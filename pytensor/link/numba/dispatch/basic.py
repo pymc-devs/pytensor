@@ -319,9 +319,8 @@ def numba_typify(data, dtype=None, **kwargs):
     return data
 
 
-@singledispatch
-def numba_funcify(op, node=None, storage_map=None, **kwargs):
-    """Create a Numba compatible function from an PyTensor `Op`."""
+def generate_fallback_impl(op, node=None, storage_map=None, **kwargs):
+    """Create a Numba compatible function from an Aesara `Op`."""
 
     warnings.warn(
         f"Numba will use object mode to run {op}'s perform method",
@@ -373,6 +372,12 @@ def numba_funcify(op, node=None, storage_map=None, **kwargs):
         return ret
 
     return perform
+
+
+@singledispatch
+def numba_funcify(op, node=None, storage_map=None, **kwargs):
+    """Generate a numba function for a given op and apply node."""
+    return generate_fallback_impl(op, node, storage_map, **kwargs)
 
 
 @numba_funcify.register(OpFromGraph)
