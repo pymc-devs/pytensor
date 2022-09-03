@@ -1483,12 +1483,13 @@ class BetaIncDer(ScalarOp):
 betainc_der = BetaIncDer(upgrade_to_float_no_complex, name="betainc_der")
 
 
-class Hyp2F1(UnaryScalarOp):
+class Hyp2F1(ScalarOp):
     """
     Gaussian hypergeometric function ``2F1(a, b; c; z)``.
 
     """
 
+    nin = 4
     nfunc_spec = ("scipy.special.hyp2f1", 4, 1)
 
     @staticmethod
@@ -1499,7 +1500,7 @@ class Hyp2F1(UnaryScalarOp):
         return Hyp2F1.st_impl(a, b, c, z)
 
     def L_op(self, inputs, outputs, grads):
-        a, b, c, z = inputs
+        (a, b, c, z, ) = inputs
         (gz,) = grads
         if a.type in complex_types:
             raise NotImplementedError()
@@ -1513,7 +1514,7 @@ class Hyp2F1(UnaryScalarOp):
             else:
                 return [inputs[0].zeros_like()]
 
-        return [gz * psi(inputs[0])]
+        return [gz]
 
     def c_code(self, *args, **kwargs):
         raise NotImplementedError()
