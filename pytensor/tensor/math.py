@@ -1866,6 +1866,11 @@ def clip(x, min, max):
     # for grep: clamp, bound
 
 
+@scalar_elemwise
+def hyp2f1(a, b, c, z):
+    """gaussian hypergeometric function"""
+
+
 pprint.assign(add, printing.OperatorPrinter("+", -2, "either"))
 pprint.assign(mul, printing.OperatorPrinter("*", -1, "either"))
 pprint.assign(sub, printing.OperatorPrinter("-", -2, "left"))
@@ -3132,6 +3137,7 @@ __all__ = [
     "power",
     "logaddexp",
     "logsumexp",
+    "hyp2f1",
 ]
 
 DEPRECATED_NAMES = [

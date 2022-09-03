@@ -71,6 +71,7 @@ expected_i1 = scipy.special.i1
 expected_iv = scipy.special.iv
 expected_erfcx = scipy.special.erfcx
 expected_sigmoid = scipy.special.expit
+expected_hyp2f1 = scipy.special.hyp2f1
 
 TestErfBroadcast = makeBroadcastTester(
     op=at.erf,
@@ -750,6 +751,41 @@ TestBetaincInplaceBroadcast = makeBroadcastTester(
     expected=scipy.special.betainc,
     good=_good_broadcast_ternary_betainc,
     grad=_good_broadcast_ternary_betainc,
+    inplace=True,
+)
+
+_good_broadcast_quaternary_hyp2f1 = dict(
+    normal=(
+        random_ranged(0, 1000, (2, 3)),
+        random_ranged(0, 1000, (2, 3)),
+        random_ranged(0, 1, (2, 3)),
+        random_ranged(0, 1, (2, 3)),
+    ),
+)
+
+_grad_broadcast_quaternary_hyp2f1 = dict(
+    normal=(
+        random_ranged(0, 1000, (2, 3)),
+        random_ranged(0, 1000, (2, 3)),
+        random_ranged(0, 1, (2, 3)),
+        random_ranged(0, 1, (2, 3)),
+    ),
+)
+
+TestHyp2F1Broadcast = makeBroadcastTester(
+    op=at.hyp2f1,
+    expected=expected_hyp2f1,
+    good=_good_broadcast_quaternary_hyp2f1,
+    grad=_grad_broadcast_quaternary_hyp2f1,
+    eps=2e-10,
+    mode=mode_no_scipy,
+)
+
+TestHyp2F1InplaceBroadcast = makeBroadcastTester(
+    op=inplace.hyp2f1_inplace,
+    expected=expected_hyp2f1,
+    good=_good_broadcast_quaternary_hyp2f1,
+    grad=_grad_broadcast_quaternary_hyp2f1,
     inplace=True,
 )
 
