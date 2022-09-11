@@ -1503,10 +1503,10 @@ class Hyp2F1(ScalarOp):
         a, b, c, z = inputs
         (gz,) = grads
         return [
-            gz * hyp2f1_der(a, b, c, z, 'a'),
-            gz * hyp2f1_der(a, b, c, z, 'b'),
-            gz * hyp2f1_der(a, b, c, z, 'c'),
-            gz * hyp2f1_der(a, b, c, z, 'z'),
+            gz * hyp2f1_der(a, b, c, z, 0),
+            gz * hyp2f1_der(a, b, c, z, 1),
+            gz * hyp2f1_der(a, b, c, z, 2),
+            gz * hyp2f1_der(a, b, c, z, 3),
         ]
 
     def c_code(self, *args, **kwargs):
@@ -1517,65 +1517,85 @@ hyp2f1 = Hyp2F1(upgrade_to_float, name="hyp2f1")
 
 
 class Hyp2F1Der(ScalarOp):
-    '''
+    """
     Derivatives of the Gaussian hypergeometric function ``2F1(a, b; c; z)``.
 
-    '''
+    """
 
     nin = 5
 
     def impl(self, a, b, c, z, wrt):
         def _hyp2f1_da(a, b, c, z):
-            '''
+            """
             Derivative of hyp2f1 wrt a
-            '''
+            """
 
-            term1 = nsum(lambda k: (scipy.special.poch(a, k) * scipy.special.poch(b, k) * scipy.special.digamma(a + k) * (z**k)) / (scipy.special.poch(c, k) * fac(k)), [0, inf])
-            term2 = (scipy.special.digamma(a) * scipy.special.hyp2f1(a, b, c ,z))
+            if abs(z) >= 1:
+                return grad_not_implemented(self, 0, a)
 
-            return term1 - term2
+            else:
+
+                term1 = mp.nsum(
+                    lambda k: (mp.rf(a, k) * mp.rf(b, k) * mp.digamma(a + k) * (z**k))
+                    / (mp.rf(c, k) * mp.fac(k)),
+                    [0, mp.mpf("inf")],
+                )
+                term2 = mp.digamma(a) * mp.hyp2f1(a, b, c, z)
+
+                return term1 - term2
 
         def _hyp2f1_db(a, b, c, z):
-            '''
+            """
             Derivative of hyp2f1 wrt b
-            '''
+            """
 
-            term1 = nsum(lambda k: (scipy.special.poch(a, k) * scipy.special.poch(b, k) * scipy.special.digamma(b + k) * (z**k)) / (scipy.special.poch(c, k) * fac(k)), [0, inf]) 
-            term2 = (scipy.special.digamma(b) * scipy.special.hyp2f1(a, b, c ,z))
+            if abs(z) >= 1:
+                return grad_not_implemented(self, 1, b)
 
-            return term1 - term2
+            else:
+                term1 = mp.nsum(
+                    lambda k: (mp.rf(a, k) * mp.rf(b, k) * mp.digamma(b + k) * (z**k))
+                    / (mp.rf(c, k) * mp.fac(k)),
+                    [0, mp.mpf("inf")],
+                )
+                term2 = mp.digamma(b) * mp.hyp2f1(a, b, c, z)
+
+                return term1 - term2
 
         def _hyp2f1_dc(a, b, c, z):
-            '''
+            """
             Derivative of hyp2f1 wrt c
-            '''
+            """
+            if abs(z) >= 1:
+                return grad_not_implemented(self, 2, c)
 
-            term1 = (scipy.special.digamma(c) * scipy.special.hyp2f1(a, b, c ,z))
-            term2 = nsum(lambda k: (scipy.special.poch(a, k) * scipy.special.poch(b, k) * scipy.special.digamma(c + k) * (z**k)) / (scipy.special.poch(c, k) * fac(k)), [0, inf]) 
-
-            return term1 - term2
+            else:
+                term1 = mp.digamma(c) * mp.hyp2f1(a, b, c, z)
+                term2 = mp.nsum(
+                    lambda k: (mp.rf(a, k) * mp.rf(b, k) * mp.digamma(c + k) * (z**k))
+                    / (mp.rf(c, k) * mp.fac(k)),
+                    [0, mp.mpf("inf")],
+                )
+                return term1 - term2
 
         def _hyp2f1_dz(a, b, c, z):
-            '''
+            """
             Derivative of hyp2f1 wrt z
-            '''
+            """
 
-            return ((a * b)/c) * scipy.special.hyp2f1(a + 1, b + 1, c + 1,z)
-        
-        if abs(z) < 1:
-            return grad_not_implemented(self, 0, z)
-        else:
-            if wrt == 'a':
-                return _hyp2f1_da(a, b, c, z)
-            elif wrt == 'b':
-                return _hyp2f1_db(a, b, c, z)
-            elif wrt == 'c':
-                return _hyp2f1_dc(a, b, c, z)
-            elif wrt == 'z':
-                return _hyp2f1_dz(a, b, c, z)
-    
+            return ((a * b) / c) * mp.hyp2f1(a + 1, b + 1, c + 1, z)
+
+        if wrt == 0:
+            return _hyp2f1_da(a, b, c, z)
+        elif wrt == 1:
+            return _hyp2f1_db(a, b, c, z)
+        elif wrt == 2:
+            return _hyp2f1_dc(a, b, c, z)
+        elif wrt == 3:
+            return _hyp2f1_dz(a, b, c, z)
+
     def c_code(self, *args, **kwargs):
         raise NotImplementedError()
 
 
-hyp2f1_der = Hyp2F1Der(upgrade_to_float_no_complex, name="hyp2f1_der")
+hyp2f1_der = Hyp2F1Der(upgrade_to_float, name="hyp2f1_der")

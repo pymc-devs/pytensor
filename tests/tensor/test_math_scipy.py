@@ -733,9 +733,9 @@ def test_deprecated_module():
 
 _good_broadcast_ternary_betainc = dict(
     normal=(
-        random_ranged(0, 1000, (2, 3), rng=rng),
-        random_ranged(0, 1000, (2, 3), rng=rng),
-        random_ranged(0, 1, (2, 3), rng=rng),
+        random_ranged(0, 1000, (2, 3)),
+        random_ranged(0, 1000, (2, 3)),
+        random_ranged(0, 1, (2, 3)),
     ),
 )
 
@@ -759,7 +759,7 @@ _good_broadcast_quaternary_hyp2f1 = dict(
         random_ranged(0, 1000, (2, 3)),
         random_ranged(0, 1000, (2, 3)),
         random_ranged(0, 1, (2, 3)),
-        random_ranged(0, 1, (2, 3)),
+        random_ranged(0, 1000, (2, 3)),
     ),
 )
 
@@ -769,7 +769,7 @@ TestHyp2F1Broadcast = makeBroadcastTester(
     good=_good_broadcast_quaternary_hyp2f1,
     grad=_good_broadcast_quaternary_hyp2f1,
     eps=2e-10,
-    # mode=mode_no_scipy,
+    mode=mode_no_scipy,
 )
 
 TestHyp2F1InplaceBroadcast = makeBroadcastTester(
@@ -777,6 +777,7 @@ TestHyp2F1InplaceBroadcast = makeBroadcastTester(
     expected=expected_hyp2f1,
     good=_good_broadcast_quaternary_hyp2f1,
     grad=_good_broadcast_quaternary_hyp2f1,
+    mode=mode_no_scipy,
     inplace=True,
 )
 
