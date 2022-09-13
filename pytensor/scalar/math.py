@@ -1531,7 +1531,7 @@ class Hyp2F1Der(ScalarOp):
             """
 
             if abs(z) >= 1:
-                return grad_not_implemented(self, 0, a)
+                raise NotImplementedError('Gradient not supported for |z| >= 1')
 
             else:
 
@@ -1550,7 +1550,7 @@ class Hyp2F1Der(ScalarOp):
             """
 
             if abs(z) >= 1:
-                return grad_not_implemented(self, 1, b)
+                raise NotImplementedError('Gradient not supported for |z| >= 1')
 
             else:
                 term1 = mp.nsum(
@@ -1567,7 +1567,7 @@ class Hyp2F1Der(ScalarOp):
             Derivative of hyp2f1 wrt c
             """
             if abs(z) >= 1:
-                return grad_not_implemented(self, 2, c)
+                raise NotImplementedError('Gradient not supported for |z| >= 1')
 
             else:
                 term1 = mp.digamma(c) * mp.hyp2f1(a, b, c, z)
