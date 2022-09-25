@@ -72,6 +72,7 @@ expected_iv = scipy.special.iv
 expected_erfcx = scipy.special.erfcx
 expected_sigmoid = scipy.special.expit
 expected_hyp2f1 = scipy.special.hyp2f1
+expected_poch = scipy.special.poch
 
 TestErfBroadcast = makeBroadcastTester(
     op=at.erf,
@@ -777,6 +778,31 @@ TestHyp2F1InplaceBroadcast = makeBroadcastTester(
     expected=expected_hyp2f1,
     good=_good_broadcast_quaternary_hyp2f1,
     grad=_good_broadcast_quaternary_hyp2f1,
+    mode=mode_no_scipy,
+    inplace=True,
+)
+
+_good_broadcast_binary_poch = dict(
+    normal=(
+        random_ranged(0, 5, (2, 1), rng=rng),
+        random_ranged(0, 5, (2, 1), rng=rng),
+    )
+)
+
+TestPochBroadcast = makeBroadcastTester(
+    op=at.poch,
+    expected=expected_poch,
+    good=_good_broadcast_binary_poch,
+    grad=_good_broadcast_binary_poch,
+    eps=2e-10,
+    mode=mode_no_scipy,
+)
+
+TestPochInplaceBroadcast = makeBroadcastTester(
+    op=inplace.poch_inplace,
+    expected=expected_poch,
+    good=_good_broadcast_binary_poch,
+    grad=_good_broadcast_binary_poch,
     mode=mode_no_scipy,
     inplace=True,
 )

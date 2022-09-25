@@ -1871,6 +1871,11 @@ def hyp2f1(a, b, c, z):
     """gaussian hypergeometric function"""
 
 
+@scalar_elemwise
+def poch(z, m):
+    """pochhammer symbol (rising factorial) function"""
+
+
 pprint.assign(add, printing.OperatorPrinter("+", -2, "either"))
 pprint.assign(mul, printing.OperatorPrinter("*", -1, "either"))
 pprint.assign(sub, printing.OperatorPrinter("-", -2, "left"))
@@ -3138,6 +3143,7 @@ __all__ = [
     "logaddexp",
     "logsumexp",
     "hyp2f1",
+    "poch",
 ]
 
 DEPRECATED_NAMES = [

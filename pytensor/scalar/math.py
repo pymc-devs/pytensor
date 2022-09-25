@@ -1599,3 +1599,33 @@ class Hyp2F1Der(ScalarOp):
 
 
 hyp2f1_der = Hyp2F1Der(upgrade_to_float, name="hyp2f1_der")
+
+
+class Poch(BinaryScalarOp):
+    """
+    Pochhammer symbol (rising factorial) function.
+
+    """
+
+    nfunc_spec = ("scipy.special.poch", 2, 1)
+
+    @staticmethod
+    def st_impl(z, m):
+        return scipy.special.poch(z, m)
+
+    def impl(self, a, b, c, z):
+        return Poch.st_impl(z, m)
+
+    def grad(self, inputs, grads):
+        (z, m) = inputs
+        (gz,) = grads
+        return [
+            gz * poch(z, m) * (tri_gamma(z + m) - tri_gamma(z)),
+            gz * poch(z, m) * tri_gamma(z + m)
+        ]
+
+    def c_code(self, *args, **kwargs):
+        raise NotImplementedError()
+
+
+poch = Poch(upgrade_to_float, name="poch")
