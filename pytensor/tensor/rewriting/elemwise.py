@@ -1,17 +1,18 @@
 import sys
-import time
-from collections import defaultdict
-from typing import Optional
+from collections import defaultdict, deque
+from functools import lru_cache
+from typing import DefaultDict, Generator, List, Set, Tuple, TypeVar
 from warnings import warn
 
 import pytensor
 import pytensor.scalar.basic as aes
-from pytensor import compile
+from pytensor import clone_replace, compile
 from pytensor.compile.mode import get_target_language
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, Constant, io_toposort
+from pytensor.graph import FunctionGraph
+from pytensor.graph.basic import Apply, Constant, Variable, ancestors, io_toposort
 from pytensor.graph.features import ReplaceValidate
-from pytensor.graph.op import compute_test_value, get_test_value
+from pytensor.graph.fg import ApplyOrOutput
 from pytensor.graph.rewriting.basic import (
     EquilibriumGraphRewriter,
     GraphRewriter,
@@ -20,7 +21,7 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.db import SequenceDB
-from pytensor.graph.utils import InconsistencyError, MethodNotDefined, TestValueError
+from pytensor.graph.utils import InconsistencyError, MethodNotDefined
 from pytensor.tensor.basic import MakeVector, alloc, cast, get_scalar_constant_value
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
@@ -592,333 +593,438 @@ def local_add_mul_fusion(fgraph, node):
         return [output]
 
 
-def local_elemwise_fusion_op(op_class, max_input_fct=lambda node: 32, maker=None):
-    r"""Create a recursive function that fuses `Elemwise` `Op`\s.
-
-    The basic idea is that we loop through an `Elemwise` node's inputs, find
-    other `Elemwise` nodes, determine the scalars input types for all of the
-    `Elemwise` `Op`\s, construct a new scalar `Op` using the scalar input types
-    and each `Elemwise`'s scalar `Op`, and use the composite scalar `Op` in a
-    new "fused" `Elemwise`.
-
-    It's parameterized in order to work for `Elemwise` `Op`\s.
-
-    Parameters
-    ----------
-    op_class : type
-        `Elemwise` class (the one that we want to fuse)
-    max_input_fct : callable
-        A function that returns the maximum number of inputs that this `Elemwise`
-        can take.
-        On the CPU we limit to 32 input variables since that is the maximum
-        NumPy support.
-
-    maker: callable
-        A function with the signature ``(node, *args)`` that constructs an
-        `op_class` instance (e.g. ``op_class(*args)``).
-
-    """
-    if maker is None:
-
-        def maker(node, scalar_op):
-            return op_class(scalar_op)
-
-    def local_fuse(fgraph, node):
-        r"""Fuse `Elemwise` `Op`\s in a node.
-
-        As part of specialization, we fuse two consecutive `Elemwise` `Op`\s of the
-        same shape.
-
-        For mixed dtype, we let the `Composite` `Op` do the cast. It lets the C
-        compiler do the cast.
-
-        The number of dimensions is validated at call time by PyTensor itself.
-
-        """
-        # TODO: use broadcast flag?
-
-        # TODO: don't do this rewrite as a `NodeRewriter`.
-        # Analyze the graph in terms of elemwise subgraphs, and then
-        # replace each subgraph with a Composite version.
-
-        # TODO: use malloc and copy to transfer arguments that don't
-        # fit within the parameter space of 256 bytes
-        #
-        # TODO: Merge with multiple output to merge when an inputs
-        # have multiple clients. This can't be done with a `NodeRewriter`
-
-        # TODO: Related: Support composites with multiple outputs
-
-        # TODO: Use Composite to combine Elemwise and Reduce
-        # operations.  We have to loop over the data anyway... might
-        # as well sum it up while we're at it (this can be trickier
-        # than i'm making it seound here. The data-traversal should be
-        # done contiguously, and the summing-up might not be easy or
-        # worthwhile if the summation axis doesn't line up with a
-        # contiguous dimension)
-
-        if type(node.op) is not op_class:
-            return False
-
-        if len(node.outputs) > 1:
-            # We don't support fusion for nodes with multiple outputs.
-            return
-
-        inputs = []  # inputs of the new Elemwise op.
-        s_inputs = []  # inputs of the new scalar op used by the Composite.
-        # Inputs of the new scalar op that represents the current node.
-        s_g = []
-
-        # There is a hard limit of 256 bytes for the formal argument list to a
-        # GPU kernel function.
-        max_nb_input = max_input_fct(node)
-        # The number of inputs to the new fused op if we do not fuse more
-        # inputs.
-        new_nb_input = len(node.inputs)
-        # Did we fuse something?
-        # Needed as we can fuse unary op that don't change the number of
-        # inputs.
-        # And there is a case where the inputs are the same as the current
-        # node. That won't change the number of inputs of the new op.
-        fused = False
-
-        for i in node.inputs:
-            scalar_node: Optional[Apply] = None
-            # Will store inputs of the fused node that are not currently inputs
-            # of the node we want to create (to avoid duplicating inputs).
-            tmp_input = []
-            # Same as tmp_input, but for scalars.
-            tmp_scalar = []
-
-            # We should not check the number of inputs here
-            # As fusing op don't always change the number of input.
-            # If a variable is used as multiple into to the same node,
-            # we still want to fusion. So we take the set.
-            if (
-                i.owner
-                and isinstance(i.owner.op, op_class)
-                and len({n for n, idx in fgraph.clients[i]}) == 1
-                and
-                # Do not merge elemwise that don't have the same
-                # broadcastable pattern to don't redo duplicate
-                # computation due to broadcast.
-                i.owner.outputs[0].broadcastable == node.outputs[0].broadcastable
-            ):
-                try:
-                    tmp_s_input = []
-                    # we should not put duplicate input into s_inputs and inputs
-                    for ii in i.owner.inputs:
-                        if ii in inputs:
-                            tmp_s_input.append(s_inputs[inputs.index(ii)])
-                        elif ii in tmp_input:
-                            tmp_s_input.append(tmp_scalar[tmp_input.index(ii)])
-                        else:
-                            tmp = aes.get_scalar_type(ii.type.dtype).make_variable()
-
-                            try:
-                                tv = get_test_value(ii)
-                                # Sometimes the original inputs have
-                                # zero-valued shapes in some dimensions, which
-                                # implies that this whole scalar thing doesn't
-                                # make sense (i.e. we're asking for the scalar
-                                # value of an entry in a zero-dimensional
-                                # array).
-                                # This will eventually lead to an error in the
-                                # `compute_test_value` call below when/if
-                                # `config.compute_test_value_opt` is enabled
-                                # (for debugging, more or less)
-                                tmp.tag.test_value = tv.item()
-                            except (TestValueError, ValueError):
-                                pass
-
-                            tmp_s_input.append(tmp)
-                            tmp_input.append(ii)
-                            tmp_scalar.append(tmp_s_input[-1])
-
-                    # Use the `Op.make_node` interface in case `Op.__call__`
-                    # has been customized
-                    scalar_node = i.owner.op.scalar_op.make_node(*tmp_s_input)
-
-                    if config.compute_test_value_opt != "off":
-                        # This is required because `Op.make_node` won't do it
-                        compute_test_value(scalar_node)
-
-                    # If the scalar_op doesn't have a C implementation, we skip
-                    # its fusion to allow fusion of the other ops
-                    i.owner.op.scalar_op.c_code(
-                        scalar_node,
-                        "test_presence_of_c_code",
-                        ["x" for x in i.owner.inputs],
-                        ["z" for z in i.owner.outputs],
-                        {"fail": "%(fail)s"},
-                    )
-
-                except (NotImplementedError, MethodNotDefined):
-                    warn(
-                        "Rewrite warning: "
-                        f"The Op {i.owner.op.scalar_op} does not provide a C implementation."
-                        " As well as being potentially slow, this also disables "
-                        "loop fusion."
-                    )
-                    scalar_node = None
-
-            # Compute the number of inputs in case we fuse this input.
-            # We subtract 1 because we replace the existing input with the new
-            # inputs from `tmp_input`.
-            new_nb_input_ = new_nb_input + len(tmp_input) - 1
-
-            # If the new input is already an input of the current node, it was
-            # already counted when `new_nb_input` was initialized to
-            # len(node.inputs).
-            # This can happen when a variable is used both by the Elemwise to
-            # fuse and the current node.
-            for x in tmp_input:
-                if x in node.inputs:
-                    new_nb_input_ -= 1
-
-            if scalar_node and (new_nb_input_ <= max_nb_input):
-                fused = True
-                new_nb_input = new_nb_input_
-                inputs.extend(tmp_input)
-                s_inputs.extend(tmp_scalar)
-                s_g.extend(scalar_node.outputs)
-            else:
-                # We must support the case where the same variable appears many
-                # times within the inputs
-                if inputs.count(i) == node.inputs.count(i):
-                    s = s_inputs[inputs.index(i)]
-                else:
-                    s = aes.get_scalar_type(i.type.dtype).make_variable()
-                    if config.compute_test_value_opt != "off":
-                        try:
-                            v = get_test_value(i)
-                            # See the zero-dimensional test value situation
-                            # described above.
-                            s.tag.test_value = v.item()
-                        except (TestValueError, ValueError):
-                            pass
-
-                    inputs.append(i)
-                    s_inputs.append(s)
-                s_g.append(s)
-
-        if not fused:
-            return False
-
-        if new_nb_input != len(inputs) or len(s_inputs) != len(inputs):
-            # TODO FIXME: This shouldn't be a generic `Exception`
-            raise Exception(
-                "Something has gone wrong with the elemwise fusion rewrite; skipping."
-            )
-
-        s_new_out = node.op.scalar_op(*s_g, return_list=True)
-        try:
-            s_new_out[0].owner.op.c_code(
-                s_new_out[0].owner,
-                "test_presence_of_c_code",
-                ["x" for x in s_g],
-                ["z" for x in s_new_out],
-                {"fail": "%(fail)s"},
-            )
-        except (NotImplementedError, MethodNotDefined):
-            name = str(s_new_out[0].owner.op)
-            warn(
-                "Rewrite warning: "
-                f"The Op {name} does not provide a C implementation."
-                " As well as being potentially slow, this also disables "
-                "loop fusion."
-            )
-            return False
-
-        # create the composite op.
-        composite_op = aes.Composite(s_inputs, s_new_out)
-
-        # create the new node.
-        # Do not call make_node to have test_value
-        new_node = maker(node, composite_op)(*inputs).owner
-
-        assert len(new_node.outputs) == 1
-        assert node.outputs[0].type.dtype == new_node.outputs[0].type.dtype
-
-        if len(new_node.inputs) > max_nb_input:
-            warn(
-                "Loop fusion failed because the resulting node "
-                "would exceed the kernel argument limit."
-            )
-            return False
-
-        # we fuse as many that we can at the same time to make debug mode faster
-        # debug mode will be faster as it won't test all intermediate step.
-        while True:
-            ret = local_fuse(fgraph, new_node)
-            if ret is not False and ret is not None:
-                assert len(ret) == len(new_node.outputs)
-                assert len(ret) == 1
-                new_node = ret[0].owner
-            else:
-                break
-
-        return new_node.outputs
-
-    return local_fuse
-
-
-def elemwise_max_input_fct(node):
-    # `Elemwise.perform` uses NumPy ufuncs and they are limited to 31 inputs.
+def elemwise_max_operands_fct(node) -> int:
+    # `Elemwise.perform` uses NumPy ufuncs and they are limited to 32 operands (inputs and outputs)
     if not config.cxx:
-        return 31
+        return 32
     return 1024
 
 
-local_elemwise_fusion = local_elemwise_fusion_op(Elemwise, elemwise_max_input_fct)
-
-
 class FusionOptimizer(GraphRewriter):
-    """Graph rewriter that simply runs node fusion operations.
-
-    TODO: This is basically an `EquilibriumGraphRewriter`; we should just use that.
-
-    """
-
-    def __init__(self, node_rewriter):
-        super().__init__()
-        self.node_rewriter = node_rewriter
+    """Graph optimizer that fuses consecutive Elemwise operations."""
 
     def add_requirements(self, fgraph):
         fgraph.attach_feature(ReplaceValidate())
 
+    @staticmethod
+    def elemwise_to_scalar(inputs, outputs):
+        replace_inputs = [(inp, inp.clone()) for inp in inputs]
+        outputs = clone_replace(outputs, replace=replace_inputs)
+
+        inputs = [inp for _, inp in replace_inputs]
+        fg = FunctionGraph(inputs=inputs, outputs=outputs, clone=False)
+        middle_inputs = []
+
+        scalar_inputs = [
+            aes.get_scalar_type(inp.type.dtype).make_variable() for inp in inputs
+        ]
+        middle_scalar_inputs = []
+
+        for node in fg.toposort():
+            node_scalar_inputs = []
+            for inp in node.inputs:
+                if inp in inputs:
+                    node_scalar_inputs.append(scalar_inputs[inputs.index(inp)])
+                elif inp in middle_inputs:
+                    node_scalar_inputs.append(
+                        middle_scalar_inputs[middle_inputs.index(inp)]
+                    )
+                else:
+                    new_scalar_input = aes.get_scalar_type(
+                        inp.type.dtype
+                    ).make_variable()
+                    node_scalar_inputs.append(new_scalar_input)
+                    middle_scalar_inputs.append(new_scalar_input)
+                    middle_inputs.append(inp)
+
+            new_scalar_node = node.op.scalar_op.make_node(*node_scalar_inputs)
+            middle_scalar_inputs.append(new_scalar_node.outputs[0])
+            middle_inputs.append(node.outputs[0])
+
+        scalar_outputs = [
+            middle_scalar_inputs[middle_inputs.index(out)] for out in fg.outputs
+        ]
+        return scalar_inputs, scalar_outputs
+
     def apply(self, fgraph):
-        did_something = True
-        nb_iter = 0
         nb_replacement = 0
-        nb_inconsistency_replace = 0
-        time_toposort = 0
+
         if fgraph.profile:
             validate_before = fgraph.profile.validate_time
             callbacks_before = fgraph.execute_callbacks_times.copy()
             callback_before = fgraph.execute_callbacks_time
-        while did_something:
-            t0 = time.perf_counter()
-            nodelist = list(fgraph.toposort())
-            time_toposort += time.perf_counter() - t0
-            nodelist.reverse()
-            did_something = False
-            for node in nodelist:
-                # Don't try to fuse node that have already been fused.
-                if node in fgraph.apply_nodes:
-                    new_outputs = self.node_rewriter(fgraph, node)
-                    if new_outputs:
-                        assert len(new_outputs) == len(node.outputs)
-                        try:
-                            fgraph.replace_all_validate(
-                                list(zip(node.outputs, new_outputs)),
-                                reason=self.__class__.__name__,
+
+        max_operands = elemwise_max_operands_fct(None)
+
+        def find_next_fuseable_subgraph(
+            fg: FunctionGraph,
+        ) -> Generator[Tuple[List[Variable], List[Variable]], None, None]:
+            """Find all subgraphs in a FunctionGraph that can be fused together
+
+            Yields
+            -------
+            List of inputs and outputs that determine subgraphs which can be fused.
+            This generator assumes that such subgraph is replaced by a single
+            Elemwise Composite before being accessed again in the next iteration.
+            """
+
+            FUSEABLE_MAPPING = DefaultDict[Variable, List[Apply]]
+            UNFUSEABLE_MAPPING = DefaultDict[Variable, Set[ApplyOrOutput]]
+
+            def initialize_fuseable_mappings(
+                *, fg: FunctionGraph
+            ) -> Tuple[FUSEABLE_MAPPING, UNFUSEABLE_MAPPING]:
+                @lru_cache(maxsize=None)
+                def elemwise_scalar_op_has_c_code(node: Apply) -> bool:
+                    # TODO: This should not play a role in non-c backends!
+                    if node.op.scalar_op.supports_c_code(node.inputs, node.outputs):
+                        return True
+                    else:
+                        warn(
+                            "Optimization Warning: "
+                            f"The Op {node.op.scalar_op} does not provide a C implementation."
+                            " As well as being potentially slow, this also disables "
+                            "loop fusion."
+                        )
+                        return False
+
+                # Fuseable nodes have to be accessed in a deterministic manner
+                # to ensure the rewrite remains deterministic.
+                # This is not a problem from unfuseable ones, as they can never
+                # become part of the graph.
+                fuseable_clients: FUSEABLE_MAPPING = defaultdict(list)
+                unfuseable_clients: UNFUSEABLE_MAPPING = defaultdict(set)
+                for out, clients in fg.clients.items():
+                    out_maybe_fuseable = (
+                        out.owner
+                        and isinstance(out.owner.op, Elemwise)
+                        # and not isinstance(out.owner.op.scalar_op, aes.Composite)
+                        and len(out.owner.outputs) == 1
+                        and elemwise_scalar_op_has_c_code(out.owner)
+                    )
+                    for client, _ in clients:
+                        if (
+                            out_maybe_fuseable
+                            and not isinstance(client, str)  # "output"
+                            and isinstance(client.op, Elemwise)
+                            # and not isinstance(client.op.scalar_op, aes.Composite)
+                            and len(client.outputs) == 1
+                            and out.type.broadcastable
+                            == client.outputs[0].type.broadcastable
+                            and elemwise_scalar_op_has_c_code(client)
+                        ):
+                            if client not in fuseable_clients[out]:
+                                fuseable_clients[out].append(client)
+                        else:
+                            unfuseable_clients[out].add(client)
+
+                return fuseable_clients, unfuseable_clients
+
+            def find_fuseable_subgraph(
+                *,
+                fg: FunctionGraph,
+                visited_nodes: Set[Apply],
+                fuseable_clients: FUSEABLE_MAPPING,
+                unfuseable_clients: UNFUSEABLE_MAPPING,
+            ) -> Tuple[List[Variable], List[Variable]]:
+
+                KT = TypeVar("KT")
+                VT = TypeVar("VT", list, set)
+
+                def shallow_clone_defaultdict(
+                    d: DefaultDict[KT, VT]
+                ) -> DefaultDict[KT, VT]:
+                    new_dict: DefaultDict[KT, VT] = defaultdict(d.default_factory)
+                    new_dict.update({k: v.copy() for k, v in d.items()})
+                    return new_dict
+
+                def variables_depend_on(
+                    variables, depend_on, stop_search_at=None
+                ) -> bool:
+                    return any(
+                        a in depend_on
+                        for a in ancestors(variables, blockers=stop_search_at)
+                    )
+
+                toposort = fg.toposort()
+                for starting_node in toposort:
+                    if starting_node in visited_nodes:
+                        continue
+
+                    starting_out = starting_node.outputs[0]
+                    if not fuseable_clients.get(starting_out):
+                        visited_nodes.add(starting_node)
+                        continue
+
+                    subgraph_inputs: List[Variable] = []
+                    subgraph_outputs: List[Variable] = []
+                    unfuseable_clients_subgraph: Set[Variable] = set()
+
+                    # Shallow cloning of maps so that they can be manipulated in place
+                    fuseable_clients_temp = shallow_clone_defaultdict(fuseable_clients)
+                    unfuseable_clients_clone = shallow_clone_defaultdict(
+                        unfuseable_clients
+                    )
+
+                    fuseable_nodes_to_visit = deque([starting_node])
+
+                    # We now try to expand as much as possible towards the potentially
+                    # fuseable clients and ancestors to detect the largest possible
+                    # subgraph that can be Composed together into a single `Op`. The
+                    # largest issue to watch out is for cyclical dependencies, where
+                    # some inputs or clients may depend on other nodes of the same
+                    # subgraph via a path that cannot be included in the Composite
+                    # (unfuseable)
+                    while fuseable_nodes_to_visit:
+                        next_node = fuseable_nodes_to_visit.popleft()
+                        visited_nodes.add(next_node)
+                        next_out = next_node.outputs[0]
+
+                        # If the output variable of next_node has no fuseable clients
+                        # or has unfuseable clients, then next_node must become an output
+                        # if it is to be fused.
+                        must_become_output = (
+                            next_out not in fuseable_clients_temp
+                            or next_out in unfuseable_clients_clone
+                        )
+
+                        # We have backtracked to this node, and it may no longer be a viable output,
+                        # so we remove it and check again as if we had never seen this node
+                        if must_become_output and next_out in subgraph_outputs:
+                            subgraph_outputs.remove(next_out)
+
+                        required_unfuseable_inputs = [
+                            inp
+                            for inp in next_node.inputs
+                            if next_node in unfuseable_clients_clone.get(inp, ())
+                        ]
+                        new_required_unfuseable_inputs = [
+                            inp
+                            for inp in required_unfuseable_inputs
+                            if inp not in subgraph_inputs
+                        ]
+
+                        must_backtrack = False
+                        if new_required_unfuseable_inputs and subgraph_outputs:
+                            # We need to check that any new inputs required by this node
+                            # do not depend on other outputs of the current subgraph,
+                            # via an unfuseable path.
+                            if variables_depend_on(
+                                [next_out],
+                                depend_on=unfuseable_clients_subgraph,
+                                stop_search_at=subgraph_outputs,
+                            ):
+                                must_backtrack = True
+
+                        if not must_backtrack:
+                            implied_unfuseable_clients = {
+                                c
+                                for client in unfuseable_clients_clone.get(next_out, ())
+                                if not isinstance(client, str)  # "output"
+                                for c in client.outputs
+                            }
+
+                            new_implied_unfuseable_clients = (
+                                implied_unfuseable_clients - unfuseable_clients_subgraph
                             )
-                            did_something = True
-                            nb_replacement += 1
-                        except InconsistencyError:
-                            nb_inconsistency_replace += 1
-            nb_iter += 1
+
+                            if new_implied_unfuseable_clients and subgraph_inputs:
+                                # We need to check that any inputs of the current subgraph
+                                # do not depend on other clients of this node,
+                                # via an unfuseable path.
+                                if variables_depend_on(
+                                    subgraph_inputs,
+                                    depend_on=new_implied_unfuseable_clients,
+                                ):
+                                    must_backtrack = True
+
+                        if must_backtrack:
+                            for inp in next_node.inputs:
+                                if (
+                                    inp.owner in visited_nodes
+                                    # next_node could have the same input repeated
+                                    and next_node in fuseable_clients_temp[inp]
+                                ):
+                                    fuseable_clients_temp[inp].remove(next_node)
+                                    unfuseable_clients_clone[inp].add(next_node)
+                                    # This input must become an output of the subgraph,
+                                    # because it can't be merged with next_node.
+                                    # We will revisit it to make sure this is safe.
+                                    fuseable_nodes_to_visit.appendleft(inp.owner)
+
+                            for client in fuseable_clients_temp[next_out]:
+                                if client in visited_nodes:
+                                    fuseable_clients_temp[next_out].remove(client)
+                                    unfuseable_clients_clone[next_out].add(client)
+                                    # next_out must become an input of the subgraph.
+                                    # We will revisit any of its clients currently
+                                    # in the subgraph to make sure this is safe.
+                                    fuseable_nodes_to_visit.appendleft(client)
+
+                            # Revisit node at a later time
+                            visited_nodes.remove(next_node)
+                            continue
+
+                        # Adding next_node to subgraph does not result in any
+                        # immediate dependency problems. Update subgraph
+                        # mappings as if it next_node was part of it.
+                        # Useless inputs will be removed by the useless Composite rewrite
+                        for inp in new_required_unfuseable_inputs:
+                            if inp not in subgraph_inputs:
+                                subgraph_inputs.append(inp)
+
+                        if must_become_output:
+                            subgraph_outputs.append(next_out)
+                            unfuseable_clients_subgraph.update(
+                                new_implied_unfuseable_clients
+                            )
+
+                        # Expand through unvisited fuseable ancestors
+                        for inp in sorted(
+                            (
+                                inp
+                                for inp in next_node.inputs
+                                if (
+                                    inp not in required_unfuseable_inputs
+                                    and inp.owner not in visited_nodes
+                                )
+                            ),
+                            key=lambda inp: toposort.index(inp.owner),
+                            reverse=True,
+                        ):
+                            fuseable_nodes_to_visit.appendleft(inp.owner)
+
+                        # Expand through unvisited fuseable clients
+                        for next_node in sorted(
+                            (
+                                node
+                                for node in fuseable_clients_temp.get(next_out, ())
+                                if node not in visited_nodes
+                            ),
+                            key=lambda node: toposort.index(node),
+                        ):
+                            fuseable_nodes_to_visit.append(next_node)
+
+                    # Don't return if final subgraph is just the original Elemwise
+                    if len(subgraph_outputs) == 1 and set(
+                        subgraph_outputs[0].owner.inputs
+                    ) == set(subgraph_inputs):
+                        # Update global fuseable mappings
+                        # No input was actually fuseable
+                        for inp in starting_node.inputs:
+                            if starting_node in fuseable_clients.get(inp, ()):
+                                fuseable_clients[inp].remove(starting_node)
+                                unfuseable_clients[inp].add(starting_node)
+                        # No client was actually fuseable
+                        unfuseable_clients[starting_out].update(
+                            fuseable_clients.pop(starting_out, ())
+                        )
+                        continue
+
+                    return subgraph_inputs, subgraph_outputs
+                raise ValueError
+
+            def update_fuseable_mappings_after_fg_replace(
+                *,
+                fg: FunctionGraph,
+                visited_nodes: Set[Apply],
+                fuseable_clients: FUSEABLE_MAPPING,
+                unfuseable_clients: UNFUSEABLE_MAPPING,
+                starting_nodes: Set[Apply],
+            ) -> None:
+                # Find new composite node and dropped intermediate nodes
+                # by comparing the current fg.apply nodes with the cached
+                # original nodes
+                next_nodes = fg.apply_nodes
+                (new_composite_node,) = next_nodes - starting_nodes
+                dropped_nodes = starting_nodes - next_nodes
+
+                # Remove intermediate Composite nodes from mappings
+                for dropped_node in dropped_nodes:
+                    (dropped_out,) = dropped_node.outputs
+                    fuseable_clients.pop(dropped_out, None)
+                    unfuseable_clients.pop(dropped_out, None)
+                    visited_nodes.remove(dropped_node)
+
+                # Update fuseable information for subgraph inputs
+                for inp in subgraph_inputs:
+                    if inp in fuseable_clients:
+                        new_fuseable_clients = [
+                            client
+                            for client in fuseable_clients[inp]
+                            if client not in dropped_nodes
+                        ]
+                        if new_fuseable_clients:
+                            fuseable_clients[inp] = new_fuseable_clients
+                        else:
+                            fuseable_clients.pop(inp)
+                    unfuseable_clients[inp] = (
+                        unfuseable_clients[inp] - dropped_nodes
+                    ) | {new_composite_node}
+
+                # Update fuseable information for subgraph outputs
+                for out in new_composite_node.outputs:
+                    unfuseable_clients[out] = {client for client, _ in fg.clients[out]}
+
+                visited_nodes.add(new_composite_node)
+                return
+
+            # We start by creating two maps, 1) from each node to each potentially
+            # fuseable client (both nodes must be single output Elemwise with same
+            # broadcast type) and 2) from each node to each certainly unfuseable
+            # client (those that don't fit into 1))
+            fuseable_clients, unfuseable_clients = initialize_fuseable_mappings(fg=fg)
+            visited_nodes: Set[Apply] = set()
+            while True:
+                starting_nodes = fg.apply_nodes.copy()
+                try:
+                    subgraph_inputs, subgraph_outputs = find_fuseable_subgraph(
+                        fg=fg,
+                        visited_nodes=visited_nodes,
+                        fuseable_clients=fuseable_clients,
+                        unfuseable_clients=unfuseable_clients,
+                    )
+                except ValueError:
+                    return
+                else:
+                    # The caller is now expected to update fg in place,
+                    # by replacing the subgraph with a Composite Op
+                    yield subgraph_inputs, subgraph_outputs
+
+                    # This is where we avoid repeated work by using a stateful
+                    # generator. For large models (as in `TestFusion.test_big_fusion`)
+                    # this can provide huge speedups
+                    update_fuseable_mappings_after_fg_replace(
+                        fg=fg,
+                        visited_nodes=visited_nodes,
+                        fuseable_clients=fuseable_clients,
+                        unfuseable_clients=unfuseable_clients,
+                        starting_nodes=starting_nodes,
+                    )
+
+        for inputs, outputs in find_next_fuseable_subgraph(fgraph):
+            if (len(inputs) + len(outputs)) > max_operands:
+                warn(
+                    "Loop fusion failed because the resulting node would exceed "
+                    "the kernel argument limit."
+                )
+                break
+
+            scalar_inputs, scalar_outputs = self.elemwise_to_scalar(inputs, outputs)
+            composite_outputs = Elemwise(aes.Composite(scalar_inputs, scalar_outputs))(
+                *inputs
+            )
+            if not isinstance(composite_outputs, list):
+                composite_outputs = [composite_outputs]
+            for old_out, composite_out in zip(outputs, composite_outputs):
+                if old_out.name:
+                    composite_out.name = old_out.name
+
+            fgraph.replace_all_validate(
+                list(zip(outputs, composite_outputs)),
+                reason=self.__class__.__name__,
+            )
+            nb_replacement += 1
 
         if fgraph.profile:
             validate_time = fgraph.profile.validate_time - validate_before
@@ -933,21 +1039,22 @@ class FusionOptimizer(GraphRewriter):
             validate_time = None
             callback_time = None
             callbacks_time = {}
+
         return (
             self,
-            nb_iter,
+            1,  # nb_iter
             nb_replacement,
-            nb_inconsistency_replace,
+            0,  # nb_inconsintency_replace
             validate_time,
             callback_time,
             callbacks_time,
-            time_toposort,
+            -1,  # toposort_time
         )
 
-    @classmethod
-    def print_profile(cls, stream, prof, level=0):
+    @staticmethod
+    def print_profile(stream, prof, level=0):
         blanc = "    " * level
-        print(blanc, cls.__name__, file=stream)
+        print(blanc, "FusionOptimizer", file=stream)
         print(blanc, " nb_iter", prof[1], file=stream)
         print(blanc, " nb_replacement", prof[2], file=stream)
         print(blanc, " nb_inconsistency_replace", prof[3], file=stream)
@@ -973,7 +1080,7 @@ if config.tensor__local_elemwise_fusion:
     )
     fuse_seqopt.register(
         "composite_elemwise_fusion",
-        FusionOptimizer(local_elemwise_fusion),
+        FusionOptimizer(),
         "fast_run",
         "fusion",
         position=1,
@@ -999,7 +1106,9 @@ def local_useless_composite(fgraph, node):
     ):
         return
     comp = node.op.scalar_op
-    used_outputs_idxs = [i for i, o_extern in enumerate(node.outputs) if fgraph.clients[o_extern]]
+    used_outputs_idxs = [
+        i for i, o_extern in enumerate(node.outputs) if fgraph.clients[o_extern]
+    ]
     used_inner_outputs = [comp.outputs[i] for i in used_outputs_idxs]
     comp_fgraph = FunctionGraph(
         inputs=comp.inputs, outputs=used_inner_outputs, clone=False

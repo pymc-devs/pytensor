@@ -887,10 +887,9 @@ class TestLocalSubtensorLift:
         prog = f.maker.fgraph.toposort()
         assert isinstance(prog[0].op, DimShuffle)
         assert isinstance(prog[1].op.scalar_op, aes.Composite)  # Composite{add,exp}
-        assert prog[2].op == add or prog[3].op == add
         # first subtensor
-        assert isinstance(prog[2].op, Subtensor) or isinstance(prog[3].op, Subtensor)
-        assert len(prog) == 4
+        assert isinstance(prog[2].op, Subtensor)
+        assert len(prog) == 3
         f([[0, 1], [2, 3]], [4, 5])  # let debugmode test something
 
     def test_basic_7(self):

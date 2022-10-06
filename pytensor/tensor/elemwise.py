@@ -652,10 +652,10 @@ class Elemwise(OpenMPOp):
 
     def prepare_node(self, node, storage_map, compute_map, impl):
         # Postpone the ufunc building to the last minutes due to:
-        # - NumPy ufunc support only up to 31 inputs.
+        # - NumPy ufunc support only up to 32 operands (inputs and outputs)
         #   But our c code support more.
         # - nfunc is reused for scipy and scipy is optional
-        if len(node.inputs) > 32 and self.ufunc and impl == "py":
+        if (len(node.inputs) + len(node.outputs)) > 32 and impl == "py":
             impl = "c"
 
         if getattr(self, "nfunc_spec", None) and impl != "c":
@@ -677,7 +677,7 @@ class Elemwise(OpenMPOp):
                 self.nfunc = module
 
         if (
-            len(node.inputs) < 32
+            (len(node.inputs) + len(node.outputs)) <= 32
             and (self.nfunc is None or self.scalar_op.nin != len(node.inputs))
             and self.ufunc is None
             and impl == "py"
@@ -727,27 +727,17 @@ class Elemwise(OpenMPOp):
         self.scalar_op.prepare_node(node.tag.fake_node, None, None, impl)
 
     def perform(self, node, inputs, output_storage):
-        if len(node.inputs) >= 32:
+        if (len(node.inputs) + len(node.outputs)) > 32:
             # Some versions of NumPy will segfault, other will raise a
-            # ValueError, if the number of inputs to a ufunc is 32 or more.
+            # ValueError, if the number of operands in an ufunc is more than 32.
             # In that case, the C version should be used, or Elemwise fusion
             # should be disabled.
+            # FIXME: This no longer calls the C implementation!
             super().perform(node, inputs, output_storage)
 
         for d, dim_shapes in enumerate(zip(*(i.shape for i in inputs))):
             if len(set(dim_shapes) - {1}) > 1:
                 raise ValueError(f"Shapes on dimension {d} do not match: {dim_shapes}")
-
-        # Determine the shape of outputs
-        out_shape = []
-        for values in zip(*[input.shape for input in inputs]):
-            if any(v == 0 for v in values):
-                # All non-broadcasted dimensions should be zero
-                assert max(values) <= 1
-                out_shape.append(0)
-            else:
-                out_shape.append(max(values))
-        out_shape = tuple(out_shape)
 
         ufunc_args = inputs
         ufunc_kwargs = {}
