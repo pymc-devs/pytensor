@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 import pytensor
+from pytensor import In
 from pytensor import scalar as aes
 from pytensor import shared
 from pytensor import tensor as at
@@ -1023,6 +1024,34 @@ class TestFusion:
         _ = f(
             np.random.random((5, 5)), np.random.random((5, 5)), np.random.random((5, 5))
         )
+
+    def test_fusion_multiout_inplace(self):
+        x = vector("x")
+
+        # Create Composite where inplacing the first non-constant output would corrupt the second output
+        xs = aes.float64("xs")
+        outs = (
+            Elemwise(Composite([xs], [xs + 1, aes.cos(xs + 1) + xs]))
+            .make_node(x)
+            .outputs
+        )
+
+        f = pytensor.function(
+            [In(x, mutable=True)],
+            outs,
+            mode=self.mode.including("inplace"),
+        )
+        (composite_node,) = f.maker.fgraph.apply_nodes
+
+        # Destroy map must be None or the last toposorted output
+        destroy_map = composite_node.op.destroy_map
+        assert (destroy_map == {}) or (
+            destroy_map == {1: [composite_node.inputs.index(x)]}
+        )
+
+        res = f([0, 1, 2])
+        assert np.allclose(res[0], [1, 2, 3])
+        assert np.allclose(res[1], np.cos([1, 2, 3]) + np.array([0, 1, 2]))
 
     @pytest.mark.skipif(not config.cxx, reason="No cxx compiler")
     def test_no_c_code(self):
