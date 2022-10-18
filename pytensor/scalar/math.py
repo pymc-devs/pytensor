@@ -1525,6 +1525,21 @@ class Hyp2F1Der(ScalarOp):
     nin = 5
 
     def impl(self, a, b, c, z, wrt):
+        def _infinisum(f):
+            """
+            Utility function for infinite summations.
+            """
+
+            n, res = 0, f(0)
+            while True:
+                term = f(n+1)
+                if RuntimeWarning:
+                    break
+                if (res+term)-res == 0:
+                    break
+                n,res = n+1, res+term
+            return res
+
         def _hyp2f1_da(a, b, c, z):
             """
             Derivative of hyp2f1 wrt a
@@ -1535,12 +1550,11 @@ class Hyp2F1Der(ScalarOp):
 
             else:
 
-                term1 = mp.nsum(
-                    lambda k: (mp.rf(a, k) * mp.rf(b, k) * mp.digamma(a + k) * (z**k))
-                    / (mp.rf(c, k) * mp.fac(k)),
-                    [0, mp.mpf("inf")],
+                term1 = _infinisum(
+                    lambda k: (scipy.special.poch(a, k) * scipy.special.poch(b, k) * scipy.special.digamma(a + k) * (z**k))
+                    / (scipy.special.poch(c, k) * scipy.special.factorial(k))
                 )
-                term2 = mp.digamma(a) * mp.hyp2f1(a, b, c, z)
+                term2 = scipy.special.digamma(a) * scipy.special.hyp2f1(a, b, c, z)
 
                 return term1 - term2
 
@@ -1553,12 +1567,11 @@ class Hyp2F1Der(ScalarOp):
                 raise NotImplementedError('Gradient not supported for |z| >= 1')
 
             else:
-                term1 = mp.nsum(
-                    lambda k: (mp.rf(a, k) * mp.rf(b, k) * mp.digamma(b + k) * (z**k))
-                    / (mp.rf(c, k) * mp.fac(k)),
-                    [0, mp.mpf("inf")],
+                term1 = _infinisum(
+                    lambda k: (scipy.special.poch(a, k) * scipy.special.poch(b, k) * scipy.special.digamma(b + k) * (z**k))
+                    / (scipy.special.poch(c, k) * scipy.special.factorial(k))
                 )
-                term2 = mp.digamma(b) * mp.hyp2f1(a, b, c, z)
+                term2 = scipy.special.digamma(b) * scipy.special.hyp2f1(a, b, c, z)
 
                 return term1 - term2
 
@@ -1570,11 +1583,10 @@ class Hyp2F1Der(ScalarOp):
                 raise NotImplementedError('Gradient not supported for |z| >= 1')
 
             else:
-                term1 = mp.digamma(c) * mp.hyp2f1(a, b, c, z)
-                term2 = mp.nsum(
-                    lambda k: (mp.rf(a, k) * mp.rf(b, k) * mp.digamma(c + k) * (z**k))
-                    / (mp.rf(c, k) * mp.fac(k)),
-                    [0, mp.mpf("inf")],
+                term1 = scipy.special.digamma(c) * scipy.special.hyp2f1(a, b, c, z)
+                term2 = _infinisum(
+                    lambda k: (scipy.special.poch(a, k) * scipy.special.poch(b, k) * scipy.special.digamma(c + k) * (z**k))
+                    / (scipy.special.poch(c, k) * scipy.special.factorial(k))
                 )
                 return term1 - term2
 
@@ -1583,7 +1595,7 @@ class Hyp2F1Der(ScalarOp):
             Derivative of hyp2f1 wrt z
             """
 
-            return ((a * b) / c) * mp.hyp2f1(a + 1, b + 1, c + 1, z)
+            return ((a * b) / c) * scipy.special.hyp2f1(a + 1, b + 1, c + 1, z)
 
         if wrt == 0:
             return _hyp2f1_da(a, b, c, z)
