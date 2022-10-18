@@ -1876,6 +1876,11 @@ def poch(z, m):
     """pochhammer symbol (rising factorial) function"""
 
 
+@scalar_elemwise
+def factorial(n):
+    """factorial function"""
+
+
 pprint.assign(add, printing.OperatorPrinter("+", -2, "either"))
 pprint.assign(mul, printing.OperatorPrinter("*", -1, "either"))
 pprint.assign(sub, printing.OperatorPrinter("-", -2, "left"))
@@ -3144,6 +3149,7 @@ __all__ = [
     "logsumexp",
     "hyp2f1",
     "poch",
+    "factorial",
 ]
 
 DEPRECATED_NAMES = [

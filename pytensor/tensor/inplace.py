@@ -398,8 +398,13 @@ def hyp2f1_inplace(a, b, c, z):
 
 
 @scalar_elemwise
-def poch_inplace(a, b, c, z):
+def poch_inplace(z, m):
     """pochhammer symbol (rising factorial) function"""
+
+
+@scalar_elemwise
+def factorial_inplace(n):
+    """factorial function"""
 
 
 pprint.assign(add_inplace, printing.OperatorPrinter("+=", -2, "either"))

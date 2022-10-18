@@ -1613,11 +1613,11 @@ class Poch(BinaryScalarOp):
     def st_impl(z, m):
         return scipy.special.poch(z, m)
 
-    def impl(self, a, b, c, z):
+    def impl(self, z, m):
         return Poch.st_impl(z, m)
 
     def grad(self, inputs, grads):
-        (z, m) = inputs
+        z, m = inputs
         (gz,) = grads
         return [
             gz * poch(z, m) * (tri_gamma(z + m) - tri_gamma(z)),
@@ -1629,3 +1629,30 @@ class Poch(BinaryScalarOp):
 
 
 poch = Poch(upgrade_to_float, name="poch")
+
+
+class Factorial(UnaryScalarOp):
+    """
+    Factorial function of a scalar or array of numbers.
+
+    """
+
+    nfunc_spec = ("scipy.special.factorial", 1, 1)
+
+    @staticmethod
+    def st_impl(n):
+        return scipy.special.factorial(n)
+
+    def impl(self, n):
+        return Factorial.st_impl(n)
+
+    def grad(self, inputs, grads):
+        (n,) = inputs
+        (gz,) = grads
+        return [gz * gamma(n+1) * tri_gamma(n+1)]
+
+    def c_code(self, *args, **kwargs):
+        raise NotImplementedError()
+
+
+factorial = Factorial(upgrade_to_float, name="factorial")
