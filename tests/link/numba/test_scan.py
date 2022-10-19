@@ -211,6 +211,8 @@ def test_scan_multiple_output():
         sequences=[at_C, at_D],
         outputs_info=[st0, et0, it0, logp_c, logp_d],
         non_sequences=[beta, gamma, delta],
+        # multi-output Elemwise not supported in NUMBA
+        mode=get_mode("NUMBA").excluding("fusion"),
     )
     st.name = "S_t"
     et.name = "E_t"
@@ -321,6 +323,8 @@ def test_scan_while():
         outputs_info=at.constant(1.0),
         non_sequences=max_value,
         n_steps=1024,
+        # multi-output Elemwise not supported in NUMBA
+        mode=get_mode("NUMBA").excluding("fusion"),
     )
 
     out_fg = FunctionGraph([max_value], [values])
@@ -370,6 +374,8 @@ def test_scan_save_mem_basic(n_steps_val):
     state_val = np.array([1.0, 2.0])
 
     numba_mode = get_mode("NUMBA").including("scan_save_mem")
+    # multi-output Elemwise not supported in NUMBA
+    numba_mode = numba_mode.excluding("fusion")
     py_mode = Mode("py").including("scan_save_mem")
 
     out_fg = FunctionGraph([init_x, n_steps], [output])
@@ -409,6 +415,8 @@ def test_mitmots_basic():
     g_outs = grad(out.sum(), [seq, init_x])
 
     numba_mode = get_mode("NUMBA").including("scan_save_mem")
+    # multi-output Elemwise not supported in NUMBA
+    numba_mode = numba_mode.excluding("fusion")
     py_mode = Mode("py").including("scan_save_mem")
 
     out_fg = FunctionGraph([seq, init_x], g_outs)
