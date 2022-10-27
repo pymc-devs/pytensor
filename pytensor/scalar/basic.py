@@ -4146,6 +4146,21 @@ class Composite(ScalarOp, HasInnerGraph):
                     "The fgraph to Composite must be exclusively"
                     " composed of ScalarOp instances."
                 )
+
+        # Clone identical outputs that have been merged
+        if len(set(fgraph.outputs)) != len(self.outputs):
+            old_outputs = fgraph.outputs
+            new_outputs = []
+            for output in old_outputs:
+                if output not in new_outputs:
+                    new_outputs.append(output)
+                else:
+                    node = output.owner
+                    output_idx = node.outputs.index(output)
+                    new_output = node.clone().outputs[output_idx]
+                    new_outputs.append(new_output)
+            fgraph = FunctionGraph(fgraph.inputs, new_outputs, clone=False)
+
         self._fgraph = fgraph
         return self._fgraph
 
