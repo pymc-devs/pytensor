@@ -3999,6 +3999,64 @@ class Composite(ScalarOp):
 
     init_param: Union[Tuple[str, str], Tuple[str]] = ("inputs", "outputs")
 
+    def __init__(self, inputs, outputs):
+        # We need to clone the graph as sometimes its nodes already
+        # contain a reference to an fgraph. As we want the Composite
+        # to be pickable, we can't have reference to fgraph.
+
+        # Also, if there is Composite in the inner graph, we want to
+        # remove them. In that case, we do a more complicated clone
+        # that will flatten Composite. We don't need to do this
+        # recursively, as the way the fusion optimizer work, we have
+        # only 1 new Composite each time at the output.
+        for i in inputs:
+            assert i not in outputs  # This isn't supported, use identity
+
+        if len(outputs) > 1 or not any(
+            isinstance(var.owner.op, Composite) for var in outputs
+        ):
+            # No inner Composite
+            inputs, outputs = clone(inputs, outputs)
+        else:
+            # Inner Composite that we need to flatten
+            assert len(outputs) == 1
+            # 1. Create a new graph from inputs up to the
+            # Composite
+            res = pytensor.compile.rebuild_collect_shared(
+                inputs=inputs, outputs=outputs[0].owner.inputs, copy_inputs_over=False
+            )  # Clone also the inputs
+            # 2. We continue this partial clone with the graph in
+            # the inner Composite
+            res2 = pytensor.compile.rebuild_collect_shared(
+                inputs=outputs[0].owner.op.inputs,
+                outputs=outputs[0].owner.op.outputs,
+                replace=dict(zip(outputs[0].owner.op.inputs, res[1])),
+            )
+            assert len(res2[1]) == len(outputs)
+            assert len(res[0]) == len(inputs)
+            assert res[0] != inputs
+            inputs, outputs = res[0], res2[1]
+
+        self.inputs = copy(inputs)
+        self.outputs = copy(outputs)
+        self.inputs_type = tuple([input.type for input in inputs])
+        self.outputs_type = tuple([output.type for output in outputs])
+        self.nin = len(inputs)
+        self.nout = len(outputs)
+        self.prepare_node_called = set()
+
+    @property
+    def fn(self):
+        return self._fn
+
+    @property
+    def inner_inputs(self):
+        return self.fgraph.inputs
+
+    @property
+    def inner_outputs(self):
+        return self.fgraph.outputs
+
     def __str__(self):
         if self.name is None:
             self.init_name()
