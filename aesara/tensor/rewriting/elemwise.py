@@ -7,15 +7,21 @@ from warnings import warn
 import pytensor
 import pytensor.scalar.basic as aes
 from pytensor import compile
+from pytensor.compile.mode import get_target_language
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Constant, io_toposort
 from pytensor.graph.features import ReplaceValidate
 from pytensor.graph.op import compute_test_value, get_test_value
-from pytensor.graph.rewriting.basic import GraphRewriter, copy_stack_trace, node_rewriter
+from pytensor.graph.rewriting.basic import (
+    GraphRewriter,
+    copy_stack_trace,
+    in2out,
+    node_rewriter,
+)
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined, TestValueError
 from pytensor.tensor.basic import MakeVector, alloc, cast, get_scalar_constant_value
-from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.rewriting.basic import register_canonicalize, register_specialize
 from pytensor.tensor.shape import shape_padleft
@@ -944,3 +950,82 @@ def local_useless_composite(fgraph, node):
         c = aes.Composite(inputs=comp.inputs, outputs=new_outputs)
         e = Elemwise(scalar_op=c)(*node.inputs, return_list=True)
         return dict(zip([node.outputs[i] for i in idx], e))
+
+
+@node_rewriter([CAReduce])
+def local_careduce_fusion(fgraph, node):
+    """Fuse a `CAReduce` applied to an `Elemwise`."""
+
+    (car_input,) = node.inputs
+    elm_node = car_input.owner
+
+    if elm_node is None or not isinstance(elm_node.op, Elemwise):
+        return False
+
+    elm_inputs = elm_node.inputs
+    elm_outputs = elm_node.outputs
+
+    if len(elm_inputs) > 1 or len(elm_outputs) > 1:
+        # TODO: Implement the multiple inputs case
+        return False
+
+    if len(fgraph.clients[elm_outputs[0]]) > 1:
+        return False
+
+    # Don't form the fusion when the target language is Python
+    elm_scalar_op = elm_node.op.scalar_op
+    car_scalar_op = node.op.scalar_op
+
+    if get_target_language() == ("py",):
+        return False
+
+    try:
+        elm_scalar_op.c_code(
+            elm_node,
+            "test_presence_of_c_code",
+            ["x" for x in elm_inputs],
+            ["z" for z in elm_outputs],
+            {"fail": "%(fail)s"},
+        )
+
+        car_scalar_op.c_code(
+            node,
+            "test_presence_of_c_code",
+            ["x" for x in node.inputs],
+            ["z" for z in node.outputs],
+            {"fail": "%(fail)s"},
+        )
+    except (NotImplementedError, MethodNotDefined):
+        return False
+
+    car_axis = node.op.axis
+
+    scalar_elm_inputs = [
+        aes.get_scalar_type(inp.type.dtype).make_variable() for inp in elm_inputs
+    ]
+    elm_output = elm_scalar_op(*scalar_elm_inputs)
+    # This input represents the previous value in the `CAReduce` binary reduction
+    carried_car_input = elm_output.type()
+    scalar_fused_outputs = [car_scalar_op(carried_car_input, elm_output)]
+
+    fused_scalar_op = aes.Composite(
+        inputs=[carried_car_input] + scalar_elm_inputs, outputs=scalar_fused_outputs
+    )
+
+    # The fused `Op` needs to look and behave like a `BinaryScalarOp`
+    # TODO: Generate a new `type` and make this relationship official?
+    fused_scalar_op.identity = car_scalar_op.identity
+    fused_scalar_op.nin = 2
+    fused_scalar_op.nout = 1
+
+    new_car_op = CAReduce(fused_scalar_op, car_axis)
+
+    return [new_car_op(*elm_inputs)]
+
+
+compile.optdb.register(  # type: ignore
+    "local_careduce_fusion",
+    in2out(local_careduce_fusion),
+    "fusion",
+    position=49,
+)
