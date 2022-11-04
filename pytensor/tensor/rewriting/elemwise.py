@@ -11,11 +11,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Constant, io_toposort
 from pytensor.graph.features import ReplaceValidate
 from pytensor.graph.op import compute_test_value, get_test_value
-from pytensor.graph.rewriting.basic import (
-    GraphRewriter,
-    copy_stack_trace,
-    node_rewriter,
-)
+from pytensor.graph.rewriting.basic import GraphRewriter, copy_stack_trace, node_rewriter
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined, TestValueError
 from pytensor.tensor.basic import MakeVector, alloc, cast, get_scalar_constant_value
@@ -84,7 +80,7 @@ class InplaceElemwiseOptimizer(GraphRewriter):
         #   deque class too?
         #   And init the deque and other list to an upper bound number of
         #   elements?
-        # Maybe PyTensor should do online toposort as in
+        # Maybe Pytensor should do online toposort as in
         #   http://code.google.com/p/acyclic
         #
         # The next longest rewriter is the canonizer phase.
@@ -567,7 +563,7 @@ def local_elemwise_fusion_op(op_class, max_input_fct=lambda node: 32, maker=None
         For mixed dtype, we let the `Composite` `Op` do the cast. It lets the C
         compiler do the cast.
 
-        The number of dimensions is validated at call time by PyTensor itself.
+        The number of dimensions is validated at call time by Pytensor itself.
 
         """
         # TODO: use broadcast flag?
