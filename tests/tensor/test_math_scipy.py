@@ -761,7 +761,7 @@ _good_broadcast_quaternary_hyp2f1 = dict(
         random_ranged(0, 1000, (2, 3)),
         random_ranged(0, 1000, (2, 3)),
         random_ranged(0, 1000, (2, 3)),
-        random_ranged(0, 1, (2, 3)),
+        random_ranged(0, .5, (2, 3)),
     ),
 )
 
