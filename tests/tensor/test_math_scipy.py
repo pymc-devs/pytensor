@@ -807,7 +807,9 @@ TestPochInplaceBroadcast = makeBroadcastTester(
 )
 
 _good_broadcast_unary_factorial = dict(
-    int=(integers_ranged(1, 10, (2, 3), rng=rng),)
+    normal=(
+        random_ranged(0, 5, (2, 1), rng=rng),
+    )
 )
 
 TestFactorialBroadcast = makeBroadcastTester(
