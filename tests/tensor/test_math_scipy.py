@@ -769,7 +769,6 @@ TestHyp2F1Broadcast = makeBroadcastTester(
     op=at.hyp2f1,
     expected=expected_hyp2f1,
     good=_good_broadcast_quaternary_hyp2f1,
-    grad=_good_broadcast_quaternary_hyp2f1,
     eps=2e-10,
 )
 
@@ -777,7 +776,6 @@ TestHyp2F1InplaceBroadcast = makeBroadcastTester(
     op=inplace.hyp2f1_inplace,
     expected=expected_hyp2f1,
     good=_good_broadcast_quaternary_hyp2f1,
-    grad=_good_broadcast_quaternary_hyp2f1,
     inplace=True,
 )
 
@@ -792,7 +790,6 @@ TestPochBroadcast = makeBroadcastTester(
     op=at.poch,
     expected=expected_poch,
     good=_good_broadcast_binary_poch,
-    grad=_good_broadcast_binary_poch,
     eps=2e-10,
     mode=mode_no_scipy,
 )
@@ -801,7 +798,6 @@ TestPochInplaceBroadcast = makeBroadcastTester(
     op=inplace.poch_inplace,
     expected=expected_poch,
     good=_good_broadcast_binary_poch,
-    grad=_good_broadcast_binary_poch,
     mode=mode_no_scipy,
     inplace=True,
 )
@@ -816,7 +812,6 @@ TestFactorialBroadcast = makeBroadcastTester(
     op=at.factorial,
     expected=expected_factorial,
     good=_good_broadcast_unary_factorial,
-    grad=_good_broadcast_unary_factorial,
     eps=2e-10,
     mode=mode_no_scipy,
 )
@@ -825,7 +820,6 @@ TestFactorialInplaceBroadcast = makeBroadcastTester(
     op=inplace.factorial_inplace,
     expected=expected_factorial,
     good=_good_broadcast_unary_factorial,
-    grad=_good_broadcast_unary_factorial,
     mode=mode_no_scipy,
     inplace=True,
 )
