@@ -1623,7 +1623,7 @@ class Poch(BinaryScalarOp):
 
     @staticmethod
     def st_impl(z, m):
-        return scipy.special.poch(z, m)
+        return gamma(z+m) / gamma(z)
 
     def impl(self, z, m):
         return Poch.st_impl(z, m)
@@ -1653,7 +1653,7 @@ class Factorial(UnaryScalarOp):
 
     @staticmethod
     def st_impl(n):
-        return scipy.special.factorial(n)
+        return gamma(n+1)
 
     def impl(self, n):
         return Factorial.st_impl(n)
