@@ -477,7 +477,7 @@ def test_QRFull(x, mode, exc):
             ),
             True,
             False,
-            UserWarning,
+            None,
         ),
     ],
 )
