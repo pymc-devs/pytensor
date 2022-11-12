@@ -34,7 +34,7 @@ from pytensor.scalar.basic import (
     upgrade_to_float64,
     upgrade_to_float_no_complex,
     ScalarType,
-    ScalarVariable
+    ScalarVariable,
 )
 
 
@@ -1526,6 +1526,9 @@ class Hyp2F1Der(ScalarOp):
     """
     Derivatives of the Gaussian hypergeometric function ``2F1(a, b; c; z)``.
 
+    Currently written in terms of gamma until poch and factorial Ops are ready:
+    poch(z, m) = (gamma(z + m) / gamma(m))
+    factorial(n) = gamma(n+1)
     """
 
     nin = 5
@@ -1538,27 +1541,33 @@ class Hyp2F1Der(ScalarOp):
 
             n, res = 0, f(0)
             while True:
-                term = f(n+1)
+                term = f(n + 1)
                 if RuntimeWarning:
                     break
-                if (res+term)-res == 0:
+                if (res + term) - res == 0:
                     break
-                n,res = n+1, res+term
+                n, res = n + 1, res + term
             return res
 
         def _hyp2f1_da(a, b, c, z):
             """
             Derivative of hyp2f1 wrt a
+
             """
 
             if abs(z) >= 1:
-                raise NotImplementedError('Gradient not supported for |z| >= 1')
+                raise NotImplementedError("Gradient not supported for |z| >= 1")
 
             else:
-
                 term1 = _infinisum(
-                    lambda k: (poch(a, k) * poch(b, k) * psi(a + k) * (z**k))
-                    / (poch(c, k) * factorial(k))
+                    lambda k: (
+                        (gamma(a + k) / gamma(a))
+                        * (gamma(b + k) / gamma(b))
+                        * psi(a + k)
+                        * (z**k)
+                    )
+                    / (gamma(c + k) / gamma(c))
+                    * gamma(k + 1)
                 )
                 term2 = psi(a) * hyp2f1(a, b, c, z)
 
@@ -1570,12 +1579,18 @@ class Hyp2F1Der(ScalarOp):
             """
 
             if abs(z) >= 1:
-                raise NotImplementedError('Gradient not supported for |z| >= 1')
+                raise NotImplementedError("Gradient not supported for |z| >= 1")
 
             else:
                 term1 = _infinisum(
-                    lambda k: (poch(a, k) * poch(b, k) * psi(b + k) * (z**k))
-                    / (poch(c, k) * factorial(k))
+                    lambda k: (
+                        (gamma(a + k) / gamma(a))
+                        * (gamma(b + k) / gamma(b))
+                        * psi(b + k)
+                        * (z**k)
+                    )
+                    / (gamma(c + k) / gamma(c))
+                    * gamma(k + 1)
                 )
                 term2 = psi(b) * hyp2f1(a, b, c, z)
 
@@ -1586,13 +1601,19 @@ class Hyp2F1Der(ScalarOp):
             Derivative of hyp2f1 wrt c
             """
             if abs(z) >= 1:
-                raise NotImplementedError('Gradient not supported for |z| >= 1')
+                raise NotImplementedError("Gradient not supported for |z| >= 1")
 
             else:
                 term1 = psi(c) * hyp2f1(a, b, c, z)
                 term2 = _infinisum(
-                    lambda k: (poch(a, k) * poch(b, k) * psi(c + k) * (z**k))
-                    / (poch(c, k) * factorial(k))
+                    lambda k: (
+                        (gamma(a + k) / gamma(a))
+                        * (gamma(b + k) / gamma(b))
+                        * psi(c + k)
+                        * (z**k)
+                    )
+                    / (gamma(c + k) / gamma(c))
+                    * gamma(k + 1)
                 )
                 return term1 - term2
 
@@ -1624,7 +1645,7 @@ def poch(z: ScalarType, m: ScalarType) -> ScalarVariable:
     Pochhammer symbol (rising factorial) function.
 
     """
-    return gamma(z+m) / gamma(z)
+    return gamma(z + m) / gamma(z)
 
 
 def factorial(n: ScalarType) -> ScalarVariable:

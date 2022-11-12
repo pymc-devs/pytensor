@@ -759,7 +759,7 @@ _good_broadcast_quaternary_hyp2f1 = dict(
         random_ranged(0, 1000, (2, 3)),
         random_ranged(0, 1000, (2, 3)),
         random_ranged(0, 1000, (2, 3)),
-        random_ranged(0, .5, (2, 3)),
+        random_ranged(0, 0.5, (2, 3)),
     ),
 )
 
@@ -785,22 +785,22 @@ _good_broadcast_binary_poch = dict(
 )
 
 
-
-@pytest.mark.parametrize("z, m",[random_ranged(0, 5, (2, 1), rng=rng),random_ranged(0, 5, (2, 1), rng=rng)])
-def test_poch(z,m):
+@pytest.mark.parametrize(
+    "z, m", [random_ranged(0, 5, (2, 1), rng=rng), random_ranged(0, 5, (2, 1), rng=rng)]
+)
+def test_poch(z, m):
 
     z, m = at.scalars("z", "m")
 
     poch = at.poch(z, m)
 
     actual = function([z, m], poch)
-    expected = scipy.special.poch(z, m) 
+    expected = scipy.special.poch(z, m)
 
     assert actual == expected
 
 
-
-@pytest.mark.parametrize("n",random_ranged(0, 5, (2, 1)))
+@pytest.mark.parametrize("n", random_ranged(0, 5, (2, 1)))
 def test_factorial(n):
 
     n = at.scalars("n")
@@ -808,7 +808,7 @@ def test_factorial(n):
     factorial = at.factorial(n)
 
     actual = function([n], factorial)
-    expected = scipy.special.factorial(n) 
+    expected = scipy.special.factorial(n)
 
     assert actual == expected
 
