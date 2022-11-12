@@ -72,8 +72,6 @@ expected_iv = scipy.special.iv
 expected_erfcx = scipy.special.erfcx
 expected_sigmoid = scipy.special.expit
 expected_hyp2f1 = scipy.special.hyp2f1
-expected_poch = scipy.special.poch
-expected_factorial = scipy.special.factorial
 
 TestErfBroadcast = makeBroadcastTester(
     op=at.erf,
@@ -786,43 +784,33 @@ _good_broadcast_binary_poch = dict(
     )
 )
 
-TestPochBroadcast = makeBroadcastTester(
-    op=at.poch,
-    expected=expected_poch,
-    good=_good_broadcast_binary_poch,
-    eps=2e-10,
-    mode=mode_no_scipy,
-)
 
-TestPochInplaceBroadcast = makeBroadcastTester(
-    op=inplace.poch_inplace,
-    expected=expected_poch,
-    good=_good_broadcast_binary_poch,
-    mode=mode_no_scipy,
-    inplace=True,
-)
 
-_good_broadcast_unary_factorial = dict(
-    normal=(
-        random_ranged(0, 5, (2, 1), rng=rng),
-    )
-)
+@pytest.mark.parametrize("z, m",[random_ranged(0, 5, (2, 1), rng=rng),random_ranged(0, 5, (2, 1), rng=rng)])
+def test_poch(z,m):
 
-TestFactorialBroadcast = makeBroadcastTester(
-    op=at.factorial,
-    expected=expected_factorial,
-    good=_good_broadcast_unary_factorial,
-    eps=2e-10,
-    mode=mode_no_scipy,
-)
+    z, m = at.scalars("z", "m")
 
-TestFactorialInplaceBroadcast = makeBroadcastTester(
-    op=inplace.factorial_inplace,
-    expected=expected_factorial,
-    good=_good_broadcast_unary_factorial,
-    mode=mode_no_scipy,
-    inplace=True,
-)
+    poch = at.poch(z, m)
+
+    actual = function([z, m], poch)
+    expected = scipy.special.poch(z, m) 
+
+    assert actual == expected
+
+
+
+@pytest.mark.parametrize("n",random_ranged(0, 5, (2, 1)))
+def test_factorial(n):
+
+    n = at.scalars("n")
+
+    factorial = at.factorial(n)
+
+    actual = function([n], factorial)
+    expected = scipy.special.factorial(n) 
+
+    assert actual == expected
 
 
 class TestBetaIncGrad:

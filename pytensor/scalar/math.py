@@ -33,6 +33,8 @@ from pytensor.scalar.basic import (
     upgrade_to_float,
     upgrade_to_float64,
     upgrade_to_float_no_complex,
+    ScalarType,
+    ScalarVariable
 )
 
 
@@ -1494,7 +1496,11 @@ class Hyp2F1(ScalarOp):
 
     @staticmethod
     def st_impl(a, b, c, z):
-        return scipy.special.hyp2f1(a, b, c, z)
+
+        if abs(z) >= 1:
+            raise NotImplementedError("hyp2f1 only supported for z < 1.")
+        else:
+            return scipy.special.hyp2f1(a, b, c, z)
 
     def impl(self, a, b, c, z):
         return Hyp2F1.st_impl(a, b, c, z)
@@ -1551,10 +1557,10 @@ class Hyp2F1Der(ScalarOp):
             else:
 
                 term1 = _infinisum(
-                    lambda k: (scipy.special.poch(a, k) * scipy.special.poch(b, k) * scipy.special.digamma(a + k) * (z**k))
-                    / (scipy.special.poch(c, k) * scipy.special.factorial(k))
+                    lambda k: (poch(a, k) * poch(b, k) * psi(a + k) * (z**k))
+                    / (poch(c, k) * factorial(k))
                 )
-                term2 = scipy.special.digamma(a) * scipy.special.hyp2f1(a, b, c, z)
+                term2 = psi(a) * hyp2f1(a, b, c, z)
 
                 return term1 - term2
 
@@ -1568,10 +1574,10 @@ class Hyp2F1Der(ScalarOp):
 
             else:
                 term1 = _infinisum(
-                    lambda k: (scipy.special.poch(a, k) * scipy.special.poch(b, k) * scipy.special.digamma(b + k) * (z**k))
-                    / (scipy.special.poch(c, k) * scipy.special.factorial(k))
+                    lambda k: (poch(a, k) * poch(b, k) * psi(b + k) * (z**k))
+                    / (poch(c, k) * factorial(k))
                 )
-                term2 = scipy.special.digamma(b) * scipy.special.hyp2f1(a, b, c, z)
+                term2 = psi(b) * hyp2f1(a, b, c, z)
 
                 return term1 - term2
 
@@ -1583,10 +1589,10 @@ class Hyp2F1Der(ScalarOp):
                 raise NotImplementedError('Gradient not supported for |z| >= 1')
 
             else:
-                term1 = scipy.special.digamma(c) * scipy.special.hyp2f1(a, b, c, z)
+                term1 = psi(c) * hyp2f1(a, b, c, z)
                 term2 = _infinisum(
-                    lambda k: (scipy.special.poch(a, k) * scipy.special.poch(b, k) * scipy.special.digamma(c + k) * (z**k))
-                    / (scipy.special.poch(c, k) * scipy.special.factorial(k))
+                    lambda k: (poch(a, k) * poch(b, k) * psi(c + k) * (z**k))
+                    / (poch(c, k) * factorial(k))
                 )
                 return term1 - term2
 
@@ -1595,7 +1601,7 @@ class Hyp2F1Der(ScalarOp):
             Derivative of hyp2f1 wrt z
             """
 
-            return ((a * b) / c) * scipy.special.hyp2f1(a + 1, b + 1, c + 1, z)
+            return ((a * b) / c) * hyp2f1(a + 1, b + 1, c + 1, z)
 
         if wrt == 0:
             return _hyp2f1_da(a, b, c, z)
@@ -1613,58 +1619,17 @@ class Hyp2F1Der(ScalarOp):
 hyp2f1_der = Hyp2F1Der(upgrade_to_float, name="hyp2f1_der")
 
 
-class Poch(BinaryScalarOp):
+def poch(z: ScalarType, m: ScalarType) -> ScalarVariable:
     """
     Pochhammer symbol (rising factorial) function.
 
     """
-
-    nfunc_spec = ("scipy.special.poch", 2, 1)
-
-    @staticmethod
-    def st_impl(z, m):
-        return gamma(z+m) / gamma(z)
-
-    def impl(self, z, m):
-        return Poch.st_impl(z, m)
-
-    def grad(self, inputs, grads):
-        z, m = inputs
-        (gz,) = grads
-        return [
-            gz * poch(z, m) * (tri_gamma(z + m) - tri_gamma(z)),
-            gz * poch(z, m) * tri_gamma(z + m)
-        ]
-
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
+    return gamma(z+m) / gamma(z)
 
 
-poch = Poch(upgrade_to_float, name="poch")
-
-
-class Factorial(UnaryScalarOp):
+def factorial(n: ScalarType) -> ScalarVariable:
     """
     Factorial function of a scalar or array of numbers.
 
     """
-
-    nfunc_spec = ("scipy.special.factorial", 1, 1)
-
-    @staticmethod
-    def st_impl(n):
-        return gamma(n+1)
-
-    def impl(self, n):
-        return Factorial.st_impl(n)
-
-    def grad(self, inputs, grads):
-        (n,) = inputs
-        (gz,) = grads
-        return [gz * gamma(n+1) * tri_gamma(n+1)]
-
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
-
-
-factorial = Factorial(upgrade_to_float, name="factorial")
+    return gamma(n + 1)
