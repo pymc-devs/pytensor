@@ -1,5 +1,6 @@
 import warnings
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import numpy as np
 import scipy
@@ -7,7 +8,11 @@ import scipy
 from pytensor.graph.basic import Apply
 from pytensor.link.c.op import COp
 from pytensor.tensor.basic import as_tensor_variable
-from pytensor.tensor.math import neg, sum
+from pytensor.tensor.math import neg, sum, gamma
+
+
+if TYPE_CHECKING:
+    from pytensor.tensor import TensorLike, TensorVariable
 
 
 class SoftmaxGrad(COp):
@@ -768,7 +773,25 @@ def log_softmax(c, axis=UNSET_AXIS):
     return LogSoftmax(axis=axis)(c)
 
 
+def poch(z: "TensorLike", m: "TensorLike") -> "TensorVariable":
+    """
+    Pochhammer symbol (rising factorial) function.
+
+    """
+    return gamma(z + m) / gamma(z)
+
+
+def factorial(n: "TensorLike") -> "TensorVariable":
+    """
+    Factorial function of a scalar or array of numbers.
+
+    """
+    return gamma(n + 1)
+
+
 __all__ = [
     "softmax",
     "log_softmax",
+    "poch",
+    "factorial",
 ]

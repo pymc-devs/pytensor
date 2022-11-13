@@ -1,12 +1,16 @@
 import numpy as np
 import pytest
+from scipy.special import factorial as scipy_factorial
 from scipy.special import log_softmax as scipy_log_softmax
+from scipy.special import poch as scipy_poch
 from scipy.special import softmax as scipy_softmax
 
 from pytensor.compile.function import function
 from pytensor.configdefaults import config
-from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad, log_softmax, softmax
+from pytensor.tensor import scalar, scalars
+from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad, log_softmax, softmax, poch, factorial
 from pytensor.tensor.type import matrix, tensor3, tensor4, vector
+from tests.tensor.utils import random_ranged
 from tests import unittest_tools as utt
 
 
@@ -134,3 +138,32 @@ class TestSoftmaxGrad(utt.InferShapeTester):
 
         with pytest.raises(ValueError):
             SoftmaxGrad(-4)(*x)
+
+
+@pytest.mark.parametrize(
+    "z, m", [random_ranged(0, 5, (2,)), random_ranged(0, 5, (2,))]
+)
+def test_poch(z, m):
+
+    _z, _m = scalars("z", "m")
+
+    actual_fn = function([_z, _m], poch(_z, _m))
+    actual = actual_fn(z, m)
+
+    expected = scipy_poch(z, m)
+
+    assert np.allclose(actual, expected)
+
+
+@pytest.mark.parametrize("n", random_ranged(0, 5, (1,)))
+def test_factorial(n):
+
+    _n = scalar("n")
+
+    actual_fn = function([_n], factorial(_n))
+    actual = actual_fn(n)
+    
+    expected = scipy_factorial(n)
+
+    assert np.allclose(actual, expected)
+    

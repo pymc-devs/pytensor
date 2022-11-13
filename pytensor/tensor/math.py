@@ -1385,6 +1385,11 @@ def gammal(k, x):
 
 
 @scalar_elemwise
+def hyp2f1(a, b, c, z):
+    """Gaussian hypergeometric function."""
+
+
+@scalar_elemwise
 def j0(x):
     """Bessel function of the first kind of order 0."""
 
@@ -1864,21 +1869,6 @@ def clip(x, min, max):
     """
     # see decorator for function body
     # for grep: clamp, bound
-
-
-@scalar_elemwise
-def hyp2f1(a, b, c, z):
-    """gaussian hypergeometric function"""
-
-
-@scalar_elemwise
-def poch(z, m):
-    """pochhammer symbol (rising factorial) function"""
-
-
-@scalar_elemwise
-def factorial(n):
-    """factorial function"""
 
 
 pprint.assign(add, printing.OperatorPrinter("+", -2, "either"))
@@ -3148,8 +3138,6 @@ __all__ = [
     "logaddexp",
     "logsumexp",
     "hyp2f1",
-    "poch",
-    "factorial",
 ]
 
 DEPRECATED_NAMES = [

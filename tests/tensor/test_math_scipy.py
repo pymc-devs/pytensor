@@ -768,49 +768,17 @@ TestHyp2F1Broadcast = makeBroadcastTester(
     expected=expected_hyp2f1,
     good=_good_broadcast_quaternary_hyp2f1,
     eps=2e-10,
+    mode=mode_no_scipy,
 )
 
 TestHyp2F1InplaceBroadcast = makeBroadcastTester(
     op=inplace.hyp2f1_inplace,
     expected=expected_hyp2f1,
     good=_good_broadcast_quaternary_hyp2f1,
+    eps=2e-10,
+    mode=mode_no_scipy,
     inplace=True,
 )
-
-_good_broadcast_binary_poch = dict(
-    normal=(
-        random_ranged(0, 5, (2, 1), rng=rng),
-        random_ranged(0, 5, (2, 1), rng=rng),
-    )
-)
-
-
-@pytest.mark.parametrize(
-    "z, m", [random_ranged(0, 5, (2, 1), rng=rng), random_ranged(0, 5, (2, 1), rng=rng)]
-)
-def test_poch(z, m):
-
-    z, m = at.scalars("z", "m")
-
-    poch = at.poch(z, m)
-
-    actual = function([z, m], poch)
-    expected = scipy.special.poch(z, m)
-
-    assert actual == expected
-
-
-@pytest.mark.parametrize("n", random_ranged(0, 5, (2, 1)))
-def test_factorial(n):
-
-    n = at.scalars("n")
-
-    factorial = at.factorial(n)
-
-    actual = function([n], factorial)
-    expected = scipy.special.factorial(n)
-
-    assert actual == expected
 
 
 class TestBetaIncGrad:

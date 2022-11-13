@@ -33,8 +33,6 @@ from pytensor.scalar.basic import (
     upgrade_to_float,
     upgrade_to_float64,
     upgrade_to_float_no_complex,
-    ScalarType,
-    ScalarVariable,
 )
 
 
@@ -1526,9 +1524,6 @@ class Hyp2F1Der(ScalarOp):
     """
     Derivatives of the Gaussian hypergeometric function ``2F1(a, b; c; z)``.
 
-    Currently written in terms of gamma until poch and factorial Ops are ready:
-    poch(z, m) = (gamma(z + m) / gamma(m))
-    factorial(n) = gamma(n+1)
     """
 
     nin = 5
@@ -1638,19 +1633,3 @@ class Hyp2F1Der(ScalarOp):
 
 
 hyp2f1_der = Hyp2F1Der(upgrade_to_float, name="hyp2f1_der")
-
-
-def poch(z: ScalarType, m: ScalarType) -> ScalarVariable:
-    """
-    Pochhammer symbol (rising factorial) function.
-
-    """
-    return gamma(z + m) / gamma(z)
-
-
-def factorial(n: ScalarType) -> ScalarVariable:
-    """
-    Factorial function of a scalar or array of numbers.
-
-    """
-    return gamma(n + 1)
