@@ -154,17 +154,17 @@ class ConvolutionIndices(Op):
 
                 # FOR EACH OUTPUT PIXEL...
                 # loop over output image height
-                for oy in np.arange(lbound[0], ubound[0], dy):
+                for oy in np.arange(lbound[0], ubound[0], dy, dtype=int):
                     # loop over output image width
-                    for ox in np.arange(lbound[1], ubound[1], dx):
+                    for ox in np.arange(lbound[1], ubound[1], dx, dtype=int):
 
                         # kern[l] is filter value to apply at (oj,oi)
                         # for (iy,ix)
                         l = 0  # noqa: E741
 
                         # ... ITERATE OVER INPUT UNITS IN RECEPTIVE FIELD
-                        for ky in oy + np.arange(kshp[0]):
-                            for kx in ox + np.arange(kshp[1]):
+                        for ky in oy + np.arange(kshp[0], dtype=int):
+                            for kx in ox + np.arange(kshp[1], dtype=int):
 
                                 # verify if we are still within image
                                 # boundaries. Equivalent to
@@ -176,13 +176,13 @@ class ConvolutionIndices(Op):
                                     # convert to "valid" input space
                                     # coords used to determine column
                                     # index to write to in sparse mat
-                                    iy, ix = np.array((ky, kx)) - topleft
+                                    iy, ix = np.array((ky, kx), dtype=int) - topleft
                                     # determine raster-index of input pixel...
 
                                     # taking into account multiple
                                     # input features
                                     col = int(
-                                        iy * inshp[2] + ix + fmapi * np.prod(inshp[1:])
+                                        iy * inshp[2] + ix + fmapi * np.prod(inshp[1:], dtype=int)
                                     )
 
                                     # convert oy,ox values to output
@@ -192,7 +192,7 @@ class ConvolutionIndices(Op):
                                     else:
                                         (y, x) = (oy, ox) - topleft
                                     # taking into account step size
-                                    (y, x) = np.array([y, x]) / (dy, dx)
+                                    (y, x) = np.array([y, x], dtype=int) / (dy, dx)
 
                                     # convert to row index of sparse matrix
                                     if ws:
@@ -212,7 +212,7 @@ class ConvolutionIndices(Op):
                                     # onto the sparse columns (idea of
                                     # kernel map)
                                     # n*... only for sparse
-                                    spmat[row + n * outsize, col] = tapi + 1
+                                    spmat[int(row + n * outsize), int(col)] = tapi + 1
 
                                     # total number of active taps
                                     # (used for kmap)
