@@ -43,6 +43,7 @@ def numba_funcify_CumOp(op, node, **kwargs):
         raise ValueError(f"Invalid axis {axis} for array with ndim {ndim}")
 
     reaxis_first = (axis,) + tuple(i for i in range(ndim) if i != axis)
+    reaxis_first_inv = tuple(np.argsort(reaxis_first))
 
     if mode == "add":
 
@@ -65,7 +66,7 @@ def numba_funcify_CumOp(op, node, **kwargs):
                 for m in range(1, x.shape[axis]):
                     res[m] = res[m - 1] + x_axis_first[m]
 
-                return res.transpose(reaxis_first)
+                return res.transpose(reaxis_first_inv)
 
     else:
         if ndim == 1:
