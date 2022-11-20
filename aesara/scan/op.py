@@ -3449,7 +3449,7 @@ def profile_printer(
 
 
 @op_debug_information.register(Scan)  # type: ignore[has-type]
-def _op_debug_information_Scan(op, node):
+def _op_debug_information_Scan(op: Scan, node: Apply):
     from typing import Sequence
 
     from aesara.scan.utils import ScanArgs
