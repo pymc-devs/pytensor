@@ -1,14 +1,14 @@
 import numpy as np
 import pytest
 
-import aesara.scalar as aes
-import aesara.tensor as at
-import aesara.tensor.basic as atb
-from aesara import config
-from aesara.compile.sharedvalue import SharedVariable
-from aesara.graph.basic import Constant
-from aesara.graph.fg import FunctionGraph
-from aesara.tensor.shape import Unbroadcast
+import pytensor.scalar as aes
+import pytensor.tensor as at
+import pytensor.tensor.basic as atb
+from pytensor import config
+from pytensor.compile.sharedvalue import SharedVariable
+from pytensor.graph.basic import Constant
+from pytensor.graph.fg import FunctionGraph
+from pytensor.tensor.shape import Unbroadcast
 from tests.link.numba.test_basic import (
     compare_numba_and_py,
     compare_shape_dtype,

@@ -2,12 +2,12 @@
 .. _libdoc_compile_shared:
 
 ===========================================
-:mod:`shared` - defines aesara.shared
+:mod:`shared` - defines pytensor.shared
 ===========================================
 
-.. module:: aesara.compile.sharedvalue
+.. module:: pytensor.compile.sharedvalue
    :platform: Unix, Windows
-   :synopsis: defines aesara.shared and related classes
+   :synopsis: defines pytensor.shared and related classes
 .. moduleauthor:: LISA
 
 

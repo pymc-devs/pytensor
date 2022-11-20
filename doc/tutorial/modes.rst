@@ -9,29 +9,29 @@ Configuration Settings and Compiling Modes
 Configuration
 =============
 
-The :mod:`aesara.config` module contains several *attributes* that modify Aesara's behavior.  Many of these
-attributes are examined during the import of the :mod:`aesara` module and several are assumed to be
+The :mod:`pytensor.config` module contains several *attributes* that modify Pytensor's behavior.  Many of these
+attributes are examined during the import of the :mod:`pytensor` module and several are assumed to be
 read-only.
 
-*As a rule, the attributes in the* :mod:`aesara.config` *module should not be modified inside the user code.*
+*As a rule, the attributes in the* :mod:`pytensor.config` *module should not be modified inside the user code.*
 
-Aesara's code comes with default values for these attributes, but you can
-override them from your ``.aesararc`` file, and override those values in turn by
-the :envvar:`AESARA_FLAGS` environment variable.
+Pytensor's code comes with default values for these attributes, but you can
+override them from your ``.pytensorrc`` file, and override those values in turn by
+the :envvar:`PYTENSOR_FLAGS` environment variable.
 
 The order of precedence is:
 
-1. an assignment to ``aesara.config.<property>``
-2. an assignment in :envvar:`AESARA_FLAGS`
-3. an assignment in the ``.aesararc`` file (or the file indicated in :envvar:`AESARARC`)
+1. an assignment to ``pytensor.config.<property>``
+2. an assignment in :envvar:`PYTENSOR_FLAGS`
+3. an assignment in the ``.pytensorrc`` file (or the file indicated in :envvar:`PYTENSORRC`)
 
 You can display the current/effective configuration at any time by printing
-`aesara.config`.  For example, to see a list  of all active configuration
+`pytensor.config`.  For example, to see a list  of all active configuration
 variables, type this from the command-line:
 
 .. code-block:: bash
 
-    python -c 'import aesara; print(aesara.config)' | less
+    python -c 'import pytensor; print(pytensor.config)' | less
 
 
 For more detail, see :ref:`Configuration <libdoc_config>` in the library.
@@ -46,27 +46,27 @@ Consider the logistic regression:
 .. testcode::
 
     import numpy as np
-    import aesara
-    import aesara.tensor as at
+    import pytensor
+    import pytensor.tensor as at
 
 
     rng = np.random.default_rng(2498)
 
     N = 400
     feats = 784
-    D = (rng.standard_normal((N, feats)).astype(aesara.config.floatX),
-    rng.integers(size=N,low=0, high=2).astype(aesara.config.floatX))
+    D = (rng.standard_normal((N, feats)).astype(pytensor.config.floatX),
+    rng.integers(size=N,low=0, high=2).astype(pytensor.config.floatX))
     training_steps = 10000
 
-    # Declare Aesara symbolic variables
+    # Declare Pytensor symbolic variables
     x = at.matrix("x")
     y = at.vector("y")
-    w = aesara.shared(rng.standard_normal(feats).astype(aesara.config.floatX), name="w")
-    b = aesara.shared(np.asarray(0., dtype=aesara.config.floatX), name="b")
+    w = pytensor.shared(rng.standard_normal(feats).astype(pytensor.config.floatX), name="w")
+    b = pytensor.shared(np.asarray(0., dtype=pytensor.config.floatX), name="b")
     x.tag.test_value = D[0]
     y.tag.test_value = D[1]
 
-    # Construct Aesara expression graph
+    # Construct Pytensor expression graph
     p_1 = 1 / (1 + at.exp(-at.dot(x, w)-b)) # Probability of having a one
     prediction = p_1 > 0.5 # The prediction that is done: 0 or 1
     xent = -y*at.log(p_1) - (1-y)*at.log(1-p_1) # Cross-entropy
@@ -74,13 +74,13 @@ Consider the logistic regression:
     gw,gb = at.grad(cost, [w,b])
 
     # Compile expressions to functions
-    train = aesara.function(
+    train = pytensor.function(
         inputs=[x,y],
         outputs=[prediction, xent],
         updates=[(w, w-0.01*gw), (b, b-0.01*gb)],
         name = "train"
     )
-    predict = aesara.function(
+    predict = pytensor.function(
         inputs=[x], outputs=prediction,
         name = "predict"
     )
@@ -89,7 +89,7 @@ Consider the logistic regression:
            for x in train.maker.fgraph.toposort()):
         print('Used the cpu')
     else:
-        print('ERROR, not able to tell if aesara used the cpu or another device')
+        print('ERROR, not able to tell if pytensor used the cpu or another device')
         print(train.maker.fgraph.toposort())
 
     for i in range(training_steps):
@@ -117,7 +117,7 @@ as it will be useful later on.
 
 .. Note::
 
-   * Apply the Aesara flag ``floatX=float32`` (through ``aesara.config.floatX``) in your code.
+   * Apply the Pytensor flag ``floatX=float32`` (through ``pytensor.config.floatX``) in your code.
    * Cast inputs before storing them into a shared variable.
    * Circumvent the automatic cast of int32 with float32 to float64:
 
@@ -132,12 +132,12 @@ as it will be useful later on.
 Default Modes
 =============
 
-Every time :func:`aesara.function <function.function>` is called,
-the symbolic relationships between the input and output Aesara *variables*
+Every time :func:`pytensor.function <function.function>` is called,
+the symbolic relationships between the input and output Pytensor *variables*
 are rewritten and compiled. The way this compilation occurs
 is controlled by the value of the ``mode`` parameter.
 
-Aesara defines the following modes by name:
+Pytensor defines the following modes by name:
 
 - ``'FAST_COMPILE'``: Apply just a few graph optimizations and only use Python implementations.
 - ``'FAST_RUN'``: Apply all optimizations and use C implementations where possible.
@@ -149,7 +149,7 @@ Aesara defines the following modes by name:
 The default mode is typically ``FAST_RUN``, but it can be controlled via
 the configuration variable :attr:`config.mode`,
 which can be overridden by passing the keyword argument to
-:func:`aesara.function <function.function>`.
+:func:`pytensor.function <function.function>`.
 
 ================= =============================================================== ===============================================================================
 short name        Full constructor                                                What does it do?
@@ -173,7 +173,7 @@ A :class:`Mode` object is composed of two things: an optimizer and a linker. Som
 like `NanGuardMode` and `DebugMode`, add logic around the
 optimizer and linker. `DebugMode` uses its own linker.
 
-You can select which linker to use with the Aesara flag :attr:`config.linker`.
+You can select which linker to use with the Pytensor flag :attr:`config.linker`.
 Here is a table to compare the different linkers.
 
 =============  =========  =================  =========  ===
@@ -186,13 +186,13 @@ c|py_nogc      no         yes                "++"       As c|py, but without gc
 c              no         yes                "+"        Use only C code (if none available for an op, raise an error)
 py             yes        yes                "+++"      Use only Python code
 NanGuardMode   yes        yes                "++++"     Check if nodes generate NaN
-DebugMode      no         yes                VERY HIGH  Make many checks on what Aesara computes
+DebugMode      no         yes                VERY HIGH  Make many checks on what Pytensor computes
 =============  =========  =================  =========  ===
 
 
 .. [#gc] Garbage collection of intermediate results during computation.
          Otherwise, their memory space used by the ops is kept between
-         Aesara function calls, in order not to
+         Pytensor function calls, in order not to
          reallocate memory, and lower the overhead (make it faster...).
 .. [#cpy1] Default
 
@@ -204,22 +204,22 @@ For more detail, see :ref:`Mode<libdoc_compile_mode>` in the library.
 Default Optimizers
 ==================
 
-Aesara allows compilations with a number of predefined rewrites that are
+Pytensor allows compilations with a number of predefined rewrites that are
 expected to improve graph evaluation performance on average.
 An optimizer is technically just a :class:`Rewriter`, or an object that
 indicates a particular set of rewrites (e.g. a string used to query `optdb` for
 a :class:`Rewriter`).
 
-The optimizers Aesara provides are summarized below to indicate the trade-offs
+The optimizers Pytensor provides are summarized below to indicate the trade-offs
 one might make between compilation time and execution time.
 
-These optimizers can be enabled globally with the Aesara flag: ``optimizer=name``
-or per call to aesara functions with ``function(...mode=Mode(optimizer="name"))``.
+These optimizers can be enabled globally with the Pytensor flag: ``optimizer=name``
+or per call to pytensor functions with ``function(...mode=Mode(optimizer="name"))``.
 
 =================  ============  ==============  ==================================================
 optimizer          Compile time  Execution time  Description
 =================  ============  ==============  ==================================================
-None               "++++++"      "+"             Applies none of Aesara's rewrites
+None               "++++++"      "+"             Applies none of Pytensor's rewrites
 o1 (fast_compile)  "+++++"       "++"            Applies only basic rewrites
 o2                 "++++"        "+++"           Applies few basic rewrites and some that compile fast
 o3                 "+++"         "++++"          Applies all rewrites except ones that compile slower
@@ -230,7 +230,7 @@ stabilize          "+++++"       "++"            Only applies stability rewrites
 
 For a detailed list of the specific rewrites applied for each of these
 optimizers, see :ref:`optimizations`. Also, see :ref:`unsafe_rewrites` and
-:ref:`faster-aesara-function-compilation` for other trade-off.
+:ref:`faster-pytensor-function-compilation` for other trade-off.
 
 
 .. _using_debugmode:
@@ -256,7 +256,7 @@ use it only during development.
 
     x = at.dvector('x')
 
-    f = aesara.function([x], 10 * x, mode='DebugMode')
+    f = pytensor.function([x], 10 * x, mode='DebugMode')
 
     f([5])
     f([0])
@@ -265,8 +265,8 @@ use it only during development.
 
 If any problem is detected, `DebugMode` will raise an exception according to
 what went wrong, either at call time (e.g. ``f(5)``) or compile time (
-``f = aesara.function(x, 10 * x, mode='DebugMode')``). These exceptions
-should *not* be ignored; talk to your local Aesara guru or email the
+``f = pytensor.function(x, 10 * x, mode='DebugMode')``). These exceptions
+should *not* be ignored; talk to your local Pytensor guru or email the
 users list if you cannot make the exception go away.
 
 Some kinds of errors can only be detected for certain input value combinations.

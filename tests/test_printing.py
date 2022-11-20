@@ -8,10 +8,10 @@ from textwrap import dedent
 import numpy as np
 import pytest
 
-import aesara
-from aesara.compile.mode import get_mode
-from aesara.compile.ops import deep_copy_op
-from aesara.printing import (
+import pytensor
+from pytensor.compile.mode import get_mode
+from pytensor.compile.ops import deep_copy_op
+from pytensor.printing import (
     PatternPrinter,
     PPrinter,
     Print,
@@ -23,8 +23,8 @@ from aesara.printing import (
     pydot_imported,
     pydotprint,
 )
-from aesara.tensor import as_tensor_variable
-from aesara.tensor.type import dmatrix, dvector, matrix
+from pytensor.tensor import as_tensor_variable
+from pytensor.tensor.type import dmatrix, dvector, matrix
 from tests.graph.utils import MyInnerGraphOp, MyOp, MyVariable
 
 
@@ -33,21 +33,21 @@ def test_pydotprint_cond_highlight():
     # This is a REALLY PARTIAL TEST.
     # I did them to help debug stuff.
     x = dvector()
-    f = aesara.function([x], x * 2)
+    f = pytensor.function([x], x * 2)
     f([1, 2, 3, 4])
 
     s = StringIO()
     new_handler = logging.StreamHandler(s)
     new_handler.setLevel(logging.DEBUG)
-    orig_handler = aesara.logging_default_handler
+    orig_handler = pytensor.logging_default_handler
 
-    aesara.aesara_logger.removeHandler(orig_handler)
-    aesara.aesara_logger.addHandler(new_handler)
+    pytensor.pytensor_logger.removeHandler(orig_handler)
+    pytensor.pytensor_logger.addHandler(new_handler)
     try:
         pydotprint(f, cond_highlight=True, print_output_file=False)
     finally:
-        aesara.aesara_logger.addHandler(orig_handler)
-        aesara.aesara_logger.removeHandler(new_handler)
+        pytensor.pytensor_logger.addHandler(orig_handler)
+        pytensor.pytensor_logger.removeHandler(new_handler)
 
     assert (
         s.getvalue() == "pydotprint: cond_highlight is set but there"
@@ -69,8 +69,8 @@ def test_pydotprint_long_name():
     # names are different, but not the shortened names.
     # We should not merge those nodes in the dot graph.
     x = dvector()
-    mode = aesara.compile.mode.get_default_mode().excluding("fusion")
-    f = aesara.function([x], [x * 2, x + x], mode=mode)
+    mode = pytensor.compile.mode.get_default_mode().excluding("fusion")
+    f = pytensor.function([x], [x * 2, x + x], mode=mode)
     f([1, 2, 3, 4])
 
     pydotprint(f, max_label_size=5, print_output_file=False)
@@ -78,13 +78,13 @@ def test_pydotprint_long_name():
 
 
 @pytest.mark.skipif(
-    not pydot_imported or aesara.config.mode in ("DebugMode", "DEBUG_MODE"),
+    not pydot_imported or pytensor.config.mode in ("DebugMode", "DEBUG_MODE"),
     reason="Can't profile in DebugMode",
 )
 def test_pydotprint_profile():
     A = matrix()
-    prof = aesara.compile.ProfileStats(atexit_print=False, gpu_checks=False)
-    f = aesara.function([A], A + 1, profile=prof)
+    prof = pytensor.compile.ProfileStats(atexit_print=False, gpu_checks=False)
+    f = pytensor.function([A], A + 1, profile=prof)
     pydotprint(f, print_output_file=False)
     f([[1]])
     pydotprint(f, print_output_file=False)
@@ -132,8 +132,8 @@ def test_debugprint():
 
     F = D + E
     G = C + F
-    mode = aesara.compile.get_default_mode().including("fusion")
-    g = aesara.function([A, B, D, E], G, mode=mode)
+    mode = pytensor.compile.get_default_mode().including("fusion")
+    g = pytensor.function([A, B, D, E], G, mode=mode)
 
     # just test that it work
     s = StringIO()
@@ -223,7 +223,7 @@ def test_debugprint():
     assert s == reference
 
     # Test the `profile` handling when profile data is missing
-    g = aesara.function([A, B, D, E], G, mode=mode, profile=True)
+    g = pytensor.function([A, B, D, E], G, mode=mode, profile=True)
 
     s = StringIO()
     debugprint(g, file=s, id_type="", print_storage=True)
@@ -264,7 +264,7 @@ def test_debugprint():
     J = dvector()
     s = StringIO()
     debugprint(
-        aesara.function([A, B, D, J], A + (B.dot(J) - D), mode="FAST_RUN"),
+        pytensor.function([A, B, D, J], A + (B.dot(J) - D), mode="FAST_RUN"),
         file=s,
         id_type="",
         print_destroy_map=True,
@@ -439,7 +439,7 @@ def test_Print(capsys):
     # Just to be more sure that we'll have constant folding...
     mode = get_mode("FAST_RUN").including("topo_constant_folding")
 
-    fn = aesara.function([], x_print, mode=mode)
+    fn = pytensor.function([], x_print, mode=mode)
 
     nodes = fn.maker.fgraph.toposort()
     assert len(nodes) == 2

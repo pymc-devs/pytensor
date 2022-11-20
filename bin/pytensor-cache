@@ -1,0 +1,3 @@
+#!/usr/bin/env python
+import pytensor_cache
+pytensor_cache.main()

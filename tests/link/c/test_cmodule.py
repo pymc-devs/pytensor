@@ -13,18 +13,18 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-import aesara
-import aesara.tensor as at
-from aesara.compile.function import function
-from aesara.compile.ops import DeepCopyOp
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply
-from aesara.graph.fg import FunctionGraph
-from aesara.link.c.basic import CLinker
-from aesara.link.c.cmodule import GCC_compiler, ModuleCache, default_blas_ldflags
-from aesara.link.c.exceptions import CompileError
-from aesara.link.c.op import COp
-from aesara.tensor.type import dvectors, vector
+import pytensor
+import pytensor.tensor as at
+from pytensor.compile.function import function
+from pytensor.compile.ops import DeepCopyOp
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply
+from pytensor.graph.fg import FunctionGraph
+from pytensor.link.c.basic import CLinker
+from pytensor.link.c.cmodule import GCC_compiler, ModuleCache, default_blas_ldflags
+from pytensor.link.c.exceptions import CompileError
+from pytensor.link.c.op import COp
+from pytensor.tensor.type import dvectors, vector
 
 
 class MyOp(DeepCopyOp):
@@ -161,8 +161,8 @@ def test_flag_detection():
     assert isinstance(res, bool)
 
 
-@patch("aesara.link.c.cmodule.try_blas_flag", return_value=None)
-@patch("aesara.link.c.cmodule.sys")
+@patch("pytensor.link.c.cmodule.try_blas_flag", return_value=None)
+@patch("pytensor.link.c.cmodule.sys")
 def test_default_blas_ldflags(sys_mock, try_blas_flag_mock, caplog):
 
     sys_mock.version = "3.8.0 | packaged by conda-forge | (default, Nov 22 2019, 19:11:38) \n[GCC 7.3.0]"
@@ -231,19 +231,19 @@ def test_cache_race_condition():
             # optimization passes, so we need these config changes to prevent the
             # exceptions from being caught
             a = at.vector()
-            f = aesara.function([a], factor * a)
+            f = pytensor.function([a], factor * a)
             return f(np.array([1], dtype=config.floatX))
 
         ctx = multiprocessing.get_context()
-        compiledir_prop = aesara.config._config_var_dict["compiledir"]
+        compiledir_prop = pytensor.config._config_var_dict["compiledir"]
 
         # The module cache must (initially) be `None` for all processes so that
         # `ModuleCache.refresh` is called
         with patch.object(compiledir_prop, "val", dir_name, create=True), patch.object(
-            aesara.link.c.cmodule, "_module_cache", None
+            pytensor.link.c.cmodule, "_module_cache", None
         ):
 
-            assert aesara.config.compiledir == dir_name
+            assert pytensor.config.compiledir == dir_name
 
             num_procs = 30
             rng = np.random.default_rng(209)

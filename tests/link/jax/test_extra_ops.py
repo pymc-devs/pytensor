@@ -2,12 +2,12 @@ import numpy as np
 import pytest
 from packaging.version import parse as version_parse
 
-import aesara.tensor.basic as at
-from aesara.configdefaults import config
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import get_test_value
-from aesara.tensor import extra_ops as at_extra_ops
-from aesara.tensor.type import matrix, vector
+import pytensor.tensor.basic as at
+from pytensor.configdefaults import config
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import get_test_value
+from pytensor.tensor import extra_ops as at_extra_ops
+from pytensor.tensor.type import matrix, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
 

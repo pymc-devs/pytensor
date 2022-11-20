@@ -1,8 +1,8 @@
 .PHONY: help venv conda docker check-docstyle check-format check-style format style test lint check coverage pypi
 .DEFAULT_GOAL = help
 
-PROJECT_NAME = aesara
-PROJECT_DIR = aesara/
+PROJECT_NAME = pytensor
+PROJECT_DIR = pytensor/
 PYTHON = python
 PIP = pip
 CONDA = conda

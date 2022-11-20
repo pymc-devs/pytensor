@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-import aesara
-from aesara.tensor.type import TensorType
-from aesara.typed_list.basic import TypedListVariable
-from aesara.typed_list.type import TypedListType
+import pytensor
+from pytensor.tensor.type import TensorType
+from pytensor.typed_list.basic import TypedListVariable
+from pytensor.typed_list.type import TypedListType
 from tests.tensor.utils import random_ranged
 
 
@@ -12,7 +12,7 @@ class TestTypedListType:
     def test_wrong_input_on_creation(self):
         # Typed list type should raises an
         # error if the argument passed for
-        # type is not a valid aesara type
+        # type is not a valid pytensor type
 
         with pytest.raises(TypeError):
             TypedListType(None)
@@ -24,7 +24,7 @@ class TestTypedListType:
         # specified on creation
 
         # list of matrices
-        myType = TypedListType(TensorType(aesara.config.floatX, shape=(None, None)))
+        myType = TypedListType(TensorType(pytensor.config.floatX, shape=(None, None)))
 
         with pytest.raises(TypeError):
             myType.filter([4])
@@ -34,22 +34,22 @@ class TestTypedListType:
         # if no iterable variable is given on input
 
         # list of matrices
-        myType = TypedListType(TensorType(aesara.config.floatX, shape=(None, None)))
+        myType = TypedListType(TensorType(pytensor.config.floatX, shape=(None, None)))
 
         with pytest.raises(TypeError):
             myType.filter(4)
 
     def test_type_equality(self):
         # Typed list types should only be equal
-        # when they contains the same aesara
+        # when they contains the same pytensor
         # variables
 
         # list of matrices
-        myType1 = TypedListType(TensorType(aesara.config.floatX, shape=(None, None)))
+        myType1 = TypedListType(TensorType(pytensor.config.floatX, shape=(None, None)))
         # list of matrices
-        myType2 = TypedListType(TensorType(aesara.config.floatX, shape=(None, None)))
+        myType2 = TypedListType(TensorType(pytensor.config.floatX, shape=(None, None)))
         # list of scalars
-        myType3 = TypedListType(TensorType(aesara.config.floatX, shape=()))
+        myType3 = TypedListType(TensorType(pytensor.config.floatX, shape=()))
 
         assert myType2 == myType1
         assert myType3 != myType1
@@ -57,7 +57,7 @@ class TestTypedListType:
     def test_filter_sanity_check(self):
         # Simple test on typed list type filter
 
-        myType = TypedListType(TensorType(aesara.config.floatX, shape=(None, None)))
+        myType = TypedListType(TensorType(pytensor.config.floatX, shape=(None, None)))
 
         x = random_ranged(-1000, 1000, [100, 100])
 
@@ -75,7 +75,7 @@ class TestTypedListType:
         assert np.array_equal(myType.filter([x]), [x])
 
     def test_load_alot(self):
-        myType = TypedListType(TensorType(aesara.config.floatX, shape=(None, None)))
+        myType = TypedListType(TensorType(pytensor.config.floatX, shape=(None, None)))
 
         x = random_ranged(-1000, 1000, [10, 10])
         testList = []
@@ -88,7 +88,7 @@ class TestTypedListType:
         # Testing nested list with one level of depth
 
         myNestedType = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )
 
         myType = TypedListType(myNestedType)
@@ -101,7 +101,7 @@ class TestTypedListType:
         # Nested list with different depth aren't the same
 
         myNestedType = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )
 
         myNestedType2 = TypedListType(myNestedType)
@@ -114,10 +114,10 @@ class TestTypedListType:
         # test for the 'depth' optional argument
 
         myNestedType = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None)), 3
+            TensorType(pytensor.config.floatX, shape=(None, None)), 3
         )
 
-        myType = TypedListType(TensorType(aesara.config.floatX, shape=(None, None)))
+        myType = TypedListType(TensorType(pytensor.config.floatX, shape=(None, None)))
 
         myManualNestedType = TypedListType(TypedListType(TypedListType(myType)))
 
@@ -126,7 +126,7 @@ class TestTypedListType:
     def test_get_depth(self):
         # test case for get_depth utilitary function
 
-        myType = TypedListType(TensorType(aesara.config.floatX, shape=(None, None)))
+        myType = TypedListType(TensorType(pytensor.config.floatX, shape=(None, None)))
 
         myManualNestedType = TypedListType(TypedListType(TypedListType(myType)))
 
@@ -135,7 +135,7 @@ class TestTypedListType:
     def test_comparison_uneven_nested(self):
         # test for comparison between uneven nested list
 
-        myType = TypedListType(TensorType(aesara.config.floatX, shape=(None, None)))
+        myType = TypedListType(TensorType(pytensor.config.floatX, shape=(None, None)))
 
         myManualNestedType1 = TypedListType(TypedListType(TypedListType(myType)))
 
@@ -146,7 +146,7 @@ class TestTypedListType:
 
     def test_variable_is_Typed_List_variable(self):
         mySymbolicVariable = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
 
         assert isinstance(mySymbolicVariable, TypedListVariable)

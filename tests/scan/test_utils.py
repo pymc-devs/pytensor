@@ -3,14 +3,14 @@ from copy import copy
 import numpy as np
 import pytest
 
-import aesara
-from aesara import tensor as at
-from aesara.scan.utils import ScanArgs
+import pytensor
+from pytensor import tensor as at
+from pytensor.scan.utils import ScanArgs
 
 
 @pytest.fixture(scope="module", autouse=True)
-def set_aesara_flags():
-    with aesara.config.change_flags(cxx="", mode="FAST_COMPILE"):
+def set_pytensor_flags():
+    with pytensor.config.change_flags(cxx="", mode="FAST_COMPILE"):
         yield
 
 
@@ -25,7 +25,7 @@ def create_test_hmm():
     mus_tt = at.matrix("mus")
     mus_tt.tag.test_value = np.stack(
         [np.arange(0.0, 10), np.arange(0.0, -10, -1)], axis=-1
-    ).astype(aesara.config.floatX)
+    ).astype(pytensor.config.floatX)
 
     sigmas_tt = at.ones((N_tt,))
     sigmas_tt.name = "sigmas"
@@ -40,7 +40,7 @@ def create_test_hmm():
         Y_t = srng.normal(mus_t[S_t], sigma_t, name="Y_t")
         return S_t, Y_t
 
-    (S_rv, Y_rv), scan_updates = aesara.scan(
+    (S_rv, Y_rv), scan_updates = pytensor.scan(
         fn=scan_fn,
         sequences=[mus_tt, sigmas_tt],
         non_sequences=[Gamma_rv],
@@ -145,7 +145,7 @@ def test_ScanArgs_basics_mit_sot():
     mus_tt = at.matrix("mus")
     mus_tt.tag.test_value = np.stack(
         [np.arange(0.0, 10), np.arange(0.0, -10, -1)], axis=-1
-    ).astype(aesara.config.floatX)
+    ).astype(pytensor.config.floatX)
 
     sigmas_tt = at.ones((N_tt,))
     sigmas_tt.name = "sigmas"
@@ -160,7 +160,7 @@ def test_ScanArgs_basics_mit_sot():
         Y_t = srng.normal(mus_t[S_tm1], sigma_t, name="Y_t")
         return S_t, Y_t
 
-    (S_rv, Y_rv), scan_updates = aesara.scan(
+    (S_rv, Y_rv), scan_updates = pytensor.scan(
         fn=scan_fn,
         sequences=[mus_tt, sigmas_tt],
         non_sequences=[Gamma_rv],

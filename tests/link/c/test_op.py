@@ -7,24 +7,24 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import aesara
-from aesara import scalar as aes
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply
-from aesara.graph.utils import MethodNotDefined
-from aesara.link.c.op import COp
+import pytensor
+from pytensor import scalar as aes
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply
+from pytensor.graph.utils import MethodNotDefined
+from pytensor.link.c.op import COp
 
 
 test_dir = Path(__file__).parent.absolute()
 
 externalcop_test_code = f"""
-from aesara import tensor as at
-from aesara.graph.basic import Apply
-from aesara.link.c.params_type import ParamsType
-from aesara.link.c.op import ExternalCOp
-from aesara.scalar import ScalarType
-from aesara.link.c.type import Generic
-from aesara.tensor.type import TensorType
+from pytensor import tensor as at
+from pytensor.graph.basic import Apply
+from pytensor.link.c.params_type import ParamsType
+from pytensor.link.c.op import ExternalCOp
+from pytensor.scalar import ScalarType
+from pytensor.link.c.type import Generic
+from pytensor.tensor.type import TensorType
 
 tensor_type_0d = TensorType("float64", tuple())
 scalar_type = ScalarType("float64")
@@ -99,18 +99,18 @@ class TestCOp:
     )
     def test_op_struct(self):
         sop = StructOp()
-        c = sop(aesara.tensor.constant(0))
+        c = sop(pytensor.tensor.constant(0))
         mode = None
         if config.mode == "FAST_COMPILE":
             mode = "FAST_RUN"
-        f = aesara.function([], c, mode=mode)
+        f = pytensor.function([], c, mode=mode)
         rval = f()
         assert rval == 0
         rval = f()
         assert rval == 1
 
-        c2 = sop(aesara.tensor.constant(1))
-        f2 = aesara.function([], [c, c2], mode=mode)
+        c2 = sop(pytensor.tensor.constant(1))
+        f2 = pytensor.function([], [c, c2], mode=mode)
         rval = f2()
         assert rval == [0, 0]
 

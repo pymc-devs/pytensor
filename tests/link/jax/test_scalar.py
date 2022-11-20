@@ -1,15 +1,15 @@
 import numpy as np
 import pytest
 
-import aesara.scalar.basic as aes
-import aesara.tensor as at
-from aesara.configdefaults import config
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import get_test_value
-from aesara.scalar.basic import Composite
-from aesara.tensor.elemwise import Elemwise
-from aesara.tensor.math import all as at_all
-from aesara.tensor.math import (
+import pytensor.scalar.basic as aes
+import pytensor.tensor as at
+from pytensor.configdefaults import config
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import get_test_value
+from pytensor.scalar.basic import Composite
+from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.math import all as at_all
+from pytensor.tensor.math import (
     cosh,
     erf,
     erfc,
@@ -20,7 +20,7 @@ from aesara.tensor.math import (
     sigmoid,
     softplus,
 )
-from aesara.tensor.type import matrix, scalar, vector
+from pytensor.tensor.type import matrix, scalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
 

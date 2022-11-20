@@ -1,14 +1,14 @@
 .. _libdoc_graph_graph:
 
-==============================================
-:mod:`graph` -- Interface for the Aesara graph
-==============================================
+================================================
+:mod:`graph` -- Interface for the Pytensor graph
+================================================
 
 ---------
 Reference
 ---------
 
-.. automodule:: aesara.graph.basic
+.. automodule:: pytensor.graph.basic
    :platform: Unix, Windows
    :synopsis: Interface for types of symbolic variables
    :members:

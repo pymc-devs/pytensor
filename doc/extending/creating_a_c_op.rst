@@ -1,17 +1,17 @@
 
 .. _creating_a_c_op:
 
-=====================================
-Extending Aesara with a C :Class:`Op`
-=====================================
+=======================================
+Extending Pytensor with a C :Class:`Op`
+=======================================
 
-This tutorial covers how to extend Aesara with an :class:`Op` that offers a C
+This tutorial covers how to extend Pytensor with an :class:`Op` that offers a C
 implementation.  This tutorial is aimed at individuals who already know how to
-extend Aesara (see tutorial :ref:`creating_an_op`) by adding a new :class:`Op`
+extend Pytensor (see tutorial :ref:`creating_an_op`) by adding a new :class:`Op`
 with a Python implementation and will only cover the additional knowledge
 required to also produce :class:`Op`\s with C implementations.
 
-Providing an Aesara :class:`Op` with a C implementation requires to interact with
+Providing an Pytensor :class:`Op` with a C implementation requires to interact with
 Python's C-API and Numpy's C-API. Thus, the first step of this tutorial is to
 introduce both and highlight their features which are most relevant to the
 task of implementing a C :class:`Op`. This tutorial then introduces the most important
@@ -48,7 +48,7 @@ be safely deleted.
 of macros to help manage those reference counts. The definition of these
 macros can be found here : `Python C-API Reference Counting
 <https://docs.python.org/2/c-api/refcounting.html>`_. Listed below are the
-two macros most often used in Aesara C :class:`Op`\s.
+two macros most often used in Pytensor C :class:`Op`\s.
 
 
 .. method:: void Py_XINCREF(PyObject *o)
@@ -83,11 +83,11 @@ NumPy C-API
 
 The NumPy library provides a C-API to allow users to create, access and
 manipulate NumPy arrays from within their own C routines. NumPy's :class:`ndarray`\s
-are used extensively inside Aesara and so extending Aesara with a C :class:`Op` will
+are used extensively inside Pytensor and so extending Pytensor with a C :class:`Op` will
 require interaction with the NumPy C-API.
 
 This sections covers the API's elements that are often required to write code
-for an Aesara C :class:`Op`. The full documentation for the API can be found here :
+for an Pytensor C :class:`Op`. The full documentation for the API can be found here :
 `NumPy C-API <http://docs.scipy.org/doc/numpy/reference/c-api.html>`_.
 
 
@@ -267,14 +267,14 @@ instead defines functions that will **return** the C code to the caller.
 
 This is because calling C code from Python code comes with a significant
 overhead. If every :class:`Op` was responsible for executing its own C code, every
-time an Aesara function was called, this overhead would occur as many times
+time an Pytensor function was called, this overhead would occur as many times
 as the number of :class:`Op`\s with C implementations in the function's computational
 graph.
 
-To maximize performance, Aesara instead requires the C :class:`Op`\s to simply return
+To maximize performance, Pytensor instead requires the C :class:`Op`\s to simply return
 the code needed for their execution and takes upon itself the task of
 organizing, linking and compiling the code from the various :class:`Op`\s. Through this,
-Aesara is able to minimize the number of times C code is called from Python
+Pytensor is able to minimize the number of times C code is called from Python
 code.
 
 The following is a very simple example to illustrate how it's possible to
@@ -287,8 +287,8 @@ the C code from each :class:`Op` and then define your own C module that would ca
 the C code from each :class:`Op` in succession. In this case, the overhead would only
 occur once; when calling your custom module itself.
 
-Moreover, the fact that Aesara itself takes care of compiling the C code,
-instead of the individual :class:`Op`\s, allows Aesara to easily cache the compiled C
+Moreover, the fact that Pytensor itself takes care of compiling the C code,
+instead of the individual :class:`Op`\s, allows Pytensor to easily cache the compiled C
 code. This allows for faster compilation times.
 
 The following are some of the various methods of the class :class:`COp` that are
@@ -382,9 +382,9 @@ commonly used.
     each apply.
 
     Both ``c_support_code`` and ``c_support_code_apply`` are necessary
-    because an Aesara `Op` can be used more than once in a given Aesara
+    because an Pytensor `Op` can be used more than once in a given Pytensor
     function. For example, an `Op` that adds two matrices could be used at some
-    point in the Aesara function to add matrices of integers and, at another
+    point in the Pytensor function to add matrices of integers and, at another
     point, to add matrices of doubles. Because the dtype of the inputs and
     outputs can change between different applies of the `Op`, any support code
     that relies on a certain dtype is specific to a given `Apply` of the `Op` and
@@ -395,15 +395,15 @@ commonly used.
     Returns a tuple of integers representing the version of the C code in this
     :class:`Op`. Ex : (1, 4, 0) for version 1.4.0
 
-    This tuple is used by Aesara to cache the compiled C code for this `Op`. As
+    This tuple is used by Pytensor to cache the compiled C code for this `Op`. As
     such, the return value **MUST BE CHANGED** every time the C code is altered
-    or else Aesara will disregard the change in the code and simply load a
+    or else Pytensor will disregard the change in the code and simply load a
     previous version of the `Op` from the cache. If you want to avoid caching of
     the C code of this `Op`, return an empty tuple or do not implement this
     method.
 
     :note:
-        Aesara can handle tuples of any hashable objects as return values
+        Pytensor can handle tuples of any hashable objects as return values
         for this function but, for greater readability and easier management,
         this function should return a tuple of integers as previously
         described.
@@ -424,7 +424,7 @@ not modify any of the inputs.
 TODO: EXPLAIN DESTROYMAP and VIEWMAP BETTER AND GIVE EXAMPLE.
 
 When developing a `COp`, you should run computations in `DebugMode`, by using
-argument ``mode='DebugMode'`` to ``aesara.function``. `DebugMode` is
+argument ``mode='DebugMode'`` to ``pytensor.function``. `DebugMode` is
 slow, but it can catch many common violations of the `Op` contract.
 
 TODO: Like what? How? Talk about Python vs. C too.
@@ -456,16 +456,16 @@ managed. Also take note of how the new variables required for the :class:`Op`'s
 computation are declared in a new scope to avoid cross-initialization errors.
 
 Also, in the C code, it is very important to properly validate the inputs
-and outputs storage. Aesara guarantees that the inputs exist and have the
+and outputs storage. Pytensor guarantees that the inputs exist and have the
 right number of dimensions but it does not guarantee their exact shape. For
 instance, if an :class:`Op` computes the sum of two vectors, it needs to validate that
 its two inputs have the same shape. In our case, we do not need to validate
 the exact shapes of the inputs because we don't have a need that they match
 in any way.
 
-For the outputs, things are a little bit more subtle. Aesara does not
+For the outputs, things are a little bit more subtle. Pytensor does not
 guarantee that they have been allocated but it does guarantee that, if they
-have been allocated, they have the right number of dimension. Again, Aesara
+have been allocated, they have the right number of dimension. Again, Pytensor
 offers no guarantee on the exact shapes. This means that, in our example, we
 need to validate that the output storage has been allocated and has the same
 shape as our vector input. If it is not the case, we allocate a new output
@@ -474,10 +474,10 @@ storage with the right shape and number of dimensions.
 .. testcode:: examples
 
     import numpy
-    import aesara
+    import pytensor
 
-    from aesara.link.c.op import COp
-    from aesara.graph.basic import Apply
+    from pytensor.link.c.op import COp
+    from pytensor.graph.basic import Apply
 
 
     class VectorTimesScalar(COp):
@@ -616,8 +616,8 @@ C code.
                 raise TypeError('y must be a 1-d vector')
 
             # Create an output variable of the same type as x
-            output_var = aesara.tensor.type.TensorType(
-                            dtype=aesara.scalar.upcast(x.dtype, y.dtype),
+            output_var = pytensor.tensor.type.TensorType(
+                            dtype=pytensor.scalar.upcast(x.dtype, y.dtype),
                             shape=(None,))()
 
             return Apply(self, [x, y], [output_var])
@@ -717,12 +717,12 @@ Alternate way of defining C :class:`Op`\s
 =========================================
 
 The two previous examples have covered the standard way of implementing C :class:`Op`\s
-in Aesara by inheriting from the class :class:`Op`. This process is mostly
+in Pytensor by inheriting from the class :class:`Op`. This process is mostly
 simple but it still involves defining many methods as well as mixing, in the
 same file, both Python and C code which tends to make the result less
 readable.
 
-To help with this, Aesara defines a class, `ExternalCOp`, from which new C :class:`Op`\s
+To help with this, Pytensor defines a class, `ExternalCOp`, from which new C :class:`Op`\s
 can inherit. The class `ExternalCOp` aims to simplify the process of implementing
 C :class:`Op`\s by doing the following :
 
@@ -745,8 +745,8 @@ The new :class:`Op` is defined inside a Python file with the following code :
 
 .. testcode::
 
-    import aesara
-    from aesara.link.c.op import ExternalCOp
+    import pytensor
+    from pytensor.link.c.op import ExternalCOp
 
     class VectorTimesVector(ExternalCOp):
         __props__ = ()
@@ -765,8 +765,8 @@ The new :class:`Op` is defined inside a Python file with the following code :
                 raise TypeError('y must be a 1-d vector')
 
             # Create an output variable of the same type as x
-            output_var = aesara.tensor.type.TensorType(
-                            dtype=aesara.scalar.upcast(x.dtype, y.dtype),
+            output_var = pytensor.tensor.type.TensorType(
+                            dtype=pytensor.scalar.upcast(x.dtype, y.dtype),
                             shape=(None,))()
 
             return Apply(self, [x, y], [output_var])
@@ -886,14 +886,14 @@ the following constraints:
 *       It must return an int. The value of that int indicates whether
         the `Op` could perform its task or not. A value of 0 indicates
         success while any non-zero value will interrupt the execution
-        of the Aesara function.  When returning non-zero the function
+        of the Pytensor function.  When returning non-zero the function
         must set a python exception indicating the details of the
         problem.
 
 *       It must receive one argument for each input to the `Op` followed
         by one pointer to an argument for each output of the `Op`.  The
         types for the argument is dependent on the Types (that is
-        aesara Types) of your inputs and outputs.
+        pytensor Types) of your inputs and outputs.
 
 *       You can specify the number of inputs and outputs for your `Op`
         by setting the ``_cop_num_inputs`` and ``_cop_num_outputs``
@@ -1033,9 +1033,9 @@ Using GDB to debug :class:`COp`'s C code
 ========================================
 
 When debugging C code, it can be useful to use GDB for code compiled
-by Aesara.
+by Pytensor.
 
-For this, you must enable this Aesara: `cmodule__remove_gxx_opt=True`.
+For this, you must enable this Pytensor: `cmodule__remove_gxx_opt=True`.
 
 Then you must start Python inside GDB and in it start your Python
 process:
@@ -1043,7 +1043,7 @@ process:
 .. code-block:: sh
 
     $gdb python
-    (gdb)r pytest aesara/
+    (gdb)r pytest pytensor/
 
 `Quick guide to GDB <https://www.cs.cmu.edu/~gilpin/tutorial/>`_.
 
@@ -1051,5 +1051,5 @@ Final Note
 ==========
 
 This tutorial focuses on providing C implementations to `COp`s that manipulate
-Aesara tensors. For more information about other Aesara types, you can refer
-to the section :ref:`Alternate Aesara Types <alternate_aesara_types>`.
+Pytensor tensors. For more information about other Pytensor types, you can refer
+to the section :ref:`Alternate Pytensor Types <alternate_pytensor_types>`.

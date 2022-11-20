@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from aesara import shared
+from pytensor import shared
 
 
 @pytest.mark.parametrize(

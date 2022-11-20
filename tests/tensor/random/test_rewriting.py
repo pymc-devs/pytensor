@@ -1,16 +1,16 @@
 import numpy as np
 import pytest
 
-import aesara.tensor as at
-from aesara import config, shared
-from aesara.compile.function import function
-from aesara.compile.mode import Mode
-from aesara.graph.basic import Constant
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.rewriting.basic import EquilibriumGraphRewriter
-from aesara.graph.rewriting.db import RewriteDatabaseQuery
-from aesara.tensor.elemwise import DimShuffle
-from aesara.tensor.random.basic import (
+import pytensor.tensor as at
+from pytensor import config, shared
+from pytensor.compile.function import function
+from pytensor.compile.mode import Mode
+from pytensor.graph.basic import Constant
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.basic import EquilibriumGraphRewriter
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.random.basic import (
     dirichlet,
     multinomial,
     multivariate_normal,
@@ -18,14 +18,14 @@ from aesara.tensor.random.basic import (
     poisson,
     uniform,
 )
-from aesara.tensor.random.op import RandomVariable
-from aesara.tensor.random.rewriting import (
+from pytensor.tensor.random.op import RandomVariable
+from pytensor.tensor.random.rewriting import (
     local_dimshuffle_rv_lift,
     local_rv_size_lift,
     local_subtensor_rv_lift,
 )
-from aesara.tensor.subtensor import AdvancedSubtensor, AdvancedSubtensor1, Subtensor
-from aesara.tensor.type import iscalar, vector
+from pytensor.tensor.subtensor import AdvancedSubtensor, AdvancedSubtensor1, Subtensor
+from pytensor.tensor.type import iscalar, vector
 
 
 no_mode = Mode("py", RewriteDatabaseQuery(include=[], exclude=[]))
@@ -463,7 +463,7 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
 )
 @config.change_flags(compute_test_value_opt="raise", compute_test_value="raise")
 def test_Subtensor_lift(indices, lifted, dist_op, dist_params, size):
-    from aesara.tensor.subtensor import as_index_constant
+    from pytensor.tensor.subtensor import as_index_constant
 
     rng = shared(np.random.default_rng(1233532), borrow=False)
 

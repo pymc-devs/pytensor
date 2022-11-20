@@ -4,15 +4,15 @@ import numpy as np
 import pytest
 import scipy.special as sp
 
-import aesara
-import aesara.tensor as at
-from aesara.compile.mode import OPT_FAST_RUN, optdb
-from aesara.configdefaults import config
-from aesara.gradient import grad
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.rewriting.basic import check_stack_trace
-from aesara.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from aesara.tensor.math import (
+import pytensor
+import pytensor.tensor as at
+from pytensor.compile.mode import OPT_FAST_RUN, optdb
+from pytensor.configdefaults import config
+from pytensor.gradient import grad
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.basic import check_stack_trace
+from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.math import (
     Argmax,
     add,
     argmax,
@@ -23,9 +23,9 @@ from aesara.tensor.math import (
     mean,
     sigmoid,
 )
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.math import tanh
-from aesara.tensor.nnet.basic import (
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import tanh
+from pytensor.tensor.nnet.basic import (
     CrossentropyCategorical1Hot,
     CrossentropyCategorical1HotGrad,
     CrossentropySoftmax1HotWithBiasDx,
@@ -54,9 +54,9 @@ from aesara.tensor.nnet.basic import (
     softmax_with_bias,
     softsign,
 )
-from aesara.tensor.shape import shape_padleft
-from aesara.tensor.subtensor import AdvancedSubtensor
-from aesara.tensor.type import (
+from pytensor.tensor.shape import shape_padleft
+from pytensor.tensor.subtensor import AdvancedSubtensor
+from pytensor.tensor.type import (
     dmatrix,
     dvector,
     fmatrix,
@@ -135,10 +135,10 @@ class TestSoftmaxWithBias(utt.InferShapeTester):
             [[0.1, 0.1, 0.1], [0.1, 0.1, 0.1], [0.1, 0.1, 0.1]],
             dtype=config.floatX,
         )
-        W = aesara.shared(value=initial_W, name="W")
-        vbias = aesara.shared(value=0.1, name="vbias")  # 0.01
+        W = pytensor.shared(value=initial_W, name="W")
+        vbias = pytensor.shared(value=0.1, name="vbias")  # 0.01
         hid = vector("hid")
-        f = aesara.function([hid], softmax_legacy(dot(hid, W.T) + vbias))
+        f = pytensor.function([hid], softmax_legacy(dot(hid, W.T) + vbias))
         ops = [node.op for node in f.maker.fgraph.toposort()]
         assert softmax_with_bias not in ops
         assert softmax_legacy in ops
@@ -148,10 +148,10 @@ class TestSoftmaxWithBias(utt.InferShapeTester):
 
     def test_softmax_with_bias_trace(self):
         rng = np.random.default_rng(utt.fetch_seed())
-        a = aesara.shared(rng.standard_normal((3,)).astype(config.floatX))
-        b = aesara.shared(np.float32(rng.standard_normal()))
+        a = pytensor.shared(rng.standard_normal((3,)).astype(config.floatX))
+        b = pytensor.shared(np.float32(rng.standard_normal()))
         sm = softmax(a + b)
-        f = aesara.function([], sm)
+        f = pytensor.function([], sm)
         assert check_stack_trace(f, ops_to_check="last")
 
     def test_infer_shape(self):
@@ -266,7 +266,7 @@ class TestCrossEntropySoftmax1HotWithBiasDx(utt.InferShapeTester):
         alvec_val = rng.integers(low=0, high=5, size=10)
         alvec_val[1] = -1
         out = CrossentropySoftmax1HotWithBiasDx()(advec, admat, alvec)
-        f = aesara.function([advec, admat, alvec], out)
+        f = pytensor.function([advec, admat, alvec], out)
         with pytest.raises(ValueError):
             f(advec_val, admat_val, alvec_val)
 
@@ -339,7 +339,7 @@ class TestCrossEntropySoftmaxArgmax1HotWithBias(utt.InferShapeTester):
         alvec_val = rng.integers(low=0, high=5, size=3)
         alvec_val[1] = -1
         out = CrossentropySoftmaxArgmax1HotWithBias()(admat, advec, alvec)
-        f = aesara.function([admat, advec, alvec], out)
+        f = pytensor.function([admat, advec, alvec], out)
         with pytest.raises(ValueError):
             f(admat_val, advec_val, alvec_val)
 
@@ -348,7 +348,7 @@ class TestPrepend(utt.InferShapeTester):
     def test_prepend_constant(self):
         x = matrix("x")
         y = Prepend_scalar_constant_to_each_row(4.0)(x)
-        f = aesara.function([x], y)
+        f = pytensor.function([x], y)
         rng = np.random.default_rng(utt.fetch_seed())
         m = rng.random((3, 5)).astype(config.floatX)
         my = f(m)
@@ -359,7 +359,7 @@ class TestPrepend(utt.InferShapeTester):
         """Test basic functionality."""
         x = matrix("x")
         y = Prepend_scalar_to_each_row()(5.0, x)
-        f = aesara.function([x], y)
+        f = pytensor.function([x], y)
         m = np.ones((3, 5), dtype="float32")
         my = f(m)
         assert my.shape == (3, 6)
@@ -416,7 +416,7 @@ class TestCrossEntropyCategorical1Hot(utt.InferShapeTester):
         one_of_n = lvector("one_of_n")
         op = crossentropy_categorical_1hot
         xe = op(x, one_of_n)
-        f = aesara.function([x, one_of_n], xe)
+        f = pytensor.function([x, one_of_n], xe)
         x_val = np.asarray([[0.4, 0.6, 0.0], [0.1, 0.8, 0.1]], dtype=config.floatX)
         xe_val = f(x_val, [0, 1])
         assert np.allclose(xe_val, -np.log([0.4, 0.8]))
@@ -754,7 +754,7 @@ def test_argmax_pushdown():
         assert isinstance(fgraph.toposort()[1].op, Softmax)
         assert isinstance(fgraph.toposort()[2].op, CAReduce)
         assert isinstance(
-            fgraph.toposort()[2].op.scalar_op, aesara.scalar.ScalarMaximum
+            fgraph.toposort()[2].op.scalar_op, pytensor.scalar.ScalarMaximum
         )
 
 
@@ -784,7 +784,7 @@ def test_argmax_pushdown_bias():
     assert len(fgraph.toposort()) == 2
     assert isinstance(fgraph.toposort()[0].op, SoftmaxWithBias)
     assert isinstance(fgraph.toposort()[1].op, CAReduce)
-    assert isinstance(fgraph.toposort()[1].op.scalar_op, aesara.scalar.ScalarMaximum)
+    assert isinstance(fgraph.toposort()[1].op.scalar_op, pytensor.scalar.ScalarMaximum)
     assert check_stack_trace(fgraph, ops_to_check=(SoftmaxWithBias, CAReduce))
 
 
@@ -804,7 +804,7 @@ def test_asymptotic_32():
         y = lvector()
 
         c = categorical_crossentropy(softmax(x + x2), y)
-        f = aesara.function([x, y, x2], [c.sum(), grad(c.sum(), x)], mode="FAST_RUN")
+        f = pytensor.function([x, y, x2], [c.sum(), grad(c.sum(), x)], mode="FAST_RUN")
 
         xval = np.zeros((5, 5), dtype=dtype).astype(dtype)
         x2val = np.zeros(5, dtype=xval.dtype).astype(dtype)
@@ -841,7 +841,7 @@ class TestSoftmaxRewrite:
     """
 
     def setup_method(self):
-        self.mode = aesara.compile.mode.get_default_mode()
+        self.mode = pytensor.compile.mode.get_default_mode()
         self.mode = self.mode.including("canonicalize")
 
     @pytest.mark.parametrize("axis", [None, 0, 1, -1, (0, 1)])
@@ -857,7 +857,7 @@ class TestSoftmaxRewrite:
             p_y = exp(c) / exp(c).sum(axis=axis).dimshuffle(0, "x")
 
         # test that function contains softmax and no div.
-        f = aesara.function([c], p_y, mode=self.mode)
+        f = pytensor.function([c], p_y, mode=self.mode)
 
         assert check_stack_trace(f, ops_to_check=Softmax)
 
@@ -876,7 +876,7 @@ class TestSoftmaxRewrite:
         p_y = exp(c) / exp(c).sum(axis=axis, keepdims=True)
 
         # test that function contains softmax and no div.
-        f = aesara.function([c], p_y, mode=self.mode)
+        f = pytensor.function([c], p_y, mode=self.mode)
 
         assert check_stack_trace(f, ops_to_check=Softmax)
 
@@ -897,7 +897,7 @@ class TestSoftmaxRewrite:
         # test that function contains softmax and softmaxgrad
         w = matrix()
 
-        g = aesara.function([c, w], grad((p_y * w).sum(), c), mode=self.mode)
+        g = pytensor.function([c, w], grad((p_y * w).sum(), c), mode=self.mode)
 
         g_ops = [n.op for n in g.maker.fgraph.toposort()]
 
@@ -914,7 +914,7 @@ class TestSoftmaxRewrite:
         p_y = exp(c) / exp(c).sum(axis=0)
 
         # test that function contains softmax and no div.
-        f = aesara.function([c], p_y, mode=self.mode)
+        f = pytensor.function([c], p_y, mode=self.mode)
         f_ops = [n.op for n in f.maker.fgraph.toposort()]
         assert len(f_ops) == 1
         assert isinstance(f_ops[0], Softmax)
@@ -926,7 +926,7 @@ class TestSoftmaxRewrite:
         p_y = exp(c) / exp(c).sum(axis=0)
 
         # test that function contains softmax and no div.
-        g = aesara.function([c], grad(p_y.sum(), c), mode=self.mode)
+        g = pytensor.function([c], grad(p_y.sum(), c), mode=self.mode)
         g_ops = [n.op for n in g.maker.fgraph.toposort()]
         assert len(g_ops) == 2
         assert isinstance(g_ops[0], Softmax)
@@ -937,7 +937,7 @@ class TestSoftmaxRewrite:
         p_y = exp(c) / exp(c).sum()
 
         # test that function contains softmax and no div.
-        f = aesara.function([c], p_y, mode=self.mode)
+        f = pytensor.function([c], p_y, mode=self.mode)
         f_ops = [n.op for n in f.maker.fgraph.toposort()]
         assert len(f_ops) == 1
         assert isinstance(f_ops[0], Softmax)
@@ -948,7 +948,7 @@ class TestSoftmaxRewrite:
         p_y = exp(c) / exp(c).sum()
 
         # test that function contains softmax and no div.
-        g = aesara.function([c], grad(p_y.sum(), c), mode=self.mode)
+        g = pytensor.function([c], grad(p_y.sum(), c), mode=self.mode)
         g_ops = [n.op for n in g.maker.fgraph.toposort()]
         assert len(g_ops) == 2
         assert isinstance(g_ops[0], Softmax)
@@ -970,7 +970,7 @@ class TestSoftmaxRewrite:
         # valid)
         c = tensor3("c")
         out = f(c)
-        f = aesara.function([c], out, mode=self.mode)
+        f = pytensor.function([c], out, mode=self.mode)
 
         f_ops = [n.op for n in f.maker.fgraph.toposort()]
         assert len(f_ops) > 1
@@ -979,22 +979,22 @@ class TestSoftmaxRewrite:
 
 def test_softmax_graph():
     rng = np.random.default_rng(utt.fetch_seed())
-    x = aesara.shared(rng.normal(size=(3, 4)))
+    x = pytensor.shared(rng.normal(size=(3, 4)))
 
     def f(inputs):
         y = softmax_graph(x)
-        return aesara.grad(None, x, known_grads={y: inputs})
+        return pytensor.grad(None, x, known_grads={y: inputs})
 
     utt.verify_grad(f, [rng.random((3, 4))])
 
 
 def test_grad_softmax_grad():
     rng = np.random.default_rng(utt.fetch_seed())
-    x = aesara.shared(rng.normal(size=(3, 4)))
+    x = pytensor.shared(rng.normal(size=(3, 4)))
 
     def f(inputs):
         y = softmax_legacy(x)
-        return aesara.grad(None, x, known_grads={y: inputs})
+        return pytensor.grad(None, x, known_grads={y: inputs})
 
     utt.verify_grad(f, [rng.random((3, 4))])
 
@@ -1047,8 +1047,8 @@ def test_h_softmax():
     W1 = np.asarray(
         rng.normal(size=(input_size, h_softmax_level1_size)), dtype=config.floatX
     )
-    W1 = aesara.shared(W1)
-    b1 = aesara.shared(
+    W1 = pytensor.shared(W1)
+    b1 = pytensor.shared(
         np.asarray(np.zeros((h_softmax_level1_size,)), dtype=config.floatX)
     )
 
@@ -1057,8 +1057,8 @@ def test_h_softmax():
         rng.normal(size=(h_softmax_level1_size, input_size, h_softmax_level2_size)),
         dtype=config.floatX,
     )
-    W2 = aesara.shared(W2)
-    b2 = aesara.shared(
+    W2 = pytensor.shared(W2)
+    b2 = pytensor.shared(
         np.asarray(
             np.zeros((h_softmax_level1_size, h_softmax_level2_size)),
             dtype=config.floatX,
@@ -1095,8 +1095,8 @@ def test_h_softmax():
         b2,
     )
 
-    fun_output_tg = aesara.function([x, y], y_hat_tg)
-    fun_output = aesara.function([x], y_hat_all)
+    fun_output_tg = pytensor.function([x, y], y_hat_tg)
+    fun_output = pytensor.function([x], y_hat_all)
 
     x_mat = rng.normal(size=(batch_size, input_size)).astype(config.floatX)
     y_mat = rng.integers(0, output_size, batch_size).astype("int32")
@@ -1146,10 +1146,10 @@ def test_binary_crossentropy_reshape():
         binary_crossentropy(sigmoid(a).reshape((-1, 1)), 1).sum(),
     ):
 
-        ga = aesara.grad(c, a)
+        ga = pytensor.grad(c, a)
         # This only works when "specialize" options are included
-        mode = aesara.compile.get_default_mode().including("fast_run")
-        fga = aesara.function([a], ga, mode=mode)
+        mode = pytensor.compile.get_default_mode().including("fast_run")
+        fga = pytensor.function([a], ga, mode=mode)
         utt.assert_allclose(
             fga(np.array([[[[30.0]]]], dtype=config.floatX)),
             np.zeros((1, 1, 1, 1), dtype=config.floatX),
@@ -1174,10 +1174,10 @@ class TestSigmoidBinaryCrossentropy:
         pred, target = inputs = vectors("pt")
 
         reference_val = binary_crossentropy(sigmoid(pred), target)
-        f_reference = aesara.function(inputs, reference_val)
+        f_reference = pytensor.function(inputs, reference_val)
 
         test_val = sigmoid_binary_crossentropy(pred, target)
-        f_test = aesara.function(inputs, test_val)
+        f_test = pytensor.function(inputs, test_val)
 
         rng = np.random.default_rng(utt.fetch_seed())
         pred, target = rng.standard_normal((2, 50)).astype(config.floatX)
@@ -1207,7 +1207,7 @@ def test_confusion_matrix():
 
     x = vector()
     y = vector()
-    f = aesara.function([x, y], confusion_matrix(x, y))
+    f = pytensor.function([x, y], confusion_matrix(x, y))
     list_inputs = [
         [[0, 1, 2, 1, 0], [0, 0, 2, 1, 2]],
         [[2, 0, 2, 2, 0, 1], [0, 0, 2, 2, 0, 2]],

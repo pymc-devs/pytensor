@@ -6,23 +6,23 @@ import numpy as np
 import pytest
 from numpy.testing import assert_array_almost_equal
 
-import aesara
-import aesara.scalar as aes
-import aesara.tensor as at
-import aesara.tensor.blas_scipy
-from aesara.compile.function import function
-from aesara.compile.io import In
-from aesara.compile.mode import Mode
-from aesara.compile.sharedvalue import shared
-from aesara.configdefaults import config
-from aesara.gradient import grad
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.rewriting.basic import in2out
-from aesara.graph.utils import InconsistencyError
-from aesara.misc.safe_asarray import _asarray
-from aesara.tensor import inplace
-from aesara.tensor.basic import as_tensor_variable
-from aesara.tensor.blas import (
+import pytensor
+import pytensor.scalar as aes
+import pytensor.tensor as at
+import pytensor.tensor.blas_scipy
+from pytensor.compile.function import function
+from pytensor.compile.io import In
+from pytensor.compile.mode import Mode
+from pytensor.compile.sharedvalue import shared
+from pytensor.configdefaults import config
+from pytensor.gradient import grad
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.basic import in2out
+from pytensor.graph.utils import InconsistencyError
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.tensor import inplace
+from pytensor.tensor.basic import as_tensor_variable
+from pytensor.tensor.blas import (
     Dot22,
     Dot22Scalar,
     Gemm,
@@ -48,9 +48,9 @@ from aesara.tensor.blas import (
     local_gemm_to_ger,
     res_is_a,
 )
-from aesara.tensor.elemwise import DimShuffle
-from aesara.tensor.math import Dot, dot, mean, mul, neg, outer, sigmoid, sqrt
-from aesara.tensor.type import (
+from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.math import Dot, dot, mean, mul, neg, outer, sigmoid, sqrt
+from pytensor.tensor.type import (
     cmatrix,
     col,
     cscalar,
@@ -87,7 +87,7 @@ if config.mode == "FAST_COMPILE":
 else:
     mode_not_fast_compile = config.mode
 
-mode_blas_opt = aesara.compile.get_default_mode().including(
+mode_blas_opt = pytensor.compile.get_default_mode().including(
     "BlasOpt", "specialize", "InplaceBlasOpt"
 )
 mode_blas_opt = mode_blas_opt.excluding("c_blas")
@@ -151,7 +151,7 @@ class TestGemm:
             cmp_linker(copy(z), a, x, y, b, "py")
 
             if not dtype.startswith("complex") and config.cxx:
-                # If config.blas__ldflags is empty, Aesara will use
+                # If config.blas__ldflags is empty, Pytensor will use
                 # a NumPy C implementation of [sd]gemm_.
                 cmp_linker(copy(z), a, x, y, b, "c")
 
@@ -852,7 +852,7 @@ def test_upcasting_scalar_nogemm():
     f = function([w, v, t, alpha], rval)
     t = f.maker.fgraph.toposort()
     assert sum(isinstance(n.op, Gemm) for n in t) == 0
-    # aesara.printing.debugprint(f, print_type=True)
+    # pytensor.printing.debugprint(f, print_type=True)
 
     v = fmatrix("v")
     w = fmatrix("w")
@@ -865,7 +865,7 @@ def test_upcasting_scalar_nogemm():
 
     t = f.maker.fgraph.toposort()
     assert sum(isinstance(n.op, Gemm) for n in t) == 0
-    # aesara.printing.debugprint(f, print_type=True)
+    # pytensor.printing.debugprint(f, print_type=True)
 
 
 def test_gemm_nested():
@@ -987,12 +987,12 @@ def test_gemm_unrolled():
             cur_V = update_V(cur_H)
             cur_H = update_H(cur_V)
 
-        unrolled_aesara = function(
-            [], updates=[(V, cur_V), (H, cur_H)], name="unrolled_aesara"
+        unrolled_pytensor = function(
+            [], updates=[(V, cur_V), (H, cur_H)], name="unrolled_pytensor"
         )
         nb_dot = sum(
             1
-            for node in unrolled_aesara.maker.fgraph.toposort()
+            for node in unrolled_pytensor.maker.fgraph.toposort()
             if isinstance(
                 node.op,
                 (
@@ -1007,7 +1007,7 @@ def test_gemm_unrolled():
         assert nb_dot == num_rounds * 2 + 1, nb_dot
 
         # TODO FIXME: This is a bad test
-        unrolled_aesara()
+        unrolled_pytensor()
 
 
 def test_inplace0():
@@ -1039,7 +1039,7 @@ def test_inplace1():
     X, Y, Z, a, b = XYZab()
     # with > 2 terms in the overall addition
     f = inplace_func([X, Y, Z], [Z + Z + dot(X, Y)], mode="FAST_RUN")
-    # aesara.printing.debugprint(f)
+    # pytensor.printing.debugprint(f)
     # it doesn't work inplace because we didn't mark Z as mutable input
     assert [n.op for n in f.maker.fgraph.apply_nodes] == [gemm_no_inplace]
 
@@ -1053,11 +1053,11 @@ def test_gemm_broadcasting(inplace, linker):
     mode = Mode(linker=linker)
     if inplace:
         out = gemm_inplace(z, a, x, y, b)
-        f = aesara.function([z, x, y, a, b], out, accept_inplace=True, mode=mode)
+        f = pytensor.function([z, x, y, a, b], out, accept_inplace=True, mode=mode)
         assert [node.op for node in f.maker.fgraph.toposort()] == [gemm_inplace]
     else:
         out = gemm_no_inplace(z, a, x, y, b)
-        f = aesara.function([z, x, y, a, b], out, mode=mode)
+        f = pytensor.function([z, x, y, a, b], out, mode=mode)
         assert [node.op for node in f.maker.fgraph.toposort()] == [gemm_no_inplace]
 
     shapes_z = [(5, 3), (1, 3), (5, 1), (1, 1)]
@@ -1111,9 +1111,9 @@ def test_dot22scalar():
     # including does not seem to work for 'local_dot_to_dot22' and
     # 'local_dot22_to_dot22scalar'
     # TODO: exclude other optimizations in BlasOpt?
-    # m = aesara.compile.get_default_mode().including('local_dot_to_dot22',
+    # m = pytensor.compile.get_default_mode().including('local_dot_to_dot22',
     #                           'local_dot22_to_dot22scalar','specialize')
-    # m = aesara.compile.get_default_mode().including('BlasOpt', 'specialize')
+    # m = pytensor.compile.get_default_mode().including('BlasOpt', 'specialize')
     rng = np.random.default_rng(unittest_tools.fetch_seed())
     for dtype1 in ["complex64", "complex128"]:
         a = matrix("a", dtype=dtype1)
@@ -1128,7 +1128,7 @@ def test_dot22scalar():
                     def check_dot22scalar(func, len_topo_scalar=-1):
                         topo = func.maker.fgraph.toposort()
                         ops = [x.op for x in topo]
-                        dtype4_upcast = aesara.scalar.upcast(dtype4, dtype1, dtype2)
+                        dtype4_upcast = pytensor.scalar.upcast(dtype4, dtype1, dtype2)
 
                         if dtype1 == dtype2 == dtype3 == dtype4_upcast:
                             if len_topo_scalar > 0:
@@ -1255,7 +1255,7 @@ def test_dot22scalar_cast():
 def test_local_dot22_to_dot22scalar():
     # This test that the bug in gh-1507 is really fixed
     A = dmatrix()
-    mode = aesara.compile.mode.get_default_mode()
+    mode = pytensor.compile.mode.get_default_mode()
     opt = in2out(local_dot22_to_dot22scalar)
     mode = mode.__class__(optimizer=opt)
 
@@ -1328,7 +1328,7 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
         rng = np.random.default_rng(unittest_tools.fetch_seed())
         v = shared(np.array(rng.uniform(size=(2,)), dtype="float32"))
         w = shared(np.array(rng.uniform(size=(2,)), dtype="float32"))
-        f = function([], aesara.tensor.dot(v, w), mode=mode_blas_opt)
+        f = function([], pytensor.tensor.dot(v, w), mode=mode_blas_opt)
 
         # Assert that the dot was optimized somehow
         self.assertFunctionContains0(f, dot)
@@ -1342,7 +1342,7 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
         rng = np.random.default_rng(unittest_tools.fetch_seed())
         v = shared(np.array(rng.uniform(size=(2,)), dtype="float32"))
         m = shared(np.array(rng.uniform(size=(2, 3)), dtype="float32"))
-        f = function([], aesara.tensor.dot(v, m), mode=mode_blas_opt)
+        f = function([], pytensor.tensor.dot(v, m), mode=mode_blas_opt)
 
         # Assert that the dot was optimized somehow
         self.assertFunctionContains0(f, dot)
@@ -1359,7 +1359,7 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
         rng = np.random.default_rng(unittest_tools.fetch_seed())
         v = shared(np.array(rng.uniform(size=(2,)), dtype="float32"))
         m = shared(np.array(rng.uniform(size=(3, 2)), dtype="float32"))
-        f = function([], aesara.tensor.dot(m, v), mode=mode_blas_opt)
+        f = function([], pytensor.tensor.dot(m, v), mode=mode_blas_opt)
 
         # Assert that the dot was optimized somehow
         self.assertFunctionContains0(f, dot)
@@ -1380,7 +1380,7 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
         v2 = shared(v2_orig)
         m = shared(np.array(rng.uniform(size=m_shp), dtype="float32"))
 
-        f = function([], v2 + aesara.tensor.dot(m, v1), mode=mode_blas_opt)
+        f = function([], v2 + pytensor.tensor.dot(m, v1), mode=mode_blas_opt)
 
         # Assert they produce the same output
         assert np.allclose(f(), np.dot(m.get_value(), v1.get_value()) + v2_orig)
@@ -1391,7 +1391,7 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
 
         # test the inplace version
         g = function(
-            [], [], updates=[(v2, v2 + aesara.tensor.dot(m, v1))], mode=mode_blas_opt
+            [], [], updates=[(v2, v2 + pytensor.tensor.dot(m, v1))], mode=mode_blas_opt
         )
 
         # Assert they produce the same output
@@ -1429,7 +1429,7 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
         v2 = shared(v2_orig)
         m = shared(np.array(rng.uniform(size=(2, 3)), dtype="float32"))
 
-        f = function([], v2 + aesara.tensor.dot(v1, m), mode=mode_blas_opt)
+        f = function([], v2 + pytensor.tensor.dot(v1, m), mode=mode_blas_opt)
 
         # Assert they produce the same output
         assert np.allclose(f(), np.dot(v1.get_value(), m.get_value()) + v2.get_value())
@@ -1439,7 +1439,7 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
 
         # test the inplace version
         g = function(
-            [], [], updates=[(v2, v2 + aesara.tensor.dot(v1, m))], mode=mode_blas_opt
+            [], [], updates=[(v2, v2 + pytensor.tensor.dot(v1, m))], mode=mode_blas_opt
         )
 
         # Assert they produce the same output
@@ -1471,7 +1471,7 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
             np.array(rng.uniform(size=(1, 2)), dtype="float32"),
             shape=(1, None),
         )
-        o = aesara.tensor.dot(m, v1)
+        o = pytensor.tensor.dot(m, v1)
         f = function([], o + v2, mode=mode_blas_opt)
 
         # Assert they produce the same output
@@ -1518,7 +1518,7 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
 # The following gemv tests were added in March 2011 by Ian Goodfellow
 # and are based on the gemv tests from scipy
 # http://projects.scipy.org/scipy/browser/trunk/scipy/linalg/tests/test_fblas.py?rev=6803
-# NOTE: At the time these tests were written, aesara did not have a
+# NOTE: At the time these tests were written, pytensor did not have a
 # conjugate function. If such a thing is ever added, the tests involving
 # conjugate should be ported over as well.
 
@@ -1741,7 +1741,7 @@ class BaseGemv:
         # done inplace on a temporarily allocated-buffer, which is
         # then scaled by alpha and to t with a fused elemwise.
         n_gemvs = 0
-        # aesara.printing.debugprint(f, print_type=True)
+        # pytensor.printing.debugprint(f, print_type=True)
         for node in f.maker.fgraph.toposort():
             if node.op == self.gemv_inplace:
                 n_gemvs += 1
@@ -1863,7 +1863,7 @@ class TestGer(unittest_tools.OptimizationTestMixin):
     shared = staticmethod(shared)
 
     def setup_method(self):
-        self.mode = aesara.compile.get_default_mode().including("fast_run")
+        self.mode = pytensor.compile.get_default_mode().including("fast_run")
         self.mode = self.mode.excluding("c_blas", "scipy_blas")
         dtype = self.dtype = "float64"  # optimization isn't dtype-dependent
         self.A = tensor(dtype=dtype, shape=(None, None))
@@ -2085,7 +2085,7 @@ class TestGer(unittest_tools.OptimizationTestMixin):
 
 class TestBlasStrides:
     dtype = "float64"
-    mode = aesara.compile.get_default_mode()
+    mode = pytensor.compile.get_default_mode()
     mode = mode.including("fast_run").excluding("gpu", "c_blas", "scipy_blas")
 
     def random(self, *shape, rng=None):
@@ -2110,7 +2110,7 @@ class TestBlasStrides:
 
         f_nn = function([], [], updates=[(a, dot(b, c))], mode=self.mode)
         # print 'class name:', self.__class__.__name__
-        # aesara.printing.debugprint(f_nn)
+        # pytensor.printing.debugprint(f_nn)
         f_nt = function([], [], updates=[(a, dot(b, c_t.T))], mode=self.mode)
         f_tn = function([], [], updates=[(a, dot(b_t.T, c))], mode=self.mode)
         f_tt = function([], [], updates=[(a, dot(b_t.T, c_t.T))], mode=self.mode)

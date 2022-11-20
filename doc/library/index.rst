@@ -6,7 +6,7 @@
 API Documentation
 =================
 
-This documentation covers Aesara module-wise.  This is suited to finding the
+This documentation covers Pytensor module-wise.  This is suited to finding the
 Types and Ops that you can use to build and compile expression graphs.
 
 Modules
@@ -31,9 +31,9 @@ Modules
    tensor/index
    typed_list
 
-.. module:: aesara
+.. module:: pytensor
    :platform: Unix, Windows
-   :synopsis: Aesara top-level import
+   :synopsis: Pytensor top-level import
 .. moduleauthor:: LISA
 
 There are also some top-level imports that you might find more convenient:
@@ -43,32 +43,32 @@ Graph
 
 .. function:: shared(...)
 
-   Alias for :func:`aesara.compile.sharedvalue.shared`
+   Alias for :func:`pytensor.compile.sharedvalue.shared`
 
 .. function:: function(...)
 
-   Alias for :func:`aesara.compile.function.function`
+   Alias for :func:`pytensor.compile.function.function`
 
-.. autofunction:: aesara.clone_replace(...)
+.. autofunction:: pytensor.clone_replace(...)
 
-   Alias for :func:`aesara.graph.basic.clone_replace`
+   Alias for :func:`pytensor.graph.basic.clone_replace`
 
 Control flow
 ============
 
-.. autofunction:: aesara.scan(...)
+.. autofunction:: pytensor.scan(...)
 
-   Alias for :func:`aesara.scan.basic.scan`
+   Alias for :func:`pytensor.scan.basic.scan`
 
 Convert to Variable
 ====================
 
-.. autofunction:: aesara.as_symbolic(...)
+.. autofunction:: pytensor.as_symbolic(...)
 
 Debug
 =====
 
-.. autofunction:: aesara.dprint(...)
+.. autofunction:: pytensor.dprint(...)
 
-   Alias for :func:`aesara.printing.debugprint`
+   Alias for :func:`pytensor.printing.debugprint`
 

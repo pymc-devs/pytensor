@@ -7,10 +7,10 @@
 .. _function_inputs:
 
 ===========================================
-:mod:`io` - defines aesara.function [TODO]
+:mod:`io` - defines pytensor.function [TODO]
 ===========================================
 
-.. module:: aesara.compile.io
+.. module:: pytensor.compile.io
    :platform: Unix, Windows
    :synopsis: defines In and Out
 .. moduleauthor:: LISA
@@ -19,7 +19,7 @@
 Inputs
 ======
 
-The ``inputs`` argument to ``aesara.function`` is a list, containing the ``Variable`` instances for which values will be specified at the time of the function call.  But inputs can be more than just Variables.
+The ``inputs`` argument to ``pytensor.function`` is a list, containing the ``Variable`` instances for which values will be specified at the time of the function call.  But inputs can be more than just Variables.
 ``In`` instances let us attach properties to ``Variables`` to tell function more about how to use them.
 
 
@@ -80,9 +80,9 @@ A non-None `value` argument makes an In() instance an optional parameter
 of the compiled function.  For example, in the following code we are
 defining an arity-2 function ``inc``.
 
->>> import aesara.tensor as at
->>> from aesara import function
->>> from aesara.compile.io import In
+>>> import pytensor.tensor as at
+>>> from pytensor import function
+>>> from pytensor.compile.io import In
 >>> u, x, s = at.scalars('u', 'x', 's')
 >>> inc = function([u, In(x, value=3), In(s, update=(s+x*u), value=10.0)], [])
 
@@ -123,7 +123,7 @@ array(10.0)
 Input Argument Restrictions
 ---------------------------
 
-The following restrictions apply to the inputs to ``aesara.function``:
+The following restrictions apply to the inputs to ``pytensor.function``:
 
 - Every input list element must be a valid ``In`` instance, or must be
   upgradable to a valid ``In`` instance. See the shortcut rules below.
@@ -152,7 +152,7 @@ instance explicitly with the ``autoname`` flag set to False.
 Access to function values and containers
 ----------------------------------------
 
-For each input, ``aesara.function`` will create a ``Container`` if
+For each input, ``pytensor.function`` will create a ``Container`` if
 ``value`` was not already a ``Container`` (or if ``implicit`` was ``False``). At the time of a function call,
 each of these containers must be filled with a value. Each input (but
 especially ones with a default value or an update expression) may have a
@@ -183,7 +183,7 @@ method to access values by indexing a Function directly by typing
 To show some examples of these access methods...
 
 
->>> from aesara import tensor as at, function
+>>> from pytensor import tensor as at, function
 >>> a, b, c = at.scalars('xys') # set the internal names of graph nodes
 >>> # Note that the name of c is 's', not 'c'!
 >>> fn = function([a, b, ((c, c+a+b), 10.0)], [])
@@ -235,15 +235,15 @@ Every element of the inputs list will be upgraded to an In instance if necessary
 
 Example:
 
->>> import aesara
->>> from aesara import tensor as at
->>> from aesara.compile.io import In
+>>> import pytensor
+>>> from pytensor import tensor as at
+>>> from pytensor.compile.io import In
 >>> x = at.scalar()
 >>> y = at.scalar('y')
 >>> z = at.scalar('z')
 >>> w = at.scalar('w')
 
->>> fn = aesara.function(inputs=[x, y, In(z, value=42), ((w, w+x), 0)],
+>>> fn = pytensor.function(inputs=[x, y, In(z, value=42), ((w, w+x), 0)],
 ...                      outputs=x + y + z)
 >>> # the first two arguments are required and the last two are
 >>> # optional and initialized to 42 and 0, respectively.
@@ -307,24 +307,24 @@ If a single ``Variable`` or ``Out`` instance is given as argument, then the comp
 If a list of ``Variable`` or ``Out`` instances is given as argument, then the compiled function will return a list of their values.
 
 >>> import numpy
->>> from aesara.compile.io import Out
+>>> from pytensor.compile.io import Out
 >>> x, y, s = at.matrices('xys')
 
 >>> # print a list of 2 ndarrays
->>> fn1 = aesara.function([x], [x+x, Out((x+x).T, borrow=True)])
+>>> fn1 = pytensor.function([x], [x+x, Out((x+x).T, borrow=True)])
 >>> fn1(numpy.asarray([[1,0],[0,1]]))
 [array([[ 2.,  0.],
        [ 0.,  2.]]), array([[ 2.,  0.],
        [ 0.,  2.]])]
 
 >>> # print a list of 1 ndarray
->>> fn2 = aesara.function([x], [x+x])
+>>> fn2 = pytensor.function([x], [x+x])
 >>> fn2(numpy.asarray([[1,0],[0,1]]))
 [array([[ 2.,  0.],
        [ 0.,  2.]])]
 
 >>> # print an ndarray
->>> fn3 = aesara.function([x], outputs=x+x)
+>>> fn3 = pytensor.function([x], outputs=x+x)
 >>> fn3(numpy.asarray([[1,0],[0,1]]))
 array([[ 2.,  0.],
        [ 0.,  2.]])

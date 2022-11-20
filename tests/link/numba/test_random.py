@@ -4,13 +4,13 @@ import numpy as np
 import pytest
 import scipy.stats as stats
 
-import aesara.tensor as at
-import aesara.tensor.random.basic as aer
-from aesara import shared
-from aesara.compile.function import function
-from aesara.compile.sharedvalue import SharedVariable
-from aesara.graph.basic import Constant
-from aesara.graph.fg import FunctionGraph
+import pytensor.tensor as at
+import pytensor.tensor.random.basic as aer
+from pytensor import shared
+from pytensor.compile.function import function
+from pytensor.compile.sharedvalue import SharedVariable
+from pytensor.graph.basic import Constant
+from pytensor.graph.fg import FunctionGraph
 from tests.link.numba.test_basic import (
     compare_numba_and_py,
     eval_python_only,
@@ -281,7 +281,7 @@ rng = np.random.default_rng(42849)
     ids=str,
 )
 def test_aligned_RandomVariable(rv_op, dist_args, size):
-    """Tests for Numba samplers that are one-to-one with Aesara's/NumPy's samplers."""
+    """Tests for Numba samplers that are one-to-one with Pytensor's/NumPy's samplers."""
     rng = shared(np.random.RandomState(29402))
     g = rv_op(*dist_args, size=size, rng=rng)
     g_fg = FunctionGraph(outputs=[g])
@@ -416,7 +416,7 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
     ],
 )
 def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_conv):
-    """Tests for Numba samplers that are not one-to-one with Aesara's/NumPy's samplers."""
+    """Tests for Numba samplers that are not one-to-one with Pytensor's/NumPy's samplers."""
     rng = shared(np.random.RandomState(29402))
     g = rv_op(*dist_args, size=(2000,) + base_size, rng=rng)
     g_fn = function(dist_args, g, mode=numba_mode)

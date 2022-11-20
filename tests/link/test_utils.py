@@ -3,20 +3,20 @@ from functools import singledispatch
 
 import numpy as np
 
-from aesara import config
-from aesara.graph.basic import Apply
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import Op
-from aesara.link.utils import (
+from pytensor import config
+from pytensor.graph.basic import Apply
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op
+from pytensor.link.utils import (
     fgraph_to_python,
     get_name_for_object,
     unique_name_generator,
 )
-from aesara.scalar.basic import Add, float64
-from aesara.tensor import constant
-from aesara.tensor.elemwise import Elemwise
-from aesara.tensor.type import scalar, vector
-from aesara.tensor.type_other import NoneConst
+from pytensor.scalar.basic import Add, float64
+from pytensor.tensor import constant
+from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.type import scalar, vector
+from pytensor.tensor.type_other import NoneConst
 
 
 @singledispatch

@@ -3,23 +3,23 @@ import contextlib
 import numpy as np
 import pytest
 
-import aesara
-import aesara.scalar as aes
-import aesara.tensor as at
-from aesara import shared
-from aesara.compile.function import function
-from aesara.compile.mode import Mode, get_default_mode
-from aesara.configdefaults import config
-from aesara.graph.basic import Constant
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.rewriting.basic import check_stack_trace, out2in
-from aesara.graph.rewriting.db import RewriteDatabaseQuery
-from aesara.graph.rewriting.utils import rewrite_graph
-from aesara.misc.safe_asarray import _asarray
-from aesara.scalar.basic import Composite
-from aesara.tensor.basic import MakeVector
-from aesara.tensor.elemwise import DimShuffle, Elemwise
-from aesara.tensor.math import (
+import pytensor
+import pytensor.scalar as aes
+import pytensor.tensor as at
+from pytensor import shared
+from pytensor.compile.function import function
+from pytensor.compile.mode import Mode, get_default_mode
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Constant
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.basic import check_stack_trace, out2in
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.scalar.basic import Composite
+from pytensor.tensor.basic import MakeVector
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.math import (
     add,
     bitwise_and,
     bitwise_or,
@@ -38,16 +38,16 @@ from aesara.tensor.math import (
     neg,
     neq,
 )
-from aesara.tensor.math import pow as at_pow
-from aesara.tensor.math import reciprocal
-from aesara.tensor.math import round as at_round
-from aesara.tensor.math import sin, sinh, sqr, sqrt
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.math import tan, tanh, true_div, xor
-from aesara.tensor.rewriting.elemwise import local_dimshuffle_lift
-from aesara.tensor.rewriting.shape import local_useless_dimshuffle_in_reshape
-from aesara.tensor.shape import reshape
-from aesara.tensor.type import (
+from pytensor.tensor.math import pow as at_pow
+from pytensor.tensor.math import reciprocal
+from pytensor.tensor.math import round as at_round
+from pytensor.tensor.math import sin, sinh, sqr, sqrt
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import tan, tanh, true_div, xor
+from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
+from pytensor.tensor.rewriting.shape import local_useless_dimshuffle_in_reshape
+from pytensor.tensor.shape import reshape
+from pytensor.tensor.type import (
     TensorType,
     dmatrices,
     dscalar,
@@ -998,7 +998,7 @@ class TestFusion:
 
         # Make sure that C compilation is used
         mode = Mode("cvm", self.rewrites)
-        dlogp = function(vars, [aesara.grad(logp, v) for v in vars], mode=mode)
+        dlogp = function(vars, [pytensor.grad(logp, v) for v in vars], mode=mode)
 
         # Make sure something was fused
         assert any(

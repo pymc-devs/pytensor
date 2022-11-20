@@ -5,17 +5,17 @@ import numpy as np
 import pytest
 from packaging import version
 
-import aesara
-import aesara.tensor as at
-from aesara import sparse
-from aesara.compile.function import function
-from aesara.compile.io import In, Out
-from aesara.configdefaults import config
-from aesara.gradient import GradientError
-from aesara.graph.basic import Apply, Constant, applys_between
-from aesara.graph.op import Op
-from aesara.misc.safe_asarray import _asarray
-from aesara.sparse import (
+import pytensor
+import pytensor.tensor as at
+from pytensor import sparse
+from pytensor.compile.function import function
+from pytensor.compile.io import In, Out
+from pytensor.configdefaults import config
+from pytensor.gradient import GradientError
+from pytensor.graph.basic import Apply, Constant, applys_between
+from pytensor.graph.op import Op
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.sparse import (
     CSC,
     CSM,
     CSR,
@@ -77,25 +77,29 @@ from aesara.sparse import (
     transpose,
     true_dot,
 )
-from aesara.sparse.basic import (
+from pytensor.sparse.basic import (
     SparseConstant,
     _is_dense_variable,
     _is_sparse,
     _is_sparse_variable,
     _mtypes,
 )
-from aesara.sparse.rewriting import (
+from pytensor.sparse.rewriting import (
     AddSD_ccode,
     CSMGradC,
     StructuredDotCSC,
     UsmmCscDense,
 )
-from aesara.tensor.basic import MakeVector
-from aesara.tensor.elemwise import DimShuffle, Elemwise
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.shape import Shape_i
-from aesara.tensor.subtensor import AdvancedIncSubtensor, AdvancedSubtensor1, Subtensor
-from aesara.tensor.type import (
+from pytensor.tensor.basic import MakeVector
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.shape import Shape_i
+from pytensor.tensor.subtensor import (
+    AdvancedIncSubtensor,
+    AdvancedSubtensor1,
+    Subtensor,
+)
+from pytensor.tensor.type import (
     TensorType,
     float_dtypes,
     fscalar,
@@ -115,7 +119,7 @@ sp = pytest.importorskip("scipy", minversion="0.7.0")
 
 
 # Probability distributions are currently tested in test_sp2.py
-# from aesara.sparse import (
+# from pytensor.sparse import (
 #    Poisson, poisson, Binomial, Multinomial, multinomial)
 
 
@@ -170,7 +174,7 @@ def sparse_random_inputs(
     """
     Return a tuple containing everything needed to perform a test.
 
-    If `out_dtype` is `None`, aesara.config.floatX is used.
+    If `out_dtype` is `None`, pytensor.config.floatX is used.
 
     :param format: Sparse format.
     :param shape: Shape of data.
@@ -189,11 +193,11 @@ def sparse_random_inputs(
                              sparse matrix.
     :return: (variable, data) where both `variable` and `data` are list.
 
-    :note: explicit_zero and unsorted_indices was added in Aesara 0.6rc4
+    :note: explicit_zero and unsorted_indices was added in Pytensor 0.6rc4
     """
 
     if out_dtype is None:
-        out_dtype = aesara.config.floatX
+        out_dtype = pytensor.config.floatX
 
     assert 0 <= p <= 1
     assert len(shape) == 2
@@ -223,7 +227,7 @@ def sparse_random_inputs(
         return (where * value).astype(out_dtype)
 
     variable = [
-        getattr(aesara.sparse, format + "_matrix")(dtype=out_dtype) for k in range(n)
+        getattr(pytensor.sparse, format + "_matrix")(dtype=out_dtype) for k in range(n)
     ]
     data = [
         getattr(sp.sparse, format + "_matrix")(_rand(), dtype=out_dtype)
@@ -251,7 +255,7 @@ def sparse_random_inputs(
 
     # numpy 1.5.0 with scipy 0.9.0 have sp.sparse.XXX_matrix return
     # typenum 10(ulonglong) instead of 8(uint64) event if they are the same!
-    # Aesara don't like ulonglong type_num
+    # Pytensor don't like ulonglong type_num
     dtype = np.dtype(out_dtype)  # Convert into dtype object.
     if data[0].dtype.num != dtype.num and dtype.str == data[0].dtype.str:
         data[0].data = _asarray(data[0].data, out_dtype)
@@ -261,7 +265,7 @@ def sparse_random_inputs(
 
 def verify_grad_sparse(op, pt, structured=False, *args, **kwargs):
     """
-    Wrapper for aesara.test.unittest_tools.py:verify_grad which
+    Wrapper for pytensor.test.unittest_tools.py:verify_grad which
     converts sparse variables back and forth.
 
     Parameters
@@ -447,7 +451,7 @@ class TestSparseInferShape(utt.InferShapeTester):
             s = ivector()
             call = getattr(sp.sparse, sparsetype + "_matrix")
             spm = call(random_lil((300, 400), config.floatX, 5))
-            out = aesara.grad(dense_from_sparse(CSM(sparsetype)(x, y, z, s)).sum(), x)
+            out = pytensor.grad(dense_from_sparse(CSM(sparsetype)(x, y, z, s)).sum(), x)
             self._compile_and_check(
                 [x, y, z, s],
                 [out],
@@ -590,7 +594,7 @@ class TestSparseInferShape(utt.InferShapeTester):
         ]:
             x = SparseTensorType(format, dtype=config.floatX)()
             y = SparseTensorType(format, dtype=config.floatX)()
-            grads = aesara.grad(dense_from_sparse(structured_dot(x, y)).sum(), [x, y])
+            grads = pytensor.grad(dense_from_sparse(structured_dot(x, y)).sum(), [x, y])
             self._compile_and_check(
                 [x, y],
                 [grads[0]],
@@ -653,23 +657,23 @@ class TestConstructSparseFromList:
         m = matrix()
 
         with pytest.raises(TypeError):
-            aesara.sparse.sparse_grad(v)
+            pytensor.sparse.sparse_grad(v)
 
         with pytest.raises(TypeError):
             sub = m[v, v]
-            aesara.sparse.sparse_grad(sub)
+            pytensor.sparse.sparse_grad(sub)
 
         # Assert we don't create a sparse grad by default
         sub = m[v]
-        g = aesara.grad(sub.sum(), m)
+        g = pytensor.grad(sub.sum(), m)
         assert isinstance(g.owner.op, AdvancedIncSubtensor)
 
         # Test that we create a sparse grad when asked
         # USER INTERFACE
         m = matrix()
         v = ivector()
-        sub = aesara.sparse.sparse_grad(m[v])
-        g = aesara.grad(sub.sum(), m)
+        sub = pytensor.sparse.sparse_grad(m[v])
+        g = pytensor.grad(sub.sum(), m)
         assert isinstance(g.owner.op, ConstructSparseFromList)
 
         # Test that we create a sparse grad when asked
@@ -677,17 +681,17 @@ class TestConstructSparseFromList:
         m = matrix()
         v = ivector()
         sub = AdvancedSubtensor1(sparse_grad=True)(m, v)
-        g = aesara.grad(sub.sum(), m)
+        g = pytensor.grad(sub.sum(), m)
         assert isinstance(g.owner.op, ConstructSparseFromList)
 
         # Test the sparse grad
         valm = np.random.random((5, 4)).astype(config.floatX)
         valv = np.random.default_rng().integers(0, 5, 10)
         m = matrix()
-        shared_v = aesara.shared(valv)
+        shared_v = pytensor.shared(valv)
 
         def fn(m):
-            return aesara.sparse.sparse_grad(m[shared_v])
+            return pytensor.sparse.sparse_grad(m[shared_v])
 
         verify_grad_sparse(fn, [valm])
 
@@ -698,14 +702,14 @@ class TestConstructSparseFromList:
             sub = t[v]
 
             # Assert we don't create a sparse grad by default
-            g = aesara.grad(sub.sum(), t)
+            g = pytensor.grad(sub.sum(), t)
             assert isinstance(g.owner.op, AdvancedIncSubtensor)
 
             # Test that we raise an error, as we can't create a sparse
             # grad from tensors that don't have 2 dimensions.
-            sub = aesara.sparse.sparse_grad(sub)
+            sub = pytensor.sparse.sparse_grad(sub)
             with pytest.raises(TypeError):
-                aesara.grad(sub.sum(), t)
+                pytensor.grad(sub.sum(), t)
 
 
 class TestAddMul:
@@ -799,7 +803,7 @@ class TestAddMul:
             for a in [
                 np.array(array1),
                 at.as_tensor_variable(array1),
-                aesara.shared(array1),
+                pytensor.shared(array1),
             ]:
                 for dtype1, dtype2 in [
                     ("float64", "int8"),
@@ -857,7 +861,7 @@ class TestAddMul:
             for b in [
                 np.asarray(array2),
                 at.as_tensor_variable(array2),
-                aesara.shared(array2),
+                pytensor.shared(array2),
             ]:
                 for dtype1, dtype2 in [
                     ("float64", "int8"),
@@ -920,13 +924,13 @@ class TestComparison:
         version.parse(sp.__version__) < version.parse("0.13"),
         reason="Comparison operators need newer release of scipy",
     )
-    def __generalized_ss_test(self, aesarap, symbolicType, testOp, scipyType):
+    def __generalized_ss_test(self, pytensorp, symbolicType, testOp, scipyType):
         x = symbolicType()
         y = symbolicType()
 
-        op = aesarap(x, y)
+        op = pytensorp(x, y)
 
-        f = aesara.function([x, y], op)
+        f = pytensor.function([x, y], op)
 
         m1 = scipyType(random_lil((10, 40), config.floatX, 3))
         m2 = scipyType(random_lil((10, 40), config.floatX, 3))
@@ -937,13 +941,13 @@ class TestComparison:
         version.parse(sp.__version__) < version.parse("0.13"),
         reason="Comparison operators need newer release of scipy",
     )
-    def __generalized_sd_test(self, aesarap, symbolicType, testOp, scipyType):
+    def __generalized_sd_test(self, pytensorp, symbolicType, testOp, scipyType):
         x = symbolicType()
         y = matrix()
 
-        op = aesarap(x, y)
+        op = pytensorp(x, y)
 
-        f = aesara.function([x, y], op)
+        f = pytensor.function([x, y], op)
 
         m1 = scipyType(random_lil((10, 40), config.floatX, 3))
         m2 = self._rand_ranged(1000, -1000, [10, 40])
@@ -954,13 +958,13 @@ class TestComparison:
         version.parse(sp.__version__) < version.parse("0.13"),
         reason="Comparison operators need newer release of scipy",
     )
-    def __generalized_ds_test(self, aesarap, symbolicType, testOp, scipyType):
+    def __generalized_ds_test(self, pytensorp, symbolicType, testOp, scipyType):
         x = symbolicType()
         y = matrix()
 
-        op = aesarap(y, x)
+        op = pytensorp(y, x)
 
-        f = aesara.function([y, x], op)
+        f = pytensor.function([y, x], op)
 
         m1 = scipyType(random_lil((10, 40), config.floatX, 3))
         m2 = self._rand_ranged(1000, -1000, [10, 40])
@@ -1011,13 +1015,13 @@ class TestComparison:
         x = sparse.csc_matrix()
         y = matrix()
 
-        m1 = sp.sparse.csc_matrix((2, 2), dtype=aesara.config.floatX)
-        m2 = np.asarray([[0, 0], [0, 0]], dtype=aesara.config.floatX)
+        m1 = sp.sparse.csc_matrix((2, 2), dtype=pytensor.config.floatX)
+        m2 = np.asarray([[0, 0], [0, 0]], dtype=pytensor.config.floatX)
 
         for func in self.testsDic:
 
             op = func(y, x)
-            f = aesara.function([y, x], op)
+            f = pytensor.function([y, x], op)
 
             assert np.array_equal(f(m2, m1), self.testsDic[func](m2, m1))
 
@@ -1045,7 +1049,7 @@ class TestConversion:
 
         a = sp.sparse.csr_matrix(test_val)
         s = as_sparse_or_tensor_variable(a)
-        from aesara.tensor.exceptions import NotScalarConstantError
+        from pytensor.tensor.exceptions import NotScalarConstantError
 
         with pytest.raises(NotScalarConstantError):
             at.get_scalar_constant_value(s, only_process_constants=True)
@@ -1090,8 +1094,8 @@ class TestConversion:
         s_m = -s
         d = dense_from_sparse(s_m)
         c = d.sum()
-        g = aesara.grad(c, x)
-        f = aesara.function([x], [s, g])
+        g = pytensor.grad(c, x)
+        f = pytensor.function([x], [s, g])
         f(np.array(0, dtype=config.floatX, ndmin=ndim))
         f(np.array(7, dtype=config.floatX, ndmin=ndim))
 
@@ -1136,7 +1140,7 @@ class TestCsmProperties:
         for format in ("csc", "csr"):
             for dtype in ("float32", "float64"):
                 x = SparseTensorType(format, dtype=dtype)()
-                f = aesara.function([x], csm_properties(x))
+                f = pytensor.function([x], csm_properties(x))
 
                 spmat = sp_types[format](random_lil((4, 3), dtype, 3))
 
@@ -1178,9 +1182,9 @@ class TestCsm:
 
                 a = as_sparse_variable(sp_types[format](random_lil((4, 3), dtype, 1)))
 
-                f = aesara.function(
+                f = pytensor.function(
                     [x, y, z, s],
-                    aesara.grad(
+                    pytensor.grad(
                         dense_from_sparse(a * CSM(format)(x, y, z, s)).sum(), x
                     ),
                 )
@@ -1228,7 +1232,7 @@ class TestCsm:
                 y = ivector()
                 z = ivector()
                 s = ivector()
-                f = aesara.function([x, y, z, s], CSM(format)(x, y, z, s))
+                f = pytensor.function([x, y, z, s], CSM(format)(x, y, z, s))
 
                 spmat = sp_types[format](random_lil((4, 3), dtype, 3))
 
@@ -1292,7 +1296,7 @@ class TestStructuredDot:
         )
         for dense_dtype in typenames:
             for sparse_dtype in typenames:
-                correct_dtype = aesara.scalar.upcast(sparse_dtype, dense_dtype)
+                correct_dtype = pytensor.scalar.upcast(sparse_dtype, dense_dtype)
                 a = SparseTensorType("csc", dtype=sparse_dtype)()
                 b = matrix(dtype=dense_dtype)
                 d = structured_dot(a, b)
@@ -1300,7 +1304,7 @@ class TestStructuredDot:
 
                 # compile and run a function
 
-                f = aesara.function([a, b], d)
+                f = pytensor.function([a, b], d)
 
                 M, N, K, nnz = (4, 3, 5, 3)
                 spmat = sp.sparse.csc_matrix(random_lil((M, N), sparse_dtype, nnz))
@@ -1317,11 +1321,11 @@ class TestStructuredDot:
                 # print 'dtype strings', spmat.dtype, mat.dtype
                 # print 'numpy dtype num', mat.dtype.num
                 # print 'scipy dtype num', spmat.data.dtype.num
-                aesara_result = f(spmat, mat)
+                pytensor_result = f(spmat, mat)
                 scipy_result = spmat * mat
-                assert aesara_result.shape == scipy_result.shape
-                assert aesara_result.dtype == scipy_result.dtype
-                utt.assert_allclose(scipy_result, aesara_result)
+                assert pytensor_result.shape == scipy_result.shape
+                assert pytensor_result.dtype == scipy_result.dtype
+                utt.assert_allclose(scipy_result, pytensor_result)
 
     def test_opt_unpack(self):
         #
@@ -1346,7 +1350,7 @@ class TestStructuredDot:
         images = TensorType(dtype="float32", shape=(None, None))("images")
 
         cscmat = CSC(kerns, spmat.indices[: spmat.size], spmat.indptr, spmat.shape)
-        f = aesara.function([kerns, images], structured_dot(cscmat, images.T))
+        f = pytensor.function([kerns, images], structured_dot(cscmat, images.T))
 
         sdcscpresent = False
         for node in f.maker.fgraph.toposort():
@@ -1383,7 +1387,7 @@ class TestStructuredDot:
                 a = SparseTensorType(sparse_format_a, dtype=sparse_dtype)()
                 b = SparseTensorType(sparse_format_b, dtype=sparse_dtype)()
                 d = at.dot(a, b)
-                f = aesara.function([a, b], Out(d, borrow=True))
+                f = pytensor.function([a, b], Out(d, borrow=True))
                 for M, N, K, nnz in [
                     (4, 3, 2, 3),
                     (40, 30, 20, 3),
@@ -1405,7 +1409,7 @@ class TestStructuredDot:
         a = SparseTensorType("csc", dtype=sparse_dtype)()
         b = matrix(dtype=dense_dtype)
         d = at.dot(a, b)
-        f = aesara.function([a, b], Out(d, borrow=True))
+        f = pytensor.function([a, b], Out(d, borrow=True))
 
         for M, N, K, nnz in [
             (4, 3, 2, 3),
@@ -1415,33 +1419,33 @@ class TestStructuredDot:
         ]:
             spmat = sp.sparse.csc_matrix(random_lil((M, N), sparse_dtype, nnz))
             mat = np.asarray(np.random.standard_normal((N, K)), dense_dtype)
-            aesara_times = []
+            pytensor_times = []
             scipy_times = []
             for i in range(5):
                 t0 = time.time()
-                aesara_result = f(spmat, mat)
+                pytensor_result = f(spmat, mat)
                 t1 = time.time()
                 scipy_result = spmat * mat
                 t2 = time.time()
 
-                aesara_times.append(t1 - t0)
+                pytensor_times.append(t1 - t0)
                 scipy_times.append(t2 - t1)
 
-            aesara_time = np.min(aesara_times)
+            pytensor_time = np.min(pytensor_times)
             scipy_time = np.min(scipy_times)
 
-            # speedup = scipy_time / aesara_time
+            # speedup = scipy_time / pytensor_time
             # print scipy_times
-            # print aesara_times
-            # print ('M=%(M)s N=%(N)s K=%(K)s nnz=%(nnz)s aesara_time'
-            #       '=%(aesara_time)s speedup=%(speedup)s') % locals()
+            # print pytensor_times
+            # print ('M=%(M)s N=%(N)s K=%(K)s nnz=%(nnz)s pytensor_time'
+            #       '=%(pytensor_time)s speedup=%(speedup)s') % locals()
 
-            # fail if Aesara is slower than scipy by more than a certain amount
+            # fail if Pytensor is slower than scipy by more than a certain amount
             overhead_tol = 0.003  # seconds overall
             overhead_rtol = 1.2  # times as long
-            utt.assert_allclose(scipy_result, aesara_result)
-            if aesara.config.mode == "FAST_RUN" and aesara.config.cxx:
-                assert aesara_time <= overhead_rtol * scipy_time + overhead_tol
+            utt.assert_allclose(scipy_result, pytensor_result)
+            if pytensor.config.mode == "FAST_RUN" and pytensor.config.cxx:
+                assert pytensor_time <= overhead_rtol * scipy_time + overhead_tol
 
     def test_csr_correct_output_faster_than_scipy(self):
 
@@ -1453,7 +1457,7 @@ class TestStructuredDot:
         a = SparseTensorType("csr", dtype=sparse_dtype)()
         b = matrix(dtype=dense_dtype)
         d = at.dot(a, b)
-        f = aesara.function([a, b], d)
+        f = pytensor.function([a, b], d)
 
         for M, N, K, nnz in [
             (4, 3, 2, 3),
@@ -1464,21 +1468,21 @@ class TestStructuredDot:
             spmat = sp.sparse.csr_matrix(random_lil((M, N), sparse_dtype, nnz))
             mat = np.asarray(np.random.standard_normal((N, K)), dense_dtype)
             t0 = time.time()
-            aesara_result = f(spmat, mat)
+            pytensor_result = f(spmat, mat)
             t1 = time.time()
             scipy_result = spmat * mat
             t2 = time.time()
 
-            aesara_time = t1 - t0
+            pytensor_time = t1 - t0
             scipy_time = t2 - t1
-            # print 'aesara took', aesara_time,
+            # print 'pytensor took', pytensor_time,
             # print 'scipy took', scipy_time
             overhead_tol = 0.002  # seconds
             overhead_rtol = 1.1  # times as long
-            utt.assert_allclose(scipy_result, aesara_result)
-            if aesara.config.mode == "FAST_RUN" and aesara.config.cxx:
-                assert aesara_time <= overhead_rtol * scipy_time + overhead_tol, (
-                    aesara_time,
+            utt.assert_allclose(scipy_result, pytensor_result)
+            if pytensor.config.mode == "FAST_RUN" and pytensor.config.cxx:
+                assert pytensor_time <= overhead_rtol * scipy_time + overhead_tol, (
+                    pytensor_time,
                     overhead_rtol * scipy_time + overhead_tol,
                     scipy_time,
                     overhead_rtol,
@@ -1493,23 +1497,25 @@ class TestDots(utt.InferShapeTester):
         y_size = (100, 1000)
 
         self.x_csr = sp.sparse.csr_matrix(
-            np.random.binomial(1, 0.5, x_size), dtype=aesara.config.floatX
+            np.random.binomial(1, 0.5, x_size), dtype=pytensor.config.floatX
         )
         self.x_csc = sp.sparse.csc_matrix(
-            np.random.binomial(1, 0.5, x_size), dtype=aesara.config.floatX
+            np.random.binomial(1, 0.5, x_size), dtype=pytensor.config.floatX
         )
         self.y = np.asarray(
-            np.random.uniform(-1, 1, y_size), dtype=aesara.config.floatX
+            np.random.uniform(-1, 1, y_size), dtype=pytensor.config.floatX
         )
         self.y_csr = sp.sparse.csr_matrix(
-            np.random.binomial(1, 0.5, y_size), dtype=aesara.config.floatX
+            np.random.binomial(1, 0.5, y_size), dtype=pytensor.config.floatX
         )
         self.y_csc = sp.sparse.csc_matrix(
-            np.random.binomial(1, 0.5, y_size), dtype=aesara.config.floatX
+            np.random.binomial(1, 0.5, y_size), dtype=pytensor.config.floatX
         )
-        self.v_10 = np.asarray(np.random.uniform(-1, 1, 10), dtype=aesara.config.floatX)
+        self.v_10 = np.asarray(
+            np.random.uniform(-1, 1, 10), dtype=pytensor.config.floatX
+        )
         self.v_100 = np.asarray(
-            np.random.uniform(-1, 1, 100), dtype=aesara.config.floatX
+            np.random.uniform(-1, 1, 100), dtype=pytensor.config.floatX
         )
 
     def test_csr_dense(self):
@@ -1522,7 +1528,7 @@ class TestDots(utt.InferShapeTester):
             (x, v, self.x_csr, self.v_100),
             (v, x, self.v_10, self.x_csr),
         ]:
-            f_a = aesara.function([x, y], sparse.dot(x, y))
+            f_a = pytensor.function([x, y], sparse.dot(x, y))
 
             def f_b(x, y):
                 return x * y
@@ -1545,7 +1551,7 @@ class TestDots(utt.InferShapeTester):
             (v, x, self.v_10, self.x_csc),
         ]:
 
-            f_a = aesara.function([x, y], sparse.dot(x, y))
+            f_a = pytensor.function([x, y], sparse.dot(x, y))
 
             def f_b(x, y):
                 return x * y
@@ -1578,14 +1584,14 @@ class TestDots(utt.InferShapeTester):
                 def f_a(x, y):
                     return x * y
 
-                f_b = aesara.function([x, y], sparse.dot(x, y))
+                f_b = pytensor.function([x, y], sparse.dot(x, y))
 
                 vx = getattr(self, "x_" + x_f).astype(d1)
                 vy = getattr(self, "y_" + y_f).astype(d2)
                 utt.assert_allclose(f_a(vx, vy).toarray(), f_b(vx, vy))
 
                 # Test infer_shape
-                f_a = aesara.function([x, y], sparse.dot(x, y).shape)
+                f_a = pytensor.function([x, y], sparse.dot(x, y).shape)
 
                 def f_b(x, y):
                     return (x * y).shape
@@ -1613,7 +1619,7 @@ class TestDots(utt.InferShapeTester):
         m2 = sparse.dot(m1, C)
         y = m2.reshape(shape=(2, 4, 9), ndim=3)
 
-        f = aesara.function(inputs=[I, C], outputs=y)
+        f = pytensor.function(inputs=[I, C], outputs=y)
         i = np.asarray([[4, 3, 7, 7], [2, 8, 4, 5]], dtype=intX)
         a = np.asarray(
             np.random.default_rng().integers(0, 100, (size, size)), dtype=intX
@@ -1673,10 +1679,14 @@ class TestUsmm:
 
         self.rng = np.random.default_rng(seed=utt.fetch_seed())
         self.x = np.asarray(
-            self.rng.binomial(1, 0.5, x_size), dtype=aesara.config.floatX
+            self.rng.binomial(1, 0.5, x_size), dtype=pytensor.config.floatX
         )
-        self.y = np.asarray(self.rng.uniform(-1, 1, y_size), dtype=aesara.config.floatX)
-        self.z = np.asarray(self.rng.uniform(-1, 1, z_size), dtype=aesara.config.floatX)
+        self.y = np.asarray(
+            self.rng.uniform(-1, 1, y_size), dtype=pytensor.config.floatX
+        )
+        self.z = np.asarray(
+            self.rng.uniform(-1, 1, z_size), dtype=pytensor.config.floatX
+        )
 
     @pytest.mark.slow
     def test_basic(self):
@@ -1706,7 +1716,7 @@ class TestUsmm:
             x = mat(format1, "x", dtype1)
             y = mat(format2, "y", dtype2)
             a = scalar("a", dtype=dtype3)
-            z = aesara.shared(np.asarray(self.z, dtype=dtype4).copy())
+            z = pytensor.shared(np.asarray(self.z, dtype=dtype4).copy())
 
             def f_b(z, a, x, y):
                 return z - a * (x * y)
@@ -1723,29 +1733,29 @@ class TestUsmm:
             f_b_out = f_b(z_data, a_data, x_data, y_data)
 
             # Can it work inplace?
-            inplace = dtype4 == aesara.scalar.upcast(dtype1, dtype2, dtype3)
+            inplace = dtype4 == pytensor.scalar.upcast(dtype1, dtype2, dtype3)
 
             # To make it easier to check the toposort
-            mode = aesara.compile.mode.get_default_mode().excluding("fusion")
+            mode = pytensor.compile.mode.get_default_mode().excluding("fusion")
 
             if inplace:
                 updates = [(z, z - a * sparse.dot(x, y))]
-                f_a = aesara.function([a, x, y], [], updates=updates, mode=mode)
+                f_a = pytensor.function([a, x, y], [], updates=updates, mode=mode)
                 f_a(a_data, x_data, y_data)
                 f_a_out = z.get_value(borrow=True)
             else:
-                f_a = aesara.function([a, x, y], z - a * sparse.dot(x, y), mode=mode)
+                f_a = pytensor.function([a, x, y], z - a * sparse.dot(x, y), mode=mode)
                 # In DebugMode there is a strange difference with complex
                 # So we raise a little the threshold a little.
                 try:
-                    orig_atol = aesara.tensor.math.float64_atol
-                    orig_rtol = aesara.tensor.math.float64_rtol
-                    aesara.tensor.math.float64_atol = 1e-7
-                    aesara.tensor.math.float64_rtol = 1e-6
+                    orig_atol = pytensor.tensor.math.float64_atol
+                    orig_rtol = pytensor.tensor.math.float64_rtol
+                    pytensor.tensor.math.float64_atol = 1e-7
+                    pytensor.tensor.math.float64_rtol = 1e-6
                     f_a_out = f_a(a_data, x_data, y_data)
                 finally:
-                    aesara.tensor.math.float64_atol = orig_atol
-                    aesara.tensor.math.float64_rtol = orig_rtol
+                    pytensor.tensor.math.float64_atol = orig_atol
+                    pytensor.tensor.math.float64_rtol = orig_rtol
 
             # As we do a dot product of 2 vector of 100 element,
             # This mean we can have 2*100*eps abs error.
@@ -1757,34 +1767,34 @@ class TestUsmm:
                 rtol = None
             utt.assert_allclose(f_a_out, f_b_out, rtol=rtol, atol=atol)
             topo = f_a.maker.fgraph.toposort()
-            up = aesara.scalar.upcast(dtype1, dtype2, dtype3, dtype4)
+            up = pytensor.scalar.upcast(dtype1, dtype2, dtype3, dtype4)
 
-            fast_compile = aesara.config.mode == "FAST_COMPILE"
+            fast_compile = pytensor.config.mode == "FAST_COMPILE"
 
-            if not aesara.config.blas__ldflags:
+            if not pytensor.config.blas__ldflags:
                 # Usmm should not be inserted, because it relies on BLAS
                 assert len(topo) == 4, topo
                 assert isinstance(topo[0].op, sparse.Dot)
                 assert isinstance(topo[1].op, DimShuffle)
                 assert isinstance(topo[2].op, Elemwise) and isinstance(
-                    topo[2].op.scalar_op, aesara.scalar.Mul
+                    topo[2].op.scalar_op, pytensor.scalar.Mul
                 )
                 assert isinstance(topo[3].op, Elemwise) and isinstance(
-                    topo[3].op.scalar_op, aesara.scalar.Sub
+                    topo[3].op.scalar_op, pytensor.scalar.Sub
                 )
             elif (
                 y.type.dtype == up
                 and format1 == "csc"
                 and format2 == "dense"
                 and not fast_compile
-                and aesara.config.cxx
+                and pytensor.config.cxx
                 and up in ("float32", "float64")
             ):
                 # The op UsmmCscDense should be inserted
                 assert (
                     sum(
                         isinstance(node.op, Elemwise)
-                        and isinstance(node.op.scalar_op, aesara.scalar.basic.Cast)
+                        and isinstance(node.op.scalar_op, pytensor.scalar.basic.Cast)
                         for node in topo
                     )
                     == len(topo) - 5
@@ -1793,7 +1803,7 @@ class TestUsmm:
                 for node in topo:
                     if not (
                         isinstance(node.op, Elemwise)
-                        and isinstance(node.op.scalar_op, aesara.scalar.basic.Cast)
+                        and isinstance(node.op.scalar_op, pytensor.scalar.basic.Cast)
                     ):
                         new_topo.append(node)
                 topo = new_topo
@@ -1816,7 +1826,7 @@ class TestUsmm:
                 # The op Usmm should be inserted
                 assert len(topo) == 3, topo
                 assert isinstance(topo[0].op, DimShuffle)
-                assert topo[1].op == aesara.tensor.neg
+                assert topo[1].op == pytensor.tensor.neg
                 assert isinstance(topo[2].op, sparse.Usmm)
 
     def test_infer_shape(self):
@@ -1837,7 +1847,7 @@ class TestUsmm:
             x = mat(format1, "x", dtype1)
             y = mat(format2, "y", dtype2)
             a = scalar("a", dtype=dtype3)
-            z = aesara.shared(np.asarray(self.z, dtype=dtype4).copy())
+            z = pytensor.shared(np.asarray(self.z, dtype=dtype4).copy())
 
             def f_b(z, a, x, y):
                 return z - a * (x * y)
@@ -1854,13 +1864,13 @@ class TestUsmm:
             f_b_out = f_b(z_data, a_data, x_data, y_data)
 
             # Can it work inplace?
-            # inplace = dtype4 == aesara.scalar.upcast(dtype1, dtype2, dtype3)
+            # inplace = dtype4 == pytensor.scalar.upcast(dtype1, dtype2, dtype3)
 
             # To make it easier to check the toposort
-            mode = aesara.compile.mode.get_default_mode().excluding("fusion")
+            mode = pytensor.compile.mode.get_default_mode().excluding("fusion")
 
             # test infer_shape of Dot got applied
-            f_shape = aesara.function(
+            f_shape = pytensor.function(
                 [a, x, y], (z - a * sparse.dot(x, y)).shape, mode=mode
             )
             assert all(f_shape(a_data, x_data, y_data) == f_b_out.shape)
@@ -1873,10 +1883,10 @@ class TestUsmm:
 class TestZerosLike:
     def test(self):
         x = sparse.csr_matrix()
-        f = aesara.function([x], sparse.sp_zeros_like(x))
+        f = pytensor.function([x], sparse.sp_zeros_like(x))
         vx = sp.sparse.csr_matrix(
             np.asarray(
-                np.random.binomial(1, 0.5, (100, 100)), dtype=aesara.config.floatX
+                np.random.binomial(1, 0.5, (100, 100)), dtype=pytensor.config.floatX
             )
         )
 
@@ -1890,7 +1900,7 @@ def test_shape_i():
     sparse_dtype = "float32"
 
     a = SparseTensorType("csr", dtype=sparse_dtype)()
-    f = aesara.function([a], a.shape[1])
+    f = pytensor.function([a], a.shape[1])
     assert f(sp.sparse.csr_matrix(random_lil((100, 10), sparse_dtype, 3))) == 10
 
 
@@ -1900,11 +1910,11 @@ def test_shape():
     sparse_dtype = "float32"
 
     a = SparseTensorType("csr", dtype=sparse_dtype)()
-    f = aesara.function([a], a.shape)
+    f = pytensor.function([a], a.shape)
     assert np.all(
         f(sp.sparse.csr_matrix(random_lil((100, 10), sparse_dtype, 3))) == (100, 10)
     )
-    if aesara.config.mode != "FAST_COMPILE":
+    if pytensor.config.mode != "FAST_COMPILE":
         topo = f.maker.fgraph.toposort()
         assert len(topo) == 3
         assert isinstance(topo[0].op, Shape_i)
@@ -1964,7 +1974,9 @@ def test_sparse_shared_memory():
     sdot = sparse.structured_dot
     z = sdot(x * 3, m1) + sdot(y * 2, m2)
 
-    f = aesara.function([In(x, mutable=True), In(y, mutable=True)], z, mode="FAST_RUN")
+    f = pytensor.function(
+        [In(x, mutable=True), In(y, mutable=True)], z, mode="FAST_RUN"
+    )
 
     def f_(x, y, m1=m1, m2=m2):
         return ((x * 3) * m1) + ((y * 2) * m2)
@@ -1979,9 +1991,9 @@ def test_size():
     # Ensure the `size` attribute of sparse matrices behaves as in numpy.
 
     for sparse_type in ("csc_matrix", "csr_matrix"):
-        x = getattr(aesara.sparse, sparse_type)()
+        x = getattr(pytensor.sparse, sparse_type)()
         y = getattr(sp.sparse, sparse_type)((5, 7)).astype(config.floatX)
-        get_size = aesara.function([x], x.size)
+        get_size = pytensor.function([x], x.size)
 
         def check():
             assert y.size == get_size(y)
@@ -2006,7 +2018,7 @@ class TestColScaleCSC(utt.InferShapeTester):
             variable.append(vector())
             data.append(np.random.random(10).astype(config.floatX))
 
-            f = aesara.function(variable, self.op(*variable))
+            f = pytensor.function(variable, self.op(*variable))
 
             tested = f(*data)
             x, s = data[0].toarray(), data[1][np.newaxis, :]
@@ -2043,7 +2055,7 @@ class TestRowScaleCSC(utt.InferShapeTester):
             variable.append(vector())
             data.append(np.random.random(8).astype(config.floatX))
 
-            f = aesara.function(variable, self.op(*variable))
+            f = pytensor.function(variable, self.op(*variable))
 
             tested = f(*data)
             x, s = data[0].toarray(), data[1][:, np.newaxis]
@@ -2093,7 +2105,7 @@ class TestSpSum(utt.InferShapeTester):
                 else:
                     assert z.type.broadcastable == (False,)
 
-                f = aesara.function(variable, self.op(variable[0], axis=axis))
+                f = pytensor.function(variable, self.op(variable[0], axis=axis))
                 tested = f(*data)
                 expected = data[0].todense().sum(axis).ravel()
                 utt.assert_allclose(expected, tested)
@@ -2131,7 +2143,7 @@ class TestDiag(utt.InferShapeTester):
             z = self.op(*variable)
             assert z.type.broadcastable == (False,)
 
-            f = aesara.function(variable, z)
+            f = pytensor.function(variable, z)
             tested = f(*data)
             expected = data[0].toarray().diagonal()
 
@@ -2162,7 +2174,7 @@ class TestSquareDiagonal(utt.InferShapeTester):
                 variable = [vector()]
                 data = [np.random.random(size).astype(config.floatX)]
 
-                f = aesara.function(variable, self.op(*variable))
+                f = pytensor.function(variable, self.op(*variable))
                 tested = f(*data).toarray()
 
                 expected = np.diag(*data)
@@ -2199,7 +2211,7 @@ class TestEnsureSortedIndices(utt.InferShapeTester):
             for shape in zip(range(5, 9), range(3, 7)[::-1]):
                 variable, data = sparse_random_inputs(format, shape=shape)
 
-                f = aesara.function(variable, self.op(*variable))
+                f = pytensor.function(variable, self.op(*variable))
                 tested = f(*data).toarray()
                 expected = data[0].sorted_indices().toarray()
 
@@ -2232,7 +2244,7 @@ class TestClean(utt.InferShapeTester):
 
                 data[0][0, 0] = data[0][1, 1] = 0
 
-                f = aesara.function(variable, self.op(*variable))
+                f = pytensor.function(variable, self.op(*variable))
                 tested = f(*data)
                 expected = data[0]
                 expected.eliminate_zeros()
@@ -2280,13 +2292,13 @@ class TestRemove0(utt.InferShapeTester):
                 assert 0 in mat.data or not zero
                 assert not mat.has_sorted_indices or not unsor
 
-                # the In thingy has to be there because aesara has as rule not
+                # the In thingy has to be there because pytensor has as rule not
                 # to optimize inputs
-                f = aesara.function([In(x, borrow=True, mutable=True)], Remove0()(x))
+                f = pytensor.function([In(x, borrow=True, mutable=True)], Remove0()(x))
 
                 # assert optimization local_inplace_remove0 is applied in
                 # modes with optimization
-                if aesara.config.mode not in ["FAST_COMPILE"]:
+                if pytensor.config.mode not in ["FAST_COMPILE"]:
                     # list of apply nodes in the optimized graph.
                     nodes = f.maker.fgraph.toposort()
                     # Check there isn't any Remove0 instance not inplace.
@@ -2317,22 +2329,22 @@ class TestRemove0(utt.InferShapeTester):
         mat = (np.arange(12) + 1).reshape((4, 3))
         mat[0, 1] = mat[1, 0] = mat[2, 2] = 0
 
-        x_csc = sparse.csc_matrix(dtype=aesara.config.floatX)
-        mat_csc = sp.sparse.csc_matrix(mat, dtype=aesara.config.floatX)
+        x_csc = sparse.csc_matrix(dtype=pytensor.config.floatX)
+        mat_csc = sp.sparse.csc_matrix(mat, dtype=pytensor.config.floatX)
         self._compile_and_check([x_csc], [Remove0()(x_csc)], [mat_csc], self.op_class)
 
-        x_csr = sparse.csr_matrix(dtype=aesara.config.floatX)
-        mat_csr = sp.sparse.csr_matrix(mat, dtype=aesara.config.floatX)
+        x_csr = sparse.csr_matrix(dtype=pytensor.config.floatX)
+        mat_csr = sp.sparse.csr_matrix(mat, dtype=pytensor.config.floatX)
         self._compile_and_check([x_csr], [Remove0()(x_csr)], [mat_csr], self.op_class)
 
     def test_grad(self):
         mat = (np.arange(9) + 1).reshape((3, 3))
         mat[0, 1] = mat[1, 0] = mat[2, 2] = 0
 
-        mat_csc = sp.sparse.csc_matrix(mat, dtype=aesara.config.floatX)
+        mat_csc = sp.sparse.csc_matrix(mat, dtype=pytensor.config.floatX)
         verify_grad_sparse(Remove0(), [mat_csc])
 
-        mat_csr = sp.sparse.csr_matrix(mat, dtype=aesara.config.floatX)
+        mat_csr = sp.sparse.csr_matrix(mat, dtype=pytensor.config.floatX)
         verify_grad_sparse(Remove0(), [mat_csr])
 
 
@@ -2347,8 +2359,8 @@ class TestGetItem:
         y = a[0][[0, 1, 2, 3, 1]]
         z = b[0][[0, 1, 2, 3, 1]]
 
-        fa = aesara.function([a[0]], y)
-        fb = aesara.function([b[0]], z)
+        fa = pytensor.function([a[0]], y)
+        fb = pytensor.function([b[0]], z)
 
         t_geta = fa(A[0]).todense()
         t_getb = fb(B[0]).todense()
@@ -2362,7 +2374,7 @@ class TestGetItem:
     def test_GetItemList_wrong_index(self):
         a, A = sparse_random_inputs("csr", (4, 5))
         y = a[0][[0, 4]]
-        f = aesara.function([a[0]], y)
+        f = pytensor.function([a[0]], y)
 
         with pytest.raises(IndexError):
             f(A[0])
@@ -2387,8 +2399,8 @@ class TestGetItem:
         y = a[0][[0, 0, 1, 3], [0, 1, 2, 4]]
         z = b[0][[0, 0, 1, 3], [0, 1, 2, 4]]
 
-        fa = aesara.function([a[0]], y)
-        fb = aesara.function([b[0]], z)
+        fa = pytensor.function([a[0]], y)
+        fb = pytensor.function([b[0]], z)
 
         t_geta = fa(A[0])
         t_getb = fb(B[0])
@@ -2404,8 +2416,8 @@ class TestGetItem:
         y1 = a[0][[0, 5], [0, 3]]
         y2 = a[0][[0, 3], [0, 5]]
 
-        f1 = aesara.function([a[0]], y1)
-        f2 = aesara.function([a[0]], y2)
+        f1 = pytensor.function([a[0]], y1)
+        f2 = pytensor.function([a[0]], y2)
 
         with pytest.raises(IndexError):
             f1(A[0])
@@ -2448,18 +2460,18 @@ class TestGetItem:
                 k = None
 
             vx = as_sparse_format(self.rng.binomial(1, 0.5, (100, 97)), format).astype(
-                aesara.config.floatX
+                pytensor.config.floatX
             )
 
-            # mode_no_debug = aesara.compile.mode.get_default_mode()
-            # if isinstance(mode_no_debug, aesara.compile.debugmode.DebugMode):
+            # mode_no_debug = pytensor.compile.mode.get_default_mode()
+            # if isinstance(mode_no_debug, pytensor.compile.debugmode.DebugMode):
             #    mode_no_debug = 'FAST_RUN'
             if is_supported_version:
-                f1 = aesara.function([x, a, b, c, d, e, f], x[a:b:e, c:d:f])
+                f1 = pytensor.function([x, a, b, c, d, e, f], x[a:b:e, c:d:f])
                 r1 = f1(vx, m, n, p, q, j, k)
                 t1 = vx[m:n:j, p:q:k]
             else:
-                f1 = aesara.function([x, a, b, c, d], x[a:b, c:d])
+                f1 = pytensor.function([x, a, b, c, d], x[a:b, c:d])
                 r1 = f1(vx, m, n, p, q)
                 t1 = vx[m:n, p:q]
             assert r1.shape == t1.shape
@@ -2470,65 +2482,65 @@ class TestGetItem:
             The following indexing methods is not supported because the rval
             would be a sparse matrix rather than a sparse vector, which is a
             deviation from numpy indexing rule. This decision is made largely
-            for keeping the consistency between numpy and aesara.
+            for keeping the consistency between numpy and pytensor.
 
-            f2 = aesara.function([x, a, b, c], x[a:b, c])
+            f2 = pytensor.function([x, a, b, c], x[a:b, c])
             r2 = f2(vx, m, n, p)
             t2 = vx[m:n, p]
             assert r2.shape == t2.shape
             assert np.all(t2.toarray() == r2.toarray())
 
-            f3 = aesara.function([x, a, b, c], x[a, b:c])
+            f3 = pytensor.function([x, a, b, c], x[a, b:c])
             r3 = f3(vx, m, n, p)
             t3 = vx[m, n:p]
             assert r3.shape == t3.shape
             assert np.all(t3.toarray() == r3.toarray())
 
-            f5 = aesara.function([x], x[1:2,3])
+            f5 = pytensor.function([x], x[1:2,3])
             r5 = f5(vx)
             t5 = vx[1:2, 3]
             assert r5.shape == t5.shape
             assert np.all(r5.toarray() == t5.toarray())
 
-            f7 = aesara.function([x], x[50])
+            f7 = pytensor.function([x], x[50])
             r7 = f7(vx)
             t7 = vx[50]
             assert r7.shape == t7.shape
             assert np.all(r7.toarray() == t7.toarray())
             """
             if is_supported_version:
-                f4 = aesara.function([x, a, b, e], x[a:b:e])
+                f4 = pytensor.function([x, a, b, e], x[a:b:e])
                 r4 = f4(vx, m, n, j)
                 t4 = vx[m:n:j]
             else:
-                f4 = aesara.function([x, a, b], x[a:b])
+                f4 = pytensor.function([x, a, b], x[a:b])
                 r4 = f4(vx, m, n)
                 t4 = vx[m:n]
             assert r4.shape == t4.shape
             assert np.all(t4.toarray() == r4.toarray())
 
             # -----------------------------------------------------------
-            # test cases using int indexing instead of aesara variable
-            f6 = aesara.function([x], x[1:10:j, 10:20:k])
+            # test cases using int indexing instead of pytensor variable
+            f6 = pytensor.function([x], x[1:10:j, 10:20:k])
             r6 = f6(vx)
             t6 = vx[1:10:j, 10:20:k]
             assert r6.shape == t6.shape
             assert np.all(r6.toarray() == t6.toarray())
 
             # ----------------------------------------------------------
-            # test cases with indexing both with aesara variable and int
+            # test cases with indexing both with pytensor variable and int
             if is_supported_version:
-                f8 = aesara.function([x, a, b, e], x[a:b:e, 10:20:1])
+                f8 = pytensor.function([x, a, b, e], x[a:b:e, 10:20:1])
                 r8 = f8(vx, m, n, j)
                 t8 = vx[m:n:j, 10:20:1]
             else:
-                f8 = aesara.function([x, a, b], x[a:b, 10:20])
+                f8 = pytensor.function([x, a, b], x[a:b, 10:20])
                 r8 = f8(vx, m, n)
                 t8 = vx[m:n, 10:20]
             assert r8.shape == t8.shape
             assert np.all(r8.toarray() == t8.toarray())
 
-            f9 = aesara.function([x, a, b], x[1:a:j, 1:b:k])
+            f9 = pytensor.function([x, a, b], x[1:a:j, 1:b:k])
             r9 = f9(vx, p, q)
             t9 = vx[1:p:j, 1:q:k]
             assert r9.shape == t9.shape
@@ -2536,21 +2548,21 @@ class TestGetItem:
 
             # -----------------------------------------------------------
             # Test mixing None and variables
-            f10 = aesara.function([x, a, b], x[:a, :b])
+            f10 = pytensor.function([x, a, b], x[:a, :b])
             r10 = f10(vx, p, q)
             t10 = vx[:p, :q]
             assert r10.shape == t10.shape
             assert np.all(r10.toarray() == t10.toarray())
 
-            f11 = aesara.function([x, a], x[:, a:])
+            f11 = pytensor.function([x, a], x[:, a:])
             r11 = f11(vx, p)
             t11 = vx[:, p:]
             assert r11.shape == t11.shape
             assert np.all(r11.toarray() == t11.toarray())
 
             # Test that is work with shared variable
-            sx = aesara.shared(vx)
-            f12 = aesara.function([a], sx[:, a:])
+            sx = pytensor.shared(vx)
+            f12 = pytensor.function([a], sx[:, a:])
             r12 = f12(p)
             t12 = vx[:, p:]
             assert r12.shape == t12.shape
@@ -2593,36 +2605,36 @@ class TestGetItem:
             n = 42
 
             vx = as_sparse_format(self.rng.binomial(1, 0.5, (97, 100)), format).astype(
-                aesara.config.floatX
+                pytensor.config.floatX
             )
 
-            f1 = aesara.function([x, a, b], x[a, b])
+            f1 = pytensor.function([x, a, b], x[a, b])
             r1 = f1(vx, 10, 10)
             t1 = vx[10, 10]
             assert r1.shape == t1.shape
             assert np.all(t1 == r1)
 
-            f2 = aesara.function([x, a], x[50, a])
+            f2 = pytensor.function([x, a], x[50, a])
             r2 = f2(vx, m)
             t2 = vx[50, m]
             assert r2.shape == t2.shape
             assert np.all(t2 == r2)
 
-            f3 = aesara.function([x, a], x[a, 50])
+            f3 = pytensor.function([x, a], x[a, 50])
             r3 = f3(vx, m)
             t3 = vx[m, 50]
             assert r3.shape == t3.shape
             assert np.all(t3 == r3)
 
-            f4 = aesara.function([x], x[50, 42])
+            f4 = pytensor.function([x], x[50, 42])
             r4 = f4(vx)
             t4 = vx[m, n]
             assert r3.shape == t3.shape
             assert np.all(t4 == r4)
 
             # Test that is work with shared variable
-            sx = aesara.shared(vx)
-            f1 = aesara.function([a, b], sx[a, b])
+            sx = pytensor.shared(vx)
+            f1 = pytensor.function([a, b], sx[a, b])
             r1 = f1(10, 10)
             t1 = vx[10, 10]
             assert r1.shape == t1.shape
@@ -2642,9 +2654,9 @@ class TestCasting(utt.InferShapeTester):
                         format, shape=(4, 7), out_dtype=i_dtype
                     )
 
-                    func = aesara.function([variable], cast(variable, o_dtype))
-                    cls = aesara.function([variable], Cast(o_dtype)(variable))
-                    prop = aesara.function([variable], variable.astype(o_dtype))
+                    func = pytensor.function([variable], cast(variable, o_dtype))
+                    cls = pytensor.function([variable], Cast(o_dtype)(variable))
+                    prop = pytensor.function([variable], variable.astype(o_dtype))
 
                     t_func, t_cls, t_prop = func(data), cls(data), prop(data)
 
@@ -2697,12 +2709,12 @@ def _format_info(nb):
     mat = {}
 
     for format in sparse.sparse_formats:
-        variable = getattr(aesara.sparse, format + "_matrix")
+        variable = getattr(pytensor.sparse, format + "_matrix")
         spa = getattr(sp.sparse, format + "_matrix")
 
         x[format] = [variable() for t in range(nb)]
         mat[format] = [
-            spa(random_lil((3, 4), aesara.config.floatX, 8)) for t in range(nb)
+            spa(random_lil((3, 4), pytensor.config.floatX, 8)) for t in range(nb)
         ]
     return x, mat
 
@@ -2721,7 +2733,7 @@ class _TestHVStack(utt.InferShapeTester):
                 for dtype in sparse.all_dtypes:
                     blocks = self.mat[format]
 
-                    f = aesara.function(
+                    f = pytensor.function(
                         self.x[format],
                         self.op_class(format=out_f, dtype=dtype)(*self.x[format]),
                         allow_input_downcast=True,
@@ -2789,11 +2801,11 @@ class TestAddSSData(utt.InferShapeTester):
         self.op_class = AddSSData
 
         for format in sparse.sparse_formats:
-            variable = getattr(aesara.sparse, format + "_matrix")
+            variable = getattr(pytensor.sparse, format + "_matrix")
 
             a_val = np.array(
                 np.random.default_rng(utt.fetch_seed()).integers(1, 4, size=(3, 4)) - 1,
-                dtype=aesara.config.floatX,
+                dtype=pytensor.config.floatX,
             )
             constant = as_sparse_format(a_val, format)
 
@@ -2802,7 +2814,7 @@ class TestAddSSData(utt.InferShapeTester):
 
     def test_op(self):
         for format in sparse.sparse_formats:
-            f = aesara.function(self.x[format], add_s_s_data(*self.x[format]))
+            f = pytensor.function(self.x[format], add_s_s_data(*self.x[format]))
 
             tested = f(*self.a[format])
             expected = 2 * self.a[format][0]
@@ -2891,7 +2903,7 @@ def elemwise_checker(
                         format, shape=(4, 7), out_dtype=dtype, gap=self.gap
                     )
 
-                    f = aesara.function(variable, self.op(*variable))
+                    f = pytensor.function(variable, self.op(*variable))
 
                     tested = f(*data)
                     data = [m.toarray() for m in data]
@@ -2937,7 +2949,7 @@ def elemwise_checker(
                             format, shape=(4, 7), out_dtype=dtype, gap=domain
                         )
 
-                        f = aesara.function(variable, self.op(*variable))
+                        f = pytensor.function(variable, self.op(*variable))
 
                         old_value = (
                             tensor.math.float32_atol,
@@ -3004,12 +3016,12 @@ def test_hstack_vstack():
     def get_expected_dtype(blocks, to_dtype):
         if to_dtype is None:
             block_dtypes = tuple(b.dtype for b in blocks)
-            return aesara.scalar.upcast(*block_dtypes)
+            return pytensor.scalar.upcast(*block_dtypes)
         else:
             return to_dtype
 
     # a deliberately weird mix of dtypes to stack
-    dtypes = ("complex128", aesara.config.floatX)
+    dtypes = ("complex128", pytensor.config.floatX)
 
     blocks = [make_block(dtype) for dtype in dtypes]
 
@@ -3202,7 +3214,7 @@ class TestMulSV:
             for dtype in ("float32", "float64"):
                 x = sparse.SparseTensorType(format, dtype=dtype)()
                 y = vector(dtype=dtype)
-                f = aesara.function([x, y], mul_s_v(x, y))
+                f = pytensor.function([x, y], mul_s_v(x, y))
 
                 spmat = sp_types[format](random_lil((4, 3), dtype, 3))
                 mat = np.asarray(np.random.random((3)), dtype=dtype)
@@ -3230,7 +3242,7 @@ class TestStructuredAddSV:
             for dtype in ("float32", "float64"):
                 x = sparse.SparseTensorType(format, dtype=dtype)()
                 y = vector(dtype=dtype)
-                f = aesara.function([x, y], structured_add_s_v(x, y))
+                f = pytensor.function([x, y], structured_add_s_v(x, y))
 
                 spmat = sp_types[format](random_lil((4, 3), dtype, 3))
                 spones = spmat.copy()
@@ -3257,7 +3269,7 @@ class TestTrueDot(utt.InferShapeTester):
                     format, shape=(10, 10), out_dtype=dtype, n=2, p=0.1
                 )
 
-                f = aesara.function(variable, self.op(*variable))
+                f = pytensor.function(variable, self.op(*variable))
 
                 tested = f(*data)
 
@@ -3278,7 +3290,7 @@ class TestTrueDot(utt.InferShapeTester):
                 variable[1] = TensorType(dtype=dtype, shape=(None, None))()
                 data[1] = data[1].toarray()
 
-                f = aesara.function(variable, self.op(*variable))
+                f = pytensor.function(variable, self.op(*variable))
 
                 tested = f(*data)
                 expected = np.dot(data[0].toarray(), data[1])
@@ -3323,15 +3335,15 @@ class TestSamplingDot(utt.InferShapeTester):
     a = [
         np.array(
             np.random.default_rng().integers(1, 6, size=(4, 3)) - 1,
-            dtype=aesara.config.floatX,
+            dtype=pytensor.config.floatX,
         ),
         np.array(
             np.random.default_rng().integers(1, 6, size=(5, 3)) - 1,
-            dtype=aesara.config.floatX,
+            dtype=pytensor.config.floatX,
         ),
         np.array(
             np.random.default_rng().integers(1, 3, size=(4, 5)) - 1,
-            dtype=aesara.config.floatX,
+            dtype=pytensor.config.floatX,
         ),
     ]
     a[2] = sp.sparse.csr_matrix(a[2])
@@ -3341,7 +3353,7 @@ class TestSamplingDot(utt.InferShapeTester):
         self.op_class = SamplingDot
 
     def test_op(self):
-        f = aesara.function(self.x, sampling_dot(*self.x))
+        f = pytensor.function(self.x, sampling_dot(*self.x))
 
         tested = f(*self.a)
         x, y, p = self.a
@@ -3352,7 +3364,7 @@ class TestSamplingDot(utt.InferShapeTester):
         assert tested.dtype == expected.dtype
 
     def test_negative_stride(self):
-        f = aesara.function(self.x, sampling_dot(*self.x))
+        f = pytensor.function(self.x, sampling_dot(*self.x))
 
         a2 = [self.a[0][::-1, :], self.a[1][:, ::-1], self.a[2]]
         tested = f(*a2)
@@ -3390,7 +3402,7 @@ class TestSamplingDot(utt.InferShapeTester):
     shared_constructor_accept_ndarray_=False,
     internal_type_=sp.sparse.csc_matrix,
     check_internal_type_=sp.sparse.issparse,
-    aesara_fct_=lambda a: dense_from_sparse(a * 2.0),
+    pytensor_fct_=lambda a: dense_from_sparse(a * 2.0),
     ref_fct_=lambda a: np.asarray((a * 2).todense()),
     cast_value_=sp.sparse.csr_matrix,
     expect_fail_fast_shape_inplace=False,

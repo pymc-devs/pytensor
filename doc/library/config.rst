@@ -1,7 +1,7 @@
 .. _libdoc_config:
 
 =======================================
-:mod:`config` -- Aesara Configuration
+:mod:`config` -- Pytensor Configuration
 =======================================
 
 .. module:: config
@@ -13,58 +13,58 @@
 Guide
 =====
 
-The config module contains many ``attributes`` that modify Aesara's behavior.  Many of these
-attributes are consulted during the import of the ``aesara`` module, and some
+The config module contains many ``attributes`` that modify Pytensor's behavior.  Many of these
+attributes are consulted during the import of the ``pytensor`` module, and some
 are assumed to be read-only.
 
 *As a rule, the attributes in this module should not be modified by user code.*
 
-Aesara's code comes with default values for these attributes, but they can be
-overridden via a user's ``.aesararc`` file and the :envvar:`AESARA_FLAGS`
+Pytensor's code comes with default values for these attributes, but they can be
+overridden via a user's ``.pytensorrc`` file and the :envvar:`PYTENSOR_FLAGS`
 environment variable.
 
 The order of precedence is:
 
-1. an assignment to ``aesara.config.<property>``
-2. :envvar:`AESARA_FLAGS`
-3. the ``.aesararc`` file (or the file indicated by :envvar:`AESARARC`)
+1. an assignment to ``pytensor.config.<property>``
+2. :envvar:`PYTENSOR_FLAGS`
+3. the ``.pytensorrc`` file (or the file indicated by :envvar:`PYTENSORRC`)
 
 The current/effective configuration can be shown at any time by printing the
-object ``aesara.config``.  For example, to see a list of all active
+object ``pytensor.config``.  For example, to see a list of all active
 configuration variables, type this from the command-line:
 
 .. code-block:: bash
 
-    python -c 'import aesara; print(aesara.config)' | less
+    python -c 'import pytensor; print(pytensor.config)' | less
 
 Environment Variables
 =====================
 
 
-.. envvar:: AESARA_FLAGS
+.. envvar:: PYTENSOR_FLAGS
 
     This is a list of comma-delimited ``key=value`` pairs that control
-    Aesara's behavior.
+    Pytensor's behavior.
 
-    For example, in ``bash``, one can override the :envvar:`AESARARC` defaults
+    For example, in ``bash``, one can override the :envvar:`PYTENSORRC` defaults
     for a script ``<myscript>.py`` with the following:
 
     .. code-block:: bash
 
-        AESARA_FLAGS='floatX=float32'  python <myscript>.py
+        PYTENSOR_FLAGS='floatX=float32'  python <myscript>.py
 
-    If a value is defined several times in ``AESARA_FLAGS``,
+    If a value is defined several times in ``PYTENSOR_FLAGS``,
     the right-most definition is used, so, for instance, if
-    ``AESARA_FLAGS='floatX=float32,floatX=float64'`` is set, then ``float64`` will be
+    ``PYTENSOR_FLAGS='floatX=float32,floatX=float64'`` is set, then ``float64`` will be
     used.
 
-.. envvar:: AESARARC
+.. envvar:: PYTENSORRC
 
-    The location(s) of the ``.aesararc`` file(s) in `ConfigParser` format.
-    It defaults to ``$HOME/.aesararc``. On Windows, it defaults to
-    ``$HOME/.aesararc:$HOME/.aesararc.txt``.
+    The location(s) of the ``.pytensorrc`` file(s) in `ConfigParser` format.
+    It defaults to ``$HOME/.pytensorrc``. On Windows, it defaults to
+    ``$HOME/.pytensorrc:$HOME/.pytensorrc.txt``.
 
-    Here is the ``.aesararc`` equivalent to the ``AESARA_FLAGS`` in the example above:
+    Here is the ``.pytensorrc`` equivalent to the ``PYTENSOR_FLAGS`` in the example above:
 
     .. code-block:: cfg
 
@@ -84,20 +84,20 @@ Environment Variables
     multiple files specify values for the same configuration option.
 
     For example, to override system-wide settings with personal ones,
-    set ``AESARARC=/etc/aesararc:~/.aesararc``. To load configuration files in
-    the current working directory, append ``.aesararc`` to the list of configuration
-    files, e.g. ``AESARARC=~/.aesararc:.aesararc``.
+    set ``PYTENSORRC=/etc/pytensorrc:~/.pytensorrc``. To load configuration files in
+    the current working directory, append ``.pytensorrc`` to the list of configuration
+    files, e.g. ``PYTENSORRC=~/.pytensorrc:.pytensorrc``.
 
 Config Attributes
 =====================
 
 The list below describes some of the more common and important flags
 that you might want to use. For the complete list (including documentation),
-import ``aesara`` and print the config variable, as in:
+import ``pytensor`` and print the config variable, as in:
 
 .. code-block:: bash
 
-    python -c 'import aesara; print(aesara.config)' | less
+    python -c 'import pytensor; print(pytensor.config)' | less
 
 .. attribute:: device
 
@@ -126,7 +126,7 @@ import ``aesara`` and print the config variable, as in:
     Default: ``'float64'``
 
     This sets the default dtype returned by ``tensor.matrix()``, ``tensor.vector()``,
-    and similar functions.  It also sets the default Aesara bit width for
+    and similar functions.  It also sets the default Pytensor bit width for
     arguments passed as Python floating-point numbers.
 
 .. attribute:: warn_float64
@@ -145,7 +145,7 @@ import ``aesara`` and print the config variable, as in:
 
     Default: ``'default'``
 
-    If ``more``, sometimes Aesara will select :class:`Op` implementations that
+    If ``more``, sometimes Pytensor will select :class:`Op` implementations that
     are more "deterministic", but slower.  See the ``dnn.conv.algo*``
     flags for more cases.
 
@@ -155,13 +155,13 @@ import ``aesara`` and print the config variable, as in:
 
     Default: ``True``
 
-    This determines whether or not Aesara's garbage collector is used for
-    intermediate results. To use less memory, Aesara frees the intermediate
-    results as soon as they are no longer needed.  Disabling Aesara's garbage
-    collection allows Aesara to reuse buffers for intermediate results between
-    function calls. This speeds up Aesara by spending less time reallocating
+    This determines whether or not Pytensor's garbage collector is used for
+    intermediate results. To use less memory, Pytensor frees the intermediate
+    results as soon as they are no longer needed.  Disabling Pytensor's garbage
+    collection allows Pytensor to reuse buffers for intermediate results between
+    function calls. This speeds up Pytensor by spending less time reallocating
     space during function evaluation and can provide significant speed-ups for
-    functions with many fast :class:`Op`\s, but it also increases Aesara's memory
+    functions with many fast :class:`Op`\s, but it also increases Pytensor's memory
     usage.
 
 .. attribute:: config.scan__allow_output_prealloc
@@ -183,7 +183,7 @@ import ``aesara`` and print the config variable, as in:
     Allow garbage collection inside of :class:`Scan` :class:`Op`\s.
 
     If :attr:`config.allow_gc` is ``True``, but :attr:`config.scan__allow_gc` is
-    ``False``, then Aesara will perform garbage collection during the inner
+    ``False``, then Pytensor will perform garbage collection during the inner
     operations of a :class:`Scan` after each iterations.
 
 .. attribute:: cycle_detection
@@ -219,8 +219,8 @@ import ``aesara`` and print the config variable, as in:
 
     Enable or disable parallel computation on the CPU with OpenMP.
     It is the default value used by :class:`Op`\s that support OpenMP.
-    It is best to specify this setting in ``.aesararc`` or in the environment
-    variable ``AESARA_FLAGS``.
+    It is best to specify this setting in ``.pytensorrc`` or in the environment
+    variable ``PYTENSOR_FLAGS``.
 
 .. attribute:: openmp_elemwise_minsize
 
@@ -235,12 +235,12 @@ import ``aesara`` and print the config variable, as in:
 
     Default: ``'custom'``
 
-    This specifies how data types are implicitly determined by Aesara during the
+    This specifies how data types are implicitly determined by Pytensor during the
     creation of constants or in the results of arithmetic operations.
 
     The ``'custom'`` value corresponds to a set of custom rules originally used
-    in Aesara.  These rules can be partially customized (e.g. see the in-code
-    help of ``aesara.scalar.basic.NumpyAutocaster``).  This will be deprecated
+    in Pytensor.  These rules can be partially customized (e.g. see the in-code
+    help of ``pytensor.scalar.basic.NumpyAutocaster``).  This will be deprecated
     in the future.
 
     The ``'numpy+floatX'`` setting attempts to mimic NumPy casting rules,
@@ -257,7 +257,7 @@ import ``aesara`` and print the config variable, as in:
       that of NumPy.
     * On mixed scalar and array operations, NumPy tries to prevent the scalar
       from upcasting the array's type unless it is of a fundamentally
-      different type. Aesara does not attempt to do the same at this point,
+      different type. Pytensor does not attempt to do the same at this point,
       so users should be careful, since scalars may upcast arrays when they
       otherwise wouldn't in NumPy. This behavior should change in the near
       future.
@@ -275,7 +275,7 @@ import ``aesara`` and print the config variable, as in:
     ``'floatX'`` returns a number of with the dtype given by ``config.floatX``.
 
     ``'raise'`` is the safest choice (and will become default in a future
-    release of Aesara).  It raises an error when one tries to perform such an
+    release of Pytensor).  It raises an error when one tries to perform such an
     operation, enforcing the use of the integer division operator (``//``). If a
     float result is desired, either cast one of the arguments to a float, or use
     ``x.__truediv__(y)``.
@@ -287,7 +287,7 @@ import ``aesara`` and print the config variable, as in:
 
     Default: ``'Mode'``
 
-    This sets the default compilation mode when compiling Aesara functions. By
+    This sets the default compilation mode when compiling Pytensor functions. By
     default the mode ``'Mode'`` is equivalent to ``'FAST_RUN'``.
 
 .. attribute:: profile
@@ -296,7 +296,7 @@ import ``aesara`` and print the config variable, as in:
 
     Default: ``False``
 
-    When ``True``, the VM and CVM linkers profile the execution time of Aesara functions.
+    When ``True``, the VM and CVM linkers profile the execution time of Pytensor functions.
 
     See :ref:`tut_profiling` for examples.
 
@@ -306,7 +306,7 @@ import ``aesara`` and print the config variable, as in:
 
     Default: ``False``
 
-    When ``True``, the VM and CVM linkers profile the memory usage of Aesara
+    When ``True``, the VM and CVM linkers profile the memory usage of Pytensor
     functions.  This only works when ``profile=True``.
 
 .. attribute:: profile_optimizer
@@ -316,7 +316,7 @@ import ``aesara`` and print the config variable, as in:
     Default: ``False``
 
     When ``True``, the :class:`VM` and :class:`CVM` linkers profile the rewriting phase when
-    compiling an Aesara function.  This only works when ``profile=True``.
+    compiling an Pytensor function.  This only works when ``profile=True``.
 
 .. attribute:: config.profiling__n_apply
 
@@ -371,7 +371,7 @@ import ``aesara`` and print the config variable, as in:
 
     Default: ``False``
 
-    When ``True``, ignore the first call to an Aesara function while profiling.
+    When ``True``, ignore the first call to an Pytensor function while profiling.
 
 .. attribute:: config.lib__amblibm
 
@@ -442,15 +442,15 @@ import ``aesara`` and print the config variable, as in:
 
     Default: ``'0.9'``
 
-    When we an Aesara bug that generated a bad result is fixed, we also make
-    Aesara raise a warning when it encounters the same circumstances again. This
+    When we an Pytensor bug that generated a bad result is fixed, we also make
+    Pytensor raise a warning when it encounters the same circumstances again. This
     helps users determine whether or not said bug has affected past runs, since
     one only needs to perform the same runs again with the new version, and one
-    does not have to understand the Aesara internals that triggered the bug.
+    does not have to understand the Pytensor internals that triggered the bug.
 
     This flag lets users ignore warnings about old bugs that were
-    fixed before their first checkout of Aesara.
-    You can set its value to the first version of Aesara
+    fixed before their first checkout of Pytensor.
+    You can set its value to the first version of Pytensor
     that you used (probably 0.3 or higher)
 
     ``'None'`` means that all warnings will be displayed.
@@ -460,8 +460,8 @@ import ``aesara`` and print the config variable, as in:
 
 .. attribute:: base_compiledir
 
-    Default: On Windows: ``$LOCALAPPDATA\\Aesara`` if ``$LOCALAPPDATA`` is defined,
-    otherwise and on other systems: ``~/.aesara``.
+    Default: On Windows: ``$LOCALAPPDATA\\Pytensor`` if ``$LOCALAPPDATA`` is defined,
+    otherwise and on other systems: ``~/.pytensor``.
 
     This directory stores the platform-dependent compilation directories.
 
@@ -474,7 +474,7 @@ import ``aesara`` and print the config variable, as in:
     This is a Python format string that specifies the sub-directory of
     ``config.base_compiledir`` in which platform-dependent compiled modules are
     stored. To see a list of all available substitution keys, run ``python -c
-    "import aesara; print(aesara.config)"`` and look for ``compiledir_format``.
+    "import pytensor; print(pytensor.config)"`` and look for ``compiledir_format``.
 
     This flag's value cannot be modified during program execution.
 
@@ -492,7 +492,7 @@ import ``aesara`` and print the config variable, as in:
     Default: ``'-lblas'``
 
     Link argument to link against a (Fortran) level-3 blas implementation.
-    Aesara will test if ``'-lblas'`` works by default. If not, it will disable C
+    Pytensor will test if ``'-lblas'`` works by default. If not, it will disable C
     code for BLAS.
 
 .. attribute:: config.experimental__local_alloc_elemwise_assert
@@ -504,7 +504,7 @@ import ``aesara`` and print the config variable, as in:
     When ``True``, add asserts that highlight shape errors.
 
     Without such asserts, the underlying rewrite could hide errors in user
-    code.  Aesara adds the asserts only if it cannot infer that the shapes are
+    code.  Pytensor adds the asserts only if it cannot infer that the shapes are
     equivalent.  When it can determine equivalence, this rewrite does not
     introduce an assert.
 
@@ -640,11 +640,11 @@ import ``aesara`` and print the config variable, as in:
     Default: Full path to ``g++`` if ``g++`` is present. Empty string otherwise.
 
     Indicates which C++ compiler to use. If empty, no C++ code is
-    compiled.  Aesara automatically detects whether ``g++`` is present and
+    compiled.  Pytensor automatically detects whether ``g++`` is present and
     disables C++ compilation when it is not.  On Darwin systems (e.g. Mac
     OS X), it looks for ``clang++`` and uses that when available.
 
-    Aesara prints a warning if it detects that no compiler is present.
+    Pytensor prints a warning if it detects that no compiler is present.
 
     This value can point to any compiler binary (full path or not), but things may
     break if the interface is not ``g++``-compatible to some degree.
@@ -790,13 +790,13 @@ import ``aesara`` and print the config variable, as in:
     Default: ``'off'``
 
     Setting this attribute to something other than ``'off'`` activates a
-    debugging mechanism, for which Aesara executes the graph on-the-fly, as it
+    debugging mechanism, for which Pytensor executes the graph on-the-fly, as it
     is being built. This allows the user to spot errors early on (such as
     dimension mis-matches) **before** rewrites are applied.
 
-    Aesara will execute the graph using constants and/or shared variables
+    Pytensor will execute the graph using constants and/or shared variables
     provided by the user. Purely symbolic variables (e.g. ``x =
-    aesara.tensor.dmatrix()``) can be augmented with test values, by writing to
+    pytensor.tensor.dmatrix()``) can be augmented with test values, by writing to
     their ``.tag.test_value`` attributes (e.g. ``x.tag.test_value = np.ones((5, 4))``).
 
     When not ``'off'``, the value of this option dictates what happens when
@@ -808,15 +808,15 @@ import ``aesara`` and print the config variable, as in:
 
 .. attribute:: compute_test_value_opt
 
-    As ``compute_test_value``, but it is the value used during Aesara's
-    rewriting phase.  This is used to help debug shape errors in Aesara's
+    As ``compute_test_value``, but it is the value used during Pytensor's
+    rewriting phase.  This is used to help debug shape errors in Pytensor's
     rewrites.
 
 .. attribute:: print_test_value
 
     Bool value, default: ``False``
 
-    If ``'True'``, Aesara will include the test values in a variable's
+    If ``'True'``, Pytensor will include the test values in a variable's
     ``__str__`` output.
 
 .. attribute:: exception_verbosity
@@ -849,27 +849,27 @@ import ``aesara`` and print the config variable, as in:
 
     Bool value, default: ``False``
 
-    If ``True``, Aesara will remove the ``-O*`` parameter passed to ``g++``.
-    This is useful for debugging objects compiled by Aesara.  The parameter
+    If ``True``, Pytensor will remove the ``-O*`` parameter passed to ``g++``.
+    This is useful for debugging objects compiled by Pytensor.  The parameter
     ``-g`` is also passed by default to ``g++``.
 
 .. attribute:: config.cmodule__compilation_warning
 
     Bool value, default: ``False``
 
-    If ``True``, Aesara will print compilation warnings.
+    If ``True``, Pytensor will print compilation warnings.
 
 .. attribute:: config.cmodule__preload_cache
 
     Bool value, default: ``False``
 
-    If set to ``True``, Aesara will preload the C module cache at import time
+    If set to ``True``, Pytensor will preload the C module cache at import time
 
 .. attribute:: config.cmodule__age_thresh_use
 
     Int value, default: ``60 * 60 * 24 * 24``  # 24 days
 
-    The time after which a compiled C module won't be reused by Aesara (in
+    The time after which a compiled C module won't be reused by Pytensor (in
     seconds). C modules are automatically deleted 7 days after that time.
 
 .. attribute:: config.cmodule__debug
@@ -883,15 +883,15 @@ import ``aesara`` and print the config variable, as in:
 
     Int value, default: 8
 
-    The number of traceback stack levels to keep for Aesara variable
+    The number of traceback stack levels to keep for Pytensor variable
     definitions.
 
 .. attribute:: config.traceback__compile_limit
 
     Bool value, default: 0
 
-    The number of traceback stack levels to keep for variables during Aesara
-    compilation. When this value is greater than zero, it will make Aesara keep
+    The number of traceback stack levels to keep for variables during Pytensor
+    compilation. When this value is greater than zero, it will make Pytensor keep
     internal stack traces.
 
 .. attribute:: config.metaopt__verbose
@@ -899,7 +899,7 @@ import ``aesara`` and print the config variable, as in:
     Int value, default: 0
 
     The verbosity level of the meta-rewriter: ``0`` for silent, ``1`` to only
-    warn when Aesara cannot meta-rewrite an :class:`Op`, ``2`` for full output (e.g.
+    warn when Pytensor cannot meta-rewrite an :class:`Op`, ``2`` for full output (e.g.
     timings and the rewrites selected).
 
 

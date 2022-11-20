@@ -1,7 +1,7 @@
 import pytest
 
-from aesara.graph.basic import Variable
-from aesara.graph.type import Type
+from pytensor.graph.basic import Variable
+from pytensor.graph.type import Type
 
 
 class MyType(Type):

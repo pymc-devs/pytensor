@@ -1,11 +1,11 @@
 import numpy as np
 import pytest
 
-import aesara
-from aesara import function
-from aesara.compile.io import In
-from aesara.misc.safe_asarray import _asarray
-from aesara.tensor.basic import (
+import pytensor
+from pytensor import function
+from pytensor.compile.io import In
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.tensor.basic import (
     _convert_to_complex64,
     _convert_to_complex128,
     _convert_to_float32,
@@ -16,7 +16,7 @@ from aesara.tensor.basic import (
     _convert_to_int64,
     cast,
 )
-from aesara.tensor.type import (
+from pytensor.tensor.type import (
     TensorType,
     bvector,
     dmatrix,
@@ -104,22 +104,22 @@ class TestCasting:
 
         # upcasting to complex128
         for t in ["int8", "int16", "int32", "int64", "float32", "float64"]:
-            a = aesara.shared(np.ones(3, dtype=t))
-            b = aesara.shared(np.ones(3, dtype="complex128"))
+            a = pytensor.shared(np.ones(3, dtype=t))
+            b = pytensor.shared(np.ones(3, dtype="complex128"))
             f = function([], _convert_to_complex128(a))
             assert a.type.values_eq_approx(b.get_value(), f())
 
         # upcasting to complex64
         for t in ["int8", "int16", "int32", "int64", "float32"]:
-            a = aesara.shared(np.ones(3, dtype=t))
-            b = aesara.shared(np.ones(3, dtype="complex64"))
+            a = pytensor.shared(np.ones(3, dtype=t))
+            b = pytensor.shared(np.ones(3, dtype="complex64"))
             f = function([], _convert_to_complex64(a))
             assert a.type.values_eq_approx(b.get_value(), f())
 
         # downcast to complex64
         for t in ["float64"]:
-            a = aesara.shared(np.ones(3, dtype=t))
-            b = aesara.shared(np.ones(3, dtype="complex64"))
+            a = pytensor.shared(np.ones(3, dtype=t))
+            b = pytensor.shared(np.ones(3, dtype="complex64"))
             f = function([], _convert_to_complex64(a))
             assert a.type.values_eq_approx(b.get_value(), f())
 

@@ -1,9 +1,9 @@
 
 .. _extend_faq:
 
-=========================================
-Extending Aesara: FAQ and Troubleshooting
-=========================================
+===========================================
+Extending Pytensor: FAQ and Troubleshooting
+===========================================
 
 I wrote a new `Op`\/`Type`, and weird stuff is happening...
 -----------------------------------------------------------

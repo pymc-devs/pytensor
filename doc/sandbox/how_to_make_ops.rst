@@ -12,7 +12,7 @@ An Op class can represent one or a wide variety of functions depending on how yo
 
 It is not always obvious what should be a parameter and what should be an input. For example, a generic indexing Op could take a list and an index as graph inputs, whereas a specific indexing Op could have an index parameter, so you could have a specialized Op instance to fetch the nth element of a list, where n is known statically. [*Could you give some advice about the relative tradeoffs of having something as a parameter and something as an input?*]
 
-Examples of parameterized Ops in aesara:
+Examples of parameterized Ops in pytensor:
   ``Broadcast(<scalar op>, <inplace?>)``
     upgrades an op that works on scalars so it works on tensors. Can work inplace or not.
   ``Reduce(<scalar op>, <axes>)``
@@ -53,7 +53,7 @@ The :meth:`Op.make_node` method is expected to have the following signature:
 
 ``inputs`` may be a list of anything that the user wants to provide as symbolic
 input (symbolic: standing for the actual values that will be passed when the
-graph is compiled into an executable function). [*The Aesara intro should
+graph is compiled into an executable function). [*The Pytensor intro should
 describe symbolic in greater depth, and we should link to that from here.*] This
 may or may not include Variable instances (but if you want the inputs of this Op
 to sometimes be outputs of another Op, then the inputs should be Variable
@@ -79,12 +79,12 @@ Example:
 
 .. code-block:: python
 
-	from aesara.scalar import *
+	from pytensor.scalar import *
 
 	class Add(Op):
 	    #...
 	    def make_node(self, x, y):
-	        # note 1: constant, int64 and ScalarType are defined in aesara.scalar
+	        # note 1: constant, int64 and ScalarType are defined in pytensor.scalar
 	        # note 2: constant(x) is equivalent to Constant(type=int64, data=x)
 	        # note 3: the call int64() is equivalent to Variable(type=int64, None) or Variable(type=ScalarType(dtype = 'int64'), None)
 	        if isinstance(x, int):
@@ -187,7 +187,7 @@ Advanced note: for an Op with multiple outputs, it is possible that some of them
 grad
 ====
 
-``grad`` is an Aesara-specific [*as opposed to?*]  function - it does not interface with core rewrite and compilation facilities, but it provides a useful interface to differentiation. Its expected signature is:
+``grad`` is an Pytensor-specific [*as opposed to?*]  function - it does not interface with core rewrite and compilation facilities, but it provides a useful interface to differentiation. Its expected signature is:
 
 .. code-block:: python
 
@@ -212,7 +212,7 @@ Essentially, the semantics are:
 	   return gz*dz/dx + gw*dw/dx, gz*dz/dy + gw*dw/dy
 
 More specifically,
-``grad`` must return a list or tuple of input gradients, as many as there are inputs. Let C be a Variable (currently assumed to be a scalar) that depends through an Aesara symbolic expression on the node outputs. Then each output_gradients[i] represents symbolically dC/doutputs[i]. The returned input gradients should represent symbolically dC/dinputs[i].
+``grad`` must return a list or tuple of input gradients, as many as there are inputs. Let C be a Variable (currently assumed to be a scalar) that depends through an Pytensor symbolic expression on the node outputs. Then each output_gradients[i] represents symbolically dC/doutputs[i]. The returned input gradients should represent symbolically dC/dinputs[i].
 
 Example:
 

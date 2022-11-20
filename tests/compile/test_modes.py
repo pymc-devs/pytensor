@@ -4,10 +4,10 @@ Test compilation modes
 
 import copy
 
-from aesara.compile.function import function
-from aesara.compile.mode import Mode, get_default_mode
-from aesara.configdefaults import config
-from aesara.tensor.type import matrix, vector
+from pytensor.compile.function import function
+from pytensor.compile.mode import Mode, get_default_mode
+from pytensor.configdefaults import config
+from pytensor.tensor.type import matrix, vector
 
 
 class TestBunchOfModes:

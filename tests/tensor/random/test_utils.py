@@ -1,16 +1,16 @@
 import numpy as np
 import pytest
 
-from aesara import config, function
-from aesara.compile.mode import Mode
-from aesara.graph.rewriting.db import RewriteDatabaseQuery
-from aesara.tensor.random.utils import RandomStream, broadcast_params
-from aesara.tensor.type import matrix, tensor
+from pytensor import config, function
+from pytensor.compile.mode import Mode
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.tensor.random.utils import RandomStream, broadcast_params
+from pytensor.tensor.type import matrix, tensor
 from tests import unittest_tools as utt
 
 
 @pytest.fixture(scope="module", autouse=True)
-def set_aesara_flags():
+def set_pytensor_flags():
     rewrites_query = RewriteDatabaseQuery(include=[None], exclude=[])
     py_mode = Mode("py", rewrites_query)
     with config.change_flags(mode=py_mode, compute_test_value="warn"):
@@ -67,7 +67,7 @@ def test_broadcast_params():
     assert np.array_equal(res[0], mean)
     assert np.array_equal(res[1], np.broadcast_to(cov, (3, 1, 1)))
 
-    # Try it in Aesara
+    # Try it in Pytensor
     with config.change_flags(compute_test_value="raise"):
         mean = tensor(config.floatX, shape=(None, 1))
         mean.tag.test_value = np.array([[0], [10], [100]], dtype=config.floatX)
@@ -245,7 +245,7 @@ class TestSharedRandomStream:
     def test_multiple_rng_aliasing(self, rng_ctor):
         # Test that when we have multiple random number generators, we do not alias
         # the state_updates member. `state_updates` can be useful when attempting to
-        # copy the (random) state between two similar aesara graphs. The test is
+        # copy the (random) state between two similar pytensor graphs. The test is
         # meant to detect a previous bug where state_updates was initialized as a
         # class-attribute, instead of the __init__ function.
 
@@ -256,7 +256,7 @@ class TestSharedRandomStream:
 
     @pytest.mark.parametrize("rng_ctor", [np.random.RandomState, np.random.default_rng])
     def test_random_state_transfer(self, rng_ctor):
-        # Test that random state can be transferred from one aesara graph to another.
+        # Test that random state can be transferred from one pytensor graph to another.
 
         class Graph:
             def __init__(self, seed=123):

@@ -1,12 +1,12 @@
 import numpy as np
 import pytest
 
-from aesara.compile.function import function
-from aesara.gradient import grad
-from aesara.scan.basic import scan
-from aesara.scan.checkpoints import scan_checkpoints
-from aesara.tensor.basic import ones_like
-from aesara.tensor.type import iscalar, vector
+from pytensor.compile.function import function
+from pytensor.gradient import grad
+from pytensor.scan.basic import scan
+from pytensor.scan.checkpoints import scan_checkpoints
+from pytensor.tensor.basic import ones_like
+from pytensor.tensor.type import iscalar, vector
 
 
 class TestScanCheckpoint:

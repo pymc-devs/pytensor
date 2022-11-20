@@ -8,7 +8,7 @@
 Reference
 ---------
 
-.. automodule:: aesara.graph.type
+.. automodule:: pytensor.graph.type
    :platform: Unix, Windows
    :synopsis: Interface for types of symbolic variables
    :members:

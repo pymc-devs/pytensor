@@ -2,5 +2,5 @@
 :mod:`ops` --  Some Common Ops and extra Ops stuff
 ==================================================
 
-.. automodule:: aesara.compile.ops
+.. automodule:: pytensor.compile.ops
     :members:

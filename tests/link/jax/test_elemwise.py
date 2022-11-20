@@ -1,15 +1,15 @@
 import numpy as np
 import pytest
 
-from aesara.configdefaults import config
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import get_test_value
-from aesara.tensor import elemwise as at_elemwise
-from aesara.tensor.math import all as at_all
-from aesara.tensor.math import prod
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.special import SoftmaxGrad, log_softmax, softmax
-from aesara.tensor.type import matrix, tensor, vector
+from pytensor.configdefaults import config
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import get_test_value
+from pytensor.tensor import elemwise as at_elemwise
+from pytensor.tensor.math import all as at_all
+from pytensor.tensor.math import prod
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.special import SoftmaxGrad, log_softmax, softmax
+from pytensor.tensor.type import matrix, tensor, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
 

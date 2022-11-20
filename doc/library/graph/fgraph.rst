@@ -5,9 +5,9 @@
 :mod:`fg` -- Graph Container [doc TODO]
 ================================================
 
-.. module:: aesara.graph.fg
+.. module:: pytensor.graph.fg
    :platform: Unix, Windows
-   :synopsis: Aesara Internals
+   :synopsis: Pytensor Internals
 .. moduleauthor:: LISA
 
 
@@ -16,7 +16,7 @@
 FunctionGraph
 -------------
 
-.. autoclass:: aesara.graph.fg.FunctionGraph
+.. autoclass:: pytensor.graph.fg.FunctionGraph
     :members:
 
     ***TODO***
@@ -33,7 +33,7 @@ FunctionGraph
 FunctionGraph Features
 ----------------------
 
-.. autoclass:: aesara.graph.features.Feature
+.. autoclass:: pytensor.graph.features.Feature
     :members:
 
 .. _libdoc_graph_fgraphfeaturelist:

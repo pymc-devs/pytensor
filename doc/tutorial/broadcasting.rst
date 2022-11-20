@@ -1,8 +1,8 @@
 .. testsetup::
 
    import numpy as np
-   import aesara
-   import aesara.tensor as at
+   import pytensor
+   import pytensor.tensor as at
 
 .. _tutbroadcasting:
 
@@ -32,7 +32,7 @@ dimensions of the matrix (adding ``1`` to the shape and ``True``
 to the pattern), resulting in ``(1, 2)`` and ``(True, False)``.
 It would then behave just like the example above.
 
-Unlike numpy which does broadcasting dynamically, Aesara needs
+Unlike numpy which does broadcasting dynamically, Pytensor needs
 to know, for any operation which supports broadcasting, which
 dimensions will need to be broadcasted. When applicable, this
 information is given in the :ref:`type` of a *Variable*.
@@ -45,7 +45,7 @@ The following code illustrates how rows and columns are broadcasted in order to 
 >>> mtr = at.matrix()
 >>> mtr.broadcastable
 (False, False)
->>> f_row = aesara.function([r, mtr], [r + mtr])
+>>> f_row = pytensor.function([r, mtr], [r + mtr])
 >>> R = np.arange(3).reshape(1, 3)
 >>> R
 array([[0, 1, 2]])
@@ -61,7 +61,7 @@ array([[0, 1, 2],
 >>> c = at.col()
 >>> c.broadcastable
 (False, True)
->>> f_col = aesara.function([c, mtr], [c + mtr])
+>>> f_col = pytensor.function([c, mtr], [c + mtr])
 >>> C = np.arange(3).reshape(3, 1)
 >>> C
 array([[0],

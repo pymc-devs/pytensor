@@ -16,14 +16,14 @@ For example if you want to learn a lookup table, e.g. used for
 word embeddings, where each row is a vector of weights representing
 the embedding that the model has learned for a word, in each iteration,
 the only rows that should get updated are those containing embeddings
-used during the forward propagation. Here is how the aesara function
+used during the forward propagation. Here is how the pytensor function
 should be written:
 
 Defining a shared variable for the lookup table
 
 .. code-block:: python
 
-   lookup_table = aesara.shared(matrix_ndarray)
+   lookup_table = pytensor.shared(matrix_ndarray)
 
 Getting a subset of the table (some rows or some columns) by passing
 an integer vector of indices corresponding to those rows or columns.
@@ -40,11 +40,11 @@ Defining cost which depends only on subset and not the entire lookup_table
 .. code-block:: python
 
    cost = something that depends on subset
-   g = aesara.grad(cost, subset)
+   g = pytensor.grad(cost, subset)
 
 There are two ways for updating the parameters:
 Either use inc_subtensor or set_subtensor. It is recommended to use
-inc_subtensor. Some aesara rewrites do the conversion between
+inc_subtensor. Some pytensor rewrites do the conversion between
 the two functions, but not in all cases.
 
 .. code-block:: python
@@ -60,11 +60,11 @@ OR
 Currently we just cover the case here,
 not if you use inc_subtensor or set_subtensor with other types of indexing.
 
-Defining the aesara function
+Defining the pytensor function
 
 .. code-block:: python
 
-   f = aesara.function(..., updates=[(lookup_table, updates)])
+   f = pytensor.function(..., updates=[(lookup_table, updates)])
 
 Note that you can compute the gradient of the cost function w.r.t.
 the entire lookup_table, and the gradient will have nonzero rows only

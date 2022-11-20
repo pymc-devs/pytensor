@@ -4,9 +4,9 @@ import pytest
 
 
 def pytest_sessionstart(session):
-    os.environ["AESARA_FLAGS"] = ",".join(
+    os.environ["PYTENSOR_FLAGS"] = ",".join(
         [
-            os.environ.setdefault("AESARA_FLAGS", ""),
+            os.environ.setdefault("PYTENSOR_FLAGS", ""),
             "warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,cmodule__warn_no_version=True",
         ]
     )

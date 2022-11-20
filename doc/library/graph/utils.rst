@@ -6,13 +6,13 @@
 
 .. testsetup:: *
 
-   from aesara.graph.utils import *
+   from pytensor.graph.utils import *
 
 ---------
 Reference
 ---------
 
-.. automodule:: aesara.graph.utils
+.. automodule:: pytensor.graph.utils
    :platform: Unix, Windows
    :synopsis: Utilities functions operating on the graph
    :members:

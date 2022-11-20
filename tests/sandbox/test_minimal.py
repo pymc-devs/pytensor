@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 
-from aesara import function
-from aesara.sandbox.minimal import minimal
-from aesara.tensor.type import matrix, vector
+from pytensor import function
+from pytensor.sandbox.minimal import minimal
+from pytensor.tensor.type import matrix, vector
 from tests import unittest_tools as utt
 
 

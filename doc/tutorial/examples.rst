@@ -6,7 +6,7 @@ More Examples
 =============
 
 At this point it would be wise to begin familiarizing yourself more
-systematically with Aesara's fundamental objects and operations by
+systematically with Pytensor's fundamental objects and operations by
 browsing this section of the library: :ref:`libdoc_basic_tensor`.
 
 As the tutorial unfolds, you should also gradually acquaint yourself
@@ -40,11 +40,11 @@ Well, what you do is this:
 .. If you modify this code, also change :
 .. tests/test_tutorial.py:T_examples.test_examples_1
 
->>> import aesara
->>> import aesara.tensor as at
+>>> import pytensor
+>>> import pytensor.tensor as at
 >>> x = at.dmatrix('x')
 >>> s = 1 / (1 + at.exp(-x))
->>> logistic = aesara.function([x], s)
+>>> logistic = pytensor.function([x], s)
 >>> logistic([[0, 1], [-1, -2]])
 array([[ 0.5       ,  0.73105858],
        [ 0.26894142,  0.11920292]])
@@ -65,7 +65,7 @@ We can verify that this alternate form produces the same values:
 .. tests/test_tutorial.py:T_examples.test_examples_2
 
 >>> s2 = (1 + at.tanh(x / 2)) / 2
->>> logistic2 = aesara.function([x], s2)
+>>> logistic2 = pytensor.function([x], s2)
 >>> logistic2([[0, 1], [-1, -2]])
 array([[ 0.5       ,  0.73105858],
        [ 0.26894142,  0.11920292]])
@@ -74,7 +74,7 @@ array([[ 0.5       ,  0.73105858],
 Computing More than one Thing at the Same Time
 ==============================================
 
-Aesara supports functions with multiple outputs. For example, we can
+Pytensor supports functions with multiple outputs. For example, we can
 compute the :ref:`element-wise <libdoc_tensor_elemwise>` difference, absolute difference, and
 squared difference between two matrices ``a`` and ``b`` at the same time:
 
@@ -85,7 +85,7 @@ squared difference between two matrices ``a`` and ``b`` at the same time:
 >>> diff = a - b
 >>> abs_diff = abs(diff)
 >>> diff_squared = diff**2
->>> f = aesara.function([a, b], [diff, abs_diff, diff_squared])
+>>> f = pytensor.function([a, b], [diff, abs_diff, diff_squared])
 
 .. note::
    `dmatrices` produces as many outputs as names that you provide.  It is a
@@ -112,8 +112,8 @@ one. You can do it like this:
 .. If you modify this code, also change :
 .. tests/test_tutorial.py:T_examples.test_examples_6
 
->>> from aesara.compile.io import In
->>> from aesara import function
+>>> from pytensor.compile.io import In
+>>> from pytensor import function
 >>> x, y = at.dscalars('x', 'y')
 >>> z = x + y
 >>> f = function([x, In(y, value=1)], z)
@@ -178,7 +178,7 @@ internal state and returns the old state value.
 .. If you modify this code, also change :
 .. tests/test_tutorial.py:T_examples.test_examples_8
 
->>> from aesara import shared
+>>> from pytensor import shared
 >>> state = shared(0)
 >>> inc = at.iscalar('inc')
 >>> accumulator = function([inc], state, updates=[(state, state+inc)])
@@ -193,7 +193,7 @@ functions that use it.  It is called a *shared* variable because its value is
 shared between many functions.  The value can be accessed and modified by the
 :meth:`get_value` and :meth:`set_value` methods. We will come back to this soon.
 
-The other new thing in this code is the ``updates`` parameter of :func:`aesara.function`.
+The other new thing in this code is the ``updates`` parameter of :func:`pytensor.function`.
 ``updates`` must be supplied with a list of pairs of the form (shared-variable, new expression).
 It can also be a dictionary whose keys are shared-variables and values are
 the new expressions.  Either way, it means "whenever this function runs, it
@@ -246,7 +246,7 @@ updates).
 
 It may happen that you expressed some formula using a shared variable, but
 you do *not* want to use its value. In this case, you can use the
-``givens`` parameter of :func:`aesara.function` which replaces a particular node in a graph
+``givens`` parameter of :func:`pytensor.function` which replaces a particular node in a graph
 for the purpose of one particular function.
 
 .. If you modify this code, also change :
@@ -274,34 +274,34 @@ expression that evaluates to a tensor of same shape and dtype.
 
 .. note::
 
-    Aesara shared variable broadcast pattern default to ``False`` for each
+    Pytensor shared variable broadcast pattern default to ``False`` for each
     dimensions. Shared variable size can change over time, so we can't
     use the shape to find the broadcastable pattern. If you want a
     different pattern, just pass it as a parameter
-    ``aesara.shared(..., broadcastable=(True, False))``
+    ``pytensor.shared(..., broadcastable=(True, False))``
 
 .. note::
     Use the ``shape`` parameter to specify tuples of static shapes instead;
     the old broadcastable values are being phased-out.  Unknown shape values
     for dimensions take the value ``None``; otherwise, integers are used for
     known static shape values.
-    For example, ``aesara.shared(..., shape=(1, None))``.
+    For example, ``pytensor.shared(..., shape=(1, None))``.
 
 Copying functions
 =================
-Aesara functions can be copied, which can be useful for creating similar
+Pytensor functions can be copied, which can be useful for creating similar
 functions but with different shared variables or updates. This is done using
-the :func:`aesara.compile.function.types.Function.copy` method of :class:`Function` objects.
+the :func:`pytensor.compile.function.types.Function.copy` method of :class:`Function` objects.
 The optimized graph of the original function is copied, so compilation only
 needs to be performed once.
 
 Let's start from the accumulator defined above:
 
->>> import aesara
->>> import aesara.tensor as at
->>> state = aesara.shared(0)
+>>> import pytensor
+>>> import pytensor.tensor as at
+>>> state = pytensor.shared(0)
 >>> inc = at.iscalar('inc')
->>> accumulator = aesara.function([inc], state, updates=[(state, state+inc)])
+>>> accumulator = pytensor.function([inc], state, updates=[(state, state+inc)])
 
 We can use it to increment the state as usual:
 
@@ -313,7 +313,7 @@ array(0)
 We can use :meth:`copy` to create a similar accumulator but with its own internal state
 using the ``swap`` parameter, which is a dictionary of shared variables to exchange:
 
->>> new_state = aesara.shared(0)
+>>> new_state = pytensor.shared(0)
 >>> new_accumulator = accumulator.copy(swap={state:new_state})
 >>> new_accumulator(100)
 [array(0)]
@@ -342,18 +342,18 @@ As expected, the shared state is no longer updated:
 Using Random Numbers
 ====================
 
-Because in Aesara you first express everything symbolically and
+Because in Pytensor you first express everything symbolically and
 afterwards compile this expression to get functions,
 using pseudo-random numbers is not as straightforward as it is in
 NumPy, though also not too complicated.
 
-The way to think about putting randomness into Aesara's computations is
-to put random variables in your graph. Aesara will allocate a NumPy
+The way to think about putting randomness into Pytensor's computations is
+to put random variables in your graph. Pytensor will allocate a NumPy
 `RandomStream` object (a random number generator) for each such
 variable, and draw from it as necessary. We will call this sort of
 sequence of random numbers a *random stream*. *Random streams* are at
 their core shared variables, so the observations on shared variables
-hold here as well. Aesara's random objects are defined and implemented in
+hold here as well. Pytensor's random objects are defined and implemented in
 :ref:`RandomStream<libdoc_tensor_random_utils>` and, at a lower level,
 in :ref:`RandomVariable<libdoc_tensor_random_basic>`.
 
@@ -367,8 +367,8 @@ Here's a brief example.  The setup code is:
 
 .. testcode::
 
-    from aesara.tensor.random.utils import RandomStream
-    from aesara import function
+    from pytensor.tensor.random.utils import RandomStream
+    from pytensor import function
 
 
     srng = RandomStream(seed=234)
@@ -424,22 +424,22 @@ As usual for shared variables, the random number generators used for random
 variables are common between functions.  So our ``nearly_zeros`` function will
 update the state of the generators used in function ``f`` above.
 
-Copying Random State Between Aesara Graphs
-------------------------------------------
+Copying Random State Between Pytensor Graphs
+--------------------------------------------
 
 In some use cases, a user might want to transfer the "state" of all random
-number generators associated with a given Aesara graph (e.g. ``g1``, with compiled
+number generators associated with a given Pytensor graph (e.g. ``g1``, with compiled
 function ``f1`` below) to a second graph (e.g. ``g2``, with function ``f2``). This might
 arise for example if you are trying to initialize the state of a model, from
 the parameters of a pickled version of a previous model. For
-:class:`aesara.tensor.random.utils.RandomStream` and
-:class:`aesara.sandbox.rng_mrg.MRG_RandomStream`
+:class:`pytensor.tensor.random.utils.RandomStream` and
+:class:`pytensor.sandbox.rng_mrg.MRG_RandomStream`
 this can be achieved by copying elements of the `state_updates` parameter.
 
 Each time a random variable is drawn from a `RandomStream` object, a tuple is
 added to its :attr:`state_updates` list. The first element is a shared variable,
 which represents the state of the random number generator associated with this
-*particular* variable, while the second represents the Aesara graph
+*particular* variable, while the second represents the Pytensor graph
 corresponding to the random number generation process.
 
 Other Random Distributions
@@ -460,8 +460,8 @@ It will be used repeatedly.
 .. testcode::
 
     import numpy as np
-    import aesara
-    import aesara.tensor as at
+    import pytensor
+    import pytensor.tensor as at
 
 
     rng = np.random.default_rng(2882)
@@ -473,7 +473,7 @@ It will be used repeatedly.
     D = (rng.standard_normal((N, feats)), rng.integers(size=N, low=0, high=2))
     training_steps = 10000
 
-    # Declare Aesara symbolic variables
+    # Declare Pytensor symbolic variables
     x = at.dmatrix("x")
     y = at.dvector("y")
 
@@ -482,16 +482,16 @@ It will be used repeatedly.
     # this and the following bias variable b
     # are shared so they keep their values
     # between training iterations (updates)
-    w = aesara.shared(rng.standard_normal(feats), name="w")
+    w = pytensor.shared(rng.standard_normal(feats), name="w")
 
     # initialize the bias term
-    b = aesara.shared(0., name="b")
+    b = pytensor.shared(0., name="b")
 
     print("Initial model:")
     print(w.get_value())
     print(b.get_value())
 
-    # Construct Aesara expression graph
+    # Construct Pytensor expression graph
     p_1 = 1 / (1 + at.exp(-at.dot(x, w) - b))       # Probability that target = 1
     prediction = p_1 > 0.5                          # The prediction thresholded
     xent = -y * at.log(p_1) - (1-y) * at.log(1-p_1) # Cross-entropy loss function
@@ -504,11 +504,11 @@ It will be used repeatedly.
                                                     # tutorial)
 
     # Compile
-    train = aesara.function(
+    train = pytensor.function(
               inputs=[x,y],
               outputs=[prediction, xent],
               updates=((w, w - 0.1 * gw), (b, b - 0.1 * gb)))
-    predict = aesara.function(inputs=[x], outputs=prediction)
+    predict = pytensor.function(inputs=[x], outputs=prediction)
 
     # Train
     for i in range(training_steps):

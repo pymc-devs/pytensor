@@ -3,8 +3,8 @@ import sys
 import numpy as np
 import pytest
 
-import aesara.tensor as at
-from aesara.compile.debugmode import (
+import pytensor.tensor as at
+from pytensor.compile.debugmode import (
     BadDestroyMap,
     BadThunkOutput,
     BadViewMap,
@@ -12,17 +12,17 @@ from aesara.compile.debugmode import (
     InvalidValueError,
     StochasticOrder,
 )
-from aesara.compile.function import function
-from aesara.compile.mode import predefined_modes
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Variable
-from aesara.graph.features import BadOptimization
-from aesara.graph.op import Op
-from aesara.graph.rewriting.basic import node_rewriter
-from aesara.graph.rewriting.db import EquilibriumDB
-from aesara.link.c.op import COp
-from aesara.tensor.math import add, dot, log
-from aesara.tensor.type import TensorType, dvector, fmatrix, fvector, scalar, vector
+from pytensor.compile.function import function
+from pytensor.compile.mode import predefined_modes
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.features import BadOptimization
+from pytensor.graph.op import Op
+from pytensor.graph.rewriting.basic import node_rewriter
+from pytensor.graph.rewriting.db import EquilibriumDB
+from pytensor.link.c.op import COp
+from pytensor.tensor.math import add, dot, log
+from pytensor.tensor.type import TensorType, dvector, fmatrix, fvector, scalar, vector
 from tests import unittest_tools as utt
 
 
@@ -105,7 +105,7 @@ class BROKEN_ON_PURPOSE_Add(COp):
 # inconsistent is a invalid op, whose perform and c_code do not match
 inconsistent = BROKEN_ON_PURPOSE_Add(False)
 
-# off_by_half is a good op, that is different from aesara.sparse.sd_csc
+# off_by_half is a good op, that is different from pytensor.sparse.sd_csc
 off_by_half = BROKEN_ON_PURPOSE_Add(True)
 
 
@@ -523,7 +523,7 @@ class TestViewMap:
 
     def test_aliased_outputs_bad(self):
         # here the alias between outputs is not ok because destroying one
-        # destroys the other, but there's no way to warn aesara about it
+        # destroys the other, but there's no way to warn pytensor about it
         # through the view_map mechanism.
         class CustomOp(Op):
             def make_node(self, a, b):

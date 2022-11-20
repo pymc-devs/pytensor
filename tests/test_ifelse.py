@@ -4,18 +4,18 @@ from functools import reduce
 import numpy as np
 import pytest
 
-import aesara
-import aesara.ifelse
-import aesara.sparse
-import aesara.tensor.basic as at
-from aesara import function
-from aesara.compile.mode import Mode, get_mode
-from aesara.graph.basic import Apply
-from aesara.graph.op import Op
-from aesara.ifelse import IfElse, ifelse
-from aesara.link.c.type import generic
-from aesara.tensor.math import eq
-from aesara.tensor.type import (
+import pytensor
+import pytensor.ifelse
+import pytensor.sparse
+import pytensor.tensor.basic as at
+from pytensor import function
+from pytensor.compile.mode import Mode, get_mode
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+from pytensor.ifelse import IfElse, ifelse
+from pytensor.link.c.type import generic
+from pytensor.tensor.math import eq
+from pytensor.tensor.type import (
     col,
     iscalar,
     ivector,
@@ -30,12 +30,12 @@ from tests import unittest_tools as utt
 
 class TestIfelse(utt.OptimizationTestMixin):
     mode = None
-    dtype = aesara.config.floatX
+    dtype = pytensor.config.floatX
     cast_output = staticmethod(at.as_tensor_variable)
-    shared = staticmethod(aesara.shared)
+    shared = staticmethod(pytensor.shared)
 
     def get_ifelse(self, n):
-        if aesara.config.mode == "FAST_COMPILE":
+        if pytensor.config.mode == "FAST_COMPILE":
             return IfElse(n)
         else:
             return IfElse(n, as_view=True)
@@ -150,7 +150,7 @@ class TestIfelse(utt.OptimizationTestMixin):
         y = vector("y", dtype=self.dtype)
         c = iscalar("c")
         z = ifelse(c, x, y)
-        gx, gy = aesara.grad(z.sum(), [x, y])
+        gx, gy = pytensor.grad(z.sum(), [x, y])
 
         f = function(
             [c, x, y], [self.cast_output(gx), self.cast_output(gy)], mode=self.mode
@@ -180,7 +180,7 @@ class TestIfelse(utt.OptimizationTestMixin):
         y = vector("y", dtype=self.dtype)
         c = iscalar("c")
         z = ifelse(c, self.cast_output(x), self.cast_output(y))
-        gx, gy = aesara.grad(z.sum(), [x, y])
+        gx, gy = pytensor.grad(z.sum(), [x, y])
 
         function([c, x, y], [gx, gy], mode=self.mode)
 
@@ -224,14 +224,14 @@ class TestIfelse(utt.OptimizationTestMixin):
         y2 = vector("y2")
         c = iscalar("c")
         z = ifelse(c, (x1, x2), (y1, y2))
-        grads = aesara.grad(z[0].sum() + z[1].sum(), [x1, x2, y1, y2])
+        grads = pytensor.grad(z[0].sum() + z[1].sum(), [x1, x2, y1, y2])
 
         f = function([c, x1, x2, y1, y2], grads)
         rng = np.random.default_rng(utt.fetch_seed())
 
         lens = [rng.integers(200) for i in range(4)]
         values = [
-            np.asarray(rng.uniform(size=(l,)), aesara.config.floatX) for l in lens
+            np.asarray(rng.uniform(size=(l,)), pytensor.config.floatX) for l in lens
         ]
         outs_1 = f(1, *values)
         assert all(x.shape[0] == y for x, y in zip(outs_1, lens))
@@ -327,7 +327,7 @@ class TestIfelse(utt.OptimizationTestMixin):
 
     def test_sparse_conversions(self):
 
-        from aesara.sparse import matrix
+        from pytensor.sparse import matrix
 
         rng = np.random.default_rng(utt.fetch_seed())
         data = rng.random((2, 3)).astype(self.dtype)
@@ -418,10 +418,10 @@ class TestIfelse(utt.OptimizationTestMixin):
         y1 = scalar("x2")
         y2 = scalar("y2")
         c = iscalar("c")
-        two = np.asarray(2, dtype=aesara.config.floatX)
+        two = np.asarray(2, dtype=pytensor.config.floatX)
         x, y = ifelse(c, (x1, y1), (two, y2), name="f1")
-        o3 = np.asarray(0.3, dtype=aesara.config.floatX)
-        o2 = np.asarray(0.2, dtype=aesara.config.floatX)
+        o3 = np.asarray(0.3, dtype=pytensor.config.floatX)
+        o2 = np.asarray(0.2, dtype=pytensor.config.floatX)
         z = ifelse(c, o3, o2, name="f2")
         out = x * z * y
 
@@ -501,15 +501,15 @@ class TestIfelse(utt.OptimizationTestMixin):
 
     def test_grad_test_values(self):
         # Regression test for test values of `ifelse` gradient.
-        with aesara.config.change_flags(compute_test_value="raise"):
+        with pytensor.config.change_flags(compute_test_value="raise"):
             x = scalar("x")
             x.tag.test_value = 1
             # Used to crash due to undefined test value.
-            aesara.grad(ifelse(0, x, x), x)
+            pytensor.grad(ifelse(0, x, x), x)
 
     def test_grad_int_value(self):
-        w = aesara.shared(np.random.random((10)))
-        b = aesara.shared(np.random.random())
+        w = pytensor.shared(np.random.random((10)))
+        b = pytensor.shared(np.random.random())
         params = [w, b]
 
         x = vector()
@@ -519,7 +519,7 @@ class TestIfelse(utt.OptimizationTestMixin):
         correct = score * y > 0
 
         loss = ifelse(correct, 0, 1)
-        [(param, param - 0.5 * aesara.grad(cost=loss, wrt=param)) for param in params]
+        [(param, param - 0.5 * pytensor.grad(cost=loss, wrt=param)) for param in params]
 
     def test_str(self):
         x = vector("x", dtype=self.dtype)
@@ -665,7 +665,7 @@ class NotImplementedOp(Op):
         raise NotImplementedError()
 
 
-@aesara.config.change_flags(vm__lazy=True)
+@pytensor.config.change_flags(vm__lazy=True)
 def test_ifelse_lazy_c():
     a = scalar()
     b = generic()
@@ -675,12 +675,12 @@ def test_ifelse_lazy_c():
 
     cloops = [True, False]
 
-    if aesara.config.cxx == "":
+    if pytensor.config.cxx == "":
         cloops = [False]
 
     for use_cloop in cloops:
         for lazy in [True, None]:
-            linker = aesara.link.vm.VMLinker(use_cloop=use_cloop, lazy=lazy)
+            linker = pytensor.link.vm.VMLinker(use_cloop=use_cloop, lazy=lazy)
             f = function(
                 [a, b, c],
                 ifelse(a, notimpl(b), c),
@@ -710,11 +710,11 @@ def test_nested():
     t4 = ifelseifelseif(eq(x1, x2), x1, eq(x1, 5), x2, c2, t3, t3 + 0.5)
     t4.name = "t4"
 
-    linker = aesara.link.vm.VMLinker(lazy=False)
+    linker = pytensor.link.vm.VMLinker(lazy=False)
     f = function([c1, c2, x1, x2], t4, mode=Mode(linker=linker, optimizer="fast_run"))
     with pytest.raises(NotImplementedOpException):
         f(1, 0, np.array(10, dtype=x1.dtype), 0)
 
-    linker = aesara.link.vm.VMLinker(lazy=True)
+    linker = pytensor.link.vm.VMLinker(lazy=True)
     f = function([c1, c2, x1, x2], t4, mode=Mode(linker=linker, optimizer="fast_run"))
     assert f(1, 0, np.array(10, dtype=x1.dtype), 0) == 20.5

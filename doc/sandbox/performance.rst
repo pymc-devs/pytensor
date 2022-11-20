@@ -3,18 +3,18 @@
 Performance
 ===========
 
-Aesara uses several tricks to obtain good performance:
+Pytensor uses several tricks to obtain good performance:
  * common sub-expression elimination
  * [custom generated] C code for many operations
  * pre-allocation of temporary storage
  * loop fusion (which gcc normally can't do)
 
 On my neural net experiments for my course projects, I was getting around 10x
-speed improvements over basic numpy by using aesara.
+speed improvements over basic numpy by using pytensor.
 [More specific speed tests would be nice.]
 
 
-With a little work, Aesara could also implement more sophisticated
+With a little work, Pytensor could also implement more sophisticated
 rewrites:
 
  * automatic ordering of matrix multiplications

@@ -1,11 +1,11 @@
 import numpy as np
 import pytest
 
-from aesara import function
-from aesara.configdefaults import config
-from aesara.sandbox import multinomial
-from aesara.sandbox.rng_mrg import MRG_RandomStream as RandomStream
-from aesara.tensor.type import fmatrix, fvector, iscalar
+from pytensor import function
+from pytensor.configdefaults import config
+from pytensor.sandbox import multinomial
+from pytensor.sandbox.rng_mrg import MRG_RandomStream as RandomStream
+from pytensor.tensor.type import fmatrix, fvector, iscalar
 
 
 class TestOP:

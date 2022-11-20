@@ -44,7 +44,7 @@ Defining a params type
 
     This section is only relevant if you decide to create your own type.
 
-The first thing you need to do is to define an Aesara Type for your
+The first thing you need to do is to define an Pytensor Type for your
 params object.  It doesn't have to be complete type because only the
 following methods will be used for the type:
 
@@ -73,8 +73,8 @@ attribute :attr:`params_type` to an instance of your params Type.
 
 .. note::
 
-   If you want to have multiple parameters, Aesara provides the convenient class
-   :class:`aesara.link.c.params_type.ParamsType` that allows to bundle many parameters into
+   If you want to have multiple parameters, Pytensor provides the convenient class
+   :class:`pytensor.link.c.params_type.ParamsType` that allows to bundle many parameters into
    one object that will be available in both Python (as a Python object) and C code (as a struct).
    See :ref:`ParamsType tutorial and API documentation <libdoc_graph_params_type>` for more infos.
 
@@ -139,9 +139,9 @@ the params type.
 
 .. testcode::
 
-   from aesara.link.c.op import COp
-   from aesara.link.c.type import Generic
-   from aesara.scalar import as_scalar
+   from pytensor.link.c.op import COp
+   from pytensor.link.c.type import Generic
+   from pytensor.scalar import as_scalar
 
    class MulOp(COp):
        params_type = Generic()
@@ -175,9 +175,9 @@ weights.
 
 .. testcode::
 
-   from aesara.graph.op import Op
-   from aesara.link.c.type import Generic
-   from aesara.scalar import as_scalar
+   from pytensor.graph.op import Op
+   from pytensor.link.c.type import Generic
+   from pytensor.scalar import as_scalar
 
    class ab(object):
        def __init__(self, alpha, beta):

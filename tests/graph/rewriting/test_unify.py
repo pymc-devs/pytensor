@@ -7,12 +7,12 @@ from etuples.core import ExpressionTuple
 from unification import reify, unify, var
 from unification.variable import Var
 
-import aesara.scalar as aes
-import aesara.tensor as at
-from aesara.graph.basic import Apply, Constant, equal_computations
-from aesara.graph.op import Op
-from aesara.graph.rewriting.unify import ConstrainedVar, convert_strs_to_vars
-from aesara.tensor.type import TensorType
+import pytensor.scalar as aes
+import pytensor.tensor as at
+from pytensor.graph.basic import Apply, Constant, equal_computations
+from pytensor.graph.op import Op
+from pytensor.graph.rewriting.unify import ConstrainedVar, convert_strs_to_vars
+from pytensor.tensor.type import TensorType
 from tests.graph.utils import MyType
 
 
@@ -258,7 +258,7 @@ def test_unify_Type():
     s = unify(t1, etuple(TensorType, "float64", (1, None)))
     assert s == {}
 
-    from aesara.scalar.basic import ScalarType
+    from pytensor.scalar.basic import ScalarType
 
     st1 = ScalarType(np.float64)
     st2 = ScalarType(np.float64)
@@ -355,4 +355,4 @@ def test_convert_strs_to_vars():
 def test_deprecations():
     """Make sure we can import deprecated classes from current and deprecated modules."""
     with pytest.deprecated_call():
-        from aesara.graph.unify import eval_if_etuple  # noqa: F401 F811
+        from pytensor.graph.unify import eval_if_etuple  # noqa: F401 F811

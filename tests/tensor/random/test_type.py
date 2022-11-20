@@ -3,9 +3,9 @@ import pickle
 import numpy as np
 import pytest
 
-from aesara import shared
-from aesara.compile.ops import ViewOp
-from aesara.tensor.random.type import (
+from pytensor import shared
+from pytensor.compile.ops import ViewOp
+from pytensor.tensor.random.type import (
     RandomGeneratorType,
     RandomStateType,
     random_generator_type,
@@ -19,8 +19,8 @@ from aesara.tensor.random.type import (
 def test_view_op_c_code():
     # TODO: It might be good to make sure that the registered C code works
     # (even though it's basically copy-paste from other registered `Op`s).
-    # from aesara.compile.ops import view_op
-    # from aesara.link.c.basic import CLinker
+    # from pytensor.compile.ops import view_op
+    # from pytensor.link.c.basic import CLinker
     # rng_var = random_state_type()
     # rng_view = view_op(rng_var)
     # function(

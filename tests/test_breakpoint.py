@@ -1,10 +1,10 @@
 import numpy as np
 
-from aesara.breakpoint import PdbBreakpoint
-from aesara.compile.function import function
-from aesara.gradient import grad
-from aesara.tensor.math import dot, gt
-from aesara.tensor.type import fmatrix, fscalar
+from pytensor.breakpoint import PdbBreakpoint
+from pytensor.compile.function import function
+from pytensor.gradient import grad
+from pytensor.tensor.math import dot, gt
+from pytensor.tensor.type import fmatrix, fscalar
 from tests import unittest_tools as utt
 
 
@@ -51,8 +51,8 @@ class TestPdbBreakpoint(utt.InferShapeTester):
             grad(self.monitored_input2.sum(), self.input2),
         ]
 
-        # Add self.monitored_input1 as an output to the Aesara function to
-        # prevent Aesara from optimizing the PdbBreakpoint op out of the
+        # Add self.monitored_input1 as an output to the Pytensor function to
+        # prevent Pytensor from optimizing the PdbBreakpoint op out of the
         # function graph
         fct = function([self.input1, self.input2], grads + [self.monitored_input1])
 

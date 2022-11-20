@@ -4,14 +4,14 @@ import numpy as np
 import pytest
 from packaging.version import parse as version_parse
 
-import aesara
-import aesara.tensor as at
-from aesara.compile.function import function
-from aesara.compile.sharedvalue import shared
-from aesara.configdefaults import config
-from aesara.graph.fg import FunctionGraph
-from aesara.tensor.random.basic import RandomVariable
-from aesara.tensor.random.utils import RandomStream
+import pytensor
+import pytensor.tensor as at
+from pytensor.compile.function import function
+from pytensor.compile.sharedvalue import shared
+from pytensor.configdefaults import config
+from pytensor.graph.fg import FunctionGraph
+from pytensor.tensor.random.basic import RandomVariable
+from pytensor.tensor.random.utils import RandomStream
 from tests.link.jax.test_basic import compare_jax_and_py, jax_mode
 
 
@@ -105,7 +105,7 @@ def test_random_updates(rng_ctor):
             "The RandomType SharedVariables [original_rng] will not be used"
         ),
     ):
-        f = aesara.function([], [x], updates={rng: next_rng}, mode=jax_mode)
+        f = pytensor.function([], [x], updates={rng: next_rng}, mode=jax_mode)
     assert f() != f()
 
     # Check that original rng variable content was not overwritten when calling jax_typify

@@ -1,39 +1,39 @@
 
 .. _debug_faq:
 
-=========================================
-Debugging Aesara: FAQ and Troubleshooting
-=========================================
+===========================================
+Debugging Pytensor: FAQ and Troubleshooting
+===========================================
 
 There are many kinds of bugs that might come up in a computer program.
 This page is structured as a FAQ.  It provides recipes to tackle common
 problems, and introduces some of the tools that we use to find problems in our
-own Aesara code, and even (it happens) in Aesara's internals, in
+own Pytensor code, and even (it happens) in Pytensor's internals, in
 :ref:`using_debugmode`.
 
-Isolating the Problem/Testing Aesara Compiler
----------------------------------------------
+Isolating the Problem/Testing Pytensor Compiler
+-----------------------------------------------
 
-You can run your Aesara function in a :ref:`DebugMode<using_debugmode>`.
-This tests the Aesara rewrites and helps to find where NaN, inf and other problems come from.
+You can run your Pytensor function in a :ref:`DebugMode<using_debugmode>`.
+This tests the Pytensor rewrites and helps to find where NaN, inf and other problems come from.
 
 Interpreting Error Messages
 ---------------------------
 
-Even in its default configuration, Aesara tries to display useful error
+Even in its default configuration, Pytensor tries to display useful error
 messages. Consider the following faulty code.
 
 .. testcode::
 
     import numpy as np
-    import aesara
-    import aesara.tensor as at
+    import pytensor
+    import pytensor.tensor as at
 
     x = at.vector()
     y = at.vector()
     z = x + x
     z = z + y
-    f = aesara.function([x, y], z)
+    f = pytensor.function([x, y], z)
     f(np.ones((2,)), np.ones((3,)))
 
 Running the code above we see:
@@ -50,8 +50,8 @@ Running the code above we see:
    Inputs strides: [(8,), (8,), (8,)]
    Inputs scalar values: ['not scalar', 'not scalar', 'not scalar']
 
-   HINT: Re-running with most Aesara optimizations disabled could give you a back-traces when this node was created. This can be done with by setting the Aesara flags 'optimizer=fast_compile'. If that does not work, Aesara optimizations can be disabled with 'optimizer=None'.
-   HINT: Use the Aesara flag 'exception_verbosity=high' for a debugprint of this apply node.
+   HINT: Re-running with most Pytensor optimizations disabled could give you a back-traces when this node was created. This can be done with by setting the Pytensor flags 'optimizer=fast_compile'. If that does not work, Pytensor optimizations can be disabled with 'optimizer=None'.
+   HINT: Use the Pytensor flag 'exception_verbosity=high' for a debugprint of this apply node.
 
 Arguably the most useful information is approximately half-way through
 the error message, where the kind of error is displayed along with its
@@ -60,7 +60,7 @@ Below it, some other information is given, such as the `Apply` node that
 caused the error, as well as the input types, shapes, strides and
 scalar values.
 
-The two hints can also be helpful when debugging. Using the Aesara flag
+The two hints can also be helpful when debugging. Using the Pytensor flag
 ``optimizer=fast_compile`` or ``optimizer=None`` can often tell you
 the faulty line, while ``exception_verbosity=high`` will display a
 debug print of the apply node. Using these hints, the end of the error
@@ -88,11 +88,11 @@ you could set ``optimizer=None`` or use test values.
 Using Test Values
 -----------------
 
-As of v.0.4.0, Aesara has a new mechanism by which graphs are executed
-on-the-fly, before a :func:`aesara.function` is ever compiled. Since optimizations
+As of v.0.4.0, Pytensor has a new mechanism by which graphs are executed
+on-the-fly, before a :func:`pytensor.function` is ever compiled. Since optimizations
 haven't been applied at this stage, it is easier for the user to locate the
 source of some bug. This functionality is enabled through the config flag
-`aesara.config.compute_test_value`. Its use is best shown through the
+`pytensor.config.compute_test_value`. Its use is best shown through the
 following example. Here, we use ``exception_verbosity=high`` and
 ``optimizer=fast_compile``, which would not tell you the line at fault.
 ``optimizer=None`` would and it could therefore be used instead of test values.
@@ -101,24 +101,24 @@ following example. Here, we use ``exception_verbosity=high`` and
 .. testcode:: testvalue
 
     import numpy as np
-    import aesara
-    import aesara.tensor as at
+    import pytensor
+    import pytensor.tensor as at
 
     # compute_test_value is 'off' by default, meaning this feature is inactive
-    aesara.config.compute_test_value = 'off' # Use 'warn' to activate this feature
+    pytensor.config.compute_test_value = 'off' # Use 'warn' to activate this feature
 
     # configure shared variables
-    W1val = np.random.random((2, 10, 10)).astype(aesara.config.floatX)
-    W1 = aesara.shared(W1val, 'W1')
-    W2val = np.random.random((15, 20)).astype(aesara.config.floatX)
-    W2 = aesara.shared(W2val, 'W2')
+    W1val = np.random.random((2, 10, 10)).astype(pytensor.config.floatX)
+    W1 = pytensor.shared(W1val, 'W1')
+    W2val = np.random.random((15, 20)).astype(pytensor.config.floatX)
+    W2 = pytensor.shared(W2val, 'W2')
 
     # input which will be of shape (5,10)
     x  = at.matrix('x')
-    # provide Aesara with a default test-value
+    # provide Pytensor with a default test-value
     #x.tag.test_value = np.random.random((5, 10))
 
-    # transform the shared variable in some way. Aesara does not
+    # transform the shared variable in some way. Pytensor does not
     # know off hand that the matrix func_of_W1 has shape (20, 10)
     func_of_W1 = W1.dimshuffle(2, 0, 1).flatten(2).T
 
@@ -129,7 +129,7 @@ following example. Here, we use ``exception_verbosity=high`` and
     h2 = at.dot(h1, W2.T)
 
     # compile and call the actual function
-    f = aesara.function([x], h2)
+    f = pytensor.function([x], h2)
     f(np.random.random((5, 10)))
 
 Running the above code generates the following error message:
@@ -139,9 +139,9 @@ Running the above code generates the following error message:
     Traceback (most recent call last):
       File "test1.py", line 31, in <module>
         f(np.random.random((5, 10)))
-      File "PATH_TO_AESARA/aesara/compile/function/types.py", line 605, in __call__
+      File "PATH_TO_PYTENSOR/pytensor/compile/function/types.py", line 605, in __call__
         self.vm.thunks[self.vm.position_of_error])
-      File "PATH_TO_AESARA/aesara/compile/function/types.py", line 595, in __call__
+      File "PATH_TO_PYTENSOR/pytensor/compile/function/types.py", line 595, in __call__
         outputs = self.vm()
     ValueError: Shape mismatch: x has 10 cols (and 5 rows) but y has 20 rows (and 10 cols)
     Apply node that caused the error: Dot22(x, DimShuffle{1,0}.0)
@@ -158,25 +158,25 @@ Running the above code generates the following error message:
          |DimShuffle{2,0,1} [id E] <TensorType(float64, (?, ?, ?))> ''
            |W1 [id F] <TensorType(float64, (?, ?, ?))>
 
-    HINT: Re-running with most Aesara optimization disabled could give you a back-traces when this node was created. This can be done with by setting the Aesara flags 'optimizer=fast_compile'. If that does not work, Aesara optimization can be disabled with 'optimizer=None'.
+    HINT: Re-running with most Pytensor optimization disabled could give you a back-traces when this node was created. This can be done with by setting the Pytensor flags 'optimizer=fast_compile'. If that does not work, Pytensor optimization can be disabled with 'optimizer=None'.
 
 If the above is not informative enough, by instrumenting the code ever
-so slightly, we can get Aesara to reveal the exact source of the error.
+so slightly, we can get Pytensor to reveal the exact source of the error.
 
 .. code-block:: python
 
     # enable on-the-fly graph computations
-    aesara.config.compute_test_value = 'warn'
+    pytensor.config.compute_test_value = 'warn'
 
     ...
 
     # Input which will have the shape (5, 10)
     x  = at.matrix('x')
-    # Provide Aesara with a default test-value
+    # Provide Pytensor with a default test-value
     x.tag.test_value = np.random.random((5, 10))
 
 In the above, we are tagging the symbolic matrix *x* with a special test
-value. This allows Aesara to evaluate symbolic expressions on-the-fly (by
+value. This allows Pytensor to evaluate symbolic expressions on-the-fly (by
 calling the ``perform`` method of each op), as they are being defined. Sources
 of error can thus be identified with much more precision and much earlier in
 the compilation pipeline. For example, running the above code yields the
@@ -187,22 +187,22 @@ following error message, which properly identifies *line 24* as the culprit.
     Traceback (most recent call last):
       File "test2.py", line 24, in <module>
         h1 = at.dot(x, func_of_W1)
-      File "PATH_TO_AESARA/aesara/tensor/basic.py", line 4734, in dot
+      File "PATH_TO_PYTENSOR/pytensor/tensor/basic.py", line 4734, in dot
         return _dot(a, b)
-      File "PATH_TO_AESARA/aesara/graph/op.py", line 545, in __call__
+      File "PATH_TO_PYTENSOR/pytensor/graph/op.py", line 545, in __call__
         required = thunk()
-      File "PATH_TO_AESARA/aesara/graph/op.py", line 752, in rval
+      File "PATH_TO_PYTENSOR/pytensor/graph/op.py", line 752, in rval
         r = p(n, [x[0] for x in i], o)
-      File "PATH_TO_AESARA/aesara/tensor/basic.py", line 4554, in perform
+      File "PATH_TO_PYTENSOR/pytensor/tensor/basic.py", line 4554, in perform
         z[0] = np.asarray(np.dot(x, y))
     ValueError: matrices are not aligned
 
 The ``compute_test_value`` mechanism works as follows:
 
-* Aesara ``constants`` and ``shared`` variables are used as is. No need to instrument them.
-* A Aesara *variable* (i.e. ``dmatrix``, ``vector``, etc.) should be
+* Pytensor ``constants`` and ``shared`` variables are used as is. No need to instrument them.
+* A Pytensor *variable* (i.e. ``dmatrix``, ``vector``, etc.) should be
   given a special test value through the attribute ``tag.test_value``.
-* Aesara automatically instruments intermediate results. As such, any quantity
+* Pytensor automatically instruments intermediate results. As such, any quantity
   derived from *x* will be given a ``tag.test_value`` automatically.
 
 ``compute_test_value`` can take the following values:
@@ -223,8 +223,8 @@ It is also possible to override variables ``__repr__`` method to have them retur
 
 .. testsetup:: printtestvalue
 
-   import aesara
-   import aesara.tensor as at
+   import pytensor
+   import pytensor.tensor as at
 
 
 .. testcode:: printtestvalue
@@ -234,11 +234,11 @@ It is also possible to override variables ``__repr__`` method to have them retur
    x.tag.test_value = 42
 
    # Enable test value printing
-   aesara.config.print_test_value = True
+   pytensor.config.print_test_value = True
    print(x.__repr__())
 
    # Disable test value printing
-   aesara.config.print_test_value = False
+   pytensor.config.print_test_value = False
    print(x.__repr__())
 
 Running the code above returns the following output:
@@ -253,19 +253,19 @@ Running the code above returns the following output:
 "How do I print an intermediate value in a function?"
 -----------------------------------------------------
 
-Aesara provides a :class:`Print`\ :class:`Op` to do this.
+Pytensor provides a :class:`Print`\ :class:`Op` to do this.
 
 .. testcode::
 
     import numpy as np
-    import aesara
+    import pytensor
 
-    x = aesara.tensor.dvector('x')
+    x = pytensor.tensor.dvector('x')
 
-    x_printed = aesara.printing.Print('this is a very important value')(x)
+    x_printed = pytensor.printing.Print('this is a very important value')(x)
 
-    f = aesara.function([x], x * 5)
-    f_with_print = aesara.function([x], x_printed * 5)
+    f = pytensor.function([x], x * 5)
+    f_with_print = pytensor.function([x], x_printed * 5)
 
     # This runs the graph without any printing
     assert np.array_equal(f([1, 2, 3]), [5, 10, 15])
@@ -277,14 +277,14 @@ Aesara provides a :class:`Print`\ :class:`Op` to do this.
 
     this is a very important value __str__ = [ 1.  2.  3.]
 
-Since Aesara runs your program in a topological order, you won't have precise
+Since Pytensor runs your program in a topological order, you won't have precise
 control over the order in which multiple :class:`Print`\ `Op`\s are evaluated.  For a more
 precise inspection of what's being computed where, when, and how, see the discussion
 :ref:`faq_monitormode`.
 
 .. warning::
 
-    Using this :class:`Print`\ `Op` can prevent some Aesara rewrites from being
+    Using this :class:`Print`\ `Op` can prevent some Pytensor rewrites from being
     applied.  So, if you use `Print` and the graph now returns NaNs for example,
     try removing the `Print`\s to see if they're the cause or not.
 
@@ -294,12 +294,12 @@ precise inspection of what's being computed where, when, and how, see the discus
 
 .. TODO: dead links in the next paragraph
 
-Aesara provides two functions, :func:`aesara.pp` and
-:func:`aesara.printing.debugprint`, to print a graph to the terminal before or after
+Pytensor provides two functions, :func:`pytensor.pp` and
+:func:`pytensor.printing.debugprint`, to print a graph to the terminal before or after
 compilation.  These two functions print expression graphs in different ways:
 :func:`pp` is more compact and somewhat math-like, and :func:`debugprint` is more verbose and true to
 the underlying graph objects being printed.
-Aesara also provides :func:`aesara.printing.pydotprint` that creates a PNG image of the graph.
+Pytensor also provides :func:`pytensor.printing.pydotprint` that creates a PNG image of the graph.
 
 You can read about them in :ref:`libdoc_printing`.
 
@@ -308,16 +308,16 @@ You can read about them in :ref:`libdoc_printing`.
 
 First, make sure you're running in ``FAST_RUN`` mode. Even though
 ``FAST_RUN`` is the default mode, insist by passing ``mode='FAST_RUN'``
-to `aesara.function`  or by setting :attr:`config.mode`
+to `pytensor.function`  or by setting :attr:`config.mode`
 to ``FAST_RUN``.
 
-Second, try the Aesara :ref:`profiling <tut_profiling>`.  This will tell you which
+Second, try the Pytensor :ref:`profiling <tut_profiling>`.  This will tell you which
 :class:`Apply` nodes, and which :class:`Op`\s are eating up your CPU cycles.
 
 Tips:
 
 * Use the flags ``floatX=float32`` to require type float32 instead of float64.
-  Use the Aesara constructors `matrix`, `vector`, etc., instead of `dmatrix`, `dvector`, etc.,
+  Use the Pytensor constructors `matrix`, `vector`, etc., instead of `dmatrix`, `dvector`, etc.,
   since the latter use the default detected precision and the former use only float64.
 * Check in the ``profile`` mode that there is no `Dot`\ `Op` in the post-compilation
   graph while you are multiplying two matrices of the same type. `Dot` should be
@@ -337,7 +337,7 @@ shows how to print all inputs and outputs:
 
 .. testcode::
 
-    import aesara
+    import pytensor
 
     def inspect_inputs(fgraph, i, node, fn):
         print(i, node, "input(s) value(s):", [input[0] for input in fn.inputs],
@@ -346,9 +346,9 @@ shows how to print all inputs and outputs:
     def inspect_outputs(fgraph, i, node, fn):
         print(" output(s) value(s):", [output[0] for output in fn.outputs])
 
-    x = aesara.tensor.dscalar('x')
-    f = aesara.function([x], [5 * x],
-                        mode=aesara.compile.MonitorMode(
+    x = pytensor.tensor.dscalar('x')
+    f = pytensor.function([x], [5 * x],
+                        mode=pytensor.compile.MonitorMode(
                             pre_func=inspect_inputs,
                             post_func=inspect_outputs))
     f(3)
@@ -373,12 +373,12 @@ computations, which can be achieved as follows:
 
     import numpy
 
-    import aesara
+    import pytensor
 
     # This is the current suggested detect_nan implementation to
     # show you how it work.  That way, you can modify it for your
     # need.  If you want exactly this method, you can use
-    # `aesara.compile.monitormode.detect_nan` that will always
+    # `pytensor.compile.monitormode.detect_nan` that will always
     # contain the current suggested version.
 
     def detect_nan(fgraph, i, node, fn):
@@ -386,15 +386,15 @@ computations, which can be achieved as follows:
             if (not isinstance(output[0], np.ndarray) and
                 np.isnan(output[0]).any()):
                 print('*** NaN detected ***')
-                aesara.printing.debugprint(node)
+                pytensor.printing.debugprint(node)
                 print('Inputs : %s' % [input[0] for input in fn.inputs])
                 print('Outputs: %s' % [output[0] for output in fn.outputs])
                 break
 
-    x = aesara.tensor.dscalar('x')
-    f = aesara.function(
-        [x], [aesara.tensor.log(x) * x],
-        mode=aesara.compile.MonitorMode(
+    x = pytensor.tensor.dscalar('x')
+    f = pytensor.function(
+        [x], [pytensor.tensor.log(x) * x],
+        mode=pytensor.compile.MonitorMode(
         post_func=detect_nan)
     )
     f(0)  # log(0) * 0 = -inf * 0 = NaN
@@ -419,14 +419,14 @@ function. To disable those rewrites, define the `MonitorMode` like this:
 
 .. testcode:: compiled
 
-   mode = aesara.compile.MonitorMode(post_func=detect_nan).excluding(
+   mode = pytensor.compile.MonitorMode(post_func=detect_nan).excluding(
        'local_elemwise_fusion', 'inplace')
-   f = aesara.function([x], [aesara.tensor.log(x) * x],
+   f = pytensor.function([x], [pytensor.tensor.log(x) * x],
                        mode=mode)
 
 .. note::
 
-    The Aesara flags ``optimizer_including``, ``optimizer_excluding``
+    The Pytensor flags ``optimizer_including``, ``optimizer_excluding``
     and ``optimizer_requiring`` aren't used by the `MonitorMode`, they
     are used only by the ``default`` mode. You can't use the ``default``
     mode with `MonitorMode`, as you need to define what you monitor.
@@ -434,7 +434,7 @@ function. To disable those rewrites, define the `MonitorMode` like this:
 To be sure all inputs of the node are available during the call to
 ``post_func``, you must also disable the garbage collector. Otherwise,
 the execution of the node can garbage collect its inputs that aren't
-needed anymore by the Aesara function. This can be done with the Aesara
+needed anymore by the Pytensor function. This can be done with the Pytensor
 flag:
 
 .. code-block:: python
@@ -460,13 +460,13 @@ Consider this example script (``ex.py``):
 .. testcode::
 
    import numpy as np
-   import aesara
-   import aesara.tensor as at
+   import pytensor
+   import pytensor.tensor as at
 
    a = at.dmatrix('a')
    b = at.dmatrix('b')
 
-   f = aesara.function([a, b], [a * b])
+   f = pytensor.function([a, b], [a * b])
 
    # Matrices chosen so dimensions are unsuitable for multiplication
    mat1 = np.arange(12).reshape((3, 4))
@@ -491,9 +491,9 @@ Consider this example script (``ex.py``):
 
    Backtrace when the node is created:
      File "<doctest default[0]>", line 8, in <module>
-       f = aesara.function([a, b], [a * b])
+       f = pytensor.function([a, b], [a * b])
 
-   HINT: Use the Aesara flag 'exception_verbosity=high' for a debugprint and storage map footprint of this apply node.
+   HINT: Use the Pytensor flag 'exception_verbosity=high' for a debugprint and storage map footprint of this apply node.
 
 This is actually so simple the debugging could be done easily, but it's for
 illustrative purposes. As the matrices can't be multiplied element-wise
@@ -503,10 +503,10 @@ illustrative purposes. As the matrices can't be multiplied element-wise
 
     File "ex.py", line 14, in <module>
       f(mat1, mat2)
-    File "/u/username/Aesara/aesara/compile/function/types.py", line 451, in __call__
-    File "/u/username/Aesara/aesara/graph/link.py", line 271, in streamline_default_f
-    File "/u/username/Aesara/aesara/graph/link.py", line 267, in streamline_default_f
-    File "/u/username/Aesara/aesara/graph/cc.py", line 1049, in execute ValueError: ('Input dimension mismatch. (input[0].shape[0] = 3, input[1].shape[0] = 5)', Elemwise{mul,no_inplace}(a, b), Elemwise{mul,no_inplace}(a, b))
+    File "/u/username/Pytensor/pytensor/compile/function/types.py", line 451, in __call__
+    File "/u/username/Pytensor/pytensor/graph/link.py", line 271, in streamline_default_f
+    File "/u/username/Pytensor/pytensor/graph/link.py", line 267, in streamline_default_f
+    File "/u/username/Pytensor/pytensor/graph/cc.py", line 1049, in execute ValueError: ('Input dimension mismatch. (input[0].shape[0] = 3, input[1].shape[0] = 5)', Elemwise{mul,no_inplace}(a, b), Elemwise{mul,no_inplace}(a, b))
 
 The call stack contains some useful information to trace back the source
 of the error. There's the script where the compiled function was called --
@@ -516,7 +516,7 @@ tells us about the `Op` that caused the exception. In this case it's a ``mul``
 involving variables with names ``a`` and ``b``. But suppose we instead had an
 intermediate result to which we hadn't given a name.
 
-After learning a few things about the graph structure in Aesara, we can use
+After learning a few things about the graph structure in Pytensor, we can use
 the Python debugger to explore the graph, and then we can get runtime
 information about the error. Matrix dimensions, especially, are useful to
 pinpoint the source of the error. In the printout, there are also two of the
@@ -528,7 +528,7 @@ debugger module and run the program with ``c``:
 
     python -m pdb ex.py
     > /u/username/experiments/doctmp1/ex.py(1)<module>()
-    -> import aesara
+    -> import pytensor
     (Pdb) c
 
 Then we get back the above error printout, but the interpreter breaks in
@@ -559,7 +559,7 @@ Dumping a Function to help debug
 If you are reading this, there is high chance that you emailed our
 mailing list and we asked you to read this section. This section
 explain how to dump all the parameter passed to
-:func:`aesara.function`. This is useful to help us reproduce a problem
+:func:`pytensor.function`. This is useful to help us reproduce a problem
 during compilation and it doesn't request you to make a self contained
 example.
 
@@ -570,19 +570,19 @@ code; otherwise, we won't be able to unpickle it.
 .. code-block:: python
 
     # Replace this line:
-    aesara.function(...)
+    pytensor.function(...)
     # with
-    aesara.function_dump(filename, ...)
+    pytensor.function_dump(filename, ...)
     # Where `filename` is a string to a file that we will write to.
 
 Then send us ``filename``.
 
 
-Breakpoint during Aesara function execution
--------------------------------------------
+Breakpoint during Pytensor function execution
+---------------------------------------------
 
-You can set a breakpoint during the execution of an Aesara function with
-:class:`PdbBreakpoint <aesara.breakpoint.PdbBreakpoint>`.
-:class:`PdbBreakpoint <aesara.breakpoint.PdbBreakpoint>` automatically
+You can set a breakpoint during the execution of an Pytensor function with
+:class:`PdbBreakpoint <pytensor.breakpoint.PdbBreakpoint>`.
+:class:`PdbBreakpoint <pytensor.breakpoint.PdbBreakpoint>` automatically
 detects available debuggers and uses the first available in the following order:
 `pudb`, `ipdb`, or `pdb`.

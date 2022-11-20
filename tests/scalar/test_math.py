@@ -1,12 +1,19 @@
 import numpy as np
 import scipy.special as sp
 
-import aesara.tensor as at
-from aesara import function
-from aesara.compile.mode import Mode
-from aesara.graph.fg import FunctionGraph
-from aesara.link.c.basic import CLinker
-from aesara.scalar.math import betainc, betainc_der, gammainc, gammaincc, gammal, gammau
+import pytensor.tensor as at
+from pytensor import function
+from pytensor.compile.mode import Mode
+from pytensor.graph.fg import FunctionGraph
+from pytensor.link.c.basic import CLinker
+from pytensor.scalar.math import (
+    betainc,
+    betainc_der,
+    gammainc,
+    gammaincc,
+    gammal,
+    gammau,
+)
 from tests.link.test_link import make_function
 
 

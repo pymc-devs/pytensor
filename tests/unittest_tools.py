@@ -6,13 +6,13 @@ from functools import wraps
 import numpy as np
 import pytest
 
-import aesara
-from aesara.compile.debugmode import str_diagnostic
-from aesara.configdefaults import config
-from aesara.gradient import verify_grad as orig_verify_grad
-from aesara.tensor.basic import as_tensor_variable
-from aesara.tensor.math import _allclose
-from aesara.tensor.math import add as at_add
+import pytensor
+from pytensor.compile.debugmode import str_diagnostic
+from pytensor.configdefaults import config
+from pytensor.gradient import verify_grad as orig_verify_grad
+from pytensor.tensor.basic import as_tensor_variable
+from pytensor.tensor.math import _allclose
+from pytensor.tensor.math import add as at_add
 
 
 _logger = logging.getLogger("tests.unittest_tools")
@@ -181,7 +181,7 @@ class InferShapeTester:
         # and it can be None
         mode = getattr(self, "mode", None)
         if mode is None:
-            mode = aesara.compile.get_default_mode()
+            mode = pytensor.compile.get_default_mode()
         # This mode seems to be the minimal one including the shape_i
         # optimizations, if we don't want to enumerate them explicitly.
         self.mode = mode.including("canonicalize")
@@ -243,12 +243,12 @@ class InferShapeTester:
                     )
                     break
 
-        outputs_function = aesara.function(inputs, outputs, mode=mode)
+        outputs_function = pytensor.function(inputs, outputs, mode=mode)
 
         # Now that we have full shape information at the type level, it's
         # possible/more likely that shape-computing graphs will not need the
         # inputs to the graph for which the shape is computed
-        shapes_function = aesara.function(
+        shapes_function = pytensor.function(
             inputs, [o.shape for o in outputs], mode=mode, on_unused_input="ignore"
         )
 
@@ -374,9 +374,9 @@ class AttemptManyTimes:
 
 def assertFailure_fast(f):
     """A Decorator to handle the test cases that are failing when
-    AESARA_FLAGS =cycle_detection='fast'.
+    PYTENSOR_FLAGS =cycle_detection='fast'.
     """
-    if aesara.config.cycle_detection == "fast":
+    if pytensor.config.cycle_detection == "fast":
 
         def test_with_assert(*args, **kwargs):
             with pytest.raises(Exception):
@@ -387,7 +387,7 @@ def assertFailure_fast(f):
         return f
 
 
-def create_aesara_param(param_value):
+def create_pytensor_param(param_value):
     """Create a `Variable` from a value and set its test value."""
     p_at = as_tensor_variable(param_value).type()
     p_at.tag.test_value = param_value

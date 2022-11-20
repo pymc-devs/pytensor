@@ -4,7 +4,7 @@
 :mod:`utils` -- Friendly random numbers
 ======================================================
 
-.. module:: aesara.tensor.random.utils
+.. module:: pytensor.tensor.random.utils
    :platform: Unix, Windows
    :synopsis: symbolic random variables
 .. moduleauthor:: LISA
@@ -12,7 +12,7 @@
 Guide
 =====
 
-Aesara assignes NumPy RNG states (e.g. `Generator` or `RandomState` objects) to
+Pytensor assignes NumPy RNG states (e.g. `Generator` or `RandomState` objects) to
 each `RandomVariable`.  The combination of an RNG state, a specific
 `RandomVariable` type (e.g. `NormalRV`), and a set of distribution parameters
 uniquely defines the `RandomVariable` instances in a graph.
@@ -23,7 +23,7 @@ means of generating distinct random variables in a fully reproducible way.
 
 `RandomStream` is also designed to produce simpler graphs and work with more
 sophisticated `Op`\s like `Scan`, which makes it the de facto random variable
-interface in Aesara.
+interface in Pytensor.
 
 For an example of how to use random numbers, see :ref:`Using Random Numbers <using_random_numbers>`.
 
@@ -42,7 +42,7 @@ Reference
 
         This can be a convenient shortcut to enumerating all the random
         variables in a large graph in the ``update`` argument to
-        `aesara.function`.
+        `pytensor.function`.
 
     .. method:: seed(meta_seed)
 

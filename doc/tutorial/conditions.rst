@@ -20,9 +20,9 @@ IfElse vs Switch
 
 .. testcode::
 
-   from aesara import tensor as at
-   from aesara.ifelse import ifelse
-   import aesara, time, numpy
+   from pytensor import tensor as at
+   from pytensor.ifelse import ifelse
+   import pytensor, time, numpy
 
    a,b = at.scalars('a', 'b')
    x,y = at.matrices('x', 'y')
@@ -30,10 +30,10 @@ IfElse vs Switch
    z_switch = at.switch(at.lt(a, b), at.mean(x), at.mean(y))
    z_lazy = ifelse(at.lt(a, b), at.mean(x), at.mean(y))
 
-   f_switch = aesara.function([a, b, x, y], z_switch,
-                              mode=aesara.compile.mode.Mode(linker='vm'))
-   f_lazyifelse = aesara.function([a, b, x, y], z_lazy,
-                                  mode=aesara.compile.mode.Mode(linker='vm'))
+   f_switch = pytensor.function([a, b, x, y], z_switch,
+                              mode=pytensor.compile.mode.Mode(linker='vm'))
+   f_lazyifelse = pytensor.function([a, b, x, y], z_lazy,
+                                  mode=pytensor.compile.mode.Mode(linker='vm'))
 
    val1 = 0.
    val2 = 1.
@@ -83,4 +83,4 @@ this `ticket <http://www.assembla.com/spaces/theano/tickets/764>`_.
    means everything will be computed when we build it, due to Python's
    greedy evaluation and the semantic of test value. As we build both
    branches, they will be executed for test values. This doesn't cause
-   any changes during the execution of the compiled Aesara function.
+   any changes during the execution of the compiled Pytensor function.

@@ -1,21 +1,21 @@
 import numpy as np
 import pytest
 
-import aesara
-from aesara.compile.mode import get_default_mode, get_mode
-from aesara.configdefaults import config
-from aesara.graph.rewriting.basic import check_stack_trace
-from aesara.scalar.basic import Composite
-from aesara.tensor.elemwise import Elemwise
-from aesara.tensor.inplace import sigmoid_inplace
-from aesara.tensor.math import clip, sigmoid
-from aesara.tensor.nnet.sigm import (
+import pytensor
+from pytensor.compile.mode import get_default_mode, get_mode
+from pytensor.configdefaults import config
+from pytensor.graph.rewriting.basic import check_stack_trace
+from pytensor.scalar.basic import Composite
+from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.inplace import sigmoid_inplace
+from pytensor.tensor.math import clip, sigmoid
+from pytensor.tensor.nnet.sigm import (
     hard_sigmoid,
     ultra_fast_scalar_sigmoid,
     ultra_fast_sigmoid,
     ultra_fast_sigmoid_inplace,
 )
-from aesara.tensor.type import matrix
+from pytensor.tensor.type import matrix
 from tests.tensor.utils import (
     _good_broadcast_unary_normal_no_complex,
     check_floatX,
@@ -82,21 +82,21 @@ class TestSpecialSigmoidOpts:
         s = sigmoid(x)
 
         mode = self.get_mode("local_ultra_fast_sigmoid")
-        f = aesara.function([x], s, mode=mode)
+        f = pytensor.function([x], s, mode=mode)
         assert check_stack_trace(f, ops_to_check=sigmoid)
         topo = f.maker.fgraph.toposort()
         assert len(topo) == 1
         assert topo[0].op == sigmoid
 
         mode = self.get_mode().including("local_ultra_fast_sigmoid")
-        f = aesara.function([x], s, mode=mode)
+        f = pytensor.function([x], s, mode=mode)
         assert check_stack_trace(f, ops_to_check=ultra_fast_sigmoid)
         topo = f.maker.fgraph.toposort()
         assert topo[0].op == ultra_fast_sigmoid
         assert len(topo) == 1
 
         s = sigmoid_inplace(x)
-        f = aesara.function([x], s, mode=mode, accept_inplace=True)
+        f = pytensor.function([x], s, mode=mode, accept_inplace=True)
         assert check_stack_trace(f, ops_to_check=ultra_fast_sigmoid_inplace)
         topo = f.maker.fgraph.toposort()
         assert topo[0].op == ultra_fast_sigmoid_inplace
@@ -107,7 +107,7 @@ class TestSpecialSigmoidOpts:
         """Make sure this `Op`'s `c_code` works within a `Composite`."""
         x = matrix("x")
         mode = get_mode("FAST_RUN").including("local_ultra_fast_sigmoid")
-        f = aesara.function([x], sigmoid(x) + sigmoid(x + 1), mode=mode)
+        f = pytensor.function([x], sigmoid(x) + sigmoid(x + 1), mode=mode)
         topo = f.maker.fgraph.toposort()
 
         assert isinstance(topo[0].op, Elemwise)
@@ -122,18 +122,18 @@ class TestSpecialSigmoidOpts:
         s = sigmoid(x)
 
         mode = self.get_mode("local_hard_sigmoid")
-        f = aesara.function([x], s, mode=mode)
+        f = pytensor.function([x], s, mode=mode)
         assert check_stack_trace(f, ops_to_check=sigmoid)
         topo = f.maker.fgraph.toposort()
         assert topo[0].op == sigmoid
         assert len(topo) == 1
 
         mode = self.get_mode().including("local_hard_sigmoid")
-        f = aesara.function([x], s, mode=mode)
+        f = pytensor.function([x], s, mode=mode)
         topo = f.maker.fgraph.toposort()
         assert not any(n.op == sigmoid for n in topo)
         f([[-50, -10, -4, -1, 0, 1, 4, 10, 50]])
 
         mode2 = mode.excluding("fusion").excluding("inplace")
-        f2 = aesara.function([x], s, mode=mode2)
+        f2 = pytensor.function([x], s, mode=mode2)
         assert check_stack_trace(f2, ops_to_check=clip)

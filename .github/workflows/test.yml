@@ -31,16 +31,16 @@ jobs:
         with:
           filters: |
             python: &python
-            - 'aesara/**/*.py'
+            - 'pytensor/**/*.py'
             - 'tests/**/*.py'
-            - 'aesara/**/*.pyx'
+            - 'pytensor/**/*.pyx'
             - 'tests/**/*.pyx'
             - '*.py'
             src:
             - *python
-            - 'aesara/**/*.c'
+            - 'pytensor/**/*.c'
             - 'tests/**/*.c'
-            - 'aesara/**/*.h'
+            - 'pytensor/**/*.h'
             - 'tests/**/*.h'
             - '.github/workflows/*.yml'
             - 'setup.cfg'
@@ -120,8 +120,8 @@ jobs:
           mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" jax jaxlib
           pip install -e ./
           mamba list && pip freeze
-          python -c 'import aesara; print(aesara.config.__str__(print_doc=False))'
-          python -c 'import aesara; assert(aesara.config.blas__ldflags != "")'
+          python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'
+          python -c 'import pytensor; assert(pytensor.config.blas__ldflags != "")'
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
           INSTALL_NUMBA: ${{ matrix.install-numba }}
@@ -129,10 +129,10 @@ jobs:
       - name: Run tests
         shell: bash -l {0}
         run: |
-          if [[ $FAST_COMPILE == "1" ]]; then export AESARA_FLAGS=$AESARA_FLAGS,mode=FAST_COMPILE; fi
-          if [[ $FLOAT32 == "1" ]]; then export AESARA_FLAGS=$AESARA_FLAGS,floatX=float32; fi
-          export AESARA_FLAGS=$AESARA_FLAGS,warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
-          python -m pytest -x -r A --verbose --runslow --cov=aesara/ --cov-report=xml:coverage/coverage-${MATRIX_ID}.xml --no-cov-on-fail $PART
+          if [[ $FAST_COMPILE == "1" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,mode=FAST_COMPILE; fi
+          if [[ $FLOAT32 == "1" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,floatX=float32; fi
+          export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
+          python -m pytest -x -r A --verbose --runslow --cov=pytensor/ --cov-report=xml:coverage/coverage-${MATRIX_ID}.xml --no-cov-on-fail $PART
         env:
           MATRIX_ID: ${{ steps.matrix-id.outputs.id }}
           MKL_THREADING_LAYER: GNU

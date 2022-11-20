@@ -1,9 +1,9 @@
-from aesara.compile.function import function
-from aesara.compile.mode import AddFeatureOptimizer, Mode
-from aesara.graph.features import NoOutputFromInplace
-from aesara.graph.rewriting.db import RewriteDatabaseQuery, SequenceDB
-from aesara.tensor.math import dot, tanh
-from aesara.tensor.type import matrix
+from pytensor.compile.function import function
+from pytensor.compile.mode import AddFeatureOptimizer, Mode
+from pytensor.graph.features import NoOutputFromInplace
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery, SequenceDB
+from pytensor.tensor.math import dot, tanh
+from pytensor.tensor.type import matrix
 
 
 def test_Mode_basic():

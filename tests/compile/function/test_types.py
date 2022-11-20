@@ -4,22 +4,22 @@ import pickle
 import numpy as np
 import pytest
 
-import aesara.tensor as at
-from aesara.compile import shared
-from aesara.compile.debugmode import DebugMode, InvalidValueError
-from aesara.compile.function import function
-from aesara.compile.function.types import UnusedInputError
-from aesara.compile.io import In, Out
-from aesara.compile.mode import Mode, get_default_mode
-from aesara.configdefaults import config
-from aesara.graph.basic import Constant
-from aesara.graph.rewriting.basic import OpKeyGraphRewriter, PatternNodeRewriter
-from aesara.graph.utils import MissingInputError
-from aesara.link.vm import VMLinker
-from aesara.tensor.math import dot
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.math import tanh
-from aesara.tensor.type import (
+import pytensor.tensor as at
+from pytensor.compile import shared
+from pytensor.compile.debugmode import DebugMode, InvalidValueError
+from pytensor.compile.function import function
+from pytensor.compile.function.types import UnusedInputError
+from pytensor.compile.io import In, Out
+from pytensor.compile.mode import Mode, get_default_mode
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Constant
+from pytensor.graph.rewriting.basic import OpKeyGraphRewriter, PatternNodeRewriter
+from pytensor.graph.utils import MissingInputError
+from pytensor.link.vm import VMLinker
+from pytensor.tensor.math import dot
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import tanh
+from pytensor.tensor.type import (
     dmatrix,
     dscalar,
     dscalars,
@@ -31,7 +31,7 @@ from aesara.tensor.type import (
     scalars,
     vector,
 )
-from aesara.utils import exc_message
+from pytensor.utils import exc_message
 
 
 def PatternOptimizer(p1, p2, ign=True):
@@ -597,18 +597,18 @@ class TestFunction:
         assert dec[s] == -1
 
     def test_constant_output(self):
-        # Test that if the output is a constant, we respect the aesara memory interface
+        # Test that if the output is a constant, we respect the pytensor memory interface
         f = function([], at.constant([4]))
         # print f.maker.fgraph.toposort()
         out = f()
         assert (out == 4).all()
         out[0] = 3
         out2 = f()
-        # If the following 2 asserts fail it mean Aesara broke it's memory contract.
+        # If the following 2 asserts fail it mean Pytensor broke it's memory contract.
         assert out2 is not out
         assert (out2 == 4).all()
 
-        # Test that if the output is a constant and borrow, we respect the aesara memory interface
+        # Test that if the output is a constant and borrow, we respect the pytensor memory interface
         f = function([], Out(at.constant([4]), borrow=True))
         # print f.maker.fgraph.toposort()
         out = f()
@@ -811,7 +811,7 @@ class TestFunction:
         assert "z" in str(f.outputs[4])
 
     def test_composing_function(self):
-        # Tests that one can compose two aesara functions when the outputs are
+        # Tests that one can compose two pytensor functions when the outputs are
         # provided in a dictionary.
 
         x = scalar("x")

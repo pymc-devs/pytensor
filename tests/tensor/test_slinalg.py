@@ -6,11 +6,11 @@ import numpy.linalg
 import pytest
 import scipy
 
-import aesara
-from aesara import function, grad
-from aesara import tensor as at
-from aesara.configdefaults import config
-from aesara.tensor.slinalg import (
+import pytensor
+from pytensor import function, grad
+from pytensor import tensor as at
+from pytensor.configdefaults import config
+from pytensor.tensor.slinalg import (
     Cholesky,
     CholeskyGrad,
     CholeskySolve,
@@ -25,7 +25,7 @@ from aesara.tensor.slinalg import (
     solve,
     solve_triangular,
 )
-from aesara.tensor.type import dmatrix, matrix, tensor, vector
+from pytensor.tensor.type import dmatrix, matrix, tensor, vector
 from tests import unittest_tools as utt
 
 
@@ -125,9 +125,9 @@ def test_cholesky_and_cholesky_grad_shape():
     rng = np.random.default_rng(utt.fetch_seed())
     x = matrix()
     for l in (cholesky(x), Cholesky(lower=True)(x), Cholesky(lower=False)(x)):
-        f_chol = aesara.function([x], l.shape)
-        g = aesara.gradient.grad(l.sum(), x)
-        f_cholgrad = aesara.function([x], g.shape)
+        f_chol = pytensor.function([x], l.shape)
+        g = pytensor.gradient.grad(l.sum(), x)
+        f_cholgrad = pytensor.function([x], g.shape)
         topo_chol = f_chol.maker.fgraph.toposort()
         topo_cholgrad = f_cholgrad.maker.fgraph.toposort()
         if config.mode != "FAST_COMPILE":
@@ -232,7 +232,7 @@ class TestSolve(utt.InferShapeTester):
         A = matrix()
         b = matrix()
         y = solve(A, b)
-        gen_solve_func = aesara.function([A, b], y)
+        gen_solve_func = pytensor.function([A, b], y)
 
         b_val = np.asarray(rng.random((5, 1)), dtype=config.floatX)
 
@@ -321,7 +321,7 @@ class TestSolveTriangular(utt.InferShapeTester):
         cholesky = Cholesky(lower=lower)
         C = cholesky(A)
         y_lower = solve_triangular(C, b, lower=lower)
-        lower_solve_func = aesara.function([C, b], y_lower)
+        lower_solve_func = pytensor.function([C, b], y_lower)
 
         assert np.allclose(
             scipy.linalg.solve_triangular(C_val, b_val, lower=lower),
@@ -372,8 +372,8 @@ class TestCholeskySolve(utt.InferShapeTester):
         A = matrix()
         b = matrix()
         self._compile_and_check(
-            [A, b],  # aesara.function inputs
-            [self.op(A, b)],  # aesara.function outputs
+            [A, b],  # pytensor.function inputs
+            [self.op(A, b)],  # pytensor.function outputs
             # A must be square
             [
                 np.asarray(rng.random((5, 5)), dtype=config.floatX),
@@ -386,8 +386,8 @@ class TestCholeskySolve(utt.InferShapeTester):
         A = matrix()
         b = vector()
         self._compile_and_check(
-            [A, b],  # aesara.function inputs
-            [self.op(A, b)],  # aesara.function outputs
+            [A, b],  # pytensor.function inputs
+            [self.op(A, b)],  # pytensor.function outputs
             # A must be square
             [
                 np.asarray(rng.random((5, 5)), dtype=config.floatX),
@@ -402,10 +402,10 @@ class TestCholeskySolve(utt.InferShapeTester):
         A = matrix()
         b = matrix()
         y = self.op(A, b)
-        cho_solve_lower_func = aesara.function([A, b], y)
+        cho_solve_lower_func = pytensor.function([A, b], y)
 
         y = self.op_upper(A, b)
-        cho_solve_upper_func = aesara.function([A, b], y)
+        cho_solve_upper_func = pytensor.function([A, b], y)
 
         b_val = np.asarray(rng.random((5, 1)), dtype=config.floatX)
 
@@ -456,7 +456,7 @@ def test_cho_solve():
     A = matrix()
     b = matrix()
     y = cho_solve((A, True), b)
-    cho_solve_lower_func = aesara.function([A, b], y)
+    cho_solve_lower_func = pytensor.function([A, b], y)
 
     b_val = np.asarray(rng.random((5, 1)), dtype=config.floatX)
 

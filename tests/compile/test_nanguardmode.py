@@ -7,13 +7,13 @@ import logging
 import numpy as np
 import pytest
 
-import aesara.tensor as at
-from aesara.compile import shared
-from aesara.compile.function import function
-from aesara.compile.nanguardmode import NanGuardMode
-from aesara.configdefaults import config
-from aesara.tensor.math import dot
-from aesara.tensor.type import matrix, tensor3
+import pytensor.tensor as at
+from pytensor.compile import shared
+from pytensor.compile.function import function
+from pytensor.compile.nanguardmode import NanGuardMode
+from pytensor.configdefaults import config
+from pytensor.tensor.math import dot
+from pytensor.tensor.type import matrix, tensor3
 
 
 def test_NanGuardMode():
@@ -38,7 +38,7 @@ def test_NanGuardMode():
     fun(a)  # normal values
 
     # Temporarily silence logger
-    _logger = logging.getLogger("aesara.compile.nanguardmode")
+    _logger = logging.getLogger("pytensor.compile.nanguardmode")
     try:
         _logger.propagate = False
         with pytest.raises(AssertionError):

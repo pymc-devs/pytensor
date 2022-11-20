@@ -5,8 +5,8 @@ Glossary
 
 .. testsetup::
 
-   import aesara
-   import aesara.tensor as at
+   import pytensor
+   import pytensor.tensor as at
 
 .. glossary::
 
@@ -61,8 +61,8 @@ Glossary
     Expression Graph
         A directed, acyclic set of connected :term:`Variable` and
         :term:`Apply` nodes that express symbolic functional relationship
-        between variables.  You use Aesara by defining expression graphs, and
-        then compiling them with :term:`aesara.function`.
+        between variables.  You use Pytensor by defining expression graphs, and
+        then compiling them with :term:`pytensor.function`.
 
         See also :term:`Variable`, :term:`Op`, :term:`Apply`, and
         :term:`Type`, or read more about :ref:`graphstructures`.
@@ -72,8 +72,8 @@ Glossary
         computation requires that one or more inputs be overwritten or
         otherwise invalidated.  For example, :term:`inplace`\ :class:`Op`\s are
         destructive.  Destructive :class:`Op`\s can sometimes be faster than
-        non-destructive alternatives.  Aesara encourages users not to put
-        destructive :class:`Op`\s into graphs that are given to :term:`aesara.function`,
+        non-destructive alternatives.  Pytensor encourages users not to put
+        destructive :class:`Op`\s into graphs that are given to :term:`pytensor.function`,
         but instead to trust the rewrites to insert destructive :class:`Op`\s
         judiciously.
 
@@ -100,23 +100,23 @@ Glossary
 
     Mode
         A :class:`Mode` instance specifying an :term:`optimizer` and a :term:`linker` that is
-        passed to :term:`aesara.function`.  It parametrizes how an expression
+        passed to :term:`pytensor.function`.  It parametrizes how an expression
         graph is converted to a callable object.
 
     Op
         The ``.op`` of an :term:`Apply`, together with its symbolic inputs
         fully determines what kind of computation will be carried out for that
         :class:`Apply` at run-time.  Mathematical functions such as addition
-        (i.e. :func:`aesara.tensor.add`) and indexing ``x[i]`` are :class:`Op`\s
-        in Aesara.  Much of the library documentation is devoted to describing
-        the various :class:`Op`\s that are provided with Aesara, but you can add
+        (i.e. :func:`pytensor.tensor.add`) and indexing ``x[i]`` are :class:`Op`\s
+        in Pytensor.  Much of the library documentation is devoted to describing
+        the various :class:`Op`\s that are provided with Pytensor, but you can add
         more.
 
         See also :term:`Variable`, :term:`Type`, and :term:`Apply`,
         or read more about :ref:`graphstructures`.
 
     Rewriter
-        A function or class that transforms an Aesara :term:`graph`.
+        A function or class that transforms an Pytensor :term:`graph`.
 
     Optimizer
         An instance of a :term:`rewriter` that has the capacity to provide
@@ -131,10 +131,10 @@ Glossary
         (such as :term:`constant` and :term:`shared variable <shared variable>` the storage is not internal.
 
     Shared Variable
-        A :term:`Variable` whose value may be shared between multiple functions.  See :func:`shared <shared.shared>` and :func:`aesara.function <function.function>`.
+        A :term:`Variable` whose value may be shared between multiple functions.  See :func:`shared <shared.shared>` and :func:`pytensor.function <function.function>`.
 
-    aesara.function
-        The interface for Aesara's compilation from symbolic expression graphs
+    pytensor.function
+        The interface for Pytensor's compilation from symbolic expression graphs
         to callable objects.  See :func:`function.function`.
 
     Type
@@ -148,7 +148,7 @@ Glossary
         or read more about :ref:`graphstructures`.
 
     Variable
-        The the main data structure you work with when using Aesara.
+        The the main data structure you work with when using Pytensor.
         For example,
 
         >>> x = at.ivector()
@@ -164,7 +164,7 @@ Glossary
         constant time by simply re-indexing their inputs.   The outputs of
         such :class:`Op`\s are views because their
         storage might be aliased to the storage of other variables (the inputs
-        of the :class:`Apply`).  It is important for Aesara to know which :class:`Variable`\s are
+        of the :class:`Apply`).  It is important for Pytensor to know which :class:`Variable`\s are
         views of which other ones in order to introduce :term:`Destructive`
         :class:`Op`\s correctly.
 

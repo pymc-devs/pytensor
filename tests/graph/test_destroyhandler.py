@@ -2,21 +2,21 @@ from copy import copy
 
 import pytest
 
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Constant, Variable, clone
-from aesara.graph.destroyhandler import DestroyHandler
-from aesara.graph.features import ReplaceValidate
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import Op
-from aesara.graph.rewriting.basic import (
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Constant, Variable, clone
+from pytensor.graph.destroyhandler import DestroyHandler
+from pytensor.graph.features import ReplaceValidate
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op
+from pytensor.graph.rewriting.basic import (
     NodeProcessingGraphRewriter,
     OpKeyGraphRewriter,
     PatternNodeRewriter,
     SubstitutionNodeRewriter,
     WalkingGraphRewriter,
 )
-from aesara.graph.type import Type
-from aesara.graph.utils import InconsistencyError
+from pytensor.graph.type import Type
+from pytensor.graph.utils import InconsistencyError
 from tests.unittest_tools import assertFailure_fast
 
 

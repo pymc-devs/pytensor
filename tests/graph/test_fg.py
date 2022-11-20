@@ -3,10 +3,10 @@ import pickle
 import numpy as np
 import pytest
 
-from aesara.configdefaults import config
-from aesara.graph.basic import NominalVariable
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.utils import MissingInputError
+from pytensor.configdefaults import config
+from pytensor.graph.basic import NominalVariable
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.utils import MissingInputError
 from tests.graph.utils import (
     MyConstant,
     MyOp,
@@ -189,7 +189,7 @@ class TestFunctionGraph:
         assert var5.owner in fg.apply_nodes
 
         with pytest.raises(TypeError, match="Computation graph contains.*"):
-            from aesara.graph.null_type import NullType
+            from pytensor.graph.null_type import NullType
 
             fg.import_var(NullType()(), "testing")
 

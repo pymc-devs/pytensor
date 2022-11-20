@@ -4,14 +4,14 @@
 :mod:`printing` -- Graph Printing and Symbolic Print Statement
 ===============================================================
 
-.. module:: aesara.printing
+.. module:: pytensor.printing
    :platform: Unix, Windows
    :synopsis: Provides the Print Op and graph-printing routines.
 .. moduleauthor:: LISA
 
 .. testsetup::
 
-   import aesara
+   import pytensor
 
 Guide
 ======
@@ -20,10 +20,10 @@ Printing during execution
 -------------------------
 
 Intermediate values in a computation cannot be printed in
-the normal python way with the print statement, because Aesara has no *statements*.
+the normal python way with the print statement, because Pytensor has no *statements*.
 Instead there is the :class:`Print` Op.
 
->>> from aesara import tensor as at, function, printing
+>>> from pytensor import tensor as at, function, printing
 >>> x = at.dvector()
 >>> hello_world_op = printing.Print('hello world')
 >>> printed_x = hello_world_op(x)
@@ -43,16 +43,16 @@ then `a` will print before `b`.
 Printing graphs
 ---------------
 
-Aesara provides two functions (:func:`aesara.pp` and
-:func:`aesara.printing.debugprint`) to print a graph to the terminal before or after
+Pytensor provides two functions (:func:`pytensor.pp` and
+:func:`pytensor.printing.debugprint`) to print a graph to the terminal before or after
 compilation.  These two functions print expression graphs in different ways:
 :func:`pp` is more compact and math-like, :func:`debugprint` is more verbose.
-Aesara also provides :func:`aesara.printing.pydotprint` that creates a png image of the function.
+Pytensor also provides :func:`pytensor.printing.pydotprint` that creates a png image of the function.
 
-1) The first is :func:`aesara.pp`.
+1) The first is :func:`pytensor.pp`.
 
->>> from aesara import pp, grad,
->>> from aesara import tensor as at
+>>> from pytensor import pp, grad,
+>>> from pytensor import tensor as at
 >>> x = at.dscalar('x')
 >>> y = x ** 2
 >>> gy = grad(y, x)
@@ -79,9 +79,9 @@ iteration number or other kinds of information in the name.
     automatic DimShuffles are not shown.
 
 
-2) The second function to print a graph is :func:`aesara.printing.debugprint`
+2) The second function to print a graph is :func:`pytensor.printing.debugprint`
 
->>> aesara.printing.debugprint(f.maker.fgraph.outputs[0])  # doctest: +NORMALIZE_WHITESPACE
+>>> pytensor.printing.debugprint(f.maker.fgraph.outputs[0])  # doctest: +NORMALIZE_WHITESPACE
 Elemwise{mul,no_inplace} [id A] ''
  |TensorConstant{2.0} [id B]
  |x [id C]
@@ -106,7 +106,7 @@ happen when that Variable has already been printed.  Where else has it been
 printed?  Look for debugprint identifier using the Find feature of your text
 editor.
 
->>> aesara.printing.debugprint(gy)  # doctest: +NORMALIZE_WHITESPACE
+>>> pytensor.printing.debugprint(gy)  # doctest: +NORMALIZE_WHITESPACE
 Elemwise{mul} [id A] ''
  |Elemwise{mul} [id B] ''
  | |Elemwise{second,no_inplace} [id C] ''
@@ -122,7 +122,7 @@ Elemwise{mul} [id A] ''
      |InplaceDimShuffle{} [id J] ''
        |TensorConstant{1} [id K]
 
->>> aesara.printing.debugprint(gy, depth=2)  # doctest: +NORMALIZE_WHITESPACE
+>>> pytensor.printing.debugprint(gy, depth=2)  # doctest: +NORMALIZE_WHITESPACE
 Elemwise{mul} [id A] ''
  |Elemwise{mul} [id B] ''
  |Elemwise{pow} [id C] ''
@@ -133,7 +133,7 @@ shown.
 
 
 
-3) The function :func:`aesara.printing.pydotprint` will print a compiled aesara function to a png file.
+3) The function :func:`pytensor.printing.pydotprint` will print a compiled pytensor function to a png file.
 
 
 In the image, Apply nodes (the applications of ops) are shown as ellipses and variables are shown as boxes.
@@ -180,16 +180,16 @@ Reference
         :param x: any symbolic variable
         :returns: symbolic identity(x)
 
-        When you use the return-value from this function in an Aesara function,
+        When you use the return-value from this function in an Pytensor function,
         running the function will print the value that `x` takes in the graph.
 
 
-.. autofunction:: aesara.printing.debugprint
+.. autofunction:: pytensor.printing.debugprint
 
-.. function:: aesara.pp(*args)
+.. function:: pytensor.pp(*args)
 
-   Just a shortcut to :func:`aesara.printing.pp`
+   Just a shortcut to :func:`pytensor.printing.pp`
 
-.. autofunction:: aesara.printing.pp(*args)
+.. autofunction:: pytensor.printing.pp(*args)
 
-.. autofunction:: aesara.printing.pydotprint
+.. autofunction:: pytensor.printing.pydotprint

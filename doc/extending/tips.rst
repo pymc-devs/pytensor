@@ -20,26 +20,26 @@ simple function:
 
 .. code::
 
-   from aesara import tensor as at
+   from pytensor import tensor as at
 
    def sum_square_difference(a, b):
        return at.sum((a - b)**2)
 
-Even without taking Aesara's rewrites into account, it is likely
+Even without taking Pytensor's rewrites into account, it is likely
 to work just as well as a custom implementation. It also supports all
 data types, tensors of all dimensions as well as broadcasting, whereas
 a custom implementation would probably only bother to support
 contiguous vectors/matrices of doubles...
 
 
-Use Aesara's high order :class:`Op`\s when applicable
-=====================================================
+Use Pytensor's high order :class:`Op`\s when applicable
+=======================================================
 
-Aesara provides some generic :class:`Op` classes which allow you to generate a
+Pytensor provides some generic :class:`Op` classes which allow you to generate a
 lot of :class:`Op`\s at a lesser effort. For instance, :class:`Elemwise` can be used to
 make :term:`elemwise` operations easily, whereas :class:`DimShuffle` can be
 used to make transpose-like transformations. These higher order :class:`Op`\s
-are mostly tensor-related, as this is Aesara's specialty.
+are mostly tensor-related, as this is Pytensor's specialty.
 
 
 ..

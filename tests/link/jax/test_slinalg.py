@@ -1,14 +1,14 @@
 import numpy as np
 import pytest
 
-import aesara.tensor as at
-from aesara.configdefaults import config
-from aesara.graph.fg import FunctionGraph
-from aesara.tensor import nlinalg as at_nlinalg
-from aesara.tensor import slinalg as at_slinalg
-from aesara.tensor import subtensor as at_subtensor
-from aesara.tensor.math import clip, cosh
-from aesara.tensor.type import matrix, vector
+import pytensor.tensor as at
+from pytensor.configdefaults import config
+from pytensor.graph.fg import FunctionGraph
+from pytensor.tensor import nlinalg as at_nlinalg
+from pytensor.tensor import slinalg as at_slinalg
+from pytensor.tensor import subtensor as at_subtensor
+from pytensor.tensor.math import clip, cosh
+from pytensor.tensor.type import matrix, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
 

@@ -5,7 +5,7 @@
 :mod:`mode` -- controlling compilation
 ======================================
 
-.. module:: aesara.compile.mode
+.. module:: pytensor.compile.mode
    :platform: Unix, Windows
    :synopsis: controlling compilation
 .. moduleauthor:: LISA
@@ -13,10 +13,10 @@
 Guide
 =====
 
-The ``mode`` parameter to :func:`aesara.function` controls how the
+The ``mode`` parameter to :func:`pytensor.function` controls how the
 inputs-to-outputs graph is transformed into a callable object.
 
-Aesara defines the following modes by name:
+Pytensor defines the following modes by name:
 
 - ``'FAST_COMPILE'``: Apply just a few graph rewrites and only use Python implementations.
 - ``'FAST_RUN'``: Apply all rewrites, and use C implementations where possible.
@@ -26,7 +26,7 @@ Aesara defines the following modes by name:
 
 The default mode is typically ``FAST_RUN``, but it can be controlled via the
 configuration variable :attr:`config.mode`, which can be
-overridden by passing the keyword argument to :func:`aesara.function`.
+overridden by passing the keyword argument to :func:`pytensor.function`.
 
 .. TODO::
 

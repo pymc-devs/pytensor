@@ -1,27 +1,27 @@
 import numpy as np
 import pytest
 
-import aesara
-import aesara.tensor as at
-from aesara import function
-from aesara import scalar as aes
-from aesara.configdefaults import config
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.rewriting.basic import out2in
-from aesara.link.basic import PerformLinker
-from aesara.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from aesara.tensor.math import MaxAndArgmax
-from aesara.tensor.math import max as at_max
-from aesara.tensor.math import max_and_argmax
-from aesara.tensor.math import min as at_min
-from aesara.tensor.rewriting.uncanonicalize import (
+import pytensor
+import pytensor.tensor as at
+from pytensor import function
+from pytensor import scalar as aes
+from pytensor.configdefaults import config
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.basic import out2in
+from pytensor.link.basic import PerformLinker
+from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.math import MaxAndArgmax
+from pytensor.tensor.math import max as at_max
+from pytensor.tensor.math import max_and_argmax
+from pytensor.tensor.math import min as at_min
+from pytensor.tensor.rewriting.uncanonicalize import (
     local_alloc_dimshuffle,
     local_dimshuffle_alloc,
     local_dimshuffle_subtensor,
     local_reshape_dimshuffle,
 )
-from aesara.tensor.shape import reshape, specify_shape
-from aesara.tensor.type import dtensor4, iscalar, matrix, tensor, vector
+from pytensor.tensor.shape import reshape, specify_shape
+from pytensor.tensor.type import dtensor4, iscalar, matrix, tensor, vector
 from tests.link.test_link import make_function
 
 
@@ -29,7 +29,7 @@ class TestMaxAndArgmax:
     def test_optimization(self):
         # If we use only the max output, we should replace this op with
         # a faster one.
-        mode = aesara.compile.mode.get_default_mode().including(
+        mode = pytensor.compile.mode.get_default_mode().including(
             "canonicalize", "fast_run"
         )
 
@@ -49,7 +49,7 @@ class TestMaxAndArgmax:
 
 class TestMinMax:
     def setup_method(self):
-        self.mode = aesara.compile.mode.get_default_mode().including(
+        self.mode = pytensor.compile.mode.get_default_mode().including(
             "canonicalize", "fast_run"
         )
 
@@ -206,13 +206,13 @@ def test_local_dimshuffle_subtensor():
     x = tensor(dtype="float64", shape=(None, 1, None, 1))
     out = x[i].dimshuffle(1)
 
-    f = aesara.function([x, i], out)
+    f = pytensor.function([x, i], out)
 
     topo = f.maker.fgraph.toposort()
     assert not all(isinstance(x, DimShuffle) for x in topo)
     assert f(np.random.random((5, 1, 4, 1)), 2).shape == (4,)
 
-    # Test a corner case that had Aesara return a bug.
+    # Test a corner case that had Pytensor return a bug.
     x = dtensor4("x")
     x = specify_shape(x, (None, 1, None, None))
 
@@ -224,6 +224,6 @@ def test_local_dimshuffle_subtensor():
 def test_deprecations():
     """Make sure we can import from deprecated modules."""
     with pytest.deprecated_call():
-        from aesara.tensor.opt_uncanonicalize import (  # noqa: F401 F811
+        from pytensor.tensor.opt_uncanonicalize import (  # noqa: F401 F811
             local_reshape_dimshuffle,
         )

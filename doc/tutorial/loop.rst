@@ -13,12 +13,12 @@ Scan
 - You ``scan`` a function along some input sequence, producing an output at each time-step.
 - The function can see the *previous K time-steps* of your function.
 - ``sum()`` could be computed by scanning the *z + x(i)* function over a list, given an initial state of *z=0*.
-- Often a *for* loop can be expressed as a ``scan()`` operation, and ``scan`` is the closest that Aesara comes to looping.
+- Often a *for* loop can be expressed as a ``scan()`` operation, and ``scan`` is the closest that Pytensor comes to looping.
 - Advantages of using ``scan`` over *for* loops:
 
   - Number of iterations to be part of the symbolic graph.
   - Computes gradients through sequential steps.
-  - Slightly faster than using a *for* loop in Python with a compiled Aesara function.
+  - Slightly faster than using a *for* loop in Python with a compiled Pytensor function.
   - Can lower the overall memory usage by detecting the actual amount of memory needed.
 
 The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
@@ -30,8 +30,8 @@ The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
 
 .. testcode::
 
-  import aesara
-  import aesara.tensor as at
+  import pytensor
+  import pytensor.tensor as at
   import numpy as np
 
   # defining the tensor variables
@@ -39,13 +39,13 @@ The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
   W = at.matrix("W")
   b_sym = at.vector("b_sym")
 
-  results, updates = aesara.scan(lambda v: at.tanh(at.dot(v, W) + b_sym), sequences=X)
-  compute_elementwise = aesara.function(inputs=[X, W, b_sym], outputs=results)
+  results, updates = pytensor.scan(lambda v: at.tanh(at.dot(v, W) + b_sym), sequences=X)
+  compute_elementwise = pytensor.function(inputs=[X, W, b_sym], outputs=results)
 
   # test values
-  x = np.eye(2, dtype=aesara.config.floatX)
-  w = np.ones((2, 2), dtype=aesara.config.floatX)
-  b = np.ones((2), dtype=aesara.config.floatX)
+  x = np.eye(2, dtype=pytensor.config.floatX)
+  w = np.ones((2, 2), dtype=pytensor.config.floatX)
+  b = np.ones((2), dtype=pytensor.config.floatX)
   b[1] = 2
 
   print(compute_elementwise(x, w, b))
@@ -64,8 +64,8 @@ The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
 
 .. testcode::
 
-  import aesara
-  import aesara.tensor as at
+  import pytensor
+  import pytensor.tensor as at
   import numpy as np
 
   # define tensor variables
@@ -77,25 +77,25 @@ The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
   V = at.matrix("V")
   P = at.matrix("P")
 
-  results, updates = aesara.scan(lambda y, p, x_tm1: at.tanh(at.dot(x_tm1, W) + at.dot(y, U) + at.dot(p, V)),
+  results, updates = pytensor.scan(lambda y, p, x_tm1: at.tanh(at.dot(x_tm1, W) + at.dot(y, U) + at.dot(p, V)),
             sequences=[Y, P[::-1]], outputs_info=[X])
-  compute_seq = aesara.function(inputs=[X, W, Y, U, P, V], outputs=results)
+  compute_seq = pytensor.function(inputs=[X, W, Y, U, P, V], outputs=results)
 
   # test values
-  x = np.zeros((2), dtype=aesara.config.floatX)
+  x = np.zeros((2), dtype=pytensor.config.floatX)
   x[1] = 1
-  w = np.ones((2, 2), dtype=aesara.config.floatX)
-  y = np.ones((5, 2), dtype=aesara.config.floatX)
+  w = np.ones((2, 2), dtype=pytensor.config.floatX)
+  y = np.ones((5, 2), dtype=pytensor.config.floatX)
   y[0, :] = -3
-  u = np.ones((2, 2), dtype=aesara.config.floatX)
-  p = np.ones((5, 2), dtype=aesara.config.floatX)
+  u = np.ones((2, 2), dtype=pytensor.config.floatX)
+  p = np.ones((5, 2), dtype=pytensor.config.floatX)
   p[0, :] = 3
-  v = np.ones((2, 2), dtype=aesara.config.floatX)
+  v = np.ones((2, 2), dtype=pytensor.config.floatX)
 
   print(compute_seq(x, w, y, u, p, v))
 
   # comparison with numpy
-  x_res = np.zeros((5, 2), dtype=aesara.config.floatX)
+  x_res = np.zeros((5, 2), dtype=pytensor.config.floatX)
   x_res[0] = np.tanh(x.dot(w) + y[0].dot(u) + p[4].dot(v))
   for i in range(1, 5):
       x_res[i] = np.tanh(x_res[i - 1].dot(w) + y[i].dot(u) + p[4-i].dot(v))
@@ -118,17 +118,17 @@ The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
 
 .. testcode::
 
-  import aesara
-  import aesara.tensor as at
+  import pytensor
+  import pytensor.tensor as at
   import numpy as np
 
   # define tensor variable
   X = at.matrix("X")
-  results, updates = aesara.scan(lambda x_i: at.sqrt((x_i ** 2).sum()), sequences=[X])
-  compute_norm_lines = aesara.function(inputs=[X], outputs=results)
+  results, updates = pytensor.scan(lambda x_i: at.sqrt((x_i ** 2).sum()), sequences=[X])
+  compute_norm_lines = pytensor.function(inputs=[X], outputs=results)
 
   # test value
-  x = np.diag(np.arange(1, 6, dtype=aesara.config.floatX), 1)
+  x = np.diag(np.arange(1, 6, dtype=pytensor.config.floatX), 1)
   print(compute_norm_lines(x))
 
   # comparison with numpy
@@ -143,17 +143,17 @@ The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
 
 .. testcode::
 
-  import aesara
-  import aesara.tensor as at
+  import pytensor
+  import pytensor.tensor as at
   import numpy as np
 
   # define tensor variable
   X = at.matrix("X")
-  results, updates = aesara.scan(lambda x_i: at.sqrt((x_i ** 2).sum()), sequences=[X.T])
-  compute_norm_cols = aesara.function(inputs=[X], outputs=results)
+  results, updates = pytensor.scan(lambda x_i: at.sqrt((x_i ** 2).sum()), sequences=[X.T])
+  compute_norm_cols = pytensor.function(inputs=[X], outputs=results)
 
   # test value
-  x = np.diag(np.arange(1, 6, dtype=aesara.config.floatX), 1)
+  x = np.diag(np.arange(1, 6, dtype=pytensor.config.floatX), 1)
   print(compute_norm_cols(x))
 
   # comparison with numpy
@@ -168,22 +168,22 @@ The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
 
 .. testcode::
 
-  import aesara
-  import aesara.tensor as at
+  import pytensor
+  import pytensor.tensor as at
   import numpy as np
   floatX = "float32"
 
   # define tensor variable
   X = at.matrix("X")
-  results, updates = aesara.scan(lambda i, j, t_f: at.cast(X[i, j] + t_f, floatX),
+  results, updates = pytensor.scan(lambda i, j, t_f: at.cast(X[i, j] + t_f, floatX),
                     sequences=[at.arange(X.shape[0]), at.arange(X.shape[1])],
                     outputs_info=np.asarray(0., dtype=floatX))
   result = results[-1]
-  compute_trace = aesara.function(inputs=[X], outputs=result)
+  compute_trace = pytensor.function(inputs=[X], outputs=result)
 
   # test value
-  x = np.eye(5, dtype=aesara.config.floatX)
-  x[0] = np.arange(5, dtype=aesara.config.floatX)
+  x = np.eye(5, dtype=pytensor.config.floatX)
+  x[0] = np.arange(5, dtype=pytensor.config.floatX)
   print(compute_trace(x))
 
   # comparison with numpy
@@ -199,8 +199,8 @@ The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
 
 .. testcode::
 
-  import aesara
-  import aesara.tensor as at
+  import pytensor
+  import pytensor.tensor as at
   import numpy as np
 
   # define tensor variables
@@ -211,18 +211,18 @@ The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
   V = at.matrix("V")
   n_sym = at.iscalar("n_sym")
 
-  results, updates = aesara.scan(lambda x_tm2, x_tm1: at.dot(x_tm2, U) + at.dot(x_tm1, V) + at.tanh(at.dot(x_tm1, W) + b_sym),
+  results, updates = pytensor.scan(lambda x_tm2, x_tm1: at.dot(x_tm2, U) + at.dot(x_tm1, V) + at.tanh(at.dot(x_tm1, W) + b_sym),
                       n_steps=n_sym, outputs_info=[dict(initial=X, taps=[-2, -1])])
-  compute_seq2 = aesara.function(inputs=[X, U, V, W, b_sym, n_sym], outputs=results)
+  compute_seq2 = pytensor.function(inputs=[X, U, V, W, b_sym, n_sym], outputs=results)
 
   # test values
-  x = np.zeros((2, 2), dtype=aesara.config.floatX) # the initial value must be able to return x[-2]
+  x = np.zeros((2, 2), dtype=pytensor.config.floatX) # the initial value must be able to return x[-2]
   x[1, 1] = 1
-  w = 0.5 * np.ones((2, 2), dtype=aesara.config.floatX)
-  u = 0.5 * (np.ones((2, 2), dtype=aesara.config.floatX) - np.eye(2, dtype=aesara.config.floatX))
-  v = 0.5 * np.ones((2, 2), dtype=aesara.config.floatX)
+  w = 0.5 * np.ones((2, 2), dtype=pytensor.config.floatX)
+  u = 0.5 * (np.ones((2, 2), dtype=pytensor.config.floatX) - np.eye(2, dtype=pytensor.config.floatX))
+  v = 0.5 * np.ones((2, 2), dtype=pytensor.config.floatX)
   n = 10
-  b = np.ones((2), dtype=aesara.config.floatX)
+  b = np.ones((2), dtype=pytensor.config.floatX)
 
   print(compute_seq2(x, u, v, w, b, n))
 
@@ -264,21 +264,21 @@ The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
 
 .. testcode::
 
-  import aesara
-  import aesara.tensor as at
+  import pytensor
+  import pytensor.tensor as at
   import numpy as np
 
   # define tensor variables
   v = at.vector()
   A = at.matrix()
   y = at.tanh(at.dot(v, A))
-  results, updates = aesara.scan(lambda i: at.grad(y[i], v), sequences=[at.arange(y.shape[0])])
-  compute_jac_t = aesara.function([A, v], results, allow_input_downcast=True) # shape (d_out, d_in)
+  results, updates = pytensor.scan(lambda i: at.grad(y[i], v), sequences=[at.arange(y.shape[0])])
+  compute_jac_t = pytensor.function([A, v], results, allow_input_downcast=True) # shape (d_out, d_in)
 
   # test values
-  x = np.eye(5, dtype=aesara.config.floatX)[0]
-  w = np.eye(5, 3, dtype=aesara.config.floatX)
-  w[2] = np.ones((3), dtype=aesara.config.floatX)
+  x = np.eye(5, dtype=pytensor.config.floatX)[0]
+  w = np.eye(5, 3, dtype=pytensor.config.floatX)
+  w[2] = np.ones((3), dtype=pytensor.config.floatX)
   print(compute_jac_t(w, x))
 
   # compare with numpy
@@ -299,16 +299,16 @@ Note that we need to iterate over the indices of ``y`` and not over the elements
 
 .. testcode::
 
-  import aesara
-  import aesara.tensor as at
+  import pytensor
+  import pytensor.tensor as at
   import numpy as np
 
   # define shared variables
-  k = aesara.shared(0)
+  k = pytensor.shared(0)
   n_sym = at.iscalar("n_sym")
 
-  results, updates = aesara.scan(lambda:{k:(k + 1)}, n_steps=n_sym)
-  accumulator = aesara.function([n_sym], [], updates=updates, allow_input_downcast=True)
+  results, updates = pytensor.scan(lambda:{k:(k + 1)}, n_steps=n_sym)
+  accumulator = pytensor.function([n_sym], [], updates=updates, allow_input_downcast=True)
 
   k.get_value()
   accumulator(5)
@@ -318,8 +318,8 @@ Note that we need to iterate over the indices of ``y`` and not over the elements
 
 .. testcode::
 
-  import aesara
-  import aesara.tensor as at
+  import pytensor
+  import pytensor.tensor as at
   import numpy as np
 
   # define tensor variables
@@ -328,15 +328,15 @@ Note that we need to iterate over the indices of ``y`` and not over the elements
   b_sym = at.vector("b_sym")
 
   # define shared random stream
-  trng = aesara.tensor.random.utils.RandomStream(1234)
+  trng = pytensor.tensor.random.utils.RandomStream(1234)
   d=trng.binomial(size=W[1].shape)
 
-  results, updates = aesara.scan(lambda v: at.tanh(at.dot(v, W) + b_sym) * d, sequences=X)
-  compute_with_bnoise = aesara.function(inputs=[X, W, b_sym], outputs=results,
+  results, updates = pytensor.scan(lambda v: at.tanh(at.dot(v, W) + b_sym) * d, sequences=X)
+  compute_with_bnoise = pytensor.function(inputs=[X, W, b_sym], outputs=results,
                             updates=updates, allow_input_downcast=True)
-  x = np.eye(10, 2, dtype=aesara.config.floatX)
-  w = np.ones((2, 2), dtype=aesara.config.floatX)
-  b = np.ones((2), dtype=aesara.config.floatX)
+  x = np.eye(10, 2, dtype=pytensor.config.floatX)
+  w = np.ones((2, 2), dtype=pytensor.config.floatX)
+  b = np.ones((2), dtype=pytensor.config.floatX)
 
   print(compute_with_bnoise(x, w, b))
 
@@ -359,8 +359,8 @@ Note that if you want to use a random variable ``d`` that will not be updated th
 
 .. testcode::
 
-  import aesara
-  import aesara.tensor as at
+  import pytensor
+  import pytensor.tensor as at
 
   k = at.iscalar("k")
   A = at.vector("A")
@@ -369,7 +369,7 @@ Note that if you want to use a random variable ``d`` that will not be updated th
       return prior_result * B
 
   # Symbolic description of the result
-  result, updates = aesara.scan(fn=inner_fct,
+  result, updates = pytensor.scan(fn=inner_fct,
                               outputs_info=at.ones_like(A),
                               non_sequences=A, n_steps=k)
 
@@ -377,7 +377,7 @@ Note that if you want to use a random variable ``d`` that will not be updated th
   # value. Scan notices this and does not waste memory saving them.
   final_result = result[-1]
 
-  power = aesara.function(inputs=[A, k], outputs=final_result,
+  power = pytensor.function(inputs=[A, k], outputs=final_result,
                         updates=updates)
 
   print(power(range(10), 2))
@@ -392,23 +392,23 @@ Note that if you want to use a random variable ``d`` that will not be updated th
 .. testcode::
 
   import numpy
-  import aesara
-  import aesara.tensor as at
+  import pytensor
+  import pytensor.tensor as at
 
-  coefficients = aesara.tensor.vector("coefficients")
+  coefficients = pytensor.tensor.vector("coefficients")
   x = at.scalar("x")
   max_coefficients_supported = 10000
 
   # Generate the components of the polynomial
-  full_range=aesara.tensor.arange(max_coefficients_supported)
-  components, updates = aesara.scan(fn=lambda coeff, power, free_var:
+  full_range=pytensor.tensor.arange(max_coefficients_supported)
+  components, updates = pytensor.scan(fn=lambda coeff, power, free_var:
                                      coeff * (free_var ** power),
                                   outputs_info=None,
                                   sequences=[coefficients, full_range],
                                   non_sequences=x)
 
   polynomial = components.sum()
-  calculate_polynomial = aesara.function(inputs=[coefficients, x],
+  calculate_polynomial = pytensor.function(inputs=[coefficients, x],
                                        outputs=polynomial)
 
   test_coeff = numpy.asarray([1, 0, 2], dtype=numpy.float32)

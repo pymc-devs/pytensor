@@ -1,14 +1,14 @@
 import numpy as np
 import pytest
 
-import aesara
-import aesara.tensor as at
-from aesara.compile.mode import Mode
-from aesara.configdefaults import config
-from aesara.graph.rewriting.basic import check_stack_trace
-from aesara.tensor.nnet import abstract_conv as conv
-from aesara.tensor.nnet import conv2d_transpose, corr, corr3d
-from aesara.tensor.nnet.abstract_conv import (
+import pytensor
+import pytensor.tensor as at
+from pytensor.compile.mode import Mode
+from pytensor.configdefaults import config
+from pytensor.graph.rewriting.basic import check_stack_trace
+from pytensor.tensor.nnet import abstract_conv as conv
+from pytensor.tensor.nnet import conv2d_transpose, corr, corr3d
+from pytensor.tensor.nnet.abstract_conv import (
     AbstractConv2d,
     AbstractConv2d_gradInputs,
     AbstractConv2d_gradWeights,
@@ -25,9 +25,13 @@ from aesara.tensor.nnet.abstract_conv import (
     separable_conv2d,
     separable_conv3d,
 )
-from aesara.tensor.nnet.corr import CorrMM, CorrMM_gradInputs, CorrMM_gradWeights
-from aesara.tensor.nnet.corr3d import Corr3dMM, Corr3dMMGradInputs, Corr3dMMGradWeights
-from aesara.tensor.type import (
+from pytensor.tensor.nnet.corr import CorrMM, CorrMM_gradInputs, CorrMM_gradWeights
+from pytensor.tensor.nnet.corr3d import (
+    Corr3dMM,
+    Corr3dMMGradInputs,
+    Corr3dMMGradWeights,
+)
+from pytensor.tensor.type import (
     TensorType,
     ftensor4,
     iscalar,
@@ -289,7 +293,7 @@ class TestConvGradInputsShape:
 class TestAssertConvShape:
     def test_basic(self):
         shape = tuple(iscalar() for i in range(4))
-        f = aesara.function(shape, assert_conv_shape(shape))
+        f = pytensor.function(shape, assert_conv_shape(shape))
 
         assert [1, 2, 3, 4] == f(1, 2, 3, 4)
         assert [0, 0, 1, 1] == f(0, 0, 1, 1)
@@ -312,7 +316,7 @@ class TestAssertShape:
         s1 = iscalar()
         s2 = iscalar()
         expected_shape = [None, s1, s2, None]
-        f = aesara.function([x, s1, s2], assert_shape(x, expected_shape))
+        f = pytensor.function([x, s1, s2], assert_shape(x, expected_shape))
 
         v = np.zeros((3, 5, 7, 11), dtype="float32")
         assert 0 == np.sum(f(v, 5, 7))
@@ -337,7 +341,7 @@ class TestAssertShape:
         out = conv.abstract_conv2d(
             input, filters, input_shape=(3, 5, 7, 11), filter_shape=(7, 5, 3, 3)
         )
-        f = aesara.function([input, filters], out)
+        f = pytensor.function([input, filters], out)
         # mismatched input_shape
         with pytest.raises(AssertionError):
             f(
@@ -360,7 +364,7 @@ class TestAssertShape:
         out = conv.conv3d(
             input, filters, input_shape=(3, 5, 7, 11, 13), filter_shape=(7, 5, 3, 3, 3)
         )
-        f = aesara.function([input, filters], out)
+        f = pytensor.function([input, filters], out)
         # mismatched input_shape
         with pytest.raises(AssertionError):
             f(
@@ -385,7 +389,7 @@ class TestAssertShape:
             input_shape=(None, None, 7, 11),
             filter_shape=(7, 5, 3, 3),
         )
-        f = aesara.function([output_grad, filters], out)
+        f = pytensor.function([output_grad, filters], out)
         # mismatched filter_shape
         with pytest.raises(AssertionError):
             f(
@@ -405,7 +409,7 @@ class TestAssertShape:
             input_shape=(None, None, 7, 11, 13),
             filter_shape=(7, 5, 3, 3, 3),
         )
-        f = aesara.function([output_grad, filters], out)
+        f = pytensor.function([output_grad, filters], out)
         # mismatched filter_shape
         with pytest.raises(AssertionError):
             f(
@@ -424,7 +428,7 @@ class TestAssertShape:
             filter_shape=(None, None, 3, 3),
             input_shape=(3, 5, 7, 11),
         )
-        f = aesara.function([input, output_grad], out)
+        f = pytensor.function([input, output_grad], out)
         # mismatched filter_shape
         with pytest.raises(AssertionError):
             f(
@@ -444,7 +448,7 @@ class TestAssertShape:
             filter_shape=(None, None, 3, 3, 3),
             input_shape=(3, 5, 7, 11, 13),
         )
-        f = aesara.function([input, output_grad], out)
+        f = pytensor.function([input, output_grad], out)
         # mismatched filter_shape
         with pytest.raises(AssertionError):
             f(
@@ -543,8 +547,8 @@ class BaseTestConv:
             filter_dilation=filter_dilation,
         )
 
-        f_ref = aesara.function([], c_ref, mode="FAST_RUN")
-        f = aesara.function([], c, mode=mode)
+        f_ref = pytensor.function([], c_ref, mode="FAST_RUN")
+        f = pytensor.function([], c, mode=mode)
 
         if target_op is not None:
             assert any(isinstance(n.op, target_op) for n in f.maker.fgraph.toposort())
@@ -628,8 +632,8 @@ class BaseTestConv:
             conv_mode=conv_mode,
             filter_dilation=filter_dilation,
         )
-        f = aesara.function([], c, mode=mode)
-        f_ref = aesara.function([], c_ref, mode="FAST_RUN")
+        f = pytensor.function([], c, mode=mode)
+        f_ref = pytensor.function([], c_ref, mode="FAST_RUN")
 
         if target_op is not None:
             assert any(isinstance(n.op, target_op) for n in f.maker.fgraph.toposort())
@@ -699,7 +703,7 @@ class BaseTestConv:
             filter_dilation=filter_dilation,
         )
         c = c(filters, output, inputs_shape[2:])
-        f = aesara.function([], c, mode=mode)
+        f = pytensor.function([], c, mode=mode)
 
         # ref is set to None for the inconsistent-shape tests.
         # The reference function also raises an exception, which would
@@ -714,7 +718,7 @@ class BaseTestConv:
                 conv_mode=conv_mode,
                 filter_dilation=filter_dilation,
             )
-            f_ref = aesara.function([], c_ref, mode="FAST_RUN")
+            f_ref = pytensor.function([], c_ref, mode="FAST_RUN")
 
         if target_op is not None:
             assert any(isinstance(n.op, target_op) for n in f.maker.fgraph.toposort())
@@ -801,7 +805,7 @@ class BaseTestConv2d(BaseTestConv):
         cls.default_filter_flip = True
         cls.provide_shape = [True, False]
         cls.default_provide_shape = True
-        cls.shared = staticmethod(aesara.compile.shared)
+        cls.shared = staticmethod(pytensor.compile.shared)
 
     def run_test_case_gi(self, *args, **kwargs):
         raise NotImplementedError()
@@ -1157,7 +1161,7 @@ class BaseTestConv3d(BaseTestConv):
         cls.default_filter_flip = True
         cls.provide_shape = [True, False]
         cls.default_provide_shape = True
-        cls.shared = staticmethod(aesara.compile.shared)
+        cls.shared = staticmethod(pytensor.compile.shared)
 
     def test_gradinput_arbitrary_output_shapes(self):
         # this computes the grad wrt inputs for an output shape
@@ -1448,7 +1452,7 @@ class TestConvTypes:
         out_shape = lvector()
 
         output = conv.abstract_conv2d(input, filters)
-        grad_input, grad_filters = aesara.grad(output.sum(), wrt=(input, filters))
+        grad_input, grad_filters = pytensor.grad(output.sum(), wrt=(input, filters))
         assert grad_input.type == input.type, (
             grad_input,
             grad_input.type,
@@ -1463,7 +1467,9 @@ class TestConvTypes:
         )
 
         grad_filters = conv.AbstractConv2d_gradWeights()(input, topgrad, out_shape)
-        grad_input, grad_topgrad = aesara.grad(grad_filters.sum(), wrt=(input, topgrad))
+        grad_input, grad_topgrad = pytensor.grad(
+            grad_filters.sum(), wrt=(input, topgrad)
+        )
 
         assert grad_input.type == input.type, (
             grad_input,
@@ -1479,7 +1485,7 @@ class TestConvTypes:
         )
 
         grad_input = conv.AbstractConv2d_gradInputs()(filters, topgrad, out_shape)
-        grad_filters, grad_topgrad = aesara.grad(
+        grad_filters, grad_topgrad = pytensor.grad(
             grad_input.sum(), wrt=(filters, topgrad)
         )
 
@@ -1506,7 +1512,7 @@ class TestConvTypes:
 
         # Check the forward Op
         output = conv.abstract_conv2d(constant_tensor, filters)
-        grad_filters = aesara.grad(output.sum(), wrt=filters)
+        grad_filters = pytensor.grad(output.sum(), wrt=filters)
         assert filters.type.is_super(grad_filters.type), (
             grad_filters,
             grad_filters.type,
@@ -1515,7 +1521,7 @@ class TestConvTypes:
         )
 
         output = conv.abstract_conv2d(input, constant_tensor)
-        grad_input = aesara.grad(output.sum(), wrt=input)
+        grad_input = pytensor.grad(output.sum(), wrt=input)
         assert input.type.is_super(grad_input.type), (
             grad_input,
             grad_input.type,
@@ -1527,7 +1533,7 @@ class TestConvTypes:
         grad_filters = conv.AbstractConv2d_gradWeights()(
             constant_tensor, topgrad, out_shape
         )
-        grad_topgrad = aesara.grad(grad_filters.sum(), wrt=topgrad)
+        grad_topgrad = pytensor.grad(grad_filters.sum(), wrt=topgrad)
         assert topgrad.type.is_super(grad_topgrad.type), (
             grad_topgrad,
             grad_topgrad.type,
@@ -1538,7 +1544,7 @@ class TestConvTypes:
         grad_filters = conv.AbstractConv2d_gradWeights()(
             input, constant_tensor, out_shape
         )
-        grad_input = aesara.grad(grad_filters.sum(), wrt=input)
+        grad_input = pytensor.grad(grad_filters.sum(), wrt=input)
         assert grad_input.type == input.type, (
             grad_input,
             grad_input.type,
@@ -1550,7 +1556,7 @@ class TestConvTypes:
         grad_input = conv.AbstractConv2d_gradInputs()(
             constant_tensor, topgrad, out_shape
         )
-        grad_topgrad = aesara.grad(grad_input.sum(), wrt=topgrad)
+        grad_topgrad = pytensor.grad(grad_input.sum(), wrt=topgrad)
         assert topgrad.type.is_super(grad_topgrad.type), (
             grad_topgrad,
             grad_topgrad.type,
@@ -1561,7 +1567,7 @@ class TestConvTypes:
         grad_input = conv.AbstractConv2d_gradInputs()(
             filters, constant_tensor, out_shape
         )
-        grad_filters = aesara.grad(grad_input.sum(), wrt=filters)
+        grad_filters = pytensor.grad(grad_input.sum(), wrt=filters)
         assert grad_filters.type == filters.type, (
             grad_filters,
             grad_filters.type,
@@ -1571,9 +1577,9 @@ class TestConvTypes:
 
 
 class TestBilinearUpsampling:
-    # If config.blas__ldflags is empty, Aesara will use
+    # If config.blas__ldflags is empty, Pytensor will use
     # a NumPy C implementation of [sd]gemm_.
-    compile_mode = aesara.compile.mode.get_default_mode()
+    compile_mode = pytensor.compile.mode.get_default_mode()
     if config.mode == "FAST_COMPILE":
         compile_mode = compile_mode.excluding("conv_gemm")
         compile_mode = compile_mode.excluding("AbstractConvCheck")
@@ -1608,13 +1614,13 @@ class TestBilinearUpsampling:
         for ratio in [2, 3, 4, 5, 6, 7, 8, 9]:
             # getting the un-normalized kernel
             kernel = bilinear_kernel_2D(ratio=ratio, normalize=False)
-            f = aesara.function([], kernel)
+            f = pytensor.function([], kernel)
             kernel_2D = self.numerical_kernel_2D(ratio)
             utt.assert_allclose(kernel_2D, f())
 
             # getting the normalized kernel
             kernel = bilinear_kernel_2D(ratio=ratio, normalize=True)
-            f = aesara.function([], kernel)
+            f = pytensor.function([], kernel)
             kernel_2D = kernel_2D / float(ratio**2)
             utt.assert_allclose(kernel_2D, f())
 
@@ -1627,22 +1633,22 @@ class TestBilinearUpsampling:
 
         rat = iscalar()
         kernel_ten = bilinear_kernel_1D(ratio=rat, normalize=False)
-        f_ten = aesara.function([rat], kernel_ten)
+        f_ten = pytensor.function([rat], kernel_ten)
 
         kernel_ten_norm = bilinear_kernel_1D(ratio=rat, normalize=True)
-        f_ten_norm = aesara.function([rat], kernel_ten_norm)
+        f_ten_norm = pytensor.function([rat], kernel_ten_norm)
 
         for ratio in [2, 3, 4, 5, 6, 7, 8, 9]:
             # getting the un-normalized kernel
             kernel = bilinear_kernel_1D(ratio=ratio, normalize=False)
-            f = aesara.function([], kernel)
+            f = pytensor.function([], kernel)
             kernel_1D = self.numerical_kernel_1D(ratio)
             utt.assert_allclose(kernel_1D, f())
             utt.assert_allclose(kernel_1D, f_ten(ratio))
 
             # getting the normalized kernel
             kernel = bilinear_kernel_1D(ratio=ratio, normalize=True)
-            f = aesara.function([], kernel)
+            f = pytensor.function([], kernel)
             kernel_1D = kernel_1D / float(ratio)
             utt.assert_allclose(kernel_1D, f())
             utt.assert_allclose(kernel_1D, f_ten_norm(ratio))
@@ -1728,7 +1734,7 @@ class TestBilinearUpsampling:
                 num_input_channels=1,
                 use_1D_kernel=True,
             )
-            f = aesara.function([], bilin_mat, mode=self.compile_mode)
+            f = pytensor.function([], bilin_mat, mode=self.compile_mode)
             up_mat_2d = self.get_upsampled_twobytwo_mat(input_x, ratio)
             utt.assert_allclose(f(), up_mat_2d, rtol=1e-06)
 
@@ -1750,7 +1756,7 @@ class TestBilinearUpsampling:
                     num_input_channels=None,
                     use_1D_kernel=use_1D_kernel,
                 )
-                f = aesara.function([], bilin_mat, mode=self.compile_mode)
+                f = pytensor.function([], bilin_mat, mode=self.compile_mode)
                 up_mat_2d = self.get_upsampled_twobytwo_mat(input_x, ratio)
                 utt.assert_allclose(f(), up_mat_2d, rtol=1e-06)
 
@@ -1778,8 +1784,8 @@ class TestBilinearUpsampling:
             num_input_channels=4,
             use_1D_kernel=False,
         )
-        f_1D = aesara.function([], mat_1D, mode=self.compile_mode)
-        f_2D = aesara.function([], mat_2D, mode=self.compile_mode)
+        f_1D = pytensor.function([], mat_1D, mode=self.compile_mode)
+        f_2D = pytensor.function([], mat_2D, mode=self.compile_mode)
         utt.assert_allclose(f_1D(), f_2D(), rtol=1e-06)
 
         # checking upsampling with ratio 8
@@ -1798,8 +1804,8 @@ class TestBilinearUpsampling:
             num_input_channels=11,
             use_1D_kernel=False,
         )
-        f_1D = aesara.function([], mat_1D, mode=self.compile_mode)
-        f_2D = aesara.function([], mat_2D, mode=self.compile_mode)
+        f_1D = pytensor.function([], mat_1D, mode=self.compile_mode)
+        f_2D = pytensor.function([], mat_2D, mode=self.compile_mode)
         utt.assert_allclose(f_1D(), f_2D(), rtol=1e-06)
 
     def test_fractional_bilinear_upsampling(self):
@@ -1836,7 +1842,7 @@ class TestBilinearUpsampling:
                 ]
             ]
         ).astype(config.floatX)
-        f_up_x = aesara.function([], up_x, mode=self.compile_mode)
+        f_up_x = pytensor.function([], up_x, mode=self.compile_mode)
         utt.assert_allclose(f_up_x(), num_up_x, rtol=1e-6)
 
     def test_fractional_bilinear_upsampling_shape(self):
@@ -1845,7 +1851,7 @@ class TestBilinearUpsampling:
         z = bilinear_upsampling(
             at.as_tensor_variable(x), frac_ratio=resize, use_1D_kernel=False
         )
-        out = aesara.function([], z.shape, mode="FAST_RUN")()
+        out = pytensor.function([], z.shape, mode="FAST_RUN")()
         utt.assert_allclose(out, (1, 1, 240, 240))
 
 
@@ -1862,12 +1868,12 @@ class TestConv2dTranspose:
         mode = self.mode
         if config.mode == "FAST_COMPILE":
             mode = (
-                aesara.compile.get_mode(mode)
+                pytensor.compile.get_mode(mode)
                 .excluding("conv_gemm")
                 .excluding("AbstractConvCheck")
             )
 
-        output = aesara.function(
+        output = pytensor.function(
             inputs=[],
             outputs=conv2d_transpose(
                 input=at.ones((2, 2, 4, 4)),
@@ -1923,7 +1929,7 @@ class TestConv2dGrads:
     def test_conv2d_grad_wrt_inputs(self):
         # Compares calculated abstract grads wrt inputs with the fwd grads
         # This method checks the outputs of `conv2_grad_wrt_inputs` against
-        # the outputs of `aesara.tensor.nnet.conv` forward grads to make sure the
+        # the outputs of `pytensor.tensor.nnet.conv` forward grads to make sure the
         # results are the same.
 
         for (in_shape, fltr_shape) in zip(self.inputs_shapes, self.filters_shapes):
@@ -1937,7 +1943,7 @@ class TestConv2dGrads:
                             config.floatX
                         )
                         out_grad_shape = (
-                            aesara.tensor.nnet.abstract_conv.get_conv_output_shape(
+                            pytensor.tensor.nnet.abstract_conv.get_conv_output_shape(
                                 image_shape=in_shape,
                                 kernel_shape=fltr_shape,
                                 border_mode=bm,
@@ -1947,7 +1953,7 @@ class TestConv2dGrads:
                         out_grad_val = self.random_stream.random(out_grad_shape).astype(
                             config.floatX
                         )
-                        conv_out = aesara.tensor.nnet.conv2d(
+                        conv_out = pytensor.tensor.nnet.conv2d(
                             self.x,
                             filters=self.w,
                             border_mode=bm,
@@ -1956,17 +1962,17 @@ class TestConv2dGrads:
                             filter_shape=fltr_shape,
                             filter_flip=ff,
                         )
-                        conv_grad = aesara.grad(
+                        conv_grad = pytensor.grad(
                             conv_out.sum(),
                             wrt=self.x,
                             known_grads={conv_out: self.output_grad},
                         )
-                        f_old = aesara.function(
+                        f_old = pytensor.function(
                             [self.x, self.w, self.output_grad], conv_grad
                         )
 
                         conv_wrt_i_out = (
-                            aesara.tensor.nnet.abstract_conv.conv2d_grad_wrt_inputs(
+                            pytensor.tensor.nnet.abstract_conv.conv2d_grad_wrt_inputs(
                                 output_grad=self.output_grad_wrt,
                                 filters=self.w,
                                 border_mode=bm,
@@ -1976,7 +1982,7 @@ class TestConv2dGrads:
                                 filter_flip=ff,
                             )
                         )
-                        f_new = aesara.function(
+                        f_new = pytensor.function(
                             [self.w, self.output_grad_wrt], conv_wrt_i_out
                         )
 
@@ -1989,7 +1995,7 @@ class TestConv2dGrads:
     def test_conv2d_grad_wrt_weights(self):
         # Compares calculated abstract grads wrt weights with the fwd grads
         # This method checks the outputs of `conv2_grad_wrt_weights` against
-        # the outputs of `aesara.tensor.nnet.conv` forward grads to make sure the
+        # the outputs of `pytensor.tensor.nnet.conv` forward grads to make sure the
         # results are the same.
 
         for (in_shape, fltr_shape) in zip(self.inputs_shapes, self.filters_shapes):
@@ -2003,7 +2009,7 @@ class TestConv2dGrads:
                             config.floatX
                         )
                         out_grad_shape = (
-                            aesara.tensor.nnet.abstract_conv.get_conv_output_shape(
+                            pytensor.tensor.nnet.abstract_conv.get_conv_output_shape(
                                 image_shape=in_shape,
                                 kernel_shape=fltr_shape,
                                 border_mode=bm,
@@ -2013,7 +2019,7 @@ class TestConv2dGrads:
                         out_grad_val = self.random_stream.random(out_grad_shape).astype(
                             config.floatX
                         )
-                        conv_out = aesara.tensor.nnet.conv2d(
+                        conv_out = pytensor.tensor.nnet.conv2d(
                             self.x,
                             filters=self.w,
                             border_mode=bm,
@@ -2022,17 +2028,17 @@ class TestConv2dGrads:
                             filter_shape=fltr_shape,
                             filter_flip=ff,
                         )
-                        conv_grad = aesara.grad(
+                        conv_grad = pytensor.grad(
                             conv_out.sum(),
                             wrt=self.w,
                             known_grads={conv_out: self.output_grad},
                         )
-                        f_old = aesara.function(
+                        f_old = pytensor.function(
                             [self.x, self.w, self.output_grad], conv_grad
                         )
 
                         conv_wrt_w_out = (
-                            aesara.tensor.nnet.abstract_conv.conv2d_grad_wrt_weights(
+                            pytensor.tensor.nnet.abstract_conv.conv2d_grad_wrt_weights(
                                 self.x,
                                 output_grad=self.output_grad_wrt,
                                 border_mode=bm,
@@ -2042,7 +2048,7 @@ class TestConv2dGrads:
                                 filter_flip=ff,
                             )
                         )
-                        f_new = aesara.function(
+                        f_new = pytensor.function(
                             [self.x, self.output_grad_wrt], conv_wrt_w_out
                         )
                         utt.assert_allclose(
@@ -2056,12 +2062,12 @@ class TestConv2dGrads:
     reason="SciPy and cxx needed",
 )
 class TestGroupedConvNoOptim:
-    conv = aesara.tensor.nnet.abstract_conv.AbstractConv2d
-    conv_gradw = aesara.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
-    conv_gradi = aesara.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
-    conv_op = aesara.tensor.nnet.abstract_conv.AbstractConv2d
-    conv_gradw_op = aesara.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
-    conv_gradi_op = aesara.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
+    conv = pytensor.tensor.nnet.abstract_conv.AbstractConv2d
+    conv_gradw = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
+    conv_gradi = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
+    conv_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d
+    conv_gradw_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
+    conv_gradi_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
     mode = Mode(optimizer=None)
     is_dnn = False
 
@@ -2103,7 +2109,7 @@ class TestGroupedConvNoOptim:
             )
             grouped_conv_output = grouped_conv_op(img_sym, kern_sym)
 
-            grouped_func = aesara.function(
+            grouped_func = pytensor.function(
                 [img_sym, kern_sym], grouped_conv_output, mode=self.mode
             )
             assert any(
@@ -2119,7 +2125,7 @@ class TestGroupedConvNoOptim:
                 subsample=self.subsample,
                 filter_dilation=self.filter_dilation,
             )
-            ref_func = aesara.function(
+            ref_func = pytensor.function(
                 [img_sym, kern_sym], ref_conv_op, mode=self.ref_mode
             )
             ref_concat_output = [
@@ -2156,7 +2162,7 @@ class TestGroupedConvNoOptim:
             grouped_conv_output = grouped_convgrad_op(
                 img_sym, top_sym, at.as_tensor_variable(kshp[-self.convdim :])
             )
-            grouped_func = aesara.function(
+            grouped_func = pytensor.function(
                 [img_sym, top_sym], grouped_conv_output, mode=self.mode
             )
             assert any(
@@ -2173,7 +2179,7 @@ class TestGroupedConvNoOptim:
                 subsample=self.subsample,
                 filter_dilation=self.filter_dilation,
             )
-            ref_func = aesara.function(
+            ref_func = pytensor.function(
                 [img_sym, top_sym], ref_conv_op, mode=self.ref_mode
             )
             ref_concat_output = [
@@ -2217,7 +2223,7 @@ class TestGroupedConvNoOptim:
             grouped_conv_output = grouped_convgrad_op(
                 kern_sym, top_sym, at.as_tensor_variable(imshp[-self.convdim :])
             )
-            grouped_func = aesara.function(
+            grouped_func = pytensor.function(
                 [kern_sym, top_sym], grouped_conv_output, mode=self.mode
             )
             assert any(
@@ -2234,7 +2240,7 @@ class TestGroupedConvNoOptim:
                 subsample=self.subsample,
                 filter_dilation=self.filter_dilation,
             )
-            ref_func = aesara.function(
+            ref_func = pytensor.function(
                 [kern_sym, top_sym], ref_conv_op, mode=self.ref_mode
             )
             ref_concat_output = [
@@ -2260,12 +2266,12 @@ class TestGroupedConvNoOptim:
     reason="SciPy and cxx needed",
 )
 class TestGroupedConv3dNoOptim(TestGroupedConvNoOptim):
-    conv = aesara.tensor.nnet.abstract_conv.AbstractConv3d
-    conv_gradw = aesara.tensor.nnet.abstract_conv.AbstractConv3d_gradWeights
-    conv_gradi = aesara.tensor.nnet.abstract_conv.AbstractConv3d_gradInputs
-    conv_op = aesara.tensor.nnet.abstract_conv.AbstractConv3d
-    conv_gradw_op = aesara.tensor.nnet.abstract_conv.AbstractConv3d_gradWeights
-    conv_gradi_op = aesara.tensor.nnet.abstract_conv.AbstractConv3d_gradInputs
+    conv = pytensor.tensor.nnet.abstract_conv.AbstractConv3d
+    conv_gradw = pytensor.tensor.nnet.abstract_conv.AbstractConv3d_gradWeights
+    conv_gradi = pytensor.tensor.nnet.abstract_conv.AbstractConv3d_gradInputs
+    conv_op = pytensor.tensor.nnet.abstract_conv.AbstractConv3d
+    conv_gradw_op = pytensor.tensor.nnet.abstract_conv.AbstractConv3d_gradWeights
+    conv_gradi_op = pytensor.tensor.nnet.abstract_conv.AbstractConv3d_gradInputs
     mode = Mode(optimizer=None)
 
     def setup_method(self):
@@ -2371,7 +2377,7 @@ class TestSeparableConv:
         pfilter_sym = tensor4("p")
 
         sep_op = separable_conv2d(x_sym, dfilter_sym, pfilter_sym, self.x.shape[1])
-        fun = aesara.function(
+        fun = pytensor.function(
             [x_sym, dfilter_sym, pfilter_sym], sep_op, mode="FAST_RUN"
         )
 
@@ -2393,7 +2399,7 @@ class TestSeparableConv:
             depthwise_filter_shape=self.depthwise_filter.shape,
             pointwise_filter_shape=self.pointwise_filter.shape,
         )
-        fun = aesara.function(
+        fun = pytensor.function(
             [x_sym, dfilter_sym, pfilter_sym], sep_op, mode="FAST_RUN"
         )
         top = fun(self.x, self.depthwise_filter, self.pointwise_filter)
@@ -2403,7 +2409,7 @@ class TestSeparableConv:
         sep_op = separable_conv2d(
             x_sym, dfilter_sym, pfilter_sym, self.x.shape[1], subsample=(2, 2)
         )
-        fun = aesara.function(
+        fun = pytensor.function(
             [x_sym, dfilter_sym, pfilter_sym], sep_op, mode="FAST_RUN"
         )
         top = fun(self.x, self.depthwise_filter, self.pointwise_filter)
@@ -2415,7 +2421,7 @@ class TestSeparableConv:
         sep_op = separable_conv2d(
             x_sym, dfilter_sym, pfilter_sym, self.x.shape[1], border_mode="full"
         )
-        fun = aesara.function(
+        fun = pytensor.function(
             [x_sym, dfilter_sym, pfilter_sym], sep_op, mode="FAST_RUN"
         )
         top = fun(self.x[:, :, :3, :3], self.depthwise_filter, self.pointwise_filter)
@@ -2439,7 +2445,7 @@ class TestSeparableConv:
         pfilter_sym = tensor5("p")
 
         sep_op = separable_conv3d(x_sym, dfilter_sym, pfilter_sym, x.shape[1])
-        fun = aesara.function(
+        fun = pytensor.function(
             [x_sym, dfilter_sym, pfilter_sym], sep_op, mode="FAST_RUN"
         )
 
@@ -2459,7 +2465,7 @@ class TestSeparableConv:
             depthwise_filter_shape=depthwise_filter.shape,
             pointwise_filter_shape=pointwise_filter.shape,
         )
-        fun = aesara.function(
+        fun = pytensor.function(
             [x_sym, dfilter_sym, pfilter_sym], sep_op, mode="FAST_RUN"
         )
         top = fun(x, depthwise_filter, pointwise_filter)
@@ -2469,7 +2475,7 @@ class TestSeparableConv:
         sep_op = separable_conv3d(
             x_sym, dfilter_sym, pfilter_sym, x.shape[1], subsample=(2, 2, 2)
         )
-        fun = aesara.function(
+        fun = pytensor.function(
             [x_sym, dfilter_sym, pfilter_sym], sep_op, mode="FAST_RUN"
         )
         top = fun(x, depthwise_filter, pointwise_filter)
@@ -2487,7 +2493,7 @@ class TestSeparableConv:
         sep_op = separable_conv3d(
             x_sym, dfilter_sym, pfilter_sym, x.shape[1], border_mode="full"
         )
-        fun = aesara.function(
+        fun = pytensor.function(
             [x_sym, dfilter_sym, pfilter_sym], sep_op, mode="FAST_RUN"
         )
         top = fun(x[:, :, :3, :3, :3], depthwise_filter, pointwise_filter)
@@ -2499,12 +2505,12 @@ class TestSeparableConv:
     reason="SciPy and cxx needed",
 )
 class TestUnsharedConv:
-    conv2d = aesara.tensor.nnet.abstract_conv.AbstractConv2d
-    conv2d_gradw = aesara.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
-    conv2d_gradi = aesara.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
-    conv2d_op = aesara.tensor.nnet.abstract_conv.AbstractConv2d
-    conv2d_gradw_op = aesara.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
-    conv2d_gradi_op = aesara.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
+    conv2d = pytensor.tensor.nnet.abstract_conv.AbstractConv2d
+    conv2d_gradw = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
+    conv2d_gradi = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
+    conv2d_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d
+    conv2d_gradw_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
+    conv2d_gradi_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
 
     mode = Mode(optimizer="None")
 
@@ -2553,7 +2559,7 @@ class TestUnsharedConv:
                 unshared=True,
             )
             unshared_out_sym = unshared_conv_op(img_sym, kern_sym)
-            unshared_func = aesara.function(
+            unshared_func = pytensor.function(
                 [img_sym, kern_sym], unshared_out_sym, mode=self.mode
             )
             assert any(
@@ -2572,7 +2578,7 @@ class TestUnsharedConv:
                 unshared=False,
             )
             ref_out_sym = ref_conv_op(img_sym, ref_kern_sym)
-            ref_func = aesara.function(
+            ref_func = pytensor.function(
                 [img_sym, ref_kern_sym], ref_out_sym, mode=self.mode
             )
 
@@ -2613,7 +2619,7 @@ class TestUnsharedConv:
             unshared_out_sym = unshared_conv_op(
                 img_sym, top_sym, at.as_tensor_variable(kshp[-2:])
             )
-            unshared_func = aesara.function(
+            unshared_func = pytensor.function(
                 [img_sym, top_sym], unshared_out_sym, mode=self.mode
             )
             assert any(
@@ -2634,7 +2640,9 @@ class TestUnsharedConv:
             ref_out_sym = ref_conv_op(
                 img_sym, top_sym, at.as_tensor_variable(single_kshp[-2:])
             )
-            ref_func = aesara.function([img_sym, top_sym], ref_out_sym, mode=self.mode)
+            ref_func = pytensor.function(
+                [img_sym, top_sym], ref_out_sym, mode=self.mode
+            )
 
             for i in range(0, topshp[2]):
                 for j in range(0, topshp[3]):
@@ -2681,7 +2689,7 @@ class TestUnsharedConv:
             unshared_out_sym = unshared_conv_op(
                 kern_sym, top_sym, at.as_tensor_variable(imshp[-2:])
             )
-            unshared_func = aesara.function(
+            unshared_func = pytensor.function(
                 [kern_sym, top_sym], unshared_out_sym, mode=self.mode
             )
             assert any(
@@ -2700,7 +2708,7 @@ class TestUnsharedConv:
             ref_out_sym = ref_conv_op(
                 ref_kern_sym, top_sym, at.as_tensor_variable(imshp[-2:])
             )
-            ref_func = aesara.function(
+            ref_func = pytensor.function(
                 [ref_kern_sym, top_sym], ref_out_sym, mode=self.mode
             )
 
@@ -2725,12 +2733,12 @@ class TestUnsharedConv:
 
 
 class TestAsymmetricPadding:
-    conv2d = aesara.tensor.nnet.abstract_conv.AbstractConv2d
-    conv2d_gradw = aesara.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
-    conv2d_gradi = aesara.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
-    conv2d_op = aesara.tensor.nnet.abstract_conv.AbstractConv2d
-    conv2d_gradw_op = aesara.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
-    conv2d_gradi_op = aesara.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
+    conv2d = pytensor.tensor.nnet.abstract_conv.AbstractConv2d
+    conv2d_gradw = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
+    conv2d_gradi = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
+    conv2d_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d
+    conv2d_gradw_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
+    conv2d_gradi_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
 
     mode = Mode(optimizer="None")
 
@@ -2755,7 +2763,7 @@ class TestAsymmetricPadding:
                 border_mode=pad, subsample=(1, 1), filter_dilation=(1, 1)
             )
             asymmetric_out_sym = asymmetric_conv_op(img_sym, kern_sym)
-            asymmetric_func = aesara.function(
+            asymmetric_func = pytensor.function(
                 [img_sym, kern_sym], asymmetric_out_sym, mode=self.mode
             )
             assert any(
@@ -2768,7 +2776,9 @@ class TestAsymmetricPadding:
                 border_mode="valid", subsample=(1, 1), filter_dilation=(1, 1)
             )
             ref_out_sym = ref_conv_op(img_sym, kern_sym)
-            ref_func = aesara.function([img_sym, kern_sym], ref_out_sym, mode=self.mode)
+            ref_func = pytensor.function(
+                [img_sym, kern_sym], ref_out_sym, mode=self.mode
+            )
 
             exp_imshp = (
                 imshp[0],
@@ -2805,7 +2815,7 @@ class TestAsymmetricPadding:
                 border_mode=pad, subsample=(1, 1), filter_dilation=(1, 1)
             )
             asymmetric_out_sym = asymmetric_conv_op(img_sym, top_sym, kshp[-2:])
-            asymmetric_func = aesara.function(
+            asymmetric_func = pytensor.function(
                 [img_sym, top_sym], asymmetric_out_sym, mode=self.mode
             )
             assert any(
@@ -2818,7 +2828,9 @@ class TestAsymmetricPadding:
                 border_mode="valid", subsample=(1, 1), filter_dilation=(1, 1)
             )
             ref_out_sym = ref_conv_op(img_sym, top_sym, kshp[-2:])
-            ref_func = aesara.function([img_sym, top_sym], ref_out_sym, mode=self.mode)
+            ref_func = pytensor.function(
+                [img_sym, top_sym], ref_out_sym, mode=self.mode
+            )
 
             exp_imshp = (
                 imshp[0],
@@ -2860,7 +2872,7 @@ class TestAsymmetricPadding:
                 border_mode=pad, subsample=(1, 1), filter_dilation=(1, 1)
             )
             asymmetric_out_sym = asymmetric_conv_op(kern_sym, top_sym, imshp[-2:])
-            asymmetric_func = aesara.function(
+            asymmetric_func = pytensor.function(
                 [kern_sym, top_sym], asymmetric_out_sym, mode=self.mode
             )
             assert any(
@@ -2877,7 +2889,9 @@ class TestAsymmetricPadding:
                 imshp[3] + pad[1][0] + pad[1][1],
             ]
             ref_out_sym = ref_conv_op(kern_sym, top_sym, exp_imshp)
-            ref_func = aesara.function([kern_sym, top_sym], ref_out_sym, mode=self.mode)
+            ref_func = pytensor.function(
+                [kern_sym, top_sym], ref_out_sym, mode=self.mode
+            )
 
             ref_output = ref_func(kern, top)
 
@@ -2928,7 +2942,7 @@ class TestCausalConv:
             img_sym, kern_sym, self.kern.shape, filter_dilation=self.dilation
         )
 
-        causal_func = aesara.function([img_sym, kern_sym], sym_out, mode=self.mode)
+        causal_func = pytensor.function([img_sym, kern_sym], sym_out, mode=self.mode)
 
         output = causal_func(self.img, self.kern)
 

@@ -1,9 +1,9 @@
 # To use:
 #
 #   $ conda env create -f environment.yml  # `mamba` works too for this command
-#   $ conda activate aesara-dev
+#   $ conda activate pytensor-dev
 #
-name: aesara-dev
+name: pytensor-dev
 channels:
   - conda-forge
 dependencies:

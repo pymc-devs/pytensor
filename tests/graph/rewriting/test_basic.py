@@ -2,12 +2,12 @@ import sys
 
 import pytest
 
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Constant, equal_computations
-from aesara.graph.features import Feature
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import Op
-from aesara.graph.rewriting.basic import (
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Constant, equal_computations
+from pytensor.graph.features import Feature
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op
+from pytensor.graph.rewriting.basic import (
     EquilibriumGraphRewriter,
     MergeOptimizer,
     OpKeyGraphRewriter,
@@ -22,12 +22,12 @@ from aesara.graph.rewriting.basic import (
     pre_constant_merge,
     pre_greedy_node_rewriter,
 )
-from aesara.raise_op import assert_op
-from aesara.tensor.math import Dot, add, dot
-from aesara.tensor.rewriting.basic import constant_folding
-from aesara.tensor.subtensor import AdvancedSubtensor
-from aesara.tensor.type import matrix, values_eq_approx_always_true
-from aesara.tensor.type_other import MakeSlice, SliceConstant, slicetype
+from pytensor.raise_op import assert_op
+from pytensor.tensor.math import Dot, add, dot
+from pytensor.tensor.rewriting.basic import constant_folding
+from pytensor.tensor.subtensor import AdvancedSubtensor
+from pytensor.tensor.type import matrix, values_eq_approx_always_true
+from pytensor.tensor.type_other import MakeSlice, SliceConstant, slicetype
 from tests.graph.utils import (
     MyOp,
     MyType,
@@ -489,8 +489,8 @@ class TestEquilibrium:
         g = FunctionGraph([x, y, z], [e])
         # print 'before', g
         # display pesky warnings along with stdout
-        # also silence logger for 'aesara.graph.rewriting.basic'
-        _logger = logging.getLogger("aesara.graph.rewriting.basic")
+        # also silence logger for 'pytensor.graph.rewriting.basic'
+        _logger = logging.getLogger("pytensor.graph.rewriting.basic")
         oldlevel = _logger.level
         _logger.setLevel(logging.CRITICAL)
         try:
@@ -837,12 +837,15 @@ def test_OpToRewriterTracker():
 def test_deprecations():
     """Make sure we can import deprecated classes from current and deprecated modules."""
     with pytest.deprecated_call():
-        from aesara.graph.rewriting.basic import GlobalOptimizer
+        from pytensor.graph.rewriting.basic import GlobalOptimizer
 
     with pytest.deprecated_call():
-        from aesara.graph.opt import GlobalOptimizer, LocalOptimizer  # noqa: F401 F811
+        from pytensor.graph.opt import (  # noqa: F401 F811
+            GlobalOptimizer,
+            LocalOptimizer,
+        )
 
-    del sys.modules["aesara.graph.opt"]
+    del sys.modules["pytensor.graph.opt"]
 
     with pytest.deprecated_call():
-        from aesara.graph.opt import GraphRewriter  # noqa: F401
+        from pytensor.graph.opt import GraphRewriter  # noqa: F401

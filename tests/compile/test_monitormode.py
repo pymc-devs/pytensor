@@ -3,11 +3,11 @@ from io import StringIO
 
 import numpy as np
 
-from aesara.compile import MonitorMode
-from aesara.compile.function import function
-from aesara.printing import debugprint
-from aesara.tensor import log, outer
-from aesara.tensor.type import dscalar, vector
+from pytensor.compile import MonitorMode
+from pytensor.compile.function import function
+from pytensor.printing import debugprint
+from pytensor.tensor import log, outer
+from pytensor.tensor.type import dscalar, vector
 
 
 def test_detect_nan():

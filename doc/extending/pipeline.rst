@@ -5,16 +5,16 @@
 Overview of the compilation pipeline
 ====================================
 
-Once one has an Aesara graph, they can use :func:`aesara.function` to compile a
+Once one has an Pytensor graph, they can use :func:`pytensor.function` to compile a
 function that will perform the computations modeled by the graph in Python, C,
 Numba, or JAX.
 
-More specifically, :func:`aesara.function` takes a list of input and output
+More specifically, :func:`pytensor.function` takes a list of input and output
 :ref:`Variables <variable>` that define the precise sub-graphs that
 correspond to the desired computations.
 
 Here is an overview of the various steps that are taken during the
-compilation performed by :func:`aesara.function`.
+compilation performed by :func:`pytensor.function`.
 
 
 Step 1 - Create a :class:`FunctionGraph`
@@ -52,7 +52,7 @@ Once the computation graph is rewritten, the :term:`linker` is
 extracted from the :class:`Mode`. It is then called with the :class:`FunctionGraph` as
 argument to produce a ``thunk``, which is a function with no arguments that
 returns nothing. Along with the thunk, one list of input containers (a
-:class:`aesara.link.basic.Container` is a sort of object that wraps another and does
+:class:`pytensor.link.basic.Container` is a sort of object that wraps another and does
 type casting) and one list of output containers are produced,
 corresponding to the input and output :class:`Variable`\s as well as the updates
 defined for the inputs when applicable. To perform the computations,
@@ -78,9 +78,9 @@ case if ``borrow`` was True, the thunk would be allowed to reuse--or
 .. note::
 
     Compiled libraries are stored within a specific compilation directory,
-    which by default is set to ``$HOME/.aesara/compiledir_xxx``, where
+    which by default is set to ``$HOME/.pytensor/compiledir_xxx``, where
     ``xxx`` identifies the platform (under Windows the default location
-    is instead ``$LOCALAPPDATA\Aesara\compiledir_xxx``). It may be manually set
+    is instead ``$LOCALAPPDATA\Pytensor\compiledir_xxx``). It may be manually set
     to a different location either by setting :attr:`config.compiledir` or
     :attr:`config.base_compiledir`, either within your Python script or by
     using one of the configuration mechanisms described in :mod:`config`.
@@ -88,9 +88,9 @@ case if ``borrow`` was True, the thunk would be allowed to reuse--or
     The compile cache is based upon the C++ code of the graph to be compiled.
     So, if you change compilation configuration variables, such as
     :attr:`config.blas__ldflags`, you will need to manually remove your compile cache,
-    using ``Aesara/bin/aesara-cache clear``
+    using ``Pytensor/bin/pytensor-cache clear``
 
-    Aesara also implements a lock mechanism that prevents multiple compilations
+    Pytensor also implements a lock mechanism that prevents multiple compilations
     within the same compilation directory (to avoid crashes with parallel
     execution of some scripts).
 
@@ -98,6 +98,6 @@ Step 4 - Wrap the thunk in a pretty package
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The thunk returned by the linker along with input and output
-containers is unwieldy. :func:`aesara.function` hides that complexity away so
+containers is unwieldy. :func:`pytensor.function` hides that complexity away so
 that it can be used like a normal function with arguments and return
 values.

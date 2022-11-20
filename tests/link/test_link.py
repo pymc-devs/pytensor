@@ -3,16 +3,16 @@ from typing import Callable
 
 import numpy as np
 
-import aesara
-from aesara.compile.mode import Mode
-from aesara.graph import fg
-from aesara.graph.basic import Apply, Constant, Variable, clone
-from aesara.graph.op import Op
-from aesara.graph.type import Type
-from aesara.link.basic import Container, Linker, PerformLinker, WrapLinker
-from aesara.link.c.basic import OpWiseCLinker
-from aesara.tensor.type import matrix, scalar
-from aesara.utils import cmp, to_return_values
+import pytensor
+from pytensor.compile.mode import Mode
+from pytensor.graph import fg
+from pytensor.graph.basic import Apply, Constant, Variable, clone
+from pytensor.graph.op import Op
+from pytensor.graph.type import Type
+from pytensor.link.basic import Container, Linker, PerformLinker, WrapLinker
+from pytensor.link.c.basic import OpWiseCLinker
+from pytensor.tensor.type import matrix, scalar
+from pytensor.utils import cmp, to_return_values
 
 
 def make_function(linker: Linker, unpack_single: bool = True, **kwargs) -> Callable:
@@ -220,17 +220,17 @@ class TestWrapLinker:
 
 
 def test_sort_schedule_fn():
-    from aesara.graph.sched import make_depends, sort_schedule_fn
+    from pytensor.graph.sched import make_depends, sort_schedule_fn
 
     x = matrix("x")
-    y = aesara.tensor.dot(x[:5] * 2, x.T + 1).T
+    y = pytensor.tensor.dot(x[:5] * 2, x.T + 1).T
 
     def str_cmp(a, b):
         return cmp(str(a), str(b))  # lexicographical sort
 
     linker = OpWiseCLinker(schedule=sort_schedule_fn(str_cmp))
     mode = Mode(linker=linker)
-    f = aesara.function((x,), (y,), mode=mode)
+    f = pytensor.function((x,), (y,), mode=mode)
 
     nodes = f.maker.linker.make_all()[-1]
     depends = make_depends()
@@ -246,7 +246,7 @@ def test_container_deepcopy():
     # It seam that numpy.asarray(0.).astype(floatX) can return a numpy
     # scalar with some NumPy Version. So we call numpy.asarray with
     # the dtype parameter.
-    v = np.asarray(0.0, dtype=aesara.config.floatX)
+    v = np.asarray(0.0, dtype=pytensor.config.floatX)
     assert isinstance(v, np.ndarray), type(v)
     for readonly in [True, False]:
         c = Container(t, [v], readonly=readonly)

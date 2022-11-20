@@ -1,7 +1,7 @@
 exclude: |
     (?x)^(
         versioneer\.py|
-        aesara/_version\.py|
+        pytensor/_version\.py|
         doc/.*|
         bin/.*
     )$
@@ -12,11 +12,11 @@ repos:
       - id: debug-statements
         exclude: |
           (?x)^(
-              aesara/breakpoint\.py|
-              aesara/graph/op\.py|
-              aesara/compile/nanguardmode\.py|
-              aesara/graph/rewriting/basic\.py|
-              aesara/tensor/var\.py|
+              pytensor/breakpoint\.py|
+              pytensor/graph/op\.py|
+              pytensor/compile/nanguardmode\.py|
+              pytensor/graph/rewriting/basic\.py|
+              pytensor/tensor/var\.py|
           )$
       - id: check-merge-conflict
   - repo: https://github.com/psf/black
@@ -39,11 +39,11 @@ repos:
         exclude: |
           (?x)^(
               .*/?__init__\.py|
-              aesara/graph/toolbox\.py|
-              aesara/link/jax/jax_dispatch\.py|
-              aesara/link/jax/jax_linker\.py|
-              aesara/scalar/basic_scipy\.py|
-              aesara/tensor/linalg\.py
+              pytensor/graph/toolbox\.py|
+              pytensor/link/jax/jax_dispatch\.py|
+              pytensor/link/jax/jax_linker\.py|
+              pytensor/scalar/basic_scipy\.py|
+              pytensor/tensor/linalg\.py
           )$
         args: ['--in-place', '--remove-all-unused-imports', '--remove-unused-variable']
   - repo: https://github.com/pre-commit/mirrors-mypy

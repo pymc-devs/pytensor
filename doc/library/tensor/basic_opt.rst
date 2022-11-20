@@ -5,7 +5,7 @@
 .. module:: tensor.rewriting.basic
    :platform: Unix, Windows
    :synopsis: Tensor Rewrites
-.. moduleauthor:: LISA, PyMC Developers, Aesara Developers
+.. moduleauthor:: LISA, PyMC Developers, Pytensor Developers
 
-.. automodule:: aesara.tensor.rewriting.basic
+.. automodule:: pytensor.tensor.rewriting.basic
     :members:

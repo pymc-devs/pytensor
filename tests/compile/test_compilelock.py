@@ -8,7 +8,7 @@ import time
 import filelock
 import pytest
 
-from aesara.compile.compilelock import force_unlock, local_mem, lock_ctx
+from pytensor.compile.compilelock import force_unlock, local_mem, lock_ctx
 
 
 def test_compilelock_force_unlock():
