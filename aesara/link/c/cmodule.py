@@ -2440,28 +2440,29 @@ class GCC_compiler(Compiler):
     def linking_patch(lib_dirs: List[str], libs: List[str]) -> List[str]:
         if sys.platform != "win32":
             return [f"-l{l}" for l in libs]
+        else:
+            # In explicit else because of https://github.com/python/mypy/issues/10773
+            def sort_key(lib):
+                name, *numbers, extension = lib.split(".")
+                return (extension == "dll", tuple(map(int, numbers)))
 
-        def sort_key(lib):  # type: ignore
-            name, *numbers, extension = lib.split(".")
-            return (extension == "dll", tuple(map(int, numbers)))
-
-        patched_lib_ldflags = []
-        for lib in libs:
-            ldflag = f"-l{lib}"
-            for lib_dir in lib_dirs:
-                lib_dir = lib_dir.strip('"')
-                windows_styled_libs = [
-                    fname
-                    for fname in os.listdir(lib_dir)
-                    if not (os.path.isdir(os.path.join(lib_dir, fname)))
-                    and fname.split(".")[0] == lib
-                    and fname.split(".")[-1] in ["dll", "lib"]
-                ]
-                if windows_styled_libs:
-                    selected_lib = sorted(windows_styled_libs, key=sort_key)[-1]
-                    ldflag = f'"{os.path.join(lib_dir, selected_lib)}"'
-            patched_lib_ldflags.append(ldflag)
-        return patched_lib_ldflags
+            patched_lib_ldflags = []
+            for lib in libs:
+                ldflag = f"-l{lib}"
+                for lib_dir in lib_dirs:
+                    lib_dir = lib_dir.strip('"')
+                    windows_styled_libs = [
+                        fname
+                        for fname in os.listdir(lib_dir)
+                        if not (os.path.isdir(os.path.join(lib_dir, fname)))
+                        and fname.split(".")[0] == lib
+                        and fname.split(".")[-1] in ["dll", "lib"]
+                    ]
+                    if windows_styled_libs:
+                        selected_lib = sorted(windows_styled_libs, key=sort_key)[-1]
+                        ldflag = f'"{os.path.join(lib_dir, selected_lib)}"'
+                patched_lib_ldflags.append(ldflag)
+            return patched_lib_ldflags
 
     @staticmethod
     def compile_str(
