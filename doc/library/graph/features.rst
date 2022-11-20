@@ -4,9 +4,9 @@
 :mod:`features` -- [doc TODO]
 ================================================
 
-.. module:: aesara.graph.features
+.. module:: pytensor.graph.features
    :platform: Unix, Windows
-   :synopsis: Aesara Internals
+   :synopsis: Pytensor Internals
 .. moduleauthor:: LISA
 
 Guide

@@ -1,12 +1,12 @@
 .. _libdoc_d3viz:
 
-=========================================================================
-:mod:`d3viz` -- d3viz: Interactive visualization of Aesara compute graphs
-=========================================================================
+===========================================================================
+:mod:`d3viz` -- d3viz: Interactive visualization of Pytensor compute graphs
+===========================================================================
 
-.. module:: aesara.d3viz
+.. module:: pytensor.d3viz
    :platform: Unix, Windows
-   :synopsis: Allows to interactively visualize Aesara compute graphs
+   :synopsis: Allows to interactively visualize Pytensor compute graphs
 .. moduleauthor:: Christof Angermueller
 
 
@@ -22,13 +22,13 @@ maintained, and it works both in Python 2.x and 3.x. Install it with pip::
 
     pip install pydot-ng
 
-Like Aesara’s printing module, ``d3viz``
+Like Pytensor’s printing module, ``d3viz``
 requires `graphviz <http://www.graphviz.org/>`__ binary to be available.
 
 Overview
 --------
 
-``d3viz`` extends Aesara’s printing module to interactively visualize compute
+``d3viz`` extends Pytensor’s printing module to interactively visualize compute
 graphs. Instead of creating a static picture, it creates an HTML file, which can
 be opened with current web-browsers. ``d3viz`` allows
 
@@ -50,8 +50,8 @@ hidden layer and a softmax output layer.
 
 .. code:: python
 
-    import aesara as th
-    import aesara.tensor as at
+    import pytensor as th
+    import pytensor.tensor as at
     import numpy as np
 
     ninputs = 1000
@@ -72,11 +72,11 @@ hidden layer and a softmax output layer.
     predict = th.function([x], y)
 
 The function ``predict`` outputs the probability of 10 classes. You can
-visualize it with :py:func:`aesara.printing.pydotprint` as follows:
+visualize it with :py:func:`pytensor.printing.pydotprint` as follows:
 
 .. code:: python
 
-    from aesara.printing import pydotprint
+    from pytensor.printing import pydotprint
     import os
 
     if not os.path.exists('examples'):
@@ -101,12 +101,12 @@ visualize it with :py:func:`aesara.printing.pydotprint` as follows:
 
 
 
-To visualize it interactively, import :py:func:`aesara.d3viz.d3viz.d3viz` from
-the the :py:mod:`aesara.d3viz.d3viz` module, which can be called as before:
+To visualize it interactively, import :py:func:`pytensor.d3viz.d3viz.d3viz` from
+the the :py:mod:`pytensor.d3viz.d3viz` module, which can be called as before:
 
 .. code:: python
 
-    import aesara.d3viz as d3v
+    import pytensor.d3viz as d3v
     d3v.d3viz(predict, 'examples/mlp.html')
 
 `Open visualization! <../../_static/mlp.html>`__
@@ -139,7 +139,7 @@ in /tmp/).
 Profiling
 ---------
 
-Aesara allows function profiling via the ``profile=True`` flag. After at least
+Pytensor allows function profiling via the ``profile=True`` flag. After at least
 one function call, the compute time of each node can be printed in text form
 with ``debugprint``. However, analyzing complex graphs in this way can be
 cumbersome.
@@ -195,7 +195,7 @@ export graphs to different formats.
 .. image:: index_files/index_24_0.png
 
 
-Here, we used the :py:class:`aesara.d3viz.formatting.PyDotFormatter` class to
+Here, we used the :py:class:`pytensor.d3viz.formatting.PyDotFormatter` class to
 convert the compute graph into a ``pydot`` graph, and created a
 :download:`PNG <examples/mlp2.png>` and :download:`PDF <examples/mlp2.pdf>`
 file. You can find all output formats supported by Graphviz `here
@@ -270,13 +270,13 @@ References
 d3viz module
 ------------
 
-.. automodule:: aesara.d3viz.d3viz
+.. automodule:: pytensor.d3viz.d3viz
   :members:
 
 PyDotFormatter
 --------------
 
-.. autoclass:: aesara.d3viz.formatting.PyDotFormatter
+.. autoclass:: pytensor.d3viz.formatting.PyDotFormatter
   :members: __call__
   :special-members:
   :private-members:

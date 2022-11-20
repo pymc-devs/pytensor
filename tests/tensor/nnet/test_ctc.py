@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 
-import aesara
-import aesara.tensor as at
-from aesara.tensor.nnet.ctc import (
+import pytensor
+import pytensor.tensor as at
+from pytensor.tensor.nnet.ctc import (
     ConnectionistTemporalClassification,
     ctc,
     ctc_available,
@@ -106,7 +106,7 @@ def setup_grad_case():
     not ctc_available(), reason="Optional library warp-ctc not available"
 )
 @pytest.mark.skipif(
-    aesara.config.mode == "FAST_COMPILE" or aesara.config.cxx == "",
+    pytensor.config.mode == "FAST_COMPILE" or pytensor.config.cxx == "",
     reason="We need a c compiler",
 )
 class TestCTC:
@@ -121,15 +121,15 @@ class TestCTC:
         self, activations, labels, input_length, expected_costs, expected_grads
     ):
         # Create symbolic variables
-        t_activations = aesara.shared(activations, name="activations")
-        t_activation_times = aesara.shared(input_length, name="activation_times")
-        t_labels = aesara.shared(labels, name="labels")
+        t_activations = pytensor.shared(activations, name="activations")
+        t_activation_times = pytensor.shared(input_length, name="activation_times")
+        t_labels = pytensor.shared(labels, name="labels")
 
         t_cost = ctc(t_activations, t_labels, t_activation_times)
         # Symbolic gradient of CTC cost
         t_grad = at.grad(at.mean(t_cost), t_activations)
         # Compile symbolic functions
-        train = aesara.function([], [t_cost, t_grad])
+        train = pytensor.function([], [t_cost, t_grad])
 
         cost, grad = train()
 
@@ -143,7 +143,7 @@ class TestCTC:
         Check if optimization to disable gradients is working
         """
         ctc_cost = ctc(activations, labels, input_length)
-        ctc_function = aesara.function([], [ctc_cost])
+        ctc_function = pytensor.function([], [ctc_cost])
         for node in ctc_function.maker.fgraph.apply_nodes:
             if isinstance(node.op, ConnectionistTemporalClassification):
                 assert node.op.compute_grad is False
@@ -172,8 +172,10 @@ class TestCTC:
         def ctc_op_functor(labels, in_lengths):
             def wrapper(acts):
                 # Create auxiliary symbolic variables
-                t_activation_times = aesara.shared(in_lengths, name="activation_times")
-                t_labels = aesara.shared(labels, name="labels")
+                t_activation_times = pytensor.shared(
+                    in_lengths, name="activation_times"
+                )
+                t_labels = pytensor.shared(labels, name="labels")
                 return ctc(acts, t_labels, t_activation_times)
 
             return wrapper

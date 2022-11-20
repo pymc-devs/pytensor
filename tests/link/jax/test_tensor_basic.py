@@ -1,11 +1,11 @@
 import numpy as np
 import pytest
 
-import aesara.tensor.basic as at
-from aesara.configdefaults import config
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import get_test_value
-from aesara.tensor.type import matrix, scalar, vector
+import pytensor.tensor.basic as at
+from pytensor.configdefaults import config
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import get_test_value
+from pytensor.tensor.type import matrix, scalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
 

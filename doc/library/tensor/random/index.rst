@@ -7,7 +7,7 @@
 Low-level random numbers
 ------------------------
 
-The :mod:`aesara.tensor.random` module provides random-number drawing functionality
+The :mod:`pytensor.tensor.random` module provides random-number drawing functionality
 that closely resembles the :mod:`numpy.random` module.
 
 .. toctree::
@@ -17,5 +17,5 @@ that closely resembles the :mod:`numpy.random` module.
     utils
 
 
-.. automodule:: aesara.tensor.random.basic
+.. automodule:: pytensor.tensor.random.basic
     :members:

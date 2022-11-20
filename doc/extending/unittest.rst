@@ -7,7 +7,7 @@ Unit Testing
 .. warning::
    This document is very outdated.
 
-Aesara relies heavily on unit testing. Its importance cannot be
+Pytensor relies heavily on unit testing. Its importance cannot be
 stressed enough!
 
 Unit Testing revolves around the following principles:
@@ -46,7 +46,7 @@ involve an assertion of some kind.
 How to Run Unit Tests
 ---------------------
 
-Mostly ``pytest aesara/``
+Mostly ``pytest pytensor/``
 
 Folder Layout
 -------------
@@ -58,11 +58,11 @@ with it, as shown below. Unit tests that test functionality of module
 ``<module>.py`` should therefore be stored in
 ``tests/<sub-package>/test_<module>.py``::
 
-    Aesara/aesara/tensor/basic.py
-    Aesara/tests/tensor/test_basic.py
+    Pytensor/pytensor/tensor/basic.py
+    Pytensor/tests/tensor/test_basic.py
 
-    Aesara/aesara/tensor/elemwise.py
-    Aesara/tests/tensor/test_elemwise.py
+    Pytensor/pytensor/tensor/elemwise.py
+    Pytensor/tests/tensor/test_elemwise.py
 
 
 How to Write a Unit Test
@@ -90,7 +90,7 @@ Checking for correctness
 ------------------------
 
 When checking for correctness of mathematical expressions, the user
-should preferably compare aesara's output to the equivalent NumPy
+should preferably compare pytensor's output to the equivalent NumPy
 implementation.
 
 Example:
@@ -98,7 +98,7 @@ Example:
 .. code-block:: python
 
     import numpy as np
-    import aesara.tensor as at
+    import pytensor.tensor as at
 
 
     def test_dot_validity():
@@ -106,7 +106,7 @@ Example:
         b = at.dmatrix('b')
         c = at.dot(a, b)
 
-        c_fn = aesara.function([a, b], [c])
+        c_fn = pytensor.function([a, b], [c])
 
         avals = ...
         bvals = ...
@@ -120,7 +120,7 @@ Creating an :class:`Op` Unit Test
 =================================
 
 A few tools have been developed to help automate the development of
-unit tests for Aesara :class:`Op`\s.
+unit tests for Pytensor :class:`Op`\s.
 
 
 .. _validating_grad:
@@ -128,7 +128,7 @@ unit tests for Aesara :class:`Op`\s.
 Validating the Gradient
 -----------------------
 
-The :func:`aesara.gradient.verify_grad` function can be used to validate that the :meth:`Op.grad`
+The :func:`pytensor.gradient.verify_grad` function can be used to validate that the :meth:`Op.grad`
 method of your :class:`Op` is properly implemented. :func:`verify_grad` is based
 on the Finite Difference Method where the derivative of function :math:`f`
 at point :math:`x` is approximated as:
@@ -160,8 +160,8 @@ relative tolerances.
 
 The parameters are as follows:
 
-* ``fun``: a Python function that takes Aesara variables as inputs,
-  and returns an Aesara variable.
+* ``fun``: a Python function that takes Pytensor variables as inputs,
+  and returns an Pytensor variable.
   For instance, an :class:`Op` instance with a single output is such a function.
   It can also be a Python function that calls an :class:`Op` with some of its
   inputs being fixed to specific values, or that combine multiple :class:`Op`\s.
@@ -180,7 +180,7 @@ The parameters are as follows:
 * ``rel_tol``: relative tolerance used as threshold for gradient comparison
 
 In the general case, you can define ``fun`` as you want, as long as it
-takes as inputs Aesara symbolic variables and returns a sinble Aesara
+takes as inputs Pytensor symbolic variables and returns a sinble Pytensor
 symbolic variable:
 
 .. testcode::
@@ -194,7 +194,7 @@ symbolic variable:
         z_val = np.asarray(2)
         rng = np.random.default_rng(42)
 
-        aesara.gradient.verify_grad(fun, [x_val, y_val, z_val], rng=rng)
+        pytensor.gradient.verify_grad(fun, [x_val, y_val, z_val], rng=rng)
 
 Here is an example showing how to use :func:`verify_grad` on an :class:`Op` instance:
 
@@ -207,14 +207,14 @@ Here is an example showing how to use :func:`verify_grad` on an :class:`Op` inst
         """
         a_val = np.asarray([[0,1,2],[3,4,5]], dtype='float64')
         rng = np.random.default_rng(42)
-        aesara.gradient.verify_grad(at.Flatten(), [a_val], rng=rng)
+        pytensor.gradient.verify_grad(at.Flatten(), [a_val], rng=rng)
 
 .. note::
 
-    Although :func:`verify_grad` is defined in :mod:`aesara.gradient`, unittests
+    Although :func:`verify_grad` is defined in :mod:`pytensor.gradient`, unittests
     should use the version of :func:`verify_grad` defined in :mod:`tests.unittest_tools`.
     This is simply a wrapper function which takes care of seeding the random
-    number generator appropriately before calling :func:`aesara.gradient.verify_grad`
+    number generator appropriately before calling :func:`pytensor.gradient.verify_grad`
 
 :func:`makeTester` and :func:`makeBroadcastTester`
 ==================================================

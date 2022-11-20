@@ -7,35 +7,35 @@ import numba
 import numpy as np
 import pytest
 
-import aesara.scalar as aes
-import aesara.scalar.math as aesm
-import aesara.tensor as at
-import aesara.tensor.math as aem
-from aesara import config, shared
-from aesara.compile.builders import OpFromGraph
-from aesara.compile.function import function
-from aesara.compile.mode import Mode
-from aesara.compile.ops import ViewOp
-from aesara.compile.sharedvalue import SharedVariable
-from aesara.graph.basic import Apply, Constant
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import Op, get_test_value
-from aesara.graph.rewriting.db import RewriteDatabaseQuery
-from aesara.graph.type import Type
-from aesara.ifelse import ifelse
-from aesara.link.numba.dispatch import basic as numba_basic
-from aesara.link.numba.dispatch import numba_typify
-from aesara.link.numba.linker import NumbaLinker
-from aesara.raise_op import assert_op
-from aesara.tensor import blas
-from aesara.tensor import subtensor as at_subtensor
-from aesara.tensor.elemwise import Elemwise
-from aesara.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
+import pytensor.scalar as aes
+import pytensor.scalar.math as aesm
+import pytensor.tensor as at
+import pytensor.tensor.math as aem
+from pytensor import config, shared
+from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.function import function
+from pytensor.compile.mode import Mode
+from pytensor.compile.ops import ViewOp
+from pytensor.compile.sharedvalue import SharedVariable
+from pytensor.graph.basic import Apply, Constant
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op, get_test_value
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.graph.type import Type
+from pytensor.ifelse import ifelse
+from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch import numba_typify
+from pytensor.link.numba.linker import NumbaLinker
+from pytensor.raise_op import assert_op
+from pytensor.tensor import blas
+from pytensor.tensor import subtensor as at_subtensor
+from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 
 
 if TYPE_CHECKING:
-    from aesara.graph.basic import Variable
-    from aesara.tensor import TensorLike
+    from pytensor.graph.basic import Variable
+    from pytensor.tensor import TensorLike
 
 
 class MyType(Type):
@@ -152,13 +152,19 @@ def eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode):
     mocks = [
         mock.patch("numba.njit", njit_noop),
         mock.patch("numba.vectorize", vectorize_noop),
-        mock.patch("aesara.link.numba.dispatch.basic.tuple_setitem", py_tuple_setitem),
-        mock.patch("aesara.link.numba.dispatch.basic.numba_njit", njit_noop),
-        mock.patch("aesara.link.numba.dispatch.basic.numba_vectorize", vectorize_noop),
-        mock.patch("aesara.link.numba.dispatch.basic.direct_cast", lambda x, dtype: x),
-        mock.patch("aesara.link.numba.dispatch.basic.to_scalar", py_to_scalar),
         mock.patch(
-            "aesara.link.numba.dispatch.basic.numba.np.numpy_support.from_dtype",
+            "pytensor.link.numba.dispatch.basic.tuple_setitem", py_tuple_setitem
+        ),
+        mock.patch("pytensor.link.numba.dispatch.basic.numba_njit", njit_noop),
+        mock.patch(
+            "pytensor.link.numba.dispatch.basic.numba_vectorize", vectorize_noop
+        ),
+        mock.patch(
+            "pytensor.link.numba.dispatch.basic.direct_cast", lambda x, dtype: x
+        ),
+        mock.patch("pytensor.link.numba.dispatch.basic.to_scalar", py_to_scalar),
+        mock.patch(
+            "pytensor.link.numba.dispatch.basic.numba.np.numpy_support.from_dtype",
             lambda dtype: dtype,
         ),
         mock.patch("numba.np.unsafe.ndarray.to_fixed_tuple", lambda x, n: tuple(x)),
@@ -168,13 +174,13 @@ def eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode):
         for ctx in mocks:
             stack.enter_context(ctx)
 
-        aesara_numba_fn = function(
+        pytensor_numba_fn = function(
             fn_inputs,
             fn_outputs,
             mode=mode,
             accept_inplace=True,
         )
-        _ = aesara_numba_fn(*inputs)
+        _ = pytensor_numba_fn(*inputs)
 
 
 def compare_numba_and_py(
@@ -187,7 +193,7 @@ def compare_numba_and_py(
 ):
     """Function to compare python graph output and Numba compiled output for testing equality
 
-    In the tests below computational graphs are defined in Aesara. These graphs are then passed to
+    In the tests below computational graphs are defined in Pytensor. These graphs are then passed to
     this function which then compiles the graphs in both Numba and python, runs the calculation
     in both and checks if the results are the same
 
@@ -201,7 +207,7 @@ def compare_numba_and_py(
         Assert function used to check for equality between python and Numba. If not
         provided uses `np.testing.assert_allclose`.
     updates
-        Updates to be passed to `aesara.function`.
+        Updates to be passed to `pytensor.function`.
 
     """
     if assert_fn is None:
@@ -219,19 +225,19 @@ def compare_numba_and_py(
 
     fn_inputs = [i for i in fn_inputs if not isinstance(i, SharedVariable)]
 
-    aesara_py_fn = function(
+    pytensor_py_fn = function(
         fn_inputs, fn_outputs, mode=py_mode, accept_inplace=True, updates=updates
     )
-    py_res = aesara_py_fn(*inputs)
+    py_res = pytensor_py_fn(*inputs)
 
-    aesara_numba_fn = function(
+    pytensor_numba_fn = function(
         fn_inputs,
         fn_outputs,
         mode=numba_mode,
         accept_inplace=True,
         updates=updates,
     )
-    numba_res = aesara_numba_fn(*inputs)
+    numba_res = pytensor_numba_fn(*inputs)
 
     # Get some coverage
     eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode)
@@ -841,13 +847,13 @@ def test_BatchedDot(x, y, exc):
 def test_shared():
     a = shared(np.array([1, 2, 3], dtype=config.floatX))
 
-    aesara_numba_fn = function([], a, mode="NUMBA")
-    numba_res = aesara_numba_fn()
+    pytensor_numba_fn = function([], a, mode="NUMBA")
+    numba_res = pytensor_numba_fn()
 
     np.testing.assert_allclose(numba_res, a.get_value())
 
-    aesara_numba_fn = function([], a * 2, mode="NUMBA")
-    numba_res = aesara_numba_fn()
+    pytensor_numba_fn = function([], a * 2, mode="NUMBA")
+    numba_res = pytensor_numba_fn()
 
     np.testing.assert_allclose(numba_res, a.get_value() * 2)
 
@@ -856,21 +862,21 @@ def test_shared():
     new_a_value = np.array([3, 4, 5], dtype=config.floatX)
     a.set_value(new_a_value)
 
-    numba_res = aesara_numba_fn()
+    numba_res = pytensor_numba_fn()
     np.testing.assert_allclose(numba_res, new_a_value * 2)
 
 
 def test_shared_updates():
     a = shared(0)
 
-    aesara_numba_fn = function([], a, updates={a: a + 1}, mode="NUMBA")
-    res1, res2 = aesara_numba_fn(), aesara_numba_fn()
+    pytensor_numba_fn = function([], a, updates={a: a + 1}, mode="NUMBA")
+    res1, res2 = pytensor_numba_fn(), pytensor_numba_fn()
     assert res1 == 0
     assert res2 == 1
     assert a.get_value() == 2
 
     a.set_value(5)
-    res1, res2 = aesara_numba_fn(), aesara_numba_fn()
+    res1, res2 = pytensor_numba_fn(), pytensor_numba_fn()
     assert res1 == 5
     assert res2 == 6
     assert a.get_value() == 7
@@ -965,8 +971,8 @@ def test_config_options_parallel():
     x = at.dvector()
 
     with config.change_flags(numba__vectorize_target="parallel"):
-        aesara_numba_fn = function([x], x * 2, mode=numba_mode)
-        numba_mul_fn = aesara_numba_fn.vm.jit_fn.py_func.__globals__["mul"]
+        pytensor_numba_fn = function([x], x * 2, mode=numba_mode)
+        numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["mul"]
         assert numba_mul_fn.targetoptions["parallel"] is True
 
 
@@ -974,8 +980,8 @@ def test_config_options_fastmath():
     x = at.dvector()
 
     with config.change_flags(numba__fastmath=True):
-        aesara_numba_fn = function([x], x * 2, mode=numba_mode)
-        numba_mul_fn = aesara_numba_fn.vm.jit_fn.py_func.__globals__["mul"]
+        pytensor_numba_fn = function([x], x * 2, mode=numba_mode)
+        numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["mul"]
         assert numba_mul_fn.targetoptions["fastmath"] is True
 
 
@@ -983,15 +989,15 @@ def test_config_options_cached():
     x = at.dvector()
 
     with config.change_flags(numba__cache=True):
-        aesara_numba_fn = function([x], x * 2, mode=numba_mode)
-        numba_mul_fn = aesara_numba_fn.vm.jit_fn.py_func.__globals__["mul"]
+        pytensor_numba_fn = function([x], x * 2, mode=numba_mode)
+        numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["mul"]
         assert not isinstance(
             numba_mul_fn._dispatcher.cache, numba.core.caching.NullCache
         )
 
     with config.change_flags(numba__cache=False):
-        aesara_numba_fn = function([x], x * 2, mode=numba_mode)
-        numba_mul_fn = aesara_numba_fn.vm.jit_fn.py_func.__globals__["mul"]
+        pytensor_numba_fn = function([x], x * 2, mode=numba_mode)
+        numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["mul"]
         assert isinstance(numba_mul_fn._dispatcher.cache, numba.core.caching.NullCache)
 
 

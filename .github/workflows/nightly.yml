@@ -6,7 +6,7 @@ on:
 jobs:
   build_and_publish:
     name: Build source distribution
-    if: github.repository == 'aesara-devs/aesara'
+    if: github.repository == 'pymc-devs/pytensor'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -22,7 +22,7 @@ jobs:
       - name: Build the sdist
         run: python -m build --sdist .
         env:
-          BUILD_AESARA_NIGHTLY: true
+          BUILD_PYTENSOR_NIGHTLY: true
       - uses: pypa/gh-action-pypi-publish@v1.4.2
         with:
           user: __token__

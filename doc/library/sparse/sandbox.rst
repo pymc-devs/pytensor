@@ -1,5 +1,5 @@
-..  ../../../../aesara/sparse/sandbox/sp.py
-..  ../../../../aesara/sparse/basic/truedot.py
+..  ../../../../pytensor/sparse/sandbox/sp.py
+..  ../../../../pytensor/sparse/basic/truedot.py
 
 .. _libdoc_sparse_sandbox:
 
@@ -15,7 +15,7 @@
 API
 ===
 
-.. automodule:: aesara.sparse.sandbox.sp
+.. automodule:: pytensor.sparse.sandbox.sp
     :members:
-.. automodule:: aesara.sparse.sandbox.sp2
+.. automodule:: pytensor.sparse.sandbox.sp2
     :members:

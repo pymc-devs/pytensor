@@ -4,22 +4,22 @@ from typing import Callable, Iterable, Optional
 import numpy as np
 import pytest
 
-from aesara.compile.function import function
-from aesara.compile.mode import Mode
-from aesara.compile.sharedvalue import SharedVariable, shared
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import Op, get_test_value
-from aesara.graph.rewriting.db import RewriteDatabaseQuery
-from aesara.ifelse import ifelse
-from aesara.link.jax import JAXLinker
-from aesara.raise_op import assert_op
-from aesara.tensor.type import dscalar, scalar, vector
+from pytensor.compile.function import function
+from pytensor.compile.mode import Mode
+from pytensor.compile.sharedvalue import SharedVariable, shared
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op, get_test_value
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.ifelse import ifelse
+from pytensor.link.jax import JAXLinker
+from pytensor.raise_op import assert_op
+from pytensor.tensor.type import dscalar, scalar, vector
 
 
 @pytest.fixture(scope="module", autouse=True)
-def set_aesara_flags():
+def set_pytensor_flags():
     with config.change_flags(cxx="", compute_test_value="ignore"):
         yield
 
@@ -40,14 +40,14 @@ def compare_jax_and_py(
 ):
     """Function to compare python graph output and jax compiled output for testing equality
 
-    In the tests below computational graphs are defined in Aesara. These graphs are then passed to
+    In the tests below computational graphs are defined in Pytensor. These graphs are then passed to
     this function which then compiles the graphs in both jax and python, runs the calculation
     in both and checks if the results are the same
 
     Parameters
     ----------
     fgraph: FunctionGraph
-        Aesara function Graph object
+        Pytensor function Graph object
     test_inputs: iter
         Numerical inputs for testing the function graph
     assert_fn: func, opt
@@ -66,8 +66,8 @@ def compare_jax_and_py(
         assert_fn = partial(np.testing.assert_allclose, rtol=1e-4)
 
     fn_inputs = [i for i in fgraph.inputs if not isinstance(i, SharedVariable)]
-    aesara_jax_fn = function(fn_inputs, fgraph.outputs, mode=jax_mode)
-    jax_res = aesara_jax_fn(*test_inputs)
+    pytensor_jax_fn = function(fn_inputs, fgraph.outputs, mode=jax_mode)
+    jax_res = pytensor_jax_fn(*test_inputs)
 
     if must_be_device_array:
         if isinstance(jax_res, list):
@@ -77,8 +77,8 @@ def compare_jax_and_py(
         else:
             assert isinstance(jax_res, jax.interpreters.xla.DeviceArray)
 
-    aesara_py_fn = function(fn_inputs, fgraph.outputs, mode=py_mode)
-    py_res = aesara_py_fn(*test_inputs)
+    pytensor_py_fn = function(fn_inputs, fgraph.outputs, mode=py_mode)
+    py_res = pytensor_py_fn(*test_inputs)
 
     if len(fgraph.outputs) > 1:
         for j, p in zip(jax_res, py_res):
@@ -91,7 +91,7 @@ def compare_jax_and_py(
 
 def test_jax_FunctionGraph_once():
     """Make sure that an output is only computed once when it's referenced multiple times."""
-    from aesara.link.jax.dispatch import jax_funcify
+    from pytensor.link.jax.dispatch import jax_funcify
 
     x = vector("x")
     y = vector("y")
@@ -143,14 +143,14 @@ def test_jax_FunctionGraph_once():
 def test_shared():
     a = shared(np.array([1, 2, 3], dtype=config.floatX))
 
-    aesara_jax_fn = function([], a, mode="JAX")
-    jax_res = aesara_jax_fn()
+    pytensor_jax_fn = function([], a, mode="JAX")
+    jax_res = pytensor_jax_fn()
 
     assert isinstance(jax_res, jax.interpreters.xla.DeviceArray)
     np.testing.assert_allclose(jax_res, a.get_value())
 
-    aesara_jax_fn = function([], a * 2, mode="JAX")
-    jax_res = aesara_jax_fn()
+    pytensor_jax_fn = function([], a * 2, mode="JAX")
+    jax_res = pytensor_jax_fn()
 
     assert isinstance(jax_res, jax.interpreters.xla.DeviceArray)
     np.testing.assert_allclose(jax_res, a.get_value() * 2)
@@ -160,7 +160,7 @@ def test_shared():
     new_a_value = np.array([3, 4, 5], dtype=config.floatX)
     a.set_value(new_a_value)
 
-    jax_res = aesara_jax_fn()
+    jax_res = pytensor_jax_fn()
     assert isinstance(jax_res, jax.interpreters.xla.DeviceArray)
     np.testing.assert_allclose(jax_res, new_a_value * 2)
 
@@ -168,14 +168,14 @@ def test_shared():
 def test_shared_updates():
     a = shared(0)
 
-    aesara_jax_fn = function([], a, updates={a: a + 1}, mode="JAX")
-    res1, res2 = aesara_jax_fn(), aesara_jax_fn()
+    pytensor_jax_fn = function([], a, updates={a: a + 1}, mode="JAX")
+    res1, res2 = pytensor_jax_fn(), pytensor_jax_fn()
     assert res1 == 0
     assert res2 == 1
     assert a.get_value() == 2
 
     a.set_value(5)
-    res1, res2 = aesara_jax_fn(), aesara_jax_fn()
+    res1, res2 = pytensor_jax_fn(), pytensor_jax_fn()
     assert res1 == 5
     assert res2 == 6
     assert a.get_value() == 7

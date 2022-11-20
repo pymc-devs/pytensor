@@ -1,4 +1,4 @@
-name: aesara-docs
+name: pytensor-docs
 channels:
   - conda-forge
   - nodefaults

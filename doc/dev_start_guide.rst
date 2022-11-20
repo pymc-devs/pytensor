@@ -8,7 +8,7 @@ Contributing
 ============
 
 Looking for an idea for a first contribution? Check the `GitHub issues
-<https://github.com/aesara-devs/aesara/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22>`_.
+<https://github.com/pymc-devs/pytensor/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22>`_.
 
 We recommend creating an issue to discuss proposed changes before making them.
 This is a good way to make sure that proposed changes will be accepted.
@@ -16,9 +16,9 @@ This is a good way to make sure that proposed changes will be accepted.
 Resources
 =========
 
-See :ref:`aesara-community` for a list of Aesara resources.
+See :ref:`pytensor-community` for a list of Pytensor resources.
 
-The Theano Google group is also relevant to (early) Aesara versions:
+The Theano Google group is also relevant to (early) Pytensor versions:
 `theano-dev`_.
 
 .. _theano-dev: https://groups.google.com/group/theano-dev
@@ -52,7 +52,7 @@ mean you shouldn't run them yourself to make sure everything is all right.  You
 can run only the portion you are modifying to go faster and have CI make sure
 there are no broader problems.
 
-To run the test suite with the default options, see :ref:`test_aesara`.
+To run the test suite with the default options, see :ref:`test_pytensor`.
 
 .. _Sphinx: http://sphinx.pocoo.org/
 .. _reStructuredText: http://docutils.sourceforge.net/rst.html
@@ -86,8 +86,8 @@ Here is an example on how to add a docstring to a class.
 
 .. testcode:: python
 
-    from aesara.graph.basic import Variable
-    from aesara.graph.op import Op
+    from pytensor.graph.basic import Variable
+    from pytensor.graph.op import Op
 
 
     class DoubleOp(Op):
@@ -100,7 +100,7 @@ Here is an example on how to add a docstring to a class.
         See Also
         --------
         `Elemwise`: This functionality is already available; just execute
-        ``x * 2`` with ``x`` being an Aesara variable.
+        ``x * 2`` with ``x`` being an Pytensor variable.
         """
 
         def make_node(self, x: Variable):
@@ -119,10 +119,10 @@ Installation and configuration
 ==============================
 
 To submit PRs, create an account on `GitHub <http://www.github.com/>`_ and fork
-`Aesara <http://www.github.com/aesara-devs/aesara>`_.
+`Pytensor <http://www.github.com/pymc-devs/pytensor>`_.
 
-This will create your own clone of the Aesara project on GitHub's servers. It is customary
-to assign this Git remote the name "origin", and the official Aesara repository
+This will create your own clone of the Pytensor project on GitHub's servers. It is customary
+to assign this Git remote the name "origin", and the official Pytensor repository
 the name "upstream".
 
 
@@ -133,23 +133,23 @@ Clone your fork locally with
 
 .. code-block:: bash
 
-    git clone git@github.com:YOUR_GITHUB_LOGIN/Aesara.git
+    git clone git@github.com:YOUR_GITHUB_LOGIN/Pytensor.git
 
 For this URL to work, you must set your public SSH keys inside your
 `GitHub account setting <https://github.com/settings/ssh>`_.
 
 From your local repository, your fork on GitHub will be called "origin" by default.
 
-Next, create a remote entry for the original (i.e. upstream) Aesara repository
+Next, create a remote entry for the original (i.e. upstream) Pytensor repository
 with the following:
 
 .. code-block:: bash
 
-    git remote add upstream git://github.com/aesara-devs/aesara.git
+    git remote add upstream git://github.com/pymc-devs/pytensor.git
 
 .. note::
 
-    You can choose a name other than "upstream" to reference the official Aesara
+    You can choose a name other than "upstream" to reference the official Pytensor
     repository.
 
 Setting up the your local development environment
@@ -162,8 +162,8 @@ create a virtual environment in the project directory:
 
 .. code-block:: bash
 
-    conda env create -n aesara-dev -f environment.yml
-    conda activate aesara-dev
+    conda env create -n pytensor-dev -f environment.yml
+    conda activate pytensor-dev
 
 Afterward, you can install the development dependencies:
 
@@ -180,11 +180,11 @@ checks are performed before each commit:
 
 
 The virtual environment will need to be activated in any environment
-(e.g. shells, IDEs, etc.) that plans to run the Aesara tests or add commits to the
+(e.g. shells, IDEs, etc.) that plans to run the Pytensor tests or add commits to the
 project repository.
 
 You can now test your environment/code by running ``pytest`` in the project's root
-directory.  See :ref:`test_aesara` for more information about testing.
+directory.  See :ref:`test_pytensor` for more information about testing.
 
 
 For a general guide on how to provide open source contributions see `here

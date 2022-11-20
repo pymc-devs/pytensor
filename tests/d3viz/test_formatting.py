@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from aesara import config, function
-from aesara.d3viz.formatting import PyDotFormatter, pydot_imported, pydot_imported_msg
+from pytensor import config, function
+from pytensor.d3viz.formatting import PyDotFormatter, pydot_imported, pydot_imported_msg
 
 
 if not pydot_imported:

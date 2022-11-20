@@ -1,18 +1,18 @@
 import numpy as np
 import pytest
 
-import aesara
-import aesara.graph.op as op
-import aesara.tensor as at
-from aesara import shared
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Variable
-from aesara.graph.op import Op
-from aesara.graph.type import Type
-from aesara.graph.utils import TestValueError
-from aesara.link.c.type import Generic
-from aesara.tensor.math import log
-from aesara.tensor.type import dmatrix, dscalar, dvector, vector
+import pytensor
+import pytensor.graph.op as op
+import pytensor.tensor as at
+from pytensor import shared
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.op import Op
+from pytensor.graph.type import Type
+from pytensor.graph.utils import TestValueError
+from pytensor.link.c.type import Generic
+from pytensor.tensor.math import log
+from pytensor.tensor.type import dmatrix, dscalar, dvector, vector
 
 
 def as_variable(x):
@@ -105,7 +105,7 @@ class TestOp:
 
     def test_op_no_input(self):
         x = NoInputOp()()
-        f = aesara.function([], x)
+        f = pytensor.function([], x)
         rval = f()
         assert rval == "test Op no input"
 
@@ -126,7 +126,7 @@ class TestMakeThunk:
                 output[0] = inp * 2
 
         x_input = dmatrix("x_input")
-        f = aesara.function([x_input], DoubleOp()(x_input))
+        f = pytensor.function([x_input], DoubleOp()(x_input))
         inp = np.random.random((5, 4))
         out = f(inp)
         assert np.allclose(inp * 2, out)
@@ -213,7 +213,7 @@ def test_get_test_values_exc():
 
 
 def test_op_invalid_input_types():
-    class TestOp(aesara.graph.op.Op):
+    class TestOp(pytensor.graph.op.Op):
         itypes = [dvector, dvector, dvector]
         otypes = [dvector]
 
@@ -227,7 +227,7 @@ def test_op_invalid_input_types():
 
 def test_op_input_broadcastable():
     # Test that we can create an op with a broadcastable subtype as input
-    class SomeOp(aesara.tensor.Op):
+    class SomeOp(pytensor.tensor.Op):
         itypes = [at.dvector]
         otypes = [at.dvector]
 

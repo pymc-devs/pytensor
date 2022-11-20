@@ -2,14 +2,14 @@
 
 .. _profilemode:
 
-================================================
-:mod:`profilemode` -- profiling Aesara functions
-================================================
+==================================================
+:mod:`profilemode` -- profiling Pytensor functions
+==================================================
 
 
-.. module:: aesara.compile.profilemode
+.. module:: pytensor.compile.profilemode
    :platform: Unix, Windows
-   :synopsis: profiling Aesara functions with ProfileMode
+   :synopsis: profiling Pytensor functions with ProfileMode
 .. moduleauthor:: LISA
 
 Guide

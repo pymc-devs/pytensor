@@ -5,7 +5,7 @@
 :mod:`nanguardmode`
 ===================
 
-.. module:: aesara.compile.nanguardmode
+.. module:: pytensor.compile.nanguardmode
    :platform: Unix, Windows
    :synopsis: defines NanGuardMode
 .. moduleauthor:: LISA
@@ -24,26 +24,26 @@ of abnormal values: NaNs, Infs, and abnormally big values.
 .. testcode::
 
     import numpy as np
-    import aesara
-    import aesara.tensor as at
-    from aesara.compile.nanguardmode import NanGuardMode
+    import pytensor
+    import pytensor.tensor as at
+    from pytensor.compile.nanguardmode import NanGuardMode
 
     x = at.matrix()
-    w = aesara.shared(np.random.standard_normal((5, 7)).astype(aesara.config.floatX))
+    w = pytensor.shared(np.random.standard_normal((5, 7)).astype(pytensor.config.floatX))
     y = at.dot(x, w)
-    fun = aesara.function(
+    fun = pytensor.function(
         [x], y,
         mode=NanGuardMode(nan_is_error=True, inf_is_error=True, big_is_error=True)
     )
 
-While using the Aesara function ``fun``, it will monitor the values of each
+While using the Pytensor function ``fun``, it will monitor the values of each
 input and output variable of each node. When abnormal values are
 detected, it raises an error to indicate which node yields the NaNs. For
 example, if we pass the following values to ``fun``:
 
 .. testcode::
 
-    infa = np.tile((np.asarray(100.) ** 1000000).astype(aesara.config.floatX), (3, 5))
+    infa = np.tile((np.asarray(100.) ** 1000000).astype(pytensor.config.floatX), (3, 5))
     fun(infa)
 
 .. testoutput::
@@ -70,4 +70,4 @@ set to be ``True`` by default.
 Reference
 =========
 
-.. autoclass:: aesara.compile.nanguardmode.NanGuardMode
+.. autoclass:: pytensor.compile.nanguardmode.NanGuardMode

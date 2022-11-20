@@ -1,9 +1,9 @@
 import pytest
 import scipy as sp
 
-from aesara.sparse import matrix as sp_matrix
-from aesara.sparse.type import SparseTensorType
-from aesara.tensor import dmatrix
+from pytensor.sparse import matrix as sp_matrix
+from pytensor.sparse.type import SparseTensorType
+from pytensor.tensor import dmatrix
 
 
 def test_SparseTensorType_constructor():

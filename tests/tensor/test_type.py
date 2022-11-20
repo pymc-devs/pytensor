@@ -4,10 +4,10 @@ from tempfile import mkdtemp
 import numpy as np
 import pytest
 
-import aesara.tensor as at
-from aesara.configdefaults import config
-from aesara.tensor.shape import SpecifyShape
-from aesara.tensor.type import TensorType
+import pytensor.tensor as at
+from pytensor.configdefaults import config
+from pytensor.tensor.shape import SpecifyShape
+from pytensor.tensor.type import TensorType
 
 
 @pytest.mark.parametrize(

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-import aesara
+import pytensor
 
 
 try:
@@ -10,9 +10,9 @@ except ImportError:
     ndimage = None
 
 import tests.unittest_tools as utt
-from aesara.compile.sharedvalue import shared
-from aesara.graph.rewriting.basic import check_stack_trace
-from aesara.tensor.nnet.conv3d2d import (
+from pytensor.compile.sharedvalue import shared
+from pytensor.graph.rewriting.basic import check_stack_trace
+from pytensor.tensor.nnet.conv3d2d import (
     DiagonalSubtensor,
     IncDiagonalSubtensor,
     conv3d,
@@ -107,15 +107,15 @@ def check_diagonal_subtensor_view_traces(fn):
 
 
 @pytest.mark.skipif(
-    ndimage is None or not aesara.config.cxx,
+    ndimage is None or not pytensor.config.cxx,
     reason="conv3d2d tests need SciPy and a c++ compiler",
 )
 @pytest.mark.parametrize("border_mode", ("valid", "full", "half"))
 def test_conv3d(border_mode):
-    if aesara.config.mode == "FAST_COMPILE":
-        mode = aesara.compile.mode.get_mode("FAST_RUN")
+    if pytensor.config.mode == "FAST_COMPILE":
+        mode = pytensor.compile.mode.get_mode("FAST_RUN")
     else:
-        mode = aesara.compile.mode.get_default_mode()
+        mode = pytensor.compile.mode.get_default_mode()
 
     Ns, Ts, C, Hs, Ws = 3, 10, 3, 32, 32
     Nf, Tf, C, Hf, Wf = 32, 5, 3, 5, 5
@@ -143,15 +143,15 @@ def test_conv3d(border_mode):
         border_mode=border_mode,
     )
 
-    newconv3d = aesara.function([], [], updates={s_output: out}, mode=mode)
+    newconv3d = pytensor.function([], [], updates={s_output: out}, mode=mode)
 
     check_diagonal_subtensor_view_traces(newconv3d)
     # t0 = time.time()
     newconv3d()
     # print(time.time() - t0)
     utt.assert_allclose(pyres, s_output.get_value(borrow=True))
-    gsignals, gfilters = aesara.grad(out.sum(), [s_signals, s_filters])
-    gnewconv3d = aesara.function(
+    gsignals, gfilters = pytensor.grad(out.sum(), [s_signals, s_filters])
+    gnewconv3d = pytensor.function(
         [],
         [],
         updates=[(s_filters, gfilters), (s_signals, gsignals)],
@@ -205,14 +205,14 @@ def test_conv3d(border_mode):
         border_mode=border_mode,
     )
 
-    newconv3d = aesara.function([], [], updates={s_output: out}, mode=mode)
+    newconv3d = pytensor.function([], [], updates={s_output: out}, mode=mode)
 
     # t0 = time.time()
     newconv3d()
     # print(time.time() - t0)
     utt.assert_allclose(pyres, s_output.get_value(borrow=True))
-    gsignals, gfilters = aesara.grad(out.sum(), [s_signals, s_filters])
-    gnewconv3d = aesara.function(
+    gsignals, gfilters = pytensor.grad(out.sum(), [s_signals, s_filters])
+    gnewconv3d = pytensor.function(
         [],
         [],
         updates=[(s_filters, gfilters), (s_signals, gsignals)],

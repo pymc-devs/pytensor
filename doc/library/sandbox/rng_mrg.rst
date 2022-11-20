@@ -12,5 +12,5 @@
 API
 ===
 
-.. automodule:: aesara.sandbox.rng_mrg
+.. automodule:: pytensor.sandbox.rng_mrg
     :members:

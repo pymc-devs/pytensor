@@ -4,7 +4,7 @@
 Optimizations
 ==============
 
-Aesara applies many kinds of graph rewrites, some of which can be considered "optimizations":
+Pytensor applies many kinds of graph rewrites, some of which can be considered "optimizations":
  * simplifying and standardizing the form of the expression graph (e.g.  :term:`merge`, :term:`add canonicalization` ),
  * reducing the maximum memory footprint (e.g. :term:`inplace_elemwise`),
  * increasing execution speed (e.g. :term:`constant folding`).
@@ -33,7 +33,7 @@ is, as the name suggests, unsafe.  See :ref:`unsafe_rewrites`.
 
     .. code-block:: bash
 
-        python -c "import aesara; aesara.compile.optdb.query(aesara.compile.predefined_optimizers['<OPT_ID>']).print_summary()"
+        python -c "import pytensor; pytensor.compile.optdb.query(pytensor.compile.predefined_optimizers['<OPT_ID>']).print_summary()"
 
     where <OPT_ID> can be one of o1 (:ref:`† <o1=>`), o2, o3, o4 (:ref:`* <o4=>`),
     Stabilization or unsafe.
@@ -87,7 +87,7 @@ Optimization                                              o4             o3  o2 
         optimization will ensure that ``x`` and ``y`` are only added once.
 
         This optimization is very useful because it frees users to write
-        highly redundant mathematical code.  Aesara will make sure to compute
+        highly redundant mathematical code.  Pytensor will make sure to compute
         just what is necessary.
 
         See :class:`MergeOptimizer`.
@@ -99,7 +99,7 @@ Optimization                                              o4             o3  o2 
         See :func:`opt.constant_folding`
 
     shape promotion
-        Aesara often knows how to infer the shape of an output from the shape
+        Pytensor often knows how to infer the shape of an output from the shape
         of its inputs.  Without this optimization, it would otherwise have to
         compute things (e.g. ``log(x)``) just to find out the shape of it!
 
@@ -132,7 +132,7 @@ Optimization                                              o4             o3  o2 
 
     constant elimination
         Many constants indicate special cases, such as ``pow(x,1) -> x``.
-        Aesara recognizes many of these special cases.
+        Pytensor recognizes many of these special cases.
 
         See :func:`local_mul_specialize`, :func:`local_mul_specialize`,:func:`local_mul_specialize`
 
@@ -165,7 +165,7 @@ Optimization                                              o4             o3  o2 
         See :func:`local_dot_to_dot22`
 
     sparse_dot
-        Aesara has a sparse matrix multiplication algorithm that is faster in
+        Pytensor has a sparse matrix multiplication algorithm that is faster in
         many cases than scipy's (for dense matrix output).  This optimization
         swaps scipy's algorithm for ours.
 
@@ -261,7 +261,7 @@ Optimization                                              o4             o3  o2 
 
     local_remove_all_assert
         This is an unsafe optimization.
-        For the fastest possible Aesara, this optimization can be enabled by
+        For the fastest possible Pytensor, this optimization can be enabled by
 	setting ``optimizer_including=local_remove_all_assert`` which will
 	remove all assertions in the graph for checking user inputs are valid.
         Use this optimization if you are sure everything is valid in your graph.

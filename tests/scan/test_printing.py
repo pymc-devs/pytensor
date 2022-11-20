@@ -1,12 +1,12 @@
 import numpy as np
 import pytest
 
-import aesara
-import aesara.tensor as at
-from aesara.configdefaults import config
-from aesara.graph.fg import FunctionGraph
-from aesara.printing import debugprint, pydot_imported, pydotprint
-from aesara.tensor.type import dvector, iscalar, scalar, vector
+import pytensor
+import pytensor.tensor as at
+from pytensor.configdefaults import config
+from pytensor.graph.fg import FunctionGraph
+from pytensor.printing import debugprint, pydot_imported, pydotprint
+from pytensor.tensor.type import dvector, iscalar, scalar, vector
 
 
 @config.change_flags(floatX="float64")
@@ -15,7 +15,7 @@ def test_debugprint_sitsot():
     A = dvector("A")
 
     # Symbolic description of the result
-    result, updates = aesara.scan(
+    result, updates = pytensor.scan(
         fn=lambda prior_result, A: prior_result * A,
         outputs_info=at.ones_like(A),
         non_sequences=A,
@@ -70,7 +70,7 @@ def test_debugprint_sitsot_no_extra_info():
     A = dvector("A")
 
     # Symbolic description of the result
-    result, updates = aesara.scan(
+    result, updates = pytensor.scan(
         fn=lambda prior_result, A: prior_result * A,
         outputs_info=at.ones_like(A),
         non_sequences=A,
@@ -128,7 +128,7 @@ def test_debugprint_nitsot():
     max_coefficients_supported = 10000
 
     # Generate the components of the polynomial
-    components, updates = aesara.scan(
+    components, updates = pytensor.scan(
         fn=lambda coefficient, power, free_variable: coefficient
         * (free_variable**power),
         outputs_info=None,
@@ -192,7 +192,7 @@ def test_debugprint_nested_scans():
     A = dvector("A")
 
     def compute_A_k(A, k):
-        result, updates = aesara.scan(
+        result, updates = pytensor.scan(
             fn=lambda prior_result, A: prior_result * A,
             outputs_info=at.ones_like(A),
             non_sequences=A,
@@ -203,7 +203,7 @@ def test_debugprint_nested_scans():
 
         return A_k
 
-    components, updates = aesara.scan(
+    components, updates = pytensor.scan(
         fn=lambda c, power, some_A, some_k: c * (compute_A_k(some_A, some_k) ** power),
         outputs_info=None,
         sequences=[c, at.arange(n)],
@@ -386,10 +386,10 @@ def test_debugprint_mitsot():
     def fn(a_m2, a_m1, b_m2, b_m1):
         return a_m1 + a_m2, b_m1 + b_m2
 
-    a0 = aesara.shared(np.arange(2, dtype="int64"))
-    b0 = aesara.shared(np.arange(2, dtype="int64"))
+    a0 = pytensor.shared(np.arange(2, dtype="int64"))
+    b0 = pytensor.shared(np.arange(2, dtype="int64"))
 
-    (a, b), _ = aesara.scan(
+    (a, b), _ = pytensor.scan(
         fn,
         outputs_info=[
             {"initial": a0, "taps": [-2, -1]},
@@ -462,14 +462,14 @@ def test_debugprint_mitmot():
     A = dvector("A")
 
     # Symbolic description of the result
-    result, updates = aesara.scan(
+    result, updates = pytensor.scan(
         fn=lambda prior_result, A: prior_result * A,
         outputs_info=at.ones_like(A),
         non_sequences=A,
         n_steps=k,
     )
 
-    final_result = aesara.grad(result[-1].sum(), A)
+    final_result = pytensor.grad(result[-1].sum(), A)
 
     output_str = debugprint(final_result, file="str", print_op_info=True)
     lines = output_str.split("\n")
@@ -590,7 +590,7 @@ def test_debugprint_compiled_fn():
         p = M[n, x_tm1]
         return at.switch(at.lt(zero, p[0]), one, zero)
 
-    out, updates = aesara.scan(
+    out, updates = pytensor.scan(
         no_shared_fn,
         outputs_info=[{"initial": zero, "taps": [-1]}],
         sequences=[at.arange(M.shape[0])],
@@ -601,7 +601,7 @@ def test_debugprint_compiled_fn():
 
     # In this case, `debugprint` should print the compiled inner-graph
     # (i.e. from `Scan._fn`)
-    out = aesara.function([M], out, updates=updates, mode="FAST_RUN")
+    out = pytensor.function([M], out, updates=updates, mode="FAST_RUN")
 
     expected_output = """forall_inplace,cpu,scan_fn} [id A] 2 (outer_out_sit_sot-0)
     |TensorConstant{20000} [id B] (n_steps)
@@ -642,10 +642,10 @@ def test_pydotprint():
 
     state = scalar("state")
     n_steps = iscalar("nsteps")
-    output, updates = aesara.scan(
+    output, updates = pytensor.scan(
         f_pow2, [], state, [], n_steps=n_steps, truncate_gradient=-1, go_backwards=False
     )
-    f = aesara.function(
+    f = pytensor.function(
         [state, n_steps], output, updates=updates, allow_input_downcast=True
     )
     pydotprint(output, scan_graphs=True)

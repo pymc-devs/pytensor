@@ -3,25 +3,25 @@ import time
 import numpy as np
 import pytest
 
-import aesara
-import aesara.tensor as at
-from aesara.compile.mode import Mode
-from aesara.tensor.exceptions import NotScalarConstantError
-from aesara.tensor.math import _allclose, exp
-from aesara.tensor.nnet import conv, conv2d
-from aesara.tensor.type import dmatrix, dtensor3, dtensor4, dvector, scalar, tensor4
+import pytensor
+import pytensor.tensor as at
+from pytensor.compile.mode import Mode
+from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.math import _allclose, exp
+from pytensor.tensor.nnet import conv, conv2d
+from pytensor.tensor.type import dmatrix, dtensor3, dtensor4, dvector, scalar, tensor4
 from tests import unittest_tools as utt
 
 
 @pytest.mark.skipif(
-    aesara.config.cxx == "",
+    pytensor.config.cxx == "",
     reason="conv2d tests need SciPy or a c++ compiler",
 )
 class TestConv2D(utt.InferShapeTester):
     # This class contains tests for the legacy 2d convolution,
     # but will also be inherited from for other implementations
     mode = None
-    dtype = aesara.config.floatX
+    dtype = pytensor.config.floatX
     # This will be set to the appropriate function in the inherited classes.
     # The call to `staticmethod` is necessary to prevent Python from passing
     # `self` as the first argument.
@@ -78,11 +78,11 @@ class TestConv2D(utt.InferShapeTester):
         if not filters:
             filters = self.filters
 
-        # AESARA IMPLEMENTATION
+        # PYTENSOR IMPLEMENTATION
 
         # we create a symbolic function so that verify_grad can work
         def sym_conv2d(input, filters):
-            # define aesara graph and function
+            # define pytensor graph and function
             input.name = "input"
             filters.name = "filters"
             with pytest.warns(DeprecationWarning):
@@ -102,13 +102,13 @@ class TestConv2D(utt.InferShapeTester):
 
         output = sym_conv2d(input, filters)
         output.name = f"conv2d({input.name},{filters.name})"
-        aesara_conv = aesara.function([input, filters], output, mode=self.mode)
+        pytensor_conv = pytensor.function([input, filters], output, mode=self.mode)
 
         # initialize input and compute result
         image_data = np.random.random(N_image_shape).astype(self.dtype)
         filter_data = np.random.random(N_filter_shape).astype(self.dtype)
         try:
-            aesara_output = aesara_conv(image_data, filter_data)
+            pytensor_output = pytensor_conv(image_data, filter_data)
         except ValueError:
             if not should_raise:
                 raise
@@ -167,7 +167,7 @@ class TestConv2D(utt.InferShapeTester):
                                 * filter2d[::-1, ::-1]
                             ).sum()
 
-        assert _allclose(aesara_output, ref_output)
+        assert _allclose(pytensor_output, ref_output)
 
         # TEST GRADIENT
         if verify_grad:
@@ -530,7 +530,7 @@ class TestConv2D(utt.InferShapeTester):
     def test_wrong_info(self):
         # Test convolutions when we don't give a constant as shape information
 
-        i = aesara.scalar.basic.int32()
+        i = pytensor.scalar.basic.int32()
         with pytest.raises(NotScalarConstantError):
             self.validate(
                 (3, 2, 8, i),
@@ -596,8 +596,8 @@ class TestConv2D(utt.InferShapeTester):
                     print("filter_shapes", filter_shapes)
                     for filter_shape in filter_shapes:
 
-                        input = aesara.shared(np.random.random(image_shape))
-                        filters = aesara.shared(np.random.random(filter_shape))
+                        input = pytensor.shared(np.random.random(image_shape))
+                        filters = pytensor.shared(np.random.random(filter_shape))
 
                         with pytest.warns(DeprecationWarning):
                             output = conv.conv2d(
@@ -610,13 +610,13 @@ class TestConv2D(utt.InferShapeTester):
                                 openmp=openmp,
                             )
                         mode = Mode(
-                            linker=aesara.link.vm.VMLinker(
+                            linker=pytensor.link.vm.VMLinker(
                                 allow_gc=False, use_cloop=True
                             )
                         )
-                        aesara_conv = aesara.function([], output, mode=mode)
+                        pytensor_conv = pytensor.function([], output, mode=mode)
                         t1 = time.time()
-                        aesara_conv.vm(n_calls=n_calls)
+                        pytensor_conv.vm(n_calls=n_calls)
                         t2 = time.time()
                         print(t2 - t1, end=" ")
                     print()
@@ -773,7 +773,7 @@ def test_broadcast_grad():
     window_radius = 3
 
     filter_1d = at.arange(-window_radius, window_radius + 1)
-    filter_1d = filter_1d.astype(aesara.config.floatX)
+    filter_1d = filter_1d.astype(pytensor.config.floatX)
     filter_1d = exp(-0.5 * filter_1d**2 / sigma**2)
     filter_1d = filter_1d / filter_1d.sum()
 
@@ -781,4 +781,4 @@ def test_broadcast_grad():
 
     y = conv2d(x1, filter_W, border_mode="full", filter_shape=[1, 1, None, None])
     # TODO FIXME: Make this a real test and `assert` something
-    aesara.grad(y.sum(), sigma)
+    pytensor.grad(y.sum(), sigma)

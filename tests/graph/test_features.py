@@ -1,10 +1,10 @@
 import pytest
 
-from aesara.graph.basic import Apply, Variable
-from aesara.graph.features import Feature, NodeFinder, ReplaceValidate
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import Op
-from aesara.graph.type import Type
+from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.features import Feature, NodeFinder, ReplaceValidate
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op
+from pytensor.graph.type import Type
 from tests.graph.utils import MyVariable, op1
 
 

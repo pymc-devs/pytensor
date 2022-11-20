@@ -5,14 +5,14 @@
 Views and inplace operations
 ============================
 
-Aesara allows the definition of :class:`Op`\s which return a :term:`view` on one
+Pytensor allows the definition of :class:`Op`\s which return a :term:`view` on one
 of their inputs or operate :term:`inplace` on one or several
 inputs. This allows more efficient operations on NumPy's :class:`ndarray`
 data type than would be possible otherwise.
 However, in order to work correctly, these :class:`Op`\s need to
 implement an additional interface.
 
-Aesara recognizes views and inplace operations specially. It ensures
+Pytensor recognizes views and inplace operations specially. It ensures
 that they are used in a consistent manner and it ensures that
 operations will be carried in a compatible order.
 
@@ -45,13 +45,13 @@ range ``0xDEADBEFF - 0xDEADBFDF`` and z the range ``0xCAFEBABE -
 considered to be a view of ``x`` and vice versa.
 
 Suppose you had an :class:`Op` which took ``x`` as input and returned
-``y``. You would need to tell Aesara that ``y`` is a view of ``x``. For this
+``y``. You would need to tell Pytensor that ``y`` is a view of ``x``. For this
 purpose, you would set the :class:`Op.view_map` field as follows:
 
 
 .. testsetup::
 
-   from aesara.graph.op import Op
+   from pytensor.graph.op import Op
    myop = Op()
 
 .. testcode::
@@ -93,8 +93,8 @@ operation on ``x``.
 
 .. note::
 
-   Inplace operations in Aesara still work in a functional setting:
-   they need to return the modified input. Symbolically, Aesara
+   Inplace operations in Pytensor still work in a functional setting:
+   they need to return the modified input. Symbolically, Pytensor
    requires one :class:`Variable` standing for the input before being modified
    and another :class:`Variable` representing the input after being
    modified. Therefore, code using inplace operations would look like
@@ -102,8 +102,8 @@ operation on ``x``.
 
    .. testcode::
 
-      from aesara.tensor import dscalars, log
-      from aesara.tensor.inplace import add_inplace
+      from pytensor.tensor import dscalars, log
+      from pytensor.tensor.inplace import add_inplace
 
       x, y = dscalars('x', 'y')
       r1 = log(x)
@@ -113,7 +113,7 @@ operation on ``x``.
 
       # r3 is log(x) using the x from BEFORE the add_inplace
       # r3 is the SAME as r1, even if we wrote this line after the add_inplace line
-      # Aesara is actually going to compute r3 BEFORE r2
+      # Pytensor is actually going to compute r3 BEFORE r2
       r3 = log(x)
 
       # this is log(x) using the x from AFTER the add_inplace (so it's like log(x + y))
@@ -124,12 +124,12 @@ operation on ``x``.
    give to :class:`Apply` in the definition of :meth:`Apply.make_node`.
 
    Also, for technical reasons but also because they are slightly
-   confusing to use as evidenced by the previous code, Aesara does not
+   confusing to use as evidenced by the previous code, Pytensor does not
    allow the end user to use inplace operations by default. However,
    it does allow rewrites to substitute them in in a later
    phase. Therefore, typically, if you define an inplace operation,
    you will define a pure equivalent and a rewrite which
-   substitutes one for the other. Aesara will automatically verify if
+   substitutes one for the other. Pytensor will automatically verify if
    it is possible to do so and will refuse the substitution if it
    introduces inconsistencies.
 
@@ -142,7 +142,7 @@ the addition. That would be a normal, :term:`pure`\ :class:`Op`. Alternatively,
 it could add one to each byte in the buffer ``x``, therefore
 changing it. That would be an inplace :class:`Op`.
 
-Aesara needs to be notified of this fact. The syntax is similar to
+Pytensor needs to be notified of this fact. The syntax is similar to
 that of :attr:`Op.view_map`:
 
 
@@ -179,8 +179,8 @@ Destructive Operations
 
 While some operations will operate inplace on their inputs, some might
 simply destroy or corrupt them. For example, an :class:`Op` could do temporary
-calculations right in its inputs. If that is the case, Aesara also
-needs to be notified. The way to notify Aesara is to assume that some
+calculations right in its inputs. If that is the case, Pytensor also
+needs to be notified. The way to notify Pytensor is to assume that some
 output operated inplace on whatever inputs are changed or corrupted by
 the :class:`Op` (even if the output does not technically reuse any of the
 input(s)'s memory). From there, go to the previous section.
@@ -189,13 +189,13 @@ input(s)'s memory). From there, go to the previous section.
 .. warning::
    Failure to correctly mark down views and inplace operations using
    :attr:`Op.view_map` and :attr:`Op.destroy_map` can lead to nasty bugs. In the
-   absence of this information, Aesara might assume that it is safe to
+   absence of this information, Pytensor might assume that it is safe to
    execute an inplace operation on some inputs before doing other
    calculations on the previous values of the inputs. For example,
    in the code: ``y = log(x); x2 = add_inplace(x, z)`` it is
    imperative to do the logarithm before the addition (because after
    the addition, the original x that we wanted to take the logarithm
-   of is gone). If Aesara does not know that ``add_inplace`` changes
+   of is gone). If Pytensor does not know that ``add_inplace`` changes
    the value of ``x`` it might invert the order and that will
    certainly lead to erroneous computations.
 
@@ -220,7 +220,7 @@ The problem with `DebugMode` is that it will trigger a useless error when
 checking a rejected inplace rewrite, since it will lead to wrong results.
 In order to be able to use `DebugMode` in more situations, your inplace
 rewrite can pre-check whether it will get rejected by using the
-:func:`aesara.graph.destroyhandler.fast_inplace_check` function, that will tell
+:func:`pytensor.graph.destroyhandler.fast_inplace_check` function, that will tell
 which :class:`Op`\s can be performed inplace. You may then skip the rewrite if it is
 incompatible with this check. Note, however, that this check does not cover all
 cases where a rewrite may be rejected (it will not detect cycles).

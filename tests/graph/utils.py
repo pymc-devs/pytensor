@@ -1,9 +1,15 @@
 import numpy as np
 
-from aesara.graph.basic import Apply, Constant, NominalVariable, Variable, clone_replace
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import HasInnerGraph, Op
-from aesara.graph.type import Type
+from pytensor.graph.basic import (
+    Apply,
+    Constant,
+    NominalVariable,
+    Variable,
+    clone_replace,
+)
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import HasInnerGraph, Op
+from pytensor.graph.type import Type
 
 
 def is_variable(x):

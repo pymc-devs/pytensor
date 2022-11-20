@@ -8,8 +8,8 @@
 In the tutorial section, you can find a :ref:`sparse tutorial
 <tutsparse>`.
 
-The sparse submodule is not loaded when we import Aesara. You must
-import ``aesara.sparse`` to enable it.
+The sparse submodule is not loaded when we import Pytensor. You must
+import ``pytensor.sparse`` to enable it.
 
 The sparse module provides the same functionality as the tensor
 module. The difference lies under the covers because sparse matrices
@@ -23,11 +23,11 @@ Compressed Sparse Format
 ========================
 
 This section tries to explain how information is stored for the two
-sparse formats of SciPy supported by Aesara.
+sparse formats of SciPy supported by Pytensor.
 
 .. Changes to this section should also result in changes to tutorial/sparse.txt.
 
-Aesara supports two *compressed sparse formats*: ``csc`` and ``csr``,
+Pytensor supports two *compressed sparse formats*: ``csc`` and ``csr``,
 respectively based on columns and rows. They have both the same
 attributes: ``data``, ``indices``, ``indptr`` and ``shape``.
 
@@ -119,57 +119,57 @@ List of Implemented Operations
 ==============================
 
 - Moving from and to sparse
-    - :func:`dense_from_sparse <aesara.sparse.basic.dense_from_sparse>`.
+    - :func:`dense_from_sparse <pytensor.sparse.basic.dense_from_sparse>`.
       Both grads are implemented. Structured by default.
-    - :func:`csr_from_dense <aesara.sparse.basic.csr_from_dense>`,
-      :func:`csc_from_dense <aesara.sparse.basic.csc_from_dense>`.
+    - :func:`csr_from_dense <pytensor.sparse.basic.csr_from_dense>`,
+      :func:`csc_from_dense <pytensor.sparse.basic.csc_from_dense>`.
       The grad implemented is structured.
-    - Aesara SparseVariable objects have a method ``toarray()`` that is the same as
-      :func:`dense_from_sparse <aesara.sparse.basic.dense_from_sparse>`.
+    - Pytensor SparseVariable objects have a method ``toarray()`` that is the same as
+      :func:`dense_from_sparse <pytensor.sparse.basic.dense_from_sparse>`.
 
 - Construction of Sparses and their Properties
-    - :class:`CSM <aesara.sparse.basic.CSM>` and ``CSC``, ``CSR`` to construct a matrix.
+    - :class:`CSM <pytensor.sparse.basic.CSM>` and ``CSC``, ``CSR`` to construct a matrix.
       The grad implemented is regular.
-    - :func:`csm_properties <aesara.sparse.basic.csm_properties>`.
+    - :func:`csm_properties <pytensor.sparse.basic.csm_properties>`.
       to get the properties of a sparse matrix.
       The grad implemented is regular.
     - csm_indices(x), csm_indptr(x), csm_data(x) and csm_shape(x) or x.shape.
-    - :func:`sp_ones_like <aesara.sparse.basic.sp_ones_like>`.
+    - :func:`sp_ones_like <pytensor.sparse.basic.sp_ones_like>`.
       The grad implemented is regular.
-    - :func:`sp_zeros_like <aesara.sparse.basic.sp_zeros_like>`.
+    - :func:`sp_zeros_like <pytensor.sparse.basic.sp_zeros_like>`.
       The grad implemented is regular.
-    - :func:`square_diagonal <aesara.sparse.basic.square_diagonal>`.
+    - :func:`square_diagonal <pytensor.sparse.basic.square_diagonal>`.
       The grad implemented is regular.
-    - :func:`construct_sparse_from_list <aesara.sparse.basic.construct_sparse_from_list>`.
+    - :func:`construct_sparse_from_list <pytensor.sparse.basic.construct_sparse_from_list>`.
       The grad implemented is regular.
 
 - Cast
-    - :func:`cast <aesara.sparse.basic.cast>` with ``bcast``, ``wcast``, ``icast``, ``lcast``,
+    - :func:`cast <pytensor.sparse.basic.cast>` with ``bcast``, ``wcast``, ``icast``, ``lcast``,
       ``fcast``, ``dcast``, ``ccast``, and ``zcast``.
       The grad implemented is regular.
 
 - Transpose
-    - :func:`transpose <aesara.sparse.basic.transpose>`.
+    - :func:`transpose <pytensor.sparse.basic.transpose>`.
       The grad implemented is regular.
 
 - Basic Arithmetic
-    - :func:`neg <aesara.sparse.basic.neg>`.
+    - :func:`neg <pytensor.sparse.basic.neg>`.
       The grad implemented is regular.
-    - :func:`eq <aesara.sparse.basic.eq>`.
-    - :func:`neq <aesara.sparse.basic.neq>`.
-    - :func:`gt <aesara.sparse.basic.gt>`.
-    - :func:`ge <aesara.sparse.basic.ge>`.
-    - :func:`lt <aesara.sparse.basic.lt>`.
-    - :func:`le <aesara.sparse.basic.le>`.
-    - :func:`add <aesara.sparse.basic.add>`.
+    - :func:`eq <pytensor.sparse.basic.eq>`.
+    - :func:`neq <pytensor.sparse.basic.neq>`.
+    - :func:`gt <pytensor.sparse.basic.gt>`.
+    - :func:`ge <pytensor.sparse.basic.ge>`.
+    - :func:`lt <pytensor.sparse.basic.lt>`.
+    - :func:`le <pytensor.sparse.basic.le>`.
+    - :func:`add <pytensor.sparse.basic.add>`.
       The grad implemented is regular.
-    - :func:`sub <aesara.sparse.basic.sub>`.
+    - :func:`sub <pytensor.sparse.basic.sub>`.
       The grad implemented is regular.
-    - :func:`mul <aesara.sparse.basic.mul>`.
+    - :func:`mul <pytensor.sparse.basic.mul>`.
       The grad implemented is regular.
-    - :func:`col_scale <aesara.sparse.basic.col_scale>` to multiply by a vector along the columns.
+    - :func:`col_scale <pytensor.sparse.basic.col_scale>` to multiply by a vector along the columns.
       The grad implemented is structured.
-    - :func:`row_scale <aesara.sparse.basic.row_scale>` to multiply by a vector along the rows.
+    - :func:`row_scale <pytensor.sparse.basic.row_scale>` to multiply by a vector along the rows.
       The grad implemented is structured.
 
 - Monoid (Element-wise operation with only one sparse input).
@@ -203,13 +203,13 @@ List of Implemented Operations
     - ``sqrt``
 
 - Dot Product
-    - :func:`dot <aesara.sparse.basic.dot>`.
+    - :func:`dot <pytensor.sparse.basic.dot>`.
 
         - One of the inputs must be sparse, the other sparse or dense.
         - The grad implemented is regular.
         - No C code for perform and no C code for grad.
         - Returns a dense for perform and a dense for grad.
-    - :func:`structured_dot <aesara.sparse.basic.structured_dot>`.
+    - :func:`structured_dot <pytensor.sparse.basic.structured_dot>`.
 
         - The first input is sparse, the second can be sparse or dense.
         - The grad implemented is structured.
@@ -218,7 +218,7 @@ List of Implemented Operations
           dense one if one of the inputs is dense.
         - Returns a sparse grad for sparse inputs and dense grad for
           dense inputs.
-    - :func:`true_dot <aesara.sparse.basic.true_dot>`.
+    - :func:`true_dot <pytensor.sparse.basic.true_dot>`.
 
         - The first input is sparse, the second can be sparse or dense.
         - The grad implemented is regular.
@@ -228,18 +228,18 @@ List of Implemented Operations
           default a dense for dense inputs. The parameter
           ``grad_preserves_dense`` can be set to False to return a
           sparse grad for dense inputs.
-    - :func:`sampling_dot <aesara.sparse.basic.sampling_dot>`.
+    - :func:`sampling_dot <pytensor.sparse.basic.sampling_dot>`.
 
         - Both inputs must be dense.
         - The grad implemented is structured for ``p``.
         - Sample of the dot and sample of the gradient.
         - C code for perform but not for grad.
         - Returns sparse for perform and grad.
-    - :func:`usmm <aesara.sparse.basic.usmm>`.
+    - :func:`usmm <pytensor.sparse.basic.usmm>`.
 
         - You *shouldn't* insert this op yourself!
            - There is a rewrite that transforms a
-             :func:`dot <aesara.sparse.basic.dot>` to :class:`Usmm` when possible.
+             :func:`dot <pytensor.sparse.basic.dot>` to :class:`Usmm` when possible.
 
         - This :class:`Op` is the equivalent of gemm for sparse dot.
         - There is no grad implemented for this :class:`Op`.
@@ -254,29 +254,29 @@ List of Implemented Operations
     - Sparse variables don't support [M, N:O] and [M:N, O] as we don't
       support sparse vectors and returning a sparse matrix would break
       the numpy interface.  Use [M:M+1, N:O] and [M:N, O:O+1] instead.
-    - :func:`diag <aesara.sparse.basic.diag>`.
+    - :func:`diag <pytensor.sparse.basic.diag>`.
       The grad implemented is regular.
 
 - Concatenation
-    - :func:`hstack <aesara.sparse.basic.hstack>`.
+    - :func:`hstack <pytensor.sparse.basic.hstack>`.
       The grad implemented is regular.
-    - :func:`vstack <aesara.sparse.basic.vstack>`.
+    - :func:`vstack <pytensor.sparse.basic.vstack>`.
       The grad implemented is regular.
 
 - Probability
     `There is no grad implemented for these operations.`
 
-    - :class:`Poisson <aesara.sparse.basic.Poisson>` and ``poisson``
-    - :class:`Binomial <aesara.sparse.basic.Binomial>` and ``csc_fbinomial``, ``csc_dbinomial``
+    - :class:`Poisson <pytensor.sparse.basic.Poisson>` and ``poisson``
+    - :class:`Binomial <pytensor.sparse.basic.Binomial>` and ``csc_fbinomial``, ``csc_dbinomial``
       ``csr_fbinomial``, ``csr_dbinomial``
-    - :class:`Multinomial <aesara.sparse.basic.Multinomial>` and ``multinomial``
+    - :class:`Multinomial <pytensor.sparse.basic.Multinomial>` and ``multinomial``
 
 - Internal Representation
     `They all have a regular grad implemented.`
 
-    - :func:`ensure_sorted_indices <aesara.sparse.basic.ensure_sorted_indices>`.
-    - :func:`remove0 <aesara.sparse.basic.remove0>`.
-    - :func:`clean <aesara.sparse.basic.clean>` to resort indices and remove zeros
+    - :func:`ensure_sorted_indices <pytensor.sparse.basic.ensure_sorted_indices>`.
+    - :func:`remove0 <pytensor.sparse.basic.remove0>`.
+    - :func:`clean <pytensor.sparse.basic.clean>` to resort indices and remove zeros
 
 - To help testing
     - :func:`tests.sparse.test_basic.sparse_random_inputs`
@@ -290,7 +290,7 @@ List of Implemented Operations
    :synopsis: Sparse Op
 .. moduleauthor:: LISA
 
-.. automodule:: aesara.sparse.basic
+.. automodule:: pytensor.sparse.basic
     :members:
 
-.. autofunction:: aesara.sparse.sparse_grad
+.. autofunction:: pytensor.sparse.sparse_grad

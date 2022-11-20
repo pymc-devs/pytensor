@@ -6,18 +6,18 @@ import time
 import numpy as np
 import pytest
 
-import aesara
-from aesara.compile.function import function
-from aesara.compile.sharedvalue import shared
-from aesara.configdefaults import config
-from aesara.gradient import NullTypeGradError, UndefinedGrad, grad, zero_grad
-from aesara.sandbox import rng_mrg
-from aesara.sandbox.rng_mrg import MRG_RandomStream, mrg_uniform
-from aesara.scan.basic import scan
-from aesara.tensor.basic import as_tensor_variable, cast
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.random.utils import RandomStream
-from aesara.tensor.type import iscalar, ivector, lmatrix, matrix, scalar, vector
+import pytensor
+from pytensor.compile.function import function
+from pytensor.compile.sharedvalue import shared
+from pytensor.configdefaults import config
+from pytensor.gradient import NullTypeGradError, UndefinedGrad, grad, zero_grad
+from pytensor.sandbox import rng_mrg
+from pytensor.sandbox.rng_mrg import MRG_RandomStream, mrg_uniform
+from pytensor.scan.basic import scan
+from pytensor.tensor.basic import as_tensor_variable, cast
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.random.utils import RandomStream
+from pytensor.tensor.type import iscalar, ivector, lmatrix, matrix, scalar, vector
 from tests import unittest_tools as utt
 
 
@@ -34,7 +34,7 @@ from tests import unittest_tools as utt
 # 5 samples drawn from each substream
 java_samples = np.loadtxt(
     os.path.join(
-        os.path.split(aesara.__file__)[0], "sandbox", "samples_MRG31k3p_12_7_5.txt"
+        os.path.split(pytensor.__file__)[0], "sandbox", "samples_MRG31k3p_12_7_5.txt"
     )
 )
 
@@ -343,7 +343,7 @@ def test_broadcastable():
                 uu = distribution(pvals=pvals_1)
                 assert uu.broadcastable == (False, True)
 
-            # check when some dimensions are aesara variables
+            # check when some dimensions are pytensor variables
             with context_mgr:
                 uu = distribution(pvals=pvals_2)
                 assert uu.broadcastable == (False, True)
@@ -352,7 +352,7 @@ def test_broadcastable():
             uu = distribution(size=size1)
             assert uu.broadcastable == (False, True)
 
-            # check when some dimensions are aesara variables
+            # check when some dimensions are pytensor variables
             uu = distribution(size=size2)
             assert uu.broadcastable == (False, True)
 
@@ -823,7 +823,7 @@ class TestMRG:
 def test_multiple_rng_aliasing():
     # Test that when we have multiple random number generators, we do not alias
     # the state_updates member. `state_updates` can be useful when attempting to
-    # copy the (random) state between two similar aesara graphs. The test is
+    # copy the (random) state between two similar pytensor graphs. The test is
     # meant to detect a previous bug where state_updates was initialized as a
     # class-attribute, instead of the __init__ function.
 
@@ -833,7 +833,7 @@ def test_multiple_rng_aliasing():
 
 
 def test_random_state_transfer():
-    # Test that random state can be transferred from one aesara graph to another.
+    # Test that random state can be transferred from one pytensor graph to another.
 
     class Graph:
         def __init__(self, seed=123):
@@ -860,11 +860,11 @@ def test_random_state_transfer():
     ],
 )
 def test_gradient_scan(mode):
-    aesara_rng = MRG_RandomStream(10)
+    pytensor_rng = MRG_RandomStream(10)
     w = shared(np.ones(1, dtype="float32"))
 
     def one_step(x):
-        return x + aesara_rng.uniform((1,), dtype="float32") * w
+        return x + pytensor_rng.uniform((1,), dtype="float32") * w
 
     x = vector(dtype="float32")
     values, updates = scan(one_step, outputs_info=x, n_steps=10)
@@ -878,10 +878,10 @@ def test_gradient_scan(mode):
 
 
 def test_simple_shared_mrg_random():
-    aesara_rng = MRG_RandomStream(10)
+    pytensor_rng = MRG_RandomStream(10)
 
     values, updates = scan(
-        lambda: aesara_rng.uniform((2,), -1, 1),
+        lambda: pytensor_rng.uniform((2,), -1, 1),
         [],
         [],
         [],
@@ -982,7 +982,7 @@ def rng_mrg_overflow(sizes, fct, mode, should_raise_error):
 
 @pytest.mark.slow
 def test_overflow_cpu():
-    # run with AESARA_FLAGS=mode=FAST_RUN,device=cpu,floatX=float32
+    # run with PYTENSOR_FLAGS=mode=FAST_RUN,device=cpu,floatX=float32
     rng = MRG_RandomStream(np.random.default_rng(utt.fetch_seed()).integers(1234))
     fct = rng.uniform
     with config.change_flags(compute_test_value="off"):

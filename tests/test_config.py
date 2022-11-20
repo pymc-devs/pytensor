@@ -5,16 +5,16 @@ import pickle
 
 import pytest
 
-from aesara import configdefaults, configparser
-from aesara.configdefaults import short_platform
-from aesara.configparser import ConfigParam
+from pytensor import configdefaults, configparser
+from pytensor.configdefaults import short_platform
+from pytensor.configparser import ConfigParam
 
 
 def _create_test_config():
-    return configparser.AesaraConfigParser(
+    return configparser.PytensorConfigParser(
         flags_dict={},
-        aesara_cfg=stdlib_configparser.ConfigParser(),
-        aesara_raw_cfg=stdlib_configparser.RawConfigParser(),
+        pytensor_cfg=stdlib_configparser.ConfigParser(),
+        pytensor_raw_cfg=stdlib_configparser.RawConfigParser(),
     )
 
 
@@ -65,7 +65,7 @@ def test_api_redirect():
 
 
 def test_invalid_default():
-    # Ensure an invalid default value found in the Aesara code only causes
+    # Ensure an invalid default value found in the Pytensor code only causes
     # a crash if it is not overridden by the user.
 
     root = _create_test_config()
@@ -177,9 +177,9 @@ class TestConfigTypes:
     def test_deviceparam(self):
         cp = configparser.DeviceParam("cpu", mutable=False)
         assert cp.default == "cpu"
-        with pytest.raises(ValueError, match="It was removed from Aesara"):
+        with pytest.raises(ValueError, match="It was removed from Pytensor"):
             cp._apply("cuda123")
-        with pytest.raises(ValueError, match="It was removed from Aesara"):
+        with pytest.raises(ValueError, match="It was removed from Pytensor"):
             cp._apply("gpu123")
         with pytest.raises(ValueError, match='Valid options start with one of "cpu".'):
             cp._apply("notadevice")
@@ -251,11 +251,11 @@ def test_mode_apply():
         configdefaults._filter_mode("not_a_mode")
 
     # test with Mode instance
-    import aesara.compile.mode
+    import pytensor.compile.mode
 
     assert (
-        configdefaults._filter_mode(aesara.compile.mode.FAST_COMPILE)
-        == aesara.compile.mode.FAST_COMPILE
+        configdefaults._filter_mode(pytensor.compile.mode.FAST_COMPILE)
+        == pytensor.compile.mode.FAST_COMPILE
     )
 
 

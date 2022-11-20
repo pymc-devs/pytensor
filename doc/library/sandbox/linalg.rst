@@ -1,5 +1,5 @@
-..  ../../../../aesara/sandbox/linalg/ops.py
-..  ../../../../aesara/sandbox/linalg
+..  ../../../../pytensor/sandbox/linalg/ops.py
+..  ../../../../pytensor/sandbox/linalg
 
 .. _libdoc_sandbox_linalg:
 
@@ -15,5 +15,5 @@
 API
 ===
 
-.. automodule:: aesara.sandbox.linalg.ops
+.. automodule:: pytensor.sandbox.linalg.ops
     :members:

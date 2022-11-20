@@ -1,14 +1,14 @@
 import numpy as np
 import pytest
 
-import aesara
-from aesara import tensor as at
-from aesara.graph.basic import Apply
-from aesara.link.c.op import COp, ExternalCOp
-from aesara.link.c.params_type import Params, ParamsType
-from aesara.link.c.type import EnumList, Generic
-from aesara.scalar import ScalarType
-from aesara.tensor.type import TensorType, matrix
+import pytensor
+from pytensor import tensor as at
+from pytensor.graph.basic import Apply
+from pytensor.link.c.op import COp, ExternalCOp
+from pytensor.link.c.params_type import Params, ParamsType
+from pytensor.link.c.type import EnumList, Generic
+from pytensor.scalar import ScalarType
+from pytensor.tensor.type import TensorType, matrix
 from tests import unittest_tools as utt
 
 
@@ -344,8 +344,8 @@ class TestParamsType:
         x = matrix(dtype="float64")
         y1 = QuadraticOpFunc(a, b, c)(x)
         y2 = QuadraticCOpFunc(a, b, c)(x)
-        f1 = aesara.function([x], y1)
-        f2 = aesara.function([x], y2)
+        f1 = pytensor.function([x], y1)
+        f2 = pytensor.function([x], y2)
         shape = (100, 100)
         vx = (
             np.random.normal(size=shape[0] * shape[1]).astype("float64").reshape(*shape)

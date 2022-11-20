@@ -1,11 +1,11 @@
 """ This file don't test everything. It only test one past crash error."""
 
-import aesara
-from aesara import as_symbolic
-from aesara.graph.basic import Constant
-from aesara.tensor.math import argmax
-from aesara.tensor.type import iscalar, vector
-from aesara.tensor.type_other import (
+import pytensor
+from pytensor import as_symbolic
+from pytensor.graph.basic import Constant
+from pytensor.tensor.math import argmax
+from pytensor.tensor.type import iscalar, vector
+from pytensor.tensor.type_other import (
     MakeSlice,
     NoneConst,
     NoneTypeT,
@@ -25,7 +25,7 @@ def test_make_slice_merge():
     i = iscalar()
     s1 = make_slice(0, i)
     s2 = make_slice(0, i)
-    f = aesara.function([i], [s1, s2])
+    f = pytensor.function([i], [s1, s2])
     nodes = f.maker.fgraph.apply_nodes
     assert len([n for n in nodes if isinstance(n.op, MakeSlice)]) == 1
 
@@ -47,15 +47,15 @@ def test_none_Constant():
     # This trigger equals that returned the wrong answer in the past.
     import pickle
 
-    import aesara
+    import pytensor
 
     x = vector("x")
     y = argmax(x)
     kwargs = {}
     # We can't pickle DebugMode
-    if aesara.config.mode in ["DebugMode", "DEBUG_MODE"]:
+    if pytensor.config.mode in ["DebugMode", "DEBUG_MODE"]:
         kwargs = {"mode": "FAST_RUN"}
-    f = aesara.function([x], [y], **kwargs)
+    f = pytensor.function([x], [y], **kwargs)
     pickle.loads(pickle.dumps(f))
 
 

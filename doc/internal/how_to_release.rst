@@ -7,15 +7,15 @@ How to make a release
 Update the version number
 =========================
 
-``Aesara/doc/conf.py`` should be updated in the following ways:
+``Pytensor/doc/conf.py`` should be updated in the following ways:
 
  * Change the upper copyright year to the current year if necessary.
 
-Update the year in the ``Aesara/LICENSE.txt`` file too, if necessary.
+Update the year in the ``Pytensor/LICENSE.txt`` file too, if necessary.
 
-Update the code and the documentation for the aesara flags
+Update the code and the documentation for the pytensor flags
 ``warn__ignore_bug_before`` to accept the new version. You must modify the
-file ``aesara/configdefaults.py`` and ``doc/library/config.txt``.
+file ``pytensor/configdefaults.py`` and ``doc/library/config.txt``.
 
 Tag the release
 ===============

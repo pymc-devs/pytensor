@@ -3,7 +3,7 @@
 .. raw:: html
 
   <div align="center">
-  <img src="./doc/images/aesara_logo_2400.png" alt="logo"></img>
+  <img src="./doc/images/pytensor_logo_2400.png" alt="logo"></img>
   </div>
 
 
@@ -25,8 +25,8 @@ Getting started
 
 .. code-block:: python
 
-  import aesara
-  from aesara import tensor as at
+  import pytensor
+  from pytensor import tensor as at
 
   # Declare two symbolic floating-point scalars
   a = at.dscalar("a")
@@ -37,18 +37,18 @@ Getting started
 
   # Convert the expression into a callable object that takes `(a, b)`
   # values as input and computes the value of `c`.
-  f_c = aesara.function([a, b], c)
+  f_c = pytensor.function([a, b], c)
 
   assert f_c(1.5, 2.5) == 4.0
 
   # Compute the gradient of the example expression with respect to `a`
-  dc = aesara.grad(c, a)
+  dc = pytensor.grad(c, a)
 
-  f_dc = aesara.function([a, b], dc)
+  f_dc = pytensor.function([a, b], dc)
 
   assert f_dc(1.5, 2.5) == 1.0
 
-  # Compiling functions with `aesara.function` also optimizes
+  # Compiling functions with `pytensor.function` also optimizes
   # expression graphs by removing unnecessary operations and
   # replacing computations with more efficient ones.
 
@@ -57,7 +57,7 @@ Getting started
 
   d = a/a + (M + a).dot(v)
 
-  aesara.dprint(d)
+  pytensor.dprint(d)
   # Elemwise{add,no_inplace} [id A] ''
   #  |InplaceDimShuffle{x} [id B] ''
   #  | |Elemwise{true_div,no_inplace} [id C] ''
@@ -70,11 +70,11 @@ Getting started
   #    |   |a [id D]
   #    |v [id I]
 
-  f_d = aesara.function([a, v, M], d)
+  f_d = pytensor.function([a, v, M], d)
 
   # `a/a` -> `1` and the dot product is replaced with a BLAS function
   # (i.e. CGemv)
-  aesara.dprint(f_d)
+  pytensor.dprint(f_d)
   # Elemwise{Add}[(0, 1)] [id A] ''   5
   #  |TensorConstant{(1,) of 1.0} [id B]
   #  |CGemv{inplace} [id C] ''   4
@@ -89,7 +89,7 @@ Getting started
   #    |v [id K]
   #    |TensorConstant{0.0} [id L]
 
-See `the Aesara documentation <https://aesara.readthedocs.io/en/latest/>`__ for in-depth tutorials.
+See `the Pytensor documentation <https://pytensor.readthedocs.io/en/latest/>`__ for in-depth tutorials.
 
 
 Installation
@@ -99,21 +99,21 @@ The latest release of |Project Name| can be installed from PyPI using ``pip``:
 
 ::
 
-    pip install aesara
+    pip install pytensor
 
 
 Or via conda-forge:
 
 ::
 
-    conda install -c conda-forge aesara
+    conda install -c conda-forge pytensor
 
 
 The current development branch of |Project Name| can be installed from GitHub, also using ``pip``:
 
 ::
 
-    pip install git+https://github.com/aesara-devs/aesara
+    pip install git+https://github.com/pymc-devs/pytensor
 
 
 Contributing
@@ -122,10 +122,10 @@ Contributing
 We welcome bug reports and fixes and improvements to the documentation.
 
 For more information on contributing, please see the
-`contributing guide <https://github.com/aesara-devs/aesara/CONTRIBUTING.md>`.
+`contributing guide <https://github.com/pymc-devs/pytensor/CONTRIBUTING.md>`.
 
 A good place to start contributing is by looking through the issues
-`here <https://github.com/aesara-devs/aesara/issues`.
+`here <https://github.com/pymc-devs/pytensor/issues`.
 
 Support
 =======
@@ -133,10 +133,10 @@ Support
 Special thanks to `Bram Timmer <http://beside.ca>`__ for the logo.
 
 
-.. |Project Name| replace:: Aesara
-.. |Tests Status| image:: https://github.com/aesara-devs/aesara/workflows/Tests/badge.svg
-  :target: https://github.com/aesara-devs/aesara/actions?query=workflow%3ATests
-.. |Coverage| image:: https://codecov.io/gh/aesara-devs/aesara/branch/main/graph/badge.svg?token=WVwr8nZYmc
-  :target: https://codecov.io/gh/aesara-devs/aesara
-.. |Gitter| image:: https://badges.gitter.im/aesara-devs/aesara.svg
-  :target: https://gitter.im/aesara-devs/aesara?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge
+.. |Project Name| replace:: Pytensor
+.. |Tests Status| image:: https://github.com/pymc-devs/pytensor/workflows/Tests/badge.svg
+  :target: https://github.com/pymc-devs/pytensor/actions?query=workflow%3ATests
+.. |Coverage| image:: https://codecov.io/gh/pymc-devs/pytensor/branch/main/graph/badge.svg?token=WVwr8nZYmc
+  :target: https://codecov.io/gh/pymc-devs/pytensor
+.. |Gitter| image:: https://badges.gitter.im/pymc-devs/pytensor.svg
+  :target: https://gitter.im/pymc-devs/pytensor?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge

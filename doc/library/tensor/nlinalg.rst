@@ -1,4 +1,4 @@
-..  ../../../../aesara/sandbox/nlinalg.py
+..  ../../../../pytensor/sandbox/nlinalg.py
 
 .. _libdoc_linalg:
 
@@ -18,5 +18,5 @@
 API
 ===
 
-.. automodule:: aesara.tensor.nlinalg
+.. automodule:: pytensor.tensor.nlinalg
     :members:

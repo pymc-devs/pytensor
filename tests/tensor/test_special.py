@@ -3,10 +3,16 @@ import pytest
 from scipy.special import log_softmax as scipy_log_softmax
 from scipy.special import softmax as scipy_softmax
 
-from aesara.compile.function import function
-from aesara.configdefaults import config
-from aesara.tensor.special import LogSoftmax, Softmax, SoftmaxGrad, log_softmax, softmax
-from aesara.tensor.type import matrix, tensor3, tensor4, vector
+from pytensor.compile.function import function
+from pytensor.configdefaults import config
+from pytensor.tensor.special import (
+    LogSoftmax,
+    Softmax,
+    SoftmaxGrad,
+    log_softmax,
+    softmax,
+)
+from pytensor.tensor.type import matrix, tensor3, tensor4, vector
 from tests import unittest_tools as utt
 
 

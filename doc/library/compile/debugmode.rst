@@ -5,7 +5,7 @@
 :mod:`debugmode`
 ================
 
-.. module:: aesara.compile.debugmode
+.. module:: pytensor.compile.debugmode
    :platform: Unix, Windows
    :synopsis: defines DebugMode
 .. moduleauthor:: LISA
@@ -27,13 +27,13 @@ a cluster.
 
 .. testcode::
 
-    import aesara
-    from aesara import tensor as at
-    from aesara.compile.debugmode import DebugMode
+    import pytensor
+    from pytensor import tensor as at
+    from pytensor.compile.debugmode import DebugMode
 
     x = at.dscalar('x')
 
-    f = aesara.function([x], 10*x, mode='DebugMode')
+    f = pytensor.function([x], 10*x, mode='DebugMode')
 
     f(5)
     f(0)
@@ -42,12 +42,12 @@ a cluster.
 It can also be used by setting the configuration variable :attr:`config.mode`,
 or passing a `DebugMode` instance, as in
 
->>> f = aesara.function([x], 10*x, mode=DebugMode(check_c_code=False))
+>>> f = pytensor.function([x], 10*x, mode=DebugMode(check_c_code=False))
 
 If any problem is detected, `DebugMode` will raise an exception according to
 what went wrong, either at call time (``f(5)``) or compile time (
-``f = aesara.function(x, 10*x, mode='DebugMode')``). These exceptions
-should *not* be ignored; talk to your local Aesara guru or email the
+``f = pytensor.function(x, 10*x, mode='DebugMode')``). These exceptions
+should *not* be ignored; talk to your local Pytensor guru or email the
 users list if you cannot make the exception go away.
 
 Some kinds of errors can only be detected for certain input value combinations.
@@ -63,7 +63,7 @@ Reference
 
 .. class:: DebugMode(Mode)
 
-    Evaluation :class:`Mode` that detects internal Aesara errors.
+    Evaluation :class:`Mode` that detects internal Pytensor errors.
 
     This mode catches several kinds of internal error:
 

@@ -1,16 +1,16 @@
 
 .. _lib_scan:
 
-================================
-:mod:`scan` -- Looping in Aesara
-================================
+==================================
+:mod:`scan` -- Looping in Pytensor
+==================================
 
 
 Guide
 =====
 
 The scan functions provides the basic functionality needed to do loops
-in Aesara. Scan comes with many whistles and bells, which we will introduce
+in Pytensor. Scan comes with many whistles and bells, which we will introduce
 by way of examples.
 
 
@@ -33,18 +33,18 @@ the unchanging variable ``A``. Unchanging variables are passed to scan as
 ``non_sequences``. Initialization occurs in ``outputs_info``, and the accumulation
 happens automatically.
 
-The equivalent Aesara code would be:
+The equivalent Pytensor code would be:
 
 .. testcode::
 
-  import aesara
-  import aesara.tensor as at
+  import pytensor
+  import pytensor.tensor as at
 
   k = at.iscalar("k")
   A = at.vector("A")
 
   # Symbolic description of the result
-  result, updates = aesara.scan(fn=lambda prior_result, A: prior_result * A,
+  result, updates = pytensor.scan(fn=lambda prior_result, A: prior_result * A,
                                 outputs_info=at.ones_like(A),
                                 non_sequences=A,
                                 n_steps=k)
@@ -55,7 +55,7 @@ The equivalent Aesara code would be:
   final_result = result[-1]
 
   # compiled function that returns A**k
-  power = aesara.function(inputs=[A,k], outputs=final_result, updates=updates)
+  power = pytensor.function(inputs=[A,k], outputs=final_result, updates=updates)
 
   print(power(range(10),2))
   print(power(range(10),4))
@@ -102,21 +102,21 @@ from a list of its coefficients:
 
     import numpy
 
-    coefficients = aesara.tensor.vector("coefficients")
+    coefficients = pytensor.tensor.vector("coefficients")
     x = at.scalar("x")
 
     max_coefficients_supported = 10000
 
     # Generate the components of the polynomial
-    components, updates = aesara.scan(fn=lambda coefficient, power, free_variable: coefficient * (free_variable ** power),
+    components, updates = pytensor.scan(fn=lambda coefficient, power, free_variable: coefficient * (free_variable ** power),
                                       outputs_info=None,
-                                      sequences=[coefficients, aesara.tensor.arange(max_coefficients_supported)],
+                                      sequences=[coefficients, pytensor.tensor.arange(max_coefficients_supported)],
                                       non_sequences=x)
     # Sum them up
     polynomial = components.sum()
 
     # Compile a function
-    calculate_polynomial = aesara.function(inputs=[coefficients, x], outputs=polynomial)
+    calculate_polynomial = pytensor.function(inputs=[coefficients, x], outputs=polynomial)
 
     # Test
     test_coefficients = numpy.asarray([1, 0, 2], dtype=numpy.float32)
@@ -143,7 +143,7 @@ The general order of function parameters to ``fn`` is::
     sequences (if any), prior result(s) (if needed), non-sequences (if any)
 
 Third, there's a handy trick used to simulate python's ``enumerate``: simply include
-``aesara.tensor.arange`` to the sequences.
+``pytensor.tensor.arange`` to the sequences.
 
 Fourth, given multiple sequences of uneven lengths, scan will truncate to the shortest of them.
 This makes it safe to pass a very long arange, which we need to do for generality, since
@@ -163,8 +163,8 @@ downcast** of the latter.
 
 
     import numpy as np
-    import aesara
-    import aesara.tensor as at
+    import pytensor
+    import pytensor.tensor as at
 
     up_to = at.iscalar("up_to")
 
@@ -179,10 +179,10 @@ downcast** of the latter.
     # outputs_info = at.as_tensor_variable(0)
 
     outputs_info = at.as_tensor_variable(np.asarray(0, seq.dtype))
-    scan_result, scan_updates = aesara.scan(fn=accumulate_by_adding,
+    scan_result, scan_updates = pytensor.scan(fn=accumulate_by_adding,
                                             outputs_info=outputs_info,
                                             sequences=seq)
-    triangular_sequence = aesara.function(inputs=[up_to], outputs=scan_result)
+    triangular_sequence = pytensor.function(inputs=[up_to], outputs=scan_result)
 
     # test
     some_num = 15
@@ -215,12 +215,12 @@ with all values set to zero except at the provided array indices.
         zeros_subtensor = zeros[a_location[0], a_location[1]]
         return at.set_subtensor(zeros_subtensor, a_value)
 
-    result, updates = aesara.scan(fn=set_value_at_position,
+    result, updates = pytensor.scan(fn=set_value_at_position,
                                   outputs_info=None,
                                   sequences=[location, values],
                                   non_sequences=output_model)
 
-    assign_values_at_positions = aesara.function(inputs=[location, values, output_model], outputs=result)
+    assign_values_at_positions = pytensor.function(inputs=[location, values, output_model], outputs=result)
 
     # test
     test_locations = numpy.asarray([[1, 1], [2, 3]], dtype=numpy.int32)
@@ -242,7 +242,7 @@ with all values set to zero except at the provided array indices.
       [  0.   0.   0.   0.   0.]
       [  0.   0.   0.   0.   0.]]]
 
-This demonstrates that you can introduce new Aesara variables into a scan function.
+This demonstrates that you can introduce new Pytensor variables into a scan function.
 
 
 .. _lib_scan_shared_variables:
@@ -256,8 +256,8 @@ the following:
 
 .. testcode:: scan1
 
-    import aesara
-    import aesara.tensor as at
+    import pytensor
+    import pytensor.tensor as at
     import numpy as np
 
     rng = np.random.default_rng(203940)
@@ -265,9 +265,9 @@ the following:
     bvis_values = rng.uniform(size=(2,))
     bhid_values = rng.uniform(size=(2,))
 
-    W = aesara.shared(W_values)
-    bvis = aesara.shared(bvis_values)
-    bhid = aesara.shared(bhid_values)
+    W = pytensor.shared(W_values)
+    bvis = pytensor.shared(bvis_values)
+    bhid = pytensor.shared(bhid_values)
 
     srng = at.random.RandomStream(1234)
 
@@ -280,9 +280,9 @@ the following:
 
     sample = at.lvector()
 
-    values, updates = aesara.scan(one_step, outputs_info=sample, n_steps=10)
+    values, updates = pytensor.scan(one_step, outputs_info=sample, n_steps=10)
 
-    gibbs10 = aesara.function([sample], values[-1], updates=updates)
+    gibbs10 = pytensor.function([sample], values[-1], updates=updates)
 
 The first, and probably most crucial observation is that the updates
 dictionary becomes important in this case. It links a shared variable
@@ -294,12 +294,12 @@ afterwards. Look at this example :
 
 .. testsetup:: scan2
 
-   import aesara
+   import pytensor
 
 .. testcode:: scan2
 
-    a = aesara.shared(1)
-    values, updates = aesara.scan(lambda: {a: a+1}, n_steps=10)
+    a = pytensor.shared(1)
+    values, updates = pytensor.scan(lambda: {a: a+1}, n_steps=10)
 
 In this case the lambda expression does not require any input parameters
 and returns an update dictionary which tells how ``a`` should be updated
@@ -309,7 +309,7 @@ after each step of scan. If we write :
 
     b = a + 1
     c = updates[a] + 1
-    f = aesara.function([], [b, c], updates=updates)
+    f = pytensor.function([], [b, c], updates=updates)
 
     print(b)
     print(c)
@@ -343,31 +343,31 @@ updated:
 
 .. testcode:: scan1
 
-    W = aesara.shared(W_values) # we assume that ``W_values`` contains the
+    W = pytensor.shared(W_values) # we assume that ``W_values`` contains the
                                 # initial values of your weight matrix
 
-    bvis = aesara.shared(bvis_values)
-    bhid = aesara.shared(bhid_values)
+    bvis = pytensor.shared(bvis_values)
+    bhid = pytensor.shared(bhid_values)
 
-    trng = aesara.tensor.random.utils.RandomStream(1234)
+    trng = pytensor.tensor.random.utils.RandomStream(1234)
 
     # OneStep, with explicit use of the shared variables (W, bvis, bhid)
     def OneStep(vsample, W, bvis, bhid):
-        hmean = at.sigmoid(aesara.dot(vsample, W) + bhid)
+        hmean = at.sigmoid(pytensor.dot(vsample, W) + bhid)
         hsample = trng.binomial(size=hmean.shape, n=1, p=hmean)
-        vmean = at.sigmoid(aesara.dot(hsample, W.T) + bvis)
+        vmean = at.sigmoid(pytensor.dot(hsample, W.T) + bvis)
         return trng.binomial(size=vsample.shape, n=1, p=vmean,
-                         dtype=aesara.config.floatX)
+                         dtype=pytensor.config.floatX)
 
-    sample = aesara.tensor.vector()
+    sample = pytensor.tensor.vector()
 
     # The new scan, with the shared variables passed as non_sequences
-    values, updates = aesara.scan(fn=OneStep,
+    values, updates = pytensor.scan(fn=OneStep,
                                   outputs_info=sample,
                                   non_sequences=[W, bvis, bhid],
                                   n_steps=10)
 
-    gibbs10 = aesara.function([sample], values[-1], updates=updates)
+    gibbs10 = pytensor.function([sample], values[-1], updates=updates)
 
 
 .. _lib_scan_strict:
@@ -389,14 +389,14 @@ Using the original Gibbs sampling example, with ``strict=True`` added to the
 
     # Same OneStep as in original example.
     def OneStep(vsample) :
-        hmean = at.sigmoid(aesara.dot(vsample, W) + bhid)
+        hmean = at.sigmoid(pytensor.dot(vsample, W) + bhid)
         hsample = trng.binomial(size=hmean.shape, n=1, p=hmean)
-        vmean = at.sigmoid(aesara.dot(hsample, W.T) + bvis)
+        vmean = at.sigmoid(pytensor.dot(hsample, W.T) + bvis)
         return trng.binomial(size=vsample.shape, n=1, p=vmean,
-                             dtype=aesara.config.floatX)
+                             dtype=pytensor.config.floatX)
 
     # The new scan, adding strict=True to the original call.
-    values, updates = aesara.scan(OneStep,
+    values, updates = pytensor.scan(OneStep,
                                   outputs_info=sample,
                                   n_steps=10,
                                   strict=True)
@@ -407,7 +407,7 @@ Using the original Gibbs sampling example, with ``strict=True`` added to the
     ...
     MissingInputError: An input of the graph, used to compute
     DimShuffle{1,0}(<TensorType(float64, (?, ?))>), was not provided and
-    not given a value.Use the Aesara flag exception_verbosity='high',for
+    not given a value.Use the Pytensor flag exception_verbosity='high',for
     more information on this error.
 
 The error indicates that ``OneStep`` relies on variables that are not passed
@@ -418,15 +418,15 @@ variables passed explicitly to ``OneStep`` and to scan:
 
     # OneStep, with explicit use of the shared variables (W, bvis, bhid)
     def OneStep(vsample, W, bvis, bhid) :
-        hmean = at.sigmoid(aesara.dot(vsample, W) + bhid)
+        hmean = at.sigmoid(pytensor.dot(vsample, W) + bhid)
         hsample = trng.binomial(size=hmean.shape, n=1, p=hmean)
-        vmean = at.sigmoid(aesara.dot(hsample, W.T) + bvis)
+        vmean = at.sigmoid(pytensor.dot(hsample, W.T) + bvis)
         return trng.binomial(size=vsample.shape, n=1, p=vmean,
-                             dtype=aesara.config.floatX)
+                             dtype=pytensor.config.floatX)
 
     # The new scan, adding strict=True to the original call, and passing
     # explicitly W, bvis and bhid.
-    values, updates = aesara.scan(OneStep,
+    values, updates = pytensor.scan(OneStep,
                                   outputs_info=sample,
                                   non_sequences=[W, bvis, bhid],
                                   n_steps=10,
@@ -459,18 +459,18 @@ construct a function that computes one iteration step :
 
 .. testsetup:: scan3
 
-   import aesara
-   from aesara import tensor as at
+   import pytensor
+   from pytensor import tensor as at
 
 .. testcode:: scan3
 
   def oneStep(u_tm4, u_t, x_tm3, x_tm1, y_tm1, W, W_in_1, W_in_2,  W_feedback, W_out):
 
-    x_t = at.tanh(aesara.dot(x_tm1, W) + \
-                 aesara.dot(u_t,   W_in_1) + \
-                 aesara.dot(u_tm4, W_in_2) + \
-                 aesara.dot(y_tm1, W_feedback))
-    y_t = aesara.dot(x_tm3, W_out)
+    x_t = at.tanh(pytensor.dot(x_tm1, W) + \
+                 pytensor.dot(u_t,   W_in_1) + \
+                 pytensor.dot(u_tm4, W_in_2) + \
+                 pytensor.dot(y_tm1, W_feedback))
+    y_t = pytensor.dot(x_tm3, W_out)
 
     return [x_t, y_t]
 
@@ -483,7 +483,7 @@ for the variables representing the different time taps to be in the same order
 as the one in which these taps are given. Also, not only taps should respect
 an order, but also variables, since this is how scan figures out what should
 be represented by what. Given that we have all
-the Aesara variables needed we construct our RNN as follows :
+the Pytensor variables needed we construct our RNN as follows :
 
 .. testcode:: scan3
 
@@ -500,7 +500,7 @@ the Aesara variables needed we construct our RNN as follows :
                    # y[-1]
 
 
-   ([x_vals, y_vals], updates) = aesara.scan(fn=oneStep,
+   ([x_vals, y_vals], updates) = pytensor.scan(fn=oneStep,
                                              sequences=dict(input=u, taps=[-4,-0]),
                                              outputs_info=[dict(initial=x0, taps=[-3,-1]), y0],
                                              non_sequences=[W, W_in_1, W_in_2, W_feedback, W_out],
@@ -534,15 +534,15 @@ value ``max_value``.
 .. testcode::
 
     def power_of_2(previous_power, max_value):
-        return previous_power*2, aesara.scan.utils.until(previous_power*2 > max_value)
+        return previous_power*2, pytensor.scan.utils.until(previous_power*2 > max_value)
 
     max_value = at.scalar()
-    values, _ = aesara.scan(power_of_2,
+    values, _ = pytensor.scan(power_of_2,
                             outputs_info = at.constant(1.),
                             non_sequences = max_value,
                             n_steps = 1024)
 
-    f = aesara.function([max_value], values)
+    f = pytensor.function([max_value], values)
 
     print(f(45))
 
@@ -552,7 +552,7 @@ value ``max_value``.
 
 As you can see, in order to terminate on condition, the only thing required
 is that the inner function ``power_of_2`` to return also the condition
-wrapped in the class ``aesara.scan.utils.until``. The condition has to be
+wrapped in the class ``pytensor.scan.utils.until``. The condition has to be
 expressed in terms of the arguments of the inner function (in this case
 ``previous_power`` and ``max_value``).
 
@@ -582,7 +582,7 @@ Before going more into the details, here are its current limitations:
   other words, ``taps`` can not be used in ``sequences`` and ``outputs_info``.
 
 Often, in order to be able to compute the gradients through scan operations,
-Aesara needs to keep in memory some intermediate computations of scan. This
+Pytensor needs to keep in memory some intermediate computations of scan. This
 can sometimes use a prohibitively large amount of memory.
 ``scan_checkpoints`` allows to discard some of those intermediate steps and
 recompute them again when computing the gradients. Its ``save_every_N`` argument
@@ -597,7 +597,7 @@ is similar to the classic ``scan`` function.
 Improving Scan's performance
 ----------------------------
 
-This section covers some ways to improve performance of an Aesara function
+This section covers some ways to improve performance of an Pytensor function
 using Scan.
 
 
@@ -633,9 +633,9 @@ improve performance at the cost of increased memory usage. By default, Scan
 reuses memory between iterations of the same execution but frees the memory
 after the last iteration.
 
-There are two ways to achieve this, using the Aesara flag
+There are two ways to achieve this, using the Pytensor flag
 ``config.scan__allow_gc`` and setting it to False, or using the argument
-``allow_gc`` of the function aesara.scan() and set it to False (when a value
+``allow_gc`` of the function pytensor.scan() and set it to False (when a value
 is not provided for this argument, the value of the flag
 ``config.scan__allow_gc`` is used).
 
@@ -643,19 +643,19 @@ is not provided for this argument, the value of the flag
 Graph Rewrites
 ^^^^^^^^^^^^^^
 
-This one is simple but still worth pointing out. Aesara is able to
+This one is simple but still worth pointing out. Pytensor is able to
 automatically recognize and rewrite many computation patterns. However, there
-are patterns that Aesara doesn't rewrite because doing so would change the
+are patterns that Pytensor doesn't rewrite because doing so would change the
 user interface (such as merging shared variables together into a single one,
-for instance). Additionally, Aesara doesn't catch every case that it could
+for instance). Additionally, Pytensor doesn't catch every case that it could
 rewrite and so it remains useful for performance that the user defines an
 efficient graph in the first place. This is also the case, and sometimes even
 more so, for the graph inside of Scan. This is because it will be executed
-many times for every execution of the Aesara function that contains it.
+many times for every execution of the Pytensor function that contains it.
 
 The `LSTM tutorial <http://deeplearning.net/tutorial/lstm.html>`_ on
 `DeepLearning.net <http://deeplearning.net>`_ provides an example of a
-rewrite that Aesara cannot perform. Instead of performing many matrix
+rewrite that Pytensor cannot perform. Instead of performing many matrix
 multiplications between matrix :math:`x_t` and each of the shared matrices
 :math:`W_i`, :math:`W_c`, :math:`W_f` and :math:`W_o`, the matrices
 :math:`W_*`, are merged into a single shared matrix :math:`W` and the graph
@@ -670,12 +670,12 @@ higher memory usage.
 reference
 =========
 
-.. automodule:: aesara.scan
+.. automodule:: pytensor.scan
 
-.. autofunction:: aesara.map
-.. autofunction:: aesara.reduce
-.. autofunction:: aesara.foldl
-.. autofunction:: aesara.foldr
-.. autofunction:: aesara.scan
+.. autofunction:: pytensor.map
+.. autofunction:: pytensor.reduce
+.. autofunction:: pytensor.foldl
+.. autofunction:: pytensor.foldr
+.. autofunction:: pytensor.scan
    :noindex:
-.. autofunction:: aesara.scan.scan_checkpoints
+.. autofunction:: pytensor.scan.scan_checkpoints

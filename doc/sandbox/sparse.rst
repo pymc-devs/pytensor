@@ -119,7 +119,7 @@ Misc
 ----
 The sparse equivalent of `dmatrix` is `csc_matrix` and `csr_matrix`.
 
-:class:`~aesara.sparse.basic.Dot` vs. :class:`~aesara.sparse.basic.StructuredDot`
+:class:`~pytensor.sparse.basic.Dot` vs. :class:`~pytensor.sparse.basic.StructuredDot`
 ---------------------------------------------------------------------------------
 
 Often when you use a sparse matrix it is because there is a meaning to the

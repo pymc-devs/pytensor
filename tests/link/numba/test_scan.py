@@ -1,14 +1,14 @@
 import numpy as np
 import pytest
 
-import aesara.tensor as at
-from aesara import config, function, grad
-from aesara.compile.mode import Mode, get_mode
-from aesara.graph.fg import FunctionGraph
-from aesara.scan.basic import scan
-from aesara.scan.op import Scan
-from aesara.scan.utils import until
-from aesara.tensor.random.utils import RandomStream
+import pytensor.tensor as at
+from pytensor import config, function, grad
+from pytensor.compile.mode import Mode, get_mode
+from pytensor.graph.fg import FunctionGraph
+from pytensor.scan.basic import scan
+from pytensor.scan.op import Scan
+from pytensor.scan.utils import until
+from pytensor.tensor.random.utils import RandomStream
 from tests import unittest_tools as utt
 from tests.link.numba.test_basic import compare_numba_and_py
 

@@ -4,9 +4,9 @@ from itertools import count
 import numpy as np
 import pytest
 
-from aesara import config, function, shared
-from aesara import tensor as at
-from aesara.graph.basic import (
+from pytensor import config, function, shared
+from pytensor import tensor as at
+from pytensor.graph.basic import (
     Apply,
     NominalVariable,
     Variable,
@@ -27,10 +27,10 @@ from aesara.graph.basic import (
     vars_between,
     walk,
 )
-from aesara.graph.op import Op
-from aesara.graph.type import Type
-from aesara.tensor.math import max_and_argmax
-from aesara.tensor.type import (
+from pytensor.graph.op import Op
+from pytensor.graph.type import Type
+from pytensor.tensor.math import max_and_argmax
+from pytensor.tensor.type import (
     TensorType,
     dvector,
     fvector,
@@ -39,8 +39,8 @@ from aesara.tensor.type import (
     scalars,
     vector,
 )
-from aesara.tensor.type_other import NoneConst
-from aesara.tensor.var import TensorVariable
+from pytensor.tensor.type_other import NoneConst
+from pytensor.tensor.var import TensorVariable
 from tests import unittest_tools as utt
 from tests.graph.utils import MyInnerGraphOp
 

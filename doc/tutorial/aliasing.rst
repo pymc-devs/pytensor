@@ -5,11 +5,11 @@
 Understanding Memory Aliasing for Speed and Correctness
 =======================================================
 
-The aggressive reuse of memory is one of the ways through which Aesara makes code fast, and
+The aggressive reuse of memory is one of the ways through which Pytensor makes code fast, and
 it is important for the correctness and speed of your program that you understand
-how Aesara might alias buffers.
+how Pytensor might alias buffers.
 
-This section describes the principles based on which Aesara handles memory, and explains
+This section describes the principles based on which Pytensor handles memory, and explains
 when you might want to alter the default behaviour of some functions and
 methods for faster performance.
 
@@ -17,32 +17,32 @@ methods for faster performance.
 The Memory Model: Two Spaces
 ============================
 
-There are some simple principles that guide Aesara's handling of memory.  The
-main idea is that there is a pool of memory managed by Aesara, and Aesara tracks
+There are some simple principles that guide Pytensor's handling of memory.  The
+main idea is that there is a pool of memory managed by Pytensor, and Pytensor tracks
 changes to values in that pool.
 
-- Aesara manages its own memory space, which typically does not overlap with
-  the memory of normal Python variables that non-Aesara code creates.
+- Pytensor manages its own memory space, which typically does not overlap with
+  the memory of normal Python variables that non-Pytensor code creates.
 
-- Aesara functions only modify buffers that are in Aesara's memory space.
+- Pytensor functions only modify buffers that are in Pytensor's memory space.
 
-- Aesara's memory space includes the buffers allocated to store ``shared``
+- Pytensor's memory space includes the buffers allocated to store ``shared``
   variables and the temporaries used to evaluate functions.
 
-- Physically, Aesara's memory space may be spread across the host, a GPU
+- Physically, Pytensor's memory space may be spread across the host, a GPU
   device(s), and in the future may even include objects on a remote machine.
 
 - The memory allocated for a ``shared`` variable buffer is unique: it is never
   aliased to another ``shared`` variable.
 
-- Aesara's managed memory is constant while Aesara functions are not running
-  and Aesara's library code is not running.
+- Pytensor's managed memory is constant while Pytensor functions are not running
+  and Pytensor's library code is not running.
 
 - The default behaviour of a function is to return user-space values for
   outputs, and to expect user-space values for inputs.
 
-The distinction between Aesara-managed memory and user-managed memory can be
-broken down by some Aesara functions (e.g. ``shared``, ``get_value`` and the
+The distinction between Pytensor-managed memory and user-managed memory can be
+broken down by some Pytensor functions (e.g. ``shared``, ``get_value`` and the
 constructors for ``In`` and ``Out``) by using a ``borrow=True`` flag.
 This can make those methods faster (by avoiding copy operations) at the expense
 of risking subtle bugs in the overall program (by aliasing memory).
@@ -57,12 +57,12 @@ A ``borrow`` argument can be provided to the shared-variable constructor.
 
 .. testcode:: borrow
 
-   import numpy, aesara
+   import numpy, pytensor
    np_array = numpy.ones(2, dtype='float32')
 
-   s_default = aesara.shared(np_array)
-   s_false   = aesara.shared(np_array, borrow=False)
-   s_true    = aesara.shared(np_array, borrow=True)
+   s_default = pytensor.shared(np_array)
+   s_false   = pytensor.shared(np_array, borrow=False)
+   s_true    = pytensor.shared(np_array, borrow=True)
 
 By default (``s_default``) and when explicitly setting ``borrow=False``, the
 shared variable we construct gets a (deep) copy of ``np_array``.  So changes we
@@ -91,9 +91,9 @@ object as it's internal buffer.
 
 However, this aliasing of ``np_array`` and ``s_true`` is not guaranteed to occur,
 and may occur only temporarily even if it occurs at all.
-It is not guaranteed to occur because if Aesara is using a GPU device, then the
+It is not guaranteed to occur because if Pytensor is using a GPU device, then the
 ``borrow`` flag has no effect. It may occur only temporarily because
-if we call an Aesara function that updates the value of ``s_true`` the aliasing
+if we call an Pytensor function that updates the value of ``s_true`` the aliasing
 relationship may or may not be broken (the function is allowed to
 update the ``shared`` variable by modifying its buffer, which will preserve
 the aliasing, or by changing which buffer the variable points to, which
@@ -122,25 +122,25 @@ retrieved.
 
 .. testcode:: borrow
 
-   s = aesara.shared(np_array)
+   s = pytensor.shared(np_array)
 
    v_false = s.get_value(borrow=False) # N.B. borrow default is False
    v_true = s.get_value(borrow=True)
 
 
 When ``borrow=False`` is passed to ``get_value``, it means that the return value
-may not be aliased to any part of Aesara's internal memory.
+may not be aliased to any part of Pytensor's internal memory.
 When ``borrow=True`` is passed to ``get_value``, it means that the return value
-might be aliased to some of Aesara's internal memory.
+might be aliased to some of Pytensor's internal memory.
 But both of these calls might create copies of the internal memory.
 
 The reason that ``borrow=True`` might still make a copy is that the internal
 representation of a ``shared`` variable might not be what you expect.  When you
 create a ``shared`` variable by passing a NumPy array for example, then ``get_value()``
-must return a NumPy array too.  That's how Aesara can make the GPU use
+must return a NumPy array too.  That's how Pytensor can make the GPU use
 transparent.  But when you are using a GPU (or in the future perhaps a remote machine),
 then the numpy.ndarray is not the internal representation of your data.
-If you really want Aesara to return its internal representation and never copy it
+If you really want Pytensor to return its internal representation and never copy it
 then you should use the ``return_internal_type=True`` argument to
 ``get_value``.  It will never cast the internal object (always return in
 constant time), but might return various datatypes depending on contextual
@@ -173,7 +173,7 @@ Assigning
 ``Shared`` variables also have a ``set_value`` method that can accept an optional
 ``borrow=True`` argument. The semantics are similar to those of creating a new
 ``shared`` variable - ``borrow=False`` is the default and ``borrow=True`` means
-that Aesara may reuse the buffer you provide as the internal storage for the variable.
+that Pytensor may reuse the buffer you provide as the internal storage for the variable.
 
 A standard pattern for manually updating the value of a ``shared`` variable is as
 follows:
@@ -190,7 +190,7 @@ follows:
         borrow=True)
 
 This pattern works regardless of the computing device, and when the latter
-makes it possible to expose Aesara's internal variables without a copy, then it
+makes it possible to expose Pytensor's internal variables without a copy, then it
 proceeds as fast as an in-place update.
 
 
@@ -198,22 +198,22 @@ proceeds as fast as an in-place update.
    When ``shared`` variables are allocated on the GPU, the transfers to and from the GPU device memory can
    be costly.  Here are a few tips to ensure fast and efficient use of GPU memory and bandwidth:
 
-   * Prior to Aesara 0.3.1, ``set_value`` did not work in-place on the GPU. This meant that, sometimes,
+   * Prior to Pytensor 0.3.1, ``set_value`` did not work in-place on the GPU. This meant that, sometimes,
      GPU memory for the new value would be allocated before the old memory was released. If you're
      running near the limits of GPU memory, this could cause you to run out of GPU memory
      unnecessarily.
 
-     *Solution*: update to a newer version of Aesara.
+     *Solution*: update to a newer version of Pytensor.
 
    * If you are going to swap several chunks of data in and out of a ``shared`` variable repeatedly,
      you will want to reuse the memory that you allocated the first time if possible - it is both
      faster and more memory efficient.
 
-     *Solution*: upgrade to a recent version of Aesara (>0.3.0) and consider padding your source
+     *Solution*: upgrade to a recent version of Pytensor (>0.3.0) and consider padding your source
      data to make sure that every chunk is the same size.
 
    * It is also worth mentioning that, current GPU copying routines
-     support only contiguous memory.  So Aesara must make the value you
+     support only contiguous memory.  So Pytensor must make the value you
      provide *C-contiguous* prior to copying it.  This can require an
      extra copy of the data on the host.
 
@@ -227,32 +227,32 @@ Borrowing when Constructing Function Objects
 ============================================
 
 A ``borrow`` argument can also be provided to the ``In`` and ``Out`` objects
-that control how ``aesara.function`` handles its argument[s] and return value[s].
+that control how ``pytensor.function`` handles its argument[s] and return value[s].
 
 .. testcode::
 
-    import aesara
-    import aesara.tensor as at
-    from aesara.compile.io import In, Out
+    import pytensor
+    import pytensor.tensor as at
+    from pytensor.compile.io import In, Out
 
     x = at.matrix()
     y = 2 * x
-    f = aesara.function([In(x, borrow=True)], Out(y, borrow=True))
+    f = pytensor.function([In(x, borrow=True)], Out(y, borrow=True))
 
-Borrowing an input means that Aesara will treat the argument you provide as if
-it were part of Aesara's pool of temporaries.  Consequently, your input
+Borrowing an input means that Pytensor will treat the argument you provide as if
+it were part of Pytensor's pool of temporaries.  Consequently, your input
 may be reused as a buffer (and overwritten!) during the computation of other variables in the
 course of evaluating that function (e.g. ``f``).
 
 
-Borrowing an output means that Aesara will not insist on allocating a fresh
+Borrowing an output means that Pytensor will not insist on allocating a fresh
 output buffer every time you call the function.  It will possibly reuse the same one as
 on a previous call, and overwrite the old content.  Consequently, it may overwrite
 old return values through side-effect.
 Those return values may also be overwritten in
 the course of evaluating another compiled function (for example, the output
 may be aliased to a ``shared`` variable).  So be careful to use a borrowed return
-value right away before calling any more Aesara functions.
+value right away before calling any more Pytensor functions.
 The default is of course to not borrow internal results.
 
 It is also possible to pass a ``return_internal_type=True`` flag to the ``Out``
@@ -266,7 +266,7 @@ graph.
 Take home message:
 
 When an input ``x`` to a function is not needed after the function
-returns and you would like to make it available to Aesara as
+returns and you would like to make it available to Pytensor as
 additional workspace, then consider marking it with ``In(x, borrow=True)``.  It
 may make the function faster and reduce its memory requirement.  When a return
 value ``y`` is large (in terms of memory footprint), and you only need to read

@@ -5,9 +5,9 @@
 Graph Structures
 ================
 
-Aesara works by modeling mathematical operations and their outputs using
+Pytensor works by modeling mathematical operations and their outputs using
 symbolic placeholders, or :term:`variables <variable>`, which inherit from the class
-:class:`Variable`.  When writing expressions in Aesara one uses operations like
+:class:`Variable`.  When writing expressions in Pytensor one uses operations like
 ``+``, ``-``, ``**``, ``sum()``, ``tanh()``. These are represented
 internally as :term:`Op`\s.  An :class:`Op` represents a computation that is
 performed on a set of symbolic inputs and produces a set of symbolic outputs.
@@ -15,7 +15,7 @@ These symbolic input and output :class:`Variable`\s carry information about
 their types, like their data type (e.g. float, int), the number of dimensions,
 etc.
 
-Aesara graphs are composed of interconnected :term:`Apply`, :term:`Variable` and
+Pytensor graphs are composed of interconnected :term:`Apply`, :term:`Variable` and
 :class:`Op` nodes. An :class:`Apply` node represents the application of an
 :class:`Op` to specific :class:`Variable`\s. It is important to draw the
 difference between the definition of a computation represented by an :class:`Op`
@@ -28,7 +28,7 @@ The following illustrates these elements:
 
 .. testcode::
 
-   import aesara.tensor as at
+   import pytensor.tensor as at
 
    x = at.dmatrix('x')
    y = at.dmatrix('y')
@@ -69,11 +69,11 @@ The graph can be traversed starting from outputs (the result of some
 computation) down to its inputs using the owner field.
 Take for example the following code:
 
->>> import aesara
->>> x = aesara.tensor.dmatrix('x')
+>>> import pytensor
+>>> x = pytensor.tensor.dmatrix('x')
 >>> y = x * 2.
 
-If you enter ``type(y.owner)`` you get ``<class 'aesara.graph.basic.Apply'>``,
+If you enter ``type(y.owner)`` you get ``<class 'pytensor.graph.basic.Apply'>``,
 which is the :class:`Apply` node that connects the :class:`Op` and the inputs to get this
 output. You can now print the name of the :class:`Op` that is applied to get
 ``y``:
@@ -96,18 +96,18 @@ because ``2`` was first :term:`broadcasted <broadcasting>` to a matrix of
 same shape as ``x``. This is done by using the :class:`Op`\ :class:`DimShuffle`:
 
 >>> type(y.owner.inputs[1])
-<class 'aesara.tensor.var.TensorVariable'>
+<class 'pytensor.tensor.var.TensorVariable'>
 >>> type(y.owner.inputs[1].owner)
-<class 'aesara.graph.basic.Apply'>
+<class 'pytensor.graph.basic.Apply'>
 >>> y.owner.inputs[1].owner.op # doctest: +SKIP
-<aesara.tensor.elemwise.DimShuffle object at 0x106fcaf10>
+<pytensor.tensor.elemwise.DimShuffle object at 0x106fcaf10>
 >>> y.owner.inputs[1].owner.inputs
 [TensorConstant{2.0}]
 
-All of the above can be succinctly summarized with the :func:`aesara.dprint`
+All of the above can be succinctly summarized with the :func:`pytensor.dprint`
 function:
 
->>> aesara.dprint(y)
+>>> pytensor.dprint(y)
 Elemwise{mul,no_inplace} [id A] ''
  |x [id B]
  |InplaceDimShuffle{x,x} [id C] ''
@@ -122,7 +122,7 @@ Graph Structures
 ================
 
 The following section outlines each type of structure that may be used
-in an Aesara-built computation graph.
+in an Pytensor-built computation graph.
 
 
 .. index::
@@ -135,7 +135,7 @@ in an Aesara-built computation graph.
 --------------
 
 An :class:`Apply` node is a type of internal node used to represent a
-:term:`computation graph <graph>` in Aesara. Unlike
+:term:`computation graph <graph>` in Pytensor. Unlike
 :class:`Variable`, :class:`Apply` nodes are usually not
 manipulated directly by the end user. They may be accessed via
 the :attr:`Variable.owner` field.
@@ -149,8 +149,8 @@ inputs. Therefore, an :class:`Apply` node may be obtained from an :class:`Op`
 and a list of inputs by calling ``Op.make_node(*inputs)``.
 
 Comparing with the Python language, an :class:`Apply` node is
-Aesara's version of a function call whereas an :class:`Op` is
-Aesara's version of a function definition.
+Pytensor's version of a function call whereas an :class:`Op` is
+Pytensor's version of a function definition.
 
 An :class:`Apply` instance has three important fields:
 
@@ -180,7 +180,7 @@ An :class:`Apply` instance can be created by calling ``graph.basic.Apply(op, inp
 :class:`Op`
 -----------
 
-An :class:`Op` in Aesara defines a certain computation on some types of
+An :class:`Op` in Pytensor defines a certain computation on some types of
 inputs, producing some types of outputs. It is equivalent to a
 function definition in most programming languages. From a list of
 input :ref:`Variables <variable>` and an :class:`Op`, you can build an :ref:`apply`
@@ -188,7 +188,7 @@ node representing the application of the :class:`Op` to the inputs.
 
 It is important to understand the distinction between an :class:`Op` (the
 definition of a function) and an :class:`Apply` node (the application of a
-function). If you were to interpret the Python language using Aesara's
+function). If you were to interpret the Python language using Pytensor's
 structures, code going like ``def f(x): ...`` would produce an :class:`Op` for
 ``f`` whereas code like ``a = f(x)`` or ``g(f(4), 5)`` would produce an
 :class:`Apply` node involving the ``f`` :class:`Op`.
@@ -203,19 +203,19 @@ structures, code going like ``def f(x): ...`` would produce an :class:`Op` for
 :class:`Type`
 -------------
 
-A :class:`Type` in Aesara provides static information (or constraints) about
+A :class:`Type` in Pytensor provides static information (or constraints) about
 data objects in a graph. The information provided by :class:`Type`\s allows
-Aesara to perform rewrites and produce more efficient compiled code.
+Pytensor to perform rewrites and produce more efficient compiled code.
 
-Every symbolic :class:`Variable` in an Aesara graph has an associated
+Every symbolic :class:`Variable` in an Pytensor graph has an associated
 :class:`Type` instance, and :class:`Type`\s also serve as a means of
 constructing :class:`Variable` instances.  In other words, :class:`Type`\s and
 :class:`Variable`\s go hand-in-hand.
 
-For example, :ref:`aesara.tensor.irow <libdoc_tensor_creation>` is an instance of a
+For example, :ref:`pytensor.tensor.irow <libdoc_tensor_creation>` is an instance of a
 :class:`Type` and it can be used to construct variables as follows:
 
->>> from aesara.tensor import irow
+>>> from pytensor.tensor import irow
 >>> irow()
 <TensorType(int32, (1, ?))>
 
@@ -229,13 +229,13 @@ the :class:`Variable`\s it constructs:
 #. They represent arrays with shapes of :math:`1 \times N`, or, in code, ``(1,
    None)``, where ``None`` represents any shape value.
 
-Note that Aesara :class:`Type`\s are not necessarily equivalent to Python types or
-classes. Aesara's :class:`TensorType`'s, like `irow`, use :class:`numpy.ndarray`
+Note that Pytensor :class:`Type`\s are not necessarily equivalent to Python types or
+classes. Pytensor's :class:`TensorType`'s, like `irow`, use :class:`numpy.ndarray`
 as the underlying Python type for performing computations and storing data, but
 :class:`numpy.ndarray`\s model a much wider class of arrays than most :class:`TensorType`\s.
-In other words, Aesara :class:`Type`'s try to be more specific.
+In other words, Pytensor :class:`Type`'s try to be more specific.
 
-For more information see :ref:`aesara_type`.
+For more information see :ref:`pytensor_type`.
 
 .. index::
    single: Variable
@@ -247,16 +247,16 @@ For more information see :ref:`aesara_type`.
 -----------------
 
 A :class:`Variable` is the main data structure you work with when using
-Aesara. The symbolic inputs that you operate on are :class:`Variable`\s and what
+Pytensor. The symbolic inputs that you operate on are :class:`Variable`\s and what
 you get from applying various :class:`Op`\s to these inputs are also
 :class:`Variable`\s. For example, when one inputs
 
->>> import aesara
->>> x = aesara.tensor.ivector()
+>>> import pytensor
+>>> x = pytensor.tensor.ivector()
 >>> y = -x
 
 ``x`` and ``y`` are both :class:`Variable`\s. The :class:`Type` of both ``x`` and
-``y`` is `aesara.tensor.ivector`.
+``y`` is `pytensor.tensor.ivector`.
 
 Unlike ``x``, ``y`` is a :class:`Variable` produced by a computation (in this
 case, it is the negation of ``x``). ``y`` is the :class:`Variable` corresponding to
@@ -265,7 +265,7 @@ corresponding to its input. The computation itself is represented by
 another type of node, an :class:`Apply` node, and may be accessed
 through ``y.owner``.
 
-More specifically, a :class:`Variable` is a basic structure in Aesara that
+More specifically, a :class:`Variable` is a basic structure in Pytensor that
 represents a datum at a certain point in computation. It is typically
 an instance of the class :class:`Variable` or
 one of its subclasses.
@@ -313,7 +313,7 @@ Automatic Differentiation
 =========================
 
 Having the graph structure, computing automatic differentiation is
-simple. The only thing :func:`aesara.grad` has to do is to traverse the
+simple. The only thing :func:`pytensor.grad` has to do is to traverse the
 graph from the outputs back towards the inputs through all :class:`Apply`
 nodes. For each such :class:`Apply` node, its :class:`Op` defines
 how to compute the gradient of the node's outputs with respect to its
@@ -330,16 +330,16 @@ A following section of this tutorial will examine the topic of
 Rewrites
 ========
 
-When compiling an Aesara graph using :func:`aesara.function`, a graph is
+When compiling an Pytensor graph using :func:`pytensor.function`, a graph is
 necessarily provided.  While this graph structure shows how to compute the
 output from the input, it also offers the possibility to improve the way this
-computation is carried out. The way rewrites work in Aesara is by
+computation is carried out. The way rewrites work in Pytensor is by
 identifying and replacing certain patterns in the graph with other specialized
 patterns that produce the same results but are either faster or more
 stable. Rewrites can also detect identical subgraphs and ensure that the
 same values are not computed twice.
 
-For example, one simple rewrite that Aesara uses is to replace
+For example, one simple rewrite that Pytensor uses is to replace
 the pattern :math:`\frac{xy}{y}` by :math:`x`.
 
 See :ref:`graph_rewriting` and :ref:`optimizations` for more information.
@@ -348,18 +348,18 @@ See :ref:`graph_rewriting` and :ref:`optimizations` for more information.
 
 Consider the following example of rewrites:
 
->>> import aesara
->>> a = aesara.tensor.vector("a")      # declare symbolic variable
+>>> import pytensor
+>>> a = pytensor.tensor.vector("a")      # declare symbolic variable
 >>> b = a + a ** 10                    # build symbolic expression
->>> f = aesara.function([a], b)        # compile function
+>>> f = pytensor.function([a], b)        # compile function
 >>> print(f([0, 1, 2]))                # prints `array([0,2,1026])`
 [    0.     2.  1026.]
->>> aesara.printing.pydotprint(b, outfile="./pics/symbolic_graph_no_rewrite.png", var_with_name_simple=True)  # doctest: +SKIP
+>>> pytensor.printing.pydotprint(b, outfile="./pics/symbolic_graph_no_rewrite.png", var_with_name_simple=True)  # doctest: +SKIP
 The output file is available at ./pics/symbolic_graph_no_rewrite.png
->>> aesara.printing.pydotprint(f, outfile="./pics/symbolic_graph_rewite.png", var_with_name_simple=True)  # doctest: +SKIP
+>>> pytensor.printing.pydotprint(f, outfile="./pics/symbolic_graph_rewite.png", var_with_name_simple=True)  # doctest: +SKIP
 The output file is available at ./pics/symbolic_graph_rewrite.png
 
-We used :func:`aesara.printing.pydotprint` to visualize the rewritten graph
+We used :func:`pytensor.printing.pydotprint` to visualize the rewritten graph
 (right), which is much more compact than the un-rewritten graph (left).
 
 .. |g1| image:: ./pics/symbolic_graph_unopt.png

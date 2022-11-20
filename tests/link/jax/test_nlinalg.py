@@ -2,19 +2,19 @@ import numpy as np
 import pytest
 from packaging.version import parse as version_parse
 
-from aesara.compile.function import function
-from aesara.compile.mode import Mode
-from aesara.configdefaults import config
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import get_test_value
-from aesara.graph.rewriting.db import RewriteDatabaseQuery
-from aesara.link.jax import JAXLinker
-from aesara.tensor import blas as at_blas
-from aesara.tensor import nlinalg as at_nlinalg
-from aesara.tensor.math import MaxAndArgmax
-from aesara.tensor.math import max as at_max
-from aesara.tensor.math import maximum
-from aesara.tensor.type import dvector, matrix, scalar, tensor3, vector
+from pytensor.compile.function import function
+from pytensor.compile.mode import Mode
+from pytensor.configdefaults import config
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import get_test_value
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.link.jax import JAXLinker
+from pytensor.tensor import blas as at_blas
+from pytensor.tensor import nlinalg as at_nlinalg
+from pytensor.tensor.math import MaxAndArgmax
+from pytensor.tensor.math import max as at_max
+from pytensor.tensor.math import maximum
+from pytensor.tensor.type import dvector, matrix, scalar, tensor3, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
@@ -39,9 +39,9 @@ def test_jax_BatchedDot():
     inputs = [get_test_value(a)[:-1], get_test_value(b)]
     opts = RewriteDatabaseQuery(include=[None], exclude=["cxx_only", "BlasOpt"])
     jax_mode = Mode(JAXLinker(), opts)
-    aesara_jax_fn = function(fgraph.inputs, fgraph.outputs, mode=jax_mode)
+    pytensor_jax_fn = function(fgraph.inputs, fgraph.outputs, mode=jax_mode)
     with pytest.raises(TypeError):
-        aesara_jax_fn(*inputs)
+        pytensor_jax_fn(*inputs)
 
     # matrix . matrix
     a = matrix("a")

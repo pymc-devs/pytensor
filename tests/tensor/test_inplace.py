@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-from aesara import config
-from aesara.misc.safe_asarray import _asarray
-from aesara.scalar.basic import round_half_away_from_zero_vec, upcast
-from aesara.tensor.inplace import (
+from pytensor import config
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.scalar.basic import round_half_away_from_zero_vec, upcast
+from pytensor.tensor.inplace import (
     abs_inplace,
     add_inplace,
     arccos_inplace,
@@ -50,7 +50,7 @@ from aesara.tensor.inplace import (
     trunc_inplace,
     xor_inplace,
 )
-from aesara.tensor.type import vector
+from pytensor.tensor.type import vector
 from tests import unittest_tools as utt
 from tests.tensor.utils import (
     _bad_build_broadcast_binary_normal,

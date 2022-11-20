@@ -1,10 +1,10 @@
 import numpy as np
 
-import aesara.tensor as at
-from aesara import shared
-from aesara.compile.builders import OpFromGraph
-from aesara.tensor.special import softmax
-from aesara.tensor.type import dmatrix, scalars
+import pytensor.tensor as at
+from pytensor import shared
+from pytensor.compile.builders import OpFromGraph
+from pytensor.tensor.special import softmax
+from pytensor.tensor.type import dmatrix, scalars
 
 
 class Mlp:

@@ -2,25 +2,25 @@
 .. _usingfunction:
 
 ===========================================
-:mod:`function` - defines aesara.function
+:mod:`function` - defines pytensor.function
 ===========================================
 
-.. module:: aesara.compile.function
+.. module:: pytensor.compile.function
    :platform: Unix, Windows
-   :synopsis: defines aesara.function and related classes
+   :synopsis: defines pytensor.function and related classes
 .. moduleauthor:: LISA
 
 Guide
 =====
 
-This module provides :func:`function`, commonly accessed as `aesara.function`,
+This module provides :func:`function`, commonly accessed as `pytensor.function`,
 the interface for compiling graphs into callable objects.
 
 You've already seen example usage in the basic tutorial... something like this:
 
->>> import aesara
->>> x = aesara.tensor.dscalar()
->>> f = aesara.function([x], 2*x)
+>>> import pytensor
+>>> x = pytensor.tensor.dscalar()
+>>> f = pytensor.function([x], 2*x)
 >>> f(4)
 array(8.0)
 
@@ -106,7 +106,7 @@ Reference
 
 .. function:: function(inputs, outputs, mode=None, updates=None, givens=None, no_default_updates=False, accept_inplace=False, name=None, rebuild_strict=True, allow_input_downcast=None, profile=None, on_unused_input='raise')
 
-    Return a :class:`callable object <aesara.compile.function.types.Function>` that will calculate `outputs` from `inputs`.
+    Return a :class:`callable object <pytensor.compile.function.types.Function>` that will calculate `outputs` from `inputs`.
 
     :type params: list of either Variable or In instances, but not shared
         variables.
@@ -174,7 +174,7 @@ Reference
         list is not used in the graph. Possible values are 'raise',
         'warn', and 'ignore'.
 
-    :rtype: :class:`Function <aesara.compile.function.types.Function>`
+    :rtype: :class:`Function <pytensor.compile.function.types.Function>`
             instance
 
     :returns: a callable object that will compute the outputs (given the inputs)
@@ -188,7 +188,7 @@ Reference
     about how output variables should be returned.
 
     The default is typically 'FAST_RUN' but this can be changed in
-    :doc:`aesara.config <../config>`.  The mode
+    :doc:`pytensor.config <../config>`.  The mode
     argument controls the sort of rewrites that will be applied to the
     graph, and the way the rewritten graph will be evaluated.
 
@@ -212,7 +212,7 @@ Reference
     occur during normal rewriting, in that ``Var2`` is not expected to be
     equivalent to ``Var1``.
 
-.. autofunction:: aesara.compile.function.function_dump
+.. autofunction:: pytensor.compile.function.function_dump
 
-.. autoclass:: aesara.compile.function.types.Function
+.. autoclass:: pytensor.compile.function.types.Function
    :members: free, copy, __call__

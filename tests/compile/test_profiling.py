@@ -5,16 +5,16 @@ from io import StringIO
 
 import numpy as np
 
-import aesara.tensor as at
-from aesara.compile import ProfileStats
-from aesara.compile.function import function
-from aesara.configdefaults import config
-from aesara.ifelse import ifelse
-from aesara.tensor.type import fvector, scalars
+import pytensor.tensor as at
+from pytensor.compile import ProfileStats
+from pytensor.compile.function import function
+from pytensor.configdefaults import config
+from pytensor.ifelse import ifelse
+from pytensor.tensor.type import fvector, scalars
 
 
 class TestProfiling:
-    # Test of Aesara profiling with min_peak_memory=True
+    # Test of Pytensor profiling with min_peak_memory=True
 
     def test_profiling(self):
 

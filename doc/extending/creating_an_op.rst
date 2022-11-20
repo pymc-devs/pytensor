@@ -8,7 +8,7 @@ So suppose you have looked through the library documentation and you don't see
 a function that does what you want.
 
 If you can implement something in terms of an existing :ref:`Op`, you should do that.
-Odds are your function that uses existing Aesara expressions is short,
+Odds are your function that uses existing Pytensor expressions is short,
 has no bugs, and potentially profits from rewrites that have already been
 implemented.
 
@@ -28,7 +28,7 @@ As an illustration, this tutorial will demonstrate how a simple Python-based
     :ref:`views_and_inplace` for an explanation on how to do this.
 
     If your :class:`Op` returns a view or changes the value of its inputs
-    without doing as prescribed in that page, Aesara will run, but will
+    without doing as prescribed in that page, Pytensor will run, but will
     return correct results for some graphs and wrong results for others.
 
     It is recommended that you run your tests in :class:`DebugMode`, since it
@@ -36,17 +36,17 @@ As an illustration, this tutorial will demonstrate how a simple Python-based
     regard.
 
 
-Aesara Graphs refresher
------------------------
+Pytensor Graphs refresher
+-------------------------
 
 .. image:: apply.png
     :width: 500 px
 
-Aesara represents symbolic mathematical computations as graphs. Those graphs
+Pytensor represents symbolic mathematical computations as graphs. Those graphs
 are bi-partite graphs (graphs with two types of nodes), they are composed of
 interconnected :ref:`apply` and :ref:`variable` nodes.
 :class:`Variable` nodes represent data in the graph, either inputs, outputs or
-intermediary values. As such, inputs and outputs of a graph are lists of Aesara
+intermediary values. As such, inputs and outputs of a graph are lists of Pytensor
 :class:`Variable` nodes. :class:`Apply` nodes perform computation on these
 variables to produce new variables. Each :class:`Apply` node has a link to an
 instance of :class:`Op` which describes the computation to perform. This tutorial
@@ -66,8 +66,8 @@ possibilities you may encounter or need.  For that refer to
 
 .. testcode:: python
 
-    import aesara
-    from aesara.graph.op import Op
+    import pytensor
+    from pytensor.graph.op import Op
 
 
     class MyOp(Op):
@@ -89,7 +89,7 @@ possibilities you may encounter or need.  For that refer to
             pass
 
         # Other type of implementation
-        # C implementation: [see aesara web site for other functions]
+        # C implementation: [see pytensor web site for other functions]
         def c_code(self, node, inputs, outputs, sub):
             pass
 
@@ -125,7 +125,7 @@ or :meth:`Op.make_thunk`.
       with the current :class:`Op`. If the :class:`Op` cannot be applied on the provided
       input types, it must raises an exception (such as :class:`TypeError`).
     - it operates on the :class:`Variable`\s found in
-      ``*inputs`` in Aesara's symbolic language to infer the type of
+      ``*inputs`` in Pytensor's symbolic language to infer the type of
       the symbolic output :class:`Variable`\s. It creates output :class:`Variable`\s of a suitable
       symbolic :class:`Type` to serve as the outputs of this :class:`Op`'s
       application.
@@ -190,7 +190,7 @@ or :meth:`Op.make_thunk`.
   :meth:`Op.make_thunk` is useful if you want to generate code and compile
   it yourself.
 
-  If :meth:`Op.make_thunk` is defined by an :class:`Op`, it will be used by Aesara
+  If :meth:`Op.make_thunk` is defined by an :class:`Op`, it will be used by Pytensor
   to obtain the :class:`Op`'s implementation.
   :meth:`Op.perform` and :meth:`COp.c_code` will be ignored.
 
@@ -241,7 +241,7 @@ There are other methods that can be optionally defined by the :class:`Op`:
   whose expression includes your :class:`Op`. The gradient may be
   specified symbolically in this method. It takes two arguments ``inputs`` and
   ``output_gradients``, which are both lists of :class:`Variable`\s, and
-  those must be operated on using Aesara's symbolic language. The :meth:`Op.grad`
+  those must be operated on using Pytensor's symbolic language. The :meth:`Op.grad`
   method must return a list containing one :class:`Variable` for each
   input. Each returned :class:`Variable` represents the gradient with respect
   to that input computed based on the symbolic gradients with respect
@@ -253,7 +253,7 @@ There are other methods that can be optionally defined by the :class:`Op`:
   :class:`NullType` for that input. Please refer to :meth:`Op.grad` for a more detailed
   view.
 
-  The :meth:`Op.R_op` method is needed if you want :func:`aesara.gradient.Rop` to
+  The :meth:`Op.R_op` method is needed if you want :func:`pytensor.gradient.Rop` to
   work with your :class:`Op`.
   This function implements the application of the R-operator on the
   function represented by your :class:`Op`. Let assume that function is :math:`f`,
@@ -272,16 +272,16 @@ Example: :class:`Op` definition
 
 .. testcode:: example
 
-    import aesara
-    from aesara.graph.op import Op
-    from aesara.graph.basic import Apply
+    import pytensor
+    from pytensor.graph.op import Op
+    from pytensor.graph.basic import Apply
 
 
     class DoubleOp1(Op):
         __props__ = ()
 
         def make_node(self, x):
-            x = aesara.tensor.as_tensor_variable(x)
+            x = pytensor.tensor.as_tensor_variable(x)
             # Note: using x_.type() is dangerous, as it copies x's broadcasting
             # behaviour
             return Apply(self, [x], [x.type()])
@@ -314,8 +314,8 @@ Example: :class:`Op` definition
     class DoubleOp2(Op):
         __props__ = ()
 
-        itypes = [aesara.tensor.dmatrix]
-        otypes = [aesara.tensor.dmatrix]
+        itypes = [pytensor.tensor.dmatrix]
+        otypes = [pytensor.tensor.dmatrix]
 
         def perform(self, node, inputs, output_storage):
             x = inputs[0]
@@ -350,7 +350,7 @@ a ``.op`` attribute that refers to ``doubleOp1``.
 
 .. The first two methods in the :class:`Op` are relatively boilerplate: ``__eq__``
 .. and ``__hash__``.
-.. When two :class:`Op`\s are equal, Aesara will merge their outputs if they are applied to the same inputs.
+.. When two :class:`Op`\s are equal, Pytensor will merge their outputs if they are applied to the same inputs.
 .. The base class says two objects are equal if (and only if)
 .. they are the same object.
 .. Writing these boilerplate definitions ensures that the logic of the equality comparison is always explicit.
@@ -366,7 +366,7 @@ a ``.op`` attribute that refers to ``doubleOp1``.
 .. arguments to the constructor. If we had done that, and if that different
 .. configuration made ``fibby2`` compute different results from ``fibby`` (for the
 .. same inputs) then we would have to add logic to the ``__eq__`` and ``__hash__``
-.. function so that he two ``Fibby`` :class:`Op`\s would *not be equal*.  The reason why: Aesara's merge
+.. function so that he two ``Fibby`` :class:`Op`\s would *not be equal*.  The reason why: Pytensor's merge
 .. optimization looks for :class:`Op`\s comparing equal and merges them. If two :class:`Op`\s compare
 .. equal but don't always produce equal results from equal inputs, then you might
 .. see wrong calculation.
@@ -375,7 +375,7 @@ The ``make_node`` method creates a node to be included in the expression graph.
 It runs when we apply our :class:`Op` (``doubleOp1``) to the ``Variable`` (``x``), as
 in ``doubleOp1(tensor.vector())``.
 When an :class:`Op` has multiple inputs, their order in the inputs argument to ``Apply``
-is important:  Aesara will call ``make_node(*inputs)`` to copy the graph,
+is important:  Pytensor will call ``make_node(*inputs)`` to copy the graph,
 so it is important not to change the semantics of the expression by changing
 the argument order.
 
@@ -400,10 +400,10 @@ You can try the new :class:`Op` as follows:
 .. testcode:: example
 
     import numpy as np
-    import aesara
+    import pytensor
 
-    x = aesara.tensor.matrix()
-    f = aesara.function([x], DoubleOp1()(x))
+    x = pytensor.tensor.matrix()
+    f = pytensor.function([x], DoubleOp1()(x))
     inp = np.random.random_sample((5, 4))
     out = f(inp)
     assert np.allclose(inp * 2, out)
@@ -432,10 +432,10 @@ You can try the new :class:`Op` as follows:
 .. testcode:: example
 
     import numpy as np
-    import aesara
+    import pytensor
 
-    x = aesara.tensor.matrix()
-    f = aesara.function([x], DoubleOp2()(x))
+    x = pytensor.tensor.matrix()
+    f = pytensor.function([x], DoubleOp2()(x))
     inp = np.random.random_sample((5, 4))
     out = f(inp)
     assert np.allclose(inp * 2, out)
@@ -475,9 +475,9 @@ and ``b`` are equal.
 
 .. testcode:: properties
 
-    import aesara
-    from aesara.graph.op import Op
-    from aesara.graph.basic import Apply
+    import pytensor
+    from pytensor.graph.op import Op
+    from pytensor.graph.basic import Apply
 
 
     class AXPBOp(Op):
@@ -492,7 +492,7 @@ and ``b`` are equal.
             super().__init__()
 
         def make_node(self, x):
-            x = aesara.tensor.as_tensor_variable(x)
+            x = pytensor.tensor.as_tensor_variable(x)
             return Apply(self, [x], [x.type()])
 
         def perform(self, node, inputs, output_storage):
@@ -523,9 +523,9 @@ We can test this by running the following segment:
     assert mult4plus5op == another_mult4plus5op
     assert mult4plus5op != mult2plus3op
 
-    x = aesara.tensor.matrix()
-    f = aesara.function([x], mult4plus5op(x))
-    g = aesara.function([x], mult2plus3op(x))
+    x = pytensor.tensor.matrix()
+    f = pytensor.function([x], mult4plus5op(x))
+    g = pytensor.function([x], mult2plus3op(x))
 
     inp = np.random.random_sample((5, 4)).astype(np.float32)
     assert np.allclose(4 * inp + 5, f(inp))
@@ -535,7 +535,7 @@ We can test this by running the following segment:
 How To Test it
 --------------
 
-Aesara has some functionalities to simplify testing. These help test the
+Pytensor has some functionalities to simplify testing. These help test the
 :meth:`Op.infer_shape`, :meth:`Op.grad` and :meth:`Op.R_op` methods. Put the following code
 in a file and execute it with the ``pytest`` program.
 
@@ -550,7 +550,7 @@ exception. You can use the ``assert`` keyword to automatically raise an
 .. testcode:: tests
 
     import numpy as np
-    import aesara
+    import pytensor
     from tests import unittest_tools as utt
 
 
@@ -563,17 +563,17 @@ exception. You can use the ``assert`` keyword to automatically raise an
         def test_basic(self):
             rng = np.random.default_rng(utt.fetch_seed())
 
-            x = aesara.tensor.matrix()
-            f = aesara.function([x], self.op(x))
+            x = pytensor.tensor.matrix()
+            f = pytensor.function([x], self.op(x))
 
-            inp = np.asarray(rng.random((5, 4)), dtype=aesara.config.floatX)
+            inp = np.asarray(rng.random((5, 4)), dtype=pytensor.config.floatX)
             out = f(inp)
             # Compare the result computed to the expected value.
             utt.assert_allclose(inp * 2, out)
 
 We call ``utt.assert_allclose(expected_value, value)`` to compare
 NumPy ndarray.This raise an error message with more information. Also,
-the default tolerance can be changed with the Aesara flags
+the default tolerance can be changed with the Pytensor flags
 ``config.tensor__cmp_sloppy`` that take values in 0, 1 and 2. The
 default value do the most strict comparison, 1 and 2 make less strict
 comparison.
@@ -589,9 +589,9 @@ itself. Additionally, it checks that the rewritten graph computes
 the correct shape, by comparing it to the actual shape of the computed
 output.
 
-:meth:`InferShapeTester._compile_and_check` compiles an Aesara function. It takes as
-parameters the lists of input and output Aesara variables, as would be
-provided to :func:`aesara.function`, and a list of real values to pass to the
+:meth:`InferShapeTester._compile_and_check` compiles an Pytensor function. It takes as
+parameters the lists of input and output Pytensor variables, as would be
+provided to :func:`pytensor.function`, and a list of real values to pass to the
 compiled function. It also takes the :class:`Op` class as a parameter
 in order to verify that no instance of it appears in the shape-optimized graph.
 
@@ -611,7 +611,7 @@ your :class:`Op` works only with such matrices, you can disable the warning with
 
 .. testcode:: tests
 
-    from aesara.configdefaults import config
+    from pytensor.configdefaults import config
     from tests import unittest_tools as utt
 
 
@@ -621,10 +621,10 @@ your :class:`Op` works only with such matrices, you can disable the warning with
 
         def test_infer_shape(self):
             rng = np.random.default_rng(utt.fetch_seed())
-            x = aesara.tensor.matrix()
+            x = pytensor.tensor.matrix()
             self._compile_and_check(
-                [x],  # aesara.function inputs
-                [self.op(x)],  # aesara.function outputs
+                [x],  # pytensor.function inputs
+                [self.op(x)],  # pytensor.function outputs
                 # Always use not square matrix!
                 # inputs data
                 [np.asarray(rng.random((5, 4)), dtype=config.floatX)],
@@ -636,7 +636,7 @@ Testing the gradient
 ^^^^^^^^^^^^^^^^^^^^
 
 The function :ref:`verify_grad <validating_grad>`
-verifies the gradient of an :class:`Op` or Aesara graph. It compares the
+verifies the gradient of an :class:`Op` or Pytensor graph. It compares the
 analytic (symbolically computed) gradient and the numeric
 gradient (computed through the Finite Difference Method).
 
@@ -716,7 +716,7 @@ Modify and execute the example to return two outputs: ``x + y`` and `jx - yj`.
 You can omit the :meth:`Rop` functions. Try to implement the testing apparatus
 described above.
 
-(Notice that Aesara's current *elemwise fusion* rewrite is
+(Notice that Pytensor's current *elemwise fusion* rewrite is
 only applicable to computations involving a single output. Hence, to gain
 efficiency over the basic solution that is asked here, the two operations would
 have to be jointly rewritten explicitly in the code.)
@@ -734,14 +734,14 @@ already do this for you. If you implement your own :meth:`setUp` method,
 don't forget to call the parent :meth:`setUp` method.
 
 
-:download:`Solution<extending_aesara_solution_1.py>`
+:download:`Solution<extending_pytensor_solution_1.py>`
 
 
 :func:`as_op`
 ---------------------
 
 :func:`as_op` is a Python decorator that converts a Python function into a
-basic Aesara :class:`Op` that will call the supplied function during execution.
+basic Pytensor :class:`Op` that will call the supplied function during execution.
 
 This isn't the recommended way to build an :class:`Op`, but allows for a quick
 implementation.
@@ -774,7 +774,7 @@ signature:
 .. note::
 
     It converts the Python function to a callable object that takes as
-    inputs Aesara variables that were declared.
+    inputs Pytensor variables that were declared.
 
 .. note::
     The python function wrapped by the :func:`as_op` decorator needs to return a new
@@ -785,11 +785,11 @@ signature:
 
 .. testcode:: asop
 
-    import aesara
-    import aesara.tensor as at
+    import pytensor
+    import pytensor.tensor as at
     import numpy as np
-    from aesara import function
-    from aesara.compile.ops import as_op
+    from pytensor import function
+    from pytensor.compile.ops import as_op
 
 
     def infer_shape_numpy_dot(fgraph, node, input_shapes):
@@ -842,7 +842,7 @@ Final Note
 ----------
 
 A more extensive discussion of this section's content may be found in
-the advanced tutorial :ref:`Extending Aesara<extending>`.
+the advanced tutorial :ref:`Extending Pytensor<extending>`.
 
 The section :ref:`Other Ops <other_ops>` includes more instructions for
 the following specific cases:

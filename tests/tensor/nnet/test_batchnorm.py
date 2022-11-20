@@ -3,13 +3,13 @@ from collections import OrderedDict
 import numpy as np
 import pytest
 
-import aesara
-import aesara.tensor as at
-from aesara.configdefaults import config
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.nnet import batchnorm
-from aesara.tensor.shape import specify_broadcastable
-from aesara.tensor.type import (
+import pytensor
+import pytensor.tensor as at
+from pytensor.configdefaults import config
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.nnet import batchnorm
+from pytensor.tensor.shape import specify_broadcastable
+from pytensor.tensor.type import (
     TensorType,
     matrix,
     scalar,
@@ -42,18 +42,18 @@ def test_BNComposite():
         m = vector("m")
         v = vector("v")
 
-        x.tag.test_value = rng.random((2, 2)).astype(aesara.config.floatX)
-        b.tag.test_value = rng.random((2)).astype(aesara.config.floatX)
-        g.tag.test_value = rng.random((2)).astype(aesara.config.floatX)
-        m.tag.test_value = rng.random((2)).astype(aesara.config.floatX)
-        v.tag.test_value = rng.random((2)).astype(aesara.config.floatX)
+        x.tag.test_value = rng.random((2, 2)).astype(pytensor.config.floatX)
+        b.tag.test_value = rng.random((2)).astype(pytensor.config.floatX)
+        g.tag.test_value = rng.random((2)).astype(pytensor.config.floatX)
+        m.tag.test_value = rng.random((2)).astype(pytensor.config.floatX)
+        v.tag.test_value = rng.random((2)).astype(pytensor.config.floatX)
 
         bn_ref_op = bn_ref(x, g, b, m, v)
-        f_ref = aesara.function([x, b, g, m, v], [bn_ref_op])
+        f_ref = pytensor.function([x, b, g, m, v], [bn_ref_op])
         res_ref = f_ref(X, G, B, M, V)
         for mode in ["low_mem", "high_mem"]:
             bn_op = batchnorm.batch_normalization(x, g, b, m, v, mode=mode)
-            f = aesara.function([x, b, g, m, v], [bn_op])
+            f = pytensor.function([x, b, g, m, v], [bn_op])
             res = f(X, G, B, M, V)
             utt.assert_allclose(res_ref, res)
 
@@ -77,11 +77,11 @@ def test_batch_normalization():
     v = vector("v")
 
     bn_ref_op = bn_ref(x, g, b, m, v)
-    f_ref = aesara.function([x, g, b, m, v], [bn_ref_op])
+    f_ref = pytensor.function([x, g, b, m, v], [bn_ref_op])
     res_ref = f_ref(X, G, B, M, V)
     for mode in ["low_mem", "high_mem"]:
         bn_op = batchnorm.batch_normalization(x, g, b, m, v, mode=mode)
-        f = aesara.function([x, g, b, m, v], [bn_op])
+        f = pytensor.function([x, g, b, m, v], [bn_op])
         res = f(X, G, B, M, V)
         utt.assert_allclose(res_ref, res)
 
@@ -95,7 +95,7 @@ def test_batch_normalization():
     bn_ref_op = bn_ref(
         x, g, b, x.mean(axis=0, keepdims=True), x.std(axis=0, keepdims=True)
     )
-    f_ref = aesara.function([x, b, g], [bn_ref_op])
+    f_ref = pytensor.function([x, b, g], [bn_ref_op])
     res_ref = f_ref(X, G, B)
     for mode in ["low_mem", "high_mem"]:
         bn_op = batchnorm.batch_normalization(
@@ -106,7 +106,7 @@ def test_batch_normalization():
             x.std(axis=0, keepdims=True),
             mode=mode,
         )
-        f = aesara.function([x, b, g], [bn_op])
+        f = pytensor.function([x, b, g], [bn_op])
         res = f(X, G, B)
         utt.assert_allclose(res_ref, res)
 
@@ -145,7 +145,7 @@ def test_bn_feature_maps():
         m.dimshuffle("x", 0, "x", "x"),
         v.dimshuffle("x", 0, "x", "x"),
     )
-    f_ref = aesara.function([x, b, g, m, v], [bn_ref_op])
+    f_ref = pytensor.function([x, b, g, m, v], [bn_ref_op])
     res_ref = f_ref(X, G, B, M, V)
 
     for mode in ["low_mem", "high_mem"]:
@@ -157,7 +157,7 @@ def test_bn_feature_maps():
             v.dimshuffle("x", 0, "x", "x"),
             mode=mode,
         )
-        f = aesara.function([x, b, g, m, v], [bn_op])
+        f = pytensor.function([x, b, g, m, v], [bn_op])
         res = f(X, G, B, M, V)
         utt.assert_allclose(res_ref, res)
 
@@ -223,7 +223,7 @@ def test_batch_normalization_train():
             scale2 = specify_broadcastable(scale, *axes2)
             bias2 = specify_broadcastable(bias, *axes2)
             out2 = (x - x_mean2) * (scale2 * x_invstd2) + bias2
-            m = at.cast(at.prod(x.shape) / at.prod(scale.shape), aesara.config.floatX)
+            m = at.cast(at.prod(x.shape) / at.prod(scale.shape), pytensor.config.floatX)
             out_running_mean2 = (
                 running_mean * (1 - running_average_factor)
                 + x_mean2 * running_average_factor
@@ -279,7 +279,7 @@ def test_batch_normalization_train():
                 return_disconnected="zero",
             )
             # compile
-            f = aesara.function(
+            f = pytensor.function(
                 [x, scale, bias, running_mean, running_var, dy, dx, dscale, dbias],
                 [
                     out,
@@ -319,15 +319,15 @@ def test_batch_normalization_train():
 
                 rng = np.random.default_rng(1234)
 
-                X = 4 + 3 * rng.random(data_shape).astype(aesara.config.floatX)
-                Dy = -1 + 2 * rng.random(data_shape).astype(aesara.config.floatX)
-                Scale = rng.random(param_shape).astype(aesara.config.floatX)
-                Bias = rng.random(param_shape).astype(aesara.config.floatX)
-                Running_mean = rng.random(param_shape).astype(aesara.config.floatX)
-                Running_var = rng.random(param_shape).astype(aesara.config.floatX)
-                Dx = 4 + 3 * rng.random(data_shape).astype(aesara.config.floatX)
-                Dscale = -1 + 2 * rng.random(param_shape).astype(aesara.config.floatX)
-                Dbias = rng.random(param_shape).astype(aesara.config.floatX)
+                X = 4 + 3 * rng.random(data_shape).astype(pytensor.config.floatX)
+                Dy = -1 + 2 * rng.random(data_shape).astype(pytensor.config.floatX)
+                Scale = rng.random(param_shape).astype(pytensor.config.floatX)
+                Bias = rng.random(param_shape).astype(pytensor.config.floatX)
+                Running_mean = rng.random(param_shape).astype(pytensor.config.floatX)
+                Running_var = rng.random(param_shape).astype(pytensor.config.floatX)
+                Dx = 4 + 3 * rng.random(data_shape).astype(pytensor.config.floatX)
+                Dscale = -1 + 2 * rng.random(param_shape).astype(pytensor.config.floatX)
+                Dbias = rng.random(param_shape).astype(pytensor.config.floatX)
 
                 outputs = f(
                     X, Scale, Bias, Running_mean, Running_var, Dy, Dx, Dscale, Dbias
@@ -444,7 +444,7 @@ def test_batch_normalization_train_without_running_averages():
     # backward pass
     grads = at.grad(None, wrt=[x, scale, bias], known_grads={out: dy})
     # compile
-    f = aesara.function([x, scale, bias, dy], [out, x_mean, x_invstd] + grads)
+    f = pytensor.function([x, scale, bias, dy], [out, x_mean, x_invstd] + grads)
     # check if the abstract Ops have been replaced
     assert not any(
         isinstance(
@@ -459,10 +459,10 @@ def test_batch_normalization_train_without_running_averages():
     )
     # run
     rng = np.random.default_rng(1234)
-    X = 4 + 3 * rng.random(data_shape).astype(aesara.config.floatX)
-    Dy = -1 + 2 * rng.random(data_shape).astype(aesara.config.floatX)
-    Scale = rng.random(param_shape).astype(aesara.config.floatX)
-    Bias = rng.random(param_shape).astype(aesara.config.floatX)
+    X = 4 + 3 * rng.random(data_shape).astype(pytensor.config.floatX)
+    Dy = -1 + 2 * rng.random(data_shape).astype(pytensor.config.floatX)
+    Scale = rng.random(param_shape).astype(pytensor.config.floatX)
+    Bias = rng.random(param_shape).astype(pytensor.config.floatX)
     f(X, Scale, Bias, Dy)
 
 
@@ -547,16 +547,16 @@ def test_batch_normalization_train_broadcast():
             results = [abs(r - r_bc) for (r, r_bc) in zip(results_non_bc, results_bc)]
 
             # compile to compute all differences
-            f = aesara.function(
+            f = pytensor.function(
                 [x, scale, bias, running_mean, running_var], at_sum(sum(results))
             )
 
             # the paired ops are exactly the same, so the optimizer should have
             # collapsed the sum of differences to a constant zero
             nodes = f.maker.fgraph.toposort()
-            if aesara.config.mode != "FAST_COMPILE":
+            if pytensor.config.mode != "FAST_COMPILE":
                 assert len(nodes) == 1
-                assert isinstance(nodes[0].op, aesara.compile.DeepCopyOp)
+                assert isinstance(nodes[0].op, pytensor.compile.DeepCopyOp)
             inputs = [
                 np.asarray(np.random.random(((4,) * n)), x.dtype)
                 for n in [
@@ -611,7 +611,7 @@ def test_batch_normalization_test():
                 None, wrt=[x, scale, bias, mean, var], known_grads={out2: dy}
             )
             # compile
-            f = aesara.function(
+            f = pytensor.function(
                 [x, scale, bias, mean, var, dy], [out, out2] + grads + grads2
             )
             # check if the abstract Ops have been replaced
@@ -633,12 +633,12 @@ def test_batch_normalization_test():
                     1 if d in axes2 else s for d, s in enumerate(data_shape)
                 )
                 rng = np.random.default_rng(1234)
-                X = 4 + 3 * rng.random(data_shape).astype(aesara.config.floatX)
-                Dy = -1 + 2 * rng.random(data_shape).astype(aesara.config.floatX)
-                Scale = rng.random(param_shape).astype(aesara.config.floatX)
-                Bias = rng.random(param_shape).astype(aesara.config.floatX)
-                Mean = rng.random(param_shape).astype(aesara.config.floatX)
-                Var = rng.random(param_shape).astype(aesara.config.floatX)
+                X = 4 + 3 * rng.random(data_shape).astype(pytensor.config.floatX)
+                Dy = -1 + 2 * rng.random(data_shape).astype(pytensor.config.floatX)
+                Scale = rng.random(param_shape).astype(pytensor.config.floatX)
+                Bias = rng.random(param_shape).astype(pytensor.config.floatX)
+                Mean = rng.random(param_shape).astype(pytensor.config.floatX)
+                Var = rng.random(param_shape).astype(pytensor.config.floatX)
                 outputs = f(X, Scale, Bias, Mean, Var, Dy)
                 # compare outputs
                 utt.assert_allclose(outputs[0], outputs[1])  # out
@@ -668,7 +668,7 @@ def test_batch_normalization_broadcastable():
     grads_train = at.grad(None, wrt=[x, scale, bias], known_grads={out_train: dy})
     grads_test = at.grad(None, wrt=[x, scale, bias], known_grads={out_test: dy})
     # compile
-    f = aesara.function(
+    f = pytensor.function(
         [x, scale, bias, mean, var, dy],
         [out_train, x_mean, x_invstd, out_test] + grads_train + grads_test,
     )

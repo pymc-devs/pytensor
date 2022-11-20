@@ -3,17 +3,17 @@ import contextlib
 import numpy as np
 import pytest
 
-import aesara.tensor as at
-import aesara.tensor.inplace as ati
-import aesara.tensor.math as aem
-from aesara import config
-from aesara.compile.ops import deep_copy_op
-from aesara.compile.sharedvalue import SharedVariable
-from aesara.graph.basic import Constant
-from aesara.graph.fg import FunctionGraph
-from aesara.tensor import elemwise as at_elemwise
-from aesara.tensor.math import All, Any, Max, Mean, Min, Prod, ProdWithoutZeros, Sum
-from aesara.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
+import pytensor.tensor as at
+import pytensor.tensor.inplace as ati
+import pytensor.tensor.math as aem
+from pytensor import config
+from pytensor.compile.ops import deep_copy_op
+from pytensor.compile.sharedvalue import SharedVariable
+from pytensor.graph.basic import Constant
+from pytensor.graph.fg import FunctionGraph
+from pytensor.tensor import elemwise as at_elemwise
+from pytensor.tensor.math import All, Any, Max, Mean, Min, Prod, ProdWithoutZeros, Sum
+from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 from tests.link.numba.test_basic import (
     compare_numba_and_py,
     my_multi_out,

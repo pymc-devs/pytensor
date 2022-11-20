@@ -5,15 +5,15 @@
 Tutorial
 ========
 
-Let us start an interactive session (e.g. with ``python`` or ``ipython``) and import Aesara.
+Let us start an interactive session (e.g. with ``python`` or ``ipython``) and import Pytensor.
 
->>> from aesara import *
+>>> from pytensor import *
 
 Several of the symbols you will need to use are in the ``tensor`` subpackage
-of Aesara. Let us import that subpackage under a handy name like
+of Pytensor. Let us import that subpackage under a handy name like
 ``at`` (the tutorials will frequently use this convention).
 
->>> import aesara.tensor as at
+>>> import pytensor.tensor as at
 
 If that succeeded you are ready for the tutorial, otherwise check your
 installation (see :ref:`install`).

@@ -3,16 +3,16 @@ import re
 import numpy as np
 import pytest
 
-import aesara
-from aesara import function
-from aesara import tensor as at
-from aesara.compile.mode import Mode
-from aesara.configdefaults import config
-from aesara.graph.basic import Constant, applys_between
-from aesara.graph.rewriting.db import RewriteDatabaseQuery
-from aesara.raise_op import Assert
-from aesara.tensor.elemwise import DimShuffle
-from aesara.tensor.extra_ops import (
+import pytensor
+from pytensor import function
+from pytensor import tensor as at
+from pytensor.compile.mode import Mode
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Constant, applys_between
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.raise_op import Assert
+from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.extra_ops import (
     Bartlett,
     BroadcastTo,
     CpuContiguous,
@@ -46,8 +46,8 @@ from aesara.tensor.extra_ops import (
     to_one_hot,
     unravel_index,
 )
-from aesara.tensor.subtensor import AdvancedIncSubtensor
-from aesara.tensor.type import (
+from pytensor.tensor.subtensor import AdvancedIncSubtensor
+from pytensor.tensor.type import (
     TensorType,
     dmatrix,
     dscalar,
@@ -64,7 +64,7 @@ from aesara.tensor.type import (
     tensor3,
     vector,
 )
-from aesara.utils import LOCAL_BITWIDTH, PYTHON_INT_BITWIDTH
+from pytensor.utils import LOCAL_BITWIDTH, PYTHON_INT_BITWIDTH
 from tests import unittest_tools as utt
 
 
@@ -77,7 +77,7 @@ def test_cpu_contiguous():
     a = fmatrix("a")
     i = iscalar("i")
     a_val = np.asarray(np.random.random((4, 5)), dtype="float32")
-    f = aesara.function([a, i], cpu_contiguous(a.reshape((5, 4))[::i]))
+    f = pytensor.function([a, i], cpu_contiguous(a.reshape((5, 4))[::i]))
     topo = f.maker.fgraph.toposort()
     assert any(isinstance(node.op, CpuContiguous) for node in topo)
     assert f(a_val, 1).flags["C_CONTIGUOUS"]
@@ -107,14 +107,14 @@ class TestSearchsortedOp(utt.InferShapeTester):
         self.idx_sorted = np.argsort(self.a).astype("int32")
 
     def test_searchsortedOp_on_sorted_input(self):
-        f = aesara.function([self.x, self.v], searchsorted(self.x, self.v))
+        f = pytensor.function([self.x, self.v], searchsorted(self.x, self.v))
         assert np.allclose(
             np.searchsorted(self.a[self.idx_sorted], self.b),
             f(self.a[self.idx_sorted], self.b),
         )
 
         sorter = vector("sorter", dtype="int32")
-        f = aesara.function(
+        f = pytensor.function(
             [self.x, self.v, sorter],
             self.x.searchsorted(self.v, sorter=sorter, side="right"),
         )
@@ -124,7 +124,9 @@ class TestSearchsortedOp(utt.InferShapeTester):
         )
 
         sa = self.a[self.idx_sorted]
-        f = aesara.function([self.x, self.v], self.x.searchsorted(self.v, side="right"))
+        f = pytensor.function(
+            [self.x, self.v], self.x.searchsorted(self.v, side="right")
+        )
         assert np.allclose(sa.searchsorted(self.b, side="right"), f(sa, self.b))
 
     def test_searchsortedOp_wrong_side_kwd(self):
@@ -146,7 +148,7 @@ class TestSearchsortedOp(utt.InferShapeTester):
     @pytest.mark.parametrize("dtype", compatible_types)
     def test_searchsortedOp_on_int_sorter(self, dtype):
         sorter = vector("sorter", dtype=dtype)
-        f = aesara.function(
+        f = pytensor.function(
             [self.x, self.v, sorter],
             searchsorted(self.x, self.v, sorter=sorter),
             allow_input_downcast=True,
@@ -157,7 +159,7 @@ class TestSearchsortedOp(utt.InferShapeTester):
         )
 
     def test_searchsortedOp_on_right_side(self):
-        f = aesara.function(
+        f = pytensor.function(
             [self.x, self.v], searchsorted(self.x, self.v, side="right")
         )
         assert np.allclose(
@@ -217,13 +219,13 @@ class TestCumOp(utt.InferShapeTester):
         with pytest.raises(ValueError):
             cumprod(x, axis=-4)
 
-        f = aesara.function([x], [cumsum(x), cumprod(x)])
+        f = pytensor.function([x], [cumsum(x), cumprod(x)])
         s, p = f(a)
         assert np.allclose(np.cumsum(a), s)  # Test axis=None
         assert np.allclose(np.cumprod(a), p)  # Test axis=None
 
         for axis in range(-len(a.shape), len(a.shape)):
-            f = aesara.function([x], [cumsum(x, axis=axis), cumprod(x, axis=axis)])
+            f = pytensor.function([x], [cumsum(x, axis=axis), cumprod(x, axis=axis)])
             s, p = f(a)
             assert np.allclose(np.cumsum(a, axis=axis), s)
             assert np.allclose(np.cumprod(a, axis=axis), p)
@@ -287,14 +289,14 @@ class TestBinCount(utt.InferShapeTester):
         a = rng.integers(1, 51, size=(25)).astype(dtype)
         weights = rng.random((25,)).astype(config.floatX)
 
-        f1 = aesara.function([x], bincount(x))
-        f2 = aesara.function([x, w], bincount(x, weights=w))
+        f1 = pytensor.function([x], bincount(x))
+        f2 = pytensor.function([x, w], bincount(x, weights=w))
 
         assert np.array_equal(ref(a), f1(a))
         assert np.allclose(ref(a, weights), f2(a, weights))
 
-        f3 = aesara.function([x], bincount(x, minlength=55))
-        f4 = aesara.function([x], bincount(x, minlength=5))
+        f3 = pytensor.function([x], bincount(x, minlength=55))
+        f4 = pytensor.function([x], bincount(x, minlength=5))
 
         assert np.array_equal(ref(a, minlength=55), f3(a))
         assert np.array_equal(ref(a, minlength=5), f4(a))
@@ -302,7 +304,7 @@ class TestBinCount(utt.InferShapeTester):
         # skip the following test when using unsigned ints
         if not dtype.startswith("u"):
             a[0] = -1
-            f5 = aesara.function([x], bincount(x, assert_nonneg=True))
+            f5 = pytensor.function([x], bincount(x, assert_nonneg=True))
             with pytest.raises(AssertionError):
                 f5(a)
 
@@ -315,7 +317,7 @@ class TestDiff(utt.InferShapeTester):
 
         a = rng.random((30, 50)).astype(config.floatX)
 
-        f = aesara.function([x], diff(x))
+        f = pytensor.function([x], diff(x))
         assert np.allclose(np.diff(a), f(a))
 
     @pytest.mark.parametrize("axis", (-2, -1, 0, 1))
@@ -327,10 +329,10 @@ class TestDiff(utt.InferShapeTester):
 
         a = rng.random((30, 50)).astype(config.floatX)
 
-        f = aesara.function([x], diff(x))
+        f = pytensor.function([x], diff(x))
         assert np.allclose(np.diff(a), f(a))
 
-        g = aesara.function([x], diff(x, n=n, axis=axis))
+        g = pytensor.function([x], diff(x, n=n, axis=axis))
         assert np.allclose(np.diff(a, n=n, axis=axis), g(a))
 
     @pytest.mark.xfail(reason="Subtensor shape cannot be inferred correctly")
@@ -377,7 +379,7 @@ class TestSqueeze(utt.InferShapeTester):
         data = np.random.random(size=shape).astype(config.floatX)
         variable = TensorType(config.floatX, shape=var_shape)()
 
-        f = aesara.function([variable], self.op(variable))
+        f = pytensor.function([variable], self.op(variable))
 
         expected = np.squeeze(data)
         tested = f(data)
@@ -431,11 +433,11 @@ class TestSqueeze(utt.InferShapeTester):
         ),
     )
     def test_var_interface(self, shape, var_shape):
-        # same as test_op, but use a_aesara_var.squeeze.
+        # same as test_op, but use a_pytensor_var.squeeze.
         data = np.random.random(size=shape).astype(config.floatX)
         variable = TensorType(config.floatX, shape=var_shape)()
 
-        f = aesara.function([variable], variable.squeeze())
+        f = pytensor.function([variable], variable.squeeze())
 
         expected = np.squeeze(data)
         tested = f(data)
@@ -509,7 +511,7 @@ class TestCompress(utt.InferShapeTester):
         data = np.random.random(size=shape).astype(config.floatX)
         data_var = matrix()
 
-        f = aesara.function(
+        f = pytensor.function(
             [cond_var, data_var], self.op(cond_var, data_var, axis=axis)
         )
 
@@ -552,7 +554,7 @@ class TestRepeat(utt.InferShapeTester):
                 with pytest.raises(TypeError):
                     repeat(x, r_var, axis=axis)
             else:
-                f = aesara.function([x, r_var], repeat(x, r_var, axis=axis))
+                f = pytensor.function([x, r_var], repeat(x, r_var, axis=axis))
                 assert np.allclose(np.repeat(a, r, axis=axis), f(a, r))
 
                 r_var = vector(dtype=dtype)
@@ -566,22 +568,22 @@ class TestRepeat(utt.InferShapeTester):
                     with pytest.raises(TypeError):
                         repeat(x, r_var, axis=axis)
                 else:
-                    f = aesara.function([x, r_var], repeat(x, r_var, axis=axis))
+                    f = pytensor.function([x, r_var], repeat(x, r_var, axis=axis))
                     assert np.allclose(np.repeat(a, r, axis=axis), f(a, r))
 
                 # check when r is a list of single integer, e.g. [3].
                 r = rng.integers(1, 11, size=()).astype(dtype) + 2
 
-                f = aesara.function([x], repeat(x, [r], axis=axis))
+                f = pytensor.function([x], repeat(x, [r], axis=axis))
                 assert np.allclose(np.repeat(a, r, axis=axis), f(a))
                 assert not any(
                     isinstance(n.op, Repeat) for n in f.maker.fgraph.toposort()
                 )
 
-                # check when r is  aesara tensortype that broadcastable is (True,)
+                # check when r is  pytensor tensortype that broadcastable is (True,)
                 r_var = TensorType(dtype=dtype, shape=(1,))()
                 r = rng.integers(1, 6, size=(1,)).astype(dtype)
-                f = aesara.function([x, r_var], repeat(x, r_var, axis=axis))
+                f = pytensor.function([x, r_var], repeat(x, r_var, axis=axis))
                 assert np.allclose(np.repeat(a, r[0], axis=axis), f(a, r))
                 assert not any(
                     isinstance(n.op, Repeat) for n in f.maker.fgraph.toposort()
@@ -819,7 +821,7 @@ class TestFillDiagonalOffset(utt.InferShapeTester):
 def test_to_one_hot():
     v = ivector()
     o = to_one_hot(v, 10)
-    f = aesara.function([v], o)
+    f = pytensor.function([v], o)
     out = f([1, 2, 3, 5, 6])
     assert out.dtype == config.floatX
     assert np.allclose(
@@ -835,7 +837,7 @@ def test_to_one_hot():
 
     v = ivector()
     o = to_one_hot(v, 10, dtype="int32")
-    f = aesara.function([v], o)
+    f = pytensor.function([v], o)
     out = f([1, 2, 3, 5, 6])
     assert out.dtype == "int32"
     assert np.allclose(
@@ -888,7 +890,7 @@ class TestUnique(utt.InferShapeTester):
         ]
         for params, outs_expected in zip(self.op_params, list_outs_expected):
             out = at.unique(x, *params, axis=axis)
-            f = aesara.function(inputs=[x], outputs=out)
+            f = pytensor.function(inputs=[x], outputs=out)
             outs = f(inp)
             for out, out_exp in zip(outs, outs_expected):
                 utt.assert_allclose(out, out_exp)
@@ -929,7 +931,7 @@ class TestUnravelIndex(utt.InferShapeTester):
                 indices = indices[-1]
             elif index_ndim == 2:
                 indices = indices[:, np.newaxis]
-            indices_symb = aesara.shared(indices)
+            indices_symb = pytensor.shared(indices)
 
             # reference result
             ref = np.unravel_index(indices, shape, order=order)
@@ -948,14 +950,14 @@ class TestUnravelIndex(utt.InferShapeTester):
             f_array_array = fn(indices, shape_array)
             np.testing.assert_equal(ref, f_array_array())
 
-            # shape given as an Aesara variable
-            shape_symb = aesara.shared(shape_array)
+            # shape given as an Pytensor variable
+            shape_symb = pytensor.shared(shape_array)
             f_array_symb = fn(indices, shape_symb)
             np.testing.assert_equal(ref, f_array_symb())
 
             # shape given as a Shape op (unravel_index will use get_vector_length
             # to infer the number of dimensions)
-            indexed_array = aesara.shared(np.random.uniform(size=shape_array))
+            indexed_array = pytensor.shared(np.random.uniform(size=shape_array))
             f_array_shape = fn(indices, indexed_array.shape)
             np.testing.assert_equal(ref, f_array_shape())
 
@@ -1004,7 +1006,7 @@ class TestRavelMultiIndex(utt.InferShapeTester):
                 multi_index = tuple(i[-1] for i in multi_index)
             elif index_ndim == 2:
                 multi_index = tuple(i[:, np.newaxis] for i in multi_index)
-            multi_index_symb = [aesara.shared(i) for i in multi_index]
+            multi_index_symb = [pytensor.shared(i) for i in multi_index]
 
             # reference result
             ref = np.ravel_multi_index(multi_index, shape, mode, order)
@@ -1023,8 +1025,8 @@ class TestRavelMultiIndex(utt.InferShapeTester):
             f_array_array = fn(multi_index, shape_array)
             np.testing.assert_equal(ref, f_array_array())
 
-            # shape given as an Aesara variable
-            shape_symb = aesara.shared(shape_array)
+            # shape given as an Pytensor variable
+            shape_symb = pytensor.shared(shape_array)
             f_array_symb = fn(multi_index, shape_symb)
             np.testing.assert_equal(ref, f_array_symb())
 
@@ -1144,7 +1146,7 @@ def test_broadcast_shape_basic():
 
     # N.B. Shared variable shape values shouldn't be treated as constants,
     # because they can change.
-    s = aesara.shared(1)
+    s = pytensor.shared(1)
     b_at = broadcast_shape((s, 2), (2, 1), arrays_are_shapes=True)
     assert isinstance(b_at[0].owner.op, Assert)
 
@@ -1220,7 +1222,7 @@ def test_broadcast_shape_symbolic_one_symbolic():
 
     res_shape = broadcast_shape(*index_shapes, arrays_are_shapes=True)
 
-    from aesara.graph.rewriting.utils import rewrite_graph
+    from pytensor.graph.rewriting.utils import rewrite_graph
 
     res_shape = rewrite_graph(res_shape)
 
@@ -1251,14 +1253,14 @@ class TestBroadcastTo(utt.InferShapeTester):
     @pytest.mark.parametrize("linker", ["cvm", "py"])
     def test_perform(self, linker):
 
-        a = aesara.shared(5)
+        a = pytensor.shared(5)
         s_1 = iscalar("s_1")
         shape = (s_1, 1)
 
         bcast_res = broadcast_to(a, shape)
         assert bcast_res.broadcastable == (False, True)
 
-        bcast_fn = aesara.function(
+        bcast_fn = pytensor.function(
             [s_1], bcast_res, mode=Mode(optimizer=None, linker=linker)
         )
         bcast_fn.vm.allow_gc = False
@@ -1282,13 +1284,13 @@ class TestBroadcastTo(utt.InferShapeTester):
         import gc
         import tracemalloc
 
-        from aesara.link.c.cvm import CVM
+        from pytensor.link.c.cvm import CVM
 
         n = 100_000
-        x = aesara.shared(np.ones(n, dtype=np.float64))
+        x = pytensor.shared(np.ones(n, dtype=np.float64))
         y = broadcast_to(x, (5, n))
 
-        f = aesara.function([], y, mode=Mode(optimizer=None, linker="cvm"))
+        f = pytensor.function([], y, mode=Mode(optimizer=None, linker="cvm"))
         assert isinstance(f.vm, CVM)
 
         assert len(f.maker.fgraph.apply_nodes) == 2
@@ -1399,16 +1401,16 @@ def test_broadcast_arrays():
 )
 def test_space_ops(start, stop, num_samples):
     z = linspace(start, stop, num_samples)
-    aesara_res = function(inputs=[], outputs=z)()
+    pytensor_res = function(inputs=[], outputs=z)()
     numpy_res = np.linspace(start, stop, num=num_samples)
-    assert np.allclose(aesara_res, numpy_res)
+    assert np.allclose(pytensor_res, numpy_res)
 
     z = logspace(start, stop, num_samples)
-    aesara_res = function(inputs=[], outputs=z)()
+    pytensor_res = function(inputs=[], outputs=z)()
     numpy_res = np.logspace(start, stop, num=num_samples)
-    assert np.allclose(aesara_res, numpy_res)
+    assert np.allclose(pytensor_res, numpy_res)
 
     z = geomspace(start, stop, num_samples)
-    aesara_res = function(inputs=[], outputs=z)()
+    pytensor_res = function(inputs=[], outputs=z)()
     numpy_res = np.geomspace(start, stop, num=num_samples)
-    assert np.allclose(aesara_res, numpy_res)
+    assert np.allclose(pytensor_res, numpy_res)

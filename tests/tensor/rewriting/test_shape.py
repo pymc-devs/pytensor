@@ -3,28 +3,28 @@ import copy
 import numpy as np
 import pytest
 
-import aesara.tensor as at
-from aesara import shared
-from aesara.compile.function import function
-from aesara.compile.mode import get_default_mode, get_mode
-from aesara.compile.ops import deep_copy_op
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Variable, equal_computations
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import Op
-from aesara.graph.rewriting.basic import check_stack_trace, node_rewriter, out2in
-from aesara.graph.rewriting.utils import rewrite_graph
-from aesara.graph.type import Type
-from aesara.tensor.basic import as_tensor_variable
-from aesara.tensor.elemwise import DimShuffle, Elemwise
-from aesara.tensor.math import add, exp, maximum
-from aesara.tensor.rewriting.basic import register_specialize
-from aesara.tensor.rewriting.shape import (
+import pytensor.tensor as at
+from pytensor import shared
+from pytensor.compile.function import function
+from pytensor.compile.mode import get_default_mode, get_mode
+from pytensor.compile.ops import deep_copy_op
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Variable, equal_computations
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op
+from pytensor.graph.rewriting.basic import check_stack_trace, node_rewriter, out2in
+from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.graph.type import Type
+from pytensor.tensor.basic import as_tensor_variable
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.math import add, exp, maximum
+from pytensor.tensor.rewriting.basic import register_specialize
+from pytensor.tensor.rewriting.shape import (
     ShapeFeature,
     local_reshape_to_dimshuffle,
     local_useless_reshape,
 )
-from aesara.tensor.shape import (
+from pytensor.tensor.shape import (
     Reshape,
     Shape_i,
     SpecifyShape,
@@ -32,8 +32,8 @@ from aesara.tensor.shape import (
     shape,
     specify_shape,
 )
-from aesara.tensor.subtensor import set_subtensor
-from aesara.tensor.type import (
+from pytensor.tensor.subtensor import set_subtensor
+from pytensor.tensor.type import (
     fmatrix,
     iscalar,
     lscalar,

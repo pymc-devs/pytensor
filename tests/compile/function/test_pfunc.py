@@ -1,17 +1,17 @@
 import numpy as np
 import pytest
 
-import aesara.tensor as at
-from aesara.compile import UnusedInputError
-from aesara.compile.function import function, pfunc
-from aesara.compile.function.pfunc import rebuild_collect_shared
-from aesara.compile.io import In
-from aesara.compile.sharedvalue import shared
-from aesara.configdefaults import config
-from aesara.graph.utils import MissingInputError
-from aesara.misc.safe_asarray import _asarray
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.type import (
+import pytensor.tensor as at
+from pytensor.compile import UnusedInputError
+from pytensor.compile.function import function, pfunc
+from pytensor.compile.function.pfunc import rebuild_collect_shared
+from pytensor.compile.io import In
+from pytensor.compile.sharedvalue import shared
+from pytensor.configdefaults import config
+from pytensor.graph.utils import MissingInputError
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.type import (
     bscalar,
     bvector,
     dmatrices,
@@ -27,7 +27,7 @@ from aesara.tensor.type import (
     lscalar,
     wvector,
 )
-from aesara.utils import PYTHON_INT_BITWIDTH
+from pytensor.utils import PYTHON_INT_BITWIDTH
 
 
 def data_of(s):
@@ -707,7 +707,7 @@ class TestPfunc:
 
 
 class TestAliasingRules:
-    # 1. Aesara manages its own memory space, which typically does not overlap
+    # 1. Pytensor manages its own memory space, which typically does not overlap
     # with the memory of normal python variables that the user uses.
     #
     # 2. shared variables are allocated in this memory space, as are the
@@ -716,16 +716,16 @@ class TestAliasingRules:
     # 3. Physically, this managed memory space may be spread across the host,
     # on a GPU device(s), or even on a remote machine.
     #
-    # 4. Aesara assumes that shared variables are never aliased to one another,
+    # 4. Pytensor assumes that shared variables are never aliased to one another,
     # and tries to make it impossible to accidentally alias them.
     #
-    # 5. Aesara's managed data is constant while Aesara Functions are not running
-    # and aesara library code is not running.
+    # 5. Pytensor's managed data is constant while Pytensor Functions are not running
+    # and pytensor library code is not running.
     #
     # 6. The default behaviour of Function is to return user-space values for
     # outputs, but this can be overridden (borrow=True) for better performance,
     # in which case the returned value may be aliased to managed memory, and
-    # potentially invalidated by the next Aesara Function call or call to aesara
+    # potentially invalidated by the next Pytensor Function call or call to pytensor
     # library code.
 
     def shared(self, x):
@@ -738,15 +738,15 @@ class TestAliasingRules:
         A = self.shared(orig_a)
         assert not np.may_share_memory(orig_a, data_of(A))
 
-        # rule #2 reading back from aesara-managed memory
+        # rule #2 reading back from pytensor-managed memory
         assert not np.may_share_memory(A.get_value(borrow=False), data_of(A))
 
     def test_sparse_input_aliasing_affecting_inplace_operations(self):
         sp = pytest.importorskip("scipy", minversion="0.7.0")
 
-        from aesara import sparse
+        from pytensor import sparse
 
-        # Note: to trigger this bug with aesara rev 4586:2bc6fc7f218b,
+        # Note: to trigger this bug with pytensor rev 4586:2bc6fc7f218b,
         #        you need to make in inputs mutable (so that inplace
         #        operations are used) and to break the elemwise composition
         #        with some non-elemwise op (here dot)
@@ -792,7 +792,7 @@ class TestAliasingRules:
 
     def test_input_aliasing_affecting_inplace_operations(self):
 
-        # Note: to trigger this bug with aesara rev 4586:2bc6fc7f218b,
+        # Note: to trigger this bug with pytensor rev 4586:2bc6fc7f218b,
         #        you need to make in inputs mutable (so that inplace
         #        operations are used) and to break the elemwise composition
         #        with some non-elemwise op (here dot)
@@ -846,7 +846,7 @@ class TestAliasingRules:
 
     def test_partial_input_aliasing_affecting_inplace_operations(self):
 
-        # Note: to trigger this bug with aesara rev 4586:2bc6fc7f218b,
+        # Note: to trigger this bug with pytensor rev 4586:2bc6fc7f218b,
         #        you need to make in inputs mutable ( so that inplace
         #        operations are used) and to break the elemwise composition
         #        with some non-elemwise op ( here dot )
@@ -958,7 +958,7 @@ class TestAliasingRules:
         z = np.zeros((2, 2))
         f(z)
         assert not np.may_share_memory(data_of(A), data_of(B))
-        # Aesara tries to maintain its own memory space.
+        # Pytensor tries to maintain its own memory space.
         assert not np.may_share_memory(z, data_of(B))
         assert np.all(data_of(B) == z)
 
@@ -982,7 +982,7 @@ class TestAliasingRules:
         # shared vars may not be aliased
         assert not np.may_share_memory(data_of(A), data_of(B))
 
-        # aesara should have been smart enough to not make copies
+        # pytensor should have been smart enough to not make copies
         assert np.may_share_memory(data_of(A), data_of_b)
         assert np.may_share_memory(data_of(B), data_of_a)
 
@@ -1001,7 +1001,7 @@ class TestAliasingRules:
         data_of_b = data_of(B)
 
         f = pfunc([], [], updates=[(A, B[:, ::-1]), (B, A.T)])
-        # aesara.printing.debugprint(f)
+        # pytensor.printing.debugprint(f)
         f()
         # correctness (doesn't actually test the view...)
         assert np.all(data_of(A) == -0.5)
@@ -1010,7 +1010,7 @@ class TestAliasingRules:
         # shared vars may not be aliased
         assert not np.may_share_memory(data_of(A), data_of(B))
 
-        # aesara should have been smart enough to not make copies
+        # pytensor should have been smart enough to not make copies
         if config.mode not in ["DebugMode", "DEBUG_MODE", "FAST_COMPILE"]:
             # We don't ask DebugMode and FAST_COMPILE not to make copy.
             # We have the right to do so.

@@ -3,7 +3,7 @@
 
    * Scan seems to do copies of every input variable. Is that needed?
    answer : probably not, but it doesn't hurt also ( what we copy is
-   aesara variables, which just cary information about the type / dimension
+   pytensor variables, which just cary information about the type / dimension
    of the data)
 
    * There is some of scan functionality that is not well documented
@@ -20,35 +20,35 @@ from tempfile import mkdtemp
 import numpy as np
 import pytest
 
-import aesara.tensor as at
-from aesara.compile.debugmode import DebugMode
-from aesara.compile.function import function
-from aesara.compile.function.pfunc import rebuild_collect_shared
-from aesara.compile.mode import Mode, get_default_mode, get_mode
-from aesara.compile.monitormode import MonitorMode
-from aesara.compile.sharedvalue import shared
-from aesara.configdefaults import config
-from aesara.gradient import NullTypeGradError, Rop, disconnected_grad, grad, hessian
-from aesara.graph.basic import Apply, ancestors, equal_computations
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import Op
-from aesara.graph.rewriting.basic import MergeOptimizer
-from aesara.graph.utils import MissingInputError
-from aesara.misc.safe_asarray import _asarray
-from aesara.raise_op import assert_op
-from aesara.scan.basic import scan
-from aesara.scan.op import Scan
-from aesara.scan.utils import until
-from aesara.tensor.math import all as at_all
-from aesara.tensor.math import dot, exp, mean, sigmoid
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.math import tanh
-from aesara.tensor.random import normal
-from aesara.tensor.random.utils import RandomStream
-from aesara.tensor.shape import Shape_i, reshape, specify_shape
-from aesara.tensor.sharedvar import SharedVariable
-from aesara.tensor.subtensor import Subtensor
-from aesara.tensor.type import (
+import pytensor.tensor as at
+from pytensor.compile.debugmode import DebugMode
+from pytensor.compile.function import function
+from pytensor.compile.function.pfunc import rebuild_collect_shared
+from pytensor.compile.mode import Mode, get_default_mode, get_mode
+from pytensor.compile.monitormode import MonitorMode
+from pytensor.compile.sharedvalue import shared
+from pytensor.configdefaults import config
+from pytensor.gradient import NullTypeGradError, Rop, disconnected_grad, grad, hessian
+from pytensor.graph.basic import Apply, ancestors, equal_computations
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op
+from pytensor.graph.rewriting.basic import MergeOptimizer
+from pytensor.graph.utils import MissingInputError
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.raise_op import assert_op
+from pytensor.scan.basic import scan
+from pytensor.scan.op import Scan
+from pytensor.scan.utils import until
+from pytensor.tensor.math import all as at_all
+from pytensor.tensor.math import dot, exp, mean, sigmoid
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import tanh
+from pytensor.tensor.random import normal
+from pytensor.tensor.random.utils import RandomStream
+from pytensor.tensor.shape import Shape_i, reshape, specify_shape
+from pytensor.tensor.sharedvar import SharedVariable
+from pytensor.tensor.subtensor import Subtensor
+from pytensor.tensor.type import (
     dcol,
     dmatrix,
     dscalar,
@@ -355,8 +355,8 @@ class TestScan:
         steps = 5
 
         numpy_values = np.array([state * (2 ** (k + 1)) for k in range(steps)])
-        aesara_values = my_f(state, steps)
-        utt.assert_allclose(numpy_values, aesara_values)
+        pytensor_values = my_f(state, steps)
+        utt.assert_allclose(numpy_values, pytensor_values)
 
     def test_inner_storage_leak(self):
         """
@@ -489,7 +489,7 @@ class TestScan:
         assert res.dtype == exp_res.dtype
 
     def test_only_nonseq_inputs(self):
-        # Compile the Aesara function
+        # Compile the Pytensor function
         n_steps = 2
         inp = matrix()
         broadcasted_inp, _ = scan(lambda x: x, non_sequences=[inp], n_steps=n_steps)
@@ -497,7 +497,7 @@ class TestScan:
         gr = grad(out, inp)
         fun = function([inp], [broadcasted_inp, gr])
 
-        # Execute the Aesara function and compare outputs to the expected outputs
+        # Execute the Pytensor function and compare outputs to the expected outputs
         inputs = np.array([[1, 2], [3, 4]], dtype=config.floatX)
         expected_out1 = np.repeat(inputs[None], n_steps, axis=0)
         expected_out2 = np.ones(inputs.shape, dtype="int8") * n_steps
@@ -545,8 +545,8 @@ class TestScan:
         v_out[0] = v_u[0] * W_in + v_x0 * W
         for step in range(1, 4):
             v_out[step] = v_u[step] * W_in + v_out[step - 1] * W
-        aesara_values = f2(v_u, v_x0, W_in, W)
-        utt.assert_allclose(aesara_values, v_out)
+        pytensor_values = f2(v_u, v_x0, W_in, W)
+        utt.assert_allclose(pytensor_values, v_out)
 
     def test_one_sequence_one_output_weights_shared(self):
         """
@@ -582,8 +582,8 @@ class TestScan:
         for step in range(1, 4):
             v_out[step] = v_u[step] * W_in.get_value() + v_out[step - 1] * W.get_value()
 
-        aesara_values = f3(v_u, v_x0)
-        assert np.allclose(aesara_values, v_out)
+        pytensor_values = f3(v_u, v_x0)
+        assert np.allclose(pytensor_values, v_out)
 
     def test_oinp_iinp_iout_oout_mappings(self):
         """
@@ -716,8 +716,8 @@ class TestScan:
 
         v_u = rng.uniform(-5.0, 5.0, size=(5,))
         numpy_result = v_u + 3
-        aesara_result = f2(v_u)
-        utt.assert_allclose(aesara_result, numpy_result)
+        pytensor_result = f2(v_u)
+        utt.assert_allclose(pytensor_result, numpy_result)
 
     def test_backwards(self):
         def f_rnn(u_t, x_tm1, W_in, W):
@@ -754,8 +754,8 @@ class TestScan:
         for step in range(1, 4):
             v_out[step] = v_u[3 - step] * W_in + v_out[step - 1] * W
 
-        aesara_values = f2(v_u, v_x0, W_in, W)
-        utt.assert_allclose(aesara_values, v_out)
+        pytensor_values = f2(v_u, v_x0, W_in, W)
+        utt.assert_allclose(pytensor_values, v_out)
 
     def test_output_padding(self):
         """
@@ -884,7 +884,7 @@ class TestScan:
 
         f10 = function([u2, y0], outputs, updates=updates, allow_input_downcast=True)
         allstuff = f10(vu2, vy0)
-        aesara_y0, aesara_y1, aesara_y2 = allstuff
+        pytensor_y0, pytensor_y1, pytensor_y2 = allstuff
 
         # do things in numpy
         numpy_y0 = np.zeros((6, 2))
@@ -906,17 +906,17 @@ class TestScan:
             numpy_W1 = numpy_W1 + 0.1
             numpy_W2 = numpy_W2 + 0.05
 
-        utt.assert_allclose(aesara_y0, numpy_y0[3:])
-        utt.assert_allclose(aesara_y1, numpy_y1[1:])
-        utt.assert_allclose(aesara_y2, numpy_y2)
+        utt.assert_allclose(pytensor_y0, numpy_y0[3:])
+        utt.assert_allclose(pytensor_y1, numpy_y1[1:])
+        utt.assert_allclose(pytensor_y2, numpy_y2)
         utt.assert_allclose(W1.get_value(), numpy_W1)
         utt.assert_allclose(W2.get_value(), numpy_W2)
 
     def test_simple_shared_random(self):
-        aesara_rng = RandomStream(utt.fetch_seed())
+        pytensor_rng = RandomStream(utt.fetch_seed())
 
         values, updates = scan(
-            lambda: aesara_rng.uniform(-1, 1, size=(2,)),
+            lambda: pytensor_rng.uniform(-1, 1, size=(2,)),
             [],
             [],
             [],
@@ -928,16 +928,16 @@ class TestScan:
 
         rng_seed = np.random.SeedSequence(utt.fetch_seed())
         (rng_seed,) = rng_seed.spawn(1)
-        rng = aesara_rng.rng_ctor(rng_seed)
+        rng = pytensor_rng.rng_ctor(rng_seed)
 
         numpy_v = np.zeros((10, 2))
         for i in range(10):
             numpy_v[i] = rng.uniform(-1, 1, size=(2,))
 
-        aesara_v = my_f()
-        utt.assert_allclose(aesara_v, numpy_v[:5, :])
-        aesara_v = my_f()
-        utt.assert_allclose(aesara_v, numpy_v[5:, :])
+        pytensor_v = my_f()
+        utt.assert_allclose(pytensor_v, numpy_v[:5, :])
+        pytensor_v = my_f()
+        utt.assert_allclose(pytensor_v, numpy_v[5:, :])
 
     def test_only_shared_no_input_no_output(self):
         rng = np.random.default_rng(utt.fetch_seed())
@@ -1744,7 +1744,7 @@ class TestScan:
     def test_grad_duplicate_outputs(self):
         """
         This test validates that taking the gradient of a scan, in which
-        multiple outputs are the same aesara variable, works.
+        multiple outputs are the same pytensor variable, works.
         """
 
         def inner_fct(inp1, inp2, inp3):
@@ -2186,9 +2186,9 @@ def test_cvm_exception_handling(mode):
 def test_cython_performance():
 
     # This implicitly confirms that the Cython version is being used
-    from aesara.scan import scan_perform_ext  # noqa: F401
+    from pytensor.scan import scan_perform_ext  # noqa: F401
 
-    # Python usually out-performs Aesara below 100 iterations
+    # Python usually out-performs Pytensor below 100 iterations
     N = 200
     n_timeit = 50
 
@@ -2399,10 +2399,10 @@ class TestGradUntil:
         )
         g = grad(r.sum(), self.x)
         f = function([self.x, self.threshold], [r, g])
-        aesara_output, aesara_gradient = f(self.seq, 5)
+        pytensor_output, pytensor_gradient = f(self.seq, 5)
 
-        utt.assert_allclose(aesara_output, self.numpy_output)
-        utt.assert_allclose(aesara_gradient, self.numpy_gradient)
+        utt.assert_allclose(pytensor_output, self.numpy_output)
+        utt.assert_allclose(pytensor_gradient, self.numpy_gradient)
 
     def test_grad_until_ndim_greater_one(self):
         def tile_array(inp):
@@ -2418,10 +2418,10 @@ class TestGradUntil:
         )
         g = grad(r.sum(), X)
         f = function([X, self.threshold], [r, g])
-        aesara_output, aesara_gradient = f(arr, 5)
+        pytensor_output, pytensor_gradient = f(arr, 5)
 
-        utt.assert_allclose(aesara_output, tile_array(self.numpy_output))
-        utt.assert_allclose(aesara_gradient, tile_array(self.numpy_gradient))
+        utt.assert_allclose(pytensor_output, tile_array(self.numpy_output))
+        utt.assert_allclose(pytensor_gradient, tile_array(self.numpy_gradient))
 
     def test_grad_until_and_truncate(self):
         n = 3
@@ -2433,11 +2433,11 @@ class TestGradUntil:
         )
         g = grad(r.sum(), self.x)
         f = function([self.x, self.threshold], [r, g])
-        aesara_output, aesara_gradient = f(self.seq, 5)
+        pytensor_output, pytensor_gradient = f(self.seq, 5)
 
         self.numpy_gradient[: 7 - n] = 0
-        utt.assert_allclose(aesara_output, self.numpy_output)
-        utt.assert_allclose(aesara_gradient, self.numpy_gradient)
+        utt.assert_allclose(pytensor_output, self.numpy_output)
+        utt.assert_allclose(pytensor_gradient, self.numpy_gradient)
 
     def test_grad_until_and_truncate_sequence_taps(self):
         n = 3
@@ -2449,12 +2449,12 @@ class TestGradUntil:
         )
         g = grad(r.sum(), self.x)
         f = function([self.x, self.threshold], [r, g])
-        aesara_output, aesara_gradient = f(self.seq, 6)
+        pytensor_output, pytensor_gradient = f(self.seq, 6)
 
         # Gradient computed by hand:
         numpy_grad = np.array([0, 0, 0, 5, 6, 10, 4, 5, 0, 0, 0, 0, 0, 0, 0])
         numpy_grad = numpy_grad.astype(config.floatX)
-        utt.assert_allclose(aesara_gradient, numpy_grad)
+        utt.assert_allclose(pytensor_gradient, numpy_grad)
 
 
 def test_mintap_onestep():
@@ -2549,7 +2549,7 @@ def test_inner_get_vector_length():
 @config.change_flags(mode=Mode("cvm", None))
 def test_profile_info():
 
-    from aesara.scan.utils import ScanProfileStats
+    from pytensor.scan.utils import ScanProfileStats
 
     z, updates = scan(fn=lambda u: u + 1, sequences=[at.arange(10)], profile=True)
 
@@ -2636,12 +2636,12 @@ class TestExamples:
                 trng.binomial(1, vmean_t, size=vmean_t.shape), dtype="float32"
             )
 
-        aesara_vsamples, updates = scan(
+        pytensor_vsamples, updates = scan(
             f, [], vsample, [], n_steps=10, truncate_gradient=-1, go_backwards=False
         )
 
         my_f = function(
-            [vsample], aesara_vsamples[-1], updates=updates, allow_input_downcast=True
+            [vsample], pytensor_vsamples[-1], updates=updates, allow_input_downcast=True
         )
 
         rng_seed = np.random.SeedSequence(utt.fetch_seed())
@@ -2726,12 +2726,12 @@ class TestExamples:
             v_x[i] = np.dot(v_u1[i], vW_in1) + v_u2[i] * vW_in2 + np.dot(v_x[i - 1], vW)
             v_y[i] = np.dot(v_x[i - 1], vWout) + v_y[i - 1]
 
-        (aesara_dump1, aesara_dump2, aesara_x, aesara_y) = f4(
+        (pytensor_dump1, pytensor_dump2, pytensor_x, pytensor_y) = f4(
             v_u1, v_u2, v_x0, v_y0, vW_in1
         )
 
-        utt.assert_allclose(aesara_x, v_x)
-        utt.assert_allclose(aesara_y, v_y)
+        utt.assert_allclose(pytensor_x, v_x)
+        utt.assert_allclose(pytensor_y, v_y)
 
     def test_scan_as_tensor_on_gradients(self):
         to_scan = dvector("to_scan")
@@ -3217,7 +3217,7 @@ class TestExamples:
         )
 
         f7 = function([u, x0], outputs, updates=updates, allow_input_downcast=True)
-        aesara_out = f7(vu, vx0)
+        pytensor_out = f7(vu, vx0)
 
         # compute output in numpy
         # a bit of explaining:
@@ -3230,7 +3230,7 @@ class TestExamples:
         numpy_out = np.zeros((2,))
         numpy_out[0] = vu[0] * vW_in + vx0[1] * vW + vx0[0]
         numpy_out[1] = vu[1] * vW_in + numpy_out[0] * vW + vx0[1]
-        utt.assert_allclose(numpy_out, aesara_out)
+        utt.assert_allclose(numpy_out, pytensor_out)
 
     def test_past_future_taps_shared(self):
         """
@@ -3263,14 +3263,14 @@ class TestExamples:
         )
 
         f8 = function([u, x0], output, updates=updates, allow_input_downcast=True)
-        aesara_out = f8(vu, vx0)
+        pytensor_out = f8(vu, vx0)
         # compute output in numpy
         numpy_out = np.zeros(2)
         # think of vu[0] as vu[-2], vu[4] as vu[2]
         # and vx0[0] as vx0[-2], vx0[1] as vx0[-1]
         numpy_out[0] = (vu[0] + vu[4]) * vW_in + vx0[1] * vW + vx0[0]
         numpy_out[1] = (vu[1] + vu[5]) * vW_in + numpy_out[0] * vW + vx0[1]
-        utt.assert_allclose(numpy_out, aesara_out)
+        utt.assert_allclose(numpy_out, pytensor_out)
 
     def test_generator_one_output_scalar(self):
         """
@@ -3303,8 +3303,8 @@ class TestExamples:
         steps = 5
 
         numpy_values = np.array([state * (2 ** (k + 1)) for k in range(steps)])
-        aesara_values = my_f(state, steps)
-        utt.assert_allclose(numpy_values, aesara_values[0])
+        pytensor_values = my_f(state, steps)
+        utt.assert_allclose(numpy_values, pytensor_values[0])
 
     def test_default_value_broadcasted(self):
         def floatx(X):
@@ -3589,10 +3589,10 @@ class TestExamples:
             v_x[i] = np.dot(v_u1[i], vW_in1) + v_u2[i] * vW_in2 + np.dot(v_x[i - 1], vW)
             v_y[i] = np.dot(v_x[i - 1], vWout) + v_y[i - 1]
 
-        (aesara_dump, aesara_x, aesara_y) = f4(v_u1, v_u2, v_x0, v_y0, vW_in1)
+        (pytensor_dump, pytensor_x, pytensor_y) = f4(v_u1, v_u2, v_x0, v_y0, vW_in1)
 
-        utt.assert_allclose(aesara_x, v_x[-2:])
-        utt.assert_allclose(aesara_y, v_y[-4:])
+        utt.assert_allclose(pytensor_x, v_x[-2:])
+        utt.assert_allclose(pytensor_y, v_y[-4:])
 
     def test_until_random_infer_shape(self):
         """
@@ -3710,9 +3710,9 @@ class TestExamples:
             v_x[i] = np.dot(v_u1[i], vW_in1) + v_u2[i] * vW_in2 + np.dot(v_x[i - 1], vW)
             v_y[i] = np.dot(v_x[i - 1], vWout)
 
-        (aesara_x, aesara_y) = f4(v_u1, v_u2, v_x0, v_y0, vW_in1)
-        utt.assert_allclose(aesara_x, v_x)
-        utt.assert_allclose(aesara_y, v_y)
+        (pytensor_x, pytensor_y) = f4(v_u1, v_u2, v_x0, v_y0, vW_in1)
+        utt.assert_allclose(pytensor_x, v_x)
+        utt.assert_allclose(pytensor_y, v_y)
 
     def test_multiple_outs_taps(self):
         l = 5
@@ -4007,7 +4007,7 @@ def test_output_storage_reuse(linker_mode):
 
     if linker_mode == "cvm":
         # This implicitly confirms that the Cython version is being used
-        from aesara.scan import scan_perform_ext  # noqa: F401
+        from pytensor.scan import scan_perform_ext  # noqa: F401
 
     mode = Mode(linker=linker_mode, optimizer=None)
 

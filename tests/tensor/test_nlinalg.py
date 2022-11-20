@@ -4,12 +4,12 @@ import pytest
 from numpy import inf
 from numpy.testing import assert_array_almost_equal
 
-import aesara
-from aesara import function
-from aesara.configdefaults import config
-from aesara.graph.basic import Constant
-from aesara.tensor.math import _allclose
-from aesara.tensor.nlinalg import (
+import pytensor
+from pytensor import function
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Constant
+from pytensor.tensor.math import _allclose
+from pytensor.tensor.nlinalg import (
     SVD,
     Eig,
     MatrixInverse,
@@ -29,7 +29,7 @@ from aesara.tensor.nlinalg import (
     tensorsolve,
     trace,
 )
-from aesara.tensor.type import (
+from pytensor.tensor.type import (
     lmatrix,
     lscalar,
     matrix,
@@ -112,12 +112,12 @@ def test_matrix_dot():
         xs += [matrix()]
     sol = matrix_dot(*xs)
 
-    aesara_sol = function(xs, sol)(*rs)
+    pytensor_sol = function(xs, sol)(*rs)
     numpy_sol = rs[0]
     for r in rs[1:]:
         numpy_sol = np.dot(numpy_sol, r)
 
-    assert _allclose(numpy_sol, aesara_sol)
+    assert _allclose(numpy_sol, pytensor_sol)
 
 
 def test_qr_modes():
@@ -262,7 +262,7 @@ def test_det():
 
     r = rng.standard_normal((5, 5)).astype(config.floatX)
     x = matrix()
-    f = aesara.function([x], det(x))
+    f = pytensor.function([x], det(x))
     assert np.allclose(np.linalg.det(r), f(r))
 
 
@@ -284,7 +284,7 @@ def test_trace():
     rng = np.random.default_rng(utt.fetch_seed())
     x = matrix()
     g = trace(x)
-    f = aesara.function([x], g)
+    f = pytensor.function([x], g)
 
     for shp in [(2, 3), (3, 2), (3, 3)]:
         m = rng.random(shp).astype(config.floatX)
@@ -319,8 +319,8 @@ class TestEig(utt.InferShapeTester):
         A = self.A
         S = self.S
         self._compile_and_check(
-            [A],  # aesara.function inputs
-            self.op(A),  # aesara.function outputs
+            [A],  # pytensor.function inputs
+            self.op(A),  # pytensor.function outputs
             # S must be square
             [S],
             self.op_class,
@@ -482,8 +482,8 @@ class TestTensorInv(utt.InferShapeTester):
         A = self.A
         Ai = tensorinv(A)
         self._compile_and_check(
-            [A],  # aesara.function inputs
-            [Ai],  # aesara.function outputs
+            [A],  # pytensor.function inputs
+            [Ai],  # pytensor.function outputs
             [self.a],  # value to substitute
             TensorInv,
         )

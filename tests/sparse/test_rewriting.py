@@ -2,14 +2,14 @@ import numpy as np
 import pytest
 import scipy as sp
 
-import aesara
-from aesara import sparse
-from aesara.compile.mode import Mode, get_default_mode
-from aesara.configdefaults import config
-from aesara.sparse.rewriting import SamplingDotCSR, sd_csc
-from aesara.tensor.basic import as_tensor_variable
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.type import ivector, matrix, vector
+import pytensor
+from pytensor import sparse
+from pytensor.compile.mode import Mode, get_default_mode
+from pytensor.configdefaults import config
+from pytensor.sparse.rewriting import SamplingDotCSR, sd_csc
+from pytensor.tensor.basic import as_tensor_variable
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.type import ivector, matrix, vector
 from tests import unittest_tools as utt
 from tests.sparse.test_basic import random_lil
 
@@ -23,7 +23,7 @@ def test_local_csm_properties_csm():
         (sparse.CSC, sp.sparse.csc_matrix),
         (sparse.CSR, sp.sparse.csr_matrix),
     ]:
-        f = aesara.function(
+        f = pytensor.function(
             [data, indices, indptr, shape],
             sparse.csm_properties(CS(data, indices, indptr, shape)),
             mode=mode,
@@ -38,14 +38,14 @@ def test_local_csm_properties_csm():
 
 @pytest.mark.skip(reason="Rewrite disabled as it don't support unsorted indices")
 @pytest.mark.skipif(
-    not aesara.config.cxx, reason="G++ not available, so we need to skip this test."
+    not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
 )
 def test_local_csm_grad_c():
     data = vector()
     indices, indptr, shape = (ivector(), ivector(), ivector())
     mode = get_default_mode()
 
-    if aesara.config.mode == "FAST_COMPILE":
+    if pytensor.config.mode == "FAST_COMPILE":
         mode = Mode(linker="c|py", optimizer="fast_compile")
 
     mode = mode.including("specialize", "local_csm_grad_c")
@@ -54,8 +54,8 @@ def test_local_csm_grad_c():
         (sparse.CSR, sp.sparse.csr_matrix),
     ]:
         cost = at_sum(sparse.DenseFromSparse()(CS(data, indices, indptr, shape)))
-        f = aesara.function(
-            [data, indices, indptr, shape], aesara.grad(cost, data), mode=mode
+        f = pytensor.function(
+            [data, indices, indptr, shape], pytensor.grad(cost, data), mode=mode
         )
         assert not any(
             isinstance(node.op, sparse.CSMGrad) for node in f.maker.fgraph.toposort()
@@ -65,16 +65,16 @@ def test_local_csm_grad_c():
 
 
 @pytest.mark.skipif(
-    not aesara.config.cxx, reason="G++ not available, so we need to skip this test."
+    not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
 )
 def test_local_mul_s_d():
     mode = get_default_mode()
     mode = mode.including("specialize", "local_mul_s_d")
 
     for sp_format in sparse.sparse_formats:
-        inputs = [getattr(aesara.sparse, sp_format + "_matrix")(), matrix()]
+        inputs = [getattr(pytensor.sparse, sp_format + "_matrix")(), matrix()]
 
-        f = aesara.function(inputs, sparse.mul_s_d(*inputs), mode=mode)
+        f = pytensor.function(inputs, sparse.mul_s_d(*inputs), mode=mode)
 
         assert not any(
             isinstance(node.op, sparse.MulSD) for node in f.maker.fgraph.toposort()
@@ -82,16 +82,16 @@ def test_local_mul_s_d():
 
 
 @pytest.mark.skipif(
-    not aesara.config.cxx, reason="G++ not available, so we need to skip this test."
+    not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
 )
 def test_local_mul_s_v():
     mode = get_default_mode()
     mode = mode.including("specialize", "local_mul_s_v")
 
     for sp_format in ["csr"]:  # Not implemented for other format
-        inputs = [getattr(aesara.sparse, sp_format + "_matrix")(), vector()]
+        inputs = [getattr(pytensor.sparse, sp_format + "_matrix")(), vector()]
 
-        f = aesara.function(inputs, sparse.mul_s_v(*inputs), mode=mode)
+        f = pytensor.function(inputs, sparse.mul_s_v(*inputs), mode=mode)
 
         assert not any(
             isinstance(node.op, sparse.MulSV) for node in f.maker.fgraph.toposort()
@@ -99,16 +99,16 @@ def test_local_mul_s_v():
 
 
 @pytest.mark.skipif(
-    not aesara.config.cxx, reason="G++ not available, so we need to skip this test."
+    not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
 )
 def test_local_structured_add_s_v():
     mode = get_default_mode()
     mode = mode.including("specialize", "local_structured_add_s_v")
 
     for sp_format in ["csr"]:  # Not implemented for other format
-        inputs = [getattr(aesara.sparse, sp_format + "_matrix")(), vector()]
+        inputs = [getattr(pytensor.sparse, sp_format + "_matrix")(), vector()]
 
-        f = aesara.function(inputs, sparse.structured_add_s_v(*inputs), mode=mode)
+        f = pytensor.function(inputs, sparse.structured_add_s_v(*inputs), mode=mode)
 
         assert not any(
             isinstance(node.op, sparse.StructuredAddSV)
@@ -117,7 +117,7 @@ def test_local_structured_add_s_v():
 
 
 @pytest.mark.skipif(
-    not aesara.config.cxx, reason="G++ not available, so we need to skip this test."
+    not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
 )
 def test_local_sampling_dot_csr():
     mode = get_default_mode()
@@ -127,12 +127,12 @@ def test_local_sampling_dot_csr():
         inputs = [
             matrix(),
             matrix(),
-            getattr(aesara.sparse, sp_format + "_matrix")(),
+            getattr(pytensor.sparse, sp_format + "_matrix")(),
         ]
 
-        f = aesara.function(inputs, sparse.sampling_dot(*inputs), mode=mode)
+        f = pytensor.function(inputs, sparse.sampling_dot(*inputs), mode=mode)
 
-        if aesara.config.blas__ldflags:
+        if pytensor.config.blas__ldflags:
             assert not any(
                 isinstance(node.op, sparse.SamplingDot)
                 for node in f.maker.fgraph.toposort()
@@ -151,10 +151,10 @@ def test_local_dense_from_sparse_sparse_from_dense():
     mode = mode.including("local_dense_from_sparse_sparse_from_dense")
 
     m = matrix()
-    for op in [aesara.sparse.csr_from_dense, aesara.sparse.csc_from_dense]:
+    for op in [pytensor.sparse.csr_from_dense, pytensor.sparse.csc_from_dense]:
         s = op(m)
-        o = aesara.sparse.dense_from_sparse(s)
-        f = aesara.function([m], o, mode=mode)
+        o = pytensor.sparse.dense_from_sparse(s)
+        f = pytensor.function([m], o, mode=mode)
         # We should just have a deep copy.
         assert len(f.maker.fgraph.apply_nodes) == 1
         f([[1, 2], [3, 4]])

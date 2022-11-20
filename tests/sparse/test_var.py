@@ -4,11 +4,11 @@ import numpy as np
 import pytest
 from scipy.sparse.csr import csr_matrix
 
-import aesara
-import aesara.sparse as sparse
-import aesara.tensor as at
-from aesara.sparse.type import SparseTensorType
-from aesara.tensor.type import DenseTensorType
+import pytensor
+import pytensor.sparse as sparse
+import pytensor.tensor as at
+from pytensor.sparse.type import SparseTensorType
+from pytensor.tensor.type import DenseTensorType
 
 
 class TestSparseVariable:
@@ -101,7 +101,9 @@ class TestSparseVariable:
 
         assert all(isinstance(out.type, exp_type) for out in z_outs)
 
-        f = aesara.function([x], z, on_unused_input="ignore", allow_input_downcast=True)
+        f = pytensor.function(
+            [x], z, on_unused_input="ignore", allow_input_downcast=True
+        )
 
         res = f([[1.1, 0.0, 2.0], [-1.0, 0.0, 0.0]])
 
@@ -157,7 +159,7 @@ class TestSparseVariable:
 
         assert all(isinstance(out.type, exp_type) for out in z_outs)
 
-        f = aesara.function([x, y], z)
+        f = pytensor.function([x, y], z)
         res = f(
             [[1, 0, 2], [-1, 0, 0]],
             [[1, 1, 2], [1, 4, 1]],
@@ -179,7 +181,7 @@ class TestSparseVariable:
 
         assert isinstance(z.type, DenseTensorType)
 
-        f = aesara.function([x], z)
+        f = pytensor.function([x], z)
         exp_res = f([[1.1, 0.0, 2.0], [-1.0, 0.0, 0.0]])
         assert isinstance(exp_res, np.ndarray)
 
@@ -192,7 +194,7 @@ class TestSparseVariable:
 
         assert isinstance(z.type, DenseTensorType)
 
-        f = aesara.function([x], z)
+        f = pytensor.function([x], z)
         exp_res = f([[1.1, 0.0, 2.0], [-1.0, 0.0, 0.0]])
         assert isinstance(exp_res, np.ndarray)
 
@@ -203,7 +205,7 @@ class TestSparseVariable:
         z = x[:, :2]
         assert isinstance(z.type, SparseTensorType)
 
-        f = aesara.function([x], z)
+        f = pytensor.function([x], z)
         exp_res = f([[1.1, 0.0, 2.0], [-1.0, 0.0, 0.0]])
         assert isinstance(exp_res, csr_matrix)
 
@@ -216,7 +218,7 @@ class TestSparseVariable:
         z = x.__dot__(y)
         assert isinstance(z.type, SparseTensorType)
 
-        f = aesara.function([x, y], z)
+        f = pytensor.function([x, y], z)
         exp_res = f(
             [[1, 0, 2], [-1, 0, 0]],
             [[-1], [2], [1]],
@@ -232,6 +234,6 @@ class TestSparseVariable:
 
         assert isinstance(z.type, DenseTensorType)
 
-        f = aesara.function([x], z)
+        f = pytensor.function([x], z)
         exp_res = f([[1.1, 0.0, 2.0], [-1.0, 0.0, 0.0]])
         assert isinstance(exp_res, np.ndarray)

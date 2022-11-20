@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-import aesara.tensor as at
-from aesara.graph.fg import FunctionGraph
-from aesara.tensor.type import matrix
-from aesara.tensor.utils import hash_from_ndarray, shape_of_variables
+import pytensor.tensor as at
+from pytensor.graph.fg import FunctionGraph
+from pytensor.tensor.type import matrix
+from pytensor.tensor.utils import hash_from_ndarray, shape_of_variables
 
 
 def test_hash_from_ndarray():

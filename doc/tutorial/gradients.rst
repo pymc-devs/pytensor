@@ -2,14 +2,14 @@
 .. _tutcomputinggrads:
 
 
-=====================
-Derivatives in Aesara
-=====================
+=======================
+Derivatives in Pytensor
+=======================
 
 Computing Gradients
 ===================
 
-Now let's use Aesara for a slightly more sophisticated task: create a
+Now let's use Pytensor for a slightly more sophisticated task: create a
 function which computes the derivative of some expression ``y`` with
 respect to its parameter ``x``. To do this we will use the macro `at.grad`.
 For instance, we can compute the gradient of :math:`x^2` with respect to
@@ -21,15 +21,15 @@ Here is the code to compute this gradient:
 .. tests/test_tutorial.py:T_examples.test_examples_4
 
 >>> import numpy
->>> import aesara
->>> import aesara.tensor as at
->>> from aesara import pp
+>>> import pytensor
+>>> import pytensor.tensor as at
+>>> from pytensor import pp
 >>> x = at.dscalar('x')
 >>> y = x ** 2
 >>> gy = at.grad(y, x)
 >>> pp(gy)  # print out the gradient prior to optimization
 '((fill((x ** TensorConstant{2}), TensorConstant{1.0}) * TensorConstant{2}) * (x ** (TensorConstant{2} - TensorConstant{1})))'
->>> f = aesara.function([x], gy)
+>>> f = pytensor.function([x], gy)
 >>> f(4)
 array(8.0)
 >>> numpy.allclose(f(94.2), 188.4)
@@ -41,7 +41,7 @@ the correct symbolic gradient.
 ``x**2`` and fill it with ``1.0``.
 
 .. note::
-    Aesara's rewrites simplify the symbolic gradient expression.  You can see
+    Pytensor's rewrites simplify the symbolic gradient expression.  You can see
     this by digging inside the internal properties of the compiled function.
 
     .. testcode::
@@ -67,14 +67,14 @@ logistic is: :math:`ds(x)/dx = s(x) \cdot (1 - s(x))`.
 >>> x = at.dmatrix('x')
 >>> s = at.sum(1 / (1 + at.exp(-x)))
 >>> gs = at.grad(s, x)
->>> dlogistic = aesara.function([x], gs)
+>>> dlogistic = pytensor.function([x], gs)
 >>> dlogistic([[0, 1], [-1, -2]])
 array([[ 0.25      ,  0.19661193],
        [ 0.19661193,  0.10499359]])
 
 In general, for any **scalar** expression ``s``, ``at.grad(s, w)`` provides
-the Aesara expression for computing :math:`\frac{\partial s}{\partial w}`. In
-this way Aesara can be used for doing **efficient** symbolic differentiation
+the Pytensor expression for computing :math:`\frac{\partial s}{\partial w}`. In
+this way Pytensor can be used for doing **efficient** symbolic differentiation
 (as the expression returned by `at.grad` will be optimized during compilation), even for
 function with many inputs. (see `automatic differentiation <http://en.wikipedia.org/wiki/Automatic_differentiation>`_ for a description
 of symbolic differentiation).
@@ -91,15 +91,15 @@ of symbolic differentiation).
    :ref:`this<libdoc_gradient>` section of the library.
 
    Additional information on the inner workings of differentiation may also be
-   found in the more advanced tutorial :ref:`Extending Aesara<extending>`.
+   found in the more advanced tutorial :ref:`Extending Pytensor<extending>`.
 
 Computing the Jacobian
 ======================
 
-In Aesara's parlance, the term **Jacobian** designates the tensor comprising the
+In Pytensor's parlance, the term **Jacobian** designates the tensor comprising the
 first partial derivatives of the output of a function with respect to its inputs.
 (This is a generalization of to the so-called Jacobian matrix in Mathematics.)
-Aesara implements the :func:`aesara.gradient.jacobian` macro that does all
+Pytensor implements the :func:`pytensor.gradient.jacobian` macro that does all
 that is needed to compute the Jacobian. The following text explains how
 to do it manually.
 
@@ -110,18 +110,18 @@ do is to loop over the entries in ``y`` and compute the gradient of
 
 .. note::
 
-    `scan` is a generic op in Aesara that allows writing in a symbolic
+    `scan` is a generic op in Pytensor that allows writing in a symbolic
     manner all kinds of recurrent equations. While creating
     symbolic loops (and optimizing them for performance) is a hard task,
     effort is being done for improving the performance of `scan`. We
     shall return to :ref:`scan<tutloop>` later in this tutorial.
 
->>> import aesara
->>> import aesara.tensor as at
+>>> import pytensor
+>>> import pytensor.tensor as at
 >>> x = at.dvector('x')
 >>> y = x ** 2
->>> J, updates = aesara.scan(lambda i, y, x : at.grad(y[i], x), sequences=at.arange(y.shape[0]), non_sequences=[y, x])
->>> f = aesara.function([x], J, updates=updates)
+>>> J, updates = pytensor.scan(lambda i, y, x : at.grad(y[i], x), sequences=at.arange(y.shape[0]), non_sequences=[y, x])
+>>> f = pytensor.function([x], J, updates=updates)
 >>> f([4, 4])
 array([[ 8.,  0.],
        [ 0.,  8.]])
@@ -135,7 +135,7 @@ matrix which corresponds to the Jacobian.
 .. note::
     There are some pitfalls to be aware of regarding `at.grad`. One of them is that you
     cannot re-write the above expression of the Jacobian as
-    ``aesara.scan(lambda y_i,x: at.grad(y_i,x), sequences=y, non_sequences=x)``,
+    ``pytensor.scan(lambda y_i,x: at.grad(y_i,x), sequences=y, non_sequences=x)``,
     even though from the documentation of scan this
     seems possible. The reason is that ``y_i`` will not be a function of
     ``x`` anymore, while ``y[i]`` still is.
@@ -144,9 +144,9 @@ matrix which corresponds to the Jacobian.
 Computing the Hessian
 =====================
 
-In Aesara, the term **Hessian** has the usual mathematical meaning: It is the
+In Pytensor, the term **Hessian** has the usual mathematical meaning: It is the
 matrix comprising the second order partial derivative of a function with scalar
-output and vector input. Aesara implements :func:`aesara.gradient.hessian` macro that does all
+output and vector input. Pytensor implements :func:`pytensor.gradient.hessian` macro that does all
 that is needed to compute the Hessian. The following text explains how
 to do it manually.
 
@@ -159,8 +159,8 @@ scalar.
 >>> y = x ** 2
 >>> cost = y.sum()
 >>> gy = at.grad(cost, x)
->>> H, updates = aesara.scan(lambda i, gy,x : at.grad(gy[i], x), sequences=at.arange(gy.shape[0]), non_sequences=[gy, x])
->>> f = aesara.function([x], H, updates=updates)
+>>> H, updates = pytensor.scan(lambda i, gy,x : at.grad(gy[i], x), sequences=at.arange(gy.shape[0]), non_sequences=[gy, x])
+>>> f = pytensor.function([x], H, updates=updates)
 >>> f([4, 4])
 array([[ 2.,  0.],
        [ 0.,  2.]])
@@ -177,7 +177,7 @@ performance gains. A description of one such algorithm can be found here:
 
 - Barak A. Pearlmutter, "Fast Exact Multiplication by the Hessian", Neural Computation, 1994
 
-While in principle we would want Aesara to identify these patterns automatically for us,
+While in principle we would want Pytensor to identify these patterns automatically for us,
 in practice, implementing such optimizations in a generic manner is extremely
 difficult. Therefore, we provide special functions dedicated to these tasks.
 
@@ -190,7 +190,7 @@ vector, namely :math:`\frac{\partial f(x)}{\partial x} v`. The formulation
 can be extended even for :math:`x` being a matrix, or a tensor in general, case in
 which also the Jacobian becomes a tensor and the product becomes some kind
 of tensor product. Because in practice we end up needing to compute such
-expressions in terms of weight matrices, Aesara supports this more generic
+expressions in terms of weight matrices, Pytensor supports this more generic
 form of the operation. In order to evaluate the R-operation of
 expression ``y``, with respect to ``x``, multiplying the Jacobian with ``V``
 you need to do something similar to this:
@@ -199,8 +199,8 @@ you need to do something similar to this:
 >>> V = at.dmatrix('V')
 >>> x = at.dvector('x')
 >>> y = at.dot(x, W)
->>> JV = aesara.gradient.Rop(y, W, V)
->>> f = aesara.function([W, V, x], JV)
+>>> JV = pytensor.gradient.Rop(y, W, V)
+>>> f = pytensor.function([W, V, x], JV)
 >>> f([[1, 1], [1, 1]], [[2, 2], [2, 2]], [0,1])
 array([ 2.,  2.])
 
@@ -218,8 +218,8 @@ f(x)}{\partial x}`. The L-operator is also supported for generic tensors
 >>> v = at.dvector('v')
 >>> x = at.dvector('x')
 >>> y = at.dot(x, W)
->>> VJ = aesara.gradient.Lop(y, W, v)
->>> f = aesara.function([v,x], VJ)
+>>> VJ = pytensor.gradient.Lop(y, W, v)
+>>> f = pytensor.function([v,x], VJ)
 >>> f([2, 2], [0, 1])
 array([[ 0.,  0.],
        [ 2.,  2.]])
@@ -251,7 +251,7 @@ Hence, we suggest profiling the methods before using either one of the two:
 >>> y = at.sum(x ** 2)
 >>> gy = at.grad(y, x)
 >>> vH = at.grad(at.sum(gy * v), x)
->>> f = aesara.function([x, v], vH)
+>>> f = pytensor.function([x, v], vH)
 >>> f([4, 4], [2, 2])
 array([ 4.,  4.])
 
@@ -262,8 +262,8 @@ or, making use of the R-operator:
 >>> v = at.dvector('v')
 >>> y = at.sum(x ** 2)
 >>> gy = at.grad(y, x)
->>> Hv = aesara.gradient.Rop(gy, x, v)
->>> f = aesara.function([x, v], Hv)
+>>> Hv = pytensor.gradient.Rop(gy, x, v)
+>>> f = pytensor.function([x, v], Hv)
 >>> f([4, 4], [2, 2])
 array([ 4.,  4.])
 
@@ -272,7 +272,7 @@ Final Pointers
 ==============
 
 
-- The `grad` function works symbolically: it receives and returns Aesara variables.
+- The `grad` function works symbolically: it receives and returns Pytensor variables.
 
 - `grad` can be compared to a macro since it can be applied repeatedly.
 

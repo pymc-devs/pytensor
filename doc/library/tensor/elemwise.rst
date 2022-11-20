@@ -4,12 +4,12 @@
 
 .. testsetup::
 
-   from aesara.tensor.elemwise import *
+   from pytensor.tensor.elemwise import *
 
 .. module:: tensor.elemwise
    :platform: Unix, Windows
    :synopsis: Tensor Elemwise
 .. moduleauthor:: LISA
 
-.. automodule:: aesara.tensor.elemwise
+.. automodule:: pytensor.tensor.elemwise
     :members:

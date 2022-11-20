@@ -1,11 +1,11 @@
 import numpy as np
 
-import aesara.tensor.basic as at
-from aesara.graph.basic import Apply, Variable
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import Op
-from aesara.graph.rewriting.basic import MergeOptimizer
-from aesara.graph.type import Type
+import pytensor.tensor.basic as at
+from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op
+from pytensor.graph.rewriting.basic import MergeOptimizer
+from pytensor.graph.type import Type
 
 
 def is_variable(x):

@@ -35,11 +35,11 @@ doc/indexes/typelist.txt
 html
 pdf
 setuptools-*.egg
-aesara/generated_version.py
-aesara/generated_version.py.out
+pytensor/generated_version.py
+pytensor/generated_version.py.out
 distribute-*.egg
 distribute-*.tar.gz
-Aesara.suo
+Pytensor.suo
 .ipynb_checkpoints
 .pydevproject
 .ropeproject
@@ -49,7 +49,7 @@ core
 .mypy_cache/
 /htmlcov/
 
-aesara-venv/
+pytensor-venv/
 /notebooks/Sandbox*
 .vscode/
 testing-report.html

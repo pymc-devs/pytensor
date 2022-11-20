@@ -5,17 +5,17 @@ sp = pytest.importorskip("scipy", minversion="0.7.0")
 
 import numpy as np
 
-import aesara
-from aesara import sparse
-from aesara.configdefaults import config
-from aesara.sparse.sandbox.sp2 import (
+import pytensor
+from pytensor import sparse
+from pytensor.configdefaults import config
+from pytensor.sparse.sandbox.sp2 import (
     Binomial,
     Multinomial,
     Poisson,
     multinomial,
     poisson,
 )
-from aesara.tensor.type import lscalar, lvector, scalar
+from pytensor.tensor.type import lscalar, lvector, scalar
 from tests import unittest_tools as utt
 from tests.sparse.test_basic import as_sparse_format
 
@@ -25,11 +25,11 @@ class TestPoisson(utt.InferShapeTester):
     a = {}
 
     for format in sparse.sparse_formats:
-        variable = getattr(aesara.sparse, format + "_matrix")
+        variable = getattr(pytensor.sparse, format + "_matrix")
 
         a_val = np.array(
             np.random.default_rng(utt.fetch_seed()).integers(1, 4, size=(3, 4)) - 1,
-            dtype=aesara.config.floatX,
+            dtype=pytensor.config.floatX,
         )
 
         x[format] = variable()
@@ -41,7 +41,7 @@ class TestPoisson(utt.InferShapeTester):
 
     def test_op(self):
         for format in sparse.sparse_formats:
-            f = aesara.function([self.x[format]], poisson(self.x[format]))
+            f = pytensor.function([self.x[format]], poisson(self.x[format]))
 
             tested = f(self.a[format])
 
@@ -78,7 +78,7 @@ class TestBinomial(utt.InferShapeTester):
     def test_op(self):
         for sp_format in sparse.sparse_formats:
             for o_type in sparse.float_dtypes:
-                f = aesara.function(
+                f = pytensor.function(
                     self.inputs, Binomial(sp_format, o_type)(*self.inputs)
                 )
 
@@ -120,7 +120,7 @@ class TestMultinomial(utt.InferShapeTester):
 
     def test_op(self):
         n = lscalar()
-        f = aesara.function([self.p, n], multinomial(n, self.p))
+        f = pytensor.function([self.p, n], multinomial(n, self.p))
 
         _n = 5
         tested = f(self._p, _n)
@@ -129,7 +129,7 @@ class TestMultinomial(utt.InferShapeTester):
         assert tested[2, 1] == _n
 
         n = lvector()
-        f = aesara.function([self.p, n], multinomial(n, self.p))
+        f = pytensor.function([self.p, n], multinomial(n, self.p))
 
         _n = np.asarray([1, 2, 3, 4], dtype="int64")
         tested = f(self._p, _n)

@@ -7,13 +7,13 @@
 
 .. testsetup:: *
 
-   from aesara.misc.pkl_utils import *
+   from pytensor.misc.pkl_utils import *
 
-.. autofunction:: aesara.misc.pkl_utils.dump
+.. autofunction:: pytensor.misc.pkl_utils.dump
 
-.. autofunction:: aesara.misc.pkl_utils.load
+.. autofunction:: pytensor.misc.pkl_utils.load
 
-.. autoclass:: aesara.misc.pkl_utils.StripPickler
+.. autoclass:: pytensor.misc.pkl_utils.StripPickler
 
 .. seealso::
 

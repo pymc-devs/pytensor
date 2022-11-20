@@ -2,11 +2,11 @@ import copy
 
 import numpy as np
 
-from aesara.compile.function import function
-from aesara.compile.io import Out
-from aesara.tensor.math import dot
-from aesara.tensor.nnet import crossentropy_softmax_argmax_1hot_with_bias
-from aesara.tensor.type import dmatrix, dvector, ivector, matrix
+from pytensor.compile.function import function
+from pytensor.compile.io import Out
+from pytensor.tensor.math import dot
+from pytensor.tensor.nnet import crossentropy_softmax_argmax_1hot_with_bias
+from pytensor.tensor.type import dmatrix, dvector, ivector, matrix
 
 
 def test_bug_2009_07_17_borrowed_output():

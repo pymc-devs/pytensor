@@ -8,15 +8,15 @@ from kanren.assoccomm import associative, commutative, eq_assoccomm
 from kanren.core import lall
 from unification import var, vars
 
-import aesara.tensor as at
-from aesara.graph.basic import Apply
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import Op
-from aesara.graph.rewriting.basic import EquilibriumGraphRewriter
-from aesara.graph.rewriting.kanren import KanrenRelationSub
-from aesara.graph.rewriting.unify import eval_if_etuple
-from aesara.graph.rewriting.utils import rewrite_graph
-from aesara.tensor.math import Dot, _dot
+import pytensor.tensor as at
+from pytensor.graph.basic import Apply
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op
+from pytensor.graph.rewriting.basic import EquilibriumGraphRewriter
+from pytensor.graph.rewriting.kanren import KanrenRelationSub
+from pytensor.graph.rewriting.unify import eval_if_etuple
+from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.tensor.math import Dot, _dot
 from tests.graph.utils import MyType, MyVariable
 
 
@@ -170,4 +170,4 @@ def test_KanrenRelationSub_dot():
 def test_deprecations():
     """Make sure we can import deprecated classes from current and deprecated modules."""
     with pytest.deprecated_call():
-        from aesara.graph.kanren import KanrenRelationSub  # noqa: F401 F811
+        from pytensor.graph.kanren import KanrenRelationSub  # noqa: F401 F811
