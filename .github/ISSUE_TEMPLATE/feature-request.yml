@@ -17,7 +17,7 @@ body:
       including adding or changing the meaning of arguments to an existing
       function, please post your idea here to explain your reasoning.
       You can also check out our
-      [Contributor Guide](https://github.com/pymc-devs/pymc/blob/main/CONTRIBUTING.md)
+      [Contributor Guide](https://github.com/pymc-devs/pytensor/blob/main/CONTRIBUTING.md)
       if you need more information.
 
 - type: textarea

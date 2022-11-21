@@ -47,18 +47,26 @@ body:
       which you can generate by following
       [these instructions](https://github.com/numpy/numpy/blob/main/doc/source/dev/development_environment.rst#debugging).
     placeholder: |
+      <details>
       << Full traceback starting from `Traceback: ...` >>
+      </details>
     render: shell
 
 - type: textarea
   attributes:
     label: "PyMC version information:"
     description: >
-      PyMC/PyMC3 Version:
-      Aesara/Theano Version:
+      Pytensor Version:
       Python Version:
       Operating system:
-      How did you install PyMC/PyMC3: (conda/pip)
+      How did you install pytensor: (conda/pip)
+      Specific config for the issue if any
+      (you may use `python -c "import pytensor; print(pytensor.config)"` 
+      to get it and enclose in `<details>` `</details>`)
+    placeholder: |
+      <details>
+      configuration information
+      </details>
   validations:
     required: true
 
