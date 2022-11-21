@@ -4,10 +4,10 @@ from optparse import OptionParser
 
 import numpy as np
 
-import aesara
-from aesara.configdefaults import config
-from aesara.tensor.math import tanh
-from aesara.tensor.type import vector
+import pytensor
+from pytensor.configdefaults import config
+from pytensor.tensor.math import tanh
+from pytensor.tensor.type import vector
 
 
 parser = OptionParser(
@@ -47,8 +47,8 @@ def ElemwiseOpTime(N, script=False, loops=1000):
     x = vector("x")
     np.random.seed(1235)
     v = np.random.random(N).astype(config.floatX)
-    f = aesara.function([x], 2 * x + x * x)
-    f1 = aesara.function([x], tanh(x))
+    f = pytensor.function([x], 2 * x + x * x)
+    f1 = pytensor.function([x], tanh(x))
     if not script:
         if config.openmp:
             print("With openmp:")

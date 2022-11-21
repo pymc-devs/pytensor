@@ -16,19 +16,19 @@ from typing import TYPE_CHECKING, Any, Optional, Sequence, Union
 
 import numpy as np
 
-import aesara.tensor as at
-from aesara import as_symbolic
-from aesara.compile import optdb
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Variable, clone_replace, is_in_ancestors
-from aesara.graph.op import _NoPythonOp
-from aesara.graph.rewriting.basic import GraphRewriter, in2out, node_rewriter
-from aesara.graph.type import HasDataType, HasShape
-from aesara.tensor.shape import Reshape, Shape, SpecifyShape, Unbroadcast
+import pytensor.tensor as at
+from pytensor import as_symbolic
+from pytensor.compile import optdb
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Variable, clone_replace, is_in_ancestors
+from pytensor.graph.op import _NoPythonOp
+from pytensor.graph.rewriting.basic import GraphRewriter, in2out, node_rewriter
+from pytensor.graph.type import HasDataType, HasShape
+from pytensor.tensor.shape import Reshape, Shape, SpecifyShape, Unbroadcast
 
 
 if TYPE_CHECKING:
-    from aesara.tensor import TensorLike
+    from pytensor.tensor import TensorLike
 
 
 class IfElse(_NoPythonOp):
@@ -592,7 +592,7 @@ class CondMerge(GraphRewriter):
     """Graph Optimizer that merges different cond ops"""
 
     def add_requirements(self, fgraph):
-        from aesara.graph.features import ReplaceValidate
+        from pytensor.graph.features import ReplaceValidate
 
         fgraph.add_feature(ReplaceValidate())
 

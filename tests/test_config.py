@@ -5,16 +5,16 @@ import pickle
 
 import pytest
 
-from aesara import configdefaults, configparser
-from aesara.configdefaults import short_platform
-from aesara.configparser import ConfigParam
+from pytensor import configdefaults, configparser
+from pytensor.configdefaults import short_platform
+from pytensor.configparser import ConfigParam
 
 
 def _create_test_config():
     return configparser.AesaraConfigParser(
         flags_dict={},
-        aesara_cfg=stdlib_configparser.ConfigParser(),
-        aesara_raw_cfg=stdlib_configparser.RawConfigParser(),
+        pytensor_cfg=stdlib_configparser.ConfigParser(),
+        pytensor_raw_cfg=stdlib_configparser.RawConfigParser(),
     )
 
 
@@ -251,11 +251,11 @@ def test_mode_apply():
         configdefaults._filter_mode("not_a_mode")
 
     # test with Mode instance
-    import aesara.compile.mode
+    import pytensor.compile.mode
 
     assert (
-        configdefaults._filter_mode(aesara.compile.mode.FAST_COMPILE)
-        == aesara.compile.mode.FAST_COMPILE
+        configdefaults._filter_mode(pytensor.compile.mode.FAST_COMPILE)
+        == pytensor.compile.mode.FAST_COMPILE
     )
 
 

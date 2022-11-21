@@ -6,10 +6,10 @@ Define `SymbolicInput`, `SymbolicOutput`, `In`, `Out`.
 
 import logging
 
-from aesara.link.basic import Container
+from pytensor.link.basic import Container
 
 
-_logger = logging.getLogger("aesara.compile.io")
+_logger = logging.getLogger("pytensor.compile.io")
 
 __docformat__ = "restructuredtext en"
 
@@ -206,7 +206,7 @@ class In(SymbolicInput):
             )
 
         if implicit is None:
-            from aesara.compile.sharedvalue import SharedVariable
+            from pytensor.compile.sharedvalue import SharedVariable
 
             implicit = isinstance(value, Container) or isinstance(value, SharedVariable)
         super().__init__(

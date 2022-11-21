@@ -4,17 +4,17 @@ import time
 import numpy as np
 import pytest
 
-import aesara
-from aesara.compile.mode import Mode
-from aesara.link.basic import PerformLinker
-from aesara.link.c.basic import OpWiseCLinker
-from aesara.tensor.type import dvector, lvector
+import pytensor
+from pytensor.compile.mode import Mode
+from pytensor.link.basic import PerformLinker
+from pytensor.link.c.basic import OpWiseCLinker
+from pytensor.tensor.type import dvector, lvector
 
 
 def test_no_reuse():
     x = lvector()
     y = lvector()
-    f = aesara.function([x, y], x + y)
+    f = pytensor.function([x, y], x + y)
 
     # provide both inputs in the first call
     f(np.ones(10, dtype="int64"), np.ones(10, dtype="int64"))
@@ -44,8 +44,8 @@ def test_gc_never_pickles_temporaries():
 
         # g_linker has no garbage collection
 
-        f = aesara.function([x], r, mode=Mode(optimizer=optimizer, linker=f_linker))
-        g = aesara.function([x], r, mode=Mode(optimizer=optimizer, linker=g_linker))
+        f = pytensor.function([x], r, mode=Mode(optimizer=optimizer, linker=f_linker))
+        g = pytensor.function([x], r, mode=Mode(optimizer=optimizer, linker=g_linker))
 
         pre_f = pickle.dumps(f)
         # pre_g = pickle.dumps(g)
@@ -65,7 +65,7 @@ def test_gc_never_pickles_temporaries():
         assert a(g) == a(g)  # some sanity checks on the pickling mechanism
 
         def b(fn):
-            return len(pickle.dumps(aesara.compile.function.types._pickle_Function(fn)))
+            return len(pickle.dumps(pytensor.compile.function.types._pickle_Function(fn)))
 
         assert b(f) == b(f)  # some sanity checks on the pickling mechanism
 
@@ -113,7 +113,7 @@ def test_merge_opt_runtime():
         r = r + r / 10
 
     t = time.time()
-    aesara.function([x], r, mode="FAST_COMPILE")
+    pytensor.function([x], r, mode="FAST_COMPILE")
     # FAST_RUN does in-place optimizer which requires a lot of
     # toposorting, which is actually pretty slow at the moment.  This
     # test was designed to test MergeOptimizer... so I'm leaving

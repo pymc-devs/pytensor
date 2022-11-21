@@ -3,25 +3,25 @@ from typing import Optional, Sequence, Tuple, Union
 
 import numpy as np
 
-import aesara
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Variable
-from aesara.graph.op import Op
-from aesara.misc.safe_asarray import _asarray
-from aesara.scalar import ScalarVariable
-from aesara.tensor.basic import (
+import pytensor
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.op import Op
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.scalar import ScalarVariable
+from pytensor.tensor.basic import (
     as_tensor_variable,
     constant,
     get_scalar_constant_value,
     get_vector_length,
     infer_static_shape,
 )
-from aesara.tensor.random.type import RandomGeneratorType, RandomStateType, RandomType
-from aesara.tensor.random.utils import normalize_size_param, params_broadcast_shapes
-from aesara.tensor.shape import shape_tuple
-from aesara.tensor.type import TensorType, all_dtypes
-from aesara.tensor.type_other import NoneConst
-from aesara.tensor.var import TensorVariable
+from pytensor.tensor.random.type import RandomGeneratorType, RandomStateType, RandomType
+from pytensor.tensor.random.utils import normalize_size_param, params_broadcast_shapes
+from pytensor.tensor.shape import shape_tuple
+from pytensor.tensor.type import TensorType, all_dtypes
+from pytensor.tensor.type_other import NoneConst
+from pytensor.tensor.var import TensorVariable
 
 
 def default_supp_shape_from_params(
@@ -43,14 +43,14 @@ def default_supp_shape_from_params(
     scalars), since that is already definitively handled in the `Op` that
     calls this.
 
-    TODO: Consider using `aesara.compile.ops.shape_i` alongside `ShapeFeature`.
+    TODO: Consider using `pytensor.compile.ops.shape_i` alongside `ShapeFeature`.
 
     Parameters
     ----------
     ndim_supp: int
         Total number of dimensions for a single draw of the random variable
         (e.g. a multivariate normal draw is 1D, so `ndim_supp = 1`).
-    dist_params: list of `aesara.graph.basic.Variable`
+    dist_params: list of `pytensor.graph.basic.Variable`
         The distribution parameters.
     rep_param_idx: int (optional)
         The index of the distribution parameter to use as a reference
@@ -120,7 +120,7 @@ class RandomVariable(Op):
             ``ndims_params = [1, 2]``).
         dtype: str (optional)
             The dtype of the sampled output.  If the value ``"floatX"`` is
-            given, then ``dtype`` is set to ``aesara.config.floatX``.  If
+            given, then ``dtype`` is set to ``pytensor.config.floatX``.  If
             ``None`` (the default), the `dtype` keyword must be set when
             `RandomVariable.make_node` is called.
         inplace: boolean (optional)
@@ -238,7 +238,7 @@ class RandomVariable(Op):
             # independent variates should broadcast together.
             p_slices, p_shapes = zip(*params_ind_slice)
 
-            shape_ind = aesara.tensor.extra_ops.broadcast_shape_iter(
+            shape_ind = pytensor.tensor.extra_ops.broadcast_shape_iter(
                 p_shapes, arrays_are_shapes=True
             )
 
@@ -295,7 +295,7 @@ class RandomVariable(Op):
             NumPy-like size parameter.
         dtype: str
             The dtype of the sampled output.  If the value ``"floatX"`` is
-            given, then `dtype` is set to ``aesara.config.floatX``.  This value is
+            given, then `dtype` is set to ``pytensor.config.floatX``.  This value is
             only used when ``self.dtype`` isn't set.
         dist_params: list
             Distribution parameters.
@@ -315,7 +315,7 @@ class RandomVariable(Op):
         )
 
         if rng is None:
-            rng = aesara.shared(np.random.default_rng())
+            rng = pytensor.shared(np.random.default_rng())
         elif not isinstance(rng.type, RandomType):
             raise TypeError(
                 "The type of rng should be an instance of either RandomGeneratorType or RandomStateType"
@@ -377,7 +377,7 @@ class RandomVariable(Op):
 
     def grad(self, inputs, outputs):
         return [
-            aesara.gradient.grad_undefined(
+            pytensor.gradient.grad_undefined(
                 self, k, inp, "No gradient defined for random variables"
             )
             for k, inp in enumerate(inputs)

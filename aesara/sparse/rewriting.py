@@ -1,18 +1,18 @@
 import scipy
 
-import aesara
-import aesara.scalar as aes
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply
-from aesara.graph.rewriting.basic import (
+import pytensor
+import pytensor.scalar as aes
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply
+from pytensor.graph.rewriting.basic import (
     PatternNodeRewriter,
     WalkingGraphRewriter,
     node_rewriter,
 )
-from aesara.link.c.op import COp, _NoPythonCOp
-from aesara.misc.safe_asarray import _asarray
-from aesara.sparse import basic as sparse
-from aesara.sparse.basic import (
+from pytensor.link.c.op import COp, _NoPythonCOp
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.sparse import basic as sparse
+from pytensor.sparse.basic import (
     CSC,
     CSR,
     csm_data,
@@ -22,12 +22,12 @@ from aesara.sparse.basic import (
     csm_properties,
     usmm,
 )
-from aesara.tensor import blas
-from aesara.tensor.basic import as_tensor_variable, cast
-from aesara.tensor.math import mul, neg, sub
-from aesara.tensor.rewriting.basic import register_canonicalize, register_specialize
-from aesara.tensor.shape import shape, specify_shape
-from aesara.tensor.type import TensorType, tensor
+from pytensor.tensor import blas
+from pytensor.tensor.basic import as_tensor_variable, cast
+from pytensor.tensor.math import mul, neg, sub
+from pytensor.tensor.rewriting.basic import register_canonicalize, register_specialize
+from pytensor.tensor.shape import shape, specify_shape
+from pytensor.tensor.type import TensorType, tensor
 
 
 _is_sparse_variable = sparse._is_sparse_variable
@@ -65,7 +65,7 @@ def local_inplace_remove0(fgraph, node):
     return False
 
 
-aesara.compile.optdb.register(
+pytensor.compile.optdb.register(
     "local_inplace_remove0",
     WalkingGraphRewriter(
         local_inplace_remove0, failure_callback=WalkingGraphRewriter.warn_inplace
@@ -205,7 +205,7 @@ def local_inplace_addsd_ccode(fgraph, node):
     return False
 
 
-aesara.compile.optdb.register(
+pytensor.compile.optdb.register(
     "local_inplace_addsd_ccode",
     WalkingGraphRewriter(
         local_inplace_addsd_ccode, failure_callback=WalkingGraphRewriter.warn_inplace
@@ -238,7 +238,7 @@ def local_addsd_ccode(fgraph, node):
     return False
 
 
-aesara.compile.optdb.register(
+pytensor.compile.optdb.register(
     "local_addsd_ccode",
     WalkingGraphRewriter(local_addsd_ccode),
     # Must be after local_inplace_addsd_ccode at 60

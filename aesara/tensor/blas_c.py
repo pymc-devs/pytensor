@@ -1,10 +1,10 @@
-from aesara.configdefaults import config
-from aesara.graph.rewriting.basic import in2out
-from aesara.link.c.op import COp
-from aesara.link.c.params_type import ParamsType
-from aesara.scalar import bool as bool_t
-from aesara.tensor import basic as at
-from aesara.tensor.blas import (
+from pytensor.configdefaults import config
+from pytensor.graph.rewriting.basic import in2out
+from pytensor.link.c.op import COp
+from pytensor.link.c.params_type import ParamsType
+from pytensor.scalar import bool as bool_t
+from pytensor.tensor import basic as at
+from pytensor.tensor.blas import (
     Gemv,
     Ger,
     blas_header_text,
@@ -642,7 +642,7 @@ cgemv_no_inplace = CGemv(inplace=False)
 
 def check_force_gemv_init():
     if check_force_gemv_init._force_init_beta is None:
-        from aesara.link.c.cmodule import GCC_compiler
+        from pytensor.link.c.cmodule import GCC_compiler
 
         """
         Test issue 1569.

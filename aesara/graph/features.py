@@ -8,10 +8,10 @@ from io import StringIO
 
 import numpy as np
 
-import aesara
-from aesara.configdefaults import config
-from aesara.graph.basic import Variable, io_toposort
-from aesara.graph.utils import InconsistencyError
+import pytensor
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Variable, io_toposort
+from pytensor.graph.utils import InconsistencyError
 
 
 class AlreadyThere(Exception):
@@ -112,7 +112,7 @@ class BadOptimization(Exception):
         used_ids = dict()
 
         if isinstance(old_r, Variable):
-            self.old_graph = aesara.printing._debugprint(
+            self.old_graph = pytensor.printing._debugprint(
                 old_r,
                 prefix="  ",
                 depth=6,
@@ -125,7 +125,7 @@ class BadOptimization(Exception):
             self.old_graph = None
 
         if isinstance(new_r, Variable):
-            self.new_graph = aesara.printing._debugprint(
+            self.new_graph = pytensor.printing._debugprint(
                 new_r,
                 prefix="  ",
                 depth=6,
@@ -258,7 +258,7 @@ class Feature:
 
     See Also
     --------
-    aesara.graph.features : for common extensions.
+    pytensor.graph.features : for common extensions.
 
     """
 

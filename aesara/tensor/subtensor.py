@@ -6,30 +6,30 @@ from typing import Callable, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
 
-import aesara
-from aesara import scalar as aes
-from aesara.configdefaults import config
-from aesara.gradient import DisconnectedType
-from aesara.graph.basic import Apply, Constant, Variable
-from aesara.graph.op import Op
-from aesara.graph.type import Type
-from aesara.graph.utils import MethodNotDefined
-from aesara.link.c.op import COp
-from aesara.link.c.params_type import ParamsType
-from aesara.misc.safe_asarray import _asarray
-from aesara.printing import Printer, pprint, set_precedence
-from aesara.scalar.basic import ScalarConstant
-from aesara.tensor import _get_vector_length, as_tensor_variable, get_vector_length
-from aesara.tensor.basic import alloc, get_scalar_constant_value
-from aesara.tensor.elemwise import DimShuffle
-from aesara.tensor.exceptions import (
+import pytensor
+from pytensor import scalar as aes
+from pytensor.configdefaults import config
+from pytensor.gradient import DisconnectedType
+from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.op import Op
+from pytensor.graph.type import Type
+from pytensor.graph.utils import MethodNotDefined
+from pytensor.link.c.op import COp
+from pytensor.link.c.params_type import ParamsType
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.printing import Printer, pprint, set_precedence
+from pytensor.scalar.basic import ScalarConstant
+from pytensor.tensor import _get_vector_length, as_tensor_variable, get_vector_length
+from pytensor.tensor.basic import alloc, get_scalar_constant_value
+from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.exceptions import (
     AdvancedIndexingError,
     NotScalarConstantError,
     ShapeError,
 )
-from aesara.tensor.math import clip
-from aesara.tensor.shape import Reshape, specify_broadcastable
-from aesara.tensor.type import (
+from pytensor.tensor.math import clip
+from pytensor.tensor.shape import Reshape, specify_broadcastable
+from pytensor.tensor.type import (
     TensorType,
     bscalar,
     complex_dtypes,
@@ -48,10 +48,10 @@ from aesara.tensor.type import (
     wscalar,
     zscalar,
 )
-from aesara.tensor.type_other import NoneConst, NoneTypeT, SliceType, make_slice
+from pytensor.tensor.type_other import NoneConst, NoneTypeT, SliceType, make_slice
 
 
-_logger = logging.getLogger("aesara.tensor.subtensor")
+_logger = logging.getLogger("pytensor.tensor.subtensor")
 
 invalid_scal_types = (aes.float64, aes.float32, aes.float16)
 scal_types = (
@@ -199,7 +199,7 @@ def get_canonical_form_slice(
     if the resulting set of numbers needs to be reversed or not.
 
     """
-    from aesara.tensor import ge, lt, sgn, switch
+    from pytensor.tensor import ge, lt, sgn, switch
 
     if not isinstance(theslice, slice):
         try:
@@ -362,7 +362,7 @@ def range_len(slc):
     Adapted from CPython.
 
     """
-    from aesara.tensor import and_, gt, lt, switch
+    from pytensor.tensor import and_, gt, lt, switch
 
     start, stop, step = tuple(
         as_index_constant(a) for a in [slc.start, slc.stop, slc.step]
@@ -486,7 +486,7 @@ def indexed_result_shape(array_shape, indices, indices_are_shapes=False):
     """
     res_shape = ()
 
-    remaining_dims = range(aesara.tensor.basic.get_vector_length(array_shape))
+    remaining_dims = range(pytensor.tensor.basic.get_vector_length(array_shape))
     idx_groups = group_indices(indices)
 
     if len(idx_groups) > 2 or len(idx_groups) > 1 and not idx_groups[0][0]:
@@ -505,7 +505,7 @@ def indexed_result_shape(array_shape, indices, indices_are_shapes=False):
             grp_shapes = tuple(array_shape[dim] for dim in dim_nums)
             res_shape += basic_shape(grp_shapes, grp_indices)
         else:
-            from aesara.tensor.extra_ops import broadcast_shape
+            from pytensor.tensor.extra_ops import broadcast_shape
 
             res_shape += broadcast_shape(
                 *grp_indices, arrays_are_shapes=indices_are_shapes
@@ -674,7 +674,7 @@ def as_nontensor_scalar(a: Variable) -> aes.ScalarVariable:
     # create a circular import) , this method converts either a
     # TensorVariable or a ScalarVariable to a scalar.
     if isinstance(a, Variable) and isinstance(a.type, TensorType):
-        return aesara.tensor.scalar_from_tensor(a)
+        return pytensor.tensor.scalar_from_tensor(a)
     else:
         return aes.as_scalar(a)
 
@@ -698,7 +698,7 @@ class Subtensor(COp):
         x
             The tensor to take a subtensor of.
         inputs
-            A list of aesara Scalars.
+            A list of pytensor Scalars.
 
         """
         x = as_tensor_variable(x)
@@ -808,7 +808,7 @@ class Subtensor(COp):
             # This allow the opt local_IncSubtensor_serialize to apply first.
             # We have an optimization that will convert this to a
             # set subtensor here at:
-            # aesara/tensor/opt.py:local_incsubtensor_of_zeros_to_setsubtensor()
+            # pytensor/tensor/opt.py:local_incsubtensor_of_zeros_to_setsubtensor()
             first = IncSubtensor(self.idx_list)(x.zeros_like(), gz, *rest)
         return [first] + [DisconnectedType()()] * len(rest)
 
@@ -1862,7 +1862,7 @@ class IncSubtensor(COp):
             if self.set_instead_of_inc:
                 gx = set_subtensor(
                     Subtensor(idx_list=self.idx_list)(g_output, *idx_list),
-                    aesara.tensor.zeros_like(y),
+                    pytensor.tensor.zeros_like(y),
                 )
             else:
                 gx = g_output
@@ -2001,7 +2001,7 @@ class AdvancedSubtensor1(COp):
                     " from a tensor with ndim != 2. ndim is " + str(x.type.ndim)
                 )
 
-            rval1 = [aesara.sparse.construct_sparse_from_list(x, gz, ilist)]
+            rval1 = [pytensor.sparse.construct_sparse_from_list(x, gz, ilist)]
         else:
             if x.dtype in discrete_dtypes:
                 # The output dtype is the same as x
@@ -2562,7 +2562,7 @@ class AdvancedSubtensor(Op):
 
             fake_index = tuple(
                 chain.from_iterable(
-                    aesara.tensor.basic.nonzero(idx)
+                    pytensor.tensor.basic.nonzero(idx)
                     if getattr(idx, "ndim", 0) > 0
                     and getattr(idx, "dtype", None) == "bool"
                     else (idx,)
@@ -2806,7 +2806,7 @@ def _get_vector_length_Subtensor(op, var):
     # If we take a slice, we know how many elements it will result in
     # TODO: We can cover more `*Subtensor` cases.
     try:
-        indices = aesara.tensor.subtensor.get_idx_list(
+        indices = pytensor.tensor.subtensor.get_idx_list(
             var.owner.inputs, var.owner.op.idx_list
         )
         start = (

@@ -6,19 +6,19 @@ from warnings import warn
 
 import numpy as np
 
-import aesara
-from aesara.configdefaults import config
-from aesara.graph.basic import Constant, Variable, ancestors, equal_computations
-from aesara.graph.features import AlreadyThere, Feature
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.rewriting.basic import (
+import pytensor
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Constant, Variable, ancestors, equal_computations
+from pytensor.graph.features import AlreadyThere, Feature
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.basic import (
     GraphRewriter,
     check_chain,
     copy_stack_trace,
     node_rewriter,
 )
-from aesara.graph.utils import InconsistencyError, get_variable_trace_string
-from aesara.tensor.basic import (
+from pytensor.graph.utils import InconsistencyError, get_variable_trace_string
+from pytensor.tensor.basic import (
     MakeVector,
     as_tensor_variable,
     cast,
@@ -27,16 +27,16 @@ from aesara.tensor.basic import (
     get_scalar_constant_value,
     stack,
 )
-from aesara.tensor.elemwise import DimShuffle, Elemwise
-from aesara.tensor.exceptions import NotScalarConstantError, ShapeError
-from aesara.tensor.rewriting.basic import (
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.exceptions import NotScalarConstantError, ShapeError
+from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
     register_stabilize,
     register_useless,
     topo_constant_folding,
 )
-from aesara.tensor.shape import (
+from pytensor.tensor.shape import (
     Reshape,
     Shape,
     Shape_i,
@@ -46,9 +46,9 @@ from aesara.tensor.shape import (
     specify_shape,
     unbroadcast,
 )
-from aesara.tensor.subtensor import Subtensor, get_idx_list
-from aesara.tensor.type import TensorType, discrete_dtypes, integer_dtypes
-from aesara.tensor.type_other import NoneConst
+from pytensor.tensor.subtensor import Subtensor, get_idx_list
+from pytensor.tensor.type import TensorType, discrete_dtypes, integer_dtypes
+from pytensor.tensor.type_other import NoneConst
 
 
 class ShapeFeature(Feature):
@@ -350,7 +350,7 @@ class ShapeFeature(Feature):
 
             if r.type.ndim != len(s):
                 sio = StringIO()
-                aesara.printing.debugprint(r, file=sio, print_type=True)
+                pytensor.printing.debugprint(r, file=sio, print_type=True)
                 raise AssertionError(
                     f"Something inferred a shape with {len(s)} dimensions "
                     f"for a variable with {int(r.type.ndim)} dimensions"
@@ -703,7 +703,7 @@ class ShapeFeature(Feature):
             clone=True,
             # copy_inputs=False,
         )
-        from aesara.graph.rewriting.utils import rewrite_graph
+        from pytensor.graph.rewriting.utils import rewrite_graph
 
         canon_shapes_fg = type_cast(
             FunctionGraph,
@@ -745,13 +745,13 @@ class UnShapeOptimizer(GraphRewriter):
 
 # Register it after merge1 optimization at 0. We don't want to track
 # the shape of merged node.
-aesara.compile.mode.optdb.register(  # type: ignore
+pytensor.compile.mode.optdb.register(  # type: ignore
     "ShapeOpt", ShapeOptimizer(), "fast_run", "fast_compile", position=0.1
 )
 # Not enabled by default for now. Some crossentropy opt use the
 # shape_feature.  They are at step 2.01. uncanonicalize is at step
 # 3. After it goes to 48.5 that move to the gpu. So 10 seems reasonable.
-aesara.compile.mode.optdb.register("UnShapeOpt", UnShapeOptimizer(), position=10)  # type: ignore
+pytensor.compile.mode.optdb.register("UnShapeOpt", UnShapeOptimizer(), position=10)  # type: ignore
 
 
 def local_reshape_chain(op):

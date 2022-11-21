@@ -3,26 +3,26 @@ from warnings import warn
 import numpy as np
 import pytest
 
-import aesara
-import aesara.tensor as at
-from aesara.misc.safe_asarray import _asarray
-from aesara.tensor.basic import AllocEmpty
-from aesara.tensor.blas import Ger
-from aesara.tensor.blas_c import CGemv, CGer, check_force_gemv_init
-from aesara.tensor.blas_scipy import ScipyGer
-from aesara.tensor.type import dmatrix, dvector, matrix, scalar, tensor, vector
+import pytensor
+import pytensor.tensor as at
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.tensor.basic import AllocEmpty
+from pytensor.tensor.blas import Ger
+from pytensor.tensor.blas_c import CGemv, CGer, check_force_gemv_init
+from pytensor.tensor.blas_scipy import ScipyGer
+from pytensor.tensor.type import dmatrix, dvector, matrix, scalar, tensor, vector
 from tests import unittest_tools
 from tests.tensor.test_blas import BaseGemv, TestBlasStrides
 from tests.unittest_tools import OptimizationTestMixin
 
 
-mode_blas_opt = aesara.compile.get_default_mode().including(
+mode_blas_opt = pytensor.compile.get_default_mode().including(
     "BlasOpt", "specialize", "InplaceBlasOpt", "c_blas"
 )
 
 
 def skip_if_blas_ldflags_empty(*functions_detected):
-    if aesara.config.blas__ldflags == "":
+    if pytensor.config.blas__ldflags == "":
         functions_string = ""
         if functions_detected:
             functions_string = " (at least " + (", ".join(functions_detected)) + ")"
@@ -38,9 +38,9 @@ class TestCGer(OptimizationTestMixin):
         self.manual_setup_method()
 
     def manual_setup_method(self, dtype="float64"):
-        # This tests can run even when aesara.config.blas__ldflags is empty.
+        # This tests can run even when pytensor.config.blas__ldflags is empty.
         self.dtype = dtype
-        self.mode = aesara.compile.get_default_mode().including("fast_run")
+        self.mode = pytensor.compile.get_default_mode().including("fast_run")
         self.A = tensor(dtype=dtype, shape=(None, None))
         self.a = tensor(dtype=dtype, shape=())
         self.x = tensor(dtype=dtype, shape=(None,))
@@ -50,7 +50,7 @@ class TestCGer(OptimizationTestMixin):
         self.yval = np.asarray([1.5, 2.7, 3.9], dtype=dtype)
 
     def function(self, inputs, outputs):
-        return aesara.function(
+        return pytensor.function(
             inputs,
             outputs,
             mode=self.mode,
@@ -126,10 +126,10 @@ class TestCGemv(OptimizationTestMixin):
     """
 
     def setup_method(self):
-        # This tests can run even when aesara.config.blas__ldflags is empty.
+        # This tests can run even when pytensor.config.blas__ldflags is empty.
         dtype = "float64"
         self.dtype = dtype
-        self.mode = aesara.compile.get_default_mode().including("fast_run")
+        self.mode = pytensor.compile.get_default_mode().including("fast_run")
         # matrix
         self.A = tensor(dtype=dtype, shape=(None, None))
         self.Aval = np.ones((2, 3), dtype=dtype)
@@ -146,7 +146,7 @@ class TestCGemv(OptimizationTestMixin):
     def test_nan_beta_0(self):
         mode = self.mode.including()
         mode.check_isfinite = False
-        f = aesara.function(
+        f = pytensor.function(
             [self.A, self.x, self.y, self.a],
             self.a * self.y + at.dot(self.A, self.x),
             mode=mode,
@@ -160,7 +160,7 @@ class TestCGemv(OptimizationTestMixin):
     def test_optimizations_vm(self):
         skip_if_blas_ldflags_empty()
         """ Test vector dot matrix """
-        f = aesara.function([self.x, self.A], at.dot(self.x, self.A), mode=self.mode)
+        f = pytensor.function([self.x, self.A], at.dot(self.x, self.A), mode=self.mode)
 
         # Assert that the dot was optimized somehow
         self.assertFunctionContains0(f, at.dot)
@@ -178,7 +178,7 @@ class TestCGemv(OptimizationTestMixin):
     def test_optimizations_mv(self):
         skip_if_blas_ldflags_empty()
         """ Test matrix dot vector """
-        f = aesara.function([self.A, self.y], at.dot(self.A, self.y), mode=self.mode)
+        f = pytensor.function([self.A, self.y], at.dot(self.A, self.y), mode=self.mode)
 
         # Assert that the dot was optimized somehow
         self.assertFunctionContains0(f, at.dot)
@@ -203,12 +203,12 @@ class TestCGemv(OptimizationTestMixin):
     def t_gemv1(self, m_shp):
         """test vector2 + dot(matrix, vector1)"""
         rng = np.random.default_rng(unittest_tools.fetch_seed())
-        v1 = aesara.shared(np.array(rng.uniform(size=(m_shp[1],)), dtype="float32"))
+        v1 = pytensor.shared(np.array(rng.uniform(size=(m_shp[1],)), dtype="float32"))
         v2_orig = np.array(rng.uniform(size=(m_shp[0],)), dtype="float32")
-        v2 = aesara.shared(v2_orig)
-        m = aesara.shared(np.array(rng.uniform(size=m_shp), dtype="float32"))
+        v2 = pytensor.shared(v2_orig)
+        m = pytensor.shared(np.array(rng.uniform(size=m_shp), dtype="float32"))
 
-        f = aesara.function([], v2 + at.dot(m, v1), mode=self.mode)
+        f = pytensor.function([], v2 + at.dot(m, v1), mode=self.mode)
 
         # Assert they produce the same output
         assert np.allclose(f(), np.dot(m.get_value(), v1.get_value()) + v2_orig)
@@ -216,7 +216,7 @@ class TestCGemv(OptimizationTestMixin):
         assert topo == [CGemv(inplace=False)], topo
 
         # test the inplace version
-        g = aesara.function([], [], updates=[(v2, v2 + at.dot(m, v1))], mode=self.mode)
+        g = pytensor.function([], [], updates=[(v2, v2 + at.dot(m, v1))], mode=self.mode)
 
         # Assert they produce the same output
         g()
@@ -247,11 +247,11 @@ class TestCGemv(OptimizationTestMixin):
         self.t_gemv1((0, 0))
 
     def test_gemv_dimensions(self, dtype="float32"):
-        alpha = aesara.shared(_asarray(1.0, dtype=dtype), name="alpha")
-        beta = aesara.shared(_asarray(1.0, dtype=dtype), name="beta")
+        alpha = pytensor.shared(_asarray(1.0, dtype=dtype), name="alpha")
+        beta = pytensor.shared(_asarray(1.0, dtype=dtype), name="beta")
 
         z = beta * self.y + alpha * at.dot(self.A, self.x)
-        f = aesara.function([self.A, self.x, self.y], z, mode=self.mode)
+        f = pytensor.function([self.A, self.x, self.y], z, mode=self.mode)
 
         # Matrix value
         A_val = np.ones((5, 3), dtype=dtype)
@@ -275,7 +275,7 @@ class TestCGemv(OptimizationTestMixin):
         x = dmatrix("x")
         y = dvector("y")
         z = dvector("z")
-        f = aesara.function([x, y, z], [at.dot(y, x), at.dot(z, x)], mode=mode_blas_opt)
+        f = pytensor.function([x, y, z], [at.dot(y, x), at.dot(z, x)], mode=mode_blas_opt)
         vx = np.random.random((3, 3))
         vy = np.random.random((3))
         vz = np.random.random((3))
@@ -333,7 +333,7 @@ class TestCGemvNoFlags:
             A_2 = A_1
             x_2 = x
             y_2 = y
-        return aesara.function(
+        return pytensor.function(
             [alpha, A, x, beta, y],
             self.gemv(y_2, alpha, A_2, x_2, beta),
             mode=self.mode,
@@ -371,7 +371,7 @@ class TestCGemvNoFlags:
             ref_val += beta * y
         return ref_val
 
-    @aesara.config.change_flags(blas__ldflags="")
+    @pytensor.config.change_flags(blas__ldflags="")
     def run_cgemv(self, dtype, ALPHA, BETA, transpose_A, slice_tensors):
         f = self.get_function(
             dtype, transpose_A=transpose_A, slice_tensors=slice_tensors

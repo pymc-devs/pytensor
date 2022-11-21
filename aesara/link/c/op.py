@@ -20,18 +20,18 @@ from typing import (
 
 import numpy as np
 
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Variable
-from aesara.graph.op import ComputeMapType, Op, StorageMapType, ThunkType
-from aesara.graph.type import HasDataType
-from aesara.graph.utils import MethodNotDefined
-from aesara.link.c.interface import CLinkerOp
-from aesara.link.c.params_type import ParamsType
-from aesara.utils import hash_from_code
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.op import ComputeMapType, Op, StorageMapType, ThunkType
+from pytensor.graph.type import HasDataType
+from pytensor.graph.utils import MethodNotDefined
+from pytensor.link.c.interface import CLinkerOp
+from pytensor.link.c.params_type import ParamsType
+from pytensor.utils import hash_from_code
 
 
 if TYPE_CHECKING:
-    from aesara.link.c.basic import _CThunk
+    from pytensor.link.c.basic import _CThunk
 
 
 class CThunkWrapperType(ThunkType):
@@ -61,9 +61,9 @@ class COp(Op, CLinkerOp):
         """
         # FIXME: Putting the following import on the module level causes an import cycle.
         #        The conclusion should be that the antire "make_c_thunk" method should be defined
-        #        in aesara.link.c and dispatched onto the Op!
-        import aesara.link.c.basic
-        from aesara.graph.fg import FunctionGraph
+        #        in pytensor.link.c and dispatched onto the Op!
+        import pytensor.link.c.basic
+        from pytensor.graph.fg import FunctionGraph
 
         node_input_storage = [storage_map[r] for r in node.inputs]
         node_output_storage = [storage_map[r] for r in node.outputs]
@@ -74,7 +74,7 @@ class COp(Op, CLinkerOp):
             for (new_o, old_o) in zip(e.outputs, node.outputs)
             if old_o in no_recycling
         ]
-        cl = aesara.link.c.basic.CLinker().accept(e, no_recycling=e_no_recycling)
+        cl = pytensor.link.c.basic.CLinker().accept(e, no_recycling=e_no_recycling)
         # float16 gets special treatment since running
         # unprepared C code will get bad results.
         if not getattr(self, "_f16_ok", False):
@@ -187,7 +187,7 @@ class OpenMPOp(COp):
     @staticmethod
     def test_gxx_support():
         """Check if OpenMP is supported."""
-        from aesara.link.c.cmodule import GCC_compiler
+        from pytensor.link.c.cmodule import GCC_compiler
 
         code = """
         #include <omp.h>
@@ -217,7 +217,7 @@ int main( int argc, const char* argv[] )
                         " know this happen with some version of the EPD mingw"
                         " compiler and LLVM compiler on Mac OS X."
                         " We disable openmp everywhere in Aesara."
-                        " To remove this warning set the aesara flags `openmp`"
+                        " To remove this warning set the pytensor flags `openmp`"
                         " to False.",
                         stacklevel=3,
                     )
@@ -421,12 +421,12 @@ class ExternalCOp(COp):
         The names must be strings that are not a C keyword and the
         values must be strings of literal C representations.
 
-        If op uses a :class:`aesara.graph.params_type.ParamsType` as ``params_type``,
+        If op uses a :class:`pytensor.graph.params_type.ParamsType` as ``params_type``,
         it returns:
          - a default macro ``PARAMS_TYPE`` which defines the class name of the
            corresponding C struct.
          - a macro ``DTYPE_PARAM_key`` for every ``key`` in the :class:`ParamsType` for which associated
-           type implements the method :func:`aesara.graph.type.CLinkerType.c_element_type`.
+           type implements the method :func:`pytensor.graph.type.CLinkerType.c_element_type`.
            ``DTYPE_PARAM_key`` defines the primitive C type name of an item in a variable
            associated to ``key``.
 
@@ -439,7 +439,7 @@ class ExternalCOp(COp):
                 c_type = wrapper.types[i].c_element_type()
                 if c_type:
                     # NB (reminder): These macros are currently used only in ParamsType example test
-                    # (`aesara/graph/tests/test_quadratic_function.c`), to demonstrate how we can
+                    # (`pytensor/graph/tests/test_quadratic_function.c`), to demonstrate how we can
                     # access params dtypes when dtypes may change (e.g. if based on config.floatX).
                     # But in practice, params types generally have fixed types per op.
                     params.append(

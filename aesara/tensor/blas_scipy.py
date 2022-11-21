@@ -4,8 +4,8 @@ Implementations of BLAS Ops based on scipy's BLAS bindings.
 
 import numpy as np
 
-from aesara.graph.rewriting.basic import in2out
-from aesara.tensor.blas import (
+from pytensor.graph.rewriting.basic import in2out
+from pytensor.tensor.blas import (
     Ger,
     blas_optdb,
     ger,
@@ -17,7 +17,7 @@ from aesara.tensor.blas import (
 
 
 if have_fblas:
-    from aesara.tensor.blas import fblas
+    from pytensor.tensor.blas import fblas
 
     _blas_ger_fns = {
         np.dtype("float32"): fblas.sger,

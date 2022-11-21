@@ -7,22 +7,22 @@ from typing import Any, Callable, Optional, Union
 import numba
 import numpy as np
 
-from aesara import config
-from aesara.graph.basic import Apply
-from aesara.graph.op import Op
-from aesara.link.numba.dispatch import basic as numba_basic
-from aesara.link.numba.dispatch.basic import (
+from pytensor import config
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch.basic import (
     create_numba_signature,
     create_tuple_creator,
     numba_funcify,
     use_optimized_cheap_pass,
 )
-from aesara.link.utils import (
+from pytensor.link.utils import (
     compile_function_src,
     get_name_for_object,
     unique_name_generator,
 )
-from aesara.scalar.basic import (
+from pytensor.scalar.basic import (
     AND,
     OR,
     XOR,
@@ -35,11 +35,11 @@ from aesara.scalar.basic import (
     Sub,
     TrueDiv,
 )
-from aesara.scalar.basic import add as add_as
-from aesara.scalar.basic import scalar_maximum
-from aesara.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from aesara.tensor.math import MaxAndArgmax, MulWithoutZeros
-from aesara.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
+from pytensor.scalar.basic import add as add_as
+from pytensor.scalar.basic import scalar_maximum
+from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.math import MaxAndArgmax, MulWithoutZeros
+from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 
 
 @singledispatch

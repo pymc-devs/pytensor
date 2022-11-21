@@ -1,12 +1,12 @@
 import numpy as np
 import pytest
 
-import aesara.tensor
-from aesara.compile.sharedvalue import SharedVariable, shared
-from aesara.configdefaults import config
-from aesara.link.c.type import generic
-from aesara.misc.safe_asarray import _asarray
-from aesara.tensor.type import (
+import pytensor.tensor
+from pytensor.compile.sharedvalue import SharedVariable, shared
+from pytensor.configdefaults import config
+from pytensor.link.c.type import generic
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.tensor.type import (
     TensorType,
     bscalar,
     bvector,
@@ -21,7 +21,7 @@ from aesara.tensor.type import (
     wscalar,
     wvector,
 )
-from aesara.utils import PYTHON_INT_BITWIDTH
+from pytensor.utils import PYTHON_INT_BITWIDTH
 
 
 class TestSharedVariable:
@@ -342,4 +342,4 @@ class TestSharedVariable:
 
     def test_err_symbolic_variable(self):
         with pytest.raises(TypeError):
-            shared(aesara.tensor.ones((2, 3)))
+            shared(pytensor.tensor.ones((2, 3)))

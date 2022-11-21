@@ -1,17 +1,17 @@
 import os
 import sys
 
-import aesara.tensor as at
-from aesara.configdefaults import config
-from aesara.gradient import grad_undefined
-from aesara.graph.basic import Apply
-from aesara.graph.rewriting.basic import node_rewriter
-from aesara.link.c.cmodule import GCC_compiler
-from aesara.link.c.op import ExternalCOp, OpenMPOp
-from aesara.tensor.blas import batched_dot
-from aesara.tensor.extra_ops import cpu_contiguous
-from aesara.tensor.rewriting.basic import register_canonicalize
-from aesara.tensor.type import ftensor3, fvector
+import pytensor.tensor as at
+from pytensor.configdefaults import config
+from pytensor.gradient import grad_undefined
+from pytensor.graph.basic import Apply
+from pytensor.graph.rewriting.basic import node_rewriter
+from pytensor.link.c.cmodule import GCC_compiler
+from pytensor.link.c.op import ExternalCOp, OpenMPOp
+from pytensor.tensor.blas import batched_dot
+from pytensor.tensor.extra_ops import cpu_contiguous
+from pytensor.tensor.rewriting.basic import register_canonicalize
+from pytensor.tensor.type import ftensor3, fvector
 
 
 def _ctc_find_lib():

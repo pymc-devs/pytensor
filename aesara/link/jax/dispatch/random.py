@@ -5,8 +5,8 @@ from numpy.random.bit_generator import (  # type: ignore[attr-defined]
     _coerce_to_uint32_array,
 )
 
-from aesara.link.jax.dispatch.basic import jax_funcify, jax_typify
-from aesara.tensor.random.op import RandomVariable
+from pytensor.link.jax.dispatch.basic import jax_funcify, jax_typify
+from pytensor.tensor.random.op import RandomVariable
 
 
 numpy_bit_gens = {"MT19937": 0, "PCG64": 1, "Philox": 2, "SFC64": 3}

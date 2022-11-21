@@ -19,7 +19,7 @@ Special cases:
   ignores previous steps of the outputs.
 
 Often a for-loop or while-loop can be expressed as a ``scan()`` operation,
-and ``scan`` is the closest that aesara comes to looping. The advantages
+and ``scan`` is the closest that pytensor comes to looping. The advantages
 of using ``scan`` over `for` loops in python (among others) are:
 
 * it allows the number of iterations to be part of the symbolic graph
@@ -46,13 +46,13 @@ __authors__ = (
 )
 __copyright__ = "(c) 2010, Universite de Montreal"
 
-from aesara import configdefaults
+from pytensor import configdefaults
 
 
 configdefaults.add_scan_configvars()
 
-from aesara.scan import rewriting
-from aesara.scan.basic import scan
-from aesara.scan.checkpoints import scan_checkpoints
-from aesara.scan.utils import until
-from aesara.scan.views import foldl, foldr, map, reduce
+from pytensor.scan import rewriting
+from pytensor.scan.basic import scan
+from pytensor.scan.checkpoints import scan_checkpoints
+from pytensor.scan.utils import until
+from pytensor.scan.views import foldl, foldr, map, reduce

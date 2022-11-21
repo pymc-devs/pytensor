@@ -1,12 +1,12 @@
 import numpy as np
 import scipy as sp
 
-import aesara
-from aesara.sparse.sharedvar import SparseTensorSharedVariable
+import pytensor
+from pytensor.sparse.sharedvar import SparseTensorSharedVariable
 
 
 def test_shared_basic():
-    x = aesara.shared(
+    x = pytensor.shared(
         sp.sparse.csr_matrix(np.eye(100), dtype=np.float64), name="blah", borrow=True
     )
 

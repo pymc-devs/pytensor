@@ -1,10 +1,10 @@
 import numpy as np
 
-from aesara.graph.basic import Apply, Constant, Variable
-from aesara.graph.op import Op
-from aesara.graph.sched import key_to_cmp
-from aesara.link.c.type import Generic
-from aesara.tensor.type import tensor
+from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.op import Op
+from pytensor.graph.sched import key_to_cmp
+from pytensor.link.c.type import Generic
+from pytensor.tensor.type import tensor
 
 
 class LoadFromDisk(Op):
@@ -79,7 +79,7 @@ def load(path, dtype, shape, mmap_mode=None):
 
     Examples
     --------
-    >>> from aesara import *
+    >>> from pytensor import *
     >>> path = Variable(Generic(), None)
     >>> x = tensor.load(path, 'int64', (None,))
     >>> y = x*2

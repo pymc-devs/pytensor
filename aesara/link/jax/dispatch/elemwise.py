@@ -1,9 +1,9 @@
 import jax
 import jax.numpy as jnp
 
-from aesara.link.jax.dispatch.basic import jax_funcify, jnp_safe_copy
-from aesara.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from aesara.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
+from pytensor.link.jax.dispatch.basic import jax_funcify, jnp_safe_copy
+from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 
 
 @jax_funcify.register(Elemwise)

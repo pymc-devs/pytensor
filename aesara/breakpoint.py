@@ -1,9 +1,9 @@
 import numpy as np
 
-from aesara.gradient import DisconnectedType
-from aesara.graph.basic import Apply, Variable
-from aesara.graph.op import Op
-from aesara.tensor.basic import as_tensor_variable
+from pytensor.gradient import DisconnectedType
+from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.op import Op
+from pytensor.tensor.basic import as_tensor_variable
 
 
 class PdbBreakpoint(Op):
@@ -35,9 +35,9 @@ class PdbBreakpoint(Op):
 
     .. code-block:: python
 
-        import aesara
-        import aesara.tensor as at
-        from aesara.breakpoint import PdbBreakpoint
+        import pytensor
+        import pytensor.tensor as at
+        from pytensor.breakpoint import PdbBreakpoint
 
         input = at.fvector()
         target = at.fvector()
@@ -53,8 +53,8 @@ class PdbBreakpoint(Op):
         mse, monitored_input, monitored_target = breakpointOp(condition, mse,
                                                               input, target)
 
-        # Compile the aesara function
-        fct = aesara.function([input, target], mse)
+        # Compile the pytensor function
+        fct = pytensor.function([input, target], mse)
 
         # Use the function
         print fct([10, 0], [10, 5]) # Will NOT activate the breakpoint

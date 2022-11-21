@@ -11,9 +11,9 @@ import numpy as np
 import scipy.special
 import scipy.stats
 
-from aesara.configdefaults import config
-from aesara.gradient import grad_not_implemented
-from aesara.scalar.basic import (
+from pytensor.configdefaults import config
+from pytensor.gradient import grad_not_implemented
+from pytensor.scalar.basic import (
     BinaryScalarOp,
     ScalarOp,
     UnaryScalarOp,
@@ -1174,7 +1174,7 @@ class Softplus(UnaryScalarOp):
         (z,) = out
         # The boundary constants were obtained by looking at the output of
         # python commands like:
-        # import numpy, aesara
+        # import numpy, pytensor
         # dt='float32'  # or float64
         #  for i in range(750):
         #      print i, repr(numpy.log1p(numpy.exp(_asarray([i,-i], dtype=dt))))

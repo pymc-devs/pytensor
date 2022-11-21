@@ -3,27 +3,27 @@
 """
 import numpy as np
 
-import aesara
-import aesara.tensor as at
+import pytensor
+import pytensor.tensor as at
 import tests.unittest_tools as utt
-from aesara.tensor.elemwise import DimShuffle
-from aesara.tensor.nnet.blocksparse import (
+from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.nnet.blocksparse import (
     SparseBlockGemv,
     SparseBlockOuter,
     sparse_block_dot,
     sparse_block_gemv,
     sparse_block_outer,
 )
-from aesara.tensor.type import fmatrix, ftensor3, ftensor4, imatrix
+from pytensor.tensor.type import fmatrix, ftensor3, ftensor4, imatrix
 
 
 class TestBlockSparseGemvAndOuter(utt.InferShapeTester):
     def setup_method(self):
 
         mode = None
-        if aesara.config.mode == "FAST_COMPILE":
+        if pytensor.config.mode == "FAST_COMPILE":
             mode = "FAST_RUN"
-        self.mode = aesara.compile.get_mode(mode).excluding("constant_folding")
+        self.mode = pytensor.compile.get_mode(mode).excluding("constant_folding")
         self.gemv_op = sparse_block_gemv
         self.outer_op = sparse_block_outer
         self.gemv_class = SparseBlockGemv
@@ -144,7 +144,7 @@ class TestBlockSparseGemvAndOuter(utt.InferShapeTester):
 
         o = sparse_block_dot(W, h, iIdx, b, oIdx)
 
-        f = aesara.function([W, h, iIdx, b, oIdx], o, mode=self.mode)
+        f = pytensor.function([W, h, iIdx, b, oIdx], o, mode=self.mode)
 
         W_val, h_val, iIdx_val, b_val, oIdx_val = self.gemv_data()
 
@@ -157,7 +157,7 @@ class TestBlockSparseGemvAndOuter(utt.InferShapeTester):
         utt.assert_allclose(ref_out, th_out)
 
     def test_sparseblockgemv(self):
-        # Compares the numpy and aesara versions of sparseblockgemv.
+        # Compares the numpy and pytensor versions of sparseblockgemv.
 
         b = fmatrix()
         W = ftensor4()
@@ -167,7 +167,7 @@ class TestBlockSparseGemvAndOuter(utt.InferShapeTester):
 
         o = self.gemv_op(b.take(oIdx, axis=0), W, h, iIdx, oIdx)
 
-        f = aesara.function([W, h, iIdx, b, oIdx], o, mode=self.mode)
+        f = pytensor.function([W, h, iIdx, b, oIdx], o, mode=self.mode)
 
         W_val, h_val, iIdx_val, b_val, oIdx_val = self.gemv_data()
 
@@ -198,7 +198,7 @@ class TestBlockSparseGemvAndOuter(utt.InferShapeTester):
             oIdx,
         )
 
-        f = aesara.function([W, h, iIdx, b, oIdx], o, mode=self.mode)
+        f = pytensor.function([W, h, iIdx, b, oIdx], o, mode=self.mode)
 
         W_val, h_val, iIdx_val, b_val, oIdx_val = self.gemv_data()
 
@@ -256,9 +256,9 @@ class TestBlockSparseGemvAndOuter(utt.InferShapeTester):
         oIdx = imatrix()
 
         o = self.gemv_op(b.take(oIdx, axis=0), W, h, iIdx, oIdx)
-        go = aesara.grad(o.sum(), [b, W, h])
+        go = pytensor.grad(o.sum(), [b, W, h])
 
-        f = aesara.function([W, h, iIdx, b, oIdx], go, mode=self.mode)
+        f = pytensor.function([W, h, iIdx, b, oIdx], go, mode=self.mode)
 
         W_val, h_val, iIdx_val, b_val, oIdx_val = self.gemv_data()
 
@@ -278,7 +278,7 @@ class TestBlockSparseGemvAndOuter(utt.InferShapeTester):
 
         out = self.outer_op(o, x, y, xIdx, yIdx)
 
-        f = aesara.function(
+        f = pytensor.function(
             [o, x, y, xIdx, yIdx], out, on_unused_input="warn", mode=self.mode
         )
 

@@ -11,11 +11,11 @@ import sys
 import textwrap
 from os.path import dirname
 
-from aesara.configdefaults import config
-from aesara.link.c.cmodule import GCC_compiler
+from pytensor.configdefaults import config
+from pytensor.link.c.cmodule import GCC_compiler
 
 
-_logger = logging.getLogger("aesara.tensor.blas")
+_logger = logging.getLogger("pytensor.tensor.blas")
 
 
 def detect_macos_sdot_bug():

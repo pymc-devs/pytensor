@@ -2,9 +2,9 @@ import errno
 import os
 import sys
 
-from aesara.compile.compilelock import lock_ctx
-from aesara.configdefaults import config
-from aesara.link.c import cmodule
+from pytensor.compile.compilelock import lock_ctx
+from pytensor.configdefaults import config
+from pytensor.link.c import cmodule
 
 
 # TODO These two lines may be removed in the future, when we are 100% sure
@@ -20,7 +20,7 @@ def compile_cutils():
     """
     code = """
         #include <Python.h>
-        #include "aesara_mod_helper.h"
+        #include "pytensor_mod_helper.h"
 
         extern "C"{
         static PyObject *
@@ -44,7 +44,7 @@ def compile_cutils():
          }
          static PyMethodDef CutilsExtMethods[] = {
             {"run_cthunk",  run_cthunk, METH_VARARGS|METH_KEYWORDS,
-             "Run an aesara cthunk."},
+             "Run an pytensor cthunk."},
             {NULL, NULL, 0, NULL}        /* Sentinel */
         };"""
 

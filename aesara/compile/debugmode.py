@@ -1,5 +1,5 @@
 """
-Provides `DebugMode`, an evaluation mode for debugging aesara internals.
+Provides `DebugMode`, an evaluation mode for debugging pytensor internals.
 
 TODO: add support for IfElse Op, LazyLinker, etc.
 
@@ -19,37 +19,37 @@ from warnings import warn
 
 import numpy as np
 
-import aesara
-from aesara.compile.function.types import (
+import pytensor
+from pytensor.compile.function.types import (
     Function,
     FunctionMaker,
     infer_reuse_pattern,
     std_fgraph,
 )
-from aesara.compile.mode import Mode, register_mode
-from aesara.compile.ops import OutputGuard, _output_guard
-from aesara.configdefaults import config
-from aesara.graph.basic import Variable, io_toposort
-from aesara.graph.destroyhandler import DestroyHandler
-from aesara.graph.features import AlreadyThere, BadOptimization
-from aesara.graph.op import HasInnerGraph, Op
-from aesara.graph.utils import InconsistencyError, MethodNotDefined
-from aesara.link.basic import Container, LocalLinker
-from aesara.link.c.op import COp
-from aesara.link.utils import map_storage, raise_with_op
-from aesara.printing import _debugprint
-from aesara.tensor import TensorType
-from aesara.utils import NoDuplicateOptWarningFilter, difference, get_unbound_function
+from pytensor.compile.mode import Mode, register_mode
+from pytensor.compile.ops import OutputGuard, _output_guard
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Variable, io_toposort
+from pytensor.graph.destroyhandler import DestroyHandler
+from pytensor.graph.features import AlreadyThere, BadOptimization
+from pytensor.graph.op import HasInnerGraph, Op
+from pytensor.graph.utils import InconsistencyError, MethodNotDefined
+from pytensor.link.basic import Container, LocalLinker
+from pytensor.link.c.op import COp
+from pytensor.link.utils import map_storage, raise_with_op
+from pytensor.printing import _debugprint
+from pytensor.tensor import TensorType
+from pytensor.utils import NoDuplicateOptWarningFilter, difference, get_unbound_function
 
 
 __docformat__ = "restructuredtext en"
-_logger: Logger = logging.getLogger("aesara.compile.debugmode")
+_logger: Logger = logging.getLogger("pytensor.compile.debugmode")
 _logger.addFilter(NoDuplicateOptWarningFilter())
 
 
 class DebugModeError(Exception):
     """
-    Generic Exception raised to indicate an internal aesara problem.
+    Generic Exception raised to indicate an internal pytensor problem.
 
     """
 
@@ -403,7 +403,7 @@ def str_diagnostic(expected, value, rtol, atol):
         print(ssio.getvalue(), file=sio)
     except Exception:
         pass
-    atol_, rtol_ = aesara.tensor.math._get_atol_rtol(expected, value)
+    atol_, rtol_ = pytensor.tensor.math._get_atol_rtol(expected, value)
     if rtol is not None:
         rtol_ = rtol
     if atol is not None:
@@ -575,7 +575,7 @@ def _check_viewmap(fgraph, node, storage_map):
         view_map = node.op.view_map
         destroy_map = node.op.destroy_map
 
-        # In theory, aesara's view_map only allows for 1 output to
+        # In theory, pytensor's view_map only allows for 1 output to
         # alias 1 input. Checking for multiple aliases just in
         # case...
 
@@ -682,7 +682,7 @@ def _lessbroken_deepcopy(a):
     """
     # this exists because copy.deepcopy on numpy arrays is broken
     # This logic is also in link.py
-    from aesara.link.c.type import _cdata_type
+    from pytensor.link.c.type import _cdata_type
 
     if isinstance(a, (np.ndarray, np.memmap)):
         rval = a.copy(order="K")
@@ -986,7 +986,7 @@ def _check_preallocated_output(
         if isinstance(getattr(node, "op", None), HasInnerGraph):
             fn = node.op.fn
             if not fn or not hasattr(fn, "maker") or not hasattr(fn.maker, "mode"):
-                _logger.warning(f"Expected aesara function not found in {node.op}.fn")
+                _logger.warning(f"Expected pytensor function not found in {node.op}.fn")
             else:
                 if isinstance(fn.maker.mode, DebugMode):
                     backup_mode = fn.maker.mode
@@ -1982,7 +1982,7 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
         What to do if a variable in the 'inputs' list is not used in the
         graph. Possible values are 'raise', 'warn' and 'ignore'.
     output_keys
-        If the outputs argument for aesara.function was a list, then
+        If the outputs argument for pytensor.function was a list, then
         output_keys is None. If the outputs argument was a dict, then
         output_keys is a sorted list of the keys from that dict.
 
@@ -2050,7 +2050,7 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
             with config.change_flags(compute_test_value=config.compute_test_value_opt):
                 optimizer(fgraph)
 
-                aesara.compile.function.types.insert_deepcopy(
+                pytensor.compile.function.types.insert_deepcopy(
                     fgraph, inputs, list(chain(outputs, additional_outputs))
                 )
 
@@ -2177,7 +2177,7 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
 
 class DebugMode(Mode):
     """
-    Evaluation Mode that detects internal aesara errors.
+    Evaluation Mode that detects internal pytensor errors.
 
     This mode catches several kinds of internal error:
 

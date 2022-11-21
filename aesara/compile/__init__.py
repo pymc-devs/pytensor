@@ -1,5 +1,5 @@
-from aesara.compile.function.pfunc import pfunc, rebuild_collect_shared
-from aesara.compile.function.types import (
+from pytensor.compile.function.pfunc import pfunc, rebuild_collect_shared
+from pytensor.compile.function.types import (
     AliasedMemoryError,
     Function,
     FunctionMaker,
@@ -15,8 +15,8 @@ from aesara.compile.function.types import (
     std_fgraph,
     view_tree_set,
 )
-from aesara.compile.io import In, Out, SymbolicInput, SymbolicOutput
-from aesara.compile.mode import (
+from pytensor.compile.io import In, Out, SymbolicInput, SymbolicOutput
+from pytensor.compile.mode import (
     FAST_COMPILE,
     FAST_RUN,
     JAX,
@@ -46,8 +46,8 @@ from aesara.compile.mode import (
     register_mode,
     register_optimizer,
 )
-from aesara.compile.monitormode import MonitorMode
-from aesara.compile.ops import (
+from pytensor.compile.monitormode import MonitorMode
+from pytensor.compile.ops import (
     DeepCopyOp,
     FromFunctionOp,
     ViewOp,
@@ -57,5 +57,5 @@ from aesara.compile.ops import (
     register_view_op_c_code,
     view_op,
 )
-from aesara.compile.profiling import ProfileStats
-from aesara.compile.sharedvalue import SharedVariable, shared, shared_constructor
+from pytensor.compile.profiling import ProfileStats
+from pytensor.compile.sharedvalue import SharedVariable, shared, shared_constructor

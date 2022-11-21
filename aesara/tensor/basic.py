@@ -19,32 +19,32 @@ import numpy as np
 from numpy.core.multiarray import normalize_axis_index
 from numpy.core.numeric import normalize_axis_tuple
 
-import aesara
-import aesara.scalar.sharedvar
-from aesara import compile, config, printing
-from aesara import scalar as aes
-from aesara.gradient import DisconnectedType, grad_not_implemented, grad_undefined
-from aesara.graph.basic import Apply, Constant, Variable
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import Op
-from aesara.graph.rewriting.utils import rewrite_graph
-from aesara.graph.type import HasShape, Type
-from aesara.link.c.op import COp
-from aesara.link.c.params_type import ParamsType
-from aesara.misc.safe_asarray import _asarray
-from aesara.printing import Printer, min_informative_str, pprint, set_precedence
-from aesara.raise_op import CheckAndRaise, assert_op
-from aesara.scalar import int32
-from aesara.scalar.basic import ScalarConstant, ScalarVariable
-from aesara.tensor import (
+import pytensor
+import pytensor.scalar.sharedvar
+from pytensor import compile, config, printing
+from pytensor import scalar as aes
+from pytensor.gradient import DisconnectedType, grad_not_implemented, grad_undefined
+from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op
+from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.graph.type import HasShape, Type
+from pytensor.link.c.op import COp
+from pytensor.link.c.params_type import ParamsType
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.printing import Printer, min_informative_str, pprint, set_precedence
+from pytensor.raise_op import CheckAndRaise, assert_op
+from pytensor.scalar import int32
+from pytensor.scalar.basic import ScalarConstant, ScalarVariable
+from pytensor.tensor import (
     _as_tensor_variable,
     _get_vector_length,
     as_tensor_variable,
     get_vector_length,
 )
-from aesara.tensor.elemwise import DimShuffle, Elemwise, scalar_elemwise
-from aesara.tensor.exceptions import NotScalarConstantError
-from aesara.tensor.shape import (
+from pytensor.tensor.elemwise import DimShuffle, Elemwise, scalar_elemwise
+from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.shape import (
     Shape,
     Shape_i,
     Unbroadcast,
@@ -55,7 +55,7 @@ from aesara.tensor.shape import (
     shape_tuple,
     specify_broadcastable,
 )
-from aesara.tensor.type import (
+from pytensor.tensor.type import (
     TensorType,
     discrete_dtypes,
     float_dtypes,
@@ -65,11 +65,11 @@ from aesara.tensor.type import (
     uint_dtypes,
     values_eq_approx_always_true,
 )
-from aesara.tensor.var import TensorConstant, TensorVariable, get_unique_value
+from pytensor.tensor.var import TensorConstant, TensorVariable, get_unique_value
 
 
 if TYPE_CHECKING:
-    from aesara.tensor import TensorLike
+    from pytensor.tensor import TensorLike
 
 
 def __oplist_tag(thing, tag):
@@ -183,7 +183,7 @@ def _as_tensor_bool(x, name, ndim, **kwargs):
         "np.array(True) or np.array(False) if you need these constants. "
         "This error might be caused by using the == operator on "
         "Variables. v == w does not do what you think it does, "
-        "use aesara.tensor.eq(v, w) instead."
+        "use pytensor.tensor.eq(v, w) instead."
     )
 
 
@@ -319,7 +319,7 @@ def get_scalar_constant_value(
                 except ValueError:
                     raise NotScalarConstantError()
 
-            from aesara.sparse.type import SparseTensorType
+            from pytensor.sparse.type import SparseTensorType
 
             if isinstance(v.type, SparseTensorType):
                 raise NotScalarConstantError()
@@ -402,11 +402,11 @@ def get_scalar_constant_value(
                     v.owner.op.perform(v.owner, const, ret)
                     return np.asarray(ret[0][0].copy())
             elif (
-                isinstance(v.owner.op, aesara.tensor.subtensor.Subtensor)
+                isinstance(v.owner.op, pytensor.tensor.subtensor.Subtensor)
                 and v.ndim == 0
             ):
                 if isinstance(v.owner.inputs[0], TensorConstant):
-                    from aesara.tensor.subtensor import get_constant_idx
+                    from pytensor.tensor.subtensor import get_constant_idx
 
                     cdata = tuple(get_constant_idx(v.owner.op.idx_list, v.owner.inputs))
                     try:
@@ -426,7 +426,7 @@ def get_scalar_constant_value(
                 assert len(v.owner.op.idx_list) == v.owner.inputs[0].ndim
 
                 # Needed to make better graph in this test in
-                # aesara/tensor/tests/test_sharedvar.py:
+                # pytensor/tensor/tests/test_sharedvar.py:
                 # test_shared_options.test_specify_shape_partial
                 if (
                     v.owner.inputs[0].owner
@@ -560,7 +560,7 @@ class TensorFromScalar(COp):
 
         # If the input dtype is an integer, then so is the output dtype,
         # and the "zero" gradient can be represented in that int dtype.
-        # Currently, aesara.grad insists that the dtype of the returned
+        # Currently, pytensor.grad insists that the dtype of the returned
         # gradient has a float dtype, so we use floatX.
         if s.type.dtype in discrete_dtypes:
             return [s.zeros_like().astype(config.floatX)]
@@ -1356,8 +1356,8 @@ def infer_static_shape(
     ``None``/``int`` values that can be used as `TensorType.shape` values.
 
     """
-    from aesara.tensor.rewriting.basic import topo_constant_folding
-    from aesara.tensor.rewriting.shape import ShapeFeature
+    from pytensor.tensor.rewriting.basic import topo_constant_folding
+    from pytensor.tensor.rewriting.shape import ShapeFeature
 
     def check_type(s):
         if s.type.dtype in integer_dtypes:
@@ -1558,14 +1558,14 @@ class Alloc(COp):
                         # Not doing the constant folding could also lower
                         # the peak memory usage, as we the "constant" won't
                         # always exists.
-                        aesara.tensor.subtensor.IncSubtensor,
-                        aesara.tensor.subtensor.AdvancedIncSubtensor1,
-                        aesara.tensor.subtensor.AdvancedIncSubtensor,
-                        aesara.tensor.blas.Gemv,
-                        aesara.tensor.blas_c.CGemv,
-                        aesara.tensor.blas.Ger,
-                        aesara.tensor.blas_c.CGer,
-                        aesara.tensor.blas_scipy.ScipyGer,
+                        pytensor.tensor.subtensor.IncSubtensor,
+                        pytensor.tensor.subtensor.AdvancedIncSubtensor1,
+                        pytensor.tensor.subtensor.AdvancedIncSubtensor,
+                        pytensor.tensor.blas.Gemv,
+                        pytensor.tensor.blas_c.CGemv,
+                        pytensor.tensor.blas.Ger,
+                        pytensor.tensor.blas_c.CGer,
+                        pytensor.tensor.blas_scipy.ScipyGer,
                     ),
                 )
             ):
@@ -1667,7 +1667,7 @@ class MakeVector(COp):
 
     def perform(self, node, inputs, out_):
         (out,) = out_
-        # not calling aesara._asarray as optimization
+        # not calling pytensor._asarray as optimization
         if (out[0] is None) or (out[0].size != len(inputs)):
             out[0] = _asarray(inputs, dtype=node.outputs[0].dtype)
         else:
@@ -1763,7 +1763,7 @@ def transfer(var, target):
     Parameters
     ----------
     var : variable
-        A aesara variable
+        A pytensor variable
     target : str
         The target of the transfer
     """
@@ -1960,7 +1960,7 @@ class Split(COp):
         out_shapes = []
         for i in range(self.len_splits):
             temp = as_tensor_variable(shp_x)
-            temp = aesara.tensor.subtensor.set_subtensor(temp[axis], splits[i])
+            temp = pytensor.tensor.subtensor.set_subtensor(temp[axis], splits[i])
             temp = [temp[i] for i in range(len(shp_x))]
             out_shapes.append(temp)
         return out_shapes
@@ -2404,7 +2404,7 @@ class Join(COp):
         return rval
 
     def infer_shape(self, fgraph, node, ishapes):
-        from aesara.tensor.math import eq, ge
+        from pytensor.tensor.math import eq, ge
 
         # ishapes[0] contains the size of the axis on which we join
         # Join op should get at least one input to join
@@ -2559,28 +2559,28 @@ def stack(*tensors, **kwargs):
 
     Examples
     --------
-    >>> a = aesara.tensor.type.scalar()
-    >>> b = aesara.tensor.type.scalar()
-    >>> c = aesara.tensor.type.scalar()
-    >>> x = aesara.tensor.stack([a, b, c])
+    >>> a = pytensor.tensor.type.scalar()
+    >>> b = pytensor.tensor.type.scalar()
+    >>> c = pytensor.tensor.type.scalar()
+    >>> x = pytensor.tensor.stack([a, b, c])
     >>> x.ndim # x is a vector of length 3.
     1
-    >>> a = aesara.tensor.type.tensor4()
-    >>> b = aesara.tensor.type.tensor4()
-    >>> c = aesara.tensor.type.tensor4()
-    >>> x = aesara.tensor.stack([a, b, c])
+    >>> a = pytensor.tensor.type.tensor4()
+    >>> b = pytensor.tensor.type.tensor4()
+    >>> c = pytensor.tensor.type.tensor4()
+    >>> x = pytensor.tensor.stack([a, b, c])
     >>> x.ndim # x is a 5d tensor.
     5
     >>> rval = x.eval(dict((t, np.zeros((2, 2, 2, 2))) for t in [a, b, c]))
     >>> rval.shape # 3 tensors are stacked on axis 0
     (3, 2, 2, 2, 2)
-    >>> x = aesara.tensor.stack([a, b, c], axis=3)
+    >>> x = pytensor.tensor.stack([a, b, c], axis=3)
     >>> x.ndim
     5
     >>> rval = x.eval(dict((t, np.zeros((2, 2, 2, 2))) for t in [a, b, c]))
     >>> rval.shape # 3 tensors are stacked on axis 3
     (2, 2, 2, 3, 2)
-    >>> x = aesara.tensor.stack([a, b, c], axis=-2)
+    >>> x = pytensor.tensor.stack([a, b, c], axis=-2)
     >>> x.ndim
     5
     >>> rval = x.eval(dict((t, np.zeros((2, 2, 2, 2))) for t in [a, b, c]))
@@ -2715,8 +2715,8 @@ def is_flat(var, ndim=None, outdim=None):
 
     Parameters
     ----------
-        var : aesara.tensor.var.TensorVariable
-            the aesara var on which the dimensionality is checked.
+        var : pytensor.tensor.var.TensorVariable
+            the pytensor var on which the dimensionality is checked.
 
         outdim : int
             the expected dimensionality of var.
@@ -2746,7 +2746,7 @@ def flatten(x, ndim=1):
 
     Parameters
     ----------
-    x : aesara.tensor.var.TensorVariable
+    x : pytensor.tensor.var.TensorVariable
         The variable to be reshaped.
     ndim : int
         The number of dimensions of the returned variable
@@ -2754,7 +2754,7 @@ def flatten(x, ndim=1):
 
     Returns
     -------
-    aesara.tensor.var.TensorVariable
+    pytensor.tensor.var.TensorVariable
         the flattened variable with dimensionality of outdim
     """
     if ndim is None:
@@ -2798,7 +2798,7 @@ def tile(x, reps, ndim=None):
     be provided.
 
     """
-    from aesara.tensor.math import ge
+    from pytensor.tensor.math import ge
 
     _x = as_tensor_variable(x)
     if ndim is not None and ndim < _x.ndim:
@@ -2890,7 +2890,7 @@ class ARange(Op):
 
     @config.change_flags(warn_float64="ignore")
     def infer_shape(self, fgraph, node, i_shapes):
-        from aesara.tensor.math import ceil, maximum
+        from pytensor.tensor.math import ceil, maximum
 
         # Note start, stop and step can be float numbers.
         start, stop, step = node.inputs
@@ -3244,7 +3244,7 @@ class PermuteRowElements(Op):
         self._rec_perform(node, x, y, inverse, outs[0], curdim=0)
 
     def infer_shape(self, fgraph, node, in_shapes):
-        from aesara.tensor.math import maximum
+        from pytensor.tensor.math import maximum
 
         shp_x = in_shapes[0]
         shp_y = in_shapes[1]
@@ -3255,7 +3255,7 @@ class PermuteRowElements(Op):
         return [out_shape]
 
     def grad(self, inp, grads):
-        from aesara.tensor.math import Sum, eq
+        from pytensor.tensor.math import Sum, eq
 
         x, y, inverse = inp
         (gz,) = grads
@@ -3419,7 +3419,7 @@ class ExtractDiag(Op):
             x = zeros_like(x)
             xdiag = AllocDiag(offset=self.offset)(gz)
             return [
-                aesara.tensor.subtensor.set_subtensor(
+                pytensor.tensor.subtensor.set_subtensor(
                     x[: xdiag.shape[0], : xdiag.shape[1]], xdiag
                 )
             ]
@@ -3428,7 +3428,7 @@ class ExtractDiag(Op):
             return [grad_not_implemented(self, 0, x)]
 
     def infer_shape(self, fgraph, node, shapes):
-        from aesara.tensor.math import clip, minimum
+        from pytensor.tensor.math import clip, minimum
 
         (in_shape,) = shapes
         dim1 = in_shape[self.axis1]
@@ -3627,9 +3627,9 @@ def stacklists(arg):
 
     Examples
     --------
-    >>> from aesara.tensor import stacklists
-    >>> from aesara.tensor.type import scalars, matrices
-    >>> from aesara import function
+    >>> from pytensor.tensor import stacklists
+    >>> from pytensor.tensor.type import scalars, matrices
+    >>> from pytensor import function
     >>> a, b, c, d = scalars('abcd')
     >>> X = stacklists([[a, b], [c, d]])
     >>> f = function([a, b, c, d], X)
@@ -3783,7 +3783,7 @@ class Choose(Op):
     def infer_shape(self, fgraph, node, shapes):
 
         a_shape, choices_shape = shapes
-        out_shape = aesara.tensor.extra_ops.broadcast_shape(
+        out_shape = pytensor.tensor.extra_ops.broadcast_shape(
             a_shape, choices_shape[1:], arrays_are_shapes=True
         )
 
@@ -3792,7 +3792,7 @@ class Choose(Op):
     def make_node(self, a, choices):
         # Import here as it isn't imported by default and we can't
         # import at the top as it would cause circular import.
-        import aesara.typed_list
+        import pytensor.typed_list
 
         a = as_tensor_variable(a)
         if a.dtype not in discrete_dtypes:
@@ -3803,7 +3803,7 @@ class Choose(Op):
         # Only use make_list if choices have inconsistent shapes
         # otherwise use as_tensor_variable
         if isinstance(choices, (tuple, list)):
-            choice = aesara.typed_list.make_list(choices)
+            choice = pytensor.typed_list.make_list(choices)
         else:
             choice = as_tensor_variable(choices)
 
@@ -3814,7 +3814,7 @@ class Choose(Op):
         static_out_shape = ()
         for s in out_shape:
             try:
-                s_val = aesara.get_scalar_constant_value(s)
+                s_val = pytensor.get_scalar_constant_value(s)
             except (NotScalarConstantError, AttributeError):
                 s_val = None
 

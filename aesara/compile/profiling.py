@@ -20,14 +20,14 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import numpy as np
 
-import aesara
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Constant, Variable
-from aesara.link.utils import get_destroy_dependencies
+import pytensor
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.link.utils import get_destroy_dependencies
 
 
 if TYPE_CHECKING:
-    from aesara.graph.fg import FunctionGraph
+    from pytensor.graph.fg import FunctionGraph
 
 
 @contextmanager
@@ -41,9 +41,9 @@ def extended_open(filename, mode="r"):
             yield f
 
 
-logger = logging.getLogger("aesara.compile.profiling")
+logger = logging.getLogger("pytensor.compile.profiling")
 
-aesara_imported_time: float = time.time()
+pytensor_imported_time: float = time.time()
 total_fct_exec_time: float = 0.0
 total_graph_rewrite_time: float = 0.0
 total_time_linker: float = 0.0
@@ -165,7 +165,7 @@ def print_global_stats():
         print(
             (
                 "Global stats: ",
-                f"Time elasped since Aesara import = {time.time() - aesara_imported_time:6.3f}s, "
+                f"Time elasped since Aesara import = {time.time() - pytensor_imported_time:6.3f}s, "
                 f"Time spent in Aesara functions = {total_fct_exec_time:6.3f}s, "
                 "Time spent compiling Aesara functions: "
                 f"rewriting = {total_graph_rewrite_time:6.3f}s, linking = {total_time_linker:6.3f}s ",
@@ -520,8 +520,8 @@ class ProfileStats:
             tot += t
             ftot = tot * 100 / local_time
             # Remove the useless start and end of the class name:
-            # "<class 'aesara.backend.blas.Dot22'>" ->
-            #  "aesara.backend.blas.Dot22"
+            # "<class 'pytensor.backend.blas.Dot22'>" ->
+            #  "pytensor.backend.blas.Dot22"
             class_name = str(a)[8:-2][:maxlen]
             print(
                 format_str
@@ -828,11 +828,11 @@ class ProfileStats:
 
     def summary_globals(self, file):
         print(
-            f"Time in all call to aesara.grad() {aesara.gradient.grad_time:e}s",
+            f"Time in all call to pytensor.grad() {pytensor.gradient.grad_time:e}s",
             file=file,
         )
-        total_time = time.time() - aesara_imported_time
-        print(f"Time since aesara import {total_time:.3f}s", file=file)
+        total_time = time.time() - pytensor_imported_time
+        print(f"Time since pytensor import {total_time:.3f}s", file=file)
 
     def summary_memory(self, file, N=None):
         fct_memory = {}  # fgraph->dict(node->[outputs size])
@@ -1464,7 +1464,7 @@ class ProfileStats:
             )
         if config.profiling__debugprint:
             fcts = {fgraph for (fgraph, n) in self.apply_time.keys()}
-            aesara.printing.debugprint(fcts, print_type=True)
+            pytensor.printing.debugprint(fcts, print_type=True)
         if self.variable_shape or self.variable_strides:
             self.summary_memory(file, n_apply_to_print)
         if self.rewriter_profile:
@@ -1482,10 +1482,10 @@ class ProfileStats:
             file=file,
         )
 
-        from aesara import scalar as aes
-        from aesara.tensor.elemwise import Elemwise
-        from aesara.tensor.math import Dot
-        from aesara.tensor.random.op import RandomVariable
+        from pytensor import scalar as aes
+        from pytensor.tensor.elemwise import Elemwise
+        from pytensor.tensor.math import Dot
+        from pytensor.tensor.random.op import RandomVariable
 
         scalar_op_amdlibm_no_speed_up = [
             aes.LT,
@@ -1605,7 +1605,7 @@ class ProfileStats:
             print(
                 "  - With the default gcc libm, exp in float32 is slower "
                 "than in float64! Try Aesara flag floatX=float64, or "
-                "install amdlibm and set the aesara flags lib__amblibm=True",
+                "install amdlibm and set the pytensor flags lib__amblibm=True",
                 file=file,
             )
             printed_tip = True
@@ -1634,7 +1634,7 @@ class ProfileStats:
                 printed_tip = True
                 print(
                     "  - Replace the default random number generator by "
-                    "'from aesara.sandbox.rng_mrg import MRG_RandomStream "
+                    "'from pytensor.sandbox.rng_mrg import MRG_RandomStream "
                     "as RandomStream', as this is is faster. It is still "
                     "experimental, but seems to work correctly.",
                     file=file,

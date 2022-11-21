@@ -10,10 +10,10 @@ import pickle
 import warnings
 from typing import Dict, Tuple
 
-from aesara.graph.basic import Apply
-from aesara.graph.op import Op
-from aesara.link.c.op import COp
-from aesara.link.c.type import CType
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+from pytensor.link.c.op import COp
+from pytensor.link.c.type import CType
 
 
 def register_view_op_c_code(type, code, version=()):
@@ -303,8 +303,8 @@ def as_op(itypes, otypes, infer_shape=None):
 
     Examples
     --------
-    @as_op(itypes=[aesara.tensor.fmatrix, aesara.tensor.fmatrix],
-           otypes=[aesara.tensor.fmatrix])
+    @as_op(itypes=[pytensor.tensor.fmatrix, pytensor.tensor.fmatrix],
+           otypes=[pytensor.tensor.fmatrix])
     def numpy_dot(a, b):
         return numpy.dot(a, b)
 

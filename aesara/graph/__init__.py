@@ -1,7 +1,7 @@
 """Graph objects and manipulation functions."""
 
 # isort: off
-from aesara.graph.basic import (
+from pytensor.graph.basic import (
     Apply,
     Variable,
     Constant,
@@ -10,11 +10,11 @@ from aesara.graph.basic import (
     clone_replace,
     ancestors,
 )
-from aesara.graph.op import Op
-from aesara.graph.type import Type
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.rewriting.basic import node_rewriter, graph_rewriter
-from aesara.graph.rewriting.utils import rewrite_graph
-from aesara.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.graph.op import Op
+from pytensor.graph.type import Type
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.basic import node_rewriter, graph_rewriter
+from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 
 # isort: on

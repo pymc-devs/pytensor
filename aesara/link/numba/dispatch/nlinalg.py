@@ -3,13 +3,13 @@ import warnings
 import numba
 import numpy as np
 
-from aesara.link.numba.dispatch import basic as numba_basic
-from aesara.link.numba.dispatch.basic import (
+from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch.basic import (
     get_numba_type,
     int_to_float_fn,
     numba_funcify,
 )
-from aesara.tensor.nlinalg import (
+from pytensor.tensor.nlinalg import (
     SVD,
     Det,
     Eig,

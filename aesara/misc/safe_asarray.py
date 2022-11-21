@@ -5,7 +5,7 @@ Helper function to safely convert an array to a new data type.
 
 import numpy as np
 
-from aesara.configdefaults import config
+from pytensor.configdefaults import config
 
 
 __docformat__ = "restructuredtext en"

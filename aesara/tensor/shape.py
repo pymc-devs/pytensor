@@ -5,21 +5,21 @@ from typing import Dict, List, Tuple, Union
 
 import numpy as np
 
-import aesara
-from aesara.gradient import DisconnectedType
-from aesara.graph.basic import Apply, Variable
-from aesara.graph.type import HasShape
-from aesara.link.c.op import COp
-from aesara.link.c.params_type import ParamsType
-from aesara.misc.safe_asarray import _asarray
-from aesara.scalar import int32
-from aesara.tensor import _get_vector_length, as_tensor_variable
-from aesara.tensor import basic as at
-from aesara.tensor import get_vector_length
-from aesara.tensor.exceptions import NotScalarConstantError
-from aesara.tensor.type import DenseTensorType, TensorType, int_dtypes, tensor
-from aesara.tensor.type_other import NoneConst
-from aesara.tensor.var import TensorConstant, TensorVariable
+import pytensor
+from pytensor.gradient import DisconnectedType
+from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.type import HasShape
+from pytensor.link.c.op import COp
+from pytensor.link.c.params_type import ParamsType
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.scalar import int32
+from pytensor.tensor import _get_vector_length, as_tensor_variable
+from pytensor.tensor import basic as at
+from pytensor.tensor import get_vector_length
+from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.type import DenseTensorType, TensorType, int_dtypes, tensor
+from pytensor.tensor.type_other import NoneConst
+from pytensor.tensor.var import TensorConstant, TensorVariable
 
 
 def register_shape_c_code(type, code, version=()):
@@ -68,7 +68,7 @@ class Shape(COp):
         if isinstance(x.type, TensorType):
             out_var = TensorType("int64", (x.type.ndim,))()
         else:
-            out_var = aesara.tensor.type.lvector()
+            out_var = pytensor.tensor.type.lvector()
 
         return Apply(self, [x], [out_var])
 
@@ -94,7 +94,7 @@ class Shape(COp):
         # the elements of the tensor variable do not participate
         # in the computation of the shape, so they are not really
         # part of the graph
-        return [aesara.gradient.DisconnectedType()()]
+        return [pytensor.gradient.DisconnectedType()()]
 
     def R_op(self, inputs, eval_points):
         return [None]
@@ -176,7 +176,7 @@ def shape_tuple(x: TensorVariable) -> Tuple[Variable, ...]:
 
         if shape_val is not None:
             # TODO: Why not use uint64?
-            res += (aesara.scalar.ScalarConstant(aesara.scalar.int64, shape_val),)
+            res += (pytensor.scalar.ScalarConstant(pytensor.scalar.int64, shape_val),)
         else:
             res += (symbolic_shape[i],)
 
@@ -208,14 +208,14 @@ class Shape_i(COp):
         # As i will be used in the hash and that ndarray are not hashable,
         # we need to convert it to an int as it is hashable.
         if isinstance(i, np.ndarray):
-            assert i.dtype in aesara.tensor.type.integer_dtypes
+            assert i.dtype in pytensor.tensor.type.integer_dtypes
         assert i == int(i)
         i = int(i)
         self.i = i
 
     # NB:
     # 1) params_type is defined as a property to avoid
-    #    loop in Python import caused by importing aesara.scalar below
+    #    loop in Python import caused by importing pytensor.scalar below
     #    when params_type is defined directly in class code.
     # 2) We wrap scalar into ParamsType (instead of directly using scalar as op param)
     #    to avoid Aesara converting scalar param to constant that would be later
@@ -223,7 +223,7 @@ class Shape_i(COp):
     #    using params.
     @property
     def params_type(self):
-        return ParamsType(i=aesara.scalar.basic.int64)
+        return ParamsType(i=pytensor.scalar.basic.int64)
 
     def __str__(self):
         return "%s{%i}" % (self.__class__.__name__, self.i)
@@ -235,7 +235,7 @@ class Shape_i(COp):
             )
         if x.type.ndim <= self.i:
             raise TypeError(f"{x} has too few dimensions for Shape_i")
-        return Apply(self, [x], [aesara.tensor.type.lscalar()])
+        return Apply(self, [x], [pytensor.tensor.type.lscalar()])
 
     def perform(self, node, inp, out_, params):
         (x,) = inp
@@ -295,7 +295,7 @@ class Shape_i(COp):
 
     def grad(self, inp, grads):
         return [
-            aesara.gradient.grad_not_implemented(
+            pytensor.gradient.grad_not_implemented(
                 op=self,
                 x_pos=0,
                 x=inp[0],
@@ -394,7 +394,7 @@ class SpecifyShape(COp):
     _f16_ok = True
 
     def make_node(self, x, *shape):
-        from aesara.tensor.basic import get_scalar_constant_value
+        from pytensor.tensor.basic import get_scalar_constant_value
 
         x = at.as_tensor_variable(x)
 
@@ -406,7 +406,7 @@ class SpecifyShape(COp):
         )
 
         if any(
-            s.dtype not in aesara.tensor.type.integer_dtypes
+            s.dtype not in pytensor.tensor.type.integer_dtypes
             for s in shape
             if hasattr(s, "dtype")
         ):
@@ -474,7 +474,7 @@ class SpecifyShape(COp):
         x, *shape = inp
         (gz,) = grads
         return [specify_shape(gz, shape)] + [
-            aesara.gradient.DisconnectedType()() for _ in range(len(shape))
+            pytensor.gradient.DisconnectedType()() for _ in range(len(shape))
         ]
 
     def R_op(self, inputs, eval_points):
@@ -668,7 +668,7 @@ class Reshape(COp):
         return self(eval_points[0], *inputs[1:], return_list=True)
 
     def infer_shape(self, fgraph, node, ishapes):
-        from aesara.tensor.math import eq, maximum, mul
+        from pytensor.tensor.math import eq, maximum, mul
 
         # inputs[1] can contain at most one value of '-1', meaning the actual
         # shape of the output will be automatically computed by reshape, so
@@ -837,14 +837,14 @@ def shape_padaxis(t, axis):
 
     Examples
     --------
-    >>> tensor = aesara.tensor.type.tensor3()
-    >>> aesara.tensor.shape_padaxis(tensor, axis=0)
+    >>> tensor = pytensor.tensor.type.tensor3()
+    >>> pytensor.tensor.shape_padaxis(tensor, axis=0)
     DimShuffle{x,0,1,2}.0
-    >>> aesara.tensor.shape_padaxis(tensor, axis=1)
+    >>> pytensor.tensor.shape_padaxis(tensor, axis=1)
     DimShuffle{0,x,1,2}.0
-    >>> aesara.tensor.shape_padaxis(tensor, axis=3)
+    >>> pytensor.tensor.shape_padaxis(tensor, axis=3)
     DimShuffle{0,1,2,x}.0
-    >>> aesara.tensor.shape_padaxis(tensor, axis=-1)
+    >>> pytensor.tensor.shape_padaxis(tensor, axis=-1)
     DimShuffle{0,1,2,x}.0
 
     See Also
@@ -914,7 +914,7 @@ def specify_broadcastable(x, *axes):
     Parameters
     ----------
     x : tensor_like
-        Input aesara tensor.
+        Input pytensor tensor.
     axis : an int or an iterable object such as list or tuple of int values
         The dimension along which the tensor x should be broadcastable.
         If the length of x along these dimensions is not 1, a ValueError will
@@ -923,7 +923,7 @@ def specify_broadcastable(x, *axes):
     Returns
     -------
     tensor
-        A aesara tensor, which is broadcastable along the specified dimensions.
+        A pytensor tensor, which is broadcastable along the specified dimensions.
 
     """
     x = as_tensor_variable(x)
@@ -944,7 +944,7 @@ class Unbroadcast(COp):
 
     See Also
     --------
-    unbroadcast <aesara.tensor.shape.unbroadcast>
+    unbroadcast <pytensor.tensor.shape.unbroadcast>
 
 
     Examples
@@ -1026,14 +1026,14 @@ def unbroadcast(x, *axes):
     Parameters
     ----------
     x : tensor_like
-        Input aesara tensor.
+        Input pytensor tensor.
     axis : an int or an iterable object such as list or tuple of int values
         The broadcastable dimensions of x that should be unbroadcasted.
 
     Returns
     -------
     tensor
-        A aesara tensor, with static broadcastable dimensions masked as `None`
+        A pytensor tensor, with static broadcastable dimensions masked as `None`
 
     """
     x = as_tensor_variable(x)

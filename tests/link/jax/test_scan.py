@@ -2,12 +2,12 @@ import numpy as np
 import pytest
 from packaging.version import parse as version_parse
 
-import aesara.tensor as at
-from aesara.configdefaults import config
-from aesara.graph.fg import FunctionGraph
-from aesara.scan.basic import scan
-from aesara.tensor.math import gammaln, log
-from aesara.tensor.type import ivector, lscalar, scalar
+import pytensor.tensor as at
+from pytensor.configdefaults import config
+from pytensor.graph.fg import FunctionGraph
+from pytensor.scan.basic import scan
+from pytensor.tensor.math import gammaln, log
+from pytensor.tensor.type import ivector, lscalar, scalar
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
@@ -52,7 +52,7 @@ def test_jax_scan_multiple_output():
     delta = scalar("delta")
 
     # TODO: Use random streams when their JAX conversions are implemented.
-    # trng = aesara.tensor.random.RandomStream(1234)
+    # trng = pytensor.tensor.random.RandomStream(1234)
 
     def seir_one_step(ct0, dt0, st0, et0, it0, logp_c, logp_d, beta, gamma, delta):
         # bt0 = trng.binomial(n=st0, p=beta)

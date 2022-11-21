@@ -2,9 +2,9 @@ import math
 
 import numpy as np
 
-from aesara.graph.basic import Apply
-from aesara.graph.op import Op
-from aesara.tensor.basic import (
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+from pytensor.tensor.basic import (
     arange,
     as_tensor_variable,
     concatenate,
@@ -12,16 +12,16 @@ from aesara.tensor.basic import (
     stack,
     switch,
 )
-from aesara.tensor.math import exp, lt, outer, tensordot
-from aesara.tensor.shape import shape
-from aesara.tensor.subtensor import set_subtensor
-from aesara.tensor.type import TensorType, integer_dtypes
-from aesara.tensor.var import TensorConstant
+from pytensor.tensor.math import exp, lt, outer, tensordot
+from pytensor.tensor.shape import shape
+from pytensor.tensor.subtensor import set_subtensor
+from pytensor.tensor.type import TensorType, integer_dtypes
+from pytensor.tensor.var import TensorConstant
 
 
 class Fourier(Op):
     """
-    WARNING: for officially supported FFTs, use aesara.tensor.fft, which
+    WARNING: for officially supported FFTs, use pytensor.tensor.fft, which
     provides real-input FFTs. Gradients are supported.
 
     An instance of this class returns a finite fourier transform calculated
@@ -151,7 +151,7 @@ class Fourier(Op):
         pow_outer = exp(((-2 * math.pi * 1j) * outer_res) / (1.0 * n))
         res = tensordot(grad, pow_outer, (axis, 0))
 
-        # This would be simpler but not implemented by aesara:
+        # This would be simpler but not implemented by pytensor:
         # res = switch(lt(n, shape(a)[axis]),
         # set_subtensor(res[...,n::], 0, False, False), res)
 

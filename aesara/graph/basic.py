@@ -29,8 +29,8 @@ from typing import (
 
 import numpy as np
 
-from aesara.configdefaults import config
-from aesara.graph.utils import (
+from pytensor.configdefaults import config
+from pytensor.graph.utils import (
     MetaObject,
     MethodNotDefined,
     Scratchpad,
@@ -39,12 +39,12 @@ from aesara.graph.utils import (
     add_tag_trace,
     get_variable_trace_string,
 )
-from aesara.misc.ordered_set import OrderedSet
+from pytensor.misc.ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
-    from aesara.graph.op import Op
-    from aesara.graph.type import Type
+    from pytensor.graph.op import Op
+    from pytensor.graph.type import Type
 
 
 OpType = TypeVar("OpType", bound="Op")
@@ -86,7 +86,7 @@ class Apply(Node, Generic[OpType]):
     This class is typically instantiated by a `Op.make_node` method, which
     is called by `Op.__call__`.
 
-    The function `aesara.compile.function.function` uses `Apply.inputs`
+    The function `pytensor.compile.function.function` uses `Apply.inputs`
     together with `Variable.owner` to search the expression graph and determine
     which inputs are necessary to compute the function's outputs.
 
@@ -223,7 +223,7 @@ class Apply(Node, Generic[OpType]):
         Tags are copied from `self` to the returned instance.
 
         """
-        from aesara.graph.op import HasInnerGraph
+        from pytensor.graph.op import HasInnerGraph
 
         new_op = self.op
 
@@ -263,7 +263,7 @@ class Apply(Node, Generic[OpType]):
             An `Apply` instance with the same `Op` but different outputs.
 
         """
-        from aesara.graph.op import HasInnerGraph
+        from pytensor.graph.op import HasInnerGraph
 
         assert isinstance(inputs, (list, tuple))
         remake_node = False
@@ -387,21 +387,21 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
 
     .. code-block:: python
 
-        import aesara
-        import aesara.tensor as at
+        import pytensor
+        import pytensor.tensor as at
 
         a = at.constant(1.5)            # declare a symbolic constant
         b = at.fscalar()                # declare a symbolic floating-point scalar
 
         c = a + b                       # create a simple expression
 
-        f = aesara.function([b], [c])   # this works because a has a value associated with it already
+        f = pytensor.function([b], [c])   # this works because a has a value associated with it already
 
         assert 4.0 == f(2.5)            # bind 2.5 to an internal copy of b and evaluate an internal c
 
-        aesara.function([a], [c])       # compilation error because b (required by c) is undefined
+        pytensor.function([a], [c])       # compilation error because b (required by c) is undefined
 
-        aesara.function([a,b], [c])     # compilation error because a is constant, it can't be an input
+        pytensor.function([a,b], [c])     # compilation error because a is constant, it can't be an input
 
 
     The python variables ``a, b, c`` all refer to instances of type
@@ -570,7 +570,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         --------
 
         >>> import numpy as np
-        >>> import aesara.tensor as at
+        >>> import pytensor.tensor as at
         >>> x = at.dscalar('x')
         >>> y = at.dscalar('y')
         >>> z = x + y
@@ -592,7 +592,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         This way of computing has more overhead than a normal Aesara
         function, so don't use it too much in real scripts.
         """
-        from aesara.compile.function import function
+        from pytensor.compile.function import function
 
         if inputs_to_values is None:
             inputs_to_values = {}
@@ -1173,7 +1173,7 @@ def clone_replace(
         Keywords to `rebuild_collect_shared`.
 
     """
-    from aesara.compile.function.pfunc import rebuild_collect_shared
+    from pytensor.compile.function.pfunc import rebuild_collect_shared
 
     items: Union[List[Tuple[Variable, Variable]], Tuple[Tuple[Variable, Variable], ...]]
     if isinstance(replace, dict):
@@ -1834,7 +1834,7 @@ def get_var_by_name(
     A ``tuple`` containing all the `Variable`\s that match `target_var_id`.
 
     """
-    from aesara.graph.op import HasInnerGraph
+    from pytensor.graph.op import HasInnerGraph
 
     def expand(r) -> Optional[List[Variable]]:
         if r.owner:

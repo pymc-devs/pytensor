@@ -22,9 +22,9 @@ from unification.core import _unify, assoc
 from unification.utils import transitive_get as walk
 from unification.variable import Var, isvar, var
 
-from aesara.graph.basic import Constant, Variable
-from aesara.graph.op import Op
-from aesara.graph.type import Type
+from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.op import Op
+from pytensor.graph.type import Type
 
 
 def eval_if_etuple(x):
@@ -285,7 +285,7 @@ def convert_strs_to_vars(
         elif isinstance(y, tuple):
             return etuple(*tuple(_convert(e) for e in y))
         elif isinstance(y, (Number, np.ndarray)):
-            from aesara.tensor import as_tensor_variable
+            from pytensor.tensor import as_tensor_variable
 
             return as_tensor_variable(y)
         return y

@@ -6,13 +6,13 @@ from tempfile import mkstemp
 import numpy as np
 import pytest
 
-import aesara
-from aesara import function, shared
-from aesara.compile.mode import get_default_mode
-from aesara.configdefaults import config
-from aesara.graph.utils import MethodNotDefined
-from aesara.misc.safe_asarray import _asarray
-from aesara.tensor.type import TensorType, complex_dtypes, discrete_dtypes, float_dtypes
+import pytensor
+from pytensor import function, shared
+from pytensor.compile.mode import get_default_mode
+from pytensor.configdefaults import config
+from pytensor.graph.utils import MethodNotDefined
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.tensor.type import TensorType, complex_dtypes, discrete_dtypes, float_dtypes
 from tests import unittest_tools as utt
 
 
@@ -54,7 +54,7 @@ ALL_DTYPES = (
 REAL_DTYPES = ALL_DTYPES[:6]
 COMPLEX_DTYPES = ALL_DTYPES[-2:]
 
-ignore_isfinite_mode = copy(aesara.compile.get_default_mode())
+ignore_isfinite_mode = copy(pytensor.compile.get_default_mode())
 ignore_isfinite_mode.check_isfinite = False
 
 

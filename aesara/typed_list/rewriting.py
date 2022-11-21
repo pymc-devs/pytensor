@@ -1,6 +1,6 @@
-from aesara.compile import optdb
-from aesara.graph.rewriting.basic import WalkingGraphRewriter, node_rewriter
-from aesara.typed_list.basic import Append, Extend, Insert, Remove, Reverse
+from pytensor.compile import optdb
+from pytensor.graph.rewriting.basic import WalkingGraphRewriter, node_rewriter
+from pytensor.typed_list.basic import Append, Extend, Insert, Remove, Reverse
 
 
 @node_rewriter([Append, Extend, Insert, Reverse, Remove], inplace=True)

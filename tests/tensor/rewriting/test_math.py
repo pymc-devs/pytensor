@@ -6,39 +6,39 @@ from io import StringIO
 import numpy as np
 import pytest
 
-import aesara
-import aesara.scalar as aes
-import aesara.tensor as at
-from aesara import pprint, shared
-from aesara.compile import optdb
-from aesara.compile.debugmode import DebugMode
-from aesara.compile.function import function
-from aesara.compile.mode import Mode, get_default_mode, get_mode
-from aesara.compile.ops import DeepCopyOp, deep_copy_op
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Constant, equal_computations
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.rewriting.basic import (
+import pytensor
+import pytensor.scalar as aes
+import pytensor.tensor as at
+from pytensor import pprint, shared
+from pytensor.compile import optdb
+from pytensor.compile.debugmode import DebugMode
+from pytensor.compile.function import function
+from pytensor.compile.mode import Mode, get_default_mode, get_mode
+from pytensor.compile.ops import DeepCopyOp, deep_copy_op
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Constant, equal_computations
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.basic import (
     SequentialNodeRewriter,
     WalkingGraphRewriter,
     check_stack_trace,
     in2out,
     out2in,
 )
-from aesara.graph.rewriting.db import RewriteDatabaseQuery
-from aesara.graph.rewriting.utils import is_same_graph, rewrite_graph
-from aesara.misc.safe_asarray import _asarray
-from aesara.tensor import inplace
-from aesara.tensor.basic import Alloc, join, switch
-from aesara.tensor.blas import Dot22, Gemv
-from aesara.tensor.blas_c import CGemv
-from aesara.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from aesara.tensor.math import Dot, MaxAndArgmax, Prod, Sum, _conj
-from aesara.tensor.math import abs as at_abs
-from aesara.tensor.math import add
-from aesara.tensor.math import all as at_all
-from aesara.tensor.math import any as at_any
-from aesara.tensor.math import (
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.graph.rewriting.utils import is_same_graph, rewrite_graph
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.tensor import inplace
+from pytensor.tensor.basic import Alloc, join, switch
+from pytensor.tensor.blas import Dot22, Gemv
+from pytensor.tensor.blas_c import CGemv
+from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.math import Dot, MaxAndArgmax, Prod, Sum, _conj
+from pytensor.tensor.math import abs as at_abs
+from pytensor.tensor.math import add
+from pytensor.tensor.math import all as at_all
+from pytensor.tensor.math import any as at_any
+from pytensor.tensor.math import (
     arccosh,
     arcsinh,
     arctanh,
@@ -69,18 +69,18 @@ from aesara.tensor.math import (
     log10,
     lt,
 )
-from aesara.tensor.math import max as at_max
-from aesara.tensor.math import maximum
-from aesara.tensor.math import min as at_min
-from aesara.tensor.math import minimum, mul, neg, neq
-from aesara.tensor.math import pow as at_pow
-from aesara.tensor.math import prod, rad2deg, reciprocal
-from aesara.tensor.math import round as at_round
-from aesara.tensor.math import sgn, sigmoid, sin, sinh, softplus, sqr, sqrt, sub
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.math import tan, tanh, true_div, xor
-from aesara.tensor.rewriting.elemwise import local_dimshuffle_lift
-from aesara.tensor.rewriting.math import (
+from pytensor.tensor.math import max as at_max
+from pytensor.tensor.math import maximum
+from pytensor.tensor.math import min as at_min
+from pytensor.tensor.math import minimum, mul, neg, neq
+from pytensor.tensor.math import pow as at_pow
+from pytensor.tensor.math import prod, rad2deg, reciprocal
+from pytensor.tensor.math import round as at_round
+from pytensor.tensor.math import sgn, sigmoid, sin, sinh, softplus, sqr, sqrt, sub
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import tan, tanh, true_div, xor
+from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
+from pytensor.tensor.rewriting.math import (
     compute_mul,
     is_1pexp,
     local_grad_log_erfc_neg,
@@ -91,8 +91,8 @@ from aesara.tensor.rewriting.math import (
     perform_sigm_times_exp,
     simplify_mul,
 )
-from aesara.tensor.shape import Reshape, Shape_i
-from aesara.tensor.type import (
+from pytensor.tensor.shape import Reshape, Shape_i
+from pytensor.tensor.type import (
     TensorType,
     cmatrix,
     dmatrices,
@@ -121,7 +121,7 @@ from aesara.tensor.type import (
     vectors,
     zscalar,
 )
-from aesara.tensor.var import TensorConstant
+from pytensor.tensor.var import TensorConstant
 from tests import unittest_tools as utt
 
 
@@ -945,12 +945,12 @@ class TestAlgebraicCanonizer:
         sio = StringIO()
         handler = logging.StreamHandler(sio)
         handler.setLevel(logging.ERROR)
-        logging.getLogger("aesara.graph.rewriting.basic").addHandler(handler)
+        logging.getLogger("pytensor.graph.rewriting.basic").addHandler(handler)
         try:
             x = vector()
             function([x], x + np.nan)
         finally:
-            logging.getLogger("aesara.graph.rewriting.basic").removeHandler(handler)
+            logging.getLogger("pytensor.graph.rewriting.basic").removeHandler(handler)
         # Ideally this test would only catch the maxed out equilibrium
         # rewriter error message, but to be safe in case this message
         # is modified in the future, we assert that there is no error
@@ -1005,7 +1005,7 @@ def test_merge_abs_bugfix():
     step2 = step1 / step1.sum(1)
     # get l1 norm
     l1_norm = at_abs(step2).sum()
-    function([input], aesara.gradient.grad(l1_norm, input))
+    function([input], pytensor.gradient.grad(l1_norm, input))
 
 
 def test_mixeddiv():
@@ -1909,14 +1909,14 @@ def test_local_subtensor_of_dot():
         return a.shape == b.shape and np.allclose(a, b)
 
     # [cst]
-    f = function([m1, m2], aesara.tensor.dot(m1, m2)[1], mode=mode)
+    f = function([m1, m2], pytensor.tensor.dot(m1, m2)[1], mode=mode)
     topo = f.maker.fgraph.toposort()
     assert test_equality(f(d1, d2), np.dot(d1, d2)[1])
     # DimShuffle happen in FAST_COMPILE
     assert isinstance(topo[-1].op, (CGemv, Gemv, DimShuffle))
 
     # slice
-    f = function([m1, m2], aesara.tensor.dot(m1, m2)[1:2], mode=mode)
+    f = function([m1, m2], pytensor.tensor.dot(m1, m2)[1:2], mode=mode)
     topo = f.maker.fgraph.toposort()
     assert test_equality(f(d1, d2), np.dot(d1, d2)[1:2])
     assert isinstance(topo[-1].op, Dot22)
@@ -1927,12 +1927,12 @@ def test_local_subtensor_of_dot():
     d1 = np.arange(30).reshape(2, 5, 3).astype(config.floatX)
     d2 = np.arange(72).reshape(4, 3, 6).astype(config.floatX) + 100
 
-    f = function([m1, m2, idx], aesara.tensor.dot(m1, m2)[idx, 1:4, :, idx:], mode=mode)
+    f = function([m1, m2, idx], pytensor.tensor.dot(m1, m2)[idx, 1:4, :, idx:], mode=mode)
     assert test_equality(f(d1, d2, 1), np.dot(d1, d2)[1, 1:4, :, 1:])
     # if we return the gradients. We need to use same mode as before.
     assert check_stack_trace(f, ops_to_check="last")
 
-    f = function([m1, m2, idx], aesara.tensor.dot(m1, m2)[1:4, :, idx:, idx], mode=mode)
+    f = function([m1, m2, idx], pytensor.tensor.dot(m1, m2)[1:4, :, idx:, idx], mode=mode)
     assert test_equality(f(d1, d2, 1), np.dot(d1, d2)[1:4, :, 1:, 1])
 
     # Now test that the stack trace is copied over properly,
@@ -2003,11 +2003,11 @@ class TestLocalUselessElemwiseComparison:
         # The following case is what made me discover those cases.
         X = matrix("X")
         Y = vector("Y")
-        X_sum, updates = aesara.scan(
+        X_sum, updates = pytensor.scan(
             fn=lambda x: x.sum(), outputs_info=None, sequences=[X], non_sequences=None
         )
         Z = X_sum + Y
-        # aesara.printing.debugprint(Z)
+        # pytensor.printing.debugprint(Z)
         # here is the output for the debug print:
         """
         Elemwise{add,no_inplace} [id A] ''
@@ -2038,7 +2038,7 @@ class TestLocalUselessElemwiseComparison:
             self.rng.random((2, 3)).astype(config.floatX),
             self.rng.random((2)).astype(config.floatX),
         )
-        # aesara.printing.debugprint(f, print_type=True)
+        # pytensor.printing.debugprint(f, print_type=True)
         # here is the output for the debug print:
         """
         Elemwise{Add}[(0, 0)] [id A] <TensorType(float64, vector)> ''   7
@@ -2779,7 +2779,7 @@ class TestLocalSwitchSink:
         # This case prevented a rewrite from being applied in the past
         x = dscalar("x")
         y = at.switch(x < 7, x, sqrt(x - 7))
-        f = self.function_remove_nan([x], aesara.gradient.grad(y, x), self.mode)
+        f = self.function_remove_nan([x], pytensor.gradient.grad(y, x), self.mode)
         assert f(5) == 1, f(5)
 
     @pytest.mark.slow
@@ -3055,7 +3055,7 @@ class TestLocalErfc:
 
         # Make sure that we catch our target graph in a way that it's naturally
         # produced
-        log_erfc_grad = aesara.gradient.grad(log(erfc(x)).sum(), x)
+        log_erfc_grad = pytensor.gradient.grad(log(erfc(x)).sum(), x)
         f = function([x], log_erfc_grad, mode=mode)
 
         # The resulting graph should be `mul(switch(...), y)`
@@ -3087,7 +3087,7 @@ class TestLocalErfc:
         assert all(np.isfinite(f(val)))
 
         # Test that it works correctly when `x` is multiplied by a constant
-        f = function([x], aesara.gradient.grad(log(erfc(2 * x)).sum(), x), mode=mode)
+        f = function([x], pytensor.gradient.grad(log(erfc(2 * x)).sum(), x), mode=mode)
 
         assert f.maker.fgraph.outputs[0].owner.op == mul
         assert f.maker.fgraph.outputs[0].owner.inputs[0].owner.op == switch
@@ -3099,7 +3099,7 @@ class TestLocalErfc:
         mode_fusion = copy.copy(self.mode_fusion)
         mode_fusion.check_isfinite = False
 
-        f = function([x], aesara.gradient.grad(log(erfc(x)).sum(), x), mode=mode_fusion)
+        f = function([x], pytensor.gradient.grad(log(erfc(x)).sum(), x), mode=mode_fusion)
 
         assert len(f.maker.fgraph.apply_nodes) == 1, len(f.maker.fgraph.apply_nodes)
         assert f.maker.fgraph.outputs[0].dtype == config.floatX
@@ -4169,9 +4169,9 @@ class TestSigmoidRewrites:
             excluding = []
         m = config.mode
         if m == "FAST_COMPILE":
-            mode = aesara.compile.mode.get_mode("FAST_RUN")
+            mode = pytensor.compile.mode.get_mode("FAST_RUN")
         else:
-            mode = aesara.compile.mode.get_default_mode()
+            mode = pytensor.compile.mode.get_default_mode()
         if excluding:
             return mode.excluding(*excluding)
         else:
@@ -4184,37 +4184,37 @@ class TestSigmoidRewrites:
         data = np.random.random((54)).astype(config.floatX)
 
         # tests exp_over_1_plus_exp
-        f = aesara.function([x], exp(x) / (1 + exp(x)), mode=m)
+        f = pytensor.function([x], exp(x) / (1 + exp(x)), mode=m)
         assert [node.op for node in f.maker.fgraph.toposort()] == [sigmoid]
         f(data)
-        f = aesara.function([x], exp(x) / (2 + exp(x)), mode=m)
+        f = pytensor.function([x], exp(x) / (2 + exp(x)), mode=m)
         assert [node.op for node in f.maker.fgraph.toposort()] != [sigmoid]
         f(data)
-        f = aesara.function([x], exp(x) / (1 - exp(x)), mode=m)
+        f = pytensor.function([x], exp(x) / (1 - exp(x)), mode=m)
         assert [node.op for node in f.maker.fgraph.toposort()] != [sigmoid]
         f(data)
-        f = aesara.function([x], exp(x + 1) / (1 + exp(x)), mode=m)
+        f = pytensor.function([x], exp(x + 1) / (1 + exp(x)), mode=m)
         assert [node.op for node in f.maker.fgraph.toposort()] != [sigmoid]
         f(data)
 
         # tests inv_1_plus_exp
-        f = aesara.function([x], at.fill(x, 1.0) / (1 + exp(-x)), mode=m)
+        f = pytensor.function([x], at.fill(x, 1.0) / (1 + exp(-x)), mode=m)
         # todo: solve issue #4589 first
         # assert check_stack_trace(f, ops_to_check=sigmoid)
         assert [node.op for node in f.maker.fgraph.toposort()] == [sigmoid]
         f(data)
-        f = aesara.function([x], at.fill(x, 1.0) / (2 + exp(-x)), mode=m)
+        f = pytensor.function([x], at.fill(x, 1.0) / (2 + exp(-x)), mode=m)
         assert [node.op for node in f.maker.fgraph.toposort()] != [sigmoid]
         f(data)
-        f = aesara.function([x], at.fill(x, 1.0) / (1 - exp(-x)), mode=m)
+        f = pytensor.function([x], at.fill(x, 1.0) / (1 - exp(-x)), mode=m)
         assert [node.op for node in f.maker.fgraph.toposort()] != [sigmoid]
         f(data)
-        f = aesara.function([x], at.fill(x, 1.1) / (1 + exp(-x)), mode=m)
+        f = pytensor.function([x], at.fill(x, 1.1) / (1 + exp(-x)), mode=m)
         assert [node.op for node in f.maker.fgraph.toposort()] != [sigmoid]
         f(data)
 
         # tests inv_1_plus_exp with neg
-        f = aesara.function([x], at.fill(x, -1.0) / (1 + exp(-x)), mode=m)
+        f = pytensor.function([x], at.fill(x, -1.0) / (1 + exp(-x)), mode=m)
         # todo: solve issue #4589 first
         # assert check_stack_trace(
         #     f, ops_to_check=[sigmoid, neg_inplace])
@@ -4223,19 +4223,19 @@ class TestSigmoidRewrites:
             inplace.neg_inplace,
         ]
         f(data)
-        f = aesara.function([x], at.fill(x, -1.0) / (1 - exp(-x)), mode=m)
+        f = pytensor.function([x], at.fill(x, -1.0) / (1 - exp(-x)), mode=m)
         assert [node.op for node in f.maker.fgraph.toposort()] != [
             sigmoid,
             inplace.neg_inplace,
         ]
         f(data)
-        f = aesara.function([x], at.fill(x, -1.0) / (2 + exp(-x)), mode=m)
+        f = pytensor.function([x], at.fill(x, -1.0) / (2 + exp(-x)), mode=m)
         assert [node.op for node in f.maker.fgraph.toposort()] != [
             sigmoid,
             inplace.neg_inplace,
         ]
         f(data)
-        f = aesara.function([x], at.fill(x, -1.1) / (1 + exp(-x)), mode=m)
+        f = pytensor.function([x], at.fill(x, -1.1) / (1 + exp(-x)), mode=m)
         assert [node.op for node in f.maker.fgraph.toposort()] != [
             sigmoid,
             inplace.neg_inplace,
@@ -4246,7 +4246,7 @@ class TestSigmoidRewrites:
         # (-1)(exp(x)) / (1+exp(x))(1+exp(-x))
         # = (-1)/(1+exp(-x)) * exp(x)/(1+exp(x))
         # = - (sigm(x) * sigm(x))
-        f = aesara.function(
+        f = pytensor.function(
             [x],
             (at.fill(x, -1.0) * exp(x)) / ((1 + exp(x)) * (1 + exp(-x))),
             mode=m,
@@ -4255,7 +4255,7 @@ class TestSigmoidRewrites:
         # assert check_stack_trace(f, ops_to_check=[sigmoid, mul])
         assert [node.op for node in f.maker.fgraph.toposort()] == [sigmoid, mul]
         f(data)
-        f = aesara.function(
+        f = pytensor.function(
             [x],
             (at.fill(x, -1.1) * exp(x)) / ((1 + exp(x)) * (1 + exp(-x))),
             mode=m,
@@ -4266,7 +4266,7 @@ class TestSigmoidRewrites:
             inplace.neg_inplace,
         ]
         f(data)
-        f = aesara.function(
+        f = pytensor.function(
             [x],
             (at.fill(x, -1.0) * exp(x)) / ((2 + exp(x)) * (1 + exp(-x))),
             mode=m,
@@ -4277,7 +4277,7 @@ class TestSigmoidRewrites:
             inplace.neg_inplace,
         ]
         f(data)
-        f = aesara.function(
+        f = pytensor.function(
             [x],
             (at.fill(x, -1.0) * exp(x)) / ((1 + exp(x)) * (2 + exp(-x))),
             mode=m,
@@ -4288,7 +4288,7 @@ class TestSigmoidRewrites:
             inplace.neg_inplace,
         ]
         f(data)
-        f = aesara.function(
+        f = pytensor.function(
             [x],
             (at.fill(x, -1.0) * exp(x)) / ((1 + exp(x)) * (1 + exp(x))),
             mode=m,
@@ -4299,7 +4299,7 @@ class TestSigmoidRewrites:
             inplace.neg_inplace,
         ]
         f(data)
-        f = aesara.function(
+        f = pytensor.function(
             [x],
             (at.fill(x, -1.0) * exp(x)) / ((1 + exp(x)) * (2 + exp(-x))),
             mode=m,
@@ -4316,19 +4316,19 @@ class TestSigmoidRewrites:
         x = fmatrix()
 
         # Test `exp_over_1_plus_exp`
-        f = aesara.function([x], 1 - exp(x) / (1 + exp(x)), mode=m)
+        f = pytensor.function([x], 1 - exp(x) / (1 + exp(x)), mode=m)
         # FIXME: PatternNodeRewriter does not copy stack trace
         #  (see https://github.com/Theano/Theano/issues/4581)
         # assert check_stack_trace(f, ops_to_check=[neg, sigmoid])
         assert [node.op for node in f.maker.fgraph.toposort()] == [neg, sigmoid]
 
         # Test `inv_1_plus_exp`
-        f = aesara.function([x], 1 - at.fill(x, 1.0) / (1 + exp(-x)), mode=m)
+        f = pytensor.function([x], 1 - at.fill(x, 1.0) / (1 + exp(-x)), mode=m)
         # assert check_stack_trace(f, ops_to_check=[neg, sigmoid])
         assert [node.op for node in f.maker.fgraph.toposort()] == [neg, sigmoid]
 
         # Test float constant
-        f = aesara.function(
+        f = pytensor.function(
             [x], np.array(1.000001, dtype="float32") - sigmoid(x), mode=m
         )
         assert [node.op for node in f.maker.fgraph.toposort()] == [neg, sigmoid]
@@ -4346,19 +4346,19 @@ class TestSigmoidRewrites:
         m = self.get_mode(excluding=["local_elemwise_fusion", "inplace"])
         x, y = vectors("x", "y")
 
-        f = aesara.function([x], sigmoid(-x) * exp(x), mode=m)
+        f = pytensor.function([x], sigmoid(-x) * exp(x), mode=m)
         match(f, [sigmoid])
         assert check_stack_trace(f, ops_to_check=sigmoid)
 
-        f = aesara.function([x], sigmoid(x) * exp(-x), mode=m)
+        f = pytensor.function([x], sigmoid(x) * exp(-x), mode=m)
         match(f, [neg, sigmoid])
         assert check_stack_trace(f, ops_to_check=sigmoid)
 
-        f = aesara.function([x], -(-(-(sigmoid(x)))) * exp(-x), mode=m)
+        f = pytensor.function([x], -(-(-(sigmoid(x)))) * exp(-x), mode=m)
         match(f, [neg, sigmoid, neg])
         # assert check_stack_trace(f, ops_to_check=sigmoid)
 
-        f = aesara.function(
+        f = pytensor.function(
             [x, y],
             (sigmoid(x) * sigmoid(-y) * -exp(-x) * exp(x * y) * exp(y)),
             mode=m,
@@ -4388,9 +4388,9 @@ class TestSigmoidRewrites:
                 print(trees[0])
                 print(trees[1])
                 print("***")
-                aesara.printing.debugprint(compute_mul(trees[0]))
+                pytensor.printing.debugprint(compute_mul(trees[0]))
                 print("***")
-                aesara.printing.debugprint(compute_mul(trees[1]))
+                pytensor.printing.debugprint(compute_mul(trees[1]))
             assert good
 
         check(sigmoid(x) * exp_op(-x), sigmoid(-x))
@@ -4426,25 +4426,25 @@ class TestSigmoidRewrites:
         s = sigmoid(x)
         l = log(1 - s)
         c = l.mean()
-        ux = x - lr * aesara.grad(c, x)
+        ux = x - lr * pytensor.grad(c, x)
 
         # Before the rewriting, inf and NaN will be produced in the graph,
         # and DebugMode will complain. Everything is fine afterwards.
         mode = self.get_mode()
-        if not isinstance(mode, aesara.compile.debugmode.DebugMode):
-            f = aesara.function([x, lr], ux, mode=mode)
+        if not isinstance(mode, pytensor.compile.debugmode.DebugMode):
+            f = pytensor.function([x, lr], ux, mode=mode)
             ux_v = f([[50]], 0.1)
             assert not np.isnan(ux_v)
 
 
 class TestSoftplusRewrites:
     def setup_method(self):
-        if aesara.config.mode == "FAST_COMPILE":
-            m = aesara.compile.mode.get_mode("FAST_RUN").excluding(
+        if pytensor.config.mode == "FAST_COMPILE":
+            m = pytensor.compile.mode.get_mode("FAST_RUN").excluding(
                 "local_elemwise_fusion"
             )
         else:
-            m = aesara.compile.mode.get_default_mode().excluding(
+            m = pytensor.compile.mode.get_default_mode().excluding(
                 "local_elemwise_fusion"
             )
         self.m = m
@@ -4453,92 +4453,92 @@ class TestSoftplusRewrites:
         x = vector()
 
         out = log(sigmoid(x))
-        f = aesara.function([x], out, mode=self.m)
+        f = pytensor.function([x], out, mode=self.m)
 
         # Fix ticket #4581 first
         # assert check_stack_trace(
-        #     f, ops_to_check=(aesara.scalar.Neg,
+        #     f, ops_to_check=(pytensor.scalar.Neg,
         #                      ScalarSoftplus))
         topo = f.maker.fgraph.toposort()
         assert len(topo) == 3
-        assert isinstance(topo[0].op.scalar_op, aesara.scalar.Neg)
-        assert isinstance(topo[1].op.scalar_op, aesara.scalar.Softplus)
-        assert isinstance(topo[2].op.scalar_op, aesara.scalar.Neg)
+        assert isinstance(topo[0].op.scalar_op, pytensor.scalar.Neg)
+        assert isinstance(topo[1].op.scalar_op, pytensor.scalar.Softplus)
+        assert isinstance(topo[2].op.scalar_op, pytensor.scalar.Neg)
         f(np.random.random((54)).astype(config.floatX))
 
     def test_log1msigm_to_softplus(self):
         x = matrix()
 
         out = log(1 - sigmoid(x))
-        f = aesara.function([x], out, mode=self.m)
+        f = pytensor.function([x], out, mode=self.m)
         topo = f.maker.fgraph.toposort()
         assert len(topo) == 2
-        assert isinstance(topo[0].op.scalar_op, aesara.scalar.Softplus)
-        assert isinstance(topo[1].op.scalar_op, aesara.scalar.Neg)
+        assert isinstance(topo[0].op.scalar_op, pytensor.scalar.Softplus)
+        assert isinstance(topo[1].op.scalar_op, pytensor.scalar.Neg)
         # assert check_stack_trace(f, ops_to_check='all')
         f(np.random.random((54, 11)).astype(config.floatX))
 
         # Test close to 1
         out = log(1.000001 - sigmoid(x))
-        f = aesara.function([x], out, mode=self.m)
+        f = pytensor.function([x], out, mode=self.m)
         topo = f.maker.fgraph.toposort()
         assert len(topo) == 2
-        assert isinstance(topo[0].op.scalar_op, aesara.scalar.Softplus)
-        assert isinstance(topo[1].op.scalar_op, aesara.scalar.Neg)
+        assert isinstance(topo[0].op.scalar_op, pytensor.scalar.Softplus)
+        assert isinstance(topo[1].op.scalar_op, pytensor.scalar.Neg)
 
         # Same test with a flatten
         out = log(1 - at.flatten(sigmoid(x)))
-        f = aesara.function([x], out, mode=self.m)
+        f = pytensor.function([x], out, mode=self.m)
 
         # assert check_stack_trace(f, ops_to_check='all')
         topo = f.maker.fgraph.toposort()
         assert len(topo) == 3
         assert at.is_flat(topo[0].outputs[0])
-        assert isinstance(topo[1].op.scalar_op, aesara.scalar.Softplus)
-        assert isinstance(topo[2].op.scalar_op, aesara.scalar.Neg)
+        assert isinstance(topo[1].op.scalar_op, pytensor.scalar.Softplus)
+        assert isinstance(topo[2].op.scalar_op, pytensor.scalar.Neg)
         f(np.random.random((54, 11)).astype(config.floatX))
 
         # Same test with a reshape
         out = log(1 - sigmoid(x).reshape([x.size]))
-        f = aesara.function([x], out, mode=self.m)
+        f = pytensor.function([x], out, mode=self.m)
         topo = f.maker.fgraph.toposort()
         # assert len(topo) == 3
         assert any(isinstance(node.op, Reshape) for node in topo)
         assert any(
             isinstance(
                 getattr(node.op, "scalar_op", None),
-                aesara.scalar.Softplus,
+                pytensor.scalar.Softplus,
             )
             for node in topo
         )
         f(np.random.random((54, 11)).astype(config.floatX))
 
     def test_log1pexp_to_softplus(self):
-        m = aesara.config.mode
+        m = pytensor.config.mode
         if m == "FAST_COMPILE":
             m = "FAST_RUN"
 
         x = vector()
 
         out = log(1 + exp(x))
-        f = aesara.function([x], out, mode=self.m)
+        f = pytensor.function([x], out, mode=self.m)
 
         # Fix ticket #4581 first
         # assert check_stack_trace(f, ops_to_check='all')
         topo = f.maker.fgraph.toposort()
         assert len(topo) == 1
-        assert isinstance(topo[0].op.scalar_op, aesara.scalar.Softplus)
+        assert isinstance(topo[0].op.scalar_op, pytensor.scalar.Softplus)
         f(np.random.random((54)).astype(config.floatX))
 
     def test_log1p_neg_sigmoid_to_softpuls(self):
         x = scalar()
         out = log1p(-sigmoid(x))
-        f = aesara.function([x], out, mode=self.m)
+        f = pytensor.function([x], out, mode=self.m)
 
         topo = f.maker.fgraph.toposort()
         assert len(topo) == 2
-        assert isinstance(topo[0].op.scalar_op, aesara.scalar.Softplus)
-        assert isinstance(topo[1].op.scalar_op, aesara.scalar.Neg)
+        assert isinstance(topo[0].op.scalar_op, pytensor.scalar.Softplus)
+        assert isinstance(topo[1].op.scalar_op, pytensor.scalar.Neg)
 
         # This value would underflow to -inf without rewrite
         assert np.isclose(f(37.0), -37.0)
@@ -4622,7 +4622,7 @@ def test_local_useless_conj():
 def test_deprecations():
     """Make sure we can import from deprecated modules."""
     with pytest.deprecated_call():
-        from aesara.tensor.math_opt import AlgebraicCanonizer  # noqa: F401 F811
+        from pytensor.tensor.math_opt import AlgebraicCanonizer  # noqa: F401 F811
 
 
 def test_local_sub_neg_to_add():

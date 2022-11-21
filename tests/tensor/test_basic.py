@@ -5,22 +5,22 @@ from tempfile import mkstemp
 import numpy as np
 import pytest
 
-import aesara
-import aesara.scalar as aes
-import aesara.tensor.basic as at
-import aesara.tensor.math as tm
-from aesara import compile, config, function, shared
-from aesara.compile.io import In, Out
-from aesara.compile.mode import get_default_mode
-from aesara.compile.ops import DeepCopyOp
-from aesara.gradient import grad, hessian
-from aesara.graph.basic import Apply
-from aesara.graph.op import Op
-from aesara.misc.safe_asarray import _asarray
-from aesara.raise_op import Assert
-from aesara.scalar import autocast_float, autocast_float_as
-from aesara.tensor import NoneConst
-from aesara.tensor.basic import (
+import pytensor
+import pytensor.scalar as aes
+import pytensor.tensor.basic as at
+import pytensor.tensor.math as tm
+from pytensor import compile, config, function, shared
+from pytensor.compile.io import In, Out
+from pytensor.compile.mode import get_default_mode
+from pytensor.compile.ops import DeepCopyOp
+from pytensor.gradient import grad, hessian
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.raise_op import Assert
+from pytensor.scalar import autocast_float, autocast_float_as
+from pytensor.tensor import NoneConst
+from pytensor.tensor.basic import (
     Alloc,
     AllocDiag,
     AllocEmpty,
@@ -86,12 +86,12 @@ from aesara.tensor.basic import (
     vertical_stack,
     zeros_like,
 )
-from aesara.tensor.elemwise import DimShuffle
-from aesara.tensor.exceptions import NotScalarConstantError
-from aesara.tensor.math import dense_dot
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.shape import Reshape, Shape, Shape_i, shape_padright, specify_shape
-from aesara.tensor.type import (
+from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.math import dense_dot
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.shape import Reshape, Shape, Shape_i, shape_padright, specify_shape
+from pytensor.tensor.type import (
     TensorType,
     bscalar,
     bvector,
@@ -124,8 +124,8 @@ from aesara.tensor.type import (
     vectors,
     wvector,
 )
-from aesara.tensor.var import TensorConstant
-from aesara.utils import PYTHON_INT_BITWIDTH
+from pytensor.tensor.var import TensorConstant
+from pytensor.utils import PYTHON_INT_BITWIDTH
 from tests import unittest_tools as utt
 from tests.tensor.utils import (
     ALL_DTYPES,
@@ -404,9 +404,9 @@ class TestMakeVector(utt.InferShapeTester):
         f(val[b], val[i], val[d])
 
         s = mv.sum()
-        gb = aesara.gradient.grad(s, b, disconnected_inputs="ignore")
-        gi = aesara.gradient.grad(s, i, disconnected_inputs="ignore")
-        gd = aesara.gradient.grad(s, d, disconnected_inputs="ignore")
+        gb = pytensor.gradient.grad(s, b, disconnected_inputs="ignore")
+        gi = pytensor.gradient.grad(s, i, disconnected_inputs="ignore")
+        gd = pytensor.gradient.grad(s, d, disconnected_inputs="ignore")
 
         g = function([b, i, d], [gb, gi, gd])
         g_val = g(val[b], val[i], val[d])
@@ -691,7 +691,7 @@ class TestAsTensorVariable:
 class TestAlloc:
     dtype = config.floatX
     mode = mode_opt
-    shared = staticmethod(aesara.shared)
+    shared = staticmethod(pytensor.shared)
     allocs = [Alloc()] * 3
 
     def setup_method(self):
@@ -718,9 +718,9 @@ class TestAlloc:
         ):
             derp = at_sum(dense_dot(subtensor, variables))
 
-            fobj = aesara.function([some_vector], derp, mode=self.mode)
-            grad_derp = aesara.grad(derp, some_vector)
-            fgrad = aesara.function([some_vector], grad_derp, mode=self.mode)
+            fobj = pytensor.function([some_vector], derp, mode=self.mode)
+            grad_derp = pytensor.grad(derp, some_vector)
+            fgrad = pytensor.function([some_vector], grad_derp, mode=self.mode)
 
             topo_obj = fobj.maker.fgraph.toposort()
             assert sum(isinstance(node.op, type(alloc_)) for node in topo_obj) == 0
@@ -739,17 +739,17 @@ class TestAlloc:
             # we do not want it to be constant-folded
             out = alloc_(val, 50, 60)
 
-            f = aesara.function([], out, mode=self.mode)
+            f = pytensor.function([], out, mode=self.mode)
             topo = f.maker.fgraph.toposort()
             assert sum(isinstance(node.op, type(alloc_)) for node in topo) == 1
             assert not isinstance(topo[0].op, DeepCopyOp)
 
     def test_ones(self):
         for shp in [[], 1, [1], [1, 2], [1, 2, 3], np.r_[1, 2, 3]]:
-            ones = aesara.function([], [at.ones(shp)], mode=self.mode)
+            ones = pytensor.function([], [at.ones(shp)], mode=self.mode)
             assert np.allclose(ones(), np.ones(shp))
             # When shape is a TensorConstant
-            ones_const = aesara.function(
+            ones_const = pytensor.function(
                 [], [at.ones(at.constant(shp))], mode=self.mode
             )
             assert np.allclose(ones_const(), np.ones(shp))
@@ -757,21 +757,21 @@ class TestAlloc:
         # scalar doesn't have to be provided as input
         x = scalar()
         shp = []
-        ones_scalar = aesara.function([], [at.ones(x.shape)], mode=self.mode)
+        ones_scalar = pytensor.function([], [at.ones(x.shape)], mode=self.mode)
         assert np.allclose(ones_scalar(), np.ones(shp))
 
         for (typ, shp) in [(vector, [3]), (matrix, [3, 4])]:
             x = typ()
-            ones_tensor = aesara.function([x], [at.ones(x.shape)], mode=self.mode)
+            ones_tensor = pytensor.function([x], [at.ones(x.shape)], mode=self.mode)
             inp = np.zeros(shp, dtype=config.floatX)
             assert np.allclose(ones_tensor(inp), np.ones(shp))
 
     def test_zeros(self):
         for shp in [[], 1, [1], [1, 2], [1, 2, 3], np.r_[1, 2, 3]]:
-            zeros = aesara.function([], [at.zeros(shp)], mode=self.mode)
+            zeros = pytensor.function([], [at.zeros(shp)], mode=self.mode)
             assert np.allclose(zeros(), np.zeros(shp))
             # When shape is a TensorConstant
-            zeros_const = aesara.function(
+            zeros_const = pytensor.function(
                 [], [at.zeros(at.constant(shp))], mode=self.mode
             )
             assert np.allclose(zeros_const(), np.zeros(shp))
@@ -779,18 +779,18 @@ class TestAlloc:
         # scalar doesn't have to be provided as input
         x = scalar()
         shp = []
-        zeros_scalar = aesara.function([], [at.zeros(x.shape)], mode=self.mode)
+        zeros_scalar = pytensor.function([], [at.zeros(x.shape)], mode=self.mode)
         assert np.allclose(zeros_scalar(), np.zeros(shp))
 
         for (typ, shp) in [(vector, [3]), (matrix, [3, 4])]:
             x = typ()
-            zeros_tensor = aesara.function([x], [at.zeros(x.shape)], mode=self.mode)
+            zeros_tensor = pytensor.function([x], [at.zeros(x.shape)], mode=self.mode)
             inp = np.zeros(shp, dtype=config.floatX)
             assert np.allclose(zeros_tensor(inp), np.zeros(shp))
 
     def test_full(self):
         full_at = at.full((2, 3), 3, dtype="int64")
-        res = aesara.function([], full_at, mode=self.mode)()
+        res = pytensor.function([], full_at, mode=self.mode)()
         assert np.array_equal(res, np.full((2, 3), 3, dtype="int64"))
 
 
@@ -1167,7 +1167,7 @@ def test_get_vector_length():
     assert 3 == get_vector_length(triple)
 
     a, b, c = triple
-    mode = aesara.compile.get_default_mode().excluding("constant_folding")
+    mode = pytensor.compile.get_default_mode().excluding("constant_folding")
     f = function([x, y], [b, c, a], mode=mode)
     topo = f.maker.fgraph.toposort()
     assert any(True for node in topo if isinstance(node.op, MakeVector))
@@ -1185,7 +1185,7 @@ class TestJoinAndSplit:
     def setup_method(self):
         Join.debug = False
 
-        self.mode = aesara.compile.get_default_mode().excluding("constant_folding")
+        self.mode = pytensor.compile.get_default_mode().excluding("constant_folding")
         self.join_op = Join()
         self.split_op_class = Split
         self.make_vector_op = MakeVector()
@@ -1193,7 +1193,7 @@ class TestJoinAndSplit:
         self.shared = shared
 
     def eval_outputs_and_check_join(self, outputs):
-        f = aesara.function([], outputs, self.mode)
+        f = pytensor.function([], outputs, self.mode)
         topo = f.maker.fgraph.toposort()
         assert [True for node in topo if isinstance(node.op, type(self.join_op))]
         variables = f()
@@ -1204,7 +1204,7 @@ class TestJoinAndSplit:
     def eval_outputs_and_check_vector(self, outputs, make_vector_op=None):
         if make_vector_op is None:
             make_vector_op = self.make_vector_op
-        f = aesara.function([], outputs, self.mode)
+        f = pytensor.function([], outputs, self.mode)
         topo = f.maker.fgraph.toposort()
         assert [True for node in topo if isinstance(node.op, type(make_vector_op))]
         variables = f()
@@ -1232,7 +1232,7 @@ class TestJoinAndSplit:
         # tested only on cpu as gpu support only float32
         a = as_tensor_variable(1)
         b = as_tensor_variable(2.0)
-        c = aesara.shared(np.asarray(3.0, dtype=self.floatX))
+        c = pytensor.shared(np.asarray(3.0, dtype=self.floatX))
         s = stack([a, b, c])
         want = np.array([1, 2, 3])
         out = self.eval_outputs_and_check_vector([s], MakeVector())
@@ -1347,7 +1347,7 @@ class TestJoinAndSplit:
         # Try some values
         a_v = np.random.random((4))
         b_v = np.random.random((4))
-        f = aesara.function([a, b], [Ha, Hb])
+        f = pytensor.function([a, b], [Ha, Hb])
         Ha_v, Hb_v = f(a_v, b_v)
         # The Hessian is always a matrix full of 2
         assert Ha_v.shape == (4, 4)
@@ -1366,7 +1366,7 @@ class TestJoinAndSplit:
         # Try some values
         a_v = np.random.random((4))
         b_v = np.random.random((4))
-        f = aesara.function([a, b], [Ha, Hb])
+        f = pytensor.function([a, b], [Ha, Hb])
         Ha_v, Hb_v = f(a_v, b_v)
         # The Hessian is always a matrix full of 0
         assert Ha_v.shape == (4, 4)
@@ -1379,7 +1379,7 @@ class TestJoinAndSplit:
         # also test that we remove the Join op if there is only 1 input
         m = fmatrix()
         c = at.concatenate([m])
-        f = aesara.function(
+        f = pytensor.function(
             inputs=[m], outputs=[c], mode=self.mode.including("local_join_1")
         )
         topo = f.maker.fgraph.toposort()
@@ -1397,19 +1397,19 @@ class TestJoinAndSplit:
 
     def test_roll(self):
 
-        for get_shift in [lambda a: a, lambda x: aesara.shared(x)]:
+        for get_shift in [lambda a: a, lambda x: pytensor.shared(x)]:
             # Test simple 1D example
             a = self.shared(np.array([1, 2, 3, 4, 5, 6], dtype=self.floatX))
             b = roll(a, get_shift(2))
             want = np.array([5, 6, 1, 2, 3, 4])
-            out = aesara.function([], b)()
+            out = pytensor.function([], b)()
 
             assert (out == want).all()
 
             # Test simple 1D example with explicit 0 axis
             b = roll(a, get_shift(-1), 0)
             want = np.array([2, 3, 4, 5, 6, 1])
-            out = aesara.function([], b)()
+            out = pytensor.function([], b)()
 
             assert (out == want).all()
 
@@ -1418,7 +1418,7 @@ class TestJoinAndSplit:
             b = roll(a, get_shift(-2), 1)
 
             want = np.roll(a.get_value(borrow=True), -2, 1)
-            out = aesara.function([], b)()
+            out = pytensor.function([], b)()
 
             assert (out == want).all()
 
@@ -1427,21 +1427,21 @@ class TestJoinAndSplit:
             b = roll(a, get_shift(-2), -2)
 
             want = np.roll(a.get_value(borrow=True), -2, -2)
-            out = aesara.function([], b)()
+            out = pytensor.function([], b)()
 
             assert (out == want).all()
 
             # Test rolling on axis 0
             want = np.roll(a.get_value(borrow=True), -2, 0)
             b = roll(a, get_shift(-2), 0)
-            out = aesara.function([], b)()
+            out = pytensor.function([], b)()
 
             assert (out == want).all()
 
             # Test rolling on default axis with ndim > 1
             want = np.roll(a.get_value(borrow=True), 2)
             b = roll(a, get_shift(2))
-            out = aesara.function([], b)()
+            out = pytensor.function([], b)()
 
             assert (out == want).all()
 
@@ -1449,7 +1449,7 @@ class TestJoinAndSplit:
             # larger than axis size
             want = np.roll(a.get_value(borrow=True), 4, 0)
             b = roll(a, get_shift(4), 0)
-            out = aesara.function([], b)()
+            out = pytensor.function([], b)()
 
             assert (out == want).all()
 
@@ -1457,14 +1457,14 @@ class TestJoinAndSplit:
             # larger than axis size
             want = np.roll(a.get_value(borrow=True), -4, 0)
             b = roll(a, get_shift(-4), 0)
-            out = aesara.function([], b)()
+            out = pytensor.function([], b)()
 
             assert (out == want).all()
 
             a = [1, 2, 3, 4, 5, 6]
             b = roll(a, get_shift(2))
             want = np.array([5, 6, 1, 2, 3, 4])
-            out = aesara.function([], b)()
+            out = pytensor.function([], b)()
 
             assert (out == want).all()
 
@@ -1626,7 +1626,7 @@ class TestJoinAndSplit:
         b = as_tensor_variable(v)
 
         s = join(-1, a, b)
-        f = aesara.function([], [s], mode=self.mode)
+        f = pytensor.function([], [s], mode=self.mode)
         topo = f.maker.fgraph.toposort()
         assert [True for node in topo if isinstance(node.op, type(self.join_op))]
 
@@ -1638,7 +1638,7 @@ class TestJoinAndSplit:
         assert np.allclose(got, want)
 
         s = join(-2, a, b)
-        f = aesara.function([], [s], mode=self.mode)
+        f = pytensor.function([], [s], mode=self.mode)
         topo = f.maker.fgraph.toposort()
         assert [True for node in topo if isinstance(node.op, type(self.join_op))]
 
@@ -1847,7 +1847,7 @@ class TestJoinAndSplit:
 
         # Test dim 0
         z = self.join_op(0, x1, x2, x3)
-        f = aesara.function([], z.shape, mode=self.mode)
+        f = pytensor.function([], z.shape, mode=self.mode)
         topo = f.maker.fgraph.toposort()
 
         out = f()
@@ -1862,7 +1862,7 @@ class TestJoinAndSplit:
         x2.set_value(get_mat(3, 4))
         x3.set_value(get_mat(3, 5))
         z = self.join_op(1, x1, x2, x3)
-        f = aesara.function([], z.shape, mode=self.mode)
+        f = pytensor.function([], z.shape, mode=self.mode)
         topo = f.maker.fgraph.toposort()
         out = f()
         assert (out == [3, 13]).all()
@@ -1951,7 +1951,7 @@ def test_join_inplace():
     join = Join(view=0)
     c = join(0, x, z, z)
 
-    f = aesara.function([In(x, borrow=True), s], Out(c, borrow=True))
+    f = pytensor.function([In(x, borrow=True), s], Out(c, borrow=True))
 
     data = np.array([3, 4, 5], dtype=config.floatX)
 
@@ -2350,7 +2350,7 @@ def test_tile_grad():
     def grad_tile(x, reps, np_x):
         y = tile(x, reps)
         z = y.sum()
-        g = aesara.function([x], grad(z, x))
+        g = pytensor.function([x], grad(z, x))
         grad_res = g(np_x)
         # The gradient should be the product of the tiling dimensions
         # (since the gradients are additive through the tiling operation)
@@ -2768,28 +2768,28 @@ class TestNdGrid:
             for ng, tg in zip(n, t):
                 utt.assert_allclose(ng, tg.eval())
 
-    def test_mgrid_aesara_variable_numpy_equiv(self):
+    def test_mgrid_pytensor_variable_numpy_equiv(self):
         nfmgrid = np.mgrid[0:1:0.1, 1:10:1.0, 10:100:10.0]
         nimgrid = np.mgrid[0:2:1, 1:10:1, 10:100:10]
         i, j, k = dscalars("i", "j", "k")
         l, m, n = iscalars("l", "m", "n")
         tfmgrid = mgrid[i:1:0.1, 1:j:1.0, 10:100:k]
         timgrid = mgrid[l:2:1, 1:m:1, 10:100:n]
-        ff = aesara.function([i, j, k], tfmgrid)
-        fi = aesara.function([l, m, n], timgrid)
+        ff = pytensor.function([i, j, k], tfmgrid)
+        fi = pytensor.function([l, m, n], timgrid)
         for n, t in zip((nfmgrid, nimgrid), (ff(0, 10, 10.0), fi(0, 10, 10))):
             for ng, tg in zip(n, t):
                 utt.assert_allclose(ng, tg)
 
-    def test_ogrid_aesara_variable_numpy_equiv(self):
+    def test_ogrid_pytensor_variable_numpy_equiv(self):
         nfogrid = np.ogrid[0:1:0.1, 1:10:1.0, 10:100:10.0]
         niogrid = np.ogrid[0:2:1, 1:10:1, 10:100:10]
         i, j, k = dscalars("i", "j", "k")
         l, m, n = iscalars("l", "m", "n")
         tfogrid = ogrid[i:1:0.1, 1:j:1.0, 10:100:k]
         tiogrid = ogrid[l:2:1, 1:m:1, 10:100:n]
-        ff = aesara.function([i, j, k], tfogrid)
-        fi = aesara.function([l, m, n], tiogrid)
+        ff = pytensor.function([i, j, k], tfogrid)
+        fi = pytensor.function([l, m, n], tiogrid)
         for n, t in zip((nfogrid, niogrid), (ff(0, 10, 10.0), fi(0, 10, 10))):
             for ng, tg in zip(n, t):
                 utt.assert_allclose(ng, tg)
@@ -2817,7 +2817,7 @@ class TestInversePermutation:
         # Test passing a list
         p = [2, 4, 3, 0, 1]
         inv = at.inverse_permutation(p)
-        f = aesara.function([], inv)
+        f = pytensor.function([], inv)
         assert np.array_equal(f(), np.array([3, 4, 0, 2, 1]))
 
     def test_dim2(self):
@@ -2975,7 +2975,7 @@ def test_stack():
 
 
 @pytest.mark.skipif(
-    isinstance(get_default_mode(), aesara.compile.debugmode.DebugMode),
+    isinstance(get_default_mode(), pytensor.compile.debugmode.DebugMode),
     reason="This test fails in DEBUG_MODE, but the generated code is OK. "
     "It is actually a problem of DEBUG_MODE, see #626.",
 )
@@ -2992,7 +2992,7 @@ def test_default():
 
 
 @pytest.mark.skipif(
-    isinstance(get_default_mode(), aesara.compile.debugmode.DebugMode),
+    isinstance(get_default_mode(), pytensor.compile.debugmode.DebugMode),
     reason="This test fails in DEBUG_MODE, but the generated code is OK. "
     "It is actually a problem of DEBUG_MODE, see #626.",
 )
@@ -3197,7 +3197,7 @@ def test_unalign():
     # out_numpy = 2 * a + 3 * b
 
     av, bv = vectors("ab")
-    f = aesara.function([av, bv], 2 * av + 3 * bv)
+    f = pytensor.function([av, bv], 2 * av + 3 * bv)
     f.maker.fgraph.toposort()
 
     with pytest.raises(TypeError):
@@ -3210,7 +3210,7 @@ def test_unalign():
     # out_numpy = 2 * a + 3 * b
 
     av, bv = scalars("ab")
-    f = aesara.function([av, bv], 2 * av + 3 * bv)
+    f = pytensor.function([av, bv], 2 * av + 3 * bv)
     f.maker.fgraph.toposort()
     with pytest.raises(TypeError):
         f(a, b)
@@ -3319,7 +3319,7 @@ class TestGetScalarConstantValue:
         assert get_scalar_constant_value(s) == 3
         s = Shape_i(1)(c)
         assert get_scalar_constant_value(s) == 4
-        d = aesara.shared(np.random.standard_normal((1, 1)), shape=(1, 1))
+        d = pytensor.shared(np.random.standard_normal((1, 1)), shape=(1, 1))
         f = ScalarFromTensor()(Shape_i(0)(d))
         assert get_scalar_constant_value(f) == 1
 
@@ -3416,7 +3416,7 @@ class TestSize:
     def test_shared(self):
         # NB: we also test higher order tensors at the same time.
         y = np.zeros((1, 2, 3, 4), dtype=config.floatX)
-        x = aesara.shared(y)
+        x = pytensor.shared(y)
         assert y.size == function([], x.size)()
 
 
@@ -3449,7 +3449,7 @@ class TestDiag:
         x = vector()
         g = diag(x)
         assert isinstance(g.owner.op, AllocDiag)
-        f = aesara.function([x], g)
+        f = pytensor.function([x], g)
         for shp in [5, 0, 1]:
             m = rng.random(shp).astype(self.floatX)
             v = np.diag(m)
@@ -3461,7 +3461,7 @@ class TestDiag:
         xx = self.shared(rng.random((3, 5)))
         g = diag(xx)
         assert isinstance(g.owner.op, ExtractDiag)
-        f = aesara.function([], g)
+        f = pytensor.function([], g)
         for shp in [(5, 3), (3, 5), (5, 1), (1, 5), (5, 0), (0, 5), (1, 0), (0, 1)]:
             m = rng.random(shp).astype(self.floatX)
             xx.set_value(m)
@@ -3486,7 +3486,7 @@ class TestDiag:
 
         x = vector()
         g = diag(x)
-        f = aesara.function([x], g.shape)
+        f = pytensor.function([x], g.shape)
         topo = f.maker.fgraph.toposort()
         if config.mode != "FAST_COMPILE":
             assert sum(isinstance(node.op, AllocDiag) for node in topo) == 0
@@ -3496,7 +3496,7 @@ class TestDiag:
 
         x = matrix()
         g = diag(x)
-        f = aesara.function([x], g.shape)
+        f = pytensor.function([x], g.shape)
         topo = f.maker.fgraph.toposort()
         if config.mode != "FAST_COMPILE":
             assert sum(isinstance(node.op, ExtractDiag) for node in topo) == 0
@@ -3515,7 +3515,7 @@ class TestDiag:
 class TestAllocDiag:
     def setup_method(self):
         self.alloc_diag = AllocDiag
-        self.mode = aesara.compile.mode.get_default_mode()
+        self.mode = pytensor.compile.mode.get_default_mode()
 
     def _generator(self):
         dims = 4
@@ -3550,7 +3550,7 @@ class TestAllocDiag:
                 if np.maximum(axis1, axis2) > len(test_val.shape):
                     continue
                 adiag_op = self.alloc_diag(offset=offset, axis1=axis1, axis2=axis2)
-                f = aesara.function([x], adiag_op(x))
+                f = pytensor.function([x], adiag_op(x))
                 # AllocDiag and extract the diagonal again
                 # to check
                 diag_arr = f(test_val)
@@ -3558,9 +3558,9 @@ class TestAllocDiag:
                 assert np.all(rediag == test_val)
 
                 # Test infer_shape
-                f_shape = aesara.function([x], adiag_op(x).shape, mode="FAST_RUN")
+                f_shape = pytensor.function([x], adiag_op(x).shape, mode="FAST_RUN")
 
-                # aesara.printing.debugprint(f_shape.maker.fgraph.outputs[0])
+                # pytensor.printing.debugprint(f_shape.maker.fgraph.outputs[0])
                 output_shape = f_shape(test_val)
                 assert not any(
                     isinstance(node.op, self.alloc_diag)
@@ -3573,10 +3573,10 @@ class TestAllocDiag:
 
                 diag_x = adiag_op(x)
                 sum_diag_x = at_sum(diag_x)
-                grad_x = aesara.grad(sum_diag_x, x)
-                grad_diag_x = aesara.grad(sum_diag_x, diag_x)
-                f_grad_x = aesara.function([x], grad_x, mode=self.mode)
-                f_grad_diag_x = aesara.function([x], grad_diag_x, mode=self.mode)
+                grad_x = pytensor.grad(sum_diag_x, x)
+                grad_diag_x = pytensor.grad(sum_diag_x, diag_x)
+                f_grad_x = pytensor.function([x], grad_x, mode=self.mode)
+                f_grad_diag_x = pytensor.function([x], grad_diag_x, mode=self.mode)
                 grad_input = f_grad_x(test_val)
                 grad_diag_input = f_grad_diag_x(test_val)
                 true_grad_input = np.diagonal(
@@ -3595,7 +3595,7 @@ def test_transpose():
     x2v = np.arange(24).reshape(2, 12)
     x3v = np.arange(24).reshape(2, 3, 4)
 
-    f = aesara.function(
+    f = pytensor.function(
         [x1, x2, x3],
         [
             at.transpose(x1),
@@ -4116,8 +4116,8 @@ class TestChoose(utt.InferShapeTester):
             A = np.asarray(np.random.random(shp1) * shp2[0], dtype="int32")
             C = np.asarray(np.random.random(shp2) * shp2[0], dtype="float32")
             self._compile_and_check(
-                [a, c],  # aesara.function inputs
-                [self.op(a, c)],  # aesara.function outputs
+                [a, c],  # pytensor.function inputs
+                [self.op(a, c)],  # pytensor.function outputs
                 # Always use not square matrix!
                 # inputs data
                 [A, C],
@@ -4141,8 +4141,8 @@ class TestChoose(utt.InferShapeTester):
         assert np.allclose(f(A, B, C).shape, shape)
 
         self._compile_and_check(
-            [a, b, c],  # aesara.function inputs
-            [self.op(a, (b, c))],  # aesara.function outputs
+            [a, b, c],  # pytensor.function inputs
+            [self.op(a, (b, c))],  # pytensor.function outputs
             # Always use not square matrix!
             # inputs data
             [A, B, C],
@@ -4153,7 +4153,7 @@ class TestChoose(utt.InferShapeTester):
 
 def test_empty():
     # Test that we allocated correctly
-    f = aesara.function([], AllocEmpty("float32")(2, 3))
+    f = pytensor.function([], AllocEmpty("float32")(2, 3))
     assert len(f.maker.fgraph.apply_nodes) == 1
     out = f()
 
@@ -4161,20 +4161,20 @@ def test_empty():
     assert out.dtype == "float32"
 
     empty_at = at.empty(3)
-    res = aesara.function([], empty_at)()
+    res = pytensor.function([], empty_at)()
     assert res.shape == (3,)
 
     empty_at = at.empty((2, 3), dtype=None)
-    res = aesara.function([], empty_at)()
+    res = pytensor.function([], empty_at)()
     assert res.shape == (2, 3)
 
     empty_at = at.empty((2, 3), dtype="int64")
-    res = aesara.function([], empty_at)()
+    res = pytensor.function([], empty_at)()
     assert res.shape == (2, 3)
     assert res.dtype == "int64"
 
     empty_at = at.empty_like(empty_at)
-    res = aesara.function([], empty_at)()
+    res = pytensor.function([], empty_at)()
     assert res.shape == (2, 3)
     assert res.dtype == "int64"
 
@@ -4190,7 +4190,7 @@ def test_identity_like_dtype():
     # Test passing list
     m = [[0, 1], [1, 3]]
     out = at.identity_like(m)
-    f = aesara.function([], out)
+    f = pytensor.function([], out)
     assert np.array_equal(f(), np.eye(2))
 
 
@@ -4211,7 +4211,7 @@ def test_atleast_Nd():
 
         ary1_val = np.array(1.0, dtype=np.float64)
         ary2_val = np.array([1.0, 2.0], dtype=np.float64)
-        res_ary1_val, res_ary2_val = aesara.function(
+        res_ary1_val, res_ary2_val = pytensor.function(
             [ary1, ary2], [res_ary1, res_ary2]
         )(ary1_val, ary2_val)
 
@@ -4225,21 +4225,21 @@ def test_expand_dims():
     res_at = expand_dims(x_at, 0)
     x_val = np.array(1.0, dtype=np.float64)
     exp_res = np.expand_dims(x_val, 0)
-    res_val = aesara.function([x_at], res_at)(x_val)
+    res_val = pytensor.function([x_at], res_at)(x_val)
     assert np.array_equal(exp_res, res_val)
 
     x_at = dscalar()
     res_at = expand_dims(x_at, (0, 1))
     x_val = np.array(1.0, dtype=np.float64)
     exp_res = np.expand_dims(x_val, (0, 1))
-    res_val = aesara.function([x_at], res_at)(x_val)
+    res_val = pytensor.function([x_at], res_at)(x_val)
     assert np.array_equal(exp_res, res_val)
 
     x_at = dmatrix()
     res_at = expand_dims(x_at, (2, 1))
     x_val = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
     exp_res = np.expand_dims(x_val, (2, 1))
-    res_val = aesara.function([x_at], res_at)(x_val)
+    res_val = pytensor.function([x_at], res_at)(x_val)
     assert np.array_equal(exp_res, res_val)
 
 
@@ -4271,7 +4271,7 @@ class TestTakeAlongAxis:
 
         out = at.take_along_axis(arr_in, indices_in, axis)
 
-        func = aesara.function([arr_in, indices_in], out)
+        func = pytensor.function([arr_in, indices_in], out)
 
         assert np.allclose(
             np.take_along_axis(arr, indices, axis=axis), func(arr, indices)

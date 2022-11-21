@@ -2,8 +2,8 @@ import copy
 
 import numpy as np
 
-from aesara.compile.sharedvalue import SharedVariable, shared_constructor
-from aesara.tensor.random.type import random_generator_type, random_state_type
+from pytensor.compile.sharedvalue import SharedVariable, shared_constructor
+from pytensor.tensor.random.type import random_generator_type, random_state_type
 
 
 class RandomStateSharedVariable(SharedVariable):

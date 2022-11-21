@@ -3,7 +3,7 @@ import pickle
 import sys
 from typing import Dict
 
-from aesara.configdefaults import config
+from pytensor.configdefaults import config
 
 
 DISPLAY_DUPLICATE_KEYS = False

@@ -3,14 +3,14 @@ from functools import update_wrapper
 import numpy as np
 import pytest
 
-import aesara
-import aesara.sparse
-import aesara.tensor as at
-from aesara.misc.may_share_memory import may_share_memory
-from aesara.tensor import get_vector_length
-from aesara.tensor.basic import MakeVector
-from aesara.tensor.shape import Shape_i, specify_shape
-from aesara.tensor.sharedvar import ScalarSharedVariable, TensorSharedVariable
+import pytensor
+import pytensor.sparse
+import pytensor.tensor as at
+from pytensor.misc.may_share_memory import may_share_memory
+from pytensor.tensor import get_vector_length
+from pytensor.tensor.basic import MakeVector
+from pytensor.tensor.shape import Shape_i, specify_shape
+from pytensor.tensor.sharedvar import ScalarSharedVariable, TensorSharedVariable
 from tests import unittest_tools as utt
 
 
@@ -25,7 +25,7 @@ def makeSharedTester(
     shared_constructor_accept_ndarray_,
     internal_type_,
     check_internal_type_,
-    aesara_fct_,
+    pytensor_fct_,
     ref_fct_,
     cast_value_=np.asarray,
     expect_fail_fast_shape_inplace=True,
@@ -48,8 +48,8 @@ def makeSharedTester(
     :param internal_type_: The internal type used.
     :param check_internal_type_: A function that tell if its input is of the same
                                 type as this shared variable internal type.
-    :param aesara_fct_: A aesara op that will be used to do some computation on the shared variable
-    :param ref_fct_: A reference function that should return the same value as the aesara_fct_
+    :param pytensor_fct_: A pytensor op that will be used to do some computation on the shared variable
+    :param ref_fct_: A reference function that should return the same value as the pytensor_fct_
     :param cast_value_: A callable that cast an ndarray into the internal shared variable representation
     :param name: This string is used to set the returned class' __name__
                  attribute. This is needed for tests to properly tag the
@@ -71,7 +71,7 @@ def makeSharedTester(
         shared_borrow_true_alias = shared_borrow_true_alias_
         internal_type = internal_type_
         check_internal_type = staticmethod(check_internal_type_)
-        aesara_fct = staticmethod(aesara_fct_)
+        pytensor_fct = staticmethod(pytensor_fct_)
         ref_fct = staticmethod(ref_fct_)
         set_value_borrow_true_alias = set_value_borrow_true_alias_
         set_value_inplace = set_value_inplace_
@@ -82,7 +82,7 @@ def makeSharedTester(
         def test_shared_dont_alias(self):
             dtype = self.dtype
             if dtype is None:
-                dtype = aesara.config.floatX
+                dtype = pytensor.config.floatX
 
             rng = np.random.default_rng(utt.fetch_seed())
             x = np.asarray(rng.uniform(0, 1, [2, 4]), dtype=dtype)
@@ -90,9 +90,9 @@ def makeSharedTester(
 
             x_ref = self.ref_fct(x)
             x_shared = self.shared_constructor(x, borrow=False)
-            total = self.aesara_fct(x_shared)
+            total = self.pytensor_fct(x_shared)
 
-            total_func = aesara.function([], total)
+            total_func = pytensor.function([], total)
 
             total_val = total_func()
 
@@ -127,7 +127,7 @@ def makeSharedTester(
         def test_shape(self):
             dtype = self.dtype
             if dtype is None:
-                dtype = aesara.config.floatX
+                dtype = pytensor.config.floatX
 
             rng = np.random.default_rng(utt.fetch_seed())
             x = np.asarray(rng.uniform(0, 1, [2, 4]), dtype=dtype)
@@ -135,13 +135,13 @@ def makeSharedTester(
 
             self.ref_fct(x)
             x_shared = self.shared_constructor(x, borrow=False)
-            self.aesara_fct(x_shared)
+            self.pytensor_fct(x_shared)
 
-            f = aesara.function([], x_shared.shape)
+            f = pytensor.function([], x_shared.shape)
             topo = f.maker.fgraph.toposort()
 
             assert np.all(f() == (2, 4))
-            if aesara.config.mode != "FAST_COMPILE":
+            if pytensor.config.mode != "FAST_COMPILE":
                 assert len(topo) == 3
                 assert isinstance(topo[0].op, Shape_i)
                 assert isinstance(topo[1].op, Shape_i)
@@ -150,7 +150,7 @@ def makeSharedTester(
         def test_shape_i(self):
             dtype = self.dtype
             if dtype is None:
-                dtype = aesara.config.floatX
+                dtype = pytensor.config.floatX
 
             rng = np.random.default_rng(utt.fetch_seed())
             x = np.asarray(rng.uniform(0, 1, [2, 4]), dtype=dtype)
@@ -158,29 +158,29 @@ def makeSharedTester(
 
             self.ref_fct(x)
             x_shared = self.shared_constructor(x, borrow=False)
-            self.aesara_fct(x_shared)
+            self.pytensor_fct(x_shared)
 
-            f = aesara.function([], x_shared.shape[1])
+            f = pytensor.function([], x_shared.shape[1])
             topo = f.maker.fgraph.toposort()
 
             assert np.all(f() == (4))
-            if aesara.config.mode != "FAST_COMPILE":
+            if pytensor.config.mode != "FAST_COMPILE":
                 assert len(topo) == 1
                 assert isinstance(topo[0].op, Shape_i)
 
         def test_return_internal_type(self):
             dtype = self.dtype
             if dtype is None:
-                dtype = aesara.config.floatX
+                dtype = pytensor.config.floatX
 
             rng = np.random.default_rng(utt.fetch_seed())
             x = np.asarray(rng.uniform(0, 1, [2, 4]), dtype=dtype)
             x = self.cast_value(x)
 
             x_shared = self.shared_constructor(x, borrow=False)
-            total = self.aesara_fct(x_shared)
+            total = self.pytensor_fct(x_shared)
 
-            total_func = aesara.function([], total)
+            total_func = pytensor.function([], total)
 
             # in this case we can alias with the internal value
             x = x_shared.get_value(borrow=True, return_internal_type=True)
@@ -204,7 +204,7 @@ def makeSharedTester(
             # Test that get_value returns a ndarray
             dtype = self.dtype
             if dtype is None:
-                dtype = aesara.config.floatX
+                dtype = pytensor.config.floatX
 
             rng = np.random.default_rng(utt.fetch_seed())
             x_orig = np.asarray(rng.uniform(0, 1, [2, 4]), dtype=dtype)
@@ -219,7 +219,7 @@ def makeSharedTester(
         def test_set_value(self):
             dtype = self.dtype
             if dtype is None:
-                dtype = aesara.config.floatX
+                dtype = pytensor.config.floatX
 
             rng = np.random.default_rng(utt.fetch_seed())
             x = np.asarray(rng.uniform(0, 1, [2, 4]), dtype=dtype)
@@ -227,12 +227,12 @@ def makeSharedTester(
 
             x_orig = x
             x_shared = self.shared_constructor(x, borrow=False)
-            total = self.aesara_fct(x_shared)
+            total = self.pytensor_fct(x_shared)
 
-            total_func = aesara.function([], total)
+            total_func = pytensor.function([], total)
             total_func()
 
-            # test if that aesara shared variable optimize set_value(borrow=True)
+            # test if that pytensor shared variable optimize set_value(borrow=True)
             get_x = x_shared.get_value(borrow=True)
             assert get_x is not x_orig  # borrow=False to shared_constructor
             get_x /= 0.5
@@ -260,7 +260,7 @@ def makeSharedTester(
         def test_shared_do_alias(self):
             dtype = self.dtype
             if dtype is None:
-                dtype = aesara.config.floatX
+                dtype = pytensor.config.floatX
 
             rng = np.random.default_rng(utt.fetch_seed())
             x = np.asarray(rng.uniform(1, 2, [4, 2]), dtype=dtype)
@@ -269,9 +269,9 @@ def makeSharedTester(
 
             x_shared = self.shared_constructor(x, borrow=True)
 
-            total = self.aesara_fct(x_shared)
+            total = self.pytensor_fct(x_shared)
 
-            total_func = aesara.function([], total)
+            total_func = pytensor.function([], total)
 
             total_val = total_func()
 
@@ -287,11 +287,11 @@ def makeSharedTester(
 
         def test_inplace_set_value(self):
             # We test that if the SharedVariable implement it we do inplace set_value
-            # We also test this for partial inplace modification when accessing the internal of aesara.
+            # We also test this for partial inplace modification when accessing the internal of pytensor.
 
             dtype = self.dtype
             if dtype is None:
-                dtype = aesara.config.floatX
+                dtype = pytensor.config.floatX
 
             shp = (100 // 4, 1024)  # 100KB
 
@@ -384,7 +384,7 @@ def makeSharedTester(
         def test_specify_shape(self):
             dtype = self.dtype
             if dtype is None:
-                dtype = aesara.config.floatX
+                dtype = pytensor.config.floatX
 
             rng = np.random.default_rng(utt.fetch_seed())
             x1_1 = np.asarray(rng.uniform(1, 2, [4, 2]), dtype=dtype)
@@ -401,32 +401,32 @@ def makeSharedTester(
             assert np.allclose(
                 self.ref_fct(x1_shared.get_value(borrow=True)), self.ref_fct(x1_2)
             )
-            shape_op_fct = aesara.function([], x1_shared.shape)
+            shape_op_fct = pytensor.function([], x1_shared.shape)
             topo = shape_op_fct.maker.fgraph.toposort()
-            if aesara.config.mode != "FAST_COMPILE":
+            if pytensor.config.mode != "FAST_COMPILE":
                 assert len(topo) == 3
                 assert isinstance(topo[0].op, Shape_i)
                 assert isinstance(topo[1].op, Shape_i)
                 assert isinstance(topo[2].op, MakeVector)
 
             # Test that we forward the input
-            specify_shape_fct = aesara.function([], x1_specify_shape)
+            specify_shape_fct = pytensor.function([], x1_specify_shape)
             assert np.all(self.ref_fct(specify_shape_fct()) == self.ref_fct(x1_2))
             topo_specify = specify_shape_fct.maker.fgraph.toposort()
             assert len(topo_specify) == 2
 
             # Test that we put the shape info into the graph
-            shape_constant_fct = aesara.function([], x1_specify_shape.shape)
+            shape_constant_fct = pytensor.function([], x1_specify_shape.shape)
             assert np.all(shape_constant_fct() == shape_op_fct())
             topo_cst = shape_constant_fct.maker.fgraph.toposort()
-            if aesara.config.mode != "FAST_COMPILE":
+            if pytensor.config.mode != "FAST_COMPILE":
                 assert len(topo_cst) == 1
-                topo_cst[0].op == aesara.compile.function.types.deep_copy_op
+                topo_cst[0].op == pytensor.compile.function.types.deep_copy_op
 
             # Test that we can take the grad.
-            shape_grad = aesara.gradient.grad(x1_specify_shape.sum(), x1_shared)
-            shape_constant_fct_grad = aesara.function([], shape_grad)
-            # aesara.printing.debugprint(shape_constant_fct_grad)
+            shape_grad = pytensor.gradient.grad(x1_specify_shape.sum(), x1_shared)
+            shape_constant_fct_grad = pytensor.function([], shape_grad)
+            # pytensor.printing.debugprint(shape_constant_fct_grad)
             shape_constant_fct_grad()
 
             # Test that we can replace with values of the different shape
@@ -439,7 +439,7 @@ def makeSharedTester(
         def test_specify_shape_partial(self):
             dtype = self.dtype
             if dtype is None:
-                dtype = aesara.config.floatX
+                dtype = pytensor.config.floatX
 
             rng = np.random.default_rng(utt.fetch_seed())
             x1_1 = np.asarray(rng.uniform(1, 2, [4, 2]), dtype=dtype)
@@ -459,30 +459,30 @@ def makeSharedTester(
             assert np.allclose(
                 self.ref_fct(x1_shared.get_value(borrow=True)), self.ref_fct(x1_2)
             )
-            shape_op_fct = aesara.function([], x1_shared.shape)
+            shape_op_fct = pytensor.function([], x1_shared.shape)
             topo = shape_op_fct.maker.fgraph.toposort()
             shape_op_fct()
-            if aesara.config.mode != "FAST_COMPILE":
+            if pytensor.config.mode != "FAST_COMPILE":
                 assert len(topo) == 3
                 assert isinstance(topo[0].op, Shape_i)
                 assert isinstance(topo[1].op, Shape_i)
                 assert isinstance(topo[2].op, MakeVector)
 
             # Test that we forward the input
-            specify_shape_fct = aesara.function([], x1_specify_shape)
+            specify_shape_fct = pytensor.function([], x1_specify_shape)
             specify_shape_fct()
-            # aesara.printing.debugprint(specify_shape_fct)
+            # pytensor.printing.debugprint(specify_shape_fct)
             assert np.all(self.ref_fct(specify_shape_fct()) == self.ref_fct(x1_2))
             topo_specify = specify_shape_fct.maker.fgraph.toposort()
-            if aesara.config.mode != "FAST_COMPILE":
+            if pytensor.config.mode != "FAST_COMPILE":
                 assert len(topo_specify) == 3
 
             # Test that we put the shape info into the graph
-            shape_constant_fct = aesara.function([], x1_specify_shape.shape)
-            # aesara.printing.debugprint(shape_constant_fct)
+            shape_constant_fct = pytensor.function([], x1_specify_shape.shape)
+            # pytensor.printing.debugprint(shape_constant_fct)
             assert np.all(shape_constant_fct() == shape_op_fct())
             topo_cst = shape_constant_fct.maker.fgraph.toposort()
-            if aesara.config.mode != "FAST_COMPILE":
+            if pytensor.config.mode != "FAST_COMPILE":
                 assert len(topo_cst) == 2
 
             # Test that we can replace with values of the different shape
@@ -496,7 +496,7 @@ def makeSharedTester(
 
             dtype = self.dtype
             if dtype is None:
-                dtype = aesara.config.floatX
+                dtype = pytensor.config.floatX
 
             rng = np.random.default_rng(utt.fetch_seed())
             a = np.asarray(rng.uniform(1, 2, [40, 40]), dtype=dtype)
@@ -508,14 +508,14 @@ def makeSharedTester(
             s = np.zeros((40, 40), dtype=dtype)
             s = self.cast_value(s)
             s_shared = self.shared_constructor(s)
-            f = aesara.function(
+            f = pytensor.function(
                 [],
-                updates=[(s_shared, aesara.tensor.dot(a_shared, b_shared) + s_shared)],
+                updates=[(s_shared, pytensor.tensor.dot(a_shared, b_shared) + s_shared)],
             )
             topo = f.maker.fgraph.toposort()
             f()
             # [Gemm{inplace}(<TensorType(float64, (?, ?))>, 0.01, <TensorType(float64, (?, ?))>, <TensorType(float64, (?, ?))>, 2e-06)]
-            if aesara.config.mode != "FAST_COMPILE":
+            if pytensor.config.mode != "FAST_COMPILE":
                 assert (
                     sum(
                         node.op.__class__.__name__ in ["Gemm", "StructuredDot"]
@@ -524,9 +524,9 @@ def makeSharedTester(
                     == 1
                 )
                 assert all(
-                    node.op == aesara.tensor.blas.gemm_inplace
+                    node.op == pytensor.tensor.blas.gemm_inplace
                     for node in topo
-                    if isinstance(node.op, aesara.tensor.blas.Gemm)
+                    if isinstance(node.op, pytensor.tensor.blas.Gemm)
                 )
             # Their is no inplace gemm for sparse
             # assert all(node.op.inplace for node in topo if node.op.__class__.__name__ == "StructuredDot")
@@ -535,17 +535,17 @@ def makeSharedTester(
             )
 
             # now test with the specify shape op in the output
-            f = aesara.function(
+            f = pytensor.function(
                 [],
                 s_shared.shape,
                 updates=[
-                    (s_shared, aesara.tensor.dot(a_shared, b_shared) + s_shared_specify)
+                    (s_shared, pytensor.tensor.dot(a_shared, b_shared) + s_shared_specify)
                 ],
             )
             topo = f.maker.fgraph.toposort()
             shp = f()
             assert np.all(shp == (40, 40))
-            if aesara.config.mode != "FAST_COMPILE":
+            if pytensor.config.mode != "FAST_COMPILE":
                 assert (
                     sum(
                         node.op.__class__.__name__ in ["Gemm", "StructuredDot"]
@@ -554,26 +554,26 @@ def makeSharedTester(
                     == 1
                 )
                 assert all(
-                    node.op == aesara.tensor.blas.gemm_inplace
+                    node.op == pytensor.tensor.blas.gemm_inplace
                     for node in topo
-                    if isinstance(node.op, aesara.tensor.blas.Gemm)
+                    if isinstance(node.op, pytensor.tensor.blas.Gemm)
                 )
 
             # now test with the specify shape op in the inputs and outputs
             a_shared = specify_shape(a_shared, a_shared.get_value(borrow=True).shape)
             b_shared = specify_shape(b_shared, b_shared.get_value(borrow=True).shape)
 
-            f = aesara.function(
+            f = pytensor.function(
                 [],
                 s_shared.shape,
                 updates=[
-                    (s_shared, aesara.tensor.dot(a_shared, b_shared) + s_shared_specify)
+                    (s_shared, pytensor.tensor.dot(a_shared, b_shared) + s_shared_specify)
                 ],
             )
             topo = f.maker.fgraph.toposort()
             shp = f()
             assert np.all(shp == (40, 40))
-            if aesara.config.mode != "FAST_COMPILE":
+            if pytensor.config.mode != "FAST_COMPILE":
                 assert (
                     sum(
                         node.op.__class__.__name__ in ["Gemm", "StructuredDot"]
@@ -582,15 +582,15 @@ def makeSharedTester(
                     == 1
                 )
                 assert all(
-                    node.op == aesara.tensor.blas.gemm_inplace
+                    node.op == pytensor.tensor.blas.gemm_inplace
                     for node in topo
-                    if isinstance(node.op, aesara.tensor.blas.Gemm)
+                    if isinstance(node.op, pytensor.tensor.blas.Gemm)
                 )
 
         if (
-            aesara.config.cycle_detection == "fast"
+            pytensor.config.cycle_detection == "fast"
             and expect_fail_fast_shape_inplace
-            and aesara.config.mode != "FAST_COMPILE"
+            and pytensor.config.mode != "FAST_COMPILE"
         ):
             test_specify_shape_inplace = pytest.mark.xfail(test_specify_shape_inplace)
 
@@ -598,7 +598,7 @@ def makeSharedTester(
             # Test the type.values_eq[_approx] function
             dtype = self.dtype
             if dtype is None:
-                dtype = aesara.config.floatX
+                dtype = pytensor.config.floatX
 
             # We need big shape as in the past there have been a bug in the
             # sparse values_eq_approx.
@@ -632,8 +632,8 @@ def makeSharedTester(
 
 
 @makeSharedTester(
-    shared_constructor_=aesara.shared,
-    dtype_=aesara.config.floatX,
+    shared_constructor_=pytensor.shared,
+    dtype_=pytensor.config.floatX,
     get_value_borrow_true_alias_=True,
     shared_borrow_true_alias_=True,
     set_value_borrow_true_alias_=True,
@@ -642,7 +642,7 @@ def makeSharedTester(
     shared_constructor_accept_ndarray_=True,
     internal_type_=np.ndarray,
     check_internal_type_=lambda a: isinstance(a, np.ndarray),
-    aesara_fct_=lambda a: a * 2,
+    pytensor_fct_=lambda a: a * 2,
     ref_fct_=lambda a: np.asarray(a * 2),
     cast_value_=np.asarray,
 )
@@ -652,7 +652,7 @@ class TestSharedOptions:
 
 def test_tensor_shared_zero():
     shared_val = np.array([1.0, 3.0], dtype=np.float32)
-    res = aesara.shared(value=shared_val, borrow=True)
+    res = pytensor.shared(value=shared_val, borrow=True)
     assert isinstance(res, TensorSharedVariable)
     assert res.get_value(borrow=True) is shared_val
 
@@ -670,7 +670,7 @@ def test_tensor_shared_zero():
 
 
 def test_scalar_shared_options():
-    res = aesara.shared(value=np.float32(0.0), name="lk", borrow=True)
+    res = pytensor.shared(value=np.float32(0.0), name="lk", borrow=True)
     assert isinstance(res, ScalarSharedVariable)
     assert res.type.dtype == "float32"
     assert res.name == "lk"
@@ -678,5 +678,5 @@ def test_scalar_shared_options():
 
 
 def test_get_vector_length():
-    x = aesara.shared(np.array((2, 3, 4, 5)))
+    x = pytensor.shared(np.array((2, 3, 4, 5)))
     assert get_vector_length(x) == 4

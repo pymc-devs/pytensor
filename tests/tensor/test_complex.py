@@ -1,12 +1,12 @@
 import numpy as np
 import pytest
 
-import aesara
-from aesara.gradient import GradientError
-from aesara.tensor.basic import cast
-from aesara.tensor.math import complex as at_complex
-from aesara.tensor.math import complex_from_polar, imag, real
-from aesara.tensor.type import cvector, dvector, fmatrix, fvector, imatrix, zvector
+import pytensor
+from pytensor.gradient import GradientError
+from pytensor.tensor.basic import cast
+from pytensor.tensor.math import complex as at_complex
+from pytensor.tensor.math import complex_from_polar, imag, real
+from pytensor.tensor.type import cvector, dvector, fmatrix, fvector, imatrix, zvector
 from tests import unittest_tools as utt
 
 
@@ -19,20 +19,20 @@ class TestRealImag:
                 complex(rng.standard_normal(), rng.standard_normal()) for i in range(10)
             )
         )
-        assert np.all(xval.real == aesara.function([x], real(x))(xval))
-        assert np.all(xval.imag == aesara.function([x], imag(x))(xval))
+        assert np.all(xval.real == pytensor.function([x], real(x))(xval))
+        assert np.all(xval.imag == pytensor.function([x], imag(x))(xval))
 
     def test_on_real_input(self):
         x = dvector()
         rng = np.random.default_rng(23)
         xval = rng.standard_normal((10))
-        np.all(0 == aesara.function([x], imag(x))(xval))
-        np.all(xval == aesara.function([x], real(x))(xval))
+        np.all(0 == pytensor.function([x], imag(x))(xval))
+        np.all(xval == pytensor.function([x], real(x))(xval))
 
         x = imatrix()
         xval = np.asarray(rng.standard_normal((3, 3)) * 100, dtype="int32")
-        np.all(0 == aesara.function([x], imag(x))(xval))
-        np.all(xval == aesara.function([x], real(x))(xval))
+        np.all(0 == pytensor.function([x], imag(x))(xval))
+        np.all(xval == pytensor.function([x], real(x))(xval))
 
     def test_cast(self):
         x = zvector()
@@ -47,7 +47,7 @@ class TestRealImag:
         r, i = [real(c), imag(c)]
         assert r.type == fvector
         assert i.type == fvector
-        f = aesara.function([m], [r, i])
+        f = pytensor.function([m], [r, i])
 
         mval = np.asarray(rng.standard_normal((2, 5)), dtype="float32")
         rval, ival = f(mval)

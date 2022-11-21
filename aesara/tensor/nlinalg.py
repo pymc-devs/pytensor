@@ -3,14 +3,14 @@ from typing import Tuple, Union
 
 import numpy as np
 
-from aesara import scalar as aes
-from aesara.gradient import DisconnectedType
-from aesara.graph.basic import Apply
-from aesara.graph.op import Op
-from aesara.tensor import basic as at
-from aesara.tensor import math as tm
-from aesara.tensor.basic import as_tensor_variable, extract_diag
-from aesara.tensor.type import dvector, lscalar, matrix, scalar, vector
+from pytensor import scalar as aes
+from pytensor.gradient import DisconnectedType
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+from pytensor.tensor import basic as at
+from pytensor.tensor import math as tm
+from pytensor.tensor.basic import as_tensor_variable, extract_diag
+from pytensor.tensor.type import dvector, lscalar, matrix, scalar, vector
 
 
 class MatrixPinv(Op):

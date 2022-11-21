@@ -7,10 +7,10 @@ from importlib import reload
 from types import ModuleType
 from typing import Optional
 
-import aesara
-from aesara.compile.compilelock import lock_ctx
-from aesara.configdefaults import config
-from aesara.link.c.cmodule import GCC_compiler
+import pytensor
+from pytensor.compile.compilelock import lock_ctx
+from pytensor.configdefaults import config
+from pytensor.link.c.cmodule import GCC_compiler
 
 
 _logger = logging.getLogger(__file__)
@@ -111,7 +111,7 @@ except ImportError:
             _logger.info("Compiling new CVM")
             dirname = "lazylinker_ext"
             cfile = os.path.join(
-                aesara.__path__[0], "link", "c", "c_code", "lazylinker_c.c"
+                pytensor.__path__[0], "link", "c", "c_code", "lazylinker_c.c"
             )
             if not os.path.exists(cfile):
                 # This can happen in not normal case. We just

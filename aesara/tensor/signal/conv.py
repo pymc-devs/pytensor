@@ -6,13 +6,13 @@ generic 2D convolution.
 import logging
 import warnings
 
-from aesara import tensor as at
-from aesara.tensor.nnet import conv
-from aesara.tensor.shape import reshape
+from pytensor import tensor as at
+from pytensor.tensor.nnet import conv
+from pytensor.tensor.shape import reshape
 
 
 warnings.warn(
-    "The module `aesara.tensor.signal` is deprecated and will "
+    "The module `pytensor.tensor.signal` is deprecated and will "
     "be removed from Aesara in version 2.9.0.",
     DeprecationWarning,
     stacklevel=2,
@@ -22,7 +22,7 @@ warnings.warn(
 __docformat__ = "restructuredtext en"
 
 
-_logger = logging.getLogger("aesara.tensor.signal.conv")
+_logger = logging.getLogger("pytensor.tensor.signal.conv")
 
 
 def conv2d(
@@ -44,9 +44,9 @@ def conv2d(
 
     Parameters
     ----------
-    input   : Symbolic aesara tensor for images to be filtered.
+    input   : Symbolic pytensor tensor for images to be filtered.
               Dimensions: ([num_images], image height, image width)
-    filters : Symbolic aesara tensor for convolution filter(s).
+    filters : Symbolic pytensor tensor for convolution filter(s).
               Dimensions: ([num_filters], filter height, filter width)
     border_mode: {'valid', 'full'}
         See scipy.signal.convolve2d.
@@ -57,7 +57,7 @@ def conv2d(
     filter_shape : tuple of length 2 or 3
         ([num_filters,] filter height, filter width).
     kwargs
-        See aesara.tensor.nnet.conv.conv2d.
+        See pytensor.tensor.nnet.conv.conv2d.
 
     Returns
     -------

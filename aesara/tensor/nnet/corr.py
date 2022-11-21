@@ -2,19 +2,19 @@ import logging
 import os
 from typing import Optional
 
-import aesara
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply
-from aesara.graph.op import _NoPythonOp
-from aesara.link.c.op import OpenMPOp
-from aesara.link.c.params_type import ParamsType
-from aesara.link.c.type import EnumList
-from aesara.scalar import int8, int64
-from aesara.tensor import blas_headers
-from aesara.tensor.basic import as_tensor_variable
-from aesara.tensor.blas import blas_header_version, ldflags
-from aesara.tensor.nnet.abstract_conv import get_conv_output_shape
-from aesara.tensor.type import TensorType
+import pytensor
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import _NoPythonOp
+from pytensor.link.c.op import OpenMPOp
+from pytensor.link.c.params_type import ParamsType
+from pytensor.link.c.type import EnumList
+from pytensor.scalar import int8, int64
+from pytensor.tensor import blas_headers
+from pytensor.tensor.basic import as_tensor_variable
+from pytensor.tensor.blas import blas_header_version, ldflags
+from pytensor.tensor.nnet.abstract_conv import get_conv_output_shape
+from pytensor.tensor.type import TensorType
 
 
 _logger = logging.getLogger(__name__)
@@ -190,7 +190,7 @@ class BaseCorrMM(OpenMPOp, _NoPythonOp):
         """
         Upcast input variables if necessary.
         """
-        dtype = aesara.scalar.upcast(in1.dtype, in2.dtype)
+        dtype = pytensor.scalar.upcast(in1.dtype, in2.dtype)
         return in1.astype(dtype), in2.astype(dtype)
 
     def __setstate__(self, d):
@@ -858,7 +858,7 @@ class CorrMM_gradWeights(BaseCorrMM):
             self.unshared,
         )(bottom, weights)
         d_height_width = (
-            (aesara.gradient.DisconnectedType()(),) * 2 if len(inp) == 4 else ()
+            (pytensor.gradient.DisconnectedType()(),) * 2 if len(inp) == 4 else ()
         )
         return (d_bottom, d_top) + d_height_width
 
@@ -990,7 +990,7 @@ class CorrMM_gradInputs(BaseCorrMM):
             self.unshared,
         )(bottom, weights)
         d_height_width = (
-            (aesara.gradient.DisconnectedType()(),) * 2 if len(inp) == 4 else ()
+            (pytensor.gradient.DisconnectedType()(),) * 2 if len(inp) == 4 else ()
         )
         return (d_weights, d_top) + d_height_width
 

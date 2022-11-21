@@ -1,19 +1,19 @@
 import numpy as np
 
-import aesara
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply
-from aesara.graph.op import Op
-from aesara.graph.rewriting.basic import copy_stack_trace, node_rewriter
-from aesara.scalar import Composite, add, as_common_dtype, mul, sub, true_div
-from aesara.tensor import basic as at
-from aesara.tensor.basic import as_tensor_variable
-from aesara.tensor.elemwise import Elemwise
-from aesara.tensor.math import mean, prod, reciprocal, sqrt
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.rewriting.basic import register_specialize_device
-from aesara.tensor.shape import specify_broadcastable
-from aesara.tensor.type import TensorType
+import pytensor
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
+from pytensor.scalar import Composite, add, as_common_dtype, mul, sub, true_div
+from pytensor.tensor import basic as at
+from pytensor.tensor.basic import as_tensor_variable
+from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.math import mean, prod, reciprocal, sqrt
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.rewriting.basic import register_specialize_device
+from pytensor.tensor.shape import specify_broadcastable
+from pytensor.tensor.type import TensorType
 
 
 class BNComposite(Composite):
@@ -22,11 +22,11 @@ class BNComposite(Composite):
     @config.change_flags(compute_test_value="off")
     def __init__(self, dtype):
         self.dtype = dtype
-        x = aesara.scalar.ScalarType(dtype=dtype).make_variable()
-        mean = aesara.scalar.ScalarType(dtype=dtype).make_variable()
-        std = aesara.scalar.ScalarType(dtype=dtype).make_variable()
-        gamma = aesara.scalar.ScalarType(dtype=dtype).make_variable()
-        beta = aesara.scalar.ScalarType(dtype=dtype).make_variable()
+        x = pytensor.scalar.ScalarType(dtype=dtype).make_variable()
+        mean = pytensor.scalar.ScalarType(dtype=dtype).make_variable()
+        std = pytensor.scalar.ScalarType(dtype=dtype).make_variable()
+        gamma = pytensor.scalar.ScalarType(dtype=dtype).make_variable()
+        beta = pytensor.scalar.ScalarType(dtype=dtype).make_variable()
         o = add(mul(true_div(sub(x, mean), std), gamma), beta)
         inputs = [x, mean, std, gamma, beta]
         outputs = [o]
@@ -485,12 +485,12 @@ class AbstractBatchNormTrain(Op):
         dy = grads[0]
         _, x_mean, x_invstd = outputs[:3]
         disconnected_outputs = [
-            aesara.gradient.DisconnectedType()(),  # epsilon
-            aesara.gradient.DisconnectedType()(),
+            pytensor.gradient.DisconnectedType()(),  # epsilon
+            pytensor.gradient.DisconnectedType()(),
         ]  # running_average_factor
         # Optional running_mean and running_var.
         for i in range(5, len(inputs)):
-            disconnected_outputs.append(aesara.gradient.DisconnectedType()())
+            disconnected_outputs.append(pytensor.gradient.DisconnectedType()())
         return (
             AbstractBatchNormTrainGrad(self.axes)(
                 x, dy, scale, x_mean, x_invstd, epsilon
@@ -628,7 +628,7 @@ class AbstractBatchNormInference(Op):
         dvar = -(dy * (x - est_mean)).sum(axes, keepdims=True) * (
             scale / (two * est_var_eps * est_std)
         )
-        return [dx, dscale, dbias, dmean, dvar, aesara.gradient.DisconnectedType()()]
+        return [dx, dscale, dbias, dmean, dvar, pytensor.gradient.DisconnectedType()()]
 
     def connection_pattern(self, node):
         # Specify that epsilon is not connected to outputs.
@@ -683,7 +683,7 @@ class AbstractBatchNormTrainGrad(Op):
         g_wrt_x_mean = 0
         g_wrt_x_invstd = 0
 
-        if not isinstance(ddinputs.type, aesara.gradient.DisconnectedType):
+        if not isinstance(ddinputs.type, pytensor.gradient.DisconnectedType):
             ccc = scale * (ddinputs - mean(ddinputs, axis=self.axes, keepdims=True))
             ddd = (x_invstd**3) * (
                 ccc * mean(dy * x_diff, axis=self.axes, keepdims=True)
@@ -714,7 +714,7 @@ class AbstractBatchNormTrainGrad(Op):
                 keepdims=True,
             )
 
-        if not isinstance(ddscale.type, aesara.gradient.DisconnectedType):
+        if not isinstance(ddscale.type, pytensor.gradient.DisconnectedType):
             g_wrt_x = g_wrt_x + (x_invstd * ddscale * dy)
             g_wrt_dy = g_wrt_dy + (x_invstd * ddscale * x_diff)
             g_wrt_x_mean = g_wrt_x_mean - (
@@ -724,7 +724,7 @@ class AbstractBatchNormTrainGrad(Op):
                 ddscale * at_sum(dy * x_diff, axis=self.axes, keepdims=True)
             )
 
-        if not isinstance(ddbias.type, aesara.gradient.DisconnectedType):
+        if not isinstance(ddbias.type, pytensor.gradient.DisconnectedType):
             g_wrt_dy = g_wrt_dy + at.fill(dy, ddbias)
 
         # depending on which output gradients are given,
@@ -735,10 +735,10 @@ class AbstractBatchNormTrainGrad(Op):
             g_wrt_scale,
             g_wrt_x_mean,
             g_wrt_x_invstd,
-            aesara.gradient.DisconnectedType()(),
+            pytensor.gradient.DisconnectedType()(),
         ]
         return [
-            aesara.gradient.DisconnectedType()()
+            pytensor.gradient.DisconnectedType()()
             if (isinstance(r, int) and r == 0)
             else r
             for r in results
@@ -826,7 +826,7 @@ def local_abstract_batch_norm_train(fgraph, node):
         )
         results.append(running_var)
 
-    for var in aesara.graph.basic.vars_between(node.inputs, results):
+    for var in pytensor.graph.basic.vars_between(node.inputs, results):
         if var not in node.inputs:
             copy_stack_trace(node.outputs[0], var)
     return results
@@ -860,7 +860,7 @@ def local_abstract_batch_norm_train_grad(fgraph, node):
     g_wrt_bias = at_sum(dy, axis=axes, keepdims=True)
     results = [g_wrt_inputs, g_wrt_scale, g_wrt_bias]
 
-    for var in aesara.graph.basic.vars_between(node.inputs, results):
+    for var in pytensor.graph.basic.vars_between(node.inputs, results):
         if var not in node.inputs:
             copy_stack_trace(node.outputs[0], var)
     return results
@@ -889,14 +889,14 @@ def local_abstract_batch_norm_inference(fgraph, node):
 
     result = (x - estimated_mean) * (scale / sqrt(estimated_variance + epsilon)) + bias
 
-    for var in aesara.graph.basic.vars_between(node.inputs, [result]):
+    for var in pytensor.graph.basic.vars_between(node.inputs, [result]):
         if var not in node.inputs:
             copy_stack_trace(node.outputs[0], var)
     return [result]
 
 
 # Register Cpu Optimization
-bn_groupopt = aesara.graph.rewriting.db.LocalGroupDB()
+bn_groupopt = pytensor.graph.rewriting.db.LocalGroupDB()
 bn_groupopt.__name__ = "batchnorm_opts"
 register_specialize_device(bn_groupopt, "fast_compile", "fast_run")
 

@@ -1,15 +1,15 @@
 import numpy as np
 
-import aesara.tensor as at
-from aesara.compile.debugmode import _lessbroken_deepcopy
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Constant, Variable
-from aesara.graph.op import Op
-from aesara.link.c.op import COp
-from aesara.tensor.type import scalar
-from aesara.tensor.type_other import SliceType
-from aesara.tensor.var import TensorVariable
-from aesara.typed_list.type import TypedListType
+import pytensor.tensor as at
+from pytensor.compile.debugmode import _lessbroken_deepcopy
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.op import Op
+from pytensor.link.c.op import COp
+from pytensor.tensor.type import scalar
+from pytensor.tensor.type_other import SliceType
+from pytensor.tensor.var import TensorVariable
+from pytensor.typed_list.type import TypedListType
 
 
 class _typed_list_py_operators:

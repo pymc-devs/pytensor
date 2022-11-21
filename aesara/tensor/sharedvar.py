@@ -2,11 +2,11 @@ import warnings
 
 import numpy as np
 
-from aesara.compile import SharedVariable, shared_constructor
-from aesara.misc.safe_asarray import _asarray
-from aesara.tensor import _get_vector_length
-from aesara.tensor.type import TensorType
-from aesara.tensor.var import _tensor_py_operators
+from pytensor.compile import SharedVariable, shared_constructor
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.tensor import _get_vector_length
+from pytensor.tensor.type import TensorType
+from pytensor.tensor.var import _tensor_py_operators
 
 
 def load_shared_variable(val):

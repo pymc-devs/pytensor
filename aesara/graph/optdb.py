@@ -2,13 +2,13 @@ import warnings
 
 
 warnings.warn(
-    "The module `aesara.graph.optdb` is deprecated; use `aesara.graph.rewriting.db` instead.",
+    "The module `pytensor.graph.optdb` is deprecated; use `pytensor.graph.rewriting.db` instead.",
     DeprecationWarning,
     stacklevel=2,
 )
 
-from aesara.graph.rewriting.db import *  # noqa: F401 E402 F403
-from aesara.graph.rewriting.db import DEPRECATED_NAMES  # noqa: F401 E402 F403
+from pytensor.graph.rewriting.db import *  # noqa: F401 E402 F403
+from pytensor.graph.rewriting.db import DEPRECATED_NAMES  # noqa: F401 E402 F403
 
 
 def __getattr__(name):

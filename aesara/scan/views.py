@@ -2,10 +2,10 @@
 
 import logging
 
-from aesara.scan import scan
+from pytensor.scan import scan
 
 
-_logger = logging.getLogger("aesara.scan.views")
+_logger = logging.getLogger("pytensor.scan.views")
 
 
 def map(

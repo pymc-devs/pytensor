@@ -2,14 +2,14 @@ import warnings
 
 
 warnings.warn(
-    "The module `aesara.tensor.nnet` is deprecated and will "
+    "The module `pytensor.tensor.nnet` is deprecated and will "
     "be removed from Aesara in version 2.9.0",
     DeprecationWarning,
     stacklevel=2,
 )
 
-import aesara.tensor.nnet.rewriting
-from aesara.tensor.nnet.abstract_conv import (
+import pytensor.tensor.nnet.rewriting
+from pytensor.tensor.nnet.abstract_conv import (
     abstract_conv2d,
     conv2d,
     conv2d_grad_wrt_inputs,
@@ -17,7 +17,7 @@ from aesara.tensor.nnet.abstract_conv import (
     conv3d,
     separable_conv2d,
 )
-from aesara.tensor.nnet.basic import (
+from pytensor.tensor.nnet.basic import (
     binary_crossentropy,
     categorical_crossentropy,
     confusion_matrix,
@@ -48,5 +48,5 @@ from aesara.tensor.nnet.basic import (
     softmax_with_bias,
     softsign,
 )
-from aesara.tensor.nnet.batchnorm import batch_normalization
-from aesara.tensor.nnet.sigm import hard_sigmoid, ultra_fast_sigmoid
+from pytensor.tensor.nnet.batchnorm import batch_normalization
+from pytensor.tensor.nnet.sigm import hard_sigmoid, ultra_fast_sigmoid

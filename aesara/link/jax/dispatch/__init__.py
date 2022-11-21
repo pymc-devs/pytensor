@@ -1,16 +1,16 @@
 # isort: off
-from aesara.link.jax.dispatch.basic import jax_funcify, jax_typify
+from pytensor.link.jax.dispatch.basic import jax_funcify, jax_typify
 
 # Load dispatch specializations
-import aesara.link.jax.dispatch.scalar
-import aesara.link.jax.dispatch.tensor_basic
-import aesara.link.jax.dispatch.subtensor
-import aesara.link.jax.dispatch.shape
-import aesara.link.jax.dispatch.extra_ops
-import aesara.link.jax.dispatch.nlinalg
-import aesara.link.jax.dispatch.slinalg
-import aesara.link.jax.dispatch.random
-import aesara.link.jax.dispatch.elemwise
-import aesara.link.jax.dispatch.scan
+import pytensor.link.jax.dispatch.scalar
+import pytensor.link.jax.dispatch.tensor_basic
+import pytensor.link.jax.dispatch.subtensor
+import pytensor.link.jax.dispatch.shape
+import pytensor.link.jax.dispatch.extra_ops
+import pytensor.link.jax.dispatch.nlinalg
+import pytensor.link.jax.dispatch.slinalg
+import pytensor.link.jax.dispatch.random
+import pytensor.link.jax.dispatch.elemwise
+import pytensor.link.jax.dispatch.scan
 
 # isort: on

@@ -1,12 +1,12 @@
 import numpy as np
 import pytest
 
-import aesara
+import pytensor
 import tests.unittest_tools as utt
-from aesara.compile.mode import Mode
-from aesara.graph.fg import FunctionGraph
-from aesara.link.c.basic import DualLinker
-from aesara.scalar.basic import (
+from pytensor.compile.mode import Mode
+from pytensor.graph.fg import FunctionGraph
+from pytensor.link.c.basic import DualLinker
+from pytensor.scalar.basic import (
     ComplexError,
     Composite,
     InRange,
@@ -55,7 +55,7 @@ from aesara.scalar.basic import (
     true_div,
     uint8,
 )
-from aesara.tensor.type import fscalar, imatrix, iscalar, matrix
+from pytensor.tensor.type import fscalar, imatrix, iscalar, matrix
 from tests.link.test_link import make_function
 
 
@@ -182,15 +182,15 @@ class TestComposite:
         # We test that Composite.make_node accept as inputs Variable
         # some that represent existing computation.
 
-        si0 = aesara.scalar.int8()
-        si1 = aesara.scalar.int8()
-        si2 = aesara.scalar.float32()
+        si0 = pytensor.scalar.int8()
+        si1 = pytensor.scalar.int8()
+        si2 = pytensor.scalar.float32()
         sout = (si0 * si1) / si2
-        sop = aesara.scalar.Composite([si0, si1, si2], [sout])
-        si0 = aesara.scalar.int8()
-        si1 = aesara.scalar.int8()
-        si2 = aesara.scalar.float32()
-        si3 = aesara.scalar.float32()
+        sop = pytensor.scalar.Composite([si0, si1, si2], [sout])
+        si0 = pytensor.scalar.int8()
+        si1 = pytensor.scalar.int8()
+        si2 = pytensor.scalar.float32()
+        si3 = pytensor.scalar.float32()
         sop.make_node(si0 * si3, si1, si2)
 
 
@@ -306,10 +306,10 @@ class TestUpgradeToFloat:
         xf = float32("xf")
 
         ei = unary_op(xi)
-        fi = aesara.function([xi], ei)
+        fi = pytensor.function([xi], ei)
 
         ef = unary_op(xf)
-        ff = aesara.function([xf], ef)
+        ff = pytensor.function([xf], ef)
 
         for x_val in x_range:
             outi = fi(x_val)
@@ -326,10 +326,10 @@ class TestUpgradeToFloat:
         yf = float32("yf")
 
         ei = binary_op(xi, yi)
-        fi = aesara.function([xi, yi], ei)
+        fi = pytensor.function([xi, yi], ei)
 
         ef = binary_op(xf, yf)
-        ff = aesara.function([xf, yf], ef)
+        ff = pytensor.function([xf, yf], ef)
 
         for x_val in x_range:
             for y_val in y_range:
@@ -347,14 +347,14 @@ class TestUpgradeToFloat:
 
         xi = int8("xi")
         yi = int8("yi")
-        xf = ScalarType(aesara.config.floatX)("xf")
-        yf = ScalarType(aesara.config.floatX)("yf")
+        xf = ScalarType(pytensor.config.floatX)("xf")
+        yf = ScalarType(pytensor.config.floatX)("yf")
 
         ei = true_div(xi, yi)
-        fi = aesara.function([xi, yi], ei)
+        fi = pytensor.function([xi, yi], ei)
 
         ef = true_div(xf, yf)
-        ff = aesara.function([xf, yf], ef)
+        ff = pytensor.function([xf, yf], ef)
 
         for x_val in x_range:
             for y_val in y_range:
@@ -387,7 +387,7 @@ def test_grad_gt():
     x = float32(name="x")
     y = float32(name="y")
     z = x > y
-    g = aesara.gradient.grad(z, y)
+    g = pytensor.gradient.grad(z, y)
     assert g.eval({y: 1.0}) == 0.0
 
 
@@ -401,19 +401,19 @@ def test_grad_switch():
     x = matrix()
     c = matrix()
 
-    s = aesara.tensor.switch(c, x, 0)
+    s = pytensor.tensor.switch(c, x, 0)
     l = s.sum()
 
-    aesara.gradient.grad(l, x)
+    pytensor.gradient.grad(l, x)
 
 
 def test_grad_identity():
     # Check that the grad method of Identity correctly handles int dytpes
     x = imatrix("x")
     # tensor_copy is Elemwise{Identity}
-    y = aesara.tensor.tensor_copy(x)
-    l = y.sum(dtype=aesara.config.floatX)
-    aesara.gradient.grad(l, x)
+    y = pytensor.tensor.tensor_copy(x)
+    l = y.sum(dtype=pytensor.config.floatX)
+    pytensor.gradient.grad(l, x)
 
 
 def test_grad_inrange():
@@ -424,7 +424,7 @@ def test_grad_inrange():
         low = fscalar("low")
         high = fscalar("high")
         out = op(x, low, high)
-        gx, glow, ghigh = aesara.gradient.grad(out, [x, low, high])
+        gx, glow, ghigh = pytensor.gradient.grad(out, [x, low, high])
 
         # We look if the gradient are equal to zero
         # if x is lower than the lower bound,
@@ -434,7 +434,7 @@ def test_grad_inrange():
         # Mathematically we should have an infinite gradient when
         # x is equal to the lower or higher bound but in that case
         # Aesara defines the gradient to be zero for stability.
-        f = aesara.function([x, low, high], [gx, glow, ghigh])
+        f = pytensor.function([x, low, high], [gx, glow, ghigh])
         utt.assert_allclose(f(0, 1, 5), [0, 0, 0])
         utt.assert_allclose(f(1, 1, 5), [0, 0, 0])
         utt.assert_allclose(f(2, 1, 5), [0, 0, 0])
@@ -444,9 +444,9 @@ def test_grad_inrange():
 
 def test_grad_abs():
     a = fscalar("a")
-    b = 0.5 * (a + aesara.tensor.abs(a))
-    c = aesara.grad(b, a)
-    f = aesara.function([a], c, mode=Mode(optimizer=None))
+    b = 0.5 * (a + pytensor.tensor.abs(a))
+    c = pytensor.grad(b, a)
+    f = pytensor.function([a], c, mode=Mode(optimizer=None))
     # Currently Aesara return 0.5, but it isn't sure it won't change
     # in the futur.
     ret = f(0.0)
@@ -467,7 +467,7 @@ def test_mean(mode):
     a = iscalar("a")
     b = iscalar("b")
     z = mean(a, b)
-    z_fn = aesara.function([a, b], z, mode=mode)
+    z_fn = pytensor.function([a, b], z, mode=mode)
     res = z_fn(1, 1)
     assert np.allclose(res, 1.0)
 
@@ -477,16 +477,16 @@ def test_mean(mode):
 
     z = mean(a, b, c)
 
-    z_fn = aesara.function([a, b, c], aesara.grad(z, [a]), mode=mode)
+    z_fn = pytensor.function([a, b, c], pytensor.grad(z, [a]), mode=mode)
     res = z_fn(3, 4, 5)
     assert np.allclose(res, 1 / 3)
 
-    z_fn = aesara.function([a, b, c], aesara.grad(z, [b]), mode=mode)
+    z_fn = pytensor.function([a, b, c], pytensor.grad(z, [b]), mode=mode)
     res = z_fn(3, 4, 5)
     assert np.allclose(res, 1 / 3)
 
     z = mean()
-    z_fn = aesara.function([], z, mode=mode)
+    z_fn = pytensor.function([], z, mode=mode)
     assert z_fn() == 0
 
 

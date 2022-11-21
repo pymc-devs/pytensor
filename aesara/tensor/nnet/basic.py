@@ -8,22 +8,22 @@ TODO: factor this out into a neural-network toolbox.
 
 import numpy as np
 
-import aesara
-from aesara import scalar as aes
-from aesara.compile import optdb
-from aesara.gradient import DisconnectedType, grad_not_implemented
-from aesara.graph.basic import Apply
-from aesara.graph.op import Op
-from aesara.graph.rewriting.basic import copy_stack_trace, graph_rewriter, node_rewriter
-from aesara.link.c.op import COp
-from aesara.raise_op import Assert
-from aesara.scalar import UnaryScalarOp
-from aesara.tensor import basic as at
-from aesara.tensor.basic import ARange
-from aesara.tensor.elemwise import DimShuffle, Elemwise
-from aesara.tensor.exceptions import NotScalarConstantError
-from aesara.tensor.extra_ops import Unique
-from aesara.tensor.math import (
+import pytensor
+from pytensor import scalar as aes
+from pytensor.compile import optdb
+from pytensor.gradient import DisconnectedType, grad_not_implemented
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+from pytensor.graph.rewriting.basic import copy_stack_trace, graph_rewriter, node_rewriter
+from pytensor.link.c.op import COp
+from pytensor.raise_op import Assert
+from pytensor.scalar import UnaryScalarOp
+from pytensor.tensor import basic as at
+from pytensor.tensor.basic import ARange
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.extra_ops import Unique
+from pytensor.tensor.math import (
     MaxAndArgmax,
     Sum,
     add,
@@ -39,19 +39,19 @@ from aesara.tensor.math import (
     sigmoid,
     softplus,
 )
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.math import tanh, tensordot, true_div
-from aesara.tensor.nnet.blocksparse import sparse_block_dot
-from aesara.tensor.rewriting.basic import (
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import tanh, tensordot, true_div
+from pytensor.tensor.nnet.blocksparse import sparse_block_dot
+from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
     register_stabilize,
 )
-from aesara.tensor.rewriting.math import local_mul_canonizer
-from aesara.tensor.shape import Shape, shape_padleft
-from aesara.tensor.special import Softmax, SoftmaxGrad, log_softmax, softmax
-from aesara.tensor.subtensor import AdvancedIncSubtensor, AdvancedSubtensor
-from aesara.tensor.type import TensorType, discrete_dtypes, float_dtypes, integer_dtypes
+from pytensor.tensor.rewriting.math import local_mul_canonizer
+from pytensor.tensor.shape import Shape, shape_padleft
+from pytensor.tensor.special import Softmax, SoftmaxGrad, log_softmax, softmax
+from pytensor.tensor.subtensor import AdvancedIncSubtensor, AdvancedSubtensor
+from pytensor.tensor.type import TensorType, discrete_dtypes, float_dtypes, integer_dtypes
 
 
 class SoftmaxWithBias(COp):
@@ -247,7 +247,7 @@ class SoftmaxWithBias(COp):
 
         # Get the vectorized version of exp if it exist
         try:
-            vec_exp = aesara.scalar.exp.c_code_contiguous_raw(
+            vec_exp = pytensor.scalar.exp.c_code_contiguous_raw(
                 dtype, "Nx[1]", "sm_i", "sm_i"
             )
             inside_row_loop_contig = (
@@ -286,7 +286,7 @@ class SoftmaxWithBias(COp):
             """
                 % locals()
             )
-        except aesara.graph.utils.MethodNotDefined:
+        except pytensor.graph.utils.MethodNotDefined:
             pass
         end_row_loop = """
         }
@@ -1595,7 +1595,7 @@ def sigmoid_binary_crossentropy(output, target):
 
     inp = [output, target]
     outp = softplus(-abs(output)) + output * ((output > 0) - target)
-    return aesara.compile.builders.OpFromGraph(
+    return pytensor.compile.builders.OpFromGraph(
         inp,
         [outp],
         grad_overrides=grad,
@@ -1897,9 +1897,9 @@ def h_softmax(
     The following example builds a simple hierarchical softmax layer.
 
     >>> import numpy as np
-    >>> import aesara
-    >>> import aesara.tensor as at
-    >>> from aesara.tensor.nnet import h_softmax
+    >>> import pytensor
+    >>> import pytensor.tensor as at
+    >>> from pytensor.tensor.nnet import h_softmax
     >>>
     >>> # Parameters
     >>> batch_size = 32
@@ -1910,16 +1910,16 @@ def h_softmax(
     >>> output_size = n_outputs_per_class * n_outputs_per_class
     >>>
     >>> # First level of h_softmax
-    >>> floatX = aesara.config.floatX
-    >>> W1 = aesara.shared(
+    >>> floatX = pytensor.config.floatX
+    >>> W1 = pytensor.shared(
     ...     np.random.normal(0, 0.001, (dim_x, n_classes)).astype(floatX))
-    >>> b1 = aesara.shared(np.zeros((n_classes,), floatX))
+    >>> b1 = pytensor.shared(np.zeros((n_classes,), floatX))
     >>>
     >>> # Second level of h_softmax
     >>> W2 = np.random.normal(0, 0.001,
     ...     size=(n_classes, dim_x, n_outputs_per_class)).astype(floatX)
-    >>> W2 = aesara.shared(W2)
-    >>> b2 = aesara.shared(np.zeros((n_classes, n_outputs_per_class), floatX))
+    >>> W2 = pytensor.shared(W2)
+    >>> b2 = pytensor.shared(np.zeros((n_classes, n_outputs_per_class), floatX))
     >>>
     >>> # We can now build the graph to compute a loss function, typically the
     >>> # negative log-likelihood:
@@ -2101,13 +2101,13 @@ def confusion_matrix(actual, pred):
 
     Examples
     --------
-    >>> import aesara
-    >>> import aesara.tensor as at
-    >>> from aesara.tensor.nnet import confusion_matrix
+    >>> import pytensor
+    >>> import pytensor.tensor as at
+    >>> from pytensor.tensor.nnet import confusion_matrix
 
     >>> x = at.vector()
     >>> y = at.vector()
-    >>> f = aesara.function([x, y], confusion_matrix(x, y))
+    >>> f = pytensor.function([x, y], confusion_matrix(x, y))
     >>> y_true = [2, 0, 2, 2, 0, 1]
     >>> y_pred = [0, 0, 2, 2, 0, 2]
     >>> print(f(y_true, y_pred))
@@ -2135,12 +2135,12 @@ def confusion_matrix(actual, pred):
 DEPRECATED_NAMES = [
     (
         "softmax",
-        "`aesara.tensor.nnet.basic.softmax` has been moved to `aesara.tensor.special.softmax`.",
+        "`pytensor.tensor.nnet.basic.softmax` has been moved to `pytensor.tensor.special.softmax`.",
         softmax,
     ),
     (
         "logsoftmax",
-        "`aesara.tensor.nnet.basic.logsoftmax` has been moved to `aesara.tensor.special.log_softmax`.",
+        "`pytensor.tensor.nnet.basic.logsoftmax` has been moved to `pytensor.tensor.special.log_softmax`.",
         log_softmax,
     ),
 ]

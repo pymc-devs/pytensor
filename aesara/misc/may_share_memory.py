@@ -6,13 +6,13 @@ numpy version support only ndarray.
 
 import numpy as np
 
-from aesara.tensor.type import TensorType
+from pytensor.tensor.type import TensorType
 
 
 try:
     import scipy.sparse
 
-    from aesara.sparse.basic import SparseTensorType
+    from pytensor.sparse.basic import SparseTensorType
 
     def _is_sparse(a):
         return scipy.sparse.issparse(a)

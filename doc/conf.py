@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# aesara documentation build configuration file, created by
+# pytensor documentation build configuration file, created by
 # sphinx-quickstart on Tue Oct  7 16:34:06 2008.
 #
 # This file is execfile()d with the current directory set to its containing
@@ -21,10 +21,10 @@
 
 import os
 import sys
-import aesara
+import pytensor
 
-aesara_path = os.path.join(os.path.dirname(__file__), os.pardir)
-sys.path.append(os.path.abspath(aesara_path))
+pytensor_path = os.path.join(os.path.dirname(__file__), os.pardir)
+sys.path.append(os.path.abspath(pytensor_path))
 import versioneer
 
 # General configuration
@@ -156,7 +156,7 @@ def setup(app):
 
 # The name of an image file (within the static path) to place at the top of
 # the sidebar.
-# html_logo = 'images/aesara_logo.png'
+# html_logo = 'images/pytensor_logo.png'
 
 # The name of an image file (within the static path) to use as favicon of the
 # docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32
@@ -204,7 +204,7 @@ html_use_smartypants = True
 # html_file_suffix = ''
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = "aesara_doc"
+htmlhelp_basename = "pytensor_doc"
 
 # Options for the linkcode extension
 # ----------------------------------
@@ -221,14 +221,14 @@ def linkcode_resolve(domain, info):
         import os
 
         fn = inspect.getsourcefile(obj)
-        fn = os.path.relpath(fn, start=os.path.dirname(aesara.__file__))
+        fn = os.path.relpath(fn, start=os.path.dirname(pytensor.__file__))
         source, lineno = inspect.getsourcelines(obj)
         return fn, lineno, lineno + len(source) - 1
 
     if domain != "py" or not info["module"]:
         return None
     try:
-        filename = "aesara/%s#L%d-L%d" % find_source()
+        filename = "pytensor/%s#L%d-L%d" % find_source()
     except Exception:
         filename = info["module"].replace(".", "/") + ".py"
     import subprocess
@@ -236,7 +236,7 @@ def linkcode_resolve(domain, info):
     tag = subprocess.Popen(
         ["git", "rev-parse", "HEAD"], stdout=subprocess.PIPE, universal_newlines=True
     ).communicate()[0][:-1]
-    return f"https://github.com/aesara-devs/aesara/blob/{tag}/{filename}"
+    return f"https://github.com/pytensor-devs/pytensor/blob/{tag}/{filename}"
 
 
 # Options for LaTeX output
@@ -255,12 +255,12 @@ latex_elements = {
 # (source start file, target name, title, author, document class
 # [howto/manual]).
 latex_documents = [
-    ("index", "aesara.tex", "Aesara Documentation", "Aesara Developers", "manual"),
+    ("index", "pytensor.tex", "Aesara Documentation", "Aesara Developers", "manual"),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of
 # the title page.
-# latex_logo = 'images/aesara_logo_allblue_200x46.png'
+# latex_logo = 'images/pytensor_logo_allblue_200x46.png'
 
 # For "manual" documents, if this is true, then toplevel headings are parts,
 # not chapters.

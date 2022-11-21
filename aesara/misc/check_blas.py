@@ -14,9 +14,9 @@ from optparse import OptionParser
 
 import numpy as np
 
-import aesara
-from aesara.configdefaults import config
-from aesara.tensor.math import dot
+import pytensor
+from pytensor.configdefaults import config
+from pytensor.tensor.math import dot
 
 
 def execute(execute=True, verbose=True, M=2000, N=2000, K=2000, iters=10, order="C"):
@@ -51,10 +51,10 @@ def execute(execute=True, verbose=True, M=2000, N=2000, K=2000, iters=10, order=
         print("Numpy location:", np.__file__)
         print("Numpy version:", np.__version__)
 
-    a = aesara.shared(np.ones((M, N), dtype=config.floatX, order=order))
-    b = aesara.shared(np.ones((N, K), dtype=config.floatX, order=order))
-    c = aesara.shared(np.ones((M, K), dtype=config.floatX, order=order))
-    f = aesara.function([], updates=[(c, 0.4 * c + 0.8 * dot(a, b))])
+    a = pytensor.shared(np.ones((M, N), dtype=config.floatX, order=order))
+    b = pytensor.shared(np.ones((N, K), dtype=config.floatX, order=order))
+    c = pytensor.shared(np.ones((M, K), dtype=config.floatX, order=order))
+    f = pytensor.function([], updates=[(c, 0.4 * c + 0.8 * dot(a, b))])
 
     if any(x.op.__class__.__name__ == "Gemm" for x in f.maker.fgraph.toposort()):
         c_impl = [

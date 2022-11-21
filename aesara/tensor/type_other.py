@@ -4,13 +4,13 @@
 
 import numpy as np
 
-import aesara
-from aesara import _as_symbolic
-from aesara.gradient import DisconnectedType
-from aesara.graph.basic import Apply, Constant, Variable
-from aesara.graph.op import Op
-from aesara.link.c.type import Generic, Type
-from aesara.tensor.type import integer_dtypes
+import pytensor
+from pytensor import _as_symbolic
+from pytensor.gradient import DisconnectedType
+from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.op import Op
+from pytensor.link.c.type import Generic, Type
+from pytensor.tensor.type import integer_dtypes
 
 
 def as_int_none_variable(x):
@@ -18,7 +18,7 @@ def as_int_none_variable(x):
         return NoneConst
     elif NoneConst.equals(x):
         return x
-    x = aesara.tensor.as_tensor_variable(x, ndim=0)
+    x = pytensor.tensor.as_tensor_variable(x, ndim=0)
     if x.type.dtype not in integer_dtypes:
         raise TypeError("index must be integers")
     return x

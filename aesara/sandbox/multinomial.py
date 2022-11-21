@@ -3,12 +3,12 @@ from typing import Tuple, Union
 
 import numpy as np
 
-import aesara.tensor as at
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply
-from aesara.link.c.op import COp
-from aesara.scalar import ScalarType, as_scalar
-from aesara.tensor.type import discrete_dtypes
+import pytensor.tensor as at
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply
+from pytensor.link.c.op import COp
+from pytensor.scalar import ScalarType, as_scalar
+from pytensor.tensor.type import discrete_dtypes
 
 
 class MultinomialFromUniform(COp):
@@ -74,8 +74,8 @@ class MultinomialFromUniform(COp):
             t = f"PyArray_TYPE({pvals})"
         else:
             t = ScalarType(self.odtype).dtype_specs()[1]
-            if t.startswith("aesara_complex"):
-                t = t.replace("aesara_complex", "NPY_COMPLEX")
+            if t.startswith("pytensor_complex"):
+                t = t.replace("pytensor_complex", "NPY_COMPLEX")
             else:
                 t = t.upper()
         fail = sub["fail"]
@@ -266,8 +266,8 @@ class ChoiceFromUniform(MultinomialFromUniform):
             t = "NPY_INT64"
         else:
             t = ScalarType(self.odtype).dtype_specs()[1]
-            if t.startswith("aesara_complex"):
-                t = t.replace("aesara_complex", "NPY_COMPLEX")
+            if t.startswith("pytensor_complex"):
+                t = t.replace("pytensor_complex", "NPY_COMPLEX")
             else:
                 t = t.upper()
         fail = sub["fail"]

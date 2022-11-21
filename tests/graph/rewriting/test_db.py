@@ -2,8 +2,8 @@ import sys
 
 import pytest
 
-from aesara.graph.rewriting.basic import GraphRewriter, SequentialGraphRewriter
-from aesara.graph.rewriting.db import (
+from pytensor.graph.rewriting.basic import GraphRewriter, SequentialGraphRewriter
+from pytensor.graph.rewriting.db import (
     EquilibriumDB,
     LocalGroupDB,
     ProxyDB,
@@ -91,12 +91,12 @@ class TestDB:
 def test_deprecations():
     """Make sure we can import deprecated classes from current and deprecated modules."""
     with pytest.deprecated_call():
-        from aesara.graph.rewriting.db import OptimizationDatabase  # noqa: F401 F811
+        from pytensor.graph.rewriting.db import OptimizationDatabase  # noqa: F401 F811
 
     with pytest.deprecated_call():
-        from aesara.graph.optdb import OptimizationDatabase  # noqa: F401 F811
+        from pytensor.graph.optdb import OptimizationDatabase  # noqa: F401 F811
 
-    del sys.modules["aesara.graph.optdb"]
+    del sys.modules["pytensor.graph.optdb"]
 
     with pytest.deprecated_call():
-        from aesara.graph.optdb import RewriteDatabase  # noqa: F401
+        from pytensor.graph.optdb import RewriteDatabase  # noqa: F401

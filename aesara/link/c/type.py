@@ -3,10 +3,10 @@ import platform
 import re
 from typing import TypeVar
 
-from aesara.graph.basic import Constant
-from aesara.graph.type import Type
-from aesara.link.c.interface import CLinkerType
-from aesara.utils import Singleton
+from pytensor.graph.basic import Constant
+from pytensor.graph.type import Type
+from pytensor.link.c.interface import CLinkerType
+from pytensor.utils import Singleton
 
 
 D = TypeVar("D")
@@ -37,13 +37,13 @@ class CType(Type[D], CLinkerType):
         # Create a second Variable with the same Type instance
         c = tensor.fvector()
 
-    Whenever you create a symbolic variable in aesara (technically,
+    Whenever you create a symbolic variable in pytensor (technically,
     `Variable`) it will contain a reference to a Type instance. That
     reference is typically constant during the lifetime of the
     Variable.  Many variables can refer to a single Type instance, as
     do b and c above.  The Type instance defines the kind of value
     which might end up in that variable when executing a `Function`.
-    In this sense, aesara is like a strongly-typed language because
+    In this sense, pytensor is like a strongly-typed language because
     the types are included in the graph before the values.  In our
     example above, b is a Variable which is guaranteed to correspond
     to a numpy.ndarray of rank 1 when we try to do some computations
@@ -130,7 +130,7 @@ class CDataType(CType[D]):
     Represents opaque C data to be passed around. The intent is to
     ease passing arbitrary data between ops C code.
 
-    The constructor builds a type made to represent a C pointer in aesara.
+    The constructor builds a type made to represent a C pointer in pytensor.
 
     Parameters
     ----------
@@ -375,7 +375,7 @@ class EnumType(CType, dict):
 
     .. code-block:: python
 
-        from aesara.link.c.type import EnumType
+        from pytensor.link.c.type import EnumType
 
         # You can remark that constant 'C' does not have an alias.
         enum = EnumType(A=('alpha', 1), B=('beta', 2), C=3, D=('delta', 4))
@@ -571,7 +571,7 @@ class EnumType(CType, dict):
 
         .. code-block:: c
 
-            int aesara_enum_to_string_<cname>(<ctype> value, char* output_string);
+            int pytensor_enum_to_string_<cname>(<ctype> value, char* output_string);
 
         Where ``ctype`` and ``cname`` are the C type and the C name of current Aesara enumeration.
 
@@ -580,11 +580,11 @@ class EnumType(CType, dict):
         If given value is unknown, the C function sets a Python ValueError exception and returns a non-zero.
 
         This C function may be useful to retrieve some runtime information.
-        It is available in C code when aesara flag ``config.cmodule__debug`` is set to ``True``.
+        It is available in C code when pytensor flag ``config.cmodule__debug`` is set to ``True``.
         """
         return """
         #ifdef DEBUG
-        int aesara_enum_to_string_%(cname)s(%(ctype)s in, char* out) {
+        int pytensor_enum_to_string_%(cname)s(%(ctype)s in, char* out) {
             int ret = 0;
             switch(in) {
                 %(cases)s

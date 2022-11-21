@@ -5,13 +5,13 @@ from typing import Tuple
 
 import numpy as np
 
-from aesara.gradient import DisconnectedType
-from aesara.graph.basic import Apply, Variable
-from aesara.link.c.op import COp
-from aesara.link.c.params_type import ParamsType
-from aesara.link.c.type import Generic
-from aesara.scalar.basic import ScalarType
-from aesara.tensor.type import DenseTensorType
+from pytensor.gradient import DisconnectedType
+from pytensor.graph.basic import Apply, Variable
+from pytensor.link.c.op import COp
+from pytensor.link.c.params_type import ParamsType
+from pytensor.link.c.type import Generic
+from pytensor.scalar.basic import ScalarType
+from pytensor.tensor.type import DenseTensorType
 
 
 class ExceptionType(Generic):
@@ -74,7 +74,7 @@ class CheckAndRaise(COp):
         conds
             The conditions to evaluate.
         """
-        import aesara.tensor as at
+        import pytensor.tensor as at
 
         if not isinstance(value, Variable):
             value = at.as_tensor_variable(value)
@@ -183,12 +183,12 @@ class Assert(CheckAndRaise):
 
     Examples
     --------
-    >>> import aesara
-    >>> import aesara.tensor as at
-    >>> from aesara.raise_op import Assert
+    >>> import pytensor
+    >>> import pytensor.tensor as at
+    >>> from pytensor.raise_op import Assert
     >>> x = at.vector("x")
     >>> assert_op = Assert("This assert failed")
-    >>> func = aesara.function([x], assert_op(x, x.size < 2))
+    >>> func = pytensor.function([x], assert_op(x, x.size < 2))
 
     """
 

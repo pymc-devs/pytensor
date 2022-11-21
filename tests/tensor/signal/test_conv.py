@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-import aesara
-from aesara.tensor.math import _allclose
-from aesara.tensor.signal import conv
-from aesara.tensor.type import TensorType, dtensor3, dtensor4, dvector, matrix
+import pytensor
+from pytensor.tensor.math import _allclose
+from pytensor.tensor.signal import conv
+from pytensor.tensor.type import TensorType, dtensor3, dtensor4, dvector, matrix
 from tests import unittest_tools as utt
 
 
@@ -33,12 +33,12 @@ class TestSignalConv2D:
 
         output = sym_conv2d(input, filters)
         assert output.ndim == out_dim
-        aesara_conv = aesara.function([input, filters], output)
+        pytensor_conv = pytensor.function([input, filters], output)
 
         # initialize input and compute result
         image_data = np.random.random(image_shape)
         filter_data = np.random.random(filter_shape)
-        aesara_output = aesara_conv(image_data, filter_data)
+        pytensor_output = pytensor_conv(image_data, filter_data)
 
         # REFERENCE IMPLEMENTATION ############
         out_shape2d = np.array(image_shape[-2:]) - np.array(filter_shape[-2:]) + 1
@@ -47,13 +47,13 @@ class TestSignalConv2D:
         # reshape as 3D input tensors to make life easier
         image_data3d = image_data.reshape((bsize,) + image_shape[-2:])
         filter_data3d = filter_data.reshape((nkern,) + filter_shape[-2:])
-        # reshape aesara output as 4D to make life easier
-        aesara_output4d = aesara_output.reshape(
+        # reshape pytensor output as 4D to make life easier
+        pytensor_output4d = pytensor_output.reshape(
             (
                 bsize,
                 nkern,
             )
-            + aesara_output.shape[-2:]
+            + pytensor_output.shape[-2:]
         )
 
         # loop over mini-batches (if required)
@@ -75,14 +75,14 @@ class TestSignalConv2D:
                             * filter2d[::-1, ::-1]
                         ).sum()
 
-                assert _allclose(aesara_output4d[b, k, :, :], output2d)
+                assert _allclose(pytensor_output4d[b, k, :, :], output2d)
 
         # TEST GRADIENT ############
         if verify_grad:
             utt.verify_grad(sym_conv2d, [image_data, filter_data])
 
     @pytest.mark.skipif(
-        aesara.config.cxx == "",
+        pytensor.config.cxx == "",
         reason="conv2d tests need a c++ compiler",
     )
     def test_basic(self):

@@ -1,25 +1,25 @@
 import numpy as np
 import scipy.sparse
 
-import aesara
-from aesara import tensor as at
-from aesara.graph.basic import Apply
-from aesara.graph.op import Op
-from aesara.sparse.basic import (
+import pytensor
+from pytensor import tensor as at
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+from pytensor.sparse.basic import (
     Remove0,
     SparseTensorType,
     _is_sparse,
     as_sparse_variable,
     remove0,
 )
-from aesara.tensor.type import discrete_dtypes, float_dtypes
+from pytensor.tensor.type import discrete_dtypes, float_dtypes
 
 
 # Probability Ops are currently back in sandbox, because they do not respect
 # Aesara's Op contract, as their behaviour is not reproducible: calling
 # the perform() method twice with the same argument will yield different
 # results.
-# from aesara.sparse.basic import (
+# from pytensor.sparse.basic import (
 #    Multinomial, multinomial, Poisson, poisson,
 #    Binomial, csr_fbinomial, csc_fbinomial, csr_dbinomial, csc_dbinomial)
 
@@ -61,9 +61,9 @@ class Poisson(Op):
 
     def grad(self, inputs, outputs_gradients):
         comment = "No gradient exists for class Poisson in\
-                   aesara/sparse/sandbox/sp2.py"
+                   pytensor/sparse/sandbox/sp2.py"
         return [
-            aesara.gradient.grad_undefined(
+            pytensor.gradient.grad_undefined(
                 op=self, x_pos=0, x=inputs[0], comment=comment
             )
         ]
@@ -127,13 +127,13 @@ class Binomial(Op):
         (n, p, shape) = inputs
         (gz,) = gout
         comment_n = "No gradient exists for the number of samples in class\
-                     Binomial of aesara/sparse/sandbox/sp2.py"
+                     Binomial of pytensor/sparse/sandbox/sp2.py"
         comment_p = "No gradient exists for the prob of success in class\
-                     Binomial of aesara/sparse/sandbox/sp2.py"
+                     Binomial of pytensor/sparse/sandbox/sp2.py"
         return [
-            aesara.gradient.grad_undefined(op=self, x_pos=0, x=n, comment=comment_n),
-            aesara.gradient.grad_undefined(op=self, x_pos=1, x=p, comment=comment_p),
-            aesara.gradient.disconnected_type(),
+            pytensor.gradient.grad_undefined(op=self, x_pos=0, x=n, comment=comment_n),
+            pytensor.gradient.grad_undefined(op=self, x_pos=1, x=p, comment=comment_p),
+            pytensor.gradient.disconnected_type(),
         ]
 
     def infer_shape(self, fgraph, node, ins_shapes):
@@ -203,14 +203,14 @@ class Multinomial(Op):
 
     def grad(self, inputs, outputs_gradients):
         comment_n = "No gradient exists for the number of samples in class\
-                     Multinomial of aesara/sparse/sandbox/sp2.py"
+                     Multinomial of pytensor/sparse/sandbox/sp2.py"
         comment_p = "No gradient exists for the prob of success in class\
-                     Multinomial of aesara/sparse/sandbox/sp2.py"
+                     Multinomial of pytensor/sparse/sandbox/sp2.py"
         return [
-            aesara.gradient.grad_undefined(
+            pytensor.gradient.grad_undefined(
                 op=self, x_pos=0, x=inputs[0], comment=comment_n
             ),
-            aesara.gradient.grad_undefined(
+            pytensor.gradient.grad_undefined(
                 op=self, x_pos=1, x=inputs[1], comment=comment_p
             ),
         ]

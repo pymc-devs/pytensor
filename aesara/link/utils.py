@@ -28,13 +28,13 @@ from typing import (
 
 import numpy as np
 
-from aesara import config, utils
-from aesara.graph.basic import Apply, Constant, Variable
-from aesara.graph.fg import FunctionGraph
+from pytensor import config, utils
+from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.fg import FunctionGraph
 
 
 if TYPE_CHECKING:
-    from aesara.graph.op import (
+    from pytensor.graph.op import (
         BasicThunkType,
         InputStorageType,
         OutputStorageType,
@@ -287,7 +287,7 @@ def raise_with_op(
         associated traceback, as would be returned by a call to
         `sys.exc_info` (which is done if ``None`` is passed).
     storage_map: dict, optional
-        storage map of the aesara function that resulted in the
+        storage map of the pytensor function that resulted in the
         raised exception.
 
     Notes
@@ -394,10 +394,10 @@ def raise_with_op(
 
     if verbosity == "high":
 
-        import aesara.printing
+        import pytensor.printing
 
         f = io.StringIO()
-        aesara.printing.debugprint(node, file=f, stop_on_name=True, print_type=True)
+        pytensor.printing.debugprint(node, file=f, stop_on_name=True, print_type=True)
         detailed_err_msg += "\nDebug print of the apply node: \n"
         detailed_err_msg += f.getvalue()
 
@@ -407,12 +407,12 @@ def raise_with_op(
         shared_input_list = [
             item
             for item in fgraph.inputs
-            if isinstance(item, aesara.compile.SharedVariable)
+            if isinstance(item, pytensor.compile.SharedVariable)
         ]
         nonshared_input_list = [
             item
             for item in fgraph.inputs
-            if not isinstance(item, aesara.compile.SharedVariable)
+            if not isinstance(item, pytensor.compile.SharedVariable)
         ]
         storage_map_list: List = []
         total_size = 0
@@ -568,7 +568,7 @@ def __log_thunk_trace(value, handler: io.TextIOWrapper) -> None:
 
 
 def register_thunk_trace_excepthook(handler: TextIO = sys.stdout) -> None:
-    """Adds the `__log_thunk_trace` except hook to the collection in `aesara.utils`.
+    """Adds the `__log_thunk_trace` except hook to the collection in `pytensor.utils`.
 
     Parameters
     ----------

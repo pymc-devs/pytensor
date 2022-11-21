@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, List, Optional, Sequence, Tuple, TypeVar,
 
 
 if TYPE_CHECKING:
-    from aesara.graph.basic import Apply, Variable
+    from pytensor.graph.basic import Apply, Variable
 
 T = TypeVar("T", bound=Union["Apply", "Variable"])
 
@@ -90,7 +90,7 @@ def add_tag_trace(thing: T, user_line: Optional[int] = None) -> T:
     we look.
 
     """
-    from aesara.configdefaults import config
+    from pytensor.configdefaults import config
 
     if user_line is None:
         user_line = config.traceback__limit
@@ -98,22 +98,22 @@ def add_tag_trace(thing: T, user_line: Optional[int] = None) -> T:
     if user_line == -1:
         user_line = None
     skips = [
-        "aesara/tensor/",
-        "aesara\\tensor\\",
-        "aesara/compile/",
-        "aesara\\compile\\",
-        "aesara/graph/",
-        "aesara\\graph\\",
-        "aesara/scalar/basic.py",
-        "aesara\\scalar\\basic.py",
-        "aesara/sandbox/",
-        "aesara\\sandbox\\",
-        "aesara/scan/",
-        "aesara\\scan\\",
-        "aesara/sparse/",
-        "aesara\\sparse\\",
-        "aesara/typed_list/",
-        "aesara\\typed_list\\",
+        "pytensor/tensor/",
+        "pytensor\\tensor\\",
+        "pytensor/compile/",
+        "pytensor\\compile\\",
+        "pytensor/graph/",
+        "pytensor\\graph\\",
+        "pytensor/scalar/basic.py",
+        "pytensor\\scalar\\basic.py",
+        "pytensor/sandbox/",
+        "pytensor\\sandbox\\",
+        "pytensor/scan/",
+        "pytensor\\scan\\",
+        "pytensor/sparse/",
+        "pytensor\\sparse\\",
+        "pytensor/typed_list/",
+        "pytensor\\typed_list\\",
     ]
 
     if config.traceback__compile_limit > 0:
@@ -277,7 +277,7 @@ class Scratchpad:
         return "scratchpad" + str(self.__dict__)
 
     def info(self):
-        print(f"<aesara.graph.utils.scratchpad instance at {id(self)}>")
+        print(f"<pytensor.graph.utils.scratchpad instance at {id(self)}>")
         for k, v in self.__dict__.items():
             print(f"  {k}: {v}")
 

@@ -4,15 +4,15 @@ TODO: implement Images2Neibs.infer_shape() methods
 """
 import numpy as np
 
-import aesara
-from aesara.gradient import grad_not_implemented, grad_undefined
-from aesara.graph.basic import Apply
-from aesara.link.c.op import COp
-from aesara.link.c.type import EnumList
-from aesara.tensor.basic import arange, as_tensor_variable, concatenate, stack, zeros
-from aesara.tensor.math import ceil_intdiv
-from aesara.tensor.subtensor import inc_subtensor, set_subtensor
-from aesara.tensor.type import matrix
+import pytensor
+from pytensor.gradient import grad_not_implemented, grad_undefined
+from pytensor.graph.basic import Apply
+from pytensor.link.c.op import COp
+from pytensor.link.c.type import EnumList
+from pytensor.tensor.basic import arange, as_tensor_variable, concatenate, stack, zeros
+from pytensor.tensor.math import ceil_intdiv
+from pytensor.tensor.subtensor import inc_subtensor, set_subtensor
+from pytensor.tensor.type import matrix
 
 
 class Images2Neibs(COp):
@@ -169,7 +169,7 @@ class Images2Neibs(COp):
 
             indices = arange(neib_shape[0] * neib_shape[1])
             pgzs = gz.dimshuffle((1, 0))
-            result, _ = aesara.scan(
+            result, _ = pytensor.scan(
                 fn=pos2map,
                 sequences=[indices, pgzs],
                 outputs_info=zeros(x.shape),
@@ -196,7 +196,7 @@ class Images2Neibs(COp):
         (z,) = out_
         # XXX: GpuImages2Neibs should not run this perform in DebugMode
         if not isinstance(self, Images2Neibs):
-            raise aesara.graph.utils.MethodNotDefined()
+            raise pytensor.graph.utils.MethodNotDefined()
 
         def CEIL_INTDIV(a, b):
             if a % b:
@@ -646,7 +646,7 @@ class Images2Neibs(COp):
 
 def images2neibs(ten4, neib_shape, neib_step=None, mode="valid"):
     r"""
-    Function :func:`images2neibs <aesara.tensor.nnet.neighbours.images2neibs>`
+    Function :func:`images2neibs <pytensor.tensor.nnet.neighbours.images2neibs>`
     allows to apply a sliding window operation to a tensor containing
     images or other two-dimensional objects.
     The sliding window operation loops over points in input data and stores
@@ -722,11 +722,11 @@ def images2neibs(ten4, neib_shape, neib_step=None, mode="valid"):
     .. code-block:: python
 
         # Defining variables
-        images = aesara.tensor.type.tensor4('images')
+        images = pytensor.tensor.type.tensor4('images')
         neibs = images2neibs(images, neib_shape=(5, 5))
 
-        # Constructing aesara function
-        window_function = aesara.function([images], neibs)
+        # Constructing pytensor function
+        window_function = pytensor.function([images], neibs)
 
         # Input tensor (one image 10x10)
         im_val = np.arange(100.).reshape((1, 1, 10, 10))
@@ -743,29 +743,29 @@ def images2neibs(ten4, neib_shape, neib_step=None, mode="valid"):
 
 def neibs2images(neibs, neib_shape, original_shape, mode="valid"):
     """
-    Function :func:`neibs2images <aesara.sandbox.neighbours.neibs2images>`
+    Function :func:`neibs2images <pytensor.sandbox.neighbours.neibs2images>`
     performs the inverse operation of
-    :func:`images2neibs <aesara.sandbox.neighbours.neibs2images>`. It inputs
-    the output of :func:`images2neibs <aesara.sandbox.neighbours.neibs2images>`
+    :func:`images2neibs <pytensor.sandbox.neighbours.neibs2images>`. It inputs
+    the output of :func:`images2neibs <pytensor.sandbox.neighbours.neibs2images>`
     and reconstructs its input.
 
     Parameters
     ----------
     neibs : 2d tensor
         Like the one obtained by
-        :func:`images2neibs <aesara.sandbox.neighbours.neibs2images>`.
+        :func:`images2neibs <pytensor.sandbox.neighbours.neibs2images>`.
     neib_shape
         `neib_shape` that was used in
-        :func:`images2neibs <aesara.sandbox.neighbours.neibs2images>`.
+        :func:`images2neibs <pytensor.sandbox.neighbours.neibs2images>`.
     original_shape
         Original shape of the 4d tensor given to
-        :func:`images2neibs <aesara.sandbox.neighbours.neibs2images>`
+        :func:`images2neibs <pytensor.sandbox.neighbours.neibs2images>`
 
     Returns
     -------
     object
         Reconstructs the input of
-        :func:`images2neibs <aesara.sandbox.neighbours.neibs2images>`,
+        :func:`images2neibs <pytensor.sandbox.neighbours.neibs2images>`,
         a 4d tensor of shape `original_shape`.
 
     Notes
@@ -773,21 +773,21 @@ def neibs2images(neibs, neib_shape, original_shape, mode="valid"):
     Currently, the function doesn't support tensors created with
     `neib_step` different from default value. This means that it may be
     impossible to compute the gradient of a variable gained by
-    :func:`images2neibs <aesara.sandbox.neighbours.neibs2images>` w.r.t.
+    :func:`images2neibs <pytensor.sandbox.neighbours.neibs2images>` w.r.t.
     its inputs in this case, because it uses
-    :func:`images2neibs <aesara.sandbox.neighbours.neibs2images>` for
+    :func:`images2neibs <pytensor.sandbox.neighbours.neibs2images>` for
     gradient computation.
 
     Examples
     --------
     Example, which uses a tensor gained in example for
-    :func:`images2neibs <aesara.sandbox.neighbours.neibs2images>`:
+    :func:`images2neibs <pytensor.sandbox.neighbours.neibs2images>`:
 
     .. code-block:: python
 
         im_new = neibs2images(neibs, (5, 5), im_val.shape)
         # Aesara function definition
-        inv_window = aesara.function([neibs], im_new)
+        inv_window = pytensor.function([neibs], im_new)
         # Function application
         im_new_val = inv_window(neibs_val)
 

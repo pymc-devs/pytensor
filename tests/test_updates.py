@@ -1,8 +1,8 @@
 import pytest
 
-import aesara
-from aesara.tensor.type import vector
-from aesara.updates import OrderedUpdates
+import pytensor
+from pytensor.tensor.type import vector
+from pytensor.updates import OrderedUpdates
 
 
 class TestUpdates:
@@ -10,7 +10,7 @@ class TestUpdates:
         with pytest.raises(TypeError):
             OrderedUpdates(dict(d=3))
 
-        sv = aesara.shared("asdf")
+        sv = pytensor.shared("asdf")
         # TODO FIXME: Not a real test.
         OrderedUpdates({sv: 3})
 
@@ -25,15 +25,15 @@ class TestUpdates:
             up.__setitem__(vector(), 7)
 
         # TODO FIXME: Not a real test.
-        up[aesara.shared(88)] = 7
+        up[pytensor.shared(88)] = 7
 
     def test_updates_add(self):
 
         up1 = OrderedUpdates()
         up2 = OrderedUpdates()
 
-        a = aesara.shared("a")
-        b = aesara.shared("b")
+        a = pytensor.shared("a")
+        b = pytensor.shared("b")
 
         assert not up1 + up2
 

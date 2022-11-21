@@ -23,11 +23,11 @@ from typing import (
     Tuple,
 )
 
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Constant, Variable
-from aesara.link.basic import Container, LocalLinker
-from aesara.link.c.exceptions import MissingGXX
-from aesara.link.utils import (
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.link.basic import Container, LocalLinker
+from pytensor.link.c.exceptions import MissingGXX
+from pytensor.link.utils import (
     gc_helper,
     get_destroy_dependencies,
     map_storage,
@@ -36,8 +36,8 @@ from aesara.link.utils import (
 
 
 if TYPE_CHECKING:
-    from aesara.graph.fg import FunctionGraph
-    from aesara.graph.op import (
+    from pytensor.graph.fg import FunctionGraph
+    from pytensor.graph.op import (
         BasicThunkType,
         ComputeMapType,
         StorageCellType,
@@ -1018,7 +1018,7 @@ class VMLinker(LocalLinker):
         pre_call_clear = [storage_map[v] for v in self.no_recycling]
 
         try:
-            from aesara.link.c.cvm import CVM
+            from pytensor.link.c.cvm import CVM
         except (MissingGXX, ImportError):
             CVM = None
 

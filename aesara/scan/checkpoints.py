@@ -1,8 +1,8 @@
-import aesara.tensor.basic as at
-from aesara.scan.basic import scan
-from aesara.tensor.basic import Join
-from aesara.tensor.math import ceil, eq
-from aesara.tensor.subtensor import set_subtensor
+import pytensor.tensor.basic as at
+from pytensor.scan.basic import scan
+from pytensor.tensor.basic import Join
+from pytensor.tensor.math import ceil, eq
+from pytensor.tensor.subtensor import set_subtensor
 
 
 def scan_checkpoints(
@@ -17,7 +17,7 @@ def scan_checkpoints(
 ):
     """Scan function that uses less memory, but is more restrictive.
 
-    In :func:`~aesara.scan`, if you compute the gradient of the output
+    In :func:`~pytensor.scan`, if you compute the gradient of the output
     with respect to the input, you will have to store the intermediate
     results at each time step, which can be prohibitively huge. This
     function allows to do ``save_every_N`` steps of forward computations
@@ -41,7 +41,7 @@ def scan_checkpoints(
     ----------
     fn
         ``fn`` is a function that describes the operations involved in one
-        step of ``scan``. See the documentation of :func:`~aesara.scan`
+        step of ``scan``. See the documentation of :func:`~pytensor.scan`
         for more information.
 
     sequences
@@ -82,7 +82,7 @@ def scan_checkpoints(
     Returns
     -------
     tuple
-        Tuple of the form ``(outputs, updates)`` as in :func:`~aesara.scan`, but
+        Tuple of the form ``(outputs, updates)`` as in :func:`~pytensor.scan`, but
         with a small change: It only contain the output at each
         ``save_every_N`` step. The time steps that are not returned by
         this function will be recomputed during the gradient computation
@@ -90,7 +90,7 @@ def scan_checkpoints(
 
     See Also
     --------
-    :func:`~aesara.scan`: Looping in Aesara.
+    :func:`~pytensor.scan`: Looping in Aesara.
 
     """
     # Standardize the format of input arguments

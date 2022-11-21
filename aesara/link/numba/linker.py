@@ -2,12 +2,12 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-import aesara
-from aesara.link.basic import JITLinker
+import pytensor
+from pytensor.link.basic import JITLinker
 
 
 if TYPE_CHECKING:
-    from aesara.graph.basic import Variable
+    from pytensor.graph.basic import Variable
 
 
 class NumbaLinker(JITLinker):
@@ -15,14 +15,14 @@ class NumbaLinker(JITLinker):
 
     def output_filter(self, var: "Variable", out: Any) -> Any:
         if not isinstance(var, np.ndarray) and isinstance(
-            var.type, aesara.tensor.TensorType
+            var.type, pytensor.tensor.TensorType
         ):
             return np.asarray(out, dtype=var.type.dtype)
 
         return out
 
     def fgraph_convert(self, fgraph, **kwargs):
-        from aesara.link.numba.dispatch import numba_funcify
+        from pytensor.link.numba.dispatch import numba_funcify
 
         return numba_funcify(fgraph, **kwargs)
 
@@ -35,7 +35,7 @@ class NumbaLinker(JITLinker):
     def create_thunk_inputs(self, storage_map):
         from numpy.random import RandomState
 
-        from aesara.link.numba.dispatch import numba_typify
+        from pytensor.link.numba.dispatch import numba_typify
 
         thunk_inputs = []
         for n in self.fgraph.inputs:

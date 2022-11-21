@@ -3,9 +3,9 @@ from typing import Any, Generic, Optional, Text, Tuple, TypeVar, Union
 
 from typing_extensions import TypeAlias
 
-from aesara.graph import utils
-from aesara.graph.basic import Constant, Variable
-from aesara.graph.utils import MetaObject
+from pytensor.graph import utils
+from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.utils import MetaObject
 
 
 D = TypeVar("D")

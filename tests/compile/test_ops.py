@@ -2,9 +2,9 @@ import pickle
 
 import numpy as np
 
-from aesara import function
-from aesara.compile.ops import as_op
-from aesara.tensor.type import dmatrix, dvector
+from pytensor import function
+from pytensor.compile.ops import as_op
+from pytensor.tensor.type import dmatrix, dvector
 from tests import unittest_tools as utt
 
 

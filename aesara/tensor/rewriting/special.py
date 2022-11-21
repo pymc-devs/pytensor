@@ -1,14 +1,14 @@
-from aesara import scalar as aes
-from aesara.graph.rewriting.basic import copy_stack_trace, node_rewriter
-from aesara.tensor.elemwise import DimShuffle, Elemwise
-from aesara.tensor.math import Sum, exp
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.math import true_div
-from aesara.tensor.rewriting.basic import register_specialize
-from aesara.tensor.rewriting.math import local_mul_canonizer
-from aesara.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
-from aesara.tensor.subtensor import AdvancedIncSubtensor
-from aesara.tensor.type import values_eq_approx_remove_inf, values_eq_approx_remove_nan
+from pytensor import scalar as aes
+from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.math import Sum, exp
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import true_div
+from pytensor.tensor.rewriting.basic import register_specialize
+from pytensor.tensor.rewriting.math import local_mul_canonizer
+from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
+from pytensor.tensor.subtensor import AdvancedIncSubtensor
+from pytensor.tensor.type import values_eq_approx_remove_inf, values_eq_approx_remove_nan
 
 
 # This is not registered in stabilize, as it cause some crossentropy

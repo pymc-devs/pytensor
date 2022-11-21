@@ -1,9 +1,9 @@
-import aesara
-from aesara import tensor as at
-from aesara.gradient import DisconnectedType
-from aesara.graph.basic import Apply
-from aesara.graph.op import Op
-from aesara.graph.rewriting.basic import (
+import pytensor
+from pytensor import tensor as at
+from pytensor.gradient import DisconnectedType
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+from pytensor.graph.rewriting.basic import (
     WalkingGraphRewriter,
     copy_stack_trace,
     node_rewriter,
@@ -212,7 +212,7 @@ def conv3d(
     --------
     Someone made a script that shows how to swap the axes between
     both 3d convolution implementations in Aesara. See the last
-    `attachment <https://groups.google.com/d/msg/aesara-users/1S9_bZgHxVw/0cQR9a4riFUJ>`_
+    `attachment <https://groups.google.com/d/msg/pytensor-users/1S9_bZgHxVw/0cQR9a4riFUJ>`_
 
     """
 
@@ -244,7 +244,7 @@ def conv3d(
     if filters_shape is None:
         conv2d_filter_shape = None
 
-    out_4d = aesara.tensor.nnet.conv2d(
+    out_4d = pytensor.tensor.nnet.conv2d(
         signals.reshape(_signals_shape_4d),
         filters.reshape(_filters_shape_4d),
         input_shape=conv2d_signal_shape,
@@ -295,7 +295,7 @@ def conv3d(
             out_tmp_padded = at.zeros(
                 dtype=out_tmp.dtype, shape=(Ns, Ts + 2 * Tpad, Nf, Tf, Hout, Wout)
             )
-            out_tmp_padded = aesara.tensor.subtensor.set_subtensor(
+            out_tmp_padded = pytensor.tensor.subtensor.set_subtensor(
                 out_tmp_padded[:, Tpad : (Ts + Tpad), :, :, :, :], out_tmp
             )
             out_5d = diagonal_subtensor(out_tmp_padded, 1, 3).sum(axis=3)
@@ -317,7 +317,7 @@ def local_inplace_DiagonalSubtensor(fgraph, node):
     return False
 
 
-aesara.compile.optdb.register(
+pytensor.compile.optdb.register(
     "local_inplace_DiagonalSubtensor",
     WalkingGraphRewriter(
         local_inplace_DiagonalSubtensor,

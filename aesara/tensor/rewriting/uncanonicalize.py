@@ -31,14 +31,14 @@ supposed to be canonical.
 
 """
 
-from aesara import scalar as aes
-from aesara.graph.rewriting.basic import copy_stack_trace, node_rewriter
-from aesara.tensor.basic import Alloc, alloc, constant
-from aesara.tensor.elemwise import CAReduce, DimShuffle
-from aesara.tensor.math import Argmax, Max, MaxAndArgmax, Min, neg
-from aesara.tensor.rewriting.basic import register_uncanonicalize
-from aesara.tensor.shape import Reshape, reshape
-from aesara.tensor.subtensor import Subtensor
+from pytensor import scalar as aes
+from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
+from pytensor.tensor.basic import Alloc, alloc, constant
+from pytensor.tensor.elemwise import CAReduce, DimShuffle
+from pytensor.tensor.math import Argmax, Max, MaxAndArgmax, Min, neg
+from pytensor.tensor.rewriting.basic import register_uncanonicalize
+from pytensor.tensor.shape import Reshape, reshape
+from pytensor.tensor.subtensor import Subtensor
 
 
 @register_uncanonicalize

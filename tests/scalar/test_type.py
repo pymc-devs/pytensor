@@ -1,7 +1,7 @@
 import numpy as np
 
-from aesara.configdefaults import config
-from aesara.scalar.basic import (
+from pytensor.configdefaults import config
+from pytensor.scalar.basic import (
     IntDiv,
     ScalarType,
     TrueDiv,

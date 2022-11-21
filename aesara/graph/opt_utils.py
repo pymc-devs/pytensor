@@ -2,13 +2,13 @@ import warnings
 
 
 warnings.warn(
-    "The module `aesara.graph.opt_utils` is deprecated; use `aesara.graph.rewriting.utils` instead.",
+    "The module `pytensor.graph.opt_utils` is deprecated; use `pytensor.graph.rewriting.utils` instead.",
     DeprecationWarning,
     stacklevel=2,
 )
 
-from aesara.graph.rewriting.utils import *  # noqa: F401 E402 F403
-from aesara.graph.rewriting.utils import DEPRECATED_NAMES  # noqa: F401 E402 F403
+from pytensor.graph.rewriting.utils import *  # noqa: F401 E402 F403
+from pytensor.graph.rewriting.utils import DEPRECATED_NAMES  # noqa: F401 E402 F403
 
 
 def __getattr__(name):

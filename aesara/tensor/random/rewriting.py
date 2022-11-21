@@ -1,15 +1,15 @@
-from aesara.compile import optdb
-from aesara.configdefaults import config
-from aesara.graph.op import compute_test_value
-from aesara.graph.rewriting.basic import in2out, node_rewriter
-from aesara.tensor.basic import constant, get_vector_length
-from aesara.tensor.elemwise import DimShuffle
-from aesara.tensor.extra_ops import broadcast_to
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.random.op import RandomVariable
-from aesara.tensor.random.utils import broadcast_params
-from aesara.tensor.shape import Shape, Shape_i
-from aesara.tensor.subtensor import (
+from pytensor.compile import optdb
+from pytensor.configdefaults import config
+from pytensor.graph.op import compute_test_value
+from pytensor.graph.rewriting.basic import in2out, node_rewriter
+from pytensor.tensor.basic import constant, get_vector_length
+from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.extra_ops import broadcast_to
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.random.op import RandomVariable
+from pytensor.tensor.random.utils import broadcast_params
+from pytensor.tensor.shape import Shape, Shape_i
+from pytensor.tensor.subtensor import (
     AdvancedSubtensor,
     AdvancedSubtensor1,
     Subtensor,

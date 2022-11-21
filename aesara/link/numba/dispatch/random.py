@@ -8,18 +8,18 @@ from numba.core import cgutils
 from numba.extending import NativeValue, box, models, register_model, typeof_impl, unbox
 from numpy.random import RandomState
 
-import aesara.tensor.random.basic as aer
-from aesara.graph.basic import Apply
-from aesara.graph.op import Op
-from aesara.link.numba.dispatch import basic as numba_basic
-from aesara.link.numba.dispatch.basic import numba_funcify, numba_typify
-from aesara.link.utils import (
+import pytensor.tensor.random.basic as aer
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch.basic import numba_funcify, numba_typify
+from pytensor.link.utils import (
     compile_function_src,
     get_name_for_object,
     unique_name_generator,
 )
-from aesara.tensor.basic import get_vector_length
-from aesara.tensor.random.type import RandomStateType
+from pytensor.tensor.basic import get_vector_length
+from pytensor.tensor.random.type import RandomStateType
 
 
 class RandomStateNumbaType(types.Type):
@@ -103,7 +103,7 @@ def make_numba_random_fn(node, np_random_func):
 
     # Make a broadcast-capable version of the Numba supported scalar sampling
     # function
-    bcast_fn_name = f"aesara_random_{get_name_for_object(np_random_func)}"
+    bcast_fn_name = f"pytensor_random_{get_name_for_object(np_random_func)}"
 
     sized_fn_name = "sized_random_variable"
 
@@ -230,7 +230,7 @@ def create_numba_random_fn(
     TODO: This could/should be generalized for other simple function
     construction cases that need unique-ified symbol names.
     """
-    np_random_fn_name = f"aesara_random_{get_name_for_object(op.name)}"
+    np_random_fn_name = f"pytensor_random_{get_name_for_object(op.name)}"
 
     if global_env:
         np_global_env = global_env.copy()

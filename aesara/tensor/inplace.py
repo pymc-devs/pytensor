@@ -1,6 +1,6 @@
-from aesara import printing
-from aesara.printing import pprint
-from aesara.tensor.elemwise import DimShuffle, scalar_elemwise
+from pytensor import printing
+from pytensor.printing import pprint
+from pytensor.tensor.elemwise import DimShuffle, scalar_elemwise
 
 
 @scalar_elemwise

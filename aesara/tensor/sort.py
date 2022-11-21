@@ -1,14 +1,14 @@
 import numpy as np
 
-from aesara.gradient import grad_undefined
-from aesara.graph.basic import Apply, Constant
-from aesara.graph.op import Op
-from aesara.misc.safe_asarray import _asarray
-from aesara.tensor.basic import arange, as_tensor_variable, flatten, switch
-from aesara.tensor.math import eq, ge, mul
-from aesara.tensor.shape import shape
-from aesara.tensor.subtensor import set_subtensor
-from aesara.tensor.type import TensorType, integer_dtypes
+from pytensor.gradient import grad_undefined
+from pytensor.graph.basic import Apply, Constant
+from pytensor.graph.op import Op
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.tensor.basic import arange, as_tensor_variable, flatten, switch
+from pytensor.tensor.math import eq, ge, mul
+from pytensor.tensor.shape import shape
+from pytensor.tensor.subtensor import set_subtensor
+from pytensor.tensor.type import TensorType, integer_dtypes
 
 
 def _variable_is_none(var):

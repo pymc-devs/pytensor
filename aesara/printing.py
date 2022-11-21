@@ -15,14 +15,14 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, TextIO, Tuple,
 import numpy as np
 from typing_extensions import Literal
 
-from aesara.compile import Function, SharedVariable
-from aesara.compile.io import In, Out
-from aesara.compile.profiling import ProfileStats
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Constant, Variable, graph_inputs, io_toposort
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import HasInnerGraph, Op, StorageMapType
-from aesara.graph.utils import Scratchpad
+from pytensor.compile import Function, SharedVariable
+from pytensor.compile.io import In, Out
+from pytensor.compile.profiling import ProfileStats
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Constant, Variable, graph_inputs, io_toposort
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import HasInnerGraph, Op, StorageMapType
+from pytensor.graph.utils import Scratchpad
 
 
 IDTypesType = Literal["id", "int", "CHAR", "auto", ""]
@@ -60,7 +60,7 @@ except ImportError:
         pydot_imported_msg += str(e.args)
 
 
-_logger = logging.getLogger("aesara.printing")
+_logger = logging.getLogger("pytensor.printing")
 VALID_ASSOC = {"left", "right", "either"}
 
 
@@ -1198,7 +1198,7 @@ def pydotprint(
     print_output_file=True,
     return_image=False,
 ):
-    """Print to a file the graph of a compiled aesara function's ops. Supports
+    """Print to a file the graph of a compiled pytensor function's ops. Supports
     all pydot output formats, including png and svg.
 
     :param fct: a compiled Aesara function, a Variable, an Apply or
@@ -1232,10 +1232,10 @@ def pydotprint(
 
         .. code-block:: python
 
-            import aesara
-            v = aesara.tensor.vector()
+            import pytensor
+            v = pytensor.tensor.vector()
             from IPython.display import SVG
-            SVG(aesara.printing.pydotprint(v*2, return_image=True,
+            SVG(pytensor.printing.pydotprint(v*2, return_image=True,
                                            format='svg'))
 
     In the graph, ellipses are Apply Nodes (the execution of an op)
@@ -1274,14 +1274,14 @@ def pydotprint(
         scan separately after the top level debugprint output.
 
     """
-    from aesara.scan.op import Scan
+    from pytensor.scan.op import Scan
 
     if colorCodes is None:
         colorCodes = default_colorCodes
 
     if outfile is None:
         outfile = os.path.join(
-            config.compiledir, "aesara.pydotprint." + config.device + "." + format
+            config.compiledir, "pytensor.pydotprint." + config.device + "." + format
         )
 
     if isinstance(fct, Function):
@@ -1820,7 +1820,7 @@ def var_descriptor(obj, _prev_obs=None, _tag_generator=None):
 
 def position_independent_str(obj):
     if isinstance(obj, Variable):
-        rval = "aesara_var"
+        rval = "pytensor_var"
         rval += "{type=" + str(obj.type) + "}"
     else:
         raise NotImplementedError()
@@ -1864,7 +1864,7 @@ def get_node_by_id(
     The `Apply`/`Variable` matching `target_var_id` or ``None``.
 
     """
-    from aesara.printing import debugprint
+    from pytensor.printing import debugprint
 
     used_ids: Dict[Union[Literal["output"], Variable, Apply], str] = {}
 

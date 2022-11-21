@@ -6,35 +6,35 @@ import numpy as np
 import numpy.core.numeric
 from numpy.core.multiarray import normalize_axis_index
 
-import aesara
-import aesara.scalar.basic as aes
-from aesara.gradient import (
+import pytensor
+import pytensor.scalar.basic as aes
+from pytensor.gradient import (
     DisconnectedType,
     _float_zeros_like,
     disconnected_type,
     grad_undefined,
 )
-from aesara.graph.basic import Apply, Constant, Variable, equal_computations
-from aesara.graph.op import Op
-from aesara.link.c.op import COp
-from aesara.link.c.params_type import ParamsType
-from aesara.link.c.type import EnumList, Generic
-from aesara.misc.safe_asarray import _asarray
-from aesara.raise_op import Assert
-from aesara.scalar import int32 as int_t
-from aesara.scalar import upcast
-from aesara.scalar.basic import Composite
-from aesara.tensor import basic as at
-from aesara.tensor import get_vector_length
-from aesara.tensor.exceptions import NotScalarConstantError
-from aesara.tensor.math import abs as at_abs
-from aesara.tensor.math import all as at_all
-from aesara.tensor.math import ge, lt, maximum, minimum, prod
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
-from aesara.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes, vector
-from aesara.tensor.var import TensorVariable
-from aesara.utils import LOCAL_BITWIDTH, PYTHON_INT_BITWIDTH
+from pytensor.graph.basic import Apply, Constant, Variable, equal_computations
+from pytensor.graph.op import Op
+from pytensor.link.c.op import COp
+from pytensor.link.c.params_type import ParamsType
+from pytensor.link.c.type import EnumList, Generic
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.raise_op import Assert
+from pytensor.scalar import int32 as int_t
+from pytensor.scalar import upcast
+from pytensor.scalar.basic import Composite
+from pytensor.tensor import basic as at
+from pytensor.tensor import get_vector_length
+from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.math import abs as at_abs
+from pytensor.tensor.math import all as at_all
+from pytensor.tensor.math import ge, lt, maximum, minimum, prod
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
+from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes, vector
+from pytensor.tensor.var import TensorVariable
+from pytensor.utils import LOCAL_BITWIDTH, PYTHON_INT_BITWIDTH
 
 
 class CpuContiguous(COp):
@@ -261,8 +261,8 @@ def searchsorted(x, v, side="left", sorter=None):
 
     Examples
     --------
-    >>> from aesara import tensor as at
-    >>> from aesara.tensor import extra_ops
+    >>> from pytensor import tensor as at
+    >>> from pytensor.tensor import extra_ops
     >>> x = at.dvector()
     >>> idx = x.searchsorted(3)
     >>> idx.eval({x: [1,2,3,4,5]})
@@ -1011,7 +1011,7 @@ class FillDiagonalOffset(Op):
         elif offset.dtype not in integer_dtypes:
             raise TypeError(
                 f"{self.__class__.__name__}: type of third parameter must be as integer"
-                " use aesara.tensor.cast( input, 'int32/int64')"
+                " use pytensor.tensor.cast( input, 'int32/int64')"
             )
 
         return Apply(self, [a, val, offset], [a.type()])
@@ -1136,7 +1136,7 @@ def to_one_hot(y, nb_class, dtype=None):
     nb_class : int
         The number of class in `y`.
     dtype : data-type
-        The dtype of the returned matrix. Default ``aesara.config.floatX``.
+        The dtype of the returned matrix. Default ``pytensor.config.floatX``.
 
     Returns
     -------
@@ -1157,15 +1157,15 @@ class Unique(Op):
     Examples
     --------
     >>> import numpy as np
-    >>> import aesara
+    >>> import pytensor
 
-    >>> x = aesara.tensor.vector()
-    >>> f = aesara.function([x], Unique(True, True, False)(x))
+    >>> x = pytensor.tensor.vector()
+    >>> f = pytensor.function([x], Unique(True, True, False)(x))
     >>> f([1, 2., 3, 4, 3, 2, 1.])
     [array([ 1.,  2.,  3.,  4.]), array([0, 1, 2, 3]), array([0, 1, 2, 3, 2, 1, 0])]
 
-    >>> y = aesara.tensor.matrix()
-    >>> g = aesara.function([y], Unique(True, True, False)(y))
+    >>> y = pytensor.tensor.matrix()
+    >>> g = pytensor.function([y], Unique(True, True, False)(y))
     >>> g([[1, 1, 1.0], (2, 3, 3.0)])
     [array([ 1.,  2.,  3.]), array([0, 3, 4]), array([0, 0, 0, 1, 2, 2])]
 
@@ -1480,7 +1480,7 @@ def broadcast_shape_iter(
         ``1``.
 
     """
-    one_at = aesara.scalar.ScalarConstant(aesara.scalar.int64, 1)
+    one_at = pytensor.scalar.ScalarConstant(pytensor.scalar.int64, 1)
 
     if arrays_are_shapes:
         max_dims = max(len(a) for a in arrays)
@@ -1539,8 +1539,8 @@ def broadcast_shape_iter(
 
                 assert const_nb_shape != 1
 
-                const_nt_shape_var = aesara.scalar.ScalarConstant(
-                    aesara.scalar.int64, const_nb_shape
+                const_nt_shape_var = pytensor.scalar.ScalarConstant(
+                    pytensor.scalar.int64, const_nb_shape
                 )
 
                 if len(nonconst_nb_shapes) > 0:
@@ -1740,7 +1740,7 @@ broadcast_to_ = BroadcastTo()
 
 
 def geomspace(start, end, steps, base=10.0):
-    from aesara.tensor.math import log
+    from pytensor.tensor.math import log
 
     start = at.as_tensor_variable(start)
     end = at.as_tensor_variable(end)

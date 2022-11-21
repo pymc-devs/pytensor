@@ -31,12 +31,12 @@ from setuptools._distutils.sysconfig import (
 from typing_extensions import Protocol
 
 # we will abuse the lockfile mechanism when reading and writing the registry
-from aesara.compile.compilelock import lock_ctx
-from aesara.configdefaults import config, gcc_version_str
-from aesara.configparser import BoolParam, StrParam
-from aesara.graph.op import Op
-from aesara.link.c.exceptions import CompileError, MissingGXX
-from aesara.utils import (
+from pytensor.compile.compilelock import lock_ctx
+from pytensor.configdefaults import config, gcc_version_str
+from pytensor.configparser import BoolParam, StrParam
+from pytensor.graph.op import Op
+from pytensor.link.c.exceptions import CompileError, MissingGXX
+from pytensor.utils import (
     LOCAL_BITWIDTH,
     flatten,
     hash_from_code,
@@ -47,7 +47,7 @@ from aesara.utils import (
 
 
 if TYPE_CHECKING:
-    from aesara.link.c.basic import CLinker
+    from pytensor.link.c.basic import CLinker
 
 
 class StdLibDirsAndLibsType(Protocol):
@@ -70,7 +70,7 @@ def is_GCCLLVMType(fn: Callable[[], Optional[bool]]) -> GCCLLVMType:
     return cast(GCCLLVMType, fn)
 
 
-_logger = logging.getLogger("aesara.link.c.cmodule")
+_logger = logging.getLogger("pytensor.link.c.cmodule")
 
 METH_VARARGS = "METH_VARARGS"
 METH_NOARGS = "METH_NOARGS"
@@ -160,7 +160,7 @@ class DynamicModule:
 
         self.support_code = []
         self.functions = []
-        self.includes = ["<Python.h>", "<iostream>", '"aesara_mod_helper.h"']
+        self.includes = ["<Python.h>", "<iostream>", '"pytensor_mod_helper.h"']
         self.init_blocks = []
 
     def print_methoddef(self, stream):
@@ -2075,7 +2075,7 @@ class GCC_compiler(Compiler):
             and "icpc" not in config.cxx
         ):
             warnings.warn(
-                "`aesara.config.cxx` is not an identifiable `g++` compiler. "
+                "`pytensor.config.cxx` is not an identifiable `g++` compiler. "
                 "Aesara will disable compiler optimizations specific to `g++`. "
                 "At worst, this could cause slow downs.\n"
                 "Those parameters can be added manually via the `cxxflags` setting."
@@ -2598,7 +2598,7 @@ class GCC_compiler(Compiler):
 
         if status:
             tf = tempfile.NamedTemporaryFile(
-                mode="w", prefix="aesara_compilation_error_", delete=False
+                mode="w", prefix="pytensor_compilation_error_", delete=False
             )
             # gcc put its messages to stderr, so we add ours now
             tf.write("===============================\n")

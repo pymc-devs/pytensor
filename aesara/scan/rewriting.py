@@ -8,13 +8,13 @@ from typing import Dict, List, Optional, Tuple, cast
 
 import numpy as np
 
-import aesara
-from aesara import scalar as aes
-from aesara import tensor as at
-from aesara.compile import optdb
-from aesara.compile.function.types import deep_copy_op
-from aesara.configdefaults import config
-from aesara.graph.basic import (
+import pytensor
+from pytensor import scalar as aes
+from pytensor import tensor as at
+from pytensor.compile import optdb
+from pytensor.compile.function.types import deep_copy_op
+from pytensor.configdefaults import config
+from pytensor.graph.basic import (
     Apply,
     Constant,
     Variable,
@@ -24,16 +24,16 @@ from aesara.graph.basic import (
     io_toposort,
     is_in_ancestors,
 )
-from aesara.graph.destroyhandler import DestroyHandler
-from aesara.graph.features import ReplaceValidate
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import compute_test_value
-from aesara.graph.rewriting.basic import GraphRewriter, in2out, node_rewriter
-from aesara.graph.rewriting.db import EquilibriumDB, SequenceDB
-from aesara.graph.type import HasShape
-from aesara.graph.utils import InconsistencyError
-from aesara.scan.op import Scan, ScanInfo
-from aesara.scan.utils import (
+from pytensor.graph.destroyhandler import DestroyHandler
+from pytensor.graph.features import ReplaceValidate
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import compute_test_value
+from pytensor.graph.rewriting.basic import GraphRewriter, in2out, node_rewriter
+from pytensor.graph.rewriting.db import EquilibriumDB, SequenceDB
+from pytensor.graph.type import HasShape
+from pytensor.graph.utils import InconsistencyError
+from pytensor.scan.op import Scan, ScanInfo
+from pytensor.scan.utils import (
     ScanArgs,
     compress_outs,
     expand_empty,
@@ -41,15 +41,15 @@ from aesara.scan.utils import (
     safe_new,
     scan_can_remove_outs,
 )
-from aesara.tensor.basic import Alloc, AllocEmpty, get_scalar_constant_value
-from aesara.tensor.elemwise import DimShuffle, Elemwise
-from aesara.tensor.exceptions import NotScalarConstantError
-from aesara.tensor.math import Dot, dot, maximum, minimum
-from aesara.tensor.rewriting.basic import constant_folding, local_useless_switch
-from aesara.tensor.rewriting.elemwise import local_upcast_elemwise_constant_inputs
-from aesara.tensor.rewriting.math import local_abs_merge, local_mul_switch_sink
-from aesara.tensor.shape import shape
-from aesara.tensor.subtensor import (
+from pytensor.tensor.basic import Alloc, AllocEmpty, get_scalar_constant_value
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.math import Dot, dot, maximum, minimum
+from pytensor.tensor.rewriting.basic import constant_folding, local_useless_switch
+from pytensor.tensor.rewriting.elemwise import local_upcast_elemwise_constant_inputs
+from pytensor.tensor.rewriting.math import local_abs_merge, local_mul_switch_sink
+from pytensor.tensor.shape import shape
+from pytensor.tensor.subtensor import (
     IncSubtensor,
     Subtensor,
     get_canonical_form_slice,
@@ -57,7 +57,7 @@ from aesara.tensor.subtensor import (
     get_slice_elements,
     set_subtensor,
 )
-from aesara.tensor.var import TensorConstant, get_unique_value
+from pytensor.tensor.var import TensorConstant, get_unique_value
 
 
 list_opt_slice = [
@@ -258,8 +258,8 @@ def push_out_non_seq_scan(fgraph, node):
             # We can (supposedly) do this because the assumption is that a
             # `ViewOp` or `DeepCopyOp` will be just at the end of the
             # function and not somewhere in the middle
-            and not isinstance(nd.op, aesara.compile.ViewOp)
-            and not isinstance(nd.op, aesara.compile.DeepCopyOp)
+            and not isinstance(nd.op, pytensor.compile.ViewOp)
+            and not isinstance(nd.op, pytensor.compile.DeepCopyOp)
         ):
             # We have a candidate node to remove from the inner-graph
 

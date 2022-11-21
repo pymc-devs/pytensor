@@ -10,9 +10,9 @@ import textwrap
 import numpy as np
 from setuptools._distutils.spawn import find_executable
 
-import aesara
-import aesara.configparser
-from aesara.configparser import (
+import pytensor
+import pytensor.configparser
+from pytensor.configparser import (
     BoolParam,
     ConfigParam,
     DeviceParam,
@@ -21,7 +21,7 @@ from aesara.configparser import (
     IntParam,
     StrParam,
 )
-from aesara.utils import (
+from pytensor.utils import (
     LOCAL_BITWIDTH,
     PYTHON_INT_BITWIDTH,
     call_subprocess_Popen,
@@ -30,7 +30,7 @@ from aesara.utils import (
 )
 
 
-_logger = logging.getLogger("aesara.configdefaults")
+_logger = logging.getLogger("pytensor.configdefaults")
 
 
 def get_cuda_root():
@@ -111,14 +111,14 @@ def _filter_mode(val):
     if val in str_options:
         return val
     # This can be executed before Aesara is completely imported, so
-    # aesara.compile.mode.Mode is not always available.
-    # Instead of isinstance(val, aesara.compile.mode.Mode),
+    # pytensor.compile.mode.Mode is not always available.
+    # Instead of isinstance(val, pytensor.compile.mode.Mode),
     # we can inspect the __mro__ of the object!
     for type_ in type(val).__mro__:
-        if "aesara.compile.mode.Mode" in str(type_):
+        if "pytensor.compile.mode.Mode" in str(type_):
             return val
     raise ValueError(
-        f"Expected one of {str_options}, or an instance of aesara.compile.mode.Mode. "
+        f"Expected one of {str_options}, or an instance of pytensor.compile.mode.Mode. "
         f"Instead got: {val}."
     )
 
@@ -461,7 +461,7 @@ def add_compile_configvars():
         # Keep the default linker the same as the one for the mode FAST_RUN
         config.add(
             "linker",
-            "Default linker used if the aesara flags mode is Mode",
+            "Default linker used if the pytensor flags mode is Mode",
             EnumStr(
                 "cvm", ["c|py", "py", "c", "c|py_nogc", "vm", "vm_nogc", "cvm_nogc"]
             ),
@@ -472,7 +472,7 @@ def add_compile_configvars():
         # linker should default to python only.
         config.add(
             "linker",
-            "Default linker used if the aesara flags mode is Mode",
+            "Default linker used if the pytensor flags mode is Mode",
             EnumStr("vm", ["py", "vm_nogc"]),
             in_c_key=False,
         )
@@ -535,7 +535,7 @@ def add_compile_configvars():
     config.add(
         "on_unused_input",
         "What to do if a variable in the 'inputs' list of "
-        " aesara.function() is not used in the graph.",
+        " pytensor.function() is not used in the graph.",
         EnumStr("raise", ["warn", "ignore"]),
         in_c_key=False,
     )
@@ -638,7 +638,7 @@ def add_tensor_configvars():
     # changed at runtime.
     config.add(
         "tensor__cmp_sloppy",
-        "Relax aesara.tensor.math._allclose (0) not at all, (1) a bit, (2) more",
+        "Relax pytensor.tensor.math._allclose (0) not at all, (1) a bit, (2) more",
         IntParam(0, _is_valid_cmp_sloppy, mutable=False),
         in_c_key=False,
     )
@@ -676,9 +676,9 @@ def add_traceback_configvars():
         "The number of stack to trace. -1 mean all.",
         # We default to a number to be able to know where v1 + v2 is created in the
         # user script. The bigger this number is, the more run time it takes.
-        # We need to default to 8 to support aesara.tensor.type.tensor(...).
-        # import aesara, numpy
-        # X = aesara.tensor.matrix()
+        # We need to default to 8 to support pytensor.tensor.type.tensor(...).
+        # import pytensor, numpy
+        # X = pytensor.tensor.matrix()
         # y = X.reshape((5,3,1))
         # assert y.tag.trace
         IntParam(8),
@@ -1031,7 +1031,7 @@ def add_multiprocessing_configvars():
                 " We disable openmp by default. To remove this"
                 " warning, set the environment variable"
                 " OMP_NUM_THREADS to the number of threads you"
-                " want aesara to use."
+                " want pytensor to use."
             )
         default_openmp = count > 1
 
@@ -1045,7 +1045,7 @@ def add_multiprocessing_configvars():
         "Allow (or not) parallel computation on the CPU with OpenMP. "
         "This is the default value used when creating an Op that "
         "supports OpenMP parallelization. It is preferable to define it "
-        "via the Aesara configuration file ~/.aesararc or with the "
+        "via the Aesara configuration file ~/.pytensorrc or with the "
         "environment variable AESARA_FLAGS. Parallelization is only "
         "done for some operations that implement it, and even for "
         "operations that implement parallelism, each operation is free "
@@ -1285,7 +1285,7 @@ def _filter_compiledir(path):
         try:
             os.makedirs(path, 0o770)  # read-write-execute for user and group
         except OSError as e:
-            # Maybe another parallel execution of aesara was trying to create
+            # Maybe another parallel execution of pytensor was trying to create
             # the same directory at the same time.
             if e.errno != errno.EEXIST:
                 raise ValueError(
@@ -1335,7 +1335,7 @@ _compiledir_format_dict = {
     "python_version": platform.python_version(),
     "python_bitwidth": LOCAL_BITWIDTH,
     "python_int_bitwidth": PYTHON_INT_BITWIDTH,
-    "aesara_version": aesara.__version__,
+    "pytensor_version": pytensor.__version__,
     "numpy_version": np.__version__,
     "gxx_version": "xxx",
     "hostname": socket.gethostname(),
@@ -1378,7 +1378,7 @@ def add_caching_dir_configvars():
     if sys.platform == "win32" and os.getenv("LOCALAPPDATA") is not None:
         default_base_compiledir = os.path.join(os.getenv("LOCALAPPDATA"), "Aesara")
     else:
-        default_base_compiledir = os.path.join(_get_home_dir(), ".aesara")
+        default_base_compiledir = os.path.join(_get_home_dir(), ".pytensor")
 
     config.add(
         "base_compiledir",
@@ -1447,9 +1447,9 @@ SUPPORTED_DNN_CONV_PRECISION = (
 # where it is also populated with settings.  But for a transition period, it
 # remains as `configparser._config`, while everybody accessing it through
 # `configparser.config` is flooded with deprecation warnings. These warnings
-# instruct one to use `aesara.config`, which is an alias for
-# `aesara.configdefaults.config`.
-config = aesara.configparser._config
+# instruct one to use `pytensor.config`, which is an alias for
+# `pytensor.configdefaults.config`.
+config = pytensor.configparser._config
 
 # The functions below register config variables into the config instance above.
 add_basic_configvars()

@@ -1,8 +1,8 @@
 import jax.numpy as jnp
 
-from aesara.graph import Constant
-from aesara.link.jax.dispatch.basic import jax_funcify
-from aesara.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape, Unbroadcast
+from pytensor.graph import Constant
+from pytensor.link.jax.dispatch.basic import jax_funcify
+from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape, Unbroadcast
 
 
 @jax_funcify.register(Reshape)

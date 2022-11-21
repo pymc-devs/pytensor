@@ -5,9 +5,9 @@ from kanren import run
 from unification import var
 from unification.variable import Var
 
-from aesara.graph.basic import Apply, Variable
-from aesara.graph.rewriting.basic import NodeRewriter
-from aesara.graph.rewriting.unify import eval_if_etuple
+from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.rewriting.basic import NodeRewriter
+from pytensor.graph.rewriting.unify import eval_if_etuple
 
 
 class KanrenRelationSub(NodeRewriter):
@@ -23,8 +23,8 @@ class KanrenRelationSub(NodeRewriter):
 
         from kanren import eq, conso, var
 
-        import aesara.tensor as at
-        from aesara.graph.rewriting.kanren import KanrenRelationSub
+        import pytensor.tensor as at
+        from pytensor.graph.rewriting.kanren import KanrenRelationSub
 
 
         def relation(in_lv, out_lv):

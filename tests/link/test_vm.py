@@ -3,22 +3,22 @@ import time
 import numpy as np
 import pytest
 
-from aesara.compile.function import function
-from aesara.compile.io import In
-from aesara.compile.mode import Mode, get_mode
-from aesara.compile.sharedvalue import shared
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import Op
-from aesara.ifelse import ifelse
-from aesara.link.c.basic import OpWiseCLinker
-from aesara.link.c.exceptions import MissingGXX
-from aesara.link.utils import map_storage
-from aesara.link.vm import VM, Loop, Stack, VMLinker
-from aesara.tensor.math import cosh, tanh
-from aesara.tensor.type import lscalar, scalar, scalars, vector, vectors
-from aesara.tensor.var import TensorConstant
+from pytensor.compile.function import function
+from pytensor.compile.io import In
+from pytensor.compile.mode import Mode, get_mode
+from pytensor.compile.sharedvalue import shared
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op
+from pytensor.ifelse import ifelse
+from pytensor.link.c.basic import OpWiseCLinker
+from pytensor.link.c.exceptions import MissingGXX
+from pytensor.link.utils import map_storage
+from pytensor.link.vm import VM, Loop, Stack, VMLinker
+from pytensor.tensor.math import cosh, tanh
+from pytensor.tensor.type import lscalar, scalar, scalars, vector, vectors
+from pytensor.tensor.var import TensorConstant
 from tests import unittest_tools as utt
 
 
@@ -213,7 +213,7 @@ def test_partial_function(linker):
     )
 
     if linker == "cvm":
-        from aesara.link.c.cvm import CVM
+        from pytensor.link.c.cvm import CVM
 
         assert isinstance(f.vm, CVM)
     else:
@@ -375,7 +375,7 @@ def test_no_recycling():
 )
 def test_VMLinker_make_vm_cvm():
     # We don't want this at module level, since CXX might not be present
-    from aesara.link.c.cvm import CVM
+    from pytensor.link.c.cvm import CVM
 
     a = scalar()
     linker = VMLinker(allow_gc=False, use_cloop=True)
@@ -392,17 +392,17 @@ def test_VMLinker_make_vm_no_cvm():
 
         # Make sure that GXX isn't present
         with pytest.raises(MissingGXX):
-            import aesara.link.c.cvm
+            import pytensor.link.c.cvm
 
-            reload(aesara.link.c.cvm)
+            reload(pytensor.link.c.cvm)
 
         # Make sure that `cvm` module is missing
-        with patch.dict("sys.modules", {"aesara.link.c.cvm": None}):
+        with patch.dict("sys.modules", {"pytensor.link.c.cvm": None}):
             a = scalar()
             linker = VMLinker(allow_gc=False, use_cloop=True)
 
             with pytest.raises(ModuleNotFoundError):
-                import aesara.link.c.cvm
+                import pytensor.link.c.cvm
 
             f = function([a], a, mode=Mode(optimizer=None, linker=linker))
             assert isinstance(f.vm, Loop)

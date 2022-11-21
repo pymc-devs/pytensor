@@ -4,12 +4,12 @@ from typing import List, Optional, Union
 import numpy as np
 import scipy.stats as stats
 
-import aesara
-from aesara.tensor.basic import as_tensor_variable
-from aesara.tensor.random.op import RandomVariable, default_supp_shape_from_params
-from aesara.tensor.random.type import RandomGeneratorType, RandomStateType
-from aesara.tensor.random.utils import broadcast_params
-from aesara.tensor.random.var import (
+import pytensor
+from pytensor.tensor.basic import as_tensor_variable
+from pytensor.tensor.random.op import RandomVariable, default_supp_shape_from_params
+from pytensor.tensor.random.type import RandomGeneratorType, RandomStateType
+from pytensor.tensor.random.utils import broadcast_params
+from pytensor.tensor.random.var import (
     RandomGeneratorSharedVariable,
     RandomStateSharedVariable,
 )
@@ -878,7 +878,7 @@ class MvNormalRV(RandomVariable):
             is specified, a single `N`-dimensional sample is returned.
 
         """
-        dtype = aesara.config.floatX if self.dtype == "floatX" else self.dtype
+        dtype = pytensor.config.floatX if self.dtype == "floatX" else self.dtype
 
         if mean is None:
             mean = np.array([0.0], dtype=dtype)
@@ -1992,7 +1992,7 @@ class ChoiceRV(RandomVariable):
     def _infer_shape(self, size, dist_params, param_shapes=None):
         (a, p, _) = dist_params
 
-        if isinstance(p.type, aesara.tensor.type_other.NoneTypeT):
+        if isinstance(p.type, pytensor.tensor.type_other.NoneTypeT):
             shape = super()._infer_shape(size, (a,), param_shapes)
         else:
             shape = super()._infer_shape(size, (a, p), param_shapes)
@@ -2011,7 +2011,7 @@ class ChoiceRV(RandomVariable):
         ----------
         a
             The array from which to randomly sample an element. If an int,
-            a sample is generated from `aesara.tensor.arange(a)`.
+            a sample is generated from `pytensor.tensor.arange(a)`.
         size
             Sample shape. If the given size is `(m, n, k)`, then `m * n *
             k` independent samples are returned. Default is `None`, in
@@ -2025,13 +2025,13 @@ class ChoiceRV(RandomVariable):
         a = as_tensor_variable(a)
 
         if a.ndim == 0:
-            a = aesara.tensor.arange(a)
+            a = pytensor.tensor.arange(a)
 
         if p is None:
-            p = aesara.tensor.type_other.NoneConst
+            p = pytensor.tensor.type_other.NoneConst
 
         if isinstance(replace, bool):
-            replace = aesara.tensor.constant(np.array(replace))
+            replace = pytensor.tensor.constant(np.array(replace))
 
         return super().__call__(a, p, replace, size=size, dtype=a.dtype, **kwargs)
 

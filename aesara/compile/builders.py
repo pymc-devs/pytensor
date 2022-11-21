@@ -4,14 +4,14 @@ from copy import copy
 from functools import partial
 from typing import Dict, List, Optional, Sequence, Tuple, cast
 
-import aesara.tensor as at
-from aesara import function
-from aesara.compile.function.pfunc import rebuild_collect_shared
-from aesara.compile.mode import optdb
-from aesara.compile.sharedvalue import SharedVariable
-from aesara.configdefaults import config
-from aesara.gradient import DisconnectedType, Rop, grad
-from aesara.graph.basic import (
+import pytensor.tensor as at
+from pytensor import function
+from pytensor.compile.function.pfunc import rebuild_collect_shared
+from pytensor.compile.mode import optdb
+from pytensor.compile.sharedvalue import SharedVariable
+from pytensor.configdefaults import config
+from pytensor.gradient import DisconnectedType, Rop, grad
+from pytensor.graph.basic import (
     Apply,
     Constant,
     NominalVariable,
@@ -20,12 +20,12 @@ from aesara.graph.basic import (
     graph_inputs,
     io_connection_pattern,
 )
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.null_type import NullType
-from aesara.graph.op import HasInnerGraph, Op
-from aesara.graph.rewriting.basic import in2out, node_rewriter
-from aesara.graph.utils import MissingInputError
-from aesara.tensor.rewriting.shape import ShapeFeature
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.null_type import NullType
+from pytensor.graph.op import HasInnerGraph, Op
+from pytensor.graph.rewriting.basic import in2out, node_rewriter
+from pytensor.graph.utils import MissingInputError
+from pytensor.tensor.rewriting.shape import ShapeFeature
 
 
 def infer_shape(outs, inputs, input_shapes):
@@ -159,7 +159,7 @@ def construct_nominal_fgraph(
 class OpFromGraph(Op, HasInnerGraph):
     r"""
     This creates an `Op` from inputs and outputs lists of variables.
-    The signature is similar to :func:`aesara.function <aesara.function>`
+    The signature is similar to :func:`pytensor.function <pytensor.function>`
     and the resulting `Op`'s perform will do the same operation as::
 
         orig_function(inputs, outputs, **kwargs)
@@ -204,12 +204,12 @@ class OpFromGraph(Op, HasInnerGraph):
 
     .. code-block:: python
 
-        from aesara import function, tensor as at
-        from aesara.compile.builders import OpFromGraph
+        from pytensor import function, tensor as at
+        from pytensor.compile.builders import OpFromGraph
         x, y, z = at.scalars('xyz')
         e = x + y * z
         op = OpFromGraph([x, y, z], [e])
-        # op behaves like a normal aesara op
+        # op behaves like a normal pytensor op
         e2 = op(x, y, z) + op(z, y, x)
         fn = function([x, y, z], [e2])
 
@@ -218,15 +218,15 @@ class OpFromGraph(Op, HasInnerGraph):
     .. code-block:: python
 
         import numpy as np
-        import aesara
-        from aesara import config, function, tensor as at
-        from aesara.compile.builders import OpFromGraph
+        import pytensor
+        from pytensor import config, function, tensor as at
+        from pytensor.compile.builders import OpFromGraph
 
         x, y, z = at.scalars('xyz')
-        s = aesara.shared(np.random.random((2, 2)).astype(config.floatX))
+        s = pytensor.shared(np.random.random((2, 2)).astype(config.floatX))
         e = x + y * z + s
         op = OpFromGraph([x, y, z], [e])
-        # op behaves like a normal aesara op
+        # op behaves like a normal pytensor op
         e2 = op(x, y, z) + op(z, y, x)
         fn = function([x, y, z], [e2])
 
@@ -234,8 +234,8 @@ class OpFromGraph(Op, HasInnerGraph):
 
     .. code-block:: python
 
-        from aesara import function, tensor as at, grad
-        from aesara.compile.builders import OpFromGraph
+        from pytensor import function, tensor as at, grad
+        from pytensor.compile.builders import OpFromGraph
 
         x, y, z = at.scalars('xyz')
         e = x + y * z
@@ -392,7 +392,7 @@ class OpFromGraph(Op, HasInnerGraph):
 
             ``list``:
             Each :class:`OpFromGraph`/callable must return a single
-            :class:`Variable <aesara.graph.basic.Variable>`. Each list element
+            :class:`Variable <pytensor.graph.basic.Variable>`. Each list element
             corresponds to a specific output of :meth:`Op.R_op`, length of list
             must be equal to number of outputs.  connection_pattern If not
             ``None``, this will be used as the connection_pattern for this
@@ -400,7 +400,7 @@ class OpFromGraph(Op, HasInnerGraph):
         name
             A name for debugging purposes.
         kwargs
-            Check :func:`aesara.function` for more arguments, only works when not
+            Check :func:`pytensor.function` for more arguments, only works when not
             inline.
         """
 
@@ -907,7 +907,7 @@ class OpFromGraph(Op, HasInnerGraph):
         # Clone the output shape so that shape are computed from outer inputs.
         # Note:
         # Here we could do it more simply like:
-        # `ret = [aesara.clone_replace(shp, replace=repl) for shp in out_shp]`
+        # `ret = [pytensor.clone_replace(shp, replace=repl) for shp in out_shp]`
         # But doing it multiple time could duplicate common subgraph between
         # each shape call. Aesara optimizer will clean this up later, but this
         # will make extra work for the optimizer.

@@ -1,30 +1,30 @@
 import numpy as np
 import pytest
 
-import aesara
-import aesara.scalar as aes
-import aesara.tensor as at
-from aesara import shared
-from aesara.compile.function import function
-from aesara.compile.mode import Mode, get_default_mode, get_mode
-from aesara.compile.ops import DeepCopyOp
-from aesara.configdefaults import config
-from aesara.graph.basic import Constant, Variable, ancestors
-from aesara.graph.rewriting.basic import check_stack_trace
-from aesara.graph.rewriting.db import RewriteDatabaseQuery
-from aesara.graph.rewriting.utils import rewrite_graph
-from aesara.graph.type import Type
-from aesara.raise_op import Assert
-from aesara.tensor import inplace
-from aesara.tensor.basic import Alloc, MakeVector, _convert_to_int8, make_vector
-from aesara.tensor.elemwise import DimShuffle, Elemwise
-from aesara.tensor.math import Dot, add, dot, exp, sqr
-from aesara.tensor.rewriting.subtensor import (
+import pytensor
+import pytensor.scalar as aes
+import pytensor.tensor as at
+from pytensor import shared
+from pytensor.compile.function import function
+from pytensor.compile.mode import Mode, get_default_mode, get_mode
+from pytensor.compile.ops import DeepCopyOp
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Constant, Variable, ancestors
+from pytensor.graph.rewriting.basic import check_stack_trace
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.graph.type import Type
+from pytensor.raise_op import Assert
+from pytensor.tensor import inplace
+from pytensor.tensor.basic import Alloc, MakeVector, _convert_to_int8, make_vector
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.math import Dot, add, dot, exp, sqr
+from pytensor.tensor.rewriting.subtensor import (
     local_replace_AdvancedSubtensor,
     local_subtensor_shape_constant,
 )
-from aesara.tensor.shape import SpecifyShape, Unbroadcast, _shape, shape, specify_shape
-from aesara.tensor.subtensor import (
+from pytensor.tensor.shape import SpecifyShape, Unbroadcast, _shape, shape, specify_shape
+from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
     AdvancedSubtensor,
@@ -35,7 +35,7 @@ from aesara.tensor.subtensor import (
     inc_subtensor,
     set_subtensor,
 )
-from aesara.tensor.type import (
+from pytensor.tensor.type import (
     bmatrix,
     col,
     dmatrix,
@@ -53,9 +53,9 @@ from aesara.tensor.type import (
     tensor4,
     vector,
 )
-from aesara.tensor.type_other import make_slice, slicetype
+from pytensor.tensor.type_other import make_slice, slicetype
 from tests import unittest_tools as utt
-from tests.unittest_tools import create_aesara_param
+from tests.unittest_tools import create_pytensor_param
 
 
 mode_opt = config.mode
@@ -64,8 +64,8 @@ if mode_opt == "FAST_COMPILE":
 mode_opt = get_mode(mode_opt)
 
 
-y = create_aesara_param(np.random.default_rng().integers(0, 4, size=(2,)))
-z = create_aesara_param(np.random.default_rng().integers(0, 4, size=(2, 2)))
+y = create_pytensor_param(np.random.default_rng().integers(0, 4, size=(2,)))
+z = create_pytensor_param(np.random.default_rng().integers(0, 4, size=(2, 2)))
 
 
 @pytest.mark.parametrize(
@@ -219,7 +219,7 @@ class TestLocalUselessSubtensor:
         assert prog[0].op == exp
         assert len(prog) == 1
 
-        x_val = np.array([[0, 1, 2], [3, 4, 5]], dtype=aesara.config.floatX)
+        x_val = np.array([[0, 1, 2], [3, 4, 5]], dtype=pytensor.config.floatX)
         idx_val = idx
         exp_res = np.exp(x_val)[idx_val]
         res = f(x_val)
@@ -249,7 +249,7 @@ class TestLocalUselessSubtensor:
         else:
             assert any(isinstance(node.op, Subtensor) for node in prog)
 
-        x_val = np.array([[0, 1, 2], [3, 4, 5]], dtype=aesara.config.floatX)
+        x_val = np.array([[0, 1, 2], [3, 4, 5]], dtype=pytensor.config.floatX)
         idx_val = idx
         exp_res = np.exp(x_val)[idx_val]
         res = f(x_val)
@@ -319,7 +319,7 @@ class TestLocalUselessSubtensor:
         else:
             assert any(isinstance(node.op, Subtensor) for node in prog)
 
-        x_val = np.array([[0, 1, 2], [3, 4, 5]], dtype=aesara.config.floatX)
+        x_val = np.array([[0, 1, 2], [3, 4, 5]], dtype=pytensor.config.floatX)
         idx_val = idx_fn(x_val)
         exp_res = np.exp(x_val)[idx_val]
         res = f(x_val)
@@ -345,7 +345,7 @@ class TestLocalUselessSubtensor:
         else:
             assert any(isinstance(node.op, Subtensor) for node in prog)
 
-        x_val = np.array([[0, 1, 2], [3, 4, 5]], dtype=aesara.config.floatX)
+        x_val = np.array([[0, 1, 2], [3, 4, 5]], dtype=pytensor.config.floatX)
         idx_val = idx_fn(x_val)
         exp_res = np.exp(x_val)[idx_val]
         res = f(x_val)
@@ -369,7 +369,7 @@ class TestLocalUselessSubtensor:
         else:
             assert any(isinstance(node.op, Subtensor) for node in prog)
 
-        x_val = np.array([[0, 1, 2], [3, 4, 5]], dtype=aesara.config.floatX)
+        x_val = np.array([[0, 1, 2], [3, 4, 5]], dtype=pytensor.config.floatX)
         idx_val = idx_fn(1)
         exp_res = np.exp(x_val)[idx_val]
         res = f(x_val, 1)
@@ -407,7 +407,7 @@ class TestLocalUselessSubtensor:
         else:
             assert any(isinstance(node.op, AdvancedSubtensor1) for node in prog)
 
-        x_val = np.array([[0, 1, 2], [3, 4, 5]], dtype=aesara.config.floatX)
+        x_val = np.array([[0, 1, 2], [3, 4, 5]], dtype=pytensor.config.floatX)
         idx_val = idx.eval() if isinstance(idx, Variable) else idx
         exp_res = np.exp(x_val)[idx_val]
         res = f(x_val)
@@ -1775,7 +1775,7 @@ def test_local_IncSubtensor_serialize():
     t = scalar("t")
     y = (W[i] + W[j] + W[1] + W[i, j]).sum()
     cost = sqr(t - y)
-    dW = aesara.grad(cost, W)
+    dW = pytensor.grad(cost, W)
     mode = get_default_mode().excluding("fusion")
     mode = mode.including("local_IncSubtensor_serialize")
     f = function([i, j, t], updates=[(W, W - 0.01 * dW)], mode=mode)
@@ -2143,7 +2143,7 @@ def test_local_join_subtensors(axis, slices_fn, expected_nodes):
     slice_scalar = at.iscalar("slice_scalar")
     slices = slices_fn(slice_scalar)
     y = at.concatenate([x[slice] for slice in slices], axis=axis)
-    f = aesara.function(
+    f = pytensor.function(
         [x, slice_scalar],
         y,
         mode=Mode("py").excluding("fusion"),
@@ -2163,7 +2163,7 @@ def test_local_join_subtensors(axis, slices_fn, expected_nodes):
 def test_deprecations():
     """Make sure we can import from deprecated modules."""
     with pytest.deprecated_call():
-        from aesara.tensor.subtensor_opt import get_advsubtensor_axis  # noqa: F401 F811
+        from pytensor.tensor.subtensor_opt import get_advsubtensor_axis  # noqa: F401 F811
 
 
 def test_local_uint_constant_indices():
@@ -2175,7 +2175,7 @@ def test_local_uint_constant_indices():
     idx = at.as_tensor_variable(np.array(-1, np.int64))
     z = x[idx]
 
-    z_fn = aesara.function([x], z, mode=mode)
+    z_fn = pytensor.function([x], z, mode=mode)
 
     deepcopy_node = z_fn.maker.fgraph.outputs[0].owner
     subtensor_node = deepcopy_node.inputs[0].owner
@@ -2189,7 +2189,7 @@ def test_local_uint_constant_indices():
     idx = at.as_tensor_variable(np.array(1, np.int64))
     z = x[idx]
 
-    z_fn = aesara.function([x], z, mode=mode)
+    z_fn = pytensor.function([x], z, mode=mode)
 
     deepcopy_node = z_fn.maker.fgraph.outputs[0].owner
     subtensor_node = deepcopy_node.inputs[0].owner
@@ -2203,7 +2203,7 @@ def test_local_uint_constant_indices():
     indices = (at.as_tensor_variable(np.array(1, np.int64)), slice(None, 10))
     z = x[indices]
 
-    z_fn = aesara.function([x], z, mode=mode)
+    z_fn = pytensor.function([x], z, mode=mode)
 
     deepcopy_node = z_fn.maker.fgraph.outputs[0].owner
     subtensor_node = deepcopy_node.inputs[0].owner
@@ -2220,7 +2220,7 @@ def test_local_uint_constant_indices():
     )
     z = x[indices]
 
-    z_fn = aesara.function([x], z, mode=mode)
+    z_fn = pytensor.function([x], z, mode=mode)
 
     subtensor_node = z_fn.maker.fgraph.outputs[0].owner
     assert isinstance(subtensor_node.op, AdvancedSubtensor)
@@ -2233,7 +2233,7 @@ def test_local_uint_constant_indices():
     idx = at.as_tensor_variable(rng.integers(0, 10, size=10).astype(np.int64))
     z = x[idx]
 
-    z_fn = aesara.function([x], z, mode=mode)
+    z_fn = pytensor.function([x], z, mode=mode)
 
     subtensor_node = z_fn.maker.fgraph.outputs[0].owner
     assert isinstance(subtensor_node.op, AdvancedSubtensor1)
@@ -2246,7 +2246,7 @@ def test_local_uint_constant_indices():
     idx = at.as_tensor_variable(1, dtype=np.int64)
     z = x[idx, []]
 
-    z_fn = aesara.function([x], z, mode=mode)
+    z_fn = pytensor.function([x], z, mode=mode)
 
     subtensor_node = z_fn.maker.fgraph.outputs[0].owner
     assert isinstance(subtensor_node.op, AdvancedSubtensor)
@@ -2259,7 +2259,7 @@ def test_local_uint_constant_indices():
     idx = at.as_tensor_variable(np.array([True]), dtype=bool)
     z = x[idx, []]
 
-    z_fn = aesara.function([x], z, mode=mode)
+    z_fn = pytensor.function([x], z, mode=mode)
 
     subtensor_node = z_fn.maker.fgraph.outputs[0].owner
     assert isinstance(subtensor_node.op, AdvancedSubtensor)
@@ -2273,7 +2273,7 @@ def test_local_uint_constant_indices():
     idx = at.as_tensor_variable(1, dtype=np.int64)
     z = inc_subtensor(x[idx], y)
 
-    z_fn = aesara.function([x, y], z, mode=mode)
+    z_fn = pytensor.function([x, y], z, mode=mode)
 
     subtensor_node = z_fn.maker.fgraph.outputs[0].owner
     assert isinstance(subtensor_node.op, IncSubtensor)
@@ -2287,7 +2287,7 @@ def test_local_uint_constant_indices():
     idx = at.as_tensor_variable(rng.integers(0, 10, size=10).astype(np.int64))
     z = advanced_inc_subtensor1(x, y, idx)
 
-    z_fn = aesara.function([x, y], z, mode=mode)
+    z_fn = pytensor.function([x, y], z, mode=mode)
 
     subtensor_node = z_fn.maker.fgraph.outputs[0].owner
     assert isinstance(subtensor_node.op, AdvancedIncSubtensor1)
@@ -2300,7 +2300,7 @@ def test_local_uint_constant_indices():
     idx = at.as_tensor_variable(rng.integers(0, 10, size=10).astype(np.int64))
     z = x[idx, None]
 
-    z_fn = aesara.function([x], z, mode=mode)
+    z_fn = pytensor.function([x], z, mode=mode)
 
     subtensor_node = z_fn.maker.fgraph.outputs[0].owner
     assert isinstance(subtensor_node.op, AdvancedSubtensor)

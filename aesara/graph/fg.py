@@ -17,18 +17,18 @@ from typing import (
 
 from typing_extensions import Literal
 
-import aesara
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, AtomicVariable, Variable, applys_between
-from aesara.graph.basic import as_string as graph_as_string
-from aesara.graph.basic import clone_get_equiv, graph_inputs, io_toposort, vars_between
-from aesara.graph.features import AlreadyThere, Feature, ReplaceValidate
-from aesara.graph.utils import MetaObject, MissingInputError, TestValueError
-from aesara.misc.ordered_set import OrderedSet
+import pytensor
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, AtomicVariable, Variable, applys_between
+from pytensor.graph.basic import as_string as graph_as_string
+from pytensor.graph.basic import clone_get_equiv, graph_inputs, io_toposort, vars_between
+from pytensor.graph.features import AlreadyThere, Feature, ReplaceValidate
+from pytensor.graph.utils import MetaObject, MissingInputError, TestValueError
+from pytensor.misc.ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
-    from aesara.graph.op import Op
+    from pytensor.graph.op import Op
 
 ApplyOrOutput = Union[Apply, Literal["output"]]
 ClientType = Tuple[ApplyOrOutput, int]
@@ -168,7 +168,7 @@ class FunctionGraph(MetaObject):
 
         Parameters
         ----------
-        var : aesara.graph.basic.Variable
+        var : pytensor.graph.basic.Variable
 
         """
         if check and var in self.inputs:
@@ -182,7 +182,7 @@ class FunctionGraph(MetaObject):
 
         Parameters
         ----------
-        var : aesara.graph.basic.Variable
+        var : pytensor.graph.basic.Variable
 
         """
         self.clients.setdefault(var, [])
@@ -291,7 +291,7 @@ class FunctionGraph(MetaObject):
 
         Parameters
         ----------
-        variable : aesara.graph.basic.Variable
+        variable : pytensor.graph.basic.Variable
             The variable to be imported.
         reason : str
             The name of the optimization or operation in progress.
@@ -307,7 +307,7 @@ class FunctionGraph(MetaObject):
             and not isinstance(var, AtomicVariable)
             and var not in self.inputs
         ):
-            from aesara.graph.null_type import NullType
+            from pytensor.graph.null_type import NullType
 
             if isinstance(var.type, NullType):
                 raise TypeError(
@@ -498,8 +498,8 @@ class FunctionGraph(MetaObject):
 
         if config.compute_test_value != "off":
             try:
-                tval = aesara.graph.op.get_test_value(var)
-                new_tval = aesara.graph.op.get_test_value(new_var)
+                tval = pytensor.graph.op.get_test_value(var)
+                new_tval = pytensor.graph.op.get_test_value(new_var)
             except TestValueError:
                 pass
             else:

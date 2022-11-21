@@ -24,19 +24,19 @@ except ImportError:
     from scipy.signal._signaltools import _bvalfromboundary, _valfrommode, convolve
     from scipy.signal._sigtools import _convolve2d
 
-import aesara
-from aesara import tensor as at
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Variable
-from aesara.graph.op import Op
-from aesara.raise_op import Assert
-from aesara.tensor.basic import as_tensor_variable, get_scalar_constant_value
-from aesara.tensor.exceptions import NotScalarConstantError
-from aesara.tensor.var import TensorConstant, TensorVariable
+import pytensor
+from pytensor import tensor as at
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.op import Op
+from pytensor.raise_op import Assert
+from pytensor.tensor.basic import as_tensor_variable, get_scalar_constant_value
+from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.var import TensorConstant, TensorVariable
 
 
 __docformat__ = "restructuredtext en"
-_logger = logging.getLogger("aesara.tensor.nnet.abstract_conv")
+_logger = logging.getLogger("pytensor.tensor.nnet.abstract_conv")
 
 
 def get_conv_output_shape(
@@ -678,7 +678,7 @@ def abstract_conv2d(
     stack of 2D inputs with a set of 2D filters. The implementation is modelled
     after Convolutional Neural Networks (CNN).
 
-    Refer to :func:`nnet.conv2d <aesara.tensor.nnet.conv2d>` for a more detailed documentation.
+    Refer to :func:`nnet.conv2d <pytensor.tensor.nnet.conv2d>` for a more detailed documentation.
     """
 
     input = as_tensor_variable(input)
@@ -2430,7 +2430,7 @@ class BaseAbstractConv(Op):
 
 class AbstractConv(BaseAbstractConv):
     """Abstract Op for the forward convolution.
-    Refer to :func:`BaseAbstractConv <aesara.tensor.nnet.abstract_conv.BaseAbstractConv>`
+    Refer to :func:`BaseAbstractConv <pytensor.tensor.nnet.abstract_conv.BaseAbstractConv>`
     for a more detailed documentation.
     """
 
@@ -2646,7 +2646,7 @@ class AbstractConv(BaseAbstractConv):
 
 class AbstractConv2d(AbstractConv):
     """Abstract Op for the forward convolution.
-    Refer to :func:`BaseAbstractConv <aesara.tensor.nnet.abstract_conv.BaseAbstractConv>`
+    Refer to :func:`BaseAbstractConv <pytensor.tensor.nnet.abstract_conv.BaseAbstractConv>`
     for a more detailed documentation.
     """
 
@@ -2708,7 +2708,7 @@ class AbstractConv2d(AbstractConv):
 
 class AbstractConv3d(AbstractConv):
     """Abstract Op for the forward convolution.
-    Refer to :func:`BaseAbstractConv <aesara.tensor.nnet.abstract_conv.BaseAbstractConv>`
+    Refer to :func:`BaseAbstractConv <pytensor.tensor.nnet.abstract_conv.BaseAbstractConv>`
     for a more detailed documentation.
     """
 
@@ -3047,7 +3047,7 @@ class AbstractConv2d_gradWeights(AbstractConv_gradWeights):
         d_bottom = bottom.type.filter_variable(d_bottom)
         d_top = top.type.filter_variable(d_top)
 
-        d_height_width = (aesara.gradient.DisconnectedType()(),)
+        d_height_width = (pytensor.gradient.DisconnectedType()(),)
         return (d_bottom, d_top) + d_height_width
 
 
@@ -3106,7 +3106,7 @@ class AbstractConv3d_gradWeights(AbstractConv_gradWeights):
         d_bottom = bottom.type.filter_variable(d_bottom)
         d_top = top.type.filter_variable(d_top)
 
-        d_depth_height_width = (aesara.gradient.DisconnectedType()(),)
+        d_depth_height_width = (pytensor.gradient.DisconnectedType()(),)
         return (d_bottom, d_top) + d_depth_height_width
 
 
@@ -3418,7 +3418,7 @@ class AbstractConv2d_gradInputs(AbstractConv_gradInputs):
         d_weights = weights.type.filter_variable(d_weights)
         d_top = top.type.filter_variable(d_top)
 
-        d_height_width = (aesara.gradient.DisconnectedType()(),)
+        d_height_width = (pytensor.gradient.DisconnectedType()(),)
         return (d_weights, d_top) + d_height_width
 
 
@@ -3477,7 +3477,7 @@ class AbstractConv3d_gradInputs(AbstractConv_gradInputs):
         d_weights = weights.type.filter_variable(d_weights)
         d_top = top.type.filter_variable(d_top)
 
-        d_depth_height_width = (aesara.gradient.DisconnectedType()(),)
+        d_depth_height_width = (pytensor.gradient.DisconnectedType()(),)
         return (d_weights, d_top) + d_depth_height_width
 
 
@@ -3589,7 +3589,7 @@ def conv2d(
             "Keyword arguments 'imshp_logical' and 'kshp_logical' for conv2d "
             "are not supported anymore (and have not been a reliable way to "
             "perform upsampling). That feature is still available by calling "
-            "aesara.tensor.nnet.conv.conv2d() for the time being."
+            "pytensor.tensor.nnet.conv.conv2d() for the time being."
         )
     if len(kwargs.keys()) > 0:
         warnings.warn(
@@ -3662,7 +3662,7 @@ def conv2d_transpose(
 
     output_shape: tuple/list of len 4 of int or Constant variable
         The shape of the output of ``conv2d_transpose``. The last two elements
-        are allowed to be ``aesara.tensor.type.scalar`` variables.
+        are allowed to be ``pytensor.tensor.type.scalar`` variables.
 
     filter_shape: None, tuple/list of len 4 of int or Constant variable
         The shape of the filters parameter.

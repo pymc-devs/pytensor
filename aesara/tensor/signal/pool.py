@@ -8,19 +8,19 @@ import warnings
 
 import numpy as np
 
-import aesara.tensor.basic as at
-import aesara.tensor.math as tm
-from aesara.gradient import DisconnectedType
-from aesara.graph.basic import Apply, Constant, Variable
-from aesara.graph.utils import MethodNotDefined
-from aesara.link.c.op import OpenMPOp
-from aesara.link.c.params_type import ParamsType
-from aesara.scalar import bool as bool_t
-from aesara.tensor.type import TensorType, int_dtypes
+import pytensor.tensor.basic as at
+import pytensor.tensor.math as tm
+from pytensor.gradient import DisconnectedType
+from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.utils import MethodNotDefined
+from pytensor.link.c.op import OpenMPOp
+from pytensor.link.c.params_type import ParamsType
+from pytensor.scalar import bool as bool_t
+from pytensor.tensor.type import TensorType, int_dtypes
 
 
 warnings.warn(
-    "The module `aesara.tensor.signal` is deprecated and will "
+    "The module `pytensor.tensor.signal` is deprecated and will "
     "be removed from Aesara in version 2.8.5.",
     DeprecationWarning,
     stacklevel=2,
@@ -36,9 +36,9 @@ def max_pool_2d_same_size(input, patch_size):
 
     Parameters
     ----------
-    input : 4-D aesara tensor of input images
+    input : 4-D pytensor tensor of input images
         Input images. Max pooling will be done over the 2 last dimensions.
-    patch_size : tuple of length 2 or aesara vector of ints of size 2.
+    patch_size : tuple of length 2 or pytensor vector of ints of size 2.
         Size of the patch (patch height, patch width).
         (2,2) will retain only one non-zero value per patch of 4 values.
 
@@ -67,20 +67,20 @@ def pool_2d(
 
     Parameters
     ----------
-    input : N-D aesara tensor of input images
+    input : N-D pytensor tensor of input images
         Input images. Max pooling will be done over the 2 last dimensions.
-    ws : tuple of length 2 or aesara vector of ints of size 2.
+    ws : tuple of length 2 or pytensor vector of ints of size 2.
         Factor by which to downscale (vertical ws, horizontal ws).
         (2,2) will halve the image in each dimension.
     ignore_border : bool (default None, will print a warning and set to False)
         When True, (5,5) input with ws=(2,2) will generate a (2,2) output.
         (3,3) otherwise.
-    stride : tuple of two ints or aesara vector of ints of size 2.
+    stride : tuple of two ints or pytensor vector of ints of size 2.
         Stride size, which is the number of shifts over rows/cols to get the
         next pool region. If stride is None, it is considered equal to ws
         (no overlap on pooling regions), eg: stride=(1,1) will shifts over
         one row and one col for every iteration.
-    pad : tuple of two ints or aesara vector of ints of size 2.
+    pad : tuple of two ints or pytensor vector of ints of size 2.
         (pad_h, pad_w), pad zeros to extend beyond four borders of the
         images, pad_h is the size of the top and bottom margins, and
         pad_w is the size of the left and right margins.
@@ -183,19 +183,19 @@ def pool_3d(
 
     Parameters
     ----------
-    input : N-D aesara tensor of input images
+    input : N-D pytensor tensor of input images
         Input images. Max pooling will be done over the 3 last dimensions.
-    ws : tuple of length 3 or aesara vector of ints of size 3
+    ws : tuple of length 3 or pytensor vector of ints of size 3
         Factor by which to downscale (vertical ws, horizontal ws, depth ws).
         (2,2,2) will halve the image in each dimension.
     ignore_border : bool (default None, will print a warning and set to False)
         When True, (5,5,5) input with ws=(2,2,2) will generate a (2,2,2) output.
         (3,3,3) otherwise.
-    st : tuple of three ints or aesara vector of ints of size 3
+    st : tuple of three ints or pytensor vector of ints of size 3
         Stride size, which is the number of shifts over rows/cols/slices to get
         the next pool region. If st is None, it is considered equal to ws
         (no overlap on pooling regions).
-    pad : tuple of two ints or aesara vector of ints of size 3
+    pad : tuple of two ints or pytensor vector of ints of size 3
         (pad_h, pad_w, pad_d), pad zeros to extend beyond six borders of the
         images, pad_h is the size of the top and bottom margins,
         pad_w is the size of the left and right margins, and pad_d is the size

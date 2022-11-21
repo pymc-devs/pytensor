@@ -2,17 +2,17 @@ import warnings
 
 from numpy.random import Generator, RandomState
 
-from aesara.compile.sharedvalue import SharedVariable, shared
-from aesara.graph.basic import Constant
-from aesara.link.basic import JITLinker
+from pytensor.compile.sharedvalue import SharedVariable, shared
+from pytensor.graph.basic import Constant
+from pytensor.link.basic import JITLinker
 
 
 class JAXLinker(JITLinker):
     """A `Linker` that JIT-compiles NumPy-based operations using JAX."""
 
     def fgraph_convert(self, fgraph, input_storage, storage_map, **kwargs):
-        from aesara.link.jax.dispatch import jax_funcify
-        from aesara.tensor.random.type import RandomType
+        from pytensor.link.jax.dispatch import jax_funcify
+        from pytensor.tensor.random.type import RandomType
 
         shared_rng_inputs = [
             inp
@@ -64,7 +64,7 @@ class JAXLinker(JITLinker):
         return jax.jit(fn, static_argnums=static_argnums)
 
     def create_thunk_inputs(self, storage_map):
-        from aesara.link.jax.dispatch import jax_typify
+        from pytensor.link.jax.dispatch import jax_typify
 
         thunk_inputs = []
         for n in self.fgraph.inputs:

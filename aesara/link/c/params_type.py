@@ -18,12 +18,12 @@ Importation:
 .. code-block:: python
 
     # Import ParamsType class.
-    from aesara.link.c.params_type import ParamsType
+    from pytensor.link.c.params_type import ParamsType
 
     # If you want to use a tensor and a scalar as parameters,
     # you should import required Aesara types.
-    from aesara.tensor.type import TensorType
-    from aesara.scalar import ScalarType
+    from pytensor.tensor.type import TensorType
+    from pytensor.scalar import ScalarType
 
 In your Op sub-class:
 
@@ -60,22 +60,22 @@ In ``c_code()`` implementation (with ``param = sub['params']``):
     /* You won't need to free them or whatever else. */
 
 
-See :class:`QuadraticOpFunc` and :class:`QuadraticCOpFunc` in ``aesara/graph/tests/test_params_type.py``
+See :class:`QuadraticOpFunc` and :class:`QuadraticCOpFunc` in ``pytensor/graph/tests/test_params_type.py``
 for complete working examples.
 
 Combining ParamsType with Aesara enumeration types
 --------------------------------------------------
 
 Aesara provide some enumeration types that allow to create constant primitive values (integer and floating values)
-available in both Python and C code. See :class:`aesara.link.c.type.EnumType` and its subclasses for more details.
+available in both Python and C code. See :class:`pytensor.link.c.type.EnumType` and its subclasses for more details.
 
 If your ParamsType contains Aesara enumeration types, then constants defined inside these
 enumerations will be directly available as ParamsType attributes.
 
 **Example**::
 
-    from aesara.link.c.params_type import ParamsType
-    from aesara.link.c.type import EnumType, EnumList
+    from pytensor.link.c.params_type import ParamsType
+    from pytensor.link.c.type import EnumType, EnumList
 
     wrapper = ParamsType(enum1=EnumList('CONSTANT_1', 'CONSTANT_2', 'CONSTANT_3'),
                          enum2=EnumType(PI=3.14, EPSILON=0.001))
@@ -99,7 +99,7 @@ This implies that a ParamsType cannot contain different enum types with common e
                          enum2=EnumType(CONSTANT_1=0, CONSTANT_3=5))
 
 If your enum types contain constant aliases, you can retrieve them from ParamsType
-with ``ParamsType.enum_from_alias(alias)`` method (see :class:`aesara.link.c.type.EnumType`
+with ``ParamsType.enum_from_alias(alias)`` method (see :class:`pytensor.link.c.type.EnumType`
 for more info about enumeration aliases).
 
 .. code-block:: python
@@ -117,8 +117,8 @@ for more info about enumeration aliases).
 import hashlib
 import re
 
-from aesara.graph.utils import MethodNotDefined
-from aesara.link.c.type import CType, EnumType
+from pytensor.graph.utils import MethodNotDefined
+from pytensor.link.c.type import CType, EnumType
 
 
 # Set of C and C++ keywords as defined (at March 2nd, 2017) in the pages below:
@@ -235,8 +235,8 @@ class Params(dict):
 
     .. code-block:: python
 
-        from aesara.link.c.params_type import ParamsType, Params
-        from aesara.scalar import ScalarType
+        from pytensor.link.c.params_type import ParamsType, Params
+        from pytensor.scalar import ScalarType
         # You must create a ParamsType first:
         params_type = ParamsType(attr1=ScalarType('int32'),
                                  key2=ScalarType('float32'),
@@ -457,12 +457,12 @@ class ParamsType(CType):
         types_hex = hashlib.sha256(types_string).hexdigest()
         return f"_Params_{fields_hex}_{types_hex}"
 
-    def has_type(self, aesara_type):
+    def has_type(self, pytensor_type):
         """
         Return True if current ParamsType contains the specified Aesara type.
 
         """
-        return aesara_type in self.types
+        return pytensor_type in self.types
 
     def get_type(self, field_name):
         """
@@ -472,7 +472,7 @@ class ParamsType(CType):
         """
         return self.types[self.fields.index(field_name)]
 
-    def get_field(self, aesara_type):
+    def get_field(self, pytensor_type):
         """
         Return the name (string) of the first field associated to
         the given Aesara type. Fields are sorted in lexicographic
@@ -484,7 +484,7 @@ class ParamsType(CType):
         Aesara type only once.
 
         """
-        return self.fields[self.types.index(aesara_type)]
+        return self.fields[self.types.index(pytensor_type)]
 
     def get_enum(self, key):
         """
@@ -495,9 +495,9 @@ class ParamsType(CType):
 
         **Example**::
 
-            from aesara.graph.params_type import ParamsType
-            from aesara.link.c.type import EnumType, EnumList
-            from aesara.scalar import ScalarType
+            from pytensor.graph.params_type import ParamsType
+            from pytensor.link.c.type import EnumType, EnumList
+            from pytensor.scalar import ScalarType
 
             wrapper = ParamsType(scalar=ScalarType('int32'),
                                  letters=EnumType(A=1, B=2, C=3),
@@ -524,9 +524,9 @@ class ParamsType(CType):
 
         **Example**::
 
-            from aesara.graph.params_type import ParamsType
-            from aesara.link.c.type import EnumType, EnumList
-            from aesara.scalar import ScalarType
+            from pytensor.graph.params_type import ParamsType
+            from pytensor.link.c.type import EnumType, EnumList
+            from pytensor.scalar import ScalarType
 
             wrapper = ParamsType(scalar=ScalarType('int32'),
                                  letters=EnumType(A=(1, 'alpha'), B=(2, 'beta'), C=3),
@@ -571,9 +571,9 @@ class ParamsType(CType):
         **Example**::
 
             import numpy
-            from aesara.graph.params_type import ParamsType
-            from aesara.tensor.type import dmatrix
-            from aesara.scalar import ScalarType
+            from pytensor.graph.params_type import ParamsType
+            from pytensor.tensor.type import dmatrix
+            from pytensor.scalar import ScalarType
 
             class MyObject:
                 def __init__(self):

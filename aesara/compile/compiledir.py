@@ -1,6 +1,6 @@
 """
 This module contains housekeeping functions for cleaning/purging the "compiledir".
-It is used by the "aesara-cache" CLI tool, located in the /bin folder of the repository.
+It is used by the "pytensor-cache" CLI tool, located in the /bin folder of the repository.
 """
 import logging
 import os
@@ -9,13 +9,13 @@ import shutil
 
 import numpy as np
 
-from aesara.configdefaults import config
-from aesara.graph.op import Op
-from aesara.link.c.type import CType
-from aesara.utils import flatten
+from pytensor.configdefaults import config
+from pytensor.graph.op import Op
+from pytensor.link.c.type import CType
+from pytensor.utils import flatten
 
 
-_logger = logging.getLogger("aesara.compile.compiledir")
+_logger = logging.getLogger("pytensor.compile.compiledir")
 
 
 def cleanup():
@@ -103,7 +103,7 @@ def print_title(title, overline="", underline=""):
 
 def print_compiledir_content():
     """
-    print list of %d compiled individual ops in the "aesara.config.compiledir"
+    print list of %d compiled individual ops in the "pytensor.config.compiledir"
     """
     max_key_file_size = 1 * 1024 * 1024  # 1M
 
@@ -226,7 +226,7 @@ def print_compiledir_content():
     print()
     print(
         f"Skipped {int(zeros_op)} files that contained 0 op "
-        "(are they always aesara.scalar ops?)"
+        "(are they always pytensor.scalar ops?)"
     )
 
 
@@ -236,7 +236,7 @@ def compiledir_purge():
 
 def basecompiledir_ls():
     """
-    Print list of files in the "aesara.config.base_compiledir"
+    Print list of files in the "pytensor.config.base_compiledir"
     """
     subdirs = []
     others = []

@@ -4,11 +4,11 @@ import numpy as np
 import scipy.sparse
 from typing_extensions import Literal
 
-import aesara
-from aesara import scalar as aes
-from aesara.graph.basic import Variable
-from aesara.graph.type import HasDataType
-from aesara.tensor.type import DenseTensorType, TensorType
+import pytensor
+from pytensor import scalar as aes
+from pytensor.graph.basic import Variable
+from pytensor.graph.type import HasDataType
+from pytensor.tensor.type import DenseTensorType, TensorType
 
 
 SparsityTypes = Literal["csr", "csc", "bsr"]
@@ -59,8 +59,8 @@ class SparseTensorType(TensorType, HasDataType):
         "int32": (int, "npy_int32", "NPY_INT32"),
         "uint64": (int, "npy_uint64", "NPY_UINT64"),
         "int64": (int, "npy_int64", "NPY_INT64"),
-        "complex128": (complex, "aesara_complex128", "NPY_COMPLEX128"),
-        "complex64": (complex, "aesara_complex64", "NPY_COMPLEX64"),
+        "complex128": (complex, "pytensor_complex128", "NPY_COMPLEX128"),
+        "complex64": (complex, "pytensor_complex64", "NPY_COMPLEX64"),
     }
     ndim = 2
 
@@ -161,11 +161,11 @@ class SparseTensorType(TensorType, HasDataType):
         if not isinstance(res.type, type(self)):
             if isinstance(res.type, DenseTensorType):
                 if self.format == "csr":
-                    from aesara.sparse.basic import csr_from_dense
+                    from pytensor.sparse.basic import csr_from_dense
 
                     return csr_from_dense(res)
                 else:
-                    from aesara.sparse.basic import csc_from_dense
+                    from pytensor.sparse.basic import csc_from_dense
 
                     return csc_from_dense(res)
 
@@ -242,7 +242,7 @@ class SparseTensorType(TensorType, HasDataType):
         return False
 
 
-aesara.compile.register_view_op_c_code(
+pytensor.compile.register_view_op_c_code(
     SparseTensorType,
     """
     Py_XDECREF(%(oname)s);

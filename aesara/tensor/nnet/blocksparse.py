@@ -2,11 +2,11 @@ from typing import List
 
 import numpy as np
 
-import aesara
-from aesara.gradient import grad_undefined
-from aesara.graph.basic import Apply
-from aesara.graph.op import Op
-from aesara.tensor.type import discrete_dtypes
+import pytensor
+from pytensor.gradient import grad_undefined
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+from pytensor.tensor.type import discrete_dtypes
 
 
 class SparseBlockGemv(Op):
@@ -75,11 +75,11 @@ class SparseBlockGemv(Op):
             Which blocks will be computed is specified in `outputIdx`.
 
         """
-        o = aesara.tensor.as_tensor_variable(o)
-        W = aesara.tensor.as_tensor_variable(W)
-        h = aesara.tensor.as_tensor_variable(h)
-        inputIdx = aesara.tensor.as_tensor_variable(inputIdx)
-        outputIdx = aesara.tensor.as_tensor_variable(outputIdx)
+        o = pytensor.tensor.as_tensor_variable(o)
+        W = pytensor.tensor.as_tensor_variable(W)
+        h = pytensor.tensor.as_tensor_variable(h)
+        inputIdx = pytensor.tensor.as_tensor_variable(inputIdx)
+        outputIdx = pytensor.tensor.as_tensor_variable(outputIdx)
 
         if o.ndim != 3:
             raise TypeError("The output o must be a 2D tensor")
@@ -192,10 +192,10 @@ class SparseBlockOuter(Op):
           Which blocks will be computed is specified in `yIdx`.
 
         """
-        one = aesara.tensor.constant(np.asarray(1.0, dtype="float32"))
-        o = aesara.tensor.as_tensor_variable(o)
-        x = aesara.tensor.as_tensor_variable(x)
-        y = aesara.tensor.as_tensor_variable(y)
+        one = pytensor.tensor.constant(np.asarray(1.0, dtype="float32"))
+        o = pytensor.tensor.as_tensor_variable(o)
+        x = pytensor.tensor.as_tensor_variable(x)
+        y = pytensor.tensor.as_tensor_variable(y)
 
         if alpha is None:
             alpha = one

@@ -4,13 +4,13 @@ from io import StringIO
 
 import numpy as np
 
-import aesara
-from aesara.compile.mode import Mode
-from aesara.configdefaults import config
-from aesara.tensor.type import discrete_dtypes
+import pytensor
+from pytensor.compile.mode import Mode
+from pytensor.configdefaults import config
+from pytensor.tensor.type import discrete_dtypes
 
 
-logger = logging.getLogger("aesara.compile.nanguardmode")
+logger = logging.getLogger("pytensor.compile.nanguardmode")
 
 
 def _is_numeric_value(arr, var):
@@ -29,8 +29,8 @@ def _is_numeric_value(arr, var):
         `True` the value is non-numeric.
 
     """
-    from aesara.link.c.type import _cdata_type
-    from aesara.tensor.random.type import RandomType
+    from pytensor.link.c.type import _cdata_type
+    from pytensor.tensor.random.type import RandomType
 
     if isinstance(arr, _cdata_type):
         return False
@@ -189,9 +189,9 @@ class NanGuardMode(Mode):
             ----------
             value : numpy.ndarray
                 The value to be checked.
-            nd : aesara.graph.basic.Apply
+            nd : pytensor.graph.basic.Apply
                 The Apply node being executed.
-            var : aesara.graph.basic.Variable
+            var : pytensor.graph.basic.Variable
                 Not used if nd is there. Otherwise, used to print the stack
                 trace for inputs of the graph.
 
@@ -222,7 +222,7 @@ class NanGuardMode(Mode):
                         "output of a node in this variable:",
                         file=sio,
                     )
-                    print(aesara.printing.debugprint(nd, file="str"), file=sio)
+                    print(pytensor.printing.debugprint(nd, file="str"), file=sio)
                 else:
                     print(
                         "NanGuardMode found an error in an input of the " "graph.",
@@ -231,7 +231,7 @@ class NanGuardMode(Mode):
                 # Add the stack trace
                 if nd:
                     var = nd.outputs[0]
-                print(aesara.graph.utils.get_variable_trace_string(var), file=sio)
+                print(pytensor.graph.utils.get_variable_trace_string(var), file=sio)
                 msg = sio.getvalue()
                 if config.NanGuardMode__action == "raise":
                     raise AssertionError(msg)
@@ -254,7 +254,7 @@ class NanGuardMode(Mode):
             if getattr(var.tag, "nan_guard_mode_check", True):
                 do_check_on(value, None, var=var)
 
-        wrap_linker = aesara.link.vm.VMLinker(
+        wrap_linker = pytensor.link.vm.VMLinker(
             callback=nan_check, callback_input=nan_check_input
         )
         super().__init__(linker=wrap_linker, optimizer=self.provided_optimizer, db=db)

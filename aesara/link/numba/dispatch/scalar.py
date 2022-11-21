@@ -6,17 +6,17 @@ import numpy as np
 import scipy
 import scipy.special
 
-from aesara import config
-from aesara.compile.ops import ViewOp
-from aesara.graph.basic import Variable
-from aesara.link.numba.dispatch import basic as numba_basic
-from aesara.link.numba.dispatch.basic import create_numba_signature, numba_funcify
-from aesara.link.utils import (
+from pytensor import config
+from pytensor.compile.ops import ViewOp
+from pytensor.graph.basic import Variable
+from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch.basic import create_numba_signature, numba_funcify
+from pytensor.link.utils import (
     compile_function_src,
     get_name_for_object,
     unique_name_generator,
 )
-from aesara.scalar.basic import (
+from pytensor.scalar.basic import (
     Add,
     Cast,
     Clip,
@@ -28,7 +28,7 @@ from aesara.scalar.basic import (
     Second,
     Switch,
 )
-from aesara.scalar.math import Erf, Erfc, GammaLn, Log1mexp, Sigmoid
+from pytensor.scalar.math import Erf, Erfc, GammaLn, Log1mexp, Sigmoid
 
 
 @numba_funcify.register(ScalarOp)

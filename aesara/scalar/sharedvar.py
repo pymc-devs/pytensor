@@ -11,15 +11,15 @@ up to the Python interpreter in benchmarking tests.
 We don't want to encourage people to use scalars (rather than 0-d tensors), but
 the reason is just to keep the docs simple, not because scalars are bad.  If we
 just don't register this shared variable constructor to handle any values by
-default when calling aesara.shared(value) then users must really go out of their
+default when calling pytensor.shared(value) then users must really go out of their
 way (as scan does) to create a shared variable of this kind.
 
 """
 
 import numpy as np
 
-from aesara.compile import SharedVariable
-from aesara.scalar.basic import ScalarType, _scalar_py_operators
+from pytensor.compile import SharedVariable
+from pytensor.scalar.basic import ScalarType, _scalar_py_operators
 
 
 class ScalarSharedVariable(_scalar_py_operators, SharedVariable):

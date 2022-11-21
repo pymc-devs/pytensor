@@ -16,25 +16,25 @@ from numba.core.errors import TypingError
 from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
 from numba.extending import box
 
-from aesara import config
-from aesara.compile.builders import OpFromGraph
-from aesara.compile.ops import DeepCopyOp
-from aesara.graph.basic import Apply, NoParams
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.type import Type
-from aesara.ifelse import IfElse
-from aesara.link.utils import (
+from pytensor import config
+from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.ops import DeepCopyOp
+from pytensor.graph.basic import Apply, NoParams
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.type import Type
+from pytensor.ifelse import IfElse
+from pytensor.link.utils import (
     compile_function_src,
     fgraph_to_python,
     unique_name_generator,
 )
-from aesara.scalar.basic import ScalarType
-from aesara.scalar.math import Softplus
-from aesara.tensor.blas import BatchedDot
-from aesara.tensor.math import Dot
-from aesara.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
-from aesara.tensor.slinalg import Cholesky, Solve
-from aesara.tensor.subtensor import (
+from pytensor.scalar.basic import ScalarType
+from pytensor.scalar.math import Softplus
+from pytensor.tensor.blas import BatchedDot
+from pytensor.tensor.math import Dot
+from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
+from pytensor.tensor.slinalg import Cholesky, Solve
+from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
     AdvancedSubtensor,
@@ -42,8 +42,8 @@ from aesara.tensor.subtensor import (
     IncSubtensor,
     Subtensor,
 )
-from aesara.tensor.type import TensorType
-from aesara.tensor.type_other import MakeSlice, NoneConst
+from pytensor.tensor.type import TensorType
+from pytensor.tensor.type_other import MakeSlice, NoneConst
 
 
 def numba_njit(*args, **kwargs):
@@ -62,7 +62,7 @@ def numba_vectorize(*args, **kwargs):
 
 
 def get_numba_type(
-    aesara_type: Type,
+    pytensor_type: Type,
     layout: str = "A",
     force_scalar: bool = False,
     reduce_to_scalar: bool = False,
@@ -71,7 +71,7 @@ def get_numba_type(
 
     Parameters
     ----------
-    aesara_type
+    pytensor_type
         The :class:`Type` to convert.
     layout
         The :class:`numpy.ndarray` layout to use.
@@ -81,20 +81,20 @@ def get_numba_type(
         Return Numba scalars for zero dimensional :class:`TensorType`\s.
     """
 
-    if isinstance(aesara_type, TensorType):
-        dtype = aesara_type.numpy_dtype
+    if isinstance(pytensor_type, TensorType):
+        dtype = pytensor_type.numpy_dtype
         numba_dtype = numba.from_dtype(dtype)
         if force_scalar or (
-            reduce_to_scalar and getattr(aesara_type, "ndim", None) == 0
+            reduce_to_scalar and getattr(pytensor_type, "ndim", None) == 0
         ):
             return numba_dtype
-        return numba.types.Array(numba_dtype, aesara_type.ndim, layout)
-    elif isinstance(aesara_type, ScalarType):
-        dtype = np.dtype(aesara_type.dtype)
+        return numba.types.Array(numba_dtype, pytensor_type.ndim, layout)
+    elif isinstance(pytensor_type, ScalarType):
+        dtype = np.dtype(pytensor_type.dtype)
         numba_dtype = numba.from_dtype(dtype)
         return numba_dtype
     else:
-        raise NotImplementedError(f"Numba type not implemented for {aesara_type}")
+        raise NotImplementedError(f"Numba type not implemented for {pytensor_type}")
 
 
 def create_numba_signature(
@@ -847,7 +847,7 @@ def numba_funcify_BatchedDot(op, node, **kwargs):
     return batched_dot
 
 
-# NOTE: The remaining `aesara.tensor.blas` `Op`s appear unnecessary, because
+# NOTE: The remaining `pytensor.tensor.blas` `Op`s appear unnecessary, because
 # they're only used to optimize basic `Dot` nodes, and those GEMV and GEMM
 # optimizations are apparently already performed by Numba
 

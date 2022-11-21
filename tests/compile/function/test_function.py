@@ -7,11 +7,11 @@ import tempfile
 import numpy as np
 import pytest
 
-from aesara.compile import shared
-from aesara.compile.function import function, function_dump
-from aesara.compile.io import In
-from aesara.configdefaults import config
-from aesara.tensor.type import (
+from pytensor.compile import shared
+from pytensor.compile.function import function, function_dump
+from pytensor.compile.io import In
+from pytensor.configdefaults import config
+from pytensor.tensor.type import (
     bscalar,
     bvector,
     dscalar,

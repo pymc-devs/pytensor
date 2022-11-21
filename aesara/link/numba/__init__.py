@@ -1,1 +1,1 @@
-from aesara.link.numba.linker import NumbaLinker
+from pytensor.link.numba.linker import NumbaLinker

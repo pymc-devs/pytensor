@@ -2,8 +2,8 @@ import warnings
 from abc import abstractmethod
 from typing import Callable, Dict, List, Text, Tuple, Union
 
-from aesara.graph.basic import Apply, Constant
-from aesara.graph.utils import MethodNotDefined
+from pytensor.graph.basic import Apply, Constant
+from pytensor.graph.utils import MethodNotDefined
 
 
 class CLinkerObject:

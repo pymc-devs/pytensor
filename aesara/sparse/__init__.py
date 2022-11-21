@@ -1,7 +1,7 @@
-from aesara.sparse import rewriting, sharedvar
-from aesara.sparse.basic import *
-from aesara.sparse.sharedvar import sparse_constructor as shared
-from aesara.sparse.type import SparseTensorType, _is_sparse
+from pytensor.sparse import rewriting, sharedvar
+from pytensor.sparse.basic import *
+from pytensor.sparse.sharedvar import sparse_constructor as shared
+from pytensor.sparse.type import SparseTensorType, _is_sparse
 
 
 def sparse_grad(var):
@@ -13,7 +13,7 @@ def sparse_grad(var):
 
     .. versionadded:: 0.6rc4
     """
-    from aesara.tensor.subtensor import AdvancedSubtensor, AdvancedSubtensor1
+    from pytensor.tensor.subtensor import AdvancedSubtensor, AdvancedSubtensor1
 
     if var.owner is None or not isinstance(
         var.owner.op, (AdvancedSubtensor, AdvancedSubtensor1)

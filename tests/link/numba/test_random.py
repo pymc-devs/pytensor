@@ -4,13 +4,13 @@ import numpy as np
 import pytest
 import scipy.stats as stats
 
-import aesara.tensor as at
-import aesara.tensor.random.basic as aer
-from aesara import shared
-from aesara.compile.function import function
-from aesara.compile.sharedvalue import SharedVariable
-from aesara.graph.basic import Constant
-from aesara.graph.fg import FunctionGraph
+import pytensor.tensor as at
+import pytensor.tensor.random.basic as aer
+from pytensor import shared
+from pytensor.compile.function import function
+from pytensor.compile.sharedvalue import SharedVariable
+from pytensor.graph.basic import Constant
+from pytensor.graph.fg import FunctionGraph
 from tests.link.numba.test_basic import (
     compare_numba_and_py,
     eval_python_only,

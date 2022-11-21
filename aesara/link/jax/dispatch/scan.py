@@ -1,10 +1,10 @@
 import jax
 import jax.numpy as jnp
 
-from aesara.graph.fg import FunctionGraph
-from aesara.link.jax.dispatch.basic import jax_funcify
-from aesara.scan.op import Scan
-from aesara.scan.utils import ScanArgs
+from pytensor.graph.fg import FunctionGraph
+from pytensor.link.jax.dispatch.basic import jax_funcify
+from pytensor.scan.op import Scan
+from pytensor.scan.utils import ScanArgs
 
 
 @jax_funcify.register(Scan)

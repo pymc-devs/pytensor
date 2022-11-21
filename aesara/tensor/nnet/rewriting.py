@@ -2,18 +2,18 @@
 Optimizations addressing the ops in nnet root directory
 """
 
-import aesara
-from aesara import compile
-from aesara.compile import optdb
-from aesara.configdefaults import config
-from aesara.graph.rewriting.basic import (
+import pytensor
+from pytensor import compile
+from pytensor.compile import optdb
+from pytensor.configdefaults import config
+from pytensor.graph.rewriting.basic import (
     MetaNodeRewriterSkip,
     WalkingGraphRewriter,
     copy_stack_trace,
     in2out,
     node_rewriter,
 )
-from aesara.tensor.nnet.abstract_conv import (
+from pytensor.tensor.nnet.abstract_conv import (
     AbstractConv2d,
     AbstractConv2d_gradInputs,
     AbstractConv2d_gradWeights,
@@ -22,7 +22,7 @@ from aesara.tensor.nnet.abstract_conv import (
     AbstractConv3d_gradWeights,
     get_conv_output_shape,
 )
-from aesara.tensor.nnet.blocksparse import (
+from pytensor.tensor.nnet.blocksparse import (
     SparseBlockGemv,
     SparseBlockOuter,
     sparse_block_gemv_inplace,
@@ -30,11 +30,11 @@ from aesara.tensor.nnet.blocksparse import (
 )
 
 # Cpu implementation
-from aesara.tensor.nnet.conv import ConvOp, conv2d
-from aesara.tensor.nnet.corr import CorrMM, CorrMM_gradInputs, CorrMM_gradWeights
-from aesara.tensor.nnet.corr3d import Corr3dMM, Corr3dMMGradInputs, Corr3dMMGradWeights
-from aesara.tensor.rewriting.basic import register_specialize_device
-from aesara.tensor.type import TensorType
+from pytensor.tensor.nnet.conv import ConvOp, conv2d
+from pytensor.tensor.nnet.corr import CorrMM, CorrMM_gradInputs, CorrMM_gradWeights
+from pytensor.tensor.nnet.corr3d import Corr3dMM, Corr3dMMGradInputs, Corr3dMMGradWeights
+from pytensor.tensor.rewriting.basic import register_specialize_device
+from pytensor.tensor.type import TensorType
 
 
 @node_rewriter([SparseBlockGemv], inplace=True)
@@ -486,7 +486,7 @@ def local_conv2d_gradinputs_cpu(fgraph, node):
 
 
 # Register Cpu Optimization
-conv_groupopt = aesara.graph.rewriting.db.LocalGroupDB()
+conv_groupopt = pytensor.graph.rewriting.db.LocalGroupDB()
 conv_groupopt.__name__ = "conv_opts"
 register_specialize_device(conv_groupopt, "fast_compile", "fast_run")
 

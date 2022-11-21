@@ -7,22 +7,22 @@ from typing import TYPE_CHECKING, Optional, Union
 import numpy as np
 from typing_extensions import Literal
 
-from aesara.compile.sharedvalue import shared
-from aesara.graph.basic import Constant, Variable
-from aesara.tensor import get_vector_length
-from aesara.tensor.basic import as_tensor_variable, cast, constant
-from aesara.tensor.extra_ops import broadcast_to
-from aesara.tensor.math import maximum
-from aesara.tensor.shape import specify_shape
-from aesara.tensor.type import int_dtypes
-from aesara.tensor.var import TensorVariable
+from pytensor.compile.sharedvalue import shared
+from pytensor.graph.basic import Constant, Variable
+from pytensor.tensor import get_vector_length
+from pytensor.tensor.basic import as_tensor_variable, cast, constant
+from pytensor.tensor.extra_ops import broadcast_to
+from pytensor.tensor.math import maximum
+from pytensor.tensor.shape import specify_shape
+from pytensor.tensor.type import int_dtypes
+from pytensor.tensor.var import TensorVariable
 
 
 if TYPE_CHECKING:
-    from aesara.tensor.random.op import RandomVariable
+    from pytensor.tensor.random.op import RandomVariable
 
 
-def params_broadcast_shapes(param_shapes, ndims_params, use_aesara=True):
+def params_broadcast_shapes(param_shapes, ndims_params, use_pytensor=True):
     """Broadcast parameters that have different dimensions.
 
     Parameters
@@ -31,7 +31,7 @@ def params_broadcast_shapes(param_shapes, ndims_params, use_aesara=True):
         The shapes of each parameters to broadcast.
     ndims_params : list of int
         The expected number of dimensions for each element in `params`.
-    use_aesara : bool
+    use_pytensor : bool
         If ``True``, use Aesara `Op`; otherwise, use NumPy.
 
     Returns
@@ -39,7 +39,7 @@ def params_broadcast_shapes(param_shapes, ndims_params, use_aesara=True):
     bcast_shapes : list of ndarray
         The broadcasted values of `params`.
     """
-    max_fn = maximum if use_aesara else max
+    max_fn = maximum if use_pytensor else max
 
     rev_extra_dims = []
     for ndim_param, param_shape in zip(ndims_params, param_shapes):
@@ -99,18 +99,18 @@ def broadcast_params(params, ndims_params):
     bcast_params : list of ndarray
         The broadcasted values of `params`.
     """
-    use_aesara = False
+    use_pytensor = False
     param_shapes = []
     for p in params:
         param_shape = tuple(
             1 if bcast else s
             for s, bcast in zip(p.shape, getattr(p, "broadcastable", (False,) * p.ndim))
         )
-        use_aesara |= isinstance(p, Variable)
+        use_pytensor |= isinstance(p, Variable)
         param_shapes.append(param_shape)
 
-    shapes = params_broadcast_shapes(param_shapes, ndims_params, use_aesara=use_aesara)
-    broadcast_to_fn = broadcast_to if use_aesara else np.broadcast_to
+    shapes = params_broadcast_shapes(param_shapes, ndims_params, use_pytensor=use_pytensor)
+    broadcast_to_fn = broadcast_to if use_pytensor else np.broadcast_to
 
     bcast_params = [
         broadcast_to_fn(param, shape) for shape, param in zip(shapes, params)
@@ -177,7 +177,7 @@ class RandomStream:
         ] = np.random.default_rng,
     ):
         if namespace is None:
-            from aesara.tensor.random import basic  # pylint: disable=import-self
+            from pytensor.tensor.random import basic  # pylint: disable=import-self
 
             self.namespaces = [basic]
         else:
@@ -204,7 +204,7 @@ class RandomStream:
         if ns_obj is None:
             raise AttributeError("No attribute {}.".format(obj))
 
-        from aesara.tensor.random.op import RandomVariable
+        from pytensor.tensor.random.op import RandomVariable
 
         if isinstance(ns_obj, RandomVariable):
 
@@ -277,7 +277,7 @@ class RandomStream:
 
         # This is the value that should be used to replace the old state
         # (i.e. `rng`) after `out` is sampled/evaluated.
-        # The updates mechanism in `aesara.function` is supposed to perform
+        # The updates mechanism in `pytensor.function` is supposed to perform
         # this replace action.
         new_rng = out.owner.outputs[0]
 

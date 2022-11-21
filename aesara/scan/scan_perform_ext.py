@@ -12,16 +12,16 @@ from importlib import reload
 from types import ModuleType
 from typing import Optional
 
-import aesara
-from aesara.compile.compilelock import lock_ctx
-from aesara.configdefaults import config
-from aesara.link.c import cmodule
+import pytensor
+from pytensor.compile.compilelock import lock_ctx
+from pytensor.configdefaults import config
+from pytensor.link.c import cmodule
 
 
 if not config.cxx:
     raise ImportError("No C compiler; cannot compile Cython-generated code")
 
-_logger = logging.getLogger("aesara.scan.scan_perform")
+_logger = logging.getLogger("pytensor.scan.scan_perform")
 
 version = 0.326  # must match constant returned in function get_version()
 
@@ -73,7 +73,7 @@ except ImportError:
         except ImportError:
             _logger.info("Compiling C code for scan")
 
-            cfile = os.path.join(aesara.__path__[0], "scan", "c_code", "scan_perform.c")
+            cfile = os.path.join(pytensor.__path__[0], "scan", "c_code", "scan_perform.c")
 
             if not os.path.exists(cfile):
                 raise ImportError(

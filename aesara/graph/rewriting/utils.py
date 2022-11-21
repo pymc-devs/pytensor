@@ -2,20 +2,20 @@ import copy
 import warnings
 from typing import TYPE_CHECKING, Generator, Optional, Sequence, Union, cast
 
-import aesara
-from aesara.graph.basic import (
+import pytensor
+from pytensor.graph.basic import (
     Apply,
     Variable,
     equal_computations,
     graph_inputs,
     vars_between,
 )
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 
 
 if TYPE_CHECKING:
-    from aesara.graph.rewriting.basic import GraphRewriter
+    from pytensor.graph.rewriting.basic import GraphRewriter
 
 
 def rewrite_graph(
@@ -43,7 +43,7 @@ def rewrite_graph(
     **kwargs
         Keyword arguments passed to a `RewriteDatabaseQuery` object.
     """
-    from aesara.compile import optdb
+    from pytensor.compile import optdb
 
     return_fgraph = False
     if isinstance(graph, FunctionGraph):
@@ -84,12 +84,12 @@ def rewrite_graph(
 
 def is_same_graph_with_merge(var1, var2, givens=None):
     """
-    Merge-based implementation of `aesara.graph.basic.is_same_graph`.
+    Merge-based implementation of `pytensor.graph.basic.is_same_graph`.
 
-    See help on `aesara.graph.basic.is_same_graph` for additional documentation.
+    See help on `pytensor.graph.basic.is_same_graph` for additional documentation.
 
     """
-    from aesara.graph.rewriting.basic import MergeOptimizer
+    from pytensor.graph.rewriting.basic import MergeOptimizer
 
     if givens is None:
         givens = {}
@@ -101,7 +101,7 @@ def is_same_graph_with_merge(var1, var2, givens=None):
     inputs = list(graph_inputs(vars))
     # The clone isn't needed as we did a deepcopy and we cloning will
     # break the mapping in givens.
-    fgraph = aesara.graph.fg.FunctionGraph(inputs, vars, clone=False)
+    fgraph = pytensor.graph.fg.FunctionGraph(inputs, vars, clone=False)
     # Perform Variable substitution.
     for to_replace, replace_by in givens.items():
         fgraph.replace(to_replace, replace_by)
@@ -143,7 +143,7 @@ def is_same_graph(var1, var2, givens=None):
     var2
         The second Variable to compare.
     givens
-        Similar to the `givens` argument of `aesara.function`, it can be used
+        Similar to the `givens` argument of `pytensor.function`, it can be used
         to perform substitutions in the computational graph of `var1` and
         `var2`. This argument is associated to neither `var1` nor `var2`:
         substitutions may affect both graphs if the substituted variable

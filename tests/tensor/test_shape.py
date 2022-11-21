@@ -1,20 +1,20 @@
 import numpy as np
 import pytest
 
-import aesara
-from aesara import Mode, function, grad
-from aesara.compile.ops import DeepCopyOp
-from aesara.configdefaults import config
-from aesara.graph.basic import Variable
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.type import Type
-from aesara.misc.safe_asarray import _asarray
-from aesara.scalar.basic import ScalarConstant
-from aesara.tensor import as_tensor_variable, get_vector_length, row
-from aesara.tensor.basic import MakeVector, constant
-from aesara.tensor.elemwise import DimShuffle, Elemwise
-from aesara.tensor.rewriting.shape import ShapeFeature
-from aesara.tensor.shape import (
+import pytensor
+from pytensor import Mode, function, grad
+from pytensor.compile.ops import DeepCopyOp
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Variable
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.type import Type
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.scalar.basic import ScalarConstant
+from pytensor.tensor import as_tensor_variable, get_vector_length, row
+from pytensor.tensor.basic import MakeVector, constant
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.rewriting.shape import ShapeFeature
+from pytensor.tensor.shape import (
     Reshape,
     Shape_i,
     SpecifyShape,
@@ -28,8 +28,8 @@ from aesara.tensor.shape import (
     specify_shape,
     unbroadcast,
 )
-from aesara.tensor.subtensor import Subtensor
-from aesara.tensor.type import (
+from pytensor.tensor.subtensor import Subtensor
+from pytensor.tensor.type import (
     TensorType,
     dmatrix,
     dtensor4,
@@ -44,9 +44,9 @@ from aesara.tensor.type import (
     tensor3,
     vector,
 )
-from aesara.tensor.type_other import NoneConst
-from aesara.tensor.var import TensorVariable
-from aesara.typed_list import make_list
+from pytensor.tensor.type_other import NoneConst
+from pytensor.tensor.var import TensorVariable
+from pytensor.typed_list import make_list
 from tests import unittest_tools as utt
 from tests.graph.utils import MyType2
 from tests.tensor.utils import eval_outputs, random
@@ -88,7 +88,7 @@ def test_shape_basic():
 
 class TestReshape(utt.InferShapeTester, utt.OptimizationTestMixin):
     def setup_method(self):
-        self.shared = aesara.shared
+        self.shared = pytensor.shared
         self.op = Reshape
         # The tag canonicalize is needed for the shape test in FAST_COMPILE
         self.mode = None
@@ -369,26 +369,26 @@ class TestSpecifyShape(utt.InferShapeTester):
 
         x = scalar()
         y = specify_shape(x, shape=())
-        f = aesara.function([x], y, mode=self.mode)
+        f = pytensor.function([x], y, mode=self.mode)
         assert f(15) == 15
 
         x = vector()
         s = lscalar()
         y = specify_shape(x, shape=s)
-        f = aesara.function([x, s], y, mode=self.mode)
+        f = pytensor.function([x, s], y, mode=self.mode)
         assert f([15], 1) == [15]
 
         x = vector()
         s = as_tensor_variable(1, dtype=np.int64)
         y = specify_shape(x, shape=s)
-        f = aesara.function([x], y, mode=self.mode)
+        f = pytensor.function([x], y, mode=self.mode)
         assert f([15]) == [15]
 
     def test_partial_shapes(self):
         x = matrix()
         s1 = lscalar()
         y = specify_shape(x, (s1, None))
-        f = aesara.function([x, s1], y, mode=self.mode)
+        f = pytensor.function([x, s1], y, mode=self.mode)
         assert f(np.zeros((2, 5), dtype=config.floatX), 2).shape == (2, 5)
         assert f(np.zeros((3, 5), dtype=config.floatX), 3).shape == (3, 5)
 
@@ -413,14 +413,14 @@ class TestSpecifyShape(utt.InferShapeTester):
         x = scalar()
         s = as_tensor_variable([], dtype=np.int32)
         y = specify_shape(x, s)
-        f = aesara.function([x], y, mode=Mode("py"))
+        f = pytensor.function([x], y, mode=Mode("py"))
         assert f(12) == 12
 
         x = vector()
         s1 = iscalar()
         shape = as_tensor_variable([s1])
         y = specify_shape(x, shape)
-        f = aesara.function([x, shape], y, mode=Mode("py"))
+        f = pytensor.function([x, shape], y, mode=Mode("py"))
         assert f([1], (1,)) == [1]
 
         with pytest.raises(AssertionError, match="SpecifyShape:.*"):
@@ -428,7 +428,7 @@ class TestSpecifyShape(utt.InferShapeTester):
 
         x = matrix()
         y = specify_shape(x, (None, 2))
-        f = aesara.function([x], y, mode=Mode("py"))
+        f = pytensor.function([x], y, mode=Mode("py"))
         assert f(np.zeros((3, 2), dtype=config.floatX)).shape == (3, 2)
         with pytest.raises(AssertionError, match="SpecifyShape:.*"):
             assert f(np.zeros((3, 3), dtype=config.floatX))
@@ -439,7 +439,7 @@ class TestSpecifyShape(utt.InferShapeTester):
 
         x = vector()
         xval = np.random.random((2)).astype(config.floatX)
-        f = aesara.function([x], specify_shape(x, 2), mode=self.mode)
+        f = pytensor.function([x], specify_shape(x, 2), mode=self.mode)
 
         assert np.array_equal(f(xval), xval)
 
@@ -456,7 +456,7 @@ class TestSpecifyShape(utt.InferShapeTester):
 
         x = matrix()
         xval = np.random.random((2, 3)).astype(config.floatX)
-        f = aesara.function([x], specify_shape(x, 2, 3), mode=self.mode)
+        f = pytensor.function([x], specify_shape(x, 2, 3), mode=self.mode)
         assert isinstance(
             [n for n in f.maker.fgraph.toposort() if isinstance(n.op, SpecifyShape)][0]
             .inputs[0]
@@ -472,7 +472,7 @@ class TestSpecifyShape(utt.InferShapeTester):
                 f(xval)
 
         s = iscalar("s")
-        f = aesara.function([x, s], specify_shape(x, None, s), mode=self.mode)
+        f = pytensor.function([x, s], specify_shape(x, None, s), mode=self.mode)
         x_val = np.zeros((3, 2), dtype=config.floatX)
         assert f(x_val, 2).shape == (3, 2)
         with pytest.raises(AssertionError, match="SpecifyShape:.*"):
@@ -593,7 +593,7 @@ def test_shape_i_basics():
 
 def test_get_vector_length():
     # Test `Shape`s
-    x = aesara.shared(np.zeros((2, 3, 4, 5)))
+    x = pytensor.shared(np.zeros((2, 3, 4, 5)))
     assert get_vector_length(x.shape) == 4
 
     # Test `SpecifyShape`
@@ -620,7 +620,7 @@ class TestUnbroadcast:
     def test_infer_shape(self):
         x = matrix()
         y = unbroadcast(x, 0)
-        f = aesara.function([x], y.shape)
+        f = pytensor.function([x], y.shape)
         assert (f(np.zeros((2, 5), dtype=config.floatX)) == [2, 5]).all()
         topo = f.maker.fgraph.toposort()
         if config.mode != "FAST_COMPILE":
@@ -631,7 +631,7 @@ class TestUnbroadcast:
 
         x = row()
         y = unbroadcast(x, 0)
-        f = aesara.function([x], y.shape)
+        f = pytensor.function([x], y.shape)
         assert (f(np.zeros((1, 5), dtype=config.floatX)) == [1, 5]).all()
         topo = f.maker.fgraph.toposort()
         if config.mode != "FAST_COMPILE":

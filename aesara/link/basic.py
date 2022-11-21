@@ -12,25 +12,25 @@ from typing import (
     Union,
 )
 
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Variable
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.type import Type
-from aesara.link.utils import gc_helper, map_storage, raise_with_op, streamline
-from aesara.utils import difference
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.type import Type
+from pytensor.link.utils import gc_helper, map_storage, raise_with_op, streamline
+from pytensor.utils import difference
 
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from aesara.compile.profiling import ProfileStats
-    from aesara.graph.op import (
+    from pytensor.compile.profiling import ProfileStats
+    from pytensor.graph.op import (
         BasicThunkType,
         InputStorageType,
         OutputStorageType,
         StorageMapType,
     )
-    from aesara.tensor.var import TensorVariable
+    from pytensor.tensor.var import TensorVariable
 
 
 ThunkAndContainersType = Tuple["BasicThunkType", List["Container"], List["Container"]]
@@ -229,7 +229,7 @@ class Linker(ABC):
 
         Returns
         -------
-        nodes : list of :py:class:`aesara.graph.basic.Apply` nodes
+        nodes : list of :py:class:`pytensor.graph.basic.Apply` nodes
             The result of the scheduling or toposort operation.
         """
         if callable(self._scheduler):
@@ -484,7 +484,7 @@ class WrapLinker(Linker):
 
         Parameters
         ----------
-        fgraph : :py:class:`aesara.graph.fg.FunctionGraph`
+        fgraph : :py:class:`pytensor.graph.fg.FunctionGraph`
             The fgraph which we will link.
         no_recycling : a list of Variables that belong to fgraph.
             If a Variable is in no_recycling, L{WrapLinker} will clear

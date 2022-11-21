@@ -1,7 +1,7 @@
 import jax
 
-from aesara.link.jax.dispatch.basic import jax_funcify
-from aesara.tensor.slinalg import Cholesky, Solve, SolveTriangular
+from pytensor.link.jax.dispatch.basic import jax_funcify
+from pytensor.tensor.slinalg import Cholesky, Solve, SolveTriangular
 
 
 @jax_funcify.register(Cholesky)

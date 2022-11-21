@@ -5,14 +5,14 @@ from typing import Union
 import numpy as np
 import scipy.linalg
 
-import aesara.tensor
-from aesara.graph.basic import Apply
-from aesara.graph.op import Op
-from aesara.tensor import as_tensor_variable
-from aesara.tensor import basic as at
-from aesara.tensor import math as atm
-from aesara.tensor.type import matrix, tensor, vector
-from aesara.tensor.var import TensorVariable
+import pytensor.tensor
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+from pytensor.tensor import as_tensor_variable
+from pytensor.tensor import basic as at
+from pytensor.tensor import math as atm
+from pytensor.tensor.type import matrix, tensor, vector
+from pytensor.tensor.var import TensorVariable
 
 
 logger = logging.getLogger(__name__)
@@ -519,11 +519,11 @@ class Eigvalsh(Op):
         self.lower = lower
 
     def make_node(self, a, b):
-        if b == aesara.tensor.type_other.NoneConst:
+        if b == pytensor.tensor.type_other.NoneConst:
             a = as_tensor_variable(a)
             assert a.ndim == 2
 
-            out_dtype = aesara.scalar.upcast(a.dtype)
+            out_dtype = pytensor.scalar.upcast(a.dtype)
             w = vector(dtype=out_dtype)
             return Apply(self, [a], [w])
         else:
@@ -532,7 +532,7 @@ class Eigvalsh(Op):
             assert a.ndim == 2
             assert b.ndim == 2
 
-            out_dtype = aesara.scalar.upcast(a.dtype, b.dtype)
+            out_dtype = pytensor.scalar.upcast(a.dtype, b.dtype)
             w = vector(dtype=out_dtype)
             return Apply(self, [a, b], [w])
 
@@ -561,7 +561,7 @@ class EigvalshGrad(Op):
     """
 
     # Note: This Op (EigvalshGrad), should be removed and replaced with a graph
-    # of aesara ops that is constructed directly in Eigvalsh.grad.
+    # of pytensor ops that is constructed directly in Eigvalsh.grad.
     # But this can only be done once scipy.linalg.eigh is available as an Op
     # (currently the Eigh uses numpy.linalg.eigh, which doesn't let you
     # pass the right-hand-side matrix for a generalized eigenproblem.) See the
@@ -588,7 +588,7 @@ class EigvalshGrad(Op):
         assert b.ndim == 2
         assert gw.ndim == 1
 
-        out_dtype = aesara.scalar.upcast(a.dtype, b.dtype, gw.dtype)
+        out_dtype = pytensor.scalar.upcast(a.dtype, b.dtype, gw.dtype)
         out1 = matrix(dtype=out_dtype)
         out2 = matrix(dtype=out_dtype)
         return Apply(self, [a, b, gw], [out1, out2])

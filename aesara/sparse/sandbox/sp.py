@@ -11,19 +11,19 @@ U{http://www-users.cs.umn.edu/~saad/software/SPARSKIT/paper.ps}.
 import numpy as np
 from scipy import sparse as scipy_sparse
 
-import aesara
-import aesara.sparse
-from aesara import sparse
-from aesara import tensor as at
-from aesara.graph.op import Op
-from aesara.tensor.math import dot
-from aesara.tensor.math import max as at_max
-from aesara.tensor.shape import reshape
-from aesara.tensor.subtensor import DimShuffle
+import pytensor
+import pytensor.sparse
+from pytensor import sparse
+from pytensor import tensor as at
+from pytensor.graph.op import Op
+from pytensor.tensor.math import dot
+from pytensor.tensor.math import max as at_max
+from pytensor.tensor.shape import reshape
+from pytensor.tensor.subtensor import DimShuffle
 
 
 def register_specialize(lopt, *tags, **kwargs):
-    aesara.compile.optdb["specialize"].register(
+    pytensor.compile.optdb["specialize"].register(
         (kwargs and kwargs.pop("name")) or lopt.__name__, lopt, "fast_run", *tags
     )
 
@@ -349,7 +349,7 @@ def convolve(
     )
 
     # build sparse matrix, then generate stack of image patches
-    csc = aesara.sparse.CSM(sptype)(np.ones(indices.size), indices, indptr, spmat_shape)
+    csc = pytensor.sparse.CSM(sptype)(np.ones(indices.size), indices, indptr, spmat_shape)
     patches = (sparse.structured_dot(csc, images.T)).T
 
     # compute output of linear classifier
@@ -418,7 +418,7 @@ def max_pool(images, imgshp, maxpoolshp):
     #    print 'outshp = ', outshp
 
     # build sparse matrix, then generate stack of image patches
-    csc = aesara.sparse.CSM(sptype)(np.ones(indices.size), indices, indptr, spmat_shape)
+    csc = pytensor.sparse.CSM(sptype)(np.ones(indices.size), indices, indptr, spmat_shape)
     patches = sparse.structured_dot(csc, images.T).T
 
     pshape = at.stack(

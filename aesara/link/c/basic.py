@@ -11,34 +11,34 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 
 import numpy as np
 
-from aesara.compile.compilelock import lock_ctx
-from aesara.configdefaults import config
-from aesara.graph.basic import (
+from pytensor.compile.compilelock import lock_ctx
+from pytensor.configdefaults import config
+from pytensor.graph.basic import (
     AtomicVariable,
     Constant,
     NoParams,
     io_toposort,
     vars_between,
 )
-from aesara.link.basic import Container, Linker, LocalLinker, PerformLinker
-from aesara.link.c.cmodule import (
+from pytensor.link.basic import Container, Linker, LocalLinker, PerformLinker
+from pytensor.link.c.cmodule import (
     METH_VARARGS,
     DynamicModule,
     ExtFunction,
     GCC_compiler,
     dlimport_workdir,
 )
-from aesara.link.c.cmodule import get_module_cache as _get_module_cache
-from aesara.link.c.interface import CLinkerObject, CLinkerOp, CLinkerType
-from aesara.link.utils import gc_helper, map_storage, raise_with_op, streamline
-from aesara.utils import difference, uniq
+from pytensor.link.c.cmodule import get_module_cache as _get_module_cache
+from pytensor.link.c.interface import CLinkerObject, CLinkerOp, CLinkerType
+from pytensor.link.utils import gc_helper, map_storage, raise_with_op, streamline
+from pytensor.utils import difference, uniq
 
 
 if TYPE_CHECKING:
-    from aesara.graph.fg import FunctionGraph
-    from aesara.link.c.cmodule import ModuleCache
+    from pytensor.graph.fg import FunctionGraph
+    from pytensor.link.c.cmodule import ModuleCache
 
-_logger = logging.getLogger("aesara.link.c.basic")
+_logger = logging.getLogger("pytensor.link.c.basic")
 
 
 def get_module_cache(init_args: Optional[Dict[str, Any]] = None) -> "ModuleCache":
@@ -638,9 +638,9 @@ class CLinker(Linker):
             for r in self.variables
             if isinstance(r, AtomicVariable) and r not in self.inputs
         )
-        # C type constants (aesara.scalar.ScalarType). They don't request an object
+        # C type constants (pytensor.scalar.ScalarType). They don't request an object
         self.consts = []
-        # Move c type from orphans (aesara.scalar.ScalarType) to self.consts
+        # Move c type from orphans (pytensor.scalar.ScalarType) to self.consts
         for variable in self.orphans:
             if (
                 isinstance(variable, Constant)
@@ -1231,7 +1231,7 @@ class CLinker(Linker):
 
         The outer tuple has a brief header, containing the compilation options
         passed to the compiler, the libraries to link against, a sha256 hash
-        of aesara.config (for all config options where "in_c_key" is True).
+        of pytensor.config (for all config options where "in_c_key" is True).
         It is followed by elements for every node in the topological ordering
         of `self.fgraph`.
 
@@ -1423,8 +1423,8 @@ class CLinker(Linker):
                     # instead of the value. This makes the key file much
                     # smaller for big constant arrays. Before this, we saw key
                     # files up to 80M.
-                    if hasattr(isig[0], "aesara_hash"):
-                        isig = (isig[0].aesara_hash(), topological_pos, i_idx)
+                    if hasattr(isig[0], "pytensor_hash"):
+                        isig = (isig[0].pytensor_hash(), topological_pos, i_idx)
                     try:
                         hash(isig)
                     except Exception:
@@ -1735,8 +1735,8 @@ class _CThunk:
     """
 
     def __init__(self, cthunk, init_tasks, tasks, error_storage, module):
-        # Lazy import to avoid compilation when importing aesara.
-        from aesara.link.c.cutils import run_cthunk  # noqa
+        # Lazy import to avoid compilation when importing pytensor.
+        from pytensor.link.c.cutils import run_cthunk  # noqa
 
         self.run_cthunk = run_cthunk
         self.cthunk = cthunk

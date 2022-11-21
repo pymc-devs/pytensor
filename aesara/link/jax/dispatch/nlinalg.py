@@ -1,9 +1,9 @@
 import jax.numpy as jnp
 
-from aesara.link.jax.dispatch import jax_funcify
-from aesara.tensor.blas import BatchedDot
-from aesara.tensor.math import Dot, MaxAndArgmax
-from aesara.tensor.nlinalg import SVD, Det, Eig, Eigh, MatrixInverse, QRFull
+from pytensor.link.jax.dispatch import jax_funcify
+from pytensor.tensor.blas import BatchedDot
+from pytensor.tensor.math import Dot, MaxAndArgmax
+from pytensor.tensor.nlinalg import SVD, Det, Eig, Eigh, MatrixInverse, QRFull
 
 
 @jax_funcify.register(SVD)

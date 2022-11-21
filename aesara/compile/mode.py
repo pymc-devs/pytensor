@@ -7,16 +7,16 @@ import logging
 import warnings
 from typing import Optional, Tuple, Union
 
-from aesara.compile.function.types import Supervisor
-from aesara.configdefaults import config
-from aesara.graph.destroyhandler import DestroyHandler
-from aesara.graph.rewriting.basic import (
+from pytensor.compile.function.types import Supervisor
+from pytensor.configdefaults import config
+from pytensor.graph.destroyhandler import DestroyHandler
+from pytensor.graph.rewriting.basic import (
     CheckStackTraceRewriter,
     GraphRewriter,
     MergeOptimizer,
     NodeProcessingGraphRewriter,
 )
-from aesara.graph.rewriting.db import (
+from pytensor.graph.rewriting.db import (
     EquilibriumDB,
     LocalGroupDB,
     RewriteDatabase,
@@ -24,14 +24,14 @@ from aesara.graph.rewriting.db import (
     SequenceDB,
     TopoDB,
 )
-from aesara.link.basic import Linker, PerformLinker
-from aesara.link.c.basic import CLinker, OpWiseCLinker
-from aesara.link.jax.linker import JAXLinker
-from aesara.link.numba.linker import NumbaLinker
-from aesara.link.vm import VMLinker
+from pytensor.link.basic import Linker, PerformLinker
+from pytensor.link.c.basic import CLinker, OpWiseCLinker
+from pytensor.link.jax.linker import JAXLinker
+from pytensor.link.numba.linker import NumbaLinker
+from pytensor.link.vm import VMLinker
 
 
-_logger = logging.getLogger("aesara.compile.mode")
+_logger = logging.getLogger("pytensor.compile.mode")
 
 
 # If a string is passed as the linker argument in the constructor for
@@ -124,7 +124,7 @@ class AddDestroyHandler(GraphRewriter):
 
     2) It tries to replace each output with an Op that purports to destroy it
     (but it won't I promise). If this replacement succeeds it means that
-    there is a bug in aesara. It should not be possible to destroy outputs.
+    there is a bug in pytensor. It should not be possible to destroy outputs.
 
     """
 
@@ -174,10 +174,10 @@ class PrintCurrentFunctionGraph(GraphRewriter):
         self.header = header
 
     def apply(self, fgraph):
-        import aesara.printing
+        import pytensor.printing
 
         print("PrintCurrentFunctionGraph:", self.header)
-        aesara.printing.debugprint(fgraph.outputs)
+        pytensor.printing.debugprint(fgraph.outputs)
 
 
 optdb = SequenceDB()

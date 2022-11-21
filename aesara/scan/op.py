@@ -53,16 +53,16 @@ from typing import Callable, List, Optional, Union
 
 import numpy as np
 
-import aesara
-from aesara import tensor as at
-from aesara.compile.builders import construct_nominal_fgraph, infer_shape
-from aesara.compile.function.pfunc import pfunc
-from aesara.compile.io import In, Out
-from aesara.compile.mode import Mode, get_default_mode, get_mode
-from aesara.compile.profiling import register_profiler_printer
-from aesara.configdefaults import config
-from aesara.gradient import DisconnectedType, NullType, Rop, grad, grad_undefined
-from aesara.graph.basic import (
+import pytensor
+from pytensor import tensor as at
+from pytensor.compile.builders import construct_nominal_fgraph, infer_shape
+from pytensor.compile.function.pfunc import pfunc
+from pytensor.compile.io import In, Out
+from pytensor.compile.mode import Mode, get_default_mode, get_mode
+from pytensor.compile.profiling import register_profiler_printer
+from pytensor.configdefaults import config
+from pytensor.gradient import DisconnectedType, NullType, Rop, grad, grad_undefined
+from pytensor.graph.basic import (
     Apply,
     Variable,
     clone_replace,
@@ -70,23 +70,23 @@ from aesara.graph.basic import (
     graph_inputs,
     io_connection_pattern,
 )
-from aesara.graph.features import NoOutputFromInplace
-from aesara.graph.op import HasInnerGraph, Op
-from aesara.graph.utils import InconsistencyError, MissingInputError
-from aesara.link.c.basic import CLinker
-from aesara.link.c.exceptions import MissingGXX
-from aesara.link.utils import raise_with_op
-from aesara.printing import op_debug_information
-from aesara.scan.utils import ScanProfileStats, Validator, forced_replace, safe_new
-from aesara.tensor.basic import as_tensor_variable
-from aesara.tensor.math import minimum
-from aesara.tensor.shape import Shape_i
-from aesara.tensor.type import TensorType, integer_dtypes
-from aesara.tensor.var import TensorVariable
+from pytensor.graph.features import NoOutputFromInplace
+from pytensor.graph.op import HasInnerGraph, Op
+from pytensor.graph.utils import InconsistencyError, MissingInputError
+from pytensor.link.c.basic import CLinker
+from pytensor.link.c.exceptions import MissingGXX
+from pytensor.link.utils import raise_with_op
+from pytensor.printing import op_debug_information
+from pytensor.scan.utils import ScanProfileStats, Validator, forced_replace, safe_new
+from pytensor.tensor.basic import as_tensor_variable
+from pytensor.tensor.math import minimum
+from pytensor.tensor.shape import Shape_i
+from pytensor.tensor.type import TensorType, integer_dtypes
+from pytensor.tensor.var import TensorVariable
 
 
 # Logging function for sending warning or info
-_logger = logging.getLogger("aesara.scan.op")
+_logger = logging.getLogger("pytensor.scan.op")
 
 
 err_msg1 = (
@@ -166,7 +166,7 @@ def check_broadcast(v1, v2):
         "axis %d in `output_info`. This can happen if one of the "
         "dimension is fixed to 1 in the input, while it is still "
         "variable in the output, or vice-verca. You have to make "
-        "them consistent, e.g. using aesara.tensor."
+        "them consistent, e.g. using pytensor.tensor."
         "{unbroadcast, specify_broadcastable}."
     )
     size = min(v1.type.ndim, v2.type.ndim)
@@ -709,7 +709,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             If you prefer the computations of one step of `scan` to be done
             differently then the entire function, you can use this parameter to
             describe how the computations in this loop are done (see
-            `aesara.function` for details about possible values and their meaning).
+            `pytensor.function` for details about possible values and their meaning).
         typeConstructor
             Function that constructs a `TensorType` for the outputs.
         truncate_gradient
@@ -735,17 +735,17 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         allow_gc
             Set the value of `allow_gc` for the internal graph of the `Scan`.  If
             set to ``None``, this will use the value of
-            `aesara.config.scan__allow_gc`.
+            `pytensor.config.scan__allow_gc`.
 
             The full `Scan` behavior related to allocation is determined by this
-            value and the flag `aesara.config.allow_gc`. If the flag
+            value and the flag `pytensor.config.allow_gc`. If the flag
             `allow_gc` is ``True`` (default) and this `allow_gc` is ``False``
             (default), then we let `Scan` allocate all intermediate memory
             on the first iteration, and they are not garbage collected
             after that first iteration; this is determined by `allow_gc`. This can
             speed up allocation of the subsequent iterations. All those temporary
             allocations are freed at the end of all iterations; this is what the
-            flag `aesara.config.allow_gc` means.
+            flag `pytensor.config.allow_gc` means.
         strict
             If ``True``, all the shared variables used in the inner-graph must be provided.
 
@@ -1410,8 +1410,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
         fgraph.update_mapping = update_mapping
 
-        from aesara.compile.function.types import Supervisor
-        from aesara.graph.destroyhandler import DestroyHandler
+        from pytensor.compile.function.types import Supervisor
+        from pytensor.graph.destroyhandler import DestroyHandler
 
         for node in fgraph.apply_nodes:
             if node.op.destroy_map:
@@ -1574,7 +1574,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     mit_mot_out_to_tap_idx += (tap_array[j].index(k),)
             mit_mot_out_to_tap_idx = np.asarray(mit_mot_out_to_tap_idx, dtype=np.uint32)
 
-            from aesara.scan.utils import InnerFunctionError
+            from pytensor.scan.utils import InnerFunctionError
 
             # TODO: Extract `Capsule` object and use that
             # c_thunk = getattr(self.fn.vm.thunks[0], "cthunk", None)
@@ -2331,7 +2331,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
         # We cache the result of this function because, with a previous
         # implementation that repeatedly called grad, there were cases
-        # where calls to aesara.grad() took as much as 4h for functions
+        # where calls to pytensor.grad() took as much as 4h for functions
         # containing many nested scans.
         if hasattr(node.tag, "connection_pattern"):
             return node.tag.connection_pattern
@@ -2564,7 +2564,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                         if not isinstance(dC_douts[outer_oidx].type, DisconnectedType):
                             dtypes.append(dC_douts[outer_oidx].dtype)
                 if dtypes:
-                    new_dtype = aesara.scalar.upcast(*dtypes)
+                    new_dtype = pytensor.scalar.upcast(*dtypes)
                 else:
                     new_dtype = config.floatX
                 dC_dXt = safe_new(Xt, dtype=new_dtype)
@@ -3380,9 +3380,9 @@ def profile_printer(
                 print(
                     "  One scan node do not have its inner profile enabled. "
                     "If you enable Aesara profiler with "
-                    "'aesara.function(..., profile=True)', you must manually"
+                    "'pytensor.function(..., profile=True)', you must manually"
                     " enable the profiling for each scan too: "
-                    "'aesara.scan(...,profile=True)'."
+                    "'pytensor.scan(...,profile=True)'."
                     " Or use Aesara flag 'profile=True'.",
                     file=file,
                 )
@@ -3431,7 +3431,7 @@ def profile_printer(
 def _op_debug_information_Scan(op, node):
     from typing import Sequence
 
-    from aesara.scan.utils import ScanArgs
+    from pytensor.scan.utils import ScanArgs
 
     extra_information = {}
 

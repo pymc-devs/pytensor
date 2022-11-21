@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 
-import aesara
-from aesara.tensor.fourier import Fourier, fft
-from aesara.tensor.type import dmatrix, dvector, iscalar
+import pytensor
+from pytensor.tensor.fourier import Fourier, fft
+from pytensor.tensor.type import dmatrix, dvector, iscalar
 from tests import unittest_tools as utt
 
 
@@ -18,7 +18,7 @@ class TestFourier(utt.InferShapeTester):
 
     def test_perform(self):
         a = dmatrix()
-        f = aesara.function([a], self.op(a, n=10, axis=0))
+        f = pytensor.function([a], self.op(a, n=10, axis=0))
         a = np.random.random((8, 6))
         assert np.allclose(f(a), np.fft.fft(a, 10, 0))
 
@@ -65,7 +65,7 @@ class TestFourier(utt.InferShapeTester):
         ]
         for fft_test in [fft_test1, fft_test2, fft_test3, fft_test4]:
             for pt in pts:
-                aesara.gradient.verify_grad(
+                pytensor.gradient.verify_grad(
                     fft_test, [pt], n_tests=1, rng=TestFourier.rng, out_type="complex64"
                 )
 

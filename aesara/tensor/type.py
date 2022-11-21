@@ -4,24 +4,24 @@ from typing import TYPE_CHECKING, Iterable, Optional, Tuple, Union
 
 import numpy as np
 
-import aesara
-from aesara import scalar as aes
-from aesara.configdefaults import config
-from aesara.graph.basic import Variable
-from aesara.graph.type import HasDataType, HasShape
-from aesara.graph.utils import MetaType
-from aesara.link.c.type import CType
-from aesara.misc.safe_asarray import _asarray
-from aesara.utils import apply_across_args
+import pytensor
+from pytensor import scalar as aes
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Variable
+from pytensor.graph.type import HasDataType, HasShape
+from pytensor.graph.utils import MetaType
+from pytensor.link.c.type import CType
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.utils import apply_across_args
 
 
 if TYPE_CHECKING:
     from numpy.typing import DTypeLike
 
-    from aesara.tensor.var import TensorVariable
+    from pytensor.tensor.var import TensorVariable
 
 
-_logger = logging.getLogger("aesara.tensor.type")
+_logger = logging.getLogger("pytensor.tensor.type")
 
 
 # Define common subsets of dtypes (as strings).
@@ -49,8 +49,8 @@ dtype_specs_map = {
     "int32": (int, "npy_int32", "NPY_INT32"),
     "uint64": (int, "npy_uint64", "NPY_UINT64"),
     "int64": (int, "npy_int64", "NPY_INT64"),
-    "complex128": (complex, "aesara_complex128", "NPY_COMPLEX128"),
-    "complex64": (complex, "aesara_complex64", "NPY_COMPLEX64"),
+    "complex128": (complex, "pytensor_complex128", "NPY_COMPLEX128"),
+    "complex64": (complex, "pytensor_complex64", "NPY_COMPLEX64"),
 }
 
 
@@ -335,7 +335,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
             # `var.type` only differs from `self` in that its shape is (at least partially)
             # less specific than `self`, so we convert `var` to `self`'s `Type`.
             # `specify_shape` will combine the more precise shapes of the two types
-            return aesara.tensor.specify_shape(var, self.shape)
+            return pytensor.tensor.specify_shape(var, self.shape)
 
     @staticmethod
     def values_eq(a, b, force_same_dtype=True):
@@ -665,7 +665,7 @@ def values_eq_approx(
         if str(a.dtype) not in continuous_dtypes:
             return np.all(a == b)
         else:
-            cmp = aesara.tensor.math._allclose(a, b, rtol=rtol, atol=atol)
+            cmp = pytensor.tensor.math._allclose(a, b, rtol=rtol, atol=atol)
             if cmp:
                 # Numpy claims they are close, this is good enough for us.
                 return True
@@ -732,7 +732,7 @@ def values_eq_approx_always_true(a, b):
     return True
 
 
-aesara.compile.register_view_op_c_code(
+pytensor.compile.register_view_op_c_code(
     TensorType,
     """
     Py_XDECREF(%(oname)s);
@@ -743,7 +743,7 @@ aesara.compile.register_view_op_c_code(
 )
 
 
-aesara.compile.register_deep_copy_op_c_code(
+pytensor.compile.register_deep_copy_op_c_code(
     TensorType,
     """
     int alloc = %(oname)s == NULL;
@@ -800,7 +800,7 @@ def scalar(name=None, dtype=None):
     Parameters
     ----------
     dtype: numeric
-        None means to use aesara.config.floatX.
+        None means to use pytensor.config.floatX.
     name
         A name to attach to this variable.
 
@@ -838,7 +838,7 @@ def vector(name=None, dtype=None):
     Parameters
     ----------
     dtype: numeric
-        None means to use aesara.config.floatX.
+        None means to use pytensor.config.floatX.
     name
         A name to attach to this variable
 
@@ -873,7 +873,7 @@ def matrix(name=None, dtype=None):
     Parameters
     ----------
     dtype: numeric
-        None means to use aesara.config.floatX.
+        None means to use pytensor.config.floatX.
     name
         A name to attach to this variable.
 
@@ -908,7 +908,7 @@ def row(name=None, dtype=None):
     Parameters
     ----------
     dtype: numeric type
-        None means to use aesara.config.floatX.
+        None means to use pytensor.config.floatX.
     name
         A name to attach to this variable.
 
@@ -941,7 +941,7 @@ def col(
     name
         A name to attach to this variable.
     dtype
-        ``None`` means to use `aesara.config.floatX`.
+        ``None`` means to use `pytensor.config.floatX`.
 
     """
     if dtype is None:
@@ -972,7 +972,7 @@ def tensor3(
     name
         A name to attach to this variable.
     dtype
-        ``None`` means to use `aesara.config.floatX`.
+        ``None`` means to use `pytensor.config.floatX`.
 
     """
     if dtype is None:
@@ -1005,7 +1005,7 @@ def tensor4(
     name
         A name to attach to this variable.
     dtype
-        ``None`` means to use `aesara.config.floatX`.
+        ``None`` means to use `pytensor.config.floatX`.
 
     """
     if dtype is None:
@@ -1038,7 +1038,7 @@ def tensor5(
     name
         A name to attach to this variable.
     dtype
-        ``None`` means to use `aesara.config.floatX`.
+        ``None`` means to use `pytensor.config.floatX`.
 
     """
     if dtype is None:
@@ -1071,7 +1071,7 @@ def tensor6(
     name
         A name to attach to this variable.
     dtype
-        ``None`` means to use `aesara.config.floatX`.
+        ``None`` means to use `pytensor.config.floatX`.
 
     """
     if dtype is None:
@@ -1104,7 +1104,7 @@ def tensor7(
     name
         A name to attach to this variable.
     dtype
-        ``None`` means to use `aesara.config.floatX`.
+        ``None`` means to use `pytensor.config.floatX`.
 
     """
     if dtype is None:

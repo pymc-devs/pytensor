@@ -1,7 +1,7 @@
 import jax
 
-from aesara.link.jax.dispatch.basic import jax_funcify
-from aesara.tensor.subtensor import (
+from pytensor.link.jax.dispatch.basic import jax_funcify
+from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
     AdvancedSubtensor,
@@ -10,7 +10,7 @@ from aesara.tensor.subtensor import (
     Subtensor,
     indices_from_subtensor,
 )
-from aesara.tensor.type_other import MakeSlice
+from pytensor.tensor.type_other import MakeSlice
 
 
 @jax_funcify.register(Subtensor)

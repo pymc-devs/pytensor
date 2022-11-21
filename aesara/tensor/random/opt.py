@@ -2,9 +2,9 @@ import warnings
 
 
 warnings.warn(
-    "The module `aesara.tensor.random.opt` is deprecated; use `aesara.tensor.random.rewriting` instead.",
+    "The module `pytensor.tensor.random.opt` is deprecated; use `pytensor.tensor.random.rewriting` instead.",
     DeprecationWarning,
     stacklevel=2,
 )
 
-from aesara.tensor.random.rewriting import *  # noqa: F401 E402 F403
+from pytensor.tensor.random.rewriting import *  # noqa: F401 E402 F403

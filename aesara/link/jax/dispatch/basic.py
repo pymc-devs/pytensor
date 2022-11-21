@@ -5,12 +5,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from aesara.compile.ops import DeepCopyOp, ViewOp
-from aesara.configdefaults import config
-from aesara.graph.fg import FunctionGraph
-from aesara.ifelse import IfElse
-from aesara.link.utils import fgraph_to_python
-from aesara.raise_op import Assert, CheckAndRaise
+from pytensor.compile.ops import DeepCopyOp, ViewOp
+from pytensor.configdefaults import config
+from pytensor.graph.fg import FunctionGraph
+from pytensor.ifelse import IfElse
+from pytensor.link.utils import fgraph_to_python
+from pytensor.raise_op import Assert, CheckAndRaise
 
 
 if config.floatX == "float64":

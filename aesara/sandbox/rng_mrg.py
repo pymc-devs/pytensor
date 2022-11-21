@@ -17,29 +17,29 @@ import warnings
 
 import numpy as np
 
-from aesara import function, gradient
-from aesara import scalar as aes
-from aesara import shared
-from aesara import tensor as at
-from aesara.compile import optdb
-from aesara.configdefaults import config
-from aesara.gradient import undefined_grad
-from aesara.graph.basic import Apply, Constant, Variable
-from aesara.graph.rewriting.basic import in2out, node_rewriter
-from aesara.link.c.op import COp, Op
-from aesara.link.c.params_type import ParamsType
-from aesara.sandbox import multinomial
-from aesara.scalar import bool as bool_t
-from aesara.scalar import int32 as int_t
-from aesara.tensor import as_tensor_variable, cast, get_vector_length
-from aesara.tensor.math import cos, log, prod, sin, sqrt
-from aesara.tensor.shape import reshape
-from aesara.tensor.type import TensorType, iscalar, ivector, lmatrix
+from pytensor import function, gradient
+from pytensor import scalar as aes
+from pytensor import shared
+from pytensor import tensor as at
+from pytensor.compile import optdb
+from pytensor.configdefaults import config
+from pytensor.gradient import undefined_grad
+from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.rewriting.basic import in2out, node_rewriter
+from pytensor.link.c.op import COp, Op
+from pytensor.link.c.params_type import ParamsType
+from pytensor.sandbox import multinomial
+from pytensor.scalar import bool as bool_t
+from pytensor.scalar import int32 as int_t
+from pytensor.tensor import as_tensor_variable, cast, get_vector_length
+from pytensor.tensor.math import cos, log, prod, sin, sqrt
+from pytensor.tensor.shape import reshape
+from pytensor.tensor.type import TensorType, iscalar, ivector, lmatrix
 
 
 warnings.warn(
-    "The module `aesara.sandbox.rng_mrg` is deprecated. "
-    "Use the module `aesara.tensor.random` for random variables instead.",
+    "The module `pytensor.sandbox.rng_mrg` is deprecated. "
+    "Use the module `pytensor.tensor.random` for random variables instead.",
     DeprecationWarning,
     stacklevel=2,
 )
@@ -1052,7 +1052,7 @@ class MRG_RandomStream:
         replace: bool (default True)
             Whether the sample is with or without replacement.
             Only replace=False is implemented for now.
-        p: 2d numpy array or aesara tensor
+        p: 2d numpy array or pytensor tensor
             the probabilities of the distribution, corresponding to values
             0 to `p.shape[1]-1`.
 

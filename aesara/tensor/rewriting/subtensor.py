@@ -3,18 +3,18 @@ from collections.abc import Iterable
 
 import numpy as np
 
-import aesara
-import aesara.scalar.basic as aes
-from aesara import compile
-from aesara.graph.basic import Constant, Variable
-from aesara.graph.rewriting.basic import (
+import pytensor
+import pytensor.scalar.basic as aes
+from pytensor import compile
+from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.rewriting.basic import (
     WalkingGraphRewriter,
     copy_stack_trace,
     in2out,
     node_rewriter,
 )
-from aesara.raise_op import Assert
-from aesara.tensor.basic import (
+from pytensor.raise_op import Assert
+from pytensor.tensor.basic import (
     Alloc,
     Join,
     MakeVector,
@@ -28,11 +28,11 @@ from aesara.tensor.basic import (
     get_scalar_constant_value,
     switch,
 )
-from aesara.tensor.elemwise import Elemwise
-from aesara.tensor.exceptions import NotScalarConstantError
-from aesara.tensor.math import Dot, add
-from aesara.tensor.math import all as at_all
-from aesara.tensor.math import (
+from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.math import Dot, add
+from pytensor.tensor.math import all as at_all
+from pytensor.tensor.math import (
     and_,
     ceil_intdiv,
     dot,
@@ -45,12 +45,12 @@ from aesara.tensor.math import (
     minimum,
     or_,
 )
-from aesara.tensor.rewriting.basic import (
+from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
     register_stabilize,
 )
-from aesara.tensor.shape import (
+from pytensor.tensor.shape import (
     Shape,
     SpecifyShape,
     Unbroadcast,
@@ -59,8 +59,8 @@ from aesara.tensor.shape import (
     specify_shape,
     unbroadcast,
 )
-from aesara.tensor.sharedvar import TensorSharedVariable
-from aesara.tensor.subtensor import (
+from pytensor.tensor.sharedvar import TensorSharedVariable
+from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
     AdvancedSubtensor,
@@ -79,9 +79,9 @@ from aesara.tensor.subtensor import (
     inc_subtensor,
     indices_from_subtensor,
 )
-from aesara.tensor.type import TensorType
-from aesara.tensor.type_other import NoneTypeT, SliceConstant, SliceType
-from aesara.tensor.var import TensorConstant, TensorVariable
+from pytensor.tensor.type import TensorType
+from pytensor.tensor.type_other import NoneTypeT, SliceConstant, SliceType
+from pytensor.tensor.var import TensorConstant, TensorVariable
 
 
 def register_useless(lopt, *tags, **kwargs):
@@ -118,8 +118,8 @@ def transform_take(a, indices, axis):
         input array is used.
 
     """
-    a = aesara.tensor.as_tensor_variable(a)
-    indices = aesara.tensor.as_tensor_variable(indices)
+    a = pytensor.tensor.as_tensor_variable(a)
+    indices = pytensor.tensor.as_tensor_variable(indices)
     # We can use the more efficient `AdvancedSubtensor1` if `indices` is a vector
     if indices.ndim == 1:
         if axis == 0:
@@ -149,7 +149,7 @@ def transform_take(a, indices, axis):
     assert len(shape_parts) > 0
 
     if len(shape_parts) > 1:
-        shape = aesara.tensor.concatenate(shape_parts)
+        shape = pytensor.tensor.concatenate(shape_parts)
     else:
         shape = shape_parts[0]
 
@@ -1813,7 +1813,7 @@ def local_uint_constant_indices(fgraph, node):
             continue
 
         if index_val.ndim > 0:
-            new_index = aesara.tensor.as_tensor_variable(
+            new_index = pytensor.tensor.as_tensor_variable(
                 index_val.astype(dtype), dtype=dtype
             )
         else:

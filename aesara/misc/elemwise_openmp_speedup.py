@@ -4,7 +4,7 @@ import sys
 from locale import getpreferredencoding
 from optparse import OptionParser
 
-from aesara.configdefaults import config
+from pytensor.configdefaults import config
 
 
 console_encoding = getpreferredencoding()

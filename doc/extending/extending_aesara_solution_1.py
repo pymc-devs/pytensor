@@ -3,10 +3,10 @@
 # Solution to Exercise in section 'Extending Aesara'
 import unittest
 
-import aesara
-from aesara.graph.basic import Apply
-from aesara.graph.op import Op
-from aesara.tensor.type import TensorType
+import pytensor
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+from pytensor.tensor.type import TensorType
 
 
 # 1. Op returns x * y
@@ -18,7 +18,7 @@ class ProdOp(Op):
         y = at.as_tensor_variable(y)
         outdim = x.type.ndim
         output = TensorType(
-            dtype=aesara.scalar.upcast(x.dtype, y.dtype), shape=(None,) * outdim
+            dtype=pytensor.scalar.upcast(x.dtype, y.dtype), shape=(None,) * outdim
         )()
         return Apply(self, inputs=[x, y], outputs=[output])
 
@@ -43,10 +43,10 @@ class SumDiffOp(Op):
         y = at.as_tensor_variable(y)
         outdim = x.type.ndim
         output1 = TensorType(
-            dtype=aesara.scalar.upcast(x.dtype, y.dtype), shape=(None,) * outdim
+            dtype=pytensor.scalar.upcast(x.dtype, y.dtype), shape=(None,) * outdim
         )()
         output2 = TensorType(
-            dtype=aesara.scalar.upcast(x.dtype, y.dtype), shape=(None,) * outdim
+            dtype=pytensor.scalar.upcast(x.dtype, y.dtype), shape=(None,) * outdim
         )()
         return Apply(self, inputs=[x, y], outputs=[output1, output2])
 
@@ -73,11 +73,11 @@ class SumDiffOp(Op):
 import numpy as np
 
 from tests import unittest_tools as utt
-from aesara import function, printing
-from aesara import tensor as at
-from aesara.graph.basic import Apply
-from aesara.graph.op import Op
-from aesara.tensor.type import dmatrix, matrix
+from pytensor import function, printing
+from pytensor import tensor as at
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+from pytensor.tensor.type import dmatrix, matrix
 
 
 class TestProdOp(utt.InferShapeTester):
@@ -89,7 +89,7 @@ class TestProdOp(utt.InferShapeTester):
         rng = np.random.default_rng(43)
         x = matrix()
         y = matrix()
-        f = aesara.function([x, y], self.op_class()(x, y))
+        f = pytensor.function([x, y], self.op_class()(x, y))
         x_val = rng.random((5, 4))
         y_val = rng.random((5, 4))
         out = f(x_val, y_val)
@@ -126,7 +126,7 @@ class TestSumDiffOp(utt.InferShapeTester):
         rng = np.random.RandomState(43)
         x = matrix()
         y = matrix()
-        f = aesara.function([x, y], self.op_class()(x, y))
+        f = pytensor.function([x, y], self.op_class()(x, y))
         x_val = rng.random((5, 4))
         y_val = rng.random((5, 4))
         out = f(x_val, y_val)
@@ -173,8 +173,8 @@ class TestSumDiffOp(utt.InferShapeTester):
 import numpy as np
 
 # as_op exercice
-import aesara
-from aesara.compile.ops import as_op
+import pytensor
+from pytensor.compile.ops import as_op
 
 
 def infer_shape_numpy_dot(fgraph, node, input_shapes):

@@ -7,15 +7,15 @@ from functools import reduce
 
 import numpy as np
 
-import aesara
-from aesara.compile import Function, builders
-from aesara.graph.basic import Apply, Constant, Variable, graph_inputs
-from aesara.graph.fg import FunctionGraph
-from aesara.printing import pydot_imported, pydot_imported_msg
+import pytensor
+from pytensor.compile import Function, builders
+from pytensor.graph.basic import Apply, Constant, Variable, graph_inputs
+from pytensor.graph.fg import FunctionGraph
+from pytensor.printing import pydot_imported, pydot_imported_msg
 
 
 try:
-    from aesara.printing import pd
+    from pytensor.printing import pd
 except ImportError:
     pass
 
@@ -103,7 +103,7 @@ class PyDotFormatter:
 
         Parameters
         ----------
-        fct : aesara.compile.function.types.Function
+        fct : pytensor.compile.function.types.Function
             A compiled Aesara function, variable, apply or a list of variables.
         graph: pydot.Dot
             `pydot` graph to which nodes are added. Creates new one if
@@ -173,7 +173,7 @@ class PyDotFormatter:
                     }
                     if isinstance(var, Constant):
                         vparams["node_type"] = "constant_input"
-                    elif isinstance(var, aesara.tensor.sharedvar.TensorSharedVariable):
+                    elif isinstance(var, pytensor.tensor.sharedvar.TensorSharedVariable):
                         vparams["node_type"] = "shared_input"
                     vparams["dtype"] = type_to_str(var.type)
                     vparams["tag"] = var_tag(var)

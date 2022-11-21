@@ -10,32 +10,32 @@ from typing import TYPE_CHECKING, List, Optional, Tuple, Type
 
 import numpy as np
 
-import aesara
-import aesara.compile.profiling
-from aesara.compile.io import In, SymbolicInput, SymbolicOutput
-from aesara.compile.ops import deep_copy_op, view_op
-from aesara.configdefaults import config
-from aesara.graph.basic import (
+import pytensor
+import pytensor.compile.profiling
+from pytensor.compile.io import In, SymbolicInput, SymbolicOutput
+from pytensor.compile.ops import deep_copy_op, view_op
+from pytensor.configdefaults import config
+from pytensor.graph.basic import (
     Constant,
     Variable,
     ancestors,
     clone_get_equiv,
     graph_inputs,
 )
-from aesara.graph.destroyhandler import DestroyHandler
-from aesara.graph.features import AlreadyThere, Feature, PreserveVariableAttributes
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import HasInnerGraph
-from aesara.graph.utils import InconsistencyError, get_variable_trace_string
-from aesara.link.basic import Container
-from aesara.link.utils import raise_with_op
+from pytensor.graph.destroyhandler import DestroyHandler
+from pytensor.graph.features import AlreadyThere, Feature, PreserveVariableAttributes
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import HasInnerGraph
+from pytensor.graph.utils import InconsistencyError, get_variable_trace_string
+from pytensor.link.basic import Container
+from pytensor.link.utils import raise_with_op
 
 
 if TYPE_CHECKING:
-    from aesara.link.vm import VM
+    from pytensor.link.vm import VM
 
 
-_logger = logging.getLogger("aesara.compile.function.types")
+_logger = logging.getLogger("pytensor.compile.function.types")
 
 
 class UnusedInputError(Exception):
@@ -588,12 +588,12 @@ class Function:
             Function. Otherwise, it will be old + " copy"
 
         profile :
-            as aesara.function profile parameter
+            as pytensor.function profile parameter
 
         Returns
         -------
-        aesara.Function
-            Copied aesara.Function
+        pytensor.Function
+            Copied pytensor.Function
         """
         # helper function
         def checkSV(sv_ori, sv_rpl):
@@ -602,7 +602,7 @@ class Function:
                 1. same type
                 2. same shape or dim?
             """
-            SharedVariable = aesara.tensor.sharedvar.SharedVariable
+            SharedVariable = pytensor.tensor.sharedvar.SharedVariable
             assert isinstance(sv_ori, SharedVariable), (
                 "Key of swap should be SharedVariable, given:",
                 sv_ori,
@@ -731,10 +731,10 @@ class Function:
                 message = name
             else:
                 message = str(profile.message) + " copy"
-            profile = aesara.compile.profiling.ProfileStats(message=message)
+            profile = pytensor.compile.profiling.ProfileStats(message=message)
             # profile -> object
         elif isinstance(profile, str):
-            profile = aesara.compile.profiling.ProfileStats(message=profile)
+            profile = pytensor.compile.profiling.ProfileStats(message=profile)
 
         f_cpy = maker.__class__(
             inputs=ins,
@@ -842,7 +842,7 @@ class Function:
                 c.provided = 0
 
             if len(args) + len(kwargs) > len(self.input_storage):
-                raise TypeError("Too many parameter passed to aesara function")
+                raise TypeError("Too many parameter passed to pytensor function")
 
             # Set positional arguments
             i = 0
@@ -861,7 +861,7 @@ class Function:
                         )
 
                     except Exception as e:
-                        function_name = "aesara function"
+                        function_name = "pytensor function"
                         argument_name = "argument"
                         if self.name:
                             function_name += ' with name "' + self.name + '"'
@@ -1040,7 +1040,7 @@ class Function:
         #
 
         dt_call = time.perf_counter() - t0
-        aesara.compile.profiling.total_fct_exec_time += dt_call
+        pytensor.compile.profiling.total_fct_exec_time += dt_call
         self.maker.mode.call_time += dt_call
         if profile:
             profile.fct_callcount += 1
@@ -1358,19 +1358,19 @@ class FunctionMaker:
         )
 
         msg = (
-            "aesara.function was asked to create a function computing "
+            "pytensor.function was asked to create a function computing "
             "outputs given certain inputs, but the provided input "
             "variable at index %i is not part of the computational graph "
             "needed to compute the outputs: %s.\n%s"
         )
         warn_msg = (
             "To make this warning into an error, you can pass the "
-            "parameter on_unused_input='raise' to aesara.function. "
+            "parameter on_unused_input='raise' to pytensor.function. "
             "To disable it completely, use on_unused_input='ignore'."
         )
         err_msg = (
             "To make this error into a warning, you can pass the "
-            "parameter on_unused_input='warn' to aesara.function. "
+            "parameter on_unused_input='warn' to pytensor.function. "
             "To disable it completely, use on_unused_input='ignore'."
         )
 
@@ -1384,7 +1384,7 @@ class FunctionMaker:
                     raise UnusedInputError(msg % (inputs.index(i), i.variable, err_msg))
                 else:
                     raise ValueError(
-                        "Invalid value for keyword on_unused_input of aesara.function: "
+                        "Invalid value for keyword on_unused_input of pytensor.function: "
                         f"'{on_unused_input}'.\n"
                         "Valid values are 'raise', 'warn', and 'ignore'."
                     )
@@ -1419,7 +1419,7 @@ class FunctionMaker:
                 end_rewriter = time.perf_counter()
                 rewrite_time = end_rewriter - start_rewriter
 
-            aesara.compile.profiling.total_graph_rewrite_time += rewrite_time
+            pytensor.compile.profiling.total_graph_rewrite_time += rewrite_time
 
             if profile:
                 if rewriter_profile is None and hasattr(rewriter, "pre_profile"):
@@ -1443,7 +1443,7 @@ class FunctionMaker:
         if not hasattr(linker, "accept"):
             raise ValueError(
                 "'linker' parameter of FunctionMaker should be "
-                f"a Linker with an accept method or one of {list(aesara.compile.mode.predefined_linkers.keys())}"
+                f"a Linker with an accept method or one of {list(pytensor.compile.mode.predefined_linkers.keys())}"
             )
 
     def __init__(
@@ -1465,7 +1465,7 @@ class FunctionMaker:
         # function and it get re-compiled, we want the current rewriter to be
         # used, not the rewriter when it was saved.
         self.mode = mode
-        mode = aesara.compile.mode.get_mode(mode)
+        mode = pytensor.compile.mode.get_mode(mode)
 
         # Assert old way of working isn't used
         if getattr(mode, "profile", None):
@@ -1479,7 +1479,7 @@ class FunctionMaker:
             #    too much execution time during testing as we compile
             #    much more functions then the number of compile c
             #    module.
-            aesara.link.c.basic.get_module_cache().refresh()
+            pytensor.link.c.basic.get_module_cache().refresh()
         # Handle the case where inputs and/or outputs is a single
         # Variable (not in a list)
         unpack_single = False
@@ -1646,7 +1646,7 @@ class FunctionMaker:
 
         # Get a function instance
         start_linker = time.perf_counter()
-        start_import_time = aesara.link.c.cmodule.import_time
+        start_import_time = pytensor.link.c.cmodule.import_time
 
         with config.change_flags(traceback__limit=config.traceback__compile_limit):
             _fn, _i, _o = self.linker.make_thunk(
@@ -1656,12 +1656,12 @@ class FunctionMaker:
         end_linker = time.perf_counter()
 
         linker_time = end_linker - start_linker
-        aesara.compile.profiling.total_time_linker += linker_time
+        pytensor.compile.profiling.total_time_linker += linker_time
         _logger.debug(f"Linker took {linker_time:f} seconds")
         if self.profile:
             self.profile.linker_time += linker_time
             _fn.time_thunks = self.profile.flag_time_thunks
-            import_time = aesara.link.c.cmodule.import_time - start_import_time
+            import_time = pytensor.link.c.cmodule.import_time - start_import_time
             self.profile.import_time += import_time
 
         fn = self.function_builder(
@@ -1716,7 +1716,7 @@ def orig_function(
     on_unused_input : {'raise', 'warn', 'ignore', None}
         What to do if a variable in the 'inputs' list is not used in the graph.
     output_keys
-        If the outputs were provided to aesara.function as a list, then
+        If the outputs were provided to pytensor.function as a list, then
         output_keys is None. Otherwise, if outputs were provided as a dict,
         output_keys is the sorted list of keys from the outputs.
     fgraph
@@ -1726,7 +1726,7 @@ def orig_function(
     """
 
     t1 = time.perf_counter()
-    mode = aesara.compile.mode.get_mode(mode)
+    mode = pytensor.compile.mode.get_mode(mode)
 
     inputs = list(map(convert_function_input, inputs))
 

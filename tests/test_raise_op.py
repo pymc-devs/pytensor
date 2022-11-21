@@ -2,13 +2,13 @@ import numpy as np
 import pytest
 import scipy.sparse
 
-import aesara
-import aesara.tensor as at
-from aesara.compile.mode import OPT_FAST_RUN, Mode
-from aesara.graph.basic import Constant, equal_computations
-from aesara.raise_op import Assert, CheckAndRaise, assert_op
-from aesara.scalar.basic import ScalarType, float64
-from aesara.sparse import as_sparse_variable
+import pytensor
+import pytensor.tensor as at
+from pytensor.compile.mode import OPT_FAST_RUN, Mode
+from pytensor.graph.basic import Constant, equal_computations
+from pytensor.raise_op import Assert, CheckAndRaise, assert_op
+from pytensor.scalar.basic import ScalarType, float64
+from pytensor.sparse import as_sparse_variable
 from tests import unittest_tools as utt
 
 
@@ -63,7 +63,7 @@ def test_CheckAndRaise_validation():
         pytest.param(
             "cvm",
             marks=pytest.mark.skipif(
-                not aesara.config.cxx,
+                not pytensor.config.cxx,
                 reason="G++ not available, so we need to skip this test.",
             ),
         ),
@@ -76,21 +76,21 @@ def test_CheckAndRaise_basic_c(linker):
 
     conds = at.scalar()
     y = check_and_raise(at.as_tensor(1), conds)
-    y_fn = aesara.function([conds], y, mode=Mode(linker))
+    y_fn = pytensor.function([conds], y, mode=Mode(linker))
 
     with pytest.raises(CustomException, match=exc_msg):
         y_fn(0)
 
     x = at.vector()
     y = check_and_raise(x, conds)
-    y_fn = aesara.function([conds, x], y.shape, mode=Mode(linker, OPT_FAST_RUN))
+    y_fn = pytensor.function([conds, x], y.shape, mode=Mode(linker, OPT_FAST_RUN))
 
-    x_val = np.array([1.0], dtype=aesara.config.floatX)
+    x_val = np.array([1.0], dtype=pytensor.config.floatX)
     assert np.array_equal(y_fn(0, x_val), x_val)
 
     y = check_and_raise(x, at.as_tensor(0))
-    y_grad = aesara.grad(y.sum(), [x])
-    y_fn = aesara.function([x], y_grad, mode=Mode(linker, OPT_FAST_RUN))
+    y_grad = pytensor.grad(y.sum(), [x])
+    y_fn = pytensor.function([x], y_grad, mode=Mode(linker, OPT_FAST_RUN))
 
     assert np.array_equal(y_fn(x_val), [x_val])
 
@@ -101,7 +101,7 @@ def test_CheckAndRaise_basic_c(linker):
         pytest.param(
             "cvm",
             marks=pytest.mark.skipif(
-                not aesara.config.cxx,
+                not pytensor.config.cxx,
                 reason="G++ not available, so we need to skip this test.",
             ),
         ),
@@ -120,7 +120,7 @@ def test_perform_CheckAndRaise_scalar(linker):
     assert isinstance(y.type, ScalarType)
 
     mode = Mode(linker=linker)
-    y_fn = aesara.function([val], y, mode=mode)
+    y_fn = pytensor.function([val], y, mode=mode)
 
     with pytest.raises(CustomException, match=exc_msg):
         y_fn(0.0)
@@ -133,8 +133,8 @@ def test_perform_CheckAndRaise_scalar(linker):
         )
         assert hasattr(y_fn.vm.thunks[-2], "cthunk")
 
-    (y_grad,) = aesara.grad(y, [val])
-    y_fn = aesara.function([val], y_grad, mode=Mode(linker, OPT_FAST_RUN))
+    (y_grad,) = pytensor.grad(y, [val])
+    y_fn = pytensor.function([val], y_grad, mode=Mode(linker, OPT_FAST_RUN))
 
     assert np.array_equal(y_fn(4.0), 1.0)
 

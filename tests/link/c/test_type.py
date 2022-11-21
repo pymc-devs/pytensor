@@ -3,12 +3,12 @@ import os
 import numpy as np
 import pytest
 
-import aesara
-from aesara import scalar as aes
-from aesara.graph.basic import Apply
-from aesara.link.c.op import COp
-from aesara.link.c.type import CDataType, CEnumType, EnumList, EnumType
-from aesara.tensor.type import TensorType, continuous_dtypes
+import pytensor
+from pytensor import scalar as aes
+from pytensor.graph.basic import Apply
+from pytensor.link.c.op import COp
+from pytensor.link.c.type import CDataType, CEnumType, EnumList, EnumType
+from pytensor.tensor.type import TensorType, continuous_dtypes
 
 
 class ProdOp(COp):
@@ -70,18 +70,18 @@ Py_INCREF(%(out)s);
 
 
 @pytest.mark.skipif(
-    not aesara.config.cxx, reason="G++ not available, so we need to skip this test."
+    not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
 )
 def test_cdata():
     i = TensorType("float32", shape=(None,))()
     c = ProdOp()(i)
     i2 = GetOp()(c)
     mode = None
-    if aesara.config.mode == "FAST_COMPILE":
+    if pytensor.config.mode == "FAST_COMPILE":
         mode = "FAST_RUN"
 
     # This should be a passthrough function for vectors
-    f = aesara.function([i], i2, mode=mode)
+    f = pytensor.function([i], i2, mode=mode)
 
     v = np.random.standard_normal((9,)).astype("float32")
 
@@ -268,7 +268,7 @@ class TestEnumTypes:
         c_sub = MyOpEnumList("-")(a, b)
         c_multiply = MyOpEnumList("*")(a, b)
         c_divide = MyOpEnumList("/")(a, b)
-        f = aesara.function([a, b], [c_add, c_sub, c_multiply, c_divide])
+        f = pytensor.function([a, b], [c_add, c_sub, c_multiply, c_divide])
         va = 12
         vb = 15
         ref = [va + vb, va - vb, va * vb, va // vb]
@@ -276,18 +276,18 @@ class TestEnumTypes:
         assert ref == out, (ref, out)
 
     @pytest.mark.skipif(
-        not aesara.config.cxx, reason="G++ not available, so we need to skip this test."
+        not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
     )
     def test_op_with_cenumtype(self):
         million = MyOpCEnumType("million")()
         billion = MyOpCEnumType("billion")()
         two_billions = MyOpCEnumType("two_billions")()
-        f = aesara.function([], [million, billion, two_billions])
+        f = pytensor.function([], [million, billion, two_billions])
         val_million, val_billion, val_two_billions = f()
         assert val_million == 1000000
         assert val_billion == val_million * 1000
         assert val_two_billions == val_billion * 2
 
-    @aesara.config.change_flags(**{"cmodule__debug": True})
+    @pytensor.config.change_flags(**{"cmodule__debug": True})
     def test_op_with_cenumtype_debug(self):
         self.test_op_with_cenumtype()

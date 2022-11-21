@@ -1,10 +1,10 @@
 import numpy as np
 
-from aesara.breakpoint import PdbBreakpoint
-from aesara.compile.function import function
-from aesara.gradient import grad
-from aesara.tensor.math import dot, gt
-from aesara.tensor.type import fmatrix, fscalar
+from pytensor.breakpoint import PdbBreakpoint
+from pytensor.compile.function import function
+from pytensor.gradient import grad
+from pytensor.tensor.math import dot, gt
+from pytensor.tensor.type import fmatrix, fscalar
 from tests import unittest_tools as utt
 
 

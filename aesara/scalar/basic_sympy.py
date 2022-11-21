@@ -1,6 +1,6 @@
 import itertools as it
 
-from aesara.scalar.basic import Apply, ScalarOp, as_scalar, float32, float64, int64
+from pytensor.scalar.basic import Apply, ScalarOp, as_scalar, float32, float64, int64
 
 
 imported_sympy = False
@@ -22,7 +22,7 @@ def sympy_dtype(expr):
     return get_default_datatype(expr).cname
 
 
-def aesara_dtype(expr):
+def pytensor_dtype(expr):
     return {"double": float64, "float": float32, "int": int64}[sympy_dtype(expr)]
 
 
@@ -33,15 +33,15 @@ class SymPyCCode(ScalarOp):
     Examples
     --------
     >>> from sympy.abc import x, y  # SymPy Variables
-    >>> from aesara.scalar.basic_sympy import SymPyCCode
+    >>> from pytensor.scalar.basic_sympy import SymPyCCode
     >>> op = SymPyCCode([x, y], x + y)
 
-    >>> from aesara.scalar.basic import floats
+    >>> from pytensor.scalar.basic import floats
     >>> xt, yt = floats('xy') # Aesara variables
     >>> zt = op(xt, yt)
 
-    >>> import aesara
-    >>> f = aesara.function([xt, yt], zt)
+    >>> import pytensor
+    >>> f = pytensor.function([xt, yt], zt)
     >>> f(1.0, 2.0)
     3.0
 
@@ -81,7 +81,7 @@ class SymPyCCode(ScalarOp):
         return f"{y} = {f}({xs});"
 
     def output_types_preference(self, *inputs):
-        return [aesara_dtype(self.expr)]
+        return [pytensor_dtype(self.expr)]
 
     def make_node(self, *inputs):
         # TODO: assert input types are correct use get_default_datatype

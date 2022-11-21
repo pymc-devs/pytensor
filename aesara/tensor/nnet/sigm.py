@@ -4,17 +4,17 @@ stability.
 
 """
 
-import aesara
-from aesara import printing
-from aesara import scalar as aes
-from aesara.graph.rewriting.basic import copy_stack_trace, node_rewriter
-from aesara.printing import pprint
-from aesara.scalar import sigmoid as scalar_sigmoid
-from aesara.scalar.math import Sigmoid
-from aesara.tensor.basic import constant
-from aesara.tensor.elemwise import Elemwise
-from aesara.tensor.math import clip, sigmoid
-from aesara.tensor.type import TensorType
+import pytensor
+from pytensor import printing
+from pytensor import scalar as aes
+from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
+from pytensor.printing import pprint
+from pytensor.scalar import sigmoid as scalar_sigmoid
+from pytensor.scalar.math import Sigmoid
+from pytensor.tensor.basic import constant
+from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.math import clip, sigmoid
+from pytensor.tensor.type import TensorType
 
 
 class UltraFastScalarSigmoid(aes.UnaryScalarOp):
@@ -129,7 +129,7 @@ def local_ultra_fast_sigmoid(fgraph, node):
         return [out]
 
 
-aesara.compile.optdb["uncanonicalize"].register(
+pytensor.compile.optdb["uncanonicalize"].register(
     "local_ultra_fast_sigmoid", local_ultra_fast_sigmoid
 )
 
@@ -171,6 +171,6 @@ def local_hard_sigmoid(fgraph, node):
         return [out]
 
 
-aesara.compile.optdb["uncanonicalize"].register(
+pytensor.compile.optdb["uncanonicalize"].register(
     "local_hard_sigmoid", local_hard_sigmoid
 )

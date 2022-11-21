@@ -1,12 +1,12 @@
 import numpy as np
 
-import aesara.tensor as at
-from aesara import config, function, grad, shared
-from aesara.compile.mode import FAST_RUN
-from aesara.scan.views import foldl, foldr
-from aesara.scan.views import map as at_map
-from aesara.scan.views import reduce as at_reduce
-from aesara.tensor.type import scalar, vector
+import pytensor.tensor as at
+from pytensor import config, function, grad, shared
+from pytensor.compile.mode import FAST_RUN
+from pytensor.scan.views import foldl, foldr
+from pytensor.scan.views import map as at_map
+from pytensor.scan.views import reduce as at_reduce
+from pytensor.tensor.type import scalar, vector
 from tests import unittest_tools as utt
 from tests.scan.test_basic import clone_optimized_graph, grab_scan_node
 
@@ -33,8 +33,8 @@ def test_map():
     rng = np.random.default_rng(utt.fetch_seed())
     vals = rng.uniform(-5.0, 5.0, size=(10,))
     abs_vals = abs(vals)
-    aesara_vals = f(vals)
-    utt.assert_allclose(abs_vals, aesara_vals)
+    pytensor_vals = f(vals)
+    utt.assert_allclose(abs_vals, pytensor_vals)
 
 
 def test_reduce_memory_consumption():

@@ -2,14 +2,14 @@ import logging
 import re
 import traceback as tb
 
-from aesara.compile.function.pfunc import pfunc
-from aesara.compile.function.types import orig_function
+from pytensor.compile.function.pfunc import pfunc
+from pytensor.compile.function.types import orig_function
 
 
 __all__ = ["types", "pfunc"]
 
 __docformat__ = "restructuredtext en"
-_logger = logging.getLogger("aesara.compile.function")
+_logger = logging.getLogger("pytensor.compile.function")
 
 
 def function_dump(
@@ -34,14 +34,14 @@ def function_dump(
 
     Ex:
 
-    replace `aesara.function(...)` by
-    `aesara.function_dump('filename.pkl', ...)`.
+    replace `pytensor.function(...)` by
+    `pytensor.function_dump('filename.pkl', ...)`.
 
     If you see this, you were probably asked to use this function to
     help debug a particular case during the compilation of an Aesara
     function. `function_dump` allows you to easily reproduce your
     compilation without generating any code. It pickles all the objects and
-    parameters needed to reproduce a call to `aesara.function()`. This
+    parameters needed to reproduce a call to `pytensor.function()`. This
     includes shared variables and their values. If you do not want
     that, you can choose to replace shared variables values with zeros by
     calling set_value(...) on them before calling `function_dump`.
@@ -49,9 +49,9 @@ def function_dump(
     To load such a dump and do the compilation:
 
     >>> import pickle
-    >>> import aesara
+    >>> import pytensor
     >>> d = pickle.load(open("func_dump.bin", "rb"))  # doctest: +SKIP
-    >>> f = aesara.function(**d)  # doctest: +SKIP
+    >>> f = pytensor.function(**d)  # doctest: +SKIP
 
     Note:
     The parameter `extra_tag_to_remove` is passed to the StripPickler used.
@@ -75,9 +75,9 @@ def function_dump(
         on_unused_input=on_unused_input,
     )
     with open(filename, "wb") as f:
-        import aesara.misc.pkl_utils
+        import pytensor.misc.pkl_utils
 
-        pickler = aesara.misc.pkl_utils.StripPickler(
+        pickler = pytensor.misc.pkl_utils.StripPickler(
             f, protocol=-1, extra_tag_to_remove=extra_tag_to_remove
         )
         pickler.dump(d)
@@ -98,7 +98,7 @@ def function(
     on_unused_input=None,
 ):
     """
-    Return a :class:`callable object <aesara.compile.function.types.Function>`
+    Return a :class:`callable object <pytensor.compile.function.types.Function>`
     that will calculate `outputs` from `inputs`.
 
     Parameters
@@ -156,7 +156,7 @@ def function(
 
     Returns
     -------
-    :class:`aesara.compile.function.types.Function` instance
+    :class:`pytensor.compile.function.types.Function` instance
         A callable object that will compute the outputs (given the inputs) and
         update the implicit function arguments according to the `updates`.
 
@@ -172,7 +172,7 @@ def function(
 
     Internal documentation:
 
-        What happens when you call aesara.function?
+        What happens when you call pytensor.function?
            1. RemoveShared: shared variables are just an abstraction to make
         things more convenient for the user. The shared variables are
         transformed into implicit inputs and implicit outputs. The
@@ -185,7 +185,7 @@ def function(
         will detect this.
                     inplace optimizations: say we have an apply node that
         does + on V1 and V2, with output V3. We can change the output to be
-        V1, to use less memory. aesara must be told that this optimization is
+        V1, to use less memory. pytensor must be told that this optimization is
         happening though, so that other parts of the graph are given the
         correct (pre + or post + ) version of V1.
                   fgraph will raise an error if any of these types of
@@ -196,8 +196,8 @@ def function(
         determining whether to do some optimizations. for example, a fusion
         operation that removes V3 is not very helpful if V3 is also needed for
         some other apply node. fusion operations result in a composite op that
-        takes a minigraph of aesara scalars and uses this to do elemwise
-        operations on aesara tensors
+        takes a minigraph of pytensor scalars and uses this to do elemwise
+        operations on pytensor tensors
          3. Optimization
                How well do optimizations apply to new ops?
                  Usually there are no optimizations for new ops. In fact, new
@@ -274,7 +274,7 @@ def function(
         last_frame = stack[idx]
         if last_frame[0] == source_file or last_frame[0] == compiled_file:
             func_frame = stack[idx - 1]
-            while "aesara/graph" in func_frame[0] and idx > 0:
+            while "pytensor/graph" in func_frame[0] and idx > 0:
                 idx -= 1
                 # This can happen if we call var.eval()
                 func_frame = stack[idx - 1]

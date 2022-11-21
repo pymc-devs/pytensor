@@ -1,4 +1,4 @@
-from aesara.link.c.type import CType, Type
+from pytensor.link.c.type import CType, Type
 
 
 class TypedListType(CType):
@@ -7,7 +7,7 @@ class TypedListType(CType):
     Parameters
     ----------
     ttype
-        Type of aesara variable this list will contains, can be another list.
+        Type of pytensor variable this list will contains, can be another list.
     depth
         Optional parameters, any value above 0 will create a nested list of
         this depth. (0-based)

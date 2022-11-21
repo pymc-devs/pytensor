@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-import aesara
-import aesara.tensor as at
-from aesara.tensor.nnet import corr
-from aesara.tensor.type import dmatrix, dtensor3, dtensor4, dvector, tensor4
+import pytensor
+import pytensor.tensor as at
+from pytensor.tensor.nnet import corr
+from pytensor.tensor.type import dmatrix, dtensor3, dtensor4, dvector, tensor4
 from tests import unittest_tools as utt
 from tests.tensor.nnet.test_abstract_conv import (
     TestAsymmetricPadding,
@@ -15,22 +15,22 @@ from tests.tensor.nnet.test_abstract_conv import (
 
 
 @pytest.mark.skipif(
-    aesara.config.cxx == "",
+    pytensor.config.cxx == "",
     reason="SciPy and cxx needed",
 )
 class TestCorr2D(utt.InferShapeTester):
-    if aesara.config.mode == "FAST_COMPILE":
-        mode = aesara.compile.get_mode("FAST_RUN")
+    if pytensor.config.mode == "FAST_COMPILE":
+        mode = pytensor.compile.get_mode("FAST_RUN")
     else:
         mode = None
-    dtype = aesara.config.floatX
+    dtype = pytensor.config.floatX
 
     def setup_method(self):
         self.input = tensor4("input", dtype=self.dtype)
         self.input.name = "default_V"
         self.filters = tensor4("filters", dtype=self.dtype)
         self.filters.name = "default_filters"
-        # This tests can run even when aesara.config.blas__ldflags is empty.
+        # This tests can run even when pytensor.config.blas__ldflags is empty.
         super().setup_method()
 
     def validate(
@@ -49,7 +49,7 @@ class TestCorr2D(utt.InferShapeTester):
         :param image_shape: The constant shape info passed to corrMM.
         :param filter_shape: The constant shape info passed to corrMM.
         """
-        if not aesara.config.cxx:
+        if not pytensor.config.cxx:
             pytest.skip("Need cxx to test conv2d")
         N_image_shape = [
             at.get_scalar_constant_value(at.as_tensor_variable(x)) for x in image_shape
@@ -67,7 +67,7 @@ class TestCorr2D(utt.InferShapeTester):
 
         # we create a symbolic function so that verify_grad can work
         def sym_CorrMM(input, filters):
-            # define aesara graph and function
+            # define pytensor graph and function
             input.name = "input"
             filters.name = "filters"
             rval = corr.CorrMM(border_mode, subsample, filter_dilation)(input, filters)
@@ -76,7 +76,7 @@ class TestCorr2D(utt.InferShapeTester):
 
         output = sym_CorrMM(input, filters)
         output.name = f"CorrMM()({input.name},{filters.name})"
-        aesara_corr = aesara.function([input, filters], output, mode=self.mode)
+        pytensor_corr = pytensor.function([input, filters], output, mode=self.mode)
 
         # initialize input and compute result
         image_data = np.random.random(N_image_shape).astype(self.dtype)
@@ -91,7 +91,7 @@ class TestCorr2D(utt.InferShapeTester):
             assert not image_data.flags["CONTIGUOUS"]
             assert not filter_data.flags["CONTIGUOUS"]
 
-        aesara_output = aesara_corr(image_data, filter_data)
+        pytensor_output = pytensor_corr(image_data, filter_data)
 
         # REFERENCE IMPLEMENTATION
         # Testing correlation, not convolution. Reverse filters.
@@ -159,7 +159,7 @@ class TestCorr2D(utt.InferShapeTester):
                                 * filter2d[::-1, ::-1]
                             ).sum()
 
-        utt.assert_allclose(ref_output, aesara_output)
+        utt.assert_allclose(ref_output, pytensor_output)
 
         # TEST GRADIENT
         if verify_grad:
@@ -293,7 +293,7 @@ class TestCorr2D(utt.InferShapeTester):
         with pytest.raises(Exception):
             self.validate((3, 2, 8, 8), (4, 2, 5, 5), "valid", input=dtensor3())
 
-    @pytest.mark.skipif(not aesara.config.cxx, reason="Need cxx for this test")
+    @pytest.mark.skipif(not pytensor.config.cxx, reason="Need cxx for this test")
     def test_dtype_upcast(self):
         # Checks dtype upcast for CorrMM methods.
 
@@ -311,19 +311,19 @@ class TestCorr2D(utt.InferShapeTester):
         for op, a_shape, b_shape in zip(ops, a_shapes, b_shapes):
             for a_dtype in dtypes:
                 for b_dtype in dtypes:
-                    c_dtype = aesara.scalar.upcast(a_dtype, b_dtype)
+                    c_dtype = pytensor.scalar.upcast(a_dtype, b_dtype)
                     a_tens = tensor4(dtype=a_dtype)
                     b_tens = tensor4(dtype=b_dtype)
                     a_tens_val = rand(a_shape, dtype=a_dtype)
                     b_tens_val = rand(b_shape, dtype=b_dtype)
 
                     c_tens = op()(a_tens, b_tens)
-                    f = aesara.function([a_tens, b_tens], c_tens, mode=self.mode)
+                    f = pytensor.function([a_tens, b_tens], c_tens, mode=self.mode)
                     assert f(a_tens_val, b_tens_val).dtype == c_dtype
 
     @pytest.mark.slow
     @pytest.mark.skipif(
-        aesara.config.cxx == "",
+        pytensor.config.cxx == "",
         reason="SciPy and cxx needed",
     )
     def test_infer_shape_forward(self):
@@ -374,7 +374,7 @@ class TestCorr2D(utt.InferShapeTester):
 
     @pytest.mark.slow
     @pytest.mark.skipif(
-        aesara.config.mode == "FAST_COMPILE" or aesara.config.cxx == "",
+        pytensor.config.mode == "FAST_COMPILE" or pytensor.config.cxx == "",
         reason="SciPy and cxx needed",
     )
     def test_infer_shape_gradW(self):
@@ -416,10 +416,10 @@ class TestCorr2D(utt.InferShapeTester):
                     cdtens = corrMM(border_mode=mode, subsample=subsample)(
                         adtens, bdtens
                     )
-                    f = aesara.function([adtens, bdtens], cdtens)
+                    f = pytensor.function([adtens, bdtens], cdtens)
                     cdtens_val = f(adtens_val, bdtens_val)
                     # CorrMM_gradWeights
-                    shape = (aesara.shared(bivec_val[2]), aesara.shared(bivec_val[3]))
+                    shape = (pytensor.shared(bivec_val[2]), pytensor.shared(bivec_val[3]))
                     bdtens_g = gradW(border_mode=mode, subsample=subsample)(
                         adtens, cdtens, shape=shape
                     )
@@ -433,7 +433,7 @@ class TestCorr2D(utt.InferShapeTester):
 
     @pytest.mark.slow
     @pytest.mark.skipif(
-        aesara.config.mode == "FAST_COMPILE" or not aesara.config.cxx,
+        pytensor.config.mode == "FAST_COMPILE" or not pytensor.config.cxx,
         reason="Need cxx for this test",
     )
     def test_infer_shape_gradI(self):
@@ -475,10 +475,10 @@ class TestCorr2D(utt.InferShapeTester):
                     cdtens = corrMM(border_mode=mode, subsample=subsample)(
                         adtens, bdtens
                     )
-                    f = aesara.function([adtens, bdtens], cdtens)
+                    f = pytensor.function([adtens, bdtens], cdtens)
                     cdtens_val = f(adtens_val, bdtens_val)
                     # CorrMM_gradInputs
-                    shape = (aesara.shared(aivec_val[2]), aesara.shared(aivec_val[3]))
+                    shape = (pytensor.shared(aivec_val[2]), pytensor.shared(aivec_val[3]))
                     adtens_g = gradI(border_mode=mode, subsample=subsample)(
                         bdtens, cdtens, shape=shape
                     )
@@ -506,7 +506,7 @@ class TestCorr2D(utt.InferShapeTester):
 
 
 class TestGroupCorr2d(TestGroupedConvNoOptim):
-    mode = aesara.compile.get_mode("FAST_RUN").excluding("gpuarray")
+    mode = pytensor.compile.get_mode("FAST_RUN").excluding("gpuarray")
     conv_op = corr.CorrMM
     conv_gradw_op = corr.CorrMM_gradWeights
     conv_gradi_op = corr.CorrMM_gradInputs
@@ -515,14 +515,14 @@ class TestGroupCorr2d(TestGroupedConvNoOptim):
         # define common values  first
         groups = 3
         rng = np.random.default_rng(280284)
-        bottom = rng.random((3, 6, 5, 5)).astype(aesara.config.floatX)
-        kern = rng.random((9, 2, 3, 3)).astype(aesara.config.floatX)
+        bottom = rng.random((3, 6, 5, 5)).astype(pytensor.config.floatX)
+        kern = rng.random((9, 2, 3, 3)).astype(pytensor.config.floatX)
         bottom_sym = tensor4("bottom")
         kern_sym = tensor4("kern")
 
         # grouped convolution graph
         conv_group = self.conv(num_groups=groups)(bottom_sym, kern_sym)
-        gconv_func = aesara.function([bottom_sym, kern_sym], conv_group, mode=self.mode)
+        gconv_func = pytensor.function([bottom_sym, kern_sym], conv_group, mode=self.mode)
 
         # Graph for the normal hard way
         kern_offset = kern_sym.shape[0] // groups
@@ -535,7 +535,7 @@ class TestGroupCorr2d(TestGroupedConvNoOptim):
             for i in range(groups)
         ]
         concatenated_output = at.concatenate(split_conv_output, axis=1)
-        conv_func = aesara.function(
+        conv_func = pytensor.function(
             [bottom_sym, kern_sym], concatenated_output, mode=self.mode
         )
 
@@ -548,8 +548,8 @@ class TestGroupCorr2d(TestGroupedConvNoOptim):
 
 
 class TestUnsharedCorr2d(TestUnsharedConv):
-    if aesara.config.mode == "FAST_COMPILE":
-        mode = aesara.compile.get_mode("FAST_RUN").excluding("gpuarray")
+    if pytensor.config.mode == "FAST_COMPILE":
+        mode = pytensor.compile.get_mode("FAST_RUN").excluding("gpuarray")
     else:
         mode = None
     conv2d_op = corr.CorrMM
@@ -558,8 +558,8 @@ class TestUnsharedCorr2d(TestUnsharedConv):
 
 
 class TestAsymmetricCorr(TestAsymmetricPadding):
-    if aesara.config.mode == "FAST_COMPILE":
-        mode = aesara.compile.get_mode("FAST_RUN").excluding("gpuarray")
+    if pytensor.config.mode == "FAST_COMPILE":
+        mode = pytensor.compile.get_mode("FAST_RUN").excluding("gpuarray")
     else:
         mode = None
     conv2d_op = corr.CorrMM
@@ -568,7 +568,7 @@ class TestAsymmetricCorr(TestAsymmetricPadding):
 
 
 class TestCausalCorr(TestCausalConv):
-    if aesara.config.mode == "FAST_COMPILE":
-        mode = aesara.compile.get_mode("FAST_RUN").excluding("gpuarray")
+    if pytensor.config.mode == "FAST_COMPILE":
+        mode = pytensor.compile.get_mode("FAST_RUN").excluding("gpuarray")
     else:
         mode = None

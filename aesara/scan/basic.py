@@ -2,21 +2,21 @@ import warnings
 
 import numpy as np
 
-import aesara.tensor as at
-from aesara.compile.function.pfunc import construct_pfunc_ins_and_outs
-from aesara.compile.sharedvalue import SharedVariable, collect_new_shareds
-from aesara.configdefaults import config
-from aesara.graph.basic import Constant, Variable, clone_replace, graph_inputs
-from aesara.graph.op import get_test_value
-from aesara.graph.utils import MissingInputError, TestValueError
-from aesara.scan.op import Scan, ScanInfo
-from aesara.scan.utils import expand_empty, safe_new, until
-from aesara.tensor.basic import get_scalar_constant_value
-from aesara.tensor.exceptions import NotScalarConstantError
-from aesara.tensor.math import minimum
-from aesara.tensor.shape import shape_padleft, unbroadcast
-from aesara.tensor.type import TensorType, integer_dtypes
-from aesara.updates import OrderedUpdates
+import pytensor.tensor as at
+from pytensor.compile.function.pfunc import construct_pfunc_ins_and_outs
+from pytensor.compile.sharedvalue import SharedVariable, collect_new_shareds
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Constant, Variable, clone_replace, graph_inputs
+from pytensor.graph.op import get_test_value
+from pytensor.graph.utils import MissingInputError, TestValueError
+from pytensor.scan.op import Scan, ScanInfo
+from pytensor.scan.utils import expand_empty, safe_new, until
+from pytensor.tensor.basic import get_scalar_constant_value
+from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.math import minimum
+from pytensor.tensor.shape import shape_padleft, unbroadcast
+from pytensor.tensor.type import TensorType, integer_dtypes
+from pytensor.updates import OrderedUpdates
 
 
 def get_updates_and_outputs(ls):
@@ -62,7 +62,7 @@ def get_updates_and_outputs(ls):
         Ensure `x` is made only of allowed data types.
 
         Return True iff `x` is made only of lists, tuples, dictionaries, Aesara
-        variables or `aesara.scan.utils.until` objects.
+        variables or `pytensor.scan.utils.until` objects.
 
         """
         # Is `x` a container we can iterate on?
@@ -80,7 +80,7 @@ def get_updates_and_outputs(ls):
         raise ValueError(
             "The return value of your scan lambda expression may only be "
             "made of lists, tuples, or dictionaries containing Aesara "
-            "variables (or `aesara.scan.utils.until` objects for "
+            "variables (or `pytensor.scan.utils.until` objects for "
             "conditions). In particular if you need to use constant "
             "values, you can use `tensor.constant` to turn them into "
             "Aesara variables."
@@ -237,7 +237,7 @@ def scan(
 
         .. code-block:: python
 
-            import aesara.tensor as at
+            import pytensor.tensor as at
 
             W   = at.matrix()
             W_2 = W**2
@@ -389,7 +389,7 @@ def scan(
         If you prefer the computations of one step of `scan` to be done
         differently then the entire function, you can use this parameter to
         describe how the computations in this loop are done (see
-        `aesara.function` for details about possible values and their meaning).
+        `pytensor.function` for details about possible values and their meaning).
 
     profile
         If ``True`` or a non-empty string, a profile object will be created and
@@ -401,17 +401,17 @@ def scan(
     allow_gc
         Set the value of `allow_gc` for the internal graph of the `Scan`.  If
         set to ``None``, this will use the value of
-        `aesara.config.scan__allow_gc`.
+        `pytensor.config.scan__allow_gc`.
 
         The full `Scan` behavior related to allocation is determined by this
-        value and the flag `aesara.config.allow_gc`. If the flag
+        value and the flag `pytensor.config.allow_gc`. If the flag
         `allow_gc` is ``True`` (default) and this `allow_gc` is ``False``
         (default), then we let `Scan` allocate all intermediate memory
         on the first iteration, and they are not garbage collected
         after that first iteration; this is determined by `allow_gc`. This can
         speed up allocation of the subsequent iterations. All those temporary
         allocations are freed at the end of all iterations; this is what the
-        flag `aesara.config.allow_gc` means.
+        flag `pytensor.config.allow_gc` means.
 
     strict
         If ``True``, all the shared variables used in `fn` must be provided as a
@@ -428,7 +428,7 @@ def scan(
         representing the outputs in the same order as in `outputs_info`.
         ``updates`` is a subclass of ``dict`` specifying the update rules for
         all shared variables used in `Scan`.
-        This ``dict`` should be passed to `aesara.function` when you compile
+        This ``dict`` should be passed to `pytensor.function` when you compile
         your function.
 
     """
@@ -560,7 +560,7 @@ def scan(
     # for compiling a dummy function (Iteration #1)
     ##
 
-    # create aesara inputs for the recursive function
+    # create pytensor inputs for the recursive function
     # note : this is a first batch of possible inputs that will
     #        be compiled in a dummy function; we used this dummy
     #        function to detect shared variables and their updates

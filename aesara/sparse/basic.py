@@ -13,27 +13,27 @@ import numpy as np
 import scipy.sparse
 from numpy.lib.stride_tricks import as_strided
 
-import aesara
-from aesara import _as_symbolic, as_symbolic
-from aesara import scalar as aes
-from aesara.configdefaults import config
-from aesara.gradient import DisconnectedType, grad_not_implemented, grad_undefined
-from aesara.graph.basic import Apply, Constant, Variable
-from aesara.graph.op import Op
-from aesara.link.c.op import COp
-from aesara.link.c.type import generic
-from aesara.misc.safe_asarray import _asarray
-from aesara.sparse.type import SparseTensorType, _is_sparse
-from aesara.sparse.utils import hash_from_sparse
-from aesara.tensor import basic as at
-from aesara.tensor.basic import Split
-from aesara.tensor.math import _conj
-from aesara.tensor.math import add as at_add
-from aesara.tensor.math import arcsin, arcsinh, arctan, arctanh, ceil, deg2rad
-from aesara.tensor.math import dot as at_dot
-from aesara.tensor.math import exp, expm1, floor, log, log1p, maximum, minimum
-from aesara.tensor.math import pow as at_pow
-from aesara.tensor.math import (
+import pytensor
+from pytensor import _as_symbolic, as_symbolic
+from pytensor import scalar as aes
+from pytensor.configdefaults import config
+from pytensor.gradient import DisconnectedType, grad_not_implemented, grad_undefined
+from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.op import Op
+from pytensor.link.c.op import COp
+from pytensor.link.c.type import generic
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.sparse.type import SparseTensorType, _is_sparse
+from pytensor.sparse.utils import hash_from_sparse
+from pytensor.tensor import basic as at
+from pytensor.tensor.basic import Split
+from pytensor.tensor.math import _conj
+from pytensor.tensor.math import add as at_add
+from pytensor.tensor.math import arcsin, arcsinh, arctan, arctanh, ceil, deg2rad
+from pytensor.tensor.math import dot as at_dot
+from pytensor.tensor.math import exp, expm1, floor, log, log1p, maximum, minimum
+from pytensor.tensor.math import pow as at_pow
+from pytensor.tensor.math import (
     rad2deg,
     round_half_to_even,
     sgn,
@@ -46,12 +46,12 @@ from aesara.tensor.math import (
     tanh,
     trunc,
 )
-from aesara.tensor.shape import shape, specify_broadcastable
-from aesara.tensor.type import TensorType
-from aesara.tensor.type import continuous_dtypes as tensor_continuous_dtypes
-from aesara.tensor.type import discrete_dtypes as tensor_discrete_dtypes
-from aesara.tensor.type import iscalar, ivector, scalar, tensor, vector
-from aesara.tensor.var import TensorConstant, TensorVariable, _tensor_py_operators
+from pytensor.tensor.shape import shape, specify_broadcastable
+from pytensor.tensor.type import TensorType
+from pytensor.tensor.type import continuous_dtypes as tensor_continuous_dtypes
+from pytensor.tensor.type import discrete_dtypes as tensor_discrete_dtypes
+from pytensor.tensor.type import iscalar, ivector, scalar, tensor, vector
+from pytensor.tensor.var import TensorConstant, TensorVariable, _tensor_py_operators
 
 
 sparse_formats = ["csc", "csr"]
@@ -459,7 +459,7 @@ class SparseConstantSignature(tuple):
         (a, b) = self
         return hash(type(self)) ^ hash(a) ^ hash(type(b))
 
-    def aesara_hash(self):
+    def pytensor_hash(self):
         (_, d) = self
         return hash_from_sparse(d)
 
@@ -1285,7 +1285,7 @@ class GetItem2d(Op):
     The above indexing methods are not supported because the return value
     would be a sparse matrix rather than a sparse vector, which is a
     deviation from numpy indexing rule. This decision is made largely
-    to preserve consistency between numpy and aesara. This may be revised
+    to preserve consistency between numpy and pytensor. This may be revised
     when sparse vectors are supported.
 
     The grad is not implemented for this op.
@@ -1315,7 +1315,7 @@ class GetItem2d(Op):
 
         for ind in index:
             if isinstance(ind, slice):
-                # in case of slice is written in aesara variable
+                # in case of slice is written in pytensor variable
                 start = ind.start
                 stop = ind.stop
                 step = ind.step
@@ -1439,12 +1439,12 @@ class GetItemScalar(Op):
             if isinstance(ind, slice):
                 raise Exception("GetItemScalar called with a slice as index!")
 
-            # in case of indexing using int instead of aesara variable
+            # in case of indexing using int instead of pytensor variable
             elif isinstance(ind, int):
                 ind = at.constant(ind)
                 input_op += [ind]
 
-            # in case of indexing using aesara variable
+            # in case of indexing using pytensor variable
             elif ind.ndim == 0:
                 input_op += [ind]
             else:
@@ -1764,11 +1764,11 @@ class SpSum(Op):
             return [x.zeros_like(dtype=config.floatX)]
         if self.structured:
             if self.axis is None:
-                r = gz * aesara.sparse.sp_ones_like(x)
+                r = gz * pytensor.sparse.sp_ones_like(x)
             elif self.axis == 0:
-                r = col_scale(aesara.sparse.sp_ones_like(x), gz)
+                r = col_scale(pytensor.sparse.sp_ones_like(x), gz)
             elif self.axis == 1:
-                r = row_scale(aesara.sparse.sp_ones_like(x), gz)
+                r = row_scale(pytensor.sparse.sp_ones_like(x), gz)
             else:
                 raise ValueError("Illegal value for self.axis.")
         else:
@@ -4256,7 +4256,7 @@ class ConstructSparseFromList(Op):
         idx_list = inputs[2:]
 
         gx = g_output
-        gy = aesara.tensor.subtensor.advanced_subtensor1(g_output, *idx_list)
+        gy = pytensor.tensor.subtensor.advanced_subtensor1(g_output, *idx_list)
 
         return [gx, gy] + [DisconnectedType()()] * len(idx_list)
 

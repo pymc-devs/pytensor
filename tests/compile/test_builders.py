@@ -3,27 +3,27 @@ from functools import partial
 import numpy as np
 import pytest
 
-import aesara.tensor as at
-from aesara.compile import shared
-from aesara.compile.builders import OpFromGraph
-from aesara.compile.function import function
-from aesara.configdefaults import config
-from aesara.gradient import DisconnectedType, Rop, disconnected_type, grad
-from aesara.graph.basic import equal_computations
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.null_type import NullType
-from aesara.graph.rewriting.utils import rewrite_graph
-from aesara.graph.utils import MissingInputError
-from aesara.printing import debugprint
-from aesara.tensor.basic import as_tensor
-from aesara.tensor.math import dot, exp
-from aesara.tensor.math import round as at_round
-from aesara.tensor.math import sigmoid
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.random.utils import RandomStream
-from aesara.tensor.rewriting.shape import ShapeOptimizer
-from aesara.tensor.shape import specify_shape
-from aesara.tensor.type import TensorType, matrices, matrix, scalar, vector, vectors
+import pytensor.tensor as at
+from pytensor.compile import shared
+from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.function import function
+from pytensor.configdefaults import config
+from pytensor.gradient import DisconnectedType, Rop, disconnected_type, grad
+from pytensor.graph.basic import equal_computations
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.null_type import NullType
+from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.graph.utils import MissingInputError
+from pytensor.printing import debugprint
+from pytensor.tensor.basic import as_tensor
+from pytensor.tensor.math import dot, exp
+from pytensor.tensor.math import round as at_round
+from pytensor.tensor.math import sigmoid
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.random.utils import RandomStream
+from pytensor.tensor.rewriting.shape import ShapeOptimizer
+from pytensor.tensor.shape import specify_shape
+from pytensor.tensor.type import TensorType, matrices, matrix, scalar, vector, vectors
 from tests import unittest_tools
 from tests.graph.utils import MyVariable
 

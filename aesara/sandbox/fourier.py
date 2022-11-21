@@ -10,16 +10,16 @@ import warnings
 import numpy as np
 import numpy.fft
 
-from aesara.graph.basic import Apply
-from aesara.graph.op import Op
-from aesara.link.c.type import generic
-from aesara.tensor.basic import as_tensor
-from aesara.tensor.type import zmatrix
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+from pytensor.link.c.type import generic
+from pytensor.tensor.basic import as_tensor
+from pytensor.tensor.type import zmatrix
 
 
 message = (
-    "The module aesara.sandbox.fourier will soon be deprecated."
-    " Please use aesara.tensor.fft, which supports gradients."
+    "The module pytensor.sandbox.fourier will soon be deprecated."
+    " Please use pytensor.tensor.fft, which supports gradients."
 )
 warnings.warn(message)
 

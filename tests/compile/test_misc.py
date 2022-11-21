@@ -1,11 +1,11 @@
 import numpy as np
 
-from aesara.compile.function.pfunc import pfunc
-from aesara.compile.sharedvalue import shared
-from aesara.gradient import grad
-from aesara.tensor.math import dot, sigmoid
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.type import dvector
+from pytensor.compile.function.pfunc import pfunc
+from pytensor.compile.sharedvalue import shared
+from pytensor.gradient import grad
+from pytensor.tensor.math import dot, sigmoid
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.type import dvector
 
 
 class NNet:

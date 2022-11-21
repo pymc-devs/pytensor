@@ -2,8 +2,8 @@ import warnings
 
 import jax.numpy as jnp
 
-from aesara.link.jax.dispatch.basic import jax_funcify
-from aesara.tensor.extra_ops import (
+from pytensor.link.jax.dispatch.basic import jax_funcify
+from pytensor.tensor.extra_ops import (
     Bartlett,
     BroadcastTo,
     CumOp,

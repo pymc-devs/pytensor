@@ -1,4 +1,4 @@
-from aesara._version import get_versions
+from pytensor._version import get_versions
 
 FALLBACK_VERSION = "1.0.5+unknown"
 

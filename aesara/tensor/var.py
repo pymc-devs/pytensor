@@ -7,16 +7,16 @@ from typing import Optional, TypeVar
 
 import numpy as np
 
-from aesara import tensor as at
-from aesara.configdefaults import config
-from aesara.graph.basic import Constant, OptionalApplyType, Variable
-from aesara.graph.utils import MetaType
-from aesara.scalar import ComplexError, IntegerDivisionError
-from aesara.tensor import _get_vector_length, as_tensor_variable
-from aesara.tensor.exceptions import AdvancedIndexingError
-from aesara.tensor.type import TensorType
-from aesara.tensor.type_other import NoneConst
-from aesara.tensor.utils import hash_from_ndarray
+from pytensor import tensor as at
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Constant, OptionalApplyType, Variable
+from pytensor.graph.utils import MetaType
+from pytensor.scalar import ComplexError, IntegerDivisionError
+from pytensor.tensor import _get_vector_length, as_tensor_variable
+from pytensor.tensor.exceptions import AdvancedIndexingError
+from pytensor.tensor.type import TensorType
+from pytensor.tensor.type_other import NoneConst
+from pytensor.tensor.utils import hash_from_ndarray
 
 
 _TensorTypeType = TypeVar("_TensorTypeType", bound=TensorType)
@@ -301,7 +301,7 @@ class _tensor_py_operators:
         .. warning:: This has a different signature than numpy's
                      ndarray.reshape!
                      In numpy you do not need to wrap the shape arguments
-                     in a tuple, in aesara you do need to.
+                     in a tuple, in pytensor you do need to.
 
         """
         if ndim is not None:
@@ -518,7 +518,7 @@ class _tensor_py_operators:
 
         # Force input to be an int datatype if input is an empty list or tuple
         # Else leave it as is if it is a real number
-        # Convert python literals to aesara constants
+        # Convert python literals to pytensor constants
         args = tuple(
             [
                 at.subtensor.as_index_constant(
@@ -618,7 +618,7 @@ class _tensor_py_operators:
             raise TypeError(
                 "TensorType does not support iteration. "
                 "Maybe you are using builtins.sum instead of "
-                "aesara.tensor.math.sum? (Maybe .max?)"
+                "pytensor.tensor.math.sum? (Maybe .max?)"
             )
 
     @property
@@ -654,13 +654,13 @@ class _tensor_py_operators:
     __rmatmul__ = __rdot__
 
     def sum(self, axis=None, dtype=None, keepdims=False, acc_dtype=None):
-        """See `aesara.tensor.math.sum`."""
+        """See `pytensor.tensor.math.sum`."""
         return at.math.sum(
             self, axis=axis, dtype=dtype, keepdims=keepdims, acc_dtype=acc_dtype
         )
 
     def prod(self, axis=None, dtype=None, keepdims=False, acc_dtype=None):
-        """See `aesara.tensor.math.prod`."""
+        """See `pytensor.tensor.math.prod`."""
         return at.math.prod(
             self, axis=axis, dtype=dtype, keepdims=keepdims, acc_dtype=acc_dtype
         )
@@ -681,73 +681,73 @@ class _tensor_py_operators:
             return y
 
     def mean(self, axis=None, dtype=None, keepdims=False, acc_dtype=None):
-        """See `aesara.tensor.math.mean`."""
+        """See `pytensor.tensor.math.mean`."""
         return at.math.mean(
             self, axis=axis, dtype=dtype, keepdims=keepdims, acc_dtype=acc_dtype
         )
 
     def var(self, axis=None, ddof=0, keepdims=False, corrected=False):
-        """See `aesara.tensor.math.var`."""
+        """See `pytensor.tensor.math.var`."""
         return at.math.var(
             self, axis=axis, ddof=ddof, keepdims=keepdims, corrected=corrected
         )
 
     def std(self, axis=None, ddof=0, keepdims=False, corrected=False):
-        """See `aesara.tensor.math.std`."""
+        """See `pytensor.tensor.math.std`."""
         return at.math.std(
             self, axis=axis, ddof=ddof, keepdims=keepdims, corrected=corrected
         )
 
     def min(self, axis=None, keepdims=False):
-        """See `aesara.tensor.math.min`."""
+        """See `pytensor.tensor.math.min`."""
         return at.math.min(self, axis, keepdims=keepdims)
 
     def max(self, axis=None, keepdims=False):
-        """See `aesara.tensor.math.max`."""
+        """See `pytensor.tensor.math.max`."""
         return at.math.max(self, axis, keepdims=keepdims)
 
     def argmin(self, axis=None, keepdims=False):
-        """See `aesara.tensor.math.argmin`."""
+        """See `pytensor.tensor.math.argmin`."""
         return at.math.argmin(self, axis, keepdims=keepdims)
 
     def argmax(self, axis=None, keepdims=False):
-        """See `aesara.tensor.math.argmax`."""
+        """See `pytensor.tensor.math.argmax`."""
         return at.math.argmax(self, axis, keepdims=keepdims)
 
     def nonzero(self, return_matrix=False):
-        """See `aesara.tensor.basic.nonzero`."""
+        """See `pytensor.tensor.basic.nonzero`."""
         return at.nonzero(self, return_matrix=return_matrix)
 
     def nonzero_values(self):
-        """See `aesara.tensor.basic.nonzero_values`."""
+        """See `pytensor.tensor.basic.nonzero_values`."""
         return at.nonzero_values(self)
 
     def sort(self, axis=-1, kind="quicksort", order=None):
-        """See `aesara.tensor.sort.sort`."""
+        """See `pytensor.tensor.sort.sort`."""
         return at.sort(self, axis, kind, order)
 
     def argsort(self, axis=-1, kind="quicksort", order=None):
-        """See `aesara.tensor.sort.argsort`."""
-        from aesara.tensor.sort import argsort
+        """See `pytensor.tensor.sort.argsort`."""
+        from pytensor.tensor.sort import argsort
 
         return argsort(self, axis, kind, order)
 
     def clip(self, a_min, a_max):
-        "See `aesara.tensor.math.clip`."
+        "See `pytensor.tensor.math.clip`."
         return at.math.clip(self, a_min, a_max)
 
     def conj(self):
-        """See `aesara.tensor.math.conj`."""
+        """See `pytensor.tensor.math.conj`."""
         return at.math.conj(self)
 
     conjugate = conj
 
     def repeat(self, repeats, axis=None):
-        """See `aesara.tensor.basic.repeat`."""
+        """See `pytensor.tensor.basic.repeat`."""
         return at.extra_ops.repeat(self, repeats, axis)
 
     def round(self, mode=None):
-        """See `aesara.tensor.math.round`."""
+        """See `pytensor.tensor.math.round`."""
         return at.math.round(self, mode)
 
     def trace(self):
@@ -775,12 +775,12 @@ class _tensor_py_operators:
         return at.extra_ops.searchsorted(self, v, side, sorter)
 
     def ptp(self, axis=None):
-        """See `aesara.tensor.math.ptp`."""
+        """See `pytensor.tensor.math.ptp`."""
 
         return at.math.ptp(self, axis)
 
     def swapaxes(self, axis1, axis2):
-        """See `aesara.tensor.basic.swapaxes`.
+        """See `pytensor.tensor.basic.swapaxes`.
 
         If a matrix is provided with the right axes, its transpose
         will be returned.
@@ -846,10 +846,10 @@ class TensorVariable(
                     file_path = x[-1][0]
                     rm = False
                     for p in [
-                        "aesara/tensor/",
-                        "aesara\\tensor\\",
-                        "aesara/graph/",
-                        "aesara\\tensor\\",
+                        "pytensor/tensor/",
+                        "pytensor\\tensor\\",
+                        "pytensor/graph/",
+                        "pytensor\\tensor\\",
                     ]:
                         if p in file_path:
                             x = x[:-1]
@@ -934,7 +934,7 @@ class TensorConstantSignature(tuple):
         t, d = self
         return hash((type(self), t, d.shape, self.sum))
 
-    def aesara_hash(self):
+    def pytensor_hash(self):
         _, d = self
         return hash_from_ndarray(d)
 

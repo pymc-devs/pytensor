@@ -7,7 +7,7 @@ are built by Python code. The expressions in these graphs are called
 nodes.
 
 You compile a graph by calling `function`, which takes a graph, and
-returns a callable object.  One of aesara's most important features is
+returns a callable object.  One of pytensor's most important features is
 that `function` can transform your graph before compiling it.  It can
 replace simple expressions with faster or more numerically stable
 implementations.
@@ -22,7 +22,7 @@ To learn more, check out:
 __docformat__ = "restructuredtext en"
 
 # Set a default logger. It is important to do this before importing some other
-# aesara code, since this code may want to log some messages.
+# pytensor code, since this code may want to log some messages.
 import logging
 import os
 import sys
@@ -30,38 +30,38 @@ from functools import singledispatch
 from typing import Any, NoReturn, Optional
 
 
-aesara_logger = logging.getLogger("aesara")
+pytensor_logger = logging.getLogger("pytensor")
 logging_default_handler = logging.StreamHandler()
 logging_default_formatter = logging.Formatter(
     fmt="%(levelname)s (%(name)s): %(message)s"
 )
 logging_default_handler.setFormatter(logging_default_formatter)
-aesara_logger.setLevel(logging.WARNING)
+pytensor_logger.setLevel(logging.WARNING)
 
-if not aesara_logger.hasHandlers():
-    aesara_logger.addHandler(logging_default_handler)
+if not pytensor_logger.hasHandlers():
+    pytensor_logger.addHandler(logging_default_handler)
 
 
-# Disable default log handler added to aesara_logger when the module
+# Disable default log handler added to pytensor_logger when the module
 # is imported.
-def disable_log_handler(logger=aesara_logger, handler=logging_default_handler):
+def disable_log_handler(logger=pytensor_logger, handler=logging_default_handler):
     if logger.hasHandlers():
         logger.removeHandler(handler)
 
 
 # Version information.
-from aesara.version import version as __version__
+from pytensor.version import version as __version__
 
 
-# Raise a meaningful warning/error if the aesara directory is in the Python
+# Raise a meaningful warning/error if the pytensor directory is in the Python
 # path.
 rpath = os.path.realpath(__path__[0])
 for p in sys.path:
     if os.path.realpath(p) != rpath:
         continue
-    raise RuntimeError("You have the aesara directory in your Python path.")
+    raise RuntimeError("You have the pytensor directory in your Python path.")
 
-from aesara.configdefaults import config
+from pytensor.configdefaults import config
 
 
 # This is the api version for ops that generate C code.  External ops
@@ -73,7 +73,7 @@ from aesara.configdefaults import config
 __api_version__ = 1
 
 # isort: off
-from aesara.graph.basic import Variable, clone_replace
+from pytensor.graph.basic import Variable, clone_replace
 
 # isort: on
 
@@ -111,14 +111,14 @@ def as_symbolic(x: Any, name: Optional[str] = None, **kwargs) -> Variable:
 
 @singledispatch
 def _as_symbolic(x, **kwargs) -> Variable:
-    from aesara.tensor import as_tensor_variable
+    from pytensor.tensor import as_tensor_variable
 
     return as_tensor_variable(x, **kwargs)
 
 
 # isort: off
-from aesara import scalar, tensor
-from aesara.compile import (
+from pytensor import scalar, tensor
+from pytensor.compile import (
     In,
     Mode,
     Out,
@@ -128,12 +128,12 @@ from aesara.compile import (
     predefined_optimizers,
     shared,
 )
-from aesara.compile.function import function, function_dump
-from aesara.compile.function.types import FunctionMaker
-from aesara.gradient import Lop, Rop, grad, subgraph_grad
-from aesara.printing import debugprint as dprint
-from aesara.printing import pp, pprint
-from aesara.updates import OrderedUpdates
+from pytensor.compile.function import function, function_dump
+from pytensor.compile.function.types import FunctionMaker
+from pytensor.gradient import Lop, Rop, grad, subgraph_grad
+from pytensor.printing import debugprint as dprint
+from pytensor.printing import pp, pprint
+from pytensor.updates import OrderedUpdates
 
 # isort: on
 
@@ -144,12 +144,12 @@ def get_scalar_constant_value(v):
     If `v` is the output of dim-shuffles, fills, allocs, cast, etc.
     this function digs through them.
 
-    If ``aesara.sparse`` is also there, we will look over CSM `Op`.
+    If ``pytensor.sparse`` is also there, we will look over CSM `Op`.
 
     If `v` is not some view of constant data, then raise a
     `NotScalarConstantError`.
     """
-    # Is it necessary to test for presence of aesara.sparse at runtime?
+    # Is it necessary to test for presence of pytensor.sparse at runtime?
     sparse = globals().get("sparse")
     if sparse and isinstance(v.type, sparse.SparseTensorType):
         if v.owner is not None and isinstance(v.owner.op, sparse.CSM):
@@ -159,11 +159,11 @@ def get_scalar_constant_value(v):
 
 
 # isort: off
-import aesara.tensor.random.var
-import aesara.sparse
-from aesara.scan import checkpoints
-from aesara.scan.basic import scan
-from aesara.scan.views import foldl, foldr, map, reduce
+import pytensor.tensor.random.var
+import pytensor.sparse
+from pytensor.scan import checkpoints
+from pytensor.scan.basic import scan
+from pytensor.scan.views import foldl, foldr, map, reduce
 
 # isort: on
 
@@ -176,7 +176,7 @@ config.warn_unused_flags()
 DEPRECATED_NAMES = [
     (
         "change_flags",
-        "`aesara.change_flags` is deprecated: use `aesara.config.change_flags` instead.",
+        "`pytensor.change_flags` is deprecated: use `pytensor.config.change_flags` instead.",
         config.change_flags,
     ),
 ]

@@ -2,9 +2,9 @@ import warnings
 
 
 warnings.warn(
-    "The module `aesara.scan.opt` is deprecated; use `aesara.scan.rewriting` instead.",
+    "The module `pytensor.scan.opt` is deprecated; use `pytensor.scan.rewriting` instead.",
     DeprecationWarning,
     stacklevel=2,
 )
 
-from aesara.scan.rewriting import *  # noqa: F401 E402 F403
+from pytensor.scan.rewriting import *  # noqa: F401 E402 F403

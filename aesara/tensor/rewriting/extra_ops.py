@@ -1,9 +1,9 @@
-import aesara.scalar.basic as aes
-from aesara.graph.rewriting.basic import node_rewriter
-from aesara.tensor.basic import Alloc, as_tensor_variable
-from aesara.tensor.elemwise import Elemwise
-from aesara.tensor.extra_ops import BroadcastTo, Repeat, Unique
-from aesara.tensor.rewriting.basic import register_canonicalize, register_useless
+import pytensor.scalar.basic as aes
+from pytensor.graph.rewriting.basic import node_rewriter
+from pytensor.tensor.basic import Alloc, as_tensor_variable
+from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.extra_ops import BroadcastTo, Repeat, Unique
+from pytensor.tensor.rewriting.basic import register_canonicalize, register_useless
 
 
 @register_useless

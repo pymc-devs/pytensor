@@ -6,23 +6,23 @@ from copy import copy
 import numpy as np
 import pytest
 
-import aesara
-import aesara.scalar as aes
+import pytensor
+import pytensor.scalar as aes
 import tests.unittest_tools as utt
-from aesara.compile.mode import Mode
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Variable
-from aesara.graph.fg import FunctionGraph
-from aesara.link.basic import PerformLinker
-from aesara.link.c.basic import CLinker, OpWiseCLinker
-from aesara.tensor import as_tensor_variable
-from aesara.tensor.basic import second
-from aesara.tensor.elemwise import CAReduce, CAReduceDtype, DimShuffle, Elemwise
-from aesara.tensor.exceptions import ShapeError
-from aesara.tensor.math import all as at_all
-from aesara.tensor.math import any as at_any
-from aesara.tensor.math import exp
-from aesara.tensor.type import (
+from pytensor.compile.mode import Mode
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.fg import FunctionGraph
+from pytensor.link.basic import PerformLinker
+from pytensor.link.c.basic import CLinker, OpWiseCLinker
+from pytensor.tensor import as_tensor_variable
+from pytensor.tensor.basic import second
+from pytensor.tensor.elemwise import CAReduce, CAReduceDtype, DimShuffle, Elemwise
+from pytensor.tensor.exceptions import ShapeError
+from pytensor.tensor.math import all as at_all
+from pytensor.tensor.math import any as at_any
+from pytensor.tensor.math import exp
+from pytensor.tensor.type import (
     TensorType,
     bmatrix,
     bscalar,
@@ -42,7 +42,7 @@ from tests.tensor.test_math import reduce_bitwise_and
 class TestDimShuffle(unittest_tools.InferShapeTester):
     op = DimShuffle
     type = TensorType
-    dtype = aesara.config.floatX
+    dtype = pytensor.config.floatX
 
     def with_linker(self, linker):
         for xsh, shuffle, zsh in [
@@ -60,12 +60,12 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
             ib = [entry == 1 for entry in i_shape]
             x = self.type(self.dtype, shape=i_shape)("x")
             e = self.op(ib, shuffle)(x)
-            f = aesara.function([x], e, mode=Mode(linker=linker))
+            f = pytensor.function([x], e, mode=Mode(linker=linker))
             assert f(np.ones(xsh, dtype=self.dtype)).shape == zsh
             # test that DimShuffle.infer_shape work correctly
             x = self.type(self.dtype, shape=i_shape)("x")
             e = self.op(ib, shuffle)(x)
-            f = aesara.function(
+            f = pytensor.function(
                 [x], e.shape, mode=Mode(linker=linker), on_unused_input="ignore"
             )
             assert all(f(np.ones(xsh, dtype=self.dtype))) == all(zsh)
@@ -80,7 +80,7 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
         ib = [True, True, False]
         x = self.type(self.dtype, shape=(1, 1, None))("x")
         e = self.op(ib, (1, 2))(x)
-        f = aesara.function([x], e.shape, mode=Mode(linker=linker))
+        f = pytensor.function([x], e.shape, mode=Mode(linker=linker))
         with pytest.raises(TypeError):
             f(np.ones((2, 1, 4)))
 
@@ -155,12 +155,12 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
 
         n = 100_000
 
-        x = aesara.shared(np.ones(n, dtype=np.float64))
+        x = pytensor.shared(np.ones(n, dtype=np.float64))
 
         y = x.dimshuffle([0, "x"])
         y.owner.op.inplace = inplace
 
-        f = aesara.function([], y, mode=Mode(optimizer=None))
+        f = pytensor.function([], y, mode=Mode(optimizer=None))
 
         assert len(f.maker.fgraph.apply_nodes) == 2
         assert isinstance(f.maker.fgraph.toposort()[0].op, DimShuffle)
@@ -205,10 +205,10 @@ class TestBroadcast:
     linkers = [PerformLinker, CLinker]
 
     def rand_val(self, shp):
-        return np.asarray(np.random.random(shp), dtype=aesara.config.floatX)
+        return np.asarray(np.random.random(shp), dtype=pytensor.config.floatX)
 
     def rand_cval(self, shp):
-        return np.asarray(np.random.random(shp), dtype=aesara.config.floatX)
+        return np.asarray(np.random.random(shp), dtype=pytensor.config.floatX)
 
     def with_linker(self, linker, op, type, rand_val):
         for shape_info in ("complete", "only_broadcastable", "none"):
@@ -229,22 +229,22 @@ class TestBroadcast:
                 ((), ()),
             ]:
                 if shape_info == "complete":
-                    x_type = type(aesara.config.floatX, shape=xsh)
-                    y_type = type(aesara.config.floatX, shape=ysh)
+                    x_type = type(pytensor.config.floatX, shape=xsh)
+                    y_type = type(pytensor.config.floatX, shape=ysh)
                 elif shape_info == "only_broadcastable":
                     # This condition is here for backwards compatibility, when the only
                     # type shape provided by Aesara was broadcastable/non-broadcastable
                     x_type = type(
-                        aesara.config.floatX,
+                        pytensor.config.floatX,
                         shape=tuple(s if s == 1 else None for s in xsh),
                     )
                     y_type = type(
-                        aesara.config.floatX,
+                        pytensor.config.floatX,
                         shape=tuple(s if s == 1 else None for s in ysh),
                     )
                 else:
-                    x_type = type(aesara.config.floatX, shape=[None for _ in xsh])
-                    y_type = type(aesara.config.floatX, shape=[None for _ in ysh])
+                    x_type = type(pytensor.config.floatX, shape=[None for _ in xsh])
+                    y_type = type(pytensor.config.floatX, shape=[None for _ in ysh])
 
                 x = x_type("x")
                 y = y_type("y")
@@ -280,22 +280,22 @@ class TestBroadcast:
                 ((), ()),
             ]:
                 if shape_info == "complete":
-                    x_type = type(aesara.config.floatX, shape=xsh)
-                    y_type = type(aesara.config.floatX, shape=ysh)
+                    x_type = type(pytensor.config.floatX, shape=xsh)
+                    y_type = type(pytensor.config.floatX, shape=ysh)
                 elif shape_info == "only_broadcastable":
                     # This condition is here for backwards compatibility, when the only
                     # type shape provided by Aesara was broadcastable/non-broadcastable
                     x_type = type(
-                        aesara.config.floatX,
+                        pytensor.config.floatX,
                         shape=tuple(s if s == 1 else None for s in xsh),
                     )
                     y_type = type(
-                        aesara.config.floatX,
+                        pytensor.config.floatX,
                         shape=tuple(s if s == 1 else None for s in ysh),
                     )
                 else:
-                    x_type = type(aesara.config.floatX, shape=[None for _ in xsh])
-                    y_type = type(aesara.config.floatX, shape=[None for _ in ysh])
+                    x_type = type(pytensor.config.floatX, shape=[None for _ in xsh])
+                    y_type = type(pytensor.config.floatX, shape=[None for _ in ysh])
 
                 x = x_type("x")
                 y = y_type("y")
@@ -327,7 +327,7 @@ class TestBroadcast:
         self.with_linker(PerformLinker(), self.op, self.type, self.rand_val)
 
     @pytest.mark.skipif(
-        not aesara.config.cxx, reason="G++ not available, so we need to skip this test."
+        not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
     )
     def test_c(self):
         self.with_linker(CLinker(), self.cop, self.ctype, self.rand_cval)
@@ -336,13 +336,13 @@ class TestBroadcast:
         self.with_linker_inplace(PerformLinker(), self.op, self.type, self.rand_val)
 
     @pytest.mark.skipif(
-        not aesara.config.cxx, reason="G++ not available, so we need to skip this test."
+        not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
     )
     def test_c_inplace(self):
         self.with_linker_inplace(CLinker(), self.cop, self.ctype, self.rand_cval)
 
     @pytest.mark.skipif(
-        not aesara.config.cxx, reason="G++ not available, so we need to skip this test."
+        not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
     )
     def test_fill(self):
         for linker, op, t, rval in zip(
@@ -351,8 +351,8 @@ class TestBroadcast:
             [self.type, self.ctype],
             [self.rand_val, self.rand_cval],
         ):
-            x = t(aesara.config.floatX, shape=(None, None))("x")
-            y = t(aesara.config.floatX, shape=(1, 1))("y")
+            x = t(pytensor.config.floatX, shape=(None, None))("x")
+            y = t(pytensor.config.floatX, shape=(1, 1))("y")
             e = op(aes.Second(aes.transfer_type(0)), {0: 0})(x, y)
             f = make_function(linker().accept(FunctionGraph([x, y], [e])))
             xv = rval((5, 5))
@@ -369,10 +369,10 @@ class TestBroadcast:
         y = TensorType(config.floatX, shape=(None, 1, None))("y")
         e = second(x, y)
         # TODO FIXME: Make this a real test and assert something here!
-        aesara.grad(e.sum(), y)
+        pytensor.grad(e.sum(), y)
 
     @pytest.mark.skipif(
-        not aesara.config.cxx, reason="G++ not available, so we need to skip this test."
+        not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
     )
     def test_weird_strides(self):
         for linker, op, t, rval in zip(
@@ -381,8 +381,8 @@ class TestBroadcast:
             [self.type, self.ctype],
             [self.rand_val, self.rand_cval],
         ):
-            x = t(aesara.config.floatX, shape=(None,) * 5)("x")
-            y = t(aesara.config.floatX, shape=(None,) * 5)("y")
+            x = t(pytensor.config.floatX, shape=(None,) * 5)("x")
+            y = t(pytensor.config.floatX, shape=(None,) * 5)("y")
             e = op(aes.add)(x, y)
             f = make_function(linker().accept(FunctionGraph([x, y], [e])))
             xv = rval((2, 2, 2, 2, 2))
@@ -391,7 +391,7 @@ class TestBroadcast:
             assert (f(xv, yv) == zv).all()
 
     @pytest.mark.skipif(
-        not aesara.config.cxx, reason="G++ not available, so we need to skip this test."
+        not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
     )
     def test_same_inputs(self):
         for linker, op, t, rval in zip(
@@ -400,7 +400,7 @@ class TestBroadcast:
             [self.type, self.ctype],
             [self.rand_val, self.rand_cval],
         ):
-            x = t(aesara.config.floatX, shape=(None,) * 2)("x")
+            x = t(pytensor.config.floatX, shape=(None,) * 2)("x")
             e = op(aes.add)(x, x)
             f = make_function(linker().accept(FunctionGraph([x], [e])))
             xv = rval((2, 2))
@@ -440,7 +440,7 @@ class TestCAReduce(unittest_tools.InferShapeTester):
     ):
         for xsh, tosum in self.cases:
             if dtype == "floatX":
-                dtype = aesara.config.floatX
+                dtype = pytensor.config.floatX
             x = self.type(
                 dtype, shape=tuple(entry if entry == 1 else None for entry in xsh)
             )("x")
@@ -455,7 +455,7 @@ class TestCAReduce(unittest_tools.InferShapeTester):
             if tosum is None:
                 tosum = list(range(len(xsh)))
 
-            f = aesara.function([x], e, mode=mode, on_unused_input="ignore")
+            f = pytensor.function([x], e, mode=mode, on_unused_input="ignore")
             xv = np.asarray(np.random.random(xsh))
 
             if dtype not in discrete_dtypes:
@@ -560,7 +560,7 @@ class TestCAReduce(unittest_tools.InferShapeTester):
                 e = tensor_op(x, axis=tosum)
             if tosum is None:
                 tosum = list(range(len(xsh)))
-            f = aesara.function([x], e.shape, mode=mode, on_unused_input="ignore")
+            f = pytensor.function([x], e.shape, mode=mode, on_unused_input="ignore")
             if not (
                 scalar_op in [aes.scalar_maximum, aes.scalar_minimum]
                 and (xsh == () or np.prod(xsh) == 0)
@@ -613,7 +613,7 @@ class TestCAReduce(unittest_tools.InferShapeTester):
             )
 
     @pytest.mark.skipif(
-        not aesara.config.cxx, reason="G++ not available, so we need to skip this test."
+        not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
     )
     def test_c_noopt(self):
         # We need to make sure that we cover the corner cases that
@@ -622,7 +622,7 @@ class TestCAReduce(unittest_tools.InferShapeTester):
 
     @pytest.mark.slow
     @pytest.mark.skipif(
-        not aesara.config.cxx, reason="G++ not available, so we need to skip this test."
+        not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
     )
     def test_c(self):
         for dtype in ["bool", "floatX", "complex64", "complex128", "int8", "uint8"]:
@@ -640,7 +640,7 @@ class TestCAReduce(unittest_tools.InferShapeTester):
 
     @pytest.mark.slow
     @pytest.mark.skipif(
-        not aesara.config.cxx, reason="G++ not available, so we need to skip this test."
+        not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
     )
     def test_c_nan(self):
         for dtype in ["floatX", "complex64", "complex128"]:
@@ -656,7 +656,7 @@ class TestCAReduce(unittest_tools.InferShapeTester):
 
     def test_infer_shape(self, dtype=None, pre_scalar_op=None):
         if dtype is None:
-            dtype = aesara.config.floatX
+            dtype = pytensor.config.floatX
         for xsh, tosum in self.cases:
             x = self.type(
                 dtype, shape=tuple(entry if entry == 1 else None for entry in xsh)
@@ -714,8 +714,8 @@ class TestBitOpReduceGrad:
     def test_all_grad(self):
         x = bmatrix("x")
         x_all = x.all()
-        gx = aesara.grad(x_all, x)
-        f = aesara.function([x], gx)
+        gx = pytensor.grad(x_all, x)
+        f = pytensor.function([x], gx)
         x_random = self.rng.binomial(n=1, p=0.5, size=(5, 7)).astype("int8")
         for x_val in (x_random, np.zeros_like(x_random), np.ones_like(x_random)):
             gx_val = f(x_val)
@@ -725,8 +725,8 @@ class TestBitOpReduceGrad:
     def test_any_grad(self):
         x = bmatrix("x")
         x_all = x.any()
-        gx = aesara.grad(x_all, x)
-        f = aesara.function([x], gx)
+        gx = pytensor.grad(x_all, x)
+        f = pytensor.function([x], gx)
         x_random = self.rng.binomial(n=1, p=0.5, size=(5, 7)).astype("int8")
         for x_val in (x_random, np.zeros_like(x_random), np.ones_like(x_random)):
             gx_val = f(x_val)
@@ -739,7 +739,7 @@ class TestElemwise(unittest_tools.InferShapeTester):
         x = scalar(dtype="bool")
         y = bscalar()
         z = x * y
-        dx, dy = aesara.grad(z, [x, y])
+        dx, dy = pytensor.grad(z, [x, y])
 
     def test_infer_shape(self):
 
@@ -755,7 +755,7 @@ class TestElemwise(unittest_tools.InferShapeTester):
             ((2, 1, 4, 5), (2, 3, 4, 5)),
             ((2, 3, 4, 1), (2, 3, 4, 5)),
         ]:
-            dtype = aesara.config.floatX
+            dtype = pytensor.config.floatX
             t_left = TensorType(
                 dtype, shape=tuple(entry if entry == 1 else None for entry in s_left)
             )()
@@ -777,7 +777,7 @@ class TestElemwise(unittest_tools.InferShapeTester):
         # it overflowed in this case.
         a, b, c, d, e, f = vectors("abcdef")
         s = a + b + c + d + e + f
-        g = aesara.function([a, b, c, d, e, f], s, mode=Mode(linker="py"))
+        g = pytensor.function([a, b, c, d, e, f], s, mode=Mode(linker="py"))
         g(*[np.zeros(2**11, config.floatX) for i in range(6)])
 
     def check_input_dimensions_match(self, mode):
@@ -791,7 +791,7 @@ class TestElemwise(unittest_tools.InferShapeTester):
         m = np.array([0.0, 0.0]).astype(config.floatX)
 
         z_v = x_v - m_v
-        f = aesara.function([x_v, m_v], z_v, mode=mode)
+        f = pytensor.function([x_v, m_v], z_v, mode=mode)
 
         res = f(x, m)
 
@@ -801,7 +801,7 @@ class TestElemwise(unittest_tools.InferShapeTester):
         self.check_input_dimensions_match(Mode(linker="py"))
 
     @pytest.mark.skipif(
-        not aesara.config.cxx, reason="G++ not available, so we need to skip this test."
+        not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
     )
     def test_input_dimensions_match_c(self):
         self.check_input_dimensions_match(Mode(linker="c"))
@@ -828,8 +828,8 @@ class TestElemwise(unittest_tools.InferShapeTester):
 
         assert len(res_shape) == 1
         assert len(res_shape[0]) == 2
-        assert aesara.get_scalar_constant_value(res_shape[0][0]) == 1
-        assert aesara.get_scalar_constant_value(res_shape[0][1]) == 1
+        assert pytensor.get_scalar_constant_value(res_shape[0][0]) == 1
+        assert pytensor.get_scalar_constant_value(res_shape[0][1]) == 1
 
     def test_multi_output(self):
         class CustomElemwise(Elemwise):
@@ -915,12 +915,12 @@ def test_not_implemented_elemwise_grad():
             (n, x) = inputs
             (gz,) = gout
             dy_dx = n
-            return [aesara.gradient.grad_not_implemented(self, 0, n), gz * dy_dx]
+            return [pytensor.gradient.grad_not_implemented(self, 0, n), gz * dy_dx]
 
     test_op = Elemwise(TestOp())
     x = scalar()
-    assert isinstance(aesara.gradient.grad(test_op(2, x), x), Variable)
+    assert isinstance(pytensor.gradient.grad(test_op(2, x), x), Variable)
 
     # Verify that trying to use the not implemented gradient fails.
-    with pytest.raises(aesara.gradient.NullTypeGradError):
-        aesara.gradient.grad(test_op(x, 2), x)
+    with pytest.raises(pytensor.gradient.NullTypeGradError):
+        pytensor.gradient.grad(test_op(x, 2), x)

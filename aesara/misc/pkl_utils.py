@@ -17,7 +17,7 @@ from pickle import HIGHEST_PROTOCOL
 
 import numpy as np
 
-import aesara
+import pytensor
 
 
 try:
@@ -25,7 +25,7 @@ try:
 except ImportError:
     DEFAULT_PROTOCOL = HIGHEST_PROTOCOL
 
-from aesara.compile.sharedvalue import SharedVariable
+from pytensor.compile.sharedvalue import SharedVariable
 
 
 __docformat__ = "restructuredtext en"
@@ -66,12 +66,12 @@ class StripPickler(Pickler):
 
     def save(self, obj):
         # Remove the tag.trace attribute from Variable and Apply nodes
-        if isinstance(obj, aesara.graph.utils.Scratchpad):
+        if isinstance(obj, pytensor.graph.utils.Scratchpad):
             for tag in self.tag_to_remove:
                 if hasattr(obj, tag):
                     del obj.__dict__[tag]
         # Remove manually-added docstring of Elemwise ops
-        elif isinstance(obj, aesara.tensor.elemwise.Elemwise):
+        elif isinstance(obj, pytensor.tensor.elemwise.Elemwise):
             if "__doc__" in obj.__dict__:
                 del obj.__dict__["__doc__"]
 
@@ -233,9 +233,9 @@ def dump(
         number of external objects. Note that the zip files are compatible with
         NumPy's :func:`numpy.load` function.
 
-    >>> import aesara
-    >>> foo_1 = aesara.shared(0, name='foo')
-    >>> foo_2 = aesara.shared(1, name='foo')
+    >>> import pytensor
+    >>> foo_1 = pytensor.shared(0, name='foo')
+    >>> foo_2 = pytensor.shared(1, name='foo')
     >>> with open('model.zip', 'wb') as f:
     ...     dump((foo_1, foo_2, np.array(2)), f)
     >>> np.load('model.zip').keys()

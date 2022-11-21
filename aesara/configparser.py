@@ -14,10 +14,10 @@ from functools import wraps
 from io import StringIO
 from typing import Callable, Dict, Optional, Sequence, Union
 
-from aesara.utils import hash_from_code
+from pytensor.utils import hash_from_code
 
 
-_logger = logging.getLogger("aesara.configparser")
+_logger = logging.getLogger("pytensor.configparser")
 
 
 class AesaraConfigWarning(Warning):
@@ -89,10 +89,10 @@ class _SectionRedirect:
 class AesaraConfigParser:
     """Object that holds configuration settings."""
 
-    def __init__(self, flags_dict: dict, aesara_cfg, aesara_raw_cfg):
+    def __init__(self, flags_dict: dict, pytensor_cfg, pytensor_raw_cfg):
         self._flags_dict = flags_dict
-        self._aesara_cfg = aesara_cfg
-        self._aesara_raw_cfg = aesara_raw_cfg
+        self._pytensor_cfg = pytensor_cfg
+        self._pytensor_raw_cfg = pytensor_raw_cfg
         self._config_var_dict: Dict = {}
         super().__init__()
 
@@ -183,7 +183,7 @@ class AesaraConfigParser:
                 configparam.__get__(self, type(self), delete_key=True)
             except KeyError:
                 # This is raised because the underlying `ConfigParser` in
-                # `self._aesara_cfg` does not contain an entry for the given
+                # `self._pytensor_cfg` does not contain an entry for the given
                 # section and/or value.
                 _logger.info(
                     f"Suppressed KeyError in AesaraConfigParser.add for parameter '{name}'!"
@@ -211,7 +211,7 @@ class AesaraConfigParser:
 
         The (decreasing) priority order is:
         - AESARA_FLAGS
-        - ~./aesararc
+        - ~./pytensorrc
 
         """
 
@@ -234,9 +234,9 @@ class AesaraConfigParser:
             section, option = "global", key
         try:
             try:
-                return self._aesara_cfg.get(section, option)
+                return self._pytensor_cfg.get(section, option)
             except InterpolationError:
-                return self._aesara_raw_cfg.get(section, option)
+                return self._pytensor_raw_cfg.get(section, option)
         except (NoOptionError, NoSectionError):
             raise KeyError(key)
 
@@ -516,22 +516,22 @@ def parse_config_string(config_string, issue_warnings=True):
     return config_dict
 
 
-def config_files_from_aesararc():
+def config_files_from_pytensorrc():
     """
     AESARARC can contain a colon-delimited list of config files, like
 
-        AESARARC=~/.aesararc:/etc/.aesararc
+        AESARARC=~/.pytensorrc:/etc/.pytensorrc
 
-    In that case, definitions in files on the right (here, ``~/.aesararc``)
+    In that case, definitions in files on the right (here, ``~/.pytensorrc``)
     have precedence over those in files on the left.
     """
     rval = [
         os.path.expanduser(s)
-        for s in os.getenv("AESARARC", "~/.aesararc").split(os.pathsep)
+        for s in os.getenv("AESARARC", "~/.pytensorrc").split(os.pathsep)
     ]
     if os.getenv("AESARARC") is None and sys.platform == "win32":
         # to don't need to change the filename and make it open easily
-        rval.append(os.path.expanduser("~/.aesararc.txt"))
+        rval.append(os.path.expanduser("~/.pytensorrc.txt"))
     return rval
 
 
@@ -542,8 +542,8 @@ def _create_default_config():
     AESARA_FLAGS = os.getenv("AESARA_FLAGS", "")
     AESARA_FLAGS_DICT = parse_config_string(AESARA_FLAGS, issue_warnings=True)
 
-    config_files = config_files_from_aesararc()
-    aesara_cfg = ConfigParser(
+    config_files = config_files_from_pytensorrc()
+    pytensor_cfg = ConfigParser(
         {
             "USER": os.getenv("USER", os.path.split(os.path.expanduser("~"))[-1]),
             "LSCRATCH": os.getenv("LSCRATCH", ""),
@@ -553,26 +553,26 @@ def _create_default_config():
             "PID": str(os.getpid()),
         }
     )
-    aesara_cfg.read(config_files)
+    pytensor_cfg.read(config_files)
     # Having a raw version of the config around as well enables us to pass
     # through config values that contain format strings.
     # The time required to parse the config twice is negligible.
-    aesara_raw_cfg = RawConfigParser()
-    aesara_raw_cfg.read(config_files)
+    pytensor_raw_cfg = RawConfigParser()
+    pytensor_raw_cfg.read(config_files)
 
     # Instances of AesaraConfigParser can have independent current values!
     # But because the properties are assigned to the type, their existence is global.
     config = AesaraConfigParser(
         flags_dict=AESARA_FLAGS_DICT,
-        aesara_cfg=aesara_cfg,
-        aesara_raw_cfg=aesara_raw_cfg,
+        pytensor_cfg=pytensor_cfg,
+        pytensor_raw_cfg=pytensor_raw_cfg,
     )
     return config
 
 
 class _ConfigProxy:
     """Like _SectionRedirect this class enables backwards-compatible access to the
-    config settings, but raises DeprecationWarnings with instructions to use `aesara.config`.
+    config settings, but raises DeprecationWarnings with instructions to use `pytensor.config`.
     """
 
     def __init__(self, actual):
@@ -582,7 +582,7 @@ class _ConfigProxy:
         if attr == "_actual":
             return _ConfigProxy._actual
         warnings.warn(
-            "`aesara.configparser.config` is deprecated; use `aesara.config` instead.",
+            "`pytensor.configparser.config` is deprecated; use `pytensor.config` instead.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -592,7 +592,7 @@ class _ConfigProxy:
         if attr == "_actual":
             return setattr(_ConfigProxy._actual, attr, value)
         warnings.warn(
-            "`aesara.configparser.config` is deprecated; use `aesara.config` instead.",
+            "`pytensor.configparser.config` is deprecated; use `pytensor.config` instead.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -604,24 +604,24 @@ class _ConfigProxy:
 _config = _create_default_config()
 
 # The old API often imported the default config object from `configparser`.
-# These imports/accesses should be replaced with `aesara.config`, so this wraps
+# These imports/accesses should be replaced with `pytensor.config`, so this wraps
 # it with warnings:
 config = _ConfigProxy(_config)
 
 DEPRECATED_NAMES = [
     (
         "change_flags",
-        "`change_flags` is deprecated; use `aesara.config.change_flags` instead.",
+        "`change_flags` is deprecated; use `pytensor.config.change_flags` instead.",
         _config.change_flags,
     ),
     (
         "_change_flags",
-        "`_change_flags` is deprecated; use `aesara.config.change_flags` instead.",
+        "`_change_flags` is deprecated; use `pytensor.config.change_flags` instead.",
         _config.change_flags,
     ),
     (
         "_config_print",
-        "`_config_print` is deprecated; use `aesara.config.config_print` instead.",
+        "`_config_print` is deprecated; use `pytensor.config.config_print` instead.",
         _config.config_print,
     ),
 ]

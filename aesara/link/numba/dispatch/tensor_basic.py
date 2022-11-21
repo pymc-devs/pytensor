@@ -2,10 +2,10 @@ from textwrap import indent
 
 import numpy as np
 
-from aesara.link.numba.dispatch import basic as numba_basic
-from aesara.link.numba.dispatch.basic import create_tuple_string, numba_funcify
-from aesara.link.utils import compile_function_src, unique_name_generator
-from aesara.tensor.basic import (
+from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch.basic import create_tuple_string, numba_funcify
+from pytensor.link.utils import compile_function_src, unique_name_generator
+from pytensor.tensor.basic import (
     Alloc,
     AllocDiag,
     AllocEmpty,
@@ -18,7 +18,7 @@ from aesara.tensor.basic import (
     Split,
     TensorFromScalar,
 )
-from aesara.tensor.shape import Unbroadcast
+from pytensor.tensor.shape import Unbroadcast
 
 
 @numba_funcify.register(AllocEmpty)

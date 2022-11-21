@@ -22,19 +22,19 @@ except ImportError:
     from scipy.signal._signaltools import _bvalfromboundary, _valfrommode
     from scipy.signal._sigtools import _convolve2d
 
-import aesara
-from aesara.graph.basic import Apply
-from aesara.link.c.op import OpenMPOp
-from aesara.tensor import blas
-from aesara.tensor.basic import as_tensor_variable, get_scalar_constant_value
-from aesara.tensor.exceptions import NotScalarConstantError
-from aesara.tensor.nnet.abstract_conv import get_conv_output_shape, get_conv_shape_1axis
-from aesara.tensor.shape import specify_broadcastable
-from aesara.tensor.type import discrete_dtypes, tensor
+import pytensor
+from pytensor.graph.basic import Apply
+from pytensor.link.c.op import OpenMPOp
+from pytensor.tensor import blas
+from pytensor.tensor.basic import as_tensor_variable, get_scalar_constant_value
+from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.nnet.abstract_conv import get_conv_output_shape, get_conv_shape_1axis
+from pytensor.tensor.shape import specify_broadcastable
+from pytensor.tensor.type import discrete_dtypes, tensor
 
 
 __docformat__ = "restructuredtext en"
-_logger = logging.getLogger("aesara.tensor.nnet.conv")
+_logger = logging.getLogger("pytensor.tensor.nnet.conv")
 
 
 def conv2d(
@@ -104,8 +104,8 @@ def conv2d(
     """
 
     warnings.warn(
-        "aesara.tensor.nnet.conv.conv2d is deprecated."
-        " Use aesara.tensor.nnet.conv2d instead.",
+        "pytensor.tensor.nnet.conv.conv2d is deprecated."
+        " Use pytensor.tensor.nnet.conv2d instead.",
         DeprecationWarning,
     )
 
@@ -304,7 +304,7 @@ class ConvOp(OpenMPOp):
 
     # the value of speed_unroll_batch_kern,speed_unroll_patch_noshape,speed_unroll_patch_shape
     # have bean calculated on maggie36 when their is only 1 session logged on and only this was running.
-    # It is an Intel(R) Xeon(R) CPU E5430 @ 2.66GHz. It is computer with aesara/tensor/nnet/tests/speed_test_conv.py
+    # It is an Intel(R) Xeon(R) CPU E5430 @ 2.66GHz. It is computer with pytensor/tensor/nnet/tests/speed_test_conv.py
     # and took 5 minutes to run.
     # TODO: we should compute this table for each computer/os as this can change.
     #      I saw on one computer that the speed with the shape can be slower than without!
@@ -997,7 +997,7 @@ class ConvOp(OpenMPOp):
         if self.out_mode == "valid" and (self.dx, self.dy) != (1, 1):
             raise NotImplementedError(
                 "ERROR: ConvOp.grad is now disabled for 'valid' convolutions with"
-                " stride != (1, 1); call aesara.tensor.nnet.conv2d() instead."
+                " stride != (1, 1); call pytensor.tensor.nnet.conv2d() instead."
             )
 
         if self.dx not in (1, 2) or self.dy not in (1, 2):
@@ -1159,7 +1159,7 @@ using namespace std;
     def c_no_compile_args(self, **kwargs):
         # when the ksph==(1,1) gcc 4.3.0 segfault during the
         # compilation with -O3.  This don't happen at -O2
-        if aesara.link.c.cmodule.gcc_version() in ["4.3.0"] and self.kshp == (1, 1):
+        if pytensor.link.c.cmodule.gcc_version() in ["4.3.0"] and self.kshp == (1, 1):
             return ["-O3"]
         else:
             return []
@@ -1169,7 +1169,7 @@ using namespace std;
 
         if self.use_blas():
             ret = blas.ldflags(libs=False, flags=True)
-        if aesara.link.c.cmodule.gcc_version() in ["4.3.0"] and self.kshp == (1, 1):
+        if pytensor.link.c.cmodule.gcc_version() in ["4.3.0"] and self.kshp == (1, 1):
             ret += ["-O2"]
         # Add the -fopenmp flags
         ret += super().c_compile_args(**kwargs)

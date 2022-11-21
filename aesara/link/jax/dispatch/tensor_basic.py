@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 
-from aesara.link.jax.dispatch.basic import jax_funcify
-from aesara.tensor.basic import (
+from pytensor.link.jax.dispatch.basic import jax_funcify
+from pytensor.tensor.basic import (
     Alloc,
     AllocDiag,
     AllocEmpty,

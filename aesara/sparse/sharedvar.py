@@ -2,9 +2,9 @@ import copy
 
 import scipy.sparse
 
-from aesara.compile import shared_constructor
-from aesara.sparse.basic import SparseTensorType, _sparse_py_operators
-from aesara.tensor.sharedvar import TensorSharedVariable
+from pytensor.compile import shared_constructor
+from pytensor.sparse.basic import SparseTensorType, _sparse_py_operators
+from pytensor.tensor.sharedvar import TensorSharedVariable
 
 
 class SparseTensorSharedVariable(TensorSharedVariable, _sparse_py_operators):

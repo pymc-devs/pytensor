@@ -1,8 +1,8 @@
 import numpy as np
 
-from aesara.graph.basic import Apply
-from aesara.graph.op import Op
-from aesara.tensor.type import lscalar
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+from pytensor.tensor.type import lscalar
 
 
 class Minimal(Op):

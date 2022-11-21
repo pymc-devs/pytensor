@@ -6,16 +6,16 @@ import numpy as np
 import pytest
 import scipy.stats as stats
 
-import aesara.tensor as at
-from aesara import function, shared
-from aesara.compile.mode import Mode
-from aesara.compile.sharedvalue import SharedVariable
-from aesara.configdefaults import config
-from aesara.graph.basic import Constant, Variable, graph_inputs
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import get_test_value
-from aesara.graph.rewriting.db import RewriteDatabaseQuery
-from aesara.tensor.random.basic import (
+import pytensor.tensor as at
+from pytensor import function, shared
+from pytensor.compile.mode import Mode
+from pytensor.compile.sharedvalue import SharedVariable
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Constant, Variable, graph_inputs
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import get_test_value
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.tensor.random.basic import (
     bernoulli,
     beta,
     betabinom,
@@ -56,9 +56,9 @@ from aesara.tensor.random.basic import (
     wald,
     weibull,
 )
-from aesara.tensor.rewriting.shape import ShapeFeature
-from aesara.tensor.type import iscalar, scalar, tensor
-from tests.unittest_tools import create_aesara_param
+from pytensor.tensor.rewriting.shape import ShapeFeature
+from pytensor.tensor.type import iscalar, scalar, tensor
+from tests.unittest_tools import create_pytensor_param
 
 
 rewrites_query = RewriteDatabaseQuery(include=[None], exclude=["cxx_only", "BlasOpt"])
@@ -110,28 +110,28 @@ def compare_sample_values(rv, *params, rng=None, test_fn=None, **kwargs):
 
     numpy_res = np.asarray(test_fn(*param_vals, random_state=copy(rng), **kwargs_vals))
 
-    aesara_res = rv(*params, rng=at_rng, **kwargs)
+    pytensor_res = rv(*params, rng=at_rng, **kwargs)
 
-    assert aesara_res.type.numpy_dtype.kind == numpy_res.dtype.kind
+    assert pytensor_res.type.numpy_dtype.kind == numpy_res.dtype.kind
 
     numpy_shape = np.shape(numpy_res)
     numpy_bcast = [s == 1 for s in numpy_shape]
-    np.testing.assert_array_equal(aesara_res.type.broadcastable, numpy_bcast)
+    np.testing.assert_array_equal(pytensor_res.type.broadcastable, numpy_bcast)
 
     fn_inputs = [
         i
-        for i in graph_inputs([aesara_res])
+        for i in graph_inputs([pytensor_res])
         if not isinstance(i, (Constant, SharedVariable))
     ]
-    aesara_fn = function(fn_inputs, aesara_res, mode=py_mode)
+    pytensor_fn = function(fn_inputs, pytensor_res, mode=py_mode)
 
-    aesara_res_val = aesara_fn()
+    pytensor_res_val = pytensor_fn()
 
-    assert aesara_res_val.flags.writeable
+    assert pytensor_res_val.flags.writeable
 
-    np.testing.assert_array_equal(aesara_res_val.shape, numpy_res.shape)
+    np.testing.assert_array_equal(pytensor_res_val.shape, numpy_res.shape)
 
-    np.testing.assert_allclose(aesara_res_val, numpy_res)
+    np.testing.assert_allclose(pytensor_res_val, numpy_res)
 
 
 @pytest.mark.parametrize(
@@ -223,15 +223,15 @@ sd_at.tag.test_value = np.array(1.0, dtype=config.floatX)
         (at.zeros((M_at,)), at.ones((M_at,)), ()),
         (at.zeros((M_at,)), at.ones((M_at,)), (2, M_at)),
         (
-            create_aesara_param(
+            create_pytensor_param(
                 np.array([[-1, 20], [300, -4000]], dtype=config.floatX)
             ),
-            create_aesara_param(np.array([[1e-6, 2e-6]], dtype=config.floatX)),
+            create_pytensor_param(np.array([[1e-6, 2e-6]], dtype=config.floatX)),
             (3, 2, 2),
         ),
         (
-            create_aesara_param(np.array([1], dtype=config.floatX)),
-            create_aesara_param(np.array([10], dtype=config.floatX)),
+            create_pytensor_param(np.array([1], dtype=config.floatX)),
+            create_pytensor_param(np.array([10], dtype=config.floatX)),
             (1, 2),
         ),
     ],
@@ -246,11 +246,11 @@ def test_normal_infer_shape(M, sd, size):
         for i in graph_inputs([a for a in all_args if isinstance(a, Variable)])
         if not isinstance(i, (Constant, SharedVariable))
     ]
-    aesara_fn = function(
+    pytensor_fn = function(
         fn_inputs, [at.as_tensor(o) for o in rv_shape + [rv]], mode=py_mode
     )
 
-    *rv_shape_val, rv_val = aesara_fn(
+    *rv_shape_val, rv_val = pytensor_fn(
         *[
             i.tag.test_value
             for i in fn_inputs
@@ -694,11 +694,11 @@ def test_dirichlet_infer_shape(M, size):
         for i in graph_inputs([a for a in all_args if isinstance(a, Variable)])
         if not isinstance(i, (Constant, SharedVariable))
     ]
-    aesara_fn = function(
+    pytensor_fn = function(
         fn_inputs, [at.as_tensor(o) for o in rv_shape + [rv]], mode=py_mode
     )
 
-    *rv_shape_val, rv_val = aesara_fn(
+    *rv_shape_val, rv_val = pytensor_fn(
         *[
             i.tag.test_value
             for i in fn_inputs

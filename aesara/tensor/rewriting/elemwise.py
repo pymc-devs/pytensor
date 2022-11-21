@@ -4,22 +4,22 @@ from collections import defaultdict
 from typing import Optional
 from warnings import warn
 
-import aesara
-import aesara.scalar.basic as aes
-from aesara import compile
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Constant, io_toposort
-from aesara.graph.features import ReplaceValidate
-from aesara.graph.op import compute_test_value, get_test_value
-from aesara.graph.rewriting.basic import GraphRewriter, copy_stack_trace, node_rewriter
-from aesara.graph.rewriting.db import SequenceDB
-from aesara.graph.utils import InconsistencyError, MethodNotDefined, TestValueError
-from aesara.tensor.basic import MakeVector, alloc, cast, get_scalar_constant_value
-from aesara.tensor.elemwise import DimShuffle, Elemwise
-from aesara.tensor.exceptions import NotScalarConstantError
-from aesara.tensor.rewriting.basic import register_canonicalize, register_specialize
-from aesara.tensor.shape import shape_padleft
-from aesara.tensor.var import TensorConstant
+import pytensor
+import pytensor.scalar.basic as aes
+from pytensor import compile
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Constant, io_toposort
+from pytensor.graph.features import ReplaceValidate
+from pytensor.graph.op import compute_test_value, get_test_value
+from pytensor.graph.rewriting.basic import GraphRewriter, copy_stack_trace, node_rewriter
+from pytensor.graph.rewriting.db import SequenceDB
+from pytensor.graph.utils import InconsistencyError, MethodNotDefined, TestValueError
+from pytensor.tensor.basic import MakeVector, alloc, cast, get_scalar_constant_value
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.rewriting.basic import register_canonicalize, register_specialize
+from pytensor.tensor.shape import shape_padleft
+from pytensor.tensor.var import TensorConstant
 
 
 class InplaceElemwiseOptimizer(GraphRewriter):
@@ -31,7 +31,7 @@ class InplaceElemwiseOptimizer(GraphRewriter):
         self.op = OP
 
     def add_requirements(self, fgraph):
-        from aesara.graph.destroyhandler import DestroyHandler
+        from pytensor.graph.destroyhandler import DestroyHandler
 
         fgraph.attach_feature(DestroyHandler())
 
@@ -70,7 +70,7 @@ class InplaceElemwiseOptimizer(GraphRewriter):
         """
         # We should not validate too often as this takes too much time to
         # execute!
-        # It is the _dfs_toposort() fct in aesara/graph/destroyhandler.py
+        # It is the _dfs_toposort() fct in pytensor/graph/destroyhandler.py
         # that takes so much time.
         # Should we try to use another lib that does toposort?
         #   igraph: http://igraph.sourceforge.net/
@@ -115,7 +115,7 @@ class InplaceElemwiseOptimizer(GraphRewriter):
         protected_inputs = [
             f.protected
             for f in fgraph._features
-            if isinstance(f, aesara.compile.function.types.Supervisor)
+            if isinstance(f, pytensor.compile.function.types.Supervisor)
         ]
         protected_inputs = sum(protected_inputs, [])  # flatten the list
         protected_inputs.extend(fgraph.outputs)

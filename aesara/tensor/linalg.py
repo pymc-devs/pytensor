@@ -1,2 +1,2 @@
-from aesara.tensor.nlinalg import *
-from aesara.tensor.slinalg import *
+from pytensor.tensor.nlinalg import *
+from pytensor.tensor.slinalg import *

@@ -6,11 +6,11 @@ from sys import exit, stderr, stdout
 import numpy as np
 from mpi4py import MPI
 
-import aesara
-from aesara.configdefaults import config
-from aesara.graph.sched import sort_schedule_fn
-from aesara.tensor.io import mpi_cmps, recv, send
-from aesara.tensor.type import matrix
+import pytensor
+from pytensor.configdefaults import config
+from pytensor.graph.sched import sort_schedule_fn
+from pytensor.tensor.io import mpi_cmps, recv, send
+from pytensor.tensor.type import matrix
 
 
 comm = MPI.COMM_WORLD
@@ -30,8 +30,8 @@ shape = (2, 2)
 dtype = "float32"
 
 scheduler = sort_schedule_fn(*mpi_cmps)
-mode = aesara.compile.mode.Mode(
-    optimizer=None, linker=aesara.link.c.basic.OpWiseCLinker(schedule=scheduler)
+mode = pytensor.compile.mode.Mode(
+    optimizer=None, linker=pytensor.link.c.basic.OpWiseCLinker(schedule=scheduler)
 )
 
 with config.change_flags(compute_test_value="off"):
@@ -42,7 +42,7 @@ with config.change_flags(compute_test_value="off"):
 
         z = recv(shape, dtype, 1, 12)
 
-        f = aesara.function([x], [send_request, z], mode=mode)
+        f = pytensor.function([x], [send_request, z], mode=mode)
 
         xx = np.random.random(shape).astype(dtype)
         expected = (xx + 1) * 2
@@ -59,6 +59,6 @@ with config.change_flags(compute_test_value="off"):
         z = y * 2
         send_request = send(z, 0, 12)
 
-        f = aesara.function([], send_request, mode=mode)
+        f = pytensor.function([], send_request, mode=mode)
 
         f()

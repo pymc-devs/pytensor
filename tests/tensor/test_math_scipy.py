@@ -9,11 +9,11 @@ from functools import partial
 import scipy.special
 import scipy.stats
 
-from aesara import function
-from aesara import tensor as at
-from aesara.compile.mode import get_default_mode
-from aesara.configdefaults import config
-from aesara.tensor import inplace
+from pytensor import function
+from pytensor import tensor as at
+from pytensor.compile.mode import get_default_mode
+from pytensor.configdefaults import config
+from pytensor.tensor import inplace
 from tests import unittest_tools as utt
 from tests.tensor.utils import (
     _good_broadcast_unary_chi2sf,
@@ -727,7 +727,7 @@ TestLog1mexpInplaceBroadcast = makeBroadcastTester(
 
 def test_deprecated_module():
     with pytest.warns(DeprecationWarning):
-        import aesara.scalar.basic_scipy  # noqa: F401
+        import pytensor.scalar.basic_scipy  # noqa: F401
 
 
 _good_broadcast_ternary_betainc = dict(

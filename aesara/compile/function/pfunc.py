@@ -3,22 +3,16 @@ Provide a simple user friendly API.
 
 """
 
-import logging
 from copy import copy
 from typing import Optional
 
-from aesara.compile.function.types import Function, UnusedInputError, orig_function
-from aesara.compile.io import In, Out
-from aesara.compile.profiling import ProfileStats
-from aesara.compile.sharedvalue import SharedVariable, shared
-from aesara.configdefaults import config
-from aesara.graph.basic import Constant, Variable, clone_node_and_cache
-from aesara.graph.fg import FunctionGraph
-
-
-_logger = logging.getLogger("aesara.compile.function.pfunc")
-
-__docformat__ = "restructuredtext en"
+from pytensor.compile.function.types import Function, UnusedInputError, orig_function
+from pytensor.compile.io import In, Out
+from pytensor.compile.profiling import ProfileStats
+from pytensor.compile.sharedvalue import SharedVariable, shared
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Constant, Variable, clone_node_and_cache
+from pytensor.graph.fg import FunctionGraph
 
 
 def rebuild_collect_shared(
@@ -225,7 +219,7 @@ def rebuild_collect_shared(
                 cloned_outputs.append(Out(cloned_v, borrow=v.borrow))
             else:
                 raise TypeError(
-                    "Outputs must be aesara Variable or "
+                    "Outputs must be pytensor Variable or "
                     "Out instances. Received " + str(v) + " of type " + str(type(v))
                 )
             # computed_list.append(cloned_v)
@@ -295,7 +289,7 @@ def pfunc(
         Function parameters, these are not allowed to be shared variables.
     outputs : list of Variables or Out instances
         Expressions to compute.
-    mode : string or `aesara.compile.mode.Mode` instance
+    mode : string or `pytensor.compile.mode.Mode` instance
         Compilation mode.
     updates : iterable over pairs (shared_variable, new_expression). List, tuple or dict.
         Update the values for SharedVariable inputs according to these
@@ -397,7 +391,7 @@ def construct_pfunc_ins_and_outs(
     """Construct inputs and outputs for `pfunc`.
 
     This function works by cloning the graph (except for the
-    inputs), and then shipping it off to aesara.compile.function.function
+    inputs), and then shipping it off to pytensor.compile.function.function
     (There it will be cloned again, unnecessarily, because it doesn't know
     that we already cloned it.)
 
@@ -438,7 +432,7 @@ def construct_pfunc_ins_and_outs(
             "The `updates` parameter must be an ordered mapping or a list of pairs"
         )
 
-    # Transform params into aesara.compile.In objects.
+    # Transform params into pytensor.compile.In objects.
     inputs = [
         _pfunc_param_to_in(p, allow_downcast=allow_input_downcast) for p in params
     ]
@@ -449,7 +443,7 @@ def construct_pfunc_ins_and_outs(
         if v in in_variables[(i + 1) :]:
             dup_v_i = in_variables.index(v, (i + 1))
             raise UnusedInputError(
-                f"Variable {v} is used twice in inputs to aesara.function, "
+                f"Variable {v} is used twice in inputs to pytensor.function, "
                 f"at indices {i} and {dup_v_i}.  This would result in values "
                 "provided for it being ignored. Please do not duplicate "
                 "variables in the inputs list."
@@ -470,10 +464,10 @@ def construct_pfunc_ins_and_outs(
                 "function. Replacing inputs is currently forbidden because it "
                 "has no effect. One way to modify an input `x` to a function "
                 "evaluating f(x) is to define a new input `y` and use "
-                "`aesara.function([y], f(x), givens={x: g(y)})`. Another "
-                "solution consists in using `aesara.clone_replace`, e.g. like this: "
-                "`aesara.function([x], "
-                "aesara.clone_replace(f(x), replace={x: g(x)}))`."
+                "`pytensor.function([y], f(x), givens={x: g(y)})`. Another "
+                "solution consists in using `pytensor.clone_replace`, e.g. like this: "
+                "`pytensor.function([x], "
+                "pytensor.clone_replace(f(x), replace={x: g(x)}))`."
             )
 
     if not fgraph:

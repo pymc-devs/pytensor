@@ -2,8 +2,8 @@ from typing import TypeVar
 
 import numpy as np
 
-import aesara
-from aesara.graph.type import Type
+import pytensor
+from pytensor.graph.type import Type
 
 
 T = TypeVar("T", np.random.RandomState, np.random.Generator)
@@ -109,7 +109,7 @@ class RandomStateType(RandomType[np.random.RandomState]):
 
 
 # Register `RandomStateType`'s C code for `ViewOp`.
-aesara.compile.register_view_op_c_code(
+pytensor.compile.register_view_op_c_code(
     RandomStateType,
     """
     Py_XDECREF(%(oname)s);
@@ -205,7 +205,7 @@ class RandomGeneratorType(RandomType[np.random.Generator]):
 
 
 # Register `RandomGeneratorType`'s C code for `ViewOp`.
-aesara.compile.register_view_op_c_code(
+pytensor.compile.register_view_op_c_code(
     RandomGeneratorType,
     """
     Py_XDECREF(%(oname)s);

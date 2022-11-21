@@ -4,10 +4,10 @@ import pytest
 from jax._src.errors import NonConcreteBooleanIndexError
 from packaging.version import parse as version_parse
 
-import aesara.tensor as at
-from aesara.configdefaults import config
-from aesara.graph.fg import FunctionGraph
-from aesara.tensor import subtensor as at_subtensor
+import pytensor.tensor as at
+from pytensor.configdefaults import config
+from pytensor.graph.fg import FunctionGraph
+from pytensor.tensor import subtensor as at_subtensor
 from tests.link.jax.test_basic import compare_jax_and_py
 
 

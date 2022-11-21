@@ -19,23 +19,23 @@ from typing import (
 
 from typing_extensions import Protocol
 
-import aesara
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, NoParams, Variable
-from aesara.graph.utils import (
+import pytensor
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, NoParams, Variable
+from pytensor.graph.utils import (
     MetaObject,
     MethodNotDefined,
     TestValueError,
     add_tag_trace,
     get_variable_trace_string,
 )
-from aesara.link.c.params_type import Params, ParamsType
+from pytensor.link.c.params_type import Params, ParamsType
 
 
 if TYPE_CHECKING:
-    from aesara.compile.function.types import Function
-    from aesara.graph.fg import FunctionGraph
-    from aesara.graph.type import Type
+    from pytensor.compile.function.types import Function
+    from pytensor.graph.fg import FunctionGraph
+    from pytensor.graph.type import Type
 
 StorageCellType = List[Optional[Any]]
 StorageMapType = Dict[Variable, StorageCellType]
@@ -260,12 +260,12 @@ class Op(MetaObject):
 
         .. code-block:: python
 
-           x = aesara.tensor.matrix()
-           y = aesara.tensor.exp(x)
+           x = pytensor.tensor.matrix()
+           y = pytensor.tensor.exp(x)
 
 
-        `aesara.tensor.exp` is an `Op` instance, so ``aesara.tensor.exp(x)`` calls
-        :meth:`aesara.tensor.exp.__call__` (i.e. this method) and returns its single output
+        `pytensor.tensor.exp` is an `Op` instance, so ``pytensor.tensor.exp(x)`` calls
+        :meth:`pytensor.tensor.exp.__call__` (i.e. this method) and returns its single output
         `Variable`, ``y``.  The `Apply` node constructed by :meth:`self.make_node`
         behind the scenes is available via ``y.owner``.
 
@@ -671,7 +671,7 @@ def get_test_value(v: Any) -> Any:
 
     """
     if not isinstance(v, Variable):
-        v = aesara.tensor.as_tensor_variable(v)
+        v = pytensor.tensor.as_tensor_variable(v)
 
     return v.get_test_value()
 

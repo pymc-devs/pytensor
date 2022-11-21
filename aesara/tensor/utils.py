@@ -1,7 +1,7 @@
 import numpy as np
 
-import aesara
-from aesara.utils import hash_from_code
+import pytensor
+from pytensor.utils import hash_from_code
 
 
 def hash_from_ndarray(data):
@@ -51,8 +51,8 @@ def shape_of_variables(fgraph, input_shapes):
 
     Examples
     --------
-    >>> import aesara
-    >>> x = aesara.tensor.matrix('x')
+    >>> import pytensor
+    >>> x = pytensor.tensor.matrix('x')
     >>> y = x[512:]; y.name = 'y'
     >>> fgraph = FunctionGraph([x], [y], clone=False)
     >>> d = shape_of_variables(fgraph, {x: (1024, 1024)})
@@ -63,7 +63,7 @@ def shape_of_variables(fgraph, input_shapes):
     """
 
     if not hasattr(fgraph, "shape_feature"):
-        from aesara.tensor.rewriting.shape import ShapeFeature
+        from pytensor.tensor.rewriting.shape import ShapeFeature
 
         fgraph.attach_feature(ShapeFeature())
 
@@ -79,7 +79,7 @@ def shape_of_variables(fgraph, input_shapes):
         for dimension in shape
     ]
 
-    compute_shapes = aesara.function(input_dims, output_dims)
+    compute_shapes = pytensor.function(input_dims, output_dims)
 
     if any(i not in fgraph.inputs for i in input_shapes.keys()):
         raise ValueError(

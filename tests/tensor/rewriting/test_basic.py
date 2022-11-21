@@ -3,22 +3,22 @@ import copy
 import numpy as np
 import pytest
 
-import aesara
-import aesara.scalar as aes
-import aesara.tensor as at
-from aesara import shared
-from aesara.compile import optdb
-from aesara.compile.function import function
-from aesara.compile.mode import get_default_mode, get_mode
-from aesara.compile.ops import DeepCopyOp, deep_copy_op
-from aesara.configdefaults import config
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.rewriting.basic import check_stack_trace, out2in
-from aesara.graph.rewriting.db import RewriteDatabaseQuery
-from aesara.graph.rewriting.utils import rewrite_graph
-from aesara.printing import pprint
-from aesara.raise_op import Assert, CheckAndRaise
-from aesara.tensor.basic import (
+import pytensor
+import pytensor.scalar as aes
+import pytensor.tensor as at
+from pytensor import shared
+from pytensor.compile import optdb
+from pytensor.compile.function import function
+from pytensor.compile.mode import get_default_mode, get_mode
+from pytensor.compile.ops import DeepCopyOp, deep_copy_op
+from pytensor.configdefaults import config
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.basic import check_stack_trace, out2in
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.printing import pprint
+from pytensor.raise_op import Assert, CheckAndRaise
+from pytensor.tensor.basic import (
     Alloc,
     Join,
     MakeVector,
@@ -28,8 +28,8 @@ from aesara.tensor.basic import (
     join,
     tile,
 )
-from aesara.tensor.elemwise import DimShuffle, Elemwise
-from aesara.tensor.math import (
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.math import (
     add,
     bitwise_and,
     bitwise_or,
@@ -49,20 +49,20 @@ from aesara.tensor.math import (
     mul,
     neq,
 )
-from aesara.tensor.math import pow as at_pow
-from aesara.tensor.math import softplus, sqrt, sub
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.math import true_div
-from aesara.tensor.rewriting.basic import (
+from pytensor.tensor.math import pow as at_pow
+from pytensor.tensor.math import softplus, sqrt, sub
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import true_div
+from pytensor.tensor.rewriting.basic import (
     assert_op,
     local_alloc_sink_dimshuffle,
     local_merge_alloc,
     local_useless_alloc,
     local_useless_elemwise,
 )
-from aesara.tensor.rewriting.math import local_lift_transpose_through_dot
-from aesara.tensor.rewriting.shape import ShapeFeature
-from aesara.tensor.shape import (
+from pytensor.tensor.rewriting.math import local_lift_transpose_through_dot
+from pytensor.tensor.rewriting.shape import ShapeFeature
+from pytensor.tensor.shape import (
     Reshape,
     Shape_i,
     SpecifyShape,
@@ -70,14 +70,14 @@ from aesara.tensor.shape import (
     specify_shape,
     unbroadcast,
 )
-from aesara.tensor.subtensor import (
+from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor1,
     Subtensor,
     advanced_inc_subtensor,
     advanced_inc_subtensor1,
     inc_subtensor,
 )
-from aesara.tensor.type import (
+from pytensor.tensor.type import (
     TensorType,
     dmatrix,
     dscalar,
@@ -881,7 +881,7 @@ class TestLocalSwitchSink:
         # This case caused a missed rewrite in the past.
         x = dscalar("x")
         y = at.switch(x < 7, x, sqrt(x - 7))
-        f = self.function_remove_nan([x], aesara.gradient.grad(y, x), self.mode)
+        f = self.function_remove_nan([x], pytensor.gradient.grad(y, x), self.mode)
         assert f(5) == 1, f(5)
 
     @pytest.mark.slow
@@ -1441,7 +1441,7 @@ class TestLiftTransposeThroughDot:
 def test_local_upcast_elemwise_constant_inputs():
     s = dvector("s")
     x = at_sum(log(10**s))
-    f = function([s], [aesara.gradient.grad(x, s)])
+    f = function([s], [pytensor.gradient.grad(x, s)])
     f([-42, -2.1, -1, -0.5, 0, 0.2, 1, 2, 12])
 
     # This tests a corner case for which the rewrite should not be applied.
@@ -1454,7 +1454,7 @@ def test_assert_op_gradient():
     x = vector("x")
     assert_op = Assert()
     cost = at_sum(assert_op(x, x.size < 2))
-    grad = aesara.gradient.grad(cost, x)
+    grad = pytensor.gradient.grad(cost, x)
     func = function([x], grad)
 
     x_val = np.ones(shape=(1,), dtype=config.floatX)
@@ -1697,7 +1697,7 @@ class TestLocalElemwiseAlloc:
         y = at.tensor("int64", shape=(None,) * len(y_shape), name="y")
         z = expr(x, y)
 
-        z_opt = aesara.function(
+        z_opt = pytensor.function(
             [x, y],
             z,
             mode=get_default_mode().including("local_elemwise_alloc"),
@@ -1708,7 +1708,7 @@ class TestLocalElemwiseAlloc:
             isinstance(node.op, Alloc) for node in z_opt.maker.fgraph.toposort()
         )
 
-        z_no_opt = aesara.function(
+        z_no_opt = pytensor.function(
             [x, y],
             z,
             mode=get_default_mode().excluding("local_elemwise_alloc"),
@@ -1889,7 +1889,7 @@ class TestLocalElemwiseAlloc:
 def test_deprecations():
     """Make sure we can import from deprecated modules."""
     with pytest.deprecated_call():
-        from aesara.tensor.basic_opt import register_useless  # noqa: F401 F811
+        from pytensor.tensor.basic_opt import register_useless  # noqa: F401 F811
 
     with pytest.deprecated_call():
-        from aesara.tensor.rewriting.basic import ShapeFeature  # noqa: F401
+        from pytensor.tensor.rewriting.basic import ShapeFeature  # noqa: F401

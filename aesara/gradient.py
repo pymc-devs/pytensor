@@ -20,18 +20,18 @@ from typing import (
 import numpy as np
 from typing_extensions import Literal
 
-import aesara
-from aesara.compile.ops import ViewOp
-from aesara.configdefaults import config
-from aesara.graph import utils
-from aesara.graph.basic import Apply, NominalVariable, Variable
-from aesara.graph.null_type import NullType, null_type
-from aesara.graph.op import get_test_values
-from aesara.graph.type import Type
+import pytensor
+from pytensor.compile.ops import ViewOp
+from pytensor.configdefaults import config
+from pytensor.graph import utils
+from pytensor.graph.basic import Apply, NominalVariable, Variable
+from pytensor.graph.null_type import NullType, null_type
+from pytensor.graph.op import get_test_values
+from pytensor.graph.type import Type
 
 
 if TYPE_CHECKING:
-    from aesara.compile.mode import Mode
+    from pytensor.compile.mode import Mode
 
 
 V = TypeVar("V", bound=Optional[Variable])
@@ -83,7 +83,7 @@ def grad_not_implemented(op, x_pos, x, comment=""):
     un-computable variable, an exception (e.g. `NotImplementedError`) will be
     raised indicating that the gradient on the
     `x_pos`'th input of `op` has not been implemented. Likewise if
-    any call to aesara.function involves this variable.
+    any call to pytensor.function involves this variable.
 
     Optionally adds a comment to the exception explaining why this
     gradient is not implemented.
@@ -106,7 +106,7 @@ def grad_undefined(op, x_pos, x, comment=""):
     un-computable variable, an exception (e.g. `GradUndefinedError`) will be
     raised indicating that the gradient on the
     `x_pos`'th input of `op` is mathematically undefined. Likewise if
-    any call to aesara.function involves this variable.
+    any call to pytensor.function involves this variable.
 
     Optionally adds a comment to the exception explaining why this
     gradient is not defined.
@@ -209,19 +209,19 @@ def Rop(
     """
 
     if not isinstance(wrt, (list, tuple)):
-        _wrt: List[Variable] = [aesara.tensor.as_tensor_variable(wrt)]
+        _wrt: List[Variable] = [pytensor.tensor.as_tensor_variable(wrt)]
     else:
-        _wrt = [aesara.tensor.as_tensor_variable(x) for x in wrt]
+        _wrt = [pytensor.tensor.as_tensor_variable(x) for x in wrt]
 
     if not isinstance(eval_points, (list, tuple)):
-        _eval_points: List[Variable] = [aesara.tensor.as_tensor_variable(eval_points)]
+        _eval_points: List[Variable] = [pytensor.tensor.as_tensor_variable(eval_points)]
     else:
-        _eval_points = [aesara.tensor.as_tensor_variable(x) for x in eval_points]
+        _eval_points = [pytensor.tensor.as_tensor_variable(x) for x in eval_points]
 
     if not isinstance(f, (list, tuple)):
-        _f: List[Variable] = [aesara.tensor.as_tensor_variable(f)]
+        _f: List[Variable] = [pytensor.tensor.as_tensor_variable(f)]
     else:
-        _f = [aesara.tensor.as_tensor_variable(x) for x in f]
+        _f = [pytensor.tensor.as_tensor_variable(x) for x in f]
 
     if len(_wrt) != len(_eval_points):
         raise ValueError("`wrt` must be the same length as `eval_points`.")
@@ -282,9 +282,9 @@ def Rop(
         for x, y in zip(inputs, local_eval_points):
             if y is not None:
                 if not isinstance(x, Variable):
-                    x = aesara.tensor.as_tensor_variable(x)
+                    x = pytensor.tensor.as_tensor_variable(x)
                 if not isinstance(y, Variable):
-                    y = aesara.tensor.as_tensor_variable(y)
+                    y = pytensor.tensor.as_tensor_variable(y)
                 try:
                     y = x.type.filter_variable(y)
                 except TypeError:
@@ -300,7 +300,7 @@ def Rop(
                     # we have to make it be wrong for Rop to keep working
                     # Rop should eventually be upgraded to handle integers
                     # correctly, the same as grad
-                    y = aesara.tensor.cast(y, x.type.dtype)
+                    y = pytensor.tensor.cast(y, x.type.dtype)
                     y = x.type.filter_variable(y)
                 assert x.type.in_same_class(y.type)
                 same_type_eval_points.append(y)
@@ -343,7 +343,7 @@ def Rop(
                     "'ignore', 'warn' and 'raise'."
                 )
             if return_disconnected.lower() == "zero":
-                rval.append(aesara.tensor.zeros_like(out))
+                rval.append(pytensor.tensor.zeros_like(out))
             elif return_disconnected.lower() == "none":
                 rval.append(None)
             elif return_disconnected.lower() == "disconnected":
@@ -398,21 +398,21 @@ def Lop(
         If `f` is a list/tuple, then return a list/tuple with the results.
     """
     if not isinstance(eval_points, (list, tuple)):
-        _eval_points: List[Variable] = [aesara.tensor.as_tensor_variable(eval_points)]
+        _eval_points: List[Variable] = [pytensor.tensor.as_tensor_variable(eval_points)]
     else:
-        _eval_points = [aesara.tensor.as_tensor_variable(x) for x in eval_points]
+        _eval_points = [pytensor.tensor.as_tensor_variable(x) for x in eval_points]
 
     if not isinstance(f, (list, tuple)):
-        _f: List[Variable] = [aesara.tensor.as_tensor_variable(f)]
+        _f: List[Variable] = [pytensor.tensor.as_tensor_variable(f)]
     else:
-        _f = [aesara.tensor.as_tensor_variable(x) for x in f]
+        _f = [pytensor.tensor.as_tensor_variable(x) for x in f]
 
     grads = list(_eval_points)
 
     if not isinstance(wrt, (list, tuple)):
-        _wrt: List[Variable] = [aesara.tensor.as_tensor_variable(wrt)]
+        _wrt: List[Variable] = [pytensor.tensor.as_tensor_variable(wrt)]
     else:
-        _wrt = [aesara.tensor.as_tensor_variable(x) for x in wrt]
+        _wrt = [pytensor.tensor.as_tensor_variable(x) for x in wrt]
 
     assert len(_f) == len(grads)
     known = dict(zip(_f, grads))
@@ -539,7 +539,7 @@ def grad(
         # So before we try to cast it make sure it even has a dtype
         if (
             hasattr(g_cost.type, "dtype")
-            and cost.type.dtype in aesara.tensor.type.continuous_dtypes
+            and cost.type.dtype in pytensor.tensor.type.continuous_dtypes
         ):
             # Here we enforce the constraint that floating point variables
             # have the same dtype as their gradient.
@@ -548,7 +548,7 @@ def grad(
         # This is to be enforced by the Op.grad method for the
         # Op that outputs cost.
         if hasattr(g_cost.type, "dtype"):
-            assert g_cost.type.dtype in aesara.tensor.type.continuous_dtypes
+            assert g_cost.type.dtype in pytensor.tensor.type.continuous_dtypes
 
         grad_dict[cost] = g_cost
 
@@ -557,9 +557,9 @@ def grad(
 
         if not hasattr(g_var, "type"):
             raise TypeError(
-                "output grads must be aesara variables."
+                "output grads must be pytensor variables."
                 f"Ambiguous whether {type(g_var)} should be made into tensor"
-                " or sparse aesara variable"
+                " or sparse pytensor variable"
             )
 
         if not isinstance(
@@ -618,7 +618,7 @@ def grad(
     for var in grad_dict:
         g = grad_dict[var]
         if hasattr(g.type, "dtype"):
-            assert g.type.dtype in aesara.tensor.type.float_dtypes
+            assert g.type.dtype in pytensor.tensor.type.float_dtypes
 
     _rval: Sequence[Variable] = _populate_grad_dict(
         var_to_app_to_idx, grad_dict, _wrt, cost_name
@@ -660,12 +660,12 @@ def subgraph_grad(wrt, end, start=None, cost=None, details=False):
     With respect to `wrt`, computes gradients of cost and/or from
     existing `start` gradients, up to the `end` variables of a
     symbolic digraph.  In other words, computes gradients for a
-    subgraph of the symbolic aesara function. Ignores all disconnected
+    subgraph of the symbolic pytensor function. Ignores all disconnected
     inputs.
 
     This can be useful when one needs to perform the gradient descent
     iteratively (e.g. one layer at a time in an MLP), or when a
-    particular operation is not differentiable in aesara
+    particular operation is not differentiable in pytensor
     (e.g. stochastic sampling from a multinomial). In the latter case,
     the gradient of the non-differentiable process could be
     approximated by user-defined formula, which could be calculated
@@ -682,14 +682,14 @@ def subgraph_grad(wrt, end, start=None, cost=None, details=False):
 
     .. code-block:: python
 
-        x, t = aesara.tensor.fvector('x'), aesara.tensor.fvector('t')
-        w1 = aesara.shared(np.random.standard_normal((3,4)))
-        w2 = aesara.shared(np.random.standard_normal((4,2)))
-        a1 = aesara.tensor.tanh(aesara.tensor.dot(x,w1))
-        a2 = aesara.tensor.tanh(aesara.tensor.dot(a1,w2))
-        cost2 = aesara.tensor.sqr(a2 - t).sum()
-        cost2 += aesara.tensor.sqr(w2.sum())
-        cost1 = aesara.tensor.sqr(w1.sum())
+        x, t = pytensor.tensor.fvector('x'), pytensor.tensor.fvector('t')
+        w1 = pytensor.shared(np.random.standard_normal((3,4)))
+        w2 = pytensor.shared(np.random.standard_normal((4,2)))
+        a1 = pytensor.tensor.tanh(pytensor.tensor.dot(x,w1))
+        a2 = pytensor.tensor.tanh(pytensor.tensor.dot(a1,w2))
+        cost2 = pytensor.tensor.sqr(a2 - t).sum()
+        cost2 += pytensor.tensor.sqr(w2.sum())
+        cost1 = pytensor.tensor.sqr(w1.sum())
 
         params = [[w2],[w1]]
         costs = [cost2,cost1]
@@ -698,7 +698,7 @@ def subgraph_grad(wrt, end, start=None, cost=None, details=False):
         next_grad = None
         param_grads = []
         for i in range(2):
-            param_grad, next_grad = aesara.subgraph_grad(
+            param_grad, next_grad = pytensor.subgraph_grad(
                 wrt=params[i], end=grad_ends[i],
                 start=next_grad, cost=costs[i]
             )
@@ -713,7 +713,7 @@ def subgraph_grad(wrt, end, start=None, cost=None, details=False):
 
     end : list of variables
         Aesara variables at which to end gradient descent (they are
-        considered constant in aesara.grad).  For convenience, the
+        considered constant in pytensor.grad).  For convenience, the
         gradients with respect to these variables are also returned.
 
     start : dictionary of variables
@@ -721,9 +721,9 @@ def subgraph_grad(wrt, end, start=None, cost=None, details=False):
         gradients. This is useful when the gradient on some variables
         are known. These are used to compute the gradients backwards up
         to the variables in `end` (they are used as known_grad in
-        aesara.grad).
+        pytensor.grad).
 
-    cost : :class:`~aesara.graph.basic.Variable` scalar (0-dimensional) variable
+    cost : :class:`~pytensor.graph.basic.Variable` scalar (0-dimensional) variable
         Additional costs for which to compute the gradients.  For
         example, these could be weight decay, an l1 constraint, MSE,
         NLL, etc. May optionally be None if start is provided.
@@ -767,7 +767,7 @@ def subgraph_grad(wrt, end, start=None, cost=None, details=False):
     cost_grads = None
     if start is not None:
         start_grads = list(
-            aesara.grad(
+            pytensor.grad(
                 cost=None,
                 wrt=params,
                 known_grads=start,
@@ -778,7 +778,7 @@ def subgraph_grad(wrt, end, start=None, cost=None, details=False):
 
     if cost is not None:
         cost_grads = list(
-            aesara.grad(
+            pytensor.grad(
                 cost=cost,
                 wrt=params,
                 consider_constant=end,
@@ -890,9 +890,9 @@ def _populate_var_to_app_to_idx(outputs, wrt, consider_constant):
         consider_constant = []
     else:
         # error checking on consider_constant: verify that it is a collection
-        # of aesara variables
+        # of pytensor variables
         # this is important, if someone accidentally passes a nested data
-        # structure with aesara variables at the leaves, only the root will
+        # structure with pytensor variables at the leaves, only the root will
         # be properly considered constant
         try:
             iter(consider_constant)
@@ -1081,7 +1081,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
             # List of bools indicating if each output is an integer dtype
             output_is_int = [
                 hasattr(output.type, "dtype")
-                and output.type.dtype in aesara.tensor.type.discrete_dtypes
+                and output.type.dtype in pytensor.tensor.type.discrete_dtypes
                 for output in node.outputs
             ]
 
@@ -1161,7 +1161,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                     o_dt = getattr(o.type, "dtype", None)
                     og_dt = getattr(og.type, "dtype", None)
                     if (
-                        o_dt not in aesara.tensor.type.discrete_dtypes
+                        o_dt not in pytensor.tensor.type.discrete_dtypes
                         and og_dt
                         and o_dt != og_dt
                     ):
@@ -1176,13 +1176,13 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                     ng_dt = getattr(ng.type, "dtype", None)
                     if (
                         ng_dt is not None
-                        and o_dt not in aesara.tensor.type.discrete_dtypes
+                        and o_dt not in pytensor.tensor.type.discrete_dtypes
                     ):
                         assert ng_dt == o_dt
 
                 assert all(
                     getattr(ng.type, "dtype", None)
-                    not in aesara.tensor.type.discrete_dtypes
+                    not in pytensor.tensor.type.discrete_dtypes
                     for ng in new_output_grads
                 )
 
@@ -1301,7 +1301,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                                 )
 
                 if not isinstance(term.type, (NullType, DisconnectedType)):
-                    if term.type.dtype not in aesara.tensor.type.float_dtypes:
+                    if term.type.dtype not in pytensor.tensor.type.float_dtypes:
                         raise TypeError(
                             str(node.op) + ".grad illegally "
                             " returned an integer-valued variable."
@@ -1326,7 +1326,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                                 "integer-valued outputs so it should be "
                                 "NullType, DisconnectedType, or some form "
                                 "of zeros. It is not NullType or "
-                                "DisconnectedType and aesara can't "
+                                "DisconnectedType and pytensor can't "
                                 "simplify it to a constant, so it's not "
                                 "verifiably zeros."
                             )
@@ -1336,7 +1336,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                                 f" {i}. Since this input is only connected "
                                 "to integer-valued outputs, it should "
                                 "evaluate to zeros, but it evaluates to"
-                                f"{aesara.get_scalar_constant_value(term)}."
+                                f"{pytensor.get_scalar_constant_value(term)}."
                             )
                             raise ValueError(msg)
 
@@ -1453,7 +1453,7 @@ def _float_ones_like(x):
     floating point dtype"""
 
     dtype = x.type.dtype
-    if dtype not in aesara.tensor.type.float_dtypes:
+    if dtype not in pytensor.tensor.type.float_dtypes:
         dtype = config.floatX
 
     return x.ones_like(dtype=dtype)
@@ -1676,8 +1676,8 @@ class numeric_grad:
 
 
 def mode_not_slow(mode):
-    from aesara.compile.debugmode import DebugMode
-    from aesara.compile.mode import FAST_RUN, get_mode
+    from pytensor.compile.debugmode import DebugMode
+    from pytensor.compile.mode import FAST_RUN, get_mode
 
     if mode == "FAST_COMPILE":
         return FAST_RUN
@@ -1711,7 +1711,7 @@ def verify_grad(
 
     Examples
     --------
-    >>> verify_grad(aesara.tensor.tanh,
+    >>> verify_grad(pytensor.tensor.tanh,
     ...             (np.asarray([[2, 3, 4], [-1, 3.3, 9.9]]),),
     ...             rng=np.random.default_rng(23098))
 
@@ -1756,8 +1756,8 @@ def verify_grad(
     using random projections.
 
     """
-    from aesara.compile.function import function
-    from aesara.compile.sharedvalue import shared
+    from pytensor.compile.function import function
+    from pytensor.compile.sharedvalue import shared
 
     if not isinstance(pt, (list, tuple)):
         raise TypeError("`pt` should be a list or tuple")
@@ -1788,7 +1788,7 @@ def verify_grad(
             "numpy.random.RandomState. You may "
             "want to use tests.unittest"
             "_tools.verify_grad instead of "
-            "aesara.gradient.verify_grad."
+            "pytensor.gradient.verify_grad."
         )
 
     # We allow input downcast in `function`, because `numeric_grad` works in
@@ -1804,7 +1804,7 @@ def verify_grad(
 
     tensor_pt = []
     for i, p in enumerate(pt):
-        p_t = aesara.tensor.as_tensor_variable(p).type()
+        p_t = pytensor.tensor.as_tensor_variable(p).type()
         p_t.name = f"input {i}"
         tensor_pt.append(p_t)
 
@@ -1842,7 +1842,7 @@ def verify_grad(
 
     # random projection of o onto t_r
     # This sum() is defined above, it's not the builtin sum.
-    cost = aesara.tensor.sum(t_r * o_output)
+    cost = pytensor.tensor.sum(t_r * o_output)
 
     if no_debug_ref:
         mode_for_cost = mode_not_slow(mode)
@@ -1926,9 +1926,9 @@ def jacobian(expression, wrt, consider_constant=None, disconnected_inputs="raise
 
     Parameters
     ----------
-    expression : Vector (1-dimensional) :class:`~aesara.graph.basic.Variable`
+    expression : Vector (1-dimensional) :class:`~pytensor.graph.basic.Variable`
         Values that we are differentiating (that we want the Jacobian of)
-    wrt : :class:`~aesara.graph.basic.Variable` or list of Variables
+    wrt : :class:`~pytensor.graph.basic.Variable` or list of Variables
         Term[s] with respect to which we compute the Jacobian
     consider_constant : list of variables
         Expressions not to backpropagate through
@@ -1944,7 +1944,7 @@ def jacobian(expression, wrt, consider_constant=None, disconnected_inputs="raise
 
     Returns
     -------
-    :class:`~aesara.graph.basic.Variable` or list/tuple of Variables (depending upon `wrt`)
+    :class:`~pytensor.graph.basic.Variable` or list/tuple of Variables (depending upon `wrt`)
         The Jacobian of `expression` with respect to (elements of) `wrt`.
         If an element of `wrt` is not differentiable with respect to the
         output, then a zero variable is returned. The return value is
@@ -1999,9 +1999,9 @@ def jacobian(expression, wrt, consider_constant=None, disconnected_inputs="raise
     # generator used n expression (because during computing gradients we are
     # just backtracking over old values. (rp Jan 2012 - if anyone has a
     # counter example please show me)
-    jacobs, updates = aesara.scan(
+    jacobs, updates = pytensor.scan(
         inner_function,
-        sequences=aesara.tensor.arange(expression.shape[0]),
+        sequences=pytensor.tensor.arange(expression.shape[0]),
         non_sequences=[expression] + wrt,
     )
     assert not updates, "Scan has returned a list of updates; this should not happen."
@@ -2028,7 +2028,7 @@ def hessian(cost, wrt, consider_constant=None, disconnected_inputs="raise"):
 
     Returns
     -------
-    :class:`~aesara.graph.basic.Variable` or list/tuple of Variables
+    :class:`~pytensor.graph.basic.Variable` or list/tuple of Variables
         The Hessian of the `cost` with respect to (elements of) `wrt`.
         If an element of `wrt` is not differentiable with respect to the
         output, then a zero variable is returned. The return value is
@@ -2071,14 +2071,14 @@ def hessian(cost, wrt, consider_constant=None, disconnected_inputs="raise"):
         # It is possible that the inputs are disconnected from expr,
         # even if they are connected to cost.
         # This should not be an error.
-        hess, updates = aesara.scan(
+        hess, updates = pytensor.scan(
             lambda i, y, x: grad(
                 y[i],
                 x,
                 consider_constant=consider_constant,
                 disconnected_inputs="ignore",
             ),
-            sequences=aesara.tensor.arange(expr.shape[0]),
+            sequences=pytensor.tensor.arange(expr.shape[0]),
             non_sequences=[expr, input],
         )
         assert (
@@ -2104,9 +2104,9 @@ def _is_zero(x):
 
     no_constant_value = True
     try:
-        constant_value = aesara.get_scalar_constant_value(x)
+        constant_value = pytensor.get_scalar_constant_value(x)
         no_constant_value = False
-    except aesara.tensor.exceptions.NotScalarConstantError:
+    except pytensor.tensor.exceptions.NotScalarConstantError:
         pass
 
     if no_constant_value:
@@ -2164,7 +2164,7 @@ class ZeroGrad(ViewOp):
         if eval_points[0] is None:
             return [None]
 
-        return aesara.tensor.zeros(1)
+        return pytensor.tensor.zeros(1)
 
 
 zero_grad_ = ZeroGrad()
@@ -2182,12 +2182,12 @@ def zero_grad(x):
 
     Parameters
     ----------
-    x: :class:`~aesara.graph.basic.Variable`
+    x: :class:`~pytensor.graph.basic.Variable`
         A Aesara expression whose gradient should be truncated.
 
     Returns
     -------
-    :class:`~aesara.graph.basic.Variable`
+    :class:`~pytensor.graph.basic.Variable`
         An expression equivalent to ``x``, with its gradient
         truncated to 0.
     """
@@ -2221,12 +2221,12 @@ def undefined_grad(x):
 
     Parameters
     ----------
-    x: :class:`~aesara.graph.basic.Variable`
+    x: :class:`~pytensor.graph.basic.Variable`
         A Aesara expression whose gradient should be undefined.
 
     Returns
     -------
-    :class:`~aesara.graph.basic.Variable`
+    :class:`~pytensor.graph.basic.Variable`
         An expression equivalent to ``x``, with its gradient undefined.
     """
     return undefined_grad_(x)
@@ -2262,13 +2262,13 @@ def disconnected_grad(x):
 
     Parameters
     ----------
-    x: :class:`~aesara.graph.basic.Variable`
+    x: :class:`~pytensor.graph.basic.Variable`
         A Aesara expression whose gradient should not be
         backpropagated through.
 
     Returns
     -------
-    :class:`~aesara.graph.basic.Variable`
+    :class:`~pytensor.graph.basic.Variable`
         An expression equivalent to ``x``, with its gradient
         now effectively truncated to 0.
     """
@@ -2290,7 +2290,7 @@ class GradClip(ViewOp):
 
     def grad(self, args, g_outs):
         return [
-            aesara.tensor.clip(g_out, self.clip_lower_bound, self.clip_upper_bound)
+            pytensor.tensor.clip(g_out, self.clip_lower_bound, self.clip_upper_bound)
             for g_out in g_outs
         ]
 
@@ -2312,10 +2312,10 @@ def grad_clip(x, lower_bound, upper_bound):
 
     Examples
     --------
-    >>> x = aesara.tensor.type.scalar()
-    >>> z = aesara.gradient.grad(grad_clip(x, -1, 1)**2, x)
-    >>> z2 = aesara.gradient.grad(x**2, x)
-    >>> f = aesara.function([x], outputs = [z, z2])
+    >>> x = pytensor.tensor.type.scalar()
+    >>> z = pytensor.gradient.grad(grad_clip(x, -1, 1)**2, x)
+    >>> z2 = pytensor.gradient.grad(x**2, x)
+    >>> f = pytensor.function([x], outputs = [z, z2])
     >>> print(f(2.0))
     [array(1.0), array(4.0)]
 
@@ -2349,15 +2349,15 @@ def grad_scale(x, multiplier):
 
     Examples
     --------
-    >>> x = aesara.tensor.fscalar()
-    >>> fx = aesara.tensor.sin(x)
-    >>> fp = aesara.grad(fx, wrt=x)
-    >>> fprime = aesara.function([x], fp)
+    >>> x = pytensor.tensor.fscalar()
+    >>> fx = pytensor.tensor.sin(x)
+    >>> fp = pytensor.grad(fx, wrt=x)
+    >>> fprime = pytensor.function([x], fp)
     >>> print(fprime(2))  # doctest: +ELLIPSIS
     -0.416...
     >>> f_inverse=grad_scale(fx, -1.)
-    >>> fpp = aesara.grad(f_inverse, wrt=x)
-    >>> fpprime = aesara.function([x], fpp)
+    >>> fpp = pytensor.grad(f_inverse, wrt=x)
+    >>> fpprime = pytensor.function([x], fpp)
     >>> print(fpprime(2))  # doctest: +ELLIPSIS
     0.416...
     """

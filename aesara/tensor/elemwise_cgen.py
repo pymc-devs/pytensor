@@ -1,4 +1,4 @@
-from aesara.configdefaults import config
+from pytensor.configdefaults import config
 
 
 def make_declare(loop_orders, dtypes, sub):

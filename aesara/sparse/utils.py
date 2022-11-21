@@ -1,4 +1,4 @@
-from aesara.utils import hash_from_code
+from pytensor.utils import hash_from_code
 
 
 def hash_from_sparse(data):

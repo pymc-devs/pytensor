@@ -5,12 +5,12 @@ import logging
 import warnings
 from collections import OrderedDict
 
-from aesara.compile.sharedvalue import SharedVariable
+from pytensor.compile.sharedvalue import SharedVariable
 
 
 __docformat__ = "restructuredtext en"
 
-logger = logging.getLogger("aesara.updates")
+logger = logging.getLogger("pytensor.updates")
 
 
 # Must be an OrderedDict or updates will be applied in a non-deterministic

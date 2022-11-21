@@ -5,15 +5,15 @@ import numpy as np
 from numba import types
 from numba.extending import overload
 
-from aesara.link.numba.dispatch import basic as numba_basic
-from aesara.link.numba.dispatch.basic import (
+from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch.basic import (
     create_arg_string,
     create_tuple_string,
     numba_funcify,
 )
-from aesara.link.utils import compile_function_src
-from aesara.scan.op import Scan
-from aesara.tensor.type import TensorType
+from pytensor.link.utils import compile_function_src
+from pytensor.scan.op import Scan
+from pytensor.tensor.type import TensorType
 
 
 def idx_to_str(

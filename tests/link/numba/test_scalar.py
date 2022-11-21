@@ -1,15 +1,15 @@
 import numpy as np
 import pytest
 
-import aesara.scalar as aes
-import aesara.scalar.basic as aesb
-import aesara.tensor as at
-from aesara import config
-from aesara.compile.sharedvalue import SharedVariable
-from aesara.graph.basic import Constant
-from aesara.graph.fg import FunctionGraph
-from aesara.scalar.basic import Composite
-from aesara.tensor.elemwise import Elemwise
+import pytensor.scalar as aes
+import pytensor.scalar.basic as aesb
+import pytensor.tensor as at
+from pytensor import config
+from pytensor.compile.sharedvalue import SharedVariable
+from pytensor.graph.basic import Constant
+from pytensor.graph.fg import FunctionGraph
+from pytensor.scalar.basic import Composite
+from pytensor.tensor.elemwise import Elemwise
 from tests.link.numba.test_basic import compare_numba_and_py, set_test_value
 
 

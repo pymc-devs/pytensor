@@ -10,29 +10,29 @@ from typing import cast as type_cast
 
 import numpy as np
 
-from aesara import scalar as aes
-from aesara import tensor as at
-from aesara.compile.profiling import ProfileStats
-from aesara.configdefaults import config
-from aesara.graph.basic import (
+from pytensor import scalar as aes
+from pytensor import tensor as at
+from pytensor.compile.profiling import ProfileStats
+from pytensor.configdefaults import config
+from pytensor.graph.basic import (
     Constant,
     Variable,
     clone_replace,
     equal_computations,
     graph_inputs,
 )
-from aesara.graph.op import get_test_value
-from aesara.graph.type import HasDataType
-from aesara.graph.utils import TestValueError
-from aesara.tensor.basic import AllocEmpty, cast
-from aesara.tensor.subtensor import set_subtensor
-from aesara.tensor.var import TensorConstant
+from pytensor.graph.op import get_test_value
+from pytensor.graph.type import HasDataType
+from pytensor.graph.utils import TestValueError
+from pytensor.tensor.basic import AllocEmpty, cast
+from pytensor.tensor.subtensor import set_subtensor
+from pytensor.tensor.var import TensorConstant
 
 
 if TYPE_CHECKING:
-    from aesara.scan.op import ScanInfo
+    from pytensor.scan.op import ScanInfo
 
-_logger = logging.getLogger("aesara.scan.utils")
+_logger = logging.getLogger("pytensor.scan.utils")
 
 
 class InnerFunctionError(Exception):
@@ -402,7 +402,7 @@ def compress_outs(op, not_required, inputs):
     node inputs, and changing the dictionary.
 
     """
-    from aesara.scan.op import ScanInfo
+    from pytensor.scan.op import ScanInfo
 
     op_info = op.info
     info = ScanInfo(
@@ -707,7 +707,7 @@ class ScanArgs:
 
     @staticmethod
     def from_node(node, clone=False) -> "ScanArgs":
-        from aesara.scan.op import Scan
+        from pytensor.scan.op import Scan
 
         if not isinstance(node.op, Scan):
             raise TypeError("{} is not a Scan node".format(node))
@@ -737,7 +737,7 @@ class ScanArgs:
 
     @property
     def var_mappings(self):
-        from aesara.scan.op import ScanMethodsMixin
+        from pytensor.scan.op import ScanMethodsMixin
 
         return ScanMethodsMixin.get_oinp_iinp_iout_oout_mappings(self)
 
@@ -804,7 +804,7 @@ class ScanArgs:
 
     @property
     def info(self) -> "ScanInfo":
-        from aesara.scan.op import ScanInfo
+        from pytensor.scan.op import ScanInfo
 
         return ScanInfo(
             n_seqs=len(self.outer_in_seqs),

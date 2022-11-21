@@ -1,23 +1,23 @@
 import numpy as np
 import pytest
 
-import aesara.tensor as at
-from aesara import config, function
-from aesara.gradient import NullTypeGradError, grad
-from aesara.raise_op import Assert
-from aesara.tensor.math import eq
-from aesara.tensor.random.op import (
+import pytensor.tensor as at
+from pytensor import config, function
+from pytensor.gradient import NullTypeGradError, grad
+from pytensor.raise_op import Assert
+from pytensor.tensor.math import eq
+from pytensor.tensor.random.op import (
     RandomState,
     RandomVariable,
     default_rng,
     default_supp_shape_from_params,
 )
-from aesara.tensor.shape import specify_shape
-from aesara.tensor.type import all_dtypes, iscalar, tensor
+from pytensor.tensor.shape import specify_shape
+from pytensor.tensor.type import all_dtypes, iscalar, tensor
 
 
 @pytest.fixture(scope="module", autouse=True)
-def set_aesara_flags():
+def set_pytensor_flags():
     with config.change_flags(cxx="", compute_test_value="raise"):
         yield
 

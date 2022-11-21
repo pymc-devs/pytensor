@@ -3,12 +3,12 @@ import numpy as np
 import pytest
 from packaging.version import parse as version_parse
 
-import aesara.tensor as at
-from aesara.compile.ops import DeepCopyOp, ViewOp
-from aesara.configdefaults import config
-from aesara.graph.fg import FunctionGraph
-from aesara.tensor.shape import Shape, Shape_i, SpecifyShape, Unbroadcast, reshape
-from aesara.tensor.type import iscalar, vector
+import pytensor.tensor as at
+from pytensor.compile.ops import DeepCopyOp, ViewOp
+from pytensor.configdefaults import config
+from pytensor.graph.fg import FunctionGraph
+from pytensor.tensor.shape import Shape, Shape_i, SpecifyShape, Unbroadcast, reshape
+from pytensor.tensor.type import iscalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
 

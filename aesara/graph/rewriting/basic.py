@@ -19,10 +19,10 @@ from typing import List, Optional, Sequence, Tuple, Union, cast
 
 from typing_extensions import Literal
 
-import aesara
-from aesara.configdefaults import config
-from aesara.graph import destroyhandler as dh
-from aesara.graph.basic import (
+import pytensor
+from pytensor.configdefaults import config
+from pytensor.graph import destroyhandler as dh
+from pytensor.graph.basic import (
     Apply,
     AtomicVariable,
     Constant,
@@ -31,19 +31,19 @@ from aesara.graph.basic import (
     io_toposort,
     vars_between,
 )
-from aesara.graph.features import AlreadyThere, Feature, NodeFinder
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.op import Op
-from aesara.graph.utils import AssocList, InconsistencyError
-from aesara.misc.ordered_set import OrderedSet
-from aesara.utils import flatten
+from pytensor.graph.features import AlreadyThere, Feature, NodeFinder
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op
+from pytensor.graph.utils import AssocList, InconsistencyError
+from pytensor.misc.ordered_set import OrderedSet
+from pytensor.utils import flatten
 
 
 if TYPE_CHECKING:
-    from aesara.graph.rewriting.unify import Var
+    from pytensor.graph.rewriting.unify import Var
 
 
-_logger = logging.getLogger("aesara.graph.rewriting.basic")
+_logger = logging.getLogger("pytensor.graph.rewriting.basic")
 
 RemoveKeyType = Literal["remove"]
 TransformOutputType = Union[
@@ -991,10 +991,10 @@ class MetaNodeRewriter(NodeRewriter):
         givens = {}
         missing = set()
         for input in node.inputs:
-            if isinstance(input, aesara.compile.SharedVariable):
+            if isinstance(input, pytensor.compile.SharedVariable):
                 pass
             elif hasattr(input.tag, "test_value"):
-                givens[input] = aesara.shared(
+                givens[input] = pytensor.shared(
                     input.type.filter(input.tag.test_value),
                     input.name,
                     shape=input.broadcastable,
@@ -1024,7 +1024,7 @@ class MetaNodeRewriter(NodeRewriter):
             outputs = node_rewriter.transform(fgraph, node, *args, **kwargs)
             if outputs:
                 try:
-                    fn = aesara.function(
+                    fn = pytensor.function(
                         [], outputs, givens=givens, on_unused_input="ignore"
                     )
                     fn.trust_input = True
@@ -1586,7 +1586,7 @@ class PatternNodeRewriter(NodeRewriter):
         often.
 
         """
-        from aesara.graph.rewriting.unify import convert_strs_to_vars
+        from pytensor.graph.rewriting.unify import convert_strs_to_vars
 
         var_map: Dict[str, "Var"] = {}
         self.in_pattern = convert_strs_to_vars(in_pattern, var_map=var_map)
@@ -3020,9 +3020,9 @@ def check_stack_trace(f_or_fgraph, ops_to_check="last", bug_print="raise"):
         otherwise.
 
     """
-    if isinstance(f_or_fgraph, aesara.compile.function.types.Function):
+    if isinstance(f_or_fgraph, pytensor.compile.function.types.Function):
         fgraph = f_or_fgraph.maker.fgraph
-    elif isinstance(f_or_fgraph, aesara.graph.fg.FunctionGraph):
+    elif isinstance(f_or_fgraph, pytensor.graph.fg.FunctionGraph):
         fgraph = f_or_fgraph
     else:
         raise ValueError("The type of f_or_fgraph is not supported")

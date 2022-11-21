@@ -10,28 +10,28 @@ import pytest
 from numpy.testing import assert_array_equal
 from scipy.special import logsumexp as scipy_logsumexp
 
-import aesara.scalar as aes
-from aesara.compile.debugmode import DebugMode
-from aesara.compile.function import function
-from aesara.compile.mode import get_default_mode
-from aesara.compile.sharedvalue import shared
-from aesara.configdefaults import config
-from aesara.gradient import NullTypeGradError, grad, numeric_grad
-from aesara.graph.basic import Variable, applys_between
-from aesara.graph.fg import FunctionGraph
-from aesara.link.c.basic import DualLinker
-from aesara.misc.safe_asarray import _asarray
-from aesara.printing import pprint
-from aesara.tensor import blas, blas_c
-from aesara.tensor.basic import (
+import pytensor.scalar as aes
+from pytensor.compile.debugmode import DebugMode
+from pytensor.compile.function import function
+from pytensor.compile.mode import get_default_mode
+from pytensor.compile.sharedvalue import shared
+from pytensor.configdefaults import config
+from pytensor.gradient import NullTypeGradError, grad, numeric_grad
+from pytensor.graph.basic import Variable, applys_between
+from pytensor.graph.fg import FunctionGraph
+from pytensor.link.c.basic import DualLinker
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.printing import pprint
+from pytensor.tensor import blas, blas_c
+from pytensor.tensor.basic import (
     as_tensor_variable,
     constant,
     eye,
     get_scalar_constant_value,
     switch,
 )
-from aesara.tensor.elemwise import CAReduce, Elemwise
-from aesara.tensor.math import (
+from pytensor.tensor.elemwise import CAReduce, Elemwise
+from pytensor.tensor.math import (
     Argmax,
     Dot,
     MatMul,
@@ -108,9 +108,9 @@ from aesara.tensor.math import (
     sqrt,
     sub,
 )
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.math import tan, tanh, tensordot, true_div, trunc, var
-from aesara.tensor.type import (
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import tan, tanh, tensordot, true_div, trunc, var
+from pytensor.tensor.type import (
     TensorType,
     complex_dtypes,
     continuous_dtypes,
@@ -139,7 +139,7 @@ from aesara.tensor.type import (
     vectors,
     zvector,
 )
-from aesara.tensor.type_other import NoneConst
+from pytensor.tensor.type_other import NoneConst
 from tests import unittest_tools as utt
 from tests.link.test_link import make_function
 from tests.tensor.utils import (
@@ -1299,7 +1299,7 @@ class TestMinMax:
         # Test the gradient when we have multiple axis at the same time.
         #
         # This not implemented, so we disable the test. See ticket:
-        # http://www.assembla.com/spaces/aesara/tickets/511
+        # http://www.assembla.com/spaces/pytensor/tickets/511
         data = random(2, 3)
         for fct in [max_and_argmax, max, min]:
             utt.verify_grad(lambda v: fct(v, axis=[0, 1]), [data])
@@ -2256,19 +2256,19 @@ class TestArithmeticCast:
         # scalar == scalar stored as a 0d array
         # array == 1d array
         # i_scalar == scalar type used internally by Aesara
-        def aesara_scalar(dtype):
+        def pytensor_scalar(dtype):
             return scalar(dtype=str(dtype))
 
         def numpy_scalar(dtype):
             return np.array(1, dtype=dtype)
 
-        def aesara_array(dtype):
+        def pytensor_array(dtype):
             return vector(dtype=str(dtype))
 
         def numpy_array(dtype):
             return np.array([1], dtype=dtype)
 
-        def aesara_i_scalar(dtype):
+        def pytensor_i_scalar(dtype):
             return aes.ScalarType(str(dtype))()
 
         def numpy_i_scalar(dtype):
@@ -2277,13 +2277,13 @@ class TestArithmeticCast:
         with config.change_flags(cast_policy="numpy+floatX"):
             # We will test all meaningful combinations of
             # scalar and array operations.
-            aesara_args = list(map(eval, [f"aesara_{c}" for c in combo]))
+            pytensor_args = list(map(eval, [f"pytensor_{c}" for c in combo]))
             numpy_args = list(map(eval, [f"numpy_{c}" for c in combo]))
-            aesara_arg_1 = aesara_args[0](a_type)
-            aesara_arg_2 = aesara_args[1](b_type)
-            aesara_dtype = op(
-                aesara_arg_1,
-                aesara_arg_2,
+            pytensor_arg_1 = pytensor_args[0](a_type)
+            pytensor_arg_2 = pytensor_args[1](b_type)
+            pytensor_dtype = op(
+                pytensor_arg_1,
+                pytensor_arg_2,
             ).type.dtype
 
             # For numpy we have a problem:
@@ -2298,7 +2298,7 @@ class TestArithmeticCast:
             ]
             numpy_dtype = aes.upcast(*list(map(str, numpy_dtypes)))
 
-            if numpy_dtype == aesara_dtype:
+            if numpy_dtype == pytensor_dtype:
                 # Same data type found, all is good!
                 return
 
@@ -2309,7 +2309,7 @@ class TestArithmeticCast:
                 and numpy_dtype == "float64"
             ):
                 # We should keep float32.
-                assert aesara_dtype == "float32"
+                assert pytensor_dtype == "float32"
                 return
 
             if "array" in combo and "scalar" in combo:
@@ -2331,7 +2331,7 @@ class TestArithmeticCast:
                     array_type != up_type
                     and
                     # Aesara upcasted the result array.
-                    aesara_dtype == up_type
+                    pytensor_dtype == up_type
                     and
                     # But Numpy kept its original type.
                     array_type == numpy_dtype
@@ -2344,7 +2344,7 @@ class TestArithmeticCast:
                 {a_type, b_type} == {"complex128", "float32"}
                 or {a_type, b_type} == {"complex128", "float16"}
                 and set(combo) == {"scalar", "array"}
-                and aesara_dtype == "complex128"
+                and pytensor_dtype == "complex128"
                 and numpy_dtype == "complex64"
             ):
                 # In numpy 1.6.x adding a complex128 with
@@ -3358,12 +3358,12 @@ def test_logsumexp(shape, axis, keepdims):
     scipy_inp = np.zeros(shape)
     scipy_out = scipy_logsumexp(scipy_inp, axis=axis, keepdims=keepdims)
 
-    aesara_inp = as_tensor_variable(scipy_inp)
-    f = function([], logsumexp(aesara_inp, axis=axis, keepdims=keepdims))
-    aesara_out = f()
+    pytensor_inp = as_tensor_variable(scipy_inp)
+    f = function([], logsumexp(pytensor_inp, axis=axis, keepdims=keepdims))
+    pytensor_out = f()
 
     np.testing.assert_array_almost_equal(
-        aesara_out,
+        pytensor_out,
         scipy_out,
     )
 
@@ -3392,9 +3392,9 @@ class TestMatMul(utt.InferShapeTester):
         self.op_class = MatMul
 
     def _validate_output(self, a, b):
-        aesara_sol = self.op(a, b).eval()
+        pytensor_sol = self.op(a, b).eval()
         numpy_sol = np.matmul(a, b)
-        assert _allclose(numpy_sol, aesara_sol)
+        assert _allclose(numpy_sol, pytensor_sol)
 
     @pytest.mark.parametrize(
         "x1, x2",

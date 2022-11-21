@@ -5,11 +5,11 @@ from typing import TYPE_CHECKING, Optional, Union
 
 import numpy as np
 
-import aesara.scalar.basic as aes
-from aesara import compile
-from aesara.compile.ops import ViewOp
-from aesara.graph.basic import Constant, Variable
-from aesara.graph.rewriting.basic import (
+import pytensor.scalar.basic as aes
+from pytensor import compile
+from pytensor.compile.ops import ViewOp
+from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.rewriting.basic import (
     NodeRewriter,
     RemovalNodeRewriter,
     Rewriter,
@@ -17,9 +17,9 @@ from aesara.graph.rewriting.basic import (
     in2out,
     node_rewriter,
 )
-from aesara.graph.rewriting.db import RewriteDatabase
-from aesara.raise_op import Assert, CheckAndRaise, assert_op
-from aesara.tensor.basic import (
+from pytensor.graph.rewriting.db import RewriteDatabase
+from pytensor.raise_op import Assert, CheckAndRaise, assert_op
+from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
     Join,
@@ -40,23 +40,23 @@ from aesara.tensor.basic import (
     zeros,
     zeros_like,
 )
-from aesara.tensor.elemwise import DimShuffle, Elemwise
-from aesara.tensor.exceptions import NotScalarConstantError
-from aesara.tensor.extra_ops import broadcast_shape, broadcast_to
-from aesara.tensor.math import all as at_all
-from aesara.tensor.math import eq
-from aesara.tensor.shape import Shape_i
-from aesara.tensor.sort import TopKOp
-from aesara.tensor.type import DenseTensorType, TensorType
-from aesara.tensor.var import TensorConstant
-from aesara.utils import NoDuplicateOptWarningFilter
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.extra_ops import broadcast_shape, broadcast_to
+from pytensor.tensor.math import all as at_all
+from pytensor.tensor.math import eq
+from pytensor.tensor.shape import Shape_i
+from pytensor.tensor.sort import TopKOp
+from pytensor.tensor.type import DenseTensorType, TensorType
+from pytensor.tensor.var import TensorConstant
+from pytensor.utils import NoDuplicateOptWarningFilter
 
 
 if TYPE_CHECKING:
-    from aesara.tensor.rewriting.shape import ShapeFeature
+    from pytensor.tensor.rewriting.shape import ShapeFeature
 
 
-_logger = logging.getLogger("aesara.tensor.rewriting.basic")
+_logger = logging.getLogger("pytensor.tensor.rewriting.basic")
 _logger.addFilter(NoDuplicateOptWarningFilter())
 
 
@@ -760,7 +760,7 @@ def local_cast_cast(fgraph, node):
 def is_an_upcast(type1, type2):
     """Given two data types (as strings), check if converting to
     type2 from type1 constitutes an upcast.
-    Differs from aesara.scalar.upcast
+    Differs from pytensor.scalar.upcast
 
     """
     category = {
@@ -1268,14 +1268,14 @@ def local_useless_topk(fgraph, node):
 
 
 def import_ShapeFeature():
-    from aesara.tensor.rewriting.shape import ShapeFeature
+    from pytensor.tensor.rewriting.shape import ShapeFeature
 
     return ShapeFeature
 
 
 DEPRECATED_NAMES = {
     "ShapeFeature": (
-        "`ShapeFeature` is now located in `aesara.tensor.rewriting.shape`.",
+        "`ShapeFeature` is now located in `pytensor.tensor.rewriting.shape`.",
         import_ShapeFeature,
     ),
 }

@@ -1,17 +1,17 @@
 import numpy as np
 import pytest
 
-import aesara
-from aesara import shared
-from aesara.compile import optdb
-from aesara.compile.mode import get_mode
-from aesara.configdefaults import config
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.rewriting.basic import check_stack_trace
-from aesara.graph.rewriting.db import RewriteDatabaseQuery
-from aesara.tensor.math import add, exp, log, true_div
-from aesara.tensor.special import LogSoftmax, Softmax, SoftmaxGrad, softmax
-from aesara.tensor.type import matrix
+import pytensor
+from pytensor import shared
+from pytensor.compile import optdb
+from pytensor.compile.mode import get_mode
+from pytensor.configdefaults import config
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.basic import check_stack_trace
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.tensor.math import add, exp, log, true_div
+from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad, softmax
+from pytensor.tensor.type import matrix
 from tests import unittest_tools as utt
 
 
@@ -73,7 +73,7 @@ class TestLogSoftmaxRewrites:
 
         x = matrix("x")
         y = log(softmax(x))
-        g = aesara.tensor.grad(y.sum(), x)
+        g = pytensor.tensor.grad(y.sum(), x)
 
         softmax_grad_node = g.owner
         assert softmax_grad_node.op == SoftmaxGrad(axis=-1)
@@ -92,7 +92,7 @@ class TestLogSoftmaxRewrites:
 
 
 def test_log_softmax_stabilization():
-    mode = aesara.compile.mode.get_default_mode()
+    mode = pytensor.compile.mode.get_default_mode()
     mode = mode.including("local_log_softmax", "specialize")
 
     x = matrix()
@@ -109,7 +109,7 @@ def test_log_softmax_stabilization():
 
     # Call the function so debug mode can verify the rewritten version matches
     # the un-rewritten version
-    f = aesara.function([x], z, mode=mode)
+    f = pytensor.function([x], z, mode=mode)
     rng = np.random.default_rng(utt.fetch_seed())
     f(np.cast[config.floatX](rng.random((2, 3))))
 
@@ -120,13 +120,13 @@ def test_softmax_graph():
 
     """
     rng = np.random.default_rng(utt.fetch_seed())
-    x = aesara.shared(rng.normal(size=(3, 4)))
+    x = pytensor.shared(rng.normal(size=(3, 4)))
 
     def softmax_graph(c):
         return exp(c) / exp(c).sum(axis=-1, keepdims=True)
 
     def f(inputs):
         y = softmax_graph(x)
-        return aesara.grad(None, x, known_grads={y: inputs})
+        return pytensor.grad(None, x, known_grads={y: inputs})
 
     utt.verify_grad(f, [rng.random((3, 4))])

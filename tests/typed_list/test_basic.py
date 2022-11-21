@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-import aesara
-import aesara.typed_list
-from aesara import sparse
-from aesara.tensor.type import (
+import pytensor
+import pytensor.typed_list
+from pytensor import sparse
+from pytensor.tensor.type import (
     TensorType,
     integer_dtypes,
     matrix,
@@ -12,9 +12,9 @@ from aesara.tensor.type import (
     tensor3,
     vector,
 )
-from aesara.tensor.type_other import SliceType
-from aesara.tensor.var import TensorVariable
-from aesara.typed_list.basic import (
+from pytensor.tensor.type_other import SliceType
+from pytensor.tensor.var import TensorVariable
+from pytensor.typed_list.basic import (
     Append,
     Count,
     Extend,
@@ -26,13 +26,13 @@ from aesara.typed_list.basic import (
     Reverse,
     make_list,
 )
-from aesara.typed_list.type import TypedListType
+from pytensor.typed_list.type import TypedListType
 
 
 def rand_ranged_matrix(minimum, maximum, shape):
     return np.asarray(
         np.random.random(shape) * (maximum - minimum) + minimum,
-        dtype=aesara.config.floatX,
+        dtype=pytensor.config.floatX,
     )
 
 
@@ -57,7 +57,7 @@ class TestGetItem:
     def test_sanity_check_slice(self):
 
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
 
         mySymbolicSlice = SliceType()()
@@ -66,7 +66,7 @@ class TestGetItem:
 
         assert not isinstance(z, TensorVariable)
 
-        f = aesara.function([mySymbolicMatricesList, mySymbolicSlice], z)
+        f = pytensor.function([mySymbolicMatricesList, mySymbolicSlice], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -75,14 +75,14 @@ class TestGetItem:
     def test_sanity_check_single(self):
 
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
 
         mySymbolicScalar = scalar(dtype="int64")
 
         z = GetItem()(mySymbolicMatricesList, mySymbolicScalar)
 
-        f = aesara.function([mySymbolicMatricesList, mySymbolicScalar], z)
+        f = pytensor.function([mySymbolicMatricesList, mySymbolicScalar], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -90,13 +90,13 @@ class TestGetItem:
 
     def test_interface(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         mySymbolicScalar = scalar(dtype="int64")
 
         z = mySymbolicMatricesList[mySymbolicScalar]
 
-        f = aesara.function([mySymbolicMatricesList, mySymbolicScalar], z)
+        f = pytensor.function([mySymbolicMatricesList, mySymbolicScalar], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -104,13 +104,13 @@ class TestGetItem:
 
         z = mySymbolicMatricesList[0]
 
-        f = aesara.function([mySymbolicMatricesList], z)
+        f = pytensor.function([mySymbolicMatricesList], z)
 
         assert np.array_equal(f([x]), x)
 
     def test_wrong_input(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         mySymbolicMatrix = matrix()
 
@@ -119,12 +119,12 @@ class TestGetItem:
 
     def test_constant_input(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
 
         z = GetItem()(mySymbolicMatricesList, 0)
 
-        f = aesara.function([mySymbolicMatricesList], z)
+        f = pytensor.function([mySymbolicMatricesList], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -132,7 +132,7 @@ class TestGetItem:
 
         z = GetItem()(mySymbolicMatricesList, slice(0, 1, 1))
 
-        f = aesara.function([mySymbolicMatricesList], z)
+        f = pytensor.function([mySymbolicMatricesList], z)
 
         assert np.array_equal(f([x]), [x])
 
@@ -140,13 +140,13 @@ class TestGetItem:
 class TestAppend:
     def test_inplace(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         myMatrix = matrix()
 
         z = Append(True)(mySymbolicMatricesList, myMatrix)
 
-        f = aesara.function([mySymbolicMatricesList, myMatrix], z, accept_inplace=True)
+        f = pytensor.function([mySymbolicMatricesList, myMatrix], z, accept_inplace=True)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -156,13 +156,13 @@ class TestAppend:
 
     def test_sanity_check(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         myMatrix = matrix()
 
         z = Append()(mySymbolicMatricesList, myMatrix)
 
-        f = aesara.function([mySymbolicMatricesList, myMatrix], z)
+        f = pytensor.function([mySymbolicMatricesList, myMatrix], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -172,13 +172,13 @@ class TestAppend:
 
     def test_interfaces(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         myMatrix = matrix()
 
         z = mySymbolicMatricesList.append(myMatrix)
 
-        f = aesara.function([mySymbolicMatricesList, myMatrix], z)
+        f = pytensor.function([mySymbolicMatricesList, myMatrix], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -190,15 +190,15 @@ class TestAppend:
 class TestExtend:
     def test_inplace(self):
         mySymbolicMatricesList1 = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         mySymbolicMatricesList2 = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
 
         z = Extend(True)(mySymbolicMatricesList1, mySymbolicMatricesList2)
 
-        f = aesara.function(
+        f = pytensor.function(
             [mySymbolicMatricesList1, mySymbolicMatricesList2], z, accept_inplace=True
         )
 
@@ -210,15 +210,15 @@ class TestExtend:
 
     def test_sanity_check(self):
         mySymbolicMatricesList1 = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         mySymbolicMatricesList2 = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
 
         z = Extend()(mySymbolicMatricesList1, mySymbolicMatricesList2)
 
-        f = aesara.function([mySymbolicMatricesList1, mySymbolicMatricesList2], z)
+        f = pytensor.function([mySymbolicMatricesList1, mySymbolicMatricesList2], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -228,15 +228,15 @@ class TestExtend:
 
     def test_interface(self):
         mySymbolicMatricesList1 = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         mySymbolicMatricesList2 = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
 
         z = mySymbolicMatricesList1.extend(mySymbolicMatricesList2)
 
-        f = aesara.function([mySymbolicMatricesList1, mySymbolicMatricesList2], z)
+        f = pytensor.function([mySymbolicMatricesList1, mySymbolicMatricesList2], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -248,14 +248,14 @@ class TestExtend:
 class TestInsert:
     def test_inplace(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         myMatrix = matrix()
         myScalar = scalar(dtype="int64")
 
         z = Insert(True)(mySymbolicMatricesList, myScalar, myMatrix)
 
-        f = aesara.function(
+        f = pytensor.function(
             [mySymbolicMatricesList, myScalar, myMatrix], z, accept_inplace=True
         )
 
@@ -267,14 +267,14 @@ class TestInsert:
 
     def test_sanity_check(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         myMatrix = matrix()
         myScalar = scalar(dtype="int64")
 
         z = Insert()(mySymbolicMatricesList, myScalar, myMatrix)
 
-        f = aesara.function([mySymbolicMatricesList, myScalar, myMatrix], z)
+        f = pytensor.function([mySymbolicMatricesList, myScalar, myMatrix], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -284,14 +284,14 @@ class TestInsert:
 
     def test_interface(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         myMatrix = matrix()
         myScalar = scalar(dtype="int64")
 
         z = mySymbolicMatricesList.insert(myScalar, myMatrix)
 
-        f = aesara.function([mySymbolicMatricesList, myScalar, myMatrix], z)
+        f = pytensor.function([mySymbolicMatricesList, myScalar, myMatrix], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -303,13 +303,13 @@ class TestInsert:
 class TestRemove:
     def test_inplace(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         myMatrix = matrix()
 
         z = Remove(True)(mySymbolicMatricesList, myMatrix)
 
-        f = aesara.function([mySymbolicMatricesList, myMatrix], z, accept_inplace=True)
+        f = pytensor.function([mySymbolicMatricesList, myMatrix], z, accept_inplace=True)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -319,13 +319,13 @@ class TestRemove:
 
     def test_sanity_check(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         myMatrix = matrix()
 
         z = Remove()(mySymbolicMatricesList, myMatrix)
 
-        f = aesara.function([mySymbolicMatricesList, myMatrix], z)
+        f = pytensor.function([mySymbolicMatricesList, myMatrix], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -335,13 +335,13 @@ class TestRemove:
 
     def test_interface(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         myMatrix = matrix()
 
         z = mySymbolicMatricesList.remove(myMatrix)
 
-        f = aesara.function([mySymbolicMatricesList, myMatrix], z)
+        f = pytensor.function([mySymbolicMatricesList, myMatrix], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -353,12 +353,12 @@ class TestRemove:
 class TestReverse:
     def test_inplace(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
 
         z = Reverse(True)(mySymbolicMatricesList)
 
-        f = aesara.function([mySymbolicMatricesList], z, accept_inplace=True)
+        f = pytensor.function([mySymbolicMatricesList], z, accept_inplace=True)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -368,12 +368,12 @@ class TestReverse:
 
     def test_sanity_check(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
 
         z = Reverse()(mySymbolicMatricesList)
 
-        f = aesara.function([mySymbolicMatricesList], z)
+        f = pytensor.function([mySymbolicMatricesList], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -383,12 +383,12 @@ class TestReverse:
 
     def test_interface(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
 
         z = mySymbolicMatricesList.reverse()
 
-        f = aesara.function([mySymbolicMatricesList], z)
+        f = pytensor.function([mySymbolicMatricesList], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -400,13 +400,13 @@ class TestReverse:
 class TestIndex:
     def test_sanity_check(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         myMatrix = matrix()
 
         z = Index()(mySymbolicMatricesList, myMatrix)
 
-        f = aesara.function([mySymbolicMatricesList, myMatrix], z)
+        f = pytensor.function([mySymbolicMatricesList, myMatrix], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -416,13 +416,13 @@ class TestIndex:
 
     def test_interface(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         myMatrix = matrix()
 
         z = mySymbolicMatricesList.ind(myMatrix)
 
-        f = aesara.function([mySymbolicMatricesList, myMatrix], z)
+        f = pytensor.function([mySymbolicMatricesList, myMatrix], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -432,15 +432,15 @@ class TestIndex:
 
     def test_non_tensor_type(self):
         mySymbolicNestedMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None)), 1
+            TensorType(pytensor.config.floatX, shape=(None, None)), 1
         )()
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
 
         z = Index()(mySymbolicNestedMatricesList, mySymbolicMatricesList)
 
-        f = aesara.function([mySymbolicNestedMatricesList, mySymbolicMatricesList], z)
+        f = pytensor.function([mySymbolicNestedMatricesList, mySymbolicMatricesList], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -451,16 +451,16 @@ class TestIndex:
     def test_sparse(self):
         sp = pytest.importorskip("scipy")
         mySymbolicSparseList = TypedListType(
-            sparse.SparseTensorType("csr", aesara.config.floatX)
+            sparse.SparseTensorType("csr", pytensor.config.floatX)
         )()
         mySymbolicSparse = sparse.csr_matrix()
 
         z = Index()(mySymbolicSparseList, mySymbolicSparse)
 
-        f = aesara.function([mySymbolicSparseList, mySymbolicSparse], z)
+        f = pytensor.function([mySymbolicSparseList, mySymbolicSparse], z)
 
-        x = sp.sparse.csr_matrix(random_lil((10, 40), aesara.config.floatX, 3))
-        y = sp.sparse.csr_matrix(random_lil((10, 40), aesara.config.floatX, 3))
+        x = sp.sparse.csr_matrix(random_lil((10, 40), pytensor.config.floatX, 3))
+        y = sp.sparse.csr_matrix(random_lil((10, 40), pytensor.config.floatX, 3))
 
         assert f([x, y], y) == 1
 
@@ -468,13 +468,13 @@ class TestIndex:
 class TestCount:
     def test_sanity_check(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         myMatrix = matrix()
 
         z = Count()(mySymbolicMatricesList, myMatrix)
 
-        f = aesara.function([mySymbolicMatricesList, myMatrix], z)
+        f = pytensor.function([mySymbolicMatricesList, myMatrix], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -484,13 +484,13 @@ class TestCount:
 
     def test_interface(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         myMatrix = matrix()
 
         z = mySymbolicMatricesList.count(myMatrix)
 
-        f = aesara.function([mySymbolicMatricesList, myMatrix], z)
+        f = pytensor.function([mySymbolicMatricesList, myMatrix], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -500,15 +500,15 @@ class TestCount:
 
     def test_non_tensor_type(self):
         mySymbolicNestedMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None)), 1
+            TensorType(pytensor.config.floatX, shape=(None, None)), 1
         )()
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
 
         z = Count()(mySymbolicNestedMatricesList, mySymbolicMatricesList)
 
-        f = aesara.function([mySymbolicNestedMatricesList, mySymbolicMatricesList], z)
+        f = pytensor.function([mySymbolicNestedMatricesList, mySymbolicMatricesList], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -519,16 +519,16 @@ class TestCount:
     def test_sparse(self):
         sp = pytest.importorskip("scipy")
         mySymbolicSparseList = TypedListType(
-            sparse.SparseTensorType("csr", aesara.config.floatX)
+            sparse.SparseTensorType("csr", pytensor.config.floatX)
         )()
         mySymbolicSparse = sparse.csr_matrix()
 
         z = Count()(mySymbolicSparseList, mySymbolicSparse)
 
-        f = aesara.function([mySymbolicSparseList, mySymbolicSparse], z)
+        f = pytensor.function([mySymbolicSparseList, mySymbolicSparse], z)
 
-        x = sp.sparse.csr_matrix(random_lil((10, 40), aesara.config.floatX, 3))
-        y = sp.sparse.csr_matrix(random_lil((10, 40), aesara.config.floatX, 3))
+        x = sp.sparse.csr_matrix(random_lil((10, 40), pytensor.config.floatX, 3))
+        y = sp.sparse.csr_matrix(random_lil((10, 40), pytensor.config.floatX, 3))
 
         assert f([x, y, y], y) == 2
 
@@ -536,12 +536,12 @@ class TestCount:
 class TestLength:
     def test_sanity_check(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
 
         z = Length()(mySymbolicMatricesList)
 
-        f = aesara.function([mySymbolicMatricesList], z)
+        f = pytensor.function([mySymbolicMatricesList], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -549,11 +549,11 @@ class TestLength:
 
     def test_interface(self):
         mySymbolicMatricesList = TypedListType(
-            TensorType(aesara.config.floatX, shape=(None, None))
+            TensorType(pytensor.config.floatX, shape=(None, None))
         )()
         z = mySymbolicMatricesList.__len__()
 
-        f = aesara.function([mySymbolicMatricesList], z)
+        f = pytensor.function([mySymbolicMatricesList], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -575,16 +575,16 @@ class TestMakeList:
         x = tensor3()
         y = tensor3()
 
-        A = np.cast[aesara.config.floatX](np.random.random((5, 3)))
-        B = np.cast[aesara.config.floatX](np.random.random((7, 2)))
-        X = np.cast[aesara.config.floatX](np.random.random((5, 6, 1)))
-        Y = np.cast[aesara.config.floatX](np.random.random((1, 9, 3)))
+        A = np.cast[pytensor.config.floatX](np.random.random((5, 3)))
+        B = np.cast[pytensor.config.floatX](np.random.random((7, 2)))
+        X = np.cast[pytensor.config.floatX](np.random.random((5, 6, 1)))
+        Y = np.cast[pytensor.config.floatX](np.random.random((1, 9, 3)))
 
         make_list((3.0, 4.0))
         c = make_list((a, b))
         z = make_list((x, y))
-        fc = aesara.function([a, b], c)
-        fz = aesara.function([x, y], z)
+        fc = pytensor.function([a, b], c)
+        fz = pytensor.function([x, y], z)
         for m, n in zip(fc(A, B), [A, B]):
             assert (m == n).all()
         for m, n in zip(fz(X, Y), [X, Y]):

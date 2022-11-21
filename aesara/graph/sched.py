@@ -1,7 +1,7 @@
 from collections import defaultdict
 
-from aesara.graph.basic import list_of_nodes
-from aesara.utils import cmp
+from pytensor.graph.basic import list_of_nodes
+from pytensor.utils import cmp
 
 
 # {{{ http://code.activestate.com/recipes/578231/ (r1)
@@ -233,9 +233,9 @@ def sort_apply_nodes(inputs, outputs, cmps):
 
     Examples
     --------
-    >>> from aesara.graph.basic import sort_apply_nodes, dependence
-    >>> from aesara.tensor.type import matrix
-    >>> from aesara.tensor.math import dot
+    >>> from pytensor.graph.basic import sort_apply_nodes, dependence
+    >>> from pytensor.tensor.type import matrix
+    >>> from pytensor.tensor.math import dot
     >>> x = matrix('x')
     >>> y = dot(x*2, x+1)
     >>> str_cmp = lambda a, b: cmp(str(a), str(b)) # lexicographical sort

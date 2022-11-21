@@ -3,34 +3,34 @@ from typing import List, Tuple, Union
 
 import numpy as np
 
-import aesara.tensor.basic
-from aesara.configdefaults import config
-from aesara.gradient import DisconnectedType
-from aesara.graph.basic import Apply
-from aesara.graph.null_type import NullType
-from aesara.graph.utils import MethodNotDefined
-from aesara.link.c.basic import failure_code
-from aesara.link.c.op import COp, ExternalCOp, OpenMPOp
-from aesara.link.c.params_type import ParamsType
-from aesara.misc.frozendict import frozendict
-from aesara.misc.safe_asarray import _asarray
-from aesara.printing import FunctionPrinter, Printer, pprint
-from aesara.scalar import get_scalar_type
-from aesara.scalar.basic import bool as scalar_bool
-from aesara.scalar.basic import identity as scalar_identity
-from aesara.scalar.basic import transfer_type, upcast
-from aesara.tensor import _get_vector_length, as_tensor_variable
-from aesara.tensor import elemwise_cgen as cgen
-from aesara.tensor import get_vector_length
-from aesara.tensor.type import (
+import pytensor.tensor.basic
+from pytensor.configdefaults import config
+from pytensor.gradient import DisconnectedType
+from pytensor.graph.basic import Apply
+from pytensor.graph.null_type import NullType
+from pytensor.graph.utils import MethodNotDefined
+from pytensor.link.c.basic import failure_code
+from pytensor.link.c.op import COp, ExternalCOp, OpenMPOp
+from pytensor.link.c.params_type import ParamsType
+from pytensor.misc.frozendict import frozendict
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.printing import FunctionPrinter, Printer, pprint
+from pytensor.scalar import get_scalar_type
+from pytensor.scalar.basic import bool as scalar_bool
+from pytensor.scalar.basic import identity as scalar_identity
+from pytensor.scalar.basic import transfer_type, upcast
+from pytensor.tensor import _get_vector_length, as_tensor_variable
+from pytensor.tensor import elemwise_cgen as cgen
+from pytensor.tensor import get_vector_length
+from pytensor.tensor.type import (
     TensorType,
     continuous_dtypes,
     discrete_dtypes,
     float_dtypes,
     lvector,
 )
-from aesara.tensor.var import TensorVariable
-from aesara.utils import uniq
+from pytensor.tensor.var import TensorVariable
+from pytensor.utils import uniq
 
 
 _numpy_ver = [int(n) for n in np.__version__.split(".")[:2]]
@@ -53,7 +53,7 @@ class DimShuffle(ExternalCOp):
         A list representing the relationship between the input's
         dimensions and the output's dimensions. Each element of the
         list can either be an index or 'x'. Indices must be encoded
-        as python integers, not aesara symbolic integers.
+        as python integers, not pytensor symbolic integers.
     inplace : bool, optional
         If True (default), the output will be a view of the input.
 
@@ -508,7 +508,7 @@ class Elemwise(OpenMPOp):
             # make such that _bgrads computes only the gradients of the
             # current output on the inputs ( and not all outputs)
             ograds = [x.zeros_like() for x in outs]
-            ograds[idx] = aesara.tensor.basic.ones_like(out)
+            ograds[idx] = pytensor.tensor.basic.ones_like(out)
 
             bgrads = self._bgrad(inputs, outs, ograds)
             rop_out = None
@@ -542,7 +542,7 @@ class Elemwise(OpenMPOp):
         return [[True for output in node.outputs] for ipt in node.inputs]
 
     def L_op(self, inputs, outs, ograds):
-        from aesara.tensor.math import sum as at_sum
+        from pytensor.tensor.math import sum as at_sum
 
         # Compute grad with respect to broadcasted input
         rval = self._bgrad(inputs, outs, ograds)
@@ -631,7 +631,7 @@ class Elemwise(OpenMPOp):
                 # the gradient contains a constant, translate it as
                 # an equivalent TensorType of size 1 and proper number of
                 # dimensions
-                res = aesara.tensor.basic.constant(
+                res = pytensor.tensor.basic.constant(
                     np.asarray(r.data), dtype=r.type.dtype
                 )
                 return DimShuffle((), ["x"] * nd)(res)
@@ -810,7 +810,7 @@ class Elemwise(OpenMPOp):
                 variable = np.asarray(variable, nout.dtype)
                 # The next line is needed for numpy 1.9. Otherwise
                 # there are tests that fail in DebugMode.
-                # Normally we would call aesara.misc._asarray, but it
+                # Normally we would call pytensor.misc._asarray, but it
                 # is faster to inline the code. We know that the dtype
                 # are the same string, just different typenum.
                 if np.dtype(nout.dtype).num != variable.dtype.num:
@@ -825,13 +825,13 @@ class Elemwise(OpenMPOp):
     def infer_shape(self, fgraph, node, i_shapes) -> List[Tuple[TensorVariable, ...]]:
 
         if len(node.outputs) > 1:
-            from aesara.tensor.exceptions import ShapeError
+            from pytensor.tensor.exceptions import ShapeError
 
             raise ShapeError(
                 "Multiple outputs are not supported by the default `Elemwise.infer_shape`"
             )
 
-        out_shape = aesara.tensor.broadcast_shape(*i_shapes, arrays_are_shapes=True)
+        out_shape = pytensor.tensor.broadcast_shape(*i_shapes, arrays_are_shapes=True)
 
         # The `as_tensor_variable` should convert `ScalarType`s to `TensorType`s
         return [tuple(as_tensor_variable(s) for s in out_shape)]
@@ -1419,7 +1419,7 @@ class CAReduce(COp):
         if len(axis) == 0:
             # The acc_dtype is never a downcast compared to the input dtype
             # So we just need a cast to the output dtype.
-            var = aesara.tensor.basic.cast(input, node.outputs[0].dtype)
+            var = pytensor.tensor.basic.cast(input, node.outputs[0].dtype)
             if var is input:
                 var = Elemwise(scalar_identity)(input)
             assert var.dtype == node.outputs[0].dtype
@@ -1769,7 +1769,7 @@ def scalar_elemwise(*symbol, nfunc=None, nin=None, nout=None, symbolname=None):
     not take a NumPy array argument to put its result in.
 
     """
-    import aesara.scalar as scalar
+    import pytensor.scalar as scalar
 
     def construct(symbol):
         nonlocal symbolname

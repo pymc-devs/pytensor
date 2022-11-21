@@ -1,8 +1,8 @@
-import aesara.tensor.rewriting.basic
-import aesara.tensor.rewriting.elemwise
-import aesara.tensor.rewriting.extra_ops
-import aesara.tensor.rewriting.math
-import aesara.tensor.rewriting.shape
-import aesara.tensor.rewriting.special
-import aesara.tensor.rewriting.subtensor
-import aesara.tensor.rewriting.uncanonicalize
+import pytensor.tensor.rewriting.basic
+import pytensor.tensor.rewriting.elemwise
+import pytensor.tensor.rewriting.extra_ops
+import pytensor.tensor.rewriting.math
+import pytensor.tensor.rewriting.shape
+import pytensor.tensor.rewriting.special
+import pytensor.tensor.rewriting.subtensor
+import pytensor.tensor.rewriting.uncanonicalize

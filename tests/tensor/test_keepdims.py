@@ -1,20 +1,20 @@
 import numpy as np
 import pytest
 
-import aesara
-from aesara import function
-from aesara.compile.mode import Mode
-from aesara.tensor.elemwise import DimShuffle
-from aesara.tensor.math import all as at_all
-from aesara.tensor.math import any as at_any
-from aesara.tensor.math import argmax, argmin
-from aesara.tensor.math import max as at_max
-from aesara.tensor.math import max_and_argmax, mean
-from aesara.tensor.math import min as at_min
-from aesara.tensor.math import prod, std
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.math import var
-from aesara.tensor.type import dtensor3
+import pytensor
+from pytensor import function
+from pytensor.compile.mode import Mode
+from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.math import all as at_all
+from pytensor.tensor.math import any as at_any
+from pytensor.tensor.math import argmax, argmin
+from pytensor.tensor.math import max as at_max
+from pytensor.tensor.math import max_and_argmax, mean
+from pytensor.tensor.math import min as at_min
+from pytensor.tensor.math import prod, std
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import var
+from pytensor.tensor.type import dtensor3
 
 
 class TestKeepDims:
@@ -227,7 +227,7 @@ class TestKeepDims:
     def test_norm(self, axis):
 
         x = dtensor3()
-        a = np.random.random((3, 2, 4)).astype(aesara.config.floatX)
+        a = np.random.random((3, 2, 4)).astype(pytensor.config.floatX)
         mode = Mode(optimizer="fast_compile", linker="py")
 
         f = function(

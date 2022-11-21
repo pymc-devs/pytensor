@@ -3,10 +3,10 @@ import functools
 import jax
 import jax.numpy as jnp
 
-from aesara.link.jax.dispatch.basic import jax_funcify
-from aesara.scalar import Softplus
-from aesara.scalar.basic import Cast, Clip, Composite, Identity, ScalarOp, Second
-from aesara.scalar.math import Erf, Erfc, Erfinv, Log1mexp, Psi
+from pytensor.link.jax.dispatch.basic import jax_funcify
+from pytensor.scalar import Softplus
+from pytensor.scalar.basic import Cast, Clip, Composite, Identity, ScalarOp, Second
+from pytensor.scalar.math import Erf, Erfc, Erfinv, Log1mexp, Psi
 
 
 @jax_funcify.register(ScalarOp)

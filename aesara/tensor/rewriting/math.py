@@ -1,4 +1,4 @@
-r"""Rewrites for the `Op`\s in `aesara.tensor.math`."""
+r"""Rewrites for the `Op`\s in `pytensor.tensor.math`."""
 
 import itertools
 import operator
@@ -6,10 +6,10 @@ from functools import partial, reduce
 
 import numpy as np
 
-import aesara.scalar.basic as aes
-import aesara.scalar.math as aes_math
-from aesara.graph.basic import Constant, Variable
-from aesara.graph.rewriting.basic import (
+import pytensor.scalar.basic as aes
+import pytensor.scalar.math as aes_math
+from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.rewriting.basic import (
     NodeRewriter,
     PatternNodeRewriter,
     SequentialNodeRewriter,
@@ -17,10 +17,10 @@ from aesara.graph.rewriting.basic import (
     in2out,
     node_rewriter,
 )
-from aesara.graph.rewriting.utils import get_clients_at_depth
-from aesara.misc.safe_asarray import _asarray
-from aesara.raise_op import assert_op
-from aesara.tensor.basic import (
+from pytensor.graph.rewriting.utils import get_clients_at_depth
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.raise_op import assert_op
+from pytensor.tensor.basic import (
     Alloc,
     Join,
     MakeVector,
@@ -35,9 +35,9 @@ from aesara.tensor.basic import (
     switch,
     zeros_like,
 )
-from aesara.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from aesara.tensor.exceptions import NotScalarConstantError
-from aesara.tensor.math import (
+from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.math import (
     All,
     Any,
     Dot,
@@ -47,8 +47,8 @@ from aesara.tensor.math import (
     Sum,
     _conj,
 )
-from aesara.tensor.math import abs as at_abs
-from aesara.tensor.math import (
+from pytensor.tensor.math import abs as at_abs
+from pytensor.tensor.math import (
     add,
     dot,
     eq,
@@ -65,13 +65,13 @@ from aesara.tensor.math import (
     log1p,
     makeKeepDims,
 )
-from aesara.tensor.math import max as at_max
-from aesara.tensor.math import maximum, mul, neg
-from aesara.tensor.math import pow as at_pow
-from aesara.tensor.math import prod, reciprocal, sgn, sigmoid, softplus, sqr, sqrt, sub
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.math import true_div
-from aesara.tensor.rewriting.basic import (
+from pytensor.tensor.math import max as at_max
+from pytensor.tensor.math import maximum, mul, neg
+from pytensor.tensor.math import pow as at_pow
+from pytensor.tensor.math import prod, reciprocal, sgn, sigmoid, softplus, sqr, sqrt, sub
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import true_div
+from pytensor.tensor.rewriting.basic import (
     broadcast_like,
     encompasses_broadcastable,
     local_fill_sink,
@@ -82,17 +82,17 @@ from aesara.tensor.rewriting.basic import (
     register_uncanonicalize,
     register_useless,
 )
-from aesara.tensor.rewriting.elemwise import FusionOptimizer, fuse_seqopt
-from aesara.tensor.shape import Shape, Shape_i
-from aesara.tensor.subtensor import Subtensor
-from aesara.tensor.type import (
+from pytensor.tensor.rewriting.elemwise import FusionOptimizer, fuse_seqopt
+from pytensor.tensor.shape import Shape, Shape_i
+from pytensor.tensor.subtensor import Subtensor
+from pytensor.tensor.type import (
     complex_dtypes,
     uint_dtypes,
     values_eq_approx_remove_inf,
     values_eq_approx_remove_inf_nan,
     values_eq_approx_remove_nan,
 )
-from aesara.tensor.var import TensorConstant, get_unique_value
+from pytensor.tensor.var import TensorConstant, get_unique_value
 
 
 def scalarconsts_rest(inputs, elemwise=True, only_process_constants=False):
@@ -646,8 +646,8 @@ class AlgebraicCanonizer(NodeRewriter):
 
     Examples
     --------
-    >>> import aesara.tensor as at
-    >>> from aesara.tensor.rewriting.math import AlgebraicCanonizer
+    >>> import pytensor.tensor as at
+    >>> from pytensor.tensor.rewriting.math import AlgebraicCanonizer
     >>> add_canonizer = AlgebraicCanonizer(add, sub, neg, \\
     ...                                    lambda n, d: sum(n) - sum(d))
     >>> mul_canonizer = AlgebraicCanonizer(mul, true_div, inv, \\

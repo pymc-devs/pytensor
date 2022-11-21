@@ -1,17 +1,17 @@
 import numpy as np
 import pytest
 
-from aesara.compile import shared
-from aesara.compile.function import function
-from aesara.compile.mode import Mode
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, Constant, Variable
-from aesara.graph.fg import FunctionGraph
-from aesara.link.basic import PerformLinker
-from aesara.link.c.basic import CLinker, DualLinker, OpWiseCLinker
-from aesara.link.c.op import COp
-from aesara.link.c.type import CType
-from aesara.tensor.type import iscalar, matrix, vector
+from pytensor.compile import shared
+from pytensor.compile.function import function
+from pytensor.compile.mode import Mode
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.fg import FunctionGraph
+from pytensor.link.basic import PerformLinker
+from pytensor.link.c.basic import CLinker, DualLinker, OpWiseCLinker
+from pytensor.link.c.op import COp
+from pytensor.link.c.type import CType
+from pytensor.tensor.type import iscalar, matrix, vector
 from tests.link.test_link import make_function
 
 

@@ -1,26 +1,26 @@
 import numpy as np
 import pytest
 
-import aesara
-import aesara.tensor as at
-from aesara import function, scan, shared
-from aesara.compile.builders import OpFromGraph
-from aesara.compile.io import In
-from aesara.compile.mode import get_default_mode
-from aesara.configdefaults import config
-from aesara.gradient import grad, jacobian
-from aesara.graph.basic import clone_replace, equal_computations
-from aesara.graph.fg import FunctionGraph
-from aesara.scan.op import Scan
-from aesara.scan.rewriting import ScanInplaceOptimizer, ScanMerge
-from aesara.scan.utils import until
-from aesara.tensor.blas import Dot22
-from aesara.tensor.elemwise import Elemwise
-from aesara.tensor.math import Dot, dot, sigmoid
-from aesara.tensor.math import sum as at_sum
-from aesara.tensor.math import tanh
-from aesara.tensor.shape import reshape, shape, specify_shape
-from aesara.tensor.type import (
+import pytensor
+import pytensor.tensor as at
+from pytensor import function, scan, shared
+from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.io import In
+from pytensor.compile.mode import get_default_mode
+from pytensor.configdefaults import config
+from pytensor.gradient import grad, jacobian
+from pytensor.graph.basic import clone_replace, equal_computations
+from pytensor.graph.fg import FunctionGraph
+from pytensor.scan.op import Scan
+from pytensor.scan.rewriting import ScanInplaceOptimizer, ScanMerge
+from pytensor.scan.utils import until
+from pytensor.tensor.blas import Dot22
+from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.math import Dot, dot, sigmoid
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import tanh
+from pytensor.tensor.shape import reshape, shape, specify_shape
+from pytensor.tensor.type import (
     dmatrix,
     dvector,
     iscalar,
@@ -34,7 +34,7 @@ from tests import unittest_tools as utt
 from tests.scan.test_basic import asarrayX, scan_nodes_from_fct
 
 
-mode = aesara.compile.mode.get_mode(config.mode)
+mode = pytensor.compile.mode.get_mode(config.mode)
 
 
 class TestRemoveConstantsAndUnusedInputsScan:
@@ -209,7 +209,7 @@ class TestPushOutDot:
         v_out = np.dot(v_h, v_W1 + v_W2)
         sol = np.zeros((5, 2))
         # This line is here to make sol have the same shape as the output of
-        # aesara. Note that what we ask aesara to do is to repeat the 2
+        # pytensor. Note that what we ask pytensor to do is to repeat the 2
         # elements vector v_out 5 times
         sol[:, :] = v_out
         utt.assert_allclose(sol, f(v_h, v_W1, v_W2))
@@ -235,7 +235,7 @@ class TestPushOutDot:
 
         f = function([W1, W2, step_indices], o, mode=self.mode)
 
-        # Compule an aesara function without the optimization
+        # Compule an pytensor function without the optimization
         o, _ = scan(
             lambda_fn,
             sequences=[step_indices, W1],
@@ -435,10 +435,10 @@ class TestPushOutNonSeqScan:
         # Compile the function twice, once with the optimization and once
         # without
         opt_mode = mode.including("scan")
-        f_opt = aesara.function([v, m], jacobian(output, v), mode=opt_mode)
+        f_opt = pytensor.function([v, m], jacobian(output, v), mode=opt_mode)
 
         no_opt_mode = mode.excluding("scan_pushout_add")
-        f_no_opt = aesara.function([v, m], jacobian(output, v), mode=no_opt_mode)
+        f_no_opt = pytensor.function([v, m], jacobian(output, v), mode=no_opt_mode)
 
         # Ensure that the optimization was performed correctly in f_opt
         # The inner function of scan should have only one output and it should
@@ -472,17 +472,17 @@ class TestPushOutNonSeqScan:
             vect_squared = vect**2
             return dot(vect_squared, mat), vect_squared
 
-        outputs, updates = aesara.scan(
+        outputs, updates = pytensor.scan(
             fn=inner_fct, outputs_info=[None] * 2, sequences=a, non_sequences=b
         )
 
         # Compile the function twice, once with the optimization and once
         # without
         opt_mode = mode.including("scan")
-        f_opt = aesara.function([a, b], outputs, mode=opt_mode)
+        f_opt = pytensor.function([a, b], outputs, mode=opt_mode)
 
         no_opt_mode = mode.excluding("scan_pushout_add")
-        f_no_opt = aesara.function([a, b], outputs, mode=no_opt_mode)
+        f_no_opt = pytensor.function([a, b], outputs, mode=no_opt_mode)
 
         # Ensure that the optimization was performed correctly in f_opt
         # The inner function of scan should have only one output and it should
@@ -520,17 +520,17 @@ class TestPushOutNonSeqScan:
             output2 = dot(output1, nonseq1)
             return output1, output2
 
-        outputs, updates = aesara.scan(
+        outputs, updates = pytensor.scan(
             fn=inner_fct, outputs_info=[a[0], None], sequences=a, non_sequences=b
         )
 
         # Compile the function twice, once with the optimization and once
         # without
         opt_mode = mode.including("scan")
-        f_opt = aesara.function([a, b], outputs, mode=opt_mode)
+        f_opt = pytensor.function([a, b], outputs, mode=opt_mode)
 
         no_opt_mode = mode.excluding("scan_pushout_add")
-        f_no_opt = aesara.function([a, b], outputs, mode=no_opt_mode)
+        f_no_opt = pytensor.function([a, b], outputs, mode=no_opt_mode)
 
         # Ensure that the optimization was performed correctly in f_opt
         # The inner function of scan should have only one output and it should
@@ -562,7 +562,7 @@ class TestPushOutNonSeqScan:
         def inner_func():
             return test_ofg()
 
-        out, out_updates = aesara.scan(inner_func, n_steps=10)
+        out, out_updates = pytensor.scan(inner_func, n_steps=10)
 
         out_fn = function([], out, updates=out_updates)
 
@@ -576,19 +576,19 @@ class TestPushOutNonSeqScan:
 
     def test_nested_OpFromGraph_shared(self):
 
-        y = aesara.shared(1.0, name="y")
+        y = pytensor.shared(1.0, name="y")
 
         test_ofg = OpFromGraph([], [y])
 
         def inner_func(x):
-            out, _ = aesara.scan(lambda: test_ofg(), n_steps=x)
+            out, _ = pytensor.scan(lambda: test_ofg(), n_steps=x)
             return out
 
-        out, _ = aesara.scan(inner_func, sequences=[at.arange(1, 2)])
+        out, _ = pytensor.scan(inner_func, sequences=[at.arange(1, 2)])
 
-        _ = aesara.function([], test_ofg())
+        _ = pytensor.function([], test_ofg())
 
-        out_fn = aesara.function([], out)
+        out_fn = pytensor.function([], out)
 
         assert np.array_equal(out_fn(), [[1.0]])
 
@@ -650,13 +650,13 @@ class TestPushOutAddScan:
         dim = 5
 
         # Weight matrices
-        U = aesara.shared(
+        U = pytensor.shared(
             np.random.normal(size=(dim, dim), scale=0.0001).astype(config.floatX)
         )
         U.name = "U"
-        V = aesara.shared(U.get_value())
+        V = pytensor.shared(U.get_value())
         V.name = "V"
-        W = aesara.shared(U.get_value())
+        W = pytensor.shared(U.get_value())
         W.name = "W"
 
         # Variables and their values
@@ -696,7 +696,7 @@ class TestPushOutAddScan:
         # Compile the function twice, once with the optimization and once
         # without
         opt_mode = mode.including("scan")
-        h, _ = aesara.scan(
+        h, _ = pytensor.scan(
             rnn_step1,
             sequences=[x, ri, zi],
             n_steps=seq_len,
@@ -706,10 +706,10 @@ class TestPushOutAddScan:
         )
         cost = h[-1].sum()
         grad1 = grad(cost, [U, V, W])
-        f_opt = aesara.function(inputs=[x, ri, zi], outputs=grad1, mode=opt_mode)
+        f_opt = pytensor.function(inputs=[x, ri, zi], outputs=grad1, mode=opt_mode)
 
         no_opt_mode = mode.excluding("scan_pushout_add")
-        h, _ = aesara.scan(
+        h, _ = pytensor.scan(
             rnn_step1,
             sequences=[x, ri, zi],
             n_steps=seq_len,
@@ -719,7 +719,7 @@ class TestPushOutAddScan:
         )
         cost = h[-1].sum()
         grad1 = grad(cost, [U, V, W])
-        f_no_opt = aesara.function(inputs=[x, ri, zi], outputs=grad1, mode=no_opt_mode)
+        f_no_opt = pytensor.function(inputs=[x, ri, zi], outputs=grad1, mode=no_opt_mode)
 
         # Validate that the optimization has been applied
         scan_node_grad = [
@@ -744,8 +744,8 @@ class TestPushOutAddScan:
         input2 = tensor3()
         input3 = tensor3()
 
-        W = aesara.shared(np.random.normal(size=(4, 5))).astype(config.floatX)
-        U = aesara.shared(np.random.normal(size=(6, 7))).astype(config.floatX)
+        W = pytensor.shared(np.random.normal(size=(4, 5))).astype(config.floatX)
+        U = pytensor.shared(np.random.normal(size=(6, 7))).astype(config.floatX)
 
         def inner_fct(seq1, seq2, seq3, previous_output):
             temp1 = dot(seq1, W) + seq3
@@ -758,24 +758,24 @@ class TestPushOutAddScan:
         # Compile the function twice, once with the optimization and once
         # without
         opt_mode = mode.including("scan")
-        h, _ = aesara.scan(
+        h, _ = pytensor.scan(
             inner_fct,
             sequences=[input1, input2, input3],
             outputs_info=init,
             mode=opt_mode,
         )
         output = h[-1]
-        f_opt = aesara.function([input1, input2, input3], output, mode=opt_mode)
+        f_opt = pytensor.function([input1, input2, input3], output, mode=opt_mode)
 
         no_opt_mode = mode.excluding("scan_pushout_add")
-        h, _ = aesara.scan(
+        h, _ = pytensor.scan(
             inner_fct,
             sequences=[input1, input2, input3],
             outputs_info=init,
             mode=no_opt_mode,
         )
         output = h[-1]
-        f_no_opt = aesara.function([input1, input2, input3], output, mode=no_opt_mode)
+        f_no_opt = pytensor.function([input1, input2, input3], output, mode=no_opt_mode)
 
         # Ensure that the optimization has been applied for f_opt
         # TODO
@@ -918,7 +918,7 @@ class TestScanInplaceOptimizer:
 
         x = at.vector("x")
 
-        scan_out, _ = aesara.scan(
+        scan_out, _ = pytensor.scan(
             lambda x: (x + 1) / 2 + 1,
             sequences=[x],
         )
@@ -935,7 +935,7 @@ class TestScanInplaceOptimizer:
 
     def test_inplace_basic(self):
 
-        scan_out, _ = aesara.scan(
+        scan_out, _ = pytensor.scan(
             lambda x: x + 1,
             outputs_info=[at.zeros(1)],
             n_steps=3,
@@ -1015,12 +1015,12 @@ class TestScanInplaceOptimizer:
             numpy_x0[i] = vu0[i] * vW_in + numpy_x0[i - 1] * vW + vu1[i] * vu2[i]
             numpy_x1[i] = vu0[i] * vW_in + numpy_x1[i - 1] * vW + vu1[i] + vu2[i]
 
-        # note aesara computes inplace, so call function after numpy
+        # note pytensor computes inplace, so call function after numpy
         # equivalent is done
-        (aesara_x0, aesara_x1) = f9(vu0, vu1, vu2, vx0, vx1)
-        # assert that aesara does what it should
-        utt.assert_allclose(aesara_x0, numpy_x0)
-        utt.assert_allclose(aesara_x1, numpy_x1)
+        (pytensor_x0, pytensor_x1) = f9(vu0, vu1, vu2, vx0, vx1)
+        # assert that pytensor does what it should
+        utt.assert_allclose(pytensor_x0, numpy_x0)
+        utt.assert_allclose(pytensor_x1, numpy_x1)
 
     @utt.assertFailure_fast
     def test_simple_rnn_2(self):
@@ -1083,12 +1083,12 @@ class TestScanInplaceOptimizer:
                 vu0[i] * vW_in + numpy_x1[i - 1] * vW + vu2[i] + vu2[i + 1] + vu2[i + 2]
             )
 
-        # note aesara computes inplace, so call function after numpy
+        # note pytensor computes inplace, so call function after numpy
         # equivalent is done
-        (aesara_x0, aesara_x1) = f9(vu0, vu1, vu2, vx0, vx1)
-        # assert that aesara does what it should
-        utt.assert_allclose(aesara_x0, numpy_x0)
-        utt.assert_allclose(aesara_x1, numpy_x1)
+        (pytensor_x0, pytensor_x1) = f9(vu0, vu1, vu2, vx0, vx1)
+        # assert that pytensor does what it should
+        utt.assert_allclose(pytensor_x0, numpy_x0)
+        utt.assert_allclose(pytensor_x1, numpy_x1)
 
     @utt.assertFailure_fast
     def test_inplace3(self):
@@ -1173,10 +1173,10 @@ class TestSaveMem:
             v_x[i] = np.dot(v_u1[i], vW_in1) + v_u2[i] * vW_in2 + np.dot(v_x[i - 1], vW)
             v_y[i] = np.dot(v_x[i - 1], vWout) + v_y[i - 1]
 
-        (aesara_dump, aesara_x, aesara_y) = f4(v_u1, v_u2, v_x0, v_y0, vW_in1)
+        (pytensor_dump, pytensor_x, pytensor_y) = f4(v_u1, v_u2, v_x0, v_y0, vW_in1)
 
-        utt.assert_allclose(aesara_x, v_x[-1:])
-        utt.assert_allclose(aesara_y, v_y[-1:])
+        utt.assert_allclose(pytensor_x, v_x[-1:])
+        utt.assert_allclose(pytensor_y, v_y[-1:])
 
     def test_save_mem_reduced_number_of_steps(self):
         def f_rnn(u_t):
@@ -1333,7 +1333,7 @@ class TestSaveMem:
             return_val = grad(features.sum(), w)
             return return_val
 
-        # Compile the aesara function
+        # Compile the pytensor function
         x = tensor3("x")
         w = matrix("w")
         f = function(inputs=[x, w], outputs=get_outputs(x, w), mode=self.mode)

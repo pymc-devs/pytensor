@@ -4,10 +4,10 @@ import numba
 import numpy as np
 from numba.misc.special import literal_unroll
 
-from aesara import config
-from aesara.link.numba.dispatch import basic as numba_basic
-from aesara.link.numba.dispatch.basic import get_numba_type, numba_funcify
-from aesara.tensor.extra_ops import (
+from pytensor import config
+from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch.basic import get_numba_type, numba_funcify
+from pytensor.tensor.extra_ops import (
     Bartlett,
     BroadcastTo,
     CumOp,

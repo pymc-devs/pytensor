@@ -1,4 +1,4 @@
-from aesara.graph.type import Type
+from pytensor.graph.type import Type
 
 
 class NullType(Type):

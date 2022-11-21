@@ -3,8 +3,8 @@
 from functools import singledispatch
 from typing import TYPE_CHECKING, Any, Callable, NoReturn, Optional, Sequence, Union
 
-from aesara.graph.basic import Constant, Variable
-from aesara.graph.op import Op
+from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.op import Op
 
 
 if TYPE_CHECKING:
@@ -23,7 +23,7 @@ def as_tensor_variable(
     `Apply` instances and `TensorVariable` instances into valid input list
     elements.
 
-    See `aesara.as_symbolic` for a more general conversion function.
+    See `pytensor.as_symbolic` for a more general conversion function.
 
     Parameters
     ----------
@@ -98,35 +98,35 @@ def _get_vector_length_Constant(op: Union[Op, Variable], var: Constant) -> int:
     return len(var.data)
 
 
-import aesara.tensor.exceptions  # noqa
-from aesara.gradient import consider_constant, grad, hessian, jacobian  # noqa
+import pytensor.tensor.exceptions  # noqa
+from pytensor.gradient import consider_constant, grad, hessian, jacobian  # noqa
 
 # adds shared-variable constructors
-from aesara.tensor import sharedvar  # noqa
-from aesara.tensor import (  # noqa
+from pytensor.tensor import sharedvar  # noqa
+from pytensor.tensor import (  # noqa
     blas,
     blas_c,
     blas_scipy,
     xlogx,
 )
-import aesara.tensor.rewriting
+import pytensor.tensor.rewriting
 
 
 # isort: off
-from aesara.tensor import linalg  # noqa
-from aesara.tensor import special
+from pytensor.tensor import linalg  # noqa
+from pytensor.tensor import special
 
 # For backward compatibility
-from aesara.tensor import nlinalg  # noqa
-from aesara.tensor import slinalg  # noqa
+from pytensor.tensor import nlinalg  # noqa
+from pytensor.tensor import slinalg  # noqa
 
 # isort: on
-from aesara.tensor.basic import *  # noqa
-from aesara.tensor.blas import batched_dot, batched_tensordot  # noqa
-from aesara.tensor.extra_ops import *
+from pytensor.tensor.basic import *  # noqa
+from pytensor.tensor.blas import batched_dot, batched_tensordot  # noqa
+from pytensor.tensor.extra_ops import *
 
 
-from aesara.tensor.shape import (  # noqa
+from pytensor.tensor.shape import (  # noqa
     reshape,
     shape,
     shape_padaxis,
@@ -136,16 +136,16 @@ from aesara.tensor.shape import (  # noqa
 )
 
 
-from aesara.tensor.io import *  # noqa
-from aesara.tensor.math import *  # noqa
+from pytensor.tensor.io import *  # noqa
+from pytensor.tensor.math import *  # noqa
 
 # We import as `_shared` instead of `shared` to avoid confusion between
-# `aesara.shared` and `tensor._shared`.
-from aesara.tensor.sort import argsort, argtopk, sort, topk, topk_and_argtopk  # noqa
-from aesara.tensor.subtensor import *  # noqa
-from aesara.tensor.type import *  # noqa
-from aesara.tensor.type_other import *  # noqa
-from aesara.tensor.var import TensorConstant, TensorVariable  # noqa
+# `pytensor.shared` and `tensor._shared`.
+from pytensor.tensor.sort import argsort, argtopk, sort, topk, topk_and_argtopk  # noqa
+from pytensor.tensor.subtensor import *  # noqa
+from pytensor.tensor.type import *  # noqa
+from pytensor.tensor.type_other import *  # noqa
+from pytensor.tensor.var import TensorConstant, TensorVariable  # noqa
 
 
 __all__ = ["random"]  # noqa: F405

@@ -1,9 +1,9 @@
 import numpy as np
 
-from aesara.compile.mode import Mode
-from aesara.configdefaults import config
-from aesara.link.basic import WrapLinkerMany
-from aesara.link.c.basic import OpWiseCLinker
+from pytensor.compile.mode import Mode
+from pytensor.configdefaults import config
+from pytensor.link.basic import WrapLinkerMany
+from pytensor.link.c.basic import OpWiseCLinker
 
 
 class MonitorMode(Mode):
@@ -101,7 +101,7 @@ class MonitorMode(Mode):
 
 
 def detect_nan(fgraph, i, node, fn):
-    from aesara.printing import debugprint
+    from pytensor.printing import debugprint
 
     for output in fn.outputs:
         if (

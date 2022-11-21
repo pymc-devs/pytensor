@@ -9,7 +9,7 @@ from typing import Optional, Union
 
 import filelock
 
-from aesara.configdefaults import config
+from pytensor.configdefaults import config
 
 
 __all__ = [
@@ -54,10 +54,10 @@ def lock_ctx(
     ----------
     lock_dir
         A directory for which to acquire the lock.
-        Defaults to `aesara.config.compiledir`.
+        Defaults to `pytensor.config.compiledir`.
     timeout
         Timeout in seconds for waiting in lock acquisition.
-        Defaults to `aesara.config.compile__timeout`.
+        Defaults to `pytensor.config.compile__timeout`.
     """
     if lock_dir is None:
         lock_dir = config.compiledir

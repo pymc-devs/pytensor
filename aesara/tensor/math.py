@@ -4,18 +4,18 @@ from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
-from aesara import config, printing
-from aesara import scalar as aes
-from aesara.gradient import DisconnectedType
-from aesara.graph.basic import Apply, Variable
-from aesara.graph.op import Op
-from aesara.link.c.op import COp
-from aesara.link.c.params_type import ParamsType
-from aesara.link.c.type import Generic
-from aesara.misc.safe_asarray import _asarray
-from aesara.printing import pprint
-from aesara.scalar.basic import BinaryScalarOp
-from aesara.tensor.basic import (
+from pytensor import config, printing
+from pytensor import scalar as aes
+from pytensor.gradient import DisconnectedType
+from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.op import Op
+from pytensor.link.c.op import COp
+from pytensor.link.c.params_type import ParamsType
+from pytensor.link.c.type import Generic
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.printing import pprint
+from pytensor.scalar.basic import BinaryScalarOp
+from pytensor.tensor.basic import (
     alloc,
     arange,
     as_tensor_variable,
@@ -25,15 +25,15 @@ from aesara.tensor.basic import (
     stack,
     switch,
 )
-from aesara.tensor.elemwise import (
+from pytensor.tensor.elemwise import (
     CAReduce,
     CAReduceDtype,
     DimShuffle,
     Elemwise,
     scalar_elemwise,
 )
-from aesara.tensor.shape import shape, specify_broadcastable
-from aesara.tensor.type import (
+from pytensor.tensor.shape import shape, specify_broadcastable
+from pytensor.tensor.type import (
     DenseTensorType,
     TensorType,
     complex_dtypes,
@@ -44,9 +44,9 @@ from aesara.tensor.type import (
     tensor,
     uint_dtypes,
 )
-from aesara.tensor.type_other import NoneConst
-from aesara.tensor.utils import as_list
-from aesara.tensor.var import TensorConstant, _tensor_py_operators
+from pytensor.tensor.type_other import NoneConst
+from pytensor.tensor.utils import as_list
+from pytensor.tensor.var import TensorConstant, _tensor_py_operators
 
 
 if TYPE_CHECKING:
@@ -60,7 +60,7 @@ if int(config.tensor__cmp_sloppy) > 1:
     # This config variable is a quick-and-dirty way to get low-precision
     # comparisons.  For a more precise setting of these tolerances set
     # them explicitly in your user code by assigning, for example,
-    # "aesara.tensor.math.float32_atol = ..."
+    # "pytensor.tensor.math.float32_atol = ..."
 
     # When config.tensor__cmp_sloppy>1 we are even more sloppy. This is
     # useful to test the GPU as they don't use extended precision and
@@ -932,35 +932,35 @@ def isclose(a, b, rtol=1.0e-5, atol=1.0e-8, equal_nan=False):
 
     Examples
     --------
-    >>> import aesara
+    >>> import pytensor
     >>> import numpy as np
     >>> a = _asarray([1e10, 1e-7], dtype="float64")
     >>> b = _asarray([1.00001e10, 1e-8], dtype="float64")
-    >>> aesara.tensor.isclose(a, b).eval()
+    >>> pytensor.tensor.isclose(a, b).eval()
     array([1, 0], dtype=int8)
     >>> a = _asarray([1e10, 1e-8], dtype="float64")
     >>> b = _asarray([1.00001e10, 1e-9], dtype="float64")
-    >>> aesara.tensor.isclose(a, b).eval()
+    >>> pytensor.tensor.isclose(a, b).eval()
     array([1, 1], dtype=int8)
     >>> a = _asarray([1e10, 1e-8], dtype="float64")
     >>> b = _asarray([1.0001e10, 1e-9], dtype="float64")
-    >>> aesara.tensor.isclose(a, b).eval()
+    >>> pytensor.tensor.isclose(a, b).eval()
     array([0, 1], dtype=int8)
     >>> a = _asarray([1.0, np.nan], dtype="float64")
     >>> b = _asarray([1.0, np.nan], dtype="float64")
-    >>> aesara.tensor.isclose(a, b).eval()
+    >>> pytensor.tensor.isclose(a, b).eval()
     array([1, 0], dtype==int8)
     >>> a = _asarray([1.0, np.nan], dtype="float64")
     >>> b = _asarray([1.0, np.nan], dtype="float64")
-    >>> aesara.tensor.isclose(a, b, equal_nan=True).eval()
+    >>> pytensor.tensor.isclose(a, b, equal_nan=True).eval()
     array([1, 1], dtype==int8)
     >>> a = _asarray([1.0, np.inf], dtype="float64")
     >>> b = _asarray([1.0, -np.inf], dtype="float64")
-    >>> aesara.tensor.isclose(a, b).eval()
+    >>> pytensor.tensor.isclose(a, b).eval()
     array([1, 0], dtype==int8)
     >>> a = _asarray([1.0, np.inf], dtype="float64")
     >>> b = _asarray([1.0, np.inf], dtype="float64")
-    >>> aesara.tensor.isclose(a, b).eval()
+    >>> pytensor.tensor.isclose(a, b).eval()
     array([1, 1], dtype==int8)
 
     """
@@ -1128,7 +1128,7 @@ def round(a, mode=None):
         mode = "half_to_even"
         if config.warn__round:
             warnings.warn(
-                "aesara.tensor.round() changed its default from"
+                "pytensor.tensor.round() changed its default from"
                 " `half_away_from_zero` to `half_to_even` to have"
                 " the same default as NumPy. Use the Aesara flag"
                 " `warn__round=False` to disable this warning."
@@ -1902,13 +1902,13 @@ class Dot(Op):
             raise TypeError(
                 "Input 0 (0-indexed) must have ndim of "
                 f"1 or 2, {int(inputs[0].ndim)} given. Consider calling "
-                "aesara.tensor.dot instead."
+                "pytensor.tensor.dot instead."
             )
         if inputs[1].ndim not in (1, 2):
             raise TypeError(
                 "Input 1 (0-indexed) must have ndim of "
                 f"1 or 2, {int(inputs[1].ndim)} given. Consider calling "
-                "aesara.tensor.dot instead."
+                "pytensor.tensor.dot instead."
             )
 
         sx, sy = [input.type.shape for input in inputs]
@@ -2744,7 +2744,7 @@ class ProdWithoutZeros(CAReduceDtype):
         super().__init__(mul_without_zeros, axis=axis, dtype=dtype, acc_dtype=acc_dtype)
 
     def grad(self, inp, grads):
-        from aesara.gradient import grad_not_implemented
+        from pytensor.gradient import grad_not_implemented
 
         (a,) = inp
         a_grad = grad_not_implemented(
@@ -2904,7 +2904,7 @@ class MatMul(Op):
         else:
 
             if validate:
-                from aesara.tensor.random.basic import broadcast_shapes
+                from pytensor.tensor.random.basic import broadcast_shapes
 
                 bshape = broadcast_shapes(x1_shape[:-2], x2_shape[:-2])
                 if x1_shape[-1] != x2_shape[-2]:
@@ -2913,7 +2913,7 @@ class MatMul(Op):
                         "to the length of the 2nd-last dimension of input 2"
                     )
             else:
-                from aesara.tensor.extra_ops import broadcast_shape
+                from pytensor.tensor.extra_ops import broadcast_shape
 
                 bshape = broadcast_shape(
                     x1_shape[:-2], x2_shape[:-2], arrays_are_shapes=True

@@ -4,10 +4,10 @@ from textwrap import dedent
 import numpy as np
 import scipy
 
-from aesara.graph.basic import Apply
-from aesara.link.c.op import COp
-from aesara.tensor.basic import as_tensor_variable
-from aesara.tensor.math import neg, sum
+from pytensor.graph.basic import Apply
+from pytensor.link.c.op import COp
+from pytensor.tensor.basic import as_tensor_variable
+from pytensor.tensor.math import neg, sum
 
 
 class SoftmaxGrad(COp):

@@ -8,7 +8,7 @@ import json
 import os
 import shutil
 
-from aesara.d3viz.formatting import PyDotFormatter
+from pytensor.d3viz.formatting import PyDotFormatter
 
 
 __path__ = os.path.dirname(os.path.realpath(__file__))
@@ -58,7 +58,7 @@ def d3viz(fct, outfile, copy_deps=True, *args, **kwargs):
 
     Parameters
     ----------
-    fct : aesara.compile.function.types.Function
+    fct : pytensor.compile.function.types.Function
         A compiled Aesara function, variable, apply or a list of variables.
     outfile : str
         Path to output HTML file.
@@ -68,7 +68,7 @@ def d3viz(fct, outfile, copy_deps=True, *args, **kwargs):
     Notes
     -----
     This function accepts extra parameters which will be forwarded to
-    :class:`aesara.d3viz.formatting.PyDotFormatter`.
+    :class:`pytensor.d3viz.formatting.PyDotFormatter`.
 
     """
 
@@ -117,7 +117,7 @@ def d3write(fct, path, *args, **kwargs):
 
     Parameters
     ----------
-    fct : aesara.compile.function.types.Function
+    fct : pytensor.compile.function.types.Function
         A compiled Aesara function, variable, apply or a list of variables.
     path: str
         Path to output file
@@ -125,7 +125,7 @@ def d3write(fct, path, *args, **kwargs):
     Notes
     -----
     This function accepts extra parameters which will be forwarded to
-    :class:`aesara.d3viz.formatting.PyDotFormatter`.
+    :class:`pytensor.d3viz.formatting.PyDotFormatter`.
 
     """
 

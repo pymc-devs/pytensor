@@ -4,16 +4,16 @@ import numpy as np
 import pytest
 from numpy.testing import assert_array_equal, assert_equal, assert_string_equal
 
-import aesara
+import pytensor
 import tests.unittest_tools as utt
-from aesara.compile.mode import get_default_mode
-from aesara.graph.basic import Constant, equal_computations
-from aesara.tensor import get_vector_length
-from aesara.tensor.basic import constant
-from aesara.tensor.elemwise import DimShuffle
-from aesara.tensor.math import dot, eq
-from aesara.tensor.subtensor import AdvancedSubtensor, Subtensor
-from aesara.tensor.type import (
+from pytensor.compile.mode import get_default_mode
+from pytensor.graph.basic import Constant, equal_computations
+from pytensor.tensor import get_vector_length
+from pytensor.tensor.basic import constant
+from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.math import dot, eq
+from pytensor.tensor.subtensor import AdvancedSubtensor, Subtensor
+from pytensor.tensor.type import (
     TensorType,
     cscalar,
     dmatrix,
@@ -26,8 +26,8 @@ from aesara.tensor.type import (
     scalar,
     tensor3,
 )
-from aesara.tensor.type_other import MakeSlice, NoneConst
-from aesara.tensor.var import (
+from pytensor.tensor.type_other import MakeSlice, NoneConst
+from pytensor.tensor.var import (
     DenseTensorConstant,
     DenseTensorVariable,
     TensorConstant,
@@ -69,7 +69,7 @@ pytestmark = pytest.mark.filterwarnings("error")
 def test_numpy_method(fct, value):
     x = dscalar("x")
     y = fct(x)
-    f = aesara.function([x], y)
+    f = pytensor.function([x], y)
     utt.assert_allclose(np.nan_to_num(f(value)), np.nan_to_num(fct(value)))
 
 
@@ -94,8 +94,8 @@ def test_empty_list_indexing():
     x = dmatrix("x")
     y = x[:, []]
     z = x[:, ()]
-    fy = aesara.function([x], y)
-    fz = aesara.function([x], z)
+    fy = pytensor.function([x], y)
+    fz = pytensor.function([x], z)
     assert_equal(fy(data).shape, ynp.shape)
     assert_equal(fz(data).shape, znp.shape)
 
@@ -104,7 +104,7 @@ def test_copy():
     x = dmatrix("x")
     data = np.random.random((5, 5))
     y = x.copy(name="y")
-    f = aesara.function([x], y)
+    f = pytensor.function([x], y)
     assert_equal(f(data), data)
     assert_string_equal(y.name, "y")
 
@@ -115,7 +115,7 @@ def test__getitem__Subtensor():
     i = iscalar("i")
 
     z = x[i]
-    op_types = [type(node.op) for node in aesara.graph.basic.io_toposort([x, i], [z])]
+    op_types = [type(node.op) for node in pytensor.graph.basic.io_toposort([x, i], [z])]
     assert op_types[-1] == Subtensor
 
     # This should ultimately do nothing (i.e. just return `x`)
@@ -127,29 +127,29 @@ def test__getitem__Subtensor():
     # It lands in the `full_slices` condition in
     # `_tensor_py_operators.__getitem__`
     z = x[..., None]
-    op_types = [type(node.op) for node in aesara.graph.basic.io_toposort([x, i], [z])]
+    op_types = [type(node.op) for node in pytensor.graph.basic.io_toposort([x, i], [z])]
     assert all(op_type == DimShuffle for op_type in op_types)
 
     z = x[None, :, None, :]
-    op_types = [type(node.op) for node in aesara.graph.basic.io_toposort([x, i], [z])]
+    op_types = [type(node.op) for node in pytensor.graph.basic.io_toposort([x, i], [z])]
     assert all(op_type == DimShuffle for op_type in op_types)
 
     # This one lands in the non-`full_slices` condition in
     # `_tensor_py_operators.__getitem__`
     z = x[:i, :, None]
-    op_types = [type(node.op) for node in aesara.graph.basic.io_toposort([x, i], [z])]
+    op_types = [type(node.op) for node in pytensor.graph.basic.io_toposort([x, i], [z])]
     assert op_types[1:] == [DimShuffle, Subtensor]
 
     z = x[:]
-    op_types = [type(node.op) for node in aesara.graph.basic.io_toposort([x, i], [z])]
+    op_types = [type(node.op) for node in pytensor.graph.basic.io_toposort([x, i], [z])]
     assert op_types[-1] == Subtensor
 
     z = x[..., :]
-    op_types = [type(node.op) for node in aesara.graph.basic.io_toposort([x, i], [z])]
+    op_types = [type(node.op) for node in pytensor.graph.basic.io_toposort([x, i], [z])]
     assert op_types[-1] == Subtensor
 
     z = x[..., i, :]
-    op_types = [type(node.op) for node in aesara.graph.basic.io_toposort([x, i], [z])]
+    op_types = [type(node.op) for node in pytensor.graph.basic.io_toposort([x, i], [z])]
     assert op_types[-1] == Subtensor
 
 
@@ -158,24 +158,24 @@ def test__getitem__AdvancedSubtensor_bool():
     i = TensorType("bool", shape=(None, None))("i")
 
     z = x[i]
-    op_types = [type(node.op) for node in aesara.graph.basic.io_toposort([x, i], [z])]
+    op_types = [type(node.op) for node in pytensor.graph.basic.io_toposort([x, i], [z])]
     assert op_types[-1] == AdvancedSubtensor
 
     i = TensorType("bool", shape=(None,))("i")
     z = x[:, i]
-    op_types = [type(node.op) for node in aesara.graph.basic.io_toposort([x, i], [z])]
+    op_types = [type(node.op) for node in pytensor.graph.basic.io_toposort([x, i], [z])]
     assert op_types[-1] == AdvancedSubtensor
 
     i = TensorType("bool", shape=(None,))("i")
     z = x[..., i]
-    op_types = [type(node.op) for node in aesara.graph.basic.io_toposort([x, i], [z])]
+    op_types = [type(node.op) for node in pytensor.graph.basic.io_toposort([x, i], [z])]
     assert op_types[-1] == AdvancedSubtensor
 
     with pytest.raises(TypeError):
         z = x[[True, False], i]
 
     z = x[ivector("b"), i]
-    op_types = [type(node.op) for node in aesara.graph.basic.io_toposort([x, i], [z])]
+    op_types = [type(node.op) for node in pytensor.graph.basic.io_toposort([x, i], [z])]
     assert op_types[-1] == AdvancedSubtensor
 
 
@@ -186,33 +186,33 @@ def test__getitem__AdvancedSubtensor():
 
     # This is a `__getitem__` call that's redirected to `_tensor_py_operators.take`
     z = x[i]
-    op_types = [type(node.op) for node in aesara.graph.basic.io_toposort([x, i], [z])]
+    op_types = [type(node.op) for node in pytensor.graph.basic.io_toposort([x, i], [z])]
     assert op_types[-1] == AdvancedSubtensor
 
     # This should index nothing (i.e. return an empty copy of `x`)
     # We check that the index is empty
     z = x[[]]
-    op_types = [type(node.op) for node in aesara.graph.basic.io_toposort([x, i], [z])]
+    op_types = [type(node.op) for node in pytensor.graph.basic.io_toposort([x, i], [z])]
     assert op_types == [AdvancedSubtensor]
     assert isinstance(z.owner.inputs[1], TensorConstant)
 
     z = x[:, i]
-    op_types = [type(node.op) for node in aesara.graph.basic.io_toposort([x, i], [z])]
+    op_types = [type(node.op) for node in pytensor.graph.basic.io_toposort([x, i], [z])]
     assert op_types == [MakeSlice, AdvancedSubtensor]
 
     z = x[..., i, None]
-    op_types = [type(node.op) for node in aesara.graph.basic.io_toposort([x, i], [z])]
+    op_types = [type(node.op) for node in pytensor.graph.basic.io_toposort([x, i], [z])]
     assert op_types == [MakeSlice, AdvancedSubtensor]
 
     z = x[i, None]
-    op_types = [type(node.op) for node in aesara.graph.basic.io_toposort([x, i], [z])]
+    op_types = [type(node.op) for node in pytensor.graph.basic.io_toposort([x, i], [z])]
     assert op_types[-1] == AdvancedSubtensor
 
 
 def test_print_constant():
-    c = aesara.tensor.constant(1, name="const")
+    c = pytensor.tensor.constant(1, name="const")
     assert str(c) == "const{1}"
-    d = aesara.tensor.constant(1)
+    d = pytensor.tensor.constant(1)
     assert str(d) == "TensorConstant{1}"
 
 
@@ -309,12 +309,12 @@ class TestTensorConstantSignature:
         # Also test that nan !=0 and nan != nan.
         x = scalar()
         mode = get_default_mode()
-        if isinstance(mode, aesara.compile.debugmode.DebugMode):
+        if isinstance(mode, pytensor.compile.debugmode.DebugMode):
             # Disable the check preventing usage of NaN / Inf values.
             # We first do a copy of the mode to avoid side effects on other tests.
             mode = copy(mode)
             mode.check_isfinite = False
-        f = aesara.function([x], eq(x, np.nan), mode=mode)
+        f = pytensor.function([x], eq(x, np.nan), mode=mode)
 
         assert f(0) == 0
         assert f(np.nan) == 0
@@ -333,7 +333,7 @@ class TestTensorInstanceMethods:
     def setup_method(self):
         self.vars = matrices("X", "Y")
         self.vals = [
-            m.astype(aesara.config.floatX) for m in [random(2, 2), random(2, 2)]
+            m.astype(pytensor.config.floatX) for m in [random(2, 2), random(2, 2)]
         ]
 
     def test_repeat(self):

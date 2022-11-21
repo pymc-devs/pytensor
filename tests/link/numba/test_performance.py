@@ -3,13 +3,13 @@ import timeit
 import numpy as np
 import pytest
 
-import aesara.tensor as aet
-from aesara import config
-from aesara.compile.function import function
-from aesara.compile.mode import Mode
-from aesara.graph.rewriting.db import RewriteDatabaseQuery
-from aesara.link.numba.linker import NumbaLinker
-from aesara.tensor.math import Max
+import pytensor.tensor as aet
+from pytensor import config
+from pytensor.compile.function import function
+from pytensor.compile.mode import Mode
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.link.numba.linker import NumbaLinker
+from pytensor.tensor.math import Max
 
 
 opts = RewriteDatabaseQuery(include=[None], exclude=["cxx_only", "BlasOpt"])
@@ -34,31 +34,31 @@ py_mode = Mode("py", opts)
 def test_careduce_performance(careduce_fn, numpy_fn, axis, inputs, input_vals):
     g = careduce_fn(*inputs, axis=axis)
 
-    aesara_numba_fn = function(
+    pytensor_numba_fn = function(
         inputs,
         g,
         mode=numba_mode,
     )
 
-    # aesara_c_fn = function(
+    # pytensor_c_fn = function(
     #     inputs,
     #     g,
     #     mode=Mode("cvm")
     # )
 
     numpy_res = numpy_fn(*input_vals)
-    numba_res = aesara_numba_fn(*input_vals)
-    # c_res = aesara_c_fn(*input_vals)
+    numba_res = pytensor_numba_fn(*input_vals)
+    # c_res = pytensor_c_fn(*input_vals)
 
     assert np.array_equal(numba_res, numpy_res)
 
-    # FYI: To test the Numba JITed function directly, use `aesara_numba_fn.vm.jit_fn`
+    # FYI: To test the Numba JITed function directly, use `pytensor_numba_fn.vm.jit_fn`
 
     numpy_timer = timeit.Timer("numpy_fn(*input_vals)", "pass", globals=locals())
     numba_timer = timeit.Timer(
-        "aesara_numba_fn.vm.jit_fn(*input_vals)", "pass", globals=locals()
+        "pytensor_numba_fn.vm.jit_fn(*input_vals)", "pass", globals=locals()
     )
-    # c_timer = timeit.Timer("aesara_c_fn(*input_vals)", "pass", globals=locals())
+    # c_timer = timeit.Timer("pytensor_c_fn(*input_vals)", "pass", globals=locals())
 
     n_loops, _ = numpy_timer.autorange()
 

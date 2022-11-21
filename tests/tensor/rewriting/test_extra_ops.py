@@ -1,15 +1,15 @@
 import numpy as np
 import pytest
 
-import aesara.scalar as aes
-from aesara.compile.function import function
-from aesara.compile.mode import OPT_NONE, Mode, get_default_mode
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.rewriting.utils import rewrite_graph
-from aesara.tensor.basic import Alloc, alloc, as_tensor_variable, second
-from aesara.tensor.elemwise import DimShuffle, Elemwise
-from aesara.tensor.extra_ops import BroadcastTo, Repeat, Unique, repeat, unique
-from aesara.tensor.type import dscalar
+import pytensor.scalar as aes
+from pytensor.compile.function import function
+from pytensor.compile.mode import OPT_NONE, Mode, get_default_mode
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.tensor.basic import Alloc, alloc, as_tensor_variable, second
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.extra_ops import BroadcastTo, Repeat, Unique, repeat, unique
+from pytensor.tensor.type import dscalar
 
 
 @pytest.mark.parametrize("return_index", [False])

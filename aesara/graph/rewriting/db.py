@@ -5,13 +5,13 @@ from functools import cmp_to_key
 from io import StringIO
 from typing import Dict, Iterable, Optional, Sequence, Tuple, Union
 
-from aesara.configdefaults import config
-from aesara.graph.rewriting import basic as aesara_rewriting
-from aesara.misc.ordered_set import OrderedSet
-from aesara.utils import DefaultOrderedDict
+from pytensor.configdefaults import config
+from pytensor.graph.rewriting import basic as pytensor_rewriting
+from pytensor.misc.ordered_set import OrderedSet
+from pytensor.utils import DefaultOrderedDict
 
 
-RewritesType = Union[aesara_rewriting.GraphRewriter, aesara_rewriting.NodeRewriter]
+RewritesType = Union[pytensor_rewriting.GraphRewriter, pytensor_rewriting.NodeRewriter]
 
 
 class RewriteDatabase:
@@ -61,8 +61,8 @@ class RewriteDatabase:
             rewriter,
             (
                 RewriteDatabase,
-                aesara_rewriting.GraphRewriter,
-                aesara_rewriting.NodeRewriter,
+                pytensor_rewriting.GraphRewriter,
+                pytensor_rewriting.NodeRewriter,
             ),
         ):
             raise TypeError(f"{rewriter} is not a valid rewrite type.")
@@ -355,12 +355,12 @@ class EquilibriumDB(RewriteDatabase):
             final_rewriters = None
         if len(cleanup_rewriters) == 0:
             cleanup_rewriters = None
-        return aesara_rewriting.EquilibriumGraphRewriter(
+        return pytensor_rewriting.EquilibriumGraphRewriter(
             rewriters,
             max_use_ratio=config.optdb__max_use_ratio,
             ignore_newtrees=self.ignore_newtrees,
             tracks_on_change_inputs=self.tracks_on_change_inputs,
-            failure_callback=aesara_rewriting.NodeProcessingGraphRewriter.warn_inplace,
+            failure_callback=pytensor_rewriting.NodeProcessingGraphRewriter.warn_inplace,
             final_rewriters=final_rewriters,
             cleanup_rewriters=cleanup_rewriters,
         )
@@ -378,9 +378,9 @@ class SequenceDB(RewriteDatabase):
 
     """
 
-    seq_rewriter_type = aesara_rewriting.SequentialGraphRewriter
+    seq_rewriter_type = pytensor_rewriting.SequentialGraphRewriter
 
-    def __init__(self, failure_callback=aesara_rewriting.SequentialGraphRewriter.warn):
+    def __init__(self, failure_callback=pytensor_rewriting.SequentialGraphRewriter.warn):
         super().__init__()
         self.__position__ = {}
         self.failure_callback = failure_callback
@@ -480,7 +480,7 @@ class LocalGroupDB(SequenceDB):
         self,
         apply_all_rewrites: bool = False,
         profile: bool = False,
-        node_rewriter=aesara_rewriting.SequentialNodeRewriter,
+        node_rewriter=pytensor_rewriting.SequentialNodeRewriter,
     ):
         super().__init__(failure_callback=None)
         self.apply_all_rewrites = apply_all_rewrites
@@ -512,7 +512,7 @@ class TopoDB(RewriteDatabase):
         self.failure_callback = failure_callback
 
     def query(self, *tags, **kwtags):
-        return aesara_rewriting.WalkingGraphRewriter(
+        return pytensor_rewriting.WalkingGraphRewriter(
             self.db.query(*tags, **kwtags),
             self.order,
             self.ignore_newtrees,

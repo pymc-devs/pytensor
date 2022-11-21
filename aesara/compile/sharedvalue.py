@@ -5,14 +5,14 @@ from contextlib import contextmanager
 from functools import singledispatch
 from typing import TYPE_CHECKING, List, Optional
 
-from aesara.graph.basic import Variable
-from aesara.graph.utils import add_tag_trace
-from aesara.link.basic import Container
-from aesara.link.c.type import generic
+from pytensor.graph.basic import Variable
+from pytensor.graph.utils import add_tag_trace
+from pytensor.link.basic import Container
+from pytensor.link.c.type import generic
 
 
 if TYPE_CHECKING:
-    from aesara.graph.type import Type
+    from pytensor.graph.type import Type
 
 
 __SHARED_CONTEXT__: Optional[List[Variable]] = None
@@ -153,8 +153,8 @@ class SharedVariable(Variable):
         """A default update expression for this `Variable`.
 
         If this value is non-``None``, its value will be used as the `update`
-        (see `aesara.function`) for this `Variable` when no updates are
-        provided through `aesara.function` and `no_default_updates` isn't
+        (see `pytensor.function`) for this `Variable` when no updates are
+        provided through `pytensor.function` and `no_default_updates` isn't
         enabled.
         """
         return self._default_update
@@ -179,7 +179,7 @@ def shared(value, name=None, strict=False, allow_downcast=None, **kwargs):
     This function is meant as a convenient default.  If you want to use a
     specific constructor, consider calling it directly.
 
-    `aesara.shared` is a shortcut to this function.
+    `pytensor.shared` is a shortcut to this function.
 
     Notes
     -----
@@ -209,7 +209,7 @@ def shared(value, name=None, strict=False, allow_downcast=None, **kwargs):
         add_tag_trace(var)
         return var
     except MemoryError as e:
-        e.args = e.args + ("Consider using `aesara.shared(..., borrow=True)`",)
+        e.args = e.args + ("Consider using `pytensor.shared(..., borrow=True)`",)
         raise
 
 

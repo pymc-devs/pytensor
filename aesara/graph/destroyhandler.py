@@ -6,12 +6,12 @@ and inplace operations.
 import itertools
 from collections import OrderedDict, deque
 
-import aesara
-from aesara.configdefaults import config
-from aesara.graph.basic import Constant
-from aesara.graph.features import AlreadyThere, Bookkeeper
-from aesara.graph.utils import InconsistencyError
-from aesara.misc.ordered_set import OrderedSet
+import pytensor
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Constant
+from pytensor.graph.features import AlreadyThere, Bookkeeper
+from pytensor.graph.utils import InconsistencyError
+from pytensor.misc.ordered_set import OrderedSet
 
 
 class ProtocolError(Exception):
@@ -233,7 +233,7 @@ def fast_inplace_check(fgraph, inputs):
         Inputs Variable that you want to use as inplace destination.
 
     """
-    Supervisor = aesara.compile.function.types.Supervisor
+    Supervisor = pytensor.compile.function.types.Supervisor
     protected_inputs = [
         f.protected for f in fgraph._features if isinstance(f, Supervisor)
     ]

@@ -7,7 +7,7 @@ You are strongly advised not to use it, except if you know
 what you are doing!
 
 If you want to use a scalar variable in an Aesara graph,
-you probably want to use aesara.tensor.[c,z,f,d,b,w,i,l,]scalar!
+you probably want to use pytensor.tensor.[c,z,f,d,b,w,i,l,]scalar!
 """
 
 import builtins
@@ -21,20 +21,20 @@ from typing import Any, Dict, Mapping, Optional, Tuple, Type, Union
 import numpy as np
 from typing_extensions import TypeAlias
 
-import aesara
-from aesara import printing
-from aesara.configdefaults import config
-from aesara.gradient import DisconnectedType, grad_undefined
-from aesara.graph.basic import Apply, Constant, Variable, clone, list_of_nodes
-from aesara.graph.fg import FunctionGraph
-from aesara.graph.rewriting.basic import MergeOptimizer
-from aesara.graph.type import HasDataType, HasShape
-from aesara.graph.utils import MetaObject, MethodNotDefined
-from aesara.link.c.op import COp
-from aesara.link.c.type import CType
-from aesara.misc.safe_asarray import _asarray
-from aesara.printing import pprint
-from aesara.utils import (
+import pytensor
+from pytensor import printing
+from pytensor.configdefaults import config
+from pytensor.gradient import DisconnectedType, grad_undefined
+from pytensor.graph.basic import Apply, Constant, Variable, clone, list_of_nodes
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.basic import MergeOptimizer
+from pytensor.graph.type import HasDataType, HasShape
+from pytensor.graph.utils import MetaObject, MethodNotDefined
+from pytensor.link.c.op import COp
+from pytensor.link.c.type import CType
+from pytensor.misc.safe_asarray import _asarray
+from pytensor.printing import pprint
+from pytensor.utils import (
     apply_across_args,
     difference,
     from_return_values,
@@ -95,7 +95,7 @@ def upcast(dtype, *dtypes):
 
 def as_common_dtype(*vars):
     """
-    For for aesara.scalar.ScalarType and TensorVariable.
+    For for pytensor.scalar.ScalarType and TensorVariable.
     """
     dtype = upcast(*[v.dtype for v in vars])
     return (v.astype(dtype) for v in vars)
@@ -394,8 +394,8 @@ class ScalarType(CType, HasDataType, HasShape):
                 "float16": (np.float16, "npy_float16", "Float16"),
                 "float32": (np.float32, "npy_float32", "Float32"),
                 "float64": (np.float64, "npy_float64", "Float64"),
-                "complex128": (np.complex128, "aesara_complex128", "Complex128"),
-                "complex64": (np.complex64, "aesara_complex64", "Complex64"),
+                "complex128": (np.complex128, "pytensor_complex128", "Complex128"),
+                "complex64": (np.complex64, "pytensor_complex64", "Complex64"),
                 "bool": (np.bool_, "npy_bool", "Bool"),
                 "uint8": (np.uint8, "npy_uint8", "UInt8"),
                 "int8": (np.int8, "npy_int8", "Int8"),
@@ -499,7 +499,7 @@ class ScalarType(CType, HasDataType, HasShape):
     def c_support_code(self, **kwargs):
 
         if self.dtype.startswith("complex"):
-            cplx_types = ["aesara_complex64", "aesara_complex128"]
+            cplx_types = ["pytensor_complex64", "pytensor_complex128"]
             real_types = [
                 "npy_int8",
                 "npy_int16",
@@ -516,9 +516,9 @@ class ScalarType(CType, HasDataType, HasShape):
                 real_types.append("int")
 
             template = """
-            struct aesara_complex%(nbits)s : public npy_complex%(nbits)s
+            struct pytensor_complex%(nbits)s : public npy_complex%(nbits)s
             {
-                typedef aesara_complex%(nbits)s complex_type;
+                typedef pytensor_complex%(nbits)s complex_type;
                 typedef npy_float%(half_nbits)s scalar_type;
 
                 complex_type operator +(const complex_type &y) const {
@@ -562,13 +562,13 @@ class ScalarType(CType, HasDataType, HasShape):
                 template <typename T>
                 complex_type& operator =(const T& y);
 
-                aesara_complex%(nbits)s() {}
+                pytensor_complex%(nbits)s() {}
 
                 template <typename T>
-                aesara_complex%(nbits)s(const T& y) { *this = y; }
+                pytensor_complex%(nbits)s(const T& y) { *this = y; }
 
                 template <typename TR, typename TI>
-                aesara_complex%(nbits)s(const TR& r, const TI& i) { this->real=r; this->imag=i; }
+                pytensor_complex%(nbits)s(const TR& r, const TI& i) { this->real=r; this->imag=i; }
             };
             """
 
@@ -683,7 +683,7 @@ def get_scalar_type(dtype, cache: Dict[str, ScalarType] = {}) -> ScalarType:
 
 
 # Register C code for ViewOp on Scalars.
-aesara.compile.register_view_op_c_code(
+pytensor.compile.register_view_op_c_code(
     ScalarType,
     """
     %(oname)s = %(iname)s;
@@ -731,7 +731,7 @@ class _scalar_py_operators:
 
     @property
     def shape(self):
-        from aesara.tensor.basic import as_tensor_variable
+        from pytensor.tensor.basic import as_tensor_variable
 
         return as_tensor_variable([], ndim=1, dtype=np.int64)
 
@@ -859,8 +859,8 @@ def constant(x, name=None, dtype=None) -> ScalarConstant:
 
 
 def as_scalar(x: Any, name: Optional[str] = None) -> ScalarVariable:
-    from aesara.tensor.basic import scalar_from_tensor
-    from aesara.tensor.type import TensorType
+    from pytensor.tensor.basic import scalar_from_tensor
+    from pytensor.tensor.type import TensorType
 
     if isinstance(x, Apply):
         if len(x.outputs) != 1:
@@ -4026,7 +4026,7 @@ class Composite(ScalarOp):
 
         The result is assigned to `self._c_code`.
         """
-        from aesara.link.c.interface import CLinkerType
+        from pytensor.link.c.interface import CLinkerType
 
         # It was already called
         if hasattr(self, "_c_code"):
@@ -4189,12 +4189,12 @@ class Composite(ScalarOp):
             assert len(outputs) == 1
             # 1. Create a new graph from inputs up to the
             # Composite
-            res = aesara.compile.rebuild_collect_shared(
+            res = pytensor.compile.rebuild_collect_shared(
                 inputs=inputs, outputs=outputs[0].owner.inputs, copy_inputs_over=False
             )  # Clone also the inputs
             # 2. We continue this partial clone with the graph in
             # the inner Composite
-            res2 = aesara.compile.rebuild_collect_shared(
+            res2 = pytensor.compile.rebuild_collect_shared(
                 inputs=outputs[0].owner.op.inputs,
                 outputs=outputs[0].owner.op.outputs,
                 replace=dict(zip(outputs[0].owner.op.inputs, res[1])),
@@ -4242,7 +4242,7 @@ class Composite(ScalarOp):
         else:
             # Make a new op with the right input type.
             assert len(inputs) == self.nin
-            res = aesara.compile.rebuild_collect_shared(
+            res = pytensor.compile.rebuild_collect_shared(
                 self.outputs,
                 replace=dict(zip(self.inputs, inputs)),
                 rebuild_strict=False,

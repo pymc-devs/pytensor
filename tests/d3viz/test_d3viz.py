@@ -5,11 +5,11 @@ import tempfile
 import numpy as np
 import pytest
 
-import aesara.d3viz as d3v
-from aesara import compile
-from aesara.compile.function import function
-from aesara.configdefaults import config
-from aesara.d3viz.formatting import pydot_imported, pydot_imported_msg
+import pytensor.d3viz as d3v
+from pytensor import compile
+from pytensor.compile.function import function
+from pytensor.configdefaults import config
+from pytensor.d3viz.formatting import pydot_imported, pydot_imported_msg
 from tests.d3viz import models
 
 

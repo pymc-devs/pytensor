@@ -139,43 +139,43 @@ except ImportError:
 
 from typing import Tuple, Union
 
-import aesara.scalar
-from aesara.compile.mode import optdb
-from aesara.configdefaults import config
-from aesara.graph.basic import Apply, view_roots
-from aesara.graph.features import ReplacementDidNotRemoveError, ReplaceValidate
-from aesara.graph.op import Op
-from aesara.graph.rewriting.basic import (
+import pytensor.scalar
+from pytensor.compile.mode import optdb
+from pytensor.configdefaults import config
+from pytensor.graph.basic import Apply, view_roots
+from pytensor.graph.features import ReplacementDidNotRemoveError, ReplaceValidate
+from pytensor.graph.op import Op
+from pytensor.graph.rewriting.basic import (
     EquilibriumGraphRewriter,
     GraphRewriter,
     copy_stack_trace,
     in2out,
     node_rewriter,
 )
-from aesara.graph.rewriting.db import SequenceDB
-from aesara.graph.utils import InconsistencyError, MethodNotDefined, TestValueError
-from aesara.link.c.op import COp
-from aesara.link.c.params_type import ParamsType
-from aesara.printing import FunctionPrinter, debugprint, pprint
-from aesara.scalar import bool as bool_t
-from aesara.tensor import basic as at
-from aesara.tensor.blas_headers import blas_header_text, blas_header_version
-from aesara.tensor.elemwise import DimShuffle, Elemwise
-from aesara.tensor.exceptions import NotScalarConstantError
-from aesara.tensor.math import Dot, add, mul, neg, sub
-from aesara.tensor.rewriting.elemwise import local_dimshuffle_lift
-from aesara.tensor.shape import specify_broadcastable
-from aesara.tensor.type import (
+from pytensor.graph.rewriting.db import SequenceDB
+from pytensor.graph.utils import InconsistencyError, MethodNotDefined, TestValueError
+from pytensor.link.c.op import COp
+from pytensor.link.c.params_type import ParamsType
+from pytensor.printing import FunctionPrinter, debugprint, pprint
+from pytensor.scalar import bool as bool_t
+from pytensor.tensor import basic as at
+from pytensor.tensor.blas_headers import blas_header_text, blas_header_version
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.math import Dot, add, mul, neg, sub
+from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
+from pytensor.tensor.shape import specify_broadcastable
+from pytensor.tensor.type import (
     DenseTensorType,
     TensorType,
     integer_dtypes,
     tensor,
     values_eq_approx_remove_inf_nan,
 )
-from aesara.utils import memoize
+from pytensor.utils import memoize
 
 
-_logger = logging.getLogger("aesara.tensor.blas")
+_logger = logging.getLogger("pytensor.tensor.blas")
 
 try:
     import scipy.linalg.blas
@@ -887,7 +887,7 @@ class Gemm(GemmRelated):
     argument. Because of this in-place computation, an L{Apply} of
     this op will destroy the L{Variable} z on which it operates.  (See
     L{DestructiveOps} for an explanation of what destroying means in
-    the context of aesara graphs. See L{BlasLapackSupport} for more
+    the context of pytensor graphs. See L{BlasLapackSupport} for more
     optimized linear algebra operations.)
 
     """
@@ -1020,8 +1020,8 @@ class Gemm(GemmRelated):
         z_shape, _, x_shape, y_shape, _ = input_shapes
         return [
             (
-                aesara.scalar.scalar_maximum(z_shape[0], x_shape[0]),
-                aesara.scalar.scalar_maximum(z_shape[1], y_shape[1]),
+                pytensor.scalar.scalar_maximum(z_shape[0], x_shape[0]),
+                pytensor.scalar.scalar_maximum(z_shape[1], y_shape[1]),
             )
         ]
 
@@ -1219,7 +1219,7 @@ def _as_scalar(res, dtype=None):
             # This is valid when res is a scalar used as input to a dot22
             # as the cast of the scalar can be done before or after the dot22
             # and this will give the same result.
-            if aesara.scalar.upcast(res.dtype, dtype) == dtype:
+            if pytensor.scalar.upcast(res.dtype, dtype) == dtype:
                 return at.cast(rval, dtype)
             else:
                 return None
@@ -1388,7 +1388,7 @@ def _factor_canonicalized(lst):
     #        t = (t,)
     #    for e in t:
     #        try:
-    #            aesara.printing.debugprint(e)
+    #            pytensor.printing.debugprint(e)
     #        except TypeError:
     #            print e, type(e)
     i = 0
@@ -1431,7 +1431,7 @@ def _gemm_from_factored_list(fgraph, lst):
         if isinstance(sM, tuple):
             sm0, sm1 = sM
             sm0 = at.as_tensor_variable(sm0)
-            if aesara.scalar.upcast(sm0.dtype, sm1.dtype) == sm1.dtype:
+            if pytensor.scalar.upcast(sm0.dtype, sm1.dtype) == sm1.dtype:
                 lst2.append((at.cast(sm0, sm1.dtype), sM[1]))
 
     lst = lst2
@@ -1543,14 +1543,14 @@ class GemmOptimizer(GraphRewriter):
             if new_node is not node:
                 nodelist.append(new_node)
 
-        u = aesara.graph.rewriting.basic.DispatchingFeature(
+        u = pytensor.graph.rewriting.basic.DispatchingFeature(
             on_import, None, None, name="GemmOptimizer"
         )
         fgraph.attach_feature(u)
         while did_something:
             nb_iter += 1
             t0 = time.time()
-            nodelist = aesara.graph.basic.io_toposort(fgraph.inputs, fgraph.outputs)
+            nodelist = pytensor.graph.basic.io_toposort(fgraph.inputs, fgraph.outputs)
             time_toposort += time.time() - t0
             did_something = False
             nodelist.reverse()
@@ -1560,10 +1560,10 @@ class GemmOptimizer(GraphRewriter):
                     and isinstance(
                         node.op.scalar_op,
                         (
-                            aesara.scalar.Add,
-                            aesara.scalar.Sub,
-                            aesara.scalar.Neg,
-                            aesara.scalar.Mul,
+                            pytensor.scalar.Add,
+                            pytensor.scalar.Sub,
+                            pytensor.scalar.Neg,
+                            pytensor.scalar.Mul,
                         ),
                     )
                 ):
@@ -2110,7 +2110,7 @@ def local_dot22_to_dot22scalar(fgraph, node):
         scalar_idx = -1
         for i, x in enumerate(m.owner.inputs):
             if _as_scalar(x, dtype=d.dtype) and (
-                aesara.scalar.upcast(x.type.dtype, d.type.dtype) == d.type.dtype
+                pytensor.scalar.upcast(x.type.dtype, d.type.dtype) == d.type.dtype
             ):
                 scalar_idx = i
                 break
@@ -2144,7 +2144,7 @@ def local_dot22_to_dot22scalar(fgraph, node):
         if (
             i != dot22_idx
             and i_scalar[i] is not None
-            and (aesara.scalar.upcast(x.type.dtype, d.type.dtype) == d.type.dtype)
+            and (pytensor.scalar.upcast(x.type.dtype, d.type.dtype) == d.type.dtype)
         ):
             scalar_idx = i
             break
@@ -2208,7 +2208,7 @@ class BatchedDot(COp):
                 " calling batched_dot instead."
             )
 
-        dtype = aesara.scalar.upcast(*[input.type.dtype for input in inputs])
+        dtype = pytensor.scalar.upcast(*[input.type.dtype for input in inputs])
         # upcast inputs to common dtype if needed
         upcasted_inputs = [at.cast(input, dtype) for input in inputs]
         out_shape = (
@@ -2541,7 +2541,7 @@ class BatchedDot(COp):
         )
 
     def c_code_cache_version(self):
-        from aesara.tensor.blas_headers import blas_header_version
+        from pytensor.tensor.blas_headers import blas_header_version
 
         return (4, blas_header_version())
 
@@ -2598,35 +2598,35 @@ class BatchedDot(COp):
 
         if test_values_enabled:
             try:
-                iv0 = aesara.graph.op.get_test_value(inputs[0])
+                iv0 = pytensor.graph.op.get_test_value(inputs[0])
             except TestValueError:
-                aesara.graph.op.missing_test_message(
+                pytensor.graph.op.missing_test_message(
                     "first input passed to BatchedDot.R_op has no test value"
                 )
                 test_values_enabled = False
 
             try:
-                iv1 = aesara.graph.op.get_test_value(inputs[1])
+                iv1 = pytensor.graph.op.get_test_value(inputs[1])
             except TestValueError:
-                aesara.graph.op.missing_test_message(
+                pytensor.graph.op.missing_test_message(
                     "second input passed to BatchedDot.R_op has no test value"
                 )
                 test_values_enabled = False
 
             if eval_points[0]:
                 try:
-                    ev0 = aesara.graph.op.get_test_value(eval_points[0])
+                    ev0 = pytensor.graph.op.get_test_value(eval_points[0])
                 except TestValueError:
-                    aesara.graph.op.missing_test_message(
+                    pytensor.graph.op.missing_test_message(
                         "first eval point passed to BatchedDot.R_op "
                         "has no test value"
                     )
                     test_values_enabled = False
             if eval_points[1]:
                 try:
-                    ev1 = aesara.graph.op.get_test_value(eval_points[1])
+                    ev1 = pytensor.graph.op.get_test_value(eval_points[1])
                 except TestValueError:
-                    aesara.graph.op.missing_test_message(
+                    pytensor.graph.op.missing_test_message(
                         "second eval point passed to BatchedDot.R_op "
                         "has no test value"
                     )
@@ -2754,6 +2754,6 @@ def batched_tensordot(x, y, axes=2):
     reshapes to reduce the tensor dot product to a matrix or vector
     dot product.  Finally, it calls batched_dot to compute the result.
     """
-    from aesara.tensor.math import _tensordot_as_dot
+    from pytensor.tensor.math import _tensordot_as_dot
 
     return _tensordot_as_dot(x, y, axes, dot=batched_dot, batched=True)
