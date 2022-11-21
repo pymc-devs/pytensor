@@ -15,10 +15,21 @@ body:
     value: >
       If you're looking to request a new feature or change in functionality,
       including adding or changing the meaning of arguments to an existing
-      function, please post your idea here to explain your reasoning.
-      You can also check out our
+      function, please post your idea first on please create a discussion thread at
+      [Discussions](https://github.com/pymc-devs/pytensor/discussions)
+      to validate it and bring attentino to it. After validation,
+      you can open this issue for a more technical developer discussion.
       [Contributor Guide](https://github.com/pymc-devs/pytensor/blob/main/CONTRIBUTING.md)
       if you need more information.
+
+- type: textarea
+  attributes:
+    label: "Link to a discussion"
+  descrition: >
+    Link to the discussion about this feature request in
+    [Discussions](https://github.com/pymc-devs/pytensor/discussions)
+  validations:
+    required: true
 
 - type: textarea
   attributes:
