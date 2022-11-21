@@ -1,13 +1,6 @@
 |Tests Status| |Coverage| |Gitter|
 
-.. raw:: html
-
-  <div align="center">
-  <img src="./doc/images/pytensor_logo_2400.png" alt="logo"></img>
-  </div>
-
-
-|Project Name| is a Python library that allows one to define, optimize, and
+|Project Name| is a fork of Aesara -- a Python library that allows one to define, optimize, and
 efficiently evaluate mathematical expressions involving multi-dimensional
 arrays.
 
