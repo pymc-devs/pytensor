@@ -1,8 +1,7 @@
-|Tests Status| |Coverage| |Gitter|
+|Tests Status| |Coverage|
 
-|Project Name| is a fork of Aesara -- a Python library that allows one to define, optimize, and
-efficiently evaluate mathematical expressions involving multi-dimensional
-arrays.
+|Project Name| is a fork of `Aesara<https://github.com/aesara-devs/aesara>`__ -- a Python library that allows one to define, optimize, and
+efficiently evaluate mathematical expressions involving multi-dimensional arrays.
 
 Features
 ========
@@ -19,11 +18,11 @@ Getting started
 .. code-block:: python
 
   import pytensor
-  from pytensor import tensor as at
+  from pytensor import tensor as pt
 
   # Declare two symbolic floating-point scalars
-  a = at.dscalar("a")
-  b = at.dscalar("b")
+  a = pt.dscalar("a")
+  b = pt.dscalar("b")
 
   # Create a simple example expression
   c = a + b
@@ -45,8 +44,8 @@ Getting started
   # expression graphs by removing unnecessary operations and
   # replacing computations with more efficient ones.
 
-  v = at.vector("v")
-  M = at.matrix("M")
+  v = pt.vector("v")
+  M = pt.matrix("M")
 
   d = a/a + (M + a).dot(v)
 
@@ -131,5 +130,3 @@ Special thanks to `Bram Timmer <http://beside.ca>`__ for the logo.
   :target: https://github.com/pymc-devs/pytensor/actions?query=workflow%3ATests
 .. |Coverage| image:: https://codecov.io/gh/pymc-devs/pytensor/branch/main/graph/badge.svg?token=WVwr8nZYmc
   :target: https://codecov.io/gh/pymc-devs/pytensor
-.. |Gitter| image:: https://badges.gitter.im/pymc-devs/pytensor.svg
-  :target: https://gitter.im/pymc-devs/pytensor?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge
