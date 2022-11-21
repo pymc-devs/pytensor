@@ -119,11 +119,6 @@ For more information on contributing, please see the
 A good place to start contributing is by looking through the issues
 `here <https://github.com/pymc-devs/pytensor/issues`.
 
-Support
-=======
-
-Special thanks to `Bram Timmer <http://beside.ca>`__ for the logo.
-
 
 .. |Project Name| replace:: Pytensor
 .. |Tests Status| image:: https://github.com/pymc-devs/pytensor/workflows/Tests/badge.svg
