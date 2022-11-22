@@ -1617,15 +1617,15 @@ def list_of_nodes(
     )
 
 
-def is_in_ancestors(l_apply: Apply, f_node: Apply) -> bool:
-    """Determine if `f_node` is in the graph given by `l_apply`.
+def is_in_ancestors(l_apply: Apply, f_applys: Collection[Apply]) -> bool:
+    """Determine if `f_applys` is in the graph given by `l_apply`.
 
     Parameters
     ----------
-    l_apply : Apply
-        The node to walk.
-    f_apply : Apply
-        The node to find in `l_apply`.
+    l_apply : Collection[Apply]
+        Nodes to walk.
+    f_applys : Collection[Apply]
+        Nodes to find in `l_applys`.
 
     Returns
     -------
@@ -1634,13 +1634,14 @@ def is_in_ancestors(l_apply: Apply, f_node: Apply) -> bool:
     """
     computed = set()
     todo = [l_apply]
+    wanted = set(f_applys)
     while todo:
         cur = todo.pop()
         if cur.outputs[0] in computed:
             continue
         if all(i in computed or i.owner is None for i in cur.inputs):
             computed.update(cur.outputs)
-            if cur is f_node:
+            if cur in wanted:
                 return True
         else:
             todo.append(cur)

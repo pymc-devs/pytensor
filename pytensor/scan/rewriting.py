@@ -1642,7 +1642,7 @@ def save_mem_new_scan(fgraph, node):
                     old_new += [(o, new_outs[nw_pos])]
             # Check if the new outputs depend on the old scan node
             old_scan_is_used = [
-                is_in_ancestors(new.owner, node) for old, new in old_new
+                is_in_ancestors(new.owner, [node]) for old, new in old_new
             ]
             if any(old_scan_is_used):
                 return False
@@ -1877,7 +1877,7 @@ class ScanMerge(GraphRewriter):
 
         # Check to see if it is an input of a different node
         for nd in set_nodes:
-            if is_in_ancestors(node, nd) or is_in_ancestors(nd, node):
+            if is_in_ancestors(node, [nd]) or is_in_ancestors(nd, [node]):
                 return False
 
         if not node.op.info.as_while:

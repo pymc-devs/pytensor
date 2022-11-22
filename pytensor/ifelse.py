@@ -604,7 +604,7 @@ class CondMerge(GraphRewriter):
         merging_node = cond_nodes[0]
         for proposal in cond_nodes[1:]:
             if proposal.inputs[0] == merging_node.inputs[0] and not is_in_ancestors(
-                proposal, merging_node
+                proposal, [merging_node]
             ):
                 # Create a list of replacements for proposal
                 mn_ts = merging_node.inputs[1:][: merging_node.op.n_outs]
@@ -703,8 +703,8 @@ def cond_merge_random_op(fgraph, main_node):
     for proposal in cond_nodes[1:]:
         if (
             proposal.inputs[0] == merging_node.inputs[0]
-            and not is_in_ancestors(proposal, merging_node)
-            and not is_in_ancestors(merging_node, proposal)
+            and not is_in_ancestors(proposal, [merging_node])
+            and not is_in_ancestors(merging_node, [proposal])
         ):
             # Create a list of replacements for proposal
             mn_ts = merging_node.inputs[1:][: merging_node.op.n_outs]
