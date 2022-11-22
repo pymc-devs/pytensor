@@ -604,7 +604,7 @@ class TestFunction:
         assert (out == 4).all()
         out[0] = 3
         out2 = f()
-        # If the following 2 asserts fail it mean Pytensor broke it's memory contract.
+        # If the following 2 asserts fail it mean PyTensor broke it's memory contract.
         assert out2 is not out
         assert (out2 == 4).all()
 

@@ -20,8 +20,8 @@ relies on the following elements to work properly :
   inputs and the outputs of the inner function which could lead to invalid
   results.
 - In make_thunk(), again, the borrow flag must be set to True for the outputs.
-  This will make Pytensor consider the output storages as persistent and make
-  Pytensor provide them as pre-allocated storage to the ops that compute the
+  This will make PyTensor consider the output storages as persistent and make
+  PyTensor provide them as pre-allocated storage to the ops that compute the
   outputs of the inner function instead of letting these ops allocate their
   own output storage.
 - The ops that produce the outputs of the inner function must be prevented
@@ -2065,7 +2065,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                                 "An output of the Scan has changed shape. "
                                 "This may be caused by a push-out optimization."
                                 " Try adding 'optimizer_excluding=scan_pushout'"
-                                " to your Pytensor flags."
+                                " to your PyTensor flags."
                             )
                             raise ne from e
 
@@ -3400,11 +3400,11 @@ def profile_printer(
             if isinstance(node.op, Scan) and not node.op.fn.profile:
                 print(
                     "  One scan node do not have its inner profile enabled. "
-                    "If you enable Pytensor profiler with "
+                    "If you enable PyTensor profiler with "
                     "'pytensor.function(..., profile=True)', you must manually"
                     " enable the profiling for each scan too: "
                     "'pytensor.scan(...,profile=True)'."
-                    " Or use Pytensor flag 'profile=True'.",
+                    " Or use PyTensor flag 'profile=True'.",
                     file=file,
                 )
             elif isinstance(node.op, Scan) and node.op.fn.profile:

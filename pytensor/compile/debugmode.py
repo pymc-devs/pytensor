@@ -979,7 +979,7 @@ def _check_preallocated_output(
 
     """
 
-    # If node has an inner compiled Pytensor function with mode DebugMode,
+    # If node has an inner compiled PyTensor function with mode DebugMode,
     # disable memory checks in that mode, since they were already run.
     try:
         changed_inner_mode = False

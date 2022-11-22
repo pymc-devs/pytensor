@@ -92,7 +92,7 @@ compile.optdb.register(
 # Conv opts
 @node_rewriter([AbstractConv2d])
 def local_abstractconv_gemm(fgraph, node):
-    # If config.blas__ldflags is empty, Pytensor will use
+    # If config.blas__ldflags is empty, PyTensor will use
     # a NumPy C implementation of [sd]gemm_.
     if config.cxx == "" or node.inputs[0].dtype == "float16":
         return
@@ -120,7 +120,7 @@ def local_abstractconv_gemm(fgraph, node):
 
 @node_rewriter([AbstractConv3d])
 def local_abstractconv3d_gemm(fgraph, node):
-    # If config.blas__ldflags is empty, Pytensor will use
+    # If config.blas__ldflags is empty, PyTensor will use
     # a NumPy C implementation of [sd]gemm_.
     if config.cxx == "" or node.inputs[0].dtype == "float16":
         return
@@ -146,7 +146,7 @@ def local_abstractconv3d_gemm(fgraph, node):
 
 @node_rewriter([AbstractConv2d_gradWeights])
 def local_abstractconv_gradweight_gemm(fgraph, node):
-    # If config.blas__ldflags is empty, Pytensor will use
+    # If config.blas__ldflags is empty, PyTensor will use
     # a NumPy C implementation of [sd]gemm_.
     if config.cxx == "" or node.inputs[0].dtype == "float16":
         return
@@ -176,7 +176,7 @@ def local_abstractconv_gradweight_gemm(fgraph, node):
 
 @node_rewriter([AbstractConv3d_gradWeights])
 def local_abstractconv3d_gradweight_gemm(fgraph, node):
-    # If config.blas__ldflags is empty, Pytensor will use
+    # If config.blas__ldflags is empty, PyTensor will use
     # a NumPy C implementation of [sd]gemm_.
     if config.cxx == "" or node.inputs[0].dtype == "float16":
         return
@@ -204,7 +204,7 @@ def local_abstractconv3d_gradweight_gemm(fgraph, node):
 
 @node_rewriter([AbstractConv2d_gradInputs])
 def local_abstractconv_gradinputs_gemm(fgraph, node):
-    # If config.blas__ldflags is empty, Pytensor will use
+    # If config.blas__ldflags is empty, PyTensor will use
     # a NumPy C implementation of [sd]gemm_.
     if config.cxx == "" or node.inputs[0].dtype == "float16":
         return
@@ -234,7 +234,7 @@ def local_abstractconv_gradinputs_gemm(fgraph, node):
 
 @node_rewriter([AbstractConv3d_gradInputs])
 def local_abstractconv3d_gradinputs_gemm(fgraph, node):
-    # If config.blas__ldflags is empty, Pytensor will use
+    # If config.blas__ldflags is empty, PyTensor will use
     # a NumPy C implementation of [sd]gemm_.
     if config.cxx == "" or node.inputs[0].dtype == "float16":
         return
@@ -589,9 +589,9 @@ def local_abstractconv_check(fgraph, node):
         ),
     ):
         raise MetaNodeRewriterSkip(
-            f"{node.op.__class__.__name__} Pytensor rewriting failed: there is no implementation "
+            f"{node.op.__class__.__name__} PyTensor rewriting failed: there is no implementation "
             "available supporting the requested options. If on CPU, "
-            "do you have a BLAS library installed Pytensor can link against? "
+            "do you have a BLAS library installed PyTensor can link against? "
             "On the CPU we do not support float16."
         )
 

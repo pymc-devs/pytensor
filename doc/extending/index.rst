@@ -2,10 +2,10 @@
 .. _extending:
 
 ==================
-Extending Pytensor
+Extending PyTensor
 ==================
 
-This advanced tutorial is for users who want to extend Pytensor with new :class:`Type`\s,
+This advanced tutorial is for users who want to extend PyTensor with new :class:`Type`\s,
 new operations (i.e. :class:`Op`\s), and new graph rewrites. This first page of the
 tutorial mainly focuses on the Python implementation of an :class:`Op` and then
 proposes an overview of the most important methods that define an :class:`Op`.
@@ -15,16 +15,16 @@ goes more in depth on advanced topics related to :class:`Op`\s, such as how to w
 efficient code for an :class:`Op` and how to write an rewrite to speed up the
 execution of an :class:`Op`.
 
-Along the way, this tutorial also introduces many aspects of how Pytensor works,
+Along the way, this tutorial also introduces many aspects of how PyTensor works,
 so it is also good for you if you are interested in getting more under the hood
-with Pytensor itself.
+with PyTensor itself.
 
 .. note::
 
     Before tackling this more advanced presentation, it is highly recommended
     to read the introductory :ref:`Tutorial<tutorial>`, especially the sections
-    that introduce the Pytensor graphs, as providing a novel Pytensor :class:`Op` requires a
-    basic understanting of the Pytensor graphs.
+    that introduce the PyTensor graphs, as providing a novel PyTensor :class:`Op` requires a
+    basic understanting of the PyTensor graphs.
 
     See also the :ref:`dev_start_guide` for information regarding the
     versioning framework, namely about Git and GitHub, regarding the

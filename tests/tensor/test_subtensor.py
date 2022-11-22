@@ -1208,7 +1208,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
                         inc_num = rng.uniform(size=inc_size).astype(self.dtype)
                         inc_num = inc_num.reshape(inc_shape)
                         # Result of the incrementation.
-                        # (i) Pytensor
+                        # (i) PyTensor
                         if set_instead_of_inc:
                             op = set_subtensor
                         else:
@@ -1239,7 +1239,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
                                     data_copy[idx] += inc_num
                         data_var = In(data_var, mutable=True)
 
-                        # Remember data for the Pytensor function (see below).
+                        # Remember data for the PyTensor function (see below).
                         all_inputs_var += [data_var, idx_var, inc_var]
                         all_inputs_num += [data_num, idx_num, inc_num]
                         all_outputs_var.append(output)
@@ -1248,7 +1248,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
                             (set_instead_of_inc, inplace, data_shape, inc_shape)
                         )
 
-        # Actual test (we compile a single Pytensor function to make it faster).
+        # Actual test (we compile a single PyTensor function to make it faster).
         f = self.function(
             all_inputs_var,
             all_outputs_var,

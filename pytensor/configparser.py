@@ -20,7 +20,7 @@ from pytensor.utils import hash_from_code
 _logger = logging.getLogger("pytensor.configparser")
 
 
-class PytensorConfigWarning(Warning):
+class PyTensorConfigWarning(Warning):
     @classmethod
     def warn(cls, message, stacklevel=0):
         warnings.warn(message, cls, stacklevel=stacklevel + 3)
@@ -66,7 +66,7 @@ class _ChangeFlagsDecorator:
 
 
 class _SectionRedirect:
-    """Functions as a mock property on the PytensorConfigParser.
+    """Functions as a mock property on the PyTensorConfigParser.
 
     It redirects attribute access (to config subsectinos) to the
     new config variable properties that use "__" in their name.
@@ -86,7 +86,7 @@ class _SectionRedirect:
         return getattr(self._root, f"{self._section_name}__{attr}")
 
 
-class PytensorConfigParser:
+class PyTensorConfigParser:
     """Object that holds configuration settings."""
 
     def __init__(self, flags_dict: dict, pytensor_cfg, pytensor_raw_cfg):
@@ -133,7 +133,7 @@ class PytensorConfigParser:
         )
 
     def add(self, name, doc, configparam, in_c_key=True):
-        """Add a new variable to PytensorConfigParser.
+        """Add a new variable to PyTensorConfigParser.
 
         This method performs some of the work of initializing `ConfigParam` instances.
 
@@ -186,7 +186,7 @@ class PytensorConfigParser:
                 # `self._pytensor_cfg` does not contain an entry for the given
                 # section and/or value.
                 _logger.info(
-                    f"Suppressed KeyError in PytensorConfigParser.add for parameter '{name}'!"
+                    f"Suppressed KeyError in PyTensorConfigParser.add for parameter '{name}'!"
                 )
 
         # the ConfigParam implements __get__/__set__, enabling us to create a property:
@@ -243,7 +243,7 @@ class PytensorConfigParser:
     def change_flags(self, *args, **kwargs) -> _ChangeFlagsDecorator:
         """
         Use this as a decorator or context manager to change the value of
-        Pytensor config variables.
+        PyTensor config variables.
 
         Useful during tests.
         """
@@ -251,7 +251,7 @@ class PytensorConfigParser:
 
     def warn_unused_flags(self):
         for key in self._flags_dict.keys():
-            warnings.warn(f"Pytensor does not recognise this flag: {key}")
+            warnings.warn(f"PyTensor does not recognise this flag: {key}")
 
 
 class ConfigParam:
@@ -262,7 +262,7 @@ class ConfigParam:
     that can be context-dependent.
 
     This class implements __get__ and __set__ methods to eventually become
-    a property on an instance of PytensorConfigParser.
+    a property on an instance of PyTensorConfigParser.
     """
 
     def __init__(
@@ -295,13 +295,13 @@ class ConfigParam:
         self._validate = validate
         self._mutable = mutable
         self.is_default = True
-        # set by PytensorConfigParser.add:
+        # set by PyTensorConfigParser.add:
         self.name = None
         self.doc = None
         self.in_c_key = None
 
         # Note that we do not call `self.filter` on the default value: this
-        # will be done automatically in PytensorConfigParser.add, potentially with a
+        # will be done automatically in PyTensorConfigParser.add, potentially with a
         # more appropriate user-provided default value.
         # Calling `filter` here may actually be harmful if the default value is
         # invalid and causes a crash or has unwanted side effects.
@@ -345,7 +345,7 @@ class ConfigParam:
             return self
         if self.name not in cls._config_var_dict:
             raise ConfigAccessViolation(
-                f"The config parameter '{self.name}' was registered on a different instance of the PytensorConfigParser."
+                f"The config parameter '{self.name}' was registered on a different instance of the PyTensorConfigParser."
                 f" It is not accessible through the instance with id '{id(cls)}' because of safeguarding."
             )
         if not hasattr(self, "val"):
@@ -459,7 +459,7 @@ class DeviceParam(ConfigParam):
         if val.startswith("opencl") or val.startswith("cuda") or val.startswith("gpu"):
             raise ValueError(
                 "You are trying to use the old GPU back-end. "
-                "It was removed from Pytensor."
+                "It was removed from PyTensor."
             )
         elif val == self.default:
             return val
@@ -505,7 +505,7 @@ def parse_config_string(config_string, issue_warnings=True):
         kv_tuple = kv_pair.split("=", 1)
         if len(kv_tuple) == 1:
             if issue_warnings:
-                PytensorConfigWarning.warn(
+                PyTensorConfigWarning.warn(
                     f"Config key '{kv_tuple[0]}' has no value, ignoring it",
                     stacklevel=1,
                 )
@@ -560,9 +560,9 @@ def _create_default_config():
     pytensor_raw_cfg = RawConfigParser()
     pytensor_raw_cfg.read(config_files)
 
-    # Instances of PytensorConfigParser can have independent current values!
+    # Instances of PyTensorConfigParser can have independent current values!
     # But because the properties are assigned to the type, their existence is global.
-    config = PytensorConfigParser(
+    config = PyTensorConfigParser(
         flags_dict=PYTENSOR_FLAGS_DICT,
         pytensor_cfg=pytensor_cfg,
         pytensor_raw_cfg=pytensor_raw_cfg,

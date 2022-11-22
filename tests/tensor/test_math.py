@@ -1766,7 +1766,7 @@ class TestAdd:
             for s, fn in tests:
                 f = inplace_func([], fn(a, b))
                 # print 'valid output:', fn(a.data, b.data)
-                # print 'Pytensor output:', f(a.data, b.data)
+                # print 'PyTensor output:', f(a.data, b.data)
                 assert a.type.values_eq_approx(fn(a.get_value(), b.get_value()), f())
 
     def test_grad_scalar_l(self):
@@ -1861,7 +1861,7 @@ class TestMean:
 
 
 def test_dot_numpy_inputs():
-    """Test the `Pytensor.tensor.dot` interface function with NumPy inputs."""
+    """Test the `PyTensor.tensor.dot` interface function with NumPy inputs."""
     a = np.ones(2)
     b = np.ones(2)
     res = dot(a, b)
@@ -2255,7 +2255,7 @@ class TestArithmeticCast:
         # Here:
         # scalar == scalar stored as a 0d array
         # array == 1d array
-        # i_scalar == scalar type used internally by Pytensor
+        # i_scalar == scalar type used internally by PyTensor
         def pytensor_scalar(dtype):
             return scalar(dtype=str(dtype))
 
@@ -2314,7 +2314,7 @@ class TestArithmeticCast:
 
             if "array" in combo and "scalar" in combo:
                 # For mixed scalar / array operations,
-                # Pytensor may differ from numpy as it does
+                # PyTensor may differ from numpy as it does
                 # not try to prevent the scalar from
                 # upcasting the array.
                 array_type, scalar_type = (
@@ -2330,7 +2330,7 @@ class TestArithmeticCast:
                     # the scalar type as well.
                     array_type != up_type
                     and
-                    # Pytensor upcasted the result array.
+                    # PyTensor upcasted the result array.
                     pytensor_dtype == up_type
                     and
                     # But Numpy kept its original type.
@@ -2556,7 +2556,7 @@ class TestTensorInstanceMethods:
     def test_std(self):
         X, _ = self.vars
         x, _ = self.vals
-        # std() is implemented as Pytensor tree and does not pass its
+        # std() is implemented as PyTensor tree and does not pass its
         # args directly to numpy. This sometimes results in small
         # difference, so we use allclose test.
         utt.assert_allclose(X.std().eval({X: x}), x.std())
@@ -2804,14 +2804,14 @@ class TestIsInfIsNan:
 
     def run_isfunc(self, at_func, np_func):
         for args in (self.scalar, self.vector):
-            Pytensor_isfunc = function([args], at_func(args), mode=self.mode)
+            PyTensor_isfunc = function([args], at_func(args), mode=self.mode)
             for x in self.test_vals:
                 if (x.ndim == 0 and args is not self.scalar) or (
                     x.ndim == 1 and args is not self.vector
                 ):
                     # We only test with the appropriate input type.
                     continue
-                t_out = Pytensor_isfunc(x)
+                t_out = PyTensor_isfunc(x)
                 n_out = np_func(x)
                 assert (t_out == n_out).all(), (t_out, n_out)
 
@@ -3250,7 +3250,7 @@ def test_grad_useless_sum():
     """
     Test absence of useless sum.
 
-    When an operation (such as `Pytensor.tensor.mul`) is done on a broadcastable
+    When an operation (such as `PyTensor.tensor.mul`) is done on a broadcastable
     vector and a matrix, the gradient in backward path is computed for the
     broadcasted vector. So a sum reverts the broadcasted vector to a vector. In
     the case of operations on two broadcastable vectors, the sum should not be

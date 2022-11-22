@@ -281,7 +281,7 @@ rng = np.random.default_rng(42849)
     ids=str,
 )
 def test_aligned_RandomVariable(rv_op, dist_args, size):
-    """Tests for Numba samplers that are one-to-one with Pytensor's/NumPy's samplers."""
+    """Tests for Numba samplers that are one-to-one with PyTensor's/NumPy's samplers."""
     rng = shared(np.random.RandomState(29402))
     g = rv_op(*dist_args, size=size, rng=rng)
     g_fg = FunctionGraph(outputs=[g])
@@ -416,7 +416,7 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
     ],
 )
 def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_conv):
-    """Tests for Numba samplers that are not one-to-one with Pytensor's/NumPy's samplers."""
+    """Tests for Numba samplers that are not one-to-one with PyTensor's/NumPy's samplers."""
     rng = shared(np.random.RandomState(29402))
     g = rv_op(*dist_args, size=(2000,) + base_size, rng=rng)
     g_fn = function(dist_args, g, mode=numba_mode)

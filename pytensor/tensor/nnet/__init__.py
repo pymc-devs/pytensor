@@ -3,7 +3,7 @@ import warnings
 
 warnings.warn(
     "The module `pytensor.tensor.nnet` is deprecated and will "
-    "be removed from Pytensor in version 2.9.0",
+    "be removed from PyTensor in version 2.9.0",
     DeprecationWarning,
     stacklevel=2,
 )

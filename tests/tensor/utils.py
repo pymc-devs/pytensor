@@ -288,7 +288,7 @@ def check_floatX(inputs, rval):
     Returns
     -------
     Either `rval` unchanged, or `rval` cast in float32. The idea is that when a
-    numpy function would have returned a float64, Pytensor may prefer to return a
+    numpy function would have returned a float64, PyTensor may prefer to return a
     float32 instead when `config.cast_policy` is set to ``'numpy+floatX'`` and
     `config.floatX` to ``'float32'``, and there was no float64 input.
     """
@@ -352,7 +352,7 @@ def makeTester(
     Parameters
     ----------
     check_name
-        Use only for testers that aren't in Pytensor.
+        Use only for testers that aren't in PyTensor.
     """
     if checks is None:
         checks = {}

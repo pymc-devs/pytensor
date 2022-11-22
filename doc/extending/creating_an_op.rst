@@ -8,7 +8,7 @@ So suppose you have looked through the library documentation and you don't see
 a function that does what you want.
 
 If you can implement something in terms of an existing :ref:`Op`, you should do that.
-Odds are your function that uses existing Pytensor expressions is short,
+Odds are your function that uses existing PyTensor expressions is short,
 has no bugs, and potentially profits from rewrites that have already been
 implemented.
 
@@ -28,7 +28,7 @@ As an illustration, this tutorial will demonstrate how a simple Python-based
     :ref:`views_and_inplace` for an explanation on how to do this.
 
     If your :class:`Op` returns a view or changes the value of its inputs
-    without doing as prescribed in that page, Pytensor will run, but will
+    without doing as prescribed in that page, PyTensor will run, but will
     return correct results for some graphs and wrong results for others.
 
     It is recommended that you run your tests in :class:`DebugMode`, since it
@@ -36,17 +36,17 @@ As an illustration, this tutorial will demonstrate how a simple Python-based
     regard.
 
 
-Pytensor Graphs refresher
+PyTensor Graphs refresher
 -------------------------
 
 .. image:: apply.png
     :width: 500 px
 
-Pytensor represents symbolic mathematical computations as graphs. Those graphs
+PyTensor represents symbolic mathematical computations as graphs. Those graphs
 are bi-partite graphs (graphs with two types of nodes), they are composed of
 interconnected :ref:`apply` and :ref:`variable` nodes.
 :class:`Variable` nodes represent data in the graph, either inputs, outputs or
-intermediary values. As such, inputs and outputs of a graph are lists of Pytensor
+intermediary values. As such, inputs and outputs of a graph are lists of PyTensor
 :class:`Variable` nodes. :class:`Apply` nodes perform computation on these
 variables to produce new variables. Each :class:`Apply` node has a link to an
 instance of :class:`Op` which describes the computation to perform. This tutorial
@@ -125,7 +125,7 @@ or :meth:`Op.make_thunk`.
       with the current :class:`Op`. If the :class:`Op` cannot be applied on the provided
       input types, it must raises an exception (such as :class:`TypeError`).
     - it operates on the :class:`Variable`\s found in
-      ``*inputs`` in Pytensor's symbolic language to infer the type of
+      ``*inputs`` in PyTensor's symbolic language to infer the type of
       the symbolic output :class:`Variable`\s. It creates output :class:`Variable`\s of a suitable
       symbolic :class:`Type` to serve as the outputs of this :class:`Op`'s
       application.
@@ -190,7 +190,7 @@ or :meth:`Op.make_thunk`.
   :meth:`Op.make_thunk` is useful if you want to generate code and compile
   it yourself.
 
-  If :meth:`Op.make_thunk` is defined by an :class:`Op`, it will be used by Pytensor
+  If :meth:`Op.make_thunk` is defined by an :class:`Op`, it will be used by PyTensor
   to obtain the :class:`Op`'s implementation.
   :meth:`Op.perform` and :meth:`COp.c_code` will be ignored.
 
@@ -241,7 +241,7 @@ There are other methods that can be optionally defined by the :class:`Op`:
   whose expression includes your :class:`Op`. The gradient may be
   specified symbolically in this method. It takes two arguments ``inputs`` and
   ``output_gradients``, which are both lists of :class:`Variable`\s, and
-  those must be operated on using Pytensor's symbolic language. The :meth:`Op.grad`
+  those must be operated on using PyTensor's symbolic language. The :meth:`Op.grad`
   method must return a list containing one :class:`Variable` for each
   input. Each returned :class:`Variable` represents the gradient with respect
   to that input computed based on the symbolic gradients with respect
@@ -350,7 +350,7 @@ a ``.op`` attribute that refers to ``doubleOp1``.
 
 .. The first two methods in the :class:`Op` are relatively boilerplate: ``__eq__``
 .. and ``__hash__``.
-.. When two :class:`Op`\s are equal, Pytensor will merge their outputs if they are applied to the same inputs.
+.. When two :class:`Op`\s are equal, PyTensor will merge their outputs if they are applied to the same inputs.
 .. The base class says two objects are equal if (and only if)
 .. they are the same object.
 .. Writing these boilerplate definitions ensures that the logic of the equality comparison is always explicit.
@@ -366,7 +366,7 @@ a ``.op`` attribute that refers to ``doubleOp1``.
 .. arguments to the constructor. If we had done that, and if that different
 .. configuration made ``fibby2`` compute different results from ``fibby`` (for the
 .. same inputs) then we would have to add logic to the ``__eq__`` and ``__hash__``
-.. function so that he two ``Fibby`` :class:`Op`\s would *not be equal*.  The reason why: Pytensor's merge
+.. function so that he two ``Fibby`` :class:`Op`\s would *not be equal*.  The reason why: PyTensor's merge
 .. optimization looks for :class:`Op`\s comparing equal and merges them. If two :class:`Op`\s compare
 .. equal but don't always produce equal results from equal inputs, then you might
 .. see wrong calculation.
@@ -375,7 +375,7 @@ The ``make_node`` method creates a node to be included in the expression graph.
 It runs when we apply our :class:`Op` (``doubleOp1``) to the ``Variable`` (``x``), as
 in ``doubleOp1(tensor.vector())``.
 When an :class:`Op` has multiple inputs, their order in the inputs argument to ``Apply``
-is important:  Pytensor will call ``make_node(*inputs)`` to copy the graph,
+is important:  PyTensor will call ``make_node(*inputs)`` to copy the graph,
 so it is important not to change the semantics of the expression by changing
 the argument order.
 
@@ -535,7 +535,7 @@ We can test this by running the following segment:
 How To Test it
 --------------
 
-Pytensor has some functionalities to simplify testing. These help test the
+PyTensor has some functionalities to simplify testing. These help test the
 :meth:`Op.infer_shape`, :meth:`Op.grad` and :meth:`Op.R_op` methods. Put the following code
 in a file and execute it with the ``pytest`` program.
 
@@ -573,7 +573,7 @@ exception. You can use the ``assert`` keyword to automatically raise an
 
 We call ``utt.assert_allclose(expected_value, value)`` to compare
 NumPy ndarray.This raise an error message with more information. Also,
-the default tolerance can be changed with the Pytensor flags
+the default tolerance can be changed with the PyTensor flags
 ``config.tensor__cmp_sloppy`` that take values in 0, 1 and 2. The
 default value do the most strict comparison, 1 and 2 make less strict
 comparison.
@@ -589,8 +589,8 @@ itself. Additionally, it checks that the rewritten graph computes
 the correct shape, by comparing it to the actual shape of the computed
 output.
 
-:meth:`InferShapeTester._compile_and_check` compiles an Pytensor function. It takes as
-parameters the lists of input and output Pytensor variables, as would be
+:meth:`InferShapeTester._compile_and_check` compiles an PyTensor function. It takes as
+parameters the lists of input and output PyTensor variables, as would be
 provided to :func:`pytensor.function`, and a list of real values to pass to the
 compiled function. It also takes the :class:`Op` class as a parameter
 in order to verify that no instance of it appears in the shape-optimized graph.
@@ -636,7 +636,7 @@ Testing the gradient
 ^^^^^^^^^^^^^^^^^^^^
 
 The function :ref:`verify_grad <validating_grad>`
-verifies the gradient of an :class:`Op` or Pytensor graph. It compares the
+verifies the gradient of an :class:`Op` or PyTensor graph. It compares the
 analytic (symbolically computed) gradient and the numeric
 gradient (computed through the Finite Difference Method).
 
@@ -716,7 +716,7 @@ Modify and execute the example to return two outputs: ``x + y`` and `jx - yj`.
 You can omit the :meth:`Rop` functions. Try to implement the testing apparatus
 described above.
 
-(Notice that Pytensor's current *elemwise fusion* rewrite is
+(Notice that PyTensor's current *elemwise fusion* rewrite is
 only applicable to computations involving a single output. Hence, to gain
 efficiency over the basic solution that is asked here, the two operations would
 have to be jointly rewritten explicitly in the code.)
@@ -741,7 +741,7 @@ don't forget to call the parent :meth:`setUp` method.
 ---------------------
 
 :func:`as_op` is a Python decorator that converts a Python function into a
-basic Pytensor :class:`Op` that will call the supplied function during execution.
+basic PyTensor :class:`Op` that will call the supplied function during execution.
 
 This isn't the recommended way to build an :class:`Op`, but allows for a quick
 implementation.
@@ -774,7 +774,7 @@ signature:
 .. note::
 
     It converts the Python function to a callable object that takes as
-    inputs Pytensor variables that were declared.
+    inputs PyTensor variables that were declared.
 
 .. note::
     The python function wrapped by the :func:`as_op` decorator needs to return a new
@@ -842,7 +842,7 @@ Final Note
 ----------
 
 A more extensive discussion of this section's content may be found in
-the advanced tutorial :ref:`Extending Pytensor<extending>`.
+the advanced tutorial :ref:`Extending PyTensor<extending>`.
 
 The section :ref:`Other Ops <other_ops>` includes more instructions for
 the following specific cases:

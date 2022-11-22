@@ -146,9 +146,9 @@ def _atexit_print_fn():
 def print_global_stats():
     """
     Print the following stats:
-      -- Time elapsed since Pytensor was imported
-      -- Time spent inside Pytensor functions
-      -- Time spent in compiling Pytensor functions
+      -- Time elapsed since PyTensor was imported
+      -- Time spent inside PyTensor functions
+      -- Time spent in compiling PyTensor functions
            -- on graph rewriters
            -- on linker
     """
@@ -165,9 +165,9 @@ def print_global_stats():
         print(
             (
                 "Global stats: ",
-                f"Time elasped since Pytensor import = {time.time() - pytensor_imported_time:6.3f}s, "
-                f"Time spent in Pytensor functions = {total_fct_exec_time:6.3f}s, "
-                "Time spent compiling Pytensor functions: "
+                f"Time elasped since PyTensor import = {time.time() - pytensor_imported_time:6.3f}s, "
+                f"Time spent in PyTensor functions = {total_fct_exec_time:6.3f}s, "
+                "Time spent compiling PyTensor functions: "
                 f"rewriting = {total_graph_rewrite_time:6.3f}s, linking = {total_time_linker:6.3f}s ",
             ),
             file=destination_file,
@@ -186,7 +186,7 @@ def register_profiler_printer(fct):
 class ProfileStats:
     """
     Object to store runtime and memory profiling information for all of
-    Pytensor's operations: compilation, rewriting, execution.
+    PyTensor's operations: compilation, rewriting, execution.
 
     Parameters
     ----------
@@ -803,11 +803,11 @@ class ProfileStats:
                 )
         print(f"  Total compilation time: {self.compile_time:e}s", file=file)
         print(f"    Number of Apply nodes: {int(self.nb_nodes)}", file=file)
-        print(f"    Pytensor rewrite time: {self.rewriting_time:e}s", file=file)
-        print(f"       Pytensor validate time: {self.validate_time:e}s", file=file)
+        print(f"    PyTensor rewrite time: {self.rewriting_time:e}s", file=file)
+        print(f"       PyTensor validate time: {self.validate_time:e}s", file=file)
         print(
             (
-                "    Pytensor Linker time (includes C, CUDA code "
+                "    PyTensor Linker time (includes C, CUDA code "
                 f"generation/compiling): {self.linker_time}s"
             ),
             file=file,
@@ -990,7 +990,7 @@ class ProfileStats:
                     running_max_memory_size[1], running_memory_size[1]
                 )
 
-                # Mimic the combination of Pytensor and Python gc
+                # Mimic the combination of PyTensor and Python gc
                 for ins in set(node.inputs):
                     assert not (ins in view_of and viewed_by[ins])
                     # we trac the original var, so this shouldn't happen
@@ -1136,7 +1136,7 @@ class ProfileStats:
                     mem_count += mem_created
                     max_mem_count = max(max_mem_count, mem_count)
 
-                    # Mimic the combination of Pytensor and Python gc.
+                    # Mimic the combination of PyTensor and Python gc.
                     for ins in node.inputs:
                         assert not (ins in view_of and viewed_by[ins])
                         # We track of the original var, so this shouldn't
@@ -1347,7 +1347,7 @@ class ProfileStats:
         print("    Max peak memory with current setting", file=file)
         print_stats(stats[0], stats[2])
         print(
-            "    Max peak memory with current setting and Pytensor flag optimizer_excluding=inplace",
+            "    Max peak memory with current setting and PyTensor flag optimizer_excluding=inplace",
             file=file,
         )
         print_stats(stats[1], stats[3])
@@ -1582,7 +1582,7 @@ class ProfileStats:
         printed_tip = False
         # tip 1
         if config.floatX == "float64":
-            print("  - Try the Pytensor flag floatX=float32", file=file)
+            print("  - Try the PyTensor flag floatX=float32", file=file)
             printed_tip = True
 
         # tip 2
@@ -1590,7 +1590,7 @@ class ProfileStats:
             amdlibm_speed_up(a.op) for (fgraph, a) in self.apply_time
         ):
             print(
-                "  - Try installing amdlibm and set the Pytensor flag "
+                "  - Try installing amdlibm and set the PyTensor flag "
                 "lib__amblibm=True. This speeds up only some Elemwise "
                 "operation.",
                 file=file,
@@ -1604,7 +1604,7 @@ class ProfileStats:
         ):
             print(
                 "  - With the default gcc libm, exp in float32 is slower "
-                "than in float64! Try Pytensor flag floatX=float64, or "
+                "than in float64! Try PyTensor flag floatX=float64, or "
                 "install amdlibm and set the pytensor flags lib__amblibm=True",
                 file=file,
             )

@@ -815,7 +815,7 @@ def test_infer_broadcastable():
 # This is slow for the ('int8', 3) version.
 def test_eye():
     def check(dtype, N, M_=None, k=0):
-        # Pytensor does not accept None as a tensor.
+        # PyTensor does not accept None as a tensor.
         # So we must use a real value.
         M = M_
         # Currently DebugMode does not support None as inputs even if this is
@@ -849,7 +849,7 @@ def test_eye():
 class TestTriangle:
     def test_tri(self):
         def check(dtype, N, M_=None, k=0):
-            # Pytensor does not accept None as a tensor.
+            # PyTensor does not accept None as a tensor.
             # So we must use a real value.
             M = M_
             # Currently DebugMode does not support None as inputs even if this is
@@ -1668,7 +1668,7 @@ class TestJoinAndSplit:
         assert c.type.shape[0] == 1 and c.type.shape[2] == 1
         assert c.type.shape[1] != 1
 
-        # Opt can remplace the int by an Pytensor constant
+        # Opt can remplace the int by an PyTensor constant
         c = self.join_op(constant(1), a, b)
         assert c.type.shape[0] == 1 and c.type.shape[2] == 1
         assert c.type.shape[1] != 1
@@ -3114,7 +3114,7 @@ def test_autocast_numpy_floatX():
     for floatX in ("float32", "float64"):
         # Go through some typical scalar values.
         # We only consider 'int' and 'long' Python values that can fit
-        # into int64, as that is the maximal integer type that Pytensor
+        # into int64, as that is the maximal integer type that PyTensor
         # supports, and that is the maximal type in Python indexing.
         for x in (
             [2**i - 1 for i in range(64)]

@@ -14,7 +14,7 @@ from pytensor.tensor.type import fvector, scalars
 
 
 class TestProfiling:
-    # Test of Pytensor profiling with min_peak_memory=True
+    # Test of PyTensor profiling with min_peak_memory=True
 
     def test_profiling(self):
 

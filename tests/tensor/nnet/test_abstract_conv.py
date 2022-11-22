@@ -1577,7 +1577,7 @@ class TestConvTypes:
 
 
 class TestBilinearUpsampling:
-    # If config.blas__ldflags is empty, Pytensor will use
+    # If config.blas__ldflags is empty, PyTensor will use
     # a NumPy C implementation of [sd]gemm_.
     compile_mode = pytensor.compile.mode.get_default_mode()
     if config.mode == "FAST_COMPILE":

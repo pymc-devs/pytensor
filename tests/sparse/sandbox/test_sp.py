@@ -117,7 +117,7 @@ class TestSP:
 
     #            print '**** Convolution Profiling Results (',mode,') ****'
     #            print 'Numpy processing time: ', ntot
-    #            print 'Pytensor processing time: ', ttot
+    #            print 'PyTensor processing time: ', ttot
 
     # this doesn't compare the output of anything... but I manually verified that the patches
     # are properly generated

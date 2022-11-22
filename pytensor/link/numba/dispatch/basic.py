@@ -321,7 +321,7 @@ def numba_typify(data, dtype=None, **kwargs):
 
 @singledispatch
 def numba_funcify(op, node=None, storage_map=None, **kwargs):
-    """Create a Numba compatible function from an Pytensor `Op`."""
+    """Create a Numba compatible function from an PyTensor `Op`."""
 
     warnings.warn(
         f"Numba will use object mode to run {op}'s perform method",

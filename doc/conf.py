@@ -69,8 +69,8 @@ source_suffix = ".rst"
 master_doc = "index"
 
 # General substitutions.
-project = "Pytensor"
-copyright = "Pytensor Developers, 2021; PyMC Developers, 2020-2021; 2008--2019, LISA lab"
+project = "PyTensor"
+copyright = "PyTensor Developers, 2021; PyMC Developers, 2020-2021; 2008--2019, LISA lab"
 
 # The default replacements for |version| and |release|, also used in various
 # other places throughout the built documents.
@@ -255,7 +255,7 @@ latex_elements = {
 # (source start file, target name, title, author, document class
 # [howto/manual]).
 latex_documents = [
-    ("index", "pytensor.tex", "Pytensor Documentation", "Pytensor Developers", "manual"),
+    ("index", "pytensor.tex", "PyTensor Documentation", "PyTensor Developers", "manual"),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of

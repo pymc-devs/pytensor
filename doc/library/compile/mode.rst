@@ -16,7 +16,7 @@ Guide
 The ``mode`` parameter to :func:`pytensor.function` controls how the
 inputs-to-outputs graph is transformed into a callable object.
 
-Pytensor defines the following modes by name:
+PyTensor defines the following modes by name:
 
 - ``'FAST_COMPILE'``: Apply just a few graph rewrites and only use Python implementations.
 - ``'FAST_RUN'``: Apply all rewrites, and use C implementations where possible.

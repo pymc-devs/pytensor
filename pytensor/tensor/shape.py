@@ -24,14 +24,14 @@ from pytensor.tensor.var import TensorConstant, TensorVariable
 
 def register_shape_c_code(type, code, version=()):
     """
-    Tell Shape Op how to generate C code for an Pytensor Type.
+    Tell Shape Op how to generate C code for an PyTensor Type.
 
     Parameters
     ----------
-    typ : Pytensor type
-        It must be the Pytensor class itself and not an instance of the class.
+    typ : PyTensor type
+        It must be the PyTensor class itself and not an instance of the class.
     code : C code
-        Returns a vector representing the shape for the Pytensor type 'typ'.
+        Returns a vector representing the shape for the PyTensor type 'typ'.
         Use %(iname)s and %(oname)s for the input and output C variable names
         respectively.
     version
@@ -218,7 +218,7 @@ class Shape_i(COp):
     #    loop in Python import caused by importing pytensor.scalar below
     #    when params_type is defined directly in class code.
     # 2) We wrap scalar into ParamsType (instead of directly using scalar as op param)
-    #    to avoid Pytensor converting scalar param to constant that would be later
+    #    to avoid PyTensor converting scalar param to constant that would be later
     #    hardcoded as literal in C code, making us loose all the advantages of
     #    using params.
     @property
@@ -358,14 +358,14 @@ shape_i_op.cache = {}
 
 def register_shape_i_c_code(typ, code, check_input, version=()):
     """
-    Tell Shape_i how to generate C code for an Pytensor Type.
+    Tell Shape_i how to generate C code for an PyTensor Type.
 
     Parameters
     ----------
-    typ : Pytensor type
-        It must be the Pytensor class itself and not an instance of the class.
+    typ : PyTensor type
+        It must be the PyTensor class itself and not an instance of the class.
     code : C code
-        Gets the shape of dimensions %(i)s for the Pytensor type 'typ'.
+        Gets the shape of dimensions %(i)s for the PyTensor type 'typ'.
         Use %(iname)s and %(oname)s for the input and output C variable names
         respectively.
     version
@@ -565,7 +565,7 @@ def specify_shape(
                 raise ValueError("Shape vector must have fixed dimensions")
 
     # If the specified shape is already encoded in the input static shape, do nothing
-    # This ignores Pytensor constants in shape
+    # This ignores PyTensor constants in shape
     x = at.as_tensor_variable(x)
     new_shape_info = any(
         s != xts for (s, xts) in zip(shape, x.type.shape) if s is not None
@@ -790,7 +790,7 @@ def reshape(x, newshape, ndim=None):
         except ValueError:
             raise ValueError(
                 f"The length of the provided shape ({newshape}) cannot "
-                "be automatically determined, so Pytensor is not able "
+                "be automatically determined, so PyTensor is not able "
                 "to know what the number of dimensions of the reshaped "
                 "variable will be. You can provide the 'ndim' keyword "
                 "argument to 'reshape' to avoid this problem."

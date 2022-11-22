@@ -2,7 +2,7 @@
 .. _extend_faq:
 
 ===========================================
-Extending Pytensor: FAQ and Troubleshooting
+Extending PyTensor: FAQ and Troubleshooting
 ===========================================
 
 I wrote a new `Op`\/`Type`, and weird stuff is happening...

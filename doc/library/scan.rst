@@ -2,7 +2,7 @@
 .. _lib_scan:
 
 ==================================
-:mod:`scan` -- Looping in Pytensor
+:mod:`scan` -- Looping in PyTensor
 ==================================
 
 
@@ -10,7 +10,7 @@ Guide
 =====
 
 The scan functions provides the basic functionality needed to do loops
-in Pytensor. Scan comes with many whistles and bells, which we will introduce
+in PyTensor. Scan comes with many whistles and bells, which we will introduce
 by way of examples.
 
 
@@ -33,7 +33,7 @@ the unchanging variable ``A``. Unchanging variables are passed to scan as
 ``non_sequences``. Initialization occurs in ``outputs_info``, and the accumulation
 happens automatically.
 
-The equivalent Pytensor code would be:
+The equivalent PyTensor code would be:
 
 .. testcode::
 
@@ -242,7 +242,7 @@ with all values set to zero except at the provided array indices.
       [  0.   0.   0.   0.   0.]
       [  0.   0.   0.   0.   0.]]]
 
-This demonstrates that you can introduce new Pytensor variables into a scan function.
+This demonstrates that you can introduce new PyTensor variables into a scan function.
 
 
 .. _lib_scan_shared_variables:
@@ -407,7 +407,7 @@ Using the original Gibbs sampling example, with ``strict=True`` added to the
     ...
     MissingInputError: An input of the graph, used to compute
     DimShuffle{1,0}(<TensorType(float64, (?, ?))>), was not provided and
-    not given a value.Use the Pytensor flag exception_verbosity='high',for
+    not given a value.Use the PyTensor flag exception_verbosity='high',for
     more information on this error.
 
 The error indicates that ``OneStep`` relies on variables that are not passed
@@ -483,7 +483,7 @@ for the variables representing the different time taps to be in the same order
 as the one in which these taps are given. Also, not only taps should respect
 an order, but also variables, since this is how scan figures out what should
 be represented by what. Given that we have all
-the Pytensor variables needed we construct our RNN as follows :
+the PyTensor variables needed we construct our RNN as follows :
 
 .. testcode:: scan3
 
@@ -582,7 +582,7 @@ Before going more into the details, here are its current limitations:
   other words, ``taps`` can not be used in ``sequences`` and ``outputs_info``.
 
 Often, in order to be able to compute the gradients through scan operations,
-Pytensor needs to keep in memory some intermediate computations of scan. This
+PyTensor needs to keep in memory some intermediate computations of scan. This
 can sometimes use a prohibitively large amount of memory.
 ``scan_checkpoints`` allows to discard some of those intermediate steps and
 recompute them again when computing the gradients. Its ``save_every_N`` argument
@@ -597,7 +597,7 @@ is similar to the classic ``scan`` function.
 Improving Scan's performance
 ----------------------------
 
-This section covers some ways to improve performance of an Pytensor function
+This section covers some ways to improve performance of an PyTensor function
 using Scan.
 
 
@@ -633,7 +633,7 @@ improve performance at the cost of increased memory usage. By default, Scan
 reuses memory between iterations of the same execution but frees the memory
 after the last iteration.
 
-There are two ways to achieve this, using the Pytensor flag
+There are two ways to achieve this, using the PyTensor flag
 ``config.scan__allow_gc`` and setting it to False, or using the argument
 ``allow_gc`` of the function pytensor.scan() and set it to False (when a value
 is not provided for this argument, the value of the flag
@@ -643,19 +643,19 @@ is not provided for this argument, the value of the flag
 Graph Rewrites
 ^^^^^^^^^^^^^^
 
-This one is simple but still worth pointing out. Pytensor is able to
+This one is simple but still worth pointing out. PyTensor is able to
 automatically recognize and rewrite many computation patterns. However, there
-are patterns that Pytensor doesn't rewrite because doing so would change the
+are patterns that PyTensor doesn't rewrite because doing so would change the
 user interface (such as merging shared variables together into a single one,
-for instance). Additionally, Pytensor doesn't catch every case that it could
+for instance). Additionally, PyTensor doesn't catch every case that it could
 rewrite and so it remains useful for performance that the user defines an
 efficient graph in the first place. This is also the case, and sometimes even
 more so, for the graph inside of Scan. This is because it will be executed
-many times for every execution of the Pytensor function that contains it.
+many times for every execution of the PyTensor function that contains it.
 
 The `LSTM tutorial <http://deeplearning.net/tutorial/lstm.html>`_ on
 `DeepLearning.net <http://deeplearning.net>`_ provides an example of a
-rewrite that Pytensor cannot perform. Instead of performing many matrix
+rewrite that PyTensor cannot perform. Instead of performing many matrix
 multiplications between matrix :math:`x_t` and each of the shared matrices
 :math:`W_i`, :math:`W_c`, :math:`W_f` and :math:`W_o`, the matrices
 :math:`W_*`, are merged into a single shared matrix :math:`W` and the graph

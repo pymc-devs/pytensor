@@ -105,7 +105,7 @@ class _tensor_py_operators:
         try:
             return at.math.add(self, other)
         # We should catch the minimum number of exception here.
-        # Otherwise this will convert error when Pytensor flags
+        # Otherwise this will convert error when PyTensor flags
         # compute_test_value is used
         # Evidently, we need to catch NotImplementedError
         # TypeError from as_tensor_variable are caught in Elemwise.make_node
@@ -282,9 +282,9 @@ class _tensor_py_operators:
     # TODO: We could use `get_vector_length` and let it raise an exception just like
     # `__iter__` does
     # def __len__(self):
-    #     raise Exception("Pytensor Variables can't work with len(Pytensor "
+    #     raise Exception("PyTensor Variables can't work with len(PyTensor "
     #                     "Variable) due to Python restriction. You can use "
-    #                     "PytensorVariable.shape[0] instead.")
+    #                     "PyTensorVariable.shape[0] instead.")
 
     def reshape(self, shape, ndim=None):
         """Return a reshaped view/copy of this variable.
@@ -295,7 +295,7 @@ class _tensor_py_operators:
             Something that can be converted to a symbolic vector of integers.
         ndim
             The length of the shape. Passing None here means for
-            Pytensor to try and guess the length of `shape`.
+            PyTensor to try and guess the length of `shape`.
 
 
         .. warning:: This has a different signature than numpy's
@@ -483,7 +483,7 @@ class _tensor_py_operators:
                 # Python arrays can contain a mixture of bools and integers,
                 # which requires complex rules to handle all special cases.
                 # These rules differ slightly between NumPy versions.
-                # Since earlier versions of Pytensor did not support any boolean
+                # Since earlier versions of PyTensor did not support any boolean
                 # indexing, it is safe to throw an error if we encounter
                 # any of these difficult cases.
                 if includes_bool(arg):
@@ -552,7 +552,7 @@ class _tensor_py_operators:
         else:
             if np.newaxis in args or NoneConst in args:
                 # `np.newaxis` (i.e. `None`) in NumPy indexing mean "add a new
-                # broadcastable dimension at this location".  Since Pytensor adds
+                # broadcastable dimension at this location".  Since PyTensor adds
                 # new broadcastable dimensions via the `DimShuffle` `Op`, the
                 # following code uses said `Op` to add one of the new axes and
                 # then uses recursion to apply any other indices and add any
@@ -753,7 +753,7 @@ class _tensor_py_operators:
     def trace(self):
         return at.linalg.trace(self)
 
-    # This value is set so that Pytensor arrays will trump NumPy operators.
+    # This value is set so that PyTensor arrays will trump NumPy operators.
     __array_priority__ = 1000
 
     def get_scalar_constant_value(self):
@@ -835,7 +835,7 @@ class TensorVariable(
             msg = (
                 "You are creating a TensorVariable "
                 "with float64 dtype. You requested an action via "
-                "the Pytensor flag warn_float64={ignore,warn,raise,pdb}."
+                "the PyTensor flag warn_float64={ignore,warn,raise,pdb}."
             )
             if config.warn_float64 == "warn":
                 # Get the user stack. We don't want function inside the

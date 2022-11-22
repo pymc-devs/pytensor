@@ -132,7 +132,7 @@ def indices_from_subtensor(
 def as_index_constant(
     a: Optional[Union[slice, int, np.integer, Variable]]
 ) -> Optional[Union[Variable, slice]]:
-    r"""Convert Python literals to Pytensor constants--when possible--in `Subtensor` arguments.
+    r"""Convert Python literals to PyTensor constants--when possible--in `Subtensor` arguments.
 
     This will leave `Variable`\s untouched.
     """
@@ -634,7 +634,7 @@ def get_constant_idx(
 
     Examples
     --------
-    Example usage where `v` and `a` are appropriately typed Pytensor variables :
+    Example usage where `v` and `a` are appropriately typed PyTensor variables :
     >>> b = a[v, 1:3]
     >>> b.owner.op.idx_list
     (ScalarType(int64), slice(ScalarType(int64), ScalarType(int64), None))
@@ -1290,7 +1290,7 @@ def inc_subtensor(
     y
         The amount by which to increment the array.
     inplace
-        Don't use. Pytensor will do in-place operations itself, when possible.
+        Don't use. PyTensor will do in-place operations itself, when possible.
     set_instead_of_inc
         If True, do a set_subtensor instead.
     tolerate_inplace_aliasing:
@@ -1909,7 +1909,7 @@ def _sum_grad_over_bcasted_dims(x, gx):
             if gx.broadcastable[i] is False and x_broad[i] is True:
                 axis_to_sum.append(i)
             elif gx.broadcastable[i] is True and x_broad[i] is False:
-                # This means that Pytensor was able to infer that
+                # This means that PyTensor was able to infer that
                 # gx.shape[i] is 1, so x.shape[i] is 1, but we
                 # didn't know it. It is fine.
                 pass

@@ -6,7 +6,7 @@
 API Documentation
 =================
 
-This documentation covers Pytensor module-wise.  This is suited to finding the
+This documentation covers PyTensor module-wise.  This is suited to finding the
 Types and Ops that you can use to build and compile expression graphs.
 
 Modules
@@ -33,7 +33,7 @@ Modules
 
 .. module:: pytensor
    :platform: Unix, Windows
-   :synopsis: Pytensor top-level import
+   :synopsis: PyTensor top-level import
 .. moduleauthor:: LISA
 
 There are also some top-level imports that you might find more convenient:

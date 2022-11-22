@@ -433,7 +433,7 @@ def test_grad_inrange():
         # bound.
         # Mathematically we should have an infinite gradient when
         # x is equal to the lower or higher bound but in that case
-        # Pytensor defines the gradient to be zero for stability.
+        # PyTensor defines the gradient to be zero for stability.
         f = pytensor.function([x, low, high], [gx, glow, ghigh])
         utt.assert_allclose(f(0, 1, 5), [0, 0, 0])
         utt.assert_allclose(f(1, 1, 5), [0, 0, 0])
@@ -447,7 +447,7 @@ def test_grad_abs():
     b = 0.5 * (a + pytensor.tensor.abs(a))
     c = pytensor.grad(b, a)
     f = pytensor.function([a], c, mode=Mode(optimizer=None))
-    # Currently Pytensor return 0.5, but it isn't sure it won't change
+    # Currently PyTensor return 0.5, but it isn't sure it won't change
     # in the futur.
     ret = f(0.0)
     assert ret == 0.5, ret

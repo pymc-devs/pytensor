@@ -1,7 +1,7 @@
 .. _tut_multi_cores:
 
 ===============================
-Multi cores support in Pytensor
+Multi cores support in PyTensor
 ===============================
 
 Convolution and Pooling
@@ -19,9 +19,9 @@ between vector/matrix and matrix/matrix). Many different
 implementations of that interface exist and some of them are
 parallelized.
 
-Pytensor tries to use that interface as frequently as possible for
-performance reasons. So if Pytensor links to a parallel implementation,
-those operations will run in parallel in Pytensor.
+PyTensor tries to use that interface as frequently as possible for
+performance reasons. So if PyTensor links to a parallel implementation,
+those operations will run in parallel in PyTensor.
 
 The most frequent way to control the number of threads used is via the
 ``OMP_NUM_THREADS`` environment variable. Set it to the number of

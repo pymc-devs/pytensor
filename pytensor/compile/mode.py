@@ -38,12 +38,12 @@ _logger = logging.getLogger("pytensor.compile.mode")
 # Mode, it will be used as the key to retrieve the real linker in this
 # dictionary
 predefined_linkers = {
-    "py": PerformLinker(),  # Use allow_gc Pytensor flag
+    "py": PerformLinker(),  # Use allow_gc PyTensor flag
     "c": CLinker(),  # Don't support gc. so don't check allow_gc
-    "c|py": OpWiseCLinker(),  # Use allow_gc Pytensor flag
+    "c|py": OpWiseCLinker(),  # Use allow_gc PyTensor flag
     "c|py_nogc": OpWiseCLinker(allow_gc=False),
-    "vm": VMLinker(use_cloop=False),  # Use allow_gc Pytensor flag
-    "cvm": VMLinker(use_cloop=True),  # Use allow_gc Pytensor flag
+    "vm": VMLinker(use_cloop=False),  # Use allow_gc PyTensor flag
+    "cvm": VMLinker(use_cloop=True),  # Use allow_gc PyTensor flag
     "vm_nogc": VMLinker(allow_gc=False, use_cloop=False),
     "cvm_nogc": VMLinker(allow_gc=False, use_cloop=True),
     "jax": JAXLinker(),

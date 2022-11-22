@@ -5,7 +5,7 @@
 Overview of the compilation pipeline
 ====================================
 
-Once one has an Pytensor graph, they can use :func:`pytensor.function` to compile a
+Once one has an PyTensor graph, they can use :func:`pytensor.function` to compile a
 function that will perform the computations modeled by the graph in Python, C,
 Numba, or JAX.
 
@@ -80,7 +80,7 @@ case if ``borrow`` was True, the thunk would be allowed to reuse--or
     Compiled libraries are stored within a specific compilation directory,
     which by default is set to ``$HOME/.pytensor/compiledir_xxx``, where
     ``xxx`` identifies the platform (under Windows the default location
-    is instead ``$LOCALAPPDATA\Pytensor\compiledir_xxx``). It may be manually set
+    is instead ``$LOCALAPPDATA\PyTensor\compiledir_xxx``). It may be manually set
     to a different location either by setting :attr:`config.compiledir` or
     :attr:`config.base_compiledir`, either within your Python script or by
     using one of the configuration mechanisms described in :mod:`config`.
@@ -88,9 +88,9 @@ case if ``borrow`` was True, the thunk would be allowed to reuse--or
     The compile cache is based upon the C++ code of the graph to be compiled.
     So, if you change compilation configuration variables, such as
     :attr:`config.blas__ldflags`, you will need to manually remove your compile cache,
-    using ``Pytensor/bin/pytensor-cache clear``
+    using ``PyTensor/bin/pytensor-cache clear``
 
-    Pytensor also implements a lock mechanism that prevents multiple compilations
+    PyTensor also implements a lock mechanism that prevents multiple compilations
     within the same compilation directory (to avoid crashes with parallel
     execution of some scripts).
 

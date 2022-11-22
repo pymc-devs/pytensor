@@ -31,7 +31,7 @@ from pytensor.tensor.rewriting.shape import ShapeFeature
 
 def infer_shape(outs, inputs, input_shapes):
     """
-    Compute the shape of the outputs given the shape of the inputs of an Pytensor
+    Compute the shape of the outputs given the shape of the inputs of an PyTensor
     graph.
 
     We do it this way to avoid compiling the inner function just to get
@@ -879,7 +879,7 @@ class OpFromGraph(Op, HasInnerGraph):
         # Here we could do it more simply like:
         # `ret = [pytensor.clone_replace(shp, replace=repl) for shp in out_shp]`
         # But doing it multiple time could duplicate common subgraph between
-        # each shape call. Pytensor optimizer will clean this up later, but this
+        # each shape call. PyTensor optimizer will clean this up later, but this
         # will make extra work for the optimizer.
 
         repl = dict(zip(self.inner_inputs, node.inputs))

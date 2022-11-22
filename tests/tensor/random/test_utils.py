@@ -67,7 +67,7 @@ def test_broadcast_params():
     assert np.array_equal(res[0], mean)
     assert np.array_equal(res[1], np.broadcast_to(cov, (3, 1, 1)))
 
-    # Try it in Pytensor
+    # Try it in PyTensor
     with config.change_flags(compute_test_value="raise"):
         mean = tensor(config.floatX, shape=(None, 1))
         mean.tag.test_value = np.array([[0], [10], [100]], dtype=config.floatX)

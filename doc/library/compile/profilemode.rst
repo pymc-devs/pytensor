@@ -3,13 +3,13 @@
 .. _profilemode:
 
 ==================================================
-:mod:`profilemode` -- profiling Pytensor functions
+:mod:`profilemode` -- profiling PyTensor functions
 ==================================================
 
 
 .. module:: pytensor.compile.profilemode
    :platform: Unix, Windows
-   :synopsis: profiling Pytensor functions with ProfileMode
+   :synopsis: profiling PyTensor functions with ProfileMode
 .. moduleauthor:: LISA
 
 Guide

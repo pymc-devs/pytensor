@@ -16,9 +16,9 @@ This is a good way to make sure that proposed changes will be accepted.
 Resources
 =========
 
-See :ref:`pytensor-community` for a list of Pytensor resources.
+See :ref:`pytensor-community` for a list of PyTensor resources.
 
-The Theano Google group is also relevant to (early) Pytensor versions:
+The Theano Google group is also relevant to (early) PyTensor versions:
 `theano-dev`_.
 
 .. _theano-dev: https://groups.google.com/group/theano-dev
@@ -100,7 +100,7 @@ Here is an example on how to add a docstring to a class.
         See Also
         --------
         `Elemwise`: This functionality is already available; just execute
-        ``x * 2`` with ``x`` being an Pytensor variable.
+        ``x * 2`` with ``x`` being an PyTensor variable.
         """
 
         def make_node(self, x: Variable):
@@ -119,10 +119,10 @@ Installation and configuration
 ==============================
 
 To submit PRs, create an account on `GitHub <http://www.github.com/>`_ and fork
-`Pytensor <http://www.github.com/pymc-devs/pytensor>`_.
+`PyTensor <http://www.github.com/pymc-devs/pytensor>`_.
 
-This will create your own clone of the Pytensor project on GitHub's servers. It is customary
-to assign this Git remote the name "origin", and the official Pytensor repository
+This will create your own clone of the PyTensor project on GitHub's servers. It is customary
+to assign this Git remote the name "origin", and the official PyTensor repository
 the name "upstream".
 
 
@@ -133,14 +133,14 @@ Clone your fork locally with
 
 .. code-block:: bash
 
-    git clone git@github.com:YOUR_GITHUB_LOGIN/Pytensor.git
+    git clone git@github.com:YOUR_GITHUB_LOGIN/PyTensor.git
 
 For this URL to work, you must set your public SSH keys inside your
 `GitHub account setting <https://github.com/settings/ssh>`_.
 
 From your local repository, your fork on GitHub will be called "origin" by default.
 
-Next, create a remote entry for the original (i.e. upstream) Pytensor repository
+Next, create a remote entry for the original (i.e. upstream) PyTensor repository
 with the following:
 
 .. code-block:: bash
@@ -149,7 +149,7 @@ with the following:
 
 .. note::
 
-    You can choose a name other than "upstream" to reference the official Pytensor
+    You can choose a name other than "upstream" to reference the official PyTensor
     repository.
 
 Setting up the your local development environment
@@ -180,7 +180,7 @@ checks are performed before each commit:
 
 
 The virtual environment will need to be activated in any environment
-(e.g. shells, IDEs, etc.) that plans to run the Pytensor tests or add commits to the
+(e.g. shells, IDEs, etc.) that plans to run the PyTensor tests or add commits to the
 project repository.
 
 You can now test your environment/code by running ``pytest`` in the project's root

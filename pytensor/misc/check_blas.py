@@ -21,8 +21,8 @@ from pytensor.tensor.math import dot
 
 def execute(execute=True, verbose=True, M=2000, N=2000, K=2000, iters=10, order="C"):
     """
-    :param execute: If True, execute an Pytensor function that should call gemm.
-    :param verbose: If True, will print some Pytensor flags and env variables.
+    :param execute: If True, execute an PyTensor function that should call gemm.
+    :param verbose: If True, will print some PyTensor flags and env variables.
     :param M,N,K: The M,N,K size used by gemm.
     :param iters: The number of calls to gemm to do.
 
@@ -31,7 +31,7 @@ def execute(execute=True, verbose=True, M=2000, N=2000, K=2000, iters=10, order=
     """
 
     if verbose:
-        print("Some Pytensor flags:")
+        print("Some PyTensor flags:")
         print("    blas__ldflags=", config.blas__ldflags)
         print("    compiledir=", config.compiledir)
         print("    floatX=", config.floatX)
@@ -45,7 +45,7 @@ def execute(execute=True, verbose=True, M=2000, N=2000, K=2000, iters=10, order=
         print("    OMP_NUM_THREADS=", os.getenv("OMP_NUM_THREADS"))
         print("    GOTO_NUM_THREADS=", os.getenv("GOTO_NUM_THREADS"))
         print()
-        print("Numpy config: (used when the Pytensor flag" ' "blas__ldflags" is empty)')
+        print("Numpy config: (used when the PyTensor flag" ' "blas__ldflags" is empty)')
         np.show_config()
         print("Numpy dot module:", np.dot.__module__)
         print("Numpy location:", np.__file__)
@@ -64,11 +64,11 @@ def execute(execute=True, verbose=True, M=2000, N=2000, K=2000, iters=10, order=
         ]
         assert len(c_impl) == 1
         if c_impl[0]:
-            impl = "CPU (with direct Pytensor binding to blas)"
+            impl = "CPU (with direct PyTensor binding to blas)"
         else:
-            impl = "CPU (without direct Pytensor binding to blas but with numpy/scipy binding to blas)"
+            impl = "CPU (without direct PyTensor binding to blas but with numpy/scipy binding to blas)"
     else:
-        impl = "ERROR, unable to tell if Pytensor used the cpu:\n"
+        impl = "ERROR, unable to tell if PyTensor used the cpu:\n"
         impl += str(f.maker.fgraph.toposort())
 
     t0 = 0

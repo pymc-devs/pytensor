@@ -16,7 +16,7 @@ T = TypeVar("T", bound=Type)
 class CType(Type[D], CLinkerType):
     """Convenience wrapper combining `Type` and `CLinkerType`.
 
-    Pytensor comes with several subclasses of such as:
+    PyTensor comes with several subclasses of such as:
 
     - `Generic`: for any python type
 
@@ -65,7 +65,7 @@ class Generic(CType, Singleton):
     It can be used to easily expose Python objects to `COp`\s.
 
     For example, ``obj_const = Constant(Generic(), my_obj)`` will construct
-    an Pytensor constant that can be used to access the Python object ``my_obj``
+    an PyTensor constant that can be used to access the Python object ``my_obj``
     directly in a `COp` (e.g. as a ``PyObject *``).
 
     """
@@ -142,7 +142,7 @@ class CDataType(CType[D]):
         have a `void` return and take a single pointer argument.
 
     version
-        The version to use in Pytensor cache system.
+        The version to use in PyTensor cache system.
     """
 
     __props__ = (
@@ -573,7 +573,7 @@ class EnumType(CType, dict):
 
             int pytensor_enum_to_string_<cname>(<ctype> value, char* output_string);
 
-        Where ``ctype`` and ``cname`` are the C type and the C name of current Pytensor enumeration.
+        Where ``ctype`` and ``cname`` are the C type and the C name of current PyTensor enumeration.
 
         ``output_string`` should be large enough to contain the longest name in this enumeration.
 

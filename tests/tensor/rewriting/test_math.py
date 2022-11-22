@@ -3656,7 +3656,7 @@ class TestLocalReduce:
         topo = f.maker.fgraph.toposort()
         assert isinstance(topo[-1].op, Elemwise)
 
-        # Test a case that was bugged in a old Pytensor bug
+        # Test a case that was bugged in a old PyTensor bug
         f = function([], at_sum(at.stack([A, A]), axis=1), mode=self.mode)
 
         utt.assert_allclose(f(), [15, 15])
@@ -4379,7 +4379,7 @@ class TestSigmoidRewrites:
         """Test the core function doing the `sigm_times_exp` rewrite.
 
         It is easier to test different graph scenarios this way than by
-        compiling an Pytensor function.
+        compiling an PyTensor function.
         """
 
         x, y, z, t = vectors("x", "y", "z", "t")

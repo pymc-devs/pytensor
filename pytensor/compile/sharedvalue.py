@@ -1,5 +1,5 @@
 """
-Provide a simple user friendly API to Pytensor-managed memory.
+Provide a simple user friendly API to PyTensor-managed memory.
 
 """
 
@@ -183,15 +183,15 @@ class SharedVariable(Variable):
         # __getitem__ is not available for generic SharedVariable objects.
         # We raise a TypeError like Python would do if __getitem__ was not
         # implemented at all, but with a more explicit error message to help
-        # Pytensor users figure out the root of the problem more easily.
+        # PyTensor users figure out the root of the problem more easily.
         value = self.get_value(borrow=True)
         if isinstance(value, np.ndarray):
             # Array probably had an unknown dtype.
             msg = (
                 f"a Numpy array with dtype: '{value.dtype}'. This data type is not "
-                "currently recognized by Pytensor tensors: please cast "
+                "currently recognized by PyTensor tensors: please cast "
                 "your data into a supported numeric type if you need "
-                "Pytensor tensor functionalities."
+                "PyTensor tensor functionalities."
             )
         else:
             msg = (

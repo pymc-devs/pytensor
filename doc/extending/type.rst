@@ -5,10 +5,10 @@
 ===============
 
 The :class:`Type` class is used to provide "static" information about the types of
-:class:`Variable`\s in an Pytensor graph.  This information is used for graph rewrites
+:class:`Variable`\s in an PyTensor graph.  This information is used for graph rewrites
 and compilation to languages with typing that's stricter than Python's.
 
-The types handled by Pytensor naturally overlap a lot with NumPy, but
+The types handled by PyTensor naturally overlap a lot with NumPy, but
 they also differ from it in some very important ways.  In the following, we use
 :class:`TensorType` to illustrate some important concepts and functionality
 regarding :class:`Type`, because it's the most common and feature rich subclass of
@@ -19,7 +19,7 @@ to any other graph objects modeled by a :class:`Type` subclass.
 The :class:`TensorType`
 -----------------------
 
-Pytensor has a :class:`Type` subclass for tensors/arrays called :class:`TensorType`.
+PyTensor has a :class:`Type` subclass for tensors/arrays called :class:`TensorType`.
 It broadly represents a type for tensors, but, more specifically, all of its
 computations are performed using instances of the :class:`numpy.ndarray` class, so it
 effectively represents the same objects as :class:`numpy.ndarray`.
@@ -37,13 +37,13 @@ be constructed using :meth:`TensorType.__call__`.  Just remember that
 Python class :class:`Type`.  The purpose is effectively the same, though:
 :class:`Type`\s provide high-level typing information and construct instances of
 the high-level types they model.  While Python types/classes do this for the Python
-VM, Pytensor :class:`Type`\s do this for its effective "VM".
+VM, PyTensor :class:`Type`\s do this for its effective "VM".
 
-In relation to NumPy, the important difference is that Pytensor works at the
+In relation to NumPy, the important difference is that PyTensor works at the
 symbolic level, and, because of that, there are no concrete array instances with
 which it can call the :attr:`dtype` and :attr:`shape`
 methods and get information about the data type or shape of a symbolic
-variable.  Pytensor needs static class/type-level information to serve that purpose,
+variable.  PyTensor needs static class/type-level information to serve that purpose,
 and it can't use the :class:`numpy.ndarray` class itself, because that doesn't have
 fixed data types or shapes.
 
@@ -95,7 +95,7 @@ TensorType(float64, (2, ?))
 >>> v2.type
 TensorType(float64, (2, 1))
 
-If we ever wanted to replace ``v1`` in an Pytensor graph with ``v2``, we would first
+If we ever wanted to replace ``v1`` in an PyTensor graph with ``v2``, we would first
 need to check that they're "compatible".  This could be done by noticing that
 their shapes match everywhere except on the second dimension, where ``v1`` has the shape
 value ``None`` and ``v2`` has a ``1``.  Since ``None`` indicates "any" shape
@@ -162,10 +162,10 @@ both ``v1`` and ``v2``.
    under development.
 
 It's important to keep these special type comparisons in mind when developing custom
-:class:`Op`\s and graph rewrites in Pytensor, because simple naive comparisons
+:class:`Op`\s and graph rewrites in PyTensor, because simple naive comparisons
 like ``v1.type == v2.type`` may unnecessarily restrict logic and prevent
 more refined type information from propagating throughout a graph.  They may not
-cause errors, but they could prevent Pytensor from performing at its best.
+cause errors, but they could prevent PyTensor from performing at its best.
 
 
 .. _type_contract:
@@ -173,7 +173,7 @@ cause errors, but they could prevent Pytensor from performing at its best.
 :class:`Type`'s contract
 ========================
 
-In Pytensor's framework, a :class:`Type` is any object which defines the following
+In PyTensor's framework, a :class:`Type` is any object which defines the following
 methods. To obtain the default methods described below, the :class:`Type` should be an
 instance of `Type` or should be an instance of a subclass of `Type`. If you
 will write all methods yourself, you need not use an instance of `Type`.
@@ -277,7 +277,7 @@ default values.
         objects `a` and `b` could share memory. Return ``False``
         otherwise. It is used to debug when :class:`Op`\s did not declare memory
         aliasing between variables. Can be a static method.
-        It is highly recommended to use and is mandatory for :class:`Type` in Pytensor
+        It is highly recommended to use and is mandatory for :class:`Type` in PyTensor
         as our buildbot runs in `DebugMode`.
 
 
@@ -328,7 +328,7 @@ but will allow people to use you type with familiar interfaces.
 ~~~~~~~~~~
 
 To plug in additional options for the transfer target, define a
-function which takes an Pytensor variable and a target argument and
+function which takes an PyTensor variable and a target argument and
 returns eitehr a new transferred variable (which can be the same as
 the input if no transfer is necessary) or returns None if the transfer
 can't be done.
@@ -401,7 +401,7 @@ chose to be 1e-4.
 
 .. note::
 
-    ``values_eq`` is never actually used by Pytensor, but it might be used
+    ``values_eq`` is never actually used by PyTensor, but it might be used
     internally in the future. Equality testing in
     :ref:`DebugMode <debugmode>` is done using ``values_eq_approx``.
 
@@ -439,7 +439,7 @@ instances of `DoubleType` are technically the same :class:`Type`; however, diffe
 >>> double1 == double2
 False
 
-Pytensor compares :class:`Type`\s using ``==`` to see if they are the same.
+PyTensor compares :class:`Type`\s using ``==`` to see if they are the same.
 This happens in :class:`DebugMode`.  Also, :class:`Op`\s can (and should) ensure that their inputs
 have the expected :class:`Type` by checking something like
 ``x.type.is_super(lvector)`` or ``x.type.in_same_class(lvector)``.
@@ -458,7 +458,7 @@ There are several ways to make sure that equality testing works properly:
  #. Hide the :class:`DoubleType` class and only advertise a single instance of it.
 
 Here we will prefer the final option, because it is the simplest.
-:class:`Op`\s in the Pytensor code often define the :meth:`__eq__` method though.
+:class:`Op`\s in the PyTensor code often define the :meth:`__eq__` method though.
 
 
 Untangling some concepts
@@ -492,7 +492,7 @@ attempt to clear up the confusion:
   does not represent anything that one of its instances does not. In this
   case it is a singleton, a set with one element. However, the
   :class:`TensorType`
-  class in Pytensor (which is a subclass of :class:`Type`)
+  class in PyTensor (which is a subclass of :class:`Type`)
   represents a set of types of tensors
   parametrized by their data type or number of dimensions. We could say
   that subclassing :class:`Type` builds a hierarchy of :class:`Type`\s which is based upon

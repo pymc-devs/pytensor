@@ -763,12 +763,12 @@ def test_constant_folding():
 
 
 @pytest.mark.xfail(
-    reason="Pytensor rewrites constants before stabilization. "
+    reason="PyTensor rewrites constants before stabilization. "
     "This breaks stabilization rewrites in some cases. See #504.",
     raises=AssertionError,
 )
 def test_constant_get_stabilized():
-    # Currently Pytensor enables the `constant_folding` rewrite before stabilization rewrites.
+    # Currently PyTensor enables the `constant_folding` rewrite before stabilization rewrites.
     # This caused some stabilization rewrites to not be activated and that
     # caused inf values to appear when they should not.
 

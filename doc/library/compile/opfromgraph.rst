@@ -8,12 +8,12 @@
 
 This page describes :class:`pytensor.compile.builders.OpFromGraph
 <pytensor.compile.builders.OpFromGraph>`, an `Op` constructor that allows one to
-encapsulate an Pytensor graph in a single `Op`.
+encapsulate an PyTensor graph in a single `Op`.
 
 This can be used to encapsulate some functionality in one block. It is
-useful to scale Pytensor compilation for regular bigger graphs when we
+useful to scale PyTensor compilation for regular bigger graphs when we
 reuse that encapsulated functionality with different inputs many
-times. Due to this encapsulation, it can make Pytensor's compilation phase
+times. Due to this encapsulation, it can make PyTensor's compilation phase
 faster for graphs with many nodes.
 
 Using this for small graphs is not recommended as it disables

@@ -707,7 +707,7 @@ class TestPfunc:
 
 
 class TestAliasingRules:
-    # 1. Pytensor manages its own memory space, which typically does not overlap
+    # 1. PyTensor manages its own memory space, which typically does not overlap
     # with the memory of normal python variables that the user uses.
     #
     # 2. shared variables are allocated in this memory space, as are the
@@ -716,16 +716,16 @@ class TestAliasingRules:
     # 3. Physically, this managed memory space may be spread across the host,
     # on a GPU device(s), or even on a remote machine.
     #
-    # 4. Pytensor assumes that shared variables are never aliased to one another,
+    # 4. PyTensor assumes that shared variables are never aliased to one another,
     # and tries to make it impossible to accidentally alias them.
     #
-    # 5. Pytensor's managed data is constant while Pytensor Functions are not running
+    # 5. PyTensor's managed data is constant while PyTensor Functions are not running
     # and pytensor library code is not running.
     #
     # 6. The default behaviour of Function is to return user-space values for
     # outputs, but this can be overridden (borrow=True) for better performance,
     # in which case the returned value may be aliased to managed memory, and
-    # potentially invalidated by the next Pytensor Function call or call to pytensor
+    # potentially invalidated by the next PyTensor Function call or call to pytensor
     # library code.
 
     def shared(self, x):
@@ -958,7 +958,7 @@ class TestAliasingRules:
         z = np.zeros((2, 2))
         f(z)
         assert not np.may_share_memory(data_of(A), data_of(B))
-        # Pytensor tries to maintain its own memory space.
+        # PyTensor tries to maintain its own memory space.
         assert not np.may_share_memory(z, data_of(B))
         assert np.all(data_of(B) == z)
 

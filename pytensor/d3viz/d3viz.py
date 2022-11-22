@@ -1,4 +1,4 @@
-"""Dynamic visualization of Pytensor graphs.
+"""Dynamic visualization of PyTensor graphs.
 
 Author: Christof Angermueller <cangermueller@gmail.com>
 """
@@ -42,7 +42,7 @@ def safe_json(obj):
 
 
 def d3viz(fct, outfile, copy_deps=True, *args, **kwargs):
-    """Create HTML file with dynamic visualizing of an Pytensor function graph.
+    """Create HTML file with dynamic visualizing of an PyTensor function graph.
 
     In the HTML file, the whole graph or single nodes can be moved by drag and
     drop. Zooming is possible via the mouse wheel. Detailed information about
@@ -59,7 +59,7 @@ def d3viz(fct, outfile, copy_deps=True, *args, **kwargs):
     Parameters
     ----------
     fct : pytensor.compile.function.types.Function
-        A compiled Pytensor function, variable, apply or a list of variables.
+        A compiled PyTensor function, variable, apply or a list of variables.
     outfile : str
         Path to output HTML file.
     copy_deps : bool, optional
@@ -113,12 +113,12 @@ def d3viz(fct, outfile, copy_deps=True, *args, **kwargs):
 
 
 def d3write(fct, path, *args, **kwargs):
-    """Convert Pytensor graph to pydot graph and write to dot file.
+    """Convert PyTensor graph to pydot graph and write to dot file.
 
     Parameters
     ----------
     fct : pytensor.compile.function.types.Function
-        A compiled Pytensor function, variable, apply or a list of variables.
+        A compiled PyTensor function, variable, apply or a list of variables.
     path: str
         Path to output file
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Pytensor tutorial
+# PyTensor tutorial
 # Solution to Exercise in section 'Baby Steps - Algebra'
 
 

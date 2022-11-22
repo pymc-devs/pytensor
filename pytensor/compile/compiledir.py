@@ -165,12 +165,12 @@ def print_compiledir_content():
             except AttributeError:
                 _logger.error(f"Could not read key file '{filename}'.")
 
-    print_title(f"Pytensor cache: {compiledir}", overline="=", underline="=")
+    print_title(f"PyTensor cache: {compiledir}", overline="=", underline="=")
     print()
 
     print_title(f"List of {len(table)} compiled individual ops", underline="+")
     print_title(
-        "sub dir/compiletime/Op/set of different associated Pytensor types",
+        "sub dir/compiletime/Op/set of different associated PyTensor types",
         underline="-",
     )
     table = sorted(table, key=lambda t: str(t[1]))
@@ -182,7 +182,7 @@ def print_compiledir_content():
         f"List of {len(table_multiple_ops)} compiled sets of ops", underline="+"
     )
     print_title(
-        "sub dir/compiletime/Set of ops/set of different associated Pytensor types",
+        "sub dir/compiletime/Set of ops/set of different associated PyTensor types",
         underline="-",
     )
     table_multiple_ops = sorted(table_multiple_ops, key=lambda t: (t[1], t[2]))

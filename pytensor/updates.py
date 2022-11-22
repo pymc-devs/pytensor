@@ -48,7 +48,7 @@ class OrderedUpdates(OrderedDict):
         if isinstance(key, SharedVariable):
 
             # TODO: consider doing error-checking on value.
-            # insist that it is an Pytensor variable? Have the right type?
+            # insist that it is an PyTensor variable? Have the right type?
             # This could have weird consequences - for example a
 
             return super().__setitem__(key, value)

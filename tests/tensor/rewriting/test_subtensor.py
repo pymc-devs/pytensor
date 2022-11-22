@@ -1332,7 +1332,7 @@ class TestLocalSubtensorMerge:
         s2 = iscalar("s2")
 
         # Generate all possible lists of positions for None in those 6 slots
-        # A 1 indicates None is present, 0 that there is an Pytensor scalar.
+        # A 1 indicates None is present, 0 that there is an PyTensor scalar.
         none_positions = np.ndindex(2, 2, 2, 2, 2, 2)
 
         # Ranges to be used when not None
@@ -1393,7 +1393,7 @@ class TestLocalSubtensorMerge:
         i = iscalar("i")
 
         # Generate all possible lists of positions for None in those 6 slots
-        # A 1 indicates None is present, 0 that there is an Pytensor scalar.
+        # A 1 indicates None is present, 0 that there is an PyTensor scalar.
         # The last index (i) is never None
         none_positions = np.ndindex(2, 2, 2, 1)
 

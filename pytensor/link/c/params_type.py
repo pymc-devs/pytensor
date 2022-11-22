@@ -1,12 +1,12 @@
 """
 Module for wrapping many Op parameters into one object available in both Python and C code.
 
-The module provides the main public class :class:`ParamsType` that allows to bundle many Pytensor types
+The module provides the main public class :class:`ParamsType` that allows to bundle many PyTensor types
 into one parameter type, and an internal convenient class :class:`Params` which will be automatically
 used to create a Params object that is compatible with the ParamsType defined.
 
 The Params object will be available in both Python code (as a standard Python object) and C code
-(as a specific struct with parameters as struct fields). To be fully-available in C code, Pytensor
+(as a specific struct with parameters as struct fields). To be fully-available in C code, PyTensor
 types wrapped into a ParamsType must provide a C interface (e.g. TensorType, ScalarType,
 or your own type. See :ref:`extending_op_params` for more details).
 
@@ -21,7 +21,7 @@ Importation:
     from pytensor.link.c.params_type import ParamsType
 
     # If you want to use a tensor and a scalar as parameters,
-    # you should import required Pytensor types.
+    # you should import required PyTensor types.
     from pytensor.tensor.type import TensorType
     from pytensor.scalar import ScalarType
 
@@ -63,13 +63,13 @@ In ``c_code()`` implementation (with ``param = sub['params']``):
 See :class:`QuadraticOpFunc` and :class:`QuadraticCOpFunc` in ``pytensor/graph/tests/test_params_type.py``
 for complete working examples.
 
-Combining ParamsType with Pytensor enumeration types
+Combining ParamsType with PyTensor enumeration types
 --------------------------------------------------
 
-Pytensor provide some enumeration types that allow to create constant primitive values (integer and floating values)
+PyTensor provide some enumeration types that allow to create constant primitive values (integer and floating values)
 available in both Python and C code. See :class:`pytensor.link.c.type.EnumType` and its subclasses for more details.
 
-If your ParamsType contains Pytensor enumeration types, then constants defined inside these
+If your ParamsType contains PyTensor enumeration types, then constants defined inside these
 enumerations will be directly available as ParamsType attributes.
 
 **Example**::
@@ -318,11 +318,11 @@ class Params(dict):
 
 class ParamsType(CType):
     """
-    This class can create a struct of Pytensor types (like `TensorType`, etc.)
+    This class can create a struct of PyTensor types (like `TensorType`, etc.)
     to be used as a convenience `Op` parameter wrapping many data.
 
     `ParamsType` constructor takes key-value args.  Key will be the name of the
-    attribute in the struct.  Value is the Pytensor type of this attribute,
+    attribute in the struct.  Value is the PyTensor type of this attribute,
     ie. an instance of (a subclass of) :class:`CType`
     (eg. ``TensorType('int64', (None,))``).
 
@@ -362,7 +362,7 @@ class ParamsType(CType):
             type_name = type_instance.__class__.__name__
             if not isinstance(type_instance, CType):
                 raise TypeError(
-                    'ParamsType: attribute "%s" should inherit from Pytensor CType, got "%s".'
+                    'ParamsType: attribute "%s" should inherit from PyTensor CType, got "%s".'
                     % (attribute_name, type_name)
                 )
 
@@ -459,14 +459,14 @@ class ParamsType(CType):
 
     def has_type(self, pytensor_type):
         """
-        Return True if current ParamsType contains the specified Pytensor type.
+        Return True if current ParamsType contains the specified PyTensor type.
 
         """
         return pytensor_type in self.types
 
     def get_type(self, field_name):
         """
-        Return the Pytensor type associated to the given field name
+        Return the PyTensor type associated to the given field name
         in the current ParamsType.
 
         """
@@ -475,23 +475,23 @@ class ParamsType(CType):
     def get_field(self, pytensor_type):
         """
         Return the name (string) of the first field associated to
-        the given Pytensor type. Fields are sorted in lexicographic
-        order. Raise an exception if this Pytensor type is not
+        the given PyTensor type. Fields are sorted in lexicographic
+        order. Raise an exception if this PyTensor type is not
         in the current ParamsType.
 
         This method is intended to be used to retrieve a field name
         when we know that current ParamsType contains the given
-        Pytensor type only once.
+        PyTensor type only once.
 
         """
         return self.fields[self.types.index(pytensor_type)]
 
     def get_enum(self, key):
         """
-        Look for a constant named ``key`` in the Pytensor enumeration types
+        Look for a constant named ``key`` in the PyTensor enumeration types
         wrapped into current ParamsType. Return value of the constant found,
         or raise an exception if either the constant is not found or
-        current wrapper does not contain any Pytensor enumeration type.
+        current wrapper does not contain any PyTensor enumeration type.
 
         **Example**::
 
@@ -514,13 +514,13 @@ class ParamsType(CType):
 
     def enum_from_alias(self, alias):
         """
-        Look for a constant that has alias ``alias`` in the Pytensor enumeration types
+        Look for a constant that has alias ``alias`` in the PyTensor enumeration types
         wrapped into current ParamsType. Return value of the constant found,
         or raise an exception if either
 
         1. there is no constant with this alias,
         2. there is no constant which name is this alias, or
-        3. current wrapper does not contain any Pytensor enumeration type.
+        3. current wrapper does not contain any PyTensor enumeration type.
 
         **Example**::
 

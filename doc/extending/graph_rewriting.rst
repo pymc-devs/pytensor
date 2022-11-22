@@ -6,7 +6,7 @@ Graph Rewriting
 ===============
 
 In this document we will explain how graph rewriting works and how graph
-rewrites can be constructed in Pytensor.
+rewrites can be constructed in PyTensor.
 
 .. todo::
    The old "optimization" nomenclature is still in use throughout some of these
@@ -59,7 +59,7 @@ Graph Rewriting
 
     .. method:: rewrite(fgraph)
 
-      This is the interface function called by Pytensor.  It calls
+      This is the interface function called by PyTensor.  It calls
       :meth:`GraphRewriter.apply` by default.
 
 
@@ -198,15 +198,15 @@ FunctionGraph(x)
 Once the merge is done, both occurrences of ``add(y, z)`` are
 collapsed into a single one and is used as an input in two
 places. Note that ``add(x, y)`` and ``add(y, x)`` are still considered
-to be different because Pytensor has no clue that ``add`` is
+to be different because PyTensor has no clue that ``add`` is
 commutative. You may write your own graph rewrite to identify
 computations that are identical with full knowledge of the rules of
-arithmetic that your Ops implement. Pytensor might provide facilities
+arithmetic that your Ops implement. PyTensor might provide facilities
 for this somewhere in the future.
 
 .. note::
 
-   :class:`FunctionGraph` is an Pytensor structure intended for the rewrite
+   :class:`FunctionGraph` is an PyTensor structure intended for the rewrite
    phase. It is used internally by :func:`pytensor.function` and is rarely
    exposed to the end user.
 
@@ -274,7 +274,7 @@ FunctionGraph(add(z, mul(x, true_div(z, x))))
 :class:`SubstitutionNodeRewriter`, :class:`RemovalNodeRewriter`, :class:`PatternNodeRewriter`
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-Pytensor defines some shortcuts to make :class:`NodeRewriter`\s:
+PyTensor defines some shortcuts to make :class:`NodeRewriter`\s:
 
 .. function:: SubstitutionNodeRewriter(op1, op2)
 
@@ -334,7 +334,7 @@ In general, *use of the unification and reification tools is preferable when
 a rewrite's matching and replacement are non-trivial*, so we will briefly explain
 them in the following.
 
-Pytensor's unification and reification tools are provided by the
+PyTensor's unification and reification tools are provided by the
 `logical-unification <https://github.com/pythological/unification>`_ package.
 The basic tools are :func:`unify`, :func:`reify`, and :class:`var`.  The class :class:`var`
 construct *logic variables*, which represent the elements to be unified/matched, :func:`unify`
@@ -342,9 +342,9 @@ performs the "matching", and :func:`reify` performs the "replacements".
 
 See :mod:`unification`'s documentation for an introduction to unification and reification.
 
-In order to use :func:`unify` and :func:`reify` with Pytensor graphs, we need an intermediate
-structure that will allow us to represent Pytensor graphs that contain :class:`var`\s, because
-Pytensor :class:`Op`\s and :class:`Apply` nodes will not accept these foreign objects as inputs.
+In order to use :func:`unify` and :func:`reify` with PyTensor graphs, we need an intermediate
+structure that will allow us to represent PyTensor graphs that contain :class:`var`\s, because
+PyTensor :class:`Op`\s and :class:`Apply` nodes will not accept these foreign objects as inputs.
 
 :class:`PatternNodeRewriter` uses Python ``tuple``\s to effectively represent :class:`Apply` nodes and
 ``str``\s to represent logic variables (i.e. :class:`var`\s in the :mod:`unification` library).
@@ -364,7 +364,7 @@ Here is an illustration of all the above components used together:
 >>> s
 {~_1: y}
 
-In this example, :func:`unify` matched the Pytensor graph in the first argument with the "pattern"
+In this example, :func:`unify` matched the PyTensor graph in the first argument with the "pattern"
 given by the :func:`etuple` in the second.  The result is a ``dict`` mapping logic variables to
 the objects to which they were successfully unified.  When a :func:`unify` doesn't succeed, it will
 return ``False``.
@@ -376,7 +376,7 @@ logic variables within structures:
 >>> res
 e(<pytensor.scalar.basic.Add at 0x7f54dfa5a350>, y, y)
 
-Since :class:`ExpressionTuple`\s can be evaluated, we can produce a complete Pytensor graph from these
+Since :class:`ExpressionTuple`\s can be evaluated, we can produce a complete PyTensor graph from these
 results as follows:
 
 >>> res.evaled_obj
@@ -423,8 +423,8 @@ mul [id A] ''
 miniKanren
 ==========
 
-Given that unification and reification are fully implemented for Pytensor objects via the :mod:`unificiation` package,
-the `kanren <https://github.com/pythological/kanren>`_ package can be used with Pytensor graphs, as well.
+Given that unification and reification are fully implemented for PyTensor objects via the :mod:`unificiation` package,
+the `kanren <https://github.com/pythological/kanren>`_ package can be used with PyTensor graphs, as well.
 :mod:`kanren` implements the `miniKanren <http://minikanren.org/>`_ domain-specific language for relational programming.
 
 Refer to the links above for a proper introduction to miniKanren, but suffice it to say that
@@ -553,7 +553,7 @@ high-level overview of miniKanren's use as a tool for symbolic computation see
 The Optimization Database (:obj:`optdb`)
 ========================================
 
-Pytensor exports a symbol called :obj:`optdb` which acts as a sort of ordered
+PyTensor exports a symbol called :obj:`optdb` which acts as a sort of ordered
 database of rewrites. When a new rewrite is constructed, it must be inserted at
 the proper place in the database in order for it to be deployed during function
 compilation.
@@ -609,10 +609,10 @@ inserted into an :class:`EquilibriumGraphRewriter`, which is returned. If the
 (note that as of yet no :class:`RewriteDatabase` can produce :class:`NodeRewriter` objects, so this
 is a moot point).
 
-Pytensor contains one principal :class:`RewriteDatabase` object, :class:`optdb`, which
-contains all of Pytensor's rewriters with proper tags. It is
+PyTensor contains one principal :class:`RewriteDatabase` object, :class:`optdb`, which
+contains all of PyTensor's rewriters with proper tags. It is
 recommended to insert new :class:`Rewriter`\s in it. As mentioned previously,
-:obj:`optdb` is a :class:`SequenceDB`, so, at the top level, Pytensor applies a sequence
+:obj:`optdb` is a :class:`SequenceDB`, so, at the top level, PyTensor applies a sequence
 of graph rewrites to the graphs it compiles.
 
 
@@ -708,7 +708,7 @@ Registering a :class:`NodeRewriter`
   (see previous section).
 * Put them in an :class:`EquilibriumDB`.
 
-Pytensor defines two :class:`EquilibriumDB`\s in which one can put node
+PyTensor defines two :class:`EquilibriumDB`\s in which one can put node
 rewrites:
 
 
@@ -807,12 +807,12 @@ under the assumption there are no inplace operations.
 
 .. _profiling_rewrite:
 
-Profiling Pytensor Function Compilation
+Profiling PyTensor Function Compilation
 =======================================
 
-If one finds that compiling an Pytensor function is taking too much time,
-profiling information about each Pytensor rewrite can be obtained. The normal
-:ref:`Pytensor profiler <tut_profiling>` provides some
+If one finds that compiling an PyTensor function is taking too much time,
+profiling information about each PyTensor rewrite can be obtained. The normal
+:ref:`PyTensor profiler <tut_profiling>` provides some
 high-level performance information. The indentation shows the included in/subset
 relationship between sections. The top of its output look like this:
 
@@ -824,9 +824,9 @@ relationship between sections. The top of its output look like this:
       Time in 0 calls to Function.__call__: 0.000000e+00s
       Total compile time: 1.131874e+01s
         Number of Apply nodes: 50
-        Pytensor rewriter time: 1.152431e+00s
-           Pytensor validate time: 2.790451e-02s
-        Pytensor Linker time (includes C, CUDA code generation/compiling): 7.893991e-02s
+        PyTensor rewriter time: 1.152431e+00s
+           PyTensor validate time: 2.790451e-02s
+        PyTensor Linker time (includes C, CUDA code generation/compiling): 7.893991e-02s
            Import time 1.153541e-02s
       Time in all call to pytensor.grad() 4.732513e-02s
 
@@ -834,23 +834,23 @@ Explanations:
 
 * ``Total compile time: 1.131874e+01s`` gives the total time spent inside `pytensor.function`.
 * ``Number of Apply nodes: 50`` means that after rewriting, there are 50 apply node in the graph.
-* ``Pytensor rewrite time: 1.152431e+00s`` means that we spend 1.15s in the rewriting phase of `pytensor.function`.
-* ``Pytensor validate time: 2.790451e-02s`` means that we spent 2.8e-2s in the validation phase of rewriting.
-* ``Pytensor Linker time (includes C code generation/compiling): 7.893991e-02s`` means that we spent 7.9e-2s in linker phase of `pytensor.function`.
+* ``PyTensor rewrite time: 1.152431e+00s`` means that we spend 1.15s in the rewriting phase of `pytensor.function`.
+* ``PyTensor validate time: 2.790451e-02s`` means that we spent 2.8e-2s in the validation phase of rewriting.
+* ``PyTensor Linker time (includes C code generation/compiling): 7.893991e-02s`` means that we spent 7.9e-2s in linker phase of `pytensor.function`.
 * ``Import time 1.153541e-02s`` is a subset of the linker time where we import the compiled module.
 * ``Time in all call to pytensor.grad() 4.732513e-02s`` tells that we spent a total of 4.7e-2s in all calls to `pytensor.grad`. This is outside of the calls to `pytensor.function`.
 
 The *linker* phase includes the generation of the C code, the time spent
-by g++ to compile and the time needed by Pytensor to build the object we
+by g++ to compile and the time needed by PyTensor to build the object we
 return. The C code generation and compilation is cached, so the first
 time you compile a function and the following ones could take different
 amount of execution time.
 
-Detailed Profiling of Pytensor Rewrites
+Detailed Profiling of PyTensor Rewrites
 ---------------------------------------
 
-You can get more detailed profiling information about the Pytensor
-rewriting phase by setting to ``True`` the Pytensor flags
+You can get more detailed profiling information about the PyTensor
+rewriting phase by setting to ``True`` the PyTensor flags
 :attr:`config.profile_optimizer` (this requires ``config.profile`` to be ``True``
 as well).
 

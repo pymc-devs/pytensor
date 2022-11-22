@@ -127,7 +127,7 @@ prefix. The complete list can be found in the documentation for
     .. method:: c_element_type()
 
        Optional: should return the name of the primitive C type of
-       for the variables handled by this Pytensor type. For example,
+       for the variables handled by this PyTensor type. For example,
        for a matrix of 32-bit signed NumPy integers, it should return
        ``"npy_int32"``. If C type may change from an instance to another
        (e.g. ``ScalarType('int32')`` vs ``ScalarType('int64')``), consider
@@ -163,7 +163,7 @@ out:
    nor ``break`` outside of your own loops or ``goto`` to strange
    places or anything like that. Failure to comply with this
    restriction could lead to erratic behavior, segfaults and/or memory
-   leaks because Pytensor defines its own cleanup system and assumes
+   leaks because PyTensor defines its own cleanup system and assumes
    that you are not meddling with it. Furthermore, advanced operations
    or types might do code transformations on your code such as
    inserting it in a loop -- in that case they can call your
@@ -200,7 +200,7 @@ do typedefs. Make sure that the name of each variable contains the
 ``name`` argument in order to avoid name collisions (collisions *will*
 happen if you don't parameterize the variable names as indicated
 here). Also note that you cannot declare a variable called
-``py_<name>`` or ``storage_<name>`` because Pytensor already defines
+``py_<name>`` or ``storage_<name>`` because PyTensor already defines
 them.
 
 What you declare there is basically the C interface you are giving to
@@ -247,9 +247,9 @@ called, without knowing for sure which of the two.
             """ % dict(name = name, fail = sub['fail'])
 
 This method is slightly more sophisticated. What happens here is that
-we have a reference to a Python object which Pytensor has placed in
+we have a reference to a Python object which PyTensor has placed in
 ``py_%(name)s`` where ``%(name)s`` must be substituted for the name
-given in the inputs. This special variable is declared by Pytensor as
+given in the inputs. This special variable is declared by PyTensor as
 ``PyObject* py_%(name)s`` where ``PyObject*`` is a pointer to a Python
 object as defined by CPython's C API. This is the reference that
 corresponds, on the Python side of things, to a :class:`Variable` with the
@@ -289,7 +289,7 @@ have computed some operation on doubles and we have put the variable
 into the double variable ``%(name)s``. Now, we need to put this data
 into a Python object that we can manipulate on the Python side of
 things. This Python object must be put into the ``py_%(name)s``
-variable which Pytensor recognizes (this is the same pointer we get in
+variable which PyTensor recognizes (this is the same pointer we get in
 :meth:`CType.c_extract`).
 
 Now, that pointer is already a pointer to a valid Python object
@@ -305,12 +305,12 @@ if the data you work on is large.
 Now that we have decreased the reference count, we call
 ``PyFloat_FromDouble`` on our double variable in order to convert it
 to a Python ``float``. This returns a new reference which we assign to
-``py_%(name)s``. From there Pytensor will do the rest and the end user
+``py_%(name)s``. From there PyTensor will do the rest and the end user
 will happily see a Python ``float`` come out of his computations.
 
 The rest of the code is not absolutely necessary and it is basically
 "good practice". ``PyFloat_FromDouble`` can return ``NULL`` on failure.
-``NULL`` is a pretty bad reference to have and neither Python nor Pytensor
+``NULL`` is a pretty bad reference to have and neither Python nor PyTensor
 like it. If this happens, we change the ``NULL`` pointer (which will
 cause us problems) to a pointer to ``None`` (which is *not* a ``NULL``
 pointer). Since ``None`` is an object like the others, we need to
@@ -357,7 +357,7 @@ Second, whenever you use ``%(fail)s`` in :meth:`CType.c_extract` or in the code 
 :ref:`operation <op>`, you can count on :meth:`CType.c_cleanup` being called right
 after that. Therefore, it's important to make sure that :meth:`CType.c_cleanup`
 doesn't depend on any code placed after a reference to
-``%(fail)s``. Furthermore, because of the way Pytensor blocks code together,
+``%(fail)s``. Furthermore, because of the way PyTensor blocks code together,
 only the variables declared in :meth:`CType.c_declare` will be visible in :meth:`CType.c_cleanup`!
 
 
@@ -388,13 +388,13 @@ like this:
 
 .. code-block:: c
 
-   // BEGIN defined by Pytensor
+   // BEGIN defined by PyTensor
    PyObject* py_x = ...;
    PyObject* py_y = ...;
    PyObject* py_z = ...;
    PyObject* py_a = ...; // note: this reference won't actually be used for anything
    PyObject* py_b = ...;
-   // END defined by Pytensor
+   // END defined by PyTensor
 
    {
      double x; //c_declare for x
@@ -514,9 +514,9 @@ Final version
 ===================
 
 We have an internal :class:`Op` called :class:`DeepCopyOp`. It is used to make sure we
-respect the user vs. Pytensor memory region as described in the :ref:`tutorial
-<aliasing>`. Pytensor has a Python implementation that calls the object's
-``copy`` or ``deepcopy`` method for Pytensor types for which it does not
+respect the user vs. PyTensor memory region as described in the :ref:`tutorial
+<aliasing>`. PyTensor has a Python implementation that calls the object's
+``copy`` or ``deepcopy`` method for PyTensor types for which it does not
 know how to generate C code.
 
 You can implement :meth:`COp.c_code` for this :class:`Op`. It is registered as follows:
@@ -551,7 +551,7 @@ calling:
 ===================================
 
 We have two generic :class:`Op`\s, :class:`Shape` and :class:`Shape_i`, that return the shape of any
-Pytensor :class:`Variable` that has a shape attribute (:class:`Shape_i` returns only one of
+PyTensor :class:`Variable` that has a shape attribute (:class:`Shape_i` returns only one of
 the elements of the shape).
 
 

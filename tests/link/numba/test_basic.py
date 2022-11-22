@@ -193,7 +193,7 @@ def compare_numba_and_py(
 ):
     """Function to compare python graph output and Numba compiled output for testing equality
 
-    In the tests below computational graphs are defined in Pytensor. These graphs are then passed to
+    In the tests below computational graphs are defined in PyTensor. These graphs are then passed to
     this function which then compiles the graphs in both Numba and python, runs the calculation
     in both and checks if the results are the same
 

@@ -1,7 +1,7 @@
 .. _libdoc_graph_graph:
 
 ================================================
-:mod:`graph` -- Interface for the Pytensor graph
+:mod:`graph` -- Interface for the PyTensor graph
 ================================================
 
 ---------

@@ -29,7 +29,7 @@ from pytensor.compile.sharedvalue import SharedVariable
 
 
 __docformat__ = "restructuredtext en"
-__authors__ = "Pascal Lamblin " "PyMC Developers " "Pytensor Developers "
+__authors__ = "Pascal Lamblin " "PyMC Developers " "PyTensor Developers "
 __copyright__ = "Copyright 2013, Universite de Montreal"
 __license__ = "3-clause BSD"
 
@@ -42,7 +42,7 @@ Pickler = pickle.Pickler
 
 
 class StripPickler(Pickler):
-    """Subclass of `Pickler` that strips unnecessary attributes from Pytensor objects.
+    """Subclass of `Pickler` that strips unnecessary attributes from PyTensor objects.
 
     Example
     -------

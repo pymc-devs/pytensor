@@ -1130,7 +1130,7 @@ def round(a, mode=None):
             warnings.warn(
                 "pytensor.tensor.round() changed its default from"
                 " `half_away_from_zero` to `half_to_even` to have"
-                " the same default as NumPy. Use the Pytensor flag"
+                " the same default as NumPy. Use the PyTensor flag"
                 " `warn__round=False` to disable this warning."
             )
     if mode == "half_away_from_zero":
@@ -1613,7 +1613,7 @@ def mean(input, axis=None, dtype=None, op=False, keepdims=False, acc_dtype=None)
     else:
         axis = [int(a) for a in axis]
 
-    # This sequential division will possibly be optimized by Pytensor:
+    # This sequential division will possibly be optimized by PyTensor:
     for i in axis:
         s = true_div(s, shp[i])
 
@@ -2065,15 +2065,15 @@ def dense_dot(a, b):
     sequence:
 
         1.  If either a or b is scalar, it returns the elementwise product
-            without calling the Pytensor Dot op.
+            without calling the PyTensor Dot op.
 
-        2.  If either a or b has more than 2 dimensions, it calls Pytensor's
+        2.  If either a or b has more than 2 dimensions, it calls PyTensor's
             tensordot function with appropriate axes. The tensordot function
             expresses high-dimensional dot products in terms of 2D matrix
             multiplications, so it may be possible to further optimize for
             performance.
 
-        3.  If both a and b have either 1 or 2 dimensions, it calls Pytensor's
+        3.  If both a and b have either 1 or 2 dimensions, it calls PyTensor's
             Dot op on a and b.
 
     Notes
@@ -2233,7 +2233,7 @@ def tensordot(a, b, axes=2):
     Compute a generalized dot product over provided axes.
 
     Given two tensors a and b, tensordot computes a generalized dot product over
-    the provided axes. Pytensor's implementation reduces all expressions to
+    the provided axes. PyTensor's implementation reduces all expressions to
     matrix or vector dot products and is based on code from Tijmen Tieleman's
     gnumpy (http://www.cs.toronto.edu/~tijmen/gnumpy.html).
 
@@ -2277,7 +2277,7 @@ def tensordot(a, b, axes=2):
     Examples
     --------
     It may be helpful to consider an example to see what tensordot does.
-    Pytensor's implementation is identical to NumPy's. Here a has shape (2, 3, 4)
+    PyTensor's implementation is identical to NumPy's. Here a has shape (2, 3, 4)
     and b has shape (5, 6, 4, 3). The axes to sum over are [[1, 2], [3, 2]] --
     note that a.shape[1] == b.shape[3] and a.shape[2] == b.shape[2]; these axes
     are compatible. The resulting tensor will have shape (2, 5, 6) -- the

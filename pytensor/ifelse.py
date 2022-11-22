@@ -1,5 +1,5 @@
 """
-IfElse introduces lazy evaluation in Pytensor (coupled with the CVM/VM
+IfElse introduces lazy evaluation in PyTensor (coupled with the CVM/VM
 linkers). It resembles the if clause of any programming language, that
 has a `then` and `else` branch, and executes either one or the other
 according to the condition provided.

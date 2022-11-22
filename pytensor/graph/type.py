@@ -240,7 +240,7 @@ class Type(MetaObject, Generic[D]):
     def values_eq_approx(cls, a: D, b: D) -> bool:
         """Return ``True`` if `a` and `b` can be considered approximately equal.
 
-        This function is used by Pytensor debugging tools to decide
+        This function is used by PyTensor debugging tools to decide
         whether two values are equivalent, admitting a certain amount
         of numerical instability. For example, for floating-point
         numbers this function should be an approximate comparison.

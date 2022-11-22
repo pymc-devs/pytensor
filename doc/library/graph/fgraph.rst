@@ -7,7 +7,7 @@
 
 .. module:: pytensor.graph.fg
    :platform: Unix, Windows
-   :synopsis: Pytensor Internals
+   :synopsis: PyTensor Internals
 .. moduleauthor:: LISA
 
 

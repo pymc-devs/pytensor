@@ -26,7 +26,7 @@ class TestLoadTensor:
         assert (fn(self.filename) == (self.data * 2)).all()
 
     def test_invalid_modes(self):
-        # Modes 'r+', 'r', and 'w+' cannot work with Pytensor, becausei
+        # Modes 'r+', 'r', and 'w+' cannot work with PyTensor, becausei
         # the output array may be modified inplace, and that should not
         # modify the original file.
         path = Variable(Generic(), None)

@@ -9,7 +9,7 @@ from pytensor.tensor.basic import as_tensor_variable
 class PdbBreakpoint(Op):
     """
     This is an identity-like op with the side effect of enforcing a
-    conditional breakpoint, inside an Pytensor function, based on a symbolic
+    conditional breakpoint, inside an PyTensor function, based on a symbolic
     scalar condition. It automatically detects available debuggers and uses
     the first available in the following order: `pudb`, `ipdb`, or `pdb`.
 
@@ -18,11 +18,11 @@ class PdbBreakpoint(Op):
                  breakpoint is activated.
 
     :note: WARNING. At least one of the outputs of the op must be used
-                    otherwise the op will be removed from the Pytensor graph
+                    otherwise the op will be removed from the PyTensor graph
                     due to its outputs being unused
 
-    :note: WARNING. Employing the function inside an Pytensor graph can prevent
-                    Pytensor from applying certain optimizations to improve
+    :note: WARNING. Employing the function inside an PyTensor graph can prevent
+                    PyTensor from applying certain optimizations to improve
                     performance, reduce memory consumption and/or reduce
                     numerical instability.
 
@@ -70,7 +70,7 @@ class PdbBreakpoint(Op):
 
     def make_node(self, condition, *monitored_vars):
 
-        # Ensure that condition is an Pytensor tensor
+        # Ensure that condition is an PyTensor tensor
         if not isinstance(condition, Variable):
             condition = as_tensor_variable(condition)
 

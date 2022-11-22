@@ -67,7 +67,7 @@ void im3d2col(const %(float_type)s* data_im, const int channels,
   }
 }
 
-// Unlike the Caffe and Pytensor GPU versions, the data_im array is set to zero
+// Unlike the Caffe and PyTensor GPU versions, the data_im array is set to zero
 // before the col2im call rather than doing it here. So, the result is just
 // accumulated into data_im.
 void col2im3d(const %(float_type)s* data_col, const int channels,
@@ -109,7 +109,7 @@ void col2im3d(const %(float_type)s* data_col, const int channels,
 }
 
 
-// Pytensor op code
+// PyTensor op code
 // GPU version authors: Arjun Jain, Frederic Bastien, Jan Schlueter
 // Reference code: https://github.com/BVLC/caffe/blob/master/src/caffe/layers/conv_layer.cu
 //   and https://github.com/torch/cunn/blob/master/SpatialConvolutionMM.cu

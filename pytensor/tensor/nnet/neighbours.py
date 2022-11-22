@@ -126,7 +126,7 @@ class Images2Neibs(COp):
                 neib_shape is neib_step
                 or neib_shape == neib_step
                 or
-                # Pytensor Constant == do not compare the data
+                # PyTensor Constant == do not compare the data
                 # the equals function do that.
                 (hasattr(neib_shape, "equals") and neib_shape.equals(neib_step))
             ):
@@ -786,7 +786,7 @@ def neibs2images(neibs, neib_shape, original_shape, mode="valid"):
     .. code-block:: python
 
         im_new = neibs2images(neibs, (5, 5), im_val.shape)
-        # Pytensor function definition
+        # PyTensor function definition
         inv_window = pytensor.function([neibs], im_new)
         # Function application
         im_new_val = inv_window(neibs_val)

@@ -1,5 +1,5 @@
 """
-VMs that run Pytensor graph computations.
+VMs that run PyTensor graph computations.
 
 A VM is not actually different from a Linker, we just decided
 VM was a better name at some point.
@@ -167,9 +167,9 @@ def calculate_reallocate_info(
 
 
 class VM(ABC):
-    r"""An abstract class for evaluating Pytensor programs.
+    r"""An abstract class for evaluating PyTensor programs.
 
-    The `VM.__call__` method evaluates an Pytensor program.
+    The `VM.__call__` method evaluates an PyTensor program.
 
     `Stack` should be considered the reference `VM`/`Linker` implementation.
     It can correctly evaluate all graphs and is the easiest to read. The `CVM`
@@ -378,7 +378,7 @@ class Loop(UpdatingVM):
                 raise ValueError(
                     "`nodes`, `thunks` and `post_thunk_clear` are not the same lengths"
                 )
-            # Some other part of Pytensor use this information
+            # Some other part of PyTensor use this information
             self.allow_gc = True
             self.post_thunk_clear = post_thunk_clear
         else:
@@ -793,7 +793,7 @@ class VMLinker(LocalLinker):
     allow_gc
         Force the virtual machine to clean up unnecessary references, in order
         to allow garbage collection on intermediate values during computation
-        of a function.  If ``None``, use as default the value of the Pytensor
+        of a function.  If ``None``, use as default the value of the PyTensor
         flag `allow_gc`.
     use_cloop
         Use the C-based virtual machine if possible
@@ -807,7 +807,7 @@ class VMLinker(LocalLinker):
         be called with two arguments: ``var``, ``value``.
     lazy
         Useful only when `use_cloop` is False. When `lazy` is ``None``, use the
-        Pytensor flag ``vm__lazy`` value. Then if we have a ``None`` (default) we
+        PyTensor flag ``vm__lazy`` value. Then if we have a ``None`` (default) we
         auto detect if lazy evaluation is needed and use the appropriate
         version. If `lazy` is ``True`` or ``False``, we force the version used
         between `Loop` and `Stack`.

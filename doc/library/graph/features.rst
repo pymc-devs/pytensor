@@ -6,7 +6,7 @@
 
 .. module:: pytensor.graph.features
    :platform: Unix, Windows
-   :synopsis: Pytensor Internals
+   :synopsis: PyTensor Internals
 .. moduleauthor:: LISA
 
 Guide

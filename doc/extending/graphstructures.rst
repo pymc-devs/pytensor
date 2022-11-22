@@ -5,9 +5,9 @@
 Graph Structures
 ================
 
-Pytensor works by modeling mathematical operations and their outputs using
+PyTensor works by modeling mathematical operations and their outputs using
 symbolic placeholders, or :term:`variables <variable>`, which inherit from the class
-:class:`Variable`.  When writing expressions in Pytensor one uses operations like
+:class:`Variable`.  When writing expressions in PyTensor one uses operations like
 ``+``, ``-``, ``**``, ``sum()``, ``tanh()``. These are represented
 internally as :term:`Op`\s.  An :class:`Op` represents a computation that is
 performed on a set of symbolic inputs and produces a set of symbolic outputs.
@@ -15,7 +15,7 @@ These symbolic input and output :class:`Variable`\s carry information about
 their types, like their data type (e.g. float, int), the number of dimensions,
 etc.
 
-Pytensor graphs are composed of interconnected :term:`Apply`, :term:`Variable` and
+PyTensor graphs are composed of interconnected :term:`Apply`, :term:`Variable` and
 :class:`Op` nodes. An :class:`Apply` node represents the application of an
 :class:`Op` to specific :class:`Variable`\s. It is important to draw the
 difference between the definition of a computation represented by an :class:`Op`
@@ -122,7 +122,7 @@ Graph Structures
 ================
 
 The following section outlines each type of structure that may be used
-in an Pytensor-built computation graph.
+in an PyTensor-built computation graph.
 
 
 .. index::
@@ -135,7 +135,7 @@ in an Pytensor-built computation graph.
 --------------
 
 An :class:`Apply` node is a type of internal node used to represent a
-:term:`computation graph <graph>` in Pytensor. Unlike
+:term:`computation graph <graph>` in PyTensor. Unlike
 :class:`Variable`, :class:`Apply` nodes are usually not
 manipulated directly by the end user. They may be accessed via
 the :attr:`Variable.owner` field.
@@ -149,8 +149,8 @@ inputs. Therefore, an :class:`Apply` node may be obtained from an :class:`Op`
 and a list of inputs by calling ``Op.make_node(*inputs)``.
 
 Comparing with the Python language, an :class:`Apply` node is
-Pytensor's version of a function call whereas an :class:`Op` is
-Pytensor's version of a function definition.
+PyTensor's version of a function call whereas an :class:`Op` is
+PyTensor's version of a function definition.
 
 An :class:`Apply` instance has three important fields:
 
@@ -180,7 +180,7 @@ An :class:`Apply` instance can be created by calling ``graph.basic.Apply(op, inp
 :class:`Op`
 -----------
 
-An :class:`Op` in Pytensor defines a certain computation on some types of
+An :class:`Op` in PyTensor defines a certain computation on some types of
 inputs, producing some types of outputs. It is equivalent to a
 function definition in most programming languages. From a list of
 input :ref:`Variables <variable>` and an :class:`Op`, you can build an :ref:`apply`
@@ -188,7 +188,7 @@ node representing the application of the :class:`Op` to the inputs.
 
 It is important to understand the distinction between an :class:`Op` (the
 definition of a function) and an :class:`Apply` node (the application of a
-function). If you were to interpret the Python language using Pytensor's
+function). If you were to interpret the Python language using PyTensor's
 structures, code going like ``def f(x): ...`` would produce an :class:`Op` for
 ``f`` whereas code like ``a = f(x)`` or ``g(f(4), 5)`` would produce an
 :class:`Apply` node involving the ``f`` :class:`Op`.
@@ -203,11 +203,11 @@ structures, code going like ``def f(x): ...`` would produce an :class:`Op` for
 :class:`Type`
 -------------
 
-A :class:`Type` in Pytensor provides static information (or constraints) about
+A :class:`Type` in PyTensor provides static information (or constraints) about
 data objects in a graph. The information provided by :class:`Type`\s allows
-Pytensor to perform rewrites and produce more efficient compiled code.
+PyTensor to perform rewrites and produce more efficient compiled code.
 
-Every symbolic :class:`Variable` in an Pytensor graph has an associated
+Every symbolic :class:`Variable` in an PyTensor graph has an associated
 :class:`Type` instance, and :class:`Type`\s also serve as a means of
 constructing :class:`Variable` instances.  In other words, :class:`Type`\s and
 :class:`Variable`\s go hand-in-hand.
@@ -229,11 +229,11 @@ the :class:`Variable`\s it constructs:
 #. They represent arrays with shapes of :math:`1 \times N`, or, in code, ``(1,
    None)``, where ``None`` represents any shape value.
 
-Note that Pytensor :class:`Type`\s are not necessarily equivalent to Python types or
-classes. Pytensor's :class:`TensorType`'s, like `irow`, use :class:`numpy.ndarray`
+Note that PyTensor :class:`Type`\s are not necessarily equivalent to Python types or
+classes. PyTensor's :class:`TensorType`'s, like `irow`, use :class:`numpy.ndarray`
 as the underlying Python type for performing computations and storing data, but
 :class:`numpy.ndarray`\s model a much wider class of arrays than most :class:`TensorType`\s.
-In other words, Pytensor :class:`Type`'s try to be more specific.
+In other words, PyTensor :class:`Type`'s try to be more specific.
 
 For more information see :ref:`pytensor_type`.
 
@@ -247,7 +247,7 @@ For more information see :ref:`pytensor_type`.
 -----------------
 
 A :class:`Variable` is the main data structure you work with when using
-Pytensor. The symbolic inputs that you operate on are :class:`Variable`\s and what
+PyTensor. The symbolic inputs that you operate on are :class:`Variable`\s and what
 you get from applying various :class:`Op`\s to these inputs are also
 :class:`Variable`\s. For example, when one inputs
 
@@ -265,7 +265,7 @@ corresponding to its input. The computation itself is represented by
 another type of node, an :class:`Apply` node, and may be accessed
 through ``y.owner``.
 
-More specifically, a :class:`Variable` is a basic structure in Pytensor that
+More specifically, a :class:`Variable` is a basic structure in PyTensor that
 represents a datum at a certain point in computation. It is typically
 an instance of the class :class:`Variable` or
 one of its subclasses.
@@ -330,16 +330,16 @@ A following section of this tutorial will examine the topic of
 Rewrites
 ========
 
-When compiling an Pytensor graph using :func:`pytensor.function`, a graph is
+When compiling an PyTensor graph using :func:`pytensor.function`, a graph is
 necessarily provided.  While this graph structure shows how to compute the
 output from the input, it also offers the possibility to improve the way this
-computation is carried out. The way rewrites work in Pytensor is by
+computation is carried out. The way rewrites work in PyTensor is by
 identifying and replacing certain patterns in the graph with other specialized
 patterns that produce the same results but are either faster or more
 stable. Rewrites can also detect identical subgraphs and ensure that the
 same values are not computed twice.
 
-For example, one simple rewrite that Pytensor uses is to replace
+For example, one simple rewrite that PyTensor uses is to replace
 the pattern :math:`\frac{xy}{y}` by :math:`x`.
 
 See :ref:`graph_rewriting` and :ref:`optimizations` for more information.

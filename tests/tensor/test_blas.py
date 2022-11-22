@@ -151,7 +151,7 @@ class TestGemm:
             cmp_linker(copy(z), a, x, y, b, "py")
 
             if not dtype.startswith("complex") and config.cxx:
-                # If config.blas__ldflags is empty, Pytensor will use
+                # If config.blas__ldflags is empty, PyTensor will use
                 # a NumPy C implementation of [sd]gemm_.
                 cmp_linker(copy(z), a, x, y, b, "c")
 

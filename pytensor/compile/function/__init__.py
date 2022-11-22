@@ -29,7 +29,7 @@ def function_dump(
     extra_tag_to_remove=None,
 ):
     """
-    This is helpful to make a reproducible case for problems during Pytensor
+    This is helpful to make a reproducible case for problems during PyTensor
     compilation.
 
     Ex:
@@ -38,7 +38,7 @@ def function_dump(
     `pytensor.function_dump('filename.pkl', ...)`.
 
     If you see this, you were probably asked to use this function to
-    help debug a particular case during the compilation of an Pytensor
+    help debug a particular case during the compilation of an PyTensor
     function. `function_dump` allows you to easily reproduce your
     compilation without generating any code. It pickles all the objects and
     parameters needed to reproduce a call to `pytensor.function()`. This
@@ -287,7 +287,7 @@ def function(
         givens = []
     if not isinstance(inputs, (list, tuple)):
         raise Exception(
-            "Input variables of an Pytensor function should be "
+            "Input variables of an PyTensor function should be "
             "contained in a list, even when there is a single "
             "input."
         )

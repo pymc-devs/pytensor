@@ -1,10 +1,10 @@
 .. _shape_info:
 
 ============================================
-How Shape Information is Handled by Pytensor
+How Shape Information is Handled by PyTensor
 ============================================
 
-Currently, information regarding shape is used in the following ways by Pytensor:
+Currently, information regarding shape is used in the following ways by PyTensor:
 
 - To remove computations in the graph when we only want to know the
   shape, but not the actual value of a variable. This is done with the
@@ -27,10 +27,10 @@ MakeVector{dtype='int64'} [id A] ''   2
 
 
 The output of this compiled function does not contain any multiplication or
-power computations; Pytensor has removed them to compute the shape of the output
+power computations; PyTensor has removed them to compute the shape of the output
 directly.
 
-Pytensor propagates information about shapes within a graph using specialized
+PyTensor propagates information about shapes within a graph using specialized
 :class:`Op`\s and static :class:`Type` information (see :ref:`pytensor_type`).
 
 
@@ -53,7 +53,7 @@ You can also pass shape infomation directly to some :class:`Op`\s, like ``Random
 
 - You can use the :class:`SpecifyShape`\ :class:`Op` to add shape information anywhere in the
   graph. This allows to perform some optimizations. In the following example,
-  this makes it possible to precompute the Pytensor function to a constant.
+  this makes it possible to precompute the PyTensor function to a constant.
 
 
 >>> import pytensor
@@ -109,14 +109,14 @@ the computation itself (there is no ``join`` in the first output or debugprint).
 
 This makes the computation of the shape faster, but it can also hide errors. In
 this example, the computation of the shape of the output of ``join`` is done only
-based on the first input Pytensor variable, which leads to an error.
+based on the first input PyTensor variable, which leads to an error.
 
 This might happen with other `Op`\s such as :class:`Elemwise` and :class:`Dot`, for example.
 Indeed, to perform some optimizations/rewrites (for speed or stability, for instance),
-Pytensor assumes that the computation is correct and consistent
+PyTensor assumes that the computation is correct and consistent
 in the first place, as it does here.
 
 You can detect those problems by running the code without this optimization,
-using the Pytensor flag ``optimizer_excluding=local_shape_to_shape_i``. You can
+using the PyTensor flag ``optimizer_excluding=local_shape_to_shape_i``. You can
 also obtain the same effect by running in the modes ``FAST_COMPILE`` or
 :class:`DebugMode`.

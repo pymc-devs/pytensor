@@ -251,7 +251,7 @@ def gc_helper(node_list: List[Apply]):
     This is used to allow garbage collection within graphs.
 
     It ignores view_map and destroy_map. This isn't needed as python
-    have reference count. In Pytensor gc, we should not take into
+    have reference count. In PyTensor gc, we should not take into
     account view_map and destroy_map as if the thunk decided to create
     a new output, we would delay uselessly its gc by Python.
 
@@ -295,7 +295,7 @@ def raise_with_op(
     This re-raises the exception described by `exc_info` (or the last
     one raised, if `exc_info` is omitted) and annotates the exception
     object with several new members which may be helpful for debugging
-    Pytensor graphs. They are:
+    PyTensor graphs. They are:
 
      * ``__op_instance__``: The `Op` that is responsible for the exception
        being raised.
@@ -377,7 +377,7 @@ def raise_with_op(
     if isinstance(tr, list) and len(tr) > 0:
         detailed_err_msg += "\nBacktrace when the node is created "
         detailed_err_msg += (
-            "(use Pytensor flag traceback__limit=N to make it longer):\n"
+            "(use PyTensor flag traceback__limit=N to make it longer):\n"
         )
 
         # Print separate message for each element in the list of batcktraces
@@ -387,11 +387,11 @@ def raise_with_op(
         detailed_err_msg += str(sio.getvalue())
     else:
         hints.append(
-            "HINT: Re-running with most Pytensor optimizations disabled could"
+            "HINT: Re-running with most PyTensor optimizations disabled could"
             " provide a back-trace showing when this node was created. This can"
-            " be done by setting the Pytensor flag"
+            " be done by setting the PyTensor flag"
             " 'optimizer=fast_compile'. If that does not work,"
-            " Pytensor optimizations can be disabled with 'optimizer=None'."
+            " PyTensor optimizations can be disabled with 'optimizer=None'."
         )
 
     if verbosity == "high":
@@ -519,7 +519,7 @@ def raise_with_op(
 
     else:
         hints.append(
-            "HINT: Use the Pytensor flag `exception_verbosity=high`"
+            "HINT: Use the PyTensor flag `exception_verbosity=high`"
             " for a debug print-out and storage map footprint of this Apply node."
         )
 
@@ -538,7 +538,7 @@ def raise_with_op(
 
 def __log_thunk_trace(value, handler: io.TextIOWrapper) -> None:
     """
-    Log Pytensor's diagnostic stack trace for an exception.
+    Log PyTensor's diagnostic stack trace for an exception.
 
     Uses custom attributes that are added to trace objects by raise_with_op.
     """
@@ -565,7 +565,7 @@ def __log_thunk_trace(value, handler: io.TextIOWrapper) -> None:
                 write(line)
             write(
                 "For the full definition stack trace set"
-                " the Pytensor flags `traceback__limit` to -1"
+                " the PyTensor flags `traceback__limit` to -1"
             )
 
 

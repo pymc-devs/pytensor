@@ -103,7 +103,7 @@ def scalar_constructor(
 
     We ignore the borrow parameter as we convert ``value`` to an
     ndarray (this is a new object). This respects the semantic of
-    borrow, as it is a hint to Pytensor that we can reuse it.
+    borrow, as it is a hint to PyTensor that we can reuse it.
 
     """
     if target != "cpu":

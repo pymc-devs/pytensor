@@ -42,7 +42,7 @@ __authors__ = (
     "Pascal Lamblin "
     "Arnaud Bergeron "
     "PyMC Developers "
-    "Pytensor Developers "
+    "PyTensor Developers "
 )
 __copyright__ = "(c) 2010, Universite de Montreal"
 

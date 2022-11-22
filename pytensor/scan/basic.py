@@ -61,7 +61,7 @@ def get_updates_and_outputs(ls):
         """
         Ensure `x` is made only of allowed data types.
 
-        Return True iff `x` is made only of lists, tuples, dictionaries, Pytensor
+        Return True iff `x` is made only of lists, tuples, dictionaries, PyTensor
         variables or `pytensor.scan.utils.until` objects.
 
         """
@@ -79,11 +79,11 @@ def get_updates_and_outputs(ls):
     if not _filter(ls):
         raise ValueError(
             "The return value of your scan lambda expression may only be "
-            "made of lists, tuples, or dictionaries containing Pytensor "
+            "made of lists, tuples, or dictionaries containing PyTensor "
             "variables (or `pytensor.scan.utils.until` objects for "
             "conditions). In particular if you need to use constant "
             "values, you can use `tensor.constant` to turn them into "
-            "Pytensor variables."
+            "PyTensor variables."
         )
 
     if is_outputs(ls):

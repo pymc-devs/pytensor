@@ -1,4 +1,4 @@
-/** Alternative template NumPy-based implementation of BLAS functions used in Pytensor. **/
+/** Alternative template NumPy-based implementation of BLAS functions used in PyTensor. **/
 
 /* Compute matrix[i][j] = scalar for every position (i, j) in matrix. */
 void alt_numpy_memset_inplace_%(float_type)s(PyArrayObject* matrix, const %(float_type)s* scalar) {

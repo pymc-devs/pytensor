@@ -1,6 +1,6 @@
-# Pytensor Code of Conduct
+# PyTensor Code of Conduct
 
-Like the technical community as a whole, the Pytensor team and community is made
+Like the technical community as a whole, the PyTensor team and community is made
 up of a mixture of professionals and volunteers from all over the world, working
 on every aspect of the mission&mdash;including mentorship, teaching, and connecting
 people.
@@ -13,8 +13,8 @@ This isn’t an exhaustive list of things that you can’t do. Rather, take it i
 the spirit in which it’s intended&mdash;a guide to make it easier to enrich all of
 us and the technical communities in which we participate.
 
-This code of conduct applies to all spaces managed by the Pytensor project. This
-includes Gitter, mailing lists, the issue tracker, Pytensor events, and any other
+This code of conduct applies to all spaces managed by the PyTensor project. This
+includes Gitter, mailing lists, the issue tracker, PyTensor events, and any other
 forums created by the project team that the community uses for communication.
 In addition, violations of this code outside these spaces may affect a person's
 ability to participate within them.
@@ -41,9 +41,9 @@ it by emailing pymc.devs@gmail.com.
   excuse for poor behavior and poor manners. We might all experience some
   frustration now and then, but we cannot allow that frustration to turn into a
   personal attack. It’s important to remember that a community where people feel
-  uncomfortable or threatened is not a productive one. Members of the Pytensor
+  uncomfortable or threatened is not a productive one. Members of the PyTensor
   community should be respectful when dealing with other members as well as with
-  people outside the Pytensor community.
+  people outside the PyTensor community.
 
 - __Be careful in the words that you choose.__ We are a community of professionals,
   and we conduct ourselves professionally. Be kind to others. Do not insult or
@@ -62,9 +62,9 @@ it by emailing pymc.devs@gmail.com.
       then stop.
 
 - __When we disagree, try to understand why.__ Disagreements, both social and
-  technical, happen all the time and Pytensor is no exception. It is important
+  technical, happen all the time and PyTensor is no exception. It is important
   that we resolve disagreements and differing views constructively. Remember
-  that we’re different. Pytensor benefits from its varied community and
+  that we’re different. PyTensor benefits from its varied community and
   people from a wide range of backgrounds. Different people have different
   perspectives on issues. Being unable to understand why someone holds a
   viewpoint doesn’t mean that they’re wrong. Don’t forget that it is human to

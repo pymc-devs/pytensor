@@ -36,7 +36,7 @@ of abnormal values: NaNs, Infs, and abnormally big values.
         mode=NanGuardMode(nan_is_error=True, inf_is_error=True, big_is_error=True)
     )
 
-While using the Pytensor function ``fun``, it will monitor the values of each
+While using the PyTensor function ``fun``, it will monitor the values of each
 input and output variable of each node. When abnormal values are
 detected, it raises an error to indicate which node yields the NaNs. For
 example, if we pass the following values to ``fun``:

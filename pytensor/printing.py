@@ -1,4 +1,4 @@
-"""Functions for printing Pytensor graphs."""
+"""Functions for printing PyTensor graphs."""
 
 import hashlib
 import logging
@@ -163,8 +163,8 @@ def debugprint(
         A ``dict`` where we store the ids of printed nodes.
         Useful to have multiple call to `debugprint` share the same ids.
     print_storage
-        If ``True``, this will print the storage map for Pytensor functions. When
-        combined with ``allow_gc=False``, after the execution of an Pytensor
+        If ``True``, this will print the storage map for PyTensor functions. When
+        combined with ``allow_gc=False``, after the execution of an PyTensor
         function, the output will show the intermediate results.
     used_ids
         A map between nodes and their printed ids.
@@ -511,7 +511,7 @@ def _debugprint(
     inner_to_outer_inputs
         A dictionary mapping an `Op`'s inner-inputs to its outer-inputs.
     storage_map
-        ``None`` or the storage map (e.g. when printing an Pytensor function).
+        ``None`` or the storage map (e.g. when printing an PyTensor function).
     used_ids
         See `debugprint`.
     op_information
@@ -1201,7 +1201,7 @@ def pydotprint(
     """Print to a file the graph of a compiled pytensor function's ops. Supports
     all pydot output formats, including png and svg.
 
-    :param fct: a compiled Pytensor function, a Variable, an Apply or
+    :param fct: a compiled PyTensor function, a Variable, an Apply or
                 a list of Variable.
     :param outfile: the output file where to put the graph.
     :param compact: if True, will remove intermediate var that don't have name.

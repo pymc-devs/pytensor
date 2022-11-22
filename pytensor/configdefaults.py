@@ -110,7 +110,7 @@ def _filter_mode(val):
     ]
     if val in str_options:
         return val
-    # This can be executed before Pytensor is completely imported, so
+    # This can be executed before PyTensor is completely imported, so
     # pytensor.compile.mode.Mode is not always available.
     # Instead of isinstance(val, pytensor.compile.mode.Mode),
     # we can inspect the __mro__ of the object!
@@ -204,7 +204,7 @@ def short_platform(r=None, p=None):
     """
     Return a safe shorter version of platform.platform().
 
-    The old default Pytensor compiledir used platform.platform in
+    The old default PyTensor compiledir used platform.platform in
     it. This use the platform.version() as a substring. This is too
     specific as it contain the full kernel number and package
     version. This cause the compiledir to change each time there is a
@@ -370,7 +370,7 @@ def add_basic_configvars():
     config.add(
         "unpickle_function",
         (
-            "Replace unpickled Pytensor functions with None. "
+            "Replace unpickled PyTensor functions with None. "
             "This is useful to unpickle old graphs that pickled"
             " them when it shouldn't"
         ),
@@ -479,16 +479,16 @@ def add_compile_configvars():
         if type(config).cxx.is_default:
             # If the user provided an empty value for cxx, do not warn.
             _logger.warning(
-                "g++ not detected!  Pytensor will be unable to compile "
+                "g++ not detected!  PyTensor will be unable to compile "
                 "C-implementations and will default to Python. "
                 "Performance may be severely degraded. "
-                "To remove this warning, set Pytensor flags cxx to an empty string."
+                "To remove this warning, set PyTensor flags cxx to an empty string."
             )
 
     # Keep the default value the same as the one for the mode FAST_RUN
     config.add(
         "allow_gc",
-        "Do we default to delete intermediate results during Pytensor"
+        "Do we default to delete intermediate results during PyTensor"
         " function calls? Doing so lowers the memory requirement, but"
         " asks that we reallocate memory at the next function call."
         " This is implemented for the default linker, but may not work"
@@ -561,7 +561,7 @@ def add_compile_configvars():
     config.add(
         "cmodule__remove_gxx_opt",
         "If True, will remove the -O* parameter passed to g++."
-        "This is useful to debug in gdb modules compiled by Pytensor."
+        "This is useful to debug in gdb modules compiled by PyTensor."
         "The parameter -g is passed by default to g++",
         BoolParam(False),
         # TODO: change so that this isn't needed.
@@ -585,7 +585,7 @@ def add_compile_configvars():
 
     config.add(
         "cmodule__age_thresh_use",
-        "In seconds. The time after which " "Pytensor won't reuse a compile c module.",
+        "In seconds. The time after which " "PyTensor won't reuse a compile c module.",
         # 24 days
         IntParam(60 * 60 * 24 * 24, mutable=False),
         in_c_key=False,
@@ -632,7 +632,7 @@ def _is_valid_cmp_sloppy(v):
 
 def add_tensor_configvars():
 
-    # This flag is used when we import Pytensor to initialize global variables.
+    # This flag is used when we import PyTensor to initialize global variables.
     # So changing it after import will not modify these global variables.
     # This could be done differently... but for now we simply prevent it from being
     # changed at runtime.
@@ -688,7 +688,7 @@ def add_traceback_configvars():
     config.add(
         "traceback__compile_limit",
         "The number of stack to trace to keep during compilation. -1 mean all."
-        " If greater then 0, will also make us save Pytensor internal stack trace.",
+        " If greater then 0, will also make us save PyTensor internal stack trace.",
         IntParam(0),
         in_c_key=False,
     )
@@ -724,9 +724,9 @@ def add_error_and_warning_configvars():
     config.add(
         "warn__ignore_bug_before",
         (
-            "If 'None', we warn about all Pytensor bugs found by default. "
-            "If 'all', we don't warn about Pytensor bugs found by default. "
-            "If a version, we print only the warnings relative to Pytensor "
+            "If 'None', we warn about all PyTensor bugs found by default. "
+            "If 'all', we don't warn about PyTensor bugs found by default. "
+            "If a version, we print only the warnings relative to PyTensor "
             "bugs found after that version. "
             "Warning for specific bugs can be configured with specific "
             "[warn] flags."
@@ -791,7 +791,7 @@ def add_testvalue_and_checking_configvars():
     config.add(
         "print_test_value",
         (
-            "If 'True', the __eval__ of an Pytensor variable will return its test_value "
+            "If 'True', the __eval__ of an PyTensor variable will return its test_value "
             "when this is available. This has the practical conseguence that, e.g., "
             "in debugging `my_var` will print the same as `my_var.tag.test_value` "
             "when a test value is defined."
@@ -803,7 +803,7 @@ def add_testvalue_and_checking_configvars():
     config.add(
         "compute_test_value",
         (
-            "If 'True', Pytensor will run each op at graph build time, using "
+            "If 'True', PyTensor will run each op at graph build time, using "
             "Constants, SharedVariables and the tag 'test_value' as inputs "
             "to the function. This helps the user track down problems in the "
             "graph before it gets optimized."
@@ -815,9 +815,9 @@ def add_testvalue_and_checking_configvars():
     config.add(
         "compute_test_value_opt",
         (
-            "For debugging Pytensor optimization only."
+            "For debugging PyTensor optimization only."
             " Same as compute_test_value, but is used"
-            " during Pytensor optimization"
+            " during PyTensor optimization"
         ),
         EnumStr("off", ["ignore", "warn", "raise", "pdb"]),
         in_c_key=False,
@@ -997,7 +997,7 @@ def add_testvalue_and_checking_configvars():
 
     config.add(
         "profiling__ignore_first_call",
-        """Do we ignore the first call of an Pytensor function.""",
+        """Do we ignore the first call of an PyTensor function.""",
         BoolParam(False),
         in_c_key=False,
     )
@@ -1045,13 +1045,13 @@ def add_multiprocessing_configvars():
         "Allow (or not) parallel computation on the CPU with OpenMP. "
         "This is the default value used when creating an Op that "
         "supports OpenMP parallelization. It is preferable to define it "
-        "via the Pytensor configuration file ~/.pytensorrc or with the "
+        "via the PyTensor configuration file ~/.pytensorrc or with the "
         "environment variable PYTENSOR_FLAGS. Parallelization is only "
         "done for some operations that implement it, and even for "
         "operations that implement parallelism, each operation is free "
         "to respect this flag or not. You can control the number of "
         "threads used with the environment variable OMP_NUM_THREADS."
-        " If it is set to 1, we disable openmp in Pytensor by default.",
+        " If it is set to 1, we disable openmp in PyTensor by default.",
         BoolParam(default_openmp),
         in_c_key=False,
     )
@@ -1376,7 +1376,7 @@ def add_caching_dir_configvars():
     # part of the roaming part of the user profile. Instead we use the local part
     # of the user profile, when available.
     if sys.platform == "win32" and os.getenv("LOCALAPPDATA") is not None:
-        default_base_compiledir = os.path.join(os.getenv("LOCALAPPDATA"), "Pytensor")
+        default_base_compiledir = os.path.join(os.getenv("LOCALAPPDATA"), "PyTensor")
     else:
         default_base_compiledir = os.path.join(_get_home_dir(), ".pytensor")
 
@@ -1397,7 +1397,7 @@ def add_caching_dir_configvars():
     )
 
 
-# Those are the options provided by Pytensor to choose algorithms at runtime.
+# Those are the options provided by PyTensor to choose algorithms at runtime.
 SUPPORTED_DNN_CONV_ALGO_RUNTIME = (
     "guess_once",
     "guess_on_shape_change",
@@ -1405,7 +1405,7 @@ SUPPORTED_DNN_CONV_ALGO_RUNTIME = (
     "time_on_shape_change",
 )
 
-# Those are the supported algorithm by Pytensor,
+# Those are the supported algorithm by PyTensor,
 # The tests will reference those lists.
 SUPPORTED_DNN_CONV_ALGO_FWD = (
     "small",
@@ -1443,7 +1443,7 @@ SUPPORTED_DNN_CONV_PRECISION = (
     "float64",
 )
 
-# Eventually, the instance of `PytensorConfigParser` should be created right here,
+# Eventually, the instance of `PyTensorConfigParser` should be created right here,
 # where it is also populated with settings.  But for a transition period, it
 # remains as `configparser._config`, while everybody accessing it through
 # `configparser.config` is flooded with deprecation warnings. These warnings

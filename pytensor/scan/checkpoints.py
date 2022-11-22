@@ -45,12 +45,12 @@ def scan_checkpoints(
         for more information.
 
     sequences
-        ``sequences`` is the list of Pytensor variables or dictionaries
+        ``sequences`` is the list of PyTensor variables or dictionaries
         describing the sequences ``scan`` has to iterate over. All
         sequences must be the same length in this version of ``scan``.
 
     outputs_info
-        ``outputs_info`` is the list of Pytensor variables or dictionaries
+        ``outputs_info`` is the list of PyTensor variables or dictionaries
         describing the initial state of the outputs computed
         recurrently.
 
@@ -62,7 +62,7 @@ def scan_checkpoints(
 
     n_steps
         ``n_steps`` is the number of steps to iterate given as an int
-        or Pytensor scalar (> 0). If any of the input sequences do not have
+        or PyTensor scalar (> 0). If any of the input sequences do not have
         enough elements, scan will raise an error. If n_steps is not provided,
         ``scan`` will figure out the amount of steps it should run given its
         input sequences.
@@ -90,7 +90,7 @@ def scan_checkpoints(
 
     See Also
     --------
-    :func:`~pytensor.scan`: Looping in Pytensor.
+    :func:`~pytensor.scan`: Looping in PyTensor.
 
     """
     # Standardize the format of input arguments

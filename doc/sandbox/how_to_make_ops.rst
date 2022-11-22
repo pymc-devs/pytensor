@@ -53,7 +53,7 @@ The :meth:`Op.make_node` method is expected to have the following signature:
 
 ``inputs`` may be a list of anything that the user wants to provide as symbolic
 input (symbolic: standing for the actual values that will be passed when the
-graph is compiled into an executable function). [*The Pytensor intro should
+graph is compiled into an executable function). [*The PyTensor intro should
 describe symbolic in greater depth, and we should link to that from here.*] This
 may or may not include Variable instances (but if you want the inputs of this Op
 to sometimes be outputs of another Op, then the inputs should be Variable
@@ -187,7 +187,7 @@ Advanced note: for an Op with multiple outputs, it is possible that some of them
 grad
 ====
 
-``grad`` is an Pytensor-specific [*as opposed to?*]  function - it does not interface with core rewrite and compilation facilities, but it provides a useful interface to differentiation. Its expected signature is:
+``grad`` is an PyTensor-specific [*as opposed to?*]  function - it does not interface with core rewrite and compilation facilities, but it provides a useful interface to differentiation. Its expected signature is:
 
 .. code-block:: python
 
@@ -212,7 +212,7 @@ Essentially, the semantics are:
 	   return gz*dz/dx + gw*dw/dx, gz*dz/dy + gw*dw/dy
 
 More specifically,
-``grad`` must return a list or tuple of input gradients, as many as there are inputs. Let C be a Variable (currently assumed to be a scalar) that depends through an Pytensor symbolic expression on the node outputs. Then each output_gradients[i] represents symbolically dC/doutputs[i]. The returned input gradients should represent symbolically dC/dinputs[i].
+``grad`` must return a list or tuple of input gradients, as many as there are inputs. Let C be a Variable (currently assumed to be a scalar) that depends through an PyTensor symbolic expression on the node outputs. Then each output_gradients[i] represents symbolically dC/doutputs[i]. The returned input gradients should represent symbolically dC/dinputs[i].
 
 Example:
 

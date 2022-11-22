@@ -20,7 +20,7 @@ Printing during execution
 -------------------------
 
 Intermediate values in a computation cannot be printed in
-the normal python way with the print statement, because Pytensor has no *statements*.
+the normal python way with the print statement, because PyTensor has no *statements*.
 Instead there is the :class:`Print` Op.
 
 >>> from pytensor import tensor as at, function, printing
@@ -43,11 +43,11 @@ then `a` will print before `b`.
 Printing graphs
 ---------------
 
-Pytensor provides two functions (:func:`pytensor.pp` and
+PyTensor provides two functions (:func:`pytensor.pp` and
 :func:`pytensor.printing.debugprint`) to print a graph to the terminal before or after
 compilation.  These two functions print expression graphs in different ways:
 :func:`pp` is more compact and math-like, :func:`debugprint` is more verbose.
-Pytensor also provides :func:`pytensor.printing.pydotprint` that creates a png image of the function.
+PyTensor also provides :func:`pytensor.printing.pydotprint` that creates a png image of the function.
 
 1) The first is :func:`pytensor.pp`.
 
@@ -180,7 +180,7 @@ Reference
         :param x: any symbolic variable
         :returns: symbolic identity(x)
 
-        When you use the return-value from this function in an Pytensor function,
+        When you use the return-value from this function in an PyTensor function,
         running the function will print the value that `x` takes in the graph.
 
 
