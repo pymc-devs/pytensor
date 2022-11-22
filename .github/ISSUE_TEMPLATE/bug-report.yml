@@ -55,7 +55,7 @@ body:
 
 - type: textarea
   attributes:
-    label: "PyMC version information:"
+    label: "Pytensor version information:"
     description: >
       Pytensor Version:
       Python Version:
