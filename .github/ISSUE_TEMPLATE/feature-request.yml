@@ -19,7 +19,7 @@ body:
       [Discussions](https://github.com/pymc-devs/pytensor/discussions)
       to validate it and bring attentino to it. After validation,
       you can open this issue for a more technical developer discussion.
-      [Contributor Guide](https://github.com/pymc-devs/pytensor/blob/main/CONTRIBUTING.md)
+      Check the [Contributor Guide](https://github.com/pymc-devs/pytensor/blob/main/CONTRIBUTING.md)
       if you need more information.
 
 - type: textarea
