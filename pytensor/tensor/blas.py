@@ -6,12 +6,12 @@ Learn more about BLAS here:
 The standard BLAS libraries implement what is called "legacy BLAS" in that
 document.
 
-This documentation describes Pytensor's BLAS optimization pipeline.
+This documentation describes PyTensor's BLAS optimization pipeline.
 
 Where there is a discrepancy between how things do work and how they *should*
 work, both aspects should be documented.
 
-There are four kinds of BLAS Ops in Pytensor:
+There are four kinds of BLAS Ops in PyTensor:
     - Python implementations (this file)
     - SciPy-based (blas_scipy)
     - C-based (blas_c)
@@ -202,7 +202,7 @@ except ImportError as e:
     if not config.blas__ldflags:
         _logger.warning(
             "Failed to import scipy.linalg.blas, and "
-            "Pytensor flag blas__ldflags is empty. "
+            "PyTensor flag blas__ldflags is empty. "
             "Falling back on slower implementations for "
             "dot(matrix, vector), dot(vector, matrix) and "
             f"dot(vector, vector) ({str(e)})"
@@ -949,7 +949,7 @@ class Gemm(GemmRelated):
         # declare to be inplace only on z. So to make it safe, we
         # raise an error if z can be a view on x or y.
 
-        # I don't know if Pytensor currently can support that case. As
+        # I don't know if PyTensor currently can support that case. As
         # this case don't happen in our code, I won't spent time
         # investigating this. So the assert is for safety.  I also
         # think there is another mechanism that would prevent this,
@@ -1186,7 +1186,7 @@ class Gemm(GemmRelated):
 
 gemm_inplace = Gemm(inplace=True)
 gemm_no_inplace = Gemm(inplace=False)
-# For the user interface. Pytensor optimization will make them inplace
+# For the user interface. PyTensor optimization will make them inplace
 gemm = gemm_no_inplace
 pprint.assign(gemm_inplace, FunctionPrinter(["gemm_inplace"]))
 pprint.assign(gemm_no_inplace, FunctionPrinter(["gemm_no_inplace"]))
@@ -1427,7 +1427,7 @@ def _gemm_from_factored_list(fgraph, lst):
     # This can happen when we try to cast a complex to a real
     for sM in lst:
         # Make every pair in list have matching dtypes
-        # sM can be a tuple of 2 elements or an Pytensor variable.
+        # sM can be a tuple of 2 elements or an PyTensor variable.
         if isinstance(sM, tuple):
             sm0, sm1 = sM
             sm0 = at.as_tensor_variable(sm0)
@@ -1875,7 +1875,7 @@ def local_dot22_to_ger_or_gemv(fgraph, node):
             new_out = [rval]
         elif xb[0] and yb[1]:
             # x and y are both vectors so this qualifies for a sdot / ddot
-            # TODO: Pytensor doesn't have a sdot, but gemv is better than _dot22
+            # TODO: PyTensor doesn't have a sdot, but gemv is better than _dot22
             xv = x.dimshuffle(1)
             zeros = at.AllocEmpty(x.dtype)(1)
             rval = gemv_no_inplace(zeros, one, y.T, xv, zero)
@@ -2691,12 +2691,12 @@ def batched_dot(a, b):
     following sequence:
 
         1.  If either a or b is a vector, it returns the batched elementwise
-            product without calling the Pytensor BatchedDot op.
+            product without calling the PyTensor BatchedDot op.
 
-        2.  If both a and b have either 2 or 3 dimensions, it calls Pytensor's
+        2.  If both a and b have either 2 or 3 dimensions, it calls PyTensor's
             BatchedDot op on a and b.
 
-        3.  If either a or b has more than 3 dimensions, it calls Pytensor's
+        3.  If either a or b has more than 3 dimensions, it calls PyTensor's
             batched_tensordot function with appropriate axes. The
             batched_tensordot function expresses high-dimensional batched
             dot products in terms of batched matrix-matrix dot products, so

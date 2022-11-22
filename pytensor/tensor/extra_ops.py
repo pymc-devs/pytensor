@@ -829,7 +829,7 @@ class Bartlett(Op):
         if M.ndim != 0:
             raise TypeError(f"{self.__class__.__name__} only works on scalar input")
         elif M.dtype not in integer_dtypes:
-            # dtype is an Pytensor attribute here
+            # dtype is an PyTensor attribute here
             raise TypeError(f"{self.__class__.__name__} only works on integer input")
         return Apply(self, [M], [dvector()])
 
@@ -1333,7 +1333,7 @@ def unravel_index(indices, dims, order="C"):
 
     Parameters
     ----------
-    indices : Pytensor or NumPy array
+    indices : PyTensor or NumPy array
         An integer array whose elements are indices into the flattened
         version of an array of dimensions `dims`.
     dims : tuple of ints
@@ -1403,7 +1403,7 @@ def ravel_multi_index(multi_index, dims, mode="raise", order="C"):
 
     Parameters
     ----------
-    multi_index : tuple of Pytensor or NumPy arrays
+    multi_index : tuple of PyTensor or NumPy arrays
         A tuple of integer arrays, one array for each dimension.
     dims : tuple of ints
         The shape of array into which the indices from ``multi_index`` apply.

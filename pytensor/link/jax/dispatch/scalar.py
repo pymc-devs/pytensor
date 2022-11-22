@@ -20,7 +20,7 @@ def jax_funcify_ScalarOp(op, **kwargs):
 
     if hasattr(op, "nfunc_variadic"):
         # These are special cases that handle invalid arities due to the broken
-        # Pytensor `Op` type contract (e.g. binary `Op`s that also function as
+        # PyTensor `Op` type contract (e.g. binary `Op`s that also function as
         # their own variadic counterparts--even when those counterparts already
         # exist as independent `Op`s).
         jax_variadic_func = getattr(jnp, op.nfunc_variadic)
@@ -125,8 +125,8 @@ def jax_funcify_Psi(op, node, **kwargs):
 @jax_funcify.register(Softplus)
 def jax_funcify_Softplus(op, **kwargs):
     def softplus(x):
-        # This expression is numerically equivalent to the Pytensor one
-        # It just contains one "speed" optimization less than the Pytensor counterpart
+        # This expression is numerically equivalent to the PyTensor one
+        # It just contains one "speed" optimization less than the PyTensor counterpart
         return jnp.where(
             x < -37.0, jnp.exp(x), jnp.where(x > 33.3, x, jnp.log1p(jnp.exp(x)))
         )

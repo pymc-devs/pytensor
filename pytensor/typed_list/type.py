@@ -19,7 +19,7 @@ class TypedListType(CType):
         if depth < 0:
             raise ValueError("Please specify a depth superior or" "equal to 0")
         if not isinstance(ttype, Type):
-            raise TypeError("Expected an Pytensor Type")
+            raise TypeError("Expected an PyTensor Type")
 
         if depth == 0:
             self.ttype = ttype

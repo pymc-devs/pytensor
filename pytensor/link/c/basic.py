@@ -1417,7 +1417,7 @@ class CLinker(Linker):
             if isinstance(i, AtomicVariable):  # orphans
                 if id(i) not in constant_ids:
                     isig = (i.signature(), topological_pos, i_idx)
-                    # If the Pytensor constant provides a strong hash
+                    # If the PyTensor constant provides a strong hash
                     # (no collision for transpose, 2, 1, 0, -1, -2,
                     # 2 element swapped...) we put this hash in the signature
                     # instead of the value. This makes the key file much
@@ -1808,7 +1808,7 @@ class OpWiseCLinker(LocalLinker):
 
     Notes
     -----
-    This is in a sense the 'default' linker for Pytensor. The
+    This is in a sense the 'default' linker for PyTensor. The
     overhead of using the OpWiseCLinker as compared with the CLinker
     is only noticeable for graphs of very small tensors (such as 20
     elements or less).

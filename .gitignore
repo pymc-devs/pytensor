@@ -39,7 +39,7 @@ pytensor/generated_version.py
 pytensor/generated_version.py.out
 distribute-*.egg
 distribute-*.tar.gz
-Pytensor.suo
+PyTensor.suo
 .ipynb_checkpoints
 .pydevproject
 .ropeproject

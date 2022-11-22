@@ -581,7 +581,7 @@ class JITLinker(PerformLinker):
     """A ``Linker`` that JIT compiles a ``FunctionGraph`` into a single runnable thunk.
 
     The entirety of ``Linker.fgraph`` is converted into a single JIT compiled
-    thunk that is run by an Pytensor ``VM``.
+    thunk that is run by an PyTensor ``VM``.
 
     """
 

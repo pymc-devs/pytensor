@@ -192,7 +192,7 @@ class Assert(CheckAndRaise):
 
     """
 
-    def __init__(self, msg="Pytensor Assert failed!"):
+    def __init__(self, msg="PyTensor Assert failed!"):
         super().__init__(AssertionError, msg)
 
     def __str__(self):

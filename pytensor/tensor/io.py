@@ -75,7 +75,7 @@ def load(path, dtype, shape, mmap_mode=None):
         will be mapped into virtual memory, so only the parts that are
         needed will be actually read from disk and put into memory.
         Other modes supported by numpy.load ('r', 'r+', 'w+') cannot
-        be supported by Pytensor.
+        be supported by PyTensor.
 
     Examples
     --------

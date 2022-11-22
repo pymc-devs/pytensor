@@ -6,7 +6,7 @@ Loading and Saving
 ==================
 
 Python's standard way of saving class instances and reloading them
-is the pickle_ mechanism. Many Pytensor objects can be *serialized* (and
+is the pickle_ mechanism. Many PyTensor objects can be *serialized* (and
 *deserialized*) by ``pickle``, however, a limitation of ``pickle`` is that
 it does not save the code or data of a class along with the instance of
 the class being serialized. As a result, reloading objects created by a
@@ -15,8 +15,8 @@ previous version of a class can be really problematic.
 Thus, you will want to consider different mechanisms depending on
 the amount of time you anticipate between saving and reloading.  For
 short-term (such as temp files and network transfers), pickling of
-the Pytensor objects or classes is possible.  For longer-term (such as
-saving models from an experiment) you should not rely on pickled Pytensor
+the PyTensor objects or classes is possible.  For longer-term (such as
+saving models from an experiment) you should not rely on pickled PyTensor
 objects; we recommend loading and saving the underlying shared objects
 as you would in the course of any other Python program.
 
@@ -125,13 +125,13 @@ For instance, you can define functions along the lines of:
 Robust Serialization
 ====================
 
-This type of serialization uses some helper functions particular to Pytensor. It
+This type of serialization uses some helper functions particular to PyTensor. It
 serializes the object using Python's pickling protocol, but any ``ndarray`` or
 ``CudaNdarray`` objects contained within the object are saved separately as NPY
 files. These NPY files and the Pickled file are all saved together in single
 ZIP-file.
 
-The main advantage of this approach is that you don't even need Pytensor installed
+The main advantage of this approach is that you don't even need PyTensor installed
 in order to look at the values of shared variables that you pickled. You can
 just load the parameters manually with `numpy`.
 
@@ -141,7 +141,7 @@ just load the parameters manually with `numpy`.
     numpy.load('model.zip')
 
 This approach could be beneficial if you are sharing your model with people who
-might not have Pytensor installed, who are using a different Python version, or if
+might not have PyTensor installed, who are using a different Python version, or if
 you are planning to save your model for a long time (in which case version
 mismatches might make it difficult to unpickle objects).
 

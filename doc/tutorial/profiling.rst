@@ -2,7 +2,7 @@
 .. _tut_profiling:
 
 ===========================
-Profiling Pytensor function
+Profiling PyTensor function
 ===========================
 
 .. note::
@@ -14,13 +14,13 @@ Besides checking for errors, another important task is to profile your code in
 terms of speed and/or memory usage.  You can profile your functions using either
 of the following two options:
 
-1. Use the Pytensor flag :attr:`config.profile` to enable profiling.
-    - To enable the memory profiler use the Pytensor flag:
+1. Use the PyTensor flag :attr:`config.profile` to enable profiling.
+    - To enable the memory profiler use the PyTensor flag:
       :attr:`config.profile_memory` in addition to :attr:`config.profile`.
-    - Moreover, to enable the profiling of Pytensor rewrite phases,
-      use the Pytensor flag: :attr:`config.profile_optimizer` in addition
+    - Moreover, to enable the profiling of PyTensor rewrite phases,
+      use the PyTensor flag: :attr:`config.profile_optimizer` in addition
       to :attr:`config.profile`.
-    - You can also use the Pytensor flags :attr:`profiling__n_apply`,
+    - You can also use the PyTensor flags :attr:`profiling__n_apply`,
       :attr:`profiling__n_ops` and :attr:`profiling__min_memory_size`
       to modify the quantity of information printed.
 
@@ -42,17 +42,17 @@ of the following two options:
 
 
 
-The profiler will output one profile per Pytensor function and produce a profile
+The profiler will output one profile per PyTensor function and produce a profile
 that is the sum of the printed profiles. Each profile contains four sections:
 global info, class info, `Op`\s info and `Apply` node info.
 
-In the global section, the "Message" is the name of the Pytensor
+In the global section, the "Message" is the name of the PyTensor
 function. :func:`pytensor.function` has an optional parameter ``name`` that
 defaults to ``None``. Change it to something else to help profile many
-Pytensor functions. In that section, we also see the number of times the
+PyTensor functions. In that section, we also see the number of times the
 function was called (1) and the total time spent in all those
 calls. The time spent in :meth:`Function.vm.__call__` and in thunks is useful
-to understand Pytensor's overhead.
+to understand PyTensor's overhead.
 
 Also, we see the time spent in the two parts of the compilation process:
 rewriting (i.e. modifying the graph to make it more stable/faster) and the
@@ -75,7 +75,7 @@ focus on the worst offending `Op`\s and `Apply` nodes--either by optimizing
 an implementation, providing a missing C implementation, or by writing
 a graph rewrite that eliminates the offending `Op` altogether.
 
-Here is some example output when Pytensor's rewrites are disabled. With all
+Here is some example output when PyTensor's rewrites are disabled. With all
 rewrites enabled, there would be only one `Op` remaining in the graph.
 
 To run the example:

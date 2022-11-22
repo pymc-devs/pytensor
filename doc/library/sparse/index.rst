@@ -8,7 +8,7 @@
 In the tutorial section, you can find a :ref:`sparse tutorial
 <tutsparse>`.
 
-The sparse submodule is not loaded when we import Pytensor. You must
+The sparse submodule is not loaded when we import PyTensor. You must
 import ``pytensor.sparse`` to enable it.
 
 The sparse module provides the same functionality as the tensor
@@ -23,11 +23,11 @@ Compressed Sparse Format
 ========================
 
 This section tries to explain how information is stored for the two
-sparse formats of SciPy supported by Pytensor.
+sparse formats of SciPy supported by PyTensor.
 
 .. Changes to this section should also result in changes to tutorial/sparse.txt.
 
-Pytensor supports two *compressed sparse formats*: ``csc`` and ``csr``,
+PyTensor supports two *compressed sparse formats*: ``csc`` and ``csr``,
 respectively based on columns and rows. They have both the same
 attributes: ``data``, ``indices``, ``indptr`` and ``shape``.
 
@@ -124,7 +124,7 @@ List of Implemented Operations
     - :func:`csr_from_dense <pytensor.sparse.basic.csr_from_dense>`,
       :func:`csc_from_dense <pytensor.sparse.basic.csc_from_dense>`.
       The grad implemented is structured.
-    - Pytensor SparseVariable objects have a method ``toarray()`` that is the same as
+    - PyTensor SparseVariable objects have a method ``toarray()`` that is the same as
       :func:`dense_from_sparse <pytensor.sparse.basic.dense_from_sparse>`.
 
 - Construction of Sparses and their Properties

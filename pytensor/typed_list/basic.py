@@ -666,14 +666,14 @@ class MakeList(Op):
 
 make_list = MakeList()
 """
-Build a Python list from those Pytensor variable.
+Build a Python list from those PyTensor variable.
 
 Parameters
 ----------
-a : tuple/list of Pytensor variable
+a : tuple/list of PyTensor variable
 
 Notes
 -----
-All Pytensor variables must have the same type.
+All PyTensor variables must have the same type.
 
 """

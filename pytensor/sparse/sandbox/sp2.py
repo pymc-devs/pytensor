@@ -16,7 +16,7 @@ from pytensor.tensor.type import discrete_dtypes, float_dtypes
 
 
 # Probability Ops are currently back in sandbox, because they do not respect
-# Pytensor's Op contract, as their behaviour is not reproducible: calling
+# PyTensor's Op contract, as their behaviour is not reproducible: calling
 # the perform() method twice with the same argument will yield different
 # results.
 # from pytensor.sparse.basic import (
@@ -36,7 +36,7 @@ class Poisson(Op):
 
     WARNING: This Op is NOT deterministic, as calling it twice with the
     same inputs will NOT give the same result. This is a violation of
-    Pytensor's contract for Ops
+    PyTensor's contract for Ops
 
     :param x: Sparse matrix.
 
@@ -82,7 +82,7 @@ class Binomial(Op):
 
     WARNING: This Op is NOT deterministic, as calling it twice with the
     same inputs will NOT give the same result. This is a violation of
-    Pytensor's contract for Ops
+    PyTensor's contract for Ops
 
     :param n: Tensor scalar representing the number of experiment.
     :param p: Tensor scalar representing the probability of success.
@@ -153,7 +153,7 @@ class Multinomial(Op):
 
     WARNING: This Op is NOT deterministic, as calling it twice with the
     same inputs will NOT give the same result. This is a violation of
-    Pytensor's contract for Ops
+    PyTensor's contract for Ops
 
     :param n: Tensor type vector or scalar representing the number of
               experiment for each row. If `n` is a scalar, it will be

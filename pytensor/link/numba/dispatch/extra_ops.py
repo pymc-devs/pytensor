@@ -283,7 +283,7 @@ def numba_funcify_UnravelIndex(op, node, **kwargs):
         a[1:] = shape[:0:-1]
         a = np.cumprod(a)[::-1]
 
-        # Pytensor actually returns a `tuple` of these values, instead of an
+        # PyTensor actually returns a `tuple` of these values, instead of an
         # `ndarray`; however, this `ndarray` result should be able to be
         # unpacked into a `tuple`, so this discrepancy shouldn't really matter
         return ((maybe_expand_dim(arr) // a) % shape).T

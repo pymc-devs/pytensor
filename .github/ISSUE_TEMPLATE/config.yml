@@ -2,4 +2,4 @@ blank_issues_enabled: false
 contact_links:
   - name: PyMC Discourse
     url: https://discourse.pymc.io/
-    about: Ask usage questions about PyMC or Pytensor
+    about: Ask usage questions about PyMC or PyTensor

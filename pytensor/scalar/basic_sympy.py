@@ -37,7 +37,7 @@ class SymPyCCode(ScalarOp):
     >>> op = SymPyCCode([x, y], x + y)
 
     >>> from pytensor.scalar.basic import floats
-    >>> xt, yt = floats('xy') # Pytensor variables
+    >>> xt, yt = floats('xy') # PyTensor variables
     >>> zt = op(xt, yt)
 
     >>> import pytensor

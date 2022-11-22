@@ -11,7 +11,7 @@ from pytensor.configparser import ConfigParam
 
 
 def _create_test_config():
-    return configparser.PytensorConfigParser(
+    return configparser.PyTensorConfigParser(
         flags_dict={},
         pytensor_cfg=stdlib_configparser.ConfigParser(),
         pytensor_raw_cfg=stdlib_configparser.RawConfigParser(),
@@ -65,7 +65,7 @@ def test_api_redirect():
 
 
 def test_invalid_default():
-    # Ensure an invalid default value found in the Pytensor code only causes
+    # Ensure an invalid default value found in the PyTensor code only causes
     # a crash if it is not overridden by the user.
 
     root = _create_test_config()
@@ -177,9 +177,9 @@ class TestConfigTypes:
     def test_deviceparam(self):
         cp = configparser.DeviceParam("cpu", mutable=False)
         assert cp.default == "cpu"
-        with pytest.raises(ValueError, match="It was removed from Pytensor"):
+        with pytest.raises(ValueError, match="It was removed from PyTensor"):
             cp._apply("cuda123")
-        with pytest.raises(ValueError, match="It was removed from Pytensor"):
+        with pytest.raises(ValueError, match="It was removed from PyTensor"):
             cp._apply("gpu123")
         with pytest.raises(ValueError, match='Valid options start with one of "cpu".'):
             cp._apply("notadevice")

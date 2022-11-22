@@ -694,7 +694,7 @@ def norm(x, ord):
 class TensorInv(Op):
     """
     Class wrapper for tensorinv() function;
-    Pytensor utilization of numpy.linalg.tensorinv;
+    PyTensor utilization of numpy.linalg.tensorinv;
     """
 
     _numop = staticmethod(np.linalg.tensorinv)
@@ -720,7 +720,7 @@ class TensorInv(Op):
 
 def tensorinv(a, ind=2):
     """
-    Pytensor utilization of numpy.linalg.tensorinv;
+    PyTensor utilization of numpy.linalg.tensorinv;
 
     Compute the 'inverse' of an N-dimensional array.
     The result is an inverse for `a` relative to the tensordot operation
@@ -752,7 +752,7 @@ def tensorinv(a, ind=2):
 
 class TensorSolve(Op):
     """
-    Pytensor utilization of numpy.linalg.tensorsolve
+    PyTensor utilization of numpy.linalg.tensorsolve
     Class wrapper for tensorsolve function.
 
     """
@@ -781,7 +781,7 @@ class TensorSolve(Op):
 
 def tensorsolve(a, b, axes=None):
     """
-    Pytensor utilization of numpy.linalg.tensorsolve.
+    PyTensor utilization of numpy.linalg.tensorsolve.
 
     Solve the tensor equation ``a x = b`` for x.
     It is assumed that all indices of `x` are summed over in the product,

@@ -14,7 +14,7 @@ It has to define the following methods.
   This method is responsible for creating output :class:`Variable`\s of a
   suitable symbolic `Type` to serve as the outputs of this :Class:`Op`'s
   application.  The :class:`Variable`\s found in ``*inputs`` must be operated on
-  using Pytensor's symbolic language to compute the symbolic output
+  using PyTensor's symbolic language to compute the symbolic output
   :class:`Variable`\s. This method should put these outputs into an :class:`Apply`
   instance, and return the :class:`Apply` instance.
 
@@ -167,7 +167,7 @@ Optional methods or attributes
    By default this is a convenience function which calls
    :meth:`make_node` with the supplied arguments and returns the
    result indexed by `default_output`.  This can be overridden by
-   subclasses to do anything else, but must return either an Pytensor
+   subclasses to do anything else, but must return either an PyTensor
    :class:`Variable` or a list of :class:`Variable`\s.
 
    If you feel the need to override `__call__` to change the graph
@@ -190,7 +190,7 @@ Optional methods or attributes
    The function should return a list with one tuple for each output.
    Each tuple should contain the corresponding output's computed shape.
 
-   Implementing this method will allow Pytensor to compute the output's
+   Implementing this method will allow PyTensor to compute the output's
    shape without computing the output itself, potentially sparing you
    a costly recomputation.
 
@@ -220,7 +220,7 @@ Optional methods or attributes
 
    By default when rewrites are enabled, we remove during
    function compilation :class:`Apply` nodes whose inputs are all constants.
-   We replace the :class:`Apply` node with an Pytensor constant variable.
+   We replace the :class:`Apply` node with an PyTensor constant variable.
    This way, the :class:`Apply` node is not executed at each function
    call. If you want to force the execution of an :class:`Op` during the
    function call, make do_constant_folding return False.
@@ -253,8 +253,8 @@ These are the function required to work with :func:`pytensor.gradient.grad`.
 
   If the :class:`Op` being defined is differentiable, its gradient may be
   specified symbolically in this method. Both ``inputs`` and
-  ``output_gradients`` are lists of symbolic Pytensor :class:`Variable`\s and
-  those must be operated on using Pytensor's symbolic language. The :meth:`Op.grad`
+  ``output_gradients`` are lists of symbolic PyTensor :class:`Variable`\s and
+  those must be operated on using PyTensor's symbolic language. The :meth:`Op.grad`
   method must return a list containing one :class:`Variable` for each
   input. Each returned :class:`Variable` represents the gradient with respect
   to that input computed based on the symbolic gradients with respect
@@ -275,7 +275,7 @@ These are the function required to work with :func:`pytensor.gradient.grad`.
   the computation of only disconnected outputs, then :meth:`Op.grad` should
   return :class:`DisconnectedType` variables for those inputs.
 
-  If the :meth:`Op.grad` method is not defined, then Pytensor assumes it has been
+  If the :meth:`Op.grad` method is not defined, then PyTensor assumes it has been
   forgotten.  Symbolic differentiation will fail on a graph that
   includes this :class:`Op`.
 
@@ -336,7 +336,7 @@ These are the function required to work with :func:`pytensor.gradient.grad`.
   :math:`\frac{d C}{d x} = \frac{d C}{d f} * \frac{d f}{d x}`.
 
   Here, the chain rule must be implemented in a similar but slightly
-  more complex setting: Pytensor provides in the list
+  more complex setting: PyTensor provides in the list
   ``output_gradients`` one gradient for each of the :class:`Variable`\s returned
   by the `Op`. Where :math:`f` is one such particular :class:`Variable`, the
   corresponding gradient found in ``output_gradients`` and
@@ -360,7 +360,7 @@ These are the function required to work with :func:`pytensor.gradient.grad`.
   \frac{d f_i}{d x_j}`.  Both the partial differentiation and the
   multiplication have to be performed by :meth:`Op.grad`.
 
-  Pytensor currently imposes the following constraints on the values
+  PyTensor currently imposes the following constraints on the values
   returned by the :meth:`Op.grad` method:
 
   1) They must be :class:`Variable` instances.
@@ -376,7 +376,7 @@ These are the function required to work with :func:`pytensor.gradient.grad`.
   :math:`\frac{d f}{d x} = \lim_{\epsilon \rightarrow 0} (f(x+\epsilon)-f(x))/\epsilon`.
 
   Suppose your function f has an integer-valued output. For most
-  functions you're likely to implement in Pytensor, this means your
+  functions you're likely to implement in PyTensor, this means your
   gradient should be zero, because :math:`f(x+epsilon) = f(x)` for almost all
   :math:`x`. (The only other option is that the gradient could be undefined,
   if your function is discontinuous everywhere, like the rational
@@ -385,14 +385,14 @@ These are the function required to work with :func:`pytensor.gradient.grad`.
   Suppose your function :math:`f` has an integer-valued input. This is a
   little trickier, because you need to think about what you mean
   mathematically when you make a variable integer-valued in
-  Pytensor. Most of the time in machine learning we mean ":math:`f` is a
+  PyTensor. Most of the time in machine learning we mean ":math:`f` is a
   function of a real-valued :math:`x`, but we are only going to pass in
   integer-values of :math:`x`". In this case, :math:`f(x+\epsilon)` exists, so the
   gradient through :math:`f` should be the same whether :math:`x` is an integer or a
   floating point variable. Sometimes what we mean is ":math:`f` is a function
   of an integer-valued :math:`x`, and :math:`f` is only defined where :math:`x` is an
   integer." Since :math:`f(x+\epsilon)` doesn't exist, the gradient is
-  undefined.  Finally, many times in Pytensor, integer valued inputs
+  undefined.  Finally, many times in PyTensor, integer valued inputs
   don't actually affect the elements of the output, only its shape.
 
   If your function :math:`f` has both an integer-valued input and an
@@ -451,12 +451,12 @@ These are the function required to work with :func:`pytensor.gradient.grad`.
   elements of all outputs.
 
   This method conveys two pieces of information that are otherwise
-  not part of the Pytensor graph:
+  not part of the PyTensor graph:
 
   1) Which of the :class:`Op`'s inputs are truly ancestors of each of the
      :class:`Op`'s outputs. Suppose an :class:`Op` has two inputs, :math:`x` and :math:`y`, and
      outputs :math:`f(x)` and :math:`g(y)`. :math:`y` is not really an ancestor of :math:`f`, but
-     it appears to be so in the Pytensor graph.
+     it appears to be so in the PyTensor graph.
   2) Whether the actual elements of each input/output are relevant to a
      computation.
      For example, the shape :class:`Op` does not read its input's elements,

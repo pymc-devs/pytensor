@@ -120,9 +120,9 @@ except ImportError:
                 warnings.warn(
                     "The file lazylinker_c.c is not available. This do"
                     "not happen normally. You are probably in a strange"
-                    "setup. This mean Pytensor can not use the cvm:"
-                    "our c execution engine for Pytensor function. If you"
-                    "want to remove this warning, use the Pytensor flag"
+                    "setup. This mean PyTensor can not use the cvm:"
+                    "our c execution engine for PyTensor function. If you"
+                    "want to remove this warning, use the PyTensor flag"
                     "'cxx=' (set to an empty string) to disable all c"
                     "code generation."
                 )

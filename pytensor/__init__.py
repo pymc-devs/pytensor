@@ -1,7 +1,7 @@
 """
-Pytensor is an optimizing compiler in Python, built to evaluate
+PyTensor is an optimizing compiler in Python, built to evaluate
 complicated expressions (especially matrix-valued ones) as quickly as
-possible.  Pytensor compiles expression graphs (see :doc:`graph` ) that
+possible.  PyTensor compiles expression graphs (see :doc:`graph` ) that
 are built by Python code. The expressions in these graphs are called
 `Apply` nodes and the variables in these graphs are called `Variable`
 nodes.
@@ -79,7 +79,7 @@ from pytensor.graph.basic import Variable, clone_replace
 
 
 def as_symbolic(x: Any, name: Optional[str] = None, **kwargs) -> Variable:
-    """Convert `x` into an equivalent Pytensor `Variable`.
+    """Convert `x` into an equivalent PyTensor `Variable`.
 
     Parameters
     ----------

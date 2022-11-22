@@ -5,9 +5,9 @@ Function profiling
   Time in Function.vm.__call__: 1.192093e-05s (20.921%)
   Time in thunks: 6.198883e-06s (10.879%)
   Total compile time: 3.642474e+00s
-    Pytensor rewrite time: 7.326508e-02s
-       Pytensor validate time: 3.712177e-04s
-    Pytensor Linker time (includes C, CUDA code generation/compiling): 9.584920e-01s
+    PyTensor rewrite time: 7.326508e-02s
+       PyTensor validate time: 3.712177e-04s
+    PyTensor Linker time (includes C, CUDA code generation/compiling): 9.584920e-01s
 
 Class
 ---

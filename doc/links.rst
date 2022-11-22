@@ -8,13 +8,13 @@ Links
 This page lists links to various resources.
 
 
-Pytensor requirements
+PyTensor requirements
 ---------------------
 
 - git_: A distributed revision control system (RCS).
 - pytest_: A system for unit testing.
 - numpy_: A library for efficient numerical computing.
-- python_: The programming language in which Pytensor is written.
+- python_: The programming language in which PyTensor is written.
 - scipy_: A library for scientific computing.
 
 

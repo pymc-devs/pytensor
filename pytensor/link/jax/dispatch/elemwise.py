@@ -34,7 +34,7 @@ def jax_funcify_CAReduce(op, **kwargs):
             jax_op = getattr(jnp, op_nfunc_spec[0])
             return jax_op(x, axis=axis).astype(acc_dtype)
 
-        # The Pytensor `Op` didn't tell us which NumPy equivalent to use (or
+        # The PyTensor `Op` didn't tell us which NumPy equivalent to use (or
         # there isn't one), so we use this fallback approach
         if scalar_nfunc_spec:
             scalar_fn_name = scalar_nfunc_spec[0]

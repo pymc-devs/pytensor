@@ -14,14 +14,14 @@ The documentation will be generated in the ``html`` directory.
 
 .. code-block:: bash
 
-    cd Pytensor/
+    cd PyTensor/
     python ./doc/scripts/docgen.py
 
 If you don't want to generate the pdf, do the following:
 
 .. code-block:: bash
 
-    cd Pytensor/
+    cd PyTensor/
     python ./doc/scripts/docgen.py --nopdf
 
 

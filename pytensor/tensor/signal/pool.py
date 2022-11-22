@@ -21,7 +21,7 @@ from pytensor.tensor.type import TensorType, int_dtypes
 
 warnings.warn(
     "The module `pytensor.tensor.signal` is deprecated and will "
-    "be removed from Pytensor in version 2.8.5.",
+    "be removed from PyTensor in version 2.8.5.",
     DeprecationWarning,
     stacklevel=2,
 )
@@ -153,7 +153,7 @@ def pool_2d(
         warnings.warn(
             "pool_2d() will have the parameter ignore_border"
             " default value changed to True (currently"
-            " False). To have consistent behavior with all Pytensor"
+            " False). To have consistent behavior with all PyTensor"
             " version, explicitly add the parameter ignore_border=True.",
             category=DeprecationWarning,
             stacklevel=2,
@@ -269,7 +269,7 @@ def pool_3d(
         warnings.warn(
             "pool_3d() will have the parameter ignore_border"
             " default value changed to True (currently"
-            " False). To have consistent behavior with all Pytensor"
+            " False). To have consistent behavior with all PyTensor"
             " version, explicitly add the parameter ignore_border=True.",
             category=DeprecationWarning,
             stacklevel=2,
@@ -340,7 +340,7 @@ class Pool(OpenMPOp):
 
         Parameters
         ----------
-        imgshape : tuple, list, or similar of integer or scalar Pytensor variable
+        imgshape : tuple, list, or similar of integer or scalar PyTensor variable
             The shape of a tensor of images. The last N elements are
             interpreted as the number of rows, and the number of cols.
         ws : list or tuple of N ints
@@ -988,7 +988,7 @@ class PoolGrad(OpenMPOp):
 
         Parameters
         ----------
-        imgshape : tuple of integers or scalar Pytensor variables
+        imgshape : tuple of integers or scalar PyTensor variables
             the shape of a tensor of images. The last N elements are
             interpreted as the downsampling dimensions.
         ws : tuple of N ints

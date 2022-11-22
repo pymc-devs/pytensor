@@ -6,7 +6,7 @@ More Examples
 =============
 
 At this point it would be wise to begin familiarizing yourself more
-systematically with Pytensor's fundamental objects and operations by
+systematically with PyTensor's fundamental objects and operations by
 browsing this section of the library: :ref:`libdoc_basic_tensor`.
 
 As the tutorial unfolds, you should also gradually acquaint yourself
@@ -74,7 +74,7 @@ array([[ 0.5       ,  0.73105858],
 Computing More than one Thing at the Same Time
 ==============================================
 
-Pytensor supports functions with multiple outputs. For example, we can
+PyTensor supports functions with multiple outputs. For example, we can
 compute the :ref:`element-wise <libdoc_tensor_elemwise>` difference, absolute difference, and
 squared difference between two matrices ``a`` and ``b`` at the same time:
 
@@ -274,7 +274,7 @@ expression that evaluates to a tensor of same shape and dtype.
 
 .. note::
 
-    Pytensor shared variable broadcast pattern default to ``False`` for each
+    PyTensor shared variable broadcast pattern default to ``False`` for each
     dimensions. Shared variable size can change over time, so we can't
     use the shape to find the broadcastable pattern. If you want a
     different pattern, just pass it as a parameter
@@ -289,7 +289,7 @@ expression that evaluates to a tensor of same shape and dtype.
 
 Copying functions
 =================
-Pytensor functions can be copied, which can be useful for creating similar
+PyTensor functions can be copied, which can be useful for creating similar
 functions but with different shared variables or updates. This is done using
 the :func:`pytensor.compile.function.types.Function.copy` method of :class:`Function` objects.
 The optimized graph of the original function is copied, so compilation only
@@ -342,18 +342,18 @@ As expected, the shared state is no longer updated:
 Using Random Numbers
 ====================
 
-Because in Pytensor you first express everything symbolically and
+Because in PyTensor you first express everything symbolically and
 afterwards compile this expression to get functions,
 using pseudo-random numbers is not as straightforward as it is in
 NumPy, though also not too complicated.
 
-The way to think about putting randomness into Pytensor's computations is
-to put random variables in your graph. Pytensor will allocate a NumPy
+The way to think about putting randomness into PyTensor's computations is
+to put random variables in your graph. PyTensor will allocate a NumPy
 `RandomStream` object (a random number generator) for each such
 variable, and draw from it as necessary. We will call this sort of
 sequence of random numbers a *random stream*. *Random streams* are at
 their core shared variables, so the observations on shared variables
-hold here as well. Pytensor's random objects are defined and implemented in
+hold here as well. PyTensor's random objects are defined and implemented in
 :ref:`RandomStream<libdoc_tensor_random_utils>` and, at a lower level,
 in :ref:`RandomVariable<libdoc_tensor_random_basic>`.
 
@@ -424,11 +424,11 @@ As usual for shared variables, the random number generators used for random
 variables are common between functions.  So our ``nearly_zeros`` function will
 update the state of the generators used in function ``f`` above.
 
-Copying Random State Between Pytensor Graphs
+Copying Random State Between PyTensor Graphs
 --------------------------------------------
 
 In some use cases, a user might want to transfer the "state" of all random
-number generators associated with a given Pytensor graph (e.g. ``g1``, with compiled
+number generators associated with a given PyTensor graph (e.g. ``g1``, with compiled
 function ``f1`` below) to a second graph (e.g. ``g2``, with function ``f2``). This might
 arise for example if you are trying to initialize the state of a model, from
 the parameters of a pickled version of a previous model. For
@@ -439,7 +439,7 @@ this can be achieved by copying elements of the `state_updates` parameter.
 Each time a random variable is drawn from a `RandomStream` object, a tuple is
 added to its :attr:`state_updates` list. The first element is a shared variable,
 which represents the state of the random number generator associated with this
-*particular* variable, while the second represents the Pytensor graph
+*particular* variable, while the second represents the PyTensor graph
 corresponding to the random number generation process.
 
 Other Random Distributions
@@ -473,7 +473,7 @@ It will be used repeatedly.
     D = (rng.standard_normal((N, feats)), rng.integers(size=N, low=0, high=2))
     training_steps = 10000
 
-    # Declare Pytensor symbolic variables
+    # Declare PyTensor symbolic variables
     x = at.dmatrix("x")
     y = at.dvector("y")
 
@@ -491,7 +491,7 @@ It will be used repeatedly.
     print(w.get_value())
     print(b.get_value())
 
-    # Construct Pytensor expression graph
+    # Construct PyTensor expression graph
     p_1 = 1 / (1 + at.exp(-at.dot(x, w) - b))       # Probability that target = 1
     prediction = p_1 > 0.5                          # The prediction thresholded
     xent = -y * at.log(p_1) - (1-y) * at.log(1-p_1) # Cross-entropy loss function

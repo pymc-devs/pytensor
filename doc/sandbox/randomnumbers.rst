@@ -11,7 +11,7 @@ Random Numbers
 == Requirements ==
 
 
-Pytensor functions sometimes need random numbers.
+PyTensor functions sometimes need random numbers.
 Random operations are not as simple as other operations such as ones_like, or pow(), because the output must be different when we call the same function repeatedly.  CompileFunction's new default-valued, updatable input variables make this possible.  At the same time we need random streams to be repeatable, and easy to work with.  So the basic requirements of our random number mechanism are:
 
  1. Internal random number generators must be used in a clear manner, and be accessible to the caller after a function has been compiled.

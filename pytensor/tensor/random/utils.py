@@ -32,7 +32,7 @@ def params_broadcast_shapes(param_shapes, ndims_params, use_pytensor=True):
     ndims_params : list of int
         The expected number of dimensions for each element in `params`.
     use_pytensor : bool
-        If ``True``, use Pytensor `Op`; otherwise, use NumPy.
+        If ``True``, use PyTensor `Op`; otherwise, use NumPy.
 
     Returns
     =======
@@ -124,7 +124,7 @@ def broadcast_params(params, ndims_params):
 def normalize_size_param(
     size: Optional[Union[int, np.ndarray, Variable, Sequence]]
 ) -> Variable:
-    """Create an Pytensor value for a ``RandomVariable`` ``size`` parameter."""
+    """Create an PyTensor value for a ``RandomVariable`` ``size`` parameter."""
     if size is None:
         size = constant([], dtype="int64")
     elif isinstance(size, int):

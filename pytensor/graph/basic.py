@@ -58,7 +58,7 @@ NodeAndChildren = Tuple[T, Optional[Iterable[T]]]
 
 
 class Node(MetaObject):
-    r"""A `Node` in an Pytensor graph.
+    r"""A `Node` in an PyTensor graph.
 
     Currently, graphs contain two kinds of `Nodes`: `Variable`\s and `Apply`\s.
     Edges in the graph are not explicitly represented.  Instead each `Node`
@@ -564,7 +564,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         Parameters
         ----------
         inputs_to_values :
-            A dictionary mapping Pytensor `Variable`\s to values.
+            A dictionary mapping PyTensor `Variable`\s to values.
 
         Examples
         --------
@@ -577,7 +577,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         >>> np.allclose(z.eval({x : 16.3, y : 12.1}), 28.4)
         True
 
-        We passed :meth:`eval` a dictionary mapping symbolic Pytensor
+        We passed :meth:`eval` a dictionary mapping symbolic PyTensor
         `Variable`\s to the values to substitute for them, and it returned
         the numerical value of the expression.
 
@@ -589,7 +589,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         the scenes. Subsequent calls to :meth:`eval` on that same variable
         will be fast, because the variable caches the compiled function.
 
-        This way of computing has more overhead than a normal Pytensor
+        This way of computing has more overhead than a normal PyTensor
         function, so don't use it too much in real scripts.
         """
         from pytensor.compile.function import function
@@ -1166,7 +1166,7 @@ def clone_replace(
     Parameters
     ----------
     output
-        Pytensor expression that represents the computational graph.
+        PyTensor expression that represents the computational graph.
     replace
         Dictionary describing which subgraphs should be replaced by what.
     rebuild_kwds
@@ -1654,7 +1654,7 @@ def equal_computations(
     in_xs: Optional[List[Variable]] = None,
     in_ys: Optional[List[Variable]] = None,
 ) -> bool:
-    """Checks if Pytensor graphs represent the same computations.
+    """Checks if PyTensor graphs represent the same computations.
 
     The two lists `xs`, `ys` should have the same number of entries. The
     function checks if for any corresponding pair ``(x, y)`` from ``zip(xs, ys)``

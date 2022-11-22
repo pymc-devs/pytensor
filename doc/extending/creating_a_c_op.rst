@@ -2,16 +2,16 @@
 .. _creating_a_c_op:
 
 =======================================
-Extending Pytensor with a C :Class:`Op`
+Extending PyTensor with a C :Class:`Op`
 =======================================
 
-This tutorial covers how to extend Pytensor with an :class:`Op` that offers a C
+This tutorial covers how to extend PyTensor with an :class:`Op` that offers a C
 implementation.  This tutorial is aimed at individuals who already know how to
-extend Pytensor (see tutorial :ref:`creating_an_op`) by adding a new :class:`Op`
+extend PyTensor (see tutorial :ref:`creating_an_op`) by adding a new :class:`Op`
 with a Python implementation and will only cover the additional knowledge
 required to also produce :class:`Op`\s with C implementations.
 
-Providing an Pytensor :class:`Op` with a C implementation requires to interact with
+Providing an PyTensor :class:`Op` with a C implementation requires to interact with
 Python's C-API and Numpy's C-API. Thus, the first step of this tutorial is to
 introduce both and highlight their features which are most relevant to the
 task of implementing a C :class:`Op`. This tutorial then introduces the most important
@@ -48,7 +48,7 @@ be safely deleted.
 of macros to help manage those reference counts. The definition of these
 macros can be found here : `Python C-API Reference Counting
 <https://docs.python.org/2/c-api/refcounting.html>`_. Listed below are the
-two macros most often used in Pytensor C :class:`Op`\s.
+two macros most often used in PyTensor C :class:`Op`\s.
 
 
 .. method:: void Py_XINCREF(PyObject *o)
@@ -83,11 +83,11 @@ NumPy C-API
 
 The NumPy library provides a C-API to allow users to create, access and
 manipulate NumPy arrays from within their own C routines. NumPy's :class:`ndarray`\s
-are used extensively inside Pytensor and so extending Pytensor with a C :class:`Op` will
+are used extensively inside PyTensor and so extending PyTensor with a C :class:`Op` will
 require interaction with the NumPy C-API.
 
 This sections covers the API's elements that are often required to write code
-for an Pytensor C :class:`Op`. The full documentation for the API can be found here :
+for an PyTensor C :class:`Op`. The full documentation for the API can be found here :
 `NumPy C-API <http://docs.scipy.org/doc/numpy/reference/c-api.html>`_.
 
 
@@ -267,14 +267,14 @@ instead defines functions that will **return** the C code to the caller.
 
 This is because calling C code from Python code comes with a significant
 overhead. If every :class:`Op` was responsible for executing its own C code, every
-time an Pytensor function was called, this overhead would occur as many times
+time an PyTensor function was called, this overhead would occur as many times
 as the number of :class:`Op`\s with C implementations in the function's computational
 graph.
 
-To maximize performance, Pytensor instead requires the C :class:`Op`\s to simply return
+To maximize performance, PyTensor instead requires the C :class:`Op`\s to simply return
 the code needed for their execution and takes upon itself the task of
 organizing, linking and compiling the code from the various :class:`Op`\s. Through this,
-Pytensor is able to minimize the number of times C code is called from Python
+PyTensor is able to minimize the number of times C code is called from Python
 code.
 
 The following is a very simple example to illustrate how it's possible to
@@ -287,8 +287,8 @@ the C code from each :class:`Op` and then define your own C module that would ca
 the C code from each :class:`Op` in succession. In this case, the overhead would only
 occur once; when calling your custom module itself.
 
-Moreover, the fact that Pytensor itself takes care of compiling the C code,
-instead of the individual :class:`Op`\s, allows Pytensor to easily cache the compiled C
+Moreover, the fact that PyTensor itself takes care of compiling the C code,
+instead of the individual :class:`Op`\s, allows PyTensor to easily cache the compiled C
 code. This allows for faster compilation times.
 
 The following are some of the various methods of the class :class:`COp` that are
@@ -382,9 +382,9 @@ commonly used.
     each apply.
 
     Both ``c_support_code`` and ``c_support_code_apply`` are necessary
-    because an Pytensor `Op` can be used more than once in a given Pytensor
+    because an PyTensor `Op` can be used more than once in a given PyTensor
     function. For example, an `Op` that adds two matrices could be used at some
-    point in the Pytensor function to add matrices of integers and, at another
+    point in the PyTensor function to add matrices of integers and, at another
     point, to add matrices of doubles. Because the dtype of the inputs and
     outputs can change between different applies of the `Op`, any support code
     that relies on a certain dtype is specific to a given `Apply` of the `Op` and
@@ -395,15 +395,15 @@ commonly used.
     Returns a tuple of integers representing the version of the C code in this
     :class:`Op`. Ex : (1, 4, 0) for version 1.4.0
 
-    This tuple is used by Pytensor to cache the compiled C code for this `Op`. As
+    This tuple is used by PyTensor to cache the compiled C code for this `Op`. As
     such, the return value **MUST BE CHANGED** every time the C code is altered
-    or else Pytensor will disregard the change in the code and simply load a
+    or else PyTensor will disregard the change in the code and simply load a
     previous version of the `Op` from the cache. If you want to avoid caching of
     the C code of this `Op`, return an empty tuple or do not implement this
     method.
 
     :note:
-        Pytensor can handle tuples of any hashable objects as return values
+        PyTensor can handle tuples of any hashable objects as return values
         for this function but, for greater readability and easier management,
         this function should return a tuple of integers as previously
         described.
@@ -456,16 +456,16 @@ managed. Also take note of how the new variables required for the :class:`Op`'s
 computation are declared in a new scope to avoid cross-initialization errors.
 
 Also, in the C code, it is very important to properly validate the inputs
-and outputs storage. Pytensor guarantees that the inputs exist and have the
+and outputs storage. PyTensor guarantees that the inputs exist and have the
 right number of dimensions but it does not guarantee their exact shape. For
 instance, if an :class:`Op` computes the sum of two vectors, it needs to validate that
 its two inputs have the same shape. In our case, we do not need to validate
 the exact shapes of the inputs because we don't have a need that they match
 in any way.
 
-For the outputs, things are a little bit more subtle. Pytensor does not
+For the outputs, things are a little bit more subtle. PyTensor does not
 guarantee that they have been allocated but it does guarantee that, if they
-have been allocated, they have the right number of dimension. Again, Pytensor
+have been allocated, they have the right number of dimension. Again, PyTensor
 offers no guarantee on the exact shapes. This means that, in our example, we
 need to validate that the output storage has been allocated and has the same
 shape as our vector input. If it is not the case, we allocate a new output
@@ -717,12 +717,12 @@ Alternate way of defining C :class:`Op`\s
 =========================================
 
 The two previous examples have covered the standard way of implementing C :class:`Op`\s
-in Pytensor by inheriting from the class :class:`Op`. This process is mostly
+in PyTensor by inheriting from the class :class:`Op`. This process is mostly
 simple but it still involves defining many methods as well as mixing, in the
 same file, both Python and C code which tends to make the result less
 readable.
 
-To help with this, Pytensor defines a class, `ExternalCOp`, from which new C :class:`Op`\s
+To help with this, PyTensor defines a class, `ExternalCOp`, from which new C :class:`Op`\s
 can inherit. The class `ExternalCOp` aims to simplify the process of implementing
 C :class:`Op`\s by doing the following :
 
@@ -886,7 +886,7 @@ the following constraints:
 *       It must return an int. The value of that int indicates whether
         the `Op` could perform its task or not. A value of 0 indicates
         success while any non-zero value will interrupt the execution
-        of the Pytensor function.  When returning non-zero the function
+        of the PyTensor function.  When returning non-zero the function
         must set a python exception indicating the details of the
         problem.
 
@@ -1033,9 +1033,9 @@ Using GDB to debug :class:`COp`'s C code
 ========================================
 
 When debugging C code, it can be useful to use GDB for code compiled
-by Pytensor.
+by PyTensor.
 
-For this, you must enable this Pytensor: `cmodule__remove_gxx_opt=True`.
+For this, you must enable this PyTensor: `cmodule__remove_gxx_opt=True`.
 
 Then you must start Python inside GDB and in it start your Python
 process:
@@ -1051,5 +1051,5 @@ Final Note
 ==========
 
 This tutorial focuses on providing C implementations to `COp`s that manipulate
-Pytensor tensors. For more information about other Pytensor types, you can refer
-to the section :ref:`Alternate Pytensor Types <alternate_pytensor_types>`.
+PyTensor tensors. For more information about other PyTensor types, you can refer
+to the section :ref:`Alternate PyTensor Types <alternate_pytensor_types>`.

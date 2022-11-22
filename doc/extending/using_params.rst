@@ -44,7 +44,7 @@ Defining a params type
 
     This section is only relevant if you decide to create your own type.
 
-The first thing you need to do is to define an Pytensor Type for your
+The first thing you need to do is to define an PyTensor Type for your
 params object.  It doesn't have to be complete type because only the
 following methods will be used for the type:
 
@@ -73,7 +73,7 @@ attribute :attr:`params_type` to an instance of your params Type.
 
 .. note::
 
-   If you want to have multiple parameters, Pytensor provides the convenient class
+   If you want to have multiple parameters, PyTensor provides the convenient class
    :class:`pytensor.link.c.params_type.ParamsType` that allows to bundle many parameters into
    one object that will be available in both Python (as a Python object) and C code (as a struct).
    See :ref:`ParamsType tutorial and API documentation <libdoc_graph_params_type>` for more infos.

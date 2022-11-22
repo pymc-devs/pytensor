@@ -102,7 +102,7 @@ def local_ultra_fast_sigmoid(fgraph, node):
     When enabled, change all sigmoid to ultra_fast_sigmoid.
 
     For example do mode.including('local_ultra_fast_sigmoid')
-    or use the Pytensor flag optimizer_including=local_ultra_fast_sigmoid.
+    or use the PyTensor flag optimizer_including=local_ultra_fast_sigmoid.
 
     This speeds up the sigmoid op by using an approximation.
 

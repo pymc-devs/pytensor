@@ -1,12 +1,12 @@
 .. _libdoc_d3viz:
 
 ===========================================================================
-:mod:`d3viz` -- d3viz: Interactive visualization of Pytensor compute graphs
+:mod:`d3viz` -- d3viz: Interactive visualization of PyTensor compute graphs
 ===========================================================================
 
 .. module:: pytensor.d3viz
    :platform: Unix, Windows
-   :synopsis: Allows to interactively visualize Pytensor compute graphs
+   :synopsis: Allows to interactively visualize PyTensor compute graphs
 .. moduleauthor:: Christof Angermueller
 
 
@@ -22,13 +22,13 @@ maintained, and it works both in Python 2.x and 3.x. Install it with pip::
 
     pip install pydot-ng
 
-Like Pytensor’s printing module, ``d3viz``
+Like PyTensor’s printing module, ``d3viz``
 requires `graphviz <http://www.graphviz.org/>`__ binary to be available.
 
 Overview
 --------
 
-``d3viz`` extends Pytensor’s printing module to interactively visualize compute
+``d3viz`` extends PyTensor’s printing module to interactively visualize compute
 graphs. Instead of creating a static picture, it creates an HTML file, which can
 be opened with current web-browsers. ``d3viz`` allows
 
@@ -139,7 +139,7 @@ in /tmp/).
 Profiling
 ---------
 
-Pytensor allows function profiling via the ``profile=True`` flag. After at least
+PyTensor allows function profiling via the ``profile=True`` flag. After at least
 one function call, the compute time of each node can be printed in text form
 with ``debugprint``. However, analyzing complex graphs in this way can be
 cumbersome.

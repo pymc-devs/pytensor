@@ -950,7 +950,7 @@ class TestUnravelIndex(utt.InferShapeTester):
             f_array_array = fn(indices, shape_array)
             np.testing.assert_equal(ref, f_array_array())
 
-            # shape given as an Pytensor variable
+            # shape given as an PyTensor variable
             shape_symb = pytensor.shared(shape_array)
             f_array_symb = fn(indices, shape_symb)
             np.testing.assert_equal(ref, f_array_symb())
@@ -1025,7 +1025,7 @@ class TestRavelMultiIndex(utt.InferShapeTester):
             f_array_array = fn(multi_index, shape_array)
             np.testing.assert_equal(ref, f_array_array())
 
-            # shape given as an Pytensor variable
+            # shape given as an PyTensor variable
             shape_symb = pytensor.shared(shape_array)
             f_array_symb = fn(multi_index, shape_symb)
             np.testing.assert_equal(ref, f_array_symb())

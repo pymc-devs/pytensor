@@ -1,7 +1,7 @@
 .. _libdoc_config:
 
 =======================================
-:mod:`config` -- Pytensor Configuration
+:mod:`config` -- PyTensor Configuration
 =======================================
 
 .. module:: config
@@ -13,13 +13,13 @@
 Guide
 =====
 
-The config module contains many ``attributes`` that modify Pytensor's behavior.  Many of these
+The config module contains many ``attributes`` that modify PyTensor's behavior.  Many of these
 attributes are consulted during the import of the ``pytensor`` module, and some
 are assumed to be read-only.
 
 *As a rule, the attributes in this module should not be modified by user code.*
 
-Pytensor's code comes with default values for these attributes, but they can be
+PyTensor's code comes with default values for these attributes, but they can be
 overridden via a user's ``.pytensorrc`` file and the :envvar:`PYTENSOR_FLAGS`
 environment variable.
 
@@ -44,7 +44,7 @@ Environment Variables
 .. envvar:: PYTENSOR_FLAGS
 
     This is a list of comma-delimited ``key=value`` pairs that control
-    Pytensor's behavior.
+    PyTensor's behavior.
 
     For example, in ``bash``, one can override the :envvar:`PYTENSORRC` defaults
     for a script ``<myscript>.py`` with the following:
@@ -126,7 +126,7 @@ import ``pytensor`` and print the config variable, as in:
     Default: ``'float64'``
 
     This sets the default dtype returned by ``tensor.matrix()``, ``tensor.vector()``,
-    and similar functions.  It also sets the default Pytensor bit width for
+    and similar functions.  It also sets the default PyTensor bit width for
     arguments passed as Python floating-point numbers.
 
 .. attribute:: warn_float64
@@ -145,7 +145,7 @@ import ``pytensor`` and print the config variable, as in:
 
     Default: ``'default'``
 
-    If ``more``, sometimes Pytensor will select :class:`Op` implementations that
+    If ``more``, sometimes PyTensor will select :class:`Op` implementations that
     are more "deterministic", but slower.  See the ``dnn.conv.algo*``
     flags for more cases.
 
@@ -155,13 +155,13 @@ import ``pytensor`` and print the config variable, as in:
 
     Default: ``True``
 
-    This determines whether or not Pytensor's garbage collector is used for
-    intermediate results. To use less memory, Pytensor frees the intermediate
-    results as soon as they are no longer needed.  Disabling Pytensor's garbage
-    collection allows Pytensor to reuse buffers for intermediate results between
-    function calls. This speeds up Pytensor by spending less time reallocating
+    This determines whether or not PyTensor's garbage collector is used for
+    intermediate results. To use less memory, PyTensor frees the intermediate
+    results as soon as they are no longer needed.  Disabling PyTensor's garbage
+    collection allows PyTensor to reuse buffers for intermediate results between
+    function calls. This speeds up PyTensor by spending less time reallocating
     space during function evaluation and can provide significant speed-ups for
-    functions with many fast :class:`Op`\s, but it also increases Pytensor's memory
+    functions with many fast :class:`Op`\s, but it also increases PyTensor's memory
     usage.
 
 .. attribute:: config.scan__allow_output_prealloc
@@ -183,7 +183,7 @@ import ``pytensor`` and print the config variable, as in:
     Allow garbage collection inside of :class:`Scan` :class:`Op`\s.
 
     If :attr:`config.allow_gc` is ``True``, but :attr:`config.scan__allow_gc` is
-    ``False``, then Pytensor will perform garbage collection during the inner
+    ``False``, then PyTensor will perform garbage collection during the inner
     operations of a :class:`Scan` after each iterations.
 
 .. attribute:: cycle_detection
@@ -235,11 +235,11 @@ import ``pytensor`` and print the config variable, as in:
 
     Default: ``'custom'``
 
-    This specifies how data types are implicitly determined by Pytensor during the
+    This specifies how data types are implicitly determined by PyTensor during the
     creation of constants or in the results of arithmetic operations.
 
     The ``'custom'`` value corresponds to a set of custom rules originally used
-    in Pytensor.  These rules can be partially customized (e.g. see the in-code
+    in PyTensor.  These rules can be partially customized (e.g. see the in-code
     help of ``pytensor.scalar.basic.NumpyAutocaster``).  This will be deprecated
     in the future.
 
@@ -257,7 +257,7 @@ import ``pytensor`` and print the config variable, as in:
       that of NumPy.
     * On mixed scalar and array operations, NumPy tries to prevent the scalar
       from upcasting the array's type unless it is of a fundamentally
-      different type. Pytensor does not attempt to do the same at this point,
+      different type. PyTensor does not attempt to do the same at this point,
       so users should be careful, since scalars may upcast arrays when they
       otherwise wouldn't in NumPy. This behavior should change in the near
       future.
@@ -275,7 +275,7 @@ import ``pytensor`` and print the config variable, as in:
     ``'floatX'`` returns a number of with the dtype given by ``config.floatX``.
 
     ``'raise'`` is the safest choice (and will become default in a future
-    release of Pytensor).  It raises an error when one tries to perform such an
+    release of PyTensor).  It raises an error when one tries to perform such an
     operation, enforcing the use of the integer division operator (``//``). If a
     float result is desired, either cast one of the arguments to a float, or use
     ``x.__truediv__(y)``.
@@ -287,7 +287,7 @@ import ``pytensor`` and print the config variable, as in:
 
     Default: ``'Mode'``
 
-    This sets the default compilation mode when compiling Pytensor functions. By
+    This sets the default compilation mode when compiling PyTensor functions. By
     default the mode ``'Mode'`` is equivalent to ``'FAST_RUN'``.
 
 .. attribute:: profile
@@ -296,7 +296,7 @@ import ``pytensor`` and print the config variable, as in:
 
     Default: ``False``
 
-    When ``True``, the VM and CVM linkers profile the execution time of Pytensor functions.
+    When ``True``, the VM and CVM linkers profile the execution time of PyTensor functions.
 
     See :ref:`tut_profiling` for examples.
 
@@ -306,7 +306,7 @@ import ``pytensor`` and print the config variable, as in:
 
     Default: ``False``
 
-    When ``True``, the VM and CVM linkers profile the memory usage of Pytensor
+    When ``True``, the VM and CVM linkers profile the memory usage of PyTensor
     functions.  This only works when ``profile=True``.
 
 .. attribute:: profile_optimizer
@@ -316,7 +316,7 @@ import ``pytensor`` and print the config variable, as in:
     Default: ``False``
 
     When ``True``, the :class:`VM` and :class:`CVM` linkers profile the rewriting phase when
-    compiling an Pytensor function.  This only works when ``profile=True``.
+    compiling an PyTensor function.  This only works when ``profile=True``.
 
 .. attribute:: config.profiling__n_apply
 
@@ -371,7 +371,7 @@ import ``pytensor`` and print the config variable, as in:
 
     Default: ``False``
 
-    When ``True``, ignore the first call to an Pytensor function while profiling.
+    When ``True``, ignore the first call to an PyTensor function while profiling.
 
 .. attribute:: config.lib__amblibm
 
@@ -442,15 +442,15 @@ import ``pytensor`` and print the config variable, as in:
 
     Default: ``'0.9'``
 
-    When we an Pytensor bug that generated a bad result is fixed, we also make
-    Pytensor raise a warning when it encounters the same circumstances again. This
+    When we an PyTensor bug that generated a bad result is fixed, we also make
+    PyTensor raise a warning when it encounters the same circumstances again. This
     helps users determine whether or not said bug has affected past runs, since
     one only needs to perform the same runs again with the new version, and one
-    does not have to understand the Pytensor internals that triggered the bug.
+    does not have to understand the PyTensor internals that triggered the bug.
 
     This flag lets users ignore warnings about old bugs that were
-    fixed before their first checkout of Pytensor.
-    You can set its value to the first version of Pytensor
+    fixed before their first checkout of PyTensor.
+    You can set its value to the first version of PyTensor
     that you used (probably 0.3 or higher)
 
     ``'None'`` means that all warnings will be displayed.
@@ -460,7 +460,7 @@ import ``pytensor`` and print the config variable, as in:
 
 .. attribute:: base_compiledir
 
-    Default: On Windows: ``$LOCALAPPDATA\\Pytensor`` if ``$LOCALAPPDATA`` is defined,
+    Default: On Windows: ``$LOCALAPPDATA\\PyTensor`` if ``$LOCALAPPDATA`` is defined,
     otherwise and on other systems: ``~/.pytensor``.
 
     This directory stores the platform-dependent compilation directories.
@@ -492,7 +492,7 @@ import ``pytensor`` and print the config variable, as in:
     Default: ``'-lblas'``
 
     Link argument to link against a (Fortran) level-3 blas implementation.
-    Pytensor will test if ``'-lblas'`` works by default. If not, it will disable C
+    PyTensor will test if ``'-lblas'`` works by default. If not, it will disable C
     code for BLAS.
 
 .. attribute:: config.experimental__local_alloc_elemwise_assert
@@ -504,7 +504,7 @@ import ``pytensor`` and print the config variable, as in:
     When ``True``, add asserts that highlight shape errors.
 
     Without such asserts, the underlying rewrite could hide errors in user
-    code.  Pytensor adds the asserts only if it cannot infer that the shapes are
+    code.  PyTensor adds the asserts only if it cannot infer that the shapes are
     equivalent.  When it can determine equivalence, this rewrite does not
     introduce an assert.
 
@@ -640,11 +640,11 @@ import ``pytensor`` and print the config variable, as in:
     Default: Full path to ``g++`` if ``g++`` is present. Empty string otherwise.
 
     Indicates which C++ compiler to use. If empty, no C++ code is
-    compiled.  Pytensor automatically detects whether ``g++`` is present and
+    compiled.  PyTensor automatically detects whether ``g++`` is present and
     disables C++ compilation when it is not.  On Darwin systems (e.g. Mac
     OS X), it looks for ``clang++`` and uses that when available.
 
-    Pytensor prints a warning if it detects that no compiler is present.
+    PyTensor prints a warning if it detects that no compiler is present.
 
     This value can point to any compiler binary (full path or not), but things may
     break if the interface is not ``g++``-compatible to some degree.
@@ -790,11 +790,11 @@ import ``pytensor`` and print the config variable, as in:
     Default: ``'off'``
 
     Setting this attribute to something other than ``'off'`` activates a
-    debugging mechanism, for which Pytensor executes the graph on-the-fly, as it
+    debugging mechanism, for which PyTensor executes the graph on-the-fly, as it
     is being built. This allows the user to spot errors early on (such as
     dimension mis-matches) **before** rewrites are applied.
 
-    Pytensor will execute the graph using constants and/or shared variables
+    PyTensor will execute the graph using constants and/or shared variables
     provided by the user. Purely symbolic variables (e.g. ``x =
     pytensor.tensor.dmatrix()``) can be augmented with test values, by writing to
     their ``.tag.test_value`` attributes (e.g. ``x.tag.test_value = np.ones((5, 4))``).
@@ -808,15 +808,15 @@ import ``pytensor`` and print the config variable, as in:
 
 .. attribute:: compute_test_value_opt
 
-    As ``compute_test_value``, but it is the value used during Pytensor's
-    rewriting phase.  This is used to help debug shape errors in Pytensor's
+    As ``compute_test_value``, but it is the value used during PyTensor's
+    rewriting phase.  This is used to help debug shape errors in PyTensor's
     rewrites.
 
 .. attribute:: print_test_value
 
     Bool value, default: ``False``
 
-    If ``'True'``, Pytensor will include the test values in a variable's
+    If ``'True'``, PyTensor will include the test values in a variable's
     ``__str__`` output.
 
 .. attribute:: exception_verbosity
@@ -849,27 +849,27 @@ import ``pytensor`` and print the config variable, as in:
 
     Bool value, default: ``False``
 
-    If ``True``, Pytensor will remove the ``-O*`` parameter passed to ``g++``.
-    This is useful for debugging objects compiled by Pytensor.  The parameter
+    If ``True``, PyTensor will remove the ``-O*`` parameter passed to ``g++``.
+    This is useful for debugging objects compiled by PyTensor.  The parameter
     ``-g`` is also passed by default to ``g++``.
 
 .. attribute:: config.cmodule__compilation_warning
 
     Bool value, default: ``False``
 
-    If ``True``, Pytensor will print compilation warnings.
+    If ``True``, PyTensor will print compilation warnings.
 
 .. attribute:: config.cmodule__preload_cache
 
     Bool value, default: ``False``
 
-    If set to ``True``, Pytensor will preload the C module cache at import time
+    If set to ``True``, PyTensor will preload the C module cache at import time
 
 .. attribute:: config.cmodule__age_thresh_use
 
     Int value, default: ``60 * 60 * 24 * 24``  # 24 days
 
-    The time after which a compiled C module won't be reused by Pytensor (in
+    The time after which a compiled C module won't be reused by PyTensor (in
     seconds). C modules are automatically deleted 7 days after that time.
 
 .. attribute:: config.cmodule__debug
@@ -883,15 +883,15 @@ import ``pytensor`` and print the config variable, as in:
 
     Int value, default: 8
 
-    The number of traceback stack levels to keep for Pytensor variable
+    The number of traceback stack levels to keep for PyTensor variable
     definitions.
 
 .. attribute:: config.traceback__compile_limit
 
     Bool value, default: 0
 
-    The number of traceback stack levels to keep for variables during Pytensor
-    compilation. When this value is greater than zero, it will make Pytensor keep
+    The number of traceback stack levels to keep for variables during PyTensor
+    compilation. When this value is greater than zero, it will make PyTensor keep
     internal stack traces.
 
 .. attribute:: config.metaopt__verbose
@@ -899,7 +899,7 @@ import ``pytensor`` and print the config variable, as in:
     Int value, default: 0
 
     The verbosity level of the meta-rewriter: ``0`` for silent, ``1`` to only
-    warn when Pytensor cannot meta-rewrite an :class:`Op`, ``2`` for full output (e.g.
+    warn when PyTensor cannot meta-rewrite an :class:`Op`, ``2`` for full output (e.g.
     timings and the rewrites selected).
 
 

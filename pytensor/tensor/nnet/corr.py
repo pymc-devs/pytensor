@@ -129,7 +129,7 @@ class BaseCorrMM(OpenMPOp, _NoPythonOp):
         self.unshared = unshared
 
         if not config.blas__ldflags:
-            # Pytensor will use a NumPy C implementation of [sd]gemm_ instead.
+            # PyTensor will use a NumPy C implementation of [sd]gemm_ instead.
             self.blas_type = ""
         else:
             if "openblas" in config.blas__ldflags:
@@ -741,7 +741,7 @@ class CorrMM_gradWeights(BaseCorrMM):
     Notes
     -----
     You will not want to use this directly, but rely on
-    Pytensor's automatic differentiation or graph optimization to
+    PyTensor's automatic differentiation or graph optimization to
     use it as needed.
 
     """
@@ -876,7 +876,7 @@ class CorrMM_gradInputs(BaseCorrMM):
     Notes
     -----
     You will not want to use this directly, but rely on
-    Pytensor's automatic differentiation or graph optimization to
+    PyTensor's automatic differentiation or graph optimization to
     use it as needed.
 
     """

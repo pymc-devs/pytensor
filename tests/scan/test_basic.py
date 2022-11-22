@@ -489,7 +489,7 @@ class TestScan:
         assert res.dtype == exp_res.dtype
 
     def test_only_nonseq_inputs(self):
-        # Compile the Pytensor function
+        # Compile the PyTensor function
         n_steps = 2
         inp = matrix()
         broadcasted_inp, _ = scan(lambda x: x, non_sequences=[inp], n_steps=n_steps)
@@ -497,7 +497,7 @@ class TestScan:
         gr = grad(out, inp)
         fun = function([inp], [broadcasted_inp, gr])
 
-        # Execute the Pytensor function and compare outputs to the expected outputs
+        # Execute the PyTensor function and compare outputs to the expected outputs
         inputs = np.array([[1, 2], [3, 4]], dtype=config.floatX)
         expected_out1 = np.repeat(inputs[None], n_steps, axis=0)
         expected_out2 = np.ones(inputs.shape, dtype="int8") * n_steps
@@ -2188,7 +2188,7 @@ def test_cython_performance():
     # This implicitly confirms that the Cython version is being used
     from pytensor.scan import scan_perform_ext  # noqa: F401
 
-    # Python usually out-performs Pytensor below 100 iterations
+    # Python usually out-performs PyTensor below 100 iterations
     N = 200
     n_timeit = 50
 

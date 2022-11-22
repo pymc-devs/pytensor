@@ -27,7 +27,7 @@ def skip_if_blas_ldflags_empty(*functions_detected):
         if functions_detected:
             functions_string = " (at least " + (", ".join(functions_detected)) + ")"
         pytest.skip(
-            "This test is useful only when Pytensor can access to BLAS functions"
+            "This test is useful only when PyTensor can access to BLAS functions"
             + functions_string
             + " other than [sd]gemm_."
         )
@@ -195,7 +195,7 @@ class TestCGemv(OptimizationTestMixin):
     def test_force_gemv_init(self):
         if check_force_gemv_init():
             warn(
-                "WARNING: The current BLAS requires Pytensor to initialize"
+                "WARNING: The current BLAS requires PyTensor to initialize"
                 + " memory for some GEMV calls which will result in a minor"
                 + " degradation in performance for such calls."
             )

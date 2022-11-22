@@ -212,7 +212,7 @@ def test_local_dimshuffle_subtensor():
     assert not all(isinstance(x, DimShuffle) for x in topo)
     assert f(np.random.random((5, 1, 4, 1)), 2).shape == (4,)
 
-    # Test a corner case that had Pytensor return a bug.
+    # Test a corner case that had PyTensor return a bug.
     x = dtensor4("x")
     x = specify_shape(x, (None, 1, None, None))
 

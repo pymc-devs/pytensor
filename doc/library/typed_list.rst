@@ -10,12 +10,12 @@
 
 .. note::
 
-    This works, but is not well integrated with the rest of Pytensor. If
+    This works, but is not well integrated with the rest of PyTensor. If
     speed is important, it is probably better to pad to a dense
     tensor.
 
-This is a type that represents a list in Pytensor. All elements must have
-the same Pytensor type. Here is an example:
+This is a type that represents a list in PyTensor. All elements must have
+the same PyTensor type. Here is an example:
 
 >>> import pytensor.typed_list
 >>> tl = pytensor.typed_list.TypedListType(pytensor.tensor.fvector)()

@@ -81,7 +81,7 @@ Getting started
   #    |v [id K]
   #    |TensorConstant{0.0} [id L]
 
-See `the Pytensor documentation <https://pytensor.readthedocs.io/en/latest/>`__ for in-depth tutorials.
+See `the PyTensor documentation <https://pytensor.readthedocs.io/en/latest/>`__ for in-depth tutorials.
 
 
 Installation
@@ -120,7 +120,7 @@ A good place to start contributing is by looking through the issues
 `here <https://github.com/pymc-devs/pytensor/issues`.
 
 
-.. |Project Name| replace:: Pytensor
+.. |Project Name| replace:: PyTensor
 .. |Tests Status| image:: https://github.com/pymc-devs/pytensor/workflows/Tests/badge.svg
   :target: https://github.com/pymc-devs/pytensor/actions?query=workflow%3ATests
 .. |Coverage| image:: https://codecov.io/gh/pymc-devs/pytensor/branch/main/graph/badge.svg?token=WVwr8nZYmc

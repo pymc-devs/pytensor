@@ -12,7 +12,7 @@
 Guide
 =====
 
-Pytensor assignes NumPy RNG states (e.g. `Generator` or `RandomState` objects) to
+PyTensor assignes NumPy RNG states (e.g. `Generator` or `RandomState` objects) to
 each `RandomVariable`.  The combination of an RNG state, a specific
 `RandomVariable` type (e.g. `NormalRV`), and a set of distribution parameters
 uniquely defines the `RandomVariable` instances in a graph.
@@ -23,7 +23,7 @@ means of generating distinct random variables in a fully reproducible way.
 
 `RandomStream` is also designed to produce simpler graphs and work with more
 sophisticated `Op`\s like `Scan`, which makes it the de facto random variable
-interface in Pytensor.
+interface in PyTensor.
 
 For an example of how to use random numbers, see :ref:`Using Random Numbers <using_random_numbers>`.
 

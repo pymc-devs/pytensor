@@ -1052,7 +1052,7 @@ class SparseFromDense(Op):
         x = at.as_tensor_variable(x)
         if x.ndim > 2:
             raise TypeError(
-                "Pytensor does not have sparse tensor types with more "
+                "PyTensor does not have sparse tensor types with more "
                 f"than 2 dimensions, but {x}.ndim = {x.ndim}"
             )
         elif x.ndim == 1:
@@ -1376,7 +1376,7 @@ class GetItem2d(Op):
                 isinstance(ind, Variable) and getattr(ind, "ndim", -1) == 0
             ) or np.isscalar(ind):
                 raise NotImplementedError(
-                    "Pytensor has no sparse vector"
+                    "PyTensor has no sparse vector"
                     + "Use X[a:b, c:d], X[a:b, c:c+1] or X[a:b] instead."
                 )
             else:

@@ -130,7 +130,7 @@ class ShapeFeature(Feature):
     elements are either integers or symbolic integers.
 
     TODO: check to see if the symbols are necessarily
-    non-constant... or are integer literals sometimes Pytensor
+    non-constant... or are integer literals sometimes PyTensor
     constants?? That would be confusing.
 
     """

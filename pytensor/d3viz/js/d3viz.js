@@ -1,5 +1,5 @@
 /*
- * Pytensor javascript library for interactive visualization.
+ * PyTensor javascript library for interactive visualization.
  *
  * Author: Christof Angermueller <cangermueller@gmail.com>
 */

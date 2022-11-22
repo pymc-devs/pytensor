@@ -397,7 +397,7 @@ class Function:
         self._check_for_aliased_inputs = False
         for i in maker.inputs:
             # If the input is a shared variable, the memory region is
-            # under Pytensor control and so we don't need to check if it
+            # under PyTensor control and so we don't need to check if it
             # is aliased as we never do that.
             if (
                 isinstance(i, In)
@@ -1299,7 +1299,7 @@ class FunctionMaker:
         - 'raise': raise an error
         - 'warn': log a warning
         - 'ignore': do not do anything
-        - None: Use the value in the Pytensor flags on_unused_input.
+        - None: Use the value in the PyTensor flags on_unused_input.
     name : str
         An optional name for this function. If used, the profile mode will
         print the time spent in this function.
@@ -1461,7 +1461,7 @@ class FunctionMaker:
         no_fgraph_prep=False,
     ):
         # Save the provided mode, not the instantiated mode.
-        # The instantiated mode don't pickle and if we unpickle an Pytensor
+        # The instantiated mode don't pickle and if we unpickle an PyTensor
         # function and it get re-compiled, we want the current rewriter to be
         # used, not the rewriter when it was saved.
         self.mode = mode

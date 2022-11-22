@@ -451,9 +451,9 @@ def get_module_hash(src_code, key):
         elif isinstance(key_element, str):
             if key_element.startswith("md5:") or key_element.startswith("hash:"):
                 # This is actually a sha256 hash of the config options.
-                # Currently, we still keep md5 to don't break old Pytensor.
+                # Currently, we still keep md5 to don't break old PyTensor.
                 # We add 'hash:' so that when we change it in
-                # the futur, it won't break this version of Pytensor.
+                # the futur, it won't break this version of PyTensor.
                 break
             elif key_element.startswith("NPY_ABI_VERSION=0x") or key_element.startswith(
                 "c_compiler_str="
@@ -485,8 +485,8 @@ def get_safe_part(key):
 
     # Find the hash part. This is actually a sha256 hash of the config
     # options.  Currently, we still keep md5 to don't break old
-    # Pytensor.  We add 'hash:' so that when we change it
-    # in the futur, it won't break this version of Pytensor.
+    # PyTensor.  We add 'hash:' so that when we change it
+    # in the futur, it won't break this version of PyTensor.
     c_link_key = key[1]
     # In case in the future, we don't have an md5 part and we have
     # such stuff in the cache.  In that case, we can set None, and the
@@ -873,7 +873,7 @@ class ModuleCache:
                                 # This exception is often triggered by keys
                                 # that contain references to classes that have
                                 # not yet been imported (e.g. when running two
-                                # different Pytensor-based scripts). They are not
+                                # different PyTensor-based scripts). They are not
                                 # necessarily broken, but we cannot load them
                                 # now. They will be loaded later if needed.
                                 pass
@@ -1199,10 +1199,10 @@ class ModuleCache:
         with lock_ctx():
             # 1) Maybe somebody else compiled it for us while we
             #    where waiting for the lock. Try to load it again.
-            # 2) If other repo that import Pytensor have Pytensor ops defined,
+            # 2) If other repo that import PyTensor have PyTensor ops defined,
             #    we need to refresh the cache here. Otherwise, there are import
             #    order problems.
-            #    (Outdated) When device=gpu, we compile during Pytensor
+            #    (Outdated) When device=gpu, we compile during PyTensor
             #    import. This triggers the loading of the cache. But
             #    unpickling the cache asks that the external Ops are
             #    completely loaded, which isn't always the case!
@@ -2048,8 +2048,8 @@ class GCC_compiler(Compiler):
         cxxflags = [flag for flag in config.gcc__cxxflags.split(" ") if flag]
         if "-fopenmp" in cxxflags:
             raise ValueError(
-                "Do not use -fopenmp in Pytensor flag gcc__cxxflags."
-                " To enable OpenMP, use the Pytensor flag openmp=True"
+                "Do not use -fopenmp in PyTensor flag gcc__cxxflags."
+                " To enable OpenMP, use the PyTensor flag openmp=True"
             )
         # Add the equivalent of -march=native flag.  We can't use
         # -march=native as when the compiledir is shared by multiple
@@ -2076,7 +2076,7 @@ class GCC_compiler(Compiler):
         ):
             warnings.warn(
                 "`pytensor.config.cxx` is not an identifiable `g++` compiler. "
-                "Pytensor will disable compiler optimizations specific to `g++`. "
+                "PyTensor will disable compiler optimizations specific to `g++`. "
                 "At worst, this could cause slow downs.\n"
                 "Those parameters can be added manually via the `cxxflags` setting."
             )
@@ -2142,11 +2142,11 @@ class GCC_compiler(Compiler):
                 else:
                     reported_lines = native_lines
                 warnings.warn(
-                    "Pytensor was not able to find the"
+                    "PyTensor was not able to find the"
                     " g++ parameters that tune the compilation to your "
-                    " specific CPU. This can slow down the execution of Pytensor"
+                    " specific CPU. This can slow down the execution of PyTensor"
                     " functions. Please submit the following lines to"
-                    " Pytensor's mailing list so that we can fix this"
+                    " PyTensor's mailing list so that we can fix this"
                     f" problem:\n {reported_lines}"
                 )
             else:
@@ -2156,12 +2156,12 @@ class GCC_compiler(Compiler):
                     reported_lines = get_lines(f"{config.cxx} -E -v -", parse=False)
                     warnings.warn(
                         (
-                            "Pytensor was not able to find the "
+                            "PyTensor was not able to find the "
                             "default g++ parameters. This is needed to tune "
                             "the compilation to your specific "
-                            "CPU. This can slow down the execution of Pytensor "
+                            "CPU. This can slow down the execution of PyTensor "
                             "functions. Please submit the following lines to "
-                            "Pytensor's mailing list so that we can fix this "
+                            "PyTensor's mailing list so that we can fix this "
                             f"problem:\n {reported_lines}"
                         )
                     )
@@ -2337,7 +2337,7 @@ class GCC_compiler(Compiler):
         # Figure out whether the current Python executable is 32
         # or 64 bit and compile accordingly. This step is ignored for
         # ARM (32-bit and 64-bit) and RISC-V architectures in order to make
-        # Pytensor compatible with the Raspberry Pi, Raspberry Pi 2, or
+        # PyTensor compatible with the Raspberry Pi, Raspberry Pi 2, or
         # other systems with ARM or RISC-V processors.
         if (not any("arm" in flag or "riscv" in flag for flag in cxxflags)) and (
             not any(arch in platform.machine() for arch in ("arm", "aarch", "riscv"))
@@ -2679,7 +2679,7 @@ def check_mkl_openmp():
         if "2018" in mkl.get_version_string():
             raise RuntimeError(
                 """
-To use MKL 2018 with Pytensor either update the numpy conda packages to
+To use MKL 2018 with PyTensor either update the numpy conda packages to
 their latest build or set "MKL_THREADING_LAYER=GNU" in your
 environment.
 """
@@ -2692,7 +2692,7 @@ packages to the latest build otherwise, set MKL_THREADING_LAYER=GNU in
 your environment for MKL 2018.
 
 If you have MKL 2017 install and are not in a conda environment you
-can set the Pytensor flag blas__check_openmp to False.  Be warned that if
+can set the PyTensor flag blas__check_openmp to False.  Be warned that if
 you set this flag and don't set the appropriate environment or make
 sure you have the right version you *will* get wrong results.
 """
@@ -2742,7 +2742,7 @@ def default_blas_ldflags():
                         "The environment variable "
                         "'DYLD_FALLBACK_LIBRARY_PATH' does not contain "
                         "the '{new_path}' path in its value. This will make "
-                        "Pytensor use a slow version of BLAS. Update "
+                        "PyTensor use a slow version of BLAS. Update "
                         "'DYLD_FALLBACK_LIBRARY_PATH' to contain the "
                         "said value, this will disable this warning."
                     )

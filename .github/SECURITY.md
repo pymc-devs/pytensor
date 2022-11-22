@@ -1,3 +1,3 @@
-To report a security vulnerability to Pytensor, please go to
+To report a security vulnerability to PyTensor, please go to
 https://tidelift.com/security and see the instructions there.
 

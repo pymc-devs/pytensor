@@ -2,26 +2,26 @@
 .. _introduction:
 
 ====================
-Pytensor at a Glance
+PyTensor at a Glance
 ====================
 
-Pytensor is a Python library that allows one to define, optimize/rewrite, and
+PyTensor is a Python library that allows one to define, optimize/rewrite, and
 evaluate mathematical expressions, especially ones involving multi-dimensional
-arrays (e.g. :class:`numpy.ndarray`\s).  Using Pytensor, it is possible to attain
+arrays (e.g. :class:`numpy.ndarray`\s).  Using PyTensor, it is possible to attain
 speeds rivaling hand-crafted C implementations for problems involving large
 amounts of data.
 
-Pytensor combines aspects of a computer algebra system (CAS) with aspects of an
+PyTensor combines aspects of a computer algebra system (CAS) with aspects of an
 optimizing compiler. It can also generate customized code for multiple compiled
 languages and/or their Python-based interfaces, such as C, Numba, and JAX.  This
 combination of CAS features with optimizing compilation and transpilation
 is particularly useful for tasks in which complicated mathematical expressions
 are evaluated repeatedly and evaluation speed is critical.  For situations
-where many different expressions are each evaluated once, Pytensor can minimize
+where many different expressions are each evaluated once, PyTensor can minimize
 the amount of compilation and analysis overhead, but still provide symbolic
 features such as automatic differentiation.
 
-Pytensor's compiler applies many default optimizations of varying
+PyTensor's compiler applies many default optimizations of varying
 complexity. These optimizations include, but are not limited to:
 
 * constant folding
@@ -39,25 +39,25 @@ For more information see :ref:`optimizations`.
 Theano
 ------
 
-The library that Pytensor is based on, Theano, was written at the LISA lab to support rapid development of efficient machine learning algorithms but while Theano was commonly referred to as a "deep learning" (DL) library, Pytensor is not a DL library.
+The library that PyTensor is based on, Theano, was written at the LISA lab to support rapid development of efficient machine learning algorithms but while Theano was commonly referred to as a "deep learning" (DL) library, PyTensor is not a DL library.
 
-Designations like "deep learning library" reflect the priorities/goals of a library; specifically, that the library serves the purposes of DL and its computational needs. Pytensor is not explicitly intended to serve the purpose of constructing and evaluating DL models, but that doesn't mean it can't serve that purpose well.
+Designations like "deep learning library" reflect the priorities/goals of a library; specifically, that the library serves the purposes of DL and its computational needs. PyTensor is not explicitly intended to serve the purpose of constructing and evaluating DL models, but that doesn't mean it can't serve that purpose well.
 
-The designation "tensor library" is more apt, but, unlike most other tensor libraries (e.g. TensorFlow, PyTorch, etc.), Pytensor is more focused on what one might call the symbolic functionality.
+The designation "tensor library" is more apt, but, unlike most other tensor libraries (e.g. TensorFlow, PyTorch, etc.), PyTensor is more focused on what one might call the symbolic functionality.
 
 Most tensor libraries perform similar operations to some extent, but many do not expose the underlying operations for use at any level other than internal library development. Furthermore, when they do, many libraries cross a large language barrier that unnecessarily hampers rapid development (e.g. moving from Python to C++ and back).
 
-If you follow the history of this project, you can see that it grew out of work on PyMC, and PyMC is a library for domain-specific (i.e. probabilistic modeling) computations. Likewise, the other ``pymc-devs`` projects demonstrate the use of Pytensor graphs as an intermediate representation (IR) for a domain-specific language/interface (e.g. `aeppl <https://github.com/pymc-devs/aeppl>`_ provides a graph representation for a PPL) and advanced automations based on IR (e.g. `aemcmc <https://github.com/pymc-devs/aemcmc>`_ as a means of constructing custom samplers from IR, ``aeppl`` as a means of automatically deriving log-probabilities for basic tensor operations represented in IR).
+If you follow the history of this project, you can see that it grew out of work on PyMC, and PyMC is a library for domain-specific (i.e. probabilistic modeling) computations. Likewise, the other ``pymc-devs`` projects demonstrate the use of PyTensor graphs as an intermediate representation (IR) for a domain-specific language/interface (e.g. `aeppl <https://github.com/pymc-devs/aeppl>`_ provides a graph representation for a PPL) and advanced automations based on IR (e.g. `aemcmc <https://github.com/pymc-devs/aemcmc>`_ as a means of constructing custom samplers from IR, ``aeppl`` as a means of automatically deriving log-probabilities for basic tensor operations represented in IR).
 
-This topic is a little more advanced and doesn't really have parallels in other tensor libraries, but it's one of the things that Pytensor uniquely facilitates.
+This topic is a little more advanced and doesn't really have parallels in other tensor libraries, but it's one of the things that PyTensor uniquely facilitates.
 
-The PyMC/probabilistic programming connection is similar to the DL connection Theano had, but—unlike Theano—we don't want Pytensor to be conflated with one of its domains of application—like probabilistic modeling. Those primary domains of application will always have some influence on the development of Pytensor, but that's also why we need to avoid labels/designations like "deep learning library" and focus on the functionality, so that we don't unnecessarily compromise Pytensor's general applicability, relative simplicity, and/or prevent useful input/collaboration from other domains.
+The PyMC/probabilistic programming connection is similar to the DL connection Theano had, but—unlike Theano—we don't want PyTensor to be conflated with one of its domains of application—like probabilistic modeling. Those primary domains of application will always have some influence on the development of PyTensor, but that's also why we need to avoid labels/designations like "deep learning library" and focus on the functionality, so that we don't unnecessarily compromise PyTensor's general applicability, relative simplicity, and/or prevent useful input/collaboration from other domains.
 
 Sneak peek
 ==========
 
-Here is an example of how to use Pytensor. It doesn't show off many of
-its features, but it illustrates concretely what Pytensor is.
+Here is an example of how to use PyTensor. It doesn't show off many of
+its features, but it illustrates concretely what PyTensor is.
 
 
 .. If you modify this code, also change :
@@ -83,8 +83,8 @@ its features, but it illustrates concretely what Pytensor is.
     assert 4.0 == f(1.5, 2.5)
 
 
-Pytensor is not a programming language in the normal sense because you
-write a program in Python that builds expressions for Pytensor. Still it
+PyTensor is not a programming language in the normal sense because you
+write a program in Python that builds expressions for PyTensor. Still it
 is like a programming language in the sense that you have to
 
 - declare variables ``a`` and ``b`` and give their types,
@@ -93,7 +93,7 @@ is like a programming language in the sense that you have to
 
 It is good to think of :func:`pytensor.function` as the interface to a
 compiler which builds a callable object from a purely symbolic graph.
-One of Pytensor's most important features is that :func:`pytensor.function`
+One of PyTensor's most important features is that :func:`pytensor.function`
 can optimize a graph and even compile some or all of it into native
 machine instructions.
 
@@ -101,28 +101,28 @@ machine instructions.
 What does it do that NumPy doesn't
 ==================================
 
-Pytensor is a essentially an optimizing compiler for manipulating
+PyTensor is a essentially an optimizing compiler for manipulating
 and evaluating expressions, especially tensor-valued
 ones. Manipulation of tensors is typically done using the NumPy
-package, so what does Pytensor do that Python and NumPy don't do?
+package, so what does PyTensor do that Python and NumPy don't do?
 
-- *execution speed optimizations*: Pytensor can use C, Numba, or JAX to compile
+- *execution speed optimizations*: PyTensor can use C, Numba, or JAX to compile
   parts your expression graph into CPU or GPU instructions, which run
   much faster than pure Python.
 
-- *symbolic differentiation*: Pytensor can automatically build symbolic graphs
+- *symbolic differentiation*: PyTensor can automatically build symbolic graphs
   for computing gradients.
 
-- *stability optimizations*: Pytensor can recognize some numerically unstable
+- *stability optimizations*: PyTensor can recognize some numerically unstable
   expressions and compute them with more stable algorithms.
 
-The closest Python package to Pytensor is sympy_.
-Pytensor focuses more on tensor expressions than Sympy, and has more machinery
+The closest Python package to PyTensor is sympy_.
+PyTensor focuses more on tensor expressions than Sympy, and has more machinery
 for compilation.  Sympy has more sophisticated algebra rules and can
 handle a wider variety of mathematical operations (such as series, limits, and integrals).
 
 If numpy_ is to be compared to MATLAB_ and sympy_ to Mathematica_,
-Pytensor is a sort of hybrid of the two which tries to combine the best of
+PyTensor is a sort of hybrid of the two which tries to combine the best of
 both worlds.
 
 
@@ -130,14 +130,14 @@ Getting started
 ===============
 
 :ref:`install`
-  Instructions to download and install Pytensor on your system.
+  Instructions to download and install PyTensor on your system.
 
 :ref:`tutorial`
-  Getting started with Pytensor's basic features. Go here if you are
+  Getting started with PyTensor's basic features. Go here if you are
   new!
 
 :ref:`libdoc`
-  Details of what Pytensor provides. It is recommended to go through
+  Details of what PyTensor provides. It is recommended to go through
   the :ref:`tutorial` first though.
 
 
@@ -148,7 +148,7 @@ Questions and bug reports should be submitted in the form of an issue at
 pytensor-dev_
 
 We welcome all kinds of contributions. If you have any questions regarding how
-to extend Pytensor, please feel free to ask.
+to extend PyTensor, please feel free to ask.
 
 
 .. _LISA:  https://mila.umontreal.ca/

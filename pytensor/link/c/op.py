@@ -216,7 +216,7 @@ int main( int argc, const char* argv[] )
                         "Your g++ compiler fails to compile OpenMP code. We"
                         " know this happen with some version of the EPD mingw"
                         " compiler and LLVM compiler on Mac OS X."
-                        " We disable openmp everywhere in Pytensor."
+                        " We disable openmp everywhere in PyTensor."
                         " To remove this warning set the pytensor flags `openmp`"
                         " to False.",
                         stacklevel=3,
@@ -327,7 +327,7 @@ class ExternalCOp(COp):
 
         self.func_codes: List[str] = []
         # Keep the original name. If we reload old pickle, we want to
-        # find the new path and new version of the file in Pytensor.
+        # find the new path and new version of the file in PyTensor.
         self.func_name = func_name
         self.code_sections: Dict[str, str] = dict()
 

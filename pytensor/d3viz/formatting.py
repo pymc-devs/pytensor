@@ -1,4 +1,4 @@
-"""Functions for formatting Pytensor compute graphs.
+"""Functions for formatting PyTensor compute graphs.
 
 Author: Christof Angermueller <cangermueller@gmail.com>
 """
@@ -21,7 +21,7 @@ except ImportError:
 
 
 class PyDotFormatter:
-    """Create `pydot` graph object from Pytensor function.
+    """Create `pydot` graph object from PyTensor function.
 
     Parameters
     ----------
@@ -67,7 +67,7 @@ class PyDotFormatter:
 
         Parameters
         ----------
-        node : Pytensor graph node
+        node : PyTensor graph node
             Apply node, tensor variable, or shared variable in compute graph.
 
         Returns
@@ -85,7 +85,7 @@ class PyDotFormatter:
 
         Parameters
         ----------
-        node : Pytensor graph node
+        node : PyTensor graph node
             Apply node, tensor variable, or shared variable in compute graph.
 
         Returns
@@ -104,7 +104,7 @@ class PyDotFormatter:
         Parameters
         ----------
         fct : pytensor.compile.function.types.Function
-            A compiled Pytensor function, variable, apply or a list of variables.
+            A compiled PyTensor function, variable, apply or a list of variables.
         graph: pydot.Dot
             `pydot` graph to which nodes are added. Creates new one if
             undefined.

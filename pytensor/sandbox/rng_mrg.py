@@ -1,5 +1,5 @@
 """
-Implementation of MRG31k3p random number generator for Pytensor.
+Implementation of MRG31k3p random number generator for PyTensor.
 
 Generator code in SSJ package (L'Ecuyer & Simard).
 http://www.iro.umontreal.ca/~simardr/ssj/indexe.html
@@ -75,7 +75,7 @@ def multMatVect(v, A, m1, B, m2):
             [A_sym, s_sym, m_sym, A2_sym, s2_sym, m2_sym], o, profile=False
         )
 
-    # This way of calling the Pytensor fct is done to bypass Pytensor overhead.
+    # This way of calling the PyTensor fct is done to bypass PyTensor overhead.
     f = multMatVect.dot_modulo
     f.input_storage[0].storage[0] = A
     f.input_storage[1].storage[0] = v[:3]
@@ -828,7 +828,7 @@ class MRG_RandomStream:
         if multMatVect.dot_modulo is None:
             multMatVect(rval[0], A1p72, M1, A2p72, M2)
 
-        # This way of calling the Pytensor fct is done to bypass Pytensor overhead.
+        # This way of calling the PyTensor fct is done to bypass PyTensor overhead.
         f = multMatVect.dot_modulo
         f.input_storage[0].storage[0] = A1p72
         f.input_storage[2].storage[0] = M1
@@ -882,8 +882,8 @@ class MRG_RandomStream:
             If the ``dtype`` arg is provided, ``high`` will be cast into
             dtype. This bound is excluded.
         size
-          Can be a list of integer or Pytensor variable (ex: the shape
-          of other Pytensor Variable).
+          Can be a list of integer or PyTensor variable (ex: the shape
+          of other PyTensor Variable).
         dtype
             The output data type. If dtype is not specified, it will be
             inferred from the dtype of low and high, but will be at
@@ -903,7 +903,7 @@ class MRG_RandomStream:
         high = undefined_grad(high)
 
         if isinstance(size, tuple):
-            msg = "size must be a tuple of int or an Pytensor variable"
+            msg = "size must be a tuple of int or an PyTensor variable"
             assert all(isinstance(i, (np.integer, int, Variable)) for i in size), msg
             if any(isinstance(i, (np.integer, int)) and i <= 0 for i in size):
                 raise ValueError(
@@ -913,7 +913,7 @@ class MRG_RandomStream:
         else:
             if not (isinstance(size, Variable) and size.ndim == 1):
                 raise TypeError(
-                    "size must be a tuple of int or an Pytensor "
+                    "size must be a tuple of int or an PyTensor "
                     "Variable with 1 dimension, got "
                     + str(size)
                     + " of type "
@@ -1172,7 +1172,7 @@ class MRG_RandomStream:
         Returns
         -------
         samples : TensorVariable
-            A Pytensor tensor of samples randomly drawn from a normal distribution.
+            A PyTensor tensor of samples randomly drawn from a normal distribution.
 
         """
         size = _check_size(size)
@@ -1278,7 +1278,7 @@ class MRG_RandomStream:
         Returns
         -------
         samples : TensorVariable
-            A Pytensor tensor of samples randomly drawn from a truncated normal distribution.
+            A PyTensor tensor of samples randomly drawn from a truncated normal distribution.
 
         See Also
         --------
@@ -1300,19 +1300,19 @@ class MRG_RandomStream:
 
 def _check_size(size):
     """
-    Canonicalise inputs to get valid output sizes for Pytensor tensors.
+    Canonicalise inputs to get valid output sizes for PyTensor tensors.
 
     Parameters
     ----------
     size : int_vector_like
-        Some variable that could serve as the shape for an Pytensor tensor.
+        Some variable that could serve as the shape for an PyTensor tensor.
         This can be an int, a tuple of ints, a list of ints
-        or an Pytensor Variable with similar properties.
+        or an PyTensor Variable with similar properties.
 
     Returns
     -------
     size_var : int_vector
-        A one-dimensional Pytensor variable encapsulating the given size.
+        A one-dimensional PyTensor variable encapsulating the given size.
 
     Raises
     ------
@@ -1327,18 +1327,18 @@ def _check_size(size):
             return at.stack([size], ndim=1)
         else:
             raise ValueError(
-                "Pytensor variable must have 1 dimension to be a valid size.", size
+                "PyTensor variable must have 1 dimension to be a valid size.", size
             )
     elif isinstance(size, (np.integer, int)):
         return at.constant([size], ndim=1)
     elif not isinstance(size, (tuple, list)):
-        raise ValueError("Size must be a int, tuple, list or Pytensor variable.", size)
+        raise ValueError("Size must be a int, tuple, list or PyTensor variable.", size)
 
     # check entries of list or tuple
     for i in size:
         if isinstance(i, Variable):
             if i.ndim != 0:
-                raise ValueError("Non-scalar Pytensor variable in size", size, i)
+                raise ValueError("Non-scalar PyTensor variable in size", size, i)
         elif isinstance(i, (np.integer, int)):
             if i <= 0:
                 raise ValueError(
@@ -1346,7 +1346,7 @@ def _check_size(size):
                 )
         else:
             raise ValueError(
-                "Only Pytensor variables and integers are allowed in a size-tuple.",
+                "Only PyTensor variables and integers are allowed in a size-tuple.",
                 size,
                 i,
             )

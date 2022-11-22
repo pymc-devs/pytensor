@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Pytensor tutorial
+# PyTensor tutorial
 # Solution to Exercise in section 'Configuration Settings and Compiling Modes'
 
 import numpy as np
@@ -19,7 +19,7 @@ D = (
 )
 training_steps = 10000
 
-# Declare Pytensor symbolic variables
+# Declare PyTensor symbolic variables
 x = at.matrix("x")
 y = at.vector("y")
 w = pytensor.shared(rng.standard_normal(feats).astype(pytensor.config.floatX), name="w")
@@ -29,7 +29,7 @@ y.tag.test_value = D[1]
 # print "Initial model:"
 # print w.get_value(), b.get_value()
 
-# Construct Pytensor expression graph
+# Construct PyTensor expression graph
 p_1 = 1 / (1 + at.exp(-at.dot(x, w) - b))  # Probability of having a one
 prediction = p_1 > 0.5  # The prediction that is done: 0 or 1
 xent = -y * at.log(p_1) - (1 - y) * at.log(1 - p_1)  # Cross-entropy

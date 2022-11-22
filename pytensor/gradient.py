@@ -443,7 +443,7 @@ def grad(
     """
     Return symbolic gradients of one cost with respect to one or more variables.
 
-    For more information about how automatic differentiation works in Pytensor,
+    For more information about how automatic differentiation works in PyTensor,
     see :mod:`gradient`. For information on how to implement the gradient of
     a certain Op, see :func:`grad`.
 
@@ -712,7 +712,7 @@ def subgraph_grad(wrt, end, start=None, cost=None, details=False):
         Gradients are computed with respect to `wrt`.
 
     end : list of variables
-        Pytensor variables at which to end gradient descent (they are
+        PyTensor variables at which to end gradient descent (they are
         considered constant in pytensor.grad).  For convenience, the
         gradients with respect to these variables are also returned.
 
@@ -1718,7 +1718,7 @@ def verify_grad(
     Parameters
     ----------
     fun
-        `fun` takes Pytensor variables as inputs, and returns an Pytensor variable.
+        `fun` takes PyTensor variables as inputs, and returns an PyTensor variable.
         For instance, an `Op` instance with  a single output.
     pt
         Input values, points where the gradient is estimated.
@@ -2137,7 +2137,7 @@ def consider_constant(x):
     through. In other words, the gradient of the expression is
     truncated to 0.
 
-    :param x: A Pytensor expression whose gradient should be truncated.
+    :param x: A PyTensor expression whose gradient should be truncated.
 
     :return: The expression is returned unmodified, but its gradient
         is now truncated to 0.
@@ -2183,7 +2183,7 @@ def zero_grad(x):
     Parameters
     ----------
     x: :class:`~pytensor.graph.basic.Variable`
-        A Pytensor expression whose gradient should be truncated.
+        A PyTensor expression whose gradient should be truncated.
 
     Returns
     -------
@@ -2222,7 +2222,7 @@ def undefined_grad(x):
     Parameters
     ----------
     x: :class:`~pytensor.graph.basic.Variable`
-        A Pytensor expression whose gradient should be undefined.
+        A PyTensor expression whose gradient should be undefined.
 
     Returns
     -------
@@ -2263,7 +2263,7 @@ def disconnected_grad(x):
     Parameters
     ----------
     x: :class:`~pytensor.graph.basic.Variable`
-        A Pytensor expression whose gradient should not be
+        A PyTensor expression whose gradient should not be
         backpropagated through.
 
     Returns

@@ -804,7 +804,7 @@ class Elemwise(OpenMPOp):
                 storage[0] = odat
 
             # Sometimes NumPy return a Python type.
-            # Some Pytensor op return a different dtype like floor, ceil,
+            # Some PyTensor op return a different dtype like floor, ceil,
             # trunc, eq, ...
             elif not isinstance(variable, np.ndarray) or variable.dtype != nout.dtype:
                 variable = np.asarray(variable, nout.dtype)

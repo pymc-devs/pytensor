@@ -18,14 +18,14 @@ from pytensor.link.c.type import CType
 
 def register_view_op_c_code(type, code, version=()):
     """
-    Tell ViewOp how to generate C code for an Pytensor Type.
+    Tell ViewOp how to generate C code for an PyTensor Type.
 
     Parameters
     ----------
-    type : Pytensor type
-        It must be the Pytensor class itself and not an instance of the class.
+    type : PyTensor type
+        It must be the PyTensor class itself and not an instance of the class.
     code : C code
-        Returns a view for the Pytensor type 'type'. Use %(iname)s and %(oname)s
+        Returns a view for the PyTensor type 'type'. Use %(iname)s and %(oname)s
         for the input and output C variable names respectively.
     version
         A number indicating the version of the code, for cache.
@@ -36,7 +36,7 @@ def register_view_op_c_code(type, code, version=()):
 
 class ViewOp(COp):
     """
-    Returns an inplace view of the input. Used internally by Pytensor.
+    Returns an inplace view of the input. Used internally by PyTensor.
 
     """
 
@@ -103,15 +103,15 @@ view_op = ViewOp()
 
 class OutputGuard(ViewOp):
     """
-    This op is used only internally by Pytensor.
+    This op is used only internally by PyTensor.
 
     Only the AddDestroyHandler optimizer tries to insert them in the graph.
 
     This Op is declared as destructive while it is not destroying anything.
     It returns a view. This is used to prevent destruction of the output
-    variables of an Pytensor function.
+    variables of an PyTensor function.
 
-    There is a mechanism in Pytensor that should prevent this, but the use
+    There is a mechanism in PyTensor that should prevent this, but the use
     of OutputGuard adds a safeguard: it may be possible for some optimization
     run before the add_destroy_handler phase to bypass this mechanism, by
     making in-place optimizations.
@@ -130,14 +130,14 @@ _output_guard = OutputGuard()
 
 def register_deep_copy_op_c_code(typ, code, version=()):
     """
-    Tell DeepCopyOp how to generate C code for an Pytensor Type.
+    Tell DeepCopyOp how to generate C code for an PyTensor Type.
 
     Parameters
     ----------
-    typ : Pytensor type
-        It must be the Pytensor class itself and not an instance of the class.
+    typ : PyTensor type
+        It must be the PyTensor class itself and not an instance of the class.
     code: C code
-        Deep copies the Pytensor type 'typ'. Use %(iname)s and %(oname)s for the
+        Deep copies the PyTensor type 'typ'. Use %(iname)s and %(oname)s for the
         input and output C variable names respectively.
     version
         A number indicating the version of the code, for cache.
@@ -225,14 +225,14 @@ def load_back(mod, name):
 
 class FromFunctionOp(Op):
     """
-    Build a basic Pytensor Op around a function.
+    Build a basic PyTensor Op around a function.
 
     Since the resulting Op is very basic and is missing most of the
     optional functionalities, some optimizations may not apply.  If you
     want to help, you can supply an infer_shape function that computes
     the shapes of the output given the shapes of the inputs.
 
-    Also the gradient is undefined in the resulting op and Pytensor will
+    Also the gradient is undefined in the resulting op and PyTensor will
     raise an error if you attempt to get the gradient of a graph
     containing this op.
 
@@ -285,7 +285,7 @@ class FromFunctionOp(Op):
 
 def as_op(itypes, otypes, infer_shape=None):
     """
-    Decorator that converts a function into a basic Pytensor op that will call
+    Decorator that converts a function into a basic PyTensor op that will call
     the supplied function as its implementation.
 
     It takes an optional infer_shape parameter that should be a callable with
@@ -312,11 +312,11 @@ def as_op(itypes, otypes, infer_shape=None):
     if not isinstance(itypes, (list, tuple)):
         itypes = [itypes]
     if not all(isinstance(t, CType) for t in itypes):
-        raise TypeError("itypes has to be a list of Pytensor types")
+        raise TypeError("itypes has to be a list of PyTensor types")
     if not isinstance(otypes, (list, tuple)):
         otypes = [otypes]
     if not all(isinstance(t, CType) for t in otypes):
-        raise TypeError("otypes has to be a list of Pytensor types")
+        raise TypeError("otypes has to be a list of PyTensor types")
 
     # make sure they are lists and not tuples
     itypes = list(itypes)

@@ -762,7 +762,7 @@ def ones_like(model, dtype=None, opt=False):
     model : tensor
     dtype : data-type, optional
     opt : If True, we will return a constant instead of a graph when possible.
-          Useful for Pytensor optimization, not for user building a graph as this
+          Useful for PyTensor optimization, not for user building a graph as this
           have the consequence that model isn't always in the graph.
 
     Returns
@@ -788,7 +788,7 @@ def zeros_like(model, dtype=None, opt=False):
     model : tensor
     dtype : data-type, optional
     opt : If True, we will return a constant instead of a graph when possible.
-          Useful for Pytensor optimization, not for user building a graph as this
+          Useful for PyTensor optimization, not for user building a graph as this
           have the consequence that model isn't always in the graph.
 
     Returns
@@ -886,7 +886,7 @@ def nonzero(a, return_matrix=False):
             is the index of the ith non-zero element of the input array in the
             jth dimension.
 
-        If return_matrix is True (same as Pytensor Op):
+        If return_matrix is True (same as PyTensor Op):
             Returns a matrix of shape (ndim, number of nonzero elements) such
             that element (i,j) is the index in the ith dimension of the jth
             non-zero element.
@@ -1819,7 +1819,7 @@ class Default(Op):
         x, default = inp
         (out,) = out_
         if x is None:
-            # why copy?  Pytensor can't yet understand out[0] being a view of
+            # why copy?  PyTensor can't yet understand out[0] being a view of
             # either x or y, so we can be a view of x, but only a copy of y.
             out[0] = default.copy()
         else:

@@ -2,22 +2,22 @@
 .. _tutorial_printing_drawing:
 
 ================================
-Printing/Drawing Pytensor graphs
+Printing/Drawing PyTensor graphs
 ================================
 
 
-Pytensor provides the functions :func:`pytensor.printing.pprint` and
+PyTensor provides the functions :func:`pytensor.printing.pprint` and
 :func:`pytensor.printing.debugprint` to print a graph to the terminal before or
 after compilation. :func:`pprint` is more compact and math-like,
-:func:`debugprint` is more verbose. Pytensor also provides :func:`pydotprint`
+:func:`debugprint` is more verbose. PyTensor also provides :func:`pydotprint`
 that creates an image of the function. You can read about them in
 :ref:`libdoc_printing`.
 
 .. note::
 
-    When printing Pytensor functions, they can sometimes be hard to
-    read.  To help with this, you can disable some Pytensor rewrites
-    by using the Pytensor flag:
+    When printing PyTensor functions, they can sometimes be hard to
+    read.  To help with this, you can disable some PyTensor rewrites
+    by using the PyTensor flag:
     ``optimizer_excluding=fusion:inplace``. Do not use this during
     real job execution, as this will make the graph slower and use more
     memory.
@@ -33,14 +33,14 @@ Consider again the logistic regression example:
 >>> feats = 784
 >>> D = (rng.standard_normal(N, feats).astype(pytensor.config.floatX), rng.integers(size=N,low=0, high=2).astype(pytensor.config.floatX))
 >>> training_steps = 10000
->>> # Declare Pytensor symbolic variables
+>>> # Declare PyTensor symbolic variables
 >>> x = at.matrix("x")
 >>> y = at.vector("y")
 >>> w = pytensor.shared(rng.standard_normal(feats).astype(pytensor.config.floatX), name="w")
 >>> b = pytensor.shared(np.asarray(0., dtype=pytensor.config.floatX), name="b")
 >>> x.tag.test_value = D[0]
 >>> y.tag.test_value = D[1]
->>> # Construct Pytensor expression graph
+>>> # Construct PyTensor expression graph
 >>> p_1 = 1 / (1 + at.exp(-at.dot(x, w)-b)) # Probability of having a one
 >>> prediction = p_1 > 0.5 # The prediction that is done: 0 or 1
 >>> # Compute gradients

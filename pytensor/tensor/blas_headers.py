@@ -22,7 +22,7 @@ def detect_macos_sdot_bug():
     """
     Try to detect a bug in the default BLAS in MacOS.
 
-    The problem in Pytensor has been reported in gh-1240,
+    The problem in PyTensor has been reported in gh-1240,
     the underlying bug has been confirmed in
     http://www.macresearch.org/lapackblas-fortran-106#comment-17227.
 

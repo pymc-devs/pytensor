@@ -139,7 +139,7 @@ class Fourier(Op):
         if not isinstance(axis, TensorConstant):
             raise NotImplementedError(
                 f"{self.__class__.__name__}: gradient is currently implemented"
-                " only for axis being an Pytensor constant"
+                " only for axis being an PyTensor constant"
             )
         axis = int(axis.data)
         # notice that the number of actual elements in wrto is independent of

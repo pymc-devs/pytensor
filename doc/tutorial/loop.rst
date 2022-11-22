@@ -13,12 +13,12 @@ Scan
 - You ``scan`` a function along some input sequence, producing an output at each time-step.
 - The function can see the *previous K time-steps* of your function.
 - ``sum()`` could be computed by scanning the *z + x(i)* function over a list, given an initial state of *z=0*.
-- Often a *for* loop can be expressed as a ``scan()`` operation, and ``scan`` is the closest that Pytensor comes to looping.
+- Often a *for* loop can be expressed as a ``scan()`` operation, and ``scan`` is the closest that PyTensor comes to looping.
 - Advantages of using ``scan`` over *for* loops:
 
   - Number of iterations to be part of the symbolic graph.
   - Computes gradients through sequential steps.
-  - Slightly faster than using a *for* loop in Python with a compiled Pytensor function.
+  - Slightly faster than using a *for* loop in Python with a compiled PyTensor function.
   - Can lower the overall memory usage by detecting the actual amount of memory needed.
 
 The full documentation can be found in the library: :ref:`Scan <lib_scan>`.

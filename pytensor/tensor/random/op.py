@@ -289,7 +289,7 @@ class RandomVariable(Op):
         Parameters
         ----------
         rng: RandomGeneratorType or RandomStateType
-            Existing Pytensor `Generator` or `RandomState` object to be used.  Creates a
+            Existing PyTensor `Generator` or `RandomState` object to be used.  Creates a
             new one, if `None`.
         size: int or Sequence
             NumPy-like size parameter.

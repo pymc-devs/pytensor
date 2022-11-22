@@ -39,11 +39,11 @@ def rebuild_collect_shared(
 
     Parameters
     ----------
-    outputs : list of Pytensor Variables (or Pytensor expressions)
-        List of Pytensor variables or expressions representing the outputs of the
+    outputs : list of PyTensor Variables (or PyTensor expressions)
+        List of PyTensor variables or expressions representing the outputs of the
         computational graph.
-    inputs : list of Pytensor Variables (or Pytensor expressions)
-        List of Pytensor variables or expressions representing the inputs of the
+    inputs : list of PyTensor Variables (or PyTensor expressions)
+        List of PyTensor variables or expressions representing the inputs of the
         computational graph (or None).
     replace : dict
         Dictionary describing which subgraphs should be replaced by what.
@@ -240,7 +240,7 @@ def rebuild_collect_shared(
             cloned_outputs = []  # TODO: get Function.__call__ to return None
         else:
             raise TypeError(
-                "output must be an Pytensor Variable or Out "
+                "output must be an PyTensor Variable or Out "
                 "instance (or list of them)",
                 outputs,
             )

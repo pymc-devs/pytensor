@@ -21,7 +21,7 @@ else:
 
 @singledispatch
 def jax_typify(data, dtype=None, **kwargs):
-    r"""Convert instances of Pytensor `Type`\s to JAX types."""
+    r"""Convert instances of PyTensor `Type`\s to JAX types."""
     if dtype is None:
         return data
     else:
@@ -35,7 +35,7 @@ def jax_typify_ndarray(data, dtype=None, **kwargs):
 
 @singledispatch
 def jax_funcify(op, node=None, storage_map=None, **kwargs):
-    """Create a JAX compatible function from an Pytensor `Op`."""
+    """Create a JAX compatible function from an PyTensor `Op`."""
     raise NotImplementedError(f"No JAX conversion for the given `Op`: {op}")
 
 

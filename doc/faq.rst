@@ -10,8 +10,8 @@ Frequently Asked Questions
 Output slight numerical difference
 ----------------------------------
 
-Sometimes when you compare the output of Pytensor using different Pytensor flags,
-Pytensor versions, CPU and GPU devices, or with other software like NumPy, you
+Sometimes when you compare the output of PyTensor using different PyTensor flags,
+PyTensor versions, CPU and GPU devices, or with other software like NumPy, you
 will see small numerical differences.
 
 This is normal. Floating point numbers are approximations of real
@@ -33,24 +33,24 @@ Use it at your own risk. Some people warned that the ``-ftree-loop-distribution`
 
 In the past we said that if the ``compiledir`` was not shared by multiple
 computers, you could add the ``-march=native`` flag. Now we recommend
-to remove this flag as Pytensor does it automatically and safely,
+to remove this flag as PyTensor does it automatically and safely,
 even if the ``compiledir`` is shared by multiple computers with different
-CPUs. In fact, Pytensor asks g++ what are the equivalent flags it uses, and re-uses
+CPUs. In fact, PyTensor asks g++ what are the equivalent flags it uses, and re-uses
 them directly.
 
 
 .. _faster-pytensor-function-compilation:
 
-Faster Pytensor Function Compilation
+Faster PyTensor Function Compilation
 ------------------------------------
 
-Pytensor function compilation can be time consuming. It can be sped up by setting
-the flag ``mode=FAST_COMPILE`` which instructs Pytensor to skip most
+PyTensor function compilation can be time consuming. It can be sped up by setting
+the flag ``mode=FAST_COMPILE`` which instructs PyTensor to skip most
 rewrites and disables the generation of any c/cuda code. This is useful
 for quickly testing a simple idea.
 
 If C code is necessary, the flag
-``optimizer=fast_compile`` can be used instead. It instructs Pytensor to
+``optimizer=fast_compile`` can be used instead. It instructs PyTensor to
 skip time consuming rewrites but still generate C code.
 
 Similarly using the flag ``optimizer_excluding=inplace`` will speed up
@@ -72,14 +72,14 @@ detection algorithm. If the graph is big enough,we suggest that you use
 this flag instead of ``optimizer_excluding=inplace``. It will result in a
 computation time that is in between fast compile and fast run.
 
-Faster Pytensor function
+Faster PyTensor function
 ------------------------
 
-You can set the Pytensor flag :attr:`allow_gc <config.allow_gc>` to ``False`` to get a speed-up by using
-more memory. By default, Pytensor frees intermediate results when we don't need
+You can set the PyTensor flag :attr:`allow_gc <config.allow_gc>` to ``False`` to get a speed-up by using
+more memory. By default, PyTensor frees intermediate results when we don't need
 them anymore. Doing so prevents us from reusing this memory. So disabling the
 garbage collection will keep all intermediate results' memory space to allow to
-reuse them during the next call to the same Pytensor function, if they are of the
+reuse them during the next call to the same PyTensor function, if they are of the
 correct shape. The shape could change if the shapes of the inputs change.
 
 .. _unsafe_rewrites:
@@ -88,28 +88,28 @@ Unsafe Rewrites
 ===============
 
 
-Some Pytensor rewrites make the assumption that the user inputs are
+Some PyTensor rewrites make the assumption that the user inputs are
 valid. What this means is that if the user provides invalid values (like
 incompatible shapes or indexing values that are out of bounds) and
 the rewrites are applied, the user error will get lost. Most of the
 time, the assumption is that the user inputs are valid. So it is good
 to have the rewrite applied, but losing the error is bad.
-The newest rewrite in Pytensor with such an assumption will add an
+The newest rewrite in PyTensor with such an assumption will add an
 assertion in the graph to keep the user error message. Computing
 these assertions could take some time. If you are sure everything is valid
-in your graph and want the fastest possible Pytensor, you can enable a
+in your graph and want the fastest possible PyTensor, you can enable a
 rewrite that will remove the assertions with:
 ``optimizer_including=local_remove_all_assert``
 
 
-Faster Small Pytensor function
+Faster Small PyTensor function
 ------------------------------
 
 .. note::
 
-   For Pytensor 0.6 and up.
+   For PyTensor 0.6 and up.
 
-For Pytensor functions that don't do much work, like a regular logistic
+For PyTensor functions that don't do much work, like a regular logistic
 regression, the overhead of checking the input can be significant. You
 can disable it by setting ``f.trust_input`` to True.
 Make sure the types of arguments you provide match those defined when
@@ -139,8 +139,8 @@ with
     f.trust_input = True
     f(numpy.array([10.], dtype=pytensor.config.floatX))
 
-Also, for small Pytensor functions, you can remove more Python overhead by
-making an Pytensor function that does not take any input. You can use shared
+Also, for small PyTensor functions, you can remove more Python overhead by
+making an PyTensor function that does not take any input. You can use shared
 variables to achieve this. Then you can call it like this: ``f.vm()`` or
 ``f.vm(n_calls=N)`` to speed it up. In the last case, only the last
 function output (out of N calls) is returned.
@@ -158,15 +158,15 @@ but requires that all nodes in the graph have a C implementation:
 Related Projects
 ----------------
 
-We try to list in this `wiki page <https://github.com/Pytensor/Pytensor/wiki/Related-projects>`_ other Pytensor related projects.
+We try to list in this `wiki page <https://github.com/PyTensor/PyTensor/wiki/Related-projects>`_ other PyTensor related projects.
 
 
-"What are Pytensor's Limitations?"
+"What are PyTensor's Limitations?"
 ----------------------------------
 
-Pytensor offers a good amount of flexibility, but has some limitations too.
+PyTensor offers a good amount of flexibility, but has some limitations too.
 You must answer for yourself the following question: How can my algorithm be cleverly written
-so as to make the most of what Pytensor can do?
+so as to make the most of what PyTensor can do?
 
 Here is a list of some of the known limitations:
 

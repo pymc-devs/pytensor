@@ -402,7 +402,7 @@ class TestPushOutNonSeqScan:
             outputs_info=[x, None],
         )
 
-        # Compile an Pytensor function where any optimization error will lead to
+        # Compile an PyTensor function where any optimization error will lead to
         # an exception being raised
         function([x], outputs, updates=updates)
 

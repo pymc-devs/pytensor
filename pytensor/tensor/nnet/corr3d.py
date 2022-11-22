@@ -115,7 +115,7 @@ class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
         self.num_groups = num_groups
 
         if not config.blas__ldflags:
-            # Pytensor will use a NumPy C implementation of [sd]gemm_ instead.
+            # PyTensor will use a NumPy C implementation of [sd]gemm_ instead.
             self.blas_type = ""
         else:
             if "openblas" in config.blas__ldflags:
@@ -679,7 +679,7 @@ class Corr3dMMGradWeights(BaseCorr3dMM):
     Notes
     -----
     You will not want to use this directly, but rely on
-    Pytensor's automatic differentiation or graph optimization to
+    PyTensor's automatic differentiation or graph optimization to
     use it as needed.
 
     """
@@ -802,7 +802,7 @@ class Corr3dMMGradInputs(BaseCorr3dMM):
     Notes
     -----
     You will not want to use this directly, but rely on
-    Pytensor's automatic differentiation or graph optimization to
+    PyTensor's automatic differentiation or graph optimization to
     use it as needed.
 
     """

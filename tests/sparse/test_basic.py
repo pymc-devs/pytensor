@@ -193,7 +193,7 @@ def sparse_random_inputs(
                              sparse matrix.
     :return: (variable, data) where both `variable` and `data` are list.
 
-    :note: explicit_zero and unsorted_indices was added in Pytensor 0.6rc4
+    :note: explicit_zero and unsorted_indices was added in PyTensor 0.6rc4
     """
 
     if out_dtype is None:
@@ -255,7 +255,7 @@ def sparse_random_inputs(
 
     # numpy 1.5.0 with scipy 0.9.0 have sp.sparse.XXX_matrix return
     # typenum 10(ulonglong) instead of 8(uint64) event if they are the same!
-    # Pytensor don't like ulonglong type_num
+    # PyTensor don't like ulonglong type_num
     dtype = np.dtype(out_dtype)  # Convert into dtype object.
     if data[0].dtype.num != dtype.num and dtype.str == data[0].dtype.str:
         data[0].data = _asarray(data[0].data, out_dtype)
@@ -1440,7 +1440,7 @@ class TestStructuredDot:
             # print ('M=%(M)s N=%(N)s K=%(K)s nnz=%(nnz)s pytensor_time'
             #       '=%(pytensor_time)s speedup=%(speedup)s') % locals()
 
-            # fail if Pytensor is slower than scipy by more than a certain amount
+            # fail if PyTensor is slower than scipy by more than a certain amount
             overhead_tol = 0.003  # seconds overall
             overhead_rtol = 1.2  # times as long
             utt.assert_allclose(scipy_result, pytensor_result)

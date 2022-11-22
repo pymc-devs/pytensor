@@ -84,7 +84,7 @@ class InplaceElemwiseOptimizer(GraphRewriter):
         #   deque class too?
         #   And init the deque and other list to an upper bound number of
         #   elements?
-        # Maybe Pytensor should do online toposort as in
+        # Maybe PyTensor should do online toposort as in
         #   http://code.google.com/p/acyclic
         #
         # The next longest rewriter is the canonizer phase.
@@ -567,7 +567,7 @@ def local_elemwise_fusion_op(op_class, max_input_fct=lambda node: 32, maker=None
         For mixed dtype, we let the `Composite` `Op` do the cast. It lets the C
         compiler do the cast.
 
-        The number of dimensions is validated at call time by Pytensor itself.
+        The number of dimensions is validated at call time by PyTensor itself.
 
         """
         # TODO: use broadcast flag?

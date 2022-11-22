@@ -52,9 +52,9 @@ body:
 
 - type: textarea
   attributes:
-    label: "Pytensor version information:"
+    label: "PyTensor version information:"
     description: >
-      Pytensor Version:
+      PyTensor Version:
       Python Version:
       Operating system:
       How did you install pytensor: (conda/pip)

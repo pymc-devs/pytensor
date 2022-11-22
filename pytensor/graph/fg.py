@@ -42,13 +42,13 @@ ClientType = Tuple[ApplyOrOutput, int]
 class FunctionGraph(MetaObject):
     r"""
     A `FunctionGraph` represents a subgraph bound by a set of input variables and
-    a set of output variables, ie a subgraph that specifies an Pytensor function.
+    a set of output variables, ie a subgraph that specifies an PyTensor function.
     The inputs list should contain all the inputs on which the outputs depend.
     `Variable`\s of type `Constant` are not counted as inputs.
 
     The `FunctionGraph` supports the replace operation which allows to replace
     a variable in the subgraph by another, e.g. replace ``(x + x).out`` by
-    ``(2 * x).out``. This is the basis for optimization in Pytensor.
+    ``(2 * x).out``. This is the basis for optimization in PyTensor.
 
     This class is also responsible for verifying that a graph is valid
     (ie, all the dtypes and broadcast patterns are compatible with the
@@ -368,7 +368,7 @@ class FunctionGraph(MetaObject):
                                 " of the graph (indices start "
                                 f"from 0), used to compute {node}, was not "
                                 "provided and not given a value. Use the "
-                                "Pytensor flag exception_verbosity='high', "
+                                "PyTensor flag exception_verbosity='high', "
                                 "for more information on this error."
                             )
                             raise MissingInputError(error_msg, variable=var)

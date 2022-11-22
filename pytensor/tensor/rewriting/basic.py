@@ -1229,7 +1229,7 @@ def local_merge_alloc(fgraph, node):
                 dims_outer[-1 - i] = Assert(
                     "You have a shape error in your graph. To see a better"
                     " error message and a stack trace of where in your code"
-                    " the error is created, use the Pytensor flags"
+                    " the error is created, use the PyTensor flags"
                     " optimizer=None or optimizer=fast_compile."
                 )(dim_outer, eq(dim_outer, dim_inner))
         i += 1

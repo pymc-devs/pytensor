@@ -2,25 +2,25 @@
 .. _debug_faq:
 
 ===========================================
-Debugging Pytensor: FAQ and Troubleshooting
+Debugging PyTensor: FAQ and Troubleshooting
 ===========================================
 
 There are many kinds of bugs that might come up in a computer program.
 This page is structured as a FAQ.  It provides recipes to tackle common
 problems, and introduces some of the tools that we use to find problems in our
-own Pytensor code, and even (it happens) in Pytensor's internals, in
+own PyTensor code, and even (it happens) in PyTensor's internals, in
 :ref:`using_debugmode`.
 
-Isolating the Problem/Testing Pytensor Compiler
+Isolating the Problem/Testing PyTensor Compiler
 -----------------------------------------------
 
-You can run your Pytensor function in a :ref:`DebugMode<using_debugmode>`.
-This tests the Pytensor rewrites and helps to find where NaN, inf and other problems come from.
+You can run your PyTensor function in a :ref:`DebugMode<using_debugmode>`.
+This tests the PyTensor rewrites and helps to find where NaN, inf and other problems come from.
 
 Interpreting Error Messages
 ---------------------------
 
-Even in its default configuration, Pytensor tries to display useful error
+Even in its default configuration, PyTensor tries to display useful error
 messages. Consider the following faulty code.
 
 .. testcode::
@@ -50,8 +50,8 @@ Running the code above we see:
    Inputs strides: [(8,), (8,), (8,)]
    Inputs scalar values: ['not scalar', 'not scalar', 'not scalar']
 
-   HINT: Re-running with most Pytensor optimizations disabled could give you a back-traces when this node was created. This can be done with by setting the Pytensor flags 'optimizer=fast_compile'. If that does not work, Pytensor optimizations can be disabled with 'optimizer=None'.
-   HINT: Use the Pytensor flag 'exception_verbosity=high' for a debugprint of this apply node.
+   HINT: Re-running with most PyTensor optimizations disabled could give you a back-traces when this node was created. This can be done with by setting the PyTensor flags 'optimizer=fast_compile'. If that does not work, PyTensor optimizations can be disabled with 'optimizer=None'.
+   HINT: Use the PyTensor flag 'exception_verbosity=high' for a debugprint of this apply node.
 
 Arguably the most useful information is approximately half-way through
 the error message, where the kind of error is displayed along with its
@@ -60,7 +60,7 @@ Below it, some other information is given, such as the `Apply` node that
 caused the error, as well as the input types, shapes, strides and
 scalar values.
 
-The two hints can also be helpful when debugging. Using the Pytensor flag
+The two hints can also be helpful when debugging. Using the PyTensor flag
 ``optimizer=fast_compile`` or ``optimizer=None`` can often tell you
 the faulty line, while ``exception_verbosity=high`` will display a
 debug print of the apply node. Using these hints, the end of the error
@@ -88,7 +88,7 @@ you could set ``optimizer=None`` or use test values.
 Using Test Values
 -----------------
 
-As of v.0.4.0, Pytensor has a new mechanism by which graphs are executed
+As of v.0.4.0, PyTensor has a new mechanism by which graphs are executed
 on-the-fly, before a :func:`pytensor.function` is ever compiled. Since optimizations
 haven't been applied at this stage, it is easier for the user to locate the
 source of some bug. This functionality is enabled through the config flag
@@ -115,10 +115,10 @@ following example. Here, we use ``exception_verbosity=high`` and
 
     # input which will be of shape (5,10)
     x  = at.matrix('x')
-    # provide Pytensor with a default test-value
+    # provide PyTensor with a default test-value
     #x.tag.test_value = np.random.random((5, 10))
 
-    # transform the shared variable in some way. Pytensor does not
+    # transform the shared variable in some way. PyTensor does not
     # know off hand that the matrix func_of_W1 has shape (20, 10)
     func_of_W1 = W1.dimshuffle(2, 0, 1).flatten(2).T
 
@@ -158,10 +158,10 @@ Running the above code generates the following error message:
          |DimShuffle{2,0,1} [id E] <TensorType(float64, (?, ?, ?))> ''
            |W1 [id F] <TensorType(float64, (?, ?, ?))>
 
-    HINT: Re-running with most Pytensor optimization disabled could give you a back-traces when this node was created. This can be done with by setting the Pytensor flags 'optimizer=fast_compile'. If that does not work, Pytensor optimization can be disabled with 'optimizer=None'.
+    HINT: Re-running with most PyTensor optimization disabled could give you a back-traces when this node was created. This can be done with by setting the PyTensor flags 'optimizer=fast_compile'. If that does not work, PyTensor optimization can be disabled with 'optimizer=None'.
 
 If the above is not informative enough, by instrumenting the code ever
-so slightly, we can get Pytensor to reveal the exact source of the error.
+so slightly, we can get PyTensor to reveal the exact source of the error.
 
 .. code-block:: python
 
@@ -172,11 +172,11 @@ so slightly, we can get Pytensor to reveal the exact source of the error.
 
     # Input which will have the shape (5, 10)
     x  = at.matrix('x')
-    # Provide Pytensor with a default test-value
+    # Provide PyTensor with a default test-value
     x.tag.test_value = np.random.random((5, 10))
 
 In the above, we are tagging the symbolic matrix *x* with a special test
-value. This allows Pytensor to evaluate symbolic expressions on-the-fly (by
+value. This allows PyTensor to evaluate symbolic expressions on-the-fly (by
 calling the ``perform`` method of each op), as they are being defined. Sources
 of error can thus be identified with much more precision and much earlier in
 the compilation pipeline. For example, running the above code yields the
@@ -199,10 +199,10 @@ following error message, which properly identifies *line 24* as the culprit.
 
 The ``compute_test_value`` mechanism works as follows:
 
-* Pytensor ``constants`` and ``shared`` variables are used as is. No need to instrument them.
-* A Pytensor *variable* (i.e. ``dmatrix``, ``vector``, etc.) should be
+* PyTensor ``constants`` and ``shared`` variables are used as is. No need to instrument them.
+* A PyTensor *variable* (i.e. ``dmatrix``, ``vector``, etc.) should be
   given a special test value through the attribute ``tag.test_value``.
-* Pytensor automatically instruments intermediate results. As such, any quantity
+* PyTensor automatically instruments intermediate results. As such, any quantity
   derived from *x* will be given a ``tag.test_value`` automatically.
 
 ``compute_test_value`` can take the following values:
@@ -253,7 +253,7 @@ Running the code above returns the following output:
 "How do I print an intermediate value in a function?"
 -----------------------------------------------------
 
-Pytensor provides a :class:`Print`\ :class:`Op` to do this.
+PyTensor provides a :class:`Print`\ :class:`Op` to do this.
 
 .. testcode::
 
@@ -277,14 +277,14 @@ Pytensor provides a :class:`Print`\ :class:`Op` to do this.
 
     this is a very important value __str__ = [ 1.  2.  3.]
 
-Since Pytensor runs your program in a topological order, you won't have precise
+Since PyTensor runs your program in a topological order, you won't have precise
 control over the order in which multiple :class:`Print`\ `Op`\s are evaluated.  For a more
 precise inspection of what's being computed where, when, and how, see the discussion
 :ref:`faq_monitormode`.
 
 .. warning::
 
-    Using this :class:`Print`\ `Op` can prevent some Pytensor rewrites from being
+    Using this :class:`Print`\ `Op` can prevent some PyTensor rewrites from being
     applied.  So, if you use `Print` and the graph now returns NaNs for example,
     try removing the `Print`\s to see if they're the cause or not.
 
@@ -294,12 +294,12 @@ precise inspection of what's being computed where, when, and how, see the discus
 
 .. TODO: dead links in the next paragraph
 
-Pytensor provides two functions, :func:`pytensor.pp` and
+PyTensor provides two functions, :func:`pytensor.pp` and
 :func:`pytensor.printing.debugprint`, to print a graph to the terminal before or after
 compilation.  These two functions print expression graphs in different ways:
 :func:`pp` is more compact and somewhat math-like, and :func:`debugprint` is more verbose and true to
 the underlying graph objects being printed.
-Pytensor also provides :func:`pytensor.printing.pydotprint` that creates a PNG image of the graph.
+PyTensor also provides :func:`pytensor.printing.pydotprint` that creates a PNG image of the graph.
 
 You can read about them in :ref:`libdoc_printing`.
 
@@ -311,13 +311,13 @@ First, make sure you're running in ``FAST_RUN`` mode. Even though
 to `pytensor.function`  or by setting :attr:`config.mode`
 to ``FAST_RUN``.
 
-Second, try the Pytensor :ref:`profiling <tut_profiling>`.  This will tell you which
+Second, try the PyTensor :ref:`profiling <tut_profiling>`.  This will tell you which
 :class:`Apply` nodes, and which :class:`Op`\s are eating up your CPU cycles.
 
 Tips:
 
 * Use the flags ``floatX=float32`` to require type float32 instead of float64.
-  Use the Pytensor constructors `matrix`, `vector`, etc., instead of `dmatrix`, `dvector`, etc.,
+  Use the PyTensor constructors `matrix`, `vector`, etc., instead of `dmatrix`, `dvector`, etc.,
   since the latter use the default detected precision and the former use only float64.
 * Check in the ``profile`` mode that there is no `Dot`\ `Op` in the post-compilation
   graph while you are multiplying two matrices of the same type. `Dot` should be
@@ -426,7 +426,7 @@ function. To disable those rewrites, define the `MonitorMode` like this:
 
 .. note::
 
-    The Pytensor flags ``optimizer_including``, ``optimizer_excluding``
+    The PyTensor flags ``optimizer_including``, ``optimizer_excluding``
     and ``optimizer_requiring`` aren't used by the `MonitorMode`, they
     are used only by the ``default`` mode. You can't use the ``default``
     mode with `MonitorMode`, as you need to define what you monitor.
@@ -434,7 +434,7 @@ function. To disable those rewrites, define the `MonitorMode` like this:
 To be sure all inputs of the node are available during the call to
 ``post_func``, you must also disable the garbage collector. Otherwise,
 the execution of the node can garbage collect its inputs that aren't
-needed anymore by the Pytensor function. This can be done with the Pytensor
+needed anymore by the PyTensor function. This can be done with the PyTensor
 flag:
 
 .. code-block:: python
@@ -493,7 +493,7 @@ Consider this example script (``ex.py``):
      File "<doctest default[0]>", line 8, in <module>
        f = pytensor.function([a, b], [a * b])
 
-   HINT: Use the Pytensor flag 'exception_verbosity=high' for a debugprint and storage map footprint of this apply node.
+   HINT: Use the PyTensor flag 'exception_verbosity=high' for a debugprint and storage map footprint of this apply node.
 
 This is actually so simple the debugging could be done easily, but it's for
 illustrative purposes. As the matrices can't be multiplied element-wise
@@ -503,10 +503,10 @@ illustrative purposes. As the matrices can't be multiplied element-wise
 
     File "ex.py", line 14, in <module>
       f(mat1, mat2)
-    File "/u/username/Pytensor/pytensor/compile/function/types.py", line 451, in __call__
-    File "/u/username/Pytensor/pytensor/graph/link.py", line 271, in streamline_default_f
-    File "/u/username/Pytensor/pytensor/graph/link.py", line 267, in streamline_default_f
-    File "/u/username/Pytensor/pytensor/graph/cc.py", line 1049, in execute ValueError: ('Input dimension mismatch. (input[0].shape[0] = 3, input[1].shape[0] = 5)', Elemwise{mul,no_inplace}(a, b), Elemwise{mul,no_inplace}(a, b))
+    File "/u/username/PyTensor/pytensor/compile/function/types.py", line 451, in __call__
+    File "/u/username/PyTensor/pytensor/graph/link.py", line 271, in streamline_default_f
+    File "/u/username/PyTensor/pytensor/graph/link.py", line 267, in streamline_default_f
+    File "/u/username/PyTensor/pytensor/graph/cc.py", line 1049, in execute ValueError: ('Input dimension mismatch. (input[0].shape[0] = 3, input[1].shape[0] = 5)', Elemwise{mul,no_inplace}(a, b), Elemwise{mul,no_inplace}(a, b))
 
 The call stack contains some useful information to trace back the source
 of the error. There's the script where the compiled function was called --
@@ -516,7 +516,7 @@ tells us about the `Op` that caused the exception. In this case it's a ``mul``
 involving variables with names ``a`` and ``b``. But suppose we instead had an
 intermediate result to which we hadn't given a name.
 
-After learning a few things about the graph structure in Pytensor, we can use
+After learning a few things about the graph structure in PyTensor, we can use
 the Python debugger to explore the graph, and then we can get runtime
 information about the error. Matrix dimensions, especially, are useful to
 pinpoint the source of the error. In the printout, there are also two of the
@@ -578,10 +578,10 @@ code; otherwise, we won't be able to unpickle it.
 Then send us ``filename``.
 
 
-Breakpoint during Pytensor function execution
+Breakpoint during PyTensor function execution
 ---------------------------------------------
 
-You can set a breakpoint during the execution of an Pytensor function with
+You can set a breakpoint during the execution of an PyTensor function with
 :class:`PdbBreakpoint <pytensor.breakpoint.PdbBreakpoint>`.
 :class:`PdbBreakpoint <pytensor.breakpoint.PdbBreakpoint>` automatically
 detects available debuggers and uses the first available in the following order:

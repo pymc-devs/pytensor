@@ -47,7 +47,7 @@ or passing a `DebugMode` instance, as in
 If any problem is detected, `DebugMode` will raise an exception according to
 what went wrong, either at call time (``f(5)``) or compile time (
 ``f = pytensor.function(x, 10*x, mode='DebugMode')``). These exceptions
-should *not* be ignored; talk to your local Pytensor guru or email the
+should *not* be ignored; talk to your local PyTensor guru or email the
 users list if you cannot make the exception go away.
 
 Some kinds of errors can only be detected for certain input value combinations.
@@ -63,7 +63,7 @@ Reference
 
 .. class:: DebugMode(Mode)
 
-    Evaluation :class:`Mode` that detects internal Pytensor errors.
+    Evaluation :class:`Mode` that detects internal PyTensor errors.
 
     This mode catches several kinds of internal error:
 

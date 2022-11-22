@@ -7,7 +7,7 @@ Unit Testing
 .. warning::
    This document is very outdated.
 
-Pytensor relies heavily on unit testing. Its importance cannot be
+PyTensor relies heavily on unit testing. Its importance cannot be
 stressed enough!
 
 Unit Testing revolves around the following principles:
@@ -58,11 +58,11 @@ with it, as shown below. Unit tests that test functionality of module
 ``<module>.py`` should therefore be stored in
 ``tests/<sub-package>/test_<module>.py``::
 
-    Pytensor/pytensor/tensor/basic.py
-    Pytensor/tests/tensor/test_basic.py
+    PyTensor/pytensor/tensor/basic.py
+    PyTensor/tests/tensor/test_basic.py
 
-    Pytensor/pytensor/tensor/elemwise.py
-    Pytensor/tests/tensor/test_elemwise.py
+    PyTensor/pytensor/tensor/elemwise.py
+    PyTensor/tests/tensor/test_elemwise.py
 
 
 How to Write a Unit Test
@@ -120,7 +120,7 @@ Creating an :class:`Op` Unit Test
 =================================
 
 A few tools have been developed to help automate the development of
-unit tests for Pytensor :class:`Op`\s.
+unit tests for PyTensor :class:`Op`\s.
 
 
 .. _validating_grad:
@@ -160,8 +160,8 @@ relative tolerances.
 
 The parameters are as follows:
 
-* ``fun``: a Python function that takes Pytensor variables as inputs,
-  and returns an Pytensor variable.
+* ``fun``: a Python function that takes PyTensor variables as inputs,
+  and returns an PyTensor variable.
   For instance, an :class:`Op` instance with a single output is such a function.
   It can also be a Python function that calls an :class:`Op` with some of its
   inputs being fixed to specific values, or that combine multiple :class:`Op`\s.
@@ -180,7 +180,7 @@ The parameters are as follows:
 * ``rel_tol``: relative tolerance used as threshold for gradient comparison
 
 In the general case, you can define ``fun`` as you want, as long as it
-takes as inputs Pytensor symbolic variables and returns a sinble Pytensor
+takes as inputs PyTensor symbolic variables and returns a sinble PyTensor
 symbolic variable:
 
 .. testcode::

@@ -1100,9 +1100,9 @@ def forced_replace(out, x, y):
 
     Parameters
     ----------
-    out : Pytensor Variable
-    x : Pytensor Variable
-    y : Pytensor Variable
+    out : PyTensor Variable
+    x : PyTensor Variable
+    y : PyTensor Variable
 
     Examples
     --------

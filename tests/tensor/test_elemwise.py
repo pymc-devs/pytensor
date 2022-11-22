@@ -233,7 +233,7 @@ class TestBroadcast:
                     y_type = type(pytensor.config.floatX, shape=ysh)
                 elif shape_info == "only_broadcastable":
                     # This condition is here for backwards compatibility, when the only
-                    # type shape provided by Pytensor was broadcastable/non-broadcastable
+                    # type shape provided by PyTensor was broadcastable/non-broadcastable
                     x_type = type(
                         pytensor.config.floatX,
                         shape=tuple(s if s == 1 else None for s in xsh),
@@ -284,7 +284,7 @@ class TestBroadcast:
                     y_type = type(pytensor.config.floatX, shape=ysh)
                 elif shape_info == "only_broadcastable":
                     # This condition is here for backwards compatibility, when the only
-                    # type shape provided by Pytensor was broadcastable/non-broadcastable
+                    # type shape provided by PyTensor was broadcastable/non-broadcastable
                     x_type = type(
                         pytensor.config.floatX,
                         shape=tuple(s if s == 1 else None for s in xsh),

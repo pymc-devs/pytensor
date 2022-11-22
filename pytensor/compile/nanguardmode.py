@@ -20,8 +20,8 @@ def _is_numeric_value(arr, var):
 
     Parameters
     ----------
-    arr : the data of that correspond to any Pytensor Variable
-    var : The corresponding Pytensor variable
+    arr : the data of that correspond to any PyTensor Variable
+    var : The corresponding PyTensor variable
 
     Returns
     -------
@@ -80,10 +80,10 @@ def contains_nan(arr, node=None, var=None):
 
     Parameters
     ----------
-    arr : np.ndarray or output of any Pytensor op
+    arr : np.ndarray or output of any PyTensor op
     node : None or an Apply instance.
-        If arr is the output of an Pytensor op, the node associated to it.
-    var : The Pytensor symbolic variable.
+        If arr is the output of an PyTensor op, the node associated to it.
+    var : The PyTensor symbolic variable.
 
     Returns
     -------
@@ -111,10 +111,10 @@ def contains_inf(arr, node=None, var=None):
 
     Parameters
     ----------
-    arr : np.ndarray or output of any Pytensor op
+    arr : np.ndarray or output of any PyTensor op
     node : None or an Apply instance.
-        If the output of an Pytensor op, the node associated to it.
-    var : The Pytensor symbolic variable.
+        If the output of an PyTensor op, the node associated to it.
+    var : The PyTensor symbolic variable.
 
     Returns
     -------
@@ -139,7 +139,7 @@ def contains_inf(arr, node=None, var=None):
 
 class NanGuardMode(Mode):
     """
-    A Pytensor compilation Mode that makes the compiled function automatically
+    A PyTensor compilation Mode that makes the compiled function automatically
     detect NaNs and Infs and detect an error if they occur.
 
     Parameters

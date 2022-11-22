@@ -1,12 +1,12 @@
 """
 .. warning::
 
-This directory is for the internal of Pytensor.
+This directory is for the internal of PyTensor.
 
 You are strongly advised not to use it, except if you know
 what you are doing!
 
-If you want to use a scalar variable in an Pytensor graph,
+If you want to use a scalar variable in an PyTensor graph,
 you probably want to use pytensor.tensor.[c,z,f,d,b,w,i,l,]scalar!
 """
 
@@ -377,7 +377,7 @@ class ScalarType(CType, HasDataType, HasShape):
             # Windows and Linux.
             # NOTE: equivalent type on a platform can have different typenum.
             #     This is the source of all dtype/typenum problem found up to
-            #     now, as Pytensor always expect the exact typenum that
+            #     now, as PyTensor always expect the exact typenum that
             #     correspond to our supported dtype.
             """
             for dtype in ['bool', 'int8', 'uint8', 'short', 'ushort', 'intc',
@@ -510,7 +510,7 @@ class ScalarType(CType, HasDataType, HasShape):
             ]
             # If the 'int' C type is not exactly the same as an existing
             # 'npy_intX', some C code may not compile, e.g. when assigning
-            # the value 0 (cast to 'int' in C) to an Pytensor_complex64.
+            # the value 0 (cast to 'int' in C) to an PyTensor_complex64.
             if np.dtype("intc").num not in [np.dtype(d[4:]).num for d in real_types]:
                 # In that case we add the 'int' type to the real types.
                 real_types.append("int")
@@ -2040,7 +2040,7 @@ true_div = TrueDiv(upcast_out, name="true_div")
 class IntDiv(BinaryScalarOp):
     nfunc_spec = ("floor_divide", 2, 1)
     complex_error = ComplexError(
-        "Pytensor does not support integer division (//) on "
+        "PyTensor does not support integer division (//) on "
         "complex numbers, since numpy deprecated it."
     )
 
@@ -2148,7 +2148,7 @@ def mod_check(x, y):
 class Mod(BinaryScalarOp):
     nfunc_spec = ("mod", 2, 1)
     complex_error = ComplexError(
-        "Pytensor does not support the mod operator (%) on "
+        "PyTensor does not support the mod operator (%) on "
         "complex numbers, since numpy deprecated it."
     )
 
@@ -2838,7 +2838,7 @@ round_half_away_from_zero = RoundHalfAwayFromZero(same_out_float_only)
 
 class Neg(UnaryScalarOp):
     # We can use numpy.negative here, because even if it gives unexpected
-    # results on Boolean arrays, it will be passed other dtypes as Pytensor
+    # results on Boolean arrays, it will be passed other dtypes as PyTensor
     # does not have a Boolean type for tensors.
     nfunc_spec = ("negative", 1, 1)
 

@@ -13,7 +13,7 @@ storage methods may lead to reduced computation time through the use of
 sparse specific algorithms. We usually refer to the generically stored matrices
 as *dense* matrices.
 
-Pytensor's sparse package provides efficient algorithms, but its use is not recommended
+PyTensor's sparse package provides efficient algorithms, but its use is not recommended
 in all cases or for all matrices. As an obvious example, consider the case where
 the *sparsity proportion* is very low. The *sparsity proportion* refers to the
 ratio of the number of zero elements to the number of all elements in a matrix.
@@ -27,12 +27,12 @@ of the matrices. More documentation may be found in the
 
 Since sparse matrices are not stored in contiguous arrays, there are several
 ways to represent them in memory. This is usually designated by the so-called ``format``
-of the matrix. Since Pytensor's sparse matrix package is based on the SciPy
+of the matrix. Since PyTensor's sparse matrix package is based on the SciPy
 sparse package, complete information about sparse matrices can be found
-in the SciPy documentation. Like SciPy, Pytensor does not implement sparse formats for
+in the SciPy documentation. Like SciPy, PyTensor does not implement sparse formats for
 arrays with a number of dimensions different from two.
 
-So far, Pytensor implements two ``formats`` of sparse matrix: ``csc`` and ``csr``.
+So far, PyTensor implements two ``formats`` of sparse matrix: ``csc`` and ``csr``.
 Those are almost identical except that ``csc`` is based on the *columns* of the
 matrix and ``csr`` is based on its *rows*. They both have the same purpose:
 to provide for the use of efficient algorithms performing linear algebra operations.
@@ -56,7 +56,7 @@ Compressed Sparse Format
 
 .. Changes to this section should also result in changes to library/sparse/index.txt.
 
-Pytensor supports two *compressed sparse formats*: ``csc`` and ``csr``, respectively based on columns
+PyTensor supports two *compressed sparse formats*: ``csc`` and ``csr``, respectively based on columns
 and rows. They have both the same attributes: ``data``, ``indices``, ``indptr`` and ``shape``.
 
   * The ``data`` attribute is a one-dimensional ``ndarray`` which contains all the non-zero
@@ -92,10 +92,10 @@ what may be the most relevant rule:
 The documentation about the ops and their supported format may be found in
 the :ref:`Sparse Library Reference <libdoc_sparse>`.
 
-Handling Sparse in Pytensor
+Handling Sparse in PyTensor
 ===========================
 
-Most of the ops in Pytensor depend on the ``format`` of the sparse matrix.
+Most of the ops in PyTensor depend on the ``format`` of the sparse matrix.
 That is why there are two kinds of constructors of sparse variables:
 ``csc_matrix`` and ``csr_matrix``. These can be called with the usual
 ``name`` and ``dtype`` parameters, but no ``broadcastable`` flags are
@@ -111,7 +111,7 @@ set(['int8', 'int16', 'int32', 'int64', 'uint8', 'uint16', 'uint32', 'uint64',
 To and Fro
 ----------
 
-To move back and forth from a dense matrix to a sparse matrix representation, Pytensor
+To move back and forth from a dense matrix to a sparse matrix representation, PyTensor
 provides the ``dense_from_sparse``, ``csr_from_dense`` and
 ``csc_from_dense`` functions. No additional detail must be provided. Here is
 an example that performs a full cycle from sparse to sparse:

@@ -1753,7 +1753,7 @@ def bilinear_kernel_2D(ratio, normalize=True):
 
     Parameters
     ----------
-    ratio: int or Constant/ScalarType Pytensor tensor of int* dtype
+    ratio: int or Constant/ScalarType PyTensor tensor of int* dtype
         the ratio by which an image will be upsampled by the returned filter
         in the 2D space.
 
@@ -1789,7 +1789,7 @@ def bilinear_kernel_1D(ratio, normalize=True):
 
     Parameters
     ----------
-    ratio: int or Constant/ScalarType Pytensor tensor of int* dtype
+    ratio: int or Constant/ScalarType PyTensor tensor of int* dtype
         the ratio by which an image will be upsampled by the returned filter
         in the 2D space.
 

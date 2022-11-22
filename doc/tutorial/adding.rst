@@ -7,7 +7,7 @@ Baby Steps - Algebra
 Adding two Scalars
 ==================
 
-To get us started with Pytensor and get a feel of what we're working with,
+To get us started with PyTensor and get a feel of what we're working with,
 let's make a simple function: add two numbers together. Here is how you do
 it:
 
@@ -41,7 +41,7 @@ instruction. Behind the scene, *f* was being compiled into C code.
 .. note:
 
   A *Variable* is the main data structure you work with when
-  using Pytensor. The symbolic inputs that you operate on are
+  using PyTensor. The symbolic inputs that you operate on are
   *Variables* and what you get from applying various operations to
   these inputs are also *Variables*. For example, when I type
 
@@ -58,9 +58,9 @@ instruction. Behind the scene, *f* was being compiled into C code.
 >>> x = at.dscalar('x')
 >>> y = at.dscalar('y')
 
-In Pytensor, all symbols must be typed. In particular, ``at.dscalar``
+In PyTensor, all symbols must be typed. In particular, ``at.dscalar``
 is the type we assign to "0-dimensional arrays (`scalar`) of doubles
-(`d`)". It is an Pytensor :ref:`type`.
+(`d`)". It is an PyTensor :ref:`type`.
 
 ``dscalar`` is not a class. Therefore, neither *x* nor *y*
 are actually instances of ``dscalar``. They are instances of
@@ -82,7 +82,7 @@ By calling ``at.dscalar`` with a string argument, you create a
 given name. If you provide no argument, the symbol will be unnamed. Names
 are not required, but they can help debugging.
 
-More will be said in a moment regarding Pytensor's inner structure. You
+More will be said in a moment regarding PyTensor's inner structure. You
 could also learn more by looking into :ref:`graphstructures`.
 
 

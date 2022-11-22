@@ -240,7 +240,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         if not data.flags.aligned:
             raise TypeError(
                 "The numpy.ndarray object is not aligned."
-                " Pytensor C code does not support that.",
+                " PyTensor C code does not support that.",
             )
 
         if not all(

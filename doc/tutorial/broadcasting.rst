@@ -32,7 +32,7 @@ dimensions of the matrix (adding ``1`` to the shape and ``True``
 to the pattern), resulting in ``(1, 2)`` and ``(True, False)``.
 It would then behave just like the example above.
 
-Unlike numpy which does broadcasting dynamically, Pytensor needs
+Unlike numpy which does broadcasting dynamically, PyTensor needs
 to know, for any operation which supports broadcasting, which
 dimensions will need to be broadcasted. When applicable, this
 information is given in the :ref:`type` of a *Variable*.

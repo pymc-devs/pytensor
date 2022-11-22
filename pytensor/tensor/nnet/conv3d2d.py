@@ -211,7 +211,7 @@ def conv3d(
     See Also
     --------
     Someone made a script that shows how to swap the axes between
-    both 3d convolution implementations in Pytensor. See the last
+    both 3d convolution implementations in PyTensor. See the last
     `attachment <https://groups.google.com/d/msg/pytensor-users/1S9_bZgHxVw/0cQR9a4riFUJ>`_
 
     """

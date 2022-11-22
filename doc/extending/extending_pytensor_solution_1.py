@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-# Pytensor tutorial
-# Solution to Exercise in section 'Extending Pytensor'
+# PyTensor tutorial
+# Solution to Exercise in section 'Extending PyTensor'
 import unittest
 
 import pytensor

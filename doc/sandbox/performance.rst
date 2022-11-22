@@ -3,7 +3,7 @@
 Performance
 ===========
 
-Pytensor uses several tricks to obtain good performance:
+PyTensor uses several tricks to obtain good performance:
  * common sub-expression elimination
  * [custom generated] C code for many operations
  * pre-allocation of temporary storage
@@ -14,7 +14,7 @@ speed improvements over basic numpy by using pytensor.
 [More specific speed tests would be nice.]
 
 
-With a little work, Pytensor could also implement more sophisticated
+With a little work, PyTensor could also implement more sophisticated
 rewrites:
 
  * automatic ordering of matrix multiplications

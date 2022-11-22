@@ -9,13 +9,13 @@ Configuration Settings and Compiling Modes
 Configuration
 =============
 
-The :mod:`pytensor.config` module contains several *attributes* that modify Pytensor's behavior.  Many of these
+The :mod:`pytensor.config` module contains several *attributes* that modify PyTensor's behavior.  Many of these
 attributes are examined during the import of the :mod:`pytensor` module and several are assumed to be
 read-only.
 
 *As a rule, the attributes in the* :mod:`pytensor.config` *module should not be modified inside the user code.*
 
-Pytensor's code comes with default values for these attributes, but you can
+PyTensor's code comes with default values for these attributes, but you can
 override them from your ``.pytensorrc`` file, and override those values in turn by
 the :envvar:`PYTENSOR_FLAGS` environment variable.
 
@@ -58,7 +58,7 @@ Consider the logistic regression:
     rng.integers(size=N,low=0, high=2).astype(pytensor.config.floatX))
     training_steps = 10000
 
-    # Declare Pytensor symbolic variables
+    # Declare PyTensor symbolic variables
     x = at.matrix("x")
     y = at.vector("y")
     w = pytensor.shared(rng.standard_normal(feats).astype(pytensor.config.floatX), name="w")
@@ -66,7 +66,7 @@ Consider the logistic regression:
     x.tag.test_value = D[0]
     y.tag.test_value = D[1]
 
-    # Construct Pytensor expression graph
+    # Construct PyTensor expression graph
     p_1 = 1 / (1 + at.exp(-at.dot(x, w)-b)) # Probability of having a one
     prediction = p_1 > 0.5 # The prediction that is done: 0 or 1
     xent = -y*at.log(p_1) - (1-y)*at.log(1-p_1) # Cross-entropy
@@ -117,7 +117,7 @@ as it will be useful later on.
 
 .. Note::
 
-   * Apply the Pytensor flag ``floatX=float32`` (through ``pytensor.config.floatX``) in your code.
+   * Apply the PyTensor flag ``floatX=float32`` (through ``pytensor.config.floatX``) in your code.
    * Cast inputs before storing them into a shared variable.
    * Circumvent the automatic cast of int32 with float32 to float64:
 
@@ -133,11 +133,11 @@ Default Modes
 =============
 
 Every time :func:`pytensor.function <function.function>` is called,
-the symbolic relationships between the input and output Pytensor *variables*
+the symbolic relationships between the input and output PyTensor *variables*
 are rewritten and compiled. The way this compilation occurs
 is controlled by the value of the ``mode`` parameter.
 
-Pytensor defines the following modes by name:
+PyTensor defines the following modes by name:
 
 - ``'FAST_COMPILE'``: Apply just a few graph optimizations and only use Python implementations.
 - ``'FAST_RUN'``: Apply all optimizations and use C implementations where possible.
@@ -173,7 +173,7 @@ A :class:`Mode` object is composed of two things: an optimizer and a linker. Som
 like `NanGuardMode` and `DebugMode`, add logic around the
 optimizer and linker. `DebugMode` uses its own linker.
 
-You can select which linker to use with the Pytensor flag :attr:`config.linker`.
+You can select which linker to use with the PyTensor flag :attr:`config.linker`.
 Here is a table to compare the different linkers.
 
 =============  =========  =================  =========  ===
@@ -186,13 +186,13 @@ c|py_nogc      no         yes                "++"       As c|py, but without gc
 c              no         yes                "+"        Use only C code (if none available for an op, raise an error)
 py             yes        yes                "+++"      Use only Python code
 NanGuardMode   yes        yes                "++++"     Check if nodes generate NaN
-DebugMode      no         yes                VERY HIGH  Make many checks on what Pytensor computes
+DebugMode      no         yes                VERY HIGH  Make many checks on what PyTensor computes
 =============  =========  =================  =========  ===
 
 
 .. [#gc] Garbage collection of intermediate results during computation.
          Otherwise, their memory space used by the ops is kept between
-         Pytensor function calls, in order not to
+         PyTensor function calls, in order not to
          reallocate memory, and lower the overhead (make it faster...).
 .. [#cpy1] Default
 
@@ -204,22 +204,22 @@ For more detail, see :ref:`Mode<libdoc_compile_mode>` in the library.
 Default Optimizers
 ==================
 
-Pytensor allows compilations with a number of predefined rewrites that are
+PyTensor allows compilations with a number of predefined rewrites that are
 expected to improve graph evaluation performance on average.
 An optimizer is technically just a :class:`Rewriter`, or an object that
 indicates a particular set of rewrites (e.g. a string used to query `optdb` for
 a :class:`Rewriter`).
 
-The optimizers Pytensor provides are summarized below to indicate the trade-offs
+The optimizers PyTensor provides are summarized below to indicate the trade-offs
 one might make between compilation time and execution time.
 
-These optimizers can be enabled globally with the Pytensor flag: ``optimizer=name``
+These optimizers can be enabled globally with the PyTensor flag: ``optimizer=name``
 or per call to pytensor functions with ``function(...mode=Mode(optimizer="name"))``.
 
 =================  ============  ==============  ==================================================
 optimizer          Compile time  Execution time  Description
 =================  ============  ==============  ==================================================
-None               "++++++"      "+"             Applies none of Pytensor's rewrites
+None               "++++++"      "+"             Applies none of PyTensor's rewrites
 o1 (fast_compile)  "+++++"       "++"            Applies only basic rewrites
 o2                 "++++"        "+++"           Applies few basic rewrites and some that compile fast
 o3                 "+++"         "++++"          Applies all rewrites except ones that compile slower
@@ -266,7 +266,7 @@ use it only during development.
 If any problem is detected, `DebugMode` will raise an exception according to
 what went wrong, either at call time (e.g. ``f(5)``) or compile time (
 ``f = pytensor.function(x, 10 * x, mode='DebugMode')``). These exceptions
-should *not* be ignored; talk to your local Pytensor guru or email the
+should *not* be ignored; talk to your local PyTensor guru or email the
 users list if you cannot make the exception go away.
 
 Some kinds of errors can only be detected for certain input value combinations.

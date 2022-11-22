@@ -7,14 +7,14 @@ Context
 =======
 
 This document is meant to act as reference material for developers working
-on Pytensor's loop mechanism. This mechanism is called `Scan` and its internals
+on PyTensor's loop mechanism. This mechanism is called `Scan` and its internals
 are highly complex, hence the need for a centralized repository of knowledge
 regarding its inner workings.
 
 The `pytensor.scan` function is the public-facing interface for looping in
-Pytensor. Under the hood, this function will perform some processing on its
+PyTensor. Under the hood, this function will perform some processing on its
 inputs and instantiate the `Scan` `Op` class which implements the looping
-mechanism. It achieves this by compiling its own Pytensor function representing
+mechanism. It achieves this by compiling its own PyTensor function representing
 the computation to be done at every iteration of the loop and calling it as
 many times as necessary.
 
@@ -32,14 +32,14 @@ Pre-requisites
 
 The following sections assumes the reader is familiar with the following :
 
-1. Pytensor's :ref:`graph structure <graphstructures>` (`Apply` nodes, `Variable` nodes and `Op`\s)
+1. PyTensor's :ref:`graph structure <graphstructures>` (`Apply` nodes, `Variable` nodes and `Op`\s)
 
-2. The interface and usage of Pytensor's :ref:`scan <lib_scan>` function
+2. The interface and usage of PyTensor's :ref:`scan <lib_scan>` function
 
 Additionally, the :ref:`scan_internals_rewrites` section below assumes
 knowledge of:
 
-3. Pytensor's :ref:`graph rewriting <graph_rewriting>`
+3. PyTensor's :ref:`graph rewriting <graph_rewriting>`
 
 
 Relevant code files
@@ -63,7 +63,7 @@ deal with, are :
 * ``views.py`` contains different views of the `Scan` `Op` that have
   simpler and easier signatures to be used in specific cases.
 
-* ``opt.py`` contains the list of all Pytensor graph rewrites for the
+* ``opt.py`` contains the list of all PyTensor graph rewrites for the
   `Scan` operator.
 
 
@@ -73,12 +73,12 @@ Notation
 `Scan` being a sizeable and complex module, it has its own naming convention for
 functions and variables which this section will attempt to introduce.
 
-A `Scan` `Op` contains an Pytensor function representing the computation
+A `Scan` `Op` contains an PyTensor function representing the computation
 that is done in a single iteration of the loop represented by the `Scan` `Op` (in
 other words, the computation given by the function provided as value to
 `pytensor.scan`'s ``fn`` argument ). Whenever we discuss a `Scan` `Op`, the **outer
-function** refers to the Pytensor function that *contains* the `Scan` `Op` whereas the
-**inner function** refers to the Pytensor function that is *contained* inside the
+function** refers to the PyTensor function that *contains* the `Scan` `Op` whereas the
+**inner function** refers to the PyTensor function that is *contained* inside the
 `Scan` `Op`.
 
 In the same spirit, the inputs and outputs of the *Apply node wrapping the `Scan`
@@ -94,14 +94,14 @@ designated **inner inputs** and **inner outputs**, respectively.
 The following are the different types of variables that `Scan` has the
 capacity to handle, along with their various caracteristics.
 
-**Sequence** : A sequence is an Pytensor variable which `Scan` will iterate
+**Sequence** : A sequence is an PyTensor variable which `Scan` will iterate
 over and give sub-elements to its inner function as input. A sequence
 has no associated output. For a sequence variable ``X``, at timestep
 ``t``, the inner function will receive as input the sequence element
 ``X[t]``. These variables are used through the argument ``sequences``
 of the `pytensor.scan` function.
 
-**Non-sequences** : A non-sequence is an Pytensor variable which Scan
+**Non-sequences** : A non-sequence is an PyTensor variable which Scan
 *will provide as-is* to its inner function. Like a sequence, a
 non-sequence has no associated output. For a non-sequence variable
 ``X``, at timestep ``t``, the inner function will receive as input
@@ -133,7 +133,7 @@ timestep, since every computed term needs to be reused to compute the
 two next terms of the sequence.
 
 **MITMOT (multiple input taps, multiple output taps)** : These outputs exist
-but they cannot be directly created by the user. They can appear in an Pytensor
+but they cannot be directly created by the user. They can appear in an PyTensor
 graph as a result of taking the gradient of the output of a `Scan` with respect
 to its inputs: This will result in the creation of a new `Scan` node used to
 compute the gradients of the first `Scan` node. If the original `Scan` had SITSOTs

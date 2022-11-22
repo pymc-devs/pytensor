@@ -3,13 +3,13 @@
 
 
 =======================
-Derivatives in Pytensor
+Derivatives in PyTensor
 =======================
 
 Computing Gradients
 ===================
 
-Now let's use Pytensor for a slightly more sophisticated task: create a
+Now let's use PyTensor for a slightly more sophisticated task: create a
 function which computes the derivative of some expression ``y`` with
 respect to its parameter ``x``. To do this we will use the macro `at.grad`.
 For instance, we can compute the gradient of :math:`x^2` with respect to
@@ -41,7 +41,7 @@ the correct symbolic gradient.
 ``x**2`` and fill it with ``1.0``.
 
 .. note::
-    Pytensor's rewrites simplify the symbolic gradient expression.  You can see
+    PyTensor's rewrites simplify the symbolic gradient expression.  You can see
     this by digging inside the internal properties of the compiled function.
 
     .. testcode::
@@ -73,8 +73,8 @@ array([[ 0.25      ,  0.19661193],
        [ 0.19661193,  0.10499359]])
 
 In general, for any **scalar** expression ``s``, ``at.grad(s, w)`` provides
-the Pytensor expression for computing :math:`\frac{\partial s}{\partial w}`. In
-this way Pytensor can be used for doing **efficient** symbolic differentiation
+the PyTensor expression for computing :math:`\frac{\partial s}{\partial w}`. In
+this way PyTensor can be used for doing **efficient** symbolic differentiation
 (as the expression returned by `at.grad` will be optimized during compilation), even for
 function with many inputs. (see `automatic differentiation <http://en.wikipedia.org/wiki/Automatic_differentiation>`_ for a description
 of symbolic differentiation).
@@ -91,15 +91,15 @@ of symbolic differentiation).
    :ref:`this<libdoc_gradient>` section of the library.
 
    Additional information on the inner workings of differentiation may also be
-   found in the more advanced tutorial :ref:`Extending Pytensor<extending>`.
+   found in the more advanced tutorial :ref:`Extending PyTensor<extending>`.
 
 Computing the Jacobian
 ======================
 
-In Pytensor's parlance, the term **Jacobian** designates the tensor comprising the
+In PyTensor's parlance, the term **Jacobian** designates the tensor comprising the
 first partial derivatives of the output of a function with respect to its inputs.
 (This is a generalization of to the so-called Jacobian matrix in Mathematics.)
-Pytensor implements the :func:`pytensor.gradient.jacobian` macro that does all
+PyTensor implements the :func:`pytensor.gradient.jacobian` macro that does all
 that is needed to compute the Jacobian. The following text explains how
 to do it manually.
 
@@ -110,7 +110,7 @@ do is to loop over the entries in ``y`` and compute the gradient of
 
 .. note::
 
-    `scan` is a generic op in Pytensor that allows writing in a symbolic
+    `scan` is a generic op in PyTensor that allows writing in a symbolic
     manner all kinds of recurrent equations. While creating
     symbolic loops (and optimizing them for performance) is a hard task,
     effort is being done for improving the performance of `scan`. We
@@ -144,9 +144,9 @@ matrix which corresponds to the Jacobian.
 Computing the Hessian
 =====================
 
-In Pytensor, the term **Hessian** has the usual mathematical meaning: It is the
+In PyTensor, the term **Hessian** has the usual mathematical meaning: It is the
 matrix comprising the second order partial derivative of a function with scalar
-output and vector input. Pytensor implements :func:`pytensor.gradient.hessian` macro that does all
+output and vector input. PyTensor implements :func:`pytensor.gradient.hessian` macro that does all
 that is needed to compute the Hessian. The following text explains how
 to do it manually.
 
@@ -177,7 +177,7 @@ performance gains. A description of one such algorithm can be found here:
 
 - Barak A. Pearlmutter, "Fast Exact Multiplication by the Hessian", Neural Computation, 1994
 
-While in principle we would want Pytensor to identify these patterns automatically for us,
+While in principle we would want PyTensor to identify these patterns automatically for us,
 in practice, implementing such optimizations in a generic manner is extremely
 difficult. Therefore, we provide special functions dedicated to these tasks.
 
@@ -190,7 +190,7 @@ vector, namely :math:`\frac{\partial f(x)}{\partial x} v`. The formulation
 can be extended even for :math:`x` being a matrix, or a tensor in general, case in
 which also the Jacobian becomes a tensor and the product becomes some kind
 of tensor product. Because in practice we end up needing to compute such
-expressions in terms of weight matrices, Pytensor supports this more generic
+expressions in terms of weight matrices, PyTensor supports this more generic
 form of the operation. In order to evaluate the R-operation of
 expression ``y``, with respect to ``x``, multiplying the Jacobian with ``V``
 you need to do something similar to this:
@@ -272,7 +272,7 @@ Final Pointers
 ==============
 
 
-- The `grad` function works symbolically: it receives and returns Pytensor variables.
+- The `grad` function works symbolically: it receives and returns PyTensor variables.
 
 - `grad` can be compared to a macro since it can be applied repeatedly.
 
