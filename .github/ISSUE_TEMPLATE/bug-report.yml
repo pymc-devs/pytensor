@@ -32,7 +32,8 @@ body:
       should be self-contained, i.e., can be copy-pasted into the Python
       interpreter or run as-is via `python myproblem.py`.
     placeholder: |
-      import numpy as np
+      import pytensor
+      import pytensor.tensor as pt
       << your code here >>
     render: python
   validations:
