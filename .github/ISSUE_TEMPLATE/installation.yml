@@ -5,7 +5,7 @@
 
 
 name: Post-install/importing issue
-description: Report an issue if you have trouble importing or using PyMC after installation.
+description: Report an issue if you have trouble importing or using Pytensor after installation.
 title: "<Please write a comprehensive title here>"
 labels: [installation]
 
