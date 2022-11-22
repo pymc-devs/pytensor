@@ -18,14 +18,8 @@
 # absolute, like shown here.
 # sys.path.append(os.path.abspath('some/directory'))
 
-
 import os
-import sys
 import pytensor
-
-pytensor_path = os.path.join(os.path.dirname(__file__), os.pardir)
-sys.path.append(os.path.abspath(pytensor_path))
-import versioneer
 
 # General configuration
 # ---------------------
@@ -38,26 +32,14 @@ extensions = [
     "sphinx.ext.doctest",
     "sphinx.ext.napoleon",
     "sphinx.ext.linkcode",
+    "sphinx.ext.mathjax",
 ]
+
+needs_sphinx = "3"
 
 todo_include_todos = True
 napoleon_google_docstring = False
 napoleon_include_special_with_doc = False
-
-# We do it like this to support multiple sphinx version without having warning.
-# Our buildbot consider warning as error.
-try:
-    from sphinx.ext import imgmath
-
-    extensions.append("sphinx.ext.imgmath")
-except ImportError:
-    try:
-        from sphinx.ext import pngmath
-
-        extensions.append("sphinx.ext.pngmath")
-    except ImportError:
-        pass
-
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = [".templates"]
@@ -70,22 +52,25 @@ master_doc = "index"
 
 # General substitutions.
 project = "PyTensor"
-copyright = "PyTensor Developers, 2021; PyMC Developers, 2020-2021; 2008--2019, LISA lab"
+copyright = "PyMC Team 2022-present,2020-2021; Aesara Developers, 2021-2022; LISA Lab, 2008--2019"
 
 # The default replacements for |version| and |release|, also used in various
 # other places throughout the built documents.
 #
 
-# We need this hokey-pokey because versioneer needs the current
-# directory to be the root of the project to work.
-_curpath = os.getcwd()
-os.chdir(os.path.dirname(os.path.dirname(__file__)))
+version = pytensor.__version__
+if os.environ.get("READTHEDOCS", False):
+    rtd_version = os.environ.get("READTHEDOCS_VERSION", "")
+    if rtd_version.lower() == "stable":
+        version = pymc.__version__.split("+")[0]
+    elif rtd_version.lower() == "latest":
+        version = "dev"
+    else:
+        version = rtd_version
+else:
+    rtd_version = "local"
 # The full version, including alpha/beta/rc tags.
-release = versioneer.get_version()
-# The short X.Y version.
-version = ".".join(release.split(".")[:2])
-os.chdir(_curpath)
-del _curpath
+release = version
 
 # There are two options for replacing |today|: either, you set today to some
 # non-false value, then it is used:
@@ -132,19 +117,18 @@ pygments_style = "sphinx"
 # https://github.com/readthedocs/sphinx_rtd_theme/issues/766#issuecomment-513852197
 html4_writer = True
 
-# Read the docs style:
-if os.environ.get("READTHEDOCS") != "True":
-    try:
-        import sphinx_rtd_theme
-    except ImportError:
-        pass  # assume we have sphinx >= 1.3
-    else:
-        html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
-    html_theme = "sphinx_rtd_theme"
-
-
-def setup(app):
-    app.add_css_file("fix_rtd.css")
+html_logo = "images/pytensor_logo.svg"
+html_theme = "pymc_sphinx_theme"
+html_theme_options = {
+    "use_search_override": False,
+}
+html_context = {
+    "github_user": "pymc-devs",
+    "github_repo": "pytensor",
+    "github_version": "main",
+    "doc_path": "doc",
+    "default_mode": "light",
+}
 
 
 # The name for this set of Sphinx documents.  If None, it defaults to
@@ -166,7 +150,7 @@ def setup(app):
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = [".static", "images", "library/d3viz/examples"]
+html_static_path = ["images", "library/d3viz/examples"]
 
 # If not '', a 'Last updated on:' timestamp is inserted at every page bottom,
 # using the given strftime format.
