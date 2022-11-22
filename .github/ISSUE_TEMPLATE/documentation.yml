@@ -17,7 +17,7 @@ body:
       Please make sure to leave a reference to the document/code you're
       referring to. You can also check the development version of the
       documentation and see if this issue has already been addressed at
-      https://www.pymc.io/projects/docs/en/latest/api.html.
+      https://pytensor.readthedocs.io/en/latest/.
   validations:
     required: true
 
