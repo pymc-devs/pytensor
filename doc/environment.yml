@@ -10,9 +10,9 @@ dependencies:
   - scipy
   - six
   - sphinx>=3
-  - sphinx_rtd_theme
   - mock
   - pillow
   - pip
   - pip:
-    - -e ..[doc]
+    - git+https://github.com/pymc-devs/pymc-sphinx-theme
+    - -e ..

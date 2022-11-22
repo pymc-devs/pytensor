@@ -4,6 +4,12 @@
 Developer Start Guide
 =====================
 
+.. toctree::
+   :hidden:
+
+   self
+   internal/index
+
 Contributing
 ============
 

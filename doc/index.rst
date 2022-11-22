@@ -78,18 +78,9 @@ Community
    :hidden:
 
    introduction
-   install
-   tutorial/index
-   extending/index
-   dev_start_guide
-   optimizations
-   library/index
-   troubleshooting
-   glossary
-   links
-   internal/index
-   acknowledgement
-
+   user_guide
+   API <library/index>
+   Contributing <dev_start_guide>
 
 .. _Theano: https://github.com/Theano/Theano
 .. _pytensor-users: https://gitter.im/pymc-devs/pytensor

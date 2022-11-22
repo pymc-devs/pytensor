@@ -1,9 +1,9 @@
 
 .. _introduction:
 
-====================
-PyTensor at a Glance
-====================
+===============
+Getting Started
+===============
 
 PyTensor is a Python library that allows one to define, optimize/rewrite, and
 evaluate mathematical expressions, especially ones involving multi-dimensional
@@ -150,6 +150,12 @@ pytensor-dev_
 We welcome all kinds of contributions. If you have any questions regarding how
 to extend PyTensor, please feel free to ask.
 
+.. toctree::
+   :hidden:
+
+   self
+   install
+   tutorial/index
 
 .. _LISA:  https://mila.umontreal.ca/
 .. _Greek mathematician: http://en.wikipedia.org/wiki/Theano_(mathematician)
