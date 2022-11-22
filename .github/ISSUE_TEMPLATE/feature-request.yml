@@ -17,7 +17,7 @@ body:
       including adding or changing the meaning of arguments to an existing
       function, please post your idea first on please create a discussion thread at
       [Discussions](https://github.com/pymc-devs/pytensor/discussions)
-      to validate it and bring attentino to it. After validation,
+      to validate it and bring attention to it. After validation,
       you can open this issue for a more technical developer discussion.
       Check the [Contributor Guide](https://github.com/pymc-devs/pytensor/blob/main/CONTRIBUTING.md)
       if you need more information.
