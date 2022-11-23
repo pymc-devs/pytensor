@@ -2244,7 +2244,7 @@ class GCC_compiler(Compiler):
                                 if len(version) != 3:
                                     # Unexpected, but should not be a problem
                                     continue
-                                mj, mn, patch = [int(vp) for vp in version]
+                                mj, mn, patch = (int(vp) for vp in version)
                                 if (
                                     ((mj, mn) == (4, 6) and patch < 4)
                                     or ((mj, mn) == (4, 7) and patch <= 3)

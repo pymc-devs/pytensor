@@ -490,7 +490,7 @@ class TestUselessCheckAndRaise:
         fg = FunctionGraph(outputs=[assert_op(x, y, 1)], clone=False)
         fg_res = rewrite_graph(fg, include=["canonicalize", "specialize"])
         topo = fg_res.toposort()
-        (assert_node,) = [node for node in topo if isinstance(node.op, CheckAndRaise)]
+        (assert_node,) = (node for node in topo if isinstance(node.op, CheckAndRaise))
         assert assert_node.inputs == [x, y]
 
     def test_local_remove_useless_3(self):
@@ -500,7 +500,7 @@ class TestUselessCheckAndRaise:
         fg = FunctionGraph(outputs=[assert_op(x, y, 0)], clone=False)
         fg_res = rewrite_graph(fg, include=["canonicalize", "specialize"])
         topo = fg_res.toposort()
-        (assert_node,) = [node for node in topo if isinstance(node.op, CheckAndRaise)]
+        (assert_node,) = (node for node in topo if isinstance(node.op, CheckAndRaise))
         assert assert_node.inputs[:2] == [x, y]
         assert assert_node.inputs[-1].data == 0
 

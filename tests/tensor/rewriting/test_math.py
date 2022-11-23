@@ -1097,15 +1097,15 @@ class TestFusion:
             ret = np.zeros(shp, dtype=dtype) + num
             return ret
 
-        fw, fx, fy, fz = [
+        fw, fx, fy, fz = (
             tensor(dtype="float32", shape=(None,) * len(shp), name=n) for n in "wxyz"
-        ]
-        dw, dx, dy, dz = [
+        )
+        dw, dx, dy, dz = (
             tensor(dtype="float64", shape=(None,) * len(shp), name=n) for n in "wxyz"
-        ]
-        ix, iy, iz = [
+        )
+        ix, iy, iz = (
             tensor(dtype="int32", shape=(None,) * len(shp), name=n) for n in "xyz"
-        ]
+        )
         fv = fvector("v")
         fs = fscalar("s")
 

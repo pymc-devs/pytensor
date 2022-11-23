@@ -3273,7 +3273,7 @@ class TestTrueDot(utt.InferShapeTester):
 
                 tested = f(*data)
 
-                x, y = [m.toarray() for m in data]
+                x, y = (m.toarray() for m in data)
                 expected = np.dot(x, y)
 
                 assert tested.format == format

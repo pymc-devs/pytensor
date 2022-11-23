@@ -3656,7 +3656,7 @@ def test_stacklists():
     result = f(1, 2, 3, 4)
     assert result.shape == (2, 2, 1)
 
-    a, b, c, d = [matrix(x) for x in "abcd"]
+    a, b, c, d = (matrix(x) for x in "abcd")
     X = stacklists([[a, b], [c, d]])
     f = function([a, b, c, d], X)
     x = np.ones((4, 4), "float32")
