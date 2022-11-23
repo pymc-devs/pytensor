@@ -2,7 +2,6 @@
 import sys
 import os
 import shutil
-import inspect
 import getopt
 from collections import defaultdict
 
