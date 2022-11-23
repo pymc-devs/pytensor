@@ -328,7 +328,7 @@ def shape_i(var, i, fgraph=None):
         shape_of = shape_feature.shape_of
 
         def recur(node):
-            if not node.outputs[0] in shape_of:
+            if node.outputs[0] not in shape_of:
                 for inp in node.inputs:
                     if inp.owner:
                         recur(inp.owner)

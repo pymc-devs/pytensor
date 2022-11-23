@@ -2283,7 +2283,7 @@ class BaseAbstractConv(Op):
         """
         Basic slow Python 2D or 3D convolution for DebugMode
         """
-        if not (mode in ("valid", "full")):
+        if mode not in ("valid", "full"):
             raise ValueError(
                 "invalid mode {}, which must be either "
                 '"valid" or "full"'.format(mode)
