@@ -98,8 +98,6 @@ if __name__ == '__main__':
                 shutil.rmtree(workdir)
             except OSError as e:
                 print('OSError:', e)
-            except IOError as e:
-                print('IOError:', e)
 
     if options['--test']:
         mkdir("doc")
