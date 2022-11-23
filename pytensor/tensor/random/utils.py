@@ -204,7 +204,7 @@ class RandomStream:
         )
 
         if ns_obj is None:
-            raise AttributeError("No attribute {}.".format(obj))
+            raise AttributeError(f"No attribute {obj}.")
 
         from pytensor.tensor.random.op import RandomVariable
 
@@ -215,7 +215,7 @@ class RandomStream:
                 return self.gen(ns_obj, *args, **kwargs)
 
         else:
-            raise AttributeError("No attribute {}.".format(obj))
+            raise AttributeError(f"No attribute {obj}.")
 
         setattr(self, obj, meta_obj)
         return getattr(self, obj)

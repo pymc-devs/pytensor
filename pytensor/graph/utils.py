@@ -246,7 +246,7 @@ class MetaType(ABCMeta):
                         return "{}{{{}}}".format(
                             self.__class__.__name__,
                             ", ".join(
-                                "{}={!r}".format(p, getattr(self, p)) for p in props
+                                f"{p}={getattr(self, p)!r}" for p in props
                             ),
                         )
 

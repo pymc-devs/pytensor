@@ -1037,7 +1037,7 @@ class TensorConstant(TensorVariable, Constant[_TensorTypeType]):
             name = self.name
         else:
             name = "TensorConstant"
-        return "{}{{{}}}".format(name, val)
+        return f"{name}{{{val}}}"
 
     def signature(self):
         return TensorConstantSignature((self.type, self.data))

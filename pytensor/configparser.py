@@ -126,7 +126,7 @@ class PyTensorConfigParser:
         return hash_from_code(
             "\n".join(
                 [
-                    "{} = {}".format(cv.name, cv.__get__(self, self.__class__))
+                    f"{cv.name} = {cv.__get__(self, self.__class__)}"
                     for cv in all_opts
                 ]
             )
