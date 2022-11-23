@@ -1,1 +1,1 @@
-﻿from pytensor.link.jax.linker import JAXLinker
+from pytensor.link.jax.linker import JAXLinker
