@@ -1023,7 +1023,7 @@ class CLinker(Linker):
             else:
                 if x_compiler and (x_compiler != c_compiler):
                     raise Exception(
-                        "Nodes have requested specific" " different compilers",
+                        "Nodes have requested specific different compilers",
                         (c_compiler, x_compiler),
                     )
         if c_compiler is None:

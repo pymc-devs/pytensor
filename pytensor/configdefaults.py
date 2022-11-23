@@ -585,7 +585,7 @@ def add_compile_configvars():
 
     config.add(
         "cmodule__age_thresh_use",
-        "In seconds. The time after which " "PyTensor won't reuse a compile c module.",
+        "In seconds. The time after which PyTensor won't reuse a compile c module.",
         # 24 days
         IntParam(60 * 60 * 24 * 24, mutable=False),
         in_c_key=False,
@@ -1004,7 +1004,7 @@ def add_testvalue_and_checking_configvars():
 
     config.add(
         "on_shape_error",
-        "warn: print a warning and use the default" " value. raise: raise an error",
+        "warn: print a warning and use the default value. raise: raise an error",
         EnumStr("warn", ["raise"]),
         in_c_key=False,
     )
@@ -1149,14 +1149,14 @@ def add_metaopt_configvars():
 
     config.add(
         "metaopt__optimizer_excluding",
-        ("exclude optimizers with these tags. " "Separate tags with ':'."),
+        ("exclude optimizers with these tags. Separate tags with ':'."),
         StrParam(""),
         in_c_key=False,
     )
 
     config.add(
         "metaopt__optimizer_including",
-        ("include optimizers with these tags. " "Separate tags with ':'."),
+        ("include optimizers with these tags. Separate tags with ':'."),
         StrParam(""),
         in_c_key=False,
     )

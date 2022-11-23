@@ -1434,7 +1434,7 @@ def local_adv_sub1_adv_inc_sub1(fgraph, node):
     if not fgraph.shape_feature.same_shape(idx, y, 0, 0):
         cond.append(eq(idx.shape[0], y.shape[0]))
     r = Assert(
-        "Bad indexing or shapes in a AdvancedIncSubtensor1 " "that was optimized away"
+        "Bad indexing or shapes in a AdvancedIncSubtensor1 that was optimized away"
     )(y, *cond)
     copy_stack_trace(y, r)
 

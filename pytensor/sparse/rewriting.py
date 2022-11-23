@@ -687,7 +687,7 @@ class UsmmCscDense(_NoPythonCOp):
         )
 
         if dtype_out not in ("float32", "float64"):
-            raise NotImplementedError("only float types are supported in " "operands")
+            raise NotImplementedError("only float types are supported in operands")
 
         if self.inplace:
             assert z.type.dtype == dtype_out
@@ -728,7 +728,7 @@ class UsmmCscDense(_NoPythonCOp):
         alpha, x_val, x_ind, x_ptr, x_nrows, y, z = inputs
         zn = outputs[0]
         if node.inputs[1].type.dtype in ("complex64", "complex128"):
-            raise NotImplementedError("Complex types are not supported for " "x_val")
+            raise NotImplementedError("Complex types are not supported for x_val")
         if node.inputs[5].type.dtype in ("complex64", "complex128"):
             raise NotImplementedError("Complex types are not supported for y")
         if node.inputs[6].type.dtype != node.outputs[0].type.dtype:

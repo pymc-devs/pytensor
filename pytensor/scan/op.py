@@ -1068,7 +1068,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     raise ValueError(
                         err_msg1
                         % (
-                            "initial state (outputs_info" " in scan nomenclature) ",
+                            "initial state (outputs_info in scan nomenclature) ",
                             str(outer_mitsot),
                             argoffset + idx,
                             outer_mitsot.type.dtype,
@@ -1115,7 +1115,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 raise ValueError(
                     err_msg1
                     % (
-                        "initial state (outputs_info" " in scan nomenclature) ",
+                        "initial state (outputs_info in scan nomenclature) ",
                         str(outer_sitsot),
                         argoffset + idx,
                         outer_sitsot.type.dtype,
@@ -1192,7 +1192,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 raise ValueError(
                     err_msg1
                     % (
-                        "initial state (outputs_info" " in scan nomenclature) ",
+                        "initial state (outputs_info in scan nomenclature) ",
                         str(outer_shared),
                         argoffset + idx,
                         outer_shared.dtype,
@@ -3428,7 +3428,7 @@ def profile_printer(
                     )
                 else:
                     print(
-                        (" The node took 0s, so we can not " "compute the overhead"),
+                        (" The node took 0s, so we can not compute the overhead"),
                         node,
                         file=file,
                     )

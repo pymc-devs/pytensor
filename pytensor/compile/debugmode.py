@@ -1604,7 +1604,7 @@ class _Linker(LocalLinker):
                     # storage will be None
                     if thunk_py:
                         _logger.debug(
-                            f"{i} - running thunk_py with None as " "output storage"
+                            f"{i} - running thunk_py with None as output storage"
                         )
                         try:
                             thunk_py()
@@ -2063,15 +2063,15 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
                     infolog = StringIO()
                     print("Optimization process is unstable...", file=infolog)
                     print(
-                        "  (HINT: Ops that the nodes point to must compare " "equal)",
+                        "  (HINT: Ops that the nodes point to must compare equal)",
                         file=infolog,
                     )
                     print(
-                        "(event index)  (one event trace)  (other event " "trace)",
+                        "(event index)  (one event trace)  (other event trace)",
                         file=infolog,
                     )
                     print(
-                        "-------------------------------------------------" "----",
+                        "-----------------------------------------------------",
                         file=infolog,
                     )
                     for j in range(max(len(li), len(l0))):
@@ -2292,7 +2292,7 @@ class DebugMode(Mode):
 
         if not isinstance(linker, _DummyLinker):
             raise Exception(
-                "DebugMode can only use its own linker! You " "should not provide one.",
+                "DebugMode can only use its own linker! You should not provide one.",
                 linker,
             )
 
@@ -2318,7 +2318,7 @@ class DebugMode(Mode):
             self.require_matching_strides = require_matching_strides
 
         if not (self.check_c_code or self.check_py_code):
-            raise ValueError("DebugMode has to check at least one of c and py " "code")
+            raise ValueError("DebugMode has to check at least one of c and py code")
 
     def __str__(self):
         return "DebugMode(linker={}, optimizer={})".format(

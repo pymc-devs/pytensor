@@ -1308,7 +1308,7 @@ class ProfileStats:
 
         if len(fct_memory) > 1:
             print(
-                "Memory Profile (the max between all functions in " "that profile)",
+                "Memory Profile (the max between all functions in that profile)",
                 file=file,
             )
         else:

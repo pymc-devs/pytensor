@@ -273,13 +273,11 @@ class MaxAndArgmax(COp):
         if eval_points[0] is None:
             return [None, None]
         if len(self.axis) != 1:
-            raise ValueError("R_op supported for arg_max only for " "one axis!")
+            raise ValueError("R_op supported for arg_max only for one axis!")
         if self.axis[0] > 1:
-            raise ValueError("R_op supported for arg_max only when " " axis is 0 or 1")
+            raise ValueError("R_op supported for arg_max only when axis is 0 or 1")
         if inputs[0].ndim != 2:
-            raise ValueError(
-                "R_op supported for arg_max only when " " input is a matrix"
-            )
+            raise ValueError("R_op supported for arg_max only when input is a matrix")
         max_vals, max_pos = self.make_node(*inputs).outputs
         if self.axis[0] == 0:
             return [eval_points[0][max_pos, arange(eval_points[0].shape[1])], None]

@@ -185,7 +185,7 @@ def rebuild_collect_shared(
             raise TypeError("update target must be a SharedVariable", store_into)
         if store_into in update_d:
             raise ValueError(
-                "this shared variable already has an update " "expression",
+                "this shared variable already has an update expression",
                 (store_into, update_d[store_into]),
             )
 
@@ -419,12 +419,12 @@ def construct_pfunc_ins_and_outs(
         givens = []
 
     if not isinstance(params, (list, tuple)):
-        raise Exception("in pfunc() the first argument must be a list or " "a tuple")
+        raise Exception("in pfunc() the first argument must be a list or a tuple")
 
     if not isinstance(no_default_updates, bool) and not isinstance(
         no_default_updates, list
     ):
-        raise TypeError("no_default_update should be either a boolean or " "a list")
+        raise TypeError("no_default_update should be either a boolean or a list")
 
     if len(updates) > 0 and any(
         isinstance(v, Variable) for v in iter_over_pairs(updates)

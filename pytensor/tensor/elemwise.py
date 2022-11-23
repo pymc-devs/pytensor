@@ -1277,7 +1277,7 @@ class CAReduce(COp):
         """
         if scalar_op.nin not in (-1, 2) or scalar_op.nout != 1:
             raise NotImplementedError(
-                "CAReduce only supports binary functions with a single " "output."
+                "CAReduce only supports binary functions with a single output."
             )
 
         self.axis = None

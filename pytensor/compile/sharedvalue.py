@@ -85,7 +85,7 @@ class SharedVariable(Variable):
             self.container = container
             if (value is not None) or (strict is not None):
                 raise TypeError(
-                    "value and strict are ignored if you pass " "a container here"
+                    "value and strict are ignored if you pass a container here"
                 )
         else:
             self.container = Container(

@@ -225,7 +225,7 @@ class NanGuardMode(Mode):
                     print(pytensor.printing.debugprint(nd, file="str"), file=sio)
                 else:
                     print(
-                        "NanGuardMode found an error in an input of the " "graph.",
+                        "NanGuardMode found an error in an input of the graph.",
                         file=sio,
                     )
                 # Add the stack trace

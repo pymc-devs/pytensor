@@ -170,7 +170,7 @@ def spectral_radius_bound(X, log2_exponent):
         )
     if log2_exponent <= 0:
         raise ValueError(
-            "spectral_radius_bound requires a strictly positive " "exponent",
+            "spectral_radius_bound requires a strictly positive exponent",
             log2_exponent,
         )
 

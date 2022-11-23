@@ -101,7 +101,7 @@ def map_storage(
                 "with storage in given storage_"
                 "map. Given input_storage: ",
                 storage,
-                "Storage in storage_ma" "p: ",
+                "Storage in storage_map: ",
                 storage_map[r],
             )
         else:
@@ -122,7 +122,7 @@ def map_storage(
                     " storage_map. Given output"
                     "_storage: ",
                     storage,
-                    "Sto" "rage in storage_map: ",
+                    "Storage in storage_map: ",
                     storage_map[r],
                 )
             else:

@@ -647,7 +647,7 @@ class ConvOp(OpenMPOp):
                     self.unroll_patch = False
 
             _logger.debug(
-                "AUTO FIND VERSION OF C_CODE OF CONV OP " "%s %s %s %s %s %s %s",
+                "AUTO FIND VERSION OF C_CODE OF CONV OP %s %s %s %s %s %s %s",
                 self.unroll_batch,
                 self.unroll_kern,
                 self.unroll_patch,

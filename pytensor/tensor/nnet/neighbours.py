@@ -224,7 +224,7 @@ class Images2Neibs(COp):
         if mode == "wrap_centered":
             if (c % 2 != 1) or (d % 2 != 1):
                 raise TypeError(
-                    "Images2Neibs:" " in mode wrap_centered need patch with odd shapes"
+                    "Images2Neibs: in mode wrap_centered need patch with odd shapes"
                 )
 
             if (ten4.shape[2] < c) or (ten4.shape[3] < d):

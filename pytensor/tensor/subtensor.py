@@ -2035,7 +2035,7 @@ class AdvancedSubtensor1(COp):
     def c_code(self, node, name, input_names, output_names, sub):
         if self.__class__ is not AdvancedSubtensor1:
             raise MethodNotDefined(
-                "c_code defined for AdvancedSubtensor1," " not for child class",
+                "c_code defined for AdvancedSubtensor1, not for child class",
                 type(self),
             )
         a_name, i_name = input_names[0], input_names[1]

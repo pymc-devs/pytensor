@@ -45,7 +45,7 @@ def execute(execute=True, verbose=True, M=2000, N=2000, K=2000, iters=10, order=
         print("    OMP_NUM_THREADS=", os.getenv("OMP_NUM_THREADS"))
         print("    GOTO_NUM_THREADS=", os.getenv("GOTO_NUM_THREADS"))
         print()
-        print("Numpy config: (used when the PyTensor flag" ' "blas__ldflags" is empty)')
+        print('Numpy config: (used when the PyTensor flag "blas__ldflags" is empty)')
         np.show_config()
         print("Numpy dot module:", np.dot.__module__)
         print("Numpy location:", np.__file__)

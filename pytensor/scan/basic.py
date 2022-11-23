@@ -541,13 +541,13 @@ def scan(
                 taps = outs_info[i]["taps"]
                 if len(taps) > len(set(taps)):
                     raise ValueError(
-                        ("All the taps must be different in " " `outputs_info`"),
+                        ("All the taps must be different in `outputs_info`"),
                         outs_info[i],
                     )
                 for t in taps:
                     if t >= 0:
                         raise ValueError(
-                            ("All the tap values must be " "smaller than 0."),
+                            ("All the tap values must be smaller than 0."),
                             outs_info[i],
                         )
         else:

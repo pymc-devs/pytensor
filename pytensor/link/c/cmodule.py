@@ -2125,7 +2125,7 @@ class GCC_compiler(Compiler):
             native_lines = get_lines(f"{config.cxx} -march=native -E -v -")
             if native_lines is None:
                 _logger.info(
-                    "Call to 'g++ -march=native' failed," "not setting -march flag"
+                    "Call to 'g++ -march=native' failed, not setting -march flag"
                 )
                 detect_march = False
             else:
@@ -2582,7 +2582,7 @@ class GCC_compiler(Compiler):
         def print_command_line_error():
             # Print command line when a problem occurred.
             print(
-                ("Problem occurred during compilation with the " "command line below:"),
+                ("Problem occurred during compilation with the command line below:"),
                 file=sys.stderr,
             )
             print(" ".join(cmd), file=sys.stderr)
@@ -2607,7 +2607,7 @@ class GCC_compiler(Compiler):
                 tf.write(f"{i + 1}\t{l}\n")
             tf.write("===============================\n")
             tf.write(
-                "Problem occurred during compilation with the " "command line below:\n"
+                "Problem occurred during compilation with the command line below:\n"
             )
             tf.write(" ".join(cmd))
             # Print errors just below the command line.

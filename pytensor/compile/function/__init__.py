@@ -300,9 +300,7 @@ def function(
     if uses_tuple:
         # we must use old semantics in this case.
         if profile:
-            raise NotImplementedError(
-                "profiling not supported in old-style " "function"
-            )
+            raise NotImplementedError("profiling not supported in old-style function")
         if uses_updates or uses_givens:
             raise NotImplementedError(
                 "In() instances and tuple inputs trigger the old "

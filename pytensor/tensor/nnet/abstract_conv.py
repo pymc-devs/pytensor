@@ -2211,7 +2211,7 @@ class BaseAbstractConv(Op):
                     get_scalar_constant_value(imshp_i, only_process_constants=True)
                 except NotScalarConstantError:
                     raise ValueError(
-                        "imshp should be None or a tuple of " "constant int values"
+                        "imshp should be None or a tuple of constant int values"
                     ).with_traceback(sys.exc_info()[2])
         if kshp:
             self.kshp = tuple(kshp)
@@ -2224,7 +2224,7 @@ class BaseAbstractConv(Op):
                     get_scalar_constant_value(kshp_i, only_process_constants=True)
                 except NotScalarConstantError:
                     raise ValueError(
-                        "kshp should be None or a tuple of " "constant int values"
+                        "kshp should be None or a tuple of constant int values"
                     ).with_traceback(sys.exc_info()[2])
         self.border_mode = border_mode
         self.filter_flip = filter_flip
