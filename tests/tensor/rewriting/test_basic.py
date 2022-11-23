@@ -387,7 +387,7 @@ class TestLocalUselessIncSubtensorAlloc:
             len([n for n in f2.maker.fgraph.toposort() if isinstance(n.op, Alloc)]) == 0
         )
 
-        x_value = np.random.standard_normal((5)).astype(config.floatX)
+        x_value = np.random.standard_normal(5).astype(config.floatX)
         y_value = np.random.standard_normal()
         i_value = self.rng.integers(0, 3, size=(2, 3))
 
@@ -419,7 +419,7 @@ class TestLocalUselessIncSubtensorAlloc:
             len([n for n in f2.maker.fgraph.toposort() if isinstance(n.op, Alloc)]) == 0
         )
 
-        x_value = np.random.standard_normal((5)).astype(config.floatX)
+        x_value = np.random.standard_normal(5).astype(config.floatX)
         y_value = np.random.standard_normal()
         i_value = self.rng.integers(0, 3, size=2)
 
@@ -450,7 +450,7 @@ class TestLocalUselessIncSubtensorAlloc:
             len([n for n in f2.maker.fgraph.toposort() if isinstance(n.op, Alloc)]) == 0
         )
 
-        x_value = np.random.standard_normal((5)).astype(config.floatX)
+        x_value = np.random.standard_normal(5).astype(config.floatX)
         y_value = np.random.standard_normal()
         i_value = 3
 

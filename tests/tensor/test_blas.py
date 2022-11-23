@@ -1939,8 +1939,8 @@ class TestGer(unittest_tools.OptimizationTestMixin):
         f = self.function([self.x, self.y], outer(self.x, self.y))
         self.assertFunctionContains(f, self.ger_destructive)
         f(
-            rng.random((5)).astype(self.dtype),
-            rng.random((4)).astype(self.dtype),
+            rng.random(5).astype(self.dtype),
+            rng.random(4).astype(self.dtype),
         ).shape == (5, 4)
 
     def test_A_plus_outer(self):
@@ -1949,13 +1949,13 @@ class TestGer(unittest_tools.OptimizationTestMixin):
         self.assertFunctionContains(f, self.ger)
         f(
             rng.random((5, 4)).astype(self.dtype),
-            rng.random((5)).astype(self.dtype),
-            rng.random((4)).astype(self.dtype),
+            rng.random(5).astype(self.dtype),
+            rng.random(4).astype(self.dtype),
         ).shape == (5, 4)
         f(
             rng.random((5, 4)).astype(self.dtype)[::-1, ::-1],
-            rng.random((5)).astype(self.dtype),
-            rng.random((4)).astype(self.dtype),
+            rng.random(5).astype(self.dtype),
+            rng.random(4).astype(self.dtype),
         ).shape == (5, 4)
 
     def test_A_plus_scaled_outer(self):
@@ -1966,13 +1966,13 @@ class TestGer(unittest_tools.OptimizationTestMixin):
         self.assertFunctionContains(f, self.ger)
         f(
             rng.random((5, 4)).astype(self.dtype),
-            rng.random((5)).astype(self.dtype),
-            rng.random((4)).astype(self.dtype),
+            rng.random(5).astype(self.dtype),
+            rng.random(4).astype(self.dtype),
         ).shape == (5, 4)
         f(
             rng.random((5, 4)).astype(self.dtype)[::-1, ::-1],
-            rng.random((5)).astype(self.dtype),
-            rng.random((4)).astype(self.dtype),
+            rng.random(5).astype(self.dtype),
+            rng.random(4).astype(self.dtype),
         ).shape == (5, 4)
 
     def test_scaled_A_plus_scaled_outer(self):
@@ -1987,13 +1987,13 @@ class TestGer(unittest_tools.OptimizationTestMixin):
         self.assertFunctionContains(f, self.gemm)
         f(
             rng.random((5, 4)).astype(self.dtype),
-            rng.random((5)).astype(self.dtype),
-            rng.random((4)).astype(self.dtype),
+            rng.random(5).astype(self.dtype),
+            rng.random(4).astype(self.dtype),
         ).shape == (5, 4)
         f(
             rng.random((5, 4)).astype(self.dtype)[::-1, ::-1],
-            rng.random((5)).astype(self.dtype),
-            rng.random((4)).astype(self.dtype),
+            rng.random(5).astype(self.dtype),
+            rng.random(4).astype(self.dtype),
         ).shape == (5, 4)
 
     def given_dtype(self, dtype, M, N, *, destructive=True):
@@ -2010,13 +2010,13 @@ class TestGer(unittest_tools.OptimizationTestMixin):
         )
         f(
             rng.random((M, N)).astype(dtype),
-            rng.random((M)).astype(dtype),
-            rng.random((N)).astype(dtype),
+            rng.random(M).astype(dtype),
+            rng.random(N).astype(dtype),
         ).shape == (5, 4)
         f(
             rng.random((M, N)).astype(dtype)[::-1, ::-1],
-            rng.random((M)).astype(dtype),
-            rng.random((N)).astype(dtype),
+            rng.random(M).astype(dtype),
+            rng.random(N).astype(dtype),
         ).shape == (5, 4)
 
     def test_f32_0_0(self):
@@ -2070,16 +2070,16 @@ class TestGer(unittest_tools.OptimizationTestMixin):
         self.assertFunctionContains(f, self.ger_destructive)
         # TODO: Test something about the updated value of `A`
         f(
-            rng.random((4)).astype(self.dtype),
-            rng.random((5)).astype(self.dtype),
+            rng.random(4).astype(self.dtype),
+            rng.random(5).astype(self.dtype),
         )
 
         A.set_value(
             A.get_value(borrow=True, return_internal_type=True)[::-1, ::-1], borrow=True
         )
         f(
-            rng.random((4)).astype(self.dtype),
-            rng.random((5)).astype(self.dtype),
+            rng.random(4).astype(self.dtype),
+            rng.random(5).astype(self.dtype),
         )
 
 

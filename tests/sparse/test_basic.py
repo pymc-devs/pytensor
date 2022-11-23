@@ -3203,7 +3203,7 @@ class TestMulSV:
         for format in ("csr", "csc"):
             for dtype in ("float32", "float64"):
                 spmat = sp_types[format](random_lil((4, 3), dtype, 3))
-                mat = np.asarray(np.random.random((3)), dtype=dtype)
+                mat = np.asarray(np.random.random(3), dtype=dtype)
 
                 verify_grad_sparse(mul_s_v, [spmat, mat], structured=True)
 
@@ -3217,7 +3217,7 @@ class TestMulSV:
                 f = pytensor.function([x, y], mul_s_v(x, y))
 
                 spmat = sp_types[format](random_lil((4, 3), dtype, 3))
-                mat = np.asarray(np.random.random((3)), dtype=dtype)
+                mat = np.asarray(np.random.random(3), dtype=dtype)
 
                 out = f(spmat, mat)
 
@@ -3231,7 +3231,7 @@ class TestStructuredAddSV:
         for format in ("csr", "csc"):
             for dtype in ("float32", "float64"):
                 spmat = sp_types[format](random_lil((4, 3), dtype, 3))
-                mat = np.asarray(np.random.random((3)), dtype=dtype)
+                mat = np.asarray(np.random.random(3), dtype=dtype)
 
                 verify_grad_sparse(structured_add_s_v, [spmat, mat], structured=True)
 
@@ -3247,7 +3247,7 @@ class TestStructuredAddSV:
                 spmat = sp_types[format](random_lil((4, 3), dtype, 3))
                 spones = spmat.copy()
                 spones.data = np.ones_like(spones.data)
-                mat = np.asarray(np.random.random((3)), dtype=dtype)
+                mat = np.asarray(np.random.random(3), dtype=dtype)
 
                 out = f(spmat, mat)
 

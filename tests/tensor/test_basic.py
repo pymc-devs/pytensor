@@ -698,7 +698,7 @@ class TestAlloc:
         self.rng = np.random.default_rng(seed=utt.fetch_seed())
 
     def test_alloc_constant_folding(self):
-        test_params = np.asarray(self.rng.standard_normal((50 * 60)), self.dtype)
+        test_params = np.asarray(self.rng.standard_normal(50 * 60), self.dtype)
 
         some_vector = vector("some_vector", dtype=self.dtype)
         some_matrix = some_vector.reshape((60, 50))
@@ -1345,8 +1345,8 @@ class TestJoinAndSplit:
         Ha, Hb = hessian(B.sum(), [a, b])
 
         # Try some values
-        a_v = np.random.random((4))
-        b_v = np.random.random((4))
+        a_v = np.random.random(4)
+        b_v = np.random.random(4)
         f = pytensor.function([a, b], [Ha, Hb])
         Ha_v, Hb_v = f(a_v, b_v)
         # The Hessian is always a matrix full of 2
@@ -1364,8 +1364,8 @@ class TestJoinAndSplit:
         Ha, Hb = hessian(A.sum(), [a, b])
 
         # Try some values
-        a_v = np.random.random((4))
-        b_v = np.random.random((4))
+        a_v = np.random.random(4)
+        b_v = np.random.random(4)
         f = pytensor.function([a, b], [Ha, Hb])
         Ha_v, Hb_v = f(a_v, b_v)
         # The Hessian is always a matrix full of 0
@@ -1899,7 +1899,7 @@ class TestJoinAndSplit:
 
     def test_mixed_ndim_error(self):
         rng = np.random.default_rng(seed=utt.fetch_seed())
-        v = self.shared(rng.random((4)).astype(self.floatX))
+        v = self.shared(rng.random(4).astype(self.floatX))
         m = self.shared(rng.random((4, 4)).astype(self.floatX))
         with pytest.raises(TypeError):
             self.join_op(0, v, m)
@@ -2359,7 +2359,7 @@ def test_tile_grad():
     rng = np.random.default_rng(utt.fetch_seed())
 
     # test vector
-    grad_tile(vector("x"), [3], rng.standard_normal((5)).astype(config.floatX))
+    grad_tile(vector("x"), [3], rng.standard_normal(5).astype(config.floatX))
     # test matrix
     grad_tile(matrix("x"), [3, 4], rng.standard_normal((2, 3)).astype(config.floatX))
     # test tensor3
@@ -3506,7 +3506,7 @@ class TestDiag:
 
     def test_diag_grad(self):
         rng = np.random.default_rng(utt.fetch_seed())
-        x = rng.random((5))
+        x = rng.random(5)
         utt.verify_grad(diag, [x], rng=rng)
         x = rng.random((5, 3))
         utt.verify_grad(diag, [x], rng=rng)

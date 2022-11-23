@@ -396,11 +396,11 @@ class TestAlgebraicCanonizer:
         fxv = _asarray(np.random.random(shp), dtype="float32")
         fyv = _asarray(np.random.random(shp), dtype="float32")
         fzv = _asarray(np.random.random(shp), dtype="float32")
-        fvv = _asarray(np.random.random((shp[0])), dtype="float32").reshape(1, shp[0])
+        fvv = _asarray(np.random.random(shp[0]), dtype="float32").reshape(1, shp[0])
         dxv = _asarray(np.random.random(shp), dtype="float64")
         dyv = _asarray(np.random.random(shp), dtype="float64")
         dzv = _asarray(np.random.random(shp), dtype="float64")
-        dvv = _asarray(np.random.random((shp[0])), dtype="float64").reshape(1, shp[0])
+        dvv = _asarray(np.random.random(shp[0]), dtype="float64").reshape(1, shp[0])
         cases = [
             (fx + fy, (fx, fy), (fxv, fyv), 1, "float32"),
             (fx * fy, (fx, fy), (fxv, fyv), 1, "float32"),
@@ -536,12 +536,12 @@ class TestAlgebraicCanonizer:
         fyv = _asarray(np.random.random(shp), dtype="float32")
         fzv = _asarray(np.random.random(shp), dtype="float32")
         fwv = _asarray(np.random.random(shp), dtype="float32")
-        fvv = _asarray(np.random.random((shp[0])), dtype="float32").reshape(1, shp[0])
+        fvv = _asarray(np.random.random(shp[0]), dtype="float32").reshape(1, shp[0])
         dxv = _asarray(np.random.random(shp), dtype="float64")
         dyv = _asarray(np.random.random(shp), dtype="float64")
         dzv = _asarray(np.random.random(shp), dtype="float64")
         dwv = _asarray(np.random.random(shp), dtype="float64")
-        dvv = _asarray(np.random.random((shp[0])), dtype="float64").reshape(1, shp[0])
+        dvv = _asarray(np.random.random(shp[0]), dtype="float64").reshape(1, shp[0])
 
         # We must be sure that the `AlgebraicCanonizer` is working, but that we don't have other
         # rewrites that could hide bugs in the `AlgebraicCanonizer` as `local_elemwise_fusion`
@@ -1036,10 +1036,10 @@ def test_const_type_in_mul_canonizer():
 
     ival = np.random.random((5, 5))
     wval = np.random.random((5, 5))
-    visbval = np.random.random((5))
-    hidbval = np.random.random((5))
-    betaval = np.random.random((5))
-    aval = np.random.random((5))
+    visbval = np.random.random(5)
+    hidbval = np.random.random(5)
+    betaval = np.random.random(5)
+    aval = np.random.random(5)
 
     utt.assert_allclose(
         f2(ival, wval, visbval, hidbval, betaval, aval),
@@ -1113,7 +1113,7 @@ class TestFusion:
         fxv = my_init(shp, "float32", 2)
         fyv = my_init(shp, "float32", 3)
         fzv = my_init(shp, "float32", 4)
-        fvv = _asarray(np.random.random((shp[0])), dtype="float32")
+        fvv = _asarray(np.random.random(shp[0]), dtype="float32")
         fsv = np.asarray(np.random.random(), dtype="float32")
         dwv = my_init(shp, "float64", 5)
         ixv = _asarray(my_init(shp, num=60), dtype="int32")
@@ -1950,8 +1950,8 @@ def test_local_elemwise_sub_zeros():
     mat = matrix()
 
     rng = np.random.default_rng(seed=utt.fetch_seed())
-    scalar_val = rng.random((1)).astype(config.floatX)[0]
-    vect_val = rng.random((5)).astype(config.floatX)
+    scalar_val = rng.random(1).astype(config.floatX)[0]
+    vect_val = rng.random(5).astype(config.floatX)
     mat_val = rng.random((3, 2)).astype(config.floatX)
 
     mode = (
@@ -2040,7 +2040,7 @@ class TestLocalUselessElemwiseComparison:
         f = function([X, Y], Z, mode=mode)
         f(
             self.rng.random((2, 3)).astype(config.floatX),
-            self.rng.random((2)).astype(config.floatX),
+            self.rng.random(2).astype(config.floatX),
         )
         # pytensor.printing.debugprint(f, print_type=True)
         # here is the output for the debug print:
@@ -2323,7 +2323,7 @@ def test_local_mul_specialize():
 
 
 def speed_local_pow_specialize_range():
-    val = np.random.random((1e7))
+    val = np.random.random(1e7)
     v = vector()
     mode = get_default_mode()
     mode_without_pow_rewrite = mode.excluding("local_pow_specialize")
@@ -3112,7 +3112,7 @@ class TestLocalErfc:
 
     def speed_local_log_erfc(self):
 
-        val = np.random.random((1e6))
+        val = np.random.random(1e6)
         x = vector()
         mode = get_mode("FAST_RUN")
         f1 = function([x], log(erfc(x)), mode=mode.excluding("local_log_erfc"))
@@ -3194,7 +3194,7 @@ class TestLocalSumProd:
         scalar1 = dscalar()
         scalar2 = dscalar()
 
-        v_val = np.random.random((2))
+        v_val = np.random.random(2)
         m_val = np.random.random((2, 2))
         s1_val = np.random.random()
         s2_val = np.random.random()
@@ -3730,7 +3730,7 @@ class TestLocalSumProdDimshuffle:
 
         rng = np.random.default_rng(utt.fetch_seed())
         a_val = rng.standard_normal((2, 2)).astype(config.floatX)
-        b_val = rng.standard_normal((2)).astype(config.floatX)
+        b_val = rng.standard_normal(2).astype(config.floatX)
         c_val = rng.standard_normal((2, 2, 2)).astype(config.floatX)
         d_val = np.asarray(rng.standard_normal(), config.floatX)
 
@@ -3785,7 +3785,7 @@ class TestLocalSumProdDimshuffle:
 
         rng = np.random.default_rng(utt.fetch_seed())
         a_val = rng.standard_normal((2, 2)).astype(config.floatX)
-        b_val = rng.standard_normal((2)).astype(config.floatX)
+        b_val = rng.standard_normal(2).astype(config.floatX)
         c_val = rng.standard_normal((2, 2, 2)).astype(config.floatX)
         d_val = np.asarray(rng.standard_normal(), config.floatX)
 
@@ -4187,7 +4187,7 @@ class TestSigmoidRewrites:
         m = self.get_mode(excluding=["local_elemwise_fusion"])
 
         x = vector()
-        data = np.random.random((54)).astype(config.floatX)
+        data = np.random.random(54).astype(config.floatX)
 
         # tests exp_over_1_plus_exp
         f = pytensor.function([x], exp(x) / (1 + exp(x)), mode=m)
@@ -4470,7 +4470,7 @@ class TestSoftplusRewrites:
         assert isinstance(topo[0].op.scalar_op, pytensor.scalar.Neg)
         assert isinstance(topo[1].op.scalar_op, pytensor.scalar.Softplus)
         assert isinstance(topo[2].op.scalar_op, pytensor.scalar.Neg)
-        f(np.random.random((54)).astype(config.floatX))
+        f(np.random.random(54).astype(config.floatX))
 
     def test_log1msigm_to_softplus(self):
         x = matrix()
@@ -4534,7 +4534,7 @@ class TestSoftplusRewrites:
         topo = f.maker.fgraph.toposort()
         assert len(topo) == 1
         assert isinstance(topo[0].op.scalar_op, pytensor.scalar.Softplus)
-        f(np.random.random((54)).astype(config.floatX))
+        f(np.random.random(54).astype(config.floatX))
 
     def test_log1p_neg_sigmoid_to_softpuls(self):
         x = scalar()

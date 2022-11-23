@@ -2155,15 +2155,13 @@ class GCC_compiler(Compiler):
                 if len(default_lines) < 1:
                     reported_lines = get_lines(f"{config.cxx} -E -v -", parse=False)
                     warnings.warn(
-                        (
-                            "PyTensor was not able to find the "
-                            "default g++ parameters. This is needed to tune "
-                            "the compilation to your specific "
-                            "CPU. This can slow down the execution of PyTensor "
-                            "functions. Please submit the following lines to "
-                            "PyTensor's mailing list so that we can fix this "
-                            f"problem:\n {reported_lines}"
-                        )
+                        "PyTensor was not able to find the "
+                        "default g++ parameters. This is needed to tune "
+                        "the compilation to your specific "
+                        "CPU. This can slow down the execution of PyTensor "
+                        "functions. Please submit the following lines to "
+                        "PyTensor's mailing list so that we can fix this "
+                        f"problem:\n {reported_lines}"
                     )
                 else:
                     # Some options are actually given as "-option value",

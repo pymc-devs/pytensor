@@ -451,7 +451,7 @@ class TestNormTests:
         V = vector("V", dtype=config.floatX)
 
         a = rng.random((4, 4)).astype(config.floatX)
-        b = rng.random((4)).astype(config.floatX)
+        b = rng.random(4).astype(config.floatX)
 
         A = (
             [None, "fro", "inf", "-inf", 1, -1, None, "inf", "-inf", 0, 1, -1, 2, -2],

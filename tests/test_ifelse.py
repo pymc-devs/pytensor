@@ -289,7 +289,7 @@ class TestIfelse(utt.OptimizationTestMixin):
 
     def test_dtype_mismatch(self):
         rng = np.random.default_rng(utt.fetch_seed())
-        data = rng.random((5)).astype(self.dtype)
+        data = rng.random(5).astype(self.dtype)
         x = self.shared(data)
         y = at.cast(x * 10, "int8")
         cond = iscalar("cond")
@@ -301,7 +301,7 @@ class TestIfelse(utt.OptimizationTestMixin):
 
     def test_ndim_mismatch(self):
         rng = np.random.default_rng(utt.fetch_seed())
-        data = rng.random((5)).astype(self.dtype)
+        data = rng.random(5).astype(self.dtype)
         x = self.shared(data)
         y = col("y", self.dtype)
         cond = iscalar("cond")
@@ -313,7 +313,7 @@ class TestIfelse(utt.OptimizationTestMixin):
 
     def test_broadcast_mismatch(self):
         rng = np.random.default_rng(utt.fetch_seed())
-        data = rng.random((5)).astype(self.dtype)
+        data = rng.random(5).astype(self.dtype)
         x = self.shared(data)
         # print x.broadcastable
         y = row("y", self.dtype)
@@ -508,7 +508,7 @@ class TestIfelse(utt.OptimizationTestMixin):
             pytensor.grad(ifelse(0, x, x), x)
 
     def test_grad_int_value(self):
-        w = pytensor.shared(np.random.random((10)))
+        w = pytensor.shared(np.random.random(10))
         b = pytensor.shared(np.random.random())
         params = [w, b]
 
