@@ -2179,9 +2179,7 @@ class Join(COp):
         else:
             return "{}{{{}}}".format(
                 self.__class__.__name__,
-                ", ".join(
-                    f"{p}={getattr(self, p)!r}" for p in self.__props__
-                ),
+                ", ".join(f"{p}={getattr(self, p)!r}" for p in self.__props__),
             )
 
     def __setstate__(self, d):

@@ -2363,8 +2363,7 @@ class BatchedDot(COp):
                     ),
                     "(%s)"
                     % " || ".join(
-                        f"{strides}[{i}] == type_size"
-                        for i in range(1, ndim)
+                        f"{strides}[{i}] == type_size" for i in range(1, ndim)
                     ),
                 ]
             )
