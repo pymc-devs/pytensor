@@ -1,4 +1,3 @@
-
 # Version: 0.23.dev0
 
 """The Versioneer - like a rocketeer, but for versions.
