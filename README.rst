@@ -114,10 +114,10 @@ Contributing
 We welcome bug reports and fixes and improvements to the documentation.
 
 For more information on contributing, please see the
-`contributing guide <https://github.com/pymc-devs/pytensor/CONTRIBUTING.md>`.
+`contributing guide <https://github.com/pymc-devs/pytensor/CONTRIBUTING.md>`__.
 
 A good place to start contributing is by looking through the issues
-`here <https://github.com/pymc-devs/pytensor/issues`.
+`here <https://github.com/pymc-devs/pytensor/issues>`__.
 
 
 .. |Project Name| replace:: PyTensor
