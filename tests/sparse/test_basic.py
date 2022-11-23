@@ -1633,22 +1633,22 @@ class TestDots(utt.InferShapeTester):
         y = sparse.csc_matrix("y")
 
         res = at.dot(x, y)
-        op_types = set(type(n.op) for n in applys_between([x, y], [res]))
+        op_types = {type(n.op) for n in applys_between([x, y], [res])}
         assert sparse.basic.StructuredDot in op_types
         assert at.math.Dot not in op_types
 
         res = at.dot(x_d, y)
-        op_types = set(type(n.op) for n in applys_between([x, y], [res]))
+        op_types = {type(n.op) for n in applys_between([x, y], [res])}
         assert sparse.basic.StructuredDot in op_types
         assert at.math.Dot not in op_types
 
         res = at.dot(x, x_d)
-        op_types = set(type(n.op) for n in applys_between([x, y], [res]))
+        op_types = {type(n.op) for n in applys_between([x, y], [res])}
         assert sparse.basic.StructuredDot in op_types
         assert at.math.Dot not in op_types
 
         res = at.dot(at.second(1, x), y)
-        op_types = set(type(n.op) for n in applys_between([x, y], [res]))
+        op_types = {type(n.op) for n in applys_between([x, y], [res])}
         assert sparse.basic.StructuredDot in op_types
         assert at.math.Dot not in op_types
 
