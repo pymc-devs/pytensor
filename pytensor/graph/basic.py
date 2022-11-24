@@ -1615,8 +1615,15 @@ def list_of_nodes(
     )
 
 
-def is_in_ancestors(l_apply: Apply, f_node: Apply) -> bool:
-    """Determine if `f_node` is in the graph given by `l_apply`.
+def is_in_ancestors(
+    l_apply: Apply,
+    f_apply: Union[Apply, Sequence[Apply]],
+    *,
+    known_dependent=None,
+    known_independent=None,
+    eager=True,
+) -> bool:
+    """Determine if `f_apply` is in the graph given by `l_apply`.
 
     Parameters
     ----------
@@ -1630,19 +1637,36 @@ def is_in_ancestors(l_apply: Apply, f_node: Apply) -> bool:
     bool
 
     """
-    computed = set()
-    todo = [l_apply]
-    while todo:
-        cur = todo.pop()
-        if cur.outputs[0] in computed:
-            continue
-        if all(i in computed or i.owner is None for i in cur.inputs):
-            computed.update(cur.outputs)
-            if cur is f_node:
-                return True
-        else:
-            todo.append(cur)
-            todo.extend(i.owner for i in cur.inputs if i.owner)
+    if known_dependent is None:
+        known_dependent = set()
+    if known_independent is None:
+        known_independent = set()
+    if not isinstance(f_apply, Sequence):
+        f_apply = [f_apply]
+    if l_apply in known_dependent:
+        return True
+    elif l_apply in f_apply:
+        known_dependent.add(l_apply)
+        return True
+    else:
+        search = (
+            is_in_ancestors(
+                inp.owner,
+                f_apply,
+                known_dependent=known_dependent,
+                known_independent=known_independent,
+                eager=eager
+            )
+            for inp in l_apply.inputs
+            if inp.owner
+        )
+        if not eager:
+            search = list(search)
+        if any(search):
+            known_dependent.add(l_apply)
+            return True
+
+    known_independent.add(l_apply)
     return False
 
 
