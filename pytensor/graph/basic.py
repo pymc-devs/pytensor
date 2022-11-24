@@ -1623,7 +1623,7 @@ def is_in_ancestors(
     known_independent: Optional[Set[Apply]] = None,
     eager=True,
 ) -> bool:
-    """Determine if `f_apply` is in the graph given by `l_apply`.
+    """Determine if `f_apply` is in the graph given by (any of) `l_apply`.
 
     Parameters
     ----------
