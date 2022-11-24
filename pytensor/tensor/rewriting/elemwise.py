@@ -11,7 +11,11 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Constant, io_toposort
 from pytensor.graph.features import ReplaceValidate
 from pytensor.graph.op import compute_test_value, get_test_value
-from pytensor.graph.rewriting.basic import GraphRewriter, copy_stack_trace, node_rewriter
+from pytensor.graph.rewriting.basic import (
+    GraphRewriter,
+    copy_stack_trace,
+    node_rewriter,
+)
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined, TestValueError
 from pytensor.tensor.basic import MakeVector, alloc, cast, get_scalar_constant_value
