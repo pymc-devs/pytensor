@@ -6,7 +6,7 @@ import numpy as np
 import scipy.linalg
 from typing_extensions import Literal
 
-import pytensor.tensor
+import pytensor.tensor as pt
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import as_tensor_variable
