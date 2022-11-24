@@ -1619,8 +1619,8 @@ def is_in_ancestors(
     l_apply: Apply,
     f_apply: Union[Apply, Sequence[Apply]],
     *,
-    known_dependent=None,
-    known_independent=None,
+    known_dependent: Optional[Set[Apply]] = None,
+    known_independent: Optional[Set[Apply]] = None,
     eager=True,
 ) -> bool:
     """Determine if `f_apply` is in the graph given by `l_apply`.
@@ -1629,8 +1629,14 @@ def is_in_ancestors(
     ----------
     l_apply : Apply
         The node to walk.
-    f_apply : Apply
+    f_apply : Union[Apply, Sequence[Apply]]
         The node to find in `l_apply`.
+    known_dependent: Optional[Set[Apply]]
+        Cache information about intermediate Applys that depend on f_apply
+    known_independent: Optional[Set[Apply]]
+        Cache information about intermediate Applys that do not depend on f_apply
+    eager: bool
+        return on first match (True) or traverse the whole graph (False)
 
     Returns
     -------
@@ -1655,7 +1661,7 @@ def is_in_ancestors(
                 f_apply,
                 known_dependent=known_dependent,
                 known_independent=known_independent,
-                eager=eager
+                eager=eager,
             )
             for inp in l_apply.inputs
             if inp.owner

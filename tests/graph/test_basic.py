@@ -512,6 +512,42 @@ def test_is_in_ancestors():
     assert is_in_ancestors(o2.owner, o1.owner)
 
 
+def test_is_in_ancestors_complete():
+
+    r1, r2, r3 = MyVariable(1), MyVariable(2), MyVariable(3)
+    o0 = MyOp(r2, r2)
+    o1 = MyOp(r1, r2)
+    o1.name = "o1"
+    o2 = MyOp(r3, o1)
+    o2.name = "o2"
+    o3 = MyOp(o2, o0)
+    o3.name = "o2"
+    dependent = set()
+    independent = set()
+    assert is_in_ancestors(
+        o3.owner,
+        o1.owner,
+        known_dependent=dependent,
+        known_independent=independent,
+        # o0 should not fall into independent with
+        # eager=True default
+        # because it is the second input in o3
+    )
+    assert o0.owner not in independent
+    dependent = set()
+    independent = set()
+    assert is_in_ancestors(
+        o3.owner,
+        o1.owner,
+        known_dependent=dependent,
+        known_independent=independent,
+        # o0 should not fall into independent with
+        eager=False
+        # because it is supposed to be the complete traverse
+    )
+    assert o0.owner in independent
+
+
 @pytest.mark.xfail(reason="Not implemented")
 def test_io_connection_pattern():
     raise AssertionError()
