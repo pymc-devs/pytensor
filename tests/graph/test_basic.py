@@ -521,7 +521,7 @@ def test_is_in_ancestors_complete():
     o2 = MyOp(r3, o1)
     o2.name = "o2"
     o3 = MyOp(o2, o0)
-    o3.name = "o2"
+    o3.name = "o3"
     dependent = set()
     independent = set()
     assert is_in_ancestors(
@@ -533,6 +533,9 @@ def test_is_in_ancestors_complete():
         # eager=True default
         # because it is the second input in o3
     )
+    assert o1.owner in dependent
+    assert o2.owner in dependent
+    assert o3.owner in dependent
     assert o0.owner not in independent
     dependent = set()
     independent = set()
@@ -545,6 +548,9 @@ def test_is_in_ancestors_complete():
         eager=False
         # because it is supposed to be the complete traverse
     )
+    assert o1.owner in dependent
+    assert o2.owner in dependent
+    assert o3.owner in dependent
     assert o0.owner in independent
 
 
