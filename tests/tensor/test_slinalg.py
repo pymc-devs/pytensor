@@ -7,7 +7,7 @@ import scipy
 
 import pytensor
 from pytensor import function, grad
-from pytensor import tensor as at
+from pytensor import tensor as pt
 from pytensor.configdefaults import config
 from pytensor.tensor.slinalg import (
     Cholesky,
@@ -156,7 +156,7 @@ def test_eigvalsh():
     # We need to test None separately, as otherwise DebugMode will
     # complain, as this isn't a valid ndarray.
     b = None
-    B = at.NoneConst
+    B = pt.NoneConst
     f = function([A], eigvalsh(A, B))
     w = f(a)
     refw = scipy.linalg.eigvalsh(a, b)
@@ -216,7 +216,7 @@ class TestSolve(utt.InferShapeTester):
         rng = np.random.default_rng(utt.fetch_seed())
         A = matrix()
         b_val = np.asarray(rng.random(b_shape), dtype=config.floatX)
-        b = at.as_tensor_variable(b_val).type()
+        b = pt.as_tensor_variable(b_val).type()
         self._compile_and_check(
             [A, b],
             [solve(A, b)],
@@ -293,7 +293,7 @@ class TestSolveTriangular(utt.InferShapeTester):
         rng = np.random.default_rng(utt.fetch_seed())
         A = matrix()
         b_val = np.asarray(rng.random(b_shape), dtype=config.floatX)
-        b = at.as_tensor_variable(b_val).type()
+        b = pt.as_tensor_variable(b_val).type()
         self._compile_and_check(
             [A, b],
             [solve_triangular(A, b)],

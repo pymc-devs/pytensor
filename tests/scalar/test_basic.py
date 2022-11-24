@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-import pytensor as pt
+import pytensor
 import tests.unittest_tools as utt
 from pytensor.compile.mode import Mode
 from pytensor.graph.fg import FunctionGraph
