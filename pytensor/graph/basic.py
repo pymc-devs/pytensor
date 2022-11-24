@@ -1667,8 +1667,10 @@ def is_in_ancestors(
             if inp.owner
         )
         if not eager:
-            search = list(search)
-        if any(search):
+            dependent = any(list(search))
+        else:
+            dependent = any(search)
+        if dependent:
             known_dependent.add(l_apply)
             return True
 
