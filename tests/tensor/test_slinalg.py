@@ -2,13 +2,12 @@ import functools
 import itertools
 
 import numpy as np
-import numpy.linalg
 import pytest
 import scipy
 
 import pytensor
 from pytensor import function, grad
-from pytensor import tensor as at
+from pytensor import tensor as pt
 from pytensor.configdefaults import config
 from pytensor.tensor.slinalg import (
     Cholesky,
@@ -23,6 +22,8 @@ from pytensor.tensor.slinalg import (
     expm,
     kron,
     solve,
+    solve_continuous_lyapunov,
+    solve_discrete_lyapunov,
     solve_triangular,
 )
 from pytensor.tensor.type import dmatrix, matrix, tensor, vector
@@ -155,7 +156,7 @@ def test_eigvalsh():
     # We need to test None separately, as otherwise DebugMode will
     # complain, as this isn't a valid ndarray.
     b = None
-    B = at.NoneConst
+    B = pt.NoneConst
     f = function([A], eigvalsh(A, B))
     w = f(a)
     refw = scipy.linalg.eigvalsh(a, b)
@@ -215,7 +216,7 @@ class TestSolve(utt.InferShapeTester):
         rng = np.random.default_rng(utt.fetch_seed())
         A = matrix()
         b_val = np.asarray(rng.random(b_shape), dtype=config.floatX)
-        b = at.as_tensor_variable(b_val).type()
+        b = pt.as_tensor_variable(b_val).type()
         self._compile_and_check(
             [A, b],
             [solve(A, b)],
@@ -292,7 +293,7 @@ class TestSolveTriangular(utt.InferShapeTester):
         rng = np.random.default_rng(utt.fetch_seed())
         A = matrix()
         b_val = np.asarray(rng.random(b_shape), dtype=config.floatX)
-        b = at.as_tensor_variable(b_val).type()
+        b = pt.as_tensor_variable(b_val).type()
         self._compile_and_check(
             [A, b],
             [solve_triangular(A, b)],
@@ -514,7 +515,6 @@ def test_expm_grad_3():
 
 
 class TestKron(utt.InferShapeTester):
-
     rng = np.random.default_rng(43)
 
     def setup_method(self):
@@ -552,3 +552,67 @@ class TestKron(utt.InferShapeTester):
                 b = self.rng.random(shp1).astype(config.floatX)
                 out = f(a, b)
                 assert np.allclose(out, np.kron(a, b))
+
+
+def test_solve_discrete_lyapunov_via_direct_real():
+    N = 5
+    rng = np.random.default_rng(utt.fetch_seed())
+    a = pt.dmatrix()
+    q = pt.dmatrix()
+    f = function([a, q], [solve_discrete_lyapunov(a, q, method="direct")])
+
+    A = rng.normal(size=(N, N))
+    Q = rng.normal(size=(N, N))
+
+    X = f(A, Q)
+    assert np.allclose(A @ X @ A.T - X + Q, 0.0)
+
+    utt.verify_grad(solve_discrete_lyapunov, pt=[A, Q], rng=rng)
+
+
+def test_solve_discrete_lyapunov_via_direct_complex():
+    N = 5
+    rng = np.random.default_rng(utt.fetch_seed())
+    a = pt.zmatrix()
+    q = pt.zmatrix()
+    f = function([a, q], [solve_discrete_lyapunov(a, q, method="direct")])
+
+    A = rng.normal(size=(N, N)) + rng.normal(size=(N, N)) * 1j
+    Q = rng.normal(size=(N, N))
+    X = f(A, Q)
+    assert np.allclose(A @ X @ A.conj().T - X + Q, 0.0)
+
+    # TODO: the .conj() method currently does not have a gradient; add this test when gradients are implemented.
+    # utt.verify_grad(solve_discrete_lyapunov, pt=[A, Q], rng=rng)
+
+
+def test_solve_discrete_lyapunov_via_bilinear():
+    N = 5
+    rng = np.random.default_rng(utt.fetch_seed())
+    a = pt.dmatrix()
+    q = pt.dmatrix()
+    f = function([a, q], [solve_discrete_lyapunov(a, q, method="bilinear")])
+
+    A = rng.normal(size=(N, N))
+    Q = rng.normal(size=(N, N))
+
+    X = f(A, Q)
+    assert np.allclose(A @ X @ A.conj().T - X + Q, 0.0)
+
+    utt.verify_grad(solve_discrete_lyapunov, pt=[A, Q], rng=rng)
+
+
+def test_solve_continuous_lyapunov():
+    N = 5
+    rng = np.random.default_rng(utt.fetch_seed())
+    a = pt.dmatrix()
+    q = pt.dmatrix()
+    f = function([a, q], [solve_continuous_lyapunov(a, q)])
+
+    A = rng.normal(size=(N, N))
+    Q = rng.normal(size=(N, N))
+    X = f(A, Q)
+
+    assert np.allclose(A @ X + X @ A.conj().T, Q)
+
+    utt.verify_grad(solve_continuous_lyapunov, pt=[A, Q], rng=rng)
