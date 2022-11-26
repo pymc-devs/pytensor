@@ -43,7 +43,7 @@ def extended_open(filename, mode="r"):
 
 logger = logging.getLogger("pytensor.compile.profiling")
 
-pytensor_imported_time: float = time.time()
+pytensor_imported_time: float = time.perf_counter()
 total_fct_exec_time: float = 0.0
 total_graph_rewrite_time: float = 0.0
 total_time_linker: float = 0.0
@@ -165,7 +165,7 @@ def print_global_stats():
         print(
             (
                 "Global stats: ",
-                f"Time elasped since PyTensor import = {time.time() - pytensor_imported_time:6.3f}s, "
+                f"Time elasped since PyTensor import = {time.perf_counter() - pytensor_imported_time:6.3f}s, "
                 f"Time spent in PyTensor functions = {total_fct_exec_time:6.3f}s, "
                 "Time spent compiling PyTensor functions: "
                 f"rewriting = {total_graph_rewrite_time:6.3f}s, linking = {total_time_linker:6.3f}s ",
@@ -831,7 +831,7 @@ class ProfileStats:
             f"Time in all call to pytensor.grad() {pytensor.gradient.grad_time:e}s",
             file=file,
         )
-        total_time = time.time() - pytensor_imported_time
+        total_time = time.perf_counter() - pytensor_imported_time
         print(f"Time since pytensor import {total_time:.3f}s", file=file)
 
     def summary_memory(self, file, N=None):
@@ -1299,9 +1299,9 @@ class ProfileStats:
             # Config: whether print min memory peak
             if config.profiling__min_peak_memory:
                 node_list = fgraph.apply_nodes
-                ttt = time.time()
+                ttt = time.perf_counter()
                 min_peak = count_minimum_peak(node_list, fgraph, nodes_mem)
-                min_peak_time += time.time() - ttt
+                min_peak_time += time.perf_counter() - ttt
                 min_max_peak = max(min_max_peak, min_peak)
 
             del fgraph, nodes_mem

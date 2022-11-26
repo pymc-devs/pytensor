@@ -1721,7 +1721,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         """
         info = self.info
         # 1. Unzip the number of steps and sequences.
-        t0_call = time.time()
+        t0_call = time.perf_counter()
         t_fn = 0
         n_steps = inputs[0]
         seqs = []
@@ -1942,7 +1942,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     old_mitmot_input_data[idx] = var.data
 
             # 5.1 compute outputs
-            t0_fn = time.time()
+            t0_fn = time.perf_counter()
 
             try:
                 vm()
@@ -1970,7 +1970,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     # old-style linkers raise their own exceptions
                     raise
 
-            dt_fn = time.time() - t0_fn
+            dt_fn = time.perf_counter() - t0_fn
             if info.as_while:
                 pdx = offset + info.n_shared_outs
                 cond = inner_output_storage[pdx].storage[0] == 0
@@ -2196,7 +2196,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         for o_s in inner_output_storage:
             o_s.storage[0] = None
 
-        t_call = time.time() - t0_call
+        t_call = time.perf_counter() - t0_call
         # NOTE: make this match what's in function.types.Function
         # and this little string helps us to find this spot:
         # "PROFILE_CODE"
