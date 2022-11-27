@@ -26,7 +26,7 @@ declare -a replace_strings=(
 )
 
 for replace in "${replace_strings[@]}"; do
-    sed -i -e "$replace" *$1.patch
+    sed -i -e "$replace" $1.patch
 done
 
 echo "Applying patch..."
