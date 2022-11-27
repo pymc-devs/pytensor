@@ -1,18 +1,18 @@
-"""
-Provide a simple user friendly API to PyTensor-managed memory.
-
-"""
+"""Provide a simple user friendly API to PyTensor-managed memory."""
 
 import copy
 from contextlib import contextmanager
-from typing import List, Optional
-
-import numpy as np
+from functools import singledispatch
+from typing import TYPE_CHECKING, List, Optional
 
 from pytensor.graph.basic import Variable
 from pytensor.graph.utils import add_tag_trace
 from pytensor.link.basic import Container
 from pytensor.link.c.type import generic
+
+
+if TYPE_CHECKING:
+    from pytensor.graph.type import Type
 
 
 __SHARED_CONTEXT__: Optional[List[Variable]] = None
@@ -32,54 +32,41 @@ def collect_new_shareds():
 
 
 class SharedVariable(Variable):
-    """
-    Variable that is (defaults to being) shared between functions that
-    it appears in.
+    """Variable that is shared between compiled functions."""
 
-    Parameters
-    ----------
-    name : str
-        The name for this variable (see `Variable`).
-    type : str
-        The type for this variable (see `Variable`).
-    value
-        A value to associate with this variable (a new container will be
-        created).
-    strict
-        True : assignments to .value will not be cast or copied, so they must
-        have the correct type.
-    allow_downcast
-        Only applies if `strict` is False.
-        True : allow assigned value to lose precision when cast during
-        assignment.
-        False : never allow precision loss.
-        None : only allow downcasting of a Python float to a scalar floatX.
-    container
-        The container to use for this variable. Illegal to pass this as well as
-        a value.
+    def __init__(
+        self,
+        type: "Type",
+        value,
+        strict: bool,
+        allow_downcast=None,
+        container: Optional[Container] = None,
+        name: Optional[str] = None,
+    ):
+        r"""
+        Parameters
+        ----------
+        type
+            The `Type` for this variable (see `Variable`).
+        value
+            A value to associate with this variable (a new container will be
+            created).
+        strict
+            ``True`` means that values assigned to this variable will not be
+            cast or copied, so they must have the correct `Type`\s.
+        allow_downcast
+            Only applies if `strict` is ``False``.
+            ``True`` means that the assigned value can lose precision when cast
+            during assignment. ``None`` means that only down-casting of a Python
+            float to a scalar ``floatX`` is allowed.
+        container
+            The container to use for this variable. Illegal to pass this as well as
+            a value.
+        name
+            The name for this variable (see `Variable`).
 
-    Notes
-    -----
-    For more user-friendly constructor, see `shared`.
-
-    """
-
-    # Container object
-    container = None
-    """
-    A container to use for this SharedVariable when it is an implicit
-    function parameter.
-
-    :type: `Container`
-    """
-
-    # default_update
-    # If this member is present, its value will be used as the "update" for
-    # this Variable, unless another update value has been passed to "function",
-    # or the "no_default_updates" list passed to "function" contains it.
-
-    def __init__(self, name, type, value, strict, allow_downcast=None, container=None):
-        super().__init__(type=type, name=name, owner=None, index=None)
+        """
+        super().__init__(type=type, owner=None, index=None, name=name)
 
         if container is not None:
             self.container = container
@@ -102,6 +89,8 @@ class SharedVariable(Variable):
 
         if isinstance(__SHARED_CONTEXT__, list):
             __SHARED_CONTEXT__.append(self)
+
+        self._default_update: Optional[Variable] = None
 
     def get_value(self, borrow=False, return_internal_type=False):
         """
@@ -147,26 +136,6 @@ class SharedVariable(Variable):
     def get_test_value(self):
         return self.get_value(borrow=True, return_internal_type=True)
 
-    def zero(self, borrow=False):
-        """
-        Set the values of a shared variable to 0.
-
-        Parameters
-        ----------
-        borrow : bbol
-            True to modify the value of a shared variable directly by using
-            its previous value. Potentially this can cause problems
-            regarding to the aliased memory.
-
-        Changes done with this function will be visible to all functions using
-        this SharedVariable.
-
-        """
-        if borrow:
-            self.container.value[...] = 0
-        else:
-            self.container.value = 0 * self.container.value
-
     def clone(self, **kwargs):
         name = kwargs.get("name", self.name)
         cp = self.__class__(
@@ -179,143 +148,77 @@ class SharedVariable(Variable):
         cp.tag = copy.copy(self.tag)
         return cp
 
-    def __getitem__(self, *args):
-        # __getitem__ is not available for generic SharedVariable objects.
-        # We raise a TypeError like Python would do if __getitem__ was not
-        # implemented at all, but with a more explicit error message to help
-        # PyTensor users figure out the root of the problem more easily.
-        value = self.get_value(borrow=True)
-        if isinstance(value, np.ndarray):
-            # Array probably had an unknown dtype.
-            msg = (
-                f"a Numpy array with dtype: '{value.dtype}'. This data type is not "
-                "currently recognized by PyTensor tensors: please cast "
-                "your data into a supported numeric type if you need "
-                "PyTensor tensor functionalities."
-            )
+    @property
+    def default_update(self) -> Optional[Variable]:
+        """A default update expression for this `Variable`.
+
+        If this value is non-``None``, its value will be used as the `update`
+        (see `pytensor.function`) for this `Variable` when no updates are
+        provided through `pytensor.function` and `no_default_updates` isn't
+        enabled.
+        """
+        return self._default_update
+
+    @default_update.setter
+    def default_update(self, value):
+        if value is not None:
+            self._default_update = self.type.filter_variable(value, allow_convert=True)
         else:
-            msg = (
-                f"an object of type: {type(value)}. Did you forget to cast it into "
-                "a Numpy array before calling pytensor.shared()?"
-            )
-
-        raise TypeError(
-            "The generic 'SharedVariable' object is not subscriptable. "
-            f"This shared variable contains {msg}"
-        )
-
-    def _value_get(self):
-        raise Exception(
-            "sharedvar.value does not exist anymore. Use "
-            "sharedvar.get_value() or sharedvar.set_value()"
-            " instead."
-        )
-
-    def _value_set(self, new_value):
-        raise Exception(
-            "sharedvar.value does not exist anymore. Use "
-            "sharedvar.get_value() or sharedvar.set_value()"
-            " instead."
-        )
-
-    # We keep this just to raise an error
-    value = property(_value_get, _value_set)
-
-
-def shared_constructor(ctor, remove=False):
-    if remove:
-        shared.constructors.remove(ctor)
-    else:
-        shared.constructors.append(ctor)
-    return ctor
+            self._default_update = value
 
 
 def shared(value, name=None, strict=False, allow_downcast=None, **kwargs):
-    """Return a SharedVariable Variable, initialized with a copy or
-    reference of `value`.
+    r"""Create a `SharedVariable` initialized with a copy or reference of `value`.
 
     This function iterates over constructor functions to find a
-    suitable SharedVariable subclass.  The suitable one is the first
+    suitable `SharedVariable` subclass.  The suitable one is the first
     constructor that accept the given value.  See the documentation of
     :func:`shared_constructor` for the definition of a constructor
     function.
 
     This function is meant as a convenient default.  If you want to use a
-    specific shared variable constructor, consider calling it directly.
+    specific constructor, consider calling it directly.
 
-    ``pytensor.shared`` is a shortcut to this function.
-
-    .. attribute:: constructors
-
-    A list of shared variable constructors that will be tried in reverse
-    order.
+    `pytensor.shared` is a shortcut to this function.
 
     Notes
     -----
     By passing kwargs, you effectively limit the set of potential constructors
     to those that can accept those kwargs.
 
-    Some shared variable have ``borrow`` as extra kwargs.
+    Some shared variable have `borrow` as a kwarg.
 
-    Some shared variable have ``broadcastable`` as extra kwargs. As shared
+    `SharedVariable`\s of `TensorType` have `broadcastable` as a kwarg. As shared
     variable shapes can change, all dimensions default to not being
-    broadcastable, even if ``value`` has a shape of 1 along some dimension.
-    This parameter allows you to create for example a `row` or `column` 2d
-    tensor.
+    broadcastable, even if `value` has a shape of 1 along some dimension.
+    This parameter allows one to create for example a row or column tensor.
 
     """
 
+    if isinstance(value, Variable):
+        raise TypeError("Shared variable values can not be symbolic.")
+
     try:
-        if isinstance(value, Variable):
-            raise TypeError(
-                "Shared variable constructor needs numeric "
-                "values and not symbolic variables."
-            )
-
-        for ctor in reversed(shared.constructors):
-            try:
-                var = ctor(
-                    value,
-                    name=name,
-                    strict=strict,
-                    allow_downcast=allow_downcast,
-                    **kwargs,
-                )
-                add_tag_trace(var)
-                return var
-            except TypeError:
-                continue
-            # This may happen when kwargs were supplied
-            # if kwargs were given, the generic_constructor won't be callable.
-            #
-            # This was done on purpose, the rationale being that if kwargs
-            # were supplied, the user didn't want them to be ignored.
-
+        var = shared_constructor(
+            value,
+            name=name,
+            strict=strict,
+            allow_downcast=allow_downcast,
+            **kwargs,
+        )
+        add_tag_trace(var)
+        return var
     except MemoryError as e:
         e.args = e.args + ("Consider using `pytensor.shared(..., borrow=True)`",)
         raise
 
-    raise TypeError(
-        "No suitable SharedVariable constructor could be found."
-        " Are you sure all kwargs are supported?"
-        " We do not support the parameter dtype or type."
-        f' value="{value}". parameters="{kwargs}"'
-    )
 
-
-shared.constructors = []
-
-
-@shared_constructor
-def generic_constructor(value, name=None, strict=False, allow_downcast=None):
-    """
-    SharedVariable Constructor.
-
-    """
+@singledispatch
+def shared_constructor(value, name=None, strict=False, allow_downcast=None, **kwargs):
     return SharedVariable(
         type=generic,
         value=value,
-        name=name,
         strict=strict,
         allow_downcast=allow_downcast,
+        name=name,
     )

@@ -282,10 +282,10 @@ class TestScan:
             n_steps=4,
         )
 
-        assert not hasattr(inner_rng, "default_update")
-        assert hasattr(inner_inner_rng, "default_update")
-        assert hasattr(y, "default_update")
-        assert hasattr(z_rng, "default_update")
+        assert inner_rng is None
+        assert inner_inner_rng.default_update is not None
+        assert y.default_update is not None
+        assert z_rng.default_update is not None
 
         out_fn = function([], out, mode=Mode(optimizer=None))
         res, z_res = out_fn()
@@ -586,10 +586,6 @@ class TestScan:
         assert np.allclose(pytensor_values, v_out)
 
     def test_oinp_iinp_iout_oout_mappings(self):
-        """
-        Test the mapping produces by
-        ScanOp.get_oinp_iinp_iout_oout_mappings()
-        """
 
         rng = RandomStream(123)
 

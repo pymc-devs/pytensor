@@ -18,19 +18,18 @@ class RandomGeneratorSharedVariable(SharedVariable):
         )
 
 
-@shared_constructor
+@shared_constructor.register(np.random.RandomState)
+@shared_constructor.register(np.random.Generator)
 def randomgen_constructor(
     value, name=None, strict=False, allow_downcast=None, borrow=False
 ):
-    r"""`SharedVariable` Constructor for NumPy's `Generator` and/or `RandomState`."""
+    r"""`SharedVariable` constructor for NumPy's `Generator` and/or `RandomState`."""
     if isinstance(value, np.random.RandomState):
         rng_sv_type = RandomStateSharedVariable
         rng_type = random_state_type
     elif isinstance(value, np.random.Generator):
         rng_sv_type = RandomGeneratorSharedVariable
         rng_type = random_generator_type
-    else:
-        raise TypeError()
 
     if not borrow:
         value = copy.deepcopy(value)
@@ -38,7 +37,7 @@ def randomgen_constructor(
     return rng_sv_type(
         type=rng_type,
         value=value,
-        name=name,
         strict=strict,
         allow_downcast=allow_downcast,
+        name=name,
     )

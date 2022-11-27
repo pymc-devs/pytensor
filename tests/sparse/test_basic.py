@@ -1422,11 +1422,11 @@ class TestStructuredDot:
             pytensor_times = []
             scipy_times = []
             for i in range(5):
-                t0 = time.time()
+                t0 = time.perf_counter()
                 pytensor_result = f(spmat, mat)
-                t1 = time.time()
+                t1 = time.perf_counter()
                 scipy_result = spmat * mat
-                t2 = time.time()
+                t2 = time.perf_counter()
 
                 pytensor_times.append(t1 - t0)
                 scipy_times.append(t2 - t1)
@@ -1467,11 +1467,11 @@ class TestStructuredDot:
         ]:
             spmat = sp.sparse.csr_matrix(random_lil((M, N), sparse_dtype, nnz))
             mat = np.asarray(np.random.standard_normal((N, K)), dense_dtype)
-            t0 = time.time()
+            t0 = time.perf_counter()
             pytensor_result = f(spmat, mat)
-            t1 = time.time()
+            t1 = time.perf_counter()
             scipy_result = spmat * mat
-            t2 = time.time()
+            t2 = time.perf_counter()
 
             pytensor_time = t1 - t0
             scipy_time = t2 - t1

@@ -3,7 +3,6 @@ Provide a simple user friendly API.
 
 """
 
-import logging
 from copy import copy
 from typing import Optional
 
@@ -14,11 +13,6 @@ from pytensor.compile.sharedvalue import SharedVariable, shared
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, Variable, clone_node_and_cache
 from pytensor.graph.fg import FunctionGraph
-
-
-_logger = logging.getLogger("pytensor.compile.function.pfunc")
-
-__docformat__ = "restructuredtext en"
 
 
 def rebuild_collect_shared(
@@ -78,10 +72,12 @@ def rebuild_collect_shared(
     shared_inputs = []
 
     def clone_v_get_shared_updates(v, copy_inputs_over):
-        """
-        Clones a variable and its inputs recursively until all are in clone_d.
-        Also appends all shared variables met along the way to shared inputs,
-        and their default_update (if applicable) to update_d and update_expr.
+        r"""Clones a variable and its inputs recursively until all are in `clone_d`.
+
+        Also, it appends all `SharedVariable`\s met along the way to
+        `shared_inputs` and their corresponding
+        `SharedVariable.default_update`\s (when applicable) to `update_d` and
+        `update_expr`.
 
         """
         # this co-recurses with clone_a
@@ -103,7 +99,7 @@ def rebuild_collect_shared(
         elif isinstance(v, SharedVariable):
             if v not in shared_inputs:
                 shared_inputs.append(v)
-            if hasattr(v, "default_update"):
+            if v.default_update is not None:
                 # Check that v should not be excluded from the default
                 # updates list
                 if no_default_updates is False or (
@@ -419,22 +415,24 @@ def construct_pfunc_ins_and_outs(
         givens = []
 
     if not isinstance(params, (list, tuple)):
-        raise Exception("in pfunc() the first argument must be a list or a tuple")
+        raise TypeError("The `params` argument must be a list or a tuple")
 
     if not isinstance(no_default_updates, bool) and not isinstance(
         no_default_updates, list
     ):
-        raise TypeError("no_default_update should be either a boolean or a list")
+        raise TypeError("The `no_default_update` argument must be a boolean or list")
 
-    if len(updates) > 0 and any(
-        isinstance(v, Variable) for v in iter_over_pairs(updates)
+    if len(updates) > 0 and not all(
+        isinstance(pair, (tuple, list))
+        and len(pair) == 2
+        and isinstance(pair[0], Variable)
+        for pair in iter_over_pairs(updates)
     ):
-        raise ValueError(
-            "The updates parameter must be an OrderedDict/dict or a list of "
-            "lists/tuples with 2 elements"
+        raise TypeError(
+            "The `updates` parameter must be an ordered mapping or a list of pairs"
         )
 
-    # transform params into pytensor.compile.In objects.
+    # Transform params into pytensor.compile.In objects.
     inputs = [
         _pfunc_param_to_in(p, allow_downcast=allow_input_downcast) for p in params
     ]
