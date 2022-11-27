@@ -40,4 +40,4 @@ pre-commit run --all
 git push origin downstream_$1
 # get the informative title
 title=$(curl https://api.github.com/repos/aesara-devs/aesara/pulls/$1 2>/dev/null | jq '.title')
-gh pr create --repo pymc-devs/pytensor --title "Downstreaming Aesara PR $1" --body "Downstreaming https://github.com/aesara-devs/aesara/pull/$1. PR port done by downstream_pr.sh script."
+gh pr create --repo pymc-devs/pytensor --title "Downstreaming Aesara PR $1: $title" --body "Downstreaming https://github.com/aesara-devs/aesara/pull/$1. PR port done by downstream_pr.sh script."
