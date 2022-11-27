@@ -31,9 +31,10 @@ done
 
 echo "Applying patch..."
 if git am -3 --reject $1.patch ; then
-   echo "Patch applied successfully..."
+    echo "Patch applied successfully..."
 else
-   echo "Patch failed. Find the .rej file and apply the changes manually. Then 'git add' all changed files, followed by 'git am --continue'. Then, create a PR manually."
+    echo "Patch failed. Find the .rej file and apply the changes manually. Then 'git add' all changed files, followed by 'git am --continue'. Then create a PR manually."
+    exit 1
 fi
 
 echo "Running pre-commit"
