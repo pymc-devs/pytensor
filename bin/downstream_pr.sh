@@ -20,9 +20,6 @@ echo "Replacing aesara strings..."
 declare -a replace_strings=(
     "s/aesara/pytensor/g"
     "s/Aesara/PyTensor/g"
-#    "s/import pytensor.tensor as at/import pytensor.tensor as pt/g"
-#    "s/at\./pt./g"
-#    "s/from pytensor import tensor as pt/from pytensor import tensor as pt/g"
 )
 
 for replace in "${replace_strings[@]}"; do
