@@ -42,4 +42,4 @@ pre-commit run --all
 
 git push origin downstream_$1
 
-gh pr create --repo pymc-devs/pytensor --title "Downstreaming $1" --body "Downstreaming https://github.com/aesara-devs/aesara/pull/$1"
+gh pr create --repo pymc-devs/pytensor --title "Downstreaming Aesara PR $1" --body "Downstreaming https://github.com/aesara-devs/aesara/pull/$1. PR port done by downstream_pr.sh script."
