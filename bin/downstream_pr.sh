@@ -3,7 +3,7 @@
 if [ -z "$1" ]
   then
     echo "Usage: downstream_pr.sh <PR_number>"
-    echo "Will create a new branch, apply changes, and create a new PR"
+    echo "Port a specified PR from the Aesara repo to the PyTensor repo. Will create a new branch, adapt and apply the upstream PR, and create a new PR to PyTensor."
     exit 1
 fi
 
@@ -26,11 +26,15 @@ declare -a replace_strings=(
 )
 
 for replace in "${replace_strings[@]}"; do
-    find . -name "*$1.patch" -type f -exec sed -i -e "/png/!$replace" {} \;
+    sed -i -e "$replace" *$1.patch
 done
 
 echo "Applying patch..."
-git am -3 --reject $1.patch
+if git am -3 --reject $1.patch ; then
+   echo "Patch applied successfully..."
+else
+   echo "Patch failed. Find the .rej file and apply the changes manually. Then 'git add' all changed files, followed by 'git am --continue'. Then, create a PR manually."
+fi
 
 echo "Running pre-commit"
 pre-commit run --all
