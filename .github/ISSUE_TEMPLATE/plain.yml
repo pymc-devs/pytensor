@@ -5,7 +5,6 @@ title: "MISC: <Please write a comprehensive title here>"
 body:
 - type: textarea
   attributes:
-    description: >
-      Please describe the purpose of filing this issue
+    label: Please describe the purpose of filing this issue
   validations:
     required: true
