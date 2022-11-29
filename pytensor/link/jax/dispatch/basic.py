@@ -87,7 +87,7 @@ def jnp_safe_copy(x):
         res = jnp.copy(x)
     except NotImplementedError:
         warnings.warn(
-            "`jnp.copy` is not implemented yet. " "Using the object's `copy` method."
+            "`jnp.copy` is not implemented yet. Using the object's `copy` method."
         )
         if hasattr(x, "copy"):
             res = jnp.array(x.copy())

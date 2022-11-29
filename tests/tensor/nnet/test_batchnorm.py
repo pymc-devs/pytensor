@@ -43,10 +43,10 @@ def test_BNComposite():
         v = vector("v")
 
         x.tag.test_value = rng.random((2, 2)).astype(pytensor.config.floatX)
-        b.tag.test_value = rng.random((2)).astype(pytensor.config.floatX)
-        g.tag.test_value = rng.random((2)).astype(pytensor.config.floatX)
-        m.tag.test_value = rng.random((2)).astype(pytensor.config.floatX)
-        v.tag.test_value = rng.random((2)).astype(pytensor.config.floatX)
+        b.tag.test_value = rng.random(2).astype(pytensor.config.floatX)
+        g.tag.test_value = rng.random(2).astype(pytensor.config.floatX)
+        m.tag.test_value = rng.random(2).astype(pytensor.config.floatX)
+        v.tag.test_value = rng.random(2).astype(pytensor.config.floatX)
 
         bn_ref_op = bn_ref(x, g, b, m, v)
         f_ref = pytensor.function([x, b, g, m, v], [bn_ref_op])
@@ -558,7 +558,7 @@ def test_batch_normalization_train_broadcast():
                 assert len(nodes) == 1
                 assert isinstance(nodes[0].op, pytensor.compile.DeepCopyOp)
             inputs = [
-                np.asarray(np.random.random(((4,) * n)), x.dtype)
+                np.asarray(np.random.random((4,) * n), x.dtype)
                 for n in [
                     x.ndim,
                     scale.ndim,

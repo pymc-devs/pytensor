@@ -1,8 +1,6 @@
-
 import sys
 import os
 import shutil
-import inspect
 import getopt
 from collections import defaultdict
 
@@ -16,7 +14,7 @@ if __name__ == '__main__':
         sys.argv[1:],
         'o:f:',
         ['rst', 'help', 'nopdf', 'cache', 'check', 'test'])
-    options.update(dict([x, y or True] for x, y in opts))
+    options.update({x: y or True for x, y in opts})
     if options['--help']:
         print(f'Usage: {sys.argv[0]} [OPTIONS] [files...]')
         print('  -o <dir>: output the html files in the specified dir')
@@ -100,8 +98,6 @@ if __name__ == '__main__':
                 shutil.rmtree(workdir)
             except OSError as e:
                 print('OSError:', e)
-            except IOError as e:
-                print('IOError:', e)
 
     if options['--test']:
         mkdir("doc")

@@ -2127,7 +2127,7 @@ class GCC_compiler(Compiler):
             native_lines = get_lines(f"{config.cxx} -march=native -E -v -")
             if native_lines is None:
                 _logger.info(
-                    "Call to 'g++ -march=native' failed," "not setting -march flag"
+                    "Call to 'g++ -march=native' failed, not setting -march flag"
                 )
                 detect_march = False
             else:
@@ -2157,15 +2157,13 @@ class GCC_compiler(Compiler):
                 if len(default_lines) < 1:
                     reported_lines = get_lines(f"{config.cxx} -E -v -", parse=False)
                     warnings.warn(
-                        (
-                            "PyTensor was not able to find the "
-                            "default g++ parameters. This is needed to tune "
-                            "the compilation to your specific "
-                            "CPU. This can slow down the execution of PyTensor "
-                            "functions. Please submit the following lines to "
-                            "PyTensor's mailing list so that we can fix this "
-                            f"problem:\n {reported_lines}"
-                        )
+                        "PyTensor was not able to find the "
+                        "default g++ parameters. This is needed to tune "
+                        "the compilation to your specific "
+                        "CPU. This can slow down the execution of PyTensor "
+                        "functions. Please submit the following lines to "
+                        "PyTensor's mailing list so that we can fix this "
+                        f"problem:\n {reported_lines}"
                     )
                 else:
                     # Some options are actually given as "-option value",
@@ -2248,7 +2246,7 @@ class GCC_compiler(Compiler):
                                 if len(version) != 3:
                                     # Unexpected, but should not be a problem
                                     continue
-                                mj, mn, patch = [int(vp) for vp in version]
+                                mj, mn, patch = (int(vp) for vp in version)
                                 if (
                                     ((mj, mn) == (4, 6) and patch < 4)
                                     or ((mj, mn) == (4, 7) and patch <= 3)
@@ -2584,7 +2582,7 @@ class GCC_compiler(Compiler):
         def print_command_line_error():
             # Print command line when a problem occurred.
             print(
-                ("Problem occurred during compilation with the " "command line below:"),
+                ("Problem occurred during compilation with the command line below:"),
                 file=sys.stderr,
             )
             print(" ".join(cmd), file=sys.stderr)
@@ -2609,7 +2607,7 @@ class GCC_compiler(Compiler):
                 tf.write(f"{i + 1}\t{l}\n")
             tf.write("===============================\n")
             tf.write(
-                "Problem occurred during compilation with the " "command line below:\n"
+                "Problem occurred during compilation with the command line below:\n"
             )
             tf.write(" ".join(cmd))
             # Print errors just below the command line.

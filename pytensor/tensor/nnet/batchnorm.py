@@ -215,7 +215,7 @@ def batch_normalization_train(
         )
     if (running_mean is None) != (running_var is None):
         raise ValueError(
-            "running_mean and running_var must either both be " "given or both be None"
+            "running_mean and running_var must either both be given or both be None"
         )
     if running_mean is not None and running_mean.ndim != params_ndim:
         raise ValueError(

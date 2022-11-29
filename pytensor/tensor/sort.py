@@ -452,7 +452,7 @@ class TopKOp(Op):
                 self,
                 0,
                 x,
-                "topk: cannot get gradient" " without both indices and values",
+                "topk: cannot get gradient without both indices and values",
             )
         else:
             x_shp = shape(x)

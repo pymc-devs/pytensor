@@ -10,7 +10,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Text,
     Tuple,
     TypeVar,
     Union,
@@ -496,7 +495,7 @@ class Op(MetaObject):
         node: Apply,
         storage_map: Optional[StorageMapType],
         compute_map: Optional[ComputeMapType],
-        impl: Optional[Text],
+        impl: Optional[str],
     ) -> None:
         """Make any special modifications that the `Op` needs before doing :meth:`Op.make_thunk`.
 
@@ -573,7 +572,7 @@ class Op(MetaObject):
         storage_map: StorageMapType,
         compute_map: ComputeMapType,
         no_recycling: List[Variable],
-        impl: Optional[Text] = None,
+        impl: Optional[str] = None,
     ) -> ThunkType:
         r"""Create a thunk.
 
@@ -676,7 +675,7 @@ def get_test_value(v: Any) -> Any:
     return v.get_test_value()
 
 
-def missing_test_message(msg: Text) -> None:
+def missing_test_message(msg: str) -> None:
     """Display a message saying that some test_value is missing.
 
     This uses the appropriate form based on ``config.compute_test_value``:

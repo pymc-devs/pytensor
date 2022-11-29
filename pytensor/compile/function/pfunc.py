@@ -181,7 +181,7 @@ def rebuild_collect_shared(
             raise TypeError("update target must be a SharedVariable", store_into)
         if store_into in update_d:
             raise ValueError(
-                "this shared variable already has an update " "expression",
+                "this shared variable already has an update expression",
                 (store_into, update_d[store_into]),
             )
 

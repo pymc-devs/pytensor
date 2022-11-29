@@ -1633,22 +1633,22 @@ class TestDots(utt.InferShapeTester):
         y = sparse.csc_matrix("y")
 
         res = at.dot(x, y)
-        op_types = set(type(n.op) for n in applys_between([x, y], [res]))
+        op_types = {type(n.op) for n in applys_between([x, y], [res])}
         assert sparse.basic.StructuredDot in op_types
         assert at.math.Dot not in op_types
 
         res = at.dot(x_d, y)
-        op_types = set(type(n.op) for n in applys_between([x, y], [res]))
+        op_types = {type(n.op) for n in applys_between([x, y], [res])}
         assert sparse.basic.StructuredDot in op_types
         assert at.math.Dot not in op_types
 
         res = at.dot(x, x_d)
-        op_types = set(type(n.op) for n in applys_between([x, y], [res]))
+        op_types = {type(n.op) for n in applys_between([x, y], [res])}
         assert sparse.basic.StructuredDot in op_types
         assert at.math.Dot not in op_types
 
         res = at.dot(at.second(1, x), y)
-        op_types = set(type(n.op) for n in applys_between([x, y], [res]))
+        op_types = {type(n.op) for n in applys_between([x, y], [res])}
         assert sparse.basic.StructuredDot in op_types
         assert at.math.Dot not in op_types
 
@@ -3203,7 +3203,7 @@ class TestMulSV:
         for format in ("csr", "csc"):
             for dtype in ("float32", "float64"):
                 spmat = sp_types[format](random_lil((4, 3), dtype, 3))
-                mat = np.asarray(np.random.random((3)), dtype=dtype)
+                mat = np.asarray(np.random.random(3), dtype=dtype)
 
                 verify_grad_sparse(mul_s_v, [spmat, mat], structured=True)
 
@@ -3217,7 +3217,7 @@ class TestMulSV:
                 f = pytensor.function([x, y], mul_s_v(x, y))
 
                 spmat = sp_types[format](random_lil((4, 3), dtype, 3))
-                mat = np.asarray(np.random.random((3)), dtype=dtype)
+                mat = np.asarray(np.random.random(3), dtype=dtype)
 
                 out = f(spmat, mat)
 
@@ -3231,7 +3231,7 @@ class TestStructuredAddSV:
         for format in ("csr", "csc"):
             for dtype in ("float32", "float64"):
                 spmat = sp_types[format](random_lil((4, 3), dtype, 3))
-                mat = np.asarray(np.random.random((3)), dtype=dtype)
+                mat = np.asarray(np.random.random(3), dtype=dtype)
 
                 verify_grad_sparse(structured_add_s_v, [spmat, mat], structured=True)
 
@@ -3247,7 +3247,7 @@ class TestStructuredAddSV:
                 spmat = sp_types[format](random_lil((4, 3), dtype, 3))
                 spones = spmat.copy()
                 spones.data = np.ones_like(spones.data)
-                mat = np.asarray(np.random.random((3)), dtype=dtype)
+                mat = np.asarray(np.random.random(3), dtype=dtype)
 
                 out = f(spmat, mat)
 
@@ -3273,7 +3273,7 @@ class TestTrueDot(utt.InferShapeTester):
 
                 tested = f(*data)
 
-                x, y = [m.toarray() for m in data]
+                x, y = (m.toarray() for m in data)
                 expected = np.dot(x, y)
 
                 assert tested.format == format

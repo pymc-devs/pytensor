@@ -679,7 +679,7 @@ class NodeFinder(Bookkeeper):
         """
         if self.fgraph is not fgraph:
             raise Exception(
-                "This NodeFinder instance was not attached to the" " provided fgraph."
+                "This NodeFinder instance was not attached to the provided fgraph."
             )
         self.fgraph = None
         del fgraph.get_nodes

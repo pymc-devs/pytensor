@@ -361,7 +361,7 @@ class mrg_uniform_base(Op):
     def grad(self, inputs, ograd):
         return [
             gradient.grad_undefined(
-                self, k, inp, "No gradient defined through " "random sampling op"
+                self, k, inp, "No gradient defined through random sampling op"
             )
             for k, inp in enumerate(inputs)
         ]
@@ -1019,7 +1019,7 @@ class MRG_RandomStream:
             return op(pvals, unis, n_samples)
         else:
             raise NotImplementedError(
-                "MRG_RandomStream.multinomial only" " implemented for pvals.ndim = 2"
+                "MRG_RandomStream.multinomial only implemented for pvals.ndim = 2"
             )
 
     def choice(
@@ -1075,7 +1075,7 @@ class MRG_RandomStream:
         """
         if replace:
             raise NotImplementedError(
-                "MRG_RandomStream.choice only works without replacement " "for now."
+                "MRG_RandomStream.choice only works without replacement for now."
             )
 
         if a is not None:
@@ -1087,15 +1087,13 @@ class MRG_RandomStream:
 
         if p is None:
             raise TypeError(
-                "For now, p has to be specified in " "MRG_RandomStream.choice."
+                "For now, p has to be specified in MRG_RandomStream.choice."
             )
         p = as_tensor_variable(p)
         p = undefined_grad(p)
 
         if ndim is not None:
-            raise ValueError(
-                "ndim argument to " "MRG_RandomStream.choice " "is not used."
-            )
+            raise ValueError("ndim argument to MRG_RandomStream.choice is not used.")
 
         if p.ndim != 2:
             raise NotImplementedError(

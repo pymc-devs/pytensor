@@ -1047,7 +1047,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     raise ValueError(
                         err_msg1
                         % (
-                            "initial state (outputs_info" " in scan nomenclature) ",
+                            "initial state (outputs_info in scan nomenclature) ",
                             str(outer_mitsot),
                             argoffset + idx,
                             outer_mitsot.type.dtype,
@@ -1094,7 +1094,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 raise ValueError(
                     err_msg1
                     % (
-                        "initial state (outputs_info" " in scan nomenclature) ",
+                        "initial state (outputs_info in scan nomenclature) ",
                         str(outer_sitsot),
                         argoffset + idx,
                         outer_sitsot.type.dtype,
@@ -1171,7 +1171,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 raise ValueError(
                     err_msg1
                     % (
-                        "initial state (outputs_info" " in scan nomenclature) ",
+                        "initial state (outputs_info in scan nomenclature) ",
                         str(outer_shared),
                         argoffset + idx,
                         outer_shared.dtype,
@@ -1197,10 +1197,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             new_inputs.append(outer_nonseq)
             if not outer_nonseq.type.in_same_class(inner_nonseq.type):
                 raise ValueError(
-                    (
-                        f"Argument {outer_nonseq} given to the scan node is not"
-                        f" compatible with its corresponding loop function variable {inner_nonseq}"
-                    )
+                    f"Argument {outer_nonseq} given to the scan node is not"
+                    f" compatible with its corresponding loop function variable {inner_nonseq}"
                 )
 
         for outer_nitsot in self.outer_nitsot(inputs):
@@ -3407,7 +3405,7 @@ def profile_printer(
                     )
                 else:
                     print(
-                        (" The node took 0s, so we can not " "compute the overhead"),
+                        (" The node took 0s, so we can not compute the overhead"),
                         node,
                         file=file,
                     )

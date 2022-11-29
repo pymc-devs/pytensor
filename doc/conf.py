@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-#
 # pytensor documentation build configuration file, created by
 # sphinx-quickstart on Tue Oct  7 16:34:06 2008.
 #

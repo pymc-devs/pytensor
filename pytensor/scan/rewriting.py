@@ -1637,7 +1637,7 @@ def save_mem_new_scan(fgraph, node):
         # 3.9. Get replace pairs for all other nodes
         if flag_store or global_nsteps is not None:
             for idx, o in enumerate(node.outputs):
-                if not (idx in replaced_outs) and idx not in not_required:
+                if idx not in replaced_outs and idx not in not_required:
                     nw_pos = compress_map[idx]
                     old_new += [(o, new_outs[nw_pos])]
             # Check if the new outputs depend on the old scan node

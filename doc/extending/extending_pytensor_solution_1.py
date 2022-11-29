@@ -73,7 +73,6 @@ class SumDiffOp(Op):
 import numpy as np
 
 from tests import unittest_tools as utt
-from pytensor import function, printing
 from pytensor import tensor as at
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op

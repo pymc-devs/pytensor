@@ -1938,7 +1938,7 @@ class Split(COp):
             )
         if builtins.any(nb < 0 for nb in splits):
             raise ValueError(
-                "Attempted to make an array with a " "negative number of elements"
+                "Attempted to make an array with a negative number of elements"
             )
 
         # Checking is done, let's roll the splitting algorithm!
@@ -2179,9 +2179,7 @@ class Join(COp):
         else:
             return "{}{{{}}}".format(
                 self.__class__.__name__,
-                ", ".join(
-                    "{}={!r}".format(p, getattr(self, p)) for p in self.__props__
-                ),
+                ", ".join(f"{p}={getattr(self, p)!r}" for p in self.__props__),
             )
 
     def __setstate__(self, d):
@@ -2819,7 +2817,7 @@ def tile(x, reps, ndim=None):
         elif ndim_check == 1:
             if ndim is None:
                 raise ValueError(
-                    "if reps is tensor.vector, you should specify " "the ndim"
+                    "if reps is tensor.vector, you should specify the ndim"
                 )
             else:
                 offset = ndim - reps.shape[0]
@@ -3083,7 +3081,7 @@ class _nd_grid:
         for sl in args[0]:
             if isinstance(sl.step, builtins.complex):
                 raise NotImplementedError(
-                    "Not implemented for slices " "whose step is complex"
+                    "Not implemented for slices whose step is complex"
                 )
         ranges = [arange(sl.start or 0, sl.stop, sl.step or 1) for sl in args[0]]
         shapes = [
@@ -3395,9 +3393,7 @@ class ExtractDiag(Op):
         x = as_tensor_variable(x)
 
         if x.ndim < 2:
-            raise ValueError(
-                "ExtractDiag needs an input with 2 or more " "dimensions", x
-            )
+            raise ValueError("ExtractDiag needs an input with 2 or more dimensions", x)
         return Apply(
             self,
             [x],
@@ -3518,7 +3514,7 @@ class AllocDiag(Op):
         diag = as_tensor_variable(diag)
         if diag.type.ndim < 1:
             raise ValueError(
-                "AllocDiag needs an input with 1 or more " "dimensions", diag.type
+                "AllocDiag needs an input with 1 or more dimensions", diag.type
             )
         return Apply(
             self,

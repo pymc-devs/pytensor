@@ -185,7 +185,7 @@ as_sparse_or_tensor_variable = as_symbolic
 
 def constant(x, name=None):
     if not isinstance(x, scipy.sparse.spmatrix):
-        raise TypeError("sparse.constant must be called on a " "scipy.sparse.spmatrix")
+        raise TypeError("sparse.constant must be called on a scipy.sparse.spmatrix")
     try:
         return SparseConstant(
             SparseTensorType(format=x.format, dtype=x.dtype), x.copy(), name=name
@@ -3439,7 +3439,7 @@ class StructuredDot(Op):
 
         if not _is_sparse_variable(a):
             raise TypeError(
-                "First argument must be of type SparseVariable " "or SparseConstant"
+                "First argument must be of type SparseVariable or SparseConstant"
             )
         dtype_out = aes.upcast(a.type.dtype, b.type.dtype)
         if b.type.ndim != 2:
@@ -3475,7 +3475,7 @@ class StructuredDot(Op):
         if variable.ndim == 1:
             variable = np.expand_dims(variable, 1)
         elif variable.ndim != 2:
-            raise Exception("Output of structured dot should be a matrix " "(ndim=2)")
+            raise Exception("Output of structured dot should be a matrix (ndim=2)")
 
         assert variable.ndim == 2
 
@@ -3613,7 +3613,7 @@ class StructuredDotGradCSC(COp):
         if node.inputs[2].type.dtype in ("complex64", "complex128"):
             raise NotImplementedError("Complex types are not supported for b")
         if node.inputs[3].type.dtype in ("complex64", "complex128"):
-            raise NotImplementedError("Complex types are not supported for " "g_ab")
+            raise NotImplementedError("Complex types are not supported for g_ab")
 
         return """
         if (PyArray_NDIM(%(_d)s) != 2) {PyErr_SetString(PyExc_NotImplementedError, "rank(d) != 2"); %(fail)s;}
@@ -3749,7 +3749,7 @@ class StructuredDotGradCSR(COp):
         if node.inputs[2].type.dtype in ("complex64", "complex128"):
             raise NotImplementedError("Complex types are not supported for b")
         if node.inputs[3].type.dtype in ("complex64", "complex128"):
-            raise NotImplementedError("Complex types are not supported for " "g_ab")
+            raise NotImplementedError("Complex types are not supported for g_ab")
 
         return """
         if (PyArray_NDIM(%(_d)s) != 2) {PyErr_SetString(PyExc_NotImplementedError, "rank(d) != 2"); %(fail)s;}

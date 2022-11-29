@@ -91,10 +91,8 @@ def grad_not_implemented(op, x_pos, x, comment=""):
 
     return (
         NullType(
-            (
-                "This variable is Null because the grad method for "
-                f"input {x_pos} ({x}) of the {op} op is not implemented. {comment}"
-            )
+            "This variable is Null because the grad method for "
+            f"input {x_pos} ({x}) of the {op} op is not implemented. {comment}"
         )
     )()
 
@@ -114,10 +112,8 @@ def grad_undefined(op, x_pos, x, comment=""):
 
     return (
         NullType(
-            (
-                "This variable is Null because the grad method for "
-                f"input {x_pos} ({x}) of the {op} op is not implemented. {comment}"
-            )
+            "This variable is Null because the grad method for "
+            f"input {x_pos} ({x}) of the {op} op is not implemented. {comment}"
         )
     )()
 
@@ -1275,14 +1271,12 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                     # We therefore don't allow it because its usage has become
                     # so muddied.
                     raise TypeError(
-                        (
-                            f"{node.op}.grad returned None for a gradient term, "
-                            "this is prohibited. Instead of None,"
-                            "return zeros_like(input), disconnected_type(),"
-                            " or a NullType variable such as those made with "
-                            "the grad_undefined or grad_unimplemented helper "
-                            "functions."
-                        )
+                        f"{node.op}.grad returned None for a gradient term, "
+                        "this is prohibited. Instead of None,"
+                        "return zeros_like(input), disconnected_type(),"
+                        " or a NullType variable such as those made with "
+                        "the grad_undefined or grad_unimplemented helper "
+                        "functions."
                     )
 
                 # Check that the gradient term for this input
@@ -1402,10 +1396,8 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
 
                         if hasattr(var, "ndim") and term.ndim != var.ndim:
                             raise ValueError(
-                                (
-                                    f"{node.op}.grad returned a term with"
-                                    f" {int(term.ndim)} dimensions, but {int(var.ndim)} are required."
-                                )
+                                f"{node.op}.grad returned a term with"
+                                f" {int(term.ndim)} dimensions, but {int(var.ndim)} are required."
                             )
 
                         terms.append(term)
@@ -1767,10 +1759,8 @@ def verify_grad(
     for i, p in enumerate(pt):
         if p.dtype not in ("float16", "float32", "float64"):
             raise TypeError(
-                (
-                    "verify_grad can work only with floating point "
-                    f'inputs, but input {i} has dtype "{p.dtype}".'
-                )
+                "verify_grad can work only with floating point "
+                f'inputs, but input {i} has dtype "{p.dtype}".'
             )
 
     _type_tol = dict(  # relative error tolerances for different types
