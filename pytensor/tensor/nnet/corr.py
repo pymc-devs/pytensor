@@ -692,7 +692,7 @@ class CorrMM(BaseCorrMM):
             if kern.type.ndim != 4:
                 raise TypeError("kern must be 4D tensor")
 
-        out_shape = tuple(
+        out_shape = (
             1 if img.type.shape[0] == 1 else None,
             1 if kern.type.shape[0] == 1 else None,
             None,
