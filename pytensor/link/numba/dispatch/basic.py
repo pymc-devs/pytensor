@@ -1,4 +1,5 @@
 import operator
+import sys
 import warnings
 from contextlib import contextmanager
 from functools import singledispatch
@@ -10,7 +11,7 @@ import numba.np.unsafe.ndarray as numba_ndarray
 import numpy as np
 import scipy
 import scipy.special
-from llvmlite.ir import Type as llvm_Type
+from llvmlite import ir
 from numba import types
 from numba.core.errors import TypingError
 from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
@@ -131,7 +132,7 @@ def create_numba_signature(
 
 
 def slice_new(self, start, stop, step):
-    fnty = llvm_Type.function(self.pyobj, [self.pyobj, self.pyobj, self.pyobj])
+    fnty = ir.FunctionType(self.pyobj, [self.pyobj, self.pyobj, self.pyobj])
     fn = self._get_function(fnty, name="PySlice_New")
     return self.builder.call(fn, [start, stop, step])
 
@@ -150,11 +151,33 @@ def enable_slice_boxing():
         This makes it possible to return an Numba's internal representation of a
         ``slice`` object as a proper ``slice`` to Python.
         """
+        start = c.builder.extract_value(val, 0)
+        stop = c.builder.extract_value(val, 1)
 
-        start = c.box(types.int64, c.builder.extract_value(val, 0))
-        stop = c.box(types.int64, c.builder.extract_value(val, 1))
+        none_val = ir.Constant(ir.IntType(64), sys.maxsize)
+
+        start_is_none = c.builder.icmp_signed("==", start, none_val)
+        start = c.builder.select(
+            start_is_none,
+            c.pyapi.get_null_object(),
+            c.box(types.int64, start),
+        )
+
+        stop_is_none = c.builder.icmp_signed("==", stop, none_val)
+        stop = c.builder.select(
+            stop_is_none,
+            c.pyapi.get_null_object(),
+            c.box(types.int64, stop),
+        )
+
         if typ.has_step:
-            step = c.box(types.int64, c.builder.extract_value(val, 2))
+            step = c.builder.extract_value(val, 2)
+            step_is_none = c.builder.icmp_signed("==", step, none_val)
+            step = c.builder.select(
+                step_is_none,
+                c.pyapi.get_null_object(),
+                c.box(types.int64, step),
+            )
         else:
             step = c.pyapi.get_null_object()
 
