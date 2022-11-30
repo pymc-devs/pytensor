@@ -3,7 +3,7 @@ import pytest
 import scipy.special.cython_special
 from numba.types import float32, float64, int32, int64
 
-from aesara.link.numba.dispatch.cython_support import Signature, wrap_cython_function
+from pytensor.link.numba.dispatch.cython_support import Signature, wrap_cython_function
 
 
 @pytest.mark.parametrize(

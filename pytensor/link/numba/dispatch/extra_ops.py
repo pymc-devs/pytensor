@@ -19,7 +19,7 @@ from pytensor.tensor.extra_ops import (
     Unique,
     UnravelIndex,
 )
-from aesara.raise_op import CheckAndRaise
+from pytensor.raise_op import CheckAndRaise
 
 
 @numba_funcify.register(Bartlett)
