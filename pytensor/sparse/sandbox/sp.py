@@ -182,7 +182,9 @@ class ConvolutionIndices(Op):
                                     # taking into account multiple
                                     # input features
                                     col = int(
-                                        iy * inshp[2] + ix + fmapi * np.prod(inshp[1:], dtype=int)
+                                        iy * inshp[2]
+                                        + ix
+                                        + fmapi * np.prod(inshp[1:], dtype=int)
                                     )
 
                                     # convert oy,ox values to output
