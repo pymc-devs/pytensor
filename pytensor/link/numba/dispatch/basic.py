@@ -49,8 +49,7 @@ from pytensor.tensor.type_other import MakeSlice, NoneConst
 def numba_njit(*args, **kwargs):
 
     kwargs = kwargs.copy()
-    if "cache" not in kwargs:
-        kwargs["cache"] = config.numba__cache
+    kwargs.setdefault("cache", config.numba__cache)
 
     if len(args) > 0 and callable(args[0]):
         return numba.njit(*args[1:], **kwargs)(args[0])

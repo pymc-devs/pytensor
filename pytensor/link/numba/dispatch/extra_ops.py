@@ -7,6 +7,7 @@ from numba.misc.special import literal_unroll
 from pytensor import config
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import get_numba_type, numba_funcify
+from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.extra_ops import (
     Bartlett,
     BroadcastTo,
@@ -19,7 +20,6 @@ from pytensor.tensor.extra_ops import (
     Unique,
     UnravelIndex,
 )
-from pytensor.raise_op import CheckAndRaise
 
 
 @numba_funcify.register(Bartlett)
@@ -48,11 +48,13 @@ def numba_funcify_CumOp(op, node, **kwargs):
     if mode == "add":
 
         if ndim == 1:
+
             @numba_basic.numba_njit(fastmath=config.numba__fastmath)
             def cumop(x):
                 return np.cumsum(x)
 
         else:
+
             @numba_basic.numba_njit(boundscheck=False, fastmath=config.numba__fastmath)
             def cumop(x):
                 out_dtype = x.dtype
@@ -70,11 +72,13 @@ def numba_funcify_CumOp(op, node, **kwargs):
 
     else:
         if ndim == 1:
+
             @numba_basic.numba_njit(fastmath=config.numba__fastmath)
             def cumop(x):
                 return np.cumprod(x)
 
         else:
+
             @numba_basic.numba_njit(boundscheck=False, fastmath=config.numba__fastmath)
             def cumop(x):
                 out_dtype = x.dtype
