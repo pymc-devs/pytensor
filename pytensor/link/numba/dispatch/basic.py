@@ -168,8 +168,12 @@ def enable_slice_boxing():
 enable_slice_boxing()
 
 
-@numba.generated_jit(nopython=True)
 def to_scalar(x):
+    raise NotImplementedError()
+
+
+@numba.extending.overload(to_scalar)
+def impl_to_scalar(x):
     if isinstance(x, (numba.types.Number, numba.types.Boolean)):
         return lambda x: x
     elif isinstance(x, numba.types.Array):
