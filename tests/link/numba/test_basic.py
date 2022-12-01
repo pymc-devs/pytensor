@@ -27,6 +27,7 @@ from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch import numba_const_convert
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.raise_op import assert_op
+from pytensor.sparse.type import SparseTensorType
 from pytensor.tensor import blas
 from pytensor.tensor import subtensor as at_subtensor
 from pytensor.tensor.elemwise import Elemwise
@@ -252,26 +253,21 @@ def compare_numba_and_py(
 
 
 @pytest.mark.parametrize(
-    "v, expected, force_scalar, not_implemented",
+    "v, expected, force_scalar",
     [
-        (MyType(), None, False, True),
-        (aes.float32, numba.types.float32, False, False),
-        (at.fscalar, numba.types.Array(numba.types.float32, 0, "A"), False, False),
-        (at.fscalar, numba.types.float32, True, False),
-        (at.lvector, numba.types.int64[:], False, False),
-        (at.dmatrix, numba.types.float64[:, :], False, False),
-        (at.dmatrix, numba.types.float64, True, False),
+        (MyType(), numba.types.pyobject, False),
+        (SparseTensorType("csc", dtype=np.float64), numba.types.pyobject, False),
+        (aes.float32, numba.types.float32, False),
+        (at.fscalar, numba.types.Array(numba.types.float32, 0, "A"), False),
+        (at.fscalar, numba.types.float32, True),
+        (at.lvector, numba.types.int64[:], False),
+        (at.dmatrix, numba.types.float64[:, :], False),
+        (at.dmatrix, numba.types.float64, True),
     ],
 )
-def test_get_numba_type(v, expected, force_scalar, not_implemented):
-    cm = (
-        contextlib.suppress()
-        if not not_implemented
-        else pytest.raises(NotImplementedError)
-    )
-    with cm:
-        res = numba_basic.get_numba_type(v, force_scalar=force_scalar)
-        assert res == expected
+def test_get_numba_type(v, expected, force_scalar):
+    res = numba_basic.get_numba_type(v, force_scalar=force_scalar)
+    assert res == expected
 
 
 @pytest.mark.parametrize(
