@@ -794,7 +794,7 @@ class TestAlloc:
         assert np.array_equal(res, np.full((2, 3), 3, dtype="int64"))
 
 
-def test_infer_broadcastable():
+def test_infer_shape():
     with pytest.raises(TypeError, match="^Shapes must be scalar integers.*"):
         infer_static_shape([constant(1.0)])
 
