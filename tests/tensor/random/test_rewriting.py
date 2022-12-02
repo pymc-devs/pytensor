@@ -9,6 +9,7 @@ from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import EquilibriumGraphRewriter
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.tensor import constant
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.random.basic import (
     dirichlet,
@@ -42,7 +43,11 @@ def apply_local_rewrite_to_rv(
 
     size_at = []
     for s in size:
-        s_at = iscalar()
+        # To test DimShuffle with dropping dims we need that size dimension to be constant
+        if s == 1:
+            s_at = constant(np.array(1, dtype="int32"))
+        else:
+            s_at = iscalar()
         s_at.tag.test_value = s
         size_at.append(s_at)
 
@@ -314,7 +319,7 @@ def test_local_rv_size_lift(dist_op, dist_params, size):
         ),
         (
             ("x", 1, 0, 2, "x"),
-            False,
+            True,
             normal,
             (
                 np.array([[-1, 20], [300, -4000]], dtype=config.floatX),
@@ -332,7 +337,30 @@ def test_local_rv_size_lift(dist_op, dist_params, size):
             (3, 2, 2),
             1,
         ),
-        # A multi-dimensional case
+        # Supported multi-dimensional cases
+        (
+            (1, 0, 2),
+            True,
+            multivariate_normal,
+            (
+                np.array([[-1, 20], [300, -4000]], dtype=config.floatX),
+                np.eye(2).astype(config.floatX) * 1e-6,
+            ),
+            (3, 2),
+            1e-3,
+        ),
+        (
+            (1, 0, "x", 2),
+            True,
+            multivariate_normal,
+            (
+                np.array([[-1, 20], [300, -4000]], dtype=config.floatX),
+                np.eye(2).astype(config.floatX) * 1e-6,
+            ),
+            (3, 2),
+            1e-3,
+        ),
+        # Not supported multi-dimensional cases where dimshuffle affects the support dimensionality
         (
             (0, 2, 1),
             False,
@@ -343,6 +371,35 @@ def test_local_rv_size_lift(dist_op, dist_params, size):
             ),
             (3, 2),
             1e-3,
+        ),
+        (
+            (0, 1, 2, "x"),
+            False,
+            multivariate_normal,
+            (
+                np.array([[-1, 20], [300, -4000]], dtype=config.floatX),
+                np.eye(2).astype(config.floatX) * 1e-6,
+            ),
+            (3, 2),
+            1e-3,
+        ),
+        pytest.param(
+            (1,),
+            True,
+            normal,
+            (0, 1),
+            (1, 2),
+            1e-3,
+            marks=pytest.mark.xfail(reason="Dropping dimensions not supported yet"),
+        ),
+        pytest.param(
+            (1,),
+            True,
+            normal,
+            ([[0, 0]], 1),
+            (1, 2),
+            1e-3,
+            marks=pytest.mark.xfail(reason="Dropping dimensions not supported yet"),
         ),
     ],
 )
