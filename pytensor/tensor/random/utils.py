@@ -134,7 +134,7 @@ def normalize_size_param(
             "Parameter size must be None, an integer, or a sequence with integers."
         )
     else:
-        size = cast(as_tensor_variable(size, ndim=1), "int64")
+        size = cast(as_tensor_variable(size, ndim=1, dtype="int64"), "int64")
 
         if not isinstance(size, Constant):
             # This should help ensure that the length of non-constant `size`s
