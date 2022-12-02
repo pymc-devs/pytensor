@@ -148,6 +148,9 @@ def test_RandomVariable_bcast():
     res = rv(0, 1, size=at.as_tensor(1, dtype=np.int64))
     assert res.broadcastable == (True,)
 
+    res = rv(0, 1, size=(at.as_tensor(1, dtype=np.int32), s3))
+    assert res.broadcastable == (True, False)
+
 
 def test_RandomVariable_bcast_specify_shape():
     rv = RandomVariable("normal", 0, [0, 0], config.floatX, inplace=True)
