@@ -192,6 +192,19 @@ class RandomVariable(Op):
         size_len = get_vector_length(size)
 
         if size_len > 0:
+
+            # Fail early when size is incompatible with parameters
+            for i, (param, param_ndim_supp) in enumerate(
+                zip(dist_params, self.ndims_params)
+            ):
+                param_batched_dims = getattr(param, "ndim", 0) - param_ndim_supp
+                if param_batched_dims > size_len:
+                    raise ValueError(
+                        f"Size length is incompatible with batched dimensions of parameter {i} {param}:\n"
+                        f"len(size) = {size_len}, len(batched dims {param}) = {param_batched_dims}. "
+                        f"Size length must be 0 or >= {param_batched_dims}"
+                    )
+
             if self.ndim_supp == 0:
                 return size
             else:

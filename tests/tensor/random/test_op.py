@@ -217,3 +217,17 @@ def test_random_maker_ops_no_seed():
     z = function(inputs=[], outputs=[default_rng()])()
     aes_res = z[0]
     assert isinstance(aes_res, np.random.Generator)
+
+
+def test_RandomVariable_incompatible_size():
+    rv_op = RandomVariable("normal", 0, [0, 0], config.floatX, inplace=True)
+    with pytest.raises(
+        ValueError, match="Size length is incompatible with batched dimensions"
+    ):
+        rv_op(np.zeros((1, 3)), 1, size=(3,))
+
+    rv_op = RandomVariable("dirichlet", 0, [1], config.floatX, inplace=True)
+    with pytest.raises(
+        ValueError, match="Size length is incompatible with batched dimensions"
+    ):
+        rv_op(np.zeros((2, 4, 3)), 1, size=(4,))
