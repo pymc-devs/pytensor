@@ -173,6 +173,7 @@ class DimShuffle(ExternalCOp):
         # List of dimensions of the output that are broadcastable and were not
         # in the original input
         self.augment = sorted([i for i, x in enumerate(new_order) if x == "x"])
+        self.drop = drop
 
         if self.inplace:
             self.view_map = {0: [0]}
