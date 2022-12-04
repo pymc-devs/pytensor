@@ -1390,6 +1390,19 @@ def test_choice_samples():
     compare_sample_values(choice, at.as_tensor_variable([1, 2, 3]), 2, replace=True)
 
 
+def test_choice_infer_shape():
+    node = choice([0, 1]).owner
+    res = node.op._infer_shape((), node.inputs[3:], None)
+    assert tuple(res.eval()) == ()
+
+    node = choice([0, 1]).owner
+    # The param_shape of a NoneConst is None, during shape_inference
+    res = node.op._infer_shape(
+        (), node.inputs[3:], (node.inputs[3].shape, None, node.inputs[5].shape)
+    )
+    assert tuple(res.eval()) == ()
+
+
 def test_permutation_samples():
     compare_sample_values(
         permutation,
