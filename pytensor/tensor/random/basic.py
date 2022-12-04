@@ -1990,11 +1990,12 @@ class ChoiceRV(RandomVariable):
         raise NotImplementedError()
 
     def _infer_shape(self, size, dist_params, param_shapes=None):
-        (a, p, _) = dist_params
-
+        a, p, _ = dist_params
         if isinstance(p.type, pytensor.tensor.type_other.NoneTypeT):
+            param_shapes = param_shapes[:1] if param_shapes is not None else None
             shape = super()._infer_shape(size, (a,), param_shapes)
         else:
+            param_shapes = param_shapes[:2] if param_shapes is not None else None
             shape = super()._infer_shape(size, (a, p), param_shapes)
 
         return shape
