@@ -61,7 +61,6 @@ pytensor/tensor/subtensor.py
 pytensor/tensor/type.py
 pytensor/tensor/type_other.py
 pytensor/tensor/var.py
-pytensor/typed_list/basic.py
 """
 
 
