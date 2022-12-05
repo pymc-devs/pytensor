@@ -3425,7 +3425,7 @@ def profile_printer(
             )
 
 
-@op_debug_information.register(Scan)
+@op_debug_information.register(Scan)  # noqa
 def _op_debug_information_Scan(op: Scan, node: Apply):
     from typing import Sequence
 
