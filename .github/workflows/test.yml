@@ -23,7 +23,7 @@ jobs:
     outputs:
       changes: ${{ steps.changes.outputs.src }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 0
       - uses: dorny/paths-filter@v2
@@ -52,7 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ needs.changes.outputs.changes == 'true' }}
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - uses: actions/setup-python@v2
       with:
         python-version: '3.9'
@@ -90,7 +90,7 @@ jobs:
             install-numba: 1
             part: "tests --ignore=tests/tensor/nnet --ignore=tests/tensor/signal"
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 0
       - name: Set up Python ${{ matrix.python-version }}
@@ -110,7 +110,7 @@ jobs:
           echo $MATRIX_CONTEXT
           export MATRIX_ID=`echo $MATRIX_CONTEXT | md5sum | cut -c 1-32`
           echo $MATRIX_ID
-          echo "::set-output name=id::$MATRIX_ID"
+          echo "id=$MATRIX_ID" >> $GITHUB_OUTPUT
 
       - name: Install dependencies
         shell: bash -l {0}
@@ -143,7 +143,7 @@ jobs:
           FLOAT32: ${{ matrix.float32 }}
 
       - name: Upload coverage file
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: coverage
           path: coverage/coverage-${{ steps.matrix-id.outputs.id }}.xml
@@ -164,7 +164,7 @@ jobs:
     needs: [changes, all-checks]
     if: ${{ needs.changes.outputs.changes == 'true' && needs.all-checks.result == 'success' }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v1
