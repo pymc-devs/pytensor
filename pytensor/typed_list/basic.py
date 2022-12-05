@@ -166,8 +166,8 @@ class Append(COp):
     def __str__(self):
         return self.__class__.__name__
 
-    # DISABLED AS WE NEED TO UPDATE IT TO COPY toAppend().
-    def _c_code_(self, node, name, inp, out, sub):
+    def c_code(self, node, name, inp, out, sub):
+        raise NotImplementedError("DISABLED AS WE NEED TO UPDATE IT TO COPY toAppend()")
         x_name, toAppend = inp[0], inp[1]
         output_name = out[0]
         fail = sub["fail"]
@@ -251,8 +251,8 @@ class Extend(COp):
     def __str__(self):
         return self.__class__.__name__
 
-    # DISABLED AS WE NEED TO UPDATE IT TO COPY toAppend().
-    def _c_code_(self, node, name, inp, out, sub):
+    def c_code(self, node, name, inp, out, sub):
+        raise NotImplementedError("DISABLED AS WE NEED TO UPDATE IT TO COPY toAppend()")
         x_name, toAppend = inp[0], inp[1]
         output_name = out[0]
         fail = sub["fail"]
@@ -343,8 +343,8 @@ class Insert(COp):
     def __str__(self):
         return self.__class__.__name__
 
-    # DISABLED AS WE NEED TO UPDATE IT TO COPY toAppend().
-    def _c_code_(self, node, name, inp, out, sub):
+    def c_code(self, node, name, inp, out, sub):
+        raise NotImplementedError("DISABLED AS WE NEED TO UPDATE IT TO COPY toAppend()")
         x_name, index, toInsert = inp[0], inp[1], inp[2]
         output_name = out[0]
         fail = sub["fail"]
