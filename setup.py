@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 import os
 
-from setuptools import setup
+import numpy
+from setuptools import Extension, setup
 from setuptools.dist import Distribution
 
 import versioneer
@@ -35,4 +36,11 @@ if __name__ == "__main__":
         name=NAME,
         version=versioneer.get_version(),
         cmdclass=versioneer.get_cmdclass(),
+        ext_modules=[
+            Extension(
+                name="pytensor.scan.scan_perform",
+                sources=["pytensor/scan/scan_perform.pyx"],
+                include_dirs=[numpy.get_include()],
+            ),
+        ],
     )

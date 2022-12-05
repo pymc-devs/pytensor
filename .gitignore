@@ -4,6 +4,7 @@ __pycache__
 .coverage
 *.linkinfo
 *.o
+*.c
 *.orig
 *.pyc
 *.pyo
