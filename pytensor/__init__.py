@@ -29,6 +29,8 @@ import sys
 from functools import singledispatch
 from typing import Any, NoReturn, Optional
 
+from pytensor.version import version as __version__
+
 
 pytensor_logger = logging.getLogger("pytensor")
 logging_default_handler = logging.StreamHandler()
@@ -47,10 +49,6 @@ if not pytensor_logger.hasHandlers():
 def disable_log_handler(logger=pytensor_logger, handler=logging_default_handler):
     if logger.hasHandlers():
         logger.removeHandler(handler)
-
-
-# Version information.
-from pytensor.version import version as __version__
 
 
 # Raise a meaningful warning/error if the pytensor directory is in the Python
