@@ -5,13 +5,7 @@ from scipy.special import softmax as scipy_softmax
 
 from pytensor.compile.function import function
 from pytensor.configdefaults import config
-from pytensor.tensor.special import (
-    LogSoftmax,
-    Softmax,
-    SoftmaxGrad,
-    log_softmax,
-    softmax,
-)
+from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad, log_softmax, softmax
 from pytensor.tensor.type import matrix, tensor3, tensor4, vector
 from tests import unittest_tools as utt
 
