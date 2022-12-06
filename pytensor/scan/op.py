@@ -54,6 +54,7 @@ from typing import Callable, List, Optional, Union
 import numpy as np
 
 import pytensor
+import pytensor.link.utils as link_utils
 from pytensor import tensor as at
 from pytensor.compile.builders import construct_nominal_fgraph, infer_shape
 from pytensor.compile.function.pfunc import pfunc
@@ -75,7 +76,6 @@ from pytensor.graph.op import HasInnerGraph, Op
 from pytensor.graph.utils import InconsistencyError, MissingInputError
 from pytensor.link.c.basic import CLinker
 from pytensor.link.c.exceptions import MissingGXX
-from pytensor.link.utils import raise_with_op
 from pytensor.printing import op_debug_information
 from pytensor.scan.utils import ScanProfileStats, Validator, forced_replace, safe_new
 from pytensor.tensor.basic import as_tensor_variable
@@ -1627,7 +1627,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     if hasattr(self.fn.vm, "position_of_error") and hasattr(
                         self.fn.vm, "thunks"
                     ):
-                        raise_with_op(
+                        link_utils.raise_with_op(
                             self.fn.maker.fgraph,
                             self.fn.vm.nodes[self.fn.vm.position_of_error],
                             self.fn.vm.thunks[self.fn.vm.position_of_error],
@@ -1930,7 +1930,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     # done by raise_with_op is not implemented in C.
                     if hasattr(vm, "thunks"):
                         # For the CVM
-                        raise_with_op(
+                        link_utils.raise_with_op(
                             self.fn.maker.fgraph,
                             vm.nodes[vm.position_of_error],
                             vm.thunks[vm.position_of_error],
@@ -1940,7 +1940,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                         # We don't have access from python to all the
                         # temps values So for now, we just don't print
                         # the extra shapes/strides info
-                        raise_with_op(
+                        link_utils.raise_with_op(
                             self.fn.maker.fgraph, vm.nodes[vm.position_of_error]
                         )
                 else:
