@@ -1,11 +1,17 @@
-import inspect
 from functools import singledispatch
 from numbers import Number
+import pickle
 from textwrap import indent
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Literal, Optional, Union
+import base64
 
 import numba
 import numpy as np
+from llvmlite import ir
+from numba import TypingError, literal_unroll, types, literally
+from numba.core import cgutils
+from numba.cpython.unsafe.tuple import tuple_setitem
+from numba.np import arrayobj
 from numpy.core.numeric import normalize_axis_index, normalize_axis_tuple
 
 from pytensor import config
@@ -16,13 +22,12 @@ from pytensor.link.numba.dispatch.basic import (
     create_numba_signature,
     create_tuple_creator,
     numba_funcify,
+    numba_njit,
     use_optimized_cheap_pass,
 )
-from pytensor.link.utils import (
-    compile_function_src,
-    get_name_for_object,
-    unique_name_generator,
-)
+from pytensor.link.numba.dispatch.helpers import check_broadcasting, tuple_mapper
+from pytensor.link.numba.dispatch import elemwise_codegen
+from pytensor.link.utils import compile_function_src, get_name_for_object
 from pytensor.scalar.basic import (
     AND,
     OR,
@@ -431,6 +436,170 @@ def create_axis_apply_fn(fn, axis, ndim, dtype):
     return axis_apply_fn
 
 
+_jit_options = {
+    "fastmath": {
+        "arcp",  # Allow Reciprocal
+        "contract",  # Allow floating-point contraction
+        "afn",  # Approximate functions
+        "reassoc",
+        "nsz",  # TODO Do we want this one?
+    }
+}
+
+@numba.extending.intrinsic(jit_options=_jit_options, prefer_literal=True)
+def _vectorized(
+    typingctx,
+    scalar_func,
+    input_bc_patterns,
+    output_bc_patterns,
+    output_dtypes,
+    inplace_pattern,
+    inputs,
+):
+    #if not isinstance(scalar_func, types.Literal):
+    #    raise TypingError("scalar func must be literal.")
+    #scalar_func = scalar_func.literal_value
+
+    arg_types = [
+        scalar_func,
+        input_bc_patterns,
+        output_bc_patterns,
+        output_dtypes,
+        inplace_pattern,
+        inputs,
+    ]
+
+    if not isinstance(input_bc_patterns, types.Literal):
+        raise TypingError("input_bc_patterns must be literal.")
+    input_bc_patterns = input_bc_patterns.literal_value
+    input_bc_patterns = pickle.loads(base64.decodebytes(input_bc_patterns.encode()))
+
+    if not isinstance(output_bc_patterns, types.Literal):
+        raise TypeError("output_bc_patterns must be literal.")
+    output_bc_patterns = output_bc_patterns.literal_value
+    output_bc_patterns = pickle.loads(base64.decodebytes(output_bc_patterns.encode()))
+
+    if not isinstance(output_dtypes, types.Literal):
+        raise TypeError("output_dtypes must be literal.")
+    output_dtypes = output_dtypes.literal_value
+    output_dtypes = pickle.loads(base64.decodebytes(output_dtypes.encode()))
+
+    if not isinstance(inplace_pattern, types.Literal):
+        raise TypeError("inplace_pattern must be literal.")
+    inplace_pattern = inplace_pattern.literal_value
+    inplace_pattern = pickle.loads(base64.decodebytes(inplace_pattern.encode()))
+
+    n_inputs = len(inputs)
+    n_outputs = len(output_bc_patterns)
+
+    if not len(inputs) > 0:
+        raise TypingError("Empty argument list to elemwise op.")
+
+    if not n_outputs > 0:
+        raise TypingError("Empty list of outputs for elemwise op.")
+
+    if not all(isinstance(input, types.Array) for input in inputs):
+        raise TypingError("Inputs to elemwise must be arrays.")
+    ndim = inputs[0].ndim
+
+    if not all(input.ndim == ndim for input in inputs):
+        raise TypingError("Inputs to elemwise must have the same rank.")
+
+    if not all(len(pattern) == ndim for pattern in output_bc_patterns):
+        raise TypingError("Invalid output broadcasting pattern.")
+
+    scalar_signature = typingctx.resolve_function_type(
+        scalar_func, [in_type.dtype for in_type in inputs], {}
+    )
+
+    # So we can access the constant values in codegen...
+    input_bc_patterns_val = input_bc_patterns
+    output_bc_patterns_val = output_bc_patterns
+    output_dtypes_val = output_dtypes
+    inplace_pattern_val = inplace_pattern
+    input_types = inputs
+
+    #assert not inplace_pattern_val
+
+    def codegen(
+        ctx,
+        builder,
+        sig,
+        args,
+    ):
+
+        [_, _, _, _, _, inputs] = args
+        inputs = cgutils.unpack_tuple(builder, inputs)
+        inputs = [arrayobj.make_array(ty)(ctx, builder, val) for ty, val in zip(input_types, inputs)]
+        in_shapes = [cgutils.unpack_tuple(builder, obj.shape) for obj in inputs]
+
+        iter_shape = elemwise_codegen.compute_itershape(
+            ctx,
+            builder,
+            in_shapes,
+            input_bc_patterns_val,
+        )
+
+        outputs, output_types = elemwise_codegen.make_outputs(
+            ctx,
+            builder,
+            iter_shape,
+            output_bc_patterns_val,
+            output_dtypes_val,
+            inplace_pattern_val,
+            inputs,
+            input_types,
+        )
+
+        def _check_input_shapes(*_):
+            # TODO impl
+            return
+
+        _check_input_shapes(
+            ctx,
+            builder,
+            iter_shape,
+            inputs,
+            input_bc_patterns_val,
+        )
+
+        elemwise_codegen.make_loop_call(
+            typingctx,
+            ctx,
+            builder,
+            scalar_func,
+            scalar_signature,
+            iter_shape,
+            inputs,
+            outputs,
+            input_bc_patterns_val,
+            output_bc_patterns_val,
+            input_types,
+            output_types,
+        )
+
+        if len(outputs) == 1:
+            if inplace_pattern:
+                assert inplace_pattern[0][0] == 0
+                ctx.nrt.incref(builder, sig.return_type, outputs[0]._getvalue())
+            return outputs[0]._getvalue()
+
+        for inplace_idx in dict(inplace_pattern):
+            ctx.nrt.incref(builder, sig.return_type.types[inplace_idx], outputs[inplace_idx]._get_value())
+        return ctx.make_tuple(builder, sig.return_type, [out._getvalue() for out in outputs])
+
+    # TODO check inplace_pattern
+    ret_type = types.Tuple([
+        types.Array(numba.from_dtype(np.dtype(dtype)), ndim, "C")
+        for dtype in output_dtypes
+    ])
+    if len(output_dtypes) == 1:
+        ret_type = ret_type.types[0]
+    sig = ret_type(*arg_types)
+
+    return sig, codegen
+
+
 @numba_funcify.register(Elemwise)
 def numba_funcify_Elemwise(op, node, **kwargs):
     # Creating a new scalar node is more involved and unnecessary
@@ -441,55 +610,42 @@ def numba_funcify_Elemwise(op, node, **kwargs):
         scalar_inputs = [scalar(dtype=input.dtype) for input in node.inputs]
         scalar_node = op.scalar_op.make_node(*scalar_inputs)
 
+    flags = {
+        "arcp",  # Allow Reciprocal
+        "contract",  # Allow floating-point contraction
+        "afn",  # Approximate functions
+        "reassoc",
+        "nsz",  # TODO Do we want this one?
+    }
+
     scalar_op_fn = numba_funcify(
-        op.scalar_op, node=scalar_node, parent_node=node, inline="always", **kwargs
+        op.scalar_op, node=scalar_node, parent_node=node, fastmath=flags, **kwargs
     )
-    elemwise_fn = create_vectorize_func(scalar_op_fn, node, use_signature=False)
-    elemwise_fn_name = elemwise_fn.__name__
 
-    if op.inplace_pattern:
-        input_idx = op.inplace_pattern[0]
-        sign_obj = inspect.signature(elemwise_fn.py_scalar_func)
-        input_names = list(sign_obj.parameters.keys())
+    ndim = node.outputs[0].ndim
+    output_bc_patterns = tuple([(False,) * ndim for _ in node.outputs])
+    input_bc_patterns = tuple([input_var.broadcastable for input_var in node.inputs])
+    output_dtypes = tuple(variable.dtype for variable in node.outputs)
+    inplace_pattern = tuple(op.inplace_pattern.items())
 
-        unique_names = unique_name_generator([elemwise_fn_name, "np"], suffix_sep="_")
-        input_names = [unique_names(i, force_unique=True) for i in input_names]
+    # numba doesn't support nested literals right now...
+    input_bc_patterns = base64.encodebytes(pickle.dumps(input_bc_patterns)).decode()
+    output_bc_patterns = base64.encodebytes(pickle.dumps(output_bc_patterns)).decode()
+    output_dtypes = base64.encodebytes(pickle.dumps(output_dtypes)).decode()
+    inplace_pattern = base64.encodebytes(pickle.dumps(inplace_pattern)).decode()
 
-        updated_input_name = input_names[input_idx]
-
-        inplace_global_env = {elemwise_fn_name: elemwise_fn, "np": np}
-
-        inplace_elemwise_fn_name = f"{elemwise_fn_name}_inplace"
-
-        input_signature_str = ", ".join(input_names)
-
-        if node.inputs[input_idx].ndim > 0:
-            inplace_elemwise_src = f"""
-def {inplace_elemwise_fn_name}({input_signature_str}):
-    return {elemwise_fn_name}({input_signature_str + ", " + updated_input_name})
-            """
-        else:
-            # We can't perform in-place updates on Numba scalars, so we need to
-            # convert them to NumPy scalars.
-            # TODO: We should really prevent the rewrites from creating
-            # in-place updates on scalars when the Numba mode is selected (or
-            # in general?).
-            inplace_elemwise_src = f"""
-def {inplace_elemwise_fn_name}({input_signature_str}):
-    {updated_input_name}_scalar = np.asarray({updated_input_name})
-    return {elemwise_fn_name}({input_signature_str + ", " + updated_input_name}_scalar).item()
-            """
-
-        inplace_elemwise_fn = compile_function_src(
-            inplace_elemwise_src,
-            inplace_elemwise_fn_name,
-            {**globals(), **inplace_global_env},
-        )
-        return numba_basic.numba_njit(inline="always", fastmath=config.numba__fastmath)(
-            inplace_elemwise_fn
+    @numba_njit
+    def elemwise_wrapper(*inputs):
+        return _vectorized(
+            scalar_op_fn,
+            input_bc_patterns,
+            output_bc_patterns,
+            output_dtypes,
+            inplace_pattern,
+            inputs,
         )
 
-    return elemwise_fn
+    return elemwise_wrapper
 
 
 @numba_funcify.register(CAReduce)
