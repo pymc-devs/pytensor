@@ -1,8 +1,31 @@
 import jax.numpy as jnp
 
 from pytensor.graph import Constant
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
 from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape, Unbroadcast
+from pytensor.tensor.type import TensorType
+
+
+class JAXShapeTuple(Op):
+    """Dummy Op that represents a `size` specified as a tuple."""
+
+    def make_node(self, *inputs):
+        dtype = inputs[0].type.dtype
+        otype = TensorType(dtype, shape=(len(inputs),))
+        return Apply(self, inputs, [otype()])
+
+    def perform(self, *inputs):
+        return tuple(inputs)
+
+
+@jax_funcify.register(JAXShapeTuple)
+def jax_funcify_JAXShapeTuple(op, **kwargs):
+    def shape_tuple_fn(*x):
+        return tuple(x)
+
+    return shape_tuple_fn
 
 
 @jax_funcify.register(Reshape)
