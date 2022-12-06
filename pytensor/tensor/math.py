@@ -1390,6 +1390,11 @@ def hyp2f1(a, b, c, z):
 
 
 @scalar_elemwise
+def hyp2f1_der(a, b, c, z):
+    """Derivatives for Gaussian hypergeometric function."""
+
+
+@scalar_elemwise
 def j0(x):
     """Bessel function of the first kind of order 0."""
 
@@ -3138,6 +3143,7 @@ __all__ = [
     "logaddexp",
     "logsumexp",
     "hyp2f1",
+    "hyp2f1_der",
 ]
 
 DEPRECATED_NAMES = [

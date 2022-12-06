@@ -763,12 +763,22 @@ _good_broadcast_quaternary_hyp2f1 = dict(
     ),
 )
 
+_good_broadcast_pentanary_hyp2f1_der = dict(
+    normal=(
+        random_ranged(0, 1000, (2, 3)),
+        random_ranged(0, 1000, (2, 3)),
+        random_ranged(0, 1000, (2, 3)),
+        random_ranged(0, 0.5, (2, 3)),
+        integers_ranged(-1, 3, (2, 3)),
+    ),
+)
+
 TestHyp2F1Broadcast = makeBroadcastTester(
     op=at.hyp2f1,
     expected=expected_hyp2f1,
     good=_good_broadcast_quaternary_hyp2f1,
+    grad=_good_broadcast_quaternary_hyp2f1,
     eps=2e-10,
-    mode=mode_no_scipy,
 )
 
 TestHyp2F1InplaceBroadcast = makeBroadcastTester(
@@ -802,10 +812,15 @@ TestHyp2F1InplaceBroadcast = makeBroadcastTester(
     expected=expected_hyp2f1,
     good=_good_broadcast_quaternary_hyp2f1,
     eps=2e-10,
-    mode=mode_no_scipy,
     inplace=True,
 )
 
+TestHyp2F1DerBroadcast = makeBroadcastTester(
+    op=at.hyp2f1_der,
+    expected=expected_hyp2f1,
+    good=_good_broadcast_pentanary_hyp2f1_der,
+    eps=2e-10,
+)
 
 class TestBetaIncGrad:
     def test_stan_grad_partial(self):
