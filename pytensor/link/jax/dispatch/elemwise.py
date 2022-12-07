@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 
-from pytensor.link.jax.dispatch.basic import jax_funcify, jnp_safe_copy
+from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 
@@ -69,7 +69,7 @@ def jax_funcify_DimShuffle(op, **kwargs):
         res = jnp.reshape(res, shape)
 
         if not op.inplace:
-            res = jnp_safe_copy(res)
+            res = jnp.copy(res)
 
         return res
 
