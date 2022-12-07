@@ -3,6 +3,7 @@ import warnings
 import jax.numpy as jnp
 import numpy as np
 
+from pytensor.graph.basic import Constant
 from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import (
@@ -20,6 +21,15 @@ from pytensor.tensor.basic import (
     get_scalar_constant_value,
 )
 from pytensor.tensor.exceptions import NotScalarConstantError
+
+
+ARANGE_CONCRETE_VALUE_ERROR = """JAX requires the arguments of `jax.numpy.arange`
+to be constants. The graph that you defined thus cannot be JIT-compiled
+by JAX. An example of a graph that can be compiled to JAX:
+
+>>> import pytensor.tensor basic
+>>> at.arange(1, 10, 2)
+"""
 
 
 @jax_funcify.register(AllocDiag)
@@ -50,9 +60,26 @@ def jax_funcify_Alloc(op, **kwargs):
 
 
 @jax_funcify.register(ARange)
-def jax_funcify_ARange(op, **kwargs):
-    # XXX: This currently requires concrete arguments.
-    def arange(start, stop, step):
+def jax_funcify_ARange(op, node, **kwargs):
+    """Register a JAX implementation for `ARange`.
+
+    `jax.numpy.arange` requires concrete values for its arguments. Here we check
+    that the arguments are constant, and raise otherwise.
+
+    TODO: Handle other situations in which values are concrete (shape of an array).
+
+    """
+    arange_args = node.inputs
+    constant_args = []
+    for arg in arange_args:
+        if not isinstance(arg, Constant):
+            raise NotImplementedError(ARANGE_CONCRETE_VALUE_ERROR)
+
+        constant_args.append(arg.value)
+
+    start, stop, step = constant_args
+
+    def arange(*_):
         return jnp.arange(start, stop, step, dtype=op.dtype)
 
     return arange
