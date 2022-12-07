@@ -25,6 +25,7 @@ from pytensor.graph.basic import Apply, NoParams
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.type import Type
 from pytensor.ifelse import IfElse
+from pytensor.link.numba.dispatch.sparse import CSCMatrixType, CSRMatrixType
 from pytensor.link.utils import (
     compile_function_src,
     fgraph_to_python,
@@ -32,6 +33,7 @@ from pytensor.link.utils import (
 )
 from pytensor.scalar.basic import ScalarType
 from pytensor.scalar.math import Softplus
+from pytensor.sparse import SparseTensorType
 from pytensor.tensor.blas import BatchedDot
 from pytensor.tensor.math import Dot
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
@@ -105,6 +107,15 @@ def get_numba_type(
         dtype = np.dtype(pytensor_type.dtype)
         numba_dtype = numba.from_dtype(dtype)
         return numba_dtype
+    elif isinstance(pytensor_type, SparseTensorType):
+        dtype = pytensor_type.numpy_dtype
+        numba_dtype = numba.from_dtype(dtype)
+        if pytensor_type.format == "csr":
+            return CSRMatrixType(numba_dtype)
+        if pytensor_type.format == "csc":
+            return CSCMatrixType(numba_dtype)
+
+        raise NotImplementedError()
     else:
         raise NotImplementedError(f"Numba type not implemented for {pytensor_type}")
 

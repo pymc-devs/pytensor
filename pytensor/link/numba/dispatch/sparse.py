@@ -19,7 +19,10 @@ class CSMatrixType(types.Type):
     """A Numba `Type` modeled after the base class `scipy.sparse.compressed._cs_matrix`."""
 
     name: str
-    instance_class: type
+
+    @staticmethod
+    def instance_class(data, indices, indptr, shape):
+        raise NotImplementedError()
 
     def __init__(self, dtype):
         self.dtype = dtype
@@ -28,6 +31,10 @@ class CSMatrixType(types.Type):
         self.indptr = types.Array(types.int32, 1, "A")
         self.shape = types.UniTuple(types.int64, 2)
         super().__init__(self.name)
+
+    @property
+    def key(self):
+        return (self.name, self.dtype)
 
 
 make_attribute_wrapper(CSMatrixType, "data", "data")
@@ -152,7 +159,6 @@ def overload_sparse_shape(x):
 
 @overload_attribute(CSMatrixType, "ndim")
 def overload_sparse_ndim(inst):
-
     if not isinstance(inst, CSMatrixType):
         return
 
