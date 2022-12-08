@@ -373,6 +373,14 @@ def test_AdvancedSubtensor1(x, indices):
     compare_numba_and_py(out_fg, [])
 
 
+def test_AdvancedSubtensor1_out_of_bounds():
+    out_at = at_subtensor.advanced_subtensor1(np.arange(3), [4])
+    assert isinstance(out_at.owner.op, at_subtensor.AdvancedSubtensor1)
+    out_fg = FunctionGraph([], [out_at])
+    with pytest.raises(IndexError):
+        compare_numba_and_py(out_fg, [])
+
+
 @pytest.mark.parametrize(
     "x, indices",
     [
