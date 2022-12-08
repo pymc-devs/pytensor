@@ -554,7 +554,7 @@ def numba_funcify_Subtensor(op, node, **kwargs):
         subtensor_def_src, "subtensor", {**globals(), **global_env}
     )
 
-    return numba_njit(subtensor_fn)
+    return numba_njit(subtensor_fn, boundscheck=True)
 
 
 @numba_funcify.register(IncSubtensor)
@@ -570,7 +570,7 @@ def numba_funcify_IncSubtensor(op, node, **kwargs):
         incsubtensor_def_src, "incsubtensor", {**globals(), **global_env}
     )
 
-    return numba_njit(incsubtensor_fn)
+    return numba_njit(incsubtensor_fn, boundscheck=True)
 
 
 @numba_funcify.register(AdvancedIncSubtensor1)
@@ -580,7 +580,7 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
 
     if set_instead_of_inc:
 
-        @numba_njit
+        @numba_njit(boundscheck=True)
         def advancedincsubtensor1_inplace(x, vals, idxs):
             for idx, val in zip(idxs, vals):
                 x[idx] = val
@@ -588,7 +588,7 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
 
     else:
 
-        @numba_njit
+        @numba_njit(boundscheck=True)
         def advancedincsubtensor1_inplace(x, vals, idxs):
             for idx, val in zip(idxs, vals):
                 x[idx] += val
