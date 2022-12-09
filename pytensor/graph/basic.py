@@ -1603,6 +1603,28 @@ def apply_depends_on(apply: Apply, depends_on: Union[Apply, Collection[Apply]]) 
     return False
 
 
+def variable_depends_on(
+    variable: Variable, depends_on: Union[Variable, Collection[Variable]]
+) -> bool:
+    """Determine if any `depends_on` is in the graph given by ``variable``.
+    Parameters
+    ----------
+    variable: Variable
+        Node to check
+    depends_on: Collection[Variable]
+        Nodes to check dependency on
+
+    Returns
+    -------
+    bool
+    """
+    if not isinstance(depends_on, Collection):
+        depends_on = {depends_on}
+    else:
+        depends_on = set(depends_on)
+    return any(interim in depends_on for interim in ancestors([variable]))
+
+
 def equal_computations(
     xs: List[Union[np.ndarray, Variable]],
     ys: List[Union[np.ndarray, Variable]],
