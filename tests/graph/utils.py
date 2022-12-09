@@ -1,14 +1,9 @@
 import numpy as np
 
-from pytensor.graph.basic import (
-    Apply,
-    Constant,
-    NominalVariable,
-    Variable,
-    clone_replace,
-)
+from pytensor.graph.basic import Apply, Constant, NominalVariable, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import HasInnerGraph, Op
+from pytensor.graph.replace import clone_replace
 from pytensor.graph.type import Type
 
 

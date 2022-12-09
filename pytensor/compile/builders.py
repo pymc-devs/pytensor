@@ -16,13 +16,13 @@ from pytensor.graph.basic import (
     Constant,
     NominalVariable,
     Variable,
-    clone_replace,
     graph_inputs,
     io_connection_pattern,
 )
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import HasInnerGraph, Op
+from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import in2out, node_rewriter
 from pytensor.graph.utils import MissingInputError
 from pytensor.tensor.rewriting.shape import ShapeFeature

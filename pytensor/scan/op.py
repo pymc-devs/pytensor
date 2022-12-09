@@ -65,13 +65,13 @@ from pytensor.gradient import DisconnectedType, NullType, Rop, grad, grad_undefi
 from pytensor.graph.basic import (
     Apply,
     Variable,
-    clone_replace,
     equal_computations,
     graph_inputs,
     io_connection_pattern,
 )
 from pytensor.graph.features import NoOutputFromInplace
 from pytensor.graph.op import HasInnerGraph, Op
+from pytensor.graph.replace import clone_replace
 from pytensor.graph.utils import InconsistencyError, MissingInputError
 from pytensor.link.c.basic import CLinker
 from pytensor.link.c.exceptions import MissingGXX

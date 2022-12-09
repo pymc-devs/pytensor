@@ -18,7 +18,6 @@ from pytensor.graph.basic import (
     Apply,
     Constant,
     Variable,
-    clone_replace,
     equal_computations,
     graph_inputs,
     io_toposort,
@@ -28,6 +27,7 @@ from pytensor.graph.destroyhandler import DestroyHandler
 from pytensor.graph.features import ReplaceValidate
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import compute_test_value
+from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import GraphRewriter, in2out, node_rewriter
 from pytensor.graph.rewriting.db import EquilibriumDB, SequenceDB
 from pytensor.graph.type import HasShape
