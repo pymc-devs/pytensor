@@ -14,14 +14,9 @@ from pytensor import scalar as aes
 from pytensor import tensor as at
 from pytensor.compile.profiling import ProfileStats
 from pytensor.configdefaults import config
-from pytensor.graph.basic import (
-    Constant,
-    Variable,
-    clone_replace,
-    equal_computations,
-    graph_inputs,
-)
+from pytensor.graph.basic import Constant, Variable, equal_computations, graph_inputs
 from pytensor.graph.op import get_test_value
+from pytensor.graph.replace import clone_replace
 from pytensor.graph.type import HasDataType
 from pytensor.graph.utils import TestValueError
 from pytensor.tensor.basic import AllocEmpty, cast

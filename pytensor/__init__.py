@@ -73,7 +73,8 @@ from pytensor.configdefaults import config
 __api_version__ = 1
 
 # isort: off
-from pytensor.graph.basic import Variable, clone_replace
+from pytensor.graph.basic import Variable
+from pytensor.graph.replace import clone_replace
 
 # isort: on
 

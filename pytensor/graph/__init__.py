@@ -7,9 +7,9 @@ from pytensor.graph.basic import (
     Constant,
     graph_inputs,
     clone,
-    clone_replace,
     ancestors,
 )
+from pytensor.graph.replace import clone_replace
 from pytensor.graph.op import Op
 from pytensor.graph.type import Type
 from pytensor.graph.fg import FunctionGraph
