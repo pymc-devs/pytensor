@@ -489,7 +489,7 @@ def indexed_result_shape(array_shape, indices, indices_are_shapes=False):
     remaining_dims = range(pytensor.tensor.basic.get_vector_length(array_shape))
     idx_groups = group_indices(indices)
 
-    if len(idx_groups) > 3 or len(idx_groups) == 3 and not idx_groups[0][0]:
+    if len(idx_groups) > 3 or (len(idx_groups) == 3 and not idx_groups[0][0]):
         # This means that there are at least two groups of advanced indexing separated by basic indexing
         # In this case NumPy places the advanced index groups in the front of the array
         # https://numpy.org/devdocs/user/basics.indexing.html#combining-advanced-and-basic-indexing
