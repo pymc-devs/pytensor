@@ -23,6 +23,7 @@ from pytensor.graph.basic import (
     io_toposort,
     list_of_nodes,
     orphans_between,
+    variable_depends_on,
     vars_between,
     walk,
 )
@@ -675,3 +676,22 @@ def test_NominalVariable_create_variable_type():
     assert type(ntv_unpkld) is type(ntv)
     assert ntv_unpkld.equals(ntv)
     assert ntv_unpkld is ntv
+
+
+def test_variable_depends_on():
+    x = MyVariable(1)
+    x.name = "x"
+    y = MyVariable(1)
+    y.name = "y"
+    x2 = MyOp(x)
+    x2.name = "x2"
+    y2 = MyOp(y)
+    y2.name = "y2"
+    o = MyOp(x2, y)
+    assert variable_depends_on(o, x)
+    assert variable_depends_on(o, [x])
+    assert not variable_depends_on(o, [y2])
+    assert variable_depends_on(o, [y2, x])
+    assert not variable_depends_on(y, [y2])
+    assert variable_depends_on(y, [y])
+
