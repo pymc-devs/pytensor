@@ -3,13 +3,16 @@
 if [ -z "$1" ]
   then
     echo "Usage: downstream_pr.sh <PR_number>"
-    echo "Port a specified PR from the Aesara repo to the PyTensor repo. Will create a new branch, adapt and apply the upstream PR, and create a new PR to PyTensor."
+    echo "Port a specified PR from the Aesara repo to the PyTensor repo. Will create a new branch, adapt and apply the upstream PR, and create a new PR to PyTensor. Requires a remote aesara."
     exit 1
 fi
 
-set -e
-
+git am --abort
 git checkout main
+git branch -D downstream_$1
+git fetch aesara
+
+set -e
 git pull origin main
 git checkout -b downstream_$1
 
