@@ -1568,15 +1568,15 @@ def list_of_nodes(
     )
 
 
-def is_in_ancestors(l_apply: Apply, f_apply: Apply) -> bool:
-    """Determine if `f_apply` is in the graph given by `l_apply`.
+def apply_depends_on(apply: Apply, depends_on: Union[Apply, Collection[Apply]]) -> bool:
+    """Determine if any `depends_on` is in the graph given by ``apply``.
 
     Parameters
     ----------
-    l_apply : Apply
-        The node to walk.
-    f_apply : Apply
-        The node to find in `l_apply`.
+    apply : Apply
+        The Apply node to check.
+    depends_on : Union[Apply, Collection[Apply]]
+        Apply nodes to check dependency on
 
     Returns
     -------
@@ -1584,14 +1584,18 @@ def is_in_ancestors(l_apply: Apply, f_apply: Apply) -> bool:
 
     """
     computed = set()
-    todo = [l_apply]
+    todo = [apply]
+    if not isinstance(depends_on, Collection):
+        depends_on = {depends_on}
+    else:
+        depends_on = set(depends_on)
     while todo:
         cur = todo.pop()
         if cur.outputs[0] in computed:
             continue
         if all(i in computed or i.owner is None for i in cur.inputs):
             computed.update(cur.outputs)
-            if cur is f_apply:
+            if cur in depends_on:
                 return True
         else:
             todo.append(cur)

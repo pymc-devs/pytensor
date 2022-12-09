@@ -11,6 +11,7 @@ from pytensor.graph.basic import (
     NominalVariable,
     Variable,
     ancestors,
+    apply_depends_on,
     applys_between,
     as_string,
     clone,
@@ -20,7 +21,6 @@ from pytensor.graph.basic import (
     get_var_by_name,
     graph_inputs,
     io_toposort,
-    is_in_ancestors,
     list_of_nodes,
     orphans_between,
     vars_between,
@@ -491,15 +491,19 @@ def test_list_of_nodes():
     assert res == [o2.owner, o1.owner]
 
 
-def test_is_in_ancestors():
+def test_apply_depends_on():
 
     r1, r2, r3 = MyVariable(1), MyVariable(2), MyVariable(3)
     o1 = MyOp(r1, r2)
     o1.name = "o1"
-    o2 = MyOp(r3, o1)
+    o2 = MyOp(r1, o1)
     o2.name = "o2"
+    o3 = MyOp(r3, o1, o2)
+    o3.name = "o3"
 
-    assert is_in_ancestors(o2.owner, o1.owner)
+    assert apply_depends_on(o2.owner, o1.owner)
+    assert apply_depends_on(o2.owner, o2.owner)
+    assert apply_depends_on(o3.owner, [o1.owner, o2.owner])
 
 
 @pytest.mark.xfail(reason="Not implemented")
