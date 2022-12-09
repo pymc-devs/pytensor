@@ -23,6 +23,7 @@ from pytensor.graph.basic import (
     io_toposort,
     list_of_nodes,
     orphans_between,
+    truncated_graph_inputs,
     variable_depends_on,
     vars_between,
     walk,
@@ -695,3 +696,56 @@ def test_variable_depends_on():
     assert not variable_depends_on(y, [y2])
     assert variable_depends_on(y, [y])
 
+
+def test_truncated_graph_inputs():
+    """
+    * No conditions
+        n - n - (o)
+
+    * One condition
+        n - (c) - o
+
+    * Two conditions where on depends on another, both returned
+        (c) - (c) - o
+
+    * Additional nodes are present
+           (c) - n - o
+        n - (n) -'
+
+    * Disconnected condition not returned
+        (c) - n - o
+         c
+
+    * Disconnected output is present and returned
+        (c) - (c) - o
+        (o)
+
+    * Condition on itself adds itself
+        n - (c) - (o/c)
+    """
+    x = MyVariable(1)
+    x.name = "x"
+    y = MyVariable(1)
+    y.name = "y"
+    z = MyVariable(1)
+    z.name = "z"
+    x2 = MyOp(x)
+    x2.name = "x2"
+    y2 = MyOp(y, x2)
+    y2.name = "y2"
+    o = MyOp(y2)
+    o2 = MyOp(o)
+    # No conditions
+    assert truncated_graph_inputs([o]) == [o]
+    # One condition
+    assert truncated_graph_inputs([o2], [y2]) == [y2]
+    # Condition on itself adds itself
+    assert truncated_graph_inputs([o], [y2, o]) == [o, y2]
+    # Two conditions where on depends on another, both returned
+    assert truncated_graph_inputs([o2], [y2, o]) == [o, y2]
+    # Additional nodes are present
+    assert truncated_graph_inputs([o], [y]) == [x2, y]
+    # Disconnected condition
+    assert truncated_graph_inputs([o2], [y2, z]) == [y2]
+    # Disconnected output is present
+    assert truncated_graph_inputs([o2, z], [y2]) == [z, y2]
