@@ -20,7 +20,7 @@ import pytensor.tensor as at
 from pytensor import as_symbolic
 from pytensor.compile import optdb
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, Variable, is_in_ancestors
+from pytensor.graph.basic import Apply, Variable, apply_depends_on
 from pytensor.graph.op import _NoPythonOp
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import GraphRewriter, in2out, node_rewriter
@@ -604,7 +604,7 @@ class CondMerge(GraphRewriter):
             return False
         merging_node = cond_nodes[0]
         for proposal in cond_nodes[1:]:
-            if proposal.inputs[0] == merging_node.inputs[0] and not is_in_ancestors(
+            if proposal.inputs[0] == merging_node.inputs[0] and not apply_depends_on(
                 proposal, merging_node
             ):
                 # Create a list of replacements for proposal
@@ -704,8 +704,8 @@ def cond_merge_random_op(fgraph, main_node):
     for proposal in cond_nodes[1:]:
         if (
             proposal.inputs[0] == merging_node.inputs[0]
-            and not is_in_ancestors(proposal, merging_node)
-            and not is_in_ancestors(merging_node, proposal)
+            and not apply_depends_on(proposal, merging_node)
+            and not apply_depends_on(merging_node, proposal)
         ):
             # Create a list of replacements for proposal
             mn_ts = merging_node.inputs[1:][: merging_node.op.n_outs]
