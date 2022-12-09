@@ -74,7 +74,7 @@ __api_version__ = 1
 
 # isort: off
 from pytensor.graph.basic import Variable
-from pytensor.graph.replace import clone_replace
+from pytensor.graph.replace import clone_replace, graph_replace
 
 # isort: on
 
