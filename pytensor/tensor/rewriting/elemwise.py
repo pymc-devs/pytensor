@@ -18,8 +18,8 @@ from pytensor.graph.rewriting.basic import (
     in2out,
     node_rewriter,
 )
-from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined, TestValueError
+from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.basic import MakeVector, alloc, cast, get_scalar_constant_value
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
@@ -378,6 +378,99 @@ def is_dimshuffle_useless(new_order, input):
     else:
         is_useless = False
     return is_useless
+
+
+@node_rewriter([Elemwise])
+def local_elemwise_lift_scalars(fgraph, node):
+    op = node.op
+
+    if not isinstance(op, Elemwise):
+        return False
+
+    if not all(input.ndim == 0 for input in node.inputs):
+        return False
+
+    scalars = [aes.as_scalar(input) for input in node.inputs]
+
+    # TODO Something like
+    # copy_stack_trace(node.outputs[0], new_res)
+    return [as_tensor_variable(out) for out in op.scalar_op.make_node(*scalars).outputs]
+
+
+compile.optdb["specialize"].register(
+    "local_elemwise_lift_scalars",
+    local_elemwise_lift_scalars,
+    "fast_run_numba",
+    "fast_compile_numba",
+)
+
+
+@node_rewriter([Elemwise])
+def push_elemwise_constants(fgraph, node):
+    """Push constant scalars from inputs to elemwise to inputs of the
+    contained scalar op.
+    """
+    op = node.op
+
+    if not isinstance(op, Elemwise):
+        return False
+
+    if any(op.inplace_pattern):
+        return False
+
+    if not isinstance(node.op.scalar_op, aes.Composite):
+        return False
+
+    def is_constant_scalar(x):
+        return isinstance(x, TensorConstant) and all(x.broadcastable)
+
+    push_idxs = []
+    push_values = []
+    keep_values = []
+    for i, input in enumerate(node.inputs):
+        if is_constant_scalar(input):
+            push_idxs.append(i)
+            val = input.value
+            push_values.append(aes.constant(val.item(), dtype=val.dtype))
+        elif (
+            input.owner
+            and isinstance(input.owner.op, DimShuffle)
+            and is_constant_scalar(input.owner.inputs[0])
+        ):
+            push_idxs.append(i)
+            val = input.owner.inputs[0].value
+            push_values.append(aes.constant(val.item(), dtype=val.dtype))
+        else:
+            keep_values.append(input)
+
+    if not push_values:
+        return False
+
+    inner_graph = node.op.scalar_op.fgraph
+    to_replace = [input for i, input in enumerate(inner_graph.inputs) if i in push_idxs]
+
+    # Clone the inner graph, it might be used somewhere else
+    inner_graph, mapping = inner_graph.clone_get_equiv()
+    inner_graph.replace_all(
+        (mapping[old], new) for old, new in zip(to_replace, push_values)
+    )
+
+    new_inputs = [
+        input for i, input in enumerate(inner_graph.inputs) if i not in push_idxs
+    ]
+    return (
+        Elemwise(scalar_op=aes.Composite(new_inputs, inner_graph.outputs))
+        .make_node(*keep_values)
+        .outputs
+    )
+
+
+compile.optdb["specialize"].register(
+    "push_elemwise_constants",
+    push_elemwise_constants,
+    "fast_run_numba",
+    "fast_compile_numba",
+)
 
 
 @register_canonicalize
@@ -898,34 +991,13 @@ class FusionOptimizer(GraphRewriter):
         print(blanc, " time_toposort", prof[7], file=stream)
 
 
-if config.tensor__local_elemwise_fusion:
-    # Must be after gpu(48.5) and before AddDestroyHandler(49.5)
-    fuse_seqopt = SequenceDB()
-    fuse_seqopt.register(
-        "composite_elemwise_fusion",
-        FusionOptimizer(local_elemwise_fusion),
-        "fast_run",
-        "fusion",
-        position=1,
-    )
-    compile.optdb.register(  # type: ignore
-        "elemwise_fusion",
-        fuse_seqopt,
-        "fast_run",
-        "fusion",
-        "local_elemwise_fusion",
-        "FusionOptimizer",
-        position=49,
-    )
-else:
-    compile.optdb.register(  # type: ignore
-        "elemwise_fusion",
-        FusionOptimizer(local_elemwise_fusion),
-        "fusion",
-        "local_elemwise_fusion",
-        "FusionOptimizer",
-        position=49,
-    )
+compile.optdb["elemwise_fusion"].register(  # type: ignore
+    "composite_elemwise_fusion",
+    FusionOptimizer(local_elemwise_fusion),
+    "fast_run",
+    "fusion",
+    position=1,
+)
 
 
 @register_canonicalize

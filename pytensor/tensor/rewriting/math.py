@@ -8,6 +8,7 @@ import numpy as np
 
 import pytensor.scalar.basic as aes
 import pytensor.scalar.math as aes_math
+from pytensor import compile
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
     NodeRewriter,
@@ -91,7 +92,7 @@ from pytensor.tensor.rewriting.basic import (
     register_uncanonicalize,
     register_useless,
 )
-from pytensor.tensor.rewriting.elemwise import FusionOptimizer, fuse_seqopt
+from pytensor.tensor.rewriting.elemwise import FusionOptimizer
 from pytensor.tensor.shape import Shape, Shape_i
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
@@ -2922,7 +2923,7 @@ def local_add_mul_fusion(fgraph, node):
         return [output]
 
 
-fuse_seqopt.register(
+compile.optdb["elemwise_fusion"].register(
     "local_add_mul_fusion",
     FusionOptimizer(local_add_mul_fusion),
     "fast_run",

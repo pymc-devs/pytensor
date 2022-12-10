@@ -255,6 +255,16 @@ optdb.register(
     "specialize_device", EquilibriumDB(), "fast_compile", "fast_run", position=48.6
 )  # must be after gpu stuff at 48.5
 
+# Must be before add_destroy_handler
+optdb.register(
+    "elemwise_fusion",
+    SequenceDB(),
+    "fast_run",
+    "fusion",
+    "local_elemwise_fusion",
+    position=49,
+)
+
 # especially constant merge
 optdb.register("merge2", MergeOptimizer(), "fast_run", "merge", position=49)
 
@@ -453,7 +463,10 @@ JAX = Mode(
 )
 NUMBA = Mode(
     NumbaLinker(),
-    RewriteDatabaseQuery(include=["fast_run"], exclude=["cxx_only", "BlasOpt"]),
+    RewriteDatabaseQuery(
+        include=["fast_run", "fast_run_numba", "fast_compile_numba"],
+        exclude=["cxx_only", "BlasOpt"],
+    ),
 )
 
 
