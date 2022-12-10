@@ -2517,6 +2517,10 @@ test_idx = np.ix_(np.array([True, True]), np.array([True]), np.array([True, True
         ),
         (np.arange(np.prod((5, 4))).reshape((5, 4)), ([1, 3, 2], slice(1, 3))),
         (np.arange(np.prod((5, 4))).reshape((5, 4)), (slice(1, 3), [1, 3, 2])),
+        (
+            np.arange(np.prod((5, 6, 7))).reshape((5, 6, 7)),
+            (slice(None, None), [1, 2, 3], slice(None, None)),
+        ),
     ],
 )
 @config.change_flags(compute_test_value="raise")
