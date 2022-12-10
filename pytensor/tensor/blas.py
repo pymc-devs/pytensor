@@ -137,7 +137,7 @@ try:
 except ImportError:
     pass
 
-from typing import Tuple, Union
+from typing import Tuple
 
 import pytensor.scalar
 from pytensor.compile.mode import optdb
@@ -522,7 +522,7 @@ class GemmRelated(COp):
 
     """
 
-    __props__: Union[Tuple, Tuple[str]] = ()
+    __props__: Tuple[str, ...] = ()
 
     def c_support_code(self, **kwargs):
         # return cblas_header_text()

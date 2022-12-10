@@ -3998,7 +3998,7 @@ class Composite(ScalarOp, HasInnerGraph):
 
     """
 
-    init_param: Union[Tuple[str, str], Tuple[str]] = ("inputs", "outputs")
+    init_param: Tuple[str, ...] = ("inputs", "outputs")
 
     def __init__(self, inputs, outputs):
         # We need to clone the graph as sometimes its nodes already

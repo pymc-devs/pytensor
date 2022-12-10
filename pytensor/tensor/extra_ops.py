@@ -1763,7 +1763,7 @@ def linspace(start, end, steps):
 
 
 def broadcast_to(
-    x: TensorVariable, shape: Union[TensorVariable, Tuple[Variable]]
+    x: TensorVariable, shape: Union[TensorVariable, Tuple[Variable, ...]]
 ) -> TensorVariable:
     """Broadcast an array to a new shape.
 

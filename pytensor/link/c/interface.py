@@ -1,6 +1,6 @@
 import warnings
 from abc import abstractmethod
-from typing import Callable, Dict, List, Tuple, Union
+from typing import Callable, Dict, List, Tuple
 
 from pytensor.graph.basic import Apply, Constant
 from pytensor.graph.utils import MethodNotDefined
@@ -149,7 +149,7 @@ class CLinkerObject:
         """Return a list of code snippets to be inserted in module initialization."""
         return []
 
-    def c_code_cache_version(self) -> Union[Tuple[int, ...], Tuple]:
+    def c_code_cache_version(self) -> Tuple[int, ...]:
         """Return a tuple of integers indicating the version of this `Op`.
 
         An empty tuple indicates an "unversioned" `Op` that will not be cached
@@ -566,7 +566,7 @@ class CLinkerType(CLinkerObject):
         """
         return ""
 
-    def c_code_cache_version(self) -> Union[Tuple, Tuple[int]]:
+    def c_code_cache_version(self) -> Tuple[int, ...]:
         """Return a tuple of integers indicating the version of this type.
 
         An empty tuple indicates an "unversioned" type that will not

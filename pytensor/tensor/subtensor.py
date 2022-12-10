@@ -85,7 +85,7 @@ invalid_tensor_types = (
 def indices_from_subtensor(
     op_indices: Iterable[ScalarConstant],
     idx_list: Optional[List[Union[Type, slice, Variable]]],
-) -> Tuple[Union[slice, Variable]]:
+) -> Union[slice, Variable]:
     """Recreate the index tuple from which a ``*Subtensor**`` ``Op`` was created.
 
     Parameters
@@ -411,7 +411,7 @@ def basic_shape(shape, indices):
 
     Parameters
     ----------
-    shape: Tuple[int]
+    shape: Tuple[int, ...]
         The shape of the array being indexed
     indices: Sequence[Or[slice, NoneType]]
         A sequence of basic indices used to index an array.
@@ -473,9 +473,9 @@ def indexed_result_shape(array_shape, indices, indices_are_shapes=False):
 
     Parameters
     ----------
-    array_shape: Tuple[Variable]
+    array_shape: Tuple[Variable, ...]
         Shape of the array being indexed.
-    indices: Sequence[Union[TensorVariable, Tuple[Union[None, slice, Variable]]]]
+    indices: Sequence[Union[TensorVariable, Tuple[Union[None, slice, Variable], ...]]]
         Either the indices themselves or the shapes of each index--depending
         on the value of `indices_are_shapes`.
     indices_are_shapes: bool (Optional)
