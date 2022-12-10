@@ -50,7 +50,13 @@ repos:
     rev: v0.991
     hooks:
       - id: mypy
+        language: python
+        entry: python ./scripts/run_mypy.py --verbose
         additional_dependencies:
         - numpy>=1.20
+        - pandas
         - types-filelock
         - types-setuptools
+        always_run: true
+        require_serial: true
+        pass_filenames: false
