@@ -1,29 +1,11 @@
-If you want to contribute to PyTensor, have a look at the instructions here:
-https://pytensor.readthedocs.io/en/latest/dev_start_guide.html
+# Guidelines for Contributing
 
-## Contribution Expectations
-
-This "Contribution Expectations" section is adapted from [Open Source
-Archetypes](https://opentechstrategies.com/archetypes) and released under a
-[CC-BY-SA](https://creativecommons.org/licenses/by-sa/4.0/) license.
-
-The current focus of the PyTensor project is rapid, high quality development of a
-hackable, pure-Python symbolic tensor library with strong support for graph
-rewrites and transpilation to multiple backends including C,
-[JAX](https://github.com/google/jax>), and
-[Numba](https://github.com/numba/numba).
-
-We welcome patches with bug fixes, and we’re happy to answer questions if you’ve
-already put in some effort to find the answer yourself. Please note, however,
-that we’re _unlikely_ to consider new feature contributions or design changes
-unless there’s a strong argument that they are fully in line with our stated
-goals. If you’re not sure, just ask.
-
-Our technical scope and project governance may open up later, of course, For
-now, though, we would characterize this project as being a mix of the "Rocket
-Ship To Mars" and "Specialty Library" archetypes (see
-https://opentechstrategies.com/archetypes for details about RStM and other open
-source archetypes).
+Thank you for being interested in contributing to PyTensor.
+PyTensor is an open source, collective effort, maintained by the PyMC team and everyone is welcome to contribute.
+There are many ways in which you can help make it better.
+Please check the latest information for contributing to the PyTensor or PyMC projects under:
+* https://pytensor.readthedocs.io/en/latest/dev_start_guide.html
+* https://docs.pymc.io/en/latest/contributing/index.html
 
 ## Issues and Discussions
 
@@ -40,3 +22,13 @@ For issues a minimal working example (MWE) is strongly recommended when relevant
 MWEs are generally required. All MWEs must be implemented using PyTensor. Please
 do not submit MWEs if they are not implemented in PyTensor. In certain cases,
 pseudocode may be acceptable, but an PyTensor implementation is always preferable.
+
+## Quick links
+
+Most of these point to PyMC documentation, but are equally relevant for PyTensor.
+
+* [Pull request (PR) step-by-step ](https://docs.pymc.io/en/latest/contributing/pr_tutorial.html)
+* [Pull request (PR) checklist](https://docs.pymc.io/en/latest/contributing/pr_checklist.html)
+* [Python style guide with pre-commit](https://docs.pymc.io/en/latest/contributing/python_style.html)
+* [Running the test suite](https://docs.pymc.io/en/latest/contributing/running_the_test_suite.html)
+* [Submitting a bug report or feature request](https://github.com/pymc-devs/pytensor/issues)
