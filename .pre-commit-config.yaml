@@ -28,7 +28,6 @@ repos:
     rev: 6.0.0
     hooks:
       - id: flake8
-        language_version: python39
   - repo: https://github.com/pycqa/isort
     rev: 5.10.1
     hooks:
