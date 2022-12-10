@@ -41,7 +41,7 @@ StorageMapType = Dict[Variable, StorageCellType]
 ComputeMapType = Dict[Variable, List[bool]]
 InputStorageType = List[StorageCellType]
 OutputStorageType = List[StorageCellType]
-ParamsInputType = Optional[Tuple[Any]]
+ParamsInputType = Optional[Tuple[Any, ...]]
 PerformMethodType = Callable[
     [Apply, List[Any], OutputStorageType, ParamsInputType], None
 ]

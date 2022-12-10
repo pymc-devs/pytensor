@@ -28,7 +28,7 @@ def default_supp_shape_from_params(
     ndim_supp: int,
     dist_params: Sequence[Variable],
     rep_param_idx: int = 0,
-    param_shapes: Optional[Sequence[Tuple[ScalarVariable]]] = None,
+    param_shapes: Optional[Sequence[Tuple[ScalarVariable, ...]]] = None,
 ) -> Union[TensorVariable, Tuple[ScalarVariable, ...]]:
     """Infer the dimensions for the output of a `RandomVariable`.
 

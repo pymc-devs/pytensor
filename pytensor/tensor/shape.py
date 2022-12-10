@@ -544,7 +544,7 @@ _specify_shape = SpecifyShape()
 
 def specify_shape(
     x: Union[np.ndarray, Number, Variable],
-    shape: Union[ShapeValueType, List[ShapeValueType], Tuple[ShapeValueType]],
+    shape: Union[ShapeValueType, List[ShapeValueType], Tuple[ShapeValueType, ...]],
 ):
     """Specify a fixed shape for a `Variable`.
 

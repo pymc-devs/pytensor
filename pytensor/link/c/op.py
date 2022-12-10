@@ -240,7 +240,7 @@ def lquote_macro(txt: str) -> str:
     return "\n".join(res)
 
 
-def get_sub_macros(sub: Dict[str, str]) -> Union[Tuple[str], Tuple[str, str]]:
+def get_sub_macros(sub: Dict[str, str]) -> Tuple[str, str]:
     define_macros = []
     undef_macros = []
     define_macros.append(f"#define FAIL {lquote_macro(sub['fail'])}")
@@ -533,7 +533,7 @@ class ExternalCOp(COp):
 
     def get_c_macros(
         self, node: Apply, name: str, check_input: Optional[bool] = None
-    ) -> Union[Tuple[str], Tuple[str, str]]:
+    ) -> Tuple[str, str]:
         "Construct a pair of C ``#define`` and ``#undef`` code strings."
         define_template = "#define %s %s"
         undef_template = "#undef %s"

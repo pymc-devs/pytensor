@@ -123,7 +123,7 @@ def numba_funcify_Scan(op, node, **kwargs):
         # These outer-inputs are indexed without offsets or storage wrap-around
         add_inner_in_expr(outer_in_name, 0, None)
 
-    inner_in_names_to_input_taps: Dict[str, Tuple[int]] = dict(
+    inner_in_names_to_input_taps: Dict[str, Tuple[int, ...]] = dict(
         zip(
             outer_in_mit_mot_names + outer_in_mit_sot_names + outer_in_sit_sot_names,
             op.info.mit_mot_in_slices
@@ -157,7 +157,7 @@ def numba_funcify_Scan(op, node, **kwargs):
     # storage array like a circular buffer, and that's why we need to track the
     # storage size along with the taps length/indexing offset.
     def add_output_storage_post_proc_stmt(
-        outer_in_name: str, tap_sizes: Tuple[int], storage_size: str
+        outer_in_name: str, tap_sizes: Tuple[int, ...], storage_size: str
     ):
 
         tap_size = max(tap_sizes)

@@ -1,7 +1,6 @@
 """Symbolic Op for raising an exception."""
 
 from textwrap import indent
-from typing import Tuple
 
 import numpy as np
 
@@ -63,7 +62,7 @@ class CheckAndRaise(COp):
     def __hash__(self):
         return hash((self.msg, self.exc_type))
 
-    def make_node(self, value: Variable, *conds: Tuple[Variable]):
+    def make_node(self, value: Variable, *conds: Variable):
         """
 
         Parameters
