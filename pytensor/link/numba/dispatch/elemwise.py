@@ -554,7 +554,7 @@ def numba_funcify_DimShuffle(op, **kwargs):
 
     shape_template = (1,) * ndim_new_shape
 
-    # When `len(shuffle) == 0`, the `shuffle_shape[j]` expression above is
+    # When `len(shuffle) == 0`, the `shuffle_shape[j]` expression below
     # is typed as `getitem(Tuple(), int)`, which has no implementation
     # (since getting an item from an empty sequence doesn't make sense).
     # To avoid this compile-time error, we omit the expression altogether.
