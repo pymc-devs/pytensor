@@ -1,6 +1,6 @@
 import contextlib
 import inspect
-from typing import TYPE_CHECKING, Callable, Optional, Sequence, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence, Tuple, Union
 from unittest import mock
 
 import numba
@@ -190,7 +190,7 @@ def compare_numba_and_py(
     numba_mode=numba_mode,
     py_mode=py_mode,
     updates=None,
-):
+) -> Tuple[Callable, Any]:
     """Function to compare python graph output and Numba compiled output for testing equality
 
     In the tests below computational graphs are defined in PyTensor. These graphs are then passed to
@@ -208,6 +208,10 @@ def compare_numba_and_py(
         provided uses `np.testing.assert_allclose`.
     updates
         Updates to be passed to `pytensor.function`.
+
+    Returns
+    -------
+    The compiled PyTensor function and its last computed result.
 
     """
     if assert_fn is None:
@@ -248,7 +252,7 @@ def compare_numba_and_py(
     else:
         assert_fn(numba_res, py_res)
 
-    return numba_res
+    return pytensor_numba_fn, numba_res
 
 
 @pytest.mark.parametrize(
