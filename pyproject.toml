@@ -86,6 +86,7 @@ tests = [
     "pre-commit",
     "pytest-cov>=2.6.1",
     "coverage>=5.1",
+    "pytest-benchmark",
 ]
 rtd = [
     "sphinx>=1.3.0",
