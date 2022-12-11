@@ -411,7 +411,6 @@ def push_elemwise_constants(fgraph, node):
     contained scalar op.
     """
     op = node.op
-
     if not isinstance(op, Elemwise):
         return False
 
@@ -465,7 +464,7 @@ def push_elemwise_constants(fgraph, node):
     )
 
 
-compile.optdb["specialize"].register(
+compile.optdb["post_fusion"].register(
     "push_elemwise_constants",
     push_elemwise_constants,
     "fast_run_numba",

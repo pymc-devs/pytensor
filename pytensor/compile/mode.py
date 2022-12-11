@@ -262,7 +262,15 @@ optdb.register(
     "fast_run",
     "fusion",
     "local_elemwise_fusion",
-    position=49,
+    position=48.7,
+)
+
+optdb.register(
+    "post_fusion",
+    EquilibriumDB(),
+    "fast_run",
+    "fast_compile",
+    position=48.8,
 )
 
 # especially constant merge
