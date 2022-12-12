@@ -111,6 +111,17 @@ def cmp(x, y):
     return (x > y) - (x < y)
 
 
+def key_to_cmp(key):
+    """
+    comparator function based on "key" function
+    """
+
+    def key_cmp(a, b):
+        return cmp(key(a), key(b))
+
+    return key_cmp
+
+
 def get_unbound_function(unbound):
     # Op.make_thunk isn't bound, so don't have a __func__ attr.
     # But bound method, have a __func__ method that point to the

@@ -2,9 +2,9 @@ import numpy as np
 
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.op import Op
-from pytensor.graph.sched import key_to_cmp
 from pytensor.link.c.type import Generic
 from pytensor.tensor.type import tensor
+from pytensor.utils import key_to_cmp
 
 
 class LoadFromDisk(Op):
