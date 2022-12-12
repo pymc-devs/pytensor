@@ -42,17 +42,23 @@ class TestFunctionGraph:
         var1 = op1()
         var2 = op2()
 
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="'Variable' object is not iterable"):
             FunctionGraph(var1, [var2])
 
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="'Variable' object is not reversible"):
             FunctionGraph([var1], var2)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(
+            ValueError,
+            match=(
+                "One of the provided inputs is the output of an already existing node. "
+                "If that is okay, either discard that input's owner or use graph.clone."
+            ),
+        ):
             var3 = op1(var1)
             FunctionGraph([var3], [var2], clone=False)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="No outputs specified"):
             var3 = op1(var1)
             FunctionGraph([var3], clone=False)
 
