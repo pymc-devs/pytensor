@@ -7,7 +7,20 @@ import pytest
 import pytensor.tensor as at
 from pytensor.configdefaults import config
 from pytensor.tensor.shape import SpecifyShape
-from pytensor.tensor.type import TensorType
+from pytensor.tensor.type import (
+    TensorType,
+    col,
+    matrix,
+    row,
+    scalar,
+    tensor,
+    tensor3,
+    tensor4,
+    tensor5,
+    tensor6,
+    tensor7,
+    vector,
+)
 
 
 @pytest.mark.parametrize(
@@ -326,3 +339,97 @@ def test_deprecated_kwargs():
         new_res = res.clone(broadcastable=(False, True))
 
     assert new_res.shape == (None, 1)
+
+
+def test_tensor_creator_helper():
+    res = tensor(shape=(5, None))
+    assert res.type == TensorType(config.floatX, shape=(5, None))
+    assert res.name is None
+
+    res = tensor("int64", shape=(5, None), name="custom")
+    assert res.type == TensorType("int64", shape=(5, None))
+    assert res.name == "custom"
+
+    # Test with positional arguments only
+    res = tensor("int64", (5, None))
+    assert res.type == TensorType("int64", shape=(5, None))
+    assert res.name is None
+
+    with pytest.warns(
+        DeprecationWarning, match="The `broadcastable` keyword is deprecated"
+    ):
+        res = tensor("int64", broadcastable=(True, False), name="custom")
+        assert res.type == TensorType("int64", shape=(1, None))
+        assert res.name == "custom"
+
+
+def test_scalar_creator_helper():
+    default = scalar()
+    assert default.type.dtype == config.floatX
+    assert default.type.ndim == 0
+    assert default.type.shape == ()
+    assert default.name is None
+
+    custom = scalar(name="custom", dtype="int64")
+    assert custom.dtype == "int64"
+    assert custom.type.ndim == 0
+    assert custom.type.shape == ()
+
+
+@pytest.mark.parametrize(
+    "helper, ndims",
+    [
+        (vector, 1),
+        (matrix, 2),
+        (row, 2),
+        (col, 2),
+        (tensor3, 3),
+        (tensor4, 4),
+        (tensor5, 5),
+        (tensor6, 6),
+        (tensor7, 7),
+    ],
+)
+def test_tensor_creator_helpers(helper, ndims):
+    if helper is row:
+        default_shape = (1, None)
+        custom_shape = (1, 5)
+    elif helper is col:
+        default_shape = (None, 1)
+        custom_shape = (5, 1)
+    else:
+        default_shape = (None,) * ndims
+        custom_shape = tuple(range(ndims))
+
+    default = helper()
+    assert default.type.dtype == config.floatX
+    assert default.type.ndim == ndims
+    assert default.type.shape == default_shape
+    assert default.name is None
+
+    assert helper(shape=default_shape).type == default.type
+
+    custom = helper(name="custom", dtype="int64", shape=custom_shape)
+    assert custom.type.dtype == "int64"
+    assert custom.type.ndim == ndims
+    assert custom.type.shape == custom_shape
+    assert custom.name == "custom"
+
+    with pytest.raises(TypeError, match="Shape must be a tuple"):
+        helper(shape=list(default_shape))
+
+    with pytest.raises(ValueError, match=f"Shape must be a tuple of length {ndims}"):
+        helper(shape=(None,) + default_shape)
+
+    with pytest.raises(TypeError, match="Shape entries must be None or integer"):
+        helper(shape=(1.0,) * ndims)
+
+
+@pytest.mark.parametrize("helper", (row, col))
+def test_row_matrix_creator_helpers(helper):
+    if helper is row:
+        match = "The first dimension of a `row` must have shape 1, got 2"
+    else:
+        match = "The second dimension of a `col` must have shape 1, got 5"
+    with pytest.raises(ValueError, match=match):
+        helper(shape=(2, 5))
