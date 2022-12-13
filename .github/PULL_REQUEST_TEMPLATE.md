@@ -15,11 +15,19 @@
 + [ ] Are the changes covered by tests and docstrings?
 + [ ] Fill out the short summary sections 👇
 
+
 ## Major / Breaking Changes
 - ...
 
-## Bugfixes / New features
+## New features
 - ...
 
-## Docs / Maintenance
+## Bugfixes
 - ...
+
+## Documentation
+- ...
+
+## Maintenance
+- ...
+
