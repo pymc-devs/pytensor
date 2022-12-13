@@ -16,7 +16,6 @@ from typing import List, Set
 
 
 __all__ = [
-    "cmp",
     "get_unbound_function",
     "maybe_add_to_os_environ_pathlist",
     "DefaultOrderedDict",
@@ -104,22 +103,6 @@ def exc_message(e):
     if isinstance(msg, Exception):
         return exc_message(msg)
     return msg
-
-
-def cmp(x, y):
-    """Return -1 if x < y, 0 if x == y, 1 if x > y."""
-    return (x > y) - (x < y)
-
-
-def key_to_cmp(key):
-    """
-    comparator function based on "key" function
-    """
-
-    def key_cmp(a, b):
-        return cmp(key(a), key(b))
-
-    return key_cmp
 
 
 def get_unbound_function(unbound):
