@@ -1,5 +1,3 @@
-import sys
-
 import pytest
 
 from pytensor.configdefaults import config
@@ -832,20 +830,3 @@ def test_OpToRewriterTracker():
         local_rewriter_2,
         local_rewriter_1,
     ]
-
-
-def test_deprecations():
-    """Make sure we can import deprecated classes from current and deprecated modules."""
-    with pytest.deprecated_call():
-        from pytensor.graph.rewriting.basic import GlobalOptimizer
-
-    with pytest.deprecated_call():
-        from pytensor.graph.opt import (  # noqa: F401 F811
-            GlobalOptimizer,
-            LocalOptimizer,
-        )
-
-    del sys.modules["pytensor.graph.opt"]
-
-    with pytest.deprecated_call():
-        from pytensor.graph.opt import GraphRewriter  # noqa: F401
