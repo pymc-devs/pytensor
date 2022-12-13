@@ -63,7 +63,7 @@ def test_identity():
         ),
     ],
 )
-def test_jax_Composite(x, y, x_val, y_val):
+def test_jax_Composite_singe_output(x, y, x_val, y_val):
     x_s = aes.float64("x")
     y_s = aes.float64("y")
 
@@ -78,6 +78,16 @@ def test_jax_Composite(x, y, x_val, y_val):
         y_val.astype(config.floatX),
     ]
     _ = compare_jax_and_py(out_fg, test_input_vals)
+
+
+def test_jax_Composite_multi_output():
+    x = vector("x")
+
+    x_s = aes.float64("xs")
+    outs = Elemwise(Composite(inputs=[x_s], outputs=[x_s + 1, x_s - 1]))(x)
+
+    fgraph = FunctionGraph([x], outs)
+    compare_jax_and_py(fgraph, [np.arange(10, dtype=config.floatX)])
 
 
 def test_erf():

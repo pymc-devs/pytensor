@@ -63,11 +63,18 @@ def jax_funcify_Clip(op, **kwargs):
 
 
 @jax_funcify.register(Composite)
-def jax_funcify_Composite(op, vectorize=True, **kwargs):
+def jax_funcify_Composite(op, node, vectorize=True, **kwargs):
     jax_impl = jax_funcify(op.fgraph)
 
-    def composite(*args):
-        return jax_impl(*args)[0]
+    if len(node.outputs) == 1:
+
+        def composite(*args):
+            return jax_impl(*args)[0]
+
+    else:
+
+        def composite(*args):
+            return jax_impl(*args)
 
     return jnp.vectorize(composite)
 
