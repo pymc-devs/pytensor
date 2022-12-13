@@ -1485,7 +1485,6 @@ class ProfileStats:
         from pytensor import scalar as aes
         from pytensor.tensor.elemwise import Elemwise
         from pytensor.tensor.math import Dot
-        from pytensor.tensor.random.op import RandomVariable
 
         scalar_op_amdlibm_no_speed_up = [
             aes.LT,
@@ -1628,18 +1627,7 @@ class ProfileStats:
                 printed_tip = True
 
         # tip 5
-        for (fgraph, a) in self.apply_time:
-            node = a
-            if isinstance(node.op, RandomVariable):
-                printed_tip = True
-                print(
-                    "  - Replace the default random number generator by "
-                    "'from pytensor.sandbox.rng_mrg import MRG_RandomStream "
-                    "as RandomStream', as this is is faster. It is still "
-                    "experimental, but seems to work correctly.",
-                    file=file,
-                )
-                break
+        # The tip was about MRG_RandomStream which is removed
 
         # tip 6
         for (fgraph, a) in self.apply_time:
