@@ -1,5 +1,3 @@
-import sys
-
 import pytest
 
 from pytensor.graph.rewriting.basic import GraphRewriter, SequentialGraphRewriter
@@ -86,17 +84,3 @@ class TestDB:
     def test_ProxyDB(self):
         with pytest.raises(TypeError, match=r"`db` must be.*"):
             ProxyDB(object())
-
-
-def test_deprecations():
-    """Make sure we can import deprecated classes from current and deprecated modules."""
-    with pytest.deprecated_call():
-        from pytensor.graph.rewriting.db import OptimizationDatabase  # noqa: F401 F811
-
-    with pytest.deprecated_call():
-        from pytensor.graph.optdb import OptimizationDatabase  # noqa: F401 F811
-
-    del sys.modules["pytensor.graph.optdb"]
-
-    with pytest.deprecated_call():
-        from pytensor.graph.optdb import RewriteDatabase  # noqa: F401

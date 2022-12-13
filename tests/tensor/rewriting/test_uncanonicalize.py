@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 import pytensor
 import pytensor.tensor as at
@@ -219,11 +218,3 @@ def test_local_dimshuffle_subtensor():
     assert x[:, :, 0:3, ::-1].dimshuffle(0, 2, 3).eval(
         {x: np.ones((5, 1, 6, 7))}
     ).shape == (5, 3, 7)
-
-
-def test_deprecations():
-    """Make sure we can import from deprecated modules."""
-    with pytest.deprecated_call():
-        from pytensor.tensor.opt_uncanonicalize import (  # noqa: F401 F811
-            local_reshape_dimshuffle,
-        )
