@@ -1056,6 +1056,7 @@ def truncated_graph_inputs(
                 truncated_inputs.append(node)
         # no more actions are needed
         return truncated_inputs
+
     blockers: Set[Variable] = set(ancestors_to_include)
     # enforce O(1) check for node in ancestors to include
     ancestors_to_include = blockers.copy()
@@ -1063,40 +1064,40 @@ def truncated_graph_inputs(
     while candidates:
         # on any new candidate
         node = candidates.pop()
-        # check if the node is independent, never go above blockers
+
+        # There was a repeated reference to this node, we have already investigated it
+        if node in truncated_inputs:
+            continue
+
+        # check if the node is independent, never go above blockers;
         # blockers are independent nodes and ancestors to include
         if node in ancestors_to_include:
             # The case where node is in ancestors to include so we check if it depends on others
             # it should be removed from the blockers to check against the rest
-            dependent = variable_depends_on(node, blockers - {node})
+            dependent = variable_depends_on(node, ancestors_to_include - {node})
             # ancestors to include that are present in the graph (not disconnected)
             # should be added to truncated_inputs
             truncated_inputs.append(node)
             if dependent:
-                # if the ancestors to include is still dependent we need to go above,
-                # the search is not yet finished
-                # the node _has_ to have owner to be dependent
-                # so we do not check it
-                # and populate search to go above
+                # if the ancestors to include is still dependent we need to go above, the search is not yet finished
                 # owner can never be None for a dependent node
                 candidates.extend(node.owner.inputs)
         else:
             # A regular node to check
             dependent = variable_depends_on(node, blockers)
-            # all regular nodes fall to blockes
+            # all regular nodes fall to blockers
             # 1. it is dependent - further search irrelevant
             # 2. it is independent - the search node is inside the closure
             blockers.add(node)
             # if we've found an independent node and it is not in blockers so far
-            # it is a new indepenent node not present in ancestors to include
-            if not dependent:
-                # we've found an independent node
-                # do not search beyond
-                truncated_inputs.append(node)
-            else:
-                # populate search otherwise
+            # it is a new independent node not present in ancestors to include
+            if dependent:
+                # populate search if it's not an independent node
                 # owner can never be None for a dependent node
                 candidates.extend(node.owner.inputs)
+            else:
+                # otherwise, do not search beyond
+                truncated_inputs.append(node)
     return truncated_inputs
 
 

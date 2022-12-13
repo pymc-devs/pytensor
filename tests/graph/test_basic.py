@@ -697,55 +697,95 @@ def test_variable_depends_on():
     assert variable_depends_on(y, [y])
 
 
-def test_truncated_graph_inputs():
-    """
-    * No conditions
-        n - n - (o)
+class TestTruncatedGraphInputs:
+    def test_basic(self):
+        """
+        * No conditions
+            n - n - (o)
 
-    * One condition
-        n - (c) - o
+        * One condition
+            n - (c) - o
 
-    * Two conditions where on depends on another, both returned
-        (c) - (c) - o
+        * Two conditions where on depends on another, both returned
+            (c) - (c) - o
 
-    * Additional nodes are present
-           (c) - n - o
-        n - (n) -'
+        * Additional nodes are present
+               (c) - n - o
+            n - (n) -'
 
-    * Disconnected condition not returned
-        (c) - n - o
-         c
+        * Disconnected condition not returned
+            (c) - n - o
+             c
 
-    * Disconnected output is present and returned
-        (c) - (c) - o
-        (o)
+        * Disconnected output is present and returned
+            (c) - (c) - o
+            (o)
 
-    * Condition on itself adds itself
-        n - (c) - (o/c)
-    """
-    x = MyVariable(1)
-    x.name = "x"
-    y = MyVariable(1)
-    y.name = "y"
-    z = MyVariable(1)
-    z.name = "z"
-    x2 = MyOp(x)
-    x2.name = "x2"
-    y2 = MyOp(y, x2)
-    y2.name = "y2"
-    o = MyOp(y2)
-    o2 = MyOp(o)
-    # No conditions
-    assert truncated_graph_inputs([o]) == [o]
-    # One condition
-    assert truncated_graph_inputs([o2], [y2]) == [y2]
-    # Condition on itself adds itself
-    assert truncated_graph_inputs([o], [y2, o]) == [o, y2]
-    # Two conditions where on depends on another, both returned
-    assert truncated_graph_inputs([o2], [y2, o]) == [o, y2]
-    # Additional nodes are present
-    assert truncated_graph_inputs([o], [y]) == [x2, y]
-    # Disconnected condition
-    assert truncated_graph_inputs([o2], [y2, z]) == [y2]
-    # Disconnected output is present
-    assert truncated_graph_inputs([o2, z], [y2]) == [z, y2]
+        * Condition on itself adds itself
+            n - (c) - (o/c)
+        """
+        x = MyVariable(1)
+        x.name = "x"
+        y = MyVariable(1)
+        y.name = "y"
+        z = MyVariable(1)
+        z.name = "z"
+        x2 = MyOp(x)
+        x2.name = "x2"
+        y2 = MyOp(y, x2)
+        y2.name = "y2"
+        o = MyOp(y2)
+        o2 = MyOp(o)
+        # No conditions
+        assert truncated_graph_inputs([o]) == [o]
+        # One condition
+        assert truncated_graph_inputs([o2], [y2]) == [y2]
+        # Condition on itself adds itself
+        assert truncated_graph_inputs([o], [y2, o]) == [o, y2]
+        # Two conditions where on depends on another, both returned
+        assert truncated_graph_inputs([o2], [y2, o]) == [o, y2]
+        # Additional nodes are present
+        assert truncated_graph_inputs([o], [y]) == [x2, y]
+        # Disconnected condition
+        assert truncated_graph_inputs([o2], [y2, z]) == [y2]
+        # Disconnected output is present
+        assert truncated_graph_inputs([o2, z], [y2]) == [z, y2]
+
+    def test_repeated_input(self):
+        """Test that truncated_graph_inputs does not return repeated inputs."""
+        x = MyVariable(1)
+        x.name = "x"
+        y = MyVariable(1)
+        y.name = "y"
+
+        trunc_inp1 = MyOp(x, y)
+        trunc_inp1.name = "trunc_inp1"
+
+        trunc_inp2 = MyOp(x, y)
+        trunc_inp2.name = "trunc_inp2"
+
+        o = MyOp(trunc_inp1, trunc_inp1, trunc_inp2, trunc_inp2)
+        o.name = "o"
+
+        assert truncated_graph_inputs([o], [trunc_inp1]) == [trunc_inp2, trunc_inp1]
+
+    def test_repeated_nested_input(self):
+        """Test that truncated_graph_inputs does not return repeated inputs."""
+        x = MyVariable(1)
+        x.name = "x"
+        y = MyVariable(1)
+        y.name = "y"
+
+        trunc_inp = MyOp(x, y)
+        trunc_inp.name = "trunc_inp"
+
+        o1 = MyOp(trunc_inp, trunc_inp, x, x)
+        o1.name = "o1"
+
+        assert truncated_graph_inputs([o1], [trunc_inp]) == [x, trunc_inp]
+
+        # Reverse order of inputs
+        o2 = MyOp(x, x, trunc_inp, trunc_inp)
+        o2.name = "o2"
+
+        assert truncated_graph_inputs([o2], [trunc_inp]) == [trunc_inp, x]
