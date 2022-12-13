@@ -26,5 +26,6 @@ They are grouped into the following sections:
     slinalg
     nlinalg
     fft
+    conv
     math_opt
     basic_opt

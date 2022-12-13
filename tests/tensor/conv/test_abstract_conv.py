@@ -6,9 +6,8 @@ import pytensor.tensor as at
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph.rewriting.basic import check_stack_trace
-from pytensor.tensor.nnet import abstract_conv as conv
-from pytensor.tensor.nnet import conv2d_transpose, corr, corr3d
-from pytensor.tensor.nnet.abstract_conv import (
+from pytensor.tensor.conv import abstract_conv
+from pytensor.tensor.conv.abstract_conv import (
     AbstractConv2d,
     AbstractConv2d_gradInputs,
     AbstractConv2d_gradWeights,
@@ -19,17 +18,12 @@ from pytensor.tensor.nnet.abstract_conv import (
     bilinear_upsampling,
     causal_conv1d,
     check_conv_gradinputs_shape,
+    conv2d_transpose,
     get_conv_gradinputs_shape,
     get_conv_gradweights_shape,
     get_conv_output_shape,
     separable_conv2d,
     separable_conv3d,
-)
-from pytensor.tensor.nnet.corr import CorrMM, CorrMM_gradInputs, CorrMM_gradWeights
-from pytensor.tensor.nnet.corr3d import (
-    Corr3dMM,
-    Corr3dMMGradInputs,
-    Corr3dMMGradWeights,
 )
 from pytensor.tensor.type import (
     TensorType,
@@ -41,6 +35,7 @@ from pytensor.tensor.type import (
     tensor5,
 )
 from tests import unittest_tools as utt
+from tests.tensor.conv import c_conv3d_corr3d_ref, c_conv_corr_ref
 
 
 def conv2d_corr(
@@ -53,7 +48,9 @@ def conv2d_corr(
 ):
     if conv_mode == "conv":
         filters = filters[:, :, ::-1, ::-1]
-    return corr.CorrMM(border_mode, subsample, filter_dilation)(inputs, filters)
+    return c_conv_corr_ref.CorrMM(border_mode, subsample, filter_dilation)(
+        inputs, filters
+    )
 
 
 def conv2d_corr_gw(
@@ -65,7 +62,7 @@ def conv2d_corr_gw(
     conv_mode="conv",
     filter_dilation=(1, 1),
 ):
-    rval = corr.CorrMM_gradWeights(border_mode, subsample, filter_dilation)(
+    rval = c_conv_corr_ref.CorrMM_gradWeights(border_mode, subsample, filter_dilation)(
         inputs, topgrad, filters_shape[2:]
     )
     if conv_mode == "conv":
@@ -84,7 +81,7 @@ def conv2d_corr_gi(
 ):
     if conv_mode == "conv":
         filters = filters[:, :, ::-1, ::-1]
-    return corr.CorrMM_gradInputs(border_mode, subsample, filter_dilation)(
+    return c_conv_corr_ref.CorrMM_gradInputs(border_mode, subsample, filter_dilation)(
         filters, topgrad, inputs_shape[2:]
     )
 
@@ -99,7 +96,9 @@ def conv3d_corr(
 ):
     if conv_mode == "conv":
         filters = filters[:, :, ::-1, ::-1, ::-1]
-    return corr3d.Corr3dMM(border_mode, subsample, filter_dilation)(inputs, filters)
+    return c_conv3d_corr3d_ref.Corr3dMM(border_mode, subsample, filter_dilation)(
+        inputs, filters
+    )
 
 
 def conv3d_corr_gw(
@@ -111,9 +110,9 @@ def conv3d_corr_gw(
     conv_mode="conv",
     filter_dilation=(1, 1, 1),
 ):
-    rval = corr3d.Corr3dMMGradWeights(border_mode, subsample, filter_dilation)(
-        inputs, topgrad, filters_shape[2:]
-    )
+    rval = c_conv3d_corr3d_ref.Corr3dMMGradWeights(
+        border_mode, subsample, filter_dilation
+    )(inputs, topgrad, filters_shape[2:])
     if conv_mode == "conv":
         rval = rval[:, :, ::-1, ::-1, ::-1]
     return rval
@@ -130,9 +129,9 @@ def conv3d_corr_gi(
 ):
     if conv_mode == "conv":
         filters = filters[:, :, ::-1, ::-1, ::-1]
-    return corr3d.Corr3dMMGradInputs(border_mode, subsample, filter_dilation)(
-        filters, topgrad, inputs_shape[2:]
-    )
+    return c_conv3d_corr3d_ref.Corr3dMMGradInputs(
+        border_mode, subsample, filter_dilation
+    )(filters, topgrad, inputs_shape[2:])
 
 
 class TestGetConvOutShape:
@@ -338,7 +337,7 @@ class TestAssertShape:
         input = tensor4()
         filters = tensor4()
 
-        out = conv.abstract_conv2d(
+        out = abstract_conv.abstract_conv2d(
             input, filters, input_shape=(3, 5, 7, 11), filter_shape=(7, 5, 3, 3)
         )
         f = pytensor.function([input, filters], out)
@@ -361,7 +360,7 @@ class TestAssertShape:
         input = tensor5()
         filters = tensor5()
 
-        out = conv.conv3d(
+        out = abstract_conv.conv3d(
             input, filters, input_shape=(3, 5, 7, 11, 13), filter_shape=(7, 5, 3, 3, 3)
         )
         f = pytensor.function([input, filters], out)
@@ -383,7 +382,7 @@ class TestAssertShape:
         output_grad = tensor4()
         filters = tensor4()
 
-        out = conv.conv2d_grad_wrt_inputs(
+        out = abstract_conv.conv2d_grad_wrt_inputs(
             output_grad,
             filters,
             input_shape=(None, None, 7, 11),
@@ -403,7 +402,7 @@ class TestAssertShape:
         output_grad = tensor5()
         filters = tensor5()
 
-        out = conv.conv3d_grad_wrt_inputs(
+        out = abstract_conv.conv3d_grad_wrt_inputs(
             output_grad,
             filters,
             input_shape=(None, None, 7, 11, 13),
@@ -422,7 +421,7 @@ class TestAssertShape:
         input = tensor4()
         output_grad = tensor4()
 
-        out = conv.conv2d_grad_wrt_weights(
+        out = abstract_conv.conv2d_grad_wrt_weights(
             input,
             output_grad,
             filter_shape=(None, None, 3, 3),
@@ -442,7 +441,7 @@ class TestAssertShape:
         input = tensor5()
         output_grad = tensor5()
 
-        out = conv.conv3d_grad_wrt_weights(
+        out = abstract_conv.conv3d_grad_wrt_weights(
             input,
             output_grad,
             filter_shape=(None, None, 3, 3, 3),
@@ -892,8 +891,8 @@ class BaseTestConv2d(BaseTestConv):
         self,
         inputs_shape,
         filters_shape,
-        conv_fn=conv.abstract_conv2d,
-        conv_op=conv.AbstractConv2d,
+        conv_fn=abstract_conv.abstract_conv2d,
+        conv_op=abstract_conv.AbstractConv2d,
         ref=conv2d_corr,
         **kwargs,
     ):
@@ -911,7 +910,7 @@ class BaseTestConv2d(BaseTestConv):
         inputs_shape,
         filters_shape,
         output_shape,
-        gradWeights_fn=conv.AbstractConv2d_gradWeights,
+        gradWeights_fn=abstract_conv.AbstractConv2d_gradWeights,
         ref=conv2d_corr_gw,
         **kwargs,
     ):
@@ -929,7 +928,7 @@ class BaseTestConv2d(BaseTestConv):
         inputs_shape,
         filters_shape,
         output_shape,
-        gradInputs_fn=conv.AbstractConv2d_gradInputs,
+        gradInputs_fn=abstract_conv.AbstractConv2d_gradInputs,
         ref=conv2d_corr_gi,
         **kwargs,
     ):
@@ -941,96 +940,6 @@ class BaseTestConv2d(BaseTestConv):
             ref=ref,
             **kwargs,
         )
-
-
-@pytest.mark.skipif(
-    not config.cxx or config.mode == "FAST_COMPILE",
-    reason="Need blas to test conv2d",
-)
-class TestCorrConv2d(BaseTestConv2d):
-    @classmethod
-    def setup_class(cls):
-        # This tests can run even when config.blas__ldflags is empty.
-        super().setup_class()
-
-    def run_test_case(self, i, f, s, b, flip, provide_shape, fd=(1, 1)):
-        o = self.get_output_shape(i, f, s, b, fd)
-        self.run_fwd(
-            inputs_shape=i,
-            filters_shape=f,
-            subsample=s,
-            verify_grad=True,
-            provide_shape=provide_shape,
-            border_mode=b,
-            filter_flip=flip,
-            target_op=CorrMM,
-            check_trace=True,
-            filter_dilation=fd,
-        )
-        self.run_gradweight(
-            inputs_shape=i,
-            filters_shape=f,
-            output_shape=o,
-            subsample=s,
-            verify_grad=True,
-            provide_shape=provide_shape,
-            border_mode=b,
-            filter_flip=flip,
-            target_op=CorrMM_gradWeights,
-            check_trace=True,
-            filter_dilation=fd,
-        )
-        self.run_gradinput(
-            inputs_shape=i,
-            filters_shape=f,
-            output_shape=o,
-            subsample=s,
-            verify_grad=True,
-            provide_shape=provide_shape,
-            border_mode=b,
-            filter_flip=flip,
-            target_op=CorrMM_gradInputs,
-            check_trace=True,
-            filter_dilation=fd,
-        )
-
-    def run_test_case_gi(
-        self, i, f, o, s, b, flip, provide_shape, fd=(1, 1), expect_error=False
-    ):
-        if not expect_error:
-            self.run_gradinput(
-                inputs_shape=i,
-                filters_shape=f,
-                output_shape=o,
-                subsample=s,
-                verify_grad=True,
-                provide_shape=provide_shape,
-                border_mode=b,
-                filter_flip=flip,
-                target_op=CorrMM_gradInputs,
-                check_trace=True,
-                filter_dilation=fd,
-            )
-        else:
-            with pytest.raises(ValueError):
-                self.run_gradinput(
-                    inputs_shape=i,
-                    filters_shape=f,
-                    output_shape=o,
-                    subsample=s,
-                    verify_grad=False,
-                    provide_shape=provide_shape,
-                    border_mode=b,
-                    filter_flip=flip,
-                    target_op=CorrMM_gradInputs,
-                    ref=None,
-                    check_trace=True,
-                    filter_dilation=fd,
-                )
-
-    @pytest.mark.slow
-    def test_all(self):
-        super().test_all()
 
 
 @pytest.mark.skipif(
@@ -1252,8 +1161,8 @@ class BaseTestConv3d(BaseTestConv):
         self,
         inputs_shape,
         filters_shape,
-        conv_fn=conv.conv3d,
-        conv_op=conv.AbstractConv3d,
+        conv_fn=abstract_conv.conv3d,
+        conv_op=abstract_conv.AbstractConv3d,
         ref=conv3d_corr,
         **kwargs,
     ):
@@ -1271,7 +1180,7 @@ class BaseTestConv3d(BaseTestConv):
         inputs_shape,
         filters_shape,
         output_shape,
-        gradWeights_fn=conv.AbstractConv3d_gradWeights,
+        gradWeights_fn=abstract_conv.AbstractConv3d_gradWeights,
         ref=conv3d_corr_gw,
         **kwargs,
     ):
@@ -1289,7 +1198,7 @@ class BaseTestConv3d(BaseTestConv):
         inputs_shape,
         filters_shape,
         output_shape,
-        gradInputs_fn=conv.AbstractConv3d_gradInputs,
+        gradInputs_fn=abstract_conv.AbstractConv3d_gradInputs,
         ref=conv3d_corr_gi,
         **kwargs,
     ):
@@ -1301,94 +1210,6 @@ class BaseTestConv3d(BaseTestConv):
             ref=ref,
             **kwargs,
         )
-
-
-@pytest.mark.skipif(
-    not config.cxx or config.mode == "FAST_COMPILE",
-    reason="Need blas to test conv3d",
-)
-class TestCorrConv3d(BaseTestConv3d):
-    @classmethod
-    def setup_class(cls):
-        # This tests can run even when config.blas__ldflags is empty.
-        super().setup_class()
-
-    def run_test_case(self, i, f, s, b, flip, provide_shape, fd=(1, 1, 1)):
-        o = self.get_output_shape(i, f, s, b, fd)
-        # This test can run even when config.blas__ldflags is empty.
-        self.run_fwd(
-            inputs_shape=i,
-            filters_shape=f,
-            subsample=s,
-            verify_grad=True,
-            provide_shape=provide_shape,
-            border_mode=b,
-            filter_flip=flip,
-            target_op=Corr3dMM,
-            check_trace=True,
-            filter_dilation=fd,
-        )
-        self.run_gradweight(
-            inputs_shape=i,
-            filters_shape=f,
-            output_shape=o,
-            subsample=s,
-            verify_grad=True,
-            provide_shape=provide_shape,
-            border_mode=b,
-            filter_flip=flip,
-            target_op=Corr3dMMGradWeights,
-            check_trace=True,
-            filter_dilation=fd,
-        )
-        self.run_gradinput(
-            inputs_shape=i,
-            filters_shape=f,
-            output_shape=o,
-            subsample=s,
-            verify_grad=True,
-            provide_shape=provide_shape,
-            border_mode=b,
-            filter_flip=flip,
-            target_op=Corr3dMMGradInputs,
-            check_trace=True,
-            filter_dilation=fd,
-        )
-
-    def run_test_case_gi(
-        self, i, f, o, s, b, flip, provide_shape, fd=(1, 1, 1), expect_error=False
-    ):
-        # This test can run even when config.blas__ldflags is empty.
-        if not expect_error:
-            self.run_gradinput(
-                inputs_shape=i,
-                filters_shape=f,
-                output_shape=o,
-                subsample=s,
-                verify_grad=True,
-                provide_shape=provide_shape,
-                border_mode=b,
-                filter_flip=flip,
-                target_op=Corr3dMMGradInputs,
-                check_trace=True,
-                filter_dilation=fd,
-            )
-        else:
-            with pytest.raises(ValueError):
-                self.run_gradinput(
-                    inputs_shape=i,
-                    filters_shape=f,
-                    output_shape=o,
-                    subsample=s,
-                    verify_grad=False,
-                    provide_shape=provide_shape,
-                    border_mode=b,
-                    filter_flip=flip,
-                    target_op=Corr3dMMGradInputs,
-                    ref=None,
-                    check_trace=True,
-                    filter_dilation=fd,
-                )
 
 
 def test_constant_shapes():
@@ -1451,7 +1272,7 @@ class TestConvTypes:
 
         out_shape = lvector()
 
-        output = conv.abstract_conv2d(input, filters)
+        output = abstract_conv.abstract_conv2d(input, filters)
         grad_input, grad_filters = pytensor.grad(output.sum(), wrt=(input, filters))
         assert grad_input.type == input.type, (
             grad_input,
@@ -1466,7 +1287,9 @@ class TestConvTypes:
             filters.type,
         )
 
-        grad_filters = conv.AbstractConv2d_gradWeights()(input, topgrad, out_shape)
+        grad_filters = abstract_conv.AbstractConv2d_gradWeights()(
+            input, topgrad, out_shape
+        )
         grad_input, grad_topgrad = pytensor.grad(
             grad_filters.sum(), wrt=(input, topgrad)
         )
@@ -1484,7 +1307,9 @@ class TestConvTypes:
             topgrad.type,
         )
 
-        grad_input = conv.AbstractConv2d_gradInputs()(filters, topgrad, out_shape)
+        grad_input = abstract_conv.AbstractConv2d_gradInputs()(
+            filters, topgrad, out_shape
+        )
         grad_filters, grad_topgrad = pytensor.grad(
             grad_input.sum(), wrt=(filters, topgrad)
         )
@@ -1511,7 +1336,7 @@ class TestConvTypes:
         out_shape = lvector()
 
         # Check the forward Op
-        output = conv.abstract_conv2d(constant_tensor, filters)
+        output = abstract_conv.abstract_conv2d(constant_tensor, filters)
         grad_filters = pytensor.grad(output.sum(), wrt=filters)
         assert filters.type.is_super(grad_filters.type), (
             grad_filters,
@@ -1520,7 +1345,7 @@ class TestConvTypes:
             filters.type,
         )
 
-        output = conv.abstract_conv2d(input, constant_tensor)
+        output = abstract_conv.abstract_conv2d(input, constant_tensor)
         grad_input = pytensor.grad(output.sum(), wrt=input)
         assert input.type.is_super(grad_input.type), (
             grad_input,
@@ -1530,7 +1355,7 @@ class TestConvTypes:
         )
 
         # Check grad wrt weights
-        grad_filters = conv.AbstractConv2d_gradWeights()(
+        grad_filters = abstract_conv.AbstractConv2d_gradWeights()(
             constant_tensor, topgrad, out_shape
         )
         grad_topgrad = pytensor.grad(grad_filters.sum(), wrt=topgrad)
@@ -1541,7 +1366,7 @@ class TestConvTypes:
             topgrad.type,
         )
 
-        grad_filters = conv.AbstractConv2d_gradWeights()(
+        grad_filters = abstract_conv.AbstractConv2d_gradWeights()(
             input, constant_tensor, out_shape
         )
         grad_input = pytensor.grad(grad_filters.sum(), wrt=input)
@@ -1553,7 +1378,7 @@ class TestConvTypes:
         )
 
         # Check grad wrt inputs
-        grad_input = conv.AbstractConv2d_gradInputs()(
+        grad_input = abstract_conv.AbstractConv2d_gradInputs()(
             constant_tensor, topgrad, out_shape
         )
         grad_topgrad = pytensor.grad(grad_input.sum(), wrt=topgrad)
@@ -1564,7 +1389,7 @@ class TestConvTypes:
             topgrad.type,
         )
 
-        grad_input = conv.AbstractConv2d_gradInputs()(
+        grad_input = abstract_conv.AbstractConv2d_gradInputs()(
             filters, constant_tensor, out_shape
         )
         grad_filters = pytensor.grad(grad_input.sum(), wrt=filters)
@@ -1923,13 +1748,13 @@ class TestConv2dGrads:
         self.output_grad = tensor4()
         self.output_grad_wrt = tensor4()
 
-        self.x = tensor4("x", config.floatX)  # inputs
-        self.w = tensor4("w", config.floatX)  # filter weights
+        self.x = tensor4("x", dtype=config.floatX)  # inputs
+        self.w = tensor4("w", dtype=config.floatX)  # filter weights
 
     def test_conv2d_grad_wrt_inputs(self):
         # Compares calculated abstract grads wrt inputs with the fwd grads
         # This method checks the outputs of `conv2_grad_wrt_inputs` against
-        # the outputs of `pytensor.tensor.nnet.conv` forward grads to make sure the
+        # the outputs of `pytensor.tensor.conv` forward grads to make sure the
         # results are the same.
 
         for (in_shape, fltr_shape) in zip(self.inputs_shapes, self.filters_shapes):
@@ -1942,18 +1767,16 @@ class TestConv2dGrads:
                         filter_val = self.random_stream.random(fltr_shape).astype(
                             config.floatX
                         )
-                        out_grad_shape = (
-                            pytensor.tensor.nnet.abstract_conv.get_conv_output_shape(
-                                image_shape=in_shape,
-                                kernel_shape=fltr_shape,
-                                border_mode=bm,
-                                subsample=ss,
-                            )
+                        out_grad_shape = abstract_conv.get_conv_output_shape(
+                            image_shape=in_shape,
+                            kernel_shape=fltr_shape,
+                            border_mode=bm,
+                            subsample=ss,
                         )
                         out_grad_val = self.random_stream.random(out_grad_shape).astype(
                             config.floatX
                         )
-                        conv_out = pytensor.tensor.nnet.conv2d(
+                        conv_out = abstract_conv.conv2d(
                             self.x,
                             filters=self.w,
                             border_mode=bm,
@@ -1971,16 +1794,14 @@ class TestConv2dGrads:
                             [self.x, self.w, self.output_grad], conv_grad
                         )
 
-                        conv_wrt_i_out = (
-                            pytensor.tensor.nnet.abstract_conv.conv2d_grad_wrt_inputs(
-                                output_grad=self.output_grad_wrt,
-                                filters=self.w,
-                                border_mode=bm,
-                                subsample=ss,
-                                input_shape=in_shape,
-                                filter_shape=fltr_shape,
-                                filter_flip=ff,
-                            )
+                        conv_wrt_i_out = abstract_conv.conv2d_grad_wrt_inputs(
+                            output_grad=self.output_grad_wrt,
+                            filters=self.w,
+                            border_mode=bm,
+                            subsample=ss,
+                            input_shape=in_shape,
+                            filter_shape=fltr_shape,
+                            filter_flip=ff,
                         )
                         f_new = pytensor.function(
                             [self.w, self.output_grad_wrt], conv_wrt_i_out
@@ -1995,7 +1816,7 @@ class TestConv2dGrads:
     def test_conv2d_grad_wrt_weights(self):
         # Compares calculated abstract grads wrt weights with the fwd grads
         # This method checks the outputs of `conv2_grad_wrt_weights` against
-        # the outputs of `pytensor.tensor.nnet.conv` forward grads to make sure the
+        # the outputs of `pytensor.tensor.conv` forward grads to make sure the
         # results are the same.
 
         for (in_shape, fltr_shape) in zip(self.inputs_shapes, self.filters_shapes):
@@ -2008,18 +1829,16 @@ class TestConv2dGrads:
                         filter_val = self.random_stream.random(fltr_shape).astype(
                             config.floatX
                         )
-                        out_grad_shape = (
-                            pytensor.tensor.nnet.abstract_conv.get_conv_output_shape(
-                                image_shape=in_shape,
-                                kernel_shape=fltr_shape,
-                                border_mode=bm,
-                                subsample=ss,
-                            )
+                        out_grad_shape = abstract_conv.get_conv_output_shape(
+                            image_shape=in_shape,
+                            kernel_shape=fltr_shape,
+                            border_mode=bm,
+                            subsample=ss,
                         )
                         out_grad_val = self.random_stream.random(out_grad_shape).astype(
                             config.floatX
                         )
-                        conv_out = pytensor.tensor.nnet.conv2d(
+                        conv_out = abstract_conv.conv2d(
                             self.x,
                             filters=self.w,
                             border_mode=bm,
@@ -2037,16 +1856,14 @@ class TestConv2dGrads:
                             [self.x, self.w, self.output_grad], conv_grad
                         )
 
-                        conv_wrt_w_out = (
-                            pytensor.tensor.nnet.abstract_conv.conv2d_grad_wrt_weights(
-                                self.x,
-                                output_grad=self.output_grad_wrt,
-                                border_mode=bm,
-                                subsample=ss,
-                                input_shape=in_shape,
-                                filter_shape=fltr_shape,
-                                filter_flip=ff,
-                            )
+                        conv_wrt_w_out = abstract_conv.conv2d_grad_wrt_weights(
+                            self.x,
+                            output_grad=self.output_grad_wrt,
+                            border_mode=bm,
+                            subsample=ss,
+                            input_shape=in_shape,
+                            filter_shape=fltr_shape,
+                            filter_flip=ff,
                         )
                         f_new = pytensor.function(
                             [self.x, self.output_grad_wrt], conv_wrt_w_out
@@ -2062,12 +1879,12 @@ class TestConv2dGrads:
     reason="SciPy and cxx needed",
 )
 class TestGroupedConvNoOptim:
-    conv = pytensor.tensor.nnet.abstract_conv.AbstractConv2d
-    conv_gradw = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
-    conv_gradi = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
-    conv_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d
-    conv_gradw_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
-    conv_gradi_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
+    conv = abstract_conv.AbstractConv2d
+    conv_gradw = abstract_conv.AbstractConv2d_gradWeights
+    conv_gradi = abstract_conv.AbstractConv2d_gradInputs
+    conv_op = abstract_conv.AbstractConv2d
+    conv_gradw_op = abstract_conv.AbstractConv2d_gradWeights
+    conv_gradi_op = abstract_conv.AbstractConv2d_gradInputs
     mode = Mode(optimizer=None)
     is_dnn = False
 
@@ -2266,12 +2083,12 @@ class TestGroupedConvNoOptim:
     reason="SciPy and cxx needed",
 )
 class TestGroupedConv3dNoOptim(TestGroupedConvNoOptim):
-    conv = pytensor.tensor.nnet.abstract_conv.AbstractConv3d
-    conv_gradw = pytensor.tensor.nnet.abstract_conv.AbstractConv3d_gradWeights
-    conv_gradi = pytensor.tensor.nnet.abstract_conv.AbstractConv3d_gradInputs
-    conv_op = pytensor.tensor.nnet.abstract_conv.AbstractConv3d
-    conv_gradw_op = pytensor.tensor.nnet.abstract_conv.AbstractConv3d_gradWeights
-    conv_gradi_op = pytensor.tensor.nnet.abstract_conv.AbstractConv3d_gradInputs
+    conv = abstract_conv.AbstractConv3d
+    conv_gradw = abstract_conv.AbstractConv3d_gradWeights
+    conv_gradi = abstract_conv.AbstractConv3d_gradInputs
+    conv_op = abstract_conv.AbstractConv3d
+    conv_gradw_op = abstract_conv.AbstractConv3d_gradWeights
+    conv_gradi_op = abstract_conv.AbstractConv3d_gradInputs
     mode = Mode(optimizer=None)
 
     def setup_method(self):
@@ -2505,12 +2322,12 @@ class TestSeparableConv:
     reason="SciPy and cxx needed",
 )
 class TestUnsharedConv:
-    conv2d = pytensor.tensor.nnet.abstract_conv.AbstractConv2d
-    conv2d_gradw = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
-    conv2d_gradi = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
-    conv2d_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d
-    conv2d_gradw_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
-    conv2d_gradi_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
+    conv2d = abstract_conv.AbstractConv2d
+    conv2d_gradw = abstract_conv.AbstractConv2d_gradWeights
+    conv2d_gradi = abstract_conv.AbstractConv2d_gradInputs
+    conv2d_op = abstract_conv.AbstractConv2d
+    conv2d_gradw_op = abstract_conv.AbstractConv2d_gradWeights
+    conv2d_gradi_op = abstract_conv.AbstractConv2d_gradInputs
 
     mode = Mode(optimizer="None")
 
@@ -2733,12 +2550,12 @@ class TestUnsharedConv:
 
 
 class TestAsymmetricPadding:
-    conv2d = pytensor.tensor.nnet.abstract_conv.AbstractConv2d
-    conv2d_gradw = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
-    conv2d_gradi = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
-    conv2d_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d
-    conv2d_gradw_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradWeights
-    conv2d_gradi_op = pytensor.tensor.nnet.abstract_conv.AbstractConv2d_gradInputs
+    conv2d = abstract_conv.AbstractConv2d
+    conv2d_gradw = abstract_conv.AbstractConv2d_gradWeights
+    conv2d_gradi = abstract_conv.AbstractConv2d_gradInputs
+    conv2d_op = abstract_conv.AbstractConv2d
+    conv2d_gradw_op = abstract_conv.AbstractConv2d_gradWeights
+    conv2d_gradi_op = abstract_conv.AbstractConv2d_gradInputs
 
     mode = Mode(optimizer="None")
 

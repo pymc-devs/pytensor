@@ -13,7 +13,7 @@ from pytensor.scalar import int64
 from pytensor.tensor import blas_headers
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blas import blas_header_version, ldflags
-from pytensor.tensor.nnet.abstract_conv import get_conv_output_shape
+from pytensor.tensor.conv.abstract_conv import get_conv_output_shape
 from pytensor.tensor.type import TensorType
 
 
