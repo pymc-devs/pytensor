@@ -11,7 +11,6 @@ import numpy as np
 from setuptools._distutils.spawn import find_executable
 
 import pytensor
-import pytensor.configparser
 from pytensor.configparser import (
     BoolParam,
     ConfigParam,
@@ -20,6 +19,7 @@ from pytensor.configparser import (
     FloatParam,
     IntParam,
     StrParam,
+    _create_default_config,
 )
 from pytensor.utils import (
     LOCAL_BITWIDTH,
@@ -1195,27 +1195,6 @@ def add_vm_configvars():
     )
 
 
-def add_deprecated_configvars():
-
-    # TODO: remove this?
-    config.add(
-        "unittests__rseed",
-        "Seed to use for randomized unit tests. "
-        "Special value 'random' means using a seed of None.",
-        StrParam(666, validate=_good_seem_param),
-        in_c_key=False,
-    )
-
-    config.add(
-        "warn__round",
-        "Warn when using `tensor.round` with the default mode. "
-        "Round changed its default from `half_away_from_zero` to "
-        "`half_to_even` to have the same default as NumPy.",
-        BoolParam(_warn_default("0.9")),
-        in_c_key=False,
-    )
-
-
 def add_scan_configvars():
     config.add(
         "scan__allow_gc",
@@ -1444,12 +1423,8 @@ SUPPORTED_DNN_CONV_PRECISION = (
 )
 
 # Eventually, the instance of `PyTensorConfigParser` should be created right here,
-# where it is also populated with settings.  But for a transition period, it
-# remains as `configparser._config`, while everybody accessing it through
-# `configparser.config` is flooded with deprecation warnings. These warnings
-# instruct one to use `pytensor.config`, which is an alias for
-# `pytensor.configdefaults.config`.
-config = pytensor.configparser._config
+# where it is also populated with settings.
+config = _create_default_config()
 
 # The functions below register config variables into the config instance above.
 add_basic_configvars()
@@ -1467,7 +1442,6 @@ add_optimizer_configvars()
 # that module, which introduces a circular dependency!
 add_metaopt_configvars()
 add_vm_configvars()
-add_deprecated_configvars()
 add_numba_configvars()
 
 # TODO: `gcc_version_str` is used by other modules.. Should it become an immutable config var?

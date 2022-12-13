@@ -65,27 +65,6 @@ class _ChangeFlagsDecorator:
             v.__set__(self._root, self.old_vals[k])
 
 
-class _SectionRedirect:
-    """Functions as a mock property on the PyTensorConfigParser.
-
-    It redirects attribute access (to config subsectinos) to the
-    new config variable properties that use "__" in their name.
-    """
-
-    def __init__(self, root, section_name):
-        self._root = root
-        self._section_name = section_name
-        super().__init__()
-
-    def __getattr__(self, attr):
-        warnings.warn(
-            f"Accessing section '{attr}' through old .-based API. "
-            f"This will be removed. Use 'config.{self._section_name}__{attr}' instead.",
-            DeprecationWarning,
-        )
-        return getattr(self._root, f"{self._section_name}__{attr}")
-
-
 class PyTensorConfigParser:
     """Object that holds configuration settings."""
 
@@ -188,18 +167,6 @@ class PyTensorConfigParser:
 
         # the ConfigParam implements __get__/__set__, enabling us to create a property:
         setattr(self.__class__, name, configparam)
-
-        # The old API used dots for accessing a hierarchy of sections.
-        # The following code adds redirects that spill DeprecationWarnings
-        # while allowing backwards-compatible access to dot-based subsections.
-        # Because the subsectioning is recursive, redirects must be added for
-        # all levels. For example: ".test", ".test.subsection".
-        sections = name.split("__")
-        for s in range(1, len(sections)):
-            section_name = "__".join(sections[:s])
-            if not hasattr(self, section_name):
-                redirect = _SectionRedirect(self, section_name)
-                setattr(self.__class__, section_name, redirect)
 
     def fetch_val_for_key(self, key, delete_key=False):
         """Return the overriding config value for a key.
@@ -565,76 +532,3 @@ def _create_default_config():
         pytensor_raw_cfg=pytensor_raw_cfg,
     )
     return config
-
-
-class _ConfigProxy:
-    """Like _SectionRedirect this class enables backwards-compatible access to the
-    config settings, but raises DeprecationWarnings with instructions to use `pytensor.config`.
-    """
-
-    def __init__(self, actual):
-        _ConfigProxy._actual = actual
-
-    def __getattr__(self, attr):
-        if attr == "_actual":
-            return _ConfigProxy._actual
-        warnings.warn(
-            "`pytensor.configparser.config` is deprecated; use `pytensor.config` instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return getattr(self._actual, attr)
-
-    def __setattr__(self, attr, value):
-        if attr == "_actual":
-            return setattr(_ConfigProxy._actual, attr, value)
-        warnings.warn(
-            "`pytensor.configparser.config` is deprecated; use `pytensor.config` instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return setattr(self._actual, attr, value)
-
-
-# Create the actual instance of the config. This one should eventually move to
-# `configdefaults`:
-_config = _create_default_config()
-
-# The old API often imported the default config object from `configparser`.
-# These imports/accesses should be replaced with `pytensor.config`, so this wraps
-# it with warnings:
-config = _ConfigProxy(_config)
-
-DEPRECATED_NAMES = [
-    (
-        "change_flags",
-        "`change_flags` is deprecated; use `pytensor.config.change_flags` instead.",
-        _config.change_flags,
-    ),
-    (
-        "_change_flags",
-        "`_change_flags` is deprecated; use `pytensor.config.change_flags` instead.",
-        _config.change_flags,
-    ),
-    (
-        "_config_print",
-        "`_config_print` is deprecated; use `pytensor.config.config_print` instead.",
-        _config.config_print,
-    ),
-]
-
-
-def __getattr__(name):
-    """Intercept module-level attribute access of deprecated symbols.
-
-    Adapted from https://stackoverflow.com/a/55139609/3006474.
-
-    """
-    from warnings import warn
-
-    for old_name, msg, old_object in DEPRECATED_NAMES:
-        if name == old_name:
-            warn(msg, DeprecationWarning, stacklevel=2)
-            return old_object
-
-    raise AttributeError(f"module {__name__} has no attribute {name}")
