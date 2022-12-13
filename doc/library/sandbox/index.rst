@@ -15,4 +15,3 @@
 
     linalg
     neighbours
-    rng_mrg

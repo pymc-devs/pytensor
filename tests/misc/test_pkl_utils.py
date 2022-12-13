@@ -6,7 +6,6 @@ import numpy as np
 
 import pytensor
 from pytensor.misc.pkl_utils import StripPickler, dump, load
-from pytensor.sandbox.rng_mrg import MRG_RandomStream
 from pytensor.tensor.type import matrix
 
 
@@ -22,17 +21,6 @@ class TestDumpLoad:
         os.chdir(self.origdir)
         if self.tmpdir is not None:
             shutil.rmtree(self.tmpdir)
-
-    def test_dump_load_mrg(self):
-        rng = MRG_RandomStream()
-
-        with open("test", "wb") as f:
-            dump(rng, f)
-
-        with open("test", "rb") as f:
-            rng = load(f)
-
-        assert type(rng) == MRG_RandomStream
 
     def test_dump_zip_names(self):
         foo_1 = pytensor.shared(0, name="foo")

@@ -30,10 +30,10 @@ from pytensor.gradient import (
 from pytensor.graph.basic import Apply, graph_inputs
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op
-from pytensor.sandbox.rng_mrg import MRG_RandomStream
 from pytensor.tensor.math import add, dot, exp, sigmoid, sqr
 from pytensor.tensor.math import sum as at_sum
 from pytensor.tensor.math import tanh
+from pytensor.tensor.random import RandomStream
 from pytensor.tensor.type import (
     discrete_dtypes,
     dmatrix,
@@ -956,13 +956,13 @@ def test_grad_scale():
 @config.change_flags(compute_test_value="off")
 def test_undefined_grad_opt():
     # Make sure that undefined grad get removed in optimized graph.
-    random = MRG_RandomStream(np.random.default_rng().integers(1, 2147462579))
+    random = RandomStream(np.random.default_rng().integers(1, 2147462579))
 
     pvals = pytensor.shared(np.random.random((10, 20)).astype(config.floatX))
     pvals = pvals / pvals.sum(axis=1)
     pvals = zero_grad(pvals)
 
-    samples = random.multinomial(pvals=pvals, n=1)
+    samples = random.multinomial(p=pvals, n=1)
     samples = at.cast(samples, pvals.dtype)
     samples = zero_grad(samples)
 
