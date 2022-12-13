@@ -4,15 +4,13 @@ from typing import Callable
 import numpy as np
 
 import pytensor
-from pytensor.compile.mode import Mode
 from pytensor.graph import fg
 from pytensor.graph.basic import Apply, Constant, Variable, clone
 from pytensor.graph.op import Op
 from pytensor.graph.type import Type
 from pytensor.link.basic import Container, Linker, PerformLinker, WrapLinker
-from pytensor.link.c.basic import OpWiseCLinker
-from pytensor.tensor.type import matrix, scalar
-from pytensor.utils import cmp, to_return_values
+from pytensor.tensor.type import scalar
+from pytensor.utils import to_return_values
 
 
 def make_function(linker: Linker, unpack_single: bool = True, **kwargs) -> Callable:
@@ -217,26 +215,6 @@ class TestWrapLinker:
         fn()
         assert nodes == [div, add, mul] or nodes == [add, div, mul]
         assert o[0].data == 1.5
-
-
-def test_sort_schedule_fn():
-    from pytensor.graph.sched import make_depends, sort_schedule_fn
-
-    x = matrix("x")
-    y = pytensor.tensor.dot(x[:5] * 2, x.T + 1).T
-
-    def str_cmp(a, b):
-        return cmp(str(a), str(b))  # lexicographical sort
-
-    linker = OpWiseCLinker(schedule=sort_schedule_fn(str_cmp))
-    mode = Mode(linker=linker)
-    f = pytensor.function((x,), (y,), mode=mode)
-
-    nodes = f.maker.linker.make_all()[-1]
-    depends = make_depends()
-    for a, b in zip(nodes[:-1], nodes[1:]):
-        if not depends((b, a)):
-            assert str(a) < str(b)
 
 
 def test_container_deepcopy():
