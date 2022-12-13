@@ -86,6 +86,7 @@ from pytensor.tensor.rewriting.basic import (
     encompasses_broadcastable,
     local_fill_sink,
     register_canonicalize,
+    register_scalarize,
     register_specialize,
     register_specialize_device,
     register_stabilize,
@@ -1566,6 +1567,18 @@ def local_op_of_op(fgraph, node):
 
                 combined = op_type(newaxis, dtype=out_dtype)
                 return [combined(node_inps.owner.inputs[0])]
+
+
+@register_scalarize
+@node_rewriter([Sum])
+def local_sum_of_makevector(fgraph, node):
+    (array,) = node.inputs
+    if not array.owner or not isinstance(array.owner.op, MakeVector):
+        return False
+
+    values = array.owner.inputs
+    summed = aes.add(*values)
+    return [as_tensor_variable(summed)]
 
 
 ALL_REDUCE = (

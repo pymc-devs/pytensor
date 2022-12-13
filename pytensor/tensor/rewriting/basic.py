@@ -186,6 +186,23 @@ def register_specialize(
         return node_rewriter
 
 
+def register_scalarize(
+    node_rewriter: Union[RewriteDatabase, NodeRewriter, str], *tags: str, **kwargs
+):
+    if isinstance(node_rewriter, str):
+
+        def register(inner_rewriter: Union[RewriteDatabase, Rewriter]):
+            return register_specialize(inner_rewriter, node_rewriter, *tags, **kwargs)
+
+        return register
+    else:
+        name = kwargs.pop("name", None) or node_rewriter.__name__
+        compile.optdb["scalarize"].register(
+            name, node_rewriter, "fast_run", "fast_compile", *tags, **kwargs
+        )
+        return node_rewriter
+
+
 def register_uncanonicalize(
     node_rewriter: Union[RewriteDatabase, NodeRewriter, str], *tags: str, **kwargs
 ):
@@ -226,30 +243,36 @@ def register_specialize_device(
 
 @register_canonicalize
 @register_specialize
+@register_scalarize
 @node_rewriter([TensorFromScalar])
 def local_tensor_scalar_tensor(fgraph, node):
     """tensor_from_scalar(scalar_from_tensor(x)) -> x"""
-    if isinstance(node.op, TensorFromScalar):
-        s = node.inputs[0]
-        if s.owner and isinstance(s.owner.op, ScalarFromTensor):
-            t = s.owner.inputs[0]
+    s = node.inputs[0]
+    if s.owner and isinstance(s.owner.op, ScalarFromTensor):
+        t = s.owner.inputs[0]
 
-            # We don't need to copy over any stack traces here
-            return [t]
+        # We don't need to copy over any stack traces here
+        return [t]
 
 
 @register_canonicalize
 @register_specialize
+@register_scalarize
 @node_rewriter([ScalarFromTensor])
 def local_scalar_tensor_scalar(fgraph, node):
-    """scalar_from_tensor(tensor_from_scalar(x)) -> x"""
-    if isinstance(node.op, ScalarFromTensor):
-        t = node.inputs[0]
-        if t.owner and isinstance(t.owner.op, TensorFromScalar):
-            s = t.owner.inputs[0]
+    """scalar_from_tensor(tensor_from_scalar(x)) -> x
 
-            # We don't need to copy over any stack traces here
-            return [s]
+    and scalar_from_tensor(TensorConstant(x)) -> x
+    """
+    t = node.inputs[0]
+    if t.owner and isinstance(t.owner.op, TensorFromScalar):
+        s = t.owner.inputs[0]
+
+        # We don't need to copy over any stack traces here
+        return [s]
+    if isinstance(t, TensorConstant):
+        assert t.ndim == 0
+        return [aes.constant(t.value.item(), t.name, t.dtype)]
 
 
 @register_specialize("local_alloc_elemwise")

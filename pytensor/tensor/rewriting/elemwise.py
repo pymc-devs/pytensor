@@ -381,12 +381,8 @@ def is_dimshuffle_useless(new_order, input):
 
 
 @node_rewriter([Elemwise])
-def local_elemwise_lift_scalars(fgraph, node):
+def elemwise_to_scalar(fgraph, node):
     op = node.op
-
-    if not isinstance(op, Elemwise):
-        return False
-
     if not all(input.ndim == 0 for input in node.inputs):
         return False
 
@@ -397,11 +393,12 @@ def local_elemwise_lift_scalars(fgraph, node):
     return [as_tensor_variable(out) for out in op.scalar_op.make_node(*scalars).outputs]
 
 
-compile.optdb["specialize"].register(
-    "local_elemwise_lift_scalars",
-    local_elemwise_lift_scalars,
-    "fast_run_numba",
-    "fast_compile_numba",
+compile.optdb["scalarize"].register(
+    "local_elemwise_to_scalar",
+    elemwise_to_scalar,
+    "fast_run",
+    "fast_compile",
+    "numba_only",
 )
 
 
@@ -411,9 +408,6 @@ def push_elemwise_constants(fgraph, node):
     contained scalar op.
     """
     op = node.op
-    if not isinstance(op, Elemwise):
-        return False
-
     if any(op.inplace_pattern):
         return False
 
@@ -467,8 +461,7 @@ def push_elemwise_constants(fgraph, node):
 compile.optdb["post_fusion"].register(
     "push_elemwise_constants",
     push_elemwise_constants,
-    "fast_run_numba",
-    "fast_compile_numba",
+    "numba_only",
 )
 
 
