@@ -165,9 +165,3 @@ def test_KanrenRelationSub_dot():
     assert expr_opt.owner.inputs[1].owner.op == at.add
     assert isinstance(expr_opt.owner.inputs[1].owner.inputs[0].owner.op, Dot)
     assert isinstance(expr_opt.owner.inputs[1].owner.inputs[1].owner.op, Dot)
-
-
-def test_deprecations():
-    """Make sure we can import deprecated classes from current and deprecated modules."""
-    with pytest.deprecated_call():
-        from pytensor.graph.kanren import KanrenRelationSub  # noqa: F401 F811

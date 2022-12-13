@@ -2166,14 +2166,6 @@ def test_local_join_subtensors(axis, slices_fn, expected_nodes):
     np.testing.assert_array_equal(f(x_val, stop_val), f_val)
 
 
-def test_deprecations():
-    """Make sure we can import from deprecated modules."""
-    with pytest.deprecated_call():
-        from pytensor.tensor.subtensor_opt import (  # noqa: F401 F811
-            get_advsubtensor_axis,
-        )
-
-
 def test_local_uint_constant_indices():
     mode = get_default_mode().including("specialize", "local_uint_constant_indices")
     rng = np.random.default_rng(20900)

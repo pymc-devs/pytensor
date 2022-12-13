@@ -4625,12 +4625,6 @@ def test_local_useless_conj():
     assert any(node.op == _conj for node in f.maker.fgraph.apply_nodes)
 
 
-def test_deprecations():
-    """Make sure we can import from deprecated modules."""
-    with pytest.deprecated_call():
-        from pytensor.tensor.math_opt import AlgebraicCanonizer  # noqa: F401 F811
-
-
 def test_local_sub_neg_to_add():
     x = scalar("x")
     y = vector("y")
