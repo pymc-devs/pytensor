@@ -724,12 +724,6 @@ TestLog1mexpInplaceBroadcast = makeBroadcastTester(
     inplace=True,
 )
 
-
-def test_deprecated_module():
-    with pytest.warns(DeprecationWarning):
-        import pytensor.scalar.basic_scipy  # noqa: F401
-
-
 _good_broadcast_ternary_betainc = dict(
     normal=(
         random_ranged(0, 1000, (2, 3)),
