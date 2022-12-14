@@ -2670,22 +2670,22 @@ def vertical_stack(*args):
     return concatenate(_args, axis=0)
 
 
-def is_flat(var, ndim=None, outdim=None):
+def is_flat(var, ndim=1):
     """
     Verifies the dimensionality of the var is equal to
-    outdim. This method is usually called after flatten method on a
-    variable, where the first outdim-1 dimension size(s) of the variable
+    ndim. This method is usually called after flatten method on a
+    variable, where the first ndim-1 dimension size(s) of the variable
     is kept intact, and the last dimension size of the variable is made
     equal to the multiplication of its remaining dimension size(s), such that
-    the variable would end up with as many dimension as outdim.
+    the variable would end up with as many dimension as ndim.
 
     Parameters
     ----------
-        var : pytensor.tensor.var.TensorVariable
-            the pytensor var on which the dimensionality is checked.
+    var : pytensor.tensor.var.TensorVariable
+        the pytensor var on which the dimensionality is checked.
 
-        outdim : int
-            the expected dimensionality of var.
+    ndim : int
+        the expected dimensionality of var.
 
     Returns
     -------
@@ -2693,13 +2693,6 @@ def is_flat(var, ndim=None, outdim=None):
         the comparison result of var's dim
         and the expected outdim.
     """
-    if outdim is None and ndim is None:
-        ndim = 1
-    elif outdim is not None and ndim is not None:
-        raise ValueError("You should only specify ndim")
-    elif outdim is not None:
-        warnings.warn("outdim` is deprecated; use `ndim` instead.")
-        ndim = outdim
     return var.ndim == ndim
 
 
