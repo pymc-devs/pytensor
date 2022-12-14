@@ -92,7 +92,7 @@ z = create_pytensor_param(np.random.default_rng().integers(0, 4, size=(2, 2)))
 def test_local_replace_AdvancedSubtensor(indices, is_none):
 
     X_val = np.random.normal(size=(4, 4, 4))
-    X = tensor(np.float64, shape=(None, None, None), name="X")
+    X = tensor(dtype=np.float64, shape=(None, None, None), name="X")
     X.tag.test_value = X_val
 
     Y = X[indices]
@@ -932,7 +932,7 @@ class TestLocalSubtensorLift:
         assert (f1(xval) == xval[:2, :5]).all()
 
         # corner case 1: Unbroadcast changes dims which are dropped through subtensor
-        y = tensor("float64", shape=(1, 10, 1, 3), name="x")
+        y = tensor(dtype="float64", shape=(1, 10, 1, 3), name="x")
         yval = np.random.random((1, 10, 1, 3)).astype(config.floatX)
         assert y.broadcastable == (True, False, True, False)
         newy = Unbroadcast(0, 2)(y)
@@ -956,7 +956,7 @@ class TestLocalSubtensorLift:
         assert (f3(yval) == yval[:, 3, 0]).all()
 
         # corner case 3: subtensor idx_list is shorter than Unbroadcast.axis
-        z = tensor("float64", shape=(4, 10, 3, 1), name="x")
+        z = tensor(dtype="float64", shape=(4, 10, 3, 1), name="x")
         zval = np.random.random((4, 10, 3, 1)).astype(config.floatX)
         assert z.broadcastable == (False, False, False, True)
         newz = Unbroadcast(3)(z)
@@ -1911,7 +1911,7 @@ def test_local_subtensor_of_alloc():
 
 
 def test_local_subtensor_shape_constant():
-    x = tensor(np.float64, shape=(1, None)).shape[0]
+    x = tensor(dtype=np.float64, shape=(1, None)).shape[0]
     (res,) = local_subtensor_shape_constant.transform(None, x.owner)
     assert isinstance(res, Constant)
     assert res.data == 1
@@ -1921,21 +1921,21 @@ def test_local_subtensor_shape_constant():
     assert isinstance(res, Constant)
     assert res.data == 1
 
-    x = _shape(tensor(np.float64, shape=(1, None)))[lscalar()]
+    x = _shape(tensor(dtype=np.float64, shape=(1, None)))[lscalar()]
     assert not local_subtensor_shape_constant.transform(None, x.owner)
 
-    x = _shape(tensor(np.float64, shape=(1, None)))[0:]
+    x = _shape(tensor(dtype=np.float64, shape=(1, None)))[0:]
     assert not local_subtensor_shape_constant.transform(None, x.owner)
 
-    x = _shape(tensor(np.float64, shape=(1, None)))[lscalar() :]
+    x = _shape(tensor(dtype=np.float64, shape=(1, None)))[lscalar() :]
     assert not local_subtensor_shape_constant.transform(None, x.owner)
 
-    x = _shape(tensor(np.float64, shape=(1, 1)))[1:]
+    x = _shape(tensor(dtype=np.float64, shape=(1, 1)))[1:]
     (res,) = local_subtensor_shape_constant.transform(None, x.owner)
     assert isinstance(res, Constant)
     assert np.array_equal(res.data, [1])
 
-    x = _shape(tensor(np.float64, shape=(None, 1, 1)))[1:]
+    x = _shape(tensor(dtype=np.float64, shape=(None, 1, 1)))[1:]
     (res,) = local_subtensor_shape_constant.transform(None, x.owner)
     assert isinstance(res, Constant)
     assert np.array_equal(res.data, [1, 1])

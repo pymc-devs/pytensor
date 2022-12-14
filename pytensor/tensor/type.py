@@ -775,18 +775,32 @@ pytensor.compile.register_deep_copy_op_c_code(
     version=2,
 )
 
+# Valid static type entries
+ST = Union[int, None]
+
 
 def tensor(
+    name: Optional[str] = None,
+    *,
     dtype: Optional["DTypeLike"] = None,
-    *args,
+    shape: Optional[Tuple[ST, ...]] = None,
     **kwargs,
 ) -> "TensorVariable":
+
+    if name is not None:
+        # Help catching errors with the new tensor API
+        # Many single letter strings are valid sctypes
+        if str(name) == "floatX" or (len(str(name)) > 1 and np.obj2sctype(name)):
+            np.obj2sctype(name)
+            raise ValueError(
+                f"The first and only positional argument of tensor is now `name`. Got {name}.\n"
+                "This name looks like a dtype, which you should pass as a keyword argument only."
+            )
 
     if dtype is None:
         dtype = config.floatX
 
-    name = kwargs.pop("name", None)
-    return TensorType(dtype, *args, **kwargs)(name=name)
+    return TensorType(dtype=dtype, shape=shape, **kwargs)(name=name)
 
 
 cscalar = TensorType("complex64", ())
@@ -805,6 +819,7 @@ ulscalar = TensorType("uint64", ())
 
 def scalar(
     name: Optional[str] = None,
+    *,
     dtype: Optional["DTypeLike"] = None,
 ) -> "TensorVariable":
     """Return a symbolic scalar variable.
@@ -844,9 +859,6 @@ ivector = TensorType("int32", shape=(None,))
 lvector = TensorType("int64", shape=(None,))
 
 
-ST = Union[int, None]
-
-
 def _validate_static_shape(shape, ndim: int) -> Tuple[ST, ...]:
 
     if not isinstance(shape, tuple):
@@ -863,6 +875,7 @@ def _validate_static_shape(shape, ndim: int) -> Tuple[ST, ...]:
 
 def vector(
     name: Optional[str] = None,
+    *,
     dtype: Optional["DTypeLike"] = None,
     shape: Optional[Tuple[ST]] = (None,),
 ) -> "TensorVariable":
@@ -908,6 +921,7 @@ lmatrix = TensorType("int64", shape=(None, None))
 
 def matrix(
     name: Optional[str] = None,
+    *,
     dtype: Optional["DTypeLike"] = None,
     shape: Optional[Tuple[ST, ST]] = (None, None),
 ) -> "TensorVariable":
@@ -951,6 +965,7 @@ lrow = TensorType("int64", shape=(1, None))
 
 def row(
     name: Optional[str] = None,
+    *,
     dtype: Optional["DTypeLike"] = None,
     shape: Optional[Tuple[Literal[1], ST]] = (1, None),
 ) -> "TensorVariable":
@@ -994,6 +1009,7 @@ lcol = TensorType("int64", shape=(None, 1))
 
 def col(
     name: Optional[str] = None,
+    *,
     dtype: Optional["DTypeLike"] = None,
     shape: Optional[Tuple[ST, Literal[1]]] = (None, 1),
 ) -> "TensorVariable":
@@ -1035,6 +1051,7 @@ ltensor3 = TensorType("int64", shape=((None,) * 3))
 
 def tensor3(
     name: Optional[str] = None,
+    *,
     dtype: Optional["DTypeLike"] = None,
     shape: Optional[Tuple[ST, ST, ST]] = (None, None, None),
 ) -> "TensorVariable":
@@ -1074,6 +1091,7 @@ ltensor4 = TensorType("int64", shape=((None,) * 4))
 
 def tensor4(
     name: Optional[str] = None,
+    *,
     dtype: Optional["DTypeLike"] = None,
     shape: Optional[Tuple[ST, ST, ST, ST]] = (None, None, None, None),
 ) -> "TensorVariable":
@@ -1113,6 +1131,7 @@ ltensor5 = TensorType("int64", shape=((None,) * 5))
 
 def tensor5(
     name: Optional[str] = None,
+    *,
     dtype: Optional["DTypeLike"] = None,
     shape: Optional[Tuple[ST, ST, ST, ST, ST]] = (None, None, None, None, None),
 ) -> "TensorVariable":
@@ -1152,6 +1171,7 @@ ltensor6 = TensorType("int64", shape=((None,) * 6))
 
 def tensor6(
     name: Optional[str] = None,
+    *,
     dtype: Optional["DTypeLike"] = None,
     shape: Optional[Tuple[ST, ST, ST, ST, ST, ST]] = (
         None,
@@ -1198,6 +1218,7 @@ ltensor7 = TensorType("int64", shape=((None,) * 7))
 
 def tensor7(
     name: Optional[str] = None,
+    *,
     dtype: Optional["DTypeLike"] = None,
     shape: Optional[Tuple[ST, ST, ST, ST, ST, ST, ST]] = (
         None,

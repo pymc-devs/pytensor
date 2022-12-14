@@ -494,7 +494,7 @@ def test_local_Shape_of_SpecifyShape_partial(s1):
 
 
 def test_local_Shape_i_ground():
-    x = tensor(np.float64, shape=(None, 2))
+    x = tensor(dtype=np.float64, shape=(None, 2))
     s = Shape_i(1)(x)
 
     fgraph = FunctionGraph(outputs=[s], clone=False)

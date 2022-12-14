@@ -559,8 +559,8 @@ class TestUnbroadcast:
         self.mode = get_default_mode().including("canonicalize")
 
     def test_local_useless_unbroadcast(self):
-        x1 = tensor("float64", shape=(1, 2))
-        x2 = tensor("float64", shape=(2, 1))
+        x1 = tensor(dtype="float64", shape=(1, 2))
+        x2 = tensor(dtype="float64", shape=(2, 1))
         unbroadcast_op = Unbroadcast(0)
 
         f = function([x1], unbroadcast_op(x1), mode=self.mode)
@@ -576,7 +576,7 @@ class TestUnbroadcast:
         )
 
     def test_local_unbroadcast_lift(self):
-        x = tensor("float64", shape=(1, 1))
+        x = tensor(dtype="float64", shape=(1, 1))
         y = unbroadcast(at.exp(unbroadcast(x, 0)), 1)
 
         assert (
@@ -1693,8 +1693,8 @@ class TestLocalElemwiseAlloc:
         ],
     )
     def test_basic(self, expr, x_shape, y_shape):
-        x = at.tensor("int64", shape=(None,) * len(x_shape), name="x")
-        y = at.tensor("int64", shape=(None,) * len(y_shape), name="y")
+        x = at.tensor(dtype="int64", shape=(None,) * len(x_shape), name="x")
+        y = at.tensor(dtype="int64", shape=(None,) * len(y_shape), name="y")
         z = expr(x, y)
 
         z_opt = pytensor.function(

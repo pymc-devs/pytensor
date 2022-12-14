@@ -1680,7 +1680,7 @@ class Dot22(GemmRelated):
             raise TypeError(y)
         if y.type.dtype != x.type.dtype:
             raise TypeError("dtype mismatch to Dot22")
-        outputs = [tensor(x.type.dtype, shape=(x.type.shape[0], y.type.shape[1]))]
+        outputs = [tensor(dtype=x.type.dtype, shape=(x.type.shape[0], y.type.shape[1]))]
         return Apply(self, [x, y], outputs)
 
     def perform(self, node, inp, out):
@@ -1985,7 +1985,7 @@ class Dot22Scalar(GemmRelated):
             raise TypeError("Dot22Scalar requires float or complex args", a.dtype)
 
         sz = (x.type.shape[0], y.type.shape[1])
-        outputs = [tensor(x.type.dtype, shape=sz)]
+        outputs = [tensor(dtype=x.type.dtype, shape=sz)]
         return Apply(self, [x, y, a], outputs)
 
     def perform(self, node, inp, out):
@@ -2221,7 +2221,7 @@ class BatchedDot(COp):
             + inputs[1].type.shape[2:]
         )
         out_shape = tuple(1 if s == 1 else None for s in out_shape)
-        return Apply(self, upcasted_inputs, [tensor(dtype, shape=out_shape)])
+        return Apply(self, upcasted_inputs, [tensor(dtype=dtype, shape=out_shape)])
 
     def perform(self, node, inp, out):
         x, y = inp

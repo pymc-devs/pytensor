@@ -1125,7 +1125,7 @@ class TestFusion:
             "inplace",
         )
 
-        x = tensor("floatX", shape=(None, None, None), name="x")
+        x = tensor(dtype="floatX", shape=(None, None, None), name="x")
         out = exp(x).sum(axis=axis)
 
         out_fn = function([x], out, mode=mode)
@@ -1151,7 +1151,7 @@ class TestFusion:
             )
 
         # `Elemwise`s with more than one client shouldn't be rewritten
-        x = tensor("floatX", shape=(None, None, None), name="x")
+        x = tensor(dtype="floatX", shape=(None, None, None), name="x")
         exp_x = exp(x)
         out = exp_x.sum(axis=axis) + exp(x)
 
@@ -1176,8 +1176,8 @@ class TestFusion:
             "inplace",
         )
 
-        x = tensor("floatX", shape=(None, None, None), name="x")
-        y = tensor("floatX", shape=(None, None, None), name="y")
+        x = tensor(dtype="floatX", shape=(None, None, None), name="x")
+        y = tensor(dtype="floatX", shape=(None, None, None), name="y")
         out = (x + y).sum(axis=axis)
 
         out_fn = function([x, y], out, mode=mode)

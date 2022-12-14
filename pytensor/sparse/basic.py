@@ -3451,7 +3451,12 @@ class StructuredDot(Op):
             return Apply(
                 self,
                 [a, b],
-                [tensor(dtype_out, shape=(None, 1 if b.type.shape[1] == 1 else None))],
+                [
+                    tensor(
+                        dtype=dtype_out,
+                        shape=(None, 1 if b.type.shape[1] == 1 else None),
+                    )
+                ],
             )
 
     def perform(self, node, inputs, outputs):
@@ -3582,7 +3587,9 @@ class StructuredDotGradCSC(COp):
 
     def make_node(self, a_indices, a_indptr, b, g_ab):
         return Apply(
-            self, [a_indices, a_indptr, b, g_ab], [tensor(g_ab.dtype, shape=(None,))]
+            self,
+            [a_indices, a_indptr, b, g_ab],
+            [tensor(dtype=g_ab.dtype, shape=(None,))],
         )
 
     def perform(self, node, inputs, outputs):
@@ -3716,7 +3723,7 @@ class StructuredDotGradCSR(COp):
 
     def make_node(self, a_indices, a_indptr, b, g_ab):
         return Apply(
-            self, [a_indices, a_indptr, b, g_ab], [tensor(b.dtype, shape=(None,))]
+            self, [a_indices, a_indptr, b, g_ab], [tensor(dtype=b.dtype, shape=(None,))]
         )
 
     def perform(self, node, inputs, outputs):

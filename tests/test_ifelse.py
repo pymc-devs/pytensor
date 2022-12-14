@@ -303,7 +303,7 @@ class TestIfelse(utt.OptimizationTestMixin):
         rng = np.random.default_rng(utt.fetch_seed())
         data = rng.random(5).astype(self.dtype)
         x = self.shared(data)
-        y = col("y", self.dtype)
+        y = col("y", dtype=self.dtype)
         cond = iscalar("cond")
 
         with pytest.raises(TypeError):
@@ -316,7 +316,7 @@ class TestIfelse(utt.OptimizationTestMixin):
         data = rng.random(5).astype(self.dtype)
         x = self.shared(data)
         # print x.broadcastable
-        y = row("y", self.dtype)
+        y = row("y", dtype=self.dtype)
         # print y.broadcastable
         cond = iscalar("cond")
 

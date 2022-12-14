@@ -556,13 +556,13 @@ def test_get_var_by_name():
 def test_clone_new_inputs():
     """Make sure that `Apply.clone_with_new_inputs` properly handles `Type` changes."""
 
-    x = at.tensor(np.float64, shape=(None,))
-    y = at.tensor(np.float64, shape=(1,))
+    x = at.tensor(dtype=np.float64, shape=(None,))
+    y = at.tensor(dtype=np.float64, shape=(1,))
 
     z = at.add(x, y)
     assert z.type.shape == (None,)
 
-    x_new = at.tensor(np.float64, shape=(1,))
+    x_new = at.tensor(dtype=np.float64, shape=(1,))
 
     # The output nodes should be reconstructed, because the input types' static
     # shape information increased in specificity

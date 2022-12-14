@@ -959,11 +959,11 @@ class TestAlgebraicCanonizer:
 
     def test_mismatching_types(self):
         a = at.as_tensor([[0.0]], dtype=np.float64)
-        b = tensor("float64", shape=(None,)).dimshuffle("x", 0)
+        b = tensor(dtype="float64", shape=(None,)).dimshuffle("x", 0)
         z = add(a, b)
         # Construct a node with the wrong output `Type`
         z = Apply(
-            z.owner.op, z.owner.inputs, [tensor("float64", shape=(None, None))]
+            z.owner.op, z.owner.inputs, [tensor(dtype="float64", shape=(None, None))]
         ).outputs[0]
 
         z_rewritten = rewrite_graph(

@@ -641,7 +641,7 @@ class Reshape(COp):
                 except NotScalarConstantError:
                     pass
 
-        return Apply(self, [x, shp], [tensor(x.type.dtype, shape=out_shape)])
+        return Apply(self, [x, shp], [tensor(dtype=x.type.dtype, shape=out_shape)])
 
     def perform(self, node, inp, out_, params):
         x, shp = inp

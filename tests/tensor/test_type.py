@@ -346,21 +346,38 @@ def test_tensor_creator_helper():
     assert res.type == TensorType(config.floatX, shape=(5, None))
     assert res.name is None
 
-    res = tensor("int64", shape=(5, None), name="custom")
-    assert res.type == TensorType("int64", shape=(5, None))
+    res = tensor(dtype="int64", shape=(5, None), name="custom")
+    assert res.type == TensorType(dtype="int64", shape=(5, None))
     assert res.name == "custom"
 
-    # Test with positional arguments only
-    res = tensor("int64", (5, None))
-    assert res.type == TensorType("int64", shape=(5, None))
-    assert res.name is None
+    # Test with positional name argument
+    res = tensor("custom", dtype="int64", shape=(5, None))
+    assert res.type == TensorType(dtype="int64", shape=(5, None))
+    assert res.name == "custom"
 
     with pytest.warns(
         DeprecationWarning, match="The `broadcastable` keyword is deprecated"
     ):
-        res = tensor("int64", broadcastable=(True, False), name="custom")
+        res = tensor(dtype="int64", broadcastable=(True, False), name="custom")
         assert res.type == TensorType("int64", shape=(1, None))
         assert res.name == "custom"
+
+
+@pytest.mark.parametrize("dtype", ("floatX", "float64", bool, np.int64))
+def test_tensor_creator_dtype_catch(dtype):
+    with pytest.raises(
+        ValueError,
+        match="This name looks like a dtype, which you should pass as a keyword argument only",
+    ):
+        tensor(dtype, shape=(None,))
+
+    # This should work
+    assert tensor(dtype=dtype, shape=(None,))
+
+
+def test_tensor_creator_ignores_rare_dtype_name():
+    # This could be a dtype, but we assume it's a name
+    assert tensor("a", shape=(None,)).type.dtype == config.floatX
 
 
 def test_scalar_creator_helper():

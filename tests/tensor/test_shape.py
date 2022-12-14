@@ -650,7 +650,7 @@ class TestUnbroadcast:
 class TestUnbroadcastInferShape(utt.InferShapeTester):
     def test_basic(self):
         rng = np.random.default_rng(3453)
-        adtens4 = tensor("float64", shape=(1, 1, 1, None))
+        adtens4 = tensor(dtype="float64", shape=(1, 1, 1, None))
         adtens4_val = rng.random((1, 1, 1, 3)).astype(config.floatX)
         self._compile_and_check(
             [adtens4],
@@ -666,7 +666,7 @@ def test_shape_tuple():
     x = Variable(MyType2(), None, None)
     assert shape_tuple(x) == ()
 
-    x = tensor(np.float64, shape=(1, 2, None))
+    x = tensor(dtype=np.float64, shape=(1, 2, None))
     res = shape_tuple(x)
     assert isinstance(res, tuple)
     assert isinstance(res[0], ScalarConstant)
