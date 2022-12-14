@@ -12,8 +12,6 @@ check_nondiff_rop,
 """
 
 
-import itertools
-
 import numpy as np
 import pytest
 
@@ -26,7 +24,6 @@ from pytensor.graph.op import Op
 from pytensor.tensor.math import argmax, dot
 from pytensor.tensor.math import max as at_max
 from pytensor.tensor.shape import unbroadcast
-from pytensor.tensor.signal.pool import Pool
 from pytensor.tensor.type import matrix, vector
 from tests import unittest_tools as utt
 
@@ -247,63 +244,6 @@ class TestRopLop(RopLopChecker):
         self.check_rop_lop(
             unbroadcast(self.x[:4].dimshuffle("x", 0), 0).sum(axis=1), (1,)
         )
-
-    @pytest.mark.slow
-    def test_downsample(self):
-        rng = np.random.default_rng(utt.fetch_seed())
-        # ws, shp
-        examples = (
-            ((2,), (16,)),
-            (
-                (2,),
-                (
-                    4,
-                    16,
-                ),
-            ),
-            (
-                (2,),
-                (
-                    4,
-                    2,
-                    16,
-                ),
-            ),
-            ((1, 1), (4, 2, 16, 16)),
-            ((2, 2), (4, 2, 16, 16)),
-            ((3, 3), (4, 2, 16, 16)),
-            ((3, 2), (4, 2, 16, 16)),
-            ((3, 2, 2), (3, 2, 16, 16, 16)),
-            ((2, 3, 2), (3, 2, 16, 16, 16)),
-            ((2, 2, 3), (3, 2, 16, 16, 16)),
-            ((2, 2, 3, 2), (3, 2, 6, 6, 6, 5)),
-        )
-
-        for example, ignore_border in itertools.product(examples, [True, False]):
-            (ws, shp) = example
-            vx = rng.random(shp)
-            vex = rng.random(shp)
-
-            x = pytensor.shared(vx)
-            ex = pytensor.shared(vex)
-
-            maxpool_op = Pool(ignore_border, ndim=len(ws))
-            a_pooled = maxpool_op(x, ws).flatten()
-            yv = Rop(a_pooled, x, ex)
-            mode = None
-            if pytensor.config.mode == "FAST_COMPILE":
-                mode = "FAST_RUN"
-            rop_f = function([], yv, on_unused_input="ignore", mode=mode)
-            sy, _ = pytensor.scan(
-                lambda i, y, x, v: (grad(y[i], x) * v).sum(),
-                sequences=at.arange(a_pooled.shape[0]),
-                non_sequences=[a_pooled, x, ex],
-                mode=mode,
-            )
-            scan_f = function([], sy, on_unused_input="ignore", mode=mode)
-            v1 = rop_f()
-            v2 = scan_f()
-            assert np.allclose(v1, v2), f"Rop mismatch: {v1} {v2}"
 
     def test_join(self):
         tv = np.asarray(self.rng.uniform(size=(10,)), pytensor.config.floatX)
