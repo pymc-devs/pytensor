@@ -110,14 +110,6 @@ class GraphRewriter(Rewriter):
         """
         raise NotImplementedError()
 
-    def optimize(self, *args, **kwargs):
-        warnings.warn(
-            "`GraphRewriter.optimize` is deprecated; use `GraphRewriter.rewrite` instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self.rewrite(*args, **kwargs)
-
     def rewrite(self, fgraph, *args, **kwargs):
         """
 
@@ -2306,14 +2298,6 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
     def get_node_rewriters(self):
         yield from self.node_tracker.get_rewriters()
 
-    def get_local_optimizers(self):
-        warnings.warn(
-            "`get_local_optimizers` is deprecated; use `get_node_rewriters` instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        yield from self.get_node_rewriters()
-
     def add_requirements(self, fgraph):
         super().add_requirements(fgraph)
         for rewriter in self.get_node_rewriters():
@@ -3137,128 +3121,3 @@ class CheckStackTraceRewriter(GraphRewriter):
 
     def apply(self, fgraph):
         pass
-
-
-DEPRECATED_NAMES = [
-    (
-        "LocalMetaOptimizerSkipAssertionError",
-        "`LocalMetaOptimizerSkipAssertionError` is deprecated: use `MetaNodeRewriterSkip` instead.",
-        MetaNodeRewriterSkip,
-    ),
-    (
-        "GlobalOptimizer",
-        "`GlobalOptimizer` is deprecated: use `GraphRewriter` instead.",
-        GraphRewriter,
-    ),
-    (
-        "LocalOptimizer",
-        "`LocalOptimizer` is deprecated: use `NodeRewriter` instead.",
-        NodeRewriter,
-    ),
-    (
-        "local_optimizer",
-        "`local_optimizer` is deprecated: use `node_rewriter` instead.",
-        node_rewriter,
-    ),
-    (
-        "pre_greedy_local_optimizer",
-        "`pre_greedy_local_optimizer` is deprecated: use `pre_greedy_node_rewriter` instead.",
-        pre_greedy_node_rewriter,
-    ),
-    (
-        "FromFunctionOptimizer",
-        "`FromFunctionOptimizer` is deprecated: use `FromFunctionGraphRewriter` instead.",
-        FromFunctionGraphRewriter,
-    ),
-    (
-        "optimizer",
-        "`optimizer` is deprecated: use `graph_rewriter` instead.",
-        graph_rewriter,
-    ),
-    (
-        "inplace_optimizer",
-        "`inplace_optimizer` is deprecated: use `graph_rewriter` instead.",
-        graph_rewriter,
-    ),
-    (
-        "LocalMetaOptimizer",
-        "`LocalMetaOptimizer` is deprecated: use `MetaNodeRewriter` instead.",
-        MetaNodeRewriter,
-    ),
-    (
-        "SeqOptimizer",
-        "`SeqOptimizer` is deprecated: use `SequentialGraphRewriter` instead.",
-        SequentialGraphRewriter,
-    ),
-    (
-        "FromFunctionLocalOptimizer",
-        "`FromFunctionLocalOptimizer` is deprecated: use `FromFunctionNodeRewriter` instead.",
-        FromFunctionNodeRewriter,
-    ),
-    (
-        "LocalOptTracker",
-        "`LocalOptTracker` is deprecated: use `OpToRewriterTracker` instead.",
-        OpToRewriterTracker,
-    ),
-    (
-        "LocalOptGroup",
-        "`LocalOptGroup` is deprecated: use `SequentialNodeRewriter` instead.",
-        SequentialNodeRewriter,
-    ),
-    (
-        "OpSub",
-        "`OpSub` is deprecated: use `SubstitutionNodeRewriter` instead.",
-        SubstitutionNodeRewriter,
-    ),
-    (
-        "OpRemove",
-        "`OpRemove` is deprecated: use `RemovalNodeRewriter` instead.",
-        RemovalNodeRewriter,
-    ),
-    (
-        "PatternSub",
-        "`PatternSub` is deprecated: use `PatternNodeRewriter` instead.",
-        PatternNodeRewriter,
-    ),
-    (
-        "NavigatorOptimizer",
-        "`NavigatorOptimizer` is deprecated: use `NodeProcessingGraphRewriter` instead.",
-        NodeProcessingGraphRewriter,
-    ),
-    (
-        "TopoOptimizer",
-        "`TopoOptimizer` is deprecated: use `WalkingGraphRewriter` instead.",
-        WalkingGraphRewriter,
-    ),
-    (
-        "topogroup_optimizer",
-        "`topogroup_optimizer` is deprecated: use `walking_rewriter` instead.",
-        walking_rewriter,
-    ),
-    (
-        "OpKeyOptimizer",
-        "`OpKeyOptimizer` is deprecated: use `OpKeyGraphRewriter` instead.",
-        OpKeyGraphRewriter,
-    ),
-    (
-        "EquilibriumOptimizer",
-        "`EquilibriumOptimizer` is deprecated: use `EquilibriumGraphRewriter` instead.",
-        EquilibriumGraphRewriter,
-    ),
-]
-
-
-def __getattr__(name):
-    """Intercept module-level attribute access of deprecated symbols.
-
-    Adapted from https://stackoverflow.com/a/55139609/3006474.
-
-    """
-    from warnings import warn
-
-    for old_name, msg, old_object in DEPRECATED_NAMES:
-        if name == old_name:
-            warn(msg, DeprecationWarning, stacklevel=2)
-            return old_object
-
-    raise AttributeError(f"module {__name__} has no attribute {name}")
