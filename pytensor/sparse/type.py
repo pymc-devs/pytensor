@@ -251,6 +251,3 @@ pytensor.compile.register_view_op_c_code(
     """,
     1,
 )
-
-# This is a deprecated alias used for (temporary) backward-compatibility
-SparseType = SparseTensorType
