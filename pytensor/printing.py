@@ -4,7 +4,6 @@ import hashlib
 import logging
 import os
 import sys
-import warnings
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from copy import copy
@@ -120,7 +119,6 @@ def debugprint(
     print_destroy_map: bool = False,
     print_view_map: bool = False,
     print_fgraph_inputs: bool = False,
-    ids: Optional[IDTypesType] = None,
 ) -> Union[str, TextIO]:
     r"""Print a graph as text.
 
@@ -192,14 +190,6 @@ def debugprint(
         _file = sys.stdout
     else:
         _file = file
-
-    if ids is not None:
-        warnings.warn(
-            "`ids` is deprecated; use `id_type` instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        id_type = ids
 
     if done is None:
         done = dict()
