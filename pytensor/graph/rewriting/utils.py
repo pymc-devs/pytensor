@@ -1,5 +1,4 @@
 import copy
-import warnings
 from typing import TYPE_CHECKING, Generator, Optional, Sequence, Union, cast
 
 import pytensor
@@ -23,7 +22,6 @@ def rewrite_graph(
     include: Sequence[str] = ("canonicalize",),
     custom_rewrite: Optional["GraphRewriter"] = None,
     clone: bool = False,
-    custom_opt: Optional["GraphRewriter"] = None,
     **kwargs,
 ) -> Union[Variable, Sequence[Variable], FunctionGraph]:
     """Easily apply rewrites to a graph.
@@ -61,14 +59,6 @@ def rewrite_graph(
 
     query_rewrites = optdb.query(RewriteDatabaseQuery(include=include, **kwargs))
     _ = query_rewrites.rewrite(fgraph)
-
-    if custom_opt is not None:
-        warnings.warn(
-            "`custom_opt` is deprecated; use `custom_rewrite` instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        custom_rewrite = custom_opt
 
     if custom_rewrite:
         custom_rewrite.rewrite(fgraph)
@@ -248,28 +238,3 @@ def get_clients_at_depth(
         else:
             assert var.owner is not None
             yield var.owner
-
-
-DEPRECATED_NAMES = [
-    (
-        "optimize_graph",
-        "`optimize_graph` is deprecated: use `rewrite_graph` instead.",
-        rewrite_graph,
-    ),
-]
-
-
-def __getattr__(name):
-    """Intercept module-level attribute access of deprecated symbols.
-
-    Adapted from https://stackoverflow.com/a/55139609/3006474.
-
-    """
-    from warnings import warn
-
-    for old_name, msg, old_object in DEPRECATED_NAMES:
-        if name == old_name:
-            warn(msg, DeprecationWarning, stacklevel=2)
-            return old_object
-
-    raise AttributeError(f"module {__name__} has no attribute {name}")
