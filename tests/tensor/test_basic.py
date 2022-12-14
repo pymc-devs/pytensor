@@ -1332,8 +1332,10 @@ class TestJoinAndSplit:
         with pytest.raises(IndexError):
             stack([a, b], -4)
 
-        # Testing depreciation warning
-        with pytest.warns(DeprecationWarning):
+        # Testing depreciation warning is now an informative error
+        with pytest.raises(
+            TypeError, match=r"First argument should be Sequence\[TensorVariable\]"
+        ):
             s = stack(a, b)
 
     def test_stack_hessian(self):
