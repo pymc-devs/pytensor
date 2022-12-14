@@ -16,7 +16,7 @@ Here are Linux troubleshooting instructions. There is a specific `MacOS`_ sectio
 .. _network_error_proxy:
 
 Why do I get a network error when I install PyTensor
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If you are behind a proxy, you must do some extra configuration steps
 before starting the installation. You must set the environment
@@ -69,7 +69,7 @@ large enough.
 .. _float64_output:
 
 pytensor.function returns a float64 when the inputs are float32 and int{32, 64}
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 It should be noted that using float32 and int{32, 64} together
 inside a function would provide float64 as output.
@@ -80,7 +80,7 @@ To help you find where float64 are created, see the
 .. _test_pytensor:
 
 How to test that PyTensor works properly
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 An easy way to check something that could be wrong is by making sure ``PYTENSOR_FLAGS``
 have the desired values as well as the ``~/.pytensorrc``

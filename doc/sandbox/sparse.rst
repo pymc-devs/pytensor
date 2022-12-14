@@ -120,7 +120,7 @@ Misc
 The sparse equivalent of `dmatrix` is `csc_matrix` and `csr_matrix`.
 
 :class:`~pytensor.sparse.basic.Dot` vs. :class:`~pytensor.sparse.basic.StructuredDot`
----------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------
 
 Often when you use a sparse matrix it is because there is a meaning to the
 structure of non-zeros. The gradient on terms outside that structure

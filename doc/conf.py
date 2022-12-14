@@ -113,7 +113,8 @@ pygments_style = "sphinx"
 
 # html4_writer added to Fix colon & whitespace misalignment
 # https://github.com/readthedocs/sphinx_rtd_theme/issues/766#issuecomment-513852197
-html4_writer = True
+# https://github.com/readthedocs/sphinx_rtd_theme/issues/766#issuecomment-629666319
+# html4_writer = False
 
 html_logo = "images/pytensor_logo.svg"
 html_theme = "pymc_sphinx_theme"

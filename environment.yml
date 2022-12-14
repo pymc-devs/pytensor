@@ -31,7 +31,7 @@ dependencies:
   - pytest-cov
   - pytest-xdist
   # For building docs
-  - sphinx>=1.3
+  - sphinx>=5.1.0
   - sphinx_rtd_theme
   - pygments
   - pydot

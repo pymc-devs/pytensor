@@ -557,6 +557,7 @@ them perfectly, but a `dscalar` otherwise.
     .. method:: astype(dtype)
     .. method:: take(indices, axis=None, mode='raise')
     .. method:: copy()
+       :noindex:
 
         Return a new symbolic variable that is a copy of the variable. Does not copy the tag.
 
@@ -667,11 +668,7 @@ dimensions, see :meth:`_tensor_py_operators.dimshuffle`.
     >>> pytensor.tensor.shape_padaxis(tensor, axis=-1)
     InplaceDimShuffle{0,1,2,x}.0
 
-.. autofunction:: unbroadcast(x, *axes)
-
-.. autofunction:: addbroadcast(x, *axes)
-
-.. autofunction:: patternbroadcast(x, broadcastable)
+.. autofunction:: specify_shape(x, shape)
 
 .. function:: flatten(x, ndim=1)
 

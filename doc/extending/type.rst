@@ -324,8 +324,8 @@ For certain mechanisms, you can register functions and other such
 things to plus your type into pytensor's mechanisms.  These are optional
 but will allow people to use you type with familiar interfaces.
 
-`transfer`
-~~~~~~~~~~
+**`transfer`**
+
 
 To plug in additional options for the transfer target, define a
 function which takes an PyTensor variable and a target argument and

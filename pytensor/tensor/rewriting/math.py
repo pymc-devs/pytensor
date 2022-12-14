@@ -1,4 +1,4 @@
-r"""Rewrites for the `Op`\s in `pytensor.tensor.math`."""
+r"""Rewrites for the `Op`\s in :mod:`pytensor.tensor.math`."""
 
 import itertools
 import operator

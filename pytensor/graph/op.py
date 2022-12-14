@@ -356,6 +356,8 @@ class Op(MetaObject):
         grads
             The gradients with respect to each `Variable` in `inputs`.
 
+        References
+        ----------
         .. [1] Giles, Mike. 2008. “An Extended Collection of Matrix Derivative Results for Forward and Reverse Mode Automatic Differentiation.”
 
         """

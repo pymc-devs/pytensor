@@ -14,4 +14,3 @@
     :maxdepth: 1
 
     linalg
-    neighbours

@@ -76,7 +76,6 @@ attribute :attr:`params_type` to an instance of your params Type.
    If you want to have multiple parameters, PyTensor provides the convenient class
    :class:`pytensor.link.c.params_type.ParamsType` that allows to bundle many parameters into
    one object that will be available in both Python (as a Python object) and C code (as a struct).
-   See :ref:`ParamsType tutorial and API documentation <libdoc_graph_params_type>` for more infos.
 
 For example if we decide to use an int as the params the following
 would be appropriate:

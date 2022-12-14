@@ -168,7 +168,7 @@ class NodeRewriter(Rewriter):
         - ``False`` to indicate that this rewrite cannot be applied to `node`
         - A list of `Variable`\s to use in place of the `node`'s current outputs
         - A ``dict`` mapping old `Variable`\s to `Variable`\s, or the key
-        ``"remove"`` mapping to a list of `Variable`\s to be removed.
+            ``"remove"`` mapping to a list of `Variable`\s to be removed.
 
         Parameters
         ----------

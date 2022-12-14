@@ -1442,18 +1442,18 @@ def betainc(a, b, x):
 
 @scalar_elemwise
 def real(z):
-    """Return real component of complex-valued tensor `z`"""
+    """Return real component of complex-valued tensor `z`."""
 
 
-_tensor_py_operators.real = property(real)
+_tensor_py_operators.real = property(real, doc=real.__doc__)
 
 
 @scalar_elemwise
 def imag(z):
-    """Return imaginary component of complex-valued tensor `z`"""
+    """Return imaginary component of complex-valued tensor `z`."""
 
 
-_tensor_py_operators.imag = property(imag)
+_tensor_py_operators.imag = property(imag, doc=imag.__doc__)
 
 
 @scalar_elemwise

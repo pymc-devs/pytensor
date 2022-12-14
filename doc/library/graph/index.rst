@@ -18,5 +18,4 @@
     features
     op
     type
-    params_type
     utils
