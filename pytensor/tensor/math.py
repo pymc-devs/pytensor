@@ -3133,28 +3133,3 @@ __all__ = [
     "logaddexp",
     "logsumexp",
 ]
-
-DEPRECATED_NAMES = [
-    ("abs_", "`abs_` is deprecated; use `abs` instead.", abs),
-    ("inv", "`inv` is deprecated; use `reciprocal` instead.", reciprocal),
-]
-
-
-def __getattr__(name):
-    """Intercept module-level attribute access of deprecated symbols.
-
-    Adapted from https://stackoverflow.com/a/55139609/3006474.
-
-    """
-    from warnings import warn
-
-    for old_name, msg, old_object in DEPRECATED_NAMES:
-        if name == old_name:
-            warn(msg, DeprecationWarning, stacklevel=2)
-            return old_object
-
-    raise AttributeError(f"module {__name__} has no attribute {name}")
-
-
-def __dir__():
-    return sorted(__all__ + [names[0] for names in DEPRECATED_NAMES])
