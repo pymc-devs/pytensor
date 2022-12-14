@@ -4449,26 +4449,3 @@ def handle_composite(node, mapping):
 
 
 Compositef32.special[Composite] = handle_composite
-
-
-DEPRECATED_NAMES = [
-    ("Inv", "`Inv` is deprecated; use `Reciprocal` instead.", Reciprocal),
-    ("inv", "`inv` is deprecated; use `reciprocal` instead.", reciprocal),
-    ("Scalar", "`Scalar` is deprecated; use `ScalarType` instead.", ScalarType),
-]
-
-
-def __getattr__(name):
-    """Intercept module-level attribute access of deprecated symbols.
-
-    Adapted from https://stackoverflow.com/a/55139609/3006474.
-
-    """
-    from warnings import warn
-
-    for old_name, msg, old_object in DEPRECATED_NAMES:
-        if name == old_name:
-            warn(msg, DeprecationWarning, stacklevel=2)
-            return old_object
-
-    raise AttributeError(f"module {__name__} has no attribute {name}")
