@@ -99,7 +99,7 @@ def _get_vector_length_Constant(op: Union[Op, Variable], var: Constant) -> int:
 
 
 import pytensor.tensor.exceptions  # noqa
-from pytensor.gradient import consider_constant, grad, hessian, jacobian  # noqa
+from pytensor.gradient import grad, hessian, jacobian  # noqa
 
 # adds shared-variable constructors
 from pytensor.tensor import sharedvar  # noqa
