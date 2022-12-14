@@ -1158,7 +1158,7 @@ def _constructor_Function(maker, input_storage, inputs_data, trust_input=False):
     if not config.unpickle_function:
         return None
 
-    f = maker.create(input_storage, trustme=True)
+    f = maker.create(input_storage)
     assert len(f.input_storage) == len(inputs_data)
     for container, x in zip(f.input_storage, inputs_data):
         assert (
@@ -1574,7 +1574,7 @@ class FunctionMaker:
             for i in self.inputs
         ]
 
-    def create(self, input_storage=None, trustme=False, storage_map=None):
+    def create(self, input_storage=None, storage_map=None):
         """
         Create a function.
 
@@ -1584,9 +1584,6 @@ class FunctionMaker:
             A list matching the inputs list and providing default values if the
             default for an input is None, then that input is a required input.
             For an input with an update, the default acts as initialization.
-        trustme
-            Disables some exceptions, used internally.
-
         """
 
         if input_storage is None:
