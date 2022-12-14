@@ -171,27 +171,3 @@ from pytensor.scan.views import foldl, foldr, map, reduce
 # imports were executed, we can warn about remaining flags provided by the user
 # through PYTENSOR_FLAGS.
 config.warn_unused_flags()
-
-DEPRECATED_NAMES = [
-    (
-        "change_flags",
-        "`pytensor.change_flags` is deprecated: use `pytensor.config.change_flags` instead.",
-        config.change_flags,
-    ),
-]
-
-
-def __getattr__(name):
-    """Intercept module-level attribute access of deprecated symbols.
-
-    Adapted from https://stackoverflow.com/a/55139609/3006474.
-
-    """
-    from warnings import warn
-
-    for old_name, msg, old_object in DEPRECATED_NAMES:
-        if name == old_name:
-            warn(msg, DeprecationWarning, stacklevel=2)
-            return old_object
-
-    raise AttributeError(f"module {__name__} has no attribute {name}")
