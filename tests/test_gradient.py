@@ -766,48 +766,6 @@ def test_subgraph_grad():
         assert np.sum(np.abs(true_grad - pgrad)) < 0.00001
 
 
-class TestConsiderConstant:
-    def test_op_removed(self):
-        from pytensor.gradient import ConsiderConstant, consider_constant
-
-        x = matrix("x")
-
-        with pytest.deprecated_call():
-            y = x * consider_constant(x)
-
-        f = pytensor.function([x], y)
-
-        assert ConsiderConstant not in [
-            type(node.op) for node in f.maker.fgraph.toposort()
-        ]
-
-    def test_grad(self):
-        from pytensor.gradient import consider_constant
-
-        rng = np.random.default_rng(seed=utt.fetch_seed())
-
-        a = np.asarray(rng.standard_normal((5, 5)), dtype=config.floatX)
-
-        x = matrix("x")
-
-        with pytest.deprecated_call():
-            expressions_gradients = [
-                (x * consider_constant(x), x),
-                (x * consider_constant(exp(x)), exp(x)),
-                (consider_constant(x), at.constant(0.0)),
-                (x**2 * consider_constant(x), 2 * x**2),
-            ]
-
-            for expr, expr_grad in expressions_gradients:
-                g = grad(expr.sum(), x)
-                # gradient according to pytensor
-                f = pytensor.function([x], g, on_unused_input="ignore")
-                # desired gradient
-                f2 = pytensor.function([x], expr_grad, on_unused_input="ignore")
-
-                assert np.allclose(f(a), f2(a))
-
-
 class TestZeroGrad:
     def setup_method(self):
         self.rng = np.random.default_rng(seed=utt.fetch_seed())

@@ -2108,44 +2108,6 @@ def _is_zero(x):
     return "yes"
 
 
-class ConsiderConstant(ViewOp):
-    def grad(self, args, g_outs):
-        return [g_out.zeros_like(g_out) for g_out in g_outs]
-
-
-consider_constant_ = ConsiderConstant()
-
-
-def consider_constant(x):
-    """Consider an expression constant when computing gradients.
-
-    DEPRECATED: use `zero_grad` or `disconnected_grad` instead.
-
-    The expression itself is unaffected, but when its gradient is
-    computed, or the gradient of another expression that this
-    expression is a subexpression of, it will not be backpropagated
-    through. In other words, the gradient of the expression is
-    truncated to 0.
-
-    :param x: A PyTensor expression whose gradient should be truncated.
-
-    :return: The expression is returned unmodified, but its gradient
-        is now truncated to 0.
-
-    .. versionadded:: 0.7
-    """
-    warnings.warn(
-        (
-            "`ConsiderConstant` is deprecated; use `zero_grad` or "
-            "`disconnected_grad` instead."
-        ),
-        category=DeprecationWarning,
-        stacklevel=3,
-    )
-
-    return ConsiderConstant()(x)
-
-
 class ZeroGrad(ViewOp):
     def grad(self, args, g_outs):
         return [g_out.zeros_like(g_out) for g_out in g_outs]
@@ -2352,28 +2314,3 @@ def grad_scale(x, multiplier):
     0.416...
     """
     return GradScale(multiplier)(x)
-
-
-DEPRECATED_NAMES = [
-    (
-        "consider_constant_",
-        "`consider_constant_` is deprecated; use `zero_grad` or `disconnected_grad` instead.",
-        ConsiderConstant(),
-    ),
-]
-
-
-def __getattr__(name):
-    """Intercept module-level attribute access of deprecated symbols.
-
-    Adapted from https://stackoverflow.com/a/55139609/3006474.
-
-    """
-    from warnings import warn
-
-    for old_name, msg, old_object in DEPRECATED_NAMES:
-        if name == old_name:
-            warn(msg, DeprecationWarning, stacklevel=2)
-            return old_object
-
-    raise AttributeError(f"module {__name__} has no attribute {name}")
