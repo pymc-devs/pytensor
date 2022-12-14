@@ -20,8 +20,4 @@ API
 
 .. automodule:: pytensor.tensor.slinalg
     :members:
-    :exclude-members: solve, solve_lower_triangular, solve_upper_triangular
 
-.. autofunction:: solve(a, b)
-.. autofunction:: solve_lower_triangular(a, b)
-.. autofunction:: solve_upper_triangular(a, b)
