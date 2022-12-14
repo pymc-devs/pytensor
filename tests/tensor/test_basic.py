@@ -1177,7 +1177,7 @@ def test_get_vector_length():
     # Test `Alloc`s
     assert 3 == get_vector_length(alloc(0, 3))
 
-    assert 5 == get_vector_length(tensor(np.float64, shape=(5,)))
+    assert 5 == get_vector_length(tensor(dtype=np.float64, shape=(5,)))
 
 
 class TestJoinAndSplit:
@@ -4263,10 +4263,10 @@ class TestTakeAlongAxis:
         indices = rng.integers(low=0, high=shape[axis or 0], size=indices_size)
 
         arr_in = at.tensor(
-            config.floatX, shape=tuple(1 if s == 1 else None for s in arr.shape)
+            dtype=config.floatX, shape=tuple(1 if s == 1 else None for s in arr.shape)
         )
         indices_in = at.tensor(
-            np.int64, shape=tuple(1 if s == 1 else None for s in indices.shape)
+            dtype=np.int64, shape=tuple(1 if s == 1 else None for s in indices.shape)
         )
 
         out = at.take_along_axis(arr_in, indices_in, axis)
@@ -4278,12 +4278,12 @@ class TestTakeAlongAxis:
         )
 
     def test_ndim_dtype_failures(self):
-        arr = at.tensor(config.floatX, shape=(None,) * 2)
-        indices = at.tensor(np.int64, shape=(None,) * 3)
+        arr = at.tensor(dtype=config.floatX, shape=(None,) * 2)
+        indices = at.tensor(dtype=np.int64, shape=(None,) * 3)
         with pytest.raises(ValueError):
             at.take_along_axis(arr, indices)
 
-        indices = at.tensor(np.float64, shape=(None,) * 2)
+        indices = at.tensor(dtype=np.float64, shape=(None,) * 2)
         with pytest.raises(IndexError):
             at.take_along_axis(arr, indices)
 
@@ -4310,7 +4310,7 @@ def test_oriented_stack_functions(func):
     with pytest.raises(ValueError):
         func()
 
-    a = at.tensor(np.float64, shape=(None, None, None))
+    a = at.tensor(dtype=np.float64, shape=(None, None, None))
 
     with pytest.raises(ValueError):
         func(a, a)

@@ -2882,7 +2882,7 @@ class ARange(Op):
         assert step.ndim == 0
 
         inputs = [start, stop, step]
-        outputs = [tensor(self.dtype, shape=(None,))]
+        outputs = [tensor(dtype=self.dtype, shape=(None,))]
 
         return Apply(self, inputs, outputs)
 

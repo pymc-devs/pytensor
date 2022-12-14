@@ -69,7 +69,7 @@ def test_broadcast_params():
 
     # Try it in PyTensor
     with config.change_flags(compute_test_value="raise"):
-        mean = tensor(config.floatX, shape=(None, 1))
+        mean = tensor(dtype=config.floatX, shape=(None, 1))
         mean.tag.test_value = np.array([[0], [10], [100]], dtype=config.floatX)
         cov = matrix()
         cov.tag.test_value = np.diag(np.array([1e-6], dtype=config.floatX))

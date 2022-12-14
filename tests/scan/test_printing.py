@@ -582,7 +582,7 @@ def test_debugprint_mitmot():
 
 def test_debugprint_compiled_fn():
 
-    M = at.tensor(np.float64, shape=(20000, 2, 2))
+    M = at.tensor(dtype=np.float64, shape=(20000, 2, 2))
     one = at.as_tensor(1, dtype=np.int64)
     zero = at.as_tensor(0, dtype=np.int64)
 

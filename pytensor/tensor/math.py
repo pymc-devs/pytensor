@@ -152,8 +152,8 @@ class MaxAndArgmax(COp):
             if i not in all_axes
         )
         outputs = [
-            tensor(x.type.dtype, shape=out_shape, name="max"),
-            tensor("int64", shape=out_shape, name="argmax"),
+            tensor(dtype=x.type.dtype, shape=out_shape, name="max"),
+            tensor(dtype="int64", shape=out_shape, name="argmax"),
         ]
         return Apply(self, inputs, outputs)
 
@@ -370,7 +370,7 @@ class Argmax(COp):
         # We keep the original broadcastable flags for dimensions on which
         # we do not perform the argmax.
         out_shape = tuple(s for i, s in enumerate(x.type.shape) if i not in all_axes)
-        outputs = [tensor("int64", shape=out_shape, name="argmax")]
+        outputs = [tensor(dtype="int64", shape=out_shape, name="argmax")]
         return Apply(self, inputs, outputs)
 
     def prepare_node(self, node, storage_map, compute_map, impl):
@@ -1922,7 +1922,7 @@ class Dot(Op):
             sz = sx[:-1]
 
         i_dtypes = [input.type.dtype for input in inputs]
-        outputs = [tensor(aes.upcast(*i_dtypes), shape=sz)]
+        outputs = [tensor(dtype=aes.upcast(*i_dtypes), shape=sz)]
         return Apply(self, inputs, outputs)
 
     def perform(self, node, inp, out):

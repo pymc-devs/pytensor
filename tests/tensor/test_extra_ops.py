@@ -1335,7 +1335,7 @@ class TestBroadcastTo(utt.InferShapeTester):
 
     def test_infer_shape(self):
         rng = np.random.default_rng(43)
-        a = tensor(config.floatX, shape=(None, 1, None))
+        a = tensor(dtype=config.floatX, shape=(None, 1, None))
         shape = list(a.shape)
         out = self.op(a, shape)
 
@@ -1346,7 +1346,7 @@ class TestBroadcastTo(utt.InferShapeTester):
             self.op_class,
         )
 
-        a = tensor(config.floatX, shape=(None, 1, None))
+        a = tensor(dtype=config.floatX, shape=(None, 1, None))
         shape = [iscalar() for i in range(4)]
         self._compile_and_check(
             [a] + shape,

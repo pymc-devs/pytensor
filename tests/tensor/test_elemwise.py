@@ -185,7 +185,7 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
         assert np.allclose(np.mean(block_diffs), 0)
 
     def test_static_shape(self):
-        x = tensor(np.float64, shape=(1, 2), name="x")
+        x = tensor(dtype=np.float64, shape=(1, 2), name="x")
         y = x.dimshuffle([0, 1, "x"])
         assert y.type.shape == (1, 2, 1)
 
@@ -852,8 +852,8 @@ class TestElemwise(unittest_tools.InferShapeTester):
             z_1.owner.op.infer_shape(None, z_1.owner, [in_1_shape, in_1_shape])
 
     def test_shape_types(self):
-        x = tensor(np.float64, (None, 1))
-        y = tensor(np.float64, (50, 10))
+        x = tensor(dtype=np.float64, shape=(None, 1))
+        y = tensor(dtype=np.float64, shape=(50, 10))
 
         z = x * y
 
@@ -864,33 +864,33 @@ class TestElemwise(unittest_tools.InferShapeTester):
         assert all(isinstance(v.type, TensorType) for v in out_shape)
 
     def test_static_shape_unary(self):
-        x = tensor("float64", shape=(None, 0, 1, 5))
+        x = tensor(dtype="float64", shape=(None, 0, 1, 5))
         assert exp(x).type.shape == (None, 0, 1, 5)
 
     def test_static_shape_binary(self):
-        x = tensor("float64", shape=(None, 5))
-        y = tensor("float64", shape=(None, 5))
+        x = tensor(dtype="float64", shape=(None, 5))
+        y = tensor(dtype="float64", shape=(None, 5))
         assert (x + y).type.shape == (None, 5)
 
-        x = tensor("float64", shape=(None, 5))
-        y = tensor("float64", shape=(10, 5))
+        x = tensor(dtype="float64", shape=(None, 5))
+        y = tensor(dtype="float64", shape=(10, 5))
         assert (x + y).type.shape == (10, 5)
 
-        x = tensor("float64", shape=(1, 5))
-        y = tensor("float64", shape=(10, 5))
+        x = tensor(dtype="float64", shape=(1, 5))
+        y = tensor(dtype="float64", shape=(10, 5))
         assert (x + y).type.shape == (10, 5)
 
-        x = tensor("float64", shape=(None, 1))
-        y = tensor("float64", shape=(1, 1))
+        x = tensor(dtype="float64", shape=(None, 1))
+        y = tensor(dtype="float64", shape=(1, 1))
         assert (x + y).type.shape == (None, 1)
 
-        x = tensor("float64", shape=(0, 0, 0))
-        y = tensor("float64", shape=(0, 1, None))
+        x = tensor(dtype="float64", shape=(0, 0, 0))
+        y = tensor(dtype="float64", shape=(0, 1, None))
         assert (x + y).type.shape == (0, 0, 0)
 
     def test_invalid_static_shape(self):
-        x = tensor("float64", shape=(2,))
-        y = tensor("float64", shape=(3,))
+        x = tensor(dtype="float64", shape=(2,))
+        y = tensor(dtype="float64", shape=(3,))
         with pytest.raises(
             ValueError,
             match=re.escape("Incompatible Elemwise input shapes [(2,), (3,)]"),
