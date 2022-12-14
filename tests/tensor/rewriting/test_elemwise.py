@@ -882,6 +882,7 @@ class TestFusion:
                 1,
                 fxv * np.tan(fxv) * np.tan(fxv) * fxv,
                 "float32",
+                1e-5,
             ),
             (
                 mul(ftanx, ftanx, fx + fy),
@@ -890,6 +891,7 @@ class TestFusion:
                 1,
                 np.tan(fxv) * np.tan(fxv) * (fxv + fyv),
                 "float32",
+                1e-5,
             ),  # 70
             # Cases with different broadcast pattern. They should not
             # be merged as this would duplicate computation
@@ -978,7 +980,11 @@ class TestFusion:
     def test_elemwise_fusion(self, case, nb_repeat=1, assert_len_topo=True):
         """Verify that `Elemwise` fusion works."""
 
-        g, sym_inputs, val_inputs, nb_elemwise, answer, out_dtype = case
+        if len(case) == 6:
+            g, sym_inputs, val_inputs, nb_elemwise, answer, out_dtype = case
+            atol = None
+        else:
+            g, sym_inputs, val_inputs, nb_elemwise, answer, out_dtype, atol = case
 
         if isinstance(out_dtype, dict):
             out_dtype = out_dtype[config.cast_policy]
@@ -1005,9 +1011,10 @@ class TestFusion:
                 f(*val_inputs)
             out = [o.get_value() for o in out]
 
-        atol = 1e-8
-        if any(o == "float32" for o in out_dtype):
-            atol = 1e-6
+        if atol is None:
+            atol = 1e-8
+            if any(o == "float32" for o in out_dtype):
+                atol = 1e-6
 
         for o, a in zip(out, answer):
             np.testing.assert_allclose(o, a * nb_repeat, atol=atol)
