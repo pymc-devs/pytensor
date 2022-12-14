@@ -264,7 +264,7 @@ def jax_sample_fn_halfnormal(op):
         ) = parameters
         sample = (
             loc
-            + jax.random.truncated_normal(sampling_key, 0.0, jax.numpy.inf, size, dtype)
+            + jax.numpy.abs(jax.random.normal(sampling_key, size, dtype))
             * scale
         )
         rng["jax_state"] = rng_key
