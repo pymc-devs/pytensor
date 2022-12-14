@@ -1267,35 +1267,4 @@ def local_useless_topk(fgraph, node):
     return {old_output: new_output}
 
 
-def import_ShapeFeature():
-    from pytensor.tensor.rewriting.shape import ShapeFeature
-
-    return ShapeFeature
-
-
-DEPRECATED_NAMES = {
-    "ShapeFeature": (
-        "`ShapeFeature` is now located in `pytensor.tensor.rewriting.shape`.",
-        import_ShapeFeature,
-    ),
-}
-
-
-def __getattr__(name):
-    """Intercept module-level attribute access of deprecated symbols.
-
-    Adapted from https://stackoverflow.com/a/55139609/3006474.
-
-    """
-    from warnings import warn
-
-    res = DEPRECATED_NAMES.get(name)
-    if res:
-        msg, fn = res
-        warn(msg, DeprecationWarning, stacklevel=2)
-        return fn()
-
-    raise AttributeError(f"module {__name__} has no attribute {name}")
-
-
 register_canonicalize(RemovalNodeRewriter(tensor_copy), name="remove_tensor_copy")
