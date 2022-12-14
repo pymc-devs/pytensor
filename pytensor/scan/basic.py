@@ -502,16 +502,6 @@ def scan(
     # wrap outputs info in a dictionary if they are not already in one
     for i in range(n_outs):
         if outs_info[i] is not None:
-            if isinstance(outs_info[i], dict):
-                if outs_info[i].get("return_steps", None) is not None:
-                    raise DeprecationWarning(
-                        "Using `return_steps` has been deprecated. "
-                        "Simply select the entries you need using a "
-                        "subtensor. Scan will optimize memory "
-                        "consumption, so do not worry about that."
-                    )
-                # END
-
             if not isinstance(outs_info[i], dict):
                 # by default any output has a tap value of -1
                 outs_info[i] = dict([("initial", outs_info[i]), ("taps", [-1])])
@@ -551,6 +541,11 @@ def scan(
                             ("All the tap values must be smaller than 0."),
                             outs_info[i],
                         )
+            _unexpected_keys = set(outs_info[i]) - {"initial", "taps", "inplace"}
+            if _unexpected_keys:
+                raise ValueError(
+                    f"These keys were unexpected in Scan outputs_info[{i}]: {_unexpected_keys}"
+                )
         else:
             # if a None is provided as the output info we replace it
             # with an empty OrdereDict() to simplify handling
