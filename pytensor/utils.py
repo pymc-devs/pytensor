@@ -1,17 +1,14 @@
 """Utility functions that only depend on the standard library."""
 
 import hashlib
-import inspect
 import logging
 import os
 import struct
 import subprocess
 import sys
-import traceback
-import warnings
 from collections import OrderedDict
 from collections.abc import Callable
-from functools import partial, wraps
+from functools import partial
 from typing import List, Set
 
 
@@ -19,7 +16,6 @@ __all__ = [
     "get_unbound_function",
     "maybe_add_to_os_environ_pathlist",
     "DefaultOrderedDict",
-    "deprecated",
     "subprocess_Popen",
     "call_subprocess_Popen",
     "output_subprocess_Popen",
@@ -138,44 +134,6 @@ def maybe_add_to_os_environ_pathlist(var, newpath):
                 os.environ[var] = newpaths
         except Exception:
             pass
-
-
-def deprecated(message: str = ""):
-    """
-    This is a decorator which can be used to mark functions
-    as deprecated. It will result in a warning being emitted
-    when the function is used first time and filter is set for show DeprecationWarning.
-
-    Taken from https://stackoverflow.com/a/40899499/4473230
-    """
-
-    def decorator_wrapper(func):
-        @wraps(func)
-        def function_wrapper(*args, **kwargs):
-            nonlocal message
-
-            current_call_source = "|".join(
-                traceback.format_stack(inspect.currentframe())
-            )
-            if current_call_source not in function_wrapper.last_call_source:
-
-                if not message:
-                    message = f"Function {func.__name__} is deprecated."
-
-                warnings.warn(
-                    message,
-                    category=DeprecationWarning,
-                    stacklevel=2,
-                )
-                function_wrapper.last_call_source.add(current_call_source)
-
-            return func(*args, **kwargs)
-
-        function_wrapper.last_call_source = set()
-
-        return function_wrapper
-
-    return decorator_wrapper
 
 
 def subprocess_Popen(command, **params):

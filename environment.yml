@@ -16,6 +16,7 @@ dependencies:
   - logical-unification
   - miniKanren
   - cons
+  - pydeprecate
   # Intel BLAS
   - mkl
   - mkl-service
@@ -49,3 +50,4 @@ dependencies:
   # optional
   - sympy
   - cython
+
