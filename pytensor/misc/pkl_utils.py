@@ -47,6 +47,8 @@ class StripPickler(Pickler):
     Example
     -------
 
+    ..code-block:: python
+
         fn_args = dict(inputs=inputs,
                        outputs=outputs,
                        updates=updates)
@@ -54,7 +56,6 @@ class StripPickler(Pickler):
         with open(dest_pkl, 'wb') as f:
             strip_pickler = StripPickler(f, protocol=-1)
             strip_pickler.dump(fn_args)
-
     """
 
     def __init__(self, file, protocol=0, extra_tag_to_remove=None):

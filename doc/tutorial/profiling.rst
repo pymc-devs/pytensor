@@ -27,9 +27,10 @@ of the following two options:
 2. Pass the argument :attr:`profile=True` to the function :func:`pytensor.function
    <function.function>` and then call :attr:`f.profile.summary()` for a single
    function.
-    - Use this option when you want to profile not all the
-      functions but only one or more specific function(s).
-    - You can also combine the profile results of many functions:
+
+   - Use this option when you want to profile not all the
+     functions but only one or more specific function(s).
+   - You can also combine the profile results of many functions:
 
       .. doctest::
           :hide:

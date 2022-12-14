@@ -9,7 +9,7 @@ dependencies:
   - numpy
   - scipy
   - six
-  - sphinx>=3
+  - sphinx>=5.1.0
   - mock
   - pillow
   - pip

@@ -2,9 +2,9 @@
 
 .. _opfromgraph:
 
-============
+=============
 `OpFromGraph`
-============
+=============
 
 This page describes :class:`pytensor.compile.builders.OpFromGraph
 <pytensor.compile.builders.OpFromGraph>`, an `Op` constructor that allows one to

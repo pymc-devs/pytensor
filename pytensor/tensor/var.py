@@ -654,13 +654,13 @@ class _tensor_py_operators:
     __rmatmul__ = __rdot__
 
     def sum(self, axis=None, dtype=None, keepdims=False, acc_dtype=None):
-        """See `pytensor.tensor.math.sum`."""
+        """See :func:`pytensor.tensor.math.sum`."""
         return at.math.sum(
             self, axis=axis, dtype=dtype, keepdims=keepdims, acc_dtype=acc_dtype
         )
 
     def prod(self, axis=None, dtype=None, keepdims=False, acc_dtype=None):
-        """See `pytensor.tensor.math.prod`."""
+        """See :func:`pytensor.tensor.math.prod`."""
         return at.math.prod(
             self, axis=axis, dtype=dtype, keepdims=keepdims, acc_dtype=acc_dtype
         )
@@ -681,73 +681,73 @@ class _tensor_py_operators:
             return y
 
     def mean(self, axis=None, dtype=None, keepdims=False, acc_dtype=None):
-        """See `pytensor.tensor.math.mean`."""
+        """See :func:`pytensor.tensor.math.mean`."""
         return at.math.mean(
             self, axis=axis, dtype=dtype, keepdims=keepdims, acc_dtype=acc_dtype
         )
 
     def var(self, axis=None, ddof=0, keepdims=False, corrected=False):
-        """See `pytensor.tensor.math.var`."""
+        """See :func:`pytensor.tensor.math.var`."""
         return at.math.var(
             self, axis=axis, ddof=ddof, keepdims=keepdims, corrected=corrected
         )
 
     def std(self, axis=None, ddof=0, keepdims=False, corrected=False):
-        """See `pytensor.tensor.math.std`."""
+        """See :func:`pytensor.tensor.math.std`."""
         return at.math.std(
             self, axis=axis, ddof=ddof, keepdims=keepdims, corrected=corrected
         )
 
     def min(self, axis=None, keepdims=False):
-        """See `pytensor.tensor.math.min`."""
+        """See :func:`pytensor.tensor.math.min`."""
         return at.math.min(self, axis, keepdims=keepdims)
 
     def max(self, axis=None, keepdims=False):
-        """See `pytensor.tensor.math.max`."""
+        """See :func:`pytensor.tensor.math.max`."""
         return at.math.max(self, axis, keepdims=keepdims)
 
     def argmin(self, axis=None, keepdims=False):
-        """See `pytensor.tensor.math.argmin`."""
+        """See :func:`pytensor.tensor.math.argmin`."""
         return at.math.argmin(self, axis, keepdims=keepdims)
 
     def argmax(self, axis=None, keepdims=False):
-        """See `pytensor.tensor.math.argmax`."""
+        """See :func:`pytensor.tensor.math.argmax`."""
         return at.math.argmax(self, axis, keepdims=keepdims)
 
     def nonzero(self, return_matrix=False):
-        """See `pytensor.tensor.basic.nonzero`."""
+        """See :func:`pytensor.tensor.basic.nonzero`."""
         return at.nonzero(self, return_matrix=return_matrix)
 
     def nonzero_values(self):
-        """See `pytensor.tensor.basic.nonzero_values`."""
+        """See :func:`pytensor.tensor.basic.nonzero_values`."""
         return at.nonzero_values(self)
 
     def sort(self, axis=-1, kind="quicksort", order=None):
-        """See `pytensor.tensor.sort.sort`."""
+        """See :func:`pytensor.tensor.sort.sort`."""
         return at.sort(self, axis, kind, order)
 
     def argsort(self, axis=-1, kind="quicksort", order=None):
-        """See `pytensor.tensor.sort.argsort`."""
+        """See :func:`pytensor.tensor.sort.argsort`."""
         from pytensor.tensor.sort import argsort
 
         return argsort(self, axis, kind, order)
 
     def clip(self, a_min, a_max):
-        "See `pytensor.tensor.math.clip`."
+        "See :func:`pytensor.tensor.math.clip`."
         return at.math.clip(self, a_min, a_max)
 
     def conj(self):
-        """See `pytensor.tensor.math.conj`."""
+        """See :func:`pytensor.tensor.math.conj`."""
         return at.math.conj(self)
 
     conjugate = conj
 
     def repeat(self, repeats, axis=None):
-        """See `pytensor.tensor.basic.repeat`."""
+        """See :func:`pytensor.tensor.basic.repeat`."""
         return at.extra_ops.repeat(self, repeats, axis)
 
     def round(self, mode=None):
-        """See `pytensor.tensor.math.round`."""
+        """See :func:`pytensor.tensor.math.round`."""
         return at.math.round(self, mode)
 
     def trace(self):
@@ -775,12 +775,12 @@ class _tensor_py_operators:
         return at.extra_ops.searchsorted(self, v, side, sorter)
 
     def ptp(self, axis=None):
-        """See `pytensor.tensor.math.ptp`."""
+        """See :func:`pytensor.tensor.math.ptp`."""
 
         return at.math.ptp(self, axis)
 
     def swapaxes(self, axis1, axis2):
-        """See `pytensor.tensor.basic.swapaxes`.
+        """See :func:`pytensor.tensor.basic.swapaxes`.
 
         If a matrix is provided with the right axes, its transpose
         will be returned.

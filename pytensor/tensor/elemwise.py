@@ -1758,7 +1758,7 @@ def scalar_elemwise(*symbol, nfunc=None, nin=None, nout=None, symbolname=None):
             )
 
         if getattr(symbol, "__doc__"):
-            rval.__doc__ = symbol.__doc__ + "\n" + rval.__doc__
+            rval.__doc__ = symbol.__doc__ + "\n\n    " + rval.__doc__
 
         # for the meaning of this see the ./epydoc script
         # it makes epydoc display rval as if it were a function, not an object

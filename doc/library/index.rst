@@ -19,7 +19,6 @@ Modules
    config
    d3viz/index
    graph/index
-   gpuarray/index
    gradient
    misc/pkl_utils
    printing
