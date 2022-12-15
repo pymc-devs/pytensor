@@ -1,3 +1,8 @@
+.. image:: https://cdn.rawgit.com/pymc-devs/pytensor/main/doc/logo/PyTensor_RGB.svg
+    :height: 100px
+    :alt: PyTensor logo
+    :align: center
+
 |Tests Status| |Coverage|
 
 |Project Name| is a fork of `Aesara <https://github.com/aesara-devs/aesara>`__ -- a Python library that allows one to define, optimize, and
