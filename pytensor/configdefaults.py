@@ -1195,6 +1195,27 @@ def add_vm_configvars():
     )
 
 
+def add_deprecated_configvars():
+
+    # TODO: remove this? Agree
+    config.add(
+        "unittests__rseed",
+        "Seed to use for randomized unit tests. "
+        "Special value 'random' means using a seed of None.",
+        StrParam(666, validate=_good_seem_param),
+        in_c_key=False,
+    )
+
+    config.add(
+        "warn__round",
+        "Warn when using `tensor.round` with the default mode. "
+        "Round changed its default from `half_away_from_zero` to "
+        "`half_to_even` to have the same default as NumPy.",
+        BoolParam(_warn_default("0.9")),
+        in_c_key=False,
+    )
+
+
 def add_scan_configvars():
     config.add(
         "scan__allow_gc",
@@ -1441,6 +1462,7 @@ add_optimizer_configvars()
 # Blas-related config are a special pain-point, because their addition depends on a lot of stuff from
 # that module, which introduces a circular dependency!
 add_metaopt_configvars()
+add_deprecated_configvars()
 add_vm_configvars()
 add_numba_configvars()
 
