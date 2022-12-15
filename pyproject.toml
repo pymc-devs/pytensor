@@ -17,7 +17,7 @@ authors = [
     {name = "pymc-devs", email = "pymc.devs@gmail.com"}
 ]
 description = "Optimizing compiler for evaluating mathematical expressions on CPUs and GPUs."
-readme = "DESCRIPTION.txt"
+readme = "DESCRIPTION.rst"
 license = {file = "LICENCE.txt"}
 classifiers = [
     "Development Status :: 6 - Mature",
