@@ -20,48 +20,11 @@ import pandas
 
 
 DP_ROOT = pathlib.Path(__file__).absolute().parent.parent
-FAILING = """
-pytensor/compile/builders.py
-pytensor/compile/compilelock.py
-pytensor/compile/debugmode.py
-pytensor/compile/function/pfunc.py
-pytensor/compile/function/types.py
-pytensor/compile/mode.py
-pytensor/compile/sharedvalue.py
-pytensor/graph/rewriting/basic.py
-pytensor/ifelse.py
-pytensor/link/basic.py
-pytensor/link/numba/dispatch/elemwise.py
-pytensor/link/numba/dispatch/random.py
-pytensor/link/numba/dispatch/scan.py
-pytensor/printing.py
-pytensor/raise_op.py
-pytensor/sandbox/rng_mrg.py
-pytensor/scalar/basic.py
-pytensor/sparse/basic.py
-pytensor/sparse/type.py
-pytensor/tensor/basic.py
-pytensor/tensor/blas.py
-pytensor/tensor/blas_c.py
-pytensor/tensor/blas_headers.py
-pytensor/tensor/elemwise.py
-pytensor/tensor/extra_ops.py
-pytensor/tensor/math.py
-pytensor/tensor/nnet/abstract_conv.py
-pytensor/tensor/nnet/ctc.py
-pytensor/tensor/nnet/neighbours.py
-pytensor/tensor/random/basic.py
-pytensor/tensor/random/op.py
-pytensor/tensor/random/utils.py
-pytensor/tensor/rewriting/basic.py
-pytensor/tensor/rewriting/elemwise.py
-pytensor/tensor/shape.py
-pytensor/tensor/slinalg.py
-pytensor/tensor/subtensor.py
-pytensor/tensor/type.py
-pytensor/tensor/type_other.py
-pytensor/tensor/var.py
-"""
+FAILING = [
+    line.strip()
+    for line in (DP_ROOT / "scripts" / "mypy-failing.txt").read_text().splitlines()
+    if line.strip()
+]
 
 
 def enforce_pep561(module_name):
@@ -130,7 +93,7 @@ def check_no_unexpected_results(mypy_lines: Iterator[str]):
             + "\n".join(sorted(map(str, failing - all_files)))
         )
     passing = all_files - failing
-    expected_failing = set(FAILING.strip().split("\n")) - {""}
+    expected_failing = set(FAILING)
     unexpected_failing = failing - expected_failing
     unexpected_passing = passing.intersection(expected_failing)
 
@@ -177,7 +140,14 @@ if __name__ == "__main__":
         help="How to group verbose output. One of {file|errorcode|message}.",
     )
     args, _ = parser.parse_known_args()
-
+    missing = list()
+    for path in FAILING:
+        if not os.path.exists(path):
+            missing.append(path)
+    if missing:
+        print("These files are missing but still kept in FAILING")
+        print("\n".join(missing))
+        sys.exit(1)
     cp = subprocess.run(
         ["mypy", "--show-error-codes", "pytensor"],
         capture_output=True,
