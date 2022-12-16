@@ -3753,8 +3753,6 @@ class TestExamples:
             [u1, u2, x0, y0, W_in1], outputs, updates=updates, allow_input_downcast=True
         )
 
-        f(v_u1, v_u2, v_x0, v_y0, vW_in1)
-
         ny0 = np.zeros((5, 2))
         ny1 = np.zeros((5,))
         ny2 = np.zeros((5, 2))
@@ -3802,7 +3800,10 @@ class TestExamples:
         ny1[4] = (ny1[3] + ny1[1]) * np.dot(ny0[3], vWout)
         ny2[4] = np.dot(v_u1[4], vW_in1)
 
-        # TODO FIXME: What is this testing?  At least assert something.
+        res = f(v_u1, v_u2, v_x0, v_y0, vW_in1)
+        np.testing.assert_almost_equal(res[0], ny0)
+        np.testing.assert_almost_equal(res[1], ny1)
+        np.testing.assert_almost_equal(res[2], ny2)
 
     def _grad_mout_helper(self, n_iters, mode):
         rng = np.random.default_rng(utt.fetch_seed())
