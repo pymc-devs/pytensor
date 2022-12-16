@@ -304,11 +304,6 @@ class ValidatingScratchpad(Scratchpad):
         return object.__setattr__(self, attr, obj)
 
 
-class D:
-    def __init__(self, **d):
-        self.__dict__.update(d)
-
-
 class AssocList:
     """An associative list.
 
