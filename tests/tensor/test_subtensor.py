@@ -986,7 +986,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
     def test_shape_i_const(self):
         # Each axis is treated independently by shape_i/shape operators
 
-        mode_opt = self.mode.including("fast_run")
+        mode_opt = self.mode
         data = self.shared(np.array(np.arange(5), dtype=self.dtype))
         for start in [None] + [-8, -5, -1, 0, 1, 5, 8]:
             outs = []
@@ -1004,7 +1004,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
     def test_shape_i_scalar(self):
         # Each axis is treated independently by shape_i/shape operators
 
-        mode_opt = self.mode.including("fast_run")
+        mode_opt = self.mode
 
         v_data = np.array(np.arange(5), dtype=self.dtype)
         t_data = self.shared(v_data)

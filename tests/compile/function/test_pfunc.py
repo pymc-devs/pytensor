@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as at
-from pytensor.compile import UnusedInputError
+from pytensor.compile import UnusedInputError, get_mode
 from pytensor.compile.function import function, pfunc
 from pytensor.compile.function.pfunc import rebuild_collect_shared
 from pytensor.compile.io import In
@@ -200,7 +200,12 @@ class TestPfunc:
         bval = np.arange(5)
         b.set_value(bval, borrow=True)
         bval = data_of(b)
-        f = pfunc([], [b_out], updates=[(b, (b_out + 3))], mode="FAST_RUN")
+        f = pfunc(
+            [],
+            [b_out],
+            updates=[(b, (b_out + 3))],
+            mode=get_mode("FAST_RUN").excluding("fusion"),
+        )
         assert (f() == (np.arange(5) * 2)).all()
         # because of the update
         assert (b.get_value(borrow=True) == ((np.arange(5) * 2) + 3)).all()
