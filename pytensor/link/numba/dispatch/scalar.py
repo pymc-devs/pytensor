@@ -8,9 +8,10 @@ from pytensor.compile.ops import ViewOp
 from pytensor.graph.basic import Variable
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
+    _numba_funcify,
     create_numba_signature,
-    generate_fallback_impl,
     numba_funcify,
+    numba_funcify_perform,
 )
 from pytensor.link.numba.dispatch.cython_support import wrap_cython_function
 from pytensor.link.utils import (
@@ -33,7 +34,7 @@ from pytensor.scalar.basic import (
 from pytensor.scalar.math import Erf, Erfc, GammaLn, Log1mexp, Sigmoid
 
 
-@numba_funcify.register(ScalarOp)
+@_numba_funcify.register(ScalarOp)
 def numba_funcify_ScalarOp(op, node, **kwargs):
     # TODO: Do we need to cache these functions so that we don't end up
     # compiling the same Numba function over and over again?
@@ -57,7 +58,7 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
     input_inner_dtypes = None
     output_inner_dtype = None
 
-    # Cython functions might have an additonal argument
+    # Cython functions might have an additional argument
     has_pyx_skip_dispatch = False
 
     if scalar_func_path.startswith("scipy.special"):
@@ -76,7 +77,7 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
             #    pass
 
     if scalar_func_numba is None:
-        scalar_func_numba = generate_fallback_impl(op, node, **kwargs)
+        scalar_func_numba = numba_funcify_perform(op, node, **kwargs)
 
     scalar_op_fn_name = get_name_for_object(scalar_func_numba)
     unique_names = unique_name_generator(
@@ -151,7 +152,7 @@ def {scalar_op_fn_name}({', '.join(input_names)}):
     )(scalar_op_fn)
 
 
-@numba_funcify.register(Switch)
+@_numba_funcify.register(Switch)
 def numba_funcify_Switch(op, node, **kwargs):
     @numba_basic.numba_njit(inline="always")
     def switch(condition, x, y):
@@ -179,7 +180,7 @@ def {binary_op_name}({input_signature}):
     return nary_fn
 
 
-@numba_funcify.register(Add)
+@_numba_funcify.register(Add)
 def numba_funcify_Add(op, node, **kwargs):
 
     signature = create_numba_signature(node, force_scalar=True)
@@ -191,7 +192,7 @@ def numba_funcify_Add(op, node, **kwargs):
     )(nary_add_fn)
 
 
-@numba_funcify.register(Mul)
+@_numba_funcify.register(Mul)
 def numba_funcify_Mul(op, node, **kwargs):
 
     signature = create_numba_signature(node, force_scalar=True)
@@ -203,7 +204,7 @@ def numba_funcify_Mul(op, node, **kwargs):
     )(nary_mul_fn)
 
 
-@numba_funcify.register(Cast)
+@_numba_funcify.register(Cast)
 def numba_funcify_Cast(op, node, **kwargs):
 
     dtype = np.dtype(op.o_type.dtype)
@@ -215,8 +216,8 @@ def numba_funcify_Cast(op, node, **kwargs):
     return cast
 
 
-@numba_funcify.register(Identity)
-@numba_funcify.register(ViewOp)
+@_numba_funcify.register(Identity)
+@_numba_funcify.register(ViewOp)
 def numba_funcify_ViewOp(op, **kwargs):
     @numba_basic.numba_njit(inline="always")
     def viewop(x):
@@ -225,7 +226,7 @@ def numba_funcify_ViewOp(op, **kwargs):
     return viewop
 
 
-@numba_funcify.register(Clip)
+@_numba_funcify.register(Clip)
 def numba_funcify_Clip(op, **kwargs):
     @numba_basic.numba_njit
     def clip(_x, _min, _max):
@@ -243,7 +244,7 @@ def numba_funcify_Clip(op, **kwargs):
     return clip
 
 
-@numba_funcify.register(Composite)
+@_numba_funcify.register(Composite)
 def numba_funcify_Composite(op, node, **kwargs):
     signature = create_numba_signature(op.fgraph, force_scalar=True)
 
@@ -255,7 +256,7 @@ def numba_funcify_Composite(op, node, **kwargs):
     return composite_fn
 
 
-@numba_funcify.register(Second)
+@_numba_funcify.register(Second)
 def numba_funcify_Second(op, node, **kwargs):
     @numba_basic.numba_njit(inline="always")
     def second(x, y):
@@ -264,7 +265,7 @@ def numba_funcify_Second(op, node, **kwargs):
     return second
 
 
-@numba_funcify.register(Reciprocal)
+@_numba_funcify.register(Reciprocal)
 def numba_funcify_Reciprocal(op, node, **kwargs):
     @numba_basic.numba_njit(inline="always")
     def reciprocal(x):
@@ -275,7 +276,7 @@ def numba_funcify_Reciprocal(op, node, **kwargs):
     return reciprocal
 
 
-@numba_funcify.register(Sigmoid)
+@_numba_funcify.register(Sigmoid)
 def numba_funcify_Sigmoid(op, node, **kwargs):
     @numba_basic.numba_njit(inline="always", fastmath=config.numba__fastmath)
     def sigmoid(x):
@@ -284,7 +285,7 @@ def numba_funcify_Sigmoid(op, node, **kwargs):
     return sigmoid
 
 
-@numba_funcify.register(GammaLn)
+@_numba_funcify.register(GammaLn)
 def numba_funcify_GammaLn(op, node, **kwargs):
     @numba_basic.numba_njit(inline="always", fastmath=config.numba__fastmath)
     def gammaln(x):
@@ -293,7 +294,7 @@ def numba_funcify_GammaLn(op, node, **kwargs):
     return gammaln
 
 
-@numba_funcify.register(Log1mexp)
+@_numba_funcify.register(Log1mexp)
 def numba_funcify_Log1mexp(op, node, **kwargs):
     @numba_basic.numba_njit(inline="always", fastmath=config.numba__fastmath)
     def logp1mexp(x):
@@ -305,7 +306,7 @@ def numba_funcify_Log1mexp(op, node, **kwargs):
     return logp1mexp
 
 
-@numba_funcify.register(Erf)
+@_numba_funcify.register(Erf)
 def numba_funcify_Erf(op, **kwargs):
     @numba_basic.numba_njit(inline="always", fastmath=config.numba__fastmath)
     def erf(x):
@@ -314,7 +315,7 @@ def numba_funcify_Erf(op, **kwargs):
     return erf
 
 
-@numba_funcify.register(Erfc)
+@_numba_funcify.register(Erfc)
 def numba_funcify_Erfc(op, **kwargs):
     @numba_basic.numba_njit(inline="always", fastmath=config.numba__fastmath)
     def erfc(x):

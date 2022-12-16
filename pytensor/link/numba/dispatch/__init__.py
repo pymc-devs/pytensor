@@ -1,5 +1,9 @@
 # isort: off
-from pytensor.link.numba.dispatch.basic import numba_funcify, numba_const_convert
+from pytensor.link.numba.dispatch.basic import (
+    numba_funcify,
+    numba_const_convert,
+    numba_njit,
+)
 
 # Load dispatch specializations
 import pytensor.link.numba.dispatch.scalar
