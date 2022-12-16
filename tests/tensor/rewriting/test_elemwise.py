@@ -4,9 +4,9 @@ import numpy as np
 import pytest
 
 import pytensor
-import pytensor.scalar as aes
-import pytensor.tensor as at
+from pytensor import scalar as aes
 from pytensor import shared
+from pytensor import tensor as at
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
@@ -263,9 +263,8 @@ def test_local_useless_dimshuffle_in_reshape():
 class TestFusion:
     rewrites = RewriteDatabaseQuery(
         include=[
-            "local_elemwise_fusion",
-            "composite_elemwise_fusion",
             "canonicalize",
+            "fusion",
             "inplace",
         ],
         exclude=["cxx_only", "BlasOpt"],
@@ -1007,22 +1006,10 @@ class TestFusion:
         )
 
     def test_add_mul_fusion_inplace(self):
-
-        rewrites = RewriteDatabaseQuery(
-            include=[
-                "local_elemwise_fusion",
-                "composite_elemwise_fusion",
-                "canonicalize",
-                "inplace",
-            ],
-            exclude=["cxx_only", "BlasOpt"],
-        )
-
-        mode = Mode(self.mode.linker, rewrites)
-
         x, y, z = dmatrices("xyz")
         out = dot(x, y) + x + y + z
-        f = function([x, y, z], out, mode=mode)
+
+        f = function([x, y, z], out, mode=self.mode)
         topo = [n for n in f.maker.fgraph.toposort()]
         assert len(topo) == 2
         assert topo[-1].op.inplace_pattern
@@ -1050,8 +1037,7 @@ class TestFusion:
 
         mode = Mode(linker="cvm")
         mode._optimizer = mode._optimizer.including(
-            "local_elemwise_fusion",
-            "composite_elemwise_fusion",
+            "fusion",
             "canonicalize",
             "inplace",
         )
@@ -1073,18 +1059,6 @@ class TestFusion:
         are checked.
 
         """
-
-        rewrites = RewriteDatabaseQuery(
-            include=[
-                "local_elemwise_fusion",
-                "composite_elemwise_fusion",
-                "canonicalize",
-            ],
-            exclude=["cxx_only", "BlasOpt"],
-        )
-
-        mode = Mode(self.mode.linker, rewrites)
-
         x, y, z = dmatrices("xyz")
 
         x.tag.test_value = test_value
@@ -1101,7 +1075,7 @@ class TestFusion:
         ):
             out = x * y + z
             with cm:
-                f = function([x, y, z], out, mode=mode)
+                f = function([x, y, z], out, mode=self.mode)
 
         if test_value.size != 0:
             # Confirm that the fusion happened

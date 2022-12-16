@@ -13,6 +13,7 @@ from pytensor.graph.basic import Apply, Constant, io_toposort
 from pytensor.graph.features import ReplaceValidate
 from pytensor.graph.op import compute_test_value, get_test_value
 from pytensor.graph.rewriting.basic import (
+    EquilibriumGraphRewriter,
     GraphRewriter,
     copy_stack_trace,
     in2out,
@@ -529,6 +530,60 @@ def local_upcast_elemwise_constant_inputs(fgraph, node):
                 return rval
 
 
+@node_rewriter([Elemwise])
+def local_add_mul_fusion(fgraph, node):
+    """Fuse consecutive add or mul in one such node with more inputs.
+
+    It is better to fuse add/mul that way then in a Composite node as
+    this make the inner graph of the Composite smaller. This allows to
+    put more computation in a Composite before hitting the max
+    recursion limit when pickling Composite.
+
+    This rewrite is almost useless after the AlgebraicCanonizer is used,
+    but it catches a few edge cases that are not canonicalized by it
+    """
+    if not isinstance(node.op, Elemwise) or not isinstance(
+        node.op.scalar_op, (aes.Add, aes.Mul)
+    ):
+        return False
+
+    s_op = node.op.scalar_op.__class__
+    new_inp = []
+    fused = False
+    nb_inputs = len(node.inputs)
+    max_inputs = float("inf")
+    if hasattr(node.op, "max_inputs"):
+        max_inputs = node.op.max_inputs(node)
+    for inp in node.inputs:
+        if (
+            inp.owner
+            and isinstance(inp.owner.op, Elemwise)
+            and isinstance(inp.owner.op.scalar_op, s_op)
+            and
+            # Do not duplicate the operation.
+            len(fgraph.clients[inp]) == 1
+            and (nb_inputs + len(inp.owner.inputs) - 1) <= max_inputs
+        ):
+            new_inp.extend(inp.owner.inputs)
+            fused = True
+        else:
+            new_inp.append(inp)
+
+    # We can not compare the number of inputs as Mul and Add could have
+    # 0 or 1 inputs in some corner cases.
+    if fused:
+        output = node.op(*new_inp)
+        copy_stack_trace(node.outputs[0], output)
+
+        # Do the recursion here to help lower the number of
+        # FusionOptimizer iteration.
+        if output.owner:
+            output2 = local_add_mul_fusion.transform(fgraph, output.owner)
+            if output2:
+                return output2
+        return [output]
+
+
 def local_elemwise_fusion_op(op_class, max_input_fct=lambda node: 32, maker=None):
     r"""Create a recursive function that fuses `Elemwise` `Op`\s.
 
@@ -902,6 +957,13 @@ if config.tensor__local_elemwise_fusion:
     # Must be after gpu(48.5) and before AddDestroyHandler(49.5)
     fuse_seqopt = SequenceDB()
     fuse_seqopt.register(
+        "local_add_mul_fusion",
+        EquilibriumGraphRewriter(rewriters=[local_add_mul_fusion], max_use_ratio=1000),
+        "fast_run",
+        "fusion",
+        position=0,
+    )
+    fuse_seqopt.register(
         "composite_elemwise_fusion",
         FusionOptimizer(local_elemwise_fusion),
         "fast_run",
@@ -912,15 +974,6 @@ if config.tensor__local_elemwise_fusion:
         "elemwise_fusion",
         fuse_seqopt,
         "fast_run",
-        "fusion",
-        "local_elemwise_fusion",
-        "FusionOptimizer",
-        position=49,
-    )
-else:
-    compile.optdb.register(  # type: ignore
-        "elemwise_fusion",
-        FusionOptimizer(local_elemwise_fusion),
         "fusion",
         "local_elemwise_fusion",
         "FusionOptimizer",

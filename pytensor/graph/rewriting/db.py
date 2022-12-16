@@ -427,7 +427,7 @@ class SequenceDB(RewriteDatabase):
                 position_cutoff = tags[0].position_cutoff
 
             # The RewriteDatabaseQuery instance might contain extra rewrites which need
-            # to be added the the sequence of rewrites (don't alter the
+            # to be added to the sequence of rewrites (don't alter the
             # original dictionary)
             if len(tags[0].extra_rewrites) > 0:
                 position_dict = position_dict.copy()
