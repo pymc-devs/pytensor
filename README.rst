@@ -1,4 +1,4 @@
-.. image:: https://cdn.rawgit.com/pymc-devs/pytensor/main/doc/logo/PyTensor_RGB.svg
+.. image:: https://cdn.rawgit.com/pymc-devs/pytensor/main/doc/images/PyTensor_RGB.svg
     :height: 100px
     :alt: PyTensor logo
     :align: center
