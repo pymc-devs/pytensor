@@ -116,7 +116,7 @@ pygments_style = "sphinx"
 # https://github.com/readthedocs/sphinx_rtd_theme/issues/766#issuecomment-629666319
 # html4_writer = False
 
-html_logo = "images/pytensor_logo.svg"
+html_logo = "images/PyTensor_RGB.svg"
 html_theme = "pymc_sphinx_theme"
 html_theme_options = {
     "use_search_override": False,
@@ -139,7 +139,7 @@ html_context = {
 
 # The name of an image file (within the static path) to place at the top of
 # the sidebar.
-# html_logo = 'images/pytensor_logo.svg'
+# html_logo = 'images/PyTensor_RGB.svg'
 
 # The name of an image file (within the static path) to use as favicon of the
 # docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32
@@ -243,7 +243,7 @@ latex_documents = [
 
 # The name of an image file (relative to this directory) to place at the top of
 # the title page.
-# latex_logo = 'images/pytensor_logo.svg'
+# latex_logo = 'images/PyTensor_RGB.svg'
 
 # For "manual" documents, if this is true, then toplevel headings are parts,
 # not chapters.
