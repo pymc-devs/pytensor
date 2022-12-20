@@ -698,7 +698,7 @@ def numba_funcify_Reshape(op, **kwargs):
 
         @numba_njit
         def reshape(x, shape):
-            return x.item()
+            return np.asarray(x.item())
 
     else:
 
