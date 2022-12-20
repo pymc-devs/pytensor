@@ -4,12 +4,16 @@ from functools import partial
 import kanren as K
 import pytest
 
-from pytensor.graph.signature import F, S, expand_dims_broadcast
+from pytensor.graph.signature import Arg, F, S, expand_dims_broadcast
 
 
 @dataclasses.dataclass(frozen=True)
 class MyDim:
     name: str
+
+    def __str__(self) -> str:
+        # for fancy dispaly in args
+        return f"~{self.name}~"
 
 
 @pytest.mark.parametrize(
@@ -20,6 +24,7 @@ class MyDim:
         ((MyDim("a"), 3), [(MyDim("a"), 3)], [(3, 5)]),
         ((S("a"), S("a")), [(1, 1), (1, 2, 2), (MyDim("a"), MyDim("a"))], [(1, 2)]),
         ((S("a"), F(-1), S("a")), [(1, 1), (2, 1, 2)], [(1, 2, 2)]),
+        ((S("a"), F(2), S("a")), [(1, 3, 4, 1), (2, 2, 4, 2)], [(1, 2, 2, 2)]),
         ((S("a"), F(2), S("a")), [(1, 3, 4, 1), (2, 2, 4, 2)], [(1, 2, 2, 2)]),
     ],
 )
@@ -35,9 +40,101 @@ def test_expand_dims_broadcast(spec, match, fail):
 
 def test_expand_dims_broadcast_value_errors():
     spec = (None, 3)
-    with pytest.raises(ValueError, match="size of spec is less than required ndim"):
+    with pytest.raises(
+        ValueError, match="requested 4 ndims but the spec only provides maximum 3"
+    ):
         expand_dims_broadcast(4, spec, bmax=1, S=dict())
-    with pytest.raises(ValueError, match="size of spec is greater than required ndim"):
+    with pytest.raises(
+        ValueError, match="requested 1 ndims but the spec only provides minimum 2"
+    ):
         expand_dims_broadcast(1, spec, S=dict())
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="more than two fills with -1 or trailing range found"
+    ):
         expand_dims_broadcast(5, (F(-1), 1, F(-1)), S=dict())
+    with pytest.raises(
+        ValueError, match="more than two fills with -1 or trailing range found"
+    ):
+        expand_dims_broadcast(5, (F(-1), 1, F(2, trailing=True)), S=dict())
+
+
+@pytest.mark.parametrize(
+    ["arg", "display", "match", "fail"],
+    [
+        (Arg(3, 3), "(.+:*.,3,3)", [(3, 3), (1, 3, 3)], [(2, 2)]),
+        (Arg(3, 3, broadcast="="), "(.=:*.,3,3)", [(3, 3), (1, 3, 3)], [(2, 2)]),
+        (
+            Arg(3, 3, bmax=0),
+            "(3,3)",
+            [(3, 3)],
+            [
+                [
+                    (1, 3, 3),
+                    ValueError,
+                    "requested 3 ndims but the spec only provides maximum 2",
+                ],
+                (2, 2),
+                [
+                    (1,),
+                    ValueError,
+                    "requested 1 ndims but the spec only provides minimum 2",
+                ],
+            ],
+        ),
+        (
+            Arg(3, 3, bmax=1),
+            "(.+:1.,3,3)",
+            [(3, 3), (1, 3, 3)],
+            [
+                (2, 2),
+                [
+                    (1, 1, 3, 3),
+                    ValueError,
+                    "requested 4 ndims but the spec only provides maximum 3",
+                ],
+            ],
+        ),
+        (Arg(None, 3), "(.+:*.,None,3)", [(4, 3), (MyDim("b"), 3)], [(4, 5)]),
+        (Arg(MyDim("a"), 3), "(.+:*.,~a~,3)", [(MyDim("a"), 3)], [(3, 5)]),
+        (
+            Arg(S("a"), S("a")),
+            "(.+:*.,a,a)",
+            [(1, 1), (1, 2, 2), (MyDim("a"), MyDim("a"))],
+            [(1, 2)],
+        ),
+        (Arg(S("a"), F(-1), S("a")), "(a,.+*.,a)", [(1, 1), (2, 1, 2)], [(1, 2, 2)]),
+        (
+            Arg(S("a"), F(2), S("a")),
+            "(.+:*.,a,.+2.,a)",
+            [(1, 3, 4, 1), (2, 2, 4, 2)],
+            [(1, 2, 2, 2)],
+        ),
+        (
+            Arg(S("a"), F(2, trailing=True), S("a")),
+            "(a,.+:2.,a)",
+            [(1, 3, 1), (2, 2, 4, 2)],
+            [
+                [
+                    (1, 2, 1, 2, 1),
+                    ValueError,
+                    "requested 5 ndims but the spec only provides maximum 4",
+                ]
+            ],
+        ),
+    ],
+)
+def test_single_arg(arg, display, match, fail):
+    assert str(arg) == display
+    for m in match:
+        sp = arg(len(m), S=dict())
+        assert len(K.run(0, sp, K.eq(sp, m))) == 1
+    for f in fail:
+        if isinstance(f, list):
+            f, e, match = f
+            with pytest.raises(e, match=match):
+                print(f)
+                sp = arg(len(f), S=dict())
+                print(sp)
+        else:
+            sp = arg(len(f), S=dict())
+            assert len(K.run(0, sp, K.eq(sp, f))) == 0
