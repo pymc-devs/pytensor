@@ -1,9 +1,9 @@
-from llvmlite import ir
-from numba import types
-from numba.np import arrayobj
-from numba.core import cgutils
 import numba
 import numpy as np
+from llvmlite import ir
+from numba import types
+from numba.core import cgutils
+from numba.np import arrayobj
 
 
 def compute_itershape(
@@ -35,7 +35,9 @@ def compute_itershape(
     return shape
 
 
-def make_outputs(ctx, builder: ir.IRBuilder, iter_shape, out_bc, dtypes, inplace, inputs, input_types):
+def make_outputs(
+    ctx, builder: ir.IRBuilder, iter_shape, out_bc, dtypes, inplace, inputs, input_types
+):
     arrays = []
     ar_types: list[types.Array] = []
     one = ir.IntType(64)(1)
@@ -52,8 +54,7 @@ def make_outputs(ctx, builder: ir.IRBuilder, iter_shape, out_bc, dtypes, inplace
         # This is actually an interal numba function, I guess we could
         # call `numba.nd.unsafe.ndarray` instead?
         shape = [
-            length if not bc_dim else one
-            for length, bc_dim in zip(iter_shape, bc)
+            length if not bc_dim else one for length, bc_dim in zip(iter_shape, bc)
         ]
         array = arrayobj._empty_nd_impl(ctx, builder, arrtype, shape)
         arrays.append(array)
@@ -84,7 +85,7 @@ def make_loop_call(
     safe = (False, False)
     n_outputs = len(outputs)
 
-    #context.printf(builder, "iter shape: " + ', '.join(["%i"] * len(iter_shape)) + "\n", *iter_shape)
+    # context.printf(builder, "iter shape: " + ', '.join(["%i"] * len(iter_shape)) + "\n", *iter_shape)
 
     # Lower the code of the scalar function so that we can use it in the inner loop
     # Caching is set to false to avoid a numba bug TODO ref?
@@ -155,12 +156,8 @@ def make_loop_call(
     # Load values from input arrays
     input_vals = []
     for array_info, bc in zip(inputs, input_bc, strict=True):
-        idxs_bc = [
-            zero if bc else idx for idx, bc in zip(idxs, bc, strict=True)
-        ]
-        ptr = cgutils.get_item_pointer2(
-            context, builder, *array_info, idxs_bc, *safe
-        )
+        idxs_bc = [zero if bc else idx for idx, bc in zip(idxs, bc, strict=True)]
+        ptr = cgutils.get_item_pointer2(context, builder, *array_info, idxs_bc, *safe)
         val = builder.load(ptr)
         # val.set_metadata("alias.scope", input_scope_set)
         # val.set_metadata("noalias", output_scope_set)
@@ -193,12 +190,9 @@ def make_loop_call(
             # store.set_metadata("noalias", input_scope_set)
         else:
             idxs_bc = [
-                zero if bc else idx
-                for idx, bc in zip(idxs, output_bc[i], strict=True)
+                zero if bc else idx for idx, bc in zip(idxs, output_bc[i], strict=True)
             ]
-            ptr = cgutils.get_item_pointer2(
-                context, builder, *outputs[i], idxs_bc
-            )
+            ptr = cgutils.get_item_pointer2(context, builder, *outputs[i], idxs_bc)
             # store = builder.store(value, ptr)
             arrayobj.store_item(context, builder, output_types[i], value, ptr)
             # store.set_metadata("alias.scope", output_scope_set)
@@ -210,9 +204,7 @@ def make_loop_call(
             if accu_depth == depth:
                 idxs_bc = [
                     zero if bc else idx
-                    for idx, bc in zip(
-                        idxs, output_bc[output], strict=True
-                    )
+                    for idx, bc in zip(idxs, output_bc[output], strict=True)
                 ]
                 ptr = cgutils.get_item_pointer2(
                     context, builder, *outputs[output], idxs_bc
@@ -221,9 +213,7 @@ def make_loop_call(
                 # load.set_metadata("alias.scope", output_scope_set)
                 # load.set_metadata("noalias", input_scope_set)
                 # store = builder.store(load, ptr)
-                arrayobj.store_item(
-                    context, builder, output_types[output], load, ptr
-                )
+                arrayobj.store_item(context, builder, output_types[output], load, ptr)
                 # store.set_metadata("alias.scope", output_scope_set)
                 # store.set_metadata("noalias", input_scope_set)
         loop.__exit__(None, None, None)
