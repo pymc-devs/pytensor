@@ -3,32 +3,55 @@ import numpy as np
 from llvmlite import ir
 from numba import types
 from numba.core import cgutils
+from numba.core.base import BaseContext
 from numba.np import arrayobj
 
 
 def compute_itershape(
-    ctx,
+    ctx: BaseContext,
     builder: ir.IRBuilder,
     in_shapes,
     broadcast_pattern,
 ):
     one = ir.IntType(64)(1)
     ndim = len(in_shapes[0])
-    #shape = [ir.IntType(64)(1) for _ in range(ndim)]
     shape = [None] * ndim
     for i in range(ndim):
-        # TODO Error checking...
-        # What if all shapes are 0?
-        for bc, in_shape in zip(broadcast_pattern, in_shapes):
+        for j, (bc, in_shape) in enumerate(
+            zip(broadcast_pattern, in_shapes, strict=True)
+        ):
+            length = in_shape[i]
             if bc[i]:
-                # TODO
-                # raise error if length != 1
-                pass
+                with builder.if_then(
+                    builder.icmp_unsigned("!=", length, one), likely=False
+                ):
+                    msg = (
+                        f"Input {j} to elemwise is expected to have shape 1 in axis {i}"
+                    )
+                    ctx.call_conv.return_user_exc(builder, ValueError, (msg,))
+            elif shape[i] is not None:
+                with builder.if_then(
+                    builder.icmp_unsigned("!=", length, shape[i]), likely=False
+                ):
+                    with builder.if_else(builder.icmp_unsigned("==", length, one)) as (
+                        then,
+                        otherwise,
+                    ):
+                        with then:
+                            msg = (
+                                f"Incompative shapes for input {j} and axis {i} of "
+                                f"elemwise. Input {j} has shape 1, but is not statically "
+                                "known to have shape 1, and thus not broadcastable."
+                            )
+                            ctx.call_conv.return_user_exc(builder, ValueError, (msg,))
+                        with otherwise:
+                            msg = (
+                                f"Input {j} to elemwise has an incompatible "
+                                f"shape in axis {i}."
+                            )
+                            ctx.call_conv.return_user_exc(builder, ValueError, (msg,))
             else:
-                # TODO
-                # if shape[i] is not None:
-                #     raise Error if !=
-                shape[i] = in_shape[i]
+                shape[i] = length
     for i in range(ndim):
         if shape[i] is None:
             shape[i] = one

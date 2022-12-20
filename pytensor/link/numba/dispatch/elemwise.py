@@ -454,10 +454,6 @@ def _vectorized(
     inplace_pattern,
     inputs,
 ):
-    #if not isinstance(scalar_func, types.Literal):
-    #    raise TypingError("scalar func must be literal.")
-    #scalar_func = scalar_func.literal_value
-
     arg_types = [
         scalar_func,
         input_bc_patterns,
@@ -516,8 +512,6 @@ def _vectorized(
     inplace_pattern_val = inplace_pattern
     input_types = inputs
 
-    #assert not inplace_pattern_val
-
     def codegen(
         ctx,
         builder,
@@ -551,18 +545,6 @@ def _vectorized(
             input_types,
         )
 
-        def _check_input_shapes(*_):
-            # TODO impl
-            return
-
-        _check_input_shapes(
-            ctx,
-            builder,
-            iter_shape,
-            inputs,
-            input_bc_patterns_val,
-        )
-
         elemwise_codegen.make_loop_call(
             typingctx,
             ctx,
@@ -594,7 +576,6 @@ def _vectorized(
             builder, sig.return_type, [out._getvalue() for out in outputs]
         )
 
-    # TODO check inplace_pattern
     ret_type = types.Tuple(
         [
             types.Array(numba.from_dtype(np.dtype(dtype)), ndim, "C")
