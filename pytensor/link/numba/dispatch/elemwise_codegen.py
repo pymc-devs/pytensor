@@ -19,9 +19,7 @@ def compute_itershape(
     ndim = len(in_shapes[0])
     shape = [None] * ndim
     for i in range(ndim):
-        for j, (bc, in_shape) in enumerate(
-            zip(broadcast_pattern, in_shapes, strict=True)
-        ):
+        for j, (bc, in_shape) in enumerate(zip(broadcast_pattern, in_shapes)):
             length = in_shape[i]
             if bc[i]:
                 with builder.if_then(
@@ -151,14 +149,10 @@ def make_loop_call(
     # input_scope_set = mod.add_metadata([input_scope, output_scope])
     # output_scope_set = mod.add_metadata([input_scope, output_scope])
 
-    inputs = tuple(
-        extract_array(aryty, ary)
-        for aryty, ary in zip(input_types, inputs, strict=True)
-    )
+    inputs = tuple(extract_array(aryty, ary) for aryty, ary in zip(input_types, inputs))
 
     outputs = tuple(
-        extract_array(aryty, ary)
-        for aryty, ary in zip(output_types, outputs, strict=True)
+        extract_array(aryty, ary) for aryty, ary in zip(output_types, outputs)
     )
 
     zero = ir.Constant(ir.IntType(64), 0)
@@ -189,8 +183,8 @@ def make_loop_call(
 
     # Load values from input arrays
     input_vals = []
-    for array_info, bc in zip(inputs, input_bc, strict=True):
-        idxs_bc = [zero if bc else idx for idx, bc in zip(idxs, bc, strict=True)]
+    for array_info, bc in zip(inputs, input_bc):
+        idxs_bc = [zero if bc else idx for idx, bc in zip(idxs, bc)]
         ptr = cgutils.get_item_pointer2(context, builder, *array_info, idxs_bc, *safe)
         val = builder.load(ptr)
         # val.set_metadata("alias.scope", input_scope_set)
@@ -210,9 +204,7 @@ def make_loop_call(
         output_values = [output_values]
 
     # Update output value or accumulators respectively
-    for i, ((accu, _), value) in enumerate(
-        zip(output_accumulator, output_values, strict=True)
-    ):
+    for i, ((accu, _), value) in enumerate(zip(output_accumulator, output_values)):
         if accu is not None:
             load = builder.load(accu)
             # load.set_metadata("alias.scope", output_scope_set)
@@ -223,9 +215,7 @@ def make_loop_call(
             # store.set_metadata("alias.scope", output_scope_set)
             # store.set_metadata("noalias", input_scope_set)
         else:
-            idxs_bc = [
-                zero if bc else idx for idx, bc in zip(idxs, output_bc[i], strict=True)
-            ]
+            idxs_bc = [zero if bc else idx for idx, bc in zip(idxs, output_bc[i])]
             ptr = cgutils.get_item_pointer2(context, builder, *outputs[i], idxs_bc)
             # store = builder.store(value, ptr)
             arrayobj.store_item(context, builder, output_types[i], value, ptr)
@@ -237,8 +227,7 @@ def make_loop_call(
         for output, (accu, accu_depth) in enumerate(output_accumulator):
             if accu_depth == depth:
                 idxs_bc = [
-                    zero if bc else idx
-                    for idx, bc in zip(idxs, output_bc[output], strict=True)
+                    zero if bc else idx for idx, bc in zip(idxs, output_bc[output])
                 ]
                 ptr = cgutils.get_item_pointer2(
                     context, builder, *outputs[output], idxs_bc
