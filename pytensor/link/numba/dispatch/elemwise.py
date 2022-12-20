@@ -376,6 +376,7 @@ def create_multiaxis_reducer(
     careduce_def_src = f"""
 def {careduce_fn_name}({input_name}):
 {careduce_assign_lines}
+    #return np.asarray({var_name})
     return {var_name}
     """
 
