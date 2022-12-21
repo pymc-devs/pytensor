@@ -16,7 +16,7 @@ from pytensor.tensor.math import All, Any, Max, Mean, Min, Prod, ProdWithoutZero
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 from tests.link.numba.test_basic import (
     compare_numba_and_py,
-    my_multi_out,
+    scalar_my_multi_out,
     set_test_value,
 )
 
@@ -99,8 +99,8 @@ rng = np.random.default_rng(42849)
                 rng.standard_normal(100).astype(config.floatX),
                 rng.standard_normal(100).astype(config.floatX),
             ],
-            lambda x, y: my_multi_out(x, y),
-            NotImplementedError,
+            lambda x, y: scalar_my_multi_out(x, y),
+            None,
         ),
     ],
 )

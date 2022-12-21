@@ -9,6 +9,7 @@ import numba
 import numpy as np
 from numba import TypingError, types
 from numba.core import cgutils
+from numba.core.extending import overload
 from numba.np import arrayobj
 from numpy.core.numeric import normalize_axis_index, normalize_axis_tuple
 
@@ -174,6 +175,7 @@ def create_axis_reducer(
     ndim: int,
     dtype: numba.types.Type,
     keepdims: bool = False,
+    return_scalar=False,
 ) -> numba.core.dispatcher.Dispatcher:
     r"""Create Python function that performs a NumPy-like reduction on a given axis.
 
@@ -284,6 +286,8 @@ def {reduce_elemwise_fn_name}(x):
         inplace_update_statement = indent(inplace_update_statement, " " * 4 * 2)
 
         return_expr = "res" if keepdims else "res.item()"
+        if not return_scalar:
+            return_expr = f"np.asarray({return_expr})"
         reduce_elemwise_def_src = f"""
 def {reduce_elemwise_fn_name}(x):
 
@@ -305,7 +309,13 @@ def {reduce_elemwise_fn_name}(x):
 
 
 def create_multiaxis_reducer(
-    scalar_op, identity, axes, ndim, dtype, input_name="input"
+    scalar_op,
+    identity,
+    axes,
+    ndim,
+    dtype,
+    input_name="input",
+    return_scalar=False,
 ):
     r"""Construct a function that reduces multiple axes.
 
@@ -336,6 +346,8 @@ def create_multiaxis_reducer(
         The number of dimensions of the result.
     dtype:
         The data type of the result.
+    return_scalar:
+        If True, return a scalar, otherwise an array.
 
     Returns
     =======
@@ -370,10 +382,17 @@ def create_multiaxis_reducer(
         )
 
     careduce_assign_lines = indent("\n".join(careduce_lines_src), " " * 4)
+    if not return_scalar:
+        pre_result = "np.asarray"
+        post_result = ""
+    else:
+        pre_result = "np.asarray"
+        post_result = ".item()"
+
     careduce_def_src = f"""
 def {careduce_fn_name}({input_name}):
 {careduce_assign_lines}
-    return np.asarray({var_name})
+    return {pre_result}({var_name}){post_result}
     """
 
     careduce_fn = compile_function_src(
@@ -383,7 +402,7 @@ def {careduce_fn_name}({input_name}):
     return careduce_fn
 
 
-def jit_compile_reducer(node, fn, **kwds):
+def jit_compile_reducer(node, fn, *, reduce_to_scalar=False, **kwds):
     """Compile Python source for reduction loops using additional optimizations.
 
     Parameters
@@ -400,7 +419,7 @@ def jit_compile_reducer(node, fn, **kwds):
     A :func:`numba.njit`-compiled function.
 
     """
-    signature = create_numba_signature(node, reduce_to_scalar=True)
+    signature = create_numba_signature(node, reduce_to_scalar=reduce_to_scalar)
 
     # Eagerly compile the function using increased optimizations.  This should
     # help improve nested loop reductions.
@@ -618,23 +637,58 @@ def numba_funcify_Elemwise(op, node, **kwargs):
     inplace_pattern = tuple(op.inplace_pattern.items())
 
     # numba doesn't support nested literals right now...
-    input_bc_patterns = base64.encodebytes(pickle.dumps(input_bc_patterns)).decode()
-    output_bc_patterns = base64.encodebytes(pickle.dumps(output_bc_patterns)).decode()
-    output_dtypes = base64.encodebytes(pickle.dumps(output_dtypes)).decode()
-    inplace_pattern = base64.encodebytes(pickle.dumps(inplace_pattern)).decode()
+    input_bc_patterns_enc = base64.encodebytes(pickle.dumps(input_bc_patterns)).decode()
+    output_bc_patterns_enc = base64.encodebytes(
+        pickle.dumps(output_bc_patterns)
+    ).decode()
+    output_dtypes_enc = base64.encodebytes(pickle.dumps(output_dtypes)).decode()
+    inplace_pattern_enc = base64.encodebytes(pickle.dumps(inplace_pattern)).decode()
 
-    @numba_njit
     def elemwise_wrapper(*inputs):
         return _vectorized(
             scalar_op_fn,
-            input_bc_patterns,
-            output_bc_patterns,
-            output_dtypes,
-            inplace_pattern,
+            input_bc_patterns_enc,
+            output_bc_patterns_enc,
+            output_dtypes_enc,
+            inplace_pattern_enc,
             inputs,
         )
 
-    return elemwise_wrapper
+    # Pure python implementation, that will be used in tests
+    def elemwise(*inputs):
+        inputs = [np.asarray(input) for input in inputs]
+        inputs_bc = np.broadcast_arrays(*inputs)
+        shape = inputs[0].shape
+        for input, bc in zip(inputs, input_bc_patterns):
+            for length, allow_bc, iter_length in zip(input.shape, bc, shape):
+                if length == 1 and shape and iter_length != 1 and not allow_bc:
+                    raise ValueError("Broadcast not allowed.")
+
+        outputs = []
+        for dtype in output_dtypes:
+            outputs.append(np.empty(shape, dtype=dtype))
+
+        for idx in np.ndindex(shape):
+            vals = [input[idx] for input in inputs_bc]
+            outs = scalar_op_fn(*vals)
+            if not isinstance(outs, tuple):
+                outs = (outs,)
+            for out, out_val in zip(outputs, outs):
+                out[idx] = out_val
+
+        outputs_summed = []
+        for output, bc in zip(outputs, output_bc_patterns):
+            axes = tuple(np.nonzero(bc)[0])
+            outputs_summed.append(output.sum(axes, keepdims=True))
+        if len(outputs_summed) != 1:
+            return tuple(outputs_summed)
+        return outputs_summed[0]
+
+    @overload(elemwise)
+    def ov_elemwise(*inputs):
+        return elemwise_wrapper
+
+    return elemwise
 
 
 @numba_funcify.register(Sum)
@@ -643,7 +697,7 @@ def numba_funcify_Sum(op, node, **kwargs):
     if axes is None:
         axes = list(range(node.inputs[0].ndim))
 
-    axes = list(axes)
+    axes = tuple(axes)
 
     ndim_input = node.inputs[0].ndim
 
@@ -658,15 +712,16 @@ def numba_funcify_Sum(op, node, **kwargs):
 
         @numba_njit(fastmath=True)
         def impl_sum(array):
-            # TODO The accumulation itself should happen in acc_dtype...
-            return np.asarray(array.sum()).astype(np_acc_dtype)
+            return np.asarray(array.sum(), dtype=np_acc_dtype)
 
-    else:
+    elif len(axes) == 0:
 
         @numba_njit(fastmath=True)
         def impl_sum(array):
-            # TODO The accumulation itself should happen in acc_dtype...
-            return array.sum(axes).astype(np_acc_dtype)
+            return array
+
+    else:
+        impl_sum = numba_funcify_CAReduce(op, node, **kwargs)
 
     return impl_sum
 
@@ -705,7 +760,7 @@ def numba_funcify_CAReduce(op, node, **kwargs):
         input_name=input_name,
     )
 
-    careduce_fn = jit_compile_reducer(node, careduce_py_fn)
+    careduce_fn = jit_compile_reducer(node, careduce_py_fn, reduce_to_scalar=False)
     return careduce_fn
 
 
@@ -888,7 +943,12 @@ def numba_funcify_LogSoftmax(op, node, **kwargs):
     if axis is not None:
         axis = normalize_axis_index(axis, x_at.ndim)
         reduce_max_py = create_axis_reducer(
-            scalar_maximum, -np.inf, axis, x_at.ndim, x_dtype, keepdims=True
+            scalar_maximum,
+            -np.inf,
+            axis,
+            x_at.ndim,
+            x_dtype,
+            keepdims=True,
         )
         reduce_sum_py = create_axis_reducer(
             add_as, 0.0, axis, x_at.ndim, x_dtype, keepdims=True
@@ -935,10 +995,17 @@ def numba_funcify_MaxAndArgmax(op, node, **kwargs):
         keep_axes = tuple(i for i in range(x_ndim) if i not in axes)
 
         reduce_max_py_fn = create_multiaxis_reducer(
-            scalar_maximum, -np.inf, axes, x_ndim, x_dtype
+            scalar_maximum,
+            -np.inf,
+            axes,
+            x_ndim,
+            x_dtype,
+            return_scalar=False,
         )
         reduce_max = jit_compile_reducer(
-            Apply(node.op, node.inputs, [node.outputs[0].clone()]), reduce_max_py_fn
+            Apply(node.op, node.inputs, [node.outputs[0].clone()]),
+            reduce_max_py_fn,
+            reduce_to_scalar=False,
         )
 
         reduced_x_ndim = x_ndim - len(axes) + 1

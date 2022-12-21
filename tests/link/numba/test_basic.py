@@ -27,6 +27,7 @@ from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch import numba_typify
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.raise_op import assert_op
+from pytensor.scalar.basic import ScalarOp, as_scalar
 from pytensor.tensor import blas
 from pytensor.tensor import subtensor as at_subtensor
 from pytensor.tensor.elemwise import Elemwise
@@ -63,6 +64,33 @@ class MySingleOut(Op):
         outputs[0][0] = res
 
 
+class ScalarMyMultiOut(ScalarOp):
+    nin = 2
+    nout = 2
+
+    @staticmethod
+    def impl(a, b):
+        res1 = 2 * a
+        res2 = 2 * b
+        return [res1, res2]
+
+    def make_node(self, a, b):
+        a = as_scalar(a)
+        b = as_scalar(b)
+        return Apply(self, [a, b], [a.type(), b.type()])
+
+    def perform(self, node, inputs, outputs):
+        res1, res2 = self.impl(inputs[0], inputs[1])
+        outputs[0][0] = res1
+        outputs[1][0] = res2
+
+
+scalar_my_multi_out = Elemwise(ScalarMyMultiOut())
+scalar_my_multi_out.ufunc = ScalarMyMultiOut.impl
+scalar_my_multi_out.ufunc.nin = 2
+scalar_my_multi_out.ufunc.nout = 2
+
+
 class MyMultiOut(Op):
     nin = 2
     nout = 2
@@ -86,7 +114,6 @@ my_multi_out = Elemwise(MyMultiOut())
 my_multi_out.ufunc = MyMultiOut.impl
 my_multi_out.ufunc.nin = 2
 my_multi_out.ufunc.nout = 2
-
 opts = RewriteDatabaseQuery(include=[None], exclude=["cxx_only", "BlasOpt"])
 numba_mode = Mode(NumbaLinker(), opts)
 py_mode = Mode("py", opts)
@@ -988,8 +1015,8 @@ def test_config_options_parallel():
     x = at.dvector()
 
     with config.change_flags(numba__vectorize_target="parallel"):
-        pytensor_numba_fn = function([x], x * 2, mode=numba_mode)
-        numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["mul"]
+        pytensor_numba_fn = function([x], at.sum(x), mode=numba_mode)
+        numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
         assert numba_mul_fn.targetoptions["parallel"] is True
 
 
@@ -997,8 +1024,9 @@ def test_config_options_fastmath():
     x = at.dvector()
 
     with config.change_flags(numba__fastmath=True):
-        pytensor_numba_fn = function([x], x * 2, mode=numba_mode)
-        numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["mul"]
+        pytensor_numba_fn = function([x], at.sum(x), mode=numba_mode)
+        print(list(pytensor_numba_fn.vm.jit_fn.py_func.__globals__.keys()))
+        numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
         assert numba_mul_fn.targetoptions["fastmath"] is True
 
 
@@ -1006,16 +1034,14 @@ def test_config_options_cached():
     x = at.dvector()
 
     with config.change_flags(numba__cache=True):
-        pytensor_numba_fn = function([x], x * 2, mode=numba_mode)
-        numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["mul"]
-        assert not isinstance(
-            numba_mul_fn._dispatcher.cache, numba.core.caching.NullCache
-        )
+        pytensor_numba_fn = function([x], at.sum(x), mode=numba_mode)
+        numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
+        assert not isinstance(numba_mul_fn._cache, numba.core.caching.NullCache)
 
     with config.change_flags(numba__cache=False):
-        pytensor_numba_fn = function([x], x * 2, mode=numba_mode)
-        numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["mul"]
-        assert isinstance(numba_mul_fn._dispatcher.cache, numba.core.caching.NullCache)
+        pytensor_numba_fn = function([x], at.sum(x), mode=numba_mode)
+        numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
+        assert isinstance(numba_mul_fn._cache, numba.core.caching.NullCache)
 
 
 def test_scalar_return_value_conversion():

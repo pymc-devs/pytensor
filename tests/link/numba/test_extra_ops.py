@@ -32,6 +32,7 @@ def test_Bartlett(val):
             for i in g_fg.inputs
             if not isinstance(i, (SharedVariable, Constant))
         ],
+        assert_fn=lambda x, y: np.testing.assert_allclose(x, y, atol=1e-15),
     )
 
 
