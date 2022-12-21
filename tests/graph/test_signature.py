@@ -61,8 +61,8 @@ def test_expand_dims_broadcast_value_errors():
 @pytest.mark.parametrize(
     ["arg", "display", "match", "fail"],
     [
-        (Arg(3, 3), "(.+:*.,3,3)", [(3, 3), (1, 3, 3)], [(2, 2)]),
-        (Arg(3, 3, broadcast="="), "(.=:*.,3,3)", [(3, 3), (1, 3, 3)], [(2, 2)]),
+        (Arg(3, 3), "(.+[L:]*.,3,3)", [(3, 3), (1, 3, 3)], [(2, 2)]),
+        (Arg(3, 3, broadcast="="), "(.=[L:]*.,3,3)", [(3, 3), (1, 3, 3)], [(2, 2)]),
         (
             Arg(3, 3, bmax=0),
             "(3,3)",
@@ -83,7 +83,7 @@ def test_expand_dims_broadcast_value_errors():
         ),
         (
             Arg(3, 3, bmax=1),
-            "(.+:1.,3,3)",
+            "(.+[L:]1.,3,3)",
             [(3, 3), (1, 3, 3)],
             [
                 (2, 2),
@@ -94,18 +94,18 @@ def test_expand_dims_broadcast_value_errors():
                 ],
             ],
         ),
-        (Arg(None, 3), "(.+:*.,None,3)", [(4, 3), (MyDim("b"), 3)], [(4, 5)]),
-        (Arg(MyDim("a"), 3), "(.+:*.,~a~,3)", [(MyDim("a"), 3)], [(3, 5)]),
+        (Arg(None, 3), "(.+[L:]*.,None,3)", [(4, 3), (MyDim("b"), 3)], [(4, 5)]),
+        (Arg(MyDim("a"), 3), "(.+[L:]*.,~a~,3)", [(MyDim("a"), 3)], [(3, 5)]),
         (
             Arg(S("a"), S("a")),
-            "(.+:*.,a,a)",
+            "(.+[L:]*.,a,a)",
             [(1, 1), (1, 2, 2), (MyDim("a"), MyDim("a"))],
             [(1, 2)],
         ),
         (Arg(S("a"), F(-1), S("a")), "(a,.+*.,a)", [(1, 1), (2, 1, 2)], [(1, 2, 2)]),
         (
             Arg(S("a"), F(2), S("a")),
-            "(.+:*.,a,.+2.,a)",
+            "(.+[L:]*.,a,.+2.,a)",
             [(1, 3, 4, 1), (2, 2, 4, 2)],
             [(1, 2, 2, 2)],
         ),
@@ -158,7 +158,7 @@ def test_prevent_dim_mismatch():
 
 def test_no_infer_dim_with_trailing():
     a = Arg()
-    S = {-1: [(3, True)]}
+    S = {"L": [(3, True)]}
     with pytest.raises(
         ValueError, match="no traling Fill's are allowed when ndim is None"
     ):
@@ -167,9 +167,17 @@ def test_no_infer_dim_with_trailing():
 
 def test_infer_ndim():
     with pytest.raises(
-        ValueError, match=r"fill_size is None but no group\[-1\] information is found"
+        ValueError, match=r"fill_size is None but no group\[L\] information is found"
     ):
         OArg()(None, S=dict())
 
-    ret = OArg()(None, S={-1: [(1, True)]})
+    ret = OArg()(None, S={"L": [(1, True)]})
     assert len(ret) == 1
+
+
+def test_leading_dim_always_a_separate_group():
+    arg = Arg(S("a"), S("a"))
+    s = dict()
+    arg(6, S=s)
+    # none should be the key for leading dims
+    assert len(s["L"]) == 1

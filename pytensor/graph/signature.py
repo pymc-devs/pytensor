@@ -17,29 +17,29 @@ class Fill:
     __slots__ = ("fill", "kind", "group", "trailing")
     fill: int
     kind: Broadcast
-    group: int
+    group: Optional[Union[int, Literal["L"]]]
     trailing: bool
 
     def __init__(
         self,
         fill: int,
         kind: Union[Literal["+", "="], Broadcast] = Broadcast.on,
-        group: int = -1,
+        group: Optional[Union[int, Literal["L"]]] = None,
         trailing=False,
     ):
         self.kind = Broadcast(kind)
         if fill < -1:
             raise ValueError("fill is less than -1")
         self.fill = fill
-        if group < -1:
-            raise ValueError("group is less than -1")
+        if group is not None and group != "L" and group < 0:
+            raise ValueError("group is less than 0")
         self.group = group
         self.trailing = trailing
 
     def __str__(self):
-        if self.group != -1 and self.trailing:
+        if self.group is not None and self.trailing:
             g = f"[{self.group}:]"
-        elif self.group != -1:
+        elif self.group is not None:
             g = f"[{self.group}]"
         elif self.trailing:
             g = ":"
@@ -68,7 +68,10 @@ class Fill:
                 yield dim
 
     def expand(self, fill_size: Optional[int], S: Dict) -> List[K.Var]:
-        seen_n = _default_get(S, self.group, list)
+        if self.group is not None:
+            seen_n = _default_get(S, self.group, list)
+        else:
+            seen_n = []
         if fill_size is not None:
             n = fill_size
             if not self.trailing and self.fill >= 0:
@@ -231,7 +234,9 @@ def expand_dims_broadcast(
     elif n_fills == 0 and not complete:
         # prepend global broadcasting dimensions
         # trailing=False when the dimension should be instead inferred
-        spec = [Fill(bmax, broadcast, trailing=ndim is not None)] + list(spec)
+        spec = [Fill(bmax, broadcast, trailing=ndim is not None, group="L")] + list(
+            spec
+        )
     elif ndim is None and sum(a.trailing for a in spec if isinstance(a, Fill)):
         raise ValueError("no traling Fill's are allowed when ndim is None")
     if ndim is not None:
@@ -272,9 +277,9 @@ class Arg:
         if n_expand > 1:
             raise ValueError("More than two fills with -1 or trailing range found")
         elif n_expand == 0 and bmax is None:
-            extra = (Fill(-1, broadcast, trailing=trailing),)
+            extra = (Fill(-1, broadcast, trailing=trailing, group="L"),)
         elif n_expand == 0 and bmax is not None and bmax != 0:
-            extra = (Fill(bmax, broadcast, trailing=trailing),)
+            extra = (Fill(bmax, broadcast, trailing=trailing, group="L"),)
         else:
             extra = ()
         self.spec = extra + tuple(spec)
