@@ -126,12 +126,9 @@ class Fill:
 F = Fill
 
 
-@dataclass
+@dataclass(frozen=True, unsafe_hash=True)
 class Symbol:
     name: str
-
-    def __hash__(self) -> int:
-        return hash((self.__class__, self.name))
 
     def __str__(self) -> str:
         return self.name
