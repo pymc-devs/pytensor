@@ -188,8 +188,10 @@ def make_loop_call(
 
     if isinstance(scalar_signature.return_type, (types.Tuple, types.UniTuple)):
         output_values = cgutils.unpack_tuple(builder, output_values)
+        func_output_types = scalar_signature.return_type.types
     else:
         output_values = [output_values]
+        func_output_types = [scalar_signature.return_type]
 
     # Update output value or accumulators respectively
     for i, ((accu, _), value) in enumerate(zip(output_accumulator, output_values)):
@@ -206,6 +208,9 @@ def make_loop_call(
             idxs_bc = [zero if bc else idx for idx, bc in zip(idxs, output_bc[i])]
             ptr = cgutils.get_item_pointer2(context, builder, *outputs[i], idxs_bc)
             # store = builder.store(value, ptr)
+            value = context.cast(
+                builder, value, func_output_types[i], output_types[i].dtype
+            )
             arrayobj.store_item(context, builder, output_types[i], value, ptr)
             # store.set_metadata("alias.scope", output_scope_set)
             # store.set_metadata("noalias", input_scope_set)
@@ -224,6 +229,9 @@ def make_loop_call(
                 # load.set_metadata("alias.scope", output_scope_set)
                 # load.set_metadata("noalias", input_scope_set)
                 # store = builder.store(load, ptr)
+                load = context.cast(
+                    builder, load, func_output_types[output], output_types[output].dtype
+                )
                 arrayobj.store_item(context, builder, output_types[output], load, ptr)
                 # store.set_metadata("alias.scope", output_scope_set)
                 # store.set_metadata("noalias", input_scope_set)
