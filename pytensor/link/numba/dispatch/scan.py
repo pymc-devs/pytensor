@@ -351,8 +351,8 @@ def scan({", ".join(outer_in_names)}):
 {indent(input_storage_block, " " * 4)}
 
     i = 0
-    cond = False
-    while i < n_steps and not cond:
+    cond = np.array(False)
+    while i < n_steps and not cond.item():
         {inner_outputs} = scan_inner_func({inner_in_args})
 {indent(inner_out_post_processing_block, " " * 8)}
 {indent(inner_out_to_outer_out_stmts, " " * 8)}
