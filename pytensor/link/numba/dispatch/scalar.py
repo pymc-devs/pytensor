@@ -38,6 +38,9 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
     # TODO: Do we need to cache these functions so that we don't end up
     # compiling the same Numba function over and over again?
 
+    if not hasattr(op, "nfunc_spec"):
+        return generate_fallback_impl(op, node, **kwargs)
+
     scalar_func_path = op.nfunc_spec[0]
     scalar_func_numba = None
 

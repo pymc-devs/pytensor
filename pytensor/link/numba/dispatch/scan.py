@@ -17,7 +17,11 @@ from pytensor.tensor.type import TensorType
 
 
 def idx_to_str(
-    array_name: str, offset: int, size: Optional[str] = None, idx_symbol: str = "i"
+    array_name: str,
+    offset: int,
+    size: Optional[str] = None,
+    idx_symbol: str = "i",
+    allow_scalar=False,
 ) -> str:
     if offset < 0:
         indices = f"{idx_symbol} + {array_name}.shape[0] - {offset}"
@@ -32,7 +36,10 @@ def idx_to_str(
         # compensate for this poor `Op`/rewrite design and implementation.
         indices = f"({indices}) % {size}"
 
-    return f"{array_name}[{indices}]"
+    if allow_scalar:
+        return f"{array_name}[{indices}]"
+    else:
+        return f"np.asarray({array_name}[{indices}])"
 
 
 @overload(range)
@@ -115,7 +122,9 @@ def numba_funcify_Scan(op, node, **kwargs):
         indexed_inner_in_str = (
             storage_name
             if tap_offset is None
-            else idx_to_str(storage_name, tap_offset, size=storage_size_var)
+            else idx_to_str(
+                storage_name, tap_offset, size=storage_size_var, allow_scalar=False
+            )
         )
         inner_in_exprs.append(indexed_inner_in_str)
 
@@ -232,7 +241,12 @@ def numba_funcify_Scan(op, node, **kwargs):
                 )
                 for out_tap in output_taps:
                     inner_out_to_outer_in_stmts.append(
-                        idx_to_str(storage_name, out_tap, size=storage_size_name)
+                        idx_to_str(
+                            storage_name,
+                            out_tap,
+                            size=storage_size_name,
+                            allow_scalar=True,
+                        )
                     )
 
                 add_output_storage_post_proc_stmt(
@@ -269,7 +283,7 @@ def numba_funcify_Scan(op, node, **kwargs):
             storage_size_name = f"{outer_in_name}_len"
 
             inner_out_to_outer_in_stmts.append(
-                idx_to_str(storage_name, 0, size=storage_size_name)
+                idx_to_str(storage_name, 0, size=storage_size_name, allow_scalar=True)
             )
             add_output_storage_post_proc_stmt(storage_name, (0,), storage_size_name)
 

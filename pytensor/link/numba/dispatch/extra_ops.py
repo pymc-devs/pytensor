@@ -364,6 +364,7 @@ def numba_funcify_BroadcastTo(op, node, **kwargs):
         lambda _: 0, len(node.inputs) - 1
     )
 
+    # TODO broadcastable checks
     @numba_basic.numba_njit
     def broadcast_to(x, *shape):
         scalars_shape = create_zeros_tuple()

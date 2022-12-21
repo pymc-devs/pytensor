@@ -117,19 +117,6 @@ def make_loop_call(
 
     # context.printf(builder, "iter shape: " + ', '.join(["%i"] * len(iter_shape)) + "\n", *iter_shape)
 
-    # Lower the code of the scalar function so that we can use it in the inner loop
-    # Caching is set to false to avoid a numba bug TODO ref?
-    inner_func = context.compile_subroutine(
-        builder,
-        # I don't quite understand why we need to access `dispatcher` here.
-        # The object does seem to be a dispatcher already? But it is missing
-        # attributes...
-        scalar_func.dispatcher,
-        scalar_signature,
-        caching=False,
-    )
-    inner = inner_func.fndesc
-
     # Extract shape and stride information from the array.
     # For later use in the loop body to do the indexing
     def extract_array(aryty, obj):
@@ -191,14 +178,15 @@ def make_loop_call(
         # val.set_metadata("noalias", output_scope_set)
         input_vals.append(val)
 
-    # Call scalar function
-    output_values = context.call_internal(
-        builder,
-        inner,
-        scalar_signature,
-        input_vals,
-    )
-    if isinstance(scalar_signature.return_type, types.Tuple):
+    inner_codegen = context.get_function(scalar_func, scalar_signature)
+
+    if isinstance(
+        scalar_signature.args[0], (types.StarArgTuple, types.StarArgUniTuple)
+    ):
+        input_vals = [context.make_tuple(builder, scalar_signature.args[0], input_vals)]
+    output_values = inner_codegen(builder, input_vals)
+
+    if isinstance(scalar_signature.return_type, (types.Tuple, types.UniTuple)):
         output_values = cgutils.unpack_tuple(builder, output_values)
     else:
         output_values = [output_values]

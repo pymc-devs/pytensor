@@ -204,7 +204,7 @@ enable_slice_boxing()
 
 
 def to_scalar(x):
-    raise NotImplementedError()
+    return np.asarray(x).item()
 
 
 @numba.extending.overload(to_scalar)
@@ -543,7 +543,7 @@ def {fn_name}({", ".join(input_names)}):
     {index_prologue}
     {indices_creation_src}
     {index_body}
-    return z
+    return np.asarray(z)
     """
 
     return subtensor_def_src
@@ -665,7 +665,7 @@ def numba_funcify_Shape_i(op, **kwargs):
 
     @numba_njit
     def shape_i(x):
-        return np.shape(x)[i]
+        return np.asarray(np.shape(x)[i])
 
     return shape_i
 
