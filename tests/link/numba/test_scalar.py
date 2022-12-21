@@ -97,7 +97,7 @@ def test_Clip(v, min, max):
     ],
 )
 def test_Composite(inputs, input_values, scalar_fn):
-    composite_inputs = [aes.float64(i.name) for i in inputs]
+    composite_inputs = [aes.ScalarType(config.floatX)(name=i.name) for i in inputs]
     comp_op = Elemwise(Composite(composite_inputs, [scalar_fn(*composite_inputs)]))
     out_fg = FunctionGraph(inputs, [comp_op(*inputs)])
     compare_numba_and_py(out_fg, input_values)
