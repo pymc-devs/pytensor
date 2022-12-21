@@ -68,7 +68,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ needs.changes.outputs.changes == 'true' && needs.style.result == 'success' }}
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         python-version: ["3.8", "3.10"]
         fast-compile: [0,1]
@@ -135,7 +135,7 @@ jobs:
           if [[ $FAST_COMPILE == "1" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,mode=FAST_COMPILE; fi
           if [[ $FLOAT32 == "1" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,floatX=float32; fi
           export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
-          python -m pytest -x -r A --verbose --runslow --cov=pytensor/ --cov-report=xml:coverage/coverage-${MATRIX_ID}.xml --no-cov-on-fail $PART --benchmark-skip
+          python -m pytest -r A --verbose --runslow --cov=pytensor/ --cov-report=xml:coverage/coverage-${MATRIX_ID}.xml --no-cov-on-fail $PART --benchmark-skip
         env:
           MATRIX_ID: ${{ steps.matrix-id.outputs.id }}
           MKL_THREADING_LAYER: GNU
@@ -159,7 +159,7 @@ jobs:
       runs-on: ubuntu-latest
       if: ${{ needs.changes.outputs.changes == 'true' && needs.style.result == 'success' }}
       strategy:
-        fail-fast: true
+        fail-fast: false
       steps:
         - uses: actions/checkout@v3
           with:
