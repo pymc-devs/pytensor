@@ -67,15 +67,26 @@ class Fill:
                 bcast.append(dim)
                 yield dim
 
-    def expand(self, fill_size: int, S: Dict) -> List[K.Var]:
+    def expand(self, fill_size: Optional[int], S: Dict) -> List[K.Var]:
         seen_n = _default_get(S, self.group, list)
-        n = fill_size
-        if not self.trailing and self.fill >= 0:
-            n = self.fill
-        elif self.trailing and self.fill >= 0 and self.fill < n:
-            raise ValueError(
-                f"trailing is True and asked to expand to {n} greater than {self.fill}"
-            )
+        if fill_size is not None:
+            n = fill_size
+            if not self.trailing and self.fill >= 0:
+                n = self.fill
+            elif self.trailing and self.fill >= 0 and self.fill < n:
+                raise ValueError(
+                    f"trailing is True and asked to expand to {n} greater than {self.fill}"
+                )
+        else:
+            if self.trailing:
+                raise ValueError(
+                    "trailing is True and trying to infer n with fill_size None"
+                )
+            elif not seen_n:
+                raise ValueError(
+                    f"fill_size is None but no group[{self.group}] information is found"
+                )
+            n = max(s for s, _ in seen_n)
         self.check_integrity(seen_n, n, self.trailing)
         seen_n.append((n, self.trailing))
         if self.fill == -1 or self.trailing:
@@ -88,13 +99,17 @@ class Fill:
             )
 
     @staticmethod
-    def check_integrity(seen_n: List[Tuple[int, bool]], n: int, trailing: bool):
+    def check_integrity(
+        seen_n: List[Tuple[int, bool]], n: Optional[int], trailing: bool
+    ):
+        if n is None:
+            return
         not_trailed = [s for (s, t) in seen_n if not t]
         trailed = [s for (s, t) in seen_n if t]
         if not trailing and not_trailed and n != not_trailed[0]:
             raise ValueError(
-                "The expansion pattern that do not trail i.e. "
-                "'...' or '.[g].' do not match in lengths"
+                "The expansion pattern that does not trail i.e. "
+                "'...' or '.[g].' does not match in length with other similar groups"
             )
         if (not trailing and trailed and max(trailed) > n) or (
             trailing and not_trailed and max(not_trailed) < n
@@ -133,22 +148,22 @@ def _default_get(S, key, cls):
 
 
 @singledispatch
-def expand_arg(a, S: Dict, fill_size: int) -> List:
+def expand_arg(a, S: Dict, fill_size: Optional[int]) -> List:
     return [a]
 
 
 @expand_arg.register(Fill)
-def _(a: Fill, S: Dict, fill_size: int) -> List:
+def _(a: Fill, S: Dict, fill_size: Optional[int]) -> List:
     return a.expand(fill_size, S)
 
 
 @expand_arg.register(Symbol)
-def _(a: Symbol, S: Dict, fill_size: int):
+def _(a: Symbol, S: Dict, fill_size: Optional[int]):
     return [_default_get(S, a, K.var)]
 
 
 @expand_arg.register(type(None))
-def _(a: Symbol, S: Dict, fill_size: int):
+def _(a: Symbol, S: Dict, fill_size: Optional[int]):
     return [K.var()]
 
 
@@ -170,7 +185,7 @@ def length_hint(a, max=False):
 
 
 def expand_dims_broadcast(
-    ndim: int,
+    ndim: Optional[int],
     spec: Sequence[Any],
     broadcast: Union[Literal["+", "="], Broadcast] = "+",
     *,
@@ -178,24 +193,61 @@ def expand_dims_broadcast(
     bmax: int = -1,
     complete=False,
 ) -> Tuple[Any, ...]:
+    """_summary_
+
+    Parameters
+    ----------
+    ndim : Optional[int]
+        set as int to iver trailing or expanding dimensions, set to none to infer vice versa,
+        trailing dimensions are not allowerd in this case because the whole group dimension
+        information is used.
+    spec : Sequence[Any]
+        Sequence of dimension specifiers. Could be `Fill`, `Symbol`, `int`, `None` or a custom object
+    S : Dict
+        Context for the dimension expansion, should be shared within a group of related variables
+    broadcast : Union[Literal["+", "="], Broadcast]
+        Action on broadcasting leading dimension, default "+" which is regular broadcast
+    bmax : int, optional
+        Number of dimensions to support in broadcast expansion, by default -1
+    complete : bool, optional
+        Is the `spec` complete and already set all the additional broadcasting patterns, by default False
+
+    Returns
+    -------
+    Tuple[Any, ...]
+       Sequence of dimension specifiers with
+       `Fill`, `Symbol` and `None` expanded to `kanren.Var`,
+       could also contain `int`, `None` or a custom object
+
+    Raises
+    ------
+    ValueError
+        If the constuction failed
+    """
     sizes = list(map(length_hint, spec))
     n_fills = sum(s == 0 for s in sizes)
     if n_fills > 1:
-        raise ValueError("more than two fills with -1 or trailing range found")
+        raise ValueError("more than two Fill's with -1 or trailing range found")
     elif n_fills == 0 and not complete:
         # prepend global broadcasting dimensions
-        spec = [Fill(bmax, broadcast, trailing=True)] + list(spec)
-    max_size = sum(length_hint(s, max=True) for s in spec)
-    if max_size < ndim:
-        raise ValueError(
-            f"requested {ndim} ndims but the spec only provides maximum {max_size}"
-        )
-    min_size = sum(map(length_hint, spec))
-    fill_size = ndim - min_size
-    if fill_size < 0:
-        raise ValueError(
-            f"requested {ndim} ndims but the spec only provides minimum {min_size}"
-        )
+        # trailing=False when the dimension should be instead inferred
+        spec = [Fill(bmax, broadcast, trailing=ndim is not None)] + list(spec)
+    elif ndim is None and sum(a.trailing for a in spec if isinstance(a, Fill)):
+        raise ValueError("no traling Fill's are allowed when ndim is None")
+    if ndim is not None:
+        max_size = sum(length_hint(s, max=True) for s in spec)
+        if max_size < ndim:
+            raise ValueError(
+                f"requested {ndim} ndims but the spec only provides maximum {max_size}"
+            )
+        min_size = sum(map(length_hint, spec))
+        fill_size = ndim - min_size
+        if fill_size < 0:
+            raise ValueError(
+                f"requested {ndim} ndims but the spec only provides minimum {min_size}"
+            )
+    else:
+        fill_size = None
     dims: List[Any] = []
     for arg in reversed(spec):
         args = expand_arg(arg, S, fill_size)
@@ -212,6 +264,7 @@ class Arg:
         *spec: Any,
         broadcast: Union[Literal["+", "="], Broadcast] = "+",
         bmax: Optional[int] = None,
+        trailing=True,
     ) -> None:
         sizes = list(map(length_hint, spec))
         n_expand = sum(s == 0 for s in sizes)
@@ -219,9 +272,9 @@ class Arg:
         if n_expand > 1:
             raise ValueError("More than two fills with -1 or trailing range found")
         elif n_expand == 0 and bmax is None:
-            extra = (Fill(-1, broadcast, trailing=True),)
+            extra = (Fill(-1, broadcast, trailing=trailing),)
         elif n_expand == 0 and bmax is not None and bmax != 0:
-            extra = (Fill(bmax, broadcast, trailing=True),)
+            extra = (Fill(bmax, broadcast, trailing=trailing),)
         else:
             extra = ()
         self.spec = extra + tuple(spec)
@@ -247,3 +300,13 @@ class Arg:
             kanren variables or concrete values
         """
         return expand_dims_broadcast(ndim, self.spec, S=S, complete=True)
+
+
+class OArg(Arg):
+    def __init__(
+        self,
+        *spec: Any,
+        broadcast: Union[Literal["+", "="], Broadcast] = "+",
+        bmax: Optional[int] = None,
+    ) -> None:
+        super().__init__(*spec, broadcast=broadcast, bmax=bmax, trailing=False)

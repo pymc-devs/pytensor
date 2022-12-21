@@ -4,7 +4,7 @@ from functools import partial
 import kanren as K
 import pytest
 
-from pytensor.graph.signature import Arg, F, S, expand_dims_broadcast
+from pytensor.graph.signature import Arg, F, OArg, S, expand_dims_broadcast
 
 
 @dataclasses.dataclass(frozen=True)
@@ -49,11 +49,11 @@ def test_expand_dims_broadcast_value_errors():
     ):
         expand_dims_broadcast(1, spec, S=dict())
     with pytest.raises(
-        ValueError, match="more than two fills with -1 or trailing range found"
+        ValueError, match="more than two Fill's with -1 or trailing range found"
     ):
         expand_dims_broadcast(5, (F(-1), 1, F(-1)), S=dict())
     with pytest.raises(
-        ValueError, match="more than two fills with -1 or trailing range found"
+        ValueError, match="more than two Fill's with -1 or trailing range found"
     ):
         expand_dims_broadcast(5, (F(-1), 1, F(2, trailing=True)), S=dict())
 
@@ -138,3 +138,38 @@ def test_single_arg(arg, display, match, fail):
         else:
             sp = arg(len(f), S=dict())
             assert len(K.run(0, sp, K.eq(sp, f))) == 0
+
+
+def test_prevent_dim_mismatch():
+    # both do not trail
+    a1 = OArg()
+    a2 = OArg()
+    S = dict()
+    _ = a1(2, S=S)
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"The expansion pattern that does not trail i.e. .* "
+            "does not match in length with other similar groups"
+        ),
+    ):
+        _ = a2(3, S=S)
+
+
+def test_no_infer_dim_with_trailing():
+    a = Arg()
+    S = {-1: [(3, True)]}
+    with pytest.raises(
+        ValueError, match="no traling Fill's are allowed when ndim is None"
+    ):
+        _ = a(None, S=S)
+
+
+def test_infer_ndim():
+    with pytest.raises(
+        ValueError, match=r"fill_size is None but no group\[-1\] information is found"
+    ):
+        OArg()(None, S=dict())
+
+    ret = OArg()(None, S={-1: [(1, True)]})
+    assert len(ret) == 1
