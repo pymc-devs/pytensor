@@ -708,17 +708,19 @@ def numba_funcify_Sum(op, node, **kwargs):
 
     np_acc_dtype = np.dtype(acc_dtype)
 
+    out_dtype = np.dtype(node.outputs[0].dtype)
+
     if ndim_input == len(axes):
 
         @numba_njit(fastmath=True)
         def impl_sum(array):
-            return np.asarray(array.sum(), dtype=np_acc_dtype)
+            return np.asarray(array.sum(), dtype=np_acc_dtype).astype(out_dtype)
 
     elif len(axes) == 0:
 
         @numba_njit(fastmath=True)
         def impl_sum(array):
-            return array
+            return np.asarray(array, dtype=out_dtype)
 
     else:
         impl_sum = numba_funcify_CAReduce(op, node, **kwargs)
