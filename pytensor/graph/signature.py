@@ -1,11 +1,33 @@
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from functools import singledispatch
 from itertools import count, islice
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+    cast,
+)
 
 import kanren as K
+import numpy as np
 from typing_extensions import Literal
+
+from pytensor.scalar.basic import upcast
+from pytensor.utils import flatten
+
+
+StateType = Dict[
+    Union[Tuple[int, int], str, int, Tuple[str, int]],
+    Union[List[Tuple[int, bool]], K.var],
+]
 
 
 class Broadcast(Enum):
@@ -52,7 +74,7 @@ class Fill:
 
     __repr__ = __str__
 
-    def expand_inf(self, S: Dict) -> Iterator[K.Var]:
+    def expand_inf(self, S: StateType) -> Iterator[K.Var]:
         # the infinite expansion of the group pattern
         if self.kind == Broadcast.off:
             for i in count():
@@ -67,7 +89,7 @@ class Fill:
                 bcast.append(dim)
                 yield dim
 
-    def expand(self, fill_size: Optional[int], S: Dict) -> List[K.Var]:
+    def expand(self, fill_size: Optional[int], S: StateType) -> List[K.Var]:
         if self.group is not None:
             seen_n = _default_get(S, self.group, list)
         else:
@@ -148,22 +170,22 @@ def _default_get(S, key, cls):
 
 
 @singledispatch
-def expand_arg(a, S: Dict, fill_size: Optional[int]) -> List:
+def expand_arg(a, S: StateType, fill_size: Optional[int]) -> List:
     return [a]
 
 
 @expand_arg.register(Fill)
-def _(a: Fill, S: Dict, fill_size: Optional[int]) -> List:
+def _(a: Fill, S: StateType, fill_size: Optional[int]) -> List:
     return a.expand(fill_size, S)
 
 
 @expand_arg.register(Symbol)
-def _(a: Symbol, S: Dict, fill_size: Optional[int]):
+def _(a: Symbol, S: StateType, fill_size: Optional[int]):
     return [_default_get(S, a, K.var)]
 
 
 @expand_arg.register(type(None))
-def _(a: Symbol, S: Dict, fill_size: Optional[int]):
+def _(a: Symbol, S: StateType, fill_size: Optional[int]):
     return [K.var()]
 
 
@@ -189,7 +211,7 @@ def expand_dims_broadcast(
     spec: Sequence[Any],
     broadcast: Union[Literal["+", "="], Broadcast] = "+",
     *,
-    S: Dict,
+    S: StateType,
     bmax: int = -1,
     complete=False,
 ) -> Tuple[Any, ...]:
@@ -257,6 +279,65 @@ def expand_dims_broadcast(
     return tuple(reversed(dims))
 
 
+class SpecifyDtype(ABC):
+    ...
+
+    @abstractmethod
+    def __call__(self, *args: np.dtype) -> np.dtype:
+        raise NotImplementedError
+
+    @abstractmethod
+    def __str__(self) -> str:
+        raise NotImplementedError
+
+
+class ConstDtype(SpecifyDtype):
+    __slots__ = ("dtype",)
+    dtype: np.dtype
+
+    def __init__(self, dtype: Union[str, np.dtype]) -> None:
+        self.dtype = np.dtype(dtype)
+
+    def __call__(self, *args: np.dtype) -> np.dtype:
+        return self.dtype
+
+    def __str__(self) -> str:
+        return str(self.dtype)
+
+
+D = ConstDtype
+
+
+class PromoteDtype(SpecifyDtype):
+    __slots__ = ("pos",)
+    pos: Tuple[int, ...]
+    default: Optional[np.dtype]
+
+    def __init__(
+        self, p: int, *ps: int, default: Optional[Union[str, np.dtype]] = None
+    ) -> None:
+        self.pos = (p, *ps)
+        if default is not None:
+            self.default = np.dtype(default)
+        else:
+            self.default = None
+
+    def __call__(self, *args: np.dtype) -> Any:
+        if self.default is None:
+            return upcast(*(args[p] for p in self.pos))
+        else:
+            return upcast(self.default, *(args[p] for p in self.pos))
+
+    def __str__(self) -> str:
+        args: Tuple[Union[np.dtype, int], ...] = self.pos
+        if self.default is not None:
+            args = (self.default, *args)
+        return "|".join(map(str, args))
+
+
+P = PromoteDtype
+
+
 class Arg:
     __slots__ = ("spec",)
     spec: Tuple[Any, ...]
@@ -281,13 +362,8 @@ class Arg:
             extra = ()
         self.spec = extra + tuple(spec)
 
-    def __str__(self) -> str:
-        return "(" + ",".join(map(str, self.spec)) + ")"
-
-    __repr__ = __str__
-
-    def __call__(self, ndim, *, S) -> Tuple[Any, ...]:
-        """Bound an argument to dims.
+    def bound(self, ndim, *, S: StateType) -> Tuple[Any, ...]:
+        """Bound an argument to dims and dtype.
 
         Parameters
         ----------
@@ -303,12 +379,114 @@ class Arg:
         """
         return expand_dims_broadcast(ndim, self.spec, S=S, complete=True)
 
+    def __str__(self) -> str:
+        return "(" + ",".join(map(str, self.spec)) + ")"
 
-class OArg(Arg):
+    def __repr__(self) -> str:
+        return str(self)
+
+    @property
+    def min_ndim(self):
+        return sum(map(length_hint, self.spec))
+
+    @property
+    def max_ndim(self):
+        return sum(length_hint(s, max=True) for s in self.spec)
+
+
+@dataclass(frozen=True)
+class AbstractTensor:
+    dtype: np.dtype
+    dims: Tuple[Any, ...]
+
+
+@singledispatch
+def as_abstract(arg) -> AbstractTensor:
+    raise NotImplementedError("can't create an abstract tensor")
+
+
+@as_abstract.register(tuple)
+def _(arg: Tuple):
+    return AbstractTensor(*arg)
+
+
+@as_abstract.register(AbstractTensor)
+def _(arg):
+    return arg
+
+
+class IArg(Arg):
+    __slots__ = ("spec", "dtype")
+    dtype: Tuple[Union[np.dtype, Type]]
+
     def __init__(
         self,
+        dtype: Union[Union[np.dtype, Type], Tuple[Union[np.dtype, Type]], None],
+        *spec: Any,
+        broadcast: Union[Literal["+", "="], Broadcast] = "+",
+        bmax: Optional[int] = None,
+        trailing=True,
+    ) -> None:
+        super().__init__(*spec, broadcast=broadcast, bmax=bmax, trailing=trailing)
+        if dtype is None:
+            dtype = (np.generic,)
+        tdtype = cast(Tuple[Union[np.dtype, Type]], tuple(flatten(dtype)))
+        for d in tdtype:
+            if not np.issubdtype(d, np.generic):
+                raise ValueError(
+                    "dtype should be a subclass from np.generic, see "
+                    "https://numpy.org/doc/stable/reference/arrays.scalars.html"
+                )
+        self.dtype = tdtype
+
+    def __call__(self, dtype: np.dtype, ndim: int, *, S: StateType) -> AbstractTensor:
+        if not any(np.issubdtype(dtype, target) for target in self.dtype):
+            raise ValueError(f"not issubdtype({dtype}, {self.dtype})")
+        return AbstractTensor(dtype, super().bound(ndim, S=S))
+
+
+class OArg(Arg):
+    __slots__ = ("spec", "dtype_promotion")
+
+    dtype_promotion: SpecifyDtype
+
+    def __init__(
+        self,
+        dtype: Union[SpecifyDtype, str, np.dtype],
         *spec: Any,
         broadcast: Union[Literal["+", "="], Broadcast] = "+",
         bmax: Optional[int] = None,
     ) -> None:
         super().__init__(*spec, broadcast=broadcast, bmax=bmax, trailing=False)
+        if not isinstance(dtype, SpecifyDtype):
+            self.dtype_promotion = ConstDtype(dtype)
+        else:
+            self.dtype_promotion = dtype
+
+    def __call__(self, *input_dtypes: np.dtype, S: StateType) -> AbstractTensor:
+        shapes = super().bound(None, S=S)
+        dtype = self.dtype_promotion(*input_dtypes)
+        return AbstractTensor(dtype, shapes)
+
+
+class Signature:
+    def __init__(self, inputs: Sequence[IArg], outputs: Sequence[OArg]) -> None:
+        self.inputs = tuple(inputs)
+        self.outputs = tuple(outputs)
+
+    def __call__(
+        self, *inputs: Any
+    ) -> Tuple[Tuple[AbstractTensor, ...], Tuple[AbstractTensor, ...]]:
+        ainputs: Tuple[AbstractTensor, ...] = tuple(map(as_abstract, inputs))
+        dtypes = [a.dtype for a in ainputs]
+        state: StateType = dict()
+        kinputs = [
+            arg(inp.dtype, len(inp.dims), S=state)
+            for arg, inp in zip(self.inputs, ainputs)
+        ]
+        koutputs = [arg(*dtypes, S=state) for arg in self.outputs]
+        res = K.run(2, (kinputs, koutputs), K.eq(kinputs, ainputs))
+        assert len(res) == 1
+        return cast(
+            Tuple[Tuple[AbstractTensor, ...], Tuple[AbstractTensor, ...]], res[0]
+        )

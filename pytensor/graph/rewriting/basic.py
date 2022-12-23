@@ -40,7 +40,7 @@ from pytensor.utils import flatten
 
 
 if TYPE_CHECKING:
-    from pytensor.graph.rewriting.unify import Var
+    from pytensor.graph.unify import Var
 
 
 _logger = logging.getLogger("pytensor.graph.rewriting.basic")
@@ -1578,7 +1578,7 @@ class PatternNodeRewriter(NodeRewriter):
         often.
 
         """
-        from pytensor.graph.rewriting.unify import convert_strs_to_vars
+        from pytensor.graph.unify import convert_strs_to_vars
 
         var_map: Dict[str, "Var"] = {}
         self.in_pattern = convert_strs_to_vars(in_pattern, var_map=var_map)

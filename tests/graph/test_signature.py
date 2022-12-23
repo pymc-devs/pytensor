@@ -4,7 +4,7 @@ from functools import partial
 import kanren as K
 import pytest
 
-from pytensor.graph.signature import Arg, F, OArg, S, expand_dims_broadcast
+from pytensor.graph.signature import Arg, F, IArg, OArg, S, expand_dims_broadcast
 
 
 @dataclasses.dataclass(frozen=True)
@@ -142,10 +142,10 @@ def test_single_arg(arg, display, match, fail):
 
 def test_prevent_dim_mismatch():
     # both do not trail
-    a1 = OArg()
-    a2 = OArg()
+    a1 = IArg("float32", trailing=False)
+    a2 = IArg("float32", trailing=False)
     S = dict()
-    _ = a1(2, S=S)
+    _ = a1(1, S=S)
     with pytest.raises(
         ValueError,
         match=(
@@ -153,7 +153,7 @@ def test_prevent_dim_mismatch():
             "does not match in length with other similar groups"
         ),
     ):
-        _ = a2(3, S=S)
+        _ = a2(2, S=S)
 
 
 def test_no_infer_dim_with_trailing():
@@ -169,10 +169,10 @@ def test_infer_ndim():
     with pytest.raises(
         ValueError, match=r"fill_size is None but no group\[L\] information is found"
     ):
-        OArg()(None, S=dict())
+        OArg("float32")(S=dict())
 
-    ret = OArg()(None, S={"L": [(1, True)]})
-    assert len(ret) == 1
+    ret = OArg("float32")(S={"L": [(1, True)]})
+    assert len(ret.dims) == 1
 
 
 def test_leading_dim_always_a_separate_group():
