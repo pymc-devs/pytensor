@@ -50,4 +50,5 @@ dependencies:
   - typing_extensions
   # optional
   - cython
-
+  - graphviz
+  - pydot
