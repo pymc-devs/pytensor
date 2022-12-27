@@ -6,7 +6,7 @@ from numba.misc.special import literal_unroll
 
 from pytensor import config
 from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.numba.dispatch.basic import get_numba_type, numba_funcify
+from pytensor.link.numba.dispatch.basic import _numba_funcify, get_numba_type
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.extra_ops import (
     Bartlett,
@@ -22,7 +22,7 @@ from pytensor.tensor.extra_ops import (
 )
 
 
-@numba_funcify.register(Bartlett)
+@_numba_funcify.register(Bartlett)
 def numba_funcify_Bartlett(op, **kwargs):
     @numba_basic.numba_njit(inline="always")
     def bartlett(x):
@@ -31,7 +31,7 @@ def numba_funcify_Bartlett(op, **kwargs):
     return bartlett
 
 
-@numba_funcify.register(CumOp)
+@_numba_funcify.register(CumOp)
 def numba_funcify_CumOp(op, node, **kwargs):
     axis = op.axis
     mode = op.mode
@@ -97,7 +97,7 @@ def numba_funcify_CumOp(op, node, **kwargs):
     return cumop
 
 
-@numba_funcify.register(FillDiagonal)
+@_numba_funcify.register(FillDiagonal)
 def numba_funcify_FillDiagonal(op, **kwargs):
     @numba_basic.numba_njit
     def filldiagonal(a, val):
@@ -107,7 +107,7 @@ def numba_funcify_FillDiagonal(op, **kwargs):
     return filldiagonal
 
 
-@numba_funcify.register(FillDiagonalOffset)
+@_numba_funcify.register(FillDiagonalOffset)
 def numba_funcify_FillDiagonalOffset(op, node, **kwargs):
     @numba_basic.numba_njit
     def filldiagonaloffset(a, val, offset):
@@ -132,7 +132,7 @@ def numba_funcify_FillDiagonalOffset(op, node, **kwargs):
     return filldiagonaloffset
 
 
-@numba_funcify.register(RavelMultiIndex)
+@_numba_funcify.register(RavelMultiIndex)
 def numba_funcify_RavelMultiIndex(op, node, **kwargs):
 
     mode = op.mode
@@ -197,7 +197,7 @@ def numba_funcify_RavelMultiIndex(op, node, **kwargs):
     return ravelmultiindex
 
 
-@numba_funcify.register(Repeat)
+@_numba_funcify.register(Repeat)
 def numba_funcify_Repeat(op, node, **kwargs):
     axis = op.axis
 
@@ -242,7 +242,7 @@ def numba_funcify_Repeat(op, node, **kwargs):
     return repeatop
 
 
-@numba_funcify.register(Unique)
+@_numba_funcify.register(Unique)
 def numba_funcify_Unique(op, node, **kwargs):
     axis = op.axis
 
@@ -288,7 +288,7 @@ def numba_funcify_Unique(op, node, **kwargs):
     return unique
 
 
-@numba_funcify.register(UnravelIndex)
+@_numba_funcify.register(UnravelIndex)
 def numba_funcify_UnravelIndex(op, node, **kwargs):
     order = op.order
 
@@ -323,7 +323,7 @@ def numba_funcify_UnravelIndex(op, node, **kwargs):
     return unravelindex
 
 
-@numba_funcify.register(SearchsortedOp)
+@_numba_funcify.register(SearchsortedOp)
 def numba_funcify_Searchsorted(op, node, **kwargs):
     side = op.side
 
@@ -357,7 +357,7 @@ def numba_funcify_Searchsorted(op, node, **kwargs):
     return searchsorted
 
 
-@numba_funcify.register(BroadcastTo)
+@_numba_funcify.register(BroadcastTo)
 def numba_funcify_BroadcastTo(op, node, **kwargs):
 
     create_zeros_tuple = numba_basic.create_tuple_creator(
@@ -380,7 +380,7 @@ def numba_funcify_BroadcastTo(op, node, **kwargs):
     return broadcast_to
 
 
-@numba_funcify.register(CheckAndRaise)
+@_numba_funcify.register(CheckAndRaise)
 def numba_funcify_CheckAndRaise(op, node, **kwargs):
     error = op.exc_type
     msg = op.msg

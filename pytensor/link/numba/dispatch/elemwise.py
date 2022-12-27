@@ -13,6 +13,7 @@ from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
+    _numba_funcify,
     create_numba_signature,
     create_tuple_creator,
     numba_funcify,
@@ -431,7 +432,7 @@ def create_axis_apply_fn(fn, axis, ndim, dtype):
     return axis_apply_fn
 
 
-@numba_funcify.register(Elemwise)
+@_numba_funcify.register(Elemwise)
 def numba_funcify_Elemwise(op, node, **kwargs):
     # Creating a new scalar node is more involved and unnecessary
     # if the scalar_op is composite, as the fgraph already contains
@@ -492,7 +493,7 @@ def {inplace_elemwise_fn_name}({input_signature_str}):
     return elemwise_fn
 
 
-@numba_funcify.register(CAReduce)
+@_numba_funcify.register(CAReduce)
 def numba_funcify_CAReduce(op, node, **kwargs):
     axes = op.axis
     if axes is None:
@@ -530,7 +531,7 @@ def numba_funcify_CAReduce(op, node, **kwargs):
     return careduce_fn
 
 
-@numba_funcify.register(DimShuffle)
+@_numba_funcify.register(DimShuffle)
 def numba_funcify_DimShuffle(op, node, **kwargs):
     shuffle = tuple(op.shuffle)
     transposition = tuple(op.transposition)
@@ -628,7 +629,7 @@ def numba_funcify_DimShuffle(op, node, **kwargs):
     return dimshuffle
 
 
-@numba_funcify.register(Softmax)
+@_numba_funcify.register(Softmax)
 def numba_funcify_Softmax(op, node, **kwargs):
 
     x_at = node.inputs[0]
@@ -666,7 +667,7 @@ def numba_funcify_Softmax(op, node, **kwargs):
     return softmax
 
 
-@numba_funcify.register(SoftmaxGrad)
+@_numba_funcify.register(SoftmaxGrad)
 def numba_funcify_SoftmaxGrad(op, node, **kwargs):
 
     sm_at = node.inputs[1]
@@ -698,7 +699,7 @@ def numba_funcify_SoftmaxGrad(op, node, **kwargs):
     return softmax_grad
 
 
-@numba_funcify.register(LogSoftmax)
+@_numba_funcify.register(LogSoftmax)
 def numba_funcify_LogSoftmax(op, node, **kwargs):
 
     x_at = node.inputs[0]
@@ -733,7 +734,7 @@ def numba_funcify_LogSoftmax(op, node, **kwargs):
     return log_softmax
 
 
-@numba_funcify.register(MaxAndArgmax)
+@_numba_funcify.register(MaxAndArgmax)
 def numba_funcify_MaxAndArgmax(op, node, **kwargs):
     axis = op.axis
     x_at = node.inputs[0]

@@ -5,9 +5,9 @@ import numpy as np
 
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
+    _numba_funcify,
     get_numba_type,
     int_to_float_fn,
-    numba_funcify,
 )
 from pytensor.tensor.nlinalg import (
     SVD,
@@ -21,7 +21,7 @@ from pytensor.tensor.nlinalg import (
 )
 
 
-@numba_funcify.register(SVD)
+@_numba_funcify.register(SVD)
 def numba_funcify_SVD(op, node, **kwargs):
     full_matrices = op.full_matrices
     compute_uv = op.compute_uv
@@ -45,7 +45,7 @@ def numba_funcify_SVD(op, node, **kwargs):
     return svd
 
 
-@numba_funcify.register(Det)
+@_numba_funcify.register(Det)
 def numba_funcify_Det(op, node, **kwargs):
 
     out_dtype = node.outputs[0].type.numpy_dtype
@@ -58,7 +58,7 @@ def numba_funcify_Det(op, node, **kwargs):
     return det
 
 
-@numba_funcify.register(Eig)
+@_numba_funcify.register(Eig)
 def numba_funcify_Eig(op, node, **kwargs):
 
     out_dtype_1 = node.outputs[0].type.numpy_dtype
@@ -74,7 +74,7 @@ def numba_funcify_Eig(op, node, **kwargs):
     return eig
 
 
-@numba_funcify.register(Eigh)
+@_numba_funcify.register(Eigh)
 def numba_funcify_Eigh(op, node, **kwargs):
     uplo = op.UPLO
 
@@ -109,7 +109,7 @@ def numba_funcify_Eigh(op, node, **kwargs):
     return eigh
 
 
-@numba_funcify.register(Inv)
+@_numba_funcify.register(Inv)
 def numba_funcify_Inv(op, node, **kwargs):
 
     out_dtype = node.outputs[0].type.numpy_dtype
@@ -122,7 +122,7 @@ def numba_funcify_Inv(op, node, **kwargs):
     return inv
 
 
-@numba_funcify.register(MatrixInverse)
+@_numba_funcify.register(MatrixInverse)
 def numba_funcify_MatrixInverse(op, node, **kwargs):
 
     out_dtype = node.outputs[0].type.numpy_dtype
@@ -135,7 +135,7 @@ def numba_funcify_MatrixInverse(op, node, **kwargs):
     return matrix_inverse
 
 
-@numba_funcify.register(MatrixPinv)
+@_numba_funcify.register(MatrixPinv)
 def numba_funcify_MatrixPinv(op, node, **kwargs):
 
     out_dtype = node.outputs[0].type.numpy_dtype
@@ -148,7 +148,7 @@ def numba_funcify_MatrixPinv(op, node, **kwargs):
     return matrixpinv
 
 
-@numba_funcify.register(QRFull)
+@_numba_funcify.register(QRFull)
 def numba_funcify_QRFull(op, node, **kwargs):
     mode = op.mode
 

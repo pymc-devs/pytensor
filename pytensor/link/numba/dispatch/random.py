@@ -5,14 +5,22 @@ import numba.np.unsafe.ndarray as numba_ndarray
 import numpy as np
 from numba import _helperlib, types
 from numba.core import cgutils
-from numba.extending import NativeValue, box, models, register_model, typeof_impl, unbox
+from numba.extending import (
+    NativeValue,
+    box,
+    models,
+    overload,
+    register_model,
+    typeof_impl,
+    unbox,
+)
 from numpy.random import RandomState
 
 import pytensor.tensor.random.basic as aer
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.numba.dispatch.basic import numba_funcify, numba_typify
+from pytensor.link.numba.dispatch.basic import _numba_funcify, numba_const_convert
 from pytensor.link.utils import (
     compile_function_src,
     get_name_for_object,
@@ -78,11 +86,21 @@ def box_random_state(typ, val, c):
     return class_obj
 
 
-@numba_typify.register(RandomState)
-def numba_typify_RandomState(state, **kwargs):
-    # The numba_typify in this case is just an passthrough function
+@overload(np.random.uniform)
+def uniform_empty_size(a, b, size):
+    if isinstance(size, types.Tuple) and size.count == 0:
+
+        def uniform_no_size(a, b, size):
+            return np.random.uniform(a, b)
+
+        return uniform_no_size
+
+
+@numba_const_convert.register(RandomState)
+def numba_const_convert_RandomState(state, **kwargs):
+    # The `numba_const_convert` in this case is just a passthrough function
     # that synchronizes Numba's internal random state with the current
-    # RandomState object
+    # `RandomState` object.
     ints, index = state.get_state()[1:3]
     ptr = _helperlib.rnd_get_np_state_ptr()
     _helperlib.rnd_set_state(ptr, (index, [int(x) for x in ints]))
@@ -189,29 +207,29 @@ def {sized_fn_name}({random_fn_input_names}):
     return random_fn
 
 
-@numba_funcify.register(aer.UniformRV)
-@numba_funcify.register(aer.TriangularRV)
-@numba_funcify.register(aer.BetaRV)
-@numba_funcify.register(aer.NormalRV)
-@numba_funcify.register(aer.LogNormalRV)
-@numba_funcify.register(aer.GammaRV)
-@numba_funcify.register(aer.ChiSquareRV)
-@numba_funcify.register(aer.ParetoRV)
-@numba_funcify.register(aer.GumbelRV)
-@numba_funcify.register(aer.ExponentialRV)
-@numba_funcify.register(aer.WeibullRV)
-@numba_funcify.register(aer.LogisticRV)
-@numba_funcify.register(aer.VonMisesRV)
-@numba_funcify.register(aer.PoissonRV)
-@numba_funcify.register(aer.GeometricRV)
-@numba_funcify.register(aer.HyperGeometricRV)
-@numba_funcify.register(aer.WaldRV)
-@numba_funcify.register(aer.LaplaceRV)
-@numba_funcify.register(aer.BinomialRV)
-@numba_funcify.register(aer.MultinomialRV)
-@numba_funcify.register(aer.RandIntRV)  # only the first two arguments are supported
-@numba_funcify.register(aer.ChoiceRV)  # the `p` argument is not supported
-@numba_funcify.register(aer.PermutationRV)
+@_numba_funcify.register(aer.UniformRV)
+@_numba_funcify.register(aer.TriangularRV)
+@_numba_funcify.register(aer.BetaRV)
+@_numba_funcify.register(aer.NormalRV)
+@_numba_funcify.register(aer.LogNormalRV)
+@_numba_funcify.register(aer.GammaRV)
+@_numba_funcify.register(aer.ChiSquareRV)
+@_numba_funcify.register(aer.ParetoRV)
+@_numba_funcify.register(aer.GumbelRV)
+@_numba_funcify.register(aer.ExponentialRV)
+@_numba_funcify.register(aer.WeibullRV)
+@_numba_funcify.register(aer.LogisticRV)
+@_numba_funcify.register(aer.VonMisesRV)
+@_numba_funcify.register(aer.PoissonRV)
+@_numba_funcify.register(aer.GeometricRV)
+@_numba_funcify.register(aer.HyperGeometricRV)
+@_numba_funcify.register(aer.WaldRV)
+@_numba_funcify.register(aer.LaplaceRV)
+@_numba_funcify.register(aer.BinomialRV)
+@_numba_funcify.register(aer.MultinomialRV)
+@_numba_funcify.register(aer.RandIntRV)  # only the first two arguments are supported
+@_numba_funcify.register(aer.ChoiceRV)  # the `p` argument is not supported
+@_numba_funcify.register(aer.PermutationRV)
 def numba_funcify_RandomVariable(op, node, **kwargs):
     name = op.name
     np_random_func = getattr(np.random, name)
@@ -267,12 +285,12 @@ def {np_random_fn_name}({np_input_names}):
     return make_numba_random_fn(node, np_random_fn)
 
 
-@numba_funcify.register(aer.NegBinomialRV)
+@_numba_funcify.register(aer.NegBinomialRV)
 def numba_funcify_NegBinomialRV(op, node, **kwargs):
     return make_numba_random_fn(node, np.random.negative_binomial)
 
 
-@numba_funcify.register(aer.CauchyRV)
+@_numba_funcify.register(aer.CauchyRV)
 def numba_funcify_CauchyRV(op, node, **kwargs):
     def body_fn(loc, scale):
         return f"    return ({loc} + np.random.standard_cauchy()) / {scale}"
@@ -280,7 +298,7 @@ def numba_funcify_CauchyRV(op, node, **kwargs):
     return create_numba_random_fn(op, node, body_fn)
 
 
-@numba_funcify.register(aer.HalfNormalRV)
+@_numba_funcify.register(aer.HalfNormalRV)
 def numba_funcify_HalfNormalRV(op, node, **kwargs):
     def body_fn(a, b):
         return f"    return {a} + {b} * abs(np.random.normal(0, 1))"
@@ -288,7 +306,7 @@ def numba_funcify_HalfNormalRV(op, node, **kwargs):
     return create_numba_random_fn(op, node, body_fn)
 
 
-@numba_funcify.register(aer.BernoulliRV)
+@_numba_funcify.register(aer.BernoulliRV)
 def numba_funcify_BernoulliRV(op, node, **kwargs):
     out_dtype = node.outputs[1].type.numpy_dtype
 
@@ -308,7 +326,7 @@ def numba_funcify_BernoulliRV(op, node, **kwargs):
     )
 
 
-@numba_funcify.register(aer.CategoricalRV)
+@_numba_funcify.register(aer.CategoricalRV)
 def numba_funcify_CategoricalRV(op, node, **kwargs):
     out_dtype = node.outputs[1].type.numpy_dtype
     size_len = int(get_vector_length(node.inputs[1]))
@@ -321,7 +339,7 @@ def numba_funcify_CategoricalRV(op, node, **kwargs):
             size_tpl = numba_ndarray.to_fixed_tuple(size, size_len)
             p = np.broadcast_to(p, size_tpl + p.shape[-1:])
 
-        unif_samples = np.random.uniform(0, 1, size_tpl)
+        unif_samples = np.asarray(np.random.uniform(0, 1, size_tpl))
 
         res = np.empty(size_tpl, dtype=out_dtype)
         for idx in np.ndindex(*size_tpl):
@@ -332,7 +350,7 @@ def numba_funcify_CategoricalRV(op, node, **kwargs):
     return categorical_rv
 
 
-@numba_funcify.register(aer.DirichletRV)
+@_numba_funcify.register(aer.DirichletRV)
 def numba_funcify_DirichletRV(op, node, **kwargs):
 
     out_dtype = node.outputs[1].type.numpy_dtype
