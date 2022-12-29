@@ -45,7 +45,7 @@ from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_shape, broadcast_to
 from pytensor.tensor.math import all as at_all
 from pytensor.tensor.math import eq
-from pytensor.tensor.shape import Shape_i
+from pytensor.tensor.shape import Shape_i, specify_shape
 from pytensor.tensor.sort import TopKOp
 from pytensor.tensor.type import DenseTensorType, TensorType
 from pytensor.tensor.var import TensorConstant
@@ -89,7 +89,7 @@ def merge_broadcastables(broadcastables):
 
 def broadcast_like(value, template, fgraph, dtype=None):
     """
-    Return a Variable with the same shape and dtype as the template,
+    Return a Variable with the same shape. broadcastable and dtype as the template,
     filled by broadcasting value through it. `value` will be cast as
     necessary.
 
@@ -113,7 +113,8 @@ def broadcast_like(value, template, fgraph, dtype=None):
         new_shape = template.shape
     rval = alloc(value, *new_shape)
     assert rval.type.dtype == dtype
-
+    rval = specify_shape(rval, shape=new_shape, broadcastable=template.broadcastable)
+    assert rval.broadcastable == template.broadcastable
     return rval
 
 
@@ -1157,6 +1158,7 @@ def constant_folding(fgraph, node):
                 output.type.dtype,
                 shape=data.shape,
                 name=output.type.name,
+                broadcastable=output.type.broadcastable,
             )
         else:
             output_type = output.type
@@ -1167,7 +1169,6 @@ def constant_folding(fgraph, node):
         # and not "broaden" them.  This is a case in which types are
         # unnecessarily "broadened"
         # assert not hasattr(output.type, "broadcastable") or output.type.broadcastable == tuple(s == 1 for s in data.shape)
-
         copy_stack_trace(output, v)
 
         rval.append(v)

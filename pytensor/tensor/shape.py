@@ -1,7 +1,7 @@
 import warnings
 from numbers import Number
 from textwrap import dedent
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -392,9 +392,14 @@ class SpecifyShape(COp):
     Maybe in the future we will never do the assert!
     """
 
+    __props__ = ("output_broadcastable",)
     view_map = {0: [0]}
     __props__ = ()
     _f16_ok = True
+
+    def __init__(self, output_broadcastable: Sequence) -> None:
+        super().__init__()
+        self.output_broadcastable = tuple(output_broadcastable)
 
     def make_node(self, x, *shape):
         from pytensor.tensor.basic import get_scalar_constant_value
@@ -432,7 +437,9 @@ class SpecifyShape(COp):
                 except NotScalarConstantError:
                     pass
 
-        out_var = x.type.clone(shape=type_shape)()
+        out_var = x.type.clone(
+            shape=type_shape, broadcastable=self.output_broadcastable
+        )()
 
         return Apply(self, [x, *shape], [out_var])
 
@@ -539,12 +546,10 @@ class SpecifyShape(COp):
         return (2,)
 
 
-_specify_shape = SpecifyShape()
-
-
 def specify_shape(
     x: Union[np.ndarray, Number, Variable],
     shape: Union[ShapeValueType, List[ShapeValueType], Tuple[ShapeValueType, ...]],
+    broadcastable=None,
 ):
     """Specify a fixed shape for a `Variable`.
 
@@ -574,8 +579,9 @@ def specify_shape(
     # If shape does not match x.ndim, we rely on the `Op` to raise a ValueError
     if not new_shape_info and len(shape) == x.type.ndim:
         return x
-
-    return _specify_shape(x, *shape)
+    if broadcastable is None:
+        broadcastable = x.broadcastable
+    return SpecifyShape(broadcastable)(x, *shape)
 
 
 @_get_vector_length.register(SpecifyShape)
@@ -934,7 +940,11 @@ def specify_broadcastable(x, *axes):
         raise ValueError("Trying to specify broadcastable of non-existent dimension")
 
     shape_info = [1 if i in axes else s for i, s in enumerate(x.type.shape)]
-    return specify_shape(x, shape_info)
+    broadcastable = [
+        True if i in axes else b for i, b in enumerate(x.type.broadcastable)
+    ]
+
+    return specify_shape(x, shape_info, broadcastable=broadcastable)
 
 
 class Unbroadcast(COp):

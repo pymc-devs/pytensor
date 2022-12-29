@@ -1099,13 +1099,13 @@ class CSMGradC(_NoPythonCOp):
 csm_grad_c = CSMGradC()
 
 
-@node_rewriter([csm_grad(None)])
+@node_rewriter([csm_grad()])
 def local_csm_grad_c(fgraph, node):
     """
     csm_grad(None) -> csm_grad_c
 
     """
-    if node.op == csm_grad(None):
+    if node.op == csm_grad():
         return [csm_grad_c(*node.inputs)]
     return False
 

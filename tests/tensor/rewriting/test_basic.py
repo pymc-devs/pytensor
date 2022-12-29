@@ -1693,8 +1693,12 @@ class TestLocalElemwiseAlloc:
         ],
     )
     def test_basic(self, expr, x_shape, y_shape):
-        x = at.tensor(dtype="int64", shape=(None,) * len(x_shape), name="x")
-        y = at.tensor(dtype="int64", shape=(None,) * len(y_shape), name="y")
+        x = at.tensor(
+            dtype="int64", broadcastable=tuple(s == 1 for s in x_shape), name="x"
+        )
+        y = at.tensor(
+            dtype="int64", broadcastable=tuple(s == 1 for s in y_shape), name="y"
+        )
         z = expr(x, y)
 
         z_opt = pytensor.function(

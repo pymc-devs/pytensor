@@ -1018,7 +1018,7 @@ class TensorConstant(TensorVariable, Constant[_TensorTypeType]):
             )
 
         # We want all the shape information from `data`
-        new_type = type.clone(shape=data_shape)
+        new_type = type.clone(shape=data_shape, broadcastable=type.broadcastable)
 
         assert not any(s is None for s in new_type.shape)
 

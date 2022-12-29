@@ -1,6 +1,5 @@
 import logging
-import warnings
-from typing import TYPE_CHECKING, Iterable, Literal, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Literal, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -54,6 +53,38 @@ dtype_specs_map = {
 }
 
 
+def infer_shape_broadcastable(
+    shape: Optional[Sequence[Optional[int]]] = None,
+    broadcastable: Optional[Sequence[bool]] = None,
+) -> Tuple[Tuple[Union[int, None], ...], Tuple[bool, ...]]:
+    if broadcastable is not None:
+        broadcastable = tuple(broadcastable)
+    if shape is not None:
+        shape = tuple(shape)
+    if broadcastable is not None and shape is not None:
+        # check that broadcast semantics match shapes
+        if len(broadcastable) != len(shape):
+            raise ValueError(
+                "broadcastable and shape should match in lengths, "
+                f"got {len(broadcastable)} vs {len(shape)}"
+            )
+        # check one by one for more specific error messages
+        for s, b in zip(shape, broadcastable):
+            if s is None and b:
+                raise ValueError(
+                    "Unknown dims can't be broadcastable or should be set explicitly to ones"
+                )
+            elif s is not None and s != 1 and b:
+                raise ValueError("shapes that are not ones can't be set broadcastable")
+    elif shape is not None:
+        broadcastable = tuple(shp == 1 if shp is not None else False for shp in shape)
+    elif broadcastable is not None:
+        shape = tuple(None if bcast is False else 1 for bcast in broadcastable)
+    else:
+        raise TypeError("broadcastable or shape should be provided")
+    return shape, broadcastable
+
+
 class TensorType(CType[np.ndarray], HasDataType, HasShape):
     r"""Symbolic `Type` representing `numpy.ndarray`\s."""
 
@@ -70,34 +101,31 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
     def __init__(
         self,
         dtype: Union[str, np.dtype],
-        shape: Optional[Iterable[Optional[Union[bool, int]]]] = None,
+        shape: Optional[Sequence[Optional[int]]] = None,
         name: Optional[str] = None,
-        broadcastable: Optional[Iterable[bool]] = None,
+        broadcastable: Optional[Sequence[bool]] = None,
     ):
         r"""
 
         Parameters
         ----------
-        dtype
+        dtype : Union[str, np.dtype]
             A NumPy dtype (e.g. ``"int64"``).
-        shape
+        shape : Tuple[Optional[int]]
             The static shape information.  ``None``\s are used to indicate
             unknown shape values for their respective dimensions.
             If `shape` is a list of ``bool``\s, the ``True`` elements of are
             converted to ``1``\s and the ``False`` values are converted to
             ``None``\s.
-        name
+        name : str
             Optional name for this type.
+        broadcastable: Sequence[bool]
 
+        Notes
+        -----
+        Either of shape or broadcastable should be present to infer dims
         """
-
-        if broadcastable is not None:
-            warnings.warn(
-                "The `broadcastable` keyword is deprecated; use `shape`.",
-                DeprecationWarning,
-            )
-            shape = broadcastable
-
+        shape, broadcastable = infer_shape_broadcastable(shape, broadcastable)
         if str(dtype) == "floatX":
             self.dtype = config.floatX
         else:
@@ -106,31 +134,24 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
 
             self.dtype = np.dtype(dtype).name
 
-        def parse_bcast_and_shape(s):
-            if isinstance(s, (bool, np.bool_)):
-                return 1 if s else None
-            else:
-                return s
-
-        self.shape = tuple(parse_bcast_and_shape(s) for s in shape)
+        self.shape = shape
         self.dtype_specs()  # error checking is done there
         self.name = name
+        self.broadcastable = broadcastable
         self.numpy_dtype = np.dtype(self.dtype)
 
     def clone(
         self, dtype=None, shape=None, broadcastable=None, **kwargs
     ) -> "TensorType":
-        if broadcastable is not None:
-            warnings.warn(
-                "The `broadcastable` keyword is deprecated; use `shape`.",
-                DeprecationWarning,
-            )
-            shape = broadcastable
+        if broadcastable is None and shape is None:
+            # only default to passby broadcast when shape is also None
+            # otherwise shape changes affect broadcasting patterns and
+            # inconsistencies
+            broadcastable = self.broadcastable
+            shape = self.shape
         if dtype is None:
             dtype = self.dtype
-        if shape is None:
-            shape = self.shape
-        return type(self)(dtype, shape, name=self.name)
+        return type(self)(dtype, shape, name=self.name, broadcastable=broadcastable)
 
     def filter(self, data, strict=False, allow_downcast=None):
         """Convert `data` to something which can be associated to a `TensorVariable`.
@@ -321,6 +342,8 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
             # `otype` is allowed to be as or more shape-specific than `self`,
             # but not less
             and all(sb == ob or sb is None for sb, ob in zip(self.shape, otype.shape))
+            # broadcastable should be the same
+            and otype.broadcastable == self.broadcastable
         ):
             return True
 
@@ -371,11 +394,6 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
 
     def __hash__(self):
         return hash((type(self), self.dtype, self.shape))
-
-    @property
-    def broadcastable(self):
-        """A boolean tuple indicating which dimensions have a shape equal to one."""
-        return tuple(s == 1 for s in self.shape)
 
     @property
     def ndim(self):

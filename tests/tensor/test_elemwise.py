@@ -17,8 +17,7 @@ from pytensor.link.basic import PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.basic import second
-from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from pytensor.tensor.exceptions import ShapeError
+from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise, broadcast_shapes
 from pytensor.tensor.math import all as at_all
 from pytensor.tensor.math import any as at_any
 from pytensor.tensor.math import exp
@@ -34,9 +33,21 @@ from pytensor.tensor.type import (
     vector,
     vectors,
 )
+from pytensor.tensor.var import TensorVariable
 from tests import unittest_tools
 from tests.link.test_link import make_function
 from tests.tensor.test_math import reduce_bitwise_and
+
+
+@pytest.fixture(
+    params=[
+        "py",
+        pytest.param("c", marks=pytest.mark.skipif("not pytensor.config.cxx")),
+        # TODO: automate this to add more linker modes, e.g. Jax, Numba
+    ]
+)
+def mode(request):
+    return Mode(linker=request.param)
 
 
 class TestDimShuffle(unittest_tools.InferShapeTester):
@@ -228,6 +239,8 @@ class TestBroadcast:
                 ((2, 3, 4, 5), (1, 1, 1, 1)),
                 ((), ()),
             ]:
+                # TODO: move test cases outside the test
+                exc = None
                 if shape_info == "complete":
                     x_type = type(pytensor.config.floatX, shape=xsh)
                     y_type = type(pytensor.config.floatX, shape=ysh)
@@ -245,7 +258,12 @@ class TestBroadcast:
                 else:
                     x_type = type(pytensor.config.floatX, shape=[None for _ in xsh])
                     y_type = type(pytensor.config.floatX, shape=[None for _ in ysh])
-
+                    # TODO: refactor this test into fixtures and proper test cases
+                    # the error should be itself a fixture that takes 2 shape cases
+                    # or a helper that takes 2 shapes, 2 broadcast patterns and
+                    # checks if they can broadcast or a fixed behaviour for given shapes
+                    if any(s1 != s2 for s1, s2 in zip(xsh, ysh)):
+                        exc = ValueError(".*broadcasting.*")
                 x = x_type("x")
                 y = y_type("y")
                 e = op(aes.add)(x, y)
@@ -254,8 +272,12 @@ class TestBroadcast:
                 yv = rand_val(ysh)
                 zv = xv + yv
 
-                unittest_tools.assert_allclose(f(xv, yv), zv)
-
+                if exc is None:
+                    unittest_tools.assert_allclose(f(xv, yv), zv)
+                else:
+                    with pytest.raises(exc.__class__, match=exc.args[0]):
+                        unittest_tools.assert_allclose(f(xv, yv), zv)
+                    return
                 # test Elemwise.infer_shape
                 # the Shape op don't implement c_code!
                 if isinstance(linker, PerformLinker):
@@ -268,6 +290,7 @@ class TestBroadcast:
                     assert tuple(f(xv, yv)) == tuple(zv.shape)
 
     def with_linker_inplace(self, linker, op, type, rand_val):
+        # TODO: refactor me to move test cases outside the function
         for shape_info in ("complete", "only_broadcastable", "none"):
             for xsh, ysh in [
                 ((5, 5), (5, 5)),
@@ -279,6 +302,7 @@ class TestBroadcast:
                 ((2, 3, 4, 5), (1, 1, 1, 1)),
                 ((), ()),
             ]:
+                exc = None
                 if shape_info == "complete":
                     x_type = type(pytensor.config.floatX, shape=xsh)
                     y_type = type(pytensor.config.floatX, shape=ysh)
@@ -287,15 +311,17 @@ class TestBroadcast:
                     # type shape provided by PyTensor was broadcastable/non-broadcastable
                     x_type = type(
                         pytensor.config.floatX,
-                        shape=tuple(s if s == 1 else None for s in xsh),
+                        broadcastable=tuple(s == 1 for s in xsh),
                     )
                     y_type = type(
                         pytensor.config.floatX,
-                        shape=tuple(s if s == 1 else None for s in ysh),
+                        broadcastable=tuple(s == 1 for s in ysh),
                     )
                 else:
                     x_type = type(pytensor.config.floatX, shape=[None for _ in xsh])
                     y_type = type(pytensor.config.floatX, shape=[None for _ in ysh])
+                    if any(s1 != s2 for s1, s2 in zip(xsh, ysh)):
+                        exc = ValueError(".*broadcasting.*")
 
                 x = x_type("x")
                 y = y_type("y")
@@ -305,7 +331,12 @@ class TestBroadcast:
                 yv = rand_val(ysh)
                 zv = xv + yv
 
-                f(xv, yv)
+                if exc is None:
+                    f(xv, yv)
+                else:
+                    with pytest.raises(exc.__class__, match=exc.args[0]):
+                        f(xv, yv)
+                    return
 
                 assert (xv == zv).all()
                 # test Elemwise.infer_shape
@@ -776,33 +807,6 @@ class TestElemwise(unittest_tools.InferShapeTester):
         g = pytensor.function([a, b, c, d, e, f], s, mode=Mode(linker="py"))
         g(*[np.zeros(2**11, config.floatX) for i in range(6)])
 
-    def check_input_dimensions_match(self, mode):
-        """Make sure that our input validation works correctly and doesn't
-        throw erroneous broadcast-based errors.
-        """
-        x_v = matrix("x")
-        m_v = vector("m")
-
-        x = np.array([[-1.32720483], [0.23442016]]).astype(config.floatX)
-        m = np.array([0.0, 0.0]).astype(config.floatX)
-
-        z_v = x_v - m_v
-        f = pytensor.function([x_v, m_v], z_v, mode=mode)
-
-        res = f(x, m)
-
-        assert np.array_equal(res, x - m)
-
-    def test_input_dimensions_match_python(self):
-        self.check_input_dimensions_match(Mode(linker="py"))
-
-    @pytest.mark.skipif(
-        not pytensor.config.cxx,
-        reason="G++ not available, so we need to skip this test.",
-    )
-    def test_input_dimensions_match_c(self):
-        self.check_input_dimensions_match(Mode(linker="c"))
-
     def test_str(self):
         op = Elemwise(aes.add, inplace_pattern=None, name=None)
         assert str(op) == "Elemwise{add}"
@@ -828,7 +832,14 @@ class TestElemwise(unittest_tools.InferShapeTester):
         assert pytensor.get_scalar_constant_value(res_shape[0][0]) == 1
         assert pytensor.get_scalar_constant_value(res_shape[0][1]) == 1
 
-    def test_multi_output(self):
+    @pytest.mark.xfail(reason="Undefined API for incorrect subclassing of Elemwise")
+    def test_multi_output_bad_implementation(self):
+        """
+        In the below implementation make_node does not follow the broadcasting assumptions
+        and the behaviour is somewhat undefined. Should we return propagated shapes [(1, 1), (1, 1)]
+        or we should instead raise an error because the output dimension no longer broadcasts?
+        """
+
         class CustomElemwise(Elemwise):
             def make_node(self, *args):
                 res = super().make_node(*args)
@@ -838,18 +849,42 @@ class TestElemwise(unittest_tools.InferShapeTester):
                     # Return two outputs
                     [
                         TensorType(dtype="float64", shape=(None, None))()
-                        for i in range(2)
+                        for _ in range(2)
                     ],
                 )
 
-        z_1, z_2 = CustomElemwise(aes.add)(
+        z_1, _ = CustomElemwise(aes.add)(
             as_tensor_variable(np.eye(1)), as_tensor_variable(np.eye(1))
         )
 
         in_1_shape = (aes.constant(1), aes.constant(1))
 
-        with pytest.raises(ShapeError):
-            z_1.owner.op.infer_shape(None, z_1.owner, [in_1_shape, in_1_shape])
+        # should not fail, actually
+        out_1_shape, _ = z_1.owner.op.infer_shape(
+            None, z_1.owner, [in_1_shape, in_1_shape]
+        )
+        assert isinstance(out_1_shape[0], TensorVariable)
+        assert out_1_shape[0][0].data == in_1_shape[0].data
+
+    def test_multi_output_correct_implementation(self):
+        class CustomAdd(aes.add.__class__):
+            nout = 2
+
+        def out_prefs(*types):
+            t = pytensor.scalar.upcast_out(*types)
+            return t * 2
+
+        z_1, _ = Elemwise(CustomAdd(out_prefs, name="add2"))(
+            as_tensor_variable(np.eye(1)), as_tensor_variable(np.eye(1))
+        )
+
+        in_1_shape = (aes.constant(1), aes.constant(1))
+
+        out_1_shape, _ = z_1.owner.op.infer_shape(
+            None, z_1.owner, [in_1_shape, in_1_shape]
+        )
+        assert isinstance(out_1_shape[0], TensorVariable)
+        assert out_1_shape[0].data == in_1_shape[0].data
 
     def test_shape_types(self):
         x = tensor(dtype=np.float64, shape=(None, 1))
@@ -893,9 +928,126 @@ class TestElemwise(unittest_tools.InferShapeTester):
         y = tensor(dtype="float64", shape=(3,))
         with pytest.raises(
             ValueError,
-            match=re.escape("Incompatible Elemwise input shapes [(2,), (3,)]"),
+            match=re.escape("Incompatible Elemwise input broadcasting pattern"),
         ):
             x + y
+
+    def test_broadcast_specification(self):
+        with pytest.raises(
+            ValueError,
+            match="Unknown dims can't be broadcastable or should be set explicitly to ones",
+        ):
+            x = tensor(dtype="float64", shape=(None, 2), broadcastable=(True, False))
+        # respect user broadcastable restriction when shape is one and shape
+        x = tensor(dtype="float64", shape=(1, 2), broadcastable=(False, False))
+        # respect user provided broadcastable
+        assert x.type.broadcastable == (False, False)
+
+    def test_no_static_broadcast(self):
+        x = tensor(dtype="float64", shape=(1, 2), broadcastable=(False, False))
+        y = tensor(dtype="float64", shape=(2, 1))
+        with pytest.raises(
+            ValueError,
+            match=re.escape("Incompatible Elemwise input broadcasting pattern"),
+        ):
+            z = x + y
+            print(x.type.broadcastable, y.type.broadcastable, z.type.broadcastable)
+
+    def test_broadcasting_not_promoted_with_elemwise_op(self):
+        """
+        After an elemwise op is performed, broadcasting semantics should respect
+        input broadcasting patterns but not the shape of inputs
+        """
+        x = tensor(dtype="float64", shape=(1, 1), broadcastable=(False, True))
+        y = tensor(dtype="float64", shape=(1, 1))
+        assert (x + y).type.broadcastable == (False, True)
+
+    def test_broadcasted_gradients(self):
+        x_row = pytensor.tensor.row("x_row")
+        y = pytensor.tensor.matrix("y")
+
+        x_row_grad = pytensor.grad(pytensor.tensor.sum(x_row + y), wrt=x_row)
+
+        f_row = pytensor.function([x_row, y], x_row_grad, allow_input_downcast=True)
+        r_row = f_row(np.ones((1, 5)), np.ones((5, 5)))
+        np.testing.assert_allclose(r_row, np.full((1, 5), 5.0))
+        # [[5. 5. 5. 5. 5.]]
+
+    @pytest.mark.parametrize("s1,s2", [[(2,), (2, 1)], [(2, 1), (1, 2)], [(1,), (2,)]])
+    def test_no_dynamic_broadcasting(self, s1, s2, mode):
+        # we set the broadcasting to False explicitly, all attempts to broadcast at runtime should be checked
+        x = pytensor.tensor.tensor("x", broadcastable=(False,) * len(s1))
+        y = pytensor.tensor.tensor("y", broadcastable=(False,) * len(s2))
+        f = pytensor.function([x, y], x + y, mode=mode, allow_input_downcast=True)
+        with pytest.raises(ValueError, match=".*broadcasting.*"):
+            # should fail as we do not support dynamic broadcasting
+            f(np.ones(s1), np.ones(s2))
+
+
+@pytest.mark.parametrize(
+    "shapes,broadcasting,expected_shape,expected_broadcasting,exc",
+    [
+        [[], [], None, None, ValueError(".*Length of arguments.*")],
+        [
+            [(1,), (2, 1)],
+            [(True,), (False, True)],
+            None,
+            None,
+            ValueError(".*Shapes length mismatch.*"),
+        ],
+        [
+            [
+                (1,),
+            ],
+            [(True,)],
+            (1,),
+            (True,),
+            None,
+        ],
+        [
+            [
+                (1,),
+            ],
+            [(False,)],
+            (1,),
+            (False,),
+            None,
+        ],
+        [[(1,), (1,)], [(False,), (True,)], (1,), (False,), None],
+        # unknown shapes propagate and kept unbroadcasted
+        [[(None,), (1,)], [(False,), (True,)], (None,), (False,), None],
+        # respect 1 that is not broadcasted
+        [
+            [(2,), (1,)],
+            [(False,), (False,)],
+            None,
+            None,
+            ValueError(".*Incompatible Elemwise input broadcasting pattern.*"),
+        ],
+        # but should broadcast if another dim is also one, the result does not broadcast
+        [[(1,), (1,)], [(False,), (True,)], (1,), (False,), None],
+        # some special case with zero dim
+        [[(0,), (1,)], [(False,), (True,)], (0,), (False,), None],
+        # regular shape error we should raise in elemwise perform
+        [
+            [(0,), (1,), (2,)],
+            [(False,), (True,), (False,)],
+            None,
+            None,
+            ValueError(".*Incompatible Elemwise input broadcasting pattern.*"),
+        ],
+    ],
+)
+def test_broadcast_shapes_function(
+    shapes, broadcasting, expected_shape, expected_broadcasting, exc
+):
+    if exc is not None:
+        with pytest.raises(exc.__class__, match=exc.args[0]):
+            out_shape, out_broadcasting = broadcast_shapes(shapes, broadcasting)
+    else:
+        out_shape, out_broadcasting = broadcast_shapes(shapes, broadcasting)
+        assert out_shape == expected_shape
+        assert out_broadcasting == expected_broadcasting
 
 
 def test_not_implemented_elemwise_grad():

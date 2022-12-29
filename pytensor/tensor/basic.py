@@ -396,7 +396,7 @@ def get_scalar_constant_value(
                         for i in v.owner.inputs
                     ]
                     ret = [[None]]
-                    v.owner.op.perform(v.owner, const, ret)
+                    v.owner.op.scalar_op.perform(v.owner, const, ret)
                     return np.asarray(ret[0][0].copy())
             elif (
                 isinstance(v.owner.op, pytensor.tensor.subtensor.Subtensor)

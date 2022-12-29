@@ -92,41 +92,22 @@ def make_checks(loop_orders, dtypes, sub):
         # elements of to_compare are pairs ( input_variable_idx, input_variable_dim_idx )
         if len(to_compare) < 2:
             continue
-
-        # Find first dimension size that is != 1
-        jl, xl = to_compare[-1]
-        non1size_dim_check = f"""
-            npy_intp non1size_dim{xl};
-            non1size_dim{xl} = """
-        for (j, x) in to_compare[:-1]:
-            non1size_dim_check += f"(%(lv{j})s_n{x} != 1) ? %(lv{j})s_n{x} : "
-        non1size_dim_check += f"%(lv{jl})s_n{xl};"
-        check += non1size_dim_check
-
-        # Check the nonsize1 dims match
-        # TODO: This is a bit inefficient because we are comparing one dimension against itself
-        check += f"""
-            if (non1size_dim{xl} != 1)
-            {{
-        """
-        for (j, x) in to_compare:
+        j0, x0 = to_compare[0]
+        for (j, x) in to_compare[1:]:
             check += f"""
-                if ((%(lv{j})s_n{x} != non1size_dim{x}) && (%(lv{j})s_n{x} != 1))
-                {{
-                    PyErr_Format(PyExc_ValueError, "Input dimension mismatch. One other input has shape[%%i] = %%lld, but input[%%i].shape[%%i] = %%lld.",
-                       {x},
-                       (long long int) non1size_dim{x},
-                       {j},
-                       {x},
-                       (long long int) %(lv{j})s_n{x}
-                    );
-                    %(fail)s
-                }}
-            """
-        check += """
-            }
+            if (%(lv{j0})s_n{x0} != %(lv{j})s_n{x})
+            {{
+                PyErr_Format(PyExc_ValueError, "Input dimension mismatch implicit broadcasting is not supported. (input[%%i].shape[%%i] = %%lld, input[%%i].shape[%%i] = %%lld)",
+                   {j0},
+                   {x0},
+                   (long long int) %(lv{j0})s_n{x0},
+                   {j},
+                   {x},
+                   (long long int) %(lv{j})s_n{x}
+                );
+                %(fail)s
+            }}
         """
-
     return init % sub + check % sub
 
 

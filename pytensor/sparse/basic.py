@@ -954,7 +954,7 @@ class DenseFromSparse(Op):
 
     """
 
-    __props__ = ()
+    __props__ = ("sparse_grad",)
 
     def __init__(self, structured=True):
         self.sparse_grad = structured

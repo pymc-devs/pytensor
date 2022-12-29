@@ -73,7 +73,10 @@ class SparseTensorType(TensorType, HasDataType):
     ):
         if shape is None and broadcastable is None:
             shape = (None, None)
-
+        if broadcastable is None:
+            broadcastable = (False, False)
+        if broadcastable != (False, False):
+            raise ValueError("Broadcasting sparse types is not yet implemented")
         if format not in self.format_cls:
             raise ValueError(
                 f'unsupported format "{format}" not in list',
@@ -95,7 +98,9 @@ class SparseTensorType(TensorType, HasDataType):
             dtype = self.dtype
         if shape is None:
             shape = self.shape
-        return type(self)(format, dtype, shape=shape, **kwargs)
+        return type(self)(
+            format, dtype, shape=shape, broadcastable=broadcastable, **kwargs
+        )
 
     def filter(self, value, strict=False, allow_downcast=None):
         if isinstance(value, Variable):

@@ -19,7 +19,6 @@ from pytensor.tensor.shape import (
     Shape_i,
     SpecifyShape,
     Unbroadcast,
-    _specify_shape,
     reshape,
     shape,
     shape_i,
@@ -350,13 +349,13 @@ class TestSpecifyShape(utt.InferShapeTester):
             specify_shape([[1, 2, 3], [4, 5, 6]], (2.2, 3))
 
         with pytest.raises(TypeError, match="must be integer types"):
-            _specify_shape([[1, 2, 3], [4, 5, 6]], *(2.2, 3))
+            SpecifyShape([False, False])([[1, 2, 3], [4, 5, 6]], *(2.2, 3))
 
         with pytest.raises(ValueError, match="will never match"):
             specify_shape(matrix(), [4])
 
         with pytest.raises(ValueError, match="will never match"):
-            _specify_shape(matrix(), *[4])
+            SpecifyShape([False, False])(matrix(), *[4])
 
         with pytest.raises(ValueError, match="must have fixed dimensions"):
             specify_shape(matrix(), vector(dtype="int32"))

@@ -1093,21 +1093,23 @@ class TestConversion:
         s = SparseFromDense(format)(x)
         s_m = -s
         d = dense_from_sparse(s_m)
+        pytensor.grad(None, x, known_grads={d: d.type()})
         c = d.sum()
         g = pytensor.grad(c, x)
         f = pytensor.function([x], [s, g])
         f(np.array(0, dtype=config.floatX, ndmin=ndim))
         f(np.array(7, dtype=config.floatX, ndmin=ndim))
 
-    def test_format_ndim(self):
-        for format in "csc", "csr":
-            for ndim in 0, 1, 2:
-                self.check_format_ndim(format, ndim)
+    @pytest.mark.parametrize("format", ["csc", "csr"])
+    @pytest.mark.parametrize("ndim", [0, 1, 2])
+    def test_format_ndim(self, format, ndim):
+        self.check_format_ndim(format, ndim)
 
-            with pytest.raises(TypeError):
-                self.check_format_ndim(format, 3)
-            with pytest.raises(TypeError):
-                self.check_format_ndim(format, 4)
+    @pytest.mark.parametrize("format", ["csc", "csr"])
+    @pytest.mark.parametrize("ndim", [3, 4])
+    def test_format_ndim_raises(self, format, ndim):
+        with pytest.raises(TypeError):
+            self.check_format_ndim(format, ndim)
 
 
 class TestCsmProperties:

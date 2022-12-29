@@ -329,14 +329,12 @@ def test_fixed_shape_convert_variable():
     assert res.type.shape == (3, 2)
 
 
-def test_deprecated_kwargs():
-    with pytest.warns(DeprecationWarning, match=".*broadcastable.*"):
-        res = TensorType("float64", broadcastable=(True, False))
+def test_broadcastable_kwargs():
+    res = TensorType("float64", broadcastable=(True, False))
 
     assert res.shape == (1, None)
 
-    with pytest.warns(DeprecationWarning, match=".*broadcastable.*"):
-        new_res = res.clone(broadcastable=(False, True))
+    new_res = res.clone(broadcastable=(False, True))
 
     assert new_res.shape == (None, 1)
 
@@ -355,12 +353,9 @@ def test_tensor_creator_helper():
     assert res.type == TensorType(dtype="int64", shape=(5, None))
     assert res.name == "custom"
 
-    with pytest.warns(
-        DeprecationWarning, match="The `broadcastable` keyword is deprecated"
-    ):
-        res = tensor(dtype="int64", broadcastable=(True, False), name="custom")
-        assert res.type == TensorType("int64", shape=(1, None))
-        assert res.name == "custom"
+    res = tensor(dtype="int64", broadcastable=(True, False), name="custom")
+    assert res.type == TensorType("int64", shape=(1, None))
+    assert res.name == "custom"
 
 
 @pytest.mark.parametrize("dtype", ("floatX", "float64", bool, np.int64))

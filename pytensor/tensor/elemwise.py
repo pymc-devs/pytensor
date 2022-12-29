@@ -1,5 +1,5 @@
 from copy import copy
-from typing import List, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -154,11 +154,11 @@ class DimShuffle(ExternalCOp):
 
         # List of input dimensions to drop
         drop = []
-        for i, b in enumerate(input_broadcastable):
+        for i, bcasted in enumerate(input_broadcastable):
             if i not in new_order:
                 # We want to drop this dimension because it's not a value in
                 # `new_order`
-                if b == 1:
+                if bcasted:
                     drop.append(i)
                 else:
                     # We cannot drop non-broadcastable dimensions
@@ -187,13 +187,13 @@ class DimShuffle(ExternalCOp):
 
     def make_node(self, _input):
         input = as_tensor_variable(_input)
-        ib = tuple(s == 1 for s in input.type.shape)
-        if ib != self.input_broadcastable:
-            if len(ib) != len(self.input_broadcastable):
-                raise TypeError(
-                    "The number of dimensions of the "
-                    f"input is incorrect for this op. Expected {self.input_broadcastable}, got {ib}."
-                )
+        ib = input.type.broadcastable
+        if len(ib) != len(self.input_broadcastable):
+            raise TypeError(
+                "The number of dimensions of the "
+                f"input is incorrect for this op. Expected {self.input_broadcastable}, got {ib}."
+            )
+        else:
             for expected, b in zip(self.input_broadcastable, ib):
                 if expected is True and b is False:
                     raise TypeError(
@@ -270,7 +270,7 @@ class DimShuffle(ExternalCOp):
             return [inp[0].zeros_like(dtype=config.floatX)]
         else:
             return [
-                DimShuffle(tuple(s == 1 for s in gz.type.shape), grad_order)(
+                DimShuffle(gz.type.broadcastable, grad_order)(
                     Elemwise(scalar_identity)(gz)
                 )
             ]
@@ -301,6 +301,80 @@ class DimShufflePrinter(Printer):
 
 
 pprint.assign(DimShuffle, DimShufflePrinter())
+
+
+def broadcast_shapes(
+    shapes: Sequence[Tuple[Optional[int], ...]],
+    broadcast_patterns: Sequence[Tuple[bool, ...]],
+):
+    """Broadcast shapes or raise an error.
+
+    This function already assumes all shapes have equal length, e.g. after Dimsuffle.
+
+    Parameters
+    ----------
+    shapes : Sequence[Tuple[Optional[int], ...]]
+        input shapes to broadcast
+    broadcast_patterns : Sequence[Tuple[bool,...]]
+        input broadcasting pattern constraints
+
+    Returns
+    -------
+    Tuple[Optional[int], ...], Tuple[bool,...]
+        shape and broadcasting pattern
+    """
+
+    def get_most_specialized_shape(shapes, bcasting):
+        seen_dims = set(zip(shapes, bcasting))
+        if len(seen_dims) == 1:
+            return next(iter(seen_dims))[0]
+        elif len(seen_dims) == 2 and (1, True) in seen_dims:
+            # this is fine since one dimension broadcasts to another common dimension
+            seen_dims.discard((1, True))
+            return next(iter(seen_dims))[0]
+        # we have set length >= 2 and it is not the case (1, True) in seen_dims
+        # let's drops dims that do not matter in comparison
+        # do not care about 1 that broadcasts
+        # the simple case was checked above so two discard
+        # never manage to produce an empty set
+        seen_dims.discard((1, True))
+        # do not care about unknown that does not broadcast because it
+        # should anyway match to known that did not broadcast
+        seen_dims.discard((None, False))
+        if len(seen_dims) > 1:
+            # we did not manage to specialize dims, raise an error
+            raise ValueError(f"shapes and broadcast mismatch: {seen_dims}")
+        return next(iter(seen_dims))[0]
+
+    # it is multiplied by nout because Elemwise supports multiple outputs
+    # (nout of them)
+    if len(shapes) < 1 or len(shapes) != len(broadcast_patterns):
+        raise ValueError(
+            "Length of arguments should be more than one and equal for shapes and broadcast patterns"
+        )
+    common_len = len(shapes[0])
+    if any(len(s) != common_len for s in shapes + broadcast_patterns):
+        raise ValueError("Shapes length mismatch, all lengths should be the same")
+    try:
+        out_shape = tuple(
+            get_most_specialized_shape(shape, bcasting)
+            for shape, bcasting in zip(
+                zip(*shapes),
+                zip(*broadcast_patterns),
+            )
+        )
+        out_broadcastable = tuple(all(bcast) for bcast in zip(*broadcast_patterns))
+    except ValueError as e:
+        raise ValueError(
+            "Incompatible Elemwise input broadcasting pattern: "
+            f"{broadcast_patterns}. "
+            "Pytensor has static broadcasting befaviour as it "
+            "simplifies gradients and execution graph dramatically. "
+            "So even input shapes may contain ones they should be "
+            "explicitly be marked broadcastable and your current shapes are "
+            f"{shapes}"
+        ) from e
+    return out_shape, out_broadcastable
 
 
 class Elemwise(OpenMPOp):
@@ -407,57 +481,28 @@ class Elemwise(OpenMPOp):
                 # TODO: use LComplete instead
                 args.append(
                     dim_shuffle(
-                        tuple(1 if s == 1 else None for s in input.type.shape),
+                        input.type.broadcastable,
                         ["x"] * difference + list(range(length)),
                     )(input)
                 )
         inputs = args
-
-        # HERE: all the broadcast dims have the same length now
-
-        # cleverness: we iterate over the first, second, third broadcast flag
-        # of all inputs in parallel... the all() gives us each output
-        # broadcastable bit in turn.
-
-        def get_most_specialized_shape(shapes):
-            shapes = set(shapes)
-            # All shapes are the same
-            if len(shapes) == 1:
-                return tuple(shapes)[0]
-
-            # Only valid indeterminate case
-            if shapes == {None, 1}:
-                return None
-
-            shapes.discard(1)
-            shapes.discard(None)
-            if len(shapes) > 1:
-                raise ValueError
-            return tuple(shapes)[0]
-
-        # it is multiplied by nout because Elemwise supports multiple outputs
-        # (nout of them)
-        try:
-            out_shapes = [
-                [
-                    get_most_specialized_shape(shape)
-                    for shape in zip(*[inp.type.shape for inp in inputs])
-                ]
-            ] * shadow.nout
-        except ValueError:
-            raise ValueError(
-                f"Incompatible Elemwise input shapes {[inp.type.shape for inp in inputs]}"
-            )
-
+        out_shapes, out_broadcastable = broadcast_shapes(
+            [inp.type.shape for inp in inputs],
+            [inp.type.broadcastable for inp in inputs],
+        )
+        out_shapes, out_broadcastable = [out_shapes] * shadow.nout, [
+            out_broadcastable
+        ] * shadow.nout
         # inplace_pattern maps output idx -> input idx
         inplace_pattern = self.inplace_pattern
         if inplace_pattern:
             for overwriter, overwritten in inplace_pattern.items():
-                for out_s, in_s in zip(
-                    out_shapes[overwriter],
-                    inputs[overwritten].type.shape,
+                for out_b, in_b in zip(
+                    out_broadcastable[overwriter],
+                    inputs[overwritten].type.broadcastable,
                 ):
-                    if in_s == 1 and out_s != 1:
+                    # the dimension lost its broadcasting property
+                    if in_b and not out_b:
                         raise ValueError(
                             "Operation cannot be done inplace on an input "
                             "with broadcasted dimensions."
@@ -474,7 +519,7 @@ class Elemwise(OpenMPOp):
                 )
             )
         assert len(out_dtypes) == len(out_shapes)
-        return out_dtypes, out_shapes, inputs
+        return out_dtypes, out_shapes, out_broadcastable, inputs
 
     def make_node(self, *inputs):
         """
@@ -483,10 +528,12 @@ class Elemwise(OpenMPOp):
         using DimShuffle.
         """
         inputs = [as_tensor_variable(i) for i in inputs]
-        out_dtypes, out_shapes, inputs = self.get_output_info(DimShuffle, *inputs)
+        out_dtypes, out_shapes, out_broadcastable, inputs = self.get_output_info(
+            DimShuffle, *inputs
+        )
         outputs = [
-            TensorType(dtype=dtype, shape=shape)()
-            for dtype, shape in zip(out_dtypes, out_shapes)
+            TensorType(dtype=dtype, shape=shape, broadcastable=bcasting)()
+            for dtype, shape, bcasting in zip(out_dtypes, out_shapes, out_broadcastable)
         ]
         return Apply(self, inputs, outputs)
 
@@ -543,8 +590,6 @@ class Elemwise(OpenMPOp):
         return [[True for output in node.outputs] for ipt in node.inputs]
 
     def L_op(self, inputs, outs, ograds):
-        from pytensor.tensor.math import sum as at_sum
-
         # Compute grad with respect to broadcasted input
         rval = self._bgrad(inputs, outs, ograds)
 
@@ -577,16 +622,17 @@ class Elemwise(OpenMPOp):
             # List of all the dimensions that are broadcastable for input[i] so
             # we can sum over them
             # TODO: only count dimensions that were effectively broadcasted
+            # the comment was introduced there
+            # https://github.com/Theano/Theano/commit/1ddd6c38a7a627bab8ee1a4c3d45295fc9c6aace
             to_sum = [
                 j
-                for j, in_s in enumerate(ipt.type.shape)
-                if in_s == 1 and outs[0].type.shape[j] != 1
+                for j, in_broadcastable in enumerate(ipt.type.broadcastable)
+                if in_broadcastable and not outs[0].type.broadcastable[j]
             ]
-
             if to_sum:
-                sr = at_sum(rval[i], axis=to_sum, keepdims=True)
+                sr = pytensor.tensor.math.sum(rval[i], axis=to_sum, keepdims=True)
+                # TODO: check if the rval type is the same as ipt type
                 rval[i] = sr
-
         return rval
 
     def _bgrad(self, inputs, outputs, ograds):
@@ -735,9 +781,13 @@ class Elemwise(OpenMPOp):
             # FIXME: This no longer calls the C implementation!
             super().perform(node, inputs, output_storage)
 
-        for d, dim_shapes in enumerate(zip(*(i.shape for i in inputs))):
-            if len(set(dim_shapes) - {1}) > 1:
-                raise ValueError(f"Shapes on dimension {d} do not match: {dim_shapes}")
+        # the output of broadcast_shapes is not used, but checks if all the shapes comply
+        broadcast_shapes(
+            # TODO: additionally check against static shapes in input types
+            # actual shapes + static shapes in the node, all should comply
+            [input.shape for input in inputs],
+            [i.type.broadcastable for i in node.inputs],
+        )
 
         ufunc_args = inputs
         ufunc_kwargs = {}
@@ -814,18 +864,38 @@ class Elemwise(OpenMPOp):
                 storage[0] = variable
 
     def infer_shape(self, fgraph, node, i_shapes) -> List[Tuple[TensorVariable, ...]]:
-
-        if len(node.outputs) > 1:
-            from pytensor.tensor.exceptions import ShapeError
-
-            raise ShapeError(
-                "Multiple outputs are not supported by the default `Elemwise.infer_shape`"
+        # some shapes can be already static, some unknown and None
+        # in the make node we copy shape and broadcasting patterns
+        # use this hint here
+        out_shape = list(node.outputs[0].type.shape)
+        for i, (o_size, i_sizes, i_bcasting) in enumerate(
+            zip(
+                out_shape,
+                zip(*i_shapes),
+                zip(*(i.type.broadcastable for i in node.inputs)),
             )
+        ):
+            if o_size is None:
+                # the unknown shape, should be inferred from some of the inputs
+                candidates = [
+                    s for s, bcasted in zip(i_sizes, i_bcasting) if not bcasted
+                ]
+                # None shape can't be broadcasted so it for sure has broadcasting=False
+                # thus some of the inputs have to have the non broadcastable dimension
+                # NOTE: It appears that user can break that assumption in some custom op,
+                # manually creating output nodes
+                if len(candidates) == 0:
+                    from pytensor.tensor.rewriting.shape import ShapeError
 
-        out_shape = pytensor.tensor.broadcast_shape(*i_shapes, arrays_are_shapes=True)
-
-        # The `as_tensor_variable` should convert `ScalarType`s to `TensorType`s
-        return [tuple(as_tensor_variable(s) for s in out_shape)]
+                    raise ShapeError(
+                        "Encountered a non broadcasting unknown dimension in elemwise, "
+                        "but all the input dims were broadcastable. "
+                        "This can happen if custom make_node did not follow broadcasting conventions"
+                    )
+                    # TODO: which best guess is better then 1 or i_sizes[0] or max(i_sizes)?
+                out_shape[i] = candidates[0]
+        # shape entries are scalars, so return tuple of scalars
+        return [tuple(as_tensor_variable(s) for s in out_shape)] * len(node.outputs)
 
     def _c_all(self, node, nodename, inames, onames, sub):
         # Some `Op`s directly call `Elemwise._c_all` or `Elemwise.c_code`
@@ -888,7 +958,7 @@ class Elemwise(OpenMPOp):
         # for each input:
         # same as range(ndim), but with 'x' at all broadcastable positions
         orders = [
-            [s == 1 and "x" or i for i, s in enumerate(input.type.shape)]
+            [bcast and "x" or i for i, bcast in enumerate(input.type.broadcastable)]
             for input in inputs
         ]
 
@@ -911,7 +981,7 @@ class Elemwise(OpenMPOp):
             [
                 f"PyArray_ISFORTRAN({arr})"
                 for arr, var in z
-                if not all(s == 1 for s in var.type.shape)
+                if not all(var.type.broadcastable)
             ]
         )
         # If it is a scalar, make it c contig to prevent problem with
@@ -996,7 +1066,7 @@ class Elemwise(OpenMPOp):
             or
             # Use simpler code when output ndim == 0 or 1
             # or for broadcated scalar.
-            all(s == 1 for s in node.outputs[0].type.shape)
+            all(node.outputs[0].type.broadcastable)
         ):
             if nnested:
                 all_code = [("", "")] * (nnested - 1) + [("", code)] + [""]
@@ -1068,7 +1138,7 @@ class Elemwise(OpenMPOp):
             all(o.ndim >= 1 for o in node.outputs)
             and
             # Don't use the contig code for broadcasted scalar.
-            not all(s == 1 for s in node.outputs[0].type.shape)
+            not all(node.outputs[0].type.broadcastable)
         ):
             contig = None
             try:
@@ -1101,7 +1171,7 @@ class Elemwise(OpenMPOp):
                     """
                     index = ""
                     for x, var in zip(inames + onames, inputs + node.outputs):
-                        if not all(s == 1 for s in var.type.shape):
+                        if not all(var.type.broadcastable):
                             contig += (
                                 """
             dtype_%(x)s * %(x)s_ptr = (dtype_%(x)s*) PyArray_DATA(%(x)s);
@@ -1135,7 +1205,7 @@ class Elemwise(OpenMPOp):
                     )
             if contig is not None:
                 z = list(zip(inames + onames, inputs + node.outputs))
-                all_broadcastable = all(s == 1 for s in var.type.shape)
+                all_broadcastable = all(var.type.broadcastable)
                 cond1 = " && ".join(
                     [
                         "PyArray_ISCONTIGUOUS(%s)" % arr
@@ -1189,7 +1259,7 @@ class Elemwise(OpenMPOp):
         return support_code
 
     def c_code_cache_version_apply(self, node):
-        version = [14]  # the version corresponding to the c code in this Op
+        version = [15]  # the version corresponding to the c code in this Op
 
         # now we insert versions for the ops on which we depend...
         scalar_node = Apply(
