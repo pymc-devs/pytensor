@@ -13,7 +13,7 @@ changelog:
         - major
     - title: New Features 🎉
       labels:
-        - enhancements
+        - enhancement
         - feature request
     - title: Bugfixes 🐛
       labels:
