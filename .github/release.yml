@@ -15,7 +15,7 @@ changelog:
       labels:
         - enhancements
         - feature request
-    - title: Bugfixes 🪲
+    - title: Bugfixes 🐛
       labels:
         - bug
     - title: Documentation 📖
