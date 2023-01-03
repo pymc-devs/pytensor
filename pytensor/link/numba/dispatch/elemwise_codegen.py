@@ -39,7 +39,7 @@ def compute_itershape(
                     ):
                         with then:
                             msg = (
-                                f"Incompative shapes for input {j} and axis {i} of "
+                                f"Incompatible shapes for input {j} and axis {i} of "
                                 f"elemwise. Input {j} has shape 1, but is not statically "
                                 "known to have shape 1, and thus not broadcastable."
                             )
