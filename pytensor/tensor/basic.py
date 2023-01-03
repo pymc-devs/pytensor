@@ -2217,8 +2217,6 @@ class Join(COp):
             # except for the axis dimension.
             # Initialize bcastable all false, and then fill in some trues with
             # the loops.
-            ndim = tensors[0].type.ndim
-            out_shape = [None] * ndim
 
             if not isinstance(axis, int):
                 try:
@@ -2226,6 +2224,7 @@ class Join(COp):
                 except NotScalarConstantError:
                     pass
 
+            ndim = tensors[0].type.ndim
             if isinstance(axis, int):
                 # Basically, broadcastable -> length 1, but the
                 # converse does not hold. So we permit e.g. T/F/T
@@ -2241,30 +2240,55 @@ class Join(COp):
                     )
                 if axis < 0:
                     axis += ndim
-
-                for x in tensors:
-                    for current_axis, s in enumerate(x.type.shape):
-                        # Constant negative axis can no longer be negative at
-                        # this point. It safe to compare this way.
-                        if current_axis == axis:
-                            continue
-                        if s == 1:
-                            out_shape[current_axis] = 1
-                try:
-                    out_shape[axis] = None
-                except IndexError:
+                if axis > ndim - 1:
                     raise ValueError(
                         f"Axis value {axis} is out of range for the given input dimensions"
                     )
+                # NOTE: Constant negative axis can no longer be negative at this point.
+
+                in_shapes = [x.type.shape for x in tensors]
+                in_ndims = [len(s) for s in in_shapes]
+                if set(in_ndims) != {ndim}:
+                    raise TypeError(
+                        "Only tensors with the same number of dimensions can be joined."
+                        f" Input ndims were: {in_ndims}."
+                    )
+
+                # Determine output shapes from a matrix of input shapes
+                in_shapes = np.array(in_shapes)
+                out_shape = [None] * ndim
+                for d in range(ndim):
+                    ins = in_shapes[:, d]
+                    if d == axis:
+                        # Any unknown size along the axis means we can't sum
+                        if None in ins:
+                            out_shape[d] = None
+                        else:
+                            out_shape[d] = sum(ins)
+                    else:
+                        inset = set(in_shapes[:, d])
+                        # Other dims must match exactly,
+                        # or if a mix of None and ? the output will be ?
+                        # otherwise the input shapes are incompatible.
+                        if len(inset) == 1:
+                            (out_shape[d],) = inset
+                        elif len(inset - {None}) == 1:
+                            (out_shape[d],) = inset - {None}
+                        else:
+                            raise ValueError(
+                                f"all input array dimensions other than the specified `axis` ({axis})"
+                                " must match exactly, or be unknown (None),"
+                                f" but along dimension {d}, the inputs shapes are incompatible: {ins}"
+                            )
             else:
                 # When the axis may vary, no dimension can be guaranteed to be
                 # broadcastable.
                 out_shape = [None] * tensors[0].type.ndim
 
-        if not builtins.all(x.ndim == len(out_shape) for x in tensors):
-            raise TypeError(
-                "Only tensors with the same number of dimensions can be joined"
-            )
+            if not builtins.all(x.ndim == len(out_shape) for x in tensors):
+                raise TypeError(
+                    "Only tensors with the same number of dimensions can be joined"
+                )
 
         inputs = [as_tensor_variable(axis)] + list(tensors)
 
