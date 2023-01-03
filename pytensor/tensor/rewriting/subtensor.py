@@ -1194,7 +1194,6 @@ def local_IncSubtensor_serialize(fgraph, node):
             tip = new_add
             for mi in movable_inputs:
                 assert o_type.is_super(tip.type)
-                assert mi.owner.inputs[0].type.is_super(tip.type)
                 tip = mi.owner.op(tip, *mi.owner.inputs[1:])
                 # Copy over stacktrace from outputs of the original
                 # "movable" operation to the new operation.
