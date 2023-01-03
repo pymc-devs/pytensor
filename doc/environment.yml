@@ -3,13 +3,13 @@ channels:
   - conda-forge
   - nodefaults
 dependencies:
-  - python=3.7
+  - python=3.9
   - gcc_linux-64
   - gxx_linux-64
   - numpy
   - scipy
   - six
-  - sphinx>=5.1.0
+  - sphinx>=5.1.0,<6
   - mock
   - pillow
   - pip

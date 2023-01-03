@@ -17,6 +17,7 @@
 # sys.path.append(os.path.abspath('some/directory'))
 
 import os
+import sys
 import pytensor
 
 # General configuration
@@ -60,7 +61,7 @@ version = pytensor.__version__
 if os.environ.get("READTHEDOCS", False):
     rtd_version = os.environ.get("READTHEDOCS_VERSION", "")
     if rtd_version.lower() == "stable":
-        version = pymc.__version__.split("+")[0]
+        version = pytensor.__version__.split("+")[0]
     elif rtd_version.lower() == "latest":
         version = "dev"
     else:
