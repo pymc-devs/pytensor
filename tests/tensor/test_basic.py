@@ -1909,6 +1909,21 @@ class TestJoinAndSplit:
         with pytest.raises(TypeError, match="same number of dimensions"):
             self.join_op(0, v, m)
 
+    def test_static_shape_inference(self):
+        a = at.tensor(dtype="int8", shape=(2, 3))
+        b = at.tensor(dtype="int8", shape=(2, 5))
+        assert at.join(1, a, b).type.shape == (2, 8)
+        assert at.join(-1, a, b).type.shape == (2, 8)
+
+        # Check early informative errors from static shape info
+        with pytest.raises(ValueError, match="must match exactly"):
+            at.join(0, at.ones((2, 3)), at.ones((2, 5)))
+
+        # Check partial inference
+        d = at.tensor(dtype="int8", shape=(2, None))
+        assert at.join(1, a, b, d).type.shape == (2, None)
+        return
+
     def test_split_0elem(self):
         rng = np.random.default_rng(seed=utt.fetch_seed())
         m = self.shared(rng.random((4, 6)).astype(self.floatX))
