@@ -24,6 +24,7 @@ from pytensor.tensor.nlinalg import (
     norm,
     pinv,
     qr,
+    slogdet,
     svd,
     tensorinv,
     tensorsolve,
@@ -278,6 +279,26 @@ def test_det_shape():
     det_shape = det(x).shape
     assert isinstance(det_shape, Constant)
     assert tuple(det_shape.data) == ()
+
+
+def test_slogdet():
+    rng = np.random.default_rng(utt.fetch_seed())
+
+    r = rng.standard_normal((5, 5)).astype(config.floatX)
+    x = matrix()
+    f = pytensor.function([x], slogdet(x))
+    f_sign, f_det = f(r)
+    sign, det = np.linalg.slogdet(r)
+    assert np.equal(sign, f_sign)
+    assert np.allclose(det, f_det)
+
+
+def test_slogdet_shape():
+    x = matrix()
+    sign, det = slogdet(x)
+    for shape in [sign.shape, det.shape]:
+        assert isinstance(shape, Constant)
+        assert tuple(shape.data) == ()
 
 
 def test_trace():
