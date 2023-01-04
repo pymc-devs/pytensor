@@ -7,7 +7,7 @@ from unification.variable import Var
 
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.rewriting.basic import NodeRewriter
-from pytensor.graph.rewriting.unify import eval_if_etuple
+from pytensor.graph.unify import eval_if_etuple
 
 
 class KanrenRelationSub(NodeRewriter):
