@@ -1,22 +1,35 @@
+import numpy as np
 import scipy as sp
 import scipy.sparse
 from numba.core import cgutils, types
+from numba.core.imputils import impl_ret_borrowed
 from numba.extending import (
     NativeValue,
     box,
+    intrinsic,
     make_attribute_wrapper,
     models,
+    overload,
+    overload_attribute,
+    overload_method,
     register_model,
     typeof_impl,
     unbox,
 )
+from numba.np.numpy_support import from_dtype
+
+from pytensor.link.numba.dispatch.basic import get_numba_type
+from pytensor.sparse.type import SparseTensorType
 
 
 class CSMatrixType(types.Type):
     """A Numba `Type` modeled after the base class `scipy.sparse.compressed._cs_matrix`."""
 
     name: str
-    instance_class: type
+
+    @staticmethod
+    def instance_class(data, indices, indptr, shape):
+        raise NotImplementedError()
 
     def __init__(self, dtype):
         self.dtype = dtype
@@ -25,6 +38,10 @@ class CSMatrixType(types.Type):
         self.indptr = types.Array(types.int32, 1, "A")
         self.shape = types.UniTuple(types.int64, 2)
         super().__init__(self.name)
+
+    @property
+    def key(self):
+        return (self.name, self.dtype)
 
 
 make_attribute_wrapper(CSMatrixType, "data", "data")
@@ -140,3 +157,69 @@ def box_matrix(typ, val, c):
     c.pyapi.decref(shape_obj)
 
     return obj
+
+
+@overload(np.shape)
+def overload_sparse_shape(x):
+    if isinstance(x, CSMatrixType):
+        return lambda x: x.shape
+
+
+@overload_attribute(CSMatrixType, "ndim")
+def overload_sparse_ndim(inst):
+
+    if not isinstance(inst, CSMatrixType):
+        return
+
+    def ndim(inst):
+        return 2
+
+    return ndim
+
+
+@intrinsic
+def _sparse_copy(typingctx, inst, data, indices, indptr, shape):
+    def _construct(context, builder, sig, args):
+        typ = sig.return_type
+        struct = cgutils.create_struct_proxy(typ)(context, builder)
+        _, data, indices, indptr, shape = args
+        struct.data = data
+        struct.indices = indices
+        struct.indptr = indptr
+        struct.shape = shape
+        return impl_ret_borrowed(
+            context,
+            builder,
+            sig.return_type,
+            struct._getvalue(),
+        )
+
+    sig = inst(inst, inst.data, inst.indices, inst.indptr, inst.shape)
+
+    return sig, _construct
+
+
+@overload_method(CSMatrixType, "copy")
+def overload_sparse_copy(inst):
+
+    if not isinstance(inst, CSMatrixType):
+        return
+
+    def copy(inst):
+        return _sparse_copy(
+            inst, inst.data.copy(), inst.indices.copy(), inst.indptr.copy(), inst.shape
+        )
+
+    return copy
+
+
+@get_numba_type.register(SparseTensorType)
+def get_numba_type_SparseType(pytensor_type, **kwargs):
+    dtype = from_dtype(np.dtype(pytensor_type.dtype))
+
+    if pytensor_type.format == "csr":
+        return CSRMatrixType(dtype)
+    if pytensor_type.format == "csc":
+        return CSCMatrixType(dtype)
+
+    raise NotImplementedError()

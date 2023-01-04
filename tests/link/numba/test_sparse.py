@@ -1,9 +1,16 @@
 import numba
 import numpy as np
+import pytest
 import scipy as sp
 
-# Load Numba customizations
+# Make sure the Numba customizations are loaded
 import pytensor.link.numba.dispatch.sparse  # noqa: F401
+from pytensor import config
+from pytensor.sparse import Dot, SparseTensorType
+from tests.link.numba.test_basic import compare_numba_and_py
+
+
+pytestmark = pytest.mark.filterwarnings("error")
 
 
 def test_sparse_unboxing():
@@ -38,3 +45,54 @@ def test_sparse_boxing():
     assert np.array_equal(res_y_val.indices, y_val.indices)
     assert np.array_equal(res_y_val.indptr, y_val.indptr)
     assert res_y_val.shape == y_val.shape
+
+
+def test_sparse_shape():
+    @numba.njit
+    def test_fn(x):
+        return np.shape(x)
+
+    x_val = sp.sparse.csr_matrix(np.eye(100))
+
+    res = test_fn(x_val)
+
+    assert res == (100, 100)
+
+
+def test_sparse_ndim():
+    @numba.njit
+    def test_fn(x):
+        return x.ndim
+
+    x_val = sp.sparse.csr_matrix(np.eye(100))
+
+    res = test_fn(x_val)
+
+    assert res == 2
+
+
+def test_sparse_copy():
+    @numba.njit
+    def test_fn(x):
+        y = x.copy()
+        return (
+            y is not x and np.all(x.data == y.data) and np.all(x.indices == y.indices)
+        )
+
+    x_val = sp.sparse.csr_matrix(np.eye(100))
+
+    assert test_fn(x_val)
+
+
+def test_sparse_objmode():
+
+    x = SparseTensorType("csc", dtype=config.floatX)()
+    y = SparseTensorType("csc", dtype=config.floatX)()
+
+    out = Dot()(x, y)
+
+    x_val = sp.sparse.random(2, 2, density=0.25, dtype=config.floatX)
+    y_val = sp.sparse.random(2, 2, density=0.25, dtype=config.floatX)
+
+    with pytest.warns(UserWarning):
+        compare_numba_and_py(((x, y), (out,)), [x_val, y_val])
