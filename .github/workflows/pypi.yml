@@ -34,10 +34,19 @@ jobs:
     - uses: actions/upload-artifact@v3
       with:
         path: dist/*.tar.gz
+    
+    - name: Check SDist
+      run: |
+          mkdir -p test-sdist
+          cd test-sdist
+          python -m venv venv-sdist
+          venv-sdist/bin/python -m pip install ../dist/pytensor-*.tar.gz
+          # check import
+          venv-sdist/bin/python -c "import pytensor;print(pytensor.__version__)"
+          # check import cython module
+          venv-sdist/bin/python -c 'from pytensor.scan import scan_perform; print(scan_perform.get_version())'
 
 
-  # Note - I adapted the scripts to check installs and imports into the test-command contained in pyproject.toml to
-  # avoid installing twice
   build_wheels:
       name: Build ${{ matrix.python-version }} wheels on ${{ matrix.platform }}
       runs-on: ${{ matrix.platform }}
@@ -47,7 +56,6 @@ jobs:
                 - macos-12
                 - windows-2022
                 - ubuntu-20.04
-
       steps:
         - uses: actions/checkout@v3
           with:
@@ -58,7 +66,18 @@ jobs:
 
         - uses: actions/upload-artifact@v3
           with:
-            path: ./wheelhouse/*.whl
+            path: ./dist/*.whl
+            
+        - name: Check the bdist installs and imports
+          run: |
+            mkdir -p test-bdist
+            cd test-bdist
+            python -m venv venv-bdist
+            venv-bdist/bin/python -m pip install ../wheelhouse/pytensor-*.whl
+            # check import
+            venv-bdist/bin/python -c "import pytensor;print(pytensor.__version__)"
+            # check import cython module
+            venv-bdist/bin/python -c 'from pytensor.scan import scan_perform; print(scan_perform.get_version())'
 
   check_dist:
         name: Check dist
