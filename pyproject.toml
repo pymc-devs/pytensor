@@ -208,7 +208,8 @@ files = ["pytensor", "tests"]
 plugins = ["numpy.typing.mypy_plugin"]
 
 [tool.cibuildwheel]
-build = "cp310-manylinux_x86_64"
+build = "*"
+skip = "pp*"
 build-frontend = "build"
 test-command = [
   "print(pytensor.__version__)",
