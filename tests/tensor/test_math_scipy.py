@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from pytensor.gradient import verify_grad
 
 scipy = pytest.importorskip("scipy")
 
@@ -9,11 +10,11 @@ from functools import partial
 import scipy.special
 import scipy.stats
 
-from pytensor import function
+from pytensor import function, grad
 from pytensor import tensor as at
 from pytensor.compile.mode import get_default_mode
 from pytensor.configdefaults import config
-from pytensor.tensor import inplace
+from pytensor.tensor import inplace, vector, gammaincc
 from tests import unittest_tools as utt
 from tests.tensor.utils import (
     _good_broadcast_unary_chi2sf,
@@ -420,6 +421,23 @@ def test_gammainc_ddk_tabulated_values():
         np.testing.assert_allclose(
             f_grad(test_k, test_x), expected_ddk, rtol=1e-5, atol=1e-14
         )
+
+
+def test_gammaincc_ddk_performance(benchmark):
+    rng = np.random.default_rng(1)
+    k = vector("k")
+    x = vector("x")
+
+    out = gammaincc(k, x)
+    grad_fn = function([k, x], grad(out.sum(), wrt=[k]), mode="FAST_RUN")
+    vals = [
+        # Values that hit the second branch of the gradient
+        np.full((1000,), 3.2),
+        np.full((1000,), 0.01),
+    ]
+
+    verify_grad(gammaincc, vals, rng=rng)
+    benchmark(grad_fn, *vals)
 
 
 TestGammaUBroadcast = makeBroadcastTester(

@@ -34,6 +34,7 @@ from pytensor.scalar.basic import (
     upgrade_to_float64,
     upgrade_to_float_no_complex,
 )
+from pytensor.scalar.scan import ScalarScanOp
 
 
 class Erf(UnaryScalarOp):
@@ -751,87 +752,172 @@ class GammaIncDer(BinaryScalarOp):
 gammainc_der = GammaIncDer(upgrade_to_float, name="gammainc_der")
 
 
-class GammaIncCDer(BinaryScalarOp):
-    """
-    Gradient of the the regularized upper gamma function (Q) wrt to the first
-    argument (k, a.k.a. alpha). Adapted from STAN `grad_reg_inc_gamma.hpp`
-    """
+# class GammaIncCDer(BinaryScalarOp):
+#     """
+#     Gradient of the the regularized upper gamma function (Q) wrt to the first
+#     argument (k, a.k.a. alpha). Adapted from STAN `grad_reg_inc_gamma.hpp`
+#     """
+#
+#     @staticmethod
+#     def st_impl(k, x):
+#         gamma_k = scipy.special.gamma(k)
+#         digamma_k = scipy.special.digamma(k)
+#         log_x = np.log(x)
+#
+#         # asymptotic expansion http://dlmf.nist.gov/8.11#E2
+#         if (x >= k) and (x >= 8):
+#             S = 0
+#             k_minus_one_minus_n = k - 1
+#             fac = k_minus_one_minus_n
+#             dfac = 1
+#             xpow = x
+#             delta = dfac / xpow
+#
+#             for n in range(1, 10):
+#                 k_minus_one_minus_n -= 1
+#                 S += delta
+#                 xpow *= x
+#                 dfac = k_minus_one_minus_n * dfac + fac
+#                 fac *= k_minus_one_minus_n
+#                 delta = dfac / xpow
+#                 if np.isinf(delta):
+#                     warnings.warn(
+#                         "gammaincc_der did not converge",
+#                         RuntimeWarning,
+#                     )
+#                     return np.nan
+#
+#             return (
+#                 scipy.special.gammaincc(k, x) * (log_x - digamma_k)
+#                 + np.exp(-x + (k - 1) * log_x) * S / gamma_k
+#             )
+#
+#         # gradient of series expansion http://dlmf.nist.gov/8.7#E3
+#         else:
+#             log_precision = np.log(1e-6)
+#             max_iters = int(1e5)
+#             S = 0
+#             log_s = 0.0
+#             s_sign = 1
+#             log_delta = log_s - 2 * np.log(k)
+#             for n in range(1, max_iters + 1):
+#                 S += np.exp(log_delta) if s_sign > 0 else -np.exp(log_delta)
+#                 s_sign = -s_sign
+#                 log_s += log_x - np.log(n)
+#                 log_delta = log_s - 2 * np.log(n + k)
+#
+#                 if np.isinf(log_delta):
+#                     warnings.warn(
+#                         "gammaincc_der did not converge",
+#                         RuntimeWarning,
+#                     )
+#                     return np.nan
+#
+#                 if log_delta <= log_precision:
+#                     return (
+#                         scipy.special.gammainc(k, x) * (digamma_k - log_x)
+#                         + np.exp(k * log_x) * S / gamma_k
+#                     )
+#
+#             warnings.warn(
+#                 f"gammaincc_der did not converge after {n} iterations",
+#                 RuntimeWarning,
+#             )
+#             return np.nan
+#
+#     def impl(self, k, x):
+#         return self.st_impl(k, x)
+#
+#     def c_code(self, *args, **kwargs):
+#         raise NotImplementedError()
+#
+#
+# gammaincc_der = GammaIncCDer(upgrade_to_float, name="gammaincc_der")
 
-    @staticmethod
-    def st_impl(k, x):
-        gamma_k = scipy.special.gamma(k)
-        digamma_k = scipy.special.digamma(k)
-        log_x = np.log(x)
 
-        # asymptotic expansion http://dlmf.nist.gov/8.11#E2
-        if (x >= k) and (x >= 8):
-            S = 0
-            k_minus_one_minus_n = k - 1
-            fac = k_minus_one_minus_n
-            dfac = 1
-            xpow = x
+class GammaIncCDerInnerScan1(ScalarScanOp):
+    nin = 7
+    nout = 6
+    n_steps = 9
+
+    @property
+    def fn(self):
+        def inner_fn(S, delta, xpow, k_minus_one_minus_n, dfac, fac, x):
+            S += delta
+            xpow *= x
+            k_minus_one_minus_n -= 1
+            dfac = k_minus_one_minus_n * dfac + fac
+            fac *= k_minus_one_minus_n
             delta = dfac / xpow
+            return S, delta, xpow, k_minus_one_minus_n, dfac, fac
 
-            for n in range(1, 10):
-                k_minus_one_minus_n -= 1
-                S += delta
-                xpow *= x
-                dfac = k_minus_one_minus_n * dfac + fac
-                fac *= k_minus_one_minus_n
-                delta = dfac / xpow
-                if np.isinf(delta):
-                    warnings.warn(
-                        "gammaincc_der did not converge",
-                        RuntimeWarning,
-                    )
-                    return np.nan
+        return inner_fn
 
+
+_gammaincc_der_scan1 = GammaIncCDerInnerScan1()
+
+
+class GammaIncCDerInnerScan2(ScalarScanOp):
+    nin = 7
+    nout = 5
+    n_steps = int(1e5)  # maximum number of iterations
+    log_precision = np.log(1e-6)
+
+    @property
+    def fn(self):
+        import pytensor.tensor as pt
+        from pytensor.scan import until
+
+        def inner_fn(S, log_s, s_sign, log_delta, n, k, log_x):
+            delta = pt.exp(log_delta)
+            S += pt.switch(s_sign > 0, delta, -delta)
+            s_sign = -s_sign
+            log_s += log_x - pt.log(n)
+            log_delta = log_s - 2 * pt.log(n + k)
+            n += 1
             return (
-                scipy.special.gammaincc(k, x) * (log_x - digamma_k)
-                + np.exp(-x + (k - 1) * log_x) * S / gamma_k
+                (S, log_s, s_sign, log_delta, n),
+                {},
+                until(pt.all(log_delta < self.log_precision)),
             )
 
-        # gradient of series expansion http://dlmf.nist.gov/8.7#E3
-        else:
-            log_precision = np.log(1e-6)
-            max_iters = int(1e5)
-            S = 0
-            log_s = 0.0
-            s_sign = 1
-            log_delta = log_s - 2 * np.log(k)
-            for n in range(1, max_iters + 1):
-                S += np.exp(log_delta) if s_sign > 0 else -np.exp(log_delta)
-                s_sign = -s_sign
-                log_s += log_x - np.log(n)
-                log_delta = log_s - 2 * np.log(n + k)
-
-                if np.isinf(log_delta):
-                    warnings.warn(
-                        "gammaincc_der did not converge",
-                        RuntimeWarning,
-                    )
-                    return np.nan
-
-                if log_delta <= log_precision:
-                    return (
-                        scipy.special.gammainc(k, x) * (digamma_k - log_x)
-                        + np.exp(k * log_x) * S / gamma_k
-                    )
-
-            warnings.warn(
-                f"gammaincc_der did not converge after {n} iterations",
-                RuntimeWarning,
-            )
-            return np.nan
-
-    def impl(self, k, x):
-        return self.st_impl(k, x)
-
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
+        return inner_fn
 
 
-gammaincc_der = GammaIncCDer(upgrade_to_float, name="gammaincc_der")
+_gammaincc_der_scan2 = GammaIncCDerInnerScan2()
+
+
+def gammaincc_der(k, x):
+    gamma_k = gamma(k)
+    digamma_k = psi(k)
+    log_x = log(x)
+
+    # asymptotic expansion http://dlmf.nist.gov/8.11#E2
+    S = np.array(0.0, dtype="float64")
+    dfac = np.array(1.0, dtype="float64")
+    xpow = x
+    k_minus_one_minus_n = k - 1
+    fac = k_minus_one_minus_n
+    delta = true_div(dfac, xpow)
+    S, *_ = _gammaincc_der_scan1(S, delta, xpow, k_minus_one_minus_n, fac, dfac, x)
+    res1 = (
+        gammaincc(k, x) * (log_x - digamma_k) + exp(-x + (k - 1) * log_x) * S / gamma_k
+    )
+
+    # gradient of series expansion http://dlmf.nist.gov/8.7#E3
+    S = np.array(0.0, dtype="float64")
+    log_s = np.array(0.0, dtype="float64")
+    s_sign = np.array(1, dtype="int8")
+    n = np.array(1, dtype="int64")
+    log_delta = log_s - 2 * log(k)
+    S, *_ = _gammaincc_der_scan2(S, log_s, s_sign, log_delta, n, k, log_x)
+    res2 = gammainc(k, x) * (digamma_k - log_x) + exp(k * log_x) * S / gamma_k
+
+    return switch(
+        (x >= k) & (x >= 8),
+        res1,
+        res2,
+    )
 
 
 class GammaU(BinaryScalarOp):
