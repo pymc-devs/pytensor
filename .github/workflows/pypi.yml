@@ -66,6 +66,7 @@ jobs:
           uses: actions/cache@v3
           with:
             path: /tmp/
+            key: ${{ runner.os }}-tmp
 
         - name: Build wheels
           uses: pypa/cibuildwheel@v2.11.4
