@@ -35,10 +35,6 @@ jobs:
       with:
         path: dist/*.tar.gz
 
-    - uses: actions/upload-artifact@v3
-      with:
-        name: artifact
-        path: dist/*
 
   # Note - I adapted the scripts to check installs and imports into the test-command contained in pyproject.toml to
   # avoid installing twice
