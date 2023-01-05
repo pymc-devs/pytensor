@@ -212,8 +212,7 @@ build = "*"
 skip = "pp*"
 build-frontend = "build"
 test-command = [
-  "print(pytensor.__version__)",
+  "import pytensor; print(pytensor.__version__)",
   "from pytensor.scan import scan_perform; print(scan_perform.get_version())",
   "pytest {package}/tests",
-  "python {package}/test.py",
 ]
