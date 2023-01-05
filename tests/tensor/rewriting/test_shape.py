@@ -417,35 +417,78 @@ class TestSameShape:
         fgraph.attach_feature(shape_feature)
         assert shape_feature.same_shape(x, o)
 
-    def test_no_static_shapes(self):
+    @pytest.mark.parametrize(
+        "setup",
+        [
+            ("x", "o"),
+            pytest.param(("x", "y"), marks=pytest.mark.xfail(reason="Not implemented")),
+            pytest.param(("y", "o"), marks=pytest.mark.xfail(reason="Not implemented")),
+        ],
+        ids=lambda case: "{0}.0=={1}.0".format(*case),
+    )
+    def test_no_static_shapes(self, setup):
+        """All the shapes are actually equal and shape inference
+        should handle all the comparisons
+        """
+        _1, _2 = setup
         x = vector()
         y = vector()
         o = x + y
         fgraph = FunctionGraph([x, y], [o], clone=False)
         shape_feature = ShapeFeature()
         fgraph.attach_feature(shape_feature)
-        # We no longer assume that `x` has the same shape as `y` simply because
-        # neither has static shape information.  Instead, when there is no
-        # static shape information is available, we assume that `x` and/or `y`
-        # could have shapes `(1,)` and/or `(n,)`, where `n != 1`, or any
-        # combination of the two.
-        assert not shape_feature.same_shape(x, o)
-        # The following case isn't implemented
-        assert not shape_feature.same_shape(y, o)
+        # We assume that `x` has the same shape as `y` simply because
+        # neither broadcast. Same is for `o`
+        variables = dict(x=x, y=y, o=o)
+        assert shape_feature.same_shape(variables[_1], variables[_2], 0, 0)
 
     @pytest.mark.parametrize(
-        "y_dim_0",
-        [2, pytest.param(None, marks=pytest.mark.xfail(reason="Not implemented"))],
+        "setup",
+        [
+            # it has to be that verbose since
+            # specific combinations are impossible
+            # to infer so far due to limitations of
+            # the shape inference
+            (2, "x", "o", 0),
+            (2, "y", "o", 0),
+            (2, "x", "y", 0),
+            (2, "x", "o", 1),
+            pytest.param(
+                (2, "y", "o", 1), marks=pytest.mark.xfail(reason="Not implemented")
+            ),
+            pytest.param(
+                (2, "x", "y", 1), marks=pytest.mark.xfail(reason="Not implemented")
+            ),
+            (None, "x", "o", 0),
+            pytest.param(
+                (None, "y", "o", 0), marks=pytest.mark.xfail(reason="Not implemented")
+            ),
+            pytest.param(
+                (None, "x", "y", 0), marks=pytest.mark.xfail(reason="Not implemented")
+            ),
+            (None, "x", "o", 1),
+            pytest.param(
+                (None, "y", "o", 1), marks=pytest.mark.xfail(reason="Not implemented")
+            ),
+            pytest.param(
+                (None, "x", "y", 1), marks=pytest.mark.xfail(reason="Not implemented")
+            ),
+        ],
+        ids=lambda case: "{1}.{3}=={2}.{3}|ydim={0}".format(*case),
     )
-    def test_vector_dim(self, y_dim_0):
+    def test_vector_dim(self, setup):
+        """All the shapes are actually equal and shape inference
+        should handle all the comparisons
+        """
+        y_dim_0, _1, _2, dim = setup
         x = at.tensor(dtype="floatX", shape=(2, None))
         y = at.tensor(dtype="floatX", shape=(y_dim_0, None))
         o = x + y
         fgraph = FunctionGraph([x, y], [o], clone=False)
         shape_feature = ShapeFeature()
         fgraph.attach_feature(shape_feature)
-        assert shape_feature.same_shape(x, o, 0, 0)
-        assert not shape_feature.same_shape(x, o, 1, 1)
+        variables = dict(x=x, y=y, o=o)
+        assert shape_feature.same_shape(variables[_1], variables[_2], dim, dim)
 
     def test_vector_dim_err(self):
         x = vector()
