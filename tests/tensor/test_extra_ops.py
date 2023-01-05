@@ -1253,41 +1253,52 @@ class TestBroadcastTo(utt.InferShapeTester):
     @pytest.mark.parametrize("linker", ["cvm", "py"])
     def test_perform(self, linker):
 
-        a = pytensor.shared(5)
+        a = pytensor.shared(np.full((3, 1, 1), 5))
+        s_0 = iscalar("s_0")
         s_1 = iscalar("s_1")
-        shape = (s_1, 1)
+        shape = (s_0, s_1, 1)
 
         bcast_res = broadcast_to(a, shape)
-        assert bcast_res.broadcastable == (False, True)
+        assert bcast_res.broadcastable == (False, False, True)
 
         bcast_fn = pytensor.function(
-            [s_1], bcast_res, mode=Mode(optimizer=None, linker=linker)
+            [s_0, s_1], bcast_res, mode=Mode(optimizer=None, linker=linker)
         )
         bcast_fn.vm.allow_gc = False
 
-        bcast_at = bcast_fn(4)
-        bcast_np = np.broadcast_to(5, (4, 1))
+        bcast_at = bcast_fn(3, 4)
+        bcast_np = np.broadcast_to(5, (3, 4, 1))
 
         assert np.array_equal(bcast_at, bcast_np)
 
-        bcast_var = bcast_fn.maker.fgraph.outputs[0].owner.inputs[0]
-        bcast_in = bcast_fn.vm.storage_map[a]
-        bcast_out = bcast_fn.vm.storage_map[bcast_var]
+        with pytest.raises(ValueError):
+            bcast_fn(5, 4)
 
         if linker != "py":
+            bcast_var = bcast_fn.maker.fgraph.outputs[0].owner.inputs[0]
+            bcast_in = bcast_fn.vm.storage_map[a]
+            bcast_out = bcast_fn.vm.storage_map[bcast_var]
             assert np.shares_memory(bcast_out[0], bcast_in[0])
+
+    def test_make_node_error_handling(self):
+        with pytest.raises(
+            ValueError,
+            match="Broadcast target shape has 1 dims, which is shorter than input with 2 dims",
+        ):
+            broadcast_to(at.zeros((3, 4)), (5,))
 
     @pytest.mark.skipif(
         not config.cxx, reason="G++ not available, so we need to skip this test."
     )
-    def test_memory_leak(self):
+    @pytest.mark.parametrize("valid", (True, False))
+    def test_memory_leak(self, valid):
         import gc
         import tracemalloc
 
         from pytensor.link.c.cvm import CVM
 
         n = 100_000
-        x = pytensor.shared(np.ones(n, dtype=np.float64))
+        x = pytensor.shared(np.ones((1, n), dtype=np.float64))
         y = broadcast_to(x, (5, n))
 
         f = pytensor.function([], y, mode=Mode(optimizer=None, linker="cvm"))
@@ -1303,8 +1314,17 @@ class TestBroadcastTo(utt.InferShapeTester):
         blocks_last = None
         block_diffs = []
         for i in range(1, 50):
-            x.set_value(np.ones(n))
-            _ = f()
+            if valid:
+                x.set_value(np.ones((1, n)))
+                _ = f()
+            else:
+                x.set_value(np.ones((2, n)))
+                try:
+                    _ = f()
+                except ValueError:
+                    pass
+                else:
+                    raise RuntimeError("Should have failed")
             _ = gc.collect()
             blocks_i, _ = tracemalloc.get_traced_memory()
             if blocks_last is not None:
@@ -1313,7 +1333,7 @@ class TestBroadcastTo(utt.InferShapeTester):
             blocks_last = blocks_i
 
         tracemalloc.stop()
-        assert np.allclose(np.mean(block_diffs), 0)
+        assert np.all(np.array(block_diffs) <= (0 + 1e-8))
 
     @pytest.mark.parametrize(
         "fn,input_dims",
