@@ -636,6 +636,9 @@ class Elemwise(OpenMPOp):
                 return DimShuffle((), ["x"] * nd)(res)
 
             new_r = Elemwise(node.op, {})(*[transform(ipt) for ipt in node.inputs])
+            if isinstance(new_r, (list, tuple)):
+                # Scalar Op with multiple outputs
+                new_r = new_r[r.owner.outputs.index(r)]
             return new_r
 
         ret = []
