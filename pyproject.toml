@@ -208,11 +208,7 @@ files = ["pytensor", "tests"]
 plugins = ["numpy.typing.mypy_plugin"]
 
 [tool.cibuildwheel]
-build = "*"
+build = "cp310*"
 skip = "pp*"
 build-frontend = "build"
-test-command = [
-  "import pytensor; print(pytensor.__version__)",
-  "from pytensor.scan import scan_perform; print(scan_perform.get_version())",
-  "pytest {package}/tests",
-]
+test-command = "pytest {project}/tests"
