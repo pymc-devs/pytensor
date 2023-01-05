@@ -206,3 +206,13 @@ show_error_codes = true
 allow_redefinition = false
 files = ["pytensor", "tests"]
 plugins = ["numpy.typing.mypy_plugin"]
+
+[tool.cibuildwheel]
+build = "cp310-manylinux_x86_64"
+build-frontend = "build"
+test-command = [
+  "print(pytensor.__version__)",
+  "from pytensor.scan import scan_perform; print(scan_perform.get_version())",
+  "pytest {package}/tests",
+  "python {package}/test.py",
+]
