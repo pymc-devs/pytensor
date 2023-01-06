@@ -58,7 +58,7 @@ jobs:
     - uses: pre-commit/action@v3.0.0
 
   test:
-    name: "Test py${{ matrix.python-version }}: ${{ matrix.part }}"
+    name: "Test py${{ matrix.python-version }} : fast-compile ${{ matrix.fast-compile }} : float32 ${{ matrix.float32 }} : ${{ matrix.part }}"
     needs:
       - changes
       - style
@@ -81,6 +81,14 @@ jobs:
           - "tests/tensor/test_math.py"
           - "tests/tensor/test_math_scipy.py"
           - "tests/tensor/test_elemwise.py tests/tensor/rewriting/test_basic.py tests/tensor/rewriting/test_math.py"
+        exclude:
+          - python-version: "3.7"
+            fast-compile: 0
+            float32: 1
+          - python-version: "3.9"
+            fast-compile: 1
+          - python-version: "3.9"
+            float32: 1
     steps:
       - uses: actions/checkout@v3
         with:
