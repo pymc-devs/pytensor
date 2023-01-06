@@ -18,7 +18,7 @@ authors = [
 ]
 description = "Optimizing compiler for evaluating mathematical expressions on CPUs and GPUs."
 readme = "README.rst"
-license = {file = "LICENCE.txt"}
+license = {file = "LICENSE.txt"}
 classifiers = [
     "Development Status :: 6 - Mature",
     "Intended Audience :: Education",
