@@ -75,12 +75,12 @@ jobs:
           - "tests --ignore=tests/tensor --ignore=tests/scan --ignore=tests/sparse"
           - "tests/scan"
           - "tests/sparse"
-          - "tests/tensor --ignore=tests/tensor/conv --ignore=tests/tensor/test_basic.py --ignore=tests/tensor/test_math.py --ignore=tests/tensor/test_math_scipy.py --ignore=tests/tensor/test_inplace.py --ignore=tests/tensor/test_elemwise.py --ignore=tests/tensor/rewriting/test_basic.py --ignore=tests/tensor/rewriting/test_math.py"
+          - "tests/tensor --ignore=tests/tensor/conv --ignore=tests/tensor/rewriting --ignore=tests/tensor/test_math.py --ignore=tests/tensor/test_basic.py --ignore=tests/tensor/test_blas.py --ignore=tests/tensor/test_math_scipy.py --ignore=tests/tensor/test_inplace.py --ignore=tests/tensor/test_elemwise.py"
           - "tests/tensor/conv"
-          - "tests/tensor/test_basic.py tests/tensor/test_inplace.py"
+          - "tests/tensor/rewriting"
           - "tests/tensor/test_math.py"
-          - "tests/tensor/test_math_scipy.py"
-          - "tests/tensor/test_elemwise.py tests/tensor/rewriting/test_basic.py tests/tensor/rewriting/test_math.py"
+          - "tests/tensor/test_basic.py tests/tensor/test_inplace.py"          
+          - "tests/tensor/test_blas.py tests/tensor/test_elemwise.py tests/tensor/test_math_scipy.py"
         exclude:
           - python-version: "3.7"
             fast-compile: 0
@@ -89,6 +89,8 @@ jobs:
             fast-compile: 1
           - python-version: "3.9"
             float32: 1
+          - python-version: "3.9"
+            part: "tests/tensor/test_math.py"
     steps:
       - uses: actions/checkout@v3
         with:
