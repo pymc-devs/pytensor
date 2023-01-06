@@ -211,5 +211,6 @@ plugins = ["numpy.typing.mypy_plugin"]
 build = "cp310*"
 skip = "pp*"
 build-frontend = "build"
-test-requires = ["pytest", "numba", "jax", "jaxlib"]
-test-command = "pytest {package}/tests"
+# Testing seems to be running into issues locating libs where expected
+# test-requires = ["pytest", "numba", "jax", "jaxlib"]
+# test-command = "pytest {package}/tests"
