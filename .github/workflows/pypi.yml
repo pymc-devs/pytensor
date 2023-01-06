@@ -54,7 +54,7 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          path: ./dist/*.whl
+          path: ./wheelhouse/*.whl
 
   check_dist:
     name: Check dist
