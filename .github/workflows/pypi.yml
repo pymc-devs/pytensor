@@ -18,26 +18,55 @@ on:
 #  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
 #  cancel-in-progress: true
 
-# TODO: Fix filepaths and move tests and checks under cibuildwheel
 jobs:
   # The job to build precompiled pypi wheels.
   make_sdist:
     name: Make SDist
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-      with:
-        submodules: true
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
 
-    - name: Build SDist
-      run: pipx run build --sdist
+      - name: Build SDist
+        run: pipx run build --sdist
 
-    - uses: actions/upload-artifact@v3
-      with:
-        path: dist/*.tar.gz
-    
-    - name: Check SDist
-      run: |
+      - uses: actions/upload-artifact@v3
+        with:
+          path: dist/*.tar.gz
+
+  build_wheels:
+    name: Build ${{ matrix.python-version }} wheels on ${{ matrix.platform }}
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      matrix:
+        platform:
+          - macos-12
+          - windows-2022
+          - ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.11.4
+
+      - uses: actions/upload-artifact@v3
+        with:
+          path: ./dist/*.whl
+
+  check_dist:
+    name: Check dist
+    needs: [ make_sdist,build_wheels ]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: artifact
+          path: dist
+      - name: Check SDist
+        run: |
           mkdir -p test-sdist
           cd test-sdist
           python -m venv venv-sdist
@@ -46,55 +75,18 @@ jobs:
           venv-sdist/bin/python -c "import pytensor;print(pytensor.__version__)"
           # check import cython module
           venv-sdist/bin/python -c 'from pytensor.scan import scan_perform; print(scan_perform.get_version())'
+      - name: Check the bdist installs and imports
+        run: |
+          mkdir -p test-bdist
+          cd test-bdist
+          python -m venv venv-bdist
+          venv-bdist/bin/python -m pip install ../dist/pytensor-*.whl
+          # check import
+          venv-bdist/bin/python -c "import pytensor;print(pytensor.__version__)"
+          # check import cython module
+          venv-bdist/bin/python -c 'from pytensor.scan import scan_perform; print(scan_perform.get_version())'
 
-
-  build_wheels:
-      name: Build ${{ matrix.python-version }} wheels on ${{ matrix.platform }}
-      runs-on: ${{ matrix.platform }}
-      strategy:
-        matrix:
-            platform:
-                - macos-12
-                - windows-2022
-                - ubuntu-20.04
-      steps:
-        - uses: actions/checkout@v3
-          with:
-            fetch-depth: 0
-
-        - name: Build wheels
-          uses: pypa/cibuildwheel@v2.11.4
-
-        - uses: actions/upload-artifact@v3
-          with:
-            path: ./wheelhouse/*.whl
-
-        - uses: actions/setup-python@v4
-          with:
-              python-version: ${{ matrix.python-version }}
-            
-        - name: Check the bdist installs and imports
-          run: |
-            mkdir -p test-bdist
-            cd test-bdist
-            python -m venv venv-bdist
-            venv-bdist/bin/python -m pip install ../wheelhouse/pytensor-*.whl
-            # check import
-            venv-bdist/bin/python -c "import pytensor;print(pytensor.__version__)"
-            # check import cython module
-            venv-bdist/bin/python -c 'from pytensor.scan import scan_perform; print(scan_perform.get_version())'
-
-  check_dist:
-        name: Check dist
-        needs: [make_sdist,build_wheels]
-        runs-on: ubuntu-22.04
-        steps:
-          - uses: actions/download-artifact@v3
-            with:
-              name: artifact
-              path: dist
-
-          - run: pipx run twine check --strict dist/*
+      - run: pipx run twine check --strict dist/*
 
 # Disabling for testing on fork
 #  upload_pypi:
