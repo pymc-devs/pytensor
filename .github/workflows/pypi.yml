@@ -18,6 +18,7 @@ on:
 #  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
 #  cancel-in-progress: true
 
+# TODO: Fix filepaths and move tests and checks under cibuildwheel
 jobs:
   # The job to build precompiled pypi wheels.
   make_sdist:
