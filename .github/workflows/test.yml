@@ -57,7 +57,7 @@ jobs:
         python-version: '3.9'
     - uses: pre-commit/action@v3.0.0
 
-  test:
+  test_ubuntu:
     name: "Test py${{ matrix.python-version }} : fast-compile ${{ matrix.fast-compile }} : float32 ${{ matrix.float32 }} : ${{ matrix.part }}"
     needs:
       - changes
@@ -67,7 +67,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        python-version: ["3.7", "3.9"]
+        python-version: ["3.8", "3.10"]
         fast-compile: [0,1]
         float32: [0,1]
         install-numba: [1]
@@ -82,14 +82,14 @@ jobs:
           - "tests/tensor/test_basic.py tests/tensor/test_inplace.py"          
           - "tests/tensor/test_blas.py tests/tensor/test_elemwise.py tests/tensor/test_math_scipy.py"
         exclude:
-          - python-version: "3.7"
+          - python-version: "3.8"
             fast-compile: 0
             float32: 1
-          - python-version: "3.9"
+          - python-version: "3.10"
             fast-compile: 1
-          - python-version: "3.9"
+          - python-version: "3.10"
             float32: 1
-          - python-version: "3.9"
+          - python-version: "3.10"
             part: "tests/tensor/test_math.py"
     steps:
       - uses: actions/checkout@v3
@@ -208,10 +208,10 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     name: "All tests"
-    needs: [changes, style, test]
+    needs: [changes, style, test_ubuntu]
     steps:
       - name: Check build matrix status
-        if: ${{ needs.changes.outputs.changes == 'true' && (needs.style.result != 'success' || needs.test.result != 'success') }}
+        if: ${{ needs.changes.outputs.changes == 'true' && (needs.style.result != 'success' || needs.test_ubuntu.result != 'success') }}
         run: exit 1
 
   upload-coverage:
