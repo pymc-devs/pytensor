@@ -61,13 +61,6 @@ jobs:
         - uses: actions/checkout@v3
           with:
             fetch-depth: 0
-        
-        - name: Cache
-          id: cache
-          uses: actions/cache@v3
-          with:
-            path: /tmp/
-            key: ${{ runner.os }}-tmp
 
         - name: Build wheels
           uses: pypa/cibuildwheel@v2.11.4
@@ -75,6 +68,10 @@ jobs:
         - uses: actions/upload-artifact@v3
           with:
             path: ./wheelhouse/*.whl
+
+        - uses: actions/setup-python@v4
+          with:
+              python-version: ${{ matrix.python-version }}
             
         - name: Check the bdist installs and imports
           run: |
