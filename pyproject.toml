@@ -208,8 +208,9 @@ files = ["pytensor", "tests"]
 plugins = ["numpy.typing.mypy_plugin"]
 
 [tool.cibuildwheel]
-build = "cp310*"
-skip = ["pp*", "*musllinux*", "*i686*", "*win32*"]
+# Build everything but PyPy and 32-bit
+build = "*"
+skip = ["pp*", "*i686*", "*win32*"]
 build-frontend = "build"
 test-command = 'python -c "import pytensor; print(pytensor.__version__); from pytensor.scan import scan_perform; print(scan_perform.get_version())"'
     
