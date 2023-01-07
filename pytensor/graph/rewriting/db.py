@@ -198,7 +198,7 @@ class RewriteDatabaseQuery:
         Parameters
         ==========
         include:
-            A set of tags such that every rewirte obtained through this
+            A set of tags such that every rewrite obtained through this
             `RewriteDatabaseQuery` must have **one** of the tags listed. This
             field is required and basically acts as a starting point for the
             search.

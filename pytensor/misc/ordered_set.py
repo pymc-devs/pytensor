@@ -6,7 +6,7 @@ from collections.abc import MutableSet
 def check_deterministic(iterable):
     # Most places where OrderedSet is used, pytensor interprets any exception
     # whatsoever as a problem that an optimization introduced into the graph.
-    # If I raise a TypeError when the DestoryHandler tries to do something
+    # If I raise a TypeError when the DestroyHandler tries to do something
     # non-deterministic, it will just result in optimizations getting ignored.
     # So I must use an assert here. In the long term we should fix the rest of
     # pytensor to use exceptions correctly, so that this can be a TypeError.

@@ -110,7 +110,7 @@ err_msg1 = (
     "that scan uses in each of its iterations. "
     "In order to solve this issue if the two variable currently "
     "have the same dimensionality, you can increase the "
-    "dimensionality of the varialbe in the initial state of scan "
+    "dimensionality of the variable in the initial state of scan "
     "by using dimshuffle or shape_padleft. "
 )
 err_msg2 = (
@@ -138,7 +138,7 @@ err_msg3 = (
     "The first dimension of this "
     "matrix corresponds to the number of previous time-steps "
     "that scan uses in each of its iterations. "
-    "In order to solve this issue if the two varialbe currently "
+    "In order to solve this issue if the two variable currently "
     "have the same dimensionality, you can increase the "
     "dimensionality of the variable in the initial state of scan "
     "by using dimshuffle or shape_padleft. "

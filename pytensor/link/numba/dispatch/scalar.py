@@ -60,7 +60,7 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
     input_inner_dtypes = None
     output_inner_dtype = None
 
-    # Cython functions might have an additonal argument
+    # Cython functions might have an additional argument
     has_pyx_skip_dispatch = False
 
     if scalar_func_path.startswith("scipy.special"):

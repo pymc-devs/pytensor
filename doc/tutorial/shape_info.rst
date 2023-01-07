@@ -44,7 +44,7 @@ You can create variables with static shape information as follows:
     pytensor.tensor.tensor("float64", shape=(4, 3, 2))
 
 
-You can also pass shape infomation directly to some :class:`Op`\s, like ``RandomVariables``
+You can also pass shape information directly to some :class:`Op`\s, like ``RandomVariables``
 
 .. code-block:: python
 

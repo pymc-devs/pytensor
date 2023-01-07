@@ -57,7 +57,7 @@ def numba_funcify_Scan(op, node, **kwargs):
     # Apply inner rewrites
     # TODO: Not sure this is the right place to do this, should we have a rewrite that
     #  explicitly triggers the optimization of the inner graphs of Scan?
-    #  The C-code deffers it to the make_thunk phase
+    #  The C-code defers it to the make_thunk phase
     rewriter = op.mode_instance.optimizer
     rewriter(op.fgraph)
 

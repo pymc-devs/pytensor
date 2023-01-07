@@ -20,7 +20,7 @@ As an illustration, this tutorial will demonstrate how a simple Python-based
 
 .. note::
 
-    This is an introductury tutorial and as such it does not cover how to make
+    This is an introductory tutorial and as such it does not cover how to make
     an :class:`Op` that returns a view or modifies the values in its inputs. Thus, all
     :class:`Op`\s created with the instructions described here MUST return newly
     allocated memory or reuse the memory provided in the parameter
@@ -203,7 +203,7 @@ or :meth:`Op.make_thunk`.
 
 There are other methods that can be optionally defined by the :class:`Op`:
 
-  :meth:`Op.__eq__` and :meth:`Op.__hash__` define respectivelly equality
+  :meth:`Op.__eq__` and :meth:`Op.__hash__` define respectively equality
   between two :class:`Op`\s and the hash of an :class:`Op` instance.
   They will be used during the rewriting phase to merge nodes that are doing
   equivalent computations (same inputs, same operation).
