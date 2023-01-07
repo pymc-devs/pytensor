@@ -85,6 +85,10 @@ def test_jax_basic_multiout():
     out_fg = FunctionGraph([x], outs)
     compare_jax_and_py(out_fg, [X.astype(config.floatX)], assert_fn=assert_fn)
 
+    outs = at_nlinalg.slogdet(x)
+    out_fg = FunctionGraph([x], outs)
+    compare_jax_and_py(out_fg, [X.astype(config.floatX)], assert_fn=assert_fn)
+
 
 @pytest.mark.xfail(
     version_parse(jax.__version__) >= version_parse("0.2.12"),

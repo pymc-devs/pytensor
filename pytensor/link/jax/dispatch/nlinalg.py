@@ -3,7 +3,7 @@ import jax.numpy as jnp
 from pytensor.link.jax.dispatch import jax_funcify
 from pytensor.tensor.blas import BatchedDot
 from pytensor.tensor.math import Dot, MaxAndArgmax
-from pytensor.tensor.nlinalg import SVD, Det, Eig, Eigh, MatrixInverse, QRFull
+from pytensor.tensor.nlinalg import SVD, Det, Eig, Eigh, MatrixInverse, QRFull, SLogDet
 
 
 @jax_funcify.register(SVD)
@@ -23,6 +23,14 @@ def jax_funcify_Det(op, **kwargs):
         return jnp.linalg.det(x)
 
     return det
+
+
+@jax_funcify.register(SLogDet)
+def jax_funcify_SLogDet(op, **kwargs):
+    def slogdet(x):
+        return jnp.linalg.slogdet(x)
+
+    return slogdet
 
 
 @jax_funcify.register(Eig)
