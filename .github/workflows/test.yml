@@ -57,8 +57,8 @@ jobs:
         python-version: '3.9'
     - uses: pre-commit/action@v3.0.0
 
-  test:
-    name: "Test py${{ matrix.python-version }}: ${{ matrix.part }}"
+  test_ubuntu:
+    name: "Test py${{ matrix.python-version }} : fast-compile ${{ matrix.fast-compile }} : float32 ${{ matrix.float32 }} : ${{ matrix.part }}"
     needs:
       - changes
       - style
@@ -67,27 +67,30 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        python-version: ["3.7", "3.9"]
-        fast-compile: [0]
-        float32: [0]
+        python-version: ["3.8", "3.10"]
+        fast-compile: [0,1]
+        float32: [0,1]
         install-numba: [1]
         part:
-          - "tests --ignore=tests/tensor --ignore=tests/sparse"
-          - "tests/tensor tests/sparse --ignore=tests/tensor/test_basic.py --ignore=tests/tensor/test_math.py --ignore=tests/tensor/test_math_scipy.py --ignore=tests/tensor/test_inplace.py --ignore=tests/tensor/test_elemwise.py --ignore=tests/tensor/rewriting/test_basic.py --ignore=tests/tensor/rewriting/test_math.py"
-          - "tests/tensor/test_basic.py tests/tensor/test_math.py tests/tensor/test_math_scipy.py tests/tensor/test_inplace.py"
-          - "tests/tensor/test_elemwise.py tests/tensor/rewriting/test_basic.py tests/tensor/rewriting/test_math.py"
-          - "tests/tensor/conv/test_abstract_conv.py"
-        include:
-          - python-version: "3.7"
-            fast-compile: 1
+          - "tests --ignore=tests/tensor --ignore=tests/scan --ignore=tests/sparse"
+          - "tests/scan"
+          - "tests/sparse"
+          - "tests/tensor --ignore=tests/tensor/conv --ignore=tests/tensor/rewriting --ignore=tests/tensor/test_math.py --ignore=tests/tensor/test_basic.py --ignore=tests/tensor/test_blas.py --ignore=tests/tensor/test_math_scipy.py --ignore=tests/tensor/test_inplace.py --ignore=tests/tensor/test_elemwise.py"
+          - "tests/tensor/conv"
+          - "tests/tensor/rewriting"
+          - "tests/tensor/test_math.py"
+          - "tests/tensor/test_basic.py tests/tensor/test_inplace.py"          
+          - "tests/tensor/test_blas.py tests/tensor/test_elemwise.py tests/tensor/test_math_scipy.py"
+        exclude:
+          - python-version: "3.8"
+            fast-compile: 0
             float32: 1
-            install-numba: 1
-            part: "tests"
-          - python-version: "3.7"
+          - python-version: "3.10"
             fast-compile: 1
-            float32: 0
-            install-numba: 1
-            part: "tests"
+          - python-version: "3.10"
+            float32: 1
+          - python-version: "3.10"
+            part: "tests/tensor/test_math.py"
     steps:
       - uses: actions/checkout@v3
         with:
@@ -205,10 +208,10 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     name: "All tests"
-    needs: [changes, style, test]
+    needs: [changes, style, test_ubuntu]
     steps:
       - name: Check build matrix status
-        if: ${{ needs.changes.outputs.changes == 'true' && (needs.style.result != 'success' || needs.test.result != 'success') }}
+        if: ${{ needs.changes.outputs.changes == 'true' && (needs.style.result != 'success' || needs.test_ubuntu.result != 'success') }}
         run: exit 1
 
   upload-coverage:
