@@ -209,9 +209,9 @@ plugins = ["numpy.typing.mypy_plugin"]
 
 [tool.cibuildwheel]
 # Build everything but PyPy and 32-bit
-build = "*"
+build = "*musllinux*"
 archs = ["auto64"]
-skip = ["cp37*", "pp*"]
+skip = ["cp37*", "cp38*", "pp*"]
 build-frontend = "build"
 test-command = 'python -c "import pytensor; print(pytensor.__version__); from pytensor.scan import scan_perform; print(scan_perform.get_version())"'
     
