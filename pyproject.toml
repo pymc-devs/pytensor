@@ -208,13 +208,15 @@ files = ["pytensor", "tests"]
 plugins = ["numpy.typing.mypy_plugin"]
 
 [tool.cibuildwheel]
-# Build everything but PyPy and 32-bit
-build = "*musllinux*"
-archs = ["auto64"]
-skip = ["cp37*", "cp38*", "pp*"]
+build = "*"
+# Uncomment to skip builds that compile but fail when trying to test (maybe due to incompatibility with runner)
+# archs = ["auto64"]
+# Replace the next line with skip = ["pp*", "cp37*", "*musllinux*"]
+skip = ["pp*"]
 build-frontend = "build"
 test-command = 'python -c "import pytensor; print(pytensor.__version__); from pytensor.scan import scan_perform; print(scan_perform.get_version())"'
-    
+test-skip = ["cp37*", "*musllinux*", "*win32*", "*i686*"]
+
 # Testing seems to be running into issues locating libs where expected
 # test-requires = ["pytest", "numba", "jax", "jaxlib"]
 # test-command = "pytest {package}/tests"
