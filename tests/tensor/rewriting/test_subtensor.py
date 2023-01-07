@@ -424,7 +424,7 @@ def test_local_subtensor_remove_broadcastable_index():
     # testing local_subtensor_remove_broadcastable_index optimization
     #
     # tests removing broadcastable dimensions with index 0 or -1,
-    # otherwise the optimzation should not be applied
+    # otherwise the optimization should not be applied
 
     mode = get_default_mode()
     mode = mode.including("local_subtensor_remove_broadcastable_index")
@@ -433,7 +433,7 @@ def test_local_subtensor_remove_broadcastable_index():
     y2 = x.dimshuffle("x", 1, 0, "x")
     y3 = x.dimshuffle("x", 1, "x", 0, "x")
 
-    # testing for cases that the optimzation should be applied
+    # testing for cases that the optimization should be applied
     z1 = y1[:, 0, :]
     z2 = y1[:, -1, :]
     z3 = y2[0, :, :, -1]
@@ -459,7 +459,7 @@ def test_local_subtensor_remove_broadcastable_index():
     xn = rng.random((5, 5))
     f(xn)
 
-    # testing for cases that the optimzation should not be applied
+    # testing for cases that the optimization should not be applied
     # to verify that other subtensor usage are passed without errors
     w1 = y1[3, 0, :]
     w2 = y1[2:4, -1, :]

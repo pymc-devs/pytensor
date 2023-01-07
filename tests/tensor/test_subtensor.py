@@ -1445,11 +1445,11 @@ class TestIncSubtensor:
         for do_set in [False, True]:
 
             if do_set:
-                resut = set_subtensor(a[sl1, sl2], increment)
+                result = set_subtensor(a[sl1, sl2], increment)
             else:
-                resut = inc_subtensor(a[sl1, sl2], increment)
+                result = inc_subtensor(a[sl1, sl2], increment)
 
-            f = pytensor.function([a, increment, sl2_end], resut)
+            f = pytensor.function([a, increment, sl2_end], result)
 
             val_a = np.ones((5, 5))
             val_inc = 2.3
@@ -1517,8 +1517,8 @@ class TestIncSubtensor:
 
         for method in [set_subtensor, inc_subtensor]:
 
-            resut = method(a[sl1, sl3, sl2], increment)
-            f = pytensor.function([a, increment, sl2_end], resut)
+            result = method(a[sl1, sl3, sl2], increment)
+            f = pytensor.function([a, increment, sl2_end], result)
 
             expected_result = np.copy(val_a)
             result = f(val_a, val_inc, val_sl2_end)
@@ -1531,9 +1531,9 @@ class TestIncSubtensor:
             utt.assert_allclose(result, expected_result)
 
             # Test when we broadcast the result
-            resut = method(a[sl1, sl2], increment)
+            result = method(a[sl1, sl2], increment)
 
-            f = pytensor.function([a, increment, sl2_end], resut)
+            f = pytensor.function([a, increment, sl2_end], result)
 
             expected_result = np.copy(val_a)
             result = f(val_a, val_inc, val_sl2_end)

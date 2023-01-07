@@ -12,7 +12,7 @@
 Guide
 =====
 
-PyTensor assignes NumPy RNG states (e.g. `Generator` or `RandomState` objects) to
+PyTensor assigns NumPy RNG states (e.g. `Generator` or `RandomState` objects) to
 each `RandomVariable`.  The combination of an RNG state, a specific
 `RandomVariable` type (e.g. `NormalRV`), and a set of distribution parameters
 uniquely defines the `RandomVariable` instances in a graph.

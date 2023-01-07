@@ -647,7 +647,7 @@ def _conversion(real_value: Op, name: str) -> Op:
     return real_value
 
 
-# These _conver_to_<type> functions have leading underscores to indicate that
+# These _convert_to_<type> functions have leading underscores to indicate that
 # they should not be called directly.  They do not perform sanity checks about
 # what types you are casting to what.  That logic is implemented by the
 # `cast()` function below.
@@ -3844,7 +3844,7 @@ class AllocEmpty(COp):
         # False and it is set to true only in DebugMode.
         # We can't set it in the type as other make_node can reuse the type.
         # We can't set it in the variable as it isn't copied when we copy
-        # the variale. So we set it in the tag.
+        # the variable. So we set it in the tag.
         output.tag.nan_guard_mode_check = False
         return Apply(self, _shape, [output])
 

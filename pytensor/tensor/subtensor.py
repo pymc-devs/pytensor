@@ -1738,7 +1738,7 @@ class IncSubtensor(COp):
         different types of arrays.
 
         """
-        # Parameters of PyArrary_FromAny are:
+        # Parameters of PyArray_FromAny are:
         # array
         # dtype: we pass NULL to say any dtype is acceptable, so the existing
         #        dtype will be copied
@@ -2200,7 +2200,7 @@ class AdvancedIncSubtensor1(COp):
         different types of arrays.
 
         """
-        # Parameters of PyArrary_FromAny are:
+        # Parameters of PyArray_FromAny are:
         # array
         # dtype: we pass NULL to say any dtype is acceptable, so the existing
         #        dtype will be copied

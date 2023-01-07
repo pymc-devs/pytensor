@@ -92,7 +92,7 @@ designated **inner inputs** and **inner outputs**, respectively.
 ================
 
 The following are the different types of variables that `Scan` has the
-capacity to handle, along with their various caracteristics.
+capacity to handle, along with their various characteristics.
 
 **Sequence** : A sequence is an PyTensor variable which `Scan` will iterate
 over and give sub-elements to its inner function as input. A sequence
