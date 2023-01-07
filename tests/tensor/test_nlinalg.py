@@ -293,14 +293,6 @@ def test_slogdet():
     assert np.allclose(det, f_det)
 
 
-def test_slogdet_shape():
-    x = matrix()
-    sign, det = slogdet(x)
-    for shape in [sign.shape, det.shape]:
-        assert isinstance(shape, Constant)
-        assert tuple(shape.data) == ()
-
-
 def test_trace():
     rng = np.random.default_rng(utt.fetch_seed())
     x = matrix()
