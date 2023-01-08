@@ -211,8 +211,9 @@ plugins = ["numpy.typing.mypy_plugin"]
 build = "*"
 # Uncomment to skip builds that compile but fail when trying to test (maybe due to incompatibility with runner)
 # archs = ["auto64"]
-# Replace the next line with skip = ["pp*", "cp37*", "*musllinux*"]
-skip = ["pp*"]
+# Disable any-platform (pp*), and 32-bit builds.
+# Additional options to consider: "*musllinux*"
+skip = ["pp*", "*-win32", "*-manylinux_i686"]
 build-frontend = "build"
 test-command = 'python -c "import pytensor; print(pytensor.__version__); from pytensor.scan import scan_perform; print(scan_perform.get_version())"'
 test-skip = ["cp37*", "*musllinux*", "*win32*", "*i686*"]
