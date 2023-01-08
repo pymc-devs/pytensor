@@ -8,6 +8,7 @@ import numpy as np
 
 import pytensor.scalar.basic as aes
 import pytensor.scalar.math as aes_math
+from pytensor import compile
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
     NodeRewriter,
@@ -85,13 +86,14 @@ from pytensor.tensor.rewriting.basic import (
     encompasses_broadcastable,
     local_fill_sink,
     register_canonicalize,
+    register_scalarize,
     register_specialize,
     register_specialize_device,
     register_stabilize,
     register_uncanonicalize,
     register_useless,
 )
-from pytensor.tensor.rewriting.elemwise import FusionOptimizer, fuse_seqopt
+from pytensor.tensor.rewriting.elemwise import FusionOptimizer
 from pytensor.tensor.shape import Shape, Shape_i
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
@@ -1567,6 +1569,18 @@ def local_op_of_op(fgraph, node):
                 return [combined(node_inps.owner.inputs[0])]
 
 
+@register_scalarize
+@node_rewriter([Sum])
+def local_sum_of_makevector(fgraph, node):
+    (array,) = node.inputs
+    if not array.owner or not isinstance(array.owner.op, MakeVector):
+        return False
+
+    values = array.owner.inputs
+    summed = aes.add(*values)
+    return [as_tensor_variable(summed)]
+
+
 ALL_REDUCE = (
     [
         CAReduce,
@@ -2922,7 +2936,7 @@ def local_add_mul_fusion(fgraph, node):
         return [output]
 
 
-fuse_seqopt.register(
+compile.optdb["elemwise_fusion"].register(
     "local_add_mul_fusion",
     FusionOptimizer(local_add_mul_fusion),
     "fast_run",
