@@ -76,18 +76,17 @@ jobs:
 
       - run: pipx run twine check --strict dist/*
 
-# Disabling for testing on fork
-#  upload_pypi:
-#    name: Upload to PyPI on release
-#    needs: [build]
-#    runs-on: ubuntu-latest
-#    if: github.event_name == 'release' && github.event.action == 'published'
-#    steps:
-#      - uses: actions/download-artifact@v3
-#        with:
-#          name: artifact
-#          path: dist
-#      - uses: pypa/gh-action-pypi-publish@v1.6.4
-#        with:
-#          user: __token__
-#          password: ${{ secrets.pypi_secret }}
+  upload_pypi:
+    name: Upload to PyPI on release
+    needs: [build]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && github.event.action == 'published'
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: artifact
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@v1.6.4
+        with:
+          user: __token__
+          password: ${{ secrets.pypi_secret }}
