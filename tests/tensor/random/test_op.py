@@ -110,7 +110,7 @@ def test_RandomVariable_basics():
     rv_shape = rv._infer_shape(at.constant([]), (), [])
     assert rv_shape.equals(at.constant([], dtype="int64"))
 
-    # Integer-specificed `dtype`
+    # Integer-specified `dtype`
     dtype_1 = all_dtypes[1]
     rv_node = rv.make_node(None, None, 1)
     rv_out = rv_node.outputs[1]

@@ -599,7 +599,7 @@ class Function:
         # helper function
         def checkSV(sv_ori, sv_rpl):
             """
-            Assert two SharedVariable follow some restirctions:
+            Assert two SharedVariable follow some restrictions:
                 1. same type
                 2. same shape or dim?
             """

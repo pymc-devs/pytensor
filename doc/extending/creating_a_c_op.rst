@@ -930,7 +930,7 @@ discussed below.
 For every input which has a :attr:`dtype` attribute (this means
 Tensors), the following macros will be
 defined unless your `Op` class has an :attr:`Op.check_input` attribute
-defined to False. In these descrptions 'i' refers to the position
+defined to False. In these descriptions 'i' refers to the position
 (indexed from 0) in the input array.
 
 *       ``DTYPE_INPUT_{i}`` : NumPy dtype of the data in the array.

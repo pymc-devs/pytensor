@@ -81,7 +81,7 @@ def make_outputs(
         dtype = numba.from_dtype(np.dtype(dtype))
         arrtype = types.Array(dtype, len(iter_shape), "C")
         ar_types.append(arrtype)
-        # This is actually an interal numba function, I guess we could
+        # This is actually an internal numba function, I guess we could
         # call `numba.nd.unsafe.ndarray` instead?
         shape = [
             length if not bc_dim else one for length, bc_dim in zip(iter_shape, bc)

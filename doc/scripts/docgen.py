@@ -21,7 +21,7 @@ if __name__ == '__main__':
         print('  --cache: use the doctree cache')
         print('  --rst: only compile the doc (requires sphinx)')
         print('  --nopdf: do not produce a PDF file from the doc, only HTML')
-        print('  --test: run all the code samples in the documentaton')
+        print('  --test: run all the code samples in the documentation')
         print('  --check: treat warnings as errors')
         print('  --help: this help')
         print('If one or more files are specified after the options then only '

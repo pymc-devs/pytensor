@@ -268,7 +268,7 @@ def load(f, persistent_load=PersistentNdarrayLoad):
     :type f: file
 
     :param persistent_load: The persistent loading function to use for
-        unpickling. This must be compatible with the `persisten_id` function
+        unpickling. This must be compatible with the `persistent_id` function
         used when pickling.
     :type persistent_load: callable, optional
 

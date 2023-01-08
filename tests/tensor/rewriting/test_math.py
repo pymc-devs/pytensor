@@ -132,9 +132,9 @@ rewrite_mode = get_mode(rewrite_mode)
 
 dimshuffle_lift = out2in(local_dimshuffle_lift)
 
-_stablize_rewrites = RewriteDatabaseQuery(include=["fast_run"])
-_stablize_rewrites.position_cutoff = 1.51
-_stablize_rewrites = optdb.query(_stablize_rewrites)
+_stabilize_rewrites = RewriteDatabaseQuery(include=["fast_run"])
+_stabilize_rewrites.position_cutoff = 1.51
+_stabilize_rewrites = optdb.query(_stabilize_rewrites)
 
 _specialize_rewrites = RewriteDatabaseQuery(include=["fast_run"])
 _specialize_rewrites.position_cutoff = 2.01
@@ -154,7 +154,7 @@ def rewrite(g, level="fast_run"):
     elif level == "specialize":
         _specialize_rewrites.rewrite(g)
     elif level == "stabilize":
-        _stablize_rewrites.rewrite(g)
+        _stabilize_rewrites.rewrite(g)
     else:
         raise ValueError(level)
     return g
@@ -2989,7 +2989,7 @@ class TestLocalErfc:
 
         # TODO: fix this problem: The python code upcast somewhere internally
         #  some value of float32 to python float for part of its computation.
-        #  That makes the c and python code generate sligtly different values
+        #  That makes the c and python code generate slightly different values
         if not (
             config.floatX == "float32" and config.mode in ["DebugMode", "DEBUG_MODE"]
         ):

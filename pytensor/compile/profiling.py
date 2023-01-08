@@ -165,7 +165,7 @@ def print_global_stats():
         print(
             (
                 "Global stats: ",
-                f"Time elasped since PyTensor import = {time.perf_counter() - pytensor_imported_time:6.3f}s, "
+                f"Time elapsed since PyTensor import = {time.perf_counter() - pytensor_imported_time:6.3f}s, "
                 f"Time spent in PyTensor functions = {total_fct_exec_time:6.3f}s, "
                 "Time spent compiling PyTensor functions: "
                 f"rewriting = {total_graph_rewrite_time:6.3f}s, linking = {total_time_linker:6.3f}s ",
@@ -768,7 +768,7 @@ class ProfileStats:
                     f"    output {int(idx)}: dtype={dtype}, shape={sh}, strides={st}{off}",
                     file=file,
                 )
-            # Same as before, this I've sacrificied some information making
+            # Same as before, this I've sacrificed some information making
             # the output more readable
         print(
             "   ... (remaining %i Apply instances account for "
