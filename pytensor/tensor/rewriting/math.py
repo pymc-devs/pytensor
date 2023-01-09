@@ -423,6 +423,35 @@ def local_sumsqr2dot(fgraph, node):
                     return [new_out]
 
 
+@register_canonicalize
+@register_specialize
+@node_rewriter([Elemwise])
+def local_mulexp2expadd(fgraph, node):
+    """
+    This rewrite detects e^x * e^y and converts it to e^(x+y).
+    Similarly, e^x / e^y becomes e^(x-y).
+    """
+    if (
+        isinstance(node.op, Elemwise)
+        and isinstance(node.op.scalar_op, (aes.Mul, aes.TrueDiv))
+        and node.inputs[0].owner
+        and isinstance(node.inputs[0].owner.op, Elemwise)
+        and isinstance(node.inputs[0].owner.op.scalar_op, aes.Exp)
+        and node.inputs[1].owner
+        and isinstance(node.inputs[1].owner.op, Elemwise)
+        and isinstance(node.inputs[1].owner.op.scalar_op, aes.Exp)
+    ):
+        input1 = node.inputs[0].owner.inputs[0]
+        input2 = node.inputs[1].owner.inputs[0]
+        if isinstance(node.op.scalar_op, aes.Mul):
+            new_out = exp(input1 + input2)
+        else:  # TrueDiv
+            new_out = exp(input1 - input2)
+        if new_out.dtype != node.outputs[0].dtype:
+            new_out = cast(new_out, dtype=node.outputs[0].dtype)
+        return [new_out]
+
+
 @register_stabilize
 @register_specialize
 @register_canonicalize

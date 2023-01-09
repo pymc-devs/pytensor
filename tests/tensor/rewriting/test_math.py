@@ -4014,6 +4014,56 @@ def test_local_sumsqr2dot():
     )
 
 
+def test_local_mulexp2expadd():
+    # e^x * e^y = e^(x+y)
+    # test simple scalars first
+    x = scalar("x")
+    y = scalar("y")
+    expx = exp(x)
+    expy = exp(y)
+    expx_expy = expx * expy
+    f = function([x, y], expx_expy)
+    utt.assert_allclose(f(3, 4), np.exp(3 + 4))
+    graph = f.maker.fgraph.toposort()
+    assert isinstance(graph[0].op, Elemwise)
+    inner_graph = graph[0].op.scalar_op.fgraph.toposort()
+    assert any(isinstance(n.op, aes.Add) for n in inner_graph)
+
+    # expect same for matrices as well
+    mx = matrix("mx")
+    my = matrix("my")
+    f = function([mx, my], exp(mx) * exp(my))
+    M1 = np.array([[1.0, 2.0], [3.0, 4.0]])
+    M2 = np.array([[5.0, 6.0], [7.0, 8.0]])
+    utt.assert_allclose(f(M1, M2), np.exp(M1 + M2))
+    graph = f.maker.fgraph.toposort()
+    assert isinstance(graph[0].op, Elemwise)
+    inner_graph = graph[0].op.scalar_op.fgraph.toposort()
+    assert any(isinstance(n.op, aes.Add) for n in inner_graph)
+
+    # checking whether further rewrites can proceed after this one as one would expect
+    # e^x * e^(-x) = e^(x-x) = e^0 = 1
+    f = function([x], expx * exp(neg(x)))
+    graph = f.maker.fgraph.toposort()
+    assert isinstance(graph[0].inputs[0], TensorConstant)
+    utt.assert_allclose(f(42), 1)
+
+    # e^x / e^y = e^(x-y)
+    expx_div_expy = expx / expy
+    f = function([x, y], expx_div_expy)
+    utt.assert_allclose(f(5, 3), np.exp(5 - 3))
+    graph = f.maker.fgraph.toposort()
+    assert isinstance(graph[0].op, Elemwise)
+    inner_graph = graph[0].op.scalar_op.fgraph.toposort()
+    assert any(isinstance(n.op, aes.Sub) for n in inner_graph)
+
+    # e^x / e^x = e^(x-x) = e^0 = 1
+    f = function([x], expx / expx)
+    graph = f.maker.fgraph.toposort()
+    assert isinstance(graph[0].inputs[0], TensorConstant)
+    utt.assert_allclose(f(42), 1)
+
+
 def test_local_expm1():
     x = matrix("x")
     u = scalar("u")
