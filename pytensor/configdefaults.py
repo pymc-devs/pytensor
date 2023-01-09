@@ -516,6 +516,22 @@ def add_compile_configvars():
     )
 
     config.add(
+        "optimizer_interactive",
+        "If True, we interrupt after every optimization being applied and display how the graph changed",
+        BoolParam(False),
+        in_c_key=False,
+    )
+
+    config.add(
+        "optimizer_interactive_skip_rewrites",
+        (
+            "Do not interrupt after changes from optimizers with these names. Separate names with ',"
+        ),
+        StrParam(""),
+        in_c_key=False,
+    )
+
+    config.add(
         "on_opt_error",
         (
             "What to do when an optimization crashes: warn and skip it, raise "
