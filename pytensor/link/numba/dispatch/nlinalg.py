@@ -18,6 +18,7 @@ from pytensor.tensor.nlinalg import (
     MatrixInverse,
     MatrixPinv,
     QRFull,
+    SLogDet,
 )
 
 
@@ -56,6 +57,25 @@ def numba_funcify_Det(op, node, **kwargs):
         return numba_basic.direct_cast(np.linalg.det(inputs_cast(x)), out_dtype)
 
     return det
+
+
+@numba_funcify.register(SLogDet)
+def numba_funcify_SLogDet(op, node, **kwargs):
+
+    out_dtype_1 = node.outputs[0].type.numpy_dtype
+    out_dtype_2 = node.outputs[1].type.numpy_dtype
+
+    inputs_cast = int_to_float_fn(node.inputs, out_dtype_1)
+
+    @numba_basic.numba_njit
+    def slogdet(x):
+        sign, det = np.linalg.slogdet(inputs_cast(x))
+        return (
+            numba_basic.direct_cast(sign, out_dtype_1),
+            numba_basic.direct_cast(det, out_dtype_2),
+        )
+
+    return slogdet
 
 
 @numba_funcify.register(Eig)

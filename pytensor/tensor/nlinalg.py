@@ -231,6 +231,39 @@ class Det(Op):
 det = Det()
 
 
+class SLogDet(Op):
+    """
+    Compute the log determinant and its sign of the matrix. Input should be a square matrix.
+    """
+
+    __props__ = ()
+
+    def make_node(self, x):
+        x = as_tensor_variable(x)
+        assert x.ndim == 2
+        sign = scalar(dtype=x.dtype)
+        det = scalar(dtype=x.dtype)
+        return Apply(self, [x], [sign, det])
+
+    def perform(self, node, inputs, outputs):
+        (x,) = inputs
+        (sign, det) = outputs
+        try:
+            sign[0], det[0] = (z.astype(x.dtype) for z in np.linalg.slogdet(x))
+        except Exception:
+            print("Failed to compute determinant", x)
+            raise
+
+    def infer_shape(self, fgraph, node, shapes):
+        return [(), ()]
+
+    def __str__(self):
+        return "SLogDet"
+
+
+slogdet = SLogDet()
+
+
 class Eig(Op):
     """
     Compute the eigenvalues and right eigenvectors of a square array.

@@ -1643,6 +1643,11 @@ class BroadcastTo(COp):
 
         shape, static_shape = at.infer_static_shape(shape)
 
+        if len(shape) < a.ndim:
+            raise ValueError(
+                f"Broadcast target shape has {len(shape)} dims, which is shorter than input with {a.ndim} dims"
+            )
+
         out = TensorType(dtype=a.type.dtype, shape=static_shape)()
 
         # Attempt to prevent in-place operations on this view-based output
@@ -1686,9 +1691,12 @@ class BroadcastTo(COp):
         return [node.inputs[1:]]
 
     def c_code(self, node, name, inputs, outputs, sub):
+        inp_dims = node.inputs[0].ndim
+        out_dims = node.outputs[0].ndim
+        new_dims = out_dims - inp_dims
+
         (x, *shape) = inputs
         (out,) = outputs
-        ndims = len(shape)
         fail = sub["fail"]
 
         # TODO: Could just use `PyArray_Return`, no?
@@ -1701,20 +1709,34 @@ class BroadcastTo(COp):
 
         src = (
             """
-            npy_intp itershape[%(ndims)s] = {%(dims_array)s};
+            npy_intp itershape[%(out_dims)s] = {%(dims_array)s};
 
+            NpyIter *iter;
             PyArrayObject *ops[1] = {%(x)s};
             npy_uint32 flags = NPY_ITER_MULTI_INDEX | NPY_ITER_REFS_OK | NPY_ITER_ZEROSIZE_OK;
             npy_uint32 op_flags[1] = {NPY_ITER_READONLY};
             PyArray_Descr *op_dtypes[1] = {NULL};
-            int oa_ndim = %(ndims)s;
+            int oa_ndim = %(out_dims)s;
             int* op_axes[1] = {NULL};
             npy_intp buffersize = 0;
 
-            NpyIter *iter = NpyIter_AdvancedNew(
+            for(int i = 0; i < %(inp_dims)s; i++)
+            {
+                if ((PyArray_DIMS(%(x)s)[i] != 1) && (PyArray_DIMS(%(x)s)[i] != itershape[i + %(new_dims)s]))
+                {
+                    PyErr_Format(PyExc_ValueError,
+                                 "Shape mismatch in broadcast_to: target shape[%%i] = %%lld is incompatible with input shape = %%lld.",
+                                 i,
+                                 (long long int) itershape[i + %(new_dims)s],
+                                 (long long int) PyArray_DIMS(%(x)s)[i]
+                    );
+                    %(fail)s
+                }
+            }
+
+            iter = NpyIter_AdvancedNew(
                 1, ops, flags, NPY_CORDER, NPY_NO_CASTING, op_flags, op_dtypes, oa_ndim, op_axes, itershape, buffersize
             );
-
             %(out)s = NpyIter_GetIterView(iter, 0);
 
             if(%(out)s == NULL){
@@ -1733,7 +1755,7 @@ class BroadcastTo(COp):
         return src
 
     def c_code_cache_version(self):
-        return (1,)
+        return (2,)
 
 
 broadcast_to_ = BroadcastTo()

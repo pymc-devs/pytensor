@@ -179,6 +179,41 @@ def test_Det(x, exc):
         )
 
 
+@pytest.mark.parametrize(
+    "x, exc",
+    [
+        (
+            set_test_value(
+                at.dmatrix(),
+                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
+            ),
+            None,
+        ),
+        (
+            set_test_value(
+                at.lmatrix(),
+                (lambda x: x.T.dot(x))(rng.poisson(size=(3, 3)).astype("int64")),
+            ),
+            None,
+        ),
+    ],
+)
+def test_SLogDet(x, exc):
+    g = nlinalg.SLogDet()(x)
+    g_fg = FunctionGraph(outputs=g)
+
+    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
+    with cm:
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, (SharedVariable, Constant))
+            ],
+        )
+
+
 # We were seeing some weird results in CI where the following two almost
 # sign-swapped results were being return from Numba and Python, respectively.
 # The issue might be related to https://github.com/numba/numba/issues/4519.
