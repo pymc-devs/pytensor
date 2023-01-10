@@ -423,33 +423,47 @@ def local_sumsqr2dot(fgraph, node):
                     return [new_out]
 
 
-@register_canonicalize
 @register_specialize
-@node_rewriter([Elemwise])
+@node_rewriter([mul, true_div])
 def local_mulexp2expadd(fgraph, node):
     """
     This rewrite detects e^x * e^y and converts it to e^(x+y).
     Similarly, e^x / e^y becomes e^(x-y).
     """
-    if (
-        isinstance(node.op, Elemwise)
-        and isinstance(node.op.scalar_op, (aes.Mul, aes.TrueDiv))
-        and node.inputs[0].owner
-        and isinstance(node.inputs[0].owner.op, Elemwise)
-        and isinstance(node.inputs[0].owner.op.scalar_op, aes.Exp)
-        and node.inputs[1].owner
-        and isinstance(node.inputs[1].owner.op, Elemwise)
-        and isinstance(node.inputs[1].owner.op.scalar_op, aes.Exp)
+    if isinstance(node.op, Elemwise) and isinstance(
+        node.op.scalar_op, (aes.Mul, aes.TrueDiv)
     ):
-        input1 = node.inputs[0].owner.inputs[0]
-        input2 = node.inputs[1].owner.inputs[0]
-        if isinstance(node.op.scalar_op, aes.Mul):
-            new_out = exp(input1 + input2)
-        else:  # TrueDiv
-            new_out = exp(input1 - input2)
-        if new_out.dtype != node.outputs[0].dtype:
-            new_out = cast(new_out, dtype=node.outputs[0].dtype)
-        return [new_out]
+        exps = [
+            n.owner.inputs[0]
+            for n in node.inputs
+            if n.owner
+            and hasattr(n.owner.op, "scalar_op")
+            and isinstance(n.owner.op.scalar_op, aes.Exp)
+        ]
+        # Can only do any rewrite if there are at least two exp-s
+        if len(exps) >= 2:
+            # Mul -> add; TrueDiv -> sub
+            orig_op, new_op = mul, add
+            if isinstance(node.op.scalar_op, aes.TrueDiv):
+                orig_op, new_op = true_div, sub
+            new_out = exp(new_op(*exps))
+            if new_out.dtype != node.outputs[0].dtype:
+                new_out = cast(new_out, dtype=node.outputs[0].dtype)
+            # The original Mul may have more than two factors, some of which may not be exp nodes.
+            # If so, we keep multiplying them with the new exp(sum) node.
+            # E.g.: e^x * y * e^z * w --> e^(x+z) * y * w
+            rest = [
+                n
+                for n in node.inputs
+                if not n.owner
+                or not hasattr(n.owner.op, "scalar_op")
+                or not isinstance(n.owner.op.scalar_op, aes.Exp)
+            ]
+            if len(rest) > 0:
+                new_out = orig_op(new_out, *rest)
+                if new_out.dtype != node.outputs[0].dtype:
+                    new_out = cast(new_out, dtype=node.outputs[0].dtype)
+            return [new_out]
 
 
 @register_stabilize
