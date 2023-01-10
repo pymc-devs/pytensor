@@ -7,7 +7,7 @@ from warnings import warn
 import pytensor
 import pytensor.scalar.basic as aes
 from pytensor import compile
-from pytensor.compile.mode import get_target_language
+from pytensor.compile.mode import get_target_language, optdb
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Constant, io_toposort
 from pytensor.graph.features import ReplaceValidate
@@ -20,11 +20,14 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined, TestValueError
+from pytensor.scalar import ScalarScanOp
 from pytensor.tensor.basic import MakeVector, alloc, cast, get_scalar_constant_value
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.extra_ops import broadcast_arrays
 from pytensor.tensor.rewriting.basic import register_canonicalize, register_specialize
 from pytensor.tensor.shape import shape_padleft
+from pytensor.tensor.subtensor import IncSubtensor
 from pytensor.tensor.var import TensorConstant
 
 
@@ -1024,4 +1027,58 @@ compile.optdb.register(  # type: ignore
     in2out(local_careduce_fusion),
     "fusion",
     position=49,
+)
+
+
+@node_rewriter([Elemwise])
+def inline_elemwise_scan(fgraph, node):
+    from pytensor.scan.basic import scan
+    from pytensor.scan.utils import expand_empty
+
+    scalar_op = node.op.scalar_op
+
+    if not isinstance(scalar_op, ScalarScanOp):
+        return None
+
+    # TODO: Add non-batched implementation? That should be better for scans with big difference in required n_steps
+    bcasted_inputs = broadcast_arrays(*node.inputs)
+    ret, updates = scan(
+        scalar_op.fn,
+        outputs_info=bcasted_inputs[: scalar_op.nout],
+        non_sequences=bcasted_inputs[scalar_op.nout :],
+        n_steps=scalar_op.n_steps,
+        sequences=None,
+        strict=True,
+    )
+    if updates:
+        raise ValueError("Scalar scan should never return updates")
+    if scalar_op.nout == 1:
+        ret = (ret,)
+
+    # Scan output size is given by the size of the input leading dimension, by default its n_steps + 1.
+    # If we only want to store the last elements we can shorten the leading dimension to 1
+    scan_node = ret[0].owner.inputs[0].owner
+    scan_inputs = scan_node.inputs
+    n_steps = scan_inputs[0]
+    n_non_seqs = scan_node.op.info.n_non_seqs
+    carried_inputs = scan_inputs[1 : len(scan_inputs) - n_non_seqs :]
+    constant_inputs = scan_inputs[len(scan_inputs) - n_non_seqs :]
+    new_carried_inputs = []
+    for carried_input in carried_inputs:
+        assert isinstance(carried_input.owner.op, IncSubtensor)
+        fill_value = carried_input.owner.inputs[1]
+        # TODO: Check for the global flag where this is controlled
+        new_carried_inputs.append(expand_empty(fill_value, 1))
+    ret = scan_node.op.make_node(n_steps, *new_carried_inputs, *constant_inputs).outputs
+
+    return [r[1] for r in ret]
+
+
+# We want to run this after the scan save mem rewrite, as we already applied it here
+optdb.register(
+    "inline_elemwise_scan",
+    in2out(inline_elemwise_scan),
+    "fast_compile",
+    "fast_run",
+    position=1.62,
 )
