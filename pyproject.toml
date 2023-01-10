@@ -18,7 +18,7 @@ authors = [
 ]
 description = "Optimizing compiler for evaluating mathematical expressions on CPUs and GPUs."
 readme = "README.rst"
-license = {file = "LICENCE.txt"}
+license = {file = "LICENSE.txt"}
 classifiers = [
     "Development Status :: 6 - Mature",
     "Intended Audience :: Education",
@@ -206,3 +206,18 @@ show_error_codes = true
 allow_redefinition = false
 files = ["pytensor", "tests"]
 plugins = ["numpy.typing.mypy_plugin"]
+
+[tool.cibuildwheel]
+build = "*"
+# Uncomment to skip builds that compile but fail when trying to test (maybe due to incompatibility with runner)
+# archs = ["auto64"]
+# Disable any-platform (pp*), and 32-bit builds.
+# Additional options to consider: "*musllinux*"
+skip = ["pp*", "*-win32", "*-manylinux_i686"]
+build-frontend = "build"
+test-command = 'python -c "import pytensor; print(pytensor.__version__); from pytensor.scan import scan_perform; print(scan_perform.get_version())"'
+test-skip = ["cp37*", "*musllinux*", "*win32*", "*i686*"]
+
+# Testing seems to be running into issues locating libs where expected
+# test-requires = ["pytest", "numba", "jax", "jaxlib"]
+# test-command = "pytest {package}/tests"
