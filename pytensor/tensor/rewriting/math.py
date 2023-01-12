@@ -2,6 +2,7 @@ r"""Rewrites for the `Op`\s in :mod:`pytensor.tensor.math`."""
 
 import itertools
 import operator
+from collections import defaultdict
 from functools import partial, reduce
 
 import numpy as np
@@ -425,14 +426,12 @@ def local_sumsqr2dot(fgraph, node):
 
 @register_specialize
 @node_rewriter([mul, true_div])
-def local_mulexp2expadd(fgraph, node):
+def local_mul_exp_to_exp_add(fgraph, node):
     """
     This rewrite detects e^x * e^y and converts it to e^(x+y).
     Similarly, e^x / e^y becomes e^(x-y).
     """
-    if isinstance(node.op, Elemwise) and isinstance(
-        node.op.scalar_op, (aes.Mul, aes.TrueDiv)
-    ):
+    if isinstance(node.op.scalar_op, (aes.Mul, aes.TrueDiv)):
         exps = [
             n.owner.inputs[0]
             for n in node.inputs
@@ -468,16 +467,12 @@ def local_mulexp2expadd(fgraph, node):
 
 @register_specialize
 @node_rewriter([mul, true_div])
-def local_mulpow2powadd(fgraph, node):
+def local_mul_pow_to_pow_add(fgraph, node):
     """
     This rewrite detects a^x * a^y and converts it to a^(x+y).
     Similarly, a^x / a^y becomes a^(x-y).
     """
-    if isinstance(node.op, Elemwise) and isinstance(
-        node.op.scalar_op, (aes.Mul, aes.TrueDiv)
-    ):
-        from collections import defaultdict
-
+    if isinstance(node.op.scalar_op, (aes.Mul, aes.TrueDiv)):
         # search for pow-s and group them by their bases
         pow_nodes = defaultdict(list)
         rest = []

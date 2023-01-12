@@ -4014,7 +4014,7 @@ def test_local_sumsqr2dot():
     )
 
 
-def test_local_mulexp2expadd():
+def test_local_mul_exp_to_exp_add():
     x = scalar("x")
     y = scalar("y")
     z = scalar("z")
@@ -4105,7 +4105,7 @@ def test_local_mulexp2expadd():
     assert isinstance(graph[0].inputs[0], TensorConstant)
 
 
-def test_local_mulpow2powadd():
+def test_local_mul_pow_to_pow_add():
     x = scalar("x")
     y = scalar("y")
     z = scalar("z")
