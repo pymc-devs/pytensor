@@ -119,6 +119,7 @@ def debugprint(
     print_destroy_map: bool = False,
     print_view_map: bool = False,
     print_fgraph_inputs: bool = False,
+    print_topo_order: bool = True,
 ) -> Union[str, TextIO]:
     r"""Print a graph as text.
 
@@ -175,6 +176,8 @@ def debugprint(
         Whether to print the `view_map`\s of printed objects
     print_fgraph_inputs
         Print the inputs of `FunctionGraph`\s.
+    print_topo_order
+        Whether to print the toposort ordering of nodes
 
     Returns
     -------
@@ -231,7 +234,10 @@ def debugprint(
             else:
                 storage_maps.extend([None for item in obj.maker.fgraph.outputs])
             topo = obj.maker.fgraph.toposort()
-            topo_orders.extend([topo for item in obj.maker.fgraph.outputs])
+            if print_topo_order:
+                topo_orders.extend([topo for item in obj.maker.fgraph.outputs])
+            else:
+                topo_orders.extend([None for item in obj.maker.fgraph.outputs])
         elif isinstance(obj, FunctionGraph):
             if print_fgraph_inputs:
                 inputs_to_print.extend(obj.inputs)
@@ -241,7 +247,10 @@ def debugprint(
                 [getattr(obj, "storage_map", None) for item in obj.outputs]
             )
             topo = obj.toposort()
-            topo_orders.extend([topo for item in obj.outputs])
+            if print_topo_order:
+                topo_orders.extend([topo for item in obj.outputs])
+            else:
+                topo_orders.extend([None for item in obj.outputs])
         elif isinstance(obj, (int, float, np.ndarray)):
             print(obj, file=_file)
         elif isinstance(obj, (In, Out)):
