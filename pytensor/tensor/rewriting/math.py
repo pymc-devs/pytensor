@@ -466,6 +466,65 @@ def local_mulexp2expadd(fgraph, node):
             return [new_out]
 
 
+@register_specialize
+@node_rewriter([mul, true_div])
+def local_mulpow2powadd(fgraph, node):
+    """
+    This rewrite detects a^x * a^y and converts it to a^(x+y).
+    Similarly, a^x / a^y becomes a^(x-y).
+    """
+    if isinstance(node.op, Elemwise) and isinstance(
+        node.op.scalar_op, (aes.Mul, aes.TrueDiv)
+    ):
+        from collections import defaultdict
+
+        # search for pow-s and group them by their bases
+        pow_nodes = defaultdict(list)
+        rest = []
+        for n in node.inputs:
+            if (
+                n.owner
+                and hasattr(n.owner.op, "scalar_op")
+                and isinstance(n.owner.op.scalar_op, aes.Pow)
+            ):
+                base_node = n.owner.inputs[0]
+                # exponent is at n.owner.inputs[1], but we need to store the full node
+                # in case this particular power node remains alone and can't be rewritten
+                pow_nodes[base_node].append(n)
+            else:
+                rest.append(n)
+
+        # Can only do any rewrite if there are at least two pow-s with the same base
+        can_rewrite = [k for k, v in pow_nodes.items() if len(v) >= 2]
+        if len(can_rewrite) >= 1:
+            # Mul -> add; TrueDiv -> sub
+            orig_op, new_op = mul, add
+            if isinstance(node.op.scalar_op, aes.TrueDiv):
+                orig_op, new_op = true_div, sub
+            pow_factors = []
+            # Rewrite pow-s having the same base for each different base
+            # E.g.: a^x * a^y --> a^(x+y)
+            for base in can_rewrite:
+                exponents = [n.owner.inputs[1] for n in pow_nodes[base]]
+                new_node = base ** new_op(*exponents)
+                if new_node.dtype != node.outputs[0].dtype:
+                    new_node = cast(new_node, dtype=node.outputs[0].dtype)
+                pow_factors.append(new_node)
+            # Don't forget about those sole pow-s that couldn't be rewriten
+            sole_pows = [v[0] for k, v in pow_nodes.items() if k not in can_rewrite]
+            # Combine the rewritten pow-s and other, non-pow factors of the original Mul
+            # E.g.: a^x * y * b^z * a^w * v * b^t --> a^(x+z) * b^(z+t) * y * v
+            if len(pow_factors) > 1 or len(sole_pows) > 0 or len(rest) > 0:
+                new_out = orig_op(*pow_factors, *sole_pows, *rest)
+                if new_out.dtype != node.outputs[0].dtype:
+                    new_out = cast(new_out, dtype=node.outputs[0].dtype)
+            else:
+                # if all factors of the original mul were pows-s with the same base,
+                # we can get rid of the mul completely.
+                new_out = pow_factors[0]
+            return [new_out]
+
+
 @register_stabilize
 @register_specialize
 @register_canonicalize

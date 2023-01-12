@@ -4105,6 +4105,64 @@ def test_local_mulexp2expadd():
     assert isinstance(graph[0].inputs[0], TensorConstant)
 
 
+def test_local_mulpow2powadd():
+    x = scalar("x")
+    y = scalar("y")
+    z = scalar("z")
+    w = scalar("w")
+    v = scalar("v")
+    u = scalar("u")
+    t = scalar("t")
+    s = scalar("s")
+    a = scalar("a")
+    b = scalar("b")
+    c = scalar("c")
+
+    # 2^x * 2^y * 2^z * 2^w = 2^(x+y+z+w)
+    op = 2**x * 2**y * 2**z * 2**w
+    f = function([x, y, z, w], op)
+    utt.assert_allclose(f(3, 4, 5, 6), 2 ** (3 + 4 + 5 + 6))
+    graph = f.maker.fgraph.toposort()
+    assert isinstance(graph[0].op, Elemwise)
+    inner_graph = graph[0].op.scalar_op.fgraph.toposort()
+    assert any(isinstance(n.op, aes.Add) for n in inner_graph)
+    assert not any(isinstance(n.op, aes.Mul) for n in inner_graph)
+
+    # 2^x * a^y * 2^z * b^w * c^v * a^u * s * b^t = 2^(x+z) * a^(y+u) * b^(w+t) * c^v * s
+    op = 2**x * a**y * 2**z * b**w * c**v * a**u * s * b**t
+    f = function([x, y, z, w, v, u, t, s, a, b, c], op)
+    utt.assert_allclose(
+        f(4, 5, 6, 7, 8, 9, 10, 11, 2.5, 3, 3.5),
+        2 ** (4 + 6) * 2.5 ** (5 + 9) * 3 ** (7 + 10) * 3.5**8 * 11,
+    )
+    graph = f.maker.fgraph.toposort()
+    assert isinstance(graph[0].op, Elemwise)
+    inner_graph = graph[0].op.scalar_op.fgraph.toposort()
+    assert len([True for n in inner_graph if isinstance(n.op, aes.Add)]) == 3
+    assert len([True for n in inner_graph if isinstance(n.op, aes.Pow)]) == 4
+    assert any(isinstance(n.op, aes.Mul) for n in inner_graph)
+
+    # (2^x / 2^y) * (a^z / a^w) = 2^(x-y) * a^(z-w)
+    op = 2**x / 2**y * (a**z / a**w)
+    f = function([x, y, z, w, a], op)
+    utt.assert_allclose(f(3, 5, 6, 4, 7), 2 ** (3 - 5) * 7 ** (6 - 4))
+    graph = f.maker.fgraph.toposort()
+    assert isinstance(graph[0].op, Elemwise)
+    inner_graph = graph[0].op.scalar_op.fgraph.toposort()
+    assert len([True for n in inner_graph if isinstance(n.op, aes.Sub)]) == 2
+    assert any(isinstance(n.op, aes.Mul) for n in inner_graph)
+
+    # a^x * a^y * exp(z) * exp(w) = a^(x+y) * exp(z+w)
+    op = a**x * a**y * exp(z) * exp(w)
+    f = function([x, y, z, w, a], op)
+    utt.assert_allclose(f(3, 4, 5, 6, 2), 2 ** (3 + 4) * np.exp(5 + 6))
+    graph = f.maker.fgraph.toposort()
+    assert isinstance(graph[0].op, Elemwise)
+    inner_graph = graph[0].op.scalar_op.fgraph.toposort()
+    assert len([True for n in inner_graph if isinstance(n.op, aes.Add)]) == 2
+    assert any(isinstance(n.op, aes.Mul) for n in inner_graph)
+
+
 def test_local_expm1():
     x = matrix("x")
     u = scalar("u")
