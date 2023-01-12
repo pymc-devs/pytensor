@@ -25,7 +25,7 @@ better job. Other examples may be found at the nexus of the specific purpose and
 of the matrices. More documentation may be found in the
 `SciPy Sparse Reference <http://docs.scipy.org/doc/scipy/reference/sparse.html>`_.
 
-Since sparse matrices are not stored in contiguous arrays, there are several
+Since sparse matrices are not stored in continuous arrays, there are several
 ways to represent them in memory. This is usually designated by the so-called ``format``
 of the matrix. Since PyTensor's sparse matrix package is based on the SciPy
 sparse package, complete information about sparse matrices can be found
