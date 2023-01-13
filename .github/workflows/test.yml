@@ -98,11 +98,9 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }}
         uses: conda-incubator/setup-miniconda@v2
         with:
-          mamba-version: "*"
-          channels: conda-forge,defaults
-          channel-priority: true
+          miniforge-variant: Mambaforge
+          miniforge-version: latest
           python-version: ${{ matrix.python-version }}
-          auto-update-conda: true
 
       - name: Create matrix id
         id: matrix-id
