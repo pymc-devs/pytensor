@@ -5,15 +5,13 @@ import numpy as np
 import pytest
 
 from pytensor.compile.function import function
-from pytensor.compile.mode import Mode
+from pytensor.compile.mode import get_mode
 from pytensor.compile.sharedvalue import SharedVariable, shared
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op, get_test_value
-from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.ifelse import ifelse
-from pytensor.link.jax import JAXLinker
 from pytensor.raise_op import assert_op
 from pytensor.tensor.type import dscalar, scalar, vector
 
@@ -27,9 +25,9 @@ def set_pytensor_flags():
 jax = pytest.importorskip("jax")
 
 
-opts = RewriteDatabaseQuery(include=["jax"], exclude=["cxx_only", "BlasOpt"])
-jax_mode = Mode(JAXLinker(), opts)
-py_mode = Mode("py", opts)
+# We assume that the JAX mode includes all the rewrites needed to transpile JAX graphs
+jax_mode = get_mode("JAX")
+py_mode = get_mode("FAST_COMPILE")
 
 
 def compare_jax_and_py(

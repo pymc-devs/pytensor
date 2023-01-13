@@ -736,6 +736,7 @@ def fgraph_to_python(
         global_env = {}
 
     body_assigns = []
+    kwargs.setdefault("global_fgraph", fgraph)
     for node in order:
         compiled_func = op_conversion_fn(
             node.op, node=node, storage_map=storage_map, **kwargs
