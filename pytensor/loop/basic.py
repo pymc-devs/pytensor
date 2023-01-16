@@ -1,5 +1,5 @@
 import functools
-from typing import List, Tuple
+from typing import List, Union
 
 import numpy as np
 
@@ -18,7 +18,7 @@ def scan(
     non_sequences=None,
     n_steps=None,
     go_backwards=False,
-) -> Tuple[List[Variable], List[Variable]]:
+) -> Union[Variable, List[Variable]]:
     if sequences is None and n_steps is None:
         raise ValueError("Must provide n_steps when scanning without sequences")
 
@@ -126,10 +126,11 @@ def scan(
         n_steps, idx, *prev_states, *sequences, *non_sequences, *extra_fgraph_inputs
     )
     assert isinstance(scan_outs, list)
-    last_states = scan_outs[: scan_op.n_states]
-    traces = scan_outs[scan_op.n_states :]
-    # Don't return the inner index state
-    return last_states[1:], traces[1:]
+    # Don't return the last states or the trace for the inner index
+    traces = scan_outs[scan_op.n_states + 1 :]
+    if len(traces) == 1:
+        return traces[0]
+    return traces
 
 
 def map(
@@ -138,14 +139,12 @@ def map(
     non_sequences=None,
     go_backwards=False,
 ):
-    _, traces = scan(
+    traces = scan(
         fn=fn,
         sequences=sequences,
         non_sequences=non_sequences,
         go_backwards=go_backwards,
     )
-    if len(traces) == 1:
-        return traces[0]
     return traces
 
 
@@ -156,16 +155,16 @@ def reduce(
     non_sequences=None,
     go_backwards=False,
 ):
-    final_states, _ = scan(
+    traces = scan(
         fn=fn,
         init_states=init_states,
         sequences=sequences,
         non_sequences=non_sequences,
         go_backwards=go_backwards,
     )
-    if len(final_states) == 1:
-        return final_states[0]
-    return final_states
+    if not isinstance(traces, list):
+        return traces[-1]
+    return [trace[-1] for trace in traces]
 
 
 def filter(
@@ -177,21 +176,21 @@ def filter(
     if not isinstance(sequences, (tuple, list)):
         sequences = [sequences]
 
-    _, masks = scan(
+    masks = scan(
         fn=fn,
         sequences=sequences,
         non_sequences=non_sequences,
         go_backwards=go_backwards,
     )
 
-    if not all(mask.dtype == "bool" for mask in masks):
-        raise TypeError("The output of filter fn should be a boolean variable")
-    if len(masks) == 1:
-        masks = [masks[0]] * len(sequences)
+    if not isinstance(masks, list):
+        masks = [masks] * len(sequences)
     elif len(masks) != len(sequences):
         raise ValueError(
             "filter fn must return one variable or len(sequences), but it returned {len(masks)}"
         )
+    if not all(mask.dtype == "bool" for mask in masks):
+        raise TypeError("The output of filter fn should be a boolean variable")
 
     filtered_sequences = [seq[mask] for seq, mask in zip(sequences, masks)]
 

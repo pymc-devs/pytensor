@@ -1,16 +1,17 @@
 import numpy as np
 
 import pytensor
-from pytensor import config, function, grad
+from pytensor import config, function, grad, shared
 from pytensor.loop.basic import filter, map, reduce, scan
 from pytensor.scan import until
 from pytensor.tensor import arange, eq, scalar, vector, zeros
+from pytensor.tensor.random import normal
 
 
 def test_scan_with_sequences():
     xs = vector("xs")
     ys = vector("ys")
-    _, [zs] = scan(
+    zs = scan(
         fn=lambda x, y: x * y,
         sequences=[xs, ys],
     )
@@ -28,7 +29,7 @@ def test_scan_with_sequences():
 
 def test_scan_with_carried_and_non_carried_states():
     x = scalar("x")
-    _, [ys1, ys2] = scan(
+    [ys1, ys2] = scan(
         fn=lambda xtm1: (xtm1 + 1, (xtm1 + 1) * 2),
         init_states=[x, None],
         n_steps=10,
@@ -41,7 +42,7 @@ def test_scan_with_carried_and_non_carried_states():
 
 def test_scan_with_sequence_and_carried_state():
     xs = vector("xs")
-    _, [ys] = scan(
+    ys = scan(
         fn=lambda x, ytm1: (ytm1 + 1) * x,
         init_states=[zeros(())],
         sequences=[xs],
@@ -55,7 +56,7 @@ def test_scan_taking_grads_wrt_non_sequence():
     xs = vector("xs")
     ys = xs**2
 
-    _, [J] = scan(
+    J = scan(
         lambda i, ys, xs: grad(ys[i], wrt=xs),
         sequences=arange(ys.shape[0]),
         non_sequences=[ys, xs],
@@ -70,7 +71,7 @@ def test_scan_taking_grads_wrt_sequence():
     xs = vector("xs")
     ys = xs**2
 
-    _, [J] = scan(
+    J = scan(
         lambda y, xs: grad(y, wrt=xs),
         sequences=[ys],
         non_sequences=[xs],
@@ -81,7 +82,7 @@ def test_scan_taking_grads_wrt_sequence():
 
 
 def test_while_scan():
-    _, [xs] = scan(
+    xs = scan(
         fn=lambda x: (x + 1, until((x + 1) >= 9)),
         init_states=[-1],
         n_steps=20,
@@ -89,6 +90,26 @@ def test_while_scan():
 
     f = pytensor.function([], xs)
     np.testing.assert_array_equal(f(), np.arange(10))
+
+
+def test_scan_rvs():
+    rng = shared(np.random.default_rng(123))
+    test_rng = np.random.default_rng(123)
+
+    def normal_fn(prev_rng):
+        next_rng, x = normal(rng=prev_rng).owner.outputs
+        return next_rng, x
+
+    [rngs, xs] = scan(
+        fn=normal_fn,
+        init_states=[rng, None],
+        n_steps=5,
+    )
+    fn = function([], xs, updates={rng: rngs[-1]})
+
+    for i in range(3):
+        res = fn()
+        np.testing.assert_almost_equal(res, test_rng.normal(size=5))
 
 
 def test_map():

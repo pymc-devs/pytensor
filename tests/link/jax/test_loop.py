@@ -13,7 +13,7 @@ from tests.link.jax.test_basic import compare_jax_and_py
 
 def test_scan_with_single_sequence():
     xs = vector("xs")
-    _, [ys] = scan(lambda x: x * 100, sequences=[xs])
+    ys = scan(lambda x: x * 100, sequences=[xs])
 
     out_fg = FunctionGraph([xs], [ys])
     compare_jax_and_py(out_fg, [np.arange(10, dtype=config.floatX)])
@@ -21,7 +21,7 @@ def test_scan_with_single_sequence():
 
 def test_scan_with_single_sequence_shortened_by_nsteps():
     xs = vector("xs", shape=(10,))  # JAX needs the length to be constant
-    _, [ys] = scan(
+    ys = scan(
         lambda x: x * 100,
         sequences=[xs],
         n_steps=9,
@@ -35,7 +35,7 @@ def test_scan_with_multiple_sequences():
     # JAX can only handle constant n_steps
     xs = vector("xs", shape=(10,))
     ys = vector("ys", shape=(10,))
-    _, [zs] = scan(
+    zs = scan(
         fn=lambda x, y: x * y,
         sequences=[xs, ys],
     )
@@ -48,7 +48,7 @@ def test_scan_with_multiple_sequences():
 
 def test_scan_with_carried_and_non_carried_states():
     x = scalar("x")
-    _, [ys1, ys2] = scan(
+    [ys1, ys2] = scan(
         fn=lambda xtm1: (xtm1 + 1, (xtm1 + 1) * 2),
         init_states=[x, None],
         n_steps=10,
@@ -59,7 +59,7 @@ def test_scan_with_carried_and_non_carried_states():
 
 def test_scan_with_sequence_and_carried_state():
     xs = vector("xs")
-    _, [ys] = scan(
+    ys = scan(
         fn=lambda x, ytm1: (ytm1 + 1) * x,
         init_states=[zeros(())],
         sequences=[xs],
@@ -71,11 +71,12 @@ def test_scan_with_sequence_and_carried_state():
 def test_scan_with_rvs():
     rng = shared(np.random.default_rng(123))
 
-    [final_rng, _], [rngs, xs] = scan(
+    [rngs, xs] = scan(
         fn=lambda prev_rng: normal(rng=prev_rng).owner.outputs,
         init_states=[rng, None],
         n_steps=10,
     )
+    final_rng = rngs[-1]
 
     # First without updates
     fn = function([], xs, mode="JAX", updates=None)
@@ -99,7 +100,7 @@ def test_scan_with_rvs():
 
 
 def test_while_scan_fails():
-    _, [xs] = scan(
+    xs = scan(
         fn=lambda x: (x + 1, until((x + 1) >= 9)),
         init_states=[-1],
         n_steps=20,
