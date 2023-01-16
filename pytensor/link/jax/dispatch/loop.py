@@ -1,8 +1,10 @@
 import jax
+from jax.tree_util import tree_flatten, tree_unflatten
 
 from pytensor.compile.mode import get_mode
 from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.loop.op import Scan
+from pytensor.typed_list import TypedListType
 
 
 @jax_funcify.register(Scan)
@@ -43,10 +45,17 @@ def jax_funcify_Scan(op, node, global_fgraph, **kwargs):
         states, traces = jax.lax.scan(
             scan_fn, init=list(states), xs=None, length=max_iters
         )
-        for i in range(len(states)):
-            if i not in used_traces_idxs:
-                traces.insert(i, None)
+        final_traces = [None] * len(states)
+        for idx, trace in zip(used_traces_idxs, traces):
+            if isinstance(op.trace_types[idx], TypedListType):
+                flattened_trace, treedef = tree_flatten(trace)
+                transposed_trace = [
+                    tree_unflatten(treedef, l) for l in zip(*flattened_trace)
+                ]
+                final_traces[idx] = transposed_trace
+            else:
+                final_traces[idx] = trace
 
-        return *states, *traces
+        return *states, *final_traces
 
     return scan

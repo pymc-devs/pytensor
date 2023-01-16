@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from jax.tree_util import tree_leaves
 
 from pytensor import config, function, shared
 from pytensor.graph import FunctionGraph
@@ -70,7 +71,7 @@ def test_scan_with_sequence_and_carried_state():
 def test_scan_with_rvs():
     rng = shared(np.random.default_rng(123))
 
-    [next_rng, _], [_, xs] = scan(
+    [final_rng, _], [rngs, xs] = scan(
         fn=lambda prev_rng: normal(rng=prev_rng).owner.outputs,
         init_states=[rng, None],
         n_steps=10,
@@ -83,10 +84,18 @@ def test_scan_with_rvs():
     assert not set(tuple(np.array(res1))) ^ set(tuple(np.array(res2)))
 
     # Now with updates
-    fn = function([], xs, mode="JAX", updates={rng: next_rng})
+    fn = function([], xs, mode="JAX", updates={rng: final_rng})
     res1 = fn()
     res2 = fn()
     assert not set(tuple(np.array(res1))) & set(tuple(np.array(res2)))
+
+    # Test traced rngs
+    fn = function([], [rngs, final_rng], mode="JAX")
+    rngs_res, final_rng_res = fn()
+    assert isinstance(rngs_res, list) and len(rngs_res) == 10
+    assert [np.array(v).tolist() for v in tree_leaves(rngs_res[-1])] == [
+        np.array(v).tolist() for v in tree_leaves(final_rng_res)
+    ]
 
 
 def test_while_scan_fails():

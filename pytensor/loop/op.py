@@ -7,18 +7,13 @@ from pytensor.compile import optdb, pfunc
 from pytensor.graph import Apply, FunctionGraph, Op, Type, node_rewriter
 from pytensor.graph.rewriting.basic import in2out
 from pytensor.scalar import constant
-from pytensor.tensor import (
-    NoneConst,
-    add,
-    and_,
-    empty,
-    get_scalar_constant_value,
-    set_subtensor,
-)
+from pytensor.tensor import add, and_, empty, get_scalar_constant_value, set_subtensor
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.shape import Shape_i
+from pytensor.tensor.subtensor import Subtensor, get_idx_list
 from pytensor.tensor.type import DenseTensorType, TensorType
 from pytensor.tensor.type_other import NoneTypeT
+from pytensor.typed_list import GetItem, TypedListType, append, make_empty_list
 
 
 def validate_loop_update_types(update):
@@ -176,8 +171,7 @@ class Scan(Op):
                     )
                 )
             else:
-                # We can't concatenate all types of states, such as RandomTypes
-                self.trace_types.append(NoneConst.type)
+                self.trace_types.append(TypedListType(state_type))
 
         self.constant_types = [inp.type for inp in update_fg.inputs[self.n_states :]]
         self.n_constants = len(self.constant_types)
@@ -312,10 +306,6 @@ def scan_to_loop(fgraph, node):
         if fgraph.clients[trace]
     ]
 
-    # Check that outputs that cannot be converted into sequences (such as RandomTypes) are not being referenced
-    for trace_idx in used_traces_idxs:
-        assert not isinstance(old_states[trace_idx].type, NoneTypeT)
-
     # Inputs to the new Loop
     max_iters = node.inputs[0]
     init_states = node.inputs[1 : 1 + op.n_states]
@@ -324,6 +314,8 @@ def scan_to_loop(fgraph, node):
             (max_iters, *tuple(init_states[trace_idx].shape)),
             dtype=init_states[trace_idx].dtype,
         )
+        if isinstance(init_states[trace_idx].type, DenseTensorType)
+        else make_empty_list(init_states[trace_idx].type)
         for trace_idx in used_traces_idxs
     ]
     constants = node.inputs[1 + op.n_states :]
@@ -387,6 +379,8 @@ def scan_to_loop(fgraph, node):
     inner_while_cond, *inner_next_states = update_fg.outputs
     inner_next_traces = [
         set_subtensor(prev_trace[inner_idx], inner_next_states[trace_idx])
+        if isinstance(prev_trace.type, DenseTensorType)
+        else append(prev_trace, inner_next_states[trace_idx])
         for trace_idx, prev_trace in zip(used_traces_idxs, inner_traces)
     ]
     for t in inner_next_traces:
@@ -429,7 +423,7 @@ def scan_to_loop(fgraph, node):
     replacements = dict(zip(old_states, new_states))
     for trace_idx, new_trace in zip(used_traces_idxs, new_traces):
         # If there is no while condition, the whole trace will be used
-        if op.has_while_condition:
+        if op.has_while_condition and isinstance(new_trace.type, DenseTensorType):
             new_trace = new_trace[:final_idx]
         replacements[old_traces[trace_idx]] = new_trace
     return replacements
@@ -445,4 +439,40 @@ optdb.register(
     "fast_run",
     "not_jax",
     position=1.0,
+)
+
+
+@node_rewriter([Scan])
+def scan_view_last_state(fgraph, node):
+    """Replace trace[-1] by the last state output of a Scan node"""
+    replacements = {}
+    for final_state, trace in zip(
+        node.outputs[: node.op.n_states], node.outputs[node.op.n_states :]
+    ):
+        clients = fgraph.clients[trace]
+        for client, _ in clients:
+            if client == "output":
+                continue
+            if isinstance(client.op, (Subtensor, GetItem)):
+                if isinstance(client.op, Subtensor):
+                    idxs = get_idx_list(client.inputs, client.op.idx_list)
+                    if len(idxs) == 1:
+                        idx = idxs[0]
+                else:
+                    idx = client.inputs[1]
+                try:
+                    last_index = get_scalar_constant_value(idx) == -1
+                except NotScalarConstantError:
+                    continue
+                if last_index:
+                    replacements[client.default_output()] = final_state
+    return replacements
+
+
+optdb.register(
+    "scan_view_last_state",
+    in2out(scan_view_last_state),
+    "fast_compile",
+    "fast_run",
+    position=0.999,
 )

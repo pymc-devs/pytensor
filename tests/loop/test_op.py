@@ -4,11 +4,13 @@ import pytensor
 from pytensor import config, function, shared
 from pytensor.compile import DeepCopyOp
 from pytensor.graph import FunctionGraph
-from pytensor.loop.op import Loop, Scan
+from pytensor.graph.rewriting.basic import in2out
+from pytensor.loop.op import Loop, Scan, scan_view_last_state
 from pytensor.tensor import constant, empty, lscalar, scalar, vector
 from pytensor.tensor.random import normal
+from pytensor.tensor.random.type import RandomGeneratorType
 from pytensor.tensor.subtensor import Subtensor
-from pytensor.tensor.type_other import NoneTypeT
+from pytensor.typed_list import TypedListType
 
 
 def test_loop_basic():
@@ -154,10 +156,31 @@ def test_fori_random_scan():
         [constant(np.array(True)), *normal(rng=rng).owner.outputs[::-1]],
     )
 
-    _, new_rng, ys, rngs = Scan(update_fg=update_fg)(n_iters, dummy_init, rng_shared)
-    assert isinstance(rngs.type, NoneTypeT)
+    last_y, last_rng, ys, rngs = Scan(update_fg=update_fg)(
+        n_iters, dummy_init, rng_shared
+    )
+    assert isinstance(last_rng.type, RandomGeneratorType)
+    assert isinstance(rngs.type, TypedListType)
+    assert isinstance(rngs.type.ttype, RandomGeneratorType)
 
-    fn = function([], ys, updates={rng_shared: new_rng})
+    fn = function([], [ys, rngs], updates={rng_shared: last_rng})
+    for i in range(2):
+        ys_res, rngs_res = fn()
+        for y_res, rng_res in zip(ys_res, rngs_res):
+            np.testing.assert_almost_equal(y_res, rng_test.normal())
+            assert rng_res.__getstate__() == rng_test.__getstate__()
 
-    np.testing.assert_array_equal(fn(), rng_test.normal(size=5))
-    np.testing.assert_array_equal(fn(), rng_test.normal(size=5))
+
+def test_scan_view_last_state():
+    x = scalar("x")
+    update_fg = FunctionGraph([x], [x > 5, x + 2])
+
+    n_iters = 10
+    y1, ys = Scan(update_fg=update_fg)(n_iters, x)
+
+    y2 = ys[-1]
+    fgraph = FunctionGraph(outputs=[y2, ys], clone=False)
+    assert fgraph.outputs[0] is not y1
+    in2out(scan_view_last_state).apply(fgraph)
+    assert fgraph.outputs[0] is y1
+    assert fgraph.outputs[1] is ys
