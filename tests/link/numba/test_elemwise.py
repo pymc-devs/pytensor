@@ -548,7 +548,7 @@ def test_logsumexp_benchmark(size, axis, benchmark):
     rng = np.random.default_rng(23920)
     X_val = rng.normal(size=size)
 
-    X_lse_fn = pytensor.function([X], X_lse, mode="JAX")
+    X_lse_fn = pytensor.function([X], X_lse, mode="NUMBA")
 
     # JIT compile first
     _ = X_lse_fn(X_val)
