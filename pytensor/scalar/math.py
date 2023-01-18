@@ -1638,9 +1638,9 @@ class Hyp2F1Der(ScalarOp):
 
         return compute_grad_2f1(a, b, c, z, wrt=wrt)
 
-    def __call__(self, a, b, c, z, wrt):
+    def __call__(self, a, b, c, z, wrt, **kwargs):
         # This allows wrt to be a keyword argument
-        return super().__call__(a, b, c, z, wrt)
+        return super().__call__(a, b, c, z, wrt, **kwargs)
 
     def c_code(self, *args, **kwargs):
         raise NotImplementedError()
