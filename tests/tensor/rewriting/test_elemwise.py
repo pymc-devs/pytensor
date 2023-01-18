@@ -9,6 +9,7 @@ from pytensor import tensor as at
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
+from pytensor.gradient import grad
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import check_stack_trace, out2in
@@ -1348,6 +1349,18 @@ class TestFusion:
         nodes = tuple(f.maker.fgraph.apply_nodes)
         assert len(nodes) == 1
         assert isinstance(nodes[0].op.scalar_op, Composite)
+
+    def test_eval_benchmark(self, benchmark):
+        rng = np.random.default_rng(123)
+        size = 100_000
+        x = pytensor.shared(rng.normal(size=size), name="x")
+        mu = pytensor.shared(rng.normal(size=size), name="mu")
+
+        logp = -((x - mu) ** 2) / 2
+        grad_logp = grad(logp.sum(), x)
+
+        func = pytensor.function([], [logp, grad_logp], mode="FAST_RUN")
+        benchmark(func)
 
 
 class TimesN(aes.basic.UnaryScalarOp):

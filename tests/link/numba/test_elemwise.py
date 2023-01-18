@@ -11,6 +11,7 @@ import pytensor.tensor.math as aem
 from pytensor import config, function
 from pytensor.compile.ops import deep_copy_op
 from pytensor.compile.sharedvalue import SharedVariable
+from pytensor.gradient import grad
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor import elemwise as at_elemwise
@@ -555,3 +556,18 @@ def test_logsumexp_benchmark(size, axis, benchmark):
     res = benchmark(X_lse_fn, X_val)
     exp_res = scipy.special.logsumexp(X_val, axis=axis, keepdims=True)
     np.testing.assert_array_almost_equal(res, exp_res)
+
+
+def test_fused_elemwise_benchmark(benchmark):
+    rng = np.random.default_rng(123)
+    size = 100_000
+    x = pytensor.shared(rng.normal(size=size), name="x")
+    mu = pytensor.shared(rng.normal(size=size), name="mu")
+
+    logp = -((x - mu) ** 2) / 2
+    grad_logp = grad(logp.sum(), x)
+
+    func = pytensor.function([], [logp, grad_logp], mode="NUMBA")
+    # JIT compile first
+    func()
+    benchmark(func)
