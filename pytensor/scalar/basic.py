@@ -4000,7 +4000,8 @@ class Composite(ScalarOp, HasInnerGraph):
 
     init_param: Tuple[str, ...] = ("inputs", "outputs")
 
-    def __init__(self, inputs, outputs):
+    def __init__(self, inputs, outputs, name="Composite"):
+        self.name = name
         # We need to clone the graph as sometimes its nodes already
         # contain a reference to an fgraph. As we want the Composite
         # to be pickable, we can't have reference to fgraph.
@@ -4105,30 +4106,6 @@ class Composite(ScalarOp, HasInnerGraph):
 
         self._py_perform_fn = fgraph_to_python(self.fgraph, python_convert)
         return self._py_perform_fn
-
-    @property
-    def name(self):
-        if hasattr(self, "_name"):
-            return self._name
-
-        # TODO FIXME: Just implement pretty printing for the `Op`; don't do
-        # this redundant, outside work in the `Op` itself.
-        for i, r in enumerate(self.fgraph.inputs):
-            r.name = f"i{int(i)}"
-        for i, r in enumerate(self.fgraph.outputs):
-            r.name = f"o{int(i)}"
-        io = set(self.fgraph.inputs + self.fgraph.outputs)
-        for i, r in enumerate(self.fgraph.variables):
-            if r not in io and len(self.fgraph.clients[r]) > 1:
-                r.name = f"t{int(i)}"
-        outputs_str = ", ".join([pprint(output) for output in self.fgraph.outputs])
-        rval = f"Composite{{{outputs_str}}}"
-        self._name = rval
-        return self._name
-
-    @name.setter
-    def name(self, name):
-        self._name = name
 
     @property
     def fgraph(self):

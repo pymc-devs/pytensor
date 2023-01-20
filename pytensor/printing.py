@@ -312,7 +312,11 @@ N.B.:
     ):
 
         if hasattr(var.owner, "op"):
-            if isinstance(var.owner.op, HasInnerGraph) and var not in inner_graph_vars:
+            if (
+                isinstance(var.owner.op, HasInnerGraph)
+                or hasattr(var.owner.op, "scalar_op")
+                and isinstance(var.owner.op.scalar_op, HasInnerGraph)
+            ) and var not in inner_graph_vars:
                 inner_graph_vars.append(var)
             if print_op_info:
                 op_information.update(op_debug_information(var.owner.op, var.owner))
@@ -355,8 +359,12 @@ N.B.:
                 inner_inputs = inner_fn.maker.fgraph.inputs
                 inner_outputs = inner_fn.maker.fgraph.outputs
             else:
-                inner_inputs = ig_var.owner.op.inner_inputs
-                inner_outputs = ig_var.owner.op.inner_outputs
+                if hasattr(ig_var.owner.op, "scalar_op"):
+                    inner_inputs = ig_var.owner.op.scalar_op.inner_inputs
+                    inner_outputs = ig_var.owner.op.scalar_op.inner_outputs
+                else:
+                    inner_inputs = ig_var.owner.op.inner_inputs
+                    inner_outputs = ig_var.owner.op.inner_outputs
 
             outer_inputs = ig_var.owner.inputs
 
@@ -422,8 +430,9 @@ N.B.:
 
                 if (
                     isinstance(getattr(out.owner, "op", None), HasInnerGraph)
-                    and out not in inner_graph_vars
-                ):
+                    or hasattr(getattr(out.owner, "op", None), "scalar_op")
+                    and isinstance(out.owner.op.scalar_op, HasInnerGraph)
+                ) and out not in inner_graph_vars:
                     inner_graph_vars.append(out)
 
                 _debugprint(
@@ -664,8 +673,9 @@ def _debugprint(
                 if hasattr(in_var, "owner") and hasattr(in_var.owner, "op"):
                     if (
                         isinstance(in_var.owner.op, HasInnerGraph)
-                        and in_var not in inner_graph_ops
-                    ):
+                        or hasattr(in_var.owner.op, "scalar_op")
+                        and isinstance(in_var.owner.op.scalar_op, HasInnerGraph)
+                    ) and in_var not in inner_graph_ops:
                         inner_graph_ops.append(in_var)
 
                 _debugprint(

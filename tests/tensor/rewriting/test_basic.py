@@ -16,7 +16,7 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import check_stack_trace, out2in
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import rewrite_graph
-from pytensor.printing import pprint
+from pytensor.printing import debugprint, pprint
 from pytensor.raise_op import Assert, CheckAndRaise
 from pytensor.tensor.basic import (
     Alloc,
@@ -1105,7 +1105,7 @@ class TestLocalMergeSwitchSameCond:
         s2 = at.switch(c, x, y)
 
         g = rewrite(FunctionGraph(mats, [op(s1, s2)]))
-        assert str(g).count("Switch") == 1
+        assert debugprint(g, file="str").count("Switch") == 1
 
     @pytest.mark.parametrize(
         "op",
@@ -1122,7 +1122,7 @@ class TestLocalMergeSwitchSameCond:
         s1 = at.switch(c, a, b)
         s2 = at.switch(c, x, y)
         g = rewrite(FunctionGraph(mats, [op(s1, s2)]))
-        assert str(g).count("Switch") == 1
+        assert debugprint(g, file="str").count("Switch") == 1
 
     @pytest.mark.parametrize("op", [add, mul])
     def test_elemwise_multi_inputs(self, op):
@@ -1134,7 +1134,7 @@ class TestLocalMergeSwitchSameCond:
         u, v = matrices("uv")
         s3 = at.switch(c, u, v)
         g = rewrite(FunctionGraph(mats + [u, v], [op(s1, s2, s3)]))
-        assert str(g).count("Switch") == 1
+        assert debugprint(g, file="str").count("Switch") == 1
 
 
 class TestLocalOptAlloc:
