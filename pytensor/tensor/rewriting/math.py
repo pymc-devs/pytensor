@@ -3604,6 +3604,14 @@ log1pmexp_to_log1mexp = PatternNodeRewriter(
 )
 register_stabilize(log1pmexp_to_log1mexp, name="log1pmexp_to_log1mexp")
 
+# log(exp(a) - exp(b)) -> a + log1mexp(b - a)
+logdiffexp_to_log1mexpdiff = PatternNodeRewriter(
+    (log, (sub, (exp, "x"), (exp, "y"))),
+    (add, "x", (log1mexp, (sub, "y", "x"))),
+    allow_multiple_clients=True,
+)
+register_stabilize(logdiffexp_to_log1mexpdiff, name="logdiffexp_to_log1mexpdiff")
+
 
 # log(sigmoid(x) / (1 - sigmoid(x))) -> x
 # i.e logit(sigmoid(x)) -> x
