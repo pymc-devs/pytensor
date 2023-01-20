@@ -28,6 +28,7 @@ from pytensor.graph.rewriting.basic import (
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import is_same_graph, rewrite_graph
 from pytensor.misc.safe_asarray import _asarray
+from pytensor.printing import debugprint
 from pytensor.tensor import inplace
 from pytensor.tensor.basic import Alloc, join, switch
 from pytensor.tensor.blas import Dot22, Gemv
@@ -2416,7 +2417,7 @@ class TestLocalMergeSwitchSameCond:
             at_pow,
         ):
             g = rewrite(FunctionGraph(mats, [op(s1, s2)]))
-            assert str(g).count("Switch") == 1
+            assert debugprint(g, file="str").count("Switch") == 1
         # integer Ops
         mats = imatrices("cabxy")
         c, a, b, x, y = mats
@@ -2428,13 +2429,13 @@ class TestLocalMergeSwitchSameCond:
             bitwise_xor,
         ):
             g = rewrite(FunctionGraph(mats, [op(s1, s2)]))
-            assert str(g).count("Switch") == 1
+            assert debugprint(g, file="str").count("Switch") == 1
         # add/mul with more than two inputs
         u, v = matrices("uv")
         s3 = at.switch(c, u, v)
         for op in (add, mul):
             g = rewrite(FunctionGraph(mats + [u, v], [op(s1, s2, s3)]))
-            assert str(g).count("Switch") == 1
+            assert debugprint(g, file="str").count("Switch") == 1
 
 
 class TestLocalSumProd:

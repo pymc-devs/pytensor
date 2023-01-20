@@ -604,31 +604,40 @@ def test_debugprint_compiled_fn():
     out = pytensor.function([M], out, updates=updates, mode="FAST_RUN")
 
     expected_output = """forall_inplace,cpu,scan_fn} [id A] 2 (outer_out_sit_sot-0)
-    |TensorConstant{20000} [id B] (n_steps)
-    |TensorConstant{[    0    ..998 19999]} [id C] (outer_in_seqs-0)
-    |IncSubtensor{InplaceSet;:int64:} [id D] 1 (outer_in_sit_sot-0)
-    | |AllocEmpty{dtype='int64'} [id E] 0
-    | | |TensorConstant{20000} [id B]
-    | |TensorConstant{(1,) of 0} [id F]
-    | |ScalarConstant{1} [id G]
-    |<TensorType(float64, (20000, 2, 2))> [id H] (outer_in_non_seqs-0)
+     |TensorConstant{20000} [id B] (n_steps)
+     |TensorConstant{[    0    ..998 19999]} [id C] (outer_in_seqs-0)
+     |IncSubtensor{InplaceSet;:int64:} [id D] 1 (outer_in_sit_sot-0)
+     | |AllocEmpty{dtype='int64'} [id E] 0
+     | | |TensorConstant{20000} [id B]
+     | |TensorConstant{(1,) of 0} [id F]
+     | |ScalarConstant{1} [id G]
+     |<TensorType(float64, (20000, 2, 2))> [id H] (outer_in_non_seqs-0)
 
     Inner graphs:
 
     forall_inplace,cpu,scan_fn} [id A] (outer_out_sit_sot-0)
-    >Elemwise{Composite{Switch(LT(i0, i1), i2, i0)}} [id I] (inner_out_sit_sot-0)
-    > |TensorConstant{0} [id J]
-    > |Subtensor{int64, int64, uint8} [id K]
-    > | |*2-<TensorType(float64, (20000, 2, 2))> [id L] -> [id H] (inner_in_non_seqs-0)
-    > | |ScalarFromTensor [id M]
-    > | | |*0-<TensorType(int64, ())> [id N] -> [id C] (inner_in_seqs-0)
-    > | |ScalarFromTensor [id O]
-    > | | |*1-<TensorType(int64, ())> [id P] -> [id D] (inner_in_sit_sot-0)
-    > | |ScalarConstant{0} [id Q]
-    > |TensorConstant{1} [id R]
+     >Elemwise{Composite} [id I] (inner_out_sit_sot-0)
+     > |TensorConstant{0} [id J]
+     > |Subtensor{int64, int64, uint8} [id K]
+     > | |*2-<TensorType(float64, (20000, 2, 2))> [id L] -> [id H] (inner_in_non_seqs-0)
+     > | |ScalarFromTensor [id M]
+     > | | |*0-<TensorType(int64, ())> [id N] -> [id C] (inner_in_seqs-0)
+     > | |ScalarFromTensor [id O]
+     > | | |*1-<TensorType(int64, ())> [id P] -> [id D] (inner_in_sit_sot-0)
+     > | |ScalarConstant{0} [id Q]
+     > |TensorConstant{1} [id R]
+
+    Elemwise{Composite} [id I]
+     >Switch [id S]
+     > |LT [id T]
+     > | |<int64> [id U]
+     > | |<float64> [id V]
+     > |<int64> [id W]
+     > |<int64> [id U]
     """
 
     output_str = debugprint(out, file="str", print_op_info=True)
+    print(output_str)
     lines = output_str.split("\n")
 
     for truth, out in zip(expected_output.split("\n"), lines):
