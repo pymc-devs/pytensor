@@ -4136,3 +4136,42 @@ def test_log1mexp_stabilization():
         f(np.array([-0.8, -0.6], dtype=config.floatX)),
         np.log(1 - np.exp([-0.8, -0.6])),
     )
+
+
+def test_logdiffexp():
+    rng = np.random.default_rng(3559)
+    mode = Mode("py").including("stabilize").excluding("fusion")
+
+    x = fmatrix("x")
+    y = fmatrix("y")
+    f = function([x, y], log(exp(x) - exp(y)), mode=mode)
+
+    graph = f.maker.fgraph.toposort()
+    assert (
+        len(
+            [
+                node
+                for node in graph
+                if isinstance(node.op, Elemwise)
+                and isinstance(node.op.scalar_op, (aes.Exp, aes.Log))
+            ]
+        )
+        == 0
+    )
+    assert (
+        len(
+            [
+                node
+                for node in graph
+                if isinstance(node.op, Elemwise)
+                and isinstance(node.op.scalar_op, aes.Log1mexp)
+            ]
+        )
+        == 1
+    )
+
+    y_test = rng.normal(size=(3, 2)).astype("float32")
+    x_test = rng.normal(size=(3, 2)).astype("float32") + y_test.max()
+    np.testing.assert_almost_equal(
+        f(x_test, y_test), np.log(np.exp(x_test) - np.exp(y_test))
+    )
