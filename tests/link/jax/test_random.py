@@ -238,6 +238,22 @@ def test_random_updates(rng_ctor):
             lambda *args: args,
         ),
         (
+            aer.integers,
+            [
+                set_test_value(
+                    at.lscalar(),
+                    np.array(0, dtype=np.int64),
+                ),
+                set_test_value(  # high-value necessary since test on cdf
+                    at.lscalar(),
+                    np.array(1000, dtype=np.int64),
+                ),
+            ],
+            (),
+            "randint",
+            lambda *args: args,
+        ),
+        (
             aer.standard_normal,
             [],
             (2,),
@@ -376,7 +392,11 @@ def test_random_RandomVariable(rv_op, dist_params, base_size, cdf_name, params_c
         The parameters passed to the op.
 
     """
-    rng = shared(np.random.RandomState(29402))
+    if rv_op is aer.integers:
+        # Integers only accepts Generator, not RandomState
+        rng = shared(np.random.default_rng(29402))
+    else:
+        rng = shared(np.random.RandomState(29402))
     g = rv_op(*dist_params, size=(10_000,) + base_size, rng=rng)
     g_fn = function(dist_params, g, mode=jax_mode)
     samples = g_fn(

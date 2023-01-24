@@ -179,6 +179,7 @@ def jax_sample_fn_no_dtype(op):
 
 
 @jax_sample_fn.register(aer.RandIntRV)
+@jax_sample_fn.register(aer.IntegersRV)
 @jax_sample_fn.register(aer.UniformRV)
 def jax_sample_fn_uniform(op):
     """JAX implementation of random variables with uniform density.
@@ -188,6 +189,9 @@ def jax_sample_fn_uniform(op):
 
     """
     name = op.name
+    # IntegersRV is equivalent to RandintRV
+    if isinstance(op, aer.IntegersRV):
+        name = "randint"
     jax_op = getattr(jax.random, name)
 
     def sample_fn(rng, size, dtype, *parameters):
