@@ -19,6 +19,9 @@ from tests.link.jax.test_basic import compare_jax_and_py, jax_mode, set_test_val
 jax = pytest.importorskip("jax")
 
 
+from pytensor.link.jax.dispatch.random import numpyro_available  # noqa: E402
+
+
 def test_random_RandomStream():
     """Two successive calls of a compiled graph using `RandomStream` should
     return different values.
@@ -377,6 +380,25 @@ def test_random_updates(rng_ctor):
             # https://stackoverflow.com/a/48603469
             lambda mean, scale: (mean / scale, 0, scale),
         ),
+        pytest.param(
+            aer.vonmises,
+            [
+                set_test_value(
+                    at.dvector(),
+                    np.array([-0.5, 1.3], dtype=np.float64),
+                ),
+                set_test_value(
+                    at.dvector(),
+                    np.array([5.5, 13.0], dtype=np.float64),
+                ),
+            ],
+            (2,),
+            "vonmises",
+            lambda mu, kappa: (kappa, mu),
+            marks=pytest.mark.skipif(
+                not numpyro_available, reason="VonMises dispatch requires numpyro"
+            ),
+        ),
     ],
 )
 def test_random_RandomVariable(rv_op, dist_params, base_size, cdf_name, params_conv):
@@ -516,6 +538,83 @@ def test_negative_binomial():
     np.testing.assert_allclose(samples.mean(axis=0), n * (1 - p) / p, rtol=0.1)
     np.testing.assert_allclose(
         samples.std(axis=0), np.sqrt(n * (1 - p) / p**2), rtol=0.1
+    )
+
+
+@pytest.mark.skipif(not numpyro_available, reason="Binomial dispatch requires numpyro")
+def test_binomial():
+    rng = shared(np.random.RandomState(123))
+    n = np.array([10, 40])
+    p = np.array([0.3, 0.7])
+    g = at.random.binomial(n, p, size=(10_000, 2), rng=rng)
+    g_fn = function([], g, mode=jax_mode)
+    samples = g_fn()
+    np.testing.assert_allclose(samples.mean(axis=0), n * p, rtol=0.1)
+    np.testing.assert_allclose(samples.std(axis=0), np.sqrt(n * p * (1 - p)), rtol=0.1)
+
+
+@pytest.mark.skipif(
+    not numpyro_available, reason="BetaBinomial dispatch requires numpyro"
+)
+def test_beta_binomial():
+    rng = shared(np.random.RandomState(123))
+    n = np.array([10, 40])
+    a = np.array([1.5, 13])
+    b = np.array([0.5, 9])
+    g = at.random.betabinom(n, a, b, size=(10_000, 2), rng=rng)
+    g_fn = function([], g, mode=jax_mode)
+    samples = g_fn()
+    np.testing.assert_allclose(samples.mean(axis=0), n * a / (a + b), rtol=0.1)
+    np.testing.assert_allclose(
+        samples.std(axis=0),
+        np.sqrt((n * a * b * (a + b + n)) / ((a + b) ** 2 * (a + b + 1))),
+        rtol=0.1,
+    )
+
+
+@pytest.mark.skipif(
+    not numpyro_available, reason="Multinomial dispatch requires numpyro"
+)
+def test_multinomial():
+    rng = shared(np.random.RandomState(123))
+    n = np.array([10, 40])
+    p = np.array([[0.3, 0.7, 0.0], [0.1, 0.4, 0.5]])
+    g = at.random.multinomial(n, p, size=(10_000, 2), rng=rng)
+    g_fn = function([], g, mode=jax_mode)
+    samples = g_fn()
+    np.testing.assert_allclose(samples.mean(axis=0), n[..., None] * p, rtol=0.1)
+    np.testing.assert_allclose(
+        samples.std(axis=0), np.sqrt(n[..., None] * p * (1 - p)), rtol=0.1
+    )
+
+
+@pytest.mark.skipif(not numpyro_available, reason="VonMises dispatch requires numpyro")
+def test_vonmises_mu_outside_circle():
+    # Scipy implementation does not behave as PyTensor/NumPy for mu outside the unit circle
+    # We test that the random draws from the JAX dispatch work as expected in these cases
+    rng = shared(np.random.RandomState(123))
+    mu = np.array([-30, 40])
+    kappa = np.array([100, 10])
+    g = at.random.vonmises(mu, kappa, size=(10_000, 2), rng=rng)
+    g_fn = function([], g, mode=jax_mode)
+    samples = g_fn()
+    np.testing.assert_allclose(
+        samples.mean(axis=0), (mu + np.pi) % (2.0 * np.pi) - np.pi, rtol=0.1
+    )
+
+    # Circvar only does the correct thing in more recent versions of Scipy
+    # https://github.com/scipy/scipy/pull/5747
+    # np.testing.assert_allclose(
+    #     stats.circvar(samples, axis=0),
+    #     1 - special.iv(1, kappa) / special.iv(0, kappa),
+    #     rtol=0.1,
+    # )
+
+    # For now simple compare with std from numpy draws
+    rng = np.random.default_rng(123)
+    ref_samples = rng.vonmises(mu, kappa, size=(10_000, 2))
+    np.testing.assert_allclose(
+        np.std(samples, axis=0), np.std(ref_samples, axis=0), rtol=0.1
     )
 
 

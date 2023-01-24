@@ -3,6 +3,7 @@ import warnings
 import jax.numpy as jnp
 
 from pytensor.link.jax.dispatch.basic import jax_funcify
+from pytensor.tensor.basic import infer_static_shape
 from pytensor.tensor.extra_ops import (
     Bartlett,
     BroadcastTo,
@@ -102,8 +103,12 @@ def jax_funcify_RavelMultiIndex(op, **kwargs):
 
 
 @jax_funcify.register(BroadcastTo)
-def jax_funcify_BroadcastTo(op, **kwargs):
+def jax_funcify_BroadcastTo(op, node, **kwargs):
+    shape = node.inputs[1:]
+    static_shape = infer_static_shape(shape)[1]
+
     def broadcast_to(x, *shape):
+        shape = tuple(st if st is not None else s for s, st in zip(shape, static_shape))
         return jnp.broadcast_to(x, shape)
 
     return broadcast_to

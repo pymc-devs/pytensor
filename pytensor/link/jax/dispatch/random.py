@@ -1,6 +1,7 @@
 from functools import singledispatch
 
 import jax
+import numpy as np
 from numpy.random import Generator, RandomState
 from numpy.random.bit_generator import (  # type: ignore[attr-defined]
     _coerce_to_uint32_array,
@@ -11,6 +12,13 @@ from pytensor.link.jax.dispatch.basic import jax_funcify, jax_typify
 from pytensor.link.jax.dispatch.shape import JAXShapeTuple
 from pytensor.tensor.shape import Shape, Shape_i
 
+
+try:
+    import numpyro  # noqa: F401
+
+    numpyro_available = True
+except ImportError:
+    numpyro_available = False
 
 numpy_bit_gens = {"MT19937": 0, "PCG64": 1, "Philox": 2, "SFC64": 3}
 
@@ -83,11 +91,8 @@ def jax_funcify_RandomVariable(op, node, **kwargs):
     out_dtype = rv.type.dtype
     out_size = rv.type.shape
 
-    if isinstance(op, aer.MvNormalRV):
-        # PyTensor sets the `size` to the concatenation of the support shape
-        # and the batch shape, while JAX explicitly requires the batch
-        # shape only for the multivariate normal.
-        out_size = node.outputs[1].type.shape[:-1]
+    if op.ndim_supp > 0:
+        out_size = node.outputs[1].type.shape[: -op.ndim_supp]
 
     # If one dimension has unknown size, either the size is determined
     # by a `Shape` operator in which case JAX will compile, or it is
@@ -289,6 +294,78 @@ def jax_sample_fn_permutation(op):
         (x,) = parameters
         sample = jax.random.permutation(sampling_key, x)
         rng["jax_state"] = rng_key
+        return (rng, sample)
+
+    return sample_fn
+
+
+@jax_sample_fn.register(aer.BinomialRV)
+def jax_sample_fn_binomial(op):
+    if not numpyro_available:
+        raise NotImplementedError(
+            f"No JAX implementation for the given distribution: {op.name}. "
+            "Implementation is available if NumPyro is installed."
+        )
+
+    from numpyro.distributions.util import binomial
+
+    def sample_fn(rng, size, dtype, n, p):
+        rng_key = rng["jax_state"]
+        rng_key, sampling_key = jax.random.split(rng_key, 2)
+
+        sample = binomial(key=sampling_key, n=n, p=p, shape=size)
+
+        rng["jax_state"] = rng_key
+
+        return (rng, sample)
+
+    return sample_fn
+
+
+@jax_sample_fn.register(aer.MultinomialRV)
+def jax_sample_fn_multinomial(op):
+    if not numpyro_available:
+        raise NotImplementedError(
+            f"No JAX implementation for the given distribution: {op.name}. "
+            "Implementation is available if NumPyro is installed."
+        )
+
+    from numpyro.distributions.util import multinomial
+
+    def sample_fn(rng, size, dtype, n, p):
+        rng_key = rng["jax_state"]
+        rng_key, sampling_key = jax.random.split(rng_key, 2)
+
+        sample = multinomial(key=sampling_key, n=n, p=p, shape=size)
+
+        rng["jax_state"] = rng_key
+
+        return (rng, sample)
+
+    return sample_fn
+
+
+@jax_sample_fn.register(aer.VonMisesRV)
+def jax_sample_fn_vonmises(op):
+    if not numpyro_available:
+        raise NotImplementedError(
+            f"No JAX implementation for the given distribution: {op.name}. "
+            "Implementation is available if NumPyro is installed."
+        )
+
+    from numpyro.distributions.util import von_mises_centered
+
+    def sample_fn(rng, size, dtype, mu, kappa):
+        rng_key = rng["jax_state"]
+        rng_key, sampling_key = jax.random.split(rng_key, 2)
+
+        sample = von_mises_centered(
+            key=sampling_key, concentration=kappa, shape=size, dtype=dtype
+        )
+        sample = (sample + mu + np.pi) % (2.0 * np.pi) - np.pi
+
+        rng["jax_state"] = rng_key
+
         return (rng, sample)
 
     return sample_fn
