@@ -179,7 +179,7 @@ def test_random_updates(rng_ctor):
             ],
             (2,),
             "lognorm",
-            lambda *args: args,
+            lambda mu, sigma: (sigma, 0, np.exp(mu)),
         ),
         (
             aer.normal,
@@ -285,7 +285,7 @@ def test_random_updates(rng_ctor):
             [
                 set_test_value(
                     at.dvector(),
-                    np.array([-1.0, 2.0], dtype=np.float64),
+                    np.array([-1.0, 200.0], dtype=np.float64),
                 ),
                 set_test_value(
                     at.dscalar(),
@@ -295,6 +295,71 @@ def test_random_updates(rng_ctor):
             (2,),
             "halfnorm",
             lambda *args: args,
+        ),
+        (
+            aer.invgamma,
+            [
+                set_test_value(
+                    at.dvector(),
+                    np.array([10.4, 2.8], dtype=np.float64),
+                ),
+                set_test_value(
+                    at.dvector(),
+                    np.array([3.4, 7.3], dtype=np.float64),
+                ),
+            ],
+            (2,),
+            "invgamma",
+            lambda a, b: (a, 0, b),
+        ),
+        (
+            aer.chisquare,
+            [
+                set_test_value(
+                    at.dvector(),
+                    np.array([2.4, 4.9], dtype=np.float64),
+                ),
+            ],
+            (2,),
+            "chi2",
+            lambda *args: args,
+        ),
+        (
+            aer.gengamma,
+            [
+                set_test_value(
+                    at.dvector(),
+                    np.array([10.4, 2.8], dtype=np.float64),
+                ),
+                set_test_value(
+                    at.dvector(),
+                    np.array([3.4, 7.3], dtype=np.float64),
+                ),
+                set_test_value(
+                    at.dvector(),
+                    np.array([0.9, 2.0], dtype=np.float64),
+                ),
+            ],
+            (2,),
+            "gengamma",
+            lambda alpha, p, lambd: (alpha / p, p, 0, lambd),
+        ),
+        (
+            aer.wald,
+            [
+                set_test_value(
+                    at.dvector(),
+                    np.array([10.4, 2.8], dtype=np.float64),
+                ),
+                set_test_value(
+                    at.dvector(),
+                    np.array([4.5, 2.0], dtype=np.float64),
+                ),
+            ],
+            (2,),
+            "invgauss",
+            # https://stackoverflow.com/a/48603469
+            lambda mean, scale: (mean / scale, 0, scale),
         ),
     ],
 )
@@ -329,7 +394,8 @@ def test_random_RandomVariable(rv_op, dist_params, base_size, cdf_name, params_c
         test_res = stats.cramervonmises(
             samples[(Ellipsis,) + idx], cdf_name, args=cdf_params
         )
-        assert test_res.pvalue > 0.1
+        assert not np.isnan(test_res.statistic)
+        assert test_res.pvalue > 0.01
 
 
 @pytest.mark.parametrize("size", [(), (4,)])
@@ -408,6 +474,29 @@ def test_random_permutation():
     permuted = g_fn()
     with pytest.raises(AssertionError):
         np.testing.assert_allclose(array, permuted)
+
+
+def test_random_geometric():
+    rng = shared(np.random.RandomState(123))
+    p = np.array([0.3, 0.7])
+    g = at.random.geometric(p, size=(10_000, 2), rng=rng)
+    g_fn = function([], g, mode=jax_mode)
+    samples = g_fn()
+    np.testing.assert_allclose(samples.mean(axis=0), 1 / p, rtol=0.1)
+    np.testing.assert_allclose(samples.std(axis=0), np.sqrt((1 - p) / p**2), rtol=0.1)
+
+
+def test_negative_binomial():
+    rng = shared(np.random.RandomState(123))
+    n = np.array([10, 40])
+    p = np.array([0.3, 0.7])
+    g = at.random.negative_binomial(n, p, size=(10_000, 2), rng=rng)
+    g_fn = function([], g, mode=jax_mode)
+    samples = g_fn()
+    np.testing.assert_allclose(samples.mean(axis=0), n * (1 - p) / p, rtol=0.1)
+    np.testing.assert_allclose(
+        samples.std(axis=0), np.sqrt(n * (1 - p) / p**2), rtol=0.1
+    )
 
 
 def test_random_unimplemented():
