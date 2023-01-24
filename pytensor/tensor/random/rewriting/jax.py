@@ -2,10 +2,11 @@ from pytensor.compile import optdb
 from pytensor.graph.rewriting.basic import in2out, node_rewriter
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.tensor import abs as abs_t
-from pytensor.tensor import exp, floor, log, log1p, reciprocal, sqrt
+from pytensor.tensor import broadcast_arrays, exp, floor, log, log1p, reciprocal, sqrt
 from pytensor.tensor.basic import MakeVector, cast, ones_like, switch, zeros_like
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.random.basic import (
+    BetaBinomialRV,
     ChiSquareRV,
     GenGammaRV,
     GeometricRV,
@@ -14,6 +15,8 @@ from pytensor.tensor.random.basic import (
     LogNormalRV,
     NegBinomialRV,
     WaldRV,
+    beta,
+    binomial,
     gamma,
     normal,
     poisson,
@@ -133,6 +136,15 @@ def wald_from_normal_uniform(fgraph, node):
     return [next_rng, cast(w, dtype=node.default_output().dtype)]
 
 
+@node_rewriter([BetaBinomialRV])
+def beta_binomial_from_beta_binomial(fgraph, node):
+    rng, *other_inputs, n, a, b = node.inputs
+    n, a, b = broadcast_arrays(n, a, b)
+    next_rng, b = beta.make_node(rng, *other_inputs, a, b).outputs
+    next_rng, b = binomial.make_node(next_rng, *other_inputs, n, b).outputs
+    return [next_rng, b]
+
+
 random_vars_opt = SequenceDB()
 random_vars_opt.register(
     "lognormal_from_normal",
@@ -172,6 +184,11 @@ random_vars_opt.register(
 random_vars_opt.register(
     "wald_from_normal_uniform",
     in2out(wald_from_normal_uniform),
+    "jax",
+)
+random_vars_opt.register(
+    "beta_binomial_from_beta_binomial",
+    in2out(beta_binomial_from_beta_binomial),
     "jax",
 )
 optdb.register("jax_random_vars_rewrites", random_vars_opt, "jax", position=110)
