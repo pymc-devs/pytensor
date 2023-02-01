@@ -4018,7 +4018,7 @@ def test_local_mul_exp_to_exp_add():
     # Default and FAST_RUN modes put a Composite op into the final graph,
     # whereas FAST_COMPILE doesn't.  To unify the graph the test cases analyze across runs,
     # we'll avoid the insertion of Composite ops in each mode by skipping Fusion rewrites
-    mode = get_default_mode().excluding("fusion")
+    mode = get_default_mode().excluding("fusion").including("local_mul_exp_to_exp_add")
 
     x = scalar("x")
     y = scalar("y")
@@ -4032,6 +4032,7 @@ def test_local_mul_exp_to_exp_add():
     # e^x * e^y * e^z * e^w = e^(x+y+z+w)
     op = expx * expy * expz * expw
     f = function([x, y, z, w], op, mode)
+    pytensor.dprint(f)
     utt.assert_allclose(f(3, 4, 5, 6), np.exp(3 + 4 + 5 + 6))
     graph = f.maker.fgraph.toposort()
     assert all(isinstance(n.op, Elemwise) for n in graph)
@@ -4108,7 +4109,12 @@ def test_local_mul_pow_to_pow_add():
     # Default and FAST_RUN modes put a Composite op into the final graph,
     # whereas FAST_COMPILE doesn't.  To unify the graph the test cases analyze across runs,
     # we'll avoid the insertion of Composite ops in each mode by skipping Fusion rewrites
-    mode = get_default_mode().excluding("fusion")
+    mode = (
+        get_default_mode()
+        .excluding("fusion")
+        .including("local_mul_exp_to_exp_add")
+        .including("local_mul_pow_to_pow_add")
+    )
 
     x = scalar("x")
     y = scalar("y")
