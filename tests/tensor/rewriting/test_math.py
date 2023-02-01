@@ -4081,7 +4081,7 @@ def test_local_mul_exp_to_exp_add():
     # expect same for matrices as well
     mx = matrix("mx")
     my = matrix("my")
-    f = function([mx, my], exp(mx) * exp(my), mode)
+    f = function([mx, my], exp(mx) * exp(my), mode, allow_input_downcast=True)
     M1 = np.array([[1.0, 2.0], [3.0, 4.0]])
     M2 = np.array([[5.0, 6.0], [7.0, 8.0]])
     utt.assert_allclose(f(M1, M2), np.exp(M1 + M2))
