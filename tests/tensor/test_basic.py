@@ -1280,15 +1280,15 @@ class TestJoinAndSplit:
 
     def test_stack_scalar_make_vector_constant(self):
         # Test that calling stack() on scalars instantiates MakeVector,
-        # event when the scalar are simple int type.
+        # even when the scalars are non-symbolic ints.
         a = iscalar("a")
         b = lscalar("b")
         # test when the constant is the first element.
         # The first element is used in a special way
-        s = stack([10, a, b, np.int8(3)])
+        s = stack([10, a, b, np.int8(3), np.array(4, dtype=np.int8)])
         f = function([a, b], s, mode=self.mode)
         val = f(1, 2)
-        assert np.all(val == [10, 1, 2, 3])
+        assert np.all(val == [10, 1, 2, 3, 4])
         topo = f.maker.fgraph.toposort()
         assert len([n for n in topo if isinstance(n.op, MakeVector)]) > 0
         assert len([n for n in topo if isinstance(n, type(self.join_op))]) == 0
@@ -1333,10 +1333,13 @@ class TestJoinAndSplit:
             stack([a, b], -4)
 
         # Testing depreciation warning is now an informative error
-        with pytest.raises(
-            TypeError, match=r"First argument should be Sequence\[TensorVariable\]"
-        ):
+        with pytest.raises(TypeError, match="First argument should be a Sequence"):
             s = stack(a, b)
+
+    def test_stack_empty(self):
+        # Do not support stacking an empty sequence
+        with pytest.raises(ValueError, match="No tensor arguments provided"):
+            stack([])
 
     def test_stack_hessian(self):
         # Test the gradient of stack when used in hessian, see gh-1589
