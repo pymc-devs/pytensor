@@ -2559,17 +2559,17 @@ def roll(x, shift, axis=None):
     )
 
 
-def stack(tensors: Sequence[TensorVariable], axis: int = 0):
+def stack(tensors: Sequence["TensorLike"], axis: int = 0):
     """Stack tensors in sequence on given axis (default is 0).
 
-    Take a sequence of tensors and stack them on given axis to make a single
-    tensor. The size in dimension `axis` of the result will be equal to the number
-    of tensors passed.
+    Take a sequence of tensors or tensor-like constant and stack them on
+    given axis to make a single tensor. The size in dimension `axis` of the
+    result will be equal to the number of tensors passed.
 
     Parameters
     ----------
-    tensors : Sequence[TensorVariable]
-        A list of tensors to be stacked.
+    tensors : Sequence[TensorLike]
+        A list of tensors or tensor-like constants to be stacked.
     axis : int
         The index of the new axis. Default value is 0.
 
@@ -2604,11 +2604,11 @@ def stack(tensors: Sequence[TensorVariable], axis: int = 0):
     (2, 2, 2, 3, 2)
     """
     if not isinstance(tensors, Sequence):
-        raise TypeError("First argument should be Sequence[TensorVariable]")
+        raise TypeError("First argument should be a Sequence.")
     elif len(tensors) == 0:
-        raise ValueError("No tensor arguments provided")
+        raise ValueError("No tensor arguments provided.")
 
-    # If all tensors are scalars of the same type, call make_vector.
+    # If all tensors are scalars, call make_vector.
     # It makes the graph simpler, by not adding DimShuffles and SpecifyShapes
 
     # This should be an optimization!
@@ -2618,12 +2618,13 @@ def stack(tensors: Sequence[TensorVariable], axis: int = 0):
     # optimization.
     # See ticket #660
     if all(
-        # In case there are explicit ints in tensors
-        isinstance(t, (np.number, float, int, builtins.complex))
+        # In case there are explicit scalars in tensors
+        isinstance(t, Number)
+        or (isinstance(t, np.ndarray) and t.ndim == 0)
         or (isinstance(t, Variable) and isinstance(t.type, TensorType) and t.ndim == 0)
         for t in tensors
     ):
-        # in case there is direct int
+        # In case there is direct scalar
         tensors = list(map(as_tensor_variable, tensors))
         dtype = aes.upcast(*[i.dtype for i in tensors])
         return MakeVector(dtype)(*tensors)
