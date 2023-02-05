@@ -4014,6 +4014,161 @@ def test_local_sumsqr2dot():
     )
 
 
+def test_local_mul_exp_to_exp_add():
+    # Default and FAST_RUN modes put a Composite op into the final graph,
+    # whereas FAST_COMPILE doesn't.  To unify the graph the test cases analyze across runs,
+    # we'll avoid the insertion of Composite ops in each mode by skipping Fusion rewrites
+    mode = get_default_mode().excluding("fusion").including("local_mul_exp_to_exp_add")
+
+    x = scalar("x")
+    y = scalar("y")
+    z = scalar("z")
+    w = scalar("w")
+    expx = exp(x)
+    expy = exp(y)
+    expz = exp(z)
+    expw = exp(w)
+
+    # e^x * e^y * e^z * e^w = e^(x+y+z+w)
+    op = expx * expy * expz * expw
+    f = function([x, y, z, w], op, mode)
+    pytensor.dprint(f)
+    utt.assert_allclose(f(3, 4, 5, 6), np.exp(3 + 4 + 5 + 6))
+    graph = f.maker.fgraph.toposort()
+    assert all(isinstance(n.op, Elemwise) for n in graph)
+    assert any(isinstance(n.op.scalar_op, aes.Add) for n in graph)
+    assert not any(isinstance(n.op.scalar_op, aes.Mul) for n in graph)
+
+    # e^x * e^y * e^z / e^w = e^(x+y+z-w)
+    op = expx * expy * expz / expw
+    f = function([x, y, z, w], op, mode)
+    utt.assert_allclose(f(3, 4, 5, 6), np.exp(3 + 4 + 5 - 6))
+    graph = f.maker.fgraph.toposort()
+    assert all(isinstance(n.op, Elemwise) for n in graph)
+    assert any(isinstance(n.op.scalar_op, aes.Add) for n in graph)
+    assert any(isinstance(n.op.scalar_op, aes.Sub) for n in graph)
+    assert not any(isinstance(n.op.scalar_op, aes.Mul) for n in graph)
+    assert not any(isinstance(n.op.scalar_op, aes.TrueDiv) for n in graph)
+
+    # e^x * e^y / e^z * e^w = e^(x+y-z+w)
+    op = expx * expy / expz * expw
+    f = function([x, y, z, w], op, mode)
+    utt.assert_allclose(f(3, 4, 5, 6), np.exp(3 + 4 - 5 + 6))
+    graph = f.maker.fgraph.toposort()
+    assert all(isinstance(n.op, Elemwise) for n in graph)
+    assert any(isinstance(n.op.scalar_op, aes.Add) for n in graph)
+    assert any(isinstance(n.op.scalar_op, aes.Sub) for n in graph)
+    assert not any(isinstance(n.op.scalar_op, aes.Mul) for n in graph)
+    assert not any(isinstance(n.op.scalar_op, aes.TrueDiv) for n in graph)
+
+    # e^x / e^y / e^z = (e^x / e^y) / e^z = e^(x-y-z)
+    op = expx / expy / expz
+    f = function([x, y, z], op, mode)
+    utt.assert_allclose(f(3, 4, 5), np.exp(3 - 4 - 5))
+    graph = f.maker.fgraph.toposort()
+    assert all(isinstance(n.op, Elemwise) for n in graph)
+    assert any(isinstance(n.op.scalar_op, aes.Sub) for n in graph)
+    assert not any(isinstance(n.op.scalar_op, aes.TrueDiv) for n in graph)
+
+    # e^x * y * e^z * w = e^(x+z) * y * w
+    op = expx * y * expz * w
+    f = function([x, y, z, w], op, mode)
+    utt.assert_allclose(f(3, 4, 5, 6), np.exp(3 + 5) * 4 * 6)
+    graph = f.maker.fgraph.toposort()
+    assert all(isinstance(n.op, Elemwise) for n in graph)
+    assert any(isinstance(n.op.scalar_op, aes.Add) for n in graph)
+    assert any(isinstance(n.op.scalar_op, aes.Mul) for n in graph)
+
+    # expect same for matrices as well
+    mx = matrix("mx")
+    my = matrix("my")
+    f = function([mx, my], exp(mx) * exp(my), mode, allow_input_downcast=True)
+    M1 = np.array([[1.0, 2.0], [3.0, 4.0]])
+    M2 = np.array([[5.0, 6.0], [7.0, 8.0]])
+    utt.assert_allclose(f(M1, M2), np.exp(M1 + M2))
+    graph = f.maker.fgraph.toposort()
+    assert all(isinstance(n.op, Elemwise) for n in graph)
+    assert any(isinstance(n.op.scalar_op, aes.Add) for n in graph)
+    assert not any(isinstance(n.op.scalar_op, aes.Mul) for n in graph)
+
+    # checking whether further rewrites can proceed after this one as one would expect
+    # e^x * e^(-x) = e^(x-x) = e^0 = 1
+    f = function([x], expx * exp(neg(x)), mode)
+    utt.assert_allclose(f(42), 1)
+    graph = f.maker.fgraph.toposort()
+    assert isinstance(graph[0].inputs[0], TensorConstant)
+
+    # e^x / e^x = e^(x-x) = e^0 = 1
+    f = function([x], expx / expx, mode)
+    utt.assert_allclose(f(42), 1)
+    graph = f.maker.fgraph.toposort()
+    assert isinstance(graph[0].inputs[0], TensorConstant)
+
+
+def test_local_mul_pow_to_pow_add():
+    # Default and FAST_RUN modes put a Composite op into the final graph,
+    # whereas FAST_COMPILE doesn't.  To unify the graph the test cases analyze across runs,
+    # we'll avoid the insertion of Composite ops in each mode by skipping Fusion rewrites
+    mode = (
+        get_default_mode()
+        .excluding("fusion")
+        .including("local_mul_exp_to_exp_add")
+        .including("local_mul_pow_to_pow_add")
+    )
+
+    x = scalar("x")
+    y = scalar("y")
+    z = scalar("z")
+    w = scalar("w")
+    v = scalar("v")
+    u = scalar("u")
+    t = scalar("t")
+    s = scalar("s")
+    a = scalar("a")
+    b = scalar("b")
+    c = scalar("c")
+
+    # 2^x * 2^y * 2^z * 2^w = 2^(x+y+z+w)
+    op = 2**x * 2**y * 2**z * 2**w
+    f = function([x, y, z, w], op, mode)
+    utt.assert_allclose(f(3, 4, 5, 6), 2 ** (3 + 4 + 5 + 6))
+    graph = f.maker.fgraph.toposort()
+    assert all(isinstance(n.op, Elemwise) for n in graph)
+    assert any(isinstance(n.op.scalar_op, aes.Add) for n in graph)
+    assert not any(isinstance(n.op.scalar_op, aes.Mul) for n in graph)
+
+    # 2^x * a^y * 2^z * b^w * c^v * a^u * s * b^t = 2^(x+z) * a^(y+u) * b^(w+t) * c^v * s
+    op = 2**x * a**y * 2**z * b**w * c**v * a**u * s * b**t
+    f = function([x, y, z, w, v, u, t, s, a, b, c], op, mode)
+    utt.assert_allclose(
+        f(4, 5, 6, 7, 8, 9, 10, 11, 2.5, 3, 3.5),
+        2 ** (4 + 6) * 2.5 ** (5 + 9) * 3 ** (7 + 10) * 3.5**8 * 11,
+    )
+    graph = f.maker.fgraph.toposort()
+    assert all(isinstance(n.op, Elemwise) for n in graph)
+    assert len([True for n in graph if isinstance(n.op.scalar_op, aes.Add)]) == 3
+    assert len([True for n in graph if isinstance(n.op.scalar_op, aes.Pow)]) == 4
+    assert any(isinstance(n.op.scalar_op, aes.Mul) for n in graph)
+
+    # (2^x / 2^y) * (a^z / a^w) = 2^(x-y) * a^(z-w)
+    op = 2**x / 2**y * (a**z / a**w)
+    f = function([x, y, z, w, a], op, mode)
+    utt.assert_allclose(f(3, 5, 6, 4, 7), 2 ** (3 - 5) * 7 ** (6 - 4))
+    graph = f.maker.fgraph.toposort()
+    assert all(isinstance(n.op, Elemwise) for n in graph)
+    assert len([True for n in graph if isinstance(n.op.scalar_op, aes.Sub)]) == 2
+    assert any(isinstance(n.op.scalar_op, aes.Mul) for n in graph)
+
+    # a^x * a^y * exp(z) * exp(w) = a^(x+y) * exp(z+w)
+    op = a**x * a**y * exp(z) * exp(w)
+    f = function([x, y, z, w, a], op, mode)
+    utt.assert_allclose(f(3, 4, 5, 6, 2), 2 ** (3 + 4) * np.exp(5 + 6))
+    graph = f.maker.fgraph.toposort()
+    assert all(isinstance(n.op, Elemwise) for n in graph)
+    assert len([True for n in graph if isinstance(n.op.scalar_op, aes.Add)]) == 2
+    assert any(isinstance(n.op.scalar_op, aes.Mul) for n in graph)
+
+
 def test_local_expm1():
     x = matrix("x")
     u = scalar("u")
