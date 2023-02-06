@@ -1925,30 +1925,18 @@ class Split(COp):
     def perform(self, node, inputs, outputs):
         x, axis, splits = inputs
 
-        len_along_axis = x.shape[axis]
-
         if len(splits) != self.len_splits:
-            raise ValueError("Length of `splits` is not equal to `len_splits`")
-        if np.sum(splits) != len_along_axis:
+            raise ValueError("Length of splits is not equal to n_splits")
+        if np.sum(splits) != x.shape[axis]:
             raise ValueError(
-                f"The splits sum to {np.sum(splits)}; expected {len_along_axis}"
+                f"Split sizes sum to {np.sum(splits)}; expected {x.shape[axis]}"
             )
-        if builtins.any(nb < 0 for nb in splits):
-            raise ValueError(
-                "Attempted to make an array with a negative number of elements"
-            )
+        if np.any(splits < 0):
+            raise ValueError("Split sizes cannot be negative")
 
-        # Checking is done, let's roll the splitting algorithm!
-        # Basically we step along the given axis of x, extracting
-        # subtensors of size splits[i] as we go along.
-
-        general_key = [slice(None, None, None) for s in x.shape]
-        lower_idx = 0
-        for i in range(self.len_splits):
-            upper_idx = lower_idx + splits[i]
-            general_key[axis] = slice(lower_idx, upper_idx, None)
-            outputs[i][0] = x.__getitem__(tuple(general_key)).copy()
-            lower_idx = upper_idx
+        split_outs = np.split(x, np.cumsum(splits[:-1]), axis=axis)
+        for i, out in enumerate(split_outs):
+            outputs[i][0] = out.copy()
 
     def infer_shape(self, fgraph, node, in_shapes):
         axis = node.inputs[1]
