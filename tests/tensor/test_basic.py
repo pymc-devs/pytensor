@@ -1491,17 +1491,25 @@ class TestJoinAndSplit:
         out = self.eval_outputs_and_check_join([s])
         assert (out == want).all()
 
-    def test_join_matrix1(self):
+    @pytest.mark.parametrize("py_impl", (False, True))
+    def test_join_matrix1(self, py_impl):
+        if py_impl:
+            impl_ctxt = pytensor.config.change_flags(cxx="")
+        else:
+            impl_ctxt = pytensor.config.change_flags()
+
         av = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype="float32")
         bv = np.array([[0.7], [0.8]], dtype="float32")
         a = self.shared(av)
         b = as_tensor_variable(bv)
         s = join(1, a, b)
         want = np.array([[0.1, 0.2, 0.3, 0.7], [0.4, 0.5, 0.6, 0.8]], dtype="float32")
-        out = self.eval_outputs_and_check_join([s])
-        assert (out == want).all()
 
-        utt.verify_grad(lambda a, b: join(1, a, b), [av, bv], mode=self.mode)
+        with impl_ctxt:
+            out = self.eval_outputs_and_check_join([s])
+            assert (out == want).all()
+
+            utt.verify_grad(lambda a, b: join(1, a, b), [av, bv], mode=self.mode)
 
     def test_join_matrix_dtypes(self):
         if "float32" in self.shared.__name__:
@@ -1624,14 +1632,22 @@ class TestJoinAndSplit:
         with pytest.raises(IndexError):
             f(-3)
 
-    def test_join_matrixC_negative_axis(self):
+    @pytest.mark.parametrize("py_impl", (False, True))
+    def test_join_matrixC_negative_axis(self, py_impl):
+        if py_impl:
+            impl_ctxt = pytensor.config.change_flags(cxx="")
+        else:
+            impl_ctxt = pytensor.config.change_flags()
+
         # constant join negative axis
         v = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=self.floatX)
         a = self.shared(v)
         b = as_tensor_variable(v)
 
         s = join(-1, a, b)
-        f = pytensor.function([], [s], mode=self.mode)
+
+        with impl_ctxt:
+            f = pytensor.function([], [s], mode=self.mode)
         topo = f.maker.fgraph.toposort()
         assert [True for node in topo if isinstance(node.op, type(self.join_op))]
 
@@ -1643,7 +1659,9 @@ class TestJoinAndSplit:
         assert np.allclose(got, want)
 
         s = join(-2, a, b)
-        f = pytensor.function([], [s], mode=self.mode)
+
+        with impl_ctxt:
+            f = pytensor.function([], [s], mode=self.mode)
         topo = f.maker.fgraph.toposort()
         assert [True for node in topo if isinstance(node.op, type(self.join_op))]
 
@@ -1657,7 +1675,8 @@ class TestJoinAndSplit:
         with pytest.raises(IndexError):
             join(-3, a, b)
 
-        utt.verify_grad(lambda a, b: join(-1, a, b), [v, 2 * v], mode=self.mode)
+        with impl_ctxt:
+            utt.verify_grad(lambda a, b: join(-1, a, b), [v, 2 * v], mode=self.mode)
 
     def test_broadcastable_flag_assignment_mixed_otheraxes(self):
         # Test that the broadcastable flags for the output of
