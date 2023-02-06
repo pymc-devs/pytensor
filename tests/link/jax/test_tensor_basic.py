@@ -1,11 +1,13 @@
+import jax.errors
 import numpy as np
 import pytest
 
+import pytensor
 import pytensor.tensor.basic as at
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import get_test_value
-from pytensor.tensor.type import matrix, scalar, vector
+from pytensor.tensor.type import iscalar, matrix, scalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
@@ -100,6 +102,80 @@ def test_jax_Join():
             np.c_[[5.0, 6.0]].astype(config.floatX),
         ],
     )
+
+
+class TestJaxSplit:
+    def test_basic(self):
+        a = matrix("a")
+        a_splits = at.split(a, splits_size=[1, 2, 3], n_splits=3, axis=0)
+        fg = FunctionGraph([a], a_splits)
+        compare_jax_and_py(
+            fg,
+            [
+                np.zeros((6, 4)).astype(config.floatX),
+            ],
+        )
+
+        a = matrix("a", shape=(6, None))
+        a_splits = at.split(a, splits_size=[2, a.shape[0] - 2], n_splits=2, axis=0)
+        fg = FunctionGraph([a], a_splits)
+        compare_jax_and_py(
+            fg,
+            [
+                np.zeros((6, 4)).astype(config.floatX),
+            ],
+        )
+
+    def test_runtime_errors(self):
+        a = matrix("a")
+
+        a_splits = at.split(a, splits_size=[2, 2, 2], n_splits=2, axis=0)
+        fn = pytensor.function([a], a_splits, mode="JAX")
+        with pytest.raises(
+            ValueError, match="Length of splits is not equal to n_splits"
+        ):
+            fn(np.zeros((6, 4), dtype=pytensor.config.floatX))
+
+        a_splits = at.split(a, splits_size=[2, 4], n_splits=3, axis=0)
+        fn = pytensor.function([a], a_splits, mode="JAX")
+        with pytest.raises(
+            ValueError, match="Length of splits is not equal to n_splits"
+        ):
+            fn(np.zeros((6, 4), dtype=pytensor.config.floatX))
+
+        a_splits = at.split(a, splits_size=[2, 4], n_splits=2, axis=0)
+        fn = pytensor.function([a], a_splits, mode="JAX")
+        with pytest.raises(
+            ValueError, match="Split sizes do not sum up to input length along axis: 7"
+        ):
+            fn(np.zeros((7, 4), dtype=pytensor.config.floatX))
+
+        a_splits = at.split(a, splits_size=[2, -4, 8], n_splits=3, axis=0)
+        fn = pytensor.function([a], a_splits, mode="JAX")
+        with pytest.raises(
+            ValueError,
+            match="Split sizes cannot be negative",
+        ):
+            fn(np.zeros((6, 4), dtype=pytensor.config.floatX))
+
+    def test_jax_split_not_supported(self):
+        a = matrix("a", shape=(6, None))
+
+        a_splits = at.split(a, splits_size=[2, a.shape[1] - 2], n_splits=2, axis=1)
+        with pytest.warns(
+            UserWarning, match="Split node does not have constant split positions."
+        ):
+            fn = pytensor.function([a], a_splits, mode="JAX")
+        # It raises an informative ConcretizationTypeError, but there's an AttributeError that surpsasses it
+        with pytest.raises(AttributeError):
+            fn(np.zeros((6, 4), dtype=pytensor.config.floatX))
+
+        split_axis = iscalar("split_axis")
+        a_splits = at.split(a, splits_size=[2, 4], n_splits=2, axis=split_axis)
+        with pytest.warns(UserWarning, match="Split node does not have constant axis."):
+            fn = pytensor.function([a, split_axis], a_splits, mode="JAX")
+        with pytest.raises(jax.errors.TracerIntegerConversionError):
+            fn(np.zeros((6, 6), dtype=pytensor.config.floatX), 0)
 
 
 def test_jax_eye():

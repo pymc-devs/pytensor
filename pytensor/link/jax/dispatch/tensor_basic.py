@@ -1,6 +1,10 @@
+import warnings
+
 import jax.numpy as jnp
+import numpy as np
 
 from pytensor.link.jax.dispatch.basic import jax_funcify
+from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import (
     Alloc,
     AllocDiag,
@@ -11,8 +15,11 @@ from pytensor.tensor.basic import (
     Join,
     MakeVector,
     ScalarFromTensor,
+    Split,
     TensorFromScalar,
+    get_scalar_constant_value,
 )
+from pytensor.tensor.exceptions import NotScalarConstantError
 
 
 @jax_funcify.register(AllocDiag)
@@ -66,6 +73,53 @@ def jax_funcify_Join(op, **kwargs):
             return jnp.concatenate(tensors, axis=axis)
 
     return join
+
+
+@jax_funcify.register(Split)
+def jax_funcify_Split(op: Split, node, **kwargs):
+    _, axis, splits = node.inputs
+    try:
+        constant_axis = get_scalar_constant_value(axis)
+    except NotScalarConstantError:
+        constant_axis = None
+        warnings.warn(
+            "Split node does not have constant axis. Jax implementation will likely fail"
+        )
+
+    try:
+        constant_splits = np.array(
+            [
+                get_scalar_constant_value(splits[i])
+                for i in range(get_vector_length(splits))
+            ]
+        )
+    except (ValueError, NotScalarConstantError):
+        constant_splits = None
+        warnings.warn(
+            "Split node does not have constant split positions. Jax implementation will likely fail"
+        )
+
+    def split(x, axis, splits):
+        if constant_axis is not None:
+            axis = constant_axis
+        if constant_splits is not None:
+            splits = constant_splits
+            cumsum_splits = np.cumsum(splits[:-1])
+        else:
+            cumsum_splits = jnp.cumsum(splits[:-1])
+
+        if len(splits) != op.len_splits:
+            raise ValueError("Length of splits is not equal to n_splits")
+        if np.sum(splits) != x.shape[axis]:
+            raise ValueError(
+                f"Split sizes do not sum up to input length along axis: {x.shape[axis]}"
+            )
+        if np.any(splits < 0):
+            raise ValueError("Split sizes cannot be negative")
+
+        return jnp.split(x, cumsum_splits, axis=axis)
+
+    return split
 
 
 @jax_funcify.register(ExtractDiag)
