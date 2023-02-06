@@ -50,11 +50,14 @@ jobs:
     needs: changes
     runs-on: ubuntu-latest
     if: ${{ needs.changes.outputs.changes == 'true' }}
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10"]
     steps:
     - uses: actions/checkout@v3
     - uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
+        python-version: ${{ matrix.python-version }}
     - uses: pre-commit/action@v3.0.0
 
   test_ubuntu:
