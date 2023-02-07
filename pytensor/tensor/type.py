@@ -1,9 +1,8 @@
 import logging
 import warnings
-from typing import TYPE_CHECKING, Iterable, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Iterable, Literal, Optional, Tuple, Union
 
 import numpy as np
-from typing_extensions import Literal
 
 import pytensor
 from pytensor import scalar as aes

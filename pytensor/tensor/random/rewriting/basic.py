@@ -143,7 +143,7 @@ def local_dimshuffle_rv_lift(fgraph, node):
     # Check that Dimshuffle does not affect support dims
     supp_dims = set(range(rv.ndim - rv_op.ndim_supp, rv.ndim))
     shuffled_dims = {dim for i, dim in enumerate(ds_op.shuffle) if dim != i}
-    augmented_dims = set(d - rv_op.ndim_supp for d in ds_op.augment)
+    augmented_dims = {d - rv_op.ndim_supp for d in ds_op.augment}
     if (shuffled_dims | augmented_dims) & supp_dims:
         return False
 

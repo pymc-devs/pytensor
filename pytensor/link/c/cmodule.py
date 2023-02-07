@@ -19,7 +19,17 @@ import textwrap
 import time
 import warnings
 from io import BytesIO, StringIO
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Set, Tuple, cast
+from typing import (
+    TYPE_CHECKING,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    Set,
+    Tuple,
+    cast,
+)
 
 import numpy as np
 from setuptools._distutils.sysconfig import (
@@ -28,7 +38,6 @@ from setuptools._distutils.sysconfig import (
     get_python_inc,
     get_python_lib,
 )
-from typing_extensions import Protocol
 
 # we will abuse the lockfile mechanism when reading and writing the registry
 from pytensor.compile.compilelock import lock_ctx

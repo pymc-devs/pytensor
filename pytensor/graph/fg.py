@@ -7,6 +7,7 @@ from typing import (
     Dict,
     Iterable,
     List,
+    Literal,
     Optional,
     Sequence,
     Set,
@@ -14,8 +15,6 @@ from typing import (
     Union,
     cast,
 )
-
-from typing_extensions import Literal
 
 import pytensor
 from pytensor.configdefaults import config

@@ -435,9 +435,9 @@ def test_inner_graph_optimized():
 
     # Disable scan pushout, in which case the whole scan is replaced by an Elemwise
     f = function([xs], seq, mode=get_mode("NUMBA").excluding("scan_pushout"))
-    (scan_node,) = [
+    (scan_node,) = (
         node for node in f.maker.fgraph.apply_nodes if isinstance(node.op, Scan)
-    ]
+    )
     inner_scan_nodes = scan_node.op.fgraph.apply_nodes
     assert len(inner_scan_nodes) == 1
     (inner_scan_node,) = scan_node.op.fgraph.apply_nodes
