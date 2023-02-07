@@ -637,7 +637,7 @@ class TestFusion:
                 "float32",
             ),
             (
-                fx - true_div(fy, 2),
+                fx - true_divide(fy, 2),
                 (fx, fy),
                 (fxv, fyv),
                 1,
@@ -645,7 +645,7 @@ class TestFusion:
                 "float32",
             ),
             (
-                fx - true_div(fy, fz),
+                fx - true_divide(fy, fz),
                 (fx, fy, fz),
                 (fxv, fyv, fzv),
                 1,
