@@ -250,10 +250,33 @@ optdb.register("specialize", EquilibriumDB(), "fast_run", "fast_compile", positi
 # misc special cases for speed that break canonicalization
 optdb.register("uncanonicalize", EquilibriumDB(), "fast_run", position=3)
 
+# Turn tensor operations to scalar operations where possible.
+# This is currently marked as numba-only, but this could be changed
+# in the future.
+optdb.register("scalarize", EquilibriumDB(), "numba_only", position=3.1)
+
 # misc special cases for speed that are dependent on the device.
 optdb.register(
     "specialize_device", EquilibriumDB(), "fast_compile", "fast_run", position=48.6
 )  # must be after gpu stuff at 48.5
+
+# Must be before add_destroy_handler
+optdb.register(
+    "elemwise_fusion",
+    SequenceDB(),
+    "fast_run",
+    "fusion",
+    "local_elemwise_fusion",
+    position=48.7,
+)
+
+optdb.register(
+    "post_fusion",
+    EquilibriumDB(),
+    "fast_run",
+    "fast_compile",
+    position=48.8,
+)
 
 # especially constant merge
 optdb.register("merge2", MergeOptimizer(), "fast_run", "merge", position=49)
@@ -441,19 +464,44 @@ class Mode:
 # FunctionMaker, the Mode will be taken from this dictionary using the
 # string as the key
 # Use VM_linker to allow lazy evaluation by default.
-FAST_COMPILE = Mode(VMLinker(use_cloop=False, c_thunks=False), "fast_compile")
+FAST_COMPILE = Mode(
+    VMLinker(use_cloop=False, c_thunks=False),
+    RewriteDatabaseQuery(
+        include=["fast_compile"],
+        exclude=["numba_only"],
+    ),
+)
 if config.cxx:
-    FAST_RUN = Mode("cvm", "fast_run")
+    FAST_RUN = Mode(
+        "cvm",
+        RewriteDatabaseQuery(
+            include=["fast_run"],
+            exclude=["numba_only"],
+        ),
+    )
 else:
-    FAST_RUN = Mode("vm", "fast_run")
+    FAST_RUN = Mode(
+        "vm",
+        RewriteDatabaseQuery(
+            include=["fast_run"],
+            exclude=["numba_only"],
+        ),
+    )
 
 JAX = Mode(
     JAXLinker(),
-    RewriteDatabaseQuery(include=["fast_run", "jax"], exclude=["cxx_only", "BlasOpt"]),
+    RewriteDatabaseQuery(
+        include=["fast_run", "jax"],
+        exclude=["cxx_only", "BlasOpt", "numba_only"],
+    ),
 )
+
 NUMBA = Mode(
     NumbaLinker(),
-    RewriteDatabaseQuery(include=["fast_run"], exclude=["cxx_only", "BlasOpt"]),
+    RewriteDatabaseQuery(
+        include=["fast_run", "numba_only"],
+        exclude=["cxx_only", "BlasOpt"],
+    ),
 )
 
 

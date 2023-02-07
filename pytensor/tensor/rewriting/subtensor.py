@@ -469,8 +469,8 @@ def local_subtensor_lift(fgraph, node):
             return [rbcast_subt_x]
 
 
-@register_canonicalize
-@register_specialize
+@register_stabilize("cxx_only")
+@register_canonicalize("cxx_only")
 @node_rewriter([Subtensor])
 def local_subtensor_merge(fgraph, node):
     """
