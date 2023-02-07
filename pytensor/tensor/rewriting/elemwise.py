@@ -990,23 +990,33 @@ if config.tensor__local_elemwise_fusion:
 
 
 @register_canonicalize
+@register_specialize
 @node_rewriter([Elemwise])
 def local_useless_composite(fgraph, node):
-    """For elemwise Composite that have multiple outputs, remove the
-    outputs that are not used.
-
-    """
+    """Remove inputs and outputs of Composite Ops that are not used anywhere."""
     if not isinstance(node.op, Elemwise) or not isinstance(
         node.op.scalar_op, aes.Composite
     ):
         return
     comp = node.op.scalar_op
-    idx = [i for i, o_extern in enumerate(node.outputs) if fgraph.clients[o_extern]]
-    if len(idx) < len(node.outputs):
-        new_outputs = [comp.outputs[i] for i in idx]
-        c = aes.Composite(inputs=comp.inputs, outputs=new_outputs)
-        e = Elemwise(scalar_op=c)(*node.inputs, return_list=True)
-        return dict(zip([node.outputs[i] for i in idx], e))
+    used_outputs_idxs = [i for i, o_extern in enumerate(node.outputs) if fgraph.clients[o_extern]]
+    used_inner_outputs = [comp.outputs[i] for i in used_outputs_idxs]
+    comp_fgraph = FunctionGraph(
+        inputs=comp.inputs, outputs=used_inner_outputs, clone=False
+    )
+    used_inputs_idxs = [
+        i
+        for i, i_intern in enumerate(comp_fgraph.inputs)
+        if comp_fgraph.clients[i_intern]
+    ]
+    used_inner_inputs = [comp.inputs[i] for i in used_inputs_idxs]
+    if len(used_inner_inputs) < len(node.inputs) or len(used_inner_outputs) < len(
+        node.outputs
+    ):
+        used_inputs = [node.inputs[i] for i in used_inputs_idxs]
+        c = aes.Composite(inputs=used_inner_inputs, outputs=used_inner_outputs)
+        e = Elemwise(scalar_op=c)(*used_inputs, return_list=True)
+        return dict(zip([node.outputs[i] for i in used_outputs_idxs], e))
 
 
 @node_rewriter([CAReduce])
