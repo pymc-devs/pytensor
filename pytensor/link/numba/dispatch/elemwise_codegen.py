@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
 import numba
 import numpy as np
@@ -14,8 +14,8 @@ from numba.np import arrayobj
 def compute_itershape(
     ctx: BaseContext,
     builder: ir.IRBuilder,
-    in_shapes: Tuple[ir.Instruction, ...],
-    broadcast_pattern: Tuple[Tuple[bool, ...], ...],
+    in_shapes: tuple[ir.Instruction, ...],
+    broadcast_pattern: tuple[tuple[bool, ...], ...],
 ):
     one = ir.IntType(64)(1)
     ndim = len(in_shapes[0])
@@ -63,12 +63,12 @@ def compute_itershape(
 def make_outputs(
     ctx: numba.core.base.BaseContext,
     builder: ir.IRBuilder,
-    iter_shape: Tuple[ir.Instruction, ...],
-    out_bc: Tuple[Tuple[bool, ...], ...],
-    dtypes: Tuple[Any, ...],
-    inplace: Tuple[Tuple[int, int], ...],
-    inputs: Tuple[Any, ...],
-    input_types: Tuple[Any, ...],
+    iter_shape: tuple[ir.Instruction, ...],
+    out_bc: tuple[tuple[bool, ...], ...],
+    dtypes: tuple[Any, ...],
+    inplace: tuple[tuple[int, int], ...],
+    inputs: tuple[Any, ...],
+    input_types: tuple[Any, ...],
 ):
     arrays = []
     ar_types: list[types.Array] = []
@@ -106,13 +106,13 @@ def make_loop_call(
     builder: ir.IRBuilder,
     scalar_func: Any,
     scalar_signature: types.FunctionType,
-    iter_shape: Tuple[ir.Instruction, ...],
-    inputs: Tuple[ir.Instruction, ...],
-    outputs: Tuple[ir.Instruction, ...],
-    input_bc: Tuple[Tuple[bool, ...], ...],
-    output_bc: Tuple[Tuple[bool, ...], ...],
-    input_types: Tuple[Any, ...],
-    output_types: Tuple[Any, ...],
+    iter_shape: tuple[ir.Instruction, ...],
+    inputs: tuple[ir.Instruction, ...],
+    outputs: tuple[ir.Instruction, ...],
+    input_bc: tuple[tuple[bool, ...], ...],
+    output_bc: tuple[tuple[bool, ...], ...],
+    input_types: tuple[Any, ...],
+    output_types: tuple[Any, ...],
 ):
     safe = (False, False)
     n_outputs = len(outputs)
@@ -150,9 +150,7 @@ def make_loop_call(
     # This part corresponds to opening the loops
     loop_stack = []
     loops = []
-    output_accumulator: List[Tuple[Optional[Any], Optional[int]]] = [
-        (None, None)
-    ] * n_outputs
+    output_accumulator: list[tuple[Any | None, int | None]] = [(None, None)] * n_outputs
     for dim, length in enumerate(iter_shape):
         # Find outputs that only have accumulations left
         for output in range(n_outputs):

@@ -8,6 +8,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Literal,
     Mapping,
     MutableSequence,
     Optional,
@@ -18,7 +19,6 @@ from typing import (
 )
 
 import numpy as np
-from typing_extensions import Literal
 
 import pytensor
 from pytensor.compile.ops import ViewOp

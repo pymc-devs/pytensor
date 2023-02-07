@@ -9,14 +9,13 @@ from typing import (
     Dict,
     List,
     Optional,
+    Protocol,
     Sequence,
     Tuple,
     TypeVar,
     Union,
     cast,
 )
-
-from typing_extensions import Protocol
 
 import pytensor
 from pytensor.configdefaults import config

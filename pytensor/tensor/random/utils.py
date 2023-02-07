@@ -2,10 +2,9 @@ from collections.abc import Sequence
 from functools import wraps
 from itertools import zip_longest
 from types import ModuleType
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Literal, Optional, Union
 
 import numpy as np
-from typing_extensions import Literal
 
 from pytensor.compile.sharedvalue import shared
 from pytensor.graph.basic import Constant, Variable
