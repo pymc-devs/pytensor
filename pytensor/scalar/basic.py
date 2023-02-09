@@ -2035,6 +2035,7 @@ class TrueDiv(BinaryScalarOp):
 true_divide = TrueDiv(upcast_out, name="true_divide")
 
 true_div = true_divide
+divide = true_divide
 
 
 class IntDiv(BinaryScalarOp):
