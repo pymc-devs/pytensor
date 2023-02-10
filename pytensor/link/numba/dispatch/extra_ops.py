@@ -46,7 +46,6 @@ def numba_funcify_CumOp(op, node, **kwargs):
     reaxis_first_inv = tuple(np.argsort(reaxis_first))
 
     if mode == "add":
-
         if ndim == 1:
 
             @numba_basic.numba_njit(fastmath=config.numba__fastmath)
@@ -134,7 +133,6 @@ def numba_funcify_FillDiagonalOffset(op, node, **kwargs):
 
 @numba_funcify.register(RavelMultiIndex)
 def numba_funcify_RavelMultiIndex(op, node, **kwargs):
-
     mode = op.mode
     order = op.order
 
@@ -207,7 +205,6 @@ def numba_funcify_Repeat(op, node, **kwargs):
         use_python = True
 
     if use_python:
-
         warnings.warn(
             (
                 "Numba will use object mode to allow the "
@@ -265,7 +262,6 @@ def numba_funcify_Unique(op, node, **kwargs):
             return np.unique(x)
 
     else:
-
         warnings.warn(
             (
                 "Numba will use object mode to allow the "
@@ -359,7 +355,6 @@ def numba_funcify_Searchsorted(op, node, **kwargs):
 
 @numba_funcify.register(BroadcastTo)
 def numba_funcify_BroadcastTo(op, node, **kwargs):
-
     create_zeros_tuple = numba_basic.create_tuple_creator(
         lambda _: 0, len(node.inputs) - 1
     )

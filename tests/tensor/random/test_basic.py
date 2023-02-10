@@ -1317,7 +1317,6 @@ def test_categorical_basic():
 
 
 def test_randint_samples():
-
     with pytest.raises(TypeError):
         randint(10, rng=shared(np.random.default_rng()))
 
@@ -1339,7 +1338,6 @@ def test_randint_samples():
 
 
 def test_integers_samples():
-
     with pytest.raises(TypeError):
         integers(10, rng=shared(np.random.RandomState()))
 

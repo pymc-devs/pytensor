@@ -782,7 +782,6 @@ class NoOutputFromInplace(Feature):
             return True
 
         for out in tuple(fgraph.outputs[i] for i in self.protected_out_ids):
-
             node = out.owner
 
             if node is None:

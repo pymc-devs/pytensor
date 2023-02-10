@@ -27,7 +27,6 @@ class TestNodeFinder:
                 return isinstance(other, MyType)
 
         class MyOp(Op):
-
             __props__ = ("nin", "name")
 
             def __init__(self, nin, name):

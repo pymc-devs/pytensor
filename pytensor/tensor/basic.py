@@ -130,7 +130,6 @@ def _as_tensor_Variable(x, name, ndim, **kwargs):
 @_as_tensor_variable.register(list)
 @_as_tensor_variable.register(tuple)
 def _as_tensor_Sequence(x, name, ndim, dtype=None, **kwargs):
-
     if len(x) == 0:
         return constant(x, name=name, ndim=ndim, dtype=dtype)
 
@@ -470,7 +469,6 @@ def get_scalar_constant_value(
                     )
                     and len(v.owner.op.idx_list) == 1
                 ):
-
                     idx = v.owner.op.idx_list[0]
                     if isinstance(idx, Type):
                         idx = get_scalar_constant_value(
@@ -531,7 +529,6 @@ def get_scalar_constant_value(
 
 
 class TensorFromScalar(COp):
-
     __props__ = ()
 
     def make_node(self, s):
@@ -588,7 +585,6 @@ tensor_from_scalar = TensorFromScalar()
 
 
 class ScalarFromTensor(COp):
-
     __props__ = ()
 
     def __call__(self, *args, **kwargs) -> ScalarVariable:
@@ -973,7 +969,6 @@ def nonzero_values(a):
 
 
 class Tri(Op):
-
     __props__ = ("dtype",)
 
     def __init__(self, dtype=None):
@@ -1249,7 +1244,6 @@ def triu_indices_from(
 
 
 class Eye(Op):
-
     __props__ = ("dtype",)
 
     def __init__(self, dtype=None):
@@ -1485,7 +1479,6 @@ class Alloc(COp):
         return [node.inputs[1:]]
 
     def connection_pattern(self, node):
-
         rval = [[True]]
 
         for ipt in node.inputs[1:]:
@@ -2916,7 +2909,6 @@ class ARange(Op):
         out[0] = np.arange(start, stop, step, dtype=self.dtype)
 
     def connection_pattern(self, node):
-
         return [[True], [False], [True]]
 
     def L_op(self, inputs, outputs, grads):
@@ -3046,7 +3038,6 @@ class _nd_grid:
         self.sparse = sparse
 
     def __getitem__(self, *args):
-
         if isinstance(args[0], slice):
             sl = args[0]
             return arange(sl.start or 0, sl.stop, sl.step or 1)
@@ -3751,7 +3742,6 @@ class Choose(Op):
         self.mode = mode
 
     def infer_shape(self, fgraph, node, shapes):
-
         a_shape, choices_shape = shapes
         out_shape = pytensor.tensor.extra_ops.broadcast_shape(
             a_shape, choices_shape[1:], arrays_are_shapes=True

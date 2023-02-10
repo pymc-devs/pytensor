@@ -1508,7 +1508,6 @@ def test_local_merge_alloc():
 
 
 def test_local_useless_alloc():
-
     useless_alloc = out2in(local_useless_alloc)
     merge_alloc = out2in(local_merge_alloc)
 

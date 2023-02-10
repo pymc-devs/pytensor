@@ -164,7 +164,6 @@ def test_flag_detection():
 @patch("pytensor.link.c.cmodule.try_blas_flag", return_value=None)
 @patch("pytensor.link.c.cmodule.sys")
 def test_default_blas_ldflags(sys_mock, try_blas_flag_mock, caplog):
-
     sys_mock.version = "3.8.0 | packaged by conda-forge | (default, Nov 22 2019, 19:11:38) \n[GCC 7.3.0]"
 
     with patch.dict("sys.modules", {"mkl": None}):
@@ -222,7 +221,6 @@ def test_linking_patch(listdir_mock, platform):
 
 
 def test_cache_race_condition():
-
     with tempfile.TemporaryDirectory() as dir_name:
 
         @config.change_flags(on_opt_error="raise", on_shape_error="raise")
@@ -242,7 +240,6 @@ def test_cache_race_condition():
         with patch.object(compiledir_prop, "val", dir_name, create=True), patch.object(
             pytensor.link.c.cmodule, "_module_cache", None
         ):
-
             assert pytensor.config.compiledir == dir_name
 
             num_procs = 30

@@ -140,7 +140,6 @@ class TestIsSameGraph:
 
 
 def test_rewrite_graph():
-
     x, y = vectors("xy")
 
     @graph_rewriter

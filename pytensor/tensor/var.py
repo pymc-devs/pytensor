@@ -944,7 +944,6 @@ class TensorConstantSignature(tuple):
         try:
             return self._sum
         except AttributeError:
-
             # Prevent warnings when there are `inf`s and `-inf`s present
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", category=RuntimeWarning)

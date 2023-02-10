@@ -537,7 +537,6 @@ def _vectorized(
         sig,
         args,
     ):
-
         [_, _, _, _, _, inputs] = args
         inputs = cgutils.unpack_tuple(builder, inputs)
         inputs = [
@@ -795,7 +794,6 @@ def numba_funcify_DimShuffle(op, node, **kwargs):
     # (since getting an item from an empty sequence doesn't make sense).
     # To avoid this compile-time error, we omit the expression altogether.
     if len(shuffle) > 0:
-
         # Use the statically known shape if available
         if all(length is not None for length in node.outputs[0].type.shape):
             shape = node.outputs[0].type.shape
@@ -866,7 +864,6 @@ def numba_funcify_DimShuffle(op, node, **kwargs):
 
 @numba_funcify.register(Softmax)
 def numba_funcify_Softmax(op, node, **kwargs):
-
     x_at = node.inputs[0]
     x_dtype = x_at.type.numpy_dtype
     x_dtype = numba.np.numpy_support.from_dtype(x_dtype)
@@ -904,7 +901,6 @@ def numba_funcify_Softmax(op, node, **kwargs):
 
 @numba_funcify.register(SoftmaxGrad)
 def numba_funcify_SoftmaxGrad(op, node, **kwargs):
-
     sm_at = node.inputs[1]
     sm_dtype = sm_at.type.numpy_dtype
     sm_dtype = numba.np.numpy_support.from_dtype(sm_dtype)
@@ -936,7 +932,6 @@ def numba_funcify_SoftmaxGrad(op, node, **kwargs):
 
 @numba_funcify.register(LogSoftmax)
 def numba_funcify_LogSoftmax(op, node, **kwargs):
-
     x_at = node.inputs[0]
     x_dtype = x_at.type.numpy_dtype
     x_dtype = numba.np.numpy_support.from_dtype(x_dtype)
@@ -989,7 +984,6 @@ def numba_funcify_MaxAndArgmax(op, node, **kwargs):
             return x, 0
 
     else:
-
         axes = tuple(int(ax) for ax in axis)
 
         # NumPy does not support multiple axes for argmax; this is a

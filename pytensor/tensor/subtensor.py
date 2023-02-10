@@ -815,7 +815,6 @@ class Subtensor(COp):
         return [first] + [DisconnectedType()()] * len(rest)
 
     def connection_pattern(self, node):
-
         rval = [[True]]
 
         for ipt in node.inputs[1:]:
@@ -1593,7 +1592,6 @@ class IncSubtensor(COp):
         out[0] = x
 
     def c_code(self, node, name, inputs, outputs, sub):
-
         # This method delegates much of the work to helper
         # methods. This method implements the main logic
         # but subclasses may override the helper methods
@@ -1838,7 +1836,6 @@ class IncSubtensor(COp):
         return self(eval_points[0], eval_points[1], *inputs[2:], return_list=True)
 
     def connection_pattern(self, node):
-
         rval = [[True], [True]]
 
         for ipt in node.inputs[2:]:
@@ -2473,7 +2470,6 @@ class AdvancedIncSubtensor1(COp):
         return self.make_node(eval_points[0], eval_points[1], *inputs[2:]).outputs
 
     def connection_pattern(self, node):
-
         rval = [[True], [True], [False]]
         return rval
 
@@ -2692,7 +2688,6 @@ class AdvancedIncSubtensor(Op):
         )
 
     def perform(self, node, inputs, out_):
-
         x, y, *indices = inputs
 
         check_advanced_indexing_dimensions(x, indices)
@@ -2714,7 +2709,6 @@ class AdvancedIncSubtensor(Op):
         return [ishapes[0]]
 
     def connection_pattern(self, node):
-
         rval = [[True], [True]]
 
         for ipt in node.inputs[2:]:

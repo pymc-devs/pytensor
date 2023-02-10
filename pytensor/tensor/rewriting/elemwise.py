@@ -194,7 +194,6 @@ class InplaceElemwiseOptimizer(GraphRewriter):
             raised_warning = not verbose
 
             for candidate_output in candidate_outputs:
-
                 # If the output of the node can be established as an update
                 # output of the fgraph, visit the candidate_inputs in an order
                 # that will improve the chances of making the node operate
@@ -203,7 +202,6 @@ class InplaceElemwiseOptimizer(GraphRewriter):
                 sorted_candidate_inputs = candidate_inputs
 
                 if candidate_out_var in update_outs:
-
                     # The candidate output is an update. Sort the
                     # variables in candidate_inputs in the following order:
                     # - Vars corresponding to the actual updated input
@@ -240,7 +238,6 @@ class InplaceElemwiseOptimizer(GraphRewriter):
                                 for up_inp in updated_inputs
                             )
                         ):
-
                             # the candidate input is a variable computed
                             # inplace on the updated input via a sequence of
                             # one or more inplace operations
@@ -727,7 +724,6 @@ class FusionOptimizer(GraphRewriter):
                 fuseable_clients: FUSEABLE_MAPPING,
                 unfuseable_clients: UNFUSEABLE_MAPPING,
             ) -> Tuple[List[Variable], List[Variable]]:
-
                 KT = TypeVar("KT")
                 VT = TypeVar("VT", list, set)
 

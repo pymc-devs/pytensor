@@ -991,7 +991,6 @@ def test_hyp2f1_grad_stan_cases():
         # (1.0, 1.0, 2.0, -5.0, -0.321040199556840, -0.321040199556840, 0.129536268190289, 0.0383370454357889),
         (1.0, 1.0, 2.0, -5.0, np.nan, np.nan, np.nan, 0.0383370454357889),
     ):
-
         expectation = (
             pytest.warns(
                 RuntimeWarning, match="Hyp2F1 does not meet convergence conditions"

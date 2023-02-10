@@ -508,7 +508,6 @@ class TestEquilibrium:
 
 
 def test_pre_constant_merge():
-
     empty_fgraph = FunctionGraph([], [])
 
     x = MyVariable("x")
@@ -552,7 +551,6 @@ def test_pre_constant_merge():
 
 
 def test_pre_greedy_node_rewriter():
-
     empty_fgraph = FunctionGraph([], [])
 
     x = MyVariable("x")
@@ -670,7 +668,6 @@ def test_patternsub_different_output_lengths():
 
 class TestSequentialNodeRewriter:
     def test_optimizer_verbose(self, capsys):
-
         x = MyVariable("x")
         y = MyVariable("y")
         o1 = op1(x, y)
@@ -720,7 +717,6 @@ def test_node_rewriter_str():
 
 
 def test_node_rewriter():
-
     with pytest.raises(ValueError):
 
         @node_rewriter([])

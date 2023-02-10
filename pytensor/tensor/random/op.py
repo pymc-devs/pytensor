@@ -192,7 +192,6 @@ class RandomVariable(Op):
         size_len = get_vector_length(size)
 
         if size_len > 0:
-
             # Fail early when size is incompatible with parameters
             for i, (param, param_ndim_supp) in enumerate(
                 zip(dist_params, self.ndims_params)

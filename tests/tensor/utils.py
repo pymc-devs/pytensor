@@ -375,7 +375,6 @@ def makeTester(
     _grad_eps = grad_eps
 
     class Checker:
-
         op = staticmethod(_op)
         expected = staticmethod(_expected)
         checks = _checks
