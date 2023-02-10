@@ -395,7 +395,6 @@ def raise_with_op(
         )
 
     if verbosity == "high":
-
         import pytensor.printing
 
         f = io.StringIO()
@@ -593,7 +592,6 @@ def compile_function_src(
     global_env: Optional[Dict[Any, Any]] = None,
     local_env: Optional[Dict[Any, Any]] = None,
 ) -> Callable:
-
     with NamedTemporaryFile(delete=False) as f:
         filename = f.name
         f.write(src.encode())

@@ -205,7 +205,6 @@ def numba_funcify_Mul(op, node, **kwargs):
 
 @numba_funcify.register(Cast)
 def numba_funcify_Cast(op, node, **kwargs):
-
     dtype = np.dtype(op.o_type.dtype)
 
     @numba_basic.numba_njit

@@ -1037,7 +1037,7 @@ class TestArgminArgmax:
         data = random(2, 3)
         n = as_tensor_variable(data)
         for fct, nfct in [(argmax, np.argmax), (argmin, np.argmin)]:
-            for (axis, np_axis) in [
+            for axis, np_axis in [
                 (-1, -1),
                 (0, 0),
                 (1, 1),
@@ -1056,7 +1056,7 @@ class TestArgminArgmax:
         n = shared(data)
         mode = get_default_mode().including("local_max_and_argmax", "uncanonicalize")
         for fct, nfct in [(argmax, np.argmax), (argmin, np.argmin)]:
-            for (axis, np_axis) in [
+            for axis, np_axis in [
                 (-1, -1),
                 (0, 0),
                 (1, 1),
@@ -1096,7 +1096,7 @@ class TestArgminArgmax:
         data = random(2, 3, 4)
         n = as_tensor_variable(data)
         for fct, nfct in [(argmax, np.argmax), (argmin, np.argmin)]:
-            for (axis, np_axis) in [
+            for axis, np_axis in [
                 (-1, -1),
                 (0, 0),
                 (1, 1),
@@ -1196,7 +1196,7 @@ class TestMinMax:
         data = random(2, 3)
         n = as_tensor_variable(data)
         for fct, nfct in [(max, np.max), (min, np.min)]:
-            for (axis, np_axis) in [
+            for axis, np_axis in [
                 (-1, -1),
                 (0, 0),
                 (1, 1),
@@ -1237,7 +1237,7 @@ class TestMinMax:
         data = random(2, 3, 4)
         n = as_tensor_variable(data)
         for fct, nfct in [(max, np.max), (min, np.min)]:
-            for (axis, np_axis) in [
+            for axis, np_axis in [
                 (-1, -1),
                 (0, 0),
                 (1, 1),
@@ -1947,7 +1947,6 @@ class TestDot:
         # TODO: What about the broadcastable conditions in `Dot.grad`?
 
     def test_broadcastable_patterns(self):
-
         #
         # These examples should all work.  All dimensions of all results have
         # size 1.
@@ -1975,7 +1974,6 @@ class TestDot:
                         (None, 1),
                         (None, None),
                     ):
-
                         y = TensorType(dtype=dtype1, shape=bc1)()
                         z = dense_dot(x, y)
 
@@ -2445,7 +2443,6 @@ class TestInferShape(utt.InferShapeTester):
         )
 
     def test_MaxAndArgmax(self):
-
         adtens3 = dtensor3()
         adtens3_val = random(4, 5, 3)
         self._compile_and_check(
@@ -3258,7 +3255,6 @@ def reduce_bitwise_and(x, axis=-1, dtype="int8"):
 
 
 def test_clip_grad():
-
     # test the gradient of clip
     def func(x, y, z):
         return clip(x, y, z)

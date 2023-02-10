@@ -1252,7 +1252,6 @@ class TestBroadcastTo(utt.InferShapeTester):
 
     @pytest.mark.parametrize("linker", ["cvm", "py"])
     def test_perform(self, linker):
-
         a = pytensor.shared(np.full((3, 1, 1), 5))
         s_0 = iscalar("s_0")
         s_1 = iscalar("s_1")

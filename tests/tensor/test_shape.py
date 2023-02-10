@@ -662,7 +662,6 @@ class TestUnbroadcastInferShape(utt.InferShapeTester):
 
 
 def test_shape_tuple():
-
     x = Variable(MyType2(), None, None)
     assert shape_tuple(x) == ()
 

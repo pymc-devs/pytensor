@@ -125,7 +125,6 @@ def jax_funcify_FillDiagonal(op, **kwargs):
 
 @jax_funcify.register(FillDiagonalOffset)
 def jax_funcify_FillDiagonalOffset(op, **kwargs):
-
     # def filldiagonaloffset(a, val, offset):
     #     height, width = a.shape
     #

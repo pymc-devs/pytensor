@@ -139,7 +139,6 @@ class TestFunctionGraph:
         assert not any(o in fg.variables for o in var4.owner.outputs)
 
     def test_import_node(self):
-
         var1 = MyVariable("var1")
         var2 = MyVariable("var2")
         var3 = op1(var2, var1)
@@ -169,7 +168,6 @@ class TestFunctionGraph:
         assert (var7.owner, 0) in fg.get_clients(var2)
 
     def test_import_var(self):
-
         var1 = MyVariable("var1")
         var2 = MyVariable("var2")
         var3 = op1(var2, var1)
@@ -200,7 +198,6 @@ class TestFunctionGraph:
             fg.import_var(NullType()(), "testing")
 
     def test_change_input(self):
-
         var1 = MyVariable("var1")
         var2 = MyVariable("var2")
         var3 = op1(var2, var1)
@@ -234,7 +231,6 @@ class TestFunctionGraph:
 
     @config.change_flags(compute_test_value="raise")
     def test_replace_test_value(self):
-
         var1 = MyVariable("var1")
         var1.tag.test_value = 1
         var2 = MyVariable("var2")
@@ -254,7 +250,6 @@ class TestFunctionGraph:
             fg.replace(var4, var6)
 
     def test_replace(self):
-
         var1 = MyVariable("var1")
         var2 = MyVariable("var2")
         var3 = op1(var2, var1)
@@ -274,7 +269,6 @@ class TestFunctionGraph:
         assert var4.owner.inputs == [var1, var2]
 
     def test_replace_verbose(self, capsys):
-
         var1 = MyVariable("var1")
         var2 = MyVariable("var2")
         var3 = op1(var2, var1)
@@ -307,7 +301,6 @@ class TestFunctionGraph:
         assert var4.owner.inputs == [var4, var2]
 
     def test_replace_bad_state(self):
-
         var1 = MyVariable("var1")
         var2 = MyVariable("var2")
         var3 = op1(var2, var1)
@@ -323,7 +316,6 @@ class TestFunctionGraph:
             fg.replace(var1, var0)
 
     def test_check_integrity(self):
-
         var1 = MyVariable("var1")
         var2 = MyVariable("var2")
         var3 = op1(var2, var1)
@@ -389,7 +381,6 @@ class TestFunctionGraph:
             fg.check_integrity()
 
     def test_contains(self):
-
         var1 = MyVariable("var1")
         var2 = MyVariable("var2")
         var3 = op1(var2, var1)
@@ -473,7 +464,6 @@ class TestFunctionGraph:
         assert fg.outputs == []
 
     def test_remove_output_2(self):
-
         var0 = MyVariable("var0")
         var1 = MyVariable("var1")
         var2 = MyVariable("var2")
@@ -512,7 +502,6 @@ class TestFunctionGraph:
         assert fg.outputs == [out0, out1, out2, var4]
 
     def test_remove_output_3(self):
-
         var0 = MyVariable("var0")
         var1 = MyVariable("var1")
         var2 = MyVariable("var2")
@@ -544,7 +533,6 @@ class TestFunctionGraph:
         assert out1 not in fg.clients
 
     def test_remove_input(self):
-
         var0 = MyVariable("var0")
         var1 = MyVariable("var1")
         var2 = MyVariable("var2")
@@ -621,7 +609,6 @@ class TestFunctionGraph:
         assert fg.outputs == []
 
     def test_remove_output_empty(self):
-
         var1 = MyVariable("var1")
         var2 = MyVariable("var2")
         op1_out = op1(var1)

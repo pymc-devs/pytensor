@@ -109,7 +109,6 @@ def _contains_cycle(fgraph, orderings):
     # Pass through all the nodes to build visitable, parent_count, and
     # node_to_children
     for var in fgraph.variables:
-
         # this is faster than calling get_parents
         owner = var.owner
         # variables don't appear in orderings, so we don't need to worry
@@ -401,7 +400,7 @@ class DestroyHandler(Bookkeeper):  # noqa
 
             def recursive_destroys_finder(protected_var):
                 # protected_var is the idx'th input of app.
-                for (app, idx) in fgraph.clients[protected_var]:
+                for app, idx in fgraph.clients[protected_var]:
                     if app == "output":
                         continue
                     destroy_maps = app.op.destroy_map.values()

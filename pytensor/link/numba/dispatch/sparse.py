@@ -88,7 +88,6 @@ class CSCMatrixModel(models.StructModel):
 @unbox(CSCMatrixType)
 @unbox(CSRMatrixType)
 def unbox_matrix(typ, obj, c):
-
     struct_ptr = cgutils.create_struct_proxy(typ)(c.context, c.builder)
 
     data = c.pyapi.object_getattr_string(obj, "data")

@@ -255,7 +255,6 @@ class DimShuffle(ExternalCOp):
         return self(*eval_points, return_list=True)
 
     def grad(self, inp, grads):
-
         (x,) = inp
         (gz,) = grads
         gz = as_tensor_variable(gz)
@@ -536,7 +535,6 @@ class Elemwise(OpenMPOp):
         return rval
 
     def connection_pattern(self, node):
-
         if hasattr(self.scalar_op, "connection_pattern"):
             return self.scalar_op.connection_pattern(node)
 
@@ -682,7 +680,6 @@ class Elemwise(OpenMPOp):
             and self.ufunc is None
             and impl == "py"
         ):
-
             ufunc = np.frompyfunc(
                 self.scalar_op.impl, len(node.inputs), self.scalar_op.nout
             )
@@ -814,7 +811,6 @@ class Elemwise(OpenMPOp):
                 storage[0] = variable
 
     def infer_shape(self, fgraph, node, i_shapes) -> List[Tuple[TensorVariable, ...]]:
-
         if len(node.outputs) > 1:
             from pytensor.tensor.exceptions import ShapeError
 
@@ -1333,7 +1329,6 @@ class CAReduce(COp):
         return self._ufunc
 
     def _output_dtype(self, idtype):
-
         if not self.upcast_discrete_output:
             return idtype
 
@@ -1516,7 +1511,6 @@ class CAReduce(COp):
         return ([ishape[i] for i in range(node.inputs[0].type.ndim) if i not in axis],)
 
     def _c_all(self, node, name, inames, onames, sub):
-
         input = node.inputs[0]
         output = node.outputs[0]
 

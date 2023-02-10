@@ -108,7 +108,6 @@ rng = np.random.default_rng(42849)
     ],
 )
 def test_Elemwise(inputs, input_vals, output_fn, exc):
-
     outputs = output_fn(*inputs)
 
     out_fg = FunctionGraph(
@@ -540,7 +539,6 @@ def test_MaxAndArgmax(x, axes, exc):
 @pytest.mark.parametrize("size", [(10, 10), (1000, 1000), (10000, 10000)])
 @pytest.mark.parametrize("axis", [0, 1])
 def test_logsumexp_benchmark(size, axis, benchmark):
-
     X = at.matrix("X")
     X_max = at.max(X, axis=axis, keepdims=True)
     X_max = at.switch(at.isinf(X_max), 0, X_max)

@@ -544,7 +544,7 @@ class FunctionGraph(MetaObject):
         self.outputs.pop(idx)
 
         new_idx = 0
-        for (out, old_idx) in old_idx_mappings:
+        for out, old_idx in old_idx_mappings:
             if old_idx == idx:
                 continue
             out_clients = self.clients[out]
@@ -579,7 +579,6 @@ class FunctionGraph(MetaObject):
                 out_client, out_idx = out_clients.pop()
 
                 if out_client == "output":
-
                     self._remove_output(out_idx)
 
                     # TODO: We could short-circuit all of the graph walking and
@@ -605,7 +604,6 @@ class FunctionGraph(MetaObject):
         # Remove all the arrows pointing to this `node`, and any orphaned
         # variables created by removing those arrows
         for inp_idx, inp in enumerate(node.inputs):
-
             inp_clients: List[ClientType] = self.clients.get(inp, [])
 
             arrow = (node, inp_idx)
