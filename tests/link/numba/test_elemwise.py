@@ -211,6 +211,14 @@ def test_Dimshuffle(v, new_order):
     )
 
 
+def test_Dimshuffle_returns_array():
+    x = at.vector("x", shape=(1,))
+    y = 2 * at_elemwise.DimShuffle([True], [])(x)
+    func = pytensor.function([x], y, mode="NUMBA")
+    out = func(np.zeros(1))
+    assert out.ndim == 0
+
+
 @pytest.mark.parametrize(
     "careduce_fn, axis, v",
     [
