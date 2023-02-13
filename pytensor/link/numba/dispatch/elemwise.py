@@ -841,7 +841,7 @@ def numba_funcify_DimShuffle(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def dimshuffle_inner(x, shuffle):
-            return x.item()
+            return np.reshape(x, ())
 
     # Without the following wrapper function we would see this error:
     # E   No implementation of function Function(<built-in function getitem>) found for signature:
