@@ -479,6 +479,7 @@ def local_subtensor_merge(fgraph, node):
     expresses all slices in a canonical form, and then merges them together.
 
     """
+    from pytensor.scan.op import Scan
 
     if isinstance(node.op, Subtensor):
         u = node.inputs[0]
@@ -489,6 +490,16 @@ def local_subtensor_merge(fgraph, node):
             # slices of the first applied subtensor
             slices1 = get_idx_list(u.owner.inputs, u.owner.op.idx_list)
             slices2 = get_idx_list(node.inputs, node.op.idx_list)
+
+            # Don't try to do the optimization on do-while scan outputs,
+            # as it will create a dependency on the shape of the outputs
+            if (
+                x.owner is not None
+                and isinstance(x.owner.op, Scan)
+                and x.owner.op.info.as_while
+            ):
+                return None
+
             # Get the shapes of the vectors !
             try:
                 # try not to introduce new shape into the graph
