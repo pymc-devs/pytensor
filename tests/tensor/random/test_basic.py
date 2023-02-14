@@ -413,6 +413,10 @@ def test_exponential_default_args():
     compare_sample_values(exponential)
 
 
+def test_rayleigh_default_args():
+    compare_sample_values(rayleigh)
+
+
 @pytest.mark.parametrize(
     "alpha, size",
     [
