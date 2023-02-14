@@ -1182,7 +1182,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         # these are states that do not feed anything back in the recurrent
         # computation, and hence they do not have an initial state. The scan
         # node however receives an input for each such argument, the input
-        # in this case is just a int saying how many steps of this output we
+        # in this case is just an int saying how many steps of this output we
         # need to store. This input does not have the same dtype, nor is it the same
         # type of tensor as the output, it is always a scalar int.
         new_inputs += [as_tensor_variable(ons) for ons in self.outer_nitsot(inputs)]
