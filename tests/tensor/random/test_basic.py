@@ -47,6 +47,7 @@ from pytensor.tensor.random.basic import (
     permutation,
     poisson,
     randint,
+    rayleigh,
     standard_normal,
     t,
     triangular,

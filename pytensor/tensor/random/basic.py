@@ -2167,4 +2167,5 @@ __all__ = [
     "negative_binomial",
     "gengamma",
     "t",
+    "rayleigh",
 ]
