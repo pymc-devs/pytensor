@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pytest
 
@@ -36,6 +38,7 @@ from pytensor.tensor.math import (
     invert,
     iround,
     log,
+    log1mexp,
     log2,
     log10,
     mul,
@@ -1369,6 +1372,21 @@ class TestFusion:
             return nb_replacement
 
         assert benchmark(rewrite_func) == 103
+
+    def test_no_warning_from_old_client(self):
+        # There used to be a warning issued when creating fuseable mapping
+        # for nodes that are no longer in the FunctionGraph
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            # The -2 integer array cannot be passed directly to the C method
+            # of log1mexp as that can only handle floats. There is a rewrite
+            # that casts it to a float, but the FunctionGraph client retains
+            # the original log1mexp of the integer input, which caused
+            # a misleading warning for non C implementation in the FusionRewrite
+            assert np.isclose(
+                log1mexp(np.array(-2, dtype="int64")).eval(),
+                np.log(1 - np.exp(-2)),
+            )
 
 
 class TimesN(aes.basic.UnaryScalarOp):

@@ -692,6 +692,11 @@ class FusionOptimizer(GraphRewriter):
                 fuseable_clients: FUSEABLE_MAPPING = defaultdict(list)
                 unfuseable_clients: UNFUSEABLE_MAPPING = defaultdict(set)
                 for out, clients in fg.clients.items():
+                    # Old FunctionGraph nodes remain in the clients dictionary
+                    # even after they are removed by rewrites
+                    if not clients:
+                        continue
+
                     out_maybe_fuseable = (
                         out.owner
                         and isinstance(out.owner.op, Elemwise)
