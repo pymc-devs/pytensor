@@ -196,7 +196,7 @@ List of Implemented Operations
     - ``ceil``
     - ``floor``
     - ``trunc``
-    - ``sgn``
+    - ``sign``
     - ``log1p``
     - ``expm1``
     - ``sqr``

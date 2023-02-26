@@ -982,7 +982,7 @@ def isclose(a, b, rtol=1.0e-5, atol=1.0e-8, equal_nan=False):
     # deal with signed inf values. this will make an array inf_eq of 0's
     # except where inf values have the same sign.
     both_infs = bitwise_and(a_inf, b_inf)
-    inf_signs_eq = eq(a_inf * sgn(a), b_inf * sgn(b))
+    inf_signs_eq = eq(a_inf * sign(a), b_inf * sign(b))
     inf_eq = bitwise_and(both_infs, inf_signs_eq)
 
     # now create the potential result combining close and inf_eq
@@ -1092,7 +1092,7 @@ def log1p(a):
 
 
 @scalar_elemwise
-def sgn(a):
+def sign(a):
     """sign of a"""
 
 
@@ -3037,7 +3037,7 @@ __all__ = [
     "log2",
     "log10",
     "log1p",
-    "sgn",
+    "sign",
     "ceil",
     "floor",
     "trunc",

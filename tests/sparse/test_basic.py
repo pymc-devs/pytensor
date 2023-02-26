@@ -3111,7 +3111,7 @@ RintTester = elemwise_checker(
 )
 
 SgnTester = elemwise_checker(
-    sparse.sgn,
+    sparse.sign,
     np.sign,
     grad_test=False,
     test_dtypes=[

@@ -74,8 +74,8 @@ from pytensor.tensor.math import (
     prod,
     rad2deg,
     reciprocal,
-    sgn,
     sigmoid,
+    sign,
     sinh,
     softplus,
     sqr,
@@ -877,7 +877,7 @@ class TestAlgebraicCanonizer:
             assert np.isfinite(f(0))
 
         assert len(f.maker.fgraph.toposort()) == 2
-        assert f.maker.fgraph.toposort()[0].op == sgn
+        assert f.maker.fgraph.toposort()[0].op == sign
 
         f = function([x], [(4 * x) / abs(x / 2)], mode=mode)
         f(0.1)
@@ -886,7 +886,7 @@ class TestAlgebraicCanonizer:
             assert np.isfinite(f(0))
 
         assert len(f.maker.fgraph.toposort()) == 2
-        assert f.maker.fgraph.toposort()[0].op == sgn
+        assert f.maker.fgraph.toposort()[0].op == sign
 
     @pytest.mark.skip(
         reason="Current implementation of AlgebraicCanonizer does not "

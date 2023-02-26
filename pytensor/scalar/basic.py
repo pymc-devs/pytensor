@@ -2566,7 +2566,7 @@ class Abs(UnaryScalarOp):
                 return [x.zeros_like()]
 
         if x.type in float_types:
-            return (gz * sgn(x),)
+            return (gz * sign(x),)
         return (gz * x / _abs(x),)  # formula works for complex and real
 
     def c_code(self, node, name, inputs, outputs, sub):
@@ -2590,7 +2590,7 @@ class Abs(UnaryScalarOp):
 abs = Abs(same_out)
 
 
-class Sgn(UnaryScalarOp):
+class Sign(UnaryScalarOp):
     nfunc_spec = ("sign", 1, 1)
 
     @staticmethod
@@ -2625,7 +2625,7 @@ class Sgn(UnaryScalarOp):
             )
         if type in int_types:
             return f"{z} = ({x} >= 0) ? ({x} == 0) ? 0 : 1 : -1;"
-        raise ComplexError("complex has no sgn")
+        raise ComplexError("complex has no sign")
 
     def c_code_cache_version(self):
         s = super().c_code_cache_version()
@@ -2635,7 +2635,7 @@ class Sgn(UnaryScalarOp):
             return s
 
 
-sgn = Sgn(name="sgn")
+sign = Sign(name="sign")
 
 
 class Ceil(UnaryScalarOp):

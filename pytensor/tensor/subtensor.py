@@ -199,7 +199,7 @@ def get_canonical_form_slice(
     if the resulting set of numbers needs to be reversed or not.
 
     """
-    from pytensor.tensor import ge, lt, sgn, switch
+    from pytensor.tensor import ge, lt, sign, switch
 
     if not isinstance(theslice, slice):
         try:
@@ -317,7 +317,7 @@ def get_canonical_form_slice(
             return switch(is_step_neg, a, b)
 
         abs_step = abs(step)
-        sgn_step = sgn(step)
+        sgn_step = sign(step)
 
     defstart = switch_neg_step(length - 1, 0)
     defstop = switch_neg_step(-1, length)

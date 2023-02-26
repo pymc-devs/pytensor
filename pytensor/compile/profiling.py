@@ -1509,7 +1509,7 @@ class ProfileStats:
             aes.Second,
             aes.Identity,
             aes.Cast,
-            aes.Sgn,
+            aes.Sign,
             aes.Neg,
             aes.Reciprocal,
             aes.Sqr,
