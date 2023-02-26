@@ -38,7 +38,7 @@ from pytensor.tensor.inplace import (
     reciprocal_inplace,
     round_half_away_from_zero_inplace,
     round_half_to_even_inplace,
-    sgn_inplace,
+    sign_inplace,
     sin_inplace,
     sinh_inplace,
     sqr_inplace,
@@ -177,7 +177,7 @@ TestNegInplaceBroadcast = makeBroadcastTester(
 )
 
 TestSgnInplaceBroadcast = makeBroadcastTester(
-    op=sgn_inplace,
+    op=sign_inplace,
     expected=np.sign,
     good=_good_broadcast_unary_normal_no_complex,
     inplace=True,
