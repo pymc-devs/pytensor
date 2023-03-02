@@ -1096,7 +1096,6 @@ def sign(a):
     """sign of a"""
 
 
-@scalar_elemwise
 def sgn(a):
     """sign of a"""
 
