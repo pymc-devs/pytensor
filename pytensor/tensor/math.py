@@ -1097,6 +1097,17 @@ def sign(a):
 
 
 @scalar_elemwise
+def sgn(a):
+    """sign of a"""
+
+    warnings.warn(
+        "sgn is deprecated and will stop working in the future, use sign instead.",
+        FutureWarning,
+    )
+    return sign(a)
+
+
+@scalar_elemwise
 def ceil(a):
     """ceiling of a"""
 
@@ -3037,6 +3048,7 @@ __all__ = [
     "log2",
     "log10",
     "log1p",
+    "sgn",
     "sign",
     "ceil",
     "floor",
