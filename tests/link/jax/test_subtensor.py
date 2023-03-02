@@ -71,13 +71,15 @@ def test_jax_Subtensor_dynamic():
 
 def test_jax_Subtensor_boolean_mask():
     """JAX does not support resizing arrays with boolean masks."""
-    x_at = at.arange(-5, 5)
+    x_at = at.vector("x", dtype="float64")
     out_at = x_at[x_at < 0]
     assert isinstance(out_at.owner.op, at_subtensor.AdvancedSubtensor)
 
+    out_fg = FunctionGraph([x_at], [out_at])
+
+    x_at_test = np.arange(-5, 5)
     with pytest.raises(NotImplementedError, match="resizing arrays with boolean"):
-        out_fg = FunctionGraph([], [out_at])
-        compare_jax_and_py(out_fg, [])
+        compare_jax_and_py(out_fg, [x_at_test])
 
 
 def test_jax_Subtensor_boolean_mask_reexpressible():
