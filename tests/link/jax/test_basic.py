@@ -40,6 +40,8 @@ def compare_jax_and_py(
     test_inputs: Iterable,
     assert_fn: Optional[Callable] = None,
     must_be_device_array: bool = True,
+    jax_mode=jax_mode,
+    py_mode=py_mode,
 ):
     """Function to compare python graph output and jax compiled output for testing equality
 
