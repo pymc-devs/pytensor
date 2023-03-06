@@ -15,7 +15,7 @@ def test_jax_Alloc():
     x = at.alloc(0.0, 2, 3)
     x_fg = FunctionGraph([], [x])
 
-    (jax_res,) = compare_jax_and_py(x_fg, [])
+    _, [jax_res] = compare_jax_and_py(x_fg, [])
 
     assert jax_res.shape == (2, 3)
 

@@ -89,7 +89,7 @@ def compare_jax_and_py(
     else:
         assert_fn(jax_res, py_res)
 
-    return jax_res
+    return pytensor_jax_fn, jax_res
 
 
 def test_jax_FunctionGraph_once():

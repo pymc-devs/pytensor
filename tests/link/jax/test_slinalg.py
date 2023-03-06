@@ -33,7 +33,7 @@ def test_jax_basic():
         np.tile(np.arange(10), (10, 1)).astype(config.floatX),
         np.tile(np.arange(10, 20), (10, 1)).astype(config.floatX),
     ]
-    (jax_res,) = compare_jax_and_py(out_fg, test_input_vals)
+    _, [jax_res] = compare_jax_and_py(out_fg, test_input_vals)
 
     # Confirm that the `Subtensor` slice operations are correct
     assert jax_res.shape == (5, 3)
