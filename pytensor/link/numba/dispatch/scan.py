@@ -190,8 +190,8 @@ def numba_funcify_Scan(op, node, **kwargs):
         output_storage_post_proc_stmts.append(
             dedent(
                 f"""
-                {outer_in_name}_shift = (i + {tap_size}) % ({storage_size})
-                if {outer_in_name}_shift > 0:
+                if (i + {tap_size}) > {storage_size}:
+                    {outer_in_name}_shift = (i + {tap_size}) % ({storage_size})
                     {outer_in_name}_left = {outer_in_name}[:{outer_in_name}_shift]
                     {outer_in_name}_right = {outer_in_name}[{outer_in_name}_shift:]
                     {outer_in_name} = np.concatenate(({outer_in_name}_right, {outer_in_name}_left))
