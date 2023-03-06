@@ -99,8 +99,8 @@ from pytensor.tensor.math import (
     reciprocal,
     round_half_away_from_zero,
     round_half_to_even,
-    sgn,
     sigmoid,
+    sign,
     sin,
     sinh,
     smallest,
@@ -386,7 +386,7 @@ TestNegBroadcast = makeBroadcastTester(
 )
 
 TestSgnBroadcast = makeBroadcastTester(
-    op=sgn,
+    op=sign,
     expected=np.sign,
     good=_good_broadcast_unary_normal_no_complex,
     grad=_grad_broadcast_unary_normal,

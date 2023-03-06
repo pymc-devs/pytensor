@@ -1462,7 +1462,7 @@ Mathematical
 
     Returns a variable representing the base e, 2 or 10 logarithm of a.
 
-.. function:: sgn(a)
+.. function:: sign(a)
 
     Returns a variable representing the sign of a.
 

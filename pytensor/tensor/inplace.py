@@ -104,7 +104,7 @@ def log10_inplace(a):
 
 
 @scalar_elemwise
-def sgn_inplace(a):
+def sign_inplace(a):
     """sign of `a` (inplace on `a`)"""
 
 

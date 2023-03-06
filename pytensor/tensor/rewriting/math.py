@@ -72,8 +72,8 @@ from pytensor.tensor.math import pow as at_pow
 from pytensor.tensor.math import (
     prod,
     reciprocal,
-    sgn,
     sigmoid,
+    sign,
     softplus,
     sqr,
     sqrt,
@@ -2289,7 +2289,7 @@ def check_for_x_over_absX(numerators, denominators):
             else:
                 denominators.remove(den)
                 numerators.remove(den.owner.inputs[0])
-                numerators.append(sgn(den.owner.inputs[0]))
+                numerators.append(sign(den.owner.inputs[0]))
     return numerators, denominators
 
 

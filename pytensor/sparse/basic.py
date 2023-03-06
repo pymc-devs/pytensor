@@ -36,8 +36,8 @@ from pytensor.tensor.math import pow as at_pow
 from pytensor.tensor.math import (
     rad2deg,
     round_half_to_even,
-    sgn,
     sigmoid,
+    sign,
     sin,
     sinh,
     sqr,
@@ -3184,8 +3184,8 @@ def rint(x):
 rint.__name__ = "rint"
 
 
-@structured_monoid(sgn)  # type: ignore[no-redef]
-def sgn(x):
+@structured_monoid(sign)  # type: ignore[no-redef]
+def sign(x):
     """
     Elemwise signe of `x`.
 
