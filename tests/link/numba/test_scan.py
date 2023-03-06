@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+import pytensor
 import pytensor.tensor as at
 from pytensor import config, function, grad
 from pytensor.compile.mode import Mode, get_mode
@@ -9,7 +10,7 @@ from pytensor.scalar import Log1p
 from pytensor.scan.basic import scan
 from pytensor.scan.op import Scan
 from pytensor.scan.utils import until
-from pytensor.tensor import log, vector
+from pytensor.tensor import log, scalar, vector
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.random.utils import RandomStream
 from tests import unittest_tools as utt
@@ -442,3 +443,54 @@ def test_inner_graph_optimized():
     assert isinstance(inner_scan_node.op, Elemwise) and isinstance(
         inner_scan_node.op.scalar_op, Log1p
     )
+
+
+def test_vector_taps_benchmark(benchmark):
+    """Test vector taps performance.
+
+    Vector taps get indexed into numeric types, that must be wrapped back into
+    scalar arrays. The numba Scan implementation has an optimization to reuse
+    these scalar arrays instead of allocating them in every iteration.
+    """
+    n_steps = 1000
+
+    seq1 = vector("seq1", dtype="float64", shape=(n_steps,))
+    seq2 = vector("seq2", dtype="float64", shape=(n_steps,))
+    mitsot_init = vector("mitsot_init", dtype="float64", shape=(2,))
+    sitsot_init = scalar("sitsot_init", dtype="float64")
+
+    def step(seq1, seq2, mitsot1, mitsot2, sitsot1):
+        mitsot3 = mitsot1 + seq2 + mitsot2 + seq1
+        sitsot2 = sitsot1 + mitsot3
+        return mitsot3, sitsot2
+
+    outs, _ = scan(
+        fn=step,
+        sequences=[seq1, seq2],
+        outputs_info=[
+            dict(initial=mitsot_init, taps=[-2, -1]),
+            dict(initial=sitsot_init, taps=[-1]),
+        ],
+    )
+
+    rng = np.random.default_rng(474)
+    test = {
+        seq1: rng.normal(size=n_steps),
+        seq2: rng.normal(size=n_steps),
+        mitsot_init: rng.normal(size=(2,)),
+        sitsot_init: rng.normal(),
+    }
+
+    numba_fn = pytensor.function(list(test.keys()), outs, mode=get_mode("NUMBA"))
+    scan_nodes = [
+        node for node in numba_fn.maker.fgraph.apply_nodes if isinstance(node.op, Scan)
+    ]
+    assert len(scan_nodes) == 1
+    numba_res = numba_fn(*test.values())
+
+    ref_fn = pytensor.function(list(test.keys()), outs, mode=get_mode("FAST_COMPILE"))
+    ref_res = ref_fn(*test.values())
+    for numba_r, ref_r in zip(numba_res, ref_res):
+        np.testing.assert_array_almost_equal(numba_r, ref_r)
+
+    benchmark(numba_fn, *test.values())
