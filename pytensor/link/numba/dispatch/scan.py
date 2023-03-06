@@ -112,25 +112,46 @@ def numba_funcify_Scan(op, node, **kwargs):
     # Inner-inputs are ordered as follows:
     # sequences + mit-mot-inputs + mit-sot-inputs + sit-sot-inputs +
     # shared-inputs + non-sequences.
+    temp_scalar_storage_alloc_stmts: List[str] = []
+    inner_in_exprs_scalar: List[str] = []
     inner_in_exprs: List[str] = []
 
     def add_inner_in_expr(
-        outer_in_name: str, tap_offset: Optional[int], storage_size_var: Optional[str]
+        outer_in_name: str,
+        tap_offset: Optional[int],
+        storage_size_var: Optional[str],
+        vector_slice_opt: bool,
     ):
         """Construct an inner-input expression."""
         storage_name = outer_in_to_storage_name.get(outer_in_name, outer_in_name)
-        indexed_inner_in_str = (
-            storage_name
-            if tap_offset is None
-            else idx_to_str(
-                storage_name, tap_offset, size=storage_size_var, allow_scalar=False
+        if vector_slice_opt:
+            indexed_inner_in_str_scalar = idx_to_str(
+                storage_name, tap_offset, size=storage_size_var, allow_scalar=True
             )
-        )
+            temp_storage = f"{storage_name}_temp_scalar_{tap_offset}"
+            storage_dtype = outer_in_var.type.numpy_dtype.name
+            temp_scalar_storage_alloc_stmts.append(
+                f"{temp_storage} = np.empty((), dtype=np.{storage_dtype})"
+            )
+            inner_in_exprs_scalar.append(
+                f"{temp_storage}[()] = {indexed_inner_in_str_scalar}"
+            )
+            indexed_inner_in_str = temp_storage
+        else:
+            indexed_inner_in_str = (
+                storage_name
+                if tap_offset is None
+                else idx_to_str(
+                    storage_name, tap_offset, size=storage_size_var, allow_scalar=False
+                )
+            )
         inner_in_exprs.append(indexed_inner_in_str)
 
     for outer_in_name in outer_in_seqs_names:
         # These outer-inputs are indexed without offsets or storage wrap-around
-        add_inner_in_expr(outer_in_name, 0, None)
+        outer_in_var = outer_in_names_to_vars[outer_in_name]
+        is_vector = outer_in_var.ndim == 1
+        add_inner_in_expr(outer_in_name, 0, None, vector_slice_opt=is_vector)
 
     inner_in_names_to_input_taps: Dict[str, Tuple[int, ...]] = dict(
         zip(
@@ -232,7 +253,13 @@ def numba_funcify_Scan(op, node, **kwargs):
                 for in_tap in input_taps:
                     tap_offset = in_tap + tap_storage_size
                     assert tap_offset >= 0
-                    add_inner_in_expr(outer_in_name, tap_offset, storage_size_name)
+                    is_vector = outer_in_var.ndim == 1
+                    add_inner_in_expr(
+                        outer_in_name,
+                        tap_offset,
+                        storage_size_name,
+                        vector_slice_opt=is_vector,
+                    )
 
                 output_taps = inner_in_names_to_output_taps.get(
                     outer_in_name, [tap_storage_size]
@@ -253,7 +280,7 @@ def numba_funcify_Scan(op, node, **kwargs):
 
             else:
                 storage_size_stmt = ""
-                add_inner_in_expr(outer_in_name, None, None)
+                add_inner_in_expr(outer_in_name, None, None, vector_slice_opt=False)
                 inner_out_to_outer_in_stmts.append(storage_name)
 
             output_idx = outer_output_names.index(storage_name)
@@ -325,7 +352,7 @@ def numba_funcify_Scan(op, node, **kwargs):
                 )
 
     for name in outer_in_non_seqs_names:
-        add_inner_in_expr(name, None, None)
+        add_inner_in_expr(name, None, None, vector_slice_opt=False)
 
     if op.info.as_while:
         # The inner function will return a boolean as the last value
@@ -333,9 +360,11 @@ def numba_funcify_Scan(op, node, **kwargs):
 
     assert len(inner_in_exprs) == len(op.fgraph.inputs)
 
+    inner_scalar_in_args_to_temp_storage = "\n".join(inner_in_exprs_scalar)
     inner_in_args = create_arg_string(inner_in_exprs)
     inner_outputs = create_tuple_string(inner_output_names)
     input_storage_block = "\n".join(storage_alloc_stmts)
+    input_temp_scalar_storage_block = "\n".join(temp_scalar_storage_alloc_stmts)
     output_storage_post_processing_block = "\n".join(output_storage_post_proc_stmts)
     inner_out_post_processing_block = "\n".join(inner_out_post_processing_stmts)
 
@@ -348,9 +377,13 @@ def scan({", ".join(outer_in_names)}):
 
 {indent(input_storage_block, " " * 4)}
 
+{indent(input_temp_scalar_storage_block, " " * 4)}
+
     i = 0
     cond = np.array(False)
     while i < n_steps and not cond.item():
+{indent(inner_scalar_in_args_to_temp_storage, " " * 8)}
+
         {inner_outputs} = scan_inner_func({inner_in_args})
 {indent(inner_out_post_processing_block, " " * 8)}
 {indent(inner_out_to_outer_out_stmts, " " * 8)}
