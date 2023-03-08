@@ -1516,13 +1516,17 @@ def save_mem_new_scan(fgraph, node):
                     if (
                         nw_inputs[offset + idx].owner
                         and isinstance(nw_inputs[offset + idx].owner.op, IncSubtensor)
+                        and nw_inputs[offset + idx].owner.op.set_instead_of_inc
                         and isinstance(
                             nw_inputs[offset + idx].owner.op.idx_list[0], slice
                         )
-                    ):
-                        assert isinstance(
-                            nw_inputs[offset + idx].owner.op, IncSubtensor
+                        # Don't try to create a smart Alloc, if set_subtensor is broadcasting the fill value
+                        # As it happens in set_subtensor(empty(2)[:], 0)
+                        and not (
+                            nw_inputs[offset + idx].ndim
+                            > nw_inputs[offset + idx].owner.inputs[1].ndim
                         )
+                    ):
                         _nw_input = nw_inputs[offset + idx].owner.inputs[1]
                         cval = at.as_tensor_variable(val)
                         initl = at.as_tensor_variable(init_l[i])

@@ -1487,6 +1487,22 @@ class TestSaveMem:
         assert stored_ys_steps == 2
         assert stored_zs_steps == 1
 
+    def test_vector_zeros_init(self):
+        ys, _ = pytensor.scan(
+            fn=lambda ytm2, ytm1: ytm1 + ytm2,
+            outputs_info=[{"initial": at.zeros(2), "taps": range(-2, 0)}],
+            n_steps=100,
+        )
+
+        fn = pytensor.function([], ys[-50:], mode=self.mode)
+        assert tuple(fn().shape) == (50,)
+
+        # Check that rewrite worked
+        [scan_node] = (n for n in fn.maker.fgraph.apply_nodes if isinstance(n.op, Scan))
+        _, ys_trace = scan_node.inputs
+        debug_fn = pytensor.function([], ys_trace.shape[0], accept_inplace=True)
+        assert debug_fn() == 50
+
 
 def test_inner_replace_dot():
     """
