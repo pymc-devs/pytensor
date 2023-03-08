@@ -1339,7 +1339,7 @@ def save_mem_new_scan(fgraph, node):
                     stop = at.extract_constant(cf_slice[0].stop)
                 else:
                     stop = at.extract_constant(cf_slice[0]) + 1
-                if stop == maxsize or stop == length:
+                if stop == maxsize or stop == at.extract_constant(length):
                     stop = None
                 else:
                     # there is a **gotcha** here ! Namely, scan returns an
