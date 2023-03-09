@@ -86,13 +86,10 @@ jobs:
           - "tests/tensor/test_blas.py tests/tensor/test_elemwise.py tests/tensor/test_math_scipy.py"
         exclude:
           - python-version: "3.8"
-            fast-compile: 0
-            float32: 1
-          - python-version: "3.10"
             fast-compile: 1
-          - python-version: "3.10"
+          - python-version: "3.8"
             float32: 1
-          - python-version: "3.10"
+          - python-version: "3.8"
             part: "tests/tensor/test_math.py"
     steps:
       - uses: actions/checkout@v3
