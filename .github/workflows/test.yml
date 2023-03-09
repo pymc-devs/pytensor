@@ -91,6 +91,8 @@ jobs:
             float32: 1
           - python-version: "3.8"
             part: "tests/tensor/test_math.py"
+          - fast-compile: 1
+            float32: 1
     steps:
       - uses: actions/checkout@v3
         with:
