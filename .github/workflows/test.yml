@@ -73,9 +73,9 @@ jobs:
         python-version: ["3.8", "3.11"]
         fast-compile: [0,1]
         float32: [0,1]
-        install-numba: [1]
+        install-numba: [0]
         part:
-          - "tests --ignore=tests/tensor --ignore=tests/scan --ignore=tests/sparse"
+          - "tests --ignore=tests/tensor --ignore=tests/scan --ignore=tests/sparse --ignore=tests/link/numba"
           - "tests/scan"
           - "tests/sparse"
           - "tests/tensor --ignore=tests/tensor/conv --ignore=tests/tensor/rewriting --ignore=tests/tensor/test_math.py --ignore=tests/tensor/test_basic.py --ignore=tests/tensor/test_blas.py --ignore=tests/tensor/test_math_scipy.py --ignore=tests/tensor/test_inplace.py --ignore=tests/tensor/test_elemwise.py"
@@ -93,6 +93,27 @@ jobs:
             part: "tests/tensor/test_math.py"
           - fast-compile: 1
             float32: 1
+        include:
+          - install-numba: 1
+            python-version: "3.8"
+            fast-compile: 0
+            float32: 0
+            part: "tests/link/numba"
+          - install-numba: 1
+            python-version: "3.10"
+            fast-compile: 0
+            float32: 0
+            part: "tests/link/numba"
+          - install-numba: 1
+            python-version: "3.10"
+            fast-compile: 1
+            float32: 0
+            part: "tests/link/numba"
+          - install-numba: 1
+            python-version: "3.10"
+            fast-compile: 0
+            float32: 1
+            part: "tests/link/numba"
     steps:
       - uses: actions/checkout@v3
         with:
