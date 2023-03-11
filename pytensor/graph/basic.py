@@ -581,11 +581,18 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         for i in inputs_to_values:
             if isinstance(i, str):
                 nodes_with_matching_names = get_var_by_name([self], i)
-                if len(nodes_with_matching_names) == 0:
+                length_of_nodes_with_matching_names = len(nodes_with_matching_names)
+                if length_of_nodes_with_matching_names == 0:
                     raise Exception(f"{i} not found in graph")
                 else:
+                    if length_of_nodes_with_matching_names > 1:
+                        warnings.warn(
+                            f"Found {length_of_nodes_with_matching_names} pytensor variables with name {i} taking the first declared named variable for computation"
+                        )
                     process_input_to_values[
-                        nodes_with_matching_names[0]
+                        nodes_with_matching_names[
+                            length_of_nodes_with_matching_names - 1
+                        ]
                     ] = inputs_to_values[i]
             else:
                 process_input_to_values[i] = inputs_to_values[i]

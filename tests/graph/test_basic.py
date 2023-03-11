@@ -290,9 +290,11 @@ class TestToposort:
 
 class TestEval:
     def setup_method(self):
-        self.x, self.y = scalars("x", "y")
+        self.x, self.y, self.e = scalars("x", "y", "e")
         self.z = self.x + self.y
         self.w = 2 * self.z
+        self.t = self.e + 1
+        self.t.name = "e"
 
     def test_eval(self):
         assert self.w.eval({self.x: 1.0, self.y: 2.0}) == 6.0
@@ -303,12 +305,11 @@ class TestEval:
         ), "temporary functions must not be serialized"
 
     def test_eval_with_strings(self):
-        assert self.w.eval({"x": 1.0, "y": 2.0}) == 6.0
+        assert self.w.eval({"x": 1.0, self.y: 2.0}) == 6.0
         assert self.w.eval({self.z: 3}) == 6.0
-        assert hasattr(self.w, "_fn_cache"), "variable must have cache after eval"
-        assert not hasattr(
-            pickle.loads(pickle.dumps(self.w)), "_fn_cache"
-        ), "temporary functions must not be serialized"
+
+    def test_eval_with_strings_with_mulitple_same_name(self):
+        assert self.t.eval({"e": 1.0}) == 2.0
 
 
 class TestAutoName:
