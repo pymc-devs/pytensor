@@ -87,7 +87,7 @@ class UniformRV(RandomVariable):
     ndim_supp = 0
     ndims_params = [0, 0]
     dtype = "floatX"
-    _print_name = ("U", "\\operatorname{U}")
+    _print_name = ("Uniform", "\\operatorname{Uniform}")
 
     def __call__(self, low=0.0, high=1.0, size=None, **kwargs):
         r"""Draw samples from a uniform distribution.
@@ -141,7 +141,7 @@ class TriangularRV(RandomVariable):
     ndim_supp = 0
     ndims_params = [0, 0, 0]
     dtype = "floatX"
-    _print_name = ("Triang", "\\operatorname{Triang}")
+    _print_name = ("Triangular", "\\operatorname{Triangular}")
 
     def __call__(self, left, mode, right, size=None, **kwargs):
         r"""Draw samples from a triangular distribution.
@@ -242,7 +242,7 @@ class NormalRV(RandomVariable):
     ndim_supp = 0
     ndims_params = [0, 0]
     dtype = "floatX"
-    _print_name = ("N", "\\operatorname{N}")
+    _print_name = ("Normal", "\\operatorname{Normal}")
 
     def __call__(self, loc=0.0, scale=1.0, size=None, **kwargs):
         r"""Draw samples from a normal distribution.
@@ -322,7 +322,7 @@ class HalfNormalRV(ScipyRandomVariable):
     ndim_supp = 0
     ndims_params = [0, 0]
     dtype = "floatX"
-    _print_name = ("N**+", "\\operatorname{N^{+}}")
+    _print_name = ("HalfNormal", "\\operatorname{HalfNormal}")
 
     def __call__(self, loc=0.0, scale=1.0, size=None, **kwargs):
         r"""Draw samples from a half-normal distribution.
@@ -387,7 +387,7 @@ class LogNormalRV(RandomVariable):
     ndim_supp = 0
     ndims_params = [0, 0]
     dtype = "floatX"
-    _print_name = ("LogN", "\\operatorname{LogN}")
+    _print_name = ("LogNormal", "\\operatorname{LogNormal}")
 
     def __call__(self, mean=0.0, sigma=1.0, size=None, **kwargs):
         r"""Draw sample from a lognormal distribution.
@@ -651,7 +651,7 @@ class ExponentialRV(RandomVariable):
     ndim_supp = 0
     ndims_params = [0]
     dtype = "floatX"
-    _print_name = ("Exp", "\\operatorname{Exp}")
+    _print_name = ("Exponential", "\\operatorname{Exponential}")
 
     def __call__(self, scale=1.0, size=None, **kwargs):
         r"""Draw samples from an exponential distribution.
@@ -853,7 +853,7 @@ class MvNormalRV(RandomVariable):
     ndim_supp = 1
     ndims_params = [1, 2]
     dtype = "floatX"
-    _print_name = ("N", "\\operatorname{N}")
+    _print_name = ("MultivariateNormal", "\\operatorname{MultivariateNormal}")
 
     def __call__(self, mean=None, cov=None, size=None, **kwargs):
         r""" "Draw samples from a multivariate normal distribution.
@@ -931,7 +931,7 @@ class DirichletRV(RandomVariable):
     ndim_supp = 1
     ndims_params = [1]
     dtype = "floatX"
-    _print_name = ("Dir", "\\operatorname{Dir}")
+    _print_name = ("Dirichlet", "\\operatorname{Dirichlet}")
 
     def __call__(self, alphas, size=None, **kwargs):
         r"""Draw samples from a dirichlet distribution.
@@ -996,7 +996,7 @@ class PoissonRV(RandomVariable):
     ndim_supp = 0
     ndims_params = [0]
     dtype = "int64"
-    _print_name = ("Pois", "\\operatorname{Pois}")
+    _print_name = ("Poisson", "\\operatorname{Poisson}")
 
     def __call__(self, lam=1.0, size=None, **kwargs):
         r"""Draw samples from a poisson distribution.
@@ -1041,7 +1041,7 @@ class GeometricRV(RandomVariable):
     ndim_supp = 0
     ndims_params = [0]
     dtype = "int64"
-    _print_name = ("Geom", "\\operatorname{Geom}")
+    _print_name = ("Geometric", "\\operatorname{Geometric}")
 
     def __call__(self, p, size=None, **kwargs):
         r"""Draw samples from a geometric distribution.
@@ -1083,7 +1083,7 @@ class HyperGeometricRV(RandomVariable):
     ndim_supp = 0
     ndims_params = [0, 0, 0]
     dtype = "int64"
-    _print_name = ("HyperGeom", "\\operatorname{HyperGeom}")
+    _print_name = ("HyperGeometric", "\\operatorname{HyperGeometric}")
 
     def __call__(self, ngood, nbad, nsample, size=None, **kwargs):
         r"""Draw samples from a geometric distribution.
@@ -1131,7 +1131,7 @@ class CauchyRV(ScipyRandomVariable):
     ndim_supp = 0
     ndims_params = [0, 0]
     dtype = "floatX"
-    _print_name = ("C", "\\operatorname{C}")
+    _print_name = ("Cauchy", "\\operatorname{Cauchy}")
 
     def __call__(self, loc=0.0, scale=1.0, size=None, **kwargs):
         r"""Draw samples from a Cauchy distribution.
@@ -1181,7 +1181,7 @@ class HalfCauchyRV(ScipyRandomVariable):
     ndim_supp = 0
     ndims_params = [0, 0]
     dtype = "floatX"
-    _print_name = ("C**+", "\\operatorname{C^{+}}")
+    _print_name = ("HalfCauchy", "\\operatorname{HalfCauchy}")
 
     def __call__(self, loc=0.0, scale=1.0, size=None, **kwargs):
         r"""Draw samples from a half-Cauchy distribution.
@@ -1235,7 +1235,7 @@ class InvGammaRV(ScipyRandomVariable):
     ndim_supp = 0
     ndims_params = [0, 0]
     dtype = "floatX"
-    _print_name = ("InvGamma", "\\operatorname{Gamma^{-1}}")
+    _print_name = ("InverseGamma", "\\operatorname{InverseGamma}")
 
     def __call__(self, shape, scale, size=None, **kwargs):
         r"""Draw samples from an inverse-gamma distribution.
@@ -1332,7 +1332,7 @@ class TruncExponentialRV(ScipyRandomVariable):
     ndim_supp = 0
     ndims_params = [0, 0, 0]
     dtype = "floatX"
-    _print_name = ("TruncExp", "\\operatorname{TruncExp}")
+    _print_name = ("TruncatedExponential", "\\operatorname{TruncatedExponential}")
 
     def __call__(self, b, loc=0.0, scale=1.0, size=None, **kwargs):
         r"""Draw samples from a truncated exponential distribution.
@@ -1446,7 +1446,7 @@ class BernoulliRV(ScipyRandomVariable):
     ndim_supp = 0
     ndims_params = [0]
     dtype = "int64"
-    _print_name = ("Bern", "\\operatorname{Bern}")
+    _print_name = ("Bernoulli", "\\operatorname{Bernoulli}")
 
     def __call__(self, p, size=None, **kwargs):
         r"""Draw samples from a Bernoulli distribution.
@@ -1539,7 +1539,7 @@ class BinomialRV(RandomVariable):
     ndim_supp = 0
     ndims_params = [0, 0]
     dtype = "int64"
-    _print_name = ("Binom", "\\operatorname{Binom}")
+    _print_name = ("Binomial", "\\operatorname{Binomial}")
 
     def __call__(self, n, p, size=None, **kwargs):
         r"""Draw samples from a binomial distribution.
@@ -1583,7 +1583,7 @@ class NegBinomialRV(ScipyRandomVariable):
     ndim_supp = 0
     ndims_params = [0, 0]
     dtype = "int64"
-    _print_name = ("NB", "\\operatorname{NB}")
+    _print_name = ("NegativeBinomial", "\\operatorname{NegativeBinomial}")
 
     def __call__(self, n, p, size=None, **kwargs):
         r"""Draw samples from a negative binomial distribution.
@@ -1638,7 +1638,7 @@ class BetaBinomialRV(ScipyRandomVariable):
     ndim_supp = 0
     ndims_params = [0, 0, 0]
     dtype = "int64"
-    _print_name = ("BetaBinom", "\\operatorname{BetaBinom}")
+    _print_name = ("BetaBinomial", "\\operatorname{BetaBinomial}")
 
     def __call__(self, n, a, b, size=None, **kwargs):
         r"""Draw samples from a beta-binomial distribution.
@@ -1689,7 +1689,7 @@ class GenGammaRV(ScipyRandomVariable):
     ndim_supp = 0
     ndims_params = [0, 0, 0]
     dtype = "floatX"
-    _print_name = ("GG", "\\operatorname{GG}")
+    _print_name = ("GeneralizedGamma", "\\operatorname{GeneralizedGamma}")
 
     def __call__(self, alpha=1.0, p=1.0, lambd=1.0, size=None, **kwargs):
         r"""Draw samples from a generalized gamma distribution.
@@ -1751,7 +1751,7 @@ class MultinomialRV(RandomVariable):
     ndim_supp = 1
     ndims_params = [0, 1]
     dtype = "int64"
-    _print_name = ("MN", "\\operatorname{MN}")
+    _print_name = ("Multinomial", "\\operatorname{Multinomial}")
 
     def __call__(self, n, p, size=None, **kwargs):
         r"""Draw samples from a discrete multinomial distribution.
@@ -1823,7 +1823,7 @@ class CategoricalRV(RandomVariable):
     ndim_supp = 0
     ndims_params = [1]
     dtype = "int64"
-    _print_name = ("Cat", "\\operatorname{Cat}")
+    _print_name = ("Categorical", "\\operatorname{Categorical}")
 
     def __call__(self, p, size=None, **kwargs):
         r"""Draw samples from a discrete categorical distribution.
