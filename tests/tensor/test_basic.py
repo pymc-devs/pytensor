@@ -51,6 +51,7 @@ from pytensor.tensor.basic import (
     flatnonzero,
     flatten,
     full_like,
+    get_scalar_constant,
     get_underlying_scalar_constant,
     get_vector_length,
     horizontal_stack,
@@ -3427,6 +3428,12 @@ class TestGetUnderlyingScalarConstant:
             )
                 is None
         )
+
+
+def test_get_scalar_constant():
+    with pytest.raises(NotScalarConstantError):
+        get_scalar_constant(np.zeros(5))
+    assert get_scalar_constant(np.array(4)) == 4
 
 
 def test_complex_mod_failure():
