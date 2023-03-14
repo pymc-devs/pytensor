@@ -290,11 +290,9 @@ class TestToposort:
 
 class TestEval:
     def setup_method(self):
-        self.x, self.y, self.e = scalars("x", "y", "e")
+        self.x, self.y = scalars("x", "y")
         self.z = self.x + self.y
         self.w = 2 * self.z
-        self.t = self.e + 1
-        self.t.name = "e"
 
     def test_eval(self):
         assert self.w.eval({self.x: 1.0, self.y: 2.0}) == 6.0
@@ -308,8 +306,12 @@ class TestEval:
         assert self.w.eval({"x": 1.0, self.y: 2.0}) == 6.0
         assert self.w.eval({self.z: 3}) == 6.0
 
-    def test_eval_with_strings_with_mulitple_same_name(self):
-        assert self.t.eval({"e": 1.0}) == 2.0
+    def test_eval_errors_having_mulitple_variables_same_name(self):
+        e = scalars("e")
+        t = e + 1
+        t.name = "e"
+        with pytest.raises(Exception, match="Found 2 pytensor variables with name e"):
+            t.eval({"e": 1})
 
 
 class TestAutoName:

@@ -558,46 +558,6 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
             return [self.owner]
         return []
 
-    def convert_string_keys_to_pytensor_variables(self, inputs_to_values):
-        r"""Convert the string keys to corresponding `Variable` with nearest name.
-
-        Parameters
-        ----------
-        inputs_to_values :
-            A dictionary mapping PyTensor `Variable`\s to values.
-
-        Examples
-        --------
-
-        >>> import numpy as np
-        >>> import pytensor.tensor as at
-        >>> x = at.dscalar('x')
-        >>> y = at.dscalar('y')
-        >>> z = x + y
-        >>> np.allclose(z.eval({'x' : 3, 'y' : 1}), 4)
-        True
-        """
-        process_input_to_values = {}
-        for i in inputs_to_values:
-            if isinstance(i, str):
-                nodes_with_matching_names = get_var_by_name([self], i)
-                length_of_nodes_with_matching_names = len(nodes_with_matching_names)
-                if length_of_nodes_with_matching_names == 0:
-                    raise Exception(f"{i} not found in graph")
-                else:
-                    if length_of_nodes_with_matching_names > 1:
-                        warnings.warn(
-                            f"Found {length_of_nodes_with_matching_names} pytensor variables with name {i} taking the first declared named variable for computation"
-                        )
-                    process_input_to_values[
-                        nodes_with_matching_names[
-                            length_of_nodes_with_matching_names - 1
-                        ]
-                    ] = inputs_to_values[i]
-            else:
-                process_input_to_values[i] = inputs_to_values[i]
-        return process_input_to_values
-
     def eval(self, inputs_to_values=None):
         r"""Evaluate the `Variable`.
 
@@ -637,9 +597,29 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         if inputs_to_values is None:
             inputs_to_values = {}
 
-        inputs_to_values = self.convert_string_keys_to_pytensor_variables(
-            inputs_to_values
-        )
+        def convert_string_keys_to_variables():
+            process_input_to_values = {}
+            for i in inputs_to_values:
+                if isinstance(i, str):
+                    nodes_with_matching_names = get_var_by_name([self], i)
+                    length_of_nodes_with_matching_names = len(nodes_with_matching_names)
+                    if length_of_nodes_with_matching_names == 0:
+                        raise Exception(f"{i} not found in graph")
+                    else:
+                        if length_of_nodes_with_matching_names > 1:
+                            raise Exception(
+                                f"Found {length_of_nodes_with_matching_names} pytensor variables with name {i}"
+                            )
+                        process_input_to_values[
+                            nodes_with_matching_names[
+                                length_of_nodes_with_matching_names - 1
+                            ]
+                        ] = inputs_to_values[i]
+                else:
+                    process_input_to_values[i] = inputs_to_values[i]
+            return process_input_to_values
+
+        inputs_to_values = convert_string_keys_to_variables()
 
         if not hasattr(self, "_fn_cache"):
             self._fn_cache = dict()
