@@ -255,6 +255,17 @@ _scalar_constant_value_elemwise_ops = (
 )
 
 
+def get_scalar_constant(v, elemwise=True, only_process_constants=False, max_recur=10):
+    """
+    Checks whether 'v' is a scalar based on 'ndim'
+    """
+    if isinstance(v, np.ndarray):
+        data = v.data
+        if data.ndim != 0:
+            raise NotScalarConstantError()
+    return get_scalar_constant_value(v, elemwise, only_process_constants, max_recur)
+
+
 def get_scalar_constant_value(
     orig_v, elemwise=True, only_process_constants=False, max_recur=10
 ):
@@ -4094,6 +4105,7 @@ __all__ = [
     "cast",
     "scalar_from_tensor",
     "tensor_from_scalar",
+    "get_scalar_constant",
     "get_scalar_constant_value",
     "constant",
     "as_tensor_variable",
