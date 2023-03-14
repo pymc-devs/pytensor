@@ -397,7 +397,7 @@ class SpecifyShape(COp):
     _f16_ok = True
 
     def make_node(self, x, *shape):
-        from pytensor.tensor.basic import get_scalar_constant_value
+        from pytensor.tensor.basic import get_underlying_scalar_constant
 
         x = at.as_tensor_variable(x)
 
@@ -426,7 +426,7 @@ class SpecifyShape(COp):
                 type_shape[i] = xts
             else:
                 try:
-                    type_s = get_scalar_constant_value(s)
+                    type_s = get_underlying_scalar_constant(s)
                     if type_s is not None:
                         type_shape[i] = int(type_s)
                 except NotScalarConstantError:
@@ -457,9 +457,9 @@ class SpecifyShape(COp):
         for dim in range(node.inputs[0].type.ndim):
             s = shape[dim]
             try:
-                s = at.get_scalar_constant_value(s)
+                s = at.get_underlying_scalar_constant(s)
                 # We assume that `None` shapes are always retrieved by
-                # `get_scalar_constant_value`, and only in that case do we default to
+                # `get_underlying_scalar_constant`, and only in that case do we default to
                 # the shape of the input variable
                 if s is None:
                     s = xshape[dim]
@@ -581,7 +581,7 @@ def specify_shape(
 @_get_vector_length.register(SpecifyShape)
 def _get_vector_length_SpecifyShape(op, var):
     try:
-        return at.get_scalar_constant_value(var.owner.inputs[1]).item()
+        return at.get_underlying_scalar_constant(var.owner.inputs[1]).item()
     except NotScalarConstantError:
         raise ValueError(f"Length of {var} cannot be determined")
 
@@ -635,7 +635,7 @@ class Reshape(COp):
                 y = shp_list[index]
                 y = at.as_tensor_variable(y)
                 try:
-                    s_val = at.get_scalar_constant_value(y).item()
+                    s_val = at.get_underlying_scalar_constant(y).item()
                     if s_val >= 0:
                         out_shape[index] = s_val
                 except NotScalarConstantError:

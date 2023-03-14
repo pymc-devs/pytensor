@@ -20,7 +20,7 @@ from pytensor.misc.safe_asarray import _asarray
 from pytensor.printing import Printer, pprint, set_precedence
 from pytensor.scalar.basic import ScalarConstant
 from pytensor.tensor import _get_vector_length, as_tensor_variable, get_vector_length
-from pytensor.tensor.basic import alloc, get_scalar_constant_value
+from pytensor.tensor.basic import alloc, get_underlying_scalar_constant
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.exceptions import (
     AdvancedIndexingError,
@@ -656,7 +656,7 @@ def get_constant_idx(
             return slice(conv(val.start), conv(val.stop), conv(val.step))
         else:
             try:
-                return get_scalar_constant_value(
+                return get_underlying_scalar_constant(
                     val,
                     only_process_constants=only_process_constants,
                     elemwise=elemwise,
@@ -733,7 +733,7 @@ class Subtensor(COp):
                 if s == 1:
                     start = p.start
                     try:
-                        start = get_scalar_constant_value(start)
+                        start = get_underlying_scalar_constant(start)
                     except NotScalarConstantError:
                         pass
                     if start is None or start == 0:
@@ -2808,17 +2808,17 @@ def _get_vector_length_Subtensor(op, var):
         start = (
             None
             if indices[0].start is None
-            else get_scalar_constant_value(indices[0].start)
+            else get_underlying_scalar_constant(indices[0].start)
         )
         stop = (
             None
             if indices[0].stop is None
-            else get_scalar_constant_value(indices[0].stop)
+            else get_underlying_scalar_constant(indices[0].stop)
         )
         step = (
             None
             if indices[0].step is None
-            else get_scalar_constant_value(indices[0].step)
+            else get_underlying_scalar_constant(indices[0].step)
         )
 
         if start == stop:

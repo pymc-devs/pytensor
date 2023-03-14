@@ -823,8 +823,8 @@ class TestElemwise(unittest_tools.InferShapeTester):
 
         assert len(res_shape) == 1
         assert len(res_shape[0]) == 2
-        assert pytensor.get_scalar_constant_value(res_shape[0][0]) == 1
-        assert pytensor.get_scalar_constant_value(res_shape[0][1]) == 1
+        assert pytensor.get_underlying_scalar_constant(res_shape[0][0]) == 1
+        assert pytensor.get_underlying_scalar_constant(res_shape[0][1]) == 1
 
     def test_multi_output(self):
         class CustomElemwise(Elemwise):
