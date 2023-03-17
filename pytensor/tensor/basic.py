@@ -257,7 +257,13 @@ _scalar_constant_value_elemwise_ops = (
 
 def get_scalar_constant(v, elemwise=True, only_process_constants=False, max_recur=10):
     """
-    Checks whether 'v' is a scalar based on 'ndim'
+    Checks whether 'v' is a scalar (ndim = 0).
+
+    If 'v' is a scalar then this function fetches the underlying constant by calling
+    'get_underlying_scalar_constant()'.
+
+    If 'v' is not a scalar, it raises a NotScalarConstantError.
+
     """
     if isinstance(v, np.ndarray):
         data = v.data
