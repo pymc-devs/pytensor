@@ -1493,7 +1493,9 @@ def local_useless_elemwise_comparison(fgraph, node):
         and investigate(node.inputs[0].owner)
     ):
         try:
-            cst = get_underlying_scalar_constant(node.inputs[1], only_process_constants=True)
+            cst = get_underlying_scalar_constant(
+                node.inputs[1], only_process_constants=True
+            )
 
             res = zeros_like(node.inputs[0], dtype=dtype, opt=True)
 
@@ -2329,7 +2331,9 @@ def local_abs_merge(fgraph, node):
                 inputs.append(i.owner.inputs[0])
             elif isinstance(i, Constant):
                 try:
-                    const = get_underlying_scalar_constant(i, only_process_constants=True)
+                    const = get_underlying_scalar_constant(
+                        i, only_process_constants=True
+                    )
                 except NotScalarConstantError:
                     return False
                 if not (const >= 0).all():

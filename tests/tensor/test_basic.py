@@ -3423,10 +3423,10 @@ class TestGetUnderlyingScalarConstant:
                 None, only_process_constants=only_process_constants
             )
         assert (
-                get_underlying_scalar_constant(
+            get_underlying_scalar_constant(
                 NoneConst, only_process_constants=only_process_constants
             )
-                is None
+            is None
         )
 
 

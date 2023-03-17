@@ -269,7 +269,9 @@ def get_scalar_constant(v, elemwise=True, only_process_constants=False, max_recu
         data = v.data
         if data.ndim != 0:
             raise NotScalarConstantError()
-    return get_underlying_scalar_constant(v, elemwise, only_process_constants, max_recur)
+    return get_underlying_scalar_constant(
+        v, elemwise, only_process_constants, max_recur
+    )
 
 
 def get_underlying_scalar_constant(

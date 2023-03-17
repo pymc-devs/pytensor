@@ -22,7 +22,12 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
-from pytensor.tensor.basic import MakeVector, alloc, cast, get_underlying_scalar_constant
+from pytensor.tensor.basic import (
+    MakeVector,
+    alloc,
+    cast,
+    get_underlying_scalar_constant,
+)
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.rewriting.basic import register_canonicalize, register_specialize

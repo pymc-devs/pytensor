@@ -1729,7 +1729,10 @@ def local_join_subtensors(fgraph, node):
             if step is None:
                 continue
             try:
-                if get_underlying_scalar_constant(step, only_process_constants=True) != 1:
+                if (
+                    get_underlying_scalar_constant(step, only_process_constants=True)
+                    != 1
+                ):
                     return None
             except NotScalarConstantError:
                 return None
