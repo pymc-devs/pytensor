@@ -111,7 +111,7 @@ def test_erfinv():
     out = erfinv(x)
     fg = FunctionGraph([x], [out])
 
-    compare_jax_and_py(fg, [1.0])
+    compare_jax_and_py(fg, [0.95])
 
 
 def test_psi():
