@@ -313,6 +313,13 @@ class TestEval:
         with pytest.raises(Exception, match="Found 2 pytensor variables with name e"):
             t.eval({"e": 1})
 
+    def test_eval_errors_with_no_name_exists(self):
+        e = scalars("e")
+        t = e + 1
+        t.name = "p"
+        with pytest.raises(Exception, match="o not found in graph"):
+            t.eval({"o": 1})
+
 
 class TestAutoName:
     def test_auto_name(self):

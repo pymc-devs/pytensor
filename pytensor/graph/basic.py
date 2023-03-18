@@ -611,9 +611,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
                                 f"Found {length_of_nodes_with_matching_names} pytensor variables with name {i}"
                             )
                         process_input_to_values[
-                            nodes_with_matching_names[
-                                length_of_nodes_with_matching_names - 1
-                            ]
+                            nodes_with_matching_names[0]
                         ] = inputs_to_values[i]
                 else:
                     process_input_to_values[i] = inputs_to_values[i]
