@@ -218,6 +218,17 @@ def test_Dimshuffle_returns_array():
     assert out.ndim == 0
 
 
+def test_Dimshuffle_non_contiguous():
+    """The numba impl of reshape doesn't work with
+    non-contiguous arrays, make sure we work around that."""
+    x = at.dvector()
+    idx = at.vector(dtype="int64")
+    op = pytensor.tensor.elemwise.DimShuffle([True], [])
+    out = op(at.specify_shape(x[idx][::2], (1,)))
+    func = pytensor.function([x, idx], out, mode="NUMBA")
+    assert func(np.zeros(3), np.array([1])).ndim == 0
+
+
 @pytest.mark.parametrize(
     "careduce_fn, axis, v",
     [
