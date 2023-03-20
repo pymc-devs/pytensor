@@ -306,14 +306,14 @@ class TestEval:
         assert self.w.eval({"x": 1.0, self.y: 2.0}) == 6.0
         assert self.w.eval({self.z: 3}) == 6.0
 
-    def test_eval_errors_having_mulitple_variables_same_name(self):
+    def test_eval_with_strings_multiple_matches(self):
         e = scalars("e")
         t = e + 1
         t.name = "e"
         with pytest.raises(Exception, match="Found multiple variables with name e"):
             t.eval({"e": 1})
 
-    def test_eval_errors_with_no_name_exists(self):
+    def test_eval_with_strings_no_match(self):
         e = scalars("e")
         t = e + 1
         t.name = "p"

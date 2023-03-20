@@ -605,13 +605,12 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
                     if not matching_vars:
                         raise Exception(f"{key} not found in graph")
                     elif len(matching_vars) > 1:
-                            raise Exception(
-                                f"Found multiple variables with name {key}"
-                            )
+                        raise Exception(f"Found multiple variables with name {key}")
                     new_input_to_values[matching_vars[0]] = value
                 else:
                     new_input_to_values[key] = value
             return new_input_to_values
+
         inputs_to_values = convert_string_keys_to_variables(inputs_to_values)
 
         if not hasattr(self, "_fn_cache"):
