@@ -310,7 +310,7 @@ class TestEval:
         e = scalars("e")
         t = e + 1
         t.name = "e"
-        with pytest.raises(Exception, match="Found 2 pytensor variables with name e"):
+        with pytest.raises(Exception, match="Found multiple variables with name e"):
             t.eval({"e": 1})
 
     def test_eval_errors_with_no_name_exists(self):

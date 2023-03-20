@@ -597,27 +597,22 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         if inputs_to_values is None:
             inputs_to_values = {}
 
-        def convert_string_keys_to_variables():
-            process_input_to_values = {}
-            for i in inputs_to_values:
-                if isinstance(i, str):
-                    nodes_with_matching_names = get_var_by_name([self], i)
-                    length_of_nodes_with_matching_names = len(nodes_with_matching_names)
-                    if length_of_nodes_with_matching_names == 0:
-                        raise Exception(f"{i} not found in graph")
-                    else:
-                        if length_of_nodes_with_matching_names > 1:
+        def convert_string_keys_to_variables(input_to_values):
+            new_input_to_values = {}
+            for key, value in inputs_to_values.items():
+                if isinstance(key, str):
+                    matching_vars = get_var_by_name([self], key)
+                    if not matching_vars:
+                        raise Exception(f"{key} not found in graph")
+                    elif len(matching_vars) > 1:
                             raise Exception(
-                                f"Found {length_of_nodes_with_matching_names} pytensor variables with name {i}"
+                                f"Found multiple variables with name {key}"
                             )
-                        process_input_to_values[
-                            nodes_with_matching_names[0]
-                        ] = inputs_to_values[i]
+                    new_input_to_values[matching_vars[0]] = value
                 else:
-                    process_input_to_values[i] = inputs_to_values[i]
-            return process_input_to_values
-
-        inputs_to_values = convert_string_keys_to_variables()
+                    new_input_to_values[key] = value
+            return new_input_to_values
+        inputs_to_values = convert_string_keys_to_variables(inputs_to_values)
 
         if not hasattr(self, "_fn_cache"):
             self._fn_cache = dict()
