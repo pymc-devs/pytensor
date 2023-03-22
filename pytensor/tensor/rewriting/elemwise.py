@@ -26,7 +26,7 @@ from pytensor.tensor.basic import (
     MakeVector,
     alloc,
     cast,
-    get_underlying_scalar_constant,
+    get_underlying_scalar_constant_value,
 )
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
@@ -500,7 +500,7 @@ def local_upcast_elemwise_constant_inputs(fgraph, node):
                 else:
                     try:
                         # works only for scalars
-                        cval_i = get_underlying_scalar_constant(
+                        cval_i = get_underlying_scalar_constant_value(
                             i, only_process_constants=True
                         )
                         if all(i.broadcastable):

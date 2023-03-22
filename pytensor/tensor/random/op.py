@@ -12,7 +12,7 @@ from pytensor.scalar import ScalarVariable
 from pytensor.tensor.basic import (
     as_tensor_variable,
     constant,
-    get_underlying_scalar_constant,
+    get_underlying_scalar_constant_value,
     get_vector_length,
     infer_static_shape,
 )
@@ -277,7 +277,7 @@ class RandomVariable(Op):
         try:
             size_len = get_vector_length(size)
         except ValueError:
-            size_len = get_underlying_scalar_constant(size_shape[0])
+            size_len = get_underlying_scalar_constant_value(size_shape[0])
 
         size = tuple(size[n] for n in range(size_len))
 

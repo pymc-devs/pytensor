@@ -24,7 +24,7 @@ from pytensor.tensor.basic import (
     cast,
     constant,
     extract_constant,
-    get_underlying_scalar_constant,
+    get_underlying_scalar_constant_value,
     stack,
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
@@ -226,7 +226,7 @@ class ShapeFeature(Feature):
             # Do not call make_node for test_value
             s = Shape_i(i)(r)
             try:
-                s = get_underlying_scalar_constant(s)
+                s = get_underlying_scalar_constant_value(s)
             except NotScalarConstantError:
                 pass
             return s
@@ -310,7 +310,7 @@ class ShapeFeature(Feature):
             assert len(idx) == 1
             idx = idx[0]
             try:
-                i = get_underlying_scalar_constant(idx)
+                i = get_underlying_scalar_constant_value(idx)
             except NotScalarConstantError:
                 pass
             else:

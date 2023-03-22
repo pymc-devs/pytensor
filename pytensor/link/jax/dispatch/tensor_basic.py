@@ -18,7 +18,7 @@ from pytensor.tensor.basic import (
     ScalarFromTensor,
     Split,
     TensorFromScalar,
-    get_underlying_scalar_constant,
+    get_underlying_scalar_constant_value,
 )
 from pytensor.tensor.exceptions import NotScalarConstantError
 
@@ -106,7 +106,7 @@ def jax_funcify_Join(op, **kwargs):
 def jax_funcify_Split(op: Split, node, **kwargs):
     _, axis, splits = node.inputs
     try:
-        constant_axis = get_underlying_scalar_constant(axis)
+        constant_axis = get_underlying_scalar_constant_value(axis)
     except NotScalarConstantError:
         constant_axis = None
         warnings.warn(
@@ -116,7 +116,7 @@ def jax_funcify_Split(op: Split, node, **kwargs):
     try:
         constant_splits = np.array(
             [
-                get_underlying_scalar_constant(splits[i])
+                get_underlying_scalar_constant_value(splits[i])
                 for i in range(get_vector_length(splits))
             ]
         )

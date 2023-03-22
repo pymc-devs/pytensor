@@ -153,8 +153,8 @@ def get_underlying_scalar_constant(v):
     if sparse and isinstance(v.type, sparse.SparseTensorType):
         if v.owner is not None and isinstance(v.owner.op, sparse.CSM):
             data = v.owner.inputs[0]
-            return tensor.get_underlying_scalar_constant(data)
-    return tensor.get_underlying_scalar_constant(v)
+            return tensor.get_underlying_scalar_constant_value(data)
+    return tensor.get_underlying_scalar_constant_value(v)
 
 
 # isort: off

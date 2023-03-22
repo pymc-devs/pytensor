@@ -757,7 +757,7 @@ class _tensor_py_operators:
     __array_priority__ = 1000
 
     def get_underlying_scalar_constant(self):
-        return at.basic.get_underlying_scalar_constant(self)
+        return at.basic.get_underlying_scalar_constant_value(self)
 
     def zeros_like(model, dtype=None):
         return at.basic.zeros_like(model, dtype=dtype)

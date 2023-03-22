@@ -25,7 +25,7 @@ from pytensor.tensor.basic import (
     cast,
     concatenate,
     extract_constant,
-    get_underlying_scalar_constant,
+    get_underlying_scalar_constant_value,
     switch,
 )
 from pytensor.tensor.elemwise import Elemwise
@@ -756,7 +756,9 @@ def local_subtensor_make_vector(fgraph, node):
     elif isinstance(idx, Variable):
         if idx.ndim == 0:
             try:
-                v = get_underlying_scalar_constant(idx, only_process_constants=True)
+                v = get_underlying_scalar_constant_value(
+                    idx, only_process_constants=True
+                )
                 try:
                     ret = [x.owner.inputs[v]]
                 except IndexError:
@@ -808,7 +810,7 @@ def local_useless_inc_subtensor(fgraph, node):
         # This is an increment operation, so the array being incremented must
         # consist of all zeros in order for the entire operation to be useless
         try:
-            c = get_underlying_scalar_constant(x)
+            c = get_underlying_scalar_constant_value(x)
             if c != 0:
                 return
         except NotScalarConstantError:
@@ -927,7 +929,7 @@ def local_useless_subtensor(fgraph, node):
         if isinstance(idx.stop, (int, np.integer)):
             length_pos_data = sys.maxsize
             try:
-                length_pos_data = get_underlying_scalar_constant(
+                length_pos_data = get_underlying_scalar_constant_value(
                     length_pos, only_process_constants=True
                 )
             except NotScalarConstantError:
@@ -992,7 +994,7 @@ def local_useless_AdvancedSubtensor1(fgraph, node):
 
     # get length of the indexed tensor along the first axis
     try:
-        length = get_underlying_scalar_constant(
+        length = get_underlying_scalar_constant_value(
             shape_of[node.inputs[0]][0], only_process_constants=True
         )
     except NotScalarConstantError:
@@ -1329,7 +1331,7 @@ def local_incsubtensor_of_zeros(fgraph, node):
         try:
             # Don't use only_process_constants=True. We need to
             # investigate Alloc of 0s but with non constant shape.
-            if get_underlying_scalar_constant(y, elemwise=False) == 0:
+            if get_underlying_scalar_constant_value(y, elemwise=False) == 0:
                 # No need to copy over the stacktrace,
                 # because x should already have a stacktrace
                 return [x]
@@ -1375,12 +1377,12 @@ def local_setsubtensor_of_constants(fgraph, node):
         # Don't use only_process_constants=True. We need to
         # investigate Alloc of 0s but with non constant shape.
         try:
-            replace_x = get_underlying_scalar_constant(x, elemwise=False)
+            replace_x = get_underlying_scalar_constant_value(x, elemwise=False)
         except NotScalarConstantError:
             return
 
         try:
-            replace_y = get_underlying_scalar_constant(y, elemwise=False)
+            replace_y = get_underlying_scalar_constant_value(y, elemwise=False)
         except NotScalarConstantError:
             return
 
@@ -1668,7 +1670,7 @@ def local_join_subtensors(fgraph, node):
     axis, tensors = node.inputs[0], node.inputs[1:]
 
     try:
-        axis = get_underlying_scalar_constant(axis)
+        axis = get_underlying_scalar_constant_value(axis)
     except NotScalarConstantError:
         return
 
@@ -1730,7 +1732,9 @@ def local_join_subtensors(fgraph, node):
                 continue
             try:
                 if (
-                    get_underlying_scalar_constant(step, only_process_constants=True)
+                    get_underlying_scalar_constant_value(
+                        step, only_process_constants=True
+                    )
                     != 1
                 ):
                     return None

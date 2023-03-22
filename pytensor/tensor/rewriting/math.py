@@ -31,7 +31,7 @@ from pytensor.tensor.basic import (
     constant,
     extract_constant,
     fill,
-    get_underlying_scalar_constant,
+    get_underlying_scalar_constant_value,
     ones_like,
     switch,
     zeros_like,
@@ -112,7 +112,7 @@ def scalarconsts_rest(inputs, elemwise=True, only_process_constants=False):
     nonconsts = []
     for i in inputs:
         try:
-            v = get_underlying_scalar_constant(
+            v = get_underlying_scalar_constant_value(
                 i, elemwise=elemwise, only_process_constants=only_process_constants
             )
             consts.append(v)
@@ -165,13 +165,13 @@ def local_0_dot_x(fgraph, node):
     y = node.inputs[1]
     replace = False
     try:
-        if get_underlying_scalar_constant(x, only_process_constants=True) == 0:
+        if get_underlying_scalar_constant_value(x, only_process_constants=True) == 0:
             replace = True
     except NotScalarConstantError:
         pass
 
     try:
-        if get_underlying_scalar_constant(y, only_process_constants=True) == 0:
+        if get_underlying_scalar_constant_value(y, only_process_constants=True) == 0:
             replace = True
     except NotScalarConstantError:
         pass
@@ -585,7 +585,7 @@ def local_mul_switch_sink(fgraph, node):
             switch_node = i.owner
             try:
                 if (
-                    get_underlying_scalar_constant(
+                    get_underlying_scalar_constant_value(
                         switch_node.inputs[1], only_process_constants=True
                     )
                     == 0.0
@@ -613,7 +613,7 @@ def local_mul_switch_sink(fgraph, node):
                 pass
             try:
                 if (
-                    get_underlying_scalar_constant(
+                    get_underlying_scalar_constant_value(
                         switch_node.inputs[2], only_process_constants=True
                     )
                     == 0.0
@@ -665,7 +665,7 @@ def local_div_switch_sink(fgraph, node):
         switch_node = node.inputs[0].owner
         try:
             if (
-                get_underlying_scalar_constant(
+                get_underlying_scalar_constant_value(
                     switch_node.inputs[1], only_process_constants=True
                 )
                 == 0.0
@@ -691,7 +691,7 @@ def local_div_switch_sink(fgraph, node):
             pass
         try:
             if (
-                get_underlying_scalar_constant(
+                get_underlying_scalar_constant_value(
                     switch_node.inputs[2], only_process_constants=True
                 )
                 == 0.0
@@ -1493,7 +1493,7 @@ def local_useless_elemwise_comparison(fgraph, node):
         and investigate(node.inputs[0].owner)
     ):
         try:
-            cst = get_underlying_scalar_constant(
+            cst = get_underlying_scalar_constant_value(
                 node.inputs[1], only_process_constants=True
             )
 
@@ -1735,7 +1735,7 @@ def local_reduce_join(fgraph, node):
 
         # We add the new check late to don't add extra warning.
         try:
-            join_axis = get_underlying_scalar_constant(
+            join_axis = get_underlying_scalar_constant_value(
                 join_node.inputs[0], only_process_constants=True
             )
 
@@ -1818,7 +1818,9 @@ def local_opt_alloc(fgraph, node):
             inp = node_inps.owner.inputs[0]
             shapes = node_inps.owner.inputs[1:]
             try:
-                val = get_underlying_scalar_constant(inp, only_process_constants=True)
+                val = get_underlying_scalar_constant_value(
+                    inp, only_process_constants=True
+                )
                 assert val.size == 1
                 val = val.reshape(1)[0]
                 # check which type of op
@@ -1950,7 +1952,7 @@ def local_mul_zero(fgraph, node):
 
         for i in node.inputs:
             try:
-                value = get_underlying_scalar_constant(i)
+                value = get_underlying_scalar_constant_value(i)
             except NotScalarConstantError:
                 continue
             # print 'MUL by value', value, node.inputs
@@ -2232,7 +2234,7 @@ def local_add_specialize(fgraph, node):
     new_inputs = []
     for inp in node.inputs:
         try:
-            y = get_underlying_scalar_constant(inp)
+            y = get_underlying_scalar_constant_value(inp)
         except NotScalarConstantError:
             y = inp
         if np.all(y == 0.0):
@@ -2331,7 +2333,7 @@ def local_abs_merge(fgraph, node):
                 inputs.append(i.owner.inputs[0])
             elif isinstance(i, Constant):
                 try:
-                    const = get_underlying_scalar_constant(
+                    const = get_underlying_scalar_constant_value(
                         i, only_process_constants=True
                     )
                 except NotScalarConstantError:
@@ -2882,7 +2884,7 @@ def local_grad_log_erfc_neg(fgraph, node):
         mul_neg = mul(*mul_inputs)
 
         try:
-            cst2 = get_underlying_scalar_constant(
+            cst2 = get_underlying_scalar_constant_value(
                 mul_neg.owner.inputs[0], only_process_constants=True
             )
         except NotScalarConstantError:
@@ -2916,7 +2918,7 @@ def local_grad_log_erfc_neg(fgraph, node):
 
             x = erfc_x
             try:
-                cst = get_underlying_scalar_constant(
+                cst = get_underlying_scalar_constant_value(
                     erfc_x.owner.inputs[0], only_process_constants=True
                 )
             except NotScalarConstantError:
@@ -2983,7 +2985,7 @@ def _is_1(expr):
 
     """
     try:
-        v = get_underlying_scalar_constant(expr)
+        v = get_underlying_scalar_constant_value(expr)
         return np.allclose(v, 1)
     except NotScalarConstantError:
         return False
@@ -3151,7 +3153,7 @@ def is_neg(var):
     if var_node.op == mul and len(var_node.inputs) >= 2:
         for idx, mul_input in enumerate(var_node.inputs):
             try:
-                constant = get_underlying_scalar_constant(mul_input)
+                constant = get_underlying_scalar_constant_value(mul_input)
                 is_minus_1 = np.allclose(constant, -1)
             except NotScalarConstantError:
                 is_minus_1 = False
