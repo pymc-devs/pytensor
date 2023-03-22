@@ -3430,10 +3430,14 @@ class TestGetUnderlyingScalarConstantValue:
         )
 
 
-def test_get_scalar_constant_value():
+@pytest.mark.parametrize(
+    ["valid_inp", "invalid_inp"],
+    ((np.array(4), np.zeros(5)), (at.constant(4), at.constant(3, ndim=1))),
+)
+def test_get_scalar_constant_value(valid_inp, invalid_inp):
     with pytest.raises(NotScalarConstantError):
-        get_scalar_constant_value(np.zeros(5))
-    assert get_scalar_constant_value(np.array(4)) == 4
+        get_scalar_constant_value(invalid_inp)
+    assert get_scalar_constant_value(valid_inp) == 4
 
 
 def test_complex_mod_failure():

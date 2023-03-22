@@ -267,9 +267,8 @@ def get_scalar_constant_value(
     If 'v' is not a scalar, it raises a NotScalarConstantError.
 
     """
-    if isinstance(v, np.ndarray):
-        data = v.data
-        if data.ndim != 0:
+    if isinstance(v, (Variable, np.ndarray)):
+        if v.ndim != 0:
             raise NotScalarConstantError()
     return get_underlying_scalar_constant_value(
         v, elemwise, only_process_constants, max_recur
