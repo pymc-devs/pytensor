@@ -302,6 +302,24 @@ class TestEval:
             pickle.loads(pickle.dumps(self.w)), "_fn_cache"
         ), "temporary functions must not be serialized"
 
+    def test_eval_with_strings(self):
+        assert self.w.eval({"x": 1.0, self.y: 2.0}) == 6.0
+        assert self.w.eval({self.z: 3}) == 6.0
+
+    def test_eval_with_strings_multiple_matches(self):
+        e = scalars("e")
+        t = e + 1
+        t.name = "e"
+        with pytest.raises(Exception, match="Found multiple variables with name e"):
+            t.eval({"e": 1})
+
+    def test_eval_with_strings_no_match(self):
+        e = scalars("e")
+        t = e + 1
+        t.name = "p"
+        with pytest.raises(Exception, match="o not found in graph"):
+            t.eval({"o": 1})
+
 
 class TestAutoName:
     def test_auto_name(self):
