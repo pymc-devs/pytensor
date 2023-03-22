@@ -22,7 +22,12 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
-from pytensor.tensor.basic import MakeVector, alloc, cast, get_scalar_constant_value
+from pytensor.tensor.basic import (
+    MakeVector,
+    alloc,
+    cast,
+    get_underlying_scalar_constant_value,
+)
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.rewriting.basic import register_canonicalize, register_specialize
@@ -495,7 +500,7 @@ def local_upcast_elemwise_constant_inputs(fgraph, node):
                 else:
                     try:
                         # works only for scalars
-                        cval_i = get_scalar_constant_value(
+                        cval_i = get_underlying_scalar_constant_value(
                             i, only_process_constants=True
                         )
                         if all(i.broadcastable):

@@ -577,7 +577,7 @@ them perfectly, but a `dscalar` otherwise.
     .. method:: round(mode="half_away_from_zero")
        :noindex:
     .. method:: trace()
-    .. method:: get_scalar_constant_value()
+    .. method:: get_underlying_scalar_constant_value()
     .. method:: zeros_like(model, dtype=None)
 
        All the above methods are equivalent to NumPy for PyTensor on the current tensor.

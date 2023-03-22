@@ -52,6 +52,7 @@ from pytensor.tensor.basic import (
     flatten,
     full_like,
     get_scalar_constant_value,
+    get_underlying_scalar_constant_value,
     get_vector_length,
     horizontal_stack,
     identity_like,
@@ -3263,52 +3264,52 @@ def test_dimshuffle_duplicate():
         DimShuffle((False,), (0, 0))(x)
 
 
-class TestGetScalarConstantValue:
+class TestGetUnderlyingScalarConstantValue:
     def test_basic(self):
         with pytest.raises(NotScalarConstantError):
-            get_scalar_constant_value(aes.int64())
+            get_underlying_scalar_constant_value(aes.int64())
 
-        res = get_scalar_constant_value(at.as_tensor(10))
+        res = get_underlying_scalar_constant_value(at.as_tensor(10))
         assert res == 10
         assert isinstance(res, np.ndarray)
 
-        res = get_scalar_constant_value(np.array(10))
+        res = get_underlying_scalar_constant_value(np.array(10))
         assert res == 10
         assert isinstance(res, np.ndarray)
 
         a = at.stack([1, 2, 3])
-        assert get_scalar_constant_value(a[0]) == 1
-        assert get_scalar_constant_value(a[1]) == 2
-        assert get_scalar_constant_value(a[2]) == 3
+        assert get_underlying_scalar_constant_value(a[0]) == 1
+        assert get_underlying_scalar_constant_value(a[1]) == 2
+        assert get_underlying_scalar_constant_value(a[2]) == 3
 
         b = iscalar()
         a = at.stack([b, 2, 3])
         with pytest.raises(NotScalarConstantError):
-            get_scalar_constant_value(a[0])
-        assert get_scalar_constant_value(a[1]) == 2
-        assert get_scalar_constant_value(a[2]) == 3
+            get_underlying_scalar_constant_value(a[0])
+        assert get_underlying_scalar_constant_value(a[1]) == 2
+        assert get_underlying_scalar_constant_value(a[2]) == 3
 
-        # For now get_scalar_constant_value goes through only MakeVector and Join of
+        # For now get_underlying_scalar_constant_value goes through only MakeVector and Join of
         # scalars.
         v = ivector()
         a = at.stack([v, [2], [3]])
         with pytest.raises(NotScalarConstantError):
-            get_scalar_constant_value(a[0])
+            get_underlying_scalar_constant_value(a[0])
         with pytest.raises(NotScalarConstantError):
-            get_scalar_constant_value(a[1])
+            get_underlying_scalar_constant_value(a[1])
         with pytest.raises(NotScalarConstantError):
-            get_scalar_constant_value(a[2])
+            get_underlying_scalar_constant_value(a[2])
 
         # Test the case SubTensor(Shape(v)) when the dimensions
         # is broadcastable.
         v = row()
-        assert get_scalar_constant_value(v.shape[0]) == 1
+        assert get_underlying_scalar_constant_value(v.shape[0]) == 1
 
-        res = at.get_scalar_constant_value(at.as_tensor([10, 20]).shape[0])
+        res = at.get_underlying_scalar_constant_value(at.as_tensor([10, 20]).shape[0])
         assert isinstance(res, np.ndarray)
         assert 2 == res
 
-        res = at.get_scalar_constant_value(
+        res = at.get_underlying_scalar_constant_value(
             9 + at.as_tensor([1.0]).shape[0],
             elemwise=True,
             only_process_constants=False,
@@ -3320,63 +3321,63 @@ class TestGetScalarConstantValue:
     @pytest.mark.xfail(reason="Incomplete implementation")
     def test_DimShufle(self):
         a = as_tensor_variable(1.0)[None][0]
-        assert get_scalar_constant_value(a) == 1
+        assert get_underlying_scalar_constant_value(a) == 1
 
     def test_subtensor_of_constant(self):
         c = constant(random(5))
         for i in range(c.value.shape[0]):
-            assert get_scalar_constant_value(c[i]) == c.value[i]
+            assert get_underlying_scalar_constant_value(c[i]) == c.value[i]
         c = constant(random(5, 5))
         for i in range(c.value.shape[0]):
             for j in range(c.value.shape[1]):
-                assert get_scalar_constant_value(c[i, j]) == c.value[i, j]
+                assert get_underlying_scalar_constant_value(c[i, j]) == c.value[i, j]
 
     def test_numpy_array(self):
         # Regression test for crash when called on a numpy array.
-        assert get_scalar_constant_value(np.array(3)) == 3
+        assert get_underlying_scalar_constant_value(np.array(3)) == 3
         with pytest.raises(NotScalarConstantError):
-            get_scalar_constant_value(np.array([0, 1]))
+            get_underlying_scalar_constant_value(np.array([0, 1]))
         with pytest.raises(NotScalarConstantError):
-            get_scalar_constant_value(np.array([]))
+            get_underlying_scalar_constant_value(np.array([]))
 
     def test_make_vector(self):
         mv = make_vector(1, 2, 3)
         with pytest.raises(NotScalarConstantError):
-            get_scalar_constant_value(mv)
-        assert get_scalar_constant_value(mv[0]) == 1
-        assert get_scalar_constant_value(mv[1]) == 2
-        assert get_scalar_constant_value(mv[2]) == 3
-        assert get_scalar_constant_value(mv[np.int32(0)]) == 1
-        assert get_scalar_constant_value(mv[np.int64(1)]) == 2
-        assert get_scalar_constant_value(mv[np.uint(2)]) == 3
+            get_underlying_scalar_constant_value(mv)
+        assert get_underlying_scalar_constant_value(mv[0]) == 1
+        assert get_underlying_scalar_constant_value(mv[1]) == 2
+        assert get_underlying_scalar_constant_value(mv[2]) == 3
+        assert get_underlying_scalar_constant_value(mv[np.int32(0)]) == 1
+        assert get_underlying_scalar_constant_value(mv[np.int64(1)]) == 2
+        assert get_underlying_scalar_constant_value(mv[np.uint(2)]) == 3
         t = aes.ScalarType("int64")
         with pytest.raises(NotScalarConstantError):
-            get_scalar_constant_value(mv[t()])
+            get_underlying_scalar_constant_value(mv[t()])
 
     def test_shape_i(self):
         c = constant(np.random.random((3, 4)))
         s = Shape_i(0)(c)
-        assert get_scalar_constant_value(s) == 3
+        assert get_underlying_scalar_constant_value(s) == 3
         s = Shape_i(1)(c)
-        assert get_scalar_constant_value(s) == 4
+        assert get_underlying_scalar_constant_value(s) == 4
         d = pytensor.shared(np.random.standard_normal((1, 1)), shape=(1, 1))
         f = ScalarFromTensor()(Shape_i(0)(d))
-        assert get_scalar_constant_value(f) == 1
+        assert get_underlying_scalar_constant_value(f) == 1
 
     def test_elemwise(self):
         # We test only for a few elemwise, the list of all supported
         # elemwise are in the fct.
         c = constant(np.random.random())
         s = c + 1
-        assert np.allclose(get_scalar_constant_value(s), c.data + 1)
+        assert np.allclose(get_underlying_scalar_constant_value(s), c.data + 1)
         s = c - 1
-        assert np.allclose(get_scalar_constant_value(s), c.data - 1)
+        assert np.allclose(get_underlying_scalar_constant_value(s), c.data - 1)
         s = c * 1.2
-        assert np.allclose(get_scalar_constant_value(s), c.data * 1.2)
+        assert np.allclose(get_underlying_scalar_constant_value(s), c.data * 1.2)
         s = c < 0.5
-        assert np.allclose(get_scalar_constant_value(s), int(c.data < 0.5))
+        assert np.allclose(get_underlying_scalar_constant_value(s), int(c.data < 0.5))
         s = at.second(c, 0.4)
-        assert np.allclose(get_scalar_constant_value(s), 0.4)
+        assert np.allclose(get_underlying_scalar_constant_value(s), 0.4)
 
     def test_assert(self):
         # Make sure we still get the constant value if it is wrapped in
@@ -3386,25 +3387,25 @@ class TestGetScalarConstantValue:
 
         # condition is always True
         a = Assert()(c, c > 1)
-        assert get_scalar_constant_value(a) == 2
+        assert get_underlying_scalar_constant_value(a) == 2
 
         with config.change_flags(compute_test_value="off"):
             # condition is always False
             a = Assert()(c, c > 2)
             with pytest.raises(NotScalarConstantError):
-                get_scalar_constant_value(a)
+                get_underlying_scalar_constant_value(a)
 
         # condition is not constant
         a = Assert()(c, c > x)
         with pytest.raises(NotScalarConstantError):
-            get_scalar_constant_value(a)
+            get_underlying_scalar_constant_value(a)
 
     def test_second(self):
         # Second should apply when the value is constant but not the shape
         c = constant(np.random.random())
         shp = vector()
         s = at.second(shp, c)
-        assert get_scalar_constant_value(s) == c.data
+        assert get_underlying_scalar_constant_value(s) == c.data
 
     def test_copy(self):
         # Make sure we do not return the internal storage of a constant,
@@ -3418,15 +3419,25 @@ class TestGetScalarConstantValue:
     @pytest.mark.parametrize("only_process_constants", (True, False))
     def test_None_and_NoneConst(self, only_process_constants):
         with pytest.raises(NotScalarConstantError):
-            get_scalar_constant_value(
+            get_underlying_scalar_constant_value(
                 None, only_process_constants=only_process_constants
             )
         assert (
-            get_scalar_constant_value(
+            get_underlying_scalar_constant_value(
                 NoneConst, only_process_constants=only_process_constants
             )
             is None
         )
+
+
+@pytest.mark.parametrize(
+    ["valid_inp", "invalid_inp"],
+    ((np.array(4), np.zeros(5)), (at.constant(4), at.constant(3, ndim=1))),
+)
+def test_get_scalar_constant_value(valid_inp, invalid_inp):
+    with pytest.raises(NotScalarConstantError):
+        get_scalar_constant_value(invalid_inp)
+    assert get_scalar_constant_value(valid_inp) == 4
 
 
 def test_complex_mod_failure():

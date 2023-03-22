@@ -1043,7 +1043,7 @@ class TestConversion:
         from pytensor.tensor.exceptions import NotScalarConstantError
 
         with pytest.raises(NotScalarConstantError):
-            at.get_scalar_constant_value(s, only_process_constants=True)
+            at.get_underlying_scalar_constant_value(s, only_process_constants=True)
 
     # TODO:
     # def test_sparse_as_tensor_variable(self):

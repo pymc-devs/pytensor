@@ -24,7 +24,10 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.op import Op
 from pytensor.raise_op import Assert
-from pytensor.tensor.basic import as_tensor_variable, get_scalar_constant_value
+from pytensor.tensor.basic import (
+    as_tensor_variable,
+    get_underlying_scalar_constant_value,
+)
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.var import TensorConstant, TensorVariable
 
@@ -495,8 +498,8 @@ def check_conv_gradinputs_shape(
         if given is None or computed is None:
             return True
         try:
-            given = get_scalar_constant_value(given)
-            computed = get_scalar_constant_value(computed)
+            given = get_underlying_scalar_constant_value(given)
+            computed = get_underlying_scalar_constant_value(computed)
             return int(given) == int(computed)
         except NotScalarConstantError:
             # no answer possible, accept for now
@@ -532,7 +535,7 @@ def assert_conv_shape(shape):
     out_shape = []
     for i, n in enumerate(shape):
         try:
-            const_n = get_scalar_constant_value(n)
+            const_n = get_underlying_scalar_constant_value(n)
             if i < 2:
                 if const_n < 0:
                     raise ValueError(
@@ -2200,7 +2203,9 @@ class BaseAbstractConv(Op):
             if imshp_i is not None:
                 # Components of imshp should be constant or ints
                 try:
-                    get_scalar_constant_value(imshp_i, only_process_constants=True)
+                    get_underlying_scalar_constant_value(
+                        imshp_i, only_process_constants=True
+                    )
                 except NotScalarConstantError:
                     raise ValueError(
                         "imshp should be None or a tuple of constant int values"
@@ -2213,7 +2218,9 @@ class BaseAbstractConv(Op):
             if kshp_i is not None:
                 # Components of kshp should be constant or ints
                 try:
-                    get_scalar_constant_value(kshp_i, only_process_constants=True)
+                    get_underlying_scalar_constant_value(
+                        kshp_i, only_process_constants=True
+                    )
                 except NotScalarConstantError:
                     raise ValueError(
                         "kshp should be None or a tuple of constant int values"
