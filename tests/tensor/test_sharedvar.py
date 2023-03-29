@@ -688,3 +688,9 @@ def test_scalar_shared_options():
 def test_get_vector_length():
     x = pytensor.shared(np.array((2, 3, 4, 5)))
     assert get_vector_length(x) == 4
+
+
+def test_shared_masked_array_not_implemented():
+    x = np.ma.masked_greater(np.array([1, 2, 3, 4]), 3)
+    with pytest.raises(NotImplementedError, match="MaskedArrays are not supported"):
+        pytensor.shared(x)

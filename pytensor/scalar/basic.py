@@ -240,6 +240,9 @@ def convert(x, dtype=None):
         The dtype to use for the conversion of `x`.
 
     """
+    if isinstance(x, np.ma.MaskedArray):
+        raise NotImplementedError("MaskedArrays are not supported")
+
     if dtype is not None:
         # in this case, the semantics are that the caller is forcing the dtype
         x_ = _asarray(x, dtype=dtype)
