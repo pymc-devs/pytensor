@@ -65,6 +65,9 @@ def tensor_constructor(
     optional `shape` argument will override this default.
 
     """
+    if isinstance(value, np.ma.MaskedArray):
+        raise NotImplementedError("MaskedArrays are not supported")
+
     if broadcastable is not None:
         warnings.warn(
             "The `broadcastable` keyword is deprecated; use `shape`.",

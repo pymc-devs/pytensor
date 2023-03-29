@@ -537,6 +537,12 @@ def test_constant():
     assert np.array_equal(z.data, x_data)
 
 
+def test_constant_masked_array_not_implemented():
+    x = np.ma.masked_greater(np.array([1, 2, 3, 4]), 3)
+    with pytest.raises(NotImplementedError, match="MaskedArrays are not supported"):
+        constant(x)
+
+
 class TestAsTensorVariable:
     """
     Unit test for ensuring that as_tensor_variable handles Apply objects
@@ -687,6 +693,13 @@ class TestAsTensorVariable:
 
         with pytest.raises(TypeError):
             at.as_tensor(TestOp(matrix(), matrix()))
+
+    def test_masked_array_not_implemented(
+        self,
+    ):
+        x = np.ma.masked_greater(np.array([1, 2, 3, 4]), 3)
+        with pytest.raises(NotImplementedError, match="MaskedArrays are not supported"):
+            at.as_tensor(x)
 
 
 class TestAlloc:
