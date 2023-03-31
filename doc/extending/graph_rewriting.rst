@@ -603,7 +603,7 @@ An :class:`EquilibriumDB` contains :class:`NodeRewriter` or :class:`RewriteDatab
 has a name and an arbitrary number of tags. When a :class:`RewriteDatabaseQuery` is applied to
 an :class:`EquilibriumDB`, all :class:`NodeRewriter`\s that match the query are
 inserted into an :class:`EquilibriumGraphRewriter`, which is returned. If the
-:class:`SequenceDB` contains :class:`RewriteDatabase` instances, the
+:class:`EquilibriumDB` contains :class:`RewriteDatabase` instances, the
 :class:`RewriteDatabaseQuery` will be passed to them as well and the
 :class:`NodeRewriter`\s they return will be put in their places
 (note that as of yet no :class:`RewriteDatabase` can produce :class:`NodeRewriter` objects, so this
