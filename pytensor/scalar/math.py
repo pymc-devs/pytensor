@@ -18,8 +18,11 @@ from pytensor.scalar.basic import (
     BinaryScalarOp,
     ScalarOp,
     UnaryScalarOp,
+    as_scalar,
     complex_types,
+    constant,
     discrete_types,
+    eq,
     exp,
     expm1,
     float64,
@@ -27,6 +30,7 @@ from pytensor.scalar.basic import (
     isinf,
     log,
     log1p,
+    sqrt,
     switch,
     true_div,
     upcast,
@@ -34,6 +38,7 @@ from pytensor.scalar.basic import (
     upgrade_to_float64,
     upgrade_to_float_no_complex,
 )
+from pytensor.scalar.loop import ScalarLoop
 
 
 class Erf(UnaryScalarOp):
@@ -595,7 +600,7 @@ class GammaInc(BinaryScalarOp):
         (k, x) = inputs
         (gz,) = grads
         return [
-            gz * gammainc_der(k, x),
+            gz * gammainc_grad(k, x),
             gz * exp(-x + (k - 1) * log(x) - gammaln(k)),
         ]
 
@@ -644,7 +649,7 @@ class GammaIncC(BinaryScalarOp):
         (k, x) = inputs
         (gz,) = grads
         return [
-            gz * gammaincc_der(k, x),
+            gz * gammaincc_grad(k, x),
             gz * -exp(-x + (k - 1) * log(x) - gammaln(k)),
         ]
 
@@ -675,162 +680,209 @@ class GammaIncC(BinaryScalarOp):
 gammaincc = GammaIncC(upgrade_to_float, name="gammaincc")
 
 
-class GammaIncDer(BinaryScalarOp):
-    """
-    Gradient of the the regularized lower gamma function (P) wrt to the first
-    argument (k, a.k.a. alpha). Adapted from STAN `grad_reg_lower_inc_gamma.hpp`
+def _make_scalar_loop(n_steps, init, constant, inner_loop_fn, name):
+    init = [as_scalar(x) for x in init]
+    constant = [as_scalar(x) for x in constant]
+    # Create dummy types, in case some variables have the same initial form
+    init_ = [x.type() for x in init]
+    constant_ = [x.type() for x in constant]
+    update_, until_ = inner_loop_fn(*init_, *constant_)
+    op = ScalarLoop(
+        init=init_,
+        constant=constant_,
+        update=update_,
+        until=until_,
+        until_condition_failed="warn",
+        name=name,
+    )
+    S, *_ = op(n_steps, *init, *constant)
+    return S
+
+
+def gammainc_grad(k, x):
+    """Gradient of the regularized lower gamma function (P) wrt to the first
+    argument (k, a.k.a. alpha).
+
+    Adapted from STAN `grad_reg_lower_inc_gamma.hpp`
 
     Reference: Gautschi, W. (1979). A computational procedure for incomplete gamma functions.
     ACM Transactions on Mathematical Software (TOMS), 5(4), 466-481.
     """
+    dtype = upcast(k.type.dtype, x.type.dtype, "float32")
 
-    def impl(self, k, x):
-        if x == 0:
-            return 0
+    def grad_approx(skip_loop):
+        precision = np.array(1e-10, dtype=config.floatX)
+        max_iters = switch(
+            skip_loop, np.array(0, dtype="int32"), np.array(1e5, dtype="int32")
+        )
 
-        sqrt_exp = -756 - x**2 + 60 * x
-        if (
-            (k < 0.8 and x > 15)
-            or (k < 12 and x > 30)
-            or (sqrt_exp > 0 and k < np.sqrt(sqrt_exp))
-        ):
-            return -GammaIncCDer.st_impl(k, x)
+        log_x = log(x)
+        log_gamma_k_plus_1 = gammaln(k + 1)
 
-        precision = 1e-10
-        max_iters = int(1e5)
-
-        log_x = np.log(x)
-        log_gamma_k_plus_1 = scipy.special.gammaln(k + 1)
-
-        k_plus_n = k
+        # First loop
+        k_plus_n = k  # Should not overflow unless k > 2,147,383,647
         log_gamma_k_plus_n_plus_1 = log_gamma_k_plus_1
-        sum_a = 0.0
-        for n in range(0, max_iters + 1):
-            term = np.exp(k_plus_n * log_x - log_gamma_k_plus_n_plus_1)
+        sum_a0 = np.array(0.0, dtype=dtype)
+
+        def inner_loop_a(sum_a, log_gamma_k_plus_n_plus_1, k_plus_n, log_x):
+            term = exp(k_plus_n * log_x - log_gamma_k_plus_n_plus_1)
             sum_a += term
 
-            if term <= precision:
-                break
-
-            log_gamma_k_plus_n_plus_1 += np.log1p(k_plus_n)
+            log_gamma_k_plus_n_plus_1 += log1p(k_plus_n)
             k_plus_n += 1
-
-        if n >= max_iters:
-            warnings.warn(
-                f"gammainc_der did not converge after {n} iterations",
-                RuntimeWarning,
+            return (
+                (sum_a, log_gamma_k_plus_n_plus_1, k_plus_n),
+                (term <= precision),
             )
-            return np.nan
 
-        k_plus_n = k
+        init = [sum_a0, log_gamma_k_plus_n_plus_1, k_plus_n]
+        constant = [log_x]
+        sum_a = _make_scalar_loop(
+            max_iters, init, constant, inner_loop_a, name="gammainc_grad_a"
+        )
+
+        # Second loop
+        n = np.array(0, dtype="int32")
         log_gamma_k_plus_n_plus_1 = log_gamma_k_plus_1
-        sum_b = 0.0
-        for n in range(0, max_iters + 1):
-            term = np.exp(
-                k_plus_n * log_x - log_gamma_k_plus_n_plus_1
-            ) * scipy.special.digamma(k_plus_n + 1)
+        k_plus_n = k
+        sum_b0 = np.array(0.0, dtype=dtype)
+
+        def inner_loop_b(sum_b, log_gamma_k_plus_n_plus_1, n, k_plus_n, log_x):
+            term = exp(k_plus_n * log_x - log_gamma_k_plus_n_plus_1) * psi(k_plus_n + 1)
             sum_b += term
 
-            if term <= precision and n >= 1:  # Require at least two iterations
-                return np.exp(-x) * (log_x * sum_a - sum_b)
-
-            log_gamma_k_plus_n_plus_1 += np.log1p(k_plus_n)
+            log_gamma_k_plus_n_plus_1 += log1p(k_plus_n)
+            n += 1
             k_plus_n += 1
-
-        warnings.warn(
-            f"gammainc_der did not converge after {n} iterations",
-            RuntimeWarning,
-        )
-        return np.nan
-
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
-
-
-gammainc_der = GammaIncDer(upgrade_to_float, name="gammainc_der")
-
-
-class GammaIncCDer(BinaryScalarOp):
-    """
-    Gradient of the the regularized upper gamma function (Q) wrt to the first
-    argument (k, a.k.a. alpha). Adapted from STAN `grad_reg_inc_gamma.hpp`
-    """
-
-    @staticmethod
-    def st_impl(k, x):
-        gamma_k = scipy.special.gamma(k)
-        digamma_k = scipy.special.digamma(k)
-        log_x = np.log(x)
-
-        # asymptotic expansion http://dlmf.nist.gov/8.11#E2
-        if (x >= k) and (x >= 8):
-            S = 0
-            k_minus_one_minus_n = k - 1
-            fac = k_minus_one_minus_n
-            dfac = 1
-            xpow = x
-            delta = dfac / xpow
-
-            for n in range(1, 10):
-                k_minus_one_minus_n -= 1
-                S += delta
-                xpow *= x
-                dfac = k_minus_one_minus_n * dfac + fac
-                fac *= k_minus_one_minus_n
-                delta = dfac / xpow
-                if np.isinf(delta):
-                    warnings.warn(
-                        "gammaincc_der did not converge",
-                        RuntimeWarning,
-                    )
-                    return np.nan
-
             return (
-                scipy.special.gammaincc(k, x) * (log_x - digamma_k)
-                + np.exp(-x + (k - 1) * log_x) * S / gamma_k
+                (sum_b, log_gamma_k_plus_n_plus_1, n, k_plus_n),
+                # Require at least two iterations
+                ((term <= precision) & (n > 1)),
             )
 
-        # gradient of series expansion http://dlmf.nist.gov/8.7#E3
-        else:
-            log_precision = np.log(1e-6)
-            max_iters = int(1e5)
-            S = 0
-            log_s = 0.0
-            s_sign = 1
-            log_delta = log_s - 2 * np.log(k)
-            for n in range(1, max_iters + 1):
-                S += np.exp(log_delta) if s_sign > 0 else -np.exp(log_delta)
-                s_sign = -s_sign
-                log_s += log_x - np.log(n)
-                log_delta = log_s - 2 * np.log(n + k)
+        init = [sum_b0, log_gamma_k_plus_n_plus_1, n, k_plus_n]
+        constant = [log_x]
+        sum_b, *_ = _make_scalar_loop(
+            max_iters, init, constant, inner_loop_b, name="gammainc_grad_b"
+        )
 
-                if np.isinf(log_delta):
-                    warnings.warn(
-                        "gammaincc_der did not converge",
-                        RuntimeWarning,
-                    )
-                    return np.nan
+        grad_approx = exp(-x) * (log_x * sum_a - sum_b)
+        return grad_approx
 
-                if log_delta <= log_precision:
-                    return (
-                        scipy.special.gammainc(k, x) * (digamma_k - log_x)
-                        + np.exp(k * log_x) * S / gamma_k
-                    )
+    zero_branch = eq(x, 0)
+    sqrt_exp = -756 - x**2 + 60 * x
+    gammaincc_branch = (
+        ((k < 0.8) & (x > 15))
+        | ((k < 12) & (x > 30))
+        | ((sqrt_exp > 0) & (k < sqrt(sqrt_exp)))
+    )
+    grad = switch(
+        zero_branch,
+        0,
+        switch(
+            gammaincc_branch,
+            -gammaincc_grad(k, x, skip_loops=zero_branch | (~gammaincc_branch)),
+            grad_approx(skip_loop=zero_branch | gammaincc_branch),
+        ),
+    )
+    return grad
 
-            warnings.warn(
-                f"gammaincc_der did not converge after {n} iterations",
-                RuntimeWarning,
+
+def gammaincc_grad(k, x, skip_loops=constant(False, dtype="bool")):
+    """Gradient of the regularized upper gamma function (Q) wrt to the first
+    argument (k, a.k.a. alpha).
+
+    Adapted from STAN `grad_reg_inc_gamma.hpp`
+
+    skip_loops is used for faster branching when this function is called by `gammainc_der`
+    """
+    dtype = upcast(k.type.dtype, x.type.dtype, "float32")
+
+    gamma_k = gamma(k)
+    digamma_k = psi(k)
+    log_x = log(x)
+
+    def approx_a(skip_loop):
+        n_steps = switch(
+            skip_loop, np.array(0, dtype="int32"), np.array(9, dtype="int32")
+        )
+        sum_a0 = np.array(0.0, dtype=dtype)
+        dfac = np.array(1.0, dtype=dtype)
+        xpow = x
+        k_minus_one_minus_n = k - 1
+        fac = k_minus_one_minus_n
+        delta = true_div(dfac, xpow)
+
+        def inner_loop_a(sum_a, delta, xpow, k_minus_one_minus_n, fac, dfac, x):
+            sum_a += delta
+            xpow *= x
+            k_minus_one_minus_n -= 1
+            dfac = k_minus_one_minus_n * dfac + fac
+            fac *= k_minus_one_minus_n
+            delta = dfac / xpow
+            return (sum_a, delta, xpow, k_minus_one_minus_n, fac, dfac), ()
+
+        init = [sum_a0, delta, xpow, k_minus_one_minus_n, fac, dfac]
+        constant = [x]
+        sum_a = _make_scalar_loop(
+            n_steps, init, constant, inner_loop_a, name="gammaincc_grad_a"
+        )
+        grad_approx_a = (
+            gammaincc(k, x) * (log_x - digamma_k)
+            + exp(-x + (k - 1) * log_x) * sum_a / gamma_k
+        )
+        return grad_approx_a
+
+    def approx_b(skip_loop):
+        max_iters = switch(
+            skip_loop, np.array(0, dtype="int32"), np.array(1e5, dtype="int32")
+        )
+        log_precision = np.array(np.log(1e-6), dtype=config.floatX)
+
+        sum_b0 = np.array(0.0, dtype=dtype)
+        log_s = np.array(0.0, dtype=dtype)
+        s_sign = np.array(1, dtype="int8")
+        n = np.array(1, dtype="int32")
+        log_delta = log_s - 2 * log(k)
+
+        def inner_loop_b(sum_b, log_s, s_sign, log_delta, n, k, log_x):
+            delta = exp(log_delta)
+            sum_b += switch(s_sign > 0, delta, -delta)
+            s_sign = -s_sign
+
+            # log will cast >int16 to float64
+            log_s_inc = log_x - log(n)
+            if log_s_inc.type.dtype != log_s.type.dtype:
+                log_s_inc = log_s_inc.astype(log_s.type.dtype)
+            log_s += log_s_inc
+
+            new_log_delta = log_s - 2 * log(n + k)
+            if new_log_delta.type.dtype != log_delta.type.dtype:
+                new_log_delta = new_log_delta.astype(log_delta.type.dtype)
+            log_delta = new_log_delta
+
+            n += 1
+            return (
+                (sum_b, log_s, s_sign, log_delta, n),
+                log_delta <= log_precision,
             )
-            return np.nan
 
-    def impl(self, k, x):
-        return self.st_impl(k, x)
+        init = [sum_b0, log_s, s_sign, log_delta, n]
+        constant = [k, log_x]
+        sum_b = _make_scalar_loop(
+            max_iters, init, constant, inner_loop_b, name="gammaincc_grad_b"
+        )
+        grad_approx_b = (
+            gammainc(k, x) * (digamma_k - log_x) + exp(k * log_x) * sum_b / gamma_k
+        )
+        return grad_approx_b
 
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
-
-
-gammaincc_der = GammaIncCDer(upgrade_to_float, name="gammaincc_der")
+    branch_a = (x >= k) & (x >= 8)
+    return switch(
+        branch_a,
+        approx_a(skip_loop=~branch_a | skip_loops),
+        approx_b(skip_loop=branch_a | skip_loops),
+    )
 
 
 class GammaU(BinaryScalarOp):
