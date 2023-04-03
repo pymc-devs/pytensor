@@ -22,6 +22,7 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
+from pytensor.scalar.loop import ScalarLoop
 from pytensor.tensor.basic import (
     MakeVector,
     alloc,
@@ -66,9 +67,12 @@ class InplaceElemwiseOptimizer(GraphRewriter):
                 print(blanc, n, ndim[n], file=stream)
 
     def candidate_input_idxs(self, node):
-        if isinstance(node.op.scalar_op, aes.Composite) and len(node.outputs) > 1:
-            # TODO: Implement specialized InplaceCompositeOptimizer with logic
-            #  needed to correctly assign inplace for multi-output Composites
+        # TODO: Implement specialized InplaceCompositeOptimizer with logic
+        #  needed to correctly assign inplace for multi-output Composites
+        #  and ScalarLoops
+        if isinstance(node.op.scalar_op, ScalarLoop):
+            return []
+        if isinstance(node.op.scalar_op, aes.Composite) and (len(node.outputs) > 1):
             return []
         else:
             return range(len(node.outputs))
