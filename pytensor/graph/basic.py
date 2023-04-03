@@ -1115,12 +1115,12 @@ def truncated_graph_inputs(
 
 
 def clone(
-    inputs: List[Variable],
-    outputs: List[Variable],
+    inputs: Sequence[Variable],
+    outputs: Sequence[Variable],
     copy_inputs: bool = True,
     copy_orphans: Optional[bool] = None,
     clone_inner_graphs: bool = False,
-) -> Tuple[Collection[Variable], Collection[Variable]]:
+) -> Tuple[List[Variable], List[Variable]]:
     r"""Copies the sub-graph contained between inputs and outputs.
 
     Parameters
