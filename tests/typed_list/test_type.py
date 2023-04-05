@@ -150,3 +150,7 @@ class TestTypedListType:
         )()
 
         assert isinstance(mySymbolicVariable, TypedListVariable)
+
+    def test_any(self):
+        tlist = TypedListType(TensorType(dtype="int64", shape=(None,)))()
+        assert any([tlist])

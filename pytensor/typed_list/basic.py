@@ -19,6 +19,11 @@ class _typed_list_py_operators:
     def __len__(self):
         return length(self)
 
+    def __bool__(self):
+        # Truthiness of typedLists cannot depend on length,
+        # just like truthiness of TensorVariables does not depend on size or contents
+        return True
+
     def append(self, toAppend):
         return append(self, toAppend)
 
@@ -677,3 +682,18 @@ Notes
 All PyTensor variables must have the same type.
 
 """
+
+
+class MakeEmptyList(Op):
+    __props__ = ()
+
+    def make_node(self, ttype):
+        tl = TypedListType(ttype)()
+        return Apply(self, [], [tl])
+
+    def perform(self, node, inputs, outputs):
+        (out,) = outputs
+        out[0] = []
+
+
+make_empty_list = MakeEmptyList()
