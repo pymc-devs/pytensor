@@ -1593,6 +1593,15 @@ class TestIncSubtensor:
                 ),
             )
 
+            # Broadcastable leading dim
+            utt.verify_grad(
+                f_slice(slice(None, None), slice(1, 3)),
+                (
+                    np.asarray([0, 1, 2, 3, 4, 5.0])[None, ...],
+                    np.asarray([9, 9.0]),
+                ),
+            )
+
 
 class TestIncSubtensor1:
     def setup_method(self):
