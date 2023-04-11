@@ -12,5 +12,6 @@ import pytensor.link.jax.dispatch.slinalg
 import pytensor.link.jax.dispatch.random
 import pytensor.link.jax.dispatch.elemwise
 import pytensor.link.jax.dispatch.scan
+import pytensor.link.jax.dispatch.sparse
 
 # isort: on
