@@ -500,12 +500,13 @@ class TestMakeVector(utt.InferShapeTester):
 
 
 class ApplyDefaultTestOp(Op):
-    def __init__(self, id):
+    def __init__(self, id, n_outs=1):
         self.default_output = id
+        self.n_outs = n_outs
 
     def make_node(self, x):
         x = at.as_tensor_variable(x)
-        return Apply(self, [x], [x.type()])
+        return Apply(self, [x], [x.type() for _ in range(self.n_outs)])
 
     def perform(self, *args, **kwargs):
         raise NotImplementedError()
@@ -556,16 +557,26 @@ class TestAsTensorVariable:
         y = as_tensor_variable(aes.int8())
         assert isinstance(y.owner.op, TensorFromScalar)
 
-    def test_multi_outputs(self):
-        good_apply_var = ApplyDefaultTestOp(0).make_node(self.x)
-        as_tensor_variable(good_apply_var)
+    def test_default_output(self):
+        good_apply_var = ApplyDefaultTestOp(0, n_outs=1).make_node(self.x)
+        as_tensor_variable(good_apply_var) is good_apply_var
 
-        bad_apply_var = ApplyDefaultTestOp(-1).make_node(self.x)
-        with pytest.raises(ValueError):
+        good_apply_var = ApplyDefaultTestOp(-1, n_outs=1).make_node(self.x)
+        as_tensor_variable(good_apply_var) is good_apply_var
+
+        bad_apply_var = ApplyDefaultTestOp(1, n_outs=1).make_node(self.x)
+        with pytest.raises(IndexError):
             _ = as_tensor_variable(bad_apply_var)
 
-        bad_apply_var = ApplyDefaultTestOp(2).make_node(self.x)
-        with pytest.raises(ValueError):
+        bad_apply_var = ApplyDefaultTestOp(2.0, n_outs=1).make_node(self.x)
+        with pytest.raises(TypeError):
+            _ = as_tensor_variable(bad_apply_var)
+
+        good_apply_var = ApplyDefaultTestOp(1, n_outs=2).make_node(self.x)
+        as_tensor_variable(good_apply_var) is good_apply_var.outputs[1]
+
+        bad_apply_var = ApplyDefaultTestOp(None, n_outs=2).make_node(self.x)
+        with pytest.raises(TypeError, match="Multi-output Op without default_output"):
             _ = as_tensor_variable(bad_apply_var)
 
     def test_list(self):
@@ -578,7 +589,7 @@ class TestAsTensorVariable:
             _ = as_tensor_variable(y)
 
         bad_apply_var = ApplyDefaultTestOp([0, 1]).make_node(self.x)
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError):
             as_tensor_variable(bad_apply_var)
 
     def test_ndim_strip_leading_broadcastable(self):

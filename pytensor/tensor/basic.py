@@ -80,7 +80,7 @@ def _as_tensor_Apply(x, name, ndim, **kwargs):
     # use Apply's default output mechanism
     if (x.op.default_output is None) and (len(x.outputs) != 1):
         raise TypeError(
-            "Multi-output Op encountered. "
+            "Multi-output Op without default_output encountered. "
             "Retry using only one of the outputs directly."
         )
 

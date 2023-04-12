@@ -193,11 +193,9 @@ class Apply(Node, Generic[OpType]):
             if len(self.outputs) == 1:
                 return self.outputs[0]
             else:
-                raise ValueError(f"{self.op}.default_output should be an output index.")
-        elif not isinstance(do, int):
-            raise ValueError(f"{self.op}.default_output should be an int or long")
-        elif do < 0 or do >= len(self.outputs):
-            raise ValueError(f"{self.op}.default_output is out of range.")
+                raise ValueError(
+                    f"Multi-output Op {self.op} default_output not specified"
+                )
         return self.outputs[do]
 
     def __str__(self):
