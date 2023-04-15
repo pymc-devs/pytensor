@@ -69,7 +69,7 @@ documentation = "https://pytensor.readthedocs.io/en/latest/"
 
 
 [project.scripts]
-pytensor-cache = "bin.pytensor_cache:main"
+pytensor-cache = "pytensor.bin.pytensor_cache:main"
 
 [project.optional-dependencies]
 complete = [
