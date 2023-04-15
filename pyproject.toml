@@ -105,30 +105,11 @@ numba = [
 ]
 
 [tool.setuptools.packages.find]
-exclude = [
-    "tests",
-    "tests.*"
-]
+include = ["pytensor*", "bin"]
 
 [tool.setuptools.package-data]
-"*" = [
-    "*.txt",
-    "*.rst",
-    "*.cu",
-    "*.cuh",
-    "*.c",
-    "*.sh",
-    "*.pkl",
-    "*.h",
-    "*.cpp",
-    "ChangeLog",
-    "c_code/*",
-]
 pytensor = [
     "py.typed"
-]
-"pytensor.misc" = [
-    "*.sh"
 ]
 "pytensor.d3viz" = [
     "html/*",
