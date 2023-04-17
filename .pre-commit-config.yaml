@@ -61,7 +61,7 @@ repos:
         - numpy>=1.20
         - pandas
         - types-filelock
-        - types-setuptools
+        - types-setuptools>=67.6.0.8
         always_run: true
         require_serial: true
         pass_filenames: false
