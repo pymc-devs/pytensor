@@ -1,4 +1,4 @@
-from setuptools._distutils.errors import CompileError as BaseCompileError
+from setuptools.errors import CompileError as BaseCompileError
 
 
 class MissingGXX(Exception):
