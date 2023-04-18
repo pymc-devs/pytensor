@@ -5,11 +5,11 @@ import scipy.stats as stats
 import pytensor
 import pytensor.tensor as at
 import pytensor.tensor.random as aer
-from pytensor.compile.function import function
 from pytensor.compile.sharedvalue import SharedVariable, shared
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor.random.basic import RandomVariable
+from pytensor.tensor.random.type import random_generator_type, random_state_type
 from pytensor.tensor.random.utils import RandomStream
 from tests.link.jax.test_basic import compare_jax_and_py, jax_mode, set_test_value
 
@@ -24,7 +24,40 @@ def random_function(*args, **kwargs):
     with pytest.warns(
         UserWarning, match=r"The RandomType SharedVariables \[.+\] will not be used"
     ):
-        return function(*args, **kwargs)
+        return pytensor.function(*args, **kwargs)
+
+
+@pytest.mark.parametrize("random_type", ("generator", "state"))
+def test_rng_io(random_type):
+    """Test explicit (non-shared) input and output RNG types in JAX."""
+    if random_type == "generator":
+        rng = random_generator_type("rng")
+        np_rng = np.random.default_rng(0)
+    else:
+        rng = random_state_type("rng")
+        np_rng = np.random.RandomState(0)
+    jx_rng = jax.random.PRNGKey(0)
+
+    next_rng, x = aer.normal(rng=rng).owner.outputs
+
+    with pytest.warns(
+        UserWarning,
+        match="RandomTypes are implicitly converted to random PRNGKey arrays",
+    ):
+        fn = pytensor.function([rng], [next_rng, x], mode="JAX")
+
+    # Inputs - RNG outputs
+    assert isinstance(fn(np_rng)[0], jax.Array)
+    assert isinstance(fn(jx_rng)[0], jax.Array)
+
+    # Inputs - Value outputs
+    assert fn(np_rng)[1] == fn(np_rng)[1]
+    assert fn(jx_rng)[1] == fn(jx_rng)[1]
+    assert fn(np_rng)[1] != fn(jx_rng)[1]
+
+    # Chained Inputs - RNG / Value outputs
+    assert fn(fn(np_rng)[0])[1] != fn(np_rng)[1]
+    assert fn(fn(jx_rng)[0])[1] != fn(jx_rng)[1]
 
 
 def test_random_RandomStream():

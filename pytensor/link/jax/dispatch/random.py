@@ -10,6 +10,7 @@ from numpy.random.bit_generator import (  # type: ignore[attr-defined]
 import pytensor.tensor.random.basic as aer
 from pytensor.link.jax.dispatch.basic import jax_funcify, jax_typify
 from pytensor.link.jax.dispatch.shape import JAXShapeTuple
+from pytensor.tensor.random.type import RandomType
 from pytensor.tensor.shape import Shape, Shape_i
 
 
@@ -57,8 +58,7 @@ def jax_typify_RandomState(state, **kwargs):
     state = state.get_state(legacy=False)
     state["bit_generator"] = numpy_bit_gens[state["bit_generator"]]
     # XXX: Is this a reasonable approach?
-    state["jax_state"] = state["state"]["key"][0:2]
-    return state
+    return state["state"]["key"][0:2]
 
 
 @jax_typify.register(Generator)
@@ -83,7 +83,36 @@ def jax_typify_Generator(rng, **kwargs):
     state_32 = _coerce_to_uint32_array(state["state"]["state"])
     state["state"]["inc"] = inc_32[0] << 32 | inc_32[1]
     state["state"]["state"] = state_32[0] << 32 | state_32[1]
-    return state
+    return state["jax_state"]
+
+
+class RandomPRNGKeyType(RandomType[jax.random.PRNGKey]):
+    """JAX-compatible PRNGKey type.
+
+    This type is not exposed to users directly.
+
+    It is introduced by the JIT linker in place of any RandomType input
+    variables used in the original function. Nodes in the function graph will
+    still show the original types as inputs and outputs.
+    """
+
+    def filter(self, data, strict: bool = False, allow_downcast=None):
+        # PRNGs are just JAX Arrays, we assume this is a valid one!
+        if isinstance(data, jax.Array):
+            return data
+
+        if strict:
+            raise TypeError()
+
+        return jax_typify(data)
+
+
+random_prng_key_type = RandomPRNGKeyType()
+
+
+@jax_typify.register(RandomType)
+def jax_typify_RandomType(type):
+    return random_prng_key_type()
 
 
 @jax_funcify.register(aer.RandomVariable)
@@ -130,12 +159,10 @@ def jax_sample_fn_generic(op):
     name = op.name
     jax_op = getattr(jax.random, name)
 
-    def sample_fn(rng, size, dtype, *parameters):
-        rng_key = rng["jax_state"]
+    def sample_fn(rng_key, size, dtype, *parameters):
         rng_key, sampling_key = jax.random.split(rng_key, 2)
         sample = jax_op(sampling_key, *parameters, shape=size, dtype=dtype)
-        rng["jax_state"] = rng_key
-        return (rng, sample)
+        return (rng_key, sample)
 
     return sample_fn
 
@@ -157,13 +184,11 @@ def jax_sample_fn_loc_scale(op):
     name = op.name
     jax_op = getattr(jax.random, name)
 
-    def sample_fn(rng, size, dtype, *parameters):
-        rng_key = rng["jax_state"]
+    def sample_fn(rng_key, size, dtype, *parameters):
         rng_key, sampling_key = jax.random.split(rng_key, 2)
         loc, scale = parameters
         sample = loc + jax_op(sampling_key, size, dtype) * scale
-        rng["jax_state"] = rng_key
-        return (rng, sample)
+        return (rng_key, sample)
 
     return sample_fn
 
@@ -175,12 +200,10 @@ def jax_sample_fn_no_dtype(op):
     name = op.name
     jax_op = getattr(jax.random, name)
 
-    def sample_fn(rng, size, dtype, *parameters):
-        rng_key = rng["jax_state"]
+    def sample_fn(rng_key, size, dtype, *parameters):
         rng_key, sampling_key = jax.random.split(rng_key, 2)
         sample = jax_op(sampling_key, *parameters, shape=size)
-        rng["jax_state"] = rng_key
-        return (rng, sample)
+        return (rng_key, sample)
 
     return sample_fn
 
@@ -201,15 +224,13 @@ def jax_sample_fn_uniform(op):
         name = "randint"
     jax_op = getattr(jax.random, name)
 
-    def sample_fn(rng, size, dtype, *parameters):
-        rng_key = rng["jax_state"]
+    def sample_fn(rng_key, size, dtype, *parameters):
         rng_key, sampling_key = jax.random.split(rng_key, 2)
         minval, maxval = parameters
         sample = jax_op(
             sampling_key, shape=size, dtype=dtype, minval=minval, maxval=maxval
         )
-        rng["jax_state"] = rng_key
-        return (rng, sample)
+        return (rng_key, sample)
 
     return sample_fn
 
@@ -226,13 +247,11 @@ def jax_sample_fn_shape_rate(op):
     name = op.name
     jax_op = getattr(jax.random, name)
 
-    def sample_fn(rng, size, dtype, *parameters):
-        rng_key = rng["jax_state"]
+    def sample_fn(rng_key, size, dtype, *parameters):
         rng_key, sampling_key = jax.random.split(rng_key, 2)
         (shape, rate) = parameters
         sample = jax_op(sampling_key, shape, size, dtype) / rate
-        rng["jax_state"] = rng_key
-        return (rng, sample)
+        return (rng_key, sample)
 
     return sample_fn
 
@@ -241,13 +260,11 @@ def jax_sample_fn_shape_rate(op):
 def jax_sample_fn_exponential(op):
     """JAX implementation of `ExponentialRV`."""
 
-    def sample_fn(rng, size, dtype, *parameters):
-        rng_key = rng["jax_state"]
+    def sample_fn(rng_key, size, dtype, *parameters):
         rng_key, sampling_key = jax.random.split(rng_key, 2)
         (scale,) = parameters
         sample = jax.random.exponential(sampling_key, size, dtype) * scale
-        rng["jax_state"] = rng_key
-        return (rng, sample)
+        return (rng_key, sample)
 
     return sample_fn
 
@@ -256,8 +273,7 @@ def jax_sample_fn_exponential(op):
 def jax_sample_fn_t(op):
     """JAX implementation of `StudentTRV`."""
 
-    def sample_fn(rng, size, dtype, *parameters):
-        rng_key = rng["jax_state"]
+    def sample_fn(rng_key, size, dtype, *parameters):
         rng_key, sampling_key = jax.random.split(rng_key, 2)
         (
             df,
@@ -265,8 +281,7 @@ def jax_sample_fn_t(op):
             scale,
         ) = parameters
         sample = loc + jax.random.t(sampling_key, df, size, dtype) * scale
-        rng["jax_state"] = rng_key
-        return (rng, sample)
+        return (rng_key, sample)
 
     return sample_fn
 
@@ -275,13 +290,11 @@ def jax_sample_fn_t(op):
 def jax_funcify_choice(op):
     """JAX implementation of `ChoiceRV`."""
 
-    def sample_fn(rng, size, dtype, *parameters):
-        rng_key = rng["jax_state"]
+    def sample_fn(rng_key, size, dtype, *parameters):
         rng_key, sampling_key = jax.random.split(rng_key, 2)
         (a, p, replace) = parameters
         smpl_value = jax.random.choice(sampling_key, a, size, replace, p)
-        rng["jax_state"] = rng_key
-        return (rng, smpl_value)
+        return (rng_key, smpl_value)
 
     return sample_fn
 
@@ -290,13 +303,11 @@ def jax_funcify_choice(op):
 def jax_sample_fn_permutation(op):
     """JAX implementation of `PermutationRV`."""
 
-    def sample_fn(rng, size, dtype, *parameters):
-        rng_key = rng["jax_state"]
+    def sample_fn(rng_key, size, dtype, *parameters):
         rng_key, sampling_key = jax.random.split(rng_key, 2)
         (x,) = parameters
         sample = jax.random.permutation(sampling_key, x)
-        rng["jax_state"] = rng_key
-        return (rng, sample)
+        return (rng_key, sample)
 
     return sample_fn
 
@@ -311,15 +322,12 @@ def jax_sample_fn_binomial(op):
 
     from numpyro.distributions.util import binomial
 
-    def sample_fn(rng, size, dtype, n, p):
-        rng_key = rng["jax_state"]
+    def sample_fn(rng_key, size, dtype, n, p):
         rng_key, sampling_key = jax.random.split(rng_key, 2)
 
         sample = binomial(key=sampling_key, n=n, p=p, shape=size)
 
-        rng["jax_state"] = rng_key
-
-        return (rng, sample)
+        return (rng_key, sample)
 
     return sample_fn
 
@@ -334,15 +342,12 @@ def jax_sample_fn_multinomial(op):
 
     from numpyro.distributions.util import multinomial
 
-    def sample_fn(rng, size, dtype, n, p):
-        rng_key = rng["jax_state"]
+    def sample_fn(rng_key, size, dtype, n, p):
         rng_key, sampling_key = jax.random.split(rng_key, 2)
 
         sample = multinomial(key=sampling_key, n=n, p=p, shape=size)
 
-        rng["jax_state"] = rng_key
-
-        return (rng, sample)
+        return (rng_key, sample)
 
     return sample_fn
 
@@ -357,8 +362,7 @@ def jax_sample_fn_vonmises(op):
 
     from numpyro.distributions.util import von_mises_centered
 
-    def sample_fn(rng, size, dtype, mu, kappa):
-        rng_key = rng["jax_state"]
+    def sample_fn(rng_key, size, dtype, mu, kappa):
         rng_key, sampling_key = jax.random.split(rng_key, 2)
 
         sample = von_mises_centered(
@@ -366,8 +370,6 @@ def jax_sample_fn_vonmises(op):
         )
         sample = (sample + mu + np.pi) % (2.0 * np.pi) - np.pi
 
-        rng["jax_state"] = rng_key
-
-        return (rng, sample)
+        return (rng_key, sample)
 
     return sample_fn

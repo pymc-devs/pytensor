@@ -609,6 +609,9 @@ class JITLinker(PerformLinker):
     def jit_compile(self, fn: Callable) -> Callable:
         """JIT compile a converted ``FunctionGraph``."""
 
+    def typify(self, var: Variable):
+        return var
+
     def output_filter(self, var: Variable, out: Any) -> Any:
         """Apply a filter to the data output by a JITed function call."""
         return out
@@ -735,7 +738,7 @@ class JITLinker(PerformLinker):
         return (
             fn,
             [
-                Container(input, storage)
+                Container(self.typify(input), storage)
                 for input, storage in zip(fgraph.inputs, input_storage)
             ],
             [
