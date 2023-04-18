@@ -12,6 +12,7 @@ class JAXLinker(JITLinker):
 
     def fgraph_convert(self, fgraph, input_storage, storage_map, **kwargs):
         from pytensor.link.jax.dispatch import jax_funcify
+        from pytensor.sparse.type import SparseTensorType
         from pytensor.tensor.random.type import RandomType
 
         if any(
@@ -21,6 +22,16 @@ class JAXLinker(JITLinker):
             warnings.warn(
                 "RandomTypes are implicitly converted to random PRNGKey arrays in JAX. "
                 "Input values should be provided in this format to avoid a conversion overhead."
+            )
+
+        if any(
+            isinstance(inp.type, SparseTensorType)
+            and not isinstance(inp, SharedVariable)
+            for inp in fgraph.inputs
+        ):
+            warnings.warn(
+                "SparseTypes are implicitly converted to sparse BCOO arrays in JAX. "
+                "Input values should be provided in this format to to avoid a conversion overhead."
             )
 
         shared_rng_inputs = [
