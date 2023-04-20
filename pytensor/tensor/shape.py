@@ -146,14 +146,7 @@ def shape(x: Union[np.ndarray, Number, Variable]) -> Variable:
     if not isinstance(x, Variable):
         x = at.as_tensor_variable(x)
 
-    x_type = x.type
-
-    if isinstance(x_type, TensorType) and all(s is not None for s in x_type.shape):
-        res = at.as_tensor_variable(x_type.shape, ndim=1, dtype=np.int64)
-    else:
-        res = _shape(x)
-
-    return res
+    return _shape(x)
 
 
 @_get_vector_length.register(Shape)

@@ -6,12 +6,14 @@ from numpy.testing import assert_array_equal, assert_equal, assert_string_equal
 
 import pytensor
 import tests.unittest_tools as utt
+from pytensor.compile import DeepCopyOp
 from pytensor.compile.mode import get_default_mode
 from pytensor.graph.basic import Constant, equal_computations
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import constant
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import dot, eq
+from pytensor.tensor.shape import Shape
 from pytensor.tensor.subtensor import AdvancedSubtensor, Subtensor
 from pytensor.tensor.type import (
     TensorType,
@@ -245,8 +247,14 @@ def test__getitem__newaxis(x, indices, new_order):
 
 def test_fixed_shape_variable_basic():
     x = TensorVariable(TensorType("int64", shape=(4,)), None)
-    assert isinstance(x.shape, Constant)
-    assert np.array_equal(x.shape.data, (4,))
+    assert x.type.shape == (4,)
+    assert isinstance(x.shape.owner.op, Shape)
+
+    shape_fn = pytensor.function([x], x.shape)
+    opt_shape = shape_fn.maker.fgraph.outputs[0]
+    assert isinstance(opt_shape.owner.op, DeepCopyOp)
+    assert isinstance(opt_shape.owner.inputs[0], Constant)
+    assert np.array_equal(opt_shape.owner.inputs[0].data, (4,))
 
     x = TensorConstant(
         TensorType("int64", shape=(None, None)), np.array([[1, 2], [2, 3]])

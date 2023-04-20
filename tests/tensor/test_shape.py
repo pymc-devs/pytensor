@@ -16,6 +16,7 @@ from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.rewriting.shape import ShapeFeature
 from pytensor.tensor.shape import (
     Reshape,
+    Shape,
     Shape_i,
     SpecifyShape,
     Unbroadcast,
@@ -397,7 +398,7 @@ class TestSpecifyShape(utt.InferShapeTester):
         shape = as_tensor_variable([2])
         y = specify_shape(x, shape)
         assert y.type.shape == (2,)
-        assert y.shape.equals(shape)
+        assert isinstance(y.shape.owner.op, Shape)
 
     def test_fixed_partial_shapes(self):
         x = TensorType("floatX", (None, None))("x")
