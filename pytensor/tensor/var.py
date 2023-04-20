@@ -12,7 +12,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, OptionalApplyType, Variable
 from pytensor.graph.utils import MetaType
 from pytensor.scalar import ComplexError, IntegerDivisionError
-from pytensor.tensor import _get_vector_length, as_tensor_variable
+from pytensor.tensor import _get_vector_length
 from pytensor.tensor.exceptions import AdvancedIndexingError
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import NoneConst
@@ -259,9 +259,6 @@ class _tensor_py_operators:
 
     @property
     def shape(self):
-        if not any(s is None for s in self.type.shape):
-            return as_tensor_variable(self.type.shape, ndim=1, dtype=np.int64)
-
         return at.shape(self)
 
     @property

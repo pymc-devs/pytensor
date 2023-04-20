@@ -7,7 +7,6 @@ from numpy.testing import assert_array_almost_equal
 import pytensor
 from pytensor import function
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Constant
 from pytensor.tensor.math import _allclose
 from pytensor.tensor.nlinalg import (
     SVD,
@@ -274,9 +273,7 @@ def test_det_grad():
 
 def test_det_shape():
     x = matrix()
-    det_shape = det(x).shape
-    assert isinstance(det_shape, Constant)
-    assert tuple(det_shape.data) == ()
+    assert det(x).type.shape == ()
 
 
 def test_slogdet():

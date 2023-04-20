@@ -1477,13 +1477,12 @@ class TestSaveMem:
             f(x0=0, seq=test_seq, n_steps=0)
 
         # Evaluate the shape of ys_trace and len_zs to confirm the rewrite worked correctly.
-        # If a MissingInputError is raised, it means the rewrite failed
         [scan_node] = (n for n in f.maker.fgraph.apply_nodes if isinstance(n.op, Scan))
         _, _, ys_trace, len_zs = scan_node.inputs
         debug_fn = pytensor.function(
-            [n_steps], [ys_trace.shape[0], len_zs], accept_inplace=True
+            [x0, n_steps], [ys_trace.shape[0], len_zs], accept_inplace=True
         )
-        stored_ys_steps, stored_zs_steps = debug_fn(n_steps=200)
+        stored_ys_steps, stored_zs_steps = debug_fn(x0=0, n_steps=200)
         assert stored_ys_steps == 2
         assert stored_zs_steps == 1
 

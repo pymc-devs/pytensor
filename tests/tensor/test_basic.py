@@ -3506,7 +3506,7 @@ class TestSize:
     def test_scalar(self):
         x = scalar()
         y = np.array(7, dtype=config.floatX)
-        assert y.size == function([], x.size)()
+        assert y.size == function([x], x.size)(y)
 
     def test_shared(self):
         # NB: we also test higher order tensors at the same time.
