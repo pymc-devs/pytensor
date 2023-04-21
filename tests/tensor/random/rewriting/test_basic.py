@@ -12,6 +12,7 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.tensor import constant
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.random.basic import (
+    categorical,
     dirichlet,
     multinomial,
     multivariate_normal,
@@ -36,8 +37,8 @@ def apply_local_rewrite_to_rv(
     rewrite, op_fn, dist_op, dist_params, size, rng, name=None
 ):
     dist_params_at = []
-    for p in dist_params:
-        p_at = at.as_tensor(p).type()
+    for i, p in enumerate(dist_params):
+        p_at = at.as_tensor(p).type(f"p_{i}")
         p_at.tag.test_value = p
         dist_params_at.append(p_at)
 
@@ -495,8 +496,79 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
             ),
             (3, 2, 2),
         ),
-        # A multi-dimensional case
+        # Only one distribution parameter
         (
+            (0,),
+            True,
+            poisson,
+            (np.array([[1, 2], [3, 4]], dtype=config.floatX),),
+            (3, 2, 2),
+        ),
+        # Univariate distribution with vector parameters
+        (
+            (np.array([0, 2]),),
+            True,
+            categorical,
+            (np.array([0.0, 0.0, 1.0], dtype=config.floatX),),
+            (4,),
+        ),
+        (
+            (np.array([True, False, True, True]),),
+            True,
+            categorical,
+            (np.array([0.0, 0.0, 1.0], dtype=config.floatX),),
+            (4,),
+        ),
+        (
+            (np.array([True, False, True]),),
+            True,
+            categorical,
+            (
+                np.array(
+                    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                    dtype=config.floatX,
+                ),
+            ),
+            (),
+        ),
+        (
+            (
+                slice(None),
+                np.array([True, False, True]),
+            ),
+            True,
+            categorical,
+            (
+                np.array(
+                    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                    dtype=config.floatX,
+                ),
+            ),
+            (4, 3),
+        ),
+        # Boolean indexing where output is empty
+        (
+            (np.array([False, False]),),
+            True,
+            normal,
+            (np.array([[1.0, 0.0, 0.0]], dtype=config.floatX),),
+            (2, 3),
+        ),
+        (
+            (np.array([False, False]),),
+            True,
+            categorical,
+            (
+                np.array(
+                    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                    dtype=config.floatX,
+                ),
+            ),
+            (2, 3),
+        ),
+        # Multivariate cases, indexing only supported if it does not affect core dimensions
+        (
+            # Indexing dips into core dimension
             (np.array([1]), 0),
             False,
             multivariate_normal,
@@ -506,13 +578,30 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
             ),
             (),
         ),
-        # Only one distribution parameter
         (
-            (0,),
+            (np.array([0, 2]),),
             True,
-            poisson,
-            (np.array([[1, 2], [3, 4]], dtype=config.floatX),),
-            (3, 2, 2),
+            multivariate_normal,
+            (
+                np.array(
+                    [[-100, -125, -150], [0, 0, 0], [200, 225, 250]],
+                    dtype=config.floatX,
+                ),
+                np.eye(3, dtype=config.floatX) * 1e-6,
+            ),
+            (),
+        ),
+        (
+            (np.array([True, False, True]), slice(None)),
+            True,
+            multivariate_normal,
+            (
+                np.array([200, 250], dtype=config.floatX),
+                # Second covariance is invalid, to test it is not chosen
+                np.dstack([np.eye(2), np.eye(2) * 0, np.eye(2)]).T.astype(config.floatX)
+                * 1e-6,
+            ),
+            (3,),
         ),
     ],
 )
