@@ -8,7 +8,7 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.link.c.basic import CLinker
 from pytensor.scalar.math import (
     betainc,
-    betainc_der,
+    betainc_grad,
     gammainc,
     gammaincc,
     gammal,
@@ -82,7 +82,7 @@ def test_betainc():
 
 def test_betainc_derivative_nan():
     a, b, x = at.scalars("a", "b", "x")
-    res = betainc_der(a, b, x, True)
+    res = betainc_grad(a, b, x, True)
     test_func = function([a, b, x], res, mode=Mode("py"))
     assert not np.isnan(test_func(1, 1, 1))
     assert np.isnan(test_func(1, 1, -1))
