@@ -1,4 +1,4 @@
-from contextlib import ExitStack as does_not_warn
+import warnings
 
 import numpy as np
 import pytest
@@ -872,162 +872,183 @@ TestHyp2F1InplaceBroadcast = makeBroadcastTester(
 )
 
 
-def test_hyp2f1_grad_stan_cases():
-    """This test reuses the same test cases as in:
-    https://github.com/stan-dev/math/blob/master/test/unit/math/prim/fun/grad_2F1_test.cpp
-    https://github.com/andrjohns/math/blob/develop/test/unit/math/prim/fun/hypergeometric_2F1_test.cpp
+class TestHyp2F1Grad:
+    few_iters_case = (
+        2.0,
+        1.0,
+        2.0,
+        0.4,
+        0.4617734323582945,
+        0.851376039609984,
+        -0.4617734323582945,
+        2.777777777777778,
+    )
 
-    Note: The expected_ddz was computed from the perform method, as it is not part of all Stan tests
-    """
-    a1, a2, b1, z = at.scalars("a1", "a2", "b1", "z")
-    betainc_out = at.hyp2f1(a1, a2, b1, z)
-    betainc_grad = at.grad(betainc_out, [a1, a2, b1, z])
-    f_grad = function([a1, a2, b1, z], betainc_grad)
+    many_iters_case = (
+        3.70975,
+        1.0,
+        2.70975,
+        0.999696,
+        29369830.002773938200417693317785,
+        36347869.41885337,
+        -30843032.10697079073015067426929807,
+        26278034019.28811,
+    )
 
-    rtol = 1e-9 if config.floatX == "float64" else 1e-3
+    def test_hyp2f1_grad_stan_cases(self):
+        """This test reuses the same test cases as in:
+        https://github.com/stan-dev/math/blob/master/test/unit/math/prim/fun/grad_2F1_test.cpp
+        https://github.com/andrjohns/math/blob/develop/test/unit/math/prim/fun/hypergeometric_2F1_test.cpp
 
-    for (
-        test_a1,
-        test_a2,
-        test_b1,
-        test_z,
-        expected_dda1,
-        expected_dda2,
-        expected_ddb1,
-        expected_ddz,
-    ) in (
-        (
-            3.70975,
-            1.0,
-            2.70975,
-            -0.2,
-            -0.0488658806159776,
-            -0.193844936204681,
-            0.0677809985598383,
-            0.8652952472723672,
-        ),
-        (3.70975, 1.0, 2.70975, 0, 0, 0, 0, 1.369037734108313),
-        (
-            1.0,
-            1.0,
-            1.0,
-            0.6,
-            2.290726829685388,
-            2.290726829685388,
-            -2.290726829685388,
-            6.25,
-        ),
-        (
-            1.0,
-            31.0,
-            41.0,
-            1.0,
-            6.825270649241036,
-            0.4938271604938271,
-            -0.382716049382716,
-            17.22222222222223,
-        ),
-        (
-            1.0,
-            -2.1,
-            41.0,
-            1.0,
-            -0.04921317604093563,
-            0.02256814168279349,
-            0.00118482743834665,
-            -0.04854621426218426,
-        ),
-        (
-            1.0,
-            -0.5,
-            10.6,
-            0.3,
-            -0.01443822031245647,
-            0.02829710651967078,
-            0.00136986255602642,
-            -0.04846036062115473,
-        ),
-        (
-            1.0,
-            -0.5,
-            10.0,
-            0.3,
-            -0.0153218866216130,
-            0.02999436412836072,
-            0.0015413242328729,
-            -0.05144686244336445,
-        ),
-        (
-            -0.5,
-            -4.5,
-            11.0,
-            0.3,
-            -0.1227022810085707,
-            -0.01298849638043795,
-            -0.0053540982315572,
-            0.1959735211840362,
-        ),
-        (
-            -0.5,
-            -4.5,
-            -3.2,
-            0.9,
-            0.85880025358111,
-            0.4677704416159314,
-            -4.19010422485256,
-            -2.959196647856408,
-        ),
-        (
-            3.70975,
-            1.0,
-            2.70975,
-            -0.2,
-            -0.0488658806159776,
-            -0.193844936204681,
-            0.0677809985598383,
-            0.865295247272367,
-        ),
-        (
-            2.0,
-            1.0,
-            2.0,
-            0.4,
-            0.4617734323582945,
-            0.851376039609984,
-            -0.4617734323582945,
-            2.777777777777778,
-        ),
-        (
-            3.70975,
-            1.0,
-            2.70975,
-            0.999696,
-            29369830.002773938200417693317785,
-            36347869.41885337,
-            -30843032.10697079073015067426929807,
-            26278034019.28811,
-        ),
-        # Cases where series does not converge
-        (1.0, 12.0, 10.0, 1.0, np.nan, np.nan, np.nan, np.inf),
-        (1.0, 12.0, 20.0, 1.2, np.nan, np.nan, np.nan, np.inf),
-        # Case where series converges under Euler transform (not implemented!)
-        # (1.0, 1.0, 2.0, -5.0, -0.321040199556840, -0.321040199556840, 0.129536268190289, 0.0383370454357889),
-        (1.0, 1.0, 2.0, -5.0, np.nan, np.nan, np.nan, 0.0383370454357889),
-    ):
-        expectation = (
-            pytest.warns(
-                RuntimeWarning, match="Hyp2F1 does not meet convergence conditions"
+        Note: The expected_ddz was computed from the perform method, as it is not part of all Stan tests
+        """
+        a1, a2, b1, z = at.scalars("a1", "a2", "b1", "z")
+        hyp2f1_out = at.hyp2f1(a1, a2, b1, z)
+        hyp2f1_grad = at.grad(hyp2f1_out, [a1, a2, b1, z])
+        f_grad = function([a1, a2, b1, z], hyp2f1_grad)
+
+        rtol = 1e-9 if config.floatX == "float64" else 2e-3
+        for (
+            test_a1,
+            test_a2,
+            test_b1,
+            test_z,
+            expected_dda1,
+            expected_dda2,
+            expected_ddb1,
+            expected_ddz,
+        ) in (
+            (
+                3.70975,
+                1.0,
+                2.70975,
+                -0.2,
+                -0.0488658806159776,
+                -0.193844936204681,
+                0.0677809985598383,
+                0.8652952472723672,
+            ),
+            (3.70975, 1.0, 2.70975, 0, 0, 0, 0, 1.369037734108313),
+            (
+                1.0,
+                1.0,
+                1.0,
+                0.6,
+                2.290726829685388,
+                2.290726829685388,
+                -2.290726829685388,
+                6.25,
+            ),
+            (
+                1.0,
+                31.0,
+                41.0,
+                1.0,
+                6.825270649241036,
+                0.4938271604938271,
+                -0.382716049382716,
+                17.22222222222223,
+            ),
+            (
+                1.0,
+                -2.1,
+                41.0,
+                1.0,
+                -0.04921317604093563,
+                0.02256814168279349,
+                0.00118482743834665,
+                -0.04854621426218426,
+            ),
+            (
+                1.0,
+                -0.5,
+                10.6,
+                0.3,
+                -0.01443822031245647,
+                0.02829710651967078,
+                0.00136986255602642,
+                -0.04846036062115473,
+            ),
+            (
+                1.0,
+                -0.5,
+                10.0,
+                0.3,
+                -0.0153218866216130,
+                0.02999436412836072,
+                0.0015413242328729,
+                -0.05144686244336445,
+            ),
+            (
+                -0.5,
+                -4.5,
+                11.0,
+                0.3,
+                -0.1227022810085707,
+                -0.01298849638043795,
+                -0.0053540982315572,
+                0.1959735211840362,
+            ),
+            (
+                -0.5,
+                -4.5,
+                -3.2,
+                0.9,
+                0.85880025358111,
+                0.4677704416159314,
+                -4.19010422485256,
+                -2.959196647856408,
+            ),
+            (
+                3.70975,
+                1.0,
+                2.70975,
+                -0.2,
+                -0.0488658806159776,
+                -0.193844936204681,
+                0.0677809985598383,
+                0.865295247272367,
+            ),
+            self.few_iters_case,
+            self.many_iters_case,
+            # Cases where series does not converge
+            (1.0, 12.0, 10.0, 1.0, np.nan, np.nan, np.nan, np.inf),
+            (1.0, 12.0, 20.0, 1.2, np.nan, np.nan, np.nan, np.inf),
+            # Case where series converges under Euler transform (not implemented!)
+            # (1.0, 1.0, 2.0, -5.0, -0.321040199556840, -0.321040199556840, 0.129536268190289, 0.0383370454357889),
+            (1.0, 1.0, 2.0, -5.0, np.nan, np.nan, np.nan, 0.0383370454357889),
+        ):
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                warnings.filterwarnings(
+                    "ignore",
+                    category=RuntimeWarning,
+                    message="divide by zero encountered in log",
+                )
+                result = np.array(f_grad(test_a1, test_a2, test_b1, test_z))
+
+            np.testing.assert_allclose(
+                result,
+                np.array([expected_dda1, expected_dda2, expected_ddb1, expected_ddz]),
+                rtol=rtol,
             )
-            if np.any(
-                np.isnan([expected_dda1, expected_dda2, expected_ddb1, expected_ddz])
-            )
-            else does_not_warn()
-        )
-        with expectation:
-            result = np.array(f_grad(test_a1, test_a2, test_b1, test_z))
 
+    @pytest.mark.parametrize("case", (few_iters_case, many_iters_case))
+    @pytest.mark.parametrize("wrt", ("a", "all"))
+    def test_benchmark(self, case, wrt, benchmark):
+        a1, a2, b1, z = at.scalars("a1", "a2", "b1", "z")
+        hyp2f1_out = at.hyp2f1(a1, a2, b1, z)
+        hyp2f1_grad = at.grad(hyp2f1_out, wrt=a1 if wrt == "a" else [a1, a2, b1, z])
+        f_grad = function([a1, a2, b1, z], hyp2f1_grad)
+
+        (test_a1, test_a2, test_b1, test_z, *expected_dds) = case
+
+        result = benchmark(f_grad, test_a1, test_a2, test_b1, test_z)
+
+        rtol = 1e-9 if config.floatX == "float64" else 2e-3
+        expected_result = expected_dds[0] if wrt == "a" else np.array(expected_dds)
         np.testing.assert_allclose(
             result,
-            np.array([expected_dda1, expected_dda2, expected_ddb1, expected_ddz]),
+            expected_result,
             rtol=rtol,
         )
