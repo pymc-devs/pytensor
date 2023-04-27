@@ -5,7 +5,9 @@ As SciPy is not always available, we treat them separately.
 """
 
 import os
+from functools import reduce
 from textwrap import dedent
+from typing import Tuple
 
 import numpy as np
 import scipy.special
@@ -683,14 +685,20 @@ class GammaIncC(BinaryScalarOp):
 gammaincc = GammaIncC(upgrade_to_float, name="gammaincc")
 
 
-def _make_scalar_loop(n_steps, init, constant, inner_loop_fn, name):
-    init = [as_scalar(x) for x in init]
+def _make_scalar_loop(n_steps, init, constant, inner_loop_fn, name, loop_op=ScalarLoop):
+    init = [as_scalar(x) if x is not None else None for x in init]
     constant = [as_scalar(x) for x in constant]
+
     # Create dummy types, in case some variables have the same initial form
-    init_ = [x.type() for x in init]
+    init_ = [x.type() if x is not None else None for x in init]
     constant_ = [x.type() for x in constant]
     update_, until_ = inner_loop_fn(*init_, *constant_)
-    op = ScalarLoop(
+
+    # Filter Nones
+    init = [i for i in init if i is not None]
+    init_ = [i for i in init_ if i is not None]
+    update_ = [u for u in update_ if u is not None]
+    op = loop_op(
         init=init_,
         constant=constant_,
         update=update_,
@@ -698,8 +706,7 @@ def _make_scalar_loop(n_steps, init, constant, inner_loop_fn, name):
         until_condition_failed="warn",
         name=name,
     )
-    S, *_ = op(n_steps, *init, *constant)
-    return S
+    return op(n_steps, *init, *constant)
 
 
 def gammainc_grad(k, x):
@@ -740,7 +747,7 @@ def gammainc_grad(k, x):
 
         init = [sum_a0, log_gamma_k_plus_n_plus_1, k_plus_n]
         constant = [log_x]
-        sum_a = _make_scalar_loop(
+        sum_a, *_ = _make_scalar_loop(
             max_iters, init, constant, inner_loop_a, name="gammainc_grad_a"
         )
 
@@ -827,7 +834,7 @@ def gammaincc_grad(k, x, skip_loops=constant(False, dtype="bool")):
 
         init = [sum_a0, delta, xpow, k_minus_one_minus_n, fac, dfac]
         constant = [x]
-        sum_a = _make_scalar_loop(
+        sum_a, *_ = _make_scalar_loop(
             n_steps, init, constant, inner_loop_a, name="gammaincc_grad_a"
         )
         grad_approx_a = (
@@ -870,7 +877,7 @@ def gammaincc_grad(k, x, skip_loops=constant(False, dtype="bool")):
 
         init = [sum_b0, log_s, s_sign, log_delta, n]
         constant = [k, log_x]
-        sum_b = _make_scalar_loop(
+        sum_b, *_ = _make_scalar_loop(
             max_iters, init, constant, inner_loop_b, name="gammaincc_grad_b"
         )
         grad_approx_b = (
@@ -1540,7 +1547,7 @@ def betainc_grad(p, q, x, wrtp: bool):
 
         init = [derivative, Am2, Am1, Bm2, Bm1, dAm2, dAm1, dBm2, dBm1, n]
         constant = [f, p, q, K, dK]
-        grad = _make_scalar_loop(
+        grad, *_ = _make_scalar_loop(
             max_iters, init, constant, inner_loop, name="betainc_grad"
         )
         return grad
@@ -1579,10 +1586,11 @@ class Hyp2F1(ScalarOp):
     def grad(self, inputs, grads):
         a, b, c, z = inputs
         (gz,) = grads
+        grad_a, grad_b, grad_c = hyp2f1_grad(a, b, c, z, wrt=[0, 1, 2])
         return [
-            gz * hyp2f1_grad(a, b, c, z, wrt=0),
-            gz * hyp2f1_grad(a, b, c, z, wrt=1),
-            gz * hyp2f1_grad(a, b, c, z, wrt=2),
+            gz * grad_a,
+            gz * grad_b,
+            gz * grad_c,
             gz * ((a * b) / c) * hyp2f1(a + 1, b + 1, c + 1, z),
         ]
 
@@ -1598,7 +1606,159 @@ def _unsafe_sign(x):
     return switch(x > 0, 1, -1)
 
 
-def hyp2f1_grad(a, b, c, z, wrt: int):
+class Grad2F1Loop(ScalarLoop):
+    """Subclass of ScalarLoop for easier targetting in rewrites"""
+
+
+def _grad_2f1_loop(a, b, c, z, *, skip_loop, wrt, dtype):
+    """
+    Notes
+    -----
+    The algorithm can be derived by looking at the ratio of two successive terms in the series
+    β_{k+1}/β_{k} = A(k)/B(k)
+    β_{k+1} = A(k)/B(k) * β_{k}
+    d[β_{k+1}] = d[A(k)/B(k)] * β_{k} + A(k)/B(k) * d[β_{k}] via the product rule
+
+    In the 2F1, A(k)/B(k) corresponds to (((a + k) * (b + k) / ((c + k) (1 + k))) * z
+
+    The partial d[A(k)/B(k)] with respect to the 3 first inputs can be obtained from the ratio A(k)/B(k),
+    by dropping the respective term
+    d/da[A(k)/B(k)] = A(k)/B(k) / (a + k)
+    d/db[A(k)/B(k)] = A(k)/B(k) / (b + k)
+    d/dc[A(k)/B(k)] = A(k)/B(k) * (c + k)
+
+    The algorithm is implemented in the log scale, which adds the complexity of working with absolute terms and
+    tracking their signs.
+    """
+
+    min_steps = np.array(
+        10, dtype="int32"
+    )  # https://github.com/stan-dev/math/issues/2857
+    max_steps = switch(
+        skip_loop, np.array(0, dtype="int32"), np.array(int(1e6), dtype="int32")
+    )
+    precision = np.array(1e-14, dtype=config.floatX)
+
+    grads = [np.array(0, dtype=dtype) if i in wrt else None for i in range(3)]
+    log_gs = [np.array(-np.inf, dtype=dtype) if i in wrt else None for i in range(3)]
+    log_gs_signs = [np.array(1, dtype="int8") if i in wrt else None for i in range(3)]
+
+    log_t = np.array(0.0, dtype=dtype)
+    log_t_sign = np.array(1, dtype="int8")
+
+    log_z = log(scalar_abs(z))
+    sign_z = _unsafe_sign(z)
+
+    sign_zk = sign_z
+    k = np.array(0, dtype="int32")
+
+    def inner_loop(*args):
+        (
+            *grads_vars,
+            log_t,
+            log_t_sign,
+            sign_zk,
+            k,
+            a,
+            b,
+            c,
+            log_z,
+            sign_z,
+        ) = args
+
+        (
+            grad_a,
+            grad_b,
+            grad_c,
+            log_g_a,
+            log_g_b,
+            log_g_c,
+            log_g_sign_a,
+            log_g_sign_b,
+            log_g_sign_c,
+        ) = grads_vars
+
+        p = (a + k) * (b + k) / ((c + k) * (k + 1))
+        if p.type.dtype != dtype:
+            p = p.astype(dtype)
+
+        # If p==0, don't update grad and get out of while loop next
+        p_zero = eq(p, 0)
+
+        if 0 in wrt:
+            term_a = log_g_sign_a * log_t_sign * exp(log_g_a - log_t)
+            term_a += reciprocal(a + k)
+            if term_a.type.dtype != dtype:
+                term_a = term_a.astype(dtype)
+        if 1 in wrt:
+            term_b = log_g_sign_b * log_t_sign * exp(log_g_b - log_t)
+            term_b += reciprocal(b + k)
+            if term_b.type.dtype != dtype:
+                term_b = term_b.astype(dtype)
+        if 2 in wrt:
+            term_c = log_g_sign_c * log_t_sign * exp(log_g_c - log_t)
+            term_c -= reciprocal(c + k)
+            if term_c.type.dtype != dtype:
+                term_c = term_c.astype(dtype)
+
+        log_t = log_t + log(scalar_abs(p)) + log_z
+        log_t_sign = (_unsafe_sign(p) * log_t_sign).astype("int8")
+
+        grads = [None] * 3
+        log_gs = [None] * 3
+        log_gs_signs = [None] * 3
+        grad_incs = [None] * 3
+
+        if 0 in wrt:
+            log_g_a = log_t + log(scalar_abs(term_a))
+            log_g_sign_a = (_unsafe_sign(term_a) * log_t_sign).astype("int8")
+            grad_inc_a = log_g_sign_a * exp(log_g_a) * sign_zk
+            grads[0] = switch(p_zero, grad_a, grad_a + grad_inc_a)
+            log_gs[0] = log_g_a
+            log_gs_signs[0] = log_g_sign_a
+            grad_incs[0] = grad_inc_a
+        if 1 in wrt:
+            log_g_b = log_t + log(scalar_abs(term_b))
+            log_g_sign_b = (_unsafe_sign(term_b) * log_t_sign).astype("int8")
+            grad_inc_b = log_g_sign_b * exp(log_g_b) * sign_zk
+            grads[1] = switch(p_zero, grad_b, grad_b + grad_inc_b)
+            log_gs[1] = log_g_b
+            log_gs_signs[1] = log_g_sign_b
+            grad_incs[1] = grad_inc_b
+        if 2 in wrt:
+            log_g_c = log_t + log(scalar_abs(term_c))
+            log_g_sign_c = (_unsafe_sign(term_c) * log_t_sign).astype("int8")
+            grad_inc_c = log_g_sign_c * exp(log_g_c) * sign_zk
+            grads[2] = switch(p_zero, grad_c, grad_c + grad_inc_c)
+            log_gs[2] = log_g_c
+            log_gs_signs[2] = log_g_sign_c
+            grad_incs[2] = grad_inc_c
+
+        sign_zk *= sign_z
+        k += 1
+
+        abs_grad_incs = [
+            scalar_abs(grad_inc) for grad_inc in grad_incs if grad_inc is not None
+        ]
+        if len(grad_incs) == 1:
+            [max_abs_grad_inc] = grad_incs
+        else:
+            max_abs_grad_inc = reduce(scalar_maximum, abs_grad_incs)
+
+        return (
+            (*grads, *log_gs, *log_gs_signs, log_t, log_t_sign, sign_zk, k),
+            (eq(p, 0) | ((k > min_steps) & (max_abs_grad_inc <= precision))),
+        )
+
+    init = [*grads, *log_gs, *log_gs_signs, log_t, log_t_sign, sign_zk, k]
+    constant = [a, b, c, log_z, sign_z]
+    loop_outs = _make_scalar_loop(
+        max_steps, init, constant, inner_loop, name="hyp2f1_grad", loop_op=Grad2F1Loop
+    )
+    return loop_outs[: len(wrt)]
+
+
+def hyp2f1_grad(a, b, c, z, wrt: Tuple[int, ...]):
     dtype = upcast(a.type.dtype, b.type.dtype, c.type.dtype, z.type.dtype, "float32")
 
     def check_2f1_converges(a, b, c, z):
@@ -1629,129 +1789,22 @@ def hyp2f1_grad(a, b, c, z, wrt: int):
             is_polynomial | (scalar_abs(z) < 1) | (eq(scalar_abs(z), 1) & (c > (a + b)))
         )
 
-    def compute_grad_2f1(a, b, c, z, wrt, skip_loop):
-        """
-        Notes
-        -----
-        The algorithm can be derived by looking at the ratio of two successive terms in the series
-        β_{k+1}/β_{k} = A(k)/B(k)
-        β_{k+1} = A(k)/B(k) * β_{k}
-        d[β_{k+1}] = d[A(k)/B(k)] * β_{k} + A(k)/B(k) * d[β_{k}] via the product rule
-
-        In the 2F1, A(k)/B(k) corresponds to (((a + k) * (b + k) / ((c + k) (1 + k))) * z
-
-        The partial d[A(k)/B(k)] with respect to the 3 first inputs can be obtained from the ratio A(k)/B(k),
-        by dropping the respective term
-        d/da[A(k)/B(k)] = A(k)/B(k) / (a + k)
-        d/db[A(k)/B(k)] = A(k)/B(k) / (b + k)
-        d/dc[A(k)/B(k)] = A(k)/B(k) * (c + k)
-
-        The algorithm is implemented in the log scale, which adds the complexity of working with absolute terms and
-        tracking their signs.
-        """
-
-        wrt_a = wrt_b = False
-        if wrt == 0:
-            wrt_a = True
-        elif wrt == 1:
-            wrt_b = True
-        elif wrt != 2:
-            raise ValueError(f"wrt must be 0, 1, or 2, got {wrt}")
-
-        min_steps = np.array(
-            10, dtype="int32"
-        )  # https://github.com/stan-dev/math/issues/2857
-        max_steps = switch(
-            skip_loop, np.array(0, dtype="int32"), np.array(int(1e6), dtype="int32")
-        )
-        precision = np.array(1e-14, dtype=config.floatX)
-
-        grad = np.array(0, dtype=dtype)
-
-        log_g = np.array(-np.inf, dtype=dtype)
-        log_g_sign = np.array(1, dtype="int8")
-
-        log_t = np.array(0.0, dtype=dtype)
-        log_t_sign = np.array(1, dtype="int8")
-
-        log_z = log(scalar_abs(z))
-        sign_z = _unsafe_sign(z)
-
-        sign_zk = sign_z
-        k = np.array(0, dtype="int32")
-
-        def inner_loop(
-            grad,
-            log_g,
-            log_g_sign,
-            log_t,
-            log_t_sign,
-            sign_zk,
-            k,
-            a,
-            b,
-            c,
-            log_z,
-            sign_z,
-        ):
-            p = (a + k) * (b + k) / ((c + k) * (k + 1))
-            if p.type.dtype != dtype:
-                p = p.astype(dtype)
-
-            term = log_g_sign * log_t_sign * exp(log_g - log_t)
-            if wrt_a:
-                term += reciprocal(a + k)
-            elif wrt_b:
-                term += reciprocal(b + k)
-            else:
-                term -= reciprocal(c + k)
-
-            if term.type.dtype != dtype:
-                term = term.astype(dtype)
-
-            log_t = log_t + log(scalar_abs(p)) + log_z
-            log_t_sign = (_unsafe_sign(p) * log_t_sign).astype("int8")
-            log_g = log_t + log(scalar_abs(term))
-            log_g_sign = (_unsafe_sign(term) * log_t_sign).astype("int8")
-
-            g_current = log_g_sign * exp(log_g) * sign_zk
-
-            # If p==0, don't update grad and get out of while loop next
-            grad = switch(
-                eq(p, 0),
-                grad,
-                grad + g_current,
-            )
-
-            sign_zk *= sign_z
-            k += 1
-
-            return (
-                (grad, log_g, log_g_sign, log_t, log_t_sign, sign_zk, k),
-                (eq(p, 0) | ((k > min_steps) & (scalar_abs(g_current) <= precision))),
-            )
-
-        init = [grad, log_g, log_g_sign, log_t, log_t_sign, sign_zk, k]
-        constant = [a, b, c, log_z, sign_z]
-        grad = _make_scalar_loop(
-            max_steps, init, constant, inner_loop, name="hyp2f1_grad"
-        )
-
-        return switch(
-            eq(z, 0),
-            0,
-            grad,
-        )
-
     # We have to pass the converges flag to interrupt the loop, as the switch is not lazy
     z_is_zero = eq(z, 0)
     converges = check_2f1_converges(a, b, c, z)
-    return switch(
-        z_is_zero,
-        0,
-        switch(
-            converges,
-            compute_grad_2f1(a, b, c, z, wrt, skip_loop=z_is_zero | (~converges)),
-            np.nan,
-        ),
+    grads = _grad_2f1_loop(
+        a, b, c, z, skip_loop=z_is_zero | (~converges), wrt=wrt, dtype=dtype
     )
+
+    return [
+        switch(
+            z_is_zero,
+            0,
+            switch(
+                converges,
+                grad,
+                np.nan,
+            ),
+        )
+        for grad in grads
+    ]

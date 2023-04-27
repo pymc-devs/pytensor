@@ -4,6 +4,8 @@ import numpy as np
 import pytest
 
 from pytensor.gradient import verify_grad
+from pytensor.scalar import ScalarLoop
+from pytensor.tensor.elemwise import Elemwise
 
 
 scipy = pytest.importorskip("scipy")
@@ -1050,5 +1052,40 @@ class TestHyp2F1Grad:
         np.testing.assert_allclose(
             result,
             expected_result,
+            rtol=rtol,
+        )
+
+    @pytest.mark.parametrize("wrt", ([0], [1], [2], [0, 1], [1, 2], [0, 2], [0, 1, 2]))
+    def test_unused_grad_loop_opt(self, wrt):
+        """Test that we don't compute unnecessary outputs in the grad scalar loop"""
+        (
+            test_a1,
+            test_a2,
+            test_b1,
+            test_z,
+            *expected_dds,
+            expected_ddz,
+        ) = self.few_iters_case
+
+        a1, a2, b1, z = at.scalars("a1", "a2", "b1", "z")
+        hyp2f1_out = at.hyp2f1(a1, a2, b1, z)
+        wrt_vars = [v for i, v in enumerate((a1, a2, b1, z)) if i in wrt]
+        hyp2f1_grad = at.grad(hyp2f1_out, wrt=wrt_vars)
+
+        mode = get_default_mode().including("local_useless_2f1grad_loop")
+        f_grad = function([a1, a2, b1, z], hyp2f1_grad, mode=mode)
+
+        [scalar_loop_op] = [
+            node.op.scalar_op
+            for node in f_grad.maker.fgraph.apply_nodes
+            if isinstance(node.op, Elemwise)
+            and isinstance(node.op.scalar_op, ScalarLoop)
+        ]
+        assert scalar_loop_op.nin == 10 + 3 * len(wrt)
+
+        rtol = 1e-9 if config.floatX == "float64" else 2e-3
+        np.testing.assert_allclose(
+            f_grad(test_a1, test_a2, test_b1, test_z),
+            [dd for i, dd in enumerate(expected_dds) if i in wrt],
             rtol=rtol,
         )
