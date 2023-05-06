@@ -13,14 +13,11 @@ from pytensor.scan.basic import scan
 from pytensor.scan.op import Scan
 from pytensor.tensor import random
 from pytensor.tensor.math import gammaln, log
-from pytensor.tensor.type import lscalar, scalar, vector, dmatrix, dvector
+from pytensor.tensor.type import dmatrix, dvector, lscalar, scalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
-# jax = pytest.importorskip("jax")
-
-import jax
-jax.config.update('jax_platform_name', 'cpu')
+jax = pytest.importorskip("jax")
 
 
 @pytest.mark.parametrize("view", [None, (-1,), slice(-2, None, None)])
@@ -322,22 +319,24 @@ def test_scan_mitsot_with_nonseq():
     compare_jax_and_py(out_fg, test_input_vals)
 
 
-@pytest.mark.parametrize('x0_func', [dvector, dmatrix])
-@pytest.mark.parametrize('A_func',  [dmatrix, dmatrix])
+@pytest.mark.parametrize("x0_func", [dvector, dmatrix])
+@pytest.mark.parametrize("A_func", [dmatrix, dmatrix])
 def test_nd_scan_sit_sot(x0_func, A_func):
-    x0 = x0_func('x0')
-    A  = A_func('A')
+    x0 = x0_func("x0")
+    A = A_func("A")
 
     n_steps = 3
     k = 3
 
     # Must specify mode = JAX for the inner func to avoid a GEMM Op in the JAX graph
-    xs, _ = scan(lambda X, A: A @ X, 
-                            non_sequences=[A],
-                            outputs_info=[x0],
-                            n_steps=n_steps,
-                            mode=get_mode('JAX'))
-                
+    xs, _ = scan(
+        lambda X, A: A @ X,
+        non_sequences=[A],
+        outputs_info=[x0],
+        n_steps=n_steps,
+        mode=get_mode("JAX"),
+    )
+
     x0_val = np.arange(k) if x0.ndim == 1 else np.diag(np.arange(k))
     A_val = np.eye(k)
 
@@ -347,19 +346,21 @@ def test_nd_scan_sit_sot(x0_func, A_func):
 
 
 def test_nd_scan_sit_sot_with_seq():
-    x = dmatrix('x0')
-    A  = dmatrix('A')
+    x = dmatrix("x0")
+    A = dmatrix("A")
 
     n_steps = 3
     k = 3
 
     # Must specify mode = JAX for the inner func to avoid a GEMM Op in the JAX graph
-    xs, _ = scan(lambda X, A: A @ X, 
-                            non_sequences=[A],
-                            sequences=[x],
-                            n_steps=n_steps,
-                            mode=get_mode('JAX'))
-                
+    xs, _ = scan(
+        lambda X, A: A @ X,
+        non_sequences=[A],
+        sequences=[x],
+        n_steps=n_steps,
+        mode=get_mode("JAX"),
+    )
+
     x_val = np.tile(np.arange(k), n_steps).reshape(n_steps, k)
     A_val = np.eye(k)
 
@@ -369,9 +370,9 @@ def test_nd_scan_sit_sot_with_seq():
 
 
 def test_nd_scan_mit_sot():
-    x0 = dmatrix('x0')
-    A  = dmatrix('A')
-    B  = dmatrix('B')
+    x0 = dmatrix("x0")
+    A = dmatrix("A")
+    B = dmatrix("B")
 
     # Must specify mode = JAX for the inner func to avoid a GEMM Op in the JAX graph
     xs, _ = scan(
@@ -379,7 +380,7 @@ def test_nd_scan_mit_sot():
         outputs_info=[{"initial": x0, "taps": [-3, -1]}],
         non_sequences=[A, B],
         n_steps=10,
-        mode = get_mode('JAX')
+        mode=get_mode("JAX"),
     )
 
     fg = FunctionGraph([x0, A, B], [xs])
@@ -392,8 +393,8 @@ def test_nd_scan_mit_sot():
 
 
 def test_nd_scan_sit_sot_with_carry():
-    x0 = dvector('x0')
-    A  = dmatrix('A')
+    x0 = dvector("x0")
+    A = dmatrix("A")
 
     def step(x, A):
         return A @ x, x.sum()
@@ -404,7 +405,7 @@ def test_nd_scan_sit_sot_with_carry():
         outputs_info=[x0, None],
         non_sequences=[A],
         n_steps=10,
-        mode = get_mode('JAX')
+        mode=get_mode("JAX"),
     )
 
     fg = FunctionGraph([x0, A], xs)
