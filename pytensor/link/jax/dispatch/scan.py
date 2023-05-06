@@ -3,7 +3,7 @@ import jax.numpy as jnp
 
 from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.scan.op import Scan
-
+from pytensor.compile.sharedvalue import SharedVariable
 
 @jax_funcify.register(Scan)
 def jax_funcify_Scan(op: Scan, **kwargs):
@@ -41,6 +41,12 @@ def jax_funcify_Scan(op: Scan, **kwargs):
             op.outer_shared(outer_inputs),
             op.outer_non_seqs(outer_inputs),
         )  # JAX `init`
+
+        ndim_out_core = [getattr(x, 'ndim', 0) for x in op.fgraph.outputs]
+        ndim_in_core  = [getattr(x, 'ndim', 0) for x in mit_sot_init + sit_sot_init]
+
+        n_batchdims = [int(dims_out > 0) for dims_out, dims_in in zip(ndim_out_core, ndim_in_core)] +\
+            [0] * op.info.n_nit_sot
 
         def jax_args_to_inner_func_args(carry, x):
             """Convert JAX scan arguments into format expected by scan_inner_func.
@@ -151,11 +157,13 @@ def jax_funcify_Scan(op: Scan, **kwargs):
                 + op.outer_nitsot(outer_inputs)
             )
             partial_traces = []
-            for init_state, trace, buffer in zip(init_states, traces, buffers):
+            for init_state, trace, n_batchdim, buffer in zip(init_states, traces, n_batchdims, buffers):
                 if init_state is not None:
                     # MIT-SOT and SIT-SOT: The final output should be as long as the input buffer
+                    batch_idx = range(n_batchdim)
                     full_trace = jnp.concatenate(
-                        [jnp.atleast_1d(init_state), jnp.atleast_1d(trace)],
+                        [jnp.atleast_1d(jnp.expand_dims(init_state, batch_idx)), 
+                        jnp.atleast_1d(trace)],
                         axis=0,
                     )
                     buffer_size = buffer.shape[0]
