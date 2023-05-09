@@ -337,8 +337,10 @@ def test_nd_scan_sit_sot(x0_func, A_func):
         mode=get_mode("JAX"),
     )
 
-    x0_val = np.arange(k) if x0.ndim == 1 else np.diag(np.arange(k))
-    A_val = np.eye(k)
+    x0_val = (
+        np.arange(k, dtype=config.floatX) if x0.ndim == 1 else np.diag(np.arange(k))
+    )
+    A_val = np.eye(k, dtype=config.floatX)
 
     fg = FunctionGraph([x0, A], [xs])
     test_input_vals = [x0_val, A_val]
@@ -361,8 +363,8 @@ def test_nd_scan_sit_sot_with_seq():
         mode=get_mode("JAX"),
     )
 
-    x_val = np.tile(np.arange(k), n_steps).reshape(n_steps, k)
-    A_val = np.eye(k)
+    x_val = np.tile(np.arange(k, dtype=config.floatX), n_steps).reshape(n_steps, k)
+    A_val = np.eye(k, dtype=config.floatX)
 
     fg = FunctionGraph([x, A], [xs])
     test_input_vals = [x_val, A_val]
@@ -384,10 +386,9 @@ def test_nd_scan_mit_sot():
     )
 
     fg = FunctionGraph([x0, A, B], [xs])
-    x0_val = np.r_[[np.arange(3).tolist()] * 3]
-    print(x0_val)
-    A_val = np.eye(3)
-    B_val = np.eye(3)
+    x0_val = np.r_[[np.arange(3, dtype=config.floatX).tolist()] * 3]
+    A_val = np.eye(3, dtype=config.floatX)
+    B_val = np.eye(3, dtype=config.floatX)
 
     test_input_vals = [x0_val, A_val, B_val]
     compare_jax_and_py(fg, test_input_vals)
@@ -410,8 +411,8 @@ def test_nd_scan_sit_sot_with_carry():
     )
 
     fg = FunctionGraph([x0, A], xs)
-    x0_val = np.arange(3)
-    A_val = np.eye(3)
+    x0_val = np.arange(3, dtype=config.floatX)
+    A_val = np.eye(3, dtype=config.floatX)
 
     test_input_vals = [x0_val, A_val]
     compare_jax_and_py(fg, test_input_vals)
