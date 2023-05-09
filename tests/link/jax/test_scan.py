@@ -1,5 +1,7 @@
 import re
 
+# jax = pytest.importorskip("jax")
+import jax
 import numpy as np
 import pytest
 
@@ -17,7 +19,8 @@ from pytensor.tensor.type import dmatrix, dvector, lscalar, scalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
-jax = pytest.importorskip("jax")
+jax.config.update("jax_platform_name", "cpu")
+config.floatX = "float32"
 
 
 @pytest.mark.parametrize("view", [None, (-1,), slice(-2, None, None)])
@@ -338,7 +341,9 @@ def test_nd_scan_sit_sot(x0_func, A_func):
     )
 
     x0_val = (
-        np.arange(k, dtype=config.floatX) if x0.ndim == 1 else np.diag(np.arange(k))
+        np.arange(k, dtype=config.floatX)
+        if x0.ndim == 1
+        else np.diag(np.arange(k, dtype=config.floatX))
     )
     A_val = np.eye(k, dtype=config.floatX)
 
@@ -363,7 +368,7 @@ def test_nd_scan_sit_sot_with_seq():
         mode=get_mode("JAX"),
     )
 
-    x_val = np.tile(np.arange(k, dtype=config.floatX), n_steps).reshape(n_steps, k)
+    x_val = np.arange(n_steps * k, dtype=config.floatX).reshape(n_steps, k)
     A_val = np.eye(k, dtype=config.floatX)
 
     fg = FunctionGraph([x, A], [xs])
@@ -386,7 +391,7 @@ def test_nd_scan_mit_sot():
     )
 
     fg = FunctionGraph([x0, A, B], [xs])
-    x0_val = np.r_[[np.arange(3, dtype=config.floatX).tolist()] * 3]
+    x0_val = np.arange(9, dtype=config.floatX).reshape(3, 3)
     A_val = np.eye(3, dtype=config.floatX)
     B_val = np.eye(3, dtype=config.floatX)
 
