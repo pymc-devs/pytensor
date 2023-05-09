@@ -346,11 +346,11 @@ def test_nd_scan_sit_sot(x0_func, A_func):
 
 
 def test_nd_scan_sit_sot_with_seq():
-    x = dmatrix("x0")
-    A = dmatrix("A")
-
     n_steps = 3
     k = 3
+
+    x = at.matrix("x0", shape=(n_steps, k))
+    A = at.matrix("A", shape=(k, k))
 
     # Must specify mode = JAX for the inner func to avoid a GEMM Op in the JAX graph
     xs, _ = scan(
@@ -370,9 +370,9 @@ def test_nd_scan_sit_sot_with_seq():
 
 
 def test_nd_scan_mit_sot():
-    x0 = dmatrix("x0")
-    A = dmatrix("A")
-    B = dmatrix("B")
+    x0 = at.matrix("x0", shape=(3, 3))
+    A = at.matrix("A", shape=(3, 3))
+    B = at.matrix("B", shape=(3, 3))
 
     # Must specify mode = JAX for the inner func to avoid a GEMM Op in the JAX graph
     xs, _ = scan(
@@ -385,6 +385,7 @@ def test_nd_scan_mit_sot():
 
     fg = FunctionGraph([x0, A, B], [xs])
     x0_val = np.r_[[np.arange(3).tolist()] * 3]
+    print(x0_val)
     A_val = np.eye(3)
     B_val = np.eye(3)
 
@@ -393,8 +394,8 @@ def test_nd_scan_mit_sot():
 
 
 def test_nd_scan_sit_sot_with_carry():
-    x0 = dvector("x0")
-    A = dmatrix("A")
+    x0 = at.vector("x0", shape=(3,))
+    A = at.matrix("A", shape=(3, 3))
 
     def step(x, A):
         return A @ x, x.sum()

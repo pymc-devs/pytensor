@@ -42,13 +42,6 @@ def jax_funcify_Scan(op: Scan, **kwargs):
             op.outer_non_seqs(outer_inputs),
         )  # JAX `init`
 
-        ndim_out_core = [getattr(x, "ndim", 0) for x in op.fgraph.outputs]
-        # ndim_in_core = [getattr(x, "ndim", 0) for x in mit_sot_init + sit_sot_init]
-
-        add_batchdim_flags = [dims_out > 0 for dims_out in ndim_out_core] + [
-            False
-        ] * op.info.n_nit_sot
-
         def jax_args_to_inner_func_args(carry, x):
             """Convert JAX scan arguments into format expected by scan_inner_func.
 
@@ -158,20 +151,14 @@ def jax_funcify_Scan(op: Scan, **kwargs):
                 + op.outer_nitsot(outer_inputs)
             )
             partial_traces = []
-            for init_state, trace, add_batchdim, buffer in zip(
-                init_states, traces, add_batchdim_flags, buffers
-            ):
+            for init_state, trace, buffer in zip(init_states, traces, buffers):
                 if init_state is not None:
                     # MIT-SOT and SIT-SOT: The final output should be as long as the input buffer
-                    if add_batchdim:
-                        init_state = jnp.expand_dims(init_state, 0)
-                    full_trace = jnp.concatenate(
-                        [
-                            jnp.atleast_1d(init_state),
-                            jnp.atleast_1d(trace),
-                        ],
-                        axis=0,
+                    trace = jnp.atleast_1d(trace)
+                    init_state = jnp.expand_dims(
+                        init_state, range(trace.ndim - init_state.ndim)
                     )
+                    full_trace = jnp.concatenate([init_state, trace], axis=0)
                     buffer_size = buffer.shape[0]
                 else:
                     # NIT-SOT: Buffer is just the number of entries that should be returned
