@@ -1,7 +1,5 @@
 import re
 
-# jax = pytest.importorskip("jax")
-import jax
 import numpy as np
 import pytest
 
@@ -19,8 +17,7 @@ from pytensor.tensor.type import dmatrix, dvector, lscalar, scalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
-jax.config.update("jax_platform_name", "cpu")
-config.floatX = "float32"
+jax = pytest.importorskip("jax")
 
 
 @pytest.mark.parametrize("view", [None, (-1,), slice(-2, None, None)])
