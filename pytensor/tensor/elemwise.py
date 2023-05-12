@@ -22,6 +22,7 @@ from pytensor.scalar.basic import transfer_type, upcast
 from pytensor.tensor import elemwise_cgen as cgen
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import _get_vector_length, as_tensor_variable
+from pytensor.tensor.blockwise import _vectorize_node, vectorize_not_needed
 from pytensor.tensor.type import (
     TensorType,
     continuous_dtypes,
@@ -29,6 +30,7 @@ from pytensor.tensor.type import (
     float_dtypes,
     lvector,
 )
+from pytensor.tensor.utils import broadcast_static_dim_lengths, import_func_from_string
 from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import uniq
 
@@ -232,7 +234,7 @@ class DimShuffle(ExternalCOp):
             return f"Transpose{{axes={self.shuffle}}}"
         return f"DimShuffle{{order=[{','.join(map(str, self.new_order))}]}}"
 
-    def perform(self, node, inp, out, params):
+    def perform(self, node, inp, out, params=None):
         (res,) = inp
         (storage,) = out
 
@@ -429,28 +431,12 @@ class Elemwise(OpenMPOp):
         # of all inputs in parallel... the all() gives us each output
         # broadcastable bit in turn.
 
-        def get_most_specialized_shape(shapes):
-            shapes = set(shapes)
-            # All shapes are the same
-            if len(shapes) == 1:
-                return tuple(shapes)[0]
-
-            # Only valid indeterminate case
-            if shapes == {None, 1}:
-                return None
-
-            shapes.discard(1)
-            shapes.discard(None)
-            if len(shapes) > 1:
-                raise ValueError
-            return tuple(shapes)[0]
-
         # it is multiplied by nout because Elemwise supports multiple outputs
         # (nout of them)
         try:
             out_shapes = [
                 [
-                    get_most_specialized_shape(shape)
+                    broadcast_static_dim_lengths(shape)
                     for shape in zip(*[inp.type.shape for inp in inputs])
                 ]
             ] * shadow.nout
@@ -665,22 +651,7 @@ class Elemwise(OpenMPOp):
             impl = "c"
 
         if getattr(self, "nfunc_spec", None) and impl != "c":
-            self.nfunc = getattr(np, self.nfunc_spec[0], None)
-            if self.nfunc is None:
-                # Not inside NumPy. So probably another package like scipy.
-                symb = self.nfunc_spec[0].split(".")
-                for idx in range(1, len(self.nfunc_spec[0])):
-                    try:
-                        module = __import__(".".join(symb[:idx]))
-                    except ImportError:
-                        break
-                for sub in symb[1:]:
-                    try:
-                        module = getattr(module, sub)
-                    except AttributeError:
-                        module = None
-                        break
-                self.nfunc = module
+            self.nfunc = import_func_from_string(self.nfunc_spec[0])
 
         if (
             (len(node.inputs) + len(node.outputs)) <= 32
@@ -1768,3 +1739,37 @@ def _get_vector_length_Elemwise(op, var):
         return get_vector_length(var.owner.inputs[0])
 
     raise ValueError(f"Length of {var} cannot be determined")
+
+
+_vectorize_node.register(Elemwise, vectorize_not_needed)
+
+
+@_vectorize_node.register(DimShuffle)
+def vectorize_dimshuffle(op: DimShuffle, node: Apply, x: TensorVariable) -> Apply:
+    batched_ndims = x.type.ndim - node.inputs[0].type.ndim
+    if not batched_ndims:
+        return node.op.make_node(x)
+    input_broadcastable = x.type.broadcastable[:batched_ndims] + op.input_broadcastable
+    # e.g., ds(matrix, order=(1, "x", 0)) -> ds(tensor4, order=(0, 1, 3, "x", 2))
+    # e.g., ds(row, order=(1, "x")) -> ds(tensor4, order=(0, 1, 3, "x"))
+    new_order = list(range(batched_ndims)) + [
+        "x" if (o == "x") else (o + batched_ndims) for o in op.new_order
+    ]
+    return DimShuffle(input_broadcastable, new_order).make_node(x)
+
+
+@_vectorize_node.register(CAReduce)
+def vectorize_careduce(op: CAReduce, node: Apply, x: TensorVariable) -> Apply:
+    batched_ndims = x.type.ndim - node.inputs[0].type.ndim
+    if not batched_ndims:
+        return node.op.make_node(x)
+    axes = op.axis
+    # e.g., sum(matrix, axis=None) -> sum(tensor4, axis=(2, 3))
+    # e.g., sum(matrix, axis=0) -> sum(tensor4, axis=(2,))
+    if axes is None:
+        axes = list(range(node.inputs[0].type.ndim))
+    else:
+        axes = list(axes)
+    new_axes = [axis + batched_ndims for axis in axes]
+    new_op = op.clone(axis=new_axes)
+    return new_op.make_node(x)

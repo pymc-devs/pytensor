@@ -5,19 +5,25 @@ import numpy as np
 
 import pytensor
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.basic import Apply, Variable, equal_computations
 from pytensor.graph.op import Op
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.scalar import ScalarVariable
 from pytensor.tensor.basic import (
     as_tensor_variable,
+    concatenate,
     constant,
     get_underlying_scalar_constant_value,
     get_vector_length,
     infer_static_shape,
 )
+from pytensor.tensor.blockwise import _vectorize_node
 from pytensor.tensor.random.type import RandomGeneratorType, RandomStateType, RandomType
-from pytensor.tensor.random.utils import normalize_size_param, params_broadcast_shapes
+from pytensor.tensor.random.utils import (
+    broadcast_params,
+    normalize_size_param,
+    params_broadcast_shapes,
+)
 from pytensor.tensor.shape import shape_tuple
 from pytensor.tensor.type import TensorType, all_dtypes
 from pytensor.tensor.type_other import NoneConst
@@ -383,3 +389,22 @@ class DefaultGeneratorMakerOp(AbstractRNGConstructor):
 
 
 default_rng = DefaultGeneratorMakerOp()
+
+
+@_vectorize_node.register(RandomVariable)
+def vectorize_random_variable(
+    op: RandomVariable, node: Apply, rng, size, dtype, *dist_params
+) -> Apply:
+    # If size was provided originally and a new size hasn't been provided,
+    # We extend it to accommodate the new input batch dimensions.
+    # Otherwise, we assume the new size already has the right values
+    old_size = node.inputs[1]
+    len_old_size = get_vector_length(old_size)
+    if len_old_size and equal_computations([old_size], [size]):
+        bcasted_param = broadcast_params(dist_params, op.ndims_params)[0]
+        new_param_ndim = (bcasted_param.type.ndim - op.ndims_params[0]) - len_old_size
+        if new_param_ndim >= 0:
+            new_size_dims = bcasted_param.shape[:new_param_ndim]
+            size = concatenate([new_size_dims, size])
+
+    return op.make_node(rng, size, dtype, *dist_params)
