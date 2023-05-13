@@ -134,3 +134,13 @@ def test_tensor_basics():
     out = at_max(y)
     fgraph = FunctionGraph([y], [out])
     compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+
+
+def test_pinv():
+    x = matrix('x')
+    x_inv = at_nlinalg.pinv(x)
+
+    fgraph = FunctionGraph([x], [x_inv])
+    x_np = np.array([[1.0, 2.0], [3.0, 4.0]])
+    compare_jax_and_py(fgraph, [x_np])
+
