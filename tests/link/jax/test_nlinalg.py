@@ -1,5 +1,3 @@
-# jax = pytest.importorskip("jax")
-import jax
 import numpy as np
 import pytest
 from packaging.version import parse as version_parse
@@ -20,7 +18,7 @@ from pytensor.tensor.type import dvector, matrix, scalar, tensor3, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
-jax.config.update("jax_platform_name", "cpu")
+jax = pytest.importorskip("jax")
 
 
 def test_jax_BatchedDot():
