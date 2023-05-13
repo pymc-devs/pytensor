@@ -1,3 +1,5 @@
+# jax = pytest.importorskip("jax")
+import jax
 import numpy as np
 import pytest
 from packaging.version import parse as version_parse
@@ -18,7 +20,7 @@ from pytensor.tensor.type import dvector, matrix, scalar, tensor3, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
-jax = pytest.importorskip("jax")
+jax.config.update("jax_platform_name", "cpu")
 
 
 def test_jax_BatchedDot():
@@ -137,10 +139,9 @@ def test_tensor_basics():
 
 
 def test_pinv():
-    x = matrix('x')
+    x = matrix("x")
     x_inv = at_nlinalg.pinv(x)
 
     fgraph = FunctionGraph([x], [x_inv])
     x_np = np.array([[1.0, 2.0], [3.0, 4.0]])
     compare_jax_and_py(fgraph, [x_np])
-

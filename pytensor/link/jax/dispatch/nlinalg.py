@@ -3,7 +3,16 @@ import jax.numpy as jnp
 from pytensor.link.jax.dispatch import jax_funcify
 from pytensor.tensor.blas import BatchedDot
 from pytensor.tensor.math import Dot, MaxAndArgmax
-from pytensor.tensor.nlinalg import SVD, Det, Eig, Eigh, MatrixInverse, QRFull, SLogDet, MatrixPinv
+from pytensor.tensor.nlinalg import (
+    SVD,
+    Det,
+    Eig,
+    Eigh,
+    MatrixInverse,
+    MatrixPinv,
+    QRFull,
+    SLogDet,
+)
 
 
 @jax_funcify.register(SVD)
@@ -119,7 +128,7 @@ def jax_funcify_MaxAndArgmax(op, **kwargs):
             x, jnp.concatenate((keep_axes, jnp.array(axes, dtype="int64")))
         )
         kept_shape = transposed_x.shape[: len(keep_axes)]
-        reduced_shape = transposed_x.shape[len(keep_axes):]
+        reduced_shape = transposed_x.shape[len(keep_axes) :]
 
         # Numpy.prod returns 1.0 when arg is empty, so we cast it to int64
         # Otherwise reshape would complain citing float arg
