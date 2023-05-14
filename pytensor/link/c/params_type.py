@@ -810,7 +810,7 @@ class ParamsType(CType):
             struct_extract_method=struct_extract_method,
         )
 
-        return list(sorted(list(c_support_code_set))) + [final_struct_code]
+        return sorted(c_support_code_set) + [final_struct_code]
 
     def c_code_cache_version(self):
         return ((3,), tuple(t.c_code_cache_version() for t in self.types))

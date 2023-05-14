@@ -361,7 +361,7 @@ def create_multiaxis_reducer(
 
     careduce_fn_name = f"careduce_{scalar_op}"
     global_env = {}
-    to_reduce = reversed(sorted(axes))
+    to_reduce = sorted(axes, reverse=True)
     careduce_lines_src = []
     var_name = input_name
 

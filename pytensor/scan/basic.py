@@ -492,7 +492,7 @@ def scan(
     # wrap sequences in a dictionary if they are not already dictionaries
     for i in range(n_seqs):
         if not isinstance(seqs[i], dict):
-            seqs[i] = dict([("input", seqs[i]), ("taps", [0])])
+            seqs[i] = {"input": seqs[i], "taps": [0]}
         elif seqs[i].get("taps", None) is not None:
             seqs[i]["taps"] = wrap_into_list(seqs[i]["taps"])
         elif seqs[i].get("taps", None) is None:
@@ -504,7 +504,7 @@ def scan(
         if outs_info[i] is not None:
             if not isinstance(outs_info[i], dict):
                 # by default any output has a tap value of -1
-                outs_info[i] = dict([("initial", outs_info[i]), ("taps", [-1])])
+                outs_info[i] = {"initial": outs_info[i], "taps": [-1]}
             elif (
                 outs_info[i].get("initial", None) is None
                 and outs_info[i].get("taps", None) is not None

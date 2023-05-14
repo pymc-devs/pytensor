@@ -41,7 +41,7 @@ def jax_funcify_CAReduce(op, **kwargs):
         elif scalar_op_name:
             scalar_fn_name = scalar_op_name
 
-        to_reduce = reversed(sorted(axis))
+        to_reduce = sorted(axis, reverse=True)
 
         if to_reduce:
             # In this case, we need to use the `jax.lax` function (if there

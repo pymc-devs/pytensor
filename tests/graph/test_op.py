@@ -87,7 +87,7 @@ class TestOp:
         r1, r2 = MyType(1)(), MyType(2)()
         node = MyOp.make_node(r1, r2)
         # Are the inputs what I provided?
-        assert [x for x in node.inputs] == [r1, r2]
+        assert list(node.inputs) == [r1, r2]
         # Are the outputs what I expect?
         assert [x.type for x in node.outputs] == [MyType(3)]
         assert node.outputs[0].owner is node and node.outputs[0].index == 0

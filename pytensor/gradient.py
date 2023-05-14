@@ -504,7 +504,7 @@ def grad(
     if not isinstance(wrt, Sequence):
         _wrt: List[Variable] = [wrt]
     else:
-        _wrt = [x for x in wrt]
+        _wrt = list(wrt)
 
     outputs = []
     if cost is not None:
@@ -791,8 +791,8 @@ def subgraph_grad(wrt, end, start=None, cost=None, details=False):
 
     pgrads = dict(zip(params, grads))
     # separate wrt from end grads:
-    wrt_grads = list(pgrads[k] for k in wrt)
-    end_grads = list(pgrads[k] for k in end)
+    wrt_grads = [pgrads[k] for k in wrt]
+    end_grads = [pgrads[k] for k in end]
 
     if details:
         return wrt_grads, end_grads, start_grads, cost_grads

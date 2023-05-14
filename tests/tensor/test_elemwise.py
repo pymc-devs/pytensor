@@ -490,50 +490,50 @@ class TestCAReduce(unittest_tools.InferShapeTester):
                 assert len(axis2) == len(tosum)
                 tosum = tuple(axis2)
             if tensor_op == at_all:
-                for axis in reversed(sorted(tosum)):
+                for axis in sorted(tosum, reverse=True):
                     zv = np.all(zv, axis)
                 if len(tosum) == 0:
                     zv = zv != 0
             elif tensor_op == at_any:
-                for axis in reversed(sorted(tosum)):
+                for axis in sorted(tosum, reverse=True):
                     zv = np.any(zv, axis)
                 if len(tosum) == 0:
                     zv = zv != 0
             elif scalar_op == aes.add:
-                for axis in reversed(sorted(tosum)):
+                for axis in sorted(tosum, reverse=True):
                     zv = np.add.reduce(zv, axis)
                 if dtype == "bool":
                     # np.add of a bool upcast, while CAReduce don't
                     zv = zv.astype(dtype)
             elif scalar_op == aes.mul:
-                for axis in reversed(sorted(tosum)):
+                for axis in sorted(tosum, reverse=True):
                     zv = np.multiply.reduce(zv, axis)
             elif scalar_op == aes.scalar_maximum:
                 # There is no identity value for the maximum function
                 # So we can't support shape of dimensions 0.
                 if np.prod(zv.shape) == 0:
                     continue
-                for axis in reversed(sorted(tosum)):
+                for axis in sorted(tosum, reverse=True):
                     zv = np.maximum.reduce(zv, axis)
             elif scalar_op == aes.scalar_minimum:
                 # There is no identity value for the minimum function
                 # So we can't support shape of dimensions 0.
                 if np.prod(zv.shape) == 0:
                     continue
-                for axis in reversed(sorted(tosum)):
+                for axis in sorted(tosum, reverse=True):
                     zv = np.minimum.reduce(zv, axis)
             elif scalar_op == aes.or_:
-                for axis in reversed(sorted(tosum)):
+                for axis in sorted(tosum, reverse=True):
                     zv = np.bitwise_or.reduce(zv, axis)
             elif scalar_op == aes.and_:
-                for axis in reversed(sorted(tosum)):
+                for axis in sorted(tosum, reverse=True):
                     zv = reduce_bitwise_and(zv, axis, dtype=dtype)
             elif scalar_op == aes.xor:
                 # There is no identity value for the xor function
                 # So we can't support shape of dimensions 0.
                 if np.prod(zv.shape) == 0:
                     continue
-                for axis in reversed(sorted(tosum)):
+                for axis in sorted(tosum, reverse=True):
                     zv = np.bitwise_xor.reduce(zv, axis)
             else:
                 raise NotImplementedError(

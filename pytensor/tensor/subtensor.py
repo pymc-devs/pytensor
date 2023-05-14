@@ -2604,7 +2604,7 @@ class AdvancedSubtensor(Op):
             ishapes[0], index_shapes, indices_are_shapes=True
         )
         assert node.outputs[0].ndim == len(res_shape)
-        return [[s for s in res_shape]]
+        return [list(res_shape)]
 
     def perform(self, node, inputs, out_):
         (out,) = out_

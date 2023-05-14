@@ -969,9 +969,7 @@ def inline_ofg_expansion(fgraph, node):
         return False
     if not op.is_inline:
         return False
-    return clone_replace(
-        op.inner_outputs, {u: v for u, v in zip(op.inner_inputs, node.inputs)}
-    )
+    return clone_replace(op.inner_outputs, dict(zip(op.inner_inputs, node.inputs)))
 
 
 # We want to run this before the first merge optimizer

@@ -633,11 +633,11 @@ class CLinker(Linker):
 
         # The orphans field is listified to ensure a consistent order.
         # list(fgraph.orphans.difference(self.outputs))
-        self.orphans = list(
+        self.orphans = [
             r
             for r in self.variables
             if isinstance(r, AtomicVariable) and r not in self.inputs
-        )
+        ]
         # C type constants (pytensor.scalar.ScalarType). They don't request an object
         self.consts = []
         # Move c type from orphans (pytensor.scalar.ScalarType) to self.consts
