@@ -141,5 +141,5 @@ def test_pinv():
     x_inv = at_nlinalg.pinv(x)
 
     fgraph = FunctionGraph([x], [x_inv])
-    x_np = np.array([[1.0, 2.0], [3.0, 4.0]])
+    x_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
     compare_jax_and_py(fgraph, [x_np])
