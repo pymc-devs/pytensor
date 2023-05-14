@@ -1123,7 +1123,7 @@ class TestFusion:
         out = dot(x, y) + x + y + z
 
         f = function([x, y, z], out, mode=self.mode)
-        topo = [n for n in f.maker.fgraph.toposort()]
+        topo = list(f.maker.fgraph.toposort())
         assert len(topo) == 2
         assert topo[-1].op.inplace_pattern
 

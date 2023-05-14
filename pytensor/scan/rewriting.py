@@ -388,7 +388,7 @@ def push_out_non_seq_scan(fgraph, node):
             if out in local_fgraph_outs_set:
                 x = node.outputs[local_fgraph_outs_map[out]]
                 y = replace_with_out[idx]
-                y_shape = [shp for shp in y.shape]
+                y_shape = list(y.shape)
                 replace_with[x] = at.alloc(y, node.inputs[0], *y_shape)
 
         # We need to add one extra dimension to the outputs

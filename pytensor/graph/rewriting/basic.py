@@ -2575,8 +2575,8 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
         for i in range(len(loop_timing)):
             loop_times = ""
             if loop_process_count[i]:
-                d = list(
-                    reversed(sorted(loop_process_count[i].items(), key=lambda a: a[1]))
+                d = sorted(
+                    loop_process_count[i].items(), key=lambda a: a[1], reverse=True
                 )
                 loop_times = " ".join([str((str(k), v)) for k, v in d[:5]])
                 if len(d) > 5:

@@ -3994,9 +3994,9 @@ class TestSigmoidUtils:
         exp_op = exp
         assert is_1pexp(1 + exp_op(x), False) == (False, x)
         assert is_1pexp(exp_op(x) + 1, False) == (False, x)
-        for neg_, exp_arg in map(
-            lambda x: is_1pexp(x, only_process_constants=False),
-            [(1 + exp_op(-x)), (exp_op(-x) + 1)],
+        for neg_, exp_arg in (
+            is_1pexp(x, only_process_constants=False)
+            for x in [(1 + exp_op(-x)), (exp_op(-x) + 1)]
         ):
             assert not neg_ and is_same_graph(exp_arg, -x)
         assert is_1pexp(1 - exp_op(x), False) is None

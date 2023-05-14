@@ -796,7 +796,7 @@ class Print(Op):
         return output_gradients
 
     def R_op(self, inputs, eval_points):
-        return [x for x in eval_points]
+        return list(eval_points)
 
     def __setstate__(self, dct):
         dct.setdefault("global_fn", _print_fn)

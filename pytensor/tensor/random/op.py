@@ -283,7 +283,7 @@ class RandomVariable(Op):
 
         shape = self._infer_shape(size, dist_params, param_shapes=param_shapes)
 
-        return [None, [s for s in shape]]
+        return [None, list(shape)]
 
     def __call__(self, *args, size=None, name=None, rng=None, dtype=None, **kwargs):
         res = super().__call__(rng, size, dtype, *args, **kwargs)

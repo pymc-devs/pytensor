@@ -142,7 +142,7 @@ def graph_replace(
                 raise ValueError(f"{key} is not a part of graph")
 
     sorted_replacements = sorted(
-        tuple(fg_replace.items()),
+        fg_replace.items(),
         # sort based on the fg toposort, if a variable has no owner, it goes first
         key=partial(toposort_key, fg, toposort),
         reverse=True,

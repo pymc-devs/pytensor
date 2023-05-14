@@ -1629,7 +1629,7 @@ def as_string(
                 multi.add(op2)
             else:
                 seen.add(input.owner)
-    multi_list = [x for x in multi]
+    multi_list = list(multi)
     done: Set = set()
 
     def multi_index(x):

@@ -1718,12 +1718,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             arg.shape[0]
             for arg in inputs[self.seqs_arg_offset : self.shared_arg_offset]
         ]
-        store_steps += [
-            arg
-            for arg in inputs[
-                self.nit_sot_arg_offset : self.nit_sot_arg_offset + info.n_nit_sot
-            ]
-        ]
+        store_steps += list(
+            inputs[self.nit_sot_arg_offset : self.nit_sot_arg_offset + info.n_nit_sot]
+        )
 
         # 2.1 Create storage space for outputs
         for idx in range(self.n_outs):
@@ -2270,7 +2267,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         )
 
         offset = 1 + info.n_seqs
-        scan_outs = [x for x in input_shapes[offset : offset + n_outs]]
+        scan_outs = list(input_shapes[offset : offset + n_outs])
         offset += n_outs
         outs_shape_n = info.n_mit_mot_outs + info.n_mit_sot + info.n_sit_sot
         for x in range(info.n_nit_sot):
@@ -2301,7 +2298,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                         shp.append(v_shp_i[0])
                 scan_outs.append(tuple(shp))
 
-        scan_outs += [x for x in input_shapes[offset : offset + info.n_shared_outs]]
+        scan_outs += list(input_shapes[offset : offset + info.n_shared_outs])
         # if we are dealing with a repeat-until, then we do not know the
         # leading dimension so we replace it for every entry with Shape_i
         if info.as_while:

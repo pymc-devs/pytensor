@@ -1555,11 +1555,11 @@ def local_sum_prod_div_dimshuffle(fgraph, node):
                     )
 
                 if len(compatible_dims) > 0:
-                    optimized_dimshuffle_order = list(
+                    optimized_dimshuffle_order = [
                         ax
                         for i, ax in enumerate(dimshuffle_order)
                         if (i not in axis) or (ax != "x")
-                    )
+                    ]
 
                     # Removing leading 'x' (since it will be done automatically)
                     while (
@@ -1644,7 +1644,7 @@ def local_op_of_op(fgraph, node):
                     return [op_type(None, dtype=out_dtype)(node_inps.owner.inputs[0])]
 
                 # figure out which axes were in the original sum
-                newaxis = list(tuple(node_inps.owner.op.axis))
+                newaxis = list(node_inps.owner.op.axis)
                 for i in node.op.axis:
                     new_i = i
                     for ii in node_inps.owner.op.axis:

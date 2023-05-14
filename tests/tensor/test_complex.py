@@ -15,9 +15,7 @@ class TestRealImag:
         x = zvector()
         rng = np.random.default_rng(23)
         xval = np.asarray(
-            list(
-                complex(rng.standard_normal(), rng.standard_normal()) for i in range(10)
-            )
+            [complex(rng.standard_normal(), rng.standard_normal()) for i in range(10)]
         )
         assert np.all(xval.real == pytensor.function([x], real(x))(xval))
         assert np.all(xval.imag == pytensor.function([x], imag(x))(xval))
