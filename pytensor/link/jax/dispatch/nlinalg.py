@@ -89,7 +89,7 @@ def jax_funcify_Dot(op, **kwargs):
 @jax_funcify.register(MatrixPinv)
 def jax_funcify_Pinv(op, **kwargs):
     def pinv(x):
-        return jnp.linalg.pinv(x)
+        return jnp.linalg.pinv(x, hermitian=op.hermitian)
 
     return pinv
 
