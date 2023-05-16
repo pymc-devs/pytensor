@@ -109,6 +109,50 @@ def psd_solve_with_chol(fgraph, node):
             return [x]
 
 
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Cholesky])
+def cholesky_ldotlt(fgraph, node):
+    """
+    rewrite cholesky(dot(L, L.T), lower=True) = L, where L is lower triangular,
+    or cholesky(dot(U.T, U), upper=True) = U where U is upper triangular.
+
+    This utilizes a boolean `lower_triangular` or `upper_triangular` tag on matrices.
+    """
+    if not isinstance(node.op, Cholesky):
+        return
+
+    A = node.inputs[0]
+    if not (A.owner and isinstance(A.owner.op, (Dot, Dot22))):
+        return
+
+    l, r = A.owner.inputs
+
+    # cholesky(dot(L,L.T)) case
+    if (
+        getattr(l.tag, "lower_triangular", False)
+        and r.owner
+        and isinstance(r.owner.op, DimShuffle)
+        and r.owner.op.new_order == (1, 0)
+        and r.owner.inputs[0] == l
+    ):
+        if node.op.lower:
+            return [l]
+        return [r]
+
+    # cholesky(dot(U.T,U)) case
+    if (
+        getattr(r.tag, "upper_triangular", False)
+        and l.owner
+        and isinstance(l.owner.op, DimShuffle)
+        and l.owner.op.new_order == (1, 0)
+        and l.owner.inputs[0] == r
+    ):
+        if node.op.lower:
+            return [l]
+        return [r]
+
+
 @register_stabilize
 @register_specialize
 @node_rewriter([Det])
