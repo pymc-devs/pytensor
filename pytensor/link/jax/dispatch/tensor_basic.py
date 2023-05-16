@@ -18,18 +18,40 @@ from pytensor.tensor.basic import (
     ScalarFromTensor,
     Split,
     TensorFromScalar,
+    Tri,
     get_underlying_scalar_constant_value,
 )
 from pytensor.tensor.exceptions import NotScalarConstantError
 
 
-ARANGE_CONCRETE_VALUE_ERROR = """JAX requires the arguments of `jax.numpy.arange`
-to be constants. The graph that you defined thus cannot be JIT-compiled
-by JAX. An example of a graph that can be compiled to JAX:
+def make_concrete_value_error_msg(func_name, arg_list):
+    """
+    Small helper function to make an informative error message to show users when JAX
+    compilation fails due to symbolic shape variables.
 
->>> import pytensor.tensor basic
->>> at.arange(1, 10, 2)
-"""
+    Parameters
+    ----------
+    func_name: str
+        Name of the function. Assumed to be the same in both the `jax.numpy` and `pytensor.tensor` name spaces.
+
+    arg_list: list of str
+        List of arguments shown to users in an example of pytensor code that can be successfully compiled to JAX
+
+    Returns
+    ----------
+    msg: str
+        Error message
+    """
+
+    msg = f"""JAX requires the arguments of `jax.numpy.{func_name}`
+    to be constants. The graph that you defined thus cannot be JIT-compiled
+    by JAX. An example of a graph that can be compiled to JAX:
+
+    >>> import pytensor.tensor as pt
+    >>> pt.{func_name}({", ".join(arg_list)})
+    """
+
+    return msg
 
 
 @jax_funcify.register(AllocDiag)
@@ -73,7 +95,9 @@ def jax_funcify_ARange(op, node, **kwargs):
     constant_args = []
     for arg in arange_args:
         if not isinstance(arg, Constant):
-            raise NotImplementedError(ARANGE_CONCRETE_VALUE_ERROR)
+            raise NotImplementedError(
+                make_concrete_value_error_msg("arange", ["1", "10", "2"])
+            )
 
         constant_args.append(arg.value)
 
@@ -193,3 +217,23 @@ def jax_funcify_ScalarFromTensor(op, **kwargs):
         return jnp.array(x).flatten()[0]
 
     return scalar_from_tensor
+
+
+@jax_funcify.register(Tri)
+def jax_funcify_Tri(op, node, **kwargs):
+    tri_args = node.inputs
+    constant_args = []
+    for arg in tri_args:
+        if not isinstance(arg, Constant):
+            raise NotImplementedError(
+                make_concrete_value_error_msg("tri", ["M=10", "N=10", "k=0"])
+            )
+
+        constant_args.append(arg.value)
+
+    M, N, k = constant_args
+
+    def tri(*_):
+        return jnp.tri(N, M, k)
+
+    return tri

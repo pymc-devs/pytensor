@@ -191,3 +191,27 @@ def test_jax_eye():
     out_fg = FunctionGraph([], [out])
 
     compare_jax_and_py(out_fg, [])
+
+
+def test_tri():
+    out = at.tri(10, 10, 0)
+    fgraph = FunctionGraph([], [out])
+    compare_jax_and_py(fgraph, [])
+
+
+def test_tri_nonconcrete():
+    """JAX cannot JIT-compile `jax.numpy.tri` when arguments are not concrete values."""
+
+    m, n, k = (
+        scalar("a", dtype="int64"),
+        scalar("n", dtype="int64"),
+        scalar("k", dtype="int64"),
+    )
+    m.tag.test_value = 10
+    n.tag.test_value = 10
+    k.tag.test_value = 0
+    out = at.tri(m, n, k)
+
+    with pytest.raises(NotImplementedError):
+        fgraph = FunctionGraph([m, n, k], [out])
+        compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
