@@ -49,6 +49,9 @@ def ElemwiseOpTime(N, script=False, loops=1000):
     v = np.random.random(N).astype(config.floatX)
     f = pytensor.function([x], 2 * x + x * x)
     f1 = pytensor.function([x], tanh(x))
+    # Don't waste time filtering inputs
+    f.trust_input = True
+    f1.trust_input = True
     if not script:
         if config.openmp:
             print("With openmp:")
