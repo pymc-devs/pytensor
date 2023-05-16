@@ -1206,6 +1206,7 @@ class Elemwise(OpenMPOp):
         for i in node.inputs + node.outputs:
             version.append(get_scalar_type(dtype=i.type.dtype).c_code_cache_version())
         version.append(("openmp", self.openmp))
+        version.append(("openmp_elemwise_minsize", config.openmp_elemwise_minsize))
         if all(version):
             return tuple(version)
         else:
