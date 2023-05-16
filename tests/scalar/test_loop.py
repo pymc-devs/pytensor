@@ -103,41 +103,11 @@ def test_until(mode):
     x = x0 + 1
     until = x >= 10
 
-    op = ScalarLoop(init=[x0], update=[x], until=until, until_condition_failed="ignore")
+    op = ScalarLoop(init=[x0], update=[x], until=until)
     fn = function([n_steps, x0], op(n_steps, x0), mode=mode)
-    np.testing.assert_allclose(fn(n_steps=20, x0=0), 10)
-    np.testing.assert_allclose(fn(n_steps=20, x0=1), 10)
-    np.testing.assert_allclose(fn(n_steps=5, x0=1), 6)
-
-    op = ScalarLoop(
-        init=[x0],
-        update=[x],
-        until=until,
-        until_condition_failed="warn",
-        name="TestLoop",
-    )
-    fn = function([n_steps, x0], op(n_steps, x0), mode=mode)
-    np.testing.assert_allclose(fn(n_steps=20, x0=0), 10)
-    np.testing.assert_allclose(fn(n_steps=20, x0=1), 10)
-    with pytest.warns(
-        RuntimeWarning, match="Until condition in ScalarLoop TestLoop not reached!"
-    ):
-        np.testing.assert_allclose(fn(n_steps=5, x0=1), 6)
-
-    op = ScalarLoop(
-        init=[x0],
-        update=[x],
-        until=until,
-        until_condition_failed="raise",
-        name="TestLoop",
-    )
-    fn = function([n_steps, x0], op(n_steps, x0), mode=mode)
-    np.testing.assert_allclose(fn(n_steps=20, x0=0), 10)
-    np.testing.assert_allclose(fn(n_steps=20, x0=1), 10)
-    with pytest.raises(
-        RuntimeError, match="Until condition in ScalarLoop TestLoop not reached!"
-    ):
-        fn(n_steps=5, x0=1)
+    np.testing.assert_allclose(fn(n_steps=20, x0=0), [10, True])
+    np.testing.assert_allclose(fn(n_steps=20, x0=1), [10, True])
+    np.testing.assert_allclose(fn(n_steps=5, x0=1), [6, False])
 
 
 def test_update_missing_error():

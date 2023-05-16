@@ -703,7 +703,6 @@ def _make_scalar_loop(n_steps, init, constant, inner_loop_fn, name, loop_op=Scal
         constant=constant_,
         update=update_,
         until=until_,
-        until_condition_failed="warn",
         name=name,
     )
     return op(n_steps, *init, *constant)
@@ -747,9 +746,10 @@ def gammainc_grad(k, x):
 
         init = [sum_a0, log_gamma_k_plus_n_plus_1, k_plus_n]
         constant = [log_x]
-        sum_a, *_ = _make_scalar_loop(
+        sum_a, *_, sum_a_converges = _make_scalar_loop(
             max_iters, init, constant, inner_loop_a, name="gammainc_grad_a"
         )
+        sum_a = switch(sum_a_converges, sum_a, np.nan)
 
         # Second loop
         n = np.array(0, dtype="int32")
@@ -772,9 +772,10 @@ def gammainc_grad(k, x):
 
         init = [sum_b0, log_gamma_k_plus_n_plus_1, n, k_plus_n]
         constant = [log_x]
-        sum_b, *_ = _make_scalar_loop(
+        sum_b, *_, sum_b_converges = _make_scalar_loop(
             max_iters, init, constant, inner_loop_b, name="gammainc_grad_b"
         )
+        sum_b = switch(sum_b_converges, sum_b, np.nan)
 
         grad_approx = exp(-x) * (log_x * sum_a - sum_b)
         return grad_approx
@@ -877,9 +878,10 @@ def gammaincc_grad(k, x, skip_loops=constant(False, dtype="bool")):
 
         init = [sum_b0, log_s, s_sign, log_delta, n]
         constant = [k, log_x]
-        sum_b, *_ = _make_scalar_loop(
+        sum_b, *_, sum_b_converges = _make_scalar_loop(
             max_iters, init, constant, inner_loop_b, name="gammaincc_grad_b"
         )
+        sum_b = switch(sum_b_converges, sum_b, np.nan)
         grad_approx_b = (
             gammainc(k, x) * (digamma_k - log_x) + exp(k * log_x) * sum_b / gamma_k
         )
@@ -1547,10 +1549,10 @@ def betainc_grad(p, q, x, wrtp: bool):
 
         init = [derivative, Am2, Am1, Bm2, Bm1, dAm2, dAm1, dBm2, dBm1, n]
         constant = [f, p, q, K, dK]
-        grad, *_ = _make_scalar_loop(
+        grad, *_, grad_converges = _make_scalar_loop(
             max_iters, init, constant, inner_loop, name="betainc_grad"
         )
-        return grad
+        return switch(grad_converges, grad, np.nan)
 
     # Input validation
     nan_branch = (x < 0) | (x > 1) | (p < 0) | (q < 0)
@@ -1752,10 +1754,10 @@ def _grad_2f1_loop(a, b, c, z, *, skip_loop, wrt, dtype):
 
     init = [*grads, *log_gs, *log_gs_signs, log_t, log_t_sign, sign_zk, k]
     constant = [a, b, c, log_z, sign_z]
-    loop_outs = _make_scalar_loop(
+    *loop_outs, converges = _make_scalar_loop(
         max_steps, init, constant, inner_loop, name="hyp2f1_grad", loop_op=Grad2F1Loop
     )
-    return loop_outs[: len(wrt)]
+    return *loop_outs[: len(wrt)], converges
 
 
 def hyp2f1_grad(a, b, c, z, wrt: Tuple[int, ...]):
@@ -1792,7 +1794,7 @@ def hyp2f1_grad(a, b, c, z, wrt: Tuple[int, ...]):
     # We have to pass the converges flag to interrupt the loop, as the switch is not lazy
     z_is_zero = eq(z, 0)
     converges = check_2f1_converges(a, b, c, z)
-    grads = _grad_2f1_loop(
+    *grads, grad_converges = _grad_2f1_loop(
         a, b, c, z, skip_loop=z_is_zero | (~converges), wrt=wrt, dtype=dtype
     )
 

@@ -1219,6 +1219,30 @@ compile.optdb.register(  # type: ignore
 )
 
 
+def _rebuild_partial_2f1grad_loop(node, wrt):
+    a, b, c, log_z, sign_z = node.inputs[-5:]
+    z = exp(log_z) * sign_z
+
+    # Reconstruct scalar loop with relevant outputs
+    a_, b_, c_, z_ = (x.type.to_scalar_type()() for x in (a, b, c, z))
+    new_loop_op = _grad_2f1_loop(
+        a_, b_, c_, z_, skip_loop=False, wrt=wrt, dtype=a_.type.dtype
+    )[0].owner.op
+
+    # Reconstruct elemwise loop
+    new_elemwise_op = Elemwise(scalar_op=new_loop_op)
+    n_steps = node.inputs[0]
+    init_grad_vars = node.inputs[1:10]
+    other_inputs = node.inputs[10:]
+
+    init_grads = init_grad_vars[: len(wrt)]
+    init_gs = init_grad_vars[3 : 3 + len(wrt)]
+    init_gs_signs = init_grad_vars[6 : 6 + len(wrt)]
+    subset_init_grad_vars = init_grads + init_gs + init_gs_signs
+
+    return new_elemwise_op(n_steps, *subset_init_grad_vars, *other_inputs)
+
+
 @register_specialize
 @node_rewriter([Elemwise])
 def local_useless_2f1grad_loop(fgraph, node):
@@ -1240,34 +1264,16 @@ def local_useless_2f1grad_loop(fgraph, node):
     if sum(grad_var_is_used) == 3:
         return None
 
-    # Check that None of the remaining vars is used anywhere
-    if any(bool(fgraph.clients.get(v)) for v in node.outputs[3:]):
+    *other_vars, converges = node.outputs[3:]
+
+    # Check that None of the remaining vars (except the converge flag) is used anywhere
+    if any(bool(fgraph.clients.get(v)) for v in other_vars):
         return None
 
-    a, b, c, log_z, sign_z = node.inputs[-5:]
-    z = exp(log_z) * sign_z
-
-    # Reconstruct scalar loop with relevant outputs
-    a_, b_, c_, z_ = (x.type.to_scalar_type()() for x in (a, b, c, z))
     wrt = [i for i, used in enumerate(grad_var_is_used) if used]
-    new_loop_op = _grad_2f1_loop(
-        a_, b_, c_, z_, skip_loop=False, wrt=wrt, dtype=a_.type.dtype
-    )[0].owner.op
+    *new_outs, new_converges = _rebuild_partial_2f1grad_loop(node, wrt=wrt)
 
-    # Reconstruct elemwise loop
-    new_elemwise_op = Elemwise(scalar_op=new_loop_op)
-    n_steps = node.inputs[0]
-    init_grad_vars = node.inputs[1:10]
-    other_inputs = node.inputs[10:]
-
-    init_grads = init_grad_vars[: len(wrt)]
-    init_gs = init_grad_vars[3 : 3 + len(wrt)]
-    init_gs_signs = init_grad_vars[6 : 6 + len(wrt)]
-    subset_init_grad_vars = init_grads + init_gs + init_gs_signs
-
-    new_outs = new_elemwise_op(n_steps, *subset_init_grad_vars, *other_inputs)
-
-    replacements = {}
+    replacements = {converges: new_converges}
     i = 0
     for grad_var, is_used in zip(grad_vars, grad_var_is_used):
         if not is_used:
@@ -1275,3 +1281,48 @@ def local_useless_2f1grad_loop(fgraph, node):
         replacements[grad_var] = new_outs[i]
         i += 1
     return replacements
+
+
+@node_rewriter([Elemwise])
+def split_2f1grad_loop(fgraph, node):
+    """
+    2f1grad loop has too many operands for Numpy frompyfunc code used by Elemwise nodes on python mode.
+
+    This rewrite splits it across 3 different operations. It is not needed if `local_useless_2f1grad_loop` was applied
+    """
+    loop_op = node.op.scalar_op
+
+    if not isinstance(loop_op, Grad2F1Loop):
+        return None
+
+    grad_related_vars = node.outputs[:-4]
+    # local_useless_2f1grad_loop was used, we should be safe
+    if len(grad_related_vars) // 3 != 3:
+        return None
+
+    grad_vars = grad_related_vars[:3]
+    *other_vars, converges = node.outputs[3:]
+
+    # Check that None of the remaining vars is used anywhere
+    if any(bool(fgraph.clients.get(v)) for v in other_vars):
+        return None
+
+    new_grad0, new_grad1, *_, new_converges01 = _rebuild_partial_2f1grad_loop(
+        node, wrt=[0, 1]
+    )
+    new_grad2, *_, new_converges2 = _rebuild_partial_2f1grad_loop(node, wrt=[2])
+
+    replacements = {
+        converges: new_converges01 & new_converges2,
+        grad_vars[0]: new_grad0,
+        grad_vars[1]: new_grad1,
+        grad_vars[2]: new_grad2,
+    }
+    return replacements
+
+
+compile.optdb["py_only"].register(  # type: ignore
+    "split_2f1grad_loop",
+    split_2f1grad_loop,
+    "fast_compile",
+)

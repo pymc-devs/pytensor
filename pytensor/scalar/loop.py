@@ -1,8 +1,6 @@
-import warnings
 from copy import copy
 from itertools import chain
-from textwrap import dedent
-from typing import Literal, Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple, cast
 
 from pytensor.compile import rebuild_collect_shared
 from pytensor.graph import Constant, FunctionGraph, Variable, clone
@@ -14,7 +12,33 @@ class ScalarLoop(ScalarInnerGraphOp):
     """Scalar Op that encapsulates a scalar loop operation.
 
     This Op can be used for the gradient of other Scalar Ops.
-    It is much more restricted that `Scan` in that the entire inner graph must be composed of Scalar operations.
+    It is much more restricted than `Scan` in that the entire inner graph
+    must be composed of Scalar operations, and all inputs and outputs must be ScalarVariables.
+
+    The pseudocode of the computation performed by this Op looks like the following:
+
+    ```python
+    def scalar_for_loop(fn, n_steps, init, update, constant):
+        for i in range(n_steps):
+            state = fn(*state, *constant)
+        return state
+    ```
+
+    When an until condition is present it behaves like this:
+
+    ```python
+    def scalar_while_loop(fn, n_steps, init, update, constant):
+        # If n_steps <= 0, we skip the loop altogether.
+        # This does not count as a "failure"
+        done = True
+
+        for i in range(n_steps):
+            *state, done = fn(*state, *constant)
+            if done:
+                break
+
+        return *state, done
+    ```
 
     """
 
@@ -23,7 +47,6 @@ class ScalarLoop(ScalarInnerGraphOp):
         "update",
         "constant",
         "until",
-        "until_condition_failed",
     )
 
     def __init__(
@@ -32,14 +55,8 @@ class ScalarLoop(ScalarInnerGraphOp):
         update: Sequence[Variable],
         constant: Optional[Sequence[Variable]] = None,
         until: Optional[Variable] = None,
-        until_condition_failed: Literal["ignore", "warn", "raise"] = "warn",
         name="ScalarLoop",
     ):
-        if until_condition_failed not in ["ignore", "warn", "raise"]:
-            raise ValueError(
-                f"Invalid until_condition_failed: {until_condition_failed}"
-            )
-
         if constant is None:
             constant = []
         if not len(init) == len(update):
@@ -52,12 +69,13 @@ class ScalarLoop(ScalarInnerGraphOp):
             self.outputs = copy(outputs)
         self.inputs = copy(inputs)
 
+        self.is_while = bool(until)
         self.inputs_type = tuple(input.type for input in inputs)
         self.outputs_type = tuple(output.type for output in outputs)
+        if self.is_while:
+            self.outputs_type = self.outputs_type + (cast(Variable, until).type,)
         self.nin = len(inputs) + 1  # n_steps is not part of the inner graph
-        self.nout = len(outputs)  # until is not output
-        self.is_while = bool(until)
-        self.until_condition_failed = until_condition_failed
+        self.nout = len(outputs) + (1 if self.is_while else 0)
         self.name = name
         self._validate_fgraph(FunctionGraph(self.inputs, self.outputs, clone=False))
         super().__init__()
@@ -135,7 +153,6 @@ class ScalarLoop(ScalarInnerGraphOp):
             update=update,
             constant=constant,
             until=until,
-            until_condition_failed=self.until_condition_failed,
             name=self.name,
         )
 
@@ -191,7 +208,6 @@ class ScalarLoop(ScalarInnerGraphOp):
                 update=cloned_update,
                 constant=cloned_constant,
                 until=cloned_until,
-                until_condition_failed=self.until_condition_failed,
                 name=self.name,
             )
             node = op.make_node(n_steps, *inputs)
@@ -209,17 +225,8 @@ class ScalarLoop(ScalarInnerGraphOp):
                 *carry, until = inner_fn(*carry, *constant)
                 if until:
                     break
+            carry.append(until)
 
-            if not until:  # no-break
-                if self.until_condition_failed == "raise":
-                    raise RuntimeError(
-                        f"Until condition in ScalarLoop {self.name} not reached!"
-                    )
-                elif self.until_condition_failed == "warn":
-                    warnings.warn(
-                        f"Until condition in ScalarLoop {self.name} not reached!",
-                        RuntimeWarning,
-                    )
         else:
             if n_steps < 0:
                 raise ValueError("ScalarLoop does not have a termination condition.")
@@ -324,27 +331,12 @@ class ScalarLoop(ScalarInnerGraphOp):
         if self.is_while:
             _c_code += "\nif(until){break;}\n"
 
+        # End of the loop
         _c_code += "}\n"
 
-        # End of the loop
+        # Output until flag
         if self.is_while:
-            if self.until_condition_failed == "raise":
-                _c_code += dedent(
-                    f"""
-                if (!until) {{
-                    PyErr_SetString(PyExc_RuntimeError, "Until condition in ScalarLoop {self.name} not reached!");
-                    %(fail)s
-                }}
-                """
-                )
-            elif self.until_condition_failed == "warn":
-                _c_code += dedent(
-                    f"""
-                if (!until) {{
-                    PyErr_WarnEx(PyExc_RuntimeWarning, "Until condition in ScalarLoop {self.name} not reached!", 1);
-                }}
-                """
-                )
+            _c_code += f"%(o{len(fgraph.outputs)-1})s = until;\n"
 
         _c_code += "}\n"
 
@@ -376,13 +368,4 @@ class ScalarLoop(ScalarInnerGraphOp):
         return res
 
     def c_code_cache_version_outer(self):
-        return (1,)
-
-    def __eq__(self, other):
-        return (
-            super().__eq__(other)
-            and self.until_condition_failed == other.until_condition_failed
-        )
-
-    def __hash__(self):
-        return hash((super().__hash__(), self.until_condition_failed))
+        return (2,)
