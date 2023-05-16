@@ -65,6 +65,9 @@ if __name__ == "__main__":
         costlySpeedstring = "slowdown"
     print(f"Timed with vector of {int(options.N)} elements")
     print(
+        f"{config.openmp_elemwise_minsize=}, OMP_NUM_THREADS={os.getenv('OMP_NUM_THREADS')}"
+    )
+    print(
         f"Fast op time without openmp {cheapTime}s with openmp {cheapTimeOpenmp}s {cheapSpeedstring} {cheapSpeed:2.2f}"
     )
 
