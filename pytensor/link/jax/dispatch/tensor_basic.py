@@ -221,21 +221,14 @@ def jax_funcify_ScalarFromTensor(op, **kwargs):
 
 @jax_funcify.register(Tri)
 def jax_funcify_Tri(op, node, **kwargs):
-    dtype = op.dtype
-    tri_args = node.inputs
-    constant_args = []
+    # node.inputs is N, M, k
+    const_args = [getattr(x, "data", None) for x in node.inputs]
 
-    for arg in tri_args:
-        if not isinstance(arg, Constant):
-            raise NotImplementedError(
-                make_concrete_value_error_msg("tri", ["M=10", "N=10", "k=0"])
-            )
-
-        constant_args.append(arg.value)
-
-    M, N, k = constant_args
-
-    def tri(*_):
-        return jnp.tri(N, M, k, dtype=dtype)
+    def tri(*args):
+        # args is N, M, k
+        args = [
+            x if const_x is None else const_x for x, const_x in zip(args, const_args)
+        ]
+        return jnp.tri(*args, dtype=op.dtype)
 
     return tri

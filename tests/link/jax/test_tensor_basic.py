@@ -210,8 +210,11 @@ def test_tri_nonconcrete():
     m.tag.test_value = 10
     n.tag.test_value = 10
     k.tag.test_value = 0
+
     out = at.tri(m, n, k)
 
-    with pytest.raises(NotImplementedError):
+    # The actual error the user will see should be jax.errors.ConcretizationTypeError, but
+    # the error handler raises an Attribute error first, so that's what this test needs to pass
+    with pytest.raises(AttributeError):
         fgraph = FunctionGraph([m, n, k], [out])
         compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
