@@ -262,6 +262,7 @@ optdb.register(
 
 # final pass just to make sure
 optdb.register("merge3", MergeOptimizer(), "fast_run", "merge", position=100)
+optdb.register("py_only", EquilibriumDB(), "fast_compile", position=100)
 
 _tags: Union[Tuple[str, str], Tuple]
 
@@ -439,11 +440,17 @@ class Mode:
 # FunctionMaker, the Mode will be taken from this dictionary using the
 # string as the key
 # Use VM_linker to allow lazy evaluation by default.
-FAST_COMPILE = Mode(VMLinker(use_cloop=False, c_thunks=False), "fast_compile")
+FAST_COMPILE = Mode(
+    VMLinker(use_cloop=False, c_thunks=False),
+    RewriteDatabaseQuery(include=["fast_compile", "py_only"]),
+)
 if config.cxx:
     FAST_RUN = Mode("cvm", "fast_run")
 else:
-    FAST_RUN = Mode("vm", "fast_run")
+    FAST_RUN = Mode(
+        "vm",
+        RewriteDatabaseQuery(include=["fast_run", "py_only"]),
+    )
 
 JAX = Mode(
     JAXLinker(),
