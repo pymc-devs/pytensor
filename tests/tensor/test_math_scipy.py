@@ -1075,7 +1075,7 @@ class TestHyp2F1Grad:
         mode = get_default_mode().including("local_useless_2f1grad_loop")
         f_grad = function([a1, a2, b1, z], hyp2f1_grad, mode=mode)
 
-        if len(wrt) == 3 and config.mode == "FAST_COMPILE" or not config.cxx:
+        if len(wrt) == 3 and (config.mode == "FAST_COMPILE" or not config.cxx):
             # In this case we actually get two scalar_loops, because the merged one can't be executed in Python
             [scalar_loop_op1, scalar_loop_op2] = [
                 node.op.scalar_op
