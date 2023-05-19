@@ -5,10 +5,10 @@ import pytensor
 from pytensor import function
 from pytensor import tensor as at
 from pytensor.configdefaults import config
-from pytensor.sandbox.linalg.ops import inv_as_solve, spectral_radius_bound
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import _allclose
 from pytensor.tensor.nlinalg import MatrixInverse, matrix_inverse
+from pytensor.tensor.rewriting.linalg import inv_as_solve
 from pytensor.tensor.slinalg import Cholesky, Solve, solve
 from pytensor.tensor.type import dmatrix, matrix, vector
 from tests import unittest_tools as utt
@@ -63,53 +63,6 @@ def test_rop_lop():
     v1 = lop_f(vx, vv)
     v2 = scan_f(vx, vv)
     assert _allclose(v1, v2), f"LOP mismatch: {v1} {v2}"
-
-
-def test_spectral_radius_bound():
-    tol = 10 ** (-6)
-    rng = np.random.default_rng(utt.fetch_seed())
-    x = matrix()
-    radius_bound = spectral_radius_bound(x, 5)
-    f = pytensor.function([x], radius_bound)
-
-    shp = (3, 4)
-    m = rng.random(shp)
-    m = np.cov(m).astype(config.floatX)
-    radius_bound_pytensor = f(m)
-
-    # test the approximation
-    mm = m
-    for i in range(5):
-        mm = np.dot(mm, mm)
-    radius_bound_numpy = np.trace(mm) ** (2 ** (-5))
-    assert abs(radius_bound_numpy - radius_bound_pytensor) < tol
-
-    # test the bound
-    eigen_val = numpy.linalg.eig(m)
-    assert (eigen_val[0].max() - radius_bound_pytensor) < tol
-
-    # test type errors
-    xx = vector()
-    ok = False
-    try:
-        spectral_radius_bound(xx, 5)
-    except TypeError:
-        ok = True
-    assert ok
-    ok = False
-    try:
-        spectral_radius_bound(x, 5.0)
-    except TypeError:
-        ok = True
-    assert ok
-
-    # test value error
-    ok = False
-    try:
-        spectral_radius_bound(x, -5)
-    except ValueError:
-        ok = True
-    assert ok
 
 
 def test_transinv_to_invtrans():
