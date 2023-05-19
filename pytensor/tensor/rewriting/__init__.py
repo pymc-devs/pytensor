@@ -7,6 +7,7 @@ import pytensor.tensor.rewriting.extra_ops
 
 # Register JAX specializations
 import pytensor.tensor.rewriting.jax
+import pytensor.tensor.rewriting.linalg
 import pytensor.tensor.rewriting.math
 import pytensor.tensor.rewriting.shape
 import pytensor.tensor.rewriting.special
