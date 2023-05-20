@@ -44,12 +44,11 @@ from pytensor.tensor.blas import (
     gemv_no_inplace,
     ger,
     ger_destructive,
-    local_dot22_to_dot22scalar,
-    local_gemm_to_ger,
     res_is_a,
 )
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Dot, dot, mean, mul, neg, outer, sigmoid, sqrt
+from pytensor.tensor.rewriting.blas import local_dot22_to_dot22scalar, local_gemm_to_ger
 from pytensor.tensor.type import (
     cmatrix,
     col,
