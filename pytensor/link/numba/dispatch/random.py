@@ -312,6 +312,7 @@ def numba_funcify_BernoulliRV(op, node, **kwargs):
 def numba_funcify_CategoricalRV(op, node, **kwargs):
     out_dtype = node.outputs[1].type.numpy_dtype
     size_len = int(get_vector_length(node.inputs[1]))
+    p_ndim = node.inputs[-1].ndim
 
     @numba_basic.numba_njit
     def categorical_rv(rng, size, dtype, p):
@@ -321,7 +322,11 @@ def numba_funcify_CategoricalRV(op, node, **kwargs):
             size_tpl = numba_ndarray.to_fixed_tuple(size, size_len)
             p = np.broadcast_to(p, size_tpl + p.shape[-1:])
 
-        unif_samples = np.random.uniform(0, 1, size_tpl)
+        # Workaround https://github.com/numba/numba/issues/8975
+        if not size_len and p_ndim == 1:
+            unif_samples = np.asarray(np.random.uniform(0, 1))
+        else:
+            unif_samples = np.random.uniform(0, 1, size_tpl)
 
         res = np.empty(size_tpl, dtype=out_dtype)
         for idx in np.ndindex(*size_tpl):
