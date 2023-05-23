@@ -349,7 +349,7 @@ class InplaceElemwiseOptimizer(GraphRewriter):
 
 
 inplace_elemwise_optimizer = InplaceElemwiseOptimizer(Elemwise)
-compile.optdb.register(  # type: ignore
+compile.optdb.register(
     "inplace_elemwise_opt",
     inplace_elemwise_optimizer,
     "inplace_opt",  # for historic reason
@@ -1097,7 +1097,7 @@ if config.tensor__local_elemwise_fusion:
         "fusion",
         position=1,
     )
-    compile.optdb.register(  # type: ignore
+    compile.optdb.register(
         "elemwise_fusion",
         fuse_seqopt,
         "fast_run",
@@ -1211,7 +1211,7 @@ def local_careduce_fusion(fgraph, node):
     return [new_car_op(*elm_inputs)]
 
 
-compile.optdb.register(  # type: ignore
+compile.optdb.register(
     "local_careduce_fusion",
     in2out(local_careduce_fusion),
     "fusion",
@@ -1321,7 +1321,7 @@ def split_2f1grad_loop(fgraph, node):
     return replacements
 
 
-compile.optdb["py_only"].register(  # type: ignore
+compile.optdb["py_only"].register(
     "split_2f1grad_loop",
     split_2f1grad_loop,
     "fast_compile",
