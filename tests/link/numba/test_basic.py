@@ -530,9 +530,6 @@ def test_AdvancedIncSubtensor1(x, y, indices):
             at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             at.as_tensor(rng.poisson(size=(2, 5))),
             ([1, 1], [2, 2]),
-            marks=pytest.mark.xfail(
-                reason="Duplicate index handling hasn't been implemented, yet."
-            ),
         ),
     ],
 )

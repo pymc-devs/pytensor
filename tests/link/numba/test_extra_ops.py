@@ -459,9 +459,6 @@ def test_UnravelIndex(arr, shape, order, exc):
             "left",
             None,
             None,
-            marks=pytest.mark.xfail(
-                reason="This won't work until https://github.com/numba/numba/pull/7005 is merged"
-            ),
         ),
         (
             set_test_value(at.vector(), np.array([1.0, 2.0, 3.0], dtype=config.floatX)),
