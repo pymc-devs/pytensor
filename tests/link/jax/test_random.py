@@ -693,6 +693,18 @@ def test_random_concrete_shape():
     assert jax_fn(np.ones((2, 3))).shape == (2, 3)
 
 
+def test_random_concrete_shape_from_param():
+    rng = shared(np.random.RandomState(123))
+    x_at = at.dmatrix()
+    out = at.random.normal(x_at, 1, rng=rng)
+    with pytest.warns(
+        UserWarning,
+        match="The RandomType SharedVariables \[.+\] will not be used"
+    ):
+        jax_fn = function([x_at], out, mode=jax_mode)
+    assert jax_fn(np.ones((2, 3))).shape == (2, 3)
+
+
 def test_random_concrete_shape_subtensor():
     """JAX should compile when a concrete value is passed for the `size` parameter.
 

@@ -45,8 +45,10 @@ def assert_size_argument_jax_compatible(node):
 
     """
     size = node.inputs[1]
-    size_op = size.owner.op
-    if not isinstance(size_op, (Shape, Shape_i, JAXShapeTuple)):
+    size_node = size.owner
+    if (size_node is not None) and (
+        not isinstance(size_node.op, (Shape, Shape_i, JAXShapeTuple))
+    ):
         raise NotImplementedError(SIZE_NOT_COMPATIBLE)
 
 
