@@ -44,7 +44,14 @@ class JAXLinker(JITLinker):
                 new_inp_storage = [new_inp.get_value(borrow=True)]
                 storage_map[new_inp] = new_inp_storage
                 old_inp_storage = storage_map.pop(old_inp)
-                input_storage[input_storage.index(old_inp_storage)] = new_inp_storage
+                # Find index of old_inp_storage in input_storage
+                for input_storage_idx, input_storage_item in enumerate(input_storage):
+                    # We have to establish equality based on identity because input_storage may contain numpy arrays
+                    if input_storage_item is old_inp_storage:
+                        break
+                else:  # no break
+                    raise ValueError()
+                input_storage[input_storage_idx] = new_inp_storage
                 fgraph.remove_input(
                     fgraph.inputs.index(old_inp), reason="JAXLinker.fgraph_convert"
                 )
