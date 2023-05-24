@@ -616,9 +616,9 @@ class _tensor_py_operators:
         except TypeError:
             # This prevents accidental iteration via sum(self)
             raise TypeError(
-                "TensorType does not support iteration. "
-                "Maybe you are using builtins.sum instead of "
-                "pytensor.tensor.math.sum? (Maybe .max?)"
+                "TensorType does not support iteration.\n"
+                "\tDid you pass a PyTensor variable to a function that expects a list?\n"
+                "\tMaybe you are using builtins.sum instead of pytensor.tensor.sum?"
             )
 
     @property
