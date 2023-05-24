@@ -291,7 +291,7 @@ N.B.:
     for var in inputs_to_print:
         _debugprint(
             var,
-            prefix="-",
+            prefix="→ ",
             depth=depth,
             done=done,
             print_type=print_type,
@@ -342,11 +342,17 @@ N.B.:
 
     if len(inner_graph_vars) > 0:
         print("", file=_file)
-        new_prefix = " >"
-        new_prefix_child = " >"
+        prefix = ""
+        new_prefix = prefix + " ← "
+        new_prefix_child = prefix + "   "
         print("Inner graphs:", file=_file)
 
+        printed_inner_graphs_nodes = set()
         for ig_var in inner_graph_vars:
+            if ig_var.owner in printed_inner_graphs_nodes:
+                continue
+            else:
+                printed_inner_graphs_nodes.add(ig_var.owner)
             # This is a work-around to maintain backward compatibility
             # (e.g. to only print inner graphs that have been compiled through
             # a call to `Op.prepare_node`)
@@ -385,6 +391,7 @@ N.B.:
 
             _debugprint(
                 ig_var,
+                prefix=prefix,
                 depth=depth,
                 done=done,
                 print_type=print_type,
@@ -399,13 +406,14 @@ N.B.:
                 print_op_info=print_op_info,
                 print_destroy_map=print_destroy_map,
                 print_view_map=print_view_map,
+                is_inner_graph_header=True,
             )
 
             if print_fgraph_inputs:
                 for inp in inner_inputs:
                     _debugprint(
                         inp,
-                        prefix="-",
+                        prefix=" → ",
                         depth=depth,
                         done=done,
                         print_type=print_type,
@@ -485,6 +493,7 @@ def _debugprint(
     parent_node: Optional[Apply] = None,
     print_op_info: bool = False,
     inner_graph_node: Optional[Apply] = None,
+    is_inner_graph_header: bool = False,
 ) -> TextIO:
     r"""Print the graph represented by `var`.
 
@@ -625,7 +634,10 @@ def _debugprint(
         else:
             data = ""
 
-        var_output = f"{prefix}{node.op}{output_idx}{id_str}{type_str}{var_name}{destroy_map_str}{view_map_str}{o}{data}"
+        if is_inner_graph_header:
+            var_output = f"{prefix}{node.op}{id_str}{destroy_map_str}{view_map_str}{o}"
+        else:
+            var_output = f"{prefix}{node.op}{output_idx}{id_str}{type_str}{var_name}{destroy_map_str}{view_map_str}{o}{data}"
 
         if print_op_info and node not in op_information:
             op_information.update(op_debug_information(node.op, node))
@@ -633,7 +645,7 @@ def _debugprint(
         node_info = (
             parent_node and op_information.get(parent_node)
         ) or op_information.get(node)
-        if node_info and var in node_info:
+        if node_info and var in node_info and not is_inner_graph_header:
             var_output = f"{var_output} ({node_info[var]})"
 
         if profile and profile.apply_time and node in profile.apply_time:
@@ -660,12 +672,13 @@ def _debugprint(
         if not already_done and (
             not stop_on_name or not (hasattr(var, "name") and var.name is not None)
         ):
-            new_prefix = prefix_child + " |"
-            new_prefix_child = prefix_child + " |"
+            new_prefix = prefix_child + " ├─ "
+            new_prefix_child = prefix_child + " │ "
 
             for in_idx, in_var in enumerate(node.inputs):
                 if in_idx == len(node.inputs) - 1:
-                    new_prefix_child = prefix_child + "  "
+                    new_prefix = prefix_child + " └─ "
+                    new_prefix_child = prefix_child + "   "
 
                 if hasattr(in_var, "owner") and hasattr(in_var.owner, "op"):
                     if (
@@ -698,6 +711,8 @@ def _debugprint(
                     print_view_map=print_view_map,
                     inner_graph_node=inner_graph_node,
                 )
+        elif not is_inner_graph_header:
+            print(prefix_child + " └─ ···", file=file)
     else:
         id_str = get_id_str(var)
 
