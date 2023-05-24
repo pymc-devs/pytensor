@@ -840,22 +840,34 @@ class Subtensor(COp):
 
     @staticmethod
     def str_from_slice(entry):
-        msg = []
-        for x in [entry.start, entry.stop, entry.step]:
-            if x is None:
-                msg.append("")
+        if entry.step:
+            return ":".join(
+                (
+                    "start" if entry.start else "",
+                    "stop" if entry.stop else "",
+                    "step",
+                )
+            )
+        if entry.stop:
+            return f"{'start' if entry.start else ''}:stop"
+        if entry.start:
+            return "start:"
+        return ":"
+
+    @staticmethod
+    def str_from_indices(idx_list):
+        indices = []
+        letter_indexes = 0
+        for entry in idx_list:
+            if isinstance(entry, slice):
+                indices.append(Subtensor.str_from_slice(entry))
             else:
-                msg.append(str(x))
-        return ":".join(msg)
+                indices.append("ijk"[letter_indexes % 3] * (letter_indexes // 3 + 1))
+                letter_indexes += 1
+        return ", ".join(indices)
 
     def __str__(self):
-        indices = []
-        for entry in self.idx_list:
-            if isinstance(entry, slice):
-                indices.append(self.str_from_slice(entry))
-            else:
-                indices.append(str(entry))
-        return f"{self.__class__.__name__}{{{', '.join(indices)}}}"
+        return f"{self.__class__.__name__}{{{self.str_from_indices(self.idx_list)}}}"
 
     @staticmethod
     def default_helper_c_code_args():
@@ -1498,21 +1510,8 @@ class IncSubtensor(COp):
         return hash((type(self), idx_list, self.inplace, self.set_instead_of_inc))
 
     def __str__(self):
-        indices = []
-        for entry in self.idx_list:
-            if isinstance(entry, slice):
-                indices.append(Subtensor.str_from_slice(entry))
-            else:
-                indices.append(str(entry))
-        if self.inplace:
-            msg = "Inplace"
-        else:
-            msg = ""
-        if not self.set_instead_of_inc:
-            msg += "Inc"
-        else:
-            msg += "Set"
-        return f"{self.__class__.__name__}{{{msg};{', '.join(indices)}}}"
+        name = "SetSubtensor" if self.set_instead_of_inc else "IncSubtensor"
+        return f"{name}{{{Subtensor.str_from_indices(self.idx_list)}}}"
 
     def make_node(self, x, y, *inputs):
         """
@@ -2661,10 +2660,10 @@ class AdvancedIncSubtensor(Op):
         self.ignore_duplicates = ignore_duplicates
 
     def __str__(self):
-        return "{}{{{}, {}}}".format(
-            self.__class__.__name__,
-            "inplace=" + str(self.inplace),
-            " set_instead_of_inc=" + str(self.set_instead_of_inc),
+        return (
+            "AdvancedSetSubtensor"
+            if self.set_instead_of_inc
+            else "AdvancedIncSubtensor"
         )
 
     def make_node(self, x, y, *inputs):
