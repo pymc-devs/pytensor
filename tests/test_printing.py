@@ -145,12 +145,12 @@ def test_debugprint():
     reference = dedent(
         r"""
         Elemwise{add,no_inplace} [id 0]
-         |Elemwise{add,no_inplace} [id 1] 'C'
-         | |A [id 2]
-         | |B [id 3]
-         |Elemwise{add,no_inplace} [id 4]
-           |D [id 5]
-           |E [id 6]
+         ├─ Elemwise{add,no_inplace} [id 1] 'C'
+         │  ├─ A [id 2]
+         │  └─ B [id 3]
+         └─ Elemwise{add,no_inplace} [id 4]
+            ├─ D [id 5]
+            └─ E [id 6]
         """
     ).lstrip()
 
@@ -163,12 +163,12 @@ def test_debugprint():
     reference = dedent(
         r"""
         Elemwise{add,no_inplace} [id A]
-         |Elemwise{add,no_inplace} [id B] 'C'
-         | |A [id C]
-         | |B [id D]
-         |Elemwise{add,no_inplace} [id E]
-           |D [id F]
-           |E [id G]
+         ├─ Elemwise{add,no_inplace} [id B] 'C'
+         │  ├─ A [id C]
+         │  └─ B [id D]
+         └─ Elemwise{add,no_inplace} [id E]
+            ├─ D [id F]
+            └─ E [id G]
         """
     ).lstrip()
 
@@ -181,10 +181,11 @@ def test_debugprint():
     reference = dedent(
         r"""
         Elemwise{add,no_inplace} [id A]
-         |Elemwise{add,no_inplace} [id B] 'C'
-         |Elemwise{add,no_inplace} [id C]
-           |D [id D]
-           |E [id E]
+         ├─ Elemwise{add,no_inplace} [id B] 'C'
+         │  └─ ···
+         └─ Elemwise{add,no_inplace} [id C]
+            ├─ D [id D]
+            └─ E [id E]
         """
     ).lstrip()
 
@@ -196,12 +197,12 @@ def test_debugprint():
     reference = dedent(
         r"""
         Elemwise{add,no_inplace}
-         |Elemwise{add,no_inplace} 'C'
-         | |A
-         | |B
-         |Elemwise{add,no_inplace}
-           |D
-           |E
+         ├─ Elemwise{add,no_inplace} 'C'
+         │  ├─ A
+         │  └─ B
+         └─ Elemwise{add,no_inplace}
+            ├─ D
+            └─ E
         """
     ).lstrip()
 
@@ -213,10 +214,10 @@ def test_debugprint():
     reference = dedent(
         r"""
         Elemwise{add,no_inplace} 0 [None]
-         |A [None]
-         |B [None]
-         |D [None]
-         |E [None]
+         ├─ A [None]
+         ├─ B [None]
+         ├─ D [None]
+         └─ E [None]
         """
     ).lstrip()
 
@@ -231,10 +232,10 @@ def test_debugprint():
     reference = dedent(
         r"""
         Elemwise{add,no_inplace} 0 [None]
-         |A [None]
-         |B [None]
-         |D [None]
-         |E [None]
+         ├─ A [None]
+         ├─ B [None]
+         ├─ D [None]
+         └─ E [None]
         """
     ).lstrip()
 
@@ -249,10 +250,10 @@ def test_debugprint():
     reference = dedent(
         r"""
         Elemwise{add,no_inplace} 0 [None]
-         |A [None]
-         |B [None]
-         |D [None]
-         |E [None]
+         ├─ A [None]
+         ├─ B [None]
+         ├─ D [None]
+         └─ E [None]
         """
     ).lstrip()
 
@@ -274,26 +275,26 @@ def test_debugprint():
     exp_res = dedent(
         r"""
         Elemwise{Composite} 4
-         |InplaceDimShuffle{x,0} v={0: [0]} 3
-         | |CGemv{inplace} d={0: [0]} 2
-         |   |AllocEmpty{dtype='float64'} 1
-         |   | |Shape_i{0} 0
-         |   |   |B
-         |   |TensorConstant{1.0}
-         |   |B
-         |   |<TensorType(float64, (?,))>
-         |   |TensorConstant{0.0}
-         |D
-         |A
+         ├─ InplaceDimShuffle{x,0} v={0: [0]} 3
+         │  └─ CGemv{inplace} d={0: [0]} 2
+         │     ├─ AllocEmpty{dtype='float64'} 1
+         │     │  └─ Shape_i{0} 0
+         │     │     └─ B
+         │     ├─ TensorConstant{1.0}
+         │     ├─ B
+         │     ├─ <TensorType(float64, (?,))>
+         │     └─ TensorConstant{0.0}
+         ├─ D
+         └─ A
 
         Inner graphs:
 
         Elemwise{Composite}
-         >add
-         > |<float64>
-         > |sub
-         >   |<float64>
-         >   |<float64>
+         ← add
+            ├─ <float64>
+            └─ sub
+               ├─ <float64>
+               └─ <float64>
         """
     ).lstrip()
 
@@ -314,10 +315,10 @@ def test_debugprint_id_type():
     s = s.getvalue()
 
     exp_res = f"""Elemwise{{add,no_inplace}} [id {e_at.auto_name}]
- |dot [id {d_at.auto_name}]
- | |<TensorType(float64, (?, ?))> [id {b_at.auto_name}]
- | |<TensorType(float64, (?,))> [id {a_at.auto_name}]
- |<TensorType(float64, (?,))> [id {a_at.auto_name}]
+ ├─ dot [id {d_at.auto_name}]
+ │  ├─ <TensorType(float64, (?, ?))> [id {b_at.auto_name}]
+ │  └─ <TensorType(float64, (?,))> [id {a_at.auto_name}]
+ └─ <TensorType(float64, (?,))> [id {a_at.auto_name}]
     """
 
     assert [l.strip() for l in s.split("\n")] == [
@@ -351,15 +352,15 @@ def test_debugprint_inner_graph():
     lines = output_str.split("\n")
 
     exp_res = """MyInnerGraphOp [id A]
- |3 [id B]
- |4 [id C]
+ ├─ 3 [id B]
+ └─ 4 [id C]
 
 Inner graphs:
 
 MyInnerGraphOp [id A]
- >op2 [id D] 'igo1'
- > |*0-<MyType()> [id E]
- > |*1-<MyType()> [id F]
+ ← op2 [id D] 'igo1'
+    ├─ *0-<MyType()> [id E]
+    └─ *1-<MyType()> [id F]
     """
 
     for exp_line, res_line in zip(exp_res.split("\n"), lines):
@@ -375,19 +376,19 @@ MyInnerGraphOp [id A]
     lines = output_str.split("\n")
 
     exp_res = """MyInnerGraphOp [id A]
- |5 [id B]
+ └─ 5 [id B]
 
 Inner graphs:
 
 MyInnerGraphOp [id A]
- >MyInnerGraphOp [id C]
- > |*0-<MyType()> [id D]
- > |*1-<MyType()> [id E]
+ ← MyInnerGraphOp [id C]
+    ├─ *0-<MyType()> [id D]
+    └─ *1-<MyType()> [id E]
 
 MyInnerGraphOp [id C]
- >op2 [id F] 'igo1'
- > |*0-<MyType()> [id D]
- > |*1-<MyType()> [id E]
+ ← op2 [id F] 'igo1'
+    ├─ *0-<MyType()> [id D]
+    └─ *1-<MyType()> [id E]
     """
 
     for exp_line, res_line in zip(exp_res.split("\n"), lines):
