@@ -14,7 +14,7 @@ from pytensor.link.c.op import COp, ExternalCOp, OpenMPOp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.misc.frozendict import frozendict
 from pytensor.misc.safe_asarray import _asarray
-from pytensor.printing import FunctionPrinter, Printer, pprint
+from pytensor.printing import Printer, pprint
 from pytensor.scalar import get_scalar_type
 from pytensor.scalar.basic import bool as scalar_bool
 from pytensor.scalar.basic import identity as scalar_identity
@@ -498,15 +498,9 @@ class Elemwise(OpenMPOp):
         return Apply(self, inputs, outputs)
 
     def __str__(self):
-        if self.name is None:
-            if self.inplace_pattern:
-                items = list(self.inplace_pattern.items())
-                items.sort()
-                return f"{type(self).__name__}{{{self.scalar_op}}}{items}"
-            else:
-                return f"{type(self).__name__}{{{self.scalar_op}}}"
-        else:
+        if self.name:
             return self.name
+        return str(self.scalar_op).capitalize()
 
     def R_op(self, inputs, eval_points):
         outs = self(*inputs, return_list=True)
@@ -1477,23 +1471,17 @@ class CAReduce(COp):
 
         return res
 
-    def __str__(self):
-        prefix = f"{type(self).__name__}{{{self.scalar_op}}}"
-        extra_params = []
-
-        if self.axis is not None:
-            axis = ", ".join(str(x) for x in self.axis)
-            extra_params.append(f"axis=[{axis}]")
-
-        if self.acc_dtype:
-            extra_params.append(f"acc_dtype={self.acc_dtype}")
-
-        extra_params_str = ", ".join(extra_params)
-
-        if extra_params_str:
-            return f"{prefix}{{{extra_params_str}}}"
+    def _axis_str(self):
+        axis = self.axis
+        if axis is None:
+            return "axes=None"
+        elif len(axis) == 1:
+            return f"axis={axis[0]}"
         else:
-            return f"{prefix}"
+            return f"axes={list(axis)}"
+
+    def __str__(self):
+        return f"{type(self).__name__}{{{self.scalar_op}, {self._axis_str()}}}"
 
     def perform(self, node, inp, out):
         (input,) = inp
@@ -1737,21 +1725,17 @@ def scalar_elemwise(*symbol, nfunc=None, nin=None, nout=None, symbolname=None):
         symbolname = symbolname or symbol.__name__
 
         if symbolname.endswith("_inplace"):
-            elemwise_name = f"Elemwise{{{symbolname},inplace}}"
-            scalar_op = getattr(scalar, symbolname[: -len("_inplace")])
+            base_symbol_name = symbolname[: -len("_inplace")]
+            scalar_op = getattr(scalar, base_symbol_name)
             inplace_scalar_op = scalar_op.__class__(transfer_type(0))
             rval = Elemwise(
                 inplace_scalar_op,
                 {0: 0},
-                name=elemwise_name,
                 nfunc_spec=(nfunc and (nfunc, nin, nout)),
             )
         else:
-            elemwise_name = f"Elemwise{{{symbolname},no_inplace}}"
             scalar_op = getattr(scalar, symbolname)
-            rval = Elemwise(
-                scalar_op, name=elemwise_name, nfunc_spec=(nfunc and (nfunc, nin, nout))
-            )
+            rval = Elemwise(scalar_op, nfunc_spec=(nfunc and (nfunc, nin, nout)))
 
         if getattr(symbol, "__doc__"):
             rval.__doc__ = symbol.__doc__ + "\n\n    " + rval.__doc__
@@ -1760,8 +1744,6 @@ def scalar_elemwise(*symbol, nfunc=None, nin=None, nout=None, symbolname=None):
         # it makes epydoc display rval as if it were a function, not an object
         rval.__epydoc_asRoutine = symbol
         rval.__module__ = symbol.__module__
-
-        pprint.assign(rval, FunctionPrinter([symbolname.replace("_inplace", "=")]))
 
         return rval
 

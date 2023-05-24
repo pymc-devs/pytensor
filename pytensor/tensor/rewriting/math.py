@@ -42,7 +42,8 @@ from pytensor.tensor.math import (
     All,
     Any,
     Dot,
-    NonZeroCAReduce,
+    FixedOpCAReduce,
+    NonZeroDimsCAReduce,
     Prod,
     ProdWithoutZeros,
     Sum,
@@ -1671,7 +1672,8 @@ ALL_REDUCE = (
         ProdWithoutZeros,
     ]
     + CAReduce.__subclasses__()
-    + NonZeroCAReduce.__subclasses__()
+    + FixedOpCAReduce.__subclasses__()
+    + NonZeroDimsCAReduce.__subclasses__()
 )
 
 

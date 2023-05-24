@@ -234,6 +234,7 @@ class MetaType(ABCMeta):
 
                 dct["__eq__"] = __eq__
 
+            # FIXME: This overrides __str__ inheritance when props are provided
             if "__str__" not in dct:
                 if len(props) == 0:
 

@@ -106,9 +106,9 @@ def test_min_informative_str():
 
     mis = min_informative_str(G).replace("\t", "        ")
 
-    reference = """A. Elemwise{add,no_inplace}
+    reference = """A. Add
  B. C
- C. Elemwise{add,no_inplace}
+ C. Add
   D. D
   E. E"""
 
@@ -144,11 +144,11 @@ def test_debugprint():
     s = s.getvalue()
     reference = dedent(
         r"""
-        Elemwise{add,no_inplace} [id 0]
-         ├─ Elemwise{add,no_inplace} [id 1] 'C'
+        Add [id 0]
+         ├─ Add [id 1] 'C'
          │  ├─ A [id 2]
          │  └─ B [id 3]
-         └─ Elemwise{add,no_inplace} [id 4]
+         └─ Add [id 4]
             ├─ D [id 5]
             └─ E [id 6]
         """
@@ -162,11 +162,11 @@ def test_debugprint():
     # The additional white space are needed!
     reference = dedent(
         r"""
-        Elemwise{add,no_inplace} [id A]
-         ├─ Elemwise{add,no_inplace} [id B] 'C'
+        Add [id A]
+         ├─ Add [id B] 'C'
          │  ├─ A [id C]
          │  └─ B [id D]
-         └─ Elemwise{add,no_inplace} [id E]
+         └─ Add [id E]
             ├─ D [id F]
             └─ E [id G]
         """
@@ -180,10 +180,10 @@ def test_debugprint():
     # The additional white space are needed!
     reference = dedent(
         r"""
-        Elemwise{add,no_inplace} [id A]
-         ├─ Elemwise{add,no_inplace} [id B] 'C'
+        Add [id A]
+         ├─ Add [id B] 'C'
          │  └─ ···
-         └─ Elemwise{add,no_inplace} [id C]
+         └─ Add [id C]
             ├─ D [id D]
             └─ E [id E]
         """
@@ -196,11 +196,11 @@ def test_debugprint():
     s = s.getvalue()
     reference = dedent(
         r"""
-        Elemwise{add,no_inplace}
-         ├─ Elemwise{add,no_inplace} 'C'
+        Add
+         ├─ Add 'C'
          │  ├─ A
          │  └─ B
-         └─ Elemwise{add,no_inplace}
+         └─ Add
             ├─ D
             └─ E
         """
@@ -213,7 +213,7 @@ def test_debugprint():
     s = s.getvalue()
     reference = dedent(
         r"""
-        Elemwise{add,no_inplace} 0 [None]
+        Add 0 [None]
          ├─ A [None]
          ├─ B [None]
          ├─ D [None]
@@ -231,7 +231,7 @@ def test_debugprint():
     s = s.getvalue()
     reference = dedent(
         r"""
-        Elemwise{add,no_inplace} 0 [None]
+        Add 0 [None]
          ├─ A [None]
          ├─ B [None]
          ├─ D [None]
@@ -249,7 +249,7 @@ def test_debugprint():
     s = s.getvalue()
     reference = dedent(
         r"""
-        Elemwise{add,no_inplace} 0 [None]
+        Add 0 [None]
          ├─ A [None]
          ├─ B [None]
          ├─ D [None]
@@ -274,7 +274,7 @@ def test_debugprint():
     s = s.getvalue()
     exp_res = dedent(
         r"""
-        Elemwise{Composite{(i2 + (i0 - i1))}} 4
+        Composite{(i2 + (i0 - i1))} 4
          ├─ ExpandDims{axis=0} v={0: [0]} 3
          │  └─ CGemv{inplace} d={0: [0]} 2
          │     ├─ AllocEmpty{dtype='float64'} 1
@@ -289,7 +289,7 @@ def test_debugprint():
 
         Inner graphs:
 
-        Elemwise{Composite{(i2 + (i0 - i1))}}
+        Composite{(i2 + (i0 - i1))}
          ← add 'o0'
             ├─ i2
             └─ sub
@@ -314,7 +314,7 @@ def test_debugprint_id_type():
     debugprint(e_at, id_type="auto", file=s)
     s = s.getvalue()
 
-    exp_res = f"""Elemwise{{add,no_inplace}} [id {e_at.auto_name}]
+    exp_res = f"""Add [id {e_at.auto_name}]
  ├─ dot [id {d_at.auto_name}]
  │  ├─ <TensorType(float64, (?, ?))> [id {b_at.auto_name}]
  │  └─ <TensorType(float64, (?,))> [id {a_at.auto_name}]
