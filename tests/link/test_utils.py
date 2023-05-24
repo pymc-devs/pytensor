@@ -156,7 +156,7 @@ def test_fgraph_to_python_multiline_str():
 
     assert (
         """
-    # Elemwise{add,no_inplace}(Test
+    # Add(Test
     # Op().0, Test
     # Op().1)
     """

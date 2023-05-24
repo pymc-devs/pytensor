@@ -32,13 +32,13 @@ def test_debugprint_sitsot():
      │  │  ├─ k [id D] (n_steps)
      │  │  ├─ IncSubtensor{Set;:int64:} [id E] (outer_in_sit_sot-0)
      │  │  │  ├─ AllocEmpty{dtype='float64'} [id F]
-     │  │  │  │  ├─ Elemwise{add,no_inplace} [id G]
+     │  │  │  │  ├─ Add [id G]
      │  │  │  │  │  ├─ k [id D]
      │  │  │  │  │  └─ Subtensor{int64} [id H]
      │  │  │  │  │     ├─ Shape [id I]
      │  │  │  │  │     │  └─ Unbroadcast{0} [id J]
      │  │  │  │  │     │     └─ ExpandDims{axis=0} [id K]
-     │  │  │  │  │     │        └─ Elemwise{second,no_inplace} [id L]
+     │  │  │  │  │     │        └─ Second [id L]
      │  │  │  │  │     │           ├─ A [id M]
      │  │  │  │  │     │           └─ ExpandDims{axis=0} [id N]
      │  │  │  │  │     │              └─ TensorConstant{1.0} [id O]
@@ -60,7 +60,7 @@ def test_debugprint_sitsot():
     Inner graphs:
 
     for{cpu,scan_fn} [id C]
-     ← Elemwise{mul,no_inplace} [id W] (inner_out_sit_sot-0)
+     ← Mul [id W] (inner_out_sit_sot-0)
         ├─ *0-<TensorType(float64, (?,))> [id X] -> [id E] (inner_in_sit_sot-0)
         └─ *1-<TensorType(float64, (?,))> [id Y] -> [id M] (inner_in_non_seqs-0)"""
 
@@ -90,13 +90,13 @@ def test_debugprint_sitsot_no_extra_info():
      │  │  ├─ k [id D]
      │  │  ├─ IncSubtensor{Set;:int64:} [id E]
      │  │  │  ├─ AllocEmpty{dtype='float64'} [id F]
-     │  │  │  │  ├─ Elemwise{add,no_inplace} [id G]
+     │  │  │  │  ├─ Add [id G]
      │  │  │  │  │  ├─ k [id D]
      │  │  │  │  │  └─ Subtensor{int64} [id H]
      │  │  │  │  │     ├─ Shape [id I]
      │  │  │  │  │     │  └─ Unbroadcast{0} [id J]
      │  │  │  │  │     │     └─ ExpandDims{axis=0} [id K]
-     │  │  │  │  │     │        └─ Elemwise{second,no_inplace} [id L]
+     │  │  │  │  │     │        └─ Second [id L]
      │  │  │  │  │     │           ├─ A [id M]
      │  │  │  │  │     │           └─ ExpandDims{axis=0} [id N]
      │  │  │  │  │     │              └─ TensorConstant{1.0} [id O]
@@ -118,7 +118,7 @@ def test_debugprint_sitsot_no_extra_info():
     Inner graphs:
 
     for{cpu,scan_fn} [id C]
-     ← Elemwise{mul,no_inplace} [id W]
+     ← Mul [id W]
         ├─ *0-<TensorType(float64, (?,))> [id X] -> [id E]
         └─ *1-<TensorType(float64, (?,))> [id Y] -> [id M]"""
 
@@ -147,9 +147,9 @@ def test_debugprint_nitsot():
     output_str = debugprint(polynomial, file="str", print_op_info=True)
     lines = output_str.split("\n")
 
-    expected_output = """Sum{acc_dtype=float64} [id A]
+    expected_output = """Sum{axes=None} [id A]
      └─ for{cpu,scan_fn} [id B] (outer_out_nit_sot-0)
-        ├─ Elemwise{scalar_minimum,no_inplace} [id C] (outer_in_nit_sot-0)
+        ├─ Minimum [id C] (outer_in_nit_sot-0)
         │  ├─ Subtensor{int64} [id D]
         │  │  ├─ Shape [id E]
         │  │  │  └─ Subtensor{int64::} [id F] 'coefficients[0:]'
@@ -169,24 +169,24 @@ def test_debugprint_nitsot():
         │  ├─ Subtensor{int64::} [id F] 'coefficients[0:]'
         │  │  └─ ···
         │  └─ ScalarFromTensor [id T]
-        │     └─ Elemwise{scalar_minimum,no_inplace} [id C]
+        │     └─ Minimum [id C]
         │        └─ ···
         ├─ Subtensor{:int64:} [id U] (outer_in_seqs-1)
         │  ├─ Subtensor{int64::} [id L]
         │  │  └─ ···
         │  └─ ScalarFromTensor [id V]
-        │     └─ Elemwise{scalar_minimum,no_inplace} [id C]
+        │     └─ Minimum [id C]
         │        └─ ···
-        ├─ Elemwise{scalar_minimum,no_inplace} [id C] (outer_in_nit_sot-0)
+        ├─ Minimum [id C] (outer_in_nit_sot-0)
         │  └─ ···
         └─ x [id W] (outer_in_non_seqs-0)
 
     Inner graphs:
 
     for{cpu,scan_fn} [id B]
-     ← Elemwise{mul,no_inplace} [id X] (inner_out_nit_sot-0)
+     ← Mul [id X] (inner_out_nit_sot-0)
         ├─ *0-<TensorType(float64, ())> [id Y] -> [id S] (inner_in_seqs-0)
-        └─ Elemwise{pow,no_inplace} [id Z]
+        └─ Pow [id Z]
            ├─ *2-<TensorType(float64, ())> [id BA] -> [id W] (inner_in_non_seqs-0)
            └─ *1-<TensorType(int64, ())> [id BB] -> [id U] (inner_in_seqs-1)"""
 
@@ -225,9 +225,9 @@ def test_debugprint_nested_scans():
     output_str = debugprint(final_result, file="str", print_op_info=True)
     lines = output_str.split("\n")
 
-    expected_output = """Sum{acc_dtype=float64} [id A]
+    expected_output = """Sum{axes=None} [id A]
      └─ for{cpu,scan_fn} [id B] (outer_out_nit_sot-0)
-        ├─ Elemwise{scalar_minimum,no_inplace} [id C] (outer_in_nit_sot-0)
+        ├─ Minimum [id C] (outer_in_nit_sot-0)
         │  ├─ Subtensor{int64} [id D]
         │  │  ├─ Shape [id E]
         │  │  │  └─ Subtensor{int64::} [id F] 'c[0:]'
@@ -247,15 +247,15 @@ def test_debugprint_nested_scans():
         │  ├─ Subtensor{int64::} [id F] 'c[0:]'
         │  │  └─ ···
         │  └─ ScalarFromTensor [id T]
-        │     └─ Elemwise{scalar_minimum,no_inplace} [id C]
+        │     └─ Minimum [id C]
         │        └─ ···
         ├─ Subtensor{:int64:} [id U] (outer_in_seqs-1)
         │  ├─ Subtensor{int64::} [id L]
         │  │  └─ ···
         │  └─ ScalarFromTensor [id V]
-        │     └─ Elemwise{scalar_minimum,no_inplace} [id C]
+        │     └─ Minimum [id C]
         │        └─ ···
-        ├─ Elemwise{scalar_minimum,no_inplace} [id C] (outer_in_nit_sot-0)
+        ├─ Minimum [id C] (outer_in_nit_sot-0)
         │  └─ ···
         ├─ A [id W] (outer_in_non_seqs-0)
         └─ k [id X] (outer_in_non_seqs-1)
@@ -263,23 +263,23 @@ def test_debugprint_nested_scans():
     Inner graphs:
 
     for{cpu,scan_fn} [id B]
-     ← Elemwise{mul,no_inplace} [id Y] (inner_out_nit_sot-0)
+     ← Mul [id Y] (inner_out_nit_sot-0)
         ├─ ExpandDims{axis=0} [id Z]
         │  └─ *0-<TensorType(float64, ())> [id BA] -> [id S] (inner_in_seqs-0)
-        └─ Elemwise{pow,no_inplace} [id BB]
+        └─ Pow [id BB]
            ├─ Subtensor{int64} [id BC]
            │  ├─ Subtensor{int64::} [id BD]
            │  │  ├─ for{cpu,scan_fn} [id BE] (outer_out_sit_sot-0)
            │  │  │  ├─ *3-<TensorType(int32, ())> [id BF] -> [id X] (inner_in_non_seqs-1) (n_steps)
            │  │  │  ├─ IncSubtensor{Set;:int64:} [id BG] (outer_in_sit_sot-0)
            │  │  │  │  ├─ AllocEmpty{dtype='float64'} [id BH]
-           │  │  │  │  │  ├─ Elemwise{add,no_inplace} [id BI]
+           │  │  │  │  │  ├─ Add [id BI]
            │  │  │  │  │  │  ├─ *3-<TensorType(int32, ())> [id BF] -> [id X] (inner_in_non_seqs-1)
            │  │  │  │  │  │  └─ Subtensor{int64} [id BJ]
            │  │  │  │  │  │     ├─ Shape [id BK]
            │  │  │  │  │  │     │  └─ Unbroadcast{0} [id BL]
            │  │  │  │  │  │     │     └─ ExpandDims{axis=0} [id BM]
-           │  │  │  │  │  │     │        └─ Elemwise{second,no_inplace} [id BN]
+           │  │  │  │  │  │     │        └─ Second [id BN]
            │  │  │  │  │  │     │           ├─ *2-<TensorType(float64, (?,))> [id BO] -> [id W] (inner_in_non_seqs-0)
            │  │  │  │  │  │     │           └─ ExpandDims{axis=0} [id BP]
            │  │  │  │  │  │     │              └─ TensorConstant{1.0} [id BQ]
@@ -301,7 +301,7 @@ def test_debugprint_nested_scans():
               └─ *1-<TensorType(int64, ())> [id BZ] -> [id U] (inner_in_seqs-1)
 
     for{cpu,scan_fn} [id BE]
-     ← Elemwise{mul,no_inplace} [id CA] (inner_out_sit_sot-0)
+     ← Mul [id CA] (inner_out_sit_sot-0)
         ├─ *0-<TensorType(float64, (?,))> [id CB] -> [id BG] (inner_in_sit_sot-0)
         └─ *1-<TensorType(float64, (?,))> [id CC] -> [id BO] (inner_in_non_seqs-0)"""
 
@@ -318,9 +318,9 @@ def test_debugprint_nested_scans():
     expected_output = """→ c [id A]
     → k [id B]
     → A [id C]
-    Sum{acc_dtype=float64} [id D] 13
+    Sum{axes=None} [id D] 13
      └─ for{cpu,scan_fn} [id E] 12 (outer_out_nit_sot-0)
-        ├─ Elemwise{scalar_minimum,no_inplace} [id F] 7 (outer_in_nit_sot-0)
+        ├─ Minimum [id F] 7 (outer_in_nit_sot-0)
         │  ├─ Subtensor{int64} [id G] 6
         │  │  ├─ Shape [id H] 5
         │  │  │  └─ Subtensor{int64::} [id I] 'c[0:]' 4
@@ -340,15 +340,15 @@ def test_debugprint_nested_scans():
         │  ├─ Subtensor{int64::} [id I] 'c[0:]' 4
         │  │  └─ ···
         │  └─ ScalarFromTensor [id V] 10
-        │     └─ Elemwise{scalar_minimum,no_inplace} [id F] 7
+        │     └─ Minimum [id F] 7
         │        └─ ···
         ├─ Subtensor{:int64:} [id W] 9 (outer_in_seqs-1)
         │  ├─ Subtensor{int64::} [id N] 1
         │  │  └─ ···
         │  └─ ScalarFromTensor [id X] 8
-        │     └─ Elemwise{scalar_minimum,no_inplace} [id F] 7
+        │     └─ Minimum [id F] 7
         │        └─ ···
-        ├─ Elemwise{scalar_minimum,no_inplace} [id F] 7 (outer_in_nit_sot-0)
+        ├─ Minimum [id F] 7 (outer_in_nit_sot-0)
         │  └─ ···
         ├─ A [id C] (outer_in_non_seqs-0)
         └─ k [id B] (outer_in_non_seqs-1)
@@ -360,23 +360,23 @@ def test_debugprint_nested_scans():
      → *1-<TensorType(int64, ())> [id Z] -> [id W] (inner_in_seqs-1)
      → *2-<TensorType(float64, (?,))> [id BA] -> [id C] (inner_in_non_seqs-0)
      → *3-<TensorType(int32, ())> [id BB] -> [id B] (inner_in_non_seqs-1)
-     ← Elemwise{mul,no_inplace} [id BC] (inner_out_nit_sot-0)
+     ← Mul [id BC] (inner_out_nit_sot-0)
         ├─ ExpandDims{axis=0} [id BD]
         │  └─ *0-<TensorType(float64, ())> [id Y] (inner_in_seqs-0)
-        └─ Elemwise{pow,no_inplace} [id BE]
+        └─ Pow [id BE]
            ├─ Subtensor{int64} [id BF]
            │  ├─ Subtensor{int64::} [id BG]
            │  │  ├─ for{cpu,scan_fn} [id BH] (outer_out_sit_sot-0)
            │  │  │  ├─ *3-<TensorType(int32, ())> [id BB] (inner_in_non_seqs-1) (n_steps)
            │  │  │  ├─ IncSubtensor{Set;:int64:} [id BI] (outer_in_sit_sot-0)
            │  │  │  │  ├─ AllocEmpty{dtype='float64'} [id BJ]
-           │  │  │  │  │  ├─ Elemwise{add,no_inplace} [id BK]
+           │  │  │  │  │  ├─ Add [id BK]
            │  │  │  │  │  │  ├─ *3-<TensorType(int32, ())> [id BB] (inner_in_non_seqs-1)
            │  │  │  │  │  │  └─ Subtensor{int64} [id BL]
            │  │  │  │  │  │     ├─ Shape [id BM]
            │  │  │  │  │  │     │  └─ Unbroadcast{0} [id BN]
            │  │  │  │  │  │     │     └─ ExpandDims{axis=0} [id BO]
-           │  │  │  │  │  │     │        └─ Elemwise{second,no_inplace} [id BP]
+           │  │  │  │  │  │     │        └─ Second [id BP]
            │  │  │  │  │  │     │           ├─ *2-<TensorType(float64, (?,))> [id BA] (inner_in_non_seqs-0)
            │  │  │  │  │  │     │           └─ ExpandDims{axis=0} [id BQ]
            │  │  │  │  │  │     │              └─ TensorConstant{1.0} [id BR]
@@ -400,7 +400,7 @@ def test_debugprint_nested_scans():
     for{cpu,scan_fn} [id BH]
      → *0-<TensorType(float64, (?,))> [id CA] -> [id BI] (inner_in_sit_sot-0)
      → *1-<TensorType(float64, (?,))> [id CB] -> [id BA] (inner_in_non_seqs-0)
-     ← Elemwise{mul,no_inplace} [id CC] (inner_out_sit_sot-0)
+     ← Mul [id CC] (inner_out_sit_sot-0)
         ├─ *0-<TensorType(float64, (?,))> [id CA] (inner_in_sit_sot-0)
         └─ *1-<TensorType(float64, (?,))> [id CB] (inner_in_non_seqs-0)"""
 
@@ -429,13 +429,13 @@ def test_debugprint_mitsot():
     output_str = debugprint(final_result, file="str", print_op_info=True)
     lines = output_str.split("\n")
 
-    expected_output = """Elemwise{add,no_inplace} [id A]
+    expected_output = """Add [id A]
      ├─ Subtensor{int64::} [id B]
      │  ├─ for{cpu,scan_fn}.0 [id C] (outer_out_mit_sot-0)
      │  │  ├─ TensorConstant{5} [id D] (n_steps)
      │  │  ├─ IncSubtensor{Set;:int64:} [id E] (outer_in_mit_sot-0)
      │  │  │  ├─ AllocEmpty{dtype='int64'} [id F]
-     │  │  │  │  └─ Elemwise{add,no_inplace} [id G]
+     │  │  │  │  └─ Add [id G]
      │  │  │  │     ├─ TensorConstant{5} [id D]
      │  │  │  │     └─ Subtensor{int64} [id H]
      │  │  │  │        ├─ Shape [id I]
@@ -450,7 +450,7 @@ def test_debugprint_mitsot():
      │  │  │        └─ ···
      │  │  └─ IncSubtensor{Set;:int64:} [id O] (outer_in_mit_sot-1)
      │  │     ├─ AllocEmpty{dtype='int64'} [id P]
-     │  │     │  └─ Elemwise{add,no_inplace} [id Q]
+     │  │     │  └─ Add [id Q]
      │  │     │     ├─ TensorConstant{5} [id D]
      │  │     │     └─ Subtensor{int64} [id R]
      │  │     │        ├─ Shape [id S]
@@ -472,10 +472,10 @@ def test_debugprint_mitsot():
     Inner graphs:
 
     for{cpu,scan_fn} [id C]
-     ← Elemwise{add,no_inplace} [id BB] (inner_out_mit_sot-0)
+     ← Add [id BB] (inner_out_mit_sot-0)
         ├─ *1-<TensorType(int64, ())> [id BC] -> [id E] (inner_in_mit_sot-0-1)
         └─ *0-<TensorType(int64, ())> [id BD] -> [id E] (inner_in_mit_sot-0-0)
-     ← Elemwise{add,no_inplace} [id BE] (inner_out_mit_sot-1)
+     ← Add [id BE] (inner_out_mit_sot-1)
         ├─ *3-<TensorType(int64, ())> [id BF] -> [id O] (inner_in_mit_sot-1-1)
         └─ *2-<TensorType(int64, ())> [id BG] -> [id O] (inner_in_mit_sot-1-0)"""
 
@@ -503,20 +503,20 @@ def test_debugprint_mitmot():
 
     expected_output = """Subtensor{int64} [id A]
      ├─ for{cpu,grad_of_scan_fn}.1 [id B] (outer_out_sit_sot-0)
-     │  ├─ Elemwise{sub,no_inplace} [id C] (n_steps)
+     │  ├─ Sub [id C] (n_steps)
      │  │  ├─ Subtensor{int64} [id D]
      │  │  │  ├─ Shape [id E]
      │  │  │  │  └─ for{cpu,scan_fn} [id F] (outer_out_sit_sot-0)
      │  │  │  │     ├─ k [id G] (n_steps)
      │  │  │  │     ├─ IncSubtensor{Set;:int64:} [id H] (outer_in_sit_sot-0)
      │  │  │  │     │  ├─ AllocEmpty{dtype='float64'} [id I]
-     │  │  │  │     │  │  ├─ Elemwise{add,no_inplace} [id J]
+     │  │  │  │     │  │  ├─ Add [id J]
      │  │  │  │     │  │  │  ├─ k [id G]
      │  │  │  │     │  │  │  └─ Subtensor{int64} [id K]
      │  │  │  │     │  │  │     ├─ Shape [id L]
      │  │  │  │     │  │  │     │  └─ Unbroadcast{0} [id M]
      │  │  │  │     │  │  │     │     └─ ExpandDims{axis=0} [id N]
-     │  │  │  │     │  │  │     │        └─ Elemwise{second,no_inplace} [id O]
+     │  │  │  │     │  │  │     │        └─ Second [id O]
      │  │  │  │     │  │  │     │           ├─ A [id P]
      │  │  │  │     │  │  │     │           └─ ExpandDims{axis=0} [id Q]
      │  │  │  │     │  │  │     │              └─ TensorConstant{1.0} [id R]
@@ -542,7 +542,7 @@ def test_debugprint_mitmot():
      │  │  │  │  └─ ScalarConstant{-1} [id BC]
      │  │  │  └─ ScalarConstant{-1} [id BD]
      │  │  └─ ScalarFromTensor [id BE]
-     │  │     └─ Elemwise{sub,no_inplace} [id C]
+     │  │     └─ Sub [id C]
      │  │        └─ ···
      │  ├─ Subtensor{:int64:} [id BF] (outer_in_seqs-1)
      │  │  ├─ Subtensor{:int64:} [id BG]
@@ -552,31 +552,31 @@ def test_debugprint_mitmot():
      │  │  │  │  └─ ScalarConstant{-1} [id BI]
      │  │  │  └─ ScalarConstant{-1} [id BJ]
      │  │  └─ ScalarFromTensor [id BK]
-     │  │     └─ Elemwise{sub,no_inplace} [id C]
+     │  │     └─ Sub [id C]
      │  │        └─ ···
      │  ├─ Subtensor{::int64} [id BL] (outer_in_mit_mot-0)
      │  │  ├─ IncSubtensor{Inc;int64::} [id BM]
-     │  │  │  ├─ Elemwise{second,no_inplace} [id BN]
+     │  │  │  ├─ Second [id BN]
      │  │  │  │  ├─ for{cpu,scan_fn} [id F] (outer_out_sit_sot-0)
      │  │  │  │  │  └─ ···
      │  │  │  │  └─ ExpandDims{axes=[0, 1]} [id BO]
      │  │  │  │     └─ TensorConstant{0.0} [id BP]
      │  │  │  ├─ IncSubtensor{Inc;int64} [id BQ]
-     │  │  │  │  ├─ Elemwise{second,no_inplace} [id BR]
+     │  │  │  │  ├─ Second [id BR]
      │  │  │  │  │  ├─ Subtensor{int64::} [id BS]
      │  │  │  │  │  │  ├─ for{cpu,scan_fn} [id F] (outer_out_sit_sot-0)
      │  │  │  │  │  │  │  └─ ···
      │  │  │  │  │  │  └─ ScalarConstant{1} [id BT]
      │  │  │  │  │  └─ ExpandDims{axes=[0, 1]} [id BU]
      │  │  │  │  │     └─ TensorConstant{0.0} [id BV]
-     │  │  │  │  ├─ Elemwise{second} [id BW]
+     │  │  │  │  ├─ Second [id BW]
      │  │  │  │  │  ├─ Subtensor{int64} [id BX]
      │  │  │  │  │  │  ├─ Subtensor{int64::} [id BS]
      │  │  │  │  │  │  │  └─ ···
      │  │  │  │  │  │  └─ ScalarConstant{-1} [id BY]
      │  │  │  │  │  └─ ExpandDims{axis=0} [id BZ]
-     │  │  │  │  │     └─ Elemwise{second,no_inplace} [id CA]
-     │  │  │  │  │        ├─ Sum{acc_dtype=float64} [id CB]
+     │  │  │  │  │     └─ Second [id CA]
+     │  │  │  │  │        ├─ Sum{axes=None} [id CB]
      │  │  │  │  │        │  └─ Subtensor{int64} [id BX]
      │  │  │  │  │        │     └─ ···
      │  │  │  │  │        └─ TensorConstant{1.0} [id CC]
@@ -585,8 +585,8 @@ def test_debugprint_mitmot():
      │  │  └─ ScalarConstant{-1} [id CD]
      │  ├─ Alloc [id CE] (outer_in_sit_sot-0)
      │  │  ├─ TensorConstant{0.0} [id CF]
-     │  │  ├─ Elemwise{add,no_inplace} [id CG]
-     │  │  │  ├─ Elemwise{sub,no_inplace} [id C]
+     │  │  ├─ Add [id CG]
+     │  │  │  ├─ Sub [id C]
      │  │  │  │  └─ ···
      │  │  │  └─ TensorConstant{1} [id CH]
      │  │  └─ Subtensor{int64} [id CI]
@@ -599,19 +599,19 @@ def test_debugprint_mitmot():
     Inner graphs:
 
     for{cpu,grad_of_scan_fn} [id B]
-     ← Elemwise{add,no_inplace} [id CM] (inner_out_mit_mot-0-0)
-        ├─ Elemwise{mul} [id CN]
+     ← Add [id CM] (inner_out_mit_mot-0-0)
+        ├─ Mul [id CN]
         │  ├─ *2-<TensorType(float64, (?,))> [id CO] -> [id BL] (inner_in_mit_mot-0-0)
         │  └─ *5-<TensorType(float64, (?,))> [id CP] -> [id P] (inner_in_non_seqs-0)
         └─ *3-<TensorType(float64, (?,))> [id CQ] -> [id BL] (inner_in_mit_mot-0-1)
-     ← Elemwise{add,no_inplace} [id CR] (inner_out_sit_sot-0)
-        ├─ Elemwise{mul} [id CS]
+     ← Add [id CR] (inner_out_sit_sot-0)
+        ├─ Mul [id CS]
         │  ├─ *2-<TensorType(float64, (?,))> [id CO] -> [id BL] (inner_in_mit_mot-0-0)
         │  └─ *0-<TensorType(float64, (?,))> [id CT] -> [id Z] (inner_in_seqs-0)
         └─ *4-<TensorType(float64, (?,))> [id CU] -> [id CE] (inner_in_sit_sot-0)
 
     for{cpu,scan_fn} [id F]
-     ← Elemwise{mul,no_inplace} [id CV] (inner_out_sit_sot-0)
+     ← Mul [id CV] (inner_out_sit_sot-0)
         ├─ *0-<TensorType(float64, (?,))> [id CT] -> [id H] (inner_in_sit_sot-0)
         └─ *1-<TensorType(float64, (?,))> [id CW] -> [id P] (inner_in_non_seqs-0)"""
 
@@ -654,7 +654,7 @@ def test_debugprint_compiled_fn():
     Inner graphs:
 
     forall_inplace,cpu,scan_fn} [id A]
-     ← Elemwise{Composite{Switch(LT(i0, i1), i2, i0)}} [id I] (inner_out_sit_sot-0)
+     ← Composite{switch(lt(i0, i1), i2, i0)} [id I] (inner_out_sit_sot-0)
         ├─ TensorConstant{0} [id J]
         ├─ Subtensor{int64, int64, uint8} [id K]
         │  ├─ *2-<TensorType(float64, (20000, 2, 2))> [id L] -> [id H] (inner_in_non_seqs-0)
@@ -665,7 +665,7 @@ def test_debugprint_compiled_fn():
         │  └─ ScalarConstant{0} [id Q]
         └─ TensorConstant{1} [id R]
 
-    Elemwise{Composite{Switch(LT(i0, i1), i2, i0)}} [id I]
+    Composite{switch(lt(i0, i1), i2, i0)} [id I]
      ← Switch [id S] 'o0'
         ├─ LT [id T]
         │  ├─ i0 [id U]

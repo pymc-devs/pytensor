@@ -583,7 +583,12 @@ def max_and_argmax(a, axis=None, keepdims=False):
     return [out, argout]
 
 
-class NonZeroCAReduce(CAReduce):
+class FixedOpCAReduce(CAReduce):
+    def __str__(self):
+        return f"{type(self).__name__}{{{self._axis_str()}}}"
+
+
+class NonZeroDimsCAReduce(FixedOpCAReduce):
     def _c_all(self, node, name, inames, onames, sub):
         decl, checks, alloc, loop, end = super()._c_all(node, name, inames, onames, sub)
 
@@ -614,7 +619,7 @@ class NonZeroCAReduce(CAReduce):
         return decl, checks, alloc, loop, end
 
 
-class Max(NonZeroCAReduce):
+class Max(NonZeroDimsCAReduce):
     nfunc_spec = ("max", 1, 1)
 
     def __init__(self, axis):
@@ -625,7 +630,7 @@ class Max(NonZeroCAReduce):
         return type(self)(axis=axis)
 
 
-class Min(NonZeroCAReduce):
+class Min(NonZeroDimsCAReduce):
     nfunc_spec = ("min", 1, 1)
 
     def __init__(self, axis):
@@ -1496,7 +1501,7 @@ def complex_from_polar(abs, angle):
     """Return complex-valued tensor from polar coordinate specification."""
 
 
-class Mean(CAReduce):
+class Mean(FixedOpCAReduce):
     __props__ = ("axis",)
     nfunc_spec = ("mean", 1, 1)
 
@@ -2356,7 +2361,7 @@ def outer(x, y):
     return dot(x.dimshuffle(0, "x"), y.dimshuffle("x", 0))
 
 
-class All(CAReduce):
+class All(FixedOpCAReduce):
     """Applies `logical and` to all the values of a tensor along the
     specified axis(es).
 
@@ -2370,12 +2375,6 @@ class All(CAReduce):
     def _output_dtype(self, idtype):
         return "bool"
 
-    def __str__(self):
-        if self.axis is None:
-            return "All"
-        else:
-            return "All{%s}" % ", ".join(map(str, self.axis))
-
     def make_node(self, input):
         input = as_tensor_variable(input)
         if input.dtype != "bool":
@@ -2392,7 +2391,7 @@ class All(CAReduce):
         return type(self)(axis=axis)
 
 
-class Any(CAReduce):
+class Any(FixedOpCAReduce):
     """Applies `bitwise or` to all the values of a tensor along the
     specified axis(es).
 
@@ -2406,12 +2405,6 @@ class Any(CAReduce):
     def _output_dtype(self, idtype):
         return "bool"
 
-    def __str__(self):
-        if self.axis is None:
-            return "Any"
-        else:
-            return "Any{%s}" % ", ".join(map(str, self.axis))
-
     def make_node(self, input):
         input = as_tensor_variable(input)
         if input.dtype != "bool":
@@ -2428,7 +2421,7 @@ class Any(CAReduce):
         return type(self)(axis=axis)
 
 
-class Sum(CAReduce):
+class Sum(FixedOpCAReduce):
     """
     Sums all the values of a tensor along the specified axis(es).
 
@@ -2448,14 +2441,6 @@ class Sum(CAReduce):
             acc_dtype=acc_dtype,
             upcast_discrete_output=True,
         )
-
-    def __str__(self):
-        name = self.__class__.__name__
-        axis = ""
-        if self.axis is not None:
-            axis = ", ".join(str(x) for x in self.axis)
-            axis = f"axis=[{axis}], "
-        return f"{name}{{{axis}acc_dtype={self.acc_dtype}}}"
 
     def L_op(self, inp, out, grads):
         (x,) = inp
@@ -2526,7 +2511,7 @@ def sum(input, axis=None, dtype=None, keepdims=False, acc_dtype=None):
 pprint.assign(Sum, printing.FunctionPrinter(["sum"], ["axis"]))
 
 
-class Prod(CAReduce):
+class Prod(FixedOpCAReduce):
     """
     Multiplies all the values of a tensor along the specified axis(es).
 
@@ -2537,7 +2522,6 @@ class Prod(CAReduce):
     """
 
     __props__ = ("scalar_op", "axis", "dtype", "acc_dtype", "no_zeros_in_input")
-
     nfunc_spec = ("prod", 1, 1)
 
     def __init__(self, axis=None, dtype=None, acc_dtype=None, no_zeros_in_input=False):
@@ -2683,6 +2667,14 @@ class Prod(CAReduce):
             no_zeros_in_input=no_zeros_in_input,
         )
 
+    def __str__(self):
+        if self.no_zeros_in_input:
+            return f"{super().__str__()[:-1]}, no_zeros_in_input}})"
+        return super().__str__()
+
+    def __repr__(self):
+        return f"{super().__repr__()[:-1]}, no_zeros_in_input={self.no_zeros_in_input})"
+
 
 def prod(
     input,
@@ -2751,7 +2743,7 @@ class MulWithoutZeros(BinaryScalarOp):
 mul_without_zeros = MulWithoutZeros(aes.upcast_out, name="mul_without_zeros")
 
 
-class ProdWithoutZeros(CAReduce):
+class ProdWithoutZeros(FixedOpCAReduce):
     def __init__(self, axis=None, dtype=None, acc_dtype=None):
         super().__init__(
             mul_without_zeros,

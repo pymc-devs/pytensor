@@ -676,14 +676,9 @@ class TestCAReduce(unittest_tools.InferShapeTester):
 
     def test_str(self):
         op = CAReduce(aes.add, axis=None)
-        assert str(op) == "CAReduce{add}"
+        assert str(op) == "CAReduce{add, axes=None}"
         op = CAReduce(aes.add, axis=(1,))
-        assert str(op) == "CAReduce{add}{axis=[1]}"
-
-        op = CAReduce(aes.add, axis=None, acc_dtype="float64")
-        assert str(op) == "CAReduce{add}{acc_dtype=float64}"
-        op = CAReduce(aes.add, axis=(1,), acc_dtype="float64")
-        assert str(op) == "CAReduce{add}{axis=[1], acc_dtype=float64}"
+        assert str(op) == "CAReduce{add, axis=1}"
 
     def test_repeated_axis(self):
         x = vector("x")
@@ -802,10 +797,8 @@ class TestElemwise(unittest_tools.InferShapeTester):
         self.check_input_dimensions_match(Mode(linker="c"))
 
     def test_str(self):
-        op = Elemwise(aes.add, inplace_pattern=None, name=None)
-        assert str(op) == "Elemwise{add}"
         op = Elemwise(aes.add, inplace_pattern={0: 0}, name=None)
-        assert str(op) == "Elemwise{add}[(0, 0)]"
+        assert str(op) == "Add"
         op = Elemwise(aes.add, inplace_pattern=None, name="my_op")
         assert str(op) == "my_op"
 

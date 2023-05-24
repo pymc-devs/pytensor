@@ -579,9 +579,9 @@ def test_debugprint():
 Inner graphs:
 
 OpFromGraph{inline=False} [id A]
- ← Elemwise{add,no_inplace} [id E]
+ ← Add [id E]
     ├─ *0-<TensorType(float64, (?, ?))> [id F]
-    └─ Elemwise{mul,no_inplace} [id G]
+    └─ Mul [id G]
        ├─ *1-<TensorType(float64, (?, ?))> [id H]
        └─ *2-<TensorType(float64, (?, ?))> [id I]
 """
