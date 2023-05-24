@@ -183,7 +183,7 @@ class TestComposite:
         make_function(DualLinker().accept(g))
 
         assert str(g) == (
-            "FunctionGraph(*1 -> Composite(x, y, z), *1::1, *1::2, *1::3, *1::4, *1::5, *1::6, *1::7)"
+            "FunctionGraph(*1 -> Composite{...}(x, y, z), *1::1, *1::2, *1::3, *1::4, *1::5, *1::6, *1::7)"
         )
 
     def test_non_scalar_error(self):

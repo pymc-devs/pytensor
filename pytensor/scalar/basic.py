@@ -4143,6 +4143,7 @@ class Composite(ScalarInnerGraphOp):
 
     def __init__(self, inputs, outputs, name="Composite"):
         self.name = name
+        self._name = None
         # We need to clone the graph as sometimes its nodes already
         # contain a reference to an fgraph. As we want the Composite
         # to be pickable, we can't have reference to fgraph.
@@ -4189,7 +4190,26 @@ class Composite(ScalarInnerGraphOp):
         super().__init__()
 
     def __str__(self):
-        return self.name
+        if self._name is not None:
+            return self._name
+
+        # Rename internal variables
+        for i, r in enumerate(self.fgraph.inputs):
+            r.name = f"i{int(i)}"
+        for i, r in enumerate(self.fgraph.outputs):
+            r.name = f"o{int(i)}"
+        io = set(self.fgraph.inputs + self.fgraph.outputs)
+        for i, r in enumerate(self.fgraph.variables):
+            if r not in io and len(self.fgraph.clients[r]) > 1:
+                r.name = f"t{int(i)}"
+
+        if len(self.fgraph.outputs) > 1 or len(self.fgraph.apply_nodes) > 10:
+            self._name = "Composite{...}"
+        else:
+            outputs_str = ", ".join([pprint(output) for output in self.fgraph.outputs])
+            self._name = f"Composite{{{outputs_str}}}"
+
+        return self._name
 
     def make_new_inplace(self, output_types_preference=None, name=None):
         """
