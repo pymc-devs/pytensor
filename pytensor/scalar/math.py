@@ -854,7 +854,7 @@ def gammaincc_grad(k, x, skip_loops=constant(False, dtype="bool")):
         log_s = np.array(0.0, dtype=dtype)
         s_sign = np.array(1, dtype="int8")
         n = np.array(1, dtype="int32")
-        log_delta = log_s - 2 * log(k)
+        log_delta = log_s - 2 * log(k).astype(dtype)
 
         def inner_loop_b(sum_b, log_s, s_sign, log_delta, n, k, log_x):
             delta = exp(log_delta)
