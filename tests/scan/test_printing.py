@@ -654,7 +654,7 @@ def test_debugprint_compiled_fn():
     Inner graphs:
 
     forall_inplace,cpu,scan_fn} [id A]
-     ← Elemwise{Composite} [id I] (inner_out_sit_sot-0)
+     ← Elemwise{Composite{Switch(LT(i0, i1), i2, i0)}} [id I] (inner_out_sit_sot-0)
         ├─ TensorConstant{0} [id J]
         ├─ Subtensor{int64, int64, uint8} [id K]
         │  ├─ *2-<TensorType(float64, (20000, 2, 2))> [id L] -> [id H] (inner_in_non_seqs-0)
@@ -665,13 +665,13 @@ def test_debugprint_compiled_fn():
         │  └─ ScalarConstant{0} [id Q]
         └─ TensorConstant{1} [id R]
 
-    Elemwise{Composite} [id I]
-     ← Switch [id S]
+    Elemwise{Composite{Switch(LT(i0, i1), i2, i0)}} [id I]
+     ← Switch [id S] 'o0'
         ├─ LT [id T]
-        │  ├─ <int64> [id U]
-        │  └─ <float64> [id V]
-        ├─ <int64> [id W]
-        └─ <int64> [id U]
+        │  ├─ i0 [id U]
+        │  └─ i1 [id V]
+        ├─ i2 [id W]
+        └─ i0 [id U]
     """
 
     output_str = debugprint(out, file="str", print_op_info=True)
