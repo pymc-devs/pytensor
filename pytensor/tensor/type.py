@@ -386,6 +386,8 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         if self.name:
             return self.name
         else:
+            shape = self.shape
+            len_shape = len(shape)
 
             def shape_str(s):
                 if s is None:
@@ -393,14 +395,18 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
                 else:
                     return str(s)
 
-            formatted_shape = ", ".join([shape_str(s) for s in self.shape])
-            if len(self.shape) == 1:
+            formatted_shape = ", ".join([shape_str(s) for s in shape])
+            if len_shape == 1:
                 formatted_shape += ","
 
-            return f"TensorType({self.dtype}, ({formatted_shape}))"
+            if len_shape > 2:
+                name = f"Tensor{len_shape}"
+            else:
+                name = ("Scalar", "Vector", "Matrix")[len_shape]
+            return f"{name}({self.dtype}, shape=({formatted_shape}))"
 
     def __repr__(self):
-        return str(self)
+        return f"TensorType({self.dtype}, shape={self.shape})"
 
     @staticmethod
     def may_share_memory(a, b):

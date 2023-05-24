@@ -580,10 +580,10 @@ Inner graphs:
 
 OpFromGraph{inline=False} [id A]
  ← Add [id E]
-    ├─ *0-<TensorType(float64, (?, ?))> [id F]
+    ├─ *0-<Matrix(float64, shape=(?, ?))> [id F]
     └─ Mul [id G]
-       ├─ *1-<TensorType(float64, (?, ?))> [id H]
-       └─ *2-<TensorType(float64, (?, ?))> [id I]
+       ├─ *1-<Matrix(float64, shape=(?, ?))> [id H]
+       └─ *2-<Matrix(float64, shape=(?, ?))> [id I]
 """
 
     for truth, out in zip(exp_res.split("\n"), lines):
