@@ -1030,7 +1030,7 @@ class TensorConstant(TensorVariable, Constant[_TensorTypeType]):
         else:
             val = f"{self.data}"
         if len(val) > 20:
-            val = val[:10] + ".." + val[-10:]
+            val = val[:10].strip() + " ... " + val[-10:].strip()
 
         if self.name is not None:
             name = self.name

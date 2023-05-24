@@ -282,7 +282,7 @@ def test_debugprint():
          │     │     └─ B
          │     ├─ TensorConstant{1.0}
          │     ├─ B
-         │     ├─ <TensorType(float64, (?,))>
+         │     ├─ <Vector(float64, shape=(?,))>
          │     └─ TensorConstant{0.0}
          ├─ D
          └─ A
@@ -316,9 +316,9 @@ def test_debugprint_id_type():
 
     exp_res = f"""Add [id {e_at.auto_name}]
  ├─ dot [id {d_at.auto_name}]
- │  ├─ <TensorType(float64, (?, ?))> [id {b_at.auto_name}]
- │  └─ <TensorType(float64, (?,))> [id {a_at.auto_name}]
- └─ <TensorType(float64, (?,))> [id {a_at.auto_name}]
+ │  ├─ <Matrix(float64, shape=(?, ?))> [id {b_at.auto_name}]
+ │  └─ <Vector(float64, shape=(?,))> [id {a_at.auto_name}]
+ └─ <Vector(float64, shape=(?,))> [id {a_at.auto_name}]
     """
 
     assert [l.strip() for l in s.split("\n")] == [
@@ -329,7 +329,7 @@ def test_debugprint_id_type():
 def test_pprint():
     x = dvector()
     y = x[1]
-    assert pp(y) == "<TensorType(float64, (?,))>[1]"
+    assert pp(y) == "<Vector(float64, shape=(?,))>[1]"
 
 
 def test_debugprint_inner_graph():
