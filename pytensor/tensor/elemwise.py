@@ -215,10 +215,18 @@ class DimShuffle(ExternalCOp):
         return Apply(self, [input], [output])
 
     def __str__(self):
-        if self.inplace:
-            return "InplaceDimShuffle{%s}" % ",".join(str(x) for x in self.new_order)
-        else:
-            return "DimShuffle{%s}" % ",".join(str(x) for x in self.new_order)
+        shuffle = sorted(self.shuffle) != self.shuffle
+        if self.augment and not (shuffle or self.drop):
+            if len(self.augment) == 1:
+                return f"ExpandDims{{axis={self.augment[0]}}}"
+            return f"ExpandDims{{axes={self.augment}}}"
+        if self.drop and not (self.augment or shuffle):
+            if len(self.drop) == 1:
+                return f"DropDims{{axis={self.drop[0]}}}"
+            return f"DropDims{{axes={self.drop}}}"
+        if shuffle and not (self.augment or self.drop):
+            return f"Transpose{{axes={self.shuffle}}}"
+        return f"DimShuffle{{order=[{','.join(map(str, self.new_order))}]}}"
 
     def perform(self, node, inp, out, params):
         (res,) = inp

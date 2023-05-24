@@ -37,10 +37,10 @@ def test_debugprint_sitsot():
      │  │  │  │  │  └─ Subtensor{int64} [id H]
      │  │  │  │  │     ├─ Shape [id I]
      │  │  │  │  │     │  └─ Unbroadcast{0} [id J]
-     │  │  │  │  │     │     └─ InplaceDimShuffle{x,0} [id K]
+     │  │  │  │  │     │     └─ ExpandDims{axis=0} [id K]
      │  │  │  │  │     │        └─ Elemwise{second,no_inplace} [id L]
      │  │  │  │  │     │           ├─ A [id M]
-     │  │  │  │  │     │           └─ InplaceDimShuffle{x} [id N]
+     │  │  │  │  │     │           └─ ExpandDims{axis=0} [id N]
      │  │  │  │  │     │              └─ TensorConstant{1.0} [id O]
      │  │  │  │  │     └─ ScalarConstant{0} [id P]
      │  │  │  │  └─ Subtensor{int64} [id Q]
@@ -95,10 +95,10 @@ def test_debugprint_sitsot_no_extra_info():
      │  │  │  │  │  └─ Subtensor{int64} [id H]
      │  │  │  │  │     ├─ Shape [id I]
      │  │  │  │  │     │  └─ Unbroadcast{0} [id J]
-     │  │  │  │  │     │     └─ InplaceDimShuffle{x,0} [id K]
+     │  │  │  │  │     │     └─ ExpandDims{axis=0} [id K]
      │  │  │  │  │     │        └─ Elemwise{second,no_inplace} [id L]
      │  │  │  │  │     │           ├─ A [id M]
-     │  │  │  │  │     │           └─ InplaceDimShuffle{x} [id N]
+     │  │  │  │  │     │           └─ ExpandDims{axis=0} [id N]
      │  │  │  │  │     │              └─ TensorConstant{1.0} [id O]
      │  │  │  │  │     └─ ScalarConstant{0} [id P]
      │  │  │  │  └─ Subtensor{int64} [id Q]
@@ -264,7 +264,7 @@ def test_debugprint_nested_scans():
 
     for{cpu,scan_fn} [id B]
      ← Elemwise{mul,no_inplace} [id Y] (inner_out_nit_sot-0)
-        ├─ InplaceDimShuffle{x} [id Z]
+        ├─ ExpandDims{axis=0} [id Z]
         │  └─ *0-<TensorType(float64, ())> [id BA] -> [id S] (inner_in_seqs-0)
         └─ Elemwise{pow,no_inplace} [id BB]
            ├─ Subtensor{int64} [id BC]
@@ -278,10 +278,10 @@ def test_debugprint_nested_scans():
            │  │  │  │  │  │  └─ Subtensor{int64} [id BJ]
            │  │  │  │  │  │     ├─ Shape [id BK]
            │  │  │  │  │  │     │  └─ Unbroadcast{0} [id BL]
-           │  │  │  │  │  │     │     └─ InplaceDimShuffle{x,0} [id BM]
+           │  │  │  │  │  │     │     └─ ExpandDims{axis=0} [id BM]
            │  │  │  │  │  │     │        └─ Elemwise{second,no_inplace} [id BN]
            │  │  │  │  │  │     │           ├─ *2-<TensorType(float64, (?,))> [id BO] -> [id W] (inner_in_non_seqs-0)
-           │  │  │  │  │  │     │           └─ InplaceDimShuffle{x} [id BP]
+           │  │  │  │  │  │     │           └─ ExpandDims{axis=0} [id BP]
            │  │  │  │  │  │     │              └─ TensorConstant{1.0} [id BQ]
            │  │  │  │  │  │     └─ ScalarConstant{0} [id BR]
            │  │  │  │  │  └─ Subtensor{int64} [id BS]
@@ -297,7 +297,7 @@ def test_debugprint_nested_scans():
            │  │  │  └─ *2-<TensorType(float64, (?,))> [id BO] -> [id W] (inner_in_non_seqs-0) (outer_in_non_seqs-0)
            │  │  └─ ScalarConstant{1} [id BW]
            │  └─ ScalarConstant{-1} [id BX]
-           └─ InplaceDimShuffle{x} [id BY]
+           └─ ExpandDims{axis=0} [id BY]
               └─ *1-<TensorType(int64, ())> [id BZ] -> [id U] (inner_in_seqs-1)
 
     for{cpu,scan_fn} [id BE]
@@ -361,7 +361,7 @@ def test_debugprint_nested_scans():
      → *2-<TensorType(float64, (?,))> [id BA] -> [id C] (inner_in_non_seqs-0)
      → *3-<TensorType(int32, ())> [id BB] -> [id B] (inner_in_non_seqs-1)
      ← Elemwise{mul,no_inplace} [id BC] (inner_out_nit_sot-0)
-        ├─ InplaceDimShuffle{x} [id BD]
+        ├─ ExpandDims{axis=0} [id BD]
         │  └─ *0-<TensorType(float64, ())> [id Y] (inner_in_seqs-0)
         └─ Elemwise{pow,no_inplace} [id BE]
            ├─ Subtensor{int64} [id BF]
@@ -375,10 +375,10 @@ def test_debugprint_nested_scans():
            │  │  │  │  │  │  └─ Subtensor{int64} [id BL]
            │  │  │  │  │  │     ├─ Shape [id BM]
            │  │  │  │  │  │     │  └─ Unbroadcast{0} [id BN]
-           │  │  │  │  │  │     │     └─ InplaceDimShuffle{x,0} [id BO]
+           │  │  │  │  │  │     │     └─ ExpandDims{axis=0} [id BO]
            │  │  │  │  │  │     │        └─ Elemwise{second,no_inplace} [id BP]
            │  │  │  │  │  │     │           ├─ *2-<TensorType(float64, (?,))> [id BA] (inner_in_non_seqs-0)
-           │  │  │  │  │  │     │           └─ InplaceDimShuffle{x} [id BQ]
+           │  │  │  │  │  │     │           └─ ExpandDims{axis=0} [id BQ]
            │  │  │  │  │  │     │              └─ TensorConstant{1.0} [id BR]
            │  │  │  │  │  │     └─ ScalarConstant{0} [id BS]
            │  │  │  │  │  └─ Subtensor{int64} [id BT]
@@ -394,7 +394,7 @@ def test_debugprint_nested_scans():
            │  │  │  └─ *2-<TensorType(float64, (?,))> [id BA] (inner_in_non_seqs-0) (outer_in_non_seqs-0)
            │  │  └─ ScalarConstant{1} [id BX]
            │  └─ ScalarConstant{-1} [id BY]
-           └─ InplaceDimShuffle{x} [id BZ]
+           └─ ExpandDims{axis=0} [id BZ]
               └─ *1-<TensorType(int64, ())> [id Z] (inner_in_seqs-1)
 
     for{cpu,scan_fn} [id BH]
@@ -515,10 +515,10 @@ def test_debugprint_mitmot():
      │  │  │  │     │  │  │  └─ Subtensor{int64} [id K]
      │  │  │  │     │  │  │     ├─ Shape [id L]
      │  │  │  │     │  │  │     │  └─ Unbroadcast{0} [id M]
-     │  │  │  │     │  │  │     │     └─ InplaceDimShuffle{x,0} [id N]
+     │  │  │  │     │  │  │     │     └─ ExpandDims{axis=0} [id N]
      │  │  │  │     │  │  │     │        └─ Elemwise{second,no_inplace} [id O]
      │  │  │  │     │  │  │     │           ├─ A [id P]
-     │  │  │  │     │  │  │     │           └─ InplaceDimShuffle{x} [id Q]
+     │  │  │  │     │  │  │     │           └─ ExpandDims{axis=0} [id Q]
      │  │  │  │     │  │  │     │              └─ TensorConstant{1.0} [id R]
      │  │  │  │     │  │  │     └─ ScalarConstant{0} [id S]
      │  │  │  │     │  │  └─ Subtensor{int64} [id T]
@@ -559,7 +559,7 @@ def test_debugprint_mitmot():
      │  │  │  ├─ Elemwise{second,no_inplace} [id BN]
      │  │  │  │  ├─ for{cpu,scan_fn} [id F] (outer_out_sit_sot-0)
      │  │  │  │  │  └─ ···
-     │  │  │  │  └─ InplaceDimShuffle{x,x} [id BO]
+     │  │  │  │  └─ ExpandDims{axes=[0, 1]} [id BO]
      │  │  │  │     └─ TensorConstant{0.0} [id BP]
      │  │  │  ├─ IncSubtensor{Inc;int64} [id BQ]
      │  │  │  │  ├─ Elemwise{second,no_inplace} [id BR]
@@ -567,14 +567,14 @@ def test_debugprint_mitmot():
      │  │  │  │  │  │  ├─ for{cpu,scan_fn} [id F] (outer_out_sit_sot-0)
      │  │  │  │  │  │  │  └─ ···
      │  │  │  │  │  │  └─ ScalarConstant{1} [id BT]
-     │  │  │  │  │  └─ InplaceDimShuffle{x,x} [id BU]
+     │  │  │  │  │  └─ ExpandDims{axes=[0, 1]} [id BU]
      │  │  │  │  │     └─ TensorConstant{0.0} [id BV]
      │  │  │  │  ├─ Elemwise{second} [id BW]
      │  │  │  │  │  ├─ Subtensor{int64} [id BX]
      │  │  │  │  │  │  ├─ Subtensor{int64::} [id BS]
      │  │  │  │  │  │  │  └─ ···
      │  │  │  │  │  │  └─ ScalarConstant{-1} [id BY]
-     │  │  │  │  │  └─ InplaceDimShuffle{x} [id BZ]
+     │  │  │  │  │  └─ ExpandDims{axis=0} [id BZ]
      │  │  │  │  │     └─ Elemwise{second,no_inplace} [id CA]
      │  │  │  │  │        ├─ Sum{acc_dtype=float64} [id CB]
      │  │  │  │  │        │  └─ Subtensor{int64} [id BX]

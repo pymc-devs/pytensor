@@ -275,7 +275,7 @@ def test_debugprint():
     exp_res = dedent(
         r"""
         Elemwise{Composite{(i2 + (i0 - i1))}} 4
-         ├─ InplaceDimShuffle{x,0} v={0: [0]} 3
+         ├─ ExpandDims{axis=0} v={0: [0]} 3
          │  └─ CGemv{inplace} d={0: [0]} 2
          │     ├─ AllocEmpty{dtype='float64'} 1
          │     │  └─ Shape_i{0} 0
