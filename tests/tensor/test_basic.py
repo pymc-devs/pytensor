@@ -16,6 +16,7 @@ from pytensor.compile.ops import DeepCopyOp
 from pytensor.gradient import grad, hessian
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
+from pytensor.graph.replace import clone_replace
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.raise_op import Assert
 from pytensor.scalar import autocast_float, autocast_float_as
@@ -817,6 +818,22 @@ class TestAlloc:
         full_at = at.full((2, 3), 3, dtype="int64")
         res = pytensor.function([], full_at, mode=self.mode)()
         assert np.array_equal(res, np.full((2, 3), 3, dtype="int64"))
+
+    @pytest.mark.parametrize("func", (at.zeros, at.empty))
+    def test_rebuild(self, func):
+        x = vector(shape=(50,))
+        x_test = np.zeros((50,), dtype=config.floatX)
+        y = func(x.shape)
+        assert y.type.shape == (50,)
+        assert y.shape.eval({x: x_test}) == (50,)
+        assert y.eval({x: x_test}).shape == (50,)
+
+        x_new = vector(shape=(100,))
+        x_new_test = np.zeros((100,), dtype=config.floatX)
+        y_new = clone_replace(y, {x: x_new}, rebuild_strict=False)
+        assert y_new.type.shape == (100,)
+        assert y_new.shape.eval({x_new: x_new_test}) == (100,)
+        assert y_new.eval({x_new: x_new_test}).shape == (100,)
 
 
 def test_infer_shape():

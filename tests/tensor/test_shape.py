@@ -7,6 +7,7 @@ from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable
 from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.replace import clone_replace
 from pytensor.graph.type import Type
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.scalar.basic import ScalarConstant
@@ -337,6 +338,21 @@ class TestReshape(utt.InferShapeTester, utt.OptimizationTestMixin):
             Reshape,
         )
 
+    def test_rebuild(self):
+        x = as_tensor_variable(50)
+        i = vector("i")
+        i_test = np.zeros((100,), dtype=config.floatX)
+        y = reshape(i, (100 // x, x))
+        assert y.type.shape == (2, 50)
+        assert tuple(y.shape.eval({i: i_test})) == (2, 50)
+        assert y.eval({i: i_test}).shape == (2, 50)
+
+        x_new = as_tensor_variable(25)
+        y_new = clone_replace(y, {x: x_new}, rebuild_strict=False)
+        assert y_new.type.shape == (4, 25)
+        assert tuple(y_new.shape.eval({i: i_test})) == (4, 25)
+        assert y_new.eval({i: i_test}).shape == (4, 25)
+
 
 def test_shape_i_hash():
     assert isinstance(Shape_i(np.int64(1)).__hash__(), int)
@@ -523,6 +539,22 @@ class TestSpecifyShape(utt.InferShapeTester):
         z = y + 1
         z_grad = grad(z.sum(), wrt=x)
         assert isinstance(z_grad.owner.op, SpecifyShape)
+
+    def test_rebuild(self):
+        x = as_tensor_variable(50)
+        i = matrix("i")
+        i_test = np.zeros((4, 50), dtype=config.floatX)
+        y = specify_shape(i, (None, x))
+        assert y.type.shape == (None, 50)
+        assert tuple(y.shape.eval({i: i_test})) == (4, 50)
+        assert y.eval({i: i_test}).shape == (4, 50)
+
+        x_new = as_tensor_variable(100)
+        i_test = np.zeros((4, 100), dtype=config.floatX)
+        y_new = clone_replace(y, {x: x_new}, rebuild_strict=False)
+        assert y_new.type.shape == (None, 100)
+        assert tuple(y_new.shape.eval({i: i_test})) == (4, 100)
+        assert y_new.eval({i: i_test}).shape == (4, 100)
 
 
 class TestSpecifyBroadcastable:

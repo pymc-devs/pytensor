@@ -9,6 +9,7 @@ from pytensor import tensor as at
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, applys_between
+from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.raise_op import Assert
 from pytensor.tensor.elemwise import DimShuffle
@@ -1398,6 +1399,22 @@ class TestBroadcastTo(utt.InferShapeTester):
         assert isinstance(advincsub_node.inputs[0].owner.op, BroadcastTo)
 
         assert advincsub_node.op.inplace is False
+
+    def test_rebuild(self):
+        x = vector(shape=(50,))
+        x_test = np.zeros((50,), dtype=config.floatX)
+        i = 0
+        y = broadcast_to(i, x.shape)
+        assert y.type.shape == (50,)
+        assert y.shape.eval({x: x_test}) == (50,)
+        assert y.eval({x: x_test}).shape == (50,)
+
+        x_new = vector(shape=(100,))
+        x_new_test = np.zeros((100,), dtype=config.floatX)
+        y_new = clone_replace(y, {x: x_new}, rebuild_strict=False)
+        assert y_new.type.shape == (100,)
+        assert y_new.shape.eval({x_new: x_new_test}) == (100,)
+        assert y_new.eval({x_new: x_new_test}).shape == (100,)
 
 
 def test_broadcast_arrays():

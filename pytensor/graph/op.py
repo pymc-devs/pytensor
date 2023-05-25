@@ -207,6 +207,15 @@ class Op(MetaObject):
     otypes: Optional[Sequence["Type"]] = None
     params_type: Optional[ParamsType] = None
 
+    _output_type_depends_on_input_value = False
+    """
+    Whether the static output type depends on the inferred value of one of the inputs.
+    (e.g, via constant folding or static shape inference).
+
+    This information is needed when rebuilding a graph with new inputs,
+    as nodes with these Ops must be rebuilt even if the input types haven't changed.
+    """
+
     def make_node(self, *inputs: Variable) -> Apply:
         """Construct an `Apply` node that represent the application of this operation to the given inputs.
 

@@ -388,6 +388,7 @@ class SpecifyShape(COp):
     view_map = {0: [0]}
     __props__ = ()
     _f16_ok = True
+    _output_type_depends_on_input_value = True
 
     def make_node(self, x, *shape):
         from pytensor.tensor.basic import get_underlying_scalar_constant_value
@@ -587,6 +588,7 @@ class Reshape(COp):
 
     view_map = {0: [0]}  # output 0 is potentially aliased to inputs [0]
     _f16_ok = True
+    _output_type_depends_on_input_value = True
 
     check_input = False
     __props__ = ("ndim",)
