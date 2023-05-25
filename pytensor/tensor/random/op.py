@@ -91,6 +91,8 @@ class RandomVariable(Op):
 
     """
 
+    _output_type_depends_on_input_value = True
+
     __props__ = ("name", "ndim_supp", "ndims_params", "dtype", "inplace")
     default_output = 1
 

@@ -14,6 +14,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, Variable, graph_inputs
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import get_test_value
+from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.tensor.random.basic import (
     bernoulli,
@@ -57,7 +58,7 @@ from pytensor.tensor.random.basic import (
     weibull,
 )
 from pytensor.tensor.rewriting.shape import ShapeFeature
-from pytensor.tensor.type import iscalar, scalar, tensor
+from pytensor.tensor.type import iscalar, scalar, tensor, vector
 from tests.unittest_tools import create_pytensor_param
 
 
@@ -1422,3 +1423,19 @@ def test_pickle():
     a_unpkl = pickle.loads(a_pkl)
 
     assert a_unpkl.owner.op._props() == sample_a.owner.op._props()
+
+
+def test_rebuild():
+    x = vector(shape=(50,))
+    x_test = np.zeros((50,), dtype=config.floatX)
+    y = normal(size=x.shape)
+    assert y.type.shape == (50,)
+    assert y.shape.eval({x: x_test}) == (50,)
+    assert y.eval({x: x_test}).shape == (50,)
+
+    x_new = vector(shape=(100,))
+    x_new_test = np.zeros((100,), dtype=config.floatX)
+    y_new = clone_replace(y, {x: x_new}, rebuild_strict=False)
+    assert y_new.type.shape == (100,)
+    assert y_new.shape.eval({x_new: x_new_test}) == (100,)
+    assert y_new.eval({x_new: x_new_test}).shape == (100,)

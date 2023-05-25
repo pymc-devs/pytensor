@@ -1561,6 +1561,8 @@ def broadcast_shape_iter(
 class BroadcastTo(COp):
     """An `Op` for `numpy.broadcast_to`."""
 
+    _output_type_depends_on_input_value = True
+
     __props__ = ()
 
     view_map = {0: [0]}
