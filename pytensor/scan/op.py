@@ -1282,27 +1282,18 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         )
 
     def __str__(self):
-        device_str = "cpu"
-        if self.info.as_while:
-            name = "do_while"
-        else:
-            name = "for"
-        aux_txt = "%s"
+        inplace = "none"
         if len(self.destroy_map.keys()) > 0:
             # Check if all outputs are inplace
             if sorted(self.destroy_map.keys()) == sorted(
                 range(self.info.n_mit_mot + self.info.n_mit_sot + self.info.n_sit_sot)
             ):
-                aux_txt += "all_inplace,%s,%s}"
+                inplace = "all"
             else:
-                aux_txt += "{inplace{"
-                for k in self.destroy_map.keys():
-                    aux_txt += str(k) + ","
-                aux_txt += "},%s,%s}"
-        else:
-            aux_txt += "{%s,%s}"
-        aux_txt = aux_txt % (name, device_str, str(self.name))
-        return aux_txt
+                inplace = str(list(self.destroy_map.keys()))
+        return (
+            f"Scan{{{self.name}, while_loop={self.info.as_while}, inplace={inplace}}}"
+        )
 
     def __hash__(self):
         return hash(
