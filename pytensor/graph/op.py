@@ -621,6 +621,11 @@ class Op(MetaObject):
     def __str__(self):
         return getattr(type(self), "__name__", super().__str__())
 
+    def __repr__(self):
+        props = getattr(self, "__props__", ())
+        props = ",".join(f"{prop}={getattr(self, prop, '?')}" for prop in props)
+        return f"{self.__class__.__name__}({props})"
+
 
 class _NoPythonOp(Op):
     """A class used to indicate that an `Op` does not provide a Python implementation.
