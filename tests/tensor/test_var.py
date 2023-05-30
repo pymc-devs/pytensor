@@ -213,7 +213,7 @@ def test_print_constant():
     c = pytensor.tensor.constant(1, name="const")
     assert str(c) == "const{1}"
     d = pytensor.tensor.constant(1)
-    assert str(d) == "TensorConstant{1}"
+    assert str(d) == "1"
 
 
 @pytest.mark.parametrize(

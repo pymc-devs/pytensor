@@ -1023,21 +1023,6 @@ class TensorConstant(TensorVariable, Constant[_TensorTypeType]):
 
         Constant.__init__(self, new_type, data, name)
 
-    def __str__(self):
-        unique_val = get_unique_value(self)
-        if unique_val is not None:
-            val = f"{self.data.shape} of {unique_val}"
-        else:
-            val = f"{self.data}"
-        if len(val) > 20:
-            val = val[:10].strip() + " ... " + val[-10:].strip()
-
-        if self.name is not None:
-            name = self.name
-        else:
-            name = "TensorConstant"
-        return f"{name}{{{val}}}"
-
     def signature(self):
         return TensorConstantSignature((self.type, self.data))
 
