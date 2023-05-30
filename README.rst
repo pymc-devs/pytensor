@@ -22,69 +22,69 @@ Getting started
 
 .. code-block:: python
 
-  import pytensor
-  from pytensor import tensor as pt
+    import pytensor
+    from pytensor import tensor as pt
 
-  # Declare two symbolic floating-point scalars
-  a = pt.dscalar("a")
-  b = pt.dscalar("b")
+    # Declare two symbolic floating-point scalars
+    a = pt.dscalar("a")
+    b = pt.dscalar("b")
 
-  # Create a simple example expression
-  c = a + b
+    # Create a simple example expression
+    c = a + b
 
-  # Convert the expression into a callable object that takes `(a, b)`
-  # values as input and computes the value of `c`.
-  f_c = pytensor.function([a, b], c)
+    # Convert the expression into a callable object that takes `(a, b)`
+    # values as input and computes the value of `c`.
+    f_c = pytensor.function([a, b], c)
 
-  assert f_c(1.5, 2.5) == 4.0
+    assert f_c(1.5, 2.5) == 4.0
 
-  # Compute the gradient of the example expression with respect to `a`
-  dc = pytensor.grad(c, a)
+    # Compute the gradient of the example expression with respect to `a`
+    dc = pytensor.grad(c, a)
 
-  f_dc = pytensor.function([a, b], dc)
+    f_dc = pytensor.function([a, b], dc)
 
-  assert f_dc(1.5, 2.5) == 1.0
+    assert f_dc(1.5, 2.5) == 1.0
 
-  # Compiling functions with `pytensor.function` also optimizes
-  # expression graphs by removing unnecessary operations and
-  # replacing computations with more efficient ones.
+    # Compiling functions with `pytensor.function` also optimizes
+    # expression graphs by removing unnecessary operations and
+    # replacing computations with more efficient ones.
 
-  v = pt.vector("v")
-  M = pt.matrix("M")
+    v = pt.vector("v")
+    M = pt.matrix("M")
 
-  d = a/a + (M + a).dot(v)
+    d = a/a + (M + a).dot(v)
 
-  pytensor.dprint(d)
-  # Elemwise{add,no_inplace} [id A] ''
-  #  |InplaceDimShuffle{x} [id B] ''
-  #  | |Elemwise{true_div,no_inplace} [id C] ''
-  #  |   |a [id D]
-  #  |   |a [id D]
-  #  |dot [id E] ''
-  #    |Elemwise{add,no_inplace} [id F] ''
-  #    | |M [id G]
-  #    | |InplaceDimShuffle{x,x} [id H] ''
-  #    |   |a [id D]
-  #    |v [id I]
+    pytensor.dprint(d)
+    #  Add [id A]
+    #  ├─ ExpandDims{axis=0} [id B]
+    #  │  └─ True_div [id C]
+    #  │     ├─ a [id D]
+    #  │     └─ a [id D]
+    #  └─ dot [id E]
+    #     ├─ Add [id F]
+    #     │  ├─ M [id G]
+    #     │  └─ ExpandDims{axes=[0, 1]} [id H]
+    #     │     └─ a [id D]
+    #     └─ v [id I]
 
-  f_d = pytensor.function([a, v, M], d)
+    f_d = pytensor.function([a, v, M], d)
 
-  # `a/a` -> `1` and the dot product is replaced with a BLAS function
-  # (i.e. CGemv)
-  pytensor.dprint(f_d)
-  # Elemwise{Add}[(0, 1)] [id A] ''   5
-  #  |TensorConstant{(1,) of 1.0} [id B]
-  #  |CGemv{inplace} [id C] ''   4
-  #    |AllocEmpty{dtype='float64'} [id D] ''   3
-  #    | |Shape_i{0} [id E] ''   2
-  #    |   |M [id F]
-  #    |TensorConstant{1.0} [id G]
-  #    |Elemwise{add,no_inplace} [id H] ''   1
-  #    | |M [id F]
-  #    | |InplaceDimShuffle{x,x} [id I] ''   0
-  #    |   |a [id J]
-  #    |v [id K]
-  #    |TensorConstant{0.0} [id L]
+    # `a/a` -> `1` and the dot product is replaced with a BLAS function
+    # (i.e. CGemv)
+    pytensor.dprint(f_d)
+    # Add [id A] 5
+    #  ├─ [1.] [id B]
+    #  └─ CGemv{inplace} [id C] 4
+    #     ├─ AllocEmpty{dtype='float64'} [id D] 3
+    #     │  └─ Shape_i{0} [id E] 2
+    #     │     └─ M [id F]
+    #     ├─ 1.0 [id G]
+    #     ├─ Add [id H] 1
+    #     │  ├─ M [id F]
+    #     │  └─ ExpandDims{axes=[0, 1]} [id I] 0
+    #     │     └─ a [id J]
+    #     ├─ v [id K]
+    #     └─ 0.0 [id L]
 
 See `the PyTensor documentation <https://pytensor.readthedocs.io/en/latest/>`__ for in-depth tutorials.
 
