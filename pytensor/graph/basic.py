@@ -763,13 +763,20 @@ class Constant(AtomicVariable[_TypeType]):
         return (self.type, self.data)
 
     def __str__(self):
-        if self.name is not None:
-            return self.name
-        else:
-            name = str(self.data)
-            if len(name) > 20:
-                name = name[:10] + "..." + name[-10:]
-            return f"{type(self).__name__}{{{name}}}"
+        data_str = str(self.data)
+        if len(data_str) > 20:
+            data_str = data_str[:10].strip() + " ... " + data_str[-10:].strip()
+
+        if self.name is None:
+            return data_str
+
+        return f"{self.name}{{{data_str}}}"
+
+    def __repr__(self):
+        data_str = repr(self.data)
+        if len(data_str) > 20:
+            data_str = data_str[:10].strip() + " ... " + data_str[-10:].strip()
+        return f"{type(self).__name__}({repr(self.type)}, data={data_str})"
 
     def clone(self, **kwargs):
         return self

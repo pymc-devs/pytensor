@@ -166,7 +166,7 @@ class TestPatternNodeRewriter:
         e = op1(op1(x, y), y)
         g = FunctionGraph([y], [e])
         OpKeyPatternNodeRewriter((op1, z, "1"), (op2, "1", z)).rewrite(g)
-        assert str(g) == "FunctionGraph(Op1(Op2(y, z), y))"
+        assert str(g) == "FunctionGraph(Op1(Op2(y, z{2}), y))"
 
     def test_constraints(self):
         x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")

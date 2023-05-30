@@ -280,10 +280,10 @@ def test_debugprint():
          │     ├─ AllocEmpty{dtype='float64'} 1
          │     │  └─ Shape_i{0} 0
          │     │     └─ B
-         │     ├─ TensorConstant{1.0}
+         │     ├─ 1.0
          │     ├─ B
          │     ├─ <Vector(float64, shape=(?,))>
-         │     └─ TensorConstant{0.0}
+         │     └─ 0.0
          ├─ D
          └─ A
 
