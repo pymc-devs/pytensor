@@ -1,6 +1,9 @@
-import jax.errors
 import numpy as np
 import pytest
+
+
+jax = pytest.importorskip("jax")
+import jax.errors
 
 import pytensor
 import pytensor.tensor.basic as at

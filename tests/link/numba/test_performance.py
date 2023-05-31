@@ -3,6 +3,9 @@ import timeit
 import numpy as np
 import pytest
 
+
+pytest.importorskip("numba")
+
 import pytensor.tensor as aet
 from pytensor import config
 from pytensor.compile.function import function
@@ -70,4 +73,5 @@ def test_careduce_performance(careduce_fn, numpy_fn, axis, inputs, input_vals):
     mean_numpy_time = np.mean(numpy_times)
     # mean_c_time = np.mean(c_times)
 
+    # FIXME: Why are we asserting >=? Numba could be doing worse than numpy!
     assert mean_numba_time / mean_numpy_time >= 0.75

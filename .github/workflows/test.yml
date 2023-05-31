@@ -73,7 +73,8 @@ jobs:
         python-version: ["3.8", "3.11"]
         fast-compile: [0,1]
         float32: [0,1]
-        install-numba: [1]
+        install-numba: [0]
+        install-jax: [0]
         part:
           - "tests --ignore=tests/tensor --ignore=tests/scan --ignore=tests/sparse"
           - "tests/scan"
@@ -93,6 +94,27 @@ jobs:
             part: "tests/tensor/test_math.py"
           - fast-compile: 1
             float32: 1
+        include:
+          - install-numba: 1
+            python-version: "3.8"
+            fast-compile: 0
+            float32: 0
+            part: "tests/link/numba"
+          - install-numba: 1
+            python-version: "3.11"
+            fast-compile: 0
+            float32: 0
+            part: "tests/link/numba"
+          - install-jax: 1
+            python-version: "3.8"
+            fast-compile: 0
+            float32: 0
+            part: "tests/link/jax"
+          - install-jax: 1
+            python-version: "3.11"
+            fast-compile: 0
+            float32: 0
+            part: "tests/link/jax"
     steps:
       - uses: actions/checkout@v3
         with:
@@ -121,7 +143,7 @@ jobs:
 #          numba-scipy downgrades the installed scipy to 1.7.3 in Python 3.8, but not numpy, even though scipy 1.7 requires numpy<1.23. When installing PyTensor next, pip installs a lower version of numpy via the PyPI.
           if [[ $INSTALL_NUMBA == "1" ]] && [[ $PYTHON_VERSION == "3.8" ]]; then mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" "numpy<1.23" "numba>=0.57" numba-scipy; fi
           if [[ $INSTALL_NUMBA == "1" ]] && [[ $PYTHON_VERSION != "3.8" ]]; then mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" "numba>=0.57" numba-scipy; fi
-          mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" jax jaxlib numpyro
+          if [[ $INSTALL_JAX == "1" ]]; then mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" jax jaxlib numpyro; fi
           pip install -e ./
           mamba list && pip freeze
           python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'
@@ -129,6 +151,7 @@ jobs:
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
           INSTALL_NUMBA: ${{ matrix.install-numba }}
+          INSTALL_JAX: ${{ matrix.install-jax }}
 
       - name: Run tests
         shell: bash -l {0}
