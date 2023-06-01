@@ -140,7 +140,9 @@ jobs:
         shell: bash -l {0}
         run: |
           mamba install --yes -q "python~=${PYTHON_VERSION}=*_cpython" mkl numpy scipy pip mkl-service graphviz cython pytest coverage pytest-cov pytest-benchmark sympy
-#          numba-scipy downgrades the installed scipy to 1.7.3 in Python 3.8, but not numpy, even though scipy 1.7 requires numpy<1.23. When installing PyTensor next, pip installs a lower version of numpy via the PyPI.
+          # numba-scipy downgrades the installed scipy to 1.7.3 in Python 3.8, but
+          # not numpy, even though scipy 1.7 requires numpy<1.23. When installing
+          # PyTensor next, pip installs a lower version of numpy via the PyPI.
           if [[ $INSTALL_NUMBA == "1" ]] && [[ $PYTHON_VERSION == "3.8" ]]; then mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" "numpy<1.23" "numba>=0.57" numba-scipy; fi
           if [[ $INSTALL_NUMBA == "1" ]] && [[ $PYTHON_VERSION != "3.8" ]]; then mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" "numba>=0.57" numba-scipy; fi
           if [[ $INSTALL_JAX == "1" ]]; then mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" jax jaxlib numpyro; fi
