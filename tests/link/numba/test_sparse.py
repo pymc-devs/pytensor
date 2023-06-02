@@ -1,7 +1,10 @@
-import numba
 import numpy as np
 import pytest
 import scipy as sp
+
+
+numba = pytest.importorskip("numba")
+
 
 # Make sure the Numba customizations are loaded
 import pytensor.link.numba.dispatch.sparse  # noqa: F401

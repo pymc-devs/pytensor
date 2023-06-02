@@ -3,9 +3,11 @@ import inspect
 from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence, Tuple, Union
 from unittest import mock
 
-import numba
 import numpy as np
 import pytest
+
+
+numba = pytest.importorskip("numba")
 
 import pytensor.scalar as aes
 import pytensor.scalar.math as aesm
