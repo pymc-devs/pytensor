@@ -1402,7 +1402,7 @@ class ProfileStats:
             shapes = str(fct_shapes[fgraph][node])
 
             if all(hasattr(out.type, "get_size") for out in node.outputs):
-                size = "{node_outputs_size:9d}B"
+                size = f"{node_outputs_size:9d}B"
                 if node_outputs_size < config.profiling__min_memory_size:
                     N = idx
                     break
