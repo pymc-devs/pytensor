@@ -26,6 +26,7 @@ from pytensor.tensor.random.rewriting import (
     local_rv_size_lift,
     local_subtensor_rv_lift,
 )
+from pytensor.tensor.rewriting.shape import ShapeFeature, ShapeOptimizer
 from pytensor.tensor.subtensor import AdvancedSubtensor, AdvancedSubtensor1, Subtensor
 from pytensor.tensor.type import iscalar, vector
 
@@ -58,7 +59,9 @@ def apply_local_rewrite_to_rv(
         p for p in dist_params_at + size_at if not isinstance(p, (slice, Constant))
     ]
 
-    mode = Mode("py", EquilibriumGraphRewriter([rewrite], max_use_ratio=100))
+    mode = Mode(
+        "py", EquilibriumGraphRewriter([ShapeOptimizer(), rewrite], max_use_ratio=100)
+    )
 
     f_rewritten = function(
         f_inputs,
@@ -440,30 +443,48 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
     np.testing.assert_allclose(res_base, res_rewritten, rtol=rtol)
 
 
+def rand_bool_mask(shape, rng=None):
+    if rng is None:
+        rng = np.random.default_rng()
+    return rng.binomial(n=1, p=0.5, size=shape).astype(bool)
+
+
 @pytest.mark.parametrize(
     "indices, lifted, dist_op, dist_params, size",
     [
+        # 0
         (
-            # `size`-less advanced boolean indexing
-            (np.r_[True, False, False, True],),
+            # `size`-less simple integer indexing
+            (slice(None), 2),
             True,
-            uniform,
+            normal,
             (
-                (0.1 - 1e-5) * np.arange(4).astype(dtype=config.floatX),
-                0.1 * np.arange(4).astype(dtype=config.floatX),
+                np.arange(30, dtype=config.floatX).reshape(3, 5, 2),
+                np.full((1, 5, 1), 1e-6),
             ),
             (),
         ),
         (
-            # `size`-only advanced boolean indexing
-            (np.r_[True, False, False, True],),
+            # `size`-only slice
+            (2, -1),
             True,
             uniform,
             (
                 np.array(0.9 - 1e-5, dtype=config.floatX),
                 np.array(0.9, dtype=config.floatX),
             ),
-            (4,),
+            (5, 2),
+        ),
+        (
+            # `size`-less slice
+            (slice(None), slice(4, -6, -1), slice(1, None)),
+            True,
+            normal,
+            (
+                np.arange(30, dtype=config.floatX).reshape(3, 5, 2),
+                np.full((1, 5, 1), 1e-6),
+            ),
+            (),
         ),
         (
             # `size`-only slice
@@ -477,8 +498,32 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
             (5, 2),
         ),
         (
-            (slice(1, None), [0, 2]),
+            # `size`-less advanced boolean indexing
+            (np.r_[True, False, False, True],),
             True,
+            uniform,
+            (
+                (0.1 - 1e-5) * np.arange(4).astype(dtype=config.floatX),
+                0.1 * np.arange(4).astype(dtype=config.floatX),
+            ),
+            (),
+        ),
+        # 5
+        (
+            # `size`-only advanced boolean indexing
+            (np.r_[True, False, False, True],),
+            True,
+            uniform,
+            (
+                np.array(0.9 - 1e-5, dtype=config.floatX),
+                np.array(0.9, dtype=config.floatX),
+            ),
+            (4,),
+        ),
+        (
+            # Advanced integer indexing
+            (slice(1, None), [0, 2]),
+            False,  # Could have duplicates
             normal,
             (
                 np.array([1, 10, 100], dtype=config.floatX),
@@ -487,8 +532,9 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
             (4, 3),
         ),
         (
+            # Advanced integer indexing
             (np.array([1]), 0),
-            True,
+            False,  # We don't support expand_dims
             normal,
             (
                 np.array([[-1, 20], [300, -4000]], dtype=config.floatX),
@@ -496,23 +542,39 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
             ),
             (3, 2, 2),
         ),
-        # Only one distribution parameter
         (
-            (0,),
+            # Advanced integer-boolean indexing
+            (0, np.r_[True, False]),
             True,
-            poisson,
-            (np.array([[1, 2], [3, 4]], dtype=config.floatX),),
+            normal,
+            (
+                np.array([[1, 2], [3, 4]], dtype=config.floatX),
+                np.array([1e-6], dtype=config.floatX),
+            ),
             (3, 2, 2),
         ),
-        # Univariate distribution with vector parameters
         (
-            (np.array([0, 2]),),
+            # Advanced non-consecutive integer-boolean indexing
+            (slice(None), 0, slice(None), np.r_[True, False]),
+            True,
+            normal,
+            (
+                np.array([[1, 2], [3, 4]], dtype=config.floatX),
+                np.array([[1e-6]], dtype=config.floatX),
+            ),
+            (7, 3, 2, 2),
+        ),
+        # 10
+        (
+            # Univariate distribution with core-vector parameters
+            (1,),
             True,
             categorical,
             (np.array([0.0, 0.0, 1.0], dtype=config.floatX),),
             (4,),
         ),
         (
+            # Univariate distribution with core-vector parameters
             (np.array([True, False, True, True]),),
             True,
             categorical,
@@ -520,6 +582,7 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
             (4,),
         ),
         (
+            # Univariate distribution with core-vector parameters
             (np.array([True, False, True]),),
             True,
             categorical,
@@ -532,10 +595,8 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
             (),
         ),
         (
-            (
-                slice(None),
-                np.array([True, False, True]),
-            ),
+            # Univariate distribution with core-vector parameters
+            (slice(None), np.array([True, False, True])),
             True,
             categorical,
             (
@@ -546,16 +607,18 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
             ),
             (4, 3),
         ),
-        # Boolean indexing where output is empty
         (
+            # Boolean indexing where output is empty
             (np.array([False, False]),),
             True,
             normal,
             (np.array([[1.0, 0.0, 0.0]], dtype=config.floatX),),
             (2, 3),
         ),
+        # 15
         (
-            (np.array([False, False]),),
+            # Boolean indexing where output is empty
+            (np.array([False, False]), slice(1, None)),
             True,
             categorical,
             (
@@ -566,10 +629,119 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
             ),
             (2, 3),
         ),
-        # Multivariate cases, indexing only supported if it does not affect core dimensions
         (
-            # Indexing dips into core dimension
-            (np.array([1]), 0),
+            # Empty-slice
+            (slice(None), slice(10, None), slice(1, None)),
+            True,
+            normal,
+            (
+                np.arange(30).reshape(2, 3, 5),
+                np.full((1, 5), 1e-6),
+            ),
+            (2, 3, 5),
+        ),
+        (
+            # Multidimensional boolean indexing
+            (rand_bool_mask((5, 3, 2)),),
+            True,
+            normal,
+            (
+                np.arange(30).reshape(5, 3, 2),
+                1e-6,
+            ),
+            (),
+        ),
+        (
+            # Multidimensional boolean indexing
+            (rand_bool_mask((5, 3)),),
+            True,
+            normal,
+            (
+                np.arange(30).reshape(5, 3, 2),
+                1e-6,
+            ),
+            (),
+        ),
+        (
+            # Multidimensional boolean indexing
+            (rand_bool_mask((5, 3)), slice(None)),
+            True,
+            normal,
+            (
+                np.arange(30).reshape(5, 3, 2),
+                1e-6,
+            ),
+            (),
+        ),
+        # 20
+        (
+            # Multidimensional boolean indexing
+            (slice(None), rand_bool_mask((3, 2))),
+            True,
+            normal,
+            (
+                np.arange(30).reshape(5, 3, 2),
+                1e-6,
+            ),
+            (),
+        ),
+        (
+            # Multidimensional boolean indexing
+            (rand_bool_mask((5, 3)),),
+            True,
+            normal,
+            (
+                np.arange(3).reshape(1, 3, 1),
+                np.full((5, 1, 2), 1e-6),
+            ),
+            (5, 3, 2),
+        ),
+        (
+            # Multidimensional boolean indexing
+            (
+                np.array([True, False, True, False, False]),
+                slice(None),
+                (np.array([True, True])),
+            ),
+            True,
+            normal,
+            (
+                np.arange(30).reshape(5, 3, 2),
+                1e-6,
+            ),
+            (),
+        ),
+        (
+            # Multidimensional boolean indexing,
+            # requires runtime broadcasting of the zeros arrays
+            (
+                np.array([True, False, True, False, False]),  # nonzero().shape == (2,)
+                slice(None),
+                (np.array([True, False])),  # nonzero().shape == (1,)
+            ),
+            True,
+            normal,
+            (
+                np.arange(30).reshape(5, 3, 2),
+                1e-6,
+            ),
+            (),
+        ),
+        (
+            # Multivariate distribution: indexing dips into core dimension
+            (1, 0),
+            False,
+            multivariate_normal,
+            (
+                np.array([[-1, 20], [300, -4000]], dtype=config.floatX),
+                np.eye(2).astype(config.floatX) * 1e-6,
+            ),
+            (),
+        ),
+        # 25
+        (
+            # Multivariate distribution: indexing dips into core dimension
+            (rand_bool_mask((2, 2)),),
             False,
             multivariate_normal,
             (
@@ -579,8 +751,9 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
             (),
         ),
         (
-            (np.array([0, 2]),),
-            True,
+            # Multivariate distribution: advanced integer indexing
+            (np.array([0, 0]),),
+            False,  # Could have duplicates (it has in this case)!
             multivariate_normal,
             (
                 np.array(
@@ -592,6 +765,7 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
             (),
         ),
         (
+            # Multivariate distribution: dummy slice "dips" into core dimension
             (np.array([True, False, True]), slice(None)),
             True,
             multivariate_normal,
@@ -602,6 +776,17 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
                 * 1e-6,
             ),
             (3,),
+        ),
+        (
+            # Multivariate distribution
+            (0, slice(1, None), rand_bool_mask((4, 3))),
+            True,
+            multivariate_normal,
+            (
+                np.arange(4 * 3 * 2).reshape(4, 3, 2).astype(dtype=config.floatX),
+                np.eye(2) * 1e-6,
+            ),
+            (5, 3, 4, 3),
         ),
     ],
 )
@@ -650,7 +835,7 @@ def test_Subtensor_lift(indices, lifted, dist_op, dist_params, size):
     res_base = f_base(*arg_values)
     res_rewritten = f_rewritten(*arg_values)
 
-    np.testing.assert_allclose(res_base, res_rewritten, rtol=1e-3)
+    np.testing.assert_allclose(res_base, res_rewritten, rtol=1e-3, atol=1e-2)
 
 
 def test_Subtensor_lift_restrictions():
@@ -664,7 +849,7 @@ def test_Subtensor_lift_restrictions():
     # the lift
     z = x - y
 
-    fg = FunctionGraph([rng], [z], clone=False)
+    fg = FunctionGraph([rng], [z], clone=False, features=[ShapeFeature()])
     _ = EquilibriumGraphRewriter([local_subtensor_rv_lift], max_use_ratio=100).apply(fg)
 
     subtensor_node = fg.outputs[0].owner.inputs[1].owner.inputs[0].owner
@@ -676,7 +861,7 @@ def test_Subtensor_lift_restrictions():
 
     # We add `x` as an output to make sure that `is_rv_used_in_graph` handles
     # `"output"` "nodes" correctly.
-    fg = FunctionGraph([rng], [z, x], clone=False)
+    fg = FunctionGraph([rng], [z, x], clone=False, features=[ShapeFeature()])
     EquilibriumGraphRewriter([local_subtensor_rv_lift], max_use_ratio=100).apply(fg)
 
     assert fg.outputs[0] == z
@@ -684,7 +869,7 @@ def test_Subtensor_lift_restrictions():
 
     # The non-`Subtensor` client doesn't depend on the RNG state, so we can
     # perform the lift
-    fg = FunctionGraph([rng], [z], clone=False)
+    fg = FunctionGraph([rng], [z], clone=False, features=[ShapeFeature()])
     EquilibriumGraphRewriter([local_subtensor_rv_lift], max_use_ratio=100).apply(fg)
 
     rv_node = fg.outputs[0].owner.inputs[1].owner.inputs[0].owner
