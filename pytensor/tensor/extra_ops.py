@@ -21,14 +21,18 @@ from pytensor.misc.safe_asarray import _asarray
 from pytensor.raise_op import Assert
 from pytensor.scalar import int32 as int_t
 from pytensor.scalar import upcast
+from pytensor.tensor import as_tensor_variable
 from pytensor.tensor import basic as at
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.exceptions import NotScalarConstantError
-from pytensor.tensor.math import abs as at_abs
+from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import eq as pt_eq
-from pytensor.tensor.math import ge, lt, maximum, minimum, prod
+from pytensor.tensor.math import ge, lt
+from pytensor.tensor.math import max as pt_max
+from pytensor.tensor.math import maximum, minimum, prod
 from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import switch
 from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
 from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes, vector
 from pytensor.tensor.var import TensorVariable
@@ -1063,7 +1067,7 @@ class FillDiagonalOffset(Op):
         # only valid for matrices
         wr_a = fill_diagonal_offset(grad, 0, offset)
 
-        offset_abs = at_abs(offset)
+        offset_abs = pt_abs(offset)
         pos_offset_flag = ge(offset, 0)
         neg_offset_flag = lt(offset, 0)
         min_wh = minimum(width, height)
@@ -1442,6 +1446,7 @@ _broadcast_assert = Assert(
     "axes that have a statically known length 1. Use `specify_broadcastable` to "
     "inform PyTensor of a known shape."
 )
+_runtime_broadcast_assert = Assert("Could not broadcast dimensions.")
 
 
 def broadcast_shape(*arrays, **kwargs) -> Tuple[aes.ScalarVariable, ...]:
@@ -1465,6 +1470,7 @@ def broadcast_shape(*arrays, **kwargs) -> Tuple[aes.ScalarVariable, ...]:
 def broadcast_shape_iter(
     arrays: Iterable[Union[TensorVariable, Tuple[TensorVariable, ...]]],
     arrays_are_shapes: bool = False,
+    allow_runtime_broadcast: bool = False,
 ) -> Tuple[aes.ScalarVariable, ...]:
     r"""Compute the shape resulting from broadcasting arrays.
 
@@ -1480,22 +1486,24 @@ def broadcast_shape_iter(
     arrays
         An iterable of tensors, or a tuple of shapes (as tuples),
         for which the broadcast shape is computed.
-    arrays_are_shapes
+    arrays_are_shapes: bool, default False
         Indicates whether or not the `arrays` contains shape tuples.
         If you use this approach, make sure that the broadcastable dimensions
         are (scalar) constants with the value ``1``--or simply the integer
-        ``1``.
+        ``1``. This is not revelant if `allow_runtime_broadcast` is True.
+    allow_runtime_broadcast: bool, default False
+        Whether to allow non-statically known broadcast on the shape computation.
 
     """
-    one_at = pytensor.scalar.ScalarConstant(pytensor.scalar.int64, 1)
+    one = pytensor.scalar.ScalarConstant(pytensor.scalar.int64, 1)
 
     if arrays_are_shapes:
         max_dims = max(len(a) for a in arrays)
 
         array_shapes = [
-            (one_at,) * (max_dims - len(a))
+            (one,) * (max_dims - len(a))
             + tuple(
-                one_at
+                one
                 if sh == 1 or isinstance(sh, Constant) and sh.value == 1
                 else (aes.as_scalar(sh) if not isinstance(sh, Variable) else sh)
                 for sh in a
@@ -1508,10 +1516,8 @@ def broadcast_shape_iter(
         _arrays = tuple(at.as_tensor_variable(a) for a in arrays)
 
         array_shapes = [
-            (one_at,) * (max_dims - a.ndim)
-            + tuple(
-                one_at if t_sh == 1 else sh for sh, t_sh in zip(a.shape, a.type.shape)
-            )
+            (one,) * (max_dims - a.ndim)
+            + tuple(one if t_sh == 1 else sh for sh, t_sh in zip(a.shape, a.type.shape))
             for a in _arrays
         ]
 
@@ -1520,11 +1526,11 @@ def broadcast_shape_iter(
     for dim_shapes in zip(*array_shapes):
         # Get the shapes in this dimension that are not broadcastable
         # (i.e. not symbolically known to be broadcastable)
-        non_bcast_shapes = [shape for shape in dim_shapes if shape != one_at]
+        non_bcast_shapes = [shape for shape in dim_shapes if shape != one]
 
         if len(non_bcast_shapes) == 0:
             # Every shape was broadcastable in this dimension
-            result_dims.append(one_at)
+            result_dims.append(one)
         elif len(non_bcast_shapes) == 1:
             # Only one shape might not be broadcastable in this dimension
             result_dims.extend(non_bcast_shapes)
@@ -1554,9 +1560,26 @@ def broadcast_shape_iter(
                 result_dims.append(first_length)
                 continue
 
-            # Add assert that all remaining shapes are equal
-            condition = pt_all([pt_eq(first_length, other) for other in other_lengths])
-            result_dims.append(_broadcast_assert(first_length, condition))
+            if not allow_runtime_broadcast:
+                # Add assert that all remaining shapes are equal
+                condition = pt_all(
+                    [pt_eq(first_length, other) for other in other_lengths]
+                )
+                result_dims.append(_broadcast_assert(first_length, condition))
+            else:
+                lengths = as_tensor_variable((first_length, *other_lengths))
+                runtime_broadcastable = pt_eq(lengths, one)
+                result_dim = pt_abs(
+                    pt_max(switch(runtime_broadcastable, -one, lengths))
+                )
+                condition = pt_all(
+                    switch(
+                        ~runtime_broadcastable,
+                        pt_eq(lengths, result_dim),
+                        np.array(True),
+                    )
+                )
+                result_dims.append(_runtime_broadcast_assert(result_dim, condition))
 
     return tuple(result_dims)
 

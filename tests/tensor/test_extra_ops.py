@@ -1087,9 +1087,17 @@ def test_broadcast_shape_basic():
     assert any(
         isinstance(node.op, Assert) for node in applys_between([x_at, y_at], b_at)
     )
-    # This should fail because it would need dynamic broadcasting
     with pytest.raises(AssertionError):
         assert np.array_equal([z.eval() for z in b_at], b.shape)
+    # But fine if we allow_runtime_broadcast
+    b_at = broadcast_shape(
+        shape_tuple(x_at, use_bcast=False),
+        shape_tuple(y_at, use_bcast=False),
+        arrays_are_shapes=True,
+        allow_runtime_broadcast=True,
+    )
+    assert np.array_equal([z.eval() for z in b_at], b.shape)
+    # Or if static bcast is known
     b_at = broadcast_shape(shape_tuple(x_at), shape_tuple(y_at), arrays_are_shapes=True)
     assert np.array_equal([z.eval() for z in b_at], b.shape)
 
