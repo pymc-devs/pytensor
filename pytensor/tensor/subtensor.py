@@ -20,15 +20,11 @@ from pytensor.misc.safe_asarray import _asarray
 from pytensor.printing import Printer, pprint, set_precedence
 from pytensor.scalar.basic import ScalarConstant
 from pytensor.tensor import _get_vector_length, as_tensor_variable, get_vector_length
-from pytensor.tensor.basic import alloc, get_underlying_scalar_constant_value
+from pytensor.tensor.basic import alloc, get_underlying_scalar_constant_value, nonzero
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.exceptions import (
-    AdvancedIndexingError,
-    NotScalarConstantError,
-    ShapeError,
-)
+from pytensor.tensor.exceptions import AdvancedIndexingError, NotScalarConstantError
 from pytensor.tensor.math import clip
-from pytensor.tensor.shape import Reshape, specify_broadcastable
+from pytensor.tensor.shape import Reshape, shape_i, specify_broadcastable
 from pytensor.tensor.type import (
     TensorType,
     bscalar,
@@ -510,7 +506,11 @@ def indexed_result_shape(array_shape, indices, indices_are_shapes=False):
             from pytensor.tensor.extra_ops import broadcast_shape
 
             res_shape += broadcast_shape(
-                *grp_indices, arrays_are_shapes=indices_are_shapes
+                *grp_indices,
+                arrays_are_shapes=indices_are_shapes,
+                # The AdvancedIndexing Op relies on the Numpy implementation which allows runtime broadcasting.
+                # As long as that is true, the shape inference has to respect that this is not an error.
+                allow_runtime_broadcast=True,
             )
 
     res_shape += tuple(array_shape[dim] for dim in remaining_dims)
@@ -2584,26 +2584,47 @@ class AdvancedSubtensor(Op):
         return self.make_node(eval_points[0], *inputs[1:]).outputs
 
     def infer_shape(self, fgraph, node, ishapes):
-        indices = node.inputs[1:]
-        index_shapes = list(ishapes[1:])
-        for i, idx in enumerate(indices):
-            if (
+        def is_bool_index(idx):
+            return (
                 isinstance(idx, (np.bool_, bool))
                 or getattr(idx, "dtype", None) == "bool"
-            ):
-                raise ShapeError(
-                    "Shape inference for boolean indices is not implemented"
+            )
+
+        indices = node.inputs[1:]
+        index_shapes = []
+        for idx, ishape in zip(indices, ishapes[1:]):
+            # Mixed bool indexes are converted to nonzero entries
+            if is_bool_index(idx):
+                index_shapes.extend(
+                    (shape_i(nz_dim, 0, fgraph=fgraph),) for nz_dim in nonzero(idx)
                 )
             # The `ishapes` entries for `SliceType`s will be None, and
             # we need to give `indexed_result_shape` the actual slices.
-            if isinstance(getattr(idx, "type", None), SliceType):
-                index_shapes[i] = idx
+            elif isinstance(getattr(idx, "type", None), SliceType):
+                index_shapes.append(idx)
+            else:
+                index_shapes.append(ishape)
 
-        res_shape = indexed_result_shape(
-            ishapes[0], index_shapes, indices_are_shapes=True
+        res_shape = list(
+            indexed_result_shape(ishapes[0], index_shapes, indices_are_shapes=True)
         )
+
+        adv_indices = [idx for idx in indices if not is_basic_idx(idx)]
+        bool_indices = [idx for idx in adv_indices if is_bool_index(idx)]
+
+        # Special logic when the only advanced index group is of bool type.
+        # We can replace the nonzeros by a sum of the whole bool variable.
+        if len(bool_indices) == 1 and len(adv_indices) == 1:
+            [bool_index] = bool_indices
+            # Find the output dim associated with the bool index group
+            # Because there are no more advanced index groups, there is exactly
+            # one output dim per index variable up to the bool group.
+            # Note: Scalar integer indexing counts as advanced indexing.
+            start_dim = indices.index(bool_index)
+            res_shape[start_dim] = bool_index.sum()
+
         assert node.outputs[0].ndim == len(res_shape)
-        return [list(res_shape)]
+        return [res_shape]
 
     def perform(self, node, inputs, out_):
         (out,) = out_

@@ -63,6 +63,7 @@ from pytensor.tensor.type import (
     tensor,
     tensor3,
     tensor4,
+    tensor5,
     vector,
 )
 from pytensor.tensor.type_other import NoneConst, SliceConstant, make_slice, slicetype
@@ -2150,6 +2151,12 @@ class TestAdvancedSubtensor:
 
 
 class TestInferShape(utt.InferShapeTester):
+    @staticmethod
+    def random_bool_mask(shape, rng=None):
+        if rng is None:
+            rng = np.random.default_rng()
+        return rng.binomial(n=1, p=0.5, size=shape).astype(bool)
+
     def test_IncSubtensor(self):
         admat = dmatrix()
         bdmat = dmatrix()
@@ -2439,24 +2446,84 @@ class TestInferShape(utt.InferShapeTester):
         n = dmatrix()
         n_val = np.arange(6).reshape((2, 3))
 
-        # infer_shape is not implemented, but it should not crash
+        # Shape inference requires runtime broadcasting between the nonzero() shapes
         self._compile_and_check(
             [n],
             [n[n[:, 0] > 2, n[0, :] > 2]],
             [n_val],
             AdvancedSubtensor,
-            check_topo=False,
         )
         self._compile_and_check(
             [n],
             [n[n[:, 0] > 2]],
             [n_val],
             AdvancedSubtensor,
-            check_topo=False,
+        )
+        self._compile_and_check(
+            [n],
+            [n[:, np.array([True, False, True])]],
+            [n_val],
+            AdvancedSubtensor,
+        )
+        self._compile_and_check(
+            [n],
+            [n[np.array([False, False]), 1:]],
+            [n_val],
+            AdvancedSubtensor,
+        )
+        self._compile_and_check(
+            [n],
+            [n[np.array([True, True]), 0]],
+            [n_val],
+            AdvancedSubtensor,
+        )
+        self._compile_and_check(
+            [n],
+            [n[self.random_bool_mask(n_val.shape)]],
+            [n_val],
+            AdvancedSubtensor,
+        )
+        self._compile_and_check(
+            [n],
+            [n[None, self.random_bool_mask(n_val.shape), None]],
+            [n_val],
+            AdvancedSubtensor,
+        )
+        self._compile_and_check(
+            [n],
+            [n[slice(5, None), self.random_bool_mask(n_val.shape[1])]],
+            [n_val],
+            AdvancedSubtensor,
         )
 
         abs_res = n[~isinf(n)]
         assert abs_res.type.shape == (None,)
+
+    def test_AdvancedSubtensor_bool_mixed(self):
+        n = tensor5("x", dtype="float64")
+        shape = (18, 3, 4, 5, 6)
+        n_val = np.arange(np.prod(shape)).reshape(shape)
+        self._compile_and_check(
+            [n],
+            # Consecutive advanced index
+            [n[1:, self.random_bool_mask((3, 4)), 0, 1:]],
+            [n_val],
+            AdvancedSubtensor,
+        )
+        self._compile_and_check(
+            [n],
+            # Non-consecutive advanced index
+            [n[1:, self.random_bool_mask((3, 4)), 1:, 0]],
+            [n_val],
+            AdvancedSubtensor,
+        )
+        self._compile_and_check(
+            [n],
+            # Non-consecutive advanced index
+            [n[1:, self.random_bool_mask((3,)), 1:, None, np.zeros((6, 1), dtype=int)]],
+            [n_val],
+            AdvancedSubtensor,
+        )
 
 
 @config.change_flags(compute_test_value="raise")
