@@ -20,9 +20,11 @@ def boolean_indexing_set_or_inc(fgraph, node):
     """
 
     op = node.op
-    x = node.inputs[0]
-    y = node.inputs[1]
-    cond = node.inputs[2]
+    [x, y, cond] = node.inputs
+
+    # This rewrite only works when `y` is a scalar, so it can broadcast to the shape of x[cond]
+    if y.type.ndim > 0:
+        return
 
     if not isinstance(cond, TensorVariable):
         return
