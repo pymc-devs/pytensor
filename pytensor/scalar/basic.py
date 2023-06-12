@@ -1598,8 +1598,8 @@ class Switch(ScalarOp):
         second_part = switch(cond, 0.0, gz)
 
         if outputs[0].type in discrete_types:
-            first_part = 0.0
-            second_part = 0.0
+            first_part = ift.zeros_like(config.floatX)
+            second_part = iff.zeros_like(config.floatX)
 
         # cond does affect the elements of the output so it is connected.
         # For the sake of making the gradient convenient we assume that
