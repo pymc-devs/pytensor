@@ -48,7 +48,7 @@ optdb.register(
 
 @node_rewriter([Sum])
 def boolean_indexing_sum(fgraph, node):
-    """Replace the sum of `AdvancedSubtensor` with boolean indexing.
+    """Replace the sum of `AdvancedSubtensor` with exclusively boolean indexing.
 
     JAX cannot JIT-compile functions that use boolean indexing, but can compile
     those expressions that can be re-expressed using `jax.numpy.where`. This
@@ -61,14 +61,21 @@ def boolean_indexing_sum(fgraph, node):
     if not isinstance(operand, TensorVariable):
         return
 
+    # If it's not a scalar reduction, it couldn't have been a pure boolean mask
+    if node.outputs[0].ndim != 0:
+        return
+
     if operand.owner is None:
         return
 
     if not isinstance(operand.owner.op, AdvancedSubtensor):
         return
 
-    x = operand.owner.inputs[0]
-    cond = operand.owner.inputs[1]
+    # Get out if AdvancedSubtensor has more than a single indexing operation
+    if len(operand.owner.inputs) > 2:
+        return
+
+    [x, cond] = operand.owner.inputs
 
     if not isinstance(cond, TensorVariable):
         return
@@ -76,6 +83,8 @@ def boolean_indexing_sum(fgraph, node):
     if not cond.type.dtype == "bool":
         return
 
+    # Output must be a scalar, since pure boolean indexing returns a vector
+    # No need to worry about axis
     out = at.sum(at.where(cond, x, 0))
     return out.owner.outputs
 

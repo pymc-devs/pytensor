@@ -5,6 +5,7 @@ import pytensor.tensor as at
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor import subtensor as at_subtensor
+from pytensor.tensor.rewriting.jax import boolean_indexing_sum
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
@@ -93,10 +94,22 @@ def test_jax_Subtensor_boolean_mask_reexpressible():
     improvement over its user interface.
 
     """
-    x_at = at.vector("x")
+    x_at = at.matrix("x")
     out_at = x_at[x_at < 0].sum()
     out_fg = FunctionGraph([x_at], [out_at])
-    compare_jax_and_py(out_fg, [np.arange(-5, 5).astype(config.floatX)])
+    compare_jax_and_py(out_fg, [np.arange(25).reshape(5, 5).astype(config.floatX)])
+
+
+def test_boolean_indexing_sum_not_applicable():
+    """Test that boolean_indexing_sum does not return an invalid replacement in cases where it doesn't apply."""
+    x = at.matrix("x")
+    out = x[x[:, 0] < 0, :].sum(axis=-1)
+    fg = FunctionGraph([x], [out])
+    assert boolean_indexing_sum.transform(fg, fg.outputs[0].owner) is None
+
+    out = x[x[:, 0] < 0, 0].sum()
+    fg = FunctionGraph([x], [out])
+    assert boolean_indexing_sum.transform(fg, fg.outputs[0].owner) is None
 
 
 def test_jax_IncSubtensor():
