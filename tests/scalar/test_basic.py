@@ -428,6 +428,13 @@ def test_grad_switch():
 
     pytensor.gradient.grad(l, x)
 
+    # Bug reported in https://github.com/pymc-devs/pytensor/issues/331
+    x = matrix(dtype=int)
+    s = pytensor.tensor.switch(0, x, -x)
+    l = s.sum()
+
+    pytensor.gradient.grad(l, x)
+
 
 def test_grad_identity():
     # Check that the grad method of Identity correctly handles int dytpes
