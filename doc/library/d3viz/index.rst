@@ -17,10 +17,9 @@ Requirements
 ------------
 
 ``d3viz`` requires the `pydot <https://pypi.python.org/pypi/pydot>`__
-package. `pydot-ng <https://github.com/pydot/pydot-ng>`__ fork is better
-maintained, and it works both in Python 2.x and 3.x. Install it with pip::
+package. Install it with pip::
 
-    pip install pydot-ng
+    pip install pydot
 
 Like PyTensor’s printing module, ``d3viz``
 requires `graphviz <http://www.graphviz.org/>`__ binary to be available.
