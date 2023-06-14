@@ -4013,10 +4013,10 @@ def expand_dims(
     out_ndim = len(axis) + a.ndim
     axis = np.core.numeric.normalize_axis_tuple(axis, out_ndim)
 
-    shape_it = iter(a.shape)
-    shape = [1 if ax in axis else next(shape_it) for ax in range(out_ndim)]
+    dim_it = iter(range(a.ndim))
+    pattern = ["x" if ax in axis else next(dim_it) for ax in range(out_ndim)]
 
-    return a.reshape(shape)
+    return a.dimshuffle(pattern)
 
 
 def _make_along_axis_idx(arr_shape, indices, axis):
