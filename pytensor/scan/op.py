@@ -1191,7 +1191,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         ):
             outer_nonseq = copy_var_format(_outer_nonseq, as_var=inner_nonseq)
             new_inputs.append(outer_nonseq)
-            if not outer_nonseq.type.in_same_class(inner_nonseq.type):
+            if not inner_nonseq.type.is_super(outer_nonseq.type):
                 raise ValueError(
                     f"Argument {outer_nonseq} given to the scan node is not"
                     f" compatible with its corresponding loop function variable {inner_nonseq}"
