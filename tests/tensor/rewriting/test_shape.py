@@ -302,6 +302,20 @@ class TestLocalUselessReshape:
         topo = f2.maker.fgraph.toposort()
         assert not any(isinstance(n.op, Reshape) for n in topo)
 
+    def test_only_1_dim_missing(self):
+        x = matrix("x")
+
+        x_vec = x[0]
+        r = x_vec.reshape([5])
+        assert local_useless_reshape.transform(None, r.owner) == [x_vec]
+
+        r = x.reshape([5, x.shape[1]])
+        assert local_useless_reshape.transform(None, r.owner) == [x]
+
+        i = scalar("i", dtype=int)
+        r = x.reshape([5, i])
+        assert not local_useless_reshape.transform(None, r.owner)
+
     def test_m1(self):
         x = matrix("x")
         r = x.reshape((x.shape[0], -1))
@@ -549,3 +563,94 @@ def test_Shape_i_canonicalize():
     assert isinstance(y_rewritten.owner.op, Shape_i)
     assert y_rewritten.owner.op.i == 0
     assert y_rewritten.owner.inputs[0] == x
+
+
+def test_useless_reshaped_expand_dims():
+    x = matrix("x")
+    y = x.dimshuffle(1, 0, "x", "x").reshape((5, 3))
+
+    y_fg = FunctionGraph(outputs=[y], copy_inputs=False)
+    import pytensor
+
+    print("")
+    pytensor.dprint(y_fg)
+    new_y_fg = rewrite_graph(
+        y_fg,
+        clone=False,
+        include=["canonicalize"],
+    )
+    import pytensor
+
+    print("")
+    pytensor.dprint(y_fg)
+    new_y = new_y_fg.outputs[0]
+
+    assert isinstance(new_y.owner.op, Reshape)
+    assert tuple(new_y.owner.inputs[1].eval()) == (5, 3)
+    assert isinstance(new_y.owner.inputs[0].owner.op, DimShuffle)
+    assert new_y.owner.inputs[0].owner.op.new_order == (1, 0)
+
+
+def test_useless_specify_shape_of_expand_dims():
+    x = matrix("x")
+    y = SpecifyShape()(x.dimshuffle(1, 0, "x"), None, None, 1)
+    assert isinstance(y.owner.op, SpecifyShape)
+
+    y_fg = FunctionGraph(outputs=[y], copy_inputs=False)
+    new_y_fg = rewrite_graph(
+        y_fg,
+        clone=False,
+        include=["canonicalize"],
+    )
+    new_y = new_y_fg.outputs[0]
+
+    assert isinstance(new_y.owner.op, DimShuffle)
+    assert new_y.owner.op.new_order == (1, 0, "x")
+
+    # Case where it doesn't apply
+    y = SpecifyShape()(x.dimshuffle(1, 0, "x"), None, 5, 1)
+    assert isinstance(y.owner.op, SpecifyShape)
+
+    y_fg = FunctionGraph(outputs=[y], copy_inputs=False)
+    new_y_fg = rewrite_graph(
+        y_fg,
+        clone=False,
+        include=["canonicalize"],
+    )
+    new_y = new_y_fg.outputs[0]
+
+    assert equal_computations([new_y], [y])
+
+
+def test_lift_dimshuffle_through_specify_shape():
+    x = matrix("x")
+    y = SpecifyShape()(x, 5, 3).dimshuffle("x", 1, "x", 0, "x")
+    assert isinstance(y.owner.op, DimShuffle)
+
+    y_fg = FunctionGraph(outputs=[y], copy_inputs=False)
+    new_y_fg = rewrite_graph(
+        y_fg,
+        clone=False,
+        include=["canonicalize"],
+    )
+    new_y = new_y_fg.outputs[0]
+
+    assert isinstance(new_y.owner.op, SpecifyShape)
+    assert [dim.data for dim in new_y.owner.inputs[1:]] == [None, 3, None, 5, None]
+    assert isinstance(new_y.owner.inputs[0].owner.op, DimShuffle)
+    assert new_y.owner.inputs[0].owner.op.new_order == ("x", 1, "x", 0, "x")
+
+    # Case where it doesn't apply (specify_shape is needed to drop dim)
+    x = matrix("x")
+    y = SpecifyShape()(x, 5, 1).dimshuffle("x", 0, "x")
+    assert isinstance(y.owner.op, DimShuffle)
+
+    y_fg = FunctionGraph(outputs=[y], copy_inputs=False)
+    new_y_fg = rewrite_graph(
+        y_fg,
+        clone=False,
+        include=["canonicalize"],
+    )
+    new_y = new_y_fg.outputs[0]
+
+    assert equal_computations([new_y], [y])

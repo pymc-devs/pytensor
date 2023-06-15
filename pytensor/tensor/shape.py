@@ -569,7 +569,9 @@ def specify_shape(
     # This ignores PyTensor constants in shape
     x = at.as_tensor_variable(x)
     new_shape_info = any(
-        s != xts for (s, xts) in zip(shape, x.type.shape) if s is not None
+        s != xts
+        for (s, xts) in zip(shape, x.type.shape)
+        if not (s is None or NoneConst.equals(s))
     )
     # If shape does not match x.ndim, we rely on the `Op` to raise a ValueError
     if not new_shape_info and len(shape) == x.type.ndim:

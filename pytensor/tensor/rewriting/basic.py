@@ -30,6 +30,7 @@ from pytensor.tensor.basic import (
     alloc,
     as_tensor_variable,
     cast,
+    expand_dims,
     extract_constant,
     fill,
     get_underlying_scalar_constant_value,
@@ -973,6 +974,17 @@ def local_join_make_vector(fgraph, node):
         # by an error in the old join op.
         copy_stack_trace(node.outputs, ret)
         return [ret]
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([MakeVector])
+def local_make_vector_to_expand_dims(fgraph, node):
+    """stack([x]) -> expand_dims(x)."""
+    if len(node.inputs) == 1:
+        new_out = [expand_dims(node.inputs[0], axis=0)]
+        copy_stack_trace(node.outputs, new_out)
+        return new_out
 
 
 @register_useless("local_remove_switch_const_cond")

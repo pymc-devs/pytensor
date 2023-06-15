@@ -802,7 +802,9 @@ def local_useless_reshape(fgraph, node):
 
     - Remove `Reshape` when both the input and output have a single dimension.
     - Remove `Reshape` when reshaping to the shape of the input.
+    - Remove `Reshape` when reshaped and input shapes were found to be equivalent via shape inference.
 
+    Note: This could hide errors if the user provides inconsistent shapes.
     """
     inp = node.inputs[0]
     output = node.outputs[0]
@@ -812,17 +814,7 @@ def local_useless_reshape(fgraph, node):
         return False
 
     # Simple case: both input and output have a single dimension.
-    # TODO FIXME XXX: This could hide errors if the user provides inconsistent
-    # shapes.
-    if (
-        inp.type.ndim == 1
-        and output.type.ndim == 1
-        and all(
-            s1 == s2
-            for s1, s2 in zip(inp.type.shape, output.type.shape)
-            if s1 == 1 or s2 == 1
-        )
-    ):
+    if inp.type.ndim == 1 and inp.type.broadcastable == output.type.broadcastable:
         return [inp]
 
     # Second case: all the shapes match the input shape
@@ -834,8 +826,15 @@ def local_useless_reshape(fgraph, node):
 
     # Match Reshape(x, [x.shape[0], ..., x.shape[-1]]), accounting for
     # broadcastable and constant dimensions
-    if output_shape.owner and isinstance(output_shape.owner.op, MakeVector):
-        output_shape_is = output_shape.owner.inputs
+    if isinstance(output_shape, Constant) or (
+        output_shape.owner and isinstance(output_shape.owner.op, MakeVector)
+    ):
+        if output_shape.owner is None:
+            output_shape_is = tuple(
+                constant(ndim, ndim=0) for ndim in output_shape.data
+            )
+        else:
+            output_shape_is = output_shape.owner.inputs
 
         shape_feature = getattr(fgraph, "shape_feature", None)
 
@@ -889,11 +888,18 @@ def local_useless_reshape(fgraph, node):
                     shape_match[dim] = True
                     continue
 
-        if all(shape_match) and nb_m1 <= 1:
-            return [inp]
+        # This is actually invalid, we don't rewrite to not hide the error
+        if nb_m1 > 1:
+            return False
+        # In this case all dimensions must match
+        elif nb_m1 == 1:
+            if all(shape_match):
+                return [inp]
+        # nb_m1 == 0; In this case is enough if all but one dimensions match
+        else:
+            if sum(shape_match) >= (output.type.ndim - 1):
+                return [inp]
 
-        # TODO later: if all the shapes except one match, we may want to
-        # consider it useless as well, like we do in the 1-dim case.
         return False
 
 
@@ -1122,6 +1128,70 @@ def local_useless_dimshuffle_in_reshape(fgraph, node):
 
 @register_useless
 @register_canonicalize
+@node_rewriter([Reshape])
+def local_useless_reshaped_expand_dims(fgraph, node):
+    """reshape(expand_dims(matrix, axis=-1), [shape0, shape1]) -> reshape(matrix, [shape0, shape1]).
+
+    Note: expand_dims is not a real Op, it's implemented by Dimshuffle
+    """
+    [out] = node.outputs
+    [inp, shape] = node.inputs
+
+    dropped_dims = inp.type.ndim - out.type.ndim
+    if dropped_dims <= 0:
+        return
+
+    # TODO: Is it a problem if new dims are added before the transposition?
+    if (
+        inp.owner
+        and isinstance(inp.owner.op, DimShuffle)
+        and all(o == "x" for o in inp.owner.op.new_order[out.type.ndim :])
+    ):
+        x = inp.owner.inputs[0]
+        return [x.dimshuffle(inp.owner.op.new_order[: out.type.ndim]).reshape(shape)]
+
+
+@register_useless
+@register_canonicalize
+@node_rewriter([SpecifyShape])
+def local_useless_specify_shape_of_expand_dims(fgraph, node):
+    """specify_shape(expand_dims(matrix, axis=-1), [None, None, 1]) -> expand_dims(matrix, axis=-1).
+
+    Note: expand_dims is not a real Op, it's implemented by Dimshuffle
+    """
+    inp, *shape = node.inputs
+    if not (inp.owner and isinstance(inp.owner.op, DimShuffle)):
+        return
+
+    augment = set(inp.owner.op.augment)
+    if not augment:
+        return
+
+    useless = True
+    for i, dim in enumerate(shape):
+        if i in augment:
+            try:
+                x = get_underlying_scalar_constant_value(
+                    dim, only_process_constants=True
+                )
+            except NotScalarConstantError:
+                useless = False
+                break
+            # Invalid graph, we don't rewrite to not hide the error
+            if x != 1:
+                useless = False
+                break
+        else:
+            if not NoneConst.equals(dim):
+                useless = False
+                break
+
+    if useless:
+        return [inp]
+
+
+@register_useless
+@register_canonicalize
 @register_specialize
 @node_rewriter([Unbroadcast])
 def local_useless_unbroadcast(fgraph, node):
@@ -1196,3 +1266,33 @@ def local_unbroadcast_lift(fgraph, node):
         # the new graph could have been caused by either of the two Unbroadcast ops.
         copy_stack_trace(node.outputs + node.inputs, rval)
         return rval
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([DimShuffle])
+def local_lift_dimshuffle_through_specify_shape(fgraph, node):
+    """Lift a dimshuffle through a specify_shape."""
+    [ss] = node.inputs
+    if not (ss.owner and isinstance(ss.owner.op, SpecifyShape)):
+        return
+
+    x, *shape = ss.owner.inputs
+
+    # specify_shape is functionally necessary when Dimshuffle is dropping dimensions
+    if any(x.type.shape[dim] != 1 for dim in node.op.drop):
+        return
+
+    # We don't worry about dropped dims, because either the specify shape was correct
+    # and those dims were of length 1, or the dimshuffle will fail
+    new_shape = []
+    for o in node.op.new_order:
+        if o == "x":
+            # We specify with None instead of 1 to make the specify_shape as useless as possible
+            new_shape.append(None)
+        else:
+            new_shape.append(shape[o])
+
+    new_out = [specify_shape(x.dimshuffle(node.op.new_order), new_shape)]
+    copy_stack_trace(node.outputs + [ss], new_out)
+    return new_out
