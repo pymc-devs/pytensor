@@ -1903,6 +1903,7 @@ class Split(COp):
     b == [3, 4]
     c == [5]
 
+    TODO: Don't make a copy in C impl
     """
 
     len_splits = None
@@ -1913,6 +1914,7 @@ class Split(COp):
 
     def __init__(self, len_splits):
         self.len_splits = int(len_splits)
+        self.view_map = {i: [0] for i in range(self.len_splits)}
 
     def __str__(self):
         return f"{self.__class__.__name__ }{{{self.len_splits}}}"
@@ -1949,7 +1951,7 @@ class Split(COp):
 
         split_outs = np.split(x, np.cumsum(splits[:-1]), axis=axis)
         for i, out in enumerate(split_outs):
-            outputs[i][0] = out.copy()
+            outputs[i][0] = out
 
     def infer_shape(self, fgraph, node, in_shapes):
         axis = node.inputs[1]

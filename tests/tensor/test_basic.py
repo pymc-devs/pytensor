@@ -11,7 +11,7 @@ import pytensor.tensor.basic as at
 import pytensor.tensor.math as tm
 from pytensor import compile, config, function, shared
 from pytensor.compile.io import In, Out
-from pytensor.compile.mode import get_default_mode
+from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.gradient import grad, hessian
 from pytensor.graph.basic import Apply
@@ -2002,45 +2002,65 @@ class TestJoinAndSplit:
         y = Split(2)(x, 0, [s, 5 - s])[0]
         assert y.type.shape == (None,)
 
+    def test_join_inplace(self):
+        # Test join to work inplace.
+        #
+        # This function tests the case when several elements are passed to the
+        # join function but all except one of them are empty. In this case join
+        # should work inplace and the output should be the view of the non-empty
+        # element.
+        s = lscalar()
+        x = vector("x")
+        z = at.zeros((s,))
 
-def test_join_inplace():
-    # Test join to work inplace.
-    #
-    # This function tests the case when several elements are passed to the
-    # join function but all except one of them are empty. In this case join
-    # should work inplace and the output should be the view of the non-empty
-    # element.
-    s = lscalar()
-    x = vector("x")
-    z = at.zeros((s,))
+        join = Join(view=0)
+        c = join(0, x, z, z)
 
-    join = Join(view=0)
-    c = join(0, x, z, z)
+        f = pytensor.function([In(x, borrow=True), s], Out(c, borrow=True))
 
-    f = pytensor.function([In(x, borrow=True), s], Out(c, borrow=True))
+        data = np.array([3, 4, 5], dtype=config.floatX)
 
-    data = np.array([3, 4, 5], dtype=config.floatX)
+        if config.mode not in ["DebugMode", "DEBUG_MODE"]:
+            assert f(data, 0) is data
+        assert np.allclose(f(data, 0), [3, 4, 5])
 
-    if config.mode not in ["DebugMode", "DEBUG_MODE"]:
-        assert f(data, 0) is data
-    assert np.allclose(f(data, 0), [3, 4, 5])
+    def test_join_oneInput(self):
+        # Test join when only 1 input is given.
+        #
+        # This functions tests the case when concatenate is called
+        # on an array of tensors but the array has only one element.
+        # In this case, we would like to avoid the computational
+        # overhead of concatenation of one element.
+        x_0 = fmatrix()
+        x_1 = fmatrix()
+        x_2 = fvector()
+        join_0 = at.concatenate([x_0], axis=1)
+        join_1 = at.concatenate([x_0, x_1, shape_padright(x_2)], axis=1)
 
+        assert join_0 is x_0
+        assert join_1 is not x_0
 
-def test_join_oneInput():
-    # Test join when only 1 input is given.
-    #
-    # This functions tests the case when concatenate is called
-    # on an array of tensors but the array has only one element.
-    # In this case, we would like to avoid the computational
-    # overhead of concatenation of one element.
-    x_0 = fmatrix()
-    x_1 = fmatrix()
-    x_2 = fvector()
-    join_0 = at.concatenate([x_0], axis=1)
-    join_1 = at.concatenate([x_0, x_1, shape_padright(x_2)], axis=1)
+    @pytest.mark.parametrize("linker", ("py", "c"))
+    def test_split_view(self, linker):
+        x = vector("x")
+        axis = 0
+        op = Split(len_splits=3)
+        assert op.view_map == {0: [0], 1: [0], 2: [0]}
+        splits = op(x, axis, [0, 3, 2])
 
-    assert join_0 is x_0
-    assert join_1 is not x_0
+        mode = Mode(linker)
+        f = pytensor.function(
+            [In(x, borrow=True)], [Out(s, borrow=True) for s in splits], mode=mode
+        )
+        x_test = np.arange(5, dtype=config.floatX)
+        res = f(x_test)
+        for r, expected in zip(res, ([], [0, 1, 2], [3, 4])):
+            assert np.allclose(r, expected)
+            if linker == "py":
+                assert r.base is x_test
+            else:
+                # C impl always makes a copy
+                assert r.base is not x_test
 
 
 def test_TensorFromScalar():

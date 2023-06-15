@@ -1372,15 +1372,28 @@ def test_local_useless_split():
 
     f_rewritten(np.random.random((4, 4)).astype(config.floatX), [4])
     f_not_rewritten(np.random.random((4, 4)).astype(config.floatX), [1, 2, 1])
-    graph_rewritten = f_rewritten.maker.fgraph.toposort()
-    graph_not_rewritten = f_not_rewritten.maker.fgraph.toposort()
+    graph_rewritten = f_rewritten.maker.fgraph
+    graph_not_rewritten = f_not_rewritten.maker.fgraph
 
-    assert isinstance(graph_rewritten[-1].op, DeepCopyOp)
-    assert len(graph_not_rewritten) == 1
-    assert isinstance(graph_not_rewritten[0].op, Split)
+    assert all(
+        isinstance(out.owner.op, DeepCopyOp) for out in graph_not_rewritten.outputs
+    )
+    assert all(isinstance(out.owner.op, DeepCopyOp) for out in graph_rewritten.outputs)
 
+    assert sum(isinstance(node.op, Split) for node in graph_rewritten.apply_nodes) == 0
+    assert (
+        sum(isinstance(node.op, Split) for node in graph_not_rewritten.apply_nodes) == 1
+    )
+
+    assert sum(isinstance(node.op, Assert) for node in graph_rewritten.apply_nodes) == 2
+    assert (
+        sum(isinstance(node.op, Assert) for node in graph_not_rewritten.apply_nodes)
+        == 0
+    )
+
+    # The DeepCopy Ops don't have traces, so we can't check "all"
     assert check_stack_trace(f_rewritten, ops_to_check=[Assert])
-    assert check_stack_trace(f_not_rewritten, ops_to_check="all")
+    assert check_stack_trace(f_not_rewritten, ops_to_check=[Split])
 
 
 @pytest.mark.parametrize("i", list(range(1, 4)))

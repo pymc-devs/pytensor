@@ -4,10 +4,11 @@ import pytest
 import pytensor.scalar as aes
 import pytensor.tensor as at
 import pytensor.tensor.basic as atb
-from pytensor import config
+from pytensor import config, function
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
+from pytensor.scalar import Add
 from pytensor.tensor.shape import Unbroadcast
 from tests.link.numba.test_basic import (
     compare_numba_and_py,
@@ -329,6 +330,30 @@ def test_Split(n_splits, axis, values, sizes):
             for i in g_fg.inputs
             if not isinstance(i, (SharedVariable, Constant))
         ],
+    )
+
+
+def test_Split_view():
+    # https://github.com/pymc-devs/pytensor/issues/343
+    x1 = at.matrix("x1")
+    x2 = at.matrix("x2", shape=(None, 1))
+    v = at.vector("v", shape=(2,), dtype=int)
+    out = at.split(x1, v, n_splits=2, axis=1)[0] + x2
+
+    fn = function([x1, x2, v], out, mode="NUMBA")
+    # Check that the addition of split[0] and x2 is not in place
+    add_op = fn.maker.fgraph.outputs[0].owner.op
+    assert isinstance(add_op.scalar_op, Add)
+    assert not add_op.inplace_pattern
+
+    rng = np.random.default_rng(123)
+    test_x1 = rng.normal(size=(2, 2))
+    test_x2 = rng.normal(size=(2, 1))
+    test_v = np.array([1, 1])
+
+    np.testing.assert_allclose(
+        fn(test_x1, test_x2, test_v).copy(),
+        fn(test_x1, test_x2, test_v).copy(),
     )
 
 
