@@ -1086,7 +1086,9 @@ def test_broadcast_shape_basic():
     assert any(
         isinstance(node.op, Assert) for node in applys_between([x_at, y_at], b_at)
     )
-    assert np.array_equal([z.eval() for z in b_at], b.shape)
+    # This should fail because it would need dynamic broadcasting
+    with pytest.raises(AssertionError):
+        assert np.array_equal([z.eval() for z in b_at], b.shape)
     b_at = broadcast_shape(shape_tuple(x_at), shape_tuple(y_at), arrays_are_shapes=True)
     assert np.array_equal([z.eval() for z in b_at], b.shape)
 
@@ -1183,8 +1185,8 @@ def test_broadcast_shape_constants():
 @pytest.mark.parametrize(
     ("s1_vals", "s2_vals", "exp_res"),
     [
-        ((2, 2), (1, 2), (2, 2)),
-        ((0, 2), (1, 2), (0, 2)),
+        ((2, 2), (1, 2), AssertionError),
+        ((0, 2), (1, 2), AssertionError),
         ((1, 2, 1), (2, 1, 2, 1), (2, 1, 2, 1)),
     ],
 )
@@ -1203,7 +1205,11 @@ def test_broadcast_shape_symbolic(s1_vals, s2_vals, exp_res):
     res = broadcast_shape(s1s, s2s, arrays_are_shapes=True)
     res = at.as_tensor(res)
 
-    assert tuple(res.eval(eval_point)) == exp_res
+    if exp_res is AssertionError:
+        with pytest.raises(AssertionError):
+            res.eval(eval_point)
+    else:
+        assert tuple(res.eval(eval_point)) == exp_res
 
 
 def test_broadcast_shape_symbolic_one_symbolic():
@@ -1395,7 +1401,7 @@ class TestBroadcastTo(utt.InferShapeTester):
 
 
 def test_broadcast_arrays():
-    x, y = at.dvector(), at.dmatrix()
+    x, y = at.tensor(shape=(1,), dtype="float64"), at.dmatrix()
     x_bcast, y_bcast = broadcast_arrays(x, y)
 
     py_mode = Mode("py", None)
