@@ -4236,7 +4236,8 @@ class Composite(ScalarInnerGraphOp):
         # the fgraph to be set to the variable as we need to pickle
         # them for the cache of c module to work.
         fgraph = FunctionGraph(self.inputs, self.outputs)
-        MergeOptimizer().rewrite(fgraph)
+        with config.change_flags(optimizer_verbose=False):
+            MergeOptimizer().rewrite(fgraph)
         for node in fgraph.apply_nodes:
             if not isinstance(node.op, ScalarOp):
                 raise TypeError(
