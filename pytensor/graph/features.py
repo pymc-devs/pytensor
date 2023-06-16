@@ -753,7 +753,8 @@ class PreserveVariableAttributes(Feature):
     """
 
     def on_change_input(self, fgraph, node, i, r, new_r, reason=None):
-        if r.name is not None and new_r.name is None:
+        # Don't change the name of constants
+        if r.owner and r.name is not None and new_r.name is None:
             new_r.name = r.name
         if (
             getattr(r.tag, "nan_guard_mode_check", False)

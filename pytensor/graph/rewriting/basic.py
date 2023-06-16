@@ -588,10 +588,6 @@ class MergeFeature(Feature):
         sig = c.merge_signature()
         other_c = self.atomic_sig_inv.get(sig, None)
         if other_c is not None:
-            # multiple names will clobber each other..
-            # we adopt convention to keep the last name
-            if c.name:
-                other_c.name = c.name
             self.scheduled.append([[(c, other_c, "merge")]])
         else:
             # this is a new constant
