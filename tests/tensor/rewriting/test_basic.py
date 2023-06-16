@@ -19,6 +19,7 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.printing import debugprint, pprint
 from pytensor.raise_op import Assert, CheckAndRaise
+from pytensor.scalar.basic import Add
 from pytensor.tensor.basic import (
     Alloc,
     Join,
@@ -102,6 +103,7 @@ from pytensor.tensor.type import (
     values_eq_approx_remove_nan,
     vector,
 )
+from pytensor.tensor.var import TensorVariable
 from tests import unittest_tools as utt
 
 
@@ -1298,6 +1300,20 @@ def test_local_join_make_vector():
     assert f.maker.fgraph.outputs[0].dtype == config.floatX
 
     assert check_stack_trace(f, ops_to_check="all")
+
+
+def test_local_sum_make_vector():
+    a, b, c = scalars("abc")
+    mv = MakeVector(config.floatX)
+    output = mv(a, b, c).sum()
+
+    func = function([a, b, c], output)
+
+    elemwise = func.maker.fgraph.outputs[0].owner
+    # The MakeVector op should be optimized away, so we just
+    # take the sum of the scalars.
+    assert elemwise.inputs[0].name == "a"
+    assert isinstance(elemwise.inputs[0], TensorVariable)
 
 
 @pytest.mark.parametrize(
