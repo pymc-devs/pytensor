@@ -971,14 +971,18 @@ def local_sum_make_vector(fgraph, node):
     if not isinstance(array.owner.op, MakeVector):
         return
 
-    if node.op.axis not in [None, 0, -1]:
-        return
+    if node.op.axis == ():
+        return [array]
+
+    # If this is not the case the sum is invalid
+    assert node.op.axis is None or node.op.axis == (0,)
 
     elements = array.owner.inputs
-    dtype = node.op.acc_dtype
-    element_sum = add(*[cast(value, dtype) for value in elements])
+    acc_dtype = node.op.acc_dtype
+    out_dtype = node.op.dtype
+    element_sum = cast(add(*[cast(value, acc_dtype) for value in elements]), out_dtype)
 
-    return [as_tensor_variable(element_sum)]
+    return [element_sum]
 
 
 @register_useless("local_remove_switch_const_cond")
