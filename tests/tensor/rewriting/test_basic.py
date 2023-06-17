@@ -1703,8 +1703,12 @@ class TestLocalElemwiseAlloc:
         ],
     )
     def test_basic(self, expr, x_shape, y_shape):
-        x = at.tensor(dtype="int64", shape=(None,) * len(x_shape), name="x")
-        y = at.tensor(dtype="int64", shape=(None,) * len(y_shape), name="y")
+        x = at.tensor(
+            dtype="int64", shape=(1 if val == 1 else None for val in x_shape), name="x"
+        )
+        y = at.tensor(
+            dtype="int64", shape=(1 if val == 1 else None for val in y_shape), name="y"
+        )
         z = expr(x, y)
 
         z_opt = pytensor.function(
@@ -1878,7 +1882,8 @@ class TestLocalElemwiseAlloc:
             mode=self.fast_run_mode,
         )
         self.verify_op_count(func, 0, Alloc)
-        self.verify_op_count(func, 1, Assert)
+        # The second assert is from the shape check...
+        self.verify_op_count(func, 2, Assert)
 
     def test_misc(self):
         x = row(dtype=self.dtype)
