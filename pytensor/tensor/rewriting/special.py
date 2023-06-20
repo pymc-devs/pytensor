@@ -1,47 +1,78 @@
-from pytensor import scalar as aes
 from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
-from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.math import Sum, exp
+from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.math import Sum, exp, log
 from pytensor.tensor.math import sum as at_sum
 from pytensor.tensor.math import true_div
-from pytensor.tensor.rewriting.basic import register_specialize
+from pytensor.tensor.rewriting.basic import register_stabilize
 from pytensor.tensor.rewriting.math import local_mul_canonizer
-from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
-from pytensor.tensor.subtensor import AdvancedIncSubtensor
+from pytensor.tensor.special import Softmax, SoftmaxGrad, log_softmax
+from pytensor.tensor.subtensor import (
+    AdvancedIncSubtensor,
+    AdvancedSubtensor,
+    AdvancedSubtensor1,
+    Subtensor,
+)
 from pytensor.tensor.type import (
     values_eq_approx_remove_inf,
     values_eq_approx_remove_nan,
 )
 
 
-# This is not registered in stabilize, as it cause some crossentropy
-# optimization to not be inserted.
-@register_specialize("stabilize", "fast_compile")
-@node_rewriter([Elemwise])
+subtensor_ops = (
+    Subtensor,
+    AdvancedSubtensor,
+    AdvancedSubtensor1,
+)
+
+
+@register_stabilize
+@node_rewriter([log])
 def local_logsoftmax(fgraph, node):
     """
     Detect Log(Softmax(x)) and replace it with LogSoftmax(x)
 
+    This also lifts Subtensor or Dimshuffle operations that could be in between log and softmax
+
     Note: only forward pass is affected
     """
-    if (
-        isinstance(node.op, Elemwise)
-        and isinstance(node.op.scalar_op, aes.Log)
-        and len(node.inputs) == 1
-        and node.inputs[0].owner is not None
-        and isinstance(node.inputs[0].owner.op, Softmax)
-    ):
-        inVars = node.inputs[0].owner.inputs[0]
-        new_op = LogSoftmax(axis=node.inputs[0].owner.op.axis)
-        ret = new_op(inVars)
-        ret.tag.values_eq_approx = values_eq_approx_remove_inf
-        copy_stack_trace([node.inputs[0], node.outputs[0]], ret)
-        return [ret]
+
+    def find_softmax_under_lifteable_ops(inp_node, ops_to_lift):
+        if inp_node is None:
+            return
+
+        if isinstance(inp_node.op, Softmax):
+            return inp_node
+
+        if isinstance(inp_node.op, subtensor_ops):
+            ops_to_lift.append((inp_node.op, inp_node.inputs[1:]))
+            return find_softmax_under_lifteable_ops(
+                inp_node.inputs[0].owner, ops_to_lift
+            )
+
+        if isinstance(inp_node.op, DimShuffle):
+            ops_to_lift.append((inp_node.op, ()))
+            return find_softmax_under_lifteable_ops(
+                inp_node.inputs[0].owner, ops_to_lift
+            )
+
+    ops_to_lift = []
+    softmax_node = find_softmax_under_lifteable_ops(node.inputs[0].owner, ops_to_lift)
+
+    if softmax_node is None:
+        return
+
+    ret = log_softmax(softmax_node.inputs[0], axis=softmax_node.op.axis)
+    ret.tag.values_eq_approx = values_eq_approx_remove_inf
+
+    # Lift ops that used to be between log and softmax
+    for op_to_lift, parameters in reversed(ops_to_lift):
+        ret = op_to_lift(ret, *parameters)
+
+    copy_stack_trace(node.outputs, ret)
+    return [ret]
 
 
-# This is not registered in stabilize, as it cause some crossentropy
-# optimization to not be inserted.
-@register_specialize("stabilize", "fast_compile")
+@register_stabilize
 @node_rewriter([SoftmaxGrad])
 def local_logsoftmax_grad(fgraph, node):
     """
@@ -50,9 +81,7 @@ def local_logsoftmax_grad(fgraph, node):
     Note: only grad is affected
     """
     if (
-        isinstance(node.op, SoftmaxGrad)
-        and len(node.inputs) == 2
-        and node.inputs[0].owner is not None
+        node.inputs[0].owner is not None
         and node.inputs[0].owner.op == true_div
         and len(node.inputs[0].owner.inputs) >= 2
         and node.inputs[0].owner.inputs[1].owner is not None

@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import scipy.special
 
 import pytensor
 from pytensor import shared
@@ -35,6 +36,37 @@ class TestLogSoftmaxRewrites:
         _fast_run_rewrites.rewrite(fgraph)
         assert isinstance(fgraph.outputs[0].owner.op, LogSoftmax)
         assert check_stack_trace(fgraph, ops_to_check=LogSoftmax)
+        assert check_stack_trace(fgraph, ops_to_check="all")
+
+    @pytest.mark.parametrize("axis", [None, 0, -1])
+    @pytest.mark.parametrize("idx0", [0, slice(1, None), slice(None)])
+    @pytest.mark.parametrize("idx1", [None, [0, 1, 1, -1]])
+    def test_logsoftmax_subtensor_dimshuffle(self, axis, idx0, idx1):
+        """Test that stabilization is introduced even when subtensor or dimshuffle operations
+        are present between log and softmax.
+        """
+        logit_p = matrix("logit_p")
+        p = softmax(logit_p, axis=axis)
+        p_indexed = p[(idx0, idx1)]
+        out = log(p_indexed)
+
+        # Don't waste time with C compilation
+        with config.change_flags(cxx=""):
+            mode = get_mode(None).including("stabilize")
+            fn = pytensor.function([logit_p], out, mode=mode)
+
+        assert not any(
+            isinstance(node.op, Softmax) for node in fn.maker.fgraph.apply_nodes
+        )
+
+        # This range would lead to underflow to -inf without the stabilization
+        test_logit_p = np.array(
+            [[-10.0, -10.0, 999.0], [999.0, 990.0, -10.0]], dtype=config.floatX
+        )
+        np.testing.assert_allclose(
+            fn(logit_p=test_logit_p),
+            scipy.special.log_softmax(test_logit_p, axis=axis)[(idx0, idx1)],
+        )
 
     @pytest.mark.parametrize("axis", [None, 0, -1])
     def test_local_logsoftmax_grad_rewrite(self, axis):
@@ -46,7 +78,7 @@ class TestLogSoftmaxRewrites:
         """
 
         m = config.mode
-        m = get_mode(m)
+        m = get_mode(m).including("stabilize")
         m.check_isfinite = False
         # some inputs that are large to make the gradient explode in the non
         # rewritten case
@@ -89,29 +121,6 @@ class TestLogSoftmaxRewrites:
         _fast_run_rewrites.rewrite(fgraph)
 
         assert SoftmaxGrad(axis=-1) in [n.op for n in fgraph.toposort()]
-
-
-def test_log_softmax_stabilization():
-    mode = pytensor.compile.mode.get_default_mode()
-    mode = mode.including("local_log_softmax", "specialize")
-
-    x = matrix()
-    y = softmax(x, axis=-1)
-    z = log(y)
-
-    fgraph = FunctionGraph([x], [z])
-    _fast_run_rewrites(fgraph)
-    assert check_stack_trace(fgraph, ops_to_check="all")
-
-    # Check that the softmax has been rewritten
-    for node in fgraph.toposort():
-        assert not isinstance(node.op, Softmax)
-
-    # Call the function so debug mode can verify the rewritten version matches
-    # the un-rewritten version
-    f = pytensor.function([x], z, mode=mode)
-    rng = np.random.default_rng(utt.fetch_seed())
-    f(np.cast[config.floatX](rng.random((2, 3))))
 
 
 def test_softmax_graph():
