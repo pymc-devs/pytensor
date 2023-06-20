@@ -1,6 +1,6 @@
 import warnings
 from textwrap import dedent
-
+import math
 import numpy as np
 import scipy
 
@@ -8,6 +8,15 @@ from pytensor.graph.basic import Apply
 from pytensor.link.c.op import COp
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.math import gamma, neg, sum
+from pytensor.tensor.elemwise import scalar_elemwise
+
+@scalar_elemwise
+def log(a):
+    """base e logarithm of a"""
+
+@scalar_elemwise
+def exp(a):
+    """e^`a`"""
 
 def logsumexp(x, axis=None, keepdims=False):
     """Compute the log of the sum of exponentials of input elements.
