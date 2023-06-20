@@ -1,4 +1,3 @@
-import warnings
 from textwrap import dedent
 
 import numpy as np
@@ -483,25 +482,8 @@ class Softmax(COp):
         return (4,)
 
 
-UNSET_AXIS = object()
-
-
-def softmax(c, axis=UNSET_AXIS):
-    if axis is UNSET_AXIS:
-        warnings.warn(
-            "Softmax now accepts an axis argument. For backwards-compatibility it defaults to -1 when not specified, "
-            "but in the future the default will be `None`.\nTo suppress this warning specify axis explicitly.",
-            FutureWarning,
-        )
-        axis = -1
-
+def softmax(c, axis=None):
     c = as_tensor_variable(c)
-    if c.ndim == 1:
-        # TODO: Create Specific warning type that can be suppressed?
-        warnings.warn(
-            "Softmax no longer converts a vector to a row matrix.",
-            UserWarning,
-        )
     return Softmax(axis=axis)(c)
 
 
@@ -749,22 +731,8 @@ class LogSoftmax(COp):
         return (1,)
 
 
-def log_softmax(c, axis=UNSET_AXIS):
-    if axis is UNSET_AXIS:
-        warnings.warn(
-            "logsoftmax now accepts an axis argument. For backwards-compatibility it defaults to -1 when not specified, "
-            "but in the future the default will be `None`.\nTo suppress this warning specify axis explicitly.",
-            FutureWarning,
-        )
-        axis = -1
-
+def log_softmax(c, axis=None):
     c = as_tensor_variable(c)
-    if c.ndim == 1:
-        # TODO: Create Specific warning type that can be suppressed?
-        warnings.warn(
-            "Softmax no longer converts a vector to a row matrix.",
-            UserWarning,
-        )
     return LogSoftmax(axis=axis)(c)
 
 
