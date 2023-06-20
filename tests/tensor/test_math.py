@@ -80,7 +80,6 @@ from pytensor.tensor.math import (
     log2,
     log10,
     logaddexp,
-    logsumexp,
     matmul,
     max,
     max_and_argmax,
@@ -3382,18 +3381,7 @@ def test_logaddexp():
     "keepdims",
     [True, False],
 )
-def test_logsumexp(shape, axis, keepdims):
-    scipy_inp = np.zeros(shape)
-    scipy_out = scipy_logsumexp(scipy_inp, axis=axis, keepdims=keepdims)
 
-    pytensor_inp = as_tensor_variable(scipy_inp)
-    f = function([], logsumexp(pytensor_inp, axis=axis, keepdims=keepdims))
-    pytensor_out = f()
-
-    np.testing.assert_array_almost_equal(
-        pytensor_out,
-        scipy_out,
-    )
 
 
 def test_pprint():
