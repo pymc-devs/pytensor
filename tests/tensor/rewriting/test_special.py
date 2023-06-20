@@ -72,7 +72,7 @@ class TestLogSoftmaxRewrites:
         """
 
         x = matrix("x")
-        y = log(softmax(x))
+        y = log(softmax(x, axis=-1))
         g = pytensor.tensor.grad(y.sum(), x)
 
         softmax_grad_node = g.owner
@@ -96,7 +96,7 @@ def test_log_softmax_stabilization():
     mode = mode.including("local_log_softmax", "specialize")
 
     x = matrix()
-    y = softmax(x)
+    y = softmax(x, axis=-1)
     z = log(y)
 
     fgraph = FunctionGraph([x], [z])
