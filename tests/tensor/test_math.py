@@ -8,8 +8,6 @@ from itertools import product
 import numpy as np
 import pytest
 from numpy.testing import assert_array_equal
-from scipy.special import logsumexp as scipy_logsumexp
-
 import pytensor.scalar as aes
 from pytensor.compile.debugmode import DebugMode
 from pytensor.compile.function import function
