@@ -3,12 +3,22 @@ from textwrap import dedent
 import math
 import numpy as np
 import scipy
-
+import pytensor.scalar.basic as aes
 from pytensor.graph.basic import Apply
 from pytensor.link.c.op import COp
-from pytensor.tensor.basic import as_tensor_variable
-from pytensor.tensor.math import gamma, neg, sum
-from pytensor.tensor.elemwise import scalar_elemwise
+from pytensor.tensor.basic import as_tensor_variable, switch
+from pytensor.tensor.math import gamma, neg, sum, Sum, makeKeepDims, isinf
+from pytensor.tensor.math import max as at_max
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.elemwise import scalar_elemwise, DimShuffle, Elemwise
+from pytensor.tensor.rewriting.basic import (
+    register_specialize,
+    register_stabilize,
+
+)
+from pytensor.graph.rewriting.basic import node_rewriter
+
+
 
 @scalar_elemwise
 def log(a):
@@ -44,6 +54,56 @@ def logsumexp(x, axis=None, keepdims=False):
     """
 
     return log(sum(exp(x), axis=axis, keepdims=keepdims))
+
+@register_stabilize
+@register_specialize
+@node_rewriter([log])
+def local_log_sum_exp(fgraph, node):
+    # log(sum_i(exp(x_i))) = x_max + log(sum_i(exp(x_i - x_max)))
+
+    if node.op != log:
+        return
+
+    sum_node = node.inputs[0].owner
+    # If the sum has keepdims=True, there might be a dimshuffle
+    if sum_node and isinstance(sum_node.op, DimShuffle):
+        dimshuffle_op = sum_node.op
+        sum_node = sum_node.inputs[0].owner
+    else:
+        dimshuffle_op = None
+
+    if not sum_node or not isinstance(sum_node.op, Sum):
+        return
+
+    exp_node, axis = sum_node.inputs[0].owner, sum_node.op.axis
+    if not exp_node or not (
+        isinstance(exp_node.op, Elemwise) and isinstance(exp_node.op.scalar_op, aes.Exp)
+    ):
+        return
+
+    pre_exp = exp_node.inputs[0]
+    max_pre_exp = at_max(pre_exp, axis=axis)
+    max_pre_exp_keepdims = makeKeepDims(pre_exp, max_pre_exp, axis)
+
+    # Do not offset when max_pre = -np.inf, to avoid nan in the output
+    # Switch statement is placed directly inside sum to break the self-symmetry
+    # of the returned output (otherwise the rewrite would not stabilize)
+    ret = max_pre_exp + log(
+        at_sum(
+            switch(
+                isinf(max_pre_exp_keepdims),
+                exp(max_pre_exp_keepdims),
+                exp(pre_exp - max_pre_exp_keepdims),
+            ),
+            axis=axis,
+        ),
+    )
+
+    # Restore the dimshuffle op, if any.
+    if dimshuffle_op:
+        ret = dimshuffle_op(ret)
+
+    return [ret]
 
 class SoftmaxGrad(COp):
     """
