@@ -580,7 +580,7 @@ def kron(a, b):
             f"You passed {int(a.ndim)} and {int(b.ndim)}."
         )
     o = atm.outer(a, b)
-    o = o.reshape(at.concatenate((a.shape, b.shape)), a.ndim + b.ndim)
+    o = o.reshape(at.concatenate((a.shape, b.shape)), ndim=a.ndim + b.ndim)
     shf = o.dimshuffle(0, 2, 1, *list(range(3, o.ndim)))
     if shf.ndim == 3:
         shf = o.dimshuffle(1, 0, 2)

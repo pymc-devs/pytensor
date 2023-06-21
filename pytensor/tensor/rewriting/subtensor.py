@@ -155,7 +155,7 @@ def transform_take(a, indices, axis):
 
     ndim = a.ndim + indices.ndim - 1
 
-    return transform_take(a, indices.flatten(), axis).reshape(shape, ndim)
+    return transform_take(a, indices.flatten(), axis).reshape(shape, ndim=ndim)
 
 
 def is_full_slice(x):

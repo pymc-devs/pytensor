@@ -283,7 +283,7 @@ class _tensor_py_operators:
     #                     "Variable) due to Python restriction. You can use "
     #                     "PyTensorVariable.shape[0] instead.")
 
-    def reshape(self, shape, ndim=None):
+    def reshape(self, shape, *, ndim=None):
         """Return a reshaped view/copy of this variable.
 
         Parameters

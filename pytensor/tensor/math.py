@@ -2196,7 +2196,7 @@ def _tensordot_as_dot(a, b, axes, dot, batched):
         b_reshaped = b.reshape(b_shape)
 
         out_reshaped = dot(a_reshaped, b_reshaped)
-        out = out_reshaped.reshape(outshape, outndim)
+        out = out_reshaped.reshape(outshape, ndim=outndim)
         # Make sure the broadcastable pattern of the result is correct,
         # since some shape information can be lost in the reshapes.
         if out.type.broadcastable != outbcast:
