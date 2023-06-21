@@ -708,7 +708,10 @@ class Repeat(Op):
             shape = [x.shape[k] for k in range(x.ndim)]
             shape.insert(axis, repeats)
 
-            return [gz.reshape(shape, x.ndim + 1).sum(axis=axis), DisconnectedType()()]
+            return [
+                gz.reshape(shape, ndim=x.ndim + 1).sum(axis=axis),
+                DisconnectedType()(),
+            ]
         elif repeats.ndim == 1:
             # For this implementation, we would need to specify the length
             # of repeats in order to split gz in the right way to sum
