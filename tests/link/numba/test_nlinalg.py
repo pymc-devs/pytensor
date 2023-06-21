@@ -353,26 +353,6 @@ def test_Eigh(x, uplo, exc):
             (),
         ),
         (
-            nlinalg.Inv,
-            set_test_value(
-                at.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
-            None,
-            (),
-        ),
-        (
-            nlinalg.Inv,
-            set_test_value(
-                at.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
-            None,
-            (),
-        ),
-        (
             nlinalg.MatrixPinv,
             set_test_value(
                 at.dmatrix(),

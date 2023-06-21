@@ -78,25 +78,6 @@ def pinv(x, hermitian=False):
     return MatrixPinv(hermitian=hermitian)(x)
 
 
-class Inv(Op):
-    """Computes the inverse of one or more matrices."""
-
-    def make_node(self, x):
-        x = as_tensor_variable(x)
-        return Apply(self, [x], [x.type()])
-
-    def perform(self, node, inputs, outputs):
-        (x,) = inputs
-        (z,) = outputs
-        z[0] = np.linalg.inv(x).astype(x.dtype)
-
-    def infer_shape(self, fgraph, node, shapes):
-        return shapes
-
-
-inv = Inv()
-
-
 class MatrixInverse(Op):
     r"""Computes the inverse of a matrix :math:`A`.
 
@@ -169,7 +150,7 @@ class MatrixInverse(Op):
         return shapes
 
 
-matrix_inverse = MatrixInverse()
+inv = matrix_inverse = MatrixInverse()
 
 
 def matrix_dot(*args):
