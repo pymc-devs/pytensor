@@ -9,11 +9,12 @@ from pytensor import function
 from pytensor import tensor as at
 from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import _allclose
 from pytensor.tensor.nlinalg import Det, MatrixInverse, matrix_inverse
 from pytensor.tensor.rewriting.linalg import inv_as_solve
-from pytensor.tensor.slinalg import Cholesky, Solve, SolveTriangular, solve
+from pytensor.tensor.slinalg import Cholesky, Solve, SolveTriangular, cholesky, solve
 from pytensor.tensor.type import dmatrix, matrix, vector
 from tests import unittest_tools as utt
 from tests.test_rop import break_op
@@ -23,7 +24,7 @@ def test_rop_lop():
     mx = matrix("mx")
     mv = matrix("mv")
     v = vector("v")
-    y = matrix_inverse(mx).sum(axis=0)
+    y = MatrixInverse()(mx).sum(axis=0)
 
     yv = pytensor.gradient.Rop(y, mx, mv)
     rop_f = function([mx, mv], yv)
@@ -83,13 +84,11 @@ def test_transinv_to_invtrans():
 
 
 def test_generic_solve_to_solve_triangular():
-    cholesky_lower = Cholesky(lower=True)
-    cholesky_upper = Cholesky(lower=False)
     A = matrix("A")
     x = matrix("x")
 
-    L = cholesky_lower(A)
-    U = cholesky_upper(A)
+    L = cholesky(A, lower=True)
+    U = cholesky(A, lower=False)
     b1 = solve(L, x)
     b2 = solve(U, x)
     f = pytensor.function([A, x], b1)
@@ -130,15 +129,15 @@ def test_matrix_inverse_solve():
     b = dmatrix("b")
     node = matrix_inverse(A).dot(b).owner
     [out] = inv_as_solve.transform(None, node)
-    assert isinstance(out.owner.op, Solve)
+    assert isinstance(out.owner.op, Blockwise) and isinstance(
+        out.owner.op.core_op, Solve
+    )
 
 
 @pytest.mark.parametrize("tag", ("lower", "upper", None))
 @pytest.mark.parametrize("cholesky_form", ("lower", "upper"))
 @pytest.mark.parametrize("product", ("lower", "upper", None))
 def test_cholesky_ldotlt(tag, cholesky_form, product):
-    cholesky = Cholesky(lower=(cholesky_form == "lower"))
-
     transform_removes_chol = tag is not None and product == tag
     transform_transposes = transform_removes_chol and cholesky_form != tag
 
@@ -153,10 +152,8 @@ def test_cholesky_ldotlt(tag, cholesky_form, product):
     else:
         M = A
 
-    C = cholesky(M)
+    C = cholesky(M, lower=(cholesky_form == "lower"))
     f = pytensor.function([A], C, mode=get_default_mode().including("cholesky_ldotlt"))
-
-    print(f.maker.fgraph.apply_nodes)
 
     no_cholesky_in_graph = not any(
         isinstance(node.op, Cholesky) for node in f.maker.fgraph.apply_nodes
