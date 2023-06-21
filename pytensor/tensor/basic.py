@@ -3764,7 +3764,7 @@ def stacklists(arg):
         return arg
 
 
-def swapaxes(y, axis1, axis2):
+def swapaxes(y, axis1: int, axis2: int) -> TensorVariable:
     "Swap the axes of a tensor."
     y = as_tensor_variable(y)
     ndim = y.ndim

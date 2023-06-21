@@ -91,7 +91,7 @@ def test_Cholesky(x, lower, exc):
     ],
 )
 def test_Solve(A, x, lower, exc):
-    g = slinalg.Solve(lower=lower)(A, x)
+    g = slinalg.Solve(lower=lower, b_ndim=1)(A, x)
 
     if isinstance(g, list):
         g_fg = FunctionGraph(outputs=g)
@@ -125,7 +125,7 @@ def test_Solve(A, x, lower, exc):
     ],
 )
 def test_SolveTriangular(A, x, lower, exc):
-    g = slinalg.SolveTriangular(lower=lower)(A, x)
+    g = slinalg.SolveTriangular(lower=lower, b_ndim=1)(A, x)
 
     if isinstance(g, list):
         g_fg = FunctionGraph(outputs=g)

@@ -24,6 +24,7 @@ def test_vectorize_blockwise():
     assert isinstance(vect_node.op, Blockwise) and isinstance(
         vect_node.op.core_op, MatrixInverse
     )
+    assert vect_node.op.signature == ("(m,m)->(m,m)")
     assert vect_node.inputs[0] is tns
 
     # Useless blockwise
@@ -253,6 +254,11 @@ class TestMatrixInverse(MatrixOpBlockwiseTester):
     signature = "(m, m) -> (m, m)"
 
 
-class TestSolve(BlockwiseOpTester):
-    core_op = Solve(lower=True)
+class TestSolveVector(BlockwiseOpTester):
+    core_op = Solve(lower=True, b_ndim=1)
     signature = "(m, m),(m) -> (m)"
+
+
+class TestSolveMatrix(BlockwiseOpTester):
+    core_op = Solve(lower=True, b_ndim=2)
+    signature = "(m, m),(m, n) -> (m, n)"

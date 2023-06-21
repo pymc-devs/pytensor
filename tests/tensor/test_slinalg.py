@@ -181,7 +181,7 @@ class TestSolveBase(utt.InferShapeTester):
             (
                 matrix,
                 functools.partial(tensor, dtype="floatX", shape=(None,) * 3),
-                "`b` must be a matrix or a vector.*",
+                "`b` must have 2 dims.*",
             ),
         ],
     )
@@ -190,20 +190,20 @@ class TestSolveBase(utt.InferShapeTester):
         with pytest.raises(ValueError, match=error_message):
             A = A_func()
             b = b_func()
-            SolveBase()(A, b)
+            SolveBase(b_ndim=2)(A, b)
 
     def test__repr__(self):
         np.random.default_rng(utt.fetch_seed())
         A = matrix()
         b = matrix()
-        y = SolveBase()(A, b)
-        assert y.__repr__() == "SolveBase{lower=False, check_finite=True}.0"
+        y = SolveBase(b_ndim=2)(A, b)
+        assert y.__repr__() == "SolveBase{lower=False, check_finite=True, b_ndim=2}.0"
 
 
 class TestSolve(utt.InferShapeTester):
     def test__init__(self):
         with pytest.raises(ValueError) as excinfo:
-            Solve(assume_a="test")
+            Solve(assume_a="test", b_ndim=2)
         assert "is not a recognized matrix structure" in str(excinfo.value)
 
     @pytest.mark.parametrize("b_shape", [(5, 1), (5,)])
@@ -278,7 +278,7 @@ class TestSolve(utt.InferShapeTester):
         if config.floatX == "float64":
             eps = 2e-8
 
-        solve_op = Solve(assume_a=assume_a, lower=lower)
+        solve_op = Solve(assume_a=assume_a, lower=lower, b_ndim=1 if n is None else 2)
         utt.verify_grad(solve_op, [A_val, b_val], 3, rng, eps=eps)
 
 
@@ -349,19 +349,20 @@ class TestSolveTriangular(utt.InferShapeTester):
         if config.floatX == "float64":
             eps = 2e-8
 
-        solve_op = SolveTriangular(lower=lower)
+        solve_op = SolveTriangular(lower=lower, b_ndim=1 if n is None else 2)
         utt.verify_grad(solve_op, [A_val, b_val], 3, rng, eps=eps)
 
 
 class TestCholeskySolve(utt.InferShapeTester):
     def setup_method(self):
         self.op_class = CholeskySolve
-        self.op = CholeskySolve()
-        self.op_upper = CholeskySolve(lower=False)
         super().setup_method()
 
     def test_repr(self):
-        assert repr(CholeskySolve()) == "CholeskySolve(lower=True,check_finite=True)"
+        assert (
+            repr(CholeskySolve(lower=True, b_ndim=1))
+            == "CholeskySolve(lower=True,check_finite=True,b_ndim=1)"
+        )
 
     def test_infer_shape(self):
         rng = np.random.default_rng(utt.fetch_seed())
@@ -369,7 +370,7 @@ class TestCholeskySolve(utt.InferShapeTester):
         b = matrix()
         self._compile_and_check(
             [A, b],  # pytensor.function inputs
-            [self.op(A, b)],  # pytensor.function outputs
+            [self.op_class(b_ndim=2)(A, b)],  # pytensor.function outputs
             # A must be square
             [
                 np.asarray(rng.random((5, 5)), dtype=config.floatX),
@@ -383,7 +384,7 @@ class TestCholeskySolve(utt.InferShapeTester):
         b = vector()
         self._compile_and_check(
             [A, b],  # pytensor.function inputs
-            [self.op(A, b)],  # pytensor.function outputs
+            [self.op_class(b_ndim=1)(A, b)],  # pytensor.function outputs
             # A must be square
             [
                 np.asarray(rng.random((5, 5)), dtype=config.floatX),
@@ -397,10 +398,10 @@ class TestCholeskySolve(utt.InferShapeTester):
         rng = np.random.default_rng(utt.fetch_seed())
         A = matrix()
         b = matrix()
-        y = self.op(A, b)
+        y = self.op_class(lower=True, b_ndim=2)(A, b)
         cho_solve_lower_func = pytensor.function([A, b], y)
 
-        y = self.op_upper(A, b)
+        y = self.op_class(lower=False, b_ndim=2)(A, b)
         cho_solve_upper_func = pytensor.function([A, b], y)
 
         b_val = np.asarray(rng.random((5, 1)), dtype=config.floatX)
@@ -435,12 +436,13 @@ class TestCholeskySolve(utt.InferShapeTester):
 
         A_val = np.eye(2)
         b_val = np.ones((2, 1))
+        op = self.op_class(b_ndim=2)
 
         # try all dtype combinations
         for A_dtype, b_dtype in itertools.product(dtypes, dtypes):
             A = matrix(dtype=A_dtype)
             b = matrix(dtype=b_dtype)
-            x = self.op(A, b)
+            x = op(A, b)
             fn = function([A, b], x)
             x_result = fn(A_val.astype(A_dtype), b_val.astype(b_dtype))
 

@@ -10,11 +10,13 @@ from pytensor.graph.op import Op
 from pytensor.tensor import basic as at
 from pytensor.tensor import math as tm
 from pytensor.tensor.basic import as_tensor_variable, extract_diag
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.type import dvector, lscalar, matrix, scalar, vector
 
 
 class MatrixPinv(Op):
     __props__ = ("hermitian",)
+    gufunc_signature = "(m,n)->(n,m)"
 
     def __init__(self, hermitian):
         self.hermitian = hermitian
@@ -75,7 +77,7 @@ def pinv(x, hermitian=False):
     solve op.
 
     """
-    return MatrixPinv(hermitian=hermitian)(x)
+    return Blockwise(MatrixPinv(hermitian=hermitian))(x)
 
 
 class MatrixInverse(Op):
@@ -93,6 +95,8 @@ class MatrixInverse(Op):
     """
 
     __props__ = ()
+    gufunc_signature = "(m,m)->(m,m)"
+    gufunc_spec = ("numpy.linalg.inv", 1, 1)
 
     def __init__(self):
         pass
@@ -150,7 +154,7 @@ class MatrixInverse(Op):
         return shapes
 
 
-inv = matrix_inverse = MatrixInverse()
+inv = matrix_inverse = Blockwise(MatrixInverse())
 
 
 def matrix_dot(*args):
@@ -181,6 +185,8 @@ class Det(Op):
     """
 
     __props__ = ()
+    gufunc_signature = "(m,m)->()"
+    gufunc_spec = ("numpy.linalg.det", 1, 1)
 
     def make_node(self, x):
         x = as_tensor_variable(x)
@@ -209,7 +215,7 @@ class Det(Op):
         return "Det"
 
 
-det = Det()
+det = Blockwise(Det())
 
 
 class SLogDet(Op):
@@ -218,6 +224,8 @@ class SLogDet(Op):
     """
 
     __props__ = ()
+    gufunc_signature = "(m, m)->(),()"
+    gufunc_spec = ("numpy.linalg.slogdet", 1, 2)
 
     def make_node(self, x):
         x = as_tensor_variable(x)
@@ -242,7 +250,7 @@ class SLogDet(Op):
         return "SLogDet"
 
 
-slogdet = SLogDet()
+slogdet = Blockwise(SLogDet())
 
 
 class Eig(Op):
@@ -252,6 +260,8 @@ class Eig(Op):
     """
 
     __props__: Tuple[str, ...] = ()
+    gufunc_signature = "(m,m)->(m),(m,m)"
+    gufunc_spec = ("numpy.linalg.eig", 1, 2)
 
     def make_node(self, x):
         x = as_tensor_variable(x)
@@ -270,7 +280,7 @@ class Eig(Op):
         return [(n,), (n, n)]
 
 
-eig = Eig()
+eig = Blockwise(Eig())
 
 
 class Eigh(Eig):
