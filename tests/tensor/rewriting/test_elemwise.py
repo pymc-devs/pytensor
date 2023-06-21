@@ -19,7 +19,7 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.raise_op import assert_op
-from pytensor.scalar.basic import Composite
+from pytensor.scalar.basic import Composite, float64
 from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import abs as at_abs
@@ -162,6 +162,20 @@ class TestDimshuffleLift:
         assert equal_computations(g.outputs, [x, y, z.T, u.dimshuffle("x")])
         # Check stacktrace was copied over correctly after rewrite was applied
         assert hasattr(g.outputs[0].tag, "trace")
+
+    def test_dimshuffle_lift_multi_out_elemwise(self):
+        # Create a multi-output Elemwise Op with Composite
+        x = float64("x")
+        outs = [x + 1, x + 2]
+        op = Elemwise(Composite([x], outs))
+
+        # Transpose both outputs
+        x = matrix("x")
+        outs = [out.T for out in op(x)]
+
+        # Make sure rewrite doesn't apply in this case
+        g = FunctionGraph([x], outs)
+        assert not local_dimshuffle_lift.transform(g, g.outputs[0].owner)
 
 
 def test_local_useless_dimshuffle_in_reshape():
