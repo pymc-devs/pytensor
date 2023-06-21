@@ -1,6 +1,5 @@
 import warnings
 from textwrap import dedent
-import math
 import numpy as np
 import scipy
 import pytensor.scalar.basic as aes
@@ -10,7 +9,7 @@ from pytensor.tensor.basic import as_tensor_variable, switch
 from pytensor.tensor.math import gamma, neg, sum, Sum, makeKeepDims, isinf, log, exp
 from pytensor.tensor.math import max as at_max
 from pytensor.tensor.math import sum as at_sum
-from pytensor.tensor.elemwise import scalar_elemwise, DimShuffle, Elemwise
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,

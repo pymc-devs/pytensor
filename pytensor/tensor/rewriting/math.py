@@ -65,9 +65,7 @@ from pytensor.tensor.math import (
     log,
     log1mexp,
     log1p,
-    makeKeepDims,
 )
-from pytensor.tensor.math import max as at_max
 from pytensor.tensor.math import maximum, mul, neg
 from pytensor.tensor.math import pow as at_pow
 from pytensor.tensor.math import (

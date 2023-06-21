@@ -34,7 +34,7 @@ from pytensor.tensor.basic import Alloc, join, switch
 from pytensor.tensor.blas import Dot22, Gemv
 from pytensor.tensor.blas_c import CGemv
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from pytensor.tensor.math import Dot, MaxAndArgmax, Prod, Sum, _conj
+from pytensor.tensor.math import Dot, Prod, Sum, _conj
 from pytensor.tensor.math import abs as at_abs
 from pytensor.tensor.math import add
 from pytensor.tensor.math import all as at_all

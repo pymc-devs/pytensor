@@ -5,6 +5,7 @@ import pytensor
 from pytensor import shared
 import pytensor.scalar as aes
 from pytensor.compile import optdb
+from pytensor.compile.function import function
 from pytensor.compile.mode import get_mode, get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
@@ -16,6 +17,7 @@ from pytensor.tensor.type import matrix, tensor3, TensorType, vector
 from tests import unittest_tools as utt
 from pytensor.tensor.math import sum as at_sum
 from pytensor.tensor.elemwise import DimShuffle
+
 
 
 
