@@ -7,7 +7,7 @@ import pytensor.scalar.basic as aes
 from pytensor.graph.basic import Apply
 from pytensor.link.c.op import COp
 from pytensor.tensor.basic import as_tensor_variable, switch
-from pytensor.tensor.math import gamma, neg, sum, Sum, makeKeepDims, isinf
+from pytensor.tensor.math import gamma, neg, sum, Sum, makeKeepDims, isinf, log, exp
 from pytensor.tensor.math import max as at_max
 from pytensor.tensor.math import sum as at_sum
 from pytensor.tensor.elemwise import scalar_elemwise, DimShuffle, Elemwise
@@ -18,15 +18,6 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.graph.rewriting.basic import node_rewriter
 
-
-
-@scalar_elemwise
-def log(a):
-    """base e logarithm of a"""
-
-@scalar_elemwise
-def exp(a):
-    """e^`a`"""
 
 def logsumexp(x, axis=None, keepdims=False):
     """Compute the log of the sum of exponentials of input elements.
