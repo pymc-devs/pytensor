@@ -251,13 +251,14 @@ optdb.register("uncanonicalize", EquilibriumDB(), "fast_run", position=3)
 # especially constant merge
 optdb.register("merge2", MergeOptimizer(), "fast_run", "merge", position=49)
 
+optdb.register("py_only", EquilibriumDB(), "fast_compile", position=49.1)
+
 optdb.register(
     "add_destroy_handler", AddDestroyHandler(), "fast_run", "inplace", position=49.5
 )
 
 # final pass just to make sure
 optdb.register("merge3", MergeOptimizer(), "fast_run", "merge", position=100)
-optdb.register("py_only", EquilibriumDB(), "fast_compile", position=100)
 
 _tags: Union[Tuple[str, str], Tuple]
 
