@@ -19,6 +19,10 @@ def boolean_indexing_set_or_inc(fgraph, node):
 
     """
 
+    # Get out if there is more than one indexing group
+    if len(node.inputs) != 3:
+        return None
+
     op = node.op
     [x, y, cond] = node.inputs
 
