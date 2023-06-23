@@ -361,7 +361,7 @@ class TestCholeskySolve(utt.InferShapeTester):
         super().setup_method()
 
     def test_repr(self):
-        assert repr(CholeskySolve()) == "CholeskySolve{(True, True)}"
+        assert repr(CholeskySolve()) == "CholeskySolve(lower=True,check_finite=True)"
 
     def test_infer_shape(self):
         rng = np.random.default_rng(utt.fetch_seed())
