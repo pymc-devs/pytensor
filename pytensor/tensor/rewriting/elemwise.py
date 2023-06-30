@@ -1150,10 +1150,19 @@ def local_careduce_fusion(fgraph, node):
     """Fuse a `CAReduce` applied to an `Elemwise`."""
 
     (car_input,) = node.inputs
+    car_scalar_op = node.op.scalar_op
+
+    # FIXME: This check is needed because of the faulty logic in the FIXME below!
+    # Right now, rewrite only works for `Sum`/`Prod`
+    if not isinstance(car_scalar_op, (aes.Add, aes.Mul)):
+        return None
+
     elm_node = car_input.owner
 
     if elm_node is None or not isinstance(elm_node.op, Elemwise):
         return False
+
+    elm_scalar_op = elm_node.op.scalar_op
 
     elm_inputs = elm_node.inputs
     elm_outputs = elm_node.outputs
@@ -1166,21 +1175,15 @@ def local_careduce_fusion(fgraph, node):
         return False
 
     # Don't form the fusion when the target language is Python
-    elm_scalar_op = elm_node.op.scalar_op
-    car_scalar_op = node.op.scalar_op
-
     if get_target_language() == ("py",):
         return False
 
-    try:
-        elm_scalar_op.c_code(
-            elm_node,
-            "test_presence_of_c_code",
-            ["x" for x in elm_inputs],
-            ["z" for z in elm_outputs],
-            {"fail": "%(fail)s"},
-        )
+    if not elm_scalar_op.supports_c_code(elm_inputs, elm_outputs):
+        return None
 
+    # FIXME: This fails with Ops like `Max` whose `c_code` always expects two inputs!
+    #  Should implement a `CAReduce.supports_c_code`?
+    try:
         car_scalar_op.c_code(
             node,
             "test_presence_of_c_code",
@@ -1191,18 +1194,24 @@ def local_careduce_fusion(fgraph, node):
     except (NotImplementedError, MethodNotDefined):
         return False
 
-    car_axis = node.op.axis
+    car_op = node.op
+    car_acc_dtype = node.op.acc_dtype
 
     scalar_elm_inputs = [
         aes.get_scalar_type(inp.type.dtype).make_variable() for inp in elm_inputs
     ]
+
     elm_output = elm_scalar_op(*scalar_elm_inputs)
+
     # This input represents the previous value in the `CAReduce` binary reduction
-    carried_car_input = elm_output.type()
-    scalar_fused_outputs = [car_scalar_op(carried_car_input, elm_output)]
+    carried_car_input = aes.get_scalar_type(car_acc_dtype).make_variable()
+
+    scalar_fused_output = car_scalar_op(carried_car_input, elm_output)
+    if scalar_fused_output.type.dtype != car_acc_dtype:
+        scalar_fused_output = aes.cast(scalar_fused_output, car_acc_dtype)
 
     fused_scalar_op = aes.Composite(
-        inputs=[carried_car_input] + scalar_elm_inputs, outputs=scalar_fused_outputs
+        inputs=[carried_car_input] + scalar_elm_inputs, outputs=[scalar_fused_output]
     )
 
     # The fused `Op` needs to look and behave like a `BinaryScalarOp`
@@ -1211,7 +1220,13 @@ def local_careduce_fusion(fgraph, node):
     fused_scalar_op.nin = 2
     fused_scalar_op.nout = 1
 
-    new_car_op = CAReduce(fused_scalar_op, car_axis)
+    new_car_op = CAReduce(
+        scalar_op=fused_scalar_op,
+        axis=car_op.axis,
+        acc_dtype=car_acc_dtype,
+        dtype=car_op.dtype,
+        upcast_discrete_output=car_op.upcast_discrete_output,
+    )
 
     return [new_car_op(*elm_inputs)]
 
