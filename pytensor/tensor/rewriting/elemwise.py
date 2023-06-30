@@ -33,9 +33,13 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import exp
-from pytensor.tensor.rewriting.basic import register_canonicalize, register_specialize
+from pytensor.tensor.rewriting.basic import (
+    broadcast_like,
+    register_canonicalize,
+    register_specialize,
+)
 from pytensor.tensor.shape import shape_padleft
-from pytensor.tensor.var import TensorConstant
+from pytensor.tensor.var import TensorConstant, get_unique_constant_value
 
 
 class InplaceElemwiseOptimizer(GraphRewriter):
@@ -1203,6 +1207,49 @@ def local_careduce_fusion(fgraph, node):
     return [new_car_op(*elm_inputs)]
 
 
+@node_rewriter([Elemwise])
+def local_inline_composite_constants(fgraph, node):
+    """Inline scalar constants in Composite graphs."""
+    composite_op = node.op.scalar_op
+
+    if not isinstance(composite_op, aes.Composite):
+        return None
+
+    new_outer_inputs = []
+    new_inner_inputs = []
+    inner_replacements = {}
+    for outer_inp, inner_inp in zip(node.inputs, composite_op.fgraph.inputs):
+        # Complex variables don't have a `c_literal` that can be inlined
+        if "complex" not in outer_inp.type.dtype:
+            unique_value = get_unique_constant_value(outer_inp)
+            if unique_value is not None:
+                inner_replacements[inner_inp] = aes.constant(
+                    unique_value, dtype=inner_inp.dtype
+                )
+                continue
+        new_outer_inputs.append(outer_inp)
+        new_inner_inputs.append(inner_inp)
+
+    if not inner_replacements:
+        return None
+
+    new_inner_outs = clone_replace(
+        composite_op.fgraph.outputs, replace=inner_replacements
+    )
+    new_composite_op = aes.Composite(new_inner_inputs, new_inner_outs)
+    new_outputs = Elemwise(new_composite_op).make_node(*new_outer_inputs).outputs
+
+    # Some of the inlined constants were broadcasting the output shape
+    if node.outputs[0].type.broadcastable != new_outputs[0].type.broadcastable:
+        new_outputs = [
+            broadcast_like(new_out, template=node.outputs[0], fgraph=fgraph)
+            for new_out in new_outputs
+        ]
+
+    copy_stack_trace(node.outputs, new_outputs)
+    return new_outputs
+
+
 # Register fusion database just before AddDestroyHandler(49.5) (inplace rewrites)
 fuse_seqopt = SequenceDB()
 compile.optdb.register(
@@ -1242,6 +1289,13 @@ fuse_seqopt.register(
     "fast_run",
     "fusion",
     position=10,
+)
+fuse_seqopt.register(
+    "local_inline_composite_constants",
+    in2out(local_inline_composite_constants),
+    "fast_run",
+    "fusion",
+    position=20,
 )
 
 
