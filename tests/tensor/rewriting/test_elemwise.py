@@ -1425,39 +1425,40 @@ class TestCompositeCodegen:
         fval = f([1, 2, 3])
         assert np.all(fval == [6, 12, 18])
 
-    def test_local_useless_composite(self):
-        x = aes.float32()
-        y = aes.float32()
-        z = aes.float32()
-        c = aes.Composite([x, y, z], [x + 1, y - 1])
-        X = matrix("X")
-        Y = matrix("Y")
-        Z = matrix("Z")
-        o1, o2 = Elemwise(scalar_op=c)(X, Y, Z)
-        mode = get_default_mode().including("local_useless_composite")
 
-        f = function([X, Y, Z], [o1, o2], mode=mode)
-        topo = f.maker.fgraph.toposort()
-        assert len(topo) == 1
-        assert len(topo[0].inputs) == 2
-        assert len(topo[0].outputs) == 2
-        res1, res2 = f([[1.0]], [[1.0]], [[np.nan]])
-        utt.assert_allclose(res1, [[2.0]])
-        utt.assert_allclose(res2, [[0.0]])
+def test_local_useless_composite_outputs():
+    x = aes.float32()
+    y = aes.float32()
+    z = aes.float32()
+    c = aes.Composite([x, y, z], [x + 1, y - 1])
+    X = matrix("X")
+    Y = matrix("Y")
+    Z = matrix("Z")
+    o1, o2 = Elemwise(scalar_op=c)(X, Y, Z)
+    mode = get_default_mode().including("local_useless_composite")
 
-        f = function([X, Y, Z], o1, mode=mode)
-        topo = f.maker.fgraph.toposort()
-        assert len(topo) == 1
-        assert len(topo[0].inputs) == 1
-        assert len(topo[0].outputs) == 1
-        utt.assert_allclose(f([[1.0]], [[np.nan]], [[np.nan]]), [[2.0]])
+    f = function([X, Y, Z], [o1, o2], mode=mode)
+    topo = f.maker.fgraph.toposort()
+    assert len(topo) == 1
+    assert len(topo[0].inputs) == 2
+    assert len(topo[0].outputs) == 2
+    res1, res2 = f([[1.0]], [[1.0]], [[np.nan]])
+    utt.assert_allclose(res1, [[2.0]])
+    utt.assert_allclose(res2, [[0.0]])
 
-        f = function([X, Y, Z], o2, mode=mode)
-        topo = f.maker.fgraph.toposort()
-        assert len(topo) == 1
-        assert len(topo[0].inputs) == 1
-        assert len(topo[0].outputs) == 1
-        utt.assert_allclose(f([[np.nan]], [[1.0]], [[np.nan]]), [[0.0]])
+    f = function([X, Y, Z], o1, mode=mode)
+    topo = f.maker.fgraph.toposort()
+    assert len(topo) == 1
+    assert len(topo[0].inputs) == 1
+    assert len(topo[0].outputs) == 1
+    utt.assert_allclose(f([[1.0]], [[np.nan]], [[np.nan]]), [[2.0]])
+
+    f = function([X, Y, Z], o2, mode=mode)
+    topo = f.maker.fgraph.toposort()
+    assert len(topo) == 1
+    assert len(topo[0].inputs) == 1
+    assert len(topo[0].outputs) == 1
+    utt.assert_allclose(f([[np.nan]], [[1.0]], [[np.nan]]), [[0.0]])
 
 
 def test_local_useless_dimshuffle_makevector():
