@@ -1177,8 +1177,24 @@ class TestFusion:
         )
 
     @pytest.mark.parametrize("linker", ["cvm", "py"])
+    @pytest.mark.parametrize("inp_dtype", ("floatX", "int32"))
     @pytest.mark.parametrize("axis", [None, 0, 1, (0, 1), (0, 1, 2)])
-    def test_CAReduce_single_input(self, linker, axis):
+    @pytest.mark.parametrize(
+        "careduce_op, numpy_op",
+        [
+            (at_sum, np.sum),
+            pytest.param(
+                at_all,
+                np.all,
+                marks=pytest.mark.xfail(
+                    reason="Rewrite logic does not support all CAReduce"
+                ),
+            ),
+        ],
+    )
+    def test_CAReduce_single_input(
+        self, linker, inp_dtype, axis, careduce_op, numpy_op
+    ):
         """Make sure that `CAReduce` and `Elemwise` fusions work with a single input."""
 
         mode = Mode(linker=linker)
@@ -1188,8 +1204,8 @@ class TestFusion:
             "inplace",
         )
 
-        x = tensor(dtype="floatX", shape=(None, None, None), name="x")
-        out = exp(x).sum(axis=axis)
+        x = tensor(dtype=inp_dtype, shape=(None, None, None), name="x")
+        out = careduce_op(exp(x), axis=axis)
 
         out_fn = function([x], out, mode=mode)
 
@@ -1198,9 +1214,9 @@ class TestFusion:
             assert isinstance(getattr(out_node.op, "scalar_op"), aes.basic.Composite)
 
             rng = np.random.default_rng(2320)
-            x_val = rng.random((4, 3, 2), dtype=config.floatX)
+            x_val = rng.random((4, 3, 2)).astype(x.type.dtype)
 
-            exp_res = np.exp(x_val).sum(axis=axis)
+            exp_res = numpy_op(np.exp(x_val), axis=axis)
 
             out_val = out_fn(x_val)
             assert out_val.shape == exp_res.shape
@@ -1216,7 +1232,7 @@ class TestFusion:
         # `Elemwise`s with more than one client shouldn't be rewritten
         x = tensor(dtype="floatX", shape=(None, None, None), name="x")
         exp_x = exp(x)
-        out = exp_x.sum(axis=axis) + exp(x)
+        out = careduce_op(exp_x, axis=axis) + exp(x)
 
         out_fn = function([x], out, mode=mode)
         out_nodes = out_fn.maker.fgraph.toposort()
