@@ -640,16 +640,6 @@ def add_tensor_configvars():
         in_c_key=False,
     )
 
-    config.add(
-        "tensor__local_elemwise_fusion",
-        (
-            "Enable or not in fast_run mode(fast_run optimization) the elemwise "
-            "fusion optimization"
-        ),
-        BoolParam(True),
-        in_c_key=False,
-    )
-
     # http://developer.amd.com/CPU/LIBRARIES/LIBM/Pages/default.aspx
     config.add(
         "lib__amblibm",

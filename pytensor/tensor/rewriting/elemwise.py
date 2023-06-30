@@ -1085,38 +1085,10 @@ class FusionOptimizer(GraphRewriter):
         print(blanc, " time_toposort", prof[7], file=stream)
 
 
-if config.tensor__local_elemwise_fusion:
-    # Must be after gpu(48.5) and before AddDestroyHandler(49.5)
-    fuse_seqopt = SequenceDB()
-    fuse_seqopt.register(
-        "local_add_mul_fusion",
-        EquilibriumGraphRewriter(rewriters=[local_add_mul_fusion], max_use_ratio=1000),
-        "fast_run",
-        "fusion",
-        position=0,
-    )
-    fuse_seqopt.register(
-        "composite_elemwise_fusion",
-        FusionOptimizer(),
-        "fast_run",
-        "fusion",
-        position=1,
-    )
-    compile.optdb.register(
-        "elemwise_fusion",
-        fuse_seqopt,
-        "fast_run",
-        "fusion",
-        "local_elemwise_fusion",
-        "FusionOptimizer",
-        position=49,
-    )
-
-
 @register_canonicalize
 @register_specialize
 @node_rewriter([Elemwise])
-def local_useless_composite(fgraph, node):
+def local_useless_composite_outputs(fgraph, node):
     """Remove inputs and outputs of Composite Ops that are not used anywhere."""
     if not isinstance(node.op, Elemwise) or not isinstance(
         node.op.scalar_op, aes.Composite
@@ -1231,11 +1203,45 @@ def local_careduce_fusion(fgraph, node):
     return [new_car_op(*elm_inputs)]
 
 
+# Register fusion database just before AddDestroyHandler(49.5) (inplace rewrites)
+fuse_seqopt = SequenceDB()
 compile.optdb.register(
+    "elemwise_fusion",
+    fuse_seqopt,
+    "fast_run",
+    "fusion",
+    "local_elemwise_fusion",
+    "FusionOptimizer",
+    position=49,
+)
+
+fuse_seqopt.register(
+    "local_add_mul_fusion",
+    EquilibriumGraphRewriter(rewriters=[local_add_mul_fusion], max_use_ratio=1000),
+    "fast_run",
+    "fusion",
+    position=0,
+)
+fuse_seqopt.register(
+    "composite_elemwise_fusion",
+    FusionOptimizer(),
+    "fast_run",
+    "fusion",
+    position=1,
+)
+fuse_seqopt.register(
+    "local_useless_composite_outputs",
+    in2out(local_useless_composite_outputs),
+    "fast_run",
+    "fusion",
+    position=2,
+)
+fuse_seqopt.register(
     "local_careduce_fusion",
     in2out(local_careduce_fusion),
+    "fast_run",
     "fusion",
-    position=49,
+    position=10,
 )
 
 
