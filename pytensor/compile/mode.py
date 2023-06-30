@@ -454,7 +454,10 @@ else:
 
 JAX = Mode(
     JAXLinker(),
-    RewriteDatabaseQuery(include=["fast_run", "jax"], exclude=["cxx_only", "BlasOpt"]),
+    RewriteDatabaseQuery(
+        include=["fast_run", "jax"],
+        exclude=["cxx_only", "BlasOpt", "fusion", "inplace"],
+    ),
 )
 NUMBA = Mode(
     NumbaLinker(),
