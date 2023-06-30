@@ -651,7 +651,8 @@ class CLinker(Linker):
             ):
                 self.consts.append(variable)
                 self.orphans.remove(variable)
-
+        if self.consts:
+            raise ValueError("There are consts after all")
         self.temps = list(
             set(self.variables)
             .difference(self.inputs)
