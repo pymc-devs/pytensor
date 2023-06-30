@@ -248,11 +248,6 @@ optdb.register("specialize", EquilibriumDB(), "fast_run", "fast_compile", positi
 # misc special cases for speed that break canonicalization
 optdb.register("uncanonicalize", EquilibriumDB(), "fast_run", position=3)
 
-# misc special cases for speed that are dependent on the device.
-optdb.register(
-    "specialize_device", EquilibriumDB(), "fast_compile", "fast_run", position=48.6
-)  # must be after gpu stuff at 48.5
-
 # especially constant merge
 optdb.register("merge2", MergeOptimizer(), "fast_run", "merge", position=49)
 
