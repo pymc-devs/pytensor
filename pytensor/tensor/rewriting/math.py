@@ -88,7 +88,6 @@ from pytensor.tensor.rewriting.basic import (
     local_fill_sink,
     register_canonicalize,
     register_specialize,
-    register_specialize_device,
     register_stabilize,
     register_uncanonicalize,
     register_useless,
@@ -2078,12 +2077,14 @@ def local_pow_specialize(fgraph, node):
         return False
 
 
-@register_specialize_device
+@register_specialize
 @node_rewriter([at_pow])
-def local_pow_specialize_device(fgraph, node):
+def local_pow_to_nested_squaring(fgraph, node):
+    """Convert a large power exponent to multiple squaring operations.
+
+    Note: This sounds like the kind of thing any half-decent compiler can do by itself?
     """
-    This rewrite is not the same on all device. We do it only on cpu here.
-    """
+
     if node.op == at_pow:
         # the idea here is that we have pow(x, y)
         odtype = node.outputs[0].dtype

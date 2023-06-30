@@ -205,25 +205,6 @@ def register_uncanonicalize(
         return node_rewriter
 
 
-def register_specialize_device(
-    node_rewriter: Union[RewriteDatabase, Rewriter, str], *tags: str, **kwargs
-):
-    if isinstance(node_rewriter, str):
-
-        def register(inner_rewriter: Union[RewriteDatabase, Rewriter]):
-            return register_specialize_device(
-                inner_rewriter, node_rewriter, *tags, **kwargs
-            )
-
-        return register
-    else:
-        name = (kwargs and kwargs.pop("name", None)) or node_rewriter.__name__
-        compile.optdb["specialize_device"].register(
-            name, node_rewriter, "fast_run", *tags, **kwargs
-        )
-        return node_rewriter
-
-
 @register_canonicalize
 @register_specialize
 @node_rewriter([TensorFromScalar])
