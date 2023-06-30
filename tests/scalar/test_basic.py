@@ -128,21 +128,33 @@ class TestComposite:
         # We don't flatten that case.
         assert isinstance(CC.outputs[0].owner.op, Composite)
 
-    def test_with_constants(self):
+    @pytest.mark.parametrize("literal_value", (70.0, -np.inf, np.float32("nan")))
+    def test_with_constants(self, literal_value):
         x, y, z = floats("xyz")
-        e = mul(add(70.0, y), true_div(x, y))
+        e = mul(add(literal_value, y), true_div(x, y))
         comp_op = Composite([x, y], [e])
         comp_node = comp_op.make_node(x, y)
 
         c_code = comp_node.op.c_code(comp_node, "dummy", ["x", "y"], ["z"], dict(id=0))
-        assert "70.0" in c_code
+        assert constant(literal_value).type.c_literal(literal_value) in c_code
 
         # Make sure caching of the c_code template works
         assert hasattr(comp_node.op, "_c_code")
 
         g = FunctionGraph([x, y], [comp_node.out])
-        fn = make_function(DualLinker().accept(g))
-        assert fn(1.0, 2.0) == 36.0
+
+        # Default checker does not allow `nan`
+        def checker(x, y):
+            np.testing.assert_equal(x, y)
+
+        fn = make_function(DualLinker(checker=checker).accept(g))
+
+        test_x = 1.0
+        test_y = 2.0
+        np.testing.assert_equal(
+            fn(test_x, test_y),
+            (literal_value + test_y) * (test_x / test_y),
+        )
 
     def test_many_outputs(self):
         x, y, z = floats("xyz")

@@ -432,6 +432,12 @@ class ScalarType(CType, HasDataType, HasShape):
             return None
         if self.dtype == "bool":
             return "1" if data else "0"
+        if data == np.inf:
+            return "INFINITY"
+        if data == -np.inf:
+            return "-INFINITY"
+        if np.isnan(data):
+            return "NAN"
         return str(data)
 
     def c_declare(self, name, sub, check_input=True):
