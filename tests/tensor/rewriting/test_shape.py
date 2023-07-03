@@ -491,6 +491,14 @@ def test_local_Shape_of_SpecifyShape_partial(s1):
     assert not any(isinstance(apply.op, SpecifyShape) for apply in fgraph.apply_nodes)
 
 
+def test_local_specify_shape_lift():
+    x = vector("x")
+    out = specify_shape([1.0] + x, shape=(5,))
+
+    new_out = rewrite_graph(out)
+    assert equal_computations([new_out], [[1.0] + specify_shape(x, shape=(5,))])
+
+
 def test_local_Shape_i_ground():
     x = tensor(dtype=np.float64, shape=(None, 2))
     s = Shape_i(1)(x)
