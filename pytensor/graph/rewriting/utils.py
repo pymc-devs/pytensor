@@ -45,7 +45,6 @@ def rewrite_graph(
 
     return_fgraph = False
     if isinstance(graph, FunctionGraph):
-        outputs: Sequence[Variable] = graph.outputs
         fgraph = graph
         return_fgraph = True
     else:
