@@ -69,7 +69,7 @@ from pytensor.tensor.subtensor import (
     get_slice_elements,
     set_subtensor,
 )
-from pytensor.tensor.var import TensorConstant, get_unique_value
+from pytensor.tensor.var import TensorConstant, get_unique_constant_value
 
 
 list_opt_slice = [
@@ -136,7 +136,7 @@ def remove_constants_and_unused_inputs_scan(fgraph, node):
         node_inp = node.inputs[idx + 1]
         if (
             isinstance(node_inp, TensorConstant)
-            and get_unique_value(node_inp) is not None
+            and get_unique_constant_value(node_inp) is not None
         ):
             try:
                 # This works if input is a constant that has all entries

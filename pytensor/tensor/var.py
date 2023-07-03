@@ -986,7 +986,7 @@ class TensorConstantSignature(tuple):
         return self._no_nan
 
 
-def get_unique_value(x: TensorVariable) -> Optional[Number]:
+def get_unique_constant_value(x: TensorVariable) -> Optional[Number]:
     """Return the unique value of a tensor, if there is one"""
     if isinstance(x, Constant):
         data = x.data
