@@ -188,6 +188,12 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
         y = x.dimshuffle([0, 1, "x"])
         assert y.type.shape == (1, 2, 1)
 
+    def test_valid_input_broadcastable(self):
+        assert DimShuffle([True, False], (1, 0)).input_broadcastable == (True, False)
+
+        with pytest.raises(ValueError, match="input_broadcastable must be boolean"):
+            DimShuffle([None, None], (1, 0))
+
 
 class TestBroadcast:
     # this is to allow other types to reuse this class to test their ops

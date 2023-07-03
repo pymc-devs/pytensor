@@ -130,6 +130,10 @@ class DimShuffle(ExternalCOp):
         super().__init__([self.c_func_file], self.c_func_name)
 
         self.input_broadcastable = tuple(input_broadcastable)
+        if not all(isinstance(bs, (bool, np.bool_)) for bs in self.input_broadcastable):
+            raise ValueError(
+                f"input_broadcastable must be boolean, {self.input_broadcastable}"
+            )
         self.new_order = tuple(new_order)
 
         self.inplace = True
@@ -411,10 +415,9 @@ class Elemwise(OpenMPOp):
             if not difference:
                 args.append(input)
             else:
-                # TODO: use LComplete instead
                 args.append(
                     dim_shuffle(
-                        tuple(1 if s == 1 else None for s in input.type.shape),
+                        input.type.broadcastable,
                         ["x"] * difference + list(range(length)),
                     )(input)
                 )
