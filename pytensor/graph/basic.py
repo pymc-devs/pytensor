@@ -773,7 +773,7 @@ class Constant(AtomicVariable[_TypeType]):
         return (self.type, self.data)
 
     def __str__(self):
-        data_str = str(self.data)
+        data_str = str(self.data).replace("\n", "")
         if len(data_str) > 20:
             data_str = data_str[:10].strip() + " ... " + data_str[-10:].strip()
 
