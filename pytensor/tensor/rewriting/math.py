@@ -2072,7 +2072,10 @@ def local_pow_specialize(fgraph, node):
                 rval = [reciprocal(sqr(xsym))]
             if rval:
                 rval[0] = cast(rval[0], odtype)
-                assert rval[0].type == node.outputs[0].type, (rval, node.outputs)
+                assert rval[0].type.is_super(node.outputs[0].type), (
+                    rval[0].type,
+                    node.outputs[0].type,
+                )
                 return rval
     else:
         return False
