@@ -1135,10 +1135,12 @@ class AlgebraicCanonizer(NodeRewriter):
         if new.type.dtype != out.type.dtype:
             new = cast(new, out.type.dtype)
 
-        if new.type != out.type:
+        if new.type.broadcastable != out.type.broadcastable:
             new = fill_chain(new, node.inputs)[0]
 
-        if new.type == out.type:
+        if (new.type.dtype == out.type.dtype) and (
+            new.type.broadcastable == out.type.broadcastable
+        ):
             new.tag.values_eq_approx = values_eq_approx_remove_inf_nan
             copy_stack_trace(out, new)
             return [new]
