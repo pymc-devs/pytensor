@@ -62,7 +62,11 @@ from pytensor.tensor.type import (
     uint_dtypes,
     values_eq_approx_always_true,
 )
-from pytensor.tensor.var import TensorConstant, TensorVariable, get_unique_value
+from pytensor.tensor.var import (
+    TensorConstant,
+    TensorVariable,
+    get_unique_constant_value,
+)
 
 
 if TYPE_CHECKING:
@@ -323,7 +327,7 @@ def get_underlying_scalar_constant_value(
                 raise NotScalarConstantError()
 
         if isinstance(v, Constant):
-            unique_value = get_unique_value(v)
+            unique_value = get_unique_constant_value(v)
             if unique_value is not None:
                 data = unique_value
             else:

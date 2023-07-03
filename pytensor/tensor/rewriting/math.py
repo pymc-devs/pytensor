@@ -101,7 +101,7 @@ from pytensor.tensor.type import (
     values_eq_approx_remove_inf_nan,
     values_eq_approx_remove_nan,
 )
-from pytensor.tensor.var import TensorConstant, get_unique_value
+from pytensor.tensor.var import TensorConstant, get_unique_constant_value
 
 
 def scalarconsts_rest(inputs, elemwise=True, only_process_constants=False):
@@ -133,7 +133,7 @@ def get_constant(v):
 
     """
     if isinstance(v, Constant):
-        unique_value = get_unique_value(v)
+        unique_value = get_unique_constant_value(v)
         if unique_value is not None:
             data = unique_value
         else:
