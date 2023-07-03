@@ -30,7 +30,7 @@ from pytensor.graph.rewriting.utils import is_same_graph, rewrite_graph
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.printing import debugprint
 from pytensor.tensor import inplace
-from pytensor.tensor.basic import Alloc, join, switch
+from pytensor.tensor.basic import Alloc, join, second, switch
 from pytensor.tensor.blas import Dot22, Gemv
 from pytensor.tensor.blas_c import CGemv
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
@@ -96,7 +96,7 @@ from pytensor.tensor.rewriting.math import (
     perform_sigm_times_exp,
     simplify_mul,
 )
-from pytensor.tensor.shape import Reshape, Shape_i, SpecifyShape
+from pytensor.tensor.shape import Reshape, Shape_i, SpecifyShape, specify_shape
 from pytensor.tensor.type import (
     TensorType,
     cmatrix,
@@ -978,6 +978,28 @@ class TestAlgebraicCanonizer:
         )
         # No rewrite was applied
         assert z_rewritten is z
+
+    def test_shape_specified_by_constant(self):
+        x = vector("x")
+        const = np.full(shape=(5,), fill_value=2.0).astype(config.floatX)
+        out = x * const
+
+        new_out = rewrite_graph(
+            out, custom_rewrite=in2out(local_mul_canonizer, name="test")
+        )
+        expected_out = np.array([2.0]).astype(config.floatX) * specify_shape(x, (5,))
+        assert equal_computations([new_out], [expected_out])
+
+    def test_broadcasted_by_constant(self):
+        x = vector("x")
+        const = np.full(shape=(3, 5), fill_value=2.0).astype(config.floatX)
+        out = x * const
+
+        new_out = rewrite_graph(
+            out, custom_rewrite=in2out(local_mul_canonizer, name="test")
+        )
+        expected_out = second(const, np.array([[2.0]], dtype=config.floatX) * x)
+        assert equal_computations([new_out], [expected_out])
 
 
 def test_local_merge_abs():
