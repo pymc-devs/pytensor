@@ -1439,7 +1439,7 @@ def ravel_multi_index(multi_index, dims, mode="raise", order="C"):
 
 _broadcast_assert = Assert(
     "Could not broadcast dimensions. Broadcasting is only allowed along "
-    "axes that have a statically known length 1. Use `specify_shape` to "
+    "axes that have a statically known length 1. Use `specify_broadcastable` to "
     "inform PyTensor of a known shape."
 )
 

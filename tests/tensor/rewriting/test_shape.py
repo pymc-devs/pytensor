@@ -428,12 +428,11 @@ class TestSameShape:
         # could have shapes `(1,)` and/or `(n,)`, where `n != 1`, or any
         # combination of the two.
         assert not shape_feature.same_shape(x, o)
-        # The following case isn't implemented
         assert not shape_feature.same_shape(y, o)
 
     @pytest.mark.parametrize(
         "y_dim_0",
-        [2, pytest.param(None, marks=pytest.mark.xfail(reason="Not implemented"))],
+        [2, None],
     )
     def test_vector_dim(self, y_dim_0):
         x = at.tensor(dtype="floatX", shape=(2, None))

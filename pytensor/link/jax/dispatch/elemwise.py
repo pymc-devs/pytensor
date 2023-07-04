@@ -7,9 +7,17 @@ from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 
 
 @jax_funcify.register(Elemwise)
-def jax_funcify_Elemwise(op, **kwargs):
+def jax_funcify_Elemwise(op, node, **kwargs):
     scalar_op = op.scalar_op
-    return jax_funcify(scalar_op, **kwargs)
+    base_fn = jax_funcify(scalar_op, node=node, **kwargs)
+
+    def elemwise_fn(*inputs):
+        # ScalarVariables in JAX are passed as int/float.
+        # We wrap them in arrays just for the broadcast check
+        Elemwise._check_runtime_broadcast(node, tuple(map(jnp.asarray, inputs)))
+        return base_fn(*inputs)
+
+    return elemwise_fn
 
 
 @jax_funcify.register(CAReduce)

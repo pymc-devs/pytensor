@@ -19,9 +19,9 @@ from pytensor.scalar import get_scalar_type
 from pytensor.scalar.basic import bool as scalar_bool
 from pytensor.scalar.basic import identity as scalar_identity
 from pytensor.scalar.basic import transfer_type, upcast
-from pytensor.tensor import _get_vector_length, as_tensor_variable
 from pytensor.tensor import elemwise_cgen as cgen
 from pytensor.tensor import get_vector_length
+from pytensor.tensor.basic import _get_vector_length, as_tensor_variable
 from pytensor.tensor.type import (
     TensorType,
     continuous_dtypes,
@@ -740,9 +740,7 @@ class Elemwise(OpenMPOp):
             # FIXME: This no longer calls the C implementation!
             super().perform(node, inputs, output_storage)
 
-        for d, dim_shapes in enumerate(zip(*(i.shape for i in inputs))):
-            if len(set(dim_shapes) - {1}) > 1:
-                raise ValueError(f"Shapes on dimension {d} do not match: {dim_shapes}")
+        self._check_runtime_broadcast(node, inputs)
 
         ufunc_args = inputs
         ufunc_kwargs = {}
@@ -818,18 +816,26 @@ class Elemwise(OpenMPOp):
             else:
                 storage[0] = variable
 
+    @staticmethod
+    def _check_runtime_broadcast(node, inputs):
+        for dims_and_bcast in zip(
+            *[
+                zip(input.shape, sinput.type.broadcastable)
+                for input, sinput in zip(inputs, node.inputs)
+            ]
+        ):
+            if any(d != 1 for d, _ in dims_and_bcast) and (1, False) in dims_and_bcast:
+                raise ValueError(
+                    "Runtime broadcasting not allowed. "
+                    "At least one input has a distinct dimension length of 1, but was not marked as broadcastable.\n"
+                    "If broadcasting was intended, use `specify_broadcastable` on the relevant input."
+                )
+
     def infer_shape(self, fgraph, node, i_shapes) -> List[Tuple[TensorVariable, ...]]:
-        if len(node.outputs) > 1:
-            from pytensor.tensor.exceptions import ShapeError
+        from pytensor.tensor.extra_ops import broadcast_shape
 
-            raise ShapeError(
-                "Multiple outputs are not supported by the default `Elemwise.infer_shape`"
-            )
-
-        out_shape = pytensor.tensor.broadcast_shape(*i_shapes, arrays_are_shapes=True)
-
-        # The `as_tensor_variable` should convert `ScalarType`s to `TensorType`s
-        return [tuple(as_tensor_variable(s) for s in out_shape)]
+        out_shape = broadcast_shape(*i_shapes, arrays_are_shapes=True)
+        return [tuple(as_tensor_variable(s) for s in out_shape)] * len(node.outputs)
 
     def _c_all(self, node, nodename, inames, onames, sub):
         # Some `Op`s directly call `Elemwise._c_all` or `Elemwise.c_code`
@@ -1193,7 +1199,7 @@ class Elemwise(OpenMPOp):
         return support_code
 
     def c_code_cache_version_apply(self, node):
-        version = [14]  # the version corresponding to the c code in this Op
+        version = [15]  # the version corresponding to the c code in this Op
 
         # now we insert versions for the ops on which we depend...
         scalar_node = Apply(
