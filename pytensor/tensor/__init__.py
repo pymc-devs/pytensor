@@ -132,6 +132,7 @@ from pytensor.tensor.shape import (  # noqa
     shape_padaxis,
     shape_padleft,
     shape_padright,
+    specify_broadcastable,
     specify_shape,
 )
 

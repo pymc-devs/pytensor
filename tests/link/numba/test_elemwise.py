@@ -9,6 +9,7 @@ import pytensor.tensor as at
 import pytensor.tensor.inplace as ati
 import pytensor.tensor.math as aem
 from pytensor import config, function
+from pytensor.compile import get_mode
 from pytensor.compile.ops import deep_copy_op
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.gradient import grad
@@ -22,6 +23,7 @@ from tests.link.numba.test_basic import (
     scalar_my_multi_out,
     set_test_value,
 )
+from tests.tensor.test_elemwise import TestElemwise
 
 
 rng = np.random.default_rng(42849)
@@ -117,6 +119,10 @@ def test_Elemwise(inputs, input_vals, output_fn, exc):
     cm = contextlib.suppress() if exc is None else pytest.raises(exc)
     with cm:
         compare_numba_and_py(out_fg, input_vals)
+
+
+def test_elemwise_runtime_shape_error():
+    TestElemwise.check_runtime_shapes_error(get_mode("NUMBA"))
 
 
 def test_elemwise_speed(benchmark):

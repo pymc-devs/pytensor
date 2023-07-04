@@ -1671,12 +1671,7 @@ class TestLocalElemwiseAlloc:
                 (),
                 (),
             ),
-            pytest.param(
-                lambda x, y: at.mul(y, at.alloc(1, x)),
-                (),
-                (),
-                marks=pytest.mark.xfail(reason="Not implemented"),
-            ),
+            (lambda x, y: at.mul(y, at.alloc(1, x)), (), ()),
             (lambda x, y: at.mul(at.alloc(x, 15, 1), y), (15, 1), (15, 1)),
             (lambda x, y: at.mul(at.alloc(x, 15, 2), y), (15, 2), (15, 2)),
             (

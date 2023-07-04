@@ -18,7 +18,6 @@ from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.basic import second
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from pytensor.tensor.exceptions import ShapeError
 from pytensor.tensor.math import all as at_all
 from pytensor.tensor.math import any as at_any
 from pytensor.tensor.math import exp
@@ -216,117 +215,93 @@ class TestBroadcast:
         return np.asarray(np.random.random(shp), dtype=pytensor.config.floatX)
 
     def with_linker(self, linker, op, type, rand_val):
-        for shape_info in ("complete", "only_broadcastable", "none"):
-            for xsh, ysh in [
-                ((3, 5), (3, 5)),
-                ((3, 5), (1, 5)),
-                ((3, 5), (3, 1)),
-                ((1, 5), (5, 1)),
-                ((1, 1), (1, 1)),
-                ((self.openmp_minsize,), (self.openmp_minsize,)),
-                (
-                    (self.openmp_minsize_sqrt, self.openmp_minsize_sqrt),
-                    (self.openmp_minsize_sqrt, self.openmp_minsize_sqrt),
-                ),
-                ((2, 3, 4, 5), (2, 3, 4, 5)),
-                ((2, 3, 4, 5), (1, 3, 1, 5)),
-                ((2, 3, 4, 5), (1, 1, 1, 1)),
-                ((), ()),
-            ]:
-                if shape_info == "complete":
-                    x_type = type(pytensor.config.floatX, shape=xsh)
-                    y_type = type(pytensor.config.floatX, shape=ysh)
-                elif shape_info == "only_broadcastable":
-                    # This condition is here for backwards compatibility, when the only
-                    # type shape provided by PyTensor was broadcastable/non-broadcastable
-                    x_type = type(
-                        pytensor.config.floatX,
-                        shape=tuple(s if s == 1 else None for s in xsh),
-                    )
-                    y_type = type(
-                        pytensor.config.floatX,
-                        shape=tuple(s if s == 1 else None for s in ysh),
-                    )
-                else:
-                    x_type = type(pytensor.config.floatX, shape=[None for _ in xsh])
-                    y_type = type(pytensor.config.floatX, shape=[None for _ in ysh])
+        for xsh, ysh in [
+            ((3, 5), (3, 5)),
+            ((3, 5), (1, 5)),
+            ((3, 5), (3, 1)),
+            ((1, 5), (5, 1)),
+            ((1, 1), (1, 1)),
+            ((self.openmp_minsize,), (self.openmp_minsize,)),
+            (
+                (self.openmp_minsize_sqrt, self.openmp_minsize_sqrt),
+                (self.openmp_minsize_sqrt, self.openmp_minsize_sqrt),
+            ),
+            ((2, 3, 4, 5), (2, 3, 4, 5)),
+            ((2, 3, 4, 5), (1, 3, 1, 5)),
+            ((2, 3, 4, 5), (1, 1, 1, 1)),
+            ((), ()),
+        ]:
+            x_type = type(
+                pytensor.config.floatX,
+                shape=tuple(s if s == 1 else None for s in xsh),
+            )
+            y_type = type(
+                pytensor.config.floatX,
+                shape=tuple(s if s == 1 else None for s in ysh),
+            )
 
+            x = x_type("x")
+            y = y_type("y")
+            e = op(aes.add)(x, y)
+            f = make_function(copy(linker).accept(FunctionGraph([x, y], [e])))
+            xv = rand_val(xsh)
+            yv = rand_val(ysh)
+            zv = xv + yv
+
+            unittest_tools.assert_allclose(f(xv, yv), zv)
+
+            # test Elemwise.infer_shape
+            # the Shape op don't implement c_code!
+            if isinstance(linker, PerformLinker):
                 x = x_type("x")
                 y = y_type("y")
                 e = op(aes.add)(x, y)
-                f = make_function(copy(linker).accept(FunctionGraph([x, y], [e])))
-                xv = rand_val(xsh)
-                yv = rand_val(ysh)
-                zv = xv + yv
-
-                unittest_tools.assert_allclose(f(xv, yv), zv)
-
-                # test Elemwise.infer_shape
-                # the Shape op don't implement c_code!
-                if isinstance(linker, PerformLinker):
-                    x = x_type("x")
-                    y = y_type("y")
-                    e = op(aes.add)(x, y)
-                    f = make_function(
-                        copy(linker).accept(FunctionGraph([x, y], [e.shape]))
-                    )
-                    assert tuple(f(xv, yv)) == tuple(zv.shape)
+                f = make_function(copy(linker).accept(FunctionGraph([x, y], [e.shape])))
+                assert tuple(f(xv, yv)) == tuple(zv.shape)
 
     def with_linker_inplace(self, linker, op, type, rand_val):
-        for shape_info in ("complete", "only_broadcastable", "none"):
-            for xsh, ysh in [
-                ((5, 5), (5, 5)),
-                ((5, 5), (1, 5)),
-                ((5, 5), (5, 1)),
-                ((1, 1), (1, 1)),
-                ((2, 3, 4, 5), (2, 3, 4, 5)),
-                ((2, 3, 4, 5), (1, 3, 1, 5)),
-                ((2, 3, 4, 5), (1, 1, 1, 1)),
-                ((), ()),
-            ]:
-                if shape_info == "complete":
-                    x_type = type(pytensor.config.floatX, shape=xsh)
-                    y_type = type(pytensor.config.floatX, shape=ysh)
-                elif shape_info == "only_broadcastable":
-                    # This condition is here for backwards compatibility, when the only
-                    # type shape provided by PyTensor was broadcastable/non-broadcastable
-                    x_type = type(
-                        pytensor.config.floatX,
-                        shape=tuple(s if s == 1 else None for s in xsh),
-                    )
-                    y_type = type(
-                        pytensor.config.floatX,
-                        shape=tuple(s if s == 1 else None for s in ysh),
-                    )
-                else:
-                    x_type = type(pytensor.config.floatX, shape=[None for _ in xsh])
-                    y_type = type(pytensor.config.floatX, shape=[None for _ in ysh])
+        for xsh, ysh in [
+            ((5, 5), (5, 5)),
+            ((5, 5), (1, 5)),
+            ((5, 5), (5, 1)),
+            ((1, 1), (1, 1)),
+            ((2, 3, 4, 5), (2, 3, 4, 5)),
+            ((2, 3, 4, 5), (1, 3, 1, 5)),
+            ((2, 3, 4, 5), (1, 1, 1, 1)),
+            ((), ()),
+        ]:
+            x_type = type(
+                pytensor.config.floatX,
+                shape=tuple(s if s == 1 else None for s in xsh),
+            )
+            y_type = type(
+                pytensor.config.floatX,
+                shape=tuple(s if s == 1 else None for s in ysh),
+            )
 
+            x = x_type("x")
+            y = y_type("y")
+            e = op(aes.Add(aes.transfer_type(0)), {0: 0})(x, y)
+            f = make_function(copy(linker).accept(FunctionGraph([x, y], [e])))
+            xv = rand_val(xsh)
+            yv = rand_val(ysh)
+            zv = xv + yv
+
+            f(xv, yv)
+
+            assert (xv == zv).all()
+            # test Elemwise.infer_shape
+            # the Shape op don't implement c_code!
+            if isinstance(linker, PerformLinker):
                 x = x_type("x")
                 y = y_type("y")
                 e = op(aes.Add(aes.transfer_type(0)), {0: 0})(x, y)
-                f = make_function(copy(linker).accept(FunctionGraph([x, y], [e])))
+                f = make_function(copy(linker).accept(FunctionGraph([x, y], [e.shape])))
                 xv = rand_val(xsh)
                 yv = rand_val(ysh)
                 zv = xv + yv
-
-                f(xv, yv)
-
-                assert (xv == zv).all()
-                # test Elemwise.infer_shape
-                # the Shape op don't implement c_code!
-                if isinstance(linker, PerformLinker):
-                    x = x_type("x")
-                    y = y_type("y")
-                    e = op(aes.Add(aes.transfer_type(0)), {0: 0})(x, y)
-                    f = make_function(
-                        copy(linker).accept(FunctionGraph([x, y], [e.shape]))
-                    )
-                    xv = rand_val(xsh)
-                    yv = rand_val(ysh)
-                    zv = xv + yv
-                    assert xv.shape == zv.shape
-                    assert tuple(f(xv, yv)) == zv.shape
+                assert xv.shape == zv.shape
+                assert tuple(f(xv, yv)) == zv.shape
 
     def test_perform(self):
         self.with_linker(PerformLinker(), self.op, self.type, self.rand_val)
@@ -775,32 +750,42 @@ class TestElemwise(unittest_tools.InferShapeTester):
         g = pytensor.function([a, b, c, d, e, f], s, mode=Mode(linker="py"))
         g(*[np.zeros(2**11, config.floatX) for i in range(6)])
 
-    def check_input_dimensions_match(self, mode):
-        """Make sure that our input validation works correctly and doesn't
-        throw erroneous broadcast-based errors.
-        """
+    @staticmethod
+    def check_runtime_shapes_error(mode):
+        """Check we emmit a clear error when runtime broadcasting would occur according to Numpy rules."""
         x_v = matrix("x")
         m_v = vector("m")
-
-        x = np.array([[-1.32720483], [0.23442016]]).astype(config.floatX)
-        m = np.array([0.0, 0.0]).astype(config.floatX)
 
         z_v = x_v - m_v
         f = pytensor.function([x_v, m_v], z_v, mode=mode)
 
-        res = f(x, m)
+        # Test invalid broadcasting by either x or m
+        for x_sh, m_sh in [((2, 1), (3,)), ((2, 3), (1,))]:
+            x = np.ones(x_sh).astype(config.floatX)
+            m = np.zeros(m_sh).astype(config.floatX)
 
-        assert np.array_equal(res, x - m)
+            # This error is introduced by PyTensor, so it's the same across different backends
+            with pytest.raises(ValueError, match="Runtime broadcasting not allowed"):
+                f(x, m)
 
-    def test_input_dimensions_match_python(self):
-        self.check_input_dimensions_match(Mode(linker="py"))
+        x = np.ones((2, 3)).astype(config.floatX)
+        m = np.zeros((1,)).astype(config.floatX)
+
+        x = np.ones((2, 4)).astype(config.floatX)
+        m = np.zeros((3,)).astype(config.floatX)
+        # This error is backend specific, and may have different types
+        with pytest.raises((ValueError, TypeError)):
+            f(x, m)
+
+    def test_runtime_shapes_error_python(self):
+        self.check_runtime_shapes_error(Mode(linker="py"))
 
     @pytest.mark.skipif(
         not pytensor.config.cxx,
         reason="G++ not available, so we need to skip this test.",
     )
-    def test_input_dimensions_match_c(self):
-        self.check_input_dimensions_match(Mode(linker="c"))
+    def test_runtime_shapes_error_c(self):
+        self.check_runtime_shapes_error(Mode(linker="c"))
 
     def test_str(self):
         op = Elemwise(aes.add, inplace_pattern={0: 0}, name=None)
@@ -825,7 +810,7 @@ class TestElemwise(unittest_tools.InferShapeTester):
         assert pytensor.get_underlying_scalar_constant(res_shape[0][0]) == 1
         assert pytensor.get_underlying_scalar_constant(res_shape[0][1]) == 1
 
-    def test_multi_output(self):
+    def test_infer_shape_multi_output(self):
         class CustomElemwise(Elemwise):
             def make_node(self, *args):
                 res = super().make_node(*args)
@@ -839,14 +824,26 @@ class TestElemwise(unittest_tools.InferShapeTester):
                     ],
                 )
 
-        z_1, z_2 = CustomElemwise(aes.add)(
-            as_tensor_variable(np.eye(1)), as_tensor_variable(np.eye(1))
+        custom_elemwise = CustomElemwise(aes.add)
+
+        z_1, z_2 = custom_elemwise(
+            as_tensor_variable(np.eye(1)),
+            as_tensor_variable(np.eye(1)),
         )
-
         in_1_shape = (aes.constant(1), aes.constant(1))
+        outs = z_1.owner.op.infer_shape(None, z_1.owner, [in_1_shape, in_1_shape])
+        for out in outs:
+            assert out[0].eval() == 1
+            assert out[1].eval() == 1
 
-        with pytest.raises(ShapeError):
-            z_1.owner.op.infer_shape(None, z_1.owner, [in_1_shape, in_1_shape])
+        z_1, z_2 = custom_elemwise(
+            as_tensor_variable(np.eye(1)), as_tensor_variable(np.eye(3))
+        )
+        in_2_shape = (aes.constant(3), aes.constant(3))
+        outs = z_1.owner.op.infer_shape(None, z_1.owner, [in_1_shape, in_2_shape])
+        for out in outs:
+            assert out[0].eval() == 3
+            assert out[1].eval() == 3
 
     def test_shape_types(self):
         x = tensor(dtype=np.float64, shape=(None, 1))
