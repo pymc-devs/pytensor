@@ -96,12 +96,11 @@ def jax_funcify_Shape_i(op, **kwargs):
 def jax_funcify_SpecifyShape(op, node, **kwargs):
     def specifyshape(x, *shape):
         assert x.ndim == len(shape)
-        assert x.shape == tuple(shape), (
-            "got shape",
-            x.shape,
-            "expected",
-            shape,
-        )
+        for actual, expected in zip(x.shape, shape):
+            if expected is None:
+                continue
+            if actual != expected:
+                raise ValueError(f"Invalid shape: Expected {shape} but got {x.shape}")
         return x
 
     return specifyshape

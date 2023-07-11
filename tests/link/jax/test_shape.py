@@ -25,7 +25,7 @@ def test_jax_shape_ops():
 
 def test_jax_specify_shape():
     in_at = at.matrix("in")
-    x = at.specify_shape(in_at, (4, 5))
+    x = at.specify_shape(in_at, (4, None))
     x_fg = FunctionGraph([in_at], [x])
     compare_jax_and_py(x_fg, [np.ones((4, 5)).astype(config.floatX)])
 
