@@ -527,7 +527,7 @@ def get_underlying_scalar_constant_value(
                         grandparent.owner.op, Unbroadcast
                     ):
                         ggp_shape = grandparent.owner.inputs[0].type.shape
-                        l = [s1 == 1 or s2 == 1 for s1, s2 in zip(ggp_shape, gp_shape)]
+                        l = [get_underlying_scalar_constant_value(s) for s in ggp_shape]
                         gp_shape = tuple(l)
 
                     if not (idx < ndim):
