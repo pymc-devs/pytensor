@@ -760,7 +760,9 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
 def int_to_float_fn(inputs, out_dtype):
     """Create a Numba function that converts integer and boolean ``ndarray``s to floats."""
 
-    if all(input.type.numpy_dtype == np.dtype(out_dtype) for input in inputs):
+    if all(
+        input.type.numpy_dtype == np.dtype(out_dtype) for input in inputs
+    ) and isinstance(np.dtype(out_dtype), np.floating):
 
         @numba_njit
         def inputs_cast(x):
