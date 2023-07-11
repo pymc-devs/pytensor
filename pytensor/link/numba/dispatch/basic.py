@@ -746,7 +746,13 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
 def int_to_float_fn(inputs, out_dtype):
     """Create a Numba function that converts integer and boolean ``ndarray``s to floats."""
 
-    if any(i.type.numpy_dtype.kind in "ib" for i in inputs):
+    if all(input.type.numpy_dtype == np.dtype(out_dtype) for input in inputs):
+
+        @numba_njit
+        def inputs_cast(x):
+            return x
+
+    elif any(i.type.numpy_dtype.kind in "ib" for i in inputs):
         args_dtype = np.dtype(f"f{out_dtype.itemsize}")
 
         @numba_njit
