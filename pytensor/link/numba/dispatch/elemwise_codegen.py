@@ -35,20 +35,15 @@ def compute_itershape(
                 with builder.if_then(
                     builder.icmp_unsigned("!=", length, shape[i]), likely=False
                 ):
-                    with builder.if_else(
-                        builder.or_(
-                            builder.icmp_unsigned("==", length, one),
-                            builder.icmp_unsigned("==", shape[i], one),
-                        )
-                    ) as (
+                    with builder.if_else(builder.icmp_unsigned("==", length, one)) as (
                         then,
                         otherwise,
                     ):
                         with then:
                             msg = (
-                                "Runtime broadcasting not allowed. "
-                                "One input had a distinct dimension length of 1, but was not marked as broadcastable.\n"
-                                "If broadcasting was intended, use `specify_broadcastable` on the relevant input."
+                                f"Incompatible shapes for input {j} and axis {i} of "
+                                f"elemwise. Input {j} has shape 1, but is not statically "
+                                "known to have shape 1, and thus not broadcastable."
                             )
                             ctx.call_conv.return_user_exc(builder, ValueError, (msg,))
                         with otherwise:
