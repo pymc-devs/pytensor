@@ -181,7 +181,8 @@ def jax_funcify_Composite(op, node, vectorize=True, **kwargs):
 @jax_funcify.register(Second)
 def jax_funcify_Second(op, **kwargs):
     def second(x, y):
-        return jnp.broadcast_to(y, x.shape)
+        _, y = jnp.broadcast_arrays(x, y)
+        return y
 
     return second
 
