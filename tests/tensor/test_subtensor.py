@@ -2693,3 +2693,18 @@ def test_index_vars_to_types():
     assert isinstance(x.type, scal.ScalarType)
     res = index_vars_to_types(x)
     assert res == x.type
+
+
+@pytest.mark.parametrize(
+    "x_shape, indices, expected",
+    [
+        [(None,), (slice(None, None),), (None,)],
+        [(13,), (slice(None, 100),), (13,)],
+        [(13,), (slice(-1, None),), (1,)],
+        [(7, 13), (slice(None, None, 2), slice(-1, 1, -1)), (4, 11)],
+    ],
+)
+def test_static_shapes(x_shape, indices, expected):
+    x = at.tensor(dtype="float64", shape=x_shape)
+    y = x[indices]
+    assert y.type.shape == expected
