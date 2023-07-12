@@ -12,7 +12,7 @@ from pytensor.compile.function import function
 from pytensor.compile.mode import get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp, deep_copy_op
 from pytensor.configdefaults import config
-from pytensor.graph.basic import equal_computations
+from pytensor.graph.basic import equal_computations, vars_between
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import check_stack_trace, out2in
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
@@ -31,6 +31,7 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import (
+    Sum,
     add,
     bitwise_and,
     bitwise_or,
@@ -1298,6 +1299,44 @@ def test_local_join_make_vector():
     assert f.maker.fgraph.outputs[0].dtype == config.floatX
 
     assert check_stack_trace(f, ops_to_check="all")
+
+
+def test_local_sum_make_vector():
+    a, b, c = scalars("abc")
+    mv = MakeVector(config.floatX)
+    output = mv(a, b, c).sum()
+
+    output = rewrite_graph(output)
+    between = vars_between([a, b, c], [output])
+    for var in between:
+        assert (var.owner is None) or (not isinstance(var.owner.op, MakeVector))
+
+    # Check for empty sum
+    a, b, c = scalars("abc")
+    mv = MakeVector(config.floatX)
+    output = mv(a, b, c).sum(axis=[])
+
+    output = rewrite_graph(output)
+    between = vars_between([a, b, c], [output])
+    for var in between:
+        assert (var.owner is None) or (not isinstance(var.owner.op, Sum))
+
+    # Check empty MakeVector
+    mv = MakeVector(config.floatX)
+    output = mv().sum()
+
+    output = rewrite_graph(output)
+    between = vars_between([a, b, c], [output])
+    for var in between:
+        assert (var.owner is None) or (not isinstance(var.owner.op, Sum))
+
+    mv = MakeVector(config.floatX)
+    output = mv(a).sum()
+
+    output = rewrite_graph(output)
+    between = vars_between([a, b, c], [output])
+    for var in between:
+        assert (var.owner is None) or (not isinstance(var.owner.op, Sum))
 
 
 @pytest.mark.parametrize(

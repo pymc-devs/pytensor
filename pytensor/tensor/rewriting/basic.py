@@ -43,6 +43,7 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_shape, broadcast_to
+from pytensor.tensor.math import Sum, add
 from pytensor.tensor.math import all as at_all
 from pytensor.tensor.math import eq
 from pytensor.tensor.shape import Shape_i
@@ -954,6 +955,41 @@ def local_join_make_vector(fgraph, node):
         # by an error in the old join op.
         copy_stack_trace(node.outputs, ret)
         return [ret]
+
+
+@register_specialize
+@register_canonicalize
+@register_useless
+@node_rewriter([Sum])
+def local_sum_make_vector(fgraph, node):
+    """A sum of a MakeVector node is just the sum of the elements."""
+    (array,) = node.inputs
+
+    if array.owner is None:
+        return
+
+    if not isinstance(array.owner.op, MakeVector):
+        return
+
+    if node.op.axis == ():
+        return [array]
+
+    # If this is not the case the sum is invalid
+    assert node.op.axis is None or node.op.axis == (0,) or node.op.axis == (-1,)
+
+    elements = array.owner.inputs
+    acc_dtype = node.op.acc_dtype
+    out_dtype = node.op.dtype
+    if len(elements) == 0:
+        element_sum = zeros(dtype=out_dtype, shape=())
+    elif len(elements) == 1:
+        element_sum = cast(elements[0], out_dtype)
+    else:
+        element_sum = cast(
+            add(*[cast(value, acc_dtype) for value in elements]), out_dtype
+        )
+
+    return [element_sum]
 
 
 @register_useless("local_remove_switch_const_cond")
