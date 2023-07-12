@@ -975,12 +975,19 @@ def local_sum_make_vector(fgraph, node):
         return [array]
 
     # If this is not the case the sum is invalid
-    assert node.op.axis is None or node.op.axis == (0,)
+    assert node.op.axis is None or node.op.axis == (0,) or node.op.axis == (-1,)
 
     elements = array.owner.inputs
     acc_dtype = node.op.acc_dtype
     out_dtype = node.op.dtype
-    element_sum = cast(add(*[cast(value, acc_dtype) for value in elements]), out_dtype)
+    if len(elements) == 0:
+        element_sum = zeros(dtype=out_dtype, shape=())
+    elif len(elements) == 1:
+        element_sum = cast(elements[0], out_dtype)
+    else:
+        element_sum = cast(
+            add(*[cast(value, acc_dtype) for value in elements]), out_dtype
+        )
 
     return [element_sum]
 

@@ -1321,6 +1321,23 @@ def test_local_sum_make_vector():
     for var in between:
         assert (var.owner is None) or (not isinstance(var.owner.op, Sum))
 
+    # Check empty MakeVector
+    mv = MakeVector(config.floatX)
+    output = mv().sum()
+
+    output = rewrite_graph(output)
+    between = vars_between([a, b, c], [output])
+    for var in between:
+        assert (var.owner is None) or (not isinstance(var.owner.op, Sum))
+
+    mv = MakeVector(config.floatX)
+    output = mv(a).sum()
+
+    output = rewrite_graph(output)
+    between = vars_between([a, b, c], [output])
+    for var in between:
+        assert (var.owner is None) or (not isinstance(var.owner.op, Sum))
+
 
 @pytest.mark.parametrize(
     "dtype",
