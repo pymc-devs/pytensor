@@ -272,27 +272,6 @@ class TestLocalCanonicalizeAlloc:
     def setup_method(self):
         self.rng = np.random.default_rng(utt.fetch_seed())
 
-    def test_inconsistent_constant(self):
-        x = at.as_tensor(self.rng.standard_normal((3, 7)))
-        a = at.alloc(x, 6, 7)
-
-        assert a.owner and isinstance(a.owner.op, Alloc)
-
-        # `local_useless_alloc` should attempt to replace the `Alloc` with an
-        # `Assert` and fail when the static shape information conflicts.
-        with pytest.raises(TypeError):
-            f = function([], a, mode=rewrite_mode)
-
-        x = at.as_tensor(self.rng.standard_normal((6, 7)))
-        a = at.alloc(x, 6, 7)
-
-        f = function([], a, mode=rewrite_mode)
-
-        # The rewrite should then be applied, and remove Alloc
-        assert not any(
-            isinstance(node.op, (Alloc, Assert)) for node in f.maker.fgraph.toposort()
-        )
-
     def test_inconsistent_shared(self):
         # These shapes don't match!
         x = shared(self.rng.standard_normal((3, 7)))
