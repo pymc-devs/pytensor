@@ -1,4 +1,26 @@
-""" Tensor optimizations addressing the ops in basic.py."""
+""" Tensor optimizations addressing the ops in basic.py.
+
+Notes
+-----
+There are two ways of broadcasting arrays:
+second(x, y) == alloc(y, broadcast_shapes(x.shape, y.shape))
+
+The second can be more efficient because x doesn't usually need to be computed when we only want its shape.
+It may also allow other rewrites that don't try to modify x when it has multiple clients (for fear of duplicating computation).
+
+However, the first one is easier to reason about.
+Knowing we have such a graph allows to do certain rewrites such as "sinking" broadcasting operations below Elemwise.
+The same rewrites with alloc would be more complicated as we would need to symbolically combine the shapes of each one.
+
+As an example contrast rewriting the following two equivalent graphs
+
+alloc(x, broadcast_shapes(x.shape, y.shape)) + alloc(y, broadcast_shapes(x.shape, y.shape)) -> x + y
+second(y, x) + second(x, y) -> x + y
+
+Theano developers (mostly) preferred to use the first form during canonicalization and introduce the second form later,
+via rewrites like `local_fill_to_alloc`, and using the `alloc_like` helper inside rewrites.
+Many stabilize and stabilization rewrites refuse to be applied when a variable has multiple clients, so this is important.
+"""
 
 import logging
 from typing import TYPE_CHECKING, Optional, Union
