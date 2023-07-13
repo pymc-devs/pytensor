@@ -23,7 +23,7 @@ from pytensor.scalar import int32 as int_t
 from pytensor.scalar import upcast
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor import basic as at
-from pytensor.tensor import get_vector_length
+from pytensor.tensor.basic import get_vector_length, second
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import all as pt_all
@@ -1780,7 +1780,19 @@ def broadcast_arrays(*args: TensorVariable) -> Tuple[TensorVariable, ...]:
         The arrays to broadcast.
 
     """
-    return tuple(broadcast_to(a, broadcast_shape(*args)) for a in args)
+
+    def broadcast_with_others(a, others):
+        for other in others:
+            a = second(other, a)
+        return a
+
+    brodacasted_vars = []
+    for i, a in enumerate(args):
+        # We use indexing and not identity in case there are duplicated variables
+        others = [a for j, a in enumerate(args) if j != i]
+        brodacasted_vars.append(broadcast_with_others(a, others))
+
+    return brodacasted_vars
 
 
 __all__ = [
