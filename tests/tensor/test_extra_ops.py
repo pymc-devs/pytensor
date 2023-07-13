@@ -8,14 +8,12 @@ from pytensor import function
 from pytensor import tensor as at
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Constant, applys_between
-from pytensor.graph.replace import clone_replace
-from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.graph.basic import Constant, applys_between, equal_computations
 from pytensor.raise_op import Assert
+from pytensor.tensor import alloc
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.extra_ops import (
     Bartlett,
-    BroadcastTo,
     CpuContiguous,
     CumOp,
     FillDiagonal,
@@ -47,7 +45,6 @@ from pytensor.tensor.extra_ops import (
     to_one_hot,
     unravel_index,
 )
-from pytensor.tensor.subtensor import AdvancedIncSubtensor
 from pytensor.tensor.type import (
     TensorType,
     dmatrix,
@@ -61,7 +58,6 @@ from pytensor.tensor.type import (
     lscalar,
     matrix,
     scalar,
-    tensor,
     tensor3,
     vector,
 )
@@ -1246,183 +1242,15 @@ def test_broadcast_shape_symbolic_one_symbolic():
     assert res_shape[2].data == 3
 
 
-class TestBroadcastTo(utt.InferShapeTester):
-    def setup_method(self):
-        super().setup_method()
-        self.op_class = BroadcastTo
-        self.op = broadcast_to
+def test_broadcast_to():
+    x = vector("x")
+    y1 = scalar(dtype="int64")
+    y2 = scalar(dtype="int64")
 
-    def test_avoid_useless_scalars(self):
-        x = scalar()
-        y = broadcast_to(x, ())
-        assert y is x
-
-    def test_avoid_useless_subtensors(self):
-        x = scalar()
-        y = broadcast_to(x, (1, 2))
-        # There shouldn't be any unnecessary `Subtensor` operations
-        # (e.g. from `at.as_tensor((1, 2))[0]`)
-        assert y.owner.inputs[1].owner is None
-        assert y.owner.inputs[2].owner is None
-
-    @pytest.mark.parametrize("linker", ["cvm", "py"])
-    def test_perform(self, linker):
-        a = pytensor.shared(np.full((3, 1, 1), 5))
-        s_0 = iscalar("s_0")
-        s_1 = iscalar("s_1")
-        shape = (s_0, s_1, 1)
-
-        bcast_res = broadcast_to(a, shape)
-        assert bcast_res.broadcastable == (False, False, True)
-
-        bcast_fn = pytensor.function(
-            [s_0, s_1], bcast_res, mode=Mode(optimizer=None, linker=linker)
-        )
-        bcast_fn.vm.allow_gc = False
-
-        bcast_at = bcast_fn(3, 4)
-        bcast_np = np.broadcast_to(5, (3, 4, 1))
-
-        assert np.array_equal(bcast_at, bcast_np)
-
-        with pytest.raises(ValueError):
-            bcast_fn(5, 4)
-
-        if linker != "py":
-            bcast_var = bcast_fn.maker.fgraph.outputs[0].owner.inputs[0]
-            bcast_in = bcast_fn.vm.storage_map[a]
-            bcast_out = bcast_fn.vm.storage_map[bcast_var]
-            assert np.shares_memory(bcast_out[0], bcast_in[0])
-
-    def test_make_node_error_handling(self):
-        with pytest.raises(
-            ValueError,
-            match="Broadcast target shape has 1 dims, which is shorter than input with 2 dims",
-        ):
-            broadcast_to(at.zeros((3, 4)), (5,))
-
-    @pytest.mark.skipif(
-        not config.cxx, reason="G++ not available, so we need to skip this test."
+    assert equal_computations(
+        [broadcast_to(x, (y1, y2))],
+        [alloc(x, y1, y2)],
     )
-    @pytest.mark.parametrize("valid", (True, False))
-    def test_memory_leak(self, valid):
-        import gc
-        import tracemalloc
-
-        from pytensor.link.c.cvm import CVM
-
-        n = 100_000
-        x = pytensor.shared(np.ones((1, n), dtype=np.float64))
-        y = broadcast_to(x, (5, n))
-
-        f = pytensor.function([], y, mode=Mode(optimizer=None, linker="cvm"))
-        assert isinstance(f.vm, CVM)
-
-        assert len(f.maker.fgraph.apply_nodes) == 2
-        assert any(
-            isinstance(node.op, BroadcastTo) for node in f.maker.fgraph.apply_nodes
-        )
-
-        tracemalloc.start()
-
-        blocks_last = None
-        block_diffs = []
-        for i in range(1, 50):
-            if valid:
-                x.set_value(np.ones((1, n)))
-                _ = f()
-            else:
-                x.set_value(np.ones((2, n)))
-                try:
-                    _ = f()
-                except ValueError:
-                    pass
-                else:
-                    raise RuntimeError("Should have failed")
-            _ = gc.collect()
-            blocks_i, _ = tracemalloc.get_traced_memory()
-            if blocks_last is not None:
-                blocks_diff = (blocks_i - blocks_last) // 10**3
-                block_diffs.append(blocks_diff)
-            blocks_last = blocks_i
-
-        tracemalloc.stop()
-        assert np.all(np.array(block_diffs) <= (0 + 1e-8))
-
-    @pytest.mark.parametrize(
-        "fn,input_dims",
-        [
-            [lambda x: broadcast_to(x, (1,)), (1,)],
-            [lambda x: broadcast_to(x, (6, 2, 5, 3)), (1,)],
-            [lambda x: broadcast_to(x, (6, 2, 5, 3)), (5, 1)],
-            [lambda x: broadcast_to(x, (6, 2, 1, 3)), (2, 1, 3)],
-        ],
-    )
-    def test_gradient(self, fn, input_dims):
-        rng = np.random.default_rng(43)
-        utt.verify_grad(
-            fn,
-            [rng.random(input_dims).astype(config.floatX)],
-            n_tests=1,
-            rng=rng,
-        )
-
-    def test_infer_shape(self):
-        rng = np.random.default_rng(43)
-        a = tensor(dtype=config.floatX, shape=(None, 1, None))
-        shape = list(a.shape)
-        out = self.op(a, shape)
-
-        self._compile_and_check(
-            [a] + shape,
-            [out],
-            [rng.random((2, 1, 3)).astype(config.floatX), 2, 1, 3],
-            self.op_class,
-        )
-
-        a = tensor(dtype=config.floatX, shape=(None, 1, None))
-        shape = [iscalar() for i in range(4)]
-        self._compile_and_check(
-            [a] + shape,
-            [self.op(a, shape)],
-            [rng.random((2, 1, 3)).astype(config.floatX), 6, 2, 5, 3],
-            self.op_class,
-        )
-
-    def test_inplace(self):
-        """Make sure that in-place optimizations are *not* performed on the output of a ``BroadcastTo``."""
-        a = at.zeros((5,))
-        d = at.vector("d")
-        c = at.set_subtensor(a[np.r_[0, 1, 3]], d)
-        b = broadcast_to(c, (5,))
-        q = b[np.r_[0, 1, 3]]
-        e = at.set_subtensor(q, np.r_[0, 0, 0])
-
-        opts = RewriteDatabaseQuery(include=["inplace"])
-        py_mode = Mode("py", opts)
-        e_fn = function([d], e, mode=py_mode)
-
-        advincsub_node = e_fn.maker.fgraph.outputs[0].owner
-        assert isinstance(advincsub_node.op, AdvancedIncSubtensor)
-        assert isinstance(advincsub_node.inputs[0].owner.op, BroadcastTo)
-
-        assert advincsub_node.op.inplace is False
-
-    def test_rebuild(self):
-        x = vector(shape=(50,))
-        x_test = np.zeros((50,), dtype=config.floatX)
-        i = 0
-        y = broadcast_to(i, x.shape)
-        assert y.type.shape == (50,)
-        assert y.shape.eval({x: x_test}) == (50,)
-        assert y.eval({x: x_test}).shape == (50,)
-
-        x_new = vector(shape=(100,))
-        x_new_test = np.zeros((100,), dtype=config.floatX)
-        y_new = clone_replace(y, {x: x_new}, rebuild_strict=False)
-        assert y_new.type.shape == (100,)
-        assert y_new.shape.eval({x_new: x_new_test}) == (100,)
-        assert y_new.eval({x_new: x_new_test}).shape == (100,)
 
 
 def test_broadcast_arrays():

@@ -2,7 +2,7 @@ import pytensor.scalar.basic as aes
 from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.tensor.basic import Alloc, as_tensor_variable
 from pytensor.tensor.elemwise import Elemwise
-from pytensor.tensor.extra_ops import BroadcastTo, Repeat, Unique
+from pytensor.tensor.extra_ops import Repeat, Unique
 from pytensor.tensor.rewriting.basic import register_canonicalize, register_useless
 
 
@@ -54,39 +54,6 @@ def local_Unique_Alloc_lift(fgraph, node):
     alloced_var, *alloc_shape = alloc_var.owner.inputs
 
     new_unique, *_ = node.op.make_node(alloced_var).outputs
-
-    old_out = node.outputs[0]
-    new_x = as_tensor_variable(new_unique, ndim=old_out.ndim, dtype=old_out.dtype)
-    return [new_x]
-
-
-@register_useless
-@register_canonicalize
-@node_rewriter([Unique])
-def local_Unique_BroadcastTo_lift(fgraph, node):
-    """Convert ``unique(broadcast_to(x, ...), axis=None)`` to ``unique(x, axis=None)``.
-
-    This isn't really so much a lift as a "reduction/consumption".
-    """
-    if not isinstance(node.op, Unique):
-        return False
-
-    if (
-        node.op.return_index
-        or node.op.return_inverse
-        or node.op.return_counts
-        or node.op.axis is not None
-    ):
-        return False
-
-    bcast_var = node.inputs[0]
-
-    if not (bcast_var.owner and isinstance(bcast_var.owner.op, BroadcastTo)):
-        return False
-
-    bcasted_var, *bcast_shape = bcast_var.owner.inputs
-
-    new_unique, *_ = node.op.make_node(bcasted_var).outputs
 
     old_out = node.outputs[0]
     new_x = as_tensor_variable(new_unique, ndim=old_out.ndim, dtype=old_out.dtype)
@@ -161,16 +128,3 @@ def local_Unique_second(fgraph, node):
     old_out = node.outputs[0]
     new_x = as_tensor_variable(new_unique, ndim=old_out.ndim, dtype=old_out.dtype)
     return [new_x]
-
-
-@register_useless
-@register_canonicalize
-@node_rewriter([BroadcastTo])
-def local_remove_scalar_BroadcastTo(fgraph, node):
-    bcast_shape = node.inputs[1:]
-
-    if not bcast_shape:
-        bcasted_var = node.inputs[0]
-        # If this isn't true, the graph is invalid
-        assert bcasted_var.ndim == 0
-        return [bcasted_var]
