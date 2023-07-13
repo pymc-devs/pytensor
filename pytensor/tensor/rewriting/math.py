@@ -30,7 +30,6 @@ from pytensor.tensor.basic import (
     cast,
     constant,
     extract_constant,
-    fill,
     get_underlying_scalar_constant_value,
     ones_like,
     switch,
@@ -2041,8 +2040,6 @@ def local_zero_div(fgraph, node):
 @register_specialize
 @node_rewriter([at_pow])
 def local_pow_specialize(fgraph, node):
-    # here, we are past the point of canonicalization, so we don't want
-    # to put in un-necessary fills.
     if node.op == at_pow:
         # the idea here is that we have pow(x, y)
         odtype = node.outputs[0].dtype
@@ -2057,7 +2054,7 @@ def local_pow_specialize(fgraph, node):
             if np.all(y == 1):
                 rval = [xsym]
             if np.all(y == 0):
-                rval = [fill(xsym, np.asarray(1, dtype=odtype))]
+                rval = [alloc_like(1, xsym, fgraph)]
             if np.all(y == 0.5):
                 rval = [sqrt(xsym)]
             if np.all(y == -0.5):
@@ -2158,9 +2155,7 @@ def local_mul_specialize(fgraph, node):
     mul(-1, x, y) -/-> neg(mul(x, y))
 
     """
-    # here, we are past the point of canonicalization, so we don't
-    # want to put in un-necessary fills.
-    #
+
     # at this point [post canonicalize], mul() may have many inputs.
     if node.op == mul:
         # the idea here is that we have pow(x, y)
@@ -2221,16 +2216,7 @@ def local_mul_specialize(fgraph, node):
 
 @register_specialize
 @node_rewriter([add])
-def local_add_specialize(fgraph, node):
-    """Remove zeros from ``add``s.
-
-    TODO: This should be a canonicalization, no?
-    """
-    # here, we are past the point of canonicalization, so we don't want
-    # to put in un-necessary fills.
-    if node.op != add:
-        return False
-
+def local_add_remove_zeros(fgraph, node):
     new_inputs = []
     for inp in node.inputs:
         try:
@@ -2253,12 +2239,12 @@ def local_add_specialize(fgraph, node):
         # Reuse call to constant for cache()
         cst = constant(np.zeros((1,) * ndim, dtype=dtype))
         assert cst.type.broadcastable == (True,) * ndim
-        return [broadcast_arrays(cst, *node.inputs)[0]]
+        return [alloc_like(cst, node_output, fgraph)]
 
     if len(new_inputs) == 1:
-        ret = [broadcast_arrays(new_inputs[0], *node.inputs)[0]]
+        ret = [alloc_like(new_inputs[0], node_output, fgraph)]
     else:
-        ret = [broadcast_arrays(add(*new_inputs), *node.inputs)[0]]
+        ret = [alloc_like(add(*new_inputs), node_output, fgraph)]
 
     # The dtype should not be changed. It can happen if the input
     # that was forcing upcasting was equal to 0.
@@ -2376,7 +2362,7 @@ def local_log1p(fgraph, node):
                         ninp = nonconsts[0]
                     if ninp.dtype != log_arg.type.dtype:
                         ninp = ninp.astype(node.outputs[0].dtype)
-                    return [broadcast_arrays(log1p(ninp), *scalar_inputs)[0]]
+                    return [alloc_like(log1p(ninp), node.outputs[0], fgraph)]
 
         elif log_arg.owner and log_arg.owner.op == sub:
             one = extract_constant(log_arg.owner.inputs[0], only_process_constants=True)
@@ -3572,10 +3558,11 @@ def local_reciprocal_1_plus_exp(fgraph, node):
                 if nonconsts[0].owner and nonconsts[0].owner.op == exp:
                     if scalars_ and np.allclose(np.sum(scalars_), 1):
                         out = [
-                            broadcast_arrays(
+                            alloc_like(
                                 sigmoid(neg(nonconsts[0].owner.inputs[0])),
-                                *scalar_inputs,
-                            )[0]
+                                node.outputs[0],
+                                fgraph,
+                            )
                         ]
                         # keep combined stack traces of
                         #     exp(x):           nonconsts[0],
