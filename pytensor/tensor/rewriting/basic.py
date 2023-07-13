@@ -256,7 +256,7 @@ def local_scalar_tensor_scalar(fgraph, node):
             return [s]
 
 
-@register_specialize("local_alloc_elemwise")
+@register_specialize("shape_unsafe")
 @node_rewriter([Elemwise])
 def local_elemwise_alloc(fgraph, node):
     r"""Remove unnecessary `Alloc`\s that occur as inputs of `Elemwise` `Op`\s.
@@ -377,7 +377,7 @@ def local_elemwise_alloc(fgraph, node):
     return ret
 
 
-@register_canonicalize
+@register_canonicalize("shape_unsafe")
 @node_rewriter([Elemwise])
 def local_fill_sink(fgraph, node):
     """
@@ -428,8 +428,8 @@ def local_fill_sink(fgraph, node):
     return replacements
 
 
-@register_specialize
-@register_stabilize
+@register_specialize("shape_unsafe")
+@register_stabilize("shape_unsafe")
 @node_rewriter([fill])
 def local_fill_to_alloc(fgraph, node):
     r"""Remove `fill`\s or replace them with `Alloc`\s.
@@ -479,8 +479,8 @@ compile.optdb.register(
 )
 
 
-@register_canonicalize("fast_compile")
-@register_useless
+@register_canonicalize("fast_compile", "shape_unsafe")
+@register_useless("shape_unsafe")
 @node_rewriter([fill])
 def local_useless_fill(fgraph, node):
     """fill(s,v) -> v
@@ -500,10 +500,10 @@ def local_useless_fill(fgraph, node):
         return [v]
 
 
-@register_specialize
-@register_stabilize
-@register_canonicalize
-@register_useless
+@register_specialize("shape_unsafe")
+@register_stabilize("shape_unsafe")
+@register_canonicalize("shape_unsafe")
+@register_useless("shape_unsafe")
 @node_rewriter([Alloc])
 def local_useless_alloc(fgraph, node):
     """

@@ -682,25 +682,7 @@ def add_traceback_configvars():
 
 
 def add_experimental_configvars():
-    config.add(
-        "experimental__local_alloc_elemwise",
-        "DEPRECATED: If True, enable the experimental"
-        " optimization local_alloc_elemwise."
-        " Generates error if not True. Use"
-        " optimizer_excluding=local_alloc_elemwise"
-        " to disable.",
-        BoolParam(True),
-        in_c_key=False,
-    )
-
-    # False could make the graph faster but not as safe.
-    config.add(
-        "experimental__local_alloc_elemwise_assert",
-        "When the local_alloc_elemwise is applied, add"
-        " an assert to highlight shape errors.",
-        BoolParam(True),
-        in_c_key=False,
-    )
+    return
 
 
 def add_error_and_warning_configvars():

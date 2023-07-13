@@ -1176,7 +1176,7 @@ def mul_calculate(num, denum, aslist=False, out_type=None):
 local_mul_canonizer = AlgebraicCanonizer(
     mul, true_div, reciprocal, mul_calculate, False
 )
-register_canonicalize(local_mul_canonizer, name="local_mul_canonizer")
+register_canonicalize(local_mul_canonizer, "shape_unsafe", name="local_mul_canonizer")
 
 
 @register_canonicalize
@@ -2493,7 +2493,7 @@ add_canonizer = in2out(
 )
 
 
-register_canonicalize(local_add_canonizer, name="local_add_canonizer")
+register_canonicalize(local_add_canonizer, "shape_unsafe", name="local_add_canonizer")
 
 
 def distribute_greedy(pos_pairs, neg_pairs, num, denum, out_type, minscore=0):
