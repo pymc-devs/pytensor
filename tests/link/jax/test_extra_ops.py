@@ -7,7 +7,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import get_test_value
 from pytensor.tensor import extra_ops as at_extra_ops
-from pytensor.tensor.type import matrix, vector
+from pytensor.tensor.type import matrix
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
@@ -61,29 +61,6 @@ def test_extra_ops():
     compare_jax_and_py(
         fgraph, [get_test_value(i) for i in fgraph.inputs], must_be_device_array=False
     )
-
-
-@pytest.mark.parametrize(
-    "x, shape",
-    [
-        (
-            set_test_value(
-                vector("x"), np.random.random(size=(2,)).astype(config.floatX)
-            ),
-            [at.as_tensor(3, dtype=np.int64), at.as_tensor(2, dtype=np.int64)],
-        ),
-        (
-            set_test_value(
-                vector("x"), np.random.random(size=(2,)).astype(config.floatX)
-            ),
-            [at.as_tensor(3, dtype=np.int8), at.as_tensor(2, dtype=np.int64)],
-        ),
-    ],
-)
-def test_BroadcastTo(x, shape):
-    out = at_extra_ops.broadcast_to(x, shape)
-    fgraph = FunctionGraph(outputs=[out])
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
 
 
 @pytest.mark.xfail(
