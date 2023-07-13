@@ -765,7 +765,12 @@ where = switch
 
 @scalar_elemwise
 def second(a, b):
-    """Create a matrix by filling the shape of a with b"""
+    """Create a matrix by filling the broadcasted shapes of a and b with the values of b
+
+    Equivalent to `np.broadcast_arrays(a, b)[1]`
+    Equivalent to `np.array(a).fill(b)` when b is a scalar value.
+
+    """
 
 
 fill = second
