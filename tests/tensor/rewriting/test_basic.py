@@ -1933,3 +1933,17 @@ class TestLocalElemwiseAlloc:
         x_val = np.random.random((1, 5)).astype(self.dtype)
         exp_res = np.broadcast_to(x_val, (5, 5))[..., None] + y_val
         assert np.array_equal(func(y_val, x_val), exp_res)
+
+
+def test_shape_unsafe_tag():
+    mode = get_mode("FAST_RUN")
+    x = vector("x")
+    y = vector("y")
+    out = x * y / y
+
+    fn = function([x, y], out, mode=mode)
+    np.testing.assert_equal(fn([0, 1], [2, 3, 4]), [0, 1])
+
+    fn = function([x, y], out, mode=mode.excluding("shape_unsafe"))
+    with pytest.raises(ValueError):
+        fn([0, 1], [2, 3, 4]), [0, 1]
