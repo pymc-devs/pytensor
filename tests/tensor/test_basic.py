@@ -835,6 +835,22 @@ class TestAlloc:
         assert y_new.shape.eval({x_new: x_new_test}) == (100,)
         assert y_new.eval({x_new: x_new_test}).shape == (100,)
 
+    def test_static_shape(self):
+        x = tensor(shape=(None, 1, 5))
+        d0 = scalar("d0", dtype=int)
+        d1 = scalar("d1", dtype=int)
+        assert at.alloc(x, 3, 1, 5).type.shape == (3, 1, 5)
+        assert at.alloc(x, 3, 4, 5).type.shape == (3, 4, 5)
+        assert at.alloc(x, d0, d1, 5).type.shape == (None, None, 5)
+        assert at.alloc(x, d0, 1, d1).type.shape == (None, 1, 5)
+
+        msg = "Alloc static input type and target shape are incompatible"
+        with pytest.raises(ValueError, match=msg):
+            at.alloc(x, 3, 1, 1)
+
+        with pytest.raises(ValueError, match=msg):
+            at.alloc(x, 3, 1, 6)
+
 
 def test_infer_shape():
     with pytest.raises(TypeError, match="^Shapes must be scalar integers.*"):

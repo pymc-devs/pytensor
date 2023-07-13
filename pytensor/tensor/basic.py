@@ -1432,17 +1432,41 @@ class Alloc(COp):
     __props__ = ()
 
     def make_node(self, value, *shape):
-        v = as_tensor_variable(value)
-        sh, static_shape = infer_static_shape(shape)
-        if v.ndim > len(sh):
+        value = as_tensor_variable(value)
+        shape, static_shape = infer_static_shape(shape)
+        if value.ndim > len(shape):
             raise TypeError(
                 "The Alloc value to use has more dimensions"
                 " than the specified dimensions",
-                v.ndim,
-                len(sh),
+                value.ndim,
+                len(shape),
             )
-        otype = TensorType(dtype=v.dtype, shape=static_shape)
-        return Apply(self, [v] + sh, [otype()])
+
+        # Combine static shape information from value and shape
+        combined_static_shape = list(static_shape).copy()
+        new_dims = len(shape) - value.type.ndim
+        extended_value_static_shape = (None,) * new_dims + value.type.shape
+        extended_value_broadcastable = (False,) * new_dims + value.type.broadcastable
+        for i, (v_bc, v_st, sh_st) in enumerate(
+            zip(
+                extended_value_broadcastable,
+                extended_value_static_shape,
+                static_shape,
+            )
+        ):
+            # If value is not broadcastable and we don't know the target static shape: use value static shape
+            if (not v_bc) and (sh_st is None):
+                combined_static_shape[i] = v_st
+            # Otherwise check if static shapes are compatible
+            elif (v_st is not None) and (sh_st is not None):
+                # They must match or if not, the value must be broadcastable
+                if v_st != sh_st and not v_bc:
+                    raise ValueError(
+                        f"Alloc static input type and target shape are incompatible: {value.type} vs {static_shape}"
+                    )
+
+        otype = TensorType(dtype=value.dtype, shape=combined_static_shape)
+        return Apply(self, [value] + shape, [otype()])
 
     def perform(self, node, inputs, out_):
         (out,) = out_
