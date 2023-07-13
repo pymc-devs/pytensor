@@ -38,6 +38,7 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.extra_ops import broadcast_arrays
 from pytensor.tensor.math import (
     All,
     Any,
@@ -146,12 +147,6 @@ def get_constant(v):
         return None
     else:
         return v
-
-
-def fill_chain(new_out, orig_inputs):
-    for i in orig_inputs:
-        new_out = fill(i, new_out)
-    return [new_out]
 
 
 @register_canonicalize
@@ -1136,7 +1131,7 @@ class AlgebraicCanonizer(NodeRewriter):
             new = cast(new, out.type.dtype)
 
         if new.type.broadcastable != out.type.broadcastable:
-            new = fill_chain(new, node.inputs)[0]
+            new = broadcast_arrays(new, *node.inputs)[0]
 
         if (new.type.dtype == out.type.dtype) and (
             new.type.broadcastable == out.type.broadcastable
@@ -1961,7 +1956,9 @@ def local_mul_zero(fgraph, node):
             # print 'MUL by value', value, node.inputs
             if value == 0:
                 # print '... returning zeros'
-                return fill_chain(_asarray(0, dtype=otype.dtype), node.inputs)
+                return [
+                    broadcast_arrays(_asarray(0, dtype=otype.dtype), *node.inputs)[0]
+                ]
 
 
 # TODO: Add this to the canonicalization to reduce redundancy.
@@ -2260,12 +2257,12 @@ def local_add_specialize(fgraph, node):
         # Reuse call to constant for cache()
         cst = constant(np.zeros((1,) * ndim, dtype=dtype))
         assert cst.type.broadcastable == (True,) * ndim
-        return fill_chain(cst, node.inputs)
+        return [broadcast_arrays(cst, *node.inputs)[0]]
 
     if len(new_inputs) == 1:
-        ret = fill_chain(new_inputs[0], node.inputs)
+        ret = [broadcast_arrays(new_inputs[0], *node.inputs)[0]]
     else:
-        ret = fill_chain(add(*new_inputs), node.inputs)
+        ret = [broadcast_arrays(add(*new_inputs), *node.inputs)[0]]
 
     # The dtype should not be changed. It can happen if the input
     # that was forcing upcasting was equal to 0.
@@ -2383,7 +2380,7 @@ def local_log1p(fgraph, node):
                         ninp = nonconsts[0]
                     if ninp.dtype != log_arg.type.dtype:
                         ninp = ninp.astype(node.outputs[0].dtype)
-                    return fill_chain(log1p(ninp), scalar_inputs)
+                    return [broadcast_arrays(log1p(ninp), *scalar_inputs)[0]]
 
         elif log_arg.owner and log_arg.owner.op == sub:
             one = extract_constant(log_arg.owner.inputs[0], only_process_constants=True)
@@ -3578,10 +3575,12 @@ def local_reciprocal_1_plus_exp(fgraph, node):
             if len(nonconsts) == 1:
                 if nonconsts[0].owner and nonconsts[0].owner.op == exp:
                     if scalars_ and np.allclose(np.sum(scalars_), 1):
-                        out = fill_chain(
-                            sigmoid(neg(nonconsts[0].owner.inputs[0])),
-                            scalar_inputs,
-                        )
+                        out = [
+                            broadcast_arrays(
+                                sigmoid(neg(nonconsts[0].owner.inputs[0])),
+                                *scalar_inputs,
+                            )[0]
+                        ]
                         # keep combined stack traces of
                         #     exp(x):           nonconsts[0],
                         #     1 + exp(x):       reciprocal_arg,
