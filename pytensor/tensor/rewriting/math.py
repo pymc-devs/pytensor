@@ -85,7 +85,7 @@ from pytensor.tensor.math import sum as at_sum
 from pytensor.tensor.math import true_div
 from pytensor.tensor.rewriting.basic import (
     broadcast_like,
-    encompasses_broadcastable,
+    broadcasted_by,
     local_fill_sink,
     register_canonicalize,
     register_specialize,
@@ -2049,9 +2049,7 @@ def local_pow_specialize(fgraph, node):
         xsym = node.inputs[0]
         ysym = node.inputs[1]
         y = get_constant(ysym)
-        if (y is not None) and encompasses_broadcastable(
-            xsym.type.broadcastable, ysym.type.broadcastable
-        ):
+        if (y is not None) and not broadcasted_by(xsym, ysym):
             rval = None
 
             if np.all(y == 2):
@@ -2107,9 +2105,7 @@ def local_pow_to_nested_squaring(fgraph, node):
                 y = y[0]
             except IndexError:
                 pass
-        if (y is not None) and encompasses_broadcastable(
-            xsym.type.broadcastable, ysym.type.broadcastable
-        ):
+        if (y is not None) and not broadcasted_by(xsym, ysym):
             rval = None
             # 512 is too small for the cpu and too big for some gpu!
             if abs(y) == int(abs(y)) and abs(y) <= 512:

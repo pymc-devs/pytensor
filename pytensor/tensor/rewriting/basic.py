@@ -49,7 +49,7 @@ from pytensor.tensor.math import eq
 from pytensor.tensor.shape import Shape_i
 from pytensor.tensor.sort import TopKOp
 from pytensor.tensor.type import DenseTensorType, TensorType
-from pytensor.tensor.var import TensorConstant
+from pytensor.tensor.var import TensorConstant, TensorVariable
 from pytensor.utils import NoDuplicateOptWarningFilter
 
 
@@ -61,27 +61,26 @@ _logger = logging.getLogger("pytensor.tensor.rewriting.basic")
 _logger.addFilter(NoDuplicateOptWarningFilter())
 
 
-def encompasses_broadcastable(b1, b2):
-    """
+def broadcasted_by(x: TensorVariable, y: TensorVariable) -> bool:
+    """Check whether x would be broadcasted by y in an Elemwise operation
 
     Parameters
     ----------
-    b1
-        The broadcastable attribute of a tensor type.
-    b2
-        The broadcastable attribute of a tensor type.
+    x: TensorVariable
+        The variable that may be broadcasted by y
+    y: TensorVariable
+        The variable that may broadcast x
 
     Returns
     -------
-    bool
-        True if the broadcastable patterns b1 and b2 are such that b2 is
-        broadcasted to b1's shape and not the opposite.
-
+    broadcasted_by: bool
     """
-    if len(b1) < len(b2):
-        return False
-    b1 = b1[-len(b2) :]
-    return not any(v1 and not v2 for v1, v2 in zip(b1, b2))
+    bx = x.type.broadcastable
+    by = y.type.broadcastable
+    if len(bx) < len(by):
+        return True
+    bx = bx[-len(by) :]
+    return any(bx_dim and not by_dim for bx_dim, by_dim in zip(bx, by))
 
 
 def merge_broadcastables(broadcastables):
