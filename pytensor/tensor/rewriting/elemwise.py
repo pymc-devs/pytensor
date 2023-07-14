@@ -34,7 +34,7 @@ from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import exp
 from pytensor.tensor.rewriting.basic import (
-    broadcast_like,
+    alloc_like,
     register_canonicalize,
     register_specialize,
 )
@@ -1242,7 +1242,7 @@ def local_inline_composite_constants(fgraph, node):
     # Some of the inlined constants were broadcasting the output shape
     if node.outputs[0].type.broadcastable != new_outputs[0].type.broadcastable:
         new_outputs = [
-            broadcast_like(new_out, template=node.outputs[0], fgraph=fgraph)
+            alloc_like(new_out, template=node.outputs[0], fgraph=fgraph)
             for new_out in new_outputs
         ]
 

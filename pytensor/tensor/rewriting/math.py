@@ -84,7 +84,7 @@ from pytensor.tensor.math import (
 from pytensor.tensor.math import sum as at_sum
 from pytensor.tensor.math import true_div
 from pytensor.tensor.rewriting.basic import (
-    broadcast_like,
+    alloc_like,
     broadcasted_by,
     local_fill_sink,
     register_canonicalize,
@@ -1973,7 +1973,7 @@ def local_div_to_reciprocal(fgraph, node):
             new_out = cast(new_out, dtype=out.dtype)
         # The ones could have forced a specific length
         if not out.type.is_super(new_out.type):
-            new_out = broadcast_like(new_out, out, fgraph)
+            new_out = alloc_like(new_out, out, fgraph)
         return [new_out]
     else:
         return False
@@ -1994,9 +1994,9 @@ def local_pow_canonicalize(fgraph, node):
     if node.op == at_pow:
         cst = get_constant(node.inputs[1])
         if cst == 0:
-            return [broadcast_like(1, node.outputs[0], fgraph)]
+            return [alloc_like(1, node.outputs[0], fgraph)]
         if cst == 1:
-            return [broadcast_like(node.inputs[0], node.outputs[0], fgraph)]
+            return [alloc_like(node.inputs[0], node.outputs[0], fgraph)]
     else:
         return False
 
@@ -2033,7 +2033,7 @@ def local_zero_div(fgraph, node):
         node.op.scalar_op, (aes.IntDiv, aes.TrueDiv)
     ):
         if get_constant(node.inputs[0]) == 0:
-            ret = broadcast_like(0, node.outputs[0], fgraph)
+            ret = alloc_like(0, node.outputs[0], fgraph)
             ret.tag.values_eq_approx = values_eq_approx_remove_nan
             return [ret]
 
@@ -2184,7 +2184,7 @@ def local_mul_specialize(fgraph, node):
                 has_neg ^= True  # toggles
             elif y == 0.0:
                 # if we find any zero, we just return right away
-                return [broadcast_like(0, node.outputs[0], fgraph)]
+                return [alloc_like(0, node.outputs[0], fgraph)]
             else:
                 new_inputs.append(inp)
 
@@ -2209,14 +2209,14 @@ def local_mul_specialize(fgraph, node):
                         new_inputs = [m1] + new_inputs
                     rval = mul(*new_inputs)
 
-                return [broadcast_like(rval, node.outputs[0], fgraph)]
+                return [alloc_like(rval, node.outputs[0], fgraph)]
             else:
                 # there are no variable inputs to mul
                 # N.B. this could have been constant-folded...
                 if has_neg:
-                    return [broadcast_like(-1, node.outputs[0], fgraph)]
+                    return [alloc_like(-1, node.outputs[0], fgraph)]
                 else:
-                    return [broadcast_like(1, node.outputs[0], fgraph)]
+                    return [alloc_like(1, node.outputs[0], fgraph)]
 
 
 @register_specialize

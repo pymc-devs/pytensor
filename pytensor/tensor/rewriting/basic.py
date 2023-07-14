@@ -8,6 +8,7 @@ import numpy as np
 import pytensor.scalar.basic as aes
 from pytensor import compile
 from pytensor.compile.ops import ViewOp
+from pytensor.graph import FunctionGraph
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
     NodeRewriter,
@@ -87,13 +88,13 @@ def merge_broadcastables(broadcastables):
     return [all(bcast) for bcast in zip(*broadcastables)]
 
 
-def broadcast_like(value, template, fgraph, dtype=None):
-    """
-    Return a Variable with the same shape and dtype as the template,
-    filled by broadcasting value through it. `value` will be cast as
-    necessary.
-
-    """
+def alloc_like(
+    value: TensorVariable,
+    template: TensorVariable,
+    fgraph: FunctionGraph,
+    dtype=None,
+) -> TensorVariable:
+    """Fill value to the same shape and dtype as the template via alloc."""
     value = as_tensor_variable(value)
     if value.type.is_super(template.type):
         return value
@@ -438,7 +439,7 @@ def local_fill_to_alloc(fgraph, node):
         # In this case, we assume that some broadcasting is needed (otherwise
         # the condition above would've been true), so we replace the `fill`
         # with an `Alloc`.
-        o = broadcast_like(values_ref, shape_ref, fgraph, dtype=values_ref.dtype)
+        o = alloc_like(values_ref, shape_ref, fgraph, dtype=values_ref.dtype)
         copy_stack_trace(node.outputs[0], o)
         return [o]
 
