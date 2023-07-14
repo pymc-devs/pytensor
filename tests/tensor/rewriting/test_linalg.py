@@ -94,10 +94,10 @@ def test_tag_solve_triangular():
     b2 = solve(U, x)
     f = pytensor.function([A, x], b1)
 
-    X = np.random.normal(size=(10, 10))
+    X = np.random.normal(size=(10, 10)).astype(config.floatX)
     X = X @ X.T
     X_chol = np.linalg.cholesky(X)
-    eye = np.eye(10)
+    eye = np.eye(10, dtype=config.floatX)
 
     if config.mode != "FAST_COMPILE":
         toposort = f.maker.fgraph.toposort()
