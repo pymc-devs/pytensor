@@ -2,6 +2,7 @@ import numpy as np
 import numpy.linalg
 import pytest
 import scipy.linalg
+from numpy.testing import assert_allclose
 
 import pytensor
 from pytensor import function
@@ -12,7 +13,7 @@ from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import _allclose
 from pytensor.tensor.nlinalg import MatrixInverse, matrix_inverse
 from pytensor.tensor.rewriting.linalg import inv_as_solve
-from pytensor.tensor.slinalg import Cholesky, Solve, solve
+from pytensor.tensor.slinalg import Cholesky, Solve, SolveTriangular, solve
 from pytensor.tensor.type import dmatrix, matrix, vector
 from tests import unittest_tools as utt
 from tests.test_rop import break_op
@@ -85,21 +86,36 @@ def test_tag_solve_triangular():
     cholesky_lower = Cholesky(lower=True)
     cholesky_upper = Cholesky(lower=False)
     A = matrix("A")
-    x = vector("x")
+    x = matrix("x")
+
     L = cholesky_lower(A)
     U = cholesky_upper(A)
     b1 = solve(L, x)
     b2 = solve(U, x)
     f = pytensor.function([A, x], b1)
+
+    X = np.random.normal(size=(10, 10))
+    X = X @ X.T
+    X_chol = np.linalg.cholesky(X)
+    eye = np.eye(10)
+
     if config.mode != "FAST_COMPILE":
-        for node in f.maker.fgraph.toposort():
-            if isinstance(node.op, Solve):
-                assert node.op.assume_a != "gen" and node.op.lower
+        toposort = f.maker.fgraph.toposort()
+        op_list = [node.op for node in toposort]
+
+        assert not any(isinstance(op, Solve) for op in op_list)
+        assert any(isinstance(op, SolveTriangular) for op in op_list)
+
+        assert_allclose(f(X, eye) @ X_chol, eye, atol=1e-8)
+
     f = pytensor.function([A, x], b2)
+
     if config.mode != "FAST_COMPILE":
-        for node in f.maker.fgraph.toposort():
-            if isinstance(node.op, Solve):
-                assert node.op.assume_a != "gen" and not node.op.lower
+        toposort = f.maker.fgraph.toposort()
+        op_list = [node.op for node in toposort]
+        assert not any(isinstance(op, Solve) for op in op_list)
+        assert any(isinstance(op, SolveTriangular) for op in op_list)
+        assert_allclose(f(X, eye).T @ X_chol, eye, atol=1e-8)
 
 
 def test_matrix_inverse_solve():
