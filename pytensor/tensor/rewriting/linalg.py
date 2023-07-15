@@ -11,7 +11,7 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.slinalg import Cholesky, Solve, cholesky, solve
+from pytensor.tensor.slinalg import Cholesky, Solve, SolveTriangular, cholesky, solve
 
 
 logger = logging.getLogger(__name__)
@@ -50,31 +50,30 @@ def inv_as_solve(fgraph, node):
 @register_stabilize
 @register_canonicalize
 @node_rewriter([Solve])
-def tag_solve_triangular(fgraph, node):
+def generic_solve_to_solve_triangular(fgraph, node):
     """
-    If a general solve() is applied to the output of a cholesky op, then
+    If any solve() is applied to the output of a cholesky op, then
     replace it with a triangular solve.
 
     """
     if isinstance(node.op, Solve):
-        if node.op.assume_a == "gen":
-            A, b = node.inputs  # result is solution Ax=b
-            if A.owner and isinstance(A.owner.op, Cholesky):
-                if A.owner.op.lower:
-                    return [Solve(assume_a="sym", lower=True)(A, b)]
+        A, b = node.inputs  # result is solution Ax=b
+        if A.owner and isinstance(A.owner.op, Cholesky):
+            if A.owner.op.lower:
+                return [SolveTriangular(lower=True)(A, b)]
+            else:
+                return [SolveTriangular(lower=False)(A, b)]
+        if (
+            A.owner
+            and isinstance(A.owner.op, DimShuffle)
+            and A.owner.op.new_order == (1, 0)
+        ):
+            (A_T,) = A.owner.inputs
+            if A_T.owner and isinstance(A_T.owner.op, Cholesky):
+                if A_T.owner.op.lower:
+                    return [SolveTriangular(lower=False)(A, b)]
                 else:
-                    return [Solve(assume_a="sym", lower=False)(A, b)]
-            if (
-                A.owner
-                and isinstance(A.owner.op, DimShuffle)
-                and A.owner.op.new_order == (1, 0)
-            ):
-                (A_T,) = A.owner.inputs
-                if A_T.owner and isinstance(A_T.owner.op, Cholesky):
-                    if A_T.owner.op.lower:
-                        return [Solve(assume_a="sym", lower=False)(A, b)]
-                    else:
-                        return [Solve(assume_a="sym", lower=True)(A, b)]
+                    return [SolveTriangular(lower=True)(A, b)]
 
 
 @register_canonicalize
