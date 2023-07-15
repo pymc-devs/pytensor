@@ -106,7 +106,9 @@ def test_tag_solve_triangular():
         assert not any(isinstance(op, Solve) for op in op_list)
         assert any(isinstance(op, SolveTriangular) for op in op_list)
 
-        assert_allclose(f(X, eye) @ X_chol, eye, atol=1e-8 if config.floatX.endswith('64') else 1e-4)
+        assert_allclose(
+            f(X, eye) @ X_chol, eye, atol=1e-8 if config.floatX.endswith("64") else 1e-4
+        )
 
     f = pytensor.function([A, x], b2)
 
@@ -115,7 +117,11 @@ def test_tag_solve_triangular():
         op_list = [node.op for node in toposort]
         assert not any(isinstance(op, Solve) for op in op_list)
         assert any(isinstance(op, SolveTriangular) for op in op_list)
-        assert_allclose(f(X, eye).T @ X_chol, eye, atol=1e-8 if config.floatX.endswith('64') else 1e-4)
+        assert_allclose(
+            f(X, eye).T @ X_chol,
+            eye,
+            atol=1e-8 if config.floatX.endswith("64") else 1e-4,
+        )
 
 
 def test_matrix_inverse_solve():
