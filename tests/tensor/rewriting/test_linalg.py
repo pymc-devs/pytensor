@@ -82,7 +82,7 @@ def test_transinv_to_invtrans():
                 assert node.inputs[0].name == "X"
 
 
-def test_tag_solve_triangular():
+def test_generic_solve_to_solve_triangular():
     cholesky_lower = Cholesky(lower=True)
     cholesky_upper = Cholesky(lower=False)
     A = matrix("A")

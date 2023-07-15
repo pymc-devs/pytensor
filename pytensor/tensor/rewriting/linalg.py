@@ -50,7 +50,7 @@ def inv_as_solve(fgraph, node):
 @register_stabilize
 @register_canonicalize
 @node_rewriter([Solve])
-def tag_solve_triangular(fgraph, node):
+def generic_solve_to_solve_triangular(fgraph, node):
     """
     If any solve() is applied to the output of a cholesky op, then
     replace it with a triangular solve.
