@@ -39,34 +39,15 @@ IDTypesType = Literal["id", "int", "CHAR", "auto", ""]
 pydot_imported = False
 pydot_imported_msg = ""
 try:
-    # pydot-ng is a fork of pydot that is better maintained
-    import pydot_ng as pd
+    import pydot as pd
 
-    if pd.find_graphviz():
-        pydot_imported = True
-    else:
-        pydot_imported_msg = "pydot-ng can't find graphviz. Install graphviz."
+    pd.Dot.create(pd.Dot())
+    pydot_imported = True
 except ImportError:
-    try:
-        # fall back on pydot if necessary
-        import pydot as pd
-
-        if hasattr(pd, "find_graphviz"):
-            if pd.find_graphviz():
-                pydot_imported = True
-            else:
-                pydot_imported_msg = "pydot can't find graphviz"
-        else:
-            pd.Dot.create(pd.Dot())
-            pydot_imported = True
-    except ImportError:
-        # tests should not fail on optional dependency
-        pydot_imported_msg = (
-            "Install the python package pydot or pydot-ng. Install graphviz."
-        )
-    except Exception as e:
-        pydot_imported_msg = "An error happened while importing/trying pydot: "
-        pydot_imported_msg += str(e.args)
+    pydot_imported_msg = "pydot package not installed"
+except Exception as e:
+    pydot_imported_msg = "An error happened while importing/testing pydot: "
+    pydot_imported_msg += str(e.args)
 
 
 _logger = logging.getLogger("pytensor.printing")
