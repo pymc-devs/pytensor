@@ -94,7 +94,8 @@ def test_generic_solve_to_solve_triangular():
     b2 = solve(U, x)
     f = pytensor.function([A, x], b1)
 
-    X = np.random.normal(size=(10, 10)).astype(config.floatX)
+    rng = np.random.default_rng(97)
+    X = rng.normal(size=(10, 10)).astype(config.floatX)
     X = X @ X.T
     X_chol = np.linalg.cholesky(X)
     eye = np.eye(10, dtype=config.floatX)
