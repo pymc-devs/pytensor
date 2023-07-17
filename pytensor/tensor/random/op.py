@@ -191,6 +191,8 @@ class RandomVariable(Op):
 
         """
 
+        from pytensor.tensor.extra_ops import broadcast_shape_iter
+
         size_len = get_vector_length(size)
 
         if size_len > 0:
@@ -216,57 +218,52 @@ class RandomVariable(Op):
 
         # Broadcast the parameters
         param_shapes = params_broadcast_shapes(
-            param_shapes or [shape_tuple(p) for p in dist_params], self.ndims_params
+            param_shapes or [shape_tuple(p) for p in dist_params],
+            self.ndims_params,
         )
 
-        def slice_ind_dims(p, ps, n):
+        def extract_batch_shape(p, ps, n):
             shape = tuple(ps)
 
             if n == 0:
-                return (p, shape)
+                return shape
 
-            ind_slice = (slice(None),) * (p.ndim - n) + (0,) * n
-            ind_shape = [
+            batch_shape = [
                 s if b is False else constant(1, "int64")
-                for s, b in zip(shape[:-n], p.broadcastable[:-n])
+                for s, b in zip(shape[:-n], p.type.broadcastable[:-n])
             ]
-            return (
-                p[ind_slice],
-                ind_shape,
-            )
+            return batch_shape
 
         # These are versions of our actual parameters with the anticipated
         # dimensions (i.e. support dimensions) removed so that only the
         # independent variate dimensions are left.
-        params_ind_slice = tuple(
-            slice_ind_dims(p, ps, n)
+        params_batch_shape = tuple(
+            extract_batch_shape(p, ps, n)
             for p, ps, n in zip(dist_params, param_shapes, self.ndims_params)
         )
 
-        if len(params_ind_slice) == 1:
-            _, shape_ind = params_ind_slice[0]
-        elif len(params_ind_slice) > 1:
+        if len(params_batch_shape) == 1:
+            [batch_shape] = params_batch_shape
+        elif len(params_batch_shape) > 1:
             # If there are multiple parameters, the dimensions of their
             # independent variates should broadcast together.
-            p_slices, p_shapes = zip(*params_ind_slice)
-
-            shape_ind = pytensor.tensor.extra_ops.broadcast_shape_iter(
-                p_shapes, arrays_are_shapes=True
+            batch_shape = broadcast_shape_iter(
+                params_batch_shape,
+                arrays_are_shapes=True,
             )
-
         else:
             # Distribution has no parameters
-            shape_ind = ()
+            batch_shape = ()
 
         if self.ndim_supp == 0:
-            shape_supp = ()
+            supp_shape = ()
         else:
-            shape_supp = self._supp_shape_from_params(
+            supp_shape = self._supp_shape_from_params(
                 dist_params,
                 param_shapes=param_shapes,
             )
 
-        shape = tuple(shape_ind) + tuple(shape_supp)
+        shape = tuple(batch_shape) + tuple(supp_shape)
         if not shape:
             shape = constant([], dtype="int64")
 
