@@ -6,12 +6,7 @@ from pytensor import config, function
 from pytensor.gradient import NullTypeGradError, grad
 from pytensor.raise_op import Assert
 from pytensor.tensor.math import eq
-from pytensor.tensor.random.op import (
-    RandomState,
-    RandomVariable,
-    default_rng,
-    default_supp_shape_from_params,
-)
+from pytensor.tensor.random.op import RandomState, RandomVariable, default_rng
 from pytensor.tensor.shape import specify_shape
 from pytensor.tensor.type import all_dtypes, iscalar, tensor
 
@@ -20,29 +15,6 @@ from pytensor.tensor.type import all_dtypes, iscalar, tensor
 def set_pytensor_flags():
     with config.change_flags(cxx="", compute_test_value="raise"):
         yield
-
-
-def test_default_supp_shape_from_params():
-    with pytest.raises(ValueError, match="^ndim_supp*"):
-        default_supp_shape_from_params(0, (np.array([1, 2]), 0))
-
-    res = default_supp_shape_from_params(
-        1, (np.array([1, 2]), np.eye(2)), rep_param_idx=0
-    )
-    assert res == (2,)
-
-    res = default_supp_shape_from_params(
-        1, (np.array([1, 2]), 0), param_shapes=((2,), ())
-    )
-    assert res == (2,)
-
-    with pytest.raises(ValueError, match="^Reference parameter*"):
-        default_supp_shape_from_params(1, (np.array(1),), rep_param_idx=0)
-
-    res = default_supp_shape_from_params(
-        2, (np.array([1, 2]), np.ones((2, 3, 4))), rep_param_idx=1
-    )
-    assert res == (3, 4)
 
 
 def test_RandomVariable_basics():

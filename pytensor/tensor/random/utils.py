@@ -1,13 +1,13 @@
-from collections.abc import Sequence
 from functools import wraps
 from itertools import zip_longest
 from types import ModuleType
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from typing import TYPE_CHECKING, Literal, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
 from pytensor.compile.sharedvalue import shared
 from pytensor.graph.basic import Constant, Variable
+from pytensor.scalar import ScalarVariable
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import as_tensor_variable, cast, constant
 from pytensor.tensor.extra_ops import broadcast_to
@@ -285,3 +285,50 @@ class RandomStream:
         rng.default_update = new_rng
 
         return out
+
+
+def supp_shape_from_ref_param_shape(
+    *,
+    ndim_supp: int,
+    dist_params: Sequence[Variable],
+    param_shapes: Optional[Sequence[Tuple[ScalarVariable, ...]]] = None,
+    ref_param_idx: int,
+) -> Union[TensorVariable, Tuple[ScalarVariable, ...]]:
+    """Extract the support shape of a multivariate `RandomVariable` from the shape of a reference parameter.
+
+    Several multivariate `RandomVariable`s have a support shape determined by the last dimensions of a parameter.
+    For example `multivariate_normal(zeros(5, 3), eye(3)) has a support shape of (3,) that is determined by the
+    last dimension of the mean or the covariance.
+
+    Parameters
+    ----------
+    ndim_supp: int
+        Support dimensionality of the `RandomVariable`.
+        (e.g. a multivariate normal draw is 1D, so `ndim_supp = 1`).
+    dist_params: list of `pytensor.graph.basic.Variable`
+        The distribution parameters.
+    param_shapes: list of tuple of `ScalarVariable` (optional)
+        Symbolic shapes for each distribution parameter.  These will
+        be used in place of distribution parameter-generated shapes.
+    ref_param_idx: int
+        The index of the distribution parameter to use as a reference
+
+    Returns
+    -------
+    out: tuple
+        Representing the support shape for a `RandomVariable` with the given `dist_params`.
+
+    """
+    if ndim_supp <= 0:
+        raise ValueError("ndim_supp must be greater than 0")
+    if param_shapes is not None:
+        ref_param = param_shapes[ref_param_idx]
+        return (ref_param[-ndim_supp],)
+    else:
+        ref_param = dist_params[ref_param_idx]
+        if ref_param.ndim < ndim_supp:
+            raise ValueError(
+                "Reference parameter does not match the expected dimensions; "
+                f"{ref_param} has less than {ndim_supp} dim(s)."
+            )
+        return ref_param.shape[-ndim_supp:]

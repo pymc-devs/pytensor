@@ -4,7 +4,11 @@ import pytest
 from pytensor import config, function
 from pytensor.compile.mode import Mode
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
-from pytensor.tensor.random.utils import RandomStream, broadcast_params
+from pytensor.tensor.random.utils import (
+    RandomStream,
+    broadcast_params,
+    supp_shape_from_ref_param_shape,
+)
 from pytensor.tensor.type import matrix, tensor
 from tests import unittest_tools as utt
 
@@ -271,3 +275,41 @@ class TestSharedRandomStream:
             su2[0].set_value(su1[0].get_value())
 
         np.testing.assert_array_almost_equal(f1(), f2(), decimal=6)
+
+
+def test_supp_shape_from_ref_param_shape():
+    with pytest.raises(ValueError, match="^ndim_supp*"):
+        supp_shape_from_ref_param_shape(
+            ndim_supp=0,
+            dist_params=(np.array([1, 2]), 0),
+            ref_param_idx=0,
+        )
+
+    res = supp_shape_from_ref_param_shape(
+        ndim_supp=1,
+        dist_params=(np.array([1, 2]), np.eye(2)),
+        ref_param_idx=0,
+    )
+    assert res == (2,)
+
+    res = supp_shape_from_ref_param_shape(
+        ndim_supp=1,
+        dist_params=(np.array([1, 2]), 0),
+        param_shapes=((2,), ()),
+        ref_param_idx=0,
+    )
+    assert res == (2,)
+
+    with pytest.raises(ValueError, match="^Reference parameter*"):
+        supp_shape_from_ref_param_shape(
+            ndim_supp=1,
+            dist_params=(np.array(1),),
+            ref_param_idx=0,
+        )
+
+    res = supp_shape_from_ref_param_shape(
+        ndim_supp=2,
+        dist_params=(np.array([1, 2]), np.ones((2, 3, 4))),
+        ref_param_idx=1,
+    )
+    assert res == (3, 4)

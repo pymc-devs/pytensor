@@ -5,10 +5,13 @@ import numpy as np
 import scipy.stats as stats
 
 import pytensor
-from pytensor.tensor.basic import as_tensor_variable
-from pytensor.tensor.random.op import RandomVariable, default_supp_shape_from_params
+from pytensor.tensor.basic import as_tensor_variable, arange
+from pytensor.tensor.random.op import RandomVariable
 from pytensor.tensor.random.type import RandomGeneratorType, RandomStateType
-from pytensor.tensor.random.utils import broadcast_params
+from pytensor.tensor.random.utils import (
+    broadcast_params,
+    supp_shape_from_ref_param_shape,
+)
 from pytensor.tensor.random.var import (
     RandomGeneratorSharedVariable,
     RandomStateSharedVariable,
@@ -855,6 +858,14 @@ class MvNormalRV(RandomVariable):
     dtype = "floatX"
     _print_name = ("MultivariateNormal", "\\operatorname{MultivariateNormal}")
 
+    def _supp_shape_from_params(self, dist_params, param_shapes=None):
+        return supp_shape_from_ref_param_shape(
+            ndim_supp=self.ndim_supp,
+            dist_params=dist_params,
+            param_shapes=param_shapes,
+            ref_param_idx=0,
+        )
+
     def __call__(self, mean=None, cov=None, size=None, **kwargs):
         r""" "Draw samples from a multivariate normal distribution.
 
@@ -932,6 +943,14 @@ class DirichletRV(RandomVariable):
     ndims_params = [1]
     dtype = "floatX"
     _print_name = ("Dirichlet", "\\operatorname{Dirichlet}")
+
+    def _supp_shape_from_params(self, dist_params, param_shapes=None):
+        return supp_shape_from_ref_param_shape(
+            ndim_supp=self.ndim_supp,
+            dist_params=dist_params,
+            param_shapes=param_shapes,
+            ref_param_idx=0,
+        )
 
     def __call__(self, alphas, size=None, **kwargs):
         r"""Draw samples from a dirichlet distribution.
@@ -1776,9 +1795,12 @@ class MultinomialRV(RandomVariable):
         """
         return super().__call__(n, p, size=size, **kwargs)
 
-    def _supp_shape_from_params(self, dist_params, rep_param_idx=1, param_shapes=None):
-        return default_supp_shape_from_params(
-            self.ndim_supp, dist_params, rep_param_idx, param_shapes
+    def _supp_shape_from_params(self, dist_params, param_shapes=None):
+        return supp_shape_from_ref_param_shape(
+            ndim_supp=self.ndim_supp,
+            dist_params=dist_params,
+            param_shapes=param_shapes,
+            ref_param_idx=1,
         )
 
     @classmethod
