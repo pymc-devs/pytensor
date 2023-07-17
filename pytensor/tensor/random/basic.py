@@ -5,7 +5,7 @@ import numpy as np
 import scipy.stats as stats
 
 import pytensor
-from pytensor.tensor.basic import as_tensor_variable, arange
+from pytensor.tensor.basic import arange, as_tensor_variable
 from pytensor.tensor.random.op import RandomVariable
 from pytensor.tensor.random.type import RandomGeneratorType, RandomStateType
 from pytensor.tensor.random.utils import (
@@ -2072,18 +2072,15 @@ class PermutationRV(RandomVariable):
 
     @classmethod
     def rng_fn(cls, rng, x, size):
-        return rng.permutation(x if x.ndim > 0 else x.item())
+        return rng.permutation(x)
 
-    def _infer_shape(self, size, dist_params, param_shapes=None):
-        param_shapes = param_shapes or [p.shape for p in dist_params]
-
-        (x,) = dist_params
-        (x_shape,) = param_shapes
-
-        if x.ndim == 0:
-            return (x,)
-        else:
-            return x_shape
+    def _supp_shape_from_params(self, dist_params, param_shapes=None):
+        return supp_shape_from_ref_param_shape(
+            ndim_supp=self.ndim_supp,
+            dist_params=dist_params,
+            param_shapes=param_shapes,
+            ref_param_idx=0,
+        )
 
     def __call__(self, x, **kwargs):
         r"""Randomly permute a sequence or a range of values.
@@ -2096,15 +2093,35 @@ class PermutationRV(RandomVariable):
         Parameters
         ----------
         x
-            If `x` is an integer, randomly permute `np.arange(x)`. If `x` is a sequence,
-            shuffle its elements randomly.
+            Elements to be shuffled.
 
         """
         x = as_tensor_variable(x)
         return super().__call__(x, dtype=x.dtype, **kwargs)
 
 
-permutation = PermutationRV()
+_permutation = PermutationRV()
+
+
+def permutation(x, **kwargs):
+    r"""Randomly permute a sequence or a range of values.
+
+    Signature
+    ---------
+
+    `(x) -> (x)`
+
+    Parameters
+    ----------
+    x
+        If `x` is an integer, randomly permute `np.arange(x)`. If `x` is a sequence,
+        shuffle its elements randomly.
+
+    """
+    x = as_tensor_variable(x)
+    if x.type.ndim == 0:
+        x = arange(x)
+    return _permutation(x, **kwargs)
 
 
 __all__ = [
