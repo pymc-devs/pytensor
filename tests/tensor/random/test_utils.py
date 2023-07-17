@@ -313,3 +313,11 @@ def test_supp_shape_from_ref_param_shape():
         ref_param_idx=1,
     )
     assert res == (3, 4)
+
+    res = supp_shape_from_ref_param_shape(
+        ndim_supp=2,
+        dist_params=(np.array([1, 2]), np.ones((2, 3, 4))),
+        param_shapes=((2,), (2, 3, 4)),
+        ref_param_idx=1,
+    )
+    assert res == (3, 4)
