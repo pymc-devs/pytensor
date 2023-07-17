@@ -1413,6 +1413,14 @@ def test_permutation_samples():
     compare_sample_values(permutation, np.array([1.0, 2.0, 3.0], dtype=config.floatX))
 
 
+def test_permutation_shape():
+    assert tuple(permutation(5).shape.eval()) == (5,)
+    assert tuple(permutation(np.arange(5)).shape.eval()) == (5,)
+    assert tuple(permutation(np.arange(10).reshape(2, 5)).shape.eval()) == (2, 5)
+    assert tuple(permutation(5, size=(2, 3)).shape.eval()) == (2, 3, 5)
+    assert tuple(permutation(np.arange(5), size=(2, 3)).shape.eval()) == (2, 3, 5)
+
+
 @config.change_flags(compute_test_value="off")
 def test_pickle():
     # This is an interesting `Op` case, because it has `None` types and a
