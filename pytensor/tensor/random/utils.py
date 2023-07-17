@@ -323,7 +323,7 @@ def supp_shape_from_ref_param_shape(
         raise ValueError("ndim_supp must be greater than 0")
     if param_shapes is not None:
         ref_param = param_shapes[ref_param_idx]
-        return (ref_param[-ndim_supp],)
+        return tuple(ref_param[i] for i in range(-ndim_supp, 0))
     else:
         ref_param = dist_params[ref_param_idx]
         if ref_param.ndim < ndim_supp:
