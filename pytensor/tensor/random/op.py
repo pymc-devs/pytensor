@@ -24,64 +24,6 @@ from pytensor.tensor.type_other import NoneConst
 from pytensor.tensor.var import TensorVariable
 
 
-def default_supp_shape_from_params(
-    ndim_supp: int,
-    dist_params: Sequence[Variable],
-    rep_param_idx: int = 0,
-    param_shapes: Optional[Sequence[Tuple[ScalarVariable, ...]]] = None,
-) -> Union[TensorVariable, Tuple[ScalarVariable, ...]]:
-    """Infer the dimensions for the output of a `RandomVariable`.
-
-    This is a function that derives a random variable's support
-    shape/dimensions from one of its parameters.
-
-    XXX: It's not always possible to determine a random variable's support
-    shape from its parameters, so this function has fundamentally limited
-    applicability and must be replaced by custom logic in such cases.
-
-    XXX: This function is not expected to handle `ndim_supp = 0` (i.e.
-    scalars), since that is already definitively handled in the `Op` that
-    calls this.
-
-    TODO: Consider using `pytensor.compile.ops.shape_i` alongside `ShapeFeature`.
-
-    Parameters
-    ----------
-    ndim_supp: int
-        Total number of dimensions for a single draw of the random variable
-        (e.g. a multivariate normal draw is 1D, so `ndim_supp = 1`).
-    dist_params: list of `pytensor.graph.basic.Variable`
-        The distribution parameters.
-    rep_param_idx: int (optional)
-        The index of the distribution parameter to use as a reference
-        In other words, a parameter in `dist_param` with a shape corresponding
-        to the support's shape.
-        The default is the first parameter (i.e. the value 0).
-    param_shapes: list of tuple of `ScalarVariable` (optional)
-        Symbolic shapes for each distribution parameter.  These will
-        be used in place of distribution parameter-generated shapes.
-
-    Results
-    -------
-    out: a tuple representing the support shape for a distribution with the
-    given `dist_params`.
-
-    """
-    if ndim_supp <= 0:
-        raise ValueError("ndim_supp must be greater than 0")
-    if param_shapes is not None:
-        ref_param = param_shapes[rep_param_idx]
-        return (ref_param[-ndim_supp],)
-    else:
-        ref_param = dist_params[rep_param_idx]
-        if ref_param.ndim < ndim_supp:
-            raise ValueError(
-                "Reference parameter does not match the "
-                f"expected dimensions; {ref_param} has less than {ndim_supp} dim(s)."
-            )
-        return ref_param.shape[-ndim_supp:]
-
-
 class RandomVariable(Op):
     """An `Op` that produces a sample from a random variable.
 
@@ -151,15 +93,29 @@ class RandomVariable(Op):
         if self.inplace:
             self.destroy_map = {0: [0]}
 
-    def _supp_shape_from_params(self, dist_params, **kwargs):
-        """Determine the support shape of a `RandomVariable`'s output given its parameters.
+    def _supp_shape_from_params(self, dist_params, param_shapes=None):
+        """Determine the support shape of a multivariate `RandomVariable`'s output given its parameters.
 
         This does *not* consider the extra dimensions added by the `size` parameter
         or independent (batched) parameters.
 
-        Defaults to `param_supp_shape_fn`.
+        When provided, `param_shapes` should be given preference over `[d.shape for d in dist_params]`,
+        as it will avoid redundancies in PyTensor shape inference.
+
+        Examples
+        --------
+        Common multivariate `RandomVariable`s derive their support shapes implicitly from the
+        last dimension of some of their parameters. For example `multivariate_normal` support shape
+        corresponds to the last dimension of the mean or covariance parameters, `support_shape=(mu.shape[-1])`.
+        For this case the helper `pytensor.tensor.random.utils.supp_shape_from_ref_param_shape` can be used.
+
+        Other variables have fixed support shape such as `support_shape=(2,)` or it is determined by the
+        values (not shapes) of some parameters. For instance, a `gaussian_random_walk(steps, size=(2,))`,
+        might have `support_shape=(steps,)`.
         """
-        return default_supp_shape_from_params(self.ndim_supp, dist_params, **kwargs)
+        raise NotImplementedError(
+            "`_supp_shape_from_params` must be implemented for multivariate RVs"
+        )
 
     def rng_fn(self, rng, *args, **kwargs) -> Union[int, float, np.ndarray]:
         """Sample a numeric random variate."""
