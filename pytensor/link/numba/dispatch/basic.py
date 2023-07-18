@@ -59,7 +59,6 @@ def global_numba_func(func):
 
 
 def numba_njit(*args, **kwargs):
-    kwargs = kwargs.copy()
     kwargs.setdefault("cache", config.numba__cache)
 
     if len(args) > 0 and callable(args[0]):
