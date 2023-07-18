@@ -17,6 +17,10 @@ from tests.link.numba.test_basic import (
 )
 
 
+pytest.importorskip("numba")
+from pytensor.link.numba.dispatch import numba_funcify
+
+
 rng = np.random.default_rng(42849)
 
 
@@ -367,6 +371,12 @@ def test_Split_view():
             0,
         ),
         (
+            set_test_value(
+                at.matrix(), np.arange(10 * 10, dtype=config.floatX).reshape((10, 10))
+            ),
+            -1,
+        ),
+        (
             set_test_value(at.vector(), np.arange(10, dtype=config.floatX)),
             0,
         ),
@@ -384,6 +394,23 @@ def test_ExtractDiag(val, offset):
             if not isinstance(i, (SharedVariable, Constant))
         ],
     )
+
+
+@pytest.mark.parametrize("k", range(-5, 4))
+@pytest.mark.parametrize(
+    "axis1, axis2", ((0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3))
+)
+@pytest.mark.parametrize("reverse_axis", (False, True))
+def test_ExtractDiag_exhaustive(k, axis1, axis2, reverse_axis):
+    if reverse_axis:
+        axis1, axis2 = axis2, axis1
+
+    x = at.tensor4("x")
+    x_shape = (2, 3, 4, 5)
+    x_test = np.arange(np.prod(x_shape)).reshape(x_shape)
+    out = at.diagonal(x, k, axis1, axis2)
+    numba_fn = numba_funcify(out.owner.op, out.owner)
+    np.testing.assert_allclose(numba_fn(x_test), np.diagonal(x_test, k, axis1, axis2))
 
 
 @pytest.mark.parametrize(
