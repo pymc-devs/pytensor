@@ -1494,36 +1494,30 @@ class Alloc(COp):
 
         # Initialize shape
         for i, shp_i in enumerate(inp[1:]):
-            code += """
-                shape[%(i)s] = ((dtype_%(shp_i)s*) PyArray_DATA(%(shp_i)s))[0];
-                """ % dict(
-                i=i, shp_i=shp_i
-            )
+            code += f"""
+                shape[{i}] = ((dtype_{shp_i}*) PyArray_DATA({shp_i}))[0];
+            """
 
-        code += """
-            int need_new_out = (NULL == %(zz)s);
-            for (int i = 0; i < %(ndim)s; i++)
-                need_new_out = (need_new_out
-                                || (PyArray_DIMS(%(zz)s)[i] != shape[i]));
+        code += f"""
+            int need_new_out = (NULL == {zz});
+            for (int i = 0; i < {ndim}; i++)
+                need_new_out = (need_new_out || (PyArray_DIMS({zz})[i] != shape[i]));
 
             if (need_new_out)
-            {
-                Py_XDECREF(%(zz)s);
-                %(zz)s = (PyArrayObject*) PyArray_SimpleNew(%(ndim)s,
-                    shape, PyArray_TYPE((PyArrayObject*) py_%(vv)s));
-                if (!%(zz)s)
-                {
+            {{
+                Py_XDECREF({zz});
+                {zz} = (PyArrayObject*) PyArray_SimpleNew({ndim}, shape, PyArray_TYPE((PyArrayObject*) py_{vv}));
+                if (!{zz})
+                {{
                     PyErr_SetString(PyExc_MemoryError, "alloc failed");
-                    %(fail)s
-                }
-            }
+                    {fail}
+                }}
+            }}
 
             // This function takes care of broadcasting
-            if (PyArray_CopyInto(%(zz)s, %(vv)s) == -1)
-              %(fail)s
-            """ % dict(
-            vv=vv, ndim=ndim, zz=zz, fail=fail
-        )
+            if (PyArray_CopyInto({zz}, {vv}) == -1)
+              {fail}
+            """
 
         return code
 
@@ -1568,7 +1562,7 @@ class Alloc(COp):
             for idx, axis in enumerate(axis_kept):
                 new_order[axis] = idx
             gx = gx.dimshuffle(new_order)
-            # Dimshuffle to add back the broadcasted dims
+        # Dimshuffle to add back the broadcasted dims
         # The *elements* of the output are not connected to
         # the inputs that specify the shape. If you grow the
         # shape by epsilon, the existing elements do not
