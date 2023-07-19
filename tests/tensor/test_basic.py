@@ -720,6 +720,38 @@ class TestAlloc:
     shared = staticmethod(pytensor.shared)
     allocs = [Alloc()] * 3
 
+    @staticmethod
+    def check_allocs_in_fgraph(fgraph, n):
+        assert (
+            len([node for node in fgraph.apply_nodes if isinstance(node.op, Alloc)])
+            == n
+        )
+
+    @staticmethod
+    def check_runtime_broadcast(mode):
+        """Check we emmit a clear error when runtime broadcasting would occur according to Numpy rules."""
+        floatX = config.floatX
+        x_v = vector("x", shape=(None,))
+
+        out = alloc(x_v, 5, 3)
+        f = pytensor.function([x_v], out, mode=mode)
+        TestAlloc.check_allocs_in_fgraph(f.maker.fgraph, 1)
+
+        np.testing.assert_array_equal(
+            f(x=np.zeros((3,), dtype=floatX)),
+            np.zeros((5, 3), dtype=floatX),
+        )
+        with pytest.raises(ValueError, match="Runtime broadcasting not allowed"):
+            f(x=np.zeros((1,), dtype=floatX))
+
+        out = alloc(specify_shape(x_v, (1,)), 5, 3)
+        f = pytensor.function([x_v], out, mode=mode)
+        TestAlloc.check_allocs_in_fgraph(f.maker.fgraph, 1)
+
+        np.testing.assert_array_equal(
+            f(x=np.zeros((1,), dtype=floatX)),
+            np.zeros((5, 3), dtype=floatX),
+        )
 
     def setup_method(self):
         self.rng = np.random.default_rng(seed=utt.fetch_seed())
@@ -854,6 +886,8 @@ class TestAlloc:
 
     def test_alloc_of_view_linker(self):
         """Check we can allocate a new array properly in the C linker when input is a view."""
+        floatX = config.floatX
+
         x_v = vector("x", shape=(None,))
         dim_len = scalar("dim_len", dtype=int)
         out = alloc(specify_shape(x_v, (1,)), 5, dim_len)
@@ -863,7 +897,14 @@ class TestAlloc:
             f.maker.fgraph.outputs, [alloc(specify_shape(x_v, (1,)), 5, dim_len)]
         )
 
-        np.testing.assert_array_equal(f(x=np.zeros((1,)), dim_len=3), np.zeros((5, 3)))
+        np.testing.assert_array_equal(
+            f(x=np.zeros((1,), dtype=floatX), dim_len=3),
+            np.zeros((5, 3), dtype=floatX),
+        )
+
+    @pytest.mark.parametrize("mode", (Mode("py"), Mode("c")))
+    def test_runtime_broadcast(self, mode):
+        self.check_runtime_broadcast(mode)
 
 
 def test_infer_shape():

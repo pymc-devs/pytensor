@@ -51,9 +51,10 @@ def jax_funcify_AllocEmpty(op, **kwargs):
 
 
 @jax_funcify.register(Alloc)
-def jax_funcify_Alloc(op, **kwargs):
+def jax_funcify_Alloc(op, node, **kwargs):
     def alloc(x, *shape):
         res = jnp.broadcast_to(x, shape)
+        Alloc._check_runtime_broadcast(node, jnp.asarray(x), res.shape)
         return res
 
     return alloc

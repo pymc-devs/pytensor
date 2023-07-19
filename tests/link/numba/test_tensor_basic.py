@@ -5,6 +5,7 @@ import pytensor.scalar as aes
 import pytensor.tensor as at
 import pytensor.tensor.basic as atb
 from pytensor import config, function
+from pytensor.compile import get_mode
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
@@ -15,6 +16,7 @@ from tests.link.numba.test_basic import (
     compare_shape_dtype,
     set_test_value,
 )
+from tests.tensor.test_basic import TestAlloc
 
 
 rng = np.random.default_rng(42849)
@@ -43,6 +45,10 @@ def test_Alloc(v, shape):
     )
 
     assert numba_res.shape == shape
+
+
+def test_alloc_runtime_broadcast():
+    TestAlloc.check_runtime_broadcast(get_mode("NUMBA"))
 
 
 def test_AllocEmpty():

@@ -1431,6 +1431,12 @@ class Alloc(COp):
 
     __props__ = ()
 
+    _runtime_broadcast_error_msg = (
+        "Runtime broadcasting not allowed. "
+        "The output of Alloc requires broadcasting a dimension of the input value, which was not marked as broadcastable. "
+        "If broadcasting was intended, use `specify_broadcastable` on the relevant input."
+    )
+
     def make_node(self, value, *shape):
         value = as_tensor_variable(value)
         shape, static_shape = infer_static_shape(shape)
@@ -1468,10 +1474,21 @@ class Alloc(COp):
         otype = TensorType(dtype=value.dtype, shape=combined_static_shape)
         return Apply(self, [value] + shape, [otype()])
 
+    @staticmethod
+    def _check_runtime_broadcast(node, value, shape):
+        value_static_shape = node.inputs[0].type.shape
+        for v_static_dim, value_dim, out_dim in zip(
+            value_static_shape[::-1], value.shape[::-1], shape[::-1]
+        ):
+            if v_static_dim is None and value_dim == 1 and out_dim != 1:
+                raise ValueError(Alloc._runtime_broadcast_error_msg)
+
     def perform(self, node, inputs, out_):
         (out,) = out_
         v = inputs[0]
         sh = tuple([int(i) for i in inputs[1:]])
+        self._check_runtime_broadcast(node, v, sh)
+
         if out[0] is None or out[0].shape != sh:
             if v.size == 1 and v.item() == 0:
                 out[0] = np.zeros(sh, dtype=v.dtype)
@@ -1484,12 +1501,19 @@ class Alloc(COp):
 
     def c_code(self, node, name, inp, out, sub):
         vv = inp[0]
-        ndim = len(inp[1:])
         (zz,) = out
         fail = sub["fail"]
 
+        v_static_shape = node.inputs[0].type.shape
+        o_static_shape = node.outputs[0].type.shape
+        v_ndim = len(v_static_shape)
+        o_ndim = len(o_static_shape)
+        assert o_ndim == len(inp[1:])
+
+        # Declare variables
         code = f"""
-            npy_intp shape[{ndim}];
+            npy_intp shape[{o_ndim}];
+            int need_new_out;
             """
 
         # Initialize shape
@@ -1498,15 +1522,26 @@ class Alloc(COp):
                 shape[{i}] = ((dtype_{shp_i}*) PyArray_DATA({shp_i}))[0];
             """
 
+        # Add checks for runtime broadcasting
+        for i, v_static_dim in enumerate(v_static_shape[::-1]):
+            if v_static_dim is None:
+                code += f"""
+                if (PyArray_DIMS({vv})[{v_ndim - i - 1}] == 1 && shape[{o_ndim - i - 1}] != 1)
+                {{
+                    PyErr_Format(PyExc_ValueError, "{self._runtime_broadcast_error_msg}");
+                    {fail}
+                }}
+                """
+
         code += f"""
-            int need_new_out = (NULL == {zz});
-            for (int i = 0; i < {ndim}; i++)
+            need_new_out = (NULL == {zz});
+            for (int i = 0; i < {o_ndim}; i++)
                 need_new_out = (need_new_out || (PyArray_DIMS({zz})[i] != shape[i]));
 
             if (need_new_out)
             {{
                 Py_XDECREF({zz});
-                {zz} = (PyArrayObject*) PyArray_SimpleNew({ndim}, shape, PyArray_TYPE({vv}));
+                {zz} = (PyArrayObject*) PyArray_SimpleNew({o_ndim}, shape, PyArray_TYPE({vv}));
                 if (!{zz})
                 {{
                     PyErr_SetString(PyExc_MemoryError, "alloc failed");
@@ -1522,7 +1557,7 @@ class Alloc(COp):
         return code
 
     def c_code_cache_version(self):
-        return (3,)
+        return (4,)
 
     def infer_shape(self, fgraph, node, input_shapes):
         return [node.inputs[1:]]

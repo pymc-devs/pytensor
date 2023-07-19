@@ -78,16 +78,24 @@ def numba_funcify_Alloc(op, node, **kwargs):
         " " * 4,
     )
 
+    check_runtime_broadcast = []
+    for i, val_static_dim in enumerate(node.inputs[0].type.shape[::-1]):
+        if val_static_dim is None:
+            check_runtime_broadcast.append(
+                f'if val.shape[{-i - 1}] == 1 and scalar_shape[{-i - 1}] != 1: raise ValueError("{Alloc._runtime_broadcast_error_msg}")'
+            )
+    check_runtime_broadcast_src = indent("\n".join(check_runtime_broadcast), " " * 4)
+
     alloc_def_src = f"""
 def alloc(val, {", ".join(shape_var_names)}):
     val_np = np.asarray(val)
 {shapes_to_items_src}
     scalar_shape = {create_tuple_string(shape_var_item_names)}
+{check_runtime_broadcast_src}
     res = np.empty(scalar_shape, dtype=val_np.dtype)
     res[...] = val_np
     return res
     """
-
     alloc_fn = compile_function_src(alloc_def_src, "alloc", {**globals(), **global_env})
 
     return numba_basic.numba_njit(alloc_fn)
