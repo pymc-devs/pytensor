@@ -52,7 +52,7 @@ jobs:
     if: ${{ needs.changes.outputs.changes == 'true' }}
     strategy:
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        python-version: ["3.9", "3.10", "3.11"]
     steps:
     - uses: actions/checkout@v3
     - uses: actions/setup-python@v4
@@ -70,7 +70,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.11"]
+        python-version: ["3.9", "3.11"]
         fast-compile: [0,1]
         float32: [0,1]
         install-numba: [0]
@@ -86,17 +86,17 @@ jobs:
           - "tests/tensor/test_basic.py tests/tensor/test_inplace.py"          
           - "tests/tensor/test_blas.py tests/tensor/test_elemwise.py tests/tensor/test_math_scipy.py"
         exclude:
-          - python-version: "3.8"
+          - python-version: "3.9"
             fast-compile: 1
-          - python-version: "3.8"
+          - python-version: "3.9"
             float32: 1
-          - python-version: "3.8"
+          - python-version: "3.9"
             part: "tests/tensor/test_math.py"
           - fast-compile: 1
             float32: 1
         include:
           - install-numba: 1
-            python-version: "3.8"
+            python-version: "3.9"
             fast-compile: 0
             float32: 0
             part: "tests/link/numba"
@@ -106,7 +106,7 @@ jobs:
             float32: 0
             part: "tests/link/numba"
           - install-jax: 1
-            python-version: "3.8"
+            python-version: "3.9"
             fast-compile: 0
             float32: 0
             part: "tests/link/jax"
@@ -140,11 +140,11 @@ jobs:
         shell: bash -l {0}
         run: |
           mamba install --yes -q "python~=${PYTHON_VERSION}=*_cpython" mkl numpy scipy pip mkl-service graphviz cython pytest coverage pytest-cov pytest-benchmark sympy
-          # numba-scipy downgrades the installed scipy to 1.7.3 in Python 3.8, but
+          # numba-scipy downgrades the installed scipy to 1.7.3 in Python 3.9, but
           # not numpy, even though scipy 1.7 requires numpy<1.23. When installing
           # PyTensor next, pip installs a lower version of numpy via the PyPI.
-          if [[ $INSTALL_NUMBA == "1" ]] && [[ $PYTHON_VERSION == "3.8" ]]; then mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" "numpy<1.23" "numba>=0.57" numba-scipy; fi
-          if [[ $INSTALL_NUMBA == "1" ]] && [[ $PYTHON_VERSION != "3.8" ]]; then mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" "numba>=0.57" numba-scipy; fi
+          if [[ $INSTALL_NUMBA == "1" ]] && [[ $PYTHON_VERSION == "3.9" ]]; then mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" "numpy<1.23" "numba>=0.57" numba-scipy; fi
+          if [[ $INSTALL_NUMBA == "1" ]] && [[ $PYTHON_VERSION != "3.9" ]]; then mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" "numba>=0.57" numba-scipy; fi
           if [[ $INSTALL_JAX == "1" ]]; then mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" jax jaxlib numpyro; fi
           pip install -e ./
           mamba list && pip freeze
