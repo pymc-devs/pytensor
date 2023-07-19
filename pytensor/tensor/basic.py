@@ -1506,7 +1506,7 @@ class Alloc(COp):
             if (need_new_out)
             {{
                 Py_XDECREF({zz});
-                {zz} = (PyArrayObject*) PyArray_SimpleNew({ndim}, shape, PyArray_TYPE((PyArrayObject*) py_{vv}));
+                {zz} = (PyArrayObject*) PyArray_SimpleNew({ndim}, shape, PyArray_TYPE({vv}));
                 if (!{zz})
                 {{
                     PyErr_SetString(PyExc_MemoryError, "alloc failed");
@@ -1522,7 +1522,7 @@ class Alloc(COp):
         return code
 
     def c_code_cache_version(self):
-        return (2,)
+        return (3,)
 
     def infer_shape(self, fgraph, node, input_shapes):
         return [node.inputs[1:]]

@@ -14,7 +14,7 @@ from pytensor.compile.io import In, Out
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.gradient import grad, hessian
-from pytensor.graph.basic import Apply
+from pytensor.graph.basic import Apply, equal_computations
 from pytensor.graph.op import Op
 from pytensor.graph.replace import clone_replace
 from pytensor.misc.safe_asarray import _asarray
@@ -720,6 +720,7 @@ class TestAlloc:
     shared = staticmethod(pytensor.shared)
     allocs = [Alloc()] * 3
 
+
     def setup_method(self):
         self.rng = np.random.default_rng(seed=utt.fetch_seed())
 
@@ -850,6 +851,19 @@ class TestAlloc:
 
         with pytest.raises(ValueError, match=msg):
             at.alloc(x, 3, 1, 6)
+
+    def test_alloc_of_view_linker(self):
+        """Check we can allocate a new array properly in the C linker when input is a view."""
+        x_v = vector("x", shape=(None,))
+        dim_len = scalar("dim_len", dtype=int)
+        out = alloc(specify_shape(x_v, (1,)), 5, dim_len)
+
+        f = pytensor.function([x_v, dim_len], out, mode=Mode("c"))
+        assert equal_computations(
+            f.maker.fgraph.outputs, [alloc(specify_shape(x_v, (1,)), 5, dim_len)]
+        )
+
+        np.testing.assert_array_equal(f(x=np.zeros((1,)), dim_len=3), np.zeros((5, 3)))
 
 
 def test_infer_shape():
