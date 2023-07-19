@@ -122,8 +122,8 @@ def test_Elemwise(inputs, input_vals, output_fn, exc):
 
 
 @pytest.mark.xfail(reason="Logic had to be reversed due to surprising segfaults")
-def test_elemwise_runtime_shape_error():
-    TestElemwise.check_runtime_shapes_error(get_mode("NUMBA"))
+def test_elemwise_runtime_broadcast():
+    TestElemwise.check_runtime_broadcast(get_mode("NUMBA"))
 
 
 def test_elemwise_speed(benchmark):
