@@ -18,8 +18,8 @@ from tests.link.jax.test_basic import compare_jax_and_py
 from tests.tensor.test_elemwise import TestElemwise
 
 
-def test_elemwise_runtime_shape_error():
-    TestElemwise.check_runtime_shapes_error(get_mode("JAX"))
+def test_elemwise_runtime_broadcast():
+    TestElemwise.check_runtime_broadcast(get_mode("JAX"))
 
 
 def test_jax_Dimshuffle():

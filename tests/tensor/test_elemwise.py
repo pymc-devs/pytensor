@@ -751,7 +751,7 @@ class TestElemwise(unittest_tools.InferShapeTester):
         g(*[np.zeros(2**11, config.floatX) for i in range(6)])
 
     @staticmethod
-    def check_runtime_shapes_error(mode):
+    def check_runtime_broadcast(mode):
         """Check we emmit a clear error when runtime broadcasting would occur according to Numpy rules."""
         x_v = matrix("x")
         m_v = vector("m")
@@ -777,15 +777,15 @@ class TestElemwise(unittest_tools.InferShapeTester):
         with pytest.raises((ValueError, TypeError)):
             f(x, m)
 
-    def test_runtime_shapes_error_python(self):
-        self.check_runtime_shapes_error(Mode(linker="py"))
+    def test_runtime_broadcast_python(self):
+        self.check_runtime_broadcast(Mode(linker="py"))
 
     @pytest.mark.skipif(
         not pytensor.config.cxx,
         reason="G++ not available, so we need to skip this test.",
     )
-    def test_runtime_shapes_error_c(self):
-        self.check_runtime_shapes_error(Mode(linker="c"))
+    def test_runtime_broadcast_c(self):
+        self.check_runtime_broadcast(Mode(linker="c"))
 
     def test_str(self):
         op = Elemwise(aes.add, inplace_pattern={0: 0}, name=None)
