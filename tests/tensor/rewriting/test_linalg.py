@@ -216,4 +216,5 @@ def test_local_det_chol():
 
     # This previously raised an error (issue #392)
     f = function([X], [L, det_X, X])
+    nodes = f.maker.fgraph.toposort()
     assert not any(isinstance(node, Det) for node in nodes)
