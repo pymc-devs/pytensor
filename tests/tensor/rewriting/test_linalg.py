@@ -11,7 +11,7 @@ from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import _allclose
-from pytensor.tensor.nlinalg import MatrixInverse, matrix_inverse
+from pytensor.tensor.nlinalg import Det, MatrixInverse, matrix_inverse
 from pytensor.tensor.rewriting.linalg import inv_as_solve
 from pytensor.tensor.slinalg import Cholesky, Solve, SolveTriangular, solve
 from pytensor.tensor.type import dmatrix, matrix, vector
@@ -202,3 +202,17 @@ def test_cholesky_ldotlt(tag, cholesky_form, product):
                 f(Av),
             )
         )
+
+
+def test_local_det_chol():
+    X = matrix("X")
+    L = at.linalg.cholesky(X)
+    det_X = at.linalg.det(X)
+
+    f = function([X], [L, det_X])
+
+    nodes = f.maker.fgraph.toposort()
+    assert not any(isinstance(node, Det) for node in nodes)
+
+    # This previously raised an error (issue #392)
+    f = function([X], [L, det_X, X])
