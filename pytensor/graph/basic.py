@@ -1088,20 +1088,20 @@ def truncated_graph_inputs(
         return truncated_inputs
 
     blockers: Set[Variable] = set(ancestors_to_include)
+    # variables that go here are under check already, do not repeat the loop for them
+    seen: Set[Variable] = set()
     # enforce O(1) check for node in ancestors to include
     ancestors_to_include = blockers.copy()
 
     while candidates:
         # on any new candidate
         node = candidates.pop()
-
-        # There was a repeated reference to this node, we have already investigated it
-        if node in truncated_inputs:
+        # we've looked into this node already
+        if node in seen:
             continue
-
         # check if the node is independent, never go above blockers;
         # blockers are independent nodes and ancestors to include
-        if node in ancestors_to_include:
+        elif node in ancestors_to_include:
             # The case where node is in ancestors to include so we check if it depends on others
             # it should be removed from the blockers to check against the rest
             dependent = variable_depends_on(node, ancestors_to_include - {node})
@@ -1128,6 +1128,8 @@ def truncated_graph_inputs(
             else:
                 # otherwise, do not search beyond
                 truncated_inputs.append(node)
+        # add node to seen, no point in checking it once more
+        seen.add(node)
     return truncated_inputs
 
 
