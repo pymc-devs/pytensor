@@ -800,16 +800,12 @@ class TestTruncatedGraphInputs:
         import pytensor.graph.basic
 
         inspect = mocker.spy(pytensor.graph.basic, "variable_depends_on")
-        variables = [at.scalar(f"v{i}") for i in range(3)]
-        for i in range(20):
-            variables.append(
-                at.add(
-                    variables[i],
-                    variables[(i**3) % len(variables)],
-                    variables[(i**2) % len(variables)],
-                )
-            )
-        truncated_graph_inputs(variables[-5:], variables[15:-5:5])
+        x = at.dmatrix("x")
+        m = x.shape[0][None, None]
+
+        f = x / m
+        w = x / m - f
+        truncated_graph_inputs([w], [x])
         # make sure there were exactly the same calls as unique variables seen by the function
         assert len(inspect.call_args_list) == len(
             {a for ((a, b), kw) in inspect.call_args_list}
