@@ -1111,7 +1111,7 @@ def truncated_graph_inputs(
             if dependent:
                 # if the ancestors to include is still dependent we need to go above, the search is not yet finished
                 # owner can never be None for a dependent node
-                candidates.extend(node.owner.inputs)
+                candidates.extend(n for n in node.owner.inputs if n not in seen)
         else:
             # A regular node to check
             dependent = variable_depends_on(node, blockers)
@@ -1124,7 +1124,7 @@ def truncated_graph_inputs(
             if dependent:
                 # populate search if it's not an independent node
                 # owner can never be None for a dependent node
-                candidates.extend(node.owner.inputs)
+                candidates.extend(n for n in node.owner.inputs if n not in seen)
             else:
                 # otherwise, do not search beyond
                 truncated_inputs.append(node)
