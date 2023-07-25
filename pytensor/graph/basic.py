@@ -1003,7 +1003,7 @@ def applys_between(
 def truncated_graph_inputs(
     outputs: Sequence[Variable],
     ancestors_to_include: Optional[Collection[Variable]] = None,
-) -> List[Variable]:
+) -> list[Variable]:
     """Get the truncate graph inputs.
 
     Unlike :func:`graph_inputs` this function will return
@@ -1076,7 +1076,7 @@ def truncated_graph_inputs(
 
     """
     # simple case, no additional ancestors to include
-    truncated_inputs = list()
+    truncated_inputs: list[Variable] = list()
     # blockers have known independent variables and ancestors to include
     candidates = list(outputs)
     if not ancestors_to_include:  # None or empty
@@ -1087,9 +1087,9 @@ def truncated_graph_inputs(
         # no more actions are needed
         return truncated_inputs
 
-    blockers: Set[Variable] = set(ancestors_to_include)
+    blockers: set[Variable] = set(ancestors_to_include)
     # variables that go here are under check already, do not repeat the loop for them
-    seen: Set[Variable] = set()
+    seen: set[Variable] = set()
     # enforce O(1) check for variable in ancestors to include
     ancestors_to_include = blockers.copy()
 
