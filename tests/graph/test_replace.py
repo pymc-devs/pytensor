@@ -169,6 +169,17 @@ class TestGraphReplace:
         # the old reference is still kept
         assert oc.owner.inputs[0].owner.inputs[1] is w
 
+    def test_non_list_input(self):
+        x = MyVariable("x")
+        y = MyVariable("y")
+        o = MyOp("xyop")(x, y)
+        new_x = x.clone(name="x_new")
+        new_y = y.clone(name="y2_new")
+        # test non list inputs as well
+        oc = graph_replace(o, {x: new_x, y: new_y})
+        assert oc.owner.inputs[1] is new_y
+        assert oc.owner.inputs[0] is new_x
+
     def test_graph_replace_advanced(self):
         x = MyVariable("x")
         y = MyVariable("y")

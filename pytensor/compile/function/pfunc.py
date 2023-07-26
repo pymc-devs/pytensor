@@ -4,7 +4,7 @@ Provide a simple user friendly API.
 """
 
 from copy import copy
-from typing import Optional
+from typing import Optional, Sequence, Union, overload
 
 from pytensor.compile.function.types import Function, UnusedInputError, orig_function
 from pytensor.compile.io import In, Out
@@ -15,8 +15,9 @@ from pytensor.graph.basic import Constant, Variable, clone_node_and_cache
 from pytensor.graph.fg import FunctionGraph
 
 
+@overload
 def rebuild_collect_shared(
-    outputs,
+    outputs: Variable,
     inputs=None,
     replace=None,
     updates=None,
@@ -24,7 +25,107 @@ def rebuild_collect_shared(
     copy_inputs_over=True,
     no_default_updates=False,
     clone_inner_graphs=False,
-):
+) -> tuple[
+    list[Variable],
+    Variable,
+    tuple[
+        dict[Variable, Variable],
+        dict[SharedVariable, Variable],
+        list[Variable],
+        list[SharedVariable],
+    ],
+]:
+    ...
+
+
+@overload
+def rebuild_collect_shared(
+    outputs: Sequence[Variable],
+    inputs=None,
+    replace=None,
+    updates=None,
+    rebuild_strict=True,
+    copy_inputs_over=True,
+    no_default_updates=False,
+    clone_inner_graphs=False,
+) -> tuple[
+    list[Variable],
+    list[Variable],
+    tuple[
+        dict[Variable, Variable],
+        dict[SharedVariable, Variable],
+        list[Variable],
+        list[SharedVariable],
+    ],
+]:
+    ...
+
+
+@overload
+def rebuild_collect_shared(
+    outputs: Out,
+    inputs=None,
+    replace=None,
+    updates=None,
+    rebuild_strict=True,
+    copy_inputs_over=True,
+    no_default_updates=False,
+    clone_inner_graphs=False,
+) -> tuple[
+    list[Variable],
+    Out,
+    tuple[
+        dict[Variable, Variable],
+        dict[SharedVariable, Variable],
+        list[Variable],
+        list[SharedVariable],
+    ],
+]:
+    ...
+
+
+@overload
+def rebuild_collect_shared(
+    outputs: Sequence[Out],
+    inputs=None,
+    replace=None,
+    updates=None,
+    rebuild_strict=True,
+    copy_inputs_over=True,
+    no_default_updates=False,
+    clone_inner_graphs=False,
+) -> tuple[
+    list[Variable],
+    list[Out],
+    tuple[
+        dict[Variable, Variable],
+        dict[SharedVariable, Variable],
+        list[Variable],
+        list[SharedVariable],
+    ],
+]:
+    ...
+
+
+def rebuild_collect_shared(
+    outputs: Union[Sequence[Variable], Variable, Out, Sequence[Out]],
+    inputs=None,
+    replace=None,
+    updates=None,
+    rebuild_strict=True,
+    copy_inputs_over=True,
+    no_default_updates=False,
+    clone_inner_graphs=False,
+) -> tuple[
+    list[Variable],
+    Union[list[Variable], Variable, Out, list[Out]],
+    tuple[
+        dict[Variable, Variable],
+        dict[SharedVariable, Variable],
+        list[Variable],
+        list[SharedVariable],
+    ],
+]:
     r"""Replace subgraphs of a computational graph.
 
     It returns a set of dictionaries and lists which collect (partial?)
@@ -260,7 +361,7 @@ def rebuild_collect_shared(
     return (
         input_variables,
         cloned_outputs,
-        [clone_d, update_d, update_expr, shared_inputs],
+        (clone_d, update_d, update_expr, shared_inputs),
     )
 
 
