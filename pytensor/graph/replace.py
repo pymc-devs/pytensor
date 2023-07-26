@@ -1,7 +1,7 @@
 from functools import partial
 from typing import Iterable, Optional, Sequence, Union, cast, overload
 
-from pytensor.graph.basic import Constant, Variable, truncated_graph_inputs
+from pytensor.graph.basic import Apply, Constant, Variable, truncated_graph_inputs
 from pytensor.graph.fg import FunctionGraph
 
 
@@ -175,7 +175,9 @@ def graph_replace(
             raise ValueError(f"Some replacements were not used: {non_fg_replace}")
     toposort = fg.toposort()
 
-    def toposort_key(fg: FunctionGraph, ts, pair):
+    def toposort_key(
+        fg: FunctionGraph, ts: list[Apply], pair: tuple[Variable, Variable]
+    ) -> int:
         key, _ = pair
         if key.owner is not None:
             return ts.index(key.owner)
