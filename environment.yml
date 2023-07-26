@@ -31,6 +31,7 @@ dependencies:
   - pytest-cov
   - pytest-xdist
   - pytest-benchmark
+  - pytest-mock
   # For building docs
   - sphinx>=5.1.0,<6
   - sphinx_rtd_theme

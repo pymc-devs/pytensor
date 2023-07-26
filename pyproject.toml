@@ -86,6 +86,7 @@ tests = [
     "pytest-cov>=2.6.1",
     "coverage>=5.1",
     "pytest-benchmark",
+    "pytest-mock",
 ]
 rtd = [
     "sphinx>=5.1.0,<6",
