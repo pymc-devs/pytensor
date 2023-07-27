@@ -7,13 +7,17 @@ from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import get_test_value
 from pytensor.scalar.basic import Composite
+from pytensor.tensor import as_tensor
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import all as at_all
 from pytensor.tensor.math import (
     cosh,
     erf,
     erfc,
+    erfcinv,
+    erfcx,
     erfinv,
+    iv,
     log,
     log1mexp,
     psi,
@@ -26,6 +30,14 @@ from tests.link.jax.test_basic import compare_jax_and_py
 
 jax = pytest.importorskip("jax")
 from pytensor.link.jax.dispatch import jax_funcify
+
+
+try:
+    pass
+
+    TFP_INSTALLED = True
+except ModuleNotFoundError:
+    TFP_INSTALLED = False
 
 
 def test_second():
@@ -132,6 +144,23 @@ def test_erfinv():
     fg = FunctionGraph([x], [out])
 
     compare_jax_and_py(fg, [0.95])
+
+
+@pytest.mark.parametrize(
+    "op, test_values",
+    [
+        (erfcx, (0.7,)),
+        (erfcinv, (0.7,)),
+        (iv, (0.3, 0.7)),
+    ],
+)
+@pytest.mark.skipif(not TFP_INSTALLED, reason="Test requires tensorflow-probability")
+def test_tfp_ops(op, test_values):
+    inputs = [as_tensor(test_value).type() for test_value in test_values]
+    output = op(*inputs)
+
+    fg = FunctionGraph(inputs, [output])
+    compare_jax_and_py(fg, test_values)
 
 
 def test_psi():

@@ -1,4 +1,6 @@
 import functools
+import typing
+from typing import Callable, Optional
 
 import jax
 import jax.numpy as jnp
@@ -18,7 +20,21 @@ from pytensor.scalar.basic import (
     Second,
     Sub,
 )
-from pytensor.scalar.math import Erf, Erfc, Erfinv, Log1mexp, Psi
+from pytensor.scalar.math import Erf, Erfc, Erfcinv, Erfcx, Erfinv, Iv, Log1mexp, Psi
+
+
+def try_import_tfp_jax_op(op: ScalarOp, jax_op_name: Optional[str] = None) -> Callable:
+    try:
+        import tensorflow_probability.substrates.jax.math as tfp_jax_math
+    except ModuleNotFoundError:
+        raise NotImplementedError(
+            f"No JAX implementation for Op {op.name}. "
+            "Implementation is available if TensorFlow Probability is installed"
+        )
+
+    if jax_op_name is None:
+        jax_op_name = op.name
+    return typing.cast(Callable, getattr(tfp_jax_math, jax_op_name))
 
 
 def check_if_inputs_scalars(node):
@@ -209,6 +225,24 @@ def jax_funcify_Erfinv(op, **kwargs):
         return jax.scipy.special.erfinv(x)
 
     return erfinv
+
+
+@jax_funcify.register(Erfcx)
+@jax_funcify.register(Erfcinv)
+def jax_funcify_from_tfp(op, **kwargs):
+    tfp_jax_op = try_import_tfp_jax_op(op)
+
+    return tfp_jax_op
+
+
+@jax_funcify.register(Iv)
+def jax_funcify_Iv(op, **kwargs):
+    ive = try_import_tfp_jax_op(op, jax_op_name="bessel_ive")
+
+    def iv(v, x):
+        return ive(v, x) / jnp.exp(-jnp.abs(jnp.real(x)))
+
+    return iv
 
 
 @jax_funcify.register(Log1mexp)
