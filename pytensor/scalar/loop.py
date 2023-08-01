@@ -1,11 +1,9 @@
-from copy import copy
 from itertools import chain
-from typing import Optional, Sequence, Tuple, cast
+from typing import Optional, Sequence, Tuple
 
 from pytensor.compile import rebuild_collect_shared
 from pytensor.graph import Constant, FunctionGraph, Variable, clone
-from pytensor.graph.rewriting.basic import MergeOptimizer
-from pytensor.scalar.basic import ScalarInnerGraphOp, ScalarOp, as_scalar
+from pytensor.scalar.basic import ScalarInnerGraphOp, as_scalar
 
 
 class ScalarLoop(ScalarInnerGraphOp):
@@ -62,44 +60,38 @@ class ScalarLoop(ScalarInnerGraphOp):
         if not len(init) == len(update):
             raise ValueError("An update must be given for each init variable")
         if until:
-            inputs, (*outputs, until) = clone([*init, *constant], [*update, until])
-            self.outputs = copy([*outputs, until])
+            inputs, outputs = clone([*init, *constant], [*update, until])
         else:
             inputs, outputs = clone([*init, *constant], update)
-            self.outputs = copy(outputs)
-        self.inputs = copy(inputs)
 
         self.is_while = bool(until)
-        self.inputs_type = tuple(input.type for input in inputs)
-        self.outputs_type = tuple(output.type for output in outputs)
-        if self.is_while:
-            self.outputs_type = self.outputs_type + (cast(Variable, until).type,)
-        self.nin = len(inputs) + 1  # n_steps is not part of the inner graph
-        self.nout = len(outputs) + (1 if self.is_while else 0)
+        self.inputs, self.outputs = self._cleanup_graph(inputs, outputs)
+        self._validate_updates(self.inputs, self.outputs)
+
+        self.inputs_type = tuple(input.type for input in self.inputs)
+        self.outputs_type = tuple(output.type for output in self.outputs)
+        self.nin = len(self.inputs) + 1  # n_steps is not part of the inner graph
+        self.nout = len(self.outputs)
         self.name = name
-        self._validate_fgraph(FunctionGraph(self.inputs, self.outputs, clone=False))
+
         super().__init__()
 
     def output_types(self, input_types):
         return self.outputs_type
 
-    def _validate_fgraph(self, fgraph: FunctionGraph) -> None:
-        for node in fgraph.apply_nodes:
-            if not isinstance(node.op, ScalarOp):
-                raise TypeError(
-                    "The fgraph of ScalarLoop must be composed exclusively of ScalarOp nodes"
-                )
-
-        init = fgraph.inputs
-        update = fgraph.outputs
-
+    def _validate_updates(
+        self, inputs: Sequence[Variable], outputs: Sequence[Variable]
+    ) -> None:
+        init = inputs
+        update: Sequence[Variable]
         if self.is_while:
-            *update, until = update
+            *update, until = outputs
             if not until.type.dtype == "bool":
                 raise TypeError(
                     f"Until condition must be boolean, got {until}({until.type.dtype})"
                 )
-
+        else:
+            update = outputs
         for i, u in zip(init, update):
             if i.type != u.type:
                 raise TypeError(
@@ -116,28 +108,9 @@ class ScalarLoop(ScalarInnerGraphOp):
     def fgraph(self):
         if hasattr(self, "_fgraph"):
             return self._fgraph
-
+        # fgraph cannot be a property of the base class because it messes up with C caching.
+        # We also need a `FunctionGraph(clone=True)` (default) according to an old comment
         fgraph = FunctionGraph(self.inputs, self.outputs)
-        # TODO: We could convert to TensorVariable, optimize graph,
-        # and then convert back to ScalarVariable.
-        # This would introduce rewrites like `log(1 + x) -> log1p`.
-        MergeOptimizer().rewrite(fgraph)
-        self._validate_fgraph(fgraph)
-
-        # Clone identical outputs that have been merged
-        if len(set(fgraph.outputs)) != len(self.outputs):
-            old_outputs = fgraph.outputs
-            new_outputs = []
-            for output in old_outputs:
-                if output not in new_outputs:
-                    new_outputs.append(output)
-                else:
-                    node = output.owner
-                    output_idx = node.outputs.index(output)
-                    new_output = node.clone().outputs[output_idx]
-                    new_outputs.append(new_output)
-            fgraph = FunctionGraph(fgraph.inputs, new_outputs, clone=False)
-
         self._fgraph = fgraph
         return self._fgraph
 

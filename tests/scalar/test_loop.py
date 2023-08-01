@@ -151,7 +151,8 @@ def test_non_scalar_error():
     x = as_scalar(tensor_exp(x0))
 
     with pytest.raises(
-        TypeError, match="must be composed exclusively of ScalarOp nodes"
+        TypeError,
+        match="The fgraph of ScalarLoop must be exclusively composed of scalar operations",
     ):
         ScalarLoop(init=[x0], constant=[], update=[x])
 

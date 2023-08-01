@@ -200,10 +200,11 @@ class TestComposite:
 
     def test_non_scalar_error(self):
         x = float32("x")
-        comp_op = Composite([x], [(at.zeros((2,)) + x).sum()])
-
-        with pytest.raises(TypeError, match=".*exclusively.*ScalarOp.*"):
-            comp_op.fgraph
+        with pytest.raises(
+            TypeError,
+            match="The fgraph of Composite must be exclusively composed of scalar operations",
+        ):
+            Composite([x], [(at.zeros((2,)) + x).sum()])
 
     def test_multi_out_perform(self):
         from pytensor.graph.basic import Apply
