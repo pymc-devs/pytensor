@@ -3998,6 +3998,42 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
     def __init__(self, *args, **kwargs):
         self.prepare_node_called = set()
 
+    def _cleanup_graph(self, inputs, outputs):
+        # TODO: We could convert to TensorVariable, optimize graph,
+        # and then convert back to ScalarVariable.
+        # This would introduce rewrites like `log(1 + x) -> log1p`.
+
+        fgraph = FunctionGraph(copy(inputs), copy(outputs))
+
+        # Validate node types
+        for node in fgraph.apply_nodes:
+            if not isinstance(node.op, ScalarOp):
+                raise TypeError(
+                    f"The fgraph of {self.__class__.__name__} must be exclusively "
+                    "composed of scalar operations."
+                )
+
+        # Run MergeOptimization to avoid duplicated nodes
+        MergeOptimizer().rewrite(fgraph)
+
+        inputs, outputs = fgraph.inputs, fgraph.outputs
+
+        # Clone identical outputs that may have been merged
+        # If fgraph.outputs = [out_A, out_B, out_A], then final outputs = [out_A, out_B, clone(out_A)]
+        if len(set(fgraph.outputs)) != len(outputs):
+            old_outputs = outputs
+            outputs = []
+            for old_output in old_outputs:
+                if old_output not in outputs:
+                    outputs.append(old_output)
+                else:
+                    node = old_output.owner
+                    output_idx = node.outputs.index(old_output)
+                    output = node.clone().outputs[output_idx]
+                    outputs.append(output)
+
+        return inputs, outputs
+
     @property
     def fn(self):
         return None
@@ -4187,10 +4223,9 @@ class Composite(ScalarInnerGraphOp):
             assert res[0] != inputs
             inputs, outputs = res[0], res2[1]
 
-        self.inputs = copy(inputs)
-        self.outputs = copy(outputs)
-        self.inputs_type = tuple([input.type for input in inputs])
-        self.outputs_type = tuple([output.type for output in outputs])
+        self.inputs, self.outputs = self._cleanup_graph(inputs, outputs)
+        self.inputs_type = tuple([input.type for input in self.inputs])
+        self.outputs_type = tuple([output.type for output in self.outputs])
         self.nin = len(inputs)
         self.nout = len(outputs)
         super().__init__()
@@ -4237,34 +4272,9 @@ class Composite(ScalarInnerGraphOp):
     def fgraph(self):
         if hasattr(self, "_fgraph"):
             return self._fgraph
-
-        # The clone done by FunctionGraph is needed as we don't want
-        # the fgraph to be set to the variable as we need to pickle
-        # them for the cache of c module to work.
+        # fgraph cannot be a property of the base class because it messes up with C caching.
+        # We also need a `FunctionGraph(clone=True)` (default) according to an old comment
         fgraph = FunctionGraph(self.inputs, self.outputs)
-        with config.change_flags(optimizer_verbose=False):
-            MergeOptimizer().rewrite(fgraph)
-        for node in fgraph.apply_nodes:
-            if not isinstance(node.op, ScalarOp):
-                raise TypeError(
-                    "The fgraph to Composite must be exclusively"
-                    " composed of ScalarOp instances."
-                )
-
-        # Clone identical outputs that have been merged
-        if len(set(fgraph.outputs)) != len(self.outputs):
-            old_outputs = fgraph.outputs
-            new_outputs = []
-            for output in old_outputs:
-                if output not in new_outputs:
-                    new_outputs.append(output)
-                else:
-                    node = output.owner
-                    output_idx = node.outputs.index(output)
-                    new_output = node.clone().outputs[output_idx]
-                    new_outputs.append(new_output)
-            fgraph = FunctionGraph(fgraph.inputs, new_outputs, clone=False)
-
         self._fgraph = fgraph
         return self._fgraph
 
@@ -4389,7 +4399,7 @@ class Composite(ScalarInnerGraphOp):
         return self.c_code_template % d
 
     def c_code_cache_version_outer(self) -> Tuple[int, ...]:
-        return (3,)
+        return (4,)
 
 
 class Compositef32:
