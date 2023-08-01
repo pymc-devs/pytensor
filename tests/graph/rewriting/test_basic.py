@@ -21,10 +21,10 @@ from pytensor.graph.rewriting.basic import (
     pre_greedy_node_rewriter,
 )
 from pytensor.raise_op import assert_op
-from pytensor.tensor.math import Dot, add, dot
+from pytensor.tensor.math import Dot, add, dot, exp
 from pytensor.tensor.rewriting.basic import constant_folding
 from pytensor.tensor.subtensor import AdvancedSubtensor
-from pytensor.tensor.type import matrix, values_eq_approx_always_true
+from pytensor.tensor.type import matrix, values_eq_approx_always_true, vector
 from pytensor.tensor.type_other import MakeSlice, SliceConstant, slicetype
 from tests.graph.utils import (
     MyOp,
@@ -440,6 +440,23 @@ class TestMergeOptimizer:
 
         assert fg.outputs[0] is fg.outputs[1]
         assert fg.outputs[0] is not fg.outputs[2]
+
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_merge_more_specific_types(self, reverse):
+        """Check that we choose the most specific static type when merging variables."""
+
+        x1 = vector("x1", shape=(None,))
+        x2 = vector("x2", shape=(500,))
+
+        y1 = exp(x1)
+        y2 = exp(x2)
+
+        # Simulate case where we find that x2 is equivalent to x1
+        fg = FunctionGraph([x1, x2], [y2, y1] if reverse else [y1, y2], clone=False)
+        fg.replace(x1, x2)
+
+        MergeOptimizer().rewrite(fg)
+        assert fg.outputs == [y2, y2]
 
 
 class TestEquilibrium:

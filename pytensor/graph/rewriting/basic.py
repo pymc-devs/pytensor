@@ -743,14 +743,22 @@ class MergeOptimizer(GraphRewriter):
                         ):
                             continue
 
-                if len(pairs) == 1 and pairs[0][0].type != pairs[0][1].type:
-                    res = pairs[0][0].type.convert_variable(pairs[0][1])
-
-                    # Since the fgraph.replace only checks the convert_variable
-                    # in one way, we change the order in the case that
-                    # convert_variable will not be successful.
-                    if not res:
-                        pairs = [(pairs[0][1], pairs[0][0])]
+                # Keep the variable with the most specific static type from the pairs
+                # E.g the second in (TensorType(shape=(None,), TensorType(shape=(5,))
+                # Otherwise we could end up reverting type inference progress done elsewhere.
+                for pair_idx in range(len(pairs)):
+                    old, new = pairs[pair_idx]
+                    if old.type == new.type:
+                        continue
+                    # Check if type of new replacement is at least as specific as that of the old variable
+                    if not old.type.is_super(new.type):
+                        # Check the other way around
+                        if new.type.is_super(old.type):
+                            pairs[pair_idx] = (new, old)
+                        else:
+                            # Replacement requires some operation like specify_shape
+                            new_repl = old.type.convert_variable(new)
+                            pairs[pair_idx] = (old, new_repl)
 
                 try:
                     # If they're all `AtomicVariable`s, there's no need to call validate.
