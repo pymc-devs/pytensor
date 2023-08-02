@@ -67,6 +67,8 @@ exclude = []
 if not config.cxx:
     exclude = ["cxx_only"]
 OPT_NONE = RewriteDatabaseQuery(include=[], exclude=exclude)
+# Minimum set of rewrites needed to evaluate a function. This is needed for graphs with "dummy" Operations
+OPT_MINIMUM = RewriteDatabaseQuery(include=["minimum_compile"], exclude=exclude)
 # Even if multiple merge optimizer call will be there, this shouldn't
 # impact performance.
 OPT_MERGE = RewriteDatabaseQuery(include=["merge"], exclude=exclude)
@@ -77,6 +79,7 @@ OPT_FAST_COMPILE = RewriteDatabaseQuery(include=["fast_compile"], exclude=exclud
 OPT_STABILIZE = RewriteDatabaseQuery(include=["fast_run"], exclude=exclude)
 OPT_STABILIZE.position_cutoff = 1.5000001
 OPT_NONE.name = "OPT_NONE"
+OPT_MINIMUM.name = "OPT_MINIMUM"
 OPT_MERGE.name = "OPT_MERGE"
 OPT_FAST_RUN.name = "OPT_FAST_RUN"
 OPT_FAST_RUN_STABLE.name = "OPT_FAST_RUN_STABLE"
@@ -95,6 +98,7 @@ predefined_optimizers = {
     None: OPT_NONE,
     "None": OPT_NONE,
     "merge": OPT_MERGE,
+    "minimum_compile": OPT_MINIMUM,
     "o4": OPT_FAST_RUN,
     "o3": OPT_O3,
     "o2": OPT_O2,
@@ -190,6 +194,7 @@ optdb = SequenceDB()
 optdb.register(
     "merge1", MergeOptimizer(), "fast_run", "fast_compile", "merge", position=0
 )
+
 
 # After scan1 opt at 0.5 and before ShapeOpt at 1
 # This should only remove nodes.
