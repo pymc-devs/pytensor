@@ -7,7 +7,6 @@ from pytensor.link.numba.dispatch.basic import create_tuple_string, numba_funcif
 from pytensor.link.utils import compile_function_src, unique_name_generator
 from pytensor.tensor.basic import (
     Alloc,
-    AllocDiag,
     AllocEmpty,
     ARange,
     ExtractDiag,
@@ -91,17 +90,6 @@ def alloc(val, {", ".join(shape_var_names)}):
     alloc_fn = compile_function_src(alloc_def_src, "alloc", {**globals(), **global_env})
 
     return numba_basic.numba_njit(alloc_fn)
-
-
-@numba_funcify.register(AllocDiag)
-def numba_funcify_AllocDiag(op, **kwargs):
-    offset = op.offset
-
-    @numba_basic.numba_njit(inline="always")
-    def allocdiag(v):
-        return np.diag(v, k=offset)
-
-    return allocdiag
 
 
 @numba_funcify.register(ARange)

@@ -58,28 +58,6 @@ def test_AllocEmpty():
 
 
 @pytest.mark.parametrize(
-    "v, offset",
-    [
-        (set_test_value(at.vector(), np.arange(10, dtype=config.floatX)), 0),
-        (set_test_value(at.vector(), np.arange(10, dtype=config.floatX)), 1),
-        (set_test_value(at.vector(), np.arange(10, dtype=config.floatX)), -1),
-    ],
-)
-def test_AllocDiag(v, offset):
-    g = atb.AllocDiag(offset=offset)(v)
-    g_fg = FunctionGraph(outputs=[g])
-
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, (SharedVariable, Constant))
-        ],
-    )
-
-
-@pytest.mark.parametrize(
     "v", [set_test_value(aes.float64(), np.array(1.0, dtype="float64"))]
 )
 def test_TensorFromScalar(v):

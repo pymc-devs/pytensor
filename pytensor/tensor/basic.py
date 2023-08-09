@@ -6,6 +6,7 @@ manipulation of tensors.
 """
 
 import builtins
+import warnings
 from functools import partial
 from numbers import Number
 from typing import TYPE_CHECKING, Optional, Sequence, Tuple, Union
@@ -3450,7 +3451,7 @@ class ExtractDiag(Op):
         x_grad = zeros_like(moveaxis(x, (axis1, axis2), (0, 1)))
 
         # Fill zeros with output diagonal
-        xdiag = AllocDiag(offset=0, axis1=0, axis2=1)(gz)
+        xdiag = alloc_diag(gz, offset=0, axis1=0, axis2=1)
         z_len = xdiag.shape[0]
         if offset >= 0:
             diag_slices = (slice(None, z_len), slice(offset, offset + z_len))
@@ -3544,6 +3545,10 @@ class AllocDiag(Op):
             Axis to be used as the second axis of the 2-D sub-arrays to which
             the diagonals will be allocated.  Defaults to second axis (i.e. 1).
         """
+        warnings.warn(
+            "AllocDiag is deprecated. Use `alloc_diag` instead",
+            FutureWarning,
+        )
         self.offset = offset
         if axis1 < 0 or axis2 < 0:
             raise NotImplementedError("AllocDiag does not support negative axis")
@@ -3625,6 +3630,43 @@ class AllocDiag(Op):
             self.axis2 = 1
 
 
+def alloc_diag(diag, offset=0, axis1=0, axis2=1):
+    """Insert a vector on the diagonal of a zero-ed matrix.
+
+    diagonal(alloc_diag(x)) == x
+    """
+    from pytensor.tensor import set_subtensor
+
+    diag = as_tensor_variable(diag)
+    axis1, axis2 = normalize_axis_tuple((axis1, axis2), ndim=diag.type.ndim + 1)
+    if axis1 > axis2:
+        axis1, axis2 = axis2, axis1
+
+    # Create array with one extra dimension for resulting matrix
+    result_shape = tuple(diag.shape)[:-1] + (diag.shape[-1] + abs(offset),) * 2
+    result = zeros(result_shape, dtype=diag.dtype)
+
+    # Create slice for diagonal in final 2 axes
+    idxs = arange(diag.shape[-1])
+    diagonal_slice = (slice(None),) * (len(result_shape) - 2) + (
+        idxs + np.maximum(0, -offset),
+        idxs + np.maximum(0, offset),
+    )
+
+    # Fill in final 2 axes with diag
+    result = set_subtensor(result[diagonal_slice], diag)
+
+    if diag.type.ndim > 1:
+        # Re-order axes so they correspond to diagonals at axis1, axis2
+        axes = list(range(diag.type.ndim - 1))
+        last_idx = axes[-1]
+        axes = axes[:axis1] + [last_idx + 1] + axes[axis1:]
+        axes = axes[:axis2] + [last_idx + 2] + axes[axis2:]
+        result = result.transpose(axes)
+
+    return result
+
+
 def diag(v, k=0):
     """
     A helper function for two ops: `ExtractDiag` and
@@ -3650,7 +3692,7 @@ def diag(v, k=0):
     _v = as_tensor_variable(v)
 
     if _v.ndim == 1:
-        return AllocDiag(k)(_v)
+        return alloc_diag(_v, offset=k)
     elif _v.ndim == 2:
         return diagonal(_v, offset=k)
     else:
