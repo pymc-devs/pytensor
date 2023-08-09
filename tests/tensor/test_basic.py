@@ -3593,16 +3593,17 @@ class TestDiag:
             # The right matrix is created
             assert (r == v).all()
 
-        # Test scalar input
-        xx = scalar()
-        with pytest.raises(ValueError):
-            diag(xx)
-
         # Test passing a list
         xx = [[1, 2], [3, 4]]
         g = diag(xx)
         f = function([], g)
         assert np.array_equal(f(), np.diag(xx))
+
+    @pytest.mark.parametrize("inp", (scalar, tensor3))
+    def test_diag_invalid_input_ndim(self, inp):
+        x = inp()
+        with pytest.raises(ValueError, match="Input must be 1- or 2-d."):
+            diag(x)
 
 
 class TestExtractDiag:
