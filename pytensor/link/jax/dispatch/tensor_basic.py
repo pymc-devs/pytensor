@@ -8,7 +8,6 @@ from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import (
     Alloc,
-    AllocDiag,
     AllocEmpty,
     ARange,
     ExtractDiag,
@@ -30,16 +29,6 @@ by JAX. An example of a graph that can be compiled to JAX:
 >>> import pytensor.tensor basic
 >>> at.arange(1, 10, 2)
 """
-
-
-@jax_funcify.register(AllocDiag)
-def jax_funcify_AllocDiag(op, **kwargs):
-    offset = op.offset
-
-    def allocdiag(v, offset=offset):
-        return jnp.diag(v, k=offset)
-
-    return allocdiag
 
 
 @jax_funcify.register(AllocEmpty)

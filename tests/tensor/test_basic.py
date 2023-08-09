@@ -23,7 +23,6 @@ from pytensor.scalar import autocast_float, autocast_float_as
 from pytensor.tensor import NoneConst
 from pytensor.tensor.basic import (
     Alloc,
-    AllocDiag,
     AllocEmpty,
     ARange,
     Choose,
@@ -92,7 +91,7 @@ from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import dense_dot
 from pytensor.tensor.math import sum as at_sum
-from pytensor.tensor.shape import Reshape, Shape, Shape_i, shape_padright, specify_shape
+from pytensor.tensor.shape import Reshape, Shape_i, shape_padright, specify_shape
 from pytensor.tensor.type import (
     TensorType,
     bscalar,
@@ -3571,7 +3570,6 @@ class TestDiag:
         # test vector input
         x = vector()
         g = diag(x)
-        assert isinstance(g.owner.op, AllocDiag)
         f = pytensor.function([x], g)
         for shp in [5, 0, 1]:
             m = rng.random(shp).astype(self.floatX)
@@ -3654,10 +3652,6 @@ class TestExtractDiag:
 class TestAllocDiag:
     # TODO: Separate perform, grad and infer_shape tests
 
-    def setup_method(self):
-        self.alloc_diag = AllocDiag
-        self.mode = pytensor.compile.mode.get_default_mode()
-
     def _generator(self):
         dims = 4
         shape = (5,) * dims
@@ -3690,34 +3684,28 @@ class TestAllocDiag:
                 # Test perform
                 if np.maximum(axis1, axis2) > len(test_val.shape):
                     continue
-                adiag_op = self.alloc_diag(offset=offset, axis1=axis1, axis2=axis2)
-                f = pytensor.function([x], adiag_op(x))
-                # AllocDiag and extract the diagonal again
-                # to check
+                diag_x = at.alloc_diag(x, offset=offset, axis1=axis1, axis2=axis2)
+                f = pytensor.function([x], diag_x)
+                # alloc_diag and extract the diagonal again to check for correctness
                 diag_arr = f(test_val)
                 rediag = np.diagonal(diag_arr, offset=offset, axis1=axis1, axis2=axis2)
                 assert np.all(rediag == test_val)
 
                 # Test infer_shape
-                f_shape = pytensor.function([x], adiag_op(x).shape, mode="FAST_RUN")
+                f_shape = pytensor.function([x], diag_x.shape, mode="FAST_RUN")
 
                 output_shape = f_shape(test_val)
-                assert not any(
-                    isinstance(node.op, self.alloc_diag)
-                    for node in f_shape.maker.fgraph.toposort()
-                )
                 rediag_shape = np.diagonal(
                     np.ones(output_shape), offset=offset, axis1=axis1, axis2=axis2
                 ).shape
                 assert np.all(rediag_shape == test_val.shape)
 
                 # Test grad
-                diag_x = adiag_op(x)
                 sum_diag_x = at_sum(diag_x)
                 grad_x = pytensor.grad(sum_diag_x, x)
                 grad_diag_x = pytensor.grad(sum_diag_x, diag_x)
-                f_grad_x = pytensor.function([x], grad_x, mode=self.mode)
-                f_grad_diag_x = pytensor.function([x], grad_diag_x, mode=self.mode)
+                f_grad_x = pytensor.function([x], grad_x)
+                f_grad_diag_x = pytensor.function([x], grad_diag_x)
                 grad_input = f_grad_x(test_val)
                 grad_diag_input = f_grad_diag_x(test_val)
                 true_grad_input = np.diagonal(
@@ -3893,20 +3881,6 @@ class TestInferShape(utt.InferShapeTester):
         self._compile_and_check([atens3], [atens3_diag], [atens3_val], ExtractDiag)
         atens3_diag = ExtractDiag(1, 2, 0)(atens3)
         self._compile_and_check([atens3], [atens3_diag], [atens3_val], ExtractDiag)
-
-    def test_AllocDiag(self):
-        advec = dvector()
-        advec_val = random(4)
-        self._compile_and_check([advec], [AllocDiag()(advec)], [advec_val], AllocDiag)
-
-        # Shape
-        # 'opt.Makevector' precludes optimizer from disentangling
-        # elements of shape
-        adtens = tensor3()
-        adtens_val = random(4, 5, 3)
-        self._compile_and_check(
-            [adtens], [Shape()(adtens)], [adtens_val], (MakeVector, Shape)
-        )
 
     def test_Split(self):
         aiscal = iscalar()
