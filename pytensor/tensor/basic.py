@@ -3408,6 +3408,12 @@ class ExtractDiag(Op):
         if self.view:
             self.view_map = {0: [0]}
         self.offset = offset
+        if axis1 < 0 or axis2 < 0:
+            raise NotImplementedError(
+                "ExtractDiag does not support negative axis. Use pytensor.tensor.diagonal instead."
+            )
+        if axis1 == axis2:
+            raise ValueError("axis1 and axis2 cannot be the same")
         self.axis1 = axis1
         self.axis2 = axis2
 
@@ -3502,6 +3508,8 @@ def diagonal(a, offset=0, axis1=0, axis2=1):
     tensor : symbolic tensor
 
     """
+    a = as_tensor_variable(a)
+    axis1, axis2 = normalize_axis_tuple((axis1, axis2), ndim=a.type.ndim)
     return ExtractDiag(offset, axis1, axis2)(a)
 
 
@@ -3529,6 +3537,10 @@ class AllocDiag(Op):
             the diagonals will be allocated.  Defaults to second axis (i.e. 1).
         """
         self.offset = offset
+        if axis1 < 0 or axis2 < 0:
+            raise NotImplementedError("AllocDiag does not support negative axis")
+        if axis1 == axis2:
+            raise ValueError("axis1 and axis2 cannot be the same")
         self.axis1 = axis1
         self.axis2 = axis2
 

@@ -3714,6 +3714,14 @@ class TestAllocDiag:
                 assert np.all(true_grad_input == grad_input)
 
 
+def test_diagonal_negative_axis():
+    x = np.arange(2 * 3 * 3).reshape((2, 3, 3))
+    np.testing.assert_allclose(
+        at.diagonal(x, axis1=-1, axis2=-2).eval(),
+        np.diagonal(x, axis1=-1, axis2=-2),
+    )
+
+
 def test_transpose():
     x1 = dvector("x1")
     x2 = dmatrix("x2")
