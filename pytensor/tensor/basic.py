@@ -6,7 +6,6 @@ manipulation of tensors.
 """
 
 import builtins
-import warnings
 from functools import partial
 from numbers import Number
 from typing import TYPE_CHECKING, Optional, Sequence, Tuple, Union
@@ -20,7 +19,7 @@ import pytensor
 import pytensor.scalar.sharedvar
 from pytensor import compile, config, printing
 from pytensor import scalar as aes
-from pytensor.gradient import DisconnectedType, grad_not_implemented, grad_undefined
+from pytensor.gradient import DisconnectedType, grad_undefined
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
@@ -3407,15 +3406,18 @@ class ExtractDiag(Op):
         self.view = view
         if self.view:
             self.view_map = {0: [0]}
-        self.offset = offset
         if axis1 < 0 or axis2 < 0:
             raise NotImplementedError(
                 "ExtractDiag does not support negative axis. Use pytensor.tensor.diagonal instead."
             )
         if axis1 == axis2:
             raise ValueError("axis1 and axis2 cannot be the same")
+        # Sort axis
+        if axis1 > axis2:
+            axis1, axis2, offset = axis2, axis1, -offset
         self.axis1 = axis1
         self.axis2 = axis2
+        self.offset = offset
 
     def make_node(self, x):
         x = as_tensor_variable(x)
@@ -3436,20 +3438,29 @@ class ExtractDiag(Op):
             z[0] = z[0].copy()
 
     def grad(self, inputs, gout):
+        # Avoid circular import
+        from pytensor.tensor.subtensor import set_subtensor
+
         (x,) = inputs
         (gz,) = gout
 
-        if x.ndim == 2:
-            x = zeros_like(x)
-            xdiag = AllocDiag(offset=self.offset)(gz)
-            return [
-                pytensor.tensor.subtensor.set_subtensor(
-                    x[: xdiag.shape[0], : xdiag.shape[1]], xdiag
-                )
-            ]
+        axis1, axis2, offset = self.axis1, self.axis2, self.offset
+
+        # Start with zeros (and axes in the front)
+        x_grad = zeros_like(moveaxis(x, (axis1, axis2), (0, 1)))
+
+        # Fill zeros with output diagonal
+        xdiag = AllocDiag(offset=0, axis1=0, axis2=1)(gz)
+        z_len = xdiag.shape[0]
+        if offset >= 0:
+            diag_slices = (slice(None, z_len), slice(offset, offset + z_len))
         else:
-            warnings.warn("Gradient of ExtractDiag only works for matrices.")
-            return [grad_not_implemented(self, 0, x)]
+            diag_slices = (slice(abs(offset), abs(offset) + z_len), slice(None, z_len))
+        x_grad = set_subtensor(x_grad[diag_slices], xdiag)
+
+        # Put axes back in their original positions
+        x_grad = moveaxis(x_grad, (0, 1), (axis1, axis2))
+        return [x_grad]
 
     def infer_shape(self, fgraph, node, shapes):
         from pytensor.tensor.math import clip, minimum
@@ -3514,10 +3525,7 @@ def diagonal(a, offset=0, axis1=0, axis2=1):
 
 
 class AllocDiag(Op):
-    """An `Op` that copies a vector to the diagonal of an empty matrix.
-
-    It does the inverse of `ExtractDiag`.
-    """
+    """An `Op` that copies a vector to the diagonal of a zero-ed matrix."""
 
     __props__ = ("offset", "axis1", "axis2")
 
