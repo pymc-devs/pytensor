@@ -3630,7 +3630,7 @@ def diag(v, k=0):
     A helper function for two ops: `ExtractDiag` and
     `AllocDiag`. The name `diag` is meant to keep it consistent
     with numpy. It both accepts tensor vector and tensor matrix.
-    While the passed tensor variable `v` has `v.ndim>=2`, it builds a
+    While the passed tensor variable `v` has `v.ndim==2`, it builds a
     `ExtractDiag` instance, and returns a vector with its entries equal to
     `v`'s main diagonal; otherwise if `v.ndim` is `1`, it builds an `AllocDiag`
     instance, and returns a matrix with `v` at its k-th diaogonal.
@@ -3651,10 +3651,10 @@ def diag(v, k=0):
 
     if _v.ndim == 1:
         return AllocDiag(k)(_v)
-    elif _v.ndim >= 2:
+    elif _v.ndim == 2:
         return diagonal(_v, offset=k)
     else:
-        raise ValueError("Number of dimensions of `v` must be greater than one.")
+        raise ValueError("Input must be 1- or 2-d.")
 
 
 def stacklists(arg):
