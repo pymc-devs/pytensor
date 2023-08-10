@@ -85,7 +85,7 @@ def test_jax_basic():
         ],
     )
 
-    out = at.diag(at.specify_shape(b, shape=(10,)))
+    out = at.diag(b)
     out_fg = FunctionGraph([b], [out])
     compare_jax_and_py(out_fg, [np.arange(10).astype(config.floatX)])
 

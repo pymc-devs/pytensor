@@ -63,6 +63,13 @@ def test_arange():
     compare_jax_and_py(fgraph, [])
 
 
+def test_arange_of_shape():
+    x = vector("x")
+    out = at.arange(1, x.shape[-1], 2)
+    fgraph = FunctionGraph([x], [out])
+    compare_jax_and_py(fgraph, [np.zeros((5,))])
+
+
 def test_arange_nonconcrete():
     """JAX cannot JIT-compile `jax.numpy.arange` when arguments are not concrete values."""
 
