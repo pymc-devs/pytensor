@@ -21,6 +21,7 @@ from pytensor.tensor.basic import (
     get_underlying_scalar_constant_value,
 )
 from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.shape import Shape_i
 
 
 ARANGE_CONCRETE_VALUE_ERROR = """JAX requires the arguments of `jax.numpy.arange`
@@ -61,14 +62,20 @@ def jax_funcify_ARange(op, node, **kwargs):
     arange_args = node.inputs
     constant_args = []
     for arg in arange_args:
-        if not isinstance(arg, Constant):
+        if arg.owner and isinstance(arg.owner.op, Shape_i):
+            constant_args.append(None)
+        elif isinstance(arg, Constant):
+            constant_args.append(arg.value)
+        else:
+            # TODO: This might be failing without need (e.g., if arg = shape(x)[-1] + 1)!
             raise NotImplementedError(ARANGE_CONCRETE_VALUE_ERROR)
 
-        constant_args.append(arg.value)
+    constant_start, constant_stop, constant_step = constant_args
 
-    start, stop, step = constant_args
-
-    def arange(*_):
+    def arange(start, stop, step):
+        start = start if constant_start is None else constant_start
+        stop = stop if constant_stop is None else constant_stop
+        step = step if constant_step is None else constant_step
         return jnp.arange(start, stop, step, dtype=op.dtype)
 
     return arange
