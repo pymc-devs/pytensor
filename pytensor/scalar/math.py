@@ -1357,15 +1357,13 @@ betainc = BetaInc(upgrade_to_float_no_complex, name="betainc")
 
 
 def betainc_grad(p, q, x, wrtp: bool):
-    """Gradient of the regularized incomplete beta function (P) wrt to the
-    first and second arguments p (p, a.k.a. alpha) and q (q, a.k.a. beta).
+    """
+    Gradient of the regularized incomplete beta function wrt to the first
+    argument `p` (aka alpha) or the second argument `q` (aka beta),
+    depending on whether `wrtp` is true.
 
-    Adapted from STAN `grad_reg_inc_beta.hpp`
-
-    Reference: [DLMF] NIST Digital Library of Mathematical Functions, Subsection 8.17(ii).
-    https://dlmf.nist.gov/8.17#ii, Release 1.1.10 of 2023-06-15. F. W. J. Olver, A. B. Olde Daalhuis,
-    D. W. Lozier, B. I. Schneider, R. F. Boisvert, C. W. Clark, B. R. Miller, B. V. Saunders,
-    H. S. Cohl, and M. A. McClain, eds.
+    Reference: Boik, R. J., & Robison-Cox, J. F. (1998). Derivatives of the incomplete beta function.
+    Journal of Statistical Software, 3(1), 1-20.
     """
 
     def _betainc_der(p, q, x, wrtp, skip_loop):
