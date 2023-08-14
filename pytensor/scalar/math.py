@@ -1357,13 +1357,13 @@ betainc = BetaInc(upgrade_to_float_no_complex, name="betainc")
 
 
 def betainc_grad(p, q, x, wrtp: bool):
-    """Gradient of the regularized lower gamma function (P) wrt to the first
-    argument (k, a.k.a. alpha).
+    """
+    Gradient of the regularized incomplete beta function wrt to the first
+    argument `p` (aka alpha) or the second argument `q` (aka beta),
+    depending on whether `wrtp` is true.
 
-    Adapted from STAN `grad_reg_lower_inc_gamma.hpp`
-
-    Reference: Gautschi, W. (1979). A computational procedure for incomplete gamma functions.
-    ACM Transactions on Mathematical Software (TOMS), 5(4), 466-481.
+    Reference: Boik, R. J., & Robison-Cox, J. F. (1998). Derivatives of the incomplete beta function.
+    Journal of Statistical Software, 3(1), 1-20.
     """
 
     def _betainc_der(p, q, x, wrtp, skip_loop):
