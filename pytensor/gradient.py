@@ -202,7 +202,7 @@ def Rop(
         where the indices in that expression are magic multidimensional
         indices that specify both the position within a list and all
         coordinates of the tensor elements.
-        If `wrt` is a list/tuple, then return a list/tuple with the results.
+        If `f` is a list/tuple, then return a list/tuple with the results.
     """
 
     if not isinstance(wrt, (list, tuple)):
