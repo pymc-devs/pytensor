@@ -459,3 +459,10 @@ def test_Print(capsys):
 
     stdout, stderr = capsys.readouterr()
     assert "hello" in stdout
+
+
+def test_summary():
+    old_profile_optimizer_config_value = pytensor.config.profile_optimizer = True
+    f = pytensor.function(inputs=[], outputs=[], profile=True)
+    f.profile.summary()
+    pytensor.config.profile_optimizer = old_profile_optimizer_config_value
