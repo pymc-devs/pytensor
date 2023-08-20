@@ -2640,7 +2640,7 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
         gf_rewrites = [
             o
             for o in (
-                rewrite.global_rewrites
+                rewrite.global_rewriters
                 + list(rewrite.final_rewriters)
                 + list(rewrite.cleanup_rewriters)
             )
