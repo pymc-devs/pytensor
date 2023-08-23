@@ -22,9 +22,9 @@ from pytensor.tensor.slinalg import (
     kron,
     solve,
     solve_continuous_lyapunov,
-    solve_discrete_lyapunov,
     solve_discrete_are,
-    solve_triangular
+    solve_discrete_lyapunov,
+    solve_triangular,
 )
 from pytensor.tensor.type import dmatrix, matrix, tensor, vector
 from tests import unittest_tools as utt
@@ -174,14 +174,14 @@ class TestSolveBase(utt.InferShapeTester):
         [
             (vector, matrix, "`A` must be a matrix.*"),
             (
-                    functools.partial(tensor, dtype="floatX", shape=(None,) * 3),
-                    matrix,
-                    "`A` must be a matrix.*",
+                functools.partial(tensor, dtype="floatX", shape=(None,) * 3),
+                matrix,
+                "`A` must be a matrix.*",
             ),
             (
-                    matrix,
-                    functools.partial(tensor, dtype="floatX", shape=(None,) * 3),
-                    "`b` must be a matrix or a vector.*",
+                matrix,
+                functools.partial(tensor, dtype="floatX", shape=(None,) * 3),
+                "`b` must be a matrix or a vector.*",
             ),
         ],
     )
@@ -494,7 +494,7 @@ def test_expm_grad_2():
     # Always test in float64 for better numerical stability.
     A = rng.standard_normal((5, 5))
     w = rng.standard_normal(5) ** 2
-    A = (np.diag(w ** 0.5)).dot(A + A.T).dot(np.diag(w ** (-0.5)))
+    A = (np.diag(w**0.5)).dot(A + A.T).dot(np.diag(w ** (-0.5)))
     assert not np.allclose(A, A.T)
 
     utt.verify_grad(expm, [A], rng=rng)
@@ -565,7 +565,7 @@ def test_solve_discrete_lyapunov_via_direct_real():
     utt.verify_grad(solve_discrete_lyapunov, pt=[A, Q], rng=rng)
 
 
-@pytest.mark.filterwarnings('ignore::UserWarning')
+@pytest.mark.filterwarnings("ignore::UserWarning")
 def test_solve_discrete_lyapunov_via_direct_complex():
     # Conj doesn't have C-op; filter the warning.
 
@@ -651,7 +651,9 @@ def test_solve_discrete_are_grad():
     # TODO: Is there a "theoretically motivated" value to use here? I pulled 1e-4 out of a hat
     atol = 1e-4 if config.floatX == "float32" else 1e-12
 
-    utt.verify_grad(functools.partial(solve_discrete_are, enforce_Q_symmetric=True),
-                    pt=[a, b, q, r],
-                    rng=rng,
-                    abs_tol=atol)
+    utt.verify_grad(
+        functools.partial(solve_discrete_are, enforce_Q_symmetric=True),
+        pt=[a, b, q, r],
+        rng=rng,
+        abs_tol=atol,
+    )
