@@ -7,7 +7,7 @@ import scipy.linalg
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor import basic as at
@@ -764,7 +764,7 @@ def _direct_solve_discrete_lyapunov(A: "TensorLike", Q: "TensorLike") -> TensorV
 
 def solve_discrete_lyapunov(
     A: "TensorLike", Q: "TensorLike", method: Literal["direct", "bilinear"] = "direct"
-) -> Variable:
+) -> TensorVariable:
     """Solve the discrete Lyapunov equation :math:`A X A^H - X = Q`.
 
     Parameters
@@ -798,7 +798,7 @@ def solve_discrete_lyapunov(
         return _solve_bilinear_direct_lyapunov(A, Q)
 
 
-def solve_continuous_lyapunov(A: "TensorLike", Q: "TensorLike") -> Variable:
+def solve_continuous_lyapunov(A: "TensorLike", Q: "TensorLike") -> TensorVariable:
     """Solve the continuous Lyapunov equation :math:`A X + X A^H + Q = 0`.
 
     Parameters
@@ -841,8 +841,9 @@ class SolveDiscreteARE(pt.Op):
 
         if self.enforce_Q_symmetric:
             Q = 0.5 * (Q + Q.T)
+
         X[0] = scipy.linalg.solve_discrete_are(A, B, Q, R).astype(
-            pytensor.config.floatX
+            node.outputs[0].type.dtype
         )
 
     def infer_shape(self, fgraph, node, shapes):
@@ -862,7 +863,7 @@ class SolveDiscreteARE(pt.Op):
         A_tilde = A - B.dot(K)
 
         dX_symm = 0.5 * (dX + dX.T)
-        S = solve_discrete_lyapunov(A_tilde, dX_symm).astype(pytensor.config.floatX)
+        S = solve_discrete_lyapunov(A_tilde, dX_symm).astype(dX.type.dtype)
 
         A_bar = 2 * matrix_dot(X, A_tilde, S)
         B_bar = -2 * matrix_dot(X, A_tilde, S, K.T)
@@ -872,9 +873,10 @@ class SolveDiscreteARE(pt.Op):
         return [A_bar, B_bar, Q_bar, R_bar]
 
 
-def solve_discrete_are(A, B, Q, R, enforce_Q_symmetric=False) -> Variable:
+def solve_discrete_are(A, B, Q, R, enforce_Q_symmetric=False) -> TensorVariable:
     """
     Solve the discrete Algebraic Riccati equation :math:`A^TXA - X - (A^TXB)(R + B^TXB)^{-1}(B^TXA) + Q = 0`.
+
     Parameters
     ----------
     A: ArrayLike
