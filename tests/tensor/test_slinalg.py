@@ -23,7 +23,8 @@ from pytensor.tensor.slinalg import (
     solve,
     solve_continuous_lyapunov,
     solve_discrete_lyapunov,
-    solve_triangular,
+    solve_discrete_are,
+    solve_triangular
 )
 from pytensor.tensor.type import dmatrix, matrix, tensor, vector
 from tests import unittest_tools as utt
@@ -173,14 +174,14 @@ class TestSolveBase(utt.InferShapeTester):
         [
             (vector, matrix, "`A` must be a matrix.*"),
             (
-                functools.partial(tensor, dtype="floatX", shape=(None,) * 3),
-                matrix,
-                "`A` must be a matrix.*",
+                    functools.partial(tensor, dtype="floatX", shape=(None,) * 3),
+                    matrix,
+                    "`A` must be a matrix.*",
             ),
             (
-                matrix,
-                functools.partial(tensor, dtype="floatX", shape=(None,) * 3),
-                "`b` must be a matrix or a vector.*",
+                    matrix,
+                    functools.partial(tensor, dtype="floatX", shape=(None,) * 3),
+                    "`b` must be a matrix or a vector.*",
             ),
         ],
     )
@@ -493,7 +494,7 @@ def test_expm_grad_2():
     # Always test in float64 for better numerical stability.
     A = rng.standard_normal((5, 5))
     w = rng.standard_normal(5) ** 2
-    A = (np.diag(w**0.5)).dot(A + A.T).dot(np.diag(w ** (-0.5)))
+    A = (np.diag(w ** 0.5)).dot(A + A.T).dot(np.diag(w ** (-0.5)))
     assert not np.allclose(A, A.T)
 
     utt.verify_grad(expm, [A], rng=rng)
@@ -564,7 +565,10 @@ def test_solve_discrete_lyapunov_via_direct_real():
     utt.verify_grad(solve_discrete_lyapunov, pt=[A, Q], rng=rng)
 
 
+@pytest.mark.filterwarnings('ignore::UserWarning')
 def test_solve_discrete_lyapunov_via_direct_complex():
+    # Conj doesn't have C-op; filter the warning.
+
     N = 5
     rng = np.random.default_rng(utt.fetch_seed())
     a = pt.zmatrix()
@@ -574,7 +578,7 @@ def test_solve_discrete_lyapunov_via_direct_complex():
     A = rng.normal(size=(N, N)) + rng.normal(size=(N, N)) * 1j
     Q = rng.normal(size=(N, N))
     X = f(A, Q)
-    assert np.allclose(A @ X @ A.conj().T - X + Q, 0.0)
+    utt.assert_allclose(A @ X @ A.conj().T - X + Q, 0.0)
 
     # TODO: the .conj() method currently does not have a gradient; add this test when gradients are implemented.
     # utt.verify_grad(solve_discrete_lyapunov, pt=[A, Q], rng=rng)
@@ -591,8 +595,8 @@ def test_solve_discrete_lyapunov_via_bilinear():
     Q = rng.normal(size=(N, N))
 
     X = f(A, Q)
-    assert np.allclose(A @ X @ A.conj().T - X + Q, 0.0)
 
+    utt.assert_allclose(A @ X @ A.conj().T - X + Q, 0.0)
     utt.verify_grad(solve_discrete_lyapunov, pt=[A, Q], rng=rng)
 
 
@@ -607,6 +611,47 @@ def test_solve_continuous_lyapunov():
     Q = rng.normal(size=(N, N))
     X = f(A, Q)
 
-    assert np.allclose(A @ X + X @ A.conj().T, Q)
-
+    utt.assert_allclose(A @ X + X @ A.conj().T, Q)
     utt.verify_grad(solve_continuous_lyapunov, pt=[A, Q], rng=rng)
+
+
+def test_solve_discrete_are_forward():
+    # TEST CASE 4 : darex #1 -- taken from Scipy tests
+    a, b, q, r = (
+        np.array([[4, 3], [-4.5, -3.5]]),
+        np.array([[1], [-1]]),
+        np.array([[9, 6], [6, 4]]),
+        np.array([[1]]),
+    )
+    a, b, q, r = (x.astype(config.floatX) for x in [a, b, q, r])
+
+    x = solve_discrete_are(a, b, q, r).eval()
+    res = a.T.dot(x.dot(a)) - x + q
+    res -= (
+        a.conj()
+        .T.dot(x.dot(b))
+        .dot(np.linalg.solve(r + b.conj().T.dot(x.dot(b)), b.T).dot(x.dot(a)))
+    )
+
+    atol = 1e-4 if config.floatX == "float32" else 1e-12
+    utt.assert_allclose(res, np.zeros_like(res), atol=atol)
+
+
+def test_solve_discrete_are_grad():
+    a, b, q, r = (
+        np.array([[4, 3], [-4.5, -3.5]]),
+        np.array([[1], [-1]]),
+        np.array([[9, 6], [6, 4]]),
+        np.array([[1]]),
+    )
+    a, b, q, r = (x.astype(config.floatX) for x in [a, b, q, r])
+
+    rng = np.random.default_rng(utt.fetch_seed())
+
+    # TODO: Is there a "theoretically motivated" value to use here? I pulled 1e-4 out of a hat
+    atol = 1e-4 if config.floatX == "float32" else 1e-12
+
+    utt.verify_grad(functools.partial(solve_discrete_are, enforce_Q_symmetric=True),
+                    pt=[a, b, q, r],
+                    rng=rng,
+                    abs_tol=atol)
