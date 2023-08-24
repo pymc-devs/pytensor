@@ -1,5 +1,5 @@
 from collections.abc import Collection
-from typing import Iterable, Set, Tuple, Union
+from typing import Iterable, Optional, Set, Tuple, Union
 
 import numpy as np
 from numpy.core.multiarray import normalize_axis_index
@@ -291,7 +291,7 @@ class CumOp(COp):
         c_axis=int_t, mode=EnumList(("MODE_ADD", "add"), ("MODE_MUL", "mul"))
     )
 
-    def __init__(self, axis=None, mode="add"):
+    def __init__(self, axis: Optional[int] = None, mode="add"):
         if mode not in ("add", "mul"):
             raise ValueError(f'{type(self).__name__}: Unknown mode "{mode}"')
         self.axis = axis

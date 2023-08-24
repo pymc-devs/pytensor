@@ -1,12 +1,15 @@
 import warnings
+from typing import cast
 
 import numba
 import numpy as np
 
 from pytensor import config
+from pytensor.graph import Apply
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import get_numba_type, numba_funcify
 from pytensor.raise_op import CheckAndRaise
+from pytensor.tensor import TensorVariable
 from pytensor.tensor.extra_ops import (
     Bartlett,
     CumOp,
@@ -30,21 +33,22 @@ def numba_funcify_Bartlett(op, **kwargs):
 
 
 @numba_funcify.register(CumOp)
-def numba_funcify_CumOp(op, node, **kwargs):
+def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
     axis = op.axis
     mode = op.mode
-    ndim = node.outputs[0].ndim
+    ndim = cast(TensorVariable, node.outputs[0]).ndim
 
-    if axis < 0:
-        axis = ndim + axis
-    if axis < 0 or axis >= ndim:
-        raise ValueError(f"Invalid axis {axis} for array with ndim {ndim}")
+    if axis is not None:
+        if axis < 0:
+            axis = ndim + axis
+        if axis < 0 or axis >= ndim:
+            raise ValueError(f"Invalid axis {axis} for array with ndim {ndim}")
 
-    reaxis_first = (axis,) + tuple(i for i in range(ndim) if i != axis)
-    reaxis_first_inv = tuple(np.argsort(reaxis_first))
+        reaxis_first = (axis,) + tuple(i for i in range(ndim) if i != axis)
+        reaxis_first_inv = tuple(np.argsort(reaxis_first))
 
     if mode == "add":
-        if ndim == 1:
+        if axis is None or ndim == 1:
 
             @numba_basic.numba_njit(fastmath=config.numba__fastmath)
             def cumop(x):
@@ -68,7 +72,7 @@ def numba_funcify_CumOp(op, node, **kwargs):
                 return res.transpose(reaxis_first_inv)
 
     else:
-        if ndim == 1:
+        if axis is None or ndim == 1:
 
             @numba_basic.numba_njit(fastmath=config.numba__fastmath)
             def cumop(x):

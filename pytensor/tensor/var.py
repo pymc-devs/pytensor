@@ -619,7 +619,7 @@ class _tensor_py_operators:
             )
 
     @property
-    def ndim(self):
+    def ndim(self) -> int:
         """The rank of this tensor."""
         return self.type.ndim
 
