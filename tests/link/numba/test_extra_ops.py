@@ -71,6 +71,13 @@ def test_Bartlett(val):
             set_test_value(
                 at.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))
             ),
+            None,
+            "add",
+        ),
+        (
+            set_test_value(
+                at.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))
+            ),
             0,
             "mul",
         ),
@@ -79,6 +86,13 @@ def test_Bartlett(val):
                 at.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))
             ),
             1,
+            "mul",
+        ),
+        (
+            set_test_value(
+                at.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))
+            ),
+            None,
             "mul",
         ),
     ],
