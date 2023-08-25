@@ -1,4 +1,5 @@
 import logging
+import typing
 import warnings
 from typing import TYPE_CHECKING, Literal, Union
 
@@ -395,9 +396,6 @@ class Solve(SolveBase):
         )
 
 
-solve = Solve()
-
-
 def solve(a, b, assume_a="gen", lower=False, check_finite=True):
     """Solves the linear equation set ``a * x = b`` for the unknown ``x`` for square ``a`` matrix.
 
@@ -746,7 +744,9 @@ class BilinearSolveDiscreteLyapunov(Op):
 
 
 _solve_continuous_lyapunov = SolveContinuousLyapunov()
-_solve_bilinear_direct_lyapunov = BilinearSolveDiscreteLyapunov()
+_solve_bilinear_direct_lyapunov = typing.cast(
+    typing.Callable, BilinearSolveDiscreteLyapunov()
+)
 
 
 def _direct_solve_discrete_lyapunov(A: "TensorLike", Q: "TensorLike") -> TensorVariable:
@@ -759,7 +759,7 @@ def _direct_solve_discrete_lyapunov(A: "TensorLike", Q: "TensorLike") -> TensorV
         AA = kron(A_, A_)
 
     X = solve(pt.eye(AA.shape[0]) - AA, Q_.ravel())
-    return reshape(X, Q_.shape)
+    return typing.cast(TensorVariable, reshape(X, Q_.shape))
 
 
 def solve_discrete_lyapunov(
@@ -795,7 +795,7 @@ def solve_discrete_lyapunov(
     if method == "direct":
         return _direct_solve_discrete_lyapunov(A, Q)
     if method == "bilinear":
-        return _solve_bilinear_direct_lyapunov(A, Q)
+        return typing.cast(TensorVariable, _solve_bilinear_direct_lyapunov(A, Q))
 
 
 def solve_continuous_lyapunov(A: "TensorLike", Q: "TensorLike") -> TensorVariable:
@@ -815,7 +815,7 @@ def solve_continuous_lyapunov(A: "TensorLike", Q: "TensorLike") -> TensorVariabl
 
     """
 
-    return _solve_continuous_lyapunov(A, Q)
+    return typing.cast(TensorVariable, _solve_continuous_lyapunov(A, Q))
 
 
 class SolveDiscreteARE(pt.Op):
@@ -896,7 +896,9 @@ def solve_discrete_are(A, B, Q, R, enforce_Q_symmetric=False) -> TensorVariable:
         Square matrix of shape M x M, representing the solution to the DARE
     """
 
-    return SolveDiscreteARE(enforce_Q_symmetric)(A, B, Q, R)
+    return typing.cast(
+        TensorVariable, SolveDiscreteARE(enforce_Q_symmetric)(A, B, Q, R)
+    )
 
 
 __all__ = [
