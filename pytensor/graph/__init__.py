@@ -9,7 +9,7 @@ from pytensor.graph.basic import (
     clone,
     ancestors,
 )
-from pytensor.graph.replace import clone_replace, graph_replace
+from pytensor.graph.replace import clone_replace, graph_replace, vectorize
 from pytensor.graph.op import Op
 from pytensor.graph.type import Type
 from pytensor.graph.fg import FunctionGraph

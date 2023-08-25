@@ -2,7 +2,8 @@ from itertools import chain
 from typing import Optional, Sequence, Tuple
 
 from pytensor.compile import rebuild_collect_shared
-from pytensor.graph import Constant, FunctionGraph, Variable, clone
+from pytensor.graph.basic import Constant, Variable, clone
+from pytensor.graph.fg import FunctionGraph
 from pytensor.scalar.basic import ScalarInnerGraphOp, as_scalar
 
 

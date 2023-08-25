@@ -7,6 +7,7 @@ import pytensor
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable, equal_computations
 from pytensor.graph.op import Op
+from pytensor.graph.replace import _vectorize_node
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.scalar import ScalarVariable
 from pytensor.tensor.basic import (
@@ -17,7 +18,6 @@ from pytensor.tensor.basic import (
     get_vector_length,
     infer_static_shape,
 )
-from pytensor.tensor.blockwise import _vectorize_node
 from pytensor.tensor.random.type import RandomGeneratorType, RandomStateType, RandomType
 from pytensor.tensor.random.utils import (
     broadcast_params,
