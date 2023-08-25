@@ -1,10 +1,11 @@
 import numpy as np
 import pytest
+import scipy.special
 
 import pytensor.tensor as pt
 from pytensor import config, function, shared
 from pytensor.graph.basic import graph_inputs
-from pytensor.graph.replace import clone_replace, graph_replace
+from pytensor.graph.replace import clone_replace, graph_replace, vectorize
 from pytensor.tensor import dvector, fvector, vector
 from tests import unittest_tools as utt
 from tests.graph.utils import MyOp, MyVariable
@@ -223,3 +224,21 @@ class TestGraphReplace:
         assert oc[0] is o
         with pytest.raises(ValueError, match="Some replacements were not used"):
             oc = graph_replace([o], {fake: x.clone()}, strict=True)
+
+
+class TestVectorize:
+    # TODO: Add tests with multiple outputs, constants, and other singleton types
+
+    def test_basic(self):
+        x = pt.vector("x")
+        y = pt.exp(x) / pt.sum(pt.exp(x))
+
+        new_x = pt.matrix("new_x")
+        [new_y] = vectorize([y], {x: new_x})
+
+        fn = function([new_x], new_y)
+        test_new_y = np.array([[0, 1, 2], [2, 1, 0]]).astype(config.floatX)
+        np.testing.assert_allclose(
+            fn(test_new_y),
+            scipy.special.softmax(test_new_y, axis=-1),
+        )

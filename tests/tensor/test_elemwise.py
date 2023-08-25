@@ -13,11 +13,11 @@ from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.replace import vectorize_node
 from pytensor.link.basic import PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.basic import second
-from pytensor.tensor.blockwise import vectorize_node
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import Any, Sum
 from pytensor.tensor.math import all as pt_all

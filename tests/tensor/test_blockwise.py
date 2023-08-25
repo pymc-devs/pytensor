@@ -8,8 +8,9 @@ import pytensor
 from pytensor import config
 from pytensor.gradient import grad
 from pytensor.graph import Apply, Op
+from pytensor.graph.replace import vectorize_node
 from pytensor.tensor import tensor
-from pytensor.tensor.blockwise import Blockwise, _parse_gufunc_signature, vectorize_node
+from pytensor.tensor.blockwise import Blockwise, _parse_gufunc_signature
 from pytensor.tensor.nlinalg import MatrixInverse
 from pytensor.tensor.slinalg import Cholesky, Solve
 

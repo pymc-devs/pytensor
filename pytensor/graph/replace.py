@@ -1,8 +1,9 @@
-from functools import partial
-from typing import Iterable, Optional, Sequence, Union, cast, overload
+from functools import partial, singledispatch
+from typing import Iterable, Mapping, Optional, Sequence, Union, cast, overload
 
 from pytensor.graph.basic import Apply, Constant, Variable, truncated_graph_inputs
 from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op
 
 
 ReplaceTypes = Union[Iterable[tuple[Variable, Variable]], dict[Variable, Variable]]
@@ -198,3 +199,65 @@ def graph_replace(
         return list(fg.outputs)
     else:
         return fg.outputs[0]
+
+
+@singledispatch
+def _vectorize_node(op: Op, node: Apply, *bached_inputs) -> Apply:
+    # Default implementation is provided in pytensor.tensor.blockwise
+    raise NotImplementedError
+
+
+def vectorize_node(node: Apply, *batched_inputs) -> Apply:
+    """Returns vectorized version of node with new batched inputs."""
+    op = node.op
+    return _vectorize_node(op, node, *batched_inputs)
+
+
+def vectorize(
+    outputs: Sequence[Variable], vectorize: Mapping[Variable, Variable]
+) -> Sequence[Variable]:
+    """Vectorize outputs graph given mapping from old variables to expanded counterparts version.
+
+    Expanded dimensions must be on the left. Behavior is similar to the functional `numpy.vectorize`.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import pytensor
+        import pytensor.tensor as pt
+
+        from pytensor.graph import vectorize
+
+        # Original graph
+        x = pt.vector("x")
+        y = pt.exp(x) / pt.sum(pt.exp(x))
+
+        # Vectorized graph
+        new_x = pt.matrix("new_x")
+        [new_y] = vectorize([y], {x: new_x})
+
+        fn = pytensor.function([new_x], new_y)
+        fn([[0, 1, 2], [2, 1, 0]])
+        # array([[0.09003057, 0.24472847, 0.66524096],
+        #        [0.66524096, 0.24472847, 0.09003057]])
+
+    """
+    # Avoid circular import
+
+    inputs = truncated_graph_inputs(outputs, ancestors_to_include=vectorize.keys())
+    new_inputs = [vectorize.get(inp, inp) for inp in inputs]
+
+    def transform(var):
+        if var in inputs:
+            return new_inputs[inputs.index(var)]
+
+        node = var.owner
+        batched_inputs = [transform(inp) for inp in node.inputs]
+        batched_node = vectorize_node(node, *batched_inputs)
+        batched_var = batched_node.outputs[var.owner.outputs.index(var)]
+
+        return batched_var
+
+    # TODO: MergeOptimization or node caching?
+    return [transform(out) for out in outputs]

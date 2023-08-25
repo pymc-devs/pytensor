@@ -1,7 +1,8 @@
 from pytensor.compile.mode import optdb
 from pytensor.graph import node_rewriter
+from pytensor.graph.replace import vectorize_node
 from pytensor.graph.rewriting.basic import copy_stack_trace, out2in
-from pytensor.tensor.blockwise import Blockwise, vectorize_node
+from pytensor.tensor.blockwise import Blockwise
 
 
 @node_rewriter([Blockwise])

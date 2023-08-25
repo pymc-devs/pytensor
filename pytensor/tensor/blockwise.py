@@ -1,5 +1,4 @@
 import re
-from functools import singledispatch
 from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
@@ -9,6 +8,7 @@ from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op
+from pytensor.graph.replace import _vectorize_node, vectorize
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.shape import shape_padleft
 from pytensor.tensor.type import continuous_dtypes, discrete_dtypes, tensor
@@ -72,8 +72,8 @@ def safe_signature(
     return f"{inputs_sig}->{outputs_sig}"
 
 
-@singledispatch
-def _vectorize_node(op: Op, node: Apply, *bached_inputs) -> Apply:
+@_vectorize_node.register(Op)
+def vectorize_node_fallback(op: Op, node: Apply, *bached_inputs) -> Apply:
     if hasattr(op, "gufunc_signature"):
         signature = op.gufunc_signature
     else:
@@ -81,12 +81,6 @@ def _vectorize_node(op: Op, node: Apply, *bached_inputs) -> Apply:
         #  Should get better as we add signatures to our Ops
         signature = safe_signature(node.inputs, node.outputs)
     return cast(Apply, Blockwise(op, signature=signature).make_node(*bached_inputs))
-
-
-def vectorize_node(node: Apply, *batched_inputs) -> Apply:
-    """Returns vectorized version of node with new batched inputs."""
-    op = node.op
-    return _vectorize_node(op, node, *batched_inputs)
 
 
 class Blockwise(Op):
@@ -279,42 +273,18 @@ class Blockwise(Op):
 
             core_igrads = self.core_op.L_op(core_inputs, core_outputs, core_ograds)
 
-        batch_ndims = self._batch_ndim_from_outputs(outputs)
+        igrads = vectorize(
+            [core_igrad for core_igrad in core_igrads if core_igrad is not None],
+            vectorize=dict(
+                zip(core_inputs + core_outputs + core_ograds, inputs + outputs + ograds)
+            ),
+        )
 
-        def transform(var):
-            # From a graph of ScalarOps, make a graph of Broadcast ops.
-            if isinstance(var.type, (NullType, DisconnectedType)):
-                return var
-            if var in core_inputs:
-                return inputs[core_inputs.index(var)]
-            if var in core_outputs:
-                return outputs[core_outputs.index(var)]
-            if var in core_ograds:
-                return ograds[core_ograds.index(var)]
-
-            node = var.owner
-
-            # The gradient contains a constant, which may be responsible for broadcasting
-            if node is None:
-                if batch_ndims:
-                    var = shape_padleft(var, batch_ndims)
-                return var
-
-            batched_inputs = [transform(inp) for inp in node.inputs]
-            batched_node = vectorize_node(node, *batched_inputs)
-            batched_var = batched_node.outputs[var.owner.outputs.index(var)]
-
-            return batched_var
-
-        ret = []
-        for core_igrad, ipt in zip(core_igrads, inputs):
-            # Undefined gradient
-            if core_igrad is None:
-                ret.append(None)
-            else:
-                ret.append(transform(core_igrad))
-
-        return ret
+        igrads_iter = iter(igrads)
+        return [
+            None if core_igrad is None else next(igrads_iter)
+            for core_igrad in core_igrads
+        ]
 
     def L_op(self, inputs, outs, ograds):
         from pytensor.tensor.math import sum as pt_sum

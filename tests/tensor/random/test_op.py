@@ -4,8 +4,8 @@ import pytest
 import pytensor.tensor as at
 from pytensor import config, function
 from pytensor.gradient import NullTypeGradError, grad
+from pytensor.graph.replace import vectorize_node
 from pytensor.raise_op import Assert
-from pytensor.tensor.blockwise import vectorize_node
 from pytensor.tensor.math import eq
 from pytensor.tensor.random import normal
 from pytensor.tensor.random.op import RandomState, RandomVariable, default_rng
