@@ -47,7 +47,7 @@ from pytensor.tensor.type import (
     vector,
 )
 from pytensor.tensor.type_other import NoneConst
-from pytensor.tensor.var import TensorVariable
+from pytensor.tensor.variable import TensorVariable
 from pytensor.typed_list import make_list
 from tests import unittest_tools as utt
 from tests.graph.utils import MyType2

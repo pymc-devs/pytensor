@@ -6,7 +6,7 @@ from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Sum
 from pytensor.tensor.shape import Reshape
 from pytensor.tensor.subtensor import AdvancedIncSubtensor, AdvancedSubtensor
-from pytensor.tensor.var import TensorVariable
+from pytensor.tensor.variable import TensorVariable
 
 
 @node_rewriter([AdvancedIncSubtensor])

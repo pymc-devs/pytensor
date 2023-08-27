@@ -35,7 +35,7 @@ from pytensor.tensor.math import sum as at_sum
 from pytensor.tensor.math import switch
 from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
 from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes, vector
-from pytensor.tensor.var import TensorVariable
+from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import LOCAL_BITWIDTH, PYTHON_INT_BITWIDTH
 
 

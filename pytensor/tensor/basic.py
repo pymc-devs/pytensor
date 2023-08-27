@@ -62,7 +62,7 @@ from pytensor.tensor.type import (
     uint_dtypes,
     values_eq_approx_always_true,
 )
-from pytensor.tensor.var import (
+from pytensor.tensor.variable import (
     TensorConstant,
     TensorVariable,
     get_unique_constant_value,

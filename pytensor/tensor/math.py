@@ -40,7 +40,7 @@ from pytensor.tensor.type import (
 )
 from pytensor.tensor.type_other import NoneConst
 from pytensor.tensor.utils import as_list
-from pytensor.tensor.var import TensorConstant, _tensor_py_operators
+from pytensor.tensor.variable import TensorConstant, _tensor_py_operators
 
 
 if TYPE_CHECKING:

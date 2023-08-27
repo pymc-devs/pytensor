@@ -101,7 +101,7 @@ from pytensor.tensor.type import (
     values_eq_approx_remove_inf_nan,
     values_eq_approx_remove_nan,
 )
-from pytensor.tensor.var import TensorConstant, get_unique_constant_value
+from pytensor.tensor.variable import TensorConstant, get_unique_constant_value
 
 
 def scalarconsts_rest(inputs, elemwise=True, only_process_constants=False):

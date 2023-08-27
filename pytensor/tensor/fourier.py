@@ -16,7 +16,7 @@ from pytensor.tensor.math import exp, lt, outer, tensordot
 from pytensor.tensor.shape import shape
 from pytensor.tensor.subtensor import set_subtensor
 from pytensor.tensor.type import TensorType, integer_dtypes
-from pytensor.tensor.var import TensorConstant
+from pytensor.tensor.variable import TensorConstant
 
 
 class Fourier(Op):

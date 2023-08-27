@@ -18,7 +18,7 @@ from pytensor.link.utils import map_storage
 from pytensor.link.vm import VM, Loop, Stack, VMLinker
 from pytensor.tensor.math import cosh, tanh
 from pytensor.tensor.type import lscalar, scalar, scalars, vector, vectors
-from pytensor.tensor.var import TensorConstant
+from pytensor.tensor.variable import TensorConstant
 from tests import unittest_tools as utt
 
 

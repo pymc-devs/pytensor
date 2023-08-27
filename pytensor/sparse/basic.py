@@ -51,7 +51,11 @@ from pytensor.tensor.type import TensorType
 from pytensor.tensor.type import continuous_dtypes as tensor_continuous_dtypes
 from pytensor.tensor.type import discrete_dtypes as tensor_discrete_dtypes
 from pytensor.tensor.type import iscalar, ivector, scalar, tensor, vector
-from pytensor.tensor.var import TensorConstant, TensorVariable, _tensor_py_operators
+from pytensor.tensor.variable import (
+    TensorConstant,
+    TensorVariable,
+    _tensor_py_operators,
+)
 
 
 sparse_formats = ["csc", "csr"]

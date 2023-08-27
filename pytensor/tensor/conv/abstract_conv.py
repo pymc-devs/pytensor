@@ -29,7 +29,7 @@ from pytensor.tensor.basic import (
     get_underlying_scalar_constant_value,
 )
 from pytensor.tensor.exceptions import NotScalarConstantError
-from pytensor.tensor.var import TensorConstant, TensorVariable
+from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
 _logger = logging.getLogger(__name__)
