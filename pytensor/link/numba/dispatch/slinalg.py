@@ -2,7 +2,6 @@ import ctypes
 
 import numba
 import numpy as np
-import scipy
 from numba.core import cgutils, types
 from numba.extending import get_cython_function_address, intrinsic, overload
 from numba.np.linalg import _blas_kinds, _copy_to_fortran_order, ensure_lapack
@@ -184,7 +183,13 @@ class _LAPACK:
         return functype(addr)
 
 
-@overload(scipy.linalg.solve_triangular)
+def _solve_triangular(A, B, trans=0, lower=False, unit_diagonal=False):
+    return linalg.solve_triangular(
+        A, B, trans=trans, lower=lower, unit_diagonal=unit_diagonal
+    )
+
+
+@overload(_solve_triangular)
 def solve_triangular_impl(A, B, trans=0, lower=False, unit_diagonal=False):
     ensure_lapack()
 
@@ -258,7 +263,7 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
 
     @numba_basic.numba_njit(inline="always")
     def solve_triangular(a, b):
-        res = scipy.linalg.solve_triangular(a, b, trans, lower, unit_diagonal)
+        res = _solve_triangular(a, b, trans, lower, unit_diagonal)
         if check_finite:
             if np.any(np.isinf(res)):
                 raise ValueError
