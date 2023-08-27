@@ -16,7 +16,7 @@ from pytensor.tensor import math as atm
 from pytensor.tensor.nlinalg import matrix_dot
 from pytensor.tensor.shape import reshape
 from pytensor.tensor.type import matrix, tensor, vector
-from pytensor.tensor.var import TensorVariable
+from pytensor.tensor.variable import TensorVariable
 
 
 if TYPE_CHECKING:

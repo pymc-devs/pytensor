@@ -14,7 +14,7 @@ from pytensor.tensor.extra_ops import broadcast_to
 from pytensor.tensor.math import maximum
 from pytensor.tensor.shape import specify_shape
 from pytensor.tensor.type import int_dtypes
-from pytensor.tensor.var import TensorVariable
+from pytensor.tensor.variable import TensorVariable
 
 
 if TYPE_CHECKING:

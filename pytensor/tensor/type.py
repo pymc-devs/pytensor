@@ -18,7 +18,7 @@ from pytensor.utils import apply_across_args
 if TYPE_CHECKING:
     from numpy.typing import DTypeLike
 
-    from pytensor.tensor.var import TensorVariable
+    from pytensor.tensor.variable import TensorVariable
 
 
 _logger = logging.getLogger("pytensor.tensor.type")

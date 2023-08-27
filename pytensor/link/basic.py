@@ -30,7 +30,7 @@ if TYPE_CHECKING:
         OutputStorageType,
         StorageMapType,
     )
-    from pytensor.tensor.var import TensorVariable
+    from pytensor.tensor.variable import TensorVariable
 
 
 ThunkAndContainersType = Tuple["BasicThunkType", List["Container"], List["Container"]]

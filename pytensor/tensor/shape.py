@@ -19,7 +19,7 @@ from pytensor.tensor import get_vector_length
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.type import DenseTensorType, TensorType, int_dtypes, tensor
 from pytensor.tensor.type_other import NoneConst
-from pytensor.tensor.var import TensorConstant, TensorVariable
+from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
 ShapeValueType = Union[None, np.integer, int, Variable]

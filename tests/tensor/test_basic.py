@@ -125,7 +125,7 @@ from pytensor.tensor.type import (
     vectors,
     wvector,
 )
-from pytensor.tensor.var import TensorConstant
+from pytensor.tensor.variable import TensorConstant
 from pytensor.utils import PYTHON_INT_BITWIDTH
 from tests import unittest_tools as utt
 from tests.tensor.utils import (

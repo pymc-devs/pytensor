@@ -21,7 +21,7 @@ from pytensor.tensor.random.utils import normalize_size_param, params_broadcast_
 from pytensor.tensor.shape import shape_tuple
 from pytensor.tensor.type import TensorType, all_dtypes
 from pytensor.tensor.type_other import NoneConst
-from pytensor.tensor.var import TensorVariable
+from pytensor.tensor.variable import TensorVariable
 
 
 class RandomVariable(Op):

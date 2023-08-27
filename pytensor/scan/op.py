@@ -82,7 +82,7 @@ from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.math import minimum
 from pytensor.tensor.shape import Shape_i
 from pytensor.tensor.type import TensorType, integer_dtypes
-from pytensor.tensor.var import TensorVariable
+from pytensor.tensor.variable import TensorVariable
 
 
 # Logging function for sending warning or info

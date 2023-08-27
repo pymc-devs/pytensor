@@ -16,7 +16,7 @@ repos:
               pytensor/graph/op\.py|
               pytensor/compile/nanguardmode\.py|
               pytensor/graph/rewriting/basic\.py|
-              pytensor/tensor/var\.py|
+              pytensor/tensor/variable\.py|
           )$
       - id: check-merge-conflict
   - repo: https://github.com/asottile/pyupgrade

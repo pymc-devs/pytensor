@@ -69,7 +69,7 @@ from pytensor.tensor.subtensor import (
     get_slice_elements,
     set_subtensor,
 )
-from pytensor.tensor.var import TensorConstant, get_unique_constant_value
+from pytensor.tensor.variable import TensorConstant, get_unique_constant_value
 
 
 list_opt_slice = [
