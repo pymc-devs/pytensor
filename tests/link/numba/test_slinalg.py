@@ -8,8 +8,8 @@ import pytensor.tensor as pt
 from pytensor import config
 
 
-ATOL = 0 if config.floatX.endswith('64') else 1e-6
-RTOL = 1e-7 if config.floatX.endswith('64') else 1e-6
+ATOL = 0 if config.floatX.endswith("64") else 1e-6
+RTOL = 1e-7 if config.floatX.endswith("64") else 1e-6
 
 
 def test_solve_triangular():
