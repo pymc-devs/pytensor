@@ -6,6 +6,9 @@ import pytensor.tensor as pt
 from pytensor import config
 
 
+numba = pytest.importorskip("numba")
+
+
 ATOL = 0 if config.floatX.endswith("64") else 1e-6
 RTOL = 1e-7 if config.floatX.endswith("64") else 1e-6
 rng = np.random.default_rng(42849)
