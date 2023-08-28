@@ -117,6 +117,10 @@ pytensor = [
     "js/*",
 ]
 
+[tool.pytest.ini_options]
+#env = "PYTENSOR_FLAGS=floatX=float32,gcc__cxxflags='-march=core2'"
+
+
 [tool.coverage.run]
 omit = [
     "pytensor/_version.py",
