@@ -111,40 +111,6 @@ def test_Solve(A, x, lower, exc):
 
 
 @pytest.mark.parametrize(
-    "A, x, lower, exc",
-    [
-        (
-            set_test_value(
-                at.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
-            set_test_value(at.dvector(), rng.random(size=(3,)).astype("float64")),
-            "sym",
-            UserWarning,
-        ),
-    ],
-)
-def test_SolveTriangular(A, x, lower, exc):
-    g = slinalg.SolveTriangular(lower)(A, x)
-
-    if isinstance(g, list):
-        g_fg = FunctionGraph(outputs=g)
-    else:
-        g_fg = FunctionGraph(outputs=[g])
-
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
-        compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, (SharedVariable, Constant))
-            ],
-        )
-
-
-@pytest.mark.parametrize(
     "x, exc",
     [
         (

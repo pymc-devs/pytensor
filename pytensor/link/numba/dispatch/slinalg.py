@@ -134,8 +134,10 @@ def _check_scipy_linalg_matrix(a, func_name):
     if not isinstance(a, types.Array):
         msg = "%s.%s() only supported for array types" % interp
         raise numba.TypingError(msg, highlighting=False)
-    if not a.ndim == 2:
-        msg = "%s.%s() only supported on 2-D arrays." % interp
+    if a.ndim not in [1, 2]:
+        msg = "%s.%s() only supported on 1d or 2d arrays, found %s." % (
+            interp + (a.ndim,)
+        )
         raise numba.TypingError(msg, highlighting=False)
     if not isinstance(a.dtype, (types.Float, types.Complex)):
         msg = "%s.%s() only supported on " "float and complex arrays." % interp
@@ -161,11 +163,8 @@ class _LAPACK:
         """
         Called by scipy.linalg.solve_triangular
         """
-        d = _blas_kinds[dtype]
-        func_name = f"{d}trtrs"
-        float_pointer = _get_float_pointer_for_dtype(d)
+        addr, float_pointer = _get_addr_and_float_pointer(dtype, "trtrs")
 
-        addr = get_cython_function_address("scipy.linalg.cython_lapack", func_name)
         functype = ctypes.CFUNCTYPE(
             None,
             _ptr_int,  # UPLO
@@ -177,8 +176,8 @@ class _LAPACK:
             _ptr_int,  # LDA
             float_pointer,  # B
             _ptr_int,  # LDB
-            _ptr_int,
-        )  # INFO
+            _ptr_int,  # INFO
+        )
 
         return functype(addr)
 
@@ -202,6 +201,8 @@ def solve_triangular_impl(A, B, trans=0, lower=False, unit_diagonal=False):
     numba_trtrs = _LAPACK().numba_xtrtrs(dtype)
 
     def impl(A, B, trans=0, lower=False, unit_diagonal=False):
+        B_is_1d = B.ndim == 1
+
         _N = np.int32(A.shape[-1])
         if A.shape[-2] != _N:
             raise linalg.LinAlgError("Last 2 dimensions of A must be square")
@@ -210,7 +211,12 @@ def solve_triangular_impl(A, B, trans=0, lower=False, unit_diagonal=False):
             raise linalg.LinAlgError("Dimensions of A and B do not conform")
 
         A_copy = _copy_to_fortran_order(A)
-        B_copy = _copy_to_fortran_order(B)
+
+        # Need to expand B here; I tried everywhere else and it doesn't work
+        if B_is_1d:
+            B_copy = _copy_to_fortran_order(np.expand_dims(B, -1))
+        else:
+            B_copy = _copy_to_fortran_order(B)
 
         # if isinstance(trans, str):
         # if trans not in ['N', 'C', 'T']:
@@ -227,11 +233,13 @@ def solve_triangular_impl(A, B, trans=0, lower=False, unit_diagonal=False):
         else:
             transval = ord("C")
 
+        B_NDIM = 1 if B_is_1d else B.shape[1]
+
         UPLO = val_to_int_ptr(ord("L") if lower else ord("U"))
         TRANS = val_to_int_ptr(transval)
         DIAG = val_to_int_ptr(ord("U") if unit_diagonal else ord("N"))
         N = val_to_int_ptr(_N)
-        NRHS = val_to_int_ptr(B.shape[1])
+        NRHS = val_to_int_ptr(B_NDIM)
         LDA = val_to_int_ptr(_N)
         LDB = val_to_int_ptr(_N)
         INFO = val_to_int_ptr(0)
@@ -249,6 +257,8 @@ def solve_triangular_impl(A, B, trans=0, lower=False, unit_diagonal=False):
             INFO,
         )
 
+        if B_is_1d:
+            return B_copy[:, 0]
         return B_copy
 
     return impl
