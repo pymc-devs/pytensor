@@ -4,7 +4,7 @@ import numba
 import numpy as np
 from numba.core import cgutils, types
 from numba.extending import get_cython_function_address, intrinsic, overload
-from numba.np.linalg import _blas_kinds, _copy_to_fortran_order, ensure_lapack
+from numba.np.linalg import _copy_to_fortran_order, ensure_lapack, get_blas_kind
 from scipy import linalg
 
 from pytensor.link.numba.dispatch import basic as numba_basic
@@ -114,7 +114,7 @@ def _get_underlying_float(dtype):
 
 
 def _get_addr_and_float_pointer(dtype, name):
-    d = _blas_kinds[dtype]
+    d = get_blas_kind(dtype)
     func_name = f"{d}{name}"
     float_pointer = _get_float_pointer_for_dtype(d)
     addr = get_cython_function_address("scipy.linalg.cython_lapack", func_name)
@@ -153,10 +153,6 @@ class _LAPACK:
 
     def __init__(self):
         ensure_lapack()
-
-    @classmethod
-    def test_blas_kinds(cls, dtype):
-        return _blas_kinds[dtype]
 
     @classmethod
     def numba_xtrtrs(cls, dtype):
@@ -233,7 +229,7 @@ def solve_triangular_impl(A, B, trans=0, lower=False, unit_diagonal=False):
         else:
             transval = ord("C")
 
-        B_NDIM = 1 if B_is_1d else B.shape[1]
+        B_NDIM = 1 if B_is_1d else int(B.shape[1])
 
         UPLO = val_to_int_ptr(ord("L") if lower else ord("U"))
         TRANS = val_to_int_ptr(transval)
