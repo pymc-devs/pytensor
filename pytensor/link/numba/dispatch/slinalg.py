@@ -192,7 +192,7 @@ def solve_triangular_impl(A, B, trans=0, lower=False, unit_diagonal=False):
     _check_scipy_linalg_matrix(B, "solve_triangular")
 
     dtype = A.dtype
-    if str(dtype) in ["complex64", "complex128"]:
+    if str(dtype).startswith('complex'):
         raise ValueError(
             "Complex inputs not currently supported by solve_triangular in Numba mode"
         )
