@@ -113,13 +113,13 @@ def _get_underlying_float(dtype):
     return np.dtype(out_type)
 
 
-def _get_addr_and_float_pointer(dtype, name):
+def _get_lapack_ptr_and_ptr_type(dtype, name):
     d = get_blas_kind(dtype)
     func_name = f"{d}{name}"
     float_pointer = _get_float_pointer_for_dtype(d)
-    addr = get_cython_function_address("scipy.linalg.cython_lapack", func_name)
+    lapack_ptr = get_cython_function_address("scipy.linalg.cython_lapack", func_name)
 
-    return addr, float_pointer
+    return lapack_ptr, float_pointer
 
 
 def _check_scipy_linalg_matrix(a, func_name):
@@ -159,7 +159,7 @@ class _LAPACK:
         """
         Called by scipy.linalg.solve_triangular
         """
-        addr, float_pointer = _get_addr_and_float_pointer(dtype, "trtrs")
+        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "trtrs")
 
         functype = ctypes.CFUNCTYPE(
             None,
@@ -175,7 +175,7 @@ class _LAPACK:
             _ptr_int,  # INFO
         )
 
-        return functype(addr)
+        return functype(lapack_ptr)
 
 
 def _solve_triangular(A, B, trans=0, lower=False, unit_diagonal=False):
