@@ -210,20 +210,11 @@ def solve_triangular_impl(A, B, trans=0, lower=False, unit_diagonal=False):
         if A.shape[0] != B.shape[0]:
             raise linalg.LinAlgError("Dimensions of A and B do not conform")
 
-        A_copy = _copy_to_fortran_order(A)
-
-        # Need to expand B here; I tried everywhere else and it doesn't work
         if B_is_1d:
-            B_copy = _copy_to_fortran_order(np.expand_dims(B, -1))
+            B_copy = np.asfortranarray(np.expand_dims(B, -1))
         else:
             B_copy = _copy_to_fortran_order(B)
 
-        # if isinstance(trans, str):
-        # if trans not in ['N', 'C', 'T']:
-        #     raise ValueError('Parameter "trans" should be one of N, C, T or 0, 1, 2')
-        # transval = ord(trans)
-
-        # else:
         if trans not in [0, 1, 2]:
             raise ValueError('Parameter "trans" should be one of N, C, T or 0, 1, 2')
         if trans == 0:
@@ -250,7 +241,7 @@ def solve_triangular_impl(A, B, trans=0, lower=False, unit_diagonal=False):
             DIAG,
             N,
             NRHS,
-            A_copy.view(w_type).ctypes,
+            np.asfortranarray(A).T.view(w_type).ctypes,
             LDA,
             B_copy.view(w_type).ctypes,
             LDB,
@@ -258,7 +249,7 @@ def solve_triangular_impl(A, B, trans=0, lower=False, unit_diagonal=False):
         )
 
         if B_is_1d:
-            return B_copy[:, 0]
+            return B_copy[..., 0]
         return B_copy
 
     return impl
