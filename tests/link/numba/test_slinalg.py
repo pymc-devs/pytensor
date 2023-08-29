@@ -1,3 +1,5 @@
+import re
+
 import numpy as np
 import pytest
 
@@ -33,9 +35,16 @@ def transpose_func(x, trans):
 @pytest.mark.parametrize(
     "unit_diag", [True, False], ids=["unit_diag=True", "unit_diag=False"]
 )
-# @pytest.mark.parametrize('complex', [True, False], ids=['complex', 'real'])
-def test_solve_triangular(b_func, b_size, lower, trans, unit_diag, complex=False):
-    # TODO: Complex raises ValueError: To change to a dtype of a different size, the last axis must be contiguous, why?
+@pytest.mark.parametrize("complex", [True, False], ids=["complex", "real"])
+@pytest.mark.filterwarnings(
+    'ignore:Cannot cache compiled function "numba_funcified_fgraph"'
+)
+def test_solve_triangular(b_func, b_size, lower, trans, unit_diag, complex):
+    if complex:
+        # TODO: Complex raises ValueError: To change to a dtype of a different size, the last axis must be contiguous,
+        #  why?
+        pytest.skip("Complex inputs currently not supported to solve_triangular")
+
     complex_dtype = "complex64" if config.floatX.endswith("32") else "complex128"
     dtype = complex_dtype if complex else config.floatX
 
@@ -71,3 +80,25 @@ def test_solve_triangular(b_func, b_size, lower, trans, unit_diag, complex=False
     np.testing.assert_allclose(
         transpose_func(A_tri, trans) @ X_np, b, atol=ATOL, rtol=RTOL
     )
+
+
+@pytest.mark.parametrize("value", [np.nan, np.inf])
+@pytest.mark.filterwarnings(
+    'ignore:Cannot cache compiled function "numba_funcified_fgraph"'
+)
+def test_solve_triangular_raises_on_nan_inf(value):
+    A = pt.matrix("A")
+    b = pt.matrix("b")
+
+    X = pt.linalg.solve_triangular(A, b, check_finite=True)
+    f = pytensor.function([A, b], X, mode="NUMBA")
+    A_val = np.random.normal(size=(5, 5))
+    A_sym = A_val @ A_val.conj().T
+
+    A_tri = np.linalg.cholesky(A_sym).astype(config.floatX)
+    b = np.full((5, 1), value)
+
+    with pytest.raises(
+        ValueError, match=re.escape("Non-numeric values (nan or inf) returned ")
+    ):
+        f(A_tri, b)

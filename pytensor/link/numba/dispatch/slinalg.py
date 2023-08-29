@@ -192,8 +192,12 @@ def solve_triangular_impl(A, B, trans=0, lower=False, unit_diagonal=False):
     _check_scipy_linalg_matrix(B, "solve_triangular")
 
     dtype = A.dtype
-    w_type = _get_underlying_float(dtype)
+    if str(dtype) in ["complex64", "complex128"]:
+        raise ValueError(
+            "Complex inputs not currently supported by solve_triangular in Numba mode"
+        )
 
+    w_type = _get_underlying_float(dtype)
     numba_trtrs = _LAPACK().numba_xtrtrs(dtype)
 
     def impl(A, B, trans=0, lower=False, unit_diagonal=False):
@@ -271,8 +275,10 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
     def solve_triangular(a, b):
         res = _solve_triangular(a, b, trans, lower, unit_diagonal)
         if check_finite:
-            if np.any(np.isinf(res)):
-                raise ValueError
+            if np.any(np.bitwise_or(np.isinf(res), np.isnan(res))):
+                raise ValueError(
+                    "Non-numeric values (nan or inf) returned by solve_triangular"
+                )
         return res
 
     return solve_triangular
