@@ -8,7 +8,7 @@ from pytensor.graph.op import Op
 from pytensor.link.c.op import COp
 from pytensor.tensor.type import scalar
 from pytensor.tensor.type_other import SliceType
-from pytensor.tensor.var import TensorVariable
+from pytensor.tensor.variable import TensorVariable
 from pytensor.typed_list.type import TypedListType
 
 

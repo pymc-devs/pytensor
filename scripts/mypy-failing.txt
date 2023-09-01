@@ -32,4 +32,5 @@ pytensor/tensor/slinalg.py
 pytensor/tensor/subtensor.py
 pytensor/tensor/type.py
 pytensor/tensor/type_other.py
-pytensor/tensor/var.py
+pytensor/tensor/variable.py
+pytensor/tensor/nlinalg.py

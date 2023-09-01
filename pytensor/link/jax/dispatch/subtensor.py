@@ -33,7 +33,7 @@ slice length.
 
 def subtensor_assert_indices_jax_compatible(node, idx_list):
     from pytensor.graph.basic import Constant
-    from pytensor.tensor.var import TensorVariable
+    from pytensor.tensor.variable import TensorVariable
 
     ilist = indices_from_subtensor(node.inputs[1:], idx_list)
     for idx in ilist:

@@ -33,7 +33,7 @@ from pytensor.graph.type import Type
 from pytensor.tensor.math import max_and_argmax
 from pytensor.tensor.type import TensorType, iscalars, matrix, scalars, vector
 from pytensor.tensor.type_other import NoneConst
-from pytensor.tensor.var import TensorVariable
+from pytensor.tensor.variable import TensorVariable
 from tests.graph.utils import MyInnerGraphOp
 
 

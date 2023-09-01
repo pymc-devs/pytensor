@@ -81,7 +81,7 @@ from pytensor.tensor.subtensor import (
 )
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import NoneTypeT, SliceConstant, SliceType
-from pytensor.tensor.var import TensorConstant, TensorVariable
+from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
 def register_useless(lopt, *tags, **kwargs):

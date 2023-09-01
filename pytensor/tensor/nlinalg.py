@@ -1,5 +1,6 @@
+import typing
 from functools import partial
-from typing import Tuple
+from typing import Callable, Tuple
 
 import numpy as np
 
@@ -299,7 +300,7 @@ class Eigh(Eig):
 
     """
 
-    _numop = staticmethod(np.linalg.eigh)
+    _numop = typing.cast(Callable, staticmethod(np.linalg.eigh))
     __props__ = ("UPLO",)
 
     def __init__(self, UPLO="L"):

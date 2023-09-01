@@ -125,7 +125,7 @@ from pytensor.tensor.type import (
     vectors,
     zscalar,
 )
-from pytensor.tensor.var import TensorConstant
+from pytensor.tensor.variable import TensorConstant
 from tests import unittest_tools as utt
 
 

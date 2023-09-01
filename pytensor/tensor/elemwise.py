@@ -29,7 +29,7 @@ from pytensor.tensor.type import (
     float_dtypes,
     lvector,
 )
-from pytensor.tensor.var import TensorVariable
+from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import uniq
 
 

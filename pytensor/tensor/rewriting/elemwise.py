@@ -39,7 +39,7 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
 )
 from pytensor.tensor.shape import shape_padleft
-from pytensor.tensor.var import TensorConstant, get_unique_constant_value
+from pytensor.tensor.variable import TensorConstant, get_unique_constant_value
 
 
 class InplaceElemwiseOptimizer(GraphRewriter):

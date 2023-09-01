@@ -13,7 +13,7 @@ from pytensor.tensor.type import (
     vector,
 )
 from pytensor.tensor.type_other import SliceType
-from pytensor.tensor.var import TensorVariable
+from pytensor.tensor.variable import TensorVariable
 from pytensor.typed_list.basic import (
     Append,
     Count,

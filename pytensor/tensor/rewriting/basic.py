@@ -72,7 +72,7 @@ from pytensor.tensor.math import eq
 from pytensor.tensor.shape import Shape_i, shape_padleft
 from pytensor.tensor.sort import TopKOp
 from pytensor.tensor.type import DenseTensorType, TensorType
-from pytensor.tensor.var import TensorConstant, TensorVariable
+from pytensor.tensor.variable import TensorConstant, TensorVariable
 from pytensor.utils import NoDuplicateOptWarningFilter
 
 

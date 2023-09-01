@@ -29,7 +29,7 @@ from pytensor.tensor.type import (
     tensor3,
 )
 from pytensor.tensor.type_other import MakeSlice, NoneConst
-from pytensor.tensor.var import (
+from pytensor.tensor.variable import (
     DenseTensorConstant,
     DenseTensorVariable,
     TensorConstant,
@@ -405,3 +405,15 @@ class TestTensorInstanceMethods:
         assert_array_equal(X.take(indices, 1).eval({X: x}), x.take(indices, 1))
         # Test equivalent advanced indexing
         assert_array_equal(X[:, indices].eval({X: x}), x[:, indices])
+
+
+def test_deprecated_import():
+    with pytest.warns(
+        DeprecationWarning,
+        match="The module 'pytensor.tensor.var' has been deprecated.",
+    ):
+        import pytensor.tensor.var as _var
+
+        # Make sure the deprecated import provides access to 'variable' module
+        assert hasattr(_var, "TensorVariable")
+        assert hasattr(_var, "TensorConstant")

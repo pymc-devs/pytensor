@@ -21,7 +21,7 @@ from pytensor.graph.type import HasDataType
 from pytensor.graph.utils import TestValueError
 from pytensor.tensor.basic import AllocEmpty, cast
 from pytensor.tensor.subtensor import set_subtensor
-from pytensor.tensor.var import TensorConstant
+from pytensor.tensor.variable import TensorConstant
 
 
 if TYPE_CHECKING:
