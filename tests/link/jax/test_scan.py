@@ -13,7 +13,7 @@ from pytensor.scan.basic import scan
 from pytensor.scan.op import Scan
 from pytensor.tensor import random
 from pytensor.tensor.math import gammaln, log
-from pytensor.tensor.type import dmatrix, dvector, lscalar, scalar, vector
+from pytensor.tensor.type import dmatrix, dvector, lscalar, matrix, scalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
@@ -418,3 +418,12 @@ def test_nd_scan_sit_sot_with_carry():
 
     test_input_vals = [x0_val, A_val]
     compare_jax_and_py(fg, test_input_vals)
+
+
+def test_default_mode_excludes_incompatible_rewrites():
+    # See issue #426
+    A = matrix("A")
+    B = matrix("B")
+    out, _ = scan(lambda a, b: a @ b, outputs_info=[A], non_sequences=[B], n_steps=2)
+    fg = FunctionGraph([A, B], [out])
+    compare_jax_and_py(fg, [np.eye(3), np.eye(3)])
