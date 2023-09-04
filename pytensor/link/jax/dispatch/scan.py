@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 
+from pytensor.compile.mode import JAX
 from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.scan.op import Scan
 
@@ -17,8 +18,8 @@ def jax_funcify_Scan(op: Scan, **kwargs):
             "Scan with MIT-MOT (gradients of scan) cannot yet be converted to JAX"
         )
 
-    # Optimize inner graph
-    rewriter = op.mode_instance.optimizer
+    # Optimize inner graph (exclude any defalut rewrites that are incompatible with JAX mode)
+    rewriter = op.mode_instance.excluding(*JAX._optimizer.exclude).optimizer
     rewriter(op.fgraph)
     scan_inner_func = jax_funcify(op.fgraph, **kwargs)
 

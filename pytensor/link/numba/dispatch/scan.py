@@ -5,6 +5,7 @@ import numpy as np
 from numba import types
 from numba.extending import overload
 
+from pytensor.compile.mode import NUMBA
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     create_arg_string,
@@ -58,7 +59,7 @@ def numba_funcify_Scan(op, node, **kwargs):
     # TODO: Not sure this is the right place to do this, should we have a rewrite that
     #  explicitly triggers the optimization of the inner graphs of Scan?
     #  The C-code defers it to the make_thunk phase
-    rewriter = op.mode_instance.optimizer
+    rewriter = op.mode_instance.excluding(*NUMBA._optimizer.exclude).optimizer
     rewriter(op.fgraph)
 
     scan_inner_func = numba_basic.numba_njit(numba_funcify(op.fgraph))
