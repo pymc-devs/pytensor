@@ -291,7 +291,8 @@ def test_slogdet():
 def test_trace():
     rng = np.random.default_rng(utt.fetch_seed())
     x = matrix()
-    g = trace(x)
+    with pytest.warns(FutureWarning):
+        g = trace(x)
     f = pytensor.function([x], g)
 
     for shp in [(2, 3), (3, 2), (3, 3)]:
@@ -302,7 +303,8 @@ def test_trace():
     xx = vector()
     ok = False
     try:
-        trace(xx)
+        with pytest.warns(FutureWarning):
+            trace(xx)
     except TypeError:
         ok = True
     except ValueError:

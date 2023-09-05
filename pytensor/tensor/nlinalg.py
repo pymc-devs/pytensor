@@ -1,3 +1,4 @@
+import warnings
 from functools import partial
 from typing import Tuple
 
@@ -9,7 +10,7 @@ from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import basic as at
 from pytensor.tensor import math as tm
-from pytensor.tensor.basic import as_tensor_variable, extract_diag
+from pytensor.tensor.basic import as_tensor_variable, diagonal
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.type import dvector, lscalar, matrix, scalar, vector
 
@@ -175,7 +176,11 @@ def trace(X):
     """
     Returns the sum of diagonal elements of matrix X.
     """
-    return extract_diag(X).sum()
+    warnings.warn(
+        "pytensor.tensor.linalg.trace is deprecated. Use pytensor.tensor.trace instead.",
+        FutureWarning,
+    )
+    return diagonal(X).sum()
 
 
 class Det(Op):

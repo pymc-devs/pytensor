@@ -351,7 +351,8 @@ class TestTensorInstanceMethods:
     def test_trace(self):
         X, _ = self.vars
         x, _ = self.vals
-        assert_array_equal(X.trace().eval({X: x}), x.trace())
+        with pytest.warns(FutureWarning):
+            assert_array_equal(X.trace().eval({X: x}), x.trace())
 
     def test_ravel(self):
         X, _ = self.vars
