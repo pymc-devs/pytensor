@@ -235,7 +235,11 @@ class BlockwiseOpTester:
                 )
                 pt_out = pt_func(*vec_inputs_testvals)
                 np_out = np_funcs[test_input_idx](*vec_inputs_testvals)
-                np.testing.assert_allclose(pt_out, np_out, atol=1e-6)
+                np.testing.assert_allclose(
+                    pt_out,
+                    np_out,
+                    atol=1e-6 if config.floatX == "float64" else 1e-5,
+                )
 
 
 class MatrixOpBlockwiseTester(BlockwiseOpTester):
