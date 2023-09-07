@@ -275,7 +275,7 @@ class Blockwise(Op):
 
         igrads = vectorize(
             [core_igrad for core_igrad in core_igrads if core_igrad is not None],
-            vectorize=dict(
+            replace=dict(
                 zip(core_inputs + core_outputs + core_ograds, inputs + outputs + ograds)
             ),
         )

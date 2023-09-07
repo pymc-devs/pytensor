@@ -4,7 +4,7 @@ import scipy.special
 
 import pytensor.tensor as pt
 from pytensor import config, function, shared
-from pytensor.graph.basic import graph_inputs
+from pytensor.graph.basic import equal_computations, graph_inputs
 from pytensor.graph.replace import clone_replace, graph_replace, vectorize
 from pytensor.tensor import dvector, fvector, vector
 from tests import unittest_tools as utt
@@ -236,9 +236,27 @@ class TestVectorize:
         new_x = pt.matrix("new_x")
         [new_y] = vectorize([y], {x: new_x})
 
+        # Check we can pass both a sequence or a single variable
+        alt_new_y = vectorize(y, {x: new_x})
+        assert equal_computations([new_y], [alt_new_y])
+
         fn = function([new_x], new_y)
         test_new_y = np.array([[0, 1, 2], [2, 1, 0]]).astype(config.floatX)
         np.testing.assert_allclose(
             fn(test_new_y),
             scipy.special.softmax(test_new_y, axis=-1),
         )
+
+    def test_multiple_outputs(self):
+        x = pt.vector("x")
+        y1 = x[0]
+        y2 = x[-1]
+
+        new_x = pt.matrix("new_x")
+        [new_y1, new_y2] = vectorize([y1, y2], {x: new_x})
+
+        fn = function([new_x], [new_y1, new_y2])
+        new_x_test = np.arange(9).reshape(3, 3).astype(config.floatX)
+        new_y1_res, new_y2_res = fn(new_x_test)
+        np.testing.assert_allclose(new_y1_res, [0, 3, 6])
+        np.testing.assert_allclose(new_y2_res, [2, 5, 8])
