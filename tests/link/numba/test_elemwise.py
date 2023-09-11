@@ -445,6 +445,16 @@ def test_SoftmaxGrad(dy, sm, axis, exc):
         )
 
 
+def test_SoftMaxGrad_constant_dy():
+    dy = at.constant(np.zeros((3,), dtype=config.floatX))
+    sm = at.vector(shape=(3,))
+
+    g = SoftmaxGrad(axis=None)(dy, sm)
+    g_fg = FunctionGraph(outputs=[g])
+
+    compare_numba_and_py(g_fg, [np.ones((3,), dtype=config.floatX)])
+
+
 @pytest.mark.parametrize(
     "x, axis, exc",
     [
