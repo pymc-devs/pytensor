@@ -925,7 +925,12 @@ def numba_funcify_SoftmaxGrad(op, node, **kwargs):
         dx = dy_times_sm - sum_dy_times_sm * sm
         return dx
 
-    softmax_grad = jit_compile_reducer(node, softmax_grad_py_fn)
+    # The signature inferred by jit_compile_reducer is wrong when dy is a constant (readonly=True)
+    # softmax_grad = jit_compile_reducer(node, softmax_grad_py_fn)
+    softmax_grad = numba_njit(
+        boundscheck=False,
+        fastmath=config.numba__fastmath,
+    )(softmax_grad_py_fn)
 
     return softmax_grad
 
