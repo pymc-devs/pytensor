@@ -427,7 +427,7 @@ class MaxwellRV(ScipyRandomVariable):
 
     .. math::
 
-        f(x; \mu, \sigma) = \sqrt{\frac{2}{\pi}}\frac{(x-\mu)^2 \exp\left\{-(x-\mu)^2/(2\sigma^2)\}}{\sigma^3}
+        f(x; \mu, \sigma) = \sqrt{\frac{2}{\pi}}\frac{(x-\mu)^2 e^{-(x-\mu)^2/(2\sigma^2)}}{\sigma^3}
 
     for :math:`x \geq 0` and :math:`\sigma > 0`
 
