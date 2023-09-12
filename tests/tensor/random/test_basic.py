@@ -40,6 +40,7 @@ from pytensor.tensor.random.basic import (
     laplace,
     logistic,
     lognormal,
+    maxwell,
     multinomial,
     multivariate_normal,
     nbinom,
@@ -336,6 +337,24 @@ def test_halfnormal_samples(mean, sigma, size):
 )
 def test_lognormal_samples(mean, sigma, size):
     compare_sample_values(lognormal, mean, sigma, size=size)
+
+
+@pytest.mark.parametrize(
+    "loc, sigma, size",
+    [
+        (np.array(0, dtype=config.floatX), np.array(1, dtype=config.floatX), None),
+        (np.array(0, dtype=config.floatX), np.array(1, dtype=config.floatX), []),
+        (
+            np.full((1, 2), 0, dtype=config.floatX),
+            np.array(1, dtype=config.floatX),
+            None,
+        ),
+    ],
+)
+def test_maxwell_samples(loc, sigma, size):
+    compare_sample_values(
+        maxwell, loc, sigma, size=size, test_fn=fixed_scipy_rvs("maxwell")
+    )
 
 
 @pytest.mark.parametrize(

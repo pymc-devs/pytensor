@@ -419,6 +419,63 @@ class LogNormalRV(RandomVariable):
 lognormal = LogNormalRV()
 
 
+class MaxwellRV(ScipyRandomVariable):
+    r"""A Maxwellian continuous random variable.
+
+    The probability density function for `maxwell` in terms of its parameters :math:`\mu`
+    and :math:`\sigma` is:
+
+    .. math::
+
+        f(x; \mu, \sigma) = \sqrt{\frac{2}{\pi}}\frac{(x-\mu)^2 \exp\left\{-(x-\mu)^2/(2\sigma^2)\}}{\sigma^3}
+
+    for :math:`x \geq 0` and :math:`\sigma > 0`
+
+    """
+    name = "maxwell"
+    ndim_supp = 0
+    ndims_params = [0, 0]
+    dtype = "floatX"
+    _print_name = ("Maxwell", "\\operatorname{Maxwell}")
+
+    def __call__(self, loc, scale, size=None, **kwargs):
+        r"""Draw samples from a Maxwell distribution.
+
+        Signature
+        ---------
+
+        `(), () -> ()`
+
+        Parameters
+        ----------
+        loc
+            Location parameter :math:`\mu` of the distribution.
+        scale
+            Scale parameter :math:`\sigma` of the distribution. Must be
+            positive.
+        size
+            Sample shape. If the given size is, e.g. `(m, n, k)` then `m * n * k`
+            independent, identically distributed random variables are
+            returned. Default is `None` in which case a single random variable
+            is returned.
+
+        """
+        return super().__call__(loc, scale, size=size, **kwargs)
+
+    @classmethod
+    def rng_fn_scipy(
+        cls,
+        rng: Union[np.random.Generator, np.random.RandomState],
+        loc: Union[np.ndarray, float],
+        scale: Union[np.ndarray, float],
+        size: Optional[Union[List[int], int]],
+    ) -> np.ndarray:
+        return stats.maxwell.rvs(loc=loc, scale=scale, size=size, random_state=rng)
+
+
+maxwell = MaxwellRV()
+
+
 class GammaRV(ScipyRandomVariable):
     r"""A gamma continuous random variable.
 
@@ -2157,6 +2214,7 @@ __all__ = [
     "lognormal",
     "halfnormal",
     "normal",
+    "maxwell",
     "beta",
     "triangular",
     "uniform",

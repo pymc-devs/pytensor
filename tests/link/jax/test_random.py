@@ -214,6 +214,22 @@ def test_random_updates_input_storage_order():
             lambda mu, sigma: (sigma, 0, np.exp(mu)),
         ),
         (
+            aer.maxwell,
+            [
+                set_test_value(
+                    at.lvector(),
+                    np.array([1, 2], dtype=np.int64),
+                ),
+                set_test_value(
+                    at.dscalar(),
+                    np.array(1.0, dtype=np.float64),
+                ),
+            ],
+            (2,),
+            "maxwell",
+            lambda *args: args,
+        ),
+        (
             aer.normal,
             [
                 set_test_value(

@@ -124,6 +124,9 @@ PyTensor can produce :class:`RandomVariable`\s that draw samples from many diffe
 .. autoclass:: pytensor.tensor.random.basic.LogNormalRV
    :members: __call__
 
+.. autoclass:: pytensor.tensor.random.basic.MaxwellRV
+   :members: __call__
+
 .. autoclass:: pytensor.tensor.random.basic.MultinomialRV
    :members: __call__
 

@@ -85,6 +85,22 @@ rng = np.random.default_rng(42849)
             ],
             at.as_tensor([3, 2]),
         ),
+        (
+            aer.maxwell,
+            [
+                set_test_value(
+                    at.dvector(),
+                    np.array([1.0, 2.0], dtype=np.float64),
+                ),
+                set_test_value(
+                    at.dscalar(),
+                    np.array(1.0, dtype=np.float64),
+                ),
+            ],
+            (2,),
+            "maxwell",
+            lambda *args: args,
+        ),
         pytest.param(
             aer.pareto,
             [
