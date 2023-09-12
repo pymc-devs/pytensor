@@ -214,3 +214,11 @@ def test_local_dimshuffle_subtensor():
     assert x[:, :, 0:3, ::-1].dimshuffle(0, 2, 3).eval(
         {x: np.ones((5, 1, 6, 7))}
     ).shape == (5, 3, 7)
+
+    # Test dropped sliced dimensions
+    x = matrix("x", shape=(5, 4), dtype="float64")
+
+    assert x[2:3, :-2].dimshuffle(1).eval({x: np.ones(x.type.shape)}).shape == (2,)
+    assert x[:1, 0:3].dimshuffle(1).eval({x: np.ones(x.type.shape)}).shape == (3,)
+    assert x[-1:, :].dimshuffle(1).eval({x: np.ones(x.type.shape)}).shape == (4,)
+    assert x[4:3:-1, 1:].dimshuffle(1).eval({x: np.ones(x.type.shape)}).shape == (3,)
