@@ -4,11 +4,11 @@ We don't have real tests for the cache, but it would be great to make them!
 But this one tests a current behavior that isn't good: the c_code isn't
 deterministic based on the input type and the op.
 """
-import logging
 import multiprocessing
 import os
+import sys
 import tempfile
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -161,16 +161,69 @@ def test_flag_detection():
     assert isinstance(res, bool)
 
 
-@patch("pytensor.link.c.cmodule.try_blas_flag", return_value=None)
-@patch("pytensor.link.c.cmodule.sys")
-def test_default_blas_ldflags(sys_mock, try_blas_flag_mock, caplog):
-    sys_mock.version = "3.8.0 | packaged by conda-forge | (default, Nov 22 2019, 19:11:38) \n[GCC 7.3.0]"
+@pytest.fixture(
+    scope="module",
+    params=["mkl_intel", "mkl_gnu", "openblas", "lapack", "blas", "no_blas"],
+)
+def blas_libs(request):
+    key = request.param
+    libs = {
+        "mkl_intel": ["mkl_core", "mkl_rt", "mkl_intel_thread", "iomp5", "pthread"],
+        "mkl_gnu": ["mkl_core", "mkl_rt", "mkl_gnu_thread", "gomp", "pthread"],
+        "openblas": ["openblas", "gfortran", "gomp", "m"],
+        "lapack": ["lapack", "blas", "cblas", "m"],
+        "blas": ["blas", "cblas"],
+        "no_blas": [],
+    }
+    return libs[key]
 
-    with patch.dict("sys.modules", {"mkl": None}):
-        with caplog.at_level(logging.WARNING):
-            default_blas_ldflags()
 
-    assert caplog.text == ""
+@pytest.fixture(scope="function", params=["Linux", "Windows", "Darwin"])
+def mock_system(request):
+    with patch("platform.system", return_value=request.param):
+        yield request.param
+
+
+@pytest.fixture()
+def cxx_search_dirs(blas_libs, mock_system):
+    libext = {"Linux": "so", "Windows": "dll", "Darwin": "dylib"}
+    libtemplate = f"{{lib}}.{libext[mock_system]}"
+    libraries = []
+    with tempfile.TemporaryDirectory() as d:
+        flags = None
+        for lib in blas_libs:
+            lib_path = os.path.join(d, libtemplate.format(lib=lib))
+            with open(lib_path, "wb") as f:
+                f.write(b"1")
+            libraries.append(lib_path)
+            if flags is None:
+                flags = f"-l{lib}"
+            else:
+                flags += f" -l{lib}"
+        if "gomp" in blas_libs and "mkl_gnu_thread" not in blas_libs:
+            flags += " -fopenmp"
+        if len(blas_libs) == 0:
+            flags = ""
+        yield f"libraries: ={d}".encode(sys.stdout.encoding), flags
+
+
+@patch("pytensor.link.c.cmodule.std_lib_dirs", return_value=[])
+@patch("pytensor.link.c.cmodule.check_mkl_openmp", return_value=None)
+def test_default_blas_ldflags(
+    mock_std_lib_dirs, mock_check_mkl_openmp, cxx_search_dirs
+):
+    cxx_search_dirs, expected_blas_ldflags = cxx_search_dirs
+    mock_process = MagicMock()
+    mock_process.communicate = lambda *args, **kwargs: (cxx_search_dirs, None)
+    with patch("pytensor.link.c.cmodule.subprocess_Popen", return_value=mock_process):
+        with patch.object(
+            pytensor.link.c.cmodule.GCC_compiler,
+            "try_compile_tmp",
+            return_value=(True, True),
+        ):
+            assert set(default_blas_ldflags().split(" ")) == set(
+                expected_blas_ldflags.split(" ")
+            )
 
 
 @patch(
