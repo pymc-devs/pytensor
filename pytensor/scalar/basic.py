@@ -1898,7 +1898,7 @@ class Mul(ScalarOp):
     commutative = True
     associative = True
     nfunc_spec = ("multiply", 2, 1)
-    nfunc_variadic = "product"
+    nfunc_variadic = "prod"
 
     def impl(self, *inputs):
         return np.prod(inputs)
