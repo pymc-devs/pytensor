@@ -9,7 +9,7 @@ channels:
 dependencies:
   - python
   - compilers
-  - numpy>=1.17.0,<1.26.0
+  - numpy>=1.17.0
   - scipy>=0.14
   - filelock
   - etuples
