@@ -482,6 +482,7 @@ acceptable_ops = (
     at.basic.Alloc,
     at.elemwise.Elemwise,
     at.elemwise.DimShuffle,
+    at.blockwise.Blockwise,
 )
 
 
