@@ -10,9 +10,9 @@ from pytensor.compile import DeepCopyOp
 from pytensor.compile.mode import get_default_mode
 from pytensor.graph.basic import Constant, equal_computations
 from pytensor.tensor import get_vector_length
-from pytensor.tensor.basic import constant
+from pytensor.tensor.basic import as_tensor, constant
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.math import dot, eq
+from pytensor.tensor.math import dot, eq, matmul
 from pytensor.tensor.shape import Shape
 from pytensor.tensor.subtensor import AdvancedSubtensor, Subtensor
 from pytensor.tensor.type import (
@@ -79,13 +79,27 @@ def test_infix_dot_method():
     X = dmatrix("X")
     y = dvector("y")
 
-    res = X @ y
-    exp_res = X.dot(y)
+    res = X.dot(y)
+    exp_res = dot(X, y)
     assert equal_computations([res], [exp_res])
 
     X_val = np.arange(2 * 3).reshape((2, 3))
-    res = X_val @ y
+    res = as_tensor(X_val).dot(y)
     exp_res = dot(X_val, y)
+    assert equal_computations([res], [exp_res])
+
+
+def test_infix_matmul_method():
+    X = dmatrix("X")
+    y = dvector("y")
+
+    res = X @ y
+    exp_res = matmul(X, y)
+    assert equal_computations([res], [exp_res])
+
+    X_val = np.arange(2 * 3).reshape((2, 3))
+    res = as_tensor(X_val) @ y
+    exp_res = matmul(X_val, y)
     assert equal_computations([res], [exp_res])
 
 
