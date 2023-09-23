@@ -3,6 +3,8 @@ from pytensor.graph import node_rewriter
 from pytensor.graph.replace import vectorize_node
 from pytensor.graph.rewriting.basic import copy_stack_trace, out2in
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.math import _matrix_matrix_matmul
+from pytensor.tensor.rewriting.basic import register_canonicalize
 
 
 @node_rewriter([Blockwise])
@@ -40,3 +42,10 @@ optdb.register(
     "blockwise",
     position=49,
 )
+
+
+# Avoid redundant cases early on for Ops whose default form is not Blockwised
+@register_canonicalize
+@node_rewriter(tracks=[_matrix_matrix_matmul])
+def local_eager_useless_unbatched_blockwise(fgraph, node):
+    return local_useless_unbatched_blockwise.fn(fgraph, node)
