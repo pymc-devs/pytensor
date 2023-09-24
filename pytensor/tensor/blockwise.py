@@ -8,7 +8,11 @@ from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op
-from pytensor.graph.replace import _vectorize_node, vectorize_graph
+from pytensor.graph.replace import (
+    _vectorize_node,
+    _vectorize_not_needed,
+    vectorize_graph,
+)
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.shape import shape_padleft
 from pytensor.tensor.type import continuous_dtypes, discrete_dtypes, tensor
@@ -35,17 +39,6 @@ def safe_signature(
         operand_sig(o, prefix=f"o{n}") for n, o in enumerate(core_outputs)
     )
     return f"{inputs_sig}->{outputs_sig}"
-
-
-@_vectorize_node.register(Op)
-def vectorize_node_fallback(op: Op, node: Apply, *bached_inputs) -> Apply:
-    if hasattr(op, "gufunc_signature"):
-        signature = op.gufunc_signature
-    else:
-        # TODO: This is pretty bad for shape inference and merge optimization!
-        #  Should get better as we add signatures to our Ops
-        signature = safe_signature(node.inputs, node.outputs)
-    return cast(Apply, Blockwise(op, signature=signature).make_node(*bached_inputs))
 
 
 class Blockwise(Op):
@@ -361,6 +354,15 @@ class Blockwise(Op):
             return self.name
 
 
-@_vectorize_node.register(Blockwise)
-def vectorize_not_needed(op, node, *batch_inputs):
-    return op.make_node(*batch_inputs)
+@_vectorize_node.register(Op)
+def vectorize_node_fallback(op: Op, node: Apply, *bached_inputs) -> Apply:
+    if hasattr(op, "gufunc_signature"):
+        signature = op.gufunc_signature
+    else:
+        # TODO: This is pretty bad for shape inference and merge optimization!
+        #  Should get better as we add signatures to our Ops
+        signature = safe_signature(node.inputs, node.outputs)
+    return cast(Apply, Blockwise(op, signature=signature).make_node(*bached_inputs))
+
+
+_vectorize_node.register(Blockwise, _vectorize_not_needed)

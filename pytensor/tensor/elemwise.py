@@ -7,7 +7,7 @@ from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.null_type import NullType
-from pytensor.graph.replace import _vectorize_node
+from pytensor.graph.replace import _vectorize_node, _vectorize_not_needed
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.basic import failure_code
 from pytensor.link.c.op import COp, ExternalCOp, OpenMPOp
@@ -22,7 +22,6 @@ from pytensor.scalar.basic import transfer_type, upcast
 from pytensor.tensor import elemwise_cgen as cgen
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import _get_vector_length, as_tensor_variable
-from pytensor.tensor.blockwise import vectorize_not_needed
 from pytensor.tensor.type import (
     TensorType,
     continuous_dtypes,
@@ -1741,7 +1740,7 @@ def _get_vector_length_Elemwise(op, var):
     raise ValueError(f"Length of {var} cannot be determined")
 
 
-_vectorize_node.register(Elemwise, vectorize_not_needed)
+_vectorize_node.register(Elemwise, _vectorize_not_needed)
 
 
 @_vectorize_node.register(DimShuffle)
