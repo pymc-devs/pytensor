@@ -10,5 +10,6 @@ import pytensor.link.numba.dispatch.random
 import pytensor.link.numba.dispatch.elemwise
 import pytensor.link.numba.dispatch.scan
 import pytensor.link.numba.dispatch.sparse
+import pytensor.link.numba.dispatch.slinalg
 
 # isort: on
