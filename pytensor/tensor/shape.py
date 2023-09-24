@@ -8,6 +8,7 @@ import numpy as np
 import pytensor
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.replace import _vectorize_node, _vectorize_not_needed
 from pytensor.graph.type import HasShape
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
@@ -152,6 +153,9 @@ def shape(x: Union[np.ndarray, Number, Variable]) -> Variable:
 @_get_vector_length.register(Shape)
 def _get_vector_length_Shape(op, var):
     return var.owner.inputs[0].type.ndim
+
+
+_vectorize_node.register(Shape, _vectorize_not_needed)
 
 
 def shape_tuple(x: TensorVariable) -> tuple[Variable, ...]:
@@ -580,6 +584,32 @@ def _get_vector_length_SpecifyShape(op, var):
         raise ValueError(f"Length of {var} cannot be determined")
 
 
+@_vectorize_node.register(SpecifyShape)
+def _vectorize_specify_shape(op, node, x, *shape):
+    old_x, *old_shape = node.inputs
+    batched_ndims = x.type.ndim - old_x.type.ndim
+
+    if any(
+        as_tensor_variable(dim).type.ndim != 0
+        for dim in shape
+        if not (NoneConst.equals(dim) or dim is None)
+    ):
+        raise NotImplementedError(
+            "It is not possible to vectorize the shape argument of SpecifyShape"
+        )
+
+    if len(shape) == len(old_shape):
+        new_shape = tuple([None] * batched_ndims) + shape
+    elif len(shape) == (len(old_shape) + batched_ndims):
+        new_shape = shape
+    else:
+        raise ValueError(
+            "Invalid number of shape arguments passed into vectorize node of SpecifyShape"
+        )
+
+    return specify_shape(x, new_shape).owner
+
+
 class Reshape(COp):
     """Perform a reshape operation of the input x to the new shape shp.
     The number of dimensions to which to reshape to (ndim) must be
@@ -638,7 +668,7 @@ class Reshape(COp):
 
         return Apply(self, [x, shp], [tensor(dtype=x.type.dtype, shape=out_shape)])
 
-    def perform(self, node, inp, out_, params):
+    def perform(self, node, inp, out_, params=None):
         x, shp = inp
         (out,) = out_
         if len(shp) != self.ndim:
@@ -768,6 +798,26 @@ class Reshape(COp):
             {fail};
         }}
         """
+
+
+@_vectorize_node.register(Reshape)
+def _vectorize_reshape(op, node, x, shape):
+    old_x, old_shape = node.inputs
+    batched_ndims = x.type.ndim - old_x.type.ndim
+
+    if as_tensor_variable(shape).type.ndim != 1:
+        raise NotImplementedError(
+            "It is not possible to vectorize the shape argument of Reshape"
+        )
+
+    if len(tuple(old_shape)) == len(tuple(shape)):
+        new_shape = [*x.shape[:batched_ndims], *shape]
+    elif len(tuple(old_shape)) == (len(tuple(shape)) - batched_ndims):
+        new_shape = shape
+    else:
+        raise ValueError("Invalid shape length passed into vectorize node of Reshape")
+
+    return reshape(x, new_shape, ndim=len(new_shape)).owner
 
 
 def reshape(x, newshape, ndim=None):
@@ -1034,3 +1084,11 @@ def unbroadcast(x, *axes):
     if not unbroadcasted_axes:
         return x
     return Unbroadcast(*unbroadcasted_axes)(x)
+
+
+@_vectorize_node.register(Unbroadcast)
+def _vectorize_unbroadcast(op: Unbroadcast, node: Apply, x: TensorVariable) -> Apply:
+    batched_ndims = x.type.ndim - node.inputs[0].type.ndim
+    old_axes = op.axes
+    new_axes = (old_axis + batched_ndims for old_axis in old_axes)
+    return unbroadcast(x, *new_axes).owner

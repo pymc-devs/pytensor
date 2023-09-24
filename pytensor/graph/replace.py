@@ -204,7 +204,7 @@ def graph_replace(
 
 
 @singledispatch
-def _vectorize_node(op: Op, node: Apply, *bached_inputs) -> Apply:
+def _vectorize_node(op: Op, node: Apply, *batched_inputs) -> Apply:
     # Default implementation is provided in pytensor.tensor.blockwise
     raise NotImplementedError
 
@@ -213,6 +213,10 @@ def vectorize_node(node: Apply, *batched_inputs) -> Apply:
     """Returns vectorized version of node with new batched inputs."""
     op = node.op
     return _vectorize_node(op, node, *batched_inputs)
+
+
+def _vectorize_not_needed(op, node, *batched_inputs):
+    return op.make_node(*batched_inputs)
 
 
 @overload
