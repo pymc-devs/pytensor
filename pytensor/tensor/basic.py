@@ -527,7 +527,7 @@ def get_underlying_scalar_constant_value(
                         grandparent.owner.op, Unbroadcast
                     ):
                         ggp_shape = grandparent.owner.inputs[0].type.shape
-                        l = [s1 == 1 or s2 == 1 for s1, s2 in zip(ggp_shape, gp_shape)]
+                        l = [get_underlying_scalar_constant_value(s) for s in ggp_shape]
                         gp_shape = tuple(l)
 
                     if not (idx < ndim):
@@ -3376,6 +3376,7 @@ def inverse_permutation(perm):
     )
 
 
+# TODO: optimization to insert ExtractDiag with view=True
 class ExtractDiag(Op):
     """
     Return specified diagonals.
@@ -3526,8 +3527,12 @@ class ExtractDiag(Op):
             self.axis2 = 1
 
 
-extract_diag = ExtractDiag()
-# TODO: optimization to insert ExtractDiag with view=True
+def extract_diag(x):
+    warnings.warn(
+        "pytensor.tensor.extract_diag is deprecated. Use pytensor.tensor.diagonal instead.",
+        FutureWarning,
+    )
+    return diagonal(x)
 
 
 def diagonal(a, offset=0, axis1=0, axis2=1):
@@ -3552,6 +3557,15 @@ def diagonal(a, offset=0, axis1=0, axis2=1):
     a = as_tensor_variable(a)
     axis1, axis2 = normalize_axis_tuple((axis1, axis2), ndim=a.type.ndim)
     return ExtractDiag(offset, axis1, axis2)(a)
+
+
+def trace(a, offset=0, axis1=0, axis2=1):
+    """
+    Returns the sum along diagonals of the array.
+
+    Equivalent to `numpy.trace`
+    """
+    return diagonal(a, offset=offset, axis1=axis1, axis2=axis2).sum(-1)
 
 
 class AllocDiag(Op):
@@ -3764,7 +3778,7 @@ def stacklists(arg):
         return arg
 
 
-def swapaxes(y, axis1, axis2):
+def swapaxes(y, axis1: int, axis2: int) -> TensorVariable:
     "Swap the axes of a tensor."
     y = as_tensor_variable(y)
     ndim = y.ndim
@@ -4254,6 +4268,7 @@ __all__ = [
     "full_like",
     "empty",
     "empty_like",
+    "trace",
     "tril_indices",
     "tril_indices_from",
     "triu_indices",

@@ -1,8 +1,9 @@
-from functools import partial
-from typing import Iterable, Optional, Sequence, Union, cast, overload
+from functools import partial, singledispatch
+from typing import Iterable, Mapping, Optional, Sequence, Union, cast, overload
 
 from pytensor.graph.basic import Apply, Constant, Variable, truncated_graph_inputs
 from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op
 
 
 ReplaceTypes = Union[Iterable[tuple[Variable, Variable]], dict[Variable, Variable]]
@@ -198,3 +199,112 @@ def graph_replace(
         return list(fg.outputs)
     else:
         return fg.outputs[0]
+
+
+@singledispatch
+def _vectorize_node(op: Op, node: Apply, *bached_inputs) -> Apply:
+    # Default implementation is provided in pytensor.tensor.blockwise
+    raise NotImplementedError
+
+
+def vectorize_node(node: Apply, *batched_inputs) -> Apply:
+    """Returns vectorized version of node with new batched inputs."""
+    op = node.op
+    return _vectorize_node(op, node, *batched_inputs)
+
+
+@overload
+def vectorize(
+    outputs: Variable,
+    replace: Mapping[Variable, Variable],
+) -> Variable:
+    ...
+
+
+@overload
+def vectorize(
+    outputs: Sequence[Variable],
+    replace: Mapping[Variable, Variable],
+) -> Sequence[Variable]:
+    ...
+
+
+def vectorize(
+    outputs: Union[Variable, Sequence[Variable]],
+    replace: Mapping[Variable, Variable],
+) -> Union[Variable, Sequence[Variable]]:
+    """Vectorize outputs graph given mapping from old variables to expanded counterparts version.
+
+    Expanded dimensions must be on the left. Behavior is similar to the functional `numpy.vectorize`.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import pytensor
+        import pytensor.tensor as pt
+
+        from pytensor.graph import vectorize
+
+        # Original graph
+        x = pt.vector("x")
+        y = pt.exp(x) / pt.sum(pt.exp(x))
+
+        # Vectorized graph
+        new_x = pt.matrix("new_x")
+        new_y = vectorize(y, replace={x: new_x})
+
+        fn = pytensor.function([new_x], new_y)
+        fn([[0, 1, 2], [2, 1, 0]])
+        # array([[0.09003057, 0.24472847, 0.66524096],
+        #        [0.66524096, 0.24472847, 0.09003057]])
+
+
+    .. code-block:: python
+
+        import pytensor
+        import pytensor.tensor as pt
+
+        from pytensor.graph import vectorize
+
+        # Original graph
+        x = pt.vector("x")
+        y1 = x[0]
+        y2 = x[-1]
+
+        # Vectorized graph
+        new_x = pt.matrix("new_x")
+        [new_y1, new_y2] = vectorize([y1, y2], replace={x: new_x})
+
+        fn = pytensor.function([new_x], [new_y1, new_y2])
+        fn([[-10, 0, 10], [-11, 0, 11]])
+        # [array([-10., -11.]), array([10., 11.])]
+
+    """
+    if isinstance(outputs, Sequence):
+        seq_outputs = outputs
+    else:
+        seq_outputs = [outputs]
+
+    inputs = truncated_graph_inputs(seq_outputs, ancestors_to_include=replace.keys())
+    new_inputs = [replace.get(inp, inp) for inp in inputs]
+
+    def transform(var: Variable) -> Variable:
+        if var in inputs:
+            return new_inputs[inputs.index(var)]
+
+        node = var.owner
+        batched_inputs = [transform(inp) for inp in node.inputs]
+        batched_node = vectorize_node(node, *batched_inputs)
+        batched_var = batched_node.outputs[var.owner.outputs.index(var)]
+
+        return cast(Variable, batched_var)
+
+    # TODO: MergeOptimization or node caching?
+    seq_vect_outputs = [transform(out) for out in seq_outputs]
+
+    if isinstance(outputs, Sequence):
+        return seq_vect_outputs
+    else:
+        [vect_output] = seq_vect_outputs
+        return vect_output

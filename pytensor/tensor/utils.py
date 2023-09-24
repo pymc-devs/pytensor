@@ -1,3 +1,5 @@
+from typing import Sequence, Union
+
 import numpy as np
 
 import pytensor
@@ -107,3 +109,54 @@ def as_list(x):
         return list(x)
     except TypeError:
         return [x]
+
+
+def import_func_from_string(func_string: str):  # -> Optional[Callable]:
+    func = getattr(np, func_string, None)
+    if func is not None:
+        return func
+
+    # Not inside NumPy or Scipy. So probably another package like scipy.
+    module = None
+    items = func_string.split(".")
+    for idx in range(1, len(items)):
+        try:
+            module = __import__(".".join(items[:idx]))
+        except ImportError:
+            break
+
+    if module:
+        for sub in items[1:]:
+            try:
+                module = getattr(module, sub)
+            except AttributeError:
+                module = None
+                break
+        return module
+
+
+def broadcast_static_dim_lengths(
+    dim_lengths: Sequence[Union[int, None]]
+) -> Union[int, None]:
+    """Apply static broadcast given static dim length of inputs (obtained from var.type.shape).
+
+    Raises
+    ------
+    ValueError
+        When static dim lengths are incompatible
+    """
+
+    dim_lengths_set = set(dim_lengths)
+    # All dim_lengths are the same
+    if len(dim_lengths_set) == 1:
+        return tuple(dim_lengths_set)[0]
+
+    # Only valid indeterminate case
+    if dim_lengths_set == {None, 1}:
+        return None
+
+    dim_lengths_set.discard(1)
+    dim_lengths_set.discard(None)
+    if len(dim_lengths_set) > 1:
+        raise ValueError
+    return tuple(dim_lengths_set)[0]

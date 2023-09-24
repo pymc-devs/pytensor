@@ -46,7 +46,7 @@ rng = np.random.default_rng(42849)
     ],
 )
 def test_Cholesky(x, lower, exc):
-    g = slinalg.Cholesky(lower)(x)
+    g = slinalg.Cholesky(lower=lower)(x)
 
     if isinstance(g, list):
         g_fg = FunctionGraph(outputs=g)
@@ -91,7 +91,7 @@ def test_Cholesky(x, lower, exc):
     ],
 )
 def test_Solve(A, x, lower, exc):
-    g = slinalg.Solve(lower)(A, x)
+    g = slinalg.Solve(lower=lower, b_ndim=1)(A, x)
 
     if isinstance(g, list):
         g_fg = FunctionGraph(outputs=g)
@@ -309,26 +309,6 @@ def test_Eigh(x, uplo, exc):
         ),
         (
             nlinalg.MatrixInverse,
-            set_test_value(
-                at.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
-            None,
-            (),
-        ),
-        (
-            nlinalg.Inv,
-            set_test_value(
-                at.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
-            None,
-            (),
-        ),
-        (
-            nlinalg.Inv,
             set_test_value(
                 at.lmatrix(),
                 (lambda x: x.T.dot(x))(

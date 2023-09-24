@@ -1,7 +1,7 @@
 import logging
 import typing
 import warnings
-from typing import TYPE_CHECKING, Literal, Union
+from typing import TYPE_CHECKING, Literal, Optional, Union
 
 import numpy as np
 import scipy.linalg
@@ -13,6 +13,7 @@ from pytensor.graph.op import Op
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor import basic as at
 from pytensor.tensor import math as atm
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.nlinalg import matrix_dot
 from pytensor.tensor.shape import reshape
 from pytensor.tensor.type import matrix, tensor, vector
@@ -48,8 +49,9 @@ class Cholesky(Op):
     # TODO: LAPACK wrapper with in-place behavior, for solve also
 
     __props__ = ("lower", "destructive", "on_error")
+    gufunc_signature = "(m,m)->(m,m)"
 
-    def __init__(self, lower=True, on_error="raise"):
+    def __init__(self, *, lower=True, on_error="raise"):
         self.lower = lower
         self.destructive = False
         if on_error not in ("raise", "nan"):
@@ -109,7 +111,7 @@ class Cholesky(Op):
 
         def conjugate_solve_triangular(outer, inner):
             """Computes L^{-T} P L^{-1} for lower-triangular L."""
-            solve_upper = SolveTriangular(lower=False)
+            solve_upper = SolveTriangular(lower=False, b_ndim=2)
             return solve_upper(outer.T, solve_upper(outer.T, inner.T).T)
 
         s = conjugate_solve_triangular(
@@ -127,77 +129,8 @@ class Cholesky(Op):
             return [grad]
 
 
-cholesky = Cholesky()
-
-
-class CholeskySolve(Op):
-    __props__ = ("lower", "check_finite")
-
-    def __init__(
-        self,
-        lower=True,
-        check_finite=True,
-    ):
-        self.lower = lower
-        self.check_finite = check_finite
-
-    def __repr__(self):
-        return "CholeskySolve{%s}" % str(self._props())
-
-    def make_node(self, C, b):
-        C = as_tensor_variable(C)
-        b = as_tensor_variable(b)
-        assert C.ndim == 2
-        assert b.ndim in (1, 2)
-
-        # infer dtype by solving the most simple
-        # case with (1, 1) matrices
-        o_dtype = scipy.linalg.solve(
-            np.eye(1).astype(C.dtype), np.eye(1).astype(b.dtype)
-        ).dtype
-        x = tensor(dtype=o_dtype, shape=b.type.shape)
-        return Apply(self, [C, b], [x])
-
-    def perform(self, node, inputs, output_storage):
-        C, b = inputs
-        rval = scipy.linalg.cho_solve(
-            (C, self.lower),
-            b,
-            check_finite=self.check_finite,
-        )
-
-        output_storage[0][0] = rval
-
-    def infer_shape(self, fgraph, node, shapes):
-        Cshape, Bshape = shapes
-        rows = Cshape[1]
-        if len(Bshape) == 1:  # b is a Vector
-            return [(rows,)]
-        else:
-            cols = Bshape[1]  # b is a Matrix
-            return [(rows, cols)]
-
-
-cho_solve = CholeskySolve()
-
-
-def cho_solve(c_and_lower, b, check_finite=True):
-    """Solve the linear equations A x = b, given the Cholesky factorization of A.
-
-    Parameters
-    ----------
-    (c, lower) : tuple, (array, bool)
-        Cholesky factorization of a, as given by cho_factor
-    b : array
-        Right-hand side
-    check_finite : bool, optional
-        Whether to check that the input matrices contain only finite numbers.
-        Disabling may give a performance gain, but may result in problems
-        (crashes, non-termination) if the inputs do contain infinities or NaNs.
-    """
-
-    A, lower = c_and_lower
-    return CholeskySolve(lower=lower, check_finite=check_finite)(A, b)
+def cholesky(x, lower=True, on_error="raise"):
+    return Blockwise(Cholesky(lower=lower, on_error=on_error))(x)
 
 
 class SolveBase(Op):
@@ -206,15 +139,24 @@ class SolveBase(Op):
     __props__ = (
         "lower",
         "check_finite",
+        "b_ndim",
     )
 
     def __init__(
         self,
+        *,
         lower=False,
         check_finite=True,
+        b_ndim,
     ):
         self.lower = lower
         self.check_finite = check_finite
+        assert b_ndim in (1, 2)
+        self.b_ndim = b_ndim
+        if b_ndim == 1:
+            self.gufunc_signature = "(m,m),(m)->(m)"
+        else:
+            self.gufunc_signature = "(m,m),(m,n)->(m,n)"
 
     def perform(self, node, inputs, outputs):
         pass
@@ -225,8 +167,8 @@ class SolveBase(Op):
 
         if A.ndim != 2:
             raise ValueError(f"`A` must be a matrix; got {A.type} instead.")
-        if b.ndim not in (1, 2):
-            raise ValueError(f"`b` must be a matrix or a vector; got {b.type} instead.")
+        if b.ndim != self.b_ndim:
+            raise ValueError(f"`b` must have {self.b_ndim} dims; got {b.type} instead.")
 
         # Infer dtype by solving the most simple case with 1x1 matrices
         o_dtype = scipy.linalg.solve(
@@ -276,28 +218,73 @@ class SolveBase(Op):
 
         return [A_bar, b_bar]
 
-    def __repr__(self):
-        return f"{type(self).__name__}{self._props()}"
+
+def _default_b_ndim(b, b_ndim):
+    if b_ndim is not None:
+        assert b_ndim in (1, 2)
+        return b_ndim
+
+    b = as_tensor_variable(b)
+    if b_ndim is None:
+        return min(b.ndim, 2)  # By default assume the core case is a matrix
+
+
+class CholeskySolve(SolveBase):
+    def __init__(self, **kwargs):
+        kwargs.setdefault("lower", True)
+        super().__init__(**kwargs)
+
+    def perform(self, node, inputs, output_storage):
+        C, b = inputs
+        rval = scipy.linalg.cho_solve(
+            (C, self.lower),
+            b,
+            check_finite=self.check_finite,
+        )
+
+        output_storage[0][0] = rval
+
+    def L_op(self, *args, **kwargs):
+        raise NotImplementedError()
+
+
+def cho_solve(c_and_lower, b, *, check_finite=True, b_ndim: Optional[int] = None):
+    """Solve the linear equations A x = b, given the Cholesky factorization of A.
+
+    Parameters
+    ----------
+    (c, lower) : tuple, (array, bool)
+        Cholesky factorization of a, as given by cho_factor
+    b : array
+        Right-hand side
+    check_finite : bool, optional
+        Whether to check that the input matrices contain only finite numbers.
+        Disabling may give a performance gain, but may result in problems
+        (crashes, non-termination) if the inputs do contain infinities or NaNs.
+        b_ndim : int
+        Whether the core case of b is a vector (1) or matrix (2).
+        This will influence how batched dimensions are interpreted.
+    """
+    A, lower = c_and_lower
+    b_ndim = _default_b_ndim(b, b_ndim)
+    return Blockwise(
+        CholeskySolve(lower=lower, check_finite=check_finite, b_ndim=b_ndim)
+    )(A, b)
 
 
 class SolveTriangular(SolveBase):
     """Solve a system of linear equations."""
 
     __props__ = (
-        "lower",
         "trans",
         "unit_diagonal",
+        "lower",
         "check_finite",
+        "b_ndim",
     )
 
-    def __init__(
-        self,
-        trans=0,
-        lower=False,
-        unit_diagonal=False,
-        check_finite=True,
-    ):
-        super().__init__(lower=lower, check_finite=check_finite)
+    def __init__(self, *, trans=0, unit_diagonal=False, **kwargs):
+        super().__init__(**kwargs)
         self.trans = trans
         self.unit_diagonal = unit_diagonal
 
@@ -326,10 +313,12 @@ class SolveTriangular(SolveBase):
 def solve_triangular(
     a: TensorVariable,
     b: TensorVariable,
+    *,
     trans: Union[int, str] = 0,
     lower: bool = False,
     unit_diagonal: bool = False,
     check_finite: bool = True,
+    b_ndim: Optional[int] = None,
 ) -> TensorVariable:
     """Solve the equation `a x = b` for `x`, assuming `a` is a triangular matrix.
 
@@ -353,12 +342,19 @@ def solve_triangular(
         Whether to check that the input matrices contain only finite numbers.
         Disabling may give a performance gain, but may result in problems
         (crashes, non-termination) if the inputs do contain infinities or NaNs.
+    b_ndim : int
+        Whether the core case of b is a vector (1) or matrix (2).
+        This will influence how batched dimensions are interpreted.
     """
-    return SolveTriangular(
-        lower=lower,
-        trans=trans,
-        unit_diagonal=unit_diagonal,
-        check_finite=check_finite,
+    b_ndim = _default_b_ndim(b, b_ndim)
+    return Blockwise(
+        SolveTriangular(
+            lower=lower,
+            trans=trans,
+            unit_diagonal=unit_diagonal,
+            check_finite=check_finite,
+            b_ndim=b_ndim,
+        )
     )(a, b)
 
 
@@ -371,18 +367,14 @@ class Solve(SolveBase):
         "assume_a",
         "lower",
         "check_finite",
+        "b_ndim",
     )
 
-    def __init__(
-        self,
-        assume_a="gen",
-        lower=False,
-        check_finite=True,
-    ):
+    def __init__(self, *, assume_a="gen", **kwargs):
         if assume_a not in ("gen", "sym", "her", "pos"):
             raise ValueError(f"{assume_a} is not a recognized matrix structure")
 
-        super().__init__(lower=lower, check_finite=check_finite)
+        super().__init__(**kwargs)
         self.assume_a = assume_a
 
     def perform(self, node, inputs, outputs):
@@ -396,7 +388,15 @@ class Solve(SolveBase):
         )
 
 
-def solve(a, b, assume_a="gen", lower=False, check_finite=True):
+def solve(
+    a,
+    b,
+    *,
+    assume_a="gen",
+    lower=False,
+    check_finite=True,
+    b_ndim: Optional[int] = None,
+):
     """Solves the linear equation set ``a * x = b`` for the unknown ``x`` for square ``a`` matrix.
 
     If the data matrix is known to be a particular type then supplying the
@@ -419,9 +419,9 @@ def solve(a, b, assume_a="gen", lower=False, check_finite=True):
 
     Parameters
     ----------
-    a : (N, N) array_like
+    a : (..., N, N) array_like
         Square input data
-    b : (N, NRHS) array_like
+    b : (..., N, NRHS) array_like
         Input data for the right hand side.
     lower : bool, optional
         If True, only the data contained in the lower triangle of `a`. Default
@@ -432,11 +432,18 @@ def solve(a, b, assume_a="gen", lower=False, check_finite=True):
         (crashes, non-termination) if the inputs do contain infinities or NaNs.
     assume_a : str, optional
         Valid entries are explained above.
+    b_ndim : int
+        Whether the core case of b is a vector (1) or matrix (2).
+        This will influence how batched dimensions are interpreted.
     """
-    return Solve(
-        lower=lower,
-        check_finite=check_finite,
-        assume_a=assume_a,
+    b_ndim = _default_b_ndim(b, b_ndim)
+    return Blockwise(
+        Solve(
+            lower=lower,
+            check_finite=check_finite,
+            assume_a=assume_a,
+            b_ndim=b_ndim,
+        )
     )(a, b)
 
 

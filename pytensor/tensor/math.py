@@ -25,11 +25,11 @@ from pytensor.tensor.basic import (
     stack,
     switch,
 )
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise, scalar_elemwise
 from pytensor.tensor.shape import shape, specify_broadcastable
 from pytensor.tensor.type import (
     DenseTensorType,
-    TensorType,
     complex_dtypes,
     continuous_dtypes,
     discrete_dtypes,
@@ -2868,93 +2868,7 @@ def logsumexp(x, axis=None, keepdims=False):
     return log(sum(exp(x), axis=axis, keepdims=keepdims))
 
 
-class MatMul(Op):
-    __props__ = ("dtype",)
-
-    def __init__(self, dtype=None):
-        self.dtype = dtype
-
-    @classmethod
-    def _get_output_shape(cls, x1, x2, shapes, validate=False):
-        x1_shape, x2_shape = shapes
-
-        if x1.ndim == 1 and x2.ndim == 1:
-            if validate and x1_shape[0] != x2_shape[0]:
-                raise ValueError("1d inputs must have the same length.")
-            return ()
-        elif x1.ndim == 1 and x2.ndim > 1:
-            if validate and x1_shape[0] != x2_shape[-2]:
-                raise ValueError(
-                    "length of input 1 must be equal the length "
-                    "of the 2nd-last dimension of input 2"
-                )
-            return x2_shape[:-2] + x2_shape[-1:]
-        elif x1.ndim > 1 and x2.ndim == 1:
-            if validate and x1_shape[-1] != x2_shape[0]:
-                raise ValueError(
-                    "length of input 2 must be equal the length "
-                    "of the last dimension of input 1"
-                )
-            return x1_shape[:-1]
-        elif x1.ndim == 2 and x2.ndim == 2:
-            if validate and x1_shape[-1] != x2_shape[0]:
-                raise ValueError(
-                    "number of columns of input 1 must be equal to "
-                    "the number of rows of input 2"
-                )
-            return x1_shape[:-1] + x2_shape[-1:]
-        elif x1.ndim > 2 and x2.ndim == 2:
-            if validate and x1_shape[-1] != x2_shape[0]:
-                raise ValueError(
-                    "number of rows of input 2 must be equal to "
-                    "the length of the last dimension of input 1"
-                )
-            return x1_shape[:-2] + x1_shape[-2:-1] + x2_shape[-1:]
-        elif x1.ndim == 2 and x2.ndim > 2:
-            if validate and x1_shape[-1] != x2_shape[-2]:
-                raise ValueError(
-                    "number of columns of input 1 must be equal "
-                    "the length of the 2nd-last dimension of input 2"
-                )
-            return x2_shape[:-2] + x1_shape[-2:-1] + x2_shape[-1:]
-        else:
-            if validate:
-                from pytensor.tensor.random.basic import broadcast_shapes
-
-                bshape = broadcast_shapes(x1_shape[:-2], x2_shape[:-2])
-                if x1_shape[-1] != x2_shape[-2]:
-                    raise ValueError(
-                        "length of the last dimension of input 1 must be equal "
-                        "to the length of the 2nd-last dimension of input 2"
-                    )
-            else:
-                from pytensor.tensor.extra_ops import broadcast_shape
-
-                bshape = broadcast_shape(
-                    x1_shape[:-2], x2_shape[:-2], arrays_are_shapes=True
-                )
-            return bshape + x1_shape[-2:-1] + x2_shape[-1:]
-
-    def make_node(self, a, b):
-        a = as_tensor_variable(a)
-        b = as_tensor_variable(b)
-
-        if 0 in {a.ndim, b.ndim}:
-            raise ValueError("inputs to `matmul` cannot be scalar.")
-
-        out_shape = self._get_output_shape(
-            a, b, (a.type.shape, b.type.shape), validate=True
-        )
-        out = TensorType(dtype=self.dtype, shape=out_shape)()
-        return Apply(self, [a, b], [out])
-
-    def perform(self, node, inputs, outputs):
-        x1, x2 = inputs
-        outputs[0][0] = np.matmul(x1, x2, dtype=self.dtype)
-
-    def infer_shape(self, fgraph, node, shapes):
-        x1, x2 = node.inputs
-        return [self._get_output_shape(x1, x2, shapes)]
+_matrix_matrix_matmul = Blockwise(_dot, signature="(n,k),(k,m)->(n,m)")
 
 
 def matmul(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None):
@@ -2999,7 +2913,23 @@ def matmul(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None
     - Stacks of matrices are broadcast together as if the matrices were elements,
         respecting the signature ``(n, k), (k, m) -> (n, m)``:
     """
-    return MatMul(dtype=dtype)(x1, x2)
+    x1 = as_tensor_variable(x1)
+    x2 = as_tensor_variable(x2)
+    if x1.type.ndim == 0 or x2.type.ndim == 0:
+        raise ValueError("matmul operand cannot be scalar")
+    if x1.type.ndim == 1 and x2.type.ndim == 1:
+        out = _dot(x1, x2)
+    elif x1.type.ndim == 1:
+        out = _matrix_matrix_matmul(x1[None], x2).squeeze(-2)
+    elif x2.type.ndim == 1:
+        out = _matrix_matrix_matmul(x1, x2[:, None]).squeeze(-1)
+    else:
+        out = _matrix_matrix_matmul(x1, x2)
+
+    if dtype is not None:
+        out = out.astype(dtype)
+
+    return out
 
 
 __all__ = [

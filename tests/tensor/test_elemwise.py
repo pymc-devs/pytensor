@@ -13,14 +13,17 @@ from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.replace import vectorize_node
 from pytensor.link.basic import PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.basic import second
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from pytensor.tensor.math import all as at_all
-from pytensor.tensor.math import any as at_any
+from pytensor.tensor.math import Any, Sum
+from pytensor.tensor.math import all as pt_all
+from pytensor.tensor.math import any as pt_any
 from pytensor.tensor.math import exp
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.type import (
     TensorType,
     bmatrix,
@@ -470,12 +473,12 @@ class TestCAReduce(unittest_tools.InferShapeTester):
                         axis2.append(a)
                 assert len(axis2) == len(tosum)
                 tosum = tuple(axis2)
-            if tensor_op == at_all:
+            if tensor_op == pt_all:
                 for axis in sorted(tosum, reverse=True):
                     zv = np.all(zv, axis)
                 if len(tosum) == 0:
                     zv = zv != 0
-            elif tensor_op == at_any:
+            elif tensor_op == pt_any:
                 for axis in sorted(tosum, reverse=True):
                     zv = np.any(zv, axis)
                 if len(tosum) == 0:
@@ -553,8 +556,8 @@ class TestCAReduce(unittest_tools.InferShapeTester):
             self.with_mode(Mode(linker="py"), aes.mul, dtype=dtype)
             self.with_mode(Mode(linker="py"), aes.scalar_maximum, dtype=dtype)
             self.with_mode(Mode(linker="py"), aes.scalar_minimum, dtype=dtype)
-            self.with_mode(Mode(linker="py"), aes.and_, dtype=dtype, tensor_op=at_all)
-            self.with_mode(Mode(linker="py"), aes.or_, dtype=dtype, tensor_op=at_any)
+            self.with_mode(Mode(linker="py"), aes.and_, dtype=dtype, tensor_op=pt_all)
+            self.with_mode(Mode(linker="py"), aes.or_, dtype=dtype, tensor_op=pt_any)
         for dtype in ["int8", "uint8"]:
             self.with_mode(Mode(linker="py"), aes.or_, dtype=dtype)
             self.with_mode(Mode(linker="py"), aes.and_, dtype=dtype)
@@ -575,14 +578,14 @@ class TestCAReduce(unittest_tools.InferShapeTester):
                 aes.or_,
                 dtype=dtype,
                 test_nan=True,
-                tensor_op=at_any,
+                tensor_op=pt_any,
             )
             self.with_mode(
                 Mode(linker="py"),
                 aes.and_,
                 dtype=dtype,
                 test_nan=True,
-                tensor_op=at_all,
+                tensor_op=pt_all,
             )
 
     @pytest.mark.skipif(
@@ -606,8 +609,8 @@ class TestCAReduce(unittest_tools.InferShapeTester):
         for dtype in ["bool", "floatX", "int8", "uint8"]:
             self.with_mode(Mode(linker="c"), aes.scalar_minimum, dtype=dtype)
             self.with_mode(Mode(linker="c"), aes.scalar_maximum, dtype=dtype)
-            self.with_mode(Mode(linker="c"), aes.and_, dtype=dtype, tensor_op=at_all)
-            self.with_mode(Mode(linker="c"), aes.or_, dtype=dtype, tensor_op=at_any)
+            self.with_mode(Mode(linker="c"), aes.and_, dtype=dtype, tensor_op=pt_all)
+            self.with_mode(Mode(linker="c"), aes.or_, dtype=dtype, tensor_op=pt_any)
         for dtype in ["bool", "int8", "uint8"]:
             self.with_mode(Mode(linker="c"), aes.or_, dtype=dtype)
             self.with_mode(Mode(linker="c"), aes.and_, dtype=dtype)
@@ -915,3 +918,50 @@ def test_not_implemented_elemwise_grad():
     # Verify that trying to use the not implemented gradient fails.
     with pytest.raises(pytensor.gradient.NullTypeGradError):
         pytensor.gradient.grad(test_op(x, 2), x)
+
+
+class TestVectorize:
+    def test_elemwise(self):
+        vec = tensor(shape=(None,))
+        mat = tensor(shape=(None, None))
+
+        node = exp(vec).owner
+        vect_node = vectorize_node(node, mat)
+        assert vect_node.op == exp
+        assert vect_node.inputs[0] is mat
+
+    def test_dimshuffle(self):
+        vec = tensor(shape=(None,))
+        mat = tensor(shape=(None, None))
+
+        node = exp(vec).owner
+        vect_node = vectorize_node(node, mat)
+        assert vect_node.op == exp
+        assert vect_node.inputs[0] is mat
+
+        col_mat = tensor(shape=(None, 1))
+        tcol_mat = tensor(shape=(None, None, 1))
+        node = col_mat.dimshuffle(0).owner  # drop column
+        vect_node = vectorize_node(node, tcol_mat)
+        assert isinstance(vect_node.op, DimShuffle)
+        assert vect_node.op.new_order == (0, 1)
+        assert vect_node.inputs[0] is tcol_mat
+        assert vect_node.outputs[0].type.shape == (None, None)
+
+    def test_CAReduce(self):
+        mat = tensor(shape=(None, None))
+        tns = tensor(shape=(None, None, None))
+
+        node = pt_sum(mat).owner
+        vect_node = vectorize_node(node, tns)
+        assert isinstance(vect_node.op, Sum)
+        assert vect_node.op.axis == (1, 2)
+        assert vect_node.inputs[0] is tns
+
+        bool_mat = tensor(dtype="bool", shape=(None, None))
+        bool_tns = tensor(dtype="bool", shape=(None, None, None))
+        node = pt_any(bool_mat, axis=-2).owner
+        vect_node = vectorize_node(node, bool_tns)
+        assert isinstance(vect_node.op, Any)
+        assert vect_node.op.axis == (1,)
+        assert vect_node.inputs[0] is bool_tns

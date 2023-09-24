@@ -647,8 +647,12 @@ class _tensor_py_operators:
         return at.math.dense_dot(left, right)
 
     dot = __dot__
-    __matmul__ = __dot__
-    __rmatmul__ = __rdot__
+
+    def __matmul__(left, right):
+        return at.math.matmul(left, right)
+
+    def __rmatmul__(right, left):
+        return at.math.matmul(right, left)
 
     def sum(self, axis=None, dtype=None, keepdims=False, acc_dtype=None):
         """See :func:`pytensor.tensor.math.sum`."""
@@ -797,7 +801,7 @@ class _tensor_py_operators:
         """
         return at.basic.choose(self, choices, mode="raise")
 
-    def squeeze(self):
+    def squeeze(self, axis=None):
         """
         Remove broadcastable dimensions from the shape of an array.
 
@@ -805,7 +809,7 @@ class _tensor_py_operators:
         removed. This is always `x` itself or a view into `x`.
 
         """
-        return at.extra_ops.squeeze(self)
+        return at.extra_ops.squeeze(self, axis=axis)
 
     def compress(self, a, axis=None):
         """Return selected slices only."""

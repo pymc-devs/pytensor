@@ -14,7 +14,6 @@ from pytensor.tensor.nlinalg import (
     Det,
     Eig,
     Eigh,
-    Inv,
     MatrixInverse,
     MatrixPinv,
     QRFull,
@@ -123,18 +122,6 @@ def numba_funcify_Eigh(op, node, **kwargs):
             return np.linalg.eigh(x)
 
     return eigh
-
-
-@numba_funcify.register(Inv)
-def numba_funcify_Inv(op, node, **kwargs):
-    out_dtype = node.outputs[0].type.numpy_dtype
-    inputs_cast = int_to_float_fn(node.inputs, out_dtype)
-
-    @numba_basic.numba_njit(inline="always")
-    def inv(x):
-        return np.linalg.inv(inputs_cast(x)).astype(out_dtype)
-
-    return inv
 
 
 @numba_funcify.register(MatrixInverse)

@@ -77,6 +77,7 @@ from pytensor.tensor.basic import (
     tensor_copy,
     tensor_from_scalar,
     tile,
+    trace,
     tri,
     tril,
     tril_indices,
@@ -4489,3 +4490,23 @@ def test_oriented_stack_functions(func):
 
     with pytest.raises(ValueError):
         func(a, a)
+
+
+def test_trace():
+    x_val = np.ones((5, 4, 2))
+    x = at.as_tensor(x_val)
+
+    np.testing.assert_allclose(
+        trace(x).eval(),
+        np.trace(x_val),
+    )
+
+    np.testing.assert_allclose(
+        trace(x, offset=1, axis1=1, axis2=2).eval(),
+        np.trace(x_val, offset=1, axis1=1, axis2=2),
+    )
+
+    np.testing.assert_allclose(
+        trace(x, offset=-1, axis1=0, axis2=-1).eval(),
+        np.trace(x_val, offset=-1, axis1=0, axis2=-1),
+    )

@@ -4,8 +4,10 @@ import pytest
 import pytensor.tensor as at
 from pytensor import config, function
 from pytensor.gradient import NullTypeGradError, grad
+from pytensor.graph.replace import vectorize_node
 from pytensor.raise_op import Assert
 from pytensor.tensor.math import eq
+from pytensor.tensor.random import normal
 from pytensor.tensor.random.op import RandomState, RandomVariable, default_rng
 from pytensor.tensor.shape import specify_shape
 from pytensor.tensor.type import all_dtypes, iscalar, tensor
@@ -202,3 +204,37 @@ def test_RandomVariable_incompatible_size():
         ValueError, match="Size length is incompatible with batched dimensions"
     ):
         rv_op(np.zeros((2, 4, 3)), 1, size=(4,))
+
+
+def test_vectorize_node():
+    vec = tensor(shape=(None,))
+    vec.tag.test_value = [0, 0, 0]
+    mat = tensor(shape=(None, None))
+    mat.tag.test_value = [[0, 0, 0], [1, 1, 1]]
+
+    # Test without size
+    node = normal(vec).owner
+    new_inputs = node.inputs.copy()
+    new_inputs[3] = mat
+    vect_node = vectorize_node(node, *new_inputs)
+    assert vect_node.op is normal
+    assert vect_node.inputs[3] is mat
+
+    # Test with size, new size provided
+    node = normal(vec, size=(3,)).owner
+    new_inputs = node.inputs.copy()
+    new_inputs[1] = (2, 3)
+    new_inputs[3] = mat
+    vect_node = vectorize_node(node, *new_inputs)
+    assert vect_node.op is normal
+    assert tuple(vect_node.inputs[1].eval()) == (2, 3)
+    assert vect_node.inputs[3] is mat
+
+    # Test with size, new size not provided
+    node = normal(vec, size=(3,)).owner
+    new_inputs = node.inputs.copy()
+    new_inputs[3] = mat
+    vect_node = vectorize_node(node, *new_inputs)
+    assert vect_node.op is normal
+    assert vect_node.inputs[3] is mat
+    assert tuple(vect_node.inputs[1].eval({mat: mat.tag.test_value})) == (2, 3)

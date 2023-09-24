@@ -560,11 +560,18 @@ def {fn_name}({", ".join(input_names)}):
 @numba_funcify.register(Subtensor)
 @numba_funcify.register(AdvancedSubtensor1)
 def numba_funcify_Subtensor(op, node, **kwargs):
-    subtensor_def_src = create_index_func(
-        node, objmode=isinstance(op, AdvancedSubtensor)
-    )
+    objmode = isinstance(op, AdvancedSubtensor)
+    if objmode:
+        warnings.warn(
+            ("Numba will use object mode to allow run " "AdvancedSubtensor."),
+            UserWarning,
+        )
 
-    global_env = {"np": np, "objmode": numba.objmode}
+    subtensor_def_src = create_index_func(node, objmode=objmode)
+
+    global_env = {"np": np}
+    if objmode:
+        global_env["objmode"] = numba.objmode
 
     subtensor_fn = compile_function_src(
         subtensor_def_src, "subtensor", {**globals(), **global_env}
@@ -575,11 +582,18 @@ def numba_funcify_Subtensor(op, node, **kwargs):
 
 @numba_funcify.register(IncSubtensor)
 def numba_funcify_IncSubtensor(op, node, **kwargs):
-    incsubtensor_def_src = create_index_func(
-        node, objmode=isinstance(op, AdvancedIncSubtensor)
-    )
+    objmode = isinstance(op, AdvancedIncSubtensor)
+    if objmode:
+        warnings.warn(
+            ("Numba will use object mode to allow run " "AdvancedIncSubtensor."),
+            UserWarning,
+        )
 
-    global_env = {"np": np, "objmode": numba.objmode}
+    incsubtensor_def_src = create_index_func(node, objmode=objmode)
+
+    global_env = {"np": np}
+    if objmode:
+        global_env["objmode"] = numba.objmode
 
     incsubtensor_fn = compile_function_src(
         incsubtensor_def_src, "incsubtensor", {**globals(), **global_env}
@@ -746,7 +760,15 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
 def int_to_float_fn(inputs, out_dtype):
     """Create a Numba function that converts integer and boolean ``ndarray``s to floats."""
 
-    if any(i.type.numpy_dtype.kind in "ib" for i in inputs):
+    if all(
+        input.type.numpy_dtype == np.dtype(out_dtype) for input in inputs
+    ) and isinstance(np.dtype(out_dtype), np.floating):
+
+        @numba_njit
+        def inputs_cast(x):
+            return x
+
+    elif any(i.type.numpy_dtype.kind in "ib" for i in inputs):
         args_dtype = np.dtype(f"f{out_dtype.itemsize}")
 
         @numba_njit

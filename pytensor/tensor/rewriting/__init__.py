@@ -2,6 +2,7 @@ import pytensor.tensor.rewriting.basic
 import pytensor.tensor.rewriting.blas
 import pytensor.tensor.rewriting.blas_c
 import pytensor.tensor.rewriting.blas_scipy
+import pytensor.tensor.rewriting.blockwise
 import pytensor.tensor.rewriting.elemwise
 import pytensor.tensor.rewriting.extra_ops
 
