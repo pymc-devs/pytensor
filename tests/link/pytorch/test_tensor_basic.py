@@ -5,7 +5,7 @@ from pytensor.compile import get_mode
 
 
 pytorch = pytest.importorskip("torch")
-import pytorch.errors
+import torch.errors
 
 import pytensor
 import pytensor.tensor.basic as at
@@ -200,7 +200,7 @@ class TestJaxSplit:
             fn = pytensor.function([a, split_axis], a_splits, mode="PyTorch")
         # Same as above, an AttributeError surpasses the `TracerIntegerConversionError`
         # Both errors are included for backwards compatibility
-        with pytest.raises((AttributeError, pytorch.errors.TracerIntegerConversionError)):
+        with pytest.raises((AttributeError, torch.errors.TracerIntegerConversionError)):
             fn(np.zeros((6, 6), dtype=pytensor.config.floatX), 0)
 
 

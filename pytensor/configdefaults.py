@@ -107,6 +107,7 @@ def _filter_mode(val):
         "DEBUG_MODE",
         "JAX",
         "NUMBA",
+        "PYTORCH"
     ]
     if val in str_options:
         return val
