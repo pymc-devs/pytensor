@@ -1,11 +1,11 @@
 import torch
 
-from pytensor.link.pytorch.dispatch.basic import torch_funcify
+from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.tensor.slinalg import Cholesky, Solve, SolveTriangular
 
 
-@torch_funcify.register(Cholesky)
-def torch_funcify_Cholesky(op, **kwargs):
+@pytorch_funcify.register(Cholesky)
+def pytorch_funcify_Cholesky(op, **kwargs):
     lower = op.lower
 
     def cholesky(a, lower=lower):
@@ -14,8 +14,8 @@ def torch_funcify_Cholesky(op, **kwargs):
     return cholesky
 
 
-@torch_funcify.register(Solve)
-def torch_funcify_Solve(op, **kwargs):
+@pytorch_funcify.register(Solve)
+def pytorch_funcify_Solve(op, **kwargs):
     if op.assume_a != "gen" and op.lower:
         lower = True
     else:
@@ -30,8 +30,8 @@ def torch_funcify_Solve(op, **kwargs):
     return solve
 
 
-@torch_funcify.register(SolveTriangular)
-def torch_funcify_SolveTriangular(op, **kwargs):
+@pytorch_funcify.register(SolveTriangular)
+def pytorch_funcify_SolveTriangular(op, **kwargs):
     lower = op.lower
     trans = op.trans
     unit_diagonal = op.unit_diagonal

@@ -1,6 +1,6 @@
 import torch
 
-from pytensor.compile.mode import PyTorch
+from pytensor.compile.mode import PYTORCH
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.scan.op import Scan
 
@@ -18,7 +18,7 @@ def pytorch_funcify_Scan(op: Scan, **kwargs):
         )
 
     # Optimize inner graph (exclude any defalut rewrites that are incompatible with PyTorch mode)
-    rewriter = op.mode_instance.excluding(*PyTorch._optimizer.exclude).optimizer
+    rewriter = op.mode_instance.excluding(*PYTORCH._optimizer.exclude).optimizer
     rewriter(op.fgraph)
     scan_inner_func = pytorch_funcify(op.fgraph, **kwargs)
 

@@ -17,9 +17,6 @@ from tests.link.pytorch.test_basic import compare_pytorch_and_py, pytorch_mode, 
 pytorch = pytest.importorskip("torch")
 
 
-from pytensor.link.pytorch.dispatch.random import numpyro_available  # noqa: E402
-
-
 def random_function(*args, **kwargs):
     with pytest.warns(
         UserWarning, match=r"The RandomType SharedVariables \[.+\] will not be used"
@@ -424,9 +421,6 @@ def test_random_updates_input_storage_order():
             (2,),
             "vonmises",
             lambda mu, kappa: (kappa, mu),
-            marks=pytest.mark.skipif(
-                not numpyro_available, reason="VonMises dispatch requires numpyro"
-            ),
         ),
     ],
 )
@@ -569,7 +563,6 @@ def test_negative_binomial():
     )
 
 
-@pytest.mark.skipif(not numpyro_available, reason="Binomial dispatch requires numpyro")
 def test_binomial():
     rng = shared(np.random.RandomState(123))
     n = np.array([10, 40])
@@ -581,9 +574,6 @@ def test_binomial():
     np.testing.assert_allclose(samples.std(axis=0), np.sqrt(n * p * (1 - p)), rtol=0.1)
 
 
-@pytest.mark.skipif(
-    not numpyro_available, reason="BetaBinomial dispatch requires numpyro"
-)
 def test_beta_binomial():
     rng = shared(np.random.RandomState(123))
     n = np.array([10, 40])
@@ -600,9 +590,6 @@ def test_beta_binomial():
     )
 
 
-@pytest.mark.skipif(
-    not numpyro_available, reason="Multinomial dispatch requires numpyro"
-)
 def test_multinomial():
     rng = shared(np.random.RandomState(123))
     n = np.array([10, 40])
@@ -616,7 +603,6 @@ def test_multinomial():
     )
 
 
-@pytest.mark.skipif(not numpyro_available, reason="VonMises dispatch requires numpyro")
 def test_vonmises_mu_outside_circle():
     # Scipy implementation does not behave as PyTensor/NumPy for mu outside the unit circle
     # We test that the random draws from the PyTorch dispatch work as expected in these cases

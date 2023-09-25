@@ -13,7 +13,7 @@ from pytensor.raise_op import Assert, CheckAndRaise
 
 
 @singledispatch
-def torch_typify(data, dtype=None, **kwargs):
+def pytorch_typify(data, dtype=None, **kwargs):
     r"""Convert instances of PyTensor `Type`\s to PyTorch types."""
     if dtype is None:
         return data
@@ -21,21 +21,21 @@ def torch_typify(data, dtype=None, **kwargs):
         return torch.tensor(data, dtype=dtype)
 
 
-@torch_typify.register(np.ndarray)
-def torch_typify_ndarray(data, dtype=None, **kwargs):
+@pytorch_typify.register(np.ndarray)
+def pytorch_typify_ndarray(data, dtype=None, **kwargs):
     if len(data.shape) == 0:
         return data.item()
     return torch.tensor(data, dtype=dtype)
 
 
 @singledispatch
-def torch_funcify(op, node=None, storage_map=None, **kwargs):
+def pytorch_funcify(op, node=None, storage_map=None, **kwargs):
     """Create a PyTorch compatible function from an PyTensor `Op`."""
     raise NotImplementedError(f"No PyTorch conversion for the given `Op`: {op}")
 
 
-@torch_funcify.register(FunctionGraph)
-def torch_funcify_FunctionGraph(
+@pytorch_funcify.register(FunctionGraph)
+def pytorch_funcify_FunctionGraph(
     fgraph,
     node=None,
     fgraph_name="torch_funcified_fgraph",
@@ -43,15 +43,15 @@ def torch_funcify_FunctionGraph(
 ):
     return fgraph_to_python(
         fgraph,
-        torch_funcify,
-        type_conversion_fn=torch_typify,
+        pytorch_funcify,
+        type_conversion_fn=pytorch_typify,
         fgraph_name=fgraph_name,
         **kwargs,
     )
 
 
-@torch_funcify.register(IfElse)
-def torch_funcify_IfElse(op, **kwargs):
+@pytorch_funcify.register(IfElse)
+def pytorch_funcify_IfElse(op, **kwargs):
     n_outs = op.n_outs
 
     def ifelse(cond, *args, n_outs=n_outs):
@@ -63,9 +63,9 @@ def torch_funcify_IfElse(op, **kwargs):
     return ifelse
 
 
-@torch_funcify.register(Assert)
-@torch_funcify.register(CheckAndRaise)
-def torch_funcify_CheckAndRaise(op, **kwargs):
+@pytorch_funcify.register(Assert)
+@pytorch_funcify.register(CheckAndRaise)
+def pytorch_funcify_CheckAndRaise(op, **kwargs):
     warnings.warn(
         f"""Skipping `CheckAndRaise` Op (assertion: {op.msg}) as PyTorch tracing would remove it.""",
         stacklevel=2,
@@ -77,7 +77,7 @@ def torch_funcify_CheckAndRaise(op, **kwargs):
     return assert_fn
 
 
-def torch_safe_copy(x):
+def pytorch_safe_copy(x):
     try:
         res = torch.clone(x)
     except NotImplementedError:
@@ -93,16 +93,16 @@ def torch_safe_copy(x):
     return res
 
 
-@torch_funcify.register(DeepCopyOp)
-def torch_funcify_DeepCopyOp(op, **kwargs):
+@pytorch_funcify.register(DeepCopyOp)
+def pytorch_funcify_DeepCopyOp(op, **kwargs):
     def deepcopyop(x):
-        return torch_safe_copy(x)
+        return pytorch_safe_copy(x)
 
     return deepcopyop
 
 
-@torch_funcify.register(ViewOp)
-def torch_funcify_ViewOp(op, **kwargs):
+@pytorch_funcify.register(ViewOp)
+def pytorch_funcify_ViewOp(op, **kwargs):
     def viewop(x):
         return x
 

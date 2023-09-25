@@ -1,5 +1,5 @@
 import torch
-from pytensor.link.pytorch.dispatch.basic import torch_funcify
+from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
@@ -31,7 +31,7 @@ slice length.
 """
 
 
-def subtensor_assert_indices_torch_compatible(node, idx_list):
+def subtensor_assert_indices_pytorch_compatible(node, idx_list):
     from pytensor.graph.basic import Constant
     from pytensor.tensor.variable import TensorVariable
 
@@ -46,12 +46,12 @@ def subtensor_assert_indices_torch_compatible(node, idx_list):
                     raise NotImplementedError(DYNAMIC_SLICE_LENGTH_ERROR)
 
 
-@torch_funcify.register(Subtensor)
-@torch_funcify.register(AdvancedSubtensor)
-@torch_funcify.register(AdvancedSubtensor1)
-def torch_funcify_Subtensor(op, node, **kwargs):
+@pytorch_funcify.register(Subtensor)
+@pytorch_funcify.register(AdvancedSubtensor)
+@pytorch_funcify.register(AdvancedSubtensor1)
+def pytorch_funcify_Subtensor(op, node, **kwargs):
     idx_list = getattr(op, "idx_list", None)
-    subtensor_assert_indices_torch_compatible(node, idx_list)
+    subtensor_assert_indices_pytorch_compatible(node, idx_list)
 
     def subtensor_constant(x, *ilists):
         indices = indices_from_subtensor(ilists, idx_list)
@@ -63,55 +63,55 @@ def torch_funcify_Subtensor(op, node, **kwargs):
     return subtensor_constant
 
 
-@torch_funcify.register(IncSubtensor)
-@torch_funcify.register(AdvancedIncSubtensor1)
-def torch_funcify_IncSubtensor(op, node, **kwargs):
+@pytorch_funcify.register(IncSubtensor)
+@pytorch_funcify.register(AdvancedIncSubtensor1)
+def pytorch_funcify_IncSubtensor(op, node, **kwargs):
     idx_list = getattr(op, "idx_list", None)
 
     if getattr(op, "set_instead_of_inc", False):
 
-        def torch_fn(x, indices, y):
+        def pytorch_fn(x, indices, y):
             x[indices] = y
             return x
 
     else:
 
-        def torch_fn(x, indices, y):
+        def pytorch_fn(x, indices, y):
             x[indices] += y
             return x
 
-    def incsubtensor(x, y, *ilist, torch_fn=torch_fn, idx_list=idx_list):
+    def incsubtensor(x, y, *ilist, pytorch_fn=pytorch_fn, idx_list=idx_list):
         indices = indices_from_subtensor(ilist, idx_list)
         if len(indices) == 1:
             indices = indices[0]
 
-        return torch_fn(x, indices, y)
+        return pytorch_fn(x, indices, y)
 
     return incsubtensor
 
 
-@torch_funcify.register(AdvancedIncSubtensor)
-def torch_funcify_AdvancedIncSubtensor(op, node, **kwargs):
+@pytorch_funcify.register(AdvancedIncSubtensor)
+def pytorch_funcify_AdvancedIncSubtensor(op, node, **kwargs):
     if getattr(op, "set_instead_of_inc", False):
 
-        def torch_fn(x, indices, y):
+        def pytorch_fn(x, indices, y):
             x[indices] = y
             return x
 
     else:
 
-        def torch_fn(x, indices, y):
+        def pytorch_fn(x, indices, y):
             x[indices] += y
             return x
 
-    def advancedincsubtensor(x, y, *ilist, torch_fn=torch_fn):
-        return torch_fn(x, ilist, y)
+    def advancedincsubtensor(x, y, *ilist, pytorch_fn=pytorch_fn):
+        return pytorch_fn(x, ilist, y)
 
     return advancedincsubtensor
 
 
-@torch_funcify.register(MakeSlice)
-def torch_funcify_MakeSlice(op, **kwargs):
+@pytorch_funcify.register(MakeSlice)
+def pytorch_funcify_MakeSlice(op, **kwargs):
     def makeslice(*x):
         return slice(*x)
 
