@@ -6,7 +6,7 @@ from pytensor.tensor.basic import TensorVariable, diagonal, swapaxes
 from pytensor.tensor.blas import Dot22
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.math import Dot, Prod, log, prod
+from pytensor.tensor.math import Dot, Prod, _matrix_matrix_matmul, log, prod
 from pytensor.tensor.nlinalg import MatrixInverse, det
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
@@ -168,13 +168,25 @@ def cholesky_ldotlt(fgraph, node):
     rewrite cholesky(dot(L, L.T), lower=True) = L, where L is lower triangular,
     or cholesky(dot(U.T, U), upper=True) = U where U is upper triangular.
 
+    Also works with matmul.
+
     This utilizes a boolean `lower_triangular` or `upper_triangular` tag on matrices.
     """
     if not isinstance(node.op.core_op, Cholesky):
         return
 
     A = node.inputs[0]
-    if not (A.owner and isinstance(A.owner.op, (Dot, Dot22))):
+    if not (
+        A.owner is not None
+        and (
+            (
+                isinstance(A.owner.op, (Dot, Dot22))
+                # This rewrite only applies to matrix Dot
+                and A.owner.inputs[0].type.ndim == 2
+            )
+            or (A.owner.op == _matrix_matrix_matmul)
+        )
+    ):
         return
 
     l, r = A.owner.inputs
