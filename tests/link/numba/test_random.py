@@ -92,6 +92,10 @@ rng = np.random.default_rng(42849)
                     at.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
+                set_test_value(
+                    at.dvector(),
+                    np.array([2.0, 10.0], dtype=np.float64),
+                ),
             ],
             at.as_tensor([3, 2]),
             marks=pytest.mark.xfail(reason="Not implemented"),
@@ -316,15 +320,15 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
             lambda *args: args,
         ),
         (
-            aer.gamma,
+            aer._gamma,
             [
                 set_test_value(
                     at.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
-                    np.array(1.0, dtype=np.float64),
+                    at.dvector(),
+                    np.array([0.5, 3.0], dtype=np.float64),
                 ),
             ],
             (2,),

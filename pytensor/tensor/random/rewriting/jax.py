@@ -15,9 +15,9 @@ from pytensor.tensor.random.basic import (
     LogNormalRV,
     NegBinomialRV,
     WaldRV,
+    _gamma,
     beta,
     binomial,
-    gamma,
     normal,
     poisson,
     uniform,
@@ -92,7 +92,7 @@ def geometric_from_uniform(fgraph, node):
 @node_rewriter([NegBinomialRV])
 def negative_binomial_from_gamma_poisson(fgraph, node):
     rng, *other_inputs, n, p = node.inputs
-    next_rng, g = gamma.make_node(rng, *other_inputs, n, p / (1 - p)).outputs
+    next_rng, g = _gamma.make_node(rng, *other_inputs, n, (1 - p) / p).outputs
     next_rng, p = poisson.make_node(next_rng, *other_inputs, g).outputs
     return [next_rng, p]
 
@@ -100,21 +100,21 @@ def negative_binomial_from_gamma_poisson(fgraph, node):
 @node_rewriter([InvGammaRV])
 def inverse_gamma_from_gamma(fgraph, node):
     *other_inputs, shape, scale = node.inputs
-    next_rng, g = gamma.make_node(*other_inputs, shape, scale).outputs
+    next_rng, g = _gamma.make_node(*other_inputs, shape, 1 / scale).outputs
     return [next_rng, reciprocal(g)]
 
 
 @node_rewriter([ChiSquareRV])
 def chi_square_from_gamma(fgraph, node):
     *other_inputs, df = node.inputs
-    next_rng, g = gamma.make_node(*other_inputs, df / 2, 1 / 2).outputs
+    next_rng, g = _gamma.make_node(*other_inputs, df / 2, 2).outputs
     return [next_rng, g]
 
 
 @node_rewriter([GenGammaRV])
 def generalized_gamma_from_gamma(fgraph, node):
     *other_inputs, alpha, p, lambd = node.inputs
-    next_rng, g = gamma.make_node(*other_inputs, alpha / p, ones_like(lambd)).outputs
+    next_rng, g = _gamma.make_node(*other_inputs, alpha / p, ones_like(lambd)).outputs
     g = (g ** reciprocal(p)) * lambd
     return [next_rng, cast(g, dtype=node.default_output().dtype)]
 

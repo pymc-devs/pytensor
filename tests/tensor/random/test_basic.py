@@ -17,6 +17,7 @@ from pytensor.graph.op import get_test_value
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.tensor.random.basic import (
+    _gamma,
     bernoulli,
     beta,
     betabinom,
@@ -351,18 +352,29 @@ def test_lognormal_samples(mean, sigma, size):
     ],
 )
 def test_gamma_samples(a, b, size):
-    gamma_test_fn = fixed_scipy_rvs("gamma")
-
-    def test_fn(shape, rate, **kwargs):
-        return gamma_test_fn(shape, scale=1.0 / rate, **kwargs)
-
     compare_sample_values(
-        gamma,
+        _gamma,
         a,
         b,
         size=size,
-        test_fn=test_fn,
     )
+
+
+def test_gamma_deprecation_wrapper_fn():
+    out = gamma(5.0, scale=0.5, size=(5,))
+    assert out.type.shape == (5,)
+    assert out.owner.inputs[-1].eval() == 0.5
+
+    with pytest.warns(FutureWarning, match="Gamma rate argument is deprecated"):
+        out = gamma([5.0, 10.0], 2.0, size=None)
+    assert out.type.shape == (2,)
+    assert out.owner.inputs[-1].eval() == 0.5
+
+    with pytest.raises(ValueError, match="Must specify scale"):
+        gamma(5.0)
+
+    with pytest.raises(ValueError, match="Cannot specify both rate and scale"):
+        gamma(5.0, rate=2.0, scale=0.5)
 
 
 @pytest.mark.parametrize(
@@ -470,18 +482,24 @@ def test_vonmises_samples(mu, kappa, size):
 
 
 @pytest.mark.parametrize(
-    "alpha, size",
+    "alpha, scale, size",
     [
-        (np.array(0.5, dtype=config.floatX), None),
-        (np.array(0.5, dtype=config.floatX), []),
+        (np.array(0.5, dtype=config.floatX), np.array(3.0, dtype=config.floatX), None),
+        (np.array(0.5, dtype=config.floatX), np.array(5.0, dtype=config.floatX), []),
         (
             np.full((1, 2), 0.5, dtype=config.floatX),
+            np.array([0.5, 1.0], dtype=config.floatX),
             None,
         ),
     ],
 )
-def test_pareto_samples(alpha, size):
-    compare_sample_values(pareto, alpha, size=size, test_fn=fixed_scipy_rvs("pareto"))
+def test_pareto_samples(alpha, scale, size):
+    pareto_test_fn = fixed_scipy_rvs("pareto")
+
+    def test_fn(shape, scale, **kwargs):
+        return pareto_test_fn(shape, scale=scale, **kwargs)
+
+    compare_sample_values(pareto, alpha, scale, size=size, test_fn=test_fn)
 
 
 def mvnormal_test_fn(mean=None, cov=None, size=None, random_state=None):

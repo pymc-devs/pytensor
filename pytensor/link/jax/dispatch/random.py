@@ -216,21 +216,20 @@ def jax_sample_fn_uniform(op):
 
 @jax_sample_fn.register(aer.ParetoRV)
 @jax_sample_fn.register(aer.GammaRV)
-def jax_sample_fn_shape_rate(op):
-    """JAX implementation of random variables in the shape-rate family.
+def jax_sample_fn_shape_scale(op):
+    """JAX implementation of random variables in the shape-scale family.
 
     JAX only implements the standard version of random variables in the
-    shape-rate family. We thus need to rescale the results manually.
+    shape-scale family. We thus need to rescale the results manually.
 
     """
     name = op.name
     jax_op = getattr(jax.random, name)
 
-    def sample_fn(rng, size, dtype, *parameters):
+    def sample_fn(rng, size, dtype, shape, scale):
         rng_key = rng["jax_state"]
         rng_key, sampling_key = jax.random.split(rng_key, 2)
-        (shape, rate) = parameters
-        sample = jax_op(sampling_key, shape, size, dtype) / rate
+        sample = jax_op(sampling_key, shape, size, dtype) * scale
         rng["jax_state"] = rng_key
         return (rng, sample)
 
