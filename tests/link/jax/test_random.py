@@ -4,7 +4,7 @@ import scipy.stats as stats
 
 import pytensor
 import pytensor.tensor as at
-import pytensor.tensor.random as aer
+import pytensor.tensor.random.basic as aer
 from pytensor.compile.function import function
 from pytensor.compile.sharedvalue import SharedVariable, shared
 from pytensor.graph.basic import Constant
@@ -140,15 +140,15 @@ def test_random_updates_input_storage_order():
             lambda *args: (0, args[0]),
         ),
         (
-            aer.gamma,
+            aer._gamma,
             [
                 set_test_value(
                     at.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
-                    np.array(1.0, dtype=np.float64),
+                    at.dvector(),
+                    np.array([0.5, 3.0], dtype=np.float64),
                 ),
             ],
             (2,),
@@ -235,11 +235,15 @@ def test_random_updates_input_storage_order():
                 set_test_value(
                     at.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
-                )
+                ),
+                set_test_value(
+                    at.dvector(),
+                    np.array([2.0, 10.0], dtype=np.float64),
+                ),
             ],
             (2,),
             "pareto",
-            lambda *args: args,
+            lambda shape, scale: (shape, 0.0, scale),
         ),
         (
             aer.poisson,

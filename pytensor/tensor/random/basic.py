@@ -1,4 +1,5 @@
 import abc
+import warnings
 from typing import List, Optional, Union
 
 import numpy as np
@@ -419,7 +420,7 @@ class LogNormalRV(RandomVariable):
 lognormal = LogNormalRV()
 
 
-class GammaRV(ScipyRandomVariable):
+class GammaRV(RandomVariable):
     r"""A gamma continuous random variable.
 
     The probability density function for `gamma` in terms of the shape parameter
@@ -443,7 +444,7 @@ class GammaRV(ScipyRandomVariable):
     dtype = "floatX"
     _print_name = ("Gamma", "\\operatorname{Gamma}")
 
-    def __call__(self, shape, rate, size=None, **kwargs):
+    def __call__(self, shape, scale, size=None, **kwargs):
         r"""Draw samples from a gamma distribution.
 
         Signature
@@ -455,8 +456,8 @@ class GammaRV(ScipyRandomVariable):
         ----------
         shape
             The shape :math:`\alpha` of the gamma distribution. Must be positive.
-        rate
-            The rate :math:`\beta` of the gamma distribution. Must be positive.
+        scale
+            The scale :math:`1/\beta` of the gamma distribution. Must be positive.
         size
             Sample shape. If the given size is, e.g. `(m, n, k)` then `m * n * k`
             independent, identically distributed random variables are
@@ -464,14 +465,26 @@ class GammaRV(ScipyRandomVariable):
             is returned.
 
         """
-        return super().__call__(shape, 1.0 / rate, size=size, **kwargs)
-
-    @classmethod
-    def rng_fn_scipy(cls, rng, shape, scale, size):
-        return stats.gamma.rvs(shape, scale=scale, size=size, random_state=rng)
+        return super().__call__(shape, scale, size=size, **kwargs)
 
 
-gamma = GammaRV()
+_gamma = GammaRV()
+
+
+def gamma(shape, rate=None, scale=None, **kwargs):
+    # TODO: Remove helper when rate is deprecated
+    if rate is not None and scale is not None:
+        raise ValueError("Cannot specify both rate and scale")
+    elif rate is None and scale is None:
+        raise ValueError("Must specify scale")
+    elif rate is not None:
+        warnings.warn(
+            "Gamma rate argument is deprecated and will stop working, use scale instead",
+            FutureWarning,
+        )
+        scale = 1.0 / rate
+
+    return _gamma(shape, scale, **kwargs)
 
 
 class ChiSquareRV(RandomVariable):
