@@ -87,11 +87,11 @@ def jax_funcify_CheckAndRaise(op, **kwargs):
 def jnp_safe_copy(x):
     try:
         res = jnp.copy(x)
-    except NotImplementedError:
-        warnings.warn(
-            "`jnp.copy` is not implemented yet. Using the object's `copy` method."
-        )
+    except (NotImplementedError, TypeError):
         if hasattr(x, "copy"):
+            warnings.warn(
+                "`jnp.copy` is not implemented yet. Using the object's `copy` method."
+            )
             res = jnp.array(x.copy())
         else:
             warnings.warn(f"Object has no `copy` method: {x}")

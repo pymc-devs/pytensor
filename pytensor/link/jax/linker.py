@@ -3,7 +3,7 @@ import warnings
 from numpy.random import Generator, RandomState
 
 from pytensor.compile.sharedvalue import SharedVariable, shared
-from pytensor.graph.basic import Constant
+from pytensor.graph.basic import Constant, Variable
 from pytensor.link.basic import JITLinker
 
 
@@ -12,7 +12,27 @@ class JAXLinker(JITLinker):
 
     def fgraph_convert(self, fgraph, input_storage, storage_map, **kwargs):
         from pytensor.link.jax.dispatch import jax_funcify
+        from pytensor.sparse.type import SparseTensorType
         from pytensor.tensor.random.type import RandomType
+
+        if any(
+            isinstance(inp.type, RandomType) and not isinstance(inp, SharedVariable)
+            for inp in fgraph.inputs
+        ):
+            warnings.warn(
+                "RandomTypes are implicitly converted to random PRNGKey arrays in JAX. "
+                "Input values should be provided in this format to avoid a conversion overhead."
+            )
+
+        if any(
+            isinstance(inp.type, SparseTensorType)
+            and not isinstance(inp, SharedVariable)
+            for inp in fgraph.inputs
+        ):
+            warnings.warn(
+                "SparseTypes are implicitly converted to sparse BCOO arrays in JAX. "
+                "Input values should be provided in this format to to avoid a conversion overhead."
+            )
 
         shared_rng_inputs = [
             inp
@@ -69,6 +89,11 @@ class JAXLinker(JITLinker):
             n for n, i in enumerate(self.fgraph.inputs) if isinstance(i, Constant)
         ]
         return jax.jit(fn, static_argnums=static_argnums)
+
+    def typify(self, var: Variable):
+        from pytensor.link.jax.dispatch import jax_typify
+
+        return jax_typify(var.type)
 
     def create_thunk_inputs(self, storage_map):
         from pytensor.link.jax.dispatch import jax_typify
