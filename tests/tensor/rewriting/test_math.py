@@ -29,8 +29,9 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import is_same_graph, rewrite_graph
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.printing import debugprint
+from pytensor.scalar import Pow
 from pytensor.tensor import inplace
-from pytensor.tensor.basic import Alloc, join, second, switch
+from pytensor.tensor.basic import Alloc, constant, join, second, switch
 from pytensor.tensor.blas import Dot22, Gemv
 from pytensor.tensor.blas_c import CGemv
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
@@ -69,7 +70,7 @@ from pytensor.tensor.math import max as at_max
 from pytensor.tensor.math import maximum
 from pytensor.tensor.math import min as at_min
 from pytensor.tensor.math import minimum, mul, neg, neq
-from pytensor.tensor.math import pow as at_pow
+from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.math import (
     prod,
     rad2deg,
@@ -1746,6 +1747,29 @@ def test_local_pow_to_nested_squaring():
     utt.assert_allclose(f(val_no0), val_no0 ** (-16))
 
 
+def test_local_pow_to_nested_squaring_fails_gracefully():
+    # Reported in #456
+
+    x = vector("x", shape=(1,))
+    # Create an Apply that does not have precise output shape
+    node = Apply(
+        op=pt_pow,
+        inputs=[x, constant([2.0])],
+        outputs=[tensor(shape=(None,))],
+    )
+    y = node.default_output()
+
+    fn = function([x], y)
+
+    # Check rewrite is not applied (this could change in the future)
+    assert any(
+        (isinstance(node.op, Elemwise) and isinstance(node.op.scalar_op, Pow))
+        for node in fn.maker.fgraph.apply_nodes
+    )
+
+    np.testing.assert_allclose(fn([2.0]), np.array([4.0]))
+
+
 class TestFuncInverse:
     def setup_method(self):
         mode = get_default_mode()
@@ -2449,7 +2473,7 @@ class TestLocalMergeSwitchSameCond:
             le,
             eq,
             neq,
-            at_pow,
+            pt_pow,
         ):
             g = rewrite(FunctionGraph(mats, [op(s1, s2)]))
             assert debugprint(g, file="str").count("Switch") == 1

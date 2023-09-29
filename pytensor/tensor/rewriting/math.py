@@ -2081,63 +2081,65 @@ def local_pow_to_nested_squaring(fgraph, node):
     Note: This sounds like the kind of thing any half-decent compiler can do by itself?
     """
 
-    if node.op == at_pow:
-        # the idea here is that we have pow(x, y)
-        odtype = node.outputs[0].dtype
-        xsym = node.inputs[0]
-        ysym = node.inputs[1]
-        y = get_constant(ysym)
+    # the idea here is that we have pow(x, y)
+    odtype = node.outputs[0].dtype
+    xsym = node.inputs[0]
+    ysym = node.inputs[1]
+    y = get_constant(ysym)
 
-        # the next line is needed to fix a strange case that I don't
-        # know how to make a separate test.
-        # That happen in the `test_log_erfc` test.
-        # y is a ndarray with dtype int8 and value 2,4 or 6. This make
-        # the abs(y) <= 512 fail!
-        # taking the value outside ndarray solve the problem.
-        # it could be that in that case, numpy make the comparison
-        # into the wrong type(do in int8 that overflow.)
-        if isinstance(y, np.ndarray):
-            assert y.size == 1
-            try:
-                y = y[0]
-            except IndexError:
-                pass
-        if (y is not None) and not broadcasted_by(xsym, ysym):
-            rval = None
-            # 512 is too small for the cpu and too big for some gpu!
-            if abs(y) == int(abs(y)) and abs(y) <= 512:
-                pow2 = [xsym]
-                pow2_scal = [aes.get_scalar_type(xsym.dtype)()]
-                y_to_do = abs(y)
-                for i in range(int(np.log2(y_to_do))):
-                    pow2.append(sqr(pow2[i]))
-                    pow2_scal.append(aes.sqr(pow2_scal[i]))
-                rval1 = None
-                rval1_scal = None
-                while y_to_do > 0:
-                    log_to_do = int(np.log2(y_to_do))
-                    if rval1:
-                        rval1 *= pow2[log_to_do]
-                        rval1_scal *= pow2_scal[log_to_do]
-                    else:
-                        rval1 = pow2[log_to_do]
-                        rval1_scal = pow2_scal[log_to_do]
-                    y_to_do -= 2**log_to_do
-
-                if abs(y) > 2:
-                    # We fuse all the pow together here to make
-                    # compilation faster
-                    rval1 = Elemwise(
-                        aes.Composite([pow2_scal[0]], [rval1_scal])
-                    ).make_node(xsym)
-                if y < 0:
-                    rval = [reciprocal(rval1)]
+    # the next line is needed to fix a strange case that I don't
+    # know how to make a separate test.
+    # That happen in the `test_log_erfc` test.
+    # y is a ndarray with dtype int8 and value 2,4 or 6. This make
+    # the abs(y) <= 512 fail!
+    # taking the value outside ndarray solve the problem.
+    # it could be that in that case, numpy make the comparison
+    # into the wrong type(do in int8 that overflow.)
+    if isinstance(y, np.ndarray):
+        assert y.size == 1
+        try:
+            y = y[0]
+        except IndexError:
+            pass
+    if (y is not None) and not broadcasted_by(xsym, ysym):
+        rval = None
+        # 512 is too small for the cpu and too big for some gpu!
+        if abs(y) == int(abs(y)) and abs(y) <= 512:
+            pow2 = [xsym]
+            pow2_scal = [aes.get_scalar_type(xsym.dtype)()]
+            y_to_do = abs(y)
+            for i in range(int(np.log2(y_to_do))):
+                pow2.append(sqr(pow2[i]))
+                pow2_scal.append(aes.sqr(pow2_scal[i]))
+            rval1 = None
+            rval1_scal = None
+            while y_to_do > 0:
+                log_to_do = int(np.log2(y_to_do))
+                if rval1:
+                    rval1 *= pow2[log_to_do]
+                    rval1_scal *= pow2_scal[log_to_do]
                 else:
-                    rval = [rval1]
-            if rval:
-                rval[0] = cast(rval[0], odtype)
-                assert rval[0].type == node.outputs[0].type, (rval, node.outputs)
-                return rval
+                    rval1 = pow2[log_to_do]
+                    rval1_scal = pow2_scal[log_to_do]
+                y_to_do -= 2**log_to_do
+
+            if abs(y) > 2:
+                # We fuse all the pow together here to make
+                # compilation faster
+                rval1 = Elemwise(aes.Composite([pow2_scal[0]], [rval1_scal])).make_node(
+                    xsym
+                )
+            if y < 0:
+                rval = [reciprocal(rval1)]
+            else:
+                rval = [rval1]
+        if rval:
+            rval[0] = cast(rval[0], odtype)
+            # TODO: We can add a specify_broadcastable and/or unbroadcast to make the
+            #  output types compatible. Or work on #408 and let TensorType.filter_variable do it.
+            if rval[0].type.broadcastable != node.outputs[0].type.broadcastable:
+                return None
+            return rval
 
 
 @register_specialize
