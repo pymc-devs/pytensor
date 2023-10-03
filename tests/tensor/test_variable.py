@@ -10,7 +10,7 @@ from pytensor.compile import DeepCopyOp
 from pytensor.compile.mode import get_default_mode
 from pytensor.graph.basic import Constant, equal_computations
 from pytensor.tensor import get_vector_length
-from pytensor.tensor.basic import as_tensor, constant
+from pytensor.tensor.basic import constant
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import dot, eq, matmul
 from pytensor.tensor.shape import Shape
@@ -98,8 +98,13 @@ def test_infix_matmul_method():
     assert equal_computations([res], [exp_res])
 
     X_val = np.arange(2 * 3).reshape((2, 3))
-    res = as_tensor(X_val) @ y
+    res = X_val @ y
     exp_res = matmul(X_val, y)
+    assert equal_computations([res], [exp_res])
+
+    y_val = np.arange(3)
+    res = X @ y_val
+    exp_res = matmul(X, y_val)
     assert equal_computations([res], [exp_res])
 
 
