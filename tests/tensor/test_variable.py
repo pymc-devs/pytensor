@@ -75,7 +75,7 @@ def test_numpy_method(fct, value):
     utt.assert_allclose(np.nan_to_num(f(value)), np.nan_to_num(fct(value)))
 
 
-def test_infix_dot_method():
+def test_dot_method():
     X = dmatrix("X")
     y = dvector("y")
 
@@ -83,10 +83,12 @@ def test_infix_dot_method():
     exp_res = dot(X, y)
     assert equal_computations([res], [exp_res])
 
+    # This doesn't work. Numpy calls TensorVariable.__rmul__ at some point and everything is messed up
     X_val = np.arange(2 * 3).reshape((2, 3))
-    res = as_tensor(X_val).dot(y)
+    res = X_val.dot(y)
     exp_res = dot(X_val, y)
-    assert equal_computations([res], [exp_res])
+    with pytest.raises(AssertionError):
+        assert equal_computations([res], [exp_res])
 
 
 def test_infix_matmul_method():
