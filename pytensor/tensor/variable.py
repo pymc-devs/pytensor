@@ -652,7 +652,7 @@ class _tensor_py_operators:
         return at.math.matmul(left, right)
 
     def __rmatmul__(right, left):
-        return at.math.matmul(right, left)
+        return at.math.matmul(left, right)
 
     def sum(self, axis=None, dtype=None, keepdims=False, acc_dtype=None):
         """See :func:`pytensor.tensor.math.sum`."""
