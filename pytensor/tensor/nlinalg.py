@@ -541,9 +541,9 @@ class SVD(Op):
     # See doc in the docstring of the function just after this class.
     __props__ = ("full_matrices", "compute_uv")
 
-    def __init__(self, full_matrices=True, compute_uv=True):
-        self.full_matrices = full_matrices
-        self.compute_uv = compute_uv
+    def __init__(self, full_matrices: bool = True, compute_uv: bool = True):
+        self.full_matrices = bool(full_matrices)
+        self.compute_uv = bool(compute_uv)
 
     def make_node(self, x):
         x = as_tensor_variable(x)
@@ -584,7 +584,7 @@ class SVD(Op):
             return [s_shape]
 
 
-def svd(a, full_matrices=1, compute_uv=1):
+def svd(a, full_matrices: bool = True, compute_uv: bool = True):
     """
     This function performs the SVD on CPU.
 
