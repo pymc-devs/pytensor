@@ -604,12 +604,16 @@ def _vectorized(
             builder, sig.return_type, [out._getvalue() for out in outputs]
         )
 
-    ret_type = types.Tuple(
-        [
-            types.Array(numba.from_dtype(np.dtype(dtype)), ndim, "C")
-            for dtype in output_dtypes
-        ]
-    )
+    ret_types = [
+        types.Array(numba.from_dtype(np.dtype(dtype)), ndim, "C")
+        for dtype in output_dtypes
+    ]
+
+    for output_idx, input_idx in inplace_pattern:
+        ret_types[output_idx] = input_types[input_idx]
+
+    ret_type = types.Tuple(ret_types)
+
     if len(output_dtypes) == 1:
         ret_type = ret_type.types[0]
     sig = ret_type(*arg_types)
