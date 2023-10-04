@@ -605,3 +605,18 @@ def test_fused_elemwise_benchmark(benchmark):
     # JIT compile first
     func()
     benchmark(func)
+
+
+def test_elemwise_out_type():
+    # Create a graph with an elemwise
+    # Ravel failes if the elemwise output type is reported incorrectly
+    x = at.matrix()
+    y = (2 * x).ravel()
+
+    # Pass in the input as mutable, to trigger the inplace rewrites
+    func = pytensor.function([pytensor.In(x, mutable=True)], y, mode="NUMBA")
+
+    # Apply it to a numpy array that is neither C or F contigous
+    x_val = np.broadcast_to(np.zeros((3,)), (6, 3))
+
+    assert func(x_val).shape == (18,)
