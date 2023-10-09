@@ -12,7 +12,7 @@ name = "pytensor"
 dynamic = [
   'version'
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.12"
 authors = [
     {name = "pymc-devs", email = "pymc.devs@gmail.com"}
 ]
