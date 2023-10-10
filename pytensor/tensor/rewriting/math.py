@@ -362,9 +362,11 @@ def local_exp_log_nan_switch(fgraph, node):
         old_out = node.outputs[0]
         new_out = switch(le(x, 0), sub(1, exp(x)), np.asarray(np.nan, old_out.dtype))
         return [new_out]
-    
+
     # Case for log1mexp(log1mexp(x)) -> x
-    if isinstance(prev_op, aes_math.Log1mexp) and isinstance(node_op, aes_math.Log1mexp):
+    if isinstance(prev_op, aes_math.Log1mexp) and isinstance(
+        node_op, aes_math.Log1mexp
+    ):
         x = x.owner.inputs[0]
         old_out = node.outputs[0]
         new_out = switch(le(x, 0), x, np.asarray(np.nan, old_out.dtype))
