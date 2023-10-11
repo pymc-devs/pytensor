@@ -267,6 +267,27 @@ def test_fixed_shape_basic():
     assert t2.shape == (2, 4)
 
 
+def test_shape_type_conversion():
+    t1 = TensorType("float64", shape=np.array([3], dtype=int))
+    assert t1.shape == (3,)
+    assert isinstance(t1.shape[0], int)
+    assert t1.broadcastable == (False,)
+    assert isinstance(t1.broadcastable[0], bool)
+
+    t2 = TensorType("float64", broadcastable=np.array([True, False], dtype="bool"))
+    assert t2.shape == (1, None)
+    assert isinstance(t2.shape[0], int)
+    assert t2.broadcastable == (True, False)
+    assert isinstance(t2.broadcastable[0], bool)
+    assert isinstance(t2.broadcastable[1], bool)
+
+    with pytest.raises(
+        ValueError,
+        match="TensorType broadcastable/shape must be a boolean, integer or None",
+    ):
+        TensorType("float64", shape=("1", "2"))
+
+
 def test_fixed_shape_clone():
     t1 = TensorType("float64", (1,))
 

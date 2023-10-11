@@ -2046,8 +2046,14 @@ class TestJoinAndSplit:
     def test_static_shape_inference(self):
         a = at.tensor(dtype="int8", shape=(2, 3))
         b = at.tensor(dtype="int8", shape=(2, 5))
-        assert at.join(1, a, b).type.shape == (2, 8)
-        assert at.join(-1, a, b).type.shape == (2, 8)
+
+        res = at.join(1, a, b).type.shape
+        assert res == (2, 8)
+        assert all(isinstance(s, int) for s in res)
+
+        res = at.join(-1, a, b).type.shape
+        assert res == (2, 8)
+        assert all(isinstance(s, int) for s in res)
 
         # Check early informative errors from static shape info
         with pytest.raises(ValueError, match="must match exactly"):
@@ -2055,8 +2061,9 @@ class TestJoinAndSplit:
 
         # Check partial inference
         d = at.tensor(dtype="int8", shape=(2, None))
-        assert at.join(1, a, b, d).type.shape == (2, None)
-        return
+        res = at.join(1, a, b, d).type.shape
+        assert res == (2, None)
+        assert isinstance(res[0], int)
 
     def test_split_0elem(self):
         rng = np.random.default_rng(seed=utt.fetch_seed())

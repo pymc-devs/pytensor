@@ -191,7 +191,7 @@ class RandomVariable(Op):
                 return shape
 
             batch_shape = [
-                s if b is False else constant(1, "int64")
+                s if not b else constant(1, "int64")
                 for s, b in zip(shape[:-n], p.type.broadcastable[:-n])
             ]
             return batch_shape

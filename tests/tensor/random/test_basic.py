@@ -16,6 +16,7 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import get_test_value
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.tensor import ones, stack
 from pytensor.tensor.random.basic import (
     _gamma,
     bernoulli,
@@ -1465,3 +1466,12 @@ def test_rebuild():
     assert y_new.type.shape == (100,)
     assert y_new.shape.eval({x_new: x_new_test}) == (100,)
     assert y_new.eval({x_new: x_new_test}).shape == (100,)
+
+
+def test_categorical_join_p_static_shape():
+    """Regression test against a bug caused by misreading a numpy.bool_"""
+    p = ones(3) / 3
+    prob = stack([p, 1 - p], axis=-1)
+    assert prob.type.shape == (3, 2)
+    x = categorical(p=prob)
+    assert x.type.shape == (3,)

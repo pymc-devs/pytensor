@@ -109,8 +109,13 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         def parse_bcast_and_shape(s):
             if isinstance(s, (bool, np.bool_)):
                 return 1 if s else None
-            else:
+            elif isinstance(s, (int, np.int_)):
+                return int(s)
+            elif s is None:
                 return s
+            raise ValueError(
+                f"TensorType broadcastable/shape must be a boolean, integer or None, got {type(s)} {s}"
+            )
 
         self.shape = tuple(parse_bcast_and_shape(s) for s in shape)
         self.dtype_specs()  # error checking is done there
