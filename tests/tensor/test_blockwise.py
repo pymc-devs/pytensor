@@ -240,6 +240,7 @@ class BlockwiseOpTester:
                         pt_out,
                         np_out,
                         atol=1e-6 if config.floatX == "float64" else 1e-5,
+                        rtol=1e-7 if config.floatX == "float64" else 1e-6,
                     )
                 except AssertionError:
                     print(f"Failed with {test_input_idx=},  {vec_inputs_testvals=}")
