@@ -1,5 +1,5 @@
 from itertools import chain
-from typing import Any, Sequence
+from typing import Any, Iterable, Sequence
 
 import pytensor.scalar as ps
 import pytensor.xtensor as px
@@ -7,6 +7,7 @@ from pytensor.graph import Apply, Op
 from pytensor.graph.basic import Variable
 from pytensor.graph.op import OutputStorageType, ParamsInputType
 from pytensor.tensor import TensorType
+from pytensor.xtensor.spaces import DimLike, Space
 
 
 class TensorFromXTensor(Op):
@@ -34,9 +35,9 @@ tensor_from_xtensor = TensorFromXTensor()
 class XTensorFromTensor(Op):
     __props__ = ("dims",)
 
-    def __init__(self, dims):
+    def __init__(self, dims: Iterable[DimLike]):
         super().__init__()
-        self.dims = dims
+        self.dims = Space(dims)
 
     def make_node(self, *inputs: Variable) -> Apply:
         [x] = inputs
@@ -56,7 +57,7 @@ class XTensorFromTensor(Op):
         output_storage[0][0] = x.copy()
 
 
-def xtensor_from_tensor(x, dims):
+def xtensor_from_tensor(x, dims: Iterable[DimLike]):
     return XTensorFromTensor(dims=dims)(x)
 
 
@@ -70,11 +71,11 @@ class XElemwise(Op):
     def make_node(self, *inputs):
         # TODO: Check dim lengths match
         inputs = [px.as_xtensor_variable(inp) for inp in inputs]
-        # TODO: This ordering is different than what xarray does
-        unique_dims = sorted(set(chain.from_iterable(inp.type.dims for inp in inputs)))
+        # NOTE: The output will have unordered dims
+        output_dims = set(chain.from_iterable(inp.type.dims for inp in inputs))
         # TODO: Fix dtype
         output_type = px.XTensorType(
-            "float64", dims=unique_dims, shape=(None,) * len(unique_dims)
+            "float64", dims=output_dims, shape=(None,) * len(output_dims)
         )
         outputs = [output_type() for _ in range(self.scalar_op.nout)]
         return Apply(self, inputs, outputs)

@@ -8,7 +8,8 @@ from pytensor.tensor import TensorVariable
 from pytensor.tensor.utils import hash_from_ndarray
 from pytensor.tensor.variable import TensorConstant, _tensor_py_operators
 from pytensor.utils import hash_from_code
-from pytensor.xtensor.type import XTensorType, _XTensorTypeType
+from pytensor.xtensor.spaces import OrderedSpace
+from pytensor.xtensor.type import XTensorType
 
 
 @_as_symbolic.register(xr.DataArray)
@@ -349,8 +350,11 @@ class XTensorConstantSignature(tuple):
 
 
 class XTensorConstant(TensorConstant, _xtensor_py_operators):
-    def __init__(self, type: _XTensorTypeType, data, name=None):
+    def __init__(self, type: XTensorType, data, name=None):
         # TODO: Add checks that type and data are compatible
+        # Check that the type carries ordered dims
+        if not isinstance(type.dims, OrderedSpace):
+            raise ValueError(f"XTensor constants require ordered dims, got {type.dims}")
         Constant.__init__(self, type, data, name)
 
     def signature(self):

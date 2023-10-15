@@ -1,4 +1,4 @@
-from typing import Iterable, Optional, Sequence, TypeVar, Union
+from typing import Iterable, Optional, Union
 
 import numpy as np
 
@@ -7,9 +7,7 @@ from pytensor import scalar as aes
 from pytensor.graph.basic import Variable
 from pytensor.graph.type import HasDataType
 from pytensor.tensor.type import TensorType
-
-
-_XTensorTypeType = TypeVar("_XTensorTypeType", bound=TensorType)
+from pytensor.xtensor.spaces import DimLike, Space
 
 
 class XTensorType(TensorType, HasDataType):
@@ -27,15 +25,12 @@ class XTensorType(TensorType, HasDataType):
         self,
         dtype: Union[str, np.dtype],
         *,
-        dims: Sequence[str],
+        dims: Iterable[DimLike],
         shape: Optional[Iterable[Optional[Union[bool, int]]]] = None,
         name: Optional[str] = None,
     ):
         super().__init__(dtype, shape=shape, name=name)
-        if not isinstance(dims, (list, tuple)):
-            raise TypeError("dims must be a list or tuple")
-        dims = tuple(dims)
-        self.dims = dims
+        self.dims = Space(dims)
 
     def clone(
         self,
