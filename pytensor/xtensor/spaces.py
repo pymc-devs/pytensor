@@ -2,7 +2,6 @@ import sys
 from collections.abc import Iterable, Iterator, Sequence
 from typing import (
     FrozenSet,
-    Iterator,
     Protocol,
     SupportsIndex,
     Union,

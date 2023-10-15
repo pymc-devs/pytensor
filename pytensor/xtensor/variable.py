@@ -1,11 +1,12 @@
+import numpy as np
 import xarray as xr
-import pytensor.xtensor.basic as xbasic
 
-from pytensor import _as_symbolic, Variable
+import pytensor.xtensor.basic as xbasic
+from pytensor import Variable, _as_symbolic
 from pytensor.graph import Apply, Constant
 from pytensor.tensor import TensorVariable
 from pytensor.tensor.utils import hash_from_ndarray
-from pytensor.tensor.var import _tensor_py_operators, TensorConstant
+from pytensor.tensor.variable import TensorConstant, _tensor_py_operators
 from pytensor.utils import hash_from_code
 from pytensor.xtensor.type import XTensorType, _XTensorTypeType
 
@@ -64,7 +65,9 @@ def constant(x, name=None):
         raise TypeError("xtensor.constant must be called on a Xarray DataArray")
     try:
         return XTensorConstant(
-            XTensorType(dtype=x.dtype, dims=x.dims, shape=x.shape), x.values.copy(), name=name
+            XTensorType(dtype=x.dtype, dims=x.dims, shape=x.shape),
+            x.values.copy(),
+            name=name,
         )
     except TypeError:
         raise TypeError(f"Could not convert {x} to XTensorType")
@@ -268,8 +271,13 @@ class _xtensor_py_operators(_tensor_py_operators):
         # will *NOT* actually expand your sparse matrix just to get the shape.
         return shape(dense_from_sparse(self))
 
-    ndim = property(lambda self: self.type.ndim)
-    dtype = property(lambda self: self.type.dtype)
+    @property
+    def ndim(self) -> int:
+        return self.type.ndim
+
+    @property
+    def dtype(self):
+        return self.type.dtype
 
     # Note that the `size` attribute of sparse matrices behaves differently
     # from dense matrices: it is the number of elements stored in the matrix
@@ -307,7 +315,6 @@ class _xtensor_py_operators(_tensor_py_operators):
         return conjugate(self)
 
 
-
 class XTensorVariable(_xtensor_py_operators, TensorVariable):
     pass
 
@@ -342,7 +349,6 @@ class XTensorConstantSignature(tuple):
 
 
 class XTensorConstant(TensorConstant, _xtensor_py_operators):
-
     def __init__(self, type: _XTensorTypeType, data, name=None):
         # TODO: Add checks that type and data are compatible
         Constant.__init__(self, type, data, name)

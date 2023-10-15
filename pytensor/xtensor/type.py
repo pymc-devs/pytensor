@@ -1,4 +1,4 @@
-from typing import Iterable, Optional, Union, Sequence, TypeVar
+from typing import Iterable, Optional, Sequence, TypeVar, Union
 
 import numpy as np
 

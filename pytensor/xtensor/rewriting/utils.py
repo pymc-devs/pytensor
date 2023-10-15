@@ -2,7 +2,7 @@ from typing import Union
 
 from pytensor.compile import optdb
 from pytensor.graph.rewriting.basic import NodeRewriter
-from pytensor.graph.rewriting.db import RewriteDatabase, EquilibriumDB
+from pytensor.graph.rewriting.db import EquilibriumDB, RewriteDatabase
 
 
 optdb.register(
@@ -21,12 +21,18 @@ def register_xcanonicalize(
     if isinstance(node_rewriter, str):
 
         def register(inner_rewriter: Union[RewriteDatabase, NodeRewriter]):
-            return register_xcanonicalize(inner_rewriter, node_rewriter, *tags, **kwargs)
+            return register_xcanonicalize(
+                # FIXME: Signature violation below; 2nd argument isn't a str
+                inner_rewriter,
+                node_rewriter,  # type: ignore
+                *tags,
+                **kwargs,
+            )
 
         return register
 
     else:
-        name = kwargs.pop("name", None) or node_rewriter.__name__
+        name = kwargs.pop("name", None) or type(node_rewriter).__name__
         optdb["xtensor"].register(
             name, node_rewriter, "fast_run", "fast_compile", *tags, **kwargs
         )
