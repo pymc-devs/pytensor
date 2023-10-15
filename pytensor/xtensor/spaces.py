@@ -1,9 +1,18 @@
-from abc import ABC, abstractmethod, abstractproperty
-from collections.abc import Iterator, Sequence, Collection, Sized, Iterable, Container, Set, Reversible
 import sys
-from typing import FrozenSet, Protocol, Tuple, Union, Iterator, overload, SupportsIndex
+from collections.abc import Iterable, Iterator, Sequence
+from typing import (
+    FrozenSet,
+    Iterator,
+    Protocol,
+    SupportsIndex,
+    Union,
+    cast,
+    overload,
+    runtime_checkable,
+)
 
 
+@runtime_checkable
 class DimLike(Protocol):
     """Most basic signature of a dimension."""
 
@@ -25,21 +34,21 @@ class Dim(DimLike):
 
     def __str__(self) -> str:
         return self._name
-    
+
     def __repr__(self) -> str:
         return f"Dim('{self._name}')"
 
     def __eq__(self, __value: object) -> bool:
         return self._name == str(__value)
-    
+
     def __hash__(self) -> int:
         return self._name.__hash__()
 
 
 class BaseSpace(FrozenSet[DimLike]):
     """The most generic type of space is an unordered frozen set of dimensions.
-    
-    It implements the following calculation operators:
+
+    It implements broadcasting rules for the following tensor operators:
     * Addition → Unordered union
     * Subtraction → Unordered union
     * Multiplication → Unordered union
@@ -69,6 +78,13 @@ class BaseSpace(FrozenSet[DimLike]):
         except Exception as ex:
             raise TypeError(f"Can't multiply space by {other}.") from ex
 
+    def __truediv__(self, other) -> "BaseSpace":
+        try:
+            other = Space(other)
+            return BaseSpace({*self, *other})
+        except Exception as ex:
+            raise TypeError(f"Can't divide space by {other}.") from ex
+
     def __pow__(self, other: Iterable[DimLike]) -> "BaseSpace":
         return self
 
@@ -97,36 +113,49 @@ class BaseSpace(FrozenSet[DimLike]):
         return "Space{" + ", ".join(f"'{d}'" for d in self) + "}"
 
 
-class OrderedSpace(BaseSpace, Reversible[DimLike]):
+class OrderedSpace(BaseSpace, Sequence[DimLike]):
     """A very tidied-up space, with a known order of dimensions."""
 
     def __init__(self, dims: Sequence[DimLike]) -> None:
         self._order = tuple(dims)
         super().__init__()
 
+    def __eq__(self, __value) -> bool:
+        if not isinstance(__value, Sequence) or isinstance(__value, str):
+            return False
+        return self._order == tuple(__value)
+
+    def __ne__(self, __value) -> bool:
+        if not isinstance(__value, Sequence) or isinstance(__value, str):
+            return True
+        return self._order != tuple(__value)
+
     def __iter__(self) -> Iterator[DimLike]:
-        for d in self._order:
-            yield d
+        yield from self._order
 
     def __reversed__(self) -> Iterator[DimLike]:
-        for d in reversed(self._order):
-            yield d
+        yield from reversed(self._order)
 
-    def index(self, __value: DimLike, __start: SupportsIndex = 0, __stop: SupportsIndex = sys.maxsize) -> int:
+    def index(
+        self,
+        __value: DimLike,
+        __start: SupportsIndex = 0,
+        __stop: SupportsIndex = sys.maxsize,
+    ) -> int:
         return self._order.index(__value, __start, __stop)
-    
-    @overload
-    def __getitem__(self, __key: slice) -> "OrderedSpace":
-        """Slicing an ordered space results in an ordered space."""
-        return OrderedSpace(self._order[__key])
 
     @overload
     def __getitem__(self, __key: SupportsIndex) -> DimLike:
-        return self._order[__key]
+        """Indexing gives a dim"""
 
-    def __getitem__(self, __key) -> DimLike:
-        return self._order[__key]
+    @overload
+    def __getitem__(self, __key: slice) -> "OrderedSpace":
+        """Slicing preserves order"""
 
+    def __getitem__(self, __key) -> Union[DimLike, "OrderedSpace"]:
+        if isinstance(__key, slice):
+            return OrderedSpace(self._order[__key])
+        return cast(DimLike, self._order[__key])
 
     def __repr__(self) -> str:
         return "OrderedSpace(" + ", ".join(f"'{d}'" for d in self) + ")"
@@ -137,9 +166,11 @@ def Space(dims: Sequence[DimLike]) -> OrderedSpace:
     """Sequences of dims give an ordered space."""
     ...
 
+
 @overload
-def Space(dims: Set[DimLike]) -> BaseSpace:
+def Space(dims: Iterable[DimLike]) -> BaseSpace:
     ...
+
 
 def Space(dims: Iterable[DimLike]) -> Union[OrderedSpace, BaseSpace]:
     if isinstance(dims, Sequence):
