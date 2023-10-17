@@ -274,6 +274,12 @@ def test_shape_type_conversion():
     assert t1.broadcastable == (False,)
     assert isinstance(t1.broadcastable[0], bool)
 
+    t1 = TensorType("float64", shape=np.array([3], dtype=np.int32))
+    assert t1.shape == (3,)
+    assert isinstance(t1.shape[0], int)
+    assert t1.broadcastable == (False,)
+    assert isinstance(t1.broadcastable[0], bool)
+
     t2 = TensorType("float64", broadcastable=np.array([True, False], dtype="bool"))
     assert t2.shape == (1, None)
     assert isinstance(t2.shape[0], int)

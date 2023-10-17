@@ -109,7 +109,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         def parse_bcast_and_shape(s):
             if isinstance(s, (bool, np.bool_)):
                 return 1 if s else None
-            elif isinstance(s, (int, np.int_)):
+            elif isinstance(s, (int, np.integer)):
                 return int(s)
             elif s is None:
                 return s
