@@ -1773,7 +1773,7 @@ def test_local_pow_to_nested_squaring_fails_gracefully():
 class TestFuncInverse:
     def setup_method(self):
         mode = get_default_mode()
-        self.mode = mode.including("local_func_inv")
+        self.mode = mode.including("local_func_inv", "local_func_inv_nan_switch")
 
     def assert_func_pair_rewritten(
         self, func1, func2, data, should_copy=True, is_complex=False
@@ -1817,6 +1817,7 @@ class TestFuncInverse:
         self.assert_func_pair_rewritten(arcsinh, sinh, dx)
         self.assert_func_pair_rewritten(arctanh, tanh, dx)
         self.assert_func_pair_rewritten(reciprocal, reciprocal, dx)
+        self.assert_func_pair_rewritten(log1mexp, log1mexp, dx)
         self.assert_func_pair_rewritten(neg, neg, dx)
         cx = dx + complex(0, 1) * (dx + 0.01)
         self.assert_func_pair_rewritten(conj, conj, cx, is_complex=True)
