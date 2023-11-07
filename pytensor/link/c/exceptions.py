@@ -1,4 +1,7 @@
-from setuptools.errors import CompileError as BaseCompileError
+try:
+    from setuptools.errors import CompileError as BaseCompileError
+except ImportError:
+    from distutils.errors import CompileError as BaseCompileError
 
 
 class MissingGXX(Exception):
@@ -9,7 +12,7 @@ class MissingGXX(Exception):
     """
 
 
-class CompileError(BaseCompileError):
+class CompileError(BaseCompileError):   # type: ignore
     """This custom `Exception` prints compilation errors with their original
     formatting.
     """
