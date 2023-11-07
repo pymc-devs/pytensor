@@ -1,7 +1,7 @@
 import logging
 from typing import cast
 
-from pytensor.graph.rewriting.basic import node_rewriter
+from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
 from pytensor.tensor.basic import TensorVariable, diagonal, swapaxes
 from pytensor.tensor.blas import Dot22
 from pytensor.tensor.blockwise import Blockwise
@@ -13,7 +13,14 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.slinalg import Cholesky, Solve, cholesky, solve, solve_triangular
+from pytensor.tensor.slinalg import (
+    Cholesky,
+    Solve,
+    SolveBase,
+    cholesky,
+    solve,
+    solve_triangular,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -129,6 +136,52 @@ def generic_solve_to_solve_triangular(fgraph, node):
                                 A, b, lower=True, b_ndim=node.op.core_op.b_ndim
                             )
                         ]
+
+
+@register_stabilize
+@register_specialize
+@node_rewriter([Blockwise])
+def batched_vector_b_solve_to_matrix_b_solve(fgraph, node):
+    """Replace a batched Solve(a, b, b_ndim=1) by Solve(a, b.T, b_ndim=2).T
+
+    `a` must have no batched dimensions, while `b` can have arbitrary batched dimensions.
+    Only the last two dimensions of `b` and the output are swapped.
+    """
+    core_op = node.op.core_op
+
+    if not isinstance(core_op, SolveBase):
+        return None
+
+    if node.op.core_op.b_ndim != 1:
+        return None
+
+    [a, b] = node.inputs
+
+    # Check `b` is actually batched
+    if b.type.ndim == 1:
+        return None
+
+    # Check `a` is a matrix (possibly with degenerate dims on the left)
+    a_bcast_batch_dims = a.type.broadcastable[:-2]
+    if not all(a_bcast_batch_dims):
+        return None
+    # We squeeze degenerate dims, any that are still needed will be introduced by the new_solve
+    elif len(a_bcast_batch_dims):
+        a = a.squeeze(axis=tuple(range(len(a_bcast_batch_dims))))
+
+    # Recreate solve Op with b_ndim=2
+    props = core_op._props_dict()
+    props["b_ndim"] = 2
+    new_core_op = type(core_op)(**props)
+    matrix_b_solve = Blockwise(new_core_op)
+
+    # Apply the rewrite
+    new_solve = _T(matrix_b_solve(a, _T(b)))
+
+    old_solve = node.outputs[0]
+    copy_stack_trace(old_solve, new_solve)
+
+    return [new_solve]
 
 
 @register_canonicalize
