@@ -1,15 +1,24 @@
+from typing import TYPE_CHECKING
+
+
+# The only thing we're doing in this block is importing BaseCompileError.
+# We jump through these hoops to add legacy support and appease mypy.
 try:
     from setuptools.errors import CompileError as BaseCompileError
 except ImportError:
     import warnings
-    from distutils.errors import CompileError as BaseCompileError
     from importlib.metadata import version
+
+    if TYPE_CHECKING:
+        # mypy gets confused here if it sees distutils.
+        from setuptools.errors import CompileError as BaseCompileError
+    else:
+        from distutils.errors import CompileError as BaseCompileError
 
     # These exception classes were made available in setuptools
     # since v59.0.0 via <https://github.com/pypa/setuptools/pull/2858>
     # in preparation for distutils deprecation. Complain loudly if they
     # are not available.
-
     setuptools_version = version("setuptools")
     warnings.warn(
         f"You appear to be using an ancient version of setuptools: "
@@ -27,7 +36,7 @@ class MissingGXX(Exception):
     """
 
 
-class CompileError(BaseCompileError):  # type: ignore
+class CompileError(BaseCompileError):
     """This custom `Exception` prints compilation errors with their original
     formatting.
     """
