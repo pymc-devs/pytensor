@@ -92,6 +92,7 @@ from pytensor.tensor.rewriting.math import (
     local_grad_log_erfc_neg,
     local_greedy_distributor,
     local_mul_canonizer,
+    local_sum_prod_of_mul,
     mul_canonizer,
     parse_mul_tree,
     perform_sigm_times_exp,
@@ -2503,7 +2504,7 @@ class TestLocalSumProd:
     def setup_method(self):
         self.mode = get_default_mode().including("canonicalize", "specialize")
 
-    def test_local_sum_prod_mul_by_scalar(self):
+    def test_local_sum_prod_of_scalar_mul(self):
         # Test the rewrite `local_sum_prod_mul_by_scalar` for both Sum and
         # Prod ops in six cases each :
         # 1-the inputs to the mul contain a scalar and no non-scalar
@@ -2652,6 +2653,157 @@ class TestLocalSumProd:
             1,
             axis=(0,),
         )
+
+    def test_sum_of_non_scalar_mul(self):
+        mode = Mode("vm", optimizer="None")
+        rewrite = out2in(local_sum_prod_of_mul)
+
+        row1 = matrix(shape=(1, None), dtype="float64")
+        row2 = matrix(shape=(1, None), dtype="float64")
+        col1 = matrix(shape=(None, 1), dtype="float64")
+        col2 = matrix(shape=(None, 1), dtype="float64")
+        mat1 = matrix(shape=(None, None), dtype="float64")
+        mat2 = matrix(shape=(None, None), dtype="float64")
+
+        inputs = [row1, row2, col1, col2, mat1, mat2]
+        test_vals = [
+            np.random.random((1, 2)),
+            np.random.random((1, 2)),
+            np.random.random((2, 1)),
+            np.random.random((2, 1)),
+            np.random.random((2, 2)),
+            np.random.random((2, 2)),
+        ]
+
+        for out, expected_out in [
+            (
+                mul(row1, row2, mat1, mat2, col1, col2).sum(axis=None),
+                mul(row1, row2, mat1, mat2, col1, col2).sum(axis=None),
+            ),
+            (
+                mul(row1, row2, mat1, mat2, col1, col2).sum(axis=0),
+                mul(row1.squeeze(), row2.squeeze())
+                * mul(mat1, mat2, col1, col2).sum(axis=0),
+            ),
+            (
+                mul(row1, mat1, mat2, col1, col2).sum(axis=0),
+                row1.squeeze() * mul(mat1, mat2, col1, col2).sum(axis=0),
+            ),
+            (
+                mul(row1, row2, mat1, mat2, col1, col2).sum(axis=1),
+                mul(col1.squeeze(), col2.squeeze())
+                * mul(row1, row2, mat1, mat2).sum(axis=1),
+            ),
+            (
+                mul(row1, row2, mat1, mat2, col2).sum(axis=1),
+                col2.squeeze() * mul(row1, row2, mat1, mat2).sum(axis=1),
+            ),
+            (
+                mul(row1, row2).sum(axis=1),
+                mul(row1, row2).sum(axis=1),
+            ),
+            (
+                mul(row1, row2).sum(axis=0),
+                mul(row1.squeeze(), row2.squeeze()),
+            ),
+            (
+                mul(row1, col1).sum(axis=0),
+                row1.squeeze() * col1.sum(axis=0),
+            ),
+        ]:
+            out_fn = pytensor.function(inputs, out, mode=mode, on_unused_input="ignore")
+
+            rewritten_out = rewrite_graph(out, custom_rewrite=rewrite)
+            assert equal_computations([rewritten_out], [expected_out])
+
+            rewritten_out_fn = pytensor.function(
+                inputs, rewritten_out, mode=mode, on_unused_input="ignore"
+            )
+            np.testing.assert_allclose(
+                out_fn(*test_vals),
+                rewritten_out_fn(*test_vals),
+            )
+
+    def test_prod_of_non_scalar_mul(self):
+        mode = Mode("vm", optimizer="None")
+        rewrite = out2in(local_sum_prod_of_mul)
+
+        scl1 = matrix(shape=(1, 1), dtype="float64")
+        row1 = matrix(shape=(1, None), dtype="float64")
+        row2 = matrix(shape=(1, None), dtype="float64")
+        col1 = matrix(shape=(None, 1), dtype="float64")
+        col2 = matrix(shape=(None, 1), dtype="float64")
+        mat1 = matrix(shape=(None, None), dtype="float64")
+        mat2 = matrix(shape=(None, None), dtype="float64")
+
+        inputs = [scl1, row1, row2, col1, col2, mat1, mat2]
+        test_vals = [
+            np.random.random((1, 1)),
+            np.random.random((1, 2)),
+            np.random.random((1, 2)),
+            np.random.random((2, 1)),
+            np.random.random((2, 1)),
+            np.random.random((2, 2)),
+            np.random.random((2, 2)),
+        ]
+
+        for out, expected_out in [
+            (
+                mul(row1, row2, mat1, mat2, col1, col2).prod(axis=None),
+                mul(row1, row2, mat1, mat2, col1, col2).prod(axis=None),
+            ),
+            (
+                mul(row1, row2, mat1, mat2, col1, col2).prod(axis=0),
+                (
+                    mul(row1.squeeze(), row2.squeeze())
+                    ** prod([mul(mat1, mat2, col1, col2).shape[0]])
+                    * mul(mat1, mat2, col1, col2).prod(axis=0)
+                ),
+            ),
+            (
+                mul(row1, mat1, mat2, col1, col2).prod(axis=0),
+                (
+                    row1.squeeze() ** prod([mul(mat1, mat2, col1, col2).shape[0]])
+                    * mul(mat1, mat2, col1, col2).prod(axis=0)
+                ),
+            ),
+            (
+                mul(row1, row2, mat1, mat2, col1, col2).prod(axis=1),
+                (
+                    mul(col1.squeeze(), col2.squeeze())
+                    ** prod([mul(row1, row2, mat1, mat2).shape[1]])
+                    * mul(row1, row2, mat1, mat2).prod(axis=1)
+                ),
+            ),
+            (
+                mul(row1, row2).prod(axis=0),
+                mul(row1.squeeze(), row2.squeeze()),
+            ),
+            (
+                mul(row1, col1).prod(axis=0),
+                (row1.squeeze() ** prod([col1.shape[0]]) * col1.prod(axis=0)),
+            ),
+            (
+                mul(scl1, mat1, row1).prod(axis=None),
+                (
+                    scl1.squeeze()
+                    ** prod([mul(mat1, row1).shape[0], mul(mat1, row1).shape[1]])
+                    * mul(mat1, row1).prod(axis=None)
+                ),
+            ),
+        ]:
+            out_fn = pytensor.function(inputs, out, mode=mode, on_unused_input="ignore")
+
+            rewritten_out = rewrite_graph(out, custom_rewrite=rewrite)
+            assert equal_computations([rewritten_out], [expected_out])
+
+            rewritten_out_fn = pytensor.function(
+                inputs, rewritten_out, mode=mode, on_unused_input="ignore"
+            )
+            np.testing.assert_allclose(
+                out_fn(*test_vals),
+                rewritten_out_fn(*test_vals),
+            )
 
     def test_local_sum_prod_all_to_none(self):
         a = tensor3()

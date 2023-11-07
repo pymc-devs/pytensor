@@ -1190,86 +1190,88 @@ def local_neg_to_mul(fgraph, node):
 
 @register_specialize
 @node_rewriter([Sum, Prod])
-def local_sum_prod_mul_by_scalar(fgraph, node):
+def local_sum_prod_of_mul(fgraph, node):
     """
-    sum(scalar * smth) -> scalar * sum(smth)
-    sum(-smth) -> -sum(smth)
+    sum(a * X) -> a * sum(X), when a is broadcasted along the sum dimensions
 
     or
 
-    prod(scalar * smth) -> scalar ** size(smth) * prod(smth)
-    prod(-smth) -> -1 ** size(smth) * prod(smth)
+    prod(a * X) -> (a ** size(X)) * prod(X)
 
+    TODO: In the case where not all axis overlap with broadcast dimensions,
+     consider introducing an outer reduction after factoring out the compatible reduced dimensions
+     E.g. sum(arange(5) * X, axis=(0, 2)) -> sum(sum(X, axis=0) * arange(5), axis=1)
     """
     # TODO: if the the thing inside the Sum is a division,
     # we should get at the numerator....
-    if isinstance(node.op, (Sum, Prod)):
-        (node_inps,) = node.inputs
-        if node_inps.owner and node_inps.owner.op == mul:
-            terms = node_inps.owner.inputs
-            scalars = [t.dimshuffle() for t in terms if all(t.type.broadcastable)]
 
-            if len(scalars) == 0:
-                return
+    [node_inps] = node.inputs
+    if not (node_inps.owner and node_inps.owner.op == mul):
+        return None
 
-            non_scalars = [t for t in terms if not all(t.broadcastable)]
+    reduced_axes = node.op.axis
+    if reduced_axes is None:
+        reduced_axes = tuple(range(node_inps.type.ndim))
 
-            # Perform the op only on the non-scalar inputs, if applicable
-            if len(non_scalars) == 0:
-                new_op_input_nb_elements = 1
-                new_op_output = 1
-            elif len(non_scalars) == 1:
-                new_op_input_nb_elements = non_scalars[0].size
-                new_op_output = node.op(non_scalars[0])
-            else:
-                new_op_input = mul(*non_scalars)
-                # We assume that errors always come from the prod/mul op in the
-                # original computational graph, and therefore need to only
-                # copy over its output stacktrace.
-                copy_stack_trace(node.outputs, new_op_input)
+    # Separate terms that can be moved out of the Sum/Prod and those that cannot
+    outer_terms = []
+    inner_terms = []
+    for term in node_inps.owner.inputs:
+        term_bcast = term.type.broadcastable
+        if all(term_bcast[i] for i in reduced_axes):
+            outer_terms.append(term.squeeze(reduced_axes))
+        else:
+            inner_terms.append(term)
 
-                new_op_input_nb_elements = new_op_input.size
-                new_op_output = node.op(new_op_input)
+    if not outer_terms:
+        return None
+    elif len(outer_terms) == 1:
+        [outer_term] = outer_terms
+    else:
+        outer_term = mul(*outer_terms)
 
-            if len(non_scalars) != 0:
-                # Copy over stacktrace from previous output to new mul op,
-                # for same reason as above.
-                copy_stack_trace(node.outputs, new_op_output)
+    if not inner_terms:
+        inner_term = None
+    elif len(inner_terms) == 1:
+        [inner_term] = inner_terms
+    else:
+        inner_term = mul(*inner_terms)
 
-            # If `node.op` is a `Prod`, then the scalars need to be raised to
-            # the power of the number of elements in the input to the `Prod`
-            if isinstance(node.op, Prod) and new_op_input_nb_elements != 1:
-                scalars = [s**new_op_input_nb_elements for s in scalars]
+    # If we have a `Prod`, then the outside terms need to be raised to the power of the number of elements
+    # that were contracted in the input
+    if isinstance(node.op, Prod) and inner_term:
+        dtype = inner_term.dtype
+        n_reduced_elements = prod(
+            [inner_term.shape[i].astype(dtype) for i in reduced_axes]
+        )
+        outer_term = outer_term**n_reduced_elements
 
-            # Scale the output of the op by the scalars and return as
-            # replacement for the original output
-            mul_inputs = scalars
-            if new_op_input_nb_elements != 1:
-                mul_inputs.append(new_op_output)
+    # Sum/Prod is useless, just return the outer_term
+    if not inner_term:
+        new_out = outer_term
+    else:
+        reduced_inner_term = node.op(inner_term)
+        new_out = outer_term * reduced_inner_term
+        copy_stack_trace(node.outputs, [inner_term, reduced_inner_term, outer_term])
 
-            if len(mul_inputs) == 1:
-                # Copy over stacktrace from previous output to new mul op,
-                # for same reason as above.
-                copy_stack_trace(node.outputs, mul_inputs)
+    copy_stack_trace(node.outputs, new_out)
+    return [new_out]
 
-                return mul_inputs
-            else:
-                ret = mul(*mul_inputs)
-                # Copy over stacktrace from previous output to new mul op,
-                # for same reason as above.
-                copy_stack_trace(node.outputs, [ret] + mul_inputs)
 
-                return [ret]
+@register_specialize
+@node_rewriter([Sum])
+def local_sum_of_neg_to_neg_of_sum(fgraph, node):
+    """Rewrite sum(-X) -> -sum(X)."""
+    [node_inps] = node.inputs
+    if node_inps.owner and node_inps.owner.op == neg:
+        s = node.op(node_inps.owner.inputs[0])
+        ret = neg(s)
+        # There are never errors in the negative op, thus
+        # we need only to copy over stacktrace from previous output node to
+        # the two new ops.
+        copy_stack_trace(node.outputs, [s, ret])
 
-        if isinstance(node.op, Sum) and node_inps.owner and node_inps.owner.op == neg:
-            s = node.op(node_inps.owner.inputs[0])
-            ret = neg(s)
-            # There are never errors in the negative op, thus
-            # we need only to copy over stacktrace from previous output node to
-            # the two new ops.
-            copy_stack_trace(node.outputs, [s, ret])
-
-            return [ret]
+        return [ret]
 
 
 @register_specialize
