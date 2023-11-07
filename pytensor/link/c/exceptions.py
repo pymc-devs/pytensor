@@ -12,7 +12,7 @@ class MissingGXX(Exception):
     """
 
 
-class CompileError(BaseCompileError):   # type: ignore
+class CompileError(BaseCompileError):  # type: ignore
     """This custom `Exception` prints compilation errors with their original
     formatting.
     """
