@@ -2512,6 +2512,7 @@ class TestLocalSumProd:
         # 4-the inputs to the mul contain two scalars and no non-scalar
         # 5-the inputs to the mul contain two scalars and one non-scalar
         # 6-the inputs to the mul contain two scalars and two non-scalars
+        # 7-the reduction happens across only the first of two axes
 
         vect = dvector()
         mat = dmatrix()
@@ -2524,10 +2525,15 @@ class TestLocalSumProd:
         s2_val = np.random.random()
 
         def test_reduction_rewrite(
-            inputs, inputs_val, reduction_op, expected_output, nb_expected_sum_nodes
+            inputs,
+            inputs_val,
+            reduction_op,
+            expected_output,
+            nb_expected_sum_nodes,
+            axis=None,
         ):
             mul_out = mul(*inputs)
-            f = function(inputs, reduction_op()(mul_out), mode=self.mode)
+            f = function(inputs, reduction_op(axis=axis)(mul_out), mode=self.mode)
             out = f(*inputs_val)
             utt.assert_allclose(out, expected_output)
 
@@ -2581,6 +2587,16 @@ class TestLocalSumProd:
             1,
         )
 
+        # Case 7
+        test_reduction_rewrite(
+            [mat, scalar1, scalar2],
+            [m_val, s1_val, s2_val],
+            Sum,
+            (s1_val * s2_val * m_val).sum(0),
+            1,
+            axis=(0,),
+        )
+
         # Test prod
 
         # Case 1
@@ -2625,6 +2641,16 @@ class TestLocalSumProd:
             Prod,
             (s1_val * s2_val * v_val * m_val).prod(),
             2,
+        )
+
+        # Case 7
+        test_reduction_rewrite(
+            [mat, scalar1, scalar2],
+            [m_val, s1_val, s2_val],
+            Prod,
+            (s1_val * s2_val * m_val).prod(0),
+            1,
+            axis=(0,),
         )
 
     def test_local_sum_prod_all_to_none(self):
