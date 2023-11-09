@@ -52,7 +52,7 @@ jobs:
     if: ${{ needs.changes.outputs.changes == 'true' }}
     strategy:
       matrix:
-        python-version: ["3.9", "3.10", "3.11"]
+        python-version: ["3.9", "3.11", "3.12"]
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-python@v5
@@ -70,7 +70,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.11"]
+        python-version: ["3.9", "3.12"]
         fast-compile: [0,1]
         float32: [0,1]
         install-numba: [0]
@@ -101,7 +101,7 @@ jobs:
             float32: 0
             part: "tests/link/numba"
           - install-numba: 1
-            python-version: "3.11"
+            python-version: "3.12"
             fast-compile: 0
             float32: 0
             part: "tests/link/numba"
@@ -111,7 +111,7 @@ jobs:
             float32: 0
             part: "tests/link/jax"
           - install-jax: 1
-            python-version: "3.11"
+            python-version: "3.12"
             fast-compile: 0
             float32: 0
             part: "tests/link/jax"
@@ -249,7 +249,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install dependencies
         run: |
