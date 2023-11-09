@@ -355,11 +355,29 @@ class Blockwise(Op):
         self._gufunc = np.vectorize(core_func, signature=self.signature)
         return self._gufunc
 
+    def _check_runtime_broadcast(self, node, inputs):
+        batch_ndim = self._batch_ndim_from_outputs(node.outputs)
+
+        for dims_and_bcast in zip(
+            *[
+                zip(input.shape[:batch_ndim], sinput.type.broadcastable[:batch_ndim])
+                for input, sinput in zip(inputs, node.inputs)
+            ]
+        ):
+            if any(d != 1 for d, _ in dims_and_bcast) and (1, False) in dims_and_bcast:
+                raise ValueError(
+                    "Runtime broadcasting not allowed. "
+                    "At least one input has a distinct batch dimension length of 1, but was not marked as broadcastable.\n"
+                    "If broadcasting was intended, use `specify_broadcastable` on the relevant input."
+                )
+
     def perform(self, node, inputs, output_storage):
         gufunc = self._gufunc
 
         if gufunc is None:
             gufunc = self._create_gufunc(node)
+
+        self._check_runtime_broadcast(node, inputs)
 
         res = gufunc(*inputs)
         if not isinstance(res, tuple):

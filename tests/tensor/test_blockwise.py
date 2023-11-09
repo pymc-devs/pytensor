@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 import pytensor
-from pytensor import config
+from pytensor import config, function
 from pytensor.gradient import grad
 from pytensor.graph import Apply, Op
 from pytensor.graph.replace import vectorize_node
@@ -36,6 +36,56 @@ def test_vectorize_blockwise():
         new_vect_node.op.core_op, MatrixInverse
     )
     assert new_vect_node.inputs[0] is tns4
+
+
+def check_blockwise_runtime_broadcasting(mode):
+    a = tensor("a", shape=(None, 3, 5))
+    b = tensor("b", shape=(None, 5, 3))
+
+    out = a @ b
+    fn = function([a, b], out, mode=mode)
+    assert isinstance(fn.maker.fgraph.outputs[0].owner.op, Blockwise)
+
+    for valid_test_values in [
+        (
+            np.ones((2, 3, 5)).astype(config.floatX),
+            np.ones((2, 5, 3)).astype(config.floatX),
+        ),
+        (
+            np.ones((1, 3, 5)).astype(config.floatX),
+            np.ones((1, 5, 3)).astype(config.floatX),
+        ),
+    ]:
+        batch_dim = valid_test_values[0].shape[0]
+        np.testing.assert_allclose(
+            fn(*valid_test_values), np.full((batch_dim, 3, 3), 5.0)
+        )
+
+    for invalid_test_values in [
+        (
+            np.ones((1, 3, 5)).astype(config.floatX),
+            np.ones((2, 5, 3)).astype(config.floatX),
+        ),
+        (
+            np.ones((2, 3, 5)).astype(config.floatX),
+            np.ones((1, 5, 3)).astype(config.floatX),
+        ),
+    ]:
+        with pytest.raises(ValueError, match="Runtime broadcasting not allowed"):
+            fn(*invalid_test_values)
+
+    invalid_test_values = (
+        np.ones((2, 3, 5)).astype(config.floatX),
+        np.ones((3, 5, 3)).astype(config.floatX),
+    )
+    # Error message is backend specific
+    with pytest.raises(ValueError):
+        fn(*invalid_test_values)
+
+
+@pytest.mark.parametrize("mode", ("FAST_COMPILE", "FAST_RUN"))
+def test_runtime_broadcast(mode):
+    check_blockwise_runtime_broadcasting(mode)
 
 
 class TestOp(Op):
