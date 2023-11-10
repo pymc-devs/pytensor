@@ -1,5 +1,6 @@
+from collections.abc import Sequence
 from copy import copy
-from typing import Optional, Sequence, Tuple, Union
+from typing import Optional, Union
 
 import numpy as np
 
@@ -135,8 +136,8 @@ class RandomVariable(Op):
         self,
         size: TensorVariable,
         dist_params: Sequence[TensorVariable],
-        param_shapes: Optional[Sequence[Tuple[Variable, ...]]] = None,
-    ) -> Union[TensorVariable, Tuple[ScalarVariable, ...]]:
+        param_shapes: Optional[Sequence[tuple[Variable, ...]]] = None,
+    ) -> Union[TensorVariable, tuple[ScalarVariable, ...]]:
         """Compute the output shape given the size and distribution parameters.
 
         Parameters

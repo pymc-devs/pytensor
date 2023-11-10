@@ -1,6 +1,7 @@
 import contextlib
 import inspect
-from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence, Tuple, Union
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 from unittest import mock
 
 import numpy as np
@@ -220,13 +221,13 @@ def eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode):
 
 
 def compare_numba_and_py(
-    fgraph: Union[FunctionGraph, Tuple[Sequence["Variable"], Sequence["Variable"]]],
+    fgraph: Union[FunctionGraph, tuple[Sequence["Variable"], Sequence["Variable"]]],
     inputs: Sequence["TensorLike"],
     assert_fn: Optional[Callable] = None,
     numba_mode=numba_mode,
     py_mode=py_mode,
     updates=None,
-) -> Tuple[Callable, Any]:
+) -> tuple[Callable, Any]:
     """Function to compare python graph output and Numba compiled output for testing equality
 
     In the tests below computational graphs are defined in PyTensor. These graphs are then passed to

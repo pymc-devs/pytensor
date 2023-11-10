@@ -1,7 +1,7 @@
 import warnings
 from numbers import Number
 from textwrap import dedent
-from typing import Dict, List, Tuple, Union
+from typing import Union
 
 import numpy as np
 
@@ -59,7 +59,7 @@ class Shape(COp):
     # Mapping from Type to C code (and version) to use.
     # In the C code, the name of the input variable is %(iname)s,
     # the output variable is %(oname)s.
-    c_code_and_version: Dict = {}
+    c_code_and_version: dict = {}
 
     check_input = False
     __props__ = ()
@@ -154,7 +154,7 @@ def _get_vector_length_Shape(op, var):
     return var.owner.inputs[0].type.ndim
 
 
-def shape_tuple(x: TensorVariable) -> Tuple[Variable, ...]:
+def shape_tuple(x: TensorVariable) -> tuple[Variable, ...]:
     r"""Get a tuple of symbolic shape values.
 
     This will return `ScalarConstant`\s for static shape values.
@@ -194,7 +194,7 @@ class Shape_i(COp):
     # Mapping from Type to C code (and version) to use.
     # In the C code, the name of the input variable is %(iname)s,
     # the output variable is %(oname)s.
-    c_code_and_version: Dict = {}
+    c_code_and_version: dict = {}
 
     check_input = False
 
@@ -538,7 +538,7 @@ _specify_shape = SpecifyShape()
 
 def specify_shape(
     x: Union[np.ndarray, Number, Variable],
-    shape: Union[ShapeValueType, List[ShapeValueType], Tuple[ShapeValueType, ...]],
+    shape: Union[ShapeValueType, list[ShapeValueType], tuple[ShapeValueType, ...]],
 ):
     """Specify a fixed shape for a `Variable`.
 
@@ -951,7 +951,7 @@ class Unbroadcast(COp):
     # Mapping from Type to C code (and version) to use.
     # In the C code, the name of the input variable is %(iname)s,
     # the output variable is %(oname)s.
-    c_code_and_version: Dict = {}
+    c_code_and_version: dict = {}
 
     check_input = False
     __props__ = ("axes",)

@@ -3,8 +3,9 @@ Provide a simple user friendly API.
 
 """
 
+from collections.abc import Sequence
 from copy import copy
-from typing import Optional, Sequence, Union, overload
+from typing import Optional, Union, overload
 
 from pytensor.compile.function.types import Function, UnusedInputError, orig_function
 from pytensor.compile.io import In, Out

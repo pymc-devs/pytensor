@@ -1,16 +1,7 @@
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from copy import copy, deepcopy
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-)
+from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
@@ -33,7 +24,7 @@ if TYPE_CHECKING:
     from pytensor.tensor.variable import TensorVariable
 
 
-ThunkAndContainersType = Tuple["BasicThunkType", List["Container"], List["Container"]]
+ThunkAndContainersType = tuple["BasicThunkType", list["Container"], list["Container"]]
 
 
 class Container:
@@ -64,7 +55,7 @@ class Container:
     def __init__(
         self,
         r: Union[Variable, Type],
-        storage: List[Any],
+        storage: list[Any],
         *,
         readonly: bool = False,
         strict: bool = False,
@@ -127,7 +118,7 @@ class Container:
     def __repr__(self):
         return "<" + repr(self.storage[0]) + ">"
 
-    def __deepcopy__(self, memo: Dict[int, Any]) -> "Container":
+    def __deepcopy__(self, memo: dict[int, Any]) -> "Container":
         data_was_in_memo = id(self.storage[0]) in memo
         r = type(self)(
             deepcopy(self.type, memo=memo),
@@ -170,7 +161,7 @@ class Linker(ABC):
         self,
         *,
         allow_gc: Optional[bool] = None,
-        scheduler: Optional[Callable[[FunctionGraph], List[Apply]]] = None,
+        scheduler: Optional[Callable[[FunctionGraph], list[Apply]]] = None,
     ) -> None:
         self._allow_gc = allow_gc
         self._scheduler = scheduler
@@ -196,7 +187,7 @@ class Linker(ABC):
     @abstractmethod
     def make_thunk(
         self, **kwargs
-    ) -> Tuple[Callable, "InputStorageType", "OutputStorageType"]:
+    ) -> tuple[Callable, "InputStorageType", "OutputStorageType"]:
         """
         This function must return a triplet (function, input_variables,
         output_variables) where function is a thunk that operates on the
@@ -219,7 +210,7 @@ class Linker(ABC):
 
         """
 
-    def schedule(self, fgraph: FunctionGraph) -> List[Apply]:
+    def schedule(self, fgraph: FunctionGraph) -> list[Apply]:
         """Runs the scheduler (if set) or the toposort on the FunctionGraph.
 
         Parameters
@@ -250,7 +241,7 @@ class LocalLinker(Linker):
         output_storage: Optional["OutputStorageType"] = None,
         storage_map: Optional["StorageMapType"] = None,
         **kwargs,
-    ) -> Tuple["BasicThunkType", "InputStorageType", "OutputStorageType"]:
+    ) -> tuple["BasicThunkType", "InputStorageType", "OutputStorageType"]:
         return self.make_all(
             input_storage=input_storage,
             output_storage=output_storage,
@@ -262,12 +253,12 @@ class LocalLinker(Linker):
         input_storage: Optional["InputStorageType"] = None,
         output_storage: Optional["OutputStorageType"] = None,
         storage_map: Optional["StorageMapType"] = None,
-    ) -> Tuple[
+    ) -> tuple[
         "BasicThunkType",
         "InputStorageType",
         "OutputStorageType",
-        List[ThunkAndContainersType],
-        List[Apply],
+        list[ThunkAndContainersType],
+        list[Apply],
     ]:
         """
         This function should return a tuple of 5 things
@@ -505,9 +496,9 @@ class WrapLinker(Linker):
     def pre(
         self,
         f: "WrapLinker",
-        inputs: Union[List["NDArray"], List[Optional[float]]],
-        order: List[Apply],
-        thunk_groups: List[Tuple[Callable]],
+        inputs: Union[list["NDArray"], list[Optional[float]]],
+        order: list[Apply],
+        thunk_groups: list[tuple[Callable]],
     ) -> None:
         pass
 
@@ -562,7 +553,7 @@ class WrapLinker(Linker):
 
 
 def WrapLinkerMany(
-    linkers: List[PerformLinker], wrappers: List[Callable]
+    linkers: list[PerformLinker], wrappers: list[Callable]
 ) -> WrapLinker:
     """
     Variant on WrapLinker that runs a series of wrapper functions instead of
@@ -592,7 +583,7 @@ class JITLinker(PerformLinker):
         """Convert a ``FunctionGraph`` into a JIT-able function."""
 
     @abstractmethod
-    def create_thunk_inputs(self, storage_map: Dict[Variable, List[Any]]) -> List[Any]:
+    def create_thunk_inputs(self, storage_map: dict[Variable, list[Any]]) -> list[Any]:
         """Pre-process inputs for the generated thunk.
 
         Parameters

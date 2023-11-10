@@ -1,5 +1,6 @@
 import copy
-from typing import TYPE_CHECKING, Generator, Optional, Sequence, Union, cast
+from collections.abc import Generator, Sequence
+from typing import TYPE_CHECKING, Optional, Union, cast
 
 import pytensor
 from pytensor.graph.basic import (

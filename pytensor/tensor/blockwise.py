@@ -1,5 +1,6 @@
 import re
-from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
+from collections.abc import Sequence
+from typing import Any, Optional, cast
 
 import numpy as np
 
@@ -204,12 +205,12 @@ class Blockwise(Op):
 
     def infer_shape(
         self, fgraph, node, input_shapes
-    ) -> List[Tuple[TensorVariable, ...]]:
+    ) -> list[tuple[TensorVariable, ...]]:
         from pytensor.tensor import broadcast_shape
         from pytensor.tensor.shape import Shape_i
 
         batch_ndims = self._batch_ndim_from_outputs(node.outputs)
-        core_dims: Dict[str, Any] = {}
+        core_dims: dict[str, Any] = {}
         batch_shapes = []
         for input_shape, sig in zip(input_shapes, self.inputs_sig):
             batch_shapes.append(input_shape[:batch_ndims])

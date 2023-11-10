@@ -5,7 +5,7 @@ WRITEME
 
 import logging
 import warnings
-from typing import Literal, Optional, Tuple, Union
+from typing import Literal, Optional, Union
 
 from pytensor.compile.function.types import Supervisor
 from pytensor.configdefaults import config
@@ -260,7 +260,7 @@ optdb.register(
 # final pass just to make sure
 optdb.register("merge3", MergeOptimizer(), "fast_run", "merge", position=100)
 
-_tags: Union[Tuple[str, str], Tuple]
+_tags: Union[tuple[str, str], tuple]
 
 if config.check_stack_trace in ("raise", "warn", "log"):
     _tags = ("fast_run", "fast_compile")
@@ -548,7 +548,7 @@ def register_mode(name, mode):
     predefined_modes[name] = mode
 
 
-def get_target_language(mode=None) -> Tuple[Literal["py", "c", "numba", "jax"], ...]:
+def get_target_language(mode=None) -> tuple[Literal["py", "c", "numba", "jax"], ...]:
     """Get the compilation target language."""
 
     if mode is None:

@@ -1,4 +1,5 @@
-from typing import Iterable, Literal, Optional, Union
+from collections.abc import Iterable
+from typing import Literal, Optional, Union
 
 import numpy as np
 import scipy.sparse

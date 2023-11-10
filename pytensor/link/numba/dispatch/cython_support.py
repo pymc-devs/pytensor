@@ -1,8 +1,9 @@
 import ctypes
 import importlib
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, cast
+from typing import Any, Callable, Optional, cast
 
 import numba
 import numpy as np
@@ -10,7 +11,7 @@ from numpy.typing import DTypeLike
 from scipy import LowLevelCallable
 
 
-_C_TO_NUMPY: Dict[str, DTypeLike] = {
+_C_TO_NUMPY: dict[str, DTypeLike] = {
     "bool": np.bool_,
     "signed char": np.byte,
     "unsigned char": np.ubyte,
@@ -33,15 +34,15 @@ _C_TO_NUMPY: Dict[str, DTypeLike] = {
 class Signature:
     res_dtype: DTypeLike
     res_c_type: str
-    arg_dtypes: List[DTypeLike]
-    arg_c_types: List[str]
-    arg_names: List[Optional[str]]
+    arg_dtypes: list[DTypeLike]
+    arg_c_types: list[str]
+    arg_names: list[Optional[str]]
 
     @property
-    def arg_numba_types(self) -> List[DTypeLike]:
+    def arg_numba_types(self) -> list[DTypeLike]:
         return [numba.from_dtype(dtype) for dtype in self.arg_dtypes]
 
-    def can_cast_args(self, args: List[DTypeLike]) -> bool:
+    def can_cast_args(self, args: list[DTypeLike]) -> bool:
         ok = True
         count = 0
         for name, dtype in zip(self.arg_names, self.arg_dtypes):
@@ -55,7 +56,7 @@ class Signature:
             return False
         return ok
 
-    def provides(self, restype: DTypeLike, arg_dtypes: List[DTypeLike]) -> bool:
+    def provides(self, restype: DTypeLike, arg_dtypes: list[DTypeLike]) -> bool:
         args_ok = self.can_cast_args(arg_dtypes)
         if np.issubdtype(restype, np.inexact):
             result_ok = np.can_cast(self.res_dtype, restype, casting="same_kind")
@@ -88,7 +89,7 @@ class Signature:
         )
 
         arg_dtypes = []
-        arg_names: List[Optional[str]] = []
+        arg_names: list[Optional[str]] = []
         arg_c_types = []
         for raw_arg in raw_args.split(b","):
             re_match = re.fullmatch(decl_expr, raw_arg)
@@ -112,7 +113,7 @@ class Signature:
         return Signature(res_dtype, res_c_type, arg_dtypes, arg_c_types, arg_names)
 
 
-def _available_impls(func: Callable) -> List[Tuple[Signature, Any]]:
+def _available_impls(func: Callable) -> list[tuple[Signature, Any]]:
     """Find all available implementations for a fused cython function."""
     impls = []
     mod = importlib.import_module(func.__module__)

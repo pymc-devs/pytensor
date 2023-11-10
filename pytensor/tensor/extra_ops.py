@@ -1,5 +1,5 @@
-from collections.abc import Collection
-from typing import Iterable, Optional, Set, Tuple, Union
+from collections.abc import Collection, Iterable
+from typing import Optional, Union
 
 import numpy as np
 from numpy.core.multiarray import normalize_axis_index
@@ -1449,7 +1449,7 @@ _broadcast_assert = Assert(
 _runtime_broadcast_assert = Assert("Could not broadcast dimensions.")
 
 
-def broadcast_shape(*arrays, **kwargs) -> Tuple[aes.ScalarVariable, ...]:
+def broadcast_shape(*arrays, **kwargs) -> tuple[aes.ScalarVariable, ...]:
     """Compute the shape resulting from broadcasting arrays.
 
     Parameters
@@ -1468,10 +1468,10 @@ def broadcast_shape(*arrays, **kwargs) -> Tuple[aes.ScalarVariable, ...]:
 
 
 def broadcast_shape_iter(
-    arrays: Iterable[Union[TensorVariable, Tuple[TensorVariable, ...]]],
+    arrays: Iterable[Union[TensorVariable, tuple[TensorVariable, ...]]],
     arrays_are_shapes: bool = False,
     allow_runtime_broadcast: bool = False,
-) -> Tuple[aes.ScalarVariable, ...]:
+) -> tuple[aes.ScalarVariable, ...]:
     r"""Compute the shape resulting from broadcasting arrays.
 
 
@@ -1536,8 +1536,8 @@ def broadcast_shape_iter(
             result_dims.extend(non_bcast_shapes)
         else:
             # More than one shape might not be broadcastable in this dimension
-            nonconst_nb_shapes: Set[int] = set()
-            const_nb_shapes: Set[Variable] = set()
+            nonconst_nb_shapes: set[int] = set()
+            const_nb_shapes: set[Variable] = set()
             for shape in non_bcast_shapes:
                 if isinstance(shape, Constant):
                     const_nb_shapes.add(shape.value.item())
@@ -1608,7 +1608,7 @@ def linspace(start, end, steps):
 
 
 def broadcast_to(
-    x: TensorVariable, shape: Union[TensorVariable, Tuple[Variable, ...]]
+    x: TensorVariable, shape: Union[TensorVariable, tuple[Variable, ...]]
 ) -> TensorVariable:
     """Broadcast an array to a new shape.
 
@@ -1630,7 +1630,7 @@ def broadcast_to(
     return alloc(x, *shape)
 
 
-def broadcast_arrays(*args: TensorVariable) -> Tuple[TensorVariable, ...]:
+def broadcast_arrays(*args: TensorVariable) -> tuple[TensorVariable, ...]:
     """Broadcast any number of arrays against each other.
 
     Parameters

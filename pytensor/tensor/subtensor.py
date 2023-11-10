@@ -1,8 +1,9 @@
 import logging
 import sys
+from collections.abc import Iterable
 from itertools import chain, groupby
 from textwrap import dedent
-from typing import Callable, Iterable, List, Optional, Tuple, Union
+from typing import Callable, Optional, Union
 
 import numpy as np
 
@@ -80,8 +81,8 @@ invalid_tensor_types = (
 
 def indices_from_subtensor(
     op_indices: Iterable[ScalarConstant],
-    idx_list: Optional[List[Union[Type, slice, Variable]]],
-) -> Tuple[Union[slice, Variable], ...]:
+    idx_list: Optional[list[Union[Type, slice, Variable]]],
+) -> tuple[Union[slice, Variable], ...]:
     """Recreate the index tuple from which a ``*Subtensor**`` ``Op`` was created.
 
     Parameters
@@ -184,7 +185,7 @@ def get_idx_list(inputs, idx_list):
 
 def get_canonical_form_slice(
     theslice: Union[slice, Variable], length: Variable
-) -> Tuple[Variable, int]:
+) -> tuple[Variable, int]:
     """Convert slices to canonical form.
 
     Given a slice [start:stop:step] transform it into a canonical form
@@ -528,7 +529,7 @@ def indexed_result_shape(array_shape, indices, indices_are_shapes=False):
     return res_shape
 
 
-def get_slice_elements(idxs: List, cond: Callable) -> List:
+def get_slice_elements(idxs: list, cond: Callable) -> list:
     """Extract slice elements conditional on a given predicate function.
 
     Parameters

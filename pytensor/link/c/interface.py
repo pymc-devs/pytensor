@@ -1,6 +1,6 @@
 import warnings
 from abc import abstractmethod
-from typing import Callable, Dict, List, Tuple
+from typing import Callable
 
 from pytensor.graph.basic import Apply, Constant
 from pytensor.graph.utils import MethodNotDefined
@@ -9,7 +9,7 @@ from pytensor.graph.utils import MethodNotDefined
 class CLinkerObject:
     """Standard methods for an `Op` or `Type` used with the `CLinker`."""
 
-    def c_headers(self, **kwargs) -> List[str]:
+    def c_headers(self, **kwargs) -> list[str]:
         """Return a list of header files required by code returned by this class.
 
         These strings will be prefixed with ``#include`` and inserted at the
@@ -30,7 +30,7 @@ class CLinkerObject:
         """
         return []
 
-    def c_header_dirs(self, **kwargs) -> List[str]:
+    def c_header_dirs(self, **kwargs) -> list[str]:
         """Return a list of header search paths required by code returned by this class.
 
         Provides search paths for headers, in addition to those in any relevant
@@ -53,7 +53,7 @@ class CLinkerObject:
         """
         return []
 
-    def c_libraries(self, **kwargs) -> List[str]:
+    def c_libraries(self, **kwargs) -> list[str]:
         """Return a list of libraries required by code returned by this class.
 
         The compiler will search the directories specified by the environment
@@ -77,7 +77,7 @@ class CLinkerObject:
         """
         return []
 
-    def c_lib_dirs(self, **kwargs) -> List[str]:
+    def c_lib_dirs(self, **kwargs) -> list[str]:
         """Return a list of library search paths required by code returned by this class.
 
         Provides search paths for libraries, in addition to those in any
@@ -115,7 +115,7 @@ class CLinkerObject:
         """
         return ""
 
-    def c_compile_args(self, **kwargs) -> List[str]:
+    def c_compile_args(self, **kwargs) -> list[str]:
         """Return a list of recommended compile arguments for code returned by other methods in this class.
 
         Compiler arguments related to headers, libraries and search paths
@@ -133,7 +133,7 @@ class CLinkerObject:
         """
         return []
 
-    def c_no_compile_args(self, **kwargs) -> List[str]:
+    def c_no_compile_args(self, **kwargs) -> list[str]:
         """Return a list of incompatible ``gcc`` compiler arguments.
 
         We will remove those arguments from the command line of ``gcc``. So if
@@ -145,11 +145,11 @@ class CLinkerObject:
         """
         return []
 
-    def c_init_code(self, **kwargs) -> List[str]:
+    def c_init_code(self, **kwargs) -> list[str]:
         """Return a list of code snippets to be inserted in module initialization."""
         return []
 
-    def c_code_cache_version(self) -> Tuple[int, ...]:
+    def c_code_cache_version(self) -> tuple[int, ...]:
         """Return a tuple of integers indicating the version of this `Op`.
 
         An empty tuple indicates an "unversioned" `Op` that will not be cached
@@ -177,9 +177,9 @@ class CLinkerOp(CLinkerObject):
         self,
         node: Apply,
         name: str,
-        inputs: List[str],
-        outputs: List[str],
-        sub: Dict[str, str],
+        inputs: list[str],
+        outputs: list[str],
+        sub: dict[str, str],
     ) -> str:
         """Return the C implementation of an ``Op``.
 
@@ -215,7 +215,7 @@ class CLinkerOp(CLinkerObject):
         """
         raise NotImplementedError()
 
-    def c_code_cache_version_apply(self, node: Apply) -> Tuple[int, ...]:
+    def c_code_cache_version_apply(self, node: Apply) -> tuple[int, ...]:
         """Return a tuple of integers indicating the version of this `Op`.
 
         An empty tuple indicates an "unversioned" `Op` that will not be
@@ -241,9 +241,9 @@ class CLinkerOp(CLinkerObject):
         self,
         node: Apply,
         name: str,
-        inputs: List[str],
-        outputs: List[str],
-        sub: Dict[str, str],
+        inputs: list[str],
+        outputs: list[str],
+        sub: dict[str, str],
     ) -> str:
         """Return C code to run after :meth:`CLinkerOp.c_code`, whether it failed or not.
 
@@ -373,7 +373,7 @@ class CLinkerType(CLinkerObject):
 
     @abstractmethod
     def c_declare(
-        self, name: str, sub: Dict[str, str], check_input: bool = True
+        self, name: str, sub: dict[str, str], check_input: bool = True
     ) -> str:
         """Return C code to declare variables that will be instantiated by :meth:`CLinkerType.c_extract`.
 
@@ -411,7 +411,7 @@ class CLinkerType(CLinkerObject):
         """
 
     @abstractmethod
-    def c_init(self, name: str, sub: Dict[str, str]) -> str:
+    def c_init(self, name: str, sub: dict[str, str]) -> str:
         """Return C code to initialize the variables that were declared by :meth:`CLinkerType.c_declare`.
 
         Notes
@@ -435,7 +435,7 @@ class CLinkerType(CLinkerObject):
 
     @abstractmethod
     def c_extract(
-        self, name: str, sub: Dict[str, str], check_input: bool = True, **kwargs
+        self, name: str, sub: dict[str, str], check_input: bool = True, **kwargs
     ) -> str:
         r"""Return C code to extract a ``PyObject *`` instance.
 
@@ -475,7 +475,7 @@ class CLinkerType(CLinkerObject):
         """
 
     @abstractmethod
-    def c_sync(self, name: str, sub: Dict[str, str]) -> str:
+    def c_sync(self, name: str, sub: dict[str, str]) -> str:
         """Return C code to pack C types back into a ``PyObject``.
 
         The code returned from this function must be templated using
@@ -525,7 +525,7 @@ class CLinkerType(CLinkerObject):
         return ""
 
     def c_extract_out(
-        self, name: str, sub: Dict[str, str], check_input: bool = True, **kwargs
+        self, name: str, sub: dict[str, str], check_input: bool = True, **kwargs
     ) -> str:
         """Return C code to extract a ``PyObject *`` instance.
 
@@ -549,7 +549,7 @@ class CLinkerType(CLinkerObject):
             c_extract_code=self.c_extract(name, sub, check_input),
         )
 
-    def c_cleanup(self, name: str, sub: Dict[str, str]) -> str:
+    def c_cleanup(self, name: str, sub: dict[str, str]) -> str:
         """Return C code to clean up after :meth:`CLinkerType.c_extract`.
 
         This returns C code that should deallocate whatever
@@ -566,7 +566,7 @@ class CLinkerType(CLinkerObject):
         """
         return ""
 
-    def c_code_cache_version(self) -> Tuple[int, ...]:
+    def c_code_cache_version(self) -> tuple[int, ...]:
         """Return a tuple of integers indicating the version of this type.
 
         An empty tuple indicates an "unversioned" type that will not

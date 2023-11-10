@@ -7,7 +7,6 @@ As SciPy is not always available, we treat them separately.
 import os
 from functools import reduce
 from textwrap import dedent
-from typing import Tuple
 
 import numpy as np
 import scipy.special
@@ -1760,7 +1759,7 @@ def _grad_2f1_loop(a, b, c, z, *, skip_loop, wrt, dtype):
     return *loop_outs[: len(wrt)], converges
 
 
-def hyp2f1_grad(a, b, c, z, wrt: Tuple[int, ...]):
+def hyp2f1_grad(a, b, c, z, wrt: tuple[int, ...]):
     dtype = upcast(a.type.dtype, b.type.dtype, c.type.dtype, z.type.dtype, "float32")
 
     def check_2f1_converges(a, b, c, z):

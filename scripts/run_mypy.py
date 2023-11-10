@@ -14,7 +14,7 @@ import os
 import pathlib
 import subprocess
 import sys
-from typing import Iterator
+from collections.abc import Iterator
 
 import pandas
 

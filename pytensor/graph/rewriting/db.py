@@ -1,9 +1,10 @@
 import copy
 import math
 import sys
+from collections.abc import Iterable, Sequence
 from functools import cmp_to_key
 from io import StringIO
-from typing import Dict, Iterable, Optional, Sequence, Tuple, Union
+from typing import Optional, Union
 
 from pytensor.configdefaults import config
 from pytensor.graph.rewriting import basic as pytensor_rewriting
@@ -185,11 +186,11 @@ class RewriteDatabaseQuery:
         include: Iterable[Union[str, None]],
         require: Optional[Union[OrderedSet, Sequence[str]]] = None,
         exclude: Optional[Union[OrderedSet, Sequence[str]]] = None,
-        subquery: Optional[Dict[str, "RewriteDatabaseQuery"]] = None,
+        subquery: Optional[dict[str, "RewriteDatabaseQuery"]] = None,
         position_cutoff: float = math.inf,
         extra_rewrites: Optional[
             Sequence[
-                Tuple[Union["RewriteDatabaseQuery", RewritesType], Union[int, float]]
+                tuple[Union["RewriteDatabaseQuery", RewritesType], Union[int, float]]
             ]
         ] = None,
     ):
@@ -276,7 +277,7 @@ class RewriteDatabaseQuery:
         )
 
     def register(
-        self, *rewrites: Tuple["RewriteDatabaseQuery", Union[int, float]]
+        self, *rewrites: tuple["RewriteDatabaseQuery", Union[int, float]]
     ) -> "RewriteDatabaseQuery":
         """Include the given rewrites."""
         return RewriteDatabaseQuery(
@@ -322,8 +323,8 @@ class EquilibriumDB(RewriteDatabase):
         super().__init__()
         self.ignore_newtrees = ignore_newtrees
         self.tracks_on_change_inputs = tracks_on_change_inputs
-        self.__final__: Dict[str, bool] = {}
-        self.__cleanup__: Dict[str, bool] = {}
+        self.__final__: dict[str, bool] = {}
+        self.__cleanup__: dict[str, bool] = {}
 
     def register(
         self,

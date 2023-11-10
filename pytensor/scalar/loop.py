@@ -1,5 +1,6 @@
+from collections.abc import Sequence
 from itertools import chain
-from typing import Optional, Sequence, Tuple
+from typing import Optional
 
 from pytensor.compile import rebuild_collect_shared
 from pytensor.graph.basic import Constant, Variable, clone
@@ -41,7 +42,7 @@ class ScalarLoop(ScalarInnerGraphOp):
 
     """
 
-    init_param: Tuple[str, ...] = (
+    init_param: tuple[str, ...] = (
         "init",
         "update",
         "constant",

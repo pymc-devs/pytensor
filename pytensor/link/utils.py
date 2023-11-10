@@ -5,6 +5,7 @@ import sys
 import traceback
 import warnings
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Sequence
 from keyword import iskeyword
 from operator import itemgetter
 from tempfile import NamedTemporaryFile
@@ -13,14 +14,9 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    Dict,
-    Iterable,
-    List,
     NoReturn,
     Optional,
-    Sequence,
     TextIO,
-    Tuple,
     TypeVar,
     Union,
     cast,
@@ -49,7 +45,7 @@ def map_storage(
     input_storage: Optional["InputStorageType"] = None,
     output_storage: Optional["OutputStorageType"] = None,
     storage_map: Optional["StorageMapType"] = None,
-) -> Tuple["InputStorageType", "OutputStorageType", "StorageMapType"]:
+) -> tuple["InputStorageType", "OutputStorageType", "StorageMapType"]:
     """Ensure there is storage (a length-1 list) for inputs, outputs, and interior nodes.
 
     Parameters
@@ -151,8 +147,8 @@ def streamline(
     fgraph: FunctionGraph,
     thunks: Sequence[Callable[[], None]],
     order: Sequence[Apply],
-    post_thunk_old_storage: Optional[List["StorageCellType"]] = None,
-    no_recycling: Optional[List["StorageCellType"]] = None,
+    post_thunk_old_storage: Optional[list["StorageCellType"]] = None,
+    no_recycling: Optional[list["StorageCellType"]] = None,
     nice_errors: bool = True,
 ) -> "BasicThunkType":
     """Construct a single thunk that runs a list of thunks.
@@ -231,7 +227,7 @@ def streamline(
     return f
 
 
-def gc_helper(node_list: List[Apply]):
+def gc_helper(node_list: list[Apply]):
     """
     Return the set of Variable instances which are computed by node_list.
     Parameters
@@ -336,9 +332,9 @@ def raise_with_op(
     types = [getattr(ipt, "type", "No type") for ipt in node.inputs]
     detailed_err_msg += f"\nInputs types: {types}\n"
 
-    shapes: Union[List, str]
-    strides: Union[List, str]
-    scalar_values: Union[List, str]
+    shapes: Union[list, str]
+    strides: Union[list, str]
+    scalar_values: Union[list, str]
 
     if thunk is not None:
         if hasattr(thunk, "inputs"):
@@ -415,11 +411,11 @@ def raise_with_op(
             for item in fgraph.inputs
             if not isinstance(item, pytensor.compile.SharedVariable)
         ]
-        storage_map_list: List = []
+        storage_map_list: list = []
         total_size = 0
         total_size_inputs = 0
         for k in storage_map:
-            storage_map_item: List = []
+            storage_map_item: list = []
 
             # storage_map_item[0]: the variable
             storage_map_item.append(str(k))
@@ -589,8 +585,8 @@ register_thunk_trace_excepthook()
 def compile_function_src(
     src: str,
     function_name: str,
-    global_env: Optional[Dict[Any, Any]] = None,
-    local_env: Optional[Dict[Any, Any]] = None,
+    global_env: Optional[dict[Any, Any]] = None,
+    local_env: Optional[dict[Any, Any]] = None,
 ) -> Callable:
     with NamedTemporaryFile(delete=False) as f:
         filename = f.name
@@ -637,7 +633,7 @@ def get_name_for_object(x: Any) -> str:
 
 
 def unique_name_generator(
-    external_names: Optional[List[str]] = None, suffix_sep: str = "_"
+    external_names: Optional[list[str]] = None, suffix_sep: str = "_"
 ) -> Callable:
     """Create a function that generates unique names."""
 
@@ -650,7 +646,7 @@ def unique_name_generator(
         x: T,
         force_unique=False,
         names_counter=Counter(external_names),
-        objs_to_names: Dict[T, str] = {},
+        objs_to_names: dict[T, str] = {},
     ) -> str:
         if not force_unique and x in objs_to_names:
             return objs_to_names[x]
@@ -677,11 +673,11 @@ def fgraph_to_python(
     op_conversion_fn: Callable,
     *,
     type_conversion_fn: Callable = lambda x, **kwargs: x,
-    order: Optional[List[Apply]] = None,
+    order: Optional[list[Apply]] = None,
     storage_map: Optional["StorageMapType"] = None,
     fgraph_name: str = "fgraph_to_python",
-    global_env: Optional[Dict[Any, Any]] = None,
-    local_env: Optional[Dict[Any, Any]] = None,
+    global_env: Optional[dict[Any, Any]] = None,
+    local_env: Optional[dict[Any, Any]] = None,
     get_name_for_object: Callable[[Any], str] = get_name_for_object,
     squeeze_output: bool = False,
     **kwargs,
@@ -810,7 +806,7 @@ def fgraph_to_python(
     return fgraph_def
 
 
-def get_destroy_dependencies(fgraph: FunctionGraph) -> Dict[Apply, List[Variable]]:
+def get_destroy_dependencies(fgraph: FunctionGraph) -> dict[Apply, list[Variable]]:
     """Construct a ``dict`` of nodes to variables that are implicit dependencies induced by `Op.destroy_map` and `Op.view_map`
 
     These variable dependencies are in contrast to each node's inputs, which

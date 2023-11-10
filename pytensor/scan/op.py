@@ -49,7 +49,7 @@ import time
 from collections import OrderedDict
 from copy import copy
 from itertools import chain, product
-from typing import Callable, List, Optional, Union
+from typing import Callable, Optional, Union
 
 import numpy as np
 
@@ -280,7 +280,7 @@ class ScanInfo:
         )
 
 
-TensorConstructorType = Callable[[List[bool], Union[str, np.generic]], TensorType]
+TensorConstructorType = Callable[[list[bool], Union[str, np.generic]], TensorType]
 
 
 class ScanMethodsMixin:
@@ -667,8 +667,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
     def __init__(
         self,
-        inputs: List[Variable],
-        outputs: List[Variable],
+        inputs: list[Variable],
+        outputs: list[Variable],
         info: ScanInfo,
         mode: Optional[Mode] = None,
         typeConstructor: Optional[TensorConstructorType] = None,
@@ -3399,7 +3399,7 @@ def profile_printer(
 
 @op_debug_information.register(Scan)  # noqa
 def _op_debug_information_Scan(op: Scan, node: Apply):
-    from typing import Sequence
+    from collections.abc import Sequence
 
     from pytensor.scan.utils import ScanArgs
 

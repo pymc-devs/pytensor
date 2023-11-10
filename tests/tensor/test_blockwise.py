@@ -1,5 +1,5 @@
 from itertools import product
-from typing import Optional, Tuple, Union
+from typing import Optional, Union
 
 import numpy as np
 import pytest
@@ -165,7 +165,7 @@ class BlockwiseOpTester:
         cls.block_op = Blockwise(core_op=cls.core_op, signature=cls.signature)
 
     @staticmethod
-    def parse_shape(shape: Tuple[Union[str, int], ...]) -> Tuple[int, ...]:
+    def parse_shape(shape: tuple[Union[str, int], ...]) -> tuple[int, ...]:
         """
         Convert (5, "m", "n") -> (5, 7, 11)
         """

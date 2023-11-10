@@ -7,9 +7,10 @@ manipulation of tensors.
 
 import builtins
 import warnings
+from collections.abc import Sequence
 from functools import partial
 from numbers import Number
-from typing import TYPE_CHECKING, Optional, Sequence, Tuple, Union
+from typing import TYPE_CHECKING, Optional, Union
 from typing import cast as type_cast
 
 import numpy as np
@@ -1159,7 +1160,7 @@ def tril_indices(
     n: Union[int, ScalarVariable],
     k: Union[int, ScalarVariable] = 0,
     m: Optional[Union[int, ScalarVariable]] = None,
-) -> Tuple[TensorVariable, TensorVariable]:
+) -> tuple[TensorVariable, TensorVariable]:
     """
     Return the indices for the lower-triangle of an (n, m) array.
 
@@ -1186,7 +1187,7 @@ def tril_indices(
 def tril_indices_from(
     a: Union[np.ndarray, TensorVariable],
     k: Union[int, ScalarVariable] = 0,
-) -> Tuple[TensorVariable, TensorVariable]:
+) -> tuple[TensorVariable, TensorVariable]:
     """
     Return the indices for the lower-triangle of arr.
 
@@ -1217,7 +1218,7 @@ def triu_indices(
     n: Union[int, ScalarVariable],
     k: Union[int, ScalarVariable] = 0,
     m: Optional[Union[int, ScalarVariable]] = None,
-) -> Tuple[TensorVariable, TensorVariable]:
+) -> tuple[TensorVariable, TensorVariable]:
     """
     Return the indices for the upper-triangle of an (n, m) array.
 
@@ -1244,7 +1245,7 @@ def triu_indices(
 def triu_indices_from(
     a: Union[np.ndarray, TensorVariable],
     k: Union[int, ScalarVariable] = 0,
-) -> Tuple[TensorVariable, TensorVariable]:
+) -> tuple[TensorVariable, TensorVariable]:
     """
     Return the indices for the upper-triangle of arr.
 
@@ -1357,7 +1358,7 @@ def identity_like(x, dtype: Optional[Union[str, np.generic, np.dtype]] = None):
 
 def infer_static_shape(
     shape: Union[Variable, Sequence[Union[Variable, int]]]
-) -> Tuple[Sequence["TensorLike"], Sequence[Optional[int]]]:
+) -> tuple[Sequence["TensorLike"], Sequence[Optional[int]]]:
     """Infer the static shapes implied by the potentially symbolic elements in `shape`.
 
     `shape` will be validated and constant folded.  As a result, this function
@@ -4135,7 +4136,7 @@ atleast_3d = partial(atleast_Nd, n=3)
 
 
 def expand_dims(
-    a: Union[np.ndarray, TensorVariable], axis: Tuple[int, ...]
+    a: Union[np.ndarray, TensorVariable], axis: tuple[int, ...]
 ) -> TensorVariable:
     """Expand the shape of an array.
 

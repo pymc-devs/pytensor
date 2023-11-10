@@ -4,7 +4,7 @@ import copy
 import dataclasses
 from itertools import chain
 from sys import maxsize
-from typing import Dict, List, Optional, Tuple, cast
+from typing import Optional, cast
 
 import numpy as np
 
@@ -686,14 +686,14 @@ def get_outer_ndim(var: Variable, scan_args: ScanArgs) -> int:
 
 def push_out_inner_vars(
     fgraph: FunctionGraph,
-    inner_vars: List[Variable],
+    inner_vars: list[Variable],
     old_scan_node: Apply,
     old_scan_args: ScanArgs,
-) -> Tuple[List[Variable], ScanArgs, Dict[Variable, Variable]]:
-    tmp_outer_vars: List[Optional[Variable]] = []
+) -> tuple[list[Variable], ScanArgs, dict[Variable, Variable]]:
+    tmp_outer_vars: list[Optional[Variable]] = []
     new_scan_node = old_scan_node
     new_scan_args = old_scan_args
-    replacements: Dict[Variable, Variable] = {}
+    replacements: dict[Variable, Variable] = {}
 
     # For the inner_vars that already exist in the outer graph,
     # simply obtain a reference to them
@@ -724,7 +724,7 @@ def push_out_inner_vars(
     idx_add_as_nitsots = [i for i, v in enumerate(tmp_outer_vars) if v is None]
     add_as_nitsots = [inner_vars[idx] for idx in idx_add_as_nitsots]
 
-    new_outs: List[Variable] = []
+    new_outs: list[Variable] = []
 
     if len(add_as_nitsots) > 0:
         new_scan_node, replacements = add_nitsot_outputs(
@@ -743,7 +743,7 @@ def push_out_inner_vars(
 
         new_outs = new_scan_args.outer_out_nit_sot[-len(add_as_nitsots) :]
 
-    outer_vars: List[Variable] = []
+    outer_vars: list[Variable] = []
 
     for i, v in enumerate(tmp_outer_vars):
         if i in idx_add_as_nitsots:
@@ -760,7 +760,7 @@ def add_nitsot_outputs(
     old_scan_node: Apply,
     old_scan_args: ScanArgs,
     new_outputs_inner,
-) -> Tuple[Apply, Dict[Variable, Variable]]:
+) -> tuple[Apply, dict[Variable, Variable]]:
     assert isinstance(old_scan_node.op, Scan)
 
     nb_new_outs = len(new_outputs_inner)
@@ -943,7 +943,7 @@ class ScanInplaceOptimizer(GraphRewriter):
         fgraph.attach_feature(DestroyHandler())
 
     def attempt_scan_inplace(
-        self, fgraph: FunctionGraph, node: Apply[Scan], output_indices: List[int]
+        self, fgraph: FunctionGraph, node: Apply[Scan], output_indices: list[int]
     ) -> Optional[Apply]:
         """Attempt to replace a `Scan` node by one which computes the specified outputs inplace.
 

@@ -1,5 +1,6 @@
+from collections.abc import Iterable
 from functools import partial
-from typing import Callable, Iterable, Optional
+from typing import Callable, Optional
 
 import numpy as np
 import pytest

@@ -1,5 +1,4 @@
 from copy import copy
-from typing import List, Tuple
 
 import numpy as np
 
@@ -803,7 +802,7 @@ class Elemwise(OpenMPOp):
                     "If broadcasting was intended, use `specify_broadcastable` on the relevant input."
                 )
 
-    def infer_shape(self, fgraph, node, i_shapes) -> List[Tuple[TensorVariable, ...]]:
+    def infer_shape(self, fgraph, node, i_shapes) -> list[tuple[TensorVariable, ...]]:
         from pytensor.tensor.extra_ops import broadcast_shape
 
         out_shape = broadcast_shape(*i_shapes, arrays_are_shapes=True)

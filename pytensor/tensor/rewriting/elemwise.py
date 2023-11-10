@@ -1,7 +1,8 @@
 import sys
 from collections import defaultdict, deque
+from collections.abc import Generator
 from functools import lru_cache
-from typing import DefaultDict, Generator, List, Set, Tuple, TypeVar
+from typing import DefaultDict, TypeVar
 from warnings import warn
 
 import pytensor
@@ -675,7 +676,7 @@ class FusionOptimizer(GraphRewriter):
 
         def find_next_fuseable_subgraph(
             fg: FunctionGraph,
-        ) -> Generator[Tuple[List[Variable], List[Variable]], None, None]:
+        ) -> Generator[tuple[list[Variable], list[Variable]], None, None]:
             """Find all subgraphs in a FunctionGraph that can be fused together
 
             Yields
@@ -685,12 +686,12 @@ class FusionOptimizer(GraphRewriter):
             Elemwise Composite before being accessed again in the next iteration.
             """
 
-            FUSEABLE_MAPPING = DefaultDict[Variable, List[Apply]]
-            UNFUSEABLE_MAPPING = DefaultDict[Variable, Set[ApplyOrOutput]]
+            FUSEABLE_MAPPING = DefaultDict[Variable, list[Apply]]
+            UNFUSEABLE_MAPPING = DefaultDict[Variable, set[ApplyOrOutput]]
 
             def initialize_fuseable_mappings(
                 *, fg: FunctionGraph
-            ) -> Tuple[FUSEABLE_MAPPING, UNFUSEABLE_MAPPING]:
+            ) -> tuple[FUSEABLE_MAPPING, UNFUSEABLE_MAPPING]:
                 @lru_cache(maxsize=None)
                 def elemwise_scalar_op_has_c_code(node: Apply) -> bool:
                     # TODO: This should not play a role in non-c backends!
@@ -745,10 +746,10 @@ class FusionOptimizer(GraphRewriter):
             def find_fuseable_subgraph(
                 *,
                 fg: FunctionGraph,
-                visited_nodes: Set[Apply],
+                visited_nodes: set[Apply],
                 fuseable_clients: FUSEABLE_MAPPING,
                 unfuseable_clients: UNFUSEABLE_MAPPING,
-            ) -> Tuple[List[Variable], List[Variable]]:
+            ) -> tuple[list[Variable], list[Variable]]:
                 KT = TypeVar("KT")
                 VT = TypeVar("VT", list, set)
 
@@ -777,9 +778,9 @@ class FusionOptimizer(GraphRewriter):
                         visited_nodes.add(starting_node)
                         continue
 
-                    subgraph_inputs: List[Variable] = []
-                    subgraph_outputs: List[Variable] = []
-                    unfuseable_clients_subgraph: Set[Variable] = set()
+                    subgraph_inputs: list[Variable] = []
+                    subgraph_outputs: list[Variable] = []
+                    unfuseable_clients_subgraph: set[Variable] = set()
 
                     # Shallow cloning of maps so that they can be manipulated in place
                     fuseable_clients_temp = shallow_clone_defaultdict(fuseable_clients)
@@ -948,10 +949,10 @@ class FusionOptimizer(GraphRewriter):
             def update_fuseable_mappings_after_fg_replace(
                 *,
                 fg: FunctionGraph,
-                visited_nodes: Set[Apply],
+                visited_nodes: set[Apply],
                 fuseable_clients: FUSEABLE_MAPPING,
                 unfuseable_clients: UNFUSEABLE_MAPPING,
-                starting_nodes: Set[Apply],
+                starting_nodes: set[Apply],
             ) -> None:
                 # Find new composite node and dropped intermediate nodes
                 # by comparing the current fg.apply nodes with the cached
@@ -995,7 +996,7 @@ class FusionOptimizer(GraphRewriter):
             # broadcast type) and 2) from each node to each certainly unfuseable
             # client (those that don't fit into 1))
             fuseable_clients, unfuseable_clients = initialize_fuseable_mappings(fg=fg)
-            visited_nodes: Set[Apply] = set()
+            visited_nodes: set[Apply] = set()
             while True:
                 starting_nodes = fg.apply_nodes.copy()
                 try:

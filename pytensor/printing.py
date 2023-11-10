@@ -5,22 +5,12 @@ import logging
 import os
 import sys
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from contextlib import contextmanager
 from copy import copy
 from functools import reduce, singledispatch
 from io import StringIO
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Literal,
-    Optional,
-    Sequence,
-    TextIO,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Literal, Optional, TextIO, Union
 
 import numpy as np
 
@@ -93,7 +83,7 @@ def char_from_number(number):
 
 
 @singledispatch
-def op_debug_information(op: Op, node: Apply) -> Dict[Apply, Dict[Variable, str]]:
+def op_debug_information(op: Op, node: Apply) -> dict[Apply, dict[Variable, str]]:
     """Provide extra debug print information based on the type of `Op` and `Apply` node.
 
     Implementations of this dispatch function should return a ``dict`` keyed by
@@ -122,9 +112,9 @@ def debugprint(
     file: Optional[Union[Literal["str"], TextIO]] = None,
     id_type: IDTypesType = "CHAR",
     stop_on_name: bool = False,
-    done: Optional[Dict[Union[Literal["output"], Variable, Apply], str]] = None,
+    done: Optional[dict[Union[Literal["output"], Variable, Apply], str]] = None,
     print_storage: bool = False,
-    used_ids: Optional[Dict[Union[Literal["output"], Variable, Apply], str]] = None,
+    used_ids: Optional[dict[Union[Literal["output"], Variable, Apply], str]] = None,
     print_op_info: bool = False,
     print_destroy_map: bool = False,
     print_view_map: bool = False,
@@ -209,9 +199,9 @@ def debugprint(
 
     inputs_to_print = []
     outputs_to_print = []
-    profile_list: List[Optional[Any]] = []
-    topo_orders: List[Optional[List[Apply]]] = []
-    storage_maps: List[Optional[StorageMapType]] = []
+    profile_list: list[Optional[Any]] = []
+    topo_orders: list[Optional[list[Apply]]] = []
+    storage_maps: list[Optional[StorageMapType]] = []
 
     if isinstance(graph_like, (list, tuple, set)):
         graphs = graph_like
@@ -262,7 +252,7 @@ def debugprint(
         else:
             raise TypeError(f"debugprint cannot print an object type {type(obj)}")
 
-    inner_graph_vars: List[Variable] = []
+    inner_graph_vars: list[Variable] = []
 
     if any(p for p in profile_list if p is not None and p.fct_callcount > 0):
         print(
@@ -286,7 +276,7 @@ N.B.:
             file=_file,
         )
 
-    op_information: Dict[Apply, Dict[Variable, str]] = {}
+    op_information: dict[Apply, dict[Variable, str]] = {}
 
     for var in inputs_to_print:
         _debugprint(
@@ -475,7 +465,7 @@ def _debugprint(
     var: Variable,
     prefix: str = "",
     depth: int = -1,
-    done: Optional[Dict[Union[Literal["output"], Variable, Apply], str]] = None,
+    done: Optional[dict[Union[Literal["output"], Variable, Apply], str]] = None,
     print_type: bool = False,
     file: TextIO = sys.stdout,
     print_destroy_map: bool = False,
@@ -484,12 +474,12 @@ def _debugprint(
     id_type: IDTypesType = "CHAR",
     stop_on_name: bool = False,
     prefix_child: Optional[str] = None,
-    inner_graph_ops: Optional[List[Variable]] = None,
+    inner_graph_ops: Optional[list[Variable]] = None,
     profile: Optional[ProfileStats] = None,
-    inner_to_outer_inputs: Optional[Dict[Variable, Variable]] = None,
+    inner_to_outer_inputs: Optional[dict[Variable, Variable]] = None,
     storage_map: Optional[StorageMapType] = None,
-    used_ids: Optional[Dict[Union[Literal["output"], Variable, Apply], str]] = None,
-    op_information: Optional[Dict[Apply, Dict[Variable, str]]] = None,
+    used_ids: Optional[dict[Union[Literal["output"], Variable, Apply], str]] = None,
+    op_information: Optional[dict[Apply, dict[Variable, str]]] = None,
     parent_node: Optional[Apply] = None,
     print_op_info: bool = False,
     inner_graph_node: Optional[Apply] = None,
@@ -949,7 +939,7 @@ class PatternPrinter(Printer):
 
 
 class FunctionPrinter(Printer):
-    def __init__(self, names: List[str], keywords: Optional[List[str]] = None):
+    def __init__(self, names: list[str], keywords: Optional[list[str]] = None):
         """
         Parameters
         ----------
@@ -1061,8 +1051,8 @@ default_printer = DefaultPrinter()
 
 class PPrinter(Printer):
     def __init__(self):
-        self.printers: List[Tuple[Union[Op, type, Callable], Printer]] = []
-        self.printers_dict: Dict[Union[Op, type, Callable], Printer] = {}
+        self.printers: list[tuple[Union[Op, type, Callable], Printer]] = []
+        self.printers_dict: dict[Union[Op, type, Callable], Printer] = {}
 
     def assign(self, condition: Union[Op, type, Callable], printer: Printer):
         if isinstance(condition, (Op, type)):
@@ -1884,7 +1874,7 @@ def get_node_by_id(
     """
     from pytensor.printing import debugprint
 
-    used_ids: Dict[Union[Literal["output"], Variable, Apply], str] = {}
+    used_ids: dict[Union[Literal["output"], Variable, Apply], str] = {}
 
     _ = debugprint(graphs, file="str", used_ids=used_ids, id_type=id_types)
 

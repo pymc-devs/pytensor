@@ -87,7 +87,6 @@ try:
 except ImportError:
     pass
 
-from typing import Tuple
 
 import pytensor.scalar
 from pytensor.configdefaults import config
@@ -454,7 +453,7 @@ class GemmRelated(COp):
 
     """
 
-    __props__: Tuple[str, ...] = ()
+    __props__: tuple[str, ...] = ()
 
     def c_support_code(self, **kwargs):
         # return cblas_header_text()
