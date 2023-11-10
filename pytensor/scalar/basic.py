@@ -12,11 +12,11 @@ you probably want to use pytensor.tensor.[c,z,f,d,b,w,i,l,]scalar!
 
 import builtins
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from copy import copy
 from itertools import chain
 from textwrap import dedent
-from typing import Any, Dict, Mapping, Optional, Tuple, Type, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 from typing_extensions import TypeAlias
@@ -679,7 +679,7 @@ class ScalarType(CType, HasDataType, HasShape):
         return shape_info
 
 
-def get_scalar_type(dtype, cache: Dict[str, ScalarType] = {}) -> ScalarType:
+def get_scalar_type(dtype, cache: dict[str, ScalarType] = {}) -> ScalarType:
     """
     Return a ScalarType(dtype) object.
 
@@ -716,7 +716,7 @@ float64: ScalarType = get_scalar_type("float64")
 complex64: ScalarType = get_scalar_type("complex64")
 complex128: ScalarType = get_scalar_type("complex128")
 
-_ScalarTypes: TypeAlias = Tuple[ScalarType, ...]
+_ScalarTypes: TypeAlias = tuple[ScalarType, ...]
 int_types: _ScalarTypes = (int8, int16, int32, int64)
 uint_types: _ScalarTypes = (uint8, uint16, uint32, uint64)
 float_types: _ScalarTypes = (float16, float32, float64)
@@ -922,7 +922,7 @@ def upgrade_to_float(*types):
     Upgrade any int types to float32 or float64 to avoid losing precision.
 
     """
-    conv: Mapping[Type, Type] = {
+    conv: Mapping[type, type] = {
         bool: float32,
         int8: float32,
         int16: float32,
@@ -4181,7 +4181,7 @@ class Composite(ScalarInnerGraphOp):
 
     """
 
-    init_param: Tuple[str, ...] = ("inputs", "outputs")
+    init_param: tuple[str, ...] = ("inputs", "outputs")
 
     def __init__(self, inputs, outputs, name="Composite"):
         self.name = name
@@ -4398,13 +4398,13 @@ class Composite(ScalarInnerGraphOp):
 
         return self.c_code_template % d
 
-    def c_code_cache_version_outer(self) -> Tuple[int, ...]:
+    def c_code_cache_version_outer(self) -> tuple[int, ...]:
         return (4,)
 
 
 class Compositef32:
     # This is a dict of scalar op classes that need special handling
-    special: Dict = {}
+    special: dict = {}
 
     def apply(self, fgraph):
         mapping = {}

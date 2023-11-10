@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Any, Generic, Optional, Tuple, TypeVar, Union
+from typing import Any, Generic, Optional, TypeVar, Union
 
 from typing_extensions import TypeAlias
 
@@ -272,4 +272,4 @@ class HasShape:
     """A mixin for a type that has :attr:`shape` and :attr:`ndim` attributes."""
 
     ndim: int
-    shape: Tuple[Optional[int], ...]
+    shape: tuple[Optional[int], ...]

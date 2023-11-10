@@ -2,8 +2,9 @@ import linecache
 import sys
 import traceback
 from abc import ABCMeta
+from collections.abc import Sequence
 from io import StringIO
-from typing import TYPE_CHECKING, Any, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Optional, TypeVar, Union
 
 
 if TYPE_CHECKING:
@@ -14,7 +15,7 @@ T = TypeVar("T", bound=Union["Apply", "Variable"])
 
 def simple_extract_stack(
     f=None, limit: Optional[int] = None, skips: Optional[Sequence[str]] = None
-) -> List[Tuple[Optional[str], int, str, Optional[str]]]:
+) -> list[tuple[Optional[str], int, str, Optional[str]]]:
     """This is traceback.extract_stack from python 2.7 with this change:
 
     - Comment the update of the cache.
@@ -39,7 +40,7 @@ def simple_extract_stack(
     if limit is None:
         if hasattr(sys, "tracebacklimit"):
             limit = sys.tracebacklimit
-    trace: List[Tuple[Optional[str], int, str, Optional[str]]] = []
+    trace: list[tuple[Optional[str], int, str, Optional[str]]] = []
     n = 0
     while f is not None and (limit is None or n < limit):
         lineno = f.f_lineno
@@ -255,7 +256,7 @@ class MetaType(ABCMeta):
 
 
 class MetaObject(metaclass=MetaType):
-    __slots__: List = []
+    __slots__: list = []
 
     def __ne__(self, other):
         return not self == other

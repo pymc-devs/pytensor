@@ -12,7 +12,7 @@ that satisfies the constraints. That's useful for pattern matching.
 
 from collections.abc import Mapping
 from numbers import Number
-from typing import Dict, Optional, Tuple, Union
+from typing import Optional, Union
 
 import numpy as np
 from cons.core import ConsError, _car, _cdr
@@ -256,7 +256,7 @@ _unify.add((object, ConstrainedVar, Mapping), _unify_ConstrainedVar_object)
 
 
 def convert_strs_to_vars(
-    x: Union[Tuple, str, Dict], var_map: Optional[Dict[str, Var]] = None
+    x: Union[tuple, str, dict], var_map: Optional[dict[str, Var]] = None
 ) -> Union[ExpressionTuple, Var]:
     r"""Convert tuples and strings to `etuple`\s and logic variables, respectively.
 

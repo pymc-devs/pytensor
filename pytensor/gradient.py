@@ -2,21 +2,9 @@
 
 import time
 import warnings
+from collections.abc import Mapping, MutableSequence, Sequence
 from functools import partial, reduce
-from typing import (
-    TYPE_CHECKING,
-    Callable,
-    Dict,
-    List,
-    Literal,
-    Mapping,
-    MutableSequence,
-    Optional,
-    Sequence,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import TYPE_CHECKING, Callable, Literal, Optional, TypeVar, Union
 
 import numpy as np
 
@@ -44,7 +32,7 @@ grad_time: float = 0.0
 # TODO: Add `overload` variants
 def as_list_or_tuple(
     use_list: bool, use_tuple: bool, outputs: Union[V, Sequence[V]]
-) -> Union[V, List[V], Tuple[V, ...]]:
+) -> Union[V, list[V], tuple[V, ...]]:
     """Return either a single object or a list/tuple of objects.
 
     If `use_list` is True, `outputs` is returned as a list (if `outputs`
@@ -206,17 +194,17 @@ def Rop(
     """
 
     if not isinstance(wrt, (list, tuple)):
-        _wrt: List[Variable] = [pytensor.tensor.as_tensor_variable(wrt)]
+        _wrt: list[Variable] = [pytensor.tensor.as_tensor_variable(wrt)]
     else:
         _wrt = [pytensor.tensor.as_tensor_variable(x) for x in wrt]
 
     if not isinstance(eval_points, (list, tuple)):
-        _eval_points: List[Variable] = [pytensor.tensor.as_tensor_variable(eval_points)]
+        _eval_points: list[Variable] = [pytensor.tensor.as_tensor_variable(eval_points)]
     else:
         _eval_points = [pytensor.tensor.as_tensor_variable(x) for x in eval_points]
 
     if not isinstance(f, (list, tuple)):
-        _f: List[Variable] = [pytensor.tensor.as_tensor_variable(f)]
+        _f: list[Variable] = [pytensor.tensor.as_tensor_variable(f)]
     else:
         _f = [pytensor.tensor.as_tensor_variable(x) for x in f]
 
@@ -237,7 +225,7 @@ def Rop(
             # Tensor, Sparse have the ndim attribute
             pass
 
-    seen_nodes: Dict[Apply, Sequence[Variable]] = {}
+    seen_nodes: dict[Apply, Sequence[Variable]] = {}
 
     def _traverse(node):
         """TODO: writeme"""
@@ -310,7 +298,7 @@ def Rop(
     for out in _f:
         _traverse(out.owner)
 
-    rval: List[Optional[Variable]] = []
+    rval: list[Optional[Variable]] = []
     for out in _f:
         if out in _wrt:
             rval.append(_eval_points[_wrt.index(out)])
@@ -394,19 +382,19 @@ def Lop(
         If `f` is a list/tuple, then return a list/tuple with the results.
     """
     if not isinstance(eval_points, (list, tuple)):
-        _eval_points: List[Variable] = [pytensor.tensor.as_tensor_variable(eval_points)]
+        _eval_points: list[Variable] = [pytensor.tensor.as_tensor_variable(eval_points)]
     else:
         _eval_points = [pytensor.tensor.as_tensor_variable(x) for x in eval_points]
 
     if not isinstance(f, (list, tuple)):
-        _f: List[Variable] = [pytensor.tensor.as_tensor_variable(f)]
+        _f: list[Variable] = [pytensor.tensor.as_tensor_variable(f)]
     else:
         _f = [pytensor.tensor.as_tensor_variable(x) for x in f]
 
     grads = list(_eval_points)
 
     if not isinstance(wrt, (list, tuple)):
-        _wrt: List[Variable] = [pytensor.tensor.as_tensor_variable(wrt)]
+        _wrt: list[Variable] = [pytensor.tensor.as_tensor_variable(wrt)]
     else:
         _wrt = [pytensor.tensor.as_tensor_variable(x) for x in wrt]
 
@@ -504,7 +492,7 @@ def grad(
         raise TypeError("Cost must be a scalar.")
 
     if not isinstance(wrt, Sequence):
-        _wrt: List[Variable] = [wrt]
+        _wrt: list[Variable] = [wrt]
     else:
         _wrt = list(wrt)
 
@@ -1677,7 +1665,7 @@ def mode_not_slow(mode):
 
 def verify_grad(
     fun: Callable,
-    pt: List[np.ndarray],
+    pt: list[np.ndarray],
     n_tests: int = 2,
     rng: Optional[Union[np.random.Generator, np.random.RandomState]] = None,
     eps: Optional[float] = None,

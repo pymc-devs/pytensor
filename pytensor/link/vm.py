@@ -11,17 +11,9 @@ import time
 import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from collections.abc import Sequence
 from itertools import zip_longest
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    DefaultDict,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-)
+from typing import TYPE_CHECKING, Any, DefaultDict, Optional
 
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Constant, Variable
@@ -50,8 +42,8 @@ def calculate_reallocate_info(
     fgraph: "FunctionGraph",
     storage_map: "StorageMapType",
     compute_map_re: "ComputeMapType",
-    dependencies: Dict[Variable, List[Variable]],
-) -> Dict[Variable, List[Variable]]:
+    dependencies: dict[Variable, list[Variable]],
+) -> dict[Variable, list[Variable]]:
     """Finds pairs of computed variables that can share a storage cell.
 
     This apparently reduces memory allocations, but its scope is very limited
@@ -72,10 +64,10 @@ def calculate_reallocate_info(
 
     """
     reallocated_info = {}
-    viewed_by: Dict[Variable, List[Variable]] = {}
+    viewed_by: dict[Variable, list[Variable]] = {}
     for var in fgraph.variables:
         viewed_by[var] = []
-    view_of: Dict[Variable, Variable] = {}
+    view_of: dict[Variable, Variable] = {}
     pre_allocated = set()
     allocated = set()
 
@@ -203,9 +195,9 @@ class VM(ABC):
     def __init__(
         self,
         fgraph: "FunctionGraph",
-        nodes: List[Apply],
-        thunks: List["BasicThunkType"],
-        pre_call_clear: List["StorageCellType"],
+        nodes: list[Apply],
+        thunks: list["BasicThunkType"],
+        pre_call_clear: list["StorageCellType"],
     ):
         r"""
         Parameters
@@ -293,9 +285,9 @@ class UpdatingVM(VM):
         thunks,
         pre_call_clear,
         storage_map: "StorageMapType",
-        input_storage: List["StorageCellType"],
-        output_storage: List["StorageCellType"],
-        update_vars: Dict[Variable, Variable],
+        input_storage: list["StorageCellType"],
+        output_storage: list["StorageCellType"],
+        update_vars: dict[Variable, Variable],
     ):
         r"""
         Parameters
@@ -323,7 +315,7 @@ class UpdatingVM(VM):
             if inp in update_vars
         )
 
-    def perform_updates(self) -> List[Any]:
+    def perform_updates(self) -> list[Any]:
         """Perform the output-to-input updates and return the output values."""
 
         # The outputs need to be collected *before* the updates that follow
@@ -352,7 +344,7 @@ class Loop(UpdatingVM):
         input_storage,
         output_storage,
         update_vars,
-        post_thunk_clear: Optional[List["StorageCellType"]] = None,
+        post_thunk_clear: Optional[list["StorageCellType"]] = None,
     ):
         r"""
         Parameters
@@ -460,7 +452,7 @@ class Stack(UpdatingVM):
         update_vars,
         compute_map: "ComputeMapType",
         allow_gc: bool,
-        dependencies: Optional[Dict[Variable, List[Variable]]] = None,
+        dependencies: Optional[dict[Variable, list[Variable]]] = None,
         callback=None,
         callback_input=None,
     ):
@@ -494,9 +486,9 @@ class Stack(UpdatingVM):
         self.message = ""
         self.base_apply_stack = [o.owner for o in fgraph.outputs if o.owner]
         self.outputs = fgraph.outputs
-        self.variable_shape: Dict[Variable, Any] = {}  # Variable -> shape
-        self.variable_strides: Dict[Variable, Any] = {}  # Variable -> strides
-        self.variable_offset: Dict[Variable, Any] = {}  # Variable -> offset
+        self.variable_shape: dict[Variable, Any] = {}  # Variable -> shape
+        self.variable_strides: dict[Variable, Any] = {}  # Variable -> strides
+        self.variable_offset: dict[Variable, Any] = {}  # Variable -> offset
         node_idx = {node: i for i, node in enumerate(self.nodes)}
         self.node_idx = node_idx
         self.callback = callback
@@ -970,7 +962,7 @@ class VMLinker(LocalLinker):
 
     def reduce_storage_allocations(
         self, storage_map: "StorageMapType", order: Sequence[Apply]
-    ) -> Tuple[Variable, ...]:
+    ) -> tuple[Variable, ...]:
         """Reuse storage cells in a storage map.
 
         `storage_map` is updated in-place.
@@ -985,7 +977,7 @@ class VMLinker(LocalLinker):
 
         """
         # Collect Reallocation Info
-        compute_map_re: DefaultDict[Variable, List[bool]] = defaultdict(lambda: [False])
+        compute_map_re: DefaultDict[Variable, list[bool]] = defaultdict(lambda: [False])
         for var in self.fgraph.inputs:
             compute_map_re[var][0] = True
 
@@ -994,7 +986,7 @@ class VMLinker(LocalLinker):
         else:
             dependencies = self.compute_gc_dependencies(storage_map)
 
-        reallocated_info: Dict[Variable, List[Variable]] = calculate_reallocate_info(
+        reallocated_info: dict[Variable, list[Variable]] = calculate_reallocate_info(
             order, self.fgraph, storage_map, compute_map_re, dependencies
         )
         for pair in reallocated_info.values():

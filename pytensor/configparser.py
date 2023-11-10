@@ -3,6 +3,7 @@ import os
 import shlex
 import sys
 import warnings
+from collections.abc import Sequence
 from configparser import (
     ConfigParser,
     InterpolationError,
@@ -12,7 +13,7 @@ from configparser import (
 )
 from functools import wraps
 from io import StringIO
-from typing import Callable, Dict, Optional, Sequence, Union
+from typing import Callable, Optional, Union
 
 from pytensor.utils import hash_from_code
 
@@ -72,7 +73,7 @@ class PyTensorConfigParser:
         self._flags_dict = flags_dict
         self._pytensor_cfg = pytensor_cfg
         self._pytensor_raw_cfg = pytensor_raw_cfg
-        self._config_var_dict: Dict = {}
+        self._config_var_dict: dict = {}
         super().__init__()
 
     def __str__(self, print_doc=True):

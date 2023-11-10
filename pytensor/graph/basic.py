@@ -2,26 +2,24 @@
 import abc
 import warnings
 from collections import deque
+from collections.abc import (
+    Collection,
+    Generator,
+    Hashable,
+    Iterable,
+    Iterator,
+    Reversible,
+    Sequence,
+)
 from copy import copy
 from itertools import count
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    Collection,
     Deque,
-    Dict,
-    Generator,
     Generic,
-    Hashable,
-    Iterable,
-    Iterator,
-    List,
     Optional,
-    Reversible,
-    Sequence,
-    Set,
-    Tuple,
     TypeVar,
     Union,
     cast,
@@ -54,7 +52,7 @@ _IdType = TypeVar("_IdType", bound=Hashable)
 
 T = TypeVar("T", bound="Node")
 NoParams = object()
-NodeAndChildren = Tuple[T, Optional[Iterable[T]]]
+NodeAndChildren = tuple[T, Optional[Iterable[T]]]
 
 
 class Node(MetaObject):
@@ -125,7 +123,7 @@ class Apply(Node, Generic[OpType]):
             raise TypeError("The output of an Apply must be a sequence type")
 
         self.op = op
-        self.inputs: List[Variable] = []
+        self.inputs: list[Variable] = []
         self.tag = Scratchpad()
 
         # filter inputs to make sure each element is a Variable
@@ -136,7 +134,7 @@ class Apply(Node, Generic[OpType]):
                 raise TypeError(
                     f"The 'inputs' argument to Apply must contain Variable instances, not {input}"
                 )
-        self.outputs: List[Variable] = []
+        self.outputs: list[Variable] = []
         # filter outputs to make sure each element is a Variable
         for i, output in enumerate(outputs):
             if isinstance(output, Variable):
@@ -265,7 +263,7 @@ class Apply(Node, Generic[OpType]):
 
         assert isinstance(inputs, (list, tuple))
         remake_node = False
-        new_inputs: List["Variable"] = list(inputs)
+        new_inputs: list["Variable"] = list(inputs)
 
         # Some Ops like Alloc require the node to always be rebuilt in non-strict mode
         # as the output type depends on the input values and not just their types
@@ -696,7 +694,7 @@ class AtomicVariable(Variable[_TypeType, None]):
 class NominalVariable(AtomicVariable[_TypeType]):
     """A variable that enables alpha-equivalent comparisons."""
 
-    __instances__: Dict[Tuple["Type", Hashable], "NominalVariable"] = {}
+    __instances__: dict[tuple["Type", Hashable], "NominalVariable"] = {}
 
     def __new__(cls, id: _IdType, typ: _TypeType, **kwargs):
         if (typ, id) not in cls.__instances__:
@@ -742,7 +740,7 @@ class NominalVariable(AtomicVariable[_TypeType]):
     def __repr__(self):
         return f"{type(self).__name__}({repr(self.id)}, {repr(self.type)})"
 
-    def signature(self) -> Tuple[_TypeType, _IdType]:
+    def signature(self) -> tuple[_TypeType, _IdType]:
         return (self.type, self.id)
 
 
@@ -840,7 +838,7 @@ def walk(
 
     nodes = deque(nodes)
 
-    rval_set: Set[int] = set()
+    rval_set: set[int] = set()
 
     nodes_pop: Callable[[], T]
     if bfs:
@@ -1139,7 +1137,7 @@ def clone(
     copy_inputs: bool = True,
     copy_orphans: Optional[bool] = None,
     clone_inner_graphs: bool = False,
-) -> Tuple[List[Variable], List[Variable]]:
+) -> tuple[list[Variable], list[Variable]]:
     r"""Copies the sub-graph contained between inputs and outputs.
 
     Parameters
@@ -1185,7 +1183,7 @@ def clone(
 
 def clone_node_and_cache(
     node: Apply,
-    clone_d: Dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]],
+    clone_d: dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]],
     clone_inner_graphs=False,
     **kwargs,
 ) -> Optional[Apply]:
@@ -1208,7 +1206,7 @@ def clone_node_and_cache(
     # Use a cached `Op` clone when available
     new_op: Optional["Op"] = cast(Optional["Op"], clone_d.get(node.op))
 
-    cloned_inputs: List[Variable] = [cast(Variable, clone_d[i]) for i in node.inputs]
+    cloned_inputs: list[Variable] = [cast(Variable, clone_d[i]) for i in node.inputs]
 
     new_node = node.clone_with_new_inputs(
         cloned_inputs,
@@ -1241,11 +1239,11 @@ def clone_get_equiv(
     copy_inputs: bool = True,
     copy_orphans: bool = True,
     memo: Optional[
-        Dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]]
+        dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]]
     ] = None,
     clone_inner_graphs: bool = False,
     **kwargs,
-) -> Dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]]:
+) -> dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]]:
     r"""Clone the graph between `inputs` and `outputs` and return a map of the cloned objects.
 
     This function works by recursively cloning inputs and rebuilding a directed
@@ -1316,13 +1314,13 @@ def clone_get_equiv(
 
 def general_toposort(
     outputs: Iterable[T],
-    deps: Callable[[T], Union[OrderedSet, List[T]]],
+    deps: Callable[[T], Union[OrderedSet, list[T]]],
     compute_deps_cache: Optional[
-        Callable[[T], Optional[Union[OrderedSet, List[T]]]]
+        Callable[[T], Optional[Union[OrderedSet, list[T]]]]
     ] = None,
-    deps_cache: Optional[Dict[T, List[T]]] = None,
-    clients: Optional[Dict[T, List[T]]] = None,
-) -> List[T]:
+    deps_cache: Optional[dict[T, list[T]]] = None,
+    clients: Optional[dict[T, list[T]]] = None,
+) -> list[T]:
     """Perform a topological sort of all nodes starting from a given node.
 
     Parameters
@@ -1382,12 +1380,12 @@ def general_toposort(
     if deps_cache is None:
         raise ValueError("deps_cache cannot be None")
 
-    search_res: List[NodeAndChildren] = cast(
-        List[NodeAndChildren],
+    search_res: list[NodeAndChildren] = cast(
+        list[NodeAndChildren],
         list(walk(outputs, _compute_deps_cache, bfs=False, return_children=True)),
     )
 
-    _clients: Dict[T, List[T]] = {}
+    _clients: dict[T, list[T]] = {}
     sources: Deque[T] = deque()
     search_res_len: int = 0
     for snode, children in search_res:
@@ -1401,8 +1399,8 @@ def general_toposort(
     if clients is not None:
         clients.update(_clients)
 
-    rset: Set[T] = set()
-    rlist: List[T] = []
+    rset: set[T] = set()
+    rlist: list[T] = []
     while sources:
         node: T = sources.popleft()
         if node not in rset:
@@ -1423,9 +1421,9 @@ def general_toposort(
 def io_toposort(
     inputs: Iterable[Variable],
     outputs: Reversible[Variable],
-    orderings: Optional[Dict[Apply, List[Apply]]] = None,
-    clients: Optional[Dict[Variable, List[Variable]]] = None,
-) -> List[Apply]:
+    orderings: Optional[dict[Apply, list[Apply]]] = None,
+    clients: Optional[dict[Variable, list[Variable]]] = None,
+) -> list[Apply]:
     """Perform topological sort from input and output nodes.
 
     Parameters
@@ -1466,7 +1464,7 @@ def io_toposort(
     compute_deps = None
     compute_deps_cache = None
     iset = set(inputs)
-    deps_cache: Dict = {}
+    deps_cache: dict = {}
 
     if not orderings:  # ordering can be None or empty dict
         # Specialized function that is faster when no ordering.
@@ -1597,11 +1595,11 @@ def op_as_string(
 
 
 def as_string(
-    inputs: List[Variable],
-    outputs: List[Variable],
+    inputs: list[Variable],
+    outputs: list[Variable],
     leaf_formatter=default_leaf_formatter,
     node_formatter=default_node_formatter,
-) -> List[str]:
+) -> list[str]:
     r"""Returns a string representation of the subgraph between `inputs` and `outputs`.
 
     Parameters
@@ -1649,7 +1647,7 @@ def as_string(
             else:
                 seen.add(input.owner)
     multi_list = list(multi)
-    done: Set = set()
+    done: set = set()
 
     def multi_index(x):
         return multi_list.index(x) + 1
@@ -1677,7 +1675,7 @@ def as_string(
     return [describe(output) for output in outputs]
 
 
-def view_roots(node: Variable) -> List[Variable]:
+def view_roots(node: Variable) -> list[Variable]:
     """Return the leaves from a search through consecutive view-maps."""
     owner = node.owner
     if owner is not None:
@@ -1698,7 +1696,7 @@ def view_roots(node: Variable) -> List[Variable]:
 
 def list_of_nodes(
     inputs: Collection[Variable], outputs: Iterable[Variable]
-) -> List[Apply]:
+) -> list[Apply]:
     r"""Return the `Apply` nodes of the graph between `inputs` and `outputs`.
 
     Parameters
@@ -1710,7 +1708,7 @@ def list_of_nodes(
 
     """
 
-    def expand(o: Apply) -> List[Apply]:
+    def expand(o: Apply) -> list[Apply]:
         return [
             inp.owner
             for inp in o.inputs
@@ -1786,10 +1784,10 @@ def variable_depends_on(
 
 
 def equal_computations(
-    xs: List[Union[np.ndarray, Variable]],
-    ys: List[Union[np.ndarray, Variable]],
-    in_xs: Optional[List[Variable]] = None,
-    in_ys: Optional[List[Variable]] = None,
+    xs: list[Union[np.ndarray, Variable]],
+    ys: list[Union[np.ndarray, Variable]],
+    in_xs: Optional[list[Variable]] = None,
+    in_ys: Optional[list[Variable]] = None,
 ) -> bool:
     """Checks if PyTensor graphs represent the same computations.
 
@@ -1852,7 +1850,7 @@ def equal_computations(
             return False
 
     common = set(zip(in_xs, in_ys))
-    different: Set[Tuple[Variable, Variable]] = set()
+    different: set[tuple[Variable, Variable]] = set()
     for dx, dy in zip(xs, ys):
         assert isinstance(dx, Variable)
         # We checked above that both dx and dy have an owner or not
@@ -1952,7 +1950,7 @@ def equal_computations(
 
 def get_var_by_name(
     graphs: Iterable[Variable], target_var_id: str, ids: str = "CHAR"
-) -> Tuple[Variable, ...]:
+) -> tuple[Variable, ...]:
     r"""Get variables in a graph using their names.
 
     Parameters
@@ -1970,7 +1968,7 @@ def get_var_by_name(
     """
     from pytensor.graph.op import HasInnerGraph
 
-    def expand(r) -> Optional[List[Variable]]:
+    def expand(r) -> Optional[list[Variable]]:
         if r.owner:
             res = list(r.owner.inputs)
 
@@ -1979,7 +1977,7 @@ def get_var_by_name(
 
             return res
 
-    results: Tuple[Variable, ...] = ()
+    results: tuple[Variable, ...] = ()
     for var in walk(graphs, expand, False):
         var = cast(Variable, var)
         if target_var_id == var.name or target_var_id == var.auto_name:

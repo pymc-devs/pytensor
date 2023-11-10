@@ -1,7 +1,8 @@
 """Symbolic tensor types and constructor functions."""
 
+from collections.abc import Sequence
 from functools import singledispatch
-from typing import TYPE_CHECKING, Any, Callable, NoReturn, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Any, Callable, NoReturn, Optional, Union
 
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.op import Op

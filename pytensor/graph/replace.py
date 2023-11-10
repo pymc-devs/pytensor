@@ -1,5 +1,6 @@
+from collections.abc import Iterable, Mapping, Sequence
 from functools import partial, singledispatch
-from typing import Iterable, Mapping, Optional, Sequence, Union, cast, overload
+from typing import Optional, Union, cast, overload
 
 from pytensor.graph.basic import Apply, Constant, Variable, truncated_graph_inputs
 from pytensor.graph.fg import FunctionGraph

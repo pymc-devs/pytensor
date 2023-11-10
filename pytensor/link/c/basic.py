@@ -7,7 +7,7 @@ import sys
 from collections import defaultdict
 from copy import copy
 from io import StringIO
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
 
@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 _logger = logging.getLogger("pytensor.link.c.basic")
 
 
-def get_module_cache(init_args: Optional[Dict[str, Any]] = None) -> "ModuleCache":
+def get_module_cache(init_args: Optional[dict[str, Any]] = None) -> "ModuleCache":
     """
 
     Parameters
@@ -1810,7 +1810,7 @@ class OpWiseCLinker(LocalLinker):
 
     """
 
-    __cache__: Dict = {}
+    __cache__: dict = {}
 
     def __init__(
         self, fallback_on_perform=True, allow_gc=None, nice_errors=True, schedule=None

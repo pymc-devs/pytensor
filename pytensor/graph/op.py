@@ -2,16 +2,13 @@ import copy
 import sys
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    Dict,
-    List,
     Optional,
     Protocol,
-    Sequence,
-    Tuple,
     TypeVar,
     Union,
     cast,
@@ -35,14 +32,14 @@ if TYPE_CHECKING:
     from pytensor.graph.fg import FunctionGraph
     from pytensor.graph.type import Type
 
-StorageCellType = List[Optional[Any]]
-StorageMapType = Dict[Variable, StorageCellType]
-ComputeMapType = Dict[Variable, List[bool]]
-InputStorageType = List[StorageCellType]
-OutputStorageType = List[StorageCellType]
-ParamsInputType = Optional[Tuple[Any, ...]]
+StorageCellType = list[Optional[Any]]
+StorageMapType = dict[Variable, StorageCellType]
+ComputeMapType = dict[Variable, list[bool]]
+InputStorageType = list[StorageCellType]
+OutputStorageType = list[StorageCellType]
+ParamsInputType = Optional[tuple[Any, ...]]
 PerformMethodType = Callable[
-    [Apply, List[Any], OutputStorageType, ParamsInputType], None
+    [Apply, list[Any], OutputStorageType, ParamsInputType], None
 ]
 BasicThunkType = Callable[[], None]
 ThunkCallableType = Callable[
@@ -53,8 +50,8 @@ C = TypeVar("C", bound=Callable)
 
 
 class ThunkType(Protocol[C]):
-    inputs: List[List[Optional[List[Any]]]]
-    outputs: List[List[Optional[List[Any]]]]
+    inputs: list[list[Optional[list[Any]]]]
+    outputs: list[list[Optional[list[Any]]]]
     lazy: bool
     __call__: C
     perform: PerformMethodType
@@ -173,7 +170,7 @@ class Op(MetaObject):
 
     """
 
-    view_map: Dict[int, List[int]] = {}
+    view_map: dict[int, list[int]] = {}
     """
     A ``dict`` that maps output indices to the input indices of which they are
     a view.
@@ -188,7 +185,7 @@ class Op(MetaObject):
 
     """
 
-    destroy_map: Dict[int, List[int]] = {}
+    destroy_map: dict[int, list[int]] = {}
     """
     A ``dict`` that maps output indices to the input indices upon which they
     operate in-place.
@@ -258,7 +255,7 @@ class Op(MetaObject):
             )
         return Apply(self, inputs, [o() for o in self.otypes])
 
-    def __call__(self, *inputs: Any, **kwargs) -> Union[Variable, List[Variable]]:
+    def __call__(self, *inputs: Any, **kwargs) -> Union[Variable, list[Variable]]:
         r"""Construct an `Apply` node using :meth:`Op.make_node` and return its outputs.
 
         This method is just a wrapper around :meth:`Op.make_node`.
@@ -328,7 +325,7 @@ class Op(MetaObject):
 
     def grad(
         self, inputs: Sequence[Variable], output_grads: Sequence[Variable]
-    ) -> List[Variable]:
+    ) -> list[Variable]:
         r"""Construct a graph for the gradient with respect to each input variable.
 
         Each returned `Variable` represents the gradient with respect to that
@@ -376,7 +373,7 @@ class Op(MetaObject):
         inputs: Sequence[Variable],
         outputs: Sequence[Variable],
         output_grads: Sequence[Variable],
-    ) -> List[Variable]:
+    ) -> list[Variable]:
         r"""Construct a graph for the L-operator.
 
         The L-operator computes a row vector times the Jacobian.
@@ -401,8 +398,8 @@ class Op(MetaObject):
         return self.grad(inputs, output_grads)
 
     def R_op(
-        self, inputs: List[Variable], eval_points: Union[Variable, List[Variable]]
-    ) -> List[Variable]:
+        self, inputs: list[Variable], eval_points: Union[Variable, list[Variable]]
+    ) -> list[Variable]:
         r"""Construct a graph for the R-operator.
 
         This method is primarily used by `Rop`.
@@ -525,7 +522,7 @@ class Op(MetaObject):
         node: Apply,
         storage_map: StorageMapType,
         compute_map: ComputeMapType,
-        no_recycling: List[Variable],
+        no_recycling: list[Variable],
         debug: bool = False,
     ) -> ThunkType:
         """Make a Python thunk.
@@ -581,7 +578,7 @@ class Op(MetaObject):
         node: Apply,
         storage_map: StorageMapType,
         compute_map: ComputeMapType,
-        no_recycling: List[Variable],
+        no_recycling: list[Variable],
         impl: Optional[str] = None,
     ) -> ThunkType:
         r"""Create a thunk.
@@ -660,12 +657,12 @@ class HasInnerGraph(ABC):
 
     @property
     @abstractmethod
-    def inner_inputs(self) -> List[Variable]:
+    def inner_inputs(self) -> list[Variable]:
         """The inner function's inputs."""
 
     @property
     @abstractmethod
-    def inner_outputs(self) -> List[Variable]:
+    def inner_outputs(self) -> list[Variable]:
         """The inner function's outputs."""
 
     @abstractmethod
@@ -721,7 +718,7 @@ def missing_test_message(msg: str) -> None:
         assert action in ("ignore", "off")
 
 
-def get_test_values(*args: Variable) -> Union[Any, List[Any]]:
+def get_test_values(*args: Variable) -> Union[Any, list[Any]]:
     r"""Get test values for multiple `Variable`\s.
 
     Intended use:

@@ -1,8 +1,9 @@
 """Define new Ops from existing Ops"""
 from collections import OrderedDict
+from collections.abc import Sequence
 from copy import copy
 from functools import partial
-from typing import Dict, List, Optional, Sequence, Tuple, cast
+from typing import Optional, cast
 
 import pytensor.tensor as at
 from pytensor import function
@@ -83,11 +84,11 @@ def infer_shape(outs, inputs, input_shapes):
 
 def construct_nominal_fgraph(
     inputs: Sequence[Variable], outputs: Sequence[Variable]
-) -> Tuple[
+) -> tuple[
     FunctionGraph,
     Sequence[Variable],
-    Dict[Variable, Variable],
-    Dict[Variable, Variable],
+    dict[Variable, Variable],
+    dict[Variable, Variable],
 ]:
     """Construct an inner-`FunctionGraph` with ordered nominal inputs."""
     dummy_inputs = []
@@ -306,13 +307,13 @@ class OpFromGraph(Op, HasInnerGraph):
 
     def __init__(
         self,
-        inputs: List[Variable],
-        outputs: List[Variable],
+        inputs: list[Variable],
+        outputs: list[Variable],
         inline: bool = False,
         lop_overrides: str = "default",
         grad_overrides: str = "default",
         rop_overrides: str = "default",
-        connection_pattern: Optional[List[List[bool]]] = None,
+        connection_pattern: Optional[list[list[bool]]] = None,
         name: Optional[str] = None,
         **kwargs,
     ):

@@ -20,17 +20,7 @@ import textwrap
 import time
 import warnings
 from io import BytesIO, StringIO
-from typing import (
-    TYPE_CHECKING,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Protocol,
-    Set,
-    Tuple,
-    cast,
-)
+from typing import TYPE_CHECKING, Callable, Optional, Protocol, cast
 
 import numpy as np
 from setuptools._distutils.sysconfig import (
@@ -61,12 +51,12 @@ if TYPE_CHECKING:
 
 
 class StdLibDirsAndLibsType(Protocol):
-    data: Optional[Tuple[List[str], ...]]
-    __call__: Callable[[], Optional[Tuple[List[str], ...]]]
+    data: Optional[tuple[list[str], ...]]
+    __call__: Callable[[], Optional[tuple[list[str], ...]]]
 
 
 def is_StdLibDirsAndLibsType(
-    fn: Callable[[], Optional[Tuple[List[str], ...]]]
+    fn: Callable[[], Optional[tuple[list[str], ...]]]
 ) -> StdLibDirsAndLibsType:
     return cast(StdLibDirsAndLibsType, fn)
 
@@ -684,33 +674,33 @@ class ModuleCache:
     The working directory that is managed by this interface.
 
     """
-    module_from_name: Dict = {}
+    module_from_name: dict = {}
     """
     Maps a module filename to the loaded module object.
 
     """
-    entry_from_key: Dict = {}
+    entry_from_key: dict = {}
     """
     Maps keys to the filename of a ``.so/.pyd``.
 
     """
-    similar_keys: Dict = {}
+    similar_keys: dict = {}
     """
     Maps a part-of-key to all keys that share this same part.
 
     """
-    module_hash_to_key_data: Dict = {}
+    module_hash_to_key_data: dict = {}
     """
     Maps a module hash to its corresponding `KeyData` object.
 
     """
-    stats: List = []
+    stats: list = []
     """
     A list with counters for the number of hits, loads, compiles issued by
     `ModuleCache.module_from_key`.
 
     """
-    loaded_key_pkl: Set = set()
+    loaded_key_pkl: set = set()
     """
     Set of all ``key.pkl`` files that have been loaded.
 
@@ -1694,7 +1684,7 @@ def std_include_dirs():
 
 
 @is_StdLibDirsAndLibsType
-def std_lib_dirs_and_libs() -> Optional[Tuple[List[str], ...]]:
+def std_lib_dirs_and_libs() -> Optional[tuple[list[str], ...]]:
     # We cache the results as on Windows, this trigger file access and
     # this method is called many times.
     if std_lib_dirs_and_libs.data is not None:
@@ -2431,10 +2421,10 @@ class GCC_compiler(Compiler):
         )
 
     @staticmethod
-    def patch_ldflags(flag_list: List[str]) -> List[str]:
+    def patch_ldflags(flag_list: list[str]) -> list[str]:
         lib_dirs = [flag[2:].lstrip() for flag in flag_list if flag.startswith("-L")]
-        flag_idxs: List[int] = []
-        libs: List[str] = []
+        flag_idxs: list[int] = []
+        libs: list[str] = []
         for i, flag in enumerate(flag_list):
             if flag.startswith("-l"):
                 flag_idxs.append(i)
@@ -2447,7 +2437,7 @@ class GCC_compiler(Compiler):
         return flag_list
 
     @staticmethod
-    def linking_patch(lib_dirs: List[str], libs: List[str]) -> List[str]:
+    def linking_patch(lib_dirs: list[str], libs: list[str]) -> list[str]:
         if sys.platform != "win32":
             return [f"-l{l}" for l in libs]
         else:

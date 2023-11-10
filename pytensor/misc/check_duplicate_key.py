@@ -1,7 +1,6 @@
 import os
 import pickle
 import sys
-from typing import Dict
 
 from pytensor.configdefaults import config
 
@@ -16,8 +15,8 @@ if len(sys.argv) > 1:
 else:
     dirs = os.listdir(config.compiledir)
     dirs = [os.path.join(config.compiledir, d) for d in dirs]
-keys: Dict = {}  # key -> nb seen
-mods: Dict = {}
+keys: dict = {}  # key -> nb seen
+mods: dict = {}
 for dir in dirs:
     key = None
     try:
@@ -48,12 +47,12 @@ if DISPLAY_DUPLICATE_KEYS:
         if v > 1:
             print("Duplicate key (%i copies): %s" % (v, pickle.loads(k)))
 
-nbs_keys: Dict = {}  # nb seen -> now many key
+nbs_keys: dict = {}  # nb seen -> now many key
 for val in keys.values():
     nbs_keys.setdefault(val, 0)
     nbs_keys[val] += 1
 
-nbs_mod: Dict = {}  # nb seen -> how many key
+nbs_mod: dict = {}  # nb seen -> how many key
 nbs_mod_to_key = {}  # nb seen -> keys
 more_than_one = 0
 for mod, kk in mods.items():

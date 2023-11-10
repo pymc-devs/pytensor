@@ -1,6 +1,5 @@
 import warnings
 from functools import partial
-from typing import Tuple
 
 import numpy as np
 
@@ -264,7 +263,7 @@ class Eig(Op):
 
     """
 
-    __props__: Tuple[str, ...] = ()
+    __props__: tuple[str, ...] = ()
     gufunc_signature = "(m,m)->(m),(m,m)"
     gufunc_spec = ("numpy.linalg.eig", 1, 2)
 

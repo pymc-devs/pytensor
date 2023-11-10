@@ -11,8 +11,9 @@ it picks each entry of a matrix according to the condition) while `ifelse`
 is a global operation with a scalar condition.
 """
 
+from collections.abc import Sequence
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 import numpy as np
 

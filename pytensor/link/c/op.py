@@ -2,21 +2,9 @@ import inspect
 import os
 import re
 import warnings
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    ClassVar,
-    Collection,
-    Dict,
-    List,
-    Optional,
-    Pattern,
-    Set,
-    Tuple,
-    Union,
-    cast,
-)
+from collections.abc import Collection
+from re import Pattern
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Optional, Union, cast
 
 import numpy as np
 
@@ -164,7 +152,7 @@ class OpenMPOp(COp):
             openmp = config.openmp
         self.openmp = openmp
 
-    def __setstate__(self, d: Dict):
+    def __setstate__(self, d: dict):
         self.__dict__.update(d)
         # If we unpickle old op
         if not hasattr(self, "openmp"):
@@ -240,7 +228,7 @@ def lquote_macro(txt: str) -> str:
     return "\n".join(res)
 
 
-def get_sub_macros(sub: Dict[str, str]) -> Tuple[str, str]:
+def get_sub_macros(sub: dict[str, str]) -> tuple[str, str]:
     define_macros = []
     undef_macros = []
     define_macros.append(f"#define FAIL {lquote_macro(sub['fail'])}")
@@ -253,8 +241,8 @@ def get_sub_macros(sub: Dict[str, str]) -> Tuple[str, str]:
 
 
 def get_io_macros(
-    inputs: List[str], outputs: List[str]
-) -> Union[Tuple[List[str]], Tuple[str, str]]:
+    inputs: list[str], outputs: list[str]
+) -> Union[tuple[list[str]], tuple[str, str]]:
     define_macros = []
     undef_macros = []
 
@@ -285,7 +273,7 @@ class ExternalCOp(COp):
         r"^PYTENSOR_(APPLY|SUPPORT)_CODE_SECTION$", re.MULTILINE
     )
     # This is the set of allowed markers
-    SECTIONS: ClassVar[Set[str]] = {
+    SECTIONS: ClassVar[set[str]] = {
         "init_code",
         "init_code_apply",
         "init_code_struct",
@@ -313,7 +301,7 @@ class ExternalCOp(COp):
         return f
 
     def __init__(
-        self, func_files: Union[str, List[str]], func_name: Optional[str] = None
+        self, func_files: Union[str, list[str]], func_name: Optional[str] = None
     ):
         """
         Sections are loaded from files in order with sections in later
@@ -325,11 +313,11 @@ class ExternalCOp(COp):
         else:
             self.func_files = func_files
 
-        self.func_codes: List[str] = []
+        self.func_codes: list[str] = []
         # Keep the original name. If we reload old pickle, we want to
         # find the new path and new version of the file in PyTensor.
         self.func_name = func_name
-        self.code_sections: Dict[str, str] = dict()
+        self.code_sections: dict[str, str] = dict()
 
         self.load_c_code(self.func_files)
 
@@ -348,7 +336,7 @@ class ExternalCOp(COp):
                     "Cannot have an `op_code_cleanup` section and specify `func_name`"
                 )
 
-    def load_c_code(self, func_files: List[str]) -> None:
+    def load_c_code(self, func_files: list[str]) -> None:
         """Loads the C code to perform the `Op`."""
         func_files = [self.get_path(f) for f in func_files]
         for func_file in func_files:
@@ -414,7 +402,7 @@ class ExternalCOp(COp):
                     f"No valid section marker was found in file {func_files[i]}"
                 )
 
-    def __get_op_params(self) -> List[Tuple[str, Any]]:
+    def __get_op_params(self) -> list[tuple[str, Any]]:
         """Construct name, value pairs that will be turned into macros for use within the `Op`'s code.
 
         The names must be strings that are not a C keyword and the
@@ -430,7 +418,7 @@ class ExternalCOp(COp):
            associated to ``key``.
 
         """
-        params: List[Tuple[str, Any]] = []
+        params: list[tuple[str, Any]] = []
         if isinstance(self.params_type, ParamsType):
             wrapper = self.params_type
             params.append(("PARAMS_TYPE", wrapper.name))
@@ -503,7 +491,7 @@ class ExternalCOp(COp):
         else:
             return super().c_cleanup_code_struct(node, name)
 
-    def format_c_function_args(self, inp: List[str], out: List[str]) -> str:
+    def format_c_function_args(self, inp: list[str], out: list[str]) -> str:
         """Generate a string containing the arguments sent to the external C function.
 
         The result will have the format: ``"input0, input1, input2, &output0, &output1"``.
@@ -532,7 +520,7 @@ class ExternalCOp(COp):
 
     def get_c_macros(
         self, node: Apply, name: str, check_input: Optional[bool] = None
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         "Construct a pair of C ``#define`` and ``#undef`` code strings."
         define_template = "#define %s %s"
         undef_template = "#undef %s"

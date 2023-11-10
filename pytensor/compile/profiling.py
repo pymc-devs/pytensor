@@ -16,7 +16,7 @@ import sys
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 import numpy as np
 
@@ -48,7 +48,7 @@ total_fct_exec_time: float = 0.0
 total_graph_rewrite_time: float = 0.0
 total_time_linker: float = 0.0
 
-_atexit_print_list: List["ProfileStats"] = []
+_atexit_print_list: list["ProfileStats"] = []
 _atexit_registered: bool = False
 
 
@@ -234,11 +234,11 @@ class ProfileStats:
     # Total time spent in Function.vm.__call__
     #
 
-    apply_time: Optional[Dict[Union["FunctionGraph", Variable], float]] = None
+    apply_time: Optional[dict[Union["FunctionGraph", Variable], float]] = None
 
-    apply_callcount: Optional[Dict[Union["FunctionGraph", Variable], int]] = None
+    apply_callcount: Optional[dict[Union["FunctionGraph", Variable], int]] = None
 
-    apply_cimpl: Optional[Dict[Apply, bool]] = None
+    apply_cimpl: Optional[dict[Apply, bool]] = None
     # dict from node -> bool (1 if c, 0 if py)
     #
 
@@ -246,15 +246,15 @@ class ProfileStats:
     # pretty string to print in summary, to identify this output
     #
 
-    variable_shape: Dict[Variable, Any] = {}
+    variable_shape: dict[Variable, Any] = {}
     # Variable -> shapes
     #
 
-    variable_strides: Dict[Variable, Any] = {}
+    variable_strides: dict[Variable, Any] = {}
     # Variable -> strides
     #
 
-    variable_offset: Dict[Variable, Any] = {}
+    variable_offset: dict[Variable, Any] = {}
     # Variable -> offset
     #
 
@@ -274,7 +274,7 @@ class ProfileStats:
 
     linker_node_make_thunks: float = 0.0
 
-    linker_make_thunk_time: Dict = {}
+    linker_make_thunk_time: dict = {}
 
     line_width = config.profiling__output_line_width
 

@@ -1,20 +1,8 @@
 """A container for specifying and manipulating a graph with distinct inputs and outputs."""
 import time
 from collections import OrderedDict
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Dict,
-    Iterable,
-    List,
-    Literal,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-    cast,
-)
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
 
 import pytensor
 from pytensor.configdefaults import config
@@ -35,7 +23,7 @@ if TYPE_CHECKING:
     from pytensor.graph.op import Op
 
 ApplyOrOutput = Union[Apply, Literal["output"]]
-ClientType = Tuple[ApplyOrOutput, int]
+ClientType = tuple[ApplyOrOutput, int]
 
 
 class FunctionGraph(MetaObject):
@@ -76,7 +64,7 @@ class FunctionGraph(MetaObject):
         outputs: Optional[Sequence[Variable]] = None,
         features: Optional[Sequence[Feature]] = None,
         clone: bool = True,
-        update_mapping: Optional[Dict[Variable, Variable]] = None,
+        update_mapping: Optional[dict[Variable, Variable]] = None,
         **clone_kwds,
     ):
         """
@@ -117,25 +105,25 @@ class FunctionGraph(MetaObject):
             inputs = [cast(Variable, _memo[i]) for i in inputs]
 
         self.execute_callbacks_time: float = 0.0
-        self.execute_callbacks_times: Dict[Feature, float] = {}
+        self.execute_callbacks_times: dict[Feature, float] = {}
 
         if features is None:
             features = []
 
-        self._features: List[Feature] = []
+        self._features: list[Feature] = []
 
         # All apply nodes in the subgraph defined by inputs and
         # outputs are cached in this field
-        self.apply_nodes: Set[Apply] = set()
+        self.apply_nodes: set[Apply] = set()
 
         # It includes inputs, outputs, and all intermediate variables
         # connecting the inputs and outputs.  It also contains irrelevant
         # outputs the nodes in `self.apply_nodes`.
-        self.variables: Set[Variable] = set()
+        self.variables: set[Variable] = set()
 
-        self.inputs: List[Variable] = []
-        self.outputs: List[Variable] = []
-        self.clients: Dict[Variable, List[ClientType]] = {}
+        self.inputs: list[Variable] = []
+        self.outputs: list[Variable] = []
+        self.clients: dict[Variable, list[ClientType]] = {}
 
         for f in features:
             self.attach_feature(f)
@@ -191,7 +179,7 @@ class FunctionGraph(MetaObject):
         """
         self.clients.setdefault(var, [])
 
-    def get_clients(self, var: Variable) -> List[ClientType]:
+    def get_clients(self, var: Variable) -> list[ClientType]:
         """Return a list of all the `(node, i)` pairs such that `node.inputs[i]` is `var`."""
         return self.clients[var]
 
@@ -521,7 +509,7 @@ class FunctionGraph(MetaObject):
                 node, i, new_var, reason=reason, import_missing=import_missing
             )
 
-    def replace_all(self, pairs: Iterable[Tuple[Variable, Variable]], **kwargs) -> None:
+    def replace_all(self, pairs: Iterable[tuple[Variable, Variable]], **kwargs) -> None:
         """Replace variables in the `FunctionGraph` according to ``(var, new_var)`` pairs in a list."""
         for var, new_var in pairs:
             self.replace(var, new_var, **kwargs)
@@ -604,7 +592,7 @@ class FunctionGraph(MetaObject):
         # Remove all the arrows pointing to this `node`, and any orphaned
         # variables created by removing those arrows
         for inp_idx, inp in enumerate(node.inputs):
-            inp_clients: List[ClientType] = self.clients.get(inp, [])
+            inp_clients: list[ClientType] = self.clients.get(inp, [])
 
             arrow = (node, inp_idx)
 
@@ -728,7 +716,7 @@ class FunctionGraph(MetaObject):
             self.execute_callbacks_times[feature] += time.perf_counter() - tf0
         self.execute_callbacks_time += time.perf_counter() - t0
 
-    def collect_callbacks(self, name: str, *args) -> Dict[Feature, Any]:
+    def collect_callbacks(self, name: str, *args) -> dict[Feature, Any]:
         """Collects callbacks
 
         Returns a dictionary d such that ``d[feature] == getattr(feature, name)(*args)``
@@ -743,7 +731,7 @@ class FunctionGraph(MetaObject):
             d[feature] = fn(*args)
         return d
 
-    def toposort(self) -> List[Apply]:
+    def toposort(self) -> list[Apply]:
         r"""Return a toposorted list of the nodes.
 
         Return an ordering of the graph's :class:`Apply` nodes such that:
@@ -759,7 +747,7 @@ class FunctionGraph(MetaObject):
 
         return io_toposort(self.inputs, self.outputs, self.orderings())
 
-    def orderings(self) -> Dict[Apply, List[Apply]]:
+    def orderings(self) -> dict[Apply, list[Apply]]:
         """Return a map of node to node evaluation dependencies.
 
         Each key node is mapped to a list of nodes that must be evaluated
@@ -777,7 +765,7 @@ class FunctionGraph(MetaObject):
 
         """
         assert isinstance(self._features, list)
-        all_orderings: List[OrderedDict] = []
+        all_orderings: list[OrderedDict] = []
 
         for feature in self._features:
             if hasattr(feature, "orderings"):
@@ -803,7 +791,7 @@ class FunctionGraph(MetaObject):
             return all_orderings[0].copy()
         else:
             # If there is more than 1 ordering, combine them.
-            ords: Dict[Apply, List[Apply]] = OrderedDict()
+            ords: dict[Apply, list[Apply]] = OrderedDict()
             for orderings in all_orderings:
                 for node, prereqs in orderings.items():
                     ords.setdefault(node, []).extend(prereqs)
@@ -867,9 +855,9 @@ class FunctionGraph(MetaObject):
 
     def clone_get_equiv(
         self, check_integrity: bool = True, attach_feature: bool = True, **kwargs
-    ) -> Tuple[
+    ) -> tuple[
         "FunctionGraph",
-        Dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]],
+        dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]],
     ]:
         """Clone the graph and return a ``dict`` that maps old nodes to new nodes.
 

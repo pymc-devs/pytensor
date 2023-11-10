@@ -11,11 +11,11 @@ import traceback
 import warnings
 from collections import UserList, defaultdict, deque
 from collections.abc import Iterable
+from collections.abc import Iterable as IterableType
+from collections.abc import Sequence
 from functools import _compose_mro, partial, reduce  # type: ignore
 from itertools import chain
-from typing import TYPE_CHECKING, Callable, Dict
-from typing import Iterable as IterableType
-from typing import List, Literal, Optional, Sequence, Tuple, Union, cast
+from typing import TYPE_CHECKING, Callable, Literal, Optional, Union, cast
 
 import pytensor
 from pytensor.configdefaults import config
@@ -47,13 +47,13 @@ RemoveKeyType = Literal["remove"]
 TransformOutputType = Union[
     bool,
     Sequence[Variable],
-    Dict[Union[Variable, Literal["remove"]], Union[Variable, Sequence[Variable]]],
+    dict[Union[Variable, Literal["remove"]], Union[Variable, Sequence[Variable]]],
 ]
 FailureCallbackType = Callable[
     [
         Exception,
         "NodeProcessingGraphRewriter",
-        List[Tuple[Variable, None]],
+        list[tuple[Variable, None]],
         "NodeRewriter",
         Apply,
     ],
@@ -1101,7 +1101,7 @@ class FromFunctionNodeRewriter(NodeRewriter):
 def node_rewriter(
     tracks: Optional[Sequence[Union[Op, type]]],
     inplace: bool = False,
-    requirements: Optional[Tuple[type, ...]] = (),
+    requirements: Optional[tuple[type, ...]] = (),
 ):
     r"""A decorator used to construct `FromFunctionNodeRewriter` instances.
 
@@ -1153,9 +1153,9 @@ class OpToRewriterTracker:
     r"""A container that maps `NodeRewriter`\s to `Op` instances and `Op`-type inheritance."""
 
     def __init__(self):
-        self.tracked_instances: Dict[Op, List[NodeRewriter]] = {}
-        self.tracked_types: Dict[type, List[NodeRewriter]] = {}
-        self.untracked_rewrites: List[NodeRewriter] = []
+        self.tracked_instances: dict[Op, list[NodeRewriter]] = {}
+        self.tracked_types: dict[type, list[NodeRewriter]] = {}
+        self.untracked_rewrites: list[NodeRewriter] = []
 
     def add_tracker(self, rw: NodeRewriter):
         """Add a `NodeRewriter` to be keyed by its `NodeRewriter.tracks` or applied generally."""
@@ -1170,7 +1170,7 @@ class OpToRewriterTracker:
                 else:
                     self.tracked_instances.setdefault(c, []).append(rw)
 
-    def _find_impl(self, cls) -> List[NodeRewriter]:
+    def _find_impl(self, cls) -> list[NodeRewriter]:
         r"""Returns the `NodeRewriter`\s that apply to `cls` based on inheritance.
 
         This based on `functools._find_impl`.
@@ -1184,7 +1184,7 @@ class OpToRewriterTracker:
         return matches
 
     @functools.lru_cache
-    def get_trackers(self, op: Op) -> List[NodeRewriter]:
+    def get_trackers(self, op: Op) -> list[NodeRewriter]:
         """Get all the rewrites applicable to `op`."""
         return (
             self._find_impl(type(op))
@@ -1250,10 +1250,10 @@ class SequentialNodeRewriter(NodeRewriter):
 
         self.profile = profile
         if self.profile:
-            self.time_rewrites: Dict[Rewriter, float] = {}
-            self.process_count: Dict[Rewriter, int] = {}
-            self.applied_true: Dict[Rewriter, int] = {}
-            self.node_created: Dict[Rewriter, int] = {}
+            self.time_rewrites: dict[Rewriter, float] = {}
+            self.process_count: dict[Rewriter, int] = {}
+            self.applied_true: dict[Rewriter, int] = {}
+            self.node_created: dict[Rewriter, int] = {}
 
         self.tracker = OpToRewriterTracker()
 
@@ -1577,7 +1577,7 @@ class PatternNodeRewriter(NodeRewriter):
         """
         from pytensor.graph.rewriting.unify import convert_strs_to_vars
 
-        var_map: Dict[str, "Var"] = {}
+        var_map: dict[str, "Var"] = {}
         self.in_pattern = convert_strs_to_vars(in_pattern, var_map=var_map)
         self.out_pattern = convert_strs_to_vars(out_pattern, var_map=var_map)
         self.values_eq_approx = values_eq_approx
@@ -1931,7 +1931,7 @@ class NodeProcessingGraphRewriter(GraphRewriter):
         if replacements is False or replacements is None:
             return False
         old_vars = node.outputs
-        remove: List[Variable] = []
+        remove: list[Variable] = []
         if isinstance(replacements, dict):
             if "remove" in replacements:
                 remove = list(cast(Sequence[Variable], replacements.pop("remove")))
@@ -2268,7 +2268,7 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
         super().__init__(
             None, ignore_newtrees=ignore_newtrees, failure_callback=failure_callback
         )
-        self.global_rewriters: List[GraphRewriter] = []
+        self.global_rewriters: list[GraphRewriter] = []
         self.tracks_on_change_inputs = tracks_on_change_inputs
 
         self.node_tracker = OpToRewriterTracker()
@@ -2860,9 +2860,9 @@ def pre_greedy_node_rewriter(
     def local_recursive_function(
         rewrite_list: Sequence[NodeRewriter],
         out: Variable,
-        rewritten_vars: Dict[Variable, Variable],
+        rewritten_vars: dict[Variable, Variable],
         depth: int,
-    ) -> Tuple[List[Variable], Dict[Variable, Variable]]:
+    ) -> tuple[list[Variable], dict[Variable, Variable]]:
         if not getattr(out, "owner", None):
             return [out], rewritten_vars
         node = out.owner

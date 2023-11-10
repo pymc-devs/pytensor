@@ -6,7 +6,7 @@ import logging
 import time
 import warnings
 from itertools import chain
-from typing import TYPE_CHECKING, List, Optional, Tuple, Type
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
@@ -170,13 +170,13 @@ class Supervisor(Feature):
 
 
 def std_fgraph(
-    input_specs: List[SymbolicInput],
-    output_specs: List[SymbolicOutput],
+    input_specs: list[SymbolicInput],
+    output_specs: list[SymbolicOutput],
     accept_inplace: bool = False,
     fgraph: Optional[FunctionGraph] = None,
-    features: List[Type[Feature]] = [PreserveVariableAttributes],
+    features: list[type[Feature]] = [PreserveVariableAttributes],
     force_clone=False,
-) -> Tuple[FunctionGraph, List[SymbolicOutput]]:
+) -> tuple[FunctionGraph, list[SymbolicOutput]]:
     """Make or set up `FunctionGraph` corresponding to the input specs and the output specs.
 
     Any `SymbolicInput` in the `input_specs`, if its `update` field is not

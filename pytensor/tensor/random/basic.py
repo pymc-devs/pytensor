@@ -1,6 +1,6 @@
 import abc
 import warnings
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 import numpy as np
 import scipy.stats as stats
@@ -612,7 +612,7 @@ class GumbelRV(ScipyRandomVariable):
         self,
         loc: Union[np.ndarray, float],
         scale: Union[np.ndarray, float] = 1.0,
-        size: Optional[Union[List[int], int]] = None,
+        size: Optional[Union[list[int], int]] = None,
         **kwargs,
     ) -> RandomVariable:
         r"""Draw samples from a gumbel distribution.
@@ -643,7 +643,7 @@ class GumbelRV(ScipyRandomVariable):
         rng: Union[np.random.Generator, np.random.RandomState],
         loc: Union[np.ndarray, float],
         scale: Union[np.ndarray, float],
-        size: Optional[Union[List[int], int]],
+        size: Optional[Union[list[int], int]],
     ) -> np.ndarray:
         return stats.gumbel_r.rvs(loc=loc, scale=scale, size=size, random_state=rng)
 

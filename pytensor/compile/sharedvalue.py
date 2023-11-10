@@ -3,7 +3,7 @@
 import copy
 from contextlib import contextmanager
 from functools import singledispatch
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from pytensor.graph.basic import Variable
 from pytensor.graph.utils import add_tag_trace
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from pytensor.graph.type import Type
 
 
-__SHARED_CONTEXT__: Optional[List[Variable]] = None
+__SHARED_CONTEXT__: Optional[list[Variable]] = None
 
 
 @contextmanager

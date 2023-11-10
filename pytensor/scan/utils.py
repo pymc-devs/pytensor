@@ -4,8 +4,9 @@ import copy
 import dataclasses
 import logging
 from collections import OrderedDict, namedtuple
+from collections.abc import Sequence
 from itertools import chain
-from typing import TYPE_CHECKING, Callable, List, Optional, Sequence, Set, Tuple, Union
+from typing import TYPE_CHECKING, Callable, Optional, Union
 from typing import cast as type_cast
 
 import numpy as np
@@ -669,7 +670,7 @@ class ScanArgs:
         n_mit_mot_outs = info.n_mit_mot_outs
         self.outer_out_mit_mot = list(outer_outputs[p : p + n_mit_mot])
         iomm = list(inner_outputs[q : q + n_mit_mot_outs])
-        self.inner_out_mit_mot: Tuple[List[Variable], ...] = ()
+        self.inner_out_mit_mot: tuple[list[Variable], ...] = ()
         qq = 0
         for sl in self.mit_mot_out_slices:
             self.inner_out_mit_mot += (iomm[qq : qq + len(sl)],)
@@ -916,8 +917,8 @@ class ScanArgs:
         return field_info
 
     def get_dependent_nodes(
-        self, i: Variable, seen: Optional[Set[Variable]] = None
-    ) -> Set[Variable]:
+        self, i: Variable, seen: Optional[set[Variable]] = None
+    ) -> set[Variable]:
         if seen is None:
             seen = {i}
         else:
@@ -990,13 +991,13 @@ class ScanArgs:
 
     def remove_from_fields(
         self, i: Variable, rm_dependents: bool = True
-    ) -> List[Tuple[Variable, Optional[FieldInfo]]]:
+    ) -> list[tuple[Variable, Optional[FieldInfo]]]:
         if rm_dependents:
             vars_to_remove = self.get_dependent_nodes(i) | {i}
         else:
             vars_to_remove = {i}
 
-        rm_info: List[Tuple[Variable, Optional[FieldInfo]]] = []
+        rm_info: list[tuple[Variable, Optional[FieldInfo]]] = []
         for v in vars_to_remove:
             dependent_rm_info = self._remove_from_fields(v)
             rm_info.append((v, dependent_rm_info))

@@ -1,7 +1,8 @@
+from collections.abc import Sequence
 from functools import wraps
 from itertools import zip_longest
 from types import ModuleType
-from typing import TYPE_CHECKING, Literal, Optional, Sequence, Tuple, Union
+from typing import TYPE_CHECKING, Literal, Optional, Union
 
 import numpy as np
 
@@ -291,9 +292,9 @@ def supp_shape_from_ref_param_shape(
     *,
     ndim_supp: int,
     dist_params: Sequence[Variable],
-    param_shapes: Optional[Sequence[Tuple[ScalarVariable, ...]]] = None,
+    param_shapes: Optional[Sequence[tuple[ScalarVariable, ...]]] = None,
     ref_param_idx: int,
-) -> Union[TensorVariable, Tuple[ScalarVariable, ...]]:
+) -> Union[TensorVariable, tuple[ScalarVariable, ...]]:
     """Extract the support shape of a multivariate `RandomVariable` from the shape of a reference parameter.
 
     Several multivariate `RandomVariable`s have a support shape determined by the last dimensions of a parameter.

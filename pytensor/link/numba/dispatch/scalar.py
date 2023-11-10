@@ -1,5 +1,4 @@
 import math
-from typing import List
 
 import numpy as np
 
@@ -167,7 +166,7 @@ def numba_funcify_Switch(op, node, **kwargs):
     return numba_basic.global_numba_func(switch)
 
 
-def binary_to_nary_func(inputs: List[Variable], binary_op_name: str, binary_op: str):
+def binary_to_nary_func(inputs: list[Variable], binary_op_name: str, binary_op: str):
     """Create a Numba-compatible N-ary function from a binary function."""
     unique_names = unique_name_generator(["binary_op_name"], suffix_sep="_")
     input_names = [unique_names(v, force_unique=True) for v in inputs]

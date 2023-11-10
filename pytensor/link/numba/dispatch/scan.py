@@ -1,5 +1,5 @@
 from textwrap import dedent, indent
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 from numba import types
@@ -90,7 +90,7 @@ def numba_funcify_Scan(op, node, **kwargs):
 
     # We create distinct variables for/references to the storage arrays for
     # each output.
-    outer_in_to_storage_name: Dict[str, str] = {}
+    outer_in_to_storage_name: dict[str, str] = {}
     for outer_in_name in outer_in_mit_mot_names:
         outer_in_to_storage_name[outer_in_name] = f"{outer_in_name}_mitmot_storage"
 
@@ -113,9 +113,9 @@ def numba_funcify_Scan(op, node, **kwargs):
     # Inner-inputs are ordered as follows:
     # sequences + mit-mot-inputs + mit-sot-inputs + sit-sot-inputs +
     # shared-inputs + non-sequences.
-    temp_scalar_storage_alloc_stmts: List[str] = []
-    inner_in_exprs_scalar: List[str] = []
-    inner_in_exprs: List[str] = []
+    temp_scalar_storage_alloc_stmts: list[str] = []
+    inner_in_exprs_scalar: list[str] = []
+    inner_in_exprs: list[str] = []
 
     def add_inner_in_expr(
         outer_in_name: str,
@@ -154,7 +154,7 @@ def numba_funcify_Scan(op, node, **kwargs):
         is_vector = outer_in_var.ndim == 1
         add_inner_in_expr(outer_in_name, 0, None, vector_slice_opt=is_vector)
 
-    inner_in_names_to_input_taps: Dict[str, Tuple[int, ...]] = dict(
+    inner_in_names_to_input_taps: dict[str, tuple[int, ...]] = dict(
         zip(
             outer_in_mit_mot_names + outer_in_mit_sot_names + outer_in_sit_sot_names,
             op.info.mit_mot_in_slices
@@ -162,7 +162,7 @@ def numba_funcify_Scan(op, node, **kwargs):
             + op.info.sit_sot_in_slices,
         )
     )
-    inner_in_names_to_output_taps: Dict[str, Optional[Tuple[int, ...]]] = dict(
+    inner_in_names_to_output_taps: dict[str, Optional[tuple[int, ...]]] = dict(
         zip(outer_in_mit_mot_names, op.info.mit_mot_out_slices)
     )
 
@@ -175,11 +175,11 @@ def numba_funcify_Scan(op, node, **kwargs):
 
     # The assignment statements that copy inner-outputs into the outer-outputs
     # storage
-    inner_out_to_outer_in_stmts: List[str] = []
+    inner_out_to_outer_in_stmts: list[str] = []
 
     # Special statements that perform storage truncation for `while`-loops and
     # rotation for initially truncated storage.
-    output_storage_post_proc_stmts: List[str] = []
+    output_storage_post_proc_stmts: list[str] = []
 
     # In truncated storage situations (e.g. created by `save_mem_new_scan`),
     # the taps and output storage overlap, instead of the standard situation in
@@ -188,7 +188,7 @@ def numba_funcify_Scan(op, node, **kwargs):
     # storage array like a circular buffer, and that's why we need to track the
     # storage size along with the taps length/indexing offset.
     def add_output_storage_post_proc_stmt(
-        outer_in_name: str, tap_sizes: Tuple[int, ...], storage_size: str
+        outer_in_name: str, tap_sizes: tuple[int, ...], storage_size: str
     ):
         tap_size = max(tap_sizes)
 
@@ -225,7 +225,7 @@ def numba_funcify_Scan(op, node, **kwargs):
     # single iteration is performed.  This is necessary because we don't know
     # the exact shapes of the storage arrays that need to be allocated until
     # after an iteration is performed.
-    inner_out_post_processing_stmts: List[str] = []
+    inner_out_post_processing_stmts: list[str] = []
 
     # Storage allocation statements
     # For output storage allocated/provided by the inputs, these statements
@@ -235,7 +235,7 @@ def numba_funcify_Scan(op, node, **kwargs):
     # In the nit-sot case, empty dummy arrays are assigned to the storage
     # variables and updated later by the statements in
     # `inner_out_post_processing_stmts`.
-    storage_alloc_stmts: List[str] = []
+    storage_alloc_stmts: list[str] = []
 
     for outer_in_name in outer_in_outtap_names:
         outer_in_var = outer_in_names_to_vars[outer_in_name]
