@@ -28,6 +28,7 @@ from pytensor.link.basic import Linker, PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.link.jax.linker import JAXLinker
 from pytensor.link.numba.linker import NumbaLinker
+from pytensor.link.pytorch.linker import PyTorchLinker
 from pytensor.link.vm import VMLinker
 
 
@@ -48,6 +49,7 @@ predefined_linkers = {
     "cvm_nogc": VMLinker(allow_gc=False, use_cloop=True),
     "jax": JAXLinker(),
     "numba": NumbaLinker(),
+    "pytorch": PyTorchLinker(),
 }
 
 
@@ -469,13 +471,26 @@ NUMBA = Mode(
         exclude=["cxx_only", "BlasOpt", "local_careduce_fusion"],
     ),
 )
-
+PYTORCH = Mode(
+    PyTorchLinker(),
+    RewriteDatabaseQuery(
+        include=["fast_run"],
+        exclude=[
+            "cxx_only",
+            "BlasOpt",
+            "fusion",
+            "inplace",
+            "local_uint_constant_indices",
+        ],
+    ),
+)
 
 predefined_modes = {
     "FAST_COMPILE": FAST_COMPILE,
     "FAST_RUN": FAST_RUN,
     "JAX": JAX,
     "NUMBA": NUMBA,
+    "PYTORCH": PYTORCH,
 }
 
 instantiated_default_mode = None
@@ -548,7 +563,7 @@ def register_mode(name, mode):
     predefined_modes[name] = mode
 
 
-def get_target_language(mode=None) -> Tuple[Literal["py", "c", "numba", "jax"], ...]:
+def get_target_language(mode=None) -> Tuple[Literal["py", "c", "numba", "jax", "pytorch"], ...]:
     """Get the compilation target language."""
 
     if mode is None:
@@ -560,6 +575,8 @@ def get_target_language(mode=None) -> Tuple[Literal["py", "c", "numba", "jax"], 
         return ("numba",)
     if isinstance(linker, JAXLinker):
         return ("jax",)
+    if isinstance(linker, PyTorchLinker):
+        return ("pytorch",)
     if isinstance(linker, PerformLinker):
         return ("py",)
     if isinstance(linker, CLinker):
