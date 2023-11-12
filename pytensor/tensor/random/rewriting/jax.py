@@ -7,7 +7,6 @@ from pytensor.tensor.basic import MakeVector, cast, ones_like, switch, zeros_lik
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.random.basic import (
     BetaBinomialRV,
-    ChiSquareRV,
     GenGammaRV,
     GeometricRV,
     HalfNormalRV,
@@ -104,13 +103,6 @@ def inverse_gamma_from_gamma(fgraph, node):
     return [next_rng, reciprocal(g)]
 
 
-@node_rewriter([ChiSquareRV])
-def chi_square_from_gamma(fgraph, node):
-    *other_inputs, df = node.inputs
-    next_rng, g = _gamma.make_node(*other_inputs, df / 2, 2).outputs
-    return [next_rng, g]
-
-
 @node_rewriter([GenGammaRV])
 def generalized_gamma_from_gamma(fgraph, node):
     *other_inputs, alpha, p, lambd = node.inputs
@@ -169,11 +161,6 @@ random_vars_opt.register(
 random_vars_opt.register(
     "inverse_gamma_from_gamma",
     in2out(inverse_gamma_from_gamma),
-    "jax",
-)
-random_vars_opt.register(
-    "chi_square_from_gamma",
-    in2out(chi_square_from_gamma),
     "jax",
 )
 random_vars_opt.register(

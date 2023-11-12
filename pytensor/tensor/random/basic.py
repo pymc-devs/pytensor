@@ -487,56 +487,8 @@ def gamma(shape, rate=None, scale=None, **kwargs):
     return _gamma(shape, scale, **kwargs)
 
 
-class ChiSquareRV(RandomVariable):
-    r"""A chi square continuous random variable.
-
-    The probability density function for `chisquare` in terms of the number of degrees of
-    freedom :math:`k` is:
-
-    .. math::
-
-        f(x; k) = \frac{(1/2)^{k/2}}{\Gamma(k/2)} x^{k/2-1} e^{-x/2}
-
-    for :math:`k > 2`. :math:`\Gamma` is the gamma function:
-
-    .. math::
-
-        \Gamma(x) = \int_0^{\infty} t^{x-1} e^{-t} \mathrm{d}t
-
-
-    This variable is obtained by summing the squares :math:`k` independent, standard normally
-    distributed random variables.
-
-    """
-    name = "chisquare"
-    ndim_supp = 0
-    ndims_params = [0]
-    dtype = "floatX"
-    _print_name = ("ChiSquare", "\\operatorname{ChiSquare}")
-
-    def __call__(self, df, size=None, **kwargs):
-        r"""Draw samples from a chisquare distribution.
-
-        Signature
-        ---------
-
-        `() -> ()`
-
-        Parameters
-        ----------
-        df
-            The number :math:`k` of degrees of freedom. Must be positive.
-        size
-            Sample shape. If the given size is, e.g. `(m, n, k)` then `m * n * k`
-            independent, identically distributed random variables are
-            returned. Default is `None` in which case a single random variable
-            is returned.
-
-        """
-        return super().__call__(df, size=size, **kwargs)
-
-
-chisquare = ChiSquareRV()
+def chisquare(df, **kwargs):
+    return gamma(shape=df / 2.0, scale=2.0, **kwargs)
 
 
 class ParetoRV(ScipyRandomVariable):
