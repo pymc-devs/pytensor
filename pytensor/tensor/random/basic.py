@@ -487,7 +487,7 @@ def gamma(shape, rate=None, scale=None, **kwargs):
     return _gamma(shape, scale, **kwargs)
 
 
-def chisquare(df, **kwargs):
+def chisquare(df, size=None, **kwargs):
     r"""Draw samples from a chisquare distribution.
 
     The probability density function for `chisquare` in terms of the number of degrees of
@@ -517,7 +517,7 @@ def chisquare(df, **kwargs):
         returned. Default is `None` in which case a single random variable
         is returned.
     """
-    return gamma(shape=df / 2.0, scale=2.0, **kwargs)
+    return gamma(shape=df / 2.0, scale=2.0, size=size, **kwargs)
 
 
 class ParetoRV(ScipyRandomVariable):
