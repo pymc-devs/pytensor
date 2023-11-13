@@ -815,6 +815,32 @@ class _tensor_py_operators:
         """Return selected slices only."""
         return at.extra_ops.compress(self, a, axis=axis)
 
+    def set(self, y, **kwargs):
+        """Set values to y, where y is the output of an index operation.
+
+        Equivalent to set_subtensor(self, y). See docstrings for kwargs.
+
+        Examples
+        --------
+
+        >>> x = matrix()
+        >>> out = x[0].set(5)
+        """
+        return at.subtensor.set_subtensor(self, y, **kwargs)
+
+    def add(self, y, **kwargs):
+        """Add values to y, where y is the output of an index operation.
+
+        Equivalent to inc_subtensor(self, y). See docstrings for kwargs
+
+        Examples
+        --------
+
+        >>> x = matrix()
+        >>> out = x[0].add(5)
+        """
+        return at.inc_subtensor(self, y, **kwargs)
+
 
 class TensorVariable(
     _tensor_py_operators, Variable[_TensorTypeType, OptionalApplyType]
