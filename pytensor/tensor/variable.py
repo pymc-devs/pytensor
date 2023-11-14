@@ -820,35 +820,36 @@ class _tensor_py_operators:
         """Return selected slices only."""
         return at.extra_ops.compress(self, a, axis=axis)
 
-    def set(self, y, **kwargs):
-        """Return a copy of a tensor with the indexed values set to y.
+    def set(self, idx, y, **kwargs):
+        """Return a copy of self with the indexed values set to y.
 
-        Self must be the output of an indexing operation.
+        Equivalent to set_subtensor(self[idx], y). See docstrings for kwargs.
 
-        Equivalent to set_subtensor(self, y). See docstrings for kwargs.
+        Examples
+        --------
+        >>> import pytensor.tensor as pt
+        >>>
+        >>> x = pt.ones((3,))
+        >>> out = x.set(1, 2)
+        >>> out.eval()  # array([1., 2., 1.])
+        """
+        return at.subtensor.set_subtensor(self[idx], y, **kwargs)
+
+    def add(self, idx, y, **kwargs):
+        """Return a copy of self with the indexed values incremented by y.
+
+        Equivalent to inc_subtensor(self[idx], y). See docstrings for kwargs.
 
         Examples
         --------
 
-        >>> x = matrix()
-        >>> out = x[0].set(5)
+        >>> import pytensor.tensor as pt
+        >>>
+        >>> x = pt.ones((3,))
+        >>> out = x.add(1, 2)
+        >>> out.eval()  # array([1., 3., 1.])
         """
-        return at.subtensor.set_subtensor(self, y, **kwargs)
-
-    def add(self, y, **kwargs):
-        """Return a copy of a tensor with the indexed values incremented by y.
-
-        Self must be the output of an indexing operation.
-
-        Equivalent to inc_subtensor(self, y). See docstrings for kwargs.
-
-        Examples
-        --------
-
-        >>> x = matrix()
-        >>> out = x[0].add(5)
-        """
-        return at.inc_subtensor(self, y, **kwargs)
+        return at.inc_subtensor(self[idx], y, **kwargs)
 
 
 class TensorVariable(

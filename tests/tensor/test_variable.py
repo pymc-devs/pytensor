@@ -438,14 +438,8 @@ class TestTensorInstanceMethods:
         idx = [0]
         y = 5
 
-        assert equal_computations([x[idx].set(y)], [set_subtensor(x[idx], y)])
-        assert equal_computations([x[idx].add(y)], [inc_subtensor(x[idx], y)])
-
-        msg = "must be the result of a subtensor operation"
-        with pytest.raises(TypeError, match=msg):
-            x.set(y)
-        with pytest.raises(TypeError, match=msg):
-            x.add(y)
+        assert equal_computations([x.set(idx, y)], [set_subtensor(x[idx], y)])
+        assert equal_computations([x.add(idx, y)], [inc_subtensor(x[idx], y)])
 
     def test_set_item_error(self):
         x = matrix("x")
