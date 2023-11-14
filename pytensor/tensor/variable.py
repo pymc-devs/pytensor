@@ -816,7 +816,9 @@ class _tensor_py_operators:
         return at.extra_ops.compress(self, a, axis=axis)
 
     def set(self, y, **kwargs):
-        """Set values to y, where y is the output of an index operation.
+        """Return a copy of a tensor with the indexed values set to y.
+
+        Self must be the output of an indexing operation.
 
         Equivalent to set_subtensor(self, y). See docstrings for kwargs.
 
@@ -829,9 +831,11 @@ class _tensor_py_operators:
         return at.subtensor.set_subtensor(self, y, **kwargs)
 
     def add(self, y, **kwargs):
-        """Add values to y, where y is the output of an index operation.
+        """Return a copy of a tensor with the indexed values incremented by y.
 
-        Equivalent to inc_subtensor(self, y). See docstrings for kwargs
+        Self must be the output of an indexing operation.
+
+        Equivalent to inc_subtensor(self, y). See docstrings for kwargs.
 
         Examples
         --------
