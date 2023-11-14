@@ -447,6 +447,15 @@ class TestTensorInstanceMethods:
         with pytest.raises(TypeError, match=msg):
             x.add(y)
 
+    def test_set_item_error(self):
+        x = matrix("x")
+
+        msg = "Use the output of `set` or `add` instead."
+        with pytest.raises(TypeError, match=msg):
+            x[0] = 5
+        with pytest.raises(TypeError, match=msg):
+            x[0] += 5
+
 
 def test_deprecated_import():
     with pytest.warns(
