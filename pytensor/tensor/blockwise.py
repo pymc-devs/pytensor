@@ -1,4 +1,3 @@
-import re
 from collections.abc import Sequence
 from typing import Any, Optional, cast
 
@@ -13,47 +12,12 @@ from pytensor.graph.replace import _vectorize_node, vectorize_graph
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.shape import shape_padleft
 from pytensor.tensor.type import continuous_dtypes, discrete_dtypes, tensor
-from pytensor.tensor.utils import broadcast_static_dim_lengths, import_func_from_string
+from pytensor.tensor.utils import (
+    _parse_gufunc_signature,
+    broadcast_static_dim_lengths,
+    import_func_from_string,
+)
 from pytensor.tensor.variable import TensorVariable
-
-
-# TODO: Implement vectorize helper to batch whole graphs (similar to what Blockwise does for the grad)
-
-# Copied verbatim from numpy.lib.function_base
-# https://github.com/numpy/numpy/blob/f2db090eb95b87d48a3318c9a3f9d38b67b0543c/numpy/lib/function_base.py#L1999-L2029
-_DIMENSION_NAME = r"\w+"
-_CORE_DIMENSION_LIST = "(?:{0:}(?:,{0:})*)?".format(_DIMENSION_NAME)
-_ARGUMENT = rf"\({_CORE_DIMENSION_LIST}\)"
-_ARGUMENT_LIST = "{0:}(?:,{0:})*".format(_ARGUMENT)
-_SIGNATURE = "^{0:}->{0:}$".format(_ARGUMENT_LIST)
-
-
-def _parse_gufunc_signature(signature):
-    """
-    Parse string signatures for a generalized universal function.
-
-    Arguments
-    ---------
-    signature : string
-        Generalized universal function signature, e.g., ``(m,n),(n,p)->(m,p)``
-        for ``np.matmul``.
-
-    Returns
-    -------
-    Tuple of input and output core dimensions parsed from the signature, each
-    of the form List[Tuple[str, ...]].
-    """
-    signature = re.sub(r"\s+", "", signature)
-
-    if not re.match(_SIGNATURE, signature):
-        raise ValueError(f"not a valid gufunc signature: {signature}")
-    return tuple(
-        [
-            tuple(re.findall(_DIMENSION_NAME, arg))
-            for arg in re.findall(_ARGUMENT, arg_list)
-        ]
-        for arg_list in signature.split("->")
-    )
 
 
 def safe_signature(

@@ -10,9 +10,10 @@ from pytensor.gradient import grad
 from pytensor.graph import Apply, Op
 from pytensor.graph.replace import vectorize_node
 from pytensor.tensor import diagonal, log, tensor
-from pytensor.tensor.blockwise import Blockwise, _parse_gufunc_signature
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.nlinalg import MatrixInverse
 from pytensor.tensor.slinalg import Cholesky, Solve, cholesky, solve_triangular
+from pytensor.tensor.utils import _parse_gufunc_signature
 
 
 def test_vectorize_blockwise():
