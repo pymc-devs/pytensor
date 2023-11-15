@@ -82,9 +82,6 @@ PyTensor can produce :class:`RandomVariable`\s that draw samples from many diffe
 .. autoclass:: pytensor.tensor.random.basic.CategoricalRV
    :members: __call__
 
-.. autoclass:: pytensor.tensor.random.basic.ChiSquareRV
-   :members: __call__
-
 .. autoclass:: pytensor.tensor.random.basic.DirichletRV
    :members: __call__
 

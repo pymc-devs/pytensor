@@ -195,7 +195,6 @@ def {sized_fn_name}({random_fn_input_names}):
 @numba_funcify.register(aer.NormalRV)
 @numba_funcify.register(aer.LogNormalRV)
 @numba_funcify.register(aer.GammaRV)
-@numba_funcify.register(aer.ChiSquareRV)
 @numba_funcify.register(aer.ParetoRV)
 @numba_funcify.register(aer.GumbelRV)
 @numba_funcify.register(aer.ExponentialRV)
