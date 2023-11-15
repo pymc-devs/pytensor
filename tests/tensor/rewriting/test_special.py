@@ -4,16 +4,22 @@ import scipy.special
 
 import pytensor
 from pytensor import shared
+import pytensor.scalar as aes
 from pytensor.compile import optdb
-from pytensor.compile.mode import get_mode
+from pytensor.compile.function import function
+from pytensor.compile.mode import get_mode, get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import check_stack_trace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
-from pytensor.tensor.math import add, exp, log, true_div
+from pytensor.tensor.math import add, exp, log, true_div, MaxAndArgmax
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad, softmax
-from pytensor.tensor.type import matrix
+from pytensor.tensor.type import matrix, tensor3, TensorType, vector
 from tests import unittest_tools as utt
+from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.elemwise import DimShuffle
+
+
 
 
 _fast_run_rewrites = RewriteDatabaseQuery(include=["fast_run"])
@@ -139,3 +145,88 @@ def test_softmax_graph():
         return pytensor.grad(None, x, known_grads={y: inputs})
 
     utt.verify_grad(f, [rng.random((3, 4))])
+
+def compile_graph_log_sum_exp(x, axis, dimshuffle_op=None):
+    sum_exp = at_sum(exp(x), axis=axis)
+    if dimshuffle_op:
+        sum_exp = dimshuffle_op(sum_exp)
+    y = log(sum_exp)
+    MODE = get_default_mode().including("local_log_sum_exp")
+    return function([x], y, mode=MODE)
+
+
+def check_max_log_sum_exp(x, axis, dimshuffle_op=None):
+    f = compile_graph_log_sum_exp(x, axis, dimshuffle_op)
+
+    fgraph = f.maker.fgraph.toposort()
+    for node in fgraph:
+        if (
+            hasattr(node.op, "scalar_op")
+            and node.op.scalar_op == aes.basic.scalar_maximum
+        ):
+            return
+
+        # In mode FAST_COMPILE, the rewrites don't replace the
+        # `MaxAndArgmax` `Op`.
+        if isinstance(node.op, MaxAndArgmax):
+            return
+
+    # TODO FIXME: Refactor this test so that it makes a direct assertion and
+    # nothing more.
+    raise AssertionError("No maximum detected after log_sum_exp rewrite")
+
+def test_local_log_sum_exp_maximum():
+    """Test that the rewrite is applied by checking the presence of the maximum."""
+    x = tensor3("x")
+    check_max_log_sum_exp(x, axis=(0,), dimshuffle_op=None)
+    check_max_log_sum_exp(x, axis=(1,), dimshuffle_op=None)
+    check_max_log_sum_exp(x, axis=(2,), dimshuffle_op=None)
+    check_max_log_sum_exp(x, axis=(0, 1), dimshuffle_op=None)
+    check_max_log_sum_exp(x, axis=(0, 1, 2), dimshuffle_op=None)
+
+    # If a transpose is applied to the sum
+    transpose_op = DimShuffle((False, False), (1, 0))
+    check_max_log_sum_exp(x, axis=2, dimshuffle_op=transpose_op)
+
+    # If the sum is performed with keepdims=True
+    x = TensorType(dtype="floatX", shape=(None, 1, None))("x")
+    sum_keepdims_op = x.sum(axis=(0, 1), keepdims=True).owner.op
+    check_max_log_sum_exp(x, axis=(0, 1), dimshuffle_op=sum_keepdims_op)
+
+def test_local_log_sum_exp_near_one():
+    """Test that the rewritten result is correct around 1.0."""
+
+    x = tensor3("x")
+    x_val = 1.0 + np.random.random((4, 3, 2)).astype(config.floatX) / 10.0
+
+    f = compile_graph_log_sum_exp(x, axis=(1,))
+    naive_ret = np.log(np.sum(np.exp(x_val), axis=1))
+    rewritten_ret = f(x_val)
+    assert np.allclose(naive_ret, rewritten_ret)
+
+    # If a transpose is applied
+    transpose_op = DimShuffle((False, False), (1, 0))
+    f = compile_graph_log_sum_exp(x, axis=(1,), dimshuffle_op=transpose_op)
+    naive_ret = np.log(np.sum(np.exp(x_val), axis=1).T)
+    rewritten_ret = f(x_val)
+    assert np.allclose(naive_ret, rewritten_ret)
+
+def test_local_log_sum_exp_large():
+    """Test that the rewrite result is correct for extreme value 100."""
+    x = vector("x")
+    f = compile_graph_log_sum_exp(x, axis=0)
+
+    x_val = np.array([-100.0, 100.0]).astype(config.floatX)
+
+    rewritten_ret = f(x_val)
+    assert np.allclose(rewritten_ret, 100.0)
+
+
+def test_local_log_sum_exp_inf():
+    """Test that when max = +-inf, the rewritten output still works correctly."""
+    x = vector("x")
+    f = compile_graph_log_sum_exp(x, axis=0)
+
+    assert f([-np.inf, -np.inf]) == -np.inf
+    assert f([np.inf, np.inf]) == np.inf
+    assert f([-np.inf, np.inf]) == np.inf

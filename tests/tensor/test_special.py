@@ -4,7 +4,7 @@ from scipy.special import factorial as scipy_factorial
 from scipy.special import log_softmax as scipy_log_softmax
 from scipy.special import poch as scipy_poch
 from scipy.special import softmax as scipy_softmax
-
+from scipy.special import logsumexp as scipy_logsumexp
 from pytensor.compile.function import function
 from pytensor.configdefaults import config
 from pytensor.tensor.special import (
@@ -15,7 +15,9 @@ from pytensor.tensor.special import (
     log_softmax,
     poch,
     softmax,
+    logsumexp,
 )
+from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.type import matrix, tensor3, tensor4, vector, vectors
 from tests import unittest_tools as utt
 from tests.tensor.utils import random_ranged
@@ -170,4 +172,17 @@ def test_factorial(n):
     expected = scipy_factorial(n)
     np.testing.assert_allclose(
         actual, expected, rtol=1e-7 if config.floatX == "float64" else 1e-5
+    )
+
+def test_logsumexp(shape, axis, keepdims):
+    scipy_inp = np.zeros(shape)
+    scipy_out = scipy_logsumexp(scipy_inp, axis=axis, keepdims=keepdims)
+
+    pytensor_inp = as_tensor_variable(scipy_inp)
+    f = function([], logsumexp(pytensor_inp, axis=axis, keepdims=keepdims))
+    pytensor_out = f()
+
+    np.testing.assert_array_almost_equal(
+        pytensor_out,
+        scipy_out,
     )

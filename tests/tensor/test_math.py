@@ -8,8 +8,6 @@ from itertools import product
 import numpy as np
 import pytest
 from numpy.testing import assert_array_equal
-from scipy.special import logsumexp as scipy_logsumexp
-
 import pytensor.scalar as aes
 from pytensor.compile.debugmode import DebugMode
 from pytensor.compile.function import function
@@ -80,7 +78,6 @@ from pytensor.tensor.math import (
     log2,
     log10,
     logaddexp,
-    logsumexp,
     matmul,
     max,
     max_and_argmax,
@@ -3382,18 +3379,7 @@ def test_logaddexp():
     "keepdims",
     [True, False],
 )
-def test_logsumexp(shape, axis, keepdims):
-    scipy_inp = np.zeros(shape)
-    scipy_out = scipy_logsumexp(scipy_inp, axis=axis, keepdims=keepdims)
 
-    pytensor_inp = as_tensor_variable(scipy_inp)
-    f = function([], logsumexp(pytensor_inp, axis=axis, keepdims=keepdims))
-    pytensor_out = f()
-
-    np.testing.assert_array_almost_equal(
-        pytensor_out,
-        scipy_out,
-    )
 
 
 def test_pprint():
