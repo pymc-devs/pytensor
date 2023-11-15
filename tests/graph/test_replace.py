@@ -5,7 +5,7 @@ import scipy.special
 import pytensor.tensor as pt
 from pytensor import config, function, shared
 from pytensor.graph.basic import equal_computations, graph_inputs
-from pytensor.graph.replace import clone_replace, graph_replace, vectorize
+from pytensor.graph.replace import clone_replace, graph_replace, vectorize_graph
 from pytensor.tensor import dvector, fvector, vector
 from tests import unittest_tools as utt
 from tests.graph.utils import MyOp, MyVariable
@@ -226,7 +226,7 @@ class TestGraphReplace:
             oc = graph_replace([o], {fake: x.clone()}, strict=True)
 
 
-class TestVectorize:
+class TestVectorizeGraph:
     # TODO: Add tests with multiple outputs, constants, and other singleton types
 
     def test_basic(self):
@@ -234,10 +234,10 @@ class TestVectorize:
         y = pt.exp(x) / pt.sum(pt.exp(x))
 
         new_x = pt.matrix("new_x")
-        [new_y] = vectorize([y], {x: new_x})
+        [new_y] = vectorize_graph([y], {x: new_x})
 
         # Check we can pass both a sequence or a single variable
-        alt_new_y = vectorize(y, {x: new_x})
+        alt_new_y = vectorize_graph(y, {x: new_x})
         assert equal_computations([new_y], [alt_new_y])
 
         fn = function([new_x], new_y)
@@ -253,7 +253,7 @@ class TestVectorize:
         y2 = x[-1]
 
         new_x = pt.matrix("new_x")
-        [new_y1, new_y2] = vectorize([y1, y2], {x: new_x})
+        [new_y1, new_y2] = vectorize_graph([y1, y2], {x: new_x})
 
         fn = function([new_x], [new_y1, new_y2])
         new_x_test = np.arange(9).reshape(3, 3).astype(config.floatX)
