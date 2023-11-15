@@ -171,6 +171,13 @@ def test_psi():
     compare_jax_and_py(fg, [3.0])
 
 
+def test_tri_gamma():
+    x = vector("x", dtype="float64")
+    out = tri_gamma(x)
+    fg = FunctionGraph([x], [out])
+    compare_jax_and_py(fg, [np.array([3.0, 5.0])])
+
+
 def test_log1mexp():
     x = vector("x")
     out = log1mexp(x)
