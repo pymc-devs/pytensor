@@ -148,6 +148,7 @@ from pytensor.tensor.subtensor import *  # noqa
 from pytensor.tensor.type import *  # noqa
 from pytensor.tensor.type_other import *  # noqa
 from pytensor.tensor.variable import TensorConstant, TensorVariable  # noqa
+from pytensor.tensor.functional import vectorize  # noqa
 
 # Allow accessing numpy constants from pytensor.tensor
 from numpy import e, euler_gamma, inf, infty, nan, newaxis, pi  # noqa
