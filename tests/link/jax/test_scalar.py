@@ -23,6 +23,7 @@ from pytensor.tensor.math import (
     psi,
     sigmoid,
     softplus,
+    tri_gamma,
 )
 from pytensor.tensor.type import matrix, scalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
