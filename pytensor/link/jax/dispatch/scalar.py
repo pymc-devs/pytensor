@@ -20,7 +20,17 @@ from pytensor.scalar.basic import (
     Second,
     Sub,
 )
-from pytensor.scalar.math import Erf, Erfc, Erfcinv, Erfcx, Erfinv, Iv, Log1mexp, Psi
+from pytensor.scalar.math import (
+    Erf,
+    Erfc,
+    Erfcinv,
+    Erfcx,
+    Erfinv,
+    Iv,
+    Log1mexp,
+    Psi,
+    TriGamma,
+)
 
 
 def try_import_tfp_jax_op(op: ScalarOp, jax_op_name: Optional[str] = None) -> Callable:
@@ -273,6 +283,14 @@ def jax_funcify_Psi(op, node, **kwargs):
         return jax.scipy.special.digamma(x)
 
     return psi
+
+
+@jax_funcify.register(TriGamma)
+def jax_funcify_TriGamma(op, node, **kwargs):
+    def tri_gamma(x):
+        return jax.scipy.special.polygamma(1, x)
+
+    return tri_gamma
 
 
 @jax_funcify.register(Softplus)
