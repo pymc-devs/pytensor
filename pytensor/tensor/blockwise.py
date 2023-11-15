@@ -9,7 +9,7 @@ from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op
-from pytensor.graph.replace import _vectorize_node, vectorize
+from pytensor.graph.replace import _vectorize_node, vectorize_graph
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.shape import shape_padleft
 from pytensor.tensor.type import continuous_dtypes, discrete_dtypes, tensor
@@ -274,7 +274,7 @@ class Blockwise(Op):
 
             core_igrads = self.core_op.L_op(core_inputs, core_outputs, core_ograds)
 
-        igrads = vectorize(
+        igrads = vectorize_graph(
             [core_igrad for core_igrad in core_igrads if core_igrad is not None],
             replace=dict(
                 zip(core_inputs + core_outputs + core_ograds, inputs + outputs + ograds)

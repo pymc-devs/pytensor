@@ -1,3 +1,4 @@
+import warnings
 from collections.abc import Iterable, Mapping, Sequence
 from functools import partial, singledispatch
 from typing import Optional, Union, cast, overload
@@ -215,7 +216,7 @@ def vectorize_node(node: Apply, *batched_inputs) -> Apply:
 
 
 @overload
-def vectorize(
+def vectorize_graph(
     outputs: Variable,
     replace: Mapping[Variable, Variable],
 ) -> Variable:
@@ -223,14 +224,14 @@ def vectorize(
 
 
 @overload
-def vectorize(
+def vectorize_graph(
     outputs: Sequence[Variable],
     replace: Mapping[Variable, Variable],
 ) -> Sequence[Variable]:
     ...
 
 
-def vectorize(
+def vectorize_graph(
     outputs: Union[Variable, Sequence[Variable]],
     replace: Mapping[Variable, Variable],
 ) -> Union[Variable, Sequence[Variable]]:
@@ -309,3 +310,8 @@ def vectorize(
     else:
         [vect_output] = seq_vect_outputs
         return vect_output
+
+
+def vectorize(*args, **kwargs):
+    warnings.warn("vectorize was renamed to vectorize_graph", UserWarning)
+    return vectorize_node(*args, **kwargs)
