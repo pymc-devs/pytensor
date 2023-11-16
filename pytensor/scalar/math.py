@@ -1594,7 +1594,7 @@ class BetaIncInv(ScalarOp):
     Inverse of the regularized incomplete beta function.
     """
 
-    nfunc_spec = ("scipy.special.betaincinv", 1, 1)
+    nfunc_spec = ("scipy.special.betaincinv", 2, 1)
 
     def impl(self, a, b, x):
         return scipy.special.betaincinv(a, b, x)
