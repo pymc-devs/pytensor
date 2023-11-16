@@ -226,6 +226,11 @@ def test_default_blas_ldflags(
             )
 
 
+def test_default_blas_ldflags_no_cxx():
+    with pytensor.config.change_flags(cxx=""):
+        assert default_blas_ldflags() == ""
+
+
 @patch(
     "os.listdir", return_value=["mkl_core.1.dll", "mkl_rt.1.0.dll", "mkl_rt.1.1.lib"]
 )
