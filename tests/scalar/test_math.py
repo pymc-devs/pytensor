@@ -60,6 +60,7 @@ def test_gammaincc_nan_c():
     assert np.isnan(test_func(1, -1))
     assert np.isnan(test_func(-1, -1))
 
+
 def test_gammaincinv_python():
     x1 = at.dscalar()
     x2 = at.dscalar()
@@ -104,6 +105,7 @@ def test_betainc_derivative_nan():
     assert np.isnan(test_func(1, 1, 2))
     assert np.isnan(test_func(1, -1, 1))
     assert np.isnan(test_func(1, 1, -1))
+
 
 def test_betaincinv():
     a, b, x = at.scalars("a", "b", "x")
