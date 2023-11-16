@@ -2773,6 +2773,9 @@ def default_blas_ldflags():
         else:
             raise RuntimeError(f"Supplied flags {flags} failed to compile")
 
+    # If no compiler is available we default to empty ldflags
+    if not config.cxx:
+        return ""
     _std_lib_dirs = std_lib_dirs()
     if len(_std_lib_dirs) > 0:
         rpath = _std_lib_dirs[0]
