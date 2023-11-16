@@ -7,6 +7,7 @@ from itertools import product
 
 import numpy as np
 import pytest
+import scipy.special
 from numpy.testing import assert_array_equal
 from scipy.special import logsumexp as scipy_logsumexp
 
@@ -64,6 +65,7 @@ from pytensor.tensor.math import (
     cov,
     deg2rad,
     dense_dot,
+    digamma,
     dot,
     eq,
     exp,
@@ -93,6 +95,7 @@ from pytensor.tensor.math import (
     neg,
     neq,
     outer,
+    polygamma,
     power,
     ptp,
     rad2deg,
@@ -3470,3 +3473,44 @@ class TestMatMul:
         fn = function([x, y], x @ y, mode="FAST_RUN")
         [node] = fn.maker.fgraph.apply_nodes
         assert isinstance(node.op, Dot22)
+
+
+class TestPolyGamma:
+    def test_basic(self):
+        n = vector("n", dtype="int64")
+        x = scalar("x")
+
+        np.testing.assert_allclose(
+            polygamma(n, x).eval({n: [0, 1], x: 0.5}),
+            scipy.special.polygamma([0, 1], 0.5),
+        )
+
+    def test_continuous_n_raises(self):
+        n = scalar("n", dtype="float64")
+        with pytest.raises(TypeError, match="must be discrete"):
+            polygamma(n, 0.5)
+
+    def test_complex_x_raises(self):
+        x = scalar(dtype="complex128")
+        with pytest.raises(TypeError, match="complex argument not supported"):
+            polygamma(0, x)
+
+    def test_output_dtype(self):
+        n = scalar("n", dtype="int64")
+        polygamma(n, scalar("x", dtype="float32")).dtype == "float32"
+        polygamma(n, scalar("x", dtype="float64")).dtype == "float64"
+        polygamma(n, scalar("x", dtype="int32")).dtype == "float64"
+
+    def test_grad_x(self):
+        x = scalar("x")
+        op_grad = grad(polygamma(0, x), wrt=x)
+        ref_grad = grad(digamma(x), wrt=x)
+        np.testing.assert_allclose(
+            op_grad.eval({x: 0.9}),
+            ref_grad.eval({x: 0.9}),
+        )
+
+    def test_grad_n_undefined(self):
+        n = scalar(dtype="int64")
+        with pytest.raises(NullTypeGradError):
+            grad(polygamma(n, 0.5), wrt=n)

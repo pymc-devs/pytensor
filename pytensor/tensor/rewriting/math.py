@@ -52,6 +52,7 @@ from pytensor.tensor.math import (
 from pytensor.tensor.math import abs as at_abs
 from pytensor.tensor.math import (
     add,
+    digamma,
     dot,
     eq,
     erf,
@@ -68,7 +69,7 @@ from pytensor.tensor.math import (
     makeKeepDims,
 )
 from pytensor.tensor.math import max as at_max
-from pytensor.tensor.math import maximum, mul, neg
+from pytensor.tensor.math import maximum, mul, neg, polygamma
 from pytensor.tensor.math import pow as at_pow
 from pytensor.tensor.math import (
     prod,
@@ -81,7 +82,7 @@ from pytensor.tensor.math import (
     sub,
 )
 from pytensor.tensor.math import sum as at_sum
-from pytensor.tensor.math import true_div
+from pytensor.tensor.math import tri_gamma, true_div
 from pytensor.tensor.rewriting.basic import (
     alloc_like,
     broadcasted_by,
@@ -3638,3 +3639,22 @@ def local_useless_conj(fgraph, node):
     x = node.inputs[0]
     if x.type.dtype not in complex_dtypes:
         return [x]
+
+
+local_polygamma_to_digamma = PatternNodeRewriter(
+    (polygamma, 0, "x"),
+    (digamma, "x"),
+    allow_multiple_clients=True,
+    name="local_polygamma_to_digamma",
+)
+
+register_specialize(local_polygamma_to_digamma)
+
+local_polygamma_to_tri_gamma = PatternNodeRewriter(
+    (polygamma, 1, "x"),
+    (tri_gamma, "x"),
+    allow_multiple_clients=True,
+    name="local_polygamma_to_tri_gamma",
+)
+
+register_specialize(local_polygamma_to_tri_gamma)

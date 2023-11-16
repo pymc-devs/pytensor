@@ -101,7 +101,7 @@ def grad_undefined(op, x_pos, x, comment=""):
     return (
         NullType(
             "This variable is Null because the grad method for "
-            f"input {x_pos} ({x}) of the {op} op is not implemented. {comment}"
+            f"input {x_pos} ({x}) of the {op} op is undefined. {comment}"
         )
     )()
 

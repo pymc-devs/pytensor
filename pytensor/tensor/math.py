@@ -1370,6 +1370,11 @@ def tri_gamma(a):
 
 
 @scalar_elemwise
+def polygamma(n, x):
+    """Polygamma function of order n evaluated at x"""
+
+
+@scalar_elemwise
 def chi2sf(x, k):
     """chi squared survival function"""
 
@@ -3008,6 +3013,7 @@ __all__ = [
     "psi",
     "digamma",
     "tri_gamma",
+    "polygamma",
     "chi2sf",
     "gammainc",
     "gammaincc",
