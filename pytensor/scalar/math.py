@@ -683,6 +683,26 @@ class GammaIncC(BinaryScalarOp):
 
 gammaincc = GammaIncC(upgrade_to_float, name="gammaincc")
 
+class GammaIncInv(BinaryScalarOp):
+    """
+    Inverse to the regularized lower incomplete gamma function.
+    """
+
+    nfunc_spec = ("scipy.special.gammaincinv", 1, 1)
+
+    @staticmethod
+    def st_impl(k, x):
+        return scipy.special.gammaincinv(k, x)
+
+    def impl(self, k, x):
+        return GammaIncInv.st_impl(k, x)
+
+    def c_code(self, *args, **kwargs):
+        raise NotImplementedError()
+
+
+gammaincinv = GammaIncInv(upgrade_to_float, name="gammaincinv")
+
 
 def _make_scalar_loop(n_steps, init, constant, inner_loop_fn, name, loop_op=ScalarLoop):
     init = [as_scalar(x) if x is not None else None for x in init]
@@ -1566,6 +1586,23 @@ def betainc_grad(p, q, x, wrtp: bool):
         ),
     )
     return grad
+
+class BetaIncInv(ScalarOp):
+    """
+    Inverse of the regularized incomplete beta function.
+    """
+
+    nin = 3
+    nfunc_spec = ("scipy.special.betaincinv", 1, 1)
+
+    def impl(self, a, b, x):
+        return scipy.special.betaincinv(a, b, x)
+
+    def c_code(self, *args, **kwargs):
+        raise NotImplementedError()
+
+
+betaincinv = BetaIncInv(upgrade_to_float_no_complex, name="betaincinv")
 
 
 class Hyp2F1(ScalarOp):
