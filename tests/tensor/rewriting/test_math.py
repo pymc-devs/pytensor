@@ -29,7 +29,7 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import is_same_graph, rewrite_graph
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.printing import debugprint
-from pytensor.scalar import Pow
+from pytensor.scalar import PolyGamma, Pow, Psi, TriGamma
 from pytensor.tensor import inplace
 from pytensor.tensor.basic import Alloc, constant, join, second, switch
 from pytensor.tensor.blas import Dot22, Gemv
@@ -69,7 +69,7 @@ from pytensor.tensor.math import (
 from pytensor.tensor.math import max as at_max
 from pytensor.tensor.math import maximum
 from pytensor.tensor.math import min as at_min
-from pytensor.tensor.math import minimum, mul, neg, neq
+from pytensor.tensor.math import minimum, mul, neg, neq, polygamma
 from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.math import (
     prod,
@@ -4236,3 +4236,19 @@ def test_logdiffexp():
     np.testing.assert_almost_equal(
         f(x_test, y_test), np.log(np.exp(x_test) - np.exp(y_test))
     )
+
+
+def test_polygamma_specialization():
+    x = vector("x")
+
+    y1 = polygamma(0, x)
+    y2 = polygamma(1, x)
+    y3 = polygamma(2, x)
+
+    fn = pytensor.function(
+        [x], [y1, y2, y3], mode=get_default_mode().including("specialize")
+    )
+    fn_outs = fn.maker.fgraph.outputs
+    assert isinstance(fn_outs[0].owner.op.scalar_op, Psi)
+    assert isinstance(fn_outs[1].owner.op.scalar_op, TriGamma)
+    assert isinstance(fn_outs[2].owner.op.scalar_op, PolyGamma)

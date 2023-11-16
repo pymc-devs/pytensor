@@ -20,6 +20,7 @@ from pytensor.tensor.math import (
     iv,
     log,
     log1mexp,
+    polygamma,
     psi,
     sigmoid,
     softplus,
@@ -176,6 +177,20 @@ def test_tri_gamma():
     out = tri_gamma(x)
     fg = FunctionGraph([x], [out])
     compare_jax_and_py(fg, [np.array([3.0, 5.0])])
+
+
+def test_polygamma():
+    n = vector("n", dtype="int32")
+    x = vector("x", dtype="float32")
+    out = polygamma(n, x)
+    fg = FunctionGraph([n, x], [out])
+    compare_jax_and_py(
+        fg,
+        [
+            np.array([0, 1, 2]).astype("int32"),
+            np.array([0.5, 0.9, 2.5]).astype("float32"),
+        ],
+    )
 
 
 def test_log1mexp():
