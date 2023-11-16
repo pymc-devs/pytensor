@@ -835,7 +835,7 @@ class _tensor_py_operators:
         """
         return at.subtensor.set_subtensor(self[idx], y, **kwargs)
 
-    def add(self, idx, y, **kwargs):
+    def inc(self, idx, y, **kwargs):
         """Return a copy of self with the indexed values incremented by y.
 
         Equivalent to inc_subtensor(self[idx], y). See docstrings for kwargs.
@@ -846,7 +846,7 @@ class _tensor_py_operators:
         >>> import pytensor.tensor as pt
         >>>
         >>> x = pt.ones((3,))
-        >>> out = x.add(1, 2)
+        >>> out = x.inc(1, 2)
         >>> out.eval()  # array([1., 3., 1.])
         """
         return at.inc_subtensor(self[idx], y, **kwargs)

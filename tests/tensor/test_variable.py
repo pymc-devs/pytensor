@@ -433,13 +433,13 @@ class TestTensorInstanceMethods:
         # Test equivalent advanced indexing
         assert_array_equal(X[:, indices].eval({X: x}), x[:, indices])
 
-    def test_set_add(self):
+    def test_set_inc(self):
         x = matrix("x")
         idx = [0]
         y = 5
 
         assert equal_computations([x.set(idx, y)], [set_subtensor(x[idx], y)])
-        assert equal_computations([x.add(idx, y)], [inc_subtensor(x[idx], y)])
+        assert equal_computations([x.inc(idx, y)], [inc_subtensor(x[idx], y)])
 
     def test_set_item_error(self):
         x = matrix("x")
