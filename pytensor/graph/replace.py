@@ -314,4 +314,4 @@ def vectorize_graph(
 
 def vectorize(*args, **kwargs):
     warnings.warn("vectorize was renamed to vectorize_graph", UserWarning)
-    return vectorize_node(*args, **kwargs)
+    return vectorize_graph(*args, **kwargs)
