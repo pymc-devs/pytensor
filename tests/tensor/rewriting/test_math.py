@@ -92,7 +92,7 @@ from pytensor.tensor.rewriting.math import (
     local_grad_log_erfc_neg,
     local_greedy_distributor,
     local_mul_canonizer,
-    local_sum_prod_of_mul,
+    local_sum_prod_of_mul_or_div,
     mul_canonizer,
     parse_mul_tree,
     perform_sigm_times_exp,
@@ -2656,7 +2656,7 @@ class TestLocalSumProd:
 
     def test_sum_of_non_scalar_mul(self):
         mode = Mode("vm", optimizer="None")
-        rewrite = out2in(local_sum_prod_of_mul)
+        rewrite = out2in(local_sum_prod_of_mul_or_div)
 
         row1 = matrix(shape=(1, None), dtype="float64")
         row2 = matrix(shape=(1, None), dtype="float64")
@@ -2726,7 +2726,7 @@ class TestLocalSumProd:
 
     def test_prod_of_non_scalar_mul(self):
         mode = Mode("vm", optimizer="None")
-        rewrite = out2in(local_sum_prod_of_mul)
+        rewrite = out2in(local_sum_prod_of_mul_or_div)
 
         scl1 = matrix(shape=(1, 1), dtype="float64")
         row1 = matrix(shape=(1, None), dtype="float64")
@@ -2756,14 +2756,15 @@ class TestLocalSumProd:
                 mul(row1, row2, mat1, mat2, col1, col2).prod(axis=0),
                 (
                     mul(row1.squeeze(), row2.squeeze())
-                    ** prod([mul(mat1, mat2, col1, col2).shape[0]])
+                    ** prod([mul(mat1, mat2, col1, col2).shape[0].astype("float64")])
                     * mul(mat1, mat2, col1, col2).prod(axis=0)
                 ),
             ),
             (
                 mul(row1, mat1, mat2, col1, col2).prod(axis=0),
                 (
-                    row1.squeeze() ** prod([mul(mat1, mat2, col1, col2).shape[0]])
+                    row1.squeeze()
+                    ** prod([mul(mat1, mat2, col1, col2).shape[0].astype("float64")])
                     * mul(mat1, mat2, col1, col2).prod(axis=0)
                 ),
             ),
@@ -2771,7 +2772,7 @@ class TestLocalSumProd:
                 mul(row1, row2, mat1, mat2, col1, col2).prod(axis=1),
                 (
                     mul(col1.squeeze(), col2.squeeze())
-                    ** prod([mul(row1, row2, mat1, mat2).shape[1]])
+                    ** prod([mul(row1, row2, mat1, mat2).shape[1].astype("float64")])
                     * mul(row1, row2, mat1, mat2).prod(axis=1)
                 ),
             ),
@@ -2781,13 +2782,21 @@ class TestLocalSumProd:
             ),
             (
                 mul(row1, col1).prod(axis=0),
-                (row1.squeeze() ** prod([col1.shape[0]]) * col1.prod(axis=0)),
+                (
+                    row1.squeeze() ** prod([col1.shape[0].astype("float64")])
+                    * col1.prod(axis=0)
+                ),
             ),
             (
                 mul(scl1, mat1, row1).prod(axis=None),
                 (
                     scl1.squeeze()
-                    ** prod([mul(mat1, row1).shape[0], mul(mat1, row1).shape[1]])
+                    ** prod(
+                        [
+                            mul(mat1, row1).shape[0].astype("float64"),
+                            mul(mat1, row1).shape[1].astype("float64"),
+                        ]
+                    )
                     * mul(mat1, row1).prod(axis=None)
                 ),
             ),
@@ -3050,6 +3059,162 @@ class TestLocalSumProd:
         f = function([mat], at_sum(-mat), mode=m0)
         assert check_stack_trace(f, ops_to_check=[Sum])
 
+    def test_local_sum_of_div(self):
+        a = matrix("a")
+        b = vector("b")
+        c = tensor3("c")
+        d = scalar("d")
+        sum = at_sum
+        sums = [
+            sum(a / d),
+            sum(a / d.dimshuffle("x", "x")),
+            sum(a / d.dimshuffle("x", "x"), axis=0),
+            sum(a / d.dimshuffle("x", "x"), axis=1),
+            sum(b / d),
+            sum(b / d.dimshuffle("x")),
+            sum(c / d),
+            sum(c / d.dimshuffle("x", "x", "x")),
+            sum(c / d.dimshuffle("x", "x", "x"), axis=0),
+            sum(c / d.dimshuffle("x", "x", "x"), axis=1),
+            sum(c / d.dimshuffle("x", "x", "x"), axis=2),
+            sum(a / b, axis=0),
+            sum(a / b.dimshuffle(0, "x"), axis=1),
+            sum(a.dimshuffle(0, 1) / b.dimshuffle(0, "x"), axis=1),
+            sum(a.dimshuffle(1, 0) / b.dimshuffle(0, "x"), axis=1),
+            sum(c / a, axis=0),
+            sum(c / a.dimshuffle(1, 0), axis=0),
+            sum(c / a.dimshuffle(0, "x", 1), axis=1),
+            sum(c / a.dimshuffle(1, "x", 0), axis=1),
+            sum(c / a.dimshuffle(0, 1, "x"), axis=2),
+            sum(c / a.dimshuffle(1, 0, "x"), axis=2),
+            sum(c / b, axis=0),
+            sum(c / b, axis=1),
+            sum(c / b, axis=(0, 1)),
+            sum(c / b.dimshuffle(0, "x"), axis=0),
+            sum(c / b.dimshuffle(0, "x"), axis=2),
+            sum(c / b.dimshuffle(0, "x"), axis=(0, 2)),
+            sum(c / b.dimshuffle(0, "x", "x"), axis=1),
+            sum(c / b.dimshuffle(0, "x", "x"), axis=2),
+            sum(c / b.dimshuffle(0, "x", "x"), axis=(1, 2)),
+            sum(sum(c, axis=0) / b, axis=0),
+            sum(sum(c, axis=1) / b, axis=0),
+        ]
+
+        rng = np.random.default_rng(utt.fetch_seed())
+        a_val = rng.standard_normal((2, 2)).astype(config.floatX)
+        b_val = rng.standard_normal(2).astype(config.floatX)
+        c_val = rng.standard_normal((2, 2, 2)).astype(config.floatX)
+        d_val = np.asarray(rng.standard_normal(), config.floatX)
+
+        for i, s in enumerate(sums):
+            f = function([a, b, c, d], s, mode=self.mode, on_unused_input="ignore")
+            g = f.maker.fgraph.toposort()
+            assert isinstance(g[-1].op.scalar_op, aes.basic.TrueDiv)
+            f(a_val, b_val, c_val, d_val)
+
+    def test_local_prod_of_div(self):
+        a = matrix("a")
+        b = vector("b")
+        c = tensor3("c")
+        e = matrix("e")
+        d = scalar("d")
+        prods = [
+            prod(a / d),
+            prod(a / d.dimshuffle("x", "x")),
+            prod(a / d.dimshuffle("x", "x"), axis=0),
+            prod(a / d.dimshuffle("x", "x"), axis=1),
+            prod(b / d),
+            prod(b / d.dimshuffle("x")),
+            prod(c / d),
+            prod(c / d.dimshuffle("x", "x", "x")),
+            prod(c / d.dimshuffle("x", "x", "x"), axis=0),
+            prod(c / d.dimshuffle("x", "x", "x"), axis=1),
+            prod(c / d.dimshuffle("x", "x", "x"), axis=2),
+            prod(a / b, axis=0),
+            prod(a / b.dimshuffle(0, "x"), axis=1),
+            prod(a.dimshuffle(0, 1) / b.dimshuffle(0, "x"), axis=1),
+            prod(a.dimshuffle(1, 0) / b.dimshuffle(0, "x"), axis=1),
+            prod(c / a, axis=0),
+            prod(c / a.dimshuffle(1, 0), axis=0),
+            prod(c / a.dimshuffle(0, "x", 1), axis=1),
+            prod(c / a.dimshuffle(1, "x", 0), axis=1),
+            prod(c / a.dimshuffle(0, 1, "x"), axis=2),
+            prod(c / a.dimshuffle(1, 0, "x"), axis=2),
+            prod(c / b, axis=0),
+            prod(c / b, axis=1),
+            prod(c / b, axis=(0, 1)),
+            prod(c / b.dimshuffle(0, "x"), axis=0),
+            prod(c / b.dimshuffle(0, "x"), axis=2),
+            prod(c / b.dimshuffle(0, "x"), axis=(0, 2)),
+            prod(c / b.dimshuffle(0, "x", "x"), axis=1),
+            prod(c / b.dimshuffle(0, "x", "x"), axis=2),
+            prod(c / b.dimshuffle(0, "x", "x"), axis=(1, 2)),
+            prod(c / b.dimshuffle(0, "x", "x"), axis=(0, 1)),
+            prod(c / b.dimshuffle(0, "x", "x"), axis=(1, 0)),
+            prod(prod(c, axis=0) / b, axis=0),
+            prod(prod(c, axis=1) / b, axis=0),
+        ]
+
+        rng = np.random.default_rng(utt.fetch_seed())
+        a_val = rng.standard_normal((2, 2)).astype(config.floatX)
+        b_val = rng.standard_normal(2).astype(config.floatX)
+        c_val = rng.standard_normal((2, 2, 2)).astype(config.floatX)
+        d_val = np.asarray(rng.standard_normal(), config.floatX)
+
+        default_mode = get_default_mode()
+        # `FusionOptimizer` is included to make sure that `expected_outer_operator`
+        # remains the same for all rewrite modes.
+        mode_with_rewrite = default_mode.including(
+            "local_sum_prod_of_mul_or_div", "FusionOptimizer"
+        )
+        mode_without_rewrite = default_mode.excluding("local_sum_prod_of_mul_or_div")
+
+        # Numerical tests: tests whether the numerical values with and without
+        # rewrites are equal or not.
+        for i, s in enumerate(prods):
+            f = function(
+                [a, b, c, d], s, on_unused_input="ignore", mode=mode_without_rewrite
+            )
+            g = function(
+                [a, b, c, d], s, on_unused_input="ignore", mode=mode_with_rewrite
+            )
+
+            utt.assert_allclose(
+                f(a_val, b_val, c_val, d_val), g(a_val, b_val, c_val, d_val)
+            )
+
+        # Logical tests: tests whether the rewrite has been appplied or not
+        # by checking graph structure.
+        prods = [
+            prod(a / e),
+            prod(a / d),
+            prod(a / d.dimshuffle("x", "x")),
+            prod(c / d.dimshuffle("x", "x", "x"), axis=1),
+            prod(a.dimshuffle(1, 0) / b.dimshuffle(0, "x"), axis=1),
+            prod(c / b.dimshuffle(0, "x", "x"), axis=(1, 0)),
+            prod(prod(c, axis=1) / b, axis=0),
+            prod(prod(c, axis=(1, 2)) / b, axis=0),
+        ]
+
+        expected_outer_operator = [
+            aes.basic.Mul,
+            aes.basic.Composite,
+            aes.basic.Composite,
+            aes.basic.TrueDiv,
+            aes.basic.Composite,
+            aes.basic.Mul,
+            aes.basic.Composite,
+            aes.basic.Mul,
+        ]
+
+        for i, s in enumerate(prods):
+            g = function(
+                [a, b, c, d, e], s, on_unused_input="ignore", mode=mode_with_rewrite
+            )
+            assert isinstance(
+                g.maker.fgraph.toposort()[-1].op.scalar_op, expected_outer_operator[i]
+            )
+
 
 class TestLocalReduce:
     def setup_method(self):
@@ -3183,171 +3348,6 @@ class TestLocalReduce:
         # https://groups.google.com/d/topic/theano-users/EDgyCU00fFA/discussion
         out = at_sum([vx, vy, vz], axis=None)
         f = function([vx, vy, vz], out)
-
-
-class TestLocalSumProdDimshuffle:
-    def setup_method(self):
-        self.mode = get_default_mode().including("canonicalize")
-
-    def test_local_sum_div_dimshuffle(self):
-        a = matrix("a")
-        b = vector("b")
-        c = tensor3("c")
-        d = scalar("d")
-        sum = at_sum
-        sums = [
-            sum(a / d),
-            sum(a / d.dimshuffle("x", "x")),
-            sum(a / d.dimshuffle("x", "x"), axis=0),
-            sum(a / d.dimshuffle("x", "x"), axis=1),
-            sum(b / d),
-            sum(b / d.dimshuffle("x")),
-            sum(c / d),
-            sum(c / d.dimshuffle("x", "x", "x")),
-            sum(c / d.dimshuffle("x", "x", "x"), axis=0),
-            sum(c / d.dimshuffle("x", "x", "x"), axis=1),
-            sum(c / d.dimshuffle("x", "x", "x"), axis=2),
-            sum(a / b, axis=0),
-            sum(a / b.dimshuffle(0, "x"), axis=1),
-            sum(a.dimshuffle(0, 1) / b.dimshuffle(0, "x"), axis=1),
-            sum(a.dimshuffle(1, 0) / b.dimshuffle(0, "x"), axis=1),
-            sum(c / a, axis=0),
-            sum(c / a.dimshuffle(1, 0), axis=0),
-            sum(c / a.dimshuffle(0, "x", 1), axis=1),
-            sum(c / a.dimshuffle(1, "x", 0), axis=1),
-            sum(c / a.dimshuffle(0, 1, "x"), axis=2),
-            sum(c / a.dimshuffle(1, 0, "x"), axis=2),
-            sum(c / b, axis=0),
-            sum(c / b, axis=1),
-            sum(c / b, axis=(0, 1)),
-            sum(c / b.dimshuffle(0, "x"), axis=0),
-            sum(c / b.dimshuffle(0, "x"), axis=2),
-            sum(c / b.dimshuffle(0, "x"), axis=(0, 2)),
-            sum(c / b.dimshuffle(0, "x", "x"), axis=1),
-            sum(c / b.dimshuffle(0, "x", "x"), axis=2),
-            sum(c / b.dimshuffle(0, "x", "x"), axis=(1, 2)),
-            sum(sum(c, axis=0) / b, axis=0),
-            sum(sum(c, axis=1) / b, axis=0),
-        ]
-
-        rng = np.random.default_rng(utt.fetch_seed())
-        a_val = rng.standard_normal((2, 2)).astype(config.floatX)
-        b_val = rng.standard_normal(2).astype(config.floatX)
-        c_val = rng.standard_normal((2, 2, 2)).astype(config.floatX)
-        d_val = np.asarray(rng.standard_normal(), config.floatX)
-
-        for i, s in enumerate(sums):
-            f = function([a, b, c, d], s, mode=self.mode, on_unused_input="ignore")
-            g = f.maker.fgraph.toposort()
-            assert isinstance(g[-1].op.scalar_op, aes.basic.TrueDiv)
-            f(a_val, b_val, c_val, d_val)
-
-    def test_local_prod_div_dimshuffle(self):
-        a = matrix("a")
-        b = vector("b")
-        c = tensor3("c")
-        e = matrix("e")
-        d = scalar("d")
-        prods = [
-            prod(a / d),
-            prod(a / d.dimshuffle("x", "x")),
-            prod(a / d.dimshuffle("x", "x"), axis=0),
-            prod(a / d.dimshuffle("x", "x"), axis=1),
-            prod(b / d),
-            prod(b / d.dimshuffle("x")),
-            prod(c / d),
-            prod(c / d.dimshuffle("x", "x", "x")),
-            prod(c / d.dimshuffle("x", "x", "x"), axis=0),
-            prod(c / d.dimshuffle("x", "x", "x"), axis=1),
-            prod(c / d.dimshuffle("x", "x", "x"), axis=2),
-            prod(a / b, axis=0),
-            prod(a / b.dimshuffle(0, "x"), axis=1),
-            prod(a.dimshuffle(0, 1) / b.dimshuffle(0, "x"), axis=1),
-            prod(a.dimshuffle(1, 0) / b.dimshuffle(0, "x"), axis=1),
-            prod(c / a, axis=0),
-            prod(c / a.dimshuffle(1, 0), axis=0),
-            prod(c / a.dimshuffle(0, "x", 1), axis=1),
-            prod(c / a.dimshuffle(1, "x", 0), axis=1),
-            prod(c / a.dimshuffle(0, 1, "x"), axis=2),
-            prod(c / a.dimshuffle(1, 0, "x"), axis=2),
-            prod(c / b, axis=0),
-            prod(c / b, axis=1),
-            prod(c / b, axis=(0, 1)),
-            prod(c / b.dimshuffle(0, "x"), axis=0),
-            prod(c / b.dimshuffle(0, "x"), axis=2),
-            prod(c / b.dimshuffle(0, "x"), axis=(0, 2)),
-            prod(c / b.dimshuffle(0, "x", "x"), axis=1),
-            prod(c / b.dimshuffle(0, "x", "x"), axis=2),
-            prod(c / b.dimshuffle(0, "x", "x"), axis=(1, 2)),
-            prod(c / b.dimshuffle(0, "x", "x"), axis=(0, 1)),
-            prod(c / b.dimshuffle(0, "x", "x"), axis=(1, 0)),
-            prod(prod(c, axis=0) / b, axis=0),
-            prod(prod(c, axis=1) / b, axis=0),
-        ]
-
-        rng = np.random.default_rng(utt.fetch_seed())
-        a_val = rng.standard_normal((2, 2)).astype(config.floatX)
-        b_val = rng.standard_normal(2).astype(config.floatX)
-        c_val = rng.standard_normal((2, 2, 2)).astype(config.floatX)
-        d_val = np.asarray(rng.standard_normal(), config.floatX)
-
-        default_mode = get_default_mode()
-        # `FusionOptimizer` is included to make sure that `expected_outer_operator`
-        # remains the same for all rewrite modes.
-        mode_with_rewrite = default_mode.including(
-            "local_sum_prod_div_dimshuffle", "FusionOptimizer"
-        )
-        mode_without_rewrite = default_mode.excluding("local_sum_prod_div_dimshuffle")
-
-        # Numerical tests: tests whether the numerical values with and without
-        # rewrites are equal or not.
-        for i, s in enumerate(prods):
-            f = function(
-                [a, b, c, d], s, on_unused_input="ignore", mode=mode_without_rewrite
-            )
-            g = function(
-                [a, b, c, d], s, on_unused_input="ignore", mode=mode_with_rewrite
-            )
-
-            utt.assert_allclose(
-                f(a_val, b_val, c_val, d_val), g(a_val, b_val, c_val, d_val)
-            )
-
-        # Logical tests: tests whether the rewrite has been appplied or not
-        # by checking graph structure.
-        prods = [
-            prod(a / e),
-            prod(a / d),
-            prod(a / d.dimshuffle("x", "x")),
-            prod(c / d.dimshuffle("x", "x", "x"), axis=1),
-            prod(a.dimshuffle(1, 0) / b.dimshuffle(0, "x"), axis=1),
-            prod(c / b.dimshuffle(0, "x", "x"), axis=(1, 0)),
-            prod(prod(c, axis=1) / b, axis=0),
-            prod(prod(c, axis=(1, 2)) / b, axis=0),
-        ]
-
-        expected_outer_operator = [
-            aes.basic.Mul,
-            aes.basic.Composite,
-            aes.basic.Composite,
-            aes.basic.TrueDiv,
-            aes.basic.Composite,
-            aes.basic.Mul,
-            aes.basic.Composite,
-            aes.basic.Mul,
-        ]
-
-        for i, s in enumerate(prods):
-            g = function(
-                [a, b, c, d, e], s, on_unused_input="ignore", mode=mode_with_rewrite
-            )
-            assert isinstance(
-                g.maker.fgraph.toposort()[-1].op.scalar_op, expected_outer_operator[i]
-            )
-
-    # TODO:
-    # test_local_sum_prod_dimshuffle (a * b * c)
-    # test_local_sum_divprod_dimshuffle ((a * b) / (c * d))
 
 
 def test_local_useless_adds():
@@ -3534,7 +3534,6 @@ def test_local_mul_exp_to_exp_add():
     # e^x * e^y * e^z * e^w = e^(x+y+z+w)
     op = expx * expy * expz * expw
     f = function([x, y, z, w], op, mode)
-    pytensor.dprint(f)
     utt.assert_allclose(f(3, 4, 5, 6), np.exp(3 + 4 + 5 + 6))
     graph = f.maker.fgraph.toposort()
     assert all(isinstance(n.op, Elemwise) for n in graph)
