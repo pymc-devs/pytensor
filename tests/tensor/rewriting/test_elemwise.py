@@ -899,7 +899,7 @@ class TestFusion:
                 ),
                 (fx, fy),
                 (fxv, fyv),
-                3,
+                2,
                 (
                     np.sum(-((fxv - fyv) ** 2) / 2),
                     -(fxv - fyv),
