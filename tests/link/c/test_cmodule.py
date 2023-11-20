@@ -6,6 +6,7 @@ deterministic based on the input type and the op.
 """
 import multiprocessing
 import os
+import re
 import sys
 import tempfile
 from unittest.mock import MagicMock, patch
@@ -207,23 +208,51 @@ def cxx_search_dirs(blas_libs, mock_system):
         yield f"libraries: ={d}".encode(sys.stdout.encoding), flags
 
 
+@pytest.fixture(
+    scope="function", params=[False, True], ids=["Working_CXX", "Broken_CXX"]
+)
+def cxx_search_dirs_status(request):
+    return request.param
+
+
 @patch("pytensor.link.c.cmodule.std_lib_dirs", return_value=[])
 @patch("pytensor.link.c.cmodule.check_mkl_openmp", return_value=None)
 def test_default_blas_ldflags(
-    mock_std_lib_dirs, mock_check_mkl_openmp, cxx_search_dirs
+    mock_std_lib_dirs, mock_check_mkl_openmp, cxx_search_dirs, cxx_search_dirs_status
 ):
     cxx_search_dirs, expected_blas_ldflags = cxx_search_dirs
     mock_process = MagicMock()
-    mock_process.communicate = lambda *args, **kwargs: (cxx_search_dirs, None)
+    if cxx_search_dirs_status:
+        error_message = ""
+        mock_process.communicate = lambda *args, **kwargs: (cxx_search_dirs, b"")
+        mock_process.returncode = 0
+    else:
+        error_message = "Unsupported argument -print-search-dirs"
+        error_message_bytes = error_message.encode(sys.stderr.encoding)
+        mock_process.communicate = lambda *args, **kwargs: (b"", error_message_bytes)
+        mock_process.returncode = 1
     with patch("pytensor.link.c.cmodule.subprocess_Popen", return_value=mock_process):
         with patch.object(
             pytensor.link.c.cmodule.GCC_compiler,
             "try_compile_tmp",
             return_value=(True, True),
         ):
-            assert set(default_blas_ldflags().split(" ")) == set(
-                expected_blas_ldflags.split(" ")
-            )
+            if cxx_search_dirs_status:
+                assert set(default_blas_ldflags().split(" ")) == set(
+                    expected_blas_ldflags.split(" ")
+                )
+            else:
+                expected_warning = re.escape(
+                    "Pytensor cxx failed to communicate its search dirs. As a consequence, "
+                    "it might not be possible to automatically determine the blas link flags to use.\n"
+                    f"Command that was run: {config.cxx} -print-search-dirs\n"
+                    f"Output printed to stderr: {error_message}"
+                )
+                with pytest.warns(
+                    UserWarning,
+                    match=expected_warning,
+                ):
+                    assert default_blas_ldflags() == ""
 
 
 def test_default_blas_ldflags_no_cxx():

@@ -2731,6 +2731,15 @@ def default_blas_ldflags():
             shell=True,
         )
         (stdout, stderr) = p.communicate(input=b"")
+        if p.returncode != 0:
+            warnings.warn(
+                "Pytensor cxx failed to communicate its search dirs. As a consequence, "
+                "it might not be possible to automatically determine the blas link flags to use.\n"
+                f"Command that was run: {config.cxx} -print-search-dirs\n"
+                f"Output printed to stderr: {stderr.decode(sys.stderr.encoding)}"
+            )
+            return []
+
         maybe_lib_dirs = [
             [pathlib.Path(p).resolve() for p in line[len("libraries: =") :].split(":")]
             for line in stdout.decode(sys.stdout.encoding).splitlines()
