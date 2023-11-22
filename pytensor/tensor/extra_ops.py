@@ -145,7 +145,7 @@ class SearchsortedOp(COp):
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[1]]
 
-    def perform(self, node, inputs, output_storage, params):
+    def perform(self, node, inputs, output_storage):
         x = inputs[0]
         v = inputs[1]
         if len(node.inputs) == 3:
@@ -154,7 +154,7 @@ class SearchsortedOp(COp):
             sorter = None
         z = output_storage[0]
 
-        z[0] = np.searchsorted(x, v, side=params, sorter=sorter).astype(
+        z[0] = np.searchsorted(x, v, side=self.side, sorter=sorter).astype(
             node.outputs[0].dtype
         )
 
@@ -310,7 +310,7 @@ class CumOp(COp):
 
         return Apply(self, [x], [out_type])
 
-    def perform(self, node, inputs, output_storage, params):
+    def perform(self, node, inputs, output_storage):
         x = inputs[0]
         z = output_storage[0]
         if self.mode == "add":

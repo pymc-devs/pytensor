@@ -3991,11 +3991,11 @@ class AllocEmpty(COp):
         output.tag.nan_guard_mode_check = False
         return Apply(self, _shape, [output])
 
-    def debug_perform(self, node, inputs, out_, params):
-        self.perform(node, inputs, out_, params)
+    def debug_perform(self, node, inputs, out_):
+        self.perform(node, inputs, out_)
         out_[0][0].fill(-123456789)
 
-    def perform(self, node, inputs, out_, params):
+    def perform(self, node, inputs, out_):
         (out,) = out_
         sh = tuple([int(i) for i in inputs])
         if out[0] is None or out[0].shape != sh:

@@ -1658,7 +1658,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         rval.lazy = False
         return rval
 
-    def perform(self, node, inputs, output_storage, params=None):
+    def perform(self, node, inputs, output_storage):
         """Compute the scan operation in Python.
 
         The `inputs` are packed like this:

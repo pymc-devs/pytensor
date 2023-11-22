@@ -48,7 +48,7 @@ def local_max_and_argmax(fgraph, node):
     If we don't use the argmax, change it to a max only.
     """
     if isinstance(node.op, MaxAndArgmax):
-        axis = node.op.get_params(node)
+        axis = node.op.axis
         if len(fgraph.clients[node.outputs[1]]) == 0:
             new = Max(axis)(node.inputs[0])
             copy_stack_trace(node.outputs[0], new)

@@ -2474,7 +2474,7 @@ class AdvancedIncSubtensor1(COp):
     def c_code_cache_version(self):
         return (8,)
 
-    def perform(self, node, inp, out_, params):
+    def perform(self, node, inp, out_):
         x, y, idx = inp
         (out,) = out_
         if not self.inplace:

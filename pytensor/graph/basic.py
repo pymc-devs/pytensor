@@ -30,7 +30,6 @@ import numpy as np
 from pytensor.configdefaults import config
 from pytensor.graph.utils import (
     MetaObject,
-    MethodNotDefined,
     Scratchpad,
     TestValueError,
     ValidatingScratchpad,
@@ -150,16 +149,6 @@ class Apply(Node, Generic[OpType]):
                 raise TypeError(
                     f"The 'outputs' argument to Apply must contain Variable instances with no owner, not {output}"
                 )
-
-    def run_params(self):
-        """
-        Returns the params for the node, or NoParams if no params is set.
-
-        """
-        try:
-            return self.op.get_params(self)
-        except MethodNotDefined:
-            return NoParams
 
     def __getstate__(self):
         d = self.__dict__

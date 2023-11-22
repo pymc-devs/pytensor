@@ -237,7 +237,7 @@ class Shape_i(COp):
             raise TypeError(f"{x} has too few dimensions for Shape_i")
         return Apply(self, [x], [pytensor.tensor.type.lscalar()])
 
-    def perform(self, node, inp, out_, params):
+    def perform(self, node, inp, out_):
         (x,) = inp
         (out,) = out_
         if out[0] is None:
@@ -668,7 +668,7 @@ class Reshape(COp):
 
         return Apply(self, [x, shp], [tensor(dtype=x.type.dtype, shape=out_shape)])
 
-    def perform(self, node, inp, out_, params=None):
+    def perform(self, node, inp, out_):
         x, shp = inp
         (out,) = out_
         if len(shp) != self.ndim:

@@ -152,9 +152,9 @@ class MaxAndArgmax(COp):
         ]
         return Apply(self, inputs, outputs)
 
-    def perform(self, node, inp, outs, params):
+    def perform(self, node, inp, outs):
         x = inp[0]
-        axes = params
+        axes = self.axis
         max, max_idx = outs
         if axes is None:
             axes = tuple(range(x.ndim))
@@ -374,7 +374,7 @@ class Argmax(COp):
                 "You are trying to compile a graph with an old Argmax node.  Either reoptimize your graph or rebuild it to get the new node format."
             )
 
-    def perform(self, node, inp, outs, params):
+    def perform(self, node, inp, outs):
         (x,) = inp
         axes = self.axis
         (max_idx,) = outs
