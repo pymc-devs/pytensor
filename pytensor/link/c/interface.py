@@ -1,9 +1,14 @@
+import typing
 import warnings
 from abc import abstractmethod
-from typing import Callable
+from typing import Callable, Optional
 
 from pytensor.graph.basic import Apply, Constant
 from pytensor.graph.utils import MethodNotDefined
+
+
+if typing.TYPE_CHECKING:
+    from pytensor.link.c.params_type import Params, ParamsType
 
 
 class CLinkerObject:
@@ -171,6 +176,8 @@ class CLinkerObject:
 
 class CLinkerOp(CLinkerObject):
     """Interface definition for `Op` subclasses compiled by `CLinker`."""
+
+    params_type: Optional["ParamsType"] = None
 
     @abstractmethod
     def c_code(
@@ -361,6 +368,22 @@ class CLinkerOp(CLinkerObject):
 
         """
         return ""
+
+    def get_params(self, node: Apply) -> "Params":
+        """Try to get parameters for the `Op` when :attr:`Op.params_type` is set to a `ParamsType`."""
+        if self.params_type is not None:
+            wrapper = self.params_type
+            if not all(hasattr(self, field) for field in wrapper.fields):
+                # Let's print missing attributes for debugging.
+                not_found = tuple(
+                    field for field in wrapper.fields if not hasattr(self, field)
+                )
+                raise AttributeError(
+                    f"{type(self).__name__}: missing attributes {not_found} for ParamsType."
+                )
+            # ParamsType.get_params() will apply filtering to attributes.
+            return self.params_type.get_params(self)
+        raise MethodNotDefined("get_params")
 
 
 class CLinkerType(CLinkerObject):

@@ -90,7 +90,7 @@ class CheckAndRaise(COp):
             [value.type()],
         )
 
-    def perform(self, node, inputs, outputs, params):
+    def perform(self, node, inputs, outputs):
         (out,) = outputs
         val, *conds = inputs
         out[0] = val

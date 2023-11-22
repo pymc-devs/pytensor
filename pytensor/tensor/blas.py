@@ -207,7 +207,7 @@ class Gemv(Op):
 
         return Apply(self, inputs, [y.type()])
 
-    def perform(self, node, inputs, out_storage, params=None):
+    def perform(self, node, inputs, out_storage):
         y, alpha, A, x, beta = inputs
         if (
             have_fblas
@@ -309,7 +309,7 @@ class Ger(Op):
 
         return Apply(self, inputs, [A.type()])
 
-    def perform(self, node, inp, out, params=None):
+    def perform(self, node, inp, out):
         cA, calpha, cx, cy = inp
         (cZ,) = out
         if self.destructive:
@@ -912,12 +912,12 @@ class Gemm(GemmRelated):
         output = z.type()
         return Apply(self, inputs, [output])
 
-    def perform(self, node, inp, out, params):
+    def perform(self, node, inp, out):
         z, a, x, y, b = inp
         (zout,) = out
         assert a.shape == ()
         assert b.shape == ()
-        if not params.inplace:
+        if not self.inplace:
             z = z.copy()  # the original z will not be changed
         if z.shape == ():
             z.itemset(z * a + b * np.dot(x, y))

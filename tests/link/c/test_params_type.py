@@ -31,7 +31,8 @@ class QuadraticOpFunc(COp):
         x = at.as_tensor_variable(x)
         return Apply(self, [x], [x.type()])
 
-    def perform(self, node, inputs, output_storage, coefficients):
+    def perform(self, node, inputs, output_storage):
+        coefficients = self.params_type.filter(self.get_params(node))
         x = inputs[0]
         y = output_storage[0]
         y[0] = coefficients.a * (x**2) + coefficients.b * x + coefficients.c
@@ -117,7 +118,8 @@ class QuadraticCOpFunc(ExternalCOp):
         x = at.as_tensor_variable(x)
         return Apply(self, [x], [x.type()])
 
-    def perform(self, node, inputs, output_storage, coefficients):
+    def perform(self, node, inputs, output_storage):
+        coefficients = self.params_type.filter(self.get_params(node))
         x = inputs[0]
         y = output_storage[0]
         y[0] = coefficients.a * (x**2) + coefficients.b * x + coefficients.c

@@ -20,6 +20,7 @@ from pytensor.graph.basic import (
     io_toposort,
     vars_between,
 )
+from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.basic import Container, Linker, LocalLinker, PerformLinker
 from pytensor.link.c.cmodule import (
     METH_VARARGS,
@@ -617,7 +618,12 @@ class CLinker(Linker):
         # that needs it
         self.node_params = dict()
         for node in self.node_order:
-            params = node.run_params()
+            if not isinstance(node.op, CLinkerOp):
+                continue
+            try:
+                params = node.op.get_params(node)
+            except MethodNotDefined:
+                params = NoParams
             if params is not NoParams:
                 # try to avoid creating more than one variable for the
                 # same params.
@@ -803,7 +809,10 @@ class CLinker(Linker):
 
             sub = dict(failure_var=failure_var)
 
-            params = node.run_params()
+            try:
+                params = op.get_params(node)
+            except MethodNotDefined:
+                params = NoParams
             if params is not NoParams:
                 params_var = symbol[self.node_params[params]]
 

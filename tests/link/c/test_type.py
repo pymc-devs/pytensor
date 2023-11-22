@@ -117,7 +117,8 @@ class MyOpEnumList(COp):
     def make_node(self, a, b):
         return Apply(self, [aes.as_scalar(a), aes.as_scalar(b)], [aes.float64()])
 
-    def perform(self, node, inputs, outputs, op):
+    def perform(self, node, inputs, outputs):
+        op = self.params_type.filter(self.get_params(node))
         a, b = inputs
         (o,) = outputs
         if op == self.params_type.ADD:

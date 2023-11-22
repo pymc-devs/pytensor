@@ -233,7 +233,7 @@ class DimShuffle(ExternalCOp):
             return f"Transpose{{axes={self.shuffle}}}"
         return f"DimShuffle{{order=[{','.join(map(str, self.new_order))}]}}"
 
-    def perform(self, node, inp, out, params=None):
+    def perform(self, node, inp, out):
         (res,) = inp
         (storage,) = out
 
