@@ -17,7 +17,9 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import (
     Apply,
     Constant,
+    NominalVariable,
     Variable,
+    ancestors,
     apply_depends_on,
     equal_computations,
     graph_inputs,
@@ -1950,11 +1952,13 @@ class ScanMerge(GraphRewriter):
         Questionable, we should also consider profile ?
 
         """
-        rep = set_nodes[0]
+        op = node.op
+        rep_node = set_nodes[0]
+        rep_op = rep_node.op
         if (
-            rep.op.info.as_while != node.op.info.as_while
-            or node.op.truncate_gradient != rep.op.truncate_gradient
-            or node.op.mode != rep.op.mode
+            op.info.as_while != rep_op.info.as_while
+            or op.truncate_gradient != rep_op.truncate_gradient
+            or op.mode != rep_op.mode
         ):
             return False
 
@@ -1964,7 +1968,7 @@ class ScanMerge(GraphRewriter):
         except NotScalarConstantError:
             pass
 
-        rep_nsteps = rep.inputs[0]
+        rep_nsteps = rep_node.inputs[0]
         try:
             rep_nsteps = int(get_underlying_scalar_constant_value(rep_nsteps))
         except NotScalarConstantError:
@@ -1978,13 +1982,40 @@ class ScanMerge(GraphRewriter):
             if apply_depends_on(node, nd) or apply_depends_on(nd, node):
                 return False
 
-        if not node.op.info.as_while:
+        if not op.info.as_while:
             return True
-        cond = node.op.inner_outputs[-1]
-        rep_cond = rep.op.inner_outputs[-1]
-        return equal_computations(
-            [cond], [rep_cond], node.op.inner_inputs, rep.op.inner_inputs
-        )
+
+        # We need to check the while conditions are identical
+        conds = [op.inner_outputs[-1]]
+        rep_conds = [rep_op.inner_outputs[-1]]
+        if not equal_computations(
+            conds, rep_conds, op.inner_inputs, rep_op.inner_inputs
+        ):
+            return False
+
+        # If they depend on inner inputs we need to check for equivalence on the respective outer inputs
+        nominal_inputs = [a for a in ancestors(conds) if isinstance(a, NominalVariable)]
+        if not nominal_inputs:
+            return True
+        rep_nominal_inputs = [
+            a for a in ancestors(rep_conds) if isinstance(a, NominalVariable)
+        ]
+
+        conds = []
+        rep_conds = []
+        mapping = op.get_oinp_iinp_iout_oout_mappings()["outer_inp_from_inner_inp"]
+        rep_mapping = rep_op.get_oinp_iinp_iout_oout_mappings()[
+            "outer_inp_from_inner_inp"
+        ]
+        inner_inputs = op.inner_inputs
+        rep_inner_inputs = rep_op.inner_inputs
+        for nominal_input, rep_nominal_input in zip(nominal_inputs, rep_nominal_inputs):
+            conds.append(node.inputs[mapping[inner_inputs.index(nominal_input)]])
+            rep_conds.append(
+                rep_node.inputs[rep_mapping[rep_inner_inputs.index(rep_nominal_input)]]
+            )
+
+        return equal_computations(conds, rep_conds)
 
     def apply(self, fgraph):
         # Collect all scan nodes ordered according to toposort

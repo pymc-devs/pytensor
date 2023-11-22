@@ -15,6 +15,7 @@ from pytensor.graph.replace import clone_replace
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import ScanInplaceOptimizer, ScanMerge
 from pytensor.scan.utils import until
+from pytensor.tensor import stack
 from pytensor.tensor.blas import Dot22
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot, dot, sigmoid
@@ -796,7 +797,13 @@ class TestPushOutAddScan:
 
 
 class TestScanMerge:
-    mode = get_default_mode().including("scan")
+    mode = get_default_mode().including("scan").excluding("scan_pushout_seqs_ops")
+
+    @staticmethod
+    def count_scans(fn):
+        nodes = fn.maker.fgraph.apply_nodes
+        scans = [node for node in nodes if isinstance(node.op, Scan)]
+        return len(scans)
 
     def test_basic(self):
         x = vector()
@@ -808,56 +815,38 @@ class TestScanMerge:
         sx, upx = scan(sum, sequences=[x])
         sy, upy = scan(sum, sequences=[y])
 
-        f = function(
-            [x, y], [sx, sy], mode=self.mode.excluding("scan_pushout_seqs_ops")
-        )
-        topo = f.maker.fgraph.toposort()
-        scans = [n for n in topo if isinstance(n.op, Scan)]
-        assert len(scans) == 2
+        f = function([x, y], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 2
 
         sx, upx = scan(sum, sequences=[x], n_steps=2)
         sy, upy = scan(sum, sequences=[y], n_steps=3)
 
-        f = function(
-            [x, y], [sx, sy], mode=self.mode.excluding("scan_pushout_seqs_ops")
-        )
-        topo = f.maker.fgraph.toposort()
-        scans = [n for n in topo if isinstance(n.op, Scan)]
-        assert len(scans) == 2
+        f = function([x, y], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 2
 
         sx, upx = scan(sum, sequences=[x], n_steps=4)
         sy, upy = scan(sum, sequences=[y], n_steps=4)
 
-        f = function(
-            [x, y], [sx, sy], mode=self.mode.excluding("scan_pushout_seqs_ops")
-        )
-        topo = f.maker.fgraph.toposort()
-        scans = [n for n in topo if isinstance(n.op, Scan)]
-        assert len(scans) == 1
+        f = function([x, y], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 1
 
         sx, upx = scan(sum, sequences=[x])
         sy, upy = scan(sum, sequences=[x])
 
-        f = function([x], [sx, sy], mode=self.mode.excluding("scan_pushout_seqs_ops"))
-        topo = f.maker.fgraph.toposort()
-        scans = [n for n in topo if isinstance(n.op, Scan)]
-        assert len(scans) == 1
+        f = function([x], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 1
 
         sx, upx = scan(sum, sequences=[x])
         sy, upy = scan(sum, sequences=[x], mode="FAST_COMPILE")
 
-        f = function([x], [sx, sy], mode=self.mode.excluding("scan_pushout_seqs_ops"))
-        topo = f.maker.fgraph.toposort()
-        scans = [n for n in topo if isinstance(n.op, Scan)]
-        assert len(scans) == 1
+        f = function([x], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 1
 
         sx, upx = scan(sum, sequences=[x])
         sy, upy = scan(sum, sequences=[x], truncate_gradient=1)
 
-        f = function([x], [sx, sy], mode=self.mode.excluding("scan_pushout_seqs_ops"))
-        topo = f.maker.fgraph.toposort()
-        scans = [n for n in topo if isinstance(n.op, Scan)]
-        assert len(scans) == 2
+        f = function([x], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 2
 
     def test_three_scans(self):
         r"""
@@ -877,12 +866,8 @@ class TestScanMerge:
         sy, upy = scan(sum, sequences=[2 * y + 2], n_steps=4, name="Y")
         sz, upz = scan(sum, sequences=[sx], n_steps=4, name="Z")
 
-        f = function(
-            [x, y], [sy, sz], mode=self.mode.excluding("scan_pushout_seqs_ops")
-        )
-        topo = f.maker.fgraph.toposort()
-        scans = [n for n in topo if isinstance(n.op, Scan)]
-        assert len(scans) == 2
+        f = function([x, y], [sy, sz], mode=self.mode)
+        assert self.count_scans(f) == 2
 
         rng = np.random.default_rng(utt.fetch_seed())
         x_val = rng.uniform(size=(4,)).astype(config.floatX)
@@ -912,6 +897,112 @@ class TestScanMerge:
         opt_obj = ScanMerge()
         assert not opt_obj.belongs_to_set(scan_node1, [scan_node2])
         assert not opt_obj.belongs_to_set(scan_node2, [scan_node1])
+
+    @config.change_flags(cxx="")  # Just for faster compilation
+    def test_while_scan(self):
+        x = vector("x")
+        y = vector("y")
+
+        def add(s):
+            return s + 1, until(s > 5)
+
+        def sub(s):
+            return s - 1, until(s > 5)
+
+        def sub_alt(s):
+            return s - 1, until(s > 4)
+
+        sx, upx = scan(add, sequences=[x])
+        sy, upy = scan(sub, sequences=[y])
+
+        f = function([x, y], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 2
+
+        sx, upx = scan(add, sequences=[x])
+        sy, upy = scan(sub, sequences=[x])
+
+        f = function([x], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 1
+
+        sx, upx = scan(add, sequences=[x])
+        sy, upy = scan(sub_alt, sequences=[x])
+
+        f = function([x], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 2
+
+    @config.change_flags(cxx="")  # Just for faster compilation
+    def test_while_scan_nominal_dependency(self):
+        """Test case where condition depends on nominal variables.
+
+        This is a regression test for #509
+        """
+        c1 = scalar("c1")
+        c2 = scalar("c2")
+        x = vector("x", shape=(5,))
+        y = vector("y", shape=(5,))
+        z = vector("z", shape=(5,))
+
+        def add(s1, s2, const):
+            return s1 + 1, until(s2 > const)
+
+        def sub(s1, s2, const):
+            return s1 - 1, until(s2 > const)
+
+        sx, _ = scan(add, sequences=[x, z], non_sequences=[c1])
+        sy, _ = scan(sub, sequences=[y, -z], non_sequences=[c1])
+
+        f = pytensor.function(inputs=[x, y, z, c1], outputs=[sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 2
+        res_sx, res_sy = f(
+            x=[0, 0, 0, 0, 0],
+            y=[0, 0, 0, 0, 0],
+            z=[0, 1, 2, 3, 4],
+            c1=0,
+        )
+        np.testing.assert_array_equal(res_sx, [1, 1])
+        np.testing.assert_array_equal(res_sy, [-1, -1, -1, -1, -1])
+
+        sx, _ = scan(add, sequences=[x, z], non_sequences=[c1])
+        sy, _ = scan(sub, sequences=[y, z], non_sequences=[c2])
+
+        f = pytensor.function(
+            inputs=[x, y, z, c1, c2], outputs=[sx, sy], mode=self.mode
+        )
+        assert self.count_scans(f) == 2
+        res_sx, res_sy = f(
+            x=[0, 0, 0, 0, 0],
+            y=[0, 0, 0, 0, 0],
+            z=[0, 1, 2, 3, 4],
+            c1=3,
+            c2=1,
+        )
+        np.testing.assert_array_equal(res_sx, [1, 1, 1, 1, 1])
+        np.testing.assert_array_equal(res_sy, [-1, -1, -1])
+
+        sx, _ = scan(add, sequences=[x, z], non_sequences=[c1])
+        sy, _ = scan(sub, sequences=[y, z], non_sequences=[c1])
+
+        f = pytensor.function(inputs=[x, y, z, c1], outputs=[sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 1
+
+        def nested_scan(c, x, z):
+            sx, _ = scan(add, sequences=[x, z], non_sequences=[c])
+            sy, _ = scan(sub, sequences=[x, z], non_sequences=[c])
+            return sx.sum() + sy.sum()
+
+        sz, _ = scan(
+            nested_scan,
+            sequences=[stack([c1, c2])],
+            non_sequences=[x, z],
+            mode=self.mode,
+        )
+
+        f = pytensor.function(inputs=[x, z, c1, c2], outputs=sz, mode=mode)
+        [scan_node] = [
+            node for node in f.maker.fgraph.apply_nodes if isinstance(node.op, Scan)
+        ]
+        inner_f = scan_node.op.fn
+        assert self.count_scans(inner_f) == 1
 
 
 class TestScanInplaceOptimizer:
