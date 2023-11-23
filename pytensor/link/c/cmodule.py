@@ -2744,7 +2744,9 @@ def default_blas_ldflags():
             [pathlib.Path(p).resolve() for p in line[len("libraries: =") :].split(":")]
             for line in stdout.decode(sys.stdout.encoding).splitlines()
             if line.startswith("libraries: =")
-        ][0]
+        ]
+        if len(maybe_lib_dirs) > 0:
+            maybe_lib_dirs = maybe_lib_dirs[0]
         return [str(d) for d in maybe_lib_dirs if d.exists() and d.is_dir()]
 
     def check_libs(
@@ -2793,6 +2795,13 @@ def default_blas_ldflags():
 
     cxx_library_dirs = get_cxx_library_dirs()
     searched_library_dirs = cxx_library_dirs + _std_lib_dirs
+    if sys.platform == "win32":
+        # Conda on Windows saves MKL libraries under CONDA_PREFIX\Library\bin
+        # From the conda manual (https://docs.conda.io/projects/conda-build/en/stable/user-guide/environment-variables.html)
+        # it seems like conda could also save some libraries into the CONDA_PREFIX\Library\lib
+        # directory. We will include both in our searched library dirs
+        searched_library_dirs.append(os.path.join(sys.prefix, "Library", "bin"))
+        searched_library_dirs.append(os.path.join(sys.prefix, "Library", "lib"))
     all_libs = [
         l
         for path in [
