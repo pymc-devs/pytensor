@@ -207,11 +207,11 @@ def get_hash(modname, seed=None):
         cmd_line,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stderr=subprocess.PIPE,
         env=env,
     )
     out, err = p.communicate()
-    return out, err
+    return out, err, p.returncode
 
 
 def test_ExternalCOp_c_code_cache_version():
@@ -222,10 +222,11 @@ def test_ExternalCOp_c_code_cache_version():
         tmp.seek(0)
         # modname = os.path.splitext(tmp.name)[0]
         modname = tmp.name
-        out_1, err = get_hash(modname, seed=428)
-        assert err is None
-        out_2, err = get_hash(modname, seed=3849)
-        assert err is None
+        out_1, err1, returncode1 = get_hash(modname, seed=428)
+        out_2, err2, returncode2 = get_hash(modname, seed=3849)
+        assert returncode1 == 0
+        assert returncode2 == 0
+        assert err1 == err2
 
         hash_1, msg, _ = out_1.decode().split("\n")
         assert msg == "__success__"
