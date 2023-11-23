@@ -260,6 +260,51 @@ def test_default_blas_ldflags_no_cxx():
         assert default_blas_ldflags() == ""
 
 
+@pytest.fixture()
+def windows_conda_libs(blas_libs):
+    libtemplate = "{lib}.dll"
+    libraries = []
+    with tempfile.TemporaryDirectory() as d:
+        subdir = os.path.join(d, "Library", "bin")
+        os.makedirs(subdir, exist_ok=True)
+        flags = f'-L"{subdir}"'
+        for lib in blas_libs:
+            lib_path = os.path.join(subdir, libtemplate.format(lib=lib))
+            with open(lib_path, "wb") as f:
+                f.write(b"1")
+            libraries.append(lib_path)
+            flags += f" -l{lib}"
+        if "gomp" in blas_libs and "mkl_gnu_thread" not in blas_libs:
+            flags += " -fopenmp"
+        if len(blas_libs) == 0:
+            flags = ""
+        yield d, flags
+
+
+@patch("pytensor.link.c.cmodule.std_lib_dirs", return_value=[])
+@patch("pytensor.link.c.cmodule.check_mkl_openmp", return_value=None)
+def test_default_blas_ldflags_conda_windows(
+    mock_std_lib_dirs, mock_check_mkl_openmp, windows_conda_libs
+):
+    mock_sys_prefix, expected_blas_ldflags = windows_conda_libs
+    mock_process = MagicMock()
+    mock_process.communicate = lambda *args, **kwargs: (b"", b"")
+    mock_process.returncode = 0
+    with patch("sys.platform", "win32"):
+        with patch("sys.prefix", mock_sys_prefix):
+            with patch(
+                "pytensor.link.c.cmodule.subprocess_Popen", return_value=mock_process
+            ):
+                with patch.object(
+                    pytensor.link.c.cmodule.GCC_compiler,
+                    "try_compile_tmp",
+                    return_value=(True, True),
+                ):
+                    assert set(default_blas_ldflags().split(" ")) == set(
+                        expected_blas_ldflags.split(" ")
+                    )
+
+
 @patch(
     "os.listdir", return_value=["mkl_core.1.dll", "mkl_rt.1.0.dll", "mkl_rt.1.1.lib"]
 )
