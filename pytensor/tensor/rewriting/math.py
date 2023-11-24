@@ -32,6 +32,7 @@ from pytensor.tensor.basic import (
     extract_constant,
     get_underlying_scalar_constant_value,
     ones_like,
+    register_infer_shape,
     switch,
     zeros_like,
 )
@@ -1745,6 +1746,7 @@ def local_reduce_join(fgraph, node):
         return [ret]
 
 
+@register_infer_shape
 @register_canonicalize("fast_compile", "local_cut_useless_reduce")
 @register_useless("local_cut_useless_reduce")
 @node_rewriter(ALL_REDUCE)
