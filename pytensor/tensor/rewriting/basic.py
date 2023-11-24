@@ -58,6 +58,7 @@ from pytensor.tensor.basic import (
     get_underlying_scalar_constant_value,
     join,
     ones_like,
+    register_infer_shape,
     switch,
     tensor_copy,
     zeros,
@@ -420,6 +421,7 @@ compile.optdb.register(
 )
 
 
+@register_infer_shape
 @register_canonicalize("fast_compile", "shape_unsafe")
 @register_useless("shape_unsafe")
 @node_rewriter([fill])
@@ -441,6 +443,7 @@ def local_useless_fill(fgraph, node):
         return [v]
 
 
+@register_infer_shape
 @register_specialize("shape_unsafe")
 @register_stabilize("shape_unsafe")
 @register_canonicalize("shape_unsafe")
@@ -530,6 +533,7 @@ compile.optdb.register(
 )
 
 
+@register_infer_shape
 @register_useless
 @register_canonicalize("fast_compile")
 @register_specialize
@@ -806,6 +810,7 @@ compile.optdb["useless"].register(
 )
 
 
+@register_infer_shape
 @register_specialize
 @register_canonicalize
 @register_useless
@@ -826,6 +831,7 @@ def local_join_1(fgraph, node):
 
 
 # TODO: merge in local_useless_join
+@register_infer_shape
 @register_useless
 @register_specialize
 @register_canonicalize
@@ -1066,6 +1072,7 @@ def local_merge_switch_same_cond(fgraph, node):
     ]
 
 
+@register_infer_shape
 @register_useless
 @register_canonicalize
 @register_specialize
@@ -1149,6 +1156,7 @@ register_stabilize(topo_constant_folding, "fast_compile", final_rewriter=True)
 register_specialize(topo_constant_folding, "fast_compile", final_rewriter=True)
 
 
+@register_infer_shape
 @register_canonicalize("fast_compile")
 @register_useless("fast_compile")
 @node_rewriter(None)
@@ -1157,6 +1165,7 @@ def local_view_op(fgraph, node):
         return node.inputs
 
 
+@register_infer_shape
 @register_useless
 @register_canonicalize
 @register_stabilize

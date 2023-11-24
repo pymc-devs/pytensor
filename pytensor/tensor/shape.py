@@ -1,12 +1,13 @@
 import warnings
 from numbers import Number
 from textwrap import dedent
-from typing import Union
+from typing import Union, cast
 
 import numpy as np
 
 import pytensor
 from pytensor.gradient import DisconnectedType
+from pytensor.graph import Op
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.type import HasShape
@@ -145,14 +146,14 @@ _shape = Shape()
 def shape(x: Union[np.ndarray, Number, Variable]) -> Variable:
     """Return the shape of `x`."""
     if not isinstance(x, Variable):
-        x = at.as_tensor_variable(x)
+        x = at.as_tensor_variable(x)  # type: ignore
 
-    return _shape(x)
+    return cast(Variable, _shape(x))
 
 
-@_get_vector_length.register(Shape)
-def _get_vector_length_Shape(op, var):
-    return var.owner.inputs[0].type.ndim
+@_get_vector_length.register(Shape)  # type: ignore
+def _get_vector_length_Shape(op: Op, var: TensorVariable) -> int:
+    return cast(int, var.owner.inputs[0].type.ndim)
 
 
 @_vectorize_node.register(Shape)
@@ -181,7 +182,7 @@ def shape_tuple(x: TensorVariable) -> tuple[Variable, ...]:
         # We assume/call it a scalar
         return ()
 
-    res = ()
+    res: tuple[Variable, ...] = ()
     symbolic_shape = shape(x)
     static_shape = x.type.shape
     for i in range(x.type.ndim):
@@ -191,7 +192,7 @@ def shape_tuple(x: TensorVariable) -> tuple[Variable, ...]:
             # TODO: Why not use uint64?
             res += (pytensor.scalar.ScalarConstant(pytensor.scalar.int64, shape_val),)
         else:
-            res += (symbolic_shape[i],)
+            res += (symbolic_shape[i],)  # type: ignore
 
     return res
 
@@ -366,7 +367,7 @@ def shape_i_op(i):
     return shape_i_op.cache[key]
 
 
-shape_i_op.cache = {}
+shape_i_op.cache = {}  # type: ignore
 
 
 def register_shape_i_c_code(typ, code, check_input, version=()):
@@ -578,7 +579,7 @@ def specify_shape(
 
     # If the specified shape is already encoded in the input static shape, do nothing
     # This ignores PyTensor constants in shape
-    x = at.as_tensor_variable(x)
+    x = at.as_tensor_variable(x)  # type: ignore
     new_shape_info = any(
         s != xts for (s, xts) in zip(shape, x.type.shape) if s is not None
     )
@@ -589,10 +590,10 @@ def specify_shape(
     return _specify_shape(x, *shape)
 
 
-@_get_vector_length.register(SpecifyShape)
-def _get_vector_length_SpecifyShape(op, var):
+@_get_vector_length.register(SpecifyShape)  # type: ignore
+def _get_vector_length_SpecifyShape(op: Op, var: TensorVariable) -> int:
     try:
-        return at.get_underlying_scalar_constant_value(var.owner.inputs[1]).item()
+        return int(at.get_underlying_scalar_constant_value(var.owner.inputs[1]).item())
     except NotScalarConstantError:
         raise ValueError(f"Length of {var} cannot be determined")
 
@@ -1104,4 +1105,4 @@ def _vectorize_unbroadcast(op: Unbroadcast, node: Apply, x: TensorVariable) -> A
     batched_ndims = x.type.ndim - node.inputs[0].type.ndim
     old_axes = op.axes
     new_axes = (old_axis + batched_ndims for old_axis in old_axes)
-    return unbroadcast(x, *new_axes).owner
+    return cast(Apply, unbroadcast(x, *new_axes).owner)

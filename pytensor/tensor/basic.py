@@ -22,10 +22,11 @@ import pytensor.scalar.sharedvar
 from pytensor import compile, config, printing
 from pytensor import scalar as aes
 from pytensor.gradient import DisconnectedType, grad_undefined
+from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
-from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.graph.rewriting.db import EquilibriumDB
 from pytensor.graph.type import HasShape, Type
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
@@ -1356,6 +1357,45 @@ def identity_like(x, dtype: Optional[Union[str, np.generic, np.dtype]] = None):
     return eye(_x.shape[0], _x.shape[1], k=0, dtype=dtype)
 
 
+class CachedEquilibrimDB(EquilibriumDB):
+    """A subclass of EquilibriumDB that allows caching of a default query for faster reuse."""
+
+    def __init__(self, default_query):
+        super().__init__()
+        self._default_query = default_query
+        self._cached_default_query = None
+
+    def register(self, *args, **kwargs):
+        # If new rewrites are registered, the default cached query is void
+        self.cached_default_query = None
+        super().register(*args, **kwargs)
+
+    @property
+    def default_query(self):
+        if self._cached_default_query is None:
+            self._cached_default_query = self.query(self._default_query)
+        return self._cached_default_query
+
+
+infer_shape_db = CachedEquilibrimDB(
+    default_query=RewriteDatabaseQuery(include=("infer_shape",))
+)
+
+
+def register_infer_shape(rewrite, *tags, **kwargs):
+    if isinstance(rewrite, str):
+
+        def register(inner_lopt):
+            return register_infer_shape(inner_lopt, rewrite, *tags, **kwargs)
+
+        return register
+    else:
+        name = kwargs.pop("name", None) or rewrite.__name__
+
+        infer_shape_db.register(name, rewrite, *tags, "infer_shape", **kwargs)
+        return rewrite
+
+
 def infer_static_shape(
     shape: Union[Variable, Sequence[Union[Variable, int]]]
 ) -> tuple[Sequence["TensorLike"], Sequence[Optional[int]]]:
@@ -1390,14 +1430,16 @@ def infer_static_shape(
 
         raise TypeError(f"Shapes must be scalar integers; got {s_as_str}")
 
-    sh = [check_type(as_tensor_variable(s, ndim=0)) for s in shape]
+    sh = folded_shape = [check_type(as_tensor_variable(s, ndim=0)) for s in shape]
 
-    shape_fg = FunctionGraph(
-        outputs=sh,
-        features=[ShapeFeature()],
-        clone=True,
-    )
-    folded_shape = rewrite_graph(shape_fg, custom_rewrite=topo_constant_folding).outputs
+    if not all(isinstance(s, Constant) for s in folded_shape):
+        shape_fg = FunctionGraph(outputs=sh, features=[ShapeFeature()], clone=True)
+        with config.change_flags(optdb__max_use_ratio=10, cxx=""):
+            infer_shape_db.default_query.rewrite(shape_fg)
+            if not all(isinstance(s, Constant) for s in shape_fg.outputs):
+                topo_constant_folding.rewrite(shape_fg)
+        folded_shape = shape_fg.outputs
+
     static_shape = tuple(
         s.data.item() if isinstance(s, Constant) else None for s in folded_shape
     )

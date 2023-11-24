@@ -26,6 +26,7 @@ from pytensor.tensor.basic import (
     concatenate,
     extract_constant,
     get_underlying_scalar_constant_value,
+    register_infer_shape,
     switch,
 )
 from pytensor.tensor.elemwise import Elemwise
@@ -328,6 +329,7 @@ def local_subtensor_of_dot(fgraph, node):
     return [r]
 
 
+@register_infer_shape
 @register_useless
 @register_canonicalize
 @register_specialize
@@ -599,6 +601,7 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
         return [node.inputs[0].dimshuffle(tuple(remain_dim))]
 
 
+@register_infer_shape
 @register_useless
 @register_canonicalize
 @register_specialize
@@ -707,6 +710,7 @@ def local_subtensor_inc_subtensor(fgraph, node):
             return
 
 
+@register_infer_shape
 @register_specialize
 @register_canonicalize("fast_compile")
 @register_useless
@@ -785,6 +789,7 @@ def local_subtensor_make_vector(fgraph, node):
             pass
 
 
+@register_infer_shape
 @register_useless
 @register_canonicalize
 @register_specialize
@@ -1461,6 +1466,7 @@ def local_adv_sub1_adv_inc_sub1(fgraph, node):
     return [r2]
 
 
+@register_infer_shape
 @register_specialize
 @register_stabilize
 @register_canonicalize
