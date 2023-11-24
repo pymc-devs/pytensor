@@ -8,7 +8,7 @@ import numpy as np
 import pytensor
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply, Variable
-from pytensor.graph.replace import _vectorize_node, _vectorize_not_needed
+from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.type import HasShape
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
@@ -155,7 +155,20 @@ def _get_vector_length_Shape(op, var):
     return var.owner.inputs[0].type.ndim
 
 
-_vectorize_node.register(Shape, _vectorize_not_needed)
+@_vectorize_node.register(Shape)
+def vectorize_shape(op, node, batched_x):
+    from pytensor.tensor.extra_ops import broadcast_to
+
+    [old_x] = node.inputs
+    core_ndims = old_x.type.ndim
+    batch_ndims = batched_x.type.ndim - core_ndims
+    batched_x_shape = shape(batched_x)
+    if not batch_ndims:
+        return batched_x_shape.owner
+    else:
+        batch_shape = batched_x_shape[:batch_ndims]
+        core_shape = batched_x_shape[batch_ndims:]
+        return broadcast_to(core_shape, (*batch_shape, core_ndims)).owner
 
 
 def shape_tuple(x: TensorVariable) -> tuple[Variable, ...]:
