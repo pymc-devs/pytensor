@@ -69,6 +69,8 @@ expected_gammainc = scipy.special.gammainc
 expected_gammaincc = scipy.special.gammaincc
 expected_gammau = scipy_special_gammau
 expected_gammal = scipy_special_gammal
+expected_gammaincinv = scipy.special.gammaincinv
+expected_gammainccinv = scipy.special.gammainccinv
 expected_j0 = scipy.special.j0
 expected_j1 = scipy.special.j1
 expected_jv = scipy.special.jv
@@ -78,6 +80,7 @@ expected_iv = scipy.special.iv
 expected_erfcx = scipy.special.erfcx
 expected_sigmoid = scipy.special.expit
 expected_hyp2f1 = scipy.special.hyp2f1
+expected_betaincinv = scipy.special.betaincinv
 
 TestErfBroadcast = makeBroadcastTester(
     op=at.erf,
@@ -477,6 +480,53 @@ TestGammaLBroadcast = makeBroadcastTester(
 TestGammaLInplaceBroadcast = makeBroadcastTester(
     op=inplace.gammal_inplace,
     expected=expected_gammal,
+    good=_good_broadcast_binary_gamma,
+    eps=2e-8,
+    mode=mode_no_scipy,
+    inplace=True,
+)
+
+rng = np.random.default_rng(seed=utt.fetch_seed())
+_good_broadcast_binary_gamma = dict(
+    normal=(
+        random_ranged(1e-2, 1, (2, 3), rng=rng),
+        random_ranged(1e-2, 1, (2, 3), rng=rng),
+    ),
+    empty=(np.asarray([], dtype=config.floatX), np.asarray([], dtype=config.floatX)),
+)
+
+_good_broadcast_binary_gamma_grad = dict(normal=(random_ranged(-10.0, 10.0, (2, 3)),))
+
+TestGammaIncInvBroadcast = makeBroadcastTester(
+    op=at.gammaincinv,
+    expected=expected_gammaincinv,
+    good=_good_broadcast_binary_gamma,
+    grad=_good_broadcast_binary_gamma_grad,
+    eps=2e-8,
+    mode=mode_no_scipy,
+)
+
+TestGammaIncInvInplaceBroadcast = makeBroadcastTester(
+    op=inplace.gammaincinv_inplace,
+    expected=expected_gammaincinv,
+    good=_good_broadcast_binary_gamma,
+    eps=2e-8,
+    mode=mode_no_scipy,
+    inplace=True,
+)
+
+TestGammaInccInvBroadcast = makeBroadcastTester(
+    op=at.gammainccinv,
+    expected=expected_gammainccinv,
+    good=_good_broadcast_binary_gamma,
+    grad=_good_broadcast_binary_gamma_grad,
+    eps=2e-8,
+    mode=mode_no_scipy,
+)
+
+TestGammaInccInvInplaceBroadcast = makeBroadcastTester(
+    op=inplace.gammainccinv_inplace,
+    expected=expected_gammainccinv,
     good=_good_broadcast_binary_gamma,
     eps=2e-8,
     mode=mode_no_scipy,

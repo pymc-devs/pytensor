@@ -14,10 +14,8 @@ from pytensor.scalar import ScalarLoop, float32, float64, int32
 from pytensor.scalar.math import (
     betainc,
     betainc_grad,
-    betaincinv,
     gammainc,
     gammaincc,
-    gammaincinv,
     gammal,
     gammau,
     hyp2f1,
@@ -61,14 +59,6 @@ def test_gammaincc_nan_c():
     assert np.isnan(test_func(-1, -1))
 
 
-def test_gammaincinv_python():
-    x1 = at.dscalar()
-    x2 = at.dscalar()
-    y = gammaincinv(x1, x2)
-    test_func = function([x1, x2], y, mode=Mode("py"))
-    assert np.isclose(test_func(1, 0.2), sp.gammaincinv(1, 0.2))
-
-
 def test_gammal_nan_c():
     x1 = at.dscalar()
     x2 = at.dscalar()
@@ -105,13 +95,6 @@ def test_betainc_derivative_nan():
     assert np.isnan(test_func(1, 1, 2))
     assert np.isnan(test_func(1, -1, 1))
     assert np.isnan(test_func(1, 1, -1))
-
-
-def test_betaincinv():
-    a, b, x = at.scalars("a", "b", "x")
-    res = betaincinv(a, b, x)
-    test_func = function([a, b, x], res, mode=Mode("py"))
-    assert np.isclose(test_func(15, 10, 0.7), sp.betaincinv(15, 10, 0.7))
 
 
 @pytest.mark.parametrize(

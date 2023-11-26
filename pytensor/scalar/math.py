@@ -698,11 +698,54 @@ class GammaIncInv(BinaryScalarOp):
     def impl(self, k, x):
         return GammaIncInv.st_impl(k, x)
 
+    def grad(self, inputs, grads):
+        (k, x) = inputs
+        (gz,) = grads
+        return [
+            grad_not_implemented(self, 0, k),
+            gz
+            * exp(scipy.special.gammaincinv(k, x))
+            * scipy.special.gamma(k)
+            * (scipy.special.gammaincinv(k, x) ** (1 - k)),
+        ]
+
     def c_code(self, *args, **kwargs):
         raise NotImplementedError()
 
 
 gammaincinv = GammaIncInv(upgrade_to_float, name="gammaincinv")
+
+
+class GammaIncCInv(BinaryScalarOp):
+    """
+    Inverse to the regularized upper incomplete gamma function.
+    """
+
+    nfunc_spec = ("scipy.special.gammaincinv", 1, 1)
+
+    @staticmethod
+    def st_impl(k, x):
+        return scipy.special.gammainccinv(k, x)
+
+    def impl(self, k, x):
+        return GammaIncInv.st_impl(k, x)
+
+    def grad(self, inputs, grads):
+        (k, x) = inputs
+        (gz,) = grads
+        return [
+            grad_not_implemented(self, 0, k),
+            gz
+            * -exp(scipy.special.gammainccinv(k, x))
+            * scipy.special.gamma(k)
+            * (scipy.special.gammainccinv(k, x) ** (1 - k)),
+        ]
+
+    def c_code(self, *args, **kwargs):
+        raise NotImplementedError()
+
+
+gammainccinv = GammaIncCInv(upgrade_to_float, name="gammainccinv")
 
 
 def _make_scalar_loop(n_steps, init, constant, inner_loop_fn, name, loop_op=ScalarLoop):
@@ -1598,6 +1641,18 @@ class BetaIncInv(ScalarOp):
 
     def impl(self, a, b, x):
         return scipy.special.betaincinv(a, b, x)
+
+    def grad(self, inputs, grads):
+        (a, b, x) = inputs
+        (gz,) = grads
+        return [
+            grad_not_implemented(self, 0, a),
+            grad_not_implemented(self, 0, b),
+            gz
+            * scipy.special.beta(a, b)
+            * ((1 - scipy.special.betaincinv(a, b, x)) ** (1 - b))
+            * (scipy.special.betaincinv(a, b, x) ** (1 - a)),
+        ]
 
     def c_code(self, *args, **kwargs):
         raise NotImplementedError()
