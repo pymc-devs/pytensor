@@ -269,6 +269,9 @@ class ProfileStats:
     linker_time: float = 0.0
     # time spent linking graph (FunctionMaker.create)
 
+    preload_cache_time: float = 0.0
+    # time spent preloading the cache, so it does not affect rewrites profiling
+
     import_time: float = 0.0
     # time spent in importing compiled python module.
 
@@ -811,6 +814,7 @@ class ProfileStats:
             ),
             file=file,
         )
+        print(f"       C-cache preloading {self.preload_cache_time:e}s", file=file)
         print(f"       Import time {self.import_time:e}s", file=file)
         print(
             f"       Node make_thunk time {self.linker_node_make_thunks:e}s", file=file
