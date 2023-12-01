@@ -2718,6 +2718,7 @@ def default_blas_ldflags():
                     found = True
                     break
             if not found:
+                _logger.debug("Required file '%s' not found", req)
                 raise RuntimeError(f"Required file {req} not found")
         return libs
 
@@ -2779,9 +2780,15 @@ def default_blas_ldflags():
         res = try_blas_flag(flags)
         if res:
             if any("mkl" in flag for flag in flags):
-                check_mkl_openmp()
+                try:
+                    check_mkl_openmp()
+                except Exception as e:
+                    _logger.debug(e)
+            _logger.debug("The following blas flags will be used: '%s'", res)
             return res
         else:
+            _logger.debug(f"Supplied flags {res} failed to compile")
+            _logger.debug("Supplied flags '%s' failed to compile", res)
             raise RuntimeError(f"Supplied flags {flags} failed to compile")
 
     # If no compiler is available we default to empty ldflags
@@ -2802,6 +2809,11 @@ def default_blas_ldflags():
         # directory. We will include both in our searched library dirs
         searched_library_dirs.append(os.path.join(sys.prefix, "Library", "bin"))
         searched_library_dirs.append(os.path.join(sys.prefix, "Library", "lib"))
+    search_dirs = "\n".join(searched_library_dirs)
+    _logger.debug(
+        "Will search for BLAS libraries in the following directories:\n%s",
+        search_dirs,
+    )
     all_libs = [
         l
         for path in [
@@ -2817,6 +2829,7 @@ def default_blas_ldflags():
         maybe_add_to_os_environ_pathlist("PATH", rpath)
     try:
         # 1. Try to use MKL with INTEL OpenMP threading
+        _logger.debug("Checking MKL flags with intel threading")
         return check_libs(
             all_libs,
             required_libs=[
@@ -2829,19 +2842,21 @@ def default_blas_ldflags():
             extra_compile_flags=[f"-Wl,-rpath,{rpath}"] if rpath is not None else [],
             cxx_library_dirs=cxx_library_dirs,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        _logger.debug(e)
     try:
         # 2. Try to use MKL with GNU OpenMP threading
+        _logger.debug("Checking MKL flags with GNU OpenMP threading")
         return check_libs(
             all_libs,
             required_libs=["mkl_core", "mkl_rt", "mkl_gnu_thread", "gomp", "pthread"],
             extra_compile_flags=[f"-Wl,-rpath,{rpath}"] if rpath is not None else [],
             cxx_library_dirs=cxx_library_dirs,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        _logger.debug(e)
     try:
+        _logger.debug("Checking Lapack + blas")
         # 3. Try to use LAPACK + BLAS
         return check_libs(
             all_libs,
@@ -2849,20 +2864,22 @@ def default_blas_ldflags():
             extra_compile_flags=[f"-Wl,-rpath,{rpath}"] if rpath is not None else [],
             cxx_library_dirs=cxx_library_dirs,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        _logger.debug(e)
     try:
         # 4. Try to use BLAS alone
+        _logger.debug("Checking blas alone")
         return check_libs(
             all_libs,
             required_libs=["blas", "cblas"],
             extra_compile_flags=[f"-Wl,-rpath,{rpath}"] if rpath is not None else [],
             cxx_library_dirs=cxx_library_dirs,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        _logger.debug(e)
     try:
         # 5. Try to use openblas
+        _logger.debug("Checking openblas")
         return check_libs(
             all_libs,
             required_libs=["openblas", "gfortran", "gomp", "m"],
@@ -2871,8 +2888,9 @@ def default_blas_ldflags():
             else ["-fopenmp"],
             cxx_library_dirs=cxx_library_dirs,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        _logger.debug(e)
+    _logger.debug("Failed to identify blas ldflags. Will leave them empty.")
     return ""
 
 
