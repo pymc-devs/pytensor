@@ -59,6 +59,8 @@ import time
 
 import numpy as np
 
+from pytensor.tensor.rewriting.basic import register_specialize
+
 
 try:
     import numpy.__config__  # noqa
@@ -79,12 +81,12 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.utils import InconsistencyError
-from pytensor.printing import debugprint
 from pytensor.tensor import basic as at
 from pytensor.tensor.blas import (
     Dot22,
     _dot22,
     _dot22scalar,
+    batched_dot,
     gemm_inplace,
     gemm_no_inplace,
     gemv_inplace,
@@ -94,7 +96,7 @@ from pytensor.tensor.blas import (
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
-from pytensor.tensor.math import Dot, add, mul, neg, sub
+from pytensor.tensor.math import Dot, _matrix_matrix_matmul, add, mul, neg, sub
 from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
 from pytensor.tensor.type import (
     DenseTensorType,
@@ -899,9 +901,32 @@ blas_optdb.register(
 )
 
 
-# from opt import register_specialize, register_canonicalize
-# @register_specialize
-@node_rewriter([sub, add])
-def local_print_as_we_go_along(fgraph, node):
-    if node.op in (sub, add):
-        debugprint(node)
+@register_specialize
+@node_rewriter([_matrix_matrix_matmul])
+def specialize_matmul_to_batched_dot(fgraph, node):
+    """Rewrite Matmul (Blockwise matrix-matrix) without implicit broadcasted batched dimension as BatchedDot.
+
+    TODO: Do the same for Blockwise BatchedDot
+    """
+    x, y = node.inputs
+
+    # BatchedDot does not allow implicit broadcasting of the batch dimensions
+    # We do not want to explicitly broadcast as it may result in huge arrays
+    if x.type.broadcastable[:-2] != y.type.broadcastable[:-2]:
+        return None
+
+    x_shape = tuple(x.shape)
+    y_shape = tuple(y.shape)
+    if len(x_shape) > 3:
+        # If we have more than one batch dim, ravel it
+        x = x.reshape((-1, x_shape[-2], x_shape[-1]))
+        y = y.reshape((-1, y_shape[-2], y_shape[-1]))
+
+    new_out = batched_dot(x, y)
+
+    if len(x_shape) > 3:
+        # And then unravel it
+        new_out = new_out.reshape((*x_shape[:-2], x_shape[-2], y_shape[-1]))
+
+    copy_stack_trace(node.outputs, [new_out])
+    return [new_out]
