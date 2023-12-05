@@ -1777,6 +1777,7 @@ def equal_computations(
     ys: list[Union[np.ndarray, Variable]],
     in_xs: Optional[list[Variable]] = None,
     in_ys: Optional[list[Variable]] = None,
+    strict_dtype=True,
 ) -> bool:
     """Checks if PyTensor graphs represent the same computations.
 
@@ -1908,7 +1909,10 @@ def equal_computations(
                         if dx != dy:
                             if isinstance(dx, Constant) and isinstance(dy, Constant):
                                 if not dx.equals(dy):
-                                    return False
+                                    if strict_dtype:
+                                        return False
+                                    elif not np.array_equal(dx.data, dy.data):
+                                        return False
                             else:
                                 return False
 

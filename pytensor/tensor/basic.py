@@ -42,6 +42,7 @@ from pytensor.tensor import (
     as_tensor_variable,
     get_vector_length,
 )
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise, scalar_elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.shape import (
@@ -1658,16 +1659,22 @@ class Alloc(COp):
         if not clients:
             return False
 
-        for client in clients:
-            if client[0] == "output":
+        for client, idx in clients:
+            if client == "output":
                 # If the output is a constant, it will have to be deepcopied
                 # each time the function is called.  So we do not fold.
                 return False
+            # Allow alloc to be lifted out of Elemwise before constant folding it
+            elif isinstance(client.op, Elemwise):
+                return None
+            # Same for Blockwise, unless it has no batch_dims
+            elif isinstance(client.op, Blockwise) and client.op.batch_ndim(client):
+                return None
             elif (
                 # The following ops work inplace of their input id 0.
-                client[1] == 0
+                idx == 0
                 and isinstance(
-                    client[0].op,
+                    client.op,
                     (
                         # Ops that will work inplace on the Alloc. So if they
                         # get constant_folded, they would copy the
