@@ -895,6 +895,8 @@ def numba_funcify_BatchedDot(op, node, **kwargs):
 
     @numba_njit
     def batched_dot(x, y):
+        # Numba does not support 3D matmul
+        # https://github.com/numba/numba/issues/3804
         shape = x.shape[:-1] + y.shape[2:]
         z0 = np.empty(shape, dtype=dtype)
         for i in range(z0.shape[0]):

@@ -43,15 +43,6 @@ def test_jax_BatchedDot():
     with pytest.raises(TypeError):
         pytensor_jax_fn(*inputs)
 
-    # matrix . matrix
-    a = matrix("a")
-    a.tag.test_value = np.linspace(-1, 1, 5 * 3).astype(config.floatX).reshape((5, 3))
-    b = matrix("b")
-    b.tag.test_value = np.linspace(1, -1, 5 * 3).astype(config.floatX).reshape((5, 3))
-    out = at_blas.BatchedDot()(a, b)
-    fgraph = FunctionGraph([a, b], [out])
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
-
 
 def test_jax_basic_multiout():
     rng = np.random.default_rng(213234)

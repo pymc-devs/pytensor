@@ -843,23 +843,23 @@ def test_Softplus(x, exc):
     [
         (
             set_test_value(
-                at.dmatrix(),
-                rng.random(size=(3, 3)).astype("float64"),
+                at.dtensor3(),
+                rng.random(size=(2, 3, 3)).astype("float64"),
             ),
             set_test_value(
-                at.dmatrix(),
-                rng.random(size=(3, 3)).astype("float64"),
+                at.dtensor3(),
+                rng.random(size=(2, 3, 3)).astype("float64"),
             ),
             None,
         ),
         (
             set_test_value(
-                at.dmatrix(),
-                rng.random(size=(3, 3)).astype("float64"),
+                at.dtensor3(),
+                rng.random(size=(2, 3, 3)).astype("float64"),
             ),
             set_test_value(
-                at.lmatrix(),
-                rng.poisson(size=(3, 3)).astype("int64"),
+                at.ltensor3(),
+                rng.poisson(size=(2, 3, 3)).astype("int64"),
             ),
             None,
         ),
