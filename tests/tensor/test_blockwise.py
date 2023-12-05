@@ -6,6 +6,7 @@ import pytest
 
 import pytensor
 from pytensor import config, function
+from pytensor.compile import get_mode
 from pytensor.gradient import grad
 from pytensor.graph import Apply, Op
 from pytensor.graph.replace import vectorize_node
@@ -13,6 +14,7 @@ from pytensor.raise_op import assert_op
 from pytensor.tensor import diagonal, log, tensor
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.nlinalg import MatrixInverse
+from pytensor.tensor.rewriting.blas import specialize_matmul_to_batched_dot
 from pytensor.tensor.slinalg import Cholesky, Solve, cholesky, solve_triangular
 from pytensor.tensor.utils import _parse_gufunc_signature
 
@@ -45,7 +47,11 @@ def check_blockwise_runtime_broadcasting(mode):
     b = tensor("b", shape=(None, 5, 3))
 
     out = a @ b
-    fn = function([a, b], out, mode=mode)
+    fn = function(
+        [a, b],
+        out,
+        mode=get_mode(mode).excluding(specialize_matmul_to_batched_dot.__name__),
+    )
     assert isinstance(fn.maker.fgraph.outputs[0].owner.op, Blockwise)
 
     for valid_test_values in [
