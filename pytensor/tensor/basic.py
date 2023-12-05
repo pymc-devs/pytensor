@@ -26,6 +26,7 @@ from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
+from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.rewriting.db import EquilibriumDB
 from pytensor.graph.type import HasShape, Type
 from pytensor.link.c.op import COp
@@ -3497,10 +3498,17 @@ class ExtractDiag(Op):
 
         if x.ndim < 2:
             raise ValueError("ExtractDiag needs an input with 2 or more dimensions", x)
+
+        out_shape = [
+            st_dim
+            for i, st_dim in enumerate(x.type.shape)
+            if i not in (self.axis1, self.axis2)
+        ] + [None]
+
         return Apply(
             self,
             [x],
-            [x.type.clone(dtype=x.dtype, shape=(None,) * (x.ndim - 1))()],
+            [x.type.clone(dtype=x.dtype, shape=tuple(out_shape))()],
         )
 
     def perform(self, node, inputs, outputs):
@@ -3599,6 +3607,17 @@ def diagonal(a, offset=0, axis1=0, axis2=1):
     a = as_tensor_variable(a)
     axis1, axis2 = normalize_axis_tuple((axis1, axis2), ndim=a.type.ndim)
     return ExtractDiag(offset, axis1, axis2)(a)
+
+
+@_vectorize_node.register(ExtractDiag)
+def vectorize_extract_diag(op: ExtractDiag, node, batched_x):
+    batched_ndims = batched_x.type.ndim - node.inputs[0].type.ndim
+    return diagonal(
+        batched_x,
+        offset=op.offset,
+        axis1=op.axis1 + batched_ndims,
+        axis2=op.axis2 + batched_ndims,
+    ).owner
 
 
 def trace(a, offset=0, axis1=0, axis2=1):
