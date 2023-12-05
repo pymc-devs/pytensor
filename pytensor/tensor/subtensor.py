@@ -13,6 +13,7 @@ from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.op import Op
+from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.type import Type
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.op import COp
@@ -22,6 +23,7 @@ from pytensor.printing import Printer, pprint, set_precedence
 from pytensor.scalar.basic import ScalarConstant
 from pytensor.tensor import _get_vector_length, as_tensor_variable, get_vector_length
 from pytensor.tensor.basic import alloc, get_underlying_scalar_constant_value, nonzero
+from pytensor.tensor.blockwise import vectorize_node_fallback
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.exceptions import AdvancedIndexingError, NotScalarConstantError
 from pytensor.tensor.math import clip
@@ -1281,6 +1283,21 @@ class SubtensorPrinter(Printer):
 
 
 pprint.assign(Subtensor, SubtensorPrinter())
+
+
+# TODO: Implement similar vectorize for Inc/SetSubtensor
+@_vectorize_node.register(Subtensor)
+def vectorize_subtensor(op: Subtensor, node, batch_x, *batch_idxs):
+    """Rewrite subtensor with non-batched indexes as another Subtensor with prepended empty slices."""
+
+    # TODO: Vectorize Subtensor with non-slice batched indexes as AdvancedSubtensor
+    if any(batch_inp.type.ndim > 0 for batch_inp in batch_idxs):
+        return vectorize_node_fallback(op, node, batch_x, *batch_idxs)
+
+    old_x, *_ = node.inputs
+    batch_ndims = batch_x.type.ndim - old_x.type.ndim
+    new_idx_list = (slice(None),) * batch_ndims + op.idx_list
+    return Subtensor(new_idx_list).make_node(batch_x, *batch_idxs)
 
 
 def set_subtensor(x, y, inplace=False, tolerate_inplace_aliasing=False):

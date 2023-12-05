@@ -9,6 +9,7 @@ from numpy.testing import assert_array_equal
 import pytensor
 import pytensor.scalar as scal
 import pytensor.tensor.basic as at
+from pytensor import function
 from pytensor.compile import DeepCopyOp, shared
 from pytensor.compile.io import In
 from pytensor.configdefaults import config
@@ -16,7 +17,8 @@ from pytensor.graph.op import get_test_value
 from pytensor.graph.rewriting.utils import is_same_graph
 from pytensor.printing import pprint
 from pytensor.scalar.basic import as_scalar
-from pytensor.tensor import get_vector_length
+from pytensor.tensor import get_vector_length, vectorize
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import exp, isinf
 from pytensor.tensor.math import sum as at_sum
@@ -2709,3 +2711,43 @@ def test_static_shapes(x_shape, indices, expected):
     x = at.tensor(dtype="float64", shape=x_shape)
     y = x[indices]
     assert y.type.shape == expected
+
+
+def test_vectorize_subtensor_without_batch_indices():
+    signature = "(t1,t2,t3),()->(t1,t3)"
+
+    def core_fn(x, start):
+        return x[:, start, :]
+
+    x = tensor(shape=(11, 7, 5, 3))
+    start = tensor(shape=(), dtype="int")
+    vectorize_pt = function(
+        [x, start], vectorize(core_fn, signature=signature)(x, start)
+    )
+    assert not any(
+        isinstance(node.op, Blockwise) for node in vectorize_pt.maker.fgraph.apply_nodes
+    )
+    x_test = np.random.normal(size=x.type.shape).astype(x.type.dtype)
+    start_test = np.random.randint(0, x.type.shape[-2])
+    vectorize_np = np.vectorize(core_fn, signature=signature)
+    np.testing.assert_allclose(
+        vectorize_pt(x_test, start_test),
+        vectorize_np(x_test, start_test),
+    )
+
+    # If we vectorize start, we should get a Blockwise that still works
+    x = tensor(shape=(11, 7, 5, 3))
+    start = tensor(shape=(11,), dtype="int")
+    vectorize_pt = function(
+        [x, start], vectorize(core_fn, signature=signature)(x, start)
+    )
+    assert any(
+        isinstance(node.op, Blockwise) for node in vectorize_pt.maker.fgraph.apply_nodes
+    )
+    x_test = np.random.normal(size=x.type.shape).astype(x.type.dtype)
+    start_test = np.random.randint(0, x.type.shape[-2], size=start.type.shape[0])
+    vectorize_np = np.vectorize(core_fn, signature=signature)
+    np.testing.assert_allclose(
+        vectorize_pt(x_test, start_test),
+        vectorize_np(x_test, start_test),
+    )
