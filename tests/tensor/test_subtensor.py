@@ -389,7 +389,8 @@ class TestSubtensor(utt.OptimizationTestMixin):
         t = Subtensor([])(n)
         assert isinstance(t.owner.op, Subtensor)
         self.eval_output_and_check(
-            t, mode=self.mode.excluding("local_useless_subtensor")
+            t,
+            mode=self.mode.excluding("local_useless_subtensor", "local_useless_slice"),
         )
 
     def test_err_invalid_2(self):

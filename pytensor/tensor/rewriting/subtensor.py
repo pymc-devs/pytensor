@@ -336,35 +336,46 @@ def local_subtensor_of_dot(fgraph, node):
 @node_rewriter([Subtensor])
 def local_useless_slice(fgraph, node):
     """
-    Remove Subtensor of the form X[0, :] -> X[0]
+    Remove Subtensor of the form:
+        1. X[0, :] -> X[0]
+        2. X[:] -> X
+
     """
-    if isinstance(node.op, Subtensor):
-        slices = get_idx_list(node.inputs, node.op.idx_list)
-        last_slice = len(slices)
-        for s in slices[::-1]:
-            # check if slice and then check slice indices
-            if (
-                isinstance(s, slice)
-                and s.start is None
-                and s.stop is None
-                and (
-                    s.step is None
-                    or extract_constant(s.step, only_process_constants=True) == 1
-                )
-            ):
-                last_slice -= 1
-            else:
-                break
-        # check if we removed something
-        if last_slice < len(slices):
-            subtens = Subtensor(slices[:last_slice])
-            sl_ins = get_slice_elements(
-                slices[:last_slice], lambda x: isinstance(x, Variable)
+    idxs = get_idx_list(node.inputs, node.op.idx_list)
+
+    if not idxs:
+        return [node.inputs[0]]
+
+    last_useless_slice = len(idxs)
+    for s in idxs[::-1]:
+        # check if slice and then check slice indices
+        if (
+            isinstance(s, slice)
+            and s.start is None
+            and s.stop is None
+            and (
+                s.step is None
+                or extract_constant(s.step, only_process_constants=True) == 1
             )
-            out = subtens(node.inputs[0], *sl_ins)
+        ):
+            last_useless_slice -= 1
+        else:
+            break
+    # check if we removed something
+    if last_useless_slice < len(idxs):
+        new_idxs = idxs[:last_useless_slice]
+        if new_idxs:
+            new_subtensor = Subtensor(new_idxs)
+            new_subtensor_inputs = get_slice_elements(
+                new_idxs, lambda x: isinstance(x, Variable)
+            )
+            out = new_subtensor(node.inputs[0], *new_subtensor_inputs)
             # Copy over previous output stacktrace
             copy_stack_trace(node.outputs, out)
             return [out]
+        else:
+            # Subtensor is not needed at all
+            return [node.inputs[0]]
 
 
 # fast_compile to allow opt subtensor(cast{float32}(make_vector))
@@ -747,7 +758,13 @@ def local_subtensor_make_vector(fgraph, node):
     make_vector_op = x.owner.op
 
     if isinstance(node.op, Subtensor):
-        (idx,) = node.op.idx_list
+        idxs = node.op.idx_list
+
+        # Subtensor has no indexes, return make_vector
+        if not idxs:
+            return [x]
+
+        (idx,) = idxs
 
         if isinstance(idx, (aes.ScalarType, TensorType)):
             old_idx, idx = idx, node.inputs[1]
@@ -903,7 +920,11 @@ def local_set_to_inc_subtensor(fgraph, node):
 @node_rewriter([Subtensor])
 def local_useless_subtensor(fgraph, node):
     """Remove `Subtensor` if it takes the full input."""
-    # This optimization needs ShapeOpt and fgraph.shape_feature
+
+    if not node.op.idx_list:
+        return [node.inputs[0]]
+
+    # The more elaborate optimization needs ShapeOpt and fgraph.shape_feature
     if not hasattr(fgraph, "shape_feature"):
         return
 
