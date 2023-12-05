@@ -67,9 +67,7 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays
-from pytensor.tensor.math import Sum, add
-from pytensor.tensor.math import all as at_all
-from pytensor.tensor.math import eq
+from pytensor.tensor.math import Sum, add, eq
 from pytensor.tensor.shape import Shape_i, shape_padleft
 from pytensor.tensor.sort import TopKOp
 from pytensor.tensor.type import DenseTensorType, TensorType
@@ -266,6 +264,7 @@ def local_elemwise_alloc(fgraph, node):
     introduces them as a canonicalization of `Alloc`'s with leading
     broadcastable dimensions.
     """
+    # This is handled by local_alloc_unary
     if len(node.inputs) == 1:
         return None
 
@@ -465,14 +464,7 @@ def local_useless_alloc(fgraph, node):
         inp.type.dtype == output.type.dtype
         and inp.type.broadcastable == output.type.broadcastable
     ):
-        if inp.ndim == 0:
-            return [inp]
-        else:
-            return [
-                Assert("Shapes must be equal")(
-                    inp, at_all(eq(inp.shape, node.inputs[1:]))
-                )
-            ]
+        return [inp]
 
 
 @register_specialize
