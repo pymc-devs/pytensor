@@ -20,7 +20,7 @@ from pytensor.graph.replace import clone_replace
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.raise_op import Assert
 from pytensor.scalar import autocast_float, autocast_float_as
-from pytensor.tensor import NoneConst
+from pytensor.tensor import NoneConst, vectorize
 from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
@@ -88,6 +88,7 @@ from pytensor.tensor.basic import (
     vertical_stack,
     zeros_like,
 )
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import dense_dot
@@ -4516,4 +4517,27 @@ def test_trace():
     np.testing.assert_allclose(
         trace(x, offset=-1, axis1=0, axis2=-1).eval(),
         np.trace(x_val, offset=-1, axis1=0, axis2=-1),
+    )
+
+
+def test_vectorize_extract_diag():
+    signature = "(a1,b,a2)->(b,a)"
+
+    def core_pt(x):
+        return at.diagonal(x, offset=1, axis1=0, axis2=2)
+
+    def core_np(x):
+        return np.diagonal(x, offset=1, axis1=0, axis2=2)
+
+    x = tensor(shape=(5, 5, 5, 5))
+    vectorize_pt = function([x], vectorize(core_pt, signature=signature)(x))
+    assert not any(
+        isinstance(node.op, Blockwise) for node in vectorize_pt.maker.fgraph.apply_nodes
+    )
+
+    x_test = np.random.normal(size=x.type.shape).astype(x.type.dtype)
+    vectorize_np = np.vectorize(core_np, signature=signature)
+    np.testing.assert_allclose(
+        vectorize_pt(x_test),
+        vectorize_np(x_test),
     )
