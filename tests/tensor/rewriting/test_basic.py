@@ -272,21 +272,36 @@ class TestLocalCanonicalizeAlloc:
     def setup_method(self):
         self.rng = np.random.default_rng(utt.fetch_seed())
 
-    def test_inconsistent_shared(self):
+    @pytest.mark.parametrize("shape_unsafe", (True, False))
+    def test_inconsistent_shared(self, shape_unsafe):
         # These shapes don't match!
         x = shared(self.rng.standard_normal((3, 7)))
         a = at.alloc(x, 6, 7)
 
         assert a.owner and isinstance(a.owner.op, Alloc)
 
-        f = function([], a, mode=rewrite_mode)
+        mode = rewrite_mode if shape_unsafe else rewrite_mode.excluding("shape_unsafe")
+        f = function([], a, mode=mode)
 
-        # The rewrite should then be applied, and remove Alloc
-        assert not any(isinstance(node.op, Alloc) for node in f.maker.fgraph.toposort())
-        assert any(isinstance(node.op, Assert) for node in f.maker.fgraph.toposort())
-
-        with pytest.raises(AssertionError):
-            f()
+        has_alloc = any(
+            isinstance(node.op, Alloc) for node in f.maker.fgraph.toposort()
+        )
+        if shape_unsafe:
+            assert not has_alloc
+            # Error raised by SpecifyShape that is introduced due to static shape inference
+            with pytest.raises(
+                AssertionError,
+                match="SpecifyShape: dim 0 of input has shape 3, expected 6.",
+            ):
+                f()
+        else:
+            assert has_alloc
+            # Error raised by Alloc Op
+            with pytest.raises(
+                ValueError,
+                match=r"could not broadcast input array from shape \(3,7\) into shape \(6,7\)",
+            ):
+                f()
 
         good_x_val = self.rng.standard_normal((6, 7))
         x.set_value(good_x_val)
