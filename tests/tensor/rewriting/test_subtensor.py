@@ -9,6 +9,7 @@ from pytensor.compile.function import function
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
+from pytensor.graph import FunctionGraph
 from pytensor.graph.basic import Constant, Variable, ancestors
 from pytensor.graph.rewriting.basic import check_stack_trace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
@@ -21,6 +22,7 @@ from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, add, dot, exp, sqr
 from pytensor.tensor.rewriting.subtensor import (
     local_replace_AdvancedSubtensor,
+    local_subtensor_make_vector,
     local_subtensor_shape_constant,
 )
 from pytensor.tensor.shape import (
@@ -763,6 +765,17 @@ class TestLocalSubtensorMakeVector:
         for v_subtensor in v_subtensors:
             f = function([x, y, z], v_subtensor, mode=mode)
             assert check_stack_trace(f, ops_to_check="all")
+
+    def test_empty_subtensor(self):
+        x, y = lscalars("xy")
+        v = make_vector(x, y)
+        out = v[()]
+
+        fgraph = FunctionGraph(outputs=[out], clone=False)
+        node = fgraph.outputs[0].owner
+        assert isinstance(node.op, Subtensor)
+
+        assert local_subtensor_make_vector.transform(fgraph, node) == [v]
 
 
 class TestLocalSubtensorLift:
