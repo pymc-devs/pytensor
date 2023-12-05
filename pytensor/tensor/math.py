@@ -9,6 +9,7 @@ from pytensor import scalar as aes
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.op import Op
+from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.link.c.type import Generic
@@ -25,7 +26,7 @@ from pytensor.tensor.basic import (
     stack,
     switch,
 )
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise, scalar_elemwise
 from pytensor.tensor.shape import shape, specify_broadcastable
 from pytensor.tensor.type import (
@@ -2873,7 +2874,11 @@ def logsumexp(x, axis=None, keepdims=False):
     return log(sum(exp(x), axis=axis, keepdims=keepdims))
 
 
-_matrix_matrix_matmul = Blockwise(_dot, signature="(n,k),(k,m)->(n,m)")
+_matrix_matrix_matmul = Blockwise(
+    _dot,
+    signature="(m,k),(k,n)->(m,n)",
+    gufunc_spec=("numpy.matmul", 2, 1),
+)
 
 
 def matmul(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None):
@@ -2935,6 +2940,15 @@ def matmul(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None
         out = out.astype(dtype)
 
     return out
+
+
+@_vectorize_node.register(Dot)
+def vectorize_node_to_matmul(op, node, batched_x, batched_y):
+    old_x, old_y = node.inputs
+    if old_x.type.ndim == 2 and old_y.type.ndim == 2:
+        return matmul(batched_x, batched_y).owner
+    else:
+        return vectorize_node_fallback(op, node, batched_x, batched_y)
 
 
 __all__ = [

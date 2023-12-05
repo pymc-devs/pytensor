@@ -58,6 +58,7 @@ class Blockwise(Op):
         core_op: Op,
         signature: Optional[str] = None,
         name: Optional[str] = None,
+        gufunc_spec: Optional[tuple[str, int, int]] = None,
         **kwargs,
     ):
         """
@@ -69,7 +70,12 @@ class Blockwise(Op):
         signature
             Generalized universal function signature,
             e.g., (m,n),(n)->(m) for vectorized matrix-vector multiplication
-
+        gufunc: tuple, Optional
+            Tuple containing:
+                1. String import path for a numpy/scipy function (e.g., "numpy.matmul", "scipy.special.softmax")
+                that implements the blockwised operation of the scalar op.
+                2 Number of inputs of the function
+                3 Number of outputs of the function
         """
         if isinstance(core_op, Blockwise):
             raise TypeError("Core Op is already a Blockwise")
@@ -85,6 +91,7 @@ class Blockwise(Op):
         self.signature = signature
         self.name = name
         self.inputs_sig, self.outputs_sig = _parse_gufunc_signature(signature)
+        self.gufunc_spec = gufunc_spec
         self._gufunc = None
         super().__init__(**kwargs)
 
@@ -297,10 +304,14 @@ class Blockwise(Op):
         return rval
 
     def _create_gufunc(self, node):
-        if hasattr(self.core_op, "gufunc_spec"):
-            self._gufunc = import_func_from_string(self.core_op.gufunc_spec[0])
+        gufunc_spec = self.gufunc_spec or getattr(self.core_op, "gufunc_spec", None)
+
+        if gufunc_spec is not None:
+            self._gufunc = import_func_from_string(gufunc_spec[0])
             if self._gufunc:
                 return self._gufunc
+            else:
+                raise ValueError(f"Could not import gufunc {gufunc_spec[0]} for {self}")
 
         n_outs = len(self.outputs_sig)
         core_node = self._create_dummy_core_node(node.inputs)
