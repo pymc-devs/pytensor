@@ -868,7 +868,8 @@ def shape_padleft(t, n_ones=1):
 
     """
     _t = at.as_tensor_variable(t)
-
+    if n_ones == 0:
+        return _t
     pattern = ["x"] * n_ones + list(range(_t.type.ndim))
     return _t.dimshuffle(pattern)
 
@@ -884,7 +885,8 @@ def shape_padright(t, n_ones=1):
 
     """
     _t = at.as_tensor_variable(t)
-
+    if n_ones == 0:
+        return _t
     pattern = list(range(_t.type.ndim)) + ["x"] * n_ones
     return _t.dimshuffle(pattern)
 

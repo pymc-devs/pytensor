@@ -603,6 +603,10 @@ def squeeze(x, axis=None):
     except np.AxisError:
         raise np.AxisError(axis, ndim=_x.ndim)
 
+    if not axis:
+        # Nothing to do
+        return _x
+
     return _x.dimshuffle([i for i in range(_x.ndim) if i not in axis])
 
 
