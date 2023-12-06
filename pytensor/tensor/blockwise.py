@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from copy import copy
 from typing import Any, Optional, cast
 
 import numpy as np
@@ -86,6 +87,11 @@ class Blockwise(Op):
         self.inputs_sig, self.outputs_sig = _parse_gufunc_signature(signature)
         self._gufunc = None
         super().__init__(**kwargs)
+
+    def __getstate__(self):
+        d = copy(self.__dict__)
+        d["_gufunc"] = None
+        return d
 
     def _create_dummy_core_node(self, inputs: Sequence[TensorVariable]) -> Apply:
         core_input_types = []
