@@ -332,6 +332,7 @@ def local_exp_log_nan_switch(fgraph, node):
 
     node_is_exp = isinstance(node_op, aes.Exp)
     node_is_expm1 = isinstance(node_op, aes.Expm1)
+    node_is_log1mexp = isinstance(node_op, aes_math.Log1mexp)
 
     def nan_switch(*, if_, substitute) -> list:
         """Reused inner function because these cases all have the same fallback."""
@@ -362,6 +363,9 @@ def local_exp_log_nan_switch(fgraph, node):
         elif node_is_expm1:
             # Case for expm1(log1mexp(x)) -> -exp(x)
             return nan_switch(if_=le(x, 0), substitute=neg(exp(x)))
+        elif node_is_log1mexp:
+            # Case for log1mexp(log1mexp(x)) -> x
+            return nan_switch(if_=ge(x, 0), substitute=x)
 
 
 @register_canonicalize
