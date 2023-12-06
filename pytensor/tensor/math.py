@@ -2944,10 +2944,6 @@ less = lt
 less_equal = le
 equal = eq
 not_equal = neq
-logical_and = bitwise_and
-logical_or = bitwise_or
-logical_not = bitwise_not
-logical_xor = bitwise_xor
 
 __all__ = [
     "max_and_argmax",
@@ -2976,16 +2972,12 @@ __all__ = [
     "isclose",
     "and_",
     "bitwise_and",
-    "logical_and",
     "or_",
     "bitwise_or",
-    "logical_or",
     "xor",
     "bitwise_xor",
-    "logical_xor",
     "invert",
     "bitwise_not",
-    "logical_not",
     "abs",
     "exp",
     "exp2",
