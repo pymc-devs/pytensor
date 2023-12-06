@@ -9,7 +9,7 @@ from pytensor.compile.function import function
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
-from pytensor.graph import FunctionGraph
+from pytensor.graph import FunctionGraph, vectorize_graph
 from pytensor.graph.basic import Constant, Variable, ancestors
 from pytensor.graph.rewriting.basic import check_stack_trace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
@@ -18,6 +18,7 @@ from pytensor.graph.type import Type
 from pytensor.raise_op import Assert
 from pytensor.tensor import inplace
 from pytensor.tensor.basic import Alloc, MakeVector, _convert_to_int8, make_vector
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, add, dot, exp, sqr
 from pytensor.tensor.rewriting.subtensor import (
@@ -2314,3 +2315,98 @@ def test_local_uint_constant_indices():
     new_index = subtensor_node.inputs[1]
     assert isinstance(new_index, Constant)
     assert new_index.type.dtype == "uint8"
+
+
+@pytest.mark.parametrize("set_instead_of_inc", (True, False))
+def test_local_blockwise_advanced_inc_subtensor(set_instead_of_inc):
+    core_x = tensor("x", shape=(6,))
+    core_y = tensor("y", shape=(3,))
+    core_idxs = [0, 2, 4]
+    if set_instead_of_inc:
+        core_graph = set_subtensor(core_x[core_idxs], core_y)
+    else:
+        core_graph = inc_subtensor(core_x[core_idxs], core_y)
+
+    # Only x is batched
+    x = tensor("x", shape=(5, 2, 6))
+    y = tensor("y", shape=(3,))
+    out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
+    assert isinstance(out.owner.op, Blockwise)
+
+    fn = pytensor.function([x, y], out, mode="FAST_RUN")
+    assert not any(
+        isinstance(node.op, Blockwise) for node in fn.maker.fgraph.apply_nodes
+    )
+
+    test_x = np.ones(x.type.shape, dtype=x.type.dtype)
+    test_y = np.array([5, 6, 7]).astype(dtype=core_y.type.dtype)
+    expected_out = test_x.copy()
+    if set_instead_of_inc:
+        expected_out[:, :, core_idxs] = test_y
+    else:
+        expected_out[:, :, core_idxs] += test_y
+    np.testing.assert_allclose(fn(test_x, test_y), expected_out)
+
+    # Only y is batched
+    x = tensor("y", shape=(6,))
+    y = tensor("y", shape=(2, 3))
+    out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
+    assert isinstance(out.owner.op, Blockwise)
+
+    fn = pytensor.function([x, y], out, mode="FAST_RUN")
+    assert not any(
+        isinstance(node.op, Blockwise) for node in fn.maker.fgraph.apply_nodes
+    )
+
+    test_x = np.ones(x.type.shape, dtype=x.type.dtype)
+    test_y = np.array([[3, 3, 3], [5, 6, 7]]).astype(dtype=core_y.type.dtype)
+    expected_out = np.ones((2, *x.type.shape))
+    if set_instead_of_inc:
+        expected_out[:, core_idxs] = test_y
+    else:
+        expected_out[:, core_idxs] += test_y
+    np.testing.assert_allclose(fn(test_x, test_y), expected_out)
+
+    # Both x and y are batched, and do not need to be broadcasted
+    x = tensor("y", shape=(2, 6))
+    y = tensor("y", shape=(2, 3))
+    out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
+    assert isinstance(out.owner.op, Blockwise)
+
+    fn = pytensor.function([x, y], out, mode="FAST_RUN")
+    assert not any(
+        isinstance(node.op, Blockwise) for node in fn.maker.fgraph.apply_nodes
+    )
+
+    test_x = np.ones(x.type.shape, dtype=x.type.dtype)
+    test_y = np.array([[5, 6, 7], [3, 3, 3]]).astype(dtype=core_y.type.dtype)
+    expected_out = test_x.copy()
+    if set_instead_of_inc:
+        expected_out[:, core_idxs] = test_y
+    else:
+        expected_out[:, core_idxs] += test_y
+    np.testing.assert_allclose(fn(test_x, test_y), expected_out)
+
+    # Both x and y are batched, but must be broadcasted
+    x = tensor("y", shape=(5, 1, 6))
+    y = tensor("y", shape=(1, 2, 3))
+    out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
+    assert isinstance(out.owner.op, Blockwise)
+
+    fn = pytensor.function([x, y], out, mode="FAST_RUN")
+    assert not any(
+        isinstance(node.op, Blockwise) for node in fn.maker.fgraph.apply_nodes
+    )
+
+    test_x = np.ones(x.type.shape, dtype=x.type.dtype)
+    test_y = np.array([[[5, 6, 7], [3, 3, 3]]]).astype(dtype=core_y.type.dtype)
+    final_shape = (
+        *np.broadcast_shapes(x.type.shape[:-1], y.type.shape[:-1]),
+        x.type.shape[-1],
+    )
+    expected_out = np.broadcast_to(test_x, final_shape).copy()
+    if set_instead_of_inc:
+        expected_out[:, :, core_idxs] = test_y
+    else:
+        expected_out[:, :, core_idxs] += test_y
+    np.testing.assert_allclose(fn(test_x, test_y), expected_out)
