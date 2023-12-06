@@ -163,8 +163,8 @@ class Blockwise(Op):
 
         return Apply(self, batched_inputs, batched_outputs)
 
-    def _batch_ndim_from_outputs(self, outputs: Sequence[TensorVariable]) -> int:
-        return cast(int, outputs[0].type.ndim - len(self.outputs_sig[0]))
+    def batch_ndim(self, node: Apply) -> int:
+        return cast(int, node.outputs[0].type.ndim - len(self.outputs_sig[0]))
 
     def infer_shape(
         self, fgraph, node, input_shapes
@@ -172,7 +172,7 @@ class Blockwise(Op):
         from pytensor.tensor import broadcast_shape
         from pytensor.tensor.shape import Shape_i
 
-        batch_ndims = self._batch_ndim_from_outputs(node.outputs)
+        batch_ndims = self.batch_ndim(node)
         core_dims: dict[str, Any] = {}
         batch_shapes = []
         for input_shape, sig in zip(input_shapes, self.inputs_sig):
@@ -278,7 +278,7 @@ class Blockwise(Op):
             return new_rval
 
         # Sum out the broadcasted dimensions
-        batch_ndims = self._batch_ndim_from_outputs(outs)
+        batch_ndims = self.batch_ndim(outs[0].owner)
         batch_shape = outs[0].type.shape[:batch_ndims]
         for i, (inp, sig) in enumerate(zip(inputs, self.inputs_sig)):
             if isinstance(rval[i].type, (NullType, DisconnectedType)):
@@ -320,7 +320,7 @@ class Blockwise(Op):
         return self._gufunc
 
     def _check_runtime_broadcast(self, node, inputs):
-        batch_ndim = self._batch_ndim_from_outputs(node.outputs)
+        batch_ndim = self.batch_ndim(node)
 
         for dims_and_bcast in zip(
             *[

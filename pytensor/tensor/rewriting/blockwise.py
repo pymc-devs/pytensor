@@ -2,9 +2,15 @@ from pytensor.compile.mode import optdb
 from pytensor.graph import node_rewriter
 from pytensor.graph.replace import vectorize_node
 from pytensor.graph.rewriting.basic import copy_stack_trace, out2in
+from pytensor.tensor.basic import Alloc, ARange, shape_padleft
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.math import _matrix_matrix_matmul
-from pytensor.tensor.rewriting.basic import register_canonicalize
+from pytensor.tensor.math import Dot
+from pytensor.tensor.rewriting.basic import (
+    register_canonicalize,
+    register_specialize,
+    register_stabilize,
+)
+from pytensor.tensor.subtensor import AdvancedIncSubtensor, AdvancedSubtensor, Subtensor
 
 
 @node_rewriter([Blockwise])
@@ -29,8 +35,17 @@ def local_useless_unbatched_blockwise(fgraph, node):
     op = node.op
     inputs = node.inputs
 
-    if max(inp.type.ndim - len(sig) for inp, sig in zip(inputs, op.inputs_sig)) == 0:
-        return copy_stack_trace(node.outputs, op.core_op.make_node(*inputs).outputs)
+    batch_ndims = node.op.batch_ndim(node)
+    if all(all(inp.type.broadcastable[:batch_ndims]) for inp in inputs):
+        if batch_ndims:
+            # Remove dummy batch dims
+            axis = tuple(range(batch_ndims))
+            inputs = [inp.squeeze(axis) for inp in inputs]
+        new_outs = op.core_op.make_node(*inputs).outputs
+        if batch_ndims:
+            # Reintroduce dummy batch dims
+            new_outs = [shape_padleft(out, batch_ndims) for out in new_outs]
+        return copy_stack_trace(node.outputs, new_outs)
 
 
 # We register this rewrite late, so that other rewrites need only target Blockwise Ops
@@ -46,6 +61,22 @@ optdb.register(
 
 # Avoid redundant cases early on for Ops whose default form is not Blockwised
 @register_canonicalize
-@node_rewriter(tracks=[_matrix_matrix_matmul])
+@register_stabilize
+@register_specialize
+@node_rewriter(tracks=[Blockwise])
 def local_eager_useless_unbatched_blockwise(fgraph, node):
-    return local_useless_unbatched_blockwise.fn(fgraph, node)
+    if isinstance(
+        node.op.core_op,
+        (
+            # Many Dot-related rewrites (e.g., all of BlasOpt) happen before specialize
+            Dot,
+            # These Ops can't always be trivially vectorized at runtime,
+            # Since their inputs may imply non-rectangular shapes.
+            Alloc,
+            ARange,
+            Subtensor,
+            AdvancedSubtensor,
+            AdvancedIncSubtensor,
+        ),
+    ):
+        return local_useless_unbatched_blockwise.fn(fgraph, node)
