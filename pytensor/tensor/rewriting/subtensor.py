@@ -29,6 +29,7 @@ from pytensor.tensor.basic import (
     register_infer_shape,
     switch,
 )
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import Dot, add
@@ -1880,3 +1881,58 @@ def local_uint_constant_indices(fgraph, node):
     copy_stack_trace(node.outputs, new_outs)
 
     return new_outs
+
+
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter([Blockwise])
+def local_blockwise_advanced_inc_subtensor(fgraph, node):
+    """Rewrite blockwise advanced inc_subtensor whithout batched indexes as an inc_subtensor with prepended empty slices."""
+    if not isinstance(node.op.core_op, AdvancedIncSubtensor):
+        return None
+
+    x, y, *idxs = node.inputs
+
+    # It is currently not possible to Vectorize such AdvancedIncSubtensor, but we check again just in case
+    if any(
+        (
+            isinstance(idx, (SliceType, NoneTypeT))
+            or (idx.type.dtype == "bool" and idx.type.ndim > 0)
+        )
+        for idx in idxs
+    ):
+        return None
+
+    op: Blockwise = node.op  # type: ignore
+    batch_ndim = op.batch_ndim(node)
+
+    new_idxs = []
+    for idx in idxs:
+        if all(idx.type.broadcastable[:batch_ndim]):
+            new_idxs.append(idx.squeeze(tuple(range(batch_ndim))))
+        else:
+            # Rewrite does not apply
+            return None
+
+    x_batch_bcast = x.type.broadcastable[:batch_ndim]
+    y_batch_bcast = y.type.broadcastable[:batch_ndim]
+    if any(xb and not yb for xb, yb in zip(x_batch_bcast, y_batch_bcast)):
+        # Need to broadcast batch x dims
+        batch_shape = tuple(
+            x_dim if (not xb or yb) else y_dim
+            for xb, x_dim, yb, y_dim in zip(
+                x_batch_bcast,
+                tuple(x.shape)[:batch_ndim],
+                y_batch_bcast,
+                tuple(y.shape)[:batch_ndim],
+            )
+        )
+        core_shape = tuple(x.shape)[batch_ndim:]
+        x = alloc(x, *batch_shape, *core_shape)
+
+    new_idxs = [slice(None)] * batch_ndim + new_idxs
+    symbolic_idxs = x[tuple(new_idxs)].owner.inputs[1:]
+    new_out = op.core_op.make_node(x, y, *symbolic_idxs).outputs
+    copy_stack_trace(node.outputs, new_out)
+    return new_out
