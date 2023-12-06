@@ -2937,6 +2937,18 @@ def matmul(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None
     return out
 
 
+# NumPy logical aliases
+greater = gt
+greater_equal = ge
+less = lt
+less_equal = le
+equal = eq
+not_equal = neq
+logical_and = bitwise_and
+logical_or = bitwise_or
+logical_not = bitwise_not
+logical_xor = bitwise_xor
+
 __all__ = [
     "max_and_argmax",
     "max",
@@ -2947,23 +2959,33 @@ __all__ = [
     "smallest",
     "largest",
     "lt",
+    "less",
     "gt",
+    "greater",
     "le",
+    "less_equal",
     "ge",
+    "greater_equal",
     "eq",
+    "equal",
     "neq",
+    "not_equal",
     "isnan",
     "isinf",
     "allclose",
     "isclose",
     "and_",
     "bitwise_and",
+    "logical_and",
     "or_",
     "bitwise_or",
+    "logical_or",
     "xor",
     "bitwise_xor",
+    "logical_xor",
     "invert",
     "bitwise_not",
+    "logical_not",
     "abs",
     "exp",
     "exp2",
