@@ -1625,7 +1625,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
                 if hasattr(self.fn.maker, "profile"):
                     profile = self.fn.maker.profile
-                    if type(profile) is not bool and profile:
+                    if not isinstance(profile, bool) and profile:
                         profile.vm_call_time += t_fn
                         profile.callcount += 1
                         profile.nbsteps += n_steps
