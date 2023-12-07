@@ -1,0 +1,15 @@
+name: ubuntu_test_environment
+dependencies:
+  - mkl
+  - "numpy<1.26"
+  - scipy
+  - pip
+  - mkl-service
+  - graphviz
+  - cython
+  - pytest
+  - coverage
+  - pytest-cov
+  - pytest-benchmark
+  - pytest-mock
+  - sympy
