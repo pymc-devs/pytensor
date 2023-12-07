@@ -330,40 +330,45 @@ def local_exp_log_nan_switch(fgraph, node):
     prev_op = x.owner.op.scalar_op
     node_op = node.op.scalar_op
 
-    node_is_exp = isinstance(node_op, aes.Exp)
-    node_is_expm1 = isinstance(node_op, aes.Expm1)
-    node_is_log1mexp = isinstance(node_op, aes_math.Log1mexp)
+    def prev_is(op_type):
+        return isinstance(prev_op, op_type)
+
+    def node_is(op_type):
+        return isinstance(node_op, op_type)
 
     def nan_switch(*, if_, substitute) -> list:
         """Reused inner function because these cases all have the same fallback."""
-        x = x.owner.inputs[0]
         old_out = node.outputs[0]
         nan_fallback = np.asarray(np.nan, old_out.dtype)
         new_out = switch(if_, substitute, nan_fallback)
         return [new_out]
 
-    if isinstance(prev_op, aes.Log):
-        if node_is_exp:
+    x = x.owner.inputs[0]
+
+    if prev_is(aes.Log):
+        if node_is(aes.Exp):
             # Case for exp(log(x)) -> x
             return nan_switch(if_=ge(x, 0), substitute=x)
-        elif node_is_expm1:
+        elif node_is(aes.Expm1):
             # Case for expm1(log(x)) -> x - 1
             return nan_switch(if_=ge(x, 0), substitute=sub(x, 1))
-    elif isinstance(prev_op, aes.Log1p):
-        if node_is_exp:
+
+    elif prev_is(aes.Log1p):
+        if node_is(aes.Exp):
             # Case for exp(log1p(x)) -> x + 1
             return nan_switch(if_=ge(x, -1), substitute=add(1, x))
-        elif node_is_expm1:
+        elif node_is(aes.Expm1):
             # Case for expm1(log1p(x)) -> x
             return nan_switch(if_=ge(x, -1), substitute=x)
-    elif isinstance(prev_op, aes_math.Log1mexp):
-        if node_is_exp:
+
+    elif prev_is(aes_math.Log1mexp):
+        if node_is(aes.Exp):
             # Case for exp(log1mexp(x)) -> 1 - exp(x)
             return nan_switch(if_=le(x, 0), substitute=sub(1, exp(x)))
-        elif node_is_expm1:
+        elif node_is(aes.Expm1):
             # Case for expm1(log1mexp(x)) -> -exp(x)
             return nan_switch(if_=le(x, 0), substitute=neg(exp(x)))
-        elif node_is_log1mexp:
+        elif node_is(aes_math.Log1mexp):
             # Case for log1mexp(log1mexp(x)) -> x
             return nan_switch(if_=ge(x, 0), substitute=x)
 
