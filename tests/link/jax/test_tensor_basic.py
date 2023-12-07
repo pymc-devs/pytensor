@@ -5,16 +5,16 @@ from pytensor.compile import get_mode
 
 
 jax = pytest.importorskip("jax")
-import jax.errors
+import jax.errors  # noqa: E402
 
-import pytensor
-import pytensor.tensor.basic as at
-from pytensor.configdefaults import config
-from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import get_test_value
-from pytensor.tensor.type import iscalar, matrix, scalar, vector
-from tests.link.jax.test_basic import compare_jax_and_py
-from tests.tensor.test_basic import TestAlloc
+import pytensor  # noqa: E402
+import pytensor.tensor.basic as at  # noqa: E402
+from pytensor.configdefaults import config  # noqa: E402
+from pytensor.graph.fg import FunctionGraph  # noqa: E402
+from pytensor.graph.op import get_test_value  # noqa: E402
+from pytensor.tensor.type import iscalar, matrix, scalar, vector  # noqa: E402
+from tests.link.jax.test_basic import compare_jax_and_py  # noqa: E402
+from tests.tensor.test_basic import TestAlloc  # noqa: E402
 
 
 def test_jax_Alloc():

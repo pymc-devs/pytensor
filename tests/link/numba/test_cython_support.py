@@ -6,9 +6,12 @@ import scipy.special.cython_special
 numba = pytest.importorskip("numba")
 
 
-from numba.types import float32, float64, int32, int64
+from numba.types import float32, float64, int32, int64  # noqa: E402
 
-from pytensor.link.numba.dispatch.cython_support import Signature, wrap_cython_function
+from pytensor.link.numba.dispatch.cython_support import (  # noqa: E402
+    Signature,
+    wrap_cython_function,
+)
 
 
 @pytest.mark.parametrize(

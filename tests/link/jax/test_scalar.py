@@ -31,7 +31,7 @@ from tests.link.jax.test_basic import compare_jax_and_py
 
 
 jax = pytest.importorskip("jax")
-from pytensor.link.jax.dispatch import jax_funcify
+from pytensor.link.jax.dispatch import jax_funcify  # noqa: E402
 
 
 try:

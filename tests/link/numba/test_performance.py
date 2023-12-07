@@ -6,13 +6,13 @@ import pytest
 
 pytest.importorskip("numba")
 
-import pytensor.tensor as aet
-from pytensor import config
-from pytensor.compile.function import function
-from pytensor.compile.mode import Mode
-from pytensor.graph.rewriting.db import RewriteDatabaseQuery
-from pytensor.link.numba.linker import NumbaLinker
-from pytensor.tensor.math import Max
+import pytensor.tensor as aet  # noqa: E402
+from pytensor import config  # noqa: E402
+from pytensor.compile.function import function  # noqa: E402
+from pytensor.compile.mode import Mode  # noqa: E402
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery  # noqa: E402
+from pytensor.link.numba.linker import NumbaLinker  # noqa: E402
+from pytensor.tensor.math import Max  # noqa: E402
 
 
 opts = RewriteDatabaseQuery(include=[None], exclude=["cxx_only", "BlasOpt"])

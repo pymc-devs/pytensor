@@ -10,31 +10,31 @@ import pytest
 
 numba = pytest.importorskip("numba")
 
-import pytensor.scalar as aes
-import pytensor.scalar.math as aesm
-import pytensor.tensor as at
-import pytensor.tensor.math as aem
-from pytensor import config, shared
-from pytensor.compile.builders import OpFromGraph
-from pytensor.compile.function import function
-from pytensor.compile.mode import Mode
-from pytensor.compile.ops import ViewOp
-from pytensor.compile.sharedvalue import SharedVariable
-from pytensor.graph.basic import Apply, Constant
-from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import Op, get_test_value
-from pytensor.graph.rewriting.db import RewriteDatabaseQuery
-from pytensor.graph.type import Type
-from pytensor.ifelse import ifelse
-from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.numba.dispatch import numba_typify
-from pytensor.link.numba.linker import NumbaLinker
-from pytensor.raise_op import assert_op
-from pytensor.scalar.basic import ScalarOp, as_scalar
-from pytensor.tensor import blas
-from pytensor.tensor import subtensor as at_subtensor
-from pytensor.tensor.elemwise import Elemwise
-from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
+import pytensor.scalar as aes  # noqa: E402
+import pytensor.scalar.math as aesm  # noqa: E402
+import pytensor.tensor as at  # noqa: E402
+import pytensor.tensor.math as aem  # noqa: E402
+from pytensor import config, shared  # noqa: E402
+from pytensor.compile.builders import OpFromGraph  # noqa: E402
+from pytensor.compile.function import function  # noqa: E402
+from pytensor.compile.mode import Mode  # noqa: E402
+from pytensor.compile.ops import ViewOp  # noqa: E402
+from pytensor.compile.sharedvalue import SharedVariable  # noqa: E402
+from pytensor.graph.basic import Apply, Constant  # noqa: E402
+from pytensor.graph.fg import FunctionGraph  # noqa: E402
+from pytensor.graph.op import Op, get_test_value  # noqa: E402
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery  # noqa: E402
+from pytensor.graph.type import Type  # noqa: E402
+from pytensor.ifelse import ifelse  # noqa: E402
+from pytensor.link.numba.dispatch import basic as numba_basic  # noqa: E402
+from pytensor.link.numba.dispatch import numba_typify  # noqa: E402
+from pytensor.link.numba.linker import NumbaLinker  # noqa: E402
+from pytensor.raise_op import assert_op  # noqa: E402
+from pytensor.scalar.basic import ScalarOp, as_scalar  # noqa: E402
+from pytensor.tensor import blas  # noqa: E402
+from pytensor.tensor import subtensor as at_subtensor  # noqa: E402
+from pytensor.tensor.elemwise import Elemwise  # noqa: E402
+from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape  # noqa: E402
 
 
 if TYPE_CHECKING:

@@ -7,10 +7,10 @@ numba = pytest.importorskip("numba")
 
 
 # Make sure the Numba customizations are loaded
-import pytensor.link.numba.dispatch.sparse  # noqa: F401
-from pytensor import config
-from pytensor.sparse import Dot, SparseTensorType
-from tests.link.numba.test_basic import compare_numba_and_py
+import pytensor.link.numba.dispatch.sparse  # noqa: E402,F401
+from pytensor import config  # noqa: E402
+from pytensor.sparse import Dot, SparseTensorType  # noqa: E402
+from tests.link.numba.test_basic import compare_numba_and_py  # noqa: E402
 
 
 pytestmark = pytest.mark.filterwarnings("error")

@@ -20,7 +20,7 @@ from tests.tensor.test_basic import TestAlloc
 
 
 pytest.importorskip("numba")
-from pytensor.link.numba.dispatch import numba_funcify
+from pytensor.link.numba.dispatch import numba_funcify # noqa: E402
 
 
 rng = np.random.default_rng(42849)
