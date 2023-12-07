@@ -1359,7 +1359,7 @@ class _Linker(LocalLinker):
         if no_recycling is None:
             no_recycling = []
         if self.fgraph is not None and self.fgraph is not fgraph:
-            assert type(self) is _Linker
+            assert isinstance(self, _Linker)
             return type(self)(maker=self.maker).accept(fgraph, no_recycling, profile)
         self.fgraph = fgraph
         self.no_recycling: list = no_recycling
@@ -1866,7 +1866,7 @@ class _Linker(LocalLinker):
                 # Nothing should be in storage map after evaluating
                 # each the thunk (specifically the last one)
                 for r, s in storage_map.items():
-                    assert type(s) is list
+                    assert isinstance(s, list)
                     assert s[0] is None
 
                 # store our output variables to their respective storage lists
