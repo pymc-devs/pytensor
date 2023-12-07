@@ -1,4 +1,4 @@
-name: ubuntu_test_environment
+name: unix_test_environment
 dependencies:
   - coverage
   - cython

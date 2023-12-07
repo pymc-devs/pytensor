@@ -139,13 +139,15 @@ jobs:
       - name: Install dependencies
         shell: bash -l {0}
         run: |
-          mamba install --yes -q "python~=${PYTHON_VERSION}=*_cpython" --file ci/ubuntu_test_environment.yml
+          pushd conda-envs/ci/unix/test 2>/dev/null
+          mamba install --yes -q "python~=${PYTHON_VERSION}=*_cpython" --file test.yml
           # numba-scipy downgrades the installed scipy to 1.7.3 in Python 3.9, but
           # not numpy, even though scipy 1.7 requires numpy<1.23. When installing
           # PyTensor next, pip installs a lower version of numpy via the PyPI.
-          if [[ $INSTALL_NUMBA == "1" ]] && [[ $PYTHON_VERSION == "3.9" ]]; then mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" "numpy<1.23" "numba>=0.57" numba-scipy; fi
-          if [[ $INSTALL_NUMBA == "1" ]] && [[ $PYTHON_VERSION != "3.9" ]]; then mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" "numba>=0.57" numba-scipy; fi
-          if [[ $INSTALL_JAX == "1" ]]; then mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" jax jaxlib numpyro && pip install tensorflow-probability; fi
+          if [[ $INSTALL_NUMBA == "1" ]] && [[ $PYTHON_VERSION == "3.9" ]]; then mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" --file numba-py39.yml; fi
+          if [[ $INSTALL_NUMBA == "1" ]] && [[ $PYTHON_VERSION != "3.9" ]]; then mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" --file numba.yml; fi
+          if [[ $INSTALL_JAX == "1" ]]; then mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" --file jax.yml; fi
+          popd 2>/dev/null
           pip install -e ./
           mamba list && pip freeze
           python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'
@@ -198,7 +200,9 @@ jobs:
         - name: Install dependencies
           shell: bash -l {0}
           run: |
-            mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" mkl numpy scipy pip mkl-service cython pytest "numba>=0.57" numba-scipy jax jaxlib pytest-benchmark
+            pushd conda-envs/ci/unix/benchmark 2>/dev/null
+            mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" --file benchmark.yml
+            popd 2>/dev/null
             pip install -e ./
             mamba list && pip freeze
             python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'

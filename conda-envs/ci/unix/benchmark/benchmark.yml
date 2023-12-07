@@ -1,0 +1,16 @@
+name: unix_benchmark_environment
+channels:
+  - conda-forge
+dependencies:
+  - cython
+  - jax
+  - jaxlib
+  - mkl
+  - mkl-service
+  - "numba>=0.57"
+  - numba-scipy
+  - numpy
+  - pip
+  - pytest
+  - pytest-benchmark
+  - scipy

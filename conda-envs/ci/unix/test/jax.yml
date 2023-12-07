@@ -1,0 +1,10 @@
+name: unix_test_environment
+channels:
+  - conda-forge
+dependencies:
+  - jax
+  - jaxlib
+  - numpyro
+  - pip
+  - pip:
+      - tensorflow-probability
