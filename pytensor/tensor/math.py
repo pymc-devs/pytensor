@@ -1012,15 +1012,9 @@ def and_(a, b):
     """bitwise a & b"""
 
 
-bitwise_and = and_  # numpy name for it
-
-
 @scalar_elemwise
 def or_(a, b):
     """bitwise a | b"""
-
-
-bitwise_or = or_  # numpy name for it
 
 
 @scalar_elemwise
@@ -1028,15 +1022,10 @@ def xor(a, b):
     """bitwise a ^ b"""
 
 
-bitwise_xor = xor  # numpy name for it
-
-
 @scalar_elemwise
 def invert(a):
     """bitwise ~a"""
 
-
-bitwise_not = invert  # numpy alias for it
 
 ##########################
 # Math
@@ -1164,10 +1153,6 @@ def round_half_away_from_zero(a):
 @scalar_elemwise
 def sqr(a):
     """square of a"""
-
-
-# alias to sqr, included to maintain similarity with numpy interface
-square = sqr
 
 
 def cov(m, y=None, rowvar=True, bias=False, ddof=None, fweights=None, aweights=None):
@@ -2938,6 +2923,13 @@ def matmul(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None
 
 
 # NumPy logical aliases
+square = sqr
+
+bitwise_and = and_
+bitwise_or = or_
+bitwise_xor = xor
+bitwise_not = invert
+
 greater = gt
 greater_equal = ge
 less = lt
