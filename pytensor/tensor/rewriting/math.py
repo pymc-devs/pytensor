@@ -345,32 +345,33 @@ def local_exp_log_nan_switch(fgraph, node):
 
     x = x.owner.inputs[0]
 
-    if prev_is(aes.Log):
-        if node_is(aes.Exp):
+    op_map = {
+        aes.Log: {
             # Case for exp(log(x)) -> x
-            return nan_switch(if_=ge(x, 0), substitute=x)
-        elif node_is(aes.Expm1):
+            aes.Exp: (ge(x, 0), x),
             # Case for expm1(log(x)) -> x - 1
-            return nan_switch(if_=ge(x, 0), substitute=sub(x, 1))
-
-    elif prev_is(aes.Log1p):
-        if node_is(aes.Exp):
+            aes.Expm1: (ge(x, 0), sub(x, 1)),
+        },
+        aes.Log1p: {
             # Case for exp(log1p(x)) -> x + 1
-            return nan_switch(if_=ge(x, -1), substitute=add(1, x))
-        elif node_is(aes.Expm1):
+            aes.Exp: (ge(x, -1), add(1, x)),
             # Case for expm1(log1p(x)) -> x
-            return nan_switch(if_=ge(x, -1), substitute=x)
-
-    elif prev_is(aes_math.Log1mexp):
-        if node_is(aes.Exp):
+            aes.Expm1: (ge(x, -1), x),
+        },
+        aes.Log1mexp: {
             # Case for exp(log1mexp(x)) -> 1 - exp(x)
-            return nan_switch(if_=le(x, 0), substitute=sub(1, exp(x)))
-        elif node_is(aes.Expm1):
+            aes.Exp: (le(x, 0), sub(1, exp(x))),
             # Case for expm1(log1mexp(x)) -> -exp(x)
-            return nan_switch(if_=le(x, 0), substitute=neg(exp(x)))
-        elif node_is(aes_math.Log1mexp):
+            aes.Expm1: (le(x, 0), neg(exp(x))),
             # Case for log1mexp(log1mexp(x)) -> x
-            return nan_switch(if_=ge(x, 0), substitute=x)
+            aes.Log1mexp: (ge(x, 0), x),
+        },
+    }
+
+    for prev_to_match, node_candidates in op_map.items():
+        for node_to_match, (inequality, substitute) in node_candidates.items():
+            if prev_is(prev_to_match) and node_is(node_to_match):
+                return nan_switch(if_=inequality, substitute=substitution)
 
 
 @register_canonicalize
