@@ -173,13 +173,16 @@ skip = "pytensor/version.py"
 skip_glob = "**/*.pyx"
 
 [tool.ruff]
-select=["C","E","F","W"]
+select=["C","E","F","W","I"]
 ignore=["E501","E741","C408","C901"]
 exclude = [
     "doc/",
     "pytensor/_version.py",
     "bin/pytensor_cache.py",
 ]
+
+[tool.ruff.isort]
+lines-after-imports = 2
 
 [tool.ruff.per-file-ignores]
 # TODO: Get rid of these:
