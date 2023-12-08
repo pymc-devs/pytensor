@@ -32,35 +32,35 @@ repos:
         args: [ --fix ]
       # Run the formatter
       - id: ruff-format
-  - repo: https://github.com/psf/black
-    rev: 23.1.0
-    hooks:
-      - id: black
-        language_version: python3
-  - repo: https://github.com/pycqa/flake8
-    rev: 6.0.0
-    hooks:
-      - id: flake8
-        additional_dependencies:
-          - flake8-comprehensions
-  - repo: https://github.com/pycqa/isort
-    rev: 5.12.0
-    hooks:
-      - id: isort
-  - repo: https://github.com/humitos/mirrors-autoflake.git
-    rev: v1.1
-    hooks:
-      - id: autoflake
-        exclude: |
-          (?x)^(
-              .*/?__init__\.py|
-              pytensor/graph/toolbox\.py|
-              pytensor/link/jax/jax_dispatch\.py|
-              pytensor/link/jax/jax_linker\.py|
-              pytensor/scalar/basic_scipy\.py|
-              pytensor/tensor/linalg\.py
-          )$
-        args: ['--in-place', '--remove-all-unused-imports', '--remove-unused-variable']
+  # - repo: https://github.com/psf/black
+  #   rev: 23.1.0
+  #   hooks:
+  #     - id: black
+  #       language_version: python3
+  # - repo: https://github.com/pycqa/flake8
+  #   rev: 6.0.0
+  #   hooks:
+  #     - id: flake8
+  #       additional_dependencies:
+  #         - flake8-comprehensions
+  # - repo: https://github.com/pycqa/isort
+  #   rev: 5.12.0
+  #   hooks:
+  #     - id: isort
+  # - repo: https://github.com/humitos/mirrors-autoflake.git
+  #   rev: v1.1
+  #   hooks:
+  #     - id: autoflake
+  #       exclude: |
+  #         (?x)^(
+  #             .*/?__init__\.py|
+  #             pytensor/graph/toolbox\.py|
+  #             pytensor/link/jax/jax_dispatch\.py|
+  #             pytensor/link/jax/jax_linker\.py|
+  #             pytensor/scalar/basic_scipy\.py|
+  #             pytensor/tensor/linalg\.py
+  #         )$
+  #       args: ['--in-place', '--remove-all-unused-imports', '--remove-unused-variable']
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.0.0
     hooks:
