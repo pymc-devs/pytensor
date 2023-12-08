@@ -2937,7 +2937,58 @@ def matmul(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None
     return out
 
 
+def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
+    """
+    Replace NaN values with the `nan` keyword, +INF with the `posinf`
+    keyword and -INF with the `neginf` keyword.  By default NaN will
+    be replaced with 0, +INF with the largest value representable by
+    ``x.dtype`` and -INF with the smallest value representable by
+    ``x.dtype``.  Mimics numpy.nan_to_num for the pytensor format
+    (with the exception that in-place operations are not supported).
+
+    Parameters
+    ----------
+    x
+        Input array.
+    nan
+        The value to replace NaN's with in the tensor (default = 0).
+    posinf
+        The value to replace +INF with in the tensor (default max
+        in range representable by ``x.dtype``).
+    neginf
+        The value to replace -INF with in the tensor (default min
+        in range representable by ``x.dtype``).
+
+    Returns
+    -------
+    out
+        The tensor with NaN's, +INF, and -INF replaced with the
+        specified and/or default substitutions.
+    """
+
+    # Replace NaN's with nan keyword
+    x = switch(isnan(x), nan, x)
+
+    # Get max and min values representable by x.dtype
+    maxf = np.finfo(x.real.dtype).max
+    minf = np.finfo(x.real.dtype).min
+
+    # Specify the value to replace +INF and -INF with
+    if posinf is not None:
+        maxf = posinf
+    if neginf is not None:
+        minf = neginf
+
+    # Replace +INF and -INF values
+    pos = gt(sign(x), 0)
+    x = switch(bitwise_and(isinf(x), pos), maxf, x)
+    x = switch(bitwise_and(isinf(x), ~pos), minf, x)
+
+    return x
+
+
 __all__ = [
+    "nan_to_num",
     "max_and_argmax",
     "max",
     "matmul",
