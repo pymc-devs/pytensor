@@ -14,9 +14,10 @@ from pytensor.graph.replace import (
     _vectorize_not_needed,
     vectorize_graph,
 )
+from pytensor.scalar import ScalarType
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.shape import shape_padleft
-from pytensor.tensor.type import continuous_dtypes, discrete_dtypes, tensor
+from pytensor.tensor.type import TensorType, continuous_dtypes, discrete_dtypes, tensor
 from pytensor.tensor.utils import (
     _parse_gufunc_signature,
     broadcast_static_dim_lengths,
@@ -373,6 +374,12 @@ class Blockwise(Op):
 
 @_vectorize_node.register(Op)
 def vectorize_node_fallback(op: Op, node: Apply, *bached_inputs) -> Apply:
+    for inp in node.inputs:
+        if not isinstance(inp.type, (TensorType, ScalarType)):
+            raise NotImplementedError(
+                f"Cannot vectorize node {node} with input {inp} of type {inp.type}"
+            )
+
     if hasattr(op, "gufunc_signature"):
         signature = op.gufunc_signature
     else:
