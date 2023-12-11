@@ -675,7 +675,7 @@ def abstract_conv2d(
     stack of 2D inputs with a set of 2D filters. The implementation is modelled
     after Convolutional Neural Networks (CNN).
 
-    Refer to :func:`nnet.conv2d <pytensor.tensor.conv.conv2d>` for a more detailed documentation.
+    Refer to :func:`conv.conv2d <pytensor.tensor.conv.conv2d>` for a more detailed documentation.
     """
 
     input = as_tensor_variable(input)
