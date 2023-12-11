@@ -4,7 +4,7 @@ from collections.abc import Iterable
 import numpy as np
 
 import pytensor
-import pytensor.scalar.basic as aes
+import pytensor.scalar.basic as ps
 from pytensor import compile
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
@@ -33,7 +33,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import Dot, add
-from pytensor.tensor.math import all as at_all
+from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import (
     and_,
     ceil_intdiv,
@@ -585,11 +585,11 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
     remove_dim = []
     node_inputs_idx = 1
     for dim, elem in enumerate(idx):
-        if isinstance(elem, (aes.ScalarType)):
+        if isinstance(elem, (ps.ScalarType)):
             # The idx is a ScalarType, ie a Type. This means the actual index
             # is contained in node.inputs[1]
             dim_index = node.inputs[node_inputs_idx]
-            if isinstance(dim_index, aes.ScalarConstant):
+            if isinstance(dim_index, ps.ScalarConstant):
                 dim_index = dim_index.value
             if dim_index in (0, -1) and node.inputs[0].broadcastable[dim]:
                 remove_dim.append(dim)
@@ -767,7 +767,7 @@ def local_subtensor_make_vector(fgraph, node):
 
         (idx,) = idxs
 
-        if isinstance(idx, (aes.ScalarType, TensorType)):
+        if isinstance(idx, (ps.ScalarType, TensorType)):
             old_idx, idx = idx, node.inputs[1]
             assert idx.type.is_super(old_idx)
     elif isinstance(node.op, AdvancedSubtensor1):
@@ -889,7 +889,7 @@ def local_set_to_inc_subtensor(fgraph, node):
         and node.op.set_instead_of_inc
         and node.inputs[1].owner
         and isinstance(node.inputs[1].owner.op, Elemwise)
-        and isinstance(node.inputs[1].owner.op.scalar_op, aes.Add)
+        and isinstance(node.inputs[1].owner.op.scalar_op, ps.Add)
     ):
         addn = node.inputs[1].owner
         subn = None
@@ -1467,7 +1467,7 @@ def local_adv_sub1_adv_inc_sub1(fgraph, node):
     if not inp.owner.op.set_instead_of_inc:
         return
 
-    cond = [at_all(and_(lt(idx, x.shape[0]), ge(idx, -x.shape[0])))]
+    cond = [pt_all(and_(lt(idx, x.shape[0]), ge(idx, -x.shape[0])))]
     if not fgraph.shape_feature.same_shape(idx, y, 0, 0):
         cond.append(eq(idx.shape[0], y.shape[0]))
     r = Assert(
@@ -1858,7 +1858,7 @@ def local_uint_constant_indices(fgraph, node):
                 index_val.astype(dtype), dtype=dtype
             )
         else:
-            new_index = aes.constant(index_val.astype(dtype), dtype=dtype)
+            new_index = ps.constant(index_val.astype(dtype), dtype=dtype)
 
         new_indices[i] = new_index
         has_new_index = True

@@ -1,4 +1,4 @@
-import pytensor.scalar.basic as aes
+import pytensor.scalar.basic as ps
 from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.tensor.basic import Alloc, as_tensor_variable
 from pytensor.tensor.elemwise import Elemwise
@@ -117,7 +117,7 @@ def local_Unique_second(fgraph, node):
     if not (
         second_var.owner
         and isinstance(second_var.owner.op, Elemwise)
-        and isinstance(second_var.owner.op.scalar_op, aes.Second)
+        and isinstance(second_var.owner.op.scalar_op, ps.Second)
     ):
         return False
 

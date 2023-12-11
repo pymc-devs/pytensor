@@ -8,7 +8,7 @@ from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
 from pytensor.sparse.rewriting import SamplingDotCSR, sd_csc
 from pytensor.tensor.basic import as_tensor_variable
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.type import ivector, matrix, vector
 from tests import unittest_tools as utt
 from tests.sparse.test_basic import random_lil
@@ -53,7 +53,7 @@ def test_local_csm_grad_c():
         (sparse.CSC, sp.sparse.csc_matrix),
         (sparse.CSR, sp.sparse.csr_matrix),
     ]:
-        cost = at_sum(sparse.DenseFromSparse()(CS(data, indices, indptr, shape)))
+        cost = pt_sum(sparse.DenseFromSparse()(CS(data, indices, indptr, shape)))
         f = pytensor.function(
             [data, indices, indptr, shape], pytensor.grad(cost, data), mode=mode
         )

@@ -8,7 +8,7 @@ from typing import Callable, Optional, Union
 import numpy as np
 
 import pytensor
-from pytensor import scalar as aes
+from pytensor import scalar as ps
 from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply, Constant, Variable
@@ -52,16 +52,16 @@ from pytensor.tensor.type_other import NoneConst, NoneTypeT, SliceType, make_sli
 
 _logger = logging.getLogger("pytensor.tensor.subtensor")
 
-invalid_scal_types = (aes.float64, aes.float32, aes.float16)
+invalid_scal_types = (ps.float64, ps.float32, ps.float16)
 scal_types = (
-    aes.int64,
-    aes.int32,
-    aes.int16,
-    aes.int8,
-    aes.uint64,
-    aes.uint32,
-    aes.uint16,
-    aes.uint8,
+    ps.int64,
+    ps.int32,
+    ps.int16,
+    ps.int8,
+    ps.uint64,
+    ps.uint32,
+    ps.uint16,
+    ps.uint8,
 )
 tensor_types = (
     lscalar,
@@ -144,7 +144,7 @@ def as_index_constant(
             as_index_constant(a.step),
         )
     elif isinstance(a, (int, np.integer)):
-        return aes.ScalarConstant(aes.int64, a)
+        return ps.ScalarConstant(ps.int64, a)
     elif not isinstance(a, Variable):
         return as_tensor_variable(a)
     else:
@@ -382,7 +382,7 @@ def range_len(slc):
         switch(
             and_(lt(step, 0), gt(start, stop)),
             1 + (start - 1 - stop) // (-step),
-            aes.ScalarConstant(aes.int64, 0),
+            ps.ScalarConstant(ps.int64, 0),
         ),
     )
 
@@ -437,9 +437,9 @@ def basic_shape(shape, indices):
                 idx_inputs = (None,)
             res_shape += (slice_len(slice(*idx_inputs), n),)
         elif idx is None:
-            res_shape += (aes.ScalarConstant(aes.int64, 1),)
+            res_shape += (ps.ScalarConstant(ps.int64, 1),)
         elif isinstance(getattr(idx, "type", None), NoneTypeT):
-            res_shape += (aes.ScalarConstant(aes.int64, 1),)
+            res_shape += (ps.ScalarConstant(ps.int64, 1),)
         else:
             raise ValueError(f"Invalid index type: {idx}")
     return res_shape
@@ -595,9 +595,9 @@ def index_vars_to_types(entry, slice_ok=True):
         and entry.type in tensor_types
         and all(entry.type.broadcastable)
     ):
-        return aes.get_scalar_type(entry.type.dtype)
+        return ps.get_scalar_type(entry.type.dtype)
     elif isinstance(entry, Type) and entry in tensor_types and all(entry.broadcastable):
-        return aes.get_scalar_type(entry.dtype)
+        return ps.get_scalar_type(entry.dtype)
     elif slice_ok and isinstance(entry, slice):
         a = entry.start
         b = entry.stop
@@ -683,15 +683,15 @@ def get_constant_idx(
     return list(map(conv, real_idx))
 
 
-def as_nontensor_scalar(a: Variable) -> aes.ScalarVariable:
+def as_nontensor_scalar(a: Variable) -> ps.ScalarVariable:
     """Convert a value to a `ScalarType` variable."""
-    # Since aes.as_scalar does not know about tensor types (it would
+    # Since ps.as_scalar does not know about tensor types (it would
     # create a circular import) , this method converts either a
     # TensorVariable or a ScalarVariable to a scalar.
     if isinstance(a, Variable) and isinstance(a.type, TensorType):
         return pytensor.tensor.scalar_from_tensor(a)
     else:
-        return aes.as_scalar(a)
+        return ps.as_scalar(a)
 
 
 class Subtensor(COp):
@@ -1255,7 +1255,7 @@ class SubtensorPrinter(Printer):
         sidxs = []
         getattr(pstate, "precedence", None)
         for entry in idxs:
-            if isinstance(entry, aes.ScalarType):
+            if isinstance(entry, ps.ScalarType):
                 with set_precedence(pstate):
                     sidxs.append(pstate.pprinter.process(inputs.pop()))
             elif isinstance(entry, slice):
@@ -2181,7 +2181,7 @@ class AdvancedIncSubtensor1(COp):
 
     __props__ = ("inplace", "set_instead_of_inc")
     check_input = False
-    params_type = ParamsType(inplace=aes.bool, set_instead_of_inc=aes.bool)
+    params_type = ParamsType(inplace=ps.bool, set_instead_of_inc=ps.bool)
 
     def __init__(self, inplace=False, set_instead_of_inc=False):
         self.inplace = bool(inplace)

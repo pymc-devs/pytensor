@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 import pytensor
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.tensor.basic import AllocEmpty
 from pytensor.tensor.blas import Ger
@@ -62,7 +62,7 @@ class TestCGer(OptimizationTestMixin):
         f(self.Aval[::-1, ::-1], self.xval, self.yval)
 
     def b(self, bval):
-        return at.as_tensor_variable(np.asarray(bval, dtype=self.dtype))
+        return pt.as_tensor_variable(np.asarray(bval, dtype=self.dtype))
 
     def test_eq(self):
         assert CGer(True) == CGer(True)
@@ -85,33 +85,33 @@ class TestCGer(OptimizationTestMixin):
 
     def test_optimization_pipeline(self):
         skip_if_blas_ldflags_empty()
-        f = self.function([self.x, self.y], at.outer(self.x, self.y))
+        f = self.function([self.x, self.y], pt.outer(self.x, self.y))
         self.assertFunctionContains(f, CGer(destructive=True))
         f(self.xval, self.yval)  # DebugMode tests correctness
 
     def test_optimization_pipeline_float(self):
         skip_if_blas_ldflags_empty()
         self.manual_setup_method("float32")
-        f = self.function([self.x, self.y], at.outer(self.x, self.y))
+        f = self.function([self.x, self.y], pt.outer(self.x, self.y))
         self.assertFunctionContains(f, CGer(destructive=True))
         f(self.xval, self.yval)  # DebugMode tests correctness
 
     def test_int_fails(self):
         self.manual_setup_method("int32")
-        f = self.function([self.x, self.y], at.outer(self.x, self.y))
+        f = self.function([self.x, self.y], pt.outer(self.x, self.y))
         self.assertFunctionContains0(f, CGer(destructive=True))
         self.assertFunctionContains0(f, CGer(destructive=False))
 
     def test_A_plus_outer(self):
         skip_if_blas_ldflags_empty()
-        f = self.function([self.A, self.x, self.y], self.A + at.outer(self.x, self.y))
+        f = self.function([self.A, self.x, self.y], self.A + pt.outer(self.x, self.y))
         self.assertFunctionContains(f, CGer(destructive=False))
         self.run_f(f)  # DebugMode tests correctness
 
     def test_A_plus_scaled_outer(self):
         skip_if_blas_ldflags_empty()
         f = self.function(
-            [self.A, self.x, self.y], self.A + 0.1 * at.outer(self.x, self.y)
+            [self.A, self.x, self.y], self.A + 0.1 * pt.outer(self.x, self.y)
         )
         self.assertFunctionContains(f, CGer(destructive=False))
         self.run_f(f)  # DebugMode tests correctness
@@ -148,7 +148,7 @@ class TestCGemv(OptimizationTestMixin):
         mode.check_isfinite = False
         f = pytensor.function(
             [self.A, self.x, self.y, self.a],
-            self.a * self.y + at.dot(self.A, self.x),
+            self.a * self.y + pt.dot(self.A, self.x),
             mode=mode,
         )
         Aval = np.ones((3, 1), dtype=self.dtype)
@@ -160,10 +160,10 @@ class TestCGemv(OptimizationTestMixin):
     def test_optimizations_vm(self):
         skip_if_blas_ldflags_empty()
         """ Test vector dot matrix """
-        f = pytensor.function([self.x, self.A], at.dot(self.x, self.A), mode=self.mode)
+        f = pytensor.function([self.x, self.A], pt.dot(self.x, self.A), mode=self.mode)
 
         # Assert that the dot was optimized somehow
-        self.assertFunctionContains0(f, at.dot)
+        self.assertFunctionContains0(f, pt.dot)
         self.assertFunctionContains1(f, CGemv(inplace=True))
 
         # Assert they produce the same output
@@ -178,10 +178,10 @@ class TestCGemv(OptimizationTestMixin):
     def test_optimizations_mv(self):
         skip_if_blas_ldflags_empty()
         """ Test matrix dot vector """
-        f = pytensor.function([self.A, self.y], at.dot(self.A, self.y), mode=self.mode)
+        f = pytensor.function([self.A, self.y], pt.dot(self.A, self.y), mode=self.mode)
 
         # Assert that the dot was optimized somehow
-        self.assertFunctionContains0(f, at.dot)
+        self.assertFunctionContains0(f, pt.dot)
         self.assertFunctionContains1(f, CGemv(inplace=True))
 
         # Assert they produce the same output
@@ -208,7 +208,7 @@ class TestCGemv(OptimizationTestMixin):
         v2 = pytensor.shared(v2_orig)
         m = pytensor.shared(np.array(rng.uniform(size=m_shp), dtype="float32"))
 
-        f = pytensor.function([], v2 + at.dot(m, v1), mode=self.mode)
+        f = pytensor.function([], v2 + pt.dot(m, v1), mode=self.mode)
 
         # Assert they produce the same output
         assert np.allclose(f(), np.dot(m.get_value(), v1.get_value()) + v2_orig)
@@ -217,7 +217,7 @@ class TestCGemv(OptimizationTestMixin):
 
         # test the inplace version
         g = pytensor.function(
-            [], [], updates=[(v2, v2 + at.dot(m, v1))], mode=self.mode
+            [], [], updates=[(v2, v2 + pt.dot(m, v1))], mode=self.mode
         )
 
         # Assert they produce the same output
@@ -252,7 +252,7 @@ class TestCGemv(OptimizationTestMixin):
         alpha = pytensor.shared(_asarray(1.0, dtype=dtype), name="alpha")
         beta = pytensor.shared(_asarray(1.0, dtype=dtype), name="beta")
 
-        z = beta * self.y + alpha * at.dot(self.A, self.x)
+        z = beta * self.y + alpha * pt.dot(self.A, self.x)
         f = pytensor.function([self.A, self.x, self.y], z, mode=self.mode)
 
         # Matrix value
@@ -278,7 +278,7 @@ class TestCGemv(OptimizationTestMixin):
         y = dvector("y")
         z = dvector("z")
         f = pytensor.function(
-            [x, y, z], [at.dot(y, x), at.dot(z, x)], mode=mode_blas_opt
+            [x, y, z], [pt.dot(y, x), pt.dot(z, x)], mode=mode_blas_opt
         )
         vx = np.random.random((3, 3))
         vy = np.random.random(3)

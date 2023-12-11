@@ -7,8 +7,8 @@ from functools import partial, reduce
 
 import numpy as np
 
-import pytensor.scalar.basic as aes
-import pytensor.scalar.math as aes_math
+import pytensor.scalar.basic as ps
+import pytensor.scalar.math as ps_math
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
     NodeRewriter,
@@ -50,7 +50,7 @@ from pytensor.tensor.math import (
     Sum,
     _conj,
 )
-from pytensor.tensor.math import abs as at_abs
+from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import (
     add,
     digamma,
@@ -69,9 +69,9 @@ from pytensor.tensor.math import (
     log1p,
     makeKeepDims,
 )
-from pytensor.tensor.math import max as at_max
+from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import maximum, mul, neg, polygamma
-from pytensor.tensor.math import pow as at_pow
+from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.math import (
     prod,
     reciprocal,
@@ -82,7 +82,7 @@ from pytensor.tensor.math import (
     sqrt,
     sub,
 )
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.math import tri_gamma, true_div
 from pytensor.tensor.rewriting.basic import (
     alloc_like,
@@ -241,13 +241,13 @@ def local_func_inv(fgraph, node):
 
     """
     inv_pairs = (
-        (aes.Deg2Rad, aes.Rad2Deg),
-        (aes.Cosh, aes.ArcCosh),
-        (aes.Tanh, aes.ArcTanh),
-        (aes.Sinh, aes.ArcSinh),
-        (aes.Conj, aes.Conj),
-        (aes.Neg, aes.Neg),
-        (aes.Reciprocal, aes.Reciprocal),
+        (ps.Deg2Rad, ps.Rad2Deg),
+        (ps.Cosh, ps.ArcCosh),
+        (ps.Tanh, ps.ArcTanh),
+        (ps.Sinh, ps.ArcSinh),
+        (ps.Conj, ps.Conj),
+        (ps.Neg, ps.Neg),
+        (ps.Reciprocal, ps.Reciprocal),
     )
     x = node.inputs[0]
 
@@ -288,7 +288,7 @@ def local_exp_log(fgraph, node):
     node_op = node.op.scalar_op
 
     # Case for log(exp(x)) -> x
-    if isinstance(prev_op, aes.Exp) and isinstance(node_op, aes.Log):
+    if isinstance(prev_op, ps.Exp) and isinstance(node_op, ps.Log):
         new_out = x.owner.inputs[0]
         old_out = node.outputs[0]
         # Exp may have cast integer input to float
@@ -297,7 +297,7 @@ def local_exp_log(fgraph, node):
         return [new_out]
 
     # Case for log1p(expm1(x)) -> x
-    if isinstance(prev_op, aes.Expm1) and isinstance(node_op, aes.Log1p):
+    if isinstance(prev_op, ps.Expm1) and isinstance(node_op, ps.Log1p):
         new_out = x.owner.inputs[0]
         old_out = node.outputs[0]
         # Expm1 may have cast integer input to float
@@ -306,12 +306,12 @@ def local_exp_log(fgraph, node):
         return [new_out]
 
     # Case for exp(softplus(x)) aka exp(log1pexp) -> 1 + exp(x)
-    if isinstance(prev_op, aes_math.Softplus) and isinstance(node_op, aes.Exp):
+    if isinstance(prev_op, ps_math.Softplus) and isinstance(node_op, ps.Exp):
         x = x.owner.inputs[0]
         return [add(1, exp(x))]
 
     # Case for expm1(softplus(x)) aka expm1(log1pexp) -> exp(x)
-    if isinstance(prev_op, aes_math.Softplus) and isinstance(node_op, aes.Expm1):
+    if isinstance(prev_op, ps_math.Softplus) and isinstance(node_op, ps.Expm1):
         x = x.owner.inputs[0]
         return [exp(x)]
 
@@ -331,42 +331,42 @@ def local_exp_log_nan_switch(fgraph, node):
     node_op = node.op.scalar_op
 
     # Case for exp(log(x)) -> x
-    if isinstance(prev_op, aes.Log) and isinstance(node_op, aes.Exp):
+    if isinstance(prev_op, ps.Log) and isinstance(node_op, ps.Exp):
         x = x.owner.inputs[0]
         old_out = node.outputs[0]
         new_out = switch(ge(x, 0), x, np.asarray(np.nan, old_out.dtype))
         return [new_out]
 
     # Case for exp(log1p(x)) -> x + 1
-    if isinstance(prev_op, aes.Log1p) and isinstance(node_op, aes.Exp):
+    if isinstance(prev_op, ps.Log1p) and isinstance(node_op, ps.Exp):
         x = x.owner.inputs[0]
         old_out = node.outputs[0]
         new_out = switch(ge(x, -1), add(1, x), np.asarray(np.nan, old_out.dtype))
         return [new_out]
 
     # Case for expm1(log(x)) -> x - 1
-    if isinstance(prev_op, aes.Log) and isinstance(node_op, aes.Expm1):
+    if isinstance(prev_op, ps.Log) and isinstance(node_op, ps.Expm1):
         x = x.owner.inputs[0]
         old_out = node.outputs[0]
         new_out = switch(ge(x, 0), sub(x, 1), np.asarray(np.nan, old_out.dtype))
         return [new_out]
 
     # Case for expm1(log1p(x)) -> x
-    if isinstance(prev_op, aes.Log1p) and isinstance(node_op, aes.Expm1):
+    if isinstance(prev_op, ps.Log1p) and isinstance(node_op, ps.Expm1):
         x = x.owner.inputs[0]
         old_out = node.outputs[0]
         new_out = switch(ge(x, -1), x, np.asarray(np.nan, old_out.dtype))
         return [new_out]
 
     # Case for exp(log1mexp(x)) -> 1 - exp(x)
-    if isinstance(prev_op, aes_math.Log1mexp) and isinstance(node_op, aes.Exp):
+    if isinstance(prev_op, ps_math.Log1mexp) and isinstance(node_op, ps.Exp):
         x = x.owner.inputs[0]
         old_out = node.outputs[0]
         new_out = switch(le(x, 0), sub(1, exp(x)), np.asarray(np.nan, old_out.dtype))
         return [new_out]
 
     # Case for expm1(log1mexp(x)) -> -exp(x)
-    if isinstance(prev_op, aes_math.Log1mexp) and isinstance(node_op, aes.Expm1):
+    if isinstance(prev_op, ps_math.Log1mexp) and isinstance(node_op, ps.Expm1):
         x = x.owner.inputs[0]
         old_out = node.outputs[0]
         new_out = switch(le(x, 0), neg(exp(x)), np.asarray(np.nan, old_out.dtype))
@@ -379,12 +379,12 @@ def local_exp_log_nan_switch(fgraph, node):
 def local_sumsqr2dot(fgraph, node):
     """
     This rewrite detects
-    ``at.sqr(W.dimshuffle("x", 0, 1) * G.dimshuffle(0, "x", 1) ).sum(axis=(1, 2))``
-    and converts it to ``at.dot(at.sqr(G), at.sqr(W).sum(axis=0))``.
+    ``pt.sqr(W.dimshuffle("x", 0, 1) * G.dimshuffle(0, "x", 1) ).sum(axis=(1, 2))``
+    and converts it to ``pt.dot(pt.sqr(G), pt.sqr(W).sum(axis=0))``.
     """
     if (
         isinstance(node.op, Sum)
-        and isinstance(node.op.scalar_op, aes.Add)
+        and isinstance(node.op.scalar_op, ps.Add)
         and node.op.axis == (1, 2)
     ):
         in1 = node.inputs[0]
@@ -393,13 +393,13 @@ def local_sumsqr2dot(fgraph, node):
         if (
             in1.owner
             and isinstance(in1.owner.op, Elemwise)
-            and isinstance(in1.owner.op.scalar_op, aes.Sqr)
+            and isinstance(in1.owner.op.scalar_op, ps.Sqr)
         ):
             in_sqr = in1.owner.inputs[0]
             if (
                 in_sqr.owner
                 and isinstance(in_sqr.owner.op, Elemwise)
-                and isinstance(in_sqr.owner.op.scalar_op, aes.Mul)
+                and isinstance(in_sqr.owner.op.scalar_op, ps.Mul)
                 and len(in_sqr.owner.inputs) == 2
             ):
                 in_mul1, in_mul2 = in_sqr.owner.inputs
@@ -431,13 +431,13 @@ def local_mul_exp_to_exp_add(fgraph, node):
         for n in node.inputs
         if n.owner
         and hasattr(n.owner.op, "scalar_op")
-        and isinstance(n.owner.op.scalar_op, aes.Exp)
+        and isinstance(n.owner.op.scalar_op, ps.Exp)
     ]
     # Can only do any rewrite if there are at least two exp-s
     if len(exps) >= 2:
         # Mul -> add; TrueDiv -> sub
         orig_op, new_op = mul, add
-        if isinstance(node.op.scalar_op, aes.TrueDiv):
+        if isinstance(node.op.scalar_op, ps.TrueDiv):
             orig_op, new_op = true_div, sub
         new_out = exp(new_op(*exps))
         if new_out.dtype != node.outputs[0].dtype:
@@ -450,7 +450,7 @@ def local_mul_exp_to_exp_add(fgraph, node):
             for n in node.inputs
             if not n.owner
             or not hasattr(n.owner.op, "scalar_op")
-            or not isinstance(n.owner.op.scalar_op, aes.Exp)
+            or not isinstance(n.owner.op.scalar_op, ps.Exp)
         ]
         if len(rest) > 0:
             new_out = orig_op(new_out, *rest)
@@ -473,7 +473,7 @@ def local_mul_pow_to_pow_add(fgraph, node):
         if (
             n.owner
             and hasattr(n.owner.op, "scalar_op")
-            and isinstance(n.owner.op.scalar_op, aes.Pow)
+            and isinstance(n.owner.op.scalar_op, ps.Pow)
         ):
             base_node = n.owner.inputs[0]
             # exponent is at n.owner.inputs[1], but we need to store the full node
@@ -487,7 +487,7 @@ def local_mul_pow_to_pow_add(fgraph, node):
     if len(can_rewrite) >= 1:
         # Mul -> add; TrueDiv -> sub
         orig_op, new_op = mul, add
-        if isinstance(node.op.scalar_op, aes.TrueDiv):
+        if isinstance(node.op.scalar_op, ps.TrueDiv):
             orig_op, new_op = true_div, sub
         pow_factors = []
         # Rewrite pow-s having the same base for each different base
@@ -519,14 +519,14 @@ def local_mul_pow_to_pow_add(fgraph, node):
 @node_rewriter([Elemwise])
 def local_expm1(fgraph, node):
     """Detect ``exp(a) - 1`` and convert them to ``expm1(a)``."""
-    if isinstance(node.op, Elemwise) and isinstance(node.op.scalar_op, aes.Sub):
+    if isinstance(node.op, Elemwise) and isinstance(node.op.scalar_op, ps.Sub):
         in1, in2 = node.inputs
         out = node.outputs[0]
 
         if (
             in1.owner
             and isinstance(in1.owner.op, Elemwise)
-            and isinstance(in1.owner.op.scalar_op, aes.Exp)
+            and isinstance(in1.owner.op.scalar_op, ps.Exp)
             and extract_constant(in2, only_process_constants=False) == 1
         ):
             in11 = in1.owner.inputs[0]
@@ -547,28 +547,28 @@ def local_mul_switch_sink(fgraph, node):
     """
     This rewrite makes the following changes in the graph:
 
-        at.mul(A, at.switch(cond, 0, iff), B) -> at.switch(cond, 0, at.mul(A, B, iff))
-        at.mul(A, at.switch(cond, ift, 0), B) -> at.switch(cond, at.mul(A, B, ift), 0)
+        pt.mul(A, pt.switch(cond, 0, iff), B) -> pt.switch(cond, 0, pt.mul(A, B, iff))
+        pt.mul(A, pt.switch(cond, ift, 0), B) -> pt.switch(cond, pt.mul(A, B, ift), 0)
 
     ``A`` and ``B`` being several (or none) symbolic variables.
     This is useful because ``A`` and ``B`` may not be numerically stable and give
     NaN or inf values for cases where the switch returns 0.
-    With this rewrite ``at.grad(at.switch(...))`` has the right behavior.
+    With this rewrite ``pt.grad(pt.switch(...))`` has the right behavior.
 
     Examples
     --------
 
         x -> f(x)
         x -> g(x)
-        y = at.switch(cond, f(x), g(x))
+        y = pt.switch(cond, f(x), g(x))
 
     without the rewrite:
 
-        at.grad(y, x) -> grad(f(x), x) * grad(y, f(x)) + grad(g(x), x) * grad(y, g(x))
+        pt.grad(y, x) -> grad(f(x), x) * grad(y, f(x)) + grad(g(x), x) * grad(y, g(x))
 
     with the rewrite
 
-        at.grad(y, x) -> switch(cond, grad(f(x), x), 0) + switch(cond, 0, grad(g(x), x))
+        pt.grad(y, x) -> switch(cond, grad(f(x), x), 0) + switch(cond, 0, grad(g(x), x))
 
     This will be particularly useful for the lazy ``if`` because we skip an entire
     part of the graph.
@@ -643,8 +643,8 @@ def local_div_switch_sink(fgraph, node):
     """
     This rewrite makes the following changes in the graph:
 
-        at.div(at.switch(cond, 0, iff), A) -> at.switch(cond, 0, at.div(iff, A))
-        at.div(at.switch(cond, ift, 0), A) -> at.switch(cond, at.div(ift, A), 0)
+        pt.div(pt.switch(cond, 0, iff), A) -> pt.switch(cond, 0, pt.div(iff, A))
+        pt.div(pt.switch(cond, ift, 0), A) -> pt.switch(cond, pt.div(ift, A), 0)
 
     where ``A`` is a symbolic variable.
 
@@ -745,7 +745,7 @@ class AlgebraicCanonizer(NodeRewriter):
 
     Examples
     --------
-    >>> import pytensor.tensor as at
+    >>> import pytensor.tensor as pt
     >>> from pytensor.tensor.rewriting.math import AlgebraicCanonizer
     >>> add_canonizer = AlgebraicCanonizer(add, sub, neg, \\
     ...                                    lambda n, d: sum(n) - sum(d))
@@ -1161,7 +1161,7 @@ def mul_calculate(num, denum, aslist=False, out_type=None):
 
     # Make sure we do not accidentally upcast data types.
     if out_type is None:
-        out_dtype = aes.upcast(*[v.dtype for v in (num + denum)])
+        out_dtype = ps.upcast(*[v.dtype for v in (num + denum)])
     else:
         out_dtype = out_type.dtype
     one = _asarray(1, dtype=out_dtype)
@@ -1304,7 +1304,7 @@ def local_elemwise_sub_zeros(fgraph, node):
     if (
         isinstance(node.op, Elemwise)
         and node.op.scalar_op.nin == 2
-        and node.op.scalar_op == aes.sub
+        and node.op.scalar_op == ps.sub
         and node.inputs[0] == node.inputs[1]
     ):
         res = zeros_like(node.inputs[0])
@@ -1360,7 +1360,7 @@ def local_useless_elemwise_comparison(fgraph, node):
 
     # Elemwise[{LT,GT}](X, X) -> Elemwise[zeros](X)
     if (
-        isinstance(node.op.scalar_op, (aes.LT, aes.GT))
+        isinstance(node.op.scalar_op, (ps.LT, ps.GT))
         and node.inputs[0] is node.inputs[1]
     ):
         res = zeros_like(node.inputs[0], dtype=dtype, opt=True)
@@ -1369,7 +1369,7 @@ def local_useless_elemwise_comparison(fgraph, node):
         return [res]
     # Elemwise[{LE,GE}](X, X) -> Elemwise[ones](X)
     if (
-        isinstance(node.op.scalar_op, (aes.LE, aes.GE))
+        isinstance(node.op.scalar_op, (ps.LE, ps.GE))
         and node.inputs[0] is node.inputs[1]
     ):
         res = ones_like(node.inputs[0], dtype=dtype, opt=True)
@@ -1379,7 +1379,7 @@ def local_useless_elemwise_comparison(fgraph, node):
         return [res]
     # Elemwise[{minimum,maximum}](X, X) -> X
     if (
-        isinstance(node.op.scalar_op, (aes.ScalarMinimum, aes.ScalarMaximum))
+        isinstance(node.op.scalar_op, (ps.ScalarMinimum, ps.ScalarMaximum))
         and node.inputs[0] is node.inputs[1]
     ):
         res = node.inputs[0]
@@ -1389,7 +1389,7 @@ def local_useless_elemwise_comparison(fgraph, node):
 
     # Elemwise[LT](X.shape[i], 0) -> Elemwise[zeros](X)
     if (
-        isinstance(node.op.scalar_op, aes.LT)
+        isinstance(node.op.scalar_op, ps.LT)
         and node.inputs[0].owner
         and isinstance(node.inputs[0].owner.op, Shape_i)
         and extract_constant(node.inputs[1], only_process_constants=True) == 0
@@ -1400,7 +1400,7 @@ def local_useless_elemwise_comparison(fgraph, node):
         return [res]
     # Elemwise[GE](X.shape[i], 0) -> Elemwise[ones](X)
     if (
-        isinstance(node.op.scalar_op, aes.GE)
+        isinstance(node.op.scalar_op, ps.GE)
         and node.inputs[0].owner
         and isinstance(node.inputs[0].owner.op, Shape_i)
         and extract_constant(node.inputs[1], only_process_constants=True) == 0
@@ -1411,7 +1411,7 @@ def local_useless_elemwise_comparison(fgraph, node):
         return [res]
     # Elemwise[maximum](X.shape[i], 0) -> X.shape[i]
     if (
-        isinstance(node.op.scalar_op, aes.ScalarMaximum)
+        isinstance(node.op.scalar_op, ps.ScalarMaximum)
         and node.inputs[0].owner
         and isinstance(node.inputs[0].owner.op, Shape_i)
         and extract_constant(node.inputs[1], only_process_constants=True) == 0
@@ -1420,7 +1420,7 @@ def local_useless_elemwise_comparison(fgraph, node):
         return [node.inputs[0]]
     # Elemwise[maximum](0, X.shape[i]) -> X.shape[i]
     if (
-        isinstance(node.op.scalar_op, aes.ScalarMaximum)
+        isinstance(node.op.scalar_op, ps.ScalarMaximum)
         and extract_constant(node.inputs[0], only_process_constants=True) == 0
         and node.inputs[1].owner
         and isinstance(node.inputs[1].owner.op, Shape_i)
@@ -1429,7 +1429,7 @@ def local_useless_elemwise_comparison(fgraph, node):
         return [node.inputs[1]]
     # Elemwise[minimum](X.shape[i], 0) -> 0
     if (
-        isinstance(node.op.scalar_op, aes.ScalarMinimum)
+        isinstance(node.op.scalar_op, ps.ScalarMinimum)
         and node.inputs[0].owner
         and isinstance(node.inputs[0].owner.op, Shape_i)
         and extract_constant(node.inputs[1], only_process_constants=True) == 0
@@ -1441,7 +1441,7 @@ def local_useless_elemwise_comparison(fgraph, node):
 
     # Elemwise[minimum](0, X.shape[i]) -> 0
     if (
-        isinstance(node.op.scalar_op, aes.ScalarMinimum)
+        isinstance(node.op.scalar_op, ps.ScalarMinimum)
         and extract_constant(node.inputs[0], only_process_constants=True) == 0
         and node.inputs[1].owner
         and isinstance(node.inputs[1].owner.op, Shape_i)
@@ -1453,10 +1453,10 @@ def local_useless_elemwise_comparison(fgraph, node):
 
     # Elemwise[LT](add([anything that is shapes]), 0) -> Elemwise[zeros](X)
     if (
-        isinstance(node.op.scalar_op, aes.LT)
+        isinstance(node.op.scalar_op, ps.LT)
         and node.inputs[0].owner
         and isinstance(node.inputs[0].owner.op, Elemwise)
-        and isinstance(node.inputs[0].owner.op.scalar_op, aes.Add)
+        and isinstance(node.inputs[0].owner.op.scalar_op, ps.Add)
         and all(
             isinstance(var.owner and var.owner.op, Shape_i)
             for var in node.inputs[0].owner.inputs
@@ -1469,10 +1469,10 @@ def local_useless_elemwise_comparison(fgraph, node):
         return [res]
     # Elemwise[GE](add([anything that is shapes]), 0) -> Elemwise[ones](X)
     if (
-        isinstance(node.op.scalar_op, aes.GE)
+        isinstance(node.op.scalar_op, ps.GE)
         and node.inputs[0].owner
         and isinstance(node.inputs[0].owner.op, Elemwise)
-        and isinstance(node.inputs[0].owner.op.scalar_op, aes.Add)
+        and isinstance(node.inputs[0].owner.op.scalar_op, ps.Add)
         and all(
             isinstance(var.owner and var.owner.op, Shape_i)
             for var in node.inputs[0].owner.inputs
@@ -1509,7 +1509,7 @@ def local_useless_elemwise_comparison(fgraph, node):
             return all(v.owner and investigate(v.owner) for v in node.inputs)
 
     if (
-        isinstance(node.op.scalar_op, aes.EQ)
+        isinstance(node.op.scalar_op, ps.EQ)
         and node.inputs[0].owner
         and investigate(node.inputs[0].owner)
     ):
@@ -1629,11 +1629,11 @@ def local_reduce_join(fgraph, node):
         if extract_constant(join_node.inputs[0], only_process_constants=True) != 0:
             return
 
-        if isinstance(node.op.scalar_op, (aes.ScalarMaximum, aes.ScalarMinimum)):
+        if isinstance(node.op.scalar_op, (ps.ScalarMaximum, ps.ScalarMinimum)):
             # Support only 2 inputs for now
             if len(join_node.inputs) != 3:
                 return
-        elif not isinstance(node.op.scalar_op, (aes.Add, aes.Mul)):
+        elif not isinstance(node.op.scalar_op, (ps.Add, ps.Mul)):
             return
         elif len(join_node.inputs) <= 2:
             # This is a useless join that should get removed by another rewrite?
@@ -1915,15 +1915,15 @@ def local_div_to_reciprocal(fgraph, node):
 @node_rewriter([reciprocal])
 def local_reciprocal_canon(fgraph, node):
     if node.op == reciprocal:
-        return [at_pow(node.inputs[0], -1.0)]
+        return [pt_pow(node.inputs[0], -1.0)]
     else:
         return False
 
 
 @register_canonicalize
-@node_rewriter([at_pow])
+@node_rewriter([pt_pow])
 def local_pow_canonicalize(fgraph, node):
-    if node.op == at_pow:
+    if node.op == pt_pow:
         cst = get_constant(node.inputs[1])
         if cst == 0:
             return [alloc_like(1, node.outputs[0], fgraph)]
@@ -1962,7 +1962,7 @@ def local_intdiv_by_one(fgraph, node):
 def local_zero_div(fgraph, node):
     """0 / x -> 0"""
     if isinstance(node.op, Elemwise) and isinstance(
-        node.op.scalar_op, (aes.IntDiv, aes.TrueDiv)
+        node.op.scalar_op, (ps.IntDiv, ps.TrueDiv)
     ):
         if get_constant(node.inputs[0]) == 0:
             ret = alloc_like(0, node.outputs[0], fgraph)
@@ -1971,9 +1971,9 @@ def local_zero_div(fgraph, node):
 
 
 @register_specialize
-@node_rewriter([at_pow])
+@node_rewriter([pt_pow])
 def local_pow_specialize(fgraph, node):
-    if node.op == at_pow:
+    if node.op == pt_pow:
         # the idea here is that we have pow(x, y)
         odtype = node.outputs[0].dtype
         xsym = node.inputs[0]
@@ -2007,7 +2007,7 @@ def local_pow_specialize(fgraph, node):
 
 
 @register_specialize
-@node_rewriter([at_pow])
+@node_rewriter([pt_pow])
 def local_pow_to_nested_squaring(fgraph, node):
     """Convert a large power exponent to multiple squaring operations.
 
@@ -2039,11 +2039,11 @@ def local_pow_to_nested_squaring(fgraph, node):
         # 512 is too small for the cpu and too big for some gpu!
         if abs(y) == int(abs(y)) and abs(y) <= 512:
             pow2 = [xsym]
-            pow2_scal = [aes.get_scalar_type(xsym.dtype)()]
+            pow2_scal = [ps.get_scalar_type(xsym.dtype)()]
             y_to_do = abs(y)
             for i in range(int(np.log2(y_to_do))):
                 pow2.append(sqr(pow2[i]))
-                pow2_scal.append(aes.sqr(pow2_scal[i]))
+                pow2_scal.append(ps.sqr(pow2_scal[i]))
             rval1 = None
             rval1_scal = None
             while y_to_do > 0:
@@ -2059,7 +2059,7 @@ def local_pow_to_nested_squaring(fgraph, node):
             if abs(y) > 2:
                 # We fuse all the pow together here to make
                 # compilation faster
-                rval1 = Elemwise(aes.Composite([pow2_scal[0]], [rval1_scal])).make_node(
+                rval1 = Elemwise(ps.Composite([pow2_scal[0]], [rval1_scal])).make_node(
                     xsym
                 )
             if y < 0:
@@ -2202,7 +2202,7 @@ def check_for_x_over_absX(numerators, denominators):
     # TODO: this function should dig/search through dimshuffles
     # This won't catch a dimshuffled absolute value
     for den in list(denominators):
-        if den.owner and den.owner.op == at_abs and den.owner.inputs[0] in numerators:
+        if den.owner and den.owner.op == pt_abs and den.owner.inputs[0] in numerators:
             if den.owner.inputs[0].type.dtype.startswith("complex"):
                 # TODO: Make an Op that projects a complex number to
                 #      have unit length but projects 0 to 0.  That
@@ -2222,7 +2222,7 @@ local_mul_canonizer.add_simplifier(check_for_x_over_absX, "X_over_absX")
 
 
 @register_canonicalize
-@node_rewriter([at_abs])
+@node_rewriter([pt_abs])
 def local_abs_lift(fgraph, node):
     """
     Move the abs toward the input.
@@ -2230,13 +2230,13 @@ def local_abs_lift(fgraph, node):
     This is needed for check_for_x_over_absX to apply in more case.
 
     """
-    if node.op == at_abs and node.inputs[0].owner:
+    if node.op == pt_abs and node.inputs[0].owner:
         assert node.nin == 1
         if node.inputs[0].owner.op == mul:
-            return [mul(*[at_abs(i) for i in node.inputs[0].owner.inputs])]
+            return [mul(*[pt_abs(i) for i in node.inputs[0].owner.inputs])]
         if node.inputs[0].owner.op == true_div:
             i = node.inputs[0].owner.inputs
-            return [true_div(at_abs(i[0]), at_abs(i[1]))]
+            return [true_div(pt_abs(i[0]), pt_abs(i[1]))]
 
 
 @register_specialize
@@ -2247,10 +2247,10 @@ def local_abs_merge(fgraph, node):
     need it anymore
 
     """
-    if node.op == mul and sum(i.owner.op == at_abs for i in node.inputs if i.owner) > 1:
+    if node.op == mul and sum(i.owner.op == pt_abs for i in node.inputs if i.owner) > 1:
         inputs = []
         for i in node.inputs:
-            if i.owner and i.owner.op == at_abs:
+            if i.owner and i.owner.op == pt_abs:
                 inputs.append(i.owner.inputs[0])
             elif isinstance(i, Constant):
                 try:
@@ -2264,13 +2264,13 @@ def local_abs_merge(fgraph, node):
                 inputs.append(i)
             else:
                 return False
-        return [at_abs(mul(*inputs))]
+        return [pt_abs(mul(*inputs))]
     if (
         node.op == true_div
-        and sum(i.owner.op == at_abs for i in node.inputs if i.owner) == 2
+        and sum(i.owner.op == pt_abs for i in node.inputs if i.owner) == 2
     ):
         return [
-            at_abs(
+            pt_abs(
                 true_div(node.inputs[0].owner.inputs[0], node.inputs[1].owner.inputs[0])
             )
         ]
@@ -2363,19 +2363,19 @@ def local_log_sum_exp(fgraph, node):
 
     exp_node, axis = sum_node.inputs[0].owner, sum_node.op.axis
     if not exp_node or not (
-        isinstance(exp_node.op, Elemwise) and isinstance(exp_node.op.scalar_op, aes.Exp)
+        isinstance(exp_node.op, Elemwise) and isinstance(exp_node.op.scalar_op, ps.Exp)
     ):
         return
 
     pre_exp = exp_node.inputs[0]
-    max_pre_exp = at_max(pre_exp, axis=axis)
+    max_pre_exp = pt_max(pre_exp, axis=axis)
     max_pre_exp_keepdims = makeKeepDims(pre_exp, max_pre_exp, axis)
 
     # Do not offset when max_pre = -np.inf, to avoid nan in the output
     # Switch statement is placed directly inside sum to break the self-symmetry
     # of the returned output (otherwise the rewrite would not stabilize)
     ret = max_pre_exp + log(
-        at_sum(
+        pt_sum(
             switch(
                 isinf(max_pre_exp_keepdims),
                 exp(max_pre_exp_keepdims),
@@ -2869,7 +2869,7 @@ def local_grad_log_erfc_neg(fgraph, node):
     # aaron value
     stab_value = (
         x
-        * at_pow(1 - 1 / (2 * (x**2)) + 3 / (4 * (x**4)) - 15 / (8 * (x**6)), -1)
+        * pt_pow(1 - 1 / (2 * (x**2)) + 3 / (4 * (x**4)) - 15 / (8 * (x**6)), -1)
         * cast(sqrt(np.pi), dtype=x.dtype)
     )
 

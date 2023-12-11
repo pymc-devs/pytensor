@@ -1,4 +1,4 @@
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.compile import optdb
 from pytensor.graph.rewriting.basic import in2out, node_rewriter
 from pytensor.tensor.basic import MakeVector
@@ -37,10 +37,10 @@ def boolean_indexing_set_or_inc(fgraph, node):
         return
 
     if op.set_instead_of_inc:
-        out = at.where(cond, y, x)
+        out = pt.where(cond, y, x)
         return out.owner.outputs
     else:
-        out = at.where(cond, x + y, x)
+        out = pt.where(cond, x + y, x)
         return out.owner.outputs
 
 
@@ -91,7 +91,7 @@ def boolean_indexing_sum(fgraph, node):
 
     # Output must be a scalar, since pure boolean indexing returns a vector
     # No need to worry about axis
-    out = at.sum(at.where(cond, x, 0))
+    out = pt.sum(pt.where(cond, x, 0))
     return out.owner.outputs
 
 

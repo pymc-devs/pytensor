@@ -5,9 +5,9 @@ import pytest
 import scipy.special
 
 import pytensor
-import pytensor.tensor as at
-import pytensor.tensor.inplace as ati
-import pytensor.tensor.math as aem
+import pytensor.tensor as pt
+import pytensor.tensor.inplace as pti
+import pytensor.tensor.math as ptm
 from pytensor import config, function
 from pytensor.compile import get_mode
 from pytensor.compile.ops import deep_copy_op
@@ -15,7 +15,7 @@ from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.gradient import grad
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
-from pytensor.tensor import elemwise as at_elemwise
+from pytensor.tensor import elemwise as pt_elemwise
 from pytensor.tensor.math import All, Any, Max, Mean, Min, Prod, ProdWithoutZeros, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 from tests.link.numba.test_basic import (
@@ -33,73 +33,73 @@ rng = np.random.default_rng(42849)
     "inputs, input_vals, output_fn, exc",
     [
         (
-            [at.vector()],
+            [pt.vector()],
             [rng.uniform(size=100).astype(config.floatX)],
-            lambda x: at.gammaln(x),
+            lambda x: pt.gammaln(x),
             None,
         ),
         (
-            [at.vector()],
+            [pt.vector()],
             [rng.standard_normal(100).astype(config.floatX)],
-            lambda x: at.sigmoid(x),
+            lambda x: pt.sigmoid(x),
             None,
         ),
         (
-            [at.vector()],
+            [pt.vector()],
             [rng.standard_normal(100).astype(config.floatX)],
-            lambda x: at.log1mexp(x),
+            lambda x: pt.log1mexp(x),
             None,
         ),
         (
-            [at.vector()],
+            [pt.vector()],
             [rng.standard_normal(100).astype(config.floatX)],
-            lambda x: at.erf(x),
+            lambda x: pt.erf(x),
             None,
         ),
         (
-            [at.vector()],
+            [pt.vector()],
             [rng.standard_normal(100).astype(config.floatX)],
-            lambda x: at.erfc(x),
+            lambda x: pt.erfc(x),
             None,
         ),
         (
-            [at.vector()],
+            [pt.vector()],
             [rng.standard_normal(100).astype(config.floatX)],
-            lambda x: at.erfcx(x),
+            lambda x: pt.erfcx(x),
             None,
         ),
         (
-            [at.vector() for i in range(4)],
+            [pt.vector() for i in range(4)],
             [rng.standard_normal(100).astype(config.floatX) for i in range(4)],
             lambda x, y, x1, y1: (x + y) * (x1 + y1) * y,
             None,
         ),
         (
-            [at.matrix(), at.scalar()],
+            [pt.matrix(), pt.scalar()],
             [rng.normal(size=(2, 2)).astype(config.floatX), 0.0],
-            lambda a, b: at.switch(a, b, a),
+            lambda a, b: pt.switch(a, b, a),
             None,
         ),
         (
-            [at.scalar(), at.scalar()],
+            [pt.scalar(), pt.scalar()],
             [
                 np.array(1.0, dtype=config.floatX),
                 np.array(1.0, dtype=config.floatX),
             ],
-            lambda x, y: ati.add_inplace(deep_copy_op(x), deep_copy_op(y)),
+            lambda x, y: pti.add_inplace(deep_copy_op(x), deep_copy_op(y)),
             None,
         ),
         (
-            [at.vector(), at.vector()],
+            [pt.vector(), pt.vector()],
             [
                 rng.standard_normal(100).astype(config.floatX),
                 rng.standard_normal(100).astype(config.floatX),
             ],
-            lambda x, y: ati.add_inplace(deep_copy_op(x), deep_copy_op(y)),
+            lambda x, y: pti.add_inplace(deep_copy_op(x), deep_copy_op(y)),
             None,
         ),
         (
-            [at.vector(), at.vector()],
+            [pt.vector(), pt.vector()],
             [
                 rng.standard_normal(100).astype(config.floatX),
                 rng.standard_normal(100).astype(config.floatX),
@@ -127,8 +127,8 @@ def test_elemwise_runtime_broadcast():
 
 
 def test_elemwise_speed(benchmark):
-    x = at.dmatrix("y")
-    y = at.dvector("z")
+    x = pt.dmatrix("y")
+    y = pt.dvector("z")
 
     out = np.exp(2 * x * y + y)
 
@@ -151,53 +151,53 @@ def test_elemwise_speed(benchmark):
         # `{'drop': [], 'shuffle': [], 'augment': [0, 1]}`
         (
             set_test_value(
-                at.lscalar(name="a"),
+                pt.lscalar(name="a"),
                 np.array(1, dtype=np.int64),
             ),
             ("x", "x"),
         ),
-        # I.e. `a_at.T`
+        # I.e. `a_pt.T`
         # `{'drop': [], 'shuffle': [1, 0], 'augment': []}`
         (
             set_test_value(
-                at.matrix("a"), np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
+                pt.matrix("a"), np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
             ),
             (1, 0),
         ),
         # `{'drop': [], 'shuffle': [0, 1], 'augment': [2]}`
         (
             set_test_value(
-                at.matrix("a"), np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
+                pt.matrix("a"), np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
             ),
             (1, 0, "x"),
         ),
         # `{'drop': [1], 'shuffle': [2, 0], 'augment': [0, 2, 4]}`
         (
             set_test_value(
-                at.tensor(dtype=config.floatX, shape=(None, 1, None), name="a"),
+                pt.tensor(dtype=config.floatX, shape=(None, 1, None), name="a"),
                 np.array([[[1.0, 2.0]], [[3.0, 4.0]]], dtype=config.floatX),
             ),
             ("x", 2, "x", 0, "x"),
         ),
-        # I.e. `a_at.dimshuffle((0,))`
+        # I.e. `a_pt.dimshuffle((0,))`
         # `{'drop': [1], 'shuffle': [0], 'augment': []}`
         (
             set_test_value(
-                at.tensor(dtype=config.floatX, shape=(None, 1), name="a"),
+                pt.tensor(dtype=config.floatX, shape=(None, 1), name="a"),
                 np.array([[1.0], [2.0], [3.0], [4.0]], dtype=config.floatX),
             ),
             (0,),
         ),
         (
             set_test_value(
-                at.tensor(dtype=config.floatX, shape=(None, 1), name="a"),
+                pt.tensor(dtype=config.floatX, shape=(None, 1), name="a"),
                 np.array([[1.0], [2.0], [3.0], [4.0]], dtype=config.floatX),
             ),
             (0,),
         ),
         (
             set_test_value(
-                at.tensor(dtype=config.floatX, shape=(1, 1, 1), name="a"),
+                pt.tensor(dtype=config.floatX, shape=(1, 1, 1), name="a"),
                 np.array([[[1.0]]], dtype=config.floatX),
             ),
             (),
@@ -205,7 +205,7 @@ def test_elemwise_speed(benchmark):
     ],
 )
 def test_Dimshuffle(v, new_order):
-    g = at_elemwise.DimShuffle(v.broadcastable, new_order)(v)
+    g = pt_elemwise.DimShuffle(v.broadcastable, new_order)(v)
     g_fg = FunctionGraph(outputs=[g])
     compare_numba_and_py(
         g_fg,
@@ -218,8 +218,8 @@ def test_Dimshuffle(v, new_order):
 
 
 def test_Dimshuffle_returns_array():
-    x = at.vector("x", shape=(1,))
-    y = 2 * at_elemwise.DimShuffle([True], [])(x)
+    x = pt.vector("x", shape=(1,))
+    y = 2 * pt_elemwise.DimShuffle([True], [])(x)
     func = pytensor.function([x], y, mode="NUMBA")
     out = func(np.zeros(1, dtype=config.floatX))
     assert out.ndim == 0
@@ -227,11 +227,11 @@ def test_Dimshuffle_returns_array():
 
 def test_Dimshuffle_non_contiguous():
     """The numba impl of reshape doesn't work with
-    non-contiguous arrays, make sure we work around that."""
-    x = at.dvector()
-    idx = at.vector(dtype="int64")
+    non-contiguous arrays, make sure we work around thpt."""
+    x = pt.dvector()
+    idx = pt.vector(dtype="int64")
     op = pytensor.tensor.elemwise.DimShuffle([True], [])
-    out = op(at.specify_shape(x[idx][::2], (1,)))
+    out = op(pt.specify_shape(x[idx][::2], (1,)))
     func = pytensor.function([x, idx], out, mode="NUMBA")
     assert func(np.zeros(3), np.array([1])).ndim == 0
 
@@ -244,28 +244,28 @@ def test_Dimshuffle_non_contiguous():
                 axis=axis, dtype=dtype, acc_dtype=acc_dtype
             )(x),
             0,
-            set_test_value(at.vector(), np.arange(3, dtype=config.floatX)),
+            set_test_value(pt.vector(), np.arange(3, dtype=config.floatX)),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: All(axis)(x),
             0,
-            set_test_value(at.vector(), np.arange(3, dtype=config.floatX)),
+            set_test_value(pt.vector(), np.arange(3, dtype=config.floatX)),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Any(axis)(x),
             0,
-            set_test_value(at.vector(), np.arange(3, dtype=config.floatX)),
+            set_test_value(pt.vector(), np.arange(3, dtype=config.floatX)),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Mean(axis)(x),
             0,
-            set_test_value(at.vector(), np.arange(3, dtype=config.floatX)),
+            set_test_value(pt.vector(), np.arange(3, dtype=config.floatX)),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Mean(axis)(x),
             0,
             set_test_value(
-                at.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
+                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
             ),
         ),
         (
@@ -274,7 +274,7 @@ def test_Dimshuffle_non_contiguous():
             )(x),
             0,
             set_test_value(
-                at.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
+                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
             ),
         ),
         (
@@ -283,7 +283,7 @@ def test_Dimshuffle_non_contiguous():
             )(x),
             (0, 1),
             set_test_value(
-                at.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
+                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
             ),
         ),
         (
@@ -292,7 +292,7 @@ def test_Dimshuffle_non_contiguous():
             )(x),
             (1, 0),
             set_test_value(
-                at.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
+                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
             ),
         ),
         (
@@ -301,7 +301,7 @@ def test_Dimshuffle_non_contiguous():
             )(x),
             None,
             set_test_value(
-                at.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
+                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
             ),
         ),
         (
@@ -310,7 +310,7 @@ def test_Dimshuffle_non_contiguous():
             )(x),
             1,
             set_test_value(
-                at.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
+                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
             ),
         ),
         (
@@ -318,14 +318,14 @@ def test_Dimshuffle_non_contiguous():
                 axis=axis, dtype=dtype, acc_dtype=acc_dtype
             )(x),
             0,
-            set_test_value(at.vector(), np.arange(3, dtype=config.floatX)),
+            set_test_value(pt.vector(), np.arange(3, dtype=config.floatX)),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: ProdWithoutZeros(
                 axis=axis, dtype=dtype, acc_dtype=acc_dtype
             )(x),
             0,
-            set_test_value(at.vector(), np.arange(3, dtype=config.floatX)),
+            set_test_value(pt.vector(), np.arange(3, dtype=config.floatX)),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Prod(
@@ -333,7 +333,7 @@ def test_Dimshuffle_non_contiguous():
             )(x),
             0,
             set_test_value(
-                at.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
+                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
             ),
         ),
         (
@@ -342,35 +342,35 @@ def test_Dimshuffle_non_contiguous():
             )(x),
             1,
             set_test_value(
-                at.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
+                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
             ),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Max(axis)(x),
             None,
             set_test_value(
-                at.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
+                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
             ),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Max(axis)(x),
             None,
             set_test_value(
-                at.lmatrix(), np.arange(3 * 2, dtype=np.int64).reshape((3, 2))
+                pt.lmatrix(), np.arange(3 * 2, dtype=np.int64).reshape((3, 2))
             ),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Min(axis)(x),
             None,
             set_test_value(
-                at.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
+                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
             ),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Min(axis)(x),
             None,
             set_test_value(
-                at.lmatrix(), np.arange(3 * 2, dtype=np.int64).reshape((3, 2))
+                pt.lmatrix(), np.arange(3 * 2, dtype=np.int64).reshape((3, 2))
             ),
         ),
     ],
@@ -390,11 +390,11 @@ def test_CAReduce(careduce_fn, axis, v):
 
 
 def test_scalar_Elemwise_Clip():
-    a = at.scalar("a")
-    b = at.scalar("b")
+    a = pt.scalar("a")
+    b = pt.scalar("b")
 
-    z = at.switch(1, a, b)
-    c = at.clip(z, 1, 3)
+    z = pt.switch(1, a, b)
+    c = pt.clip(z, 1, 3)
     c_fg = FunctionGraph(outputs=[c])
 
     compare_numba_and_py(c_fg, [1, 1])
@@ -405,25 +405,25 @@ def test_scalar_Elemwise_Clip():
     [
         (
             set_test_value(
-                at.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
+                pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
             ),
-            set_test_value(at.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+            set_test_value(pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
             None,
             None,
         ),
         (
             set_test_value(
-                at.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
+                pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
             ),
-            set_test_value(at.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+            set_test_value(pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
             0,
             None,
         ),
         (
             set_test_value(
-                at.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
+                pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
             ),
-            set_test_value(at.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+            set_test_value(pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
             1,
             None,
         ),
@@ -446,8 +446,8 @@ def test_SoftmaxGrad(dy, sm, axis, exc):
 
 
 def test_SoftMaxGrad_constant_dy():
-    dy = at.constant(np.zeros((3,), dtype=config.floatX))
-    sm = at.vector(shape=(3,))
+    dy = pt.constant(np.zeros((3,), dtype=config.floatX))
+    sm = pt.vector(shape=(3,))
 
     g = SoftmaxGrad(axis=None)(dy, sm)
     g_fg = FunctionGraph(outputs=[g])
@@ -459,17 +459,17 @@ def test_SoftMaxGrad_constant_dy():
     "x, axis, exc",
     [
         (
-            set_test_value(at.vector(), rng.random(size=(2,)).astype(config.floatX)),
+            set_test_value(pt.vector(), rng.random(size=(2,)).astype(config.floatX)),
             None,
             None,
         ),
         (
-            set_test_value(at.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+            set_test_value(pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
             None,
             None,
         ),
         (
-            set_test_value(at.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+            set_test_value(pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
             0,
             None,
         ),
@@ -495,17 +495,17 @@ def test_Softmax(x, axis, exc):
     "x, axis, exc",
     [
         (
-            set_test_value(at.vector(), rng.random(size=(2,)).astype(config.floatX)),
+            set_test_value(pt.vector(), rng.random(size=(2,)).astype(config.floatX)),
             None,
             None,
         ),
         (
-            set_test_value(at.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+            set_test_value(pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
             0,
             None,
         ),
         (
-            set_test_value(at.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+            set_test_value(pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
             1,
             None,
         ),
@@ -531,29 +531,29 @@ def test_LogSoftmax(x, axis, exc):
     "x, axes, exc",
     [
         (
-            set_test_value(at.dscalar(), np.array(0.0, dtype="float64")),
+            set_test_value(pt.dscalar(), np.array(0.0, dtype="float64")),
             [],
             None,
         ),
         (
-            set_test_value(at.dvector(), rng.random(size=(3,)).astype("float64")),
+            set_test_value(pt.dvector(), rng.random(size=(3,)).astype("float64")),
             [0],
             None,
         ),
         (
-            set_test_value(at.dmatrix(), rng.random(size=(3, 2)).astype("float64")),
+            set_test_value(pt.dmatrix(), rng.random(size=(3, 2)).astype("float64")),
             [0],
             None,
         ),
         (
-            set_test_value(at.dmatrix(), rng.random(size=(3, 2)).astype("float64")),
+            set_test_value(pt.dmatrix(), rng.random(size=(3, 2)).astype("float64")),
             [0, 1],
             None,
         ),
     ],
 )
 def test_MaxAndArgmax(x, axes, exc):
-    g = aem.MaxAndArgmax(axes)(x)
+    g = ptm.MaxAndArgmax(axes)(x)
 
     if isinstance(g, list):
         g_fg = FunctionGraph(outputs=g)
@@ -575,10 +575,10 @@ def test_MaxAndArgmax(x, axes, exc):
 @pytest.mark.parametrize("size", [(10, 10), (1000, 1000), (10000, 10000)])
 @pytest.mark.parametrize("axis", [0, 1])
 def test_logsumexp_benchmark(size, axis, benchmark):
-    X = at.matrix("X")
-    X_max = at.max(X, axis=axis, keepdims=True)
-    X_max = at.switch(at.isinf(X_max), 0, X_max)
-    X_lse = at.log(at.sum(at.exp(X - X_max), axis=axis, keepdims=True)) + X_max
+    X = pt.matrix("X")
+    X_max = pt.max(X, axis=axis, keepdims=True)
+    X_max = pt.switch(pt.isinf(X_max), 0, X_max)
+    X_lse = pt.log(pt.sum(pt.exp(X - X_max), axis=axis, keepdims=True)) + X_max
 
     rng = np.random.default_rng(23920)
     X_val = rng.normal(size=size)
@@ -610,7 +610,7 @@ def test_fused_elemwise_benchmark(benchmark):
 def test_elemwise_out_type():
     # Create a graph with an elemwise
     # Ravel failes if the elemwise output type is reported incorrectly
-    x = at.matrix()
+    x = pt.matrix()
     y = (2 * x).ravel()
 
     # Pass in the input as mutable, to trigger the inplace rewrites

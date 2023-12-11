@@ -7,7 +7,7 @@ from numpy.testing import assert_allclose
 
 import pytensor
 from pytensor import function
-from pytensor import tensor as at
+from pytensor import tensor as pt
 from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.tensor import swapaxes
@@ -42,7 +42,7 @@ def test_rop_lop():
 
     sy, _ = pytensor.scan(
         lambda i, y, x, v: (pytensor.gradient.grad(y[i], x) * v).sum(),
-        sequences=at.arange(y.shape[0]),
+        sequences=pt.arange(y.shape[0]),
         non_sequences=[y, mx, mv],
     )
     scan_f = function([mx, mv], sy)
@@ -227,8 +227,8 @@ def test_cholesky_ldotlt(tag, cholesky_form, product, op):
 
 def test_local_det_chol():
     X = matrix("X")
-    L = at.linalg.cholesky(X)
-    det_X = at.linalg.det(X)
+    L = pt.linalg.cholesky(X)
+    det_X = pt.linalg.det(X)
 
     f = function([X], [L, det_X])
 

@@ -4,7 +4,7 @@ from pytensor.compile.function.pfunc import pfunc
 from pytensor.compile.sharedvalue import shared
 from pytensor.gradient import grad
 from pytensor.tensor.math import dot, sigmoid
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.type import dvector
 
 
@@ -35,7 +35,7 @@ class NNet:
 
         self.hidden = sigmoid(dot(self.w1, self.input))
         self.output = dot(self.w2, self.hidden)
-        self.cost = at_sum((self.output - self.target) ** 2)
+        self.cost = pt_sum((self.output - self.target) ** 2)
 
         self.sgd_updates = {
             self.w1: self.w1 - self.lr * grad(self.cost, self.w1),

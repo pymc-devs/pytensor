@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 
 from pytensor import config, printing
-from pytensor import scalar as aes
+from pytensor import scalar as ps
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.op import Op
@@ -340,7 +340,7 @@ class Argmax(COp):
     __props__ = ("axis",)
     _f16_ok = True
 
-    params_type = ParamsType(c_axis=aes.int64)
+    params_type = ParamsType(c_axis=ps.int64)
 
     def __init__(self, axis):
         if axis is not None:
@@ -624,7 +624,7 @@ class Max(NonZeroDimsCAReduce):
     nfunc_spec = ("max", 1, 1)
 
     def __init__(self, axis):
-        super().__init__(aes.scalar_maximum, axis)
+        super().__init__(ps.scalar_maximum, axis)
 
     def clone(self, **kwargs):
         axis = kwargs.get("axis", self.axis)
@@ -635,7 +635,7 @@ class Min(NonZeroDimsCAReduce):
     nfunc_spec = ("min", 1, 1)
 
     def __init__(self, axis):
-        super().__init__(aes.scalar_minimum, axis)
+        super().__init__(ps.scalar_minimum, axis)
 
     def clone(self, **kwargs):
         axis = kwargs.get("axis", self.axis)
@@ -1517,7 +1517,7 @@ class Mean(FixedOpCAReduce):
     nfunc_spec = ("mean", 1, 1)
 
     def __init__(self, axis=None):
-        super().__init__(aes.mean, axis)
+        super().__init__(ps.mean, axis)
         assert self.axis is None or len(self.axis) == 1
 
     def __str__(self):
@@ -1839,13 +1839,13 @@ def ceil_intdiv(a, b):
     # is faster or not. But this is not safe for int64, because the cast will
     # lose precision. For example:
     #     cast(cast(a, scalar.upcast(a.type.dtype, 'float32')) / b,
-    #          aes.upcast(a.type.dtype, b.type.dtype))
+    #          ps.upcast(a.type.dtype, b.type.dtype))
 
     # We cast for the case when a and b are uint*; otherwise, neq will
     # force their upcast to int.
     div = int_div(a, b)
     ret = cast(neq(a % b, 0), div.dtype) + div
-    assert ret.dtype == aes.upcast(
+    assert ret.dtype == ps.upcast(
         div.owner.inputs[0].type.dtype, div.owner.inputs[1].type.dtype
     )
     return ret
@@ -1858,7 +1858,7 @@ def mod_check(x, y):
         or as_tensor_variable(y).dtype in complex_dtypes
     ):
         # Currently forbidden.
-        raise aes.Mod.complex_error
+        raise ps.Mod.complex_error
     else:
         return mod(x, y)
 
@@ -1947,7 +1947,7 @@ class Dot(Op):
             sz = sx[:-1]
 
         i_dtypes = [input.type.dtype for input in inputs]
-        outputs = [tensor(dtype=aes.upcast(*i_dtypes), shape=sz)]
+        outputs = [tensor(dtype=ps.upcast(*i_dtypes), shape=sz)]
         return Apply(self, inputs, outputs)
 
     def perform(self, node, inp, out):
@@ -2381,7 +2381,7 @@ class All(FixedOpCAReduce):
     nfunc_spec = ("all", 1, 1)
 
     def __init__(self, axis=None):
-        super().__init__(aes.and_, axis)
+        super().__init__(ps.and_, axis)
 
     def _output_dtype(self, idtype):
         return "bool"
@@ -2411,7 +2411,7 @@ class Any(FixedOpCAReduce):
     nfunc_spec = ("any", 1, 1)
 
     def __init__(self, axis=None):
-        super().__init__(aes.or_, axis)
+        super().__init__(ps.or_, axis)
 
     def _output_dtype(self, idtype):
         return "bool"
@@ -2446,7 +2446,7 @@ class Sum(FixedOpCAReduce):
 
     def __init__(self, axis=None, dtype=None, acc_dtype=None):
         super().__init__(
-            aes.add,
+            ps.add,
             axis=axis,
             dtype=dtype,
             acc_dtype=acc_dtype,
@@ -2475,7 +2475,7 @@ class Sum(FixedOpCAReduce):
                 new_dims.append(i)
                 i += 1
         ds_op = DimShuffle(gz.type.broadcastable, new_dims)
-        gx = Elemwise(aes.second)(x, ds_op(gz))
+        gx = Elemwise(ps.second)(x, ds_op(gz))
         return [gx]
 
     def R_op(self, inputs, eval_points):
@@ -2537,7 +2537,7 @@ class Prod(FixedOpCAReduce):
 
     def __init__(self, axis=None, dtype=None, acc_dtype=None, no_zeros_in_input=False):
         super().__init__(
-            aes.mul,
+            ps.mul,
             axis=axis,
             dtype=dtype,
             acc_dtype=acc_dtype,
@@ -2751,7 +2751,7 @@ class MulWithoutZeros(BinaryScalarOp):
         return (1,)
 
 
-mul_without_zeros = MulWithoutZeros(aes.upcast_out, name="mul_without_zeros")
+mul_without_zeros = MulWithoutZeros(ps.upcast_out, name="mul_without_zeros")
 
 
 class ProdWithoutZeros(FixedOpCAReduce):

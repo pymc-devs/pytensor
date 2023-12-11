@@ -24,10 +24,10 @@ oscillates due to the box function being shifted to the middle of the array.
 
     import numpy as np
     import pytensor
-    import pytensor.tensor as at
+    import pytensor.tensor as pt
     from pytensor.tensor import fft
 
-    x = at.matrix('x', dtype='float64')
+    x = pt.matrix('x', dtype='float64')
 
     rfft = fft.rfft(x, norm='ortho')
     f_rfft = pytensor.function([x], rfft)

@@ -2,7 +2,7 @@ import numpy as np
 import scipy.sparse
 
 import pytensor
-from pytensor import tensor as at
+from pytensor import tensor as pt
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.sparse.basic import (
@@ -99,9 +99,9 @@ class Binomial(Op):
         self.dtype = dtype
 
     def make_node(self, n, p, shape):
-        n = at.as_tensor_variable(n)
-        p = at.as_tensor_variable(p)
-        shape = at.as_tensor_variable(shape)
+        n = pt.as_tensor_variable(n)
+        p = pt.as_tensor_variable(p)
+        shape = pt.as_tensor_variable(shape)
 
         assert n.dtype in discrete_dtypes
         assert p.dtype in float_dtypes
@@ -171,7 +171,7 @@ class Multinomial(Op):
     __props__ = ()
 
     def make_node(self, n, p):
-        n = at.as_tensor_variable(n)
+        n = pt.as_tensor_variable(n)
         p = as_sparse_variable(p)
         assert p.format in ("csr", "csc")
 

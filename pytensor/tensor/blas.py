@@ -97,7 +97,7 @@ from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.printing import FunctionPrinter, pprint
 from pytensor.scalar import bool as bool_t
-from pytensor.tensor import basic as at
+from pytensor.tensor import basic as ptb
 from pytensor.tensor.basic import expand_dims
 from pytensor.tensor.blas_headers import blas_header_text, blas_header_version
 from pytensor.tensor.elemwise import DimShuffle
@@ -185,11 +185,11 @@ class Gemv(Op):
             return "%s{no_inplace}" % self.__class__.__name__
 
     def make_node(self, y, alpha, A, x, beta):
-        y = at.as_tensor_variable(y)
-        x = at.as_tensor_variable(x)
-        A = at.as_tensor_variable(A)
-        alpha = at.as_tensor_variable(alpha)
-        beta = at.as_tensor_variable(beta)
+        y = ptb.as_tensor_variable(y)
+        x = ptb.as_tensor_variable(x)
+        A = ptb.as_tensor_variable(A)
+        alpha = ptb.as_tensor_variable(alpha)
+        beta = ptb.as_tensor_variable(beta)
         if y.dtype != A.dtype or y.dtype != x.dtype:
             raise TypeError(
                 "Gemv requires matching dtypes", (y.dtype, A.dtype, x.dtype)
@@ -284,10 +284,10 @@ class Ger(Op):
             return "%s{non-destructive}" % self.__class__.__name__
 
     def make_node(self, A, alpha, x, y):
-        A = at.as_tensor_variable(A)
-        y = at.as_tensor_variable(y)
-        x = at.as_tensor_variable(x)
-        alpha = at.as_tensor_variable(alpha)
+        A = ptb.as_tensor_variable(A)
+        y = ptb.as_tensor_variable(y)
+        x = ptb.as_tensor_variable(x)
+        alpha = ptb.as_tensor_variable(alpha)
         if not (A.dtype == x.dtype == y.dtype == alpha.dtype):
             raise TypeError(
                 "ger requires matching dtypes", (A.dtype, alpha.dtype, x.dtype, y.dtype)
@@ -864,7 +864,7 @@ class Gemm(GemmRelated):
         return rval
 
     def make_node(self, *inputs):
-        inputs = list(map(at.as_tensor_variable, inputs))
+        inputs = list(map(ptb.as_tensor_variable, inputs))
 
         if any(not isinstance(i.type, DenseTensorType) for i in inputs):
             raise NotImplementedError("Only dense tensor types are supported")
@@ -1152,7 +1152,7 @@ def _as_scalar(res, dtype=None):
             # as the cast of the scalar can be done before or after the dot22
             # and this will give the same result.
             if pytensor.scalar.upcast(res.dtype, dtype) == dtype:
-                return at.cast(rval, dtype)
+                return ptb.cast(rval, dtype)
             else:
                 return None
 
@@ -1362,9 +1362,9 @@ def _gemm_from_factored_list(fgraph, lst):
         # sM can be a tuple of 2 elements or an PyTensor variable.
         if isinstance(sM, tuple):
             sm0, sm1 = sM
-            sm0 = at.as_tensor_variable(sm0)
+            sm0 = ptb.as_tensor_variable(sm0)
             if pytensor.scalar.upcast(sm0.dtype, sm1.dtype) == sm1.dtype:
-                lst2.append((at.cast(sm0, sm1.dtype), sM[1]))
+                lst2.append((ptb.cast(sm0, sm1.dtype), sM[1]))
 
     lst = lst2
 
@@ -1454,8 +1454,8 @@ class Dot22(GemmRelated):
     check_input = False
 
     def make_node(self, x, y):
-        x = at.as_tensor_variable(x)
-        y = at.as_tensor_variable(y)
+        x = ptb.as_tensor_variable(x)
+        y = ptb.as_tensor_variable(y)
 
         if any(not isinstance(i.type, DenseTensorType) for i in (x, y)):
             raise NotImplementedError("Only dense tensor types are supported")
@@ -1647,8 +1647,8 @@ class BatchedDot(COp):
     gufunc_signature = "(b,m,k),(b,k,n)->(b,m,n)"
 
     def make_node(self, x, y):
-        x = at.as_tensor_variable(x)
-        y = at.as_tensor_variable(y)
+        x = ptb.as_tensor_variable(x)
+        y = ptb.as_tensor_variable(y)
 
         if not (
             isinstance(x.type, DenseTensorType) and isinstance(y.type, DenseTensorType)
@@ -1682,7 +1682,7 @@ class BatchedDot(COp):
 
         # Change dtype if needed
         dtype = pytensor.scalar.upcast(x.type.dtype, y.type.dtype)
-        x, y = at.cast(x, dtype), at.cast(y, dtype)
+        x, y = ptb.cast(x, dtype), ptb.cast(y, dtype)
         out = tensor(dtype=dtype, shape=out_shape)
         return Apply(self, [x, y], [out])
 
@@ -2069,7 +2069,7 @@ def batched_dot(a, b):
             dot products in terms of batched matrix-matrix dot products, so
             it may be possible to further optimize for performance.
     """
-    a, b = at.as_tensor_variable(a), at.as_tensor_variable(b)
+    a, b = ptb.as_tensor_variable(a), ptb.as_tensor_variable(b)
 
     if a.ndim == 0:
         raise TypeError("a must have at least one (batch) axis")

@@ -12,10 +12,10 @@ let's make a simple function: add two numbers together. Here is how you do
 it:
 
 >>> import numpy
->>> import pytensor.tensor as at
+>>> import pytensor.tensor as pt
 >>> from pytensor import function
->>> x = at.dscalar('x')
->>> y = at.dscalar('y')
+>>> x = pt.dscalar('x')
+>>> y = pt.dscalar('y')
 >>> z = x + y
 >>> f = function([x, y], z)
 
@@ -55,10 +55,10 @@ instruction. Behind the scene, *f* was being compiled into C code.
 
 **Step 1**
 
->>> x = at.dscalar('x')
->>> y = at.dscalar('y')
+>>> x = pt.dscalar('x')
+>>> y = pt.dscalar('y')
 
-In PyTensor, all symbols must be typed. In particular, ``at.dscalar``
+In PyTensor, all symbols must be typed. In particular, ``pt.dscalar``
 is the type we assign to "0-dimensional arrays (`scalar`) of doubles
 (`d`)". It is an PyTensor :ref:`type`.
 
@@ -72,12 +72,12 @@ field, as you can see here:
 <class 'pytensor.tensor.var.TensorVariable'>
 >>> x.type
 TensorType(float64, ())
->>> at.dscalar
+>>> pt.dscalar
 TensorType(float64, ())
->>> x.type is at.dscalar
+>>> x.type is pt.dscalar
 True
 
-By calling ``at.dscalar`` with a string argument, you create a
+By calling ``pt.dscalar`` with a string argument, you create a
 *Variable* representing a floating-point scalar quantity with the
 given name. If you provide no argument, the symbol will be unnamed. Names
 are not required, but they can help debugging.
@@ -124,9 +124,9 @@ then be used like a normal Python function.
     you to import :func:`function` . Here is how :func:`eval` works:
 
     >>> import numpy
-    >>> import pytensor.tensor as at
-    >>> x = at.dscalar('x')
-    >>> y = at.dscalar('y')
+    >>> import pytensor.tensor as pt
+    >>> x = pt.dscalar('x')
+    >>> y = pt.dscalar('y')
     >>> z = x + y
     >>> numpy.allclose(z.eval({x : 16.3, y : 12.1}), 28.4)
     True
@@ -149,8 +149,8 @@ You might already have guessed how to do this. Indeed, the only change
 from the previous example is that you need to instantiate *x* and
 *y* using the matrix Types:
 
->>> x = at.dmatrix('x')
->>> y = at.dmatrix('y')
+>>> x = pt.dmatrix('x')
+>>> y = pt.dmatrix('y')
 >>> z = x + y
 >>> f = function([x, y], z)
 

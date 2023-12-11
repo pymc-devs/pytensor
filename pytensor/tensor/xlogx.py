@@ -1,10 +1,10 @@
 import numpy as np
 
-from pytensor import scalar as aes
+from pytensor import scalar as ps
 from pytensor.tensor.elemwise import Elemwise
 
 
-class XlogX(aes.UnaryScalarOp):
+class XlogX(ps.UnaryScalarOp):
     """
     Compute X * log(X), with special case 0 log(0) = 0.
 
@@ -22,12 +22,12 @@ class XlogX(aes.UnaryScalarOp):
     def grad(self, inputs, grads):
         (x,) = inputs
         (gz,) = grads
-        return [gz * (1 + aes.log(x))]
+        return [gz * (1 + ps.log(x))]
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
         (z,) = outputs
-        if node.inputs[0].type in [aes.float32, aes.float64]:
+        if node.inputs[0].type in [ps.float32, ps.float64]:
             return f"""{z} =
                 {x} == 0.0
                 ? 0.0
@@ -35,11 +35,11 @@ class XlogX(aes.UnaryScalarOp):
         raise NotImplementedError("only floatingpoint is implemented")
 
 
-scalar_xlogx = XlogX(aes.upgrade_to_float, name="scalar_xlogx")
+scalar_xlogx = XlogX(ps.upgrade_to_float, name="scalar_xlogx")
 xlogx = Elemwise(scalar_xlogx, name="xlogx")
 
 
-class XlogY0(aes.BinaryScalarOp):
+class XlogY0(ps.BinaryScalarOp):
     """
     Compute X * log(Y), with special case 0 log(0) = 0.
 
@@ -57,12 +57,12 @@ class XlogY0(aes.BinaryScalarOp):
     def grad(self, inputs, grads):
         x, y = inputs
         (gz,) = grads
-        return [gz * aes.log(y), gz * x / y]
+        return [gz * ps.log(y), gz * x / y]
 
     def c_code(self, node, name, inputs, outputs, sub):
         x, y = inputs
         (z,) = outputs
-        if node.inputs[0].type in [aes.float32, aes.float64]:
+        if node.inputs[0].type in [ps.float32, ps.float64]:
             return f"""{z} =
                 {x} == 0.0
                 ? 0.0
@@ -70,5 +70,5 @@ class XlogY0(aes.BinaryScalarOp):
         raise NotImplementedError("only floatingpoint is implemented")
 
 
-scalar_xlogy0 = XlogY0(aes.upgrade_to_float, name="scalar_xlogy0")
+scalar_xlogy0 = XlogY0(ps.upgrade_to_float, name="scalar_xlogy0")
 xlogy0 = Elemwise(scalar_xlogy0, name="xlogy0")

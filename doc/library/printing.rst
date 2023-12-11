@@ -23,8 +23,8 @@ Intermediate values in a computation cannot be printed in
 the normal python way with the print statement, because PyTensor has no *statements*.
 Instead there is the :class:`Print` Op.
 
->>> from pytensor import tensor as at, function, printing
->>> x = at.dvector()
+>>> from pytensor import tensor as pt, function, printing
+>>> x = pt.dvector()
 >>> hello_world_op = printing.Print('hello world')
 >>> printed_x = hello_world_op(x)
 >>> f = function([x], printed_x)
@@ -52,8 +52,8 @@ PyTensor also provides :func:`pytensor.printing.pydotprint` that creates a png i
 1) The first is :func:`pytensor.pp`.
 
 >>> from pytensor import pp, grad,
->>> from pytensor import tensor as at
->>> x = at.dscalar('x')
+>>> from pytensor import tensor as pt
+>>> x = pt.dscalar('x')
 >>> y = x ** 2
 >>> gy = grad(y, x)
 >>> pp(gy)  # print out the gradient prior to rewriting
@@ -62,7 +62,7 @@ PyTensor also provides :func:`pytensor.printing.pydotprint` that creates a png i
 >>> pp(f.maker.fgraph.outputs[0])
 '(TensorConstant{2.0} * x)'
 
-The parameter in at.dscalar('x') in the first line is the name of this variable
+The parameter in pt.dscalar('x') in the first line is the name of this variable
 in the graph. This name is used when printing the graph to make it more readable.
 If no name is provided the variable x is printed as its type as returned by
 ``x.type()``. In this example - ``<TensorType(float64, ())>``.

@@ -5,7 +5,7 @@ from copy import copy
 from functools import partial
 from typing import Optional, cast
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor import function
 from pytensor.compile.function.pfunc import rebuild_collect_shared
 from pytensor.compile.mode import optdb
@@ -205,9 +205,9 @@ class OpFromGraph(Op, HasInnerGraph):
 
     .. code-block:: python
 
-        from pytensor import function, tensor as at
+        from pytensor import function, tensor as pt
         from pytensor.compile.builders import OpFromGraph
-        x, y, z = at.scalars('xyz')
+        x, y, z = pt.scalars('xyz')
         e = x + y * z
         op = OpFromGraph([x, y, z], [e])
         # op behaves like a normal pytensor op
@@ -220,10 +220,10 @@ class OpFromGraph(Op, HasInnerGraph):
 
         import numpy as np
         import pytensor
-        from pytensor import config, function, tensor as at
+        from pytensor import config, function, tensor as pt
         from pytensor.compile.builders import OpFromGraph
 
-        x, y, z = at.scalars('xyz')
+        x, y, z = pt.scalars('xyz')
         s = pytensor.shared(np.random.random((2, 2)).astype(config.floatX))
         e = x + y * z + s
         op = OpFromGraph([x, y, z], [e])
@@ -235,10 +235,10 @@ class OpFromGraph(Op, HasInnerGraph):
 
     .. code-block:: python
 
-        from pytensor import function, tensor as at, grad
+        from pytensor import function, tensor as pt, grad
         from pytensor.compile.builders import OpFromGraph
 
-        x, y, z = at.scalars('xyz')
+        x, y, z = pt.scalars('xyz')
         e = x + y * z
         def rescale_dy(inps, grads):
             x, y, z = inps
@@ -289,7 +289,7 @@ class OpFromGraph(Op, HasInnerGraph):
             if hasattr(inp, "zeros_like"):
                 return inp.zeros_like(), grad
             else:
-                return at.constant(0.0), grad
+                return pt.constant(0.0), grad
         else:
             return grad, None
 

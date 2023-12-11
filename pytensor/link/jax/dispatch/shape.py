@@ -31,13 +31,13 @@ def jax_funcify_JAXShapeTuple(op, **kwargs):
 SHAPE_NOT_COMPATIBLE = """JAX requires concrete values for the `shape` parameter of `jax.numpy.reshape`.
 Concrete values are either constants:
 
->>> import pytensor.tensor as at
->>> x = at.ones(6)
+>>> import pytensor.tensor as pt
+>>> x = pt.ones(6)
 >>> y = x.reshape((2, 3))
 
 Or the shape of an array:
 
->>> mat = at.matrix('mat')
+>>> mat = pt.matrix('mat')
 >>> y = x.reshape(mat.shape)
 """
 

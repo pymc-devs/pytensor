@@ -28,10 +28,10 @@ a cluster.
 .. testcode::
 
     import pytensor
-    from pytensor import tensor as at
+    from pytensor import tensor as pt
     from pytensor.compile.debugmode import DebugMode
 
-    x = at.dscalar('x')
+    x = pt.dscalar('x')
 
     f = pytensor.function([x], 10*x, mode='DebugMode')
 

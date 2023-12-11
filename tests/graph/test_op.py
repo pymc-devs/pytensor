@@ -3,7 +3,7 @@ import pytest
 
 import pytensor
 import pytensor.graph.op as op
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor import shared
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
@@ -142,7 +142,7 @@ def test_test_value_ndarray():
 
 
 def test_test_value_constant():
-    x = at.as_tensor_variable(np.zeros((5, 5)))
+    x = pt.as_tensor_variable(np.zeros((5, 5)))
     v = op.get_test_value(x)
 
     assert np.all(v == np.zeros((5, 5)))
@@ -224,11 +224,11 @@ def test_op_invalid_input_types():
 def test_op_input_broadcastable():
     # Test that we can create an op with a broadcastable subtype as input
     class SomeOp(pytensor.tensor.Op):
-        itypes = [at.dvector]
-        otypes = [at.dvector]
+        itypes = [pt.dvector]
+        otypes = [pt.dvector]
 
         def perform(self, *_):
             raise NotImplementedError()
 
-    x = at.TensorType(dtype="float64", shape=(1,))("x")
-    assert SomeOp()(x).type == at.dvector
+    x = pt.TensorType(dtype="float64", shape=(1,))("x")
+    assert SomeOp()(x).type == pt.dvector

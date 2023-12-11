@@ -31,15 +31,15 @@ The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
 .. testcode::
 
   import pytensor
-  import pytensor.tensor as at
+  import pytensor.tensor as pt
   import numpy as np
 
   # defining the tensor variables
-  X = at.matrix("X")
-  W = at.matrix("W")
-  b_sym = at.vector("b_sym")
+  X = pt.matrix("X")
+  W = pt.matrix("W")
+  b_sym = pt.vector("b_sym")
 
-  results, updates = pytensor.scan(lambda v: at.tanh(at.dot(v, W) + b_sym), sequences=X)
+  results, updates = pytensor.scan(lambda v: pt.tanh(pt.dot(v, W) + b_sym), sequences=X)
   compute_elementwise = pytensor.function(inputs=[X, W, b_sym], outputs=results)
 
   # test values
@@ -65,19 +65,19 @@ The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
 .. testcode::
 
   import pytensor
-  import pytensor.tensor as at
+  import pytensor.tensor as pt
   import numpy as np
 
   # define tensor variables
-  X = at.vector("X")
-  W = at.matrix("W")
-  b_sym = at.vector("b_sym")
-  U = at.matrix("U")
-  Y = at.matrix("Y")
-  V = at.matrix("V")
-  P = at.matrix("P")
+  X = pt.vector("X")
+  W = pt.matrix("W")
+  b_sym = pt.vector("b_sym")
+  U = pt.matrix("U")
+  Y = pt.matrix("Y")
+  V = pt.matrix("V")
+  P = pt.matrix("P")
 
-  results, updates = pytensor.scan(lambda y, p, x_tm1: at.tanh(at.dot(x_tm1, W) + at.dot(y, U) + at.dot(p, V)),
+  results, updates = pytensor.scan(lambda y, p, x_tm1: pt.tanh(pt.dot(x_tm1, W) + pt.dot(y, U) + pt.dot(p, V)),
             sequences=[Y, P[::-1]], outputs_info=[X])
   compute_seq = pytensor.function(inputs=[X, W, Y, U, P, V], outputs=results)
 
@@ -119,12 +119,12 @@ The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
 .. testcode::
 
   import pytensor
-  import pytensor.tensor as at
+  import pytensor.tensor as pt
   import numpy as np
 
   # define tensor variable
-  X = at.matrix("X")
-  results, updates = pytensor.scan(lambda x_i: at.sqrt((x_i ** 2).sum()), sequences=[X])
+  X = pt.matrix("X")
+  results, updates = pytensor.scan(lambda x_i: pt.sqrt((x_i ** 2).sum()), sequences=[X])
   compute_norm_lines = pytensor.function(inputs=[X], outputs=results)
 
   # test value
@@ -144,12 +144,12 @@ The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
 .. testcode::
 
   import pytensor
-  import pytensor.tensor as at
+  import pytensor.tensor as pt
   import numpy as np
 
   # define tensor variable
-  X = at.matrix("X")
-  results, updates = pytensor.scan(lambda x_i: at.sqrt((x_i ** 2).sum()), sequences=[X.T])
+  X = pt.matrix("X")
+  results, updates = pytensor.scan(lambda x_i: pt.sqrt((x_i ** 2).sum()), sequences=[X.T])
   compute_norm_cols = pytensor.function(inputs=[X], outputs=results)
 
   # test value
@@ -169,14 +169,14 @@ The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
 .. testcode::
 
   import pytensor
-  import pytensor.tensor as at
+  import pytensor.tensor as pt
   import numpy as np
   floatX = "float32"
 
   # define tensor variable
-  X = at.matrix("X")
-  results, updates = pytensor.scan(lambda i, j, t_f: at.cast(X[i, j] + t_f, floatX),
-                    sequences=[at.arange(X.shape[0]), at.arange(X.shape[1])],
+  X = pt.matrix("X")
+  results, updates = pytensor.scan(lambda i, j, t_f: pt.cast(X[i, j] + t_f, floatX),
+                    sequences=[pt.arange(X.shape[0]), pt.arange(X.shape[1])],
                     outputs_info=np.asarray(0., dtype=floatX))
   result = results[-1]
   compute_trace = pytensor.function(inputs=[X], outputs=result)
@@ -200,18 +200,18 @@ The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
 .. testcode::
 
   import pytensor
-  import pytensor.tensor as at
+  import pytensor.tensor as pt
   import numpy as np
 
   # define tensor variables
-  X = at.matrix("X")
-  W = at.matrix("W")
-  b_sym = at.vector("b_sym")
-  U = at.matrix("U")
-  V = at.matrix("V")
-  n_sym = at.iscalar("n_sym")
+  X = pt.matrix("X")
+  W = pt.matrix("W")
+  b_sym = pt.vector("b_sym")
+  U = pt.matrix("U")
+  V = pt.matrix("V")
+  n_sym = pt.iscalar("n_sym")
 
-  results, updates = pytensor.scan(lambda x_tm2, x_tm1: at.dot(x_tm2, U) + at.dot(x_tm1, V) + at.tanh(at.dot(x_tm1, W) + b_sym),
+  results, updates = pytensor.scan(lambda x_tm2, x_tm1: pt.dot(x_tm2, U) + pt.dot(x_tm1, V) + pt.tanh(pt.dot(x_tm1, W) + b_sym),
                       n_steps=n_sym, outputs_info=[dict(initial=X, taps=[-2, -1])])
   compute_seq2 = pytensor.function(inputs=[X, U, V, W, b_sym, n_sym], outputs=results)
 
@@ -265,14 +265,14 @@ The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
 .. testcode::
 
   import pytensor
-  import pytensor.tensor as at
+  import pytensor.tensor as pt
   import numpy as np
 
   # define tensor variables
-  v = at.vector()
-  A = at.matrix()
-  y = at.tanh(at.dot(v, A))
-  results, updates = pytensor.scan(lambda i: at.grad(y[i], v), sequences=[at.arange(y.shape[0])])
+  v = pt.vector()
+  A = pt.matrix()
+  y = pt.tanh(pt.dot(v, A))
+  results, updates = pytensor.scan(lambda i: pt.grad(y[i], v), sequences=[pt.arange(y.shape[0])])
   compute_jac_t = pytensor.function([A, v], results, allow_input_downcast=True) # shape (d_out, d_in)
 
   # test values
@@ -300,12 +300,12 @@ Note that we need to iterate over the indices of ``y`` and not over the elements
 .. testcode::
 
   import pytensor
-  import pytensor.tensor as at
+  import pytensor.tensor as pt
   import numpy as np
 
   # define shared variables
   k = pytensor.shared(0)
-  n_sym = at.iscalar("n_sym")
+  n_sym = pt.iscalar("n_sym")
 
   results, updates = pytensor.scan(lambda:{k:(k + 1)}, n_steps=n_sym)
   accumulator = pytensor.function([n_sym], [], updates=updates, allow_input_downcast=True)
@@ -319,19 +319,19 @@ Note that we need to iterate over the indices of ``y`` and not over the elements
 .. testcode::
 
   import pytensor
-  import pytensor.tensor as at
+  import pytensor.tensor as pt
   import numpy as np
 
   # define tensor variables
-  X = at.matrix("X")
-  W = at.matrix("W")
-  b_sym = at.vector("b_sym")
+  X = pt.matrix("X")
+  W = pt.matrix("W")
+  b_sym = pt.vector("b_sym")
 
   # define shared random stream
   trng = pytensor.tensor.random.utils.RandomStream(1234)
   d=trng.binomial(size=W[1].shape)
 
-  results, updates = pytensor.scan(lambda v: at.tanh(at.dot(v, W) + b_sym) * d, sequences=X)
+  results, updates = pytensor.scan(lambda v: pt.tanh(pt.dot(v, W) + b_sym) * d, sequences=X)
   compute_with_bnoise = pytensor.function(inputs=[X, W, b_sym], outputs=results,
                             updates=updates, allow_input_downcast=True)
   x = np.eye(10, 2, dtype=pytensor.config.floatX)
@@ -360,17 +360,17 @@ Note that if you want to use a random variable ``d`` that will not be updated th
 .. testcode::
 
   import pytensor
-  import pytensor.tensor as at
+  import pytensor.tensor as pt
 
-  k = at.iscalar("k")
-  A = at.vector("A")
+  k = pt.iscalar("k")
+  A = pt.vector("A")
 
   def inner_fct(prior_result, B):
       return prior_result * B
 
   # Symbolic description of the result
   result, updates = pytensor.scan(fn=inner_fct,
-                              outputs_info=at.ones_like(A),
+                              outputs_info=pt.ones_like(A),
                               non_sequences=A, n_steps=k)
 
   # Scan has provided us with A ** 1 through A ** k.  Keep only the last
@@ -393,10 +393,10 @@ Note that if you want to use a random variable ``d`` that will not be updated th
 
   import numpy
   import pytensor
-  import pytensor.tensor as at
+  import pytensor.tensor as pt
 
   coefficients = pytensor.tensor.vector("coefficients")
-  x = at.scalar("x")
+  x = pt.scalar("x")
   max_coefficients_supported = 10000
 
   # Generate the components of the polynomial

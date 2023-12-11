@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import pytensor
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.printing import debugprint, pydot_imported, pydotprint
@@ -17,7 +17,7 @@ def test_debugprint_sitsot():
     # Symbolic description of the result
     result, updates = pytensor.scan(
         fn=lambda prior_result, A: prior_result * A,
-        outputs_info=at.ones_like(A),
+        outputs_info=pt.ones_like(A),
         non_sequences=A,
         n_steps=k,
     )
@@ -75,7 +75,7 @@ def test_debugprint_sitsot_no_extra_info():
     # Symbolic description of the result
     result, updates = pytensor.scan(
         fn=lambda prior_result, A: prior_result * A,
-        outputs_info=at.ones_like(A),
+        outputs_info=pt.ones_like(A),
         non_sequences=A,
         n_steps=k,
     )
@@ -138,7 +138,7 @@ def test_debugprint_nitsot():
         fn=lambda coefficient, power, free_variable: coefficient
         * (free_variable**power),
         outputs_info=None,
-        sequences=[coefficients, at.arange(max_coefficients_supported)],
+        sequences=[coefficients, pt.arange(max_coefficients_supported)],
         non_sequences=x,
     )
     # Sum them up
@@ -205,7 +205,7 @@ def test_debugprint_nested_scans():
     def compute_A_k(A, k):
         result, updates = pytensor.scan(
             fn=lambda prior_result, A: prior_result * A,
-            outputs_info=at.ones_like(A),
+            outputs_info=pt.ones_like(A),
             non_sequences=A,
             n_steps=k,
         )
@@ -217,7 +217,7 @@ def test_debugprint_nested_scans():
     components, updates = pytensor.scan(
         fn=lambda c, power, some_A, some_k: c * (compute_A_k(some_A, some_k) ** power),
         outputs_info=None,
-        sequences=[c, at.arange(n)],
+        sequences=[c, pt.arange(n)],
         non_sequences=[A, k],
     )
     final_result = components.sum()
@@ -491,7 +491,7 @@ def test_debugprint_mitmot():
     # Symbolic description of the result
     result, updates = pytensor.scan(
         fn=lambda prior_result, A: prior_result * A,
-        outputs_info=at.ones_like(A),
+        outputs_info=pt.ones_like(A),
         non_sequences=A,
         n_steps=k,
     )
@@ -620,18 +620,18 @@ def test_debugprint_mitmot():
 
 
 def test_debugprint_compiled_fn():
-    M = at.tensor(dtype=np.float64, shape=(20000, 2, 2))
-    one = at.as_tensor(1, dtype=np.int64)
-    zero = at.as_tensor(0, dtype=np.int64)
+    M = pt.tensor(dtype=np.float64, shape=(20000, 2, 2))
+    one = pt.as_tensor(1, dtype=np.int64)
+    zero = pt.as_tensor(0, dtype=np.int64)
 
     def no_shared_fn(n, x_tm1, M):
         p = M[n, x_tm1]
-        return at.switch(at.lt(zero, p[0]), one, zero)
+        return pt.switch(pt.lt(zero, p[0]), one, zero)
 
     out, updates = pytensor.scan(
         no_shared_fn,
         outputs_info=[{"initial": zero, "taps": [-1]}],
-        sequences=[at.arange(M.shape[0])],
+        sequences=[pt.arange(M.shape[0])],
         non_sequences=[M],
         allow_gc=False,
         mode="FAST_RUN",

@@ -5,7 +5,7 @@ from io import StringIO
 
 import numpy as np
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.compile import ProfileStats
 from pytensor.compile.function import function
 from pytensor.configdefaults import config
@@ -28,7 +28,7 @@ class TestProfiling:
             x = [fvector("val%i" % i) for i in range(3)]
 
             z = []
-            z += [at.outer(x[i], x[i + 1]).sum(axis=1) for i in range(len(x) - 1)]
+            z += [pt.outer(x[i], x[i + 1]).sum(axis=1) for i in range(len(x) - 1)]
             z += [x[i] + x[i + 1] for i in range(len(x) - 1)]
 
             p = ProfileStats(False, gpu_checks=False)
@@ -84,7 +84,7 @@ class TestProfiling:
             a, b = scalars("a", "b")
             x, y = scalars("x", "y")
 
-            z = ifelse(at.lt(a, b), x * 2, y * 2)
+            z = ifelse(pt.lt(a, b), x * 2, y * 2)
 
             p = ProfileStats(False, gpu_checks=False)
 
