@@ -185,7 +185,7 @@ class IfElse(_NoPythonOp):
                 input_f.type, HasDataType
             ):
                 # TODO: Be smarter about dtype casting.
-                # up_dtype = aes.upcast(input_t.type.dtype, input_f.type.dtype)
+                # up_dtype = ps.upcast(input_t.type.dtype, input_f.type.dtype)
 
                 if input_t.type.dtype != input_f.type.dtype:
                     raise TypeError(

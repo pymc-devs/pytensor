@@ -5,7 +5,7 @@ import numpy as np
 import scipy.sparse
 
 import pytensor
-from pytensor import scalar as aes
+from pytensor import scalar as ps
 from pytensor.graph.basic import Variable
 from pytensor.graph.type import HasDataType
 from pytensor.tensor.type import DenseTensorType, TensorType
@@ -123,7 +123,7 @@ class SparseTensorType(TensorType, HasDataType):
             sp = self.format_cls[self.format](value, dtype=self.dtype)
         else:
             data = self.format_cls[self.format](value)
-            up_dtype = aes.upcast(self.dtype, data.dtype)
+            up_dtype = ps.upcast(self.dtype, data.dtype)
             if up_dtype != self.dtype:
                 raise TypeError(f"Expected {self.dtype} dtype but got {data.dtype}")
             sp = data.astype(up_dtype)

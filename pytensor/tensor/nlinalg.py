@@ -3,7 +3,7 @@ from functools import partial
 
 import numpy as np
 
-from pytensor import scalar as aes
+from pytensor import scalar as ps
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
@@ -383,7 +383,7 @@ class EighGrad(Op):
         assert v.ndim == 2
         assert gw.ndim == 1
         assert gv.ndim == 2
-        out_dtype = aes.upcast(x.dtype, w.dtype, v.dtype, gw.dtype, gv.dtype)
+        out_dtype = ps.upcast(x.dtype, w.dtype, v.dtype, gw.dtype, gv.dtype)
         out = matrix(dtype=out_dtype)
         return Apply(self, [x, w, v, gw, gv], [out])
 
@@ -787,7 +787,7 @@ class TensorSolve(Op):
     def make_node(self, a, b):
         a = as_tensor_variable(a)
         b = as_tensor_variable(b)
-        out_dtype = aes.upcast(a.dtype, b.dtype)
+        out_dtype = ps.upcast(a.dtype, b.dtype)
         x = matrix(dtype=out_dtype)
         return Apply(self, [a, b], [x])
 

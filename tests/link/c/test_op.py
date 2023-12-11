@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 import pytensor
-from pytensor import scalar as aes
+from pytensor import scalar as ps
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.utils import MethodNotDefined
@@ -70,7 +70,7 @@ class StructOp(COp):
 
     # The input only serves to distinguish thunks
     def make_node(self, i):
-        return Apply(self, [i], [aes.uint64()])
+        return Apply(self, [i], [ps.uint64()])
 
     def c_support_code_struct(self, node, name):
         return f"npy_uint64 counter{name};"
@@ -123,7 +123,7 @@ class TestMakeThunk:
             __props__ = ()
 
             def make_node(self, input):
-                input = aes.as_scalar(input)
+                input = ps.as_scalar(input)
                 output = input.type()
                 return Apply(self, [input], [output])
 
@@ -132,7 +132,7 @@ class TestMakeThunk:
                 (output,) = outputs
                 output[0] = input + 1
 
-        i = aes.int32("i")
+        i = ps.int32("i")
         o = IncOnePython()(i)
 
         # Check that the c_code function is not implemented
@@ -159,7 +159,7 @@ class TestMakeThunk:
             __props__ = ()
 
             def make_node(self, input):
-                input = aes.as_scalar(input)
+                input = ps.as_scalar(input)
                 output = input.type()
                 return Apply(self, [input], [output])
 
@@ -171,7 +171,7 @@ class TestMakeThunk:
             def perform(self, *args, **kwargs):
                 raise NotImplementedError("No Python implementation available.")
 
-        i = aes.int32("i")
+        i = ps.int32("i")
         o = IncOneC()(i)
 
         # Check that the perform function is not implemented

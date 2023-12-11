@@ -20,7 +20,7 @@ from numpy.core.numeric import normalize_axis_tuple
 import pytensor
 import pytensor.scalar.sharedvar
 from pytensor import compile, config, printing
-from pytensor import scalar as aes
+from pytensor import scalar as ps
 from pytensor.gradient import DisconnectedType, grad_undefined
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Apply, Constant, Variable
@@ -161,7 +161,7 @@ def _as_tensor_Sequence(x, name, ndim, dtype=None, **kwargs):
             # In this instance, we have a sequence of constants with which we
             # want to construct a vector, so we can use `MakeVector` directly.
             if dtype is None:
-                dtype = aes.upcast(*[i.dtype for i in x if hasattr(i, "dtype")])
+                dtype = ps.upcast(*[i.dtype for i in x if hasattr(i, "dtype")])
             return MakeVector(dtype)(*x)
 
         # In this case, we have at least one non-`Constant` term, so we
@@ -215,7 +215,7 @@ def constant(x, name=None, ndim=None, dtype=None) -> TensorConstant:
         else:
             x = x.data
 
-    x_ = aes.convert(x, dtype=dtype)
+    x_ = ps.convert(x, dtype=dtype)
 
     if ndim is not None:
         if x_.ndim < ndim:
@@ -244,22 +244,22 @@ def _obj_is_wrappable_as_tensor(x):
 
 
 _scalar_constant_value_elemwise_ops = (
-    aes.Cast,
-    aes.Switch,
-    aes.NEQ,
-    aes.EQ,
-    aes.LT,
-    aes.GT,
-    aes.LE,
-    aes.GE,
-    aes.Sub,
-    aes.Add,
-    aes.Mod,
-    aes.Mul,
-    aes.IntDiv,
-    aes.TrueDiv,
-    aes.ScalarMinimum,
-    aes.ScalarMaximum,
+    ps.Cast,
+    ps.Switch,
+    ps.NEQ,
+    ps.EQ,
+    ps.LT,
+    ps.GT,
+    ps.LE,
+    ps.GE,
+    ps.Sub,
+    ps.Add,
+    ps.Mod,
+    ps.Mul,
+    ps.IntDiv,
+    ps.TrueDiv,
+    ps.ScalarMinimum,
+    ps.ScalarMaximum,
 )
 
 
@@ -392,8 +392,8 @@ def get_underlying_scalar_constant_value(
                 if builtins.all(0 == c.ndim and c != 0 for c in conds):
                     v = v.owner.inputs[0]
                     continue
-            elif isinstance(v.owner.op, aes.ScalarOp):
-                if isinstance(v.owner.op, aes.Second):
+            elif isinstance(v.owner.op, ps.ScalarOp):
+                if isinstance(v.owner.op, ps.Second):
                     # We don't need both input to be constant for second
                     shp, val = v.owner.inputs
                     v = val
@@ -410,7 +410,7 @@ def get_underlying_scalar_constant_value(
             # we need to investigate Second as Alloc. So elemwise
             # don't disable the check for Second.
             elif isinstance(v.owner.op, Elemwise):
-                if isinstance(v.owner.op.scalar_op, aes.Second):
+                if isinstance(v.owner.op.scalar_op, ps.Second):
                     # We don't need both input to be constant for second
                     shp, val = v.owner.inputs
                     v = val
@@ -560,7 +560,7 @@ class TensorFromScalar(COp):
     __props__ = ()
 
     def make_node(self, s):
-        if not isinstance(s.type, aes.ScalarType):
+        if not isinstance(s.type, ps.ScalarType):
             raise TypeError("Input must be a `ScalarType` `Type`")
 
         return Apply(self, [s], [tensor(dtype=s.type.dtype, shape=())])
@@ -622,7 +622,7 @@ class ScalarFromTensor(COp):
             raise TypeError("Input must be a scalar `TensorType`")
 
         return Apply(
-            self, [t], [aes.get_scalar_type(dtype=t.type.dtype).make_variable()]
+            self, [t], [ps.get_scalar_type(dtype=t.type.dtype).make_variable()]
         )
 
     def perform(self, node, inp, out_):
@@ -675,49 +675,49 @@ def _conversion(real_value: Op, name: str) -> Op:
 # what types you are casting to what.  That logic is implemented by the
 # `cast()` function below.
 
-_convert_to_bool: Elemwise = _conversion(Elemwise(aes.convert_to_bool), "bool")
+_convert_to_bool: Elemwise = _conversion(Elemwise(ps.convert_to_bool), "bool")
 """Cast to boolean"""
 
-_convert_to_int8: Elemwise = _conversion(Elemwise(aes.convert_to_int8), "int8")
+_convert_to_int8: Elemwise = _conversion(Elemwise(ps.convert_to_int8), "int8")
 """Cast to 8-bit integer"""
 
-_convert_to_int16: Elemwise = _conversion(Elemwise(aes.convert_to_int16), "int16")
+_convert_to_int16: Elemwise = _conversion(Elemwise(ps.convert_to_int16), "int16")
 """Cast to 16-bit integer"""
 
-_convert_to_int32: Elemwise = _conversion(Elemwise(aes.convert_to_int32), "int32")
+_convert_to_int32: Elemwise = _conversion(Elemwise(ps.convert_to_int32), "int32")
 """Cast to 32-bit integer"""
 
-_convert_to_int64: Elemwise = _conversion(Elemwise(aes.convert_to_int64), "int64")
+_convert_to_int64: Elemwise = _conversion(Elemwise(ps.convert_to_int64), "int64")
 """Cast to 64-bit integer"""
 
-_convert_to_uint8: Elemwise = _conversion(Elemwise(aes.convert_to_uint8), "uint8")
+_convert_to_uint8: Elemwise = _conversion(Elemwise(ps.convert_to_uint8), "uint8")
 """Cast to unsigned 8-bit integer"""
 
-_convert_to_uint16: Elemwise = _conversion(Elemwise(aes.convert_to_uint16), "uint16")
+_convert_to_uint16: Elemwise = _conversion(Elemwise(ps.convert_to_uint16), "uint16")
 """Cast to unsigned 16-bit integer"""
 
-_convert_to_uint32: Elemwise = _conversion(Elemwise(aes.convert_to_uint32), "uint32")
+_convert_to_uint32: Elemwise = _conversion(Elemwise(ps.convert_to_uint32), "uint32")
 """Cast to unsigned 32-bit integer"""
 
-_convert_to_uint64: Elemwise = _conversion(Elemwise(aes.convert_to_uint64), "uint64")
+_convert_to_uint64: Elemwise = _conversion(Elemwise(ps.convert_to_uint64), "uint64")
 """Cast to unsigned 64-bit integer"""
 
-_convert_to_float16: Elemwise = _conversion(Elemwise(aes.convert_to_float16), "float16")
+_convert_to_float16: Elemwise = _conversion(Elemwise(ps.convert_to_float16), "float16")
 """Cast to half-precision floating point"""
 
-_convert_to_float32: Elemwise = _conversion(Elemwise(aes.convert_to_float32), "float32")
+_convert_to_float32: Elemwise = _conversion(Elemwise(ps.convert_to_float32), "float32")
 """Cast to single-precision floating point"""
 
-_convert_to_float64: Elemwise = _conversion(Elemwise(aes.convert_to_float64), "float64")
+_convert_to_float64: Elemwise = _conversion(Elemwise(ps.convert_to_float64), "float64")
 """Cast to double-precision floating point"""
 
 _convert_to_complex64: Elemwise = _conversion(
-    Elemwise(aes.convert_to_complex64), "complex64"
+    Elemwise(ps.convert_to_complex64), "complex64"
 )
 """Cast to single-precision complex"""
 
 _convert_to_complex128: Elemwise = _conversion(
-    Elemwise(aes.convert_to_complex128), "complex128"
+    Elemwise(ps.convert_to_complex128), "complex128"
 )
 """Cast to double-precision complex"""
 
@@ -1772,7 +1772,7 @@ class MakeVector(COp):
         if not all(a.type.dtype == inputs[0].type.dtype for a in inputs) or (
             len(inputs) > 0 and inputs[0].dtype != self.dtype
         ):
-            dtype = aes.upcast(self.dtype, *[i.dtype for i in inputs])
+            dtype = ps.upcast(self.dtype, *[i.dtype for i in inputs])
             inputs = [cast(i, dtype=dtype) for i in inputs]
 
             if not all(self.dtype == i.dtype for i in inputs):
@@ -1916,7 +1916,7 @@ def register_transfer(fn):
 
 
 """Create a duplicate of `a` (with duplicated storage)"""
-tensor_copy = Elemwise(aes.identity)
+tensor_copy = Elemwise(ps.identity)
 pprint.assign(tensor_copy, printing.IgnorePrinter())
 
 
@@ -1968,8 +1968,8 @@ def extract_constant(x, elemwise=True, only_process_constants=False):
         x = get_underlying_scalar_constant_value(x, elemwise, only_process_constants)
     except NotScalarConstantError:
         pass
-    if isinstance(x, aes.ScalarVariable) or isinstance(
-        x, aes.sharedvar.ScalarSharedVariable
+    if isinstance(x, ps.ScalarVariable) or isinstance(
+        x, ps.sharedvar.ScalarSharedVariable
     ):
         if x.owner and isinstance(x.owner.op, ScalarFromTensor):
             x = x.owner.inputs[0]
@@ -2317,7 +2317,7 @@ class Join(COp):
             raise ValueError("Cannot join an empty list of tensors")
 
         tensors = [as_tensor_variable(x) for x in tensors]
-        out_dtype = aes.upcast(*[x.type.dtype for x in tensors])
+        out_dtype = ps.upcast(*[x.type.dtype for x in tensors])
 
         if not builtins.all(targs.type.ndim for targs in tensors):
             raise TypeError(
@@ -2511,7 +2511,7 @@ class Join(COp):
         rval = [grad_undefined(self, 0, axis)]
 
         dtypes = [as_tensor_variable(x).type.dtype for x in tens]
-        out_dtype = aes.upcast(*dtypes)
+        out_dtype = ps.upcast(*dtypes)
 
         if "float" in out_dtype or "complex" in out_dtype:
             # assume that this is differentiable
@@ -2743,7 +2743,7 @@ def stack(tensors: Sequence["TensorLike"], axis: int = 0):
     ):
         # In case there is direct scalar
         tensors = list(map(as_tensor_variable, tensors))
-        dtype = aes.upcast(*[i.dtype for i in tensors])
+        dtype = ps.upcast(*[i.dtype for i in tensors])
         return MakeVector(dtype)(*tensors)
     return join(axis, *[shape_padaxis(t, axis) for t in tensors])
 
@@ -3013,7 +3013,7 @@ class ARange(Op):
                 # this give float64. This is safer then checking for
                 # uint64 in case we support [u]int128 or other in the
                 # future.
-                aes.upcast(var.dtype, "int64") == "int64"
+                ps.upcast(var.dtype, "int64") == "int64"
             ):
                 return cast(var, "int64")
             return var
@@ -3088,7 +3088,7 @@ def arange(start, stop=None, step=1, dtype=None):
     start, stop, step = map(as_tensor_variable, (start, stop, step))
     # If dtype is not provided, infer it from the other arguments
     if dtype is None:
-        dtype = aes.upcast(start.type.dtype, stop.type.dtype, step.type.dtype)
+        dtype = ps.upcast(start.type.dtype, stop.type.dtype, step.type.dtype)
         # don't try to be stingy and byte-optimize, this leads to
         # overflow problems.
         if dtype in int_dtypes:
