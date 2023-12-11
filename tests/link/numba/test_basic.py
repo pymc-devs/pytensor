@@ -10,10 +10,10 @@ import pytest
 
 numba = pytest.importorskip("numba")
 
-import pytensor.scalar as aes
-import pytensor.scalar.math as aesm
-import pytensor.tensor as at
-import pytensor.tensor.math as aem
+import pytensor.scalar as ps
+import pytensor.scalar.math as psm
+import pytensor.tensor as pt
+import pytensor.tensor.math as ptm
 from pytensor import config, shared
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
@@ -32,7 +32,7 @@ from pytensor.link.numba.linker import NumbaLinker
 from pytensor.raise_op import assert_op
 from pytensor.scalar.basic import ScalarOp, as_scalar
 from pytensor.tensor import blas
-from pytensor.tensor import subtensor as at_subtensor
+from pytensor.tensor import subtensor as pt_subtensor
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 
@@ -296,12 +296,12 @@ def compare_numba_and_py(
     "v, expected, force_scalar, not_implemented",
     [
         (MyType(), None, False, True),
-        (aes.float32, numba.types.float32, False, False),
-        (at.fscalar, numba.types.Array(numba.types.float32, 0, "A"), False, False),
-        (at.fscalar, numba.types.float32, True, False),
-        (at.lvector, numba.types.int64[:], False, False),
-        (at.dmatrix, numba.types.float64[:, :], False, False),
-        (at.dmatrix, numba.types.float64, True, False),
+        (ps.float32, numba.types.float32, False, False),
+        (pt.fscalar, numba.types.Array(numba.types.float32, 0, "A"), False, False),
+        (pt.fscalar, numba.types.float32, True, False),
+        (pt.lvector, numba.types.int64[:], False, False),
+        (pt.dmatrix, numba.types.float64[:, :], False, False),
+        (pt.dmatrix, numba.types.float64, True, False),
     ],
 )
 def test_get_numba_type(v, expected, force_scalar, not_implemented):
@@ -321,30 +321,30 @@ def test_get_numba_type(v, expected, force_scalar, not_implemented):
         (Apply(MyOp(), [], []), numba.types.void(), False),
         (Apply(MyOp(), [], []), numba.types.void(), True),
         (
-            Apply(MyOp(), [at.lvector()], []),
+            Apply(MyOp(), [pt.lvector()], []),
             numba.types.void(numba.types.int64[:]),
             False,
         ),
-        (Apply(MyOp(), [at.lvector()], []), numba.types.void(numba.types.int64), True),
+        (Apply(MyOp(), [pt.lvector()], []), numba.types.void(numba.types.int64), True),
         (
-            Apply(MyOp(), [at.dmatrix(), aes.float32()], [at.dmatrix()]),
+            Apply(MyOp(), [pt.dmatrix(), ps.float32()], [pt.dmatrix()]),
             numba.types.float64[:, :](numba.types.float64[:, :], numba.types.float32),
             False,
         ),
         (
-            Apply(MyOp(), [at.dmatrix(), aes.float32()], [at.dmatrix()]),
+            Apply(MyOp(), [pt.dmatrix(), ps.float32()], [pt.dmatrix()]),
             numba.types.float64(numba.types.float64, numba.types.float32),
             True,
         ),
         (
-            Apply(MyOp(), [at.dmatrix(), aes.float32()], [at.dmatrix(), aes.int32()]),
+            Apply(MyOp(), [pt.dmatrix(), ps.float32()], [pt.dmatrix(), ps.int32()]),
             numba.types.Tuple([numba.types.float64[:, :], numba.types.int32])(
                 numba.types.float64[:, :], numba.types.float32
             ),
             False,
         ),
         (
-            Apply(MyOp(), [at.dmatrix(), aes.float32()], [at.dmatrix(), aes.int32()]),
+            Apply(MyOp(), [pt.dmatrix(), ps.float32()], [pt.dmatrix(), ps.int32()]),
             numba.types.Tuple([numba.types.float64, numba.types.int32])(
                 numba.types.float64, numba.types.float32
             ),
@@ -380,44 +380,44 @@ def test_box_unbox(input, wrapper_fn, check_fn):
 @pytest.mark.parametrize(
     "x, indices",
     [
-        (at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), (1,)),
+        (pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), (1,)),
         (
-            at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             (slice(None)),
         ),
-        (at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), (1, 2, 0)),
+        (pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), (1, 2, 0)),
         (
-            at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             (slice(1, 2), 1, slice(None)),
         ),
     ],
 )
 def test_Subtensor(x, indices):
     """Test NumPy's basic indexing."""
-    out_at = x[indices]
-    assert isinstance(out_at.owner.op, at_subtensor.Subtensor)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = x[indices]
+    assert isinstance(out_pt.owner.op, pt_subtensor.Subtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_numba_and_py(out_fg, [])
 
 
 @pytest.mark.parametrize(
     "x, indices",
     [
-        (at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), ([1, 2],)),
+        (pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), ([1, 2],)),
     ],
 )
 def test_AdvancedSubtensor1(x, indices):
     """Test NumPy's advanced indexing in one dimension."""
-    out_at = at_subtensor.advanced_subtensor1(x, *indices)
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedSubtensor1)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = pt_subtensor.advanced_subtensor1(x, *indices)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor1)
+    out_fg = FunctionGraph([], [out_pt])
     compare_numba_and_py(out_fg, [])
 
 
 def test_AdvancedSubtensor1_out_of_bounds():
-    out_at = at_subtensor.advanced_subtensor1(np.arange(3), [4])
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedSubtensor1)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = pt_subtensor.advanced_subtensor1(np.arange(3), [4])
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor1)
+    out_fg = FunctionGraph([], [out_pt])
     with pytest.raises(IndexError):
         compare_numba_and_py(out_fg, [])
 
@@ -425,18 +425,18 @@ def test_AdvancedSubtensor1_out_of_bounds():
 @pytest.mark.parametrize(
     "x, indices",
     [
-        (at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), ([1, 2], [2, 3])),
+        (pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), ([1, 2], [2, 3])),
         (
-            at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             ([1, 2], slice(None), [3, 4]),
         ),
     ],
 )
 def test_AdvancedSubtensor(x, indices):
     """Test NumPy's advanced indexing in more than one dimension."""
-    out_at = x[indices]
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = x[indices]
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_numba_and_py(out_fg, [])
 
 
@@ -444,42 +444,42 @@ def test_AdvancedSubtensor(x, indices):
     "x, y, indices",
     [
         (
-            at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
-            at.as_tensor(np.array(10)),
+            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            pt.as_tensor(np.array(10)),
             (1,),
         ),
         (
-            at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
-            at.as_tensor(rng.poisson(size=(4, 5))),
+            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            pt.as_tensor(rng.poisson(size=(4, 5))),
             (slice(None)),
         ),
         (
-            at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
-            at.as_tensor(np.array(10)),
+            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            pt.as_tensor(np.array(10)),
             (1, 2, 0),
         ),
         (
-            at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
-            at.as_tensor(rng.poisson(size=(1, 5))),
+            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            pt.as_tensor(rng.poisson(size=(1, 5))),
             (slice(1, 2), 1, slice(None)),
         ),
     ],
 )
 def test_IncSubtensor(x, y, indices):
-    out_at = at.set_subtensor(x[indices], y)
-    assert isinstance(out_at.owner.op, at_subtensor.IncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = pt.set_subtensor(x[indices], y)
+    assert isinstance(out_pt.owner.op, pt_subtensor.IncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_numba_and_py(out_fg, [])
 
-    out_at = at.inc_subtensor(x[indices], y)
-    assert isinstance(out_at.owner.op, at_subtensor.IncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = pt.inc_subtensor(x[indices], y)
+    assert isinstance(out_pt.owner.op, pt_subtensor.IncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_numba_and_py(out_fg, [])
 
-    x_at = x.type()
-    out_at = at.set_subtensor(x_at[indices], y, inplace=True)
-    assert isinstance(out_at.owner.op, at_subtensor.IncSubtensor)
-    out_fg = FunctionGraph([x_at], [out_at])
+    x_pt = x.type()
+    out_pt = pt.set_subtensor(x_pt[indices], y, inplace=True)
+    assert isinstance(out_pt.owner.op, pt_subtensor.IncSubtensor)
+    out_fg = FunctionGraph([x_pt], [out_pt])
     compare_numba_and_py(out_fg, [x.data])
 
 
@@ -487,32 +487,32 @@ def test_IncSubtensor(x, y, indices):
     "x, y, indices",
     [
         (
-            at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
-            at.as_tensor(rng.poisson(size=(2, 4, 5))),
+            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            pt.as_tensor(rng.poisson(size=(2, 4, 5))),
             ([1, 2],),
         ),
         (
-            at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
-            at.as_tensor(rng.poisson(size=(2, 4, 5))),
+            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            pt.as_tensor(rng.poisson(size=(2, 4, 5))),
             ([1, 1],),
         ),
     ],
 )
 def test_AdvancedIncSubtensor1(x, y, indices):
-    out_at = at_subtensor.advanced_set_subtensor1(x, y, *indices)
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedIncSubtensor1)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = pt_subtensor.advanced_set_subtensor1(x, y, *indices)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor1)
+    out_fg = FunctionGraph([], [out_pt])
     compare_numba_and_py(out_fg, [])
 
-    out_at = at_subtensor.advanced_inc_subtensor1(x, y, *indices)
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedIncSubtensor1)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = pt_subtensor.advanced_inc_subtensor1(x, y, *indices)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor1)
+    out_fg = FunctionGraph([], [out_pt])
     compare_numba_and_py(out_fg, [])
 
-    x_at = x.type()
-    out_at = at_subtensor.AdvancedIncSubtensor1(inplace=True)(x_at, y, *indices)
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedIncSubtensor1)
-    out_fg = FunctionGraph([x_at], [out_at])
+    x_pt = x.type()
+    out_pt = pt_subtensor.AdvancedIncSubtensor1(inplace=True)(x_pt, y, *indices)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor1)
+    out_fg = FunctionGraph([x_pt], [out_pt])
     compare_numba_and_py(out_fg, [x.data])
 
 
@@ -520,40 +520,40 @@ def test_AdvancedIncSubtensor1(x, y, indices):
     "x, y, indices",
     [
         (
-            at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
-            at.as_tensor(rng.poisson(size=(2, 5))),
+            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            pt.as_tensor(rng.poisson(size=(2, 5))),
             ([1, 2], [2, 3]),
         ),
         (
-            at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
-            at.as_tensor(rng.poisson(size=(2, 4))),
+            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            pt.as_tensor(rng.poisson(size=(2, 4))),
             ([1, 2], slice(None), [3, 4]),
         ),
         pytest.param(
-            at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
-            at.as_tensor(rng.poisson(size=(2, 5))),
+            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            pt.as_tensor(rng.poisson(size=(2, 5))),
             ([1, 1], [2, 2]),
         ),
     ],
 )
 def test_AdvancedIncSubtensor(x, y, indices):
-    out_at = at.set_subtensor(x[indices], y)
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedIncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = pt.set_subtensor(x[indices], y)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_numba_and_py(out_fg, [])
 
-    out_at = at.inc_subtensor(x[indices], y)
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedIncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = pt.inc_subtensor(x[indices], y)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_numba_and_py(out_fg, [])
 
-    x_at = x.type()
-    out_at = at.set_subtensor(x_at[indices], y)
+    x_pt = x.type()
+    out_pt = pt.set_subtensor(x_pt[indices], y)
     # Inplace isn't really implemented for `AdvancedIncSubtensor`, so we just
     # hack it on here
-    out_at.owner.op.inplace = True
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedIncSubtensor)
-    out_fg = FunctionGraph([x_at], [out_at])
+    out_pt.owner.op.inplace = True
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    out_fg = FunctionGraph([x_pt], [out_pt])
     compare_numba_and_py(out_fg, [x.data])
 
 
@@ -564,12 +564,12 @@ def test_AdvancedIncSubtensor(x, y, indices):
     ],
 )
 def test_Shape(x, i):
-    g = Shape()(at.as_tensor_variable(x))
+    g = Shape()(pt.as_tensor_variable(x))
     g_fg = FunctionGraph([], [g])
 
     compare_numba_and_py(g_fg, [])
 
-    g = Shape_i(i)(at.as_tensor_variable(x))
+    g = Shape_i(i)(pt.as_tensor_variable(x))
     g_fg = FunctionGraph([], [g])
 
     compare_numba_and_py(g_fg, [])
@@ -578,11 +578,11 @@ def test_Shape(x, i):
 @pytest.mark.parametrize(
     "v, shape, ndim",
     [
-        (set_test_value(at.vector(), np.array([4], dtype=config.floatX)), (), 0),
-        (set_test_value(at.vector(), np.arange(4, dtype=config.floatX)), (2, 2), 2),
+        (set_test_value(pt.vector(), np.array([4], dtype=config.floatX)), (), 0),
+        (set_test_value(pt.vector(), np.arange(4, dtype=config.floatX)), (2, 2), 2),
         (
-            set_test_value(at.vector(), np.arange(4, dtype=config.floatX)),
-            set_test_value(at.lvector(), np.array([2, 2], dtype="int64")),
+            set_test_value(pt.vector(), np.arange(4, dtype=config.floatX)),
+            set_test_value(pt.lvector(), np.array([2, 2], dtype="int64")),
             2,
         ),
     ],
@@ -601,7 +601,7 @@ def test_Reshape(v, shape, ndim):
 
 
 def test_Reshape_scalar():
-    v = at.vector()
+    v = pt.vector()
     v.tag.test_value = np.array([1.0], dtype=config.floatX)
     g = Reshape(1)(v[0], (1,))
     g_fg = FunctionGraph(outputs=[g])
@@ -619,17 +619,17 @@ def test_Reshape_scalar():
     "v, shape, fails",
     [
         (
-            set_test_value(at.matrix(), np.array([[1.0]], dtype=config.floatX)),
+            set_test_value(pt.matrix(), np.array([[1.0]], dtype=config.floatX)),
             (1, 1),
             False,
         ),
         (
-            set_test_value(at.matrix(), np.array([[1.0, 2.0]], dtype=config.floatX)),
+            set_test_value(pt.matrix(), np.array([[1.0, 2.0]], dtype=config.floatX)),
             (1, 1),
             True,
         ),
         (
-            set_test_value(at.matrix(), np.array([[1.0, 2.0]], dtype=config.floatX)),
+            set_test_value(pt.matrix(), np.array([[1.0, 2.0]], dtype=config.floatX)),
             (1, None),
             False,
         ),
@@ -653,7 +653,7 @@ def test_SpecifyShape(v, shape, fails):
 @pytest.mark.parametrize(
     "v",
     [
-        set_test_value(at.vector(), np.arange(4, dtype=config.floatX)),
+        set_test_value(pt.vector(), np.arange(4, dtype=config.floatX)),
     ],
 )
 def test_ViewOp(v):
@@ -675,9 +675,9 @@ def test_ViewOp(v):
         (
             [
                 set_test_value(
-                    at.matrix(), rng.random(size=(2, 3)).astype(config.floatX)
+                    pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)
                 ),
-                set_test_value(at.lmatrix(), rng.poisson(size=(2, 3))),
+                set_test_value(pt.lmatrix(), rng.poisson(size=(2, 3))),
             ],
             MySingleOut,
             UserWarning,
@@ -685,9 +685,9 @@ def test_ViewOp(v):
         (
             [
                 set_test_value(
-                    at.matrix(), rng.random(size=(2, 3)).astype(config.floatX)
+                    pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)
                 ),
-                set_test_value(at.lmatrix(), rng.poisson(size=(2, 3))),
+                set_test_value(pt.lmatrix(), rng.poisson(size=(2, 3))),
             ],
             MyMultiOut,
             UserWarning,
@@ -717,7 +717,7 @@ def test_perform(inputs, op, exc):
 def test_perform_params():
     """This tests for `Op.perform` implementations that require the `params` arguments."""
 
-    x = at.vector()
+    x = pt.vector()
     x.tag.test_value = np.array([1.0, 2.0], dtype=config.floatX)
 
     out = assert_op(x, np.array(True))
@@ -736,7 +736,7 @@ def test_perform_type_convert():
     native scalar and it's supposed to return an `np.ndarray`.
     """
 
-    x = at.vector()
+    x = pt.vector()
     x.tag.test_value = np.array([1.0, 2.0], dtype=config.floatX)
 
     out = assert_op(x.sum(), np.array(True))
@@ -752,33 +752,33 @@ def test_perform_type_convert():
     "x, y, exc",
     [
         (
-            set_test_value(at.matrix(), rng.random(size=(3, 2)).astype(config.floatX)),
-            set_test_value(at.vector(), rng.random(size=(2,)).astype(config.floatX)),
+            set_test_value(pt.matrix(), rng.random(size=(3, 2)).astype(config.floatX)),
+            set_test_value(pt.vector(), rng.random(size=(2,)).astype(config.floatX)),
             None,
         ),
         (
             set_test_value(
-                at.matrix(dtype="float64"), rng.random(size=(3, 2)).astype("float64")
+                pt.matrix(dtype="float64"), rng.random(size=(3, 2)).astype("float64")
             ),
             set_test_value(
-                at.vector(dtype="float32"), rng.random(size=(2,)).astype("float32")
+                pt.vector(dtype="float32"), rng.random(size=(2,)).astype("float32")
             ),
             None,
         ),
         (
-            set_test_value(at.lmatrix(), rng.poisson(size=(3, 2))),
-            set_test_value(at.fvector(), rng.random(size=(2,)).astype("float32")),
+            set_test_value(pt.lmatrix(), rng.poisson(size=(3, 2))),
+            set_test_value(pt.fvector(), rng.random(size=(2,)).astype("float32")),
             None,
         ),
         (
-            set_test_value(at.lvector(), rng.random(size=(2,)).astype(np.int64)),
-            set_test_value(at.lvector(), rng.random(size=(2,)).astype(np.int64)),
+            set_test_value(pt.lvector(), rng.random(size=(2,)).astype(np.int64)),
+            set_test_value(pt.lvector(), rng.random(size=(2,)).astype(np.int64)),
             None,
         ),
     ],
 )
 def test_Dot(x, y, exc):
-    g = aem.Dot()(x, y)
+    g = ptm.Dot()(x, y)
     g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
@@ -797,33 +797,33 @@ def test_Dot(x, y, exc):
     "x, exc",
     [
         (
-            set_test_value(aes.float64(), np.array(0.0, dtype="float64")),
+            set_test_value(ps.float64(), np.array(0.0, dtype="float64")),
             None,
         ),
         (
-            set_test_value(aes.float64(), np.array(-32.0, dtype="float64")),
+            set_test_value(ps.float64(), np.array(-32.0, dtype="float64")),
             None,
         ),
         (
-            set_test_value(aes.float64(), np.array(-40.0, dtype="float64")),
+            set_test_value(ps.float64(), np.array(-40.0, dtype="float64")),
             None,
         ),
         (
-            set_test_value(aes.float64(), np.array(32.0, dtype="float64")),
+            set_test_value(ps.float64(), np.array(32.0, dtype="float64")),
             None,
         ),
         (
-            set_test_value(aes.float64(), np.array(40.0, dtype="float64")),
+            set_test_value(ps.float64(), np.array(40.0, dtype="float64")),
             None,
         ),
         (
-            set_test_value(aes.int64(), np.array(32, dtype="int64")),
+            set_test_value(ps.int64(), np.array(32, dtype="int64")),
             None,
         ),
     ],
 )
 def test_Softplus(x, exc):
-    g = aesm.Softplus(aes.upgrade_to_float)(x)
+    g = psm.Softplus(ps.upgrade_to_float)(x)
     g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
@@ -843,22 +843,22 @@ def test_Softplus(x, exc):
     [
         (
             set_test_value(
-                at.dtensor3(),
+                pt.dtensor3(),
                 rng.random(size=(2, 3, 3)).astype("float64"),
             ),
             set_test_value(
-                at.dtensor3(),
+                pt.dtensor3(),
                 rng.random(size=(2, 3, 3)).astype("float64"),
             ),
             None,
         ),
         (
             set_test_value(
-                at.dtensor3(),
+                pt.dtensor3(),
                 rng.random(size=(2, 3, 3)).astype("float64"),
             ),
             set_test_value(
-                at.ltensor3(),
+                pt.ltensor3(),
                 rng.poisson(size=(2, 3, 3)).astype("int64"),
             ),
             None,
@@ -952,15 +952,15 @@ y = np.array(
     [
         ([], lambda: np.array(True), np.r_[1, 2, 3], np.r_[-1, -2, -3]),
         (
-            [set_test_value(at.dscalar(), np.array(0.2, dtype=np.float64))],
+            [set_test_value(pt.dscalar(), np.array(0.2, dtype=np.float64))],
             lambda x: x < 0.5,
             np.r_[1, 2, 3],
             np.r_[-1, -2, -3],
         ),
         (
             [
-                set_test_value(at.dscalar(), np.array(0.3, dtype=np.float64)),
-                set_test_value(at.dscalar(), np.array(0.5, dtype=np.float64)),
+                set_test_value(pt.dscalar(), np.array(0.3, dtype=np.float64)),
+                set_test_value(pt.dscalar(), np.array(0.5, dtype=np.float64)),
             ],
             lambda x, y: x > y,
             x,
@@ -968,28 +968,28 @@ y = np.array(
         ),
         (
             [
-                set_test_value(at.dvector(), np.array([0.3, 0.1], dtype=np.float64)),
-                set_test_value(at.dvector(), np.array([0.5, 0.9], dtype=np.float64)),
+                set_test_value(pt.dvector(), np.array([0.3, 0.1], dtype=np.float64)),
+                set_test_value(pt.dvector(), np.array([0.5, 0.9], dtype=np.float64)),
             ],
-            lambda x, y: at.all(x > y),
+            lambda x, y: pt.all(x > y),
             x,
             y,
         ),
         (
             [
-                set_test_value(at.dvector(), np.array([0.3, 0.1], dtype=np.float64)),
-                set_test_value(at.dvector(), np.array([0.5, 0.9], dtype=np.float64)),
+                set_test_value(pt.dvector(), np.array([0.3, 0.1], dtype=np.float64)),
+                set_test_value(pt.dvector(), np.array([0.5, 0.9], dtype=np.float64)),
             ],
-            lambda x, y: at.all(x > y),
+            lambda x, y: pt.all(x > y),
             [x, 2 * x],
             [y, 3 * y],
         ),
         (
             [
-                set_test_value(at.dvector(), np.array([0.5, 0.9], dtype=np.float64)),
-                set_test_value(at.dvector(), np.array([0.3, 0.1], dtype=np.float64)),
+                set_test_value(pt.dvector(), np.array([0.5, 0.9], dtype=np.float64)),
+                set_test_value(pt.dvector(), np.array([0.3, 0.1], dtype=np.float64)),
             ],
-            lambda x, y: at.all(x > y),
+            lambda x, y: pt.all(x > y),
             [x, 2 * x],
             [y, 3 * y],
         ),
@@ -1008,41 +1008,41 @@ def test_IfElse(inputs, cond_fn, true_vals, false_vals):
 
 @pytest.mark.xfail(reason="https://github.com/numba/numba/issues/7409")
 def test_config_options_parallel():
-    x = at.dvector()
+    x = pt.dvector()
 
     with config.change_flags(numba__vectorize_target="parallel"):
-        pytensor_numba_fn = function([x], at.sum(x), mode=numba_mode)
+        pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
         numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
         assert numba_mul_fn.targetoptions["parallel"] is True
 
 
 def test_config_options_fastmath():
-    x = at.dvector()
+    x = pt.dvector()
 
     with config.change_flags(numba__fastmath=True):
-        pytensor_numba_fn = function([x], at.sum(x), mode=numba_mode)
+        pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
         print(list(pytensor_numba_fn.vm.jit_fn.py_func.__globals__.keys()))
         numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
         assert numba_mul_fn.targetoptions["fastmath"] is True
 
 
 def test_config_options_cached():
-    x = at.dvector()
+    x = pt.dvector()
 
     with config.change_flags(numba__cache=True):
-        pytensor_numba_fn = function([x], at.sum(x), mode=numba_mode)
+        pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
         numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
         assert not isinstance(numba_mul_fn._cache, numba.core.caching.NullCache)
 
     with config.change_flags(numba__cache=False):
-        pytensor_numba_fn = function([x], at.sum(x), mode=numba_mode)
+        pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
         numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
         assert isinstance(numba_mul_fn._cache, numba.core.caching.NullCache)
 
 
 def test_scalar_return_value_conversion():
     r"""Make sure that we convert \"native\" scalars to `ndarray`\s in the graph outputs."""
-    x = at.scalar(name="x")
+    x = pt.scalar(name="x")
     x_fn = function(
         [x],
         2 * x,
@@ -1052,7 +1052,7 @@ def test_scalar_return_value_conversion():
 
 
 def test_OpFromGraph():
-    x, y, z = at.matrices("xyz")
+    x, y, z = pt.matrices("xyz")
     ofg_1 = OpFromGraph([x, y], [x + y], inline=False)
     ofg_2 = OpFromGraph([x, y], [x * y, x - y], inline=False)
 

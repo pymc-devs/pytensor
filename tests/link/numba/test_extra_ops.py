@@ -3,7 +3,7 @@ import contextlib
 import numpy as np
 import pytest
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor import config
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.graph.basic import Constant
@@ -18,7 +18,7 @@ rng = np.random.default_rng(42849)
 @pytest.mark.parametrize(
     "val",
     [
-        set_test_value(at.lscalar(), np.array(6, dtype="int64")),
+        set_test_value(pt.lscalar(), np.array(6, dtype="int64")),
     ],
 )
 def test_Bartlett(val):
@@ -41,56 +41,56 @@ def test_Bartlett(val):
     [
         (
             set_test_value(
-                at.matrix(), np.arange(3, dtype=config.floatX).reshape((3, 1))
+                pt.matrix(), np.arange(3, dtype=config.floatX).reshape((3, 1))
             ),
             1,
             "add",
         ),
         (
             set_test_value(
-                at.dtensor3(), np.arange(30, dtype=config.floatX).reshape((2, 3, 5))
+                pt.dtensor3(), np.arange(30, dtype=config.floatX).reshape((2, 3, 5))
             ),
             -1,
             "add",
         ),
         (
             set_test_value(
-                at.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))
+                pt.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))
             ),
             0,
             "add",
         ),
         (
             set_test_value(
-                at.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))
+                pt.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))
             ),
             1,
             "add",
         ),
         (
             set_test_value(
-                at.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))
+                pt.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))
             ),
             None,
             "add",
         ),
         (
             set_test_value(
-                at.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))
+                pt.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))
             ),
             0,
             "mul",
         ),
         (
             set_test_value(
-                at.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))
+                pt.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))
             ),
             1,
             "mul",
         ),
         (
             set_test_value(
-                at.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))
+                pt.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))
             ),
             None,
             "mul",
@@ -115,8 +115,8 @@ def test_CumOp(val, axis, mode):
     "a, val",
     [
         (
-            set_test_value(at.lmatrix(), np.zeros((10, 2), dtype="int64")),
-            set_test_value(at.lscalar(), np.array(1, dtype="int64")),
+            set_test_value(pt.lmatrix(), np.zeros((10, 2), dtype="int64")),
+            set_test_value(pt.lscalar(), np.array(1, dtype="int64")),
         )
     ],
 )
@@ -138,19 +138,19 @@ def test_FillDiagonal(a, val):
     "a, val, offset",
     [
         (
-            set_test_value(at.lmatrix(), np.zeros((10, 2), dtype="int64")),
-            set_test_value(at.lscalar(), np.array(1, dtype="int64")),
-            set_test_value(at.lscalar(), np.array(-1, dtype="int64")),
+            set_test_value(pt.lmatrix(), np.zeros((10, 2), dtype="int64")),
+            set_test_value(pt.lscalar(), np.array(1, dtype="int64")),
+            set_test_value(pt.lscalar(), np.array(-1, dtype="int64")),
         ),
         (
-            set_test_value(at.lmatrix(), np.zeros((10, 2), dtype="int64")),
-            set_test_value(at.lscalar(), np.array(1, dtype="int64")),
-            set_test_value(at.lscalar(), np.array(0, dtype="int64")),
+            set_test_value(pt.lmatrix(), np.zeros((10, 2), dtype="int64")),
+            set_test_value(pt.lscalar(), np.array(1, dtype="int64")),
+            set_test_value(pt.lscalar(), np.array(0, dtype="int64")),
         ),
         (
-            set_test_value(at.lmatrix(), np.zeros((10, 3), dtype="int64")),
-            set_test_value(at.lscalar(), np.array(1, dtype="int64")),
-            set_test_value(at.lscalar(), np.array(1, dtype="int64")),
+            set_test_value(pt.lmatrix(), np.zeros((10, 3), dtype="int64")),
+            set_test_value(pt.lscalar(), np.array(1, dtype="int64")),
+            set_test_value(pt.lscalar(), np.array(1, dtype="int64")),
         ),
     ],
 )
@@ -172,65 +172,65 @@ def test_FillDiagonalOffset(a, val, offset):
     "arr, shape, mode, order, exc",
     [
         (
-            tuple(set_test_value(at.lscalar(), v) for v in np.array([0])),
-            set_test_value(at.lvector(), np.array([2])),
+            tuple(set_test_value(pt.lscalar(), v) for v in np.array([0])),
+            set_test_value(pt.lvector(), np.array([2])),
             "raise",
             "C",
             None,
         ),
         (
-            tuple(set_test_value(at.lscalar(), v) for v in np.array([0, 0, 3])),
-            set_test_value(at.lvector(), np.array([2, 3, 4])),
-            "raise",
-            "C",
-            None,
-        ),
-        (
-            tuple(
-                set_test_value(at.lvector(), v)
-                for v in np.array([[0, 1], [2, 0], [1, 3]])
-            ),
-            set_test_value(at.lvector(), np.array([2, 3, 4])),
+            tuple(set_test_value(pt.lscalar(), v) for v in np.array([0, 0, 3])),
+            set_test_value(pt.lvector(), np.array([2, 3, 4])),
             "raise",
             "C",
             None,
         ),
         (
             tuple(
-                set_test_value(at.lvector(), v)
+                set_test_value(pt.lvector(), v)
                 for v in np.array([[0, 1], [2, 0], [1, 3]])
             ),
-            set_test_value(at.lvector(), np.array([2, 3, 4])),
+            set_test_value(pt.lvector(), np.array([2, 3, 4])),
+            "raise",
+            "C",
+            None,
+        ),
+        (
+            tuple(
+                set_test_value(pt.lvector(), v)
+                for v in np.array([[0, 1], [2, 0], [1, 3]])
+            ),
+            set_test_value(pt.lvector(), np.array([2, 3, 4])),
             "raise",
             "F",
             NotImplementedError,
         ),
         (
             tuple(
-                set_test_value(at.lvector(), v)
+                set_test_value(pt.lvector(), v)
                 for v in np.array([[0, 1, 2], [2, 0, 3], [1, 3, 5]])
             ),
-            set_test_value(at.lvector(), np.array([2, 3, 4])),
+            set_test_value(pt.lvector(), np.array([2, 3, 4])),
             "raise",
             "C",
             ValueError,
         ),
         (
             tuple(
-                set_test_value(at.lvector(), v)
+                set_test_value(pt.lvector(), v)
                 for v in np.array([[0, 1, 2], [2, 0, 3], [1, 3, 5]])
             ),
-            set_test_value(at.lvector(), np.array([2, 3, 4])),
+            set_test_value(pt.lvector(), np.array([2, 3, 4])),
             "wrap",
             "C",
             None,
         ),
         (
             tuple(
-                set_test_value(at.lvector(), v)
+                set_test_value(pt.lvector(), v)
                 for v in np.array([[0, 1, 2], [2, 0, 3], [1, 3, 5]])
             ),
-            set_test_value(at.lvector(), np.array([2, 3, 4])),
+            set_test_value(pt.lvector(), np.array([2, 3, 4])),
             "clip",
             "C",
             None,
@@ -257,26 +257,26 @@ def test_RavelMultiIndex(arr, shape, mode, order, exc):
     "x, repeats, axis, exc",
     [
         (
-            set_test_value(at.lscalar(), np.array(1, dtype="int64")),
-            set_test_value(at.lscalar(), np.array(0, dtype="int64")),
+            set_test_value(pt.lscalar(), np.array(1, dtype="int64")),
+            set_test_value(pt.lscalar(), np.array(0, dtype="int64")),
             None,
             None,
         ),
         (
-            set_test_value(at.lmatrix(), np.zeros((2, 2), dtype="int64")),
-            set_test_value(at.lscalar(), np.array(1, dtype="int64")),
+            set_test_value(pt.lmatrix(), np.zeros((2, 2), dtype="int64")),
+            set_test_value(pt.lscalar(), np.array(1, dtype="int64")),
             None,
             None,
         ),
         (
-            set_test_value(at.lvector(), np.arange(2, dtype="int64")),
-            set_test_value(at.lvector(), np.array([1, 1], dtype="int64")),
+            set_test_value(pt.lvector(), np.arange(2, dtype="int64")),
+            set_test_value(pt.lvector(), np.array([1, 1], dtype="int64")),
             None,
             None,
         ),
         (
-            set_test_value(at.lmatrix(), np.zeros((2, 2), dtype="int64")),
-            set_test_value(at.lscalar(), np.array(1, dtype="int64")),
+            set_test_value(pt.lmatrix(), np.zeros((2, 2), dtype="int64")),
+            set_test_value(pt.lscalar(), np.array(1, dtype="int64")),
             0,
             UserWarning,
         ),
@@ -302,7 +302,7 @@ def test_Repeat(x, repeats, axis, exc):
     "x, axis, return_index, return_inverse, return_counts, exc",
     [
         (
-            set_test_value(at.lscalar(), np.array(1, dtype="int64")),
+            set_test_value(pt.lscalar(), np.array(1, dtype="int64")),
             None,
             False,
             False,
@@ -310,7 +310,7 @@ def test_Repeat(x, repeats, axis, exc):
             None,
         ),
         (
-            set_test_value(at.lvector(), np.array([1, 1, 2], dtype="int64")),
+            set_test_value(pt.lvector(), np.array([1, 1, 2], dtype="int64")),
             None,
             False,
             False,
@@ -318,7 +318,7 @@ def test_Repeat(x, repeats, axis, exc):
             None,
         ),
         (
-            set_test_value(at.lmatrix(), np.array([[1, 1], [2, 2]], dtype="int64")),
+            set_test_value(pt.lmatrix(), np.array([[1, 1], [2, 2]], dtype="int64")),
             None,
             False,
             False,
@@ -327,7 +327,7 @@ def test_Repeat(x, repeats, axis, exc):
         ),
         (
             set_test_value(
-                at.lmatrix(), np.array([[1, 1], [1, 1], [2, 2]], dtype="int64")
+                pt.lmatrix(), np.array([[1, 1], [1, 1], [2, 2]], dtype="int64")
             ),
             0,
             False,
@@ -337,7 +337,7 @@ def test_Repeat(x, repeats, axis, exc):
         ),
         (
             set_test_value(
-                at.lmatrix(), np.array([[1, 1], [1, 1], [2, 2]], dtype="int64")
+                pt.lmatrix(), np.array([[1, 1], [1, 1], [2, 2]], dtype="int64")
             ),
             0,
             True,
@@ -371,20 +371,20 @@ def test_Unique(x, axis, return_index, return_inverse, return_counts, exc):
     "arr, shape, order, exc",
     [
         (
-            set_test_value(at.lvector(), np.array([9, 15, 1], dtype="int64")),
-            at.as_tensor([2, 3, 4]),
+            set_test_value(pt.lvector(), np.array([9, 15, 1], dtype="int64")),
+            pt.as_tensor([2, 3, 4]),
             "C",
             None,
         ),
         (
-            set_test_value(at.lvector(), np.array([1, 0], dtype="int64")),
-            at.as_tensor([2]),
+            set_test_value(pt.lvector(), np.array([1, 0], dtype="int64")),
+            pt.as_tensor([2]),
             "C",
             None,
         ),
         (
-            set_test_value(at.lvector(), np.array([9, 15, 1], dtype="int64")),
-            at.as_tensor([2, 3, 4]),
+            set_test_value(pt.lvector(), np.array([9, 15, 1], dtype="int64")),
+            pt.as_tensor([2, 3, 4]),
             "F",
             NotImplementedError,
         ),
@@ -414,19 +414,19 @@ def test_UnravelIndex(arr, shape, order, exc):
     "a, v, side, sorter, exc",
     [
         (
-            set_test_value(at.vector(), np.array([1.0, 2.0, 3.0], dtype=config.floatX)),
-            set_test_value(at.matrix(), rng.random((3, 2)).astype(config.floatX)),
+            set_test_value(pt.vector(), np.array([1.0, 2.0, 3.0], dtype=config.floatX)),
+            set_test_value(pt.matrix(), rng.random((3, 2)).astype(config.floatX)),
             "left",
             None,
             None,
         ),
         pytest.param(
             set_test_value(
-                at.vector(),
+                pt.vector(),
                 np.array([0.29769574, 0.71649186, 0.20475563]).astype(config.floatX),
             ),
             set_test_value(
-                at.matrix(),
+                pt.matrix(),
                 np.array(
                     [
                         [0.18847123, 0.39659508],
@@ -440,10 +440,10 @@ def test_UnravelIndex(arr, shape, order, exc):
             None,
         ),
         (
-            set_test_value(at.vector(), np.array([1.0, 2.0, 3.0], dtype=config.floatX)),
-            set_test_value(at.matrix(), rng.random((3, 2)).astype(config.floatX)),
+            set_test_value(pt.vector(), np.array([1.0, 2.0, 3.0], dtype=config.floatX)),
+            set_test_value(pt.matrix(), rng.random((3, 2)).astype(config.floatX)),
             "right",
-            set_test_value(at.lvector(), np.array([0, 2, 1])),
+            set_test_value(pt.lvector(), np.array([0, 2, 1])),
             UserWarning,
         ),
     ],

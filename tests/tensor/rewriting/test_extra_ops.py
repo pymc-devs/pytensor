@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-import pytensor.scalar as aes
+import pytensor.scalar as ps
 from pytensor.compile.function import function
 from pytensor.compile.mode import OPT_NONE, Mode, get_default_mode
 from pytensor.graph.fg import FunctionGraph
@@ -209,7 +209,7 @@ def test_local_Unique_second(
 
     assert y_rewritten_start == x
     assert not any(
-        isinstance(node.op.scalar_op, aes.Second)
+        isinstance(node.op.scalar_op, ps.Second)
         for node in y_rewritten_fg.apply_nodes
         if isinstance(node.op, Elemwise)
     )
@@ -222,7 +222,7 @@ def test_local_Unique_second(
     # Make sure that the original `BroadcastTo` is used to compute the
     # reference `y` result
     assert any(
-        isinstance(node.op.scalar_op, aes.Second)
+        isinstance(node.op.scalar_op, ps.Second)
         for node in y_fn.maker.fgraph.apply_nodes
         if isinstance(node.op, Elemwise)
     )

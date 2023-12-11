@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 import pytensor
-import pytensor.scalar as aes
+import pytensor.scalar as ps
 import tests.unittest_tools as utt
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
@@ -132,9 +132,9 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
             y.eval({x: 0})
 
     def test_c_views(self):
-        x_at = vector()
+        x_pt = vector()
         thunk, inputs, outputs = (
-            CLinker().accept(FunctionGraph([x_at], [x_at[None]])).make_thunk()
+            CLinker().accept(FunctionGraph([x_pt], [x_pt[None]])).make_thunk()
         )
 
         # This is a little hackish, but we're hoping that--by running this more than
@@ -245,7 +245,7 @@ class TestBroadcast:
 
             x = x_type("x")
             y = y_type("y")
-            e = op(aes.add)(x, y)
+            e = op(ps.add)(x, y)
             f = make_function(copy(linker).accept(FunctionGraph([x, y], [e])))
             xv = rand_val(xsh)
             yv = rand_val(ysh)
@@ -258,7 +258,7 @@ class TestBroadcast:
             if isinstance(linker, PerformLinker):
                 x = x_type("x")
                 y = y_type("y")
-                e = op(aes.add)(x, y)
+                e = op(ps.add)(x, y)
                 f = make_function(copy(linker).accept(FunctionGraph([x, y], [e.shape])))
                 assert tuple(f(xv, yv)) == tuple(zv.shape)
 
@@ -284,7 +284,7 @@ class TestBroadcast:
 
             x = x_type("x")
             y = y_type("y")
-            e = op(aes.Add(aes.transfer_type(0)), {0: 0})(x, y)
+            e = op(ps.Add(ps.transfer_type(0)), {0: 0})(x, y)
             f = make_function(copy(linker).accept(FunctionGraph([x, y], [e])))
             xv = rand_val(xsh)
             yv = rand_val(ysh)
@@ -298,7 +298,7 @@ class TestBroadcast:
             if isinstance(linker, PerformLinker):
                 x = x_type("x")
                 y = y_type("y")
-                e = op(aes.Add(aes.transfer_type(0)), {0: 0})(x, y)
+                e = op(ps.Add(ps.transfer_type(0)), {0: 0})(x, y)
                 f = make_function(copy(linker).accept(FunctionGraph([x, y], [e.shape])))
                 xv = rand_val(xsh)
                 yv = rand_val(ysh)
@@ -339,7 +339,7 @@ class TestBroadcast:
         ):
             x = t(pytensor.config.floatX, shape=(None, None))("x")
             y = t(pytensor.config.floatX, shape=(1, 1))("y")
-            e = op(aes.Second(aes.transfer_type(0)), {0: 0})(x, y)
+            e = op(ps.Second(ps.transfer_type(0)), {0: 0})(x, y)
             f = make_function(linker().accept(FunctionGraph([x, y], [e])))
             xv = rval((5, 5))
             yv = rval((1, 1))
@@ -370,7 +370,7 @@ class TestBroadcast:
         ):
             x = t(pytensor.config.floatX, shape=(None,) * 5)("x")
             y = t(pytensor.config.floatX, shape=(None,) * 5)("y")
-            e = op(aes.add)(x, y)
+            e = op(ps.add)(x, y)
             f = make_function(linker().accept(FunctionGraph([x, y], [e])))
             xv = rval((2, 2, 2, 2, 2))
             yv = rval((2, 2, 2, 2, 2)).transpose(4, 0, 3, 1, 2)
@@ -389,7 +389,7 @@ class TestBroadcast:
             [self.rand_val, self.rand_cval],
         ):
             x = t(pytensor.config.floatX, shape=(None,) * 2)("x")
-            e = op(aes.add)(x, x)
+            e = op(ps.add)(x, x)
             f = make_function(linker().accept(FunctionGraph([x], [e])))
             xv = rval((2, 2))
             zv = xv + xv
@@ -420,7 +420,7 @@ class TestCAReduce(unittest_tools.InferShapeTester):
     def with_mode(
         self,
         mode,
-        scalar_op=aes.add,
+        scalar_op=ps.add,
         dtype="floatX",
         pre_scalar_op=None,
         test_nan=False,
@@ -483,36 +483,36 @@ class TestCAReduce(unittest_tools.InferShapeTester):
                     zv = np.any(zv, axis)
                 if len(tosum) == 0:
                     zv = zv != 0
-            elif scalar_op == aes.add:
+            elif scalar_op == ps.add:
                 for axis in sorted(tosum, reverse=True):
                     zv = np.add.reduce(zv, axis)
                 if dtype == "bool":
                     # np.add of a bool upcast, while CAReduce don't
                     zv = zv.astype(dtype)
-            elif scalar_op == aes.mul:
+            elif scalar_op == ps.mul:
                 for axis in sorted(tosum, reverse=True):
                     zv = np.multiply.reduce(zv, axis)
-            elif scalar_op == aes.scalar_maximum:
+            elif scalar_op == ps.scalar_maximum:
                 # There is no identity value for the maximum function
                 # So we can't support shape of dimensions 0.
                 if np.prod(zv.shape) == 0:
                     continue
                 for axis in sorted(tosum, reverse=True):
                     zv = np.maximum.reduce(zv, axis)
-            elif scalar_op == aes.scalar_minimum:
+            elif scalar_op == ps.scalar_minimum:
                 # There is no identity value for the minimum function
                 # So we can't support shape of dimensions 0.
                 if np.prod(zv.shape) == 0:
                     continue
                 for axis in sorted(tosum, reverse=True):
                     zv = np.minimum.reduce(zv, axis)
-            elif scalar_op == aes.or_:
+            elif scalar_op == ps.or_:
                 for axis in sorted(tosum, reverse=True):
                     zv = np.bitwise_or.reduce(zv, axis)
-            elif scalar_op == aes.and_:
+            elif scalar_op == ps.and_:
                 for axis in sorted(tosum, reverse=True):
                     zv = reduce_bitwise_and(zv, axis, dtype=dtype)
-            elif scalar_op == aes.xor:
+            elif scalar_op == ps.xor:
                 # There is no identity value for the xor function
                 # So we can't support shape of dimensions 0.
                 if np.prod(zv.shape) == 0:
@@ -542,47 +542,47 @@ class TestCAReduce(unittest_tools.InferShapeTester):
                 tosum = list(range(len(xsh)))
             f = pytensor.function([x], e.shape, mode=mode, on_unused_input="ignore")
             if not (
-                scalar_op in [aes.scalar_maximum, aes.scalar_minimum]
+                scalar_op in [ps.scalar_maximum, ps.scalar_minimum]
                 and (xsh == () or np.prod(xsh) == 0)
             ):
                 assert all(f(xv) == zv.shape)
 
     def test_perform_noopt(self):
-        self.with_mode(Mode(linker="py", optimizer=None), aes.add, dtype="floatX")
+        self.with_mode(Mode(linker="py", optimizer=None), ps.add, dtype="floatX")
 
     def test_perform(self):
         for dtype in ["bool", "floatX", "complex64", "complex128", "int8", "uint8"]:
-            self.with_mode(Mode(linker="py"), aes.add, dtype=dtype)
-            self.with_mode(Mode(linker="py"), aes.mul, dtype=dtype)
-            self.with_mode(Mode(linker="py"), aes.scalar_maximum, dtype=dtype)
-            self.with_mode(Mode(linker="py"), aes.scalar_minimum, dtype=dtype)
-            self.with_mode(Mode(linker="py"), aes.and_, dtype=dtype, tensor_op=pt_all)
-            self.with_mode(Mode(linker="py"), aes.or_, dtype=dtype, tensor_op=pt_any)
+            self.with_mode(Mode(linker="py"), ps.add, dtype=dtype)
+            self.with_mode(Mode(linker="py"), ps.mul, dtype=dtype)
+            self.with_mode(Mode(linker="py"), ps.scalar_maximum, dtype=dtype)
+            self.with_mode(Mode(linker="py"), ps.scalar_minimum, dtype=dtype)
+            self.with_mode(Mode(linker="py"), ps.and_, dtype=dtype, tensor_op=pt_all)
+            self.with_mode(Mode(linker="py"), ps.or_, dtype=dtype, tensor_op=pt_any)
         for dtype in ["int8", "uint8"]:
-            self.with_mode(Mode(linker="py"), aes.or_, dtype=dtype)
-            self.with_mode(Mode(linker="py"), aes.and_, dtype=dtype)
-            self.with_mode(Mode(linker="py"), aes.xor, dtype=dtype)
+            self.with_mode(Mode(linker="py"), ps.or_, dtype=dtype)
+            self.with_mode(Mode(linker="py"), ps.and_, dtype=dtype)
+            self.with_mode(Mode(linker="py"), ps.xor, dtype=dtype)
 
     def test_perform_nan(self):
         for dtype in ["floatX", "complex64", "complex128"]:
-            self.with_mode(Mode(linker="py"), aes.add, dtype=dtype, test_nan=True)
-            self.with_mode(Mode(linker="py"), aes.mul, dtype=dtype, test_nan=True)
+            self.with_mode(Mode(linker="py"), ps.add, dtype=dtype, test_nan=True)
+            self.with_mode(Mode(linker="py"), ps.mul, dtype=dtype, test_nan=True)
             self.with_mode(
-                Mode(linker="py"), aes.scalar_maximum, dtype=dtype, test_nan=True
+                Mode(linker="py"), ps.scalar_maximum, dtype=dtype, test_nan=True
             )
             self.with_mode(
-                Mode(linker="py"), aes.scalar_minimum, dtype=dtype, test_nan=True
+                Mode(linker="py"), ps.scalar_minimum, dtype=dtype, test_nan=True
             )
             self.with_mode(
                 Mode(linker="py"),
-                aes.or_,
+                ps.or_,
                 dtype=dtype,
                 test_nan=True,
                 tensor_op=pt_any,
             )
             self.with_mode(
                 Mode(linker="py"),
-                aes.and_,
+                ps.and_,
                 dtype=dtype,
                 test_nan=True,
                 tensor_op=pt_all,
@@ -595,7 +595,7 @@ class TestCAReduce(unittest_tools.InferShapeTester):
     def test_c_noopt(self):
         # We need to make sure that we cover the corner cases that
         # optimizations normally cover
-        self.with_mode(Mode(linker="c", optimizer=None), aes.add, dtype="floatX")
+        self.with_mode(Mode(linker="c", optimizer=None), ps.add, dtype="floatX")
 
     @pytest.mark.slow
     @pytest.mark.skipif(
@@ -604,17 +604,17 @@ class TestCAReduce(unittest_tools.InferShapeTester):
     )
     def test_c(self):
         for dtype in ["bool", "floatX", "complex64", "complex128", "int8", "uint8"]:
-            self.with_mode(Mode(linker="c"), aes.add, dtype=dtype)
-            self.with_mode(Mode(linker="c"), aes.mul, dtype=dtype)
+            self.with_mode(Mode(linker="c"), ps.add, dtype=dtype)
+            self.with_mode(Mode(linker="c"), ps.mul, dtype=dtype)
         for dtype in ["bool", "floatX", "int8", "uint8"]:
-            self.with_mode(Mode(linker="c"), aes.scalar_minimum, dtype=dtype)
-            self.with_mode(Mode(linker="c"), aes.scalar_maximum, dtype=dtype)
-            self.with_mode(Mode(linker="c"), aes.and_, dtype=dtype, tensor_op=pt_all)
-            self.with_mode(Mode(linker="c"), aes.or_, dtype=dtype, tensor_op=pt_any)
+            self.with_mode(Mode(linker="c"), ps.scalar_minimum, dtype=dtype)
+            self.with_mode(Mode(linker="c"), ps.scalar_maximum, dtype=dtype)
+            self.with_mode(Mode(linker="c"), ps.and_, dtype=dtype, tensor_op=pt_all)
+            self.with_mode(Mode(linker="c"), ps.or_, dtype=dtype, tensor_op=pt_any)
         for dtype in ["bool", "int8", "uint8"]:
-            self.with_mode(Mode(linker="c"), aes.or_, dtype=dtype)
-            self.with_mode(Mode(linker="c"), aes.and_, dtype=dtype)
-            self.with_mode(Mode(linker="c"), aes.xor, dtype=dtype)
+            self.with_mode(Mode(linker="c"), ps.or_, dtype=dtype)
+            self.with_mode(Mode(linker="c"), ps.and_, dtype=dtype)
+            self.with_mode(Mode(linker="c"), ps.xor, dtype=dtype)
 
     @pytest.mark.slow
     @pytest.mark.skipif(
@@ -623,14 +623,14 @@ class TestCAReduce(unittest_tools.InferShapeTester):
     )
     def test_c_nan(self):
         for dtype in ["floatX", "complex64", "complex128"]:
-            self.with_mode(Mode(linker="c"), aes.add, dtype=dtype, test_nan=True)
-            self.with_mode(Mode(linker="c"), aes.mul, dtype=dtype, test_nan=True)
+            self.with_mode(Mode(linker="c"), ps.add, dtype=dtype, test_nan=True)
+            self.with_mode(Mode(linker="c"), ps.mul, dtype=dtype, test_nan=True)
         for dtype in ["floatX"]:
             self.with_mode(
-                Mode(linker="c"), aes.scalar_minimum, dtype=dtype, test_nan=True
+                Mode(linker="c"), ps.scalar_minimum, dtype=dtype, test_nan=True
             )
             self.with_mode(
-                Mode(linker="c"), aes.scalar_maximum, dtype=dtype, test_nan=True
+                Mode(linker="c"), ps.scalar_maximum, dtype=dtype, test_nan=True
             )
 
     def test_infer_shape(self, dtype=None, pre_scalar_op=None):
@@ -651,7 +651,7 @@ class TestCAReduce(unittest_tools.InferShapeTester):
                 d = {pre_scalar_op: pre_scalar_op}
             self._compile_and_check(
                 [x],
-                [self.op(aes.add, axis=tosum, *d)(x)],
+                [self.op(ps.add, axis=tosum, *d)(x)],
                 [xv],
                 self.op,
                 ["local_cut_useless_reduce"],
@@ -659,26 +659,26 @@ class TestCAReduce(unittest_tools.InferShapeTester):
             )
 
     def test_str(self):
-        op = CAReduce(aes.add, axis=None)
+        op = CAReduce(ps.add, axis=None)
         assert str(op) == "CAReduce{add, axes=None}"
-        op = CAReduce(aes.add, axis=(1,))
+        op = CAReduce(ps.add, axis=(1,))
         assert str(op) == "CAReduce{add, axis=1}"
 
     def test_repeated_axis(self):
         x = vector("x")
         with pytest.raises(ValueError, match="repeated axis"):
-            self.op(aes.add, axis=(0, 0))(x)
+            self.op(ps.add, axis=(0, 0))(x)
 
     def test_scalar_input(self):
         x = scalar("x")
 
-        assert self.op(aes.add, axis=(-1,))(x).eval({x: 5}) == 5
+        assert self.op(ps.add, axis=(-1,))(x).eval({x: 5}) == 5
 
         with pytest.raises(
             np.AxisError,
             match=re.escape("axis (-2,) is out of bounds for array of dimension 0"),
         ):
-            self.op(aes.add, axis=(-2,))(x)
+            self.op(ps.add, axis=(-2,))(x)
 
 
 class TestBitOpReduceGrad:
@@ -739,7 +739,7 @@ class TestElemwise(unittest_tools.InferShapeTester):
             t_right_val = np.zeros(s_right, dtype=dtype)
             self._compile_and_check(
                 [t_left, t_right],
-                [Elemwise(aes.add)(t_left, t_right)],
+                [Elemwise(ps.add)(t_left, t_right)],
                 [t_left_val, t_right_val],
                 Elemwise,
             )
@@ -791,18 +791,18 @@ class TestElemwise(unittest_tools.InferShapeTester):
         self.check_runtime_broadcast(Mode(linker="c"))
 
     def test_str(self):
-        op = Elemwise(aes.add, inplace_pattern={0: 0}, name=None)
+        op = Elemwise(ps.add, inplace_pattern={0: 0}, name=None)
         assert str(op) == "Add"
-        op = Elemwise(aes.add, inplace_pattern=None, name="my_op")
+        op = Elemwise(ps.add, inplace_pattern=None, name="my_op")
         assert str(op) == "my_op"
 
     def test_partial_static_shape_info(self):
         """Make sure that `Elemwise.infer_shape` can handle changes in the static shape information during rewriting."""
 
         x = TensorType("floatX", shape=(None, None))()
-        z = Elemwise(aes.add)(x, x)
+        z = Elemwise(ps.add)(x, x)
 
-        x_inferred_shape = (aes.constant(1), aes.constant(1))
+        x_inferred_shape = (ps.constant(1), ps.constant(1))
 
         res_shape = z.owner.op.infer_shape(
             None, z.owner, [x_inferred_shape, x_inferred_shape]
@@ -827,13 +827,13 @@ class TestElemwise(unittest_tools.InferShapeTester):
                     ],
                 )
 
-        custom_elemwise = CustomElemwise(aes.add)
+        custom_elemwise = CustomElemwise(ps.add)
 
         z_1, z_2 = custom_elemwise(
             as_tensor_variable(np.eye(1)),
             as_tensor_variable(np.eye(1)),
         )
-        in_1_shape = (aes.constant(1), aes.constant(1))
+        in_1_shape = (ps.constant(1), ps.constant(1))
         outs = z_1.owner.op.infer_shape(None, z_1.owner, [in_1_shape, in_1_shape])
         for out in outs:
             assert out[0].eval() == 1
@@ -842,7 +842,7 @@ class TestElemwise(unittest_tools.InferShapeTester):
         z_1, z_2 = custom_elemwise(
             as_tensor_variable(np.eye(1)), as_tensor_variable(np.eye(3))
         )
-        in_2_shape = (aes.constant(3), aes.constant(3))
+        in_2_shape = (ps.constant(3), ps.constant(3))
         outs = z_1.owner.op.infer_shape(None, z_1.owner, [in_1_shape, in_2_shape])
         for out in outs:
             assert out[0].eval() == 3
@@ -898,9 +898,9 @@ class TestElemwise(unittest_tools.InferShapeTester):
 def test_not_implemented_elemwise_grad():
     # Regression test for unimplemented gradient in an Elemwise Op.
 
-    class TestOp(aes.ScalarOp):
+    class TestOp(ps.ScalarOp):
         def __init__(self):
-            self.output_types_preference = aes.upgrade_to_float
+            self.output_types_preference = ps.upgrade_to_float
 
         def impl(self, n, x):
             return x * n

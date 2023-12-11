@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import pytensor
-import pytensor.tensor as at
+import pytensor.tensor as pt
 import tests.unittest_tools as utt
 from pytensor.compile.mode import Mode
 from pytensor.graph.fg import FunctionGraph
@@ -204,7 +204,7 @@ class TestComposite:
             TypeError,
             match="The fgraph of Composite must be exclusively composed of scalar operations",
         ):
-            Composite([x], [(at.zeros((2,)) + x).sum()])
+            Composite([x], [(pt.zeros((2,)) + x).sum()])
 
     def test_multi_out_perform(self):
         from pytensor.graph.basic import Apply

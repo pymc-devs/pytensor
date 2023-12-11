@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 
 import pytensor
-import pytensor.tensor as at
-from pytensor import scalar as aes
+import pytensor.tensor as pt
+from pytensor import scalar as ps
 from pytensor.configdefaults import config
 from pytensor.graph import utils
 from pytensor.graph.basic import Apply
@@ -28,7 +28,7 @@ class IncOneC(COp):
     __props__ = ()
 
     def make_node(self, input):
-        input = aes.as_scalar(input)
+        input = ps.as_scalar(input)
         output = input.type()
         return Apply(self, [input], [output])
 
@@ -173,7 +173,7 @@ class TestComputeTestValue:
         assert _allclose(f(), z.tag.test_value)
 
     def test_constant(self):
-        x = at.constant(np.random.random((2, 3)), dtype=config.floatX)
+        x = pt.constant(np.random.random((2, 3)), dtype=config.floatX)
         y = pytensor.shared(np.random.random((3, 6)).astype(config.floatX), "y")
 
         # should work
@@ -183,7 +183,7 @@ class TestComputeTestValue:
         assert _allclose(f(), z.tag.test_value)
 
         # this test should fail
-        x = at.constant(np.random.random((2, 4)), dtype=config.floatX)
+        x = pt.constant(np.random.random((2, 4)), dtype=config.floatX)
         with pytest.raises(ValueError):
             dot(x, y)
 
@@ -220,7 +220,7 @@ class TestComputeTestValue:
 
         # Symbolic description of the result
         result, updates = pytensor.scan(
-            fn=fx, outputs_info=at.ones_like(A), non_sequences=A, n_steps=k
+            fn=fx, outputs_info=pt.ones_like(A), non_sequences=A, n_steps=k
         )
 
         # We only care about A**k, but scan has provided us with A**1 through A**k.
@@ -241,7 +241,7 @@ class TestComputeTestValue:
 
         with pytest.raises(ValueError) as e:
             pytensor.scan(
-                fn=fx, outputs_info=at.ones_like(A), non_sequences=A, n_steps=k
+                fn=fx, outputs_info=pt.ones_like(A), non_sequences=A, n_steps=k
             )
 
         assert str(e.traceback[0].path).endswith("test_compute_test_value.py")
@@ -261,12 +261,12 @@ class TestComputeTestValue:
 
         with pytest.raises(ValueError):
             pytensor.scan(
-                fn=fx, outputs_info=at.ones_like(A.T), non_sequences=A, n_steps=k
+                fn=fx, outputs_info=pt.ones_like(A.T), non_sequences=A, n_steps=k
             )
 
         with pytest.raises(ValueError, match="^could not broadcast input"):
             pytensor.scan(
-                fn=fx, outputs_info=at.ones_like(A.T), non_sequences=A, n_steps=k
+                fn=fx, outputs_info=pt.ones_like(A.T), non_sequences=A, n_steps=k
             )
 
     def test_no_c_code(self):
@@ -278,7 +278,7 @@ class TestComputeTestValue:
             __props__ = ()
 
             def make_node(self, input):
-                input = aes.as_scalar(input)
+                input = ps.as_scalar(input)
                 output = input.type()
                 return Apply(self, [input], [output])
 
@@ -287,7 +287,7 @@ class TestComputeTestValue:
                 (output,) = outputs
                 output[0] = input + 1
 
-        i = aes.int32("i")
+        i = ps.int32("i")
         i.tag.test_value = 3
 
         o = IncOnePython()(i)
@@ -303,7 +303,7 @@ class TestComputeTestValue:
         not config.cxx, reason="G++ not available, so we need to skip this test."
     )
     def test_no_perform(self):
-        i = aes.int32("i")
+        i = ps.int32("i")
         i.tag.test_value = 3
 
         # Class IncOneC is defined outside of the TestComputeTestValue

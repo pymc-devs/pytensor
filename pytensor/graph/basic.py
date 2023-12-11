@@ -383,10 +383,10 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
     .. code-block:: python
 
         import pytensor
-        import pytensor.tensor as at
+        import pytensor.tensor as pt
 
-        a = at.constant(1.5)            # declare a symbolic constant
-        b = at.fscalar()                # declare a symbolic floating-point scalar
+        a = pt.constant(1.5)            # declare a symbolic constant
+        b = pt.fscalar()                # declare a symbolic floating-point scalar
 
         c = a + b                       # create a simple expression
 
@@ -565,9 +565,9 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         --------
 
         >>> import numpy as np
-        >>> import pytensor.tensor as at
-        >>> x = at.dscalar('x')
-        >>> y = at.dscalar('y')
+        >>> import pytensor.tensor as pt
+        >>> x = pt.dscalar('x')
+        >>> y = pt.dscalar('y')
         >>> z = x + y
         >>> np.allclose(z.eval({x : 16.3, y : 12.1}), 28.4)
         True

@@ -1,15 +1,15 @@
 import numpy as np
 import pytest
 
-import pytensor.scalar.basic as aes
-import pytensor.tensor as at
+import pytensor.scalar.basic as ps
+import pytensor.tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import get_test_value
 from pytensor.scalar.basic import Composite
 from pytensor.tensor import as_tensor
 from pytensor.tensor.elemwise import Elemwise
-from pytensor.tensor.math import all as at_all
+from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import (
     cosh,
     erf,
@@ -46,18 +46,18 @@ def test_second():
     a0 = scalar("a0")
     b = scalar("b")
 
-    out = aes.second(a0, b)
+    out = ps.second(a0, b)
     fgraph = FunctionGraph([a0, b], [out])
     compare_jax_and_py(fgraph, [10.0, 5.0])
 
     a1 = vector("a1")
-    out = at.second(a1, b)
+    out = pt.second(a1, b)
     fgraph = FunctionGraph([a1, b], [out])
     compare_jax_and_py(fgraph, [np.zeros([5], dtype=config.floatX), 5.0])
 
     a2 = matrix("a2", shape=(1, None), dtype="float64")
     b2 = matrix("b2", shape=(None, 1), dtype="int32")
-    out = at.second(a2, b2)
+    out = pt.second(a2, b2)
     fgraph = FunctionGraph([a2, b2], [out])
     compare_jax_and_py(
         fgraph, [np.zeros((1, 3), dtype="float64"), np.ones((5, 1), dtype="int32")]
@@ -66,7 +66,7 @@ def test_second():
 
 def test_second_constant_scalar():
     b = scalar("b", dtype="int")
-    out = at.second(0.0, b)
+    out = pt.second(0.0, b)
     fgraph = FunctionGraph([b], [out])
     # Test dispatch directly as useless second is removed during compilation
     fn = jax_funcify(fgraph)
@@ -79,7 +79,7 @@ def test_identity():
     a = scalar("a")
     a.tag.test_value = 10
 
-    out = aes.identity(a)
+    out = ps.identity(a)
     fgraph = FunctionGraph([a], [out])
     compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
 
@@ -98,10 +98,10 @@ def test_identity():
     ],
 )
 def test_jax_Composite_singe_output(x, y, x_val, y_val):
-    x_s = aes.float64("x")
-    y_s = aes.float64("y")
+    x_s = ps.float64("x")
+    y_s = ps.float64("y")
 
-    comp_op = Elemwise(Composite([x_s, y_s], [x_s + y_s * 2 + aes.exp(x_s - y_s)]))
+    comp_op = Elemwise(Composite([x_s, y_s], [x_s + y_s * 2 + ps.exp(x_s - y_s)]))
 
     out = comp_op(x, y)
 
@@ -117,7 +117,7 @@ def test_jax_Composite_singe_output(x, y, x_val, y_val):
 def test_jax_Composite_multi_output():
     x = vector("x")
 
-    x_s = aes.float64("xs")
+    x_s = ps.float64("xs")
     outs = Elemwise(Composite(inputs=[x_s], outputs=[x_s + 1, x_s - 1]))(x)
 
     fgraph = FunctionGraph([x], outs)
@@ -234,36 +234,36 @@ def test_jax_variadic_Scalar():
 
 
 def test_add_scalars():
-    x = at.matrix("x")
+    x = pt.matrix("x")
     size = x.shape[0] + x.shape[0] + x.shape[1]
-    out = at.ones(size).astype(config.floatX)
+    out = pt.ones(size).astype(config.floatX)
 
     out_fg = FunctionGraph([x], [out])
     compare_jax_and_py(out_fg, [np.ones((2, 3)).astype(config.floatX)])
 
 
 def test_mul_scalars():
-    x = at.matrix("x")
+    x = pt.matrix("x")
     size = x.shape[0] * x.shape[0] * x.shape[1]
-    out = at.ones(size).astype(config.floatX)
+    out = pt.ones(size).astype(config.floatX)
 
     out_fg = FunctionGraph([x], [out])
     compare_jax_and_py(out_fg, [np.ones((2, 3)).astype(config.floatX)])
 
 
 def test_div_scalars():
-    x = at.matrix("x")
+    x = pt.matrix("x")
     size = x.shape[0] // x.shape[1]
-    out = at.ones(size).astype(config.floatX)
+    out = pt.ones(size).astype(config.floatX)
 
     out_fg = FunctionGraph([x], [out])
     compare_jax_and_py(out_fg, [np.ones((12, 3)).astype(config.floatX)])
 
 
 def test_mod_scalars():
-    x = at.matrix("x")
+    x = pt.matrix("x")
     size = x.shape[0] % x.shape[1]
-    out = at.ones(size).astype(config.floatX)
+    out = pt.ones(size).astype(config.floatX)
 
     out_fg = FunctionGraph([x], [out])
     compare_jax_and_py(out_fg, [np.ones((12, 3)).astype(config.floatX)])
@@ -295,8 +295,8 @@ def test_jax_logp():
 
     logp = (-tau * (value - mu) ** 2 + log(tau / np.pi / 2.0)) / 2.0
     conditions = [sigma > 0]
-    alltrue = at_all([at_all(1 * val) for val in conditions])
-    normal_logp = at.switch(alltrue, logp, -np.inf)
+    alltrue = pt_all([pt_all(1 * val) for val in conditions])
+    normal_logp = pt.switch(alltrue, logp, -np.inf)
 
     fgraph = FunctionGraph([mu, tau, sigma, value], [normal_logp])
 

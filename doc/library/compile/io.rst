@@ -80,7 +80,7 @@ A non-None `value` argument makes an In() instance an optional parameter
 of the compiled function.  For example, in the following code we are
 defining an arity-2 function ``inc``.
 
->>> import pytensor.tensor as at
+>>> import pytensor.tensor as pt
 >>> from pytensor import function
 >>> from pytensor.compile.io import In
 >>> u, x, s = pt.scalars('u', 'x', 's')

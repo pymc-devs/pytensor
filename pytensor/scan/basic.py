@@ -2,7 +2,7 @@ import warnings
 
 import numpy as np
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.compile.function.pfunc import construct_pfunc_ins_and_outs
 from pytensor.compile.sharedvalue import SharedVariable, collect_new_shareds
 from pytensor.configdefaults import config
@@ -238,13 +238,13 @@ def scan(
 
         .. code-block:: python
 
-            import pytensor.tensor as at
+            import pytensor.tensor as pt
 
-            W   = at.matrix()
+            W   = pt.matrix()
             W_2 = W**2
 
             def f(x):
-                return at.dot(x,W_2)
+                return pt.dot(x,W_2)
 
         The function `fn` is expected to return two things. One is a list of
         outputs ordered in the same order as `outputs_info`, with the
@@ -462,7 +462,7 @@ def scan(
     non_seqs = []
     for elem in wrap_into_list(non_sequences):
         if not isinstance(elem, Variable):
-            non_seqs.append(at.as_tensor_variable(elem))
+            non_seqs.append(pt.as_tensor_variable(elem))
         else:
             non_seqs.append(elem)
 
@@ -476,7 +476,7 @@ def scan(
         n_fixed_steps = int(n_steps)
     else:
         try:
-            n_fixed_steps = at.get_underlying_scalar_constant_value(n_steps)
+            n_fixed_steps = pt.get_underlying_scalar_constant_value(n_steps)
         except NotScalarConstantError:
             n_fixed_steps = None
 
@@ -592,7 +592,7 @@ def scan(
                 # If not we need to use copies, that will be replaced at
                 # each frame by the corresponding slice
                 actual_slice = seq["input"][k - mintap_proxy]
-                _seq_val = at.as_tensor_variable(seq["input"])
+                _seq_val = pt.as_tensor_variable(seq["input"])
                 _seq_val_slice = _seq_val[k - mintap_proxy]
                 nw_slice = _seq_val_slice.type()
 
@@ -652,7 +652,7 @@ def scan(
 
     if not isNaN_or_Inf_or_None(n_steps):
         # ^ N_steps should also be considered
-        lengths_vec.append(at.as_tensor(n_steps))
+        lengths_vec.append(pt.as_tensor(n_steps))
 
     if len(lengths_vec) == 0:
         # ^ No information about the number of steps
@@ -670,7 +670,7 @@ def scan(
         for contestant in lengths_vec[1:]:
             actual_n_steps = minimum(actual_n_steps, contestant)
     else:
-        actual_n_steps = at.as_tensor(n_steps)
+        actual_n_steps = pt.as_tensor(n_steps)
 
     scan_seqs = [seq[:actual_n_steps] for seq in scan_seqs]
     # Conventions :
@@ -716,7 +716,7 @@ def scan(
         if init_out.get("taps", None) == [-1]:
             actual_arg = init_out["initial"]
             if not isinstance(actual_arg, Variable):
-                actual_arg = at.as_tensor_variable(actual_arg)
+                actual_arg = pt.as_tensor_variable(actual_arg)
             arg = safe_new(actual_arg)
             if isinstance(arg, Constant):
                 # safe new returns a clone of the constants, but that is not
@@ -774,7 +774,7 @@ def scan(
             for k in init_out["taps"]:
                 # create a new slice
                 actual_nw_slice = init_out["initial"][k + mintap]
-                _init_out_var = at.as_tensor_variable(init_out["initial"])
+                _init_out_var = pt.as_tensor_variable(init_out["initial"])
                 _init_out_var_slice = _init_out_var[k + mintap]
                 nw_slice = _init_out_var_slice.type()
 
@@ -1003,7 +1003,7 @@ def scan(
                     )
                 )
 
-                tensor_update = at.as_tensor_variable(input.update)
+                tensor_update = pt.as_tensor_variable(input.update)
                 sit_sot_inner_outputs.append(tensor_update)
                 # Note that `pos` is not a negative index. The sign of `pos` is used
                 # as a flag to indicate if this output should be part of the
@@ -1154,7 +1154,7 @@ def scan(
     scan_inputs = []
     for arg in [actual_n_steps] + _scan_inputs:
         try:
-            arg = at.as_tensor_variable(arg)
+            arg = pt.as_tensor_variable(arg)
         except TypeError:
             # This happens for Random States for e.g. but it is a good way
             # to make sure all inputs are tensors.

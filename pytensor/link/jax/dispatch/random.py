@@ -26,13 +26,13 @@ numpy_bit_gens = {"MT19937": 0, "PCG64": 1, "Philox": 2, "SFC64": 3}
 SIZE_NOT_COMPATIBLE = """JAX random variables require concrete values for the `size` parameter of the distributions.
 Concrete values are either constants:
 
->>> import pytensor.tensor as at
->>> x_rv = at.random.normal(0, 1, size=(3, 2))
+>>> import pytensor.tensor as pt
+>>> x_rv = pt.random.normal(0, 1, size=(3, 2))
 
 or the shape of an array:
 
->>> m = at.matrix()
->>> x_rv = at.random.normal(0, 1, size=m.shape)
+>>> m = pt.matrix()
+>>> x_rv = pt.random.normal(0, 1, size=m.shape)
 """
 
 

@@ -786,7 +786,7 @@ signature:
 .. testcode:: asop
 
     import pytensor
-    import pytensor.tensor as at
+    import pytensor.tensor as pt
     import numpy as np
     from pytensor import function
     from pytensor.compile.ops import as_op
@@ -797,8 +797,8 @@ signature:
         return [ashp[:-1] + bshp[-1:]]
 
 
-    @as_op(itypes=[at.matrix, at.matrix],
-           otypes=[at.matrix], infer_shape=infer_shape_numpy_dot)
+    @as_op(itypes=[pt.matrix, pt.matrix],
+           otypes=[pt.matrix], infer_shape=infer_shape_numpy_dot)
     def numpy_dot(a, b):
        return np.dot(a, b)
 
@@ -806,8 +806,8 @@ You can try it as follows:
 
 .. testcode:: asop
 
-    x = at.matrix()
-    y = at.matrix()
+    x = pt.matrix()
+    y = pt.matrix()
     f = function([x, y], numpy_dot(x, y))
     inp1 = np.random.random_sample((5, 4))
     inp2 = np.random.random_sample((4, 7))

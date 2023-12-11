@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Optional, Union
 
 import numpy as np
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor import as_symbolic
 from pytensor.compile import optdb
 from pytensor.configdefaults import config
@@ -159,7 +159,7 @@ class IfElse(_NoPythonOp):
                 f"{int(2 * self.n_outs)}, got {len(true_false_branches)}"
             )
 
-        condition = at.basic.as_tensor_variable(condition)
+        condition = pt.basic.as_tensor_variable(condition)
 
         if condition.type.ndim > 0:
             raise TypeError("The condition argument must be a truthy scalar value")
@@ -257,14 +257,14 @@ class IfElse(_NoPythonOp):
             [condition]
             + grads
             + [
-                at.basic.zeros_like(t, dtype=grads[i].dtype)
+                pt.basic.zeros_like(t, dtype=grads[i].dtype)
                 for i, t in enumerate(inputs_true_branch)
             ]
         )
         inputs_false_grad = (
             [condition]
             + [
-                at.basic.zeros_like(f, dtype=grads[i].dtype)
+                pt.basic.zeros_like(f, dtype=grads[i].dtype)
                 for i, f in enumerate(inputs_false_branch)
             ]
             + grads
@@ -476,14 +476,14 @@ acceptable_ops = (
     SpecifyShape,
     Reshape,
     Unbroadcast,
-    at.math.Dot,
-    at.math.MaxAndArgmax,
-    at.subtensor.Subtensor,
-    at.subtensor.IncSubtensor,
-    at.basic.Alloc,
-    at.elemwise.Elemwise,
-    at.elemwise.DimShuffle,
-    at.blockwise.Blockwise,
+    pt.math.Dot,
+    pt.math.MaxAndArgmax,
+    pt.subtensor.Subtensor,
+    pt.subtensor.IncSubtensor,
+    pt.basic.Alloc,
+    pt.elemwise.Elemwise,
+    pt.elemwise.DimShuffle,
+    pt.blockwise.Blockwise,
 )
 
 

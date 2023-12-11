@@ -50,7 +50,7 @@ from pytensor.tensor.math import (
     Sum,
     _conj,
 )
-from pytensor.tensor.math import abs as at_abs
+from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import (
     add,
     digamma,
@@ -69,9 +69,9 @@ from pytensor.tensor.math import (
     log1p,
     makeKeepDims,
 )
-from pytensor.tensor.math import max as at_max
+from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import maximum, mul, neg, polygamma
-from pytensor.tensor.math import pow as at_pow
+from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.math import (
     prod,
     reciprocal,
@@ -82,7 +82,7 @@ from pytensor.tensor.math import (
     sqrt,
     sub,
 )
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.math import tri_gamma, true_div
 from pytensor.tensor.rewriting.basic import (
     alloc_like,
@@ -379,8 +379,8 @@ def local_exp_log_nan_switch(fgraph, node):
 def local_sumsqr2dot(fgraph, node):
     """
     This rewrite detects
-    ``at.sqr(W.dimshuffle("x", 0, 1) * G.dimshuffle(0, "x", 1) ).sum(axis=(1, 2))``
-    and converts it to ``at.dot(at.sqr(G), at.sqr(W).sum(axis=0))``.
+    ``pt.sqr(W.dimshuffle("x", 0, 1) * G.dimshuffle(0, "x", 1) ).sum(axis=(1, 2))``
+    and converts it to ``pt.dot(pt.sqr(G), pt.sqr(W).sum(axis=0))``.
     """
     if (
         isinstance(node.op, Sum)
@@ -547,28 +547,28 @@ def local_mul_switch_sink(fgraph, node):
     """
     This rewrite makes the following changes in the graph:
 
-        at.mul(A, at.switch(cond, 0, iff), B) -> at.switch(cond, 0, at.mul(A, B, iff))
-        at.mul(A, at.switch(cond, ift, 0), B) -> at.switch(cond, at.mul(A, B, ift), 0)
+        pt.mul(A, pt.switch(cond, 0, iff), B) -> pt.switch(cond, 0, pt.mul(A, B, iff))
+        pt.mul(A, pt.switch(cond, ift, 0), B) -> pt.switch(cond, pt.mul(A, B, ift), 0)
 
     ``A`` and ``B`` being several (or none) symbolic variables.
     This is useful because ``A`` and ``B`` may not be numerically stable and give
     NaN or inf values for cases where the switch returns 0.
-    With this rewrite ``at.grad(at.switch(...))`` has the right behavior.
+    With this rewrite ``pt.grad(pt.switch(...))`` has the right behavior.
 
     Examples
     --------
 
         x -> f(x)
         x -> g(x)
-        y = at.switch(cond, f(x), g(x))
+        y = pt.switch(cond, f(x), g(x))
 
     without the rewrite:
 
-        at.grad(y, x) -> grad(f(x), x) * grad(y, f(x)) + grad(g(x), x) * grad(y, g(x))
+        pt.grad(y, x) -> grad(f(x), x) * grad(y, f(x)) + grad(g(x), x) * grad(y, g(x))
 
     with the rewrite
 
-        at.grad(y, x) -> switch(cond, grad(f(x), x), 0) + switch(cond, 0, grad(g(x), x))
+        pt.grad(y, x) -> switch(cond, grad(f(x), x), 0) + switch(cond, 0, grad(g(x), x))
 
     This will be particularly useful for the lazy ``if`` because we skip an entire
     part of the graph.
@@ -643,8 +643,8 @@ def local_div_switch_sink(fgraph, node):
     """
     This rewrite makes the following changes in the graph:
 
-        at.div(at.switch(cond, 0, iff), A) -> at.switch(cond, 0, at.div(iff, A))
-        at.div(at.switch(cond, ift, 0), A) -> at.switch(cond, at.div(ift, A), 0)
+        pt.div(pt.switch(cond, 0, iff), A) -> pt.switch(cond, 0, pt.div(iff, A))
+        pt.div(pt.switch(cond, ift, 0), A) -> pt.switch(cond, pt.div(ift, A), 0)
 
     where ``A`` is a symbolic variable.
 
@@ -745,7 +745,7 @@ class AlgebraicCanonizer(NodeRewriter):
 
     Examples
     --------
-    >>> import pytensor.tensor as at
+    >>> import pytensor.tensor as pt
     >>> from pytensor.tensor.rewriting.math import AlgebraicCanonizer
     >>> add_canonizer = AlgebraicCanonizer(add, sub, neg, \\
     ...                                    lambda n, d: sum(n) - sum(d))
@@ -1915,15 +1915,15 @@ def local_div_to_reciprocal(fgraph, node):
 @node_rewriter([reciprocal])
 def local_reciprocal_canon(fgraph, node):
     if node.op == reciprocal:
-        return [at_pow(node.inputs[0], -1.0)]
+        return [pt_pow(node.inputs[0], -1.0)]
     else:
         return False
 
 
 @register_canonicalize
-@node_rewriter([at_pow])
+@node_rewriter([pt_pow])
 def local_pow_canonicalize(fgraph, node):
-    if node.op == at_pow:
+    if node.op == pt_pow:
         cst = get_constant(node.inputs[1])
         if cst == 0:
             return [alloc_like(1, node.outputs[0], fgraph)]
@@ -1971,9 +1971,9 @@ def local_zero_div(fgraph, node):
 
 
 @register_specialize
-@node_rewriter([at_pow])
+@node_rewriter([pt_pow])
 def local_pow_specialize(fgraph, node):
-    if node.op == at_pow:
+    if node.op == pt_pow:
         # the idea here is that we have pow(x, y)
         odtype = node.outputs[0].dtype
         xsym = node.inputs[0]
@@ -2007,7 +2007,7 @@ def local_pow_specialize(fgraph, node):
 
 
 @register_specialize
-@node_rewriter([at_pow])
+@node_rewriter([pt_pow])
 def local_pow_to_nested_squaring(fgraph, node):
     """Convert a large power exponent to multiple squaring operations.
 
@@ -2202,7 +2202,7 @@ def check_for_x_over_absX(numerators, denominators):
     # TODO: this function should dig/search through dimshuffles
     # This won't catch a dimshuffled absolute value
     for den in list(denominators):
-        if den.owner and den.owner.op == at_abs and den.owner.inputs[0] in numerators:
+        if den.owner and den.owner.op == pt_abs and den.owner.inputs[0] in numerators:
             if den.owner.inputs[0].type.dtype.startswith("complex"):
                 # TODO: Make an Op that projects a complex number to
                 #      have unit length but projects 0 to 0.  That
@@ -2222,7 +2222,7 @@ local_mul_canonizer.add_simplifier(check_for_x_over_absX, "X_over_absX")
 
 
 @register_canonicalize
-@node_rewriter([at_abs])
+@node_rewriter([pt_abs])
 def local_abs_lift(fgraph, node):
     """
     Move the abs toward the input.
@@ -2230,13 +2230,13 @@ def local_abs_lift(fgraph, node):
     This is needed for check_for_x_over_absX to apply in more case.
 
     """
-    if node.op == at_abs and node.inputs[0].owner:
+    if node.op == pt_abs and node.inputs[0].owner:
         assert node.nin == 1
         if node.inputs[0].owner.op == mul:
-            return [mul(*[at_abs(i) for i in node.inputs[0].owner.inputs])]
+            return [mul(*[pt_abs(i) for i in node.inputs[0].owner.inputs])]
         if node.inputs[0].owner.op == true_div:
             i = node.inputs[0].owner.inputs
-            return [true_div(at_abs(i[0]), at_abs(i[1]))]
+            return [true_div(pt_abs(i[0]), pt_abs(i[1]))]
 
 
 @register_specialize
@@ -2247,10 +2247,10 @@ def local_abs_merge(fgraph, node):
     need it anymore
 
     """
-    if node.op == mul and sum(i.owner.op == at_abs for i in node.inputs if i.owner) > 1:
+    if node.op == mul and sum(i.owner.op == pt_abs for i in node.inputs if i.owner) > 1:
         inputs = []
         for i in node.inputs:
-            if i.owner and i.owner.op == at_abs:
+            if i.owner and i.owner.op == pt_abs:
                 inputs.append(i.owner.inputs[0])
             elif isinstance(i, Constant):
                 try:
@@ -2264,13 +2264,13 @@ def local_abs_merge(fgraph, node):
                 inputs.append(i)
             else:
                 return False
-        return [at_abs(mul(*inputs))]
+        return [pt_abs(mul(*inputs))]
     if (
         node.op == true_div
-        and sum(i.owner.op == at_abs for i in node.inputs if i.owner) == 2
+        and sum(i.owner.op == pt_abs for i in node.inputs if i.owner) == 2
     ):
         return [
-            at_abs(
+            pt_abs(
                 true_div(node.inputs[0].owner.inputs[0], node.inputs[1].owner.inputs[0])
             )
         ]
@@ -2368,14 +2368,14 @@ def local_log_sum_exp(fgraph, node):
         return
 
     pre_exp = exp_node.inputs[0]
-    max_pre_exp = at_max(pre_exp, axis=axis)
+    max_pre_exp = pt_max(pre_exp, axis=axis)
     max_pre_exp_keepdims = makeKeepDims(pre_exp, max_pre_exp, axis)
 
     # Do not offset when max_pre = -np.inf, to avoid nan in the output
     # Switch statement is placed directly inside sum to break the self-symmetry
     # of the returned output (otherwise the rewrite would not stabilize)
     ret = max_pre_exp + log(
-        at_sum(
+        pt_sum(
             switch(
                 isinf(max_pre_exp_keepdims),
                 exp(max_pre_exp_keepdims),
@@ -2869,7 +2869,7 @@ def local_grad_log_erfc_neg(fgraph, node):
     # aaron value
     stab_value = (
         x
-        * at_pow(1 - 1 / (2 * (x**2)) + 3 / (4 * (x**4)) - 15 / (8 * (x**6)), -1)
+        * pt_pow(1 - 1 / (2 * (x**2)) + 3 / (4 * (x**4)) - 15 / (8 * (x**6)), -1)
         * cast(sqrt(np.pi), dtype=x.dtype)
     )
 

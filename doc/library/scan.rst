@@ -164,7 +164,7 @@ downcast** of the latter.
 
     import numpy as np
     import pytensor
-    import pytensor.tensor as at
+    import pytensor.tensor as pt
 
     up_to = pt.iscalar("up_to")
 
@@ -257,7 +257,7 @@ the following:
 .. testcode:: scan1
 
     import pytensor
-    import pytensor.tensor as at
+    import pytensor.tensor as pt
     import numpy as np
 
     rng = np.random.default_rng(203940)

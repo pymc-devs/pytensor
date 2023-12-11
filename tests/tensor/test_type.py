@@ -4,7 +4,7 @@ from tempfile import mkdtemp
 import numpy as np
 import pytest
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.configdefaults import config
 from pytensor.tensor.shape import SpecifyShape
 from pytensor.tensor.type import (
@@ -83,7 +83,7 @@ def test_convert_variable():
     res = test_type2.convert_variable(test_var3)
     assert res is None
 
-    const_var = at.as_tensor([[1, 2], [3, 4]], dtype=config.floatX)
+    const_var = pt.as_tensor([[1, 2], [3, 4]], dtype=config.floatX)
     res = test_type.convert_variable(const_var)
     assert res is const_var
 

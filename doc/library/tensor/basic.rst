@@ -10,7 +10,7 @@ Basic Tensor Functionality
 
    import numpy as np
    import pytensor
-   import pytensor.tensor as at
+   import pytensor.tensor as pt
    from pytensor.tensor.type import scalar, iscalar, TensorType, dmatrix, ivector, fmatrix
    from pytensor.tensor import set_subtensor, inc_subtensor, batched_dot
    from pytensor import shared
@@ -1220,7 +1220,7 @@ Casting
 
     .. testcode:: cast
 
-        import pytensor.tensor as at
+        import pytensor.tensor as pt
         x = pt.matrix()
         x_as_int = pt.cast(x, 'int32')
 
@@ -1256,7 +1256,7 @@ The six usual equality and inequality operators share the same interface.
 
   .. testcode:: oper
 
-    import pytensor.tensor as at
+    import pytensor.tensor as pt
     x,y = pt.dmatrices('x','y')
     z = pt.le(x,y)
 
@@ -1349,7 +1349,7 @@ Condition
 
     .. testcode:: switch
 
-      import pytensor.tensor as at
+      import pytensor.tensor as pt
       a,b = pt.dmatrices('a','b')
       x,y = pt.dmatrices('x','y')
       z = pt.switch(pt.lt(a,b), x, y)
@@ -1420,7 +1420,7 @@ Here is an example using the bit-wise ``and_`` via the ``&`` operator:
 
 .. testcode:: bitwise
 
-    import pytensor.tensor as at
+    import pytensor.tensor as pt
     x,y = pt.imatrices('x','y')
     z = x & y
 

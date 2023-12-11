@@ -25,12 +25,12 @@ of abnormal values: NaNs, Infs, and abnormally big values.
 
     import numpy as np
     import pytensor
-    import pytensor.tensor as at
+    import pytensor.tensor as pt
     from pytensor.compile.nanguardmode import NanGuardMode
 
-    x = at.matrix()
+    x = pt.matrix()
     w = pytensor.shared(np.random.standard_normal((5, 7)).astype(pytensor.config.floatX))
-    y = at.dot(x, w)
+    y = pt.dot(x, w)
     fun = pytensor.function(
         [x], y,
         mode=NanGuardMode(nan_is_error=True, inf_is_error=True, big_is_error=True)

@@ -443,7 +443,7 @@ The following is an example that distributes dot products across additions.
 .. code::
 
     import pytensor
-    import pytensor.tensor as at
+    import pytensor.tensor as pt
     from pytensor.graph.rewriting.kanren import KanrenRelationSub
     from pytensor.graph.rewriting.basic import EquilibriumGraphRewriter
     from pytensor.graph.rewriting.utils import rewrite_graph
@@ -462,7 +462,7 @@ The following is an example that distributes dot products across additions.
     )
 
     # Tell `kanren` that `add` is associative
-    fact(associative, at.add)
+    fact(associative, pt.add)
 
 
     def dot_distributeo(in_lv, out_lv):
@@ -473,13 +473,13 @@ The following is an example that distributes dot products across additions.
             # Make sure the input is a `_dot`
             eq(in_lv, etuple(_dot, A_lv, add_term_lv)),
             # Make sure the term being `_dot`ed is an `add`
-            heado(at.add, add_term_lv),
+            heado(pt.add, add_term_lv),
             # Flatten the associative pairings of `add` operations
             assoc_flatten(add_term_lv, add_flat_lv),
             # Get the flattened `add` arguments
             tailo(add_cdr_lv, add_flat_lv),
             # Add all the `_dot`ed arguments and set the output
-            conso(at.add, dot_cdr_lv, out_lv),
+            conso(pt.add, dot_cdr_lv, out_lv),
             # Apply the `_dot` to all the flattened `add` arguments
             mapo(lambda x, y: conso(_dot, etuple(A_lv, x), y), add_cdr_lv, dot_cdr_lv),
         )
@@ -490,10 +490,10 @@ The following is an example that distributes dot products across additions.
 
 Below, we apply `dot_distribute_rewrite` to a few example graphs.  First we create simple test graph:
 
->>> x_at = at.vector("x")
->>> y_at = at.vector("y")
->>> A_at = at.matrix("A")
->>> test_at = A_at.dot(x_at + y_at)
+>>> x_at = pt.vector("x")
+>>> y_at = pt.vector("y")
+>>> A_at = pt.matrix("A")
+>>> test_at = A_pt.dot(x_at + y_at)
 >>> print(pytensor.pprint(test_at))
 (A @ (x + y))
 
@@ -506,18 +506,18 @@ Next we apply the rewrite to the graph:
 We see that the dot product has been distributed, as desired.  Now, let's try a
 few more test cases:
 
->>> z_at = at.vector("z")
->>> w_at = at.vector("w")
->>> test_at = A_at.dot((x_at + y_at) + (z_at + w_at))
+>>> z_at = pt.vector("z")
+>>> w_at = pt.vector("w")
+>>> test_at = A_pt.dot((x_at + y_at) + (z_at + w_at))
 >>> print(pytensor.pprint(test_at))
 (A @ ((x + y) + (z + w)))
 >>> res = rewrite_graph(test_at, include=[], custom_rewrite=dot_distribute_rewrite, clone=False)
 >>> print(pytensor.pprint(res))
 (((A @ x) + (A @ y)) + ((A @ z) + (A @ w)))
 
->>> B_at = at.matrix("B")
->>> w_at = at.vector("w")
->>> test_at = A_at.dot(x_at + (y_at + B_at.dot(z_at + w_at)))
+>>> B_at = pt.matrix("B")
+>>> w_at = pt.vector("w")
+>>> test_at = A_pt.dot(x_at + (y_at + B_pt.dot(z_at + w_at)))
 >>> print(pytensor.pprint(test_at))
 (A @ (x + (y + ((B @ z) + (B @ w)))))
 >>> res = rewrite_graph(test_at, include=[], custom_rewrite=dot_distribute_rewrite, clone=False)

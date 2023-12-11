@@ -3,8 +3,8 @@ import pytest
 import scipy.stats as stats
 
 import pytensor
-import pytensor.tensor as at
-import pytensor.tensor.random.basic as aer
+import pytensor.tensor as pt
+import pytensor.tensor.random.basic as ptr
 from pytensor.compile.function import function
 from pytensor.compile.sharedvalue import SharedVariable, shared
 from pytensor.graph.basic import Constant
@@ -46,7 +46,7 @@ def test_random_RandomStream():
 def test_random_updates(rng_ctor):
     original_value = rng_ctor(seed=98)
     rng = shared(original_value, name="original_rng", borrow=False)
-    next_rng, x = at.random.normal(name="x", rng=rng).owner.outputs
+    next_rng, x = pt.random.normal(name="x", rng=rng).owner.outputs
 
     f = random_function([], [x], updates={rng: next_rng}, mode=jax_mode)
     assert f() != f()
@@ -73,7 +73,7 @@ def test_random_updates_input_storage_order():
         np.zeros(batchshape, dtype="float64"), name="inp_shared"
     )
 
-    inp = at.tensor4(dtype="float64", name="inp")
+    inp = pt.tensor4(dtype="float64", name="inp")
     inp_update = inp + pt_rng.normal(size=inp.shape, loc=5, scale=1e-5)
 
     # This function replaces inp by input_shared in the update expression
@@ -96,14 +96,14 @@ def test_random_updates_input_storage_order():
     "rv_op, dist_params, base_size, cdf_name, params_conv",
     [
         (
-            aer.beta,
+            ptr.beta,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
@@ -112,14 +112,14 @@ def test_random_updates_input_storage_order():
             lambda *args: args,
         ),
         (
-            aer.cauchy,
+            ptr.cauchy,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
@@ -128,10 +128,10 @@ def test_random_updates_input_storage_order():
             lambda *args: args,
         ),
         (
-            aer.exponential,
+            ptr.exponential,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
             ],
@@ -140,14 +140,14 @@ def test_random_updates_input_storage_order():
             lambda *args: (0, args[0]),
         ),
         (
-            aer._gamma,
+            ptr._gamma,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([0.5, 3.0], dtype=np.float64),
                 ),
             ],
@@ -156,14 +156,14 @@ def test_random_updates_input_storage_order():
             lambda a, b: (a, 0.0, b),
         ),
         (
-            aer.gumbel,
+            ptr.gumbel,
             [
                 set_test_value(
-                    at.lvector(),
+                    pt.lvector(),
                     np.array([1, 2], dtype=np.int64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
@@ -172,24 +172,24 @@ def test_random_updates_input_storage_order():
             lambda *args: args,
         ),
         (
-            aer.laplace,
+            ptr.laplace,
             [
-                set_test_value(at.dvector(), np.array([1.0, 2.0], dtype=np.float64)),
-                set_test_value(at.dscalar(), np.array(1.0, dtype=np.float64)),
+                set_test_value(pt.dvector(), np.array([1.0, 2.0], dtype=np.float64)),
+                set_test_value(pt.dscalar(), np.array(1.0, dtype=np.float64)),
             ],
             (2,),
             "laplace",
             lambda *args: args,
         ),
         (
-            aer.logistic,
+            ptr.logistic,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
@@ -198,14 +198,14 @@ def test_random_updates_input_storage_order():
             lambda *args: args,
         ),
         (
-            aer.lognormal,
+            ptr.lognormal,
             [
                 set_test_value(
-                    at.lvector(),
+                    pt.lvector(),
                     np.array([0, 0], dtype=np.int64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
@@ -214,14 +214,14 @@ def test_random_updates_input_storage_order():
             lambda mu, sigma: (sigma, 0, np.exp(mu)),
         ),
         (
-            aer.normal,
+            ptr.normal,
             [
                 set_test_value(
-                    at.lvector(),
+                    pt.lvector(),
                     np.array([1, 2], dtype=np.int64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
@@ -230,14 +230,14 @@ def test_random_updates_input_storage_order():
             lambda *args: args,
         ),
         (
-            aer.pareto,
+            ptr.pareto,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([2.0, 10.0], dtype=np.float64),
                 ),
             ],
@@ -246,10 +246,10 @@ def test_random_updates_input_storage_order():
             lambda shape, scale: (shape, 0.0, scale),
         ),
         (
-            aer.poisson,
+            ptr.poisson,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([100000.0, 200000.0], dtype=np.float64),
                 ),
             ],
@@ -258,14 +258,14 @@ def test_random_updates_input_storage_order():
             lambda *args: args,
         ),
         (
-            aer.randint,
+            ptr.randint,
             [
                 set_test_value(
-                    at.lscalar(),
+                    pt.lscalar(),
                     np.array(0, dtype=np.int64),
                 ),
                 set_test_value(  # high-value necessary since test on cdf
-                    at.lscalar(),
+                    pt.lscalar(),
                     np.array(1000, dtype=np.int64),
                 ),
             ],
@@ -274,14 +274,14 @@ def test_random_updates_input_storage_order():
             lambda *args: args,
         ),
         (
-            aer.integers,
+            ptr.integers,
             [
                 set_test_value(
-                    at.lscalar(),
+                    pt.lscalar(),
                     np.array(0, dtype=np.int64),
                 ),
                 set_test_value(  # high-value necessary since test on cdf
-                    at.lscalar(),
+                    pt.lscalar(),
                     np.array(1000, dtype=np.int64),
                 ),
             ],
@@ -290,25 +290,25 @@ def test_random_updates_input_storage_order():
             lambda *args: args,
         ),
         (
-            aer.standard_normal,
+            ptr.standard_normal,
             [],
             (2,),
             "norm",
             lambda *args: args,
         ),
         (
-            aer.t,
+            ptr.t,
             [
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(2.0, dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
@@ -317,14 +317,14 @@ def test_random_updates_input_storage_order():
             lambda *args: args,
         ),
         (
-            aer.uniform,
+            ptr.uniform,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1000.0, dtype=np.float64),
                 ),
             ],
@@ -333,14 +333,14 @@ def test_random_updates_input_storage_order():
             lambda *args: args,
         ),
         (
-            aer.halfnormal,
+            ptr.halfnormal,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([-1.0, 200.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1000.0, dtype=np.float64),
                 ),
             ],
@@ -349,14 +349,14 @@ def test_random_updates_input_storage_order():
             lambda *args: args,
         ),
         (
-            aer.invgamma,
+            ptr.invgamma,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([10.4, 2.8], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([3.4, 7.3], dtype=np.float64),
                 ),
             ],
@@ -365,10 +365,10 @@ def test_random_updates_input_storage_order():
             lambda a, b: (a, 0, b),
         ),
         (
-            aer.chisquare,
+            ptr.chisquare,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([2.4, 4.9], dtype=np.float64),
                 ),
             ],
@@ -377,18 +377,18 @@ def test_random_updates_input_storage_order():
             lambda *args: args,
         ),
         (
-            aer.gengamma,
+            ptr.gengamma,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([10.4, 2.8], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([3.4, 7.3], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([0.9, 2.0], dtype=np.float64),
                 ),
             ],
@@ -397,14 +397,14 @@ def test_random_updates_input_storage_order():
             lambda alpha, p, lambd: (alpha / p, p, 0, lambd),
         ),
         (
-            aer.wald,
+            ptr.wald,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([10.4, 2.8], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([4.5, 2.0], dtype=np.float64),
                 ),
             ],
@@ -414,14 +414,14 @@ def test_random_updates_input_storage_order():
             lambda mean, scale: (mean / scale, 0, scale),
         ),
         pytest.param(
-            aer.vonmises,
+            ptr.vonmises,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([-0.5, 1.3], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([5.5, 13.0], dtype=np.float64),
                 ),
             ],
@@ -447,7 +447,7 @@ def test_random_RandomVariable(rv_op, dist_params, base_size, cdf_name, params_c
         The parameters passed to the op.
 
     """
-    if rv_op is aer.integers:
+    if rv_op is ptr.integers:
         # Integers only accepts Generator, not RandomState
         rng = shared(np.random.default_rng(29402))
     else:
@@ -476,7 +476,7 @@ def test_random_RandomVariable(rv_op, dist_params, base_size, cdf_name, params_c
 @pytest.mark.parametrize("size", [(), (4,)])
 def test_random_bernoulli(size):
     rng = shared(np.random.RandomState(123))
-    g = at.random.bernoulli(0.5, size=(1000,) + size, rng=rng)
+    g = pt.random.bernoulli(0.5, size=(1000,) + size, rng=rng)
     g_fn = random_function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), 0.5, 1)
@@ -487,7 +487,7 @@ def test_random_mvnormal():
 
     mu = np.ones(4)
     cov = np.eye(4)
-    g = at.random.multivariate_normal(mu, cov, size=(10000,), rng=rng)
+    g = pt.random.multivariate_normal(mu, cov, size=(10000,), rng=rng)
     g_fn = random_function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), mu, atol=0.1)
@@ -502,7 +502,7 @@ def test_random_mvnormal():
 )
 def test_random_dirichlet(parameter, size):
     rng = shared(np.random.RandomState(123))
-    g = at.random.dirichlet(parameter, size=(1000,) + size, rng=rng)
+    g = pt.random.dirichlet(parameter, size=(1000,) + size, rng=rng)
     g_fn = random_function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), 0.5, 1)
@@ -512,21 +512,21 @@ def test_random_choice():
     # Elements are picked at equal frequency
     num_samples = 10000
     rng = shared(np.random.RandomState(123))
-    g = at.random.choice(np.arange(4), size=num_samples, rng=rng)
+    g = pt.random.choice(np.arange(4), size=num_samples, rng=rng)
     g_fn = random_function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(np.sum(samples == 3) / num_samples, 0.25, 2)
 
     # `replace=False` produces unique results
     rng = shared(np.random.RandomState(123))
-    g = at.random.choice(np.arange(100), replace=False, size=99, rng=rng)
+    g = pt.random.choice(np.arange(100), replace=False, size=99, rng=rng)
     g_fn = random_function([], g, mode=jax_mode)
     samples = g_fn()
     assert len(np.unique(samples)) == 99
 
     # We can pass an array with probabilities
     rng = shared(np.random.RandomState(123))
-    g = at.random.choice(np.arange(3), p=np.array([1.0, 0.0, 0.0]), size=10, rng=rng)
+    g = pt.random.choice(np.arange(3), p=np.array([1.0, 0.0, 0.0]), size=10, rng=rng)
     g_fn = random_function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples, np.zeros(10))
@@ -534,7 +534,7 @@ def test_random_choice():
 
 def test_random_categorical():
     rng = shared(np.random.RandomState(123))
-    g = at.random.categorical(0.25 * np.ones(4), size=(10000, 4), rng=rng)
+    g = pt.random.categorical(0.25 * np.ones(4), size=(10000, 4), rng=rng)
     g_fn = random_function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), 6 / 4, 1)
@@ -543,7 +543,7 @@ def test_random_categorical():
 def test_random_permutation():
     array = np.arange(4)
     rng = shared(np.random.RandomState(123))
-    g = at.random.permutation(array, rng=rng)
+    g = pt.random.permutation(array, rng=rng)
     g_fn = random_function([], g, mode=jax_mode)
     permuted = g_fn()
     with pytest.raises(AssertionError):
@@ -553,7 +553,7 @@ def test_random_permutation():
 def test_random_geometric():
     rng = shared(np.random.RandomState(123))
     p = np.array([0.3, 0.7])
-    g = at.random.geometric(p, size=(10_000, 2), rng=rng)
+    g = pt.random.geometric(p, size=(10_000, 2), rng=rng)
     g_fn = random_function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), 1 / p, rtol=0.1)
@@ -564,7 +564,7 @@ def test_negative_binomial():
     rng = shared(np.random.RandomState(123))
     n = np.array([10, 40])
     p = np.array([0.3, 0.7])
-    g = at.random.negative_binomial(n, p, size=(10_000, 2), rng=rng)
+    g = pt.random.negative_binomial(n, p, size=(10_000, 2), rng=rng)
     g_fn = random_function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), n * (1 - p) / p, rtol=0.1)
@@ -578,7 +578,7 @@ def test_binomial():
     rng = shared(np.random.RandomState(123))
     n = np.array([10, 40])
     p = np.array([0.3, 0.7])
-    g = at.random.binomial(n, p, size=(10_000, 2), rng=rng)
+    g = pt.random.binomial(n, p, size=(10_000, 2), rng=rng)
     g_fn = random_function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), n * p, rtol=0.1)
@@ -593,7 +593,7 @@ def test_beta_binomial():
     n = np.array([10, 40])
     a = np.array([1.5, 13])
     b = np.array([0.5, 9])
-    g = at.random.betabinom(n, a, b, size=(10_000, 2), rng=rng)
+    g = pt.random.betabinom(n, a, b, size=(10_000, 2), rng=rng)
     g_fn = random_function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), n * a / (a + b), rtol=0.1)
@@ -611,7 +611,7 @@ def test_multinomial():
     rng = shared(np.random.RandomState(123))
     n = np.array([10, 40])
     p = np.array([[0.3, 0.7, 0.0], [0.1, 0.4, 0.5]])
-    g = at.random.multinomial(n, p, size=(10_000, 2), rng=rng)
+    g = pt.random.multinomial(n, p, size=(10_000, 2), rng=rng)
     g_fn = random_function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), n[..., None] * p, rtol=0.1)
@@ -627,7 +627,7 @@ def test_vonmises_mu_outside_circle():
     rng = shared(np.random.RandomState(123))
     mu = np.array([-30, 40])
     kappa = np.array([100, 10])
-    g = at.random.vonmises(mu, kappa, size=(10_000, 2), rng=rng)
+    g = pt.random.vonmises(mu, kappa, size=(10_000, 2), rng=rng)
     g_fn = random_function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(
@@ -726,17 +726,17 @@ def test_random_concrete_shape():
 
     """
     rng = shared(np.random.RandomState(123))
-    x_at = at.dmatrix()
-    out = at.random.normal(0, 1, size=x_at.shape, rng=rng)
-    jax_fn = random_function([x_at], out, mode=jax_mode)
+    x_pt = pt.dmatrix()
+    out = pt.random.normal(0, 1, size=x_pt.shape, rng=rng)
+    jax_fn = random_function([x_pt], out, mode=jax_mode)
     assert jax_fn(np.ones((2, 3))).shape == (2, 3)
 
 
 def test_random_concrete_shape_from_param():
     rng = shared(np.random.RandomState(123))
-    x_at = at.dmatrix()
-    out = at.random.normal(x_at, 1, rng=rng)
-    jax_fn = random_function([x_at], out, mode=jax_mode)
+    x_pt = pt.dmatrix()
+    out = pt.random.normal(x_pt, 1, rng=rng)
+    jax_fn = random_function([x_pt], out, mode=jax_mode)
     assert jax_fn(np.ones((2, 3))).shape == (2, 3)
 
 
@@ -753,9 +753,9 @@ def test_random_concrete_shape_subtensor():
 
     """
     rng = shared(np.random.RandomState(123))
-    x_at = at.dmatrix()
-    out = at.random.normal(0, 1, size=x_at.shape[1], rng=rng)
-    jax_fn = random_function([x_at], out, mode=jax_mode)
+    x_pt = pt.dmatrix()
+    out = pt.random.normal(0, 1, size=x_pt.shape[1], rng=rng)
+    jax_fn = random_function([x_pt], out, mode=jax_mode)
     assert jax_fn(np.ones((2, 3))).shape == (3,)
 
 
@@ -769,18 +769,18 @@ def test_random_concrete_shape_subtensor_tuple():
 
     """
     rng = shared(np.random.RandomState(123))
-    x_at = at.dmatrix()
-    out = at.random.normal(0, 1, size=(x_at.shape[0],), rng=rng)
-    jax_fn = random_function([x_at], out, mode=jax_mode)
+    x_pt = pt.dmatrix()
+    out = pt.random.normal(0, 1, size=(x_pt.shape[0],), rng=rng)
+    jax_fn = random_function([x_pt], out, mode=jax_mode)
     assert jax_fn(np.ones((2, 3))).shape == (2,)
 
 
 @pytest.mark.xfail(
-    reason="`size_at` should be specified as a static argument", strict=True
+    reason="`size_pt` should be specified as a static argument", strict=True
 )
 def test_random_concrete_shape_graph_input():
     rng = shared(np.random.RandomState(123))
-    size_at = at.scalar()
-    out = at.random.normal(0, 1, size=size_at, rng=rng)
-    jax_fn = random_function([size_at], out, mode=jax_mode)
+    size_pt = pt.scalar()
+    out = pt.random.normal(0, 1, size=size_pt, rng=rng)
+    jax_fn = random_function([size_pt], out, mode=jax_mode)
     assert jax_fn(10).shape == (10,)

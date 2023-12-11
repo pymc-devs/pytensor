@@ -6,7 +6,7 @@ import pytest
 from packaging import version
 
 import pytensor
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor import sparse
 from pytensor.compile.function import function
 from pytensor.compile.io import In, Out
@@ -92,7 +92,7 @@ from pytensor.sparse.rewriting import (
 )
 from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import Shape_i
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -561,12 +561,12 @@ class TestSparseInferShape(utt.InferShapeTester):
             (vector()[None, :], SparseTensorType("csr", "float32")()),
             (matrix(), SparseTensorType("csr", "float32")()),
         ]:
-            sparse_out = at.dot(x, y)
+            sparse_out = pt.dot(x, y)
             if isinstance(x, sparse.SparseVariable):
                 x = matrix()
             if isinstance(y, sparse.SparseVariable):
                 y = matrix()
-            dense_out = at.dot(x, y)
+            dense_out = pt.dot(x, y)
             assert dense_out.broadcastable == sparse_out.broadcastable
 
     def test_structured_dot(self):
@@ -801,7 +801,7 @@ class TestAddMul:
         for mtype in _mtypes:
             for a in [
                 np.array(array1),
-                at.as_tensor_variable(array1),
+                pt.as_tensor_variable(array1),
                 pytensor.shared(array1),
             ]:
                 for dtype1, dtype2 in [
@@ -859,7 +859,7 @@ class TestAddMul:
         for mtype in _mtypes:
             for b in [
                 np.asarray(array2),
-                at.as_tensor_variable(array2),
+                pt.as_tensor_variable(array2),
                 pytensor.shared(array2),
             ]:
                 for dtype1, dtype2 in [
@@ -1020,13 +1020,13 @@ class TestComparison:
 class TestConversion:
     def test_basic(self):
         test_val = np.random.random((5,)).astype(config.floatX)
-        a = at.as_tensor_variable(test_val)
+        a = pt.as_tensor_variable(test_val)
         s = csc_from_dense(a)
         val = eval_outputs([s])
         assert str(val.dtype) == config.floatX
         assert val.format == "csc"
 
-        a = at.as_tensor_variable(test_val)
+        a = pt.as_tensor_variable(test_val)
         s = csr_from_dense(a)
         val = eval_outputs([s])
         assert str(val.dtype) == config.floatX
@@ -1035,7 +1035,7 @@ class TestConversion:
         test_val = np.eye(3).astype(config.floatX)
         a = sp.sparse.csr_matrix(test_val)
         s = as_sparse_or_tensor_variable(a)
-        res = at.as_tensor_variable(s)
+        res = pt.as_tensor_variable(s)
         assert isinstance(res, SparseConstant)
 
         a = sp.sparse.csr_matrix(test_val)
@@ -1043,7 +1043,7 @@ class TestConversion:
         from pytensor.tensor.exceptions import NotScalarConstantError
 
         with pytest.raises(NotScalarConstantError):
-            at.get_underlying_scalar_constant_value(s, only_process_constants=True)
+            pt.get_underlying_scalar_constant_value(s, only_process_constants=True)
 
     # TODO:
     # def test_sparse_as_tensor_variable(self):
@@ -1207,10 +1207,10 @@ class TestCsm:
                 assert not a.has_sorted_indices
 
                 def my_op(x):
-                    y = at.constant(a.indices)
-                    z = at.constant(a.indptr)
-                    s = at.constant(a.shape)
-                    return at_sum(dense_from_sparse(CSM(format)(x, y, z, s) * a))
+                    y = pt.constant(a.indices)
+                    z = pt.constant(a.indptr)
+                    s = pt.constant(a.shape)
+                    return pt_sum(dense_from_sparse(CSM(format)(x, y, z, s) * a))
 
                 verify_grad_sparse(my_op, [a.data])
 
@@ -1374,7 +1374,7 @@ class TestStructuredDot:
             for sparse_format_b in ["csc", "csr", "bsr"]:
                 a = SparseTensorType(sparse_format_a, dtype=sparse_dtype)()
                 b = SparseTensorType(sparse_format_b, dtype=sparse_dtype)()
-                d = at.dot(a, b)
+                d = pt.dot(a, b)
                 f = pytensor.function([a, b], Out(d, borrow=True))
                 for M, N, K, nnz in [
                     (4, 3, 2, 3),
@@ -1396,7 +1396,7 @@ class TestStructuredDot:
 
         a = SparseTensorType("csc", dtype=sparse_dtype)()
         b = matrix(dtype=dense_dtype)
-        d = at.dot(a, b)
+        d = pt.dot(a, b)
         f = pytensor.function([a, b], Out(d, borrow=True))
 
         for M, N, K, nnz in [
@@ -1443,7 +1443,7 @@ class TestStructuredDot:
 
         a = SparseTensorType("csr", dtype=sparse_dtype)()
         b = matrix(dtype=dense_dtype)
-        d = at.dot(a, b)
+        d = pt.dot(a, b)
         f = pytensor.function([a, b], d)
 
         for M, N, K, nnz in [
@@ -1598,8 +1598,8 @@ class TestDots(utt.InferShapeTester):
         I = matrix("I", dtype=intX)
 
         fI = I.flatten()
-        data = at.ones_like(fI)
-        indptr = at.arange(data.shape[0] + 1, dtype="int32")
+        data = pt.ones_like(fI)
+        indptr = pt.arange(data.shape[0] + 1, dtype="int32")
 
         m1 = sparse.CSR(data, fI, indptr, (8, size))
         m2 = sparse.dot(m1, C)
@@ -1614,28 +1614,28 @@ class TestDots(utt.InferShapeTester):
 
     def test_tensor_dot_types(self):
         x = sparse.csc_matrix("x")
-        x_d = at.matrix("x_d")
+        x_d = pt.matrix("x_d")
         y = sparse.csc_matrix("y")
 
-        res = at.dot(x, y)
+        res = pt.dot(x, y)
         op_types = {type(n.op) for n in applys_between([x, y], [res])}
         assert sparse.basic.StructuredDot in op_types
-        assert at.math.Dot not in op_types
+        assert pt.math.Dot not in op_types
 
-        res = at.dot(x_d, y)
+        res = pt.dot(x_d, y)
         op_types = {type(n.op) for n in applys_between([x, y], [res])}
         assert sparse.basic.StructuredDot in op_types
-        assert at.math.Dot not in op_types
+        assert pt.math.Dot not in op_types
 
-        res = at.dot(x, x_d)
+        res = pt.dot(x, x_d)
         op_types = {type(n.op) for n in applys_between([x, y], [res])}
         assert sparse.basic.StructuredDot in op_types
-        assert at.math.Dot not in op_types
+        assert pt.math.Dot not in op_types
 
-        res = at.dot(at.second(1, x), y)
+        res = pt.dot(pt.second(1, x), y)
         op_types = {type(n.op) for n in applys_between([x, y], [res])}
         assert sparse.basic.StructuredDot in op_types
-        assert at.math.Dot not in op_types
+        assert pt.math.Dot not in op_types
 
     def test_csr_dense_grad(self):
         # shortcut: testing csc in float32, testing csr in float64

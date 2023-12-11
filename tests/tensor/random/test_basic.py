@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import scipy.stats as stats
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor import function, shared
 from pytensor.compile.mode import Mode
 from pytensor.compile.sharedvalue import SharedVariable
@@ -109,11 +109,11 @@ def compare_sample_values(rv, *params, rng=None, test_fn=None, **kwargs):
         for k, v in kwargs.items()
     }
 
-    at_rng = shared(rng, borrow=True)
+    pt_rng = shared(rng, borrow=True)
 
     numpy_res = np.asarray(test_fn(*param_vals, random_state=copy(rng), **kwargs_vals))
 
-    pytensor_res = rv(*params, rng=at_rng, **kwargs)
+    pytensor_res = rv(*params, rng=pt_rng, **kwargs)
 
     assert pytensor_res.type.numpy_dtype.kind == numpy_res.dtype.kind
 
@@ -200,31 +200,31 @@ def test_beta_samples(a, b, size):
     compare_sample_values(beta, a, b, size=size)
 
 
-M_at = iscalar("M")
-M_at.tag.test_value = 3
-sd_at = scalar("sd")
-sd_at.tag.test_value = np.array(1.0, dtype=config.floatX)
+M_pt = iscalar("M")
+M_pt.tag.test_value = 3
+sd_pt = scalar("sd")
+sd_pt.tag.test_value = np.array(1.0, dtype=config.floatX)
 
 
 @pytest.mark.parametrize(
     "M, sd, size",
     [
-        (at.as_tensor_variable(np.array(1.0, dtype=config.floatX)), sd_at, ()),
+        (pt.as_tensor_variable(np.array(1.0, dtype=config.floatX)), sd_pt, ()),
         (
-            at.as_tensor_variable(np.array(1.0, dtype=config.floatX)),
-            sd_at,
-            (M_at,),
+            pt.as_tensor_variable(np.array(1.0, dtype=config.floatX)),
+            sd_pt,
+            (M_pt,),
         ),
         (
-            at.as_tensor_variable(np.array(1.0, dtype=config.floatX)),
-            sd_at,
-            (2, M_at),
+            pt.as_tensor_variable(np.array(1.0, dtype=config.floatX)),
+            sd_pt,
+            (2, M_pt),
         ),
-        (at.zeros((M_at,)), sd_at, ()),
-        (at.zeros((M_at,)), sd_at, (M_at,)),
-        (at.zeros((M_at,)), sd_at, (2, M_at)),
-        (at.zeros((M_at,)), at.ones((M_at,)), ()),
-        (at.zeros((M_at,)), at.ones((M_at,)), (2, M_at)),
+        (pt.zeros((M_pt,)), sd_pt, ()),
+        (pt.zeros((M_pt,)), sd_pt, (M_pt,)),
+        (pt.zeros((M_pt,)), sd_pt, (2, M_pt)),
+        (pt.zeros((M_pt,)), pt.ones((M_pt,)), ()),
+        (pt.zeros((M_pt,)), pt.ones((M_pt,)), (2, M_pt)),
         (
             create_pytensor_param(
                 np.array([[-1, 20], [300, -4000]], dtype=config.floatX)
@@ -250,7 +250,7 @@ def test_normal_infer_shape(M, sd, size):
         if not isinstance(i, (Constant, SharedVariable))
     ]
     pytensor_fn = function(
-        fn_inputs, [at.as_tensor(o) for o in rv_shape + [rv]], mode=py_mode
+        fn_inputs, [pt.as_tensor(o) for o in rv_shape + [rv]], mode=py_mode
     )
 
     *rv_shape_val, rv_val = pytensor_fn(
@@ -266,12 +266,12 @@ def test_normal_infer_shape(M, sd, size):
 
 @config.change_flags(compute_test_value="raise")
 def test_normal_ShapeFeature():
-    M_at = iscalar("M")
-    M_at.tag.test_value = 3
-    sd_at = scalar("sd")
-    sd_at.tag.test_value = np.array(1.0, dtype=config.floatX)
+    M_pt = iscalar("M")
+    M_pt.tag.test_value = 3
+    sd_pt = scalar("sd")
+    sd_pt.tag.test_value = np.array(1.0, dtype=config.floatX)
 
-    d_rv = normal(at.ones((M_at,)), sd_at, size=(2, M_at))
+    d_rv = normal(pt.ones((M_pt,)), sd_pt, size=(2, M_pt))
     d_rv.tag.test_value
 
     fg = FunctionGraph(
@@ -609,10 +609,10 @@ def test_mvnormal_default_args():
 
 @config.change_flags(compute_test_value="raise")
 def test_mvnormal_ShapeFeature():
-    M_at = iscalar("M")
-    M_at.tag.test_value = 2
+    M_pt = iscalar("M")
+    M_pt.tag.test_value = 2
 
-    d_rv = multivariate_normal(at.ones((M_at,)), at.eye(M_at), size=2)
+    d_rv = multivariate_normal(pt.ones((M_pt,)), pt.eye(M_pt), size=2)
 
     fg = FunctionGraph(
         [i for i in graph_inputs([d_rv]) if not isinstance(i, Constant)],
@@ -624,7 +624,7 @@ def test_mvnormal_ShapeFeature():
     s1, s2 = fg.shape_feature.shape_of[d_rv]
 
     assert get_test_value(s1) == 2
-    assert M_at in graph_inputs([s2])
+    assert M_pt in graph_inputs([s2])
 
     # Test broadcasted shapes
     mean = tensor(dtype=config.floatX, shape=(1, None))
@@ -632,7 +632,7 @@ def test_mvnormal_ShapeFeature():
 
     test_covar = np.diag(np.array([1, 10, 100], dtype=config.floatX))
     test_covar = np.stack([test_covar, test_covar * 10.0])
-    cov = at.as_tensor(test_covar).type()
+    cov = pt.as_tensor(test_covar).type()
     cov.tag.test_value = test_covar
 
     d_rv = multivariate_normal(mean, cov, size=[2, 3, 2])
@@ -689,19 +689,19 @@ def test_dirichlet_rng():
         dirichlet.rng_fn(None, np.broadcast_to(alphas, (1, 3, 3)), size=(3,))
 
 
-M_at = iscalar("M")
-M_at.tag.test_value = 3
+M_pt = iscalar("M")
+M_pt.tag.test_value = 3
 
 
 @pytest.mark.parametrize(
     "M, size",
     [
-        (at.ones((M_at,)), ()),
-        (at.ones((M_at,)), (M_at + 1,)),
-        (at.ones((M_at,)), (2, M_at)),
-        (at.ones((M_at, M_at + 1)), ()),
-        (at.ones((M_at, M_at + 1)), (M_at + 2, M_at)),
-        (at.ones((M_at, M_at + 1)), (2, M_at + 2, M_at + 3, M_at)),
+        (pt.ones((M_pt,)), ()),
+        (pt.ones((M_pt,)), (M_pt + 1,)),
+        (pt.ones((M_pt,)), (2, M_pt)),
+        (pt.ones((M_pt, M_pt + 1)), ()),
+        (pt.ones((M_pt, M_pt + 1)), (M_pt + 2, M_pt)),
+        (pt.ones((M_pt, M_pt + 1)), (2, M_pt + 2, M_pt + 3, M_pt)),
     ],
 )
 def test_dirichlet_infer_shape(M, size):
@@ -715,7 +715,7 @@ def test_dirichlet_infer_shape(M, size):
         if not isinstance(i, (Constant, SharedVariable))
     ]
     pytensor_fn = function(
-        fn_inputs, [at.as_tensor(o) for o in rv_shape + [rv]], mode=py_mode
+        fn_inputs, [pt.as_tensor(o) for o in rv_shape + [rv]], mode=py_mode
     )
 
     *rv_shape_val, rv_val = pytensor_fn(
@@ -732,12 +732,12 @@ def test_dirichlet_infer_shape(M, size):
 @config.change_flags(compute_test_value="raise")
 def test_dirichlet_ShapeFeature():
     """Make sure `RandomVariable.infer_shape` works with `ShapeFeature`."""
-    M_at = iscalar("M")
-    M_at.tag.test_value = 2
-    N_at = iscalar("N")
-    N_at.tag.test_value = 3
+    M_pt = iscalar("M")
+    M_pt.tag.test_value = 2
+    N_pt = iscalar("N")
+    N_pt.tag.test_value = 3
 
-    d_rv = dirichlet(at.ones((M_at, N_at)), name="Gamma")
+    d_rv = dirichlet(pt.ones((M_pt, N_pt)), name="Gamma")
 
     fg = FunctionGraph(
         outputs=[d_rv],
@@ -747,8 +747,8 @@ def test_dirichlet_ShapeFeature():
 
     s1, s2 = fg.shape_feature.shape_of[d_rv]
 
-    assert M_at in graph_inputs([s1])
-    assert N_at in graph_inputs([s2])
+    assert M_pt in graph_inputs([s1])
+    assert N_pt in graph_inputs([s2])
 
 
 @pytest.mark.parametrize(
@@ -1347,12 +1347,12 @@ def test_randint_samples():
     compare_sample_values(randint, [0, 1, 2], 5, rng=rng)
     compare_sample_values(randint, [0, 1, 2], 5, size=[3, 3], rng=rng)
     compare_sample_values(randint, [0], [5], size=[1], rng=rng)
-    compare_sample_values(randint, at.as_tensor_variable([-1]), [1], size=[1], rng=rng)
+    compare_sample_values(randint, pt.as_tensor_variable([-1]), [1], size=[1], rng=rng)
     compare_sample_values(
         randint,
-        at.as_tensor_variable([-1]),
+        pt.as_tensor_variable([-1]),
         [1],
-        size=at.as_tensor_variable([1]),
+        size=pt.as_tensor_variable([1]),
         rng=rng,
     )
 
@@ -1368,12 +1368,12 @@ def test_integers_samples():
     compare_sample_values(integers, [0, 1, 2], 5, rng=rng)
     compare_sample_values(integers, [0, 1, 2], 5, size=[3, 3], rng=rng)
     compare_sample_values(integers, [0], [5], size=[1], rng=rng)
-    compare_sample_values(integers, at.as_tensor_variable([-1]), [1], size=[1], rng=rng)
+    compare_sample_values(integers, pt.as_tensor_variable([-1]), [1], size=[1], rng=rng)
     compare_sample_values(
         integers,
-        at.as_tensor_variable([-1]),
+        pt.as_tensor_variable([-1]),
         [1],
-        size=at.as_tensor_variable([1]),
+        size=pt.as_tensor_variable([1]),
         rng=rng,
     )
 
@@ -1393,7 +1393,7 @@ def test_choice_samples():
     compare_sample_values(choice, [1, 2, 3], 1)
 
     compare_sample_values(
-        choice, [1, 2, 3], 1, p=at.as_tensor([1 / 3.0, 1 / 3.0, 1 / 3.0])
+        choice, [1, 2, 3], 1, p=pt.as_tensor([1 / 3.0, 1 / 3.0, 1 / 3.0])
     )
 
     # p must be 1-dimensional.
@@ -1401,11 +1401,11 @@ def test_choice_samples():
     # time in some situations using static shape analysis.
     with pytest.raises(ValueError):
         rng = np.random.default_rng()
-        rng_at = shared(rng, borrow=True)
-        choice(a=[1, 2], p=at.as_tensor([[0.1, 0.9], [0.3, 0.7]]), rng=rng_at).eval()
+        rng_pt = shared(rng, borrow=True)
+        choice(a=[1, 2], p=pt.as_tensor([[0.1, 0.9], [0.3, 0.7]]), rng=rng_pt).eval()
 
     compare_sample_values(choice, [1, 2, 3], (10, 2), replace=True)
-    compare_sample_values(choice, at.as_tensor_variable([1, 2, 3]), 2, replace=True)
+    compare_sample_values(choice, pt.as_tensor_variable([1, 2, 3]), 2, replace=True)
 
 
 def test_choice_infer_shape():

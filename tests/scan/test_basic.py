@@ -19,7 +19,7 @@ from tempfile import mkdtemp
 import numpy as np
 import pytest
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.compile.debugmode import DebugMode
 from pytensor.compile.function import function
 from pytensor.compile.function.pfunc import rebuild_collect_shared
@@ -38,9 +38,9 @@ from pytensor.raise_op import assert_op
 from pytensor.scan.basic import scan
 from pytensor.scan.op import Scan
 from pytensor.scan.utils import until
-from pytensor.tensor.math import all as at_all
+from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import dot, exp, mean, sigmoid
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.math import tanh
 from pytensor.tensor.random import normal
 from pytensor.tensor.random.utils import RandomStream
@@ -277,7 +277,7 @@ class TestScan:
 
         out, out_updates = scan(
             inner_fn,
-            outputs_info=[at.as_tensor(0.0, dtype=config.floatX), None],
+            outputs_info=[pt.as_tensor(0.0, dtype=config.floatX), None],
             n_steps=4,
         )
 
@@ -1074,7 +1074,7 @@ class TestScan:
         # Symbolic description of the result
         result, updates = scan(
             fn=lambda prior_result, A: prior_result * A,
-            outputs_info=at.ones_like(A),
+            outputs_info=pt.ones_like(A),
             non_sequences=A,
             n_steps=k,
             mode=mode,
@@ -1106,7 +1106,7 @@ class TestScan:
         gy.name = "gy"
         hy, updates = scan(
             lambda i, gy, x: grad(gy[i] * fc2, x),
-            sequences=at.arange(gy.shape[0]),
+            sequences=pt.arange(gy.shape[0]),
             non_sequences=[gy, x],
         )
 
@@ -1285,9 +1285,9 @@ class TestScan:
         c = iscalar("c")
 
         def inner_fn(cond, x, y):
-            new_cond = at.cast(at.switch(cond, x, y), "int32")
-            new_x = at.switch(cond, sigmoid(y * x), x)
-            new_y = at.switch(cond, y, sigmoid(x))
+            new_cond = pt.cast(pt.switch(cond, x, y), "int32")
+            new_x = pt.switch(cond, sigmoid(y * x), x)
+            new_y = pt.switch(cond, y, sigmoid(x))
             return new_cond, new_x, new_y
 
         values, _ = scan(
@@ -1572,7 +1572,7 @@ class TestScan:
         def f_rnn_cmpl(u_t, u2_t, x_tm1, W_in):
             trng1 = RandomStream(123)
             x_t = (
-                at.cast(u2_t, config.floatX)
+                pt.cast(u2_t, config.floatX)
                 + dot(u_t, W_in)
                 + x_tm1
                 + trng1.uniform(low=-1.1, high=1.1, dtype=config.floatX)
@@ -1658,7 +1658,7 @@ class TestScan:
             trng1 = RandomStream(123)
             rnd_nb = trng1.uniform(-0.1, 0.1)
             x_t = dot(u_t, W_in) + x_tm1 + rnd_nb
-            x_t = at.cast(x_t, dtype=config.floatX)
+            x_t = pt.cast(x_t, dtype=config.floatX)
             return x_t
 
         cost, updates = scan_project_sum(
@@ -1713,7 +1713,7 @@ class TestScan:
         x1 = shared(3.0)
         x1.name = "x1"
         x2 = vector("x2")
-        y, updates = scan(lambda v: at.cast(v * x1, config.floatX), sequences=x2)
+        y, updates = scan(lambda v: pt.cast(v * x1, config.floatX), sequences=x2)
         m = grad(y.sum(), x1)
 
         f = function([x2], m, allow_input_downcast=True)
@@ -1726,7 +1726,7 @@ class TestScan:
 
         out, updates = scan(
             lambda i, v: grad(K[i], v),
-            sequences=at.arange(K.shape[0]),
+            sequences=pt.arange(K.shape[0]),
             non_sequences=x1,
         )
         f = function([x1], out, allow_input_downcast=True)
@@ -1844,7 +1844,7 @@ class TestScan:
         c = vector("c")
         x = scalar("x")
         _max_coefficients_supported = 1000
-        full_range = at.arange(_max_coefficients_supported)
+        full_range = pt.arange(_max_coefficients_supported)
         components, updates = scan(
             fn=lambda coeff, power, free_var: coeff * (free_var**power),
             outputs_info=None,
@@ -1864,7 +1864,7 @@ class TestScan:
         c = vector("c")
         x = scalar("x")
         _max_coefficients_supported = 1000
-        full_range = at.arange(_max_coefficients_supported)
+        full_range = pt.arange(_max_coefficients_supported)
         components, updates = scan(
             fn=lambda coeff, power, free_var: coeff * (free_var**power),
             outputs_info=None,
@@ -1972,21 +1972,21 @@ class TestScan:
 
         n2o_u, _ = scan(
             lambda i, o, u, h0, W, eu: (grad(o[i], u) * eu).sum(),
-            sequences=at.arange(o.shape[0]),
+            sequences=pt.arange(o.shape[0]),
             non_sequences=[o, u, h0, W, eu],
             name="jacobU",
         )
 
         n2o_h0, _ = scan(
             lambda i, o, u, h0, W, eh0: (grad(o[i], h0) * eh0).sum(),
-            sequences=at.arange(o.shape[0]),
+            sequences=pt.arange(o.shape[0]),
             non_sequences=[o, u, h0, W, eh0],
             name="jacobh",
         )
 
         n2o_W, _ = scan(
             lambda i, o, u, h0, W, eW: (grad(o[i], W) * eW).sum(),
-            sequences=at.arange(o.shape[0]),
+            sequences=pt.arange(o.shape[0]),
             non_sequences=[o, u, h0, W, eW],
             name="jacobW",
         )
@@ -2056,21 +2056,21 @@ class TestScan:
 
         n2o_u, _ = scan(
             lambda i, o, u, h0, W, eu: (grad(o[i], u) * eu).sum(),
-            sequences=at.arange(o.shape[0]),
+            sequences=pt.arange(o.shape[0]),
             non_sequences=[o, u, h0, W, eu],
             name="jacobU",
         )
 
         n2o_h0, _ = scan(
             lambda i, o, u, h0, W, eh0: (grad(o[i], h0) * eh0).sum(),
-            sequences=at.arange(o.shape[0]),
+            sequences=pt.arange(o.shape[0]),
             non_sequences=[o, u, h0, W, eh0],
             name="jacobh",
         )
 
         n2o_W, _ = scan(
             lambda i, o, u, h0, W, eW: (grad(o[i], W) * eW).sum(),
-            sequences=at.arange(o.shape[0]),
+            sequences=pt.arange(o.shape[0]),
             non_sequences=[o, u, h0, W, eW],
             name="jacobW",
         )
@@ -2123,7 +2123,7 @@ class TestScan:
         hidden_rec, _ = scan(
             lambda x, h_tm1: transfer(dot(h_tm1, W2) + x),
             sequences=hidden,
-            outputs_info=[at.zeros_like(hidden[0])],
+            outputs_info=[pt.zeros_like(hidden[0])],
         )
 
         hidden_rec.reshape(
@@ -2161,7 +2161,7 @@ def test_cvm_exception_handling(mode):
     myop = MyOp()
 
     def scan_fn():
-        return myop(at.as_tensor(1))
+        return myop(pt.as_tensor(1))
 
     res, _ = scan(scan_fn, n_steps=4, mode=mode)
 
@@ -2192,11 +2192,11 @@ def test_cython_performance(benchmark):
 
     py_res = f_py()
 
-    s_r = at.as_tensor_variable(r, dtype=config.floatX)
+    s_r = pt.as_tensor_variable(r, dtype=config.floatX)
     s_y, updates = scan(
         fn=lambda ri, rii, M: ri + M * rii,
         sequences=[s_r[1:]],
-        non_sequences=[at.as_tensor_variable(M, dtype=config.floatX)],
+        non_sequences=[pt.as_tensor_variable(M, dtype=config.floatX)],
         outputs_info=s_r[0],
         mode=Mode(linker="cvm", optimizer="fast_run"),
     )
@@ -2254,11 +2254,11 @@ def test_compute_test_value_grad():
         W_flat.tag.test_value = WEIGHT
         W = W_flat.reshape((2, 2, 3))
 
-        outputs_mi = at.as_tensor_variable(np.asarray(0, dtype="float32"))
+        outputs_mi = pt.as_tensor_variable(np.asarray(0, dtype="float32"))
         outputs_mi.tag.test_value = np.asarray(0, dtype="float32")
 
         def loss_mi(mi, sum_mi, W):
-            outputs_ti = at.as_tensor_variable(np.asarray(0, dtype="float32"))
+            outputs_ti = pt.as_tensor_variable(np.asarray(0, dtype="float32"))
             outputs_ti.tag.test_value = np.asarray(0, dtype="float32")
 
             def loss_ti(ti, sum_ti, mi, W):
@@ -2267,7 +2267,7 @@ def test_compute_test_value_grad():
             result_ti, _ = scan(
                 fn=loss_ti,
                 outputs_info=outputs_ti,
-                sequences=at.arange(W.shape[1], dtype="int32"),
+                sequences=pt.arange(W.shape[1], dtype="int32"),
                 non_sequences=[mi, W],
             )
             lossmi = result_ti[-1]
@@ -2276,7 +2276,7 @@ def test_compute_test_value_grad():
         result_mi, _ = scan(
             fn=loss_mi,
             outputs_info=outputs_mi,
-            sequences=at.arange(W.shape[0], dtype="int32"),
+            sequences=pt.arange(W.shape[0], dtype="int32"),
             non_sequences=[W],
         )
 
@@ -2316,7 +2316,7 @@ def test_constant_folding_n_steps():
     # folding optimization step.
     res, _ = scan(
         lambda x: x * 2,
-        outputs_info=at.ones(()),
+        outputs_info=pt.ones(()),
         # The constant `n_steps` was causing the crash.
         n_steps=10,
     )
@@ -2342,7 +2342,7 @@ def test_outputs_taps_check():
 
 def test_inconsistent_broadcast_error():
     x = tensor3()
-    initial_x = at.constant(np.zeros((1, 10)))
+    initial_x = pt.constant(np.zeros((1, 10)))
     y, updates = scan(
         fn=lambda x, prev_x: x + prev_x,
         sequences=x,
@@ -2358,7 +2358,7 @@ def test_missing_input_error():
     inc = scalar("inc")
 
     def count_up():
-        return at.zeros(()), {c: c + inc}
+        return pt.zeros(()), {c: c + inc}
 
     with pytest.raises(MissingInputError):
         _, updates = scan(count_up, n_steps=20)
@@ -2394,7 +2394,7 @@ class TestGradUntil:
         X = matrix(name="x")
         arr = tile_array(self.seq)
         r, _ = scan(
-            lambda x, u: (x * x, until(at_all(x > u))),
+            lambda x, u: (x * x, until(pt_all(x > u))),
             sequences=X,
             non_sequences=[self.threshold],
         )
@@ -2458,21 +2458,21 @@ def test_mintap_onestep():
 def test_inner_get_vector_length():
     """Make sure we can handle/preserve fixed shape terms when cloning the body of a `Scan`."""
 
-    rng_at = RandomStream()
+    rng_pt = RandomStream()
 
     s1 = lscalar("s1")
     s2 = lscalar("s2")
-    size_at = at.as_tensor([s1, s2])
+    size_pt = pt.as_tensor([s1, s2])
 
     def scan_body(size):
         # `size` will be cloned and replaced with an ownerless `TensorVariable`.
         # This will cause `RandomVariable.infer_shape` to fail, because it expects
         # `get_vector_length` to work on all `size` arguments.
-        return rng_at.normal(0, 1, size=size)
+        return rng_pt.normal(0, 1, size=size)
 
     res, _ = scan(
         scan_body,
-        non_sequences=[size_at],
+        non_sequences=[size_pt],
         n_steps=10,
         strict=True,
     )
@@ -2484,23 +2484,23 @@ def test_inner_get_vector_length():
     size_clone = res.owner.op.inner_inputs[1]
     assert size_clone.owner is None
 
-    # Make sure the cloned `size` maps to the original `size_at`
+    # Make sure the cloned `size` maps to the original `size_pt`
     inner_outer_map = res.owner.op.get_oinp_iinp_iout_oout_mappings()
     outer_input_idx = inner_outer_map["outer_inp_from_inner_inp"][1]
     original_size = res.owner.inputs[outer_input_idx]
-    assert original_size == size_at
+    assert original_size == size_pt
 
     with config.change_flags(on_opt_error="raise", on_shape_error="raise"):
-        res_fn = function([size_at], res.shape)
+        res_fn = function([size_pt], res.shape)
 
     assert np.array_equal(res_fn((1, 2)), (10, 1, 2))
 
     # Second case has an empty size non-sequence
-    size_at = at.as_tensor([], dtype=np.int64)
+    size_pt = pt.as_tensor([], dtype=np.int64)
 
     res, _ = scan(
         scan_body,
-        non_sequences=[size_at],
+        non_sequences=[size_pt],
         n_steps=10,
         strict=True,
     )
@@ -2512,11 +2512,11 @@ def test_inner_get_vector_length():
     assert np.array_equal(res_fn(), (10,))
 
     # Third case has a constant size non-sequence
-    size_at = at.as_tensor([3], dtype=np.int64)
+    size_pt = pt.as_tensor([3], dtype=np.int64)
 
     res, _ = scan(
         scan_body,
-        non_sequences=[size_at],
+        non_sequences=[size_pt],
         n_steps=10,
         strict=True,
     )
@@ -2532,7 +2532,7 @@ def test_inner_get_vector_length():
 def test_profile_info():
     from pytensor.scan.utils import ScanProfileStats
 
-    z, updates = scan(fn=lambda u: u + 1, sequences=[at.arange(10)], profile=True)
+    z, updates = scan(fn=lambda u: u + 1, sequences=[pt.arange(10)], profile=True)
 
     assert isinstance(z.owner.op, Scan)
     fn = z.owner.op.fn
@@ -2542,7 +2542,7 @@ def test_profile_info():
 
     # Set the `ScanProfileStats` name
     z, updates = scan(
-        fn=lambda u: u + 1, sequences=[at.arange(10)], profile="profile_name"
+        fn=lambda u: u + 1, sequences=[pt.arange(10)], profile="profile_name"
     )
 
     assert isinstance(z.owner.op, Scan)
@@ -2553,7 +2553,7 @@ def test_profile_info():
 
     # Use an existing profile object
     profile = fn.profile
-    z, updates = scan(fn=lambda u: u + 1, sequences=[at.arange(10)], profile=profile)
+    z, updates = scan(fn=lambda u: u + 1, sequences=[pt.arange(10)], profile=profile)
 
     assert isinstance(z.owner.op, Scan)
     fn = z.owner.op.fn
@@ -2609,11 +2609,11 @@ class TestExamples:
 
         def f(vsample_tm1):
             hmean_t = sigmoid(dot(vsample_tm1, W) + bhid)
-            hsample_t = at.cast(
+            hsample_t = pt.cast(
                 trng.binomial(1, hmean_t, size=hmean_t.shape), dtype="float32"
             )
             vmean_t = sigmoid(dot(hsample_t, W.T) + bvis)
-            return at.cast(
+            return pt.cast(
                 trng.binomial(1, vmean_t, size=vmean_t.shape), dtype="float32"
             )
 
@@ -2781,7 +2781,7 @@ class TestExamples:
 
         x = scalar()
         seq = vector()
-        outputs_info = [x, at.zeros_like(x)]
+        outputs_info = [x, pt.zeros_like(x)]
         (out1, out2), updates = scan(
             lambda a, b, c: (a + b, b + c),
             sequences=seq,
@@ -2820,7 +2820,7 @@ class TestExamples:
 
         x = dcol()
         seq = dcol()
-        outputs_info = [x, at.zeros_like(x)]
+        outputs_info = [x, pt.zeros_like(x)]
         (out1, out2), updates = scan(
             lambda a, b, c: (a + b, a + c), sequences=seq, outputs_info=outputs_info
         )
@@ -2859,7 +2859,7 @@ class TestExamples:
         )
 
         def f(inp, mem):
-            i = at.join(0, inp, mem)
+            i = pt.join(0, inp, mem)
             d = dot(i, W)
             return d, d
 
@@ -3064,7 +3064,7 @@ class TestExamples:
 
             result_inner, _ = scan(
                 fn=loss_inner,
-                outputs_info=at.as_tensor_variable(np.asarray(0, dtype=np.float32)),
+                outputs_info=pt.as_tensor_variable(np.asarray(0, dtype=np.float32)),
                 non_sequences=[W],
                 n_steps=1,
             )
@@ -3073,7 +3073,7 @@ class TestExamples:
         # Also test return_list for that case.
         result_outer, _ = scan(
             fn=loss_outer,
-            outputs_info=at.as_tensor_variable(np.asarray(0, dtype=np.float32)),
+            outputs_info=pt.as_tensor_variable(np.asarray(0, dtype=np.float32)),
             non_sequences=[W],
             n_steps=n_steps,
             return_list=True,
@@ -3110,7 +3110,7 @@ class TestExamples:
     def test_disconnected_gradient(self):
         v = vector("v")
         m = matrix("m")
-        u0 = at.zeros((7,))
+        u0 = pt.zeros((7,))
 
         [u, m2], _ = scan(lambda _, u: [u, v], sequences=m, outputs_info=[u0, None])
         # This used to raise an exception with older versions because for a
@@ -3120,7 +3120,7 @@ class TestExamples:
     def test_disconnected_gradient2(self):
         v = vector("v")
         m = matrix("m")
-        u0 = at.zeros((7,))
+        u0 = pt.zeros((7,))
 
         [u, m2], _ = scan(
             lambda x, u: [x + u, u + v], sequences=m, outputs_info=[u0, None]
@@ -3314,7 +3314,7 @@ class TestExamples:
         value, scan_updates = scan(
             _active,
             sequences=X,
-            outputs_info=[at.alloc(floatx(0.0), 1, out_size)],
+            outputs_info=[pt.alloc(floatx(0.0), 1, out_size)],
         )
         cost = mean(value)
         gW_x = grad(cost, W_x)
@@ -3351,7 +3351,7 @@ class TestExamples:
         max_coefficients_supported = 10000
 
         # Generate the components of the polynomial
-        full_range = at.arange(max_coefficients_supported)
+        full_range = pt.arange(max_coefficients_supported)
         components, updates = scan(
             fn=lambda coeff, power, free_var: coeff * (free_var**power),
             sequences=[coefficients, full_range],
@@ -3360,7 +3360,7 @@ class TestExamples:
         polynomial1 = components.sum()
         polynomial2, updates = scan(
             fn=lambda coeff, power, prev, free_var: prev + coeff * (free_var**power),
-            outputs_info=at.constant(0, dtype="floatX"),
+            outputs_info=pt.constant(0, dtype="floatX"),
             sequences=[coefficients, full_range],
             non_sequences=x,
         )
@@ -3405,7 +3405,7 @@ class TestExamples:
 
         rand_stream = RandomStream()
         inp = matrix()
-        norm_inp = inp / at_sum(inp, axis=0)
+        norm_inp = inp / pt_sum(inp, axis=0)
 
         def unit_dropout(out_idx):
             def stochastic_pooling(in_idx):
@@ -3416,14 +3416,14 @@ class TestExamples:
                 return inp + sample
 
             pooled, updates_inner = scan(
-                fn=stochastic_pooling, sequences=at.arange(inp.shape[0])
+                fn=stochastic_pooling, sequences=pt.arange(inp.shape[0])
             )
 
             # randomly add stuff to units
             rand_nums = rand_stream.binomial(1, 0.5, size=pooled.shape)
             return pooled + rand_nums, updates_inner
 
-        out, updates_outer = scan(unit_dropout, sequences=[at.arange(inp.shape[0])])
+        out, updates_outer = scan(unit_dropout, sequences=[pt.arange(inp.shape[0])])
 
         with pytest.raises(NullTypeGradError):
             grad(out.sum(), inp)
@@ -3623,7 +3623,7 @@ class TestExamples:
             diff = mitsot_m1 + seq1
             next_mitsot_val = mitsot_m2 + diff
             next_sitsot_val = sitsot_m1 - diff
-            nitsot_out = at.alloc(
+            nitsot_out = pt.alloc(
                 np.asarray(0.0, "float32"), next_mitsot_val + next_sitsot_val
             )
             return next_sitsot_val, next_mitsot_val, nitsot_out
@@ -3887,7 +3887,7 @@ class TestExamples:
         # sequences
         (
             lambda a_t: 2 * a_t,
-            [at.arange(10)],
+            [pt.arange(10)],
             [{}],
             [],
             None,
@@ -3895,7 +3895,7 @@ class TestExamples:
         ),
         # nit-sot
         (
-            lambda: at.as_tensor(2.0),
+            lambda: pt.as_tensor(2.0),
             [],
             [{}],
             [],
@@ -3904,7 +3904,7 @@ class TestExamples:
         ),
         # nit-sot, non_seq
         (
-            lambda c: at.as_tensor(2.0) * c,
+            lambda c: pt.as_tensor(2.0) * c,
             [],
             [{}],
             [scalar("c", dtype="floatX")],
@@ -3915,7 +3915,7 @@ class TestExamples:
         (
             lambda a_tm1: 2 * a_tm1,
             [],
-            [{"initial": at.as_tensor(0.0, dtype="floatX"), "taps": [-1]}],
+            [{"initial": pt.as_tensor(0.0, dtype="floatX"), "taps": [-1]}],
             [],
             3,
             lambda op: op.info.n_sit_sot > 0,
@@ -3924,7 +3924,7 @@ class TestExamples:
         (
             lambda a_tm1: (a_tm1 + 1, until(a_tm1 > 2)),
             [],
-            [{"initial": at.as_tensor(1, dtype=np.int64), "taps": [-1]}],
+            [{"initial": pt.as_tensor(1, dtype=np.int64), "taps": [-1]}],
             [],
             3,
             lambda op: op.info.n_sit_sot > 0,
@@ -3942,7 +3942,7 @@ class TestExamples:
         (
             lambda a_tm1: 2 * a_tm1,
             [],
-            [{"initial": at.as_tensor([0.0, 1.0], dtype="floatX"), "taps": [-2]}],
+            [{"initial": pt.as_tensor([0.0, 1.0], dtype="floatX"), "taps": [-2]}],
             [],
             6,
             lambda op: op.info.n_mit_sot > 0,
@@ -3952,8 +3952,8 @@ class TestExamples:
             lambda a_tm1, b_tm1: (2 * a_tm1, 2 * b_tm1),
             [],
             [
-                {"initial": at.as_tensor(0.0, dtype="floatX"), "taps": [-1]},
-                {"initial": at.as_tensor(0.0, dtype="floatX"), "taps": [-1]},
+                {"initial": pt.as_tensor(0.0, dtype="floatX"), "taps": [-1]},
+                {"initial": pt.as_tensor(0.0, dtype="floatX"), "taps": [-1]},
             ],
             [],
             10,
@@ -4013,7 +4013,7 @@ def test_output_storage_reuse(linker_mode):
         s_in_y, _ = scan(
             fn=lambda z: (z + 1, until(z > 2)),
             outputs_info=[
-                {"taps": [-1], "initial": at.as_tensor(0.0, dtype=np.float64)}
+                {"taps": [-1], "initial": pt.as_tensor(0.0, dtype=np.float64)}
             ],
             mode=mode,
             n_steps=n - 1,
@@ -4025,7 +4025,7 @@ def test_output_storage_reuse(linker_mode):
     s_y, updates = scan(
         fn=fn,
         outputs_info=[None],
-        sequences=[at.as_tensor([3, 2, 1], dtype=np.int64)],
+        sequences=[pt.as_tensor([3, 2, 1], dtype=np.int64)],
         mode=mode,
         allow_gc=False,
     )

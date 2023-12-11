@@ -3,7 +3,7 @@ import pytest
 import scipy.sparse
 
 import pytensor
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.compile.mode import OPT_FAST_RUN, Mode
 from pytensor.graph.basic import Constant, equal_computations
 from pytensor.raise_op import Assert, CheckAndRaise, assert_op
@@ -31,7 +31,7 @@ def test_CheckAndRaise_pickle():
     exc_msg = "this is the exception"
     check_and_raise = CheckAndRaise(CustomException, exc_msg)
 
-    y = check_and_raise(at.as_tensor(1), at.as_tensor(0))
+    y = check_and_raise(pt.as_tensor(1), pt.as_tensor(0))
     y_str = pickle.dumps(y)
     new_y = pickle.loads(y_str)
 
@@ -41,7 +41,7 @@ def test_CheckAndRaise_pickle():
 
 
 def test_CheckAndRaise_equal():
-    x, y = at.vectors("xy")
+    x, y = pt.vectors("xy")
     g1 = assert_op(x, (x > y).all())
     g2 = assert_op(x, (x > y).all())
 
@@ -73,21 +73,21 @@ def test_CheckAndRaise_basic_c(linker):
     exc_msg = "this is the exception"
     check_and_raise = CheckAndRaise(CustomException, exc_msg)
 
-    conds = at.scalar()
-    y = check_and_raise(at.as_tensor(1), conds)
+    conds = pt.scalar()
+    y = check_and_raise(pt.as_tensor(1), conds)
     y_fn = pytensor.function([conds], y, mode=Mode(linker))
 
     with pytest.raises(CustomException, match=exc_msg):
         y_fn(0)
 
-    x = at.vector()
+    x = pt.vector()
     y = check_and_raise(x, conds)
     y_fn = pytensor.function([conds, x], y.shape, mode=Mode(linker, OPT_FAST_RUN))
 
     x_val = np.array([1.0], dtype=pytensor.config.floatX)
     assert np.array_equal(y_fn(0, x_val), x_val)
 
-    y = check_and_raise(x, at.as_tensor(0))
+    y = check_and_raise(x, pt.as_tensor(0))
     y_grad = pytensor.grad(y.sum(), [x])
     y_fn = pytensor.function([x], y_grad, mode=Mode(linker, OPT_FAST_RUN))
 
@@ -143,8 +143,8 @@ class TestCheckAndRaiseInferShape(utt.InferShapeTester):
         super().setup_method()
 
     def test_infer_shape(self):
-        adscal = at.dscalar()
-        bdscal = at.dscalar()
+        adscal = pt.dscalar()
+        bdscal = pt.dscalar()
         adscal_val = np.random.random()
         bdscal_val = np.random.random() + 1
         out = assert_op(adscal, bdscal)
@@ -152,7 +152,7 @@ class TestCheckAndRaiseInferShape(utt.InferShapeTester):
             [adscal, bdscal], [out], [adscal_val, bdscal_val], Assert
         )
 
-        admat = at.dmatrix()
+        admat = pt.dmatrix()
         admat_val = np.random.random((3, 4))
         adscal_val += 1
         out = assert_op(admat, adscal, bdscal)

@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 
 import pytensor
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor import function
 from pytensor.gradient import Lop, Rop, grad, grad_undefined
 from pytensor.graph.basic import Apply
@@ -111,7 +111,7 @@ class RopLopChecker:
         rop_f = function([self.mx, self.mv], yv, on_unused_input="ignore")
         sy, _ = pytensor.scan(
             lambda i, y, x, v: (grad(y[i], x) * v).sum(),
-            sequences=at.arange(y.shape[0]),
+            sequences=pt.arange(y.shape[0]),
             non_sequences=[y, self.mx, self.mv],
         )
         scan_f = function([self.mx, self.mv], sy, on_unused_input="ignore")
@@ -149,7 +149,7 @@ class RopLopChecker:
         rop_f = function([self.x, self.v], yv, on_unused_input="ignore")
         J, _ = pytensor.scan(
             lambda i, y, x: grad(y[i], x),
-            sequences=at.arange(y.shape[0]),
+            sequences=pt.arange(y.shape[0]),
             non_sequences=[y, self.x],
         )
         sy = dot(J, self.v)
@@ -179,7 +179,7 @@ class RopLopChecker:
         lop_f = function([self.x, self.v], yv, on_unused_input="ignore")
         J, _ = pytensor.scan(
             lambda i, y, x: grad(y[i], x),
-            sequences=at.arange(y.shape[0]),
+            sequences=pt.arange(y.shape[0]),
             non_sequences=[y, self.x],
         )
         sy = dot(self.v, J)
@@ -248,7 +248,7 @@ class TestRopLop(RopLopChecker):
     def test_join(self):
         tv = np.asarray(self.rng.uniform(size=(10,)), pytensor.config.floatX)
         t = pytensor.shared(tv)
-        out = at.join(0, self.x, t)
+        out = pt.join(0, self.x, t)
         self.check_rop_lop(out, (self.in_shape[0] + 10,))
 
     def test_dot(self):
@@ -261,7 +261,7 @@ class TestRopLop(RopLopChecker):
         self.check_rop_lop((self.x + 1) ** 2, self.in_shape)
 
     def test_elemwise1(self):
-        self.check_rop_lop(self.x + at.cast(self.x, "int32"), self.in_shape)
+        self.check_rop_lop(self.x + pt.cast(self.x, "int32"), self.in_shape)
 
     def test_flatten(self):
         self.check_mat_rop_lop(
@@ -278,11 +278,11 @@ class TestRopLop(RopLopChecker):
 
     def test_alloc(self):
         # Alloc of the sum of x into a vector
-        out1d = at.alloc(self.x.sum(), self.in_shape[0])
+        out1d = pt.alloc(self.x.sum(), self.in_shape[0])
         self.check_rop_lop(out1d, self.in_shape[0])
 
         # Alloc of x into a 3-D tensor, flattened
-        out3d = at.alloc(
+        out3d = pt.alloc(
             self.x, self.mat_in_shape[0], self.mat_in_shape[1], self.in_shape[0]
         )
         self.check_rop_lop(
@@ -330,7 +330,7 @@ class TestRopLop(RopLopChecker):
         # 2013. The bug consists when through a dot operation there is only
         # one differentiable path (i.e. there is no gradient wrt to one of
         # the inputs).
-        x = at.arange(20.0).reshape([1, 20])
+        x = pt.arange(20.0).reshape([1, 20])
         v = pytensor.shared(np.ones([20]))
         d = dot(x, v).sum()
         Rop(grad(d, v), v, v)

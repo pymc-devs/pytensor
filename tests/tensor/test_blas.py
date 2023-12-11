@@ -7,8 +7,8 @@ import pytest
 from numpy.testing import assert_array_almost_equal
 
 import pytensor
-import pytensor.scalar as aes
-import pytensor.tensor as at
+import pytensor.scalar as ps
+import pytensor.tensor as pt
 import pytensor.tensor.blas_scipy
 from pytensor.compile.function import function
 from pytensor.compile.io import In
@@ -216,9 +216,9 @@ class TestGemm:
         b = matrix()
         s = shared(np.zeros((5, 5)).astype(config.floatX))
 
-        lr1 = at.constant(0.01).astype(config.floatX)
-        lr2 = at.constant(2).astype(config.floatX)
-        l2_reg = at.constant(0.0001).astype(config.floatX)
+        lr1 = pt.constant(0.01).astype(config.floatX)
+        lr2 = pt.constant(2).astype(config.floatX)
+        l2_reg = pt.constant(0.0001).astype(config.floatX)
 
         # test constant merge with gemm
         f = function(
@@ -292,7 +292,7 @@ class TestGemm:
         rng = np.random.default_rng(seed=utt.fetch_seed())
         Z = shared(rng.random((2, 2)), name="Z")
         A = shared(rng.random((2, 2)), name="A")
-        one = at.constant(1.0).astype(Z.dtype)
+        one = pt.constant(1.0).astype(Z.dtype)
         f = inplace_func([], gemm_inplace(Z, one, A, A, one))
         # TODO FIXME: This is a bad test
         f()
@@ -396,7 +396,7 @@ class TestGemm:
                 g_i = function(
                     [],
                     tz_i,
-                    updates=[(tz, at.set_subtensor(tz[:, :, i], tz_i))],
+                    updates=[(tz, pt.set_subtensor(tz[:, :, i], tz_i))],
                     mode=Mode(optimizer=None, linker=l),
                 )
                 for j in range(3):
@@ -581,8 +581,8 @@ def test_res_is_a():
 class TestAsScalar:
     def test_basic(self):
         # Test that it works on scalar constants
-        a = at.constant(2.5)
-        b = at.constant(np.asarray([[[0.5]]]))
+        a = pt.constant(2.5)
+        b = pt.constant(np.asarray([[[0.5]]]))
         b2 = b.dimshuffle()
         assert b2.ndim == 0
         d_a = DimShuffle([], [])(a)
@@ -597,7 +597,7 @@ class TestAsScalar:
 
     def test_basic_1(self):
         # Test that it fails on nonscalar constants
-        a = at.constant(np.ones(5))
+        a = pt.constant(np.ones(5))
         assert _as_scalar(a) is None
         assert _as_scalar(DimShuffle([False], [0, "x"])(a)) is None
 
@@ -733,7 +733,7 @@ def test_gemm_opt_double_gemm():
     o = [
         (
             a * dot(X, Y)
-            + gemm_inplace(Z, b, S.T, R.T, at.constant(1.0).astype(config.floatX))
+            + gemm_inplace(Z, b, S.T, R.T, pt.constant(1.0).astype(config.floatX))
         )
     ]
     f = inplace_func(
@@ -908,7 +908,7 @@ def test_gemm_nested():
 def test_gemm_opt_wishlist():
     X, Y, Z, a, b = matrix(), matrix(), matrix(), scalar(), scalar()
 
-    # with >2 additions of the same ``at.dot(X, Y)`` term
+    # with >2 additions of the same ``pt.dot(X, Y)`` term
     just_gemm([X, Y, Z, a, b], [(b * b) * Z * a + (a * a) * dot(X, Y) + b * dot(X, Y)])
 
     just_gemm([X, Y, Z, a, b], [Z + dot(X, Y) + dot(X, Y)])
@@ -1121,8 +1121,8 @@ def test_dot22scalar():
             for dtype3 in ["complex64", "complex128"]:
                 c = matrix("c", dtype=dtype3)
                 for dtype4 in ["complex64", "complex128"]:
-                    cst = at.constant(0.2, dtype=dtype4)
-                    cst2 = at.constant(0.1, dtype=dtype4)
+                    cst = pt.constant(0.2, dtype=dtype4)
+                    cst2 = pt.constant(0.1, dtype=dtype4)
 
                     def check_dot22scalar(func, len_topo_scalar=-1):
                         topo = func.maker.fgraph.toposort()
@@ -1878,7 +1878,7 @@ class TestGer(unittest_tools.OptimizationTestMixin):
         return function(inputs, outputs, self.mode, updates=updates)
 
     def b(self, bval):
-        return at.as_tensor_variable(np.asarray(bval, dtype=self.dtype))
+        return pt.as_tensor_variable(np.asarray(bval, dtype=self.dtype))
 
     def test_b_0_triggers_ger(self):
         # test local_gemm_to_ger opt
@@ -2062,7 +2062,7 @@ class TestGer(unittest_tools.OptimizationTestMixin):
             [self.x, self.y],
             [],
             updates=[
-                (A, A + at.constant(0.1, dtype=self.dtype) * outer(self.x, self.y))
+                (A, A + pt.constant(0.1, dtype=self.dtype) * outer(self.x, self.y))
             ],
         )
         self.assertFunctionContains(f, self.ger_destructive)
@@ -2276,7 +2276,7 @@ class TestBlasStrides:
                 a_n = l * av[::a_step1, ::a_step2] + np.dot(
                     bv[::b_step1, ::b_step2], cv[::c_step1, ::c_step2]
                 )
-                at_n = (
+                pt_n = (
                     l * av[::a_step1, ::a_step2].T
                     + np.dot(bv[::b_step1, ::b_step2], cv[::c_step1, ::c_step2]).T
                 )
@@ -2302,25 +2302,25 @@ class TestBlasStrides:
                     np.transpose(a_dev.copy())[::a_step2, ::a_step1], borrow=True
                 )
                 f_tnn()
-                assert np.allclose(a_t.get_value(), at_n)
+                assert np.allclose(a_t.get_value(), pt_n)
 
                 a_t.set_value(
                     np.transpose(a_dev.copy())[::a_step2, ::a_step1], borrow=True
                 )
                 f_tnt()
-                assert np.allclose(a_t.get_value(), at_n)
+                assert np.allclose(a_t.get_value(), pt_n)
 
                 a_t.set_value(
                     np.transpose(a_dev.copy())[::a_step2, ::a_step1], borrow=True
                 )
                 f_ttn()
-                assert np.allclose(a_t.get_value(), at_n)
+                assert np.allclose(a_t.get_value(), pt_n)
 
                 a_t.set_value(
                     np.transpose(a_dev.copy())[::a_step2, ::a_step1], borrow=True
                 )
                 f_ttt()
-                assert np.allclose(a_t.get_value(), at_n)
+                assert np.allclose(a_t.get_value(), pt_n)
 
     def test_gemm(self):
         rng = np.random.default_rng(unittest_tools.fetch_seed())
@@ -2592,7 +2592,7 @@ TestBatchedDot = makeTester(
                 x * y if x.ndim == 0 or y.ndim == 0 else np.dot(x, y)
                 for x, y in zip(xs, ys)
             ],
-            dtype=aes.upcast(xs.dtype, ys.dtype),
+            dtype=ps.upcast(xs.dtype, ys.dtype),
         )
     ),
     checks={},
