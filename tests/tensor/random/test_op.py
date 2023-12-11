@@ -206,6 +206,42 @@ def test_RandomVariable_incompatible_size():
         rv_op(np.zeros((2, 4, 3)), 1, size=(4,))
 
 
+class MultivariateRandomVariable(RandomVariable):
+    name = "MultivariateRandomVariable"
+    ndim_supp = 1
+    ndims_params = (1, 2)
+    dtype = "floatX"
+
+    def _supp_shape_from_params(self, dist_params, param_shapes=None):
+        return [dist_params[0].shape[-1]]
+
+
+@config.change_flags(compute_test_value="off")
+def test_multivariate_rv_infer_static_shape():
+    """Test that infer shape for multivariate random variable works when a parameter must be broadcasted."""
+    mv_op = MultivariateRandomVariable()
+
+    param1 = tensor(shape=(10, 2, 3))
+    param2 = tensor(shape=(10, 2, 3, 3))
+    assert mv_op(param1, param2).type.shape == (10, 2, 3)
+
+    param1 = tensor(shape=(2, 3))
+    param2 = tensor(shape=(10, 2, 3, 3))
+    assert mv_op(param1, param2).type.shape == (10, 2, 3)
+
+    param1 = tensor(shape=(10, 2, 3))
+    param2 = tensor(shape=(2, 3, 3))
+    assert mv_op(param1, param2).type.shape == (10, 2, 3)
+
+    param1 = tensor(shape=(10, 1, 3))
+    param2 = tensor(shape=(2, 3, 3))
+    assert mv_op(param1, param2).type.shape == (10, 2, 3)
+
+    param1 = tensor(shape=(2, 3))
+    param2 = tensor(shape=(2, 3, 3))
+    assert mv_op(param1, param2, size=(10, 2)).type.shape == (10, 2, 3)
+
+
 def test_vectorize_node():
     vec = tensor(shape=(None,))
     vec.tag.test_value = [0, 0, 0]
