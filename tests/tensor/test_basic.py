@@ -7,7 +7,7 @@ import pytest
 
 import pytensor
 import pytensor.scalar as ps
-import pytensor.tensor.basic as pt
+import pytensor.tensor.basic as ptb
 import pytensor.tensor.math as ptm
 from pytensor import compile, config, function, shared
 from pytensor.compile.io import In, Out
@@ -507,7 +507,7 @@ class ApplyDefaultTestOp(Op):
         self.n_outs = n_outs
 
     def make_node(self, x):
-        x = pt.as_tensor_variable(x)
+        x = ptb.as_tensor_variable(x)
         return Apply(self, [x], [x.type() for _ in range(self.n_outs)])
 
     def perform(self, *args, **kwargs):
@@ -664,7 +664,7 @@ class TestAsTensorVariable:
         ("x", "y"),
         [
             ([1, 2], [1, 2]),
-            ([pt.as_tensor(1), pt.as_tensor(2)], [1, 2]),
+            ([ptb.as_tensor(1), ptb.as_tensor(2)], [1, 2]),
             ([ps.constant(1), ps.constant(2)], [1, 2]),
         ],
     )
@@ -689,14 +689,14 @@ class TestAsTensorVariable:
 
     def test_make_vector(self):
         a = iscalar()
-        x = pt.tile(a, (1, 1, 1))
+        x = ptb.tile(a, (1, 1, 1))
         y = (constant(1, dtype="int64"), x.shape[2])
-        res = pt.as_tensor(y, ndim=1)
+        res = ptb.as_tensor(y, ndim=1)
         assert isinstance(res.owner.op, MakeVector)
         assert tuple(res.owner.inputs) == y
 
         y = (1, x.shape[2])
-        res = pt.as_tensor(y)
+        res = ptb.as_tensor(y)
         assert isinstance(res.owner.op, MakeVector)
 
     def test_multi_out(self):
@@ -705,14 +705,14 @@ class TestAsTensorVariable:
                 return Apply(self, [a, b], [a, b])
 
         with pytest.raises(TypeError):
-            pt.as_tensor(TestOp(matrix(), matrix()))
+            ptb.as_tensor(TestOp(matrix(), matrix()))
 
     def test_masked_array_not_implemented(
         self,
     ):
         x = np.ma.masked_greater(np.array([1, 2, 3, 4]), 3)
         with pytest.raises(NotImplementedError, match="MaskedArrays are not supported"):
-            pt.as_tensor(x)
+            ptb.as_tensor(x)
 
 
 class TestAlloc:
@@ -806,54 +806,54 @@ class TestAlloc:
 
     def test_ones(self):
         for shp in [[], 1, [1], [1, 2], [1, 2, 3], np.r_[1, 2, 3]]:
-            ones = pytensor.function([], [pt.ones(shp)], mode=self.mode)
+            ones = pytensor.function([], [ptb.ones(shp)], mode=self.mode)
             assert np.allclose(ones(), np.ones(shp))
             # When shape is a TensorConstant
             ones_const = pytensor.function(
-                [], [pt.ones(pt.constant(shp))], mode=self.mode
+                [], [ptb.ones(ptb.constant(shp))], mode=self.mode
             )
             assert np.allclose(ones_const(), np.ones(shp))
 
         # scalar doesn't have to be provided as input
         x = scalar()
         shp = []
-        ones_scalar = pytensor.function([], [pt.ones(x.shape)], mode=self.mode)
+        ones_scalar = pytensor.function([], [ptb.ones(x.shape)], mode=self.mode)
         assert np.allclose(ones_scalar(), np.ones(shp))
 
         for typ, shp in [(vector, [3]), (matrix, [3, 4])]:
             x = typ()
-            ones_tensor = pytensor.function([x], [pt.ones(x.shape)], mode=self.mode)
+            ones_tensor = pytensor.function([x], [ptb.ones(x.shape)], mode=self.mode)
             inp = np.zeros(shp, dtype=config.floatX)
             assert np.allclose(ones_tensor(inp), np.ones(shp))
 
     def test_zeros(self):
         for shp in [[], 1, [1], [1, 2], [1, 2, 3], np.r_[1, 2, 3]]:
-            zeros = pytensor.function([], [pt.zeros(shp)], mode=self.mode)
+            zeros = pytensor.function([], [ptb.zeros(shp)], mode=self.mode)
             assert np.allclose(zeros(), np.zeros(shp))
             # When shape is a TensorConstant
             zeros_const = pytensor.function(
-                [], [pt.zeros(pt.constant(shp))], mode=self.mode
+                [], [ptb.zeros(ptb.constant(shp))], mode=self.mode
             )
             assert np.allclose(zeros_const(), np.zeros(shp))
 
         # scalar doesn't have to be provided as input
         x = scalar()
         shp = []
-        zeros_scalar = pytensor.function([], [pt.zeros(x.shape)], mode=self.mode)
+        zeros_scalar = pytensor.function([], [ptb.zeros(x.shape)], mode=self.mode)
         assert np.allclose(zeros_scalar(), np.zeros(shp))
 
         for typ, shp in [(vector, [3]), (matrix, [3, 4])]:
             x = typ()
-            zeros_tensor = pytensor.function([x], [pt.zeros(x.shape)], mode=self.mode)
+            zeros_tensor = pytensor.function([x], [ptb.zeros(x.shape)], mode=self.mode)
             inp = np.zeros(shp, dtype=config.floatX)
             assert np.allclose(zeros_tensor(inp), np.zeros(shp))
 
     def test_full(self):
-        full_pt = pt.full((2, 3), 3, dtype="int64")
+        full_pt = ptb.full((2, 3), 3, dtype="int64")
         res = pytensor.function([], full_pt, mode=self.mode)()
         assert np.array_equal(res, np.full((2, 3), 3, dtype="int64"))
 
-    @pytest.mark.parametrize("func", (pt.zeros, pt.empty))
+    @pytest.mark.parametrize("func", (ptb.zeros, ptb.empty))
     def test_rebuild(self, func):
         x = vector(shape=(50,))
         x_test = np.zeros((50,), dtype=config.floatX)
@@ -873,17 +873,17 @@ class TestAlloc:
         x = tensor(shape=(None, 1, 5))
         d0 = scalar("d0", dtype=int)
         d1 = scalar("d1", dtype=int)
-        assert pt.alloc(x, 3, 1, 5).type.shape == (3, 1, 5)
-        assert pt.alloc(x, 3, 4, 5).type.shape == (3, 4, 5)
-        assert pt.alloc(x, d0, d1, 5).type.shape == (None, None, 5)
-        assert pt.alloc(x, d0, 1, d1).type.shape == (None, 1, 5)
+        assert ptb.alloc(x, 3, 1, 5).type.shape == (3, 1, 5)
+        assert ptb.alloc(x, 3, 4, 5).type.shape == (3, 4, 5)
+        assert ptb.alloc(x, d0, d1, 5).type.shape == (None, None, 5)
+        assert ptb.alloc(x, d0, 1, d1).type.shape == (None, 1, 5)
 
         msg = "Alloc static input type and target shape are incompatible"
         with pytest.raises(ValueError, match=msg):
-            pt.alloc(x, 3, 1, 1)
+            ptb.alloc(x, 3, 1, 1)
 
         with pytest.raises(ValueError, match=msg):
-            pt.alloc(x, 3, 1, 6)
+            ptb.alloc(x, 3, 1, 6)
 
     def test_alloc_of_view_linker(self):
         """Check we can allocate a new array properly in the C linker when input is a view."""
@@ -1497,7 +1497,7 @@ class TestJoinAndSplit:
         # Fast test of concatenate as this is an alias for join.
         # also test that we remove the Join op if there is only 1 input
         m = fmatrix()
-        c = pt.concatenate([m])
+        c = ptb.concatenate([m])
         f = pytensor.function(
             inputs=[m], outputs=[c], mode=self.mode.including("local_join_1")
         )
@@ -2016,7 +2016,7 @@ class TestJoinAndSplit:
         x = TensorType(self.floatX, shape=(None, None, 1))()
         u = TensorType(self.floatX, shape=(None, None, 1))()
         # This line used to crash.
-        pt.concatenate([x, -u], axis=2)
+        ptb.concatenate([x, -u], axis=2)
 
     def test_concatenate_same(self):
         # Test that we can concatenate the same tensor multiple time.
@@ -2024,7 +2024,7 @@ class TestJoinAndSplit:
         # In the past it was broken on the GPU.
         rng = np.random.default_rng(seed=utt.fetch_seed())
         T_shared = self.shared(rng.random((3, 4)).astype(self.floatX))
-        Tout = pt.concatenate([T_shared, T_shared])
+        Tout = ptb.concatenate([T_shared, T_shared])
         f = function([], Tout, mode=self.mode)
         out = f()
         if config.mode != "FAST_COMPILE":
@@ -2045,24 +2045,24 @@ class TestJoinAndSplit:
             self.join_op(0, v, m)
 
     def test_static_shape_inference(self):
-        a = pt.tensor(dtype="int8", shape=(2, 3))
-        b = pt.tensor(dtype="int8", shape=(2, 5))
+        a = ptb.tensor(dtype="int8", shape=(2, 3))
+        b = ptb.tensor(dtype="int8", shape=(2, 5))
 
-        res = pt.join(1, a, b).type.shape
+        res = ptb.join(1, a, b).type.shape
         assert res == (2, 8)
         assert all(isinstance(s, int) for s in res)
 
-        res = pt.join(-1, a, b).type.shape
+        res = ptb.join(-1, a, b).type.shape
         assert res == (2, 8)
         assert all(isinstance(s, int) for s in res)
 
         # Check early informative errors from static shape info
         with pytest.raises(ValueError, match="must match exactly"):
-            pt.join(0, pt.ones((2, 3)), pt.ones((2, 5)))
+            ptb.join(0, ptb.ones((2, 3)), ptb.ones((2, 5)))
 
         # Check partial inference
-        d = pt.tensor(dtype="int8", shape=(2, None))
-        res = pt.join(1, a, b, d).type.shape
+        d = ptb.tensor(dtype="int8", shape=(2, None))
+        res = ptb.join(1, a, b, d).type.shape
         assert res == (2, None)
         assert isinstance(res[0], int)
 
@@ -2107,7 +2107,7 @@ class TestJoinAndSplit:
         # element.
         s = lscalar()
         x = vector("x")
-        z = pt.zeros((s,))
+        z = ptb.zeros((s,))
 
         join = Join(view=0)
         c = join(0, x, z, z)
@@ -2130,8 +2130,8 @@ class TestJoinAndSplit:
         x_0 = fmatrix()
         x_1 = fmatrix()
         x_2 = fvector()
-        join_0 = pt.concatenate([x_0], axis=1)
-        join_1 = pt.concatenate([x_0, x_1, shape_padright(x_2)], axis=1)
+        join_0 = ptb.concatenate([x_0], axis=1)
+        join_1 = ptb.concatenate([x_0, x_1, shape_padright(x_2)], axis=1)
 
         assert join_0 is x_0
         assert join_1 is not x_0
@@ -2204,10 +2204,10 @@ def test_ScalarFromTensor(cast_policy):
         elif cast_policy == "numpy+floatX":
             assert isinstance(v, np.int64)
 
-        aes = lscalar()
-        ss = scalar_from_tensor(aes)
-        ss.owner.op.grad([aes], [ss])
-        fff = function([aes], ss)
+        pts = lscalar()
+        ss = scalar_from_tensor(pts)
+        ss.owner.op.grad([pts], [ss])
+        fff = function([pts], ss)
         v = fff(np.asarray(5))
         assert v == 5
         assert isinstance(v, np.int64)
@@ -2344,26 +2344,26 @@ def test_is_flat():
     # given `ndim`
 
     # Constant variable
-    assert pt.is_flat(pt.as_tensor_variable(np.zeros(10)))
-    assert pt.is_flat(pt.as_tensor_variable(np.zeros((10, 10, 10))), ndim=3)
-    assert not pt.is_flat(pt.as_tensor_variable(np.zeros((10, 10, 10))))
+    assert ptb.is_flat(ptb.as_tensor_variable(np.zeros(10)))
+    assert ptb.is_flat(ptb.as_tensor_variable(np.zeros((10, 10, 10))), ndim=3)
+    assert not ptb.is_flat(ptb.as_tensor_variable(np.zeros((10, 10, 10))))
 
     # Symbolic variable
-    assert pt.is_flat(vector())
-    assert pt.is_flat(tensor3(), ndim=3)
-    assert not pt.is_flat(tensor3())
+    assert ptb.is_flat(vector())
+    assert ptb.is_flat(tensor3(), ndim=3)
+    assert not ptb.is_flat(tensor3())
 
     # Reshape with constant shape
     X = tensor4()
-    assert pt.is_flat(X.reshape((-1,)))
-    assert pt.is_flat(X.reshape((10, 10, -1)), ndim=3)
-    assert not pt.is_flat(X.reshape((10, 10, -1)))
+    assert ptb.is_flat(X.reshape((-1,)))
+    assert ptb.is_flat(X.reshape((10, 10, -1)), ndim=3)
+    assert not ptb.is_flat(X.reshape((10, 10, -1)))
 
     # Reshape with symbolic shape
     X = tensor4()
-    assert pt.is_flat(X.reshape((iscalar(),)))
-    assert pt.is_flat(X.reshape((iscalar(),) * 3), ndim=3)
-    assert not pt.is_flat(X.reshape((iscalar(),) * 3))
+    assert ptb.is_flat(X.reshape((iscalar(),)))
+    assert ptb.is_flat(X.reshape((iscalar(),) * 3), ndim=3)
+    assert not ptb.is_flat(X.reshape((iscalar(),) * 3))
 
 
 def test_tile():
@@ -2998,7 +2998,7 @@ class TestInversePermutation:
 
         # Test passing a list
         p = [2, 4, 3, 0, 1]
-        inv = pt.inverse_permutation(p)
+        inv = ptb.inverse_permutation(p)
         f = pytensor.function([], inv)
         assert np.array_equal(f(), np.array([3, 4, 0, 2, 1]))
 
@@ -3409,7 +3409,7 @@ class TestGetUnderlyingScalarConstantValue:
         with pytest.raises(NotScalarConstantError):
             get_underlying_scalar_constant_value(ps.int64())
 
-        res = get_underlying_scalar_constant_value(pt.as_tensor(10))
+        res = get_underlying_scalar_constant_value(ptb.as_tensor(10))
         assert res == 10
         assert isinstance(res, np.ndarray)
 
@@ -3417,13 +3417,13 @@ class TestGetUnderlyingScalarConstantValue:
         assert res == 10
         assert isinstance(res, np.ndarray)
 
-        a = pt.stack([1, 2, 3])
+        a = ptb.stack([1, 2, 3])
         assert get_underlying_scalar_constant_value(a[0]) == 1
         assert get_underlying_scalar_constant_value(a[1]) == 2
         assert get_underlying_scalar_constant_value(a[2]) == 3
 
         b = iscalar()
-        a = pt.stack([b, 2, 3])
+        a = ptb.stack([b, 2, 3])
         with pytest.raises(NotScalarConstantError):
             get_underlying_scalar_constant_value(a[0])
         assert get_underlying_scalar_constant_value(a[1]) == 2
@@ -3432,7 +3432,7 @@ class TestGetUnderlyingScalarConstantValue:
         # For now get_underlying_scalar_constant_value goes through only MakeVector and Join of
         # scalars.
         v = ivector()
-        a = pt.stack([v, [2], [3]])
+        a = ptb.stack([v, [2], [3]])
         with pytest.raises(NotScalarConstantError):
             get_underlying_scalar_constant_value(a[0])
         with pytest.raises(NotScalarConstantError):
@@ -3445,12 +3445,12 @@ class TestGetUnderlyingScalarConstantValue:
         v = row()
         assert get_underlying_scalar_constant_value(v.shape[0]) == 1
 
-        res = pt.get_underlying_scalar_constant_value(pt.as_tensor([10, 20]).shape[0])
+        res = ptb.get_underlying_scalar_constant_value(ptb.as_tensor([10, 20]).shape[0])
         assert isinstance(res, np.ndarray)
         assert 2 == res
 
-        res = pt.get_underlying_scalar_constant_value(
-            9 + pt.as_tensor([1.0]).shape[0],
+        res = ptb.get_underlying_scalar_constant_value(
+            9 + ptb.as_tensor([1.0]).shape[0],
             elemwise=True,
             only_process_constants=False,
             max_recur=9,
@@ -3516,7 +3516,7 @@ class TestGetUnderlyingScalarConstantValue:
         assert np.allclose(get_underlying_scalar_constant_value(s), c.data * 1.2)
         s = c < 0.5
         assert np.allclose(get_underlying_scalar_constant_value(s), int(c.data < 0.5))
-        s = pt.second(c, 0.4)
+        s = ptb.second(c, 0.4)
         assert np.allclose(get_underlying_scalar_constant_value(s), 0.4)
 
     def test_assert(self):
@@ -3544,7 +3544,7 @@ class TestGetUnderlyingScalarConstantValue:
         # Second should apply when the value is constant but not the shape
         c = constant(np.random.random())
         shp = vector()
-        s = pt.second(shp, c)
+        s = ptb.second(shp, c)
         assert get_underlying_scalar_constant_value(s) == c.data
 
     def test_copy(self):
@@ -3572,7 +3572,7 @@ class TestGetUnderlyingScalarConstantValue:
 
 @pytest.mark.parametrize(
     ["valid_inp", "invalid_inp"],
-    ((np.array(4), np.zeros(5)), (pt.constant(4), pt.constant(3, ndim=1))),
+    ((np.array(4), np.zeros(5)), (ptb.constant(4), ptb.constant(3, ndim=1))),
 )
 def test_get_scalar_constant_value(valid_inp, invalid_inp):
     with pytest.raises(NotScalarConstantError):
@@ -3748,7 +3748,7 @@ class TestAllocDiag:
                 # Test perform
                 if np.maximum(axis1, axis2) > len(test_val.shape):
                     continue
-                diag_x = pt.alloc_diag(x, offset=offset, axis1=axis1, axis2=axis2)
+                diag_x = ptb.alloc_diag(x, offset=offset, axis1=axis1, axis2=axis2)
                 f = pytensor.function([x], diag_x)
                 # alloc_diag and extract the diagonal again to check for correctness
                 diag_arr = f(test_val)
@@ -3781,7 +3781,7 @@ class TestAllocDiag:
 def test_diagonal_negative_axis():
     x = np.arange(2 * 3 * 3).reshape((2, 3, 3))
     np.testing.assert_allclose(
-        pt.diagonal(x, axis1=-1, axis2=-2).eval(),
+        ptb.diagonal(x, axis1=-1, axis2=-2).eval(),
         np.diagonal(x, axis1=-1, axis2=-2),
     )
 
@@ -3798,16 +3798,16 @@ def test_transpose():
     f = pytensor.function(
         [x1, x2, x3],
         [
-            pt.transpose(x1),
-            pt.transpose(x2),
-            pt.transpose(x3),
+            ptb.transpose(x1),
+            ptb.transpose(x2),
+            ptb.transpose(x3),
             x1.transpose(),
             x2.transpose(),
             x3.transpose(),
             x2.transpose(0, 1),
             x3.transpose((0, 2, 1)),
-            pt.transpose(x2, [0, 1]),
-            pt.transpose(x3, [0, 2, 1]),
+            ptb.transpose(x2, [0, 1]),
+            ptb.transpose(x3, [0, 2, 1]),
         ],
     )
 
@@ -3831,10 +3831,10 @@ def test_transpose():
     assert np.all(t3d == np.transpose(x3v, [0, 2, 1]))
 
     # Check that we create a name.
-    assert pt.transpose(x1).name == "x1.T"
-    assert pt.transpose(x2).name == "x2.T"
-    assert pt.transpose(x3).name == "x3.T"
-    assert pt.transpose(dmatrix()).name is None
+    assert ptb.transpose(x1).name == "x1.T"
+    assert ptb.transpose(x2).name == "x2.T"
+    assert ptb.transpose(x3).name == "x3.T"
+    assert ptb.transpose(dmatrix()).name is None
 
 
 def test_stacklists():
@@ -4164,7 +4164,7 @@ class TestSwapaxes:
 
 
 def test_moveaxis():
-    x = pt.zeros((3, 4, 5))
+    x = ptb.zeros((3, 4, 5))
     tuple(moveaxis(x, 0, -1).shape.eval()) == (4, 5, 3)
     tuple(moveaxis(x, -1, 0).shape.eval()) == (5, 3, 4)
     tuple(moveaxis(x, [0, 1], [-1, -2]).shape.eval()) == (5, 4, 3)
@@ -4172,7 +4172,7 @@ def test_moveaxis():
 
 
 def test_moveaxis_error():
-    x = pt.zeros((3, 4, 5))
+    x = ptb.zeros((3, 4, 5))
     with pytest.raises(
         ValueError,
         match="`source` and `destination` arguments must have the same number of elements",
@@ -4344,20 +4344,20 @@ def test_empty():
     assert out.shape == (2, 3)
     assert out.dtype == "float32"
 
-    empty_pt = pt.empty(3)
+    empty_pt = ptb.empty(3)
     res = pytensor.function([], empty_pt)()
     assert res.shape == (3,)
 
-    empty_pt = pt.empty((2, 3), dtype=None)
+    empty_pt = ptb.empty((2, 3), dtype=None)
     res = pytensor.function([], empty_pt)()
     assert res.shape == (2, 3)
 
-    empty_pt = pt.empty((2, 3), dtype="int64")
+    empty_pt = ptb.empty((2, 3), dtype="int64")
     res = pytensor.function([], empty_pt)()
     assert res.shape == (2, 3)
     assert res.dtype == "int64"
 
-    empty_pt = pt.empty_like(empty_pt)
+    empty_pt = ptb.empty_like(empty_pt)
     res = pytensor.function([], empty_pt)()
     assert res.shape == (2, 3)
     assert res.dtype == "int64"
@@ -4373,7 +4373,7 @@ def test_identity_like_dtype():
 
     # Test passing list
     m = [[0, 1], [1, 3]]
-    out = pt.identity_like(m)
+    out = ptb.identity_like(m)
     f = pytensor.function([], out)
     assert np.array_equal(f(), np.eye(2))
 
@@ -4446,14 +4446,14 @@ class TestTakeAlongAxis:
         indices_size[axis or 0] = samples
         indices = rng.integers(low=0, high=shape[axis or 0], size=indices_size)
 
-        arr_in = pt.tensor(
+        arr_in = ptb.tensor(
             dtype=config.floatX, shape=tuple(1 if s == 1 else None for s in arr.shape)
         )
-        indices_in = pt.tensor(
+        indices_in = ptb.tensor(
             dtype=np.int64, shape=tuple(1 if s == 1 else None for s in indices.shape)
         )
 
-        out = pt.take_along_axis(arr_in, indices_in, axis)
+        out = ptb.take_along_axis(arr_in, indices_in, axis)
 
         func = pytensor.function([arr_in, indices_in], out)
 
@@ -4462,14 +4462,14 @@ class TestTakeAlongAxis:
         )
 
     def test_ndim_dtype_failures(self):
-        arr = pt.tensor(dtype=config.floatX, shape=(None,) * 2)
-        indices = pt.tensor(dtype=np.int64, shape=(None,) * 3)
+        arr = ptb.tensor(dtype=config.floatX, shape=(None,) * 2)
+        indices = ptb.tensor(dtype=np.int64, shape=(None,) * 3)
         with pytest.raises(ValueError):
-            pt.take_along_axis(arr, indices)
+            ptb.take_along_axis(arr, indices)
 
-        indices = pt.tensor(dtype=np.float64, shape=(None,) * 2)
+        indices = ptb.tensor(dtype=np.float64, shape=(None,) * 2)
         with pytest.raises(IndexError):
-            pt.take_along_axis(arr, indices)
+            ptb.take_along_axis(arr, indices)
 
 
 @pytest.mark.parametrize(
@@ -4494,7 +4494,7 @@ def test_oriented_stack_functions(func):
     with pytest.raises(ValueError):
         func()
 
-    a = pt.tensor(dtype=np.float64, shape=(None, None, None))
+    a = ptb.tensor(dtype=np.float64, shape=(None, None, None))
 
     with pytest.raises(ValueError):
         func(a, a)
@@ -4502,7 +4502,7 @@ def test_oriented_stack_functions(func):
 
 def test_trace():
     x_val = np.ones((5, 4, 2))
-    x = pt.as_tensor(x_val)
+    x = ptb.as_tensor(x_val)
 
     np.testing.assert_allclose(
         trace(x).eval(),
@@ -4524,7 +4524,7 @@ def test_vectorize_extract_diag():
     signature = "(a1,b,a2)->(b,a)"
 
     def core_pt(x):
-        return pt.diagonal(x, offset=1, axis1=0, axis2=2)
+        return ptb.diagonal(x, offset=1, axis1=0, axis2=2)
 
     def core_np(x):
         return np.diagonal(x, offset=1, axis1=0, axis2=2)

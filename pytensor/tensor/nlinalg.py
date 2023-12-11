@@ -7,8 +7,8 @@ from pytensor import scalar as aes
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
-from pytensor.tensor import basic as at
-from pytensor.tensor import math as tm
+from pytensor.tensor import basic as ptb
+from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable, diagonal
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.type import dvector, lscalar, matrix, scalar, vector
@@ -47,13 +47,13 @@ class MatrixPinv(Op):
         (z,) = outputs
         (gz,) = g_outputs
 
-        x_dot_z = tm.dot(x, z)
-        z_dot_x = tm.dot(z, x)
+        x_dot_z = ptm.dot(x, z)
+        z_dot_x = ptm.dot(z, x)
 
         grad = (
             -matrix_dot(z, gz.T, z)
-            + matrix_dot(z, z.T, gz, (at.identity_like(x_dot_z) - x_dot_z))
-            + matrix_dot((at.identity_like(z_dot_x) - z_dot_x), gz, z.T, z)
+            + matrix_dot(z, z.T, gz, (ptb.identity_like(x_dot_z) - x_dot_z))
+            + matrix_dot((ptb.identity_like(z_dot_x) - z_dot_x), gz, z.T, z)
         ).T
         return [grad]
 
@@ -127,7 +127,7 @@ class MatrixInverse(Op):
         (x,) = inputs
         xi = self(x)
         (gz,) = g_outputs
-        # tm.dot(gz.T,xi)
+        # ptm.dot(gz.T,xi)
         return [-matrix_dot(xi, gz.T, xi).T]
 
     def R_op(self, inputs, eval_points):
@@ -167,7 +167,7 @@ def matrix_dot(*args):
     """
     rval = args[0]
     for a in args[1:]:
-        rval = tm.dot(rval, a)
+        rval = ptm.dot(rval, a)
     return rval
 
 
@@ -573,7 +573,7 @@ class SVD(Op):
     def infer_shape(self, fgraph, node, shapes):
         (x_shape,) = shapes
         M, N = x_shape
-        K = tm.minimum(M, N)
+        K = ptm.minimum(M, N)
         s_shape = (K,)
         if self.compute_uv:
             u_shape = (M, M) if self.full_matrices else (M, K)
@@ -655,24 +655,24 @@ def matrix_power(M, n):
 
     # Shortcuts when 0 < n <= 3
     if n == 0:
-        return at.eye(M.shape[-2])
+        return ptb.eye(M.shape[-2])
 
     elif n == 1:
         return M
 
     elif n == 2:
-        return tm.dot(M, M)
+        return ptm.dot(M, M)
 
     elif n == 3:
-        return tm.dot(tm.dot(M, M), M)
+        return ptm.dot(ptm.dot(M, M), M)
 
     result = z = None
 
     while n > 0:
-        z = M if z is None else tm.dot(z, z)
+        z = M if z is None else ptm.dot(z, z)
         n, bit = divmod(n, 2)
         if bit:
-            result = z if result is None else tm.dot(result, z)
+            result = z if result is None else ptm.dot(result, z)
 
     return result
 
@@ -684,30 +684,30 @@ def norm(x, ord):
         raise ValueError("'axis' entry is out of bounds.")
     elif ndim == 1:
         if ord is None:
-            return tm.sum(x**2) ** 0.5
+            return ptm.sum(x**2) ** 0.5
         elif ord == "inf":
-            return tm.max(abs(x))
+            return ptm.max(abs(x))
         elif ord == "-inf":
-            return tm.min(abs(x))
+            return ptm.min(abs(x))
         elif ord == 0:
             return x[x.nonzero()].shape[0]
         else:
             try:
-                z = tm.sum(abs(x**ord)) ** (1.0 / ord)
+                z = ptm.sum(abs(x**ord)) ** (1.0 / ord)
             except TypeError:
                 raise ValueError("Invalid norm order for vectors.")
             return z
     elif ndim == 2:
         if ord is None or ord == "fro":
-            return tm.sum(abs(x**2)) ** (0.5)
+            return ptm.sum(abs(x**2)) ** (0.5)
         elif ord == "inf":
-            return tm.max(tm.sum(abs(x), 1))
+            return ptm.max(ptm.sum(abs(x), 1))
         elif ord == "-inf":
-            return tm.min(tm.sum(abs(x), 1))
+            return ptm.min(ptm.sum(abs(x), 1))
         elif ord == 1:
-            return tm.max(tm.sum(abs(x), 0))
+            return ptm.max(ptm.sum(abs(x), 0))
         elif ord == -1:
-            return tm.min(tm.sum(abs(x), 0))
+            return ptm.min(ptm.sum(abs(x), 0))
         else:
             raise ValueError(0)
     elif ndim > 2:

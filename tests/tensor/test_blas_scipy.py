@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import pytensor
-from pytensor import tensor as at
+from pytensor import tensor as pt
 from pytensor.tensor.blas_scipy import ScipyGer
 from pytensor.tensor.math import outer
 from pytensor.tensor.type import tensor
@@ -33,7 +33,7 @@ class TestScipyGer(OptimizationTestMixin):
         f(self.Aval[::-1, ::-1], self.xval[::-1], self.yval[::-1])
 
     def b(self, bval):
-        return at.as_tensor_variable(np.asarray(bval, dtype=self.dtype))
+        return pt.as_tensor_variable(np.asarray(bval, dtype=self.dtype))
 
     def test_outer(self):
         f = self.function([self.x, self.y], outer(self.x, self.y))

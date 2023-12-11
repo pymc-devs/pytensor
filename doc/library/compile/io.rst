@@ -183,7 +183,7 @@ method to access values by indexing a Function directly by typing
 To show some examples of these access methods...
 
 
->>> from pytensor import tensor as at, function
+>>> from pytensor import tensor as pt, function
 >>> a, b, c = pt.scalars('xys') # set the internal names of graph nodes
 >>> # Note that the name of c is 's', not 'c'!
 >>> fn = function([a, b, ((c, c+a+b), 10.0)], [])
@@ -236,7 +236,7 @@ Every element of the inputs list will be upgraded to an In instance if necessary
 Example:
 
 >>> import pytensor
->>> from pytensor import tensor as at
+>>> from pytensor import tensor as pt
 >>> from pytensor.compile.io import In
 >>> x = pt.scalar()
 >>> y = pt.scalar('y')

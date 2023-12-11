@@ -22,7 +22,7 @@ from pytensor.gradient import Lop, Rop, grad, grad_undefined
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor.math import argmax, dot
-from pytensor.tensor.math import max as at_max
+from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.shape import unbroadcast
 from pytensor.tensor.type import matrix, vector
 from tests import unittest_tools as utt
@@ -196,8 +196,8 @@ class TestRopLop(RopLopChecker):
         # If we call max directly, we will return an CAReduce object
         # which doesn't have R_op implemented!
         # self.check_mat_rop_lop(at_max(self.mx, axis=[0,1])[0], ())
-        self.check_mat_rop_lop(at_max(self.mx, axis=0), (self.mat_in_shape[1],))
-        self.check_mat_rop_lop(at_max(self.mx, axis=1), (self.mat_in_shape[0],))
+        self.check_mat_rop_lop(pt_max(self.mx, axis=0), (self.mat_in_shape[1],))
+        self.check_mat_rop_lop(pt_max(self.mx, axis=1), (self.mat_in_shape[0],))
 
     def test_argmax(self):
         self.check_nondiff_rop(argmax(self.mx, axis=1))

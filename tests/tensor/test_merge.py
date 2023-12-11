@@ -1,6 +1,6 @@
 import numpy as np
 
-import pytensor.tensor.basic as at
+import pytensor.tensor.basic as ptb
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
@@ -69,8 +69,8 @@ def test_merge_with_weird_eq():
     # numpy arrays don't compare equal like other python objects
 
     # SCALAR CASE
-    x = at.constant(np.asarray(1), name="x")
-    y = at.constant(np.asarray(1), name="y")
+    x = ptb.constant(np.asarray(1), name="x")
+    y = ptb.constant(np.asarray(1), name="y")
     g = FunctionGraph([x, y], [x + y])
     MergeOptimizer().rewrite(g)
 
@@ -81,8 +81,8 @@ def test_merge_with_weird_eq():
 
     # NONSCALAR CASE
     # This was created to test TensorConstantSignature
-    x = at.constant(np.ones(5), name="x")
-    y = at.constant(np.ones(5), name="y")
+    x = ptb.constant(np.ones(5), name="x")
+    y = ptb.constant(np.ones(5), name="y")
     g = FunctionGraph([x, y], [x + y])
     MergeOptimizer().rewrite(g)
 

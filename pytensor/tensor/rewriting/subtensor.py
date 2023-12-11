@@ -33,7 +33,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import Dot, add
-from pytensor.tensor.math import all as at_all
+from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import (
     and_,
     ceil_intdiv,
@@ -1467,7 +1467,7 @@ def local_adv_sub1_adv_inc_sub1(fgraph, node):
     if not inp.owner.op.set_instead_of_inc:
         return
 
-    cond = [at_all(and_(lt(idx, x.shape[0]), ge(idx, -x.shape[0])))]
+    cond = [pt_all(and_(lt(idx, x.shape[0]), ge(idx, -x.shape[0])))]
     if not fgraph.shape_feature.same_shape(idx, y, 0, 0):
         cond.append(eq(idx.shape[0], y.shape[0]))
     r = Assert(

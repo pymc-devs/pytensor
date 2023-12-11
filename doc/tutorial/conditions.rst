@@ -20,7 +20,7 @@ IfElse vs Switch
 
 .. testcode::
 
-   from pytensor import tensor as at
+   from pytensor import tensor as pt
    from pytensor.ifelse import ifelse
    import pytensor, time, numpy
 

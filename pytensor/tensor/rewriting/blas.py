@@ -81,7 +81,7 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.utils import InconsistencyError
-from pytensor.tensor import basic as at
+from pytensor.tensor import basic as ptb
 from pytensor.tensor.blas import (
     Dot22,
     _dot22,
@@ -137,7 +137,7 @@ def _as_scalar(res, dtype=None):
             # as the cast of the scalar can be done before or after the dot22
             # and this will give the same result.
             if pytensor.scalar.upcast(res.dtype, dtype) == dtype:
-                return at.cast(rval, dtype)
+                return ptb.cast(rval, dtype)
             else:
                 return None
 
@@ -347,9 +347,9 @@ def _gemm_from_factored_list(fgraph, lst):
         # sM can be a tuple of 2 elements or an PyTensor variable.
         if isinstance(sM, tuple):
             sm0, sm1 = sM
-            sm0 = at.as_tensor_variable(sm0)
+            sm0 = ptb.as_tensor_variable(sm0)
             if pytensor.scalar.upcast(sm0.dtype, sm1.dtype) == sm1.dtype:
-                lst2.append((at.cast(sm0, sm1.dtype), sM[1]))
+                lst2.append((ptb.cast(sm0, sm1.dtype), sM[1]))
 
     lst = lst2
 
@@ -657,7 +657,7 @@ def local_gemm_to_ger(fgraph, node):
             xv = x.dimshuffle(0)
             yv = y.dimshuffle(1)
             try:
-                bval = at.get_underlying_scalar_constant_value(b)
+                bval = ptb.get_underlying_scalar_constant_value(b)
             except NotScalarConstantError:
                 # b isn't a constant, GEMM is doing useful pre-scaling
                 return
@@ -666,7 +666,7 @@ def local_gemm_to_ger(fgraph, node):
                 rval = ger(z, a, xv, yv)
                 new_out = [rval]
             elif bval == 0:  # GER on zeros_like should be faster than GEMM
-                zeros = at.zeros([x.shape[0], y.shape[1]], x.dtype)
+                zeros = ptb.zeros([x.shape[0], y.shape[1]], x.dtype)
                 rval = ger(zeros, a, xv, yv)
                 new_out = [rval]
             else:
@@ -686,32 +686,32 @@ def local_dot22_to_ger_or_gemv(fgraph, node):
         x, y = node.inputs
         xb = x.broadcastable
         yb = y.broadcastable
-        one = at.as_tensor_variable(np.asarray(1, dtype=x.dtype))
-        zero = at.as_tensor_variable(np.asarray(0, dtype=x.dtype))
+        one = ptb.as_tensor_variable(np.asarray(1, dtype=x.dtype))
+        zero = ptb.as_tensor_variable(np.asarray(0, dtype=x.dtype))
         if xb[1] and yb[0]:
             # x and y are both vectors so this might qualifies for a GER
             xv = x.dimshuffle(0)
             yv = y.dimshuffle(1)
-            zeros = at.zeros([x.shape[0], y.shape[1]], dtype=x.dtype)
+            zeros = ptb.zeros([x.shape[0], y.shape[1]], dtype=x.dtype)
             rval = ger(zeros, one, xv, yv)
             new_out = [rval]
         elif xb[0] and yb[1]:
             # x and y are both vectors so this qualifies for a sdot / ddot
             # TODO: PyTensor doesn't have a sdot, but gemv is better than _dot22
             xv = x.dimshuffle(1)
-            zeros = at.AllocEmpty(x.dtype)(1)
+            zeros = ptb.AllocEmpty(x.dtype)(1)
             rval = gemv_no_inplace(zeros, one, y.T, xv, zero)
             new_out = [rval.dimshuffle("x", 0)]
         elif xb[0] and not yb[0] and not yb[1]:
             # x is vector, y is matrix so try gemv
             xv = x.dimshuffle(1)
-            zeros = at.AllocEmpty(x.dtype)(y.shape[1])
+            zeros = ptb.AllocEmpty(x.dtype)(y.shape[1])
             rval = gemv_no_inplace(zeros, one, y.T, xv, zero)
             new_out = [rval.dimshuffle("x", 0)]
         elif not xb[0] and not xb[1] and yb[1]:
             # x is matrix, y is vector, try gemv
             yv = y.dimshuffle(0)
-            zeros = at.AllocEmpty(x.dtype)(x.shape[0])
+            zeros = ptb.AllocEmpty(x.dtype)(x.shape[0])
             rval = gemv_no_inplace(zeros, one, x, yv, zero)
             new_out = [rval.dimshuffle(0, "x")]
         else:
@@ -845,7 +845,9 @@ def local_dot22_to_dot22scalar(fgraph, node):
                 " matrix type"
             )
             return False
-        a = at.cast(_as_scalar(m.owner.inputs[scalar_idx], dtype=d.dtype), d.type.dtype)
+        a = ptb.cast(
+            _as_scalar(m.owner.inputs[scalar_idx], dtype=d.dtype), d.type.dtype
+        )
         assert not a.type.ndim
         dot = _dot22scalar(d.owner.inputs[0], d.owner.inputs[1], a)
 
@@ -883,7 +885,7 @@ def local_dot22_to_dot22scalar(fgraph, node):
     o.remove(d)
     o.remove(s)
 
-    a = at.cast(i_scalar[scalar_idx], d.type.dtype)
+    a = ptb.cast(i_scalar[scalar_idx], d.type.dtype)
     assert not a.type.ndim
     if len(o) == 0:
         return [_dot22scalar(d.owner.inputs[0], d.owner.inputs[1], a)]

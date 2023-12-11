@@ -11,8 +11,8 @@ from typing import cast as type_cast
 
 import numpy as np
 
-from pytensor import scalar as aes
-from pytensor import tensor as at
+from pytensor import scalar as ps
+from pytensor import tensor as pt
 from pytensor.compile.profiling import ProfileStats
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, Variable, equal_computations, graph_inputs
@@ -66,9 +66,9 @@ def safe_new(
     # Note, `as_tensor_variable` will convert the `ScalarType` into a
     # `TensorScalar` that will require a `ScalarFromTensor` `Op`, making the
     # push-out optimization fail
-    elif isinstance(x, aes.ScalarVariable):
+    elif isinstance(x, ps.ScalarVariable):
         if dtype:
-            nw_x = aes.get_scalar_type(dtype=dtype)()
+            nw_x = ps.get_scalar_type(dtype=dtype)()
         else:
             nw_x = x.type()
         nw_x.name = nw_name
@@ -84,7 +84,7 @@ def safe_new(
         return nw_x
     else:
         try:
-            x = at.as_tensor_variable(x)
+            x = pt.as_tensor_variable(x)
         except TypeError:
             # This could happen for example for random states
             pass
@@ -127,7 +127,7 @@ class until:
     """
 
     def __init__(self, condition):
-        self.condition = at.as_tensor_variable(condition)
+        self.condition = pt.as_tensor_variable(condition)
         assert self.condition.ndim == 0
 
 

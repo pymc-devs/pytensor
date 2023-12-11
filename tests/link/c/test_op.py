@@ -18,7 +18,7 @@ from pytensor.link.c.op import COp
 test_dir = Path(__file__).parent.absolute()
 
 externalcop_test_code = f"""
-from pytensor import tensor as at
+from pytensor import tensor as pt
 from pytensor.graph.basic import Apply
 from pytensor.link.c.params_type import ParamsType
 from pytensor.link.c.op import ExternalCOp
@@ -44,7 +44,7 @@ class QuadraticCOpFunc(ExternalCOp):
         self.c = c
 
     def make_node(self, x):
-        x = at.as_tensor_variable(x)
+        x = pt.as_tensor_variable(x)
         return Apply(self, [x], [x.type()])
 
     def perform(self, node, inputs, output_storage, coefficients):

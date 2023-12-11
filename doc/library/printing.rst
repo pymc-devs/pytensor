@@ -52,7 +52,7 @@ PyTensor also provides :func:`pytensor.printing.pydotprint` that creates a png i
 1) The first is :func:`pytensor.pp`.
 
 >>> from pytensor import pp, grad,
->>> from pytensor import tensor as at
+>>> from pytensor import tensor as pt
 >>> x = pt.dscalar('x')
 >>> y = x ** 2
 >>> gy = grad(y, x)

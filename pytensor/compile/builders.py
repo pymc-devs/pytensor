@@ -205,7 +205,7 @@ class OpFromGraph(Op, HasInnerGraph):
 
     .. code-block:: python
 
-        from pytensor import function, tensor as at
+        from pytensor import function, tensor as pt
         from pytensor.compile.builders import OpFromGraph
         x, y, z = pt.scalars('xyz')
         e = x + y * z
@@ -220,7 +220,7 @@ class OpFromGraph(Op, HasInnerGraph):
 
         import numpy as np
         import pytensor
-        from pytensor import config, function, tensor as at
+        from pytensor import config, function, tensor as pt
         from pytensor.compile.builders import OpFromGraph
 
         x, y, z = pt.scalars('xyz')
@@ -235,7 +235,7 @@ class OpFromGraph(Op, HasInnerGraph):
 
     .. code-block:: python
 
-        from pytensor import function, tensor as at, grad
+        from pytensor import function, tensor as pt, grad
         from pytensor.compile.builders import OpFromGraph
 
         x, y, z = pt.scalars('xyz')

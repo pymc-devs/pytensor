@@ -66,7 +66,7 @@ its features, but it illustrates concretely what PyTensor is.
 .. code-block:: python
 
     import pytensor
-    from pytensor import tensor as at
+    from pytensor import tensor as pt
 
     # declare two symbolic floating-point scalars
     a = pt.dscalar()

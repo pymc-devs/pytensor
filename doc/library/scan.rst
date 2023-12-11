@@ -460,7 +460,7 @@ construct a function that computes one iteration step :
 .. testsetup:: scan3
 
    import pytensor
-   from pytensor import tensor as at
+   from pytensor import tensor as pt
 
 .. testcode:: scan3
 

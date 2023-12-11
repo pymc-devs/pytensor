@@ -7,7 +7,7 @@ import pytest
 import pytensor
 import pytensor.ifelse
 import pytensor.sparse
-import pytensor.tensor.basic as at
+import pytensor.tensor.basic as ptb
 from pytensor import function
 from pytensor.compile.mode import Mode, get_mode
 from pytensor.graph.basic import Apply
@@ -31,7 +31,7 @@ from tests import unittest_tools as utt
 class TestIfelse(utt.OptimizationTestMixin):
     mode = None
     dtype = pytensor.config.floatX
-    cast_output = staticmethod(at.as_tensor_variable)
+    cast_output = staticmethod(ptb.as_tensor_variable)
     shared = staticmethod(pytensor.shared)
 
     def get_ifelse(self, n):
@@ -269,7 +269,7 @@ class TestIfelse(utt.OptimizationTestMixin):
 
         fsub = [fsub0, fsub1, fsub2, fsub3]
 
-        acc = at.constant(1, "int8") >= 0
+        acc = ptb.constant(1, "int8") >= 0
 
         new_positions = ifelse(acc, fsub, p)
 
@@ -291,7 +291,7 @@ class TestIfelse(utt.OptimizationTestMixin):
         rng = np.random.default_rng(utt.fetch_seed())
         data = rng.random(5).astype(self.dtype)
         x = self.shared(data)
-        y = at.cast(x * 10, "int8")
+        y = ptb.cast(x * 10, "int8")
         cond = iscalar("cond")
 
         with pytest.raises(TypeError):
@@ -542,8 +542,8 @@ class TestIfelse(utt.OptimizationTestMixin):
         ],
     )
     def test_static_branch_shapes(self, x_shape, y_shape, x_val, y_val, exp_shape):
-        x = at.tensor(dtype=self.dtype, shape=x_shape, name="x")
-        y = at.tensor(dtype=self.dtype, shape=y_shape, name="y")
+        x = ptb.tensor(dtype=self.dtype, shape=x_shape, name="x")
+        y = ptb.tensor(dtype=self.dtype, shape=y_shape, name="y")
         c = iscalar("c")
         z = IfElse(1)(c, x, y)
         assert z.type.shape == exp_shape

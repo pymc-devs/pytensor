@@ -8,10 +8,10 @@ from pytensor.compile import get_mode
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import get_test_value
-from pytensor.tensor import elemwise as at_elemwise
-from pytensor.tensor.math import all as at_all
+from pytensor.tensor import elemwise as pt_elemwise
+from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import prod
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.special import SoftmaxGrad, log_softmax, softmax
 from pytensor.tensor.type import matrix, tensor, vector, vectors
 from tests.link.jax.test_basic import compare_jax_and_py
@@ -39,7 +39,7 @@ def test_jax_Dimshuffle():
     compare_jax_and_py(x_fg, [np.c_[[1.0, 2.0, 3.0, 4.0]].astype(config.floatX)])
 
     a_pt = tensor(dtype=config.floatX, shape=(None, 1))
-    x = at_elemwise.DimShuffle([False, True], (0,))(a_pt)
+    x = pt_elemwise.DimShuffle([False, True], (0,))(a_pt)
     x_fg = FunctionGraph([a_pt], [x])
     compare_jax_and_py(x_fg, [np.c_[[1.0, 2.0, 3.0, 4.0]].astype(config.floatX)])
 
@@ -48,7 +48,7 @@ def test_jax_CAReduce():
     a_pt = vector("a")
     a_pt.tag.test_value = np.r_[1, 2, 3].astype(config.floatX)
 
-    x = at_sum(a_pt, axis=None)
+    x = pt_sum(a_pt, axis=None)
     x_fg = FunctionGraph([a_pt], [x])
 
     compare_jax_and_py(x_fg, [np.r_[1, 2, 3].astype(config.floatX)])
@@ -56,12 +56,12 @@ def test_jax_CAReduce():
     a_pt = matrix("a")
     a_pt.tag.test_value = np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)
 
-    x = at_sum(a_pt, axis=0)
+    x = pt_sum(a_pt, axis=0)
     x_fg = FunctionGraph([a_pt], [x])
 
     compare_jax_and_py(x_fg, [np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)])
 
-    x = at_sum(a_pt, axis=1)
+    x = pt_sum(a_pt, axis=1)
     x_fg = FunctionGraph([a_pt], [x])
 
     compare_jax_and_py(x_fg, [np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)])
@@ -74,7 +74,7 @@ def test_jax_CAReduce():
 
     compare_jax_and_py(x_fg, [np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)])
 
-    x = at_all(a_pt)
+    x = pt_all(a_pt)
     x_fg = FunctionGraph([a_pt], [x])
 
     compare_jax_and_py(x_fg, [np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)])

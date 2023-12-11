@@ -1,6 +1,6 @@
 from pytensor.configdefaults import config
 from pytensor.graph.rewriting.basic import in2out
-from pytensor.tensor import basic as at
+from pytensor.tensor import basic as ptb
 from pytensor.tensor.blas import gemv_inplace, gemv_no_inplace, ger, ger_destructive
 from pytensor.tensor.blas_c import (
     CGemv,
@@ -47,10 +47,10 @@ def make_c_gemv_destructive(fgraph, node):
         dest = inputs[0]
         if (
             dest.owner
-            and isinstance(dest.owner.op, at.AllocEmpty)
+            and isinstance(dest.owner.op, ptb.AllocEmpty)
             and len(fgraph.clients[dest]) > 1
         ):
-            inputs[0] = at.AllocEmpty(dest.dtype)(*dest.owner.inputs)
+            inputs[0] = ptb.AllocEmpty(dest.dtype)(*dest.owner.inputs)
 
         return [cgemv_inplace(*inputs)]
 

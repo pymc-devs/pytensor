@@ -15,7 +15,7 @@ from numpy.lib.stride_tricks import as_strided
 
 import pytensor
 from pytensor import _as_symbolic, as_symbolic
-from pytensor import scalar as aes
+from pytensor import scalar as ps
 from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType, grad_not_implemented, grad_undefined
 from pytensor.graph.basic import Apply, Constant, Variable
@@ -25,14 +25,14 @@ from pytensor.link.c.type import generic
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.sparse.type import SparseTensorType, _is_sparse
 from pytensor.sparse.utils import hash_from_sparse
-from pytensor.tensor import basic as at
+from pytensor.tensor import basic as ptb
 from pytensor.tensor.basic import Split
 from pytensor.tensor.math import _conj
-from pytensor.tensor.math import add as at_add
+from pytensor.tensor.math import add as pt_add
 from pytensor.tensor.math import arcsin, arcsinh, arctan, arctanh, ceil, deg2rad
-from pytensor.tensor.math import dot as at_dot
+from pytensor.tensor.math import dot as pt_dot
 from pytensor.tensor.math import exp, expm1, floor, log, log1p, maximum, minimum
-from pytensor.tensor.math import pow as at_pow
+from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.math import (
     rad2deg,
     round_half_to_even,
@@ -215,7 +215,7 @@ def sp_ones_like(x):
     """
     # TODO: don't restrict to CSM formats
     data, indices, indptr, _shape = csm_properties(x)
-    return CSM(format=x.format)(at.ones_like(data), indices, indptr, _shape)
+    return CSM(format=x.format)(ptb.ones_like(data), indices, indptr, _shape)
 
 
 def sp_zeros_like(x):
@@ -239,7 +239,7 @@ def sp_zeros_like(x):
     return CSM(format=x.format)(
         data=np.array([], dtype=x.type.dtype),
         indices=np.array([], dtype="int32"),
-        indptr=at.zeros_like(indptr),
+        indptr=ptb.zeros_like(indptr),
         shape=_shape,
     )
 
@@ -391,7 +391,7 @@ class _sparse_py_operators(_tensor_py_operators):
 
     @property
     def shape(self):
-        # TODO: The plan is that the ShapeFeature in at.opt will do shape
+        # TODO: The plan is that the ShapeFeature in ptb.opt will do shape
         # propagation and remove the dense_from_sparse from the graph.  This
         # will *NOT* actually expand your sparse matrix just to get the shape.
         return shape(dense_from_sparse(self))
@@ -689,7 +689,7 @@ class CSM(Op):
             matrix to construct.
 
         """
-        data = at.as_tensor_variable(data)
+        data = ptb.as_tensor_variable(data)
 
         if not isinstance(indices, Variable):
             indices_ = np.asarray(indices)
@@ -707,9 +707,9 @@ class CSM(Op):
             assert (shape_ == shape_32).all()
             shape = shape_32
 
-        indices = at.as_tensor_variable(indices)
-        indptr = at.as_tensor_variable(indptr)
-        shape = at.as_tensor_variable(shape)
+        indices = ptb.as_tensor_variable(indices)
+        indptr = ptb.as_tensor_variable(indptr)
+        shape = ptb.as_tensor_variable(shape)
 
         if data.type.ndim != 1:
             raise TypeError("data argument must be a vector", data.type, data.type.ndim)
@@ -1052,7 +1052,7 @@ class SparseFromDense(Op):
             A dense matrix.
 
         """
-        x = at.as_tensor_variable(x)
+        x = ptb.as_tensor_variable(x)
         if x.ndim > 2:
             raise TypeError(
                 "PyTensor does not have sparse tensor types with more "
@@ -1114,7 +1114,7 @@ class GetItemList(Op):
         x = as_sparse_variable(x)
         assert x.format in ("csr", "csc")
 
-        ind = at.as_tensor_variable(index)
+        ind = ptb.as_tensor_variable(index)
         assert ind.ndim == 1
         assert ind.dtype in integer_dtypes
 
@@ -1152,7 +1152,7 @@ class GetItemListGrad(Op):
         assert x.format in ("csr", "csc")
         assert gz.format in ("csr", "csc")
 
-        ind = at.as_tensor_variable(index)
+        ind = ptb.as_tensor_variable(index)
         assert ind.ndim == 1
         assert ind.dtype in integer_dtypes
 
@@ -1201,8 +1201,8 @@ class GetItem2Lists(Op):
         """
         x = as_sparse_variable(x)
         assert x.format in ("csr", "csc")
-        ind1 = at.as_tensor_variable(ind1)
-        ind2 = at.as_tensor_variable(ind2)
+        ind1 = ptb.as_tensor_variable(ind1)
+        ind2 = ptb.as_tensor_variable(ind2)
         assert ind1.dtype in integer_dtypes
         assert ind2.dtype in integer_dtypes
 
@@ -1241,8 +1241,8 @@ class GetItem2ListsGrad(Op):
 
         assert x.format in ("csr", "csc")
 
-        ind1 = at.as_tensor_variable(ind1)
-        ind2 = at.as_tensor_variable(ind2)
+        ind1 = ptb.as_tensor_variable(ind1)
+        ind2 = ptb.as_tensor_variable(ind2)
         assert ind1.ndim == 1
         assert ind2.ndim == 1
         assert ind1.dtype in integer_dtypes
@@ -1332,7 +1332,7 @@ class GetItem2d(Op):
                     step = generic_None
                 else:
                     if not isinstance(step, Variable):
-                        step = at.as_tensor_variable(step)
+                        step = ptb.as_tensor_variable(step)
                     if not (step.ndim == 0 and step.dtype in tensor_discrete_dtypes):
                         raise ValueError(
                             (
@@ -1347,7 +1347,7 @@ class GetItem2d(Op):
                     start = generic_None
                 else:
                     if not isinstance(start, Variable):
-                        start = at.as_tensor_variable(start)
+                        start = ptb.as_tensor_variable(start)
                     if not (start.ndim == 0 and start.dtype in tensor_discrete_dtypes):
                         raise ValueError(
                             (
@@ -1362,7 +1362,7 @@ class GetItem2d(Op):
                     stop = generic_None
                 else:
                     if not isinstance(stop, Variable):
-                        stop = at.as_tensor_variable(stop)
+                        stop = ptb.as_tensor_variable(stop)
                     if not (stop.ndim == 0 and stop.dtype in tensor_discrete_dtypes):
                         raise ValueError(
                             (
@@ -1441,7 +1441,7 @@ class GetItemScalar(Op):
 
             # in case of indexing using int instead of pytensor variable
             elif isinstance(ind, int):
-                ind = at.constant(ind)
+                ind = ptb.constant(ind)
                 input_op += [ind]
 
             # in case of indexing using pytensor variable
@@ -1777,9 +1777,9 @@ class SpSum(Op):
             if _is_sparse_variable(gz):
                 gz = dense_from_sparse(gz)
             if self.axis is None:
-                r = at.second(x, gz)
+                r = ptb.second(x, gz)
             else:
-                ones = at.ones_like(x)
+                ones = ptb.ones_like(x)
                 if self.axis == 0:
                     r = specify_broadcastable(gz.dimshuffle("x", 0), 0) * ones
                 elif self.axis == 1:
@@ -1903,7 +1903,7 @@ class SquareDiagonal(Op):
             Dense vector for the diagonal.
 
         """
-        diag = at.as_tensor_variable(diag)
+        diag = ptb.as_tensor_variable(diag)
         if diag.type.ndim != 1:
             raise TypeError("data argument must be a vector", diag.type)
 
@@ -2026,7 +2026,7 @@ class AddSS(Op):
         x, y = map(as_sparse_variable, [x, y])
         assert x.format in ("csr", "csc")
         assert y.format in ("csr", "csc")
-        out_dtype = aes.upcast(x.type.dtype, y.type.dtype)
+        out_dtype = ps.upcast(x.type.dtype, y.type.dtype)
         return Apply(
             self, [x, y], [SparseTensorType(dtype=out_dtype, format=x.type.format)()]
         )
@@ -2117,9 +2117,9 @@ class AddSD(Op):
     __props__ = ()
 
     def make_node(self, x, y):
-        x, y = as_sparse_variable(x), at.as_tensor_variable(y)
+        x, y = as_sparse_variable(x), ptb.as_tensor_variable(y)
         assert x.format in ("csr", "csc")
-        out_dtype = aes.upcast(x.type.dtype, y.type.dtype)
+        out_dtype = ps.upcast(x.type.dtype, y.type.dtype)
 
         # The magic number two here arises because L{scipy.sparse}
         # objects must be matrices (have dimension 2)
@@ -2180,7 +2180,7 @@ class StructuredAddSV(Op):
         """
         x = as_sparse_variable(x)
         assert x.format in ("csr", "csc")
-        y = at.as_tensor_variable(y)
+        y = ptb.as_tensor_variable(y)
 
         assert y.type.ndim == 1
 
@@ -2244,9 +2244,9 @@ def add(x, y):
     if hasattr(y, "getnnz"):
         y = as_sparse_variable(y)
     if not isinstance(x, Variable):
-        x = at.as_tensor_variable(x)
+        x = ptb.as_tensor_variable(x)
     if not isinstance(y, Variable):
-        y = at.as_tensor_variable(y)
+        y = ptb.as_tensor_variable(y)
 
     x_is_sparse_variable = _is_sparse_variable(x)
     y_is_sparse_variable = _is_sparse_variable(y)
@@ -2301,7 +2301,7 @@ class MulSS(Op):
         x, y = as_sparse_variable(x), as_sparse_variable(y)
         assert x.format in ("csr", "csc")
         assert y.format in ("csr", "csc")
-        out_dtype = aes.upcast(x.type.dtype, y.type.dtype)
+        out_dtype = ps.upcast(x.type.dtype, y.type.dtype)
         return Apply(
             self, [x, y], [SparseTensorType(dtype=out_dtype, format=x.type.format)()]
         )
@@ -2334,12 +2334,12 @@ class MulSD(Op):
     __props__ = ()
 
     def make_node(self, x, y):
-        x, y = as_sparse_variable(x), at.as_tensor_variable(y)
+        x, y = as_sparse_variable(x), ptb.as_tensor_variable(y)
 
         assert x.format in ("csr", "csc")
 
         # upcast the tensor. Is the cast of sparse done implemented?
-        dtype = aes.upcast(x.type.dtype, y.type.dtype)
+        dtype = ps.upcast(x.type.dtype, y.type.dtype)
 
         # The magic number two here arises because L{scipy.sparse}
         # objects must be matrices (have dimension 2)
@@ -2442,7 +2442,7 @@ class MulSV(Op):
         """
         x = as_sparse_variable(x)
         assert x.format in ("csr", "csc")
-        y = at.as_tensor_variable(y)
+        y = ptb.as_tensor_variable(y)
 
         assert y.type.ndim == 1
 
@@ -2605,7 +2605,7 @@ class __ComparisonOpSD(Op):
         raise NotImplementedError()
 
     def make_node(self, x, y):
-        x, y = as_sparse_variable(x), at.as_tensor_variable(y)
+        x, y = as_sparse_variable(x), ptb.as_tensor_variable(y)
 
         assert y.type.ndim == 2
         out = TensorType(dtype="uint8", shape=(None, None))()
@@ -2660,9 +2660,9 @@ def __ComparisonSwitch(SS, SD, DS):
         if hasattr(y, "getnnz"):
             y = as_sparse_variable(y)
         if not isinstance(x, Variable):
-            x = at.as_tensor_variable(x)
+            x = ptb.as_tensor_variable(x)
         if not isinstance(y, Variable):
-            y = at.as_tensor_variable(y)
+            y = ptb.as_tensor_variable(y)
 
         x_is_sparse_variable = _is_sparse_variable(x)
         y_is_sparse_variable = _is_sparse_variable(y)
@@ -2837,7 +2837,7 @@ class HStack(Op):
         if _is_sparse_variable(gz):
             gz = dense_from_sparse(gz)
 
-        split = Split(len(inputs))(gz, 1, at.stack([x.shape[1] for x in inputs]))
+        split = Split(len(inputs))(gz, 1, ptb.stack([x.shape[1] for x in inputs]))
         if not isinstance(split, list):
             split = [split]
 
@@ -2892,7 +2892,7 @@ def hstack(blocks, format=None, dtype=None):
 
     blocks = [as_sparse_variable(i) for i in blocks]
     if dtype is None:
-        dtype = aes.upcast(*[i.dtype for i in blocks])
+        dtype = ps.upcast(*[i.dtype for i in blocks])
     return HStack(format=format, dtype=dtype)(*blocks)
 
 
@@ -2916,7 +2916,7 @@ class VStack(HStack):
         if _is_sparse_variable(gz):
             gz = dense_from_sparse(gz)
 
-        split = Split(len(inputs))(gz, 0, at.stack([x.shape[0] for x in inputs]))
+        split = Split(len(inputs))(gz, 0, ptb.stack([x.shape[0] for x in inputs]))
         if not isinstance(split, list):
             split = [split]
 
@@ -2968,7 +2968,7 @@ def vstack(blocks, format=None, dtype=None):
 
     blocks = [as_sparse_variable(i) for i in blocks]
     if dtype is None:
-        dtype = aes.upcast(*[i.dtype for i in blocks])
+        dtype = ps.upcast(*[i.dtype for i in blocks])
     return VStack(format=format, dtype=dtype)(*blocks)
 
 
@@ -3041,7 +3041,7 @@ def structured_monoid(tensor_op):
             x = as_sparse_variable(args[0])
             assert x.format in ("csr", "csc")
 
-            xs = [aes.as_scalar(arg) for arg in args[1:]]
+            xs = [ps.as_scalar(arg) for arg in args[1:]]
 
             data, ind, ptr, _shape = csm_properties(x)
 
@@ -3079,7 +3079,7 @@ def structured_log(x):
     """
 
 
-@structured_monoid(at_pow)
+@structured_monoid(pt_pow)
 def structured_pow(x, y):
     """
     Structured elemwise power of sparse matrix x by scalar y.
@@ -3103,7 +3103,7 @@ def structured_maximum(x, y):
     """
 
 
-@structured_monoid(at_add)
+@structured_monoid(pt_add)
 def structured_add(x):
     """
     Structured addition of sparse matrix x and scalar y.
@@ -3436,7 +3436,7 @@ class StructuredDot(Op):
             raise TypeError(
                 "First argument must be of type SparseVariable or SparseConstant"
             )
-        dtype_out = aes.upcast(a.type.dtype, b.type.dtype)
+        dtype_out = ps.upcast(a.type.dtype, b.type.dtype)
         if b.type.ndim != 2:
             raise NotImplementedError("non-matrix b")
 
@@ -3887,8 +3887,8 @@ class SamplingDot(Op):
             Sparse matrix in csr format.
 
         """
-        x = at.as_tensor_variable(x)
-        y = at.as_tensor_variable(y)
+        x = ptb.as_tensor_variable(x)
+        y = ptb.as_tensor_variable(y)
         p = as_sparse_variable(p)
         assert p.format in ("csr", "csc")
 
@@ -3896,7 +3896,7 @@ class SamplingDot(Op):
             raise TypeError(p)
 
         # TODO: use it.
-        # dtype_out = aes.upcast(x.type.dtype, y.type.dtype, p.type.dtype)
+        # dtype_out = ps.upcast(x.type.dtype, y.type.dtype, p.type.dtype)
 
         return Apply(self, [x, y, p], [p.type()])
 
@@ -3948,7 +3948,7 @@ class Dot(Op):
         raise NotImplementedError()
 
     def make_node(self, x, y):
-        dtype_out = aes.upcast(x.dtype, y.dtype)
+        dtype_out = ps.upcast(x.dtype, y.dtype)
 
         # Sparse dot product should have at least one sparse variable
         # as input. If the other one is not sparse, it has to be converted
@@ -3971,7 +3971,7 @@ class Dot(Op):
         if x_is_sparse_var:
             shape_x = (None,) * x.type.ndim
         else:
-            x = at.as_tensor_variable(x)
+            x = ptb.as_tensor_variable(x)
             shape_x = x.type.shape
             assert y.format in ("csr", "csc")
             if x.ndim not in (1, 2):
@@ -3983,7 +3983,7 @@ class Dot(Op):
         if y_is_sparse_var:
             shape_y = (None,) * y.type.ndim
         else:
-            y = at.as_tensor_variable(y)
+            y = ptb.as_tensor_variable(y)
             shape_y = y.type.shape
             assert x.format in ("csr", "csc")
             if y.ndim not in (1, 2):
@@ -4022,11 +4022,11 @@ class Dot(Op):
         rval = []
 
         if _is_dense_variable(y):
-            rval.append(at_dot(gz, y.T))
+            rval.append(pt_dot(gz, y.T))
         else:
             rval.append(dot(gz, y.T))
         if _is_dense_variable(x):
-            rval.append(at_dot(x.T, gz))
+            rval.append(pt_dot(x.T, gz))
         else:
             rval.append(dot(x.T, gz))
 
@@ -4112,20 +4112,20 @@ class Usmm(Op):
             # We should use Dot22 and Gemm in that case.
             raise TypeError(x)
 
-        dtype_out = aes.upcast(
+        dtype_out = ps.upcast(
             alpha.type.dtype, x.type.dtype, y.type.dtype, z.type.dtype
         )
-        alpha = at.as_tensor_variable(alpha)
-        z = at.as_tensor_variable(z)
+        alpha = ptb.as_tensor_variable(alpha)
+        z = ptb.as_tensor_variable(z)
 
         assert z.type.ndim == 2
         assert alpha.type.shape == (1,) * alpha.type.ndim
         if not _is_sparse_variable(x):
-            x = at.as_tensor_variable(x)
+            x = ptb.as_tensor_variable(x)
             assert y.format in ("csr", "csc")
             assert x.type.ndim == 2
         if not _is_sparse_variable(y):
-            y = at.as_tensor_variable(y)
+            y = ptb.as_tensor_variable(y)
             assert x.format in ("csr", "csc")
             assert y.type.ndim == 2
 
@@ -4198,9 +4198,9 @@ class ConstructSparseFromList(Op):
             It specifies where in the output to put the corresponding rows.
 
         """
-        x_ = at.as_tensor_variable(x)
-        values_ = at.as_tensor_variable(values)
-        ilist_ = at.as_tensor_variable(ilist)
+        x_ = ptb.as_tensor_variable(x)
+        values_ = ptb.as_tensor_variable(values)
+        ilist_ = ptb.as_tensor_variable(ilist)
 
         if ilist_.type.dtype not in integer_dtypes:
             raise TypeError("index must be integers")

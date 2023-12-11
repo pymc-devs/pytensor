@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 import pytensor
-import pytensor.tensor.basic as at
+import pytensor.tensor.basic as ptb
 from pytensor.configdefaults import config
 from pytensor.gradient import (
     DisconnectedInputError,
@@ -31,7 +31,7 @@ from pytensor.graph.basic import Apply, graph_inputs
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op
 from pytensor.tensor.math import add, dot, exp, sigmoid, sqr
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.math import tanh
 from pytensor.tensor.random import RandomStream
 from pytensor.tensor.type import (
@@ -50,7 +50,7 @@ from pytensor.tensor.type import (
 from tests import unittest_tools as utt
 
 
-one = at.as_tensor_variable(1.0)
+one = ptb.as_tensor_variable(1.0)
 
 
 def grad_sources_inputs(sources, inputs):
@@ -274,7 +274,7 @@ class TestGrad:
         o = TestGrad.Obj1()
         a1 = o.make_node()
         g = grad(a1.outputs[0], a1.outputs[1], disconnected_inputs="ignore")
-        assert g.owner.op == at.fill
+        assert g.owner.op == ptb.fill
         assert g.owner.inputs[1].data == 0
 
     def test_NNone_rval(self):
@@ -286,7 +286,7 @@ class TestGrad:
         )
         assert o.gval0 is g0
         assert o.gval1 is g1
-        assert g2.owner.op == at.fill
+        assert g2.owner.op == ptb.fill
         assert g2.owner.inputs[1].data == 0
 
     def test_zero_gradient_shape(self):
@@ -498,7 +498,7 @@ class TestGrad:
         total.name = "total"
         num_elements = x.shape[0]
         num_elements.name = "num_elements"
-        silly_vector = at.alloc(total / num_elements, num_elements)
+        silly_vector = ptb.alloc(total / num_elements, num_elements)
         silly_vector.name = "silly_vector"
         cost = silly_vector.sum()
         cost.name = "cost"
@@ -609,7 +609,7 @@ def test_known_grads():
     # matches what happens if you put its own known_grads
     # in for each variable
 
-    full_range = at.arange(10)
+    full_range = ptb.arange(10)
     x = scalar("x")
     t = iscalar("t")
     ft = full_range[t]
@@ -786,7 +786,7 @@ class TestZeroGrad:
         expressions_gradients = [
             (x * zero_grad(x), x),
             (x * zero_grad(exp(x)), exp(x)),
-            (zero_grad(x), at.constant(0.0)),
+            (zero_grad(x), ptb.constant(0.0)),
             (x**2 * zero_grad(x), 2 * x**2),
         ]
 
@@ -921,10 +921,10 @@ def test_undefined_grad_opt():
     pvals = zero_grad(pvals)
 
     samples = random.multinomial(p=pvals, n=1)
-    samples = at.cast(samples, pvals.dtype)
+    samples = ptb.cast(samples, pvals.dtype)
     samples = zero_grad(samples)
 
-    cost = at_sum(samples + pvals)
+    cost = pt_sum(samples + pvals)
     grad_res = grad(cost, samples)
 
     f = pytensor.function([], grad_res)
@@ -1059,7 +1059,7 @@ def test_jacobian_scalar():
 
 def test_hessian():
     x = vector()
-    y = at_sum(x**2)
+    y = pt_sum(x**2)
     Hx = hessian(y, x)
     f = pytensor.function([x], Hx)
     vx = np.arange(10).astype(pytensor.config.floatX)

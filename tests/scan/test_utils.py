@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 import pytensor
-from pytensor import tensor as at
+from pytensor import tensor as pt
 from pytensor.scan.utils import ScanArgs
 
 
@@ -15,23 +15,23 @@ def set_pytensor_flags():
 
 
 def create_test_hmm():
-    srng = at.random.RandomStream()
+    srng = pt.random.RandomStream()
 
-    N_tt = at.iscalar("N")
-    N_tt.tag.test_value = 10
-    M_tt = at.iscalar("M")
-    M_tt.tag.test_value = 2
+    N_pt = pt.iscalar("N")
+    N_pt.tag.test_value = 10
+    M_pt = pt.iscalar("M")
+    M_pt.tag.test_value = 2
 
-    mus_tt = at.matrix("mus")
-    mus_tt.tag.test_value = np.stack(
+    mus_pt = pt.matrix("mus")
+    mus_pt.tag.test_value = np.stack(
         [np.arange(0.0, 10), np.arange(0.0, -10, -1)], axis=-1
     ).astype(pytensor.config.floatX)
 
-    sigmas_tt = at.ones((N_tt,))
-    sigmas_tt.name = "sigmas"
+    sigmas_pt = pt.ones((N_pt,))
+    sigmas_pt.name = "sigmas"
 
-    pi_0_rv = srng.dirichlet(at.ones((M_tt,)), name="pi_0")
-    Gamma_rv = srng.dirichlet(at.ones((M_tt, M_tt)), name="Gamma")
+    pi_0_rv = srng.dirichlet(pt.ones((M_pt,)), name="pi_0")
+    Gamma_rv = srng.dirichlet(pt.ones((M_pt, M_pt)), name="Gamma")
 
     S_0_rv = srng.categorical(pi_0_rv, name="S_0")
 
@@ -42,7 +42,7 @@ def create_test_hmm():
 
     (S_rv, Y_rv), scan_updates = pytensor.scan(
         fn=scan_fn,
-        sequences=[mus_tt, sigmas_tt],
+        sequences=[mus_pt, sigmas_pt],
         non_sequences=[Gamma_rv],
         outputs_info=[{"initial": S_0_rv, "taps": [-1]}, {}],
         strict=True,
@@ -75,7 +75,7 @@ def create_test_hmm():
 
 def test_ScanArgs():
     with pytest.raises(TypeError):
-        ScanArgs.from_node(at.ones(2).owner)
+        ScanArgs.from_node(pt.ones(2).owner)
 
     hmm_model_env = create_test_hmm()
     scan_args = hmm_model_env["scan_args"]
@@ -134,23 +134,23 @@ def test_ScanArgs():
 
 
 def test_ScanArgs_basics_mit_sot():
-    srng = at.random.RandomStream()
+    srng = pt.random.RandomStream()
 
-    N_tt = at.iscalar("N")
-    N_tt.tag.test_value = 10
-    M_tt = at.iscalar("M")
-    M_tt.tag.test_value = 2
+    N_pt = pt.iscalar("N")
+    N_pt.tag.test_value = 10
+    M_pt = pt.iscalar("M")
+    M_pt.tag.test_value = 2
 
-    mus_tt = at.matrix("mus")
-    mus_tt.tag.test_value = np.stack(
+    mus_pt = pt.matrix("mus")
+    mus_pt.tag.test_value = np.stack(
         [np.arange(0.0, 10), np.arange(0.0, -10, -1)], axis=-1
     ).astype(pytensor.config.floatX)
 
-    sigmas_tt = at.ones((N_tt,))
-    sigmas_tt.name = "sigmas"
+    sigmas_pt = pt.ones((N_pt,))
+    sigmas_pt.name = "sigmas"
 
-    pi_0_rv = srng.dirichlet(at.ones((M_tt,)), name="pi_0")
-    Gamma_rv = srng.dirichlet(at.ones((M_tt, M_tt)), name="Gamma")
+    pi_0_rv = srng.dirichlet(pt.ones((M_pt,)), name="pi_0")
+    Gamma_rv = srng.dirichlet(pt.ones((M_pt, M_pt)), name="Gamma")
 
     S_0_rv = srng.categorical(pi_0_rv, name="S_0")
 
@@ -161,9 +161,9 @@ def test_ScanArgs_basics_mit_sot():
 
     (S_rv, Y_rv), scan_updates = pytensor.scan(
         fn=scan_fn,
-        sequences=[mus_tt, sigmas_tt],
+        sequences=[mus_pt, sigmas_pt],
         non_sequences=[Gamma_rv],
-        outputs_info=[{"initial": at.stack([S_0_rv, S_0_rv]), "taps": [-2, -1]}, {}],
+        outputs_info=[{"initial": pt.stack([S_0_rv, S_0_rv]), "taps": [-2, -1]}, {}],
         strict=True,
         name="scan_rv",
     )
@@ -187,7 +187,7 @@ def test_ScanArgs_basics_mit_sot():
     assert field_info.inner_index == 1
     assert field_info.agg_index == 3
 
-    rm_info = scan_args._remove_from_fields(at.ones(2))
+    rm_info = scan_args._remove_from_fields(pt.ones(2))
     assert rm_info is None
 
     rm_info = scan_args._remove_from_fields(test_v)
