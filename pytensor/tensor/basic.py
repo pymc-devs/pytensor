@@ -1406,11 +1406,8 @@ def infer_static_shape(
     `shape` will be validated and constant folded.  As a result, this function
     can be expensive and shouldn't be used unless absolutely necessary.
 
-    It mostly exists as a hold-over from pre-static shape times, when it was
-    required in order to produce correct broadcastable arrays and prevent
-    some graphs from being unusable.  Now, it is no longer strictly required,
-    so don't use it unless you want the same shape graphs to be rewritten
-    multiple times during graph construction.
+    It is often needed for `Op`s whose static shape and broadcastable flags
+    depend on the values of their inputs, such as `Alloc` and `RandomVariable`.
 
     Returns
     -------
