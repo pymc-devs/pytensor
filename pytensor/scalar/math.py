@@ -1197,6 +1197,37 @@ class I0(UnaryScalarOp):
 i0 = I0(upgrade_to_float, name="i0")
 
 
+class Ive(BinaryScalarOp):
+    """
+    Exponentially scaled modified Bessel function of the first kind of order v (real).
+    """
+
+    nfunc_spec = ("scipy.special.ive", 2, 1)
+
+    @staticmethod
+    def st_impl(v, x):
+        return scipy.special.ive(v, x)
+
+    def impl(self, v, x):
+        return self.st_impl(v, x)
+
+    def grad(self, inputs, grads):
+        v, x = inputs
+        (gz,) = grads
+        return [
+            grad_not_implemented(self, 0, v),
+            gz
+            * (ive(v - 1, x) - 2.0 * _unsafe_sign(x) * ive(v, x) + ive(v + 1, x))
+            / 2.0,
+        ]
+
+    def c_code(self, *args, **kwargs):
+        raise NotImplementedError()
+
+
+ive = Ive(upgrade_to_float, name="ive")
+
+
 class Sigmoid(UnaryScalarOp):
     """
     Logistic sigmoid function (1 / (1 + exp(-x)), also known as expit or inverse logit

@@ -75,6 +75,7 @@ expected_jv = scipy.special.jv
 expected_i0 = scipy.special.i0
 expected_i1 = scipy.special.i1
 expected_iv = scipy.special.iv
+expected_ive = scipy.special.ive
 expected_erfcx = scipy.special.erfcx
 expected_sigmoid = scipy.special.expit
 expected_hyp2f1 = scipy.special.hyp2f1
@@ -639,6 +640,23 @@ TestIvInplaceBroadcast = makeBroadcastTester(
     inplace=True,
 )
 
+TestIveBroadcast = makeBroadcastTester(
+    op=at.ive,
+    expected=expected_ive,
+    good=_good_broadcast_binary_bessel,
+    eps=2e-10,
+    mode=mode_no_scipy,
+)
+
+TestIveInplaceBroadcast = makeBroadcastTester(
+    op=inplace.ive_inplace,
+    expected=expected_ive,
+    good=_good_broadcast_binary_bessel,
+    eps=2e-10,
+    mode=mode_no_scipy,
+    inplace=True,
+)
+
 
 def test_verify_iv_grad():
     # Verify Iv gradient.
@@ -650,6 +668,18 @@ def test_verify_iv_grad():
         return at.iv(v_val, x)
 
     utt.verify_grad(fixed_first_input_iv, [x_val])
+
+
+def test_verify_ive_grad():
+    # Verify Ive gradient.
+    # Implemented separately due to need to fix first input for which grad is
+    # not defined.
+    v_val, x_val = _grad_broadcast_binary_bessel["normal"]
+
+    def fixed_first_input_ive(x):
+        return at.ive(v_val, x)
+
+    utt.verify_grad(fixed_first_input_ive, [x_val])
 
 
 TestSigmoidBroadcast = makeBroadcastTester(
