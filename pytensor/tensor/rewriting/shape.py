@@ -992,12 +992,17 @@ def local_merge_consecutive_specify_shape(fgraph, node):
     return [specify_shape(inner_obj, shape)]
 
 
+_empty_shape = constant([], dtype="int64")
+
+
 @register_infer_shape
 @node_rewriter([Shape])
 def local_shape_ground(fgraph, node):
     """Rewrite shape(x) -> make_vector(x.type.shape) when this is constant."""
     [x] = node.inputs
     static_shape = x.type.shape
+    if len(static_shape) == 0:
+        return [_empty_shape]
     if not any(dim is None for dim in static_shape):
         return [stack([constant(dim, dtype="int64") for dim in static_shape])]
 

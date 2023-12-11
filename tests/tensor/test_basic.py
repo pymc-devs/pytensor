@@ -908,7 +908,7 @@ class TestAlloc:
         self.check_runtime_broadcast(mode)
 
 
-def test_infer_shape():
+def test_infer_static_shape():
     with pytest.raises(TypeError, match="^Shapes must be scalar integers.*"):
         infer_static_shape([constant(1.0)])
 
@@ -923,6 +923,10 @@ def test_infer_shape():
     constant_size = constant([1])
     specify_size = specify_shape(constant_size, [1])
     sh, static_shape = infer_static_shape(specify_size)
+    assert static_shape == (1,)
+
+    x = scalar("x")
+    sh, static_shape = infer_static_shape([x.size])
     assert static_shape == (1,)
 
 
