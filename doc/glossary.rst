@@ -6,7 +6,7 @@ Glossary
 .. testsetup::
 
    import pytensor
-   import pytensor.tensor as at
+   import pytensor.tensor as pt
 
 .. glossary::
 
@@ -31,7 +31,7 @@ Glossary
         A variable with an immutable value.
         For example, when you type
 
-        >>> x = at.ivector()
+        >>> x = pt.ivector()
         >>> y = x + 3
 
         Then a `constant` is created to represent the ``3`` in the graph.
@@ -151,7 +151,7 @@ Glossary
         The the main data structure you work with when using PyTensor.
         For example,
 
-        >>> x = at.ivector()
+        >>> x = pt.ivector()
         >>> y = -x**2
 
         ``x`` and ``y`` are both :class:`Variable`\s, i.e. instances of the :class:`Variable` class.

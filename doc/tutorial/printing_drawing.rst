@@ -26,7 +26,7 @@ Consider again the logistic regression example:
 
 >>> import numpy as np
 >>> import pytensor
->>> import pytensor.tensor as at
+>>> import pytensor.tensor as pt
 >>> rng = np.random.default_rng(2382)
 >>> # Training data
 >>> N = 400
@@ -34,19 +34,19 @@ Consider again the logistic regression example:
 >>> D = (rng.standard_normal(N, feats).astype(pytensor.config.floatX), rng.integers(size=N,low=0, high=2).astype(pytensor.config.floatX))
 >>> training_steps = 10000
 >>> # Declare PyTensor symbolic variables
->>> x = at.matrix("x")
->>> y = at.vector("y")
+>>> x = pt.matrix("x")
+>>> y = pt.vector("y")
 >>> w = pytensor.shared(rng.standard_normal(feats).astype(pytensor.config.floatX), name="w")
 >>> b = pytensor.shared(np.asarray(0., dtype=pytensor.config.floatX), name="b")
 >>> x.tag.test_value = D[0]
 >>> y.tag.test_value = D[1]
 >>> # Construct PyTensor expression graph
->>> p_1 = 1 / (1 + at.exp(-at.dot(x, w)-b)) # Probability of having a one
+>>> p_1 = 1 / (1 + pt.exp(-pt.dot(x, w)-b)) # Probability of having a one
 >>> prediction = p_1 > 0.5 # The prediction that is done: 0 or 1
 >>> # Compute gradients
->>> xent = -y*at.log(p_1) - (1-y)*at.log(1-p_1) # Cross-entropy
+>>> xent = -y*pt.log(p_1) - (1-y)*pt.log(1-p_1) # Cross-entropy
 >>> cost = xent.mean() + 0.01*(w**2).sum() # The cost to optimize
->>> gw,gb = at.grad(cost, [w,b])
+>>> gw,gb = pt.grad(cost, [w,b])
 >>> # Training and prediction function
 >>> train = pytensor.function(inputs=[x,y], outputs=[prediction, xent], updates=[[w, w-0.01*gw], [b, b-0.01*gb]], name = "train")
 >>> predict = pytensor.function(inputs=[x], outputs=prediction, name = "predict")

@@ -83,7 +83,7 @@ defining an arity-2 function ``inc``.
 >>> import pytensor.tensor as at
 >>> from pytensor import function
 >>> from pytensor.compile.io import In
->>> u, x, s = at.scalars('u', 'x', 's')
+>>> u, x, s = pt.scalars('u', 'x', 's')
 >>> inc = function([u, In(x, value=3), In(s, update=(s+x*u), value=10.0)], [])
 
 Since we provided a ``value`` for ``s`` and ``x``, we can call it with just a value for ``u`` like this:
@@ -184,7 +184,7 @@ To show some examples of these access methods...
 
 
 >>> from pytensor import tensor as at, function
->>> a, b, c = at.scalars('xys') # set the internal names of graph nodes
+>>> a, b, c = pt.scalars('xys') # set the internal names of graph nodes
 >>> # Note that the name of c is 's', not 'c'!
 >>> fn = function([a, b, ((c, c+a+b), 10.0)], [])
 
@@ -238,10 +238,10 @@ Example:
 >>> import pytensor
 >>> from pytensor import tensor as at
 >>> from pytensor.compile.io import In
->>> x = at.scalar()
->>> y = at.scalar('y')
->>> z = at.scalar('z')
->>> w = at.scalar('w')
+>>> x = pt.scalar()
+>>> y = pt.scalar('y')
+>>> z = pt.scalar('z')
+>>> w = pt.scalar('w')
 
 >>> fn = pytensor.function(inputs=[x, y, In(z, value=42), ((w, w+x), 0)],
 ...                      outputs=x + y + z)
@@ -308,7 +308,7 @@ If a list of ``Variable`` or ``Out`` instances is given as argument, then the co
 
 >>> import numpy
 >>> from pytensor.compile.io import Out
->>> x, y, s = at.matrices('xys')
+>>> x, y, s = pt.matrices('xys')
 
 >>> # print a list of 2 ndarrays
 >>> fn1 = pytensor.function([x], [x+x, Out((x+x).T, borrow=True)])

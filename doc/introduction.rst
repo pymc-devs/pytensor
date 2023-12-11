@@ -69,8 +69,8 @@ its features, but it illustrates concretely what PyTensor is.
     from pytensor import tensor as at
 
     # declare two symbolic floating-point scalars
-    a = at.dscalar()
-    b = at.dscalar()
+    a = pt.dscalar()
+    b = pt.dscalar()
 
     # create a simple expression
     c = a + b

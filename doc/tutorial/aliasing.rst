@@ -232,10 +232,10 @@ that control how ``pytensor.function`` handles its argument[s] and return value[
 .. testcode::
 
     import pytensor
-    import pytensor.tensor as at
+    import pytensor.tensor as pt
     from pytensor.compile.io import In, Out
 
-    x = at.matrix()
+    x = pt.matrix()
     y = 2 * x
     f = pytensor.function([In(x, borrow=True)], Out(y, borrow=True))
 
