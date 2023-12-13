@@ -23,6 +23,7 @@ from pytensor.misc.safe_asarray import _asarray
 from pytensor.tensor import inplace
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blas import (
+    BatchedDot,
     Dot22,
     Dot22Scalar,
     Gemm,
@@ -2698,6 +2699,30 @@ def test_batched_dot_not_contiguous():
 
     for inverted in (0, 1):
         check_first_dim(inverted)
+
+
+def test_batched_dot_blas_flags():
+    """Test that BatchedDot works regardless of presence of BLAS flags"""
+    mode = "FAST_RUN"
+    rng = np.random.default_rng(2708)
+
+    x = tensor("x", shape=(2, 5, 3))
+    y = tensor("y", shape=(2, 3, 1))
+    out = batched_dot(x, y)
+    assert isinstance(out.owner.op, BatchedDot)
+    x_test = rng.normal(size=x.type.shape).astype(x.type.dtype)
+    y_test = rng.normal(size=y.type.shape).astype(y.type.dtype)
+
+    fn = function([x, y], out, mode=mode)
+    [batched_dot_thunk] = fn.vm.thunks
+    assert hasattr(batched_dot_thunk, "cthunk")
+    np.testing.assert_allclose(fn(x_test, y_test), x_test @ y_test)
+
+    with config.change_flags(blas__ldflags=""):
+        fn = function([x, y], out, mode=mode)
+    [batched_dot_thunk] = fn.vm.thunks
+    assert not hasattr(batched_dot_thunk, "cthunk")
+    np.testing.assert_allclose(fn(x_test, y_test), x_test @ y_test)
 
 
 def test_batched_tensordot():
