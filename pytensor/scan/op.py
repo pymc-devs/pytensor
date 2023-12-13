@@ -55,7 +55,7 @@ import numpy as np
 
 import pytensor
 import pytensor.link.utils as link_utils
-from pytensor import tensor as at
+from pytensor import tensor as pt
 from pytensor.compile.builders import construct_nominal_fgraph, infer_shape
 from pytensor.compile.function.pfunc import pfunc
 from pytensor.compile.io import In, Out
@@ -1658,7 +1658,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         rval.lazy = False
         return rval
 
-    def perform(self, node, inputs, output_storage, params=None):
+    def perform(self, node, inputs, output_storage):
         """Compute the scan operation in Python.
 
         The `inputs` are packed like this:
@@ -2568,7 +2568,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         # mask inputs that get no gradients
         for dx in range(len(dC_dinps_t)):
             if not dC_dinps_t[dx]:
-                dC_dinps_t[dx] = at.zeros_like(diff_inputs[dx])
+                dC_dinps_t[dx] = pt.zeros_like(diff_inputs[dx])
             else:
                 disconnected_dC_dinps_t[dx] = False
                 for Xt, Xt_placeholder in zip(diff_outputs[info.n_mit_mot_outs :], Xts):
@@ -2696,7 +2696,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         for idx, taps in enumerate(info.mit_mot_in_slices):
             if isinstance(dC_douts[idx].type, DisconnectedType):
                 out = outs[idx]
-                outer_inp_mitmot.append(at.zeros_like(out))
+                outer_inp_mitmot.append(pt.zeros_like(out))
             else:
                 outer_inp_mitmot.append(dC_douts[idx][::-1])
             mitmot_inp_taps.append([])
@@ -2723,7 +2723,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     # We cannot use Null in the inner graph, so we
                     # use a zero tensor of the appropriate shape instead.
                     inner_out_mitmot.append(
-                        at.zeros(diff_inputs[ins_pos].shape, dtype=config.floatX)
+                        pt.zeros(diff_inputs[ins_pos].shape, dtype=config.floatX)
                     )
                     undefined_msg = dC_dinps_t[ins_pos].type.why_null
                 else:
@@ -2792,7 +2792,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     # We cannot use Null in the inner graph, so we
                     # use a zero tensor of the appropriate shape instead.
                     inner_out_mitmot.append(
-                        at.zeros(diff_inputs[ins_pos].shape, dtype=config.floatX)
+                        pt.zeros(diff_inputs[ins_pos].shape, dtype=config.floatX)
                     )
                     undefined_msg = dC_dinps_t[ins_pos].type.why_null
                 else:
@@ -2834,11 +2834,11 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     # floatX instead, as it is a dummy value that will not
                     # be used anyway.
                     outer_inp_mitmot.append(
-                        at.zeros(outs[idx + offset].shape, dtype=config.floatX)
+                        pt.zeros(outs[idx + offset].shape, dtype=config.floatX)
                     )
                 else:
                     outer_inp_mitmot.append(
-                        at.zeros(
+                        pt.zeros(
                             outs[idx + offset].shape, dtype=dC_dinps_t[ins_pos].dtype
                         )
                     )
@@ -2847,7 +2847,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 # We cannot use Null in the inner graph, so we
                 # use a zero tensor of the appropriate shape instead.
                 inner_out_mitmot.append(
-                    at.zeros(diff_inputs[ins_pos].shape, dtype=config.floatX)
+                    pt.zeros(diff_inputs[ins_pos].shape, dtype=config.floatX)
                 )
             else:
                 inner_out_mitmot.append(dC_dinps_t[ins_pos])
@@ -2887,7 +2887,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 type_outs.append(vl.type.why_null)
                 # Replace the inner output with a zero tensor of
                 # the right shape
-                inner_out_sitsot[_p] = at.zeros(
+                inner_out_sitsot[_p] = pt.zeros(
                     diff_inputs[ins_pos + _p].shape, dtype=config.floatX
                 )
             elif through_shared:
@@ -2906,7 +2906,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 type_outs.append(vl.type.why_null)
                 # Replace the inner output with a zero tensor of
                 # the right shape
-                inner_out_nitsot[_p] = at.zeros(
+                inner_out_nitsot[_p] = pt.zeros(
                     diff_inputs[_p].shape, dtype=config.floatX
                 )
 
@@ -2924,19 +2924,19 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             if isinstance(y.type, NullType):
                 # Cannot use dC_dXtm1s.dtype, so we use floatX instead.
                 outer_inp_sitsot.append(
-                    at.zeros(
+                    pt.zeros(
                         [grad_steps + 1] + [x.shape[i] for i in range(x.ndim)],
                         dtype=config.floatX,
                     )
                 )
                 # replace y by a zero tensor of the right shape
-                inner_inp_sitsot[_idx] = at.zeros(
+                inner_inp_sitsot[_idx] = pt.zeros(
                     diff_inputs[ins_pos + _idx].shape, dtype=config.floatX
                 )
 
             else:
                 outer_inp_sitsot.append(
-                    at.zeros(
+                    pt.zeros(
                         [grad_steps + 1] + [x.shape[i] for i in range(x.ndim)],
                         dtype=y.dtype,
                     )
@@ -3008,8 +3008,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     shp = (n_zeros,)
                     if x.ndim > 1:
                         shp = shp + tuple(x.shape[i] for i in range(1, x.ndim))
-                    z = at.zeros(shp, dtype=x.dtype)
-                    x = at.concatenate([x[::-1], z], axis=0)
+                    z = pt.zeros(shp, dtype=x.dtype)
+                    x = pt.concatenate([x[::-1], z], axis=0)
                     gradients.append(x)
                 else:
                     gradients.append(x[::-1])
@@ -3036,8 +3036,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     shp = (n_zeros,)
                     if x.ndim > 1:
                         shp = shp + tuple(x.shape[i] for i in range(1, x.ndim))
-                    z = at.zeros(shp, dtype=x.dtype)
-                    x = at.concatenate([x[::-1], z], axis=0)
+                    z = pt.zeros(shp, dtype=x.dtype)
+                    x = pt.concatenate([x[::-1], z], axis=0)
                     gradients.append(x)
                 else:
                     gradients.append(x[::-1])

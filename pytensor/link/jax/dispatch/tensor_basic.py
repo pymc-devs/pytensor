@@ -27,8 +27,8 @@ from pytensor.tensor.shape import Shape_i
 ARANGE_CONCRETE_VALUE_ERROR = """JAX requires the arguments of `jax.numpy.arange`
 to be constants. The graph that you defined thus cannot be JIT-compiled
 by JAX. An example of a graph that can be compiled to JAX:
->>> import pytensor.tensor basic
->>> at.arange(1, 10, 2)
+>>> import pytensor.tensor as pt
+>>> pt.arange(1, 10, 2)
 """
 
 

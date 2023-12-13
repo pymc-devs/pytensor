@@ -7,7 +7,7 @@ from numpy.random.bit_generator import (  # type: ignore[attr-defined]
     _coerce_to_uint32_array,
 )
 
-import pytensor.tensor.random.basic as aer
+import pytensor.tensor.random.basic as ptr
 from pytensor.link.jax.dispatch.basic import jax_funcify, jax_typify
 from pytensor.link.jax.dispatch.shape import JAXShapeTuple
 from pytensor.tensor.shape import Shape, Shape_i
@@ -26,13 +26,13 @@ numpy_bit_gens = {"MT19937": 0, "PCG64": 1, "Philox": 2, "SFC64": 3}
 SIZE_NOT_COMPATIBLE = """JAX random variables require concrete values for the `size` parameter of the distributions.
 Concrete values are either constants:
 
->>> import pytensor.tensor as at
->>> x_rv = at.random.normal(0, 1, size=(3, 2))
+>>> import pytensor.tensor as pt
+>>> x_rv = pt.random.normal(0, 1, size=(3, 2))
 
 or the shape of an array:
 
->>> m = at.matrix()
->>> x_rv = at.random.normal(0, 1, size=m.shape)
+>>> m = pt.matrix()
+>>> x_rv = pt.random.normal(0, 1, size=m.shape)
 """
 
 
@@ -86,7 +86,7 @@ def jax_typify_Generator(rng, **kwargs):
     return state
 
 
-@jax_funcify.register(aer.RandomVariable)
+@jax_funcify.register(ptr.RandomVariable)
 def jax_funcify_RandomVariable(op, node, **kwargs):
     """JAX implementation of random variables."""
     rv = node.outputs[1]
@@ -121,10 +121,10 @@ def jax_sample_fn(op):
     )
 
 
-@jax_sample_fn.register(aer.BetaRV)
-@jax_sample_fn.register(aer.DirichletRV)
-@jax_sample_fn.register(aer.PoissonRV)
-@jax_sample_fn.register(aer.MvNormalRV)
+@jax_sample_fn.register(ptr.BetaRV)
+@jax_sample_fn.register(ptr.DirichletRV)
+@jax_sample_fn.register(ptr.PoissonRV)
+@jax_sample_fn.register(ptr.MvNormalRV)
 def jax_sample_fn_generic(op):
     """Generic JAX implementation of random variables."""
     name = op.name
@@ -140,12 +140,12 @@ def jax_sample_fn_generic(op):
     return sample_fn
 
 
-@jax_sample_fn.register(aer.CauchyRV)
-@jax_sample_fn.register(aer.GumbelRV)
-@jax_sample_fn.register(aer.LaplaceRV)
-@jax_sample_fn.register(aer.LogisticRV)
-@jax_sample_fn.register(aer.NormalRV)
-@jax_sample_fn.register(aer.StandardNormalRV)
+@jax_sample_fn.register(ptr.CauchyRV)
+@jax_sample_fn.register(ptr.GumbelRV)
+@jax_sample_fn.register(ptr.LaplaceRV)
+@jax_sample_fn.register(ptr.LogisticRV)
+@jax_sample_fn.register(ptr.NormalRV)
+@jax_sample_fn.register(ptr.StandardNormalRV)
 def jax_sample_fn_loc_scale(op):
     """JAX implementation of random variables in the loc-scale families.
 
@@ -168,8 +168,8 @@ def jax_sample_fn_loc_scale(op):
     return sample_fn
 
 
-@jax_sample_fn.register(aer.BernoulliRV)
-@jax_sample_fn.register(aer.CategoricalRV)
+@jax_sample_fn.register(ptr.BernoulliRV)
+@jax_sample_fn.register(ptr.CategoricalRV)
 def jax_sample_fn_no_dtype(op):
     """Generic JAX implementation of random variables."""
     name = op.name
@@ -185,9 +185,9 @@ def jax_sample_fn_no_dtype(op):
     return sample_fn
 
 
-@jax_sample_fn.register(aer.RandIntRV)
-@jax_sample_fn.register(aer.IntegersRV)
-@jax_sample_fn.register(aer.UniformRV)
+@jax_sample_fn.register(ptr.RandIntRV)
+@jax_sample_fn.register(ptr.IntegersRV)
+@jax_sample_fn.register(ptr.UniformRV)
 def jax_sample_fn_uniform(op):
     """JAX implementation of random variables with uniform density.
 
@@ -197,7 +197,7 @@ def jax_sample_fn_uniform(op):
     """
     name = op.name
     # IntegersRV is equivalent to RandintRV
-    if isinstance(op, aer.IntegersRV):
+    if isinstance(op, ptr.IntegersRV):
         name = "randint"
     jax_op = getattr(jax.random, name)
 
@@ -214,8 +214,8 @@ def jax_sample_fn_uniform(op):
     return sample_fn
 
 
-@jax_sample_fn.register(aer.ParetoRV)
-@jax_sample_fn.register(aer.GammaRV)
+@jax_sample_fn.register(ptr.ParetoRV)
+@jax_sample_fn.register(ptr.GammaRV)
 def jax_sample_fn_shape_scale(op):
     """JAX implementation of random variables in the shape-scale family.
 
@@ -236,7 +236,7 @@ def jax_sample_fn_shape_scale(op):
     return sample_fn
 
 
-@jax_sample_fn.register(aer.ExponentialRV)
+@jax_sample_fn.register(ptr.ExponentialRV)
 def jax_sample_fn_exponential(op):
     """JAX implementation of `ExponentialRV`."""
 
@@ -251,7 +251,7 @@ def jax_sample_fn_exponential(op):
     return sample_fn
 
 
-@jax_sample_fn.register(aer.StudentTRV)
+@jax_sample_fn.register(ptr.StudentTRV)
 def jax_sample_fn_t(op):
     """JAX implementation of `StudentTRV`."""
 
@@ -270,7 +270,7 @@ def jax_sample_fn_t(op):
     return sample_fn
 
 
-@jax_sample_fn.register(aer.ChoiceRV)
+@jax_sample_fn.register(ptr.ChoiceRV)
 def jax_funcify_choice(op):
     """JAX implementation of `ChoiceRV`."""
 
@@ -285,7 +285,7 @@ def jax_funcify_choice(op):
     return sample_fn
 
 
-@jax_sample_fn.register(aer.PermutationRV)
+@jax_sample_fn.register(ptr.PermutationRV)
 def jax_sample_fn_permutation(op):
     """JAX implementation of `PermutationRV`."""
 
@@ -300,7 +300,7 @@ def jax_sample_fn_permutation(op):
     return sample_fn
 
 
-@jax_sample_fn.register(aer.BinomialRV)
+@jax_sample_fn.register(ptr.BinomialRV)
 def jax_sample_fn_binomial(op):
     if not numpyro_available:
         raise NotImplementedError(
@@ -323,7 +323,7 @@ def jax_sample_fn_binomial(op):
     return sample_fn
 
 
-@jax_sample_fn.register(aer.MultinomialRV)
+@jax_sample_fn.register(ptr.MultinomialRV)
 def jax_sample_fn_multinomial(op):
     if not numpyro_available:
         raise NotImplementedError(
@@ -346,7 +346,7 @@ def jax_sample_fn_multinomial(op):
     return sample_fn
 
 
-@jax_sample_fn.register(aer.VonMisesRV)
+@jax_sample_fn.register(ptr.VonMisesRV)
 def jax_sample_fn_vonmises(op):
     if not numpyro_available:
         raise NotImplementedError(

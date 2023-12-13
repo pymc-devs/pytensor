@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import pytensor
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph.rewriting.basic import check_stack_trace
@@ -1219,15 +1219,15 @@ def test_constant_shapes():
     # Check that the `imshp` and `kshp` parameters of the AbstractConv Ops
     # are rejected if not constant or None
     dummy_t4 = ftensor4()
-    alloc_dummy_t4 = at.zeros((3, 5, 7, 11), dtype="float32")
+    alloc_dummy_t4 = pt.zeros((3, 5, 7, 11), dtype="float32")
 
     dummy_shape = lvector()
-    dummy_one_shape = at.ones(4, dtype="int64")
-    constant_vec_shape = at.constant([3, 5, 7, 11])
+    dummy_one_shape = pt.ones(4, dtype="int64")
+    constant_vec_shape = pt.constant([3, 5, 7, 11])
 
     tuple_shape = (3, 5, 7, 11)
     list_shape = list(tuple_shape)
-    constant_list_shape = [at.constant(i, dtype="int64") for i in tuple_shape]
+    constant_list_shape = [pt.constant(i, dtype="int64") for i in tuple_shape]
     constant_tuple_shape = tuple(constant_list_shape)
 
     bad_shapes = (
@@ -1677,7 +1677,7 @@ class TestBilinearUpsampling:
         x = np.random.random((1, 1, 200, 200)).astype(config.floatX)
         resize = (24, 20)
         z = bilinear_upsampling(
-            at.as_tensor_variable(x), frac_ratio=resize, use_1D_kernel=False
+            pt.as_tensor_variable(x), frac_ratio=resize, use_1D_kernel=False
         )
         out = pytensor.function([], z.shape, mode="FAST_RUN")()
         utt.assert_allclose(out, (1, 1, 240, 240))
@@ -1704,8 +1704,8 @@ class TestConv2dTranspose:
         output = pytensor.function(
             inputs=[],
             outputs=conv2d_transpose(
-                input=at.ones((2, 2, 4, 4)),
-                filters=at.ones((2, 1, 4, 4)),
+                input=pt.ones((2, 2, 4, 4)),
+                filters=pt.ones((2, 1, 4, 4)),
                 output_shape=(2, 1, 10, 10),
                 input_dilation=(2, 2),
             ),
@@ -1980,7 +1980,7 @@ class TestGroupedConvNoOptim:
                 num_groups=groups,
             )
             grouped_conv_output = grouped_convgrad_op(
-                img_sym, top_sym, at.as_tensor_variable(kshp[-self.convdim :])
+                img_sym, top_sym, pt.as_tensor_variable(kshp[-self.convdim :])
             )
             grouped_func = pytensor.function(
                 [img_sym, top_sym], grouped_conv_output, mode=self.mode
@@ -2014,7 +2014,7 @@ class TestGroupedConvNoOptim:
                 return grouped_convgrad_op(
                     inputs_val,
                     output_val,
-                    at.as_tensor_variable(kshp[-self.convdim :]),
+                    pt.as_tensor_variable(kshp[-self.convdim :]),
                 )
 
             utt.verify_grad(conv_gradweight, [img, top], mode=self.mode, eps=1)
@@ -2041,7 +2041,7 @@ class TestGroupedConvNoOptim:
                 num_groups=groups,
             )
             grouped_conv_output = grouped_convgrad_op(
-                kern_sym, top_sym, at.as_tensor_variable(imshp[-self.convdim :])
+                kern_sym, top_sym, pt.as_tensor_variable(imshp[-self.convdim :])
             )
             grouped_func = pytensor.function(
                 [kern_sym, top_sym], grouped_conv_output, mode=self.mode
@@ -2075,7 +2075,7 @@ class TestGroupedConvNoOptim:
                 return grouped_convgrad_op(
                     filters_val,
                     output_val,
-                    at.as_tensor_variable(imshp[-self.convdim :]),
+                    pt.as_tensor_variable(imshp[-self.convdim :]),
                 )
 
             utt.verify_grad(conv_gradinputs, [kern, top], mode=self.mode, eps=1)
@@ -2437,7 +2437,7 @@ class TestUnsharedConv:
                 unshared=True,
             )
             unshared_out_sym = unshared_conv_op(
-                img_sym, top_sym, at.as_tensor_variable(kshp[-2:])
+                img_sym, top_sym, pt.as_tensor_variable(kshp[-2:])
             )
             unshared_func = pytensor.function(
                 [img_sym, top_sym], unshared_out_sym, mode=self.mode
@@ -2458,7 +2458,7 @@ class TestUnsharedConv:
                 unshared=False,
             )
             ref_out_sym = ref_conv_op(
-                img_sym, top_sym, at.as_tensor_variable(single_kshp[-2:])
+                img_sym, top_sym, pt.as_tensor_variable(single_kshp[-2:])
             )
             ref_func = pytensor.function(
                 [img_sym, top_sym], ref_out_sym, mode=self.mode
@@ -2473,7 +2473,7 @@ class TestUnsharedConv:
 
             def conv_gradweight(inputs_val, output_val):
                 return unshared_conv_op(
-                    inputs_val, output_val, at.as_tensor_variable(kshp[-2:])
+                    inputs_val, output_val, pt.as_tensor_variable(kshp[-2:])
                 )
 
             if verify:
@@ -2507,7 +2507,7 @@ class TestUnsharedConv:
                 unshared=True,
             )
             unshared_out_sym = unshared_conv_op(
-                kern_sym, top_sym, at.as_tensor_variable(imshp[-2:])
+                kern_sym, top_sym, pt.as_tensor_variable(imshp[-2:])
             )
             unshared_func = pytensor.function(
                 [kern_sym, top_sym], unshared_out_sym, mode=self.mode
@@ -2526,7 +2526,7 @@ class TestUnsharedConv:
                 unshared=False,
             )
             ref_out_sym = ref_conv_op(
-                ref_kern_sym, top_sym, at.as_tensor_variable(imshp[-2:])
+                ref_kern_sym, top_sym, pt.as_tensor_variable(imshp[-2:])
             )
             ref_func = pytensor.function(
                 [ref_kern_sym, top_sym], ref_out_sym, mode=self.mode
@@ -2545,7 +2545,7 @@ class TestUnsharedConv:
 
             def conv_gradinputs(filters_val, output_val):
                 return unshared_conv_op(
-                    filters_val, output_val, at.as_tensor_variable(imshp[-2:])
+                    filters_val, output_val, pt.as_tensor_variable(imshp[-2:])
                 )
 
             if verify:
@@ -2669,7 +2669,7 @@ class TestAsymmetricPadding:
 
             def conv_gradweight(inputs_val, output_val):
                 return asymmetric_conv_op(
-                    inputs_val, output_val, at.as_tensor_variable(kshp[-2:])
+                    inputs_val, output_val, pt.as_tensor_variable(kshp[-2:])
                 )
 
             utt.verify_grad(conv_gradweight, [img, top], mode=self.mode, eps=1)
@@ -2723,7 +2723,7 @@ class TestAsymmetricPadding:
 
             def conv_gradinputs(filters_val, output_val):
                 return asymmetric_conv_op(
-                    filters_val, output_val, at.as_tensor_variable(imshp[-2:])
+                    filters_val, output_val, pt.as_tensor_variable(imshp[-2:])
                 )
 
             utt.verify_grad(conv_gradinputs, [kern, top], mode=self.mode, eps=1)

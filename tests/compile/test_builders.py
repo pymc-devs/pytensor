@@ -3,7 +3,7 @@ from functools import partial
 import numpy as np
 import pytest
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.compile import shared
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
@@ -17,9 +17,9 @@ from pytensor.graph.utils import MissingInputError
 from pytensor.printing import debugprint
 from pytensor.tensor.basic import as_tensor
 from pytensor.tensor.math import dot, exp
-from pytensor.tensor.math import round as at_round
+from pytensor.tensor.math import round as pt_round
 from pytensor.tensor.math import sigmoid
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.random.utils import RandomStream
 from pytensor.tensor.rewriting.shape import ShapeOptimizer
 from pytensor.tensor.shape import specify_shape
@@ -108,7 +108,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         e = x + y * z
         op = cls_ofg([x, y, z], [e])
         f = op(x, y, z)
-        f = f - grad(at_sum(f), y)
+        f = f - grad(pt_sum(f), y)
         fn = function([x, y, z], f)
         xv = np.ones((2, 2), dtype=config.floatX)
         yv = np.ones((2, 2), dtype=config.floatX) * 3
@@ -123,8 +123,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         e = x + y * z
         op = cls_ofg([x, y, z], [e])
         f = op(x, y, z)
-        f = f - grad(at_sum(f), y)
-        f = f - grad(at_sum(f), y)
+        f = f - grad(pt_sum(f), y)
+        f = f - grad(pt_sum(f), y)
         fn = function([x, y, z], f)
         xv = np.ones((2, 2), dtype=config.floatX)
         yv = np.ones((2, 2), dtype=config.floatX) * 3
@@ -160,7 +160,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         e = x + y * z + s
         op = cls_ofg([x, y, z], [e])
         f = op(x, y, z)
-        f = f - grad(at_sum(f), y)
+        f = f - grad(pt_sum(f), y)
         fn = function([x, y, z], f)
         xv = np.ones((2, 2), dtype=config.floatX)
         yv = np.ones((2, 2), dtype=config.floatX) * 3
@@ -169,7 +169,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
         # grad again the shared variable
         f = op(x, y, z)
-        f = f - grad(at_sum(f), s)
+        f = f - grad(pt_sum(f), s)
         fn = function([x, y, z], f)
         np.testing.assert_array_almost_equal(15.0 + s.get_value(), fn(xv, yv, zv), 4)
 
@@ -193,7 +193,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         # single override case (function or OfG instance)
         xx, yy = vector("xx"), vector("yy")
         for op in [op_mul, op_mul2]:
-            zz = at_sum(op(xx, yy))
+            zz = pt_sum(op(xx, yy))
             dx, dy = grad(zz, [xx, yy])
             fn = function([xx, yy], [dx, dy])
             xv = np.random.random((16,)).astype(config.floatX)
@@ -219,7 +219,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
             [x, w, b], [x * w + b], grad_overrides=[go1, go2, "default"]
         )
         xx, ww, bb = vector("xx"), vector("yy"), vector("bb")
-        zz = at_sum(op_linear(xx, ww, bb))
+        zz = pt_sum(op_linear(xx, ww, bb))
         dx, dw, db = grad(zz, [xx, ww, bb])
         fn = function([xx, ww, bb], [dx, dw, db])
         xv = np.random.random((16,)).astype(config.floatX)
@@ -236,7 +236,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
             [x * w + b],
             grad_overrides=[go1, NullType()(), DisconnectedType()()],
         )
-        zz2 = at_sum(op_linear2(xx, ww, bb))
+        zz2 = pt_sum(op_linear2(xx, ww, bb))
         dx2, dw2, db2 = grad(
             zz2,
             [xx, ww, bb],
@@ -265,12 +265,12 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         op_lop_ov = cls_ofg([x, y_, dedy], [2.0 * y_ * (1.0 - y_) * dedy])
 
         xx = vector()
-        yy1 = at_sum(sigmoid(xx))
+        yy1 = pt_sum(sigmoid(xx))
         gyy1 = 2.0 * grad(yy1, xx)
 
         for ov in [lop_ov, op_lop_ov]:
             op = cls_ofg([x], [y], lop_overrides=ov)
-            yy2 = at_sum(op(xx))
+            yy2 = pt_sum(op(xx))
             gyy2 = grad(yy2, xx)
             fn = function([xx], [gyy1, gyy2])
 
@@ -340,7 +340,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
             del x
             # but we know how to backpropagate for x for some reasons
             # and we don't care about the gradient wrt y.
-            return y + at_round(y)
+            return y + pt_round(y)
 
         def f1_back(inputs, output_gradients):
             return [output_gradients[0], disconnected_type()]
@@ -474,7 +474,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
     def test_make_node_shared(self):
         """Make sure we can provide `OpFromGraph.make_node` new shared inputs and get a valid `OpFromGraph`."""
 
-        x = at.scalar("x")
+        x = pt.scalar("x")
         y = shared(1.0, name="y")
 
         test_ofg = OpFromGraph([x], [x + y], on_unused_input="ignore")
@@ -503,26 +503,26 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
     def test_shared_with_constant_input(self):
         """Make sure that a constant input can be given to an `OpFromGraph` instance."""
-        x = at.scalar("x")
+        x = pt.scalar("x")
         y = shared(1.0, name="y")
 
         test_ofg = OpFromGraph([x], [x + y])
         assert test_ofg.shared_inputs == [y]
 
-        out = test_ofg(at.as_tensor(1.0, dtype=config.floatX))
+        out = test_ofg(pt.as_tensor(1.0, dtype=config.floatX))
 
         out_fn = function([], out)
         assert np.array_equal(out_fn(), 2.0)
 
     def test_missing_input(self):
-        x = at.lscalar("x")
+        x = pt.lscalar("x")
 
         with pytest.raises(MissingInputError):
             OpFromGraph([], [x])
 
     def test_shared_to_nonshared_input(self):
         """Make sure that shared variables can be replaced with non-shared variables."""
-        x = at.scalar("x")
+        x = pt.scalar("x")
         y = shared(1.0, name="y")
 
         test_ofg = OpFromGraph([], [y])

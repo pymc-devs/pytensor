@@ -5,7 +5,7 @@ import pytest
 
 import pytensor
 from pytensor import function
-from pytensor import tensor as at
+from pytensor import tensor as pt
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, applys_between, equal_computations
@@ -336,10 +336,10 @@ class TestDiff(utt.InferShapeTester):
     @pytest.mark.parametrize(
         "x_type",
         (
-            at.TensorType("float64", shape=(None, None)),
-            at.TensorType("float64", shape=(None, 30)),
-            at.TensorType("float64", shape=(10, None)),
-            at.TensorType("float64", shape=(10, 30)),
+            pt.TensorType("float64", shape=(None, None)),
+            pt.TensorType("float64", shape=(None, 30)),
+            pt.TensorType("float64", shape=(10, None)),
+            pt.TensorType("float64", shape=(10, 30)),
         ),
     )
     @pytest.mark.parametrize("axis", (-2, -1, 0, 1))
@@ -472,7 +472,7 @@ class TestSqueeze(utt.InferShapeTester):
             squeeze(variable, axis=1)
 
     def test_scalar_input(self):
-        x = at.scalar("x")
+        x = pt.scalar("x")
 
         assert squeeze(x, axis=(0,)).eval({x: 5}) == 5
 
@@ -886,7 +886,7 @@ class TestUnique(utt.InferShapeTester):
             np.unique(inp, True, True, True, axis=axis),
         ]
         for params, outs_expected in zip(self.op_params, list_outs_expected):
-            out = at.unique(x, *params, axis=axis)
+            out = pt.unique(x, *params, axis=axis)
             f = pytensor.function(inputs=[x], outputs=out)
             outs = f(inp)
             for out, out_exp in zip(outs, outs_expected):
@@ -908,9 +908,9 @@ class TestUnique(utt.InferShapeTester):
             if not params[1]:
                 continue
             if params[0]:
-                f = at.unique(x, *params, axis=axis)[2]
+                f = pt.unique(x, *params, axis=axis)[2]
             else:
-                f = at.unique(x, *params, axis=axis)[1]
+                f = pt.unique(x, *params, axis=axis)[1]
             self._compile_and_check(
                 [x],
                 [f],
@@ -1066,8 +1066,8 @@ def test_broadcast_shape_basic():
     x = np.array([[1], [2], [3]])
     y = np.array([4, 5, 6])
     b = np.broadcast(x, y)
-    x_at = at.as_tensor_variable(x)
-    y_at = at.as_tensor_variable(y)
+    x_at = pt.as_tensor_variable(x)
+    y_at = pt.as_tensor_variable(y)
     b_at = broadcast_shape(x_at, y_at)
     assert np.array_equal([z.eval() for z in b_at], b.shape)
     # Now, we try again using shapes as the inputs
@@ -1100,8 +1100,8 @@ def test_broadcast_shape_basic():
     x = np.array([1, 2, 3])
     y = np.array([4, 5, 6])
     b = np.broadcast(x, y)
-    x_at = at.as_tensor_variable(x)
-    y_at = at.as_tensor_variable(y)
+    x_at = pt.as_tensor_variable(x)
+    y_at = pt.as_tensor_variable(y)
     b_at = broadcast_shape(x_at, y_at)
     assert np.array_equal([z.eval() for z in b_at], b.shape)
     b_at = broadcast_shape(shape_tuple(x_at), shape_tuple(y_at), arrays_are_shapes=True)
@@ -1110,8 +1110,8 @@ def test_broadcast_shape_basic():
     x = np.empty((1, 2, 3))
     y = np.array(1)
     b = np.broadcast(x, y)
-    x_at = at.as_tensor_variable(x)
-    y_at = at.as_tensor_variable(y)
+    x_at = pt.as_tensor_variable(x)
+    y_at = pt.as_tensor_variable(y)
     b_at = broadcast_shape(x_at, y_at)
     assert b_at[0].value == 1
     assert np.array_equal([z.eval() for z in b_at], b.shape)
@@ -1121,8 +1121,8 @@ def test_broadcast_shape_basic():
     x = np.empty((2, 1, 3))
     y = np.empty((2, 1, 1))
     b = np.broadcast(x, y)
-    x_at = at.as_tensor_variable(x)
-    y_at = at.as_tensor_variable(y)
+    x_at = pt.as_tensor_variable(x)
+    y_at = pt.as_tensor_variable(y)
     b_at = broadcast_shape(x_at, y_at)
     assert b_at[1].value == 1
     assert np.array_equal([z.eval() for z in b_at], b.shape)
@@ -1133,11 +1133,11 @@ def test_broadcast_shape_basic():
     x2_shp_at = iscalar("x2")
     y1_shp_at = iscalar("y1")
     x_shapes = (1, x1_shp_at, x2_shp_at)
-    x_at = at.ones(x_shapes)
+    x_at = pt.ones(x_shapes)
     y_shapes = (y1_shp_at, 1, x2_shp_at)
-    y_at = at.ones(y_shapes)
+    y_at = pt.ones(y_shapes)
     b_at = broadcast_shape(x_at, y_at)
-    res = at.as_tensor(b_at).eval(
+    res = pt.as_tensor(b_at).eval(
         {
             x1_shp_at: 10,
             x2_shp_at: 4,
@@ -1147,7 +1147,7 @@ def test_broadcast_shape_basic():
     assert np.array_equal(res, (2, 10, 4))
 
     y_shapes = (y1_shp_at, 1, y1_shp_at)
-    y_at = at.ones(y_shapes)
+    y_at = pt.ones(y_shapes)
     b_at = broadcast_shape(x_at, y_at)
     assert isinstance(b_at[-1].owner.op, Assert)
 
@@ -1196,19 +1196,19 @@ def test_broadcast_shape_constants():
     ],
 )
 def test_broadcast_shape_symbolic(s1_vals, s2_vals, exp_res):
-    s1s = at.lscalars(len(s1_vals))
+    s1s = pt.lscalars(len(s1_vals))
     eval_point = {}
     for s, s_val in zip(s1s, s1_vals):
         eval_point[s] = s_val
         s.tag.test_value = s_val
 
-    s2s = at.lscalars(len(s2_vals))
+    s2s = pt.lscalars(len(s2_vals))
     for s, s_val in zip(s2s, s2_vals):
         eval_point[s] = s_val
         s.tag.test_value = s_val
 
     res = broadcast_shape(s1s, s2s, arrays_are_shapes=True)
-    res = at.as_tensor(res)
+    res = pt.as_tensor(res)
 
     if exp_res is AssertionError:
         with pytest.raises(AssertionError):
@@ -1219,11 +1219,11 @@ def test_broadcast_shape_symbolic(s1_vals, s2_vals, exp_res):
 
 def test_broadcast_shape_symbolic_one_symbolic():
     """Test case for a constant non-broadcast shape and a symbolic shape."""
-    one_at = at.as_tensor(1, dtype=np.int64)
-    three_at = at.as_tensor(3, dtype=np.int64)
+    one_at = pt.as_tensor(1, dtype=np.int64)
+    three_at = pt.as_tensor(3, dtype=np.int64)
     int_div = one_at / one_at
 
-    assert int_div.owner.op == at.true_div
+    assert int_div.owner.op == pt.true_div
 
     index_shapes = [
         (one_at, one_at, three_at),
@@ -1254,7 +1254,7 @@ def test_broadcast_to():
 
 
 def test_broadcast_arrays():
-    x, y = at.tensor(shape=(1,), dtype="float64"), at.dmatrix()
+    x, y = pt.tensor(shape=(1,), dtype="float64"), pt.dmatrix()
     x_bcast, y_bcast = broadcast_arrays(x, y)
 
     py_mode = Mode("py", None)

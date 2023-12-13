@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import pytensor
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor import function, scan, shared
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.io import In
@@ -15,10 +15,11 @@ from pytensor.graph.replace import clone_replace
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import ScanInplaceOptimizer, ScanMerge
 from pytensor.scan.utils import until
+from pytensor.tensor import stack
 from pytensor.tensor.blas import Dot22
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot, dot, sigmoid
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.math import tanh
 from pytensor.tensor.shape import reshape, shape, specify_shape
 from pytensor.tensor.type import (
@@ -320,14 +321,14 @@ class TestPushOutNonSeqScan:
                 return K.sum()
 
             beta, K_updts = scan(
-                init_K, sequences=at.arange(E), non_sequences=[inputs, targets]
+                init_K, sequences=pt.arange(E), non_sequences=[inputs, targets]
             )
 
             # mean
             def predict_mean_i(i, x_star, s_star, X, beta, h):
                 n, D = shape(X)
                 # rescale every dimension by the corresponding inverse lengthscale
-                iL = at.diag(h[i, :D])
+                iL = pt.diag(h[i, :D])
                 inp = (X - x_star).dot(iL)
 
                 # compute the mean
@@ -336,12 +337,12 @@ class TestPushOutNonSeqScan:
 
                 lb = (inp * t).sum() + beta.sum()
 
-                Mi = at_sum(lb) * h[i, D]
+                Mi = pt_sum(lb) * h[i, D]
                 return Mi
 
             (M), M_updts = scan(
                 predict_mean_i,
-                sequences=at.arange(E),
+                sequences=pt.arange(E),
                 non_sequences=[x_star, s_star, inputs, beta, hyp],
             )
             return M
@@ -377,7 +378,7 @@ class TestPushOutNonSeqScan:
         # equivalent code for the jacobian using scan
         dMdm, dMdm_updts = scan(
             lambda i, M, x: grad(M[i], x),
-            sequences=at.arange(M.shape[0]),
+            sequences=pt.arange(M.shape[0]),
             non_sequences=[M, x_star],
         )
         dfdm = function([inputs, targets, x_star, s_star], [dMdm[0], dMdm[1], dMdm[2]])
@@ -396,7 +397,7 @@ class TestPushOutNonSeqScan:
     def test_pushout_seqs2(self):
         x = matrix()
         outputs, updates = scan(
-            lambda x: [x * x, at.constant(0).copy().copy()],
+            lambda x: [x * x, pt.constant(0).copy().copy()],
             n_steps=2,
             sequences=[],
             non_sequences=[],
@@ -584,7 +585,7 @@ class TestPushOutNonSeqScan:
             out, _ = pytensor.scan(lambda: test_ofg(), n_steps=x)
             return out
 
-        out, _ = pytensor.scan(inner_func, sequences=[at.arange(1, 2)])
+        out, _ = pytensor.scan(inner_func, sequences=[pt.arange(1, 2)])
 
         _ = pytensor.function([], test_ofg())
 
@@ -611,7 +612,7 @@ class TestPushOutAddScan:
         S, _ = scan(
             lambda x1, x2, u: u + dot(x1, x2),
             sequences=[A.dimshuffle(0, 1, "x"), B.dimshuffle(0, "x", 1)],
-            outputs_info=[at.zeros_like(A)],
+            outputs_info=[pt.zeros_like(A)],
         )
         f = function([A, B], S.owner.inputs[0][-1])
         rng = np.random.default_rng(utt.fetch_seed())
@@ -620,9 +621,9 @@ class TestPushOutAddScan:
         utt.assert_allclose(f(vA, vB), np.dot(vA.T, vB))
 
     def test_pregreedy_optimizer(self, benchmark):
-        W = at.zeros((5, 4))
-        bv = at.zeros((5,))
-        bh = at.zeros((4,))
+        W = pt.zeros((5, 4))
+        bv = pt.zeros((5,))
+        bh = pt.zeros((4,))
         v = matrix("v")
         (bv_t, bh_t), _ = scan(
             lambda _: [bv, bh], sequences=v, outputs_info=[None, None]
@@ -673,7 +674,7 @@ class TestPushOutAddScan:
         zi = tensor3("zi")
         zi_value = x_value
 
-        init = at.alloc(np.cast[config.floatX](0), batch_size, dim)
+        init = pt.alloc(np.cast[config.floatX](0), batch_size, dim)
 
         def rnn_step1(
             # sequences
@@ -757,7 +758,7 @@ class TestPushOutAddScan:
             dot_output = dot(temp1, temp2)
             return previous_output + dot_output
 
-        init = at.as_tensor_variable(np.random.normal(size=(3, 7)))
+        init = pt.as_tensor_variable(np.random.normal(size=(3, 7)))
 
         # Compile the function twice, once with the optimization and once
         # without
@@ -796,7 +797,13 @@ class TestPushOutAddScan:
 
 
 class TestScanMerge:
-    mode = get_default_mode().including("scan")
+    mode = get_default_mode().including("scan").excluding("scan_pushout_seqs_ops")
+
+    @staticmethod
+    def count_scans(fn):
+        nodes = fn.maker.fgraph.apply_nodes
+        scans = [node for node in nodes if isinstance(node.op, Scan)]
+        return len(scans)
 
     def test_basic(self):
         x = vector()
@@ -808,56 +815,38 @@ class TestScanMerge:
         sx, upx = scan(sum, sequences=[x])
         sy, upy = scan(sum, sequences=[y])
 
-        f = function(
-            [x, y], [sx, sy], mode=self.mode.excluding("scan_pushout_seqs_ops")
-        )
-        topo = f.maker.fgraph.toposort()
-        scans = [n for n in topo if isinstance(n.op, Scan)]
-        assert len(scans) == 2
+        f = function([x, y], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 2
 
         sx, upx = scan(sum, sequences=[x], n_steps=2)
         sy, upy = scan(sum, sequences=[y], n_steps=3)
 
-        f = function(
-            [x, y], [sx, sy], mode=self.mode.excluding("scan_pushout_seqs_ops")
-        )
-        topo = f.maker.fgraph.toposort()
-        scans = [n for n in topo if isinstance(n.op, Scan)]
-        assert len(scans) == 2
+        f = function([x, y], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 2
 
         sx, upx = scan(sum, sequences=[x], n_steps=4)
         sy, upy = scan(sum, sequences=[y], n_steps=4)
 
-        f = function(
-            [x, y], [sx, sy], mode=self.mode.excluding("scan_pushout_seqs_ops")
-        )
-        topo = f.maker.fgraph.toposort()
-        scans = [n for n in topo if isinstance(n.op, Scan)]
-        assert len(scans) == 1
+        f = function([x, y], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 1
 
         sx, upx = scan(sum, sequences=[x])
         sy, upy = scan(sum, sequences=[x])
 
-        f = function([x], [sx, sy], mode=self.mode.excluding("scan_pushout_seqs_ops"))
-        topo = f.maker.fgraph.toposort()
-        scans = [n for n in topo if isinstance(n.op, Scan)]
-        assert len(scans) == 1
+        f = function([x], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 1
 
         sx, upx = scan(sum, sequences=[x])
         sy, upy = scan(sum, sequences=[x], mode="FAST_COMPILE")
 
-        f = function([x], [sx, sy], mode=self.mode.excluding("scan_pushout_seqs_ops"))
-        topo = f.maker.fgraph.toposort()
-        scans = [n for n in topo if isinstance(n.op, Scan)]
-        assert len(scans) == 1
+        f = function([x], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 1
 
         sx, upx = scan(sum, sequences=[x])
         sy, upy = scan(sum, sequences=[x], truncate_gradient=1)
 
-        f = function([x], [sx, sy], mode=self.mode.excluding("scan_pushout_seqs_ops"))
-        topo = f.maker.fgraph.toposort()
-        scans = [n for n in topo if isinstance(n.op, Scan)]
-        assert len(scans) == 2
+        f = function([x], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 2
 
     def test_three_scans(self):
         r"""
@@ -877,12 +866,8 @@ class TestScanMerge:
         sy, upy = scan(sum, sequences=[2 * y + 2], n_steps=4, name="Y")
         sz, upz = scan(sum, sequences=[sx], n_steps=4, name="Z")
 
-        f = function(
-            [x, y], [sy, sz], mode=self.mode.excluding("scan_pushout_seqs_ops")
-        )
-        topo = f.maker.fgraph.toposort()
-        scans = [n for n in topo if isinstance(n.op, Scan)]
-        assert len(scans) == 2
+        f = function([x, y], [sy, sz], mode=self.mode)
+        assert self.count_scans(f) == 2
 
         rng = np.random.default_rng(utt.fetch_seed())
         x_val = rng.uniform(size=(4,)).astype(config.floatX)
@@ -913,6 +898,112 @@ class TestScanMerge:
         assert not opt_obj.belongs_to_set(scan_node1, [scan_node2])
         assert not opt_obj.belongs_to_set(scan_node2, [scan_node1])
 
+    @config.change_flags(cxx="")  # Just for faster compilation
+    def test_while_scan(self):
+        x = vector("x")
+        y = vector("y")
+
+        def add(s):
+            return s + 1, until(s > 5)
+
+        def sub(s):
+            return s - 1, until(s > 5)
+
+        def sub_alt(s):
+            return s - 1, until(s > 4)
+
+        sx, upx = scan(add, sequences=[x])
+        sy, upy = scan(sub, sequences=[y])
+
+        f = function([x, y], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 2
+
+        sx, upx = scan(add, sequences=[x])
+        sy, upy = scan(sub, sequences=[x])
+
+        f = function([x], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 1
+
+        sx, upx = scan(add, sequences=[x])
+        sy, upy = scan(sub_alt, sequences=[x])
+
+        f = function([x], [sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 2
+
+    @config.change_flags(cxx="")  # Just for faster compilation
+    def test_while_scan_nominal_dependency(self):
+        """Test case where condition depends on nominal variables.
+
+        This is a regression test for #509
+        """
+        c1 = scalar("c1")
+        c2 = scalar("c2")
+        x = vector("x", shape=(5,))
+        y = vector("y", shape=(5,))
+        z = vector("z", shape=(5,))
+
+        def add(s1, s2, const):
+            return s1 + 1, until(s2 > const)
+
+        def sub(s1, s2, const):
+            return s1 - 1, until(s2 > const)
+
+        sx, _ = scan(add, sequences=[x, z], non_sequences=[c1])
+        sy, _ = scan(sub, sequences=[y, -z], non_sequences=[c1])
+
+        f = pytensor.function(inputs=[x, y, z, c1], outputs=[sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 2
+        res_sx, res_sy = f(
+            x=[0, 0, 0, 0, 0],
+            y=[0, 0, 0, 0, 0],
+            z=[0, 1, 2, 3, 4],
+            c1=0,
+        )
+        np.testing.assert_array_equal(res_sx, [1, 1])
+        np.testing.assert_array_equal(res_sy, [-1, -1, -1, -1, -1])
+
+        sx, _ = scan(add, sequences=[x, z], non_sequences=[c1])
+        sy, _ = scan(sub, sequences=[y, z], non_sequences=[c2])
+
+        f = pytensor.function(
+            inputs=[x, y, z, c1, c2], outputs=[sx, sy], mode=self.mode
+        )
+        assert self.count_scans(f) == 2
+        res_sx, res_sy = f(
+            x=[0, 0, 0, 0, 0],
+            y=[0, 0, 0, 0, 0],
+            z=[0, 1, 2, 3, 4],
+            c1=3,
+            c2=1,
+        )
+        np.testing.assert_array_equal(res_sx, [1, 1, 1, 1, 1])
+        np.testing.assert_array_equal(res_sy, [-1, -1, -1])
+
+        sx, _ = scan(add, sequences=[x, z], non_sequences=[c1])
+        sy, _ = scan(sub, sequences=[y, z], non_sequences=[c1])
+
+        f = pytensor.function(inputs=[x, y, z, c1], outputs=[sx, sy], mode=self.mode)
+        assert self.count_scans(f) == 1
+
+        def nested_scan(c, x, z):
+            sx, _ = scan(add, sequences=[x, z], non_sequences=[c])
+            sy, _ = scan(sub, sequences=[x, z], non_sequences=[c])
+            return sx.sum() + sy.sum()
+
+        sz, _ = scan(
+            nested_scan,
+            sequences=[stack([c1, c2])],
+            non_sequences=[x, z],
+            mode=self.mode,
+        )
+
+        f = pytensor.function(inputs=[x, z, c1, c2], outputs=sz, mode=mode)
+        [scan_node] = [
+            node for node in f.maker.fgraph.apply_nodes if isinstance(node.op, Scan)
+        ]
+        inner_f = scan_node.op.fn
+        assert self.count_scans(inner_f) == 1
+
 
 class TestScanInplaceOptimizer:
     mode = get_default_mode().including("scan_make_inplace", "inplace")
@@ -920,7 +1011,7 @@ class TestScanInplaceOptimizer:
     def test_no_inplace(self):
         """Make sure the rewrite doesn't make unnecessary replacements."""
 
-        x = at.vector("x")
+        x = pt.vector("x")
 
         scan_out, _ = pytensor.scan(
             lambda x: (x + 1) / 2 + 1,
@@ -940,7 +1031,7 @@ class TestScanInplaceOptimizer:
     def test_inplace_basic(self):
         scan_out, _ = pytensor.scan(
             lambda x: x + 1,
-            outputs_info=[at.zeros(1)],
+            outputs_info=[pt.zeros(1)],
             n_steps=3,
         )
 
@@ -1106,7 +1197,7 @@ class TestScanInplaceOptimizer:
         )
         x0 = asarrayX(np.zeros((4,)))
         x0[0] = vx0
-        x0 = at.constant(x0)
+        x0 = pt.constant(x0)
 
         to_replace = outputs[0].owner.inputs[0].owner.inputs[1]
         outputs = clone_replace(outputs, replace=[(to_replace, x0)])
@@ -1278,7 +1369,7 @@ class TestSaveMem:
         utt.assert_allclose(tx5, v_u[-1] + 5.0)
 
     def test_savemem_does_not_duplicate_number_of_scan_nodes(self):
-        var = at.ones(())
+        var = pt.ones(())
         values, _ = scan(
             lambda x: ([x], (), until(x)),
             outputs_info=[var],
@@ -1489,7 +1580,7 @@ class TestSaveMem:
     def test_vector_zeros_init(self):
         ys, _ = pytensor.scan(
             fn=lambda ytm2, ytm1: ytm1 + ytm2,
-            outputs_info=[{"initial": at.zeros(2), "taps": range(-2, 0)}],
+            outputs_info=[{"initial": pt.zeros(2), "taps": range(-2, 0)}],
             n_steps=100,
         )
 
@@ -1519,7 +1610,7 @@ def test_inner_replace_dot():
 
     o, _ = scan(
         lambda hi, him1, W: (hi, dot(hi + him1, W)),
-        outputs_info=[at.zeros([h.shape[1]]), None],
+        outputs_info=[pt.zeros([h.shape[1]]), None],
         sequences=[h],
         non_sequences=[W],
         mode=mode,
@@ -1544,7 +1635,7 @@ def test_alloc_inputs1():
     o, _ = scan(
         lambda_fn,
         outputs_info=h0,
-        non_sequences=[W1, at.zeros_like(W2)],
+        non_sequences=[W1, pt.zeros_like(W2)],
         n_steps=5,
     )
 
@@ -1576,9 +1667,9 @@ def test_alloc_inputs2():
 
     o, _ = scan(
         lambda_fn,
-        sequences=at.zeros_like(W1),
+        sequences=pt.zeros_like(W1),
         outputs_info=h0,
-        non_sequences=[at.zeros_like(W2)],
+        non_sequences=[pt.zeros_like(W2)],
         n_steps=5,
     )
 
@@ -1611,9 +1702,9 @@ def test_alloc_inputs3():
 
     o, _ = scan(
         lambda_fn,
-        sequences=at.zeros_like(W1),
+        sequences=pt.zeros_like(W1),
         outputs_info=h0,
-        non_sequences=[at.zeros_like(W2)],
+        non_sequences=[pt.zeros_like(W2)],
         n_steps=5,
     )
 

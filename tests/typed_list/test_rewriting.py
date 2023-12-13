@@ -1,7 +1,7 @@
 import numpy as np
 
 import pytensor
-import pytensor.tensor as at
+import pytensor.tensor as pt
 import pytensor.typed_list
 from pytensor.compile.io import In
 from pytensor.tensor.type import TensorType, matrix, scalar
@@ -147,7 +147,7 @@ class TestInplace:
 
 
 def test_constant_folding():
-    m = at.ones((1,), dtype="int8")
+    m = pt.ones((1,), dtype="int8")
     l = pytensor.typed_list.make_list([m, m])
     f = pytensor.function([], l)
     topo = f.maker.fgraph.toposort()

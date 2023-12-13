@@ -1,12 +1,12 @@
 import numpy as np
 import pytest
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
-from pytensor.tensor import nlinalg as at_nlinalg
-from pytensor.tensor import slinalg as at_slinalg
-from pytensor.tensor import subtensor as at_subtensor
+from pytensor.tensor import nlinalg as pt_nlinalg
+from pytensor.tensor import slinalg as pt_slinalg
+from pytensor.tensor import subtensor as pt_subtensor
 from pytensor.tensor.math import clip, cosh
 from pytensor.tensor.type import matrix, vector
 from tests.link.jax.test_basic import compare_jax_and_py
@@ -23,8 +23,8 @@ def test_jax_basic():
     z = cosh(x**2 + y / 3.0)
 
     # `[Inc]Subtensor`
-    out = at_subtensor.set_subtensor(z[0], -10.0)
-    out = at_subtensor.inc_subtensor(out[0, 1], 2.0)
+    out = pt_subtensor.set_subtensor(z[0], -10.0)
+    out = pt_subtensor.inc_subtensor(out[0, 1], 2.0)
     out = out[:5, :3]
 
     out_fg = FunctionGraph([x, y], [out])
@@ -46,13 +46,13 @@ def test_jax_basic():
     out_fg = FunctionGraph([x, y], [out])
     compare_jax_and_py(out_fg, test_input_vals)
 
-    out = at.diagonal(x, 0)
+    out = pt.diagonal(x, 0)
     out_fg = FunctionGraph([x], [out])
     compare_jax_and_py(
         out_fg, [np.arange(10 * 10).reshape((10, 10)).astype(config.floatX)]
     )
 
-    out = at_slinalg.cholesky(x)
+    out = pt_slinalg.cholesky(x)
     out_fg = FunctionGraph([x], [out])
     compare_jax_and_py(
         out_fg,
@@ -64,7 +64,7 @@ def test_jax_basic():
     )
 
     # not sure why this isn't working yet with lower=False
-    out = at_slinalg.Cholesky(lower=False)(x)
+    out = pt_slinalg.Cholesky(lower=False)(x)
     out_fg = FunctionGraph([x], [out])
     compare_jax_and_py(
         out_fg,
@@ -75,7 +75,7 @@ def test_jax_basic():
         ],
     )
 
-    out = at_slinalg.solve(x, b)
+    out = pt_slinalg.solve(x, b)
     out_fg = FunctionGraph([x, b], [out])
     compare_jax_and_py(
         out_fg,
@@ -85,17 +85,17 @@ def test_jax_basic():
         ],
     )
 
-    out = at.diag(b)
+    out = pt.diag(b)
     out_fg = FunctionGraph([b], [out])
     compare_jax_and_py(out_fg, [np.arange(10).astype(config.floatX)])
 
-    out = at_nlinalg.det(x)
+    out = pt_nlinalg.det(x)
     out_fg = FunctionGraph([x], [out])
     compare_jax_and_py(
         out_fg, [np.arange(10 * 10).reshape((10, 10)).astype(config.floatX)]
     )
 
-    out = at_nlinalg.matrix_inverse(x)
+    out = pt_nlinalg.matrix_inverse(x)
     out_fg = FunctionGraph([x], [out])
     compare_jax_and_py(
         out_fg,
@@ -114,7 +114,7 @@ def test_jax_SolveTriangular(trans, lower, check_finite):
     x = matrix("x")
     b = vector("b")
 
-    out = at_slinalg.solve_triangular(
+    out = pt_slinalg.solve_triangular(
         x,
         b,
         trans=trans,

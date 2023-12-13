@@ -13,7 +13,7 @@ import scipy.special
 import scipy.stats
 
 from pytensor.configdefaults import config
-from pytensor.gradient import grad_not_implemented
+from pytensor.gradient import grad_not_implemented, grad_undefined
 from pytensor.scalar.basic import BinaryScalarOp, ScalarOp, UnaryScalarOp
 from pytensor.scalar.basic import abs as scalar_abs
 from pytensor.scalar.basic import (
@@ -473,8 +473,12 @@ class TriGamma(UnaryScalarOp):
     def impl(self, x):
         return TriGamma.st_impl(x)
 
-    def grad(self, inputs, outputs_gradients):
-        raise NotImplementedError()
+    def L_op(self, inputs, outputs, outputs_gradients):
+        (x,) = inputs
+        (g_out,) = outputs_gradients
+        if x in complex_types:
+            raise NotImplementedError("gradient not implemented for complex types")
+        return [g_out * polygamma(2, x)]
 
     def c_support_code(self, **kwargs):
         # The implementation has been copied from
@@ -541,7 +545,52 @@ class TriGamma(UnaryScalarOp):
         raise NotImplementedError("only floating point is implemented")
 
 
-tri_gamma = TriGamma(upgrade_to_float, name="tri_gamma")
+# Scipy polygamma does not support complex inputs: https://github.com/scipy/scipy/issues/7410
+tri_gamma = TriGamma(upgrade_to_float_no_complex, name="tri_gamma")
+
+
+class PolyGamma(BinaryScalarOp):
+    """Polygamma function of order n evaluated at x.
+
+    It corresponds to the (n+1)th derivative of the log gamma function.
+
+    TODO: Because the first input is discrete and the output is continuous,
+     the default elemwise inplace won't work, as it always tries to store the results in the first input.
+    """
+
+    nfunc_spec = ("scipy.special.polygamma", 2, 1)
+
+    @staticmethod
+    def output_types_preference(n_type, x_type):
+        if n_type not in discrete_types:
+            raise TypeError(
+                f"Polygamma order parameter must be discrete, got {n_type} dtype"
+            )
+        # Scipy doesn't support it
+        return upgrade_to_float_no_complex(x_type)
+
+    @staticmethod
+    def st_impl(n, x):
+        return scipy.special.polygamma(n, x)
+
+    def impl(self, n, x):
+        return PolyGamma.st_impl(n, x)
+
+    def L_op(self, inputs, outputs, output_gradients):
+        (n, x) = inputs
+        (g_out,) = output_gradients
+        if x in complex_types:
+            raise NotImplementedError("gradient not implemented for complex types")
+        return [
+            grad_undefined(self, 0, n),
+            g_out * self(n + 1, x),
+        ]
+
+    def c_code(self, *args, **kwargs):
+        raise NotImplementedError()
+
+
+polygamma = PolyGamma(name="polygamma")
 
 
 class Chi2SF(BinaryScalarOp):
@@ -1210,6 +1259,37 @@ class I0(UnaryScalarOp):
 
 
 i0 = I0(upgrade_to_float, name="i0")
+
+
+class Ive(BinaryScalarOp):
+    """
+    Exponentially scaled modified Bessel function of the first kind of order v (real).
+    """
+
+    nfunc_spec = ("scipy.special.ive", 2, 1)
+
+    @staticmethod
+    def st_impl(v, x):
+        return scipy.special.ive(v, x)
+
+    def impl(self, v, x):
+        return self.st_impl(v, x)
+
+    def grad(self, inputs, grads):
+        v, x = inputs
+        (gz,) = grads
+        return [
+            grad_not_implemented(self, 0, v),
+            gz
+            * (ive(v - 1, x) - 2.0 * _unsafe_sign(x) * ive(v, x) + ive(v + 1, x))
+            / 2.0,
+        ]
+
+    def c_code(self, *args, **kwargs):
+        raise NotImplementedError()
+
+
+ive = Ive(upgrade_to_float, name="ive")
 
 
 class Sigmoid(UnaryScalarOp):

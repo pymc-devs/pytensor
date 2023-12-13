@@ -13,25 +13,25 @@ BUT, YOU GOTTA RUN THIS CODE AND MAKE SURE IT STILL WORKS NICELY, HEY?
     def build_logistic_regression_model(n_in, n_out, l2_coef=30.0)
         # DECLARE SOME VARIABLES
 
-        import tensor as at
+        import pytensor.tensor as pt
 
-        x = at.matrix()  #our points, one point per row
-        y = at.matrix()  #store our labels as place codes (label 3 of 5 is vector [00100])
+        x = pt.matrix()  #our points, one point per row
+        y = pt.matrix()  #store our labels as place codes (label 3 of 5 is vector [00100])
 
-        w = at.matrix()  #the linear transform to apply to our input points
-        b = at.vector()  #a vector of biases, which make our transform affine instead of linear
+        w = pt.matrix()  #the linear transform to apply to our input points
+        b = pt.vector()  #a vector of biases, which make our transform affine instead of linear
 
-        stepsize = at.scalar('stepsize')  # a stepsize for gradient descent
+        stepsize = pt.scalar('stepsize')  # a stepsize for gradient descent
 
         # REGRESSION MODEL AND COSTS TO MINIMIZE
 
-        prediction = at.softmax(at.dot(x, w) + b)
-        cross_entropy = at.sum(y * at.log(prediction), axis=1)
-        cost = at.sum(cross_entropy) + l2_coef * at.sum(at.sum(w*w))
+        prediction = pt.softmax(pt.dot(x, w) + b)
+        cross_entropy = pt.sum(y * pt.log(prediction), axis=1)
+        cost = pt.sum(cross_entropy) + l2_coef * pt.sum(pt.sum(w*w))
 
         # GET THE GRADIENTS NECESSARY TO FIT OUR PARAMETERS
 
-        grad_w, grad_b = at.grad(cost, [w, b])
+        grad_w, grad_b = pt.grad(cost, [w, b])
 
         #
         # GET THE GRADIENTS NECESSARY TO FIT OUR PARAMETERS

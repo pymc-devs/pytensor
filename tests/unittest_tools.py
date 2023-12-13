@@ -12,7 +12,7 @@ from pytensor.configdefaults import config
 from pytensor.gradient import verify_grad as orig_verify_grad
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.math import _allclose
-from pytensor.tensor.math import add as at_add
+from pytensor.tensor.math import add as pt_add
 
 
 _logger = logging.getLogger("tests.unittest_tools")
@@ -133,7 +133,7 @@ class OptimizationTestMixin:
 class OpContractTestMixin:
     # self.ops should be a list of instantiations of an Op class to test.
     # self.other_op should be an op which is different from every op
-    other_op = at_add
+    other_op = pt_add
 
     def copy(self, x):
         return copy(x)

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor.type import matrix
 from pytensor.tensor.utils import hash_from_ndarray, shape_of_variables
@@ -58,7 +58,7 @@ class TestShapeOfVariables:
         assert shapes == {x: (5, 5), y: (5, 5)}
 
         x = matrix("x")
-        y = at.dot(x, x.T)
+        y = pt.dot(x, x.T)
         fgraph = FunctionGraph([x], [y], clone=False)
         shapes = shape_of_variables(fgraph, {x: (5, 1)})
         assert shapes[x] == (5, 1)

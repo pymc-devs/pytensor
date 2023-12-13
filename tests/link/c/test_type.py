@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 import pytensor
-from pytensor import scalar as aes
+from pytensor import scalar as ps
 from pytensor.graph.basic import Apply
 from pytensor.link.c.op import COp
 from pytensor.link.c.type import CDataType, CEnumType, EnumList, EnumType
@@ -115,9 +115,10 @@ class MyOpEnumList(COp):
         return self.op_chosen
 
     def make_node(self, a, b):
-        return Apply(self, [aes.as_scalar(a), aes.as_scalar(b)], [aes.float64()])
+        return Apply(self, [ps.as_scalar(a), ps.as_scalar(b)], [ps.float64()])
 
-    def perform(self, node, inputs, outputs, op):
+    def perform(self, node, inputs, outputs):
+        op = self.params_type.filter(self.get_params(node))
         a, b = inputs
         (o,) = outputs
         if op == self.params_type.ADD:
@@ -189,7 +190,7 @@ class MyOpCEnumType(COp):
         return self.python_value
 
     def make_node(self):
-        return Apply(self, [], [aes.uint32()])
+        return Apply(self, [], [ps.uint32()])
 
     def perform(self, *args, **kwargs):
         raise NotImplementedError()
@@ -262,8 +263,8 @@ class TestEnumTypes:
             )
 
     def test_op_with_enumlist(self):
-        a = aes.int32()
-        b = aes.int32()
+        a = ps.int32()
+        b = ps.int32()
         c_add = MyOpEnumList("+")(a, b)
         c_sub = MyOpEnumList("-")(a, b)
         c_multiply = MyOpEnumList("*")(a, b)

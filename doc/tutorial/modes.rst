@@ -47,7 +47,7 @@ Consider the logistic regression:
 
     import numpy as np
     import pytensor
-    import pytensor.tensor as at
+    import pytensor.tensor as pt
 
 
     rng = np.random.default_rng(2498)
@@ -59,19 +59,19 @@ Consider the logistic regression:
     training_steps = 10000
 
     # Declare PyTensor symbolic variables
-    x = at.matrix("x")
-    y = at.vector("y")
+    x = pt.matrix("x")
+    y = pt.vector("y")
     w = pytensor.shared(rng.standard_normal(feats).astype(pytensor.config.floatX), name="w")
     b = pytensor.shared(np.asarray(0., dtype=pytensor.config.floatX), name="b")
     x.tag.test_value = D[0]
     y.tag.test_value = D[1]
 
     # Construct PyTensor expression graph
-    p_1 = 1 / (1 + at.exp(-at.dot(x, w)-b)) # Probability of having a one
+    p_1 = 1 / (1 + pt.exp(-pt.dot(x, w)-b)) # Probability of having a one
     prediction = p_1 > 0.5 # The prediction that is done: 0 or 1
-    xent = -y*at.log(p_1) - (1-y)*at.log(1-p_1) # Cross-entropy
+    xent = -y*pt.log(p_1) - (1-y)*pt.log(1-p_1) # Cross-entropy
     cost = xent.mean() + 0.01*(w**2).sum() # The cost to optimize
-    gw,gb = at.grad(cost, [w,b])
+    gw,gb = pt.grad(cost, [w,b])
 
     # Compile expressions to functions
     train = pytensor.function(
@@ -254,7 +254,7 @@ use it only during development.
 
 .. testcode::
 
-    x = at.dvector('x')
+    x = pt.dvector('x')
 
     f = pytensor.function([x], 10 * x, mode='DebugMode')
 

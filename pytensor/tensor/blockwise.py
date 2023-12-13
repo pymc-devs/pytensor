@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from copy import copy
 from typing import Any, Optional, cast
 
 import numpy as np
@@ -8,10 +9,15 @@ from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op
-from pytensor.graph.replace import _vectorize_node, vectorize_graph
+from pytensor.graph.replace import (
+    _vectorize_node,
+    _vectorize_not_needed,
+    vectorize_graph,
+)
+from pytensor.scalar import ScalarType
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.shape import shape_padleft
-from pytensor.tensor.type import continuous_dtypes, discrete_dtypes, tensor
+from pytensor.tensor.type import TensorType, continuous_dtypes, discrete_dtypes, tensor
 from pytensor.tensor.utils import (
     _parse_gufunc_signature,
     broadcast_static_dim_lengths,
@@ -37,17 +43,6 @@ def safe_signature(
     return f"{inputs_sig}->{outputs_sig}"
 
 
-@_vectorize_node.register(Op)
-def vectorize_node_fallback(op: Op, node: Apply, *bached_inputs) -> Apply:
-    if hasattr(op, "gufunc_signature"):
-        signature = op.gufunc_signature
-    else:
-        # TODO: This is pretty bad for shape inference and merge optimization!
-        #  Should get better as we add signatures to our Ops
-        signature = safe_signature(node.inputs, node.outputs)
-    return cast(Apply, Blockwise(op, signature=signature).make_node(*bached_inputs))
-
-
 class Blockwise(Op):
     """Generalizes a core `Op` to work with batched dimensions.
 
@@ -64,6 +59,7 @@ class Blockwise(Op):
         core_op: Op,
         signature: Optional[str] = None,
         name: Optional[str] = None,
+        gufunc_spec: Optional[tuple[str, int, int]] = None,
         **kwargs,
     ):
         """
@@ -75,7 +71,12 @@ class Blockwise(Op):
         signature
             Generalized universal function signature,
             e.g., (m,n),(n)->(m) for vectorized matrix-vector multiplication
-
+        gufunc: tuple, Optional
+            Tuple containing:
+                1. String import path for a numpy/scipy function (e.g., "numpy.matmul", "scipy.special.softmax")
+                that implements the blockwised operation of the scalar op.
+                2 Number of inputs of the function
+                3 Number of outputs of the function
         """
         if isinstance(core_op, Blockwise):
             raise TypeError("Core Op is already a Blockwise")
@@ -91,8 +92,14 @@ class Blockwise(Op):
         self.signature = signature
         self.name = name
         self.inputs_sig, self.outputs_sig = _parse_gufunc_signature(signature)
+        self.gufunc_spec = gufunc_spec
         self._gufunc = None
         super().__init__(**kwargs)
+
+    def __getstate__(self):
+        d = copy(self.__dict__)
+        d["_gufunc"] = None
+        return d
 
     def _create_dummy_core_node(self, inputs: Sequence[TensorVariable]) -> Apply:
         core_input_types = []
@@ -164,8 +171,8 @@ class Blockwise(Op):
 
         return Apply(self, batched_inputs, batched_outputs)
 
-    def _batch_ndim_from_outputs(self, outputs: Sequence[TensorVariable]) -> int:
-        return cast(int, outputs[0].type.ndim - len(self.outputs_sig[0]))
+    def batch_ndim(self, node: Apply) -> int:
+        return cast(int, node.outputs[0].type.ndim - len(self.outputs_sig[0]))
 
     def infer_shape(
         self, fgraph, node, input_shapes
@@ -173,7 +180,7 @@ class Blockwise(Op):
         from pytensor.tensor import broadcast_shape
         from pytensor.tensor.shape import Shape_i
 
-        batch_ndims = self._batch_ndim_from_outputs(node.outputs)
+        batch_ndims = self.batch_ndim(node)
         core_dims: dict[str, Any] = {}
         batch_shapes = []
         for input_shape, sig in zip(input_shapes, self.inputs_sig):
@@ -279,7 +286,7 @@ class Blockwise(Op):
             return new_rval
 
         # Sum out the broadcasted dimensions
-        batch_ndims = self._batch_ndim_from_outputs(outs)
+        batch_ndims = self.batch_ndim(outs[0].owner)
         batch_shape = outs[0].type.shape[:batch_ndims]
         for i, (inp, sig) in enumerate(zip(inputs, self.inputs_sig)):
             if isinstance(rval[i].type, (NullType, DisconnectedType)):
@@ -298,10 +305,14 @@ class Blockwise(Op):
         return rval
 
     def _create_gufunc(self, node):
-        if hasattr(self.core_op, "gufunc_spec"):
-            self._gufunc = import_func_from_string(self.core_op.gufunc_spec[0])
+        gufunc_spec = self.gufunc_spec or getattr(self.core_op, "gufunc_spec", None)
+
+        if gufunc_spec is not None:
+            self._gufunc = import_func_from_string(gufunc_spec[0])
             if self._gufunc:
                 return self._gufunc
+            else:
+                raise ValueError(f"Could not import gufunc {gufunc_spec[0]} for {self}")
 
         n_outs = len(self.outputs_sig)
         core_node = self._create_dummy_core_node(node.inputs)
@@ -321,7 +332,7 @@ class Blockwise(Op):
         return self._gufunc
 
     def _check_runtime_broadcast(self, node, inputs):
-        batch_ndim = self._batch_ndim_from_outputs(node.outputs)
+        batch_ndim = self.batch_ndim(node)
 
         for dims_and_bcast in zip(
             *[
@@ -361,6 +372,21 @@ class Blockwise(Op):
             return self.name
 
 
-@_vectorize_node.register(Blockwise)
-def vectorize_not_needed(op, node, *batch_inputs):
-    return op.make_node(*batch_inputs)
+@_vectorize_node.register(Op)
+def vectorize_node_fallback(op: Op, node: Apply, *bached_inputs) -> Apply:
+    for inp in node.inputs:
+        if not isinstance(inp.type, (TensorType, ScalarType)):
+            raise NotImplementedError(
+                f"Cannot vectorize node {node} with input {inp} of type {inp.type}"
+            )
+
+    if hasattr(op, "gufunc_signature"):
+        signature = op.gufunc_signature
+    else:
+        # TODO: This is pretty bad for shape inference and merge optimization!
+        #  Should get better as we add signatures to our Ops
+        signature = safe_signature(node.inputs, node.outputs)
+    return cast(Apply, Blockwise(op, signature=signature).make_node(*bached_inputs))
+
+
+_vectorize_node.register(Blockwise, _vectorize_not_needed)

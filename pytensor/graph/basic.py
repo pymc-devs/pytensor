@@ -30,7 +30,6 @@ import numpy as np
 from pytensor.configdefaults import config
 from pytensor.graph.utils import (
     MetaObject,
-    MethodNotDefined,
     Scratchpad,
     TestValueError,
     ValidatingScratchpad,
@@ -150,16 +149,6 @@ class Apply(Node, Generic[OpType]):
                 raise TypeError(
                     f"The 'outputs' argument to Apply must contain Variable instances with no owner, not {output}"
                 )
-
-    def run_params(self):
-        """
-        Returns the params for the node, or NoParams if no params is set.
-
-        """
-        try:
-            return self.op.get_params(self)
-        except MethodNotDefined:
-            return NoParams
 
     def __getstate__(self):
         d = self.__dict__
@@ -394,10 +383,10 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
     .. code-block:: python
 
         import pytensor
-        import pytensor.tensor as at
+        import pytensor.tensor as pt
 
-        a = at.constant(1.5)            # declare a symbolic constant
-        b = at.fscalar()                # declare a symbolic floating-point scalar
+        a = pt.constant(1.5)            # declare a symbolic constant
+        b = pt.fscalar()                # declare a symbolic floating-point scalar
 
         c = a + b                       # create a simple expression
 
@@ -576,9 +565,9 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         --------
 
         >>> import numpy as np
-        >>> import pytensor.tensor as at
-        >>> x = at.dscalar('x')
-        >>> y = at.dscalar('y')
+        >>> import pytensor.tensor as pt
+        >>> x = pt.dscalar('x')
+        >>> y = pt.dscalar('y')
         >>> z = x + y
         >>> np.allclose(z.eval({x : 16.3, y : 12.1}), 28.4)
         True
@@ -1788,6 +1777,7 @@ def equal_computations(
     ys: list[Union[np.ndarray, Variable]],
     in_xs: Optional[list[Variable]] = None,
     in_ys: Optional[list[Variable]] = None,
+    strict_dtype=True,
 ) -> bool:
     """Checks if PyTensor graphs represent the same computations.
 
@@ -1919,7 +1909,10 @@ def equal_computations(
                         if dx != dy:
                             if isinstance(dx, Constant) and isinstance(dy, Constant):
                                 if not dx.equals(dy):
-                                    return False
+                                    if strict_dtype:
+                                        return False
+                                    elif not np.array_equal(dx.data, dy.data):
+                                        return False
                             else:
                                 return False
 

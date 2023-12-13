@@ -24,15 +24,15 @@ class KanrenRelationSub(NodeRewriter):
 
         from kanren import eq, conso, var
 
-        import pytensor.tensor as at
+        import pytensor.tensor as pt
         from pytensor.graph.rewriting.kanren import KanrenRelationSub
 
 
         def relation(in_lv, out_lv):
-            # A `kanren` goal that changes `at.log` terms to `at.exp`
+            # A `kanren` goal that changes `pt.log` terms to `pt.exp`
             cdr_lv = var()
-            return eq(conso(at.log, cdr_lv, in_lv),
-                    conso(at.exp, cdr_lv, out_lv))
+            return eq(conso(pt.log, cdr_lv, in_lv),
+                    conso(pt.exp, cdr_lv, out_lv))
 
 
         kanren_sub_opt = KanrenRelationSub(relation)

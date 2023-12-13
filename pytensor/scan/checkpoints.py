@@ -1,4 +1,4 @@
-import pytensor.tensor.basic as at
+import pytensor.tensor.basic as ptb
 from pytensor.scan.basic import scan
 from pytensor.tensor.basic import Join
 from pytensor.tensor.math import ceil, eq
@@ -117,12 +117,12 @@ def scan_checkpoints(
         n_steps = sequences[0].shape[0]
 
     # Compute the number of steps of the outer scan
-    o_n_steps = at.cast(ceil(n_steps / save_every_N), "int64")
+    o_n_steps = ptb.cast(ceil(n_steps / save_every_N), "int64")
 
     # Compute the number of steps of the inner scan
-    i_n_steps = save_every_N * at.ones((o_n_steps,), "int64")
+    i_n_steps = save_every_N * ptb.ones((o_n_steps,), "int64")
     mod = n_steps % save_every_N
-    last_n_steps = at.switch(eq(mod, 0), save_every_N, mod)
+    last_n_steps = ptb.switch(eq(mod, 0), save_every_N, mod)
     i_n_steps = set_subtensor(i_n_steps[-1], last_n_steps)
 
     # Pad the sequences if needed
@@ -131,7 +131,7 @@ def scan_checkpoints(
         join = Join(view=0)
         for i, s in enumerate(sequences):
             n = s.shape[0] % save_every_N
-            z = at.zeros((n, s.shape[1:]), dtype=s.dtype)
+            z = ptb.zeros((n, s.shape[1:]), dtype=s.dtype)
             sequences[i] = join(0, [s, z])
 
     # Establish the input variables of the outer scan

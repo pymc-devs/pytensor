@@ -1,20 +1,22 @@
 import warnings
 from numbers import Number
 from textwrap import dedent
-from typing import Union
+from typing import Union, cast
 
 import numpy as np
 
 import pytensor
 from pytensor.gradient import DisconnectedType
+from pytensor.graph import Op
 from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.type import HasShape
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.scalar import int32
 from pytensor.tensor import _get_vector_length, as_tensor_variable
-from pytensor.tensor import basic as at
+from pytensor.tensor import basic as ptb
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.type import DenseTensorType, TensorType, int_dtypes, tensor
@@ -66,7 +68,7 @@ class Shape(COp):
 
     def make_node(self, x):
         if not isinstance(x, Variable):
-            x = at.as_tensor_variable(x)
+            x = ptb.as_tensor_variable(x)
 
         if isinstance(x.type, TensorType):
             out_var = TensorType("int64", (x.type.ndim,))()
@@ -144,14 +146,30 @@ _shape = Shape()
 def shape(x: Union[np.ndarray, Number, Variable]) -> Variable:
     """Return the shape of `x`."""
     if not isinstance(x, Variable):
-        x = at.as_tensor_variable(x)
+        x = ptb.as_tensor_variable(x)  # type: ignore
 
-    return _shape(x)
+    return cast(Variable, _shape(x))
 
 
-@_get_vector_length.register(Shape)
-def _get_vector_length_Shape(op, var):
-    return var.owner.inputs[0].type.ndim
+@_get_vector_length.register(Shape)  # type: ignore
+def _get_vector_length_Shape(op: Op, var: TensorVariable) -> int:
+    return cast(int, var.owner.inputs[0].type.ndim)
+
+
+@_vectorize_node.register(Shape)
+def vectorize_shape(op, node, batched_x):
+    from pytensor.tensor.extra_ops import broadcast_to
+
+    [old_x] = node.inputs
+    core_ndims = old_x.type.ndim
+    batch_ndims = batched_x.type.ndim - core_ndims
+    batched_x_shape = shape(batched_x)
+    if not batch_ndims:
+        return batched_x_shape.owner
+    else:
+        batch_shape = batched_x_shape[:batch_ndims]
+        core_shape = batched_x_shape[batch_ndims:]
+        return broadcast_to(core_shape, (*batch_shape, core_ndims)).owner
 
 
 def shape_tuple(x: TensorVariable) -> tuple[Variable, ...]:
@@ -164,7 +182,7 @@ def shape_tuple(x: TensorVariable) -> tuple[Variable, ...]:
         # We assume/call it a scalar
         return ()
 
-    res = ()
+    res: tuple[Variable, ...] = ()
     symbolic_shape = shape(x)
     static_shape = x.type.shape
     for i in range(x.type.ndim):
@@ -174,7 +192,7 @@ def shape_tuple(x: TensorVariable) -> tuple[Variable, ...]:
             # TODO: Why not use uint64?
             res += (pytensor.scalar.ScalarConstant(pytensor.scalar.int64, shape_val),)
         else:
-            res += (symbolic_shape[i],)
+            res += (symbolic_shape[i],)  # type: ignore
 
     return res
 
@@ -233,7 +251,7 @@ class Shape_i(COp):
             raise TypeError(f"{x} has too few dimensions for Shape_i")
         return Apply(self, [x], [pytensor.tensor.type.lscalar()])
 
-    def perform(self, node, inp, out_, params):
+    def perform(self, node, inp, out_):
         (x,) = inp
         (out,) = out_
         if out[0] is None:
@@ -349,7 +367,7 @@ def shape_i_op(i):
     return shape_i_op.cache[key]
 
 
-shape_i_op.cache = {}
+shape_i_op.cache = {}  # type: ignore
 
 
 def register_shape_i_c_code(typ, code, check_input, version=()):
@@ -393,12 +411,12 @@ class SpecifyShape(COp):
     def make_node(self, x, *shape):
         from pytensor.tensor.basic import get_underlying_scalar_constant_value
 
-        x = at.as_tensor_variable(x)
+        x = ptb.as_tensor_variable(x)
 
         shape = tuple(
             NoneConst
             if (s is None or NoneConst.equals(s))
-            else at.as_tensor_variable(s, ndim=0)
+            else ptb.as_tensor_variable(s, ndim=0)
             for s in shape
         )
 
@@ -451,7 +469,7 @@ class SpecifyShape(COp):
         for dim in range(node.inputs[0].type.ndim):
             s = shape[dim]
             try:
-                s = at.get_underlying_scalar_constant_value(s)
+                s = ptb.get_underlying_scalar_constant_value(s)
                 # We assume that `None` shapes are always retrieved by
                 # `get_underlying_scalar_constant_value`, and only in that case do we default to
                 # the shape of the input variable
@@ -459,7 +477,7 @@ class SpecifyShape(COp):
                     s = xshape[dim]
             except NotScalarConstantError:
                 pass
-            new_shape.append(at.as_tensor_variable(s))
+            new_shape.append(ptb.as_tensor_variable(s))
 
         assert len(new_shape) == len(xshape)
         return [new_shape]
@@ -552,7 +570,7 @@ def specify_shape(
     # If shape is a symbolic 1d vector of fixed length, we separate the items into a
     # tuple with one entry per shape dimension
     if len(shape) == 1 and shape[0] is not None:
-        shape_vector = at.as_tensor_variable(shape[0])
+        shape_vector = ptb.as_tensor_variable(shape[0])
         if shape_vector.ndim == 1:
             try:
                 shape = tuple(shape_vector)
@@ -561,7 +579,7 @@ def specify_shape(
 
     # If the specified shape is already encoded in the input static shape, do nothing
     # This ignores PyTensor constants in shape
-    x = at.as_tensor_variable(x)
+    x = ptb.as_tensor_variable(x)  # type: ignore
     new_shape_info = any(
         s != xts for (s, xts) in zip(shape, x.type.shape) if s is not None
     )
@@ -572,12 +590,38 @@ def specify_shape(
     return _specify_shape(x, *shape)
 
 
-@_get_vector_length.register(SpecifyShape)
-def _get_vector_length_SpecifyShape(op, var):
+@_get_vector_length.register(SpecifyShape)  # type: ignore
+def _get_vector_length_SpecifyShape(op: Op, var: TensorVariable) -> int:
     try:
-        return at.get_underlying_scalar_constant_value(var.owner.inputs[1]).item()
+        return int(ptb.get_underlying_scalar_constant_value(var.owner.inputs[1]).item())
     except NotScalarConstantError:
         raise ValueError(f"Length of {var} cannot be determined")
+
+
+@_vectorize_node.register(SpecifyShape)
+def _vectorize_specify_shape(op, node, x, *shape):
+    old_x, *old_shape = node.inputs
+    batched_ndims = x.type.ndim - old_x.type.ndim
+
+    if any(
+        as_tensor_variable(dim).type.ndim != 0
+        for dim in shape
+        if not (NoneConst.equals(dim) or dim is None)
+    ):
+        raise NotImplementedError(
+            "It is not possible to vectorize the shape argument of SpecifyShape"
+        )
+
+    if len(shape) == len(old_shape):
+        new_shape = tuple([None] * batched_ndims) + shape
+    elif len(shape) == (len(old_shape) + batched_ndims):
+        new_shape = shape
+    else:
+        raise ValueError(
+            "Invalid number of shape arguments passed into vectorize node of SpecifyShape"
+        )
+
+    return specify_shape(x, new_shape).owner
 
 
 class Reshape(COp):
@@ -605,9 +649,9 @@ class Reshape(COp):
         return f"{self.__class__.__name__}{{{self.ndim}}}"
 
     def make_node(self, x, shp):
-        x = at.as_tensor_variable(x)
+        x = ptb.as_tensor_variable(x)
         shp_orig = shp
-        shp = at.as_tensor_variable(shp, ndim=1)
+        shp = ptb.as_tensor_variable(shp, ndim=1)
         if not (
             shp.dtype in int_dtypes
             or (isinstance(shp, TensorConstant) and shp.data.size == 0)
@@ -628,9 +672,9 @@ class Reshape(COp):
                 shp_list = [shp_orig]
             for index in range(self.ndim):
                 y = shp_list[index]
-                y = at.as_tensor_variable(y)
+                y = ptb.as_tensor_variable(y)
                 try:
-                    s_val = at.get_underlying_scalar_constant_value(y).item()
+                    s_val = ptb.get_underlying_scalar_constant_value(y).item()
                     if s_val >= 0:
                         out_shape[index] = s_val
                 except NotScalarConstantError:
@@ -638,7 +682,7 @@ class Reshape(COp):
 
         return Apply(self, [x, shp], [tensor(dtype=x.type.dtype, shape=out_shape)])
 
-    def perform(self, node, inp, out_, params):
+    def perform(self, node, inp, out_):
         x, shp = inp
         (out,) = out_
         if len(shp) != self.ndim:
@@ -729,7 +773,7 @@ class Reshape(COp):
             return [
                 tuple(
                     [
-                        at.switch(eq(requ[i], -1), rest_size, requ[i])
+                        ptb.switch(eq(requ[i], -1), rest_size, requ[i])
                         for i in range(self.ndim)
                     ]
                 )
@@ -770,9 +814,29 @@ class Reshape(COp):
         """
 
 
+@_vectorize_node.register(Reshape)
+def _vectorize_reshape(op, node, x, shape):
+    old_x, old_shape = node.inputs
+    batched_ndims = x.type.ndim - old_x.type.ndim
+
+    if as_tensor_variable(shape).type.ndim != 1:
+        raise NotImplementedError(
+            "It is not possible to vectorize the shape argument of Reshape"
+        )
+
+    if len(tuple(old_shape)) == len(tuple(shape)):
+        new_shape = [*x.shape[:batched_ndims], *shape]
+    elif len(tuple(old_shape)) == (len(tuple(shape)) - batched_ndims):
+        new_shape = shape
+    else:
+        raise ValueError("Invalid shape length passed into vectorize node of Reshape")
+
+    return reshape(x, new_shape, ndim=len(new_shape)).owner
+
+
 def reshape(x, newshape, ndim=None):
     if ndim is None:
-        newshape = at.as_tensor_variable(newshape)
+        newshape = ptb.as_tensor_variable(newshape)
         if newshape.type.ndim != 1:
             raise TypeError(
                 "New shape in reshape must be a vector or a list/tuple of"
@@ -803,8 +867,9 @@ def shape_padleft(t, n_ones=1):
     Dimshuffle
 
     """
-    _t = at.as_tensor_variable(t)
-
+    _t = ptb.as_tensor_variable(t)
+    if n_ones == 0:
+        return _t
     pattern = ["x"] * n_ones + list(range(_t.type.ndim))
     return _t.dimshuffle(pattern)
 
@@ -819,8 +884,9 @@ def shape_padright(t, n_ones=1):
     Dimshuffle
 
     """
-    _t = at.as_tensor_variable(t)
-
+    _t = ptb.as_tensor_variable(t)
+    if n_ones == 0:
+        return _t
     pattern = list(range(_t.type.ndim)) + ["x"] * n_ones
     return _t.dimshuffle(pattern)
 
@@ -847,7 +913,7 @@ def shape_padaxis(t, axis):
     Dimshuffle
 
     """
-    _t = at.as_tensor_variable(t)
+    _t = ptb.as_tensor_variable(t)
 
     ndim = _t.ndim + 1
     if not -ndim <= axis < ndim:
@@ -1034,3 +1100,11 @@ def unbroadcast(x, *axes):
     if not unbroadcasted_axes:
         return x
     return Unbroadcast(*unbroadcasted_axes)(x)
+
+
+@_vectorize_node.register(Unbroadcast)
+def _vectorize_unbroadcast(op: Unbroadcast, node: Apply, x: TensorVariable) -> Apply:
+    batched_ndims = x.type.ndim - node.inputs[0].type.ndim
+    old_axes = op.axes
+    new_axes = (old_axis + batched_ndims for old_axis in old_axes)
+    return cast(Apply, unbroadcast(x, *new_axes).owner)

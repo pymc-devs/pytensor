@@ -20,10 +20,10 @@ simple function:
 
 .. code::
 
-   from pytensor import tensor as at
+   from pytensor import tensor as pt
 
    def sum_square_difference(a, b):
-       return at.sum((a - b)**2)
+       return pt.sum((a - b)**2)
 
 Even without taking PyTensor's rewrites into account, it is likely
 to work just as well as a custom implementation. It also supports all

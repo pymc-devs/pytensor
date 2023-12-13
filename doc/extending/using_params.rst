@@ -1,10 +1,10 @@
 .. _extending_op_params:
 
-===============
-Using Op params
-===============
+================
+Using COp params
+================
 
-The Op params is a facility to pass some runtime parameters to the
+The COp params is a facility to pass some runtime parameters to the
 code of an op without modifying it.  It can enable a single instance
 of C code to serve different needs and therefore reduce compilation.
 
@@ -53,7 +53,7 @@ following methods will be used for the type:
   - :meth:`__hash__ <Type.__hash__>`
   - :meth:`values_eq <Type.values_eq>`
 
-Additionally if you want to use your params with C code, you need to extend `COp`
+Additionally, to use your params with C code, you need to extend `COp`
 and implement the following methods:
 
   - :meth:`c_declare <CLinkerType.c_declare>`
@@ -65,24 +65,24 @@ You can also define other convenience methods such as
 :meth:`c_headers <CLinkerType.c_headers>` if you need any special things.
 
 
-Registering the params with your Op
------------------------------------
+Registering the params with your COp
+------------------------------------
 
-To declare that your Op uses params you have to set the class
+To declare that your `COp` uses params you have to set the class
 attribute :attr:`params_type` to an instance of your params Type.
 
 .. note::
 
    If you want to have multiple parameters, PyTensor provides the convenient class
    :class:`pytensor.link.c.params_type.ParamsType` that allows to bundle many parameters into
-   one object that will be available in both Python (as a Python object) and C code (as a struct).
+   one object that will be available to the C code (as a struct).
 
 For example if we decide to use an int as the params the following
 would be appropriate:
 
 .. code-block:: python
 
-   class MyOp(Op):
+   class MyOp(COp):
        params_type = Generic()
 
 After that you need to define a :meth:`get_params` method on your
@@ -115,12 +115,7 @@ Having declared a params for your Op will affect the expected
 signature of :meth:`perform`.  The new expected signature will have an
 extra parameter at the end which corresponds to the params object.
 
-.. warning::
-
-   If you do not account for this extra parameter, the code will fail
-   at runtime if it tries to run the python version.
-
-Also, for the C code, the `sub` dictionary will contain an extra entry
+The `sub` dictionary for `COp`s with params will contain an extra entry
 `'params'` which will map to the variable name of the params object.
 This is true for all methods that receive a `sub` parameter, so this
 means that you can use your params in the :meth:`c_code <COp.c_code>`
@@ -131,7 +126,7 @@ A simple example
 ----------------
 
 This is a simple example which uses a params object to pass a value.
-This `Op` will multiply a scalar input by a fixed floating point value.
+This `COp` will multiply a scalar input by a fixed floating point value.
 
 Since the value in this case is a python float, we chose Generic as
 the params type.
@@ -156,9 +151,10 @@ the params type.
            inp = as_scalar(inp)
            return Apply(self, [inp], [inp.type()])
 
-       def perform(self, node, inputs, output_storage, params):
-           # Here params is a python float so this is ok
-           output_storage[0][0] = inputs[0] * params
+       def perform(self, node, inputs, output_storage):
+           # Because params is a python float we can use `self.mul` directly.
+           # If it's something fancier, call `self.params_type.filter(self.get_params(node))`
+           output_storage[0][0] = inputs[0] * self.mul
 
        def c_code(self, node, name, inputs, outputs, sub):
            return ("%(z)s = %(x)s * PyFloat_AsDouble(%(p)s);" %
@@ -174,7 +170,7 @@ weights.
 
 .. testcode::
 
-   from pytensor.graph.op import Op
+   from pytensor.link.c.op import COp
    from pytensor.link.c.type import Generic
    from pytensor.scalar import as_scalar
 

@@ -4,7 +4,7 @@ import pickle
 import numpy as np
 import pytest
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.compile import shared
 from pytensor.compile.debugmode import DebugMode, InvalidValueError
 from pytensor.compile.function import function
@@ -17,7 +17,7 @@ from pytensor.graph.rewriting.basic import OpKeyGraphRewriter, PatternNodeRewrit
 from pytensor.graph.utils import MissingInputError
 from pytensor.link.vm import VMLinker
 from pytensor.tensor.math import dot
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.math import tanh
 from pytensor.tensor.type import (
     dmatrix,
@@ -455,7 +455,7 @@ class TestFunction:
         x = vector("x")
         y = vector("y")
         # this formular has no sense but for a test
-        out = (at_sum(x) - y) ** 2
+        out = (pt_sum(x) - y) ** 2
         train = function(
             [i],
             out,
@@ -598,7 +598,7 @@ class TestFunction:
 
     def test_constant_output(self):
         # Test that if the output is a constant, we respect the pytensor memory interface
-        f = function([], at.constant([4]))
+        f = function([], pt.constant([4]))
         # print f.maker.fgraph.toposort()
         out = f()
         assert (out == 4).all()
@@ -609,7 +609,7 @@ class TestFunction:
         assert (out2 == 4).all()
 
         # Test that if the output is a constant and borrow, we respect the pytensor memory interface
-        f = function([], Out(at.constant([4]), borrow=True))
+        f = function([], Out(pt.constant([4]), borrow=True))
         # print f.maker.fgraph.toposort()
         out = f()
         assert (out == 4).all()

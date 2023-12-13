@@ -8,7 +8,7 @@ from kanren.assoccomm import associative, commutative, eq_assoccomm
 from kanren.core import lall
 from unification import var, vars
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
@@ -36,37 +36,37 @@ def clear_assoccomm():
 
 
 def test_kanren_basic():
-    A_at = at.matrix("A")
-    x_at = at.vector("x")
+    A_pt = pt.matrix("A")
+    x_pt = pt.vector("x")
 
-    y_at = at.dot(A_at, x_at)
+    y_pt = pt.dot(A_pt, x_pt)
 
     q = var()
-    res = list(run(None, q, eq(y_at, etuple(_dot, q, x_at))))
+    res = list(run(None, q, eq(y_pt, etuple(_dot, q, x_pt))))
 
-    assert res == [A_at]
+    assert res == [A_pt]
 
 
 def test_KanrenRelationSub_filters():
-    x_at = at.vector("x")
-    y_at = at.vector("y")
-    z_at = at.vector("z")
-    A_at = at.matrix("A")
+    x_pt = pt.vector("x")
+    y_pt = pt.vector("y")
+    z_pt = pt.vector("z")
+    A_pt = pt.matrix("A")
 
     fact(commutative, _dot)
-    fact(commutative, at.add)
-    fact(associative, at.add)
+    fact(commutative, pt.add)
+    fact(associative, pt.add)
 
-    Z_at = A_at.dot((x_at + y_at) + z_at)
+    Z_pt = A_pt.dot((x_pt + y_pt) + z_pt)
 
-    fgraph = FunctionGraph(outputs=[Z_at], clone=False)
+    fgraph = FunctionGraph(outputs=[Z_pt], clone=False)
 
     def distributes(in_lv, out_lv):
         A_lv, x_lv, y_lv, z_lv = vars(4)
         return lall(
             # lhs == A * (x + y + z)
             eq_assoccomm(
-                etuple(_dot, A_lv, etuple(at.add, x_lv, etuple(at.add, y_lv, z_lv))),
+                etuple(_dot, A_lv, etuple(pt.add, x_lv, etuple(pt.add, y_lv, z_lv))),
                 in_lv,
             ),
             # This relation does nothing but provide us with a means of
@@ -79,9 +79,9 @@ def test_KanrenRelationSub_filters():
         _results = [eval_if_etuple(v) for v in results]
 
         # Make sure that at least a couple permutations are present
-        assert (A_at, x_at, y_at, z_at) in _results
-        assert (A_at, y_at, x_at, z_at) in _results
-        assert (A_at, z_at, x_at, y_at) in _results
+        assert (A_pt, x_pt, y_pt, z_pt) in _results
+        assert (A_pt, y_pt, x_pt, z_pt) in _results
+        assert (A_pt, z_pt, x_pt, y_pt) in _results
 
         return None
 
@@ -121,15 +121,15 @@ def test_KanrenRelationSub_multiout():
 
 def test_KanrenRelationSub_dot():
     """Make sure we can run miniKanren "optimizations" over a graph until a fixed-point/normal-form is reached."""
-    x_at = at.vector("x")
-    c_at = at.vector("c")
-    d_at = at.vector("d")
-    A_at = at.matrix("A")
-    B_at = at.matrix("B")
+    x_pt = pt.vector("x")
+    c_pt = pt.vector("c")
+    d_pt = pt.vector("d")
+    A_pt = pt.matrix("A")
+    B_pt = pt.matrix("B")
 
-    Z_at = A_at.dot(x_at + B_at.dot(c_at + d_at))
+    Z_pt = A_pt.dot(x_pt + B_pt.dot(c_pt + d_pt))
 
-    fgraph = FunctionGraph(outputs=[Z_at], clone=False)
+    fgraph = FunctionGraph(outputs=[Z_pt], clone=False)
 
     assert isinstance(fgraph.outputs[0].owner.op, Dot)
 
@@ -137,13 +137,13 @@ def test_KanrenRelationSub_dot():
         return lall(
             # lhs == A * (x + b)
             eq(
-                etuple(_dot, var("A"), etuple(at.add, var("x"), var("b"))),
+                etuple(_dot, var("A"), etuple(pt.add, var("x"), var("b"))),
                 in_lv,
             ),
             # rhs == A * x + A * b
             eq(
                 etuple(
-                    at.add,
+                    pt.add,
                     etuple(_dot, var("A"), var("x")),
                     etuple(_dot, var("A"), var("b")),
                 ),
@@ -158,10 +158,10 @@ def test_KanrenRelationSub_dot():
     fgraph_opt = rewrite_graph(fgraph, custom_rewrite=distribute_opt)
     (expr_opt,) = fgraph_opt.outputs
 
-    assert expr_opt.owner.op == at.add
+    assert expr_opt.owner.op == pt.add
     assert isinstance(expr_opt.owner.inputs[0].owner.op, Dot)
-    assert fgraph_opt.inputs[0] is A_at
+    assert fgraph_opt.inputs[0] is A_pt
     assert expr_opt.owner.inputs[0].owner.inputs[0].name == "A"
-    assert expr_opt.owner.inputs[1].owner.op == at.add
+    assert expr_opt.owner.inputs[1].owner.op == pt.add
     assert isinstance(expr_opt.owner.inputs[1].owner.inputs[0].owner.op, Dot)
     assert isinstance(expr_opt.owner.inputs[1].owner.inputs[1].owner.op, Dot)

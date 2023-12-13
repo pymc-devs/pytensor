@@ -1,6 +1,6 @@
 import numpy as np
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor import shared
 from pytensor.compile.builders import OpFromGraph
 from pytensor.tensor.special import softmax
@@ -21,11 +21,11 @@ class Mlp:
         x = dmatrix("x")
         wh = shared(self.rng.normal(0, 1, (nfeatures, nhiddens)), borrow=True)
         bh = shared(np.zeros(nhiddens), borrow=True)
-        h = at.sigmoid(at.dot(x, wh) + bh)
+        h = pt.sigmoid(pt.dot(x, wh) + bh)
 
         wy = shared(self.rng.normal(0, 1, (nhiddens, noutputs)))
         by = shared(np.zeros(noutputs), borrow=True)
-        y = softmax(at.dot(h, wy) + by, axis=-1)
+        y = softmax(pt.dot(h, wy) + by, axis=-1)
         self.inputs = [x]
         self.outputs = [y]
 
@@ -46,7 +46,7 @@ class OfgNested:
 class Ofg:
     def __init__(self):
         x, y, z = scalars("xyz")
-        e = at.sigmoid((x + y + z) ** 2)
+        e = pt.sigmoid((x + y + z) ** 2)
         op = OpFromGraph([x, y, z], [e])
         e2 = op(x, y, z) + op(z, y, x)
 
@@ -57,7 +57,7 @@ class Ofg:
 class OfgSimple:
     def __init__(self):
         x, y, z = scalars("xyz")
-        e = at.sigmoid((x + y + z) ** 2)
+        e = pt.sigmoid((x + y + z) ** 2)
         op = OpFromGraph([x, y, z], [e])
         e2 = op(x, y, z)
 

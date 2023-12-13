@@ -4,7 +4,7 @@ from collections.abc import Iterable
 import numpy as np
 
 import pytensor
-import pytensor.scalar.basic as aes
+import pytensor.scalar.basic as ps
 from pytensor import compile
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
@@ -26,12 +26,14 @@ from pytensor.tensor.basic import (
     concatenate,
     extract_constant,
     get_underlying_scalar_constant_value,
+    register_infer_shape,
     switch,
 )
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import Dot, add
-from pytensor.tensor.math import all as at_all
+from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import (
     and_,
     ceil_intdiv,
@@ -328,41 +330,53 @@ def local_subtensor_of_dot(fgraph, node):
     return [r]
 
 
+@register_infer_shape
 @register_useless
 @register_canonicalize
 @register_specialize
 @node_rewriter([Subtensor])
 def local_useless_slice(fgraph, node):
     """
-    Remove Subtensor of the form X[0, :] -> X[0]
+    Remove Subtensor of the form:
+        1. X[0, :] -> X[0]
+        2. X[:] -> X
+
     """
-    if isinstance(node.op, Subtensor):
-        slices = get_idx_list(node.inputs, node.op.idx_list)
-        last_slice = len(slices)
-        for s in slices[::-1]:
-            # check if slice and then check slice indices
-            if (
-                isinstance(s, slice)
-                and s.start is None
-                and s.stop is None
-                and (
-                    s.step is None
-                    or extract_constant(s.step, only_process_constants=True) == 1
-                )
-            ):
-                last_slice -= 1
-            else:
-                break
-        # check if we removed something
-        if last_slice < len(slices):
-            subtens = Subtensor(slices[:last_slice])
-            sl_ins = get_slice_elements(
-                slices[:last_slice], lambda x: isinstance(x, Variable)
+    idxs = get_idx_list(node.inputs, node.op.idx_list)
+
+    if not idxs:
+        return [node.inputs[0]]
+
+    last_useless_slice = len(idxs)
+    for s in idxs[::-1]:
+        # check if slice and then check slice indices
+        if (
+            isinstance(s, slice)
+            and s.start is None
+            and s.stop is None
+            and (
+                s.step is None
+                or extract_constant(s.step, only_process_constants=True) == 1
             )
-            out = subtens(node.inputs[0], *sl_ins)
+        ):
+            last_useless_slice -= 1
+        else:
+            break
+    # check if we removed something
+    if last_useless_slice < len(idxs):
+        new_idxs = idxs[:last_useless_slice]
+        if new_idxs:
+            new_subtensor = Subtensor(new_idxs)
+            new_subtensor_inputs = get_slice_elements(
+                new_idxs, lambda x: isinstance(x, Variable)
+            )
+            out = new_subtensor(node.inputs[0], *new_subtensor_inputs)
             # Copy over previous output stacktrace
             copy_stack_trace(node.outputs, out)
             return [out]
+        else:
+            # Subtensor is not needed at all
+            return [node.inputs[0]]
 
 
 # fast_compile to allow opt subtensor(cast{float32}(make_vector))
@@ -571,11 +585,11 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
     remove_dim = []
     node_inputs_idx = 1
     for dim, elem in enumerate(idx):
-        if isinstance(elem, (aes.ScalarType)):
+        if isinstance(elem, (ps.ScalarType)):
             # The idx is a ScalarType, ie a Type. This means the actual index
             # is contained in node.inputs[1]
             dim_index = node.inputs[node_inputs_idx]
-            if isinstance(dim_index, aes.ScalarConstant):
+            if isinstance(dim_index, ps.ScalarConstant):
                 dim_index = dim_index.value
             if dim_index in (0, -1) and node.inputs[0].broadcastable[dim]:
                 remove_dim.append(dim)
@@ -599,6 +613,7 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
         return [node.inputs[0].dimshuffle(tuple(remain_dim))]
 
 
+@register_infer_shape
 @register_useless
 @register_canonicalize
 @register_specialize
@@ -707,6 +722,7 @@ def local_subtensor_inc_subtensor(fgraph, node):
             return
 
 
+@register_infer_shape
 @register_specialize
 @register_canonicalize("fast_compile")
 @register_useless
@@ -743,9 +759,15 @@ def local_subtensor_make_vector(fgraph, node):
     make_vector_op = x.owner.op
 
     if isinstance(node.op, Subtensor):
-        (idx,) = node.op.idx_list
+        idxs = node.op.idx_list
 
-        if isinstance(idx, (aes.ScalarType, TensorType)):
+        # Subtensor has no indexes, return make_vector
+        if not idxs:
+            return [x]
+
+        (idx,) = idxs
+
+        if isinstance(idx, (ps.ScalarType, TensorType)):
             old_idx, idx = idx, node.inputs[1]
             assert idx.type.is_super(old_idx)
     elif isinstance(node.op, AdvancedSubtensor1):
@@ -785,6 +807,7 @@ def local_subtensor_make_vector(fgraph, node):
             pass
 
 
+@register_infer_shape
 @register_useless
 @register_canonicalize
 @register_specialize
@@ -866,7 +889,7 @@ def local_set_to_inc_subtensor(fgraph, node):
         and node.op.set_instead_of_inc
         and node.inputs[1].owner
         and isinstance(node.inputs[1].owner.op, Elemwise)
-        and isinstance(node.inputs[1].owner.op.scalar_op, aes.Add)
+        and isinstance(node.inputs[1].owner.op.scalar_op, ps.Add)
     ):
         addn = node.inputs[1].owner
         subn = None
@@ -898,7 +921,11 @@ def local_set_to_inc_subtensor(fgraph, node):
 @node_rewriter([Subtensor])
 def local_useless_subtensor(fgraph, node):
     """Remove `Subtensor` if it takes the full input."""
-    # This optimization needs ShapeOpt and fgraph.shape_feature
+
+    if not node.op.idx_list:
+        return [node.inputs[0]]
+
+    # The more elaborate optimization needs ShapeOpt and fgraph.shape_feature
     if not hasattr(fgraph, "shape_feature"):
         return
 
@@ -1440,7 +1467,7 @@ def local_adv_sub1_adv_inc_sub1(fgraph, node):
     if not inp.owner.op.set_instead_of_inc:
         return
 
-    cond = [at_all(and_(lt(idx, x.shape[0]), ge(idx, -x.shape[0])))]
+    cond = [pt_all(and_(lt(idx, x.shape[0]), ge(idx, -x.shape[0])))]
     if not fgraph.shape_feature.same_shape(idx, y, 0, 0):
         cond.append(eq(idx.shape[0], y.shape[0]))
     r = Assert(
@@ -1461,6 +1488,7 @@ def local_adv_sub1_adv_inc_sub1(fgraph, node):
     return [r2]
 
 
+@register_infer_shape
 @register_specialize
 @register_stabilize
 @register_canonicalize
@@ -1830,7 +1858,7 @@ def local_uint_constant_indices(fgraph, node):
                 index_val.astype(dtype), dtype=dtype
             )
         else:
-            new_index = aes.constant(index_val.astype(dtype), dtype=dtype)
+            new_index = ps.constant(index_val.astype(dtype), dtype=dtype)
 
         new_indices[i] = new_index
         has_new_index = True
@@ -1853,3 +1881,58 @@ def local_uint_constant_indices(fgraph, node):
     copy_stack_trace(node.outputs, new_outs)
 
     return new_outs
+
+
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter([Blockwise])
+def local_blockwise_advanced_inc_subtensor(fgraph, node):
+    """Rewrite blockwise advanced inc_subtensor whithout batched indexes as an inc_subtensor with prepended empty slices."""
+    if not isinstance(node.op.core_op, AdvancedIncSubtensor):
+        return None
+
+    x, y, *idxs = node.inputs
+
+    # It is currently not possible to Vectorize such AdvancedIncSubtensor, but we check again just in case
+    if any(
+        (
+            isinstance(idx, (SliceType, NoneTypeT))
+            or (idx.type.dtype == "bool" and idx.type.ndim > 0)
+        )
+        for idx in idxs
+    ):
+        return None
+
+    op: Blockwise = node.op  # type: ignore
+    batch_ndim = op.batch_ndim(node)
+
+    new_idxs = []
+    for idx in idxs:
+        if all(idx.type.broadcastable[:batch_ndim]):
+            new_idxs.append(idx.squeeze(tuple(range(batch_ndim))))
+        else:
+            # Rewrite does not apply
+            return None
+
+    x_batch_bcast = x.type.broadcastable[:batch_ndim]
+    y_batch_bcast = y.type.broadcastable[:batch_ndim]
+    if any(xb and not yb for xb, yb in zip(x_batch_bcast, y_batch_bcast)):
+        # Need to broadcast batch x dims
+        batch_shape = tuple(
+            x_dim if (not xb or yb) else y_dim
+            for xb, x_dim, yb, y_dim in zip(
+                x_batch_bcast,
+                tuple(x.shape)[:batch_ndim],
+                y_batch_bcast,
+                tuple(y.shape)[:batch_ndim],
+            )
+        )
+        core_shape = tuple(x.shape)[batch_ndim:]
+        x = alloc(x, *batch_shape, *core_shape)
+
+    new_idxs = [slice(None)] * batch_ndim + new_idxs
+    symbolic_idxs = x[tuple(new_idxs)].owner.inputs[1:]
+    new_out = op.core_op.make_node(x, y, *symbolic_idxs).outputs
+    copy_stack_trace(node.outputs, new_out)
+    return new_out

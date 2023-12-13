@@ -72,13 +72,13 @@ class CheckAndRaise(COp):
         conds
             The conditions to evaluate.
         """
-        import pytensor.tensor as at
+        import pytensor.tensor as pt
 
         if not isinstance(value, Variable):
-            value = at.as_tensor_variable(value)
+            value = pt.as_tensor_variable(value)
 
         conds = [
-            at.as_tensor_variable(c) if not isinstance(c, Variable) else c
+            pt.as_tensor_variable(c) if not isinstance(c, Variable) else c
             for c in conds
         ]
 
@@ -90,7 +90,7 @@ class CheckAndRaise(COp):
             [value.type()],
         )
 
-    def perform(self, node, inputs, outputs, params):
+    def perform(self, node, inputs, outputs):
         (out,) = outputs
         val, *conds = inputs
         out[0] = val
@@ -182,9 +182,9 @@ class Assert(CheckAndRaise):
     Examples
     --------
     >>> import pytensor
-    >>> import pytensor.tensor as at
+    >>> import pytensor.tensor as pt
     >>> from pytensor.raise_op import Assert
-    >>> x = at.vector("x")
+    >>> x = pt.vector("x")
     >>> assert_op = Assert("This assert failed")
     >>> func = pytensor.function([x], assert_op(x, x.size < 2))
 

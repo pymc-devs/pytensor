@@ -664,7 +664,7 @@ class _NoPythonCOp(COp):
 
     """
 
-    def perform(self, node, inputs, output_storage, params=None):
+    def perform(self, node, inputs, output_storage):
         raise NotImplementedError("No Python implementation is provided by this COp.")
 
 
@@ -675,7 +675,7 @@ class _NoPythonExternalCOp(ExternalCOp):
 
     """
 
-    def perform(self, node, inputs, output_storage, params=None):
+    def perform(self, node, inputs, output_storage):
         raise NotImplementedError(
             "No Python implementation is provided by this ExternalCOp."
         )

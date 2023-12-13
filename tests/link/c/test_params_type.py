@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import pytensor
-from pytensor import tensor as at
+from pytensor import tensor as pt
 from pytensor.graph.basic import Apply
 from pytensor.link.c.op import COp, ExternalCOp
 from pytensor.link.c.params_type import Params, ParamsType
@@ -28,10 +28,11 @@ class QuadraticOpFunc(COp):
         self.c = c
 
     def make_node(self, x):
-        x = at.as_tensor_variable(x)
+        x = pt.as_tensor_variable(x)
         return Apply(self, [x], [x.type()])
 
-    def perform(self, node, inputs, output_storage, coefficients):
+    def perform(self, node, inputs, output_storage):
+        coefficients = self.params_type.filter(self.get_params(node))
         x = inputs[0]
         y = output_storage[0]
         y[0] = coefficients.a * (x**2) + coefficients.b * x + coefficients.c
@@ -114,10 +115,11 @@ class QuadraticCOpFunc(ExternalCOp):
         self.c = c
 
     def make_node(self, x):
-        x = at.as_tensor_variable(x)
+        x = pt.as_tensor_variable(x)
         return Apply(self, [x], [x.type()])
 
-    def perform(self, node, inputs, output_storage, coefficients):
+    def perform(self, node, inputs, output_storage):
+        coefficients = self.params_type.filter(self.get_params(node))
         x = inputs[0]
         y = output_storage[0]
         y[0] = coefficients.a * (x**2) + coefficients.b * x + coefficients.c

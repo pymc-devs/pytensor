@@ -21,7 +21,7 @@ from numba.extending import box, overload
 from pytensor import config
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp
-from pytensor.graph.basic import Apply, NoParams
+from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.type import Type
 from pytensor.ifelse import IfElse
@@ -383,22 +383,11 @@ def generate_fallback_impl(op, node=None, storage_map=None, **kwargs):
         ret_sig = get_numba_type(node.outputs[0].type)
 
     output_types = tuple(out.type for out in node.outputs)
-    params = node.run_params()
 
-    if params is not NoParams:
-        params_val = dict(node.params_type.filter(params))
-
-        def py_perform(inputs):
-            outputs = [[None] for i in range(n_outputs)]
-            op.perform(node, inputs, outputs, params_val)
-            return outputs
-
-    else:
-
-        def py_perform(inputs):
-            outputs = [[None] for i in range(n_outputs)]
-            op.perform(node, inputs, outputs)
-            return outputs
+    def py_perform(inputs):
+        outputs = [[None] for i in range(n_outputs)]
+        op.perform(node, inputs, outputs)
+        return outputs
 
     if n_outputs == 1:
 
@@ -906,6 +895,8 @@ def numba_funcify_BatchedDot(op, node, **kwargs):
 
     @numba_njit
     def batched_dot(x, y):
+        # Numba does not support 3D matmul
+        # https://github.com/numba/numba/issues/3804
         shape = x.shape[:-1] + y.shape[2:]
         z0 = np.empty(shape, dtype=dtype)
         for i in range(z0.shape[0]):

@@ -135,16 +135,16 @@ Here's a small example of a test for :class:`Eye`:
 
 .. code:: python
 
-   import pytensor.tensor as at
+   import pytensor.tensor as pt
 
    def test_jax_Eye():
        """Test JAX conversion of the `Eye` `Op`."""
 
        # Create a symbolic input for `Eye`
-       x_at = at.scalar()
+       x_at = pt.scalar()
 
        # Create a variable that is the output of an `Eye` `Op`
-       eye_var = at.eye(x_at)
+       eye_var = pt.eye(x_at)
 
        # Create an PyTensor `FunctionGraph`
        out_fg = FunctionGraph(outputs=[eye_var])

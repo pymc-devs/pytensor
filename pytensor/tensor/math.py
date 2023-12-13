@@ -5,10 +5,11 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 
 from pytensor import config, printing
-from pytensor import scalar as aes
+from pytensor import scalar as ps
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.op import Op
+from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.link.c.type import Generic
@@ -25,7 +26,7 @@ from pytensor.tensor.basic import (
     stack,
     switch,
 )
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise, scalar_elemwise
 from pytensor.tensor.shape import shape, specify_broadcastable
 from pytensor.tensor.type import (
@@ -152,9 +153,9 @@ class MaxAndArgmax(COp):
         ]
         return Apply(self, inputs, outputs)
 
-    def perform(self, node, inp, outs, params):
+    def perform(self, node, inp, outs):
         x = inp[0]
-        axes = params
+        axes = self.axis
         max, max_idx = outs
         if axes is None:
             axes = tuple(range(x.ndim))
@@ -339,7 +340,7 @@ class Argmax(COp):
     __props__ = ("axis",)
     _f16_ok = True
 
-    params_type = ParamsType(c_axis=aes.int64)
+    params_type = ParamsType(c_axis=ps.int64)
 
     def __init__(self, axis):
         if axis is not None:
@@ -374,7 +375,7 @@ class Argmax(COp):
                 "You are trying to compile a graph with an old Argmax node.  Either reoptimize your graph or rebuild it to get the new node format."
             )
 
-    def perform(self, node, inp, outs, params):
+    def perform(self, node, inp, outs):
         (x,) = inp
         axes = self.axis
         (max_idx,) = outs
@@ -623,7 +624,7 @@ class Max(NonZeroDimsCAReduce):
     nfunc_spec = ("max", 1, 1)
 
     def __init__(self, axis):
-        super().__init__(aes.scalar_maximum, axis)
+        super().__init__(ps.scalar_maximum, axis)
 
     def clone(self, **kwargs):
         axis = kwargs.get("axis", self.axis)
@@ -634,7 +635,7 @@ class Min(NonZeroDimsCAReduce):
     nfunc_spec = ("min", 1, 1)
 
     def __init__(self, axis):
-        super().__init__(aes.scalar_minimum, axis)
+        super().__init__(ps.scalar_minimum, axis)
 
     def clone(self, **kwargs):
         axis = kwargs.get("axis", self.axis)
@@ -1370,6 +1371,11 @@ def tri_gamma(a):
 
 
 @scalar_elemwise
+def polygamma(n, x):
+    """Polygamma function of order n evaluated at x"""
+
+
+@scalar_elemwise
 def chi2sf(x, k):
     """chi squared survival function"""
 
@@ -1437,6 +1443,11 @@ def i1(x):
 @scalar_elemwise
 def iv(v, x):
     """Modified Bessel function of the first kind of order v (real)."""
+
+
+@scalar_elemwise
+def ive(v, x):
+    """Exponentially scaled modified Bessel function of the first kind of order v (real)."""
 
 
 @scalar_elemwise
@@ -1521,7 +1532,7 @@ class Mean(FixedOpCAReduce):
     nfunc_spec = ("mean", 1, 1)
 
     def __init__(self, axis=None):
-        super().__init__(aes.mean, axis)
+        super().__init__(ps.mean, axis)
         assert self.axis is None or len(self.axis) == 1
 
     def __str__(self):
@@ -1843,13 +1854,13 @@ def ceil_intdiv(a, b):
     # is faster or not. But this is not safe for int64, because the cast will
     # lose precision. For example:
     #     cast(cast(a, scalar.upcast(a.type.dtype, 'float32')) / b,
-    #          aes.upcast(a.type.dtype, b.type.dtype))
+    #          ps.upcast(a.type.dtype, b.type.dtype))
 
     # We cast for the case when a and b are uint*; otherwise, neq will
     # force their upcast to int.
     div = int_div(a, b)
     ret = cast(neq(a % b, 0), div.dtype) + div
-    assert ret.dtype == aes.upcast(
+    assert ret.dtype == ps.upcast(
         div.owner.inputs[0].type.dtype, div.owner.inputs[1].type.dtype
     )
     return ret
@@ -1862,7 +1873,7 @@ def mod_check(x, y):
         or as_tensor_variable(y).dtype in complex_dtypes
     ):
         # Currently forbidden.
-        raise aes.Mod.complex_error
+        raise ps.Mod.complex_error
     else:
         return mod(x, y)
 
@@ -1951,7 +1962,7 @@ class Dot(Op):
             sz = sx[:-1]
 
         i_dtypes = [input.type.dtype for input in inputs]
-        outputs = [tensor(dtype=aes.upcast(*i_dtypes), shape=sz)]
+        outputs = [tensor(dtype=ps.upcast(*i_dtypes), shape=sz)]
         return Apply(self, inputs, outputs)
 
     def perform(self, node, inp, out):
@@ -2385,7 +2396,7 @@ class All(FixedOpCAReduce):
     nfunc_spec = ("all", 1, 1)
 
     def __init__(self, axis=None):
-        super().__init__(aes.and_, axis)
+        super().__init__(ps.and_, axis)
 
     def _output_dtype(self, idtype):
         return "bool"
@@ -2415,7 +2426,7 @@ class Any(FixedOpCAReduce):
     nfunc_spec = ("any", 1, 1)
 
     def __init__(self, axis=None):
-        super().__init__(aes.or_, axis)
+        super().__init__(ps.or_, axis)
 
     def _output_dtype(self, idtype):
         return "bool"
@@ -2450,7 +2461,7 @@ class Sum(FixedOpCAReduce):
 
     def __init__(self, axis=None, dtype=None, acc_dtype=None):
         super().__init__(
-            aes.add,
+            ps.add,
             axis=axis,
             dtype=dtype,
             acc_dtype=acc_dtype,
@@ -2479,7 +2490,7 @@ class Sum(FixedOpCAReduce):
                 new_dims.append(i)
                 i += 1
         ds_op = DimShuffle(gz.type.broadcastable, new_dims)
-        gx = Elemwise(aes.second)(x, ds_op(gz))
+        gx = Elemwise(ps.second)(x, ds_op(gz))
         return [gx]
 
     def R_op(self, inputs, eval_points):
@@ -2541,7 +2552,7 @@ class Prod(FixedOpCAReduce):
 
     def __init__(self, axis=None, dtype=None, acc_dtype=None, no_zeros_in_input=False):
         super().__init__(
-            aes.mul,
+            ps.mul,
             axis=axis,
             dtype=dtype,
             acc_dtype=acc_dtype,
@@ -2755,7 +2766,7 @@ class MulWithoutZeros(BinaryScalarOp):
         return (1,)
 
 
-mul_without_zeros = MulWithoutZeros(aes.upcast_out, name="mul_without_zeros")
+mul_without_zeros = MulWithoutZeros(ps.upcast_out, name="mul_without_zeros")
 
 
 class ProdWithoutZeros(FixedOpCAReduce):
@@ -2883,7 +2894,11 @@ def logsumexp(x, axis=None, keepdims=False):
     return log(sum(exp(x), axis=axis, keepdims=keepdims))
 
 
-_matrix_matrix_matmul = Blockwise(_dot, signature="(n,k),(k,m)->(n,m)")
+_matrix_matrix_matmul = Blockwise(
+    _dot,
+    signature="(m,k),(k,n)->(m,n)",
+    gufunc_spec=("numpy.matmul", 2, 1),
+)
 
 
 def matmul(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None):
@@ -2945,6 +2960,15 @@ def matmul(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None
         out = out.astype(dtype)
 
     return out
+
+
+@_vectorize_node.register(Dot)
+def vectorize_node_to_matmul(op, node, batched_x, batched_y):
+    old_x, old_y = node.inputs
+    if old_x.type.ndim == 2 and old_y.type.ndim == 2:
+        return matmul(batched_x, batched_y).owner
+    else:
+        return vectorize_node_fallback(op, node, batched_x, batched_y)
 
 
 __all__ = [
@@ -3023,6 +3047,7 @@ __all__ = [
     "psi",
     "digamma",
     "tri_gamma",
+    "polygamma",
     "chi2sf",
     "gammainc",
     "gammaincc",
@@ -3036,6 +3061,7 @@ __all__ = [
     "i0",
     "i1",
     "iv",
+    "ive",
     "sigmoid",
     "expit",
     "softplus",

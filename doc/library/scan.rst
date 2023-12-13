@@ -38,14 +38,14 @@ The equivalent PyTensor code would be:
 .. testcode::
 
   import pytensor
-  import pytensor.tensor as at
+  import pytensor.tensor as pt
 
-  k = at.iscalar("k")
-  A = at.vector("A")
+  k = pt.iscalar("k")
+  A = pt.vector("A")
 
   # Symbolic description of the result
   result, updates = pytensor.scan(fn=lambda prior_result, A: prior_result * A,
-                                outputs_info=at.ones_like(A),
+                                outputs_info=pt.ones_like(A),
                                 non_sequences=A,
                                 n_steps=k)
 
@@ -103,7 +103,7 @@ from a list of its coefficients:
     import numpy
 
     coefficients = pytensor.tensor.vector("coefficients")
-    x = at.scalar("x")
+    x = pt.scalar("x")
 
     max_coefficients_supported = 10000
 
@@ -164,21 +164,21 @@ downcast** of the latter.
 
     import numpy as np
     import pytensor
-    import pytensor.tensor as at
+    import pytensor.tensor as pt
 
-    up_to = at.iscalar("up_to")
+    up_to = pt.iscalar("up_to")
 
     # define a named function, rather than using lambda
     def accumulate_by_adding(arange_val, sum_to_date):
         return sum_to_date + arange_val
-    seq = at.arange(up_to)
+    seq = pt.arange(up_to)
 
     # An unauthorized implicit downcast from the dtype of 'seq', to that of
-    # 'at.as_tensor_variable(0)' which is of dtype 'int8' by default would occur
+    # 'pt.as_tensor_variable(0)' which is of dtype 'int8' by default would occur
     # if this instruction were to be used instead of the next one:
-    # outputs_info = at.as_tensor_variable(0)
+    # outputs_info = pt.as_tensor_variable(0)
 
-    outputs_info = at.as_tensor_variable(np.asarray(0, seq.dtype))
+    outputs_info = pt.as_tensor_variable(np.asarray(0, seq.dtype))
     scan_result, scan_updates = pytensor.scan(fn=accumulate_by_adding,
                                             outputs_info=outputs_info,
                                             sequences=seq)
@@ -206,14 +206,14 @@ with all values set to zero except at the provided array indices.
 
 .. testcode::
 
-    location = at.imatrix("location")
-    values = at.vector("values")
-    output_model = at.matrix("output_model")
+    location = pt.imatrix("location")
+    values = pt.vector("values")
+    output_model = pt.matrix("output_model")
 
     def set_value_at_position(a_location, a_value, output_model):
-        zeros = at.zeros_like(output_model)
+        zeros = pt.zeros_like(output_model)
         zeros_subtensor = zeros[a_location[0], a_location[1]]
-        return at.set_subtensor(zeros_subtensor, a_value)
+        return pt.set_subtensor(zeros_subtensor, a_value)
 
     result, updates = pytensor.scan(fn=set_value_at_position,
                                   outputs_info=None,
@@ -257,7 +257,7 @@ the following:
 .. testcode:: scan1
 
     import pytensor
-    import pytensor.tensor as at
+    import pytensor.tensor as pt
     import numpy as np
 
     rng = np.random.default_rng(203940)
@@ -269,16 +269,16 @@ the following:
     bvis = pytensor.shared(bvis_values)
     bhid = pytensor.shared(bhid_values)
 
-    srng = at.random.RandomStream(1234)
+    srng = pt.random.RandomStream(1234)
 
     def one_step(vsample):
-        hmean = at.sigmoid(at.dot(vsample, W) + bhid)
+        hmean = pt.sigmoid(pt.dot(vsample, W) + bhid)
         hsample = srng.binomial(1, hmean, size=hmean.shape)
-        vmean = at.sigmoid(at.dot(hsample, W.T) + bvis)
+        vmean = pt.sigmoid(pt.dot(hsample, W.T) + bvis)
 
         return srng.binomial(1, vmean, size=vsample.shape)
 
-    sample = at.lvector()
+    sample = pt.lvector()
 
     values, updates = pytensor.scan(one_step, outputs_info=sample, n_steps=10)
 
@@ -353,9 +353,9 @@ updated:
 
     # OneStep, with explicit use of the shared variables (W, bvis, bhid)
     def OneStep(vsample, W, bvis, bhid):
-        hmean = at.sigmoid(pytensor.dot(vsample, W) + bhid)
+        hmean = pt.sigmoid(pytensor.dot(vsample, W) + bhid)
         hsample = trng.binomial(size=hmean.shape, n=1, p=hmean)
-        vmean = at.sigmoid(pytensor.dot(hsample, W.T) + bvis)
+        vmean = pt.sigmoid(pytensor.dot(hsample, W.T) + bvis)
         return trng.binomial(size=vsample.shape, n=1, p=vmean,
                          dtype=pytensor.config.floatX)
 
@@ -389,9 +389,9 @@ Using the original Gibbs sampling example, with ``strict=True`` added to the
 
     # Same OneStep as in original example.
     def OneStep(vsample) :
-        hmean = at.sigmoid(pytensor.dot(vsample, W) + bhid)
+        hmean = pt.sigmoid(pytensor.dot(vsample, W) + bhid)
         hsample = trng.binomial(size=hmean.shape, n=1, p=hmean)
-        vmean = at.sigmoid(pytensor.dot(hsample, W.T) + bvis)
+        vmean = pt.sigmoid(pytensor.dot(hsample, W.T) + bvis)
         return trng.binomial(size=vsample.shape, n=1, p=vmean,
                              dtype=pytensor.config.floatX)
 
@@ -418,9 +418,9 @@ variables passed explicitly to ``OneStep`` and to scan:
 
     # OneStep, with explicit use of the shared variables (W, bvis, bhid)
     def OneStep(vsample, W, bvis, bhid) :
-        hmean = at.sigmoid(pytensor.dot(vsample, W) + bhid)
+        hmean = pt.sigmoid(pytensor.dot(vsample, W) + bhid)
         hsample = trng.binomial(size=hmean.shape, n=1, p=hmean)
-        vmean = at.sigmoid(pytensor.dot(hsample, W.T) + bvis)
+        vmean = pt.sigmoid(pytensor.dot(hsample, W.T) + bvis)
         return trng.binomial(size=vsample.shape, n=1, p=vmean,
                              dtype=pytensor.config.floatX)
 
@@ -460,13 +460,13 @@ construct a function that computes one iteration step :
 .. testsetup:: scan3
 
    import pytensor
-   from pytensor import tensor as at
+   from pytensor import tensor as pt
 
 .. testcode:: scan3
 
   def oneStep(u_tm4, u_t, x_tm3, x_tm1, y_tm1, W, W_in_1, W_in_2,  W_feedback, W_out):
 
-    x_t = at.tanh(pytensor.dot(x_tm1, W) + \
+    x_t = pt.tanh(pytensor.dot(x_tm1, W) + \
                  pytensor.dot(u_t,   W_in_1) + \
                  pytensor.dot(u_tm4, W_in_2) + \
                  pytensor.dot(y_tm1, W_feedback))
@@ -487,16 +487,16 @@ the PyTensor variables needed we construct our RNN as follows :
 
 .. testcode:: scan3
 
-   W = at.matrix()
-   W_in_1 = at.matrix()
-   W_in_2 = at.matrix()
-   W_feedback = at.matrix()
-   W_out = at.matrix()
+   W = pt.matrix()
+   W_in_1 = pt.matrix()
+   W_in_2 = pt.matrix()
+   W_feedback = pt.matrix()
+   W_out = pt.matrix()
 
-   u = at.matrix() # it is a sequence of vectors
-   x0 = at.matrix() # initial state of x has to be a matrix, since
+   u = pt.matrix() # it is a sequence of vectors
+   x0 = pt.matrix() # initial state of x has to be a matrix, since
                    # it has to cover x[-3]
-   y0 = at.vector() # y0 is just a vector since scan has only to provide
+   y0 = pt.vector() # y0 is just a vector since scan has only to provide
                    # y[-1]
 
 
@@ -536,9 +536,9 @@ value ``max_value``.
     def power_of_2(previous_power, max_value):
         return previous_power*2, pytensor.scan.utils.until(previous_power*2 > max_value)
 
-    max_value = at.scalar()
+    max_value = pt.scalar()
     values, _ = pytensor.scan(power_of_2,
-                            outputs_info = at.constant(1.),
+                            outputs_info = pt.constant(1.),
                             non_sequences = max_value,
                             n_steps = 1024)
 

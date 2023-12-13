@@ -27,7 +27,7 @@ from typing import Union
 
 import numpy as np
 
-import pytensor.scalar.basic as aes
+import pytensor.scalar.basic as ps
 from pytensor import compile
 from pytensor.compile.ops import ViewOp
 from pytensor.graph import FunctionGraph
@@ -58,6 +58,7 @@ from pytensor.tensor.basic import (
     get_underlying_scalar_constant_value,
     join,
     ones_like,
+    register_infer_shape,
     switch,
     tensor_copy,
     zeros,
@@ -66,9 +67,7 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays
-from pytensor.tensor.math import Sum, add
-from pytensor.tensor.math import all as at_all
-from pytensor.tensor.math import eq
+from pytensor.tensor.math import Sum, add, eq
 from pytensor.tensor.shape import Shape_i, shape_padleft
 from pytensor.tensor.sort import TopKOp
 from pytensor.tensor.type import DenseTensorType, TensorType
@@ -265,6 +264,7 @@ def local_elemwise_alloc(fgraph, node):
     introduces them as a canonicalization of `Alloc`'s with leading
     broadcastable dimensions.
     """
+    # This is handled by local_alloc_unary
     if len(node.inputs) == 1:
         return None
 
@@ -420,6 +420,7 @@ compile.optdb.register(
 )
 
 
+@register_infer_shape
 @register_canonicalize("fast_compile", "shape_unsafe")
 @register_useless("shape_unsafe")
 @node_rewriter([fill])
@@ -441,6 +442,7 @@ def local_useless_fill(fgraph, node):
         return [v]
 
 
+@register_infer_shape
 @register_specialize("shape_unsafe")
 @register_stabilize("shape_unsafe")
 @register_canonicalize("shape_unsafe")
@@ -462,14 +464,7 @@ def local_useless_alloc(fgraph, node):
         inp.type.dtype == output.type.dtype
         and inp.type.broadcastable == output.type.broadcastable
     ):
-        if inp.ndim == 0:
-            return [inp]
-        else:
-            return [
-                Assert("Shapes must be equal")(
-                    inp, at_all(eq(inp.shape, node.inputs[1:]))
-                )
-            ]
+        return [inp]
 
 
 @register_specialize
@@ -530,6 +525,7 @@ compile.optdb.register(
 )
 
 
+@register_infer_shape
 @register_useless
 @register_canonicalize("fast_compile")
 @register_specialize
@@ -555,7 +551,7 @@ def local_useless_elemwise(fgraph, node):
         # cleaner graph.
         dtype = node.outputs[0].dtype
 
-        if node.op.scalar_op == aes.eq and len(node.inputs) == 2:
+        if node.op.scalar_op == ps.eq and len(node.inputs) == 2:
             if node.inputs[0] == node.inputs[1]:
                 # it is the same var in the graph. That will always be true
                 ret = ones_like(node.inputs[0], dtype=dtype, opt=True)
@@ -563,7 +559,7 @@ def local_useless_elemwise(fgraph, node):
                 # Copy stack trace from input to constant output
                 copy_stack_trace(node.outputs[0], ret)
                 return [ret]
-        elif node.op.scalar_op == aes.neq and len(node.inputs) == 2:
+        elif node.op.scalar_op == ps.neq and len(node.inputs) == 2:
             if node.inputs[0] == node.inputs[1]:
                 # it is the same var in the graph. That will always be false
                 ret = zeros_like(node.inputs[0], dtype=dtype, opt=True)
@@ -572,17 +568,17 @@ def local_useless_elemwise(fgraph, node):
                 copy_stack_trace(node.outputs[0], ret)
                 return [ret]
 
-        elif node.op.scalar_op == aes.mul and len(node.inputs) == 1:
+        elif node.op.scalar_op == ps.mul and len(node.inputs) == 1:
             # No need to copy over any stack trace
             return [node.inputs[0]]
 
-        elif node.op.scalar_op == aes.add and len(node.inputs) == 1:
+        elif node.op.scalar_op == ps.add and len(node.inputs) == 1:
             # No need to copy over any stack trace
             return [node.inputs[0]]
-        elif node.op.scalar_op == aes.identity and len(node.inputs) == 1:
+        elif node.op.scalar_op == ps.identity and len(node.inputs) == 1:
             return [node.inputs[0]]
 
-        elif isinstance(node.op.scalar_op, aes.AND) and len(node.inputs) == 2:
+        elif isinstance(node.op.scalar_op, ps.AND) and len(node.inputs) == 2:
             if isinstance(node.inputs[0], TensorConstant):
                 const_val = extract_constant(
                     node.inputs[0], only_process_constants=True
@@ -607,7 +603,7 @@ def local_useless_elemwise(fgraph, node):
                         # and this rewrite would be wrong
                         return [node.inputs[0].astype(node.outputs[0].dtype)]
 
-        elif isinstance(node.op.scalar_op, aes.OR) and len(node.inputs) == 2:
+        elif isinstance(node.op.scalar_op, ps.OR) and len(node.inputs) == 2:
             if isinstance(node.inputs[0], TensorConstant):
                 const_val = extract_constant(
                     node.inputs[0], only_process_constants=True
@@ -632,7 +628,7 @@ def local_useless_elemwise(fgraph, node):
                         # and this rewrite would be wrong
                         return [ones_like(node.inputs[0], dtype=dtype, opt=True)]
 
-        elif isinstance(node.op.scalar_op, aes.XOR) and len(node.inputs) == 2:
+        elif isinstance(node.op.scalar_op, ps.XOR) and len(node.inputs) == 2:
             if node.inputs[0] is node.inputs[1]:
                 return [zeros_like(node.inputs[0], dtype=dtype, opt=True)]
 
@@ -670,13 +666,13 @@ def local_cast_cast(fgraph, node):
           and the first cast cause an upcast.
 
     """
-    if not isinstance(node.op, Elemwise) or not isinstance(node.op.scalar_op, aes.Cast):
+    if not isinstance(node.op, Elemwise) or not isinstance(node.op.scalar_op, ps.Cast):
         return
     x = node.inputs[0]
     if (
         not x.owner
         or not isinstance(x.owner.op, Elemwise)
-        or not isinstance(x.owner.op.scalar_op, aes.Cast)
+        or not isinstance(x.owner.op.scalar_op, ps.Cast)
     ):
         return
 
@@ -806,6 +802,7 @@ compile.optdb["useless"].register(
 )
 
 
+@register_infer_shape
 @register_specialize
 @register_canonicalize
 @register_useless
@@ -826,6 +823,7 @@ def local_join_1(fgraph, node):
 
 
 # TODO: merge in local_useless_join
+@register_infer_shape
 @register_useless
 @register_specialize
 @register_canonicalize
@@ -1018,7 +1016,7 @@ def local_useless_switch(fgraph, node):
     if (
         cond_var.owner
         and isinstance(cond_var.owner.op, Elemwise)
-        and isinstance(cond_var.owner.op.scalar_op, aes.LE)
+        and isinstance(cond_var.owner.op.scalar_op, ps.LE)
         and cond_var.owner.inputs[0].owner
         and isinstance(cond_var.owner.inputs[0].owner.op, Shape_i)
         and extract_constant(cond_var.owner.inputs[1], only_process_constants=True) == 0
@@ -1041,14 +1039,14 @@ def local_merge_switch_same_cond(fgraph, node):
     """
     # node must be binary elemwise or add or mul
     if not isinstance(node.op, Elemwise) or not isinstance(
-        node.op.scalar_op, (aes.BinaryScalarOp, aes.Add, aes.Mul)
+        node.op.scalar_op, (ps.BinaryScalarOp, ps.Add, ps.Mul)
     ):
         return
     # all inputs must be switch
     if not all(
         s.owner
         and isinstance(s.owner.op, Elemwise)
-        and isinstance(s.owner.op.scalar_op, aes.Switch)
+        and isinstance(s.owner.op.scalar_op, ps.Switch)
         for s in node.inputs
     ):
         return
@@ -1066,6 +1064,7 @@ def local_merge_switch_same_cond(fgraph, node):
     ]
 
 
+@register_infer_shape
 @register_useless
 @register_canonicalize
 @register_specialize
@@ -1149,6 +1148,7 @@ register_stabilize(topo_constant_folding, "fast_compile", final_rewriter=True)
 register_specialize(topo_constant_folding, "fast_compile", final_rewriter=True)
 
 
+@register_infer_shape
 @register_canonicalize("fast_compile")
 @register_useless("fast_compile")
 @node_rewriter(None)
@@ -1157,6 +1157,7 @@ def local_view_op(fgraph, node):
         return node.inputs
 
 
+@register_infer_shape
 @register_useless
 @register_canonicalize
 @register_stabilize

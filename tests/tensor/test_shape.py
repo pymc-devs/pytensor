@@ -5,14 +5,14 @@ import pytensor
 from pytensor import Mode, function, grad
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Variable
+from pytensor.graph.basic import Variable, equal_computations
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.replace import clone_replace
+from pytensor.graph.replace import clone_replace, vectorize_node
 from pytensor.graph.type import Type
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.scalar.basic import ScalarConstant
-from pytensor.tensor import as_tensor_variable, get_vector_length, row
-from pytensor.tensor.basic import MakeVector, constant
+from pytensor.tensor import as_tensor_variable, broadcast_to, get_vector_length, row
+from pytensor.tensor.basic import MakeVector, as_tensor, constant
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.rewriting.shape import ShapeFeature
 from pytensor.tensor.shape import (
@@ -706,3 +706,125 @@ def test_shape_tuple():
     assert isinstance(res[1], ScalarConstant)
     assert res[1].data == 2
     assert not isinstance(res[2], ScalarConstant)
+
+
+class TestVectorize:
+    @pytensor.config.change_flags(cxx="")  # For faster eval
+    def test_shape(self):
+        vec = tensor(shape=(None,), dtype="float64")
+        mat = tensor(shape=(None, None), dtype="float64")
+        node = shape(vec).owner
+
+        [vect_out] = vectorize_node(node, mat).outputs
+        assert equal_computations(
+            [vect_out], [broadcast_to(mat.shape[1:], (*mat.shape[:1], 1))]
+        )
+
+        mat_test_value = np.ones((5, 3))
+        ref_fn = np.vectorize(lambda vec: np.asarray(vec.shape), signature="(vec)->(1)")
+        np.testing.assert_array_equal(
+            vect_out.eval({mat: mat_test_value}),
+            ref_fn(mat_test_value),
+        )
+
+        mat = tensor(shape=(None, None), dtype="float64")
+        tns = tensor(shape=(None, None, None, None), dtype="float64")
+        node = shape(mat).owner
+        [vect_out] = vectorize_node(node, tns).outputs
+        assert equal_computations(
+            [vect_out], [broadcast_to(tns.shape[2:], (*tns.shape[:2], 2))]
+        )
+
+        tns_test_value = np.ones((4, 6, 5, 3))
+        ref_fn = np.vectorize(
+            lambda vec: np.asarray(vec.shape), signature="(m1,m2)->(2)"
+        )
+        np.testing.assert_array_equal(
+            vect_out.eval({tns: tns_test_value}),
+            ref_fn(tns_test_value),
+        )
+
+    @pytensor.config.change_flags(cxx="")  # For faster eval
+    def test_reshape(self):
+        x = scalar("x", dtype=int)
+        vec = tensor(shape=(None,), dtype="float64")
+        mat = tensor(shape=(None, None), dtype="float64")
+
+        shape = (-1, x)
+        node = reshape(vec, shape).owner
+
+        [vect_out] = vectorize_node(node, mat, shape).outputs
+        assert equal_computations([vect_out], [reshape(mat, (*mat.shape[:1], -1, x))])
+
+        x_test_value = 2
+        mat_test_value = np.ones((5, 6))
+        ref_fn = np.vectorize(
+            lambda x, vec: vec.reshape(-1, x), signature="(),(vec1)->(mat1,mat2)"
+        )
+        np.testing.assert_array_equal(
+            vect_out.eval({x: x_test_value, mat: mat_test_value}),
+            ref_fn(x_test_value, mat_test_value),
+        )
+
+        new_shape = (5, -1, x)
+        [vect_out] = vectorize_node(node, mat, new_shape).outputs
+        assert equal_computations([vect_out], [reshape(mat, new_shape)])
+
+        with pytest.raises(NotImplementedError):
+            vectorize_node(node, vec, broadcast_to(as_tensor([5, 2, x]), (2, 3)))
+
+        with pytest.raises(
+            ValueError,
+            match="Invalid shape length passed into vectorize node of Reshape",
+        ):
+            vectorize_node(node, vec, (5, 2, x))
+
+        with pytest.raises(
+            ValueError,
+            match="Invalid shape length passed into vectorize node of Reshape",
+        ):
+            vectorize_node(node, mat, (5, 3, 2, x))
+
+    def test_specify_shape(self):
+        x = scalar("x", dtype=int)
+        mat = tensor(shape=(None, None))
+        tns = tensor(shape=(None, None, None))
+
+        shape = (x, None)
+        node = specify_shape(mat, shape).owner
+        vect_node = vectorize_node(node, tns, *shape)
+        assert equal_computations(
+            vect_node.outputs, [specify_shape(tns, (None, x, None))]
+        )
+
+        new_shape = (5, 2, x)
+        vect_node = vectorize_node(node, tns, *new_shape)
+        assert equal_computations(vect_node.outputs, [specify_shape(tns, (5, 2, x))])
+
+        with pytest.raises(NotImplementedError):
+            vectorize_node(node, mat, *([x, x], None))
+
+        with pytest.raises(
+            ValueError,
+            match="Invalid number of shape arguments passed into vectorize node of SpecifyShape",
+        ):
+            vectorize_node(node, mat, *(5, 2, x))
+
+        with pytest.raises(
+            ValueError,
+            match="Invalid number of shape arguments passed into vectorize node of SpecifyShape",
+        ):
+            vectorize_node(node, tns, *(5, 3, 2, x))
+
+    def test_unbroadcast(self):
+        mat = tensor(
+            shape=(
+                1,
+                1,
+            )
+        )
+        tns = tensor(shape=(4, 1, 1, 1))
+
+        node = unbroadcast(mat, 0).owner
+        vect_node = vectorize_node(node, tns)
+        assert equal_computations(vect_node.outputs, [unbroadcast(tns, 2)])

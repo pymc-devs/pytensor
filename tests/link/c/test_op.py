@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 import pytensor
-from pytensor import scalar as aes
+from pytensor import scalar as ps
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.utils import MethodNotDefined
@@ -18,7 +18,7 @@ from pytensor.link.c.op import COp
 test_dir = Path(__file__).parent.absolute()
 
 externalcop_test_code = f"""
-from pytensor import tensor as at
+from pytensor import tensor as pt
 from pytensor.graph.basic import Apply
 from pytensor.link.c.params_type import ParamsType
 from pytensor.link.c.op import ExternalCOp
@@ -44,7 +44,7 @@ class QuadraticCOpFunc(ExternalCOp):
         self.c = c
 
     def make_node(self, x):
-        x = at.as_tensor_variable(x)
+        x = pt.as_tensor_variable(x)
         return Apply(self, [x], [x.type()])
 
     def perform(self, node, inputs, output_storage, coefficients):
@@ -70,7 +70,7 @@ class StructOp(COp):
 
     # The input only serves to distinguish thunks
     def make_node(self, i):
-        return Apply(self, [i], [aes.uint64()])
+        return Apply(self, [i], [ps.uint64()])
 
     def c_support_code_struct(self, node, name):
         return f"npy_uint64 counter{name};"
@@ -123,7 +123,7 @@ class TestMakeThunk:
             __props__ = ()
 
             def make_node(self, input):
-                input = aes.as_scalar(input)
+                input = ps.as_scalar(input)
                 output = input.type()
                 return Apply(self, [input], [output])
 
@@ -132,7 +132,7 @@ class TestMakeThunk:
                 (output,) = outputs
                 output[0] = input + 1
 
-        i = aes.int32("i")
+        i = ps.int32("i")
         o = IncOnePython()(i)
 
         # Check that the c_code function is not implemented
@@ -159,7 +159,7 @@ class TestMakeThunk:
             __props__ = ()
 
             def make_node(self, input):
-                input = aes.as_scalar(input)
+                input = ps.as_scalar(input)
                 output = input.type()
                 return Apply(self, [input], [output])
 
@@ -171,7 +171,7 @@ class TestMakeThunk:
             def perform(self, *args, **kwargs):
                 raise NotImplementedError("No Python implementation available.")
 
-        i = aes.int32("i")
+        i = ps.int32("i")
         o = IncOneC()(i)
 
         # Check that the perform function is not implemented
@@ -207,11 +207,11 @@ def get_hash(modname, seed=None):
         cmd_line,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stderr=subprocess.PIPE,
         env=env,
     )
     out, err = p.communicate()
-    return out, err
+    return out, err, p.returncode
 
 
 def test_ExternalCOp_c_code_cache_version():
@@ -222,10 +222,11 @@ def test_ExternalCOp_c_code_cache_version():
         tmp.seek(0)
         # modname = os.path.splitext(tmp.name)[0]
         modname = tmp.name
-        out_1, err = get_hash(modname, seed=428)
-        assert err is None
-        out_2, err = get_hash(modname, seed=3849)
-        assert err is None
+        out_1, err1, returncode1 = get_hash(modname, seed=428)
+        out_2, err2, returncode2 = get_hash(modname, seed=3849)
+        assert returncode1 == 0
+        assert returncode2 == 0
+        assert err1 == err2
 
         hash_1, msg, _ = out_1.decode().split("\n")
         assert msg == "__success__"

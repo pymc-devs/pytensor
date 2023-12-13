@@ -5,7 +5,7 @@ import numpy as np
 from numpy.core.multiarray import normalize_axis_index
 
 import pytensor
-import pytensor.scalar.basic as aes
+import pytensor.scalar.basic as ps
 from pytensor.gradient import (
     DisconnectedType,
     _float_zeros_like,
@@ -22,7 +22,7 @@ from pytensor.raise_op import Assert
 from pytensor.scalar import int32 as int_t
 from pytensor.scalar import upcast
 from pytensor.tensor import as_tensor_variable
-from pytensor.tensor import basic as at
+from pytensor.tensor import basic as ptb
 from pytensor.tensor.basic import alloc, second
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import abs as pt_abs
@@ -31,7 +31,7 @@ from pytensor.tensor.math import eq as pt_eq
 from pytensor.tensor.math import ge, lt
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import maximum, minimum, prod
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.math import switch
 from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
 from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes, vector
@@ -51,7 +51,7 @@ class CpuContiguous(COp):
     check_input = False
 
     def make_node(self, x):
-        x_ = at.as_tensor_variable(x)
+        x_ = ptb.as_tensor_variable(x)
         return Apply(self, [x_], [x_.type()])
 
     def perform(self, node, inputs, output_storage):
@@ -65,7 +65,7 @@ class CpuContiguous(COp):
         y[0] = x
 
     def grad(self, inputs, dout):
-        return [at.as_tensor_variable(dout[0])]
+        return [ptb.as_tensor_variable(dout[0])]
 
     def c_code(self, node, name, inames, onames, sub):
         (x,) = inames
@@ -126,13 +126,13 @@ class SearchsortedOp(COp):
         return self.side
 
     def make_node(self, x, v, sorter=None):
-        x = at.as_tensor(x, ndim=1)
-        v = at.as_tensor(v)
+        x = ptb.as_tensor(x, ndim=1)
+        v = ptb.as_tensor(v)
         out_type = v.type.clone(dtype="int64")
         if sorter is None:
             return Apply(self, [x, v], [out_type()])
         else:
-            sorter = at.as_tensor(sorter, ndim=1)
+            sorter = ptb.as_tensor(sorter, ndim=1)
             if PYTHON_INT_BITWIDTH == 32 and sorter.dtype == "int64":
                 raise TypeError(
                     "numpy.searchsorted with Python 32bit do not support a"
@@ -145,7 +145,7 @@ class SearchsortedOp(COp):
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[1]]
 
-    def perform(self, node, inputs, output_storage, params):
+    def perform(self, node, inputs, output_storage):
         x = inputs[0]
         v = inputs[1]
         if len(node.inputs) == 3:
@@ -154,7 +154,7 @@ class SearchsortedOp(COp):
             sorter = None
         z = output_storage[0]
 
-        z[0] = np.searchsorted(x, v, side=params, sorter=sorter).astype(
+        z[0] = np.searchsorted(x, v, side=self.side, sorter=sorter).astype(
             node.outputs[0].dtype
         )
 
@@ -263,9 +263,9 @@ def searchsorted(x, v, side="left", sorter=None):
 
     Examples
     --------
-    >>> from pytensor import tensor as at
+    >>> from pytensor import tensor as pt
     >>> from pytensor.tensor import extra_ops
-    >>> x = at.dvector()
+    >>> x = ptb.dvector()
     >>> idx = x.searchsorted(3)
     >>> idx.eval({x: [1,2,3,4,5]})
     array(2)
@@ -300,7 +300,7 @@ class CumOp(COp):
     c_axis = property(lambda self: np.MAXDIMS if self.axis is None else self.axis)
 
     def make_node(self, x):
-        x = at.as_tensor_variable(x)
+        x = ptb.as_tensor_variable(x)
         out_type = x.type()
 
         if self.axis is None:
@@ -310,7 +310,7 @@ class CumOp(COp):
 
         return Apply(self, [x], [out_type])
 
-    def perform(self, node, inputs, output_storage, params):
+    def perform(self, node, inputs, output_storage):
         x = inputs[0]
         z = output_storage[0]
         if self.mode == "add":
@@ -540,7 +540,7 @@ def bincount(x, weights=None, minlength=None, assert_nonneg=False):
         assert_op = Assert("Input to bincount has negative values!")
         x = assert_op(x, pt_all(x >= 0))
 
-    max_value = at.cast(x.max() + 1, "int64")
+    max_value = ptb.cast(x.max() + 1, "int64")
 
     if minlength is not None:
         max_value = maximum(max_value, minlength)
@@ -548,10 +548,10 @@ def bincount(x, weights=None, minlength=None, assert_nonneg=False):
     # Note: we do not use inc_subtensor(out[x], ...) in the following lines,
     # since out[x] raises an exception if the indices (x) are int8.
     if weights is None:
-        out = at.zeros([max_value], dtype=x.dtype)
+        out = ptb.zeros([max_value], dtype=x.dtype)
         out = advanced_inc_subtensor1(out, 1, x)
     else:
-        out = at.zeros([max_value], dtype=weights.dtype)
+        out = ptb.zeros([max_value], dtype=weights.dtype)
         out = advanced_inc_subtensor1(out, weights, x)
     return out
 
@@ -589,7 +589,7 @@ def squeeze(x, axis=None):
     `x` without `axis` dimensions.
 
     """
-    _x = at.as_tensor_variable(x)
+    _x = ptb.as_tensor_variable(x)
 
     if axis is None:
         # By default exclude all broadcastable (length=1) axes
@@ -602,6 +602,10 @@ def squeeze(x, axis=None):
         axis = np.core.numeric.normalize_axis_tuple(axis, ndim=max(1, _x.ndim))
     except np.AxisError:
         raise np.AxisError(axis, ndim=_x.ndim)
+
+    if not axis:
+        # Nothing to do
+        return _x
 
     return _x.dimshuffle([i for i in range(_x.ndim) if i not in axis])
 
@@ -631,8 +635,8 @@ def compress(condition, x, axis=None):
     `x` with selected slices.
 
     """
-    _x = at.as_tensor_variable(x)
-    indices = at.flatnonzero(condition)
+    _x = ptb.as_tensor_variable(x)
+    indices = ptb.flatnonzero(condition)
     return _x.take(indices, axis=axis)
 
 
@@ -645,8 +649,8 @@ class Repeat(Op):
         self.axis = axis
 
     def make_node(self, x, repeats):
-        x = at.as_tensor_variable(x)
-        repeats = at.as_tensor_variable(repeats)
+        x = ptb.as_tensor_variable(x)
+        repeats = ptb.as_tensor_variable(repeats)
 
         if repeats.dtype not in integer_dtypes:
             raise TypeError("repeats.dtype must be an integer.")
@@ -673,7 +677,7 @@ class Repeat(Op):
             out_shape = [None]
         else:
             try:
-                const_reps = at.get_underlying_scalar_constant_value(repeats)
+                const_reps = ptb.get_underlying_scalar_constant_value(repeats)
             except NotScalarConstantError:
                 const_reps = None
             if const_reps == 1:
@@ -743,12 +747,12 @@ class Repeat(Op):
                         res = res * d
                     out_shape = (res * repeats,)
             else:
-                out_shape = [at_sum(repeats, dtype=dtype)]
+                out_shape = [pt_sum(repeats, dtype=dtype)]
         else:
             if repeats.ndim == 0:
                 out_shape[self.axis] = out_shape[self.axis] * repeats
             else:
-                out_shape[self.axis] = at_sum(repeats, dtype=dtype)
+                out_shape[self.axis] = pt_sum(repeats, dtype=dtype)
         return [out_shape]
 
 
@@ -777,7 +781,7 @@ def repeat(x, repeats, axis=None):
     .. versionadded:: 0.6
 
     """
-    repeats = at.as_tensor_variable(repeats, dtype=np.int64)
+    repeats = ptb.as_tensor_variable(repeats, dtype=np.int64)
 
     if repeats.ndim > 1:
         raise ValueError("The dimension of repeats should not exceed 1.")
@@ -820,7 +824,7 @@ def repeat(x, repeats, axis=None):
         # After the original tensor is duplicated along the additional
         # dimension, we reshape it to the expected output shape, and
         # return the output z.
-        z = at.alloc(x.dimshuffle(*dims_), *shape_).reshape(shape)
+        z = ptb.alloc(x.dimshuffle(*dims_), *shape_).reshape(shape)
         return z
 
 
@@ -829,7 +833,7 @@ class Bartlett(Op):
     __props__ = ()
 
     def make_node(self, M):
-        M = at.as_tensor_variable(M)
+        M = ptb.as_tensor_variable(M)
         if M.ndim != 0:
             raise TypeError(f"{self.__class__.__name__} only works on scalar input")
         elif M.dtype not in integer_dtypes:
@@ -844,7 +848,7 @@ class Bartlett(Op):
 
     def infer_shape(self, fgraph, node, in_shapes):
         temp = node.inputs[0]
-        M = at.switch(lt(temp, 0), at.cast(0, temp.dtype), temp)
+        M = ptb.switch(lt(temp, 0), ptb.cast(0, temp.dtype), temp)
         return [[M]]
 
     def grad(self, inputs, output_grads):
@@ -889,8 +893,8 @@ class FillDiagonal(Op):
         return [in_shapes[0]]
 
     def make_node(self, a, val):
-        a = at.as_tensor_variable(a)
-        val = at.as_tensor_variable(val)
+        a = ptb.as_tensor_variable(a)
+        val = ptb.as_tensor_variable(val)
         if a.ndim < 2:
             raise TypeError(
                 "%s: first parameter must have at least"
@@ -900,7 +904,7 @@ class FillDiagonal(Op):
             raise TypeError(
                 f"{self.__class__.__name__}: second parameter must be a scalar"
             )
-        val = at.cast(val, dtype=upcast(a.dtype, val.dtype))
+        val = ptb.cast(val, dtype=upcast(a.dtype, val.dtype))
         if val.dtype != a.dtype:
             raise TypeError(
                 "%s: type of second parameter must be the same as"
@@ -942,7 +946,7 @@ class FillDiagonal(Op):
             )
         wr_a = fill_diagonal(grad, 0)  # valid for any number of dimensions
         # diag is only valid for matrices
-        wr_val = at.diag(grad).sum()
+        wr_val = ptb.diag(grad).sum()
         return [wr_a, wr_val]
 
 
@@ -990,9 +994,9 @@ class FillDiagonalOffset(Op):
         return [in_shapes[0]]
 
     def make_node(self, a, val, offset):
-        a = at.as_tensor_variable(a)
-        val = at.as_tensor_variable(val)
-        offset = at.as_tensor_variable(offset)
+        a = ptb.as_tensor_variable(a)
+        val = ptb.as_tensor_variable(val)
+        offset = ptb.as_tensor_variable(offset)
         if a.ndim != 2:
             raise TypeError(
                 "%s: first parameter must have exactly"
@@ -1006,7 +1010,7 @@ class FillDiagonalOffset(Op):
             raise TypeError(
                 f"{self.__class__.__name__}: third parameter must be a scalar"
             )
-        val = at.cast(val, dtype=upcast(a.dtype, val.dtype))
+        val = ptb.cast(val, dtype=upcast(a.dtype, val.dtype))
         if val.dtype != a.dtype:
             raise TypeError(
                 "%s: type of second parameter must be the same"
@@ -1081,9 +1085,9 @@ class FillDiagonalOffset(Op):
         end = start + step * num_of_step
 
         # input of slice should be integer
-        start = at.cast(start, "int32")
-        step = at.cast(step, "int32")
-        end = at.cast(end, "int32")
+        start = ptb.cast(start, "int32")
+        step = ptb.cast(step, "int32")
+        end = ptb.cast(end, "int32")
 
         wr_val = grad.flatten()[start:end:step].sum()
 
@@ -1149,8 +1153,8 @@ def to_one_hot(y, nb_class, dtype=None):
         the one hot encoding of the corresponding ``y[i]`` value.
 
     """
-    ret = at.zeros((y.shape[0], nb_class), dtype=dtype)
-    ret = set_subtensor(ret[at.arange(y.shape[0]), y], 1)
+    ret = ptb.zeros((y.shape[0], nb_class), dtype=dtype)
+    ret = set_subtensor(ret[ptb.arange(y.shape[0]), y], 1)
     return ret
 
 
@@ -1186,7 +1190,7 @@ class Unique(Op):
         self.axis = axis
 
     def make_node(self, x):
-        x = at.as_tensor_variable(x)
+        x = ptb.as_tensor_variable(x)
         self_axis = self.axis
         if self_axis is None:
             out_shape = (None,)
@@ -1293,8 +1297,8 @@ class UnravelIndex(Op):
         self.order = order
 
     def make_node(self, indices, dims):
-        indices = at.as_tensor_variable(indices)
-        dims = at.as_tensor_variable(dims)
+        indices = ptb.as_tensor_variable(indices)
+        dims = ptb.as_tensor_variable(dims)
 
         if indices.dtype not in int_dtypes:
             raise TypeError(
@@ -1310,7 +1314,7 @@ class UnravelIndex(Op):
             [indices, dims],
             [
                 TensorType(dtype="int64", shape=(None,) * indices.type.ndim)()
-                for i in range(at.get_vector_length(dims))
+                for i in range(ptb.get_vector_length(dims))
             ],
         )
 
@@ -1374,8 +1378,8 @@ class RavelMultiIndex(Op):
         self.order = order
 
     def make_node(self, *inp):
-        multi_index = [at.as_tensor_variable(i) for i in inp[:-1]]
-        dims = at.as_tensor_variable(inp[-1])
+        multi_index = [ptb.as_tensor_variable(i) for i in inp[:-1]]
+        dims = ptb.as_tensor_variable(inp[-1])
 
         for i in multi_index:
             if i.dtype not in int_dtypes:
@@ -1449,7 +1453,7 @@ _broadcast_assert = Assert(
 _runtime_broadcast_assert = Assert("Could not broadcast dimensions.")
 
 
-def broadcast_shape(*arrays, **kwargs) -> tuple[aes.ScalarVariable, ...]:
+def broadcast_shape(*arrays, **kwargs) -> tuple[ps.ScalarVariable, ...]:
     """Compute the shape resulting from broadcasting arrays.
 
     Parameters
@@ -1471,7 +1475,7 @@ def broadcast_shape_iter(
     arrays: Iterable[Union[TensorVariable, tuple[TensorVariable, ...]]],
     arrays_are_shapes: bool = False,
     allow_runtime_broadcast: bool = False,
-) -> tuple[aes.ScalarVariable, ...]:
+) -> tuple[ps.ScalarVariable, ...]:
     r"""Compute the shape resulting from broadcasting arrays.
 
 
@@ -1505,7 +1509,7 @@ def broadcast_shape_iter(
             + tuple(
                 one
                 if sh == 1 or isinstance(sh, Constant) and sh.value == 1
-                else (aes.as_scalar(sh) if not isinstance(sh, Variable) else sh)
+                else (ps.as_scalar(sh) if not isinstance(sh, Variable) else sh)
                 for sh in a
             )
             for a in arrays
@@ -1513,7 +1517,7 @@ def broadcast_shape_iter(
     else:
         max_dims = max(a.ndim for a in arrays)
 
-        _arrays = tuple(at.as_tensor_variable(a) for a in arrays)
+        _arrays = tuple(ptb.as_tensor_variable(a) for a in arrays)
 
         array_shapes = [
             (one,) * (max_dims - a.ndim)
@@ -1552,7 +1556,7 @@ def broadcast_shape_iter(
             if len(const_nb_shapes) == 1:
                 (first_length,) = const_nb_shapes
                 other_lengths = nonconst_nb_shapes
-                first_length = aes.as_scalar(first_length)
+                first_length = ps.as_scalar(first_length)
             else:
                 first_length, *other_lengths = nonconst_nb_shapes
 
@@ -1587,22 +1591,22 @@ def broadcast_shape_iter(
 def geomspace(start, end, steps, base=10.0):
     from pytensor.tensor.math import log
 
-    start = at.as_tensor_variable(start)
-    end = at.as_tensor_variable(end)
+    start = ptb.as_tensor_variable(start)
+    end = ptb.as_tensor_variable(end)
     return base ** linspace(log(start) / log(base), log(end) / log(base), steps)
 
 
 def logspace(start, end, steps, base=10.0):
-    start = at.as_tensor_variable(start)
-    end = at.as_tensor_variable(end)
+    start = ptb.as_tensor_variable(start)
+    end = ptb.as_tensor_variable(end)
     return base ** linspace(start, end, steps)
 
 
 def linspace(start, end, steps):
-    start = at.as_tensor_variable(start)
-    end = at.as_tensor_variable(end)
-    arr = at.arange(steps)
-    arr = at.shape_padright(arr, max(start.ndim, end.ndim))
+    start = ptb.as_tensor_variable(start)
+    end = ptb.as_tensor_variable(end)
+    arr = ptb.arange(steps)
+    arr = ptb.shape_padright(arr, max(start.ndim, end.ndim))
     multiplier = (end - start) / (steps - 1)
     return start + arr * multiplier
 

@@ -5,13 +5,13 @@
 import numpy as np
 
 import pytensor
-import pytensor.tensor as at
+import pytensor.tensor as pt
 
 
 # 1. First example
 
-k = at.iscalar("k")
-A = at.vector("A")
+k = pt.iscalar("k")
+A = pt.vector("A")
 
 
 def inner_fct(prior_result, A):
@@ -19,7 +19,7 @@ def inner_fct(prior_result, A):
 
 # Symbolic description of the result
 result, updates = pytensor.scan(fn=inner_fct,
-                              outputs_info=at.ones_like(A),
+                              outputs_info=pt.ones_like(A),
                               non_sequences=A, n_steps=k)
 
 # Scan has provided us with A ** 1 through A ** k.  Keep only the last
@@ -35,12 +35,12 @@ print(power(list(range(10)), 2))
 
 # 2. Second example
 
-coefficients = at.vector("coefficients")
-x = at.scalar("x")
+coefficients = pt.vector("coefficients")
+x = pt.scalar("x")
 max_coefficients_supported = 10000
 
 # Generate the components of the polynomial
-full_range = at.arange(max_coefficients_supported)
+full_range = pt.arange(max_coefficients_supported)
 components, updates = pytensor.scan(fn=lambda coeff, power, free_var:
                                   coeff * (free_var ** power),
                                   sequences=[coefficients, full_range],
@@ -56,15 +56,15 @@ print(calculate_polynomial1(test_coeff, 3))
 
 # 3. Reduction performed inside scan
 
-coefficients = at.vector("coefficients")
-x = at.scalar("x")
+coefficients = pt.vector("coefficients")
+x = pt.scalar("x")
 max_coefficients_supported = 10000
 
 # Generate the components of the polynomial
-full_range = at.arange(max_coefficients_supported)
+full_range = pt.arange(max_coefficients_supported)
 
 
-outputs_info = at.as_tensor_variable(np.asarray(0, 'float64'))
+outputs_info = pt.as_tensor_variable(np.asarray(0, 'float64'))
 
 components, updates = pytensor.scan(fn=lambda coeff, power, prior_value, free_var:
                                   prior_value + (coeff * (free_var ** power)),

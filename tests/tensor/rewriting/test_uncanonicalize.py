@@ -1,18 +1,18 @@
 import numpy as np
 
 import pytensor
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor import function
-from pytensor import scalar as aes
+from pytensor import scalar as ps
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import out2in
 from pytensor.link.basic import PerformLinker
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import MaxAndArgmax
-from pytensor.tensor.math import max as at_max
+from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import max_and_argmax
-from pytensor.tensor.math import min as at_min
+from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.rewriting.uncanonicalize import (
     local_alloc_dimshuffle,
     local_dimshuffle_alloc,
@@ -57,29 +57,29 @@ class TestMinMax:
         n = matrix()
 
         for axis in [0, 1, -1]:
-            f = function([n], at_max(n, axis), mode=self.mode)
+            f = function([n], pt_max(n, axis), mode=self.mode)
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 1
             assert isinstance(topo[0].op, CAReduce)
             f(data)
 
-            f = function([n], at_max(-n, axis), mode=self.mode)
+            f = function([n], pt_max(-n, axis), mode=self.mode)
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 2
             assert isinstance(topo[0].op, Elemwise)
-            assert isinstance(topo[0].op.scalar_op, aes.Neg)
+            assert isinstance(topo[0].op.scalar_op, ps.Neg)
             assert isinstance(topo[1].op, CAReduce)
             f(data)
 
-            f = function([n], -at_max(n, axis), mode=self.mode)
+            f = function([n], -pt_max(n, axis), mode=self.mode)
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 2
             assert isinstance(topo[0].op, CAReduce)
             assert isinstance(topo[1].op, Elemwise)
-            assert isinstance(topo[1].op.scalar_op, aes.Neg)
+            assert isinstance(topo[1].op.scalar_op, ps.Neg)
             f(data)
 
-            f = function([n], -at_max(-n, axis), mode=self.mode)
+            f = function([n], -pt_max(-n, axis), mode=self.mode)
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 1
             assert isinstance(topo[0].op, CAReduce)  # min
@@ -90,30 +90,30 @@ class TestMinMax:
         n = matrix()
 
         for axis in [0, 1, -1]:
-            f = function([n], at_min(n, axis), mode=self.mode)
+            f = function([n], pt_min(n, axis), mode=self.mode)
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 1
             assert isinstance(topo[0].op, CAReduce)
             f(data)
 
             # test variant with neg to make sure we optimize correctly
-            f = function([n], at_min(-n, axis), mode=self.mode)
+            f = function([n], pt_min(-n, axis), mode=self.mode)
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 2
             assert isinstance(topo[0].op, CAReduce)  # max
             assert isinstance(topo[1].op, Elemwise)
-            assert isinstance(topo[1].op.scalar_op, aes.Neg)
+            assert isinstance(topo[1].op.scalar_op, ps.Neg)
             f(data)
 
-            f = function([n], -at_min(n, axis), mode=self.mode)
+            f = function([n], -pt_min(n, axis), mode=self.mode)
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 2
             assert isinstance(topo[0].op, Elemwise)
-            assert isinstance(topo[0].op.scalar_op, aes.Neg)
+            assert isinstance(topo[0].op.scalar_op, ps.Neg)
             assert isinstance(topo[1].op, CAReduce)  # max
             f(data)
 
-            f = function([n], -at_min(-n, axis), mode=self.mode)
+            f = function([n], -pt_min(-n, axis), mode=self.mode)
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 1
             assert isinstance(topo[0].op, CAReduce)  # max
@@ -127,7 +127,7 @@ def test_local_alloc_dimshuffle():
     m = iscalar("m")
 
     y = x.dimshuffle("x", 0)
-    out = at.alloc(y, m, 1, x.shape[0])
+    out = pt.alloc(y, m, 1, x.shape[0])
 
     g = FunctionGraph([x, m], [out])
     alloc_dimshuffle(g)
@@ -156,7 +156,7 @@ def test_local_dimshuffle_alloc():
 
     x = vector("x")
 
-    out = at.alloc(x, 3, 2).dimshuffle("x", "x", 0, 1)
+    out = pt.alloc(x, 3, 2).dimshuffle("x", "x", 0, 1)
 
     g = FunctionGraph([x], [out])
     reshape_dimshuffle(g)

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor import config, shared
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
@@ -37,26 +37,26 @@ no_mode = Mode("py", RewriteDatabaseQuery(include=[], exclude=[]))
 def apply_local_rewrite_to_rv(
     rewrite, op_fn, dist_op, dist_params, size, rng, name=None
 ):
-    dist_params_at = []
+    dist_params_pt = []
     for i, p in enumerate(dist_params):
-        p_at = at.as_tensor(p).type(f"p_{i}")
-        p_at.tag.test_value = p
-        dist_params_at.append(p_at)
+        p_pt = pt.as_tensor(p).type(f"p_{i}")
+        p_pt.tag.test_value = p
+        dist_params_pt.append(p_pt)
 
-    size_at = []
+    size_pt = []
     for s in size:
         # To test DimShuffle with dropping dims we need that size dimension to be constant
         if s == 1:
-            s_at = constant(np.array(1, dtype="int32"))
+            s_pt = constant(np.array(1, dtype="int32"))
         else:
-            s_at = iscalar()
-        s_at.tag.test_value = s
-        size_at.append(s_at)
+            s_pt = iscalar()
+        s_pt.tag.test_value = s
+        size_pt.append(s_pt)
 
-    dist_st = op_fn(dist_op(*dist_params_at, size=size_at, rng=rng, name=name))
+    dist_st = op_fn(dist_op(*dist_params_pt, size=size_pt, rng=rng, name=name))
 
     f_inputs = [
-        p for p in dist_params_at + size_at if not isinstance(p, (slice, Constant))
+        p for p in dist_params_pt + size_pt if not isinstance(p, (slice, Constant))
     ]
 
     mode = Mode(
@@ -202,7 +202,7 @@ def test_local_rv_size_lift(dist_op, dist_params, size):
         rng,
     )
 
-    assert at.get_vector_length(new_out.owner.inputs[1]) == 0
+    assert pt.get_vector_length(new_out.owner.inputs[1]) == 0
 
 
 @pytest.mark.parametrize(
@@ -796,16 +796,16 @@ def test_Subtensor_lift(indices, lifted, dist_op, dist_params, size):
 
     rng = shared(np.random.default_rng(1233532), borrow=False)
 
-    indices_at = ()
+    indices_pt = ()
     for i in indices:
-        i_at = as_index_constant(i)
-        if not isinstance(i_at, slice):
-            i_at.tag.test_value = i
-        indices_at += (i_at,)
+        i_pt = as_index_constant(i)
+        if not isinstance(i_pt, slice):
+            i_pt.tag.test_value = i
+        indices_pt += (i_pt,)
 
     new_out, f_inputs, dist_st, f_rewritten = apply_local_rewrite_to_rv(
         local_subtensor_rv_lift,
-        lambda rv: rv[indices_at],
+        lambda rv: rv[indices_pt],
         dist_op,
         dist_params,
         size,
@@ -843,7 +843,7 @@ def test_Subtensor_lift_restrictions():
 
     std = vector("std")
     std.tag.test_value = np.array([1e-5, 2e-5, 3e-5], dtype=config.floatX)
-    x = normal(at.arange(2), at.ones(2), rng=rng)
+    x = normal(pt.arange(2), pt.ones(2), rng=rng)
     y = x[1]
     # The non-`Subtensor` client depends on the RNG state, so we can't perform
     # the lift
@@ -857,7 +857,7 @@ def test_Subtensor_lift_restrictions():
     assert isinstance(subtensor_node.op, Subtensor)
     assert subtensor_node.inputs[0].owner.op == normal
 
-    z = at.ones(x.shape) - x[1]
+    z = pt.ones(x.shape) - x[1]
 
     # We add `x` as an output to make sure that `is_rv_used_in_graph` handles
     # `"output"` "nodes" correctly.
@@ -881,7 +881,7 @@ def test_Subtensor_lift_restrictions():
 def test_Dimshuffle_lift_restrictions():
     rng = shared(np.random.default_rng(1233532), borrow=False)
 
-    x = normal(at.arange(2).reshape((2,)), 100, size=(2, 2, 2), rng=rng)
+    x = normal(pt.arange(2).reshape((2,)), 100, size=(2, 2, 2), rng=rng)
     y = x.dimshuffle(1, 0, 2)
     # The non-`Dimshuffle` client depends on the RNG state, so we can't
     # perform the lift
@@ -897,7 +897,7 @@ def test_Dimshuffle_lift_restrictions():
     assert isinstance(dimshuffle_node.op, DimShuffle)
     assert dimshuffle_node.inputs[0].owner.op == normal
 
-    z = at.ones(x.shape) - y
+    z = pt.ones(x.shape) - y
 
     # We add `x` as an output to make sure that `is_rv_used_in_graph` handles
     # `"output"` "nodes" correctly.

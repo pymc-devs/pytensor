@@ -27,10 +27,10 @@ messages. Consider the following faulty code.
 
     import numpy as np
     import pytensor
-    import pytensor.tensor as at
+    import pytensor.tensor as pt
 
-    x = at.vector()
-    y = at.vector()
+    x = pt.vector()
+    y = pt.vector()
     z = x + x
     z = z + y
     f = pytensor.function([x, y], z)
@@ -102,7 +102,7 @@ following example. Here, we use ``exception_verbosity=high`` and
 
     import numpy as np
     import pytensor
-    import pytensor.tensor as at
+    import pytensor.tensor as pt
 
     # compute_test_value is 'off' by default, meaning this feature is inactive
     pytensor.config.compute_test_value = 'off' # Use 'warn' to activate this feature
@@ -114,7 +114,7 @@ following example. Here, we use ``exception_verbosity=high`` and
     W2 = pytensor.shared(W2val, 'W2')
 
     # input which will be of shape (5,10)
-    x  = at.matrix('x')
+    x  = pt.matrix('x')
     # provide PyTensor with a default test-value
     #x.tag.test_value = np.random.random((5, 10))
 
@@ -123,10 +123,10 @@ following example. Here, we use ``exception_verbosity=high`` and
     func_of_W1 = W1.dimshuffle(2, 0, 1).flatten(2).T
 
     # source of error: dot product of 5x10 with 20x10
-    h1 = at.dot(x, func_of_W1)
+    h1 = pt.dot(x, func_of_W1)
 
     # do more stuff
-    h2 = at.dot(h1, W2.T)
+    h2 = pt.dot(h1, W2.T)
 
     # compile and call the actual function
     f = pytensor.function([x], h2)
@@ -171,7 +171,7 @@ so slightly, we can get PyTensor to reveal the exact source of the error.
     ...
 
     # Input which will have the shape (5, 10)
-    x  = at.matrix('x')
+    x  = pt.matrix('x')
     # Provide PyTensor with a default test-value
     x.tag.test_value = np.random.random((5, 10))
 
@@ -186,7 +186,7 @@ following error message, which properly identifies *line 24* as the culprit.
 
     Traceback (most recent call last):
       File "test2.py", line 24, in <module>
-        h1 = at.dot(x, func_of_W1)
+        h1 = pt.dot(x, func_of_W1)
       File "PATH_TO_PYTENSOR/pytensor/tensor/basic.py", line 4734, in dot
         return _dot(a, b)
       File "PATH_TO_PYTENSOR/pytensor/graph/op.py", line 545, in __call__
@@ -224,12 +224,12 @@ It is also possible to override variables ``__repr__`` method to have them retur
 .. testsetup:: printtestvalue
 
    import pytensor
-   import pytensor.tensor as at
+   import pytensor.tensor as pt
 
 
 .. testcode:: printtestvalue
 
-   x = at.scalar('x')
+   x = pt.scalar('x')
    # Assigning test value
    x.tag.test_value = 42
 
@@ -461,10 +461,10 @@ Consider this example script (``ex.py``):
 
    import numpy as np
    import pytensor
-   import pytensor.tensor as at
+   import pytensor.tensor as pt
 
-   a = at.dmatrix('a')
-   b = at.dmatrix('b')
+   a = pt.dmatrix('a')
+   b = pt.dmatrix('b')
 
    f = pytensor.function([a, b], [a * b])
 

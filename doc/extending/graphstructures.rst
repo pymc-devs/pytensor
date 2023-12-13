@@ -28,10 +28,10 @@ The following illustrates these elements:
 
 .. testcode::
 
-   import pytensor.tensor as at
+   import pytensor.tensor as pt
 
-   x = at.dmatrix('x')
-   y = at.dmatrix('y')
+   x = pt.dmatrix('x')
+   y = pt.dmatrix('y')
    z = x + y
 
 **Diagram**

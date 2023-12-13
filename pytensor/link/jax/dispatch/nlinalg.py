@@ -99,9 +99,7 @@ def jax_funcify_BatchedDot(op, **kwargs):
     def batched_dot(a, b):
         if a.shape[0] != b.shape[0]:
             raise TypeError("Shapes must match in the 0-th dimension")
-        if a.ndim == 2 or b.ndim == 2:
-            return jnp.einsum("n...j,nj...->n...", a, b)
-        return jnp.einsum("nij,njk->nik", a, b)
+        return jnp.matmul(a, b)
 
     return batched_dot
 

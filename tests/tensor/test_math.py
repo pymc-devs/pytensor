@@ -7,10 +7,11 @@ from itertools import product
 
 import numpy as np
 import pytest
+import scipy.special
 from numpy.testing import assert_array_equal
 from scipy.special import logsumexp as scipy_logsumexp
 
-import pytensor.scalar as aes
+import pytensor.scalar as ps
 from pytensor.compile.debugmode import DebugMode
 from pytensor.compile.function import function
 from pytensor.compile.mode import get_default_mode
@@ -64,6 +65,7 @@ from pytensor.tensor.math import (
     cov,
     deg2rad,
     dense_dot,
+    digamma,
     dot,
     eq,
     exp,
@@ -93,6 +95,7 @@ from pytensor.tensor.math import (
     neg,
     neq,
     outer,
+    polygamma,
     power,
     ptp,
     rad2deg,
@@ -108,7 +111,7 @@ from pytensor.tensor.math import (
     sqrt,
     sub,
 )
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.math import tan, tanh, tensordot, true_div, trunc, var
 from pytensor.tensor.type import (
     TensorType,
@@ -355,7 +358,7 @@ TestCeilIntDivBroadcast = makeBroadcastTester(
 
 TestModBroadcast = makeBroadcastTester(
     op=mod,
-    expected=lambda x, y: np.asarray(x % y, dtype=aes.upcast(x.dtype, y.dtype)),
+    expected=lambda x, y: np.asarray(x % y, dtype=ps.upcast(x.dtype, y.dtype)),
     good=copymod(_good_broadcast_div_mod_normal_float, ["complex1", "complex2"]),
     grad=_grad_broadcast_div_mod_normal,
     grad_eps=1e-5,
@@ -427,7 +430,7 @@ TestRoundHalfToEvenBroadcast = makeBroadcastTester(
 # This happen in float32 mode.
 TestRoundHalfAwayFromZeroBroadcast = makeBroadcastTester(
     op=round_half_away_from_zero,
-    expected=lambda a: aes.round_half_away_from_zero_vec(a),
+    expected=lambda a: ps.round_half_away_from_zero_vec(a),
     good=_good_broadcast_unary_normal_float_no_empty_no_complex,
     grad=_grad_broadcast_unary_normal_no_complex_no_corner_case,
 )
@@ -1003,9 +1006,9 @@ class TestMaxAndArgmax:
 
     def test_numpy_input(self):
         ar = np.array([1, 2, 3])
-        max_at, argmax_at = max_and_argmax(ar, axis=None)
-        assert max_at.eval() == 3
-        assert argmax_at.eval() == 2
+        max_pt, argmax_pt = max_and_argmax(ar, axis=None)
+        assert max_pt.eval() == 3
+        assert argmax_pt.eval() == 2
 
 
 class TestArgminArgmax:
@@ -2237,12 +2240,12 @@ class TestSum:
     def test_sum_overflow(self):
         # Ensure that overflow errors are a little bit harder to get
         a = TensorType(dtype="int8", shape=(None,))()
-        f = function([a], at_sum(a))
+        f = function([a], pt_sum(a))
         assert f([1] * 300) == 300
 
     def test_list(self):
         ll = [shared(0.0), shared(2.0)]
-        at_sum(ll).eval() == 2
+        pt_sum(ll).eval() == 2
 
 
 class TestArithmeticCast:
@@ -2299,7 +2302,7 @@ class TestArithmeticCast:
             return np.array([1], dtype=dtype)
 
         def pytensor_i_scalar(dtype):
-            return aes.ScalarType(str(dtype))()
+            return ps.ScalarType(str(dtype))()
 
         def numpy_i_scalar(dtype):
             return numpy_scalar(dtype)
@@ -2326,7 +2329,7 @@ class TestArithmeticCast:
                 op(numpy_arg_1, numpy_arg_2).dtype,
                 op(numpy_arg_2, numpy_arg_1).dtype,
             ]
-            numpy_dtype = aes.upcast(*list(map(str, numpy_dtypes)))
+            numpy_dtype = ps.upcast(*list(map(str, numpy_dtypes)))
 
             if numpy_dtype == pytensor_dtype:
                 # Same data type found, all is good!
@@ -2351,7 +2354,7 @@ class TestArithmeticCast:
                     (a_type, b_type)[list(combo).index(arg)]
                     for arg in ("array", "scalar")
                 )
-                up_type = aes.upcast(array_type, scalar_type)
+                up_type = ps.upcast(array_type, scalar_type)
                 if (
                     # The two data types are different.
                     scalar_type != array_type
@@ -2761,7 +2764,7 @@ class TestProd:
     def test_prod_without_zeros_grad(self):
         x = dmatrix()
         pwz_a1 = ProdWithoutZeros(axis=0)(x)
-        pwz_grad = grad(at_sum(pwz_a1), x)
+        pwz_grad = grad(pt_sum(pwz_a1), x)
         # FIXME: This is not a real test.
         function([x], pwz_grad, mode=self.mode)
 
@@ -2831,9 +2834,9 @@ class TestIsInfIsNan:
             self.mode = copy(self.mode)
             self.mode.check_isfinite = False
 
-    def run_isfunc(self, at_func, np_func):
+    def run_isfunc(self, pt_func, np_func):
         for args in (self.scalar, self.vector):
-            PyTensor_isfunc = function([args], at_func(args), mode=self.mode)
+            PyTensor_isfunc = function([args], pt_func(args), mode=self.mode)
             for x in self.test_vals:
                 if (x.ndim == 0 and args is not self.scalar) or (
                     x.ndim == 1 and args is not self.vector
@@ -2856,7 +2859,7 @@ class TestSumProdReduceDtype:
     op = CAReduce
     axes = [None, 0, 1, [], [0], [1], [0, 1]]
     methods = ["sum", "prod"]
-    dtypes = list(map(str, aes.all_types))
+    dtypes = list(map(str, ps.all_types))
 
     # Test the default dtype of a method().
     def test_reduce_default_dtype(self):
@@ -2980,7 +2983,7 @@ class TestSumProdReduceDtype:
                     axis = self.axes[idx % len(self.axes)]
                     # If output_dtype would force a downcast, we expect a TypeError
                     # We always allow int/uint inputs with float/complex outputs.
-                    upcasted_dtype = aes.upcast(input_dtype, acc_dtype)
+                    upcasted_dtype = ps.upcast(input_dtype, acc_dtype)
                     if acc_dtype == upcasted_dtype or (
                         input_dtype in discrete_dtypes
                         and acc_dtype in continuous_dtypes
@@ -3019,7 +3022,7 @@ class TestMeanDtype:
 
         # We try multiple axis combinations even though axis should not matter.
         axes = [None, 0, 1, [], [0], [1], [0, 1]]
-        for idx, dtype in enumerate(map(str, aes.all_types)):
+        for idx, dtype in enumerate(map(str, ps.all_types)):
             axis = axes[idx % len(axes)]
             x = matrix(dtype=dtype)
             m = x.mean(axis=axis)
@@ -3040,9 +3043,9 @@ class TestMeanDtype:
         # We try multiple axis combinations even though axis should not matter.
         axes = [None, 0, 1, [], [0], [1], [0, 1]]
         idx = 0
-        for input_dtype in map(str, aes.all_types):
+        for input_dtype in map(str, ps.all_types):
             x = matrix(dtype=input_dtype)
-            for sum_dtype in map(str, aes.all_types):
+            for sum_dtype in map(str, ps.all_types):
                 axis = axes[idx % len(axes)]
                 # If the inner sum cannot be created, it will raise a
                 # TypeError.
@@ -3095,7 +3098,7 @@ class TestProdWithoutZerosDtype:
 
         # We try multiple axis combinations even though axis should not matter.
         axes = [None, 0, 1, [], [0], [1], [0, 1]]
-        for idx, dtype in enumerate(map(str, aes.all_types)):
+        for idx, dtype in enumerate(map(str, ps.all_types)):
             axis = axes[idx % len(axes)]
             x = ProdWithoutZeros(axis=axis)(matrix(dtype=dtype))
             assert x.dtype == dict(
@@ -3113,7 +3116,7 @@ class TestProdWithoutZerosDtype:
 
         # We try multiple axis combinations even though axis should not matter.
         axes = [None, 0, 1, [], [0], [1], [0, 1]]
-        for idx, dtype in enumerate(map(str, aes.all_types)):
+        for idx, dtype in enumerate(map(str, ps.all_types)):
             axis = axes[idx % len(axes)]
             x = matrix(dtype=dtype)
             p = ProdWithoutZeros(axis=axis)(x)
@@ -3145,9 +3148,9 @@ class TestProdWithoutZerosDtype:
         # We try multiple axis combinations even though axis should not matter.
         axes = [None, 0, 1, [], [0], [1], [0, 1]]
         idx = 0
-        for input_dtype in map(str, aes.all_types):
+        for input_dtype in map(str, ps.all_types):
             x = matrix(dtype=input_dtype)
-            for output_dtype in map(str, aes.all_types):
+            for output_dtype in map(str, ps.all_types):
                 axis = axes[idx % len(axes)]
                 prod_woz_var = ProdWithoutZeros(axis=axis, dtype=output_dtype)(x)
                 assert prod_woz_var.dtype == output_dtype
@@ -3167,13 +3170,13 @@ class TestProdWithoutZerosDtype:
         # We try multiple axis combinations even though axis should not matter.
         axes = [None, 0, 1, [], [0], [1], [0, 1]]
         idx = 0
-        for input_dtype in map(str, aes.all_types):
+        for input_dtype in map(str, ps.all_types):
             x = matrix(dtype=input_dtype)
-            for acc_dtype in map(str, aes.all_types):
+            for acc_dtype in map(str, ps.all_types):
                 axis = axes[idx % len(axes)]
                 # If acc_dtype would force a downcast, we expect a TypeError
                 # We always allow int/uint inputs with float/complex outputs.
-                upcasted_dtype = aes.upcast(input_dtype, acc_dtype)
+                upcasted_dtype = ps.upcast(input_dtype, acc_dtype)
                 if acc_dtype == upcasted_dtype or (
                     input_dtype in discrete_dtypes and acc_dtype in continuous_dtypes
                 ):
@@ -3398,7 +3401,7 @@ def test_logsumexp(shape, axis, keepdims):
 
 def test_pprint():
     x = vector("x")
-    y = at_sum(x, axis=0)
+    y = pt_sum(x, axis=0)
     assert pprint(y) == "sum(x, axis=(0,))"
 
 
@@ -3470,3 +3473,44 @@ class TestMatMul:
         fn = function([x, y], x @ y, mode="FAST_RUN")
         [node] = fn.maker.fgraph.apply_nodes
         assert isinstance(node.op, Dot22)
+
+
+class TestPolyGamma:
+    def test_basic(self):
+        n = vector("n", dtype="int64")
+        x = scalar("x")
+
+        np.testing.assert_allclose(
+            polygamma(n, x).eval({n: [0, 1], x: 0.5}),
+            scipy.special.polygamma([0, 1], 0.5),
+        )
+
+    def test_continuous_n_raises(self):
+        n = scalar("n", dtype="float64")
+        with pytest.raises(TypeError, match="must be discrete"):
+            polygamma(n, 0.5)
+
+    def test_complex_x_raises(self):
+        x = scalar(dtype="complex128")
+        with pytest.raises(TypeError, match="complex argument not supported"):
+            polygamma(0, x)
+
+    def test_output_dtype(self):
+        n = scalar("n", dtype="int64")
+        polygamma(n, scalar("x", dtype="float32")).dtype == "float32"
+        polygamma(n, scalar("x", dtype="float64")).dtype == "float64"
+        polygamma(n, scalar("x", dtype="int32")).dtype == "float64"
+
+    def test_grad_x(self):
+        x = scalar("x")
+        op_grad = grad(polygamma(0, x), wrt=x)
+        ref_grad = grad(digamma(x), wrt=x)
+        np.testing.assert_allclose(
+            op_grad.eval({x: 0.9}),
+            ref_grad.eval({x: 0.9}),
+        )
+
+    def test_grad_n_undefined(self):
+        n = scalar(dtype="int64")
+        with pytest.raises(NullTypeGradError):
+            grad(polygamma(n, 0.5), wrt=n)

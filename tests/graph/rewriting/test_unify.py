@@ -7,8 +7,8 @@ from etuples.core import ExpressionTuple
 from unification import reify, unify, var
 from unification.variable import Var
 
-import pytensor.scalar as aes
-import pytensor.tensor as at
+import pytensor.scalar as ps
+import pytensor.tensor as pt
 from pytensor.graph.basic import Apply, Constant, equal_computations
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.unify import ConstrainedVar, convert_strs_to_vars
@@ -23,7 +23,7 @@ class CustomOp(Op):
         self.a = a
 
     def make_node(self, *inputs):
-        return Apply(self, list(inputs), [at.vector()])
+        return Apply(self, list(inputs), [pt.vector()])
 
     def perform(self, node, inputs, outputs):
         raise NotImplementedError()
@@ -34,7 +34,7 @@ class CustomOpNoPropsNoEq(Op):
         self.a = a
 
     def make_node(self, *inputs):
-        return Apply(self, list(inputs), [at.vector()])
+        return Apply(self, list(inputs), [pt.vector()])
 
     def perform(self, node, inputs, outputs):
         raise NotImplementedError()
@@ -49,22 +49,22 @@ class CustomOpNoProps(CustomOpNoPropsNoEq):
 
 
 def test_cons():
-    x_at = at.vector("x")
-    y_at = at.vector("y")
+    x_pt = pt.vector("x")
+    y_pt = pt.vector("y")
 
-    z_at = x_at + y_at
+    z_pt = x_pt + y_pt
 
-    res = car(z_at)
-    assert res == z_at.owner.op
+    res = car(z_pt)
+    assert res == z_pt.owner.op
 
-    res = cdr(z_at)
-    assert res == [x_at, y_at]
-
-    with pytest.raises(ConsError):
-        car(x_at)
+    res = cdr(z_pt)
+    assert res == [x_pt, y_pt]
 
     with pytest.raises(ConsError):
-        cdr(x_at)
+        car(x_pt)
+
+    with pytest.raises(ConsError):
+        cdr(x_pt)
 
     op1 = CustomOp(1)
 
@@ -84,44 +84,44 @@ def test_cons():
     with pytest.raises(ConsError):
         cdr(op1_np)
 
-    atype_at = aes.float64
-    car_res = car(atype_at)
-    cdr_res = cdr(atype_at)
-    assert car_res is type(atype_at)
-    assert cdr_res == [atype_at.dtype]
+    atype_pt = ps.float64
+    car_res = car(atype_pt)
+    cdr_res = cdr(atype_pt)
+    assert car_res is type(atype_pt)
+    assert cdr_res == [atype_pt.dtype]
 
-    atype_at = at.lvector
-    car_res = car(atype_at)
-    cdr_res = cdr(atype_at)
-    assert car_res is type(atype_at)
-    assert cdr_res == [atype_at.dtype, atype_at.shape]
+    atype_pt = pt.lvector
+    car_res = car(atype_pt)
+    cdr_res = cdr(atype_pt)
+    assert car_res is type(atype_pt)
+    assert cdr_res == [atype_pt.dtype, atype_pt.shape]
 
 
 def test_etuples():
-    x_at = at.vector("x")
-    y_at = at.vector("y")
+    x_pt = pt.vector("x")
+    y_pt = pt.vector("y")
 
-    z_at = etuple(x_at, y_at)
+    z_pt = etuple(x_pt, y_pt)
 
-    res = apply(at.add, z_at)
+    res = apply(pt.add, z_pt)
 
-    assert res.owner.op == at.add
-    assert res.owner.inputs == [x_at, y_at]
+    assert res.owner.op == pt.add
+    assert res.owner.inputs == [x_pt, y_pt]
 
-    w_at = etuple(at.add, x_at, y_at)
+    w_pt = etuple(pt.add, x_pt, y_pt)
 
-    res = w_at.evaled_obj
-    assert res.owner.op == at.add
-    assert res.owner.inputs == [x_at, y_at]
+    res = w_pt.evaled_obj
+    assert res.owner.op == pt.add
+    assert res.owner.inputs == [x_pt, y_pt]
 
     # This `Op` doesn't expand into an `etuple` (i.e. it's "atomic")
     op1_np = CustomOpNoProps(1)
 
-    res = apply(op1_np, z_at)
+    res = apply(op1_np, z_pt)
     assert res.owner.op == op1_np
 
-    q_at = op1_np(x_at, y_at)
-    res = etuplize(q_at)
+    q_pt = op1_np(x_pt, y_pt)
+    res = etuplize(q_pt)
     assert res[0] == op1_np
 
     with pytest.raises(TypeError):
@@ -136,22 +136,22 @@ def test_etuples():
             outputs[0] = np.array(inputs[0])
             outputs[1] = np.array(inputs[0])
 
-    x_at = at.vector("x")
+    x_pt = pt.vector("x")
     op1_np = MyMultiOutOp()
-    res = apply(op1_np, etuple(x_at))
+    res = apply(op1_np, etuple(x_pt))
     assert len(res) == 2
     assert res[0].owner.op == op1_np
     assert res[1].owner.op == op1_np
 
 
 def test_unify_Variable():
-    x_at = at.vector("x")
-    y_at = at.vector("y")
+    x_pt = pt.vector("x")
+    y_pt = pt.vector("y")
 
-    z_at = x_at + y_at
+    z_pt = x_pt + y_pt
 
     # `Variable`, `Variable`
-    s = unify(z_at, z_at)
+    s = unify(z_pt, z_pt)
     assert s == {}
 
     # These `Variable`s have no owners
@@ -164,48 +164,48 @@ def test_unify_Variable():
     assert s is False
 
     op_lv = var()
-    z_pat_et = etuple(op_lv, x_at, y_at)
+    z_ppt_et = etuple(op_lv, x_pt, y_pt)
 
     # `Variable`, `ExpressionTuple`
-    s = unify(z_at, z_pat_et, {})
+    s = unify(z_pt, z_ppt_et, {})
 
     assert op_lv in s
-    assert s[op_lv] == z_at.owner.op
+    assert s[op_lv] == z_pt.owner.op
 
-    res = reify(z_pat_et, s)
+    res = reify(z_ppt_et, s)
 
     assert isinstance(res, ExpressionTuple)
-    assert equal_computations([res.evaled_obj], [z_at])
+    assert equal_computations([res.evaled_obj], [z_pt])
 
-    z_et = etuple(at.add, x_at, y_at)
+    z_et = etuple(pt.add, x_pt, y_pt)
 
     # `ExpressionTuple`, `ExpressionTuple`
-    s = unify(z_et, z_pat_et, {})
+    s = unify(z_et, z_ppt_et, {})
 
     assert op_lv in s
     assert s[op_lv] == z_et[0]
 
-    res = reify(z_pat_et, s)
+    res = reify(z_ppt_et, s)
 
     assert isinstance(res, ExpressionTuple)
     assert equal_computations([res.evaled_obj], [z_et.evaled_obj])
 
     # `ExpressionTuple`, `Variable`
-    s = unify(z_et, x_at, {})
+    s = unify(z_et, x_pt, {})
     assert s is False
 
     # This `Op` doesn't expand into an `ExpressionTuple`
     op1_np = CustomOpNoProps(1)
 
-    q_at = op1_np(x_at, y_at)
+    q_pt = op1_np(x_pt, y_pt)
 
     a_lv = var()
     b_lv = var()
     # `Variable`, `ExpressionTuple`
-    s = unify(q_at, etuple(op1_np, a_lv, b_lv))
+    s = unify(q_pt, etuple(op1_np, a_lv, b_lv))
 
-    assert s[a_lv] == x_at
-    assert s[b_lv] == y_at
+    assert s[a_lv] == x_pt
+    assert s[b_lv] == y_pt
 
 
 def test_unify_Op():
@@ -237,11 +237,11 @@ def test_unify_Op():
 
 def test_unify_Constant():
     # Make sure `Constant` unification works
-    c1_at = at.as_tensor(np.r_[1, 2])
-    c2_at = at.as_tensor(np.r_[1, 2])
+    c1_pt = pt.as_tensor(np.r_[1, 2])
+    c2_pt = pt.as_tensor(np.r_[1, 2])
 
     # `Constant`, `Constant`
-    s = unify(c1_at, c2_at)
+    s = unify(c1_pt, c2_pt)
     assert s == {}
 
 
@@ -302,18 +302,18 @@ def test_ConstrainedVar():
     s = unify(x_lv, cvar, s_orig)
     assert s is False
 
-    x_at = at.vector("x")
-    y_at = at.vector("y")
+    x_pt = pt.vector("x")
+    y_pt = pt.vector("y")
     op1_np = CustomOpNoProps(1)
-    r_at = etuple(op1_np, x_at, y_at)
+    r_pt = etuple(op1_np, x_pt, y_pt)
 
     def constraint(x):
         return isinstance(x, tuple)
 
     a_lv = ConstrainedVar(constraint)
-    res = reify(etuple(op1_np, a_lv), {a_lv: r_at})
+    res = reify(etuple(op1_np, a_lv), {a_lv: r_pt})
 
-    assert res[1] == r_at
+    assert res[1] == r_pt
 
 
 def test_convert_strs_to_vars():
@@ -321,18 +321,18 @@ def test_convert_strs_to_vars():
     assert isinstance(res, Var)
     assert res.token == "a"
 
-    x_at = at.vector()
-    y_at = at.vector()
-    res = convert_strs_to_vars((("a", x_at), y_at))
-    assert res == etuple(etuple(var("a"), x_at), y_at)
+    x_pt = pt.vector()
+    y_pt = pt.vector()
+    res = convert_strs_to_vars((("a", x_pt), y_pt))
+    assert res == etuple(etuple(var("a"), x_pt), y_pt)
 
     def constraint(x):
         return isinstance(x, str)
 
     res = convert_strs_to_vars(
-        (({"pattern": "a", "constraint": constraint}, x_at), y_at)
+        (({"pattern": "a", "constraint": constraint}, x_pt), y_pt)
     )
-    assert res == etuple(etuple(ConstrainedVar(constraint, "a"), x_at), y_at)
+    assert res == etuple(etuple(ConstrainedVar(constraint, "a"), x_pt), y_pt)
 
     # Make sure constrained logic variables are the same across distinct uses
     # of their string names

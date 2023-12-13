@@ -31,7 +31,7 @@ supposed to be canonical.
 
 """
 
-from pytensor import scalar as aes
+from pytensor import scalar as ps
 from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
 from pytensor.tensor.basic import Alloc, alloc, constant
 from pytensor.tensor.elemwise import CAReduce, DimShuffle
@@ -48,7 +48,7 @@ def local_max_and_argmax(fgraph, node):
     If we don't use the argmax, change it to a max only.
     """
     if isinstance(node.op, MaxAndArgmax):
-        axis = node.op.get_params(node)
+        axis = node.op.axis
         if len(fgraph.clients[node.outputs[1]]) == 0:
             new = Max(axis)(node.inputs[0])
             copy_stack_trace(node.outputs[0], new)
@@ -79,7 +79,7 @@ def local_max_to_min(fgraph, node):
         if (
             max.owner
             and isinstance(max.owner.op, CAReduce)
-            and max.owner.op.scalar_op == aes.scalar_maximum
+            and max.owner.op.scalar_op == ps.scalar_maximum
         ):
             neg_node = max.owner.inputs[0]
             if neg_node.owner and neg_node.owner.op == neg:

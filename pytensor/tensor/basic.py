@@ -20,12 +20,14 @@ from numpy.core.numeric import normalize_axis_tuple
 import pytensor
 import pytensor.scalar.sharedvar
 from pytensor import compile, config, printing
-from pytensor import scalar as aes
+from pytensor import scalar as ps
 from pytensor.gradient import DisconnectedType, grad_undefined
+from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
-from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.graph.replace import _vectorize_node
+from pytensor.graph.rewriting.db import EquilibriumDB
 from pytensor.graph.type import HasShape, Type
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
@@ -40,6 +42,7 @@ from pytensor.tensor import (
     as_tensor_variable,
     get_vector_length,
 )
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise, scalar_elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.shape import (
@@ -158,7 +161,7 @@ def _as_tensor_Sequence(x, name, ndim, dtype=None, **kwargs):
             # In this instance, we have a sequence of constants with which we
             # want to construct a vector, so we can use `MakeVector` directly.
             if dtype is None:
-                dtype = aes.upcast(*[i.dtype for i in x if hasattr(i, "dtype")])
+                dtype = ps.upcast(*[i.dtype for i in x if hasattr(i, "dtype")])
             return MakeVector(dtype)(*x)
 
         # In this case, we have at least one non-`Constant` term, so we
@@ -212,7 +215,7 @@ def constant(x, name=None, ndim=None, dtype=None) -> TensorConstant:
         else:
             x = x.data
 
-    x_ = aes.convert(x, dtype=dtype)
+    x_ = ps.convert(x, dtype=dtype)
 
     if ndim is not None:
         if x_.ndim < ndim:
@@ -241,22 +244,22 @@ def _obj_is_wrappable_as_tensor(x):
 
 
 _scalar_constant_value_elemwise_ops = (
-    aes.Cast,
-    aes.Switch,
-    aes.NEQ,
-    aes.EQ,
-    aes.LT,
-    aes.GT,
-    aes.LE,
-    aes.GE,
-    aes.Sub,
-    aes.Add,
-    aes.Mod,
-    aes.Mul,
-    aes.IntDiv,
-    aes.TrueDiv,
-    aes.ScalarMinimum,
-    aes.ScalarMaximum,
+    ps.Cast,
+    ps.Switch,
+    ps.NEQ,
+    ps.EQ,
+    ps.LT,
+    ps.GT,
+    ps.LE,
+    ps.GE,
+    ps.Sub,
+    ps.Add,
+    ps.Mod,
+    ps.Mul,
+    ps.IntDiv,
+    ps.TrueDiv,
+    ps.ScalarMinimum,
+    ps.ScalarMaximum,
 )
 
 
@@ -389,8 +392,8 @@ def get_underlying_scalar_constant_value(
                 if builtins.all(0 == c.ndim and c != 0 for c in conds):
                     v = v.owner.inputs[0]
                     continue
-            elif isinstance(v.owner.op, aes.ScalarOp):
-                if isinstance(v.owner.op, aes.Second):
+            elif isinstance(v.owner.op, ps.ScalarOp):
+                if isinstance(v.owner.op, ps.Second):
                     # We don't need both input to be constant for second
                     shp, val = v.owner.inputs
                     v = val
@@ -407,7 +410,7 @@ def get_underlying_scalar_constant_value(
             # we need to investigate Second as Alloc. So elemwise
             # don't disable the check for Second.
             elif isinstance(v.owner.op, Elemwise):
-                if isinstance(v.owner.op.scalar_op, aes.Second):
+                if isinstance(v.owner.op.scalar_op, ps.Second):
                     # We don't need both input to be constant for second
                     shp, val = v.owner.inputs
                     v = val
@@ -557,7 +560,7 @@ class TensorFromScalar(COp):
     __props__ = ()
 
     def make_node(self, s):
-        if not isinstance(s.type, aes.ScalarType):
+        if not isinstance(s.type, ps.ScalarType):
             raise TypeError("Input must be a `ScalarType` `Type`")
 
         return Apply(self, [s], [tensor(dtype=s.type.dtype, shape=())])
@@ -619,7 +622,7 @@ class ScalarFromTensor(COp):
             raise TypeError("Input must be a scalar `TensorType`")
 
         return Apply(
-            self, [t], [aes.get_scalar_type(dtype=t.type.dtype).make_variable()]
+            self, [t], [ps.get_scalar_type(dtype=t.type.dtype).make_variable()]
         )
 
     def perform(self, node, inp, out_):
@@ -672,49 +675,49 @@ def _conversion(real_value: Op, name: str) -> Op:
 # what types you are casting to what.  That logic is implemented by the
 # `cast()` function below.
 
-_convert_to_bool: Elemwise = _conversion(Elemwise(aes.convert_to_bool), "bool")
+_convert_to_bool: Elemwise = _conversion(Elemwise(ps.convert_to_bool), "bool")
 """Cast to boolean"""
 
-_convert_to_int8: Elemwise = _conversion(Elemwise(aes.convert_to_int8), "int8")
+_convert_to_int8: Elemwise = _conversion(Elemwise(ps.convert_to_int8), "int8")
 """Cast to 8-bit integer"""
 
-_convert_to_int16: Elemwise = _conversion(Elemwise(aes.convert_to_int16), "int16")
+_convert_to_int16: Elemwise = _conversion(Elemwise(ps.convert_to_int16), "int16")
 """Cast to 16-bit integer"""
 
-_convert_to_int32: Elemwise = _conversion(Elemwise(aes.convert_to_int32), "int32")
+_convert_to_int32: Elemwise = _conversion(Elemwise(ps.convert_to_int32), "int32")
 """Cast to 32-bit integer"""
 
-_convert_to_int64: Elemwise = _conversion(Elemwise(aes.convert_to_int64), "int64")
+_convert_to_int64: Elemwise = _conversion(Elemwise(ps.convert_to_int64), "int64")
 """Cast to 64-bit integer"""
 
-_convert_to_uint8: Elemwise = _conversion(Elemwise(aes.convert_to_uint8), "uint8")
+_convert_to_uint8: Elemwise = _conversion(Elemwise(ps.convert_to_uint8), "uint8")
 """Cast to unsigned 8-bit integer"""
 
-_convert_to_uint16: Elemwise = _conversion(Elemwise(aes.convert_to_uint16), "uint16")
+_convert_to_uint16: Elemwise = _conversion(Elemwise(ps.convert_to_uint16), "uint16")
 """Cast to unsigned 16-bit integer"""
 
-_convert_to_uint32: Elemwise = _conversion(Elemwise(aes.convert_to_uint32), "uint32")
+_convert_to_uint32: Elemwise = _conversion(Elemwise(ps.convert_to_uint32), "uint32")
 """Cast to unsigned 32-bit integer"""
 
-_convert_to_uint64: Elemwise = _conversion(Elemwise(aes.convert_to_uint64), "uint64")
+_convert_to_uint64: Elemwise = _conversion(Elemwise(ps.convert_to_uint64), "uint64")
 """Cast to unsigned 64-bit integer"""
 
-_convert_to_float16: Elemwise = _conversion(Elemwise(aes.convert_to_float16), "float16")
+_convert_to_float16: Elemwise = _conversion(Elemwise(ps.convert_to_float16), "float16")
 """Cast to half-precision floating point"""
 
-_convert_to_float32: Elemwise = _conversion(Elemwise(aes.convert_to_float32), "float32")
+_convert_to_float32: Elemwise = _conversion(Elemwise(ps.convert_to_float32), "float32")
 """Cast to single-precision floating point"""
 
-_convert_to_float64: Elemwise = _conversion(Elemwise(aes.convert_to_float64), "float64")
+_convert_to_float64: Elemwise = _conversion(Elemwise(ps.convert_to_float64), "float64")
 """Cast to double-precision floating point"""
 
 _convert_to_complex64: Elemwise = _conversion(
-    Elemwise(aes.convert_to_complex64), "complex64"
+    Elemwise(ps.convert_to_complex64), "complex64"
 )
 """Cast to single-precision complex"""
 
 _convert_to_complex128: Elemwise = _conversion(
-    Elemwise(aes.convert_to_complex128), "complex128"
+    Elemwise(ps.convert_to_complex128), "complex128"
 )
 """Cast to double-precision complex"""
 
@@ -1356,6 +1359,45 @@ def identity_like(x, dtype: Optional[Union[str, np.generic, np.dtype]] = None):
     return eye(_x.shape[0], _x.shape[1], k=0, dtype=dtype)
 
 
+class CachedEquilibrimDB(EquilibriumDB):
+    """A subclass of EquilibriumDB that allows caching of a default query for faster reuse."""
+
+    def __init__(self, default_query):
+        super().__init__()
+        self._default_query = default_query
+        self._cached_default_query = None
+
+    def register(self, *args, **kwargs):
+        # If new rewrites are registered, the default cached query is void
+        self.cached_default_query = None
+        super().register(*args, **kwargs)
+
+    @property
+    def default_query(self):
+        if self._cached_default_query is None:
+            self._cached_default_query = self.query(self._default_query)
+        return self._cached_default_query
+
+
+infer_shape_db = CachedEquilibrimDB(
+    default_query=RewriteDatabaseQuery(include=("infer_shape",))
+)
+
+
+def register_infer_shape(rewrite, *tags, **kwargs):
+    if isinstance(rewrite, str):
+
+        def register(inner_lopt):
+            return register_infer_shape(inner_lopt, rewrite, *tags, **kwargs)
+
+        return register
+    else:
+        name = kwargs.pop("name", None) or rewrite.__name__
+
+        infer_shape_db.register(name, rewrite, *tags, "infer_shape", **kwargs)
+        return rewrite
+
+
 def infer_static_shape(
     shape: Union[Variable, Sequence[Union[Variable, int]]]
 ) -> tuple[Sequence["TensorLike"], Sequence[Optional[int]]]:
@@ -1364,11 +1406,8 @@ def infer_static_shape(
     `shape` will be validated and constant folded.  As a result, this function
     can be expensive and shouldn't be used unless absolutely necessary.
 
-    It mostly exists as a hold-over from pre-static shape times, when it was
-    required in order to produce correct broadcastable arrays and prevent
-    some graphs from being unusable.  Now, it is no longer strictly required,
-    so don't use it unless you want the same shape graphs to be rewritten
-    multiple times during graph construction.
+    It is often needed for `Op`s whose static shape and broadcastable flags
+    depend on the values of their inputs, such as `Alloc` and `RandomVariable`.
 
     Returns
     -------
@@ -1390,14 +1429,16 @@ def infer_static_shape(
 
         raise TypeError(f"Shapes must be scalar integers; got {s_as_str}")
 
-    sh = [check_type(as_tensor_variable(s, ndim=0)) for s in shape]
+    sh = folded_shape = [check_type(as_tensor_variable(s, ndim=0)) for s in shape]
 
-    shape_fg = FunctionGraph(
-        outputs=sh,
-        features=[ShapeFeature()],
-        clone=True,
-    )
-    folded_shape = rewrite_graph(shape_fg, custom_rewrite=topo_constant_folding).outputs
+    if not all(isinstance(s, Constant) for s in folded_shape):
+        shape_fg = FunctionGraph(outputs=sh, features=[ShapeFeature()], clone=True)
+        with config.change_flags(optdb__max_use_ratio=10, cxx=""):
+            infer_shape_db.default_query.rewrite(shape_fg)
+            if not all(isinstance(s, Constant) for s in shape_fg.outputs):
+                topo_constant_folding.rewrite(shape_fg)
+        folded_shape = shape_fg.outputs
+
     static_shape = tuple(
         s.data.item() if isinstance(s, Constant) else None for s in folded_shape
     )
@@ -1615,16 +1656,22 @@ class Alloc(COp):
         if not clients:
             return False
 
-        for client in clients:
-            if client[0] == "output":
+        for client, idx in clients:
+            if client == "output":
                 # If the output is a constant, it will have to be deepcopied
                 # each time the function is called.  So we do not fold.
                 return False
+            # Allow alloc to be lifted out of Elemwise before constant folding it
+            elif isinstance(client.op, Elemwise):
+                return None
+            # Same for Blockwise, unless it has no batch_dims
+            elif isinstance(client.op, Blockwise) and client.op.batch_ndim(client):
+                return None
             elif (
                 # The following ops work inplace of their input id 0.
-                client[1] == 0
+                idx == 0
                 and isinstance(
-                    client[0].op,
+                    client.op,
                     (
                         # Ops that will work inplace on the Alloc. So if they
                         # get constant_folded, they would copy the
@@ -1722,7 +1769,7 @@ class MakeVector(COp):
         if not all(a.type.dtype == inputs[0].type.dtype for a in inputs) or (
             len(inputs) > 0 and inputs[0].dtype != self.dtype
         ):
-            dtype = aes.upcast(self.dtype, *[i.dtype for i in inputs])
+            dtype = ps.upcast(self.dtype, *[i.dtype for i in inputs])
             inputs = [cast(i, dtype=dtype) for i in inputs]
 
             if not all(self.dtype == i.dtype for i in inputs):
@@ -1866,7 +1913,7 @@ def register_transfer(fn):
 
 
 """Create a duplicate of `a` (with duplicated storage)"""
-tensor_copy = Elemwise(aes.identity)
+tensor_copy = Elemwise(ps.identity)
 pprint.assign(tensor_copy, printing.IgnorePrinter())
 
 
@@ -1918,8 +1965,8 @@ def extract_constant(x, elemwise=True, only_process_constants=False):
         x = get_underlying_scalar_constant_value(x, elemwise, only_process_constants)
     except NotScalarConstantError:
         pass
-    if isinstance(x, aes.ScalarVariable) or isinstance(
-        x, aes.sharedvar.ScalarSharedVariable
+    if isinstance(x, ps.ScalarVariable) or isinstance(
+        x, ps.sharedvar.ScalarSharedVariable
     ):
         if x.owner and isinstance(x.owner.op, ScalarFromTensor):
             x = x.owner.inputs[0]
@@ -2267,7 +2314,7 @@ class Join(COp):
             raise ValueError("Cannot join an empty list of tensors")
 
         tensors = [as_tensor_variable(x) for x in tensors]
-        out_dtype = aes.upcast(*[x.type.dtype for x in tensors])
+        out_dtype = ps.upcast(*[x.type.dtype for x in tensors])
 
         if not builtins.all(targs.type.ndim for targs in tensors):
             raise TypeError(
@@ -2461,7 +2508,7 @@ class Join(COp):
         rval = [grad_undefined(self, 0, axis)]
 
         dtypes = [as_tensor_variable(x).type.dtype for x in tens]
-        out_dtype = aes.upcast(*dtypes)
+        out_dtype = ps.upcast(*dtypes)
 
         if "float" in out_dtype or "complex" in out_dtype:
             # assume that this is differentiable
@@ -2693,7 +2740,7 @@ def stack(tensors: Sequence["TensorLike"], axis: int = 0):
     ):
         # In case there is direct scalar
         tensors = list(map(as_tensor_variable, tensors))
-        dtype = aes.upcast(*[i.dtype for i in tensors])
+        dtype = ps.upcast(*[i.dtype for i in tensors])
         return MakeVector(dtype)(*tensors)
     return join(axis, *[shape_padaxis(t, axis) for t in tensors])
 
@@ -2963,7 +3010,7 @@ class ARange(Op):
                 # this give float64. This is safer then checking for
                 # uint64 in case we support [u]int128 or other in the
                 # future.
-                aes.upcast(var.dtype, "int64") == "int64"
+                ps.upcast(var.dtype, "int64") == "int64"
             ):
                 return cast(var, "int64")
             return var
@@ -3038,7 +3085,7 @@ def arange(start, stop=None, step=1, dtype=None):
     start, stop, step = map(as_tensor_variable, (start, stop, step))
     # If dtype is not provided, infer it from the other arguments
     if dtype is None:
-        dtype = aes.upcast(start.type.dtype, stop.type.dtype, step.type.dtype)
+        dtype = ps.upcast(start.type.dtype, stop.type.dtype, step.type.dtype)
         # don't try to be stingy and byte-optimize, this leads to
         # overflow problems.
         if dtype in int_dtypes:
@@ -3455,10 +3502,17 @@ class ExtractDiag(Op):
 
         if x.ndim < 2:
             raise ValueError("ExtractDiag needs an input with 2 or more dimensions", x)
+
+        out_shape = [
+            st_dim
+            for i, st_dim in enumerate(x.type.shape)
+            if i not in (self.axis1, self.axis2)
+        ] + [None]
+
         return Apply(
             self,
             [x],
-            [x.type.clone(dtype=x.dtype, shape=(None,) * (x.ndim - 1))()],
+            [x.type.clone(dtype=x.dtype, shape=tuple(out_shape))()],
         )
 
     def perform(self, node, inputs, outputs):
@@ -3557,6 +3611,17 @@ def diagonal(a, offset=0, axis1=0, axis2=1):
     a = as_tensor_variable(a)
     axis1, axis2 = normalize_axis_tuple((axis1, axis2), ndim=a.type.ndim)
     return ExtractDiag(offset, axis1, axis2)(a)
+
+
+@_vectorize_node.register(ExtractDiag)
+def vectorize_extract_diag(op: ExtractDiag, node, batched_x):
+    batched_ndims = batched_x.type.ndim - node.inputs[0].type.ndim
+    return diagonal(
+        batched_x,
+        offset=op.offset,
+        axis1=op.axis1 + batched_ndims,
+        axis2=op.axis2 + batched_ndims,
+    ).owner
 
 
 def trace(a, offset=0, axis1=0, axis2=1):
@@ -3991,11 +4056,11 @@ class AllocEmpty(COp):
         output.tag.nan_guard_mode_check = False
         return Apply(self, _shape, [output])
 
-    def debug_perform(self, node, inputs, out_, params):
-        self.perform(node, inputs, out_, params)
+    def debug_perform(self, node, inputs, out_):
+        self.perform(node, inputs, out_)
         out_[0][0].fill(-123456789)
 
-    def perform(self, node, inputs, out_, params):
+    def perform(self, node, inputs, out_):
         (out,) = out_
         sh = tuple([int(i) for i in inputs])
         if out[0] is None or out[0].shape != sh:

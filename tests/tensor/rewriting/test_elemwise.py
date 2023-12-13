@@ -5,9 +5,9 @@ import pytest
 
 import pytensor
 from pytensor import In
-from pytensor import scalar as aes
+from pytensor import scalar as ps
 from pytensor import shared
-from pytensor import tensor as at
+from pytensor import tensor as pt
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
@@ -22,9 +22,9 @@ from pytensor.raise_op import assert_op
 from pytensor.scalar.basic import Composite, float64
 from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.math import abs as at_abs
+from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import add
-from pytensor.tensor.math import all as at_all
+from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import (
     bitwise_and,
     bitwise_or,
@@ -45,11 +45,11 @@ from pytensor.tensor.math import (
     neg,
     neq,
 )
-from pytensor.tensor.math import pow as at_pow
+from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.math import reciprocal
-from pytensor.tensor.math import round as at_round
+from pytensor.tensor.math import round as pt_round
 from pytensor.tensor.math import sin, sinh, sqr, sqrt
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.math import tan, tanh, true_div, xor
 from pytensor.tensor.rewriting.elemwise import FusionOptimizer, local_dimshuffle_lift
 from pytensor.tensor.rewriting.shape import local_useless_dimshuffle_in_reshape
@@ -151,7 +151,7 @@ class TestDimshuffleLift:
 
     def test_dimshuffle_on_broadcastable(self):
         x, y, z = inputs([False, True], [True, False, True], [False, False, True])
-        u = at.constant(1)
+        u = pt.constant(1)
         ds_x = ds(x, (0, "x"))  # useless
         ds_y = ds(y, (2, 1, 0))  # useless
         ds_z = ds(z, (2, 1, 0))  # useful
@@ -268,17 +268,17 @@ class TestFusion:
         sd = dscalar()
         means = dvector()
 
-        cst_05 = at.constant(0.5)
-        cst_m05 = at.constant(-0.5)
-        cst_2 = at.constant(2)
-        cst_m2 = at.constant(-2)
-        ones = at.constant(np.ones(10))
+        cst_05 = pt.constant(0.5)
+        cst_m05 = pt.constant(-0.5)
+        cst_2 = pt.constant(2)
+        cst_m2 = pt.constant(-2)
+        ones = pt.constant(np.ones(10))
 
         for i in range(n):
             f = cst_m05 * sd**cst_m2 * (ones - means[i]) ** cst_2 + cst_05 * log(
                 cst_05 * (sd**cst_m2) / np.pi
             )
-            factors.append(at_sum(f))
+            factors.append(pt_sum(f))
 
         logp = add(*factors)
 
@@ -747,7 +747,7 @@ class TestFusion:
                 "float32",
             ),
             (
-                fx - fy + at_round(fz),
+                fx - fy + pt_round(fz),
                 (fx, fy, fz),
                 (fxv, fyv, fzv),
                 1,
@@ -812,7 +812,7 @@ class TestFusion:
                 },
             ),
             (
-                fx - at.cast(fy, dtype="float64"),
+                fx - pt.cast(fy, dtype="float64"),
                 (fx, fy),
                 (fxv, fyv),
                 1,
@@ -820,7 +820,7 @@ class TestFusion:
                 "float64",
             ),
             (
-                at_pow(fx * fy + fz, fx * fy),
+                pt_pow(fx * fy + fz, fx * fy),
                 (fx, fy, fz),
                 (fxv, fyv, fzv),
                 1,
@@ -893,13 +893,13 @@ class TestFusion:
             (
                 (
                     # sum(logp)
-                    at_sum(-((fx - fy) ** 2) / 2),
+                    pt_sum(-((fx - fy) ** 2) / 2),
                     # grad(logp)
-                    at.grad(at_sum(-((fx - fy) ** 2) / 2), wrt=fx),
+                    pt.grad(pt_sum(-((fx - fy) ** 2) / 2), wrt=fx),
                 ),
                 (fx, fy),
                 (fxv, fyv),
-                3,
+                2,
                 (
                     np.sum(-((fxv - fyv) ** 2) / 2),
                     -(fxv - fyv),
@@ -913,8 +913,8 @@ class TestFusion:
                     log(
                         ge(
                             assert_op(
-                                at_abs(fx),
-                                at_all(ge(at_abs(fx), 0)),
+                                pt_abs(fx),
+                                pt_all(ge(pt_abs(fx), 0)),
                             ),
                             0,
                         )
@@ -932,7 +932,7 @@ class TestFusion:
                 (
                     true_div(
                         mul(
-                            at_sum(fx + 5),  # breaks fusion
+                            pt_sum(fx + 5),  # breaks fusion
                             exp(fx),
                         ),
                         (fx + 5),
@@ -1036,7 +1036,7 @@ class TestFusion:
         composite_nodes = [
             node
             for node in f.maker.fgraph.toposort()
-            if isinstance(getattr(node.op, "scalar_op", None), aes.basic.Composite)
+            if isinstance(getattr(node.op, "scalar_op", None), ps.basic.Composite)
         ]
         assert not any(len(node.inputs) > 31 for node in composite_nodes)
 
@@ -1048,7 +1048,7 @@ class TestFusion:
 
         # Make sure something was fused
         assert any(
-            isinstance(getattr(node.op, "scalar_op", None), aes.basic.Composite)
+            isinstance(getattr(node.op, "scalar_op", None), ps.basic.Composite)
             for node in dlogp.maker.fgraph.toposort()
         )
 
@@ -1069,11 +1069,11 @@ class TestFusion:
         assert isinstance(scalar_op, Composite)
         assert [node.op for node in scalar_op.fgraph.toposort()] == [
             # There should be a single mul
-            aes.mul,
+            ps.mul,
             # There should be a single add
-            aes.add,
-            aes.true_div,
-            aes.log,
+            ps.add,
+            ps.true_div,
+            ps.log,
         ]
 
     def test_add_mul_fusion_inplace(self):
@@ -1087,7 +1087,7 @@ class TestFusion:
 
         new_out = f.maker.fgraph.outputs[0]
         assert isinstance(new_out.owner.op, Elemwise)
-        assert isinstance(new_out.owner.op.scalar_op, aes.basic.Add)
+        assert isinstance(new_out.owner.op.scalar_op, ps.basic.Add)
         assert len(new_out.owner.inputs) == 4
 
         # TODO: Do we really need to do this?
@@ -1099,9 +1099,9 @@ class TestFusion:
         x = vector("x")
 
         # Create Composite where inplacing the first non-constant output would corrupt the second output
-        xs = aes.float64("xs")
+        xs = ps.float64("xs")
         outs = (
-            Elemwise(Composite([xs], [xs + 1, aes.cos(xs + 1) + xs]))
+            Elemwise(Composite([xs], [xs + 1, ps.cos(xs + 1) + xs]))
             .make_node(x)
             .outputs
         )
@@ -1128,11 +1128,11 @@ class TestFusion:
         r"""Make sure we avoid fusions for `Op`\s without C code implementations."""
 
         # This custom `Op` has no `c_code` method
-        class NoCCodeOp(aes.basic.UnaryScalarOp):
+        class NoCCodeOp(ps.basic.UnaryScalarOp):
             def impl(self, x):
                 return x * 2
 
-        no_c_code_op = Elemwise(NoCCodeOp(aes.basic.upgrade_to_float))
+        no_c_code_op = Elemwise(NoCCodeOp(ps.basic.upgrade_to_float))
 
         mode = Mode(linker="cvm")
         mode._optimizer = mode._optimizer.including(
@@ -1146,7 +1146,7 @@ class TestFusion:
         f = function([x], out, mode=mode)
 
         assert not any(
-            isinstance(getattr(n.op, "scalar_op"), aes.basic.Composite)
+            isinstance(getattr(n.op, "scalar_op"), ps.basic.Composite)
             for n in f.maker.fgraph.toposort()
         )
 
@@ -1182,9 +1182,9 @@ class TestFusion:
     @pytest.mark.parametrize(
         "careduce_op, numpy_op",
         [
-            (at_sum, np.sum),
+            (pt_sum, np.sum),
             pytest.param(
-                at_all,
+                pt_all,
                 np.all,
                 marks=pytest.mark.xfail(
                     reason="Rewrite logic does not support all CAReduce"
@@ -1211,7 +1211,7 @@ class TestFusion:
 
         if linker != "py":
             (out_node,) = out_fn.maker.fgraph.toposort()
-            assert isinstance(getattr(out_node.op, "scalar_op"), aes.basic.Composite)
+            assert isinstance(getattr(out_node.op, "scalar_op"), ps.basic.Composite)
 
             rng = np.random.default_rng(2320)
             x_val = rng.random((4, 3, 2)).astype(x.type.dtype)
@@ -1224,7 +1224,7 @@ class TestFusion:
         else:
             out_nodes = out_fn.maker.fgraph.toposort()
             assert not any(
-                isinstance(out_node.op.scalar_op, aes.basic.Composite)
+                isinstance(out_node.op.scalar_op, ps.basic.Composite)
                 for out_node in out_nodes
                 if hasattr(out_node.op, "scalar_op")
             )
@@ -1237,7 +1237,7 @@ class TestFusion:
         out_fn = function([x], out, mode=mode)
         out_nodes = out_fn.maker.fgraph.toposort()
         assert not any(
-            isinstance(out_node.op.scalar_op, aes.basic.Composite)
+            isinstance(out_node.op.scalar_op, ps.basic.Composite)
             for out_node in out_nodes
             if hasattr(out_node.op, "scalar_op")
         )
@@ -1262,7 +1262,7 @@ class TestFusion:
         out_fn = function([x, y], out, mode=mode)
         (out_node,) = out_fn.maker.fgraph.toposort()
 
-        assert isinstance(getattr(out_node.op, "scalar_op"), aes.basic.Composite)
+        assert isinstance(getattr(out_node.op, "scalar_op"), ps.basic.Composite)
 
         rng = np.random.default_rng(2320)
         x_val = rng.random((4, 3, 2), dtype=config.floatX)
@@ -1292,15 +1292,15 @@ class TestFusion:
         # Inner Vector output Composite
         assert isinstance(apply_nodes[1].op.scalar_op, Composite)
         assert {node.op for node in apply_nodes[1].op.scalar_op.fgraph.apply_nodes} == {
-            aes.add,
-            aes.log,
+            ps.add,
+            ps.log,
         }
         # Outer Matrix output Composite
         assert isinstance(apply_nodes[2].op.scalar_op, Composite)
         assert {node.op for node in apply_nodes[2].op.scalar_op.fgraph.apply_nodes} == {
-            aes.sub,
-            aes.exp,
-            aes.mul,
+            ps.sub,
+            ps.exp,
+            ps.mul,
         }
 
     def test_multiple_outputs_fused_root_elemwise(self):
@@ -1308,16 +1308,16 @@ class TestFusion:
         there is another fused output"""
 
         # By default, we do not introduce Composite for single layers of Elemwise
-        x = at.vector("x")
-        out1 = at.cos(x)
+        x = pt.vector("x")
+        out1 = pt.cos(x)
         f = pytensor.function([x], out1, mode=self.mode)
         nodes = tuple(f.maker.fgraph.apply_nodes)
         assert len(nodes) == 1
-        assert isinstance(nodes[0].op.scalar_op, aes.Cos)
+        assert isinstance(nodes[0].op.scalar_op, ps.Cos)
 
         # However, when it can be composed with another output, we should not
         # compute that root Elemwise twice
-        out2 = at.log(out1)
+        out2 = pt.log(out1)
         f = pytensor.function([x], [out1, out2], mode=self.mode)
         nodes = tuple(f.maker.fgraph.apply_nodes)
         assert len(nodes) == 1
@@ -1363,7 +1363,7 @@ class TestFusion:
             )
 
 
-class TimesN(aes.basic.UnaryScalarOp):
+class TimesN(ps.basic.UnaryScalarOp):
     """
     Used in test TestCompositeCodegen
 
@@ -1379,7 +1379,7 @@ class TimesN(aes.basic.UnaryScalarOp):
 
     def __init__(self, n, *args, **kwargs):
         self.n = n
-        aes.basic.UnaryScalarOp.__init__(self, *args, **kwargs)
+        ps.basic.UnaryScalarOp.__init__(self, *args, **kwargs)
 
     def impl(self, x):
         return x * self.n
@@ -1406,7 +1406,7 @@ class TestCompositeCodegen:
     """
 
     def setup_method(self):
-        upgrade_to_float = aes.basic.upgrade_to_float
+        upgrade_to_float = ps.basic.upgrade_to_float
 
         self.scal_times_2 = TimesN(2, upgrade_to_float, name="times_2")
         self.times_2 = Elemwise(self.scal_times_2, name="times_2")
@@ -1427,10 +1427,10 @@ class TestCompositeCodegen:
 
 
 def test_local_useless_composite_outputs():
-    x = aes.float32()
-    y = aes.float32()
-    z = aes.float32()
-    c = aes.Composite([x, y, z], [x + 1, y - 1])
+    x = ps.float32()
+    y = ps.float32()
+    z = ps.float32()
+    c = ps.Composite([x, y, z], [x + 1, y - 1])
     X = matrix("X")
     Y = matrix("Y")
     Z = matrix("Z")
@@ -1462,12 +1462,12 @@ def test_local_useless_composite_outputs():
 
 
 @pytest.mark.parametrize("const_shape", [(), (1,), (5,), (1, 5), (2, 5)])
-@pytest.mark.parametrize("op, np_op", [(at.pow, np.power), (at.add, np.add)])
+@pytest.mark.parametrize("op, np_op", [(pt.pow, np.power), (pt.add, np.add)])
 def test_local_inline_composite_constants(op, np_op, const_shape):
     const = np.full(shape=const_shape, fill_value=2.5).astype(config.floatX)
     x = vector("x")
     y = vector("y")
-    out = at.exp(op(x, const)) + y
+    out = pt.exp(op(x, const)) + y
 
     fn = pytensor.function(
         [x, y], out, mode=get_default_mode().including("specialize", "fusion")

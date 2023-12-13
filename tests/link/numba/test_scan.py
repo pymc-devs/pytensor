@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import pytensor
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor import config, function, grad
 from pytensor.compile.mode import Mode, get_mode
 from pytensor.graph.fg import FunctionGraph
@@ -23,7 +23,7 @@ from tests.link.numba.test_basic import compare_numba_and_py
         # sequences
         (
             lambda a_t: 2 * a_t,
-            [at.dvector("a")],
+            [pt.dvector("a")],
             [{}],
             [],
             None,
@@ -33,7 +33,7 @@ from tests.link.numba.test_basic import compare_numba_and_py
         ),
         # nit-sot
         (
-            lambda: at.as_tensor(2.0),
+            lambda: pt.as_tensor(2.0),
             [],
             [{}],
             [],
@@ -44,10 +44,10 @@ from tests.link.numba.test_basic import compare_numba_and_py
         ),
         # nit-sot, non_seq
         (
-            lambda c: at.as_tensor(2.0) * c,
+            lambda c: pt.as_tensor(2.0) * c,
             [],
             [{}],
-            [at.dscalar("c")],
+            [pt.dscalar("c")],
             3,
             [1.0],
             None,
@@ -57,7 +57,7 @@ from tests.link.numba.test_basic import compare_numba_and_py
         (
             lambda a_tm1: 2 * a_tm1,
             [],
-            [{"initial": at.as_tensor(0.0, dtype="floatX"), "taps": [-1]}],
+            [{"initial": pt.as_tensor(0.0, dtype="floatX"), "taps": [-1]}],
             [],
             3,
             [],
@@ -68,7 +68,7 @@ from tests.link.numba.test_basic import compare_numba_and_py
         (
             lambda a_tm1: (a_tm1 + 1, until(a_tm1 > 2)),
             [],
-            [{"initial": at.as_tensor(1, dtype=np.int64), "taps": [-1]}],
+            [{"initial": pt.as_tensor(1, dtype=np.int64), "taps": [-1]}],
             [],
             3,
             [],
@@ -92,7 +92,7 @@ from tests.link.numba.test_basic import compare_numba_and_py
         (
             lambda a_tm1: 2 * a_tm1,
             [],
-            [{"initial": at.as_tensor([0.0, 1.0], dtype="floatX"), "taps": [-2]}],
+            [{"initial": pt.as_tensor([0.0, 1.0], dtype="floatX"), "taps": [-2]}],
             [],
             6,
             [],
@@ -104,8 +104,8 @@ from tests.link.numba.test_basic import compare_numba_and_py
             lambda a_tm1, b_tm1: (2 * a_tm1, 2 * b_tm1),
             [],
             [
-                {"initial": at.as_tensor(0.0, dtype="floatX"), "taps": [-1]},
-                {"initial": at.as_tensor(0.0, dtype="floatX"), "taps": [-1]},
+                {"initial": pt.as_tensor(0.0, dtype="floatX"), "taps": [-1]},
+                {"initial": pt.as_tensor(0.0, dtype="floatX"), "taps": [-1]},
             ],
             [],
             10,
@@ -176,24 +176,24 @@ def test_scan_multiple_output(benchmark):
     """
 
     def binomln(n, k):
-        return at.exp(n + 1) - at.exp(k + 1) - at.exp(n - k + 1)
+        return pt.exp(n + 1) - pt.exp(k + 1) - pt.exp(n - k + 1)
 
     def binom_log_prob(n, p, value):
-        return binomln(n, value) + value * at.exp(p) + (n - value) * at.exp(1 - p)
+        return binomln(n, value) + value * pt.exp(p) + (n - value) * pt.exp(1 - p)
 
     # sequences
-    at_C = at.ivector("C_t")
-    at_D = at.ivector("D_t")
+    pt_C = pt.ivector("C_t")
+    pt_D = pt.ivector("D_t")
     # outputs_info (initial conditions)
-    st0 = at.lscalar("s_t0")
-    et0 = at.lscalar("e_t0")
-    it0 = at.lscalar("i_t0")
-    logp_c = at.scalar("logp_c")
-    logp_d = at.scalar("logp_d")
+    st0 = pt.lscalar("s_t0")
+    et0 = pt.lscalar("e_t0")
+    it0 = pt.lscalar("i_t0")
+    logp_c = pt.scalar("logp_c")
+    logp_d = pt.scalar("logp_d")
     # non_sequences
-    beta = at.scalar("beta")
-    gamma = at.scalar("gamma")
-    delta = at.scalar("delta")
+    beta = pt.scalar("beta")
+    gamma = pt.scalar("gamma")
+    delta = pt.scalar("delta")
 
     def seir_one_step(ct0, dt0, st0, et0, it0, logp_c, logp_d, beta, gamma, delta):
         bt0 = st0 * beta
@@ -209,7 +209,7 @@ def test_scan_multiple_output(benchmark):
 
     (st, et, it, logp_c_all, logp_d_all), _ = scan(
         fn=seir_one_step,
-        sequences=[at_C, at_D],
+        sequences=[pt_C, pt_D],
         outputs_info=[st0, et0, it0, logp_c, logp_d],
         non_sequences=[beta, gamma, delta],
     )
@@ -220,7 +220,7 @@ def test_scan_multiple_output(benchmark):
     logp_d_all.name = "D_t_logp"
 
     out_fg = FunctionGraph(
-        [at_C, at_D, st0, et0, it0, logp_c, logp_d, beta, gamma, delta],
+        [pt_C, pt_D, st0, et0, it0, logp_c, logp_d, beta, gamma, delta],
         [st, et, it, logp_c_all, logp_d_all],
     )
 
@@ -252,14 +252,14 @@ def test_scan_multiple_output(benchmark):
 
 @config.change_flags(compute_test_value="raise")
 def test_scan_tap_output():
-    a_at = at.scalar("a")
-    a_at.tag.test_value = 10.0
+    a_pt = pt.scalar("a")
+    a_pt.tag.test_value = 10.0
 
-    b_at = at.arange(11).astype(config.floatX)
-    b_at.name = "b"
+    b_pt = pt.arange(11).astype(config.floatX)
+    b_pt.name = "b"
 
-    c_at = at.arange(20, 31, dtype=config.floatX)
-    c_at.name = "c"
+    c_pt = pt.arange(20, 31, dtype=config.floatX)
+    c_pt.name = "c"
 
     def input_step_fn(b, b2, c, x_tm1, y_tm1, y_tm3, a):
         x_tm1.name = "x_tm1"
@@ -270,40 +270,40 @@ def test_scan_tap_output():
         x_t = x_tm1 + 1
         x_t.name = "x_t"
         y_t.name = "y_t"
-        return x_t, y_t, at.fill((10,), z_t)
+        return x_t, y_t, pt.fill((10,), z_t)
 
     scan_res, _ = scan(
         fn=input_step_fn,
         sequences=[
             {
-                "input": b_at,
+                "input": b_pt,
                 "taps": [-1, -2],
             },
             {
-                "input": c_at,
+                "input": c_pt,
                 "taps": [-2],
             },
         ],
         outputs_info=[
             {
-                "initial": at.as_tensor_variable(0.0, dtype=config.floatX),
+                "initial": pt.as_tensor_variable(0.0, dtype=config.floatX),
                 "taps": [-1],
             },
             {
-                "initial": at.as_tensor_variable(
+                "initial": pt.as_tensor_variable(
                     np.r_[-1.0, 1.3, 0.0].astype(config.floatX)
                 ),
                 "taps": [-1, -3],
             },
             None,
         ],
-        non_sequences=[a_at],
+        non_sequences=[a_pt],
         n_steps=5,
         name="yz_scan",
         strict=True,
     )
 
-    out_fg = FunctionGraph([a_at, b_at, c_at], scan_res)
+    out_fg = FunctionGraph([a_pt, b_pt, c_pt], scan_res)
 
     test_input_vals = [
         np.array(10.0).astype(config.floatX),
@@ -317,10 +317,10 @@ def test_scan_while():
     def power_of_2(previous_power, max_value):
         return previous_power * 2, until(previous_power * 2 > max_value)
 
-    max_value = at.scalar()
+    max_value = pt.scalar()
     values, _ = scan(
         power_of_2,
-        outputs_info=at.constant(1.0),
+        outputs_info=pt.constant(1.0),
         non_sequences=max_value,
         n_steps=1024,
     )
@@ -334,7 +334,7 @@ def test_scan_while():
 
 
 def test_scan_multiple_none_output():
-    A = at.dvector("A")
+    A = pt.dvector("A")
 
     def power_step(prior_result, x):
         return prior_result * x, prior_result * x * x, prior_result * x * x * x
@@ -342,7 +342,7 @@ def test_scan_multiple_none_output():
     result, _ = scan(
         power_step,
         non_sequences=[A],
-        outputs_info=[at.ones_like(A), None, None],
+        outputs_info=[pt.ones_like(A), None, None],
         n_steps=3,
     )
 
@@ -359,8 +359,8 @@ def test_scan_save_mem_basic(n_steps_val):
     def f_pow2(x_tm2, x_tm1):
         return 2 * x_tm1 + x_tm2
 
-    init_x = at.dvector("init_x")
-    n_steps = at.iscalar("n_steps")
+    init_x = pt.dvector("init_x")
+    n_steps = pt.iscalar("n_steps")
     output, _ = scan(
         f_pow2,
         sequences=[],
@@ -397,8 +397,8 @@ def test_grad_sitsot():
 
 
 def test_mitmots_basic():
-    init_x = at.dvector()
-    seq = at.dvector()
+    init_x = pt.dvector()
+    seq = pt.dvector()
 
     def inner_fct(seq, state_old, state_current):
         return state_old * 2 + state_current + seq

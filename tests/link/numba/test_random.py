@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 import scipy.stats as stats
 
-import pytensor.tensor as at
-import pytensor.tensor.random.basic as aer
+import pytensor.tensor as pt
+import pytensor.tensor.random.basic as ptr
 from pytensor import shared
 from pytensor.compile.function import function
 from pytensor.compile.sharedvalue import SharedVariable
@@ -26,259 +26,259 @@ rng = np.random.default_rng(42849)
     "rv_op, dist_args, size",
     [
         (
-            aer.normal,
+            ptr.normal,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
-            at.as_tensor([3, 2]),
+            pt.as_tensor([3, 2]),
         ),
         (
-            aer.uniform,
+            ptr.uniform,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
-            at.as_tensor([3, 2]),
+            pt.as_tensor([3, 2]),
         ),
         (
-            aer.triangular,
+            ptr.triangular,
             [
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(-5.0, dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(5.0, dtype=np.float64),
                 ),
             ],
-            at.as_tensor([3, 2]),
+            pt.as_tensor([3, 2]),
         ),
         (
-            aer.lognormal,
+            ptr.lognormal,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
-            at.as_tensor([3, 2]),
+            pt.as_tensor([3, 2]),
         ),
         pytest.param(
-            aer.pareto,
+            ptr.pareto,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([2.0, 10.0], dtype=np.float64),
                 ),
             ],
-            at.as_tensor([3, 2]),
+            pt.as_tensor([3, 2]),
             marks=pytest.mark.xfail(reason="Not implemented"),
         ),
         (
-            aer.exponential,
+            ptr.exponential,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
             ],
-            at.as_tensor([3, 2]),
+            pt.as_tensor([3, 2]),
         ),
         (
-            aer.weibull,
+            ptr.weibull,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
             ],
-            at.as_tensor([3, 2]),
+            pt.as_tensor([3, 2]),
         ),
         (
-            aer.logistic,
+            ptr.logistic,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
-            at.as_tensor([3, 2]),
+            pt.as_tensor([3, 2]),
         ),
         (
-            aer.geometric,
+            ptr.geometric,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([0.3, 0.4], dtype=np.float64),
                 ),
             ],
-            at.as_tensor([3, 2]),
+            pt.as_tensor([3, 2]),
         ),
         (
-            aer.hypergeometric,
+            ptr.hypergeometric,
             [
                 set_test_value(
-                    at.lscalar(),
+                    pt.lscalar(),
                     np.array(7, dtype=np.int64),
                 ),
                 set_test_value(
-                    at.lscalar(),
+                    pt.lscalar(),
                     np.array(8, dtype=np.int64),
                 ),
                 set_test_value(
-                    at.lscalar(),
+                    pt.lscalar(),
                     np.array(15, dtype=np.int64),
                 ),
             ],
-            at.as_tensor([3, 2]),
+            pt.as_tensor([3, 2]),
         ),
         (
-            aer.wald,
+            ptr.wald,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
-            at.as_tensor([3, 2]),
+            pt.as_tensor([3, 2]),
         ),
         (
-            aer.laplace,
+            ptr.laplace,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
-            at.as_tensor([3, 2]),
+            pt.as_tensor([3, 2]),
         ),
         (
-            aer.binomial,
+            ptr.binomial,
             [
                 set_test_value(
-                    at.lvector(),
+                    pt.lvector(),
                     np.array([1, 2], dtype=np.int64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(0.9, dtype=np.float64),
                 ),
             ],
-            at.as_tensor([3, 2]),
+            pt.as_tensor([3, 2]),
         ),
         (
-            aer.normal,
+            ptr.normal,
             [
                 set_test_value(
-                    at.lvector(),
+                    pt.lvector(),
                     np.array([1, 2], dtype=np.int64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
-            at.as_tensor(tuple(set_test_value(at.lscalar(), v) for v in [3, 2])),
+            pt.as_tensor(tuple(set_test_value(pt.lscalar(), v) for v in [3, 2])),
         ),
         (
-            aer.poisson,
+            ptr.poisson,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
             ],
             None,
         ),
         (
-            aer.halfnormal,
+            ptr.halfnormal,
             [
                 set_test_value(
-                    at.lvector(),
+                    pt.lvector(),
                     np.array([1, 2], dtype=np.int64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
             None,
         ),
         (
-            aer.bernoulli,
+            ptr.bernoulli,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([0.1, 0.9], dtype=np.float64),
                 ),
             ],
             None,
         ),
         (
-            aer.randint,
+            ptr.randint,
             [
                 set_test_value(
-                    at.lscalar(),
+                    pt.lscalar(),
                     np.array(0, dtype=np.int64),
                 ),
                 set_test_value(
-                    at.lscalar(),
+                    pt.lscalar(),
                     np.array(5, dtype=np.int64),
                 ),
             ],
-            at.as_tensor([3, 2]),
+            pt.as_tensor([3, 2]),
         ),
         pytest.param(
-            aer.multivariate_normal,
+            ptr.multivariate_normal,
             [
                 set_test_value(
-                    at.dmatrix(),
+                    pt.dmatrix(),
                     np.array([[1, 2], [3, 4]], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.tensor(dtype="float64", shape=(1, None, None)),
+                    pt.tensor(dtype="float64", shape=(1, None, None)),
                     np.eye(2)[None, ...],
                 ),
             ],
-            at.as_tensor(tuple(set_test_value(at.lscalar(), v) for v in [4, 3, 2])),
+            pt.as_tensor(tuple(set_test_value(pt.lscalar(), v) for v in [4, 3, 2])),
             marks=pytest.mark.xfail(reason="Not implemented"),
         ),
     ],
@@ -304,14 +304,14 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
     "rv_op, dist_args, base_size, cdf_name, params_conv",
     [
         (
-            aer.beta,
+            ptr.beta,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
@@ -320,14 +320,14 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
             lambda *args: args,
         ),
         (
-            aer._gamma,
+            ptr._gamma,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([0.5, 3.0], dtype=np.float64),
                 ),
             ],
@@ -336,14 +336,14 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
             lambda a, b: (a, 0.0, b),
         ),
         (
-            aer.cauchy,
+            ptr.cauchy,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
@@ -352,10 +352,10 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
             lambda *args: args,
         ),
         (
-            aer.chisquare,
+            ptr.chisquare,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 )
             ],
@@ -364,14 +364,14 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
             lambda *args: args,
         ),
         (
-            aer.gumbel,
+            ptr.gumbel,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
@@ -380,14 +380,14 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
             lambda *args: args,
         ),
         (
-            aer.negative_binomial,
+            ptr.negative_binomial,
             [
                 set_test_value(
-                    at.lvector(),
+                    pt.lvector(),
                     np.array([100, 200], dtype=np.int64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(0.09, dtype=np.float64),
                 ),
             ],
@@ -396,14 +396,14 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
             lambda *args: args,
         ),
         pytest.param(
-            aer.vonmises,
+            ptr.vonmises,
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([-0.5, 0.5], dtype=np.float64),
                 ),
                 set_test_value(
-                    at.dscalar(),
+                    pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
@@ -448,7 +448,7 @@ def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_
         pytest.param(
             [
                 set_test_value(
-                    at.dvector(),
+                    pt.dvector(),
                     np.array([100000, 1, 1], dtype=np.float64),
                 ),
             ],
@@ -458,7 +458,7 @@ def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_
         pytest.param(
             [
                 set_test_value(
-                    at.dmatrix(),
+                    pt.dmatrix(),
                     np.array(
                         [[100000, 1, 1], [1, 100000, 1], [1, 1, 100000]],
                         dtype=np.float64,
@@ -471,7 +471,7 @@ def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_
         pytest.param(
             [
                 set_test_value(
-                    at.dmatrix(),
+                    pt.dmatrix(),
                     np.array(
                         [[100000, 1, 1]],
                         dtype=np.float64,
@@ -484,7 +484,7 @@ def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_
         pytest.param(
             [
                 set_test_value(
-                    at.dmatrix(),
+                    pt.dmatrix(),
                     np.array(
                         [[100000, 1, 1], [1, 100000, 1], [1, 1, 100000]],
                         dtype=np.float64,
@@ -500,7 +500,7 @@ def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_
 )
 def test_CategoricalRV(dist_args, size, cm):
     rng = shared(np.random.RandomState(29402))
-    g = aer.categorical(*dist_args, size=size, rng=rng)
+    g = ptr.categorical(*dist_args, size=size, rng=rng)
     g_fg = FunctionGraph(outputs=[g])
 
     with cm:
@@ -519,7 +519,7 @@ def test_CategoricalRV(dist_args, size, cm):
     [
         pytest.param(
             set_test_value(
-                at.dvector(),
+                pt.dvector(),
                 np.array([100000, 1, 1], dtype=np.float64),
             ),
             None,
@@ -527,7 +527,7 @@ def test_CategoricalRV(dist_args, size, cm):
         ),
         pytest.param(
             set_test_value(
-                at.dmatrix(),
+                pt.dmatrix(),
                 np.array(
                     [[100000, 1, 1], [1, 100000, 1], [1, 1, 100000]],
                     dtype=np.float64,
@@ -538,7 +538,7 @@ def test_CategoricalRV(dist_args, size, cm):
         ),
         pytest.param(
             set_test_value(
-                at.dmatrix(),
+                pt.dmatrix(),
                 np.array(
                     [[100000, 1, 1], [1, 100000, 1], [1, 1, 100000]],
                     dtype=np.float64,
@@ -551,7 +551,7 @@ def test_CategoricalRV(dist_args, size, cm):
 )
 def test_DirichletRV(a, size, cm):
     rng = shared(np.random.RandomState(29402))
-    g = aer.dirichlet(a, size=size, rng=rng)
+    g = ptr.dirichlet(a, size=size, rng=rng)
     g_fn = function([a], g, mode=numba_mode)
 
     with cm:
@@ -574,7 +574,7 @@ def test_RandomState_updates():
     rng = shared(np.random.RandomState(1))
     rng_new = shared(np.random.RandomState(2))
 
-    x = at.random.normal(size=10, rng=rng)
+    x = pt.random.normal(size=10, rng=rng)
     res = function([], x, updates={rng: rng_new}, mode=numba_mode)()
 
     ref = np.random.RandomState(2).normal(size=10)
@@ -583,7 +583,7 @@ def test_RandomState_updates():
 
 def test_random_Generator():
     rng = shared(np.random.default_rng(29402))
-    g = aer.normal(rng=rng)
+    g = ptr.normal(rng=rng)
     g_fg = FunctionGraph(outputs=[g])
 
     with pytest.raises(TypeError):

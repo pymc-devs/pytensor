@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Literal, Optional, Union
 import numpy as np
 
 import pytensor
-from pytensor import scalar as aes
+from pytensor import scalar as ps
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable
 from pytensor.graph.type import HasDataType, HasShape
@@ -26,14 +26,14 @@ _logger = logging.getLogger("pytensor.tensor.type")
 
 
 # Define common subsets of dtypes (as strings).
-complex_dtypes = list(map(str, aes.complex_types))
-continuous_dtypes = list(map(str, aes.continuous_types))
-float_dtypes = list(map(str, aes.float_types))
-integer_dtypes = list(map(str, aes.integer_types))
-discrete_dtypes = list(map(str, aes.discrete_types))
-all_dtypes = list(map(str, aes.all_types))
-int_dtypes = list(map(str, aes.int_types))
-uint_dtypes = list(map(str, aes.uint_types))
+complex_dtypes = list(map(str, ps.complex_types))
+continuous_dtypes = list(map(str, ps.continuous_types))
+float_dtypes = list(map(str, ps.float_types))
+integer_dtypes = list(map(str, ps.integer_types))
+discrete_dtypes = list(map(str, ps.discrete_types))
+all_dtypes = list(map(str, ps.all_types))
+int_dtypes = list(map(str, ps.int_types))
+uint_dtypes = list(map(str, ps.uint_types))
 
 # TODO: add more type correspondences for e.g. int32, int64, float32,
 # complex64, etc.
@@ -185,7 +185,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
                 if isinstance(data, np.ndarray):
                     # Check if self.dtype can accurately represent data
                     # (do not try to convert the data)
-                    up_dtype = aes.upcast(self.dtype, data.dtype)
+                    up_dtype = ps.upcast(self.dtype, data.dtype)
                     if up_dtype == self.dtype:
                         # Bug in the following line when data is a
                         # scalar array, see
@@ -297,7 +297,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
             )
 
     def to_scalar_type(self):
-        return aes.get_scalar_type(dtype=self.dtype)
+        return ps.get_scalar_type(dtype=self.dtype)
 
     def in_same_class(self, otype):
         r"""Determine if `otype` is in the same class of fixed broadcastable types as `self`.
@@ -615,22 +615,22 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         )
 
     def c_headers(self, **kwargs):
-        return aes.get_scalar_type(self.dtype).c_headers(**kwargs)
+        return ps.get_scalar_type(self.dtype).c_headers(**kwargs)
 
     def c_libraries(self, **kwargs):
-        return aes.get_scalar_type(self.dtype).c_libraries(**kwargs)
+        return ps.get_scalar_type(self.dtype).c_libraries(**kwargs)
 
     def c_compile_args(self, **kwargs):
-        return aes.get_scalar_type(self.dtype).c_compile_args(**kwargs)
+        return ps.get_scalar_type(self.dtype).c_compile_args(**kwargs)
 
     def c_support_code(self, **kwargs):
-        return aes.get_scalar_type(self.dtype).c_support_code(**kwargs)
+        return ps.get_scalar_type(self.dtype).c_support_code(**kwargs)
 
     def c_init_code(self, **kwargs):
-        return aes.get_scalar_type(self.dtype).c_init_code(**kwargs)
+        return ps.get_scalar_type(self.dtype).c_init_code(**kwargs)
 
     def c_code_cache_version(self):
-        scalar_version = aes.get_scalar_type(self.dtype).c_code_cache_version()
+        scalar_version = ps.get_scalar_type(self.dtype).c_code_cache_version()
         if scalar_version:
             return (11,) + scalar_version
         else:
