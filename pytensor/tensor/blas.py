@@ -1795,6 +1795,10 @@ class BatchedDot(COp):
         return ldflags(libs=False, include_dir=True)
 
     def c_code(self, node, name, inp, out, sub):
+        # Can only compile if linked to blas libraries
+        if len(self.c_libraries()) <= 0:
+            raise NotImplementedError()
+
         _x, _y = inp
         (_z,) = out
         fail = sub["fail"]
