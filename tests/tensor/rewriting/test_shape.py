@@ -3,7 +3,7 @@ import copy
 import numpy as np
 import pytest
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor import shared
 from pytensor.compile.function import function
 from pytensor.compile.mode import get_default_mode, get_mode
@@ -104,7 +104,7 @@ class TestShapeRewriter:
         last_pool_c = last_pool(img_shp, pool_shp, pool_stride) * pool_stride
         required_c = last_pool_c + pool_shp
 
-        wide_infinity = at.alloc(
+        wide_infinity = pt.alloc(
             -np.inf, c01b.shape[0], required_r, required_c, c01b.shape[3]
         )
 
@@ -143,9 +143,9 @@ class TestShapeRewriter:
         # This test the error in gh-1122 that is a caused by the
         # combination of merge rewriter and ShapeFeature.
 
-        x = at.constant([0, 0])
+        x = pt.constant([0, 0])
         y = x[1:]
-        x1 = x - at.join(0, y, y)
+        x1 = x - pt.join(0, y, y)
         x1.eval()
 
     def test_local_track_shape_i(self):
@@ -264,7 +264,7 @@ class TestLocalUselessReshape:
     def test_0(self):
         mode = get_default_mode().including("local_useless_reshape")
         i = iscalar("i")
-        m = at.mgrid[0:i,]
+        m = pt.mgrid[0:i,]
         f = function([i], m, mode=mode)
         topo = f.maker.fgraph.toposort()
         assert not any(isinstance(n.op, Reshape) for n in topo)
@@ -399,7 +399,7 @@ class TestShapeI(utt.InferShapeTester):
 class TestSameShape:
     def test_scalar(self):
         x = scalar()
-        cst = at.constant(1)
+        cst = pt.constant(1)
         o = x + cst
         fgraph = FunctionGraph([x], [o], clone=False)
         shape_feature = ShapeFeature()
@@ -408,7 +408,7 @@ class TestSameShape:
 
     def test_vector(self):
         x = vector()
-        cst = at.constant(1)
+        cst = pt.constant(1)
         o = x + cst
         fgraph = FunctionGraph([x], [o], clone=False)
         shape_feature = ShapeFeature()
@@ -435,8 +435,8 @@ class TestSameShape:
         [2, None],
     )
     def test_vector_dim(self, y_dim_0):
-        x = at.tensor(dtype="floatX", shape=(2, None))
-        y = at.tensor(dtype="floatX", shape=(y_dim_0, None))
+        x = pt.tensor(dtype="floatX", shape=(2, None))
+        y = pt.tensor(dtype="floatX", shape=(y_dim_0, None))
         o = x + y
         fgraph = FunctionGraph([x, y], [o], clone=False)
         shape_feature = ShapeFeature()

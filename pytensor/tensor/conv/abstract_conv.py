@@ -19,7 +19,7 @@ except ImportError:
     from scipy.signal._sigtools import _convolve2d
 
 import pytensor
-from pytensor import tensor as at
+from pytensor import tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.op import Op
@@ -552,12 +552,12 @@ def assert_conv_shape(shape):
                 assert_shp = Assert(
                     f"The convolution would produce an invalid shape (dim[{int(i)}] < 0)."
                 )
-                out_shape.append(assert_shp(n, at.ge(n, 0)))
+                out_shape.append(assert_shp(n, pt.ge(n, 0)))
             else:
                 assert_shp = Assert(
                     f"The convolution would produce an invalid shape (dim[{int(i)}] < 0)."
                 )
-                out_shape.append(assert_shp(n, at.gt(n, 0)))
+                out_shape.append(assert_shp(n, pt.gt(n, 0)))
     return tuple(out_shape)
 
 
@@ -589,7 +589,7 @@ def assert_shape(x, expected_shape, msg="Unexpected shape."):
     tests = []
     for i in range(x.ndim):
         if expected_shape[i] is not None:
-            tests.append(at.eq(shape[i], expected_shape[i]))
+            tests.append(pt.eq(shape[i], expected_shape[i]))
     if tests:
         return Assert(msg)(x, *tests)
     else:
@@ -1800,11 +1800,11 @@ def bilinear_kernel_1D(ratio, normalize=True):
         by the indicated ratio using bilinear interpolation in one dimension.
 
     """
-    half_kern = at.arange(1, ratio + 1, dtype=config.floatX)
-    kern = at.concatenate([half_kern, half_kern[-2::-1]])
+    half_kern = pt.arange(1, ratio + 1, dtype=config.floatX)
+    kern = pt.concatenate([half_kern, half_kern[-2::-1]])
 
     if normalize:
-        kern /= at.cast(ratio, config.floatX)
+        kern /= pt.cast(ratio, config.floatX)
     return kern
 
 
@@ -1863,15 +1863,15 @@ def frac_bilinear_upsampling(input, frac_ratio):
             subsample = (frac_ratio[1], frac_ratio[1])
 
     # duplicate borders of the input
-    concat_mat = at.concatenate(
+    concat_mat = pt.concatenate(
         (up_input[:, :, :1, :], up_input, up_input[:, :, -1:, :]), axis=2
     )
-    concat_mat = at.concatenate(
+    concat_mat = pt.concatenate(
         (concat_mat[:, :, :, :1], concat_mat, concat_mat[:, :, :, -1:]), axis=3
     )
 
     # add padding for the pyramidal kernel
-    double_pad = (2 * at.as_tensor([row, col]) - 1) * np.array(ratio) + 1
+    double_pad = (2 * pt.as_tensor([row, col]) - 1) * np.array(ratio) + 1
     pad = double_pad // 2
 
     # build pyramidal kernel
@@ -1880,25 +1880,25 @@ def frac_bilinear_upsampling(input, frac_ratio):
     )
 
     # add corresponding padding
-    pad_kern = at.concatenate(
+    pad_kern = pt.concatenate(
         (
-            at.zeros(
+            pt.zeros(
                 tuple(kern.shape[:2]) + (pad[0], kern.shape[-1]),
                 dtype=config.floatX,
             ),
             kern,
-            at.zeros(
+            pt.zeros(
                 tuple(kern.shape[:2]) + (double_pad[0] - pad[0], kern.shape[-1]),
                 dtype=config.floatX,
             ),
         ),
         axis=2,
     )
-    pad_kern = at.concatenate(
+    pad_kern = pt.concatenate(
         (
-            at.zeros(tuple(pad_kern.shape[:3]) + (pad[1],), dtype=config.floatX),
+            pt.zeros(tuple(pad_kern.shape[:3]) + (pad[1],), dtype=config.floatX),
             pad_kern,
-            at.zeros(
+            pt.zeros(
                 tuple(pad_kern.shape[:3]) + (double_pad[1] - pad[1],),
                 dtype=config.floatX,
             ),
@@ -1992,11 +1992,11 @@ def bilinear_upsampling(
 
     # concatenating the first and last row and column
     # first and last row
-    concat_mat = at.concatenate(
+    concat_mat = pt.concatenate(
         (up_input[:, :, :1, :], up_input, up_input[:, :, -1:, :]), axis=2
     )
     # first and last col
-    concat_mat = at.concatenate(
+    concat_mat = pt.concatenate(
         (concat_mat[:, :, :, :1], concat_mat, concat_mat[:, :, :, -1:]), axis=3
     )
     concat_col = col + 2

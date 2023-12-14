@@ -15,15 +15,15 @@ BOOLEAN_MASK_ERROR = """JAX does not support resizing arrays with boolean
 masks. In some cases, however, it is possible to re-express your model
 in a form that JAX can compile:
 
->>> import pytensor.tensor as at
->>> x_at = at.vector('x')
->>> y_at = x_at[x_at > 0].sum()
+>>> import pytensor.tensor as pt
+>>> x_pt = pt.vector('x')
+>>> y_pt = x_pt[x_pt > 0].sum()
 
 can be re-expressed as:
 
->>> import pytensor.tensor as at
->>> x_at = at.vector('x')
->>> y_at = at.where(x_at > 0, x_at, 0).sum()
+>>> import pytensor.tensor as pt
+>>> x_pt = pt.vector('x')
+>>> y_pt = pt.where(x_pt > 0, x_pt, 0).sum()
 """
 
 DYNAMIC_SLICE_LENGTH_ERROR = """JAX does not support slicing arrays with a dynamic

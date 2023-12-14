@@ -9,10 +9,10 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import get_test_value
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.link.jax import JAXLinker
-from pytensor.tensor import blas as at_blas
-from pytensor.tensor import nlinalg as at_nlinalg
+from pytensor.tensor import blas as pt_blas
+from pytensor.tensor import nlinalg as pt_nlinalg
 from pytensor.tensor.math import MaxAndArgmax
-from pytensor.tensor.math import max as at_max
+from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import maximum
 from pytensor.tensor.type import dvector, matrix, scalar, tensor3, vector
 from tests.link.jax.test_basic import compare_jax_and_py
@@ -31,7 +31,7 @@ def test_jax_BatchedDot():
     b.tag.test_value = (
         np.linspace(1, -1, 10 * 3 * 2).astype(config.floatX).reshape((10, 3, 2))
     )
-    out = at_blas.BatchedDot()(a, b)
+    out = pt_blas.BatchedDot()(a, b)
     fgraph = FunctionGraph([a, b], [out])
     compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
 
@@ -43,15 +43,6 @@ def test_jax_BatchedDot():
     with pytest.raises(TypeError):
         pytensor_jax_fn(*inputs)
 
-    # matrix . matrix
-    a = matrix("a")
-    a.tag.test_value = np.linspace(-1, 1, 5 * 3).astype(config.floatX).reshape((5, 3))
-    b = matrix("b")
-    b.tag.test_value = np.linspace(1, -1, 5 * 3).astype(config.floatX).reshape((5, 3))
-    out = at_blas.BatchedDot()(a, b)
-    fgraph = FunctionGraph([a, b], [out])
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
-
 
 def test_jax_basic_multiout():
     rng = np.random.default_rng(213234)
@@ -61,7 +52,7 @@ def test_jax_basic_multiout():
 
     x = matrix("x")
 
-    outs = at_nlinalg.eig(x)
+    outs = pt_nlinalg.eig(x)
     out_fg = FunctionGraph([x], outs)
 
     def assert_fn(x, y):
@@ -69,23 +60,23 @@ def test_jax_basic_multiout():
 
     compare_jax_and_py(out_fg, [X.astype(config.floatX)], assert_fn=assert_fn)
 
-    outs = at_nlinalg.eigh(x)
+    outs = pt_nlinalg.eigh(x)
     out_fg = FunctionGraph([x], outs)
     compare_jax_and_py(out_fg, [X.astype(config.floatX)], assert_fn=assert_fn)
 
-    outs = at_nlinalg.qr(x, mode="full")
+    outs = pt_nlinalg.qr(x, mode="full")
     out_fg = FunctionGraph([x], outs)
     compare_jax_and_py(out_fg, [X.astype(config.floatX)], assert_fn=assert_fn)
 
-    outs = at_nlinalg.qr(x, mode="reduced")
+    outs = pt_nlinalg.qr(x, mode="reduced")
     out_fg = FunctionGraph([x], outs)
     compare_jax_and_py(out_fg, [X.astype(config.floatX)], assert_fn=assert_fn)
 
-    outs = at_nlinalg.svd(x)
+    outs = pt_nlinalg.svd(x)
     out_fg = FunctionGraph([x], outs)
     compare_jax_and_py(out_fg, [X.astype(config.floatX)], assert_fn=assert_fn)
 
-    outs = at_nlinalg.slogdet(x)
+    outs = pt_nlinalg.slogdet(x)
     out_fg = FunctionGraph([x], outs)
     compare_jax_and_py(out_fg, [X.astype(config.floatX)], assert_fn=assert_fn)
 
@@ -131,14 +122,14 @@ def test_tensor_basics():
     fgraph = FunctionGraph([y, x], [out])
     compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
 
-    out = at_max(y)
+    out = pt_max(y)
     fgraph = FunctionGraph([y], [out])
     compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
 
 
 def test_pinv():
     x = matrix("x")
-    x_inv = at_nlinalg.pinv(x)
+    x_inv = pt_nlinalg.pinv(x)
 
     fgraph = FunctionGraph([x], [x_inv])
     x_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
@@ -150,7 +141,7 @@ def test_pinv_hermitian():
     A_h_test = np.c_[[3, 3 + 2j], [3 - 2j, 2]]
     A_not_h_test = A_h_test + 0 + 1j
 
-    A_inv = at_nlinalg.pinv(A, hermitian=False)
+    A_inv = pt_nlinalg.pinv(A, hermitian=False)
     jax_fn = function([A], A_inv, mode="JAX")
 
     assert np.allclose(jax_fn(A_h_test), np.linalg.pinv(A_h_test, hermitian=False))
@@ -162,7 +153,7 @@ def test_pinv_hermitian():
         jax_fn(A_not_h_test), np.linalg.pinv(A_not_h_test, hermitian=True)
     )
 
-    A_inv = at_nlinalg.pinv(A, hermitian=True)
+    A_inv = pt_nlinalg.pinv(A, hermitian=True)
     jax_fn = function([A], A_inv, mode="JAX")
 
     assert np.allclose(jax_fn(A_h_test), np.linalg.pinv(A_h_test, hermitian=False))

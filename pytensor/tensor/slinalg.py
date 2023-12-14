@@ -11,8 +11,8 @@ import pytensor.tensor as pt
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import as_tensor_variable
-from pytensor.tensor import basic as at
-from pytensor.tensor import math as atm
+from pytensor.tensor import basic as ptb
+from pytensor.tensor import math as ptm
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.nlinalg import matrix_dot
 from pytensor.tensor.shape import reshape
@@ -96,9 +96,9 @@ class Cholesky(Op):
         # Replace the cholesky decomposition with 1 if there are nans
         # or solve_upper_triangular will throw a ValueError.
         if self.on_error == "nan":
-            ok = ~atm.any(atm.isnan(chol_x))
-            chol_x = at.switch(ok, chol_x, 1)
-            dz = at.switch(ok, dz, 1)
+            ok = ~ptm.any(ptm.isnan(chol_x))
+            chol_x = ptb.switch(ok, chol_x, 1)
+            dz = ptb.switch(ok, dz, 1)
 
         # deal with upper triangular by converting to lower triangular
         if not self.lower:
@@ -107,7 +107,7 @@ class Cholesky(Op):
 
         def tril_and_halve_diagonal(mtx):
             """Extracts lower triangle of square matrix and halves diagonal."""
-            return at.tril(mtx) - at.diag(at.diagonal(mtx) / 2.0)
+            return ptb.tril(mtx) - ptb.diag(ptb.diagonal(mtx) / 2.0)
 
         def conjugate_solve_triangular(outer, inner):
             """Computes L^{-T} P L^{-1} for lower-triangular L."""
@@ -119,12 +119,12 @@ class Cholesky(Op):
         )
 
         if self.lower:
-            grad = at.tril(s + s.T) - at.diag(at.diagonal(s))
+            grad = ptb.tril(s + s.T) - ptb.diag(ptb.diagonal(s))
         else:
-            grad = at.triu(s + s.T) - at.diag(at.diagonal(s))
+            grad = ptb.triu(s + s.T) - ptb.diag(ptb.diagonal(s))
 
         if self.on_error == "nan":
-            return [at.switch(ok, grad, np.nan)]
+            return [ptb.switch(ok, grad, np.nan)]
         else:
             return [grad]
 
@@ -214,7 +214,7 @@ class SolveBase(Op):
         )
         b_bar = trans_solve_op(A.T, c_bar)
         # force outer product if vector second input
-        A_bar = -atm.outer(b_bar, c) if c.ndim == 1 else -b_bar.dot(c.T)
+        A_bar = -ptm.outer(b_bar, c) if c.ndim == 1 else -b_bar.dot(c.T)
 
         return [A_bar, b_bar]
 
@@ -303,9 +303,9 @@ class SolveTriangular(SolveBase):
         res = super().L_op(inputs, outputs, output_gradients)
 
         if self.lower:
-            res[0] = at.tril(res[0])
+            res[0] = ptb.tril(res[0])
         else:
-            res[0] = at.triu(res[0])
+            res[0] = ptb.triu(res[0])
 
         return res
 
@@ -582,8 +582,8 @@ def kron(a, b):
             "kron: inputs dimensions must sum to 3 or more. "
             f"You passed {int(a.ndim)} and {int(b.ndim)}."
         )
-    o = atm.outer(a, b)
-    o = o.reshape(at.concatenate((a.shape, b.shape)), ndim=a.ndim + b.ndim)
+    o = ptm.outer(a, b)
+    o = o.reshape(ptb.concatenate((a.shape, b.shape)), ndim=a.ndim + b.ndim)
     shf = o.dimshuffle(0, 2, 1, *list(range(3, o.ndim)))
     if shf.ndim == 3:
         shf = o.dimshuffle(1, 0, 2)

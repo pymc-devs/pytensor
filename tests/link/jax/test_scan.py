@@ -3,7 +3,7 @@ import re
 import numpy as np
 import pytest
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor import function, shared
 from pytensor.compile import get_mode
 from pytensor.configdefaults import config
@@ -22,7 +22,7 @@ jax = pytest.importorskip("jax")
 
 @pytest.mark.parametrize("view", [None, (-1,), slice(-2, None, None)])
 def test_scan_sit_sot(view):
-    x0 = at.scalar("x0", dtype="float64")
+    x0 = pt.scalar("x0", dtype="float64")
     xs, _ = scan(
         lambda xtm1: xtm1 + 1,
         outputs_info=[x0],
@@ -37,7 +37,7 @@ def test_scan_sit_sot(view):
 
 @pytest.mark.parametrize("view", [None, (-1,), slice(-4, -1, None)])
 def test_scan_mit_sot(view):
-    x0 = at.vector("x0", dtype="float64", shape=(3,))
+    x0 = pt.vector("x0", dtype="float64", shape=(3,))
     xs, _ = scan(
         lambda xtm3, xtm1: xtm3 + xtm1 + 1,
         outputs_info=[{"initial": x0, "taps": [-3, -1]}],
@@ -53,8 +53,8 @@ def test_scan_mit_sot(view):
 @pytest.mark.parametrize("view_x", [None, (-1,), slice(-4, -1, None)])
 @pytest.mark.parametrize("view_y", [None, (-1,), slice(-4, -1, None)])
 def test_scan_multiple_mit_sot(view_x, view_y):
-    x0 = at.vector("x0", dtype="float64", shape=(3,))
-    y0 = at.vector("y0", dtype="float64", shape=(4,))
+    x0 = pt.vector("x0", dtype="float64", shape=(3,))
+    y0 = pt.vector("y0", dtype="float64", shape=(4,))
 
     def step(xtm3, xtm1, ytm4, ytm2):
         return xtm3 + ytm4 + 1, xtm1 + ytm2 + 2
@@ -81,10 +81,10 @@ def test_scan_multiple_mit_sot(view_x, view_y):
 def test_scan_nit_sot(view):
     rng = np.random.default_rng(seed=49)
 
-    xs = at.vector("x0", dtype="float64", shape=(10,))
+    xs = pt.vector("x0", dtype="float64", shape=(10,))
 
     ys, _ = scan(
-        lambda x: at.exp(x),
+        lambda x: pt.exp(x),
         outputs_info=[None],
         sequences=[xs],
     )
@@ -105,13 +105,13 @@ def test_scan_nit_sot(view):
 
 @pytest.mark.xfail(raises=NotImplementedError)
 def test_scan_mit_mot():
-    xs = at.vector("xs", shape=(10,))
+    xs = pt.vector("xs", shape=(10,))
     ys, _ = scan(
         lambda xtm2, xtm1: (xtm2 + xtm1),
         outputs_info=[{"initial": xs, "taps": [-2, -1]}],
         n_steps=10,
     )
-    grads_wrt_xs = at.grad(ys.sum(), wrt=xs)
+    grads_wrt_xs = pt.grad(ys.sum(), wrt=xs)
     fg = FunctionGraph([xs], [grads_wrt_xs])
     compare_jax_and_py(fg, [np.arange(10)])
 
@@ -188,7 +188,7 @@ def test_scan_rng_update():
 def test_scan_while():
     xs, _ = scan(
         lambda x: (x + 1, until(x < 10)),
-        outputs_info=[at.zeros(())],
+        outputs_info=[pt.zeros(())],
         n_steps=100,
     )
 
@@ -287,7 +287,7 @@ def test_scan_SEIR():
 
 
 def test_scan_mitsot_with_nonseq():
-    a_at = scalar("a")
+    a_pt = scalar("a")
 
     def input_step_fn(y_tm1, y_tm3, a):
         y_tm1.name = "y_tm1"
@@ -296,24 +296,24 @@ def test_scan_mitsot_with_nonseq():
         res.name = "y_t"
         return res
 
-    y_scan_at, _ = scan(
+    y_scan_pt, _ = scan(
         fn=input_step_fn,
         outputs_info=[
             {
-                "initial": at.as_tensor_variable(
+                "initial": pt.as_tensor_variable(
                     np.r_[-1.0, 1.3, 0.0].astype(config.floatX)
                 ),
                 "taps": [-1, -3],
             },
         ],
-        non_sequences=[a_at],
+        non_sequences=[a_pt],
         n_steps=10,
         name="y_scan",
     )
-    y_scan_at.name = "y"
-    y_scan_at.owner.inputs[0].name = "y_all"
+    y_scan_pt.name = "y"
+    y_scan_pt.owner.inputs[0].name = "y_all"
 
-    out_fg = FunctionGraph([a_at], [y_scan_at])
+    out_fg = FunctionGraph([a_pt], [y_scan_pt])
 
     test_input_vals = [np.array(10.0).astype(config.floatX)]
     compare_jax_and_py(out_fg, test_input_vals)
@@ -353,8 +353,8 @@ def test_nd_scan_sit_sot_with_seq():
     n_steps = 3
     k = 3
 
-    x = at.matrix("x0", shape=(n_steps, k))
-    A = at.matrix("A", shape=(k, k))
+    x = pt.matrix("x0", shape=(n_steps, k))
+    A = pt.matrix("A", shape=(k, k))
 
     # Must specify mode = JAX for the inner func to avoid a GEMM Op in the JAX graph
     xs, _ = scan(
@@ -374,9 +374,9 @@ def test_nd_scan_sit_sot_with_seq():
 
 
 def test_nd_scan_mit_sot():
-    x0 = at.matrix("x0", shape=(3, 3))
-    A = at.matrix("A", shape=(3, 3))
-    B = at.matrix("B", shape=(3, 3))
+    x0 = pt.matrix("x0", shape=(3, 3))
+    A = pt.matrix("A", shape=(3, 3))
+    B = pt.matrix("B", shape=(3, 3))
 
     # Must specify mode = JAX for the inner func to avoid a GEMM Op in the JAX graph
     xs, _ = scan(
@@ -397,8 +397,8 @@ def test_nd_scan_mit_sot():
 
 
 def test_nd_scan_sit_sot_with_carry():
-    x0 = at.vector("x0", shape=(3,))
-    A = at.matrix("A", shape=(3, 3))
+    x0 = pt.vector("x0", shape=(3,))
+    A = pt.matrix("A", shape=(3, 3))
 
     def step(x, A):
         return A @ x, x.sum()

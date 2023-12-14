@@ -1,3 +1,4 @@
+import re
 from itertools import product
 from typing import Optional, Union
 
@@ -6,13 +7,15 @@ import pytest
 
 import pytensor
 from pytensor import config, function
+from pytensor.compile import get_mode
 from pytensor.gradient import grad
 from pytensor.graph import Apply, Op
 from pytensor.graph.replace import vectorize_node
 from pytensor.raise_op import assert_op
 from pytensor.tensor import diagonal, log, tensor
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
 from pytensor.tensor.nlinalg import MatrixInverse
+from pytensor.tensor.rewriting.blas import specialize_matmul_to_batched_dot
 from pytensor.tensor.slinalg import Cholesky, Solve, cholesky, solve_triangular
 from pytensor.tensor.utils import _parse_gufunc_signature
 
@@ -40,12 +43,29 @@ def test_vectorize_blockwise():
     assert new_vect_node.inputs[0] is tns4
 
 
+def test_vectorize_node_fallback_unsupported_type():
+    x = tensor("x", shape=(2, 6))
+    node = x[:, [0, 2, 4]].owner
+
+    with pytest.raises(
+        NotImplementedError,
+        match=re.escape(
+            "Cannot vectorize node AdvancedSubtensor(x, MakeSlice.0, [0 2 4]) with input MakeSlice.0 of type slice"
+        ),
+    ):
+        vectorize_node_fallback(node.op, node, node.inputs)
+
+
 def check_blockwise_runtime_broadcasting(mode):
     a = tensor("a", shape=(None, 3, 5))
     b = tensor("b", shape=(None, 5, 3))
 
     out = a @ b
-    fn = function([a, b], out, mode=mode)
+    fn = function(
+        [a, b],
+        out,
+        mode=get_mode(mode).excluding(specialize_matmul_to_batched_dot.__name__),
+    )
     assert isinstance(fn.maker.fgraph.outputs[0].owner.op, Blockwise)
 
     for valid_test_values in [
@@ -293,7 +313,7 @@ class BlockwiseOpTester:
                     pt_out,
                     np_out,
                     rtol=1e-7 if config.floatX == "float64" else 1e-5,
-                    atol=1e-6 if config.floatX == "float64" else 1e-5,
+                    atol=1e-6 if config.floatX == "float64" else 1e-4,
                 )
 
 

@@ -6,7 +6,7 @@ from scipy.sparse.csr import csr_matrix
 
 import pytensor
 import pytensor.sparse as sparse
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.sparse.type import SparseTensorType
 from pytensor.tensor.type import DenseTensorType
 
@@ -62,7 +62,7 @@ class TestSparseVariable:
             ("nonzero", DenseTensorType, ExitStack(), None),
             ("nonzero_values", DenseTensorType, None, None),
             ("argsort", DenseTensorType, ExitStack(), None),
-            ("conj", SparseTensorType, ExitStack(), at.cmatrix("x")),
+            ("conj", SparseTensorType, ExitStack(), pt.cmatrix("x")),
             ("round", DenseTensorType, None, None),
             ("trace", DenseTensorType, None, None),
             ("zeros_like", SparseTensorType, ExitStack(), None),
@@ -76,7 +76,7 @@ class TestSparseVariable:
     )
     def test_unary(self, method, exp_type, cm, x):
         if x is None:
-            x = at.dmatrix("x")
+            x = pt.dmatrix("x")
 
         x = sparse.csr_from_dense(x)
 
@@ -134,8 +134,8 @@ class TestSparseVariable:
         ],
     )
     def test_binary(self, method, exp_type):
-        x = at.lmatrix("x")
-        y = at.lmatrix("y")
+        x = pt.lmatrix("x")
+        y = pt.lmatrix("y")
         x = sparse.csr_from_dense(x)
         y = sparse.csr_from_dense(y)
 
@@ -172,7 +172,7 @@ class TestSparseVariable:
         assert all(isinstance(out, exp_res_type) for out in res_outs)
 
     def test_reshape(self):
-        x = at.dmatrix("x")
+        x = pt.dmatrix("x")
         x = sparse.csr_from_dense(x)
 
         with pytest.warns(UserWarning, match=".*converted to dense.*"):
@@ -185,7 +185,7 @@ class TestSparseVariable:
         assert isinstance(exp_res, np.ndarray)
 
     def test_dimshuffle(self):
-        x = at.dmatrix("x")
+        x = pt.dmatrix("x")
         x = sparse.csr_from_dense(x)
 
         with pytest.warns(UserWarning, match=".*converted to dense.*"):
@@ -198,7 +198,7 @@ class TestSparseVariable:
         assert isinstance(exp_res, np.ndarray)
 
     def test_getitem(self):
-        x = at.dmatrix("x")
+        x = pt.dmatrix("x")
         x = sparse.csr_from_dense(x)
 
         z = x[:, :2]
@@ -209,8 +209,8 @@ class TestSparseVariable:
         assert isinstance(exp_res, csr_matrix)
 
     def test_dot(self):
-        x = at.lmatrix("x")
-        y = at.lmatrix("y")
+        x = pt.lmatrix("x")
+        y = pt.lmatrix("y")
         x = sparse.csr_from_dense(x)
         y = sparse.csr_from_dense(y)
 
@@ -225,7 +225,7 @@ class TestSparseVariable:
         assert isinstance(exp_res, csr_matrix)
 
     def test_repeat(self):
-        x = at.dmatrix("x")
+        x = pt.dmatrix("x")
         x = sparse.csr_from_dense(x)
 
         with pytest.warns(UserWarning, match=".*converted to dense.*"):

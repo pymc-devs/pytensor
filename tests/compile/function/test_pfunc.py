@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.compile import UnusedInputError, get_mode
 from pytensor.compile.function import function, pfunc
 from pytensor.compile.function.pfunc import rebuild_collect_shared
@@ -10,7 +10,7 @@ from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.graph.utils import MissingInputError
 from pytensor.misc.safe_asarray import _asarray
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.type import (
     bscalar,
     bvector,
@@ -110,7 +110,7 @@ class TestPfunc:
         with pytest.raises(
             TypeError, match=r"^Cannot use a shared variable \(w\) as explicit input"
         ):
-            pfunc([w], at_sum(w * w))
+            pfunc([w], pt_sum(w * w))
 
     def test_default_container(self):
         # Ensure it is possible to (implicitly) use a shared variable in a
@@ -119,7 +119,7 @@ class TestPfunc:
         rng = np.random.default_rng(1827)
         w_init = rng.random(5)
         w = shared(w_init.copy(), "w")
-        reg = at_sum(w * w)
+        reg = pt_sum(w * w)
         f = pfunc([], reg)
 
         assert f() == np.sum(w_init * w_init)
@@ -826,7 +826,7 @@ class TestAliasingRules:
                 In(m1, mutable=True),
                 In(m2, mutable=True),
             ],
-            at.dot((x * 2), m1) + at.dot((y * 3), m2),
+            pt.dot((x * 2), m1) + pt.dot((y * 3), m2),
         )
         # Test 1. If the same variable is given twice
 
@@ -889,7 +889,7 @@ class TestAliasingRules:
                 In(m2, mutable=True),
                 In(m3, mutable=True),
             ],
-            (at.dot((x * 2), m1) + at.dot((y * 3), m2) + at.dot((z * 4), m3)),
+            (pt.dot((x * 2), m1) + pt.dot((y * 3), m2) + pt.dot((z * 4), m3)),
         )
 
         # Compute bogus values

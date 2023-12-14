@@ -1,11 +1,11 @@
 import numpy as np
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor import config, function, grad, shared
 from pytensor.compile.mode import FAST_RUN
 from pytensor.scan.views import foldl, foldr
-from pytensor.scan.views import map as at_map
-from pytensor.scan.views import reduce as at_reduce
+from pytensor.scan.views import map as pt_map
+from pytensor.scan.views import reduce as pt_reduce
 from pytensor.tensor.type import scalar, vector
 from tests import unittest_tools as utt
 from tests.scan.test_basic import clone_optimized_graph, grab_scan_node
@@ -14,7 +14,7 @@ from tests.scan.test_basic import clone_optimized_graph, grab_scan_node
 def test_reduce():
     v = vector("v")
     s = scalar("s")
-    result, updates = at_reduce(lambda x, y: x + y, v, s)
+    result, updates = pt_reduce(lambda x, y: x + y, v, s)
 
     f = function([v, s], result, updates=updates, allow_input_downcast=True)
     rng = np.random.default_rng(utt.fetch_seed())
@@ -24,7 +24,7 @@ def test_reduce():
 
 def test_map():
     v = vector("v")
-    abs_expr, abs_updates = at_map(
+    abs_expr, abs_updates = pt_map(
         lambda x: abs(x), v, [], truncate_gradient=-1, go_backwards=False
     )
 
@@ -39,10 +39,10 @@ def test_map():
 
 def test_reduce_memory_consumption():
     x = shared(np.asarray(np.random.uniform(size=(10,)), dtype=config.floatX))
-    o, _ = at_reduce(
+    o, _ = pt_reduce(
         lambda v, acc: acc + v,
         x,
-        at.constant(np.asarray(0.0, dtype=config.floatX)),
+        pt.constant(np.asarray(0.0, dtype=config.floatX)),
     )
     mode = FAST_RUN
     mode = mode.excluding("inplace")
@@ -74,7 +74,7 @@ def test_foldl_memory_consumption():
     o, _ = foldl(
         lambda v, acc: acc + v,
         x,
-        at.constant(np.asarray(0.0, dtype=config.floatX)),
+        pt.constant(np.asarray(0.0, dtype=config.floatX)),
     )
 
     mode = FAST_RUN
@@ -107,7 +107,7 @@ def test_foldr_memory_consumption():
     o, _ = foldr(
         lambda v, acc: acc + v,
         x,
-        at.constant(np.asarray(0.0, dtype=config.floatX)),
+        pt.constant(np.asarray(0.0, dtype=config.floatX)),
     )
 
     mode = FAST_RUN

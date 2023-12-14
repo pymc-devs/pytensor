@@ -4,7 +4,7 @@ import pytest
 import pytensor
 from pytensor.gradient import GradientError
 from pytensor.tensor.basic import cast
-from pytensor.tensor.math import complex as at_complex
+from pytensor.tensor.math import complex as pt_complex
 from pytensor.tensor.math import complex_from_polar, imag, real
 from pytensor.tensor.type import cvector, dvector, fmatrix, fvector, imatrix, zvector
 from tests import unittest_tools as utt
@@ -40,7 +40,7 @@ class TestRealImag:
     def test_complex(self):
         rng = np.random.default_rng(2333)
         m = fmatrix()
-        c = at_complex(m[0], m[1])
+        c = pt_complex(m[0], m[1])
         assert c.type == cvector
         r, i = [real(c), imag(c)]
         assert r.type == fvector
@@ -55,7 +55,7 @@ class TestRealImag:
     @pytest.mark.skip(reason="Complex grads not enabled, see #178")
     def test_complex_grads(self):
         def f(m):
-            c = at_complex(m[0], m[1])
+            c = pt_complex(m[0], m[1])
             return 0.5 * real(c) + 0.9 * imag(c)
 
         rng = np.random.default_rng(9333)
@@ -65,7 +65,7 @@ class TestRealImag:
     @pytest.mark.skip(reason="Complex grads not enabled, see #178")
     def test_mul_mixed0(self):
         def f(a):
-            ac = at_complex(a[0], a[1])
+            ac = pt_complex(a[0], a[1])
             return abs((ac) ** 2).sum()
 
         rng = np.random.default_rng(9333)
@@ -80,7 +80,7 @@ class TestRealImag:
     @pytest.mark.skip(reason="Complex grads not enabled, see #178")
     def test_mul_mixed1(self):
         def f(a):
-            ac = at_complex(a[0], a[1])
+            ac = pt_complex(a[0], a[1])
             return abs(ac).sum()
 
         rng = np.random.default_rng(9333)
@@ -95,7 +95,7 @@ class TestRealImag:
     @pytest.mark.skip(reason="Complex grads not enabled, see #178")
     def test_mul_mixed(self):
         def f(a, b):
-            ac = at_complex(a[0], a[1])
+            ac = pt_complex(a[0], a[1])
             return abs((ac * b) ** 2).sum()
 
         rng = np.random.default_rng(9333)
@@ -121,7 +121,7 @@ class TestRealImag:
     @pytest.mark.skip(reason="Complex grads not enabled, see #178")
     def test_abs_grad(self):
         def f(m):
-            c = at_complex(m[0], m[1])
+            c = pt_complex(m[0], m[1])
             return 0.5 * abs(c)
 
         rng = np.random.default_rng(9333)

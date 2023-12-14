@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 import pytensor
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.compile.function import function
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
@@ -360,7 +360,7 @@ def test_cache_race_condition():
             # Some of the caching issues arise during constant folding within the
             # optimization passes, so we need these config changes to prevent the
             # exceptions from being caught
-            a = at.vector()
+            a = pt.vector()
             f = pytensor.function([a], factor * a)
             return f(np.array([1], dtype=config.floatX))
 

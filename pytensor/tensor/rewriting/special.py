@@ -1,7 +1,7 @@
 from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Sum, exp, log
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.math import true_div
 from pytensor.tensor.rewriting.basic import register_stabilize
 from pytensor.tensor.rewriting.math import local_mul_canonizer
@@ -102,7 +102,7 @@ def local_logsoftmax_grad(fgraph, node):
     ):
         # get parameters from unoptimized op
         grads, sm = node.inputs[0].owner.inputs
-        ret = grads - at_sum(grads, axis=sm.owner.op.axis, keepdims=True) * sm
+        ret = grads - pt_sum(grads, axis=sm.owner.op.axis, keepdims=True) * sm
         ret.tag.values_eq_approx = values_eq_approx_remove_nan
         copy_stack_trace(node.outputs[0], ret)
         return [ret]

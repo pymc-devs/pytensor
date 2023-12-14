@@ -16,7 +16,7 @@ import scipy.special
 import scipy.stats
 
 from pytensor import function, grad
-from pytensor import tensor as at
+from pytensor import tensor as pt
 from pytensor.compile.mode import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.tensor import gammaincc, inplace, vector
@@ -75,12 +75,13 @@ expected_jv = scipy.special.jv
 expected_i0 = scipy.special.i0
 expected_i1 = scipy.special.i1
 expected_iv = scipy.special.iv
+expected_ive = scipy.special.ive
 expected_erfcx = scipy.special.erfcx
 expected_sigmoid = scipy.special.expit
 expected_hyp2f1 = scipy.special.hyp2f1
 
 TestErfBroadcast = makeBroadcastTester(
-    op=at.erf,
+    op=pt.erf,
     expected=expected_erf,
     good=_good_broadcast_unary_normal,
     grad=_grad_broadcast_unary_normal,
@@ -97,7 +98,7 @@ TestErfInplaceBroadcast = makeBroadcastTester(
 )
 
 TestErfcBroadcast = makeBroadcastTester(
-    op=at.erfc,
+    op=pt.erfc,
     expected=expected_erfc,
     good=_good_broadcast_unary_normal_float_no_complex,
     grad=_grad_broadcast_unary_normal,
@@ -114,7 +115,7 @@ TestErfcInplaceBroadcast = makeBroadcastTester(
 )
 
 TestErfcxBroadcast = makeBroadcastTester(
-    op=at.erfcx,
+    op=pt.erfcx,
     expected=expected_erfcx,
     good=_good_broadcast_unary_normal_float_no_complex_small_neg_range,
     grad=_grad_broadcast_unary_normal_small_neg_range,
@@ -131,7 +132,7 @@ TestErfcxInplaceBroadcast = makeBroadcastTester(
 )
 
 TestErfinvBroadcast = makeBroadcastTester(
-    op=at.erfinv,
+    op=pt.erfinv,
     expected=expected_erfinv,
     good={
         "normal": [random_ranged(-0.9, 0.9, (2, 3))],
@@ -143,7 +144,7 @@ TestErfinvBroadcast = makeBroadcastTester(
 )
 
 TestErfcinvBroadcast = makeBroadcastTester(
-    op=at.erfcinv,
+    op=pt.erfcinv,
     expected=expected_erfcinv,
     good={
         "normal": [random_ranged(0.001, 1.9, (2, 3))],
@@ -187,7 +188,7 @@ _grad_broadcast_binary_owenst = dict(
 )
 
 TestOwensTBroadcast = makeBroadcastTester(
-    op=at.owens_t,
+    op=pt.owens_t,
     expected=expected_owenst,
     good=_good_broadcast_binary_owenst,
     grad=_grad_broadcast_binary_owenst,
@@ -218,7 +219,7 @@ _grad_broadcast_unary_gammaln = dict(
 )
 
 TestGammaBroadcast = makeBroadcastTester(
-    op=at.gamma,
+    op=pt.gamma,
     expected=expected_gamma,
     good=_good_broadcast_unary_gammaln,
     grad=_grad_broadcast_unary_gammaln,
@@ -235,7 +236,7 @@ TestGammaInplaceBroadcast = makeBroadcastTester(
 )
 
 TestGammalnBroadcast = makeBroadcastTester(
-    op=at.gammaln,
+    op=pt.gammaln,
     expected=expected_gammaln,
     good=_good_broadcast_unary_gammaln,
     grad=_grad_broadcast_unary_gammaln,
@@ -261,7 +262,7 @@ _good_broadcast_unary_psi = dict(
 )
 
 TestPsiBroadcast = makeBroadcastTester(
-    op=at.psi,
+    op=pt.psi,
     expected=expected_psi,
     good=_good_broadcast_unary_psi,
     eps=2e-10,
@@ -279,7 +280,7 @@ TestPsiInplaceBroadcast = makeBroadcastTester(
 _good_broadcast_unary_tri_gamma = _good_broadcast_unary_psi
 
 TestTriGammaBroadcast = makeBroadcastTester(
-    op=at.tri_gamma,
+    op=pt.tri_gamma,
     expected=expected_tri_gamma,
     good=_good_broadcast_unary_psi,
     eps=2e-8,
@@ -295,7 +296,7 @@ TestTriGammaInplaceBroadcast = makeBroadcastTester(
 )
 
 TestChi2SFBroadcast = makeBroadcastTester(
-    op=at.chi2sf,
+    op=pt.chi2sf,
     expected=expected_chi2sf,
     good=_good_broadcast_unary_chi2sf,
     eps=2e-10,
@@ -347,7 +348,7 @@ _good_broadcast_binary_gamma_grad = dict(
 )
 
 TestGammaIncBroadcast = makeBroadcastTester(
-    op=at.gammainc,
+    op=pt.gammainc,
     expected=expected_gammainc,
     good=_good_broadcast_binary_gamma,
     grad=_good_broadcast_binary_gamma_grad,
@@ -365,7 +366,7 @@ TestGammaIncInplaceBroadcast = makeBroadcastTester(
 )
 
 TestGammaInccBroadcast = makeBroadcastTester(
-    op=at.gammaincc,
+    op=pt.gammaincc,
     expected=expected_gammaincc,
     good=_good_broadcast_binary_gamma,
     grad=_good_broadcast_binary_gamma_grad,
@@ -386,9 +387,9 @@ TestGammaInccInplaceBroadcast = makeBroadcastTester(
 def test_gammainc_ddk_tabulated_values():
     # This test replicates part of the old STAN test:
     # https://github.com/stan-dev/math/blob/21333bb70b669a1bd54d444ecbe1258078d33153/test/unit/math/prim/scal/fun/grad_reg_lower_inc_gamma_test.cpp
-    k, x = at.scalars("k", "x")
-    gammainc_out = at.gammainc(k, x)
-    gammaincc_ddk = at.grad(gammainc_out, k)
+    k, x = pt.scalars("k", "x")
+    gammainc_out = pt.gammainc(k, x)
+    gammaincc_ddk = pt.grad(gammainc_out, k)
     f_grad = function([k, x], gammaincc_ddk)
 
     rtol = 1e-5 if config.floatX == "float64" else 1e-2
@@ -450,7 +451,7 @@ def test_gammaincc_ddk_performance(benchmark):
 
 
 TestGammaUBroadcast = makeBroadcastTester(
-    op=at.gammau,
+    op=pt.gammau,
     expected=expected_gammau,
     good=_good_broadcast_binary_gamma,
     eps=2e-8,
@@ -467,7 +468,7 @@ TestGammaUInplaceBroadcast = makeBroadcastTester(
 )
 
 TestGammaLBroadcast = makeBroadcastTester(
-    op=at.gammal,
+    op=pt.gammal,
     expected=expected_gammal,
     good=_good_broadcast_binary_gamma,
     eps=2e-8,
@@ -521,7 +522,7 @@ _grad_broadcast_binary_bessel = dict(
 )
 
 TestJ0Broadcast = makeBroadcastTester(
-    op=at.j0,
+    op=pt.j0,
     expected=expected_j0,
     good=_good_broadcast_unary_bessel,
     grad=_grad_broadcast_unary_bessel,
@@ -539,7 +540,7 @@ TestJ0InplaceBroadcast = makeBroadcastTester(
 )
 
 TestJ1Broadcast = makeBroadcastTester(
-    op=at.j1,
+    op=pt.j1,
     expected=expected_j1,
     good=_good_broadcast_unary_bessel,
     grad=_grad_broadcast_unary_bessel,
@@ -557,7 +558,7 @@ TestJ1InplaceBroadcast = makeBroadcastTester(
 )
 
 TestJvBroadcast = makeBroadcastTester(
-    op=at.jv,
+    op=pt.jv,
     expected=expected_jv,
     good=_good_broadcast_binary_bessel,
     eps=2e-10,
@@ -581,13 +582,13 @@ def test_verify_jv_grad():
     v_val, x_val = _grad_broadcast_binary_bessel["normal"]
 
     def fixed_first_input_jv(x):
-        return at.jv(v_val, x)
+        return pt.jv(v_val, x)
 
     utt.verify_grad(fixed_first_input_jv, [x_val])
 
 
 TestI0Broadcast = makeBroadcastTester(
-    op=at.i0,
+    op=pt.i0,
     expected=expected_i0,
     good=_good_broadcast_unary_bessel,
     grad=_grad_broadcast_unary_bessel,
@@ -605,7 +606,7 @@ TestI0InplaceBroadcast = makeBroadcastTester(
 )
 
 TestI1Broadcast = makeBroadcastTester(
-    op=at.i1,
+    op=pt.i1,
     expected=expected_i1,
     good=_good_broadcast_unary_bessel,
     grad=_grad_broadcast_unary_bessel,
@@ -623,7 +624,7 @@ TestI1InplaceBroadcast = makeBroadcastTester(
 )
 
 TestIvBroadcast = makeBroadcastTester(
-    op=at.iv,
+    op=pt.iv,
     expected=expected_iv,
     good=_good_broadcast_binary_bessel,
     eps=2e-10,
@@ -639,6 +640,23 @@ TestIvInplaceBroadcast = makeBroadcastTester(
     inplace=True,
 )
 
+TestIveBroadcast = makeBroadcastTester(
+    op=pt.ive,
+    expected=expected_ive,
+    good=_good_broadcast_binary_bessel,
+    eps=2e-10,
+    mode=mode_no_scipy,
+)
+
+TestIveInplaceBroadcast = makeBroadcastTester(
+    op=inplace.ive_inplace,
+    expected=expected_ive,
+    good=_good_broadcast_binary_bessel,
+    eps=2e-10,
+    mode=mode_no_scipy,
+    inplace=True,
+)
+
 
 def test_verify_iv_grad():
     # Verify Iv gradient.
@@ -647,13 +665,25 @@ def test_verify_iv_grad():
     v_val, x_val = _grad_broadcast_binary_bessel["normal"]
 
     def fixed_first_input_iv(x):
-        return at.iv(v_val, x)
+        return pt.iv(v_val, x)
 
     utt.verify_grad(fixed_first_input_iv, [x_val])
 
 
+def test_verify_ive_grad():
+    # Verify Ive gradient.
+    # Implemented separately due to need to fix first input for which grad is
+    # not defined.
+    v_val, x_val = _grad_broadcast_binary_bessel["normal"]
+
+    def fixed_first_input_ive(x):
+        return pt.ive(v_val, x)
+
+    utt.verify_grad(fixed_first_input_ive, [x_val])
+
+
 TestSigmoidBroadcast = makeBroadcastTester(
-    op=at.sigmoid,
+    op=pt.sigmoid,
     expected=expected_sigmoid,
     good=_good_broadcast_unary_normal_no_complex,
     eps=1e-8,
@@ -671,7 +701,7 @@ TestSigmoidInplaceBroadcast = makeBroadcastTester(
 
 class TestSigmoid:
     def test_elemwise(self):
-        utt.verify_grad(at.sigmoid, [np.random.random((3, 4))])
+        utt.verify_grad(pt.sigmoid, [np.random.random((3, 4))])
 
 
 _good_broadcast_unary_softplus = dict(
@@ -690,7 +720,7 @@ expected_sofplus = upcast_int8_nfunc(
 )
 
 TestSoftplusBroadcast = makeBroadcastTester(
-    op=at.softplus,
+    op=pt.softplus,
     expected=expected_sofplus,
     good=_good_broadcast_unary_softplus,
     eps=1e-8,
@@ -708,12 +738,12 @@ TestSoftplusInplaceBroadcast = makeBroadcastTester(
 
 class TestSoftplus:
     def test_elemwise(self):
-        utt.verify_grad(at.softplus, [np.random.random((3, 4))])
+        utt.verify_grad(pt.softplus, [np.random.random((3, 4))])
 
     def test_accuracy(self):
         # Test all approximations are working (cutoff points are -37, 18, 33.3)
         x_test = np.array([-40.0, -17.5, 17.5, 18.5, 40.0])
-        y_th = at.softplus(x_test).eval()
+        y_th = pt.softplus(x_test).eval()
         y_np = np.log1p(np.exp(x_test))
         np.testing.assert_allclose(y_th, y_np, rtol=10e-10)
 
@@ -736,7 +766,7 @@ def expected_log1mexp(x):
 
 
 TestLog1mexpBroadcast = makeBroadcastTester(
-    op=at.log1mexp,
+    op=pt.log1mexp,
     expected=expected_log1mexp,
     good=_good_broadcast_unary_log1mexp,
     grad=_grad_broadcast_unary_log1mexp,
@@ -760,7 +790,7 @@ _good_broadcast_ternary_betainc = dict(
 )
 
 TestBetaincBroadcast = makeBroadcastTester(
-    op=at.betainc,
+    op=pt.betainc,
     expected=scipy.special.betainc,
     good=_good_broadcast_ternary_betainc,
     grad=_good_broadcast_ternary_betainc,
@@ -781,9 +811,9 @@ class TestBetaIncGrad:
         # https://github.com/stan-dev/math/blob/master/test/unit/math/prim/fun/inc_beta_dda_test.cpp
         # https://github.com/stan-dev/math/blob/master/test/unit/math/prim/fun/inc_beta_ddb_test.cpp
         # https://github.com/stan-dev/math/blob/master/test/unit/math/prim/fun/inc_beta_ddz_test.cpp
-        a, b, z = at.scalars("a", "b", "z")
-        betainc_out = at.betainc(a, b, z)
-        betainc_grad = at.grad(betainc_out, [a, b, z])
+        a, b, z = pt.scalars("a", "b", "z")
+        betainc_out = pt.betainc(a, b, z)
+        betainc_grad = pt.grad(betainc_out, [a, b, z])
         f_grad = function([a, b, z], betainc_grad)
 
         decimal_precision = 7 if config.floatX == "float64" else 3
@@ -816,9 +846,9 @@ class TestBetaIncGrad:
         # This test compares against the tabulated values in:
         # Boik, R. J., & Robison-Cox, J. F. (1998). Derivatives of the incomplete beta function.
         # Journal of Statistical Software, 3(1), 1-20.
-        a, b, z = at.scalars("a", "b", "z")
-        betainc_out = at.betainc(a, b, z)
-        betainc_grad = at.grad(betainc_out, [a, b])
+        a, b, z = pt.scalars("a", "b", "z")
+        betainc_out = pt.betainc(a, b, z)
+        betainc_grad = pt.grad(betainc_out, [a, b])
         f_grad = function([a, b, z], betainc_grad)
         decimal = 7 if config.floatX == "float64" else 5
         for test_a, test_b, test_z, expected_dda, expected_ddb in (
@@ -836,9 +866,9 @@ class TestBetaIncGrad:
     def test_beta_inc_stan_grad_combined(self):
         # This test replicates the following STAN test:
         # https://github.com/stan-dev/math/blob/master/test/unit/math/prim/fun/grad_reg_inc_beta_test.cpp
-        a, b, z = at.scalars("a", "b", "z")
-        betainc_out = at.betainc(a, b, z)
-        betainc_grad = at.grad(betainc_out, [a, b])
+        a, b, z = pt.scalars("a", "b", "z")
+        betainc_out = pt.betainc(a, b, z)
+        betainc_grad = pt.grad(betainc_out, [a, b])
         f_grad = function([a, b, z], betainc_grad)
 
         for test_a, test_b, test_z, expected_dda, expected_ddb in (
@@ -860,7 +890,7 @@ _good_broadcast_quaternary_hyp2f1 = dict(
 )
 
 TestHyp2F1Broadcast = makeBroadcastTester(
-    op=at.hyp2f1,
+    op=pt.hyp2f1,
     expected=expected_hyp2f1,
     good=_good_broadcast_quaternary_hyp2f1,
     grad=_good_broadcast_quaternary_hyp2f1,
@@ -904,9 +934,9 @@ class TestHyp2F1Grad:
 
         Note: The expected_ddz was computed from the perform method, as it is not part of all Stan tests
         """
-        a1, a2, b1, z = at.scalars("a1", "a2", "b1", "z")
-        hyp2f1_out = at.hyp2f1(a1, a2, b1, z)
-        hyp2f1_grad = at.grad(hyp2f1_out, [a1, a2, b1, z])
+        a1, a2, b1, z = pt.scalars("a1", "a2", "b1", "z")
+        hyp2f1_out = pt.hyp2f1(a1, a2, b1, z)
+        hyp2f1_grad = pt.grad(hyp2f1_out, [a1, a2, b1, z])
         f_grad = function([a1, a2, b1, z], hyp2f1_grad)
 
         rtol = 1e-9 if config.floatX == "float64" else 2e-3
@@ -1038,9 +1068,9 @@ class TestHyp2F1Grad:
     @pytest.mark.parametrize("case", (few_iters_case, many_iters_case))
     @pytest.mark.parametrize("wrt", ("a", "all"))
     def test_benchmark(self, case, wrt, benchmark):
-        a1, a2, b1, z = at.scalars("a1", "a2", "b1", "z")
-        hyp2f1_out = at.hyp2f1(a1, a2, b1, z)
-        hyp2f1_grad = at.grad(hyp2f1_out, wrt=a1 if wrt == "a" else [a1, a2, b1, z])
+        a1, a2, b1, z = pt.scalars("a1", "a2", "b1", "z")
+        hyp2f1_out = pt.hyp2f1(a1, a2, b1, z)
+        hyp2f1_grad = pt.grad(hyp2f1_out, wrt=a1 if wrt == "a" else [a1, a2, b1, z])
         f_grad = function([a1, a2, b1, z], hyp2f1_grad)
 
         (test_a1, test_a2, test_b1, test_z, *expected_dds) = case
@@ -1067,10 +1097,10 @@ class TestHyp2F1Grad:
             expected_ddz,
         ) = self.few_iters_case
 
-        a1, a2, b1, z = at.scalars("a1", "a2", "b1", "z")
-        hyp2f1_out = at.hyp2f1(a1, a2, b1, z)
+        a1, a2, b1, z = pt.scalars("a1", "a2", "b1", "z")
+        hyp2f1_out = pt.hyp2f1(a1, a2, b1, z)
         wrt_vars = [v for i, v in enumerate((a1, a2, b1, z)) if i in wrt]
-        hyp2f1_grad = at.grad(hyp2f1_out, wrt=wrt_vars)
+        hyp2f1_grad = pt.grad(hyp2f1_out, wrt=wrt_vars)
 
         mode = get_default_mode().including("local_useless_2f1grad_loop")
         f_grad = function([a1, a2, b1, z], hyp2f1_grad, mode=mode)

@@ -20,15 +20,15 @@ IfElse vs Switch
 
 .. testcode::
 
-   from pytensor import tensor as at
+   from pytensor import tensor as pt
    from pytensor.ifelse import ifelse
    import pytensor, time, numpy
 
-   a,b = at.scalars('a', 'b')
-   x,y = at.matrices('x', 'y')
+   a,b = pt.scalars('a', 'b')
+   x,y = pt.matrices('x', 'y')
 
-   z_switch = at.switch(at.lt(a, b), at.mean(x), at.mean(y))
-   z_lazy = ifelse(at.lt(a, b), at.mean(x), at.mean(y))
+   z_switch = pt.switch(pt.lt(a, b), pt.mean(x), pt.mean(y))
+   z_lazy = ifelse(pt.lt(a, b), pt.mean(x), pt.mean(y))
 
    f_switch = pytensor.function([a, b, x, y], z_switch,
                               mode=pytensor.compile.mode.Mode(linker='vm'))

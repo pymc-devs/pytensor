@@ -3,7 +3,7 @@ import contextlib
 import numpy as np
 import pytest
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
@@ -19,7 +19,7 @@ rng = np.random.default_rng(42849)
     [
         (
             set_test_value(
-                at.dmatrix(),
+                pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
             True,
@@ -27,7 +27,7 @@ rng = np.random.default_rng(42849)
         ),
         (
             set_test_value(
-                at.lmatrix(),
+                pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
                 ),
@@ -37,7 +37,7 @@ rng = np.random.default_rng(42849)
         ),
         (
             set_test_value(
-                at.dmatrix(),
+                pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
             False,
@@ -70,21 +70,21 @@ def test_Cholesky(x, lower, exc):
     [
         (
             set_test_value(
-                at.dmatrix(),
+                pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
-            set_test_value(at.dvector(), rng.random(size=(3,)).astype("float64")),
+            set_test_value(pt.dvector(), rng.random(size=(3,)).astype("float64")),
             "gen",
             None,
         ),
         (
             set_test_value(
-                at.lmatrix(),
+                pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
                 ),
             ),
-            set_test_value(at.dvector(), rng.random(size=(3,)).astype("float64")),
+            set_test_value(pt.dvector(), rng.random(size=(3,)).astype("float64")),
             "gen",
             None,
         ),
@@ -115,14 +115,14 @@ def test_Solve(A, x, lower, exc):
     [
         (
             set_test_value(
-                at.dmatrix(),
+                pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
             None,
         ),
         (
             set_test_value(
-                at.lmatrix(),
+                pt.lmatrix(),
                 (lambda x: x.T.dot(x))(rng.poisson(size=(3, 3)).astype("int64")),
             ),
             None,
@@ -150,14 +150,14 @@ def test_Det(x, exc):
     [
         (
             set_test_value(
-                at.dmatrix(),
+                pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
             None,
         ),
         (
             set_test_value(
-                at.lmatrix(),
+                pt.lmatrix(),
                 (lambda x: x.T.dot(x))(rng.poisson(size=(3, 3)).astype("int64")),
             ),
             None,
@@ -209,21 +209,21 @@ y = np.array(
     [
         (
             set_test_value(
-                at.dmatrix(),
+                pt.dmatrix(),
                 (lambda x: x.T.dot(x))(x),
             ),
             None,
         ),
         (
             set_test_value(
-                at.dmatrix(),
+                pt.dmatrix(),
                 (lambda x: x.T.dot(x))(y),
             ),
             None,
         ),
         (
             set_test_value(
-                at.lmatrix(),
+                pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
                 ),
@@ -257,7 +257,7 @@ def test_Eig(x, exc):
     [
         (
             set_test_value(
-                at.dmatrix(),
+                pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
             "L",
@@ -265,7 +265,7 @@ def test_Eig(x, exc):
         ),
         (
             set_test_value(
-                at.lmatrix(),
+                pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
                 ),
@@ -301,7 +301,7 @@ def test_Eigh(x, uplo, exc):
         (
             nlinalg.MatrixInverse,
             set_test_value(
-                at.dmatrix(),
+                pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
             None,
@@ -310,7 +310,7 @@ def test_Eigh(x, uplo, exc):
         (
             nlinalg.MatrixInverse,
             set_test_value(
-                at.lmatrix(),
+                pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
                 ),
@@ -321,7 +321,7 @@ def test_Eigh(x, uplo, exc):
         (
             nlinalg.MatrixPinv,
             set_test_value(
-                at.dmatrix(),
+                pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
             None,
@@ -330,7 +330,7 @@ def test_Eigh(x, uplo, exc):
         (
             nlinalg.MatrixPinv,
             set_test_value(
-                at.lmatrix(),
+                pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
                 ),
@@ -361,7 +361,7 @@ def test_matrix_inverses(op, x, exc, op_args):
     [
         (
             set_test_value(
-                at.dmatrix(),
+                pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
             "reduced",
@@ -369,7 +369,7 @@ def test_matrix_inverses(op, x, exc, op_args):
         ),
         (
             set_test_value(
-                at.dmatrix(),
+                pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
             "r",
@@ -377,7 +377,7 @@ def test_matrix_inverses(op, x, exc, op_args):
         ),
         (
             set_test_value(
-                at.lmatrix(),
+                pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
                 ),
@@ -387,7 +387,7 @@ def test_matrix_inverses(op, x, exc, op_args):
         ),
         (
             set_test_value(
-                at.lmatrix(),
+                pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
                 ),
@@ -422,7 +422,7 @@ def test_QRFull(x, mode, exc):
     [
         (
             set_test_value(
-                at.dmatrix(),
+                pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
             True,
@@ -431,7 +431,7 @@ def test_QRFull(x, mode, exc):
         ),
         (
             set_test_value(
-                at.dmatrix(),
+                pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
             False,
@@ -440,7 +440,7 @@ def test_QRFull(x, mode, exc):
         ),
         (
             set_test_value(
-                at.lmatrix(),
+                pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
                 ),
@@ -451,7 +451,7 @@ def test_QRFull(x, mode, exc):
         ),
         (
             set_test_value(
-                at.lmatrix(),
+                pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
                 ),

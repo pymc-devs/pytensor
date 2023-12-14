@@ -7,7 +7,7 @@ import logging
 import numpy as np
 import pytest
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.compile import shared
 from pytensor.compile.function import function
 from pytensor.compile.nanguardmode import NanGuardMode
@@ -61,7 +61,7 @@ def test_NanGuardMode():
     biga = np.tile(np.asarray(1e20).astype(config.floatX), (3, 4, 5))
 
     x = tensor3()
-    y = x[:, at.arange(2), at.arange(2), None]
+    y = x[:, pt.arange(2), pt.arange(2), None]
     fun = function([x], y, mode=NanGuardMode(nan_is_error=True, inf_is_error=True))
     fun(a)  # normal values
     try:

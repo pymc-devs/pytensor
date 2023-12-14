@@ -98,13 +98,13 @@ Example:
 .. code-block:: python
 
     import numpy as np
-    import pytensor.tensor as at
+    import pytensor.tensor as pt
 
 
     def test_dot_validity():
-        a = at.dmatrix('a')
-        b = at.dmatrix('b')
-        c = at.dot(a, b)
+        a = pt.dmatrix('a')
+        b = pt.dmatrix('b')
+        c = pt.dot(a, b)
 
         c_fn = pytensor.function([a, b], [c])
 
@@ -187,7 +187,7 @@ symbolic variable:
 
     def test_verify_exprgrad():
         def fun(x,y,z):
-            return (x + at.cos(y)) / (4 * z)**2
+            return (x + pt.cos(y)) / (4 * z)**2
 
         x_val = np.asarray([[1], [1.1], [1.2]])
         y_val = np.asarray([0.1, 0.2])
@@ -207,7 +207,7 @@ Here is an example showing how to use :func:`verify_grad` on an :class:`Op` inst
         """
         a_val = np.asarray([[0,1,2],[3,4,5]], dtype='float64')
         rng = np.random.default_rng(42)
-        pytensor.gradient.verify_grad(at.Flatten(), [a_val], rng=rng)
+        pytensor.gradient.verify_grad(pt.Flatten(), [a_val], rng=rng)
 
 .. note::
 

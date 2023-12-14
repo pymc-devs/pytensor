@@ -14,10 +14,10 @@ from scipy import sparse as scipy_sparse
 import pytensor
 import pytensor.sparse
 from pytensor import sparse
-from pytensor import tensor as at
+from pytensor import tensor as pt
 from pytensor.graph.op import Op
 from pytensor.tensor.math import dot
-from pytensor.tensor.math import max as at_max
+from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.shape import reshape
 from pytensor.tensor.subtensor import DimShuffle
 
@@ -353,10 +353,10 @@ def convolve(
     patches = (sparse.structured_dot(csc, images.T)).T
 
     # compute output of linear classifier
-    pshape = at.stack(
+    pshape = pt.stack(
         [
-            images.shape[0] * at.as_tensor(np.prod(outshp)),
-            at.as_tensor(imgshp[0] * kern_size),
+            images.shape[0] * pt.as_tensor(np.prod(outshp)),
+            pt.as_tensor(imgshp[0] * kern_size),
         ]
     )
     patch_stack = reshape(patches, pshape, ndim=2)
@@ -371,13 +371,13 @@ def convolve(
 
     # now to have feature maps in raster order ...
     # go from bsize*outshp x nkern to bsize x nkern*outshp
-    newshp = at.stack(
-        [images.shape[0], at.as_tensor(np.prod(outshp)), at.as_tensor(nkern)]
+    newshp = pt.stack(
+        [images.shape[0], pt.as_tensor(np.prod(outshp)), pt.as_tensor(nkern)]
     )
     tensout = reshape(output, newshp, ndim=3)
     output = DimShuffle((False,) * tensout.ndim, (0, 2, 1))(tensout)
     if flatten:
-        output = at.flatten(output, 2)
+        output = pt.flatten(output, 2)
 
     return output, np.hstack((nkern, outshp))
 
@@ -423,26 +423,26 @@ def max_pool(images, imgshp, maxpoolshp):
     )
     patches = sparse.structured_dot(csc, images.T).T
 
-    pshape = at.stack(
+    pshape = pt.stack(
         [
-            images.shape[0] * at.as_tensor(np.prod(outshp)),
-            at.as_tensor(imgshp[0]),
-            at.as_tensor(poolsize),
+            images.shape[0] * pt.as_tensor(np.prod(outshp)),
+            pt.as_tensor(imgshp[0]),
+            pt.as_tensor(poolsize),
         ]
     )
     patch_stack = reshape(patches, pshape, ndim=3)
 
-    out1 = at_max(patch_stack, axis=2)
+    out1 = pt_max(patch_stack, axis=2)
 
-    pshape = at.stack(
+    pshape = pt.stack(
         [
             images.shape[0],
-            at.as_tensor(np.prod(outshp)),
-            at.as_tensor(imgshp[0]),
+            pt.as_tensor(np.prod(outshp)),
+            pt.as_tensor(imgshp[0]),
         ]
     )
     out2 = reshape(out1, pshape, ndim=3)
 
     out3 = DimShuffle(out2.broadcastable, (0, 2, 1))(out2)
 
-    return at.flatten(out3, 2), outshp
+    return pt.flatten(out3, 2), outshp

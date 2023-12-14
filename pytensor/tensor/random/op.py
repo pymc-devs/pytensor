@@ -20,11 +20,7 @@ from pytensor.tensor.basic import (
     infer_static_shape,
 )
 from pytensor.tensor.random.type import RandomGeneratorType, RandomStateType, RandomType
-from pytensor.tensor.random.utils import (
-    broadcast_params,
-    normalize_size_param,
-    params_broadcast_shapes,
-)
+from pytensor.tensor.random.utils import broadcast_params, normalize_size_param
 from pytensor.tensor.shape import shape_tuple
 from pytensor.tensor.type import TensorType, all_dtypes
 from pytensor.tensor.type_other import NoneConst
@@ -156,6 +152,13 @@ class RandomVariable(Op):
 
         from pytensor.tensor.extra_ops import broadcast_shape_iter
 
+        if self.ndim_supp == 0:
+            supp_shape = ()
+        else:
+            supp_shape = tuple(
+                self._supp_shape_from_params(dist_params, param_shapes=param_shapes)
+            )
+
         size_len = get_vector_length(size)
 
         if size_len > 0:
@@ -171,19 +174,11 @@ class RandomVariable(Op):
                         f"Size length must be 0 or >= {param_batched_dims}"
                     )
 
-            if self.ndim_supp == 0:
-                return size
-            else:
-                supp_shape = self._supp_shape_from_params(
-                    dist_params, param_shapes=param_shapes
-                )
-                return tuple(size) + tuple(supp_shape)
+            return tuple(size) + supp_shape
 
-        # Broadcast the parameters
-        param_shapes = params_broadcast_shapes(
-            param_shapes or [shape_tuple(p) for p in dist_params],
-            self.ndims_params,
-        )
+        # Size was not provided, we must infer it from the shape of the parameters
+        if param_shapes is None:
+            param_shapes = [shape_tuple(p) for p in dist_params]
 
         def extract_batch_shape(p, ps, n):
             shape = tuple(ps)
@@ -191,10 +186,10 @@ class RandomVariable(Op):
             if n == 0:
                 return shape
 
-            batch_shape = [
+            batch_shape = tuple(
                 s if not b else constant(1, "int64")
                 for s, b in zip(shape[:-n], p.type.broadcastable[:-n])
-            ]
+            )
             return batch_shape
 
         # These are versions of our actual parameters with the anticipated
@@ -218,15 +213,8 @@ class RandomVariable(Op):
             # Distribution has no parameters
             batch_shape = ()
 
-        if self.ndim_supp == 0:
-            supp_shape = ()
-        else:
-            supp_shape = self._supp_shape_from_params(
-                dist_params,
-                param_shapes=param_shapes,
-            )
+        shape = batch_shape + supp_shape
 
-        shape = tuple(batch_shape) + tuple(supp_shape)
         if not shape:
             shape = constant([], dtype="int64")
 

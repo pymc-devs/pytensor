@@ -1,7 +1,7 @@
 import scipy
 
 import pytensor
-import pytensor.scalar as aes
+import pytensor.scalar as ps
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.rewriting.basic import (
@@ -116,7 +116,7 @@ class AddSD_ccode(_NoPythonCOp):
 
     def make_node(self, x, y):
         x, y = sparse.as_sparse_variable(x), as_tensor_variable(y)
-        out_dtype = aes.upcast(x.type.dtype, y.type.dtype)
+        out_dtype = ps.upcast(x.type.dtype, y.type.dtype)
         if self.inplace:
             assert out_dtype == y.dtype
 
@@ -195,7 +195,7 @@ class AddSD_ccode(_NoPythonCOp):
 def local_inplace_addsd_ccode(fgraph, node):
     """Rewrite to insert inplace versions of `AddSD`."""
     if isinstance(node.op, sparse.AddSD) and config.cxx:
-        out_dtype = aes.upcast(*node.inputs)
+        out_dtype = ps.upcast(*node.inputs)
         if out_dtype != node.inputs[1].dtype:
             return
         new_node = AddSD_ccode(format=node.inputs[0].type.format, inplace=True)(
@@ -266,7 +266,7 @@ class StructuredDotCSC(COp):
     __props__ = ()
 
     def make_node(self, a_val, a_ind, a_ptr, a_nrows, b):
-        dtype_out = aes.upcast(a_val.type.dtype, b.type.dtype)
+        dtype_out = ps.upcast(a_val.type.dtype, b.type.dtype)
         r = Apply(
             self,
             [a_val, a_ind, a_ptr, a_nrows, b],
@@ -465,7 +465,7 @@ class StructuredDotCSR(COp):
     __props__ = ()
 
     def make_node(self, a_val, a_ind, a_ptr, b):
-        self.dtype_out = aes.upcast(a_val.type.dtype, b.type.dtype)
+        self.dtype_out = ps.upcast(a_val.type.dtype, b.type.dtype)
         r = Apply(
             self,
             [a_val, a_ind, a_ptr, b],
@@ -691,7 +691,7 @@ class UsmmCscDense(_NoPythonCOp):
         assert y.ndim == 2
         assert z.ndim == 2
 
-        dtype_out = aes.upcast(
+        dtype_out = ps.upcast(
             alpha.type.dtype, x_val.type.dtype, y.type.dtype, z.type.dtype
         )
 
@@ -957,7 +957,7 @@ def local_usmm_csx(fgraph, node):
             if x.type.format == "csc":
                 x_val, x_ind, x_ptr, x_shape = csm_properties(x)
                 x_nsparse = x_shape[0]
-                dtype_out = aes.upcast(
+                dtype_out = ps.upcast(
                     alpha.type.dtype, x.type.dtype, y.type.dtype, z.type.dtype
                 )
                 if dtype_out not in ("float32", "float64"):
@@ -1860,8 +1860,8 @@ class SamplingDotCSR(_NoPythonCOp):
 
         assert p_ncols.dtype == "int32"
 
-        dtype_out = aes.upcast(x.type.dtype, y.type.dtype, p_data.type.dtype)
-        dot_out = aes.upcast(x.type.dtype, y.type.dtype)
+        dtype_out = ps.upcast(x.type.dtype, y.type.dtype, p_data.type.dtype)
+        dot_out = ps.upcast(x.type.dtype, y.type.dtype)
 
         # We call blas ?dot function that take only param of the same type
         x = cast(x, dot_out)
@@ -1905,7 +1905,7 @@ class SamplingDotCSR(_NoPythonCOp):
         if node.inputs[2].type.dtype in ("complex64", "complex128"):
             raise NotImplementedError("Complex types are not supported for pattern")
 
-        dot_out = aes.upcast(node.inputs[0].type.dtype, node.inputs[1].type.dtype)
+        dot_out = ps.upcast(node.inputs[0].type.dtype, node.inputs[1].type.dtype)
 
         if dot_out == "float32":
             conv_type = "float"

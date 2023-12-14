@@ -3,15 +3,15 @@ import pytest
 import scipy.special
 
 import pytensor
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.compile import get_mode
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import get_test_value
-from pytensor.tensor import elemwise as at_elemwise
-from pytensor.tensor.math import all as at_all
+from pytensor.tensor import elemwise as pt_elemwise
+from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import prod
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.special import SoftmaxGrad, log_softmax, softmax
 from pytensor.tensor.type import matrix, tensor, vector, vectors
 from tests.link.jax.test_basic import compare_jax_and_py
@@ -23,59 +23,59 @@ def test_elemwise_runtime_broadcast():
 
 
 def test_jax_Dimshuffle():
-    a_at = matrix("a")
+    a_pt = matrix("a")
 
-    x = a_at.T
-    x_fg = FunctionGraph([a_at], [x])
+    x = a_pt.T
+    x_fg = FunctionGraph([a_pt], [x])
     compare_jax_and_py(x_fg, [np.c_[[1.0, 2.0], [3.0, 4.0]].astype(config.floatX)])
 
-    x = a_at.dimshuffle([0, 1, "x"])
-    x_fg = FunctionGraph([a_at], [x])
+    x = a_pt.dimshuffle([0, 1, "x"])
+    x_fg = FunctionGraph([a_pt], [x])
     compare_jax_and_py(x_fg, [np.c_[[1.0, 2.0], [3.0, 4.0]].astype(config.floatX)])
 
-    a_at = tensor(dtype=config.floatX, shape=(None, 1))
-    x = a_at.dimshuffle((0,))
-    x_fg = FunctionGraph([a_at], [x])
+    a_pt = tensor(dtype=config.floatX, shape=(None, 1))
+    x = a_pt.dimshuffle((0,))
+    x_fg = FunctionGraph([a_pt], [x])
     compare_jax_and_py(x_fg, [np.c_[[1.0, 2.0, 3.0, 4.0]].astype(config.floatX)])
 
-    a_at = tensor(dtype=config.floatX, shape=(None, 1))
-    x = at_elemwise.DimShuffle([False, True], (0,))(a_at)
-    x_fg = FunctionGraph([a_at], [x])
+    a_pt = tensor(dtype=config.floatX, shape=(None, 1))
+    x = pt_elemwise.DimShuffle([False, True], (0,))(a_pt)
+    x_fg = FunctionGraph([a_pt], [x])
     compare_jax_and_py(x_fg, [np.c_[[1.0, 2.0, 3.0, 4.0]].astype(config.floatX)])
 
 
 def test_jax_CAReduce():
-    a_at = vector("a")
-    a_at.tag.test_value = np.r_[1, 2, 3].astype(config.floatX)
+    a_pt = vector("a")
+    a_pt.tag.test_value = np.r_[1, 2, 3].astype(config.floatX)
 
-    x = at_sum(a_at, axis=None)
-    x_fg = FunctionGraph([a_at], [x])
+    x = pt_sum(a_pt, axis=None)
+    x_fg = FunctionGraph([a_pt], [x])
 
     compare_jax_and_py(x_fg, [np.r_[1, 2, 3].astype(config.floatX)])
 
-    a_at = matrix("a")
-    a_at.tag.test_value = np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)
+    a_pt = matrix("a")
+    a_pt.tag.test_value = np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)
 
-    x = at_sum(a_at, axis=0)
-    x_fg = FunctionGraph([a_at], [x])
-
-    compare_jax_and_py(x_fg, [np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)])
-
-    x = at_sum(a_at, axis=1)
-    x_fg = FunctionGraph([a_at], [x])
+    x = pt_sum(a_pt, axis=0)
+    x_fg = FunctionGraph([a_pt], [x])
 
     compare_jax_and_py(x_fg, [np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)])
 
-    a_at = matrix("a")
-    a_at.tag.test_value = np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)
-
-    x = prod(a_at, axis=0)
-    x_fg = FunctionGraph([a_at], [x])
+    x = pt_sum(a_pt, axis=1)
+    x_fg = FunctionGraph([a_pt], [x])
 
     compare_jax_and_py(x_fg, [np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)])
 
-    x = at_all(a_at)
-    x_fg = FunctionGraph([a_at], [x])
+    a_pt = matrix("a")
+    a_pt.tag.test_value = np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)
+
+    x = prod(a_pt, axis=0)
+    x_fg = FunctionGraph([a_pt], [x])
+
+    compare_jax_and_py(x_fg, [np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)])
+
+    x = pt_all(a_pt)
+    x_fg = FunctionGraph([a_pt], [x])
 
     compare_jax_and_py(x_fg, [np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)])
 
@@ -112,10 +112,10 @@ def test_softmax_grad(axis):
 @pytest.mark.parametrize("size", [(10, 10), (1000, 1000), (10000, 10000)])
 @pytest.mark.parametrize("axis", [0, 1])
 def test_logsumexp_benchmark(size, axis, benchmark):
-    X = at.matrix("X")
-    X_max = at.max(X, axis=axis, keepdims=True)
-    X_max = at.switch(at.isinf(X_max), 0, X_max)
-    X_lse = at.log(at.sum(at.exp(X - X_max), axis=axis, keepdims=True)) + X_max
+    X = pt.matrix("X")
+    X_max = pt.max(X, axis=axis, keepdims=True)
+    X_max = pt.switch(pt.isinf(X_max), 0, X_max)
+    X_lse = pt.log(pt.sum(pt.exp(X - X_max), axis=axis, keepdims=True)) + X_max
 
     rng = np.random.default_rng(23920)
     X_val = rng.normal(size=size)
@@ -133,7 +133,7 @@ def test_logsumexp_benchmark(size, axis, benchmark):
 
 def test_multiple_input_multiply():
     x, y, z = vectors("xyz")
-    out = at.mul(x, y, z)
+    out = pt.mul(x, y, z)
 
     fg = FunctionGraph(outputs=[out], clone=False)
     compare_jax_and_py(fg, [[1.5], [2.5], [3.5]])

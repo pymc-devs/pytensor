@@ -1,33 +1,31 @@
 <!-- !! Thank your for opening a PR !! -->
 
-### Motivation for these changes
-...
+<!--- Provide a self-contained summary of your changes in the Title above -->
+<!--- This is what will be shown in the automatic release notes: https://github.com/pymc-devs/pytensor/releases -->
 
-### Implementation details
-...
+## Description
+<!--- Describe your changes in detail -->
 
+## Related Issue
+<!--- It is good practice to first open an issue explaining the bug / new feature that is addressed by this PR -->
+<!--- Please type an `x` in one of the boxes below and provide the issue number after the # sign: -->
+- [ ] Closes #
+- [ ] Related to #
 
-### Checklist
-+ [ ] Explain motivation and implementation 👆
-+ [ ] Make sure that [the pre-commit linting/style checks pass](https://docs.pymc.io/en/latest/contributing/python_style.html).
-+ [ ] Link relevant issues, preferably in [nice commit messages](https://tbaggery.com/2008/04/19/a-note-about-git-commit-messages.html).
-+ [ ] The commits correspond to [_relevant logical changes_](https://wiki.openstack.org/wiki/GitCommitMessages#Structural_split_of_changes). Note that if they don't, we will [rewrite/rebase/squash the git history](https://git-scm.com/book/en/v2/Git-Tools-Rewriting-History#_rewriting_history) before merging.
-+ [ ] Are the changes covered by tests and docstrings?
-+ [ ] Fill out the short summary sections 👇
+## Checklist
+<!--- Make sure you have completed the following steps before submitting your PR -->
+<!--- Feel free to type an `x` in all the boxes below to let us know you have completed the steps: -->
+- [ ] Checked that [the pre-commit linting/style checks pass](https://docs.pymc.io/en/latest/contributing/python_style.html)
+- [ ] Included tests that prove the fix is effective or that the new feature works
+- [ ] Added necessary documentation (docstrings and/or example notebooks)
+- [ ] If you are a pro: each commit corresponds to a [relevant logical change](https://wiki.openstack.org/wiki/GitCommitMessages#Structural_split_of_changes)
+<!--- You may find this guide helpful: https://mainmatter.com/blog/2021/05/26/keeping-a-clean-git-history/ -->
 
-
-## Major / Breaking Changes
-- ...
-
-## New features
-- ...
-
-## Bugfixes
-- ...
-
-## Documentation
-- ...
-
-## Maintenance
-- ...
-
+## Type of change
+<!--- Select one of the categories below by typing an `x` in the box -->
+- [ ] New feature / enhancement
+- [ ] Bug fix
+- [ ] Documentation
+- [ ] Maintenance
+- [ ] Other (please specify):
+<!--- Additionally, if you are a maintainer or reviewer, please make sure that the appropriate labels are added to this PR -->

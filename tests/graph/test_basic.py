@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from pytensor import shared
-from pytensor import tensor as at
+from pytensor import tensor as pt
 from pytensor.graph.basic import (
     Apply,
     NominalVariable,
@@ -164,7 +164,7 @@ class TestClone(X):
         _, new = clone([r1, r2, r5], node.outputs, False)
         new_node = new[0].owner
         new_node.inputs = [MyVariable(7), MyVariable(8)]
-        c1 = at.constant(1.5)
+        c1 = pt.constant(1.5)
 
         i, o = clone([c1], [c1])
         assert i[0] is c1 and o[0] is c1
@@ -334,13 +334,13 @@ class TestAutoName:
         # Get counter value
         autoname_id = next(Variable.__count__)
         Variable.__count__ = count(autoname_id)
-        r1 = at.constant(1.5)
+        r1 = pt.constant(1.5)
         assert r1.auto_name == "auto_" + str(autoname_id), (
             r1.auto_name,
             "auto_" + str(autoname_id),
         )
 
-        r3 = at.constant(1.6)
+        r3 = pt.constant(1.6)
         assert r3.auto_name == "auto_" + str(autoname_id + 1)
 
     def test_tensorvariable(self):
@@ -377,14 +377,14 @@ def test_equal_computations():
         equal_computations([a], [a, b])
 
     assert equal_computations([a], [a])
-    assert equal_computations([at.as_tensor(1)], [at.as_tensor(1)])
+    assert equal_computations([pt.as_tensor(1)], [pt.as_tensor(1)])
     assert not equal_computations([b], [a])
-    assert not equal_computations([at.as_tensor(1)], [at.as_tensor(2)])
+    assert not equal_computations([pt.as_tensor(1)], [pt.as_tensor(2)])
 
     assert equal_computations([2], [2])
     assert equal_computations([np.r_[2, 1]], [np.r_[2, 1]])
-    assert equal_computations([np.r_[2, 1]], [at.as_tensor(np.r_[2, 1])])
-    assert equal_computations([at.as_tensor(np.r_[2, 1])], [np.r_[2, 1]])
+    assert equal_computations([np.r_[2, 1]], [pt.as_tensor(np.r_[2, 1])])
+    assert equal_computations([pt.as_tensor(np.r_[2, 1])], [np.r_[2, 1]])
 
     assert not equal_computations([2], [a])
     assert not equal_computations([np.r_[2, 1]], [a])
@@ -564,13 +564,13 @@ def test_get_var_by_name():
 def test_clone_new_inputs():
     """Make sure that `Apply.clone_with_new_inputs` properly handles `Type` changes."""
 
-    x = at.tensor(dtype=np.float64, shape=(None,))
-    y = at.tensor(dtype=np.float64, shape=(1,))
+    x = pt.tensor(dtype=np.float64, shape=(None,))
+    y = pt.tensor(dtype=np.float64, shape=(1,))
 
-    z = at.add(x, y)
+    z = pt.add(x, y)
     assert z.type.shape == (None,)
 
-    x_new = at.tensor(dtype=np.float64, shape=(1,))
+    x_new = pt.tensor(dtype=np.float64, shape=(1,))
 
     # The output nodes should be reconstructed, because the input types' static
     # shape information increased in specificity
@@ -583,7 +583,7 @@ def test_clone_new_inputs():
     # Now, attempt to decrease the specificity of the first input's static
     # shape information, but, because we're using strict conversion, we
     # shouldn't lose any information
-    z = at.add(x_new, y)
+    z = pt.add(x_new, y)
     assert z.type.shape == (1,)
 
     z_node_new = z.owner.clone_with_new_inputs([x, y], strict=True)
@@ -800,7 +800,7 @@ class TestTruncatedGraphInputs:
         import pytensor.graph.basic
 
         inspect = mocker.spy(pytensor.graph.basic, "variable_depends_on")
-        x = at.dmatrix("x")
+        x = pt.dmatrix("x")
         m = x.shape[0][None, None]
 
         f = x / m

@@ -9,8 +9,8 @@ from typing import Optional, cast
 import numpy as np
 
 import pytensor
-from pytensor import scalar as aes
-from pytensor import tensor as at
+from pytensor import scalar as ps
+from pytensor import tensor as pt
 from pytensor.compile import optdb
 from pytensor.compile.function.types import deep_copy_op
 from pytensor.configdefaults import config
@@ -391,7 +391,7 @@ def push_out_non_seq_scan(fgraph, node):
                 x = node.outputs[local_fgraph_outs_map[out]]
                 y = replace_with_out[idx]
                 y_shape = list(y.shape)
-                replace_with[x] = at.alloc(y, node.inputs[0], *y_shape)
+                replace_with[x] = pt.alloc(y, node.inputs[0], *y_shape)
 
         # We need to add one extra dimension to the outputs
         # because the scan op expects for a tensor3, to which an
@@ -668,7 +668,7 @@ def inner_sitsot_only_last_step_used(
         client = fgraph.clients[outer_var][0][0]
         if isinstance(client, Apply) and isinstance(client.op, Subtensor):
             lst = get_idx_list(client.inputs, client.op.idx_list)
-            if len(lst) == 1 and at.extract_constant(lst[0]) == -1:
+            if len(lst) == 1 and pt.extract_constant(lst[0]) == -1:
                 return True
 
     return False
@@ -851,7 +851,7 @@ def push_out_add_scan(fgraph, node):
     for nd in local_fgraph_topo:
         if (
             isinstance(nd.op, Elemwise)
-            and isinstance(nd.op.scalar_op, aes.Add)
+            and isinstance(nd.op.scalar_op, ps.Add)
             and nd.out in args.inner_out_sit_sot
             and inner_sitsot_only_last_step_used(fgraph, nd.out, args)
         ):
@@ -897,7 +897,7 @@ def push_out_add_scan(fgraph, node):
                     # so that they become matrices. This is because a
                     # dot is usually faster on two large matrices than
                     # a bunch of small ones
-                    outer_dot_inputs[0] = at.flatten(
+                    outer_dot_inputs[0] = pt.flatten(
                         outer_dot_inputs[0].dimshuffle(1, 0, 2), ndim=2
                     )
 
@@ -1114,7 +1114,7 @@ def sanitize(x):
     if x is None:
         return None
     else:
-        return at.as_tensor_variable(x)
+        return pt.as_tensor_variable(x)
 
 
 @node_rewriter([Scan])
@@ -1167,12 +1167,12 @@ def while_scan_merge_subtensor_last_element(fgraph, scan_node):
         if (
             len(slice1) == 1
             and isinstance(slice1[0], slice)
-            and isinstance(slice1[0].start, aes.ScalarConstant)
+            and isinstance(slice1[0].start, ps.ScalarConstant)
             and slice1[0].start.data == min_tap
             and slice1[0].stop is None
             and slice1[0].step is None
             and len(slice2) == 1
-            and isinstance(slice2[0], aes.ScalarConstant)
+            and isinstance(slice2[0], ps.ScalarConstant)
             and slice2[0].data == -1
         ):
             out = assert_non_zero_steps_op(x[-1], non_zero_steps_cond)
@@ -1342,10 +1342,10 @@ def save_mem_new_scan(fgraph, node):
                 if isinstance(this_slice[0], slice) and this_slice[0].stop is None:
                     global_nsteps = None
                 if isinstance(cf_slice[0], slice):
-                    stop = at.extract_constant(cf_slice[0].stop)
+                    stop = pt.extract_constant(cf_slice[0].stop)
                 else:
-                    stop = at.extract_constant(cf_slice[0]) + 1
-                if stop == maxsize or stop == at.extract_constant(length):
+                    stop = pt.extract_constant(cf_slice[0]) + 1
+                if stop == maxsize or stop == pt.extract_constant(length):
                     stop = None
                 else:
                     # there is a **gotcha** here ! Namely, scan returns an
@@ -1449,9 +1449,9 @@ def save_mem_new_scan(fgraph, node):
                     cf_slice = get_canonical_form_slice(this_slice[0], length)
 
                     if isinstance(cf_slice[0], slice):
-                        start = at.extract_constant(cf_slice[0].start)
+                        start = pt.extract_constant(cf_slice[0].start)
                     else:
-                        start = at.extract_constant(cf_slice[0])
+                        start = pt.extract_constant(cf_slice[0])
 
                 if start == 0 or store_steps[i] == 0:
                     store_steps[i] = 0
@@ -1534,13 +1534,13 @@ def save_mem_new_scan(fgraph, node):
                         )
                     ):
                         _nw_input = nw_inputs[offset + idx].owner.inputs[1]
-                        cval = at.as_tensor_variable(val)
-                        initl = at.as_tensor_variable(init_l[i])
-                        tmp_idx = at.switch(cval < initl, cval + initl, cval - initl)
+                        cval = pt.as_tensor_variable(val)
+                        initl = pt.as_tensor_variable(init_l[i])
+                        tmp_idx = pt.switch(cval < initl, cval + initl, cval - initl)
                         nw_input = expand_empty(_nw_input, tmp_idx)
                     else:
-                        tmp = at.as_tensor_variable(val)
-                        initl = at.as_tensor_variable(init_l[i])
+                        tmp = pt.as_tensor_variable(val)
+                        initl = pt.as_tensor_variable(init_l[i])
                         tmp = maximum(tmp, initl)
                         nw_input = nw_inputs[offset + idx][:tmp]
 
@@ -1628,7 +1628,7 @@ def save_mem_new_scan(fgraph, node):
         # 3.6 Compose the new scan
         # TODO: currently we don't support scan with 0 step. So
         # don't create one.
-        if at.extract_constant(node_ins[0]) == 0:
+        if pt.extract_constant(node_ins[0]) == 0:
             return False
 
         # Do not call make_node for test_value
@@ -2303,7 +2303,7 @@ def push_out_dot1_scan(fgraph, node):
         if (
             out.owner
             and isinstance(out.owner.op, Elemwise)
-            and isinstance(out.owner.op.scalar_op, aes.Add)
+            and isinstance(out.owner.op.scalar_op, ps.Add)
             and inp in out.owner.inputs
             and len(fgraph.clients[outer_out]) == 1
             and not isinstance(fgraph.clients[outer_out][0][0], str)

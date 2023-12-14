@@ -531,7 +531,7 @@ class Elemwise(OpenMPOp):
         return [[True for output in node.outputs] for ipt in node.inputs]
 
     def L_op(self, inputs, outs, ograds):
-        from pytensor.tensor.math import sum as at_sum
+        from pytensor.tensor.math import sum as pt_sum
 
         # Compute grad with respect to broadcasted input
         rval = self._bgrad(inputs, outs, ograds)
@@ -572,7 +572,7 @@ class Elemwise(OpenMPOp):
             ]
 
             if to_sum:
-                sr = at_sum(rval[i], axis=to_sum, keepdims=True)
+                sr = pt_sum(rval[i], axis=to_sum, keepdims=True)
                 rval[i] = sr
 
         return rval

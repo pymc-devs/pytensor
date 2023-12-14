@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-import pytensor.tensor as at
+import pytensor.tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
-from pytensor.tensor import subtensor as at_subtensor
+from pytensor.tensor import subtensor as pt_subtensor
 from pytensor.tensor.rewriting.jax import (
     boolean_indexing_set_or_inc,
     boolean_indexing_sum,
@@ -14,76 +14,76 @@ from tests.link.jax.test_basic import compare_jax_and_py
 
 def test_jax_Subtensor_constant():
     # Basic indices
-    x_at = at.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5)))
-    out_at = x_at[1, 2, 0]
-    assert isinstance(out_at.owner.op, at_subtensor.Subtensor)
-    out_fg = FunctionGraph([], [out_at])
+    x_pt = pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5)))
+    out_pt = x_pt[1, 2, 0]
+    assert isinstance(out_pt.owner.op, pt_subtensor.Subtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
-    out_at = x_at[1:, 1, :]
-    assert isinstance(out_at.owner.op, at_subtensor.Subtensor)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = x_pt[1:, 1, :]
+    assert isinstance(out_pt.owner.op, pt_subtensor.Subtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
-    out_at = x_at[:2, 1, :]
-    assert isinstance(out_at.owner.op, at_subtensor.Subtensor)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = x_pt[:2, 1, :]
+    assert isinstance(out_pt.owner.op, pt_subtensor.Subtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
-    out_at = x_at[1:2, 1, :]
-    assert isinstance(out_at.owner.op, at_subtensor.Subtensor)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = x_pt[1:2, 1, :]
+    assert isinstance(out_pt.owner.op, pt_subtensor.Subtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
     # Advanced indexing
-    out_at = at_subtensor.advanced_subtensor1(x_at, [1, 2])
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedSubtensor1)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = pt_subtensor.advanced_subtensor1(x_pt, [1, 2])
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor1)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
-    out_at = x_at[[1, 2], [2, 3]]
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = x_pt[[1, 2], [2, 3]]
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
     # Advanced and basic indexing
-    out_at = x_at[[1, 2], :]
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = x_pt[[1, 2], :]
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
-    out_at = x_at[[1, 2], :, [3, 4]]
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = x_pt[[1, 2], :, [3, 4]]
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
     # Flipping
-    out_at = x_at[::-1]
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = x_pt[::-1]
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
 
 @pytest.mark.xfail(reason="`a` should be specified as static when JIT-compiling")
 def test_jax_Subtensor_dynamic():
-    a = at.iscalar("a")
-    x = at.arange(3)
-    out_at = x[:a]
-    assert isinstance(out_at.owner.op, at_subtensor.Subtensor)
-    out_fg = FunctionGraph([a], [out_at])
+    a = pt.iscalar("a")
+    x = pt.arange(3)
+    out_pt = x[:a]
+    assert isinstance(out_pt.owner.op, pt_subtensor.Subtensor)
+    out_fg = FunctionGraph([a], [out_pt])
     compare_jax_and_py(out_fg, [1])
 
 
 def test_jax_Subtensor_boolean_mask():
     """JAX does not support resizing arrays with boolean masks."""
-    x_at = at.vector("x", dtype="float64")
-    out_at = x_at[x_at < 0]
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedSubtensor)
+    x_pt = pt.vector("x", dtype="float64")
+    out_pt = x_pt[x_pt < 0]
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor)
 
-    out_fg = FunctionGraph([x_at], [out_at])
+    out_fg = FunctionGraph([x_pt], [out_pt])
 
-    x_at_test = np.arange(-5, 5)
+    x_pt_test = np.arange(-5, 5)
     with pytest.raises(NotImplementedError, match="resizing arrays with boolean"):
-        compare_jax_and_py(out_fg, [x_at_test])
+        compare_jax_and_py(out_fg, [x_pt_test])
 
 
 def test_jax_Subtensor_boolean_mask_reexpressible():
@@ -97,15 +97,15 @@ def test_jax_Subtensor_boolean_mask_reexpressible():
     improvement over its user interface.
 
     """
-    x_at = at.matrix("x")
-    out_at = x_at[x_at < 0].sum()
-    out_fg = FunctionGraph([x_at], [out_at])
+    x_pt = pt.matrix("x")
+    out_pt = x_pt[x_pt < 0].sum()
+    out_fg = FunctionGraph([x_pt], [out_pt])
     compare_jax_and_py(out_fg, [np.arange(25).reshape(5, 5).astype(config.floatX)])
 
 
 def test_boolean_indexing_sum_not_applicable():
     """Test that boolean_indexing_sum does not return an invalid replacement in cases where it doesn't apply."""
-    x = at.matrix("x")
+    x = pt.matrix("x")
     out = x[x[:, 0] < 0, :].sum(axis=-1)
     fg = FunctionGraph([x], [out])
     assert boolean_indexing_sum.transform(fg, fg.outputs[0].owner) is None
@@ -119,98 +119,98 @@ def test_jax_IncSubtensor():
     rng = np.random.default_rng(213234)
 
     x_np = rng.uniform(-1, 1, size=(3, 4, 5)).astype(config.floatX)
-    x_at = at.constant(np.arange(3 * 4 * 5).reshape((3, 4, 5)).astype(config.floatX))
+    x_pt = pt.constant(np.arange(3 * 4 * 5).reshape((3, 4, 5)).astype(config.floatX))
 
     # "Set" basic indices
-    st_at = at.as_tensor_variable(np.array(-10.0, dtype=config.floatX))
-    out_at = at_subtensor.set_subtensor(x_at[1, 2, 3], st_at)
-    assert isinstance(out_at.owner.op, at_subtensor.IncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    st_pt = pt.as_tensor_variable(np.array(-10.0, dtype=config.floatX))
+    out_pt = pt_subtensor.set_subtensor(x_pt[1, 2, 3], st_pt)
+    assert isinstance(out_pt.owner.op, pt_subtensor.IncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
-    st_at = at.as_tensor_variable(np.r_[-1.0, 0.0].astype(config.floatX))
-    out_at = at_subtensor.set_subtensor(x_at[:2, 0, 0], st_at)
-    assert isinstance(out_at.owner.op, at_subtensor.IncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    st_pt = pt.as_tensor_variable(np.r_[-1.0, 0.0].astype(config.floatX))
+    out_pt = pt_subtensor.set_subtensor(x_pt[:2, 0, 0], st_pt)
+    assert isinstance(out_pt.owner.op, pt_subtensor.IncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
-    out_at = at_subtensor.set_subtensor(x_at[0, 1:3, 0], st_at)
-    assert isinstance(out_at.owner.op, at_subtensor.IncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = pt_subtensor.set_subtensor(x_pt[0, 1:3, 0], st_pt)
+    assert isinstance(out_pt.owner.op, pt_subtensor.IncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
     # "Set" advanced indices
-    st_at = at.as_tensor_variable(
+    st_pt = pt.as_tensor_variable(
         rng.uniform(-1, 1, size=(2, 4, 5)).astype(config.floatX)
     )
-    out_at = at_subtensor.set_subtensor(x_at[np.r_[0, 2]], st_at)
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedIncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = pt_subtensor.set_subtensor(x_pt[np.r_[0, 2]], st_pt)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
-    st_at = at.as_tensor_variable(np.r_[-1.0, 0.0].astype(config.floatX))
-    out_at = at_subtensor.set_subtensor(x_at[[0, 2], 0, 0], st_at)
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedIncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    st_pt = pt.as_tensor_variable(np.r_[-1.0, 0.0].astype(config.floatX))
+    out_pt = pt_subtensor.set_subtensor(x_pt[[0, 2], 0, 0], st_pt)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
     # "Set" boolean indices
-    mask_at = at.constant(x_np > 0)
-    out_at = at_subtensor.set_subtensor(x_at[mask_at], 0.0)
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedIncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    mask_pt = pt.constant(x_np > 0)
+    out_pt = pt_subtensor.set_subtensor(x_pt[mask_pt], 0.0)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
     # "Increment" basic indices
-    st_at = at.as_tensor_variable(np.array(-10.0, dtype=config.floatX))
-    out_at = at_subtensor.inc_subtensor(x_at[1, 2, 3], st_at)
-    assert isinstance(out_at.owner.op, at_subtensor.IncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    st_pt = pt.as_tensor_variable(np.array(-10.0, dtype=config.floatX))
+    out_pt = pt_subtensor.inc_subtensor(x_pt[1, 2, 3], st_pt)
+    assert isinstance(out_pt.owner.op, pt_subtensor.IncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
-    st_at = at.as_tensor_variable(np.r_[-1.0, 0.0].astype(config.floatX))
-    out_at = at_subtensor.inc_subtensor(x_at[:2, 0, 0], st_at)
-    assert isinstance(out_at.owner.op, at_subtensor.IncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    st_pt = pt.as_tensor_variable(np.r_[-1.0, 0.0].astype(config.floatX))
+    out_pt = pt_subtensor.inc_subtensor(x_pt[:2, 0, 0], st_pt)
+    assert isinstance(out_pt.owner.op, pt_subtensor.IncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
-    out_at = at_subtensor.set_subtensor(x_at[0, 1:3, 0], st_at)
-    assert isinstance(out_at.owner.op, at_subtensor.IncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = pt_subtensor.set_subtensor(x_pt[0, 1:3, 0], st_pt)
+    assert isinstance(out_pt.owner.op, pt_subtensor.IncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
     # "Increment" advanced indices
-    st_at = at.as_tensor_variable(
+    st_pt = pt.as_tensor_variable(
         rng.uniform(-1, 1, size=(2, 4, 5)).astype(config.floatX)
     )
-    out_at = at_subtensor.inc_subtensor(x_at[np.r_[0, 2]], st_at)
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedIncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    out_pt = pt_subtensor.inc_subtensor(x_pt[np.r_[0, 2]], st_pt)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
-    st_at = at.as_tensor_variable(np.r_[-1.0, 0.0].astype(config.floatX))
-    out_at = at_subtensor.inc_subtensor(x_at[[0, 2], 0, 0], st_at)
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedIncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    st_pt = pt.as_tensor_variable(np.r_[-1.0, 0.0].astype(config.floatX))
+    out_pt = pt_subtensor.inc_subtensor(x_pt[[0, 2], 0, 0], st_pt)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
     # "Increment" boolean indices
-    mask_at = at.constant(x_np > 0)
-    out_at = at_subtensor.set_subtensor(x_at[mask_at], 1.0)
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedIncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    mask_pt = pt.constant(x_np > 0)
+    out_pt = pt_subtensor.set_subtensor(x_pt[mask_pt], 1.0)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
-    st_at = at.as_tensor_variable(x_np[[0, 2], 0, :3])
-    out_at = at_subtensor.set_subtensor(x_at[[0, 2], 0, :3], st_at)
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedIncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    st_pt = pt.as_tensor_variable(x_np[[0, 2], 0, :3])
+    out_pt = pt_subtensor.set_subtensor(x_pt[[0, 2], 0, :3], st_pt)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
-    st_at = at.as_tensor_variable(x_np[[0, 2], 0, :3])
-    out_at = at_subtensor.inc_subtensor(x_at[[0, 2], 0, :3], st_at)
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedIncSubtensor)
-    out_fg = FunctionGraph([], [out_at])
+    st_pt = pt.as_tensor_variable(x_np[[0, 2], 0, :3])
+    out_pt = pt_subtensor.inc_subtensor(x_pt[[0, 2], 0, :3], st_pt)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    out_fg = FunctionGraph([], [out_pt])
     compare_jax_and_py(out_fg, [])
 
 
@@ -228,24 +228,24 @@ def test_jax_IncSubtensor_boolean_indexing_reexpressible():
     rng = np.random.default_rng(213234)
     x_np = rng.uniform(-1, 1, size=(4, 5)).astype(config.floatX)
 
-    x_at = at.matrix("x")
-    mask_at = at.as_tensor(x_at) > 0
-    out_at = at_subtensor.set_subtensor(x_at[mask_at], 0.0)
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedIncSubtensor)
-    out_fg = FunctionGraph([x_at], [out_at])
+    x_pt = pt.matrix("x")
+    mask_pt = pt.as_tensor(x_pt) > 0
+    out_pt = pt_subtensor.set_subtensor(x_pt[mask_pt], 0.0)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    out_fg = FunctionGraph([x_pt], [out_pt])
     compare_jax_and_py(out_fg, [x_np])
 
-    mask_at = at.as_tensor(x_at) > 0
-    out_at = at_subtensor.inc_subtensor(x_at[mask_at], 1.0)
-    assert isinstance(out_at.owner.op, at_subtensor.AdvancedIncSubtensor)
-    out_fg = FunctionGraph([x_at], [out_at])
+    mask_pt = pt.as_tensor(x_pt) > 0
+    out_pt = pt_subtensor.inc_subtensor(x_pt[mask_pt], 1.0)
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor)
+    out_fg = FunctionGraph([x_pt], [out_pt])
     compare_jax_and_py(out_fg, [x_np])
 
 
 def test_boolean_indexing_set_or_inc_not_applicable():
     """Test that `boolean_indexing_set_or_inc` does not return an invalid replacement in cases where it doesn't apply."""
-    x = at.vector("x")
-    mask = at.as_tensor(x) > 0
-    out = at_subtensor.set_subtensor(x[mask], [0, 1, 2])
+    x = pt.vector("x")
+    mask = pt.as_tensor(x) > 0
+    out = pt_subtensor.set_subtensor(x[mask], [0, 1, 2])
     fg = FunctionGraph([x], [out])
     assert boolean_indexing_set_or_inc.transform(fg, fg.outputs[0].owner) is None

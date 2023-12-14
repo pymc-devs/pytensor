@@ -14,8 +14,8 @@ from pytensor.tensor.type import TensorType
 
 class ProdOp(Op):
     def make_node(self, x, y):
-        x = at.as_tensor_variable(x)
-        y = at.as_tensor_variable(y)
+        x = pt.as_tensor_variable(x)
+        y = pt.as_tensor_variable(y)
         outdim = x.type.ndim
         output = TensorType(
             dtype=pytensor.scalar.upcast(x.dtype, y.dtype), shape=(None,) * outdim
@@ -39,8 +39,8 @@ class ProdOp(Op):
 
 class SumDiffOp(Op):
     def make_node(self, x, y):
-        x = at.as_tensor_variable(x)
-        y = at.as_tensor_variable(y)
+        x = pt.as_tensor_variable(x)
+        y = pt.as_tensor_variable(y)
         outdim = x.type.ndim
         output1 = TensorType(
             dtype=pytensor.scalar.upcast(x.dtype, y.dtype), shape=(None,) * outdim
@@ -62,20 +62,16 @@ class SumDiffOp(Op):
     def grad(self, inputs, output_grads):
         og1, og2 = output_grads
         if og1 is None:
-            og1 = at.zeros_like(og2)
+            og1 = pt.zeros_like(og2)
         if og2 is None:
-            og2 = at.zeros_like(og1)
+            og2 = pt.zeros_like(og1)
         return [og1 + og2, og1 - og2]
 
 
 # 3. Testing apparatus
-
-import numpy as np
-
 from tests import unittest_tools as utt
-from pytensor import tensor as at
+from pytensor import tensor as pt
 from pytensor.graph.basic import Apply
-from pytensor.graph.op import Op
 from pytensor.tensor.type import dmatrix, matrix
 
 
@@ -182,8 +178,8 @@ def infer_shape_numpy_dot(fgraph, node, input_shapes):
 
 
 @as_op(
-    itypes=[at.fmatrix, at.fmatrix],
-    otypes=[at.fmatrix],
+    itypes=[pt.fmatrix, pt.fmatrix],
+    otypes=[pt.fmatrix],
     infer_shape=infer_shape_numpy_dot,
 )
 def numpy_add(a, b):
@@ -197,8 +193,8 @@ def infer_shape_numpy_add_sub(fgraph, node, input_shapes):
 
 
 @as_op(
-    itypes=[at.fmatrix, at.fmatrix],
-    otypes=[at.fmatrix],
+    itypes=[pt.fmatrix, pt.fmatrix],
+    otypes=[pt.fmatrix],
     infer_shape=infer_shape_numpy_add_sub,
 )
 def numpy_add(a, b):
@@ -206,8 +202,8 @@ def numpy_add(a, b):
 
 
 @as_op(
-    itypes=[at.fmatrix, at.fmatrix],
-    otypes=[at.fmatrix],
+    itypes=[pt.fmatrix, pt.fmatrix],
+    otypes=[pt.fmatrix],
     infer_shape=infer_shape_numpy_add_sub,
 )
 def numpy_sub(a, b):

@@ -5,14 +5,14 @@ import pytensor
 from pytensor import function
 from pytensor.compile.mode import Mode
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.math import all as at_all
-from pytensor.tensor.math import any as at_any
+from pytensor.tensor.math import all as pt_all
+from pytensor.tensor.math import any as pt_any
 from pytensor.tensor.math import argmax, argmin
-from pytensor.tensor.math import max as at_max
+from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import max_and_argmax, mean
-from pytensor.tensor.math import min as at_min
+from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.math import prod, std
-from pytensor.tensor.math import sum as at_sum
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.math import var
 from pytensor.tensor.type import dtensor3
 
@@ -168,15 +168,15 @@ class TestKeepDims:
     @pytest.mark.parametrize(
         "op",
         [
-            at_sum,
+            pt_sum,
             prod,
             mean,
             var,
             std,
-            at_all,
-            at_any,
-            at_max,
-            at_min,
+            pt_all,
+            pt_any,
+            pt_max,
+            pt_min,
         ],
     )
     def test_free_axis(self, axis, op):

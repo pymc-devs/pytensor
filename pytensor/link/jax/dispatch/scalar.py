@@ -27,6 +27,7 @@ from pytensor.scalar.math import (
     Erfcx,
     Erfinv,
     Iv,
+    Ive,
     Log1mexp,
     Psi,
     TriGamma,
@@ -265,6 +266,13 @@ def jax_funcify_Iv(op, **kwargs):
         return ive(v, x) / jnp.exp(-jnp.abs(jnp.real(x)))
 
     return iv
+
+
+@jax_funcify.register(Ive)
+def jax_funcify_Ive(op, **kwargs):
+    ive = try_import_tfp_jax_op(op, jax_op_name="bessel_ive")
+
+    return ive
 
 
 @jax_funcify.register(Log1mexp)

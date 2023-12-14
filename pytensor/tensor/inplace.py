@@ -314,6 +314,11 @@ def iv_inplace(v, x):
 
 
 @scalar_elemwise
+def ive_inplace(v, x):
+    """Exponentially scaled modified Bessel function of the first kind of order v (real)."""
+
+
+@scalar_elemwise
 def sigmoid_inplace(x):
     """Logistic sigmoid function (1 / (1 + exp(-x)), also known as expit or inverse logit"""
 

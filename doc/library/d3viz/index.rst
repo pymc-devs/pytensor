@@ -49,8 +49,8 @@ hidden layer and a softmax output layer.
 
 .. code:: python
 
-    import pytensor as th
-    import pytensor.tensor as at
+    import pytensor
+    import pytensor.tensor as pt
     import numpy as np
 
     ninputs = 1000
@@ -59,16 +59,16 @@ hidden layer and a softmax output layer.
     nhiddens = 50
 
     rng = np.random.RandomState(0)
-    x = at.dmatrix('x')
-    wh = th.shared(rng.normal(0, 1, (nfeatures, nhiddens)), borrow=True)
-    bh = th.shared(np.zeros(nhiddens), borrow=True)
-    h = at.sigmoid(at.dot(x, wh) + bh)
+    x = pt.dmatrix('x')
+    wh = pytensor.shared(rng.normal(0, 1, (nfeatures, nhiddens)), borrow=True)
+    bh = pytensor.shared(np.zeros(nhiddens), borrow=True)
+    h = pt.sigmoid(pt.dot(x, wh) + bh)
 
-    wy = th.shared(rng.normal(0, 1, (nhiddens, noutputs)))
-    by = th.shared(np.zeros(noutputs), borrow=True)
-    y = at.special.softmax(at.dot(h, wy) + by)
+    wy = pytensor.shared(rng.normal(0, 1, (nhiddens, noutputs)))
+    by = pytensor.shared(np.zeros(noutputs), borrow=True)
+    y = pt.special.softmax(pt.dot(h, wy) + by)
 
-    predict = th.function([x], y)
+    predict = pytensor.function([x], y)
 
 The function ``predict`` outputs the probability of 10 classes. You can
 visualize it with :py:func:`pytensor.printing.pydotprint` as follows:
@@ -151,7 +151,7 @@ random data:
 
 .. code:: python
 
-    predict_profiled = th.function([x], y, profile=True)
+    predict_profiled = pytensor.function([x], y, profile=True)
 
     x_val = rng.normal(0, 1, (ninputs, nfeatures))
     y_val = predict_profiled(x_val)
@@ -209,12 +209,12 @@ node defines a nested graph, which will be visualized accordingly by ``d3viz``.
 
 .. code:: python
 
-    x, y, z = at.scalars('xyz')
-    e = at.sigmoid((x + y + z)**2)
-    op = th.compile.builders.OpFromGraph([x, y, z], [e])
+    x, y, z = pt.scalars('xyz')
+    e = pt.sigmoid((x + y + z)**2)
+    op = pytensor.compile.builders.OpFromGraph([x, y, z], [e])
 
     e2 = op(x, y, z) + op(z, y, x)
-    f = th.function([x, y, z], e2)
+    f = pytensor.function([x, y, z], e2)
 
 .. code:: python
 
@@ -238,13 +238,13 @@ the following example.
 
 .. code:: python
 
-    x, y, z = at.scalars('xyz')
+    x, y, z = pt.scalars('xyz')
     e = x * y
-    op = th.compile.builders.OpFromGraph([x, y], [e])
+    op = pytensor.compile.builders.OpFromGraph([x, y], [e])
     e2 = op(x, y) + z
-    op2 = th.compile.builders.OpFromGraph([x, y, z], [e2])
+    op2 = pytensor.compile.builders.OpFromGraph([x, y, z], [e2])
     e3 = op2(x, y, z) + z
-    f = th.function([x, y, z], [e3])
+    f = pytensor.function([x, y, z], [e3])
 
 .. code:: python
 

@@ -2,13 +2,14 @@ import numpy as np
 import pytest
 
 import pytensor
-import pytensor.scalar as aes
-import pytensor.tensor as at
+import pytensor.scalar as ps
+import pytensor.tensor as pt
 from pytensor import shared
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
+from pytensor.graph import FunctionGraph, vectorize_graph
 from pytensor.graph.basic import Constant, Variable, ancestors
 from pytensor.graph.rewriting.basic import check_stack_trace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
@@ -17,10 +18,12 @@ from pytensor.graph.type import Type
 from pytensor.raise_op import Assert
 from pytensor.tensor import inplace
 from pytensor.tensor.basic import Alloc, MakeVector, _convert_to_int8, make_vector
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, add, dot, exp, sqr
 from pytensor.tensor.rewriting.subtensor import (
     local_replace_AdvancedSubtensor,
+    local_subtensor_make_vector,
     local_subtensor_shape_constant,
 )
 from pytensor.tensor.shape import (
@@ -96,22 +99,22 @@ def test_local_replace_AdvancedSubtensor(indices, is_none):
 
     Y = X[indices]
 
-    res_at = local_replace_AdvancedSubtensor.transform(None, Y.owner)
+    res_pt = local_replace_AdvancedSubtensor.transform(None, Y.owner)
 
     if is_none:
-        assert res_at is None
+        assert res_pt is None
     else:
-        (res_at,) = res_at
+        (res_pt,) = res_pt
 
         assert not any(
             isinstance(v.owner.op, AdvancedSubtensor)
-            for v in ancestors([res_at])
+            for v in ancestors([res_pt])
             if v.owner
         )
 
         inputs = [X] + [i for i in indices if isinstance(i, Variable)]
 
-        res_fn = function(inputs, res_at, mode=Mode("py", None, None))
+        res_fn = function(inputs, res_pt, mode=Mode("py", None, None))
         exp_res_fn = function(inputs, Y, mode=Mode("py", None, None))
 
         # Make sure that the expected result graph has an `AdvancedSubtensor`
@@ -158,7 +161,7 @@ def test_local_useless_inc_subtensor_increment_zeros():
     r"""Make sure we remove `IncSubtensor`\s that are increments on entire zero arrays."""
     y = matrix("y")
 
-    s = at.zeros((2, 2))[:, :]
+    s = pt.zeros((2, 2))[:, :]
     o_shape = inc_subtensor(s, specify_shape(y, s.shape))
 
     mode = get_default_mode().including("local_useless_inc_subtensor")
@@ -195,7 +198,7 @@ def test_local_useless_inc_subtensor_no_opt():
     assert any(isinstance(n.op, IncSubtensor) for n in topo)
 
     # This is an increment with a non-zero target array
-    s = at.ones((2, 2))[:, :]
+    s = pt.ones((2, 2))[:, :]
     o_shape = inc_subtensor(s, specify_shape(y, s.shape))
 
     f_shape = function([y], o_shape, mode=mode)
@@ -206,7 +209,7 @@ def test_local_useless_inc_subtensor_no_opt():
 
 class TestLocalUselessSubtensor:
     x = matrix("x")
-    s = aes.int32("s")
+    s = ps.int32("s")
     mode = mode_opt.including(
         "local_useless_subtensor", "local_useless_AdvancedSubtensor1"
     )
@@ -305,7 +308,7 @@ class TestLocalUselessSubtensor:
                 lambda x: (
                     slice(
                         0,
-                        at.scalar_from_tensor(x.shape[0])
+                        pt.scalar_from_tensor(x.shape[0])
                         if isinstance(x, Variable)
                         else x.shape[0],
                     ),
@@ -392,11 +395,11 @@ class TestLocalUselessSubtensor:
             ([1, 0], False),
             ([0, 0], False),
             ([0, 0, 1], False),
-            (at.arange(2), True),
-            (at.arange(0, 2), True),
-            (at.arange(0, 2, 2), False),
-            (at.arange(0, 2, -1), False),
-            (at.arange(1, 2), False),
+            (pt.arange(2), True),
+            (pt.arange(0, 2), True),
+            (pt.arange(0, 2, 2), False),
+            (pt.arange(0, 2, -1), False),
+            (pt.arange(1, 2), False),
         ],
     )
     def test_local_useless_subtensor_6(self, idx, res):
@@ -681,7 +684,7 @@ class TestLocalSubtensorMakeVector:
     def test_idx_symbolic(self):
         x, y, z = iscalars("xyz")
         v = MakeVector("int32")(x, y, z)
-        idx = at.as_tensor([0], dtype=np.int64)
+        idx = pt.as_tensor([0], dtype=np.int64)
         f = function([x, y, z], v[idx], mode=self.mode)
 
         opt_fgraph = f.maker.fgraph
@@ -764,6 +767,17 @@ class TestLocalSubtensorMakeVector:
             f = function([x, y, z], v_subtensor, mode=mode)
             assert check_stack_trace(f, ops_to_check="all")
 
+    def test_empty_subtensor(self):
+        x, y = lscalars("xy")
+        v = make_vector(x, y)
+        out = v[()]
+
+        fgraph = FunctionGraph(outputs=[out], clone=False)
+        node = fgraph.outputs[0].owner
+        assert isinstance(node.op, Subtensor)
+
+        assert local_subtensor_make_vector.transform(fgraph, node) == [v]
+
 
 class TestLocalSubtensorLift:
     def test_basic(self):
@@ -807,7 +821,7 @@ class TestLocalSubtensorLift:
         assert isinstance(prog[0].op, Subtensor)
         assert isinstance(prog[1].op, DimShuffle)
         assert isinstance(prog[2].op, Subtensor)
-        assert isinstance(prog[3].op.scalar_op, aes.Composite)  # Composite{add,add}
+        assert isinstance(prog[3].op.scalar_op, ps.Composite)  # Composite{add,add}
         assert len(prog) == 4
 
         # Check stacktrace was copied over correctly after opt was applied
@@ -827,7 +841,7 @@ class TestLocalSubtensorLift:
         assert isinstance(prog[0].op, Subtensor)
         assert isinstance(prog[1].op, DimShuffle)
         assert isinstance(prog[2].op, Subtensor)
-        assert isinstance(prog[3].op.scalar_op, aes.Composite)  # Composite{add,add}
+        assert isinstance(prog[3].op.scalar_op, ps.Composite)  # Composite{add,add}
         assert len(prog) == 4
 
         # Check stacktrace was copied over correctly after opt was applied
@@ -884,7 +898,7 @@ class TestLocalSubtensorLift:
 
         prog = f.maker.fgraph.toposort()
         assert isinstance(prog[0].op, DimShuffle)
-        assert isinstance(prog[1].op.scalar_op, aes.Composite)  # Composite{add,exp}
+        assert isinstance(prog[1].op.scalar_op, ps.Composite)  # Composite{add,exp}
         # first subtensor
         assert isinstance(prog[2].op, Subtensor)
         assert len(prog) == 3
@@ -905,7 +919,7 @@ class TestLocalSubtensorLift:
         prog = f.maker.fgraph.toposort()
         assert isinstance(prog[0].op, Subtensor)
         # Composite{add,exp}
-        assert isinstance(prog[1].op.scalar_op, aes.Composite)
+        assert isinstance(prog[1].op.scalar_op, ps.Composite)
         assert len(prog) == 2
         f([1, 2, 3], 4)  # let debugmode test something
 
@@ -1558,7 +1572,7 @@ class TestLocalAdvSub1AdvIncSub1:
 
         for y, out in zip(ys, outs):
             f = function([x, y, idx], out, self.mode)
-            assert check_stack_trace(f, ops_to_check=(Assert, aes.Cast))
+            assert check_stack_trace(f, ops_to_check=(Assert, ps.Cast))
 
 
 class TestSubtensorAllocRewrites:
@@ -1573,8 +1587,8 @@ class TestSubtensorAllocRewrites:
     def test_setsubtensor_allocs0(self):
         x = matrix()
         y = matrix()
-        x0 = at.zeros_like(x)
-        y0 = at.zeros_like(y)
+        x0 = pt.zeros_like(x)
+        y0 = pt.zeros_like(y)
         z = set_subtensor(x0[:4], y0)
         f = function([x, y], z, mode=self.mode)
         assert all(
@@ -1583,8 +1597,8 @@ class TestSubtensorAllocRewrites:
 
     def test_setsubtensor_allocs1(self):
         y = matrix()
-        x0 = at.constant(np.asarray(np.zeros((4, 4)), dtype=config.floatX))
-        y0 = at.zeros_like(y)
+        x0 = pt.constant(np.asarray(np.zeros((4, 4)), dtype=config.floatX))
+        y0 = pt.zeros_like(y)
         z = set_subtensor(x0[:4], y0)
         f = function([y], z, mode=self.mode)
         assert all(
@@ -1593,8 +1607,8 @@ class TestSubtensorAllocRewrites:
 
     def test_setsubtensor_allocs1t(self):
         y = matrix()
-        x0 = at.constant(np.asarray(np.zeros((4, 4)), dtype=config.floatX))
-        y0 = at.zeros_like(y)
+        x0 = pt.constant(np.asarray(np.zeros((4, 4)), dtype=config.floatX))
+        y0 = pt.zeros_like(y)
         z = set_subtensor(x0[:4], y0.T)
         f = function([y], z, mode=mode_opt)
         assert all(
@@ -1603,8 +1617,8 @@ class TestSubtensorAllocRewrites:
 
     def test_setsubtensor_allocs2(self):
         x = matrix()
-        y0 = at.constant(np.asarray(np.zeros_like((4, 4)), dtype=config.floatX))
-        x0 = at.zeros_like(x)
+        y0 = pt.constant(np.asarray(np.zeros_like((4, 4)), dtype=config.floatX))
+        x0 = pt.zeros_like(x)
         z = set_subtensor(x0[:4], y0)
         f = function([x], z, mode=self.mode)
         assert all(
@@ -1614,7 +1628,7 @@ class TestSubtensorAllocRewrites:
     def test_incsubtensor_allocs0(self):
         x = matrix()
         y = matrix()
-        y0 = at.zeros_like(y)
+        y0 = pt.zeros_like(y)
         z = inc_subtensor(x[:4], y0)
         f = function([x, y], z, mode=self.mode)
         assert all(
@@ -1624,7 +1638,7 @@ class TestSubtensorAllocRewrites:
     def test_incsubtensor_allocs0t(self):
         x = matrix()
         y = matrix()
-        y0 = at.zeros_like(y)
+        y0 = pt.zeros_like(y)
         z = inc_subtensor(x[:4], y0.T)
         f = function([x, y], z, mode=mode_opt)
         assert all(
@@ -1633,7 +1647,7 @@ class TestSubtensorAllocRewrites:
 
     def test_incsubtensor_allocs1(self):
         x = matrix()
-        y0 = at.constant(np.asarray(np.zeros_like((4, 4)), dtype=config.floatX))
+        y0 = pt.constant(np.asarray(np.zeros_like((4, 4)), dtype=config.floatX))
         z = inc_subtensor(x[:4], y0)
         f = function([x], z, mode=self.mode)
         assert all(
@@ -1641,7 +1655,7 @@ class TestSubtensorAllocRewrites:
         )
 
     def test_incsubtensor_x_zeros(self):
-        x = at.constant(np.asarray(np.zeros((4, 4)), dtype=config.floatX))
+        x = pt.constant(np.asarray(np.zeros((4, 4)), dtype=config.floatX))
         y = matrix()
         z = inc_subtensor(x[:4], y)
         f = function([y], z)
@@ -1658,7 +1672,7 @@ class TestSubtensorAllocRewrites:
         # also check the flag doesn't get set if first input is not zeros:
         not_all_zeros = np.zeros((4, 4))
         not_all_zeros[1, 0] = 0.001
-        x = at.constant(np.asarray(not_all_zeros, dtype=config.floatX))
+        x = pt.constant(np.asarray(not_all_zeros, dtype=config.floatX))
         y = matrix()
         z = inc_subtensor(x[:4], y)
         f = function([y], z)
@@ -1673,7 +1687,7 @@ class TestSubtensorAllocRewrites:
     def test_advancedincsubtensor1_allocs0(self):
         x = matrix()
         y = matrix()
-        y0 = at.zeros_like(y)
+        y0 = pt.zeros_like(y)
         z = inc_subtensor(x[[0, 1, 2, 3]], y0)
         f = function([x, y], z, mode=self.mode)
         assert all(
@@ -1684,7 +1698,7 @@ class TestSubtensorAllocRewrites:
     def test_advancedincsubtensor1_allocs0t(self):
         x = matrix()
         y = matrix()
-        y0 = at.zeros_like(y)
+        y0 = pt.zeros_like(y)
         z = inc_subtensor(x[[0, 1, 2, 3]], y0.T)
         f = function([x, y], z, mode=mode_opt)
         assert all(
@@ -1694,7 +1708,7 @@ class TestSubtensorAllocRewrites:
 
     def test_advancedincsubtensor1_allocs1(self):
         x = matrix()
-        y0 = at.constant(np.asarray(np.zeros_like((4, 4)), dtype=config.floatX))
+        y0 = pt.constant(np.asarray(np.zeros_like((4, 4)), dtype=config.floatX))
         z = inc_subtensor(x[[0, 1, 2, 3]], y0)
         f = function([x], z, mode=self.mode)
         assert all(
@@ -1705,7 +1719,7 @@ class TestSubtensorAllocRewrites:
     def test_advancedincsubtensor_allocs0(self):
         x = matrix()
         y = matrix()
-        y0 = at.zeros_like(y)
+        y0 = pt.zeros_like(y)
         z = inc_subtensor(x[[[0, 0], [1, 1]], [[0, 1], [0, 1]]], y0)
         f = function([x, y], z, mode=self.mode)
         assert all(
@@ -1716,7 +1730,7 @@ class TestSubtensorAllocRewrites:
     def test_advancedincsubtensor_allocs0t(self):
         x = matrix()
         y = matrix()
-        y0 = at.zeros_like(y)
+        y0 = pt.zeros_like(y)
         z = inc_subtensor(x[[[0, 0], [1, 1]], [[0, 1], [0, 1]]], y0.T)
         f = function([x, y], z, mode=mode_opt)
         assert all(
@@ -1726,7 +1740,7 @@ class TestSubtensorAllocRewrites:
 
     def test_advancedincsubtensor_allocs1(self):
         x = matrix()
-        y0 = at.constant(np.asarray(np.zeros_like((2, 2)), dtype=config.floatX))
+        y0 = pt.constant(np.asarray(np.zeros_like((2, 2)), dtype=config.floatX))
         z = inc_subtensor(x[[[0, 0], [1, 1]], [[0, 1], [0, 1]]], y0)
         f = function([x], z, mode=self.mode)
         assert all(
@@ -1747,11 +1761,11 @@ class TestSubtensorAllocRewrites:
             for _e2 in [(v2, vv2, vv3), (m2, vm2, vm3)]:
                 for p in [0, 1]:
                     if p == 0:
-                        e1 = at.zeros_like(_e1[0])
+                        e1 = pt.zeros_like(_e1[0])
                         e2 = _e2[0]
                     else:
                         e1 = _e1[0]
-                        e2 = at.zeros_like(_e2[0])
+                        e2 = pt.zeros_like(_e2[0])
                     o = dot(e1, e2)
                     f = function([_e1[0], _e2[0]], o, mode=self.mode)
                     f(_e1[1], _e2[1])
@@ -1785,7 +1799,7 @@ def test_local_IncSubtensor_serialize():
     adds = [
         n
         for n in topo
-        if isinstance(n.op, Elemwise) and isinstance(n.op.scalar_op, aes.Add)
+        if isinstance(n.op, Elemwise) and isinstance(n.op.scalar_op, ps.Add)
     ]
     for a in adds:
         assert not any(
@@ -1867,9 +1881,9 @@ def test_local_subtensor_of_alloc():
         xval = np.zeros(s, dtype=config.floatX)
         yval = np.arange(s[1], dtype=config.floatX)
 
-        for y in [shared(yval), at.constant([1.0])]:
+        for y in [shared(yval), pt.constant([1.0])]:
             # The rows of yx are copies of y
-            yx = at.alloc(y, x.shape[0], x.shape[1])
+            yx = pt.alloc(y, x.shape[0], x.shape[1])
 
             # Slice of each row
             z_mat = yx[:, 3:]
@@ -2139,10 +2153,10 @@ def test_local_subtensor_SpecifyShape_lift_fail(x, s, idx):
     ],
 )
 def test_local_join_subtensors(axis, slices_fn, expected_nodes):
-    x = at.dmatrix("x")
-    slice_scalar = at.iscalar("slice_scalar")
+    x = pt.dmatrix("x")
+    slice_scalar = pt.iscalar("slice_scalar")
     slices = slices_fn(slice_scalar)
-    y = at.concatenate([x[slice] for slice in slices], axis=axis)
+    y = pt.concatenate([x[slice] for slice in slices], axis=axis)
     f = pytensor.function(
         [x, slice_scalar],
         y,
@@ -2165,8 +2179,8 @@ def test_local_uint_constant_indices():
     rng = np.random.default_rng(20900)
 
     # Subtensor, don't convert
-    x = at.vector("x")
-    idx = at.as_tensor_variable(np.array(-1, np.int64))
+    x = pt.vector("x")
+    idx = pt.as_tensor_variable(np.array(-1, np.int64))
     z = x[idx]
 
     z_fn = pytensor.function([x], z, mode=mode)
@@ -2179,8 +2193,8 @@ def test_local_uint_constant_indices():
     assert new_index.type.dtype == "int64"
 
     # `Subtensor`, one index, convert
-    x = at.vector("x")
-    idx = at.as_tensor_variable(np.array(1, np.int64))
+    x = pt.vector("x")
+    idx = pt.as_tensor_variable(np.array(1, np.int64))
     z = x[idx]
 
     z_fn = pytensor.function([x], z, mode=mode)
@@ -2193,8 +2207,8 @@ def test_local_uint_constant_indices():
     assert new_index.type.dtype == "uint8"
 
     # `Subtensor`, two indices, one slice, convert
-    x = at.matrix("x")
-    indices = (at.as_tensor_variable(np.array(1, np.int64)), slice(None, 10))
+    x = pt.matrix("x")
+    indices = (pt.as_tensor_variable(np.array(1, np.int64)), slice(None, 10))
     z = x[indices]
 
     z_fn = pytensor.function([x], z, mode=mode)
@@ -2207,9 +2221,9 @@ def test_local_uint_constant_indices():
     assert new_index.type.dtype == "uint8"
 
     # `AdvancedSubtensor`, two indices, one symbolic slice, convert
-    x = at.matrix("x")
+    x = pt.matrix("x")
     indices = (
-        at.as_tensor_variable(np.array(1, np.int64)),
+        pt.as_tensor_variable(np.array(1, np.int64)),
         make_slice(slice(None, 10)),
     )
     z = x[indices]
@@ -2223,8 +2237,8 @@ def test_local_uint_constant_indices():
     assert new_index.type.dtype == "uint8"
 
     # `AdvancedSubtensor1`, convert
-    x = at.vector("x")
-    idx = at.as_tensor_variable(rng.integers(0, 10, size=10).astype(np.int64))
+    x = pt.vector("x")
+    idx = pt.as_tensor_variable(rng.integers(0, 10, size=10).astype(np.int64))
     z = x[idx]
 
     z_fn = pytensor.function([x], z, mode=mode)
@@ -2236,8 +2250,8 @@ def test_local_uint_constant_indices():
     assert new_index.type.dtype == "uint8"
 
     # AdvancedSubtensor, empty, convert
-    x = at.matrix("x")
-    idx = at.as_tensor_variable(1, dtype=np.int64)
+    x = pt.matrix("x")
+    idx = pt.as_tensor_variable(1, dtype=np.int64)
     z = x[idx, []]
 
     z_fn = pytensor.function([x], z, mode=mode)
@@ -2249,8 +2263,8 @@ def test_local_uint_constant_indices():
     assert new_index.type.dtype == "uint8"
 
     # AdvancedSubtensor, bool, don't convert
-    x = at.matrix("x")
-    idx = at.as_tensor_variable(np.array([True]), dtype=bool)
+    x = pt.matrix("x")
+    idx = pt.as_tensor_variable(np.array([True]), dtype=bool)
     z = x[idx, []]
 
     z_fn = pytensor.function([x], z, mode=mode)
@@ -2262,9 +2276,9 @@ def test_local_uint_constant_indices():
     assert new_index.type.dtype == "bool"
 
     # `IncSubtensor`, convert
-    x = at.vector("x")
-    y = at.scalar("y")
-    idx = at.as_tensor_variable(1, dtype=np.int64)
+    x = pt.vector("x")
+    y = pt.scalar("y")
+    idx = pt.as_tensor_variable(1, dtype=np.int64)
     z = inc_subtensor(x[idx], y)
 
     z_fn = pytensor.function([x, y], z, mode=mode)
@@ -2276,9 +2290,9 @@ def test_local_uint_constant_indices():
     assert new_index.type.dtype == "uint8"
 
     # `AdvancedIncSubtensor1`, convert
-    x = at.vector("x")
-    y = at.vector("y")
-    idx = at.as_tensor_variable(rng.integers(0, 10, size=10).astype(np.int64))
+    x = pt.vector("x")
+    y = pt.vector("y")
+    idx = pt.as_tensor_variable(rng.integers(0, 10, size=10).astype(np.int64))
     z = advanced_inc_subtensor1(x, y, idx)
 
     z_fn = pytensor.function([x, y], z, mode=mode)
@@ -2290,8 +2304,8 @@ def test_local_uint_constant_indices():
     assert new_index.type.dtype == "uint8"
 
     # `AdvancedIncSubtensor1`, convert
-    x = at.vector("x")
-    idx = at.as_tensor_variable(rng.integers(0, 10, size=10).astype(np.int64))
+    x = pt.vector("x")
+    idx = pt.as_tensor_variable(rng.integers(0, 10, size=10).astype(np.int64))
     z = x[idx, None]
 
     z_fn = pytensor.function([x], z, mode=mode)
@@ -2301,3 +2315,98 @@ def test_local_uint_constant_indices():
     new_index = subtensor_node.inputs[1]
     assert isinstance(new_index, Constant)
     assert new_index.type.dtype == "uint8"
+
+
+@pytest.mark.parametrize("set_instead_of_inc", (True, False))
+def test_local_blockwise_advanced_inc_subtensor(set_instead_of_inc):
+    core_x = tensor("x", shape=(6,))
+    core_y = tensor("y", shape=(3,))
+    core_idxs = [0, 2, 4]
+    if set_instead_of_inc:
+        core_graph = set_subtensor(core_x[core_idxs], core_y)
+    else:
+        core_graph = inc_subtensor(core_x[core_idxs], core_y)
+
+    # Only x is batched
+    x = tensor("x", shape=(5, 2, 6))
+    y = tensor("y", shape=(3,))
+    out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
+    assert isinstance(out.owner.op, Blockwise)
+
+    fn = pytensor.function([x, y], out, mode="FAST_RUN")
+    assert not any(
+        isinstance(node.op, Blockwise) for node in fn.maker.fgraph.apply_nodes
+    )
+
+    test_x = np.ones(x.type.shape, dtype=x.type.dtype)
+    test_y = np.array([5, 6, 7]).astype(dtype=core_y.type.dtype)
+    expected_out = test_x.copy()
+    if set_instead_of_inc:
+        expected_out[:, :, core_idxs] = test_y
+    else:
+        expected_out[:, :, core_idxs] += test_y
+    np.testing.assert_allclose(fn(test_x, test_y), expected_out)
+
+    # Only y is batched
+    x = tensor("y", shape=(6,))
+    y = tensor("y", shape=(2, 3))
+    out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
+    assert isinstance(out.owner.op, Blockwise)
+
+    fn = pytensor.function([x, y], out, mode="FAST_RUN")
+    assert not any(
+        isinstance(node.op, Blockwise) for node in fn.maker.fgraph.apply_nodes
+    )
+
+    test_x = np.ones(x.type.shape, dtype=x.type.dtype)
+    test_y = np.array([[3, 3, 3], [5, 6, 7]]).astype(dtype=core_y.type.dtype)
+    expected_out = np.ones((2, *x.type.shape))
+    if set_instead_of_inc:
+        expected_out[:, core_idxs] = test_y
+    else:
+        expected_out[:, core_idxs] += test_y
+    np.testing.assert_allclose(fn(test_x, test_y), expected_out)
+
+    # Both x and y are batched, and do not need to be broadcasted
+    x = tensor("y", shape=(2, 6))
+    y = tensor("y", shape=(2, 3))
+    out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
+    assert isinstance(out.owner.op, Blockwise)
+
+    fn = pytensor.function([x, y], out, mode="FAST_RUN")
+    assert not any(
+        isinstance(node.op, Blockwise) for node in fn.maker.fgraph.apply_nodes
+    )
+
+    test_x = np.ones(x.type.shape, dtype=x.type.dtype)
+    test_y = np.array([[5, 6, 7], [3, 3, 3]]).astype(dtype=core_y.type.dtype)
+    expected_out = test_x.copy()
+    if set_instead_of_inc:
+        expected_out[:, core_idxs] = test_y
+    else:
+        expected_out[:, core_idxs] += test_y
+    np.testing.assert_allclose(fn(test_x, test_y), expected_out)
+
+    # Both x and y are batched, but must be broadcasted
+    x = tensor("y", shape=(5, 1, 6))
+    y = tensor("y", shape=(1, 2, 3))
+    out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
+    assert isinstance(out.owner.op, Blockwise)
+
+    fn = pytensor.function([x, y], out, mode="FAST_RUN")
+    assert not any(
+        isinstance(node.op, Blockwise) for node in fn.maker.fgraph.apply_nodes
+    )
+
+    test_x = np.ones(x.type.shape, dtype=x.type.dtype)
+    test_y = np.array([[[5, 6, 7], [3, 3, 3]]]).astype(dtype=core_y.type.dtype)
+    final_shape = (
+        *np.broadcast_shapes(x.type.shape[:-1], y.type.shape[:-1]),
+        x.type.shape[-1],
+    )
+    expected_out = np.broadcast_to(test_x, final_shape).copy()
+    if set_instead_of_inc:
+        expected_out[:, :, core_idxs] = test_y
+    else:
+        expected_out[:, :, core_idxs] += test_y
+    np.testing.assert_allclose(fn(test_x, test_y), expected_out)
