@@ -256,7 +256,7 @@ def vectorize_graph(
         import pytensor
         import pytensor.tensor as pt
 
-        from pytensor.graph import vectorize
+        from pytensor.graph import vectorize_graph
 
         # Original graph
         x = pt.vector("x")
@@ -264,7 +264,7 @@ def vectorize_graph(
 
         # Vectorized graph
         new_x = pt.matrix("new_x")
-        new_y = vectorize(y, replace={x: new_x})
+        new_y = vectorize_graph(y, replace={x: new_x})
 
         fn = pytensor.function([new_x], new_y)
         fn([[0, 1, 2], [2, 1, 0]])
@@ -277,7 +277,7 @@ def vectorize_graph(
         import pytensor
         import pytensor.tensor as pt
 
-        from pytensor.graph import vectorize
+        from pytensor.graph import vectorize_graph
 
         # Original graph
         x = pt.vector("x")
@@ -286,7 +286,7 @@ def vectorize_graph(
 
         # Vectorized graph
         new_x = pt.matrix("new_x")
-        [new_y1, new_y2] = vectorize([y1, y2], replace={x: new_x})
+        [new_y1, new_y2] = vectorize_graph([y1, y2], replace={x: new_x})
 
         fn = pytensor.function([new_x], [new_y1, new_y2])
         fn([[-10, 0, 10], [-11, 0, 11]])
