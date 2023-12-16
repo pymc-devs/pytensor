@@ -31,11 +31,13 @@ from pytensor.tensor.basic import (
     constant,
     extract_constant,
     get_underlying_scalar_constant_value,
+    moveaxis,
     ones_like,
     register_infer_shape,
     switch,
     zeros_like,
 )
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays
@@ -215,6 +217,57 @@ def local_lift_transpose_through_dot(fgraph, node):
         # Copy over stack trace to output from result of dot-product
         copy_stack_trace(node.inputs[0], ret)
         return ret
+
+
+@register_stabilize
+@register_specialize
+@node_rewriter(tracks=[Blockwise])
+def local_batched_matmul_to_core_matmul(fgraph, node):
+    """Rewrite matmul where only one of the inputs has batch dimensions to a reshaped core matmul.
+
+    Example, if x has batch dimensions, but y not:
+    x @ y -> (x.reshape(-1, x.shape[-1]) @ y).reshape(*x.shape[:-1], y.shape[-1])
+
+    It also works when y has batch dimensions, but x not.
+    """
+
+    # Check whether we have a matmul operation in this node
+    if not (
+        isinstance(node.op.core_op, Dot)
+        and len(node.op.inputs_sig[0]) == 2
+        and len(node.op.inputs_sig[1]) == 2
+    ):
+        return None
+
+    x, y = node.inputs
+    batch_ndim = node.op.batch_ndim(node)
+
+    # Check if x has batch dimensions, but y not (or only broadcastable dimensions)
+    if any(not b_dim for b_dim in x.type.broadcastable[:-2]) and all(
+        y.type.broadcastable[:-2]
+    ):
+        x_stacked = x.reshape((-1, x.shape[-1]))
+        out_stacked = x_stacked @ y.squeeze(tuple(range(batch_ndim)))
+        out = out_stacked.reshape((*x.shape[:-1], y.shape[-1]))
+        return [out]
+
+    # Otherwise, check if y has batch dimension, but x not
+    elif any(not b_dim for b_dim in y.type.broadcastable[:-2]) and all(
+        x.type.broadcastable[:-2]
+    ):
+        # For the y batch case we need to first move the batch axes and then reshape
+        # y.shape == (*b, k, n)
+        y_tr = moveaxis(y, -2, 0)  # (k, *b, n)
+        y_stacked = y_tr.reshape((y.shape[-2], -1))  # (k, *b * n)
+        out_stacked = x.squeeze(tuple(range(batch_ndim))) @ y_stacked  # (m, *b * n)
+        out_stacked_tr = out_stacked.reshape(
+            (x.shape[-2], *y.shape[:-2], y.shape[-1])
+        )  # (m, *b, n)
+        out = moveaxis(out_stacked_tr, 0, -2)  # (*b, m, n)
+        return [out]
+
+    # Both x and y have batch dimensions, nothing to do here
+    return None
 
 
 def is_inverse_pair(node_op, prev_op, inv_pair):
