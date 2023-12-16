@@ -34,6 +34,7 @@ from pytensor.tensor import inplace
 from pytensor.tensor.basic import Alloc, constant, join, second, switch
 from pytensor.tensor.blas import Dot22, Gemv
 from pytensor.tensor.blas_c import CGemv
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, MaxAndArgmax, Prod, Sum, _conj
 from pytensor.tensor.math import abs as pt_abs
@@ -4427,3 +4428,51 @@ def test_polygamma_specialization():
     assert isinstance(fn_outs[0].owner.op.scalar_op, Psi)
     assert isinstance(fn_outs[1].owner.op.scalar_op, TriGamma)
     assert isinstance(fn_outs[2].owner.op.scalar_op, PolyGamma)
+
+
+@pytest.mark.skipif(
+    config.mode == "FAST_COMPILE",
+    reason="Rewrite is only relevant in FAST_RUN",
+)
+def test_local_batched_matmul_to_core_matmul():
+    rng = np.random.default_rng(seed=4433)
+
+    # x is batched but not y
+    x = pt.tensor("x", shape=(None, 3, 2), dtype="float64")
+    y = pt.tensor("y", shape=(2, 2), dtype="float64")
+    out = x @ y
+    assert isinstance(out.owner.op, Blockwise)
+
+    fn = pytensor.function([x, y], out)
+    assert not any(
+        isinstance(node.op, Blockwise) for node in fn.maker.fgraph.apply_nodes
+    )
+
+    x_test = rng.normal(size=(5, 3, 2))
+    y_test = rng.normal(size=(2, 2))
+    np.testing.assert_allclose(fn(x_test, y_test), x_test @ y_test)
+
+    # y is batched but not x
+    x = pt.tensor("x", shape=(1, 3, 2), dtype="float64")
+    y = pt.tensor("y", shape=(5, 2, 2), dtype="float64")
+    out = x @ y
+    assert isinstance(out.owner.op, Blockwise)
+
+    fn = pytensor.function([x, y], out)
+    assert not any(
+        isinstance(node.op, Blockwise) for node in fn.maker.fgraph.apply_nodes
+    )
+
+    x_test = rng.normal(size=(1, 3, 2))
+    y_test = rng.normal(size=(5, 2, 2))
+    np.testing.assert_allclose(fn(x_test, y_test), x_test @ y_test)
+
+    # Both x and y are batched, rewrite does not apply
+    x = pt.tensor("x", shape=(None, 3, 2), dtype="float64")
+    y = pt.tensor("y", shape=(5, 2, 2), dtype="float64")
+    out = x @ y
+
+    fn = pytensor.function([x, y], out)
+    x_test = rng.normal(size=(5, 3, 2))
+    y_test = rng.normal(size=(5, 2, 2))
+    np.testing.assert_allclose(fn(x_test, y_test), x_test @ y_test)
