@@ -154,11 +154,8 @@ def test_erfinv():
 @pytest.mark.parametrize(
     "op, test_values",
     [
-        (betaincinv, (3.0, 5.5, 0.7)),
         (erfcx, (0.7,)),
         (erfcinv, (0.7,)),
-        (gammaincinv, (5.5, 0.7)),
-        (gammainccinv, (5.5, 0.7)),
         (iv, (0.3, 0.7)),
     ],
 )
@@ -169,6 +166,31 @@ def test_tfp_ops(op, test_values):
 
     fg = FunctionGraph(inputs, [output])
     compare_jax_and_py(fg, test_values)
+
+
+def test_betaincinv():
+    a = vector("a", dtype="float32")
+    b = vector("b", dtype="float32")
+    x = vector("x", dtype="float32")
+    out = betaincinv(a, b, x)
+    fg = FunctionGraph([a, b, x], [out])
+    compare_jax_and_py(fg, [np.array([3.0, 5.5, 0.7])])
+
+
+def test_gammaincinv():
+    k = vector("k", dtype="float32")
+    x = vector("x", dtype="float32")
+    out = gammaincinv(k, x)
+    fg = FunctionGraph([k, x], [out])
+    compare_jax_and_py(fg, [np.array([5.5, 0.7])])
+
+
+def test_gammainccinv():
+    k = vector("k", dtype="float32")
+    x = vector("x", dtype="float32")
+    out = gammainccinv(k, x)
+    fg = FunctionGraph([k, x], [out])
+    compare_jax_and_py(fg, [np.array([5.5, 0.7])])
 
 
 def test_psi():
