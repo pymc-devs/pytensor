@@ -175,6 +175,14 @@ def test_betaincinv():
     out = betaincinv(a, b, x)
     fg = FunctionGraph([a, b, x], [out])
     compare_jax_and_py(fg, [np.array([3.0, 5.5, 0.7])])
+    compare_jax_and_py(
+        fg,
+        [
+            np.array([5.5, 7.0]),
+            np.array([5.5, 7.0]),
+            np.array([0.25, 0.7]),
+        ],
+    )
 
 
 def test_gammaincinv():
@@ -182,7 +190,7 @@ def test_gammaincinv():
     x = vector("x", dtype="float64")
     out = gammaincinv(k, x)
     fg = FunctionGraph([k, x], [out])
-    compare_jax_and_py(fg, [np.array([5.5, 0.7])])
+    compare_jax_and_py(fg, [np.array([5.5, 7.0]), np.array([0.25, 0.7])])
 
 
 def test_gammainccinv():
@@ -190,7 +198,7 @@ def test_gammainccinv():
     x = vector("x", dtype="float64")
     out = gammainccinv(k, x)
     fg = FunctionGraph([k, x], [out])
-    compare_jax_and_py(fg, [np.array([5.5, 0.7])])
+    compare_jax_and_py(fg, [np.array([5.5, 7.0]), np.array([0.25, 0.7])])
 
 
 def test_psi():
