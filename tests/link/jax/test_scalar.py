@@ -11,12 +11,15 @@ from pytensor.tensor import as_tensor
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import (
+    betaincinv,
     cosh,
     erf,
     erfc,
     erfcinv,
     erfcx,
     erfinv,
+    gammainccinv,
+    gammaincinv,
     iv,
     log,
     log1mexp,
@@ -151,8 +154,11 @@ def test_erfinv():
 @pytest.mark.parametrize(
     "op, test_values",
     [
+        (betaincinv, (3.0, 5.5, 0.7)),
         (erfcx, (0.7,)),
         (erfcinv, (0.7,)),
+        (gammaincinv, (5.5, 0.7)),
+        (gammainccinv, (5.5, 0.7)),
         (iv, (0.3, 0.7)),
     ],
 )

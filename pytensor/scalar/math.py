@@ -738,7 +738,7 @@ class GammaIncInv(BinaryScalarOp):
     Inverse to the regularized lower incomplete gamma function.
     """
 
-    nfunc_spec = ("scipy.special.gammaincinv", 1, 1)
+    nfunc_spec = ("scipy.special.gammaincinv", 2, 1)
 
     @staticmethod
     def st_impl(k, x):
@@ -752,10 +752,7 @@ class GammaIncInv(BinaryScalarOp):
         (gz,) = grads
         return [
             grad_not_implemented(self, 0, k),
-            gz
-            * exp(scipy.special.gammaincinv(k, x))
-            * scipy.special.gamma(k)
-            * (scipy.special.gammaincinv(k, x) ** (1 - k)),
+            gz * exp(gammaincinv(k, x)) * gamma(k) * (gammaincinv(k, x) ** (1 - k)),
         ]
 
     def c_code(self, *args, **kwargs):
@@ -770,24 +767,21 @@ class GammaIncCInv(BinaryScalarOp):
     Inverse to the regularized upper incomplete gamma function.
     """
 
-    nfunc_spec = ("scipy.special.gammaincinv", 1, 1)
+    nfunc_spec = ("scipy.special.gammainccinv", 2, 1)
 
     @staticmethod
     def st_impl(k, x):
         return scipy.special.gammainccinv(k, x)
 
     def impl(self, k, x):
-        return GammaIncInv.st_impl(k, x)
+        return GammaIncCInv.st_impl(k, x)
 
     def grad(self, inputs, grads):
         (k, x) = inputs
         (gz,) = grads
         return [
             grad_not_implemented(self, 0, k),
-            gz
-            * -exp(scipy.special.gammainccinv(k, x))
-            * scipy.special.gamma(k)
-            * (scipy.special.gammainccinv(k, x) ** (1 - k)),
+            gz * -exp(gammainccinv(k, x)) * gamma(k) * (gammainccinv(k, x) ** (1 - k)),
         ]
 
     def c_code(self, *args, **kwargs):
@@ -1712,12 +1706,37 @@ def betainc_grad(p, q, x, wrtp: bool):
     return grad
 
 
+class Beta(BinaryScalarOp):
+    """
+    Beta function.
+    """
+
+    nfunc_spec = ("scipy.special.beta", 2, 1)
+
+    def impl(self, a, b):
+        return scipy.special.beta(a, b)
+
+    def grad(self, inputs, grads):
+        (a, b) = inputs
+        (gz,) = grads
+        return [
+            gz * beta(a, b) * (polygamma(0, a) - polygamma(0, a + b)),
+            gz * beta(a, b) * (polygamma(0, b) - polygamma(0, a + b)),
+        ]
+
+    def c_code(self, *args, **kwargs):
+        raise NotImplementedError()
+
+
+beta = Beta(upgrade_to_float_no_complex, name="beta")
+
+
 class BetaIncInv(ScalarOp):
     """
     Inverse of the regularized incomplete beta function.
     """
 
-    nfunc_spec = ("scipy.special.betaincinv", 2, 1)
+    nfunc_spec = ("scipy.special.betaincinv", 3, 1)
 
     def impl(self, a, b, x):
         return scipy.special.betaincinv(a, b, x)
@@ -1729,9 +1748,9 @@ class BetaIncInv(ScalarOp):
             grad_not_implemented(self, 0, a),
             grad_not_implemented(self, 0, b),
             gz
-            * scipy.special.beta(a, b)
-            * ((1 - scipy.special.betaincinv(a, b, x)) ** (1 - b))
-            * (scipy.special.betaincinv(a, b, x) ** (1 - a)),
+            * beta(a, b)
+            * ((1 - betaincinv(a, b, x)) ** (1 - b))
+            * (betaincinv(a, b, x) ** (1 - a)),
         ]
 
     def c_code(self, *args, **kwargs):
