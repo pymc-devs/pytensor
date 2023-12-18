@@ -497,10 +497,6 @@ _good_broadcast_binary_gamma = dict(
     empty=(np.asarray([], dtype=config.floatX), np.asarray([], dtype=config.floatX)),
 )
 
-_good_broadcast_binary_gamma_grad = dict(
-    normal=(random_ranged(0, 1000.0, (2, 3)), random_ranged(0.0, 1.0, (2, 3)))
-)
-
 TestGammaIncInvBroadcast = makeBroadcastTester(
     op=pt.gammaincinv,
     expected=expected_gammaincinv,
