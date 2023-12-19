@@ -174,7 +174,6 @@ def test_betaincinv():
     x = vector("x", dtype="float64")
     out = betaincinv(a, b, x)
     fg = FunctionGraph([a, b, x], [out])
-    compare_jax_and_py(fg, [np.array([3.0, 5.5, 0.7])])
     compare_jax_and_py(
         fg,
         [
