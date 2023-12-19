@@ -6,6 +6,7 @@ import numpy as np
 
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.link.c.type import Generic
@@ -198,3 +199,21 @@ class Assert(CheckAndRaise):
 
 
 assert_op = Assert()
+
+
+@_vectorize_node.register(CheckAndRaise)
+def vectorize_check_and_raise(op, node, batch_x, batch_cond):
+    from pytensor.tensor.extra_ops import broadcast_arrays
+    from pytensor.tensor.shape import shape_padright
+
+    batch_cond_dims = batch_cond.type.ndim
+
+    if batch_cond_dims:
+        out = op(batch_x, batch_cond.all())
+        # Condition may broadcast batch dims of x
+        # We broadcast after the Check Op, so it can be removed more easily if not needed
+        x_core_ndim = node.inputs[0].type.ndim
+        batch_out, _ = broadcast_arrays(out, shape_padright(batch_cond, x_core_ndim))
+        return batch_out.owner
+    else:
+        return op.make_node(batch_x, batch_cond)

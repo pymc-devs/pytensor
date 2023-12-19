@@ -1292,6 +1292,30 @@ The six usual equality and inequality operators share the same interface.
 
     Returns a variable representing the result of logical inequality (a!=b).
 
+.. function:: greater(a, b)
+
+    Alias for `gt`. greater is the NumPy name.
+
+.. function:: greater_equal(a, b)
+
+    Alias for `ge`. greater_equal is the NumPy name.
+
+.. function:: less(a, b)
+
+    Alias for `lt`. less is the NumPy name.
+
+.. function:: less_equal(a, b)
+
+    Alias for `le`. less_equal is the NumPy name.
+
+.. function:: equal(a, b)
+
+    Alias for `eq`. equal is the NumPy name.
+
+.. function:: not_equal(a, b)
+
+    Alias for `neq`. not_equal is the NumPy name.
+
 .. function:: isnan(a)
 
     Returns a variable representing the comparison of ``a`` elements with nan.
