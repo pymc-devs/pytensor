@@ -9,7 +9,6 @@ from pytensor.link.c.params_type import Params, ParamsType
 from pytensor.link.c.type import EnumList, Generic
 from pytensor.scalar import ScalarType
 from pytensor.tensor.type import TensorType, matrix
-from tests import unittest_tools as utt
 
 
 tensor_type_0d = TensorType("float64", shape=tuple())
@@ -355,5 +354,5 @@ class TestParamsType:
         vy1 = f1(vx)
         vy2 = f2(vx)
         ref = a * (vx**2) + b * vx + c
-        utt.assert_allclose(vy1, vy2)
-        utt.assert_allclose(ref, vy1)
+        np.testing.assert_allclose(vy1, vy2)
+        np.testing.assert_allclose(ref, vy1)

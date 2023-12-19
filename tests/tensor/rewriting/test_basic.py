@@ -390,7 +390,7 @@ class TestLocalUselessIncSubtensorAlloc:
         r1 = f1(x_value, i_value, y_value)
         r2 = f2(x_value, i_value, y_value)
 
-        utt.assert_allclose(r1, r2)
+        np.testing.assert_allclose(r1, r2)
 
         # Check stacktrace was copied over correctly after rewrite was applied
         assert check_stack_trace(f1, ops_to_check=AdvancedIncSubtensor1)
@@ -422,7 +422,7 @@ class TestLocalUselessIncSubtensorAlloc:
         r1 = f1(x_value, i_value, y_value)
         r2 = f2(x_value, i_value, y_value)
 
-        utt.assert_allclose(r1, r2)
+        np.testing.assert_allclose(r1, r2)
 
         assert check_stack_trace(f1, ops_to_check=AdvancedIncSubtensor1)
         assert check_stack_trace(f2, ops_to_check="all")
@@ -453,7 +453,7 @@ class TestLocalUselessIncSubtensorAlloc:
         r1 = f1(x_value, i_value, y_value)
         r2 = f2(x_value, i_value, y_value)
 
-        utt.assert_allclose(r1, r2)
+        np.testing.assert_allclose(r1, r2)
 
         assert check_stack_trace(f1, ops_to_check="last")
         assert check_stack_trace(f2, ops_to_check="last")
@@ -1066,7 +1066,7 @@ class TestLocalUselessSwitch:
         f = function([x, y], z, mode=self.mode)
         vx = np.array([[0, 1], [1, 0]], dtype="int32")
         vy = np.array([7, 8], dtype="int64")
-        utt.assert_allclose(f(vx, vy), np.where(vx, vy, vy))
+        np.testing.assert_allclose(f(vx, vy), np.where(vx, vy, vy))
 
         assert isinstance(f.maker.fgraph.outputs[0].owner.op, Alloc)
         assert not any(node.op == pt.switch for node in f.maker.fgraph.toposort())

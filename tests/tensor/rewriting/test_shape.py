@@ -379,14 +379,14 @@ class TestShapeI(utt.InferShapeTester):
         advec_val = rng.random(3).astype(config.floatX)
         f = function([advec], Shape_i(0)(advec))
         out = f(advec_val)
-        utt.assert_allclose(out, advec_val.shape[0])
+        np.testing.assert_allclose(out, advec_val.shape[0])
 
         admat = matrix()
         admat_val = rng.random((4, 3)).astype(config.floatX)
         for i in range(2):
             f = function([admat], Shape_i(i)(admat))
             out = f(admat_val)
-            utt.assert_allclose(out, admat_val.shape[i])
+            np.testing.assert_allclose(out, admat_val.shape[i])
 
     def test_infer_shape(self):
         admat = matrix()

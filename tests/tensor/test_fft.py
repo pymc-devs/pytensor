@@ -40,7 +40,7 @@ class TestFFT:
 
         rfft_ref = np.fft.rfft(inputs_val, axis=1)
 
-        utt.assert_allclose(rfft_ref, res_rfft_comp)
+        np.testing.assert_allclose(rfft_ref, res_rfft_comp)
 
         m = rfft.type()
         print(m.ndim)
@@ -48,7 +48,7 @@ class TestFFT:
         f_irfft = pytensor.function([m], irfft)
         res_irfft = f_irfft(res_rfft)
 
-        utt.assert_allclose(inputs_val, np.asarray(res_irfft))
+        np.testing.assert_allclose(inputs_val, np.asarray(res_irfft))
 
         # The numerical gradient of the FFT is sensitive, must set large
         # enough epsilon to get good accuracy.
@@ -79,7 +79,7 @@ class TestFFT:
 
         rfft_ref = np.fft.rfftn(inputs_val, axes=(1, 2))
 
-        utt.assert_allclose(rfft_ref, res_rfft_comp, atol=1e-4, rtol=1e-4)
+        np.testing.assert_allclose(rfft_ref, res_rfft_comp, atol=1e-4, rtol=1e-4)
 
     def test_irfft(self):
         inputs_val = np.random.random((1, N, N)).astype(pytensor.config.floatX)
@@ -94,7 +94,7 @@ class TestFFT:
         f_irfft = pytensor.function([m], irfft)
         res_irfft = f_irfft(res_fft)
 
-        utt.assert_allclose(inputs_val, np.asarray(res_irfft))
+        np.testing.assert_allclose(inputs_val, np.asarray(res_irfft))
 
         inputs_val = np.random.random((1, N, N, 2)).astype(pytensor.config.floatX)
         inputs = pytensor.shared(inputs_val)
@@ -106,7 +106,7 @@ class TestFFT:
 
         irfft_ref = np.fft.irfftn(inputs_ref, axes=(1, 2))
 
-        utt.assert_allclose(irfft_ref, res_irfft, atol=1e-4, rtol=1e-4)
+        np.testing.assert_allclose(irfft_ref, res_irfft, atol=1e-4, rtol=1e-4)
 
     def test_norm_rfft(self):
         inputs_val = np.random.random((1, N, N)).astype(pytensor.config.floatX)
@@ -122,7 +122,7 @@ class TestFFT:
 
         rfft_ref = np.fft.rfftn(inputs_val, axes=(1, 2))
 
-        utt.assert_allclose(rfft_ref / N, res_rfft_comp, atol=1e-4, rtol=1e-4)
+        np.testing.assert_allclose(rfft_ref / N, res_rfft_comp, atol=1e-4, rtol=1e-4)
 
         # No normalization
         rfft = fft.rfft(inputs, norm="no_norm")
@@ -132,7 +132,7 @@ class TestFFT:
             res_rfft[:, :, :, 1]
         )
 
-        utt.assert_allclose(rfft_ref, res_rfft_comp, atol=1e-4, rtol=1e-4)
+        np.testing.assert_allclose(rfft_ref, res_rfft_comp, atol=1e-4, rtol=1e-4)
 
         # Inverse FFT inputs
         inputs_val = np.random.random((1, N, N // 2 + 1, 2)).astype(
@@ -148,14 +148,14 @@ class TestFFT:
 
         irfft_ref = np.fft.irfftn(inputs_ref, axes=(1, 2))
 
-        utt.assert_allclose(irfft_ref * N, res_irfft, atol=1e-4, rtol=1e-4)
+        np.testing.assert_allclose(irfft_ref * N, res_irfft, atol=1e-4, rtol=1e-4)
 
         # No normalization inverse FFT
         irfft = fft.irfft(inputs, norm="no_norm")
         f_irfft = pytensor.function([], irfft)
         res_irfft = f_irfft()
 
-        utt.assert_allclose(irfft_ref * N**2, res_irfft, atol=1e-4, rtol=1e-4)
+        np.testing.assert_allclose(irfft_ref * N**2, res_irfft, atol=1e-4, rtol=1e-4)
 
     def test_params(self):
         inputs_val = np.random.random((1, N)).astype(pytensor.config.floatX)
