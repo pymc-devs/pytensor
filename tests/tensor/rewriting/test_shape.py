@@ -15,7 +15,7 @@ from pytensor.graph.op import Op
 from pytensor.graph.rewriting.basic import check_stack_trace, node_rewriter, out2in
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.type import Type
-from pytensor.tensor.basic import as_tensor_variable
+from pytensor.tensor.basic import alloc, as_tensor_variable
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import add, exp, maximum
 from pytensor.tensor.rewriting.basic import register_specialize
@@ -238,6 +238,25 @@ class TestShapeRewriter:
         f = function([X], expr, mode=mode)
         # FIXME: This is not a good test.
         f([[1, 2], [2, 3]])
+
+    def test_shape_of_useless_alloc(self):
+        """Test that local_shape_to_shape_i does not create circular graph.
+
+        Regression test for #565
+        """
+        alpha = vector(shape=(None,), dtype="float64")
+        channel = vector(shape=(None,), dtype="float64")
+
+        broadcast_channel = alloc(
+            channel,
+            maximum(
+                shape(alpha)[0],
+                shape(channel)[0],
+            ),
+        )
+        out = shape(broadcast_channel)
+        fn = function([alpha, channel], out)
+        assert fn([1.0, 2, 3], [1.0, 2, 3]) == (3,)
 
 
 class TestReshape:

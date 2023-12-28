@@ -423,7 +423,17 @@ class ShapeFeature(Feature):
                 # This mean the shape is equivalent
                 # We do not want to do the ancestor check in those cases
                 merged_shape.append(r_shape[i])
-            elif r_shape[i] in ancestors([other_shape[i]]):
+            elif any(
+                (
+                    r_shape[i] == anc
+                    or (
+                        anc.owner
+                        and isinstance(anc.owner.op, Shape)
+                        and anc.owner.inputs[0] == r
+                    )
+                )
+                for anc in ancestors([other_shape[i]])
+            ):
                 # Another case where we want to use r_shape[i] is when
                 # other_shape[i] actually depends on r_shape[i]. In that case,
                 # we do not want to substitute an expression with another that
