@@ -43,7 +43,6 @@ from pytensor.scalar.basic import (
     upgrade_to_float_no_complex,
 )
 from pytensor.scalar.loop import ScalarLoop
-from pytensor.tensor.special import betaln
 
 
 class Erf(UnaryScalarOp):
@@ -1734,6 +1733,14 @@ class BetaIncInv(ScalarOp):
 
 
 betaincinv = BetaIncInv(upgrade_to_float_no_complex, name="betaincinv")
+
+
+def betaln(a, b):
+    """
+    Beta function from gamma function.
+    """
+
+    return gammaln(a) + gammaln(b) - gammaln(a + b)
 
 
 class Hyp2F1(ScalarOp):

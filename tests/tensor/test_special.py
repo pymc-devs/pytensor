@@ -195,8 +195,8 @@ def test_betaln():
 
     a = random_ranged(0, 5, (2,))
     b = random_ranged(0, 5, (2,))
-    actual = actual_fn(a, b)
-    expected = np.exp(scipy_beta(a, b))
+    actual = np.exp(actual_fn(a, b))
+    expected = scipy_beta(a, b)
     np.testing.assert_allclose(
         actual, expected, rtol=1e-7 if config.floatX == "float64" else 1e-5
     )
