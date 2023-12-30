@@ -354,11 +354,6 @@ def betaincinv_inplace(a, b, x):
 
 
 @scalar_elemwise
-def beta_inplace(a, b):
-    """Beta function"""
-
-
-@scalar_elemwise
 def second_inplace(a):
     """Fill `a` with `b`"""
 

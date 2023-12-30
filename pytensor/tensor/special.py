@@ -6,7 +6,7 @@ import scipy
 from pytensor.graph.basic import Apply
 from pytensor.link.c.op import COp
 from pytensor.tensor.basic import as_tensor_variable
-from pytensor.tensor.math import gamma, neg, sum
+from pytensor.tensor.math import gamma, gammaln, neg, sum
 
 
 class SoftmaxGrad(COp):
@@ -752,9 +752,20 @@ def factorial(n):
     return gamma(n + 1)
 
 
-__all__ = [
-    "softmax",
-    "log_softmax",
-    "poch",
-    "factorial",
-]
+def beta(a, b):
+    """
+    Beta function.
+
+    """
+    return (gamma(a) * gamma(b)) / gamma(a + b)
+
+
+def betaln(a, b):
+    """
+    Log beta function.
+
+    """
+    return gammaln(a) + gammaln(b) - gammaln(a + b)
+
+
+__all__ = ["softmax", "log_softmax", "poch", "factorial", "beta", "betaln"]

@@ -82,7 +82,6 @@ expected_erfcx = scipy.special.erfcx
 expected_sigmoid = scipy.special.expit
 expected_hyp2f1 = scipy.special.hyp2f1
 expected_betaincinv = scipy.special.betaincinv
-expected_beta = scipy.special.beta
 
 TestErfBroadcast = makeBroadcastTester(
     op=pt.erf,
@@ -926,48 +925,6 @@ class TestBetaIncGrad:
                 f_grad(test_a, test_b, test_z), [expected_dda, expected_ddb]
             )
 
-
-rng = np.random.default_rng(seed=utt.fetch_seed())
-_good_broadcast_binary_beta = dict(
-    normal=(
-        random_ranged(1e-2, 100, (2, 3), rng=rng),
-        random_ranged(1e-2, 100, (2, 3), rng=rng),
-    ),
-    integers=(
-        integers_ranged(1, 100, (2, 3), rng=rng),
-        integers_ranged(1, 100, (2, 3), rng=rng),
-    ),
-    uint8=(
-        integers_ranged(1, 100, (2, 3), rng=rng).astype("uint8"),
-        integers_ranged(1, 100, (2, 3), rng=rng).astype("uint8"),
-    ),
-    uint16=(
-        integers_ranged(1, 100, (2, 3), rng=rng).astype("uint16"),
-        integers_ranged(1, 100, (2, 3), rng=rng).astype("uint16"),
-    ),
-)
-
-_grad_broadcast_binary_beta = dict(
-    normal=(
-        random_ranged(1e-2, 100, (2, 3), rng=rng),
-        random_ranged(1e-2, 100, (2, 3), rng=rng),
-    )
-)
-
-TestBetaBroadcast = makeBroadcastTester(
-    op=pt.beta,
-    expected=scipy.special.beta,
-    good=_good_broadcast_binary_beta,
-    grad=_grad_broadcast_binary_beta,
-)
-
-TestBetaInplaceBroadcast = makeBroadcastTester(
-    op=inplace.beta_inplace,
-    expected=scipy.special.beta,
-    good=_good_broadcast_binary_beta,
-    grad=_grad_broadcast_binary_beta,
-    inplace=True,
-)
 
 _good_broadcast_ternary_betaincinv = dict(
     normal=(

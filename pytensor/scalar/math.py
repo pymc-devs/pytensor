@@ -43,6 +43,7 @@ from pytensor.scalar.basic import (
     upgrade_to_float_no_complex,
 )
 from pytensor.scalar.loop import ScalarLoop
+from pytensor.tensor.special import betaln
 
 
 class Erf(UnaryScalarOp):
@@ -1706,31 +1707,6 @@ def betainc_grad(p, q, x, wrtp: bool):
     return grad
 
 
-class Beta(BinaryScalarOp):
-    """
-    Beta function.
-    """
-
-    nfunc_spec = ("scipy.special.beta", 2, 1)
-
-    def impl(self, a, b):
-        return scipy.special.beta(a, b)
-
-    def grad(self, inputs, grads):
-        (a, b) = inputs
-        (gz,) = grads
-        return [
-            gz * beta(a, b) * (polygamma(0, a) - polygamma(0, a + b)),
-            gz * beta(a, b) * (polygamma(0, b) - polygamma(0, a + b)),
-        ]
-
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
-
-
-beta = Beta(upgrade_to_float_no_complex, name="beta")
-
-
 class BetaIncInv(ScalarOp):
     """
     Inverse of the regularized incomplete beta function.
@@ -1748,7 +1724,7 @@ class BetaIncInv(ScalarOp):
             grad_not_implemented(self, 0, a),
             grad_not_implemented(self, 0, b),
             gz
-            * beta(a, b)
+            * exp(betaln(a, b))
             * ((1 - betaincinv(a, b, x)) ** (1 - b))
             * (betaincinv(a, b, x) ** (1 - a)),
         ]

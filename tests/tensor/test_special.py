@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from scipy.special import beta as scipy_beta
 from scipy.special import factorial as scipy_factorial
 from scipy.special import log_softmax as scipy_log_softmax
 from scipy.special import poch as scipy_poch
@@ -11,6 +12,8 @@ from pytensor.tensor.special import (
     LogSoftmax,
     Softmax,
     SoftmaxGrad,
+    beta,
+    betaln,
     factorial,
     log_softmax,
     poch,
@@ -168,6 +171,32 @@ def test_factorial(n):
     n = random_ranged(0, 5, (2,))
     actual = actual_fn(n)
     expected = scipy_factorial(n)
+    np.testing.assert_allclose(
+        actual, expected, rtol=1e-7 if config.floatX == "float64" else 1e-5
+    )
+
+
+def test_beta():
+    _a, _b = vectors("a", "b")
+    actual_fn = function([_a, _b], beta(_a, _b))
+
+    a = random_ranged(0, 5, (2,))
+    b = random_ranged(0, 5, (2,))
+    actual = actual_fn(a, b)
+    expected = scipy_beta(a, b)
+    np.testing.assert_allclose(
+        actual, expected, rtol=1e-7 if config.floatX == "float64" else 1e-5
+    )
+
+
+def test_betaln():
+    _a, _b = vectors("a", "b")
+    actual_fn = function([_a, _b], betaln(_a, _b))
+
+    a = random_ranged(0, 5, (2,))
+    b = random_ranged(0, 5, (2,))
+    actual = actual_fn(a, b)
+    expected = np.exp(scipy_beta(a, b))
     np.testing.assert_allclose(
         actual, expected, rtol=1e-7 if config.floatX == "float64" else 1e-5
     )

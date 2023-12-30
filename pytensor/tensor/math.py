@@ -1467,11 +1467,6 @@ def betaincinv(a, b, x):
 
 
 @scalar_elemwise
-def beta(a, b):
-    """Beta function"""
-
-
-@scalar_elemwise
 def real(z):
     """Return real component of complex-valued tensor `z`."""
 
@@ -3080,7 +3075,6 @@ __all__ = [
     "log1mexp",
     "betainc",
     "betaincinv",
-    "beta",
     "real",
     "imag",
     "angle",
