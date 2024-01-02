@@ -284,6 +284,16 @@ def gammal_inplace(k, x):
 
 
 @scalar_elemwise
+def gammaincinv_inplace(k, x):
+    """Inverse to the regularized lower incomplete gamma function"""
+
+
+@scalar_elemwise
+def gammainccinv_inplace(k, x):
+    """Inverse of the regularized upper incomplete gamma function"""
+
+
+@scalar_elemwise
 def j0_inplace(x):
     """Bessel function of the first kind of order 0."""
 
@@ -336,6 +346,11 @@ def log1mexp_inplace(x):
 @scalar_elemwise
 def betainc_inplace(a, b, x):
     """Regularized incomplete beta function"""
+
+
+@scalar_elemwise
+def betaincinv_inplace(a, b, x):
+    """Inverse of the regularized incomplete beta function"""
 
 
 @scalar_elemwise

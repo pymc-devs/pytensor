@@ -733,6 +733,64 @@ class GammaIncC(BinaryScalarOp):
 gammaincc = GammaIncC(upgrade_to_float, name="gammaincc")
 
 
+class GammaIncInv(BinaryScalarOp):
+    """
+    Inverse to the regularized lower incomplete gamma function.
+    """
+
+    nfunc_spec = ("scipy.special.gammaincinv", 2, 1)
+
+    @staticmethod
+    def st_impl(k, x):
+        return scipy.special.gammaincinv(k, x)
+
+    def impl(self, k, x):
+        return GammaIncInv.st_impl(k, x)
+
+    def grad(self, inputs, grads):
+        (k, x) = inputs
+        (gz,) = grads
+        return [
+            grad_not_implemented(self, 0, k),
+            gz * exp(gammaincinv(k, x)) * gamma(k) * (gammaincinv(k, x) ** (1 - k)),
+        ]
+
+    def c_code(self, *args, **kwargs):
+        raise NotImplementedError()
+
+
+gammaincinv = GammaIncInv(upgrade_to_float, name="gammaincinv")
+
+
+class GammaIncCInv(BinaryScalarOp):
+    """
+    Inverse to the regularized upper incomplete gamma function.
+    """
+
+    nfunc_spec = ("scipy.special.gammainccinv", 2, 1)
+
+    @staticmethod
+    def st_impl(k, x):
+        return scipy.special.gammainccinv(k, x)
+
+    def impl(self, k, x):
+        return GammaIncCInv.st_impl(k, x)
+
+    def grad(self, inputs, grads):
+        (k, x) = inputs
+        (gz,) = grads
+        return [
+            grad_not_implemented(self, 0, k),
+            gz * -exp(gammainccinv(k, x)) * gamma(k) * (gammainccinv(k, x) ** (1 - k)),
+        ]
+
+    def c_code(self, *args, **kwargs):
+        raise NotImplementedError()
+
+
+gammainccinv = GammaIncCInv(upgrade_to_float, name="gammainccinv")
+
+
 def _make_scalar_loop(n_steps, init, constant, inner_loop_fn, name, loop_op=ScalarLoop):
     init = [as_scalar(x) if x is not None else None for x in init]
     constant = [as_scalar(x) for x in constant]
@@ -1646,6 +1704,43 @@ def betainc_grad(p, q, x, wrtp: bool):
         ),
     )
     return grad
+
+
+class BetaIncInv(ScalarOp):
+    """
+    Inverse of the regularized incomplete beta function.
+    """
+
+    nfunc_spec = ("scipy.special.betaincinv", 3, 1)
+
+    def impl(self, a, b, x):
+        return scipy.special.betaincinv(a, b, x)
+
+    def grad(self, inputs, grads):
+        (a, b, x) = inputs
+        (gz,) = grads
+        return [
+            grad_not_implemented(self, 0, a),
+            grad_not_implemented(self, 0, b),
+            gz
+            * exp(betaln(a, b))
+            * ((1 - betaincinv(a, b, x)) ** (1 - b))
+            * (betaincinv(a, b, x) ** (1 - a)),
+        ]
+
+    def c_code(self, *args, **kwargs):
+        raise NotImplementedError()
+
+
+betaincinv = BetaIncInv(upgrade_to_float_no_complex, name="betaincinv")
+
+
+def betaln(a, b):
+    """
+    Beta function from gamma function.
+    """
+
+    return gammaln(a) + gammaln(b) - gammaln(a + b)
 
 
 class Hyp2F1(ScalarOp):

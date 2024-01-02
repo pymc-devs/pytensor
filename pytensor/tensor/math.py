@@ -1386,6 +1386,16 @@ def gammal(k, x):
 
 
 @scalar_elemwise
+def gammaincinv(k, x):
+    """Inverse to the regularized lower incomplete gamma function"""
+
+
+@scalar_elemwise
+def gammainccinv(k, x):
+    """Inverse of the regularized upper incomplete gamma function"""
+
+
+@scalar_elemwise
 def hyp2f1(a, b, c, z):
     """Gaussian hypergeometric function."""
 
@@ -1449,6 +1459,11 @@ def log1mexp(x):
 @scalar_elemwise
 def betainc(a, b, x):
     """Regularized incomplete beta function"""
+
+
+@scalar_elemwise
+def betaincinv(a, b, x):
+    """Inverse of the regularized incomplete beta function"""
 
 
 @scalar_elemwise
@@ -3044,6 +3059,8 @@ __all__ = [
     "gammaincc",
     "gammau",
     "gammal",
+    "gammaincinv",
+    "gammainccinv",
     "j0",
     "j1",
     "jv",
@@ -3057,6 +3074,7 @@ __all__ = [
     "log1pexp",
     "log1mexp",
     "betainc",
+    "betaincinv",
     "real",
     "imag",
     "angle",

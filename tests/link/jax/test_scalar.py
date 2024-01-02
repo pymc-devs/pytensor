@@ -11,12 +11,15 @@ from pytensor.tensor import as_tensor
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import (
+    betaincinv,
     cosh,
     erf,
     erfc,
     erfcinv,
     erfcx,
     erfinv,
+    gammainccinv,
+    gammaincinv,
     iv,
     log,
     log1mexp,
@@ -163,6 +166,38 @@ def test_tfp_ops(op, test_values):
 
     fg = FunctionGraph(inputs, [output])
     compare_jax_and_py(fg, test_values)
+
+
+def test_betaincinv():
+    a = vector("a", dtype="float64")
+    b = vector("b", dtype="float64")
+    x = vector("x", dtype="float64")
+    out = betaincinv(a, b, x)
+    fg = FunctionGraph([a, b, x], [out])
+    compare_jax_and_py(
+        fg,
+        [
+            np.array([5.5, 7.0]),
+            np.array([5.5, 7.0]),
+            np.array([0.25, 0.7]),
+        ],
+    )
+
+
+def test_gammaincinv():
+    k = vector("k", dtype="float64")
+    x = vector("x", dtype="float64")
+    out = gammaincinv(k, x)
+    fg = FunctionGraph([k, x], [out])
+    compare_jax_and_py(fg, [np.array([5.5, 7.0]), np.array([0.25, 0.7])])
+
+
+def test_gammainccinv():
+    k = vector("k", dtype="float64")
+    x = vector("x", dtype="float64")
+    out = gammainccinv(k, x)
+    fg = FunctionGraph([k, x], [out])
+    compare_jax_and_py(fg, [np.array([5.5, 7.0]), np.array([0.25, 0.7])])
 
 
 def test_psi():

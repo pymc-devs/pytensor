@@ -21,11 +21,14 @@ from pytensor.scalar.basic import (
     Sub,
 )
 from pytensor.scalar.math import (
+    BetaIncInv,
     Erf,
     Erfc,
     Erfcinv,
     Erfcx,
     Erfinv,
+    GammaIncCInv,
+    GammaIncInv,
     Iv,
     Ive,
     Log1mexp,
@@ -226,6 +229,20 @@ def jax_funcify_Second(op, **kwargs):
     return second
 
 
+@jax_funcify.register(GammaIncInv)
+def jax_funcify_GammaIncInv(op, **kwargs):
+    gammaincinv = try_import_tfp_jax_op(op, jax_op_name="igammainv")
+
+    return gammaincinv
+
+
+@jax_funcify.register(GammaIncCInv)
+def jax_funcify_GammaIncCInv(op, **kwargs):
+    gammainccinv = try_import_tfp_jax_op(op, jax_op_name="igammacinv")
+
+    return gammainccinv
+
+
 @jax_funcify.register(Erf)
 def jax_funcify_Erf(op, node, **kwargs):
     def erf(x):
@@ -250,6 +267,7 @@ def jax_funcify_Erfinv(op, **kwargs):
     return erfinv
 
 
+@jax_funcify.register(BetaIncInv)
 @jax_funcify.register(Erfcx)
 @jax_funcify.register(Erfcinv)
 def jax_funcify_from_tfp(op, **kwargs):

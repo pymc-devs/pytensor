@@ -69,6 +69,8 @@ expected_gammainc = scipy.special.gammainc
 expected_gammaincc = scipy.special.gammaincc
 expected_gammau = scipy_special_gammau
 expected_gammal = scipy_special_gammal
+expected_gammaincinv = scipy.special.gammaincinv
+expected_gammainccinv = scipy.special.gammainccinv
 expected_j0 = scipy.special.j0
 expected_j1 = scipy.special.j1
 expected_jv = scipy.special.jv
@@ -79,6 +81,7 @@ expected_ive = scipy.special.ive
 expected_erfcx = scipy.special.erfcx
 expected_sigmoid = scipy.special.expit
 expected_hyp2f1 = scipy.special.hyp2f1
+expected_betaincinv = scipy.special.betaincinv
 
 TestErfBroadcast = makeBroadcastTester(
     op=pt.erf,
@@ -485,6 +488,49 @@ TestGammaLInplaceBroadcast = makeBroadcastTester(
 )
 
 rng = np.random.default_rng(seed=utt.fetch_seed())
+_good_broadcast_binary_gamma = dict(
+    normal=(
+        random_ranged(0, 100, (2, 3), rng=rng),
+        random_ranged(0, 1, (2, 3), rng=rng),
+    ),
+    empty=(np.asarray([], dtype=config.floatX), np.asarray([], dtype=config.floatX)),
+)
+
+TestGammaIncInvBroadcast = makeBroadcastTester(
+    op=pt.gammaincinv,
+    expected=expected_gammaincinv,
+    good=_good_broadcast_binary_gamma,
+    eps=2e-8,
+    mode=mode_no_scipy,
+)
+
+TestGammaIncInvInplaceBroadcast = makeBroadcastTester(
+    op=inplace.gammaincinv_inplace,
+    expected=expected_gammaincinv,
+    good=_good_broadcast_binary_gamma,
+    eps=2e-8,
+    mode=mode_no_scipy,
+    inplace=True,
+)
+
+TestGammaInccInvBroadcast = makeBroadcastTester(
+    op=pt.gammainccinv,
+    expected=expected_gammainccinv,
+    good=_good_broadcast_binary_gamma,
+    eps=2e-8,
+    mode=mode_no_scipy,
+)
+
+TestGammaInccInvInplaceBroadcast = makeBroadcastTester(
+    op=inplace.gammainccinv_inplace,
+    expected=expected_gammainccinv,
+    good=_good_broadcast_binary_gamma,
+    eps=2e-8,
+    mode=mode_no_scipy,
+    inplace=True,
+)
+
+rng = np.random.default_rng(seed=utt.fetch_seed())
 _good_broadcast_unary_bessel = dict(
     normal=(random_ranged(-10, 10, (2, 3), rng=rng),),
     empty=(np.asarray([], dtype=config.floatX),),
@@ -879,6 +925,27 @@ class TestBetaIncGrad:
                 f_grad(test_a, test_b, test_z), [expected_dda, expected_ddb]
             )
 
+
+_good_broadcast_ternary_betaincinv = dict(
+    normal=(
+        random_ranged(0, 1000, (2, 3)),
+        random_ranged(0, 1000, (2, 3)),
+        random_ranged(0, 1, (2, 3)),
+    ),
+)
+
+TestBetaincinvBroadcast = makeBroadcastTester(
+    op=pt.betaincinv,
+    expected=scipy.special.betaincinv,
+    good=_good_broadcast_ternary_betaincinv,
+)
+
+TestBetaincinvInplaceBroadcast = makeBroadcastTester(
+    op=inplace.betaincinv_inplace,
+    expected=scipy.special.betaincinv,
+    good=_good_broadcast_ternary_betaincinv,
+    inplace=True,
+)
 
 _good_broadcast_quaternary_hyp2f1 = dict(
     normal=(
