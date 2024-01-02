@@ -768,4 +768,11 @@ def betaln(a, b):
     return gammaln(a) + gammaln(b) - gammaln(a + b)
 
 
-__all__ = ["softmax", "log_softmax", "poch", "factorial", "beta", "betaln",]
+__all__ = [
+    "softmax",
+    "log_softmax",
+    "poch",
+    "factorial",
+    "beta",
+    "betaln",
+]
