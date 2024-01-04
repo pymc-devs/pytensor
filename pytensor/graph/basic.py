@@ -1439,15 +1439,16 @@ def io_toposort(
         order = []
         while todo:
             cur = todo.pop()
-            # We suppose that all outputs are always computed
-            if cur.outputs[0] in computed:
+            if all(out in computed for out in cur.outputs):
                 continue
             if all(i in computed or i.owner is None for i in cur.inputs):
                 computed.update(cur.outputs)
                 order.append(cur)
             else:
                 todo.append(cur)
-                todo.extend(i.owner for i in cur.inputs if i.owner)
+                todo.extend(
+                    i.owner for i in cur.inputs if (i.owner and i not in computed)
+                )
         return order
 
     compute_deps = None
