@@ -34,7 +34,7 @@ from pytensor.tensor.math import max_and_argmax
 from pytensor.tensor.type import TensorType, iscalars, matrix, scalars, vector
 from pytensor.tensor.type_other import NoneConst
 from pytensor.tensor.variable import TensorVariable
-from tests.graph.utils import MyInnerGraphOp
+from tests.graph.utils import MyInnerGraphOp, op_multiple_outputs
 
 
 class MyType(Type):
@@ -286,6 +286,45 @@ class TestToposort:
         MyOp.make_node(o0.outputs[0], r4)
         all = io_toposort([], o0.outputs)
         assert all == [o0]
+
+    def test_multi_output_nodes(self):
+        l0, r0 = op_multiple_outputs(shared(0.0))
+        l1, r1 = op_multiple_outputs(shared(0.0))
+
+        v0 = r0 + 1
+        v1 = pt.exp(v0)
+        out = r1 * v1
+
+        # When either r0 or r1 is provided as an input, the respective node shouldn't be part of the toposort
+        assert set(io_toposort([], [out])) == {
+            r0.owner,
+            r1.owner,
+            v0.owner,
+            v1.owner,
+            out.owner,
+        }
+        assert set(io_toposort([r0], [out])) == {
+            r1.owner,
+            v0.owner,
+            v1.owner,
+            out.owner,
+        }
+        assert set(io_toposort([r1], [out])) == {
+            r0.owner,
+            v0.owner,
+            v1.owner,
+            out.owner,
+        }
+        assert set(io_toposort([r0, r1], [out])) == {v0.owner, v1.owner, out.owner}
+
+        # When l0 and/or l1 are provided, we still need to compute the respective nodes
+        assert set(io_toposort([l0, l1], [out])) == {
+            r0.owner,
+            r1.owner,
+            v0.owner,
+            v1.owner,
+            out.owner,
+        }
 
 
 class TestEval:

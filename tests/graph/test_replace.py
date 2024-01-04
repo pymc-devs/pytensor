@@ -5,10 +5,15 @@ import scipy.special
 import pytensor.tensor as pt
 from pytensor import config, function, shared
 from pytensor.graph.basic import equal_computations, graph_inputs
-from pytensor.graph.replace import clone_replace, graph_replace, vectorize_graph
+from pytensor.graph.replace import (
+    clone_replace,
+    graph_replace,
+    vectorize_graph,
+    vectorize_node,
+)
 from pytensor.tensor import dvector, fvector, vector
 from tests import unittest_tools as utt
-from tests.graph.utils import MyOp, MyVariable
+from tests.graph.utils import MyOp, MyVariable, op_multiple_outputs
 
 
 class TestCloneReplace:
@@ -227,8 +232,6 @@ class TestGraphReplace:
 
 
 class TestVectorizeGraph:
-    # TODO: Add tests with multiple outputs, constants, and other singleton types
-
     def test_basic(self):
         x = pt.vector("x")
         y = pt.exp(x) / pt.sum(pt.exp(x))
@@ -260,3 +263,63 @@ class TestVectorizeGraph:
         new_y1_res, new_y2_res = fn(new_x_test)
         np.testing.assert_allclose(new_y1_res, [0, 3, 6])
         np.testing.assert_allclose(new_y2_res, [2, 5, 8])
+
+    def test_multi_output_node(self):
+        x = pt.scalar("x")
+        node = op_multiple_outputs.make_node(x)
+        y1, y2 = node.outputs
+        out = pt.add(y1, y2)
+
+        new_x = pt.vector("new_x")
+        new_y1 = pt.vector("new_y1")
+        new_y2 = pt.vector("new_y2")
+
+        # Cases where either x or both of y1 and y2 are given replacements
+        new_out = vectorize_graph(out, {x: new_x})
+        expected_new_out = pt.add(*vectorize_node(node, new_x).outputs)
+        assert equal_computations([new_out], [expected_new_out])
+
+        new_out = vectorize_graph(out, {y1: new_y1, y2: new_y2})
+        expected_new_out = pt.add(new_y1, new_y2)
+        assert equal_computations([new_out], [expected_new_out])
+
+        new_out = vectorize_graph(out, {x: new_x, y1: new_y1, y2: new_y2})
+        expected_new_out = pt.add(new_y1, new_y2)
+        assert equal_computations([new_out], [expected_new_out])
+
+        # Special case where x is given a replacement as well as only one of y1 and y2
+        # The graph combines the replaced variable with the other vectorized output
+        new_out = vectorize_graph(out, {x: new_x, y1: new_y1})
+        expected_new_out = pt.add(new_y1, vectorize_node(node, new_x).outputs[1])
+        assert equal_computations([new_out], [expected_new_out])
+
+    def test_multi_output_node_random_variable(self):
+        """This is a regression test for #569.
+
+        Functionally, it covers the same case as `test_multiple_output_node`
+        """
+
+        # RandomVariables have two outputs, a hidden RNG and the visible draws
+        beta0 = pt.random.normal(name="beta0")
+        beta1 = pt.random.normal(name="beta1")
+
+        out1 = beta0 + 1
+        out2 = beta1 * pt.exp(out1)
+
+        # We replace the second output of each RandomVariable
+        new_beta0 = pt.tensor("new_beta0", shape=(3,))
+        new_beta1 = pt.tensor("new_beta1", shape=(3,))
+
+        new_outs = vectorize_graph(
+            [out1, out2],
+            replace={
+                beta0: new_beta0,
+                beta1: new_beta1,
+            },
+        )
+
+        expected_new_outs = [
+            new_beta0 + 1,
+            new_beta1 * pt.exp(new_beta0 + 1),
+        ]
+        assert equal_computations(new_outs, expected_new_outs)
