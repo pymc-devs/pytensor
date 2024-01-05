@@ -2948,9 +2948,11 @@ def matmul(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None
 
 
 @_vectorize_node.register(Dot)
-def vectorize_node_to_matmul(op, node, batched_x, batched_y):
+def vectorize_node_dot_to_matmul(op, node, batched_x, batched_y):
     old_x, old_y = node.inputs
     if old_x.type.ndim == 2 and old_y.type.ndim == 2:
+        # If original input is equivalent to a matrix-matrix product,
+        # return specialized Matmul Op to avoid unnecessary new Ops.
         return matmul(batched_x, batched_y).owner
     else:
         return vectorize_node_fallback(op, node, batched_x, batched_y)
