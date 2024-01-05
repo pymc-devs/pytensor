@@ -671,13 +671,7 @@ def max(x, axis=None, keepdims=False):
     # thing is supporting all user interface features, not speed.
     # Some cases can be implemented only with CAReduce.
 
-    # We thus prefer to use MaxAndArgmax, if possible. It does not
-    # support all axis arguments, so we may need to fall back to CAReduce.
-
-    try:
-        out = max_and_argmax(x, axis)[0]
-    except Exception:
-        out = Max(axis)(x)
+    out = max_and_argmax(x, axis)[0]
 
     if keepdims:
         out = makeKeepDims(x, out, axis)
