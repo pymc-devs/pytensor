@@ -18,6 +18,7 @@ from pytensor.scalar import int32
 from pytensor.tensor import _get_vector_length, as_tensor_variable
 from pytensor.tensor import basic as ptb
 from pytensor.tensor import get_vector_length
+from pytensor.tensor.elemwise import get_normalized_batch_axes
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.type import DenseTensorType, TensorType, int_dtypes, tensor
 from pytensor.tensor.type_other import NoneConst
@@ -1103,8 +1104,10 @@ def unbroadcast(x, *axes):
 
 
 @_vectorize_node.register(Unbroadcast)
-def _vectorize_unbroadcast(op: Unbroadcast, node: Apply, x: TensorVariable) -> Apply:
-    batched_ndims = x.type.ndim - node.inputs[0].type.ndim
-    old_axes = op.axes
-    new_axes = (old_axis + batched_ndims for old_axis in old_axes)
-    return cast(Apply, unbroadcast(x, *new_axes).owner)
+def _vectorize_unbroadcast(
+    op: Unbroadcast, node: Apply, batch_x: TensorVariable
+) -> Apply:
+    core_ndim = node.inputs[0].type.ndim
+    batch_ndim = batch_x.type.ndim - core_ndim
+    batch_axes = get_normalized_batch_axes(op.axes, core_ndim, batch_ndim)
+    return cast(Apply, unbroadcast(batch_x, *batch_axes).owner)
