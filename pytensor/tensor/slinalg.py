@@ -1,3 +1,4 @@
+import functools as ft
 import logging
 import typing
 import warnings
@@ -22,7 +23,6 @@ from pytensor.tensor.variable import TensorVariable
 
 if TYPE_CHECKING:
     from pytensor.tensor import TensorLike
-
 
 logger = logging.getLogger(__name__)
 
@@ -908,6 +908,115 @@ def solve_discrete_are(A, B, Q, R, enforce_Q_symmetric=False) -> TensorVariable:
     )
 
 
+def largest_common_dtype(tensors: typing.Sequence[TensorVariable]) -> np.dtype:
+    return ft.reduce(lambda l, r: np.promote_types(l, r), [x.dtype for x in tensors])
+
+
+class BlockDiagonalMatrix(Op):
+    __props__ = ("sparse", "format")
+
+    def __init__(self, sparse=False, format="csr"):
+        if format not in ("csr", "csc"):
+            raise ValueError(f"format must be one of: 'csr', 'csc', got {format}")
+        self.sparse = sparse
+        self.format = format
+
+    def make_node(self, *matrices):
+        if not matrices:
+            raise ValueError("no matrices to allocate")
+        dtype = largest_common_dtype(matrices)
+        matrices = list(map(pt.as_tensor, matrices))
+
+        if any(mat.type.ndim != 2 for mat in matrices):
+            raise TypeError("all data arguments must be matrices")
+        if self.sparse:
+            out_type = pytensor.sparse.matrix(self.format, dtype=dtype)
+        else:
+            out_type = pytensor.tensor.matrix(dtype=dtype)
+        return Apply(self, matrices, [out_type])
+
+    def perform(self, node, inputs, output_storage, params=None):
+        dtype = largest_common_dtype(inputs)
+        if self.sparse:
+            output_storage[0][0] = scipy.sparse.block_diag(inputs, self.format, dtype)
+        else:
+            output_storage[0][0] = scipy.linalg.block_diag(*inputs).astype(dtype)
+
+    def grad(self, inputs, gout):
+        shapes = pt.stack([i.shape for i in inputs])
+        index_end = shapes.cumsum(0)
+        index_begin = index_end - shapes
+        slices = [
+            ptb.ix_(
+                pt.arange(index_begin[i, 0], index_end[i, 0]),
+                pt.arange(index_begin[i, 1], index_end[i, 1]),
+            )
+            for i in range(len(inputs))
+        ]
+        return [gout[0][slc] for slc in slices]
+
+    def infer_shape(self, fgraph, nodes, shapes):
+        first, second = zip(*shapes)
+        return [(pt.add(*first), pt.add(*second))]
+
+
+def block_diagonal(
+    matrices: typing.Sequence[TensorVariable],
+    sparse: bool = False,
+    format: Literal["csr", "csc"] = "csr",
+):
+    """
+    Construct a block diagonal matrix from a sequence of input matrices.
+
+    Parameters
+    ----------
+    matrices: sequence of tensors
+        Input matrices to form the block diagonal matrix. Each matrix should have the same number of dimensions, and the
+         block diagonal matrix will be formed along the first axis of the matrices.
+    sparse : bool, optional
+        If True, the function returns a sparse matrix in the specified format. Default is True.
+    format: str, optional
+        The format of the output sparse matrix. One of 'csr' or 'csc'. Default is 'csr'. Ignored if sparse=False.
+
+    Returns
+    -------
+    out: tensor or sparse matrix tensor
+        The block diagonal matrix formed from the input matrices. If `sparse` is True, the output will be a symbolic
+        sparse matrix in the specified format. Otherwise, a symbolic tensor will be returned.
+
+    Examples
+    --------
+    Create a block diagonal matrix from two 2x2 matrices:
+
+    ..code-block:: python
+
+        import numpy as np
+        from pytensor.tensor.slinalg import block_diagonal
+
+        matrices = [np.array([[1, 2], [3, 4]]), np.array([[5, 6], [7, 8]])]
+        matrices = [pt.as_tensor_variable(mat) for mat in matrices]
+        result = block_diagonal(matrices)
+
+        print(result)
+        >>> Out: array([[1, 2, 0, 0],
+        >>>             [3, 4, 0, 0],
+        >>>             [0, 0, 5, 6],
+        >>>             [0, 0, 7, 8]])
+
+    Create a sparse block diagonal matrix from two sparse 2x2 matrices:
+
+    ..code-block:: python
+
+        matrices_sparse = [csr_matrix([[1, 2], [3, 4]]), csr_matrix([[5, 6], [7, 8]])]
+        result_sparse = block_diagonal(matrices_sparse, sparse=True)
+
+    The resulting sparse block diagonal matrix `result_sparse` is in CSR format.
+    """
+    if len(matrices) == 1:  # graph optimization
+        return matrices[0]
+    return BlockDiagonalMatrix(sparse=sparse, format=format)(*matrices)
+
+
 __all__ = [
     "cholesky",
     "solve",
@@ -918,4 +1027,5 @@ __all__ = [
     "solve_continuous_lyapunov",
     "solve_discrete_are",
     "solve_triangular",
+    "block_diagonal",
 ]

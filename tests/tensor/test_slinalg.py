@@ -15,6 +15,7 @@ from pytensor.tensor.slinalg import (
     Solve,
     SolveBase,
     SolveTriangular,
+    block_diagonal,
     cho_solve,
     cholesky,
     eigvalsh,
@@ -661,3 +662,14 @@ def test_solve_discrete_are_grad():
         rng=rng,
         abs_tol=atol,
     )
+
+
+def test_block_diagonal():
+    matrices = [np.array([[1.0, 2.0], [3.0, 4.0]]), np.array([[5.0, 6.0], [7.0, 8.0]])]
+    result = block_diagonal(matrices)
+    np.testing.assert_allclose(result.eval(), scipy.linalg.block_diag(*matrices))
+
+    result = block_diagonal(matrices, format="csr", sparse=True)
+    sp_result = scipy.sparse.block_diag(matrices, format="csr")
+    assert type(result.eval()) == type(sp_result)
+    np.testing.assert_allclose(result.eval().toarray(), sp_result.toarray())
