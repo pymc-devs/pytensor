@@ -997,7 +997,7 @@ def block_diagonal(
         matrices = [pt.as_tensor_variable(mat) for mat in matrices]
         result = block_diagonal(matrices)
 
-        print(result)
+        print(result.eval())
         >>> Out: array([[1, 2, 0, 0],
         >>>             [3, 4, 0, 0],
         >>>             [0, 0, 5, 6],
