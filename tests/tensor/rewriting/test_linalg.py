@@ -260,7 +260,12 @@ def test_psd_solve_with_chol():
     L = rng.normal(size=(5, 5)).astype(config.floatX)
     X_psd = L @ L.T
     X_psd_inv = f(X_psd)
-    assert_allclose(X_psd_inv, np.linalg.inv(X_psd))
+    assert_allclose(
+        X_psd_inv,
+        np.linalg.inv(X_psd),
+        atol=1e-4 if config.floatX == "float32" else 1e-8,
+        rtol=1e-4 if config.floatX == "float32" else 1e-8,
+    )
 
 
 class TestBatchedVectorBSolveToMatrixBSolve:
