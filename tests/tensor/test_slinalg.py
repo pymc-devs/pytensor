@@ -671,5 +671,5 @@ def test_block_diagonal():
 
     result = block_diagonal(matrices, format="csr", sparse=True)
     sp_result = scipy.sparse.block_diag(matrices, format="csr")
-    assert isinstance(result.eval()),  type(sp_result))
+    assert isinstance(result.eval(), type(sp_result))
     np.testing.assert_allclose(result.eval().toarray(), sp_result.toarray())
