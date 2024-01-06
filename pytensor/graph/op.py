@@ -583,6 +583,12 @@ class Op(MetaObject):
         )
         return self.make_py_thunk(node, storage_map, compute_map, no_recycling)
 
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
+        """Try to return a version of self that tries to inplace in as many as `allowed_inplace_inputs`."""
+        # TODO: Document this in the Create your own Op docs
+        # By default, do nothing
+        return self
+
     def __str__(self):
         return getattr(type(self), "__name__", super().__str__())
 
