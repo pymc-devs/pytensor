@@ -282,9 +282,9 @@ def numba_funcify_BlockDiagonalMatrix(op, node, **kwargs):
     # TODO: Why do we always inline all functions? It doesn't work with starred args, so can't use it in this case.
     @numba_basic.numba_njit(inline="never")
     def block_diag(*arrs):
-        shapes = np.array([a.shape for a in arrs], dtype=dtype)
+        shapes = np.array([a.shape for a in arrs], dtype="int")
         out_shape = [int(s) for s in np.sum(shapes, axis=0)]
-        out = np.zeros((out_shape[0], out_shape[1]))
+        out = np.zeros((out_shape[0], out_shape[1]), dtype=dtype)
 
         r, c = 0, 0
         for arr, shape in zip(arrs, shapes):
