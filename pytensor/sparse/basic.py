@@ -4261,10 +4261,11 @@ construct_sparse_from_list = ConstructSparseFromList()
 class SparseBlockDiagonalMatrix(BaseBlockDiagonal):
     __props__ = ("format",)
 
-    def __init__(self, format: Literal["csc", "csr"] = "csc"):
+    def __init__(self, n_inputs: int, format: Literal["csc", "csr"] = "csc"):
+        super().__init__(n_inputs)
         self.format = format
 
-    def make_node(self, *matrices, name=None):
+    def make_node(self, *matrices):
         if not matrices:
             raise ValueError("no matrices to allocate")
         dtype = largest_common_dtype(matrices)
@@ -4273,7 +4274,7 @@ class SparseBlockDiagonalMatrix(BaseBlockDiagonal):
         if any(mat.type.ndim != 2 for mat in matrices):
             raise TypeError("all data arguments must be matrices")
 
-        out_type = matrix(format=self.format, dtype=dtype, name=name)
+        out_type = matrix(format=self.format, dtype=dtype)
         return Apply(self, matrices, [out_type])
 
     def perform(self, node, inputs, output_storage, params=None):
@@ -4338,5 +4339,7 @@ def block_diag(
     if len(matrices) == 1:
         return matrices
 
-    _sparse_block_diagonal = SparseBlockDiagonalMatrix(format=format)
-    return _sparse_block_diagonal(*matrices, name=name)
+    _sparse_block_diagonal = SparseBlockDiagonalMatrix(
+        n_inputs=len(matrices), format=format
+    )
+    return _sparse_block_diagonal(*matrices)

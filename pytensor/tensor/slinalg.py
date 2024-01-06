@@ -913,6 +913,12 @@ def largest_common_dtype(tensors: typing.Sequence[TensorVariable]) -> np.dtype:
 
 
 class BaseBlockDiagonal(Op):
+    __props__ = ("gufunc_signature",)
+
+    def __init__(self, n_inputs):
+        input_sig = ",".join([f"(m{i},n{i})" for i in range(n_inputs)])
+        self.gufunc_signature = f"{input_sig}->(m,n)"
+
     def grad(self, inputs, gout):
         shapes = pt.stack([i.shape for i in inputs])
         index_end = shapes.cumsum(0)
@@ -932,11 +938,7 @@ class BaseBlockDiagonal(Op):
 
 
 class BlockDiagonalMatrix(BaseBlockDiagonal):
-    def __init__(self, n_inputs):
-        input_sig = ",".join([f"(m{i},n{i})" for i in range(n_inputs)])
-        self.gufunc_signature = f"{input_sig}->(m,n)"
-
-    def make_node(self, *matrices, name=None):
+    def make_node(self, *matrices):
         if not matrices:
             raise ValueError("no matrices to allocate")
         dtype = largest_common_dtype(matrices)
@@ -945,7 +947,7 @@ class BlockDiagonalMatrix(BaseBlockDiagonal):
         if any(mat.type.ndim != 2 for mat in matrices):
             raise TypeError("all data arguments must be matrices")
 
-        out_type = pytensor.tensor.matrix(dtype=dtype, name=name)
+        out_type = pytensor.tensor.matrix(dtype=dtype)
         return Apply(self, matrices, [out_type])
 
     def perform(self, node, inputs, output_storage, params=None):
@@ -998,8 +1000,8 @@ def block_diag(*matrices: TensorVariable, name=None):
     if len(matrices) == 1:  # graph optimization
         return matrices
 
-    _block_diagonal_matrix = BlockDiagonalMatrix(n_inputs=len(matrices))
-    return _block_diagonal_matrix(*matrices, name=name)
+    _block_diagonal_matrix = Blockwise(BlockDiagonalMatrix(n_inputs=len(matrices)))
+    return _block_diagonal_matrix(*matrices)
 
 
 __all__ = [

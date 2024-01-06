@@ -667,5 +667,20 @@ def test_solve_discrete_are_grad():
 def test_block_diagonal():
     A = np.array([[1.0, 2.0], [3.0, 4.0]])
     B = np.array([[5.0, 6.0], [7.0, 8.0]])
-    result = block_diag(A, B, name="X")
+    result = block_diag(A, B)
     np.testing.assert_allclose(result.eval(), scipy.linalg.block_diag(A, B))
+
+
+def test_block_diagonal_blockwise():
+    batch_size = 5
+    A = np.random.normal(size=(batch_size, 2, 2)).astype(config.floatX)
+    B = np.random.normal(size=(batch_size, 4, 4)).astype(config.floatX)
+    result = block_diag(A, B).eval()
+    assert result.shape == (batch_size, 6, 6)
+    for i in range(batch_size):
+        np.testing.assert_allclose(
+            result[i],
+            scipy.linalg.block_diag(A[i], B[i]),
+            atol=1e-4 if config.floatX == "float32" else 1e-8,
+            rtol=1e-4 if config.floatX == "float32" else 1e-8,
+        )

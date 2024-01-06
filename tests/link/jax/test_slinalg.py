@@ -138,8 +138,8 @@ def test_jax_block_diag():
     D = matrix("D")
 
     out = pt_slinalg.block_diag(A, B, C, D)
-
     out_fg = FunctionGraph([A, B, C, D], [out])
+
     compare_jax_and_py(
         out_fg,
         [
@@ -147,5 +147,19 @@ def test_jax_block_diag():
             np.random.normal(size=(3, 3)).astype(config.floatX),
             np.random.normal(size=(2, 2)).astype(config.floatX),
             np.random.normal(size=(4, 4)).astype(config.floatX),
+        ],
+    )
+
+
+def test_jax_block_diag_blockwise():
+    A = pt.tensor3("A")
+    B = pt.tensor3("B")
+    out = pt_slinalg.block_diag(A, B)
+    out_fg = FunctionGraph([A, B], [out])
+    compare_jax_and_py(
+        out_fg,
+        [
+            np.random.normal(size=(5, 5, 5)).astype(config.floatX),
+            np.random.normal(size=(5, 3, 3)).astype(config.floatX),
         ],
     )
