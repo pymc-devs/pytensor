@@ -2,6 +2,7 @@ import re
 
 import numpy as np
 import pytest
+from scipy import linalg
 
 import pytensor
 import pytensor.tensor as pt
@@ -9,7 +10,6 @@ from pytensor import config
 
 
 numba = pytest.importorskip("numba")
-
 
 ATOL = 0 if config.floatX.endswith("64") else 1e-6
 RTOL = 1e-7 if config.floatX.endswith("64") else 1e-6
@@ -102,3 +102,30 @@ def test_solve_triangular_raises_on_nan_inf(value):
         ValueError, match=re.escape("Non-numeric values (nan or inf) returned ")
     ):
         f(A_tri, b)
+
+
+def test_block_diag():
+    A = pt.matrix("A")
+    B = pt.matrix("B")
+    C = pt.matrix("C")
+    D = pt.matrix("D")
+    X = pt.linalg.block_diag(A, B, C, D)
+    f = pytensor.function([A, B, C, D], X, mode="NUMBA")
+
+    A_val = np.random.normal(size=(5, 5))
+    B_val = np.random.normal(size=(3, 3))
+    C_val = np.random.normal(size=(2, 2))
+    D_val = np.random.normal(size=(4, 4))
+
+    X_val = f(A_val, B_val, C_val, D_val)
+    np.testing.assert_allclose(
+        np.block([[A_val, np.zeros((5, 3))], [np.zeros((3, 5)), B_val]]), X_val[:8, :8]
+    )
+    np.testing.assert_allclose(
+        np.block([[C_val, np.zeros((2, 4))], [np.zeros((4, 2)), D_val]]), X_val[8:, 8:]
+    )
+    np.testing.assert_allclose(np.zeros((8, 6)), X_val[:8, 8:])
+    np.testing.assert_allclose(np.zeros((6, 8)), X_val[8:, :8])
+
+    X_sp = linalg.block_diag(A_val, B_val, C_val, D_val)
+    np.testing.assert_allclose(X_val, X_sp)

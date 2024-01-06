@@ -949,7 +949,7 @@ class BlockDiagonalMatrix(BaseBlockDiagonal):
         return Apply(self, matrices, [out_type])
 
     def perform(self, node, inputs, output_storage, params=None):
-        dtype = largest_common_dtype(inputs)
+        dtype = node.outputs[0].type.dtype
         output_storage[0][0] = scipy.linalg.block_diag(*inputs).astype(dtype)
 
 

@@ -665,6 +665,7 @@ def test_solve_discrete_are_grad():
 
 
 def test_block_diagonal():
-    matrices = [np.array([[1.0, 2.0], [3.0, 4.0]]), np.array([[5.0, 6.0], [7.0, 8.0]])]
-    result = block_diag(*matrices)
-    np.testing.assert_allclose(result.eval(), scipy.linalg.block_diag(*matrices))
+    A = np.array([[1.0, 2.0], [3.0, 4.0]])
+    B = np.array([[5.0, 6.0], [7.0, 8.0]])
+    result = block_diag(A, B, name="X")
+    np.testing.assert_allclose(result.eval(), scipy.linalg.block_diag(A, B))
