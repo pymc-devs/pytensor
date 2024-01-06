@@ -10,6 +10,7 @@ from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Dot, Prod, _matrix_matrix_matmul, log, prod
 from pytensor.tensor.nlinalg import MatrixInverse, det
 from pytensor.tensor.rewriting.basic import (
+    make_inplace,
     register_canonicalize,
     register_specialize,
     register_stabilize,
@@ -313,15 +314,9 @@ def local_log_prod_sqr(fgraph, node):
         # returns the sign of the prod multiplication.
 
 
-cholesky_no_inplace = Cholesky(overwrite_a=False)
-cholesky_inplace = Cholesky(overwrite_a=True)
-
-
-@node_rewriter([cholesky_no_inplace], inplace=True)
+@node_rewriter([Cholesky], inplace=True)
 def local_inplace_cholesky(fgraph, node):
-    new_out = [cholesky_inplace(*node.inputs)]
-    copy_stack_trace(node.outputs, new_out)
-    return new_out
+    return make_inplace(node, "overwrite_a")
 
 
 # After destroyhandler(49.5) but before we try to make elemwise things

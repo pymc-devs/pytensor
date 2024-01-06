@@ -317,12 +317,12 @@ def test_local_inplace_cholesky():
     L = cholesky(X, overwrite_a=False, lower=True)
     f = function([pytensor.In(X, mutable=True)], L)
 
-    assert not L.owner.op.core_op.destructive
+    assert not L.owner.op.core_op.overwrite_a
 
     nodes = f.maker.fgraph.toposort()
     for node in nodes:
         if isinstance(node, Cholesky):
-            assert node.destructive
+            assert node.overwrite_a
             break
 
     X_val = np.random.normal(size=(10, 10)).astype(config.floatX)

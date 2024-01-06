@@ -28,6 +28,22 @@ logger = logging.getLogger(__name__)
 
 
 class Cholesky(Op):
+    """
+    Return a triangular matrix square root of positive semi-definite `x`.
+
+    L = cholesky(X, lower=True) implies dot(L, L.T) == X.
+
+    Parameters
+    ----------
+    lower : bool, default=True
+        Whether to return the lower or upper cholesky factor
+    on_error : ['raise', 'nan']
+        If on_error is set to 'raise', this Op will raise a
+        `scipy.linalg.LinAlgError` if the matrix is not positive definite.
+        If on_error is set to 'nan', it will return a matrix containing
+        nans instead.
+    """
+
     # TODO: for specific dtypes
     # TODO: LAPACK wrapper with in-place behavior, for solve also
 
@@ -36,13 +52,11 @@ class Cholesky(Op):
 
     def __init__(self, *, lower=True, on_error="raise", overwrite_a=False):
         self.lower = lower
-
+        self.overwrite_a = overwrite_a
         if on_error not in ("raise", "nan"):
             raise ValueError('on_error must be one of "raise" or ""nan"')
         self.on_error = on_error
-
-        self.overwrite_a = overwrite_a
-        if self.overwrite_a:
+        if overwrite_a:
             self.destroy_map = {0: [0]}
 
     def infer_shape(self, fgraph, node, shapes):
@@ -73,7 +87,7 @@ class Cholesky(Op):
             if self.on_error == "raise":
                 raise
             else:
-                x = np.full_like(x, np.nan)
+                x = np.zeros(x.shape) * np.nan
         z[0] = x.astype(input_dtype)
 
     def L_op(self, inputs, outputs, gradients):
@@ -129,49 +143,9 @@ class Cholesky(Op):
 
 
 def cholesky(x, lower=True, on_error="raise", overwrite_a=False):
-    """
-    Return a triangular matrix square root of positive semi-definite `x`.
-
-    L = cholesky(X, lower=True) implies dot(L, L.T) == X.
-
-    Parameters
-    ----------
-    lower : bool, default=True
-        Whether to return the lower or upper cholesky factor
-    on_error : ['raise', 'nan']
-        If on_error is set to 'raise', this Op will raise a
-        `scipy.linalg.LinAlgError` if the matrix is not positive definite.
-        If on_error is set to 'nan', it will return a matrix containing
-        nans instead.
-    overwrite_a: bool, ignored
-        Whether to use the same memory for the output as `a`. This argument is ignored, and is present here only
-        for consistency with scipy.linalg.cholesky.
-
-    Returns
-    -------
-    TensorVariable
-        Lower or upper triangular Cholesky factor of `x`
-
-    Example
-    -------
-    .. code-block:: python
-
-        import pytensor
-        import pytensor.tensor as pt
-        import numpy as np
-
-        x = pt.tensor('x', size=(5, 5), dtype='float64')
-        L = pt.linalg.cholesky(x)
-
-        f = pytensor.function([x], L)
-        x_value = np.random.normal(size=(5, 5))
-        x_value = x_value @ x_value.T # Ensures x is positive definite
-        L_value = f(x_value)
-        print(np.allclose(L_value @ L_value.T, x_value))
-        >>> True
-    """
-
-    return Blockwise(Cholesky(lower=lower, on_error=on_error))(x)
+    return Blockwise(Cholesky(lower=lower, on_error=on_error, overwrite_a=overwrite_a))(
+        x
+    )
 
 
 class SolveBase(Op):

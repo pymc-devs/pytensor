@@ -135,6 +135,18 @@ def alloc_like(
     return rval
 
 
+def make_inplace(node, inplace_prop="inplace"):
+    op = getattr(node.op, "core_op", node.op)
+    props = op._props_dict()
+    if props[inplace_prop]:
+        return False
+
+    props[inplace_prop] = True
+    inplace_op = type(op)(**props)
+
+    return inplace_op.make_node(*node.inputs).outputs
+
+
 def register_useless(
     node_rewriter: Union[RewriteDatabase, NodeRewriter, str], *tags, **kwargs
 ):
