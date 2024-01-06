@@ -3,10 +3,11 @@ from itertools import product
 
 import numpy as np
 import pytest
+import scipy.linalg
 
 import pytensor
-from pytensor import config, function
-from pytensor.compile import get_mode
+from pytensor import In, config, function
+from pytensor.compile import get_default_mode, get_mode
 from pytensor.gradient import grad
 from pytensor.graph import Apply, Op
 from pytensor.graph.replace import vectorize_node
@@ -15,7 +16,15 @@ from pytensor.tensor import diagonal, log, tensor
 from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
 from pytensor.tensor.nlinalg import MatrixInverse
 from pytensor.tensor.rewriting.blas import specialize_matmul_to_batched_dot
-from pytensor.tensor.slinalg import Cholesky, Solve, cholesky, solve_triangular
+from pytensor.tensor.slinalg import (
+    Cholesky,
+    Solve,
+    SolveBase,
+    cho_solve,
+    cholesky,
+    solve,
+    solve_triangular,
+)
 from pytensor.tensor.utils import _parse_gufunc_signature
 
 
@@ -398,3 +407,105 @@ def test_cop_with_params():
 
     with pytest.raises(AssertionError):
         fn(np.zeros((5, 3, 2)) - 1)
+
+
+@pytest.mark.skipif(
+    config.mode == "FAST_COMPILE",
+    reason="inplace rewrites disabled when mode is FAST_COMPILE",
+)
+class TestInplace:
+    @pytest.mark.parametrize("is_batched", (False, True))
+    def test_cholesky(self, is_batched):
+        X = tensor("X", shape=(5, None, None) if is_batched else (None, None))
+        L = cholesky(X, lower=True)
+        f = function([In(X, mutable=True)], L)
+
+        assert not L.owner.op.core_op.destroy_map
+
+        if is_batched:
+            [cholesky_op] = [
+                node.op.core_op
+                for node in f.maker.fgraph.apply_nodes
+                if isinstance(node.op, Blockwise)
+                and isinstance(node.op.core_op, Cholesky)
+            ]
+        else:
+            [cholesky_op] = [
+                node.op
+                for node in f.maker.fgraph.apply_nodes
+                if isinstance(node.op, Cholesky)
+            ]
+        assert cholesky_op.destroy_map == {0: [0]}
+
+        rng = np.random.default_rng(441 + is_batched)
+        X_val = rng.normal(size=(10, 10)).astype(config.floatX)
+        X_val_in = X_val @ X_val.T
+        if is_batched:
+            X_val_in = np.broadcast_to(X_val_in, (5, *X_val_in.shape)).copy()
+        X_val_in_copy = X_val_in.copy()
+
+        f(X_val_in)
+
+        np.testing.assert_allclose(
+            X_val_in,
+            np.linalg.cholesky(X_val_in_copy),
+            atol=1e-5 if config.floatX == "float32" else 0,
+        )
+
+    @pytest.mark.parametrize("batched_A", (False, True))
+    @pytest.mark.parametrize("batched_b", (False, True))
+    @pytest.mark.parametrize("solve_fn", (solve, solve_triangular, cho_solve))
+    def test_solve(self, solve_fn, batched_A, batched_b):
+        A = tensor("A", shape=(5, 3, 3) if batched_A else (3, 3))
+        b = tensor("b", shape=(5, 3) if batched_b else (3,))
+        if solve_fn == cho_solve:
+            # Special signature for cho_solve
+            x = solve_fn((A, True), b, b_ndim=1)
+        else:
+            x = solve_fn(A, b, b_ndim=1)
+
+        mode = get_default_mode().excluding("batched_vector_b_solve_to_matrix_b_solve")
+        fn = function([In(A, mutable=True), In(b, mutable=True)], x, mode=mode)
+
+        op = fn.maker.fgraph.outputs[0].owner.op
+        if batched_A or batched_b:
+            assert isinstance(op, Blockwise) and isinstance(op.core_op, SolveBase)
+            if batched_A and not batched_b:
+                if solve_fn == solve:
+                    assert op.destroy_map == {0: [0]}
+                else:
+                    # SolveTriangular does not destroy A
+                    assert op.destroy_map == {}
+            else:
+                assert op.destroy_map == {0: [1]}
+        else:
+            assert isinstance(op, SolveBase)
+            assert op.destroy_map == {0: [1]}
+
+        # We test with an F_CONTIGUOUS (core) A as only that will be destroyed by scipy
+        rng = np.random.default_rng(
+            487 + batched_A + 2 * batched_b + sum(map(ord, solve_fn.__name__))
+        )
+        A_val = np.swapaxes(rng.normal(size=A.type.shape).astype(A.type.dtype), -1, -2)
+        b_val = np.random.normal(size=b.type.shape).astype(b.type.dtype)
+        A_val_copy = A_val.copy()
+        b_val_copy = b_val.copy()
+        out = fn(A_val, b_val)
+
+        if solve_fn == cho_solve:
+
+            def core_scipy_fn(A, b):
+                return scipy.linalg.cho_solve((A, True), b)
+
+        else:
+            core_scipy_fn = getattr(scipy.linalg, solve_fn.__name__)
+        expected_out = np.vectorize(core_scipy_fn, signature="(m,m),(m)->(m)")(
+            A_val_copy, b_val_copy
+        )
+        np.testing.assert_allclose(
+            out, expected_out, atol=1e-6 if config.floatX == "float32" else 0
+        )
+
+        # Confirm input was destroyed
+        assert (A_val == A_val_copy).all() == (op.destroy_map.get(0, None) != [0])
+        assert (b_val == b_val_copy).all() == (op.destroy_map.get(0, None) != [1])

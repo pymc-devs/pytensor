@@ -197,7 +197,10 @@ class TestSolveBase(utt.InferShapeTester):
         A = matrix()
         b = matrix()
         y = SolveBase(b_ndim=2)(A, b)
-        assert y.__repr__() == "SolveBase{lower=False, check_finite=True, b_ndim=2}.0"
+        assert (
+            y.__repr__()
+            == "SolveBase{lower=False, check_finite=True, b_ndim=2, overwrite_a=False, overwrite_b=False}.0"
+        )
 
 
 class TestSolve(utt.InferShapeTester):
@@ -361,7 +364,7 @@ class TestCholeskySolve(utt.InferShapeTester):
     def test_repr(self):
         assert (
             repr(CholeskySolve(lower=True, b_ndim=1))
-            == "CholeskySolve(lower=True,check_finite=True,b_ndim=1)"
+            == "CholeskySolve(lower=True,check_finite=True,b_ndim=1,overwrite_b=False)"
         )
 
     def test_infer_shape(self):

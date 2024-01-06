@@ -28,57 +28,68 @@ logger = logging.getLogger(__name__)
 
 
 class Cholesky(Op):
-    """
-    Return a triangular matrix square root of positive semi-definite `x`.
-
-    L = cholesky(X, lower=True) implies dot(L, L.T) == X.
-
-    Parameters
-    ----------
-    lower : bool, default=True
-        Whether to return the lower or upper cholesky factor
-    on_error : ['raise', 'nan']
-        If on_error is set to 'raise', this Op will raise a
-        `scipy.linalg.LinAlgError` if the matrix is not positive definite.
-        If on_error is set to 'nan', it will return a matrix containing
-        nans instead.
-    """
-
-    # TODO: inplace
-    # TODO: for specific dtypes
     # TODO: LAPACK wrapper with in-place behavior, for solve also
 
-    __props__ = ("lower", "destructive", "on_error")
+    __props__ = ("lower", "check_finite", "on_error", "overwrite_a")
     gufunc_signature = "(m,m)->(m,m)"
 
-    def __init__(self, *, lower=True, check_finite=True, on_error="raise"):
+    def __init__(
+        self,
+        *,
+        lower: bool = True,
+        check_finite: bool = True,
+        on_error: Literal["raise", "nan"] = "raise",
+        overwrite_a: bool = False,
+    ):
         self.lower = lower
-        self.destructive = False
         self.check_finite = check_finite
         if on_error not in ("raise", "nan"):
             raise ValueError('on_error must be one of "raise" or ""nan"')
         self.on_error = on_error
+        self.overwrite_a = overwrite_a
+
+        if self.overwrite_a:
+            self.destroy_map = {0: [0]}
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]
 
     def make_node(self, x):
         x = as_tensor_variable(x)
-        assert x.ndim == 2
-        return Apply(self, [x], [x.type()])
+        if x.type.ndim != 2:
+            raise TypeError(
+                f"Cholesky only allowed on matrix (2-D) inputs, got {x.type.ndim}-D input"
+            )
+        # Call scipy to find output dtype
+        dtype = scipy.linalg.cholesky(np.eye(1, dtype=x.type.dtype)).dtype
+        return Apply(self, [x], [tensor(shape=x.type.shape, dtype=dtype)])
 
     def perform(self, node, inputs, outputs):
-        x = inputs[0]
-        z = outputs[0]
+        [x] = inputs
+        [out] = outputs
         try:
-            z[0] = scipy.linalg.cholesky(
-                x, lower=self.lower, check_finite=self.check_finite
-            ).astype(x.dtype)
+            # Scipy cholesky only makes use of overwrite_a when it is F_CONTIGUOUS
+            # If we have a `C_CONTIGUOUS` array we transpose to benefit from it
+            if self.overwrite_a and x.flags["C_CONTIGUOUS"]:
+                out[0] = scipy.linalg.cholesky(
+                    x.T,
+                    lower=not self.lower,
+                    check_finite=self.check_finite,
+                    overwrite_a=True,
+                ).T
+            else:
+                out[0] = scipy.linalg.cholesky(
+                    x,
+                    lower=self.lower,
+                    check_finite=self.check_finite,
+                    overwrite_a=self.overwrite_a,
+                )
+
         except scipy.linalg.LinAlgError:
             if self.on_error == "raise":
                 raise
             else:
-                z[0] = (np.zeros(x.shape) * np.nan).astype(x.dtype)
+                out[0] = np.full(x.shape, np.nan, dtype=node.outputs[0].type.dtype)
 
     def L_op(self, inputs, outputs, gradients):
         """
@@ -131,11 +142,66 @@ class Cholesky(Op):
         else:
             return [grad]
 
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
+        if not allowed_inplace_inputs:
+            return self
+        new_props = self._props_dict()  # type: ignore
+        new_props["overwrite_a"] = True
+        return type(self)(**new_props)
 
-def cholesky(x, lower=True, on_error="raise", check_finite=False):
-    return Blockwise(
-        Cholesky(lower=lower, on_error=on_error, check_finite=check_finite)
-    )(x)
+
+def cholesky(
+    x: "TensorLike",
+    lower: bool = True,
+    *,
+    check_finite: bool = False,
+    overwrite_a: bool = False,
+    on_error: Literal["raise", "nan"] = "raise",
+):
+    """
+    Return a triangular matrix square root of positive semi-definite `x`.
+
+    L = cholesky(X, lower=True) implies dot(L, L.T) == X.
+
+    Parameters
+    ----------
+    x: tensor_like
+    lower : bool, default=True
+        Whether to return the lower or upper cholesky factor
+    check_finite : bool, default=False
+        Whether to check that the input matrix contains only finite numbers.
+    overwrite_a: bool, ignored
+        Whether to use the same memory for the output as `a`. This argument is ignored, and is present here only
+        for consistency with scipy.linalg.cholesky.
+    on_error : ['raise', 'nan']
+        If on_error is set to 'raise', this Op will raise a `scipy.linalg.LinAlgError` if the matrix is not positive definite.
+        If on_error is set to 'nan', it will return a matrix containing nans instead.
+
+    Returns
+    -------
+    TensorVariable
+        Lower or upper triangular Cholesky factor of `x`
+
+    Example
+    -------
+    .. testcode::
+
+        import pytensor
+        import pytensor.tensor as pt
+        import numpy as np
+
+        x = pt.tensor('x', shape=(5, 5), dtype='float64')
+        L = pt.linalg.cholesky(x)
+
+        f = pytensor.function([x], L)
+        x_value = np.random.normal(size=(5, 5))
+        x_value = x_value @ x_value.T # Ensures x is positive definite
+        L_value = f(x_value)
+        assert np.allclose(L_value @ L_value.T, x_value)
+
+    """
+
+    return Blockwise(Cholesky(lower=lower, on_error=on_error))(x)
 
 
 class SolveBase(Op):
@@ -145,6 +211,8 @@ class SolveBase(Op):
         "lower",
         "check_finite",
         "b_ndim",
+        "overwrite_a",
+        "overwrite_b",
     )
 
     def __init__(
@@ -153,6 +221,8 @@ class SolveBase(Op):
         lower=False,
         check_finite=True,
         b_ndim,
+        overwrite_a=False,
+        overwrite_b=False,
     ):
         self.lower = lower
         self.check_finite = check_finite
@@ -162,9 +232,25 @@ class SolveBase(Op):
             self.gufunc_signature = "(m,m),(m)->(m)"
         else:
             self.gufunc_signature = "(m,m),(m,n)->(m,n)"
+        self.overwrite_a = overwrite_a
+        self.overwrite_b = overwrite_b
+        destroy_map = {}
+        if self.overwrite_a and self.overwrite_b:
+            # An output destroying two inputs is not yet supported
+            # destroy_map[0] = [0, 1]
+            raise NotImplementedError(
+                "It's not yet possible to overwrite_a and overwrite_b simultaneously"
+            )
+        elif self.overwrite_a:
+            destroy_map[0] = [0]
+        elif self.overwrite_b:
+            destroy_map[0] = [1]
+        self.destroy_map = destroy_map
 
     def perform(self, node, inputs, outputs):
-        pass
+        raise NotImplementedError(
+            "SolveBase should be subclassed with an perform method"
+        )
 
     def make_node(self, A, b):
         A = as_tensor_variable(A)
@@ -235,7 +321,16 @@ def _default_b_ndim(b, b_ndim):
 
 
 class CholeskySolve(SolveBase):
+    __props__ = (
+        "lower",
+        "check_finite",
+        "b_ndim",
+        "overwrite_b",
+    )
+
     def __init__(self, **kwargs):
+        if kwargs.get("overwrite_a", False):
+            raise ValueError("overwrite_a is not supported for CholeskySolve")
         kwargs.setdefault("lower", True)
         super().__init__(**kwargs)
 
@@ -245,12 +340,22 @@ class CholeskySolve(SolveBase):
             (C, self.lower),
             b,
             check_finite=self.check_finite,
+            overwrite_b=self.overwrite_b,
         )
 
         output_storage[0][0] = rval
 
     def L_op(self, *args, **kwargs):
+        # TODO: Base impl should work, let's try it
         raise NotImplementedError()
+
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
+        if 1 in allowed_inplace_inputs:
+            new_props = self._props_dict()  # type: ignore
+            new_props["overwrite_b"] = True
+            return type(self)(**new_props)
+        else:
+            return self
 
 
 def cho_solve(c_and_lower, b, *, check_finite=True, b_ndim: int | None = None):
@@ -286,9 +391,12 @@ class SolveTriangular(SolveBase):
         "lower",
         "check_finite",
         "b_ndim",
+        "overwrite_b",
     )
 
     def __init__(self, *, trans=0, unit_diagonal=False, **kwargs):
+        if kwargs.get("overwrite_a", False):
+            raise ValueError("overwrite_a is not supported for SolverTriangulare")
         super().__init__(**kwargs)
         self.trans = trans
         self.unit_diagonal = unit_diagonal
@@ -302,6 +410,7 @@ class SolveTriangular(SolveBase):
             trans=self.trans,
             unit_diagonal=self.unit_diagonal,
             check_finite=self.check_finite,
+            overwrite_b=self.overwrite_b,
         )
 
     def L_op(self, inputs, outputs, output_gradients):
@@ -313,6 +422,14 @@ class SolveTriangular(SolveBase):
             res[0] = ptb.triu(res[0])
 
         return res
+
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
+        if 1 in allowed_inplace_inputs:
+            new_props = self._props_dict()  # type: ignore
+            new_props["overwrite_b"] = True
+            return type(self)(**new_props)
+        else:
+            return self
 
 
 def solve_triangular(
@@ -374,6 +491,8 @@ class Solve(SolveBase):
         "lower",
         "check_finite",
         "b_ndim",
+        "overwrite_a",
+        "overwrite_b",
     )
 
     def __init__(self, *, assume_a="gen", **kwargs):
@@ -391,7 +510,23 @@ class Solve(SolveBase):
             lower=self.lower,
             check_finite=self.check_finite,
             assume_a=self.assume_a,
+            overwrite_a=self.overwrite_a,
+            overwrite_b=self.overwrite_b,
         )
+
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
+        if not allowed_inplace_inputs:
+            return self
+        new_props = self._props_dict()  # type: ignore
+        # PyTensor doesn't allow an output to destroy two inputs yet
+        # new_props["overwrite_a"] = 0 in allowed_inplace_inputs
+        # new_props["overwrite_b"] = 1 in allowed_inplace_inputs
+        if 1 in allowed_inplace_inputs:
+            # Give preference to overwrite_b
+            new_props["overwrite_b"] = True
+        else:  # allowed inputs == [0]
+            new_props["overwrite_a"] = True
+        return type(self)(**new_props)
 
 
 def solve(
