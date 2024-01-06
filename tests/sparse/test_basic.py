@@ -51,6 +51,7 @@ from pytensor.sparse import (
     add_s_s_data,
     as_sparse_or_tensor_variable,
     as_sparse_variable,
+    block_diag,
     cast,
     clean,
     construct_sparse_from_list,
@@ -3389,3 +3390,15 @@ class TestSamplingDot(utt.InferShapeTester):
 )
 class TestSharedOptions:
     pass
+
+
+@pytest.mark.parametrize("format", ["csc", "csr"], ids=["csc", "csr"])
+def test_block_diagonal(format):
+    from scipy.sparse import block_diag as scipy_block_diag
+
+    matrices = [np.array([[1.0, 2.0], [3.0, 4.0]]), np.array([[5.0, 6.0], [7.0, 8.0]])]
+    result = block_diag(*matrices, format=format, name="X")
+    sp_result = scipy_block_diag(matrices, format=format)
+
+    assert isinstance(result.eval(), type(sp_result))
+    np.testing.assert_allclose(result.eval().toarray(), sp_result.toarray())
