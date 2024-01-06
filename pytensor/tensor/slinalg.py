@@ -912,23 +912,19 @@ def largest_common_dtype(tensors: typing.Sequence[TensorVariable]) -> np.dtype:
     return ft.reduce(lambda l, r: np.promote_types(l, r), [x.dtype for x in tensors])
 
 
-def block_diag_grad(inputs, gout):
-    shapes = pt.stack([i.shape for i in inputs])
-    index_end = shapes.cumsum(0)
-    index_begin = index_end - shapes
-    slices = [
-        ptb.ix_(
-            pt.arange(index_begin[i, 0], index_end[i, 0]),
-            pt.arange(index_begin[i, 1], index_end[i, 1]),
-        )
-        for i in range(len(inputs))
-    ]
-    return [gout[0][slc] for slc in slices]
-
-
 class BaseBlockDiagonal(Op):
     def grad(self, inputs, gout):
-        return block_diag_grad(inputs, gout)
+        shapes = pt.stack([i.shape for i in inputs])
+        index_end = shapes.cumsum(0)
+        index_begin = index_end - shapes
+        slices = [
+            ptb.ix_(
+                pt.arange(index_begin[i, 0], index_end[i, 0]),
+                pt.arange(index_begin[i, 1], index_end[i, 1]),
+            )
+            for i in range(len(inputs))
+        ]
+        return [gout[0][slc] for slc in slices]
 
     def infer_shape(self, fgraph, nodes, shapes):
         first, second = zip(*shapes)
@@ -936,6 +932,10 @@ class BaseBlockDiagonal(Op):
 
 
 class BlockDiagonalMatrix(BaseBlockDiagonal):
+    def __init__(self, n_inputs):
+        input_sig = ",".join([f"(m{i},n{i})" for i in range(n_inputs)])
+        self.gufunc_signature = f"{input_sig}->(m,n)"
+
     def make_node(self, *matrices, name=None):
         if not matrices:
             raise ValueError("no matrices to allocate")
@@ -951,9 +951,6 @@ class BlockDiagonalMatrix(BaseBlockDiagonal):
     def perform(self, node, inputs, output_storage, params=None):
         dtype = node.outputs[0].type.dtype
         output_storage[0][0] = scipy.linalg.block_diag(*inputs).astype(dtype)
-
-
-_block_diagonal_matrix = BlockDiagonalMatrix()
 
 
 def block_diag(*matrices: TensorVariable, name=None):
@@ -1000,6 +997,8 @@ def block_diag(*matrices: TensorVariable, name=None):
     """
     if len(matrices) == 1:  # graph optimization
         return matrices
+
+    _block_diagonal_matrix = BlockDiagonalMatrix(n_inputs=len(matrices))
     return _block_diagonal_matrix(*matrices, name=name)
 
 
