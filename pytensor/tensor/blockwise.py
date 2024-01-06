@@ -45,6 +45,7 @@ class Blockwise(Op):
         signature: str | None = None,
         name: str | None = None,
         gufunc_spec: tuple[str, int, int] | None = None,
+        destroy_map=None,
         **kwargs,
     ):
         """
@@ -79,6 +80,15 @@ class Blockwise(Op):
         self.inputs_sig, self.outputs_sig = _parse_gufunc_signature(signature)
         self.gufunc_spec = gufunc_spec
         self._gufunc = None
+        if destroy_map is not None:
+            self.destroy_map = destroy_map
+        if self.destroy_map != core_op.destroy_map:
+            # Note: Should be fine for destroy_map of Blockwise to be more extensive than that of core_op
+            # But we are not using that anywhere yet, so this check is fine for now
+            raise ValueError(
+                f"Blockwise destroy_map {self.destroy_map} must be the same as that of the core_op {core_op} {core_op.destroy_map}"
+            )
+
         super().__init__(**kwargs)
 
     def __getstate__(self):
