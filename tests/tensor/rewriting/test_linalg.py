@@ -246,7 +246,7 @@ def test_psd_solve_with_chol():
     X.tag.psd = True
     X_inv = pt.linalg.solve(X, pt.identity_like(X))
 
-    f = function([X], X_inv)
+    f = function([X], X_inv, mode="FAST_RUN")
 
     nodes = f.maker.fgraph.apply_nodes
 
@@ -255,7 +255,9 @@ def test_psd_solve_with_chol():
     assert any(isinstance(node.op, SolveTriangular) for node in nodes)
 
     # Numeric test
-    L = np.random.randn(5, 5).astype(config.floatX)
+    rng = np.random.default_rng(sum(map(ord, "test_psd_solve_with_chol")))
+
+    L = rng.normal(size=(5, 5)).astype(config.floatX)
     X_psd = L @ L.T
     X_psd_inv = f(X_psd)
     assert_allclose(X_psd_inv, np.linalg.inv(X_psd))
