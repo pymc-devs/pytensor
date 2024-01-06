@@ -4259,7 +4259,12 @@ construct_sparse_from_list = ConstructSparseFromList()
 
 
 class SparseBlockDiagonalMatrix(BaseBlockDiagonal):
-    def make_node(self, *matrices, format: Literal["csc", "csr"] = "csc", name=None):
+    __props__ = ("format",)
+
+    def __init__(self, format: Literal["csc", "csr"] = "csc"):
+        self.format = format
+
+    def make_node(self, *matrices, name=None):
         if not matrices:
             raise ValueError("no matrices to allocate")
         dtype = largest_common_dtype(matrices)
@@ -4268,18 +4273,14 @@ class SparseBlockDiagonalMatrix(BaseBlockDiagonal):
         if any(mat.type.ndim != 2 for mat in matrices):
             raise TypeError("all data arguments must be matrices")
 
-        out_type = matrix(format=format, dtype=dtype, name=name)
+        out_type = matrix(format=self.format, dtype=dtype, name=name)
         return Apply(self, matrices, [out_type])
 
     def perform(self, node, inputs, output_storage, params=None):
-        format = node.outputs[0].type.format
         dtype = node.outputs[0].type.dtype
-        output_storage[0][0] = scipy.sparse.block_diag(inputs, format=format).astype(
-            dtype
-        )
-
-
-_sparse_block_diagonal = SparseBlockDiagonalMatrix()
+        output_storage[0][0] = scipy.sparse.block_diag(
+            inputs, format=self.format
+        ).astype(dtype)
 
 
 def block_diag(
@@ -4337,4 +4338,5 @@ def block_diag(
     if len(matrices) == 1:
         return matrices
 
-    return _sparse_block_diagonal(*matrices, format=format, name=name)
+    _sparse_block_diagonal = SparseBlockDiagonalMatrix(format=format)
+    return _sparse_block_diagonal(*matrices, name=name)
