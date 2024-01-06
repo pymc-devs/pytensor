@@ -3394,11 +3394,12 @@ class TestSharedOptions:
 
 @pytest.mark.parametrize("format", ["csc", "csr"], ids=["csc", "csr"])
 def test_block_diagonal(format):
-    from scipy.sparse import block_diag as scipy_block_diag
+    from scipy import sparse as sp_sparse
 
-    matrices = [np.array([[1.0, 2.0], [3.0, 4.0]]), np.array([[5.0, 6.0], [7.0, 8.0]])]
-    result = block_diag(*matrices, format=format, name="X")
-    sp_result = scipy_block_diag(matrices, format=format)
+    A = sp_sparse.csr_matrix([[1, 2], [3, 4]])
+    B = sp_sparse.csr_matrix([[5, 6], [7, 8]])
+    result = block_diag(A, B, format=format, name="X")
+    sp_result = sp_sparse.block_diag([A, B], format=format)
 
     assert isinstance(result.eval(), type(sp_result))
     np.testing.assert_allclose(result.eval().toarray(), sp_result.toarray())

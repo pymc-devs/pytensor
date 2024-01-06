@@ -4263,7 +4263,7 @@ class SparseBlockDiagonalMatrix(BaseBlockDiagonal):
         if not matrices:
             raise ValueError("no matrices to allocate")
         dtype = largest_common_dtype(matrices)
-        matrices = list(map(pytensor.tensor.as_tensor, matrices))
+        matrices = list(map(as_sparse_or_tensor_variable, matrices))
 
         if any(mat.type.ndim != 2 for mat in matrices):
             raise TypeError("all data arguments must be matrices")
@@ -4273,7 +4273,7 @@ class SparseBlockDiagonalMatrix(BaseBlockDiagonal):
 
     def perform(self, node, inputs, output_storage, params=None):
         format = node.outputs[0].type.format
-        dtype = largest_common_dtype(inputs)
+        dtype = node.outputs[0].type.dtype
         output_storage[0][0] = scipy.sparse.block_diag(inputs, format=format).astype(
             dtype
         )
@@ -4296,9 +4296,12 @@ def block_diag(
 
     Parameters
     ----------
-    A, B, C ... : tensors
-        Input sparse matrices to form the block diagonal matrix. Each matrix should have the same number of dimensions,
+    A, B, C ... : tensors or array-like
+        Inputs to form the block diagonal matrix. Each input should have the same number of dimensions,
         and the block diagonal matrix will be formed using the right-most two dimensions of each input matrix.
+
+        Note that the input matrices need not be sparse themselves, and will be automatically converted to the
+        requested format if they are not.
     format: str, optional
         The format of the output sparse matrix. One of 'csr' or 'csc'. Default is 'csr'. Ignored if sparse=False.
     name: str, optional
@@ -4321,9 +4324,15 @@ def block_diag(
         A = csr_matrix([[1, 2], [3, 4]])
         B = csr_matrix([[5, 6], [7, 8]])
         result_sparse = block_diag(A, B, format='csr', name='X')
-        print(result_sparse.eval())
 
-    The resulting sparse block diagonal matrix `result_sparse` is in CSR format.
+        print(result_sparse)
+        >>>  SparseVariable{csr,int32}
+
+        print(result_sparse.toarray().eval())
+        >>> array([[1, 2, 0, 0],
+        >>> [3, 4, 0, 0],
+        >>> [0, 0, 5, 6],
+        >>> [0, 0, 7, 8]])
     """
     if len(matrices) == 1:
         return matrices
