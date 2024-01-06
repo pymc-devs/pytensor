@@ -3393,11 +3393,14 @@ class TestSharedOptions:
 
 
 @pytest.mark.parametrize("format", ["csc", "csr"], ids=["csc", "csr"])
-def test_block_diagonal(format):
+@pytest.mark.parametrize("sparse_input", [True, False], ids=["sparse", "dense"])
+def test_block_diagonal(format, sparse_input):
     from scipy import sparse as sp_sparse
 
-    A = sp_sparse.csr_matrix([[1, 2], [3, 4]])
-    B = sp_sparse.csr_matrix([[5, 6], [7, 8]])
+    f_array = sp_sparse.csr_matrix if sparse_input else np.array
+    A = f_array([[1, 2], [3, 4]]).astype(config.floatX)
+    B = f_array([[5, 6], [7, 8]]).astype(config.floatX)
+
     result = block_diag(A, B, format=format, name="X")
     sp_result = sp_sparse.block_diag([A, B], format=format)
 
