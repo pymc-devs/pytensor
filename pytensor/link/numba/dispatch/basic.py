@@ -37,7 +37,7 @@ from pytensor.sparse import SparseTensorType
 from pytensor.tensor.blas import BatchedDot
 from pytensor.tensor.math import Dot
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
-from pytensor.tensor.slinalg import Cholesky, Solve
+from pytensor.tensor.slinalg import Solve
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
@@ -809,39 +809,39 @@ def numba_funcify_Softplus(op, node, **kwargs):
     return softplus
 
 
-@numba_funcify.register(Cholesky)
-def numba_funcify_Cholesky(op, node, **kwargs):
-    lower = op.lower
-
-    out_dtype = node.outputs[0].type.numpy_dtype
-
-    if lower:
-        inputs_cast = int_to_float_fn(node.inputs, out_dtype)
-
-        @numba_njit
-        def cholesky(a):
-            return np.linalg.cholesky(inputs_cast(a)).astype(out_dtype)
-
-    else:
-        # TODO: Use SciPy's BLAS/LAPACK Cython wrappers.
-
-        warnings.warn(
-            (
-                "Numba will use object mode to allow the "
-                "`lower` argument to `scipy.linalg.cholesky`."
-            ),
-            UserWarning,
-        )
-
-        ret_sig = get_numba_type(node.outputs[0].type)
-
-        @numba_njit
-        def cholesky(a):
-            with numba.objmode(ret=ret_sig):
-                ret = scipy.linalg.cholesky(a, lower=lower).astype(out_dtype)
-            return ret
-
-    return cholesky
+# @numba_funcify.register(Cholesky)
+# def numba_funcify_Cholesky(op, node, **kwargs):
+#     lower = op.lower
+#
+#     out_dtype = node.outputs[0].type.numpy_dtype
+#
+#     if lower:
+#         inputs_cast = int_to_float_fn(node.inputs, out_dtype)
+#
+#         @numba_njit
+#         def cholesky(a):
+#             return np.linalg.cholesky(inputs_cast(a)).astype(out_dtype)
+#
+#     else:
+#         # TODO: Use SciPy's BLAS/LAPACK Cython wrappers.
+#
+#         warnings.warn(
+#             (
+#                 "Numba will use object mode to allow the "
+#                 "`lower` argument to `scipy.linalg.cholesky`."
+#             ),
+#             UserWarning,
+#         )
+#
+#         ret_sig = get_numba_type(node.outputs[0].type)
+#
+#         @numba_njit
+#         def cholesky(a):
+#             with numba.objmode(ret=ret_sig):
+#                 ret = scipy.linalg.cholesky(a, lower=lower).astype(out_dtype)
+#             return ret
+#
+#     return cholesky
 
 
 @numba_funcify.register(Solve)

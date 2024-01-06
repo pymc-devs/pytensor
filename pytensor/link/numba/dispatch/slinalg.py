@@ -9,7 +9,7 @@ from scipy import linalg
 
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import numba_funcify
-from pytensor.tensor.slinalg import SolveTriangular
+from pytensor.tensor.slinalg import Cholesky, SolveTriangular
 
 
 _PTR = ctypes.POINTER
@@ -177,6 +177,22 @@ class _LAPACK:
 
         return functype(lapack_ptr)
 
+    @classmethod
+    def numba_xpotrf(cls, dtype):
+        """
+        Called by scipy.linalg.cholesky
+        """
+        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "potrf")
+        functype = ctypes.CFUNCTYPE(
+            None,
+            _ptr_int,  # UPLO,
+            _ptr_int,  # N
+            float_pointer,  # A
+            _ptr_int,  # LDA
+            _ptr_int,  # INFO
+        )
+        return functype(lapack_ptr)
+
 
 def _solve_triangular(A, B, trans=0, lower=False, unit_diagonal=False):
     return linalg.solve_triangular(
@@ -273,3 +289,65 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
         return res
 
     return solve_triangular
+
+
+def _cholesky(a, lower=False, overwrite_a=False, check_finite=True):
+    return linalg.cholesky(
+        a, lower=lower, overwrite_a=overwrite_a, check_finite=check_finite
+    )
+
+
+@overload(_cholesky)
+def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
+    ensure_lapack()
+    _check_scipy_linalg_matrix(A, "cholesky")
+    dtype = A.dtype
+    w_type = _get_underlying_float(dtype)
+    numba_potrf = _LAPACK().numba_xpotrf(dtype)
+
+    def impl(A, lower=0, overwrite_a=False, check_finite=True):
+        _N = np.int32(A.shape[-1])
+        if A.shape[-2] != _N:
+            raise linalg.LinAlgError("Last 2 dimensions of A must be square")
+
+        UPLO = val_to_int_ptr(ord("L") if lower else ord("U"))
+        N = val_to_int_ptr(_N)
+        LDA = val_to_int_ptr(_N)
+        INFO = val_to_int_ptr(0)
+
+        if not overwrite_a:
+            A_copy = _copy_to_fortran_order(A)
+        else:
+            A_copy = A
+
+        numba_potrf(
+            UPLO,
+            N,
+            A_copy.view(w_type).ctypes,
+            LDA,
+            INFO,
+        )
+
+        return A_copy
+
+    return impl
+
+
+@numba_funcify.register(Cholesky)
+def numba_funcify_Cholesky(op, node, **kwargs):
+    lower = op.lower
+    # overwrite_a = op.overwrite_a
+    overwrite_a = False
+    check_finite = op.check_finite
+
+    @numba_basic.numba_njit(inline="always")
+    def nb_cholesky(a):
+        if check_finite:
+            if np.any(np.isinf(a)) or np.any(np.isnan(a)):
+                raise ValueError(
+                    "Non-numeric values (nan or inf) in input to ", op.name
+                )
+        res = _cholesky(a, lower, overwrite_a, check_finite)
+        return res
+
+    return nb_cholesky
