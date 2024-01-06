@@ -306,3 +306,39 @@ class TestBatchedVectorBSolveToMatrixBSolve:
             ref_fn(test_a, test_b),
             rtol=1e-7 if config.floatX == "float64" else 1e-5,
         )
+
+
+@pytest.mark.skipif(
+    config.mode == "FAST_COMPILE",
+    reason="inplace rewrites disabled when mode is FAST_COMPILE",
+)
+def test_local_inplace_cholesky():
+    X = matrix("X")
+    L = cholesky(X, overwrite_a=False, lower=True)
+    f = function([pytensor.In(X, mutable=True)], L)
+
+    assert not L.owner.op.core_op.destructive
+
+    nodes = f.maker.fgraph.toposort()
+    for node in nodes:
+        if isinstance(node, Cholesky):
+            assert node.destructive
+            break
+
+    X_val = np.random.normal(size=(10, 10)).astype(config.floatX)
+    X_val_in = X_val @ X_val.T
+    X_val_in_copy = X_val_in.copy()
+    f(X_val_in)
+
+    assert_allclose(
+        X_val_in[np.triu_indices_from(X_val_in, k=1)],
+        0.0,
+        atol=1e-4 if config.floatX == "float32" else 1e-8,
+        rtol=1e-4 if config.floatX == "float32" else 1e-8,
+    )
+    assert_allclose(
+        X_val_in @ X_val_in.T,
+        X_val_in_copy,
+        atol=1e-4 if config.floatX == "float32" else 1e-8,
+        rtol=1e-4 if config.floatX == "float32" else 1e-8,
+    )

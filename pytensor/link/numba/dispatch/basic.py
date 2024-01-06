@@ -812,7 +812,6 @@ def numba_funcify_Softplus(op, node, **kwargs):
 @numba_funcify.register(Cholesky)
 def numba_funcify_Cholesky(op, node, **kwargs):
     lower = op.lower
-
     out_dtype = node.outputs[0].type.numpy_dtype
 
     if lower:
