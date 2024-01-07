@@ -48,7 +48,7 @@ from pytensor.tensor.math import (
     trunc,
 )
 from pytensor.tensor.shape import shape, specify_broadcastable
-from pytensor.tensor.slinalg import BaseBlockDiagonal, largest_common_dtype
+from pytensor.tensor.slinalg import BaseBlockDiagonal, _largest_common_dtype
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type import continuous_dtypes as tensor_continuous_dtypes
 from pytensor.tensor.type import discrete_dtypes as tensor_discrete_dtypes
@@ -4258,7 +4258,7 @@ class ConstructSparseFromList(Op):
 construct_sparse_from_list = ConstructSparseFromList()
 
 
-class SparseBlockDiagonalMatrix(BaseBlockDiagonal):
+class SparseBlockDiagonal(BaseBlockDiagonal):
     __props__ = ("format",)
 
     def __init__(self, n_inputs: int, format: Literal["csc", "csr"] = "csc"):
@@ -4266,15 +4266,12 @@ class SparseBlockDiagonalMatrix(BaseBlockDiagonal):
         self.format = format
 
     def make_node(self, *matrices):
-        if not matrices:
-            raise ValueError("no matrices to allocate")
-        dtype = largest_common_dtype(matrices)
-        matrices = list(map(as_sparse_or_tensor_variable, matrices))
-
-        if any(mat.type.ndim != 2 for mat in matrices):
-            raise TypeError("all data arguments must be matrices")
-
+        matrices = self._validate_and_prepare_inputs(
+            matrices, as_sparse_or_tensor_variable
+        )
+        dtype = _largest_common_dtype(matrices)
         out_type = matrix(format=self.format, dtype=dtype)
+
         return Apply(self, matrices, [out_type])
 
     def perform(self, node, inputs, output_storage, params=None):
@@ -4284,9 +4281,7 @@ class SparseBlockDiagonalMatrix(BaseBlockDiagonal):
         ).astype(dtype)
 
 
-def block_diag(
-    *matrices: TensorVariable, format: Literal["csc", "csr"] = "csc", name=None
-):
+def block_diag(*matrices: TensorVariable, format: Literal["csc", "csr"] = "csc"):
     r"""
     Construct a block diagonal matrix from a sequence of input matrices.
 
@@ -4298,16 +4293,15 @@ def block_diag(
 
     Parameters
     ----------
-    A, B, C ... : tensors or array-like
-        Inputs to form the block diagonal matrix. Each input should have the same number of dimensions,
-        and the block diagonal matrix will be formed using the right-most two dimensions of each input matrix.
+    A, B, C ... : tensors
+        Input tensors to form the block diagonal matrix. last two dimensions of the inputs will be used, and all
+        inputs should have at least 2 dimensins.
 
         Note that the input matrices need not be sparse themselves, and will be automatically converted to the
         requested format if they are not.
+
     format: str, optional
         The format of the output sparse matrix. One of 'csr' or 'csc'. Default is 'csr'. Ignored if sparse=False.
-    name: str, optional
-        Name of the output tensor.
 
     Returns
     -------
@@ -4339,7 +4333,5 @@ def block_diag(
     if len(matrices) == 1:
         return matrices
 
-    _sparse_block_diagonal = SparseBlockDiagonalMatrix(
-        n_inputs=len(matrices), format=format
-    )
+    _sparse_block_diagonal = SparseBlockDiagonal(n_inputs=len(matrices), format=format)
     return _sparse_block_diagonal(*matrices)

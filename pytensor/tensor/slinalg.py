@@ -1,7 +1,7 @@
-import functools as ft
 import logging
 import typing
 import warnings
+from functools import reduce
 from typing import TYPE_CHECKING, Literal, Optional, Union
 
 import numpy as np
@@ -908,16 +908,20 @@ def solve_discrete_are(A, B, Q, R, enforce_Q_symmetric=False) -> TensorVariable:
     )
 
 
-def largest_common_dtype(tensors: typing.Sequence[TensorVariable]) -> np.dtype:
-    return ft.reduce(lambda l, r: np.promote_types(l, r), [x.dtype for x in tensors])
+def _largest_common_dtype(tensors: typing.Sequence[TensorVariable]) -> np.dtype:
+    return reduce(lambda l, r: np.promote_types(l, r), [x.dtype for x in tensors])
 
 
 class BaseBlockDiagonal(Op):
-    __props__ = ("gufunc_signature",)
+    __props__ = ("gufunc_signature", "n_inputs")
 
     def __init__(self, n_inputs):
         input_sig = ",".join([f"(m{i},n{i})" for i in range(n_inputs)])
         self.gufunc_signature = f"{input_sig}->(m,n)"
+
+        if n_inputs == 0:
+            raise ValueError("n_inputs must be greater than 0")
+        self.n_inputs = n_inputs
 
     def grad(self, inputs, gout):
         shapes = pt.stack([i.shape for i in inputs])
@@ -936,17 +940,21 @@ class BaseBlockDiagonal(Op):
         first, second = zip(*shapes)
         return [(pt.add(*first), pt.add(*second))]
 
-
-class BlockDiagonalMatrix(BaseBlockDiagonal):
-    def make_node(self, *matrices):
-        if not matrices:
-            raise ValueError("no matrices to allocate")
-        dtype = largest_common_dtype(matrices)
-        matrices = list(map(pt.as_tensor, matrices))
-
+    def _validate_and_prepare_inputs(self, matrices, as_tensor_func):
+        if len(matrices) != self.n_inputs:
+            raise ValueError(
+                f"Expected {self.n_inputs} matri{'ces' if self.n_inputs > 1 else 'x'}, got {len(matrices)}"
+            )
+        matrices = list(map(as_tensor_func, matrices))
         if any(mat.type.ndim != 2 for mat in matrices):
-            raise TypeError("all data arguments must be matrices")
+            raise TypeError("All inputs must have dimension 2")
+        return matrices
 
+
+class BlockDiagonal(BaseBlockDiagonal):
+    def make_node(self, *matrices):
+        matrices = self._validate_and_prepare_inputs(matrices, pt.as_tensor)
+        dtype = _largest_common_dtype(matrices)
         out_type = pytensor.tensor.matrix(dtype=dtype)
         return Apply(self, matrices, [out_type])
 
@@ -955,7 +963,7 @@ class BlockDiagonalMatrix(BaseBlockDiagonal):
         output_storage[0][0] = scipy.linalg.block_diag(*inputs).astype(dtype)
 
 
-def block_diag(*matrices: TensorVariable, name=None):
+def block_diag(*matrices: TensorVariable):
     """
     Construct a block diagonal matrix from a sequence of input tensors.
 
@@ -968,10 +976,8 @@ def block_diag(*matrices: TensorVariable, name=None):
     Parameters
     ----------
     A, B, C ... : tensors
-        Input matrices to form the block diagonal matrix. Each matrix should have the same number of dimensions, and the
-        block diagonal matrix will be formed using the right-most two dimensions of each input matrix.
-    name: str, optional
-        Name of the block diagonal matrix.
+        Input tensors to form the block diagonal matrix. last two dimensions of the inputs will be used, and all
+        inputs should have at least 2 dimensins.
 
     Returns
     -------
@@ -985,7 +991,7 @@ def block_diag(*matrices: TensorVariable, name=None):
     ..code-block:: python
 
         import numpy as np
-        from pytensor.tensor.slinalg import block_diag
+        from pytensor.tensor.linalg import block_diag
 
         A = pt.as_tensor_variable(np.array([[1, 2], [3, 4]]))
         B = pt.as_tensor_variable(np.array([[5, 6], [7, 8]]))
@@ -997,10 +1003,7 @@ def block_diag(*matrices: TensorVariable, name=None):
         >>>             [0, 0, 5, 6],
         >>>             [0, 0, 7, 8]])
     """
-    if len(matrices) == 1:  # graph optimization
-        return matrices
-
-    _block_diagonal_matrix = Blockwise(BlockDiagonalMatrix(n_inputs=len(matrices)))
+    _block_diagonal_matrix = Blockwise(BlockDiagonal(n_inputs=len(matrices)))
     return _block_diagonal_matrix(*matrices)
 
 

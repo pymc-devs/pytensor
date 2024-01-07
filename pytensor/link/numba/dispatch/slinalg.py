@@ -9,7 +9,7 @@ from scipy import linalg
 
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import numba_funcify
-from pytensor.tensor.slinalg import BlockDiagonalMatrix, SolveTriangular
+from pytensor.tensor.slinalg import BlockDiagonal, SolveTriangular
 
 
 _PTR = ctypes.POINTER
@@ -275,8 +275,8 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
     return solve_triangular
 
 
-@numba_funcify.register(BlockDiagonalMatrix)
-def numba_funcify_BlockDiagonalMatrix(op, node, **kwargs):
+@numba_funcify.register(BlockDiagonal)
+def numba_funcify_BlockDiagonal(op, node, **kwargs):
     dtype = node.outputs[0].dtype
 
     # TODO: Why do we always inline all functions? It doesn't work with starred args, so can't use it in this case.

@@ -3401,7 +3401,7 @@ def test_block_diagonal(format, sparse_input):
     A = f_array([[1, 2], [3, 4]]).astype(config.floatX)
     B = f_array([[5, 6], [7, 8]]).astype(config.floatX)
 
-    result = block_diag(A, B, format=format, name="X")
+    result = block_diag(A, B, format=format)
     sp_result = sp_sparse.block_diag([A, B], format=format)
 
     assert isinstance(result.eval(), type(sp_result))
