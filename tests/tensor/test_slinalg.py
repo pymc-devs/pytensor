@@ -668,6 +668,8 @@ def test_block_diagonal():
     A = np.array([[1.0, 2.0], [3.0, 4.0]])
     B = np.array([[5.0, 6.0], [7.0, 8.0]])
     result = block_diag(A, B)
+    assert result.owner.op.core_op._props_dict() == {"n_inputs": 2}
+
     np.testing.assert_allclose(result.eval(), scipy.linalg.block_diag(A, B))
 
 

@@ -952,6 +952,8 @@ class BaseBlockDiagonal(Op):
 
 
 class BlockDiagonal(BaseBlockDiagonal):
+    __props__ = ("n_inputs",)
+
     def make_node(self, *matrices):
         matrices = self._validate_and_prepare_inputs(matrices, pt.as_tensor)
         dtype = _largest_common_dtype(matrices)

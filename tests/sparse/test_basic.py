@@ -3402,6 +3402,8 @@ def test_block_diagonal(format, sparse_input):
     B = f_array([[5, 6], [7, 8]]).astype(config.floatX)
 
     result = block_diag(A, B, format=format)
+    assert result.owner.op._props_dict() == {"n_inputs": 2, "format": format}
+
     sp_result = sp_sparse.block_diag([A, B], format=format)
 
     assert isinstance(result.eval(), type(sp_result))

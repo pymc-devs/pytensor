@@ -4259,7 +4259,10 @@ construct_sparse_from_list = ConstructSparseFromList()
 
 
 class SparseBlockDiagonal(BaseBlockDiagonal):
-    __props__ = ("format",)
+    __props__ = (
+        "n_inputs",
+        "format",
+    )
 
     def __init__(self, n_inputs: int, format: Literal["csc", "csr"] = "csc"):
         super().__init__(n_inputs)
