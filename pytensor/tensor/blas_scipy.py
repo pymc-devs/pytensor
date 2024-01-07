@@ -19,17 +19,13 @@ if have_fblas:
 
 
 class ScipyGer(Ger):
-    def prepare_node(self, node, storage_map, compute_map, impl):
-        if impl == "py":
-            node.tag.local_ger = _blas_ger_fns[np.dtype(node.inputs[0].type.dtype)]
-
     def perform(self, node, inputs, output_storage):
         cA, calpha, cx, cy = inputs
         (cZ,) = output_storage
         # N.B. some versions of scipy (e.g. mine) don't actually work
         # in-place on a, even when I tell it to.
         A = cA
-        local_ger = node.tag.local_ger
+        local_ger = _blas_ger_fns[cA.dtype]
         if A.size == 0:
             # We don't have to compute anything, A is empty.
             # We need this special case because Numpy considers it
