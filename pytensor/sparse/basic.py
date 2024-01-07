@@ -7,6 +7,7 @@ http://www-users.cs.umn.edu/~saad/software/SPARSKIT/paper.ps
 TODO: Automatic methods for determining best sparse format?
 
 """
+from typing import Literal
 from warnings import warn
 
 import numpy as np
@@ -47,6 +48,7 @@ from pytensor.tensor.math import (
     trunc,
 )
 from pytensor.tensor.shape import shape, specify_broadcastable
+from pytensor.tensor.slinalg import BaseBlockDiagonal, _largest_common_dtype
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type import continuous_dtypes as tensor_continuous_dtypes
 from pytensor.tensor.type import discrete_dtypes as tensor_discrete_dtypes
@@ -59,7 +61,6 @@ from pytensor.tensor.variable import (
 
 
 sparse_formats = ["csc", "csr"]
-
 
 """
 Types of sparse matrices to use for testing.
@@ -182,7 +183,6 @@ def as_sparse_variable(x, name=None, ndim=None, **kwargs):
 
 
 as_sparse = as_sparse_variable
-
 
 as_sparse_or_tensor_variable = as_symbolic
 
@@ -1800,7 +1800,7 @@ class SpSum(Op):
         return r
 
     def __str__(self):
-        return f"{self.__class__.__name__ }{{axis={self.axis}}}"
+        return f"{self.__class__.__name__}{{axis={self.axis}}}"
 
 
 def sp_sum(x, axis=None, sparse_grad=False):
@@ -2775,18 +2775,13 @@ class GreaterEqualSD(__ComparisonOpSD):
 
 greater_equal_s_d = GreaterEqualSD()
 
-
 eq = __ComparisonSwitch(equal_s_s, equal_s_d, equal_s_d)
-
 
 neq = __ComparisonSwitch(not_equal_s_s, not_equal_s_d, not_equal_s_d)
 
-
 lt = __ComparisonSwitch(less_than_s_s, less_than_s_d, greater_than_s_d)
 
-
 gt = __ComparisonSwitch(greater_than_s_s, greater_than_s_d, less_than_s_d)
-
 
 le = __ComparisonSwitch(less_equal_s_s, less_equal_s_d, greater_equal_s_d)
 
@@ -2992,7 +2987,7 @@ class Remove0(Op):
         l = []
         if self.inplace:
             l.append("inplace")
-        return f"{self.__class__.__name__ }{{{', '.join(l)}}}"
+        return f"{self.__class__.__name__}{{{', '.join(l)}}}"
 
     def make_node(self, x):
         """
@@ -3291,6 +3286,7 @@ class TrueDot(Op):
     # Simplify code by splitting into DotSS and DotSD.
 
     __props__ = ()
+
     # The grad_preserves_dense attribute doesn't change the
     # execution behavior.  To let the optimizer merge nodes with
     # different values of this attribute we shouldn't compare it
@@ -4260,3 +4256,85 @@ class ConstructSparseFromList(Op):
 
 
 construct_sparse_from_list = ConstructSparseFromList()
+
+
+class SparseBlockDiagonal(BaseBlockDiagonal):
+    __props__ = (
+        "n_inputs",
+        "format",
+    )
+
+    def __init__(self, n_inputs: int, format: Literal["csc", "csr"] = "csc"):
+        super().__init__(n_inputs)
+        self.format = format
+
+    def make_node(self, *matrices):
+        matrices = self._validate_and_prepare_inputs(
+            matrices, as_sparse_or_tensor_variable
+        )
+        dtype = _largest_common_dtype(matrices)
+        out_type = matrix(format=self.format, dtype=dtype)
+
+        return Apply(self, matrices, [out_type])
+
+    def perform(self, node, inputs, output_storage, params=None):
+        dtype = node.outputs[0].type.dtype
+        output_storage[0][0] = scipy.sparse.block_diag(
+            inputs, format=self.format
+        ).astype(dtype)
+
+
+def block_diag(*matrices: TensorVariable, format: Literal["csc", "csr"] = "csc"):
+    r"""
+    Construct a block diagonal matrix from a sequence of input matrices.
+
+    Given the inputs `A`, `B` and `C`, the output will have these arrays arranged on the diagonal:
+
+    [[A, 0, 0],
+     [0, B, 0],
+     [0, 0, C]]
+
+    Parameters
+    ----------
+    A, B, C ... : tensors
+        Input tensors to form the block diagonal matrix. last two dimensions of the inputs will be used, and all
+        inputs should have at least 2 dimensins.
+
+        Note that the input matrices need not be sparse themselves, and will be automatically converted to the
+        requested format if they are not.
+
+    format: str, optional
+        The format of the output sparse matrix. One of 'csr' or 'csc'. Default is 'csr'. Ignored if sparse=False.
+
+    Returns
+    -------
+    out: sparse matrix tensor
+        Symbolic sparse matrix in the specified format.
+
+    Examples
+    --------
+    Create a sparse block diagonal matrix from two sparse 2x2 matrices:
+
+    ..code-block:: python
+        import numpy as np
+        from pytensor.sparse import block_diag
+        from scipy.sparse import csr_matrix
+
+        A = csr_matrix([[1, 2], [3, 4]])
+        B = csr_matrix([[5, 6], [7, 8]])
+        result_sparse = block_diag(A, B, format='csr', name='X')
+
+        print(result_sparse)
+        >>>  SparseVariable{csr,int32}
+
+        print(result_sparse.toarray().eval())
+        >>> array([[1, 2, 0, 0],
+        >>> [3, 4, 0, 0],
+        >>> [0, 0, 5, 6],
+        >>> [0, 0, 7, 8]])
+    """
+    if len(matrices) == 1:
+        return matrices
+
+    _sparse_block_diagonal = SparseBlockDiagonal(n_inputs=len(matrices), format=format)
+    return _sparse_block_diagonal(*matrices)

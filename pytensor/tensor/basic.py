@@ -4279,6 +4279,25 @@ def take_along_axis(arr, indices, axis=0):
     return arr[_make_along_axis_idx(arr.shape, indices, axis)]
 
 
+def ix_(*args):
+    """
+    PyTensor np.ix_ analog
+
+    See numpy.lib.index_tricks.ix_ for reference
+    """
+    out = []
+    nd = len(args)
+    for k, new in enumerate(args):
+        if new is None:
+            out.append(slice(None))
+        new = as_tensor(new)
+        if new.ndim != 1:
+            raise ValueError("Cross index must be 1 dimensional")
+        new = new.reshape((1,) * k + (new.size,) + (1,) * (nd - k - 1))
+        out.append(new)
+    return tuple(out)
+
+
 __all__ = [
     "take_along_axis",
     "expand_dims",
