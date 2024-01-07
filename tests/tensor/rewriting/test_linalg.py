@@ -241,6 +241,33 @@ def test_local_det_chol():
     assert not any(isinstance(node, Det) for node in nodes)
 
 
+def test_psd_solve_with_chol():
+    X = matrix("X")
+    X.tag.psd = True
+    X_inv = pt.linalg.solve(X, pt.identity_like(X))
+
+    f = function([X], X_inv, mode="FAST_RUN")
+
+    nodes = f.maker.fgraph.apply_nodes
+
+    assert not any(isinstance(node.op, Solve) for node in nodes)
+    assert any(isinstance(node.op, Cholesky) for node in nodes)
+    assert any(isinstance(node.op, SolveTriangular) for node in nodes)
+
+    # Numeric test
+    rng = np.random.default_rng(sum(map(ord, "test_psd_solve_with_chol")))
+
+    L = rng.normal(size=(5, 5)).astype(config.floatX)
+    X_psd = L @ L.T
+    X_psd_inv = f(X_psd)
+    assert_allclose(
+        X_psd_inv,
+        np.linalg.inv(X_psd),
+        atol=1e-4 if config.floatX == "float32" else 1e-8,
+        rtol=1e-4 if config.floatX == "float32" else 1e-8,
+    )
+
+
 class TestBatchedVectorBSolveToMatrixBSolve:
     rewrite_name = "batched_vector_b_solve_to_matrix_b_solve"
 

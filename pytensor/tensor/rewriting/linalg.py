@@ -215,8 +215,8 @@ def psd_solve_with_chol(fgraph, node):
             # N.B. this can be further reduced to a yet-unwritten cho_solve Op
             #     __if__ no other Op makes use of the L matrix during the
             #     stabilization
-            Li_b = solve(L, b, assume_a="sym", lower=True, b_ndim=2)
-            x = solve(_T(L), Li_b, assume_a="sym", lower=False, b_ndim=2)
+            Li_b = solve_triangular(L, b, lower=True, b_ndim=2)
+            x = solve_triangular(_T(L), Li_b, lower=False, b_ndim=2)
             return [x]
 
 
