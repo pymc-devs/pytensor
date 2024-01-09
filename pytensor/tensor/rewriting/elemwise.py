@@ -126,7 +126,7 @@ class InplaceElemwiseOptimizer(GraphRewriter):
             "nb_call_replace": 0,
             "nb_call_validate": 0,
             "nb_inconsistent": 0,
-            "ndim": defaultdict(lambda: 0),
+            "ndim": defaultdict(int),
         }
 
         check_each_change = config.tensor__insert_inplace_optimizer_validate_nb
