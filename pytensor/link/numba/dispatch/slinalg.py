@@ -25,6 +25,15 @@ _ptr_char = _PTR(_char)
 _ptr_int = _PTR(_int)
 
 
+@numba.core.extending.register_jitable
+def _check_finite_matrix(a, func_name):
+    for v in np.nditer(a):
+        if not np.isfinite(v.item()):
+            raise np.linalg.LinAlgError(
+                "Non-numeric values (nan or inf) in input to " + func_name
+            )
+
+
 @intrinsic
 def val_to_dptr(typingctx, data):
     def impl(context, builder, signature, args):
@@ -310,6 +319,9 @@ def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
         if A.shape[-2] != _N:
             raise linalg.LinAlgError("Last 2 dimensions of A must be square")
 
+        if check_finite:
+            _check_finite_matrix(A, "cholesky")
+
         UPLO = val_to_int_ptr(ord("L") if lower else ord("U"))
         N = val_to_int_ptr(_N)
         LDA = val_to_int_ptr(_N)
@@ -336,18 +348,12 @@ def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
 @numba_funcify.register(Cholesky)
 def numba_funcify_Cholesky(op, node, **kwargs):
     lower = op.lower
-    # overwrite_a = op.overwrite_a
     overwrite_a = False
-    check_finite = op.check_finite
+    on_error = op.on_error
 
     @numba_basic.numba_njit(inline="always")
     def nb_cholesky(a):
-        if check_finite:
-            if np.any(np.isinf(a)) or np.any(np.isnan(a)):
-                raise ValueError(
-                    "Non-numeric values (nan or inf) in input to ", op.name
-                )
-        res = _cholesky(a, lower, overwrite_a, check_finite)
+        res = _cholesky(a, lower, overwrite_a, on_error)
         return res
 
     return nb_cholesky

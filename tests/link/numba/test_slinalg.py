@@ -1,4 +1,3 @@
-import contextlib
 import re
 
 import numpy as np
@@ -109,52 +108,34 @@ def test_solve_triangular_raises_on_nan_inf(value):
         f(A_tri, b)
 
 
-@pytest.mark.parametrize(
-    "x, lower, exc",
-    [
-        (
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
-            True,
-            None,
-        ),
-        (
-            set_test_value(
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
-            True,
-            None,
-        ),
-        (
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
-            False,
-            UserWarning,
-        ),
-    ],
-)
-def test_Cholesky(x, lower, exc):
+@pytest.mark.parametrize("lower", [True, False], ids=["lower=True", "lower=False"])
+def test_numba_Cholesky(lower):
+    x = set_test_value(
+        pt.tensor(dtype=config.floatX, shape=(3, 3)),
+        (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype(config.floatX)),
+    )
+
     g = pt.linalg.cholesky(x, lower=lower)
+    g_fg = FunctionGraph(outputs=[g])
 
-    if isinstance(g, list):
-        g_fg = FunctionGraph(outputs=g)
-    else:
-        g_fg = FunctionGraph(outputs=[g])
+    compare_numba_and_py(
+        g_fg,
+        [
+            i.tag.test_value
+            for i in g_fg.inputs
+            if not isinstance(i, (SharedVariable, Constant))
+        ],
+    )
 
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
-        compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, (SharedVariable, Constant))
-            ],
-        )
+
+def test_numba_Cholesky_raises_on_nan():
+    test_value = rng.random(size=(3, 3)).astype(config.floatX)
+    test_value[0, 0] = np.nan
+
+    x = pt.tensor(dtype=config.floatX, shape=(3, 3))
+    x = x.T.dot(x)
+    g = pt.linalg.cholesky(x, on_error="raise")
+    f = pytensor.function([x], g, mode="NUMBA")
+
+    with pytest.raises(ValueError, match=r"Non-numeric values"):
+        f(test_value)
