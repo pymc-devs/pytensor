@@ -689,7 +689,7 @@ def _lessbroken_deepcopy(a):
     else:
         rval = copy.deepcopy(a)
 
-    assert type(rval) == type(a), (type(rval), type(a))
+    assert type(rval) is type(a), (type(rval), type(a))
 
     if isinstance(rval, np.ndarray):
         assert rval.dtype == a.dtype
@@ -1156,7 +1156,7 @@ class _FunctionGraphEvent:
             return str(self.__dict__)
 
     def __eq__(self, other):
-        rval = type(self) == type(other)
+        rval = type(self) is type(other)
         if rval:
             # nodes are not compared because this comparison is
             # supposed to be true for corresponding events that happen

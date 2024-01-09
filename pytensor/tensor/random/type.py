@@ -102,7 +102,7 @@ class RandomStateType(RandomType[np.random.RandomState]):
         return _eq(sa, sb)
 
     def __eq__(self, other):
-        return type(self) == type(other)
+        return type(self) is type(other)
 
     def __hash__(self):
         return hash(type(self))
@@ -198,7 +198,7 @@ class RandomGeneratorType(RandomType[np.random.Generator]):
         return _eq(sa, sb)
 
     def __eq__(self, other):
-        return type(self) == type(other)
+        return type(self) is type(other)
 
     def __hash__(self):
         return hash(type(self))
