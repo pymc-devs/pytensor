@@ -818,7 +818,7 @@ def get_destroy_dependencies(fgraph: FunctionGraph) -> dict[Apply, list[Variable
     in destroy_dependencies.
     """
     order = fgraph.orderings()
-    destroy_dependencies = defaultdict(lambda: [])
+    destroy_dependencies = defaultdict(list)
     for node in fgraph.apply_nodes:
         for prereq in order.get(node, []):
             destroy_dependencies[node].extend(prereq.outputs)

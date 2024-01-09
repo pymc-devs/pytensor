@@ -951,8 +951,8 @@ class MetaNodeRewriter(NodeRewriter):
 
     def __init__(self):
         self.verbose = config.metaopt__verbose
-        self.track_dict = defaultdict(lambda: [])
-        self.tag_dict = defaultdict(lambda: [])
+        self.track_dict = defaultdict(list)
+        self.tag_dict = defaultdict(list)
         self._tracks = []
         self.rewriters = []
 
