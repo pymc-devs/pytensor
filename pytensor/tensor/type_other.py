@@ -64,7 +64,7 @@ class SliceType(Type[slice]):
         return "slice"
 
     def __eq__(self, other):
-        return type(self) == type(other)
+        return type(self) is type(other)
 
     def __hash__(self):
         return hash(type(self))

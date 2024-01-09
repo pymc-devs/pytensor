@@ -25,7 +25,7 @@ class MyType(Type):
         self.thingy = thingy
 
     def __eq__(self, other):
-        return type(other) == type(self) and other.thingy == self.thingy
+        return type(other) is type(self) and other.thingy == self.thingy
 
     def __str__(self):
         return str(self.thingy)

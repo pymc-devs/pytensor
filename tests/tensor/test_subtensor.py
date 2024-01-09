@@ -819,7 +819,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
             assert np.allclose(val, good), (val, good)
 
             # Test reuse of output memory
-            if type(AdvancedSubtensor1) == AdvancedSubtensor1:
+            if type(AdvancedSubtensor1) is AdvancedSubtensor1:
                 op = AdvancedSubtensor1()
                 # When idx is a TensorConstant.
                 if hasattr(idx, "data"):

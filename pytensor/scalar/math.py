@@ -625,7 +625,7 @@ class Chi2SF(BinaryScalarOp):
         raise NotImplementedError("only floatingpoint is implemented")
 
     def __eq__(self, other):
-        return type(self) == type(other)
+        return type(self) is type(other)
 
     def __hash__(self):
         return hash(type(self))
@@ -671,7 +671,7 @@ class GammaInc(BinaryScalarOp):
         raise NotImplementedError("only floatingpoint is implemented")
 
     def __eq__(self, other):
-        return type(self) == type(other)
+        return type(self) is type(other)
 
     def __hash__(self):
         return hash(type(self))
@@ -717,7 +717,7 @@ class GammaIncC(BinaryScalarOp):
         raise NotImplementedError("only floatingpoint is implemented")
 
     def __eq__(self, other):
-        return type(self) == type(other)
+        return type(self) is type(other)
 
     def __hash__(self):
         return hash(type(self))
@@ -1023,7 +1023,7 @@ class GammaU(BinaryScalarOp):
         raise NotImplementedError("only floatingpoint is implemented")
 
     def __eq__(self, other):
-        return type(self) == type(other)
+        return type(self) is type(other)
 
     def __hash__(self):
         return hash(type(self))
@@ -1061,7 +1061,7 @@ class GammaL(BinaryScalarOp):
         raise NotImplementedError("only floatingpoint is implemented")
 
     def __eq__(self, other):
-        return type(self) == type(other)
+        return type(self) is type(other)
 
     def __hash__(self):
         return hash(type(self))

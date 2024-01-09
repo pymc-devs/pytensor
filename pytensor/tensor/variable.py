@@ -931,7 +931,7 @@ class TensorConstantSignature(tuple):
     """
 
     def __eq__(self, other):
-        if type(self) != type(other):
+        if type(self) is not type(other):
             return False
         try:
             (t0, d0), (t1, d1) = self, other
@@ -1091,7 +1091,7 @@ TensorType.constant_type = TensorConstant
 
 class DenseVariableMeta(MetaType):
     def __instancecheck__(self, o):
-        if type(o) == TensorVariable or isinstance(o, DenseVariableMeta):
+        if type(o) is TensorVariable or isinstance(o, DenseVariableMeta):
             return True
         return False
 
@@ -1106,7 +1106,7 @@ class DenseTensorVariable(TensorType, metaclass=DenseVariableMeta):
 
 class DenseConstantMeta(MetaType):
     def __instancecheck__(self, o):
-        if type(o) == TensorConstant or isinstance(o, DenseConstantMeta):
+        if type(o) is TensorConstant or isinstance(o, DenseConstantMeta):
             return True
         return False
 

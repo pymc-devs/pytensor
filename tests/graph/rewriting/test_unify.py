@@ -42,7 +42,7 @@ class CustomOpNoPropsNoEq(Op):
 
 class CustomOpNoProps(CustomOpNoPropsNoEq):
     def __eq__(self, other):
-        return type(self) == type(other) and self.a == other.a
+        return type(self) is type(other) and self.a == other.a
 
     def __hash__(self):
         return hash((type(self), self.a))

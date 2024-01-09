@@ -246,7 +246,7 @@ class FromFunctionOp(Op):
             self.infer_shape = self._infer_shape
 
     def __eq__(self, other):
-        return type(self) == type(other) and self.__fn == other.__fn
+        return type(self) is type(other) and self.__fn == other.__fn
 
     def __hash__(self):
         return hash(type(self)) ^ hash(self.__fn)
