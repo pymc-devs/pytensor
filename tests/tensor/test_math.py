@@ -1403,7 +1403,7 @@ class TestMinMax:
 
 
 rng = np.random.default_rng(seed=utt.fetch_seed())
-TestClip = makeTester(
+TestClip1 = makeTester(
     name="ClipTester",
     op=clip,
     expected=lambda x, y, z: np.clip(x, y, z),
@@ -1470,7 +1470,7 @@ TestBackwardsClip = makeTester(
 )
 
 
-class TestClip:
+class TestClip2:
     def test_complex_value(self):
         for dtype in ["complex64", "complex128"]:
             a = vector(dtype=dtype)
