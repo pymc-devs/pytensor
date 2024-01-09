@@ -3163,7 +3163,7 @@ def test_stack():
     sx, sy = dscalar(), dscalar()
 
     rval = inplace_func([sx, sy], stack([sx, sy]))(-4.0, -2.0)
-    assert type(rval) == np.ndarray
+    assert type(rval) is np.ndarray
     assert [-4, -2] == list(rval)
 
 

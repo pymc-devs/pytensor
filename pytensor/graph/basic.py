@@ -748,7 +748,7 @@ class NominalVariable(AtomicVariable[_TypeType]):
             return True
 
         return (
-            type(self) == type(other)
+            type(self) is type(other)
             and self.id == other.id
             and self.type == other.type
         )

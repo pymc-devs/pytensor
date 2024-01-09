@@ -78,7 +78,7 @@ class IfElse(_NoPythonOp):
         self.name = name
 
     def __eq__(self, other):
-        if type(self) != type(other):
+        if type(self) is not type(other):
             return False
         if self.as_view != other.as_view:
             return False

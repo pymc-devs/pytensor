@@ -16,7 +16,7 @@ from pytensor.tensor.type import DenseTensorType
 
 class ExceptionType(Generic):
     def __eq__(self, other):
-        return type(self) == type(other)
+        return type(self) is type(other)
 
     def __hash__(self):
         return hash(type(self))
@@ -51,7 +51,7 @@ class CheckAndRaise(COp):
         return f"CheckAndRaise{{{self.exc_type}({self.msg})}}"
 
     def __eq__(self, other):
-        if type(self) != type(other):
+        if type(self) is not type(other):
             return False
 
         if self.msg == other.msg and self.exc_type == other.exc_type:

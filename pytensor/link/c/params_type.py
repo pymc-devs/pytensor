@@ -301,7 +301,7 @@ class Params(dict):
 
     def __eq__(self, other):
         return (
-            type(self) == type(other)
+            type(self) is type(other)
             and self.__params_type__ == other.__params_type__
             and all(
                 # NB: Params object should have been already filtered.
@@ -435,7 +435,7 @@ class ParamsType(CType):
 
     def __eq__(self, other):
         return (
-            type(self) == type(other)
+            type(self) is type(other)
             and self.fields == other.fields
             and self.types == other.types
         )

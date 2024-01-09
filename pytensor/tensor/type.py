@@ -370,7 +370,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         return values_eq_approx(a, b, allow_remove_inf, allow_remove_nan, rtol, atol)
 
     def __eq__(self, other):
-        if type(self) != type(other):
+        if type(self) is not type(other):
             return NotImplemented
 
         return other.dtype == self.dtype and other.shape == self.shape
@@ -624,7 +624,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
 
 class DenseTypeMeta(MetaType):
     def __instancecheck__(self, o):
-        if type(o) == TensorType or isinstance(o, DenseTypeMeta):
+        if type(o) is TensorType or isinstance(o, DenseTypeMeta):
             return True
         return False
 

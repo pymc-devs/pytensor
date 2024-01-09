@@ -515,7 +515,7 @@ class EnumType(CType, dict):
 
     def __eq__(self, other):
         return (
-            type(self) == type(other)
+            type(self) is type(other)
             and self.ctype == other.ctype
             and len(self) == len(other)
             and len(self.aliases) == len(other.aliases)
