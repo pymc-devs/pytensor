@@ -2406,12 +2406,14 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
                 if node is not current_node:
                     q.append(node)
 
-            chin = None
+            chin: Optional[Callable] = None
             if self.tracks_on_change_inputs:
 
-                def chin(node, i, r, new_r, reason):
+                def chin_(node, i, r, new_r, reason):
                     if node is not current_node and not isinstance(node, str):
                         q.append(node)
+
+                chin = chin_
 
             u = self.attach_updater(
                 fgraph, importer, None, chin=chin, name=getattr(self, "name", None)
