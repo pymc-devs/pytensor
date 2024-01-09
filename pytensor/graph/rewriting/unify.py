@@ -57,8 +57,8 @@ class ConstrainedVar(Var):
         return obj
 
     def __eq__(self, other):
-        if type(self) == type(other):
-            return self.token == other.token and self.constraint == other.constraint
+        if type(self) is type(other):
+            return self.token is other.token and self.constraint == other.constraint
         return NotImplemented
 
     def __hash__(self):
