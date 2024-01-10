@@ -51,9 +51,10 @@ class Cholesky(Op):
     __props__ = ("lower", "destructive", "on_error")
     gufunc_signature = "(m,m)->(m,m)"
 
-    def __init__(self, *, lower=True, on_error="raise"):
+    def __init__(self, *, lower=True, check_finite=True, on_error="raise"):
         self.lower = lower
         self.destructive = False
+        self.check_finite = check_finite
         if on_error not in ("raise", "nan"):
             raise ValueError('on_error must be one of "raise" or ""nan"')
         self.on_error = on_error
@@ -70,7 +71,9 @@ class Cholesky(Op):
         x = inputs[0]
         z = outputs[0]
         try:
-            z[0] = scipy.linalg.cholesky(x, lower=self.lower).astype(x.dtype)
+            z[0] = scipy.linalg.cholesky(
+                x, lower=self.lower, check_finite=self.check_finite
+            ).astype(x.dtype)
         except scipy.linalg.LinAlgError:
             if self.on_error == "raise":
                 raise
@@ -129,8 +132,10 @@ class Cholesky(Op):
             return [grad]
 
 
-def cholesky(x, lower=True, on_error="raise"):
-    return Blockwise(Cholesky(lower=lower, on_error=on_error))(x)
+def cholesky(x, lower=True, on_error="raise", check_finite=True):
+    return Blockwise(
+        Cholesky(lower=lower, on_error=on_error, check_finite=check_finite)
+    )(x)
 
 
 class SolveBase(Op):

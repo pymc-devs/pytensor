@@ -102,7 +102,8 @@ def test_solve_triangular_raises_on_nan_inf(value):
     b = np.full((5, 1), value)
 
     with pytest.raises(
-        ValueError, match=re.escape("Non-numeric values (nan or inf) returned ")
+        np.linalg.LinAlgError,
+        match=re.escape("Non-numeric values (nan or inf) returned "),
     ):
         f(A_tri, b)
 
@@ -127,17 +128,34 @@ def test_numba_Cholesky(lower):
     )
 
 
-def test_numba_Cholesky_raises_on_nan():
+def test_numba_Cholesky_raises_on_nan_input():
     test_value = rng.random(size=(3, 3)).astype(config.floatX)
     test_value[0, 0] = np.nan
 
     x = pt.tensor(dtype=config.floatX, shape=(3, 3))
     x = x.T.dot(x)
-    g = pt.linalg.cholesky(x, on_error="raise")
+    g = pt.linalg.cholesky(x, check_finite=True)
     f = pytensor.function([x], g, mode="NUMBA")
 
-    with pytest.raises(ValueError, match=r"Non-numeric values"):
+    with pytest.raises(np.linalg.LinAlgError, match=r"Non-numeric values"):
         f(test_value)
+
+
+@pytest.mark.parametrize("on_error", ["nan", "raise"])
+def test_numba_Cholesky_raise_on(on_error):
+    test_value = rng.random(size=(3, 3)).astype(config.floatX)
+
+    x = pt.tensor(dtype=config.floatX, shape=(3, 3))
+    g = pt.linalg.cholesky(x, on_error=on_error)
+    f = pytensor.function([x], g, mode="NUMBA")
+
+    if on_error == "raise":
+        with pytest.raises(
+            np.linalg.LinAlgError, match=r"Input to cholesky is not positive definite"
+        ):
+            f(test_value)
+    else:
+        assert np.all(np.isnan(f(test_value)))
 
 
 def test_block_diag():

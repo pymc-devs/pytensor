@@ -9,7 +9,7 @@ from scipy import linalg
 
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import numba_funcify
-from pytensor.tensor.slinalg import Cholesky, BlockDiagonal, SolveTriangular
+from pytensor.tensor.slinalg import BlockDiagonal, Cholesky, SolveTriangular
 
 
 _PTR = ctypes.POINTER
@@ -292,12 +292,13 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
         res = _solve_triangular(a, b, trans, lower, unit_diagonal)
         if check_finite:
             if np.any(np.bitwise_or(np.isinf(res), np.isnan(res))):
-                raise ValueError(
+                raise np.linalg.LinAlgError(
                     "Non-numeric values (nan or inf) returned by solve_triangular"
                 )
         return res
 
     return solve_triangular
+
 
 def _cholesky(a, lower=False, overwrite_a=False, check_finite=True):
     return linalg.cholesky(
@@ -339,7 +340,7 @@ def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
             INFO,
         )
 
-        return A_copy
+        return A_copy, int_ptr_to_val(INFO)
 
     return impl
 
@@ -348,14 +349,35 @@ def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
 def numba_funcify_Cholesky(op, node, **kwargs):
     lower = op.lower
     overwrite_a = False
+    check_finite = op.check_finite
     on_error = op.on_error
 
     @numba_basic.numba_njit(inline="always")
     def nb_cholesky(a):
-        res = _cholesky(a, lower, overwrite_a, on_error)
+        if check_finite:
+            if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
+                raise np.linalg.LinAlgError(
+                    "Non-numeric values (nan or inf) found in input to cholesky"
+                )
+        res, info = _cholesky(a, lower, overwrite_a, check_finite)
+
+        if on_error == "raise":
+            if info > 0:
+                raise np.linalg.LinAlgError(
+                    "Input to cholesky is not positive definite"
+                )
+            if info < 0:
+                raise ValueError(
+                    'LAPACK reported an illegal value in input on entry to "POTRF."'
+                )
+        else:
+            if info != 0:
+                res = np.full_like(res, np.nan)
+
         return res
 
     return nb_cholesky
+
 
 @numba_funcify.register(BlockDiagonal)
 def numba_funcify_BlockDiagonal(op, node, **kwargs):
