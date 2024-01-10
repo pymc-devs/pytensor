@@ -14,7 +14,6 @@ from tests.tensor.test_extra_ops import set_test_value
 
 numba = pytest.importorskip("numba")
 
-
 ATOL = 0 if config.floatX.endswith("64") else 1e-6
 RTOL = 1e-7 if config.floatX.endswith("64") else 1e-6
 rng = np.random.default_rng(42849)
@@ -139,3 +138,18 @@ def test_numba_Cholesky_raises_on_nan():
 
     with pytest.raises(ValueError, match=r"Non-numeric values"):
         f(test_value)
+
+
+def test_block_diag():
+    A = pt.matrix("A")
+    B = pt.matrix("B")
+    C = pt.matrix("C")
+    D = pt.matrix("D")
+    X = pt.linalg.block_diag(A, B, C, D)
+
+    A_val = np.random.normal(size=(5, 5))
+    B_val = np.random.normal(size=(3, 3))
+    C_val = np.random.normal(size=(2, 2))
+    D_val = np.random.normal(size=(4, 4))
+    out_fg = pytensor.graph.FunctionGraph([A, B, C, D], [X])
+    compare_numba_and_py(out_fg, [A_val, B_val, C_val, D_val])

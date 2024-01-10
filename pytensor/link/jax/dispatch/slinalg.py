@@ -1,7 +1,7 @@
 import jax
 
 from pytensor.link.jax.dispatch.basic import jax_funcify
-from pytensor.tensor.slinalg import Cholesky, Solve, SolveTriangular
+from pytensor.tensor.slinalg import BlockDiagonal, Cholesky, Solve, SolveTriangular
 
 
 @jax_funcify.register(Cholesky)
@@ -45,3 +45,11 @@ def jax_funcify_SolveTriangular(op, **kwargs):
         )
 
     return solve_triangular
+
+
+@jax_funcify.register(BlockDiagonal)
+def jax_funcify_BlockDiagonalMatrix(op, **kwargs):
+    def block_diag(*inputs):
+        return jax.scipy.linalg.block_diag(*inputs)
+
+    return block_diag

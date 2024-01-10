@@ -144,20 +144,20 @@ except ImportError as e:
 # If check_init_y() == True we need to initialize y when beta == 0.
 def check_init_y():
     if check_init_y._result is None:
-        if not have_fblas:
+        if not have_fblas:  # pragma: no cover
             check_init_y._result = False
-
-        y = float("NaN") * np.ones((2,))
-        x = np.ones((2,))
-        A = np.ones((2, 2))
-        gemv = _blas_gemv_fns[y.dtype]
-        gemv(1.0, A.T, x, 0.0, y, overwrite_y=True, trans=True)
-        check_init_y._result = np.isnan(y).any()
+        else:
+            y = float("NaN") * np.ones((2,))
+            x = np.ones((2,))
+            A = np.ones((2, 2))
+            gemv = _blas_gemv_fns[y.dtype]
+            gemv(1.0, A.T, x, 0.0, y, overwrite_y=True, trans=True)
+            check_init_y._result = np.isnan(y).any()
 
     return check_init_y._result
 
 
-check_init_y._result = None
+check_init_y._result = None  # type: ignore
 
 
 class Gemv(Op):

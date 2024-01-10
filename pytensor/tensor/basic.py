@@ -43,7 +43,12 @@ from pytensor.tensor import (
     get_vector_length,
 )
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.elemwise import DimShuffle, Elemwise, scalar_elemwise
+from pytensor.tensor.elemwise import (
+    DimShuffle,
+    Elemwise,
+    get_normalized_batch_axes,
+    scalar_elemwise,
+)
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.shape import (
     Shape,
@@ -3614,13 +3619,18 @@ def diagonal(a, offset=0, axis1=0, axis2=1):
 
 
 @_vectorize_node.register(ExtractDiag)
-def vectorize_extract_diag(op: ExtractDiag, node, batched_x):
-    batched_ndims = batched_x.type.ndim - node.inputs[0].type.ndim
+def vectorize_extract_diag(op: ExtractDiag, node, batch_x):
+    core_ndim = node.inputs[0].type.ndim
+    batch_ndim = batch_x.type.ndim - core_ndim
+    batch_axis1, batch_axis2 = get_normalized_batch_axes(
+        (op.axis1, op.axis2), core_ndim, batch_ndim
+    )
+
     return diagonal(
-        batched_x,
+        batch_x,
         offset=op.offset,
-        axis1=op.axis1 + batched_ndims,
-        axis2=op.axis2 + batched_ndims,
+        axis1=batch_axis1,
+        axis2=batch_axis2,
     ).owner
 
 
@@ -4267,6 +4277,25 @@ def take_along_axis(arr, indices, axis=0):
 
     # use the fancy index
     return arr[_make_along_axis_idx(arr.shape, indices, axis)]
+
+
+def ix_(*args):
+    """
+    PyTensor np.ix_ analog
+
+    See numpy.lib.index_tricks.ix_ for reference
+    """
+    out = []
+    nd = len(args)
+    for k, new in enumerate(args):
+        if new is None:
+            out.append(slice(None))
+        new = as_tensor(new)
+        if new.ndim != 1:
+            raise ValueError("Cross index must be 1 dimensional")
+        new = new.reshape((1,) * k + (new.size,) + (1,) * (nd - k - 1))
+        out.append(new)
+    return tuple(out)
 
 
 __all__ = [
