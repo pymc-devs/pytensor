@@ -311,6 +311,10 @@ def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
     ensure_lapack()
     _check_scipy_linalg_matrix(A, "cholesky")
     dtype = A.dtype
+    if str(dtype).startswith("complex"):
+        raise ValueError(
+            "Complex inputs not currently supported by cholesky in Numba mode"
+        )
     w_type = _get_underlying_float(dtype)
     numba_potrf = _LAPACK().numba_xpotrf(dtype)
 
