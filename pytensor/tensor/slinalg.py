@@ -132,7 +132,7 @@ class Cholesky(Op):
             return [grad]
 
 
-def cholesky(x, lower=True, on_error="raise", check_finite=True):
+def cholesky(x, lower=True, on_error="raise", check_finite=False):
     return Blockwise(
         Cholesky(lower=lower, on_error=on_error, check_finite=check_finite)
     )(x)
