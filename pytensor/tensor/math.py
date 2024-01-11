@@ -411,17 +411,14 @@ class Argmax(COp):
             if len(self.axis) > 1:
                 raise NotImplementedError()
             # params is only used here for now
-            axis_code = (
-                """
+            axis_code = """
             axis = %(params)s->c_axis;
             if(axis > PyArray_NDIM(%(x)s)-1 || axis < -PyArray_NDIM(%(x)s)){
                 PyErr_SetString(PyExc_ValueError,
                 "Argmax, bad axis argument");
                 %(fail)s
             }
-            """
-                % locals()
-            )
+            """ % locals()
         ret = """
         int axis;
 

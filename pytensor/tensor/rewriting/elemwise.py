@@ -754,7 +754,7 @@ class FusionOptimizer(GraphRewriter):
                 VT = TypeVar("VT", list, set)
 
                 def shallow_clone_defaultdict(
-                    d: DefaultDict[KT, VT]
+                    d: DefaultDict[KT, VT],
                 ) -> DefaultDict[KT, VT]:
                     new_dict: DefaultDict[KT, VT] = defaultdict(d.default_factory)
                     new_dict.update({k: v.copy() for k, v in d.items()})

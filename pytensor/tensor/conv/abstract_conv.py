@@ -2284,8 +2284,9 @@ class BaseAbstractConv(Op):
         """
         if mode not in ("valid", "full"):
             raise ValueError(
-                "invalid mode {}, which must be either "
-                '"valid" or "full"'.format(mode)
+                "invalid mode {}, which must be either " '"valid" or "full"'.format(
+                    mode
+                )
             )
         if isinstance(dilation, int):
             dilation = (dilation,) * self.convdim
@@ -2545,8 +2546,7 @@ class AbstractConv(BaseAbstractConv):
             )
             if kern.shape[1 : 1 + self.convdim] != out_shape[2 : 2 + self.convdim]:
                 raise ValueError(
-                    "Kernel shape {} does not match "
-                    "computed output size {}".format(
+                    "Kernel shape {} does not match " "computed output size {}".format(
                         kern.shape[1 : 1 + self.convdim],
                         out_shape[2 : 2 + self.convdim],
                     )

@@ -62,6 +62,7 @@ class Node(MetaObject):
     keeps track of its parents via `Variable.owner` / `Apply.inputs`.
 
     """
+
     name: Optional[str]
 
     def get_parents(self):

@@ -3272,9 +3272,7 @@ def test_autocast_numpy():
     def ok(z):
         assert constant(z).dtype == np.asarray(z).dtype
 
-    for x in (
-        [2**i for i in range(63)] + [0, 0, 1, 2**63 - 1] + [0.0, 1.0, 1.1, 1.5]
-    ):
+    for x in [2**i for i in range(63)] + [0, 0, 1, 2**63 - 1] + [0.0, 1.0, 1.1, 1.5]:
         n_x = np.asarray(x)
         # Make sure the data type is the same as the one found by numpy.
         ok(x)
@@ -3303,9 +3301,7 @@ def test_autocast_numpy_floatX():
         # into int64, as that is the maximal integer type that PyTensor
         # supports, and that is the maximal type in Python indexing.
         for x in (
-            [2**i - 1 for i in range(64)]
-            + [0, 0, 1, 2**63 - 1]
-            + [0.0, 1.0, 1.1, 1.5]
+            [2**i - 1 for i in range(64)] + [0, 0, 1, 2**63 - 1] + [0.0, 1.0, 1.1, 1.5]
         ):
             with config.change_flags(floatX=floatX):
                 ok(x, floatX)

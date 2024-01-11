@@ -138,7 +138,7 @@ def import_func_from_string(func_string: str):  # -> Optional[Callable]:
 
 
 def broadcast_static_dim_lengths(
-    dim_lengths: Sequence[Union[int, None]]
+    dim_lengths: Sequence[Union[int, None]],
 ) -> Union[int, None]:
     """Apply static broadcast given static dim length of inputs (obtained from var.type.shape).
 
