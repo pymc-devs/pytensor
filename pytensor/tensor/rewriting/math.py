@@ -51,9 +51,6 @@ from pytensor.tensor.math import (
     ProdWithoutZeros,
     Sum,
     _conj,
-)
-from pytensor.tensor.math import abs as pt_abs
-from pytensor.tensor.math import (
     add,
     digamma,
     dot,
@@ -70,11 +67,10 @@ from pytensor.tensor.math import (
     log1mexp,
     log1p,
     makeKeepDims,
-)
-from pytensor.tensor.math import max as pt_max
-from pytensor.tensor.math import maximum, mul, neg, polygamma
-from pytensor.tensor.math import pow as pt_pow
-from pytensor.tensor.math import (
+    maximum,
+    mul,
+    neg,
+    polygamma,
     prod,
     reciprocal,
     sigmoid,
@@ -83,9 +79,13 @@ from pytensor.tensor.math import (
     sqr,
     sqrt,
     sub,
+    tri_gamma,
+    true_div,
 )
+from pytensor.tensor.math import abs as pt_abs
+from pytensor.tensor.math import max as pt_max
+from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.math import tri_gamma, true_div
 from pytensor.tensor.rewriting.basic import (
     alloc_like,
     broadcasted_by,

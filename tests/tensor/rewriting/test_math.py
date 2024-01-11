@@ -36,12 +36,13 @@ from pytensor.tensor.blas import Dot22, Gemv
 from pytensor.tensor.blas_c import CGemv
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from pytensor.tensor.math import Dot, MaxAndArgmax, Prod, Sum, _conj
-from pytensor.tensor.math import abs as pt_abs
-from pytensor.tensor.math import add
-from pytensor.tensor.math import all as pt_all
-from pytensor.tensor.math import any as pt_any
 from pytensor.tensor.math import (
+    Dot,
+    MaxAndArgmax,
+    Prod,
+    Sum,
+    _conj,
+    add,
     arccosh,
     arcsinh,
     arctanh,
@@ -66,13 +67,12 @@ from pytensor.tensor.math import (
     log1mexp,
     log1p,
     lt,
-)
-from pytensor.tensor.math import max as pt_max
-from pytensor.tensor.math import maximum
-from pytensor.tensor.math import min as pt_min
-from pytensor.tensor.math import minimum, mul, neg, neq, polygamma
-from pytensor.tensor.math import pow as pt_pow
-from pytensor.tensor.math import (
+    maximum,
+    minimum,
+    mul,
+    neg,
+    neq,
+    polygamma,
     prod,
     rad2deg,
     reciprocal,
@@ -83,9 +83,17 @@ from pytensor.tensor.math import (
     sqr,
     sqrt,
     sub,
+    tanh,
+    true_div,
+    xor,
 )
+from pytensor.tensor.math import abs as pt_abs
+from pytensor.tensor.math import all as pt_all
+from pytensor.tensor.math import any as pt_any
+from pytensor.tensor.math import max as pt_max
+from pytensor.tensor.math import min as pt_min
+from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.math import tanh, true_div, xor
 from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
 from pytensor.tensor.rewriting.math import (
     compute_mul,

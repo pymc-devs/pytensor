@@ -39,9 +39,8 @@ from pytensor.scan.basic import scan
 from pytensor.scan.op import Scan
 from pytensor.scan.utils import until
 from pytensor.tensor.math import all as pt_all
-from pytensor.tensor.math import dot, exp, mean, sigmoid
+from pytensor.tensor.math import dot, exp, mean, sigmoid, tanh
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.math import tanh
 from pytensor.tensor.random import normal
 from pytensor.tensor.random.utils import RandomStream
 from pytensor.tensor.shape import Shape_i, reshape, specify_shape

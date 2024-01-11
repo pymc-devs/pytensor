@@ -50,11 +50,13 @@ from pytensor.tensor.math import (
     minimum,
     mul,
     neq,
+    softplus,
+    sqrt,
+    sub,
+    true_div,
 )
 from pytensor.tensor.math import pow as pt_pow
-from pytensor.tensor.math import softplus, sqrt, sub
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.math import true_div
 from pytensor.tensor.rewriting.basic import (
     assert_op,
     local_alloc_sink_dimshuffle,

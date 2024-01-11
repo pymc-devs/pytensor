@@ -130,9 +130,12 @@ disable = ["C0330", "C0326"]
 
 
 [tool.ruff]
-select = ["C", "E", "F", "W"]
+select = ["C", "E", "F", "I", "W"]
 ignore = ["E501", "E741", "C408", "C901"]
 exclude = ["doc/", "pytensor/_version.py", "bin/pytensor_cache.py"]
+
+[tool.ruff.isort]
+lines-after-imports = 2
 
 [tool.ruff.per-file-ignores]
 # TODO: Get rid of these:
@@ -153,6 +156,7 @@ exclude = ["doc/", "pytensor/_version.py", "bin/pytensor_cache.py"]
 "tests/sparse/sandbox/test_sp.py" = ["E402", "F401"]
 "tests/scalar/test_basic_sympy.py" = ["E402"]
 "pytensor/graph/rewriting/unify.py" = ["F811"]
+"versioneer.py" = ["I"]
 
 
 [tool.mypy]

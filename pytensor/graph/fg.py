@@ -6,14 +6,17 @@ from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
 
 import pytensor
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, AtomicVariable, Variable, applys_between
-from pytensor.graph.basic import as_string as graph_as_string
 from pytensor.graph.basic import (
+    Apply,
+    AtomicVariable,
+    Variable,
+    applys_between,
     clone_get_equiv,
     graph_inputs,
     io_toposort,
     vars_between,
 )
+from pytensor.graph.basic import as_string as graph_as_string
 from pytensor.graph.features import AlreadyThere, Feature, ReplaceValidate
 from pytensor.graph.utils import MetaObject, MissingInputError, TestValueError
 from pytensor.misc.ordered_set import OrderedSet

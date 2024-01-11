@@ -30,9 +30,8 @@ from pytensor.gradient import (
 from pytensor.graph.basic import Apply, graph_inputs
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op
-from pytensor.tensor.math import add, dot, exp, sigmoid, sqr
+from pytensor.tensor.math import add, dot, exp, sigmoid, sqr, tanh
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.math import tanh
 from pytensor.tensor.random import RandomStream
 from pytensor.tensor.type import (
     discrete_dtypes,

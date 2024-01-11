@@ -28,13 +28,21 @@ from pytensor.sparse.type import SparseTensorType, _is_sparse
 from pytensor.sparse.utils import hash_from_sparse
 from pytensor.tensor import basic as ptb
 from pytensor.tensor.basic import Split
-from pytensor.tensor.math import _conj
-from pytensor.tensor.math import add as pt_add
-from pytensor.tensor.math import arcsin, arcsinh, arctan, arctanh, ceil, deg2rad
-from pytensor.tensor.math import dot as pt_dot
-from pytensor.tensor.math import exp, expm1, floor, log, log1p, maximum, minimum
-from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.math import (
+    _conj,
+    arcsin,
+    arcsinh,
+    arctan,
+    arctanh,
+    ceil,
+    deg2rad,
+    exp,
+    expm1,
+    floor,
+    log,
+    log1p,
+    maximum,
+    minimum,
     rad2deg,
     round_half_to_even,
     sigmoid,
@@ -47,12 +55,14 @@ from pytensor.tensor.math import (
     tanh,
     trunc,
 )
+from pytensor.tensor.math import add as pt_add
+from pytensor.tensor.math import dot as pt_dot
+from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.shape import shape, specify_broadcastable
 from pytensor.tensor.slinalg import BaseBlockDiagonal, _largest_common_dtype
-from pytensor.tensor.type import TensorType
+from pytensor.tensor.type import TensorType, iscalar, ivector, scalar, tensor, vector
 from pytensor.tensor.type import continuous_dtypes as tensor_continuous_dtypes
 from pytensor.tensor.type import discrete_dtypes as tensor_discrete_dtypes
-from pytensor.tensor.type import iscalar, ivector, scalar, tensor, vector
 from pytensor.tensor.variable import (
     TensorConstant,
     TensorVariable,
@@ -3684,9 +3694,7 @@ class StructuredDotGradCSC(COp):
             }
         }
 
-        """ % dict(
-            locals(), **sub
-        )
+        """ % dict(locals(), **sub)
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]
@@ -3820,9 +3828,7 @@ class StructuredDotGradCSR(COp):
             }
         }
 
-        """ % dict(
-            locals(), **sub
-        )
+        """ % dict(locals(), **sub)
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]

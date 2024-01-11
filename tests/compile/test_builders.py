@@ -16,9 +16,8 @@ from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.utils import MissingInputError
 from pytensor.printing import debugprint
 from pytensor.tensor.basic import as_tensor
-from pytensor.tensor.math import dot, exp
+from pytensor.tensor.math import dot, exp, sigmoid
 from pytensor.tensor.math import round as pt_round
-from pytensor.tensor.math import sigmoid
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.random.utils import RandomStream
 from pytensor.tensor.rewriting.shape import ShapeOptimizer

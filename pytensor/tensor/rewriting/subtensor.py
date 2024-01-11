@@ -32,9 +32,9 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
-from pytensor.tensor.math import Dot, add
-from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import (
+    Dot,
+    add,
     and_,
     ceil_intdiv,
     dot,
@@ -47,6 +47,7 @@ from pytensor.tensor.math import (
     minimum,
     or_,
 )
+from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
