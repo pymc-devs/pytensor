@@ -134,6 +134,7 @@ select = ["C", "E", "F", "I", "W"]
 ignore = ["E501", "E741", "C408", "C901"]
 exclude = ["doc/", "pytensor/_version.py", "bin/pytensor_cache.py"]
 
+
 [tool.ruff.isort]
 lines-after-imports = 2
 
@@ -147,11 +148,9 @@ lines-after-imports = 2
 "tests/link/numba/*.py" = ["E402"]
 "tests/tensor/test_math_scipy.py" = ["E402"]
 "tests/sparse/test_basic.py" = ["E402"]
-"tests/sparse/test_opt.py" = ["E402"]
 "tests/sparse/test_sp2.py" = ["E402"]
 "tests/sparse/test_utils.py" = ["E402"]
 "tests/sparse/sandbox/test_sp.py" = ["E402", "F401"]
-"tests/scalar/test_basic_sympy.py" = ["E402"]
 "versioneer.py" = ["I"]
 
 
