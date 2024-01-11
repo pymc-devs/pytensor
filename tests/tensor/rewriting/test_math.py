@@ -592,7 +592,7 @@ class TestAlgebraicCanonizer:
                 # must broadcast as there is a dimshuffle in the computation
                 ((dx * dv) / dx, [dx, dv], [dxv, dvv], 1, "float64"),
                 # topo: [Elemwise{second,no_inplace}(x, <TensorType(float64, row)>)]
-                ((fx * fv) / fx, [fx, fv], [fxv, fvv], 1, "float32")
+                ((fx * fv) / fx, [fx, fv], [fxv, fvv], 1, "float32"),
                 # topo: [Elemwise{second,no_inplace}(x, <TensorType(float32, row)>)]
             ]
         ):
@@ -2092,7 +2092,7 @@ class TestLocalSwitchSink:
                 f = self.function_remove_nan(
                     [condition[0], x[0], c], [y], mode=self.mode
                 )
-                if type(condition[1]) is list:
+                if isinstance(condition[1], list):
                     for i in range(len(condition[1])):
                         res = f(condition[1][i], x[1], -1)
                         assert (
@@ -2132,7 +2132,7 @@ class TestLocalSwitchSink:
                 f = self.function_remove_nan(
                     [condition[0], x[0], c], [y], mode=self.mode
                 )
-                if type(condition[1]) is list:
+                if isinstance(condition[1], list):
                     for i in range(len(condition[1])):
                         res = f(condition[1][i], x[1], -1)
                         assert (

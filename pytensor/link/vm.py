@@ -1072,8 +1072,8 @@ class VMLinker(LocalLinker):
                 compute_map[vars_idx_inv[i]] for i in range(len(vars_idx_inv))
             ]
             if nodes:
-                assert type(storage_map_list[0]) is list
-                assert type(compute_map_list[0]) is list
+                assert isinstance(storage_map_list[0], list)
+                assert isinstance(compute_map_list[0], list)
 
             # Needed for allow_gc=True, profiling and storage_map reuse
             dependency_map = self.compute_gc_dependencies(storage_map)

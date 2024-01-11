@@ -19,26 +19,13 @@ repos:
               pytensor/tensor/variable\.py|
           )$
       - id: check-merge-conflict
-  - repo: https://github.com/asottile/pyupgrade
-    rev: v3.3.1
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.1.11
     hooks:
-      - id: pyupgrade
-        args: [--py39-plus]
-  - repo: https://github.com/psf/black
-    rev: 23.1.0
-    hooks:
-      - id: black
-        language_version: python3
-  - repo: https://github.com/pycqa/flake8
-    rev: 6.0.0
-    hooks:
-      - id: flake8
-        additional_dependencies:
-          - flake8-comprehensions
-  - repo: https://github.com/pycqa/isort
-    rev: 5.12.0
-    hooks:
-      - id: isort
+      - id: ruff
+        args: ["--fix", "--show-source"]
+      - id: ruff-format
+        args: ["--line-length=88"]
   - repo: https://github.com/humitos/mirrors-autoflake.git
     rev: v1.1
     hooks:

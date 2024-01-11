@@ -1,24 +1,20 @@
 [build-system]
 requires = [
-  "setuptools>=48.0.0",
-  "cython",
-  "numpy>=1.17.0",
-  "versioneer[toml]==0.28",
+    "setuptools>=48.0.0",
+    "cython",
+    "numpy>=1.17.0",
+    "versioneer[toml]==0.28",
 ]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pytensor"
-dynamic = [
-  'version'
-]
+dynamic = ['version']
 requires-python = ">=3.9,<3.12"
-authors = [
-    {name = "pymc-devs", email = "pymc.devs@gmail.com"}
-]
+authors = [{ name = "pymc-devs", email = "pymc.devs@gmail.com" }]
 description = "Optimizing compiler for evaluating mathematical expressions on CPUs and GPUs."
 readme = "README.rst"
-license = {file = "LICENSE.txt"}
+license = { file = "LICENSE.txt" }
 classifiers = [
     "Development Status :: 6 - Mature",
     "Intended Audience :: Education",
@@ -71,15 +67,8 @@ documentation = "https://pytensor.readthedocs.io/en/latest/"
 pytensor-cache = "pytensor.bin.pytensor_cache:main"
 
 [project.optional-dependencies]
-complete = [
-    "pytensor[jax]",
-    "pytensor[numba]",
-]
-development = [
-    "pytensor[complete]",
-    "pytensor[tests]",
-    "pytensor[rtd]"
-]
+complete = ["pytensor[jax]", "pytensor[numba]"]
+development = ["pytensor[complete]", "pytensor[tests]", "pytensor[rtd]"]
 tests = [
     "pytest",
     "pre-commit",
@@ -88,34 +77,16 @@ tests = [
     "pytest-benchmark",
     "pytest-mock",
 ]
-rtd = [
-    "sphinx>=5.1.0,<6",
-    "pygments",
-    "pydot",
-    "pydot2",
-    "pydot-ng",
-]
-jax = [
-    "jax",
-    "jaxlib",
-]
-numba = [
-    "numba>=0.55",
-    "numba-scipy>=0.3.0"
-]
+rtd = ["sphinx>=5.1.0,<6", "pygments", "pydot", "pydot2", "pydot-ng"]
+jax = ["jax", "jaxlib"]
+numba = ["numba>=0.55", "numba-scipy>=0.3.0"]
 
 [tool.setuptools.packages.find]
 include = ["pytensor*", "bin"]
 
 [tool.setuptools.package-data]
-pytensor = [
-    "py.typed"
-]
-"pytensor.d3viz" = [
-    "html/*",
-    "css/*",
-    "js/*",
-]
+pytensor = ["py.typed"]
+"pytensor.d3viz" = ["html/*", "css/*", "js/*"]
 
 [tool.coverage.run]
 omit = [
@@ -136,14 +107,8 @@ branch = true
 relative_files = true
 
 [tool.coverage.report]
-omit = [
-    "pytensor/_version.py",
-    "tests/",
-]
-exclude_lines = [
-    "pragma: no cover",
-    "if TYPE_CHECKING:",
-]
+omit = ["pytensor/_version.py", "tests/"]
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:"]
 show_missing = true
 
 [tool.versioneer]
@@ -163,41 +128,31 @@ max-line-length = 88
 [tool.pylint.messages_control]
 disable = ["C0330", "C0326"]
 
-[tool.isort]
-profile = "black"
-lines_after_imports = 2
-lines_between_sections = 1
-honor_noqa = true
-skip_gitignore = true
-skip = "pytensor/version.py"
-skip_glob = "**/*.pyx"
 
 [tool.ruff]
-select=["C","E","F","W"]
-ignore=["E501","E741","C408","C901"]
-exclude = [
-    "doc/",
-    "pytensor/_version.py",
-    "bin/pytensor_cache.py",
-]
+select = ["C", "E", "F", "W"]
+ignore = ["E501", "E741", "C408", "C901"]
+exclude = ["doc/", "pytensor/_version.py", "bin/pytensor_cache.py"]
 
 [tool.ruff.per-file-ignores]
 # TODO: Get rid of these:
-    "**/__init__.py"=["F401","E402","F403"]
-    "pytensor/tensor/linalg.py"=["F401","F403"]
-    "pytensor/scalar/basic_scipy.py"=["E402","F403","F401"]
-    "pytensor/graph/toolbox.py"=["E402","F403","F401"]
-    "pytensor/link/jax/jax_dispatch.py"=["E402","F403","F401"]
-    "pytensor/link/jax/jax_linker.py"=["E402","F403","F401"]
-    "pytensor/sparse/sandbox/sp2.py"=["F401"]
-    "tests/tensor/test_math_scipy.py"=["E402"]
-    "tests/sparse/test_basic.py"=["E402"]
-    "tests/sparse/test_opt.py"=["E402"]
-    "tests/sparse/test_sp2.py"=["E402"]
-    "tests/sparse/test_utils.py"=["E402","F401"]
-    "tests/sparse/sandbox/test_sp.py"=["E402","F401"]
-    "tests/scalar/test_basic_sympy.py"=["E402"]
-    "pytensor/graph/rewriting/unify.py"=["F811"]
+"**/__init__.py" = ["F401", "E402", "F403"]
+"pytensor/tensor/linalg.py" = ["F401", "F403"]
+"pytensor/scalar/basic_scipy.py" = ["E402", "F403", "F401"]
+"pytensor/graph/toolbox.py" = ["E402", "F403", "F401"]
+"pytensor/link/jax/jax_dispatch.py" = ["E402", "F403", "F401"]
+"pytensor/link/jax/jax_linker.py" = ["E402", "F403", "F401"]
+"pytensor/sparse/sandbox/sp2.py" = ["F401"]
+"tests/link/jax/*" = ["E402"]
+"tests/link/numba/*.py" = ["E402"]
+"tests/tensor/test_math_scipy.py" = ["E402"]
+"tests/sparse/test_basic.py" = ["E402"]
+"tests/sparse/test_opt.py" = ["E402"]
+"tests/sparse/test_sp2.py" = ["E402"]
+"tests/sparse/test_utils.py" = ["E402", "F401"]
+"tests/sparse/sandbox/test_sp.py" = ["E402", "F401"]
+"tests/scalar/test_basic_sympy.py" = ["E402"]
+"pytensor/graph/rewriting/unify.py" = ["F811"]
 
 
 [tool.mypy]

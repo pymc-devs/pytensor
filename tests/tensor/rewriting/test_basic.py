@@ -861,7 +861,7 @@ class TestLocalSwitchSink:
                 f = self.function_remove_nan(
                     [condition[0], x[0], c], [y], mode=self.mode
                 )
-                if type(condition[1]) is list:
+                if isinstance(condition[1], list):
                     for i in range(len(condition[1])):
                         res = f(condition[1][i], x[1], -1)
                         assert (
@@ -901,7 +901,7 @@ class TestLocalSwitchSink:
                 f = self.function_remove_nan(
                     [condition[0], x[0], c], [y], mode=self.mode
                 )
-                if type(condition[1]) is list:
+                if isinstance(condition[1], list):
                     for i in range(len(condition[1])):
                         res = f(condition[1][i], x[1], -1)
                         assert (
