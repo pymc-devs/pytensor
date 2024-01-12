@@ -316,7 +316,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, Dict
+from typing import Callable
 import functools
 
 have_tomllib = True
@@ -415,8 +415,8 @@ class NotThisMethod(Exception):
 
 
 # these dictionaries contain VCS-specific tools
-LONG_VERSION_PY: Dict[str, str] = {}
-HANDLERS: Dict[str, Dict[str, Callable]] = {}
+LONG_VERSION_PY: dict[str, str] = {}
+HANDLERS: dict[str, dict[str, Callable]] = {}
 
 
 def register_vcs_handler(vcs, method):  # decorator
@@ -1141,7 +1141,7 @@ def git_get_keywords(versionfile_abs):
     # _version.py.
     keywords = {}
     try:
-        with open(versionfile_abs, "r") as fobj:
+        with open(versionfile_abs) as fobj:
             for line in fobj:
                 if line.strip().startswith("git_refnames ="):
                     mo = re.search(r'=\s*"(.*)"', line)
@@ -1380,7 +1380,7 @@ def do_vcs_install(versionfile_source, ipy):
         files.append(versioneer_file)
     present = False
     try:
-        with open(".gitattributes", "r") as fobj:
+        with open(".gitattributes") as fobj:
             for line in fobj:
                 if line.strip().startswith(versionfile_source):
                     if "export-subst" in line.strip().split()[1:]:
@@ -2128,7 +2128,7 @@ def do_setup():
                        "__init__.py")
     if os.path.exists(ipy):
         try:
-            with open(ipy, "r") as f:
+            with open(ipy) as f:
                 old = f.read()
         except OSError:
             old = ""
@@ -2160,7 +2160,7 @@ def scan_setup_py():
     found = set()
     setters = False
     errors = 0
-    with open("setup.py", "r") as f:
+    with open("setup.py") as f:
         for line in f.readlines():
             if "import versioneer" in line:
                 found.add("import")

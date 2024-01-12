@@ -3247,10 +3247,10 @@ def test_autocast_custom():
         assert (fvector() + 1.0).dtype == "float32"
         assert (dvector() + np.float32(1.1)).dtype == "float64"
         assert (dvector() + np.float64(1.1)).dtype == "float64"
-        assert (dvector() + float(1.1)).dtype == "float64"
+        assert (dvector() + 1.1).dtype == "float64"
         assert (fvector() + np.float32(1.1)).dtype == "float32"
         assert (fvector() + np.float64(1.1)).dtype == "float64"
-        assert (fvector() + float(1.1)).dtype == config.floatX
+        assert (fvector() + 1.1).dtype == config.floatX
         assert (lvector() + np.int64(1)).dtype == "int64"
         assert (lvector() + np.int32(1)).dtype == "int64"
         assert (lvector() + np.int16(1)).dtype == "int64"

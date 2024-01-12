@@ -1811,9 +1811,7 @@ class BatchedDot(COp):
             return " && ".join(
                 [
                     " && ".join(
-                        "{strides}[{i}] > 0 && {strides}[{i}] % type_size == 0".format(
-                            strides=strides, i=i
-                        )
+                        f"{strides}[{i}] > 0 && {strides}[{i}] % type_size == 0"
                         for i in range(1, ndim)
                     ),
                     "(%s)"

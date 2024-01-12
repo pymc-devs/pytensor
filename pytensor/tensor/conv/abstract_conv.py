@@ -639,8 +639,8 @@ def border_mode_to_pad(mode, convdim, kshp):
                 border += ((m[0], m[1]),)
             else:
                 raise ValueError(
-                    "invalid border mode {}. The tuple can only contain "
-                    "integers or tuples of length 2".format(mode)
+                    f"invalid border mode {mode}. The tuple can only contain "
+                    "integers or tuples of length 2"
                 )
         pad = border
     elif mode == "full":
@@ -651,9 +651,9 @@ def border_mode_to_pad(mode, convdim, kshp):
         pad = ((0, 0),) * convdim
     else:
         raise ValueError(
-            "invalid border_mode {}, which must be either "
+            f"invalid border_mode {mode}, which must be either "
             '"valid", "full", "half", an integer or a tuple '
-            "of length {}".format(mode, convdim)
+            f"of length {convdim}"
         )
     return pad
 
@@ -2153,15 +2153,15 @@ class BaseAbstractConv(Op):
         if isinstance(border_mode, int):
             if border_mode < 0:
                 raise ValueError(
-                    "invalid border_mode {}, which must be a "
-                    "non-negative integer".format(border_mode)
+                    f"invalid border_mode {border_mode}, which must be a "
+                    "non-negative integer"
                 )
             border_mode = (border_mode,) * convdim
         elif isinstance(border_mode, tuple):
             if len(border_mode) != convdim:
                 raise ValueError(
-                    "invalid border_mode {}, which must be a "
-                    "tuple of length {}".format(border_mode, convdim)
+                    f"invalid border_mode {border_mode}, which must be a "
+                    f"tuple of length {convdim}"
                 )
             new_border_mode = ()
             for mode in border_mode:
@@ -2189,9 +2189,9 @@ class BaseAbstractConv(Op):
             border_mode = new_border_mode
         elif border_mode not in ("valid", "full", "half"):
             raise ValueError(
-                "invalid border_mode {}, which must be either "
+                f"invalid border_mode {border_mode}, which must be either "
                 '"valid", "full", "half", an integer or a tuple '
-                "of length {}".format(border_mode, convdim)
+                f"of length {convdim}"
             )
         if isinstance(border_mode, tuple) and all(
             mode == (0, 0) or mode == 0 for mode in border_mode
@@ -2284,9 +2284,7 @@ class BaseAbstractConv(Op):
         """
         if mode not in ("valid", "full"):
             raise ValueError(
-                "invalid mode {}, which must be either " '"valid" or "full"'.format(
-                    mode
-                )
+                f"invalid mode {mode}, which must be either " '"valid" or "full"'
             )
         if isinstance(dilation, int):
             dilation = (dilation,) * self.convdim

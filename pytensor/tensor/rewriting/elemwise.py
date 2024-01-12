@@ -1,8 +1,8 @@
 import sys
 from collections import defaultdict, deque
 from collections.abc import Generator
-from functools import lru_cache
-from typing import DefaultDict, TypeVar
+from functools import cache
+from typing import TypeVar
 from warnings import warn
 
 import pytensor
@@ -686,13 +686,13 @@ class FusionOptimizer(GraphRewriter):
             Elemwise Composite before being accessed again in the next iteration.
             """
 
-            FUSEABLE_MAPPING = DefaultDict[Variable, list[Apply]]
-            UNFUSEABLE_MAPPING = DefaultDict[Variable, set[ApplyOrOutput]]
+            FUSEABLE_MAPPING = defaultdict[Variable, list[Apply]]
+            UNFUSEABLE_MAPPING = defaultdict[Variable, set[ApplyOrOutput]]
 
             def initialize_fuseable_mappings(
                 *, fg: FunctionGraph
             ) -> tuple[FUSEABLE_MAPPING, UNFUSEABLE_MAPPING]:
-                @lru_cache(maxsize=None)
+                @cache
                 def elemwise_scalar_op_has_c_code(node: Apply) -> bool:
                     # TODO: This should not play a role in non-c backends!
                     if node.op.scalar_op.supports_c_code(node.inputs, node.outputs):
@@ -754,9 +754,9 @@ class FusionOptimizer(GraphRewriter):
                 VT = TypeVar("VT", list, set)
 
                 def shallow_clone_defaultdict(
-                    d: DefaultDict[KT, VT],
-                ) -> DefaultDict[KT, VT]:
-                    new_dict: DefaultDict[KT, VT] = defaultdict(d.default_factory)
+                    d: defaultdict[KT, VT],
+                ) -> defaultdict[KT, VT]:
+                    new_dict: defaultdict[KT, VT] = defaultdict(d.default_factory)
                     new_dict.update({k: v.copy() for k, v in d.items()})
                     return new_dict
 

@@ -82,15 +82,15 @@ class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
         if isinstance(border_mode, int):
             if border_mode < 0:
                 raise ValueError(
-                    "invalid border_mode {}, which must be a "
-                    "non-negative integer".format(border_mode)
+                    f"invalid border_mode {border_mode}, which must be a "
+                    "non-negative integer"
                 )
             border_mode = (border_mode, border_mode, border_mode)
         if isinstance(border_mode, tuple):
             if len(border_mode) != 3 or min(border_mode) < 0:
                 raise ValueError(
-                    "invalid border_mode {}, which must be a tuple of "
-                    "three non-negative integers".format(border_mode)
+                    f"invalid border_mode {border_mode}, which must be a tuple of "
+                    "three non-negative integers"
                 )
             pad_h, pad_w, pad_d = map(int, border_mode)
             border_mode = (pad_h, pad_w, pad_d)
@@ -99,9 +99,9 @@ class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
             or border_mode in ("valid", "full", "half")
         ):
             raise ValueError(
-                "invalid border_mode {}, which must be either "
+                f"invalid border_mode {border_mode}, which must be either "
                 '"valid", "full", "half", an integer or a tuple of three'
-                " integers".format(border_mode)
+                " integers"
             )
         self.border_mode = border_mode
         if len(subsample) != 3:

@@ -917,7 +917,7 @@ def shape_padaxis(t, axis):
 
     ndim = _t.ndim + 1
     if not -ndim <= axis < ndim:
-        msg = "axis {0} is out of bounds [-{1}, {1})".format(axis, ndim)
+        msg = f"axis {axis} is out of bounds [-{ndim}, {ndim})"
         raise IndexError(msg)
     if axis < 0:
         axis += ndim
