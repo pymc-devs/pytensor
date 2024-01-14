@@ -103,7 +103,7 @@ def test_solve_triangular_raises_on_nan_inf(value):
 
     with pytest.raises(
         np.linalg.LinAlgError,
-        match=re.escape("Non-numeric values (nan or inf) returned "),
+        match=re.escape("Non-numeric values"),
     ):
         f(A_tri, b)
 

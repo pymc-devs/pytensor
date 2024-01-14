@@ -215,13 +215,7 @@ def solve_triangular_impl(A, B, trans=0, lower=False, unit_diagonal=False):
 
     _check_scipy_linalg_matrix(A, "solve_triangular")
     _check_scipy_linalg_matrix(B, "solve_triangular")
-
     dtype = A.dtype
-    if str(dtype).startswith("complex"):
-        raise ValueError(
-            "Complex inputs not currently supported by solve_triangular in Numba mode"
-        )
-
     w_type = _get_underlying_float(dtype)
     numba_trtrs = _LAPACK().numba_xtrtrs(dtype)
 
@@ -274,8 +268,8 @@ def solve_triangular_impl(A, B, trans=0, lower=False, unit_diagonal=False):
         )
 
         if B_is_1d:
-            return B_copy[..., 0]
-        return B_copy
+            return B_copy[..., 0], int_ptr_to_val(INFO)
+        return B_copy, int_ptr_to_val(INFO)
 
     return impl
 
@@ -287,14 +281,29 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
     unit_diagonal = op.unit_diagonal
     check_finite = op.check_finite
 
+    dtype = node.inputs[0].dtype
+    if str(dtype).startswith("complex"):
+        raise NotImplementedError(
+            "Complex inputs not currently supported by solve_triangular in Numba mode"
+        )
+
     @numba_basic.numba_njit(inline="always")
     def solve_triangular(a, b):
-        res = _solve_triangular(a, b, trans, lower, unit_diagonal)
         if check_finite:
-            if np.any(np.bitwise_or(np.isinf(res), np.isnan(res))):
+            if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
                 raise np.linalg.LinAlgError(
-                    "Non-numeric values (nan or inf) returned by solve_triangular"
+                    "Non-numeric values (nan or inf) in input A to solve_triangular"
                 )
+            if np.any(np.bitwise_or(np.isinf(b), np.isnan(b))):
+                raise np.linalg.LinAlgError(
+                    "Non-numeric values (nan or inf) in input b to solve_triangular"
+                )
+
+        res, info = _solve_triangular(a, b, trans, lower, unit_diagonal)
+        if info != 0:
+            raise np.linalg.LinAlgError(
+                "Singular matrix in input A to solve_triangular"
+            )
         return res
 
     return solve_triangular
@@ -311,10 +320,6 @@ def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
     ensure_lapack()
     _check_scipy_linalg_matrix(A, "cholesky")
     dtype = A.dtype
-    if str(dtype).startswith("complex"):
-        raise ValueError(
-            "Complex inputs not currently supported by cholesky in Numba mode"
-        )
     w_type = _get_underlying_float(dtype)
     numba_potrf = _LAPACK().numba_xpotrf(dtype)
 
@@ -322,9 +327,6 @@ def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
         _N = np.int32(A.shape[-1])
         if A.shape[-2] != _N:
             raise linalg.LinAlgError("Last 2 dimensions of A must be square")
-
-        if check_finite:
-            _check_finite_matrix(A, "cholesky")
 
         UPLO = val_to_int_ptr(ord("L") if lower else ord("U"))
         N = val_to_int_ptr(_N)
@@ -355,6 +357,12 @@ def numba_funcify_Cholesky(op, node, **kwargs):
     overwrite_a = False
     check_finite = op.check_finite
     on_error = op.on_error
+
+    dtype = node.inputs[0].dtype
+    if str(dtype).startswith("complex"):
+        raise NotImplementedError(
+            "Complex inputs not currently supported by cholesky in Numba mode"
+        )
 
     @numba_basic.numba_njit(inline="always")
     def nb_cholesky(a):
