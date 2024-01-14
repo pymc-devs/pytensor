@@ -353,6 +353,12 @@ def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
 
 @numba_funcify.register(Cholesky)
 def numba_funcify_Cholesky(op, node, **kwargs):
+    """
+    Overload scipy.linalg.cholesky with a numba function.
+
+    Note that np.linalg.cholesky is already implemented in numba, but it does not support additional keyword arguments.
+    In particular, the `inplace` argument is not supported, which is why we choose to implement our own version.
+    """
     lower = op.lower
     overwrite_a = False
     check_finite = op.check_finite
