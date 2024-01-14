@@ -523,6 +523,7 @@ def qr(a, mode="reduced"):
 
 class SVD(Op):
     """
+    Computes singular value decomposition of matrix A, into U, S, V such that A = U @ S @ V
 
     Parameters
     ----------
@@ -543,13 +544,23 @@ class SVD(Op):
     def __init__(self, full_matrices: bool = True, compute_uv: bool = True):
         self.full_matrices = bool(full_matrices)
         self.compute_uv = bool(compute_uv)
+        if self.compute_uv:
+            if self.full_matrices:
+                self.gufunc_signature = "(m,n)->(m,m),(k),(n,n)"
+            else:
+                self.gufunc_signature = "(m,n)->(m,k),(k),(k,n)"
+        else:
+            self.gufunc_signature = "(m,n)->(k)"
 
     def make_node(self, x):
         x = as_tensor_variable(x)
         assert x.ndim == 2, "The input of svd function should be a matrix."
 
         in_dtype = x.type.numpy_dtype
-        out_dtype = np.dtype(f"f{in_dtype.itemsize}")
+        if in_dtype.name.startswith("int"):
+            out_dtype = np.dtype(f"f{in_dtype.itemsize}")
+        else:
+            out_dtype = in_dtype
 
         s = vector(dtype=out_dtype)
 
@@ -603,7 +614,7 @@ def svd(a, full_matrices: bool = True, compute_uv: bool = True):
     U, V,  D : matrices
 
     """
-    return SVD(full_matrices, compute_uv)(a)
+    return Blockwise(SVD(full_matrices, compute_uv))(a)
 
 
 class Lstsq(Op):
