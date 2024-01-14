@@ -146,7 +146,9 @@ _shape = Shape()
 def shape(x: Union[np.ndarray, Number, Variable]) -> Variable:
     """Return the shape of `x`."""
     if not isinstance(x, Variable):
-        x = ptb.as_tensor_variable(x)  # type: ignore
+        # The following is a type error in Python 3.9 but not 3.12.
+        # Thus we need to ignore unused-ignore on 3.12.
+        x = ptb.as_tensor_variable(x)  # type: ignore[arg-type,unused-ignore]
 
     return cast(Variable, _shape(x))
 
@@ -579,7 +581,9 @@ def specify_shape(
 
     # If the specified shape is already encoded in the input static shape, do nothing
     # This ignores PyTensor constants in shape
-    x = ptb.as_tensor_variable(x)  # type: ignore
+    x = ptb.as_tensor_variable(x)  # type: ignore[arg-type,unused-ignore]
+    # The above is a type error in Python 3.9 but not 3.12.
+    # Thus we need to ignore unused-ignore on 3.12.
     new_shape_info = any(
         s != xts for (s, xts) in zip(shape, x.type.shape) if s is not None
     )
