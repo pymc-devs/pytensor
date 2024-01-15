@@ -5,7 +5,7 @@
 
 |Tests Status| |Coverage|
 
-|Project Name| is a fork of `Theano <https://github.com/Theano/Theano>`__ -- a Python library that allows one to define, optimize, and
+|Project Name| is a Python library that allows one to define, optimize, and
 efficiently evaluate mathematical expressions involving multi-dimensional arrays.
 
 Features
