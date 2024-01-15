@@ -9,7 +9,7 @@ from scipy import linalg
 
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import numba_funcify
-from pytensor.tensor.slinalg import BlockDiagonal, SolveTriangular
+from pytensor.tensor.slinalg import BlockDiagonal, Cholesky, SolveTriangular
 
 
 _PTR = ctypes.POINTER
@@ -23,6 +23,15 @@ _ptr_float = _PTR(_float)
 _ptr_dbl = _PTR(_dbl)
 _ptr_char = _PTR(_char)
 _ptr_int = _PTR(_int)
+
+
+@numba.core.extending.register_jitable
+def _check_finite_matrix(a, func_name):
+    for v in np.nditer(a):
+        if not np.isfinite(v.item()):
+            raise np.linalg.LinAlgError(
+                "Non-numeric values (nan or inf) in input to " + func_name
+            )
 
 
 @intrinsic
@@ -177,6 +186,22 @@ class _LAPACK:
 
         return functype(lapack_ptr)
 
+    @classmethod
+    def numba_xpotrf(cls, dtype):
+        """
+        Called by scipy.linalg.cholesky
+        """
+        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "potrf")
+        functype = ctypes.CFUNCTYPE(
+            None,
+            _ptr_int,  # UPLO,
+            _ptr_int,  # N
+            float_pointer,  # A
+            _ptr_int,  # LDA
+            _ptr_int,  # INFO
+        )
+        return functype(lapack_ptr)
+
 
 def _solve_triangular(A, B, trans=0, lower=False, unit_diagonal=False):
     return linalg.solve_triangular(
@@ -190,13 +215,7 @@ def solve_triangular_impl(A, B, trans=0, lower=False, unit_diagonal=False):
 
     _check_scipy_linalg_matrix(A, "solve_triangular")
     _check_scipy_linalg_matrix(B, "solve_triangular")
-
     dtype = A.dtype
-    if str(dtype).startswith("complex"):
-        raise ValueError(
-            "Complex inputs not currently supported by solve_triangular in Numba mode"
-        )
-
     w_type = _get_underlying_float(dtype)
     numba_trtrs = _LAPACK().numba_xtrtrs(dtype)
 
@@ -249,8 +268,8 @@ def solve_triangular_impl(A, B, trans=0, lower=False, unit_diagonal=False):
         )
 
         if B_is_1d:
-            return B_copy[..., 0]
-        return B_copy
+            return B_copy[..., 0], int_ptr_to_val(INFO)
+        return B_copy, int_ptr_to_val(INFO)
 
     return impl
 
@@ -262,17 +281,120 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
     unit_diagonal = op.unit_diagonal
     check_finite = op.check_finite
 
+    dtype = node.inputs[0].dtype
+    if str(dtype).startswith("complex"):
+        raise NotImplementedError(
+            "Complex inputs not currently supported by solve_triangular in Numba mode"
+        )
+
     @numba_basic.numba_njit(inline="always")
     def solve_triangular(a, b):
-        res = _solve_triangular(a, b, trans, lower, unit_diagonal)
         if check_finite:
-            if np.any(np.bitwise_or(np.isinf(res), np.isnan(res))):
-                raise ValueError(
-                    "Non-numeric values (nan or inf) returned by solve_triangular"
+            if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
+                raise np.linalg.LinAlgError(
+                    "Non-numeric values (nan or inf) in input A to solve_triangular"
                 )
+            if np.any(np.bitwise_or(np.isinf(b), np.isnan(b))):
+                raise np.linalg.LinAlgError(
+                    "Non-numeric values (nan or inf) in input b to solve_triangular"
+                )
+
+        res, info = _solve_triangular(a, b, trans, lower, unit_diagonal)
+        if info != 0:
+            raise np.linalg.LinAlgError(
+                "Singular matrix in input A to solve_triangular"
+            )
         return res
 
     return solve_triangular
+
+
+def _cholesky(a, lower=False, overwrite_a=False, check_finite=True):
+    return linalg.cholesky(
+        a, lower=lower, overwrite_a=overwrite_a, check_finite=check_finite
+    )
+
+
+@overload(_cholesky)
+def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
+    ensure_lapack()
+    _check_scipy_linalg_matrix(A, "cholesky")
+    dtype = A.dtype
+    w_type = _get_underlying_float(dtype)
+    numba_potrf = _LAPACK().numba_xpotrf(dtype)
+
+    def impl(A, lower=0, overwrite_a=False, check_finite=True):
+        _N = np.int32(A.shape[-1])
+        if A.shape[-2] != _N:
+            raise linalg.LinAlgError("Last 2 dimensions of A must be square")
+
+        UPLO = val_to_int_ptr(ord("L") if lower else ord("U"))
+        N = val_to_int_ptr(_N)
+        LDA = val_to_int_ptr(_N)
+        INFO = val_to_int_ptr(0)
+
+        if not overwrite_a:
+            A_copy = _copy_to_fortran_order(A)
+        else:
+            A_copy = A
+
+        numba_potrf(
+            UPLO,
+            N,
+            A_copy.view(w_type).ctypes,
+            LDA,
+            INFO,
+        )
+
+        return A_copy, int_ptr_to_val(INFO)
+
+    return impl
+
+
+@numba_funcify.register(Cholesky)
+def numba_funcify_Cholesky(op, node, **kwargs):
+    """
+    Overload scipy.linalg.cholesky with a numba function.
+
+    Note that np.linalg.cholesky is already implemented in numba, but it does not support additional keyword arguments.
+    In particular, the `inplace` argument is not supported, which is why we choose to implement our own version.
+    """
+    lower = op.lower
+    overwrite_a = False
+    check_finite = op.check_finite
+    on_error = op.on_error
+
+    dtype = node.inputs[0].dtype
+    if str(dtype).startswith("complex"):
+        raise NotImplementedError(
+            "Complex inputs not currently supported by cholesky in Numba mode"
+        )
+
+    @numba_basic.numba_njit(inline="always")
+    def nb_cholesky(a):
+        if check_finite:
+            if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
+                raise np.linalg.LinAlgError(
+                    "Non-numeric values (nan or inf) found in input to cholesky"
+                )
+        res, info = _cholesky(a, lower, overwrite_a, check_finite)
+
+        if on_error == "raise":
+            if info > 0:
+                raise np.linalg.LinAlgError(
+                    "Input to cholesky is not positive definite"
+                )
+            if info < 0:
+                raise ValueError(
+                    'LAPACK reported an illegal value in input on entry to "POTRF."'
+                )
+        else:
+            if info != 0:
+                res = np.full_like(res, np.nan)
+
+        return res
+
+    return nb_cholesky
 
 
 @numba_funcify.register(BlockDiagonal)

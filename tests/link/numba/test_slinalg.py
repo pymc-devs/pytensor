@@ -6,7 +6,10 @@ import pytest
 import pytensor
 import pytensor.tensor as pt
 from pytensor import config
+from pytensor.compile import SharedVariable
+from pytensor.graph import Constant, FunctionGraph
 from tests.link.numba.test_basic import compare_numba_and_py
+from tests.tensor.test_extra_ops import set_test_value
 
 
 numba = pytest.importorskip("numba")
@@ -99,9 +102,60 @@ def test_solve_triangular_raises_on_nan_inf(value):
     b = np.full((5, 1), value)
 
     with pytest.raises(
-        ValueError, match=re.escape("Non-numeric values (nan or inf) returned ")
+        np.linalg.LinAlgError,
+        match=re.escape("Non-numeric values"),
     ):
         f(A_tri, b)
+
+
+@pytest.mark.parametrize("lower", [True, False], ids=["lower=True", "lower=False"])
+def test_numba_Cholesky(lower):
+    x = set_test_value(
+        pt.tensor(dtype=config.floatX, shape=(3, 3)),
+        (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype(config.floatX)),
+    )
+
+    g = pt.linalg.cholesky(x, lower=lower)
+    g_fg = FunctionGraph(outputs=[g])
+
+    compare_numba_and_py(
+        g_fg,
+        [
+            i.tag.test_value
+            for i in g_fg.inputs
+            if not isinstance(i, (SharedVariable, Constant))
+        ],
+    )
+
+
+def test_numba_Cholesky_raises_on_nan_input():
+    test_value = rng.random(size=(3, 3)).astype(config.floatX)
+    test_value[0, 0] = np.nan
+
+    x = pt.tensor(dtype=config.floatX, shape=(3, 3))
+    x = x.T.dot(x)
+    g = pt.linalg.cholesky(x, check_finite=True)
+    f = pytensor.function([x], g, mode="NUMBA")
+
+    with pytest.raises(np.linalg.LinAlgError, match=r"Non-numeric values"):
+        f(test_value)
+
+
+@pytest.mark.parametrize("on_error", ["nan", "raise"])
+def test_numba_Cholesky_raise_on(on_error):
+    test_value = rng.random(size=(3, 3)).astype(config.floatX)
+
+    x = pt.tensor(dtype=config.floatX, shape=(3, 3))
+    g = pt.linalg.cholesky(x, on_error=on_error)
+    f = pytensor.function([x], g, mode="NUMBA")
+
+    if on_error == "raise":
+        with pytest.raises(
+            np.linalg.LinAlgError, match=r"Input to cholesky is not positive definite"
+        ):
+            f(test_value)
+    else:
+        assert np.all(np.isnan(f(test_value)))
 
 
 def test_block_diag():
