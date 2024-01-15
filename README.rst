@@ -7,6 +7,7 @@
 
 |Project Name| is a Python library that allows one to define, optimize, and
 efficiently evaluate mathematical expressions involving multi-dimensional arrays.
+It provides the computational backend for `PyMC <https://github.com/pymc-devs/pymc>`__.
 
 Features
 ========
