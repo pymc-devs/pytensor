@@ -5,7 +5,7 @@
 
 |Tests Status| |Coverage|
 
-|Project Name| is a fork of `Aesara <https://github.com/aesara-devs/aesara>`__ -- a Python library that allows one to define, optimize, and
+|Project Name| is a fork of `Theano <https://github.com/Theano/Theano>`__ -- a Python library that allows one to define, optimize, and
 efficiently evaluate mathematical expressions involving multi-dimensional arrays.
 
 Features
@@ -15,7 +15,8 @@ Features
 - Extensible graph framework suitable for rapid development of custom operators and symbolic optimizations
 - Implements an extensible graph transpilation framework that currently provides
   compilation via C, `JAX <https://github.com/google/jax>`__, and `Numba <https://github.com/numba/numba>`__
-- Based on one of the most widely-used Python tensor libraries: `Theano <https://github.com/Theano/Theano>`__
+- Contrary to PyTorch and TensorFlow, PyTensor maintains a static graph which can be modified in-place to
+  allow for advanced optimizations
 
 Getting started
 ===============
