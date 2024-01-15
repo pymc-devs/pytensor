@@ -13,9 +13,7 @@ class RandomStateSharedVariable(SharedVariable):
 
 class RandomGeneratorSharedVariable(SharedVariable):
     def __str__(self):
-        return self.name or "RandomGeneratorSharedVariable({})".format(
-            repr(self.container)
-        )
+        return self.name or f"RandomGeneratorSharedVariable({repr(self.container)})"
 
 
 @shared_constructor.register(np.random.RandomState)

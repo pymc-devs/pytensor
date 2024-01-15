@@ -98,15 +98,12 @@ class Generic(CType, Singleton):
         """
 
     def c_sync(self, name, sub):
-        return (
-            """
+        return """
         assert(py_%(name)s->ob_refcnt > 1);
         Py_DECREF(py_%(name)s);
         py_%(name)s = %(name)s ? %(name)s : Py_None;
         Py_INCREF(py_%(name)s);
-        """
-            % locals()
-        )
+        """ % locals()
 
     def c_code_cache_version(self):
         return (1,)
@@ -195,9 +192,7 @@ class CDataType(CType[D]):
     def c_declare(self, name, sub, check_input=True):
         return """
         %(ctype)s %(name)s;
-        """ % dict(
-            ctype=self.ctype, name=name
-        )
+        """ % dict(ctype=self.ctype, name=name)
 
     def c_init(self, name, sub):
         return f"{name} = NULL;"
@@ -206,9 +201,7 @@ class CDataType(CType[D]):
         return """
   %(name)s = (%(ctype)s)PyCapsule_GetPointer(py_%(name)s, NULL);
   if (%(name)s == NULL) %(fail)s
-        """ % dict(
-            name=name, ctype=self.ctype, fail=sub["fail"]
-        )
+        """ % dict(name=name, ctype=self.ctype, fail=sub["fail"])
 
     def c_sync(self, name, sub):
         freefunc = self.freefunc
@@ -640,9 +633,7 @@ class EnumType(CType, dict):
         if (PyErr_Occurred()) {
             %(fail)s
         }
-        """ % dict(
-            ctype=self.ctype, name=name, fail=sub["fail"]
-        )
+        """ % dict(ctype=self.ctype, name=name, fail=sub["fail"])
 
     def c_code_cache_version(self):
         return (2, self.ctype, self.cname, tuple(self.items()))

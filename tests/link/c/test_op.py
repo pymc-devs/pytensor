@@ -82,9 +82,7 @@ class StructOp(COp):
         return """
 %(out)s = counter%(name)s;
 counter%(name)s++;
-""" % dict(
-            out=outputs_names[0], name=name
-        )
+""" % dict(out=outputs_names[0], name=name)
 
     def c_code_cache_version(self):
         return (1,)

@@ -127,8 +127,9 @@ def local_blockwise_alloc(fgraph, node):
             squeezed_value = _squeeze_left(value, batch_ndim)
             missing_ndim = len(shape) - value.type.ndim
             if (
-                ((1,) * missing_ndim + value.type.broadcastable)[batch_ndim:]
-            ) != inp.type.broadcastable[batch_ndim:]:
+                (((1,) * missing_ndim + value.type.broadcastable)[batch_ndim:])
+                != inp.type.broadcastable[batch_ndim:]
+            ):
                 # We still need an Alloc for the core dims
                 core_shape = shape[batch_ndim:]
                 # And the batch dims of the squeezed value

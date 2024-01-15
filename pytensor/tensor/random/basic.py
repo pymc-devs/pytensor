@@ -87,6 +87,7 @@ class UniformRV(RandomVariable):
         \end{split}
 
     """
+
     name = "uniform"
     ndim_supp = 0
     ndims_params = [0, 0]
@@ -141,6 +142,7 @@ class TriangularRV(RandomVariable):
         \end{split}
 
     """
+
     name = "triangular"
     ndim_supp = 0
     ndims_params = [0, 0, 0]
@@ -196,6 +198,7 @@ class BetaRV(RandomVariable):
         B(\alpha, \beta) = \int_0^1 t^{\alpha-1} (1-t)^{\beta-1} \mathrm{d}t
 
     """
+
     name = "beta"
     ndim_supp = 0
     ndims_params = [0, 0]
@@ -242,6 +245,7 @@ class NormalRV(RandomVariable):
     for :math:`\sigma > 0`.
 
     """
+
     name = "normal"
     ndim_supp = 0
     ndims_params = [0, 0]
@@ -322,6 +326,7 @@ class HalfNormalRV(ScipyRandomVariable):
     for :math:`x \geq 0` and :math:`\sigma > 0`.
 
     """
+
     name = "halfnormal"
     ndim_supp = 0
     ndims_params = [0, 0]
@@ -387,6 +392,7 @@ class LogNormalRV(RandomVariable):
     for :math:`x > 0` and :math:`\sigma > 0`.
 
     """
+
     name = "lognormal"
     ndim_supp = 0
     ndims_params = [0, 0]
@@ -438,6 +444,7 @@ class GammaRV(RandomVariable):
         \Gamma(x) = \int_0^{\infty} t^{x-1} e^{-t} \mathrm{d}t
 
     """
+
     name = "gamma"
     ndim_supp = 0
     ndims_params = [0, 0]
@@ -533,6 +540,7 @@ class ParetoRV(ScipyRandomVariable):
     and is defined for :math:`x \geq x_m`.
 
     """
+
     name = "pareto"
     ndim_supp = 0
     ndims_params = [0, 0]
@@ -583,6 +591,7 @@ class GumbelRV(ScipyRandomVariable):
     for :math:`\beta > 0`.
 
     """
+
     name = "gumbel"
     ndim_supp = 0
     ndims_params = [0, 0]
@@ -644,6 +653,7 @@ class ExponentialRV(RandomVariable):
     for :math:`x \geq 0` and :math:`\beta > 0`.
 
     """
+
     name = "exponential"
     ndim_supp = 0
     ndims_params = [0]
@@ -687,6 +697,7 @@ class WeibullRV(RandomVariable):
     for :math:`x \geq 0` and :math:`k > 0`.
 
     """
+
     name = "weibull"
     ndim_supp = 0
     ndims_params = [0]
@@ -731,6 +742,7 @@ class LogisticRV(RandomVariable):
     for :math:`s > 0`.
 
     """
+
     name = "logistic"
     ndim_supp = 0
     ndims_params = [0, 0]
@@ -779,6 +791,7 @@ class VonMisesRV(RandomVariable):
     function of order 0.
 
     """
+
     name = "vonmises"
     ndim_supp = 0
     ndims_params = [0, 0]
@@ -846,6 +859,7 @@ class MvNormalRV(RandomVariable):
     where :math:`\Sigma` is a positive semi-definite matrix.
 
     """
+
     name = "multivariate_normal"
     ndim_supp = 1
     ndims_params = [1, 2]
@@ -932,6 +946,7 @@ class DirichletRV(RandomVariable):
     :math:`\sum_{i=1}^k x_i = 1`.
 
     """
+
     name = "dirichlet"
     ndim_supp = 1
     ndims_params = [1]
@@ -1005,6 +1020,7 @@ class PoissonRV(RandomVariable):
     for :math:`\lambda > 0`.
 
     """
+
     name = "poisson"
     ndim_supp = 0
     ndims_params = [0]
@@ -1050,6 +1066,7 @@ class GeometricRV(RandomVariable):
     for :math:`0 \geq p \geq 1`.
 
     """
+
     name = "geometric"
     ndim_supp = 0
     ndims_params = [0]
@@ -1092,6 +1109,7 @@ class HyperGeometricRV(RandomVariable):
         f(k; n, N, K) = \frac{{K \choose k} {N-K \choose n-k}}{{N \choose n}}
 
     """
+
     name = "hypergeometric"
     ndim_supp = 0
     ndims_params = [0, 0, 0]
@@ -1140,6 +1158,7 @@ class CauchyRV(ScipyRandomVariable):
     where :math:`\gamma > 0`.
 
     """
+
     name = "cauchy"
     ndim_supp = 0
     ndims_params = [0, 0]
@@ -1190,6 +1209,7 @@ class HalfCauchyRV(ScipyRandomVariable):
     for :math:`x \geq 0` where :math:`\gamma > 0`.
 
     """
+
     name = "halfcauchy"
     ndim_supp = 0
     ndims_params = [0, 0]
@@ -1244,6 +1264,7 @@ class InvGammaRV(ScipyRandomVariable):
         \Gamma(x) = \int_0^{\infty} t^{x-1} e^{-t} \mathrm{d}t
 
     """
+
     name = "invgamma"
     ndim_supp = 0
     ndims_params = [0, 0]
@@ -1294,6 +1315,7 @@ class WaldRV(RandomVariable):
     for :math:`x > 0`, where :math:`\mu > 0` and :math:`\lambda > 0`.
 
     """
+
     name = "wald"
     ndim_supp = 0
     ndims_params = [0, 0]
@@ -1341,6 +1363,7 @@ class TruncExponentialRV(ScipyRandomVariable):
     for :math:`0 \leq x \leq b` and :math:`\beta > 0`.
 
     """
+
     name = "truncexpon"
     ndim_supp = 0
     ndims_params = [0, 0, 0]
@@ -1396,6 +1419,7 @@ class StudentTRV(ScipyRandomVariable):
     for :math:`\nu > 0`, :math:`\sigma > 0`.
 
     """
+
     name = "t"
     ndim_supp = 0
     ndims_params = [0, 0, 0]
@@ -1455,6 +1479,7 @@ class BernoulliRV(ScipyRandomVariable):
     where :math:`0 \leq p \leq 1`.
 
     """
+
     name = "bernoulli"
     ndim_supp = 0
     ndims_params = [0]
@@ -1502,6 +1527,7 @@ class LaplaceRV(RandomVariable):
     with :math:`\lambda > 0`.
 
     """
+
     name = "laplace"
     ndim_supp = 0
     ndims_params = [0, 0]
@@ -1548,6 +1574,7 @@ class BinomialRV(RandomVariable):
             f(k; p, n) = {n \choose k} p^k (1-p)^{n-k}
 
     """
+
     name = "binomial"
     ndim_supp = 0
     ndims_params = [0, 0]
@@ -1592,6 +1619,7 @@ class NegBinomialRV(ScipyRandomVariable):
             f(k; p, n) = {k+n-1 \choose n-1} p^n (1-p)^{k}
 
     """
+
     name = "nbinom"
     ndim_supp = 0
     ndims_params = [0, 0]
@@ -1647,6 +1675,7 @@ class BetaBinomialRV(ScipyRandomVariable):
         \operatorname{B}(a, b) = \int_0^1 t^{a-1} (1-t)^{b-1} \mathrm{d}t
 
     """
+
     name = "beta_binomial"
     ndim_supp = 0
     ndims_params = [0, 0, 0]
@@ -1698,6 +1727,7 @@ class GenGammaRV(ScipyRandomVariable):
     for :math:`x > 0`, where :math:`\alpha, \lambda, p > 0`.
 
     """
+
     name = "gengamma"
     ndim_supp = 0
     ndims_params = [0, 0, 0]
@@ -1760,6 +1790,7 @@ class MultinomialRV(RandomVariable):
     dimension in the *second* parameter (i.e.  the probabilities vector).
 
     """
+
     name = "multinomial"
     ndim_supp = 1
     ndims_params = [0, 1]
@@ -1943,6 +1974,7 @@ class IntegersRV(RandomVariable):
     Only available for `RandomGeneratorType`. Use `randint` with `RandomStateType`\s.
 
     """
+
     name = "integers"
     ndim_supp = 0
     ndims_params = [0, 0]

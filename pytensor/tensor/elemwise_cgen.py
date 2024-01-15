@@ -203,9 +203,7 @@ def make_alloc(loop_orders, dtype, sub, fortran="0"):
             %(fail)s
         }
     }
-    """ % dict(
-        locals(), **sub
-    )
+    """ % dict(locals(), **sub)
 
 
 def make_loop(loop_orders, dtypes, loop_tasks, sub, openmp=None):

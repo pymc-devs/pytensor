@@ -1811,9 +1811,7 @@ class BatchedDot(COp):
             return " && ".join(
                 [
                     " && ".join(
-                        "{strides}[{i}] > 0 && {strides}[{i}] % type_size == 0".format(
-                            strides=strides, i=i
-                        )
+                        f"{strides}[{i}] > 0 && {strides}[{i}] % type_size == 0"
                         for i in range(1, ndim)
                     ),
                     "(%s)"
@@ -1841,8 +1839,7 @@ class BatchedDot(COp):
         )
         z_shape = ", ".join(z_dims)
         z_contiguous = contiguous(_z, z_ndim)
-        allocate = (
-            """
+        allocate = """
             if (NULL == %(_z)s || !(%(z_shape_correct)s)  || !(%(z_contiguous)s))
             {
                 npy_intp dims[%(z_ndim)s] = {%(z_shape)s};
@@ -1855,9 +1852,7 @@ class BatchedDot(COp):
                     %(fail)s
                 }
             }
-        """
-            % locals()
-        )
+        """ % locals()
 
         # code to reallocate inputs contiguously if necessary
         contiguate = []
@@ -1877,8 +1872,7 @@ class BatchedDot(COp):
             )
         contiguate = "\n".join(contiguate)
 
-        return (
-            """
+        return """
         int type_num = PyArray_DESCR(%(_x)s)->type_num;
         int type_size = PyArray_DESCR(%(_x)s)->elsize; // in bytes
 
@@ -1935,9 +1929,7 @@ class BatchedDot(COp):
             }
             break;
         }
-        """
-            % locals()
-        )
+        """ % locals()
 
     def c_code_cache_version(self):
         from pytensor.tensor.blas_headers import blas_header_version

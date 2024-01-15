@@ -120,9 +120,7 @@ def failure_code(sub, use_goto=True):
                 "Unexpected error in an Op's C code. "
                 "No Python exception was set.");
         }
-        %(goto_statement)s}""" % dict(
-        sub, goto_statement=goto_statement
-    )
+        %(goto_statement)s}""" % dict(sub, goto_statement=goto_statement)
 
 
 def failure_code_init(sub):
@@ -384,8 +382,7 @@ def get_c_init(fgraph, r, name, sub):
         """
     py_%(name)s = Py_None;
     {Py_XINCREF(py_%(name)s);}
-    """
-        % locals()
+    """ % locals()
     )
     return pre + r.type.c_init(name, sub)
 
@@ -420,13 +417,10 @@ def get_c_extract(fgraph, r, name, sub):
     else:
         c_extract = r.type.c_extract(name, sub, False)
 
-    pre = (
-        """
+    pre = """
     py_%(name)s = PyList_GET_ITEM(storage_%(name)s, 0);
     {Py_XINCREF(py_%(name)s);}
-    """
-        % locals()
-    )
+    """ % locals()
     return pre + c_extract
 
 
@@ -452,13 +446,10 @@ def get_c_extract_out(fgraph, r, name, sub):
     else:
         c_extract = r.type.c_extract_out(name, sub, check_input, check_broadcast=False)
 
-    pre = (
-        """
+    pre = """
     py_%(name)s = PyList_GET_ITEM(storage_%(name)s, 0);
     {Py_XINCREF(py_%(name)s);}
-    """
-        % locals()
-    )
+    """ % locals()
     return pre + c_extract
 
 
@@ -467,12 +458,9 @@ def get_c_cleanup(fgraph, r, name, sub):
     Wrapper around c_cleanup that decrefs py_name.
 
     """
-    post = (
-        """
+    post = """
     {Py_XDECREF(py_%(name)s);}
-    """
-        % locals()
-    )
+    """ % locals()
     return r.type.c_cleanup(name, sub) + post
 
 
@@ -489,9 +477,7 @@ def get_c_sync(fgraph, r, name, sub):
       PyList_SET_ITEM(storage_%(name)s, 0, py_%(name)s);
       {Py_XDECREF(old);}
     }
-    """ % dict(
-        sync=r.type.c_sync(name, sub), name=name, **sub
-    )
+    """ % dict(sync=r.type.c_sync(name, sub), name=name, **sub)
 
 
 def apply_policy(fgraph, policy, r, name, sub):
@@ -1595,9 +1581,7 @@ class CLinker(Linker):
             {struct_name} *self = ({struct_name} *)PyCapsule_GetContext(capsule);
             delete self;
         }}
-    """.format(
-                struct_name=self.struct_name
-            )
+    """.format(struct_name=self.struct_name)
 
             # We add all the support code, compile args, headers and libs we need.
             for support_code in self.support_code() + self.c_support_code_apply:

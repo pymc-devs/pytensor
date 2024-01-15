@@ -7,13 +7,10 @@ from pytensor.compile.mode import Mode
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import any as pt_any
-from pytensor.tensor.math import argmax, argmin
+from pytensor.tensor.math import argmax, argmin, max_and_argmax, mean, prod, std, var
 from pytensor.tensor.math import max as pt_max
-from pytensor.tensor.math import max_and_argmax, mean
 from pytensor.tensor.math import min as pt_min
-from pytensor.tensor.math import prod, std
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.math import var
 from pytensor.tensor.type import dtensor3
 
 

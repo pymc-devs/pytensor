@@ -928,16 +928,13 @@ class Elemwise(OpenMPOp):
             # We make the output point to the corresponding input and
             # decrease the reference of whatever the output contained
             # prior to this
-            alloc += (
-                """
+            alloc += """
             if (%(oname)s) {
                 Py_XDECREF(%(oname)s);
             }
             %(oname)s = %(iname)s;
             Py_XINCREF(%(oname)s);
-            """
-                % locals()
-            )
+            """ % locals()
             # We alias the scalar variables
             defines += f"#define {oname}_i {iname}_i\n"
             undefs += f"#undef {oname}_i\n"
@@ -960,16 +957,13 @@ class Elemwise(OpenMPOp):
             [f"{s}_i" for s in onames],
             dict(sub, fail=fail),
         )
-        code = (
-            """
+        code = """
         {
             %(defines)s
             %(task_code)s
             %(undefs)s
         }
-        """
-            % locals()
-        )
+        """ % locals()
 
         loop_orders = orders + [list(range(nnested))] * len(real_onames)
         dtypes = idtypes + list(real_odtypes)
@@ -1013,8 +1007,7 @@ class Elemwise(OpenMPOp):
                         ) % sub
 
                 init_array = preloops.get(0, " ")
-                loop = (
-                    """
+                loop = """
                 {
                   %(defines)s
                   %(init_array)s
@@ -1022,9 +1015,7 @@ class Elemwise(OpenMPOp):
                   %(task_code)s
                   %(undefs)s
                 }
-                """
-                    % locals()
-                )
+                """ % locals()
             else:
                 loop = cgen.make_loop(
                     loop_orders=loop_orders,
@@ -1084,37 +1075,25 @@ class Elemwise(OpenMPOp):
                     index = ""
                     for x, var in zip(inames + onames, inputs + node.outputs):
                         if not all(s == 1 for s in var.type.shape):
-                            contig += (
-                                """
+                            contig += """
             dtype_%(x)s * %(x)s_ptr = (dtype_%(x)s*) PyArray_DATA(%(x)s);
-                            """
-                                % locals()
-                            )
-                            index += (
-                                """
+                            """ % locals()
+                            index += """
             dtype_%(x)s& %(x)s_i = %(x)s_ptr[i];
-                            """
-                                % locals()
-                            )
+                            """ % locals()
                         else:
-                            contig += (
-                                """
+                            contig += """
             dtype_%(x)s& %(x)s_i = ((dtype_%(x)s*) PyArray_DATA(%(x)s))[0];
-                            """
-                                % locals()
-                            )
+                            """ % locals()
                     if self.openmp:
                         contig += f"""#pragma omp parallel for if(n>={int(config.openmp_elemwise_minsize)})
                         """
-                    contig += (
-                        """
+                    contig += """
                     for(int i=0; i<n; i++){
                         %(index)s
                         %(task_code)s;
                     }
-                    """
-                        % locals()
-                    )
+                    """ % locals()
             if contig is not None:
                 z = list(zip(inames + onames, inputs + node.outputs))
                 all_broadcastable = all(s == 1 for s in var.type.shape)
@@ -1132,16 +1111,13 @@ class Elemwise(OpenMPOp):
                         if not all_broadcastable
                     ]
                 )
-                loop = (
-                    """
+                loop = """
             if((%(cond1)s) || (%(cond2)s)){
                 %(contig)s
             }else{
                 %(loop)s
             }
-            """
-                    % locals()
-                )
+            """ % locals()
         return decl, checks, alloc, loop, ""
 
     def c_code(self, node, nodename, inames, onames, sub):

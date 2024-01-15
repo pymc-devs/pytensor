@@ -18,9 +18,8 @@ from pytensor.scan.utils import until
 from pytensor.tensor import stack
 from pytensor.tensor.blas import Dot22
 from pytensor.tensor.elemwise import Elemwise
-from pytensor.tensor.math import Dot, dot, sigmoid
+from pytensor.tensor.math import Dot, dot, sigmoid, tanh
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.math import tanh
 from pytensor.tensor.shape import reshape, shape, specify_shape
 from pytensor.tensor.type import (
     dmatrix,

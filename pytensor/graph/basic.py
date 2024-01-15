@@ -17,7 +17,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    Deque,
     Generic,
     Optional,
     TypeVar,
@@ -62,6 +61,7 @@ class Node(MetaObject):
     keeps track of its parents via `Variable.owner` / `Apply.inputs`.
 
     """
+
     name: Optional[str]
 
     def get_parents(self):
@@ -1375,7 +1375,7 @@ def general_toposort(
     )
 
     _clients: dict[T, list[T]] = {}
-    sources: Deque[T] = deque()
+    sources: deque[T] = deque()
     search_res_len: int = 0
     for snode, children in search_res:
         search_res_len += 1

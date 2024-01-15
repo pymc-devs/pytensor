@@ -10,9 +10,8 @@ import time
 import traceback
 import warnings
 from collections import UserList, defaultdict, deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from collections.abc import Iterable as IterableType
-from collections.abc import Sequence
 from functools import _compose_mro, partial, reduce  # type: ignore
 from itertools import chain
 from typing import TYPE_CHECKING, Callable, Literal, Optional, Union, cast

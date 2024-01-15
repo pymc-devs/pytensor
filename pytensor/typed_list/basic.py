@@ -102,16 +102,13 @@ class GetItem(COp):
         x_name, index = inp[0], inp[1]
         output_name = out[0]
         fail = sub["fail"]
-        return (
-            """
+        return """
         %(output_name)s = (typeof %(output_name)s) PyList_GetItem( (PyObject*) %(x_name)s, *((npy_int64 *) PyArray_DATA(%(index)s)));
         if(%(output_name)s == NULL){
             %(fail)s
         }
         Py_INCREF(%(output_name)s);
-        """
-            % locals()
-        )
+        """ % locals()
 
     def c_code_cache_version(self):
         return (1,)
@@ -172,12 +169,9 @@ class Append(COp):
         output_name = out[0]
         fail = sub["fail"]
         if not self.inplace:
-            init = (
-                """
+            init = """
             %(output_name)s = (PyListObject*) PyList_GetSlice((PyObject*) %(x_name)s, 0, PyList_GET_SIZE((PyObject*) %(x_name)s)) ;
-            """
-                % locals()
-            )
+            """ % locals()
         else:
             init = f"""
             {output_name} =  {x_name};
@@ -257,12 +251,9 @@ class Extend(COp):
         output_name = out[0]
         fail = sub["fail"]
         if not self.inplace:
-            init = (
-                """
+            init = """
             %(output_name)s = (PyListObject*) PyList_GetSlice((PyObject*) %(x_name)s, 0, PyList_GET_SIZE((PyObject*) %(x_name)s)) ;
-            """
-                % locals()
-            )
+            """ % locals()
         else:
             init = f"""
             {output_name} =  {x_name};
@@ -349,12 +340,9 @@ class Insert(COp):
         output_name = out[0]
         fail = sub["fail"]
         if not self.inplace:
-            init = (
-                """
+            init = """
             %(output_name)s = (PyListObject*) PyList_GetSlice((PyObject*) %(x_name)s, 0, PyList_GET_SIZE((PyObject*) %(x_name)s)) ;
-            """
-                % locals()
-            )
+            """ % locals()
         else:
             init = f"""
             {output_name} =  {x_name};
@@ -481,12 +469,9 @@ class Reverse(COp):
         output_name = out[0]
         fail = sub["fail"]
         if not self.inplace:
-            init = (
-                """
+            init = """
             %(output_name)s = (PyListObject*) PyList_GetSlice((PyObject*) %(x_name)s, 0, PyList_GET_SIZE((PyObject*) %(x_name)s)) ;
-            """
-                % locals()
-            )
+            """ % locals()
         else:
             init = f"""
             {output_name} =  {x_name};
@@ -616,15 +601,12 @@ class Length(COp):
         x_name = inp[0]
         output_name = out[0]
         fail = sub["fail"]
-        return (
-            """
+        return """
         if(!%(output_name)s)
             %(output_name)s=(PyArrayObject*)PyArray_EMPTY(0, NULL, NPY_INT64, 0);
         ((npy_int64*)PyArray_DATA(%(output_name)s))[0]=PyList_Size((PyObject*)%(x_name)s);
         Py_INCREF(%(output_name)s);
-        """
-            % locals()
-        )
+        """ % locals()
 
     def c_code_cache_version(self):
         return (1,)

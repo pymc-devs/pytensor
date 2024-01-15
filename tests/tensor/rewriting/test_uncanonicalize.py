@@ -9,9 +9,8 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import out2in
 from pytensor.link.basic import PerformLinker
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from pytensor.tensor.math import MaxAndArgmax
+from pytensor.tensor.math import MaxAndArgmax, max_and_argmax
 from pytensor.tensor.math import max as pt_max
-from pytensor.tensor.math import max_and_argmax
 from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.rewriting.uncanonicalize import (
     local_alloc_dimshuffle,

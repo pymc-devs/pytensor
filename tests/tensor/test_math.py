@@ -111,9 +111,14 @@ from pytensor.tensor.math import (
     sqr,
     sqrt,
     sub,
+    tan,
+    tanh,
+    tensordot,
+    true_div,
+    trunc,
+    var,
 )
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.math import tan, tanh, tensordot, true_div, trunc, var
 from pytensor.tensor.type import (
     TensorType,
     complex_dtypes,
@@ -1444,7 +1449,7 @@ TestClip = makeTester(
             np.array(2, dtype="uint16"),
             np.array(4, dtype="uint16"),
         ),
-    )
+    ),
     # I can't think of any way to make this fail at runtime
 )
 

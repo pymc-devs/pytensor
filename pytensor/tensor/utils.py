@@ -138,7 +138,7 @@ def import_func_from_string(func_string: str):  # -> Optional[Callable]:
 
 
 def broadcast_static_dim_lengths(
-    dim_lengths: Sequence[Union[int, None]]
+    dim_lengths: Sequence[Union[int, None]],
 ) -> Union[int, None]:
     """Apply static broadcast given static dim length of inputs (obtained from var.type.shape).
 
@@ -167,10 +167,10 @@ def broadcast_static_dim_lengths(
 # Copied verbatim from numpy.lib.function_base
 # https://github.com/numpy/numpy/blob/f2db090eb95b87d48a3318c9a3f9d38b67b0543c/numpy/lib/function_base.py#L1999-L2029
 _DIMENSION_NAME = r"\w+"
-_CORE_DIMENSION_LIST = "(?:{0:}(?:,{0:})*)?".format(_DIMENSION_NAME)
+_CORE_DIMENSION_LIST = f"(?:{_DIMENSION_NAME}(?:,{_DIMENSION_NAME})*)?"
 _ARGUMENT = rf"\({_CORE_DIMENSION_LIST}\)"
-_ARGUMENT_LIST = "{0:}(?:,{0:})*".format(_ARGUMENT)
-_SIGNATURE = "^{0:}->{0:}$".format(_ARGUMENT_LIST)
+_ARGUMENT_LIST = f"{_ARGUMENT}(?:,{_ARGUMENT})*"
+_SIGNATURE = f"^{_ARGUMENT_LIST}->{_ARGUMENT_LIST}$"
 
 
 def _parse_gufunc_signature(signature):

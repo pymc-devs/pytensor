@@ -4,9 +4,8 @@ import numpy as np
 import pytest
 
 import pytensor
-from pytensor import In
+from pytensor import In, shared
 from pytensor import scalar as ps
-from pytensor import shared
 from pytensor import tensor as pt
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode, get_default_mode
@@ -23,9 +22,8 @@ from pytensor.scalar.basic import Composite, float64
 from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import abs as pt_abs
-from pytensor.tensor.math import add
-from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import (
+    add,
     bitwise_and,
     bitwise_or,
     cos,
@@ -44,13 +42,20 @@ from pytensor.tensor.math import (
     mul,
     neg,
     neq,
+    reciprocal,
+    sin,
+    sinh,
+    sqr,
+    sqrt,
+    tan,
+    tanh,
+    true_div,
+    xor,
 )
+from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import pow as pt_pow
-from pytensor.tensor.math import reciprocal
 from pytensor.tensor.math import round as pt_round
-from pytensor.tensor.math import sin, sinh, sqr, sqrt
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.math import tan, tanh, true_div, xor
 from pytensor.tensor.rewriting.elemwise import FusionOptimizer, local_dimshuffle_lift
 from pytensor.tensor.rewriting.shape import local_useless_dimshuffle_in_reshape
 from pytensor.tensor.shape import reshape
@@ -1386,12 +1391,9 @@ class TimesN(ps.basic.UnaryScalarOp):
 
     def c_support_code_apply(self, node, nodename):
         n = str(self.n)
-        return (
-            """
+        return """
         float %(nodename)s_timesn(float x) { return x * %(n)s; }
-        """
-            % locals()
-        )
+        """ % locals()
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs

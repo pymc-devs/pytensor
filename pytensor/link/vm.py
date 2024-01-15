@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Sequence
 from itertools import zip_longest
-from typing import TYPE_CHECKING, Any, DefaultDict, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Constant, Variable
@@ -977,7 +977,7 @@ class VMLinker(LocalLinker):
 
         """
         # Collect Reallocation Info
-        compute_map_re: DefaultDict[Variable, list[bool]] = defaultdict(lambda: [False])
+        compute_map_re: defaultdict[Variable, list[bool]] = defaultdict(lambda: [False])
         for var in self.fgraph.inputs:
             compute_map_re[var][0] = True
 
@@ -1072,8 +1072,8 @@ class VMLinker(LocalLinker):
                 compute_map[vars_idx_inv[i]] for i in range(len(vars_idx_inv))
             ]
             if nodes:
-                assert type(storage_map_list[0]) is list
-                assert type(compute_map_list[0]) is list
+                assert isinstance(storage_map_list[0], list)
+                assert isinstance(compute_map_list[0], list)
 
             # Needed for allow_gc=True, profiling and storage_map reuse
             dependency_map = self.compute_gc_dependencies(storage_map)

@@ -1,8 +1,7 @@
 from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.math import Sum, exp, log
+from pytensor.tensor.math import Sum, exp, log, true_div
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.math import true_div
 from pytensor.tensor.rewriting.basic import register_stabilize
 from pytensor.tensor.rewriting.math import local_mul_canonizer
 from pytensor.tensor.special import Softmax, SoftmaxGrad, log_softmax

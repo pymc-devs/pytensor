@@ -3247,10 +3247,10 @@ def test_autocast_custom():
         assert (fvector() + 1.0).dtype == "float32"
         assert (dvector() + np.float32(1.1)).dtype == "float64"
         assert (dvector() + np.float64(1.1)).dtype == "float64"
-        assert (dvector() + float(1.1)).dtype == "float64"
+        assert (dvector() + 1.1).dtype == "float64"
         assert (fvector() + np.float32(1.1)).dtype == "float32"
         assert (fvector() + np.float64(1.1)).dtype == "float64"
-        assert (fvector() + float(1.1)).dtype == config.floatX
+        assert (fvector() + 1.1).dtype == config.floatX
         assert (lvector() + np.int64(1)).dtype == "int64"
         assert (lvector() + np.int32(1)).dtype == "int64"
         assert (lvector() + np.int16(1)).dtype == "int64"
@@ -3272,9 +3272,7 @@ def test_autocast_numpy():
     def ok(z):
         assert constant(z).dtype == np.asarray(z).dtype
 
-    for x in (
-        [2**i for i in range(63)] + [0, 0, 1, 2**63 - 1] + [0.0, 1.0, 1.1, 1.5]
-    ):
+    for x in [2**i for i in range(63)] + [0, 0, 1, 2**63 - 1] + [0.0, 1.0, 1.1, 1.5]:
         n_x = np.asarray(x)
         # Make sure the data type is the same as the one found by numpy.
         ok(x)
@@ -3303,9 +3301,7 @@ def test_autocast_numpy_floatX():
         # into int64, as that is the maximal integer type that PyTensor
         # supports, and that is the maximal type in Python indexing.
         for x in (
-            [2**i - 1 for i in range(64)]
-            + [0, 0, 1, 2**63 - 1]
-            + [0.0, 1.0, 1.1, 1.5]
+            [2**i - 1 for i in range(64)] + [0, 0, 1, 2**63 - 1] + [0.0, 1.0, 1.1, 1.5]
         ):
             with config.change_flags(floatX=floatX):
                 ok(x, floatX)

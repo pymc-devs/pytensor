@@ -15,9 +15,8 @@ from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.scalar import int32
-from pytensor.tensor import _get_vector_length, as_tensor_variable
+from pytensor.tensor import _get_vector_length, as_tensor_variable, get_vector_length
 from pytensor.tensor import basic as ptb
-from pytensor.tensor import get_vector_length
 from pytensor.tensor.elemwise import get_normalized_batch_axes
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.type import DenseTensorType, TensorType, int_dtypes, tensor
@@ -918,7 +917,7 @@ def shape_padaxis(t, axis):
 
     ndim = _t.ndim + 1
     if not -ndim <= axis < ndim:
-        msg = "axis {0} is out of bounds [-{1}, {1})".format(axis, ndim)
+        msg = f"axis {axis} is out of bounds [-{ndim}, {ndim})"
         raise IndexError(msg)
     if axis < 0:
         axis += ndim
