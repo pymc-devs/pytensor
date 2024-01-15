@@ -115,6 +115,11 @@ The current development branch of |Project Name| can be installed from GitHub, a
     pip install git+https://github.com/pymc-devs/pytensor
 
 
+Background
+==========
+
+PyTensor is a fork of `Aesara <https://github.com/aesara-devs/aesara>`__, which is a fork of `Theano <https://github.com/Theano/Theano>`__.
+
 Contributing
 ============
 
