@@ -44,6 +44,7 @@ jobs:
             - '.github/workflows/*.yml'
             - 'setup.cfg'
             - 'requirements.txt'
+            - '.pre-commit-config.yaml'
 
   style:
     name: Check code style
