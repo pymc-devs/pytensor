@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 import pytensor
+from pytensor import config
 from pytensor.compile.mode import get_mode
 from pytensor.compile.ops import deep_copy_op
 from pytensor.printing import (
@@ -464,8 +465,10 @@ def test_Print(capsys):
     assert "hello" in stdout
 
 
-def test_summary():
-    old_profile_optimizer_config_value = pytensor.config.profile_optimizer = True
-    f = pytensor.function(inputs=[], outputs=[], profile=True)
-    f.profile.summary()
-    pytensor.config.profile_optimizer = old_profile_optimizer_config_value
+def test_summary_with_profile_optimizer():
+    with config.change_flags(profile_optimizer=True):
+        f = pytensor.function(inputs=[], outputs=[], profile=True)
+
+    s = StringIO()
+    f.profile.summary(file=s)
+    assert "Rewriter Profile" in s.getvalue()
