@@ -1,0 +1,6 @@
+name: unix_test_environment
+channels:
+  - conda-forge
+dependencies:
+  - "numba>=0.57"
+  - numba-scipy

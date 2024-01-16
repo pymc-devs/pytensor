@@ -1,0 +1,15 @@
+name: unix_test_environment
+dependencies:
+  - coverage
+  - cython
+  - graphviz
+  - mkl
+  - mkl-service
+  - "numpy<1.26"
+  - pip
+  - pytest
+  - pytest-benchmark
+  - pytest-cov
+  - pytest-mock
+  - scipy
+  - sympy
