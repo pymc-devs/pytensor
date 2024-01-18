@@ -18,18 +18,20 @@ from pytensor.compile.mode import get_default_mode
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.gradient import NullTypeGradError, grad, numeric_grad
-from pytensor.graph.basic import Variable, applys_between
+from pytensor.graph.basic import Variable, ancestors, applys_between
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import vectorize_node
 from pytensor.link.c.basic import DualLinker
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.printing import pprint
+from pytensor.raise_op import Assert
 from pytensor.tensor import blas, blas_c
 from pytensor.tensor.basic import (
     as_tensor_variable,
     constant,
     eye,
     get_underlying_scalar_constant_value,
+    ones,
     switch,
 )
 from pytensor.tensor.blas import Dot22
@@ -2207,6 +2209,96 @@ class TestTensordot:
         yv = random(4, 3, 5, rng=rng)
         zv = f(xv, yv)
         assert np.allclose(np.tensordot(xv, yv, axes=axes), zv)
+
+    def test_type_shape(self):
+        x = ones(shape=(7, 3, 2))
+        y = ones(
+            shape=(
+                10,
+                2,
+            )
+        )
+        xv = x.eval()
+        yv = y.eval()
+        sy = tensor("sy", shape=(None, 2))
+        axes = [[-1], [-1]]
+        z = tensordot(x, y, axes=axes)
+        sz = tensordot(x, sy, axes=axes)
+
+        assert (
+            len(
+                {
+                    node
+                    for node in ancestors([z])
+                    if node.owner and isinstance(node.owner.op, Assert)
+                }
+            )
+            == 0
+        )
+        assert z.type.shape == (7, 3, 10)
+        assert z.broadcastable == (False, False, False)
+        assert np.allclose(np.tensordot(xv, yv, axes=axes), z.eval())
+
+        assert (
+            len(
+                {
+                    node
+                    for node in ancestors([sz])
+                    if node.owner and isinstance(node.owner.op, Assert)
+                }
+            )
+            == 0
+        )
+        assert sz.type.shape == (7, 3, None)
+        assert z.broadcastable == (False, False, False)
+        assert np.allclose(np.tensordot(xv, yv, axes=axes), sz.eval({sy: yv}))
+
+        with pytest.raises(
+            ValueError,
+            match="Input arrays have inconsistent broadcastable pattern or type shape",
+        ):
+            tensordot(ones(shape=(7, 4)), ones(shape=(7, 4)), axes=1)
+
+    @pytest.mark.parametrize(
+        ["axes", "has_assert", "values", "expected_fail"],
+        [
+            ([[1], [2]], False, (np.ones((7, 3, 2)), np.ones((7, 2, 3))), False),
+            ([[0, 2], [0, 1]], True, (np.ones((7, 3, 2)), np.ones((7, 2, 3))), False),
+            ([[0], [0]], False, (np.ones((7, 3, 1)), np.ones((100, 1, 3))), True),
+            ([[1, 2], [1, 2]], True, (np.ones((7, 3, 2)), np.ones((7, 2, 3))), True),
+        ],
+    )
+    def test_shape_assert(self, axes, has_assert, values, expected_fail):
+        x = tensor(shape=(7, 3, None))
+        y = tensor(shape=(None, None, 3))
+
+        xv, yv = values
+        xv = xv.astype(x.dtype)
+        yv = yv.astype(x.dtype)
+
+        z = tensordot(x, y, axes=axes)
+
+        found_asserts = {
+            node
+            for node in ancestors([z])
+            if node.owner and isinstance(node.owner.op, Assert)
+        }
+        if has_assert:
+            assert found_asserts
+        else:
+            assert not found_asserts
+        if expected_fail:
+            if has_assert:
+                with pytest.raises(
+                    AssertionError,
+                    match="Input array shape along reduced axes of tensordot are not equal",
+                ):
+                    z.eval({x: xv, y: yv})
+            else:
+                with pytest.raises(ValueError):
+                    z.eval({x: xv, y: yv})
+        else:
+            assert np.allclose(np.tensordot(xv, yv, axes=axes), z.eval({x: xv, y: yv}))
 
 
 def test_smallest():
