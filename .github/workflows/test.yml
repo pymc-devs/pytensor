@@ -101,7 +101,7 @@ jobs:
             float32: 0
             part: "tests/link/numba"
           - install-numba: 1
-            python-version: "3.12"
+            python-version: "3.11"  # TODO: bump to 3.12 when numba 0.59 is released
             fast-compile: 0
             float32: 0
             part: "tests/link/numba"
