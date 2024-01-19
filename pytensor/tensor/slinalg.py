@@ -50,11 +50,9 @@ class Cholesky(Op):
     __props__ = ("lower", "overwrite_a", "on_error")
     gufunc_signature = "(m,m)->(m,m)"
 
-    def __init__(self, *, lower=True, on_error="raise", overwrite_a=False):
-        self.lower = lower
-        self.overwrite_a = overwrite_a
-
-    def __init__(self, *, lower=True, check_finite=True, on_error="raise", overwrite_a=False):
+    def __init__(
+        self, *, lower=True, check_finite=True, on_error="raise", overwrite_a=False
+    ):
         self.lower = lower
         self.destructive = False
         self.check_finite = check_finite
@@ -154,11 +152,12 @@ class Cholesky(Op):
                 lower=self.lower, overwrite_a=True, on_error=self.on_error
             )
 
+
 def cholesky(x, lower=True, on_error="raise", check_finite=False):
     return Blockwise(
         Cholesky(lower=lower, on_error=on_error, check_finite=check_finite)
     )(x)
-  
+
 
 class SolveBase(Op):
     """Base class for `scipy.linalg` matrix equation solvers."""
