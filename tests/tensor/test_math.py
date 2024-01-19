@@ -20,6 +20,7 @@ from pytensor.configdefaults import config
 from pytensor.gradient import NullTypeGradError, grad, numeric_grad
 from pytensor.graph.basic import Variable, applys_between
 from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.replace import vectorize_node
 from pytensor.link.c.basic import DualLinker
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.printing import pprint
@@ -110,9 +111,14 @@ from pytensor.tensor.math import (
     sqr,
     sqrt,
     sub,
+    tan,
+    tanh,
+    tensordot,
+    true_div,
+    trunc,
+    var,
 )
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.math import tan, tanh, tensordot, true_div, trunc, var
 from pytensor.tensor.type import (
     TensorType,
     complex_dtypes,
@@ -1010,6 +1016,35 @@ class TestMaxAndArgmax:
         assert max_pt.eval() == 3
         assert argmax_pt.eval() == 2
 
+    @pytest.mark.parametrize(
+        "core_axis, batch_axis",
+        [
+            (None, (1, 2, 3, 4)),
+            (0, (1,)),
+            ((1, -1), (2, 4)),
+        ],
+    )
+    def test_vectorize(self, core_axis, batch_axis):
+        x = tensor(shape=(5, 5, 5, 5))
+        batch_x = tensor(shape=(3, 5, 5, 5, 5))
+
+        # Test MaxAndArgmax
+        max_x, argmax_x = max_and_argmax(x, axis=core_axis)
+        node = max_x.owner
+        assert isinstance(node.op, MaxAndArgmax)
+
+        new_node = vectorize_node(node, batch_x)
+        assert isinstance(new_node.op, MaxAndArgmax)
+        assert new_node.op.axis == batch_axis
+
+        # Test Argmax
+        # Argmax is not user-facing, so we have to create it manually
+        node = Argmax(axis=node.op.axis).make_node(x)
+
+        new_node = vectorize_node(node, batch_x)
+        assert isinstance(new_node.op, Argmax)
+        assert new_node.op.axis == batch_axis
+
 
 class TestArgminArgmax:
     def setup_method(self):
@@ -1368,7 +1403,7 @@ class TestMinMax:
 
 
 rng = np.random.default_rng(seed=utt.fetch_seed())
-TestClip = makeTester(
+TestClip1 = makeTester(
     name="ClipTester",
     op=clip,
     expected=lambda x, y, z: np.clip(x, y, z),
@@ -1414,7 +1449,7 @@ TestClip = makeTester(
             np.array(2, dtype="uint16"),
             np.array(4, dtype="uint16"),
         ),
-    )
+    ),
     # I can't think of any way to make this fail at runtime
 )
 
@@ -1435,7 +1470,7 @@ TestBackwardsClip = makeTester(
 )
 
 
-class TestClip:
+class TestClip2:
     def test_complex_value(self):
         for dtype in ["complex64", "complex128"]:
             a = vector(dtype=dtype)

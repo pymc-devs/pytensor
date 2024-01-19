@@ -39,12 +39,7 @@ dependencies:
   - pydot
   - ipython
   # code style
-  - black
-  - isort
-  # For linting
-  - flake8
-  - pep8
-  - pyflakes
+  - ruff
   # developer tools
   - pre-commit
   - packaging

@@ -1084,8 +1084,8 @@ class ProfileStats:
                     viewof_change = []
                     # Use to track view_of changes
 
-                    viewedby_add = defaultdict(lambda: [])
-                    viewedby_remove = defaultdict(lambda: [])
+                    viewedby_add = defaultdict(list)
+                    viewedby_remove = defaultdict(list)
                     # Use to track viewed_by changes
 
                     for var in node.outputs:

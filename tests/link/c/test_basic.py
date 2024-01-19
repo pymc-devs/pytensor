@@ -47,9 +47,7 @@ class TDouble(CType):
         %(name)s = PyFloat_AsDouble(py_%(name)s);
         %(name)s_bad_thing = NULL;
         //printf("Extracting %(name)s\\n");
-        """ % dict(
-            locals(), **sub
-        )
+        """ % dict(locals(), **sub)
 
     def c_sync(self, name, sub):
         return f"""

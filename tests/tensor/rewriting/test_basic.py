@@ -50,11 +50,13 @@ from pytensor.tensor.math import (
     minimum,
     mul,
     neq,
+    softplus,
+    sqrt,
+    sub,
+    true_div,
 )
 from pytensor.tensor.math import pow as pt_pow
-from pytensor.tensor.math import softplus, sqrt, sub
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.math import true_div
 from pytensor.tensor.rewriting.basic import (
     assert_op,
     local_alloc_sink_dimshuffle,
@@ -861,7 +863,7 @@ class TestLocalSwitchSink:
                 f = self.function_remove_nan(
                     [condition[0], x[0], c], [y], mode=self.mode
                 )
-                if type(condition[1]) is list:
+                if isinstance(condition[1], list):
                     for i in range(len(condition[1])):
                         res = f(condition[1][i], x[1], -1)
                         assert (
@@ -901,7 +903,7 @@ class TestLocalSwitchSink:
                 f = self.function_remove_nan(
                     [condition[0], x[0], c], [y], mode=self.mode
                 )
-                if type(condition[1]) is list:
+                if isinstance(condition[1], list):
                     for i in range(len(condition[1])):
                         res = f(condition[1][i], x[1], -1)
                         assert (

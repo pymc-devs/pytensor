@@ -56,7 +56,7 @@ class StdLibDirsAndLibsType(Protocol):
 
 
 def is_StdLibDirsAndLibsType(
-    fn: Callable[[], Optional[tuple[list[str], ...]]]
+    fn: Callable[[], Optional[tuple[list[str], ...]]],
 ) -> StdLibDirsAndLibsType:
     return cast(StdLibDirsAndLibsType, fn)
 

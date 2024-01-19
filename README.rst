@@ -5,8 +5,9 @@
 
 |Tests Status| |Coverage|
 
-|Project Name| is a fork of `Aesara <https://github.com/aesara-devs/aesara>`__ -- a Python library that allows one to define, optimize, and
+|Project Name| is a Python library that allows one to define, optimize, and
 efficiently evaluate mathematical expressions involving multi-dimensional arrays.
+It provides the computational backend for `PyMC <https://github.com/pymc-devs/pymc>`__.
 
 Features
 ========
@@ -15,7 +16,8 @@ Features
 - Extensible graph framework suitable for rapid development of custom operators and symbolic optimizations
 - Implements an extensible graph transpilation framework that currently provides
   compilation via C, `JAX <https://github.com/google/jax>`__, and `Numba <https://github.com/numba/numba>`__
-- Based on one of the most widely-used Python tensor libraries: `Theano <https://github.com/Theano/Theano>`__
+- Contrary to PyTorch and TensorFlow, PyTensor maintains a static graph which can be modified in-place to
+  allow for advanced optimizations
 
 Getting started
 ===============
@@ -112,6 +114,11 @@ The current development branch of |Project Name| can be installed from GitHub, a
 
     pip install git+https://github.com/pymc-devs/pytensor
 
+
+Background
+==========
+
+PyTensor is a fork of `Aesara <https://github.com/aesara-devs/aesara>`__, which is a fork of `Theano <https://github.com/Theano/Theano>`__.
 
 Contributing
 ============

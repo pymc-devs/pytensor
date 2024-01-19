@@ -43,7 +43,12 @@ from pytensor.tensor import (
     get_vector_length,
 )
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.elemwise import DimShuffle, Elemwise, scalar_elemwise
+from pytensor.tensor.elemwise import (
+    DimShuffle,
+    Elemwise,
+    get_normalized_batch_axes,
+    scalar_elemwise,
+)
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.shape import (
     Shape,
@@ -594,15 +599,12 @@ class TensorFromScalar(COp):
         (z,) = outputs
         fail = sub["fail"]
 
-        return (
-            """
+        return """
             %(z)s = (PyArrayObject*)PyArray_FromScalar(py_%(x)s, NULL);
             if(%(z)s == NULL){
                 %(fail)s;
             }
-            """
-            % locals()
-        )
+            """ % locals()
 
     def c_code_cache_version(self):
         return (2,)
@@ -647,12 +649,9 @@ class ScalarFromTensor(COp):
         (x,) = inputs
         (z,) = outputs
         fail = sub["fail"]
-        return (
-            """
+        return """
         %(z)s = ((dtype_%(x)s*)(PyArray_DATA(%(x)s)))[0];
-        """
-            % locals()
-        )
+        """ % locals()
 
     def c_code_cache_version(self):
         return (1,)
@@ -1399,7 +1398,7 @@ def register_infer_shape(rewrite, *tags, **kwargs):
 
 
 def infer_static_shape(
-    shape: Union[Variable, Sequence[Union[Variable, int]]]
+    shape: Union[Variable, Sequence[Union[Variable, int]]],
 ) -> tuple[Sequence["TensorLike"], Sequence[Optional[int]]]:
     """Infer the static shapes implied by the potentially symbolic elements in `shape`.
 
@@ -1812,24 +1811,18 @@ class MakeVector(COp):
             assert self.dtype == node.inputs[0].dtype
             out_num = f"PyArray_TYPE({inp[0]})"
 
-        ret = (
-            """
+        ret = """
         npy_intp dims[1];
         dims[0] = %(out_shape)s;
         if(!%(out)s || PyArray_DIMS(%(out)s)[0] != %(out_shape)s){
             Py_XDECREF(%(out)s);
             %(out)s = (PyArrayObject*)PyArray_EMPTY(1, dims, %(out_num)s, 0);
         }
-        """
-            % locals()
-        )
+        """ % locals()
         for idx, i in enumerate(inp):
-            ret += (
-                """
+            ret += """
             *((%(out_dtype)s *)PyArray_GETPTR1(%(out)s, %(idx)s)) = *((%(out_dtype)s *) PyArray_DATA(%(i)s));
-            """
-                % locals()
-            )
+            """ % locals()
         return ret
 
     def infer_shape(self, fgraph, node, ishapes):
@@ -2146,8 +2139,7 @@ class Split(COp):
         splits_dtype = node.inputs[2].type.dtype_specs()[1]
         expected_splits_count = self.len_splits
 
-        return (
-            """
+        return """
         int ndim = PyArray_NDIM(%(x)s);
         int axis = (int)(*(%(axis_dtype)s*)PyArray_GETPTR1(%(axis)s, 0));
         int splits_count = PyArray_DIM(%(splits)s, 0);
@@ -2244,9 +2236,7 @@ class Split(COp):
         }
 
         free(split_dims);
-        """
-            % locals()
-        )
+        """ % locals()
 
 
 class Join(COp):
@@ -2455,8 +2445,7 @@ class Join(COp):
         copy_inputs_to_list = "\n".join(copy_to_list)
         n = len(tens)
 
-        code = (
-            """
+        code = """
         int axis = ((%(adtype)s *)PyArray_DATA(%(axis)s))[0];
         PyObject* list = PyList_New(%(l)s);
         %(copy_inputs_to_list)s
@@ -2488,9 +2477,7 @@ class Join(COp):
                 %(fail)s
             }
         }
-        """
-            % locals()
-        )
+        """ % locals()
         return code
 
     def R_op(self, inputs, eval_points):
@@ -3614,13 +3601,18 @@ def diagonal(a, offset=0, axis1=0, axis2=1):
 
 
 @_vectorize_node.register(ExtractDiag)
-def vectorize_extract_diag(op: ExtractDiag, node, batched_x):
-    batched_ndims = batched_x.type.ndim - node.inputs[0].type.ndim
+def vectorize_extract_diag(op: ExtractDiag, node, batch_x):
+    core_ndim = node.inputs[0].type.ndim
+    batch_ndim = batch_x.type.ndim - core_ndim
+    batch_axis1, batch_axis2 = get_normalized_batch_axes(
+        (op.axis1, op.axis2), core_ndim, batch_ndim
+    )
+
     return diagonal(
-        batched_x,
+        batch_x,
         offset=op.offset,
-        axis1=op.axis1 + batched_ndims,
-        axis2=op.axis2 + batched_ndims,
+        axis1=batch_axis1,
+        axis2=batch_axis2,
     ).owner
 
 
@@ -4085,8 +4077,7 @@ class AllocEmpty(COp):
         for idx, sh in enumerate(shps):
             str += f"||PyArray_DIMS({out})[{idx}]!=dims[{idx}]"
 
-        str += (
-            """){
+        str += """){
             /* Reference received to invalid output variable.
             Decrease received reference's ref count and allocate new
             output variable */
@@ -4101,9 +4092,7 @@ class AllocEmpty(COp):
                 %(fail)s;
             }
         }
-        """
-            % locals()
-        )
+        """ % locals()
         return str
 
     def infer_shape(self, fgraph, node, input_shapes):
@@ -4267,6 +4256,25 @@ def take_along_axis(arr, indices, axis=0):
 
     # use the fancy index
     return arr[_make_along_axis_idx(arr.shape, indices, axis)]
+
+
+def ix_(*args):
+    """
+    PyTensor np.ix_ analog
+
+    See numpy.lib.index_tricks.ix_ for reference
+    """
+    out = []
+    nd = len(args)
+    for k, new in enumerate(args):
+        if new is None:
+            out.append(slice(None))
+        new = as_tensor(new)
+        if new.ndim != 1:
+            raise ValueError("Cross index must be 1 dimensional")
+        new = new.reshape((1,) * k + (new.size,) + (1,) * (nd - k - 1))
+        out.append(new)
+    return tuple(out)
 
 
 __all__ = [

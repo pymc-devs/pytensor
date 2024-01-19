@@ -42,7 +42,7 @@ class QuadraticOpFunc(COp):
 
     def c_support_code_apply(self, node, name):
         float_type = node.inputs[0].type.dtype_specs()[1]
-        return """
+        return f"""
         /* Computes: x = a*x*x + b*x + c for x in tensor. */
         int quadratic_{name}(PyArrayObject* tensor, {float_type} a, {float_type} b, {float_type} c) {{
             NpyIter* iterator = NpyIter_New(tensor,
@@ -70,10 +70,7 @@ class QuadraticOpFunc(COp):
             NpyIter_Deallocate(iterator);
             return 0;
         }}
-        """.format(
-            name=name,
-            float_type=float_type,
-        )
+        """
 
     def c_code(self, node, name, inputs, outputs, sub):
         return """

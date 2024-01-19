@@ -8,6 +8,8 @@ from scipy.special import softmax as scipy_softmax
 
 from pytensor.compile.function import function
 from pytensor.configdefaults import config
+from pytensor.graph.replace import vectorize_node
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.special import (
     LogSoftmax,
     Softmax,
@@ -19,7 +21,7 @@ from pytensor.tensor.special import (
     poch,
     softmax,
 )
-from pytensor.tensor.type import matrix, tensor3, tensor4, vector, vectors
+from pytensor.tensor.type import matrix, tensor, tensor3, tensor4, vector, vectors
 from tests import unittest_tools as utt
 from tests.tensor.utils import random_ranged
 
@@ -148,6 +150,34 @@ class TestSoftmaxGrad(utt.InferShapeTester):
 
         with pytest.raises(ValueError):
             SoftmaxGrad(-4)(*x)
+
+
+@pytest.mark.parametrize(
+    "core_axis, batch_axis",
+    [
+        (None, (1, 2, 3, 4)),
+        (0, (1,)),
+    ],
+)
+@pytest.mark.parametrize(
+    "op, constructor", [(Softmax, softmax), (LogSoftmax, log_softmax)]
+)
+def test_vectorize_softmax(op, constructor, core_axis, batch_axis):
+    x = tensor(shape=(5, 5, 5, 5))
+    batch_x = tensor(shape=(3, 5, 5, 5, 5))
+
+    node = constructor(x, axis=core_axis).owner
+    assert isinstance(node.op, op)
+
+    new_node = vectorize_node(node, batch_x)
+    if len(batch_axis) == 1:
+        assert isinstance(new_node.op, op)
+        assert (new_node.op.axis,) == batch_axis
+    else:
+        assert isinstance(new_node.op, Blockwise) and isinstance(
+            new_node.op.core_op, op
+        )
+        assert new_node.op.core_op.axis == core_axis
 
 
 def test_poch():

@@ -14,9 +14,10 @@ import scipy.stats
 
 from pytensor.configdefaults import config
 from pytensor.gradient import grad_not_implemented, grad_undefined
-from pytensor.scalar.basic import BinaryScalarOp, ScalarOp, UnaryScalarOp
-from pytensor.scalar.basic import abs as scalar_abs
 from pytensor.scalar.basic import (
+    BinaryScalarOp,
+    ScalarOp,
+    UnaryScalarOp,
     as_scalar,
     complex_types,
     constant,
@@ -42,6 +43,7 @@ from pytensor.scalar.basic import (
     upgrade_to_float64,
     upgrade_to_float_no_complex,
 )
+from pytensor.scalar.basic import abs as scalar_abs
 from pytensor.scalar.loop import ScalarLoop
 
 
@@ -618,11 +620,8 @@ class Chi2SF(BinaryScalarOp):
         (z,) = out
         if node.inputs[0].type in float_types:
             dtype = "npy_" + node.outputs[0].dtype
-            return (
-                """%(z)s =
-                (%(dtype)s) 1 - GammaP(%(k)s/2., %(x)s/2.);"""
-                % locals()
-            )
+            return """%(z)s =
+                (%(dtype)s) 1 - GammaP(%(k)s/2., %(x)s/2.);""" % locals()
         raise NotImplementedError("only floatingpoint is implemented")
 
     def __eq__(self, other):
@@ -667,11 +666,8 @@ class GammaInc(BinaryScalarOp):
         (z,) = out
         if node.inputs[0].type in float_types:
             dtype = "npy_" + node.outputs[0].dtype
-            return (
-                """%(z)s =
-                (%(dtype)s) GammaP(%(k)s, %(x)s);"""
-                % locals()
-            )
+            return """%(z)s =
+                (%(dtype)s) GammaP(%(k)s, %(x)s);""" % locals()
         raise NotImplementedError("only floatingpoint is implemented")
 
     def __eq__(self, other):
@@ -716,11 +712,8 @@ class GammaIncC(BinaryScalarOp):
         (z,) = out
         if node.inputs[0].type in float_types:
             dtype = "npy_" + node.outputs[0].dtype
-            return (
-                """%(z)s =
-                (%(dtype)s) GammaQ(%(k)s, %(x)s);"""
-                % locals()
-            )
+            return """%(z)s =
+                (%(dtype)s) GammaQ(%(k)s, %(x)s);""" % locals()
         raise NotImplementedError("only floatingpoint is implemented")
 
     def __eq__(self, other):
@@ -1025,11 +1018,8 @@ class GammaU(BinaryScalarOp):
         (z,) = out
         if node.inputs[0].type in float_types:
             dtype = "npy_" + node.outputs[0].dtype
-            return (
-                """%(z)s =
-                (%(dtype)s) upperGamma(%(k)s, %(x)s);"""
-                % locals()
-            )
+            return """%(z)s =
+                (%(dtype)s) upperGamma(%(k)s, %(x)s);""" % locals()
         raise NotImplementedError("only floatingpoint is implemented")
 
     def __eq__(self, other):
@@ -1066,11 +1056,8 @@ class GammaL(BinaryScalarOp):
         (z,) = out
         if node.inputs[0].type in float_types:
             dtype = "npy_" + node.outputs[0].dtype
-            return (
-                """%(z)s =
-                (%(dtype)s) lowerGamma(%(k)s, %(x)s);"""
-                % locals()
-            )
+            return """%(z)s =
+                (%(dtype)s) lowerGamma(%(k)s, %(x)s);""" % locals()
         raise NotImplementedError("only floatingpoint is implemented")
 
     def __eq__(self, other):

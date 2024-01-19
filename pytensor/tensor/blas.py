@@ -144,20 +144,20 @@ except ImportError as e:
 # If check_init_y() == True we need to initialize y when beta == 0.
 def check_init_y():
     if check_init_y._result is None:
-        if not have_fblas:
+        if not have_fblas:  # pragma: no cover
             check_init_y._result = False
-
-        y = float("NaN") * np.ones((2,))
-        x = np.ones((2,))
-        A = np.ones((2, 2))
-        gemv = _blas_gemv_fns[y.dtype]
-        gemv(1.0, A.T, x, 0.0, y, overwrite_y=True, trans=True)
-        check_init_y._result = np.isnan(y).any()
+        else:
+            y = float("NaN") * np.ones((2,))
+            x = np.ones((2,))
+            A = np.ones((2, 2))
+            gemv = _blas_gemv_fns[y.dtype]
+            gemv(1.0, A.T, x, 0.0, y, overwrite_y=True, trans=True)
+            check_init_y._result = np.isnan(y).any()
 
     return check_init_y._result
 
 
-check_init_y._result = None
+check_init_y._result = None  # type: ignore
 
 
 class Gemv(Op):
@@ -1811,9 +1811,7 @@ class BatchedDot(COp):
             return " && ".join(
                 [
                     " && ".join(
-                        "{strides}[{i}] > 0 && {strides}[{i}] % type_size == 0".format(
-                            strides=strides, i=i
-                        )
+                        f"{strides}[{i}] > 0 && {strides}[{i}] % type_size == 0"
                         for i in range(1, ndim)
                     ),
                     "(%s)"
@@ -1841,8 +1839,7 @@ class BatchedDot(COp):
         )
         z_shape = ", ".join(z_dims)
         z_contiguous = contiguous(_z, z_ndim)
-        allocate = (
-            """
+        allocate = """
             if (NULL == %(_z)s || !(%(z_shape_correct)s)  || !(%(z_contiguous)s))
             {
                 npy_intp dims[%(z_ndim)s] = {%(z_shape)s};
@@ -1855,9 +1852,7 @@ class BatchedDot(COp):
                     %(fail)s
                 }
             }
-        """
-            % locals()
-        )
+        """ % locals()
 
         # code to reallocate inputs contiguously if necessary
         contiguate = []
@@ -1877,8 +1872,7 @@ class BatchedDot(COp):
             )
         contiguate = "\n".join(contiguate)
 
-        return (
-            """
+        return """
         int type_num = PyArray_DESCR(%(_x)s)->type_num;
         int type_size = PyArray_DESCR(%(_x)s)->elsize; // in bytes
 
@@ -1935,9 +1929,7 @@ class BatchedDot(COp):
             }
             break;
         }
-        """
-            % locals()
-        )
+        """ % locals()
 
     def c_code_cache_version(self):
         from pytensor.tensor.blas_headers import blas_header_version

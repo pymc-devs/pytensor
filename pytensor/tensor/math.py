@@ -27,7 +27,13 @@ from pytensor.tensor.basic import (
     switch,
 )
 from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
-from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise, scalar_elemwise
+from pytensor.tensor.elemwise import (
+    CAReduce,
+    DimShuffle,
+    Elemwise,
+    get_normalized_batch_axes,
+    scalar_elemwise,
+)
 from pytensor.tensor.shape import shape, specify_broadcastable
 from pytensor.tensor.type import (
     DenseTensorType,
@@ -134,7 +140,7 @@ class MaxAndArgmax(COp):
     _f16_ok = True
 
     def __init__(self, axis):
-        assert isinstance(axis, list)
+        assert isinstance(axis, (tuple, list))
         self.axis = tuple(axis)
 
     def get_params(self, node):
@@ -405,17 +411,14 @@ class Argmax(COp):
             if len(self.axis) > 1:
                 raise NotImplementedError()
             # params is only used here for now
-            axis_code = (
-                """
+            axis_code = """
             axis = %(params)s->c_axis;
             if(axis > PyArray_NDIM(%(x)s)-1 || axis < -PyArray_NDIM(%(x)s)){
                 PyErr_SetString(PyExc_ValueError,
                 "Argmax, bad axis argument");
                 %(fail)s
             }
-            """
-                % locals()
-            )
+            """ % locals()
         ret = """
         int axis;
 
@@ -463,6 +466,19 @@ class Argmax(COp):
         (x,) = inp
 
         return [x.zeros_like()]
+
+
+@_vectorize_node.register(Argmax)
+@_vectorize_node.register(MaxAndArgmax)
+def vectorize_argmax_node(op, node, batch_x):
+    core_ndim = node.inputs[0].type.ndim
+    batch_ndim = batch_x.type.ndim - core_ndim
+
+    if not batch_ndim:
+        return node.op.make_node(batch_x)
+
+    batch_axes = get_normalized_batch_axes(op.axis, core_ndim, batch_ndim)
+    return type(op)(axis=batch_axes).make_node(batch_x)
 
 
 def makeKeepDims(x, y, axis):
@@ -671,13 +687,7 @@ def max(x, axis=None, keepdims=False):
     # thing is supporting all user interface features, not speed.
     # Some cases can be implemented only with CAReduce.
 
-    # We thus prefer to use MaxAndArgmax, if possible. It does not
-    # support all axis arguments, so we may need to fall back to CAReduce.
-
-    try:
-        out = max_and_argmax(x, axis)[0]
-    except Exception:
-        out = Max(axis)(x)
+    out = max_and_argmax(x, axis)[0]
 
     if keepdims:
         out = makeKeepDims(x, out, axis)
@@ -2948,9 +2958,11 @@ def matmul(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None
 
 
 @_vectorize_node.register(Dot)
-def vectorize_node_to_matmul(op, node, batched_x, batched_y):
+def vectorize_node_dot_to_matmul(op, node, batched_x, batched_y):
     old_x, old_y = node.inputs
     if old_x.type.ndim == 2 and old_y.type.ndim == 2:
+        # If original input is equivalent to a matrix-matrix product,
+        # return specialized Matmul Op to avoid unnecessary new Ops.
         return matmul(batched_x, batched_y).owner
     else:
         return vectorize_node_fallback(op, node, batched_x, batched_y)

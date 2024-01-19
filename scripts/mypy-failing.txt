@@ -17,7 +17,6 @@ pytensor/scalar/basic.py
 pytensor/sparse/basic.py
 pytensor/sparse/type.py
 pytensor/tensor/basic.py
-pytensor/tensor/blas.py
 pytensor/tensor/blas_c.py
 pytensor/tensor/blas_headers.py
 pytensor/tensor/elemwise.py

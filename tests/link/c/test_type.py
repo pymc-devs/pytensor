@@ -29,9 +29,7 @@ Py_XDECREF((PyObject *)p);
 Py_XDECREF(%(out)s);
 %(out)s = (void *)%(inp)s;
 Py_INCREF(%(inp)s);
-""" % dict(
-            out=outs[0], inp=inps[0]
-        )
+""" % dict(out=outs[0], inp=inps[0])
 
     def c_code_cache_version(self):
         return (0,)
@@ -58,9 +56,7 @@ Py_XDECREF((PyObject *)p);
 Py_XDECREF(%(out)s);
 %(out)s = (PyArrayObject *)%(inp)s;
 Py_INCREF(%(out)s);
-""" % dict(
-            out=outs[0], inp=inps[0]
-        )
+""" % dict(out=outs[0], inp=inps[0])
 
     def c_code_cache_version(self):
         return (0,)

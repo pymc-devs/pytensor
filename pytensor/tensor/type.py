@@ -477,25 +477,19 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         if check_input:
             check = """
             typedef %(dtype)s dtype_%(name)s;
-            """ % dict(
-                sub, name=name, dtype=self.dtype_specs()[1]
-            )
+            """ % dict(sub, name=name, dtype=self.dtype_specs()[1])
         else:
             check = ""
         declaration = """
         PyArrayObject* %(name)s;
-        """ % dict(
-            sub, name=name, dtype=self.dtype_specs()[1]
-        )
+        """ % dict(sub, name=name, dtype=self.dtype_specs()[1])
 
         return declaration + check
 
     def c_init(self, name, sub):
         return """
         %(name)s = NULL;
-        """ % dict(
-            sub, name=name, type_num=self.dtype_specs()[2]
-        )
+        """ % dict(sub, name=name, type_num=self.dtype_specs()[2])
 
     def c_extract(self, name, sub, check_input=True, **kwargs):
         if check_input:
@@ -547,9 +541,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
                              %(type_num)s, PyArray_TYPE((PyArrayObject*) py_%(name)s));
                 %(fail)s
             }
-            """ % dict(
-                sub, name=name, type_num=self.dtype_specs()[2]
-            )
+            """ % dict(sub, name=name, type_num=self.dtype_specs()[2])
         else:
             check = ""
         return (
@@ -562,20 +554,16 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         )
 
     def c_cleanup(self, name, sub):
-        return (
-            """
+        return """
         if (%(name)s) {
             Py_XDECREF(%(name)s);
         }
-        """
-            % locals()
-        )
+        """ % locals()
 
     def c_sync(self, name, sub):
         fail = sub["fail"]
         type_num = self.dtype_specs()[2]
-        return (
-            """
+        return """
         {Py_XDECREF(py_%(name)s);}
         if (!%(name)s) {
             Py_INCREF(Py_None);
@@ -610,9 +598,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         );
             %(fail)s
         }
-        """
-            % locals()
-        )
+        """ % locals()
 
     def c_headers(self, **kwargs):
         return ps.get_scalar_type(self.dtype).c_headers(**kwargs)

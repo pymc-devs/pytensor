@@ -30,7 +30,13 @@ def jax_funcify_CAReduce(op, **kwargs):
     acc_dtype = getattr(op, "acc_dtype", None)
 
     def careduce(x):
-        nonlocal axis, op_nfunc_spec, scalar_nfunc_spec, scalar_op_name, scalar_op_identity, acc_dtype
+        nonlocal \
+            axis, \
+            op_nfunc_spec, \
+            scalar_nfunc_spec, \
+            scalar_op_name, \
+            scalar_op_identity, \
+            acc_dtype
 
         if axis is None:
             axis = list(range(x.ndim))

@@ -179,9 +179,7 @@ class AddSD_ccode(_NoPythonCOp):
                   }
                  }
                 }
-             """ % dict(
-            locals(), **sub
-        )
+             """ % dict(locals(), **sub)
         return code
 
     def infer_shape(self, fgraph, node, shapes):
@@ -432,9 +430,7 @@ class StructuredDotCSC(COp):
                 }
             }
         }
-        """ % dict(
-            locals(), **sub
-        )
+        """ % dict(locals(), **sub)
 
         return rval
 
@@ -613,9 +609,7 @@ class StructuredDotCSR(COp):
             }
         }
 
-        """ % dict(
-            locals(), **sub
-        )
+        """ % dict(locals(), **sub)
 
     def c_code_cache_version(self):
         return (2,)
@@ -894,9 +888,7 @@ class UsmmCscDense(_NoPythonCOp):
                 }
             }
         }
-        """ % dict(
-            locals(), **sub
-        )
+        """ % dict(locals(), **sub)
 
         return rval
 
@@ -1087,9 +1079,7 @@ class CSMGradC(_NoPythonCOp):
             }
         }
 
-        """ % dict(
-            locals(), **sub
-        )
+        """ % dict(locals(), **sub)
 
     def c_code_cache_version(self):
         return (3,)
@@ -1241,9 +1231,7 @@ class MulSDCSC(_NoPythonCOp):
             }
         }
 
-        """ % dict(
-            locals(), **sub
-        )
+        """ % dict(locals(), **sub)
 
     def __str__(self):
         return self.__class__.__name__
@@ -1380,9 +1368,7 @@ class MulSDCSR(_NoPythonCOp):
             }
         }
 
-        """ % dict(
-            locals(), **sub
-        )
+        """ % dict(locals(), **sub)
 
     def __str__(self):
         return self.__class__.__name__
@@ -1567,9 +1553,7 @@ class MulSVCSR(_NoPythonCOp):
             }
         }
 
-        """ % dict(
-            locals(), **sub
-        )
+        """ % dict(locals(), **sub)
 
     def __str__(self):
         return self.__class__.__name__
@@ -1748,9 +1732,7 @@ class StructuredAddSVCSR(_NoPythonCOp):
             }
         }
 
-        """ % dict(
-            locals(), **sub
-        )
+        """ % dict(locals(), **sub)
 
     def __str__(self):
         return self.__class__.__name__
@@ -2042,9 +2024,7 @@ PyErr_SetString(PyExc_NotImplementedError, "rank(y) != 2"); %(fail)s;}
                 }
             }
         }
-        """ % dict(
-            locals(), **sub
-        )
+        """ % dict(locals(), **sub)
 
         return rval
 

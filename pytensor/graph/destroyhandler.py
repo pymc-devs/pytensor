@@ -366,9 +366,7 @@ class DestroyHandler(Bookkeeper):  # noqa
             OrderedSet()
         )  # set of Apply instances with non-null destroy_map
         self.view_i = {}  # variable -> variable used in calculation
-        self.view_o = (
-            {}
-        )  # variable -> set of variables that use this one as a direct input
+        self.view_o = {}  # variable -> set of variables that use this one as a direct input
         # clients: how many times does an apply use a given variable
         self.clients = OrderedDict()  # variable -> apply -> ninputs
         self.stale_droot = True

@@ -15,9 +15,9 @@ from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.scalar import int32
-from pytensor.tensor import _get_vector_length, as_tensor_variable
+from pytensor.tensor import _get_vector_length, as_tensor_variable, get_vector_length
 from pytensor.tensor import basic as ptb
-from pytensor.tensor import get_vector_length
+from pytensor.tensor.elemwise import get_normalized_batch_axes
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.type import DenseTensorType, TensorType, int_dtypes, tensor
 from pytensor.tensor.type_other import NoneConst
@@ -146,7 +146,9 @@ _shape = Shape()
 def shape(x: Union[np.ndarray, Number, Variable]) -> Variable:
     """Return the shape of `x`."""
     if not isinstance(x, Variable):
-        x = ptb.as_tensor_variable(x)  # type: ignore
+        # The following is a type error in Python 3.9 but not 3.12.
+        # Thus we need to ignore unused-ignore on 3.12.
+        x = ptb.as_tensor_variable(x)  # type: ignore[arg-type,unused-ignore]
 
     return cast(Variable, _shape(x))
 
@@ -579,7 +581,9 @@ def specify_shape(
 
     # If the specified shape is already encoded in the input static shape, do nothing
     # This ignores PyTensor constants in shape
-    x = ptb.as_tensor_variable(x)  # type: ignore
+    x = ptb.as_tensor_variable(x)  # type: ignore[arg-type,unused-ignore]
+    # The above is a type error in Python 3.9 but not 3.12.
+    # Thus we need to ignore unused-ignore on 3.12.
     new_shape_info = any(
         s != xts for (s, xts) in zip(shape, x.type.shape) if s is not None
     )
@@ -917,7 +921,7 @@ def shape_padaxis(t, axis):
 
     ndim = _t.ndim + 1
     if not -ndim <= axis < ndim:
-        msg = "axis {0} is out of bounds [-{1}, {1})".format(axis, ndim)
+        msg = f"axis {axis} is out of bounds [-{ndim}, {ndim})"
         raise IndexError(msg)
     if axis < 0:
         axis += ndim
@@ -1103,8 +1107,10 @@ def unbroadcast(x, *axes):
 
 
 @_vectorize_node.register(Unbroadcast)
-def _vectorize_unbroadcast(op: Unbroadcast, node: Apply, x: TensorVariable) -> Apply:
-    batched_ndims = x.type.ndim - node.inputs[0].type.ndim
-    old_axes = op.axes
-    new_axes = (old_axis + batched_ndims for old_axis in old_axes)
-    return cast(Apply, unbroadcast(x, *new_axes).owner)
+def _vectorize_unbroadcast(
+    op: Unbroadcast, node: Apply, batch_x: TensorVariable
+) -> Apply:
+    core_ndim = node.inputs[0].type.ndim
+    batch_ndim = batch_x.type.ndim - core_ndim
+    batch_axes = get_normalized_batch_axes(op.axes, core_ndim, batch_ndim)
+    return cast(Apply, unbroadcast(batch_x, *batch_axes).owner)

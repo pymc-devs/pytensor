@@ -1,6 +1,8 @@
 from copy import copy
+from typing import Union
 
 import numpy as np
+from numpy.core.numeric import normalize_axis_tuple
 
 import pytensor.tensor.basic
 from pytensor.configdefaults import config
@@ -926,16 +928,13 @@ class Elemwise(OpenMPOp):
             # We make the output point to the corresponding input and
             # decrease the reference of whatever the output contained
             # prior to this
-            alloc += (
-                """
+            alloc += """
             if (%(oname)s) {
                 Py_XDECREF(%(oname)s);
             }
             %(oname)s = %(iname)s;
             Py_XINCREF(%(oname)s);
-            """
-                % locals()
-            )
+            """ % locals()
             # We alias the scalar variables
             defines += f"#define {oname}_i {iname}_i\n"
             undefs += f"#undef {oname}_i\n"
@@ -958,16 +957,13 @@ class Elemwise(OpenMPOp):
             [f"{s}_i" for s in onames],
             dict(sub, fail=fail),
         )
-        code = (
-            """
+        code = """
         {
             %(defines)s
             %(task_code)s
             %(undefs)s
         }
-        """
-            % locals()
-        )
+        """ % locals()
 
         loop_orders = orders + [list(range(nnested))] * len(real_onames)
         dtypes = idtypes + list(real_odtypes)
@@ -1011,8 +1007,7 @@ class Elemwise(OpenMPOp):
                         ) % sub
 
                 init_array = preloops.get(0, " ")
-                loop = (
-                    """
+                loop = """
                 {
                   %(defines)s
                   %(init_array)s
@@ -1020,9 +1015,7 @@ class Elemwise(OpenMPOp):
                   %(task_code)s
                   %(undefs)s
                 }
-                """
-                    % locals()
-                )
+                """ % locals()
             else:
                 loop = cgen.make_loop(
                     loop_orders=loop_orders,
@@ -1082,37 +1075,25 @@ class Elemwise(OpenMPOp):
                     index = ""
                     for x, var in zip(inames + onames, inputs + node.outputs):
                         if not all(s == 1 for s in var.type.shape):
-                            contig += (
-                                """
+                            contig += """
             dtype_%(x)s * %(x)s_ptr = (dtype_%(x)s*) PyArray_DATA(%(x)s);
-                            """
-                                % locals()
-                            )
-                            index += (
-                                """
+                            """ % locals()
+                            index += """
             dtype_%(x)s& %(x)s_i = %(x)s_ptr[i];
-                            """
-                                % locals()
-                            )
+                            """ % locals()
                         else:
-                            contig += (
-                                """
+                            contig += """
             dtype_%(x)s& %(x)s_i = ((dtype_%(x)s*) PyArray_DATA(%(x)s))[0];
-                            """
-                                % locals()
-                            )
+                            """ % locals()
                     if self.openmp:
                         contig += f"""#pragma omp parallel for if(n>={int(config.openmp_elemwise_minsize)})
                         """
-                    contig += (
-                        """
+                    contig += """
                     for(int i=0; i<n; i++){
                         %(index)s
                         %(task_code)s;
                     }
-                    """
-                        % locals()
-                    )
+                    """ % locals()
             if contig is not None:
                 z = list(zip(inames + onames, inputs + node.outputs))
                 all_broadcastable = all(s == 1 for s in var.type.shape)
@@ -1130,16 +1111,13 @@ class Elemwise(OpenMPOp):
                         if not all_broadcastable
                     ]
                 )
-                loop = (
-                    """
+                loop = """
             if((%(cond1)s) || (%(cond2)s)){
                 %(contig)s
             }else{
                 %(loop)s
             }
-            """
-                    % locals()
-                )
+            """ % locals()
         return decl, checks, alloc, loop, ""
 
     def c_code(self, node, nodename, inames, onames, sub):
@@ -1399,7 +1377,7 @@ class CAReduce(COp):
         # scalar inputs are treated as 1D regarding axis in this `Op`
         if axis is not None:
             try:
-                axis = np.core.numeric.normalize_axis_tuple(axis, ndim=max(1, inp_dims))
+                axis = normalize_axis_tuple(axis, ndim=max(1, inp_dims))
             except np.AxisError:
                 raise np.AxisError(axis, ndim=inp_dims)
 
@@ -1757,18 +1735,36 @@ def vectorize_dimshuffle(op: DimShuffle, node: Apply, x: TensorVariable) -> Appl
     return DimShuffle(input_broadcastable, new_order).make_node(x)
 
 
-@_vectorize_node.register(CAReduce)
-def vectorize_careduce(op: CAReduce, node: Apply, x: TensorVariable) -> Apply:
-    batched_ndims = x.type.ndim - node.inputs[0].type.ndim
-    if not batched_ndims:
-        return node.op.make_node(x)
-    axes = op.axis
-    # e.g., sum(matrix, axis=None) -> sum(tensor4, axis=(2, 3))
-    # e.g., sum(matrix, axis=0) -> sum(tensor4, axis=(2,))
-    if axes is None:
-        axes = list(range(node.inputs[0].type.ndim))
+def get_normalized_batch_axes(
+    core_axes: Union[None, int, tuple[int, ...]],
+    core_ndim: int,
+    batch_ndim: int,
+) -> tuple[int, ...]:
+    """Compute batch axes for a batched operation, from the core input ndim and axes.
+
+    e.g., sum(matrix, axis=None) -> sum(tensor4, axis=(2, 3))
+    batch_axes(None, 2, 4) -> (2, 3)
+
+    e.g., sum(matrix, axis=0) -> sum(tensor4, axis=(2,))
+    batch_axes(0, 2, 4) -> (2,)
+
+    e.g., sum(tensor3, axis=(0, -1)) -> sum(tensor4, axis=(1, 3))
+    batch_axes((0, -1), 3, 4) -> (1, 3)
+    """
+    if core_axes is None:
+        core_axes = tuple(range(core_ndim))
     else:
-        axes = list(axes)
-    new_axes = [axis + batched_ndims for axis in axes]
-    new_op = op.clone(axis=new_axes)
-    return new_op.make_node(x)
+        core_axes = normalize_axis_tuple(core_axes, core_ndim)
+    return tuple(core_axis + batch_ndim for core_axis in core_axes)
+
+
+@_vectorize_node.register(CAReduce)
+def vectorize_careduce(op: CAReduce, node: Apply, batch_x: TensorVariable) -> Apply:
+    core_ndim = node.inputs[0].type.ndim
+    batch_ndim = batch_x.type.ndim - core_ndim
+
+    if not batch_ndim:
+        return node.op.make_node(batch_x)
+
+    batch_axes = get_normalized_batch_axes(op.axis, core_ndim, batch_ndim)
+    return op.clone(axis=batch_axes).make_node(batch_x)

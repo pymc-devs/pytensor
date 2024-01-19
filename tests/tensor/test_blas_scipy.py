@@ -1,3 +1,5 @@
+import pickle
+
 import numpy as np
 import pytest
 
@@ -57,6 +59,17 @@ class TestScipyGer(OptimizationTestMixin):
         )
         self.assertFunctionContains(f, gemm_no_inplace)
         self.run_f(f)  # DebugMode tests correctness
+
+    def test_pickle(self):
+        out = ScipyGer(destructive=False)(self.A, self.a, self.x, self.y)
+        f = pytensor.function([self.A, self.a, self.x, self.y], out)
+        new_f = pickle.loads(pickle.dumps(f))
+
+        assert isinstance(new_f.maker.fgraph.toposort()[-1].op, ScipyGer)
+        assert np.allclose(
+            f(self.Aval, 1.0, self.xval, self.yval),
+            new_f(self.Aval, 1.0, self.xval, self.yval),
+        )
 
 
 class TestBlasStridesScipy(TestBlasStrides):

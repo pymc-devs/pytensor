@@ -122,7 +122,7 @@ def broadcast_params(params, ndims_params):
 
 
 def normalize_size_param(
-    size: Optional[Union[int, np.ndarray, Variable, Sequence]]
+    size: Optional[Union[int, np.ndarray, Variable, Sequence]],
 ) -> Variable:
     """Create an PyTensor value for a ``RandomVariable`` ``size`` parameter."""
     if size is None:

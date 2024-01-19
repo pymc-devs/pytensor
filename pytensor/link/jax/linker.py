@@ -23,7 +23,7 @@ class JAXLinker(JITLinker):
         # Replace any shared RNG inputs so that their values can be updated in place
         # without affecting the original RNG container. This is necessary because
         # JAX does not accept RandomState/Generators as inputs, and they will have to
-        # be typyfied
+        # be tipyfied
         if shared_rng_inputs:
             warnings.warn(
                 f"The RandomType SharedVariables {shared_rng_inputs} will not be used "
@@ -52,9 +52,16 @@ class JAXLinker(JITLinker):
                 else:  # no break
                     raise ValueError()
                 input_storage[input_storage_idx] = new_inp_storage
+                # We need to change the order of the inputs of the FunctionGraph
+                # so that the new input is in the same position as to old one,
+                # to align with the storage_map. We hope this is safe!
+                old_inp_fgrap_index = fgraph.inputs.index(old_inp)
                 fgraph.remove_input(
-                    fgraph.inputs.index(old_inp), reason="JAXLinker.fgraph_convert"
+                    old_inp_fgrap_index,
+                    reason="JAXLinker.fgraph_convert",
                 )
+                fgraph.inputs.remove(new_inp)
+                fgraph.inputs.insert(old_inp_fgrap_index, new_inp)
 
         return jax_funcify(
             fgraph, input_storage=input_storage, storage_map=storage_map, **kwargs

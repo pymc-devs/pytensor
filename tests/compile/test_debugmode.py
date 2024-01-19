@@ -96,9 +96,7 @@ class BROKEN_ON_PURPOSE_Add(COp):
                 + ((double*)PyArray_GETPTR1(%(b)s, m))[0] ;
             }
         }
-        """ % dict(
-            locals(), **sub
-        )
+        """ % dict(locals(), **sub)
 
 
 # inconsistent is a invalid op, whose perform and c_code do not match
@@ -692,9 +690,7 @@ class BrokenCImplementationAdd(COp):
                 }
             }
         }
-        """ % dict(
-            locals(), **sub
-        )
+        """ % dict(locals(), **sub)
 
 
 class VecAsRowAndCol(Op):

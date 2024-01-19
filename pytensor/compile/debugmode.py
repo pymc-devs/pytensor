@@ -1866,7 +1866,7 @@ class _Linker(LocalLinker):
                 # Nothing should be in storage map after evaluating
                 # each the thunk (specifically the last one)
                 for r, s in storage_map.items():
-                    assert type(s) is list
+                    assert isinstance(s, list)
                     assert s[0] is None
 
                 # store our output variables to their respective storage lists

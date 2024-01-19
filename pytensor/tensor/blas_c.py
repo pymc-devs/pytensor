@@ -33,8 +33,7 @@ class BaseBLAS(COp):
 
 
 def ger_c_code(A, a, x, y, Z, fail, params):
-    return (
-        """
+    return """
 
     int elemsize ;
 
@@ -310,9 +309,7 @@ def ger_c_code(A, a, x, y, Z, fail, params):
         }
     }
 
-    """
-        % locals()
-    )
+    """ % locals()
 
 
 class CGer(BaseBLAS, Ger):

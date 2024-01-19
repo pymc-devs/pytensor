@@ -823,9 +823,7 @@ class ParamsType(CType):
     def c_declare(self, name, sub, check_input=True):
         return """
         %(struct_name)s* %(name)s;
-        """ % dict(
-            struct_name=self.name, name=name
-        )
+        """ % dict(struct_name=self.name, name=name)
 
     def c_init(self, name, sub):
         # NB: It seems c_init() is not called for an op param.

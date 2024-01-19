@@ -306,6 +306,11 @@ def vectorize_graph(
         vect_inputs = [vect_vars.get(inp, inp) for inp in node.inputs]
         vect_node = vectorize_node(node, *vect_inputs)
         for output, vect_output in zip(node.outputs, vect_node.outputs):
+            if output in vect_vars:
+                # This can happen when some outputs of a multi-output node are given a replacement,
+                # while some of the remaining outputs are still needed in the graph.
+                # We make sure we don't overwrite the provided replacement with the newly vectorized output
+                continue
             vect_vars[output] = vect_output
 
     seq_vect_outputs = [vect_vars[out] for out in seq_outputs]

@@ -15,6 +15,7 @@ from pytensor.tensor.slinalg import (
     Solve,
     SolveBase,
     SolveTriangular,
+    block_diag,
     cho_solve,
     cholesky,
     eigvalsh,
@@ -661,3 +662,40 @@ def test_solve_discrete_are_grad():
         rng=rng,
         abs_tol=atol,
     )
+
+
+def test_block_diagonal():
+    A = np.array([[1.0, 2.0], [3.0, 4.0]])
+    B = np.array([[5.0, 6.0], [7.0, 8.0]])
+    result = block_diag(A, B)
+    assert result.owner.op.core_op._props_dict() == {"n_inputs": 2}
+
+    np.testing.assert_allclose(result.eval(), scipy.linalg.block_diag(A, B))
+
+
+def test_block_diagonal_grad():
+    A = np.array([[1.0, 2.0], [3.0, 4.0]])
+    B = np.array([[5.0, 6.0], [7.0, 8.0]])
+
+    utt.verify_grad(block_diag, pt=[A, B], rng=np.random.default_rng())
+
+
+def test_block_diagonal_blockwise():
+    batch_size = 5
+    A = np.random.normal(size=(batch_size, 2, 2)).astype(config.floatX)
+    B = np.random.normal(size=(batch_size, 4, 4)).astype(config.floatX)
+    result = block_diag(A, B).eval()
+    assert result.shape == (batch_size, 6, 6)
+    for i in range(batch_size):
+        np.testing.assert_allclose(
+            result[i],
+            scipy.linalg.block_diag(A[i], B[i]),
+            atol=1e-4 if config.floatX == "float32" else 1e-8,
+            rtol=1e-4 if config.floatX == "float32" else 1e-8,
+        )
+
+    # Test broadcasting
+    A = np.random.normal(size=(10, batch_size, 2, 2)).astype(config.floatX)
+    B = np.random.normal(size=(1, batch_size, 4, 4)).astype(config.floatX)
+    result = block_diag(A, B).eval()
+    assert result.shape == (10, batch_size, 6, 6)

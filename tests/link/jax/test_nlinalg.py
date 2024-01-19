@@ -11,9 +11,8 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.link.jax import JAXLinker
 from pytensor.tensor import blas as pt_blas
 from pytensor.tensor import nlinalg as pt_nlinalg
-from pytensor.tensor.math import MaxAndArgmax
+from pytensor.tensor.math import MaxAndArgmax, maximum
 from pytensor.tensor.math import max as pt_max
-from pytensor.tensor.math import maximum
 from pytensor.tensor.type import dvector, matrix, scalar, tensor3, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 

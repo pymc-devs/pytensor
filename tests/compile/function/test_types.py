@@ -16,9 +16,8 @@ from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import OpKeyGraphRewriter, PatternNodeRewriter
 from pytensor.graph.utils import MissingInputError
 from pytensor.link.vm import VMLinker
-from pytensor.tensor.math import dot
+from pytensor.tensor.math import dot, tanh
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.math import tanh
 from pytensor.tensor.type import (
     dmatrix,
     dscalar,

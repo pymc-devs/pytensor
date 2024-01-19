@@ -91,15 +91,15 @@ class BaseCorrMM(OpenMPOp, _NoPythonOp):
         if isinstance(border_mode, int):
             if border_mode < 0:
                 raise ValueError(
-                    "invalid border_mode {}, which must be a "
-                    "non-negative integer".format(border_mode)
+                    f"invalid border_mode {border_mode}, which must be a "
+                    "non-negative integer"
                 )
             border_mode = ((border_mode, border_mode),) * 2
         elif isinstance(border_mode, tuple):
             if len(border_mode) != 2:
                 raise ValueError(
-                    "invalid border_mode {} which must be a "
-                    "tuple of length 2".format(border_mode)
+                    f"invalid border_mode {border_mode} which must be a "
+                    "tuple of length 2"
                 )
             border = ()
             for mode in border_mode:
@@ -115,9 +115,9 @@ class BaseCorrMM(OpenMPOp, _NoPythonOp):
             border_mode = border
         elif border_mode not in ("valid", "full", "half"):
             raise ValueError(
-                "invalid border_mode {}, which must be either "
+                f"invalid border_mode {border_mode}, which must be either "
                 '"valid", "full", "half", an integer or a tuple '
-                "of two integers or a pair of integers".format(border_mode)
+                "of two integers or a pair of integers"
             )
         self.border_mode = border_mode
         if len(subsample) != 2:

@@ -19,10 +19,9 @@ from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.basic import second
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from pytensor.tensor.math import Any, Sum
+from pytensor.tensor.math import Any, Sum, exp
 from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import any as pt_any
-from pytensor.tensor.math import exp
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.type import (
     TensorType,

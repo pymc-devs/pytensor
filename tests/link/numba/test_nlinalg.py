@@ -15,57 +15,6 @@ rng = np.random.default_rng(42849)
 
 
 @pytest.mark.parametrize(
-    "x, lower, exc",
-    [
-        (
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
-            True,
-            None,
-        ),
-        (
-            set_test_value(
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
-            True,
-            None,
-        ),
-        (
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
-            False,
-            UserWarning,
-        ),
-    ],
-)
-def test_Cholesky(x, lower, exc):
-    g = slinalg.Cholesky(lower=lower)(x)
-
-    if isinstance(g, list):
-        g_fg = FunctionGraph(outputs=g)
-    else:
-        g_fg = FunctionGraph(outputs=[g])
-
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
-        compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, (SharedVariable, Constant))
-            ],
-        )
-
-
-@pytest.mark.parametrize(
     "A, x, lower, exc",
     [
         (

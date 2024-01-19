@@ -10,9 +10,8 @@ import time
 import traceback
 import warnings
 from collections import UserList, defaultdict, deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from collections.abc import Iterable as IterableType
-from collections.abc import Sequence
 from functools import _compose_mro, partial, reduce  # type: ignore
 from itertools import chain
 from typing import TYPE_CHECKING, Callable, Literal, Optional, Union, cast
@@ -951,8 +950,8 @@ class MetaNodeRewriter(NodeRewriter):
 
     def __init__(self):
         self.verbose = config.metaopt__verbose
-        self.track_dict = defaultdict(lambda: [])
-        self.tag_dict = defaultdict(lambda: [])
+        self.track_dict = defaultdict(list)
+        self.tag_dict = defaultdict(list)
         self._tracks = []
         self.rewriters = []
 
@@ -2406,12 +2405,14 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
                 if node is not current_node:
                     q.append(node)
 
-            chin = None
+            chin: Optional[Callable] = None
             if self.tracks_on_change_inputs:
 
-                def chin(node, i, r, new_r, reason):
+                def chin_(node, i, r, new_r, reason):
                     if node is not current_node and not isinstance(node, str):
                         q.append(node)
+
+                chin = chin_
 
             u = self.attach_updater(
                 fgraph, importer, None, chin=chin, name=getattr(self, "name", None)

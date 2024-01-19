@@ -499,9 +499,7 @@ class ScalarType(CType, HasDataType, HasShape):
             %(fail)s
         }
         PyArrayScalar_ASSIGN(py_%(name)s, %(cls)s, %(name)s);
-        """ % dict(
-            sub, name=name, dtype=specs[1], cls=specs[2]
-        )
+        """ % dict(sub, name=name, dtype=specs[1], cls=specs[2])
 
     def c_cleanup(self, name, sub):
         return ""

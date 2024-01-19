@@ -39,9 +39,9 @@ from pytensor.scalar.basic import (
     ScalarMinimum,
     Sub,
     TrueDiv,
+    scalar_maximum,
 )
 from pytensor.scalar.basic import add as add_as
-from pytensor.scalar.basic import scalar_maximum
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import MaxAndArgmax, MulWithoutZeros, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad

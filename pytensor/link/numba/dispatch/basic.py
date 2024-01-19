@@ -37,7 +37,7 @@ from pytensor.sparse import SparseTensorType
 from pytensor.tensor.blas import BatchedDot
 from pytensor.tensor.math import Dot
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
-from pytensor.tensor.slinalg import Cholesky, Solve
+from pytensor.tensor.slinalg import Solve
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
@@ -807,7 +807,6 @@ def numba_funcify_Softplus(op, node, **kwargs):
         return direct_cast(value, x_dtype)
 
     return softplus
-
 
 @numba_funcify.register(Cholesky)
 def numba_funcify_Cholesky(op, node, **kwargs):
