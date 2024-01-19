@@ -312,33 +312,38 @@ class TestBatchedVectorBSolveToMatrixBSolve:
     config.mode == "FAST_COMPILE",
     reason="inplace rewrites disabled when mode is FAST_COMPILE",
 )
-def test_local_inplace_cholesky():
-    X = matrix("X")
+@pytest.mark.parametrize("is_batched", (False, True))
+def test_local_inplace_cholesky(is_batched):
+    shape = (5, None, None) if is_batched else (None, None)
+    X = tensor("X", shape=shape)
     L = cholesky(X, overwrite_a=False, lower=True)
     f = function([pytensor.In(X, mutable=True)], L)
 
     assert not L.owner.op.core_op.overwrite_a
 
-    nodes = f.maker.fgraph.toposort()
-    for node in nodes:
-        if isinstance(node, Cholesky):
-            assert node.overwrite_a
-            break
+    if is_batched:
+        [cholesky_op] = [
+            node.op.core_op
+            for node in f.maker.fgraph.apply_nodes
+            if isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Cholesky)
+        ]
+    else:
+        [cholesky_op] = [
+            node.op
+            for node in f.maker.fgraph.apply_nodes
+            if isinstance(node.op, Cholesky)
+        ]
+    assert cholesky_op.overwrite_a
 
     X_val = np.random.normal(size=(10, 10)).astype(config.floatX)
     X_val_in = X_val @ X_val.T
+    if is_batched:
+        X_val_in = np.broadcast_to(X_val_in, (5, *X_val_in.shape)).copy()
     X_val_in_copy = X_val_in.copy()
+
     f(X_val_in)
 
     assert_allclose(
-        X_val_in[np.triu_indices_from(X_val_in, k=1)],
-        0.0,
-        atol=1e-4 if config.floatX == "float32" else 1e-8,
-        rtol=1e-4 if config.floatX == "float32" else 1e-8,
-    )
-    assert_allclose(
-        X_val_in @ X_val_in.T,
-        X_val_in_copy,
-        atol=1e-4 if config.floatX == "float32" else 1e-8,
-        rtol=1e-4 if config.floatX == "float32" else 1e-8,
+        X_val_in,
+        np.linalg.cholesky(X_val_in_copy),
     )

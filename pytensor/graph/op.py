@@ -577,6 +577,11 @@ class Op(MetaObject):
         )
         return self.make_py_thunk(node, storage_map, compute_map, no_recycling)
 
+    def try_inplace_inputs(self, candidate_inputs: list[int]) -> "Op":
+        """Try to return a version of self that can inplace on candidate_inputs."""
+        # TODO: Document this in the Create your own op docs
+        raise NotImplementedError()
+
     def __str__(self):
         return getattr(type(self), "__name__", super().__str__())
 

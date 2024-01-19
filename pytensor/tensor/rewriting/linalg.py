@@ -1,8 +1,7 @@
 import logging
 from typing import cast
 
-from pytensor.compile import optdb
-from pytensor.graph.rewriting.basic import copy_stack_trace, in2out, node_rewriter
+from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
 from pytensor.tensor.basic import TensorVariable, diagonal, swapaxes
 from pytensor.tensor.blas import Dot22
 from pytensor.tensor.blockwise import Blockwise
@@ -10,7 +9,6 @@ from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Dot, Prod, _matrix_matrix_matmul, log, prod
 from pytensor.tensor.nlinalg import MatrixInverse, det
 from pytensor.tensor.rewriting.basic import (
-    make_inplace,
     register_canonicalize,
     register_specialize,
     register_stabilize,
@@ -312,21 +310,3 @@ def local_log_prod_sqr(fgraph, node):
 
         # TODO: have a reduction like prod and sum that simply
         # returns the sign of the prod multiplication.
-
-
-@node_rewriter([Cholesky], inplace=True)
-def local_inplace_cholesky(fgraph, node):
-    return make_inplace(node, "overwrite_a")
-
-
-# After destroyhandler(49.5) but before we try to make elemwise things
-# inplace (75)
-linalg_opt_inplace = in2out(local_inplace_cholesky, name="linalg_opt_inplace")
-optdb.register(
-    "InplaceLinalgOpt",
-    linalg_opt_inplace,
-    "fast_run",
-    "inplace",
-    "linalg_opt_inplace",
-    position=69.0,
-)

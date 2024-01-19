@@ -141,6 +141,12 @@ class Cholesky(Op):
         else:
             return [grad]
 
+    def try_inplace_inputs(self, candidate_inputs: list[int]) -> "Op":
+        if candidate_inputs == [0]:
+            return type(self)(
+                lower=self.lower, overwrite_a=True, on_error=self.on_error
+            )
+
 
 def cholesky(x, lower=True, on_error="raise", overwrite_a=False):
     return Blockwise(Cholesky(lower=lower, on_error=on_error, overwrite_a=overwrite_a))(
@@ -155,6 +161,8 @@ class SolveBase(Op):
         "lower",
         "check_finite",
         "b_ndim",
+        "overwrite_a",
+        "overwrite_b",
     )
 
     def __init__(
@@ -163,6 +171,8 @@ class SolveBase(Op):
         lower=False,
         check_finite=True,
         b_ndim,
+        overwrite_a=False,
+        overwrite_b=False,
     ):
         self.lower = lower
         self.check_finite = check_finite
@@ -172,6 +182,16 @@ class SolveBase(Op):
             self.gufunc_signature = "(m,m),(m)->(m)"
         else:
             self.gufunc_signature = "(m,m),(m,n)->(m,n)"
+        self.overwrite_a = overwrite_a
+        self.overwrite_b = overwrite_b
+        destroy_map = {}
+        if self.overwrite_a and self.overwrite_b:
+            destroy_map[0] = [0, 1]
+        elif self.overwrite_a:
+            destroy_map[0] = [0]
+        elif self.overwrite_b:
+            destroy_map[0] = [1]
+        self.destroy_map = destroy_map
 
     def perform(self, node, inputs, outputs):
         pass
@@ -245,7 +265,16 @@ def _default_b_ndim(b, b_ndim):
 
 
 class CholeskySolve(SolveBase):
+    __props__ = (
+        "lower",
+        "check_finite",
+        "b_ndim",
+        "overwrite_b",
+    )
+
     def __init__(self, **kwargs):
+        if kwargs.get("overwrite_a", False):
+            raise ValueError("overwrite_a is not supported for CholeskySolve")
         kwargs.setdefault("lower", True)
         super().__init__(**kwargs)
 
@@ -260,7 +289,14 @@ class CholeskySolve(SolveBase):
         output_storage[0][0] = rval
 
     def L_op(self, *args, **kwargs):
+        # TODO: Base impl should work, let's try it
         raise NotImplementedError()
+
+    def try_inplace_inputs(self, candidate_inputs: list[int]) -> "Op":
+        if 1 in candidate_inputs:
+            new_props = self._props_dict()
+            new_props["overwrite_b"] = True
+            return type(self)(**new_props)
 
 
 def cho_solve(c_and_lower, b, *, check_finite=True, b_ndim: Optional[int] = None):
@@ -296,9 +332,12 @@ class SolveTriangular(SolveBase):
         "lower",
         "check_finite",
         "b_ndim",
+        "overwrite_b",
     )
 
     def __init__(self, *, trans=0, unit_diagonal=False, **kwargs):
+        if kwargs.get("overwrite_a", False):
+            raise ValueError("overwrite_a is not supported for SolverTriangulare")
         super().__init__(**kwargs)
         self.trans = trans
         self.unit_diagonal = unit_diagonal
@@ -323,6 +362,12 @@ class SolveTriangular(SolveBase):
             res[0] = ptb.triu(res[0])
 
         return res
+
+    def try_inplace_inputs(self, candidate_inputs: list[int]) -> "Op":
+        if 1 in candidate_inputs:
+            new_props = self._props_dict()
+            new_props["overwrite_b"] = True
+            return type(self)(**new_props)
 
 
 def solve_triangular(
@@ -383,6 +428,8 @@ class Solve(SolveBase):
         "lower",
         "check_finite",
         "b_ndim",
+        "overwrite_a",
+        "overwrite_b",
     )
 
     def __init__(self, *, assume_a="gen", **kwargs):
@@ -401,6 +448,14 @@ class Solve(SolveBase):
             check_finite=self.check_finite,
             assume_a=self.assume_a,
         )
+
+    def try_inplace_inputs(self, candidate_inputs: list[int]) -> "Op":
+        new_props = self._props_dict()
+        if 0 in candidate_inputs:
+            new_props["overwrite_a"] = True
+        if 1 in candidate_inputs:
+            new_props["overwrite_b"] = True
+        return type(self)(**new_props)
 
 
 def solve(
