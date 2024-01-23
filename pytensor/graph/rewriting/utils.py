@@ -252,12 +252,7 @@ def register_canonicalize(
 
         return register
     else:
-        # Use getattr to handle cases where __name__ is not present
         name = kwargs.pop("name", None) or getattr(node_rewriter, "__name__", None)
-
-        # If name is still None, provide a default name or handle it as needed
-        if name is None:
-            name = "default_name"
 
         compile.optdb["canonicalize"].register(
             name, node_rewriter, "fast_run", "fast_compile", *tags, **kwargs
