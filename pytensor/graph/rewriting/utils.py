@@ -3,6 +3,7 @@ from collections.abc import Generator, Sequence
 from typing import TYPE_CHECKING, Optional, Union, cast
 
 import pytensor
+from pytensor import compile
 from pytensor.graph.basic import (
     Apply,
     Variable,
@@ -11,7 +12,8 @@ from pytensor.graph.basic import (
     vars_between,
 )
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.graph.rewriting.basic import NodeRewriter
+from pytensor.graph.rewriting.db import RewriteDatabase, RewriteDatabaseQuery
 
 
 if TYPE_CHECKING:
@@ -238,3 +240,26 @@ def get_clients_at_depth(
         else:
             assert var.owner is not None
             yield var.owner
+
+
+def register_canonicalize(
+    node_rewriter: Union[RewriteDatabase, NodeRewriter, str], *tags: str, **kwargs
+):
+    if isinstance(node_rewriter, str):
+
+        def register(inner_rewriter: Union[RewriteDatabase, NodeRewriter]):
+            return register_canonicalize(inner_rewriter, node_rewriter, *tags, **kwargs)
+
+        return register
+    else:
+        # Use getattr to handle cases where __name__ is not present
+        name = kwargs.pop("name", None) or getattr(node_rewriter, "__name__", None)
+
+        # If name is still None, provide a default name or handle it as needed
+        if name is None:
+            name = "default_name"
+
+        compile.optdb["canonicalize"].register(
+            name, node_rewriter, "fast_run", "fast_compile", *tags, **kwargs
+        )
+        return node_rewriter

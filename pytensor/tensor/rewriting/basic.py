@@ -41,6 +41,7 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.db import RewriteDatabase
+from pytensor.graph.rewriting.utils import register_canonicalize
 from pytensor.raise_op import Assert, CheckAndRaise, assert_op
 from pytensor.tensor.basic import (
     Alloc,
@@ -149,23 +150,6 @@ def register_useless(
 
         compile.mode.local_useless.register(
             name, node_rewriter, "fast_run", *tags, position="last", **kwargs
-        )
-        return node_rewriter
-
-
-def register_canonicalize(
-    node_rewriter: Union[RewriteDatabase, NodeRewriter, str], *tags: str, **kwargs
-):
-    if isinstance(node_rewriter, str):
-
-        def register(inner_rewriter: Union[RewriteDatabase, Rewriter]):
-            return register_canonicalize(inner_rewriter, node_rewriter, *tags, **kwargs)
-
-        return register
-    else:
-        name = kwargs.pop("name", None) or node_rewriter.__name__
-        compile.optdb["canonicalize"].register(
-            name, node_rewriter, "fast_run", "fast_compile", *tags, **kwargs
         )
         return node_rewriter
 
