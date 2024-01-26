@@ -2743,7 +2743,7 @@ def default_blas_ldflags():
 
         maybe_lib_dirs = [
             [pathlib.Path(p).resolve() for p in line[len("libraries: =") :].split(":")]
-            for line in stdout.decode(sys.stdout.encoding).splitlines()
+            for line in stdout.decode(sys.getdefaultencoding()).splitlines()
             if line.startswith("libraries: =")
         ]
         if len(maybe_lib_dirs) > 0:
