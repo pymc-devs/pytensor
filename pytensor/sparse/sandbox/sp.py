@@ -158,7 +158,7 @@ class ConvolutionIndices(Op):
                     for ox in np.arange(lbound[1], ubound[1], dx, dtype=int):
                         # kern[l] is filter value to apply at (oj,oi)
                         # for (iy,ix)
-                        l = 0  # noqa: E741
+                        l = 0
 
                         # ... ITERATE OVER INPUT UNITS IN RECEPTIVE FIELD
                         for ky in oy + np.arange(kshp[0], dtype=int):

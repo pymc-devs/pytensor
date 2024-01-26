@@ -1718,7 +1718,7 @@ class _CThunk:
 
     def __init__(self, cthunk, init_tasks, tasks, error_storage, module):
         # Lazy import to avoid compilation when importing pytensor.
-        from pytensor.link.c.cutils import run_cthunk  # noqa
+        from pytensor.link.c.cutils import run_cthunk
 
         self.run_cthunk = run_cthunk
         self.cthunk = cthunk
