@@ -150,7 +150,7 @@ class ShapeFeature(Feature):
             msg = (
                 f"Failed to infer_shape from Op {node.op}.\nInput shapes: "
                 f"{[self.shape_of[r] for r in node.inputs]}\nException encountered during infer_shape: "
-                f"{type(e)}\nException message: {str(e)}\nTraceback: {traceback.format_exc()}"
+                f"{type(e)}\nException message: {e!s}\nTraceback: {traceback.format_exc()}"
             )
             if config.on_shape_error == "raise":
                 raise Exception(msg).with_traceback(e.__traceback__)
