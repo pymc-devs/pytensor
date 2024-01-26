@@ -101,8 +101,6 @@ omit = [
     "pytensor/graph/unify.py",
     "pytensor/link/jax/jax_linker.py",
     "pytensor/link/jax/jax_dispatch.py",
-    "pytensor/graph/toolbox.py",
-    "pytensor/scalar/basic_scipy.py",
 ]
 branch = true
 relative_files = true
@@ -143,8 +141,6 @@ lines-after-imports = 2
 # TODO: Get rid of these:
 "**/__init__.py" = ["F401", "E402", "F403"]
 "pytensor/tensor/linalg.py" = ["F401", "F403"]
-"pytensor/scalar/basic_scipy.py" = ["E402"]
-"pytensor/graph/toolbox.py" = ["E402"]
 # For the tests we skip because `pytest.importorskip` is used:
 "tests/link/jax/test_scalar.py" = ["E402"]
 "tests/link/jax/test_tensor_basic.py" = ["E402"]
