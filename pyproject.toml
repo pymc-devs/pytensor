@@ -140,7 +140,7 @@ lines-after-imports = 2
 [tool.ruff.per-file-ignores]
 # TODO: Get rid of these:
 "**/__init__.py" = ["F401", "E402", "F403"]
-"pytensor/tensor/linalg.py" = ["F401", "F403"]
+"pytensor/tensor/linalg.py" = ["F403"]
 # For the tests we skip because `pytest.importorskip` is used:
 "tests/link/jax/test_scalar.py" = ["E402"]
 "tests/link/jax/test_tensor_basic.py" = ["E402"]
