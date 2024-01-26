@@ -359,8 +359,7 @@ class ParamsType(CType):
             type_name = type_instance.__class__.__name__
             if not isinstance(type_instance, CType):
                 raise TypeError(
-                    'ParamsType: attribute "%s" should inherit from PyTensor CType, got "%s".'
-                    % (attribute_name, type_name)
+                    f'ParamsType: attribute "{attribute_name}" should inherit from PyTensor CType, got "{type_name}".'
                 )
 
         self.length = len(kwargs)
@@ -723,15 +722,11 @@ class ParamsType(CType):
             c_cleanup_list.append(type_instance.c_cleanup(attribute_name, sub))
 
             c_extract_list.append(
-                """
-            void extract_%(attribute_name)s(PyObject* py_%(attribute_name)s) {
-                %(extract_code)s
-            }
+                f"""
+            void extract_{attribute_name}(PyObject* py_{attribute_name}) {{
+                {type_instance.c_extract(attribute_name, sub)}
+            }}
             """
-                % {
-                    "attribute_name": attribute_name,
-                    "extract_code": type_instance.c_extract(attribute_name, sub),
-                }
             )
 
         struct_declare = "\n".join(c_declare_list)
@@ -759,55 +754,57 @@ class ParamsType(CType):
             )
         )
         final_struct_code = """
-        /** ParamsType %(struct_name)s **/
-        #ifndef %(struct_name_defined)s
-        #define %(struct_name_defined)s
-        struct %(struct_name)s {
+        /** ParamsType {struct_name} **/
+        #ifndef {struct_name_defined}
+        #define {struct_name_defined}
+        struct {struct_name} {{
             /* Attributes, */
-            int %(struct_name)s_error;
-            %(struct_declare)s
+            int {struct_name}_error;
+            {struct_declare}
 
             /* Constructor. */
-            %(struct_name)s() {
-                %(struct_name)s_error = 0;
-                %(struct_init)s
-            }
+            {struct_name}() {{
+                {struct_name}_error = 0;
+                {struct_init}
+            }}
 
             /* Destructor. */
-            ~%(struct_name)s() {
+            ~{struct_name}() {{
                 // cleanup() is defined below.
                 cleanup();
-            }
+            }}
 
             /* Cleanup method. */
-            void cleanup() {
-                %(struct_cleanup)s
-            }
+            void cleanup() {{
+                {struct_cleanup}
+            }}
 
             /* Extraction methods. */
-            %(struct_extract)s
+            {struct_extract}
 
             /* Extract method. */
-            %(struct_extract_method)s
+            {struct_extract_method}
 
             /* Other methods. */
-            void setErrorOccurred() {
-                ++%(struct_name)s_error;
-            }
-            int errorOccurred() {
-                return %(struct_name)s_error;
-            }
-        };
+            void setErrorOccurred() {{
+                ++{struct_name}_error;
+            }}
+            int errorOccurred() {{
+                return {struct_name}_error;
+            }}
+        }};
         #endif
-        /** End ParamsType %(struct_name)s **/
-        """ % dict(
-            struct_name_defined=struct_name_defined,
-            struct_name=struct_name,
-            struct_declare=struct_declare,
-            struct_init=struct_init,
-            struct_cleanup=struct_cleanup,
-            struct_extract=struct_extract,
-            struct_extract_method=struct_extract_method,
+        /** End ParamsType {struct_name} **/
+        """.format(
+            **dict(
+                struct_name_defined=struct_name_defined,
+                struct_name=struct_name,
+                struct_declare=struct_declare,
+                struct_init=struct_init,
+                struct_cleanup=struct_cleanup,
+                struct_extract=struct_extract,
+                struct_extract_method=struct_extract_method,
+            )
         )
 
         return sorted(c_support_code_set) + [final_struct_code]
@@ -822,8 +819,8 @@ class ParamsType(CType):
 
     def c_declare(self, name, sub, check_input=True):
         return """
-        %(struct_name)s* %(name)s;
-        """ % dict(struct_name=self.name, name=name)
+        {struct_name}* {name};
+        """.format(**dict(struct_name=self.name, name=name))
 
     def c_init(self, name, sub):
         # NB: It seems c_init() is not called for an op param.
@@ -841,35 +838,37 @@ class ParamsType(CType):
     def c_extract(self, name, sub, check_input=True, **kwargs):
         return """
         /* Seems c_init() is not called for a op param. So I call `new` here. */
-        %(name)s = new %(struct_name)s;
+        {name} = new {struct_name};
 
-        { // This need a separate namespace for Clinker
-        const char* fields[] = {%(fields_list)s};
-        if (py_%(name)s == Py_None) {
+        {{ // This need a separate namespace for Clinker
+        const char* fields[] = {{{fields_list}}};
+        if (py_{name} == Py_None) {{
             PyErr_SetString(PyExc_ValueError, "ParamsType: expected an object, not None.");
-            %(fail)s
-        }
-        for (int i = 0; i < %(length)s; ++i) {
-            PyObject* o = PyDict_GetItemString(py_%(name)s, fields[i]);
-            if (o == NULL) {
-                PyErr_Format(PyExc_TypeError, "ParamsType: missing expected attribute \\"%%s\\" in object.", fields[i]);
-                %(fail)s
-            }
-            %(name)s->extract(o, i);
-            if (%(name)s->errorOccurred()) {
+            {fail}
+        }}
+        for (int i = 0; i < {length}; ++i) {{
+            PyObject* o = PyDict_GetItemString(py_{name}, fields[i]);
+            if (o == NULL) {{
+                PyErr_Format(PyExc_TypeError, "ParamsType: missing expected attribute \\"%s\\" in object.", fields[i]);
+                {fail}
+            }}
+            {name}->extract(o, i);
+            if ({name}->errorOccurred()) {{
                 /* The extract code from attribute type should have already raised a Python exception,
                  * so we just print the attribute name in stderr. */
-                fprintf(stderr, "\\nParamsType: error when extracting value for attribute \\"%%s\\".\\n", fields[i]);
-                %(fail)s
-            }
-        }
-        }
-        """ % dict(
-            name=name,
-            struct_name=self.name,
-            length=self.length,
-            fail=sub["fail"],
-            fields_list='"%s"' % '", "'.join(self.fields),
+                fprintf(stderr, "\\nParamsType: error when extracting value for attribute \\"%s\\".\\n", fields[i]);
+                {fail}
+            }}
+        }}
+        }}
+        """.format(
+            **dict(
+                name=name,
+                struct_name=self.name,
+                length=self.length,
+                fail=sub["fail"],
+                fields_list='"%s"' % '", "'.join(self.fields),
+            )
         )
 
     def c_sync(self, name, sub):

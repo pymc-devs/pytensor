@@ -465,7 +465,7 @@ class OpFromGraph(Op, HasInnerGraph):
     def __str__(self):
         name = self.__class__.__name__ if self.name is None else self.name
         is_inline = self.is_inline
-        return "%(name)s{inline=%(is_inline)s}" % locals()
+        return "{name}{{inline={is_inline}}}".format(**locals())
 
     @config.change_flags(compute_test_value="off")
     def _recompute_lop_op(self):

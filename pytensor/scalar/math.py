@@ -620,8 +620,8 @@ class Chi2SF(BinaryScalarOp):
         (z,) = out
         if node.inputs[0].type in float_types:
             dtype = "npy_" + node.outputs[0].dtype
-            return """%(z)s =
-                (%(dtype)s) 1 - GammaP(%(k)s/2., %(x)s/2.);""" % locals()
+            return """{z} =
+                ({dtype}) 1 - GammaP({k}/2., {x}/2.);""".format(**locals())
         raise NotImplementedError("only floatingpoint is implemented")
 
     def __eq__(self, other):
@@ -666,8 +666,8 @@ class GammaInc(BinaryScalarOp):
         (z,) = out
         if node.inputs[0].type in float_types:
             dtype = "npy_" + node.outputs[0].dtype
-            return """%(z)s =
-                (%(dtype)s) GammaP(%(k)s, %(x)s);""" % locals()
+            return """{z} =
+                ({dtype}) GammaP({k}, {x});""".format(**locals())
         raise NotImplementedError("only floatingpoint is implemented")
 
     def __eq__(self, other):
@@ -712,8 +712,8 @@ class GammaIncC(BinaryScalarOp):
         (z,) = out
         if node.inputs[0].type in float_types:
             dtype = "npy_" + node.outputs[0].dtype
-            return """%(z)s =
-                (%(dtype)s) GammaQ(%(k)s, %(x)s);""" % locals()
+            return """{z} =
+                ({dtype}) GammaQ({k}, {x});""".format(**locals())
         raise NotImplementedError("only floatingpoint is implemented")
 
     def __eq__(self, other):
@@ -1018,8 +1018,8 @@ class GammaU(BinaryScalarOp):
         (z,) = out
         if node.inputs[0].type in float_types:
             dtype = "npy_" + node.outputs[0].dtype
-            return """%(z)s =
-                (%(dtype)s) upperGamma(%(k)s, %(x)s);""" % locals()
+            return """{z} =
+                ({dtype}) upperGamma({k}, {x});""".format(**locals())
         raise NotImplementedError("only floatingpoint is implemented")
 
     def __eq__(self, other):
@@ -1056,8 +1056,8 @@ class GammaL(BinaryScalarOp):
         (z,) = out
         if node.inputs[0].type in float_types:
             dtype = "npy_" + node.outputs[0].dtype
-            return """%(z)s =
-                (%(dtype)s) lowerGamma(%(k)s, %(x)s);""" % locals()
+            return """{z} =
+                ({dtype}) lowerGamma({k}, {x});""".format(**locals())
         raise NotImplementedError("only floatingpoint is implemented")
 
     def __eq__(self, other):

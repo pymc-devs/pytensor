@@ -1037,24 +1037,24 @@ class Subtensor(COp):
         // The subtensor is created by iterating over the dimensions
         // and updating stride, shape, and data pointers
 
-        %(is_slice_init)s
-        %(subensor_spec)s
-        %(subtensor_init)s;
+        {is_slice_init}
+        {subensor_spec}
+        {subtensor_init};
         int spec_pos = 0; //position in subtensor_spec
         int inner_ii = 0; // the current dimension of zview
         int outer_ii = 0; // current dimension of z
 
 
-        for (; outer_ii < %(len_is_slice)s; ++outer_ii)
-        {
+        for (; outer_ii < {len_is_slice}; ++outer_ii)
+        {{
             if (is_slice[outer_ii])
-            {
-                npy_intp length = %(c_prefix)s_DIMS(%(x)s)[outer_ii];
+            {{
+                npy_intp length = {c_prefix}_DIMS({x})[outer_ii];
                 npy_intp slicelength;
                 npy_intp start = subtensor_spec[spec_pos+0];
                 npy_intp stop  = subtensor_spec[spec_pos+1];
                 npy_intp step  = subtensor_spec[spec_pos+2];
-                if (step == %(NONE_CODE)s) step = 1;
+                if (step == {NONE_CODE}) step = 1;
 
                 npy_intp defstart = step < 0 ? length-1 : 0;
                 npy_intp defstop = step < 0 ? -1 : length;
@@ -1062,102 +1062,102 @@ class Subtensor(COp):
                 // logic adapted from
                 // PySlice_GetIndicesEx in python source
                 if (!step)
-                {
+                {{
                     PyErr_Format(PyExc_ValueError,
                                  "slice step cannot be zero");
-                    %(fail)s;
-                }
+                    {fail};
+                }}
 
-                if (start == %(NONE_CODE)s)
-                {
+                if (start == {NONE_CODE})
+                {{
                     start = defstart;
-                }
+                }}
                 else
-                {
+                {{
                     if (start < 0) start += length;
                     if (start < 0) start = (step < 0) ? -1 : 0;
                     if (start >= length)
                         start = (step < 0) ? length - 1 : length;
-                }
+                }}
 
-                if (stop == %(NONE_CODE)s)
-                {
+                if (stop == {NONE_CODE})
+                {{
                     stop = defstop;
-                }
+                }}
                 else
-                {
+                {{
                     if (stop < 0) stop += length;
                     if (stop < 0) stop = (step < 0) ? -1 : 0;
                     if (stop >= length)
                         stop = (step < 0) ? length - 1 : length;
-                }
+                }}
 
                 if ((step < 0 && stop >= start)
-                    || (step > 0 && start >= stop)) {
+                    || (step > 0 && start >= stop)) {{
                     slicelength = 0;
-                }
-                else if (step < 0) {
+                }}
+                else if (step < 0) {{
                     slicelength = (stop-start+1)/step+1;
-                }
-                else {
+                }}
+                else {{
                     slicelength = (stop-start-1)/step+1;
-                }
+                }}
 
-                if (0){
-                    fprintf(stdout, "start %%zi\\n", start);
-                    fprintf(stdout, "stop %%zi\\n", stop);
-                    fprintf(stdout, "step %%zi\\n", step);
-                    fprintf(stdout, "length %%zi\\n", length);
-                    fprintf(stdout, "slicelength %%zi\\n", slicelength);
-                }
+                if (0){{
+                    fprintf(stdout, "start %zi\\n", start);
+                    fprintf(stdout, "stop %zi\\n", stop);
+                    fprintf(stdout, "step %zi\\n", step);
+                    fprintf(stdout, "length %zi\\n", length);
+                    fprintf(stdout, "slicelength %zi\\n", slicelength);
+                }}
 
                 assert (slicelength <= length);
 
-                xview_offset += (npy_intp)%(c_prefix)s_STRIDES(%(x)s)[outer_ii]
-                    * start * %(strides_mul)s;
+                xview_offset += (npy_intp){c_prefix}_STRIDES({x})[outer_ii]
+                    * start * {strides_mul};
                 xview_dims[inner_ii] = slicelength;
-                xview_strides[inner_ii] = (npy_intp)%(c_prefix)s_STRIDES(%(x)s)[outer_ii] * step;
+                xview_strides[inner_ii] = (npy_intp){c_prefix}_STRIDES({x})[outer_ii] * step;
 
                 inner_ii += 1;
                 spec_pos += 3;
-            }
+            }}
             else // tuple coord `outer_ii` is an int
-            {
+            {{
                 int idx = subtensor_spec[spec_pos];
-                if (idx < 0) idx += %(c_prefix)s_DIMS(%(x)s)[outer_ii];
+                if (idx < 0) idx += {c_prefix}_DIMS({x})[outer_ii];
                 if (idx >= 0)
-                {
-                    if (idx < %(c_prefix)s_DIMS(%(x)s)[outer_ii])
-                    {
-                        xview_offset += (npy_intp)%(c_prefix)s_STRIDES(%(x)s)[outer_ii] * idx *
-                               %(strides_mul)s;
-                    }
+                {{
+                    if (idx < {c_prefix}_DIMS({x})[outer_ii])
+                    {{
+                        xview_offset += (npy_intp){c_prefix}_STRIDES({x})[outer_ii] * idx *
+                               {strides_mul};
+                    }}
                     else
-                    {
+                    {{
                         PyErr_Format(PyExc_IndexError,"index out of bounds");
-                        %(fail)s;
-                    }
-                }
+                        {fail};
+                    }}
+                }}
                 else
-                {
+                {{
                     PyErr_Format(PyExc_IndexError,"index out of bounds");
-                    %(fail)s;
-                }
+                    {fail};
+                }}
 
                 spec_pos += 1;
-            }
-        }
-        assert (inner_ii <= %(view_ndim)s);
-        while (inner_ii < %(view_ndim)s)
-        {
-            assert (outer_ii < %(c_prefix)s_NDIM(%(x)s));
-            xview_dims[inner_ii] = %(c_prefix)s_DIMS(%(x)s)[outer_ii];
-            xview_strides[inner_ii] = %(c_prefix)s_STRIDES(%(x)s)[outer_ii];
+            }}
+        }}
+        assert (inner_ii <= {view_ndim});
+        while (inner_ii < {view_ndim})
+        {{
+            assert (outer_ii < {c_prefix}_NDIM({x}));
+            xview_dims[inner_ii] = {c_prefix}_DIMS({x})[outer_ii];
+            xview_strides[inner_ii] = {c_prefix}_STRIDES({x})[outer_ii];
 
             inner_ii += 1;
             outer_ii += 1;
-        }
-        """ % locals()
+        }}
+        """.format(**locals())
         # print rval
         return rval
 
@@ -1178,13 +1178,13 @@ class Subtensor(COp):
         decl = "PyArrayObject * xview = NULL;"
 
         checkNDim = """
-        if (PyArray_NDIM(%(x)s) != %(ndim)s){
+        if (PyArray_NDIM({x}) != {ndim}){{
             PyErr_SetString(PyExc_ValueError,
-                                     "Expected %(ndim)s dimensions input"
+                                     "Expected {ndim} dimensions input"
                                         );
-            %(fail)s
-        }
-        """ % locals()
+            {fail}
+        }}
+        """.format(**locals())
 
         get_xview = self.helper_c_code(
             node, name, inputs, outputs, sub, self.idx_list, view_ndim
@@ -1192,22 +1192,22 @@ class Subtensor(COp):
         build_view = """
         //TODO: give this Op a second output so that this view can be cached
         //TODO: alternatively, fix the memory leak on failure
-        Py_INCREF(PyArray_DESCR(%(x)s));
+        Py_INCREF(PyArray_DESCR({x}));
         xview = (PyArrayObject*)PyArray_NewFromDescr(
                 &PyArray_Type,
-                PyArray_DESCR(%(x)s),
-                %(view_ndim)s,
+                PyArray_DESCR({x}),
+                {view_ndim},
                 xview_dims,
                 xview_strides,
-                PyArray_BYTES(%(x)s) + xview_offset,
-                PyArray_FLAGS(%(x)s),
+                PyArray_BYTES({x}) + xview_offset,
+                PyArray_FLAGS({x}),
                 NULL);
-        assert (PyArray_NDIM(xview) == %(view_ndim)s);
+        assert (PyArray_NDIM(xview) == {view_ndim});
         if (!xview)
-        {
-            %(fail)s;
-        }
-        """ % locals()
+        {{
+            {fail};
+        }}
+        """.format(**locals())
 
         finish_view = f"""
         Py_XDECREF({z});
@@ -1655,25 +1655,25 @@ class IncSubtensor(COp):
         copy_of_x = self.copy_of_x(x)
 
         copy_input_if_necessary = """
-        if (%(inplace)s)
-        {
-            if (%(x)s != %(z)s)
-            {
-                Py_XDECREF(%(z)s);
-                Py_INCREF(%(x)s);
-                %(z)s = %(x)s;
-            }
-        }
+        if ({inplace})
+        {{
+            if ({x} != {z})
+            {{
+                Py_XDECREF({z});
+                Py_INCREF({x});
+                {z} = {x};
+            }}
+        }}
         else
-        {
-            Py_XDECREF(%(z)s);
-            %(z)s = %(copy_of_x)s;
-            if (!%(z)s) {
+        {{
+            Py_XDECREF({z});
+            {z} = {copy_of_x};
+            if (!{z}) {{
                 // Exception already set
-                %(fail)s
-            }
-        }
-        """ % locals()
+                {fail}
+            }}
+        }}
+        """.format(**locals())
 
         # get info needed to make zview: a view of %(z)s
         helper_args = self.get_helper_c_code_args()
@@ -1695,31 +1695,31 @@ class IncSubtensor(COp):
         build_view = """
         //TODO: give this Op a second output so that this view can be cached
         //TODO: alternatively, fix the memory leak on failure
-        %(alloc_zview)s;
+        {alloc_zview};
         if (!zview)
-        {
-            %(fail)s;
-        }
-        """ % locals()
+        {{
+            {fail};
+        }}
+        """.format(**locals())
 
         copy_into = self.copy_into("zview", y)
 
         add_to_zview = self.add_to_zview(name, y, fail)
 
         make_modification = """
-        if (%(op_is_set)s)
-        {
-            if (%(copy_into)s) // does broadcasting
-            {
+        if ({op_is_set})
+        {{
+            if ({copy_into}) // does broadcasting
+            {{
                 Py_DECREF(zview);
-                %(fail)s;
-            }
-        }
+                {fail};
+            }}
+        }}
         else
-        {
-            %(add_to_zview)s
-        }
-        """ % locals()
+        {{
+            {add_to_zview}
+        }}
+        """.format(**locals())
         return (
             self.decl_view()
             + copy_input_if_necessary
@@ -1789,17 +1789,17 @@ class IncSubtensor(COp):
 
         """
 
-        return """Py_INCREF(PyArray_DESCR(%(x)s));
+        return """Py_INCREF(PyArray_DESCR({x}));
         zview = (PyArrayObject*)PyArray_NewFromDescr(
                 &PyArray_Type,
-                PyArray_DESCR(%(x)s),
-                %(view_ndim)s,
-                xview_dims, //PyArray_DIMS(%(x)s),
-                xview_strides, //PyArray_STRIDES(%(x)s),
-                PyArray_BYTES(%(x)s) + xview_offset, //PyArray_DATA(%(x)s),
-                PyArray_FLAGS(%(x)s),
+                PyArray_DESCR({x}),
+                {view_ndim},
+                xview_dims, //PyArray_DIMS({x}),
+                xview_strides, //PyArray_STRIDES({x}),
+                PyArray_BYTES({x}) + xview_offset, //PyArray_DATA({x}),
+                PyArray_FLAGS({x}),
                 NULL);
-        """ % locals()
+        """.format(**locals())
 
     def get_helper_c_code_args(self):
         """
@@ -1834,18 +1834,18 @@ class IncSubtensor(COp):
 
         return """
             PyArrayObject * add_rval = (PyArrayObject*)PyNumber_InPlaceAdd(
-                    (PyObject*)zview, py_%(x)s);
+                    (PyObject*)zview, py_{x});
             if (add_rval)
-            {
+            {{
                 assert (PyArray_Check((PyObject*)add_rval));
                 assert (PyArray_DATA(add_rval) == PyArray_DATA(zview));
                 Py_DECREF(add_rval);
-            }
+            }}
             else
-            {
+            {{
                 Py_DECREF(zview);
-                %(fail)s;
-            }""" % locals()
+                {fail};
+            }}""".format(**locals())
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]
@@ -2064,80 +2064,80 @@ class AdvancedSubtensor1(COp):
         fail = sub["fail"]
         return """
             PyArrayObject *indices;
-            int i_type = PyArray_TYPE(%(i_name)s);
-            if (i_type != NPY_INTP) {
-                // Cast %(i_name)s to NPY_INTP (expected by PyArray_TakeFrom),
+            int i_type = PyArray_TYPE({i_name});
+            if (i_type != NPY_INTP) {{
+                // Cast {i_name} to NPY_INTP (expected by PyArray_TakeFrom),
                 // if all values fit.
                 if (!PyArray_CanCastSafely(i_type, NPY_INTP) &&
-                    PyArray_SIZE(%(i_name)s) > 0) {
+                    PyArray_SIZE({i_name}) > 0) {{
                     npy_int64 min_val, max_val;
-                    PyObject* py_min_val = PyArray_Min(%(i_name)s, NPY_MAXDIMS,
+                    PyObject* py_min_val = PyArray_Min({i_name}, NPY_MAXDIMS,
                                                        NULL);
-                    if (py_min_val == NULL) {
-                        %(fail)s;
-                    }
+                    if (py_min_val == NULL) {{
+                        {fail};
+                    }}
                     min_val = PyLong_AsLongLong(py_min_val);
                     Py_DECREF(py_min_val);
-                    if (min_val == -1 && PyErr_Occurred()) {
-                        %(fail)s;
-                    }
-                    PyObject* py_max_val = PyArray_Max(%(i_name)s, NPY_MAXDIMS,
+                    if (min_val == -1 && PyErr_Occurred()) {{
+                        {fail};
+                    }}
+                    PyObject* py_max_val = PyArray_Max({i_name}, NPY_MAXDIMS,
                                                        NULL);
-                    if (py_max_val == NULL) {
-                        %(fail)s;
-                    }
+                    if (py_max_val == NULL) {{
+                        {fail};
+                    }}
                     max_val = PyLong_AsLongLong(py_max_val);
                     Py_DECREF(py_max_val);
-                    if (max_val == -1 && PyErr_Occurred()) {
-                        %(fail)s;
-                    }
-                    if (min_val < NPY_MIN_INTP || max_val > NPY_MAX_INTP) {
+                    if (max_val == -1 && PyErr_Occurred()) {{
+                        {fail};
+                    }}
+                    if (min_val < NPY_MIN_INTP || max_val > NPY_MAX_INTP) {{
                         PyErr_SetString(PyExc_IndexError,
                                      "Index contains values "
                                      "that are bigger than the maximum array "
                                      "size on this system.");
-                        %(fail)s;
-                    }
-                }
-                indices = (PyArrayObject*) PyArray_Cast(%(i_name)s, NPY_INTP);
-                if (indices == NULL) {
-                    %(fail)s;
-                }
-            }
-            else {
-                 indices = %(i_name)s;
+                        {fail};
+                    }}
+                }}
+                indices = (PyArrayObject*) PyArray_Cast({i_name}, NPY_INTP);
+                if (indices == NULL) {{
+                    {fail};
+                }}
+            }}
+            else {{
+                 indices = {i_name};
                  Py_INCREF(indices);
-            }
-            if (%(output_name)s != NULL) {
+            }}
+            if ({output_name} != NULL) {{
                 npy_intp nd, i, *shape;
-                nd = PyArray_NDIM(%(a_name)s) + PyArray_NDIM(indices) - 1;
-                if (PyArray_NDIM(%(output_name)s) != nd) {
-                    Py_CLEAR(%(output_name)s);
-                }
-                else {
-                    shape = PyArray_DIMS(%(output_name)s);
-                    for (i = 0; i < PyArray_NDIM(indices); i++) {
-                        if (shape[i] != PyArray_DIMS(indices)[i]) {
-                            Py_CLEAR(%(output_name)s);
+                nd = PyArray_NDIM({a_name}) + PyArray_NDIM(indices) - 1;
+                if (PyArray_NDIM({output_name}) != nd) {{
+                    Py_CLEAR({output_name});
+                }}
+                else {{
+                    shape = PyArray_DIMS({output_name});
+                    for (i = 0; i < PyArray_NDIM(indices); i++) {{
+                        if (shape[i] != PyArray_DIMS(indices)[i]) {{
+                            Py_CLEAR({output_name});
                             break;
-                        }
-                    }
-                    if (%(output_name)s != NULL) {
-                        for (; i < nd; i++) {
-                            if (shape[i] != PyArray_DIMS(%(a_name)s)[
-                                                i-PyArray_NDIM(indices)+1]) {
-                                Py_CLEAR(%(output_name)s);
+                        }}
+                    }}
+                    if ({output_name} != NULL) {{
+                        for (; i < nd; i++) {{
+                            if (shape[i] != PyArray_DIMS({a_name})[
+                                                i-PyArray_NDIM(indices)+1]) {{
+                                Py_CLEAR({output_name});
                                 break;
-                            }
-                        }
-                    }
-                }
-            }
-            %(output_name)s = (PyArrayObject*)PyArray_TakeFrom(
-                        %(a_name)s, (PyObject*)indices, 0, %(output_name)s, NPY_RAISE);
+                            }}
+                        }}
+                    }}
+                }}
+            }}
+            {output_name} = (PyArrayObject*)PyArray_TakeFrom(
+                        {a_name}, (PyObject*)indices, 0, {output_name}, NPY_RAISE);
             Py_DECREF(indices);
-            if (%(output_name)s == NULL) %(fail)s;
-        """ % locals()
+            if ({output_name} == NULL) {fail};
+        """.format(**locals())
 
     def c_code_cache_version(self):
         return (0, 1, 2)
@@ -2194,8 +2194,7 @@ class AdvancedIncSubtensor1(COp):
             else:
                 opname = "increment"
             raise TypeError(
-                "cannot %s x subtensor with ndim=%s by y with ndim=%s."
-                % (opname, x_.type.ndim, y_.type.ndim)
+                f"cannot {opname} x subtensor with ndim={x_.type.ndim} by y with ndim={y_.type.ndim}."
             )
 
         return Apply(self, [x_, y_, ilist_], [x_.type()])
@@ -2429,36 +2428,38 @@ class AdvancedIncSubtensor1(COp):
 
         return """
         PyObject* rval = NULL;
-        if (%(params)s->inplace)
-        {
-            if (%(x)s != %(out)s)
-            {
-                Py_XDECREF(%(out)s);
-                Py_INCREF(%(x)s);
-                %(out)s = %(x)s;
-            }
-        }
+        if ({params}->inplace)
+        {{
+            if ({x} != {out})
+            {{
+                Py_XDECREF({out});
+                Py_INCREF({x});
+                {out} = {x};
+            }}
+        }}
         else
-        {
-            Py_XDECREF(%(out)s);
-            %(out)s = %(copy_of_x)s;
-            if (!%(out)s) {
+        {{
+            Py_XDECREF({out});
+            {out} = {copy_of_x};
+            if (!{out}) {{
                 // Exception already set
-                %(fail)s
-            }
-        }
-        if (inplace_increment(%(out)s, (PyObject *)%(idx)s, %(y)s, (1 - %(params)s->set_instead_of_inc))) {
-            %(fail)s;
-        }
+                {fail}
+            }}
+        }}
+        if (inplace_increment({out}, (PyObject *){idx}, {y}, (1 - {params}->set_instead_of_inc))) {{
+            {fail};
+        }}
         Py_XDECREF(rval);
-        """ % dict(
-            x=x,
-            y=y,
-            idx=idx,
-            out=out,
-            copy_of_x=copy_of_x,
-            params=sub["params"],
-            fail=sub["fail"],
+        """.format(
+            **dict(
+                x=x,
+                y=y,
+                idx=idx,
+                out=out,
+                copy_of_x=copy_of_x,
+                params=sub["params"],
+                fail=sub["fail"],
+            )
         )
 
     def c_code_cache_version(self):

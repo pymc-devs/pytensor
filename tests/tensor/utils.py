@@ -463,9 +463,9 @@ def makeTester(
                     node = safe_make_node(self.op, *inputrs)
                 except Exception as exc:
                     err_msg = (
-                        "Test %s::%s: Error occurred while"
-                        " making a node with inputs %s"
-                    ) % (self.op, testname, inputs)
+                        f"Test {self.op}::{testname}: Error occurred while"
+                        f" making a node with inputs {inputs}"
+                    )
                     exc.args += (err_msg,)
                     raise
 
@@ -473,8 +473,8 @@ def makeTester(
                     f = inplace_func(inputrs, node.outputs, mode=mode, name="test_good")
                 except Exception as exc:
                     err_msg = (
-                        "Test %s::%s: Error occurred while" " trying to make a Function"
-                    ) % (self.op, testname)
+                        "Test {}::{}: Error occurred while" " trying to make a Function"
+                    ).format(self.op, testname)
                     exc.args += (err_msg,)
                     raise
                 if isinstance(self.expected, dict) and testname in self.expected:
@@ -497,9 +497,9 @@ def makeTester(
                     variables = f(*inputs)
                 except Exception as exc:
                     err_msg = (
-                        "Test %s::%s: Error occurred while calling"
-                        " the Function on the inputs %s"
-                    ) % (self.op, testname, inputs)
+                        f"Test {self.op}::{testname}: Error occurred while calling"
+                        f" the Function on the inputs {inputs}"
+                    )
                     exc.args += (err_msg,)
                     raise
 
@@ -513,11 +513,11 @@ def makeTester(
                         or not np.allclose(variable, expected, atol=eps, rtol=eps)
                     )
                     assert not condition, (
-                        "Test %s::%s: Output %s gave the wrong"
-                        " value. With inputs %s, expected %s (dtype %s),"
-                        " got %s (dtype %s). eps=%f"
-                        " np.allclose returns %s %s"
-                    ) % (
+                        "Test {}::{}: Output {} gave the wrong"
+                        " value. With inputs {}, expected {} (dtype {}),"
+                        " got {} (dtype {}). eps={:f}"
+                        " np.allclose returns {} {}"
+                    ).format(
                         self.op,
                         testname,
                         i,
@@ -533,9 +533,9 @@ def makeTester(
 
                 for description, check in self.checks.items():
                     assert check(inputs, variables), (
-                        "Test %s::%s: Failed check: %s (inputs"
-                        " were %s, outputs were %s)"
-                    ) % (self.op, testname, description, inputs, variables)
+                        "Test {}::{}: Failed check: {} (inputs"
+                        " were {}, outputs were {})"
+                    ).format(self.op, testname, description, inputs, variables)
 
         @pytest.mark.skipif(skip, reason="Skipped")
         def test_bad_build(self):
@@ -557,9 +557,9 @@ def makeTester(
                     node = safe_make_node(self.op, *inputrs)
                 except Exception as exc:
                     err_msg = (
-                        "Test %s::%s: Error occurred while trying"
-                        " to make a node with inputs %s"
-                    ) % (self.op, testname, inputs)
+                        f"Test {self.op}::{testname}: Error occurred while trying"
+                        f" to make a node with inputs {inputs}"
+                    )
                     exc.args += (err_msg,)
                     raise
 
@@ -569,8 +569,8 @@ def makeTester(
                     )
                 except Exception as exc:
                     err_msg = (
-                        "Test %s::%s: Error occurred while trying" " to make a Function"
-                    ) % (self.op, testname)
+                        "Test {}::{}: Error occurred while trying" " to make a Function"
+                    ).format(self.op, testname)
                     exc.args += (err_msg,)
                     raise
 
@@ -595,10 +595,10 @@ def makeTester(
                     )
                 except Exception as exc:
                     err_msg = (
-                        "Test %s::%s: Error occurred while"
+                        f"Test {self.op}::{testname}: Error occurred while"
                         " computing the gradient on the following"
-                        " inputs: %s"
-                    ) % (self.op, testname, inputs)
+                        f" inputs: {inputs}"
+                    )
                     exc.args += (err_msg,)
                     raise
 

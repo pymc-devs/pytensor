@@ -65,38 +65,38 @@ class BROKEN_ON_PURPOSE_Add(COp):
         a, b = inp
         (z,) = out
         return """
-        if (PyArray_NDIM(%(a)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(a) != 1"); %(fail)s;}
-        if (PyArray_NDIM(%(b)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 1"); %(fail)s;}
+        if (PyArray_NDIM({a}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a) != 1"); {fail};}}
+        if (PyArray_NDIM({b}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 1"); {fail};}}
 
-        if (PyArray_DESCR(%(a)s)->type_num != NPY_DOUBLE)
-        {PyErr_SetString(PyExc_NotImplementedError, "a dtype not NPY_DOUBLE"); %(fail)s;}
+        if (PyArray_DESCR({a})->type_num != NPY_DOUBLE)
+        {{PyErr_SetString(PyExc_NotImplementedError, "a dtype not NPY_DOUBLE"); {fail};}}
 
-        if (PyArray_DESCR(%(b)s)->type_num != NPY_DOUBLE)
-        {PyErr_SetString(PyExc_NotImplementedError, "b's dtype not NPY_DOUBLE"); %(fail)s;}
+        if (PyArray_DESCR({b})->type_num != NPY_DOUBLE)
+        {{PyErr_SetString(PyExc_NotImplementedError, "b's dtype not NPY_DOUBLE"); {fail};}}
 
-        if (PyArray_DIMS(%(a)s)[0] != PyArray_DIMS(%(b)s)[0])
-        {PyErr_SetString(PyExc_NotImplementedError, "a and b have different lengths"); %(fail)s;}
+        if (PyArray_DIMS({a})[0] != PyArray_DIMS({b})[0])
+        {{PyErr_SetString(PyExc_NotImplementedError, "a and b have different lengths"); {fail};}}
 
-        if ((!%(z)s)
-            || (PyArray_DIMS(%(z)s)[0] != PyArray_DIMS(%(b)s)[0])
+        if ((!{z})
+            || (PyArray_DIMS({z})[0] != PyArray_DIMS({b})[0])
             )
-        {
-            {Py_XDECREF(%(z)s);}
-            npy_intp dims[] = {0};
-            dims[0] = PyArray_DIMS(%(b)s)[0];
-            %(z)s = (PyArrayObject*) PyArray_SimpleNew(1, dims, PyArray_DESCR(%(b)s)->type_num);
-        }
+        {{
+            {{Py_XDECREF({z});}}
+            npy_intp dims[] = {{0}};
+            dims[0] = PyArray_DIMS({b})[0];
+            {z} = (PyArrayObject*) PyArray_SimpleNew(1, dims, PyArray_DESCR({b})->type_num);
+        }}
 
-        {
-            for (npy_intp m = 0; m < PyArray_DIMS(%(z)s)[0]; ++m)
-            {
-                ((double*)PyArray_GETPTR1(%(z)s, m))[0]
+        {{
+            for (npy_intp m = 0; m < PyArray_DIMS({z})[0]; ++m)
+            {{
+                ((double*)PyArray_GETPTR1({z}, m))[0]
                 = 0.5
-                + ((double*)PyArray_GETPTR1(%(a)s, m))[0]
-                + ((double*)PyArray_GETPTR1(%(b)s, m))[0] ;
-            }
-        }
-        """ % dict(locals(), **sub)
+                + ((double*)PyArray_GETPTR1({a}, m))[0]
+                + ((double*)PyArray_GETPTR1({b}, m))[0] ;
+            }}
+        }}
+        """.format(**dict(locals(), **sub))
 
 
 # inconsistent is a invalid op, whose perform and c_code do not match
@@ -634,63 +634,63 @@ class BrokenCImplementationAdd(COp):
         debug = 0
         return """
         //printf("executing c_code\\n");
-        if (PyArray_NDIM(%(a)s) != 2) {PyErr_SetString(PyExc_NotImplementedError, "rank(a) != 2"); %(fail)s;}
-        if (PyArray_NDIM(%(b)s) != 2) {PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 2"); %(fail)s;}
+        if (PyArray_NDIM({a}) != 2) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a) != 2"); {fail};}}
+        if (PyArray_NDIM({b}) != 2) {{PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 2"); {fail};}}
 
-        if (PyArray_DESCR(%(a)s)->type_num != NPY_FLOAT)
-        {PyErr_SetString(PyExc_NotImplementedError, "a dtype not NPY_FLOAT"); %(fail)s;}
+        if (PyArray_DESCR({a})->type_num != NPY_FLOAT)
+        {{PyErr_SetString(PyExc_NotImplementedError, "a dtype not NPY_FLOAT"); {fail};}}
 
-        if (PyArray_DESCR(%(b)s)->type_num != NPY_FLOAT)
-        {PyErr_SetString(PyExc_NotImplementedError, "b's dtype not NPY_FLOAT"); %(fail)s;}
+        if (PyArray_DESCR({b})->type_num != NPY_FLOAT)
+        {{PyErr_SetString(PyExc_NotImplementedError, "b's dtype not NPY_FLOAT"); {fail};}}
 
-        if (PyArray_DIMS(%(a)s)[0] != PyArray_DIMS(%(a)s)[1])
-        {PyErr_SetString(PyExc_NotImplementedError, "a is not square"); %(fail)s;}
+        if (PyArray_DIMS({a})[0] != PyArray_DIMS({a})[1])
+        {{PyErr_SetString(PyExc_NotImplementedError, "a is not square"); {fail};}}
 
-        if (PyArray_DIMS(%(b)s)[0] != PyArray_DIMS(%(b)s)[1])
-        {PyErr_SetString(PyExc_NotImplementedError, "b is not square"); %(fail)s;}
+        if (PyArray_DIMS({b})[0] != PyArray_DIMS({b})[1])
+        {{PyErr_SetString(PyExc_NotImplementedError, "b is not square"); {fail};}}
 
-        if (PyArray_DIMS(%(a)s)[0] != PyArray_DIMS(%(b)s)[0])
-        {PyErr_SetString(PyExc_NotImplementedError, "a and b have different dimensions"); %(fail)s;}
+        if (PyArray_DIMS({a})[0] != PyArray_DIMS({b})[0])
+        {{PyErr_SetString(PyExc_NotImplementedError, "a and b have different dimensions"); {fail};}}
 
         // We do not check for c_contiguous property here
-        if (%(debug)s)
-        {
-            if (!%(z)s)
-                printf("%(z)s is not there, %%p \\n", %(z)s);
-            else if (PyArray_DIMS(%(z)s)[0] != PyArray_DIMS(%(b)s)[0])
-                printf("Dimension 0 mismatch for %(z)s and %(b)s\\n");
-            else if (PyArray_DIMS(%(z)s)[1] != PyArray_DIMS(%(b)s)[1])
-                printf("Dimension 1 mismatch for %(z)s and %(b)s\\n");
+        if ({debug})
+        {{
+            if (!{z})
+                printf("{z} is not there, %p \\n", {z});
+            else if (PyArray_DIMS({z})[0] != PyArray_DIMS({b})[0])
+                printf("Dimension 0 mismatch for {z} and {b}\\n");
+            else if (PyArray_DIMS({z})[1] != PyArray_DIMS({b})[1])
+                printf("Dimension 1 mismatch for {z} and {b}\\n");
             else
-                printf("Reusing %(z)s\\n");
-        }
+                printf("Reusing {z}\\n");
+        }}
 
-        if ((!%(z)s)
-            || (PyArray_DIMS(%(z)s)[0] != PyArray_DIMS(%(b)s)[0])
-            || (PyArray_DIMS(%(z)s)[1] != PyArray_DIMS(%(b)s)[1])
+        if ((!{z})
+            || (PyArray_DIMS({z})[0] != PyArray_DIMS({b})[0])
+            || (PyArray_DIMS({z})[1] != PyArray_DIMS({b})[1])
             )
-        {
-            Py_XDECREF(%(z)s);
-            npy_intp dims[] = {0, 0};
-            dims[0] = PyArray_DIMS(%(b)s)[0];
-            dims[1] = PyArray_DIMS(%(b)s)[1];
-            %(z)s = (PyArrayObject*) PyArray_SimpleNew(2, dims, PyArray_DESCR(%(b)s)->type_num);
-        }
+        {{
+            Py_XDECREF({z});
+            npy_intp dims[] = {{0, 0}};
+            dims[0] = PyArray_DIMS({b})[0];
+            dims[1] = PyArray_DIMS({b})[1];
+            {z} = (PyArrayObject*) PyArray_SimpleNew(2, dims, PyArray_DESCR({b})->type_num);
+        }}
 
-        // Let us assume that %(z)s is c_contiguous
-        {
-            dtype_%(z)s * z = ((dtype_%(z)s*)(PyArray_GETPTR2(%(z)s,0,0)));
-            for (int i=0; i<PyArray_DIMS(%(b)s)[0]; i++)
-            {
-                for (int j=0; j<PyArray_DIMS(%(b)s)[1]; j++)
-                {
-                    *z = ((float*)PyArray_GETPTR2(%(a)s, i, j))[0] +
-                         ((float*)PyArray_GETPTR2(%(b)s, i, j))[0] ;
+        // Let us assume that {z} is c_contiguous
+        {{
+            dtype_{z} * z = ((dtype_{z}*)(PyArray_GETPTR2({z},0,0)));
+            for (int i=0; i<PyArray_DIMS({b})[0]; i++)
+            {{
+                for (int j=0; j<PyArray_DIMS({b})[1]; j++)
+                {{
+                    *z = ((float*)PyArray_GETPTR2({a}, i, j))[0] +
+                         ((float*)PyArray_GETPTR2({b}, i, j))[0] ;
                     z++;
-                }
-            }
-        }
-        """ % dict(locals(), **sub)
+                }}
+            }}
+        }}
+        """.format(**dict(locals(), **sub))
 
 
 class VecAsRowAndCol(Op):

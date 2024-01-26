@@ -1097,7 +1097,7 @@ def ____gemm_code(check_ab, a_init, b_init):
         if (PyArray_NDIM(_y) != 2) goto _dot_execute_fallback;
         if (PyArray_NDIM(_z) != 2) goto _dot_execute_fallback;
 
-        %(check_ab)s
+        {check_ab}
 
         if ((PyArray_DESCR(_x)->type_num != NPY_DOUBLE)
             && (PyArray_DESCR(_x)->type_num != NPY_FLOAT))
@@ -1117,16 +1117,16 @@ def ____gemm_code(check_ab, a_init, b_init):
 
 
         if ((Nx[0] != Nz[0]) || (Nx[1] != Ny[0]) || (Ny[1] != Nz[1]))
-        {
+        {{
             error_string = "Input dimensions do not agree";
             goto _dot_execute_fail;
-        }
-        if ((Sx[0] < 1) || (Sx[1] < 1) || (Sx[0] %(mod)s type_size) || (Sx[1] %(mod)s type_size)
-           || (Sy[0] < 1) || (Sy[1] < 1) || (Sy[0] %(mod)s type_size) || (Sy[1] %(mod)s type_size)
-           || (Sz[0] < 1) || (Sz[1] < 1) || (Sz[0] %(mod)s type_size) || (Sz[1] %(mod)s type_size))
-        {
+        }}
+        if ((Sx[0] < 1) || (Sx[1] < 1) || (Sx[0] {mod} type_size) || (Sx[1] {mod} type_size)
+           || (Sy[0] < 1) || (Sy[1] < 1) || (Sy[0] {mod} type_size) || (Sy[1] {mod} type_size)
+           || (Sz[0] < 1) || (Sz[1] < 1) || (Sz[0] {mod} type_size) || (Sz[1] {mod} type_size))
+        {{
            goto _dot_execute_fallback;
-        }
+        }}
 
         /*
         encode the stride structure of _x,_y,_z into a single integer
@@ -1146,19 +1146,19 @@ def ____gemm_code(check_ab, a_init, b_init):
         sz_1 = (Nz[1] > 1) ? Sz[1]/type_size : Nz[0];
 
         switch (type_num)
-        {
+        {{
             case NPY_FLOAT:
-            {
+            {{
                 #define REAL float
-                float a = %(a_init)s;
-                float b = %(b_init)s;
+                float a = {a_init};
+                float b = {b_init};
 
                 float* x = (float*)PyArray_DATA(_x);
                 float* y = (float*)PyArray_DATA(_y);
                 float* z = (float*)PyArray_DATA(_z);
 
                 switch(unit)
-                {
+                {{
                     case 0x000: cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, Nz[0], Nz[1], Nx[1], a, x, sx_0, y, sy_0, b, z, sz_0); break;
                     case 0x001: cblas_sgemm(CblasRowMajor, CblasTrans,   CblasNoTrans, Nz[0], Nz[1], Nx[1], a, x, sx_1, y, sy_0, b, z, sz_0); break;
                     case 0x010: cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,   Nz[0], Nz[1], Nx[1], a, x, sx_0, y, sy_1, b, z, sz_0); break;
@@ -1168,21 +1168,21 @@ def ____gemm_code(check_ab, a_init, b_init):
                     case 0x110: cblas_sgemm(CblasColMajor, CblasTrans,   CblasNoTrans, Nz[0], Nz[1], Nx[1], a, x, sx_0, y, sy_1, b, z, sz_1); break;
                     case 0x111: cblas_sgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nz[0], Nz[1], Nx[1], a, x, sx_1, y, sy_1, b, z, sz_1); break;
                     default: goto _dot_execute_fallback;
-                };
+                }};
                 #undef REAL
-            }
+            }}
             break;
             case NPY_DOUBLE:
-            {
+            {{
                 #define REAL double
-                double a = %(a_init)s;
-                double b = %(b_init)s;
+                double a = {a_init};
+                double b = {b_init};
 
                 double* x = (double*)PyArray_DATA(_x);
                 double* y = (double*)PyArray_DATA(_y);
                 double* z = (double*)PyArray_DATA(_z);
                 switch(unit)
-                {
+                {{
                     case 0x000: cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, Nz[0], Nz[1], Nx[1], a, x, sx_0, y, sy_0, b, z, sz_0); break;
                     case 0x001: cblas_dgemm(CblasRowMajor, CblasTrans,   CblasNoTrans, Nz[0], Nz[1], Nx[1], a, x, sx_1, y, sy_0, b, z, sz_0); break;
                     case 0x010: cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans,   Nz[0], Nz[1], Nx[1], a, x, sx_0, y, sy_1, b, z, sz_0); break;
@@ -1192,11 +1192,11 @@ def ____gemm_code(check_ab, a_init, b_init):
                     case 0x110: cblas_dgemm(CblasColMajor, CblasTrans,   CblasNoTrans, Nz[0], Nz[1], Nx[1], a, x, sx_0, y, sy_1, b, z, sz_1); break;
                     case 0x111: cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nz[0], Nz[1], Nx[1], a, x, sx_1, y, sy_1, b, z, sz_1); break;
                     default: goto _dot_execute_fallback;
-                };
+                }};
                 #undef REAL
-            }
+            }}
             break;
-        }
+        }}
 
         return 0;  //success!
 
@@ -1212,4 +1212,4 @@ def ____gemm_code(check_ab, a_init, b_init):
         return -1;
 
         /* v 1 */
-    """ % locals()
+    """.format(**locals())

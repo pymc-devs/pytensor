@@ -37,197 +37,197 @@ def ger_c_code(A, a, x, y, Z, fail, params):
 
     int elemsize ;
 
-    if (PyArray_NDIM(%(A)s) != 2)
-    {PyErr_SetString(PyExc_NotImplementedError, "rank(A) != 2"); %(fail)s;}
-    if (PyArray_NDIM(%(x)s) != 1)
-    {PyErr_SetString(PyExc_NotImplementedError, "rank(x) != 1"); %(fail)s;}
-    if (PyArray_NDIM(%(y)s) != 1)
-    {PyErr_SetString(PyExc_NotImplementedError, "rank(y) != 1"); %(fail)s;}
-    if (PyArray_NDIM(%(a)s) != 0)
-    {PyErr_SetString(PyExc_NotImplementedError, "rank(a) != 0"); %(fail)s;}
+    if (PyArray_NDIM({A}) != 2)
+    {{PyErr_SetString(PyExc_NotImplementedError, "rank(A) != 2"); {fail};}}
+    if (PyArray_NDIM({x}) != 1)
+    {{PyErr_SetString(PyExc_NotImplementedError, "rank(x) != 1"); {fail};}}
+    if (PyArray_NDIM({y}) != 1)
+    {{PyErr_SetString(PyExc_NotImplementedError, "rank(y) != 1"); {fail};}}
+    if (PyArray_NDIM({a}) != 0)
+    {{PyErr_SetString(PyExc_NotImplementedError, "rank(a) != 0"); {fail};}}
 
-    if (PyArray_DESCR(%(A)s)->type_num != PyArray_DESCR(%(x)s)->type_num)
-    { PyErr_SetString(PyExc_TypeError, "A vs. x"); %(fail)s; }
-    if (PyArray_DESCR(%(A)s)->type_num != PyArray_DESCR(%(y)s)->type_num)
-    { PyErr_SetString(PyExc_TypeError, "A vs. y"); %(fail)s; }
+    if (PyArray_DESCR({A})->type_num != PyArray_DESCR({x})->type_num)
+    {{ PyErr_SetString(PyExc_TypeError, "A vs. x"); {fail}; }}
+    if (PyArray_DESCR({A})->type_num != PyArray_DESCR({y})->type_num)
+    {{ PyErr_SetString(PyExc_TypeError, "A vs. y"); {fail}; }}
 
-    if (PyArray_DIMS(%(A)s)[0] != PyArray_DIMS(%(x)s)[0])
-    {
+    if (PyArray_DIMS({A})[0] != PyArray_DIMS({x})[0])
+    {{
         PyErr_SetString(PyExc_ValueError,
                         "Shape mismatch: A.shape[0] != x.shape[0]");
-        %(fail)s;
-    }
-    if (PyArray_DIMS(%(A)s)[1] != PyArray_DIMS(%(y)s)[0])
-    {
+        {fail};
+    }}
+    if (PyArray_DIMS({A})[1] != PyArray_DIMS({y})[0])
+    {{
         PyErr_SetString(PyExc_ValueError,
                         "Shape mismatch: A.shape[1] != y.shape[0]");
-        %(fail)s;
-    }
+        {fail};
+    }}
 
-    if  (PyArray_DESCR(%(A)s)->type_num == NPY_DOUBLE) { elemsize = 8; }
-    else if (PyArray_DESCR(%(A)s)->type_num == NPY_FLOAT) { elemsize = 4;}
+    if  (PyArray_DESCR({A})->type_num == NPY_DOUBLE) {{ elemsize = 8; }}
+    else if (PyArray_DESCR({A})->type_num == NPY_FLOAT) {{ elemsize = 4;}}
     else
-    {
+    {{
         PyErr_SetString(PyExc_NotImplementedError, "complex CGer");
-        %(fail)s;
-    }
+        {fail};
+    }}
 
     // copy A if !self.destructive or A is fully strided
-    if (!%(params)s->destructive
-        || (PyArray_STRIDES(%(A)s)[0] < 0)
-        || (PyArray_STRIDES(%(A)s)[1] < 0)
-        || ((PyArray_STRIDES(%(A)s)[0] != elemsize)
-            && (PyArray_STRIDES(%(A)s)[1] != elemsize)))
-    {
+    if (!{params}->destructive
+        || (PyArray_STRIDES({A})[0] < 0)
+        || (PyArray_STRIDES({A})[1] < 0)
+        || ((PyArray_STRIDES({A})[0] != elemsize)
+            && (PyArray_STRIDES({A})[1] != elemsize)))
+    {{
         npy_intp dims[2];
-        dims[0] = PyArray_DIMS(%(A)s)[0];
-        dims[1] = PyArray_DIMS(%(A)s)[1];
+        dims[0] = PyArray_DIMS({A})[0];
+        dims[1] = PyArray_DIMS({A})[1];
 
-        if ((NULL == %(Z)s)
-            || (PyArray_DIMS(%(Z)s)[0] != PyArray_DIMS(%(A)s)[0])
-            || (PyArray_DIMS(%(Z)s)[1] != PyArray_DIMS(%(A)s)[1])
-            || (PyArray_STRIDES(%(Z)s)[0] < 0)
-            || (PyArray_STRIDES(%(Z)s)[1] < 0)
-            || ((PyArray_STRIDES(%(Z)s)[0] != elemsize)
-                && (PyArray_STRIDES(%(Z)s)[1] != elemsize)))
-        {
-            Py_XDECREF(%(Z)s);
-            %(Z)s = (PyArrayObject*) PyArray_SimpleNew(2, dims,
-                                                       PyArray_TYPE(%(A)s));
-            if(!%(Z)s) {
+        if ((NULL == {Z})
+            || (PyArray_DIMS({Z})[0] != PyArray_DIMS({A})[0])
+            || (PyArray_DIMS({Z})[1] != PyArray_DIMS({A})[1])
+            || (PyArray_STRIDES({Z})[0] < 0)
+            || (PyArray_STRIDES({Z})[1] < 0)
+            || ((PyArray_STRIDES({Z})[0] != elemsize)
+                && (PyArray_STRIDES({Z})[1] != elemsize)))
+        {{
+            Py_XDECREF({Z});
+            {Z} = (PyArrayObject*) PyArray_SimpleNew(2, dims,
+                                                       PyArray_TYPE({A}));
+            if(!{Z}) {{
                 PyErr_SetString(PyExc_MemoryError,
                                 "failed to alloc ger output");
-                %(fail)s
-            }
-        }
-        if (%(Z)s == %(A)s)
-        {
-            PyErr_SetString(PyExc_AssertionError, "%(Z)s != %(A)s");
-            %(fail)s
-        }
-        if (PyArray_DESCR(%(Z)s)->type_num == NPY_FLOAT)
-        {
-            float * zoutdata = (float*)PyArray_DATA(%(Z)s);
-            const float * zdata = (float*)PyArray_DATA(%(A)s);
-            const float * xdata = (float*)PyArray_DATA(%(x)s);
-            const float * ydata = (float*)PyArray_DATA(%(y)s);
-            const float * adata = (float*)PyArray_DATA(%(a)s);
+                {fail}
+            }}
+        }}
+        if ({Z} == {A})
+        {{
+            PyErr_SetString(PyExc_AssertionError, "{Z} != {A}");
+            {fail}
+        }}
+        if (PyArray_DESCR({Z})->type_num == NPY_FLOAT)
+        {{
+            float * zoutdata = (float*)PyArray_DATA({Z});
+            const float * zdata = (float*)PyArray_DATA({A});
+            const float * xdata = (float*)PyArray_DATA({x});
+            const float * ydata = (float*)PyArray_DATA({y});
+            const float * adata = (float*)PyArray_DATA({a});
             const float alpha = adata[0];
             float tmp, xx;
-            int Ai = PyArray_STRIDES(%(A)s)[0]/sizeof(float);
-            int Aj = PyArray_STRIDES(%(A)s)[1]/sizeof(float);
-            int Zi = PyArray_STRIDES(%(Z)s)[0]/sizeof(float);
-            int Zj = PyArray_STRIDES(%(Z)s)[1]/sizeof(float);
-            int xi = PyArray_STRIDES(%(x)s)[0]/sizeof(float);
-            int yj = PyArray_STRIDES(%(y)s)[0]/sizeof(float);
+            int Ai = PyArray_STRIDES({A})[0]/sizeof(float);
+            int Aj = PyArray_STRIDES({A})[1]/sizeof(float);
+            int Zi = PyArray_STRIDES({Z})[0]/sizeof(float);
+            int Zj = PyArray_STRIDES({Z})[1]/sizeof(float);
+            int xi = PyArray_STRIDES({x})[0]/sizeof(float);
+            int yj = PyArray_STRIDES({y})[0]/sizeof(float);
             for (int i = 0; i < dims[0]; ++i)
-            {
+            {{
                 xx = alpha * xdata[xi * i];
                 for (int j = 0; j < dims[1]; ++j)
-                {
+                {{
                     tmp = zdata[Ai*i+Aj*j];
                     tmp += xx * ydata[yj * j];
                     zoutdata[Zi*i+Zj*j] = tmp;
-                }
-            }
-        }
-        else if (PyArray_DESCR(%(Z)s)->type_num == NPY_DOUBLE)
-        {
-            double * zoutdata = (double*) PyArray_DATA(%(Z)s);
-            const double * zdata = (double*)PyArray_DATA(%(A)s);
-            const double * xdata = (double*)PyArray_DATA(%(x)s);
-            const double * ydata = (double*)PyArray_DATA(%(y)s);
-            const double * adata = (double*)PyArray_DATA(%(a)s);
+                }}
+            }}
+        }}
+        else if (PyArray_DESCR({Z})->type_num == NPY_DOUBLE)
+        {{
+            double * zoutdata = (double*) PyArray_DATA({Z});
+            const double * zdata = (double*)PyArray_DATA({A});
+            const double * xdata = (double*)PyArray_DATA({x});
+            const double * ydata = (double*)PyArray_DATA({y});
+            const double * adata = (double*)PyArray_DATA({a});
             const double alpha = adata[0];
             double tmp, xx;
 
-            int Ai = PyArray_STRIDES(%(A)s)[0]/sizeof(double);
-            int Aj = PyArray_STRIDES(%(A)s)[1]/sizeof(double);
-            int Zi = PyArray_STRIDES(%(Z)s)[0]/sizeof(double);
-            int Zj = PyArray_STRIDES(%(Z)s)[1]/sizeof(double);
-            int xi = PyArray_STRIDES(%(x)s)[0]/sizeof(double);
-            int yj = PyArray_STRIDES(%(y)s)[0]/sizeof(double);
+            int Ai = PyArray_STRIDES({A})[0]/sizeof(double);
+            int Aj = PyArray_STRIDES({A})[1]/sizeof(double);
+            int Zi = PyArray_STRIDES({Z})[0]/sizeof(double);
+            int Zj = PyArray_STRIDES({Z})[1]/sizeof(double);
+            int xi = PyArray_STRIDES({x})[0]/sizeof(double);
+            int yj = PyArray_STRIDES({y})[0]/sizeof(double);
             for (int i = 0; i < dims[0]; ++i)
-            {
+            {{
                 xx = alpha * xdata[xi * i];
                 for (int j = 0; j < dims[1]; ++j)
-                {
+                {{
                     tmp = zdata[Ai*i+Aj*j];
                     tmp += xx * ydata[yj * j];
                     zoutdata[Zi*i+Zj*j] = tmp;
-                }
-            }
-        }
+                }}
+            }}
+        }}
         else
-        {
+        {{
             PyErr_SetString(PyExc_AssertionError,
                             "neither float nor double dtype");
-            %(fail)s
-        }
-    }
+            {fail}
+        }}
+    }}
     else
-    {
-        if (%(Z)s != %(A)s)
-        {
-            if (%(Z)s) { Py_DECREF(%(Z)s); }
-            %(Z)s = %(A)s;
-            Py_INCREF(%(Z)s);
-        }
+    {{
+        if ({Z} != {A})
+        {{
+            if ({Z}) {{ Py_DECREF({Z}); }}
+            {Z} = {A};
+            Py_INCREF({Z});
+        }}
         npy_intp dims[2];
-        dims[0] = PyArray_DIMS(%(A)s)[0];
-        dims[1] = PyArray_DIMS(%(A)s)[1];
+        dims[0] = PyArray_DIMS({A})[0];
+        dims[1] = PyArray_DIMS({A})[1];
         if ((dims[0] * dims[1]) < 100000)
-        {
-            if (PyArray_DESCR(%(Z)s)->type_num == NPY_FLOAT)
-            {
-                float * zoutdata = (float*)PyArray_DATA(%(Z)s);
-                const float * xdata = (float*)PyArray_DATA(%(x)s);
-                const float * ydata = (float*)PyArray_DATA(%(y)s);
-                const float * adata = (float*)PyArray_DATA(%(a)s);
+        {{
+            if (PyArray_DESCR({Z})->type_num == NPY_FLOAT)
+            {{
+                float * zoutdata = (float*)PyArray_DATA({Z});
+                const float * xdata = (float*)PyArray_DATA({x});
+                const float * ydata = (float*)PyArray_DATA({y});
+                const float * adata = (float*)PyArray_DATA({a});
                 const float alpha = adata[0];
                 float tmp, axi;
-                int Zi = PyArray_STRIDES(%(Z)s)[0]/sizeof(float);
-                int Zj = PyArray_STRIDES(%(Z)s)[1]/sizeof(float);
-                int xi = PyArray_STRIDES(%(x)s)[0]/sizeof(float);
-                int yj = PyArray_STRIDES(%(y)s)[0]/sizeof(float);
+                int Zi = PyArray_STRIDES({Z})[0]/sizeof(float);
+                int Zj = PyArray_STRIDES({Z})[1]/sizeof(float);
+                int xi = PyArray_STRIDES({x})[0]/sizeof(float);
+                int yj = PyArray_STRIDES({y})[0]/sizeof(float);
                 for (int i = 0; i < dims[0]; ++i)
-                {
+                {{
                     axi = alpha * xdata[xi * i];
                     for (int j = 0; j < dims[1]; ++j)
-                    {
+                    {{
                         zoutdata[Zi*i+Zj*j] += axi * ydata[yj * j];
-                    }
-                }
-            }
-            else if (PyArray_DESCR(%(Z)s)->type_num == NPY_DOUBLE)
-            {
-                double * zoutdata = (double*) PyArray_DATA(%(Z)s);
-                const double * xdata = (double*)PyArray_DATA(%(x)s);
-                const double * ydata = (double*)PyArray_DATA(%(y)s);
-                const double * adata = (double*)PyArray_DATA(%(a)s);
+                    }}
+                }}
+            }}
+            else if (PyArray_DESCR({Z})->type_num == NPY_DOUBLE)
+            {{
+                double * zoutdata = (double*) PyArray_DATA({Z});
+                const double * xdata = (double*)PyArray_DATA({x});
+                const double * ydata = (double*)PyArray_DATA({y});
+                const double * adata = (double*)PyArray_DATA({a});
                 const double alpha = adata[0];
                 double tmp, axi;
 
-                int Zi = PyArray_STRIDES(%(Z)s)[0]/sizeof(double);
-                int Zj = PyArray_STRIDES(%(Z)s)[1]/sizeof(double);
-                int xi = PyArray_STRIDES(%(x)s)[0]/sizeof(double);
-                int yj = PyArray_STRIDES(%(y)s)[0]/sizeof(double);
+                int Zi = PyArray_STRIDES({Z})[0]/sizeof(double);
+                int Zj = PyArray_STRIDES({Z})[1]/sizeof(double);
+                int xi = PyArray_STRIDES({x})[0]/sizeof(double);
+                int yj = PyArray_STRIDES({y})[0]/sizeof(double);
                 for (int i = 0; i < dims[0]; ++i)
-                {
+                {{
                     axi = alpha * xdata[xi * i];
                     for (int j = 0; j < dims[1]; ++j)
-                    {
+                    {{
                         zoutdata[Zi*i+Zj*j] += axi * ydata[yj * j];
-                    }
-                }
-            }
-        }
+                    }}
+                }}
+            }}
+        }}
         else
-        {
-            int Nz0 = PyArray_DIMS(%(Z)s)[0];
-            int Nz1 = PyArray_DIMS(%(Z)s)[1];
-            int Sx = PyArray_STRIDES(%(x)s)[0] / elemsize;
-            int Sy = PyArray_STRIDES(%(y)s)[0] / elemsize;
+        {{
+            int Nz0 = PyArray_DIMS({Z})[0];
+            int Nz1 = PyArray_DIMS({Z})[1];
+            int Sx = PyArray_STRIDES({x})[0] / elemsize;
+            int Sy = PyArray_STRIDES({y})[0] / elemsize;
 
             /* create appropriate strides for Z, if it is a row or column matrix.
              * In that case, the value of the stride does not really matter, but
@@ -235,11 +235,11 @@ def ger_c_code(A, a, x, y, Z, fail, params):
              *  - they are not smaller than the number of elements in the array,
              *  - they are not 0.
              */
-            int Sz0 = (Nz0 > 1) ? (PyArray_STRIDES(%(Z)s)[0] / elemsize) : (Nz1 + 1);
-            int Sz1 = (Nz1 > 1) ? (PyArray_STRIDES(%(Z)s)[1] / elemsize) : (Nz0 + 1);
+            int Sz0 = (Nz0 > 1) ? (PyArray_STRIDES({Z})[0] / elemsize) : (Nz1 + 1);
+            int Sz1 = (Nz1 > 1) ? (PyArray_STRIDES({Z})[1] / elemsize) : (Nz0 + 1);
 
-            dtype_%(x)s* x_data = (dtype_%(x)s*) PyArray_DATA(%(x)s);
-            dtype_%(y)s* y_data = (dtype_%(y)s*) PyArray_DATA(%(y)s);
+            dtype_{x}* x_data = (dtype_{x}*) PyArray_DATA({x});
+            dtype_{y}* y_data = (dtype_{y}*) PyArray_DATA({y});
             // gemv expects pointers to the beginning of memory arrays,
             // but numpy provides provides a pointer to the first element,
             // so when the stride is negative, we need to get the last one.
@@ -248,68 +248,68 @@ def ger_c_code(A, a, x, y, Z, fail, params):
             if (Sy < 0)
                 y_data += (Nz1 - 1) * Sy;
 
-            if (PyArray_STRIDES(%(Z)s)[0] == elemsize)
-            {
-                if (PyArray_DESCR(%(Z)s)->type_num == NPY_FLOAT)
-                {
-                    float alpha = ((dtype_%(a)s*)PyArray_DATA(%(a)s))[0];
+            if (PyArray_STRIDES({Z})[0] == elemsize)
+            {{
+                if (PyArray_DESCR({Z})->type_num == NPY_FLOAT)
+                {{
+                    float alpha = ((dtype_{a}*)PyArray_DATA({a}))[0];
                     sger_(&Nz0, &Nz1, &alpha,
                         (float*)x_data, &Sx,
                         (float*)y_data, &Sy,
-                        (float*)(PyArray_DATA(%(Z)s)), &Sz1);
-                }
-                else if (PyArray_DESCR(%(Z)s)->type_num == NPY_DOUBLE)
-                {
-                    double alpha = ((dtype_%(a)s*)PyArray_DATA(%(a)s))[0];
+                        (float*)(PyArray_DATA({Z})), &Sz1);
+                }}
+                else if (PyArray_DESCR({Z})->type_num == NPY_DOUBLE)
+                {{
+                    double alpha = ((dtype_{a}*)PyArray_DATA({a}))[0];
                     dger_(&Nz0, &Nz1, &alpha,
                         (double*)x_data, &Sx,
                         (double*)y_data, &Sy,
-                        (double*)(PyArray_DATA(%(Z)s)), &Sz1);
+                        (double*)(PyArray_DATA({Z})), &Sz1);
 
 
-                }
-                else {
+                }}
+                else {{
                     PyErr_SetString(PyExc_NotImplementedError,
                                     "not float nor double");
-                    %(fail)s
-                }
-            }
-            else if (PyArray_STRIDES(%(Z)s)[1] == elemsize)
-            {
-                if (PyArray_DESCR(%(Z)s)->type_num == NPY_FLOAT)
-                {
-                    float alpha = ((dtype_%(a)s*)(PyArray_DATA(%(a)s)))[0];
+                    {fail}
+                }}
+            }}
+            else if (PyArray_STRIDES({Z})[1] == elemsize)
+            {{
+                if (PyArray_DESCR({Z})->type_num == NPY_FLOAT)
+                {{
+                    float alpha = ((dtype_{a}*)(PyArray_DATA({a})))[0];
                     sger_(&Nz1, &Nz0, &alpha,
                         (float*)y_data, &Sy,
                         (float*)x_data, &Sx,
-                        (float*)(PyArray_DATA(%(Z)s)), &Sz0);
-                }
-                else if (PyArray_DESCR(%(Z)s)->type_num == NPY_DOUBLE)
-                {
-                    double alpha = ((dtype_%(a)s*)PyArray_DATA(%(a)s))[0];
+                        (float*)(PyArray_DATA({Z})), &Sz0);
+                }}
+                else if (PyArray_DESCR({Z})->type_num == NPY_DOUBLE)
+                {{
+                    double alpha = ((dtype_{a}*)PyArray_DATA({a}))[0];
                     dger_(&Nz1, &Nz0, &alpha,
                         (double*)y_data, &Sy,
                         (double*)x_data, &Sx,
-                        (double*)(PyArray_DATA(%(Z)s)), &Sz0);
-                }
+                        (double*)(PyArray_DATA({Z})), &Sz0);
+                }}
                 else
-                {
+                {{
                     PyErr_SetString(PyExc_NotImplementedError,
                                     "not float nor double");
-                    %(fail)s
-                }
-            }
+                    {fail}
+                }}
+            }}
             else
-            {
+            {{
                 PyErr_SetString(PyExc_AssertionError,
                     "A is a double-strided matrix, and should have been copied "
                     "into a memory-contiguous one.");
-                %(fail)s
-            }
-        }
-    }
+                {fail}
+            }}
+        }}
+    }}
 
-    """ % locals()
+    """.format(**locals())
 
 
 class CGer(BaseBLAS, Ger):

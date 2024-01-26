@@ -141,7 +141,7 @@ def _check_scipy_linalg_matrix(a, func_name):
     if isinstance(a, types.Optional):
         a = a.type
     if not isinstance(a, types.Array):
-        msg = "%s.%s() only supported for array types" % interp
+        msg = "{}.{}() only supported for array types".format(*interp)
         raise numba.TypingError(msg, highlighting=False)
     if a.ndim not in [1, 2]:
         msg = "%s.%s() only supported on 1d or 2d arrays, found %s." % (
@@ -149,7 +149,7 @@ def _check_scipy_linalg_matrix(a, func_name):
         )
         raise numba.TypingError(msg, highlighting=False)
     if not isinstance(a.dtype, (types.Float, types.Complex)):
-        msg = "%s.%s() only supported on " "float and complex arrays." % interp
+        msg = "{}.{}() only supported on " "float and complex arrays.".format(*interp)
         raise numba.TypingError(msg, highlighting=False)
 
 

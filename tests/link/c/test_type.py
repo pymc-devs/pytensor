@@ -26,10 +26,10 @@ Py_XDECREF((PyObject *)p);
 
     def c_code(self, node, name, inps, outs, sub):
         return """
-Py_XDECREF(%(out)s);
-%(out)s = (void *)%(inp)s;
-Py_INCREF(%(inp)s);
-""" % dict(out=outs[0], inp=inps[0])
+Py_XDECREF({out});
+{out} = (void *){inp};
+Py_INCREF({inp});
+""".format(**dict(out=outs[0], inp=inps[0]))
 
     def c_code_cache_version(self):
         return (0,)
@@ -53,10 +53,10 @@ Py_XDECREF((PyObject *)p);
 
     def c_code(self, node, name, inps, outs, sub):
         return """
-Py_XDECREF(%(out)s);
-%(out)s = (PyArrayObject *)%(inp)s;
-Py_INCREF(%(out)s);
-""" % dict(out=outs[0], inp=inps[0])
+Py_XDECREF({out});
+{out} = (PyArrayObject *){inp};
+Py_INCREF({out});
+""".format(**dict(out=outs[0], inp=inps[0]))
 
     def c_code_cache_version(self):
         return (0,)
@@ -137,25 +137,31 @@ class MyOpEnumList(COp):
 
     def c_code(self, node, name, inputs, outputs, sub):
         return """
-        switch(%(op)s) {
+        switch({op}) {{
             case ADD:
-                %(o)s = %(a)s + %(b)s;
+                {o} = {a} + {b};
                 break;
             case SUB:
-                %(o)s = %(a)s - %(b)s;
+                {o} = {a} - {b};
                 break;
             case MULTIPLY:
-                %(o)s = %(a)s * %(b)s;
+                {o} = {a} * {b};
                 break;
             case DIVIDE:
-                %(o)s = %(a)s / %(b)s;
+                {o} = {a} / {b};
                 break;
             default:
-                {%(fail)s}
+                {{{fail}}}
                 break;
-        }
-        """ % dict(
-            op=sub["params"], o=outputs[0], a=inputs[0], b=inputs[1], fail=sub["fail"]
+        }}
+        """.format(
+            **dict(
+                op=sub["params"],
+                o=outputs[0],
+                a=inputs[0],
+                b=inputs[1],
+                fail=sub["fail"],
+            )
         )
 
 
@@ -196,11 +202,13 @@ class MyOpCEnumType(COp):
 
     def c_code(self, node, name, inputs, outputs, sub):
         return """
-        %(o)s = %(val)s;
-        """ % dict(
-            o=outputs[0],
-            # params in C code will already contains expected C constant value.
-            val=sub["params"],
+        {o} = {val};
+        """.format(
+            **dict(
+                o=outputs[0],
+                # params in C code will already contains expected C constant value.
+                val=sub["params"],
+            )
         )
 
 

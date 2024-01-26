@@ -466,40 +466,44 @@ class ScalarType(CType, HasDataType, HasShape):
         specs = self.dtype_specs()
         if check_input:
             pre = """
-            if (!PyObject_TypeCheck(py_%(name)s, &%(pyarr_type)s))
-            {
+            if (!PyObject_TypeCheck(py_{name}, &{pyarr_type}))
+            {{
                 PyErr_Format(PyExc_ValueError,
-                    "Scalar check failed (%(dtype)s)");
-                %(fail)s
-            }
-            """ % dict(
-                sub, name=name, dtype=specs[1], pyarr_type="Py%sArrType_Type" % specs[2]
+                    "Scalar check failed ({dtype})");
+                {fail}
+            }}
+            """.format(
+                **dict(
+                    sub,
+                    name=name,
+                    dtype=specs[1],
+                    pyarr_type="Py%sArrType_Type" % specs[2],
+                )
             )
         else:
             pre = ""
         return (
             pre
             + """
-        PyArray_ScalarAsCtype(py_%(name)s, &%(name)s);
-        """
-            % dict(sub, name=name)
+        PyArray_ScalarAsCtype(py_{name}, &{name});
+        """.format(**dict(sub, name=name))
         )
 
     def c_sync(self, name, sub):
         specs = self.dtype_specs()
         return """
-        Py_XDECREF(py_%(name)s);
-        py_%(name)s = PyArrayScalar_New(%(cls)s);
-        if (!py_%(name)s)
-        {
+        Py_XDECREF(py_{name});
+        py_{name} = PyArrayScalar_New({cls});
+        if (!py_{name})
+        {{
             Py_XINCREF(Py_None);
-            py_%(name)s = Py_None;
+            py_{name} = Py_None;
             PyErr_Format(PyExc_MemoryError,
-                "Instantiation of new Python scalar failed (%(dtype)s)");
-            %(fail)s
-        }
-        PyArrayScalar_ASSIGN(py_%(name)s, %(cls)s, %(name)s);
-        """ % dict(sub, name=name, dtype=specs[1], cls=specs[2])
+                "Instantiation of new Python scalar failed ({dtype})");
+            {fail}
+        }}
+        PyArrayScalar_ASSIGN(py_{name}, {cls}, {name});
+        """.format(**dict(sub, name=name, dtype=specs[1], cls=specs[2]))
 
     def c_cleanup(self, name, sub):
         return ""
