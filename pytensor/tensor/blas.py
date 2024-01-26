@@ -83,7 +83,7 @@ import numpy as np
 
 
 try:
-    import numpy.__config__  # noqa
+    import numpy.__config__
 except ImportError:
     pass
 

@@ -23,7 +23,7 @@ lazylinker_ext: Optional[ModuleType] = None
 def try_import():
     global lazylinker_ext
     sys.path[0:0] = [config.compiledir]
-    import lazylinker_ext  # noqa
+    import lazylinker_ext
 
     del sys.path[0]
 
@@ -167,4 +167,4 @@ except ImportError:
 from lazylinker_ext.lazylinker_ext import CLazyLinker, get_version  # noqa
 from lazylinker_ext.lazylinker_ext import *  # noqa
 
-assert force_compile or (version == get_version())  # noqa
+assert force_compile or (version == get_version())

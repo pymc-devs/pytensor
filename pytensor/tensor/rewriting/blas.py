@@ -63,7 +63,7 @@ from pytensor.tensor.rewriting.basic import register_specialize
 
 
 try:
-    import numpy.__config__  # noqa
+    import numpy.__config__
 except ImportError:
     pass
 

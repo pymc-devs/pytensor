@@ -249,7 +249,7 @@ def fast_inplace_check(fgraph, inputs):
     return inputs
 
 
-class DestroyHandler(Bookkeeper):  # noqa
+class DestroyHandler(Bookkeeper):
     """
     The DestroyHandler class detects when a graph is impossible to evaluate
     because of aliasing and destructive operations.
