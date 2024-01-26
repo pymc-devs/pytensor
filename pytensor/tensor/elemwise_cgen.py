@@ -176,34 +176,34 @@ def make_alloc(loop_orders, dtype, sub, fortran="0"):
     # contiguous dimensions, or the dimension with the smallest
     # stride. Right now, it is allocated to be C_CONTIGUOUS.
     return """
-    {
-        npy_intp dims[%(nd)s];
-        //npy_intp* dims = (npy_intp*)malloc(%(nd)s * sizeof(npy_intp));
-        %(init_dims)s
-        if (!%(olv)s) {
-            %(olv)s = (PyArrayObject*)PyArray_EMPTY(%(nd)s, dims,
-                                                    %(type)s,
-                                                    %(fortran)s);
-        }
-        else {
+    {{
+        npy_intp dims[{nd}];
+        //npy_intp* dims = (npy_intp*)malloc({nd} * sizeof(npy_intp));
+        {init_dims}
+        if (!{olv}) {{
+            {olv} = (PyArrayObject*)PyArray_EMPTY({nd}, dims,
+                                                    {type},
+                                                    {fortran});
+        }}
+        else {{
             PyArray_Dims new_dims;
-            new_dims.len = %(nd)s;
+            new_dims.len = {nd};
             new_dims.ptr = dims;
-            PyObject* success = PyArray_Resize(%(olv)s, &new_dims, 0, NPY_CORDER);
-            if (!success) {
+            PyObject* success = PyArray_Resize({olv}, &new_dims, 0, NPY_CORDER);
+            if (!success) {{
                 // If we can't resize the ndarray we have we can allocate a new one.
                 PyErr_Clear();
-                Py_XDECREF(%(olv)s);
-                %(olv)s = (PyArrayObject*)PyArray_EMPTY(%(nd)s, dims, %(type)s, 0);
-            } else {
+                Py_XDECREF({olv});
+                {olv} = (PyArrayObject*)PyArray_EMPTY({nd}, dims, {type}, 0);
+            }} else {{
                 Py_DECREF(success);
-            }
-        }
-        if (!%(olv)s) {
-            %(fail)s
-        }
-    }
-    """ % dict(locals(), **sub)
+            }}
+        }}
+        if (!{olv}) {{
+            {fail}
+        }}
+    }}
+    """.format(**dict(locals(), **sub))
 
 
 def make_loop(loop_orders, dtypes, loop_tasks, sub, openmp=None):

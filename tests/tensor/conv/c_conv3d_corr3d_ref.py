@@ -336,83 +336,83 @@ class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
 
         return """
     // Mandatory args
-    int direction = %(params)s->direction;  // forward, bprop weights, bprop inputs
+    int direction = {params}->direction;  // forward, bprop weights, bprop inputs
 
     // Optional args
-    int dH = %(params)s->dH;
-    int dW = %(params)s->dW;
-    int dD = %(params)s->dD;
-    int dilH = %(params)s->dilH;
-    int dilW = %(params)s->dilW;
-    int dilD = %(params)s->dilD;
-    int padH = %(params)s->padH;
-    int padW = %(params)s->padW;
-    int padD = %(params)s->padD;
-    int numgroups = %(params)s->num_groups;
+    int dH = {params}->dH;
+    int dW = {params}->dW;
+    int dD = {params}->dD;
+    int dilH = {params}->dilH;
+    int dilW = {params}->dilW;
+    int dilD = {params}->dilD;
+    int padH = {params}->padH;
+    int padW = {params}->padW;
+    int padD = {params}->padD;
+    int numgroups = {params}->num_groups;
 
-    PyArrayObject * bottom = %(bottom)s;
-    PyArrayObject * weights = %(weights)s;
-    PyArrayObject * top = %(top)s;
+    PyArrayObject * bottom = {bottom};
+    PyArrayObject * weights = {weights};
+    PyArrayObject * top = {top};
     PyArrayObject * out2 = NULL;
     PyArrayObject **out = NULL;
 
-    switch(%(params)s->direction) {
+    switch({params}->direction) {{
         case DIRECTION_FORWARD:
-            out = &%(top)s;
+            out = &{top};
             break;
         case DIRECTION_BACKPROP_WEIGHTS:
-            out = &%(weights)s;
+            out = &{weights};
             break;
         case DIRECTION_BACKPROP_INPUTS:
-            out = &%(bottom)s;
+            out = &{bottom};
             break;
         default:
             PyErr_SetString(PyExc_ValueError, "CPU Corr3dMM: Invalid direction.");
-            {%(fail)s}
+            {{{fail}}}
             break;
-    }
+    }}
 
     // Obtain or infer kernel width, height and depth
     // (we need to know it early to be able to handle auto-padding)
     int kH, kW, kD, dil_kH, dil_kW, dil_kD;
-    if (direction != 1) {
+    if (direction != 1) {{
         // weight is an input variable, we can just read its shape
         kH = PyArray_DIMS(weights)[2];
         kW = PyArray_DIMS(weights)[3];
         kD = PyArray_DIMS(weights)[4];
-    }
-    else {
-        if (%(height)s != -1) {
+    }}
+    else {{
+        if ({height} != -1) {{
             // kernel height is specified (perhaps vertical subsampling or half padding)
-            kH = %(height)s;
-        }
-        else if (padH == -2) {
+            kH = {height};
+        }}
+        else if (padH == -2) {{
             // vertical full padding, we can infer the kernel height
             kH = (2 - PyArray_DIMS(bottom)[2] + (PyArray_DIMS(top)[2] - 1) * dH - 1)/ dilH + 1;
-        }
-        else {
+        }}
+        else {{
             // explicit padding, we can infer the kernel height
             kH = (PyArray_DIMS(bottom)[2] + 2*padH - (PyArray_DIMS(top)[2] - 1) * dH - 1) / dilH +1;
-        }
-        if (%(width)s != -1) {
-            kW = %(width)s;
-        }
-        else if (padW == -2) {
+        }}
+        if ({width} != -1) {{
+            kW = {width};
+        }}
+        else if (padW == -2) {{
             kW = (2 - PyArray_DIMS(bottom)[3] + (PyArray_DIMS(top)[3] - 1) * dW - 1) / dilW + 1;
-        }
-        else {
+        }}
+        else {{
             kW = (PyArray_DIMS(bottom)[3] + 2*padW - (PyArray_DIMS(top)[3] - 1) * dW - 1) / dilW + 1;
-        }
-        if (%(depth)s != -1) {
-            kD = %(depth)s;
-        }
-        else if (padD == -2) {
+        }}
+        if ({depth} != -1) {{
+            kD = {depth};
+        }}
+        else if (padD == -2) {{
             kD = (2 - PyArray_DIMS(bottom)[4] + (PyArray_DIMS(top)[4] - 1) * dD - 1) / dilD + 1;
-        }
-        else {
+        }}
+        else {{
             kD = (PyArray_DIMS(bottom)[4] + 2*padD - (PyArray_DIMS(top)[4] - 1) * dD - 1) / dilD + 1;
-        }
-    }
+        }}
+    }}
 
     // Implicit dilated kernel size
     dil_kH = (kH - 1) * dilH + 1;
@@ -420,40 +420,40 @@ class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
     dil_kD = (kD - 1) * dilD + 1;
 
     // Auto-padding if requested
-    if (padH == -1) {  // vertical half padding
+    if (padH == -1) {{  // vertical half padding
         padH = dil_kH / 2;
-    }
-    else if (padH == -2) {  // vertical full padding
+    }}
+    else if (padH == -2) {{  // vertical full padding
         padH = dil_kH - 1;
-    }
-    else if (padH < 0) {
+    }}
+    else if (padH < 0) {{
         PyErr_SetString(PyExc_ValueError, "BaseCorr3dMM: padH must be >= -2");
-        %(fail)s
-    }
-    if (padW == -1) {  // horizontal half padding
+        {fail}
+    }}
+    if (padW == -1) {{  // horizontal half padding
         padW = dil_kW / 2;
-    }
-    else if (padW == -2) {  // horizontal full padding
+    }}
+    else if (padW == -2) {{  // horizontal full padding
         padW = dil_kW - 1;
-    }
-    else if (padW < 0) {
+    }}
+    else if (padW < 0) {{
         PyErr_SetString(PyExc_ValueError, "BaseCorr3dMM: padW must be >= -2");
-        %(fail)s
-    }
-    if (padD == -1) {  // depth half padding
+        {fail}
+    }}
+    if (padD == -1) {{  // depth half padding
         padD = dil_kD / 2;
-    }
-    else if (padD == -2) {  // depth full padding
+    }}
+    else if (padD == -2) {{  // depth full padding
         padD = dil_kD - 1;
-    }
-    else if (padD < 0) {
+    }}
+    else if (padD < 0) {{
         PyErr_SetString(PyExc_ValueError, "BaseCorr3dMM: padD must be >= -2");
-        %(fail)s
-    }
+        {fail}
+    }}
 
     // Infer output shape
     npy_intp out_dim[5];
-    switch(direction) {
+    switch(direction) {{
     case 0:  // forward pass
         // output is top: (batchsize, num_filters, height, width, depth)
         // height and width: top = (bottom + 2*pad - ((weight-1)*dil + 1)) / sample + 1
@@ -463,12 +463,12 @@ class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
         out_dim[3] = (npy_intp)((PyArray_DIMS(bottom)[3] + 2*padW - ((PyArray_DIMS(weights)[3]-1)*dilW + 1)) / dW + 1);
         out_dim[4] = (npy_intp)((PyArray_DIMS(bottom)[4] + 2*padD - ((PyArray_DIMS(weights)[4]-1)*dilD + 1)) / dD + 1);
         if (out_dim[0] < 0 || out_dim[1] < 0 || out_dim[2] <= 0 || out_dim[3] <= 0 || out_dim[4] <= 0)
-        {
+        {{
             PyErr_Format(PyExc_ValueError,
                          "Corr3dMM: impossible output shape\\n"
-                         "  bottom shape: %%ld x %%ld x %%ld x %%ld x %%ld\\n"
-                         "  weights shape: %%ld x %%ld x %%ld x %%ld x %%ld\\n"
-                         "  top shape: %%ld x %%ld x %%ld x %%ld x %%ld\\n",
+                         "  bottom shape: %ld x %ld x %ld x %ld x %ld\\n"
+                         "  weights shape: %ld x %ld x %ld x %ld x %ld\\n"
+                         "  top shape: %ld x %ld x %ld x %ld x %ld\\n",
                          (long int)PyArray_DIMS(bottom)[0], (long int)PyArray_DIMS(bottom)[1],
                          (long int)PyArray_DIMS(bottom)[2], (long int)PyArray_DIMS(bottom)[3],
                          (long int)PyArray_DIMS(bottom)[4],
@@ -477,8 +477,8 @@ class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
                          (long int)PyArray_DIMS(weights)[4],
                          (long int)out_dim[0], (long int)out_dim[1], (long int)out_dim[2],
                          (long int)out_dim[3], (long int)out_dim[4]);
-            %(fail)s
-        }
+            {fail}
+        }}
         break;
     case 1:  // backprop wrt. weights
         // output is weights: (num_filters, num_channels, height, width, depth)
@@ -489,12 +489,12 @@ class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
         out_dim[3] = (npy_intp)kW;  // how convenient
         out_dim[4] = (npy_intp)kD;
         if (out_dim[0] < 0 || out_dim[1] < 0 || out_dim[2] <= 0 || out_dim[3] <= 0 || out_dim[4] <= 0)
-        {
+        {{
             PyErr_Format(PyExc_ValueError,
                          "Corr3dMM backprop wrt. weights: impossible output shape\\n"
-                         "  bottom shape: %%ld x %%ld x %%ld x %%ld x %%ld\\n"
-                         "  weights shape: %%ld x %%ld x %%ld x %%ld x %%ld\\n"
-                         "  top shape: %%ld x %%ld x %%ld x %%ld x %%ld\\n",
+                         "  bottom shape: %ld x %ld x %ld x %ld x %ld\\n"
+                         "  weights shape: %ld x %ld x %ld x %ld x %ld\\n"
+                         "  top shape: %ld x %ld x %ld x %ld x %ld\\n",
                          (long int)PyArray_DIMS(bottom)[0], (long int)PyArray_DIMS(bottom)[1],
                          (long int)PyArray_DIMS(bottom)[2], (long int)PyArray_DIMS(bottom)[3],
                          (long int)PyArray_DIMS(bottom)[4],
@@ -503,24 +503,24 @@ class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
                          (long int)PyArray_DIMS(top)[0], (long int)PyArray_DIMS(top)[1],
                          (long int)PyArray_DIMS(top)[2], (long int)PyArray_DIMS(top)[3],
                          (long int)PyArray_DIMS(top)[4]);
-            %(fail)s
-        }
+            {fail}
+        }}
         break;
     case 2:  // backprop wrt. inputs
         // output is bottom: (batchsize, num_channels, height, width, depth)
         // height and width: bottom = (top - 1) * sample + (weights-1)*dil + 1 - 2*pad
         out_dim[0] = (npy_intp)PyArray_DIMS(top)[0];
         out_dim[1] = (npy_intp)PyArray_DIMS(weights)[1] * numgroups;
-        out_dim[2] = (npy_intp)((%(height)s != -1) ? %(height)s : (PyArray_DIMS(top)[2] - 1) * dH + (PyArray_DIMS(weights)[2]-1)*dilH + 1 - 2*padH);
-        out_dim[3] = (npy_intp)((%(width)s != -1) ? %(width)s : (PyArray_DIMS(top)[3] - 1) * dW + (PyArray_DIMS(weights)[3]-1)*dilW + 1 - 2*padW);
-        out_dim[4] = (npy_intp)((%(depth)s != -1) ? %(depth)s : (PyArray_DIMS(top)[4] - 1) * dD + (PyArray_DIMS(weights)[4]-1)*dilD + 1 - 2*padD);
+        out_dim[2] = (npy_intp)(({height} != -1) ? {height} : (PyArray_DIMS(top)[2] - 1) * dH + (PyArray_DIMS(weights)[2]-1)*dilH + 1 - 2*padH);
+        out_dim[3] = (npy_intp)(({width} != -1) ? {width} : (PyArray_DIMS(top)[3] - 1) * dW + (PyArray_DIMS(weights)[3]-1)*dilW + 1 - 2*padW);
+        out_dim[4] = (npy_intp)(({depth} != -1) ? {depth} : (PyArray_DIMS(top)[4] - 1) * dD + (PyArray_DIMS(weights)[4]-1)*dilD + 1 - 2*padD);
         if (out_dim[0] < 0 || out_dim[1] < 0 || out_dim[2] <= 0 || out_dim[3] <= 0 || out_dim[4] <= 0)
-        {
+        {{
             PyErr_Format(PyExc_ValueError,
                          "Corr3dMM backprop wrt. inputs: impossible output shape\\n"
-                         "  bottom shape: %%ld x %%ld x %%ld x %%ld x %%ld\\n"
-                         "  weights shape: %%ld x %%ld x %%ld x %%ld x %%ld\\n"
-                         "  top shape: %%ld x %%ld x %%ld x %%ld x %%ld\\n",
+                         "  bottom shape: %ld x %ld x %ld x %ld x %ld\\n"
+                         "  weights shape: %ld x %ld x %ld x %ld x %ld\\n"
+                         "  top shape: %ld x %ld x %ld x %ld x %ld\\n",
                          (long int)out_dim[0], (long int)out_dim[1], (long int)out_dim[2],
                          (long int)out_dim[3], (long int)out_dim[4],
                          (long int)PyArray_DIMS(weights)[0], (long int)PyArray_DIMS(weights)[1],
@@ -529,13 +529,13 @@ class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
                          (long int)PyArray_DIMS(top)[0], (long int)PyArray_DIMS(top)[1],
                          (long int)PyArray_DIMS(top)[2], (long int)PyArray_DIMS(top)[3],
                          (long int)PyArray_DIMS(top)[4]);
-            %(fail)s
-        }
+            {fail}
+        }}
         break;
     default:
         PyErr_SetString(PyExc_ValueError, "BaseCorr3dMM: direction must be 0, 1, or 2\\n");
-        %(fail)s
-    }
+        {fail}
+    }}
 
     // Prepare output array
     int typenum;
@@ -547,47 +547,49 @@ class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
            && PyArray_DIMS(*out)[2]==out_dim[2]
            && PyArray_DIMS(*out)[3]==out_dim[3]
            && PyArray_DIMS(*out)[4]==out_dim[4]))
-    {
+    {{
         Py_XDECREF(*out);
-        if (direction != 1) {
+        if (direction != 1) {{
           typenum = PyArray_TYPE(weights);
-        }
-        else {
+        }}
+        else {{
           typenum = PyArray_TYPE(bottom);
-        }
+        }}
         //Change to PyArray_ZEROS which is faster than PyArray_EMPTY.
         *out = (PyArrayObject*)PyArray_ZEROS(5,
                                           out_dim,
                                           typenum,
                                           0);
         if (NULL == *out)
-        {
+        {{
             PyErr_Format(PyExc_RuntimeError,
-                    "BaseCorr3dMM: Failed to allocate output of %%lld x %%lld x %%lld x %%lld x %%lld",
+                    "BaseCorr3dMM: Failed to allocate output of %lld x %lld x %lld x %lld x %lld",
                     (long long)out_dim[0], (long long)out_dim[1],
                     (long long)out_dim[2], (long long)out_dim[3], (long long)out_dim[4]);
-            %(fail)s
-        }
-    }
+            {fail}
+        }}
+    }}
 
     // Call corr3dMM code
-    out2 = corr3dMM(%(bottom)s, %(weights)s, %(top)s, direction,
+    out2 = corr3dMM({bottom}, {weights}, {top}, direction,
                     dH, dW, dD, dilH, dilW, dilD, padH, padW, padD,
                     numgroups);
-    if (out2==NULL){
-       %(fail)s
-    }
+    if (out2==NULL){{
+       {fail}
+    }}
     assert (out2 == *out);
 
-""" % dict(
-            bottom=bottom,
-            weights=weights,
-            top=top,
-            height=height,
-            width=width,
-            depth=depth,
-            fail=sub["fail"],
-            params=sub["params"],
+""".format(
+            **dict(
+                bottom=bottom,
+                weights=weights,
+                top=top,
+                height=height,
+                width=width,
+                depth=depth,
+                fail=sub["fail"],
+                params=sub["params"],
+            )
         )
 
 

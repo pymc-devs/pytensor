@@ -40,14 +40,14 @@ class TDouble(CType):
 
     def c_extract(self, name, sub, check_input=True, **kwargs):
         return """
-        if (!PyFloat_Check(py_%(name)s)) {
+        if (!PyFloat_Check(py_{name})) {{
             PyErr_SetString(PyExc_TypeError, "not a double!");
-            %(fail)s
-        }
-        %(name)s = PyFloat_AsDouble(py_%(name)s);
-        %(name)s_bad_thing = NULL;
-        //printf("Extracting %(name)s\\n");
-        """ % dict(locals(), **sub)
+            {fail}
+        }}
+        {name} = PyFloat_AsDouble(py_{name});
+        {name}_bad_thing = NULL;
+        //printf("Extracting {name}\\n");
+        """.format(**dict(locals(), **sub))
 
     def c_sync(self, name, sub):
         return f"""

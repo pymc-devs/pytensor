@@ -1950,14 +1950,13 @@ class Compiler:
 
         code = (
             """
-        %(preamble)s
+        {preamble}
         int main(int argc, char** argv)
-        {
-            %(body)s
+        {{
+            {body}
             return 0;
-        }
-        """
-            % locals()
+        }}
+        """.format(**locals())
         ).encode()
         return cls._try_compile_tmp(
             code,

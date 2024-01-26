@@ -138,48 +138,48 @@ class AddSD_ccode(_NoPythonCOp):
         format = {"csc": 0, "csr": 1}[self.format]
         out_typenum = node.outputs[0].type.dtype_specs()[2]
         code = """
-                Py_XDECREF(%(z)s);
-                if (!%(inplace)s){
-                    if(PyArray_TYPE(%(y)s) != %(out_typenum)s){
-                        %(z)s = (PyArrayObject *) PyArray_FromArray(%(y)s,  PyArray_DescrFromType(%(out_typenum)s), 0);
-                    }else{
-                        %(z)s = (PyArrayObject *) PyArray_NewCopy(%(y)s, NPY_CORDER);
-                    }
-                }else{
-                  %(z)s = %(y)s;
-                  Py_XINCREF(%(z)s);
-                }
+                Py_XDECREF({z});
+                if (!{inplace}){{
+                    if(PyArray_TYPE({y}) != {out_typenum}){{
+                        {z} = (PyArrayObject *) PyArray_FromArray({y},  PyArray_DescrFromType({out_typenum}), 0);
+                    }}else{{
+                        {z} = (PyArrayObject *) PyArray_NewCopy({y}, NPY_CORDER);
+                    }}
+                }}else{{
+                  {z} = {y};
+                  Py_XINCREF({z});
+                }}
 
-                npy_intp N =  PyArray_DIMS(%(_indptr)s)[0]-1;
+                npy_intp N =  PyArray_DIMS({_indptr})[0]-1;
 
-                const dtype_%(_indptr)s* __restrict__ indptr = (dtype_%(_indptr)s*)PyArray_DATA(%(_indptr)s);
-                const dtype_%(_indices)s* __restrict__ indices = (dtype_%(_indices)s*)PyArray_DATA(%(_indices)s);
-                const dtype_%(_data)s* __restrict__ data = (dtype_%(_data)s*)PyArray_DATA(%(_data)s);
+                const dtype_{_indptr}* __restrict__ indptr = (dtype_{_indptr}*)PyArray_DATA({_indptr});
+                const dtype_{_indices}* __restrict__ indices = (dtype_{_indices}*)PyArray_DATA({_indices});
+                const dtype_{_data}* __restrict__ data = (dtype_{_data}*)PyArray_DATA({_data});
 
-                dtype_%(y)s* ydata = (dtype_%(y)s*)PyArray_DATA(%(y)s);
-                dtype_%(z)s* zdata = (dtype_%(z)s*)PyArray_DATA(%(z)s);
-                npy_intp Yi = PyArray_STRIDES(%(y)s)[0]/PyArray_DESCR(%(y)s)->elsize;
-                npy_intp Yj = PyArray_STRIDES(%(y)s)[1]/PyArray_DESCR(%(y)s)->elsize;
+                dtype_{y}* ydata = (dtype_{y}*)PyArray_DATA({y});
+                dtype_{z}* zdata = (dtype_{z}*)PyArray_DATA({z});
+                npy_intp Yi = PyArray_STRIDES({y})[0]/PyArray_DESCR({y})->elsize;
+                npy_intp Yj = PyArray_STRIDES({y})[1]/PyArray_DESCR({y})->elsize;
 
                 npy_intp pos;
-                if (%(format)s == 0){
-                for (npy_intp col = 0; col < N; ++col){
-                  for (dtype_%(_indptr)s ind = indptr[col]; ind < indptr[col+1]; ++ind){
+                if ({format} == 0){{
+                for (npy_intp col = 0; col < N; ++col){{
+                  for (dtype_{_indptr} ind = indptr[col]; ind < indptr[col+1]; ++ind){{
                     npy_intp row = indices[ind];
                     pos = row * Yi + col * Yj;
                     zdata[pos] = ydata[pos] + data[ind];
-                  }
-                }
-                }else{
-                for (npy_intp row = 0; row < N; ++row){
-                  for (dtype_%(_indptr)s ind = indptr[row]; ind < indptr[row+1]; ++ind){
+                  }}
+                }}
+                }}else{{
+                for (npy_intp row = 0; row < N; ++row){{
+                  for (dtype_{_indptr} ind = indptr[row]; ind < indptr[row+1]; ++ind){{
                     npy_intp col = indices[ind];
                     pos = row * Yi + col * Yj;
                     zdata[pos] = ydata[pos] + data[ind];
-                  }
-                 }
-                }
-             """ % dict(locals(), **sub)
+                  }}
+                 }}
+                }}
+             """.format(**dict(locals(), **sub))
         return code
 
     def infer_shape(self, fgraph, node, shapes):
@@ -312,72 +312,72 @@ class StructuredDotCSC(COp):
 
         rval = """
 
-        if (PyArray_NDIM(%(a_val)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(a_val) != 1"); %(fail)s;}
-        if (PyArray_NDIM(%(a_ind)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(a_ind) != 1"); %(fail)s;}
-        if (PyArray_NDIM(%(a_ptr)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(a_ptr) != 1"); %(fail)s;}
-        if (PyArray_NDIM(%(a_nrows)s) != 0) {PyErr_SetString(PyExc_NotImplementedError, "rank(nrows) != 0"); %(fail)s;}
-        if (PyArray_NDIM(%(b)s) != 2) {PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 2"); %(fail)s;}
+        if (PyArray_NDIM({a_val}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a_val) != 1"); {fail};}}
+        if (PyArray_NDIM({a_ind}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a_ind) != 1"); {fail};}}
+        if (PyArray_NDIM({a_ptr}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a_ptr) != 1"); {fail};}}
+        if (PyArray_NDIM({a_nrows}) != 0) {{PyErr_SetString(PyExc_NotImplementedError, "rank(nrows) != 0"); {fail};}}
+        if (PyArray_NDIM({b}) != 2) {{PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 2"); {fail};}}
 
-        if (PyArray_TYPE(%(a_val)s) != %(typenum_a_val)s) {
-        PyErr_SetString(PyExc_NotImplementedError, "Invalid type for a_val"); %(fail)s;}
+        if (PyArray_TYPE({a_val}) != {typenum_a_val}) {{
+        PyErr_SetString(PyExc_NotImplementedError, "Invalid type for a_val"); {fail};}}
 
-        if (PyArray_TYPE(%(b)s) != %(typenum_b)s) {
-        PyErr_SetString(PyExc_NotImplementedError, "Invalid type for b"); %(fail)s;}
+        if (PyArray_TYPE({b}) != {typenum_b}) {{
+        PyErr_SetString(PyExc_NotImplementedError, "Invalid type for b"); {fail};}}
 
-        if (PyArray_TYPE(%(a_ind)s) != NPY_INT32) {
-        PyErr_SetString(PyExc_NotImplementedError, "a_ind dtype not INT32"); %(fail)s;}
+        if (PyArray_TYPE({a_ind}) != NPY_INT32) {{
+        PyErr_SetString(PyExc_NotImplementedError, "a_ind dtype not INT32"); {fail};}}
 
-        if (PyArray_TYPE(%(a_ptr)s) != NPY_INT32)
-        {PyErr_SetString(PyExc_NotImplementedError, "a_ptr dtype not INT32"); %(fail)s;}
+        if (PyArray_TYPE({a_ptr}) != NPY_INT32)
+        {{PyErr_SetString(PyExc_NotImplementedError, "a_ptr dtype not INT32"); {fail};}}
 
-        if (PyArray_TYPE(%(a_nrows)s) != NPY_INT32)
-        {PyErr_SetString(PyExc_NotImplementedError, "a_nrows dtype not INT32"); %(fail)s;}
+        if (PyArray_TYPE({a_nrows}) != NPY_INT32)
+        {{PyErr_SetString(PyExc_NotImplementedError, "a_nrows dtype not INT32"); {fail};}}
 
-        if (PyArray_DIMS(%(a_val)s)[0] != PyArray_DIMS(%(a_ind)s)[0])
-        {PyErr_SetString(PyExc_NotImplementedError, "a_val and a_ind have different lengths"); %(fail)s;}
+        if (PyArray_DIMS({a_val})[0] != PyArray_DIMS({a_ind})[0])
+        {{PyErr_SetString(PyExc_NotImplementedError, "a_val and a_ind have different lengths"); {fail};}}
 
-        if (PyArray_DIMS(%(a_ptr)s)[0] != PyArray_DIMS(%(b)s)[0]+1)
-        {PyErr_SetString(PyExc_NotImplementedError, "a's number of columns doesn't match b's rows"); %(fail)s;}
+        if (PyArray_DIMS({a_ptr})[0] != PyArray_DIMS({b})[0]+1)
+        {{PyErr_SetString(PyExc_NotImplementedError, "a's number of columns doesn't match b's rows"); {fail};}}
 
-        if ((!%(z)s)
-            || (PyArray_DIMS(%(z)s)[0] != ((npy_int32 *)PyArray_DATA(%(a_nrows)s))[0])
-            || (PyArray_DIMS(%(z)s)[1] != PyArray_DIMS(%(b)s)[1])
+        if ((!{z})
+            || (PyArray_DIMS({z})[0] != ((npy_int32 *)PyArray_DATA({a_nrows}))[0])
+            || (PyArray_DIMS({z})[1] != PyArray_DIMS({b})[1])
             )
-        {
-            {Py_XDECREF(%(z)s);}
-            npy_intp dims[] = {0, 0};
-            dims[0] = ((npy_int32 *)PyArray_DATA(%(a_nrows)s))[0];
-            dims[1] = PyArray_DIMS(%(b)s)[1];
-            %(z)s = (PyArrayObject*) PyArray_SimpleNew(2, dims, %(typenum_z)s);
-        }
+        {{
+            {{Py_XDECREF({z});}}
+            npy_intp dims[] = {{0, 0}};
+            dims[0] = ((npy_int32 *)PyArray_DATA({a_nrows}))[0];
+            dims[1] = PyArray_DIMS({b})[1];
+            {z} = (PyArrayObject*) PyArray_SimpleNew(2, dims, {typenum_z});
+        }}
 
-        {
+        {{
             // sparse array has size MxK, dense KxN, output MxN
-            npy_intp M = PyArray_DIMS(%(z)s)[0];
-            npy_intp N = PyArray_DIMS(%(z)s)[1];
-            npy_intp K = PyArray_DIMS(%(b)s)[0];
+            npy_intp M = PyArray_DIMS({z})[0];
+            npy_intp N = PyArray_DIMS({z})[1];
+            npy_intp K = PyArray_DIMS({b})[0];
             if (N > 0x7fffffffL)
-            {PyErr_SetString(PyExc_NotImplementedError, "array too big (overflows int32 index)"); %(fail)s;}
+            {{PyErr_SetString(PyExc_NotImplementedError, "array too big (overflows int32 index)"); {fail};}}
 
             // strides tell you how many bytes to skip to go to next column/row entry
-            npy_intp Szm = PyArray_STRIDES(%(z)s)[0] / PyArray_DESCR(%(z)s)->elsize;
-            npy_intp Szn = PyArray_STRIDES(%(z)s)[1] / PyArray_DESCR(%(z)s)->elsize;
-            //npy_intp Sbm = PyArray_STRIDES(%(b)s)[0] / PyArray_DESCR(%(b)s)->elsize;
-            npy_intp Sbn = PyArray_STRIDES(%(b)s)[1] / PyArray_DESCR(%(b)s)->elsize;
-            npy_intp Sval = PyArray_STRIDES(%(a_val)s)[0] / PyArray_DESCR(%(a_val)s)->elsize;
-            npy_intp Sind = PyArray_STRIDES(%(a_ind)s)[0] / PyArray_DESCR(%(a_ind)s)->elsize;
-            npy_intp Sptr = PyArray_STRIDES(%(a_ptr)s)[0] / PyArray_DESCR(%(a_ptr)s)->elsize;
+            npy_intp Szm = PyArray_STRIDES({z})[0] / PyArray_DESCR({z})->elsize;
+            npy_intp Szn = PyArray_STRIDES({z})[1] / PyArray_DESCR({z})->elsize;
+            //npy_intp Sbm = PyArray_STRIDES({b})[0] / PyArray_DESCR({b})->elsize;
+            npy_intp Sbn = PyArray_STRIDES({b})[1] / PyArray_DESCR({b})->elsize;
+            npy_intp Sval = PyArray_STRIDES({a_val})[0] / PyArray_DESCR({a_val})->elsize;
+            npy_intp Sind = PyArray_STRIDES({a_ind})[0] / PyArray_DESCR({a_ind})->elsize;
+            npy_intp Sptr = PyArray_STRIDES({a_ptr})[0] / PyArray_DESCR({a_ptr})->elsize;
 
             // pointers to access actual data in the arrays passed as params.
-            dtype_%(z)s*     __restrict__ Dz   = (dtype_%(z)s*)PyArray_DATA(%(z)s);
-            const dtype_%(a_val)s* __restrict__ Dval = (dtype_%(a_val)s*)PyArray_DATA(%(a_val)s);
-            const npy_int32 * __restrict__ Dind = (npy_int32*)PyArray_DATA(%(a_ind)s);
-            const npy_int32 * __restrict__ Dptr = (npy_int32*)PyArray_DATA(%(a_ptr)s);
+            dtype_{z}*     __restrict__ Dz   = (dtype_{z}*)PyArray_DATA({z});
+            const dtype_{a_val}* __restrict__ Dval = (dtype_{a_val}*)PyArray_DATA({a_val});
+            const npy_int32 * __restrict__ Dind = (npy_int32*)PyArray_DATA({a_ind});
+            const npy_int32 * __restrict__ Dptr = (npy_int32*)PyArray_DATA({a_ptr});
 
-            //npy_intp nnz = PyArray_DIMS(%(a_ind)s)[0];
+            //npy_intp nnz = PyArray_DIMS({a_ind})[0];
 
             //clear the output array
-            memset(Dz, 0, M*N*sizeof(dtype_%(z)s));
+            memset(Dz, 0, M*N*sizeof(dtype_{z}));
 
             //iterate over the sparse array, making the most of an entry wherever we find it.
             //
@@ -394,43 +394,43 @@ class StructuredDotCSC(COp):
 
             // loop over inner dimension
             for (npy_int32 k = 0; k < K; ++k)
-            {
+            {{
                 // get pointer to k-th row of dense matrix
-                const dtype_%(b)s* __restrict__ bk = (dtype_%(b)s*)(PyArray_BYTES(%(b)s) + PyArray_STRIDES(%(b)s)[0] * k);
+                const dtype_{b}* __restrict__ bk = (dtype_{b}*)(PyArray_BYTES({b}) + PyArray_STRIDES({b})[0] * k);
 
                 // loop over sparse column indices through index pointer array
                 // (amounts to looping over rows M of sparse matrix)
 
                 for (npy_int32 m_idx = Dptr[k * Sptr]; m_idx < Dptr[(k+1) * Sptr]; ++m_idx)
-                {
+                {{
                     npy_int32 m = Dind[m_idx * Sind]; // row index of non-null value for column K
-                    const dtype_%(a_val)s Amk = Dval[m_idx * Sval]; // actual value at that location
+                    const dtype_{a_val} Amk = Dval[m_idx * Sval]; // actual value at that location
 
                     // pointer to m-th row of the output matrix Z
-                    dtype_%(z)s* __restrict__ zm = (dtype_%(z)s*)(PyArray_BYTES(%(z)s) + PyArray_STRIDES(%(z)s)[0] * m);
+                    dtype_{z}* __restrict__ zm = (dtype_{z}*)(PyArray_BYTES({z}) + PyArray_STRIDES({z})[0] * m);
 
                     //RESOLVE: a.shape[0] equals z.shape[0], why is this not an equality constraint?
-                    if (m >= PyArray_DIMS(%(z)s)[0])
-                    {PyErr_SetString(PyExc_NotImplementedError, "illegal row index in a"); %(fail)s;}
+                    if (m >= PyArray_DIMS({z})[0])
+                    {{PyErr_SetString(PyExc_NotImplementedError, "illegal row index in a"); {fail};}}
 
                     // loop over final dimension (cols of dense matrix) and perform dot product
-                    if ((Szn == 1) && (Sbn == 1)) {
+                    if ((Szn == 1) && (Sbn == 1)) {{
                         for(npy_int32 n = 0; n < N; ++n)
-                        {
+                        {{
                             zm[n] += Amk * bk[n];
-                        }
-                    }
+                        }}
+                    }}
                     else
-                    {
+                    {{
                         for(npy_int32 n = 0; n < N; ++n)
-                        {
+                        {{
                             zm[n*Szn] += Amk * bk[n*Sbn];
-                        }
-                    }
-                }
-            }
-        }
-        """ % dict(locals(), **sub)
+                        }}
+                    }}
+                }}
+            }}
+        }}
+        """.format(**dict(locals(), **sub))
 
         return rval
 
@@ -518,59 +518,59 @@ class StructuredDotCSR(COp):
             raise NotImplementedError("Complex types are not supported for b")
 
         return """
-        if (PyArray_NDIM(%(a_val)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(a_val) != 1"); %(fail)s;}
-        if (PyArray_NDIM(%(a_ind)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(a_ind) != 1"); %(fail)s;}
-        if (PyArray_NDIM(%(a_ptr)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(a_ptr) != 1"); %(fail)s;}
-        if (PyArray_NDIM(%(b)s) != 2) {PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 2"); %(fail)s;}
+        if (PyArray_NDIM({a_val}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a_val) != 1"); {fail};}}
+        if (PyArray_NDIM({a_ind}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a_ind) != 1"); {fail};}}
+        if (PyArray_NDIM({a_ptr}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a_ptr) != 1"); {fail};}}
+        if (PyArray_NDIM({b}) != 2) {{PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 2"); {fail};}}
 
-        if (PyArray_TYPE(%(a_ind)s) != NPY_INT32) {
-        PyErr_SetString(PyExc_NotImplementedError, "a_ind dtype not INT32"); %(fail)s;}
+        if (PyArray_TYPE({a_ind}) != NPY_INT32) {{
+        PyErr_SetString(PyExc_NotImplementedError, "a_ind dtype not INT32"); {fail};}}
 
-        if (PyArray_TYPE(%(a_ptr)s) != NPY_INT32)
-        {PyErr_SetString(PyExc_NotImplementedError, "a_ptr dtype not INT32"); %(fail)s;}
+        if (PyArray_TYPE({a_ptr}) != NPY_INT32)
+        {{PyErr_SetString(PyExc_NotImplementedError, "a_ptr dtype not INT32"); {fail};}}
 
-        if (PyArray_DIMS(%(a_val)s)[0] != PyArray_DIMS(%(a_ind)s)[0])
-        {PyErr_SetString(PyExc_NotImplementedError, "a_val and a_ind have different lengths"); %(fail)s;}
+        if (PyArray_DIMS({a_val})[0] != PyArray_DIMS({a_ind})[0])
+        {{PyErr_SetString(PyExc_NotImplementedError, "a_val and a_ind have different lengths"); {fail};}}
 
-        if ((!%(z)s)
-            || (PyArray_DIMS(%(z)s)[0] != PyArray_DIMS(%(a_ptr)s)[0]-1) //a's rows
-            || (PyArray_DIMS(%(z)s)[1] != PyArray_DIMS(%(b)s)[1])       //b's columns
+        if ((!{z})
+            || (PyArray_DIMS({z})[0] != PyArray_DIMS({a_ptr})[0]-1) //a's rows
+            || (PyArray_DIMS({z})[1] != PyArray_DIMS({b})[1])       //b's columns
             )
-        {
-            {Py_XDECREF(%(z)s);}
-            npy_intp dims[] = {0, 0};
-            dims[0] = PyArray_DIMS(%(a_ptr)s)[0]-1;
-            dims[1] = PyArray_DIMS(%(b)s)[1];
-            %(z)s = (PyArrayObject*) PyArray_SimpleNew(2, dims, %(typenum_z)s);
-        }
+        {{
+            {{Py_XDECREF({z});}}
+            npy_intp dims[] = {{0, 0}};
+            dims[0] = PyArray_DIMS({a_ptr})[0]-1;
+            dims[1] = PyArray_DIMS({b})[1];
+            {z} = (PyArrayObject*) PyArray_SimpleNew(2, dims, {typenum_z});
+        }}
 
-        {
+        {{
             // sparse array has size MxK, dense KxN, output MxN
-            npy_intp M = PyArray_DIMS(%(z)s)[0];
-            npy_intp N = PyArray_DIMS(%(z)s)[1];
-            npy_intp K = PyArray_DIMS(%(b)s)[0];
+            npy_intp M = PyArray_DIMS({z})[0];
+            npy_intp N = PyArray_DIMS({z})[1];
+            npy_intp K = PyArray_DIMS({b})[0];
             if (N > 0x7fffffffL)
-            {PyErr_SetString(PyExc_NotImplementedError, "array too big (overflows int32 index)"); %(fail)s;}
+            {{PyErr_SetString(PyExc_NotImplementedError, "array too big (overflows int32 index)"); {fail};}}
 
             // strides tell you how many bytes to skip to go to next column/row entry
-            npy_intp Szm = PyArray_STRIDES(%(z)s)[0] / PyArray_DESCR(%(z)s)->elsize;
-            npy_intp Szn = PyArray_STRIDES(%(z)s)[1] / PyArray_DESCR(%(z)s)->elsize;
-            npy_intp Sbm = PyArray_STRIDES(%(b)s)[0] / PyArray_DESCR(%(b)s)->elsize;
-            npy_intp Sbn = PyArray_STRIDES(%(b)s)[1] / PyArray_DESCR(%(b)s)->elsize;
-            npy_intp Sval = PyArray_STRIDES(%(a_val)s)[0] / PyArray_DESCR(%(a_val)s)->elsize;
-            npy_intp Sind = PyArray_STRIDES(%(a_ind)s)[0] / PyArray_DESCR(%(a_ind)s)->elsize;
-            npy_intp Sptr = PyArray_STRIDES(%(a_ptr)s)[0] / PyArray_DESCR(%(a_ptr)s)->elsize;
+            npy_intp Szm = PyArray_STRIDES({z})[0] / PyArray_DESCR({z})->elsize;
+            npy_intp Szn = PyArray_STRIDES({z})[1] / PyArray_DESCR({z})->elsize;
+            npy_intp Sbm = PyArray_STRIDES({b})[0] / PyArray_DESCR({b})->elsize;
+            npy_intp Sbn = PyArray_STRIDES({b})[1] / PyArray_DESCR({b})->elsize;
+            npy_intp Sval = PyArray_STRIDES({a_val})[0] / PyArray_DESCR({a_val})->elsize;
+            npy_intp Sind = PyArray_STRIDES({a_ind})[0] / PyArray_DESCR({a_ind})->elsize;
+            npy_intp Sptr = PyArray_STRIDES({a_ptr})[0] / PyArray_DESCR({a_ptr})->elsize;
 
             // pointers to access actual data in the arrays passed as params.
-            dtype_%(z)s* __restrict__ Dz = (dtype_%(z)s*)PyArray_DATA(%(z)s);
-            const dtype_%(a_val)s* __restrict__ Dval = (dtype_%(a_val)s*)PyArray_DATA(%(a_val)s);
-            const npy_int32 * __restrict__ Dind = (npy_int32*)PyArray_DATA(%(a_ind)s);
-            const npy_int32 * __restrict__ Dptr = (npy_int32*)PyArray_DATA(%(a_ptr)s);
+            dtype_{z}* __restrict__ Dz = (dtype_{z}*)PyArray_DATA({z});
+            const dtype_{a_val}* __restrict__ Dval = (dtype_{a_val}*)PyArray_DATA({a_val});
+            const npy_int32 * __restrict__ Dind = (npy_int32*)PyArray_DATA({a_ind});
+            const npy_int32 * __restrict__ Dptr = (npy_int32*)PyArray_DATA({a_ptr});
 
-            //npy_intp nnz = PyArray_DIMS(%(a_ind)s)[0];
+            //npy_intp nnz = PyArray_DIMS({a_ind})[0];
 
             //clear the output array
-            memset(Dz, 0, M*N*sizeof(dtype_%(z)s));
+            memset(Dz, 0, M*N*sizeof(dtype_{z}));
 
             //iterate over the sparse array, making the most of an entry wherever we find it.
             // Normal matrix matrix multiply:
@@ -586,30 +586,30 @@ class StructuredDotCSR(COp):
 
             // loop over inner dimension
             for (npy_int64 m = 0; m < M; ++m)
-            {
+            {{
                 // pointer to m-th row of the output matrix Z
-                dtype_%(z)s* __restrict__ zm = (dtype_%(z)s*)(PyArray_BYTES(%(z)s) + PyArray_STRIDES(%(z)s)[0] * m);
+                dtype_{z}* __restrict__ zm = (dtype_{z}*)(PyArray_BYTES({z}) + PyArray_STRIDES({z})[0] * m);
 
                 // loop over sparse rows indices through index pointer array
                 // (amounts to looping over cols k of sparse matrix)
                 for (npy_int32 k_idx = Dptr[m * Sptr]; k_idx < Dptr[(m+1) * Sptr]; ++k_idx)
-                {
+                {{
                     npy_int32 k = Dind[k_idx * Sind]; // col index of non-null value for row m
-                    const dtype_%(a_val)s Amk = Dval[k_idx * Sval]; // actual value at that location
+                    const dtype_{a_val} Amk = Dval[k_idx * Sval]; // actual value at that location
 
                     // get pointer to k-th row of dense matrix
-                    const dtype_%(b)s* __restrict__ bk = (dtype_%(b)s*)(PyArray_BYTES(%(b)s) + PyArray_STRIDES(%(b)s)[0] * k);
+                    const dtype_{b}* __restrict__ bk = (dtype_{b}*)(PyArray_BYTES({b}) + PyArray_STRIDES({b})[0] * k);
 
                     // loop over final dimension (cols of dense matrix) and perform dot product
                     for(npy_int32 n = 0; n < N; ++n)
-                    {
+                    {{
                         zm[n*Szn] += Amk * bk[n*Sbn];
-                    }
-                }
-            }
-        }
+                    }}
+                }}
+            }}
+        }}
 
-        """ % dict(locals(), **sub)
+        """.format(**dict(locals(), **sub))
 
     def c_code_cache_version(self):
         return (2,)
@@ -758,137 +758,137 @@ class UsmmCscDense(_NoPythonCOp):
 
         rval = """
 
-        if (PyArray_NDIM(%(x_val)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(x_val) != 1"); %(fail)s;}
-        if (PyArray_NDIM(%(x_ind)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(x_ind) != 1"); %(fail)s;}
-        if (PyArray_NDIM(%(x_ptr)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(x_ptr) != 1"); %(fail)s;}
-        if (PyArray_NDIM(%(x_nrows)s) != 0) {PyErr_SetString(PyExc_NotImplementedError, "rank(nrows) != 0"); %(fail)s;}
-        if (PyArray_NDIM(%(y)s) != 2) {PyErr_SetString(PyExc_NotImplementedError, "rank(y) != 2"); %(fail)s;}
+        if (PyArray_NDIM({x_val}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(x_val) != 1"); {fail};}}
+        if (PyArray_NDIM({x_ind}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(x_ind) != 1"); {fail};}}
+        if (PyArray_NDIM({x_ptr}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(x_ptr) != 1"); {fail};}}
+        if (PyArray_NDIM({x_nrows}) != 0) {{PyErr_SetString(PyExc_NotImplementedError, "rank(nrows) != 0"); {fail};}}
+        if (PyArray_NDIM({y}) != 2) {{PyErr_SetString(PyExc_NotImplementedError, "rank(y) != 2"); {fail};}}
 
-        if (PyArray_TYPE(%(x_val)s) != %(typenum_x_val)s) {
-        PyErr_SetString(PyExc_NotImplementedError, "Invalid type for x_val"); %(fail)s;}
+        if (PyArray_TYPE({x_val}) != {typenum_x_val}) {{
+        PyErr_SetString(PyExc_NotImplementedError, "Invalid type for x_val"); {fail};}}
 
-        if (PyArray_TYPE(%(y)s) != %(typenum_y)s) {
-        PyErr_SetString(PyExc_NotImplementedError, "Invalid type for y"); %(fail)s;}
+        if (PyArray_TYPE({y}) != {typenum_y}) {{
+        PyErr_SetString(PyExc_NotImplementedError, "Invalid type for y"); {fail};}}
 
-        if (PyArray_TYPE(%(z)s) != %(typenum_z)s) {
-        PyErr_SetString(PyExc_NotImplementedError, "Invalid type for z"); %(fail)s;}
+        if (PyArray_TYPE({z}) != {typenum_z}) {{
+        PyErr_SetString(PyExc_NotImplementedError, "Invalid type for z"); {fail};}}
 
-        if (PyArray_TYPE(%(alpha)s) != %(typenum_alpha)s) {
-        PyErr_SetString(PyExc_NotImplementedError, "Invalid type for alpha"); %(fail)s;}
+        if (PyArray_TYPE({alpha}) != {typenum_alpha}) {{
+        PyErr_SetString(PyExc_NotImplementedError, "Invalid type for alpha"); {fail};}}
 
-        if (PyArray_TYPE(%(x_ind)s) != NPY_INT32) {
-        PyErr_SetString(PyExc_NotImplementedError, "x_ind dtype not INT32"); %(fail)s;}
+        if (PyArray_TYPE({x_ind}) != NPY_INT32) {{
+        PyErr_SetString(PyExc_NotImplementedError, "x_ind dtype not INT32"); {fail};}}
 
-        if (PyArray_TYPE(%(x_ptr)s) != NPY_INT32)
-        {PyErr_SetString(PyExc_NotImplementedError, "x_ptr dtype not INT32"); %(fail)s;}
+        if (PyArray_TYPE({x_ptr}) != NPY_INT32)
+        {{PyErr_SetString(PyExc_NotImplementedError, "x_ptr dtype not INT32"); {fail};}}
 
-        if (PyArray_TYPE(%(x_nrows)s) != NPY_INT32)
-        {PyErr_SetString(PyExc_NotImplementedError, "x_nrows dtype not INT32"); %(fail)s;}
+        if (PyArray_TYPE({x_nrows}) != NPY_INT32)
+        {{PyErr_SetString(PyExc_NotImplementedError, "x_nrows dtype not INT32"); {fail};}}
 
-        if (PyArray_DIMS(%(x_val)s)[0] != PyArray_DIMS(%(x_ind)s)[0])
-        {PyErr_SetString(PyExc_NotImplementedError, "x_val and x_ind have different lengths"); %(fail)s;}
+        if (PyArray_DIMS({x_val})[0] != PyArray_DIMS({x_ind})[0])
+        {{PyErr_SetString(PyExc_NotImplementedError, "x_val and x_ind have different lengths"); {fail};}}
 
-        if (PyArray_DIMS(%(x_ptr)s)[0] != PyArray_DIMS(%(y)s)[0]+1)
-        {PyErr_SetString(PyExc_NotImplementedError, "x's number of columns doesn't match y's rows"); %(fail)s;}
+        if (PyArray_DIMS({x_ptr})[0] != PyArray_DIMS({y})[0]+1)
+        {{PyErr_SetString(PyExc_NotImplementedError, "x's number of columns doesn't match y's rows"); {fail};}}
 
-        if (PyArray_DIMS(%(z)s)[0] != ((npy_int32 *)PyArray_DATA(%(x_nrows)s))[0] || PyArray_DIMS(%(z)s)[1] != PyArray_DIMS(%(y)s)[1])
-        {PyErr_SetString(PyExc_NotImplementedError, "The dimension of the allocated output doesn't match the correct output size."); %(fail)s;}
+        if (PyArray_DIMS({z})[0] != ((npy_int32 *)PyArray_DATA({x_nrows}))[0] || PyArray_DIMS({z})[1] != PyArray_DIMS({y})[1])
+        {{PyErr_SetString(PyExc_NotImplementedError, "The dimension of the allocated output doesn't match the correct output size."); {fail};}}
 
-        if (PyArray_SIZE(%(alpha)s) != 1)
-        {PyErr_SetString(PyExc_NotImplementedError, "The number of element in alpha must be 1"); %(fail)s;}
+        if (PyArray_SIZE({alpha}) != 1)
+        {{PyErr_SetString(PyExc_NotImplementedError, "The number of element in alpha must be 1"); {fail};}}
 
-        if (PyArray_NDIM(%(alpha)s) != 2)
-        {PyErr_SetString(PyExc_NotImplementedError, "The number dimension of alpha must be 2"); %(fail)s;}
+        if (PyArray_NDIM({alpha}) != 2)
+        {{PyErr_SetString(PyExc_NotImplementedError, "The number dimension of alpha must be 2"); {fail};}}
 
-        if (PyArray_NDIM(%(x_val)s) != 1)
-        {PyErr_SetString(PyExc_NotImplementedError, "The number dimension of x_val must be 1"); %(fail)s;}
+        if (PyArray_NDIM({x_val}) != 1)
+        {{PyErr_SetString(PyExc_NotImplementedError, "The number dimension of x_val must be 1"); {fail};}}
 
-        if (PyArray_NDIM(%(y)s) != 2)
-        {PyErr_SetString(PyExc_NotImplementedError, "The number dimension of y must be 2"); %(fail)s;}
+        if (PyArray_NDIM({y}) != 2)
+        {{PyErr_SetString(PyExc_NotImplementedError, "The number dimension of y must be 2"); {fail};}}
 
-        if (PyArray_NDIM(%(z)s) != 2)
-        {PyErr_SetString(PyExc_NotImplementedError, "The number dimension of z must be 2"); %(fail)s;}
+        if (PyArray_NDIM({z}) != 2)
+        {{PyErr_SetString(PyExc_NotImplementedError, "The number dimension of z must be 2"); {fail};}}
 
-        if (%(inplace)s)
-        {
-            if (%(typenum_zn)s != %(typenum_z)s) {
-            PyErr_SetString(PyExc_NotImplementedError, "When inplace the output dtype must be the same as the input"); %(fail)s;}
+        if ({inplace})
+        {{
+            if ({typenum_zn} != {typenum_z}) {{
+            PyErr_SetString(PyExc_NotImplementedError, "When inplace the output dtype must be the same as the input"); {fail};}}
 
-            Py_XDECREF(%(zn)s);
-            %(zn)s = %(z)s;
-            Py_INCREF(%(zn)s);
-        }
-        else if (!%(zn)s
-            || (PyArray_DIMS(%(zn)s)[0] != ((npy_int32 *)PyArray_DATA(%(x_nrows)s))[0])
-            || (PyArray_DIMS(%(zn)s)[1] != PyArray_DIMS(%(y)s)[1])
+            Py_XDECREF({zn});
+            {zn} = {z};
+            Py_INCREF({zn});
+        }}
+        else if (!{zn}
+            || (PyArray_DIMS({zn})[0] != ((npy_int32 *)PyArray_DATA({x_nrows}))[0])
+            || (PyArray_DIMS({zn})[1] != PyArray_DIMS({y})[1])
             )
-        {
-            {Py_XDECREF(%(zn)s);}
-            npy_intp dims[] = {0, 0};
-            dims[0] = ((npy_int32 *)PyArray_DATA(%(x_nrows)s))[0];
-            dims[1] = PyArray_DIMS(%(y)s)[1];
-            %(zn)s = (PyArrayObject*) PyArray_SimpleNew(2, dims, %(typenum_zn)s);
-        }
+        {{
+            {{Py_XDECREF({zn});}}
+            npy_intp dims[] = {{0, 0}};
+            dims[0] = ((npy_int32 *)PyArray_DATA({x_nrows}))[0];
+            dims[1] = PyArray_DIMS({y})[1];
+            {zn} = (PyArrayObject*) PyArray_SimpleNew(2, dims, {typenum_zn});
+        }}
 
-        {
+        {{
             // sparse array has size MxK, dense KxN, output MxN
-            npy_intp M = PyArray_DIMS(%(zn)s)[0];
-            npy_intp N = PyArray_DIMS(%(zn)s)[1];
-            npy_intp K = PyArray_DIMS(%(y)s)[0];
+            npy_intp M = PyArray_DIMS({zn})[0];
+            npy_intp N = PyArray_DIMS({zn})[1];
+            npy_intp K = PyArray_DIMS({y})[0];
 
             // pointers to access actual data in the arrays passed as params.
-            const dtype_%(x_val)s* __restrict__ Dval = (dtype_%(x_val)s*)PyArray_DATA(%(x_val)s);
-            const npy_int32 * __restrict__ Dind = (npy_int32*)PyArray_DATA(%(x_ind)s);
-            const npy_int32 * __restrict__ Dptr = (npy_int32*)PyArray_DATA(%(x_ptr)s);
-            const dtype_%(alpha)s alpha = ((dtype_%(alpha)s*)PyArray_DATA(%(alpha)s))[0];
+            const dtype_{x_val}* __restrict__ Dval = (dtype_{x_val}*)PyArray_DATA({x_val});
+            const npy_int32 * __restrict__ Dind = (npy_int32*)PyArray_DATA({x_ind});
+            const npy_int32 * __restrict__ Dptr = (npy_int32*)PyArray_DATA({x_ptr});
+            const dtype_{alpha} alpha = ((dtype_{alpha}*)PyArray_DATA({alpha}))[0];
 
-            npy_intp Sz = PyArray_STRIDES(%(z)s)[1] / PyArray_DESCR(%(z)s)->elsize;
-            npy_intp Szn = PyArray_STRIDES(%(zn)s)[1] / PyArray_DESCR(%(zn)s)->elsize;
-            npy_intp Sval = PyArray_STRIDES(%(x_val)s)[0] / PyArray_DESCR(%(x_val)s)->elsize;
-            npy_intp Sind = PyArray_STRIDES(%(x_ind)s)[0] / PyArray_DESCR(%(x_ind)s)->elsize;
-            npy_intp Sptr = PyArray_STRIDES(%(x_ptr)s)[0] / PyArray_DESCR(%(x_ptr)s)->elsize;
-            npy_intp Sy = PyArray_STRIDES(%(y)s)[1] / PyArray_DESCR(%(y)s)->elsize;
+            npy_intp Sz = PyArray_STRIDES({z})[1] / PyArray_DESCR({z})->elsize;
+            npy_intp Szn = PyArray_STRIDES({zn})[1] / PyArray_DESCR({zn})->elsize;
+            npy_intp Sval = PyArray_STRIDES({x_val})[0] / PyArray_DESCR({x_val})->elsize;
+            npy_intp Sind = PyArray_STRIDES({x_ind})[0] / PyArray_DESCR({x_ind})->elsize;
+            npy_intp Sptr = PyArray_STRIDES({x_ptr})[0] / PyArray_DESCR({x_ptr})->elsize;
+            npy_intp Sy = PyArray_STRIDES({y})[1] / PyArray_DESCR({y})->elsize;
 
             // blas expects ints; convert here (rather than just making N etc ints) to avoid potential overflow in the negative-stride correction
             if ((N > 0x7fffffffL)||(Sy > 0x7fffffffL)||(Szn > 0x7fffffffL)||(Sy < -0x7fffffffL)||(Szn < -0x7fffffffL))
-            {PyErr_SetString(PyExc_NotImplementedError, "array too big for BLAS (overflows int32 index)"); %(fail)s;}
+            {{PyErr_SetString(PyExc_NotImplementedError, "array too big for BLAS (overflows int32 index)"); {fail};}}
             int N32 = N;
             int Sy32 = Sy;
             int Szn32 = Szn;
 
-            if (!(%(inplace)s))
-            {
-                if (PyArray_CopyInto(%(zn)s, %(z)s))
-                {
-                    Py_XDECREF(%(zn)s);
-                    %(fail)s;
-                }
-            }
+            if (!({inplace}))
+            {{
+                if (PyArray_CopyInto({zn}, {z}))
+                {{
+                    Py_XDECREF({zn});
+                    {fail};
+                }}
+            }}
 
             for (npy_intp k = 0; k < K; ++k)
-            {
+            {{
                 for (npy_int32 m_idx = Dptr[k * Sptr]; m_idx < Dptr[(k+1)*Sptr]; ++m_idx)
-                {
+                {{
                     const npy_int32 m = Dind[m_idx * Sind]; // row index of non-null value for column K
 
-                    const dtype_%(x_val)s Amk = alpha * Dval[m_idx * Sval]; // actual value at that location
+                    const dtype_{x_val} Amk = alpha * Dval[m_idx * Sval]; // actual value at that location
 
-                    dtype_%(y)s* y_row = (dtype_%(y)s*)(PyArray_BYTES(%(y)s) + PyArray_STRIDES(%(y)s)[0] * k);
+                    dtype_{y}* y_row = (dtype_{y}*)(PyArray_BYTES({y}) + PyArray_STRIDES({y})[0] * k);
                     // axpy expects pointer to the beginning of memory arrays,
                     // so when the stride is negative, we need to get the
                     // last element
                     if (Sy < 0)
                         y_row += (K - 1) * Sy;
 
-                    dtype_%(zn)s* z_row = (dtype_%(zn)s*)(PyArray_BYTES(%(zn)s) + PyArray_STRIDES(%(zn)s)[0] * m);
+                    dtype_{zn}* z_row = (dtype_{zn}*)(PyArray_BYTES({zn}) + PyArray_STRIDES({zn})[0] * m);
                     if (Szn < 0)
                         z_row += (N - 1) * Szn;
 
-                    %(axpy)s(&N32, (%(conv_type)s*)&Amk, (%(conv_type)s*)y_row, &Sy32, (%(conv_type)s*)z_row, &Szn32);
-                }
-            }
-        }
-        """ % dict(locals(), **sub)
+                    {axpy}(&N32, ({conv_type}*)&Amk, ({conv_type}*)y_row, &Sy32, ({conv_type}*)z_row, &Szn32);
+                }}
+            }}
+        }}
+        """.format(**dict(locals(), **sub))
 
         return rval
 
@@ -986,100 +986,100 @@ class CSMGradC(_NoPythonCOp):
             raise NotImplementedError("Complex types are not supported for b_val")
 
         return """
-        if (PyArray_NDIM(%(a_val)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(a_val) != 1"); %(fail)s;}
-        if (PyArray_NDIM(%(a_ind)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(a_ind) != 1"); %(fail)s;}
-        if (PyArray_NDIM(%(a_ptr)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(a_ptr) != 1"); %(fail)s;}
-        if (PyArray_NDIM(%(b_val)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(b_val) != 1"); %(fail)s;}
-        if (PyArray_NDIM(%(b_ind)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(b_ind) != 1"); %(fail)s;}
-        if (PyArray_NDIM(%(b_ptr)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(b_ptr) != 1"); %(fail)s;}
+        if (PyArray_NDIM({a_val}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a_val) != 1"); {fail};}}
+        if (PyArray_NDIM({a_ind}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a_ind) != 1"); {fail};}}
+        if (PyArray_NDIM({a_ptr}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a_ptr) != 1"); {fail};}}
+        if (PyArray_NDIM({b_val}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(b_val) != 1"); {fail};}}
+        if (PyArray_NDIM({b_ind}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(b_ind) != 1"); {fail};}}
+        if (PyArray_NDIM({b_ptr}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(b_ptr) != 1"); {fail};}}
 
-        if (PyArray_TYPE(%(a_ind)s) != NPY_INT32) {
-        PyErr_SetString(PyExc_NotImplementedError, "a_ind dtype not INT32"); %(fail)s;}
+        if (PyArray_TYPE({a_ind}) != NPY_INT32) {{
+        PyErr_SetString(PyExc_NotImplementedError, "a_ind dtype not INT32"); {fail};}}
 
-        if (PyArray_TYPE(%(a_ptr)s) != NPY_INT32)
-        {PyErr_SetString(PyExc_NotImplementedError, "a_ptr dtype not INT32"); %(fail)s;}
+        if (PyArray_TYPE({a_ptr}) != NPY_INT32)
+        {{PyErr_SetString(PyExc_NotImplementedError, "a_ptr dtype not INT32"); {fail};}}
 
-        if (PyArray_TYPE(%(b_ind)s) != NPY_INT32) {
-        PyErr_SetString(PyExc_NotImplementedError, "b_ind dtype not INT32"); %(fail)s;}
+        if (PyArray_TYPE({b_ind}) != NPY_INT32) {{
+        PyErr_SetString(PyExc_NotImplementedError, "b_ind dtype not INT32"); {fail};}}
 
-        if (PyArray_TYPE(%(b_ptr)s) != NPY_INT32)
-        {PyErr_SetString(PyExc_NotImplementedError, "b_ptr dtype not INT32"); %(fail)s;}
+        if (PyArray_TYPE({b_ptr}) != NPY_INT32)
+        {{PyErr_SetString(PyExc_NotImplementedError, "b_ptr dtype not INT32"); {fail};}}
 
-        if (PyArray_DIMS(%(a_val)s)[0] != PyArray_DIMS(%(a_ind)s)[0])
-        {PyErr_SetString(PyExc_NotImplementedError, "a_val and a_ind have different lengths"); %(fail)s;}
+        if (PyArray_DIMS({a_val})[0] != PyArray_DIMS({a_ind})[0])
+        {{PyErr_SetString(PyExc_NotImplementedError, "a_val and a_ind have different lengths"); {fail};}}
 
-        if (PyArray_DIMS(%(b_val)s)[0] != PyArray_DIMS(%(b_ind)s)[0])
-        {PyErr_SetString(PyExc_NotImplementedError, "b_val and b_ind have different lengths"); %(fail)s;}
+        if (PyArray_DIMS({b_val})[0] != PyArray_DIMS({b_ind})[0])
+        {{PyErr_SetString(PyExc_NotImplementedError, "b_val and b_ind have different lengths"); {fail};}}
 
-        if (PyArray_DIMS(%(a_ptr)s)[0] != PyArray_DIMS(%(b_ptr)s)[0])
-        {PyErr_SetString(PyExc_NotImplementedError, "a_ptr and b_ptr have different lengths"); %(fail)s;}
+        if (PyArray_DIMS({a_ptr})[0] != PyArray_DIMS({b_ptr})[0])
+        {{PyErr_SetString(PyExc_NotImplementedError, "a_ptr and b_ptr have different lengths"); {fail};}}
 
-        if ((!%(z)s) || (PyArray_DIMS(%(z)s)[0] != PyArray_DIMS(%(a_val)s)[0]))
-        {
-            {Py_XDECREF(%(z)s);}
-            npy_intp dims[] = {0};
-            dims[0] = PyArray_DIMS(%(a_val)s)[0];
-            %(z)s = (PyArrayObject*) PyArray_SimpleNew(1, dims, %(typenum_z)s);
-        }
+        if ((!{z}) || (PyArray_DIMS({z})[0] != PyArray_DIMS({a_val})[0]))
+        {{
+            {{Py_XDECREF({z});}}
+            npy_intp dims[] = {{0}};
+            dims[0] = PyArray_DIMS({a_val})[0];
+            {z} = (PyArrayObject*) PyArray_SimpleNew(1, dims, {typenum_z});
+        }}
 
-        {
+        {{
             // sparse array has size MxK, dense KxN, output MxN
-            npy_intp M = PyArray_DIMS(%(a_ptr)s)[0] - 1;
-            npy_intp a_dim_0 = ((npy_int32 *)PyArray_DATA(%(a_dim)s))[0];
-            npy_intp a_dim_1 = ((npy_int32 *)PyArray_DATA(%(a_dim)s))[1];
+            npy_intp M = PyArray_DIMS({a_ptr})[0] - 1;
+            npy_intp a_dim_0 = ((npy_int32 *)PyArray_DATA({a_dim}))[0];
+            npy_intp a_dim_1 = ((npy_int32 *)PyArray_DATA({a_dim}))[1];
 
             npy_intp sp_dim = (M == a_dim_0)?a_dim_1:a_dim_0;
 
             // strides tell you how many bytes to skip to go to next column/row entry
-            npy_intp Sz = PyArray_STRIDES(%(z)s)[0] / PyArray_DESCR(%(z)s)->elsize;
-            npy_intp Sa_val = PyArray_STRIDES(%(a_val)s)[0] / PyArray_DESCR(%(a_val)s)->elsize;
-            npy_intp Sa_ind = PyArray_STRIDES(%(a_ind)s)[0] / PyArray_DESCR(%(a_ind)s)->elsize;
-            npy_intp Sa_ptr = PyArray_STRIDES(%(a_ptr)s)[0] / PyArray_DESCR(%(a_ptr)s)->elsize;
-            npy_intp Sb_val = PyArray_STRIDES(%(b_val)s)[0] / PyArray_DESCR(%(b_val)s)->elsize;
-            npy_intp Sb_ind = PyArray_STRIDES(%(b_ind)s)[0] / PyArray_DESCR(%(b_ind)s)->elsize;
-            npy_intp Sb_ptr = PyArray_STRIDES(%(b_ptr)s)[0] / PyArray_DESCR(%(b_ptr)s)->elsize;
+            npy_intp Sz = PyArray_STRIDES({z})[0] / PyArray_DESCR({z})->elsize;
+            npy_intp Sa_val = PyArray_STRIDES({a_val})[0] / PyArray_DESCR({a_val})->elsize;
+            npy_intp Sa_ind = PyArray_STRIDES({a_ind})[0] / PyArray_DESCR({a_ind})->elsize;
+            npy_intp Sa_ptr = PyArray_STRIDES({a_ptr})[0] / PyArray_DESCR({a_ptr})->elsize;
+            npy_intp Sb_val = PyArray_STRIDES({b_val})[0] / PyArray_DESCR({b_val})->elsize;
+            npy_intp Sb_ind = PyArray_STRIDES({b_ind})[0] / PyArray_DESCR({b_ind})->elsize;
+            npy_intp Sb_ptr = PyArray_STRIDES({b_ptr})[0] / PyArray_DESCR({b_ptr})->elsize;
 
             // pointers to access actual data in the arrays passed as params.
-            dtype_%(z)s* __restrict__ Dz = (dtype_%(z)s*)PyArray_DATA(%(z)s);
-            const dtype_%(a_val)s* __restrict__ Da_val = (dtype_%(a_val)s*)PyArray_DATA(%(a_val)s);
-            const npy_int32 * __restrict__ Da_ind = (npy_int32*)PyArray_DATA(%(a_ind)s);
-            const npy_int32 * __restrict__ Da_ptr = (npy_int32*)PyArray_DATA(%(a_ptr)s);
-            const dtype_%(b_val)s* __restrict__ Db_val = (dtype_%(b_val)s*)PyArray_DATA(%(b_val)s);
-            const npy_int32 * __restrict__ Db_ind = (npy_int32*)PyArray_DATA(%(b_ind)s);
-            const npy_int32 * __restrict__ Db_ptr = (npy_int32*)PyArray_DATA(%(b_ptr)s);
+            dtype_{z}* __restrict__ Dz = (dtype_{z}*)PyArray_DATA({z});
+            const dtype_{a_val}* __restrict__ Da_val = (dtype_{a_val}*)PyArray_DATA({a_val});
+            const npy_int32 * __restrict__ Da_ind = (npy_int32*)PyArray_DATA({a_ind});
+            const npy_int32 * __restrict__ Da_ptr = (npy_int32*)PyArray_DATA({a_ptr});
+            const dtype_{b_val}* __restrict__ Db_val = (dtype_{b_val}*)PyArray_DATA({b_val});
+            const npy_int32 * __restrict__ Db_ind = (npy_int32*)PyArray_DATA({b_ind});
+            const npy_int32 * __restrict__ Db_ptr = (npy_int32*)PyArray_DATA({b_ptr});
 
-            npy_intp nnz = PyArray_DIMS(%(a_ind)s)[0];
+            npy_intp nnz = PyArray_DIMS({a_ind})[0];
 
-            dtype_%(b_val)s b_row[sp_dim];
+            dtype_{b_val} b_row[sp_dim];
 
             //clear the output array
             for (npy_int64 i = 0; i < nnz; ++i)
-            {
+            {{
                 Dz[i*Sz] = 0;
-            }
-            memset(b_row, 0, sp_dim*sizeof(dtype_%(b_val)s));
+            }}
+            memset(b_row, 0, sp_dim*sizeof(dtype_{b_val}));
 
             // loop over inner dimension
             for (npy_int64 m = 0; m < M; ++m)
-            {
+            {{
                 for (npy_int32 j_ptr = Db_ptr[m * Sb_ptr];
-                    j_ptr < Db_ptr[(m + 1) * Sb_ptr]; j_ptr++) {
+                    j_ptr < Db_ptr[(m + 1) * Sb_ptr]; j_ptr++) {{
                     b_row[Db_ind[j_ptr * Sb_ind]] += Db_val[j_ptr*Sb_val];
-                }
+                }}
 
                 for (npy_int32 j_ptr = Da_ptr[m * Sa_ptr];
-                    j_ptr < Da_ptr[(m + 1) * Sa_ptr]; j_ptr++) {
+                    j_ptr < Da_ptr[(m + 1) * Sa_ptr]; j_ptr++) {{
                     Dz[j_ptr*Sz] = b_row[Da_ind[j_ptr * Sa_ind]];
-                }
+                }}
 
                 for (npy_int32 j_ptr = Db_ptr[m * Sb_ptr];
-                    j_ptr < Db_ptr[(m + 1) * Sb_ptr]; j_ptr++) {
+                    j_ptr < Db_ptr[(m + 1) * Sb_ptr]; j_ptr++) {{
                     b_row[Db_ind[j_ptr * Sb_ind]] = 0;
-                }
-            }
-        }
+                }}
+            }}
+        }}
 
-        """ % dict(locals(), **sub)
+        """.format(**dict(locals(), **sub))
 
     def c_code_cache_version(self):
         return (3,)
@@ -1166,72 +1166,72 @@ class MulSDCSC(_NoPythonCOp):
             raise NotImplementedError("Complex types are not supported for b")
 
         return """
-        if (PyArray_NDIM(%(_b)s) != 2) {
+        if (PyArray_NDIM({_b}) != 2) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 2");
-            %(fail)s;}
-        if (PyArray_NDIM(%(_data)s) != 1) {
+            {fail};}}
+        if (PyArray_NDIM({_data}) != 1) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(data) != 1");
-            %(fail)s;}
-        if (PyArray_NDIM(%(_indices)s) != 1) {
+            {fail};}}
+        if (PyArray_NDIM({_indices}) != 1) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(indices) != 1");
-            %(fail)s;}
-        if (PyArray_NDIM(%(_indptr)s) != 1) {
+            {fail};}}
+        if (PyArray_NDIM({_indptr}) != 1) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(indptr) != 1");
-            %(fail)s;}
+            {fail};}}
 
-        if( PyArray_TYPE(%(_indices)s) != NPY_INT32) {
-        PyErr_SetString(PyExc_NotImplementedError, "C"); %(fail)s;}
+        if( PyArray_TYPE({_indices}) != NPY_INT32) {{
+        PyErr_SetString(PyExc_NotImplementedError, "C"); {fail};}}
 
-        if( PyArray_TYPE(%(_indptr)s) != NPY_INT32)
-        {PyErr_SetString(PyExc_NotImplementedError, "D"); %(fail)s;}
+        if( PyArray_TYPE({_indptr}) != NPY_INT32)
+        {{PyErr_SetString(PyExc_NotImplementedError, "D"); {fail};}}
 
-        if (!%(_zout)s ||
-            (PyArray_DIMS(%(_zout)s)[0] != PyArray_DIMS(%(_indices)s)[0]) ||
-            !(PyArray_ISCONTIGUOUS(%(_zout)s)))
-        {
-            Py_XDECREF(%(_zout)s);
-            %(_zout)s = (PyArrayObject*) PyArray_SimpleNew(1,
-                  PyArray_DIMS(%(_indices)s), PyArray_TYPE(%(_b)s));
-            if (!%(_zout)s)
-            {
+        if (!{_zout} ||
+            (PyArray_DIMS({_zout})[0] != PyArray_DIMS({_indices})[0]) ||
+            !(PyArray_ISCONTIGUOUS({_zout})))
+        {{
+            Py_XDECREF({_zout});
+            {_zout} = (PyArrayObject*) PyArray_SimpleNew(1,
+                  PyArray_DIMS({_indices}), PyArray_TYPE({_b}));
+            if (!{_zout})
+            {{
                 PyErr_SetString(PyExc_MemoryError,
                     "Could not allocate output memory.");
-                %(fail)s;
-            }
-        }
+                {fail};
+            }}
+        }}
 
-        { //makes it compile even though labels jump over variable definitions.
-            const npy_intp nnz = PyArray_DIMS(%(_indices)s)[0];
+        {{ //makes it compile even though labels jump over variable definitions.
+            const npy_intp nnz = PyArray_DIMS({_indices})[0];
             //TODO: error checking with this
-            const npy_intp N =  PyArray_DIMS(%(_indptr)s)[0]-1;
+            const npy_intp N =  PyArray_DIMS({_indptr})[0]-1;
 
-            const dtype_%(_data)s * const __restrict__ data = (dtype_%(_data)s*)PyArray_DATA(%(_data)s);
-            const npy_int32 * const __restrict__ indptr = (npy_int32 *)PyArray_DATA(%(_indptr)s);
-            const npy_int32 * const __restrict__ indices = (npy_int32 *)PyArray_DATA(%(_indices)s);
+            const dtype_{_data} * const __restrict__ data = (dtype_{_data}*)PyArray_DATA({_data});
+            const npy_int32 * const __restrict__ indptr = (npy_int32 *)PyArray_DATA({_indptr});
+            const npy_int32 * const __restrict__ indices = (npy_int32 *)PyArray_DATA({_indices});
 
-            dtype_%(_zout)s * const __restrict__ zout = (dtype_%(_zout)s*)PyArray_DATA(%(_zout)s);
+            dtype_{_zout} * const __restrict__ zout = (dtype_{_zout}*)PyArray_DATA({_zout});
 
-            const npy_intp Sb = PyArray_STRIDES(%(_b)s)[0];
+            const npy_intp Sb = PyArray_STRIDES({_b})[0];
 
             // loop over columns
             for (npy_intp j = 0; j < N; ++j)
-            {
+            {{
                 // for each non-null value in the sparse column
                 for (npy_int32 i_idx = indptr[j]; i_idx < indptr[j+1]; ++i_idx)
-                {
+                {{
                     // extract row index of non-null value
                     npy_int32 i = indices[i_idx];
 
                     // extract i-th row of dense matrix
-                    const dtype_%(_b)s* __restrict__ b_row = (dtype_%(_b)s*)(PyArray_BYTES(%(_b)s) + Sb * i);
+                    const dtype_{_b}* __restrict__ b_row = (dtype_{_b}*)(PyArray_BYTES({_b}) + Sb * i);
 
                     // write resulting gradient to sparse output
                     zout[i_idx] = data[i_idx] * b_row[j];
-                }
-            }
-        }
+                }}
+            }}
+        }}
 
-        """ % dict(locals(), **sub)
+        """.format(**dict(locals(), **sub))
 
     def __str__(self):
         return self.__class__.__name__
@@ -1303,72 +1303,72 @@ class MulSDCSR(_NoPythonCOp):
             raise NotImplementedError("Complex types are not supported for b")
 
         return """
-        if (PyArray_NDIM(%(_b)s) != 2) {
+        if (PyArray_NDIM({_b}) != 2) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 2");
-            %(fail)s;}
-        if (PyArray_NDIM(%(_data)s) != 1) {
+            {fail};}}
+        if (PyArray_NDIM({_data}) != 1) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(data) != 1");
-            %(fail)s;}
-        if (PyArray_NDIM(%(_indices)s) != 1) {
+            {fail};}}
+        if (PyArray_NDIM({_indices}) != 1) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(indices) != 1");
-            %(fail)s;}
-        if (PyArray_NDIM(%(_indptr)s) != 1) {
+            {fail};}}
+        if (PyArray_NDIM({_indptr}) != 1) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(indptr) != 1");
-            %(fail)s;}
+            {fail};}}
 
-        if( PyArray_TYPE(%(_indices)s) != NPY_INT32) {
-        PyErr_SetString(PyExc_NotImplementedError, "C"); %(fail)s;}
+        if( PyArray_TYPE({_indices}) != NPY_INT32) {{
+        PyErr_SetString(PyExc_NotImplementedError, "C"); {fail};}}
 
-        if( PyArray_TYPE(%(_indptr)s) != NPY_INT32)
-        {PyErr_SetString(PyExc_NotImplementedError, "D"); %(fail)s;}
+        if( PyArray_TYPE({_indptr}) != NPY_INT32)
+        {{PyErr_SetString(PyExc_NotImplementedError, "D"); {fail};}}
 
-        if (!%(_zout)s ||
-            (PyArray_DIMS(%(_zout)s)[0] != PyArray_DIMS(%(_indices)s)[0]) ||
-            !(PyArray_ISCONTIGUOUS(%(_zout)s)))
-        {
-            Py_XDECREF(%(_zout)s);
-            %(_zout)s = (PyArrayObject*) PyArray_SimpleNew(1,
-                    PyArray_DIMS(%(_indices)s), PyArray_TYPE(%(_b)s));
-            if (!%(_zout)s)
-            {
+        if (!{_zout} ||
+            (PyArray_DIMS({_zout})[0] != PyArray_DIMS({_indices})[0]) ||
+            !(PyArray_ISCONTIGUOUS({_zout})))
+        {{
+            Py_XDECREF({_zout});
+            {_zout} = (PyArrayObject*) PyArray_SimpleNew(1,
+                    PyArray_DIMS({_indices}), PyArray_TYPE({_b}));
+            if (!{_zout})
+            {{
                 PyErr_SetString(PyExc_MemoryError,
                     "Could not allocate output memory.");
-                %(fail)s;
-            }
-        }
+                {fail};
+            }}
+        }}
 
-        { //makes it compile even though labels jump over variable definitions.
-            const npy_intp nnz = PyArray_DIMS(%(_indices)s)[0];
+        {{ //makes it compile even though labels jump over variable definitions.
+            const npy_intp nnz = PyArray_DIMS({_indices})[0];
             //TODO: error checking with this
-            const npy_intp N =  PyArray_DIMS(%(_indptr)s)[0]-1;
+            const npy_intp N =  PyArray_DIMS({_indptr})[0]-1;
 
-            const dtype_%(_data)s * const __restrict__ data = (dtype_%(_data)s*)PyArray_DATA(%(_data)s);
-            const npy_int32 * const __restrict__ indptr = (npy_int32 *)PyArray_DATA(%(_indptr)s);
-            const npy_int32 * const __restrict__ indices = (npy_int32 *)PyArray_DATA(%(_indices)s);
+            const dtype_{_data} * const __restrict__ data = (dtype_{_data}*)PyArray_DATA({_data});
+            const npy_int32 * const __restrict__ indptr = (npy_int32 *)PyArray_DATA({_indptr});
+            const npy_int32 * const __restrict__ indices = (npy_int32 *)PyArray_DATA({_indices});
 
-            dtype_%(_zout)s * const __restrict__ zout = (dtype_%(_zout)s*)PyArray_DATA(%(_zout)s);
+            dtype_{_zout} * const __restrict__ zout = (dtype_{_zout}*)PyArray_DATA({_zout});
 
-            const npy_intp Sb = PyArray_STRIDES(%(_b)s)[0];
+            const npy_intp Sb = PyArray_STRIDES({_b})[0];
 
             // loop over columns
             for (npy_intp j = 0; j < N; ++j)
-            {
+            {{
                 // extract i-th row of dense matrix
-                const dtype_%(_b)s* __restrict__ b_row = (dtype_%(_b)s*)(PyArray_BYTES(%(_b)s) + Sb * j);
+                const dtype_{_b}* __restrict__ b_row = (dtype_{_b}*)(PyArray_BYTES({_b}) + Sb * j);
 
                 // for each non-null value in the sparse column
                 for (npy_int32 i_idx = indptr[j]; i_idx < indptr[j+1]; ++i_idx)
-                {
+                {{
                     // extract row index of non-null value
                     npy_int32 i = indices[i_idx];
 
                     // write resulting gradient to sparse output
                     zout[i_idx] = data[i_idx] * b_row[i];
-                }
-            }
-        }
+                }}
+            }}
+        }}
 
-        """ % dict(locals(), **sub)
+        """.format(**dict(locals(), **sub))
 
     def __str__(self):
         return self.__class__.__name__
@@ -1492,68 +1492,68 @@ class MulSVCSR(_NoPythonCOp):
             raise NotImplementedError("Complex types are not supported for b")
 
         return """
-        if (PyArray_NDIM(%(_b)s) != 1) {
+        if (PyArray_NDIM({_b}) != 1) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 1");
-            %(fail)s;
-        }
-        if (PyArray_NDIM(%(_data)s) != 1) {
+            {fail};
+        }}
+        if (PyArray_NDIM({_data}) != 1) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(data) != 1");
-            %(fail)s;
-        }
-        if (PyArray_NDIM(%(_indices)s) != 1) {
+            {fail};
+        }}
+        if (PyArray_NDIM({_indices}) != 1) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(indices) != 1");
-            %(fail)s;
-        }
-        if (PyArray_NDIM(%(_indptr)s) != 1) {
+            {fail};
+        }}
+        if (PyArray_NDIM({_indptr}) != 1) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(indptr) != 1");
-            %(fail)s;
-        }
+            {fail};
+        }}
 
-        if( PyArray_TYPE(%(_indices)s) != NPY_INT32) {
-        PyErr_SetString(PyExc_NotImplementedError, "C"); %(fail)s;}
+        if( PyArray_TYPE({_indices}) != NPY_INT32) {{
+        PyErr_SetString(PyExc_NotImplementedError, "C"); {fail};}}
 
-        if( PyArray_TYPE(%(_indptr)s) != NPY_INT32)
-        {PyErr_SetString(PyExc_NotImplementedError, "D"); %(fail)s;}
+        if( PyArray_TYPE({_indptr}) != NPY_INT32)
+        {{PyErr_SetString(PyExc_NotImplementedError, "D"); {fail};}}
 
-        if (!%(_zout)s
-            || PyArray_DIMS(%(_zout)s)[0] != PyArray_DIMS(%(_indices)s)[0]
-            || !PyArray_ISCONTIGUOUS(%(_zout)s))
-        {
-            Py_XDECREF(%(_zout)s);
-            %(_zout)s = (PyArrayObject*) PyArray_SimpleNew(1,
-                    PyArray_DIMS(%(_indices)s), PyArray_TYPE(%(_b)s));
-        }
+        if (!{_zout}
+            || PyArray_DIMS({_zout})[0] != PyArray_DIMS({_indices})[0]
+            || !PyArray_ISCONTIGUOUS({_zout}))
+        {{
+            Py_XDECREF({_zout});
+            {_zout} = (PyArrayObject*) PyArray_SimpleNew(1,
+                    PyArray_DIMS({_indices}), PyArray_TYPE({_b}));
+        }}
 
-        { //makes it compile even though labels jump over variable definitions.
-            const npy_intp nnz = PyArray_DIMS(%(_indices)s)[0];
+        {{ //makes it compile even though labels jump over variable definitions.
+            const npy_intp nnz = PyArray_DIMS({_indices})[0];
             //TODO: error checking with this
-            const npy_intp N =  PyArray_DIMS(%(_indptr)s)[0]-1;
+            const npy_intp N =  PyArray_DIMS({_indptr})[0]-1;
 
-            const dtype_%(_data)s * const __restrict__ data = (dtype_%(_data)s*)PyArray_DATA(%(_data)s);
-            const npy_int32 * const __restrict__ indptr = (npy_int32 *)PyArray_DATA(%(_indptr)s);
-            const npy_int32 * const __restrict__ indices = (npy_int32 *)PyArray_DATA(%(_indices)s);
+            const dtype_{_data} * const __restrict__ data = (dtype_{_data}*)PyArray_DATA({_data});
+            const npy_int32 * const __restrict__ indptr = (npy_int32 *)PyArray_DATA({_indptr});
+            const npy_int32 * const __restrict__ indices = (npy_int32 *)PyArray_DATA({_indices});
 
-            const dtype_%(_b)s* __restrict__ Db = (dtype_%(_b)s*)PyArray_DATA(%(_b)s);
+            const dtype_{_b}* __restrict__ Db = (dtype_{_b}*)PyArray_DATA({_b});
 
-            dtype_%(_zout)s * const __restrict__ zout = (dtype_%(_zout)s*)PyArray_DATA(%(_zout)s);
+            dtype_{_zout} * const __restrict__ zout = (dtype_{_zout}*)PyArray_DATA({_zout});
 
-            const npy_intp Sb = PyArray_STRIDES(%(_b)s)[0] / PyArray_DESCR(%(_b)s)->elsize;
+            const npy_intp Sb = PyArray_STRIDES({_b})[0] / PyArray_DESCR({_b})->elsize;
 
             // loop over rows
             for (npy_intp j = 0; j < N; ++j)
-            {
+            {{
                 // for each non-null value in the sparse column
                 for (npy_int32 i_idx = indptr[j]; i_idx < indptr[j+1]; ++i_idx)
-                {
+                {{
                     // extract row index of non-null value
                     npy_int32 i = indices[i_idx];
 
                     zout[i_idx] = data[i_idx] * Db[i * Sb];
-                }
-            }
-        }
+                }}
+            }}
+        }}
 
-        """ % dict(locals(), **sub)
+        """.format(**dict(locals(), **sub))
 
     def __str__(self):
         return self.__class__.__name__
@@ -1664,75 +1664,75 @@ class StructuredAddSVCSR(_NoPythonCOp):
             raise NotImplementedError("Complex types are not supported for b")
 
         return """
-        if (PyArray_NDIM(%(_b)s) != 1) {
+        if (PyArray_NDIM({_b}) != 1) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 1");
-            %(fail)s;
-        }
-        if (PyArray_NDIM(%(_data)s) != 1) {
+            {fail};
+        }}
+        if (PyArray_NDIM({_data}) != 1) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(data) != 1");
-            %(fail)s;
-        }
-        if (PyArray_NDIM(%(_indices)s) != 1) {
+            {fail};
+        }}
+        if (PyArray_NDIM({_indices}) != 1) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(indices) != 1");
-            %(fail)s;
-        }
-        if (PyArray_NDIM(%(_indptr)s) != 1) {
+            {fail};
+        }}
+        if (PyArray_NDIM({_indptr}) != 1) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(indptr) != 1");
-            %(fail)s;
-        }
+            {fail};
+        }}
 
-        if( PyArray_TYPE(%(_indices)s) != NPY_INT32) {
-        PyErr_SetString(PyExc_NotImplementedError, "C"); %(fail)s;}
+        if( PyArray_TYPE({_indices}) != NPY_INT32) {{
+        PyErr_SetString(PyExc_NotImplementedError, "C"); {fail};}}
 
-        if( PyArray_TYPE(%(_indptr)s) != NPY_INT32)
-        {PyErr_SetString(PyExc_NotImplementedError, "D"); %(fail)s;}
+        if( PyArray_TYPE({_indptr}) != NPY_INT32)
+        {{PyErr_SetString(PyExc_NotImplementedError, "D"); {fail};}}
 
-        if (!%(_zout)s
-            || (PyArray_DIMS(%(_zout)s)[0] != PyArray_DIMS(%(_indices)s)[0])
-            || !(PyArray_ISCONTIGUOUS(%(_zout)s)))
-        {
-            Py_XDECREF(%(_zout)s);
-            %(_zout)s = (PyArrayObject*) PyArray_SimpleNew(1,
-                    PyArray_DIMS(%(_indices)s), PyArray_TYPE(%(_b)s));
-            if (!%(_zout)s)
-            {
+        if (!{_zout}
+            || (PyArray_DIMS({_zout})[0] != PyArray_DIMS({_indices})[0])
+            || !(PyArray_ISCONTIGUOUS({_zout})))
+        {{
+            Py_XDECREF({_zout});
+            {_zout} = (PyArrayObject*) PyArray_SimpleNew(1,
+                    PyArray_DIMS({_indices}), PyArray_TYPE({_b}));
+            if (!{_zout})
+            {{
                 PyErr_SetString(PyExc_MemoryError,
                     "Could not allocate output memory.");
-                %(fail)s;
-            }
-        }
+                {fail};
+            }}
+        }}
 
-        { //makes it compile even though labels jump over variable definitions.
-            const npy_intp nnz = PyArray_DIMS(%(_indices)s)[0];
+        {{ //makes it compile even though labels jump over variable definitions.
+            const npy_intp nnz = PyArray_DIMS({_indices})[0];
             //TODO: error checking with this
-            const npy_intp N =  PyArray_DIMS(%(_indptr)s)[0]-1;
+            const npy_intp N =  PyArray_DIMS({_indptr})[0]-1;
 
-            const dtype_%(_data)s * const __restrict__ data = (dtype_%(_data)s*)PyArray_DATA(%(_data)s);
-            const npy_int32 * const __restrict__ indptr = (npy_int32 *)PyArray_DATA(%(_indptr)s);
-            const npy_int32 * const __restrict__ indices = (npy_int32 *)PyArray_DATA(%(_indices)s);
+            const dtype_{_data} * const __restrict__ data = (dtype_{_data}*)PyArray_DATA({_data});
+            const npy_int32 * const __restrict__ indptr = (npy_int32 *)PyArray_DATA({_indptr});
+            const npy_int32 * const __restrict__ indices = (npy_int32 *)PyArray_DATA({_indices});
 
-            const dtype_%(_b)s* __restrict__ Db = (dtype_%(_b)s*)PyArray_DATA(%(_b)s);
+            const dtype_{_b}* __restrict__ Db = (dtype_{_b}*)PyArray_DATA({_b});
 
-            dtype_%(_zout)s * const __restrict__ zout = (dtype_%(_zout)s*)PyArray_DATA(%(_zout)s);
+            dtype_{_zout} * const __restrict__ zout = (dtype_{_zout}*)PyArray_DATA({_zout});
 
-            const npy_intp Sb = PyArray_STRIDES(%(_b)s)[0] / PyArray_DESCR(%(_b)s)->elsize;
+            const npy_intp Sb = PyArray_STRIDES({_b})[0] / PyArray_DESCR({_b})->elsize;
 
             // loop over columns
             for (npy_intp j = 0; j < N; ++j)
-            {
+            {{
                 // for each non-null value in the sparse column
                 for (npy_int32 i_idx = indptr[j]; i_idx < indptr[j+1]; ++i_idx)
-                {
+                {{
                     // extract row index of non-null value
                     npy_int32 i = indices[i_idx];
 
                     // write resulting gradient to sparse output
                     zout[i_idx] = data[i_idx] + Db[i * Sb];
-                }
-            }
-        }
+                }}
+            }}
+        }}
 
-        """ % dict(locals(), **sub)
+        """.format(**dict(locals(), **sub))
 
     def __str__(self):
         return self.__class__.__name__
@@ -1905,113 +1905,113 @@ class SamplingDotCSR(_NoPythonCOp):
         typenum_zp = TensorType(node.outputs[2].dtype, []).dtype_specs()[2]
 
         rval = """
-        if (PyArray_NDIM(%(x)s) != 2) {
-PyErr_SetString(PyExc_NotImplementedError, "rank(x) != 2"); %(fail)s;}
-        if (PyArray_NDIM(%(y)s) != 2) {
-PyErr_SetString(PyExc_NotImplementedError, "rank(y) != 2"); %(fail)s;}
+        if (PyArray_NDIM({x}) != 2) {{
+PyErr_SetString(PyExc_NotImplementedError, "rank(x) != 2"); {fail};}}
+        if (PyArray_NDIM({y}) != 2) {{
+PyErr_SetString(PyExc_NotImplementedError, "rank(y) != 2"); {fail};}}
 
-        if (PyArray_TYPE(%(x)s) != %(typenum_x)s) {
+        if (PyArray_TYPE({x}) != {typenum_x}) {{
             PyErr_SetString(PyExc_NotImplementedError,
                             "Invalid type for x");
-            %(fail)s;}
+            {fail};}}
 
-        if (PyArray_TYPE(%(y)s) != %(typenum_y)s) {
+        if (PyArray_TYPE({y}) != {typenum_y}) {{
             PyErr_SetString(PyExc_NotImplementedError,
                             "Invalid type for y");
-            %(fail)s;}
+            {fail};}}
 
-        if (PyArray_TYPE(%(p_data)s) != %(typenum_p)s) {
+        if (PyArray_TYPE({p_data}) != {typenum_p}) {{
             PyErr_SetString(PyExc_NotImplementedError,
                             "Invalid type for pattern");
-            %(fail)s;}
+            {fail};}}
 
-        if (PyArray_DIMS(%(x)s)[1] != PyArray_DIMS(%(y)s)[1]) {
+        if (PyArray_DIMS({x})[1] != PyArray_DIMS({y})[1]) {{
             PyErr_SetString(PyExc_NotImplementedError,
               "x's number of columns doesn't match y's rows! Note: sampling_dot is different from dot because y is assumed to be transposed.");
-            %(fail)s;}
+            {fail};}}
 
-        if (PyArray_DIMS(%(y)s)[0] != ((npy_int32 *)PyArray_DATA(%(p_ncols)s))[0] ||
-            PyArray_DIMS(%(x)s)[0] != (PyArray_DIMS(%(p_ptr)s)[0] - 1))
-        {PyErr_SetString(PyExc_NotImplementedError,
-        "The dimension of the pattern and the output must match"); %(fail)s;}
+        if (PyArray_DIMS({y})[0] != ((npy_int32 *)PyArray_DATA({p_ncols}))[0] ||
+            PyArray_DIMS({x})[0] != (PyArray_DIMS({p_ptr})[0] - 1))
+        {{PyErr_SetString(PyExc_NotImplementedError,
+        "The dimension of the pattern and the output must match"); {fail};}}
 
         // Allocate output
-        if (!%(z_data)s
-            || (PyArray_DIMS(%(z_data)s)[0] != PyArray_DIMS(%(p_data)s)[0])
-            || (PyArray_TYPE(%(z_data)s) != %(typenum_zd)s)
-            || !(PyArray_ISCONTIGUOUS(%(z_data)s)))
-         {
-            {Py_XDECREF(%(z_data)s);}
-            npy_intp dims[] = {0};
-            dims[0] = PyArray_DIMS(%(p_data)s)[0];
-            %(z_data)s = (PyArrayObject*) PyArray_SimpleNew(1, dims,
-                                                            %(typenum_zd)s);
-        }
-        if (!%(z_ind)s
-            || (PyArray_DIMS(%(z_ind)s)[0] != PyArray_DIMS(%(p_ind)s)[0])
-            || (PyArray_TYPE(%(z_ind)s) != %(typenum_zi)s)
-            || !(PyArray_ISCONTIGUOUS(%(z_ind)s)))
-        {
-            {Py_XDECREF(%(z_ind)s);}
-            npy_intp dims[] = {0};
-            dims[0] = PyArray_DIMS(%(p_ind)s)[0];
-            %(z_ind)s = (PyArrayObject*) PyArray_SimpleNew(1, dims,
-                                                           %(typenum_zi)s);
-        }
-        if (!%(z_ptr)s
-            || (PyArray_DIMS(%(z_ptr)s)[0] != PyArray_DIMS(%(p_ptr)s)[0])
-            || (PyArray_TYPE(%(z_ptr)s) != %(typenum_zp)s)
-            || !(PyArray_ISCONTIGUOUS(%(z_ptr)s)))
-        {
-            {Py_XDECREF(%(z_ptr)s);}
-            npy_intp dims[] = {0};
-            dims[0] = PyArray_DIMS(%(p_ptr)s)[0];
-            %(z_ptr)s = (PyArrayObject*) PyArray_SimpleNew(1, dims,
-                                                           %(typenum_zp)s);
-        }
+        if (!{z_data}
+            || (PyArray_DIMS({z_data})[0] != PyArray_DIMS({p_data})[0])
+            || (PyArray_TYPE({z_data}) != {typenum_zd})
+            || !(PyArray_ISCONTIGUOUS({z_data})))
+         {{
+            {{Py_XDECREF({z_data});}}
+            npy_intp dims[] = {{0}};
+            dims[0] = PyArray_DIMS({p_data})[0];
+            {z_data} = (PyArrayObject*) PyArray_SimpleNew(1, dims,
+                                                            {typenum_zd});
+        }}
+        if (!{z_ind}
+            || (PyArray_DIMS({z_ind})[0] != PyArray_DIMS({p_ind})[0])
+            || (PyArray_TYPE({z_ind}) != {typenum_zi})
+            || !(PyArray_ISCONTIGUOUS({z_ind})))
+        {{
+            {{Py_XDECREF({z_ind});}}
+            npy_intp dims[] = {{0}};
+            dims[0] = PyArray_DIMS({p_ind})[0];
+            {z_ind} = (PyArrayObject*) PyArray_SimpleNew(1, dims,
+                                                           {typenum_zi});
+        }}
+        if (!{z_ptr}
+            || (PyArray_DIMS({z_ptr})[0] != PyArray_DIMS({p_ptr})[0])
+            || (PyArray_TYPE({z_ptr}) != {typenum_zp})
+            || !(PyArray_ISCONTIGUOUS({z_ptr})))
+        {{
+            {{Py_XDECREF({z_ptr});}}
+            npy_intp dims[] = {{0}};
+            dims[0] = PyArray_DIMS({p_ptr})[0];
+            {z_ptr} = (PyArrayObject*) PyArray_SimpleNew(1, dims,
+                                                           {typenum_zp});
+        }}
 
-        {
+        {{
             // Product of MxK and NxK, output MxN
-            npy_intp M = PyArray_DIMS(%(x)s)[0];
-            npy_intp N = PyArray_DIMS(%(y)s)[0];
-            npy_intp K = PyArray_DIMS(%(y)s)[1];
+            npy_intp M = PyArray_DIMS({x})[0];
+            npy_intp N = PyArray_DIMS({y})[0];
+            npy_intp K = PyArray_DIMS({y})[1];
 
             // pointers to access actual data in the arrays passed as params.
-            const dtype_%(x)s* __restrict__ Dx = (dtype_%(x)s*)PyArray_DATA(%(x)s);
-            const dtype_%(y)s* __restrict__ Dy = (dtype_%(y)s*)PyArray_DATA(%(y)s);
-            const dtype_%(p_data)s* __restrict__ Dpd = (dtype_%(p_data)s*)PyArray_DATA(%(p_data)s);
-            const dtype_%(p_ind)s* __restrict__ Dpi = (dtype_%(p_ind)s*)PyArray_DATA(%(p_ind)s);
-            const dtype_%(p_ptr)s* __restrict__ Dpp = (dtype_%(p_ptr)s*)PyArray_DATA(%(p_ptr)s);
-            dtype_%(z_data)s* __restrict__ Dzd = (dtype_%(z_data)s*)PyArray_DATA(%(z_data)s);
-            dtype_%(z_ind)s* __restrict__ Dzi = (dtype_%(z_ind)s*)PyArray_DATA(%(z_ind)s);
-            dtype_%(z_ptr)s* __restrict__ Dzp = (dtype_%(z_ptr)s*)PyArray_DATA(%(z_ptr)s);
+            const dtype_{x}* __restrict__ Dx = (dtype_{x}*)PyArray_DATA({x});
+            const dtype_{y}* __restrict__ Dy = (dtype_{y}*)PyArray_DATA({y});
+            const dtype_{p_data}* __restrict__ Dpd = (dtype_{p_data}*)PyArray_DATA({p_data});
+            const dtype_{p_ind}* __restrict__ Dpi = (dtype_{p_ind}*)PyArray_DATA({p_ind});
+            const dtype_{p_ptr}* __restrict__ Dpp = (dtype_{p_ptr}*)PyArray_DATA({p_ptr});
+            dtype_{z_data}* __restrict__ Dzd = (dtype_{z_data}*)PyArray_DATA({z_data});
+            dtype_{z_ind}* __restrict__ Dzi = (dtype_{z_ind}*)PyArray_DATA({z_ind});
+            dtype_{z_ptr}* __restrict__ Dzp = (dtype_{z_ptr}*)PyArray_DATA({z_ptr});
 
-            const npy_intp Sdx = PyArray_STRIDES(%(x)s)[1]/PyArray_DESCR(%(x)s)->elsize;
-            const npy_intp Sdy = PyArray_STRIDES(%(y)s)[1]/PyArray_DESCR(%(y)s)->elsize;
-            const npy_intp Sdpd = PyArray_STRIDES(%(p_data)s)[0] / PyArray_DESCR(%(p_data)s)->elsize;
-            const npy_intp Sdpi = PyArray_STRIDES(%(p_ind)s)[0] / PyArray_DESCR(%(p_ind)s)->elsize;
-            const npy_intp Sdpp = PyArray_STRIDES(%(p_ptr)s)[0] / PyArray_DESCR(%(p_ptr)s)->elsize;
-            const npy_intp Sdzd = PyArray_STRIDES(%(z_data)s)[0] / PyArray_DESCR(%(z_data)s)->elsize;
-            const npy_intp Sdzi = PyArray_STRIDES(%(z_ind)s)[0] / PyArray_DESCR(%(z_ind)s)->elsize;
-            const npy_intp Sdzp = PyArray_STRIDES(%(z_ptr)s)[0] / PyArray_DESCR(%(z_ptr)s)->elsize;
+            const npy_intp Sdx = PyArray_STRIDES({x})[1]/PyArray_DESCR({x})->elsize;
+            const npy_intp Sdy = PyArray_STRIDES({y})[1]/PyArray_DESCR({y})->elsize;
+            const npy_intp Sdpd = PyArray_STRIDES({p_data})[0] / PyArray_DESCR({p_data})->elsize;
+            const npy_intp Sdpi = PyArray_STRIDES({p_ind})[0] / PyArray_DESCR({p_ind})->elsize;
+            const npy_intp Sdpp = PyArray_STRIDES({p_ptr})[0] / PyArray_DESCR({p_ptr})->elsize;
+            const npy_intp Sdzd = PyArray_STRIDES({z_data})[0] / PyArray_DESCR({z_data})->elsize;
+            const npy_intp Sdzi = PyArray_STRIDES({z_ind})[0] / PyArray_DESCR({z_ind})->elsize;
+            const npy_intp Sdzp = PyArray_STRIDES({z_ptr})[0] / PyArray_DESCR({z_ptr})->elsize;
 
-            memcpy(Dzi, Dpi, PyArray_DIMS(%(p_ind)s)[0]*sizeof(dtype_%(p_ind)s));
-            memcpy(Dzp, Dpp, PyArray_DIMS(%(p_ptr)s)[0]*sizeof(dtype_%(p_ptr)s));
+            memcpy(Dzi, Dpi, PyArray_DIMS({p_ind})[0]*sizeof(dtype_{p_ind}));
+            memcpy(Dzp, Dpp, PyArray_DIMS({p_ptr})[0]*sizeof(dtype_{p_ptr}));
 
             // blas expects ints; convert here (rather than just making K etc ints) to avoid potential overflow in the negative-stride correction
             if ((K > 0x7fffffffL)||(Sdx > 0x7fffffffL)||(Sdy > 0x7fffffffL)||(Sdx < -0x7fffffffL)||(Sdy < -0x7fffffffL))
-            {PyErr_SetString(PyExc_NotImplementedError, "array too big for BLAS (overflows int32 index)"); %(fail)s;}
+            {{PyErr_SetString(PyExc_NotImplementedError, "array too big for BLAS (overflows int32 index)"); {fail};}}
             int K32 = K;
             int Sdx32 = Sdx;
             int Sdy32 = Sdy;
 
-            for (npy_intp m = 0; m < M; ++m) {
-                for (npy_int32 n_idx = Dpp[m * Sdpp]; n_idx < Dpp[(m+1)*Sdpp]; ++n_idx) {
+            for (npy_intp m = 0; m < M; ++m) {{
+                for (npy_int32 n_idx = Dpp[m * Sdpp]; n_idx < Dpp[(m+1)*Sdpp]; ++n_idx) {{
                     const npy_int32 n = Dpi[n_idx * Sdpi]; // row index of non-null value for column K
 
-                    const dtype_%(x)s* x_row = (dtype_%(x)s*)(PyArray_BYTES(%(x)s) + PyArray_STRIDES(%(x)s)[0] * m);
+                    const dtype_{x}* x_row = (dtype_{x}*)(PyArray_BYTES({x}) + PyArray_STRIDES({x})[0] * m);
 
-                    const dtype_%(y)s* y_col = (dtype_%(y)s*)(PyArray_BYTES(%(y)s) + PyArray_STRIDES(%(y)s)[0] * n);
+                    const dtype_{y}* y_col = (dtype_{y}*)(PyArray_BYTES({y}) + PyArray_STRIDES({y})[0] * n);
                     // dot expects pointer to the beginning of memory arrays,
                     // so when the stride is negative, we need to get the
                     // last element
@@ -2020,11 +2020,11 @@ PyErr_SetString(PyExc_NotImplementedError, "rank(y) != 2"); %(fail)s;}
                     if (Sdy < 0)
                         y_col += (K - 1) * Sdy;
 
-                    Dzd[n_idx * Sdzd] = Dpd[n_idx * Sdpd] * %(cdot)s(&K32, (const %(conv_type)s*)x_row, &Sdx32, (const %(conv_type)s*)y_col, &Sdy32);
-                }
-            }
-        }
-        """ % dict(locals(), **sub)
+                    Dzd[n_idx * Sdzd] = Dpd[n_idx * Sdpd] * {cdot}(&K32, (const {conv_type}*)x_row, &Sdx32, (const {conv_type}*)y_col, &Sdy32);
+                }}
+            }}
+        }}
+        """.format(**dict(locals(), **sub))
 
         return rval
 

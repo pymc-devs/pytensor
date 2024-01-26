@@ -74,26 +74,28 @@ class QuadraticOpFunc(COp):
 
     def c_code(self, node, name, inputs, outputs, sub):
         return """
-        %(float_type)s a = (%(float_type)s) (*(npy_float64*) PyArray_GETPTR1(%(coeff)s->a, 0)); // 0-D TensorType.
-        %(float_type)s b =                                                   %(coeff)s->b;      // ScalarType.
-        %(float_type)s c =                 (%(float_type)s) PyFloat_AsDouble(%(coeff)s->c);     // Generic.
-        Py_XDECREF(%(Y)s);
-        %(Y)s = (PyArrayObject*)PyArray_EMPTY(PyArray_NDIM(%(X)s), PyArray_DIMS(%(X)s), PyArray_TYPE(%(X)s), PyArray_IS_F_CONTIGUOUS(%(X)s));
-        if (PyArray_CopyInto(%(Y)s, %(X)s) != 0) {
+        {float_type} a = ({float_type}) (*(npy_float64*) PyArray_GETPTR1({coeff}->a, 0)); // 0-D TensorType.
+        {float_type} b =                                                   {coeff}->b;      // ScalarType.
+        {float_type} c =                 ({float_type}) PyFloat_AsDouble({coeff}->c);     // Generic.
+        Py_XDECREF({Y});
+        {Y} = (PyArrayObject*)PyArray_EMPTY(PyArray_NDIM({X}), PyArray_DIMS({X}), PyArray_TYPE({X}), PyArray_IS_F_CONTIGUOUS({X}));
+        if (PyArray_CopyInto({Y}, {X}) != 0) {{
             PyErr_SetString(PyExc_RuntimeError, "Unable to copy input into output.");
-            %(fail)s
-        };
-        if (quadratic_%(name)s(%(Y)s, a, b, c) != 0) {
+            {fail}
+        }};
+        if (quadratic_{name}({Y}, a, b, c) != 0) {{
             PyErr_SetString(PyExc_RuntimeError, "Unable to compute quadratic function.");
-            %(fail)s
-        }
-        """ % dict(
-            name=name,
-            coeff=sub["params"],
-            fail=sub["fail"],
-            X=inputs[0],
-            Y=outputs[0],
-            float_type=node.inputs[0].type.c_element_type(),
+            {fail}
+        }}
+        """.format(
+            **dict(
+                name=name,
+                coeff=sub["params"],
+                fail=sub["fail"],
+                X=inputs[0],
+                Y=outputs[0],
+                float_type=node.inputs[0].type.c_element_type(),
+            )
         )
 
 

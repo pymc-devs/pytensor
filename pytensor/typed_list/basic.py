@@ -103,12 +103,12 @@ class GetItem(COp):
         output_name = out[0]
         fail = sub["fail"]
         return """
-        %(output_name)s = (typeof %(output_name)s) PyList_GetItem( (PyObject*) %(x_name)s, *((npy_int64 *) PyArray_DATA(%(index)s)));
-        if(%(output_name)s == NULL){
-            %(fail)s
-        }
-        Py_INCREF(%(output_name)s);
-        """ % locals()
+        {output_name} = (typeof {output_name}) PyList_GetItem( (PyObject*) {x_name}, *((npy_int64 *) PyArray_DATA({index})));
+        if({output_name} == NULL){{
+            {fail}
+        }}
+        Py_INCREF({output_name});
+        """.format(**locals())
 
     def c_code_cache_version(self):
         return (1,)
@@ -170,8 +170,8 @@ class Append(COp):
         fail = sub["fail"]
         if not self.inplace:
             init = """
-            %(output_name)s = (PyListObject*) PyList_GetSlice((PyObject*) %(x_name)s, 0, PyList_GET_SIZE((PyObject*) %(x_name)s)) ;
-            """ % locals()
+            {output_name} = (PyListObject*) PyList_GetSlice((PyObject*) {x_name}, 0, PyList_GET_SIZE((PyObject*) {x_name})) ;
+            """.format(**locals())
         else:
             init = f"""
             {output_name} =  {x_name};
@@ -179,15 +179,14 @@ class Append(COp):
         return (
             init
             + """
-        if(%(output_name)s==NULL){
-                %(fail)s
-        };
-        if(PyList_Append( (PyObject*) %(output_name)s,(PyObject*) %(toAppend)s)){
-            %(fail)s
-        };
-        Py_INCREF(%(output_name)s);
-        """
-            % locals()
+        if({output_name}==NULL){{
+                {fail}
+        }};
+        if(PyList_Append( (PyObject*) {output_name},(PyObject*) {toAppend})){{
+            {fail}
+        }};
+        Py_INCREF({output_name});
+        """.format(**locals())
         )
 
     def c_code_cache_version(self):
@@ -252,8 +251,8 @@ class Extend(COp):
         fail = sub["fail"]
         if not self.inplace:
             init = """
-            %(output_name)s = (PyListObject*) PyList_GetSlice((PyObject*) %(x_name)s, 0, PyList_GET_SIZE((PyObject*) %(x_name)s)) ;
-            """ % locals()
+            {output_name} = (PyListObject*) PyList_GetSlice((PyObject*) {x_name}, 0, PyList_GET_SIZE((PyObject*) {x_name})) ;
+            """.format(**locals())
         else:
             init = f"""
             {output_name} =  {x_name};
@@ -262,18 +261,17 @@ class Extend(COp):
             init
             + """
         int i =0;
-        int length = PyList_GET_SIZE((PyObject*) %(toAppend)s);
-        if(%(output_name)s==NULL){
-                %(fail)s
-        };
-        for(i; i < length; i++){
-            if(PyList_Append( (PyObject*) %(output_name)s,(PyObject*) PyList_GetItem((PyObject*) %(toAppend)s,i))==-1){
-                %(fail)s
-            };
-        }
-        Py_INCREF(%(output_name)s);
-        """
-            % locals()
+        int length = PyList_GET_SIZE((PyObject*) {toAppend});
+        if({output_name}==NULL){{
+                {fail}
+        }};
+        for(i; i < length; i++){{
+            if(PyList_Append( (PyObject*) {output_name},(PyObject*) PyList_GetItem((PyObject*) {toAppend},i))==-1){{
+                {fail}
+            }};
+        }}
+        Py_INCREF({output_name});
+        """.format(**locals())
         )
 
     def c_code_cache_version_(self):
@@ -341,8 +339,8 @@ class Insert(COp):
         fail = sub["fail"]
         if not self.inplace:
             init = """
-            %(output_name)s = (PyListObject*) PyList_GetSlice((PyObject*) %(x_name)s, 0, PyList_GET_SIZE((PyObject*) %(x_name)s)) ;
-            """ % locals()
+            {output_name} = (PyListObject*) PyList_GetSlice((PyObject*) {x_name}, 0, PyList_GET_SIZE((PyObject*) {x_name})) ;
+            """.format(**locals())
         else:
             init = f"""
             {output_name} =  {x_name};
@@ -350,15 +348,14 @@ class Insert(COp):
         return (
             init
             + """
-        if(%(output_name)s==NULL){
-                %(fail)s
-        };
-        if(PyList_Insert((PyObject*) %(output_name)s, *((npy_int64 *) PyArray_DATA(%(index)s)), (PyObject*) %(toInsert)s)==-1){
-            %(fail)s
-        };
-        Py_INCREF(%(output_name)s);
-        """
-            % locals()
+        if({output_name}==NULL){{
+                {fail}
+        }};
+        if(PyList_Insert((PyObject*) {output_name}, *((npy_int64 *) PyArray_DATA({index})), (PyObject*) {toInsert})==-1){{
+            {fail}
+        }};
+        Py_INCREF({output_name});
+        """.format(**locals())
         )
 
     def c_code_cache_version(self):
@@ -470,8 +467,8 @@ class Reverse(COp):
         fail = sub["fail"]
         if not self.inplace:
             init = """
-            %(output_name)s = (PyListObject*) PyList_GetSlice((PyObject*) %(x_name)s, 0, PyList_GET_SIZE((PyObject*) %(x_name)s)) ;
-            """ % locals()
+            {output_name} = (PyListObject*) PyList_GetSlice((PyObject*) {x_name}, 0, PyList_GET_SIZE((PyObject*) {x_name})) ;
+            """.format(**locals())
         else:
             init = f"""
             {output_name} =  {x_name};
@@ -479,15 +476,14 @@ class Reverse(COp):
         return (
             init
             + """
-        if(%(output_name)s==NULL){
-                %(fail)s
-        };
-        if(PyList_Reverse((PyObject*) %(output_name)s)==-1){
-            %(fail)s
-        };
-        Py_INCREF(%(output_name)s);
-        """
-            % locals()
+        if({output_name}==NULL){{
+                {fail}
+        }};
+        if(PyList_Reverse((PyObject*) {output_name})==-1){{
+            {fail}
+        }};
+        Py_INCREF({output_name});
+        """.format(**locals())
         )
 
     def c_code_cache_version(self):
@@ -602,11 +598,11 @@ class Length(COp):
         output_name = out[0]
         fail = sub["fail"]
         return """
-        if(!%(output_name)s)
-            %(output_name)s=(PyArrayObject*)PyArray_EMPTY(0, NULL, NPY_INT64, 0);
-        ((npy_int64*)PyArray_DATA(%(output_name)s))[0]=PyList_Size((PyObject*)%(x_name)s);
-        Py_INCREF(%(output_name)s);
-        """ % locals()
+        if(!{output_name})
+            {output_name}=(PyArrayObject*)PyArray_EMPTY(0, NULL, NPY_INT64, 0);
+        ((npy_int64*)PyArray_DATA({output_name}))[0]=PyList_Size((PyObject*){x_name});
+        Py_INCREF({output_name});
+        """.format(**locals())
 
     def c_code_cache_version(self):
         return (1,)

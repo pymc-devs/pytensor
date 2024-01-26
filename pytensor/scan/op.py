@@ -3364,8 +3364,7 @@ def profile_printer(
                     total_scan_fct_time += scan_fct_time
                     total_scan_op_time += scan_op_time
                     print(
-                        "      %5.1fs  %5.1fs  %5.1fs  %5.1f%%  %5.1f%%"
-                        % (
+                        "      {:5.1f}s  {:5.1f}s  {:5.1f}s  {:5.1f}%  {:5.1f}%".format(
                             v,
                             scan_fct_time,
                             scan_op_time,
@@ -3385,8 +3384,7 @@ def profile_printer(
             print("  No scan have its inner profile enabled.", file=file)
         else:
             print(
-                "total %5.1fs  %5.1fs  %5.1fs  %5.1f%%  %5.1f%%"
-                % (
+                "total {:5.1f}s  {:5.1f}s  {:5.1f}s  {:5.1f}%  {:5.1f}%".format(
                     total_super_scan_time,
                     total_scan_fct_time,
                     total_scan_op_time,

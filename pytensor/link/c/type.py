@@ -99,11 +99,11 @@ class Generic(CType, Singleton):
 
     def c_sync(self, name, sub):
         return """
-        assert(py_%(name)s->ob_refcnt > 1);
-        Py_DECREF(py_%(name)s);
-        py_%(name)s = %(name)s ? %(name)s : Py_None;
-        Py_INCREF(py_%(name)s);
-        """ % locals()
+        assert(py_{name}->ob_refcnt > 1);
+        Py_DECREF(py_{name});
+        py_{name} = {name} ? {name} : Py_None;
+        Py_INCREF(py_{name});
+        """.format(**locals())
 
     def c_code_cache_version(self):
         return (1,)
@@ -191,17 +191,17 @@ class CDataType(CType[D]):
 
     def c_declare(self, name, sub, check_input=True):
         return """
-        %(ctype)s %(name)s;
-        """ % dict(ctype=self.ctype, name=name)
+        {ctype} {name};
+        """.format(**dict(ctype=self.ctype, name=name))
 
     def c_init(self, name, sub):
         return f"{name} = NULL;"
 
     def c_extract(self, name, sub, check_input=True, **kwargs):
         return """
-  %(name)s = (%(ctype)s)PyCapsule_GetPointer(py_%(name)s, NULL);
-  if (%(name)s == NULL) %(fail)s
-        """ % dict(name=name, ctype=self.ctype, fail=sub["fail"])
+  {name} = ({ctype})PyCapsule_GetPointer(py_{name}, NULL);
+  if ({name} == NULL) {fail}
+        """.format(**dict(name=name, ctype=self.ctype, fail=sub["fail"]))
 
     def c_sync(self, name, sub):
         freefunc = self.freefunc
@@ -576,39 +576,39 @@ class EnumType(CType, dict):
         """
         return """
         #ifdef DEBUG
-        int pytensor_enum_to_string_%(cname)s(%(ctype)s in, char* out) {
+        int pytensor_enum_to_string_{cname}({ctype} in, char* out) {{
             int ret = 0;
-            switch(in) {
-                %(cases)s
+            switch(in) {{
+                {cases}
                 default:
-                    PyErr_SetString(PyExc_ValueError, "%(classname)s:  unknown enum value.");
+                    PyErr_SetString(PyExc_ValueError, "{classname}:  unknown enum value.");
                     ret = -1;
                     break;
-            }
+            }}
             return ret;
-        }
+        }}
         #endif
-        """ % dict(
-            cname=self.cname,
-            ctype=self.ctype,
-            classname=type(self).__name__,
-            cases="".join(
-                """
-                   case %(name)s: sprintf(out, "%(name)s"); break;
-                   """
-                % dict(name=name)
-                for name in self
-            ),
+        """.format(
+            **dict(
+                cname=self.cname,
+                ctype=self.ctype,
+                classname=type(self).__name__,
+                cases="".join(
+                    """
+                   case {name}: sprintf(out, "{name}"); break;
+                   """.format(**dict(name=name))
+                    for name in self
+                ),
+            )
         )
 
     def c_support_code(self, **kwargs):
         return (
             self.pyint_compat_code
             + "".join(
-                """
-            #define %s %s
+                f"""
+            #define {k} {str(self[k])}
             """
-                % (k, str(self[k]))
                 for k in sorted(self.keys())
             )
             + self.c_to_string()
@@ -625,15 +625,15 @@ class EnumType(CType, dict):
 
     def c_extract(self, name, sub, check_input=True, **kwargs):
         return """
-        if (PyInt_Check(py_%(name)s)) {
-            %(name)s = (%(ctype)s)PyInt_AsLong(py_%(name)s);
-        } else {
-            %(name)s = (%(ctype)s)PyFloat_AsDouble(py_%(name)s);
-        }
-        if (PyErr_Occurred()) {
-            %(fail)s
-        }
-        """ % dict(ctype=self.ctype, name=name, fail=sub["fail"])
+        if (PyInt_Check(py_{name})) {{
+            {name} = ({ctype})PyInt_AsLong(py_{name});
+        }} else {{
+            {name} = ({ctype})PyFloat_AsDouble(py_{name});
+        }}
+        if (PyErr_Occurred()) {{
+            {fail}
+        }}
+        """.format(**dict(ctype=self.ctype, name=name, fail=sub["fail"]))
 
     def c_code_cache_version(self):
         return (2, self.ctype, self.cname, tuple(self.items()))
@@ -754,23 +754,25 @@ class CEnumType(EnumList):
         # swapped_dict's keys are integers.
 
         return """
-        switch(PyInt_AsLong(py_%(name)s)) {
-            %(cases)s
+        switch(PyInt_AsLong(py_{name})) {{
+            {cases}
             default:
                 PyErr_SetString(PyExc_ValueError, "CEnumType: invalid value to map to C constants.");
-                {%(fail)s}
+                {{{fail}}}
                 break;
-        }
-        """ % dict(
-            name=name,
-            cases="".join(
-                """
+        }}
+        """.format(
+            **dict(
+                name=name,
+                cases="".join(
+                    """
                    case %(i)d: %(name)s = %(constant_cname)s; break;
                    """
-                % dict(i=i, name=name, constant_cname=swapped_dict[i])
-                for i in sorted(swapped_dict.keys())
-            ),
-            fail=sub["fail"],
+                    % dict(i=i, name=name, constant_cname=swapped_dict[i])
+                    for i in sorted(swapped_dict.keys())
+                ),
+                fail=sub["fail"],
+            )
         )
 
     def c_code_cache_version(self):

@@ -3623,78 +3623,78 @@ class StructuredDotGradCSC(COp):
             raise NotImplementedError("Complex types are not supported for g_ab")
 
         return """
-        if (PyArray_NDIM(%(_d)s) != 2) {PyErr_SetString(PyExc_NotImplementedError, "rank(d) != 2"); %(fail)s;}
-        if (PyArray_NDIM(%(_g)s) != 2) {PyErr_SetString(PyExc_NotImplementedError, "rank(g) != 2"); %(fail)s;}
-        if (PyArray_NDIM(%(_indices)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(indices) != 1"); %(fail)s;}
-        if (PyArray_NDIM(%(_indptr)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(indptr) != 1"); %(fail)s;}
+        if (PyArray_NDIM({_d}) != 2) {{PyErr_SetString(PyExc_NotImplementedError, "rank(d) != 2"); {fail};}}
+        if (PyArray_NDIM({_g}) != 2) {{PyErr_SetString(PyExc_NotImplementedError, "rank(g) != 2"); {fail};}}
+        if (PyArray_NDIM({_indices}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(indices) != 1"); {fail};}}
+        if (PyArray_NDIM({_indptr}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(indptr) != 1"); {fail};}}
 
-        if( PyArray_TYPE(%(_indices)s) != NPY_INT32) {
-        PyErr_SetString(PyExc_NotImplementedError, "C"); %(fail)s;}
+        if( PyArray_TYPE({_indices}) != NPY_INT32) {{
+        PyErr_SetString(PyExc_NotImplementedError, "C"); {fail};}}
 
-        if( PyArray_TYPE(%(_indptr)s) != NPY_INT32)
-        {PyErr_SetString(PyExc_NotImplementedError, "D"); %(fail)s;}
+        if( PyArray_TYPE({_indptr}) != NPY_INT32)
+        {{PyErr_SetString(PyExc_NotImplementedError, "D"); {fail};}}
 
-        if( PyArray_DIMS(%(_d)s)[1] != PyArray_DIMS(%(_g)s)[1])
-        {PyErr_SetString(PyExc_NotImplementedError, "d and g have different numbers of columns"); %(fail)s;}
+        if( PyArray_DIMS({_d})[1] != PyArray_DIMS({_g})[1])
+        {{PyErr_SetString(PyExc_NotImplementedError, "d and g have different numbers of columns"); {fail};}}
 
-        if (!%(_zout)s
-            || (PyArray_DIMS(%(_zout)s)[0] != PyArray_DIMS(%(_indices)s)[0]))
-        {
-            Py_XDECREF(%(_zout)s);
-            %(_zout)s = (PyArrayObject*) PyArray_SimpleNew(1, PyArray_DIMS(%(_indices)s), PyArray_TYPE(%(_g)s));
-        }
+        if (!{_zout}
+            || (PyArray_DIMS({_zout})[0] != PyArray_DIMS({_indices})[0]))
+        {{
+            Py_XDECREF({_zout});
+            {_zout} = (PyArrayObject*) PyArray_SimpleNew(1, PyArray_DIMS({_indices}), PyArray_TYPE({_g}));
+        }}
 
-        {   //makes it compile even though labels jump over variable definitions.
-            npy_intp nnz = PyArray_DIMS(%(_indices)s)[0];
-            npy_intp N =  PyArray_DIMS(%(_indptr)s)[0]-1; //TODO: error checking with this
+        {{   //makes it compile even though labels jump over variable definitions.
+            npy_intp nnz = PyArray_DIMS({_indices})[0];
+            npy_intp N =  PyArray_DIMS({_indptr})[0]-1; //TODO: error checking with this
 
-            npy_intp Sindices = PyArray_STRIDES(%(_indices)s)[0]/PyArray_DESCR(%(_indices)s)->elsize;
-            npy_intp Sindptr = PyArray_STRIDES(%(_indptr)s)[0]/PyArray_DESCR(%(_indptr)s)->elsize;
+            npy_intp Sindices = PyArray_STRIDES({_indices})[0]/PyArray_DESCR({_indices})->elsize;
+            npy_intp Sindptr = PyArray_STRIDES({_indptr})[0]/PyArray_DESCR({_indptr})->elsize;
 
-            const npy_intp Sd1 = PyArray_STRIDES(%(_d)s)[1]/PyArray_DESCR(%(_d)s)->elsize;
-            const npy_intp Sg1 = PyArray_STRIDES(%(_g)s)[1]/PyArray_DESCR(%(_g)s)->elsize;
+            const npy_intp Sd1 = PyArray_STRIDES({_d})[1]/PyArray_DESCR({_d})->elsize;
+            const npy_intp Sg1 = PyArray_STRIDES({_g})[1]/PyArray_DESCR({_g})->elsize;
 
-            const npy_intp K = PyArray_DIMS(%(_d)s)[1];
+            const npy_intp K = PyArray_DIMS({_d})[1];
 
-            const npy_int32 * __restrict__ indptr = (npy_int32 *)PyArray_DATA(%(_indptr)s);
-            const npy_int32 * __restrict__ indices = (npy_int32 *)PyArray_DATA(%(_indices)s);
+            const npy_int32 * __restrict__ indptr = (npy_int32 *)PyArray_DATA({_indptr});
+            const npy_int32 * __restrict__ indices = (npy_int32 *)PyArray_DATA({_indices});
 
             // loop over columns
             for (npy_int32 j = 0; j < N; ++j)
-            {
+            {{
                 // extract j-th row of dense matrix
-                const dtype_%(_d)s* __restrict__ d_row = (dtype_%(_d)s*)(PyArray_BYTES(%(_d)s) + PyArray_STRIDES(%(_d)s)[0] * j);
-                if(j >= PyArray_DIMS(%(_d)s)[0]) {PyErr_SetString(PyExc_NotImplementedError, "G"); %(fail)s;}
+                const dtype_{_d}* __restrict__ d_row = (dtype_{_d}*)(PyArray_BYTES({_d}) + PyArray_STRIDES({_d})[0] * j);
+                if(j >= PyArray_DIMS({_d})[0]) {{PyErr_SetString(PyExc_NotImplementedError, "G"); {fail};}}
 
                 // for each non-null value in the sparse column
                 for (npy_int32 i_idx = indptr[j * Sindptr]; i_idx < indptr[(j+1) * Sindptr]; ++i_idx)
-                {
+                {{
                     // extract row index of non-null value
                     npy_int32 i = indices[i_idx * Sindices];
 
                     // extract corresponding row in gradient
-                    const dtype_%(_g)s* __restrict__ g_row = (dtype_%(_g)s*)(PyArray_BYTES(%(_g)s) + PyArray_STRIDES(%(_g)s)[0] * i);
+                    const dtype_{_g}* __restrict__ g_row = (dtype_{_g}*)(PyArray_BYTES({_g}) + PyArray_STRIDES({_g})[0] * i);
                     double ip = 0.0;
 
                     // make sure that row index is not bigger than actual number of rows
                     // Note: wouldn't the above operation fail if that were the case ?
                     //       when would this ever be true anyway ?
-                    if (i >= PyArray_DIMS(%(_g)s)[0])
-                    {PyErr_SetString(PyExc_NotImplementedError, "H"); %(fail)s;}
+                    if (i >= PyArray_DIMS({_g})[0])
+                    {{PyErr_SetString(PyExc_NotImplementedError, "H"); {fail};}}
 
                     // perform dot product of dense and sparse rows
                     for(int k = 0; k < K; ++k)
-                    {
+                    {{
                         ip += d_row[k * Sd1] * g_row[k*Sg1];
-                    }
+                    }}
 
                     // write resulting gradient to sparse output
-                    ((dtype_%(_zout)s* __restrict__)(PyArray_BYTES(%(_zout)s) + i_idx * PyArray_STRIDES(%(_zout)s)[0]))[0] = ip;
-                }
-            }
-        }
+                    ((dtype_{_zout}* __restrict__)(PyArray_BYTES({_zout}) + i_idx * PyArray_STRIDES({_zout})[0]))[0] = ip;
+                }}
+            }}
+        }}
 
-        """ % dict(locals(), **sub)
+        """.format(**dict(locals(), **sub))
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]
@@ -3756,79 +3756,79 @@ class StructuredDotGradCSR(COp):
             raise NotImplementedError("Complex types are not supported for g_ab")
 
         return """
-        if (PyArray_NDIM(%(_d)s) != 2) {PyErr_SetString(PyExc_NotImplementedError, "rank(d) != 2"); %(fail)s;}
-        if (PyArray_NDIM(%(_g)s) != 2) {PyErr_SetString(PyExc_NotImplementedError, "rank(g) != 2"); %(fail)s;}
-        if (PyArray_NDIM(%(_indices)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(indices) != 1"); %(fail)s;}
-        if (PyArray_NDIM(%(_indptr)s) != 1) {PyErr_SetString(PyExc_NotImplementedError, "rank(indptr) != 1"); %(fail)s;}
+        if (PyArray_NDIM({_d}) != 2) {{PyErr_SetString(PyExc_NotImplementedError, "rank(d) != 2"); {fail};}}
+        if (PyArray_NDIM({_g}) != 2) {{PyErr_SetString(PyExc_NotImplementedError, "rank(g) != 2"); {fail};}}
+        if (PyArray_NDIM({_indices}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(indices) != 1"); {fail};}}
+        if (PyArray_NDIM({_indptr}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(indptr) != 1"); {fail};}}
 
-        if( PyArray_TYPE(%(_indices)s) != NPY_INT32) {
-        PyErr_SetString(PyExc_NotImplementedError, "C"); %(fail)s;}
+        if( PyArray_TYPE({_indices}) != NPY_INT32) {{
+        PyErr_SetString(PyExc_NotImplementedError, "C"); {fail};}}
 
-        if( PyArray_TYPE(%(_indptr)s) != NPY_INT32)
-        {PyErr_SetString(PyExc_NotImplementedError, "D"); %(fail)s;}
+        if( PyArray_TYPE({_indptr}) != NPY_INT32)
+        {{PyErr_SetString(PyExc_NotImplementedError, "D"); {fail};}}
 
-        if( PyArray_DIMS(%(_d)s)[1] != PyArray_DIMS(%(_g)s)[1])
-        {PyErr_SetString(PyExc_NotImplementedError, "d and g have different numbers of columns"); %(fail)s;}
+        if( PyArray_DIMS({_d})[1] != PyArray_DIMS({_g})[1])
+        {{PyErr_SetString(PyExc_NotImplementedError, "d and g have different numbers of columns"); {fail};}}
 
-        if (!%(_zout)s
-            || (PyArray_DIMS(%(_zout)s)[0] != PyArray_DIMS(%(_indices)s)[0]))
-        {
-            Py_XDECREF(%(_zout)s);
-            %(_zout)s = (PyArrayObject*) PyArray_SimpleNew(1, PyArray_DIMS(%(_indices)s), PyArray_TYPE(%(_g)s));
-        }
+        if (!{_zout}
+            || (PyArray_DIMS({_zout})[0] != PyArray_DIMS({_indices})[0]))
+        {{
+            Py_XDECREF({_zout});
+            {_zout} = (PyArrayObject*) PyArray_SimpleNew(1, PyArray_DIMS({_indices}), PyArray_TYPE({_g}));
+        }}
 
-        {   //makes it compile even though labels jump over variable definitions.
-            npy_intp nnz = PyArray_DIMS(%(_indices)s)[0];
+        {{   //makes it compile even though labels jump over variable definitions.
+            npy_intp nnz = PyArray_DIMS({_indices})[0];
             // extract number of rows
-            npy_intp N =  PyArray_DIMS(%(_indptr)s)[0]-1; //TODO: error checking with this
+            npy_intp N =  PyArray_DIMS({_indptr})[0]-1; //TODO: error checking with this
 
-            npy_intp Sindices = PyArray_STRIDES(%(_indices)s)[0]/PyArray_DESCR(%(_indices)s)->elsize;
-            npy_intp Sindptr = PyArray_STRIDES(%(_indptr)s)[0]/PyArray_DESCR(%(_indptr)s)->elsize;
+            npy_intp Sindices = PyArray_STRIDES({_indices})[0]/PyArray_DESCR({_indices})->elsize;
+            npy_intp Sindptr = PyArray_STRIDES({_indptr})[0]/PyArray_DESCR({_indptr})->elsize;
 
-            const npy_intp Sd1 = PyArray_STRIDES(%(_d)s)[1]/PyArray_DESCR(%(_d)s)->elsize;
-            const npy_intp Sg1 = PyArray_STRIDES(%(_g)s)[1]/PyArray_DESCR(%(_g)s)->elsize;
+            const npy_intp Sd1 = PyArray_STRIDES({_d})[1]/PyArray_DESCR({_d})->elsize;
+            const npy_intp Sg1 = PyArray_STRIDES({_g})[1]/PyArray_DESCR({_g})->elsize;
 
-            const npy_intp K = PyArray_DIMS(%(_d)s)[1];
+            const npy_intp K = PyArray_DIMS({_d})[1];
 
-            const npy_int32 * __restrict__ indptr = (npy_int32 *)PyArray_DATA(%(_indptr)s);
-            const npy_int32 * __restrict__ indices = (npy_int32 *)PyArray_DATA(%(_indices)s);
+            const npy_int32 * __restrict__ indptr = (npy_int32 *)PyArray_DATA({_indptr});
+            const npy_int32 * __restrict__ indices = (npy_int32 *)PyArray_DATA({_indices});
 
             // loop over columns of sparse matrix
             for (npy_int32 i = 0; i < N; ++i)
-            {
+            {{
                 // for each non-null value in the sparse row
                 for (npy_int32 j_idx = indptr[i * Sindptr]; j_idx < indptr[(i+1) * Sindptr]; ++j_idx)
-                {
+                {{
                     // extract column index of non-null value
                     npy_int32 j = indices[j_idx * Sindices];
 
                     // extract j-th row of dense matrix
-                    const dtype_%(_d)s* __restrict__ d_row = (dtype_%(_d)s*)(PyArray_BYTES(%(_d)s) + PyArray_STRIDES(%(_d)s)[0] * j);
-                    if(j >= PyArray_DIMS(%(_d)s)[0]) {PyErr_SetString(PyExc_NotImplementedError, "G"); %(fail)s;}
+                    const dtype_{_d}* __restrict__ d_row = (dtype_{_d}*)(PyArray_BYTES({_d}) + PyArray_STRIDES({_d})[0] * j);
+                    if(j >= PyArray_DIMS({_d})[0]) {{PyErr_SetString(PyExc_NotImplementedError, "G"); {fail};}}
 
                     // extract corresponding row in gradient
-                    const dtype_%(_g)s* __restrict__ g_row = (dtype_%(_g)s*)(PyArray_BYTES(%(_g)s) + PyArray_STRIDES(%(_g)s)[0] * i);
+                    const dtype_{_g}* __restrict__ g_row = (dtype_{_g}*)(PyArray_BYTES({_g}) + PyArray_STRIDES({_g})[0] * i);
                     double ip = 0.0;
 
                     // make sure that row index is not bigger than actual number of rows
                     // Note: wouldn't the above operation fail if that were the case ?
                     //       when would this ever be true anyway ?
-                    if (i >= PyArray_DIMS(%(_g)s)[0])
-                    {PyErr_SetString(PyExc_NotImplementedError, "H"); %(fail)s;}
+                    if (i >= PyArray_DIMS({_g})[0])
+                    {{PyErr_SetString(PyExc_NotImplementedError, "H"); {fail};}}
 
                     // perform dot product of dense and sparse rows
                     for(int k = 0; k < K; ++k)
-                    {
+                    {{
                         ip += d_row[k * Sd1] * g_row[k*Sg1];
-                    }
+                    }}
 
                     // write resulting gradient to sparse output
-                    ((dtype_%(_zout)s* __restrict__)(PyArray_BYTES(%(_zout)s) + j_idx * PyArray_STRIDES(%(_zout)s)[0]))[0] = ip;
-                }
-            }
-        }
+                    ((dtype_{_zout}* __restrict__)(PyArray_BYTES({_zout}) + j_idx * PyArray_STRIDES({_zout})[0]))[0] = ip;
+                }}
+            }}
+        }}
 
-        """ % dict(locals(), **sub)
+        """.format(**dict(locals(), **sub))
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]

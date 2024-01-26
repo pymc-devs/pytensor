@@ -476,47 +476,47 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
     def c_declare(self, name, sub, check_input=True):
         if check_input:
             check = """
-            typedef %(dtype)s dtype_%(name)s;
-            """ % dict(sub, name=name, dtype=self.dtype_specs()[1])
+            typedef {dtype} dtype_{name};
+            """.format(**dict(sub, name=name, dtype=self.dtype_specs()[1]))
         else:
             check = ""
         declaration = """
-        PyArrayObject* %(name)s;
-        """ % dict(sub, name=name, dtype=self.dtype_specs()[1])
+        PyArrayObject* {name};
+        """.format(**dict(sub, name=name, dtype=self.dtype_specs()[1]))
 
         return declaration + check
 
     def c_init(self, name, sub):
         return """
-        %(name)s = NULL;
-        """ % dict(sub, name=name, type_num=self.dtype_specs()[2])
+        {name} = NULL;
+        """.format(**dict(sub, name=name, type_num=self.dtype_specs()[2]))
 
     def c_extract(self, name, sub, check_input=True, **kwargs):
         if check_input:
             check = """
-            %(name)s = NULL;
-            if (py_%(name)s == Py_None) {
-                // We can either fail here or set %(name)s to NULL and rely on Ops
+            {name} = NULL;
+            if (py_{name} == Py_None) {{
+                // We can either fail here or set {name} to NULL and rely on Ops
                 // using tensors to handle the NULL case, but if they fail to do so
                 // they'll end up with nasty segfaults, so this is public service.
                 PyErr_SetString(PyExc_ValueError, "expected an ndarray, not None");
-                %(fail)s
-            }
-            if (!PyArray_Check(py_%(name)s)) {
+                {fail}
+            }}
+            if (!PyArray_Check(py_{name})) {{
                 PyErr_SetString(PyExc_ValueError, "expected an ndarray");
-                %(fail)s
-            }
-            // We expect %(type_num)s
-            if (!PyArray_ISALIGNED((PyArrayObject*) py_%(name)s)) {
-                PyArrayObject * tmp = (PyArrayObject*) py_%(name)s;
+                {fail}
+            }}
+            // We expect {type_num}
+            if (!PyArray_ISALIGNED((PyArrayObject*) py_{name})) {{
+                PyArrayObject * tmp = (PyArrayObject*) py_{name};
                 PyErr_Format(PyExc_NotImplementedError,
-                             "expected an aligned array of type %%ld "
-                             "(%(type_num)s), got non-aligned array of type %%ld"
-                             " with %%ld dimensions, with 3 last dims "
-                             "%%ld, %%ld, %%ld"
-                             " and 3 last strides %%ld %%ld, %%ld.",
-                             (long int) %(type_num)s,
-                             (long int) PyArray_TYPE((PyArrayObject*) py_%(name)s),
+                             "expected an aligned array of type %ld "
+                             "({type_num}), got non-aligned array of type %ld"
+                             " with %ld dimensions, with 3 last dims "
+                             "%ld, %ld, %ld"
+                             " and 3 last strides %ld %ld, %ld.",
+                             (long int) {type_num},
+                             (long int) PyArray_TYPE((PyArrayObject*) py_{name}),
                              (long int) PyArray_NDIM(tmp),
                              (long int) (PyArray_NDIM(tmp) >= 3 ?
             PyArray_DIMS(tmp)[PyArray_NDIM(tmp)-3] : -1),
@@ -531,74 +531,73 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
                              (long int) (PyArray_NDIM(tmp) >= 1 ?
             PyArray_STRIDES(tmp)[PyArray_NDIM(tmp)-1] : -1)
             );
-                %(fail)s
-            }
+                {fail}
+            }}
             // This is a TypeError to be consistent with DEBUG_MODE
             // Note: DEBUG_MODE also tells the name of the container
-            if (PyArray_TYPE((PyArrayObject*) py_%(name)s) != %(type_num)s) {
+            if (PyArray_TYPE((PyArrayObject*) py_{name}) != {type_num}) {{
                 PyErr_Format(PyExc_TypeError,
-                             "expected type_num %%d (%(type_num)s) got %%d",
-                             %(type_num)s, PyArray_TYPE((PyArrayObject*) py_%(name)s));
-                %(fail)s
-            }
-            """ % dict(sub, name=name, type_num=self.dtype_specs()[2])
+                             "expected type_num %d ({type_num}) got %d",
+                             {type_num}, PyArray_TYPE((PyArrayObject*) py_{name}));
+                {fail}
+            }}
+            """.format(**dict(sub, name=name, type_num=self.dtype_specs()[2]))
         else:
             check = ""
         return (
             check
             + """
-        %(name)s = (PyArrayObject*)(py_%(name)s);
-        Py_XINCREF(%(name)s);
-        """
-            % dict(sub, name=name, type_num=self.dtype_specs()[2])
+        {name} = (PyArrayObject*)(py_{name});
+        Py_XINCREF({name});
+        """.format(**dict(sub, name=name, type_num=self.dtype_specs()[2]))
         )
 
     def c_cleanup(self, name, sub):
         return """
-        if (%(name)s) {
-            Py_XDECREF(%(name)s);
-        }
-        """ % locals()
+        if ({name}) {{
+            Py_XDECREF({name});
+        }}
+        """.format(**locals())
 
     def c_sync(self, name, sub):
         fail = sub["fail"]
         type_num = self.dtype_specs()[2]
         return """
-        {Py_XDECREF(py_%(name)s);}
-        if (!%(name)s) {
+        {{Py_XDECREF(py_{name});}}
+        if (!{name}) {{
             Py_INCREF(Py_None);
-            py_%(name)s = Py_None;
-        }
-        else if ((void*)py_%(name)s != (void*)%(name)s) {
-            py_%(name)s = (PyObject*)%(name)s;
-        }
+            py_{name} = Py_None;
+        }}
+        else if ((void*)py_{name} != (void*){name}) {{
+            py_{name} = (PyObject*){name};
+        }}
 
-        {Py_XINCREF(py_%(name)s);}
+        {{Py_XINCREF(py_{name});}}
 
-        if (%(name)s && !PyArray_ISALIGNED((PyArrayObject*) py_%(name)s)) {
+        if ({name} && !PyArray_ISALIGNED((PyArrayObject*) py_{name})) {{
             PyErr_Format(PyExc_NotImplementedError,
-                         "c_sync: expected an aligned array, got non-aligned array of type %%ld"
-                         " with %%ld dimensions, with 3 last dims "
-                         "%%ld, %%ld, %%ld"
-                         " and 3 last strides %%ld %%ld, %%ld.",
-                         (long int) PyArray_TYPE((PyArrayObject*) py_%(name)s),
-                         (long int) PyArray_NDIM(%(name)s),
-                         (long int) (PyArray_NDIM(%(name)s) >= 3 ?
-        PyArray_DIMS(%(name)s)[PyArray_NDIM(%(name)s)-3] : -1),
-                         (long int) (PyArray_NDIM(%(name)s) >= 2 ?
-        PyArray_DIMS(%(name)s)[PyArray_NDIM(%(name)s)-2] : -1),
-                         (long int) (PyArray_NDIM(%(name)s) >= 1 ?
-        PyArray_DIMS(%(name)s)[PyArray_NDIM(%(name)s)-1] : -1),
-                         (long int) (PyArray_NDIM(%(name)s) >= 3 ?
-        PyArray_STRIDES(%(name)s)[PyArray_NDIM(%(name)s)-3] : -1),
-                         (long int) (PyArray_NDIM(%(name)s) >= 2 ?
-        PyArray_STRIDES(%(name)s)[PyArray_NDIM(%(name)s)-2] : -1),
-                         (long int) (PyArray_NDIM(%(name)s) >= 1 ?
-        PyArray_STRIDES(%(name)s)[PyArray_NDIM(%(name)s)-1] : -1)
+                         "c_sync: expected an aligned array, got non-aligned array of type %ld"
+                         " with %ld dimensions, with 3 last dims "
+                         "%ld, %ld, %ld"
+                         " and 3 last strides %ld %ld, %ld.",
+                         (long int) PyArray_TYPE((PyArrayObject*) py_{name}),
+                         (long int) PyArray_NDIM({name}),
+                         (long int) (PyArray_NDIM({name}) >= 3 ?
+        PyArray_DIMS({name})[PyArray_NDIM({name})-3] : -1),
+                         (long int) (PyArray_NDIM({name}) >= 2 ?
+        PyArray_DIMS({name})[PyArray_NDIM({name})-2] : -1),
+                         (long int) (PyArray_NDIM({name}) >= 1 ?
+        PyArray_DIMS({name})[PyArray_NDIM({name})-1] : -1),
+                         (long int) (PyArray_NDIM({name}) >= 3 ?
+        PyArray_STRIDES({name})[PyArray_NDIM({name})-3] : -1),
+                         (long int) (PyArray_NDIM({name}) >= 2 ?
+        PyArray_STRIDES({name})[PyArray_NDIM({name})-2] : -1),
+                         (long int) (PyArray_NDIM({name}) >= 1 ?
+        PyArray_STRIDES({name})[PyArray_NDIM({name})-1] : -1)
         );
-            %(fail)s
-        }
-        """ % locals()
+            {fail}
+        }}
+        """.format(**locals())
 
     def c_headers(self, **kwargs):
         return ps.get_scalar_type(self.dtype).c_headers(**kwargs)

@@ -1840,19 +1840,19 @@ class BatchedDot(COp):
         z_shape = ", ".join(z_dims)
         z_contiguous = contiguous(_z, z_ndim)
         allocate = """
-            if (NULL == %(_z)s || !(%(z_shape_correct)s)  || !(%(z_contiguous)s))
-            {
-                npy_intp dims[%(z_ndim)s] = {%(z_shape)s};
-                Py_XDECREF(%(_z)s);
-                %(_z)s = (PyArrayObject*)PyArray_SimpleNew(
-                    %(z_ndim)s, dims, PyArray_TYPE(%(_x)s));
-                if(!%(_z)s) {
+            if (NULL == {_z} || !({z_shape_correct})  || !({z_contiguous}))
+            {{
+                npy_intp dims[{z_ndim}] = {{{z_shape}}};
+                Py_XDECREF({_z});
+                {_z} = (PyArrayObject*)PyArray_SimpleNew(
+                    {z_ndim}, dims, PyArray_TYPE({_x}));
+                if(!{_z}) {{
                     PyErr_SetString(PyExc_MemoryError,
                                     "failed to alloc BatchedDot output");
-                    %(fail)s
-                }
-            }
-        """ % locals()
+                    {fail}
+                }}
+            }}
+        """.format(**locals())
 
         # code to reallocate inputs contiguously if necessary
         contiguate = []
@@ -1860,76 +1860,75 @@ class BatchedDot(COp):
             _contiguous = contiguous(var, ndim)
             contiguate.append(
                 """
-                if (!(%(_contiguous)s)) {
-                    PyArrayObject * _copy = (PyArrayObject *) PyArray_Copy(%(var)s);
+                if (!({_contiguous})) {{
+                    PyArrayObject * _copy = (PyArrayObject *) PyArray_Copy({var});
                     if (!_copy)
-                        %(fail)s
-                    Py_XDECREF(%(var)s);
-                    %(var)s = _copy;
-                }
-            """
-                % locals()
+                        {fail}
+                    Py_XDECREF({var});
+                    {var} = _copy;
+                }}
+            """.format(**locals())
             )
         contiguate = "\n".join(contiguate)
 
         return """
-        int type_num = PyArray_DESCR(%(_x)s)->type_num;
-        int type_size = PyArray_DESCR(%(_x)s)->elsize; // in bytes
+        int type_num = PyArray_DESCR({_x})->type_num;
+        int type_size = PyArray_DESCR({_x})->elsize; // in bytes
 
-        if (PyArray_NDIM(%(_x)s) != 3) {
+        if (PyArray_NDIM({_x}) != 3) {{
             PyErr_Format(PyExc_NotImplementedError,
-                         "rank(x) != 3. rank(x) is %%d.",
-                         PyArray_NDIM(%(_x)s));
-            %(fail)s;
-        }
-        if (PyArray_NDIM(%(_y)s) != 3) {
+                         "rank(x) != 3. rank(x) is %d.",
+                         PyArray_NDIM({_x}));
+            {fail};
+        }}
+        if (PyArray_NDIM({_y}) != 3) {{
             PyErr_Format(PyExc_NotImplementedError,
-                         "rank(y) != 3. rank(y) is %%d.",
-                         PyArray_NDIM(%(_y)s));
-            %(fail)s;
-        }
-        if (%(_z)s && PyArray_NDIM(%(_z)s) != 3) {
+                         "rank(y) != 3. rank(y) is %d.",
+                         PyArray_NDIM({_y}));
+            {fail};
+        }}
+        if ({_z} && PyArray_NDIM({_z}) != 3) {{
             PyErr_Format(PyExc_NotImplementedError,
-                         "rank(z) != 3. rank(z) is %%d.",
-                         PyArray_NDIM(%(_z)s));
-            %(fail)s;
-        }
+                         "rank(z) != 3. rank(z) is %d.",
+                         PyArray_NDIM({_z}));
+            {fail};
+        }}
 
         // allocate output
-        %(allocate)s
+        {allocate}
         // reallocate any noncontiguous arrays or arrays with invalid strides
-        %(contiguate)s
+        {contiguate}
 
-        if ((PyArray_DESCR(%(_x)s)->type_num != NPY_DOUBLE)
-            && (PyArray_DESCR(%(_x)s)->type_num != NPY_FLOAT))
-        {PyErr_SetString(PyExc_NotImplementedError, "type(x) is not double or float"); %(fail)s;}
+        if ((PyArray_DESCR({_x})->type_num != NPY_DOUBLE)
+            && (PyArray_DESCR({_x})->type_num != NPY_FLOAT))
+        {{PyErr_SetString(PyExc_NotImplementedError, "type(x) is not double or float"); {fail};}}
 
-        if ((PyArray_DESCR(%(_y)s)->type_num != NPY_DOUBLE)
-            && (PyArray_DESCR(%(_y)s)->type_num != NPY_FLOAT))
-        {PyErr_SetString(PyExc_NotImplementedError, "type(y) is not double or float"); %(fail)s;}
+        if ((PyArray_DESCR({_y})->type_num != NPY_DOUBLE)
+            && (PyArray_DESCR({_y})->type_num != NPY_FLOAT))
+        {{PyErr_SetString(PyExc_NotImplementedError, "type(y) is not double or float"); {fail};}}
 
-        if ((PyArray_DESCR(%(_z)s)->type_num != NPY_DOUBLE)
-            && (PyArray_DESCR(%(_z)s)->type_num != NPY_FLOAT))
-        {PyErr_SetString(PyExc_NotImplementedError, "type(z) is not double or float"); %(fail)s;}
+        if ((PyArray_DESCR({_z})->type_num != NPY_DOUBLE)
+            && (PyArray_DESCR({_z})->type_num != NPY_FLOAT))
+        {{PyErr_SetString(PyExc_NotImplementedError, "type(z) is not double or float"); {fail};}}
 
-        if ((PyArray_DESCR(%(_x)s)->type_num != PyArray_DESCR(%(_y)s)->type_num)
-            ||(PyArray_DESCR(%(_x)s)->type_num != PyArray_DESCR(%(_z)s)->type_num))
-        { PyErr_SetString(PyExc_NotImplementedError, "type(x), type(y), type(z) are not all the same"); %(fail)s; }
+        if ((PyArray_DESCR({_x})->type_num != PyArray_DESCR({_y})->type_num)
+            ||(PyArray_DESCR({_x})->type_num != PyArray_DESCR({_z})->type_num))
+        {{ PyErr_SetString(PyExc_NotImplementedError, "type(x), type(y), type(z) are not all the same"); {fail}; }}
 
         switch (type_num)
-        {
+        {{
             case NPY_FLOAT:
-            if (batch_gemm<float>(sgemm_, type_size, %(_x)s, %(_y)s, %(_z)s)) {
-                %(fail)s;
-            }
+            if (batch_gemm<float>(sgemm_, type_size, {_x}, {_y}, {_z})) {{
+                {fail};
+            }}
             break;
             case NPY_DOUBLE:
-            if (batch_gemm<double>(dgemm_, type_size, %(_x)s, %(_y)s, %(_z)s)) {
-                %(fail)s;
-            }
+            if (batch_gemm<double>(dgemm_, type_size, {_x}, {_y}, {_z})) {{
+                {fail};
+            }}
             break;
-        }
-        """ % locals()
+        }}
+        """.format(**locals())
 
     def c_code_cache_version(self):
         from pytensor.tensor.blas_headers import blas_header_version

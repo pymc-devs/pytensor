@@ -250,33 +250,30 @@ def struct_gen(args, struct_builders, blocks, sub):
     # that holds the type, the value and the traceback. After storing
     # the error, we return the failure code so we know which code
     # block failed.
-    do_return = (
-        """
-        if (%(failure_var)s) {
+    do_return = """
+        if ({failure_var}) {{
             // When there is a failure, this code puts the exception
             // in __ERROR.
             PyObject* err_type = NULL;
             PyObject* err_msg = NULL;
             PyObject* err_traceback = NULL;
             PyErr_Fetch(&err_type, &err_msg, &err_traceback);
-            if (!err_type) {err_type = Py_None;Py_INCREF(Py_None);}
-            if (!err_msg) {err_msg = Py_None; Py_INCREF(Py_None);}
-            if (!err_traceback) {err_traceback = Py_None; Py_INCREF(Py_None);}
+            if (!err_type) {{err_type = Py_None;Py_INCREF(Py_None);}}
+            if (!err_msg) {{err_msg = Py_None; Py_INCREF(Py_None);}}
+            if (!err_traceback) {{err_traceback = Py_None; Py_INCREF(Py_None);}}
             PyObject* old_err_type = PyList_GET_ITEM(__ERROR, 0);
             PyObject* old_err_msg = PyList_GET_ITEM(__ERROR, 1);
             PyObject* old_err_traceback = PyList_GET_ITEM(__ERROR, 2);
             PyList_SET_ITEM(__ERROR, 0, err_type);
             PyList_SET_ITEM(__ERROR, 1, err_msg);
             PyList_SET_ITEM(__ERROR, 2, err_traceback);
-            {Py_XDECREF(old_err_type);}
-            {Py_XDECREF(old_err_msg);}
-            {Py_XDECREF(old_err_traceback);}
-        }
+            {{Py_XDECREF(old_err_type);}}
+            {{Py_XDECREF(old_err_msg);}}
+            {{Py_XDECREF(old_err_traceback);}}
+        }}
         // The failure code is returned to index what code block failed.
-        return %(failure_var)s;
-        """
-        % sub
-    )
+        return {failure_var};
+        """.format(**sub)
 
     sub = dict(sub)
     sub.update(locals())
@@ -284,16 +281,15 @@ def struct_gen(args, struct_builders, blocks, sub):
     # TODO: add some error checking to make sure storage_<x> are
     # 1-element lists and __ERROR is a 3-elements list.
 
-    struct_code = (
-        """
-    namespace {
-    struct %(name)s {
+    struct_code = """
+    namespace {{
+    struct {name} {{
         PyObject* __ERROR;
 
-        %(storage_decl)s
-        %(struct_decl)s
+        {storage_decl}
+        {struct_decl}
 
-        %(name)s() {
+        {name}() {{
             // This is only somewhat safe because we:
             //  1) Are not a virtual class
             //  2) Do not use any virtual classes in the members
@@ -306,32 +302,30 @@ def struct_gen(args, struct_builders, blocks, sub):
             #ifndef PYTENSOR_DONT_MEMSET_STRUCT
             memset(this, 0, sizeof(*this));
             #endif
-        }
-        ~%(name)s(void) {
+        }}
+        ~{name}(void) {{
             cleanup();
-        }
+        }}
 
-        int init(PyObject* __ERROR, %(args_decl)s) {
-            %(storage_incref)s
-            %(storage_set)s
-            %(struct_init_head)s
+        int init(PyObject* __ERROR, {args_decl}) {{
+            {storage_incref}
+            {storage_set}
+            {struct_init_head}
             this->__ERROR = __ERROR;
             return 0;
-        }
-        void cleanup(void) {
-            %(struct_cleanup)s
-            %(storage_decref)s
-        }
-        int run(void) {
-            int %(failure_var)s = 0;
-            %(behavior)s
-            %(do_return)s
-        }
-    };
-    }
-    """
-        % sub
-    )
+        }}
+        void cleanup(void) {{
+            {struct_cleanup}
+            {storage_decref}
+        }}
+        int run(void) {{
+            int {failure_var} = 0;
+            {behavior}
+            {do_return}
+        }}
+    }};
+    }}
+    """.format(**sub)
 
     return struct_code
 
@@ -380,9 +374,9 @@ def get_c_init(fgraph, r, name, sub):
     pre = (
         ""
         """
-    py_%(name)s = Py_None;
-    {Py_XINCREF(py_%(name)s);}
-    """ % locals()
+    py_{name} = Py_None;
+    {{Py_XINCREF(py_{name});}}
+    """.format(**locals())
     )
     return pre + r.type.c_init(name, sub)
 
@@ -418,9 +412,9 @@ def get_c_extract(fgraph, r, name, sub):
         c_extract = r.type.c_extract(name, sub, False)
 
     pre = """
-    py_%(name)s = PyList_GET_ITEM(storage_%(name)s, 0);
-    {Py_XINCREF(py_%(name)s);}
-    """ % locals()
+    py_{name} = PyList_GET_ITEM(storage_{name}, 0);
+    {{Py_XINCREF(py_{name});}}
+    """.format(**locals())
     return pre + c_extract
 
 
@@ -447,9 +441,9 @@ def get_c_extract_out(fgraph, r, name, sub):
         c_extract = r.type.c_extract_out(name, sub, check_input, check_broadcast=False)
 
     pre = """
-    py_%(name)s = PyList_GET_ITEM(storage_%(name)s, 0);
-    {Py_XINCREF(py_%(name)s);}
-    """ % locals()
+    py_{name} = PyList_GET_ITEM(storage_{name}, 0);
+    {{Py_XINCREF(py_{name});}}
+    """.format(**locals())
     return pre + c_extract
 
 
@@ -459,8 +453,8 @@ def get_c_cleanup(fgraph, r, name, sub):
 
     """
     post = """
-    {Py_XDECREF(py_%(name)s);}
-    """ % locals()
+    {{Py_XDECREF(py_{name});}}
+    """.format(**locals())
     return r.type.c_cleanup(name, sub) + post
 
 
@@ -470,14 +464,14 @@ def get_c_sync(fgraph, r, name, sub):
 
     """
     return """
-    if (!%(failure_var)s) {
-      %(sync)s
-      PyObject* old = PyList_GET_ITEM(storage_%(name)s, 0);
-      {Py_XINCREF(py_%(name)s);}
-      PyList_SET_ITEM(storage_%(name)s, 0, py_%(name)s);
-      {Py_XDECREF(old);}
-    }
-    """ % dict(sync=r.type.c_sync(name, sub), name=name, **sub)
+    if (!{failure_var}) {{
+      {sync}
+      PyObject* old = PyList_GET_ITEM(storage_{name}, 0);
+      {{Py_XINCREF(py_{name});}}
+      PyList_SET_ITEM(storage_{name}, 0, py_{name});
+      {{Py_XDECREF(old);}}
+    }}
+    """.format(**dict(sync=r.type.c_sync(name, sub), name=name, **sub))
 
 
 def apply_policy(fgraph, policy, r, name, sub):

@@ -646,8 +646,7 @@ def _debugprint(
             tot_time_percent = (tot_time_dict[node] / profile.fct_call_time) * 100
 
             print(
-                "%s --> %8.2es %4.1f%% %8.2es %4.1f%%"
-                % (
+                "{} --> {:8.2e}s {:4.1f}% {:8.2e}s {:4.1f}%".format(
                     var_output,
                     op_time,
                     op_time_percent,

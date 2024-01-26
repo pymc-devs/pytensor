@@ -69,24 +69,24 @@ class CpuContiguous(COp):
         (x,) = inames
         (y,) = onames
         code = """
-            if (!PyArray_CHKFLAGS(%(x)s, NPY_ARRAY_C_CONTIGUOUS)){
+            if (!PyArray_CHKFLAGS({x}, NPY_ARRAY_C_CONTIGUOUS)){{
                 // check to see if output is contiguous first
-                if (%(y)s != NULL &&
-                    PyArray_CompareLists(PyArray_DIMS(%(y)s), PyArray_DIMS(%(x)s), PyArray_NDIM(%(x)s)) &&
-                    PyArray_CHKFLAGS(%(y)s, NPY_ARRAY_C_CONTIGUOUS)){
-                    PyArray_CopyInto(%(y)s, %(x)s);
-                }
-                else{
-                    Py_XDECREF(%(y)s);
-                    %(y)s = PyArray_GETCONTIGUOUS(%(x)s);
-                }
-            }
-            else{
-                Py_XINCREF(%(x)s);
-                Py_XDECREF(%(y)s);
-                %(y)s = %(x)s;
-            }
-            """ % locals()
+                if ({y} != NULL &&
+                    PyArray_CompareLists(PyArray_DIMS({y}), PyArray_DIMS({x}), PyArray_NDIM({x})) &&
+                    PyArray_CHKFLAGS({y}, NPY_ARRAY_C_CONTIGUOUS)){{
+                    PyArray_CopyInto({y}, {x});
+                }}
+                else{{
+                    Py_XDECREF({y});
+                    {y} = PyArray_GETCONTIGUOUS({x});
+                }}
+            }}
+            else{{
+                Py_XINCREF({x});
+                Py_XDECREF({y});
+                {y} = {x};
+            }}
+            """.format(**locals())
         return code
 
     def c_code_cache_version(self):
@@ -162,12 +162,12 @@ class SearchsortedOp(COp):
         side = sub["params"]
         fail = sub["fail"]
         return """
-            PyObject* tmp_%(name)s = PyUnicode_FromString("right");
-            if (tmp_%(name)s == NULL)
-                %(fail)s;
-            right_%(name)s = PyUnicode_Compare(%(side)s, tmp_%(name)s);
-            Py_DECREF(tmp_%(name)s);
-        """ % locals()
+            PyObject* tmp_{name} = PyUnicode_FromString("right");
+            if (tmp_{name} == NULL)
+                {fail};
+            right_{name} = PyUnicode_Compare({side}, tmp_{name});
+            Py_DECREF(tmp_{name});
+        """.format(**locals())
 
     def c_code(self, node, name, inames, onames, sub):
         sorter = None
@@ -181,17 +181,17 @@ class SearchsortedOp(COp):
         fail = sub["fail"]
 
         return """
-            Py_XDECREF(%(z)s);
-            %(z)s = (PyArrayObject*) PyArray_SearchSorted(%(x)s, (PyObject*) %(v)s,
-                                                          right_%(name)s ? NPY_SEARCHLEFT : NPY_SEARCHRIGHT, (PyObject*) %(sorter)s);
-            if (!%(z)s)
-                %(fail)s;
-            if (PyArray_TYPE(%(z)s) != NPY_INT64){
-                PyObject * tmp = PyArray_Cast(%(z)s, NPY_INT64);
-                Py_XDECREF(%(z)s);
-                %(z)s = (PyArrayObject*) tmp;
-            }
-        """ % locals()
+            Py_XDECREF({z});
+            {z} = (PyArrayObject*) PyArray_SearchSorted({x}, (PyObject*) {v},
+                                                          right_{name} ? NPY_SEARCHLEFT : NPY_SEARCHRIGHT, (PyObject*) {sorter});
+            if (!{z})
+                {fail};
+            if (PyArray_TYPE({z}) != NPY_INT64){{
+                PyObject * tmp = PyArray_Cast({z}, NPY_INT64);
+                Py_XDECREF({z});
+                {z} = (PyArrayObject*) tmp;
+            }}
+        """.format(**locals())
 
     def c_code_cache_version(self):
         return (2,)
@@ -351,43 +351,43 @@ class CumOp(COp):
         params = sub["params"]
 
         code = """
-                int axis = %(params)s->c_axis;
-                if (axis == 0 && PyArray_NDIM(%(x)s) == 1)
+                int axis = {params}->c_axis;
+                if (axis == 0 && PyArray_NDIM({x}) == 1)
                     axis = NPY_MAXDIMS;
-                npy_intp shape[1] = { PyArray_SIZE(%(x)s) };
-                if(axis == NPY_MAXDIMS && !(%(z)s && PyArray_DIMS(%(z)s)[0] == shape[0]))
-                {
-                    Py_XDECREF(%(z)s);
-                    %(z)s = (PyArrayObject*) PyArray_SimpleNew(1, shape, PyArray_TYPE((PyArrayObject*) py_%(x)s));
-                }
+                npy_intp shape[1] = {{ PyArray_SIZE({x}) }};
+                if(axis == NPY_MAXDIMS && !({z} && PyArray_DIMS({z})[0] == shape[0]))
+                {{
+                    Py_XDECREF({z});
+                    {z} = (PyArrayObject*) PyArray_SimpleNew(1, shape, PyArray_TYPE((PyArrayObject*) py_{x}));
+                }}
 
-                else if(axis != NPY_MAXDIMS && !(%(z)s && PyArray_CompareLists(PyArray_DIMS(%(z)s), PyArray_DIMS(%(x)s), PyArray_NDIM(%(x)s))))
-                {
-                    Py_XDECREF(%(z)s);
-                    %(z)s = (PyArrayObject*) PyArray_SimpleNew(PyArray_NDIM(%(x)s), PyArray_DIMS(%(x)s), PyArray_TYPE(%(x)s));
-                }
+                else if(axis != NPY_MAXDIMS && !({z} && PyArray_CompareLists(PyArray_DIMS({z}), PyArray_DIMS({x}), PyArray_NDIM({x}))))
+                {{
+                    Py_XDECREF({z});
+                    {z} = (PyArrayObject*) PyArray_SimpleNew(PyArray_NDIM({x}), PyArray_DIMS({x}), PyArray_TYPE({x}));
+                }}
 
-                if (!%(z)s)
-                    %(fail)s;
-                {
+                if (!{z})
+                    {fail};
+                {{
 
                     PyObject * t = NULL;
-                    if(%(params)s->mode == MODE_ADD)
+                    if({params}->mode == MODE_ADD)
                         t = PyArray_CumSum(
-                            %(x)s, axis,
-                            PyArray_TYPE(%(x)s), %(z)s);
-                    else if(%(params)s->mode == MODE_MUL)
+                            {x}, axis,
+                            PyArray_TYPE({x}), {z});
+                    else if({params}->mode == MODE_MUL)
                         t = PyArray_CumProd(
-                            %(x)s, axis,
-                            PyArray_TYPE(%(x)s), %(z)s);
+                            {x}, axis,
+                            PyArray_TYPE({x}), {z});
 
-                    if (!t){
-                       %(fail)s;
-                    }
+                    if (!t){{
+                       {fail};
+                    }}
                     // Because PyArray_CumSum/CumProd returns a newly created reference on t.
                     Py_XDECREF(t);
-                }
-            """ % locals()
+                }}
+            """.format(**locals())
 
         return code
 

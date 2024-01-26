@@ -600,11 +600,11 @@ class TensorFromScalar(COp):
         fail = sub["fail"]
 
         return """
-            %(z)s = (PyArrayObject*)PyArray_FromScalar(py_%(x)s, NULL);
-            if(%(z)s == NULL){
-                %(fail)s;
-            }
-            """ % locals()
+            {z} = (PyArrayObject*)PyArray_FromScalar(py_{x}, NULL);
+            if({z} == NULL){{
+                {fail};
+            }}
+            """.format(**locals())
 
     def c_code_cache_version(self):
         return (2,)
@@ -650,8 +650,8 @@ class ScalarFromTensor(COp):
         (z,) = outputs
         fail = sub["fail"]
         return """
-        %(z)s = ((dtype_%(x)s*)(PyArray_DATA(%(x)s)))[0];
-        """ % locals()
+        {z} = ((dtype_{x}*)(PyArray_DATA({x})))[0];
+        """.format(**locals())
 
     def c_code_cache_version(self):
         return (1,)
@@ -1813,16 +1813,16 @@ class MakeVector(COp):
 
         ret = """
         npy_intp dims[1];
-        dims[0] = %(out_shape)s;
-        if(!%(out)s || PyArray_DIMS(%(out)s)[0] != %(out_shape)s){
-            Py_XDECREF(%(out)s);
-            %(out)s = (PyArrayObject*)PyArray_EMPTY(1, dims, %(out_num)s, 0);
-        }
-        """ % locals()
+        dims[0] = {out_shape};
+        if(!{out} || PyArray_DIMS({out})[0] != {out_shape}){{
+            Py_XDECREF({out});
+            {out} = (PyArrayObject*)PyArray_EMPTY(1, dims, {out_num}, 0);
+        }}
+        """.format(**locals())
         for idx, i in enumerate(inp):
             ret += """
-            *((%(out_dtype)s *)PyArray_GETPTR1(%(out)s, %(idx)s)) = *((%(out_dtype)s *) PyArray_DATA(%(i)s));
-            """ % locals()
+            *(({out_dtype} *)PyArray_GETPTR1({out}, {idx})) = *(({out_dtype} *) PyArray_DATA({i}));
+            """.format(**locals())
         return ret
 
     def infer_shape(self, fgraph, node, ishapes):
@@ -2140,103 +2140,103 @@ class Split(COp):
         expected_splits_count = self.len_splits
 
         return """
-        int ndim = PyArray_NDIM(%(x)s);
-        int axis = (int)(*(%(axis_dtype)s*)PyArray_GETPTR1(%(axis)s, 0));
-        int splits_count = PyArray_DIM(%(splits)s, 0);
+        int ndim = PyArray_NDIM({x});
+        int axis = (int)(*({axis_dtype}*)PyArray_GETPTR1({axis}, 0));
+        int splits_count = PyArray_DIM({splits}, 0);
         npy_intp len_along_axis, sum_of_splits = 0, current_split_length = 0, current_split_start = 0;
         npy_intp* split_dims = NULL;
         PyObject* split_view = NULL;
         npy_intp data_offset;
         int i;
-        PyArrayObject** outputs[] = {%(outputs_pointers)s};
+        PyArrayObject** outputs[] = {{{outputs_pointers}}};
 
         /* Check inputs. */
 
-        if (splits_count != %(expected_splits_count)s) {
+        if (splits_count != {expected_splits_count}) {{
             PyErr_Format(PyExc_ValueError,
-                "Split: splits count (%%d) != expected count (%%d).", splits_count, %(expected_splits_count)s);
-            %(fail)s
-        }
+                "Split: splits count (%d) != expected count (%d).", splits_count, {expected_splits_count});
+            {fail}
+        }}
 
-        if (axis < 0) {
+        if (axis < 0) {{
             axis += ndim;
-        }
-        if (axis < 0 || axis >= ndim) {
-            PyErr_Format(PyExc_IndexError, "Split: invalid axis %%d for a %%d-D array.", axis, ndim);
-            %(fail)s
-        }
-        len_along_axis = PyArray_DIM(%(x)s, axis);
+        }}
+        if (axis < 0 || axis >= ndim) {{
+            PyErr_Format(PyExc_IndexError, "Split: invalid axis %d for a %d-D array.", axis, ndim);
+            {fail}
+        }}
+        len_along_axis = PyArray_DIM({x}, axis);
 
-        for (i = 0; i < splits_count; ++i) {
-            current_split_length = (npy_intp)(*(%(splits_dtype)s*)PyArray_GETPTR1(%(splits)s, i));
-            if (current_split_length < 0) {
+        for (i = 0; i < splits_count; ++i) {{
+            current_split_length = (npy_intp)(*({splits_dtype}*)PyArray_GETPTR1({splits}, i));
+            if (current_split_length < 0) {{
                 PyErr_Format(PyExc_ValueError,
-                    "Split: you try to take a negative number (%%ld) of elements.", current_split_length);
-                %(fail)s
-            }
+                    "Split: you try to take a negative number (%ld) of elements.", current_split_length);
+                {fail}
+            }}
             sum_of_splits += current_split_length;
-        }
-        if (sum_of_splits != len_along_axis) {
-            PyErr_Format(PyExc_ValueError, "Split: the splits sums to %%ld, expected %%ld.", sum_of_splits, len_along_axis);
-            %(fail)s
-        }
+        }}
+        if (sum_of_splits != len_along_axis) {{
+            PyErr_Format(PyExc_ValueError, "Split: the splits sums to %ld, expected %ld.", sum_of_splits, len_along_axis);
+            {fail}
+        }}
 
         /* Check outputs. */
 
         split_dims = (npy_intp*) malloc(ndim * sizeof(npy_intp));
-        if (split_dims == NULL) {
+        if (split_dims == NULL) {{
             PyErr_NoMemory();
-            %(fail)s
-        }
+            {fail}
+        }}
 
-        memcpy(split_dims, PyArray_DIMS(%(x)s), ndim * sizeof(npy_intp));
+        memcpy(split_dims, PyArray_DIMS({x}), ndim * sizeof(npy_intp));
 
-        for (i = 0; i < splits_count; ++i) {
+        for (i = 0; i < splits_count; ++i) {{
             PyArrayObject** output = outputs[i];
-            current_split_length = (npy_intp) (* (%(splits_dtype)s*) PyArray_GETPTR1(%(splits)s, i));
-            if (*output == NULL || !split_output_shape_is_correct(*output, %(x)s, axis, current_split_length)) {
+            current_split_length = (npy_intp) (* ({splits_dtype}*) PyArray_GETPTR1({splits}, i));
+            if (*output == NULL || !split_output_shape_is_correct(*output, {x}, axis, current_split_length)) {{
                 Py_XDECREF(*output);
                 split_dims[axis] = current_split_length;
-                *output = (PyArrayObject*)PyArray_EMPTY(ndim, split_dims, %(x_typenum)s, PyArray_IS_F_CONTIGUOUS(%(x)s));
-                if (outputs == NULL) {
+                *output = (PyArrayObject*)PyArray_EMPTY(ndim, split_dims, {x_typenum}, PyArray_IS_F_CONTIGUOUS({x}));
+                if (outputs == NULL) {{
                     PyErr_SetString(PyExc_RuntimeError, "Split: unable to allocate an output.");
                     free(split_dims);
-                    %(fail)s
-                }
-            }
-        }
+                    {fail}
+                }}
+            }}
+        }}
 
         /* Compute split. */
 
-        for (i = 0; i < splits_count; ++i) {
-            current_split_length = (npy_intp) (* (%(splits_dtype)s*) PyArray_GETPTR1(%(splits)s, i));
-            data_offset = PyArray_STRIDE(%(x)s, axis) * current_split_start;
+        for (i = 0; i < splits_count; ++i) {{
+            current_split_length = (npy_intp) (* ({splits_dtype}*) PyArray_GETPTR1({splits}, i));
+            data_offset = PyArray_STRIDE({x}, axis) * current_split_start;
             split_dims[axis] = current_split_length;
             split_view = PyArray_New(&PyArray_Type,
                                     ndim, split_dims,
-                                    %(x_typenum)s,
-                                    PyArray_STRIDES(%(x)s),
-                                    PyArray_BYTES(%(x)s) + data_offset,
-                                    %(x_itemsize)s,
-                                    PyArray_FLAGS(%(x)s),
+                                    {x_typenum},
+                                    PyArray_STRIDES({x}),
+                                    PyArray_BYTES({x}) + data_offset,
+                                    {x_itemsize},
+                                    PyArray_FLAGS({x}),
                                     NULL);
-            if (split_view == NULL) {
+            if (split_view == NULL) {{
                 PyErr_SetString(PyExc_RuntimeError, "Split: unable to create a view for a split.");
                 free(split_dims);
-                %(fail)s
-            }
-            if (PyArray_CopyInto(*outputs[i], (PyArrayObject*)split_view) != 0) {
+                {fail}
+            }}
+            if (PyArray_CopyInto(*outputs[i], (PyArrayObject*)split_view) != 0) {{
                 PyErr_SetString(PyExc_RuntimeError, "Split: unable to copy a split view into the output.");
                 Py_XDECREF(split_view);
                 free(split_dims);
-                %(fail)s
-            }
+                {fail}
+            }}
             Py_XDECREF(split_view);
             current_split_start += current_split_length;
-        }
+        }}
 
         free(split_dims);
-        """ % locals()
+        """.format(**locals())
 
 
 class Join(COp):
@@ -2446,38 +2446,38 @@ class Join(COp):
         n = len(tens)
 
         code = """
-        int axis = ((%(adtype)s *)PyArray_DATA(%(axis)s))[0];
-        PyObject* list = PyList_New(%(l)s);
-        %(copy_inputs_to_list)s
+        int axis = (({adtype} *)PyArray_DATA({axis}))[0];
+        PyObject* list = PyList_New({l});
+        {copy_inputs_to_list}
         int tensors_lens_sum;
-        if(%(view)s != -1) {
+        if({view} != -1) {{
             tensors_lens_sum = 0;
 
-            for(int i=0; i < %(n)s; i++){
+            for(int i=0; i < {n}; i++){{
                 tensors_lens_sum += PyArray_DIM((PyArrayObject *)(PyList_GetItem(list, i)), axis);
-            }
-            tensors_lens_sum -= PyArray_DIM(%(non_empty_tensor)s, axis);
-        }
-        if(%(view)s != -1 && tensors_lens_sum == 0) {
-            Py_XDECREF(%(out)s);
-            Py_INCREF(%(non_empty_tensor)s);
-            %(out)s = %(non_empty_tensor)s;
-        }else{
+            }}
+            tensors_lens_sum -= PyArray_DIM({non_empty_tensor}, axis);
+        }}
+        if({view} != -1 && tensors_lens_sum == 0) {{
+            Py_XDECREF({out});
+            Py_INCREF({non_empty_tensor});
+            {out} = {non_empty_tensor};
+        }}else{{
             //PyObject* PyArray_Concatenate(PyObject* obj, int axis)
-            int ndim = PyArray_NDIM(%(input_1)s);
-            if( axis < -ndim ){
+            int ndim = PyArray_NDIM({input_1});
+            if( axis < -ndim ){{
                 PyErr_Format(PyExc_IndexError,
-                             "Join axis %%d out of bounds [0, %%d)", axis, ndim);
-                %(fail)s
-            }
-            Py_XDECREF(%(out)s);
-            %(out)s = (PyArrayObject *)PyArray_Concatenate(list, axis);
+                             "Join axis %d out of bounds [0, %d)", axis, ndim);
+                {fail}
+            }}
+            Py_XDECREF({out});
+            {out} = (PyArrayObject *)PyArray_Concatenate(list, axis);
             Py_DECREF(list);
-            if(!%(out)s){
-                %(fail)s
-            }
-        }
-        """ % locals()
+            if(!{out}){{
+                {fail}
+            }}
+        }}
+        """.format(**locals())
         return code
 
     def R_op(self, inputs, eval_points):
@@ -4067,9 +4067,9 @@ class AllocEmpty(COp):
         str = f"npy_intp dims[{nd}];\n"
         for idx, sh in enumerate(shps):
             str += (
-                "dims[%(idx)s] ="
-                "((npy_intp)((dtype_%(sh)s*)"
-                " PyArray_DATA(%(sh)s))[0]);\n" % locals()
+                "dims[{idx}] ="
+                "((npy_intp)((dtype_{sh}*)"
+                " PyArray_DATA({sh}))[0]);\n".format(**locals())
             )
 
         # Validate that the output storage exists
@@ -4077,22 +4077,22 @@ class AllocEmpty(COp):
         for idx, sh in enumerate(shps):
             str += f"||PyArray_DIMS({out})[{idx}]!=dims[{idx}]"
 
-        str += """){
+        str += """){{
             /* Reference received to invalid output variable.
             Decrease received reference's ref count and allocate new
             output variable */
-            Py_XDECREF(%(out)s);
-            %(out)s = (PyArrayObject*)PyArray_EMPTY(%(nd)s,
+            Py_XDECREF({out});
+            {out} = (PyArrayObject*)PyArray_EMPTY({nd},
                                                     dims,
-                                                    %(params)s->typecode,
+                                                    {params}->typecode,
                                                     0);
-            if (!%(out)s)
-            {
+            if (!{out})
+            {{
                 PyErr_SetString(PyExc_MemoryError, "alloc failed");
-                %(fail)s;
-            }
-        }
-        """ % locals()
+                {fail};
+            }}
+        }}
+        """.format(**locals())
         return str
 
     def infer_shape(self, fgraph, node, input_shapes):
