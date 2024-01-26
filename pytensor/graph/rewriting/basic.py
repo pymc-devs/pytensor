@@ -1091,7 +1091,7 @@ class FromFunctionNodeRewriter(NodeRewriter):
         return getattr(self, "__name__", repr(self))
 
     def __repr__(self):
-        return f"FromFunctionNodeRewriter({repr(self.fn)}, {repr(self._tracks)}, {repr(self.requirements)})"
+        return f"FromFunctionNodeRewriter({self.fn!r}, {self._tracks!r}, {self.requirements!r})"
 
     def print_summary(self, stream=sys.stdout, level=0, depth=-1):
         print(f"{' ' * level}{self.transform} id={id(self)}", file=stream)

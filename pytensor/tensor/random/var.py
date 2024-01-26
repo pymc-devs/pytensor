@@ -8,12 +8,12 @@ from pytensor.tensor.random.type import random_generator_type, random_state_type
 
 class RandomStateSharedVariable(SharedVariable):
     def __str__(self):
-        return self.name or f"RandomStateSharedVariable({repr(self.container)})"
+        return self.name or f"RandomStateSharedVariable({self.container!r})"
 
 
 class RandomGeneratorSharedVariable(SharedVariable):
     def __str__(self):
-        return self.name or f"RandomGeneratorSharedVariable({repr(self.container)})"
+        return self.name or f"RandomGeneratorSharedVariable({self.container!r})"
 
 
 @shared_constructor.register(np.random.RandomState)

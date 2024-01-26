@@ -607,7 +607,7 @@ class EnumType(CType, dict):
             self.pyint_compat_code
             + "".join(
                 f"""
-            #define {k} {str(self[k])}
+            #define {k} {self[k]!s}
             """
                 for k in sorted(self.keys())
             )

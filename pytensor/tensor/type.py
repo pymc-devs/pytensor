@@ -199,7 +199,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
                             "this loss, you can: "
                             f"1) explicitly cast your data to {self.dtype}, or "
                             '2) set "allow_input_downcast=True" when calling '
-                            f'"function". Value: "{repr(data)}"'
+                            f'"function". Value: "{data!r}"'
                         )
                         raise TypeError(err_msg)
                 elif (

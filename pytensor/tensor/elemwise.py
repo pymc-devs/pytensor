@@ -602,7 +602,7 @@ class Elemwise(OpenMPOp):
 
         if not isinstance(scalar_igrads, (list, tuple)):
             raise TypeError(
-                f"{str(self.scalar_op)}.grad returned {str(type(scalar_igrads))} instead of list or tuple"
+                f"{self.scalar_op!s}.grad returned {type(scalar_igrads)!s} instead of list or tuple"
             )
 
         nd = inputs[0].type.ndim  # this is the same for everyone

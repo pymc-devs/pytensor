@@ -137,7 +137,7 @@ except ImportError as e:
             "PyTensor flag blas__ldflags is empty. "
             "Falling back on slower implementations for "
             "dot(matrix, vector), dot(vector, matrix) and "
-            f"dot(vector, vector) ({str(e)})"
+            f"dot(vector, vector) ({e!s})"
         )
 
 
