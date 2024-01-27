@@ -465,7 +465,7 @@ class TestSpecifyShape(utt.InferShapeTester):
             f(xval)
 
         assert isinstance(
-            [n for n in f.maker.fgraph.toposort() if isinstance(n.op, SpecifyShape)][0]
+            next(n for n in f.maker.fgraph.toposort() if isinstance(n.op, SpecifyShape))
             .inputs[0]
             .type,
             self.input_type,
@@ -475,7 +475,7 @@ class TestSpecifyShape(utt.InferShapeTester):
         xval = np.random.random((2, 3)).astype(config.floatX)
         f = pytensor.function([x], specify_shape(x, 2, 3), mode=self.mode)
         assert isinstance(
-            [n for n in f.maker.fgraph.toposort() if isinstance(n.op, SpecifyShape)][0]
+            next(n for n in f.maker.fgraph.toposort() if isinstance(n.op, SpecifyShape))
             .inputs[0]
             .type,
             self.input_type,

@@ -275,7 +275,7 @@ def test_allow_gc_cvm():
     f = function([v], v + 1, mode=mode)
 
     f([1])
-    n = list(f.maker.fgraph.apply_nodes)[0].outputs[0]
+    n = next(iter(f.maker.fgraph.apply_nodes)).outputs[0]
     assert f.vm.storage_map[n][0] is None
     assert f.vm.allow_gc is True
 
