@@ -10,7 +10,6 @@ from pytensor.sparse.rewriting import SamplingDotCSR, sd_csc
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.type import ivector, matrix, vector
-from tests import unittest_tools as utt
 from tests.sparse.test_basic import random_lil
 
 
@@ -173,4 +172,4 @@ def test_sd_csc():
 
     res = sd_csc(a_val, a_ind, a_ptr, nrows, b).eval()
 
-    utt.assert_allclose(res, target)
+    np.testing.assert_allclose(res, target)

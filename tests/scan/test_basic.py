@@ -353,7 +353,7 @@ class TestScan:
 
         numpy_values = np.array([state * (2 ** (k + 1)) for k in range(steps)])
         pytensor_values = my_f(state, steps)
-        utt.assert_allclose(numpy_values, pytensor_values)
+        np.testing.assert_allclose(numpy_values, pytensor_values)
 
     def test_inner_storage_leak(self):
         """
@@ -500,8 +500,8 @@ class TestScan:
         expected_out2 = np.ones(inputs.shape, dtype="int8") * n_steps
 
         out1, out2 = fun(inputs)
-        utt.assert_allclose(out1, expected_out1)
-        utt.assert_allclose(out2, expected_out2)
+        np.testing.assert_allclose(out1, expected_out1)
+        np.testing.assert_allclose(out2, expected_out2)
 
     def test_one_sequence_one_output_weights(self):
         """
@@ -543,7 +543,7 @@ class TestScan:
         for step in range(1, 4):
             v_out[step] = v_u[step] * W_in + v_out[step - 1] * W
         pytensor_values = f2(v_u, v_x0, W_in, W)
-        utt.assert_allclose(pytensor_values, v_out)
+        np.testing.assert_allclose(pytensor_values, v_out)
 
     def test_one_sequence_one_output_weights_shared(self):
         """
@@ -709,7 +709,7 @@ class TestScan:
         v_u = rng.uniform(-5.0, 5.0, size=(5,))
         numpy_result = v_u + 3
         pytensor_result = f2(v_u)
-        utt.assert_allclose(pytensor_result, numpy_result)
+        np.testing.assert_allclose(pytensor_result, numpy_result)
 
     def test_backwards(self):
         def f_rnn(u_t, x_tm1, W_in, W):
@@ -747,7 +747,7 @@ class TestScan:
             v_out[step] = v_u[3 - step] * W_in + v_out[step - 1] * W
 
         pytensor_values = f2(v_u, v_x0, W_in, W)
-        utt.assert_allclose(pytensor_values, v_out)
+        np.testing.assert_allclose(pytensor_values, v_out)
 
     def test_output_padding(self):
         """
@@ -835,7 +835,7 @@ class TestScan:
 
         output = f([1, 2, 3, 4, 5])
         expected_output = np.array([1, 2, 3], dtype="float32")
-        utt.assert_allclose(output, expected_output)
+        np.testing.assert_allclose(output, expected_output)
 
     def test_shared_arguments_with_updates(self):
         rng = np.random.default_rng(utt.fetch_seed())
@@ -898,11 +898,11 @@ class TestScan:
             numpy_W1 = numpy_W1 + 0.1
             numpy_W2 = numpy_W2 + 0.05
 
-        utt.assert_allclose(pytensor_y0, numpy_y0[3:])
-        utt.assert_allclose(pytensor_y1, numpy_y1[1:])
-        utt.assert_allclose(pytensor_y2, numpy_y2)
-        utt.assert_allclose(W1.get_value(), numpy_W1)
-        utt.assert_allclose(W2.get_value(), numpy_W2)
+        np.testing.assert_allclose(pytensor_y0, numpy_y0[3:])
+        np.testing.assert_allclose(pytensor_y1, numpy_y1[1:])
+        np.testing.assert_allclose(pytensor_y2, numpy_y2)
+        np.testing.assert_allclose(W1.get_value(), numpy_W1)
+        np.testing.assert_allclose(W2.get_value(), numpy_W2)
 
     def test_simple_shared_random(self):
         pytensor_rng = RandomStream(utt.fetch_seed())
@@ -927,9 +927,9 @@ class TestScan:
             numpy_v[i] = rng.uniform(-1, 1, size=(2,))
 
         pytensor_v = my_f()
-        utt.assert_allclose(pytensor_v, numpy_v[:5, :])
+        np.testing.assert_allclose(pytensor_v, numpy_v[:5, :])
         pytensor_v = my_f()
-        utt.assert_allclose(pytensor_v, numpy_v[5:, :])
+        np.testing.assert_allclose(pytensor_v, numpy_v[5:, :])
 
     def test_only_shared_no_input_no_output(self):
         rng = np.random.default_rng(utt.fetch_seed())
@@ -947,7 +947,7 @@ class TestScan:
         n_steps = 3
         this_f(n_steps)
         numpy_state = v_state * (2 ** (n_steps))
-        utt.assert_allclose(state.get_value(), numpy_state)
+        np.testing.assert_allclose(state.get_value(), numpy_state)
 
     def test_random_as_input_to_scan(self):
         trng = RandomStream(123)
@@ -963,8 +963,8 @@ class TestScan:
         ny1, nz1 = f(nx)
         ny2, nz2 = f(nx)
 
-        utt.assert_allclose([ny1, ny1], nz1)
-        utt.assert_allclose([ny2, ny2], nz2)
+        np.testing.assert_allclose([ny1, ny1], nz1)
+        np.testing.assert_allclose([ny2, ny2], nz2)
         assert not np.allclose(ny1, ny2)
 
     def test_shared_updates(self):
@@ -1115,7 +1115,7 @@ class TestScan:
         vR = np.array([[3.6, 1.8], [1.8, 0.9]], dtype=config.floatX)
         out = f(vx, vA)
 
-        utt.assert_allclose(out, vR)
+        np.testing.assert_allclose(out, vR)
 
     @pytest.mark.parametrize(
         "mode", [Mode(linker="cvm", optimizer=None), Mode(linker="cvm")]
@@ -1706,7 +1706,7 @@ class TestScan:
         multiple_outputs_numeric_grad(reset_rng_cost_fn, [v_u, v_x0, vW_in])
 
         analytic_grad = reset_rng_grad_fn(v_u, v_x0, vW_in)
-        utt.assert_allclose(analytic_grad[0][:2], np.zeros((2, 2)))
+        np.testing.assert_allclose(analytic_grad[0][:2], np.zeros((2, 2)))
 
     def test_grad_wrt_shared(self):
         x1 = shared(3.0)
@@ -1716,7 +1716,7 @@ class TestScan:
         m = grad(y.sum(), x1)
 
         f = function([x2], m, allow_input_downcast=True)
-        utt.assert_allclose(f([2, 3]), 5)
+        np.testing.assert_allclose(f([2, 3]), 5)
 
     def test_inner_grad_wrt_shared(self):
         x1 = scalar("x1")
@@ -1792,12 +1792,12 @@ class TestScan:
         expected_g_out_init = expected_g_seq[:3]
         expected_g_non_seq = np.array([22, 22, 22])
 
-        utt.assert_allclose(outputs[0], expected_g_seq)
-        utt.assert_allclose(outputs[1], expected_g_out_init)
-        utt.assert_allclose(outputs[2], expected_g_non_seq)
-        utt.assert_allclose(outputs[3], expected_g_seq)
-        utt.assert_allclose(outputs[4], expected_g_out_init)
-        utt.assert_allclose(outputs[5], expected_g_non_seq)
+        np.testing.assert_allclose(outputs[0], expected_g_seq)
+        np.testing.assert_allclose(outputs[1], expected_g_out_init)
+        np.testing.assert_allclose(outputs[2], expected_g_non_seq)
+        np.testing.assert_allclose(outputs[3], expected_g_seq)
+        np.testing.assert_allclose(outputs[4], expected_g_out_init)
+        np.testing.assert_allclose(outputs[5], expected_g_non_seq)
 
     def test_grad_duplicate_outputs_connection_pattern(self):
         """
@@ -1997,9 +1997,9 @@ class TestScan:
         vnu, vnh0, vnW = fn_rop(v_u, v_h0, v_W, v_eu, v_eh0, v_eW)
         tnu, tnh0, tnW = fn_test(v_u, v_h0, v_W, v_eu, v_eh0, v_eW)
 
-        utt.assert_allclose(vnu, tnu, atol=1e-6)
-        utt.assert_allclose(vnh0, tnh0, atol=1e-6)
-        utt.assert_allclose(vnW, tnW, atol=1e-6)
+        np.testing.assert_allclose(vnu, tnu, atol=1e-6)
+        np.testing.assert_allclose(vnh0, tnh0, atol=1e-6)
+        np.testing.assert_allclose(vnW, tnW, atol=1e-6)
 
     @pytest.mark.slow
     def test_R_op_2(self):
@@ -2079,9 +2079,9 @@ class TestScan:
         )
 
         tnu, tnh0, tnW, tno = fn_test(v_u, v_h0, v_W, v_eu, v_eh0, v_eW)
-        utt.assert_allclose(vnu, tnu, atol=1e-6)
-        utt.assert_allclose(vnh0, tnh0, atol=1e-6)
-        utt.assert_allclose(vnW, tnW, atol=2e-6)
+        np.testing.assert_allclose(vnu, tnu, atol=1e-6)
+        np.testing.assert_allclose(vnh0, tnh0, atol=1e-6)
+        np.testing.assert_allclose(vnW, tnW, atol=2e-6)
 
     def test_R_op_mitmot(self):
         # this test is a copy paste from the script given by Justin Bayer to
@@ -2382,8 +2382,8 @@ class TestGradUntil:
         f = function([self.x, self.threshold], [r, g])
         pytensor_output, pytensor_gradient = f(self.seq, 5)
 
-        utt.assert_allclose(pytensor_output, self.numpy_output)
-        utt.assert_allclose(pytensor_gradient, self.numpy_gradient)
+        np.testing.assert_allclose(pytensor_output, self.numpy_output)
+        np.testing.assert_allclose(pytensor_gradient, self.numpy_gradient)
 
     def test_grad_until_ndim_greater_one(self):
         def tile_array(inp):
@@ -2401,8 +2401,8 @@ class TestGradUntil:
         f = function([X, self.threshold], [r, g])
         pytensor_output, pytensor_gradient = f(arr, 5)
 
-        utt.assert_allclose(pytensor_output, tile_array(self.numpy_output))
-        utt.assert_allclose(pytensor_gradient, tile_array(self.numpy_gradient))
+        np.testing.assert_allclose(pytensor_output, tile_array(self.numpy_output))
+        np.testing.assert_allclose(pytensor_gradient, tile_array(self.numpy_gradient))
 
     def test_grad_until_and_truncate(self):
         n = 3
@@ -2417,8 +2417,8 @@ class TestGradUntil:
         pytensor_output, pytensor_gradient = f(self.seq, 5)
 
         self.numpy_gradient[: 7 - n] = 0
-        utt.assert_allclose(pytensor_output, self.numpy_output)
-        utt.assert_allclose(pytensor_gradient, self.numpy_gradient)
+        np.testing.assert_allclose(pytensor_output, self.numpy_output)
+        np.testing.assert_allclose(pytensor_gradient, self.numpy_gradient)
 
     def test_grad_until_and_truncate_sequence_taps(self):
         n = 3
@@ -2435,7 +2435,7 @@ class TestGradUntil:
         # Gradient computed by hand:
         numpy_grad = np.array([0, 0, 0, 5, 6, 10, 4, 5, 0, 0, 0, 0, 0, 0, 0])
         numpy_grad = numpy_grad.astype(config.floatX)
-        utt.assert_allclose(pytensor_gradient, numpy_grad)
+        np.testing.assert_allclose(pytensor_gradient, numpy_grad)
 
 
 def test_mintap_onestep():
@@ -2644,7 +2644,7 @@ class TestExamples:
 
         t_result = my_f(v_vsample)
         n_result = numpy_implementation(v_vsample)
-        utt.assert_allclose(t_result, n_result)
+        np.testing.assert_allclose(t_result, n_result)
 
     def test_reordering(self, benchmark):
         """Test re-ordering of inputs.
@@ -2710,8 +2710,8 @@ class TestExamples:
             f4, v_u1, v_u2, v_x0, v_y0, vW_in1
         )
 
-        utt.assert_allclose(pytensor_x, v_x)
-        utt.assert_allclose(pytensor_y, v_y)
+        np.testing.assert_allclose(pytensor_x, v_x)
+        np.testing.assert_allclose(pytensor_y, v_y)
 
     def test_scan_as_tensor_on_gradients(self, benchmark):
         to_scan = dvector("to_scan")
@@ -2764,7 +2764,7 @@ class TestExamples:
         rval = np.asarray([[5187989] * 5] * 5, dtype=config.floatX)
         arg1 = np.ones((5, 5), dtype=config.floatX)
         arg2 = np.ones((10, 5), dtype=config.floatX)
-        utt.assert_allclose(f(arg1, arg2), rval)
+        np.testing.assert_allclose(f(arg1, arg2), rval)
 
     def test_use_scan_direct_output(self):
         """
@@ -2807,8 +2807,8 @@ class TestExamples:
             expected_output2.append(expected_output1[-1] + expected_output2[-1])
             expected_output1.append(expected_output1[-1] + i)
 
-        utt.assert_allclose(output1, expected_output1)
-        utt.assert_allclose(output2, expected_output2)
+        np.testing.assert_allclose(output1, expected_output1)
+        np.testing.assert_allclose(output2, expected_output2)
 
     def test_use_scan_direct_output2(self):
         """
@@ -2845,8 +2845,8 @@ class TestExamples:
         for i in range(5):
             expected_out1[i] = expected_out2[i] + x_val
 
-        utt.assert_allclose(out1, expected_out1)
-        utt.assert_allclose(out2, expected_out2)
+        np.testing.assert_allclose(out1, expected_out1)
+        np.testing.assert_allclose(out2, expected_out2)
 
     def test_same(self):
         x = fmatrix("x")
@@ -2874,7 +2874,7 @@ class TestExamples:
         f_vals = f(x_val)
         memory.set_value(mem_val)
         f2_vals = f2(x_val)
-        utt.assert_allclose(f_vals, f2_vals)
+        np.testing.assert_allclose(f_vals, f2_vals)
 
     def test_eliminate_seqs(self):
         U = vector("U")
@@ -2907,10 +2907,10 @@ class TestExamples:
         rng = np.random.default_rng(utt.fetch_seed())
         v_u = asarrayX(rng.uniform(size=(5,)))
         outs = f(v_u, [0, 0, 0], 0)
-        utt.assert_allclose(outs[0], v_u + 1)
-        utt.assert_allclose(outs[1], v_u + 2)
-        utt.assert_allclose(outs[2], v_u + 3)
-        utt.assert_allclose(sh.get_value(), v_u[-1] + 4)
+        np.testing.assert_allclose(outs[0], v_u + 1)
+        np.testing.assert_allclose(outs[1], v_u + 2)
+        np.testing.assert_allclose(outs[2], v_u + 3)
+        np.testing.assert_allclose(sh.get_value(), v_u[-1] + 4)
 
     def test_eliminate_nonseqs(self):
         W = scalar("W")
@@ -2944,10 +2944,10 @@ class TestExamples:
         rng = np.random.default_rng(utt.fetch_seed())
         v_w = asarrayX(rng.uniform())
         outs = f(v_w, [0, 0, 0], 0)
-        utt.assert_allclose(outs[0], v_w + 1)
-        utt.assert_allclose(outs[1], v_w + 2)
-        utt.assert_allclose(outs[2], v_w + 3)
-        utt.assert_allclose(sh.get_value(), v_w + 4)
+        np.testing.assert_allclose(outs[0], v_w + 1)
+        np.testing.assert_allclose(outs[1], v_w + 2)
+        np.testing.assert_allclose(outs[2], v_w + 3)
+        np.testing.assert_allclose(sh.get_value(), v_w + 4)
 
     def test_seq_tap_bug_jeremiah(self):
         inp = np.arange(10).reshape(-1, 1).astype(config.floatX)
@@ -3046,7 +3046,7 @@ class TestExamples:
             states[3:6],
         ]
 
-        utt.assert_allclose(outputs, expected_outputs)
+        np.testing.assert_allclose(outputs, expected_outputs)
 
     @pytest.mark.slow
     def test_hessian_bug_grad_grad_two_scans(self, benchmark):
@@ -3148,7 +3148,7 @@ class TestExamples:
 
         # Ensure the output of the function is valid
         output = f(np.random.default_rng(utt.fetch_seed()).random(5))
-        utt.assert_allclose(output, np.ones(5))
+        np.testing.assert_allclose(output, np.ones(5))
 
     def test_grad_bug_disconnected_input(self):
         W = shared(np.zeros((3, 3)), name="W")
@@ -3157,7 +3157,7 @@ class TestExamples:
 
         # This used to raise an exception
         f = function([v], grad(y.sum(), W))
-        utt.assert_allclose(f([1, 2]), [[0, 0, 0], [1, 1, 1], [1, 1, 1]])
+        np.testing.assert_allclose(f([1, 2]), [[0, 0, 0], [1, 1, 1], [1, 1, 1]])
 
     def test_grad_find_input(self):
         w = shared(np.array(0, dtype="float32"), name="w")
@@ -3214,7 +3214,7 @@ class TestExamples:
         numpy_out = np.zeros((2,))
         numpy_out[0] = vu[0] * vW_in + vx0[1] * vW + vx0[0]
         numpy_out[1] = vu[1] * vW_in + numpy_out[0] * vW + vx0[1]
-        utt.assert_allclose(numpy_out, pytensor_out)
+        np.testing.assert_allclose(numpy_out, pytensor_out)
 
     def test_past_future_taps_shared(self):
         """
@@ -3254,7 +3254,7 @@ class TestExamples:
         # and vx0[0] as vx0[-2], vx0[1] as vx0[-1]
         numpy_out[0] = (vu[0] + vu[4]) * vW_in + vx0[1] * vW + vx0[0]
         numpy_out[1] = (vu[1] + vu[5]) * vW_in + numpy_out[0] * vW + vx0[1]
-        utt.assert_allclose(numpy_out, pytensor_out)
+        np.testing.assert_allclose(numpy_out, pytensor_out)
 
     def test_generator_one_output_scalar(self):
         """
@@ -3288,7 +3288,7 @@ class TestExamples:
 
         numpy_values = np.array([state * (2 ** (k + 1)) for k in range(steps)])
         pytensor_values = my_f(state, steps)
-        utt.assert_allclose(numpy_values, pytensor_values[0])
+        np.testing.assert_allclose(numpy_values, pytensor_values[0])
 
     def test_default_value_broadcasted(self):
         def floatx(X):
@@ -3575,8 +3575,8 @@ class TestExamples:
 
         (pytensor_dump, pytensor_x, pytensor_y) = f4(v_u1, v_u2, v_x0, v_y0, vW_in1)
 
-        utt.assert_allclose(pytensor_x, v_x[-2:])
-        utt.assert_allclose(pytensor_y, v_y[-4:])
+        np.testing.assert_allclose(pytensor_x, v_x[-2:])
+        np.testing.assert_allclose(pytensor_y, v_y[-4:])
 
     def test_until_random_infer_shape(self):
         """
@@ -3695,8 +3695,8 @@ class TestExamples:
             v_y[i] = np.dot(v_x[i - 1], vWout)
 
         (pytensor_x, pytensor_y) = f4(v_u1, v_u2, v_x0, v_y0, vW_in1)
-        utt.assert_allclose(pytensor_x, v_x)
-        utt.assert_allclose(pytensor_y, v_y)
+        np.testing.assert_allclose(pytensor_x, v_x)
+        np.testing.assert_allclose(pytensor_y, v_y)
 
     def test_multiple_outs_taps(self, benchmark):
         l = 5

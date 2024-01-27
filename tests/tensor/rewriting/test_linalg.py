@@ -3,7 +3,6 @@ from functools import partial
 import numpy as np
 import pytest
 import scipy.linalg
-from numpy.testing import assert_allclose
 
 import pytensor
 from pytensor import function
@@ -117,7 +116,7 @@ def test_generic_solve_to_solve_triangular():
         assert not any(isinstance(op, Solve) for op in op_list)
         assert any(isinstance(op, SolveTriangular) for op in op_list)
 
-        assert_allclose(
+        np.testing.assert_allclose(
             f(X, eye) @ X_chol, eye, atol=1e-8 if config.floatX.endswith("64") else 1e-4
         )
 
@@ -128,7 +127,7 @@ def test_generic_solve_to_solve_triangular():
         op_list = [node.op for node in toposort]
         assert not any(isinstance(op, Solve) for op in op_list)
         assert any(isinstance(op, SolveTriangular) for op in op_list)
-        assert_allclose(
+        np.testing.assert_allclose(
             f(X, eye).T @ X_chol,
             eye,
             atol=1e-8 if config.floatX.endswith("64") else 1e-4,

@@ -34,7 +34,7 @@ def test_map():
     vals = rng.uniform(-5.0, 5.0, size=(10,))
     abs_vals = abs(vals)
     pytensor_vals = f(vals)
-    utt.assert_allclose(abs_vals, pytensor_vals)
+    np.testing.assert_allclose(abs_vals, pytensor_vals)
 
 
 def test_reduce_memory_consumption():
@@ -66,7 +66,7 @@ def test_reduce_memory_consumption():
 
     gx = grad(o, x)
     f2 = function([], gx)
-    utt.assert_allclose(f2(), np.ones((10,)))
+    np.testing.assert_allclose(f2(), np.ones((10,)))
 
 
 def test_foldl_memory_consumption():
@@ -99,7 +99,7 @@ def test_foldl_memory_consumption():
 
     gx = grad(o, x)
     f2 = function([], gx)
-    utt.assert_allclose(f2(), np.ones((10,)))
+    np.testing.assert_allclose(f2(), np.ones((10,)))
 
 
 def test_foldr_memory_consumption():
@@ -132,4 +132,4 @@ def test_foldr_memory_consumption():
 
     gx = grad(o, x)
     f2 = function([], gx)
-    utt.assert_allclose(f2(), np.ones((10,)))
+    np.testing.assert_allclose(f2(), np.ones((10,)))

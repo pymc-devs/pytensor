@@ -139,7 +139,7 @@ class TestGemm:
                 z_after = self._gemm(z_orig, a, x, y, b)
 
                 # print z_orig, z_after, z, type(z_orig), type(z_after), type(z)
-                unittest_tools.assert_allclose(z_after, z)
+                np.testing.assert_allclose(z_after, z)
                 if a == 0.0 and b == 1.0:
                     return
                 elif z_orig.size == 0:
@@ -324,11 +324,11 @@ class TestGemm:
                 mode=Mode(optimizer=None, linker=l),
             )
             f()
-            unittest_tools.assert_allclose(z_after, tz.get_value(borrow=True))
+            np.testing.assert_allclose(z_after, tz.get_value(borrow=True))
             f()
-            unittest_tools.assert_allclose(z_after, tz.get_value(borrow=True))
+            np.testing.assert_allclose(z_after, tz.get_value(borrow=True))
             f()
-            unittest_tools.assert_allclose(z_after, tz.get_value(borrow=True))
+            np.testing.assert_allclose(z_after, tz.get_value(borrow=True))
 
             # tz.value *= 0 # clear z's value
             y_T = ty.get_value(borrow=True).T
@@ -338,7 +338,7 @@ class TestGemm:
             f()
             # test that the transposed version of multiplication gives
             # same answer
-            unittest_tools.assert_allclose(z_after, tz.get_value(borrow=True).T)
+            np.testing.assert_allclose(z_after, tz.get_value(borrow=True).T)
 
         t(C, A, B)
         t(C.T, A, B)
@@ -389,7 +389,7 @@ class TestGemm:
                     z = tz.get_value(borrow=True, return_internal_type=True)
                     z[:, :, i] = z_i
 
-                    unittest_tools.assert_allclose(
+                    np.testing.assert_allclose(
                         z_after[:, :, i], tz.get_value(borrow=True)[:, :, i]
                     )
 
@@ -402,7 +402,7 @@ class TestGemm:
                 )
                 for j in range(3):
                     g_i()
-                    unittest_tools.assert_allclose(
+                    np.testing.assert_allclose(
                         z_after[:, :, i], tz.get_value(borrow=True)[:, :, i]
                     )
 
@@ -553,7 +553,7 @@ class TestGemmNoFlags:
                 + (transpose_A, transpose_B, transpose_C, slice_A, slice_B, slice_C)
             )
         )
-        unittest_tools.assert_allclose(ref_val, z_val)
+        np.testing.assert_allclose(ref_val, z_val)
 
     def test_gemm(self):
         rng = np.random.default_rng(seed=utt.fetch_seed())
@@ -2462,7 +2462,7 @@ class TestBlasStrides:
 
         f(0)
         ref_output = np.ones((3, 5)) * 2
-        unittest_tools.assert_allclose(c.get_value(), ref_output)
+        np.testing.assert_allclose(c.get_value(), ref_output)
 
 
 class TestInferShape(unittest_tools.InferShapeTester):
@@ -2695,7 +2695,7 @@ def test_batched_dot_not_contiguous():
         assert not (x.flags["C_CONTIGUOUS"] or x.flags["F_CONTIGUOUS"])
         result = f(x, w)
         ref_result = np.asarray([np.dot(u, v) for u, v in zip(x, w)])
-        utt.assert_allclose(ref_result, result)
+        np.testing.assert_allclose(ref_result, result)
 
     for inverted in (0, 1):
         check_first_dim(inverted)

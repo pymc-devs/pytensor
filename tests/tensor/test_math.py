@@ -1539,7 +1539,7 @@ class TestOuter:
                 v1 = np.asarray(self.rng.random(s1)).astype(config.floatX)
                 v2 = np.asarray(self.rng.random(s2)).astype(config.floatX)
                 o = outer(x, y).eval({x: v1, y: v2})
-                utt.assert_allclose(o, np.outer(v1, v2))
+                np.testing.assert_allclose(o, np.outer(v1, v2))
 
     def test_grad(self):
         # Test the combined graph of the graph of outer
@@ -1919,7 +1919,7 @@ class TestMean:
         x = vector(dtype="float16")
         y = x.mean()
         f = function([x], y)
-        utt.assert_allclose(f(np.ones((100000,), dtype="float16")), 1.0)
+        np.testing.assert_allclose(f(np.ones((100000,), dtype="float16")), 1.0)
 
     def test_basic(self):
         x = vector()
@@ -2042,7 +2042,7 @@ class TestTensordot:
         bval = random(5, rng=rng)
         out0 = np.tensordot(aval, bval, axes)
         out1 = f1(aval, bval)
-        utt.assert_allclose(out0, out1)
+        np.testing.assert_allclose(out0, out1)
         utt.verify_grad(self.TensorDot(axes), [aval, bval])
 
         # Test matrix-vector
@@ -2052,7 +2052,7 @@ class TestTensordot:
         f2 = inplace_func([avec, bmat], c)
         aval = random(5, rng=rng)
         bval = random(8, 5, rng=rng)
-        utt.assert_allclose(np.tensordot(aval, bval, axes), f2(aval, bval))
+        np.testing.assert_allclose(np.tensordot(aval, bval, axes), f2(aval, bval))
         utt.verify_grad(self.TensorDot(axes), [aval, bval])
 
         # Test matrix-matrix
@@ -2071,7 +2071,7 @@ class TestTensordot:
             f3 = inplace_func([amat, bmat], c)
             aval = random(*shps[0], rng=rng)
             bval = random(*shps[1], rng=rng)
-            utt.assert_allclose(np.tensordot(aval, bval, axes), f3(aval, bval))
+            np.testing.assert_allclose(np.tensordot(aval, bval, axes), f3(aval, bval))
             utt.verify_grad(self.TensorDot(axes), [aval, bval])
 
         # Test ndarray-matrix, sum over one dim of matrix
@@ -2089,7 +2089,7 @@ class TestTensordot:
             f4 = inplace_func([atens, bmat], c)
             aval = random(*shps[0], rng=rng)
             bval = random(*shps[1], rng=rng)
-            utt.assert_allclose(np.tensordot(aval, bval, axes), f4(aval, bval))
+            np.testing.assert_allclose(np.tensordot(aval, bval, axes), f4(aval, bval))
             utt.verify_grad(self.TensorDot(axes), [aval, bval])
 
         # Test ndarray-ndarray
@@ -2100,13 +2100,13 @@ class TestTensordot:
         f5 = inplace_func([atens, btens], c)
         aval = random(4, 3, 5, 2, rng=rng)
         bval = random(3, 4, 2, rng=rng)
-        utt.assert_allclose(np.tensordot(aval, bval, axes), f5(aval, bval))
+        np.testing.assert_allclose(np.tensordot(aval, bval, axes), f5(aval, bval))
         utt.verify_grad(self.TensorDot(axes), [aval, bval])
 
         axes = (axes[1], axes[0])
         c = tensordot(btens, atens, axes)
         f6 = inplace_func([btens, atens], c)
-        utt.assert_allclose(np.tensordot(bval, aval, axes), f6(bval, aval))
+        np.testing.assert_allclose(np.tensordot(bval, aval, axes), f6(bval, aval))
         utt.verify_grad(self.TensorDot(axes), [bval, aval])
 
     def test_raise_error(self):
@@ -2144,7 +2144,7 @@ class TestTensordot:
             f3 = inplace_func([amat, bmat], c)
             aval = random(4, 7, rng=rng)
             bval = random(7, 9, rng=rng)
-            utt.assert_allclose(np.tensordot(aval, bval, axes), f3(aval, bval))
+            np.testing.assert_allclose(np.tensordot(aval, bval, axes), f3(aval, bval))
             utt.verify_grad(self.TensorDot(axes), [aval, bval])
 
     def test_scalar_axes(self):
@@ -2682,10 +2682,10 @@ class TestTensorInstanceMethods:
         x, y = self.vals
         # Use allclose comparison as a user reported on the mailing
         # list failure otherwise with array that print exactly the same.
-        utt.assert_allclose(x.dot(y), X.dot(Y).eval({X: x, Y: y}))
+        np.testing.assert_allclose(x.dot(y), X.dot(Y).eval({X: x, Y: y}))
         Z = X.dot(Y)
         z = x.dot(y)
-        utt.assert_allclose(x.dot(z), X.dot(Z).eval({X: x, Z: z}))
+        np.testing.assert_allclose(x.dot(z), X.dot(Z).eval({X: x, Z: z}))
 
     def test_real_imag(self):
         X, Y = self.vars
@@ -2718,7 +2718,7 @@ class TestTensorInstanceMethods:
         # std() is implemented as PyTensor tree and does not pass its
         # args directly to numpy. This sometimes results in small
         # difference, so we use allclose test.
-        utt.assert_allclose(X.std().eval({X: x}), x.std())
+        np.testing.assert_allclose(X.std().eval({X: x}), x.std())
 
     def test_cumsum(self):
         X, _ = self.vars

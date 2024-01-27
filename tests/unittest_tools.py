@@ -11,7 +11,6 @@ from pytensor.compile.debugmode import str_diagnostic
 from pytensor.configdefaults import config
 from pytensor.gradient import verify_grad as orig_verify_grad
 from pytensor.tensor.basic import as_tensor_variable
-from pytensor.tensor.math import _allclose
 from pytensor.tensor.math import add as pt_add
 
 
@@ -275,11 +274,6 @@ class WrongValue(Exception):
     def __str__(self):
         s = "WrongValue\n"
         return s + str_diagnostic(self.val1, self.val2, self.rtol, self.atol)
-
-
-def assert_allclose(expected, value, rtol=None, atol=None):
-    if not _allclose(expected, value, rtol, atol):
-        raise WrongValue(expected, value, rtol, atol)
 
 
 class AttemptManyTimes:

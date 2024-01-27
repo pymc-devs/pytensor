@@ -213,7 +213,7 @@ class TestPushOutDot:
         # pytensor. Note that what we ask pytensor to do is to repeat the 2
         # elements vector v_out 5 times
         sol[:, :] = v_out
-        utt.assert_allclose(sol, f(v_h, v_W1, v_W2))
+        np.testing.assert_allclose(sol, f(v_h, v_W1, v_W2))
 
     def test_pushout_while(self):
         """
@@ -256,7 +256,7 @@ class TestPushOutDot:
 
         out = f(*input_values)
         out_ref = f_ref(*input_values)
-        utt.assert_allclose(out, out_ref)
+        np.testing.assert_allclose(out, out_ref)
 
     def test_pushout(self):
         W1 = matrix("W1")
@@ -296,8 +296,8 @@ class TestPushOutDot:
         f = function([inp], [i_t, i_tm1])
         val = np.arange(10).reshape(5, 2).astype(config.floatX)
         ret = f(val)
-        utt.assert_allclose(ret[0], val + 10)
-        utt.assert_allclose(
+        np.testing.assert_allclose(ret[0], val + 10)
+        np.testing.assert_allclose(
             ret[1], [[0.0, 0.0], [10.0, 11.0], [12.0, 13.0], [14.0, 15.0], [16.0, 17.0]]
         )
 
@@ -389,8 +389,8 @@ class TestPushOutNonSeqScan:
         )
         jacobian_outputs = dfdm_j(X, Y, test_m, test_s)
 
-        utt.assert_allclose(expected_output, scan_output)
-        utt.assert_allclose(expected_output, jacobian_outputs)
+        np.testing.assert_allclose(expected_output, scan_output)
+        np.testing.assert_allclose(expected_output, jacobian_outputs)
 
     @config.change_flags(on_opt_error="raise")
     def test_pushout_seqs2(self):
@@ -421,7 +421,7 @@ class TestPushOutNonSeqScan:
 
         outs = f()
         expected_outs = [[4, 4], [2, 2]]
-        utt.assert_allclose(outs, expected_outs)
+        np.testing.assert_allclose(outs, expected_outs)
 
     def test_dot_not_output(self):
         """
@@ -458,7 +458,7 @@ class TestPushOutNonSeqScan:
         output_opt = f_opt(v_value, m_value)
         output_no_opt = f_no_opt(v_value, m_value)
 
-        utt.assert_allclose(output_opt, output_no_opt)
+        np.testing.assert_allclose(output_opt, output_no_opt)
 
     def test_dot_nitsot_output(self):
         """
@@ -504,8 +504,8 @@ class TestPushOutNonSeqScan:
         output_opt = f_opt(a_value, b_value)
         output_no_opt = f_no_opt(a_value, b_value)
 
-        utt.assert_allclose(output_opt[0], output_no_opt[0])
-        utt.assert_allclose(output_opt[1], output_no_opt[1])
+        np.testing.assert_allclose(output_opt[0], output_no_opt[0])
+        np.testing.assert_allclose(output_opt[1], output_no_opt[1])
 
     def test_dot_sitsot_output(self):
         """
@@ -550,8 +550,8 @@ class TestPushOutNonSeqScan:
         output_opt = f_opt(a_value, b_value)
         output_no_opt = f_no_opt(a_value, b_value)
 
-        utt.assert_allclose(output_opt[0], output_no_opt[0])
-        utt.assert_allclose(output_opt[1], output_no_opt[1])
+        np.testing.assert_allclose(output_opt[0], output_no_opt[0])
+        np.testing.assert_allclose(output_opt[1], output_no_opt[1])
 
     def test_OpFromGraph_shared(self):
         """Make sure that a simple `OpFromGraph` with a shared variable can be pushed out."""
@@ -617,7 +617,7 @@ class TestPushOutAddScan:
         rng = np.random.default_rng(utt.fetch_seed())
         vA = rng.uniform(size=(5, 5)).astype(config.floatX)
         vB = rng.uniform(size=(5, 5)).astype(config.floatX)
-        utt.assert_allclose(f(vA, vB), np.dot(vA.T, vB))
+        np.testing.assert_allclose(f(vA, vB), np.dot(vA.T, vB))
 
     def test_pregreedy_optimizer(self, benchmark):
         W = pt.zeros((5, 4))
@@ -739,7 +739,7 @@ class TestPushOutAddScan:
         # Compare the outputs of the two functions on the same input data.
         f_opt_output = f_opt(x_value, ri_value, zi_value)
         f_no_opt_output = f_no_opt(x_value, ri_value, zi_value)
-        utt.assert_allclose(f_opt_output, f_no_opt_output)
+        np.testing.assert_allclose(f_opt_output, f_no_opt_output)
 
     def test_non_zero_init(self):
         """Test the case where the initial value for the nitsot output is non-zero."""
@@ -792,7 +792,7 @@ class TestPushOutAddScan:
         output_opt = f_opt(input1_value, input2_value, input3_value)
         output_no_opt = f_no_opt(input1_value, input2_value, input3_value)
 
-        utt.assert_allclose(output_opt, output_no_opt)
+        np.testing.assert_allclose(output_opt, output_no_opt)
 
 
 class TestScanMerge:
@@ -1112,8 +1112,8 @@ class TestScanInplaceOptimizer:
         # equivalent is done
         (pytensor_x0, pytensor_x1) = f9(vu0, vu1, vu2, vx0, vx1)
         # assert that pytensor does what it should
-        utt.assert_allclose(pytensor_x0, numpy_x0)
-        utt.assert_allclose(pytensor_x1, numpy_x1)
+        np.testing.assert_allclose(pytensor_x0, numpy_x0)
+        np.testing.assert_allclose(pytensor_x1, numpy_x1)
 
     @utt.assertFailure_fast
     def test_simple_rnn_2(self):
@@ -1180,8 +1180,8 @@ class TestScanInplaceOptimizer:
         # equivalent is done
         (pytensor_x0, pytensor_x1) = f9(vu0, vu1, vu2, vx0, vx1)
         # assert that pytensor does what it should
-        utt.assert_allclose(pytensor_x0, numpy_x0)
-        utt.assert_allclose(pytensor_x1, numpy_x1)
+        np.testing.assert_allclose(pytensor_x0, numpy_x0)
+        np.testing.assert_allclose(pytensor_x1, numpy_x1)
 
     @utt.assertFailure_fast
     def test_inplace3(self):
@@ -1268,8 +1268,8 @@ class TestSaveMem:
 
         (pytensor_dump, pytensor_x, pytensor_y) = f4(v_u1, v_u2, v_x0, v_y0, vW_in1)
 
-        utt.assert_allclose(pytensor_x, v_x[-1:])
-        utt.assert_allclose(pytensor_y, v_y[-1:])
+        np.testing.assert_allclose(pytensor_x, v_x[-1:])
+        np.testing.assert_allclose(pytensor_y, v_y[-1:])
 
     def test_save_mem_reduced_number_of_steps(self):
         def f_rnn(u_t):
@@ -1304,13 +1304,13 @@ class TestSaveMem:
         # compute the output in numpy
         tx1, tx2, tx3, tx4, tx5, tx6, tx7 = f2(v_u, 3, 15)
 
-        utt.assert_allclose(tx1, v_u[:2] + 1.0)
-        utt.assert_allclose(tx2, v_u[4] + 2.0)
-        utt.assert_allclose(tx3, v_u[3] + 3.0)
-        utt.assert_allclose(tx4, v_u[:3] + 4.0)
-        utt.assert_allclose(tx5, v_u[-10] + 5.0)
-        utt.assert_allclose(tx6, v_u[-15] + 6.0)
-        utt.assert_allclose(tx7, v_u[:-15] + 7.0)
+        np.testing.assert_allclose(tx1, v_u[:2] + 1.0)
+        np.testing.assert_allclose(tx2, v_u[4] + 2.0)
+        np.testing.assert_allclose(tx3, v_u[3] + 3.0)
+        np.testing.assert_allclose(tx4, v_u[:3] + 4.0)
+        np.testing.assert_allclose(tx5, v_u[-10] + 5.0)
+        np.testing.assert_allclose(tx6, v_u[-15] + 6.0)
+        np.testing.assert_allclose(tx7, v_u[:-15] + 7.0)
 
     def test_save_mem_store_steps(self):
         def f_rnn(u_t, x1_tm1, x1_tm3, x2_tm1, x3tm2, x3_tm1, x4_tm1):
@@ -1361,11 +1361,11 @@ class TestSaveMem:
         # compute the output in numpy
         tx1, tx2, tx3, tx4, tx5 = f2(v_u, [0, 0], 0, [0, 0], 0)
 
-        utt.assert_allclose(tx1, v_u[-7] + 1.0)
-        utt.assert_allclose(tx2, v_u[-3:-1] + 2.0)
-        utt.assert_allclose(tx3, v_u[-6:] + 3.0)
-        utt.assert_allclose(tx4, v_u[-1] + 4.0)
-        utt.assert_allclose(tx5, v_u[-1] + 5.0)
+        np.testing.assert_allclose(tx1, v_u[-7] + 1.0)
+        np.testing.assert_allclose(tx2, v_u[-3:-1] + 2.0)
+        np.testing.assert_allclose(tx3, v_u[-6:] + 3.0)
+        np.testing.assert_allclose(tx4, v_u[-1] + 4.0)
+        np.testing.assert_allclose(tx5, v_u[-1] + 5.0)
 
     def test_savemem_does_not_duplicate_number_of_scan_nodes(self):
         var = pt.ones(())
@@ -1444,7 +1444,7 @@ class TestSaveMem:
         expected_output = np.tile(x_value[:, 0].sum(0), (3, 1)).transpose()
 
         output = f(x_value, w_value)
-        utt.assert_allclose(output, expected_output)
+        np.testing.assert_allclose(output, expected_output)
 
     @pytest.mark.skip(
         reason="The 'assertion' of this test relied on something that no longer exists "
@@ -1735,4 +1735,4 @@ def test_opt_order():
     vx = np.array([[1.0, 1.0], [2.0, 2.0]], dtype=config.floatX)
     vA = np.array([[1.0, 1.0], [1.0, 0.0]], dtype=config.floatX)
     vR = np.array([[[2, 1], [4, 2]], [[2, 1], [4, 2]]], dtype=config.floatX)
-    utt.assert_allclose(f(vx, vA), vR)
+    np.testing.assert_allclose(f(vx, vA), vR)

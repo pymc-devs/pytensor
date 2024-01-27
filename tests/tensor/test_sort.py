@@ -50,7 +50,7 @@ class TestSort:
         a = dmatrix()
         w = sort(a)
         f = pytensor.function([a], w)
-        utt.assert_allclose(f(self.m_val), np.sort(self.m_val))
+        np.testing.assert_allclose(f(self.m_val), np.sort(self.m_val))
 
     def test2(self):
         a = dmatrix()
@@ -60,7 +60,7 @@ class TestSort:
         for axis_val in 0, 1:
             gv = f(self.m_val, axis_val)
             gt = np.sort(self.m_val, axis_val)
-            utt.assert_allclose(gv, gt)
+            np.testing.assert_allclose(gv, gt)
 
     def test3(self):
         a = dvector()
@@ -68,7 +68,7 @@ class TestSort:
         f = pytensor.function([a], w2)
         gv = f(self.v_val)
         gt = np.sort(self.v_val)
-        utt.assert_allclose(gv, gt)
+        np.testing.assert_allclose(gv, gt)
 
     def test4(self):
         a = dmatrix()
@@ -78,7 +78,7 @@ class TestSort:
         for axis_val in 0, 1:
             gv = f(self.m_val, axis_val)
             gt = np.sort(self.m_val, axis_val)
-            utt.assert_allclose(gv, gt)
+            np.testing.assert_allclose(gv, gt)
 
     def test5(self):
         a1 = SortOp("mergesort", [])
@@ -95,7 +95,7 @@ class TestSort:
         f = pytensor.function([a], l)
         gv = f(self.m_val)
         gt = np.sort(self.m_val, None)
-        utt.assert_allclose(gv, gt)
+        np.testing.assert_allclose(gv, gt)
 
     def test_grad_vector(self):
         data = self.rng.random(10).astype(pytensor.config.floatX)
@@ -193,7 +193,7 @@ def test_argsort():
     f = pytensor.function([a], w)
     gv = f(m_val)
     gt = np.argsort(m_val)
-    utt.assert_allclose(gv, gt)
+    np.testing.assert_allclose(gv, gt)
 
     # Example 2
     a = dmatrix()
@@ -203,7 +203,7 @@ def test_argsort():
     for axis_val in 0, 1:
         gv = f(m_val, axis_val)
         gt = np.argsort(m_val, axis_val)
-        utt.assert_allclose(gv, gt)
+        np.testing.assert_allclose(gv, gt)
 
     # Example 3
     a = dvector()
@@ -211,7 +211,7 @@ def test_argsort():
     f = pytensor.function([a], w2)
     gv = f(v_val)
     gt = np.argsort(v_val)
-    utt.assert_allclose(gv, gt)
+    np.testing.assert_allclose(gv, gt)
 
     # Example 4
     a = dmatrix()
@@ -221,7 +221,7 @@ def test_argsort():
     for axis_val in 0, 1:
         gv = f(m_val, axis_val)
         gt = np.argsort(m_val, axis_val)
-        utt.assert_allclose(gv, gt)
+        np.testing.assert_allclose(gv, gt)
 
     # Example 5
     a = dmatrix()
@@ -239,7 +239,7 @@ def test_argsort():
     f = pytensor.function([a], w2)
     gv = f(m_val)
     gt = np.argsort(m_val, None)
-    utt.assert_allclose(gv, gt)
+    np.testing.assert_allclose(gv, gt)
 
 
 def test_argsort_grad():
@@ -305,7 +305,7 @@ class TestTopK:
         xval = np.asarray([1]).astype(dtype)
         yvval, yival = fn(xval)
         assert yival == np.asarray([0], dtype=idx_dtype)
-        utt.assert_allclose(xval, yvval)
+        np.testing.assert_allclose(xval, yvval)
         assert yvval.dtype == xval.dtype
         assert yival.dtype == np.dtype(idx_dtype)
 
@@ -339,7 +339,7 @@ class TestTopK:
         goal = np.sort(xval)[idx]
 
         assert yval.dtype == goal.dtype
-        utt.assert_allclose(goal, np.sort(yval))
+        np.testing.assert_allclose(goal, np.sort(yval))
 
     @pytest.mark.parametrize(
         "size, k, dtype, sorted, idx_dtype",
@@ -405,7 +405,7 @@ class TestTopK:
 
         # due to uniqueness, we expect indices same
         assert np.all(xval[np.sort(yival)] == xval[np.sort(goali)])
-        utt.assert_allclose(np.sort(yvval), goalv)
+        np.testing.assert_allclose(np.sort(yvval), goalv)
 
     @pytest.mark.parametrize(
         "size, k, dtype, sorted",
@@ -434,7 +434,7 @@ class TestTopK:
         yval = fn(xval)
         idx = slice(-k, None) if k > 0 else slice(-k)
         goal = np.argsort(xval)[idx].astype("int32")
-        utt.assert_allclose(np.sort(xval[yval]), np.sort(xval[goal]))
+        np.testing.assert_allclose(np.sort(xval[yval]), np.sort(xval[goal]))
 
     @pytest.mark.parametrize(
         "shp, k_, dtype, sorted, idx_dtype",
