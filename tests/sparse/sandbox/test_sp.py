@@ -64,7 +64,7 @@ class TestSP:
                     else:
                         fulloutshp = np.array(imshp) + np.array(kshp) - 1
                     ntime1 = time.perf_counter()
-                    refout = np.zeros((bsize, *tuple(fulloutshp), nkern))
+                    refout = np.zeros((bsize, *fulloutshp, nkern))
                     for b in range(bsize):
                         for n in range(nkern):
                             refout[b, ..., n] = convolve2d(

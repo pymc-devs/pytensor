@@ -435,7 +435,7 @@ def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_
     bcast_dist_args = np.broadcast_arrays(*[i.tag.test_value for i in dist_args])
 
     for idx in np.ndindex(*base_size):
-        cdf_params = params_conv(*tuple(arg[idx] for arg in bcast_dist_args))
+        cdf_params = params_conv(*(arg[idx] for arg in bcast_dist_args))
         test_res = stats.cramervonmises(
             samples[(Ellipsis, *idx)], cdf_name, args=cdf_params
         )

@@ -2380,7 +2380,7 @@ def test_tile():
         if use_symbolic_reps:
             rep_symbols = [iscalar() for _ in range(len(reps))]
             f = function([x, *rep_symbols], tile(x, rep_symbols))
-            return f(*([x_, *list(reps)]))
+            return f(*([x_, *reps]))
         else:
             f = function([x], tile(x, reps))
             return f(x_)

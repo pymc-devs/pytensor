@@ -447,7 +447,7 @@ def jit_compile_reducer(
 def create_axis_apply_fn(fn, axis, ndim, dtype):
     axis = normalize_axis_index(axis, ndim)
 
-    reaxis_first = (*tuple(i for i in range(ndim) if i != axis), axis)
+    reaxis_first = (*(i for i in range(ndim) if i != axis), axis)
 
     @numba_basic.numba_njit(boundscheck=False)
     def axis_apply_fn(x):

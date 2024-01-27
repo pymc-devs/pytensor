@@ -474,7 +474,7 @@ class BaseTestConv:
         return (
             batch_size,
             num_filters,
-            *tuple(
+            *(
                 None
                 if i is None or k is None
                 else (i + 2 * pad - ((k - 1) * fd + 1)) // d + 1

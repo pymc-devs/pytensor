@@ -1941,7 +1941,7 @@ def _sum_grad_over_bcasted_dims(x, gx):
             assert gx.ndim > x.ndim
             for i in range(x_dim_added):
                 assert gx.broadcastable[i]
-            gx = gx.dimshuffle(*list(range(x_dim_added, gx.ndim)))
+            gx = gx.dimshuffle(*range(x_dim_added, gx.ndim))
         assert gx.broadcastable == x.broadcastable
     return gx
 
@@ -2719,7 +2719,7 @@ class AdvancedIncSubtensor(Op):
             new_inputs.append(inp)
         return Apply(
             self,
-            (x, y, *tuple(new_inputs)),
+            (x, y, *new_inputs),
             [
                 tensor(
                     dtype=x.type.dtype,

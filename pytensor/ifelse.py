@@ -397,7 +397,7 @@ def ifelse(
 
     new_ifelse = IfElse(n_outs=len(then_branch), as_view=False, name=name)
 
-    ins = [condition, *list(then_branch), *list(else_branch)]
+    ins = [condition, *then_branch, *else_branch]
     rval = new_ifelse(*ins, return_list=True)
 
     if rval_type is None:

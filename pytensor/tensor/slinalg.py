@@ -589,7 +589,7 @@ def kron(a, b):
         )
     o = ptm.outer(a, b)
     o = o.reshape(ptb.concatenate((a.shape, b.shape)), ndim=a.ndim + b.ndim)
-    shf = o.dimshuffle(0, 2, 1, *list(range(3, o.ndim)))
+    shf = o.dimshuffle(0, 2, 1, *range(3, o.ndim))
     if shf.ndim == 3:
         shf = o.dimshuffle(1, 0, 2)
         o = shf.flatten()
@@ -598,7 +598,7 @@ def kron(a, b):
             (
                 o.shape[0] * o.shape[2],
                 o.shape[1] * o.shape[3],
-                *tuple(o.shape[i] for i in range(4, o.ndim)),
+                *(o.shape[i] for i in range(4, o.ndim)),
             )
         )
     return o

@@ -535,7 +535,7 @@ class TestSubtensorIncSubtensor:
         y = set_subtensor((2 * x)[indices], val, inplace=False)
         assert y.owner.op.inplace is False
         f = function(
-            [x, val, *list(indices)],
+            [x, val, *indices],
             y,
             mode=self.mode.including("inplace"),
         )
@@ -2015,10 +2015,8 @@ def test_local_subtensor_SpecifyShape_lift(x, s, idx, x_val, s_val):
     rewrites = RewriteDatabaseQuery(include=[None])
     no_rewrites_mode = Mode(optimizer=rewrites)
 
-    y_val_fn = function(
-        [x, *list(s)], y, on_unused_input="ignore", mode=no_rewrites_mode
-    )
-    y_val = y_val_fn(*([x_val, *list(s_val)]))
+    y_val_fn = function([x, *s], y, on_unused_input="ignore", mode=no_rewrites_mode)
+    y_val = y_val_fn(*([x_val, *s_val]))
 
     # This optimization should appear in the canonicalizations
     y_opt = rewrite_graph(y, clone=False)
@@ -2030,8 +2028,8 @@ def test_local_subtensor_SpecifyShape_lift(x, s, idx, x_val, s_val):
     else:
         assert isinstance(y_opt.owner.op, SpecifyShape)
 
-    y_opt_fn = function([x, *list(s)], y_opt, on_unused_input="ignore")
-    y_opt_val = y_opt_fn(*([x_val, *list(s_val)]))
+    y_opt_fn = function([x, *s], y_opt, on_unused_input="ignore")
+    y_opt_val = y_opt_fn(*([x_val, *s_val]))
 
     assert np.allclose(y_val, y_opt_val)
 
