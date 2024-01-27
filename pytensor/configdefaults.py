@@ -1382,7 +1382,8 @@ SUPPORTED_DNN_CONV_ALGO_FWD = (
     "fft_tiling",
     "winograd",
     "winograd_non_fused",
-) + SUPPORTED_DNN_CONV_ALGO_RUNTIME
+    *SUPPORTED_DNN_CONV_ALGO_RUNTIME,
+)
 
 SUPPORTED_DNN_CONV_ALGO_BWD_DATA = (
     "none",
@@ -1391,7 +1392,8 @@ SUPPORTED_DNN_CONV_ALGO_BWD_DATA = (
     "fft_tiling",
     "winograd",
     "winograd_non_fused",
-) + SUPPORTED_DNN_CONV_ALGO_RUNTIME
+    *SUPPORTED_DNN_CONV_ALGO_RUNTIME,
+)
 
 SUPPORTED_DNN_CONV_ALGO_BWD_FILTER = (
     "none",
@@ -1400,7 +1402,8 @@ SUPPORTED_DNN_CONV_ALGO_BWD_FILTER = (
     "small",
     "winograd_non_fused",
     "fft_tiling",
-) + SUPPORTED_DNN_CONV_ALGO_RUNTIME
+    *SUPPORTED_DNN_CONV_ALGO_RUNTIME,
+)
 
 SUPPORTED_DNN_CONV_PRECISION = (
     "as_input_f32",

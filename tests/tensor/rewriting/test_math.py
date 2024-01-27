@@ -2501,7 +2501,7 @@ class TestLocalMergeSwitchSameCond:
         u, v = matrices("uv")
         s3 = pt.switch(c, u, v)
         for op in (add, mul):
-            g = rewrite(FunctionGraph(mats + [u, v], [op(s1, s2, s3)]))
+            g = rewrite(FunctionGraph([*mats, u, v], [op(s1, s2, s3)]))
             assert debugprint(g, file="str").count("Switch") == 1
 
 

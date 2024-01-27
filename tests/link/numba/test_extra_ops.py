@@ -238,7 +238,7 @@ def test_FillDiagonalOffset(a, val, offset):
     ],
 )
 def test_RavelMultiIndex(arr, shape, mode, order, exc):
-    g = extra_ops.RavelMultiIndex(mode, order)(*(arr + (shape,)))
+    g = extra_ops.RavelMultiIndex(mode, order)(*((*arr, shape)))
     g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.raises(exc)

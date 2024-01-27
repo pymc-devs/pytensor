@@ -47,6 +47,7 @@ import dataclasses
 import logging
 import time
 from collections import OrderedDict
+from collections.abc import Iterable
 from copy import copy
 from itertools import chain, product
 from typing import Callable, Optional, Union
@@ -280,7 +281,9 @@ class ScanInfo:
         )
 
 
-TensorConstructorType = Callable[[list[bool], Union[str, np.generic]], TensorType]
+TensorConstructorType = Callable[
+    [Iterable[Optional[Union[bool, int]]], Union[str, np.generic]], TensorType
+]
 
 
 class ScanMethodsMixin:
@@ -790,7 +793,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             self.output_types.append(
                 # TODO: What can we actually say about the shape of this
                 # added dimension?
-                typeConstructor((None,) + o.type.shape, o.type.dtype)
+                typeConstructor((None, *o.type.shape), o.type.dtype)
             )
 
             idx += len(info.mit_mot_out_slices[jdx])
@@ -803,7 +806,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             self.output_types.append(
                 # TODO: What can we actually say about the shape of this
                 # added dimension?
-                typeConstructor((None,) + o.type.shape, o.type.dtype)
+                typeConstructor((None, *o.type.shape), o.type.dtype)
             )
 
         # shared outputs + possibly the ending condition
@@ -2031,9 +2034,10 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             for j in range(begin, end):
                 if i == 0:
                     jout = j + offset_out
-                    shape = (store_steps[j],) + inner_output_storage[jout].storage[
-                        0
-                    ].shape
+                    shape = (
+                        store_steps[j],
+                        *inner_output_storage[jout].storage[0].shape,
+                    )
                     dtype = inner_output_storage[jout].storage[0].dtype
                     if (
                         output_storage[j][0] is None
@@ -3270,16 +3274,16 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
         if info.as_while:
             inner_outs += [self_outputs[-1]]
-        scan_inputs = (
-            [inputs[0]]
-            + scan_seqs
-            + scan_mit_mot
-            + scan_mit_sot
-            + scan_sit_sot
-            + scan_shared
-            + scan_nit_sot
-            + scan_other
-        )
+        scan_inputs = [
+            inputs[0],
+            *scan_seqs,
+            *scan_mit_mot,
+            *scan_mit_sot,
+            *scan_sit_sot,
+            *scan_shared,
+            *scan_nit_sot,
+            *scan_other,
+        ]
 
         out_info = ScanInfo(
             n_seqs=info.n_seqs * 2,

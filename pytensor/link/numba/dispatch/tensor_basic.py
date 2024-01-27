@@ -174,14 +174,14 @@ def numba_funcify_ExtractDiag(op, node, **kwargs):
             else:
                 diag_len = min(x.shape[axis2], max(0, x.shape[axis1] + offset))
             base_shape = x.shape[:axis1] + x.shape[axis1p1:axis2] + x.shape[axis2p1:]
-            out_shape = base_shape + (diag_len,)
+            out_shape = (*base_shape, diag_len)
             out = np.empty(out_shape)
 
             for i in range(diag_len):
                 if offset >= 0:
-                    new_entry = x[leading_dims + (i,) + middle_dims + (i + offset,)]
+                    new_entry = x[(*leading_dims, i, *middle_dims, i + offset)]
                 else:
-                    new_entry = x[leading_dims + (i - offset,) + middle_dims + (i,)]
+                    new_entry = x[(*leading_dims, i - offset, *middle_dims, i)]
                 out[..., i] = new_entry
             return out
 

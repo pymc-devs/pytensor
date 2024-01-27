@@ -622,7 +622,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
         )
         assert_array_equal(
             numpy_inc_subtensor(test_array_np, (0, mask), 1),
-            inc_subtensor(test_array[(0,) + mask.nonzero()], 1).eval(),
+            inc_subtensor(test_array[(0, *mask.nonzero())], 1).eval(),
         )
         assert_array_equal(
             numpy_inc_subtensor(test_array_np, (0, mask), 1),
@@ -992,11 +992,11 @@ class TestSubtensor(utt.OptimizationTestMixin):
 
         mode_opt = self.mode
         data = self.shared(np.array(np.arange(5), dtype=self.dtype))
-        for start in [None] + [-8, -5, -1, 0, 1, 5, 8]:
+        for start in [None, -8, -5, -1, 0, 1, 5, 8]:
             outs = []
             shapes = []
-            for stop in [None] + [-8, -5, -1, 0, 1, 5, 8]:
-                for step in [None] + [-3, -1, 2]:
+            for stop in [None, -8, -5, -1, 0, 1, 5, 8]:
+                for step in [None, -3, -1, 2]:
                     outs += [data[start:stop:step].shape]
                     shapes += [data.get_value(borrow=True)[start:stop:step].shape]
             f = self.function([], outs, mode=mode_opt, op=subtensor_ops, N=0)

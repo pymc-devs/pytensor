@@ -171,7 +171,7 @@ class MissingInputError(Exception):
             assert list(kwargs.keys()) == ["variable"]
             error_msg = get_variable_trace_string(kwargs["variable"])
             if error_msg:
-                args = args + (error_msg,)
+                args = (*args, error_msg)
         s = "\n".join(args)  # Needed to have the new line print correctly
         super().__init__(s)
 

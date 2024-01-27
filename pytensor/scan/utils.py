@@ -429,10 +429,14 @@ def compress_outs(op, not_required, inputs):
             curr_pos += 1
             info = dataclasses.replace(
                 info,
-                mit_mot_in_slices=info.mit_mot_in_slices
-                + (op_info.mit_mot_in_slices[idx],),
-                mit_mot_out_slices=info.mit_mot_out_slices
-                + (op_info.mit_mot_out_slices[idx],),
+                mit_mot_in_slices=(
+                    *info.mit_mot_in_slices,
+                    op_info.mit_mot_in_slices[idx],
+                ),
+                mit_mot_out_slices=(
+                    *info.mit_mot_out_slices,
+                    op_info.mit_mot_out_slices[idx],
+                ),
             )
             # input taps
             for jdx in op_info.mit_mot_in_slices[idx]:
@@ -457,8 +461,10 @@ def compress_outs(op, not_required, inputs):
             curr_pos += 1
             info = dataclasses.replace(
                 info,
-                mit_sot_in_slices=info.mit_sot_in_slices
-                + (op_info.mit_sot_in_slices[idx],),
+                mit_sot_in_slices=(
+                    *info.mit_sot_in_slices,
+                    op_info.mit_sot_in_slices[idx],
+                ),
             )
             # input taps
             for jdx in op_info.mit_sot_in_slices[idx]:
@@ -481,8 +487,10 @@ def compress_outs(op, not_required, inputs):
             curr_pos += 1
             info = dataclasses.replace(
                 info,
-                sit_sot_in_slices=info.sit_sot_in_slices
-                + (op_info.sit_sot_in_slices[idx],),
+                sit_sot_in_slices=(
+                    *info.sit_sot_in_slices,
+                    op_info.sit_sot_in_slices[idx],
+                ),
             )
             # input taps
             op_inputs += [op.inner_inputs[i_offset]]
@@ -766,16 +774,16 @@ class ScanArgs:
 
     @property
     def outer_inputs(self):
-        return (
-            [self.n_steps]
-            + self.outer_in_seqs
-            + self.outer_in_mit_mot
-            + self.outer_in_mit_sot
-            + self.outer_in_sit_sot
-            + self.outer_in_shared
-            + self.outer_in_nit_sot
-            + self.outer_in_non_seqs
-        )
+        return [
+            self.n_steps,
+            *self.outer_in_seqs,
+            *self.outer_in_mit_mot,
+            *self.outer_in_mit_sot,
+            *self.outer_in_sit_sot,
+            *self.outer_in_shared,
+            *self.outer_in_nit_sot,
+            *self.outer_in_non_seqs,
+        ]
 
     @property
     def inner_outputs(self):

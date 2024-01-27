@@ -267,7 +267,7 @@ void _capsule_destructor(PyObject *o) {
     def c_code_cache_version(self):
         v = (3,)
         if self.version is not None:
-            v = v + (self.version,)
+            v = (*v, self.version)
         return v
 
     def __str__(self):
@@ -505,9 +505,12 @@ class EnumType(CType, dict):
     def __hash__(self):
         # All values are Python basic types, then easy to hash.
         return hash(
-            (type(self), self.ctype)
-            + tuple((k, self[k]) for k in sorted(self.keys()))
-            + tuple((a, self.aliases[a]) for a in sorted(self.aliases.keys()))
+            (
+                type(self),
+                self.ctype,
+                *tuple((k, self[k]) for k in sorted(self.keys())),
+                *tuple((a, self.aliases[a]) for a in sorted(self.aliases.keys())),
+            )
         )
 
     def __eq__(self, other):

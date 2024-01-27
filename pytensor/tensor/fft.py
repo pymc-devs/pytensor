@@ -43,7 +43,7 @@ class RFFTOp(Op):
         A = np.fft.rfftn(a, s=tuple(s))
         # Format output with two extra dimensions for real and imaginary
         # parts.
-        out = np.zeros(A.shape + (2,), dtype=a.dtype)
+        out = np.zeros((*A.shape, 2), dtype=a.dtype)
         out[..., 0], out[..., 1] = np.real(A), np.imag(A)
         output_storage[0][0] = out
 

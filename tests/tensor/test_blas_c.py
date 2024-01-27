@@ -388,7 +388,7 @@ class TestCGemvNoFlags:
         assert z_val.dtype == dtype
         assert z_val.ndim == 1
         assert z_val.shape[0] == self.M
-        ref_val = self.compute_ref(*(values + (transpose_A, slice_tensors)))
+        ref_val = self.compute_ref(*((*values, transpose_A, slice_tensors)))
         unittest_tools.assert_allclose(ref_val, z_val)
 
     def test_cgemv(self):

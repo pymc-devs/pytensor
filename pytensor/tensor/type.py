@@ -617,7 +617,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
     def c_code_cache_version(self):
         scalar_version = ps.get_scalar_type(self.dtype).c_code_cache_version()
         if scalar_version:
-            return (11,) + scalar_version
+            return (11, *scalar_version)
         else:
             return ()
 

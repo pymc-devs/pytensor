@@ -405,7 +405,7 @@ class SequentialGraphRewriter(GraphRewriter, UserList):
             else:
                 name = rewrite.name
             idx = rewrites.index(rewrite)
-            ll.append((name, rewrite.__class__.__name__, idx) + nb_n)
+            ll.append((name, rewrite.__class__.__name__, idx, *nb_n))
         lll = sorted(zip(prof, ll), key=lambda a: a[0])
 
         for t, rewrite in lll[::-1]:
@@ -1138,7 +1138,8 @@ def node_rewriter(
         req = requirements
         if inplace:
             dh_handler = dh.DestroyHandler
-            req = tuple(requirements) + (
+            req = (
+                *tuple(requirements),
                 lambda fgraph: fgraph.attach_feature(dh_handler()),
             )
         rval = FromFunctionNodeRewriter(f, tracks, req)

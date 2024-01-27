@@ -52,7 +52,7 @@ class TestPdbBreakpoint(utt.InferShapeTester):
         # Add self.monitored_input1 as an output to the PyTensor function to
         # prevent PyTensor from optimizing the PdbBreakpoint op out of the
         # function graph
-        fct = function([self.input1, self.input2], grads + [self.monitored_input1])
+        fct = function([self.input1, self.input2], [*grads, self.monitored_input1])
 
         gradients = fct(input1_value, input2_value)[:-1]
 

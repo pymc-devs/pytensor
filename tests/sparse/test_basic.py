@@ -3008,7 +3008,7 @@ def test_hstack_vstack():
     blocks = [make_block(dtype) for dtype in dtypes]
 
     for stack_dimension, stack_function in enumerate((sparse.vstack, sparse.hstack)):
-        for to_dtype in (None,) + dtypes:
+        for to_dtype in (None, *dtypes):
             stacked_blocks = stack_function(blocks, dtype=to_dtype)
             expected_dtype = get_expected_dtype(blocks, to_dtype)
             assert stacked_blocks.dtype == expected_dtype

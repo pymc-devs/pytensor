@@ -203,7 +203,7 @@ def remove_constants_and_unused_inputs_scan(fgraph, node):
             allow_gc=op.allow_gc,
         )
         nw_outs = nwScan(*nw_outer, return_list=True)
-        return dict([("remove", [node])] + list(zip(node.outputs, nw_outs)))
+        return dict([("remove", [node]), *list(zip(node.outputs, nw_outs))])
     else:
         return False
 
@@ -1664,7 +1664,7 @@ def save_mem_new_scan(fgraph, node):
                         )
                     else:
                         fslice = sanitize(cnf_slice[0])
-                    nw_slice = (fslice,) + tuple(old_slices[1:])
+                    nw_slice = (fslice, *tuple(old_slices[1:]))
 
                     nw_pos = inv_compress_map[idx]
 
@@ -1711,7 +1711,8 @@ def save_mem_new_scan(fgraph, node):
                                 sanitize(stop),
                                 sanitize(cnf_slice[0].step),
                             ),
-                        ) + tuple(old_slices[1:])
+                            *tuple(old_slices[1:]),
+                        )
 
                     else:
                         # Special case when only last value is requested
@@ -1725,7 +1726,7 @@ def save_mem_new_scan(fgraph, node):
                                 cnf_slice[0] - nw_steps - init_l[pos] + store_steps[pos]
                             )
 
-                        nw_slice = (sanitize(position),) + tuple(old_slices[1:])
+                        nw_slice = (sanitize(position), *tuple(old_slices[1:]))
                     subtens = Subtensor(nw_slice)
                     sl_ins = get_slice_elements(
                         nw_slice, lambda entry: isinstance(entry, Variable)
@@ -1850,7 +1851,7 @@ class ScanMerge(GraphRewriter):
             outer_ins += nd.op.outer_non_seqs(nd.inputs)
 
         # Add back the number of steps
-        outer_ins = [nodes[0].inputs[0]] + outer_ins
+        outer_ins = [nodes[0].inputs[0], *outer_ins]
 
         if as_while:
             # add the condition, which was the one of nodes[0]
@@ -2274,7 +2275,7 @@ def scan_merge_inouts(fgraph, node):
             new_outer_out_mit_mot.append(outer_omm)
     na.outer_out_mit_mot = new_outer_out_mit_mot
     if remove:
-        return dict([("remove", remove)] + list(zip(node.outputs, na.outer_outputs)))
+        return dict([("remove", remove), *list(zip(node.outputs, na.outer_outputs))])
     return na.outer_outputs
 
 
@@ -2399,17 +2400,17 @@ def push_out_dot1_scan(fgraph, node):
                         name=op.name,
                         allow_gc=op.allow_gc,
                     )
-                    _scan_inputs = (
-                        [node.inputs[0]]
-                        + outer_seqs
-                        + outer_mitmot
-                        + outer_mitsot
-                        + outer_sitsot
-                        + outer_shared
-                        + outer_nitsot
-                        + [node.inputs[0]]
-                        + outer_non_seqs
-                    )
+                    _scan_inputs = [
+                        node.inputs[0],
+                        *outer_seqs,
+                        *outer_mitmot,
+                        *outer_mitsot,
+                        *outer_sitsot,
+                        *outer_shared,
+                        *outer_nitsot,
+                        node.inputs[0],
+                        *outer_non_seqs,
+                    ]
 
                     new_outs = new_op(*_scan_inputs)
                     if not isinstance(new_outs, (list, tuple)):

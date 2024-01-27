@@ -1512,7 +1512,7 @@ class Alloc(COp):
                     )
 
         otype = TensorType(dtype=value.dtype, shape=combined_static_shape)
-        return Apply(self, [value] + shape, [otype()])
+        return Apply(self, [value, *shape], [otype()])
 
     @staticmethod
     def _check_runtime_broadcast(node, value, shape):
@@ -2394,7 +2394,7 @@ class Join(COp):
                     "Only tensors with the same number of dimensions can be joined"
                 )
 
-        inputs = [as_tensor_variable(axis)] + list(tensors)
+        inputs = [as_tensor_variable(axis), *list(tensors)]
 
         if inputs[0].type.dtype not in int_dtypes:
             raise TypeError(f"Axis value {inputs[0]} must be an integer type")
@@ -2854,14 +2854,14 @@ def flatten(x, ndim=1):
         raise ValueError(f"ndim {ndim} out of bound [1, {_x.ndim + 1})")
 
     if ndim > 1:
-        dims = tuple(_x.shape[: ndim - 1]) + (-1,)
+        dims = (*tuple(_x.shape[: ndim - 1]), -1)
     else:
         dims = (-1,)
 
     x_reshaped = _x.reshape(dims)
     shape_kept_dims = _x.type.shape[: ndim - 1]
     bcast_new_dim = builtins.all(s == 1 for s in _x.type.shape[ndim - 1 :])
-    out_shape = shape_kept_dims + (1 if bcast_new_dim else None,)
+    out_shape = (*shape_kept_dims, 1 if bcast_new_dim else None)
     bcasted_indices = tuple(i for i in range(ndim) if out_shape[i] == 1)
     x_reshaped = specify_broadcastable(x_reshaped, *bcasted_indices)
     return x_reshaped
@@ -4217,7 +4217,7 @@ def _make_along_axis_idx(arr_shape, indices, axis):
         raise IndexError("`indices` must be an integer array")
 
     shape_ones = (1,) * indices.ndim
-    dest_dims = list(range(axis)) + [None] + list(range(axis + 1, indices.ndim))
+    dest_dims = [*list(range(axis)), None, *list(range(axis + 1, indices.ndim))]
 
     # build a fancy index, consisting of orthogonal aranges, with the
     # requested index inserted at the right location

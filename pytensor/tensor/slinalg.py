@@ -595,8 +595,11 @@ def kron(a, b):
         o = shf.flatten()
     else:
         o = shf.reshape(
-            (o.shape[0] * o.shape[2], o.shape[1] * o.shape[3])
-            + tuple(o.shape[i] for i in range(4, o.ndim))
+            (
+                o.shape[0] * o.shape[2],
+                o.shape[1] * o.shape[3],
+                *tuple(o.shape[i] for i in range(4, o.ndim)),
+            )
         )
     return o
 
