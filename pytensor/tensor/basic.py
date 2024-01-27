@@ -2394,7 +2394,7 @@ class Join(COp):
                     "Only tensors with the same number of dimensions can be joined"
                 )
 
-        inputs = [as_tensor_variable(axis), *list(tensors)]
+        inputs = [as_tensor_variable(axis), *tensors]
 
         if inputs[0].type.dtype not in int_dtypes:
             raise TypeError(f"Axis value {inputs[0]} must be an integer type")
@@ -2854,7 +2854,7 @@ def flatten(x, ndim=1):
         raise ValueError(f"ndim {ndim} out of bound [1, {_x.ndim + 1})")
 
     if ndim > 1:
-        dims = (*tuple(_x.shape[: ndim - 1]), -1)
+        dims = (*_x.shape[: ndim - 1], -1)
     else:
         dims = (-1,)
 
@@ -4217,7 +4217,7 @@ def _make_along_axis_idx(arr_shape, indices, axis):
         raise IndexError("`indices` must be an integer array")
 
     shape_ones = (1,) * indices.ndim
-    dest_dims = [*list(range(axis)), None, *list(range(axis + 1, indices.ndim))]
+    dest_dims = [*range(axis), None, *range(axis + 1, indices.ndim)]
 
     # build a fancy index, consisting of orthogonal aranges, with the
     # requested index inserted at the right location

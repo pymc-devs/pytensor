@@ -416,7 +416,7 @@ class ScalarType(CType, HasDataType, HasShape):
             )
 
     def upcast(self, *others):
-        return upcast(*[x.dtype for x in [self, *list(others)]])
+        return upcast(*[x.dtype for x in [self, *others]])
 
     def make_variable(self, name=None):
         return ScalarVariable(self, None, name=name)
@@ -1501,7 +1501,7 @@ class IsNan(FixedLogicalComparison):
 
     def c_code_cache_version(self):
         scalarop_version = super().c_code_cache_version()
-        return (*tuple(scalarop_version), 3)
+        return (*scalarop_version, 3)
 
 
 isnan = IsNan()
@@ -1529,7 +1529,7 @@ class IsInf(FixedLogicalComparison):
 
     def c_code_cache_version(self):
         scalarop_version = super().c_code_cache_version()
-        return (*tuple(scalarop_version), 3)
+        return (*scalarop_version, 3)
 
 
 isinf = IsInf()

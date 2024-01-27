@@ -92,7 +92,7 @@ class PdbBreakpoint(Op):
             new_op.inp_types.append(monitored_vars[i].type)
 
         # Build the Apply node
-        inputs = [condition, *list(monitored_vars)]
+        inputs = [condition, *monitored_vars]
         outputs = [inp.type() for inp in monitored_vars]
         return Apply(op=new_op, inputs=inputs, outputs=outputs)
 

@@ -1139,7 +1139,7 @@ def node_rewriter(
         if inplace:
             dh_handler = dh.DestroyHandler
             req = (
-                *tuple(requirements),
+                *requirements,
                 lambda fgraph: fgraph.attach_feature(dh_handler()),
             )
         rval = FromFunctionNodeRewriter(f, tracks, req)

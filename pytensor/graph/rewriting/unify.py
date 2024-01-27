@@ -283,7 +283,7 @@ def convert_strs_to_vars(
             var_map[pattern] = v
             return v
         elif isinstance(y, tuple):
-            return etuple(*tuple(_convert(e) for e in y))
+            return etuple(*(_convert(e) for e in y))
         elif isinstance(y, (Number, np.ndarray)):
             from pytensor.tensor import as_tensor_variable
 

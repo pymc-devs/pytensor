@@ -1697,7 +1697,7 @@ def local_reduce_join(fgraph, node):
                 return
             if not isinstance(inp.op, DimShuffle) or inp.op.new_order != (
                 "x",
-                *tuple(range(inp.inputs[0].ndim)),
+                *range(inp.inputs[0].ndim),
             ):
                 return
             new_inp.append(inp.inputs[0])
@@ -3354,7 +3354,7 @@ def compute_mul(tree):
         )
     elif isinstance(inputs, list):
         # Recurse through inputs.
-        rval = mul(*list(map(compute_mul, inputs)))
+        rval = mul(*map(compute_mul, inputs))
     else:
         rval = inputs
     if neg:
