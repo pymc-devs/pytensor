@@ -46,7 +46,9 @@ def force_unlock(lock_dir: os.PathLike):
 
 @contextmanager
 def lock_ctx(
-    lock_dir: Union[str, os.PathLike] = None, *, timeout: Optional[float] = None
+    lock_dir: Optional[Union[str, os.PathLike]] = None,
+    *,
+    timeout: Optional[float] = None,
 ):
     """Context manager that wraps around FileLock and SoftFileLock from filelock package.
 
