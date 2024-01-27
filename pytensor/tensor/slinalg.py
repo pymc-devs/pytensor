@@ -335,7 +335,7 @@ def solve_triangular(
         Input data for the right hand side.
     lower : bool, optional
         Use only data contained in the lower triangle of `a`. Default is to use upper triangle.
-    trans: {0, 1, 2, ‘N’, ‘T’, ‘C’}, optional
+    trans: {0, 1, 2, 'N', 'T', 'C'}, optional
         Type of system to solve:
         trans       system
         0 or 'N'    a x = b
