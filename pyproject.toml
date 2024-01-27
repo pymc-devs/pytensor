@@ -129,8 +129,8 @@ disable = ["C0330", "C0326"]
 
 
 [tool.ruff]
-select = ["C", "E", "F", "I", "UP", "W"]
-ignore = ["C408", "C901", "E501", "E741"]
+select = ["C", "E", "F", "I", "UP", "W", "RUF"]
+ignore = ["C408", "C901", "E501", "E741", "RUF012"]
 exclude = ["doc/", "pytensor/_version.py", "bin/pytensor_cache.py"]
 
 
