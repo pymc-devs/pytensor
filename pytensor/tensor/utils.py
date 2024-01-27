@@ -151,7 +151,7 @@ def broadcast_static_dim_lengths(
     dim_lengths_set = set(dim_lengths)
     # All dim_lengths are the same
     if len(dim_lengths_set) == 1:
-        return tuple(dim_lengths_set)[0]
+        return next(iter(dim_lengths_set))
 
     # Only valid indeterminate case
     if dim_lengths_set == {None, 1}:
@@ -161,7 +161,7 @@ def broadcast_static_dim_lengths(
     dim_lengths_set.discard(None)
     if len(dim_lengths_set) > 1:
         raise ValueError
-    return tuple(dim_lengths_set)[0]
+    return next(iter(dim_lengths_set))
 
 
 # Copied verbatim from numpy.lib.function_base

@@ -3274,7 +3274,7 @@ class TestLocalReduce:
             order = f.maker.fgraph.toposort()
             assert 1 == sum(isinstance(node.op, CAReduce) for node in order)
 
-            node = [node for node in order if isinstance(node.op, CAReduce)][0]
+            node = next(node for node in order if isinstance(node.op, CAReduce))
 
             op = node.op
             assert isinstance(op, CAReduce)

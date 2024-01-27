@@ -1630,7 +1630,7 @@ class TestScan:
 
         # Also validate that the mappings outer_inp_from_outer_out and
         # outer_inp_from_inner_inp produce the correct results
-        scan_node = list(updates.values())[0].owner
+        scan_node = next(iter(updates.values())).owner
 
         var_mappings = scan_node.op.get_oinp_iinp_iout_oout_mappings()
         result = var_mappings["outer_inp_from_outer_out"]
@@ -1922,7 +1922,7 @@ class TestScan:
         _, updates = scan(
             inner_fn, n_steps=10, truncate_gradient=-1, go_backwards=False
         )
-        cost = list(updates.values())[0]
+        cost = next(iter(updates.values()))
         g_sh = grad(cost, shared_var)
         fgrad = function([], g_sh)
         assert fgrad() == 1
