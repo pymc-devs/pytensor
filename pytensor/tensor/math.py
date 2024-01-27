@@ -186,7 +186,7 @@ class MaxAndArgmax(COp):
 
         # Numpy.prod returns 1.0 when arg is empty, so we cast it to int64
         # Otherwise reshape would complain citing float arg
-        new_shape = kept_shape + (np.prod(reduced_shape, dtype="int64"),)
+        new_shape = (*kept_shape, np.prod(reduced_shape, dtype="int64"))
         reshaped_x = transposed_x.reshape(new_shape)
 
         max_idx[0] = _asarray(np.argmax(reshaped_x, axis=-1), dtype="int64")
@@ -403,7 +403,7 @@ class Argmax(COp):
         transposed_x = np.transpose(x, np.concatenate((keep_axes, axes)))
         kept_shape = transposed_x.shape[: len(keep_axes)]
         reduced_shape = transposed_x.shape[len(keep_axes) :]
-        new_shape = kept_shape + (np.prod(reduced_shape),)
+        new_shape = (*kept_shape, np.prod(reduced_shape))
         reshaped_x = transposed_x.reshape(new_shape)
 
         max_idx[0] = _asarray(np.argmax(reshaped_x, axis=-1), dtype="int64")

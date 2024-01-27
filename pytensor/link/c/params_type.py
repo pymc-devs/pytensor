@@ -293,7 +293,7 @@ class Params(dict):
                 .signature()
                 for i in range(self.__params_type__.length)
             )
-        return hash((type(self), self.__params_type__) + self.__signatures__)
+        return hash((type(self), self.__params_type__, *self.__signatures__))
 
     def __eq__(self, other):
         return (
@@ -437,7 +437,7 @@ class ParamsType(CType):
         )
 
     def __hash__(self):
-        return hash((type(self),) + self.fields + self.types)
+        return hash((type(self), *self.fields, *self.types))
 
     def generate_struct_name(self):
         # This method tries to generate an unique name for the current instance.
@@ -807,7 +807,7 @@ class ParamsType(CType):
             )
         )
 
-        return sorted(c_support_code_set) + [final_struct_code]
+        return [*sorted(c_support_code_set), final_struct_code]
 
     def c_code_cache_version(self):
         return ((3,), tuple(t.c_code_cache_version() for t in self.types))

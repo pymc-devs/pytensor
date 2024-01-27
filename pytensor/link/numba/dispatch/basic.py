@@ -330,7 +330,7 @@ def create_tuple_creator(f, n):
 
         @numba_njit
         def creator(args, creator=creator, i=i):
-            return creator(args) + (f(i, *args),)
+            return (*creator(args), f(i, *args))
 
     return numba_njit(lambda *args: creator(args))
 

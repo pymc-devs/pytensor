@@ -154,8 +154,9 @@ class Erfcx(UnaryScalarOp):
 
     def c_header_dirs(self, **kwargs):
         # Using the Faddeeva.hh (c++) header for Faddeevva.cc
-        res = super().c_header_dirs(**kwargs) + [
-            os.path.join(os.path.dirname(__file__), "c_code")
+        res = [
+            *super().c_header_dirs(**kwargs),
+            os.path.join(os.path.dirname(__file__), "c_code"),
         ]
         return res
 
@@ -1308,7 +1309,7 @@ class Sigmoid(UnaryScalarOp):
     def c_code_cache_version(self):
         v = super().c_code_cache_version()
         if v:
-            return (2,) + v
+            return (2, *v)
         else:
             return v
 
@@ -1390,7 +1391,7 @@ class Softplus(UnaryScalarOp):
     def c_code_cache_version(self):
         v = super().c_code_cache_version()
         if v:
-            return (3,) + v
+            return (3, *v)
         else:
             return v
 

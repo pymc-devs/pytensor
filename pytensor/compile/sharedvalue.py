@@ -209,7 +209,7 @@ def shared(value, name=None, strict=False, allow_downcast=None, **kwargs):
         add_tag_trace(var)
         return var
     except MemoryError as e:
-        e.args = e.args + ("Consider using `pytensor.shared(..., borrow=True)`",)
+        e.args = (*e.args, "Consider using `pytensor.shared(..., borrow=True)`")
         raise
 
 

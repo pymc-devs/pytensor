@@ -805,8 +805,8 @@ def scan(
         #      a map); in that case we do not have to do anything ..
 
     # Re-order args
-    max_mit_sot = np.max([-1] + mit_sot_rightOrder) + 1
-    max_sit_sot = np.max([-1] + sit_sot_rightOrder) + 1
+    max_mit_sot = np.max([-1, *mit_sot_rightOrder]) + 1
+    max_sit_sot = np.max([-1, *sit_sot_rightOrder]) + 1
     n_elems = np.max([max_mit_sot, max_sit_sot])
     _ordered_args = [[] for x in range(n_elems)]
     offset = 0
@@ -1152,7 +1152,7 @@ def scan(
     )
 
     scan_inputs = []
-    for arg in [actual_n_steps] + _scan_inputs:
+    for arg in [actual_n_steps, *_scan_inputs]:
         try:
             arg = pt.as_tensor_variable(arg)
         except TypeError:

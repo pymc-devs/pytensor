@@ -73,7 +73,7 @@ class RewriteDatabase:
 
         if use_db_name_as_tag:
             if self.name is not None:
-                tags = tags + (self.name,)
+                tags = (*tags, self.name)
 
         rewriter.name = name
         # This restriction is there because in many place we suppose that

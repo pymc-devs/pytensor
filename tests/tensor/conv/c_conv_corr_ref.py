@@ -790,7 +790,7 @@ class CorrMM_gradWeights(BaseCorrMM):
 
         dtype = img.type.dtype
         return Apply(
-            self, [img, topgrad] + height_width, [TensorType(dtype, shape=out_shape)()]
+            self, [img, topgrad, *height_width], [TensorType(dtype, shape=out_shape)()]
         )
 
     def infer_shape(self, fgraph, node, input_shape):
@@ -862,7 +862,7 @@ class CorrMM_gradWeights(BaseCorrMM):
         d_height_width = (
             (pytensor.gradient.DisconnectedType()(),) * 2 if len(inp) == 4 else ()
         )
-        return (d_bottom, d_top) + d_height_width
+        return (d_bottom, d_top, *d_height_width)
 
     def connection_pattern(self, node):
         if node.nin == 2:
@@ -918,7 +918,7 @@ class CorrMM_gradInputs(BaseCorrMM):
             ]
         dtype = kern.type.dtype
         return Apply(
-            self, [kern, topgrad] + height_width, [TensorType(dtype, shape=out_shape)()]
+            self, [kern, topgrad, *height_width], [TensorType(dtype, shape=out_shape)()]
         )
 
     def infer_shape(self, fgraph, node, input_shape):
@@ -966,7 +966,7 @@ class CorrMM_gradInputs(BaseCorrMM):
         else:
             out_shp1 = (topshp[1] - 1) * dW + kshp[1] - padW_l - padW_r
         out_shp = (out_shp0, out_shp1)
-        return [(bsize, ssize) + out_shp]
+        return [(bsize, ssize, *out_shp)]
 
     def c_code(self, node, nodename, inp, out_, sub):
         weights, top = inp[:2]
@@ -994,7 +994,7 @@ class CorrMM_gradInputs(BaseCorrMM):
         d_height_width = (
             (pytensor.gradient.DisconnectedType()(),) * 2 if len(inp) == 4 else ()
         )
-        return (d_weights, d_top) + d_height_width
+        return (d_weights, d_top, *d_height_width)
 
     def connection_pattern(self, node):
         if node.nin == 2:

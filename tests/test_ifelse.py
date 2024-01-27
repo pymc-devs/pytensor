@@ -90,7 +90,7 @@ class TestIfelse(utt.OptimizationTestMixin):
             "constant_folding",
             "constant_folding",
         )
-        y2 = reduce(lambda x, y: x + y, [y] + list(range(200)))
+        y2 = reduce(lambda x, y: x + y, [y, *list(range(200))])
         f = function([c, x, y], ifelse(c, x, y2), mode=mode)
         # For not inplace ifelse
         ifnode = [n for n in f.maker.fgraph.toposort() if isinstance(n.op, IfElse)]

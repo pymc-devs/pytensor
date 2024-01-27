@@ -243,14 +243,14 @@ def test_normal_infer_shape(M, sd, size):
     rv = normal(M, sd, size=size)
     rv_shape = list(normal._infer_shape(size or (), [M, sd], None))
 
-    all_args = (M, sd) + size
+    all_args = (M, sd, *size)
     fn_inputs = [
         i
         for i in graph_inputs([a for a in all_args if isinstance(a, Variable)])
         if not isinstance(i, (Constant, SharedVariable))
     ]
     pytensor_fn = function(
-        fn_inputs, [pt.as_tensor(o) for o in rv_shape + [rv]], mode=py_mode
+        fn_inputs, [pt.as_tensor(o) for o in [*rv_shape, rv]], mode=py_mode
     )
 
     *rv_shape_val, rv_val = pytensor_fn(
@@ -708,14 +708,14 @@ def test_dirichlet_infer_shape(M, size):
     rv = dirichlet(M, size=size)
     rv_shape = list(dirichlet._infer_shape(size or (), [M], None))
 
-    all_args = (M,) + size
+    all_args = (M, *size)
     fn_inputs = [
         i
         for i in graph_inputs([a for a in all_args if isinstance(a, Variable)])
         if not isinstance(i, (Constant, SharedVariable))
     ]
     pytensor_fn = function(
-        fn_inputs, [pt.as_tensor(o) for o in rv_shape + [rv]], mode=py_mode
+        fn_inputs, [pt.as_tensor(o) for o in [*rv_shape, rv]], mode=py_mode
     )
 
     *rv_shape_val, rv_val = pytensor_fn(
@@ -883,7 +883,7 @@ def test_invgamma_samples(loc, scale, size):
         scale,
         size=size,
         test_fn=lambda *args, size=None, random_state=None, **kwargs: invgamma.rng_fn(
-            random_state, *(args + (size,))
+            random_state, *((*args, size))
         ),
     )
 
@@ -942,7 +942,7 @@ def test_truncexpon_samples(b, loc, scale, size):
         scale,
         size=size,
         test_fn=lambda *args, size=None, random_state=None, **kwargs: truncexpon.rng_fn(
-            random_state, *(args + (size,))
+            random_state, *((*args, size))
         ),
     )
 
@@ -984,7 +984,7 @@ def test_t_samples(df, loc, scale, size):
         scale,
         size=size,
         test_fn=lambda *args, size=None, random_state=None, **kwargs: t.rng_fn(
-            random_state, *(args + (size,))
+            random_state, *((*args, size))
         ),
     )
 
@@ -1016,7 +1016,7 @@ def test_bernoulli_samples(p, size):
         p,
         size=size,
         test_fn=lambda *args, size=None, random_state=None, **kwargs: bernoulli.rng_fn(
-            random_state, *(args + (size,))
+            random_state, *((*args, size))
         ),
     )
 
@@ -1111,7 +1111,7 @@ def test_nbinom_samples(M, p, size):
         p,
         size=size,
         test_fn=lambda *args, size=None, random_state=None, **kwargs: nbinom.rng_fn(
-            random_state, *(args + (size,))
+            random_state, *((*args, size))
         ),
     )
 
@@ -1153,7 +1153,7 @@ def test_betabinom_samples(M, a, p, size):
         p,
         size=size,
         test_fn=lambda *args, size=None, random_state=None, **kwargs: betabinom.rng_fn(
-            random_state, *(args + (size,))
+            random_state, *((*args, size))
         ),
     )
 
@@ -1195,7 +1195,7 @@ def test_gengamma_samples(alpha, p, lambd, size):
         lambd,
         size=size,
         test_fn=lambda *args, size=None, random_state=None, **kwargs: gengamma.rng_fn(
-            random_state, *(args + (size,))
+            random_state, *((*args, size))
         ),
     )
 
@@ -1226,7 +1226,7 @@ def test_gengamma_samples(alpha, p, lambd, size):
             np.array([0.7, 0.3], dtype=config.floatX),
             None,
             lambda *args, size=None, random_state=None, **kwargs: multinomial.rng_fn(
-                random_state, *(args + (size,))
+                random_state, *((*args, size))
             ),
         ),
         (

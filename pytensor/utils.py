@@ -129,7 +129,7 @@ def maybe_add_to_os_environ_pathlist(var, newpath):
         try:
             oldpaths = os.environ[var].split(os.pathsep)
             if newpath not in oldpaths:
-                newpaths = os.pathsep.join([newpath] + oldpaths)
+                newpaths = os.pathsep.join([newpath, *oldpaths])
                 os.environ[var] = newpaths
         except Exception:
             pass
@@ -210,7 +210,7 @@ def output_subprocess_Popen(command, **params):
     # we need to use communicate to make sure we don't deadlock around
     # the stdout/stderr pipe.
     out = p.communicate()
-    return out + (p.returncode,)
+    return (*out, p.returncode)
 
 
 def hash_from_code(msg):

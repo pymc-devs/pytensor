@@ -1890,7 +1890,7 @@ class Compiler:
                 os.close(fd)
                 fd = None
                 out, err, p_ret = output_subprocess_Popen(
-                    [compiler] + args + [path, "-o", exe_path] + flags
+                    [compiler, *args, path, "-o", exe_path, *flags]
                 )
                 if p_ret != 0:
                     compilation_ok = False

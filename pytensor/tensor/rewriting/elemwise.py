@@ -1188,7 +1188,7 @@ def local_careduce_fusion(fgraph, node):
         scalar_fused_output = ps.cast(scalar_fused_output, car_acc_dtype)
 
     fused_scalar_op = ps.Composite(
-        inputs=[carried_car_input] + scalar_elm_inputs, outputs=[scalar_fused_output]
+        inputs=[carried_car_input, *scalar_elm_inputs], outputs=[scalar_fused_output]
     )
 
     # The fused `Op` needs to look and behave like a `BinaryScalarOp`

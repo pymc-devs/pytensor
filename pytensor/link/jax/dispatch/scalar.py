@@ -95,7 +95,7 @@ def jax_funcify_ScalarOp(op, node, **kwargs):
 
     func_name = nfunc_spec[0]
     if "." in func_name:
-        jax_func = functools.reduce(getattr, [jax] + func_name.split("."))
+        jax_func = functools.reduce(getattr, [jax, *func_name.split(".")])
     else:
         jax_func = getattr(jnp, func_name)
 

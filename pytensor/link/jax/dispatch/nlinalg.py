@@ -130,7 +130,8 @@ def jax_funcify_MaxAndArgmax(op, **kwargs):
 
         # Numpy.prod returns 1.0 when arg is empty, so we cast it to int64
         # Otherwise reshape would complain citing float arg
-        new_shape = kept_shape + (
+        new_shape = (
+            *kept_shape,
             jnp.prod(jnp.array(reduced_shape, dtype="int64"), dtype="int64"),
         )
         reshaped_x = transposed_x.reshape(new_shape)

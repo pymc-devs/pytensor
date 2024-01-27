@@ -2379,8 +2379,8 @@ def test_tile():
     def run_tile(x, x_, reps, use_symbolic_reps):
         if use_symbolic_reps:
             rep_symbols = [iscalar() for _ in range(len(reps))]
-            f = function([x] + rep_symbols, tile(x, rep_symbols))
-            return f(*([x_] + list(reps)))
+            f = function([x, *rep_symbols], tile(x, rep_symbols))
+            return f(*([x_, *list(reps)]))
         else:
             f = function([x], tile(x, reps))
             return f(x_)
@@ -2480,7 +2480,7 @@ def test_tile():
         # (3) ndim > len(reps)
         ndim_ = len(reps_) + 1
         f = function([x], tile(x, reps_, ndim_))
-        assert np.all(f(x_) == np.tile(x_, [1] + reps_))
+        assert np.all(f(x_) == np.tile(x_, [1, *reps_]))
 
         # reps is list, ndim > x.ndim > len(reps):
         r = [2, 3, 4, 5]
@@ -2488,7 +2488,7 @@ def test_tile():
             ndim_ = k + 1
             reps_ = r[: k - 1]
             f = function([x], tile(x, reps_, ndim_))
-            assert np.all(f(x_) == np.tile(x_, [1, 1] + reps_))
+            assert np.all(f(x_) == np.tile(x_, [1, 1, *reps_]))
 
         # error raising test: ndim not specified when reps is vector
         reps = ivector()
