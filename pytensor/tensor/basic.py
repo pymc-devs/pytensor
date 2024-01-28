@@ -761,7 +761,7 @@ def cast(x, dtype: Union[str, np.dtype]) -> TensorVariable:
 def switch(cond, ift, iff):
     r"""
     if cond then ift else iff
-    
+
     Examples
     --------
     .. code-block:: python
@@ -772,7 +772,7 @@ def switch(cond, ift, iff):
             mu = pm.math.switch(x > 0, 2.0, -2.0)
 
             x1 = pm.Normal('x1', mu=mu, sigma=1)
-            
+
     """
 
 
