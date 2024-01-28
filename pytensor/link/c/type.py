@@ -508,8 +508,8 @@ class EnumType(CType, dict):
             (
                 type(self),
                 self.ctype,
-                *((k, self[k]) for k in sorted(self.keys())),
-                *((a, self.aliases[a]) for a in sorted(self.aliases.keys())),
+                *sorted(self.items()),
+                *sorted(self.aliases.items()),
             )
         )
 
