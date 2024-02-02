@@ -1067,7 +1067,9 @@ class ScanInplaceOptimizer(GraphRewriter):
                     if client.op.destroy_map:
                         # This flattens the content of destroy_map.values()
                         # which is a list of lists
-                        inplace_inp_indices = sum(client.op.destroy_map.values(), [])
+                        inplace_inp_indices = chain.from_iterable(
+                            client.op.destroy_map.values()
+                        )
 
                         inplace_inps = [client.inputs[i] for i in inplace_inp_indices]
                         if original_node.inputs[inp_idx] in inplace_inps:
@@ -1860,8 +1862,8 @@ class ScanMerge(GraphRewriter):
         # Clone the inner graph of each node independently
         for idx, nd in enumerate(nodes):
             # concatenate all inner_ins and inner_outs of nd
-            flat_inner_ins = sum(inner_ins[idx], [])
-            flat_inner_outs = sum(inner_outs[idx], [])
+            flat_inner_ins = list(chain.from_iterable(inner_ins[idx]))
+            flat_inner_outs = list(chain.from_iterable(inner_outs[idx]))
             # clone
             flat_inner_ins, flat_inner_outs = reconstruct_graph(
                 flat_inner_ins, flat_inner_outs

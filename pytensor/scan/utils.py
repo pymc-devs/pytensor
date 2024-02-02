@@ -765,8 +765,8 @@ class ScanArgs:
     def inner_inputs(self):
         return (
             self.inner_in_seqs
-            + sum(self.inner_in_mit_mot, [])
-            + sum(self.inner_in_mit_sot, [])
+            + list(chain.from_iterable(self.inner_in_mit_mot))
+            + list(chain.from_iterable(self.inner_in_mit_sot))
             + self.inner_in_sit_sot
             + self.inner_in_shared
             + self.inner_in_non_seqs
@@ -788,7 +788,7 @@ class ScanArgs:
     @property
     def inner_outputs(self):
         return (
-            sum(self.inner_out_mit_mot, [])
+            list(chain.from_iterable(self.inner_out_mit_mot))
             + self.inner_out_mit_sot
             + self.inner_out_sit_sot
             + self.inner_out_nit_sot

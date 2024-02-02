@@ -4096,9 +4096,10 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
         return tuple(rval)
 
     def c_header_dirs(self, **kwargs):
-        rval = sum(
-            (subnode.op.c_header_dirs(**kwargs) for subnode in self.fgraph.toposort()),
-            [],
+        rval = list(
+            chain.from_iterable(
+                subnode.op.c_header_dirs(**kwargs) for subnode in self.fgraph.toposort()
+            )
         )
         return rval
 

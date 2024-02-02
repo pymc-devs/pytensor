@@ -233,10 +233,11 @@ def fast_inplace_check(fgraph, inputs):
 
     """
     Supervisor = pytensor.compile.function.types.Supervisor
-    protected_inputs = [
-        f.protected for f in fgraph._features if isinstance(f, Supervisor)
-    ]
-    protected_inputs = sum(protected_inputs, [])  # flatten the list
+    protected_inputs = list(
+        itertools.chain.from_iterable(
+            f.protected for f in fgraph._features if isinstance(f, Supervisor)
+        )
+    )
     protected_inputs.extend(fgraph.outputs)
 
     inputs = [
