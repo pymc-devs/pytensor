@@ -1,22 +1,35 @@
 import logging
+from collections.abc import Callable
 from typing import cast
 
+from pytensor import Variable
+from pytensor.graph import Apply, FunctionGraph
 from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
 from pytensor.tensor.basic import TensorVariable, diagonal
 from pytensor.tensor.blas import Dot22
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Dot, Prod, _matrix_matrix_matmul, log, prod
-from pytensor.tensor.nlinalg import MatrixInverse, det
+from pytensor.tensor.nlinalg import (
+    KroneckerProduct,
+    MatrixInverse,
+    MatrixPinv,
+    det,
+    inv,
+    kron,
+    pinv,
+)
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
     register_stabilize,
 )
 from pytensor.tensor.slinalg import (
+    BlockDiagonal,
     Cholesky,
     Solve,
     SolveBase,
+    block_diag,
     cholesky,
     solve,
     solve_triangular,
@@ -305,3 +318,62 @@ def local_log_prod_sqr(fgraph, node):
 
         # TODO: have a reduction like prod and sum that simply
         # returns the sign of the prod multiplication.
+
+
+@register_specialize
+@node_rewriter([Blockwise])
+def local_lift_through_linalg(
+    fgraph: FunctionGraph, node: Apply
+) -> list[Variable] | None:
+    """
+    Rewrite compositions of linear algebra operations by lifting expensive operations (Cholesky, Inverse) through Ops
+    that join matrices (KroneckerProduct, BlockDiagonal).
+
+    This rewrite takes advantage of commutation between certain linear algebra operations to do several smaller matrix
+    operations on component matrices instead of one large one. For example, when taking the inverse of Kronecker
+    product, we can take the inverse of each component matrix and then take the Kronecker product of the inverses. This
+    reduces the cost of the inverse from O((n*m)^3) to O(n^3 + m^3) where n and m are the dimensions of the component
+    matrices.
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
+
+    # TODO: Simplify this if we end up Blockwising KroneckerProduct
+    if isinstance(node.op.core_op, MatrixInverse | Cholesky | MatrixPinv):
+        y = node.inputs[0]
+        outer_op = node.op
+
+        if y.owner and (
+            isinstance(y.owner.op, Blockwise)
+            and isinstance(y.owner.op.core_op, BlockDiagonal)
+            or isinstance(y.owner.op, KroneckerProduct)
+        ):
+            input_matrices = y.owner.inputs
+
+            if isinstance(outer_op.core_op, MatrixInverse):
+                outer_f = cast(Callable, inv)
+            elif isinstance(outer_op.core_op, Cholesky):
+                outer_f = cast(Callable, cholesky)
+            elif isinstance(outer_op.core_op, MatrixPinv):
+                outer_f = cast(Callable, pinv)
+            else:
+                raise NotImplementedError  # pragma: no cover
+
+            inner_matrices = [cast(TensorVariable, outer_f(m)) for m in input_matrices]
+
+            if isinstance(y.owner.op, KroneckerProduct):
+                return [kron(*inner_matrices)]
+            elif isinstance(y.owner.op.core_op, BlockDiagonal):
+                return [block_diag(*inner_matrices)]
+            else:
+                raise NotImplementedError  # pragma: no cover

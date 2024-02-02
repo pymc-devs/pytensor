@@ -7,6 +7,7 @@ import numpy as np
 from numpy.core.numeric import normalize_axis_tuple  # type: ignore
 
 from pytensor import scalar as ps
+from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
@@ -614,7 +615,7 @@ def svd(a, full_matrices: bool = True, compute_uv: bool = True):
 
     Returns
     -------
-    U, V,  D : matrices
+    U, V, D : matrices
 
     """
     return Blockwise(SVD(full_matrices, compute_uv))(a)
@@ -1011,6 +1012,12 @@ def tensorsolve(a, b, axes=None):
     return TensorSolve(axes)(a, b)
 
 
+class KroneckerProduct(OpFromGraph):
+    """
+    Wrapper Op for Kronecker graphs
+    """
+
+
 def kron(a, b):
     """Kronecker product.
 
@@ -1042,7 +1049,8 @@ def kron(a, b):
     out_shape = tuple(a.shape * b.shape)
     output_out_of_shape = a_reshaped * b_reshaped
     output_reshaped = output_out_of_shape.reshape(out_shape)
-    return output_reshaped
+
+    return KroneckerProduct(inputs=[a, b], outputs=[output_reshaped])(a, b)
 
 
 __all__ = [

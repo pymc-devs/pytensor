@@ -7,7 +7,7 @@ from functools import partial
 from typing import cast
 
 import pytensor.tensor as pt
-from pytensor import function
+from pytensor.compile.function import function
 from pytensor.compile.function.pfunc import rebuild_collect_shared
 from pytensor.compile.mode import optdb
 from pytensor.compile.sharedvalue import SharedVariable

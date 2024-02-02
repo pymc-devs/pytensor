@@ -590,6 +590,14 @@ class TestKron(utt.InferShapeTester):
         self.op = kron
         super().setup_method()
 
+    def test_vec_vec_kron_raises(self):
+        x = vector()
+        y = vector()
+        with pytest.raises(
+            TypeError, match="kron: inputs dimensions must sum to 3 or more"
+        ):
+            kron(x, y)
+
     @pytest.mark.parametrize("shp0", [(2,), (2, 3), (2, 3, 4), (2, 3, 4, 5)])
     @pytest.mark.parametrize("shp1", [(6,), (6, 7), (6, 7, 8), (6, 7, 8, 9)])
     def test_perform(self, shp0, shp1):
