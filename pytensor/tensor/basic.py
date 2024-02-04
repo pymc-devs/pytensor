@@ -2787,15 +2787,19 @@ def vstack(*args):
 
 
 def horizontal_stack(*args):
-  warnings.warn("horizontal_stack was renamed to hstack and will be removed in a future release", FutureWarning)
-  return hstack(*args)
+    warnings.warn(
+        "horizontal_stack was renamed to hstack and will be removed in a future release",
+        FutureWarning,
+    )
+    return hstack(*args)
 
 
 def vertical_stack(*args):
-  warnings.warn("vertical_stack was renamed to vstack and will be removed in a future release", FutureWarning)
-  return vstack(*args)
-
-
+    warnings.warn(
+        "vertical_stack was renamed to vstack and will be removed in a future release",
+        FutureWarning,
+    )
+    return vstack(*args)
 
 
 def dstack(*args):

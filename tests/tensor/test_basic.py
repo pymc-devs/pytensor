@@ -41,9 +41,11 @@ from pytensor.tensor.basic import (
     atleast_Nd,
     cast,
     choose,
+    column_stack,
     constant,
     default,
     diag,
+    dstack,
     expand_dims,
     extract_constant,
     eye,
@@ -85,9 +87,7 @@ from pytensor.tensor.basic import (
     triu,
     triu_indices,
     triu_indices_from,
-    dstack,
     vstack,
-    column_stack,
     zeros_like,
 )
 from pytensor.tensor.blockwise import Blockwise
@@ -1678,46 +1678,42 @@ class TestJoinAndSplit:
         want = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9], [9, 8, 7]])
         out = self.eval_outputs_and_check_join([s])
         assert (out == want).all()
-    
+
     def test_join_matrix1_using_dstack(self):
-        a = self.shared(np.array(
-            [
-                [[0.1], [0.2], [0.3]],
-                [[0.4], [0.5], [0.6]]
-            ],
-            dtype="float32"))
+        a = self.shared(
+            np.array([[[0.1], [0.2], [0.3]], [[0.4], [0.5], [0.6]]], dtype="float32")
+        )
 
-        b = as_tensor_variable(np.array(
-            [[[0.2, 0.3],
-            [0.3, 0.4],
-            [0.4, 0.5], ],
-            [[0.5, 0.6],
-            [0.6, 0.7],
-            [0.7, 0.8]]],
-            dtype="float32"))
+        b = as_tensor_variable(
+            np.array(
+                [
+                    [
+                        [0.2, 0.3],
+                        [0.3, 0.4],
+                        [0.4, 0.5],
+                    ],
+                    [[0.5, 0.6], [0.6, 0.7], [0.7, 0.8]],
+                ],
+                dtype="float32",
+            )
+        )
 
-        c = as_tensor_variable(np.array(
-            [
-                [[0.4], [0.5], [0.6]],
-                [[0.7], [0.8], [0.9]]
-            ],
-            dtype="float32"))
-        
+        c = as_tensor_variable(
+            np.array([[[0.4], [0.5], [0.6]], [[0.7], [0.8], [0.9]]], dtype="float32")
+        )
+
         s = dstack(a, b, c)
 
         want = np.array(
-            [[[0.1, 0.2, 0.3, 0.4],
-            [0.2, 0.3, 0.4, 0.5],
-            [0.3, 0.4, 0.5, 0.6]],
+            [
+                [[0.1, 0.2, 0.3, 0.4], [0.2, 0.3, 0.4, 0.5], [0.3, 0.4, 0.5, 0.6]],
+                [[0.4, 0.5, 0.6, 0.7], [0.5, 0.6, 0.7, 0.8], [0.6, 0.7, 0.8, 0.9]],
+            ],
+            dtype="float32",
+        )
 
-            [[0.4, 0.5, 0.6, 0.7],
-            [0.5, 0.6, 0.7, 0.8],
-            [0.6, 0.7, 0.8, 0.9]]],
-            dtype="float32")
-        
         out = self.eval_outputs_and_check_join([s])
         assert (out == want).all()
-        
 
     def test_join_matrix1_using_hstack(self):
         av = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype="float32")
@@ -1743,12 +1739,11 @@ class TestJoinAndSplit:
         b = as_tensor_variable(bv)
         s = column_stack(a, b)
         want = np.array(
-            [[0.1, 0.7],[0.2, 0.8],[0.3, 0.9]],
+            [[0.1, 0.7], [0.2, 0.8], [0.3, 0.9]],
             dtype="float32",
         )
         out = self.eval_outputs_and_check_join([s])
         assert (out == want).all()
-
 
     def test_join_matrixV(self):
         # variable join axis
@@ -4560,6 +4555,7 @@ def test_dstack_function(func):
 
     with pytest.raises(ValueError):
         func(a, a)
+
 
 def test_trace():
     x_val = np.ones((5, 4, 2))
