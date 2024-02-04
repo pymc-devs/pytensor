@@ -2797,6 +2797,7 @@ def vertical_stack(*args):
 
 
 
+
 def dstack(*args):
     r"""Stack arrays in sequence along third axis (depth wise)."""
 
