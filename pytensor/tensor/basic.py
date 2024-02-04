@@ -2796,6 +2796,7 @@ def vertical_stack(*args):
   return vstack(*args)
 
 
+
 def dstack(*args):
     r"""Stack arrays in sequence along third axis (depth wise)."""
 
@@ -2811,6 +2812,7 @@ def dstack(*args):
 
     return concatenate(_args, axis=2)
 
+
 def column_stack(*args):
     r"""Stack 1-D arrays as columns into a 2-D array."""
 
@@ -2825,6 +2827,7 @@ def column_stack(*args):
         _args.append(_arg)
 
     return concatenate(_args, axis=1)
+
 
 def is_flat(var, ndim=1):
     """
