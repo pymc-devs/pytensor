@@ -4338,6 +4338,8 @@ __all__ = [
     "is_flat",
     "vstack",
     "hstack",
+    "vertical_stack",
+    "horizontal_stack",
     "dstack",
     "column_stack",
     "get_vector_length",
