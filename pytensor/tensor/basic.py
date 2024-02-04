@@ -2758,14 +2758,8 @@ def concatenate(tensor_list, axis=0):
     return join(axis, *tensor_list)
 
 
-def horizontal_stack(*args):
+def hstack(*args):
     r"""Stack arrays in sequence horizontally (column wise)."""
-    # Note: 'horizontal_stack' and 'vertical_stack' do not behave exactly like
-    # Numpy's hstack and vstack functions. This is intended, because Numpy's
-    # functions have potentially confusing/incoherent behavior (try them on 1D
-    # arrays). If this is fixed in a future version of Numpy, it may be worth
-    # trying to get closer to Numpy's way of doing things. In the meantime,
-    # better keep different names to emphasize the implementation divergences.
 
     if len(args) < 2:
         raise ValueError("Too few arguments")
@@ -2773,14 +2767,12 @@ def horizontal_stack(*args):
     _args = []
     for arg in args:
         _arg = as_tensor_variable(arg)
-        if _arg.type.ndim != 2:
-            raise ValueError("All arguments must have two dimensions")
         _args.append(_arg)
 
     return concatenate(_args, axis=1)
 
 
-def vertical_stack(*args):
+def vstack(*args):
     r"""Stack arrays in sequence vertically (row wise)."""
 
     if len(args) < 2:
@@ -2789,12 +2781,39 @@ def vertical_stack(*args):
     _args = []
     for arg in args:
         _arg = as_tensor_variable(arg)
-        if _arg.type.ndim != 2:
-            raise ValueError("All arguments must have two dimensions")
         _args.append(_arg)
 
     return concatenate(_args, axis=0)
 
+def dstack(*args):
+    r"""Stack arrays in sequence along third axis (depth wise)."""
+
+    if len(args) < 2:
+        raise ValueError("Too few arguments")
+
+    _args = []
+    for arg in args:
+        _arg = as_tensor_variable(arg)
+        if _arg.type.ndim != 3:
+            raise ValueError("All arguments must have three dimensions")
+        _args.append(_arg)
+
+    return concatenate(_args, axis=2)
+
+def column_stack(*args):
+    r"""Stack 1-D arrays as columns into a 2-D array."""
+
+    if len(args) < 2:
+        raise ValueError("Too few arguments")
+
+    _args = []
+    for arg in args:
+        _arg = as_tensor_variable(arg)
+        if _arg.type.ndim < 2:
+            _arg = atleast_2d(_arg).transpose()
+        _args.append(_arg)
+
+    return concatenate(_args, axis=1)
 
 def is_flat(var, ndim=1):
     """
@@ -4298,8 +4317,10 @@ __all__ = [
     "tile",
     "flatten",
     "is_flat",
-    "vertical_stack",
-    "horizontal_stack",
+    "vstack",
+    "hstack",
+    "dstack",
+    "column_stack",
     "get_vector_length",
     "concatenate",
     "stack",
