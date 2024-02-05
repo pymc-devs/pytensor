@@ -6,7 +6,7 @@ from pytensor.compile import SharedVariable, shared_constructor
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.tensor import _get_vector_length
 from pytensor.tensor.type import TensorType
-from pytensor.tensor.variable import _tensor_py_operators
+from pytensor.tensor.variable import TensorVariable
 
 
 def __getattr__(name):
@@ -31,7 +31,7 @@ def load_shared_variable(val):
     return tensor_constructor(val)
 
 
-class TensorSharedVariable(_tensor_py_operators, SharedVariable):
+class TensorSharedVariable(SharedVariable, TensorVariable):
     def zero(self, borrow: bool = False):
         r"""Set the values of a shared variable to 0.
 

@@ -479,7 +479,7 @@ class SparseConstantSignature(tuple):
         return hash_from_sparse(d)
 
 
-class SparseConstant(TensorConstant, _sparse_py_operators):
+class SparseConstant(SparseVariable, TensorConstant):
     format = property(lambda self: self.type.format)
 
     def signature(self):
