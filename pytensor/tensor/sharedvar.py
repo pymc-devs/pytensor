@@ -65,7 +65,6 @@ def tensor_constructor(
     allow_downcast=None,
     borrow=False,
     shape=None,
-    target="cpu",
     broadcastable=None,
 ):
     r"""`SharedVariable` constructor for `TensorType`\s.
@@ -86,9 +85,6 @@ def tensor_constructor(
             DeprecationWarning,
         )
         shape = broadcastable
-
-    if target != "cpu":
-        raise TypeError("not for cpu")
 
     # If no shape is given, then the default is to assume that the value might
     # be resized in any dimension in the future.
@@ -111,7 +107,7 @@ def tensor_constructor(
 @shared_constructor.register(int)
 @shared_constructor.register(complex)
 def scalar_constructor(
-    value, name=None, strict=False, allow_downcast=None, borrow=False, target="cpu"
+    value, name=None, strict=False, allow_downcast=None, borrow=False
 ):
     """`SharedVariable` constructor for scalar values.
 
@@ -126,9 +122,6 @@ def scalar_constructor(
     borrow, as it is a hint to PyTensor that we can reuse it.
 
     """
-    if target != "cpu":
-        raise TypeError("not for cpu")
-
     try:
         dtype = value.dtype
     except AttributeError:
