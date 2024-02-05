@@ -10,7 +10,7 @@ from pytensor.misc.may_share_memory import may_share_memory
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.shape import Shape_i, specify_shape
-from pytensor.tensor.sharedvar import ScalarSharedVariable, TensorSharedVariable
+from pytensor.tensor.sharedvar import TensorSharedVariable
 from tests import unittest_tools as utt
 
 
@@ -679,10 +679,15 @@ def test_tensor_shared_zero():
 
 def test_scalar_shared_options():
     res = pytensor.shared(value=np.float32(0.0), name="lk", borrow=True)
-    assert isinstance(res, ScalarSharedVariable)
+    assert isinstance(res, TensorSharedVariable) and res.type.ndim == 0
     assert res.type.dtype == "float32"
     assert res.name == "lk"
     assert res.type.shape == ()
+
+
+def test_scalar_shared_deprecated():
+    with pytest.warns(FutureWarning, match=".*deprecated.*"):
+        pytensor.tensor.sharedvar.ScalarSharedVariable
 
 
 def test_get_vector_length():
