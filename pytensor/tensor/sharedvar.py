@@ -9,6 +9,18 @@ from pytensor.tensor.type import TensorType
 from pytensor.tensor.variable import _tensor_py_operators
 
 
+def __getattr__(name):
+    if name == "ScalarSharedVariable":
+        warnings.warn(
+            "The class `ScalarSharedVariable` has been deprecated. "
+            "Use `TensorSharedVariable` instead and check for `ndim==0`.",
+            FutureWarning,
+        )
+        return TensorSharedVariable
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 def load_shared_variable(val):
     """
     This function is only here to keep some pickles loading
@@ -94,10 +106,6 @@ def tensor_constructor(
     )
 
 
-class ScalarSharedVariable(TensorSharedVariable):
-    pass
-
-
 @shared_constructor.register(np.number)
 @shared_constructor.register(float)
 @shared_constructor.register(int)
@@ -132,7 +140,7 @@ def scalar_constructor(
 
     # Do not pass the dtype to asarray because we want this to fail if
     # strict is True and the types do not match.
-    rval = ScalarSharedVariable(
+    rval = TensorSharedVariable(
         type=tensor_type,
         value=np.array(value, copy=True),
         name=name,
