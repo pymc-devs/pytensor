@@ -3,11 +3,11 @@ import copy
 import scipy.sparse
 
 from pytensor.compile import shared_constructor
-from pytensor.sparse.basic import SparseTensorType, _sparse_py_operators
+from pytensor.sparse.basic import SparseTensorType, SparseVariable
 from pytensor.tensor.sharedvar import TensorSharedVariable
 
 
-class SparseTensorSharedVariable(TensorSharedVariable, _sparse_py_operators):
+class SparseTensorSharedVariable(TensorSharedVariable, SparseVariable):
     @property
     def format(self):
         return self.type.format
