@@ -1,3 +1,6 @@
+ci:
+  autofix_prs: false
+
 exclude: |
     (?x)^(
         versioneer\.py|
