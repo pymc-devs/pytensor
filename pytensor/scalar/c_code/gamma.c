@@ -218,6 +218,11 @@ DEVICE double GammaP (double n, double x)
 {                               /* --- regularized Gamma function P */
   if ((n <= 0) || (x < 0)) return NPY_NAN;  /* check the function arguments */
   if (x <=  0) return 0;        /* treat x = 0 as a special case */
+  if (isinf(n)) {
+    if (isinf(x)) return NPY_NAN;
+    return 0;
+  }
+  if (isinf(x)) return 1;
   if (x < n+1) return _series(n, x) *exp(n *log(x) -x -logGamma(n));
   return 1 -_cfrac(n, x) *exp(n *log(x) -x -logGamma(n));
 }  /* GammaP() */
@@ -228,6 +233,11 @@ DEVICE double GammaQ (double n, double x)
 {                               /* --- regularized Gamma function Q */
   if ((n <= 0) || (x < 0)) return NPY_NAN;  /* check the function arguments */
   if (x <=  0) return 1;        /* treat x = 0 as a special case */
+  if (isinf(n)) {
+    if (isinf(x)) return NPY_NAN;
+    return 1;
+  }
+  if (isinf(x)) return 0;
   if (x < n+1) return 1 -_series(n, x) *exp(n *log(x) -x -logGamma(n));
   return _cfrac(n, x) *exp(n *log(x) -x -logGamma(n));
 }  /* GammaQ() */
