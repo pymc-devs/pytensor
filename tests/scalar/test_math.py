@@ -41,6 +41,16 @@ def test_gammainc_nan_c():
     assert np.isnan(test_func(-1, -1))
 
 
+def test_gammainc_inf_c():
+    x1 = pt.dscalar()
+    x2 = pt.dscalar()
+    y = gammainc(x1, x2)
+    test_func = make_function(CLinker().accept(FunctionGraph([x1, x2], [y])))
+    assert np.isclose(test_func(np.inf, 1), sp.gammainc(np.inf, 1))
+    assert np.isclose(test_func(1, np.inf), sp.gammainc(1, np.inf))
+    assert np.isnan(test_func(np.inf, np.inf))
+
+
 def test_gammaincc_python():
     x1 = pt.dscalar()
     x2 = pt.dscalar()
@@ -57,6 +67,16 @@ def test_gammaincc_nan_c():
     assert np.isnan(test_func(-1, 1))
     assert np.isnan(test_func(1, -1))
     assert np.isnan(test_func(-1, -1))
+
+
+def test_gammaincc_inf_c():
+    x1 = pt.dscalar()
+    x2 = pt.dscalar()
+    y = gammaincc(x1, x2)
+    test_func = make_function(CLinker().accept(FunctionGraph([x1, x2], [y])))
+    assert np.isclose(test_func(np.inf, 1), sp.gammaincc(np.inf, 1))
+    assert np.isclose(test_func(1, np.inf), sp.gammaincc(1, np.inf))
+    assert np.isnan(test_func(np.inf, np.inf))
 
 
 def test_gammal_nan_c():

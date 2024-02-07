@@ -630,6 +630,13 @@ class Chi2SF(BinaryScalarOp):
 
     def __hash__(self):
         return hash(type(self))
+    
+    def c_code_cache_version(self):
+        v = super().c_code_cache_version()
+        if v:
+            return (2, *v)
+        else:
+            return v
 
 
 chi2sf = Chi2SF(upgrade_to_float64, name="chi2sf")
@@ -676,6 +683,13 @@ class GammaInc(BinaryScalarOp):
 
     def __hash__(self):
         return hash(type(self))
+    
+    def c_code_cache_version(self):
+        v = super().c_code_cache_version()
+        if v:
+            return (2, *v)
+        else:
+            return v
 
 
 gammainc = GammaInc(upgrade_to_float, name="gammainc")
@@ -722,6 +736,13 @@ class GammaIncC(BinaryScalarOp):
 
     def __hash__(self):
         return hash(type(self))
+    
+    def c_code_cache_version(self):
+        v = super().c_code_cache_version()
+        if v:
+            return (2, *v)
+        else:
+            return v
 
 
 gammaincc = GammaIncC(upgrade_to_float, name="gammaincc")
