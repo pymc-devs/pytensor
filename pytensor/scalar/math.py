@@ -630,7 +630,7 @@ class Chi2SF(BinaryScalarOp):
 
     def __hash__(self):
         return hash(type(self))
-    
+
     def c_code_cache_version(self):
         v = super().c_code_cache_version()
         if v:
@@ -683,7 +683,7 @@ class GammaInc(BinaryScalarOp):
 
     def __hash__(self):
         return hash(type(self))
-    
+
     def c_code_cache_version(self):
         v = super().c_code_cache_version()
         if v:
@@ -736,7 +736,7 @@ class GammaIncC(BinaryScalarOp):
 
     def __hash__(self):
         return hash(type(self))
-    
+
     def c_code_cache_version(self):
         v = super().c_code_cache_version()
         if v:
