@@ -1377,7 +1377,7 @@ class RavelMultiIndex(Op):
 
         return Apply(
             self,
-            multi_index + [dims],
+            [*multi_index, dims],
             [TensorType(dtype="int64", shape=(None,) * multi_index[0].type.ndim)()],
         )
 
@@ -1427,7 +1427,7 @@ def ravel_multi_index(multi_index, dims, mode="raise", order="C"):
     """
     if not isinstance(multi_index, (tuple, list)):
         raise TypeError("multi_index must be a tuple or a list.")
-    args = tuple(multi_index) + (dims,)
+    args = (*multi_index, dims)
     return RavelMultiIndex(mode=mode, order=order)(*args)
 
 

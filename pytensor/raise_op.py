@@ -87,7 +87,7 @@ class CheckAndRaise(COp):
 
         return Apply(
             self,
-            [value] + conds,
+            [value, *conds],
             [value.type()],
         )
 

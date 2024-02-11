@@ -193,7 +193,7 @@ def local_blockwise_alloc(fgraph, node):
             alloc(
                 new_out,
                 *batch_shape,
-                *tuple(new_out.shape)[batch_ndim - missing_ndim :],
+                *new_out.shape[batch_ndim - missing_ndim :],
             )
             for new_out in new_outs
         ]

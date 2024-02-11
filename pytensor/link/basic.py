@@ -106,7 +106,7 @@ class Container:
                 self.storage[0] = self.type.filter(value, **kwargs)
 
         except Exception as e:
-            e.args = e.args + (f'Container name "{self.name}"',)
+            e.args = (*e.args, f'Container name "{self.name}"')
             raise
 
     data = property(__get__, __set__)

@@ -892,9 +892,9 @@ def _get_preallocated_maps(
 
         # Use the same step on all dimensions before the last check_ndim.
         if all(s == 1 for s in out_shape[:-check_ndim]):
-            step_signs_list = [(1,)] + step_signs_list
+            step_signs_list = [(1,), *step_signs_list]
         else:
-            step_signs_list = [(-1, 1)] + step_signs_list
+            step_signs_list = [(-1, 1), *step_signs_list]
 
         for step_signs in itertools_product(*step_signs_list):
             for step_size in (1, 2):

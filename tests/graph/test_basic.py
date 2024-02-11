@@ -683,7 +683,7 @@ def test_NominalVariable():
     assert not nv4.equals(nv5)
     assert hash(nv4) != hash(nv5)
 
-    assert repr(nv5) == f"NominalVariable(2, {repr(type3)})"
+    assert repr(nv5) == f"NominalVariable(2, {type3!r})"
 
     assert nv5.signature() == (type3, 2)
 

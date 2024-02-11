@@ -640,7 +640,7 @@ def local_mul_switch_sink(fgraph, node):
                     == 0.0
                 ):
                     listmul = node.inputs[:idx] + node.inputs[idx + 1 :]
-                    fmul = mul(*(listmul + [switch_node.inputs[2]]))
+                    fmul = mul(*([*listmul, switch_node.inputs[2]]))
 
                     # Copy over stacktrace for elementwise multiplication op
                     # from previous elementwise multiplication op.
@@ -668,7 +668,7 @@ def local_mul_switch_sink(fgraph, node):
                     == 0.0
                 ):
                     listmul = node.inputs[:idx] + node.inputs[idx + 1 :]
-                    fmul = mul(*(listmul + [switch_node.inputs[1]]))
+                    fmul = mul(*([*listmul, switch_node.inputs[1]]))
                     # Copy over stacktrace for elementwise multiplication op
                     # from previous elementwise multiplication op.
                     # An error in the multiplication (e.g. errors due to
@@ -1642,19 +1642,17 @@ def local_op_of_op(fgraph, node):
                 return [combined(node_inps.owner.inputs[0])]
 
 
-ALL_REDUCE = (
-    [
-        CAReduce,
-        All,
-        Any,
-        Sum,
-        Prod,
-        ProdWithoutZeros,
-    ]
-    + CAReduce.__subclasses__()
-    + FixedOpCAReduce.__subclasses__()
-    + NonZeroDimsCAReduce.__subclasses__()
-)
+ALL_REDUCE = [
+    CAReduce,
+    All,
+    Any,
+    Sum,
+    Prod,
+    ProdWithoutZeros,
+    *CAReduce.__subclasses__(),
+    *FixedOpCAReduce.__subclasses__(),
+    *NonZeroDimsCAReduce.__subclasses__(),
+]
 
 
 @register_canonicalize
@@ -1697,8 +1695,9 @@ def local_reduce_join(fgraph, node):
             inp = inp.owner
             if not inp:
                 return
-            if not isinstance(inp.op, DimShuffle) or inp.op.new_order != ("x",) + tuple(
-                range(inp.inputs[0].ndim)
+            if not isinstance(inp.op, DimShuffle) or inp.op.new_order != (
+                "x",
+                *range(inp.inputs[0].ndim),
             ):
                 return
             new_inp.append(inp.inputs[0])
@@ -2175,7 +2174,7 @@ def local_mul_specialize(fgraph, node):
             if new_inputs:
                 if len(new_inputs) == 1:
                     if has_neg:
-                        if new_inputs[0].dtype in (uint_dtypes + ["bool"]):
+                        if new_inputs[0].dtype in ([*uint_dtypes, "bool"]):
                             return
                         else:
                             rval = -new_inputs[0]
@@ -2189,7 +2188,7 @@ def local_mul_specialize(fgraph, node):
                         # Don't add an extra neg node as we can't
                         # fully replace this mul by a neg.
                         m1 = np.asarray(-1, dtype=node.outputs[0].dtype)
-                        new_inputs = [m1] + new_inputs
+                        new_inputs = [m1, *new_inputs]
                     rval = mul(*new_inputs)
 
                 return [alloc_like(rval, node.outputs[0], fgraph)]
@@ -3355,7 +3354,7 @@ def compute_mul(tree):
         )
     elif isinstance(inputs, list):
         # Recurse through inputs.
-        rval = mul(*list(map(compute_mul, inputs)))
+        rval = mul(*map(compute_mul, inputs))
     else:
         rval = inputs
     if neg:

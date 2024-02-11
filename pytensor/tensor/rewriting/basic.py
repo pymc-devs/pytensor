@@ -497,7 +497,7 @@ def local_alloc_sink_dimshuffle(fgraph, node):
         ):
             inner = inp
         else:
-            inner = op(*([inp] + new_output_shape))
+            inner = op(*([inp, *new_output_shape]))
         dimshuffle_new_order = ["x"] * num_dims_with_size_1_added_to_left + list(
             range(len(new_output_shape))
         )

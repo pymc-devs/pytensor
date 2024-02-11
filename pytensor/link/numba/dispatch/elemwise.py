@@ -447,7 +447,7 @@ def jit_compile_reducer(
 def create_axis_apply_fn(fn, axis, ndim, dtype):
     axis = normalize_axis_index(axis, ndim)
 
-    reaxis_first = tuple(i for i in range(ndim) if i != axis) + (axis,)
+    reaxis_first = (*(i for i in range(ndim) if i != axis), axis)
 
     @numba_basic.numba_njit(boundscheck=False)
     def axis_apply_fn(x):
@@ -1042,7 +1042,7 @@ def numba_funcify_MaxAndArgmax(op, node, **kwargs):
 
             # Numpy.prod returns 1.0 when arg is empty, so we cast it to int64
             # Otherwise reshape would complain citing float arg
-            new_shape = kept_shape + (reduced_size,)
+            new_shape = (*kept_shape, reduced_size)
             reshaped_x = transposed_x.reshape(new_shape)
 
             max_idx_res = argmax_axis(reshaped_x)

@@ -137,7 +137,7 @@ except ImportError as e:
             "PyTensor flag blas__ldflags is empty. "
             "Falling back on slower implementations for "
             "dot(matrix, vector), dot(vector, matrix) and "
-            f"dot(vector, vector) ({str(e)})"
+            f"dot(vector, vector) ({e!s})"
         )
 
 
@@ -1111,7 +1111,7 @@ class Gemm(GemmRelated):
     def c_code_cache_version(self):
         gv = self.build_gemm_version()
         if gv:
-            return (7,) + gv
+            return (7, *gv)
         else:
             return gv
 
@@ -1478,7 +1478,7 @@ class Dot22(GemmRelated):
         except ValueError as e:
             # The error raised by numpy has no shape information, we mean to
             # add that
-            e.args = e.args + (x.shape, y.shape)
+            e.args = (*e.args, x.shape, y.shape)
             raise
 
     def infer_shape(self, fgraph, node, input_shapes):
@@ -1530,7 +1530,7 @@ class Dot22(GemmRelated):
     def c_code_cache_version(self):
         gv = self.build_gemm_version()
         if gv:
-            return (2,) + gv
+            return (2, *gv)
         else:
             return gv
 
@@ -1581,7 +1581,7 @@ class Dot22Scalar(GemmRelated):
         except ValueError as e:
             # The error raised by numpy has no shape information, we
             # mean to add that
-            e.args = e.args + (x.shape, y.shape)
+            e.args = (*e.args, x.shape, y.shape)
             raise
 
     def infer_shape(self, fgraph, node, input_shapes):
@@ -1628,7 +1628,7 @@ class Dot22Scalar(GemmRelated):
     def c_code_cache_version(self):
         gv = self.build_gemm_version()
         if gv:
-            return (2,) + gv
+            return (2, *gv)
         else:
             return gv
 

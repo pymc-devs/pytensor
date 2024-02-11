@@ -728,7 +728,7 @@ class NominalVariable(AtomicVariable[_TypeType]):
         return hash((type(self), self.id, self.type))
 
     def __repr__(self):
-        return f"{type(self).__name__}({repr(self.id)}, {repr(self.type)})"
+        return f"{type(self).__name__}({self.id!r}, {self.type!r})"
 
     def signature(self) -> tuple[_TypeType, _IdType]:
         return (self.type, self.id)
@@ -774,7 +774,7 @@ class Constant(AtomicVariable[_TypeType]):
         data_str = repr(self.data)
         if len(data_str) > 20:
             data_str = data_str[:10].strip() + " ... " + data_str[-10:].strip()
-        return f"{type(self).__name__}({repr(self.type)}, data={data_str})"
+        return f"{type(self).__name__}({self.type!r}, data={data_str})"
 
     def clone(self, **kwargs):
         return self

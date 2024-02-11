@@ -2501,7 +2501,7 @@ class TestLocalMergeSwitchSameCond:
         u, v = matrices("uv")
         s3 = pt.switch(c, u, v)
         for op in (add, mul):
-            g = rewrite(FunctionGraph(mats + [u, v], [op(s1, s2, s3)]))
+            g = rewrite(FunctionGraph([*mats, u, v], [op(s1, s2, s3)]))
             assert debugprint(g, file="str").count("Switch") == 1
 
 
@@ -3274,7 +3274,7 @@ class TestLocalReduce:
             order = f.maker.fgraph.toposort()
             assert 1 == sum(isinstance(node.op, CAReduce) for node in order)
 
-            node = [node for node in order if isinstance(node.op, CAReduce)][0]
+            node = next(node for node in order if isinstance(node.op, CAReduce))
 
             op = node.op
             assert isinstance(op, CAReduce)

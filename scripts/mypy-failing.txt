@@ -1,5 +1,4 @@
 pytensor/compile/builders.py
-pytensor/compile/compilelock.py
 pytensor/compile/debugmode.py
 pytensor/compile/function/pfunc.py
 pytensor/compile/function/types.py

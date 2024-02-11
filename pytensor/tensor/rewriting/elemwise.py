@@ -1,3 +1,4 @@
+import itertools
 import sys
 from collections import defaultdict, deque
 from collections.abc import Generator
@@ -144,12 +145,12 @@ class InplaceElemwiseOptimizer(GraphRewriter):
         else:
             update_outs = []
 
-        protected_inputs = [
-            f.protected
-            for f in fgraph._features
-            if isinstance(f, pytensor.compile.function.types.Supervisor)
-        ]
-        protected_inputs = sum(protected_inputs, [])  # flatten the list
+        Supervisor = pytensor.compile.function.types.Supervisor
+        protected_inputs = list(
+            itertools.chain.from_iterable(
+                f.protected for f in fgraph._features if isinstance(f, Supervisor)
+            )
+        )
         protected_inputs.extend(fgraph.outputs)
         for node in list(io_toposort(fgraph.inputs, fgraph.outputs)):
             op = node.op
@@ -1188,7 +1189,7 @@ def local_careduce_fusion(fgraph, node):
         scalar_fused_output = ps.cast(scalar_fused_output, car_acc_dtype)
 
     fused_scalar_op = ps.Composite(
-        inputs=[carried_car_input] + scalar_elm_inputs, outputs=[scalar_fused_output]
+        inputs=[carried_car_input, *scalar_elm_inputs], outputs=[scalar_fused_output]
     )
 
     # The fused `Op` needs to look and behave like a `BinaryScalarOp`

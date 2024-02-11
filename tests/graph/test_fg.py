@@ -1,3 +1,4 @@
+import itertools
 import pickle
 
 import numpy as np
@@ -574,7 +575,8 @@ class TestFunctionGraph:
         assert fg.outputs == [op1_out]
         assert op3_out not in fg.clients
         assert not any(
-            op3_out.owner in clients for clients in sum(fg.clients.values(), [])
+            op3_out.owner in clients
+            for clients in itertools.chain.from_iterable(fg.clients.values())
         )
 
         # Remove an input
@@ -585,7 +587,8 @@ class TestFunctionGraph:
         assert fg.inputs == [var2]
         assert fg.outputs == []
         assert not any(
-            op1_out.owner in clients for clients in sum(fg.clients.values(), [])
+            op1_out.owner in clients
+            for clients in itertools.chain.from_iterable(fg.clients.values())
         )
 
     def test_remove_duplicates(self):
@@ -622,10 +625,12 @@ class TestFunctionGraph:
         assert not fg.apply_nodes
         assert op1_out not in fg.clients
         assert not any(
-            op1_out.owner in clients for clients in sum(fg.clients.values(), [])
+            op1_out.owner in clients
+            for clients in itertools.chain.from_iterable(fg.clients.values())
         )
         assert not any(
-            op3_out.owner in clients for clients in sum(fg.clients.values(), [])
+            op3_out.owner in clients
+            for clients in itertools.chain.from_iterable(fg.clients.values())
         )
 
     def test_remove_node_multi_out(self):

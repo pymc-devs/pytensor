@@ -98,7 +98,7 @@ def get_conv_output_shape(
             )
             for i in range(len(subsample))
         )
-    return (bsize, nkern) + out_shp
+    return (bsize, nkern, *out_shp)
 
 
 # filter dilation set by default to 1
@@ -236,7 +236,7 @@ def get_conv_gradweights_shape(
     if unshared:
         return (nchan,) + top_shape[2:] + (nkern,) + out_shp
     else:
-        return (nchan, nkern) + out_shp
+        return (nchan, nkern, *out_shp)
 
 
 def get_conv_gradweights_shape_1axis(
@@ -363,7 +363,7 @@ def get_conv_gradinputs_shape(
             )
             for i in range(len(subsample))
         )
-    return (bsize, nkern) + out_shp
+    return (bsize, nkern, *out_shp)
 
 
 def get_conv_gradinputs_shape_1axis(
@@ -1883,12 +1883,12 @@ def frac_bilinear_upsampling(input, frac_ratio):
     pad_kern = pt.concatenate(
         (
             pt.zeros(
-                tuple(kern.shape[:2]) + (pad[0], kern.shape[-1]),
+                (*kern.shape[:2], pad[0], kern.shape[-1]),
                 dtype=config.floatX,
             ),
             kern,
             pt.zeros(
-                tuple(kern.shape[:2]) + (double_pad[0] - pad[0], kern.shape[-1]),
+                (*kern.shape[:2], double_pad[0] - pad[0], kern.shape[-1]),
                 dtype=config.floatX,
             ),
         ),
@@ -1896,10 +1896,10 @@ def frac_bilinear_upsampling(input, frac_ratio):
     )
     pad_kern = pt.concatenate(
         (
-            pt.zeros(tuple(pad_kern.shape[:3]) + (pad[1],), dtype=config.floatX),
+            pt.zeros((*pad_kern.shape[:3], pad[1]), dtype=config.floatX),
             pad_kern,
             pt.zeros(
-                tuple(pad_kern.shape[:3]) + (double_pad[1] - pad[1],),
+                (*pad_kern.shape[:3], double_pad[1] - pad[1]),
                 dtype=config.floatX,
             ),
         ),
@@ -2517,18 +2517,24 @@ class AbstractConv(BaseAbstractConv):
         if any(p != (0, 0) for p in pad):
             mode = "valid"
             new_img = np.zeros(
-                (img.shape[0], img.shape[1])
-                + tuple(
-                    img.shape[i + 2] + pad[i][0] + pad[i][1]
-                    for i in range(self.convdim)
+                (
+                    img.shape[0],
+                    img.shape[1],
+                    *(
+                        img.shape[i + 2] + pad[i][0] + pad[i][1]
+                        for i in range(self.convdim)
+                    ),
                 ),
                 dtype=img.dtype,
             )
             new_img[
-                (slice(None), slice(None))
-                + tuple(
-                    slice(pad[i][0], img.shape[i + 2] + pad[i][0])
-                    for i in range(self.convdim)
+                (
+                    slice(None),
+                    slice(None),
+                    *(
+                        slice(pad[i][0], img.shape[i + 2] + pad[i][0])
+                        for i in range(self.convdim)
+                    ),
                 )
             ] = img
             img = new_img
@@ -2576,12 +2582,10 @@ class AbstractConv(BaseAbstractConv):
             # from (nFilters, out_rows, out_cols, nChannels, kH, kW)
             # to (nFilters, nChannels, out_rows, out_cols, kH, kW)
             axes_order = (
-                (
-                    0,
-                    1 + self.convdim,
-                )
-                + tuple(range(1, 1 + self.convdim))
-                + tuple(range(2 + self.convdim, kern.ndim))
+                0,
+                1 + self.convdim,
+                *range(1, 1 + self.convdim),
+                *range(2 + self.convdim, kern.ndim),
             )
             kern = kern.transpose(axes_order)
 
@@ -2594,8 +2598,11 @@ class AbstractConv(BaseAbstractConv):
             unshared=self.unshared,
         )
         conv_out = conv_out[
-            (slice(None), slice(None))
-            + tuple(slice(None, None, self.subsample[i]) for i in range(self.convdim))
+            (
+                slice(None),
+                slice(None),
+                *(slice(None, None, self.subsample[i]) for i in range(self.convdim)),
+            )
         ]
         o[0] = node.outputs[0].type.filter(conv_out)
 
@@ -2848,36 +2855,48 @@ class AbstractConv_gradWeights(BaseAbstractConv):
 
         if any(p != (0, 0) for p in pad):
             new_img = np.zeros(
-                (img.shape[0], img.shape[1])
-                + tuple(
-                    img.shape[i + 2] + pad[i][0] + pad[i][1]
-                    for i in range(self.convdim)
+                (
+                    img.shape[0],
+                    img.shape[1],
+                    *(
+                        img.shape[i + 2] + pad[i][0] + pad[i][1]
+                        for i in range(self.convdim)
+                    ),
                 ),
                 dtype=img.dtype,
             )
             new_img[
-                (slice(None), slice(None))
-                + tuple(
-                    slice(pad[i][0], img.shape[i + 2] + pad[i][0])
-                    for i in range(self.convdim)
+                (
+                    slice(None),
+                    slice(None),
+                    *(
+                        slice(pad[i][0], img.shape[i + 2] + pad[i][0])
+                        for i in range(self.convdim)
+                    ),
                 )
             ] = img
             img = new_img
 
         if any(self.subsample[i] > 1 for i in range(self.convdim)):
-            new_shape = (topgrad.shape[0], topgrad.shape[1]) + tuple(
-                img.shape[i + 2] - dil_shape[i] + 1 for i in range(self.convdim)
+            new_shape = (
+                topgrad.shape[0],
+                topgrad.shape[1],
+                *(img.shape[i + 2] - dil_shape[i] + 1 for i in range(self.convdim)),
             )
             new_topgrad = np.zeros((new_shape), dtype=topgrad.dtype)
             new_topgrad[
-                (slice(None), slice(None))
-                + tuple(
-                    slice(None, None, self.subsample[i]) for i in range(self.convdim)
+                (
+                    slice(None),
+                    slice(None),
+                    *(
+                        slice(None, None, self.subsample[i])
+                        for i in range(self.convdim)
+                    ),
                 )
             ] = topgrad
             topgrad = new_topgrad
 
-        axes_order = (1, 0) + tuple(range(2, self.convdim + 2))
+        axes_order = (1, 0, *range(2, self.convdim + 2))
         topgrad = topgrad.transpose(axes_order)
         img = img.transpose(axes_order)
 
@@ -2885,7 +2904,7 @@ class AbstractConv_gradWeights(BaseAbstractConv):
             mshp0 = mat.shape[0] // self.num_groups
             mshp1 = mat.shape[1] * self.num_groups
             mat = mat.reshape((self.num_groups, mshp0) + mat.shape[1:])
-            mat = mat.transpose((1, 0, 2) + tuple(range(3, 3 + self.convdim)))
+            mat = mat.transpose((1, 0, 2, *range(3, 3 + self.convdim)))
             mat = mat.reshape((mshp0, mshp1) + mat.shape[-self.convdim :])
             return mat
 
@@ -2917,10 +2936,10 @@ class AbstractConv_gradWeights(BaseAbstractConv):
             # from (nChannels, nFilters, out_rows, out_cols, kH, kW)
             # to (nFilters, out_rows, out_cols, nChannels, kH, kW)
             kern_axes = (
-                (1,)
-                + tuple(range(2, self.convdim + 2))
-                + (0,)
-                + tuple(range(self.convdim + 2, kern.ndim))
+                1,
+                *range(2, self.convdim + 2),
+                0,
+                *range(self.convdim + 2, kern.ndim),
             )
         else:
             flip_topgrad = flip_kern = (slice(None), slice(None)) + (
@@ -2928,7 +2947,7 @@ class AbstractConv_gradWeights(BaseAbstractConv):
             ) * self.convdim
             topgrad = topgrad[flip_topgrad]
             kern = self.conv(img, topgrad, mode="valid", num_groups=self.num_groups)
-            kern_axes = (1, 0) + tuple(range(2, self.convdim + 2))
+            kern_axes = (1, 0, *range(2, self.convdim + 2))
 
         kern = kern.transpose(kern_axes)
 
@@ -3045,7 +3064,7 @@ class AbstractConv2d_gradWeights(AbstractConv_gradWeights):
         d_top = top.type.filter_variable(d_top)
 
         d_height_width = (pytensor.gradient.DisconnectedType()(),)
-        return (d_bottom, d_top) + d_height_width
+        return (d_bottom, d_top, *d_height_width)
 
 
 class AbstractConv3d_gradWeights(AbstractConv_gradWeights):
@@ -3104,7 +3123,7 @@ class AbstractConv3d_gradWeights(AbstractConv_gradWeights):
         d_top = top.type.filter_variable(d_top)
 
         d_depth_height_width = (pytensor.gradient.DisconnectedType()(),)
-        return (d_bottom, d_top) + d_depth_height_width
+        return (d_bottom, d_top, *d_depth_height_width)
 
 
 class AbstractConv_gradInputs(BaseAbstractConv):
@@ -3223,15 +3242,23 @@ class AbstractConv_gradInputs(BaseAbstractConv):
                 )
             )
         if any(self.subsample[i] > 1 for i in range(self.convdim)):
-            new_shape = (topgrad.shape[0], topgrad.shape[1]) + tuple(
-                shape[i] + pad[i][0] + pad[i][1] - dil_kernshp[i] + 1
-                for i in range(self.convdim)
+            new_shape = (
+                topgrad.shape[0],
+                topgrad.shape[1],
+                *(
+                    shape[i] + pad[i][0] + pad[i][1] - dil_kernshp[i] + 1
+                    for i in range(self.convdim)
+                ),
             )
             new_topgrad = np.zeros((new_shape), dtype=topgrad.dtype)
             new_topgrad[
-                (slice(None), slice(None))
-                + tuple(
-                    slice(None, None, self.subsample[i]) for i in range(self.convdim)
+                (
+                    slice(None),
+                    slice(None),
+                    *(
+                        slice(None, None, self.subsample[i])
+                        for i in range(self.convdim)
+                    ),
                 )
             ] = topgrad
             topgrad = new_topgrad
@@ -3259,9 +3286,11 @@ class AbstractConv_gradInputs(BaseAbstractConv):
             if self.unshared:
                 # for 2D -> (1, 2, 3, 0, 4, 5, 6)
                 mat = mat.transpose(
-                    tuple(range(1, 2 + self.convdim))
-                    + (0,)
-                    + tuple(range(2 + self.convdim, mat.ndim))
+                    (
+                        *range(1, 2 + self.convdim),
+                        0,
+                        *range(2 + self.convdim, mat.ndim),
+                    )
                 )
                 mat = mat.reshape(
                     (mshp0,)
@@ -3270,7 +3299,7 @@ class AbstractConv_gradInputs(BaseAbstractConv):
                     + mat.shape[-self.convdim :]
                 )
             else:
-                mat = mat.transpose((1, 0, 2) + tuple(range(3, 3 + self.convdim)))
+                mat = mat.transpose((1, 0, 2, *range(3, 3 + self.convdim)))
                 mat = mat.reshape((mshp0, mshp1) + mat.shape[-self.convdim :])
             return mat
 
@@ -3280,12 +3309,10 @@ class AbstractConv_gradInputs(BaseAbstractConv):
             # from (nFilters, out_rows, out_cols, nChannels, kH, kW)
             # to (nChannels, nFilters, out_rows, out_cols, kH, kW)
             axes_order = (
-                (
-                    1 + self.convdim,
-                    0,
-                )
-                + tuple(range(1, 1 + self.convdim))
-                + tuple(range(2 + self.convdim, kern.ndim))
+                1 + self.convdim,
+                0,
+                *range(1, 1 + self.convdim),
+                *range(2 + self.convdim, kern.ndim),
             )
             kern = kern.transpose(axes_order)
             if not self.filter_flip:
@@ -3303,7 +3330,7 @@ class AbstractConv_gradInputs(BaseAbstractConv):
                 direction="backprop inputs",
             )
         else:
-            axes_order = (1, 0) + tuple(range(2, 2 + self.convdim))
+            axes_order = (1, 0, *range(2, 2 + self.convdim))
             kern = kern.transpose(axes_order)
             flip_filters = (slice(None), slice(None)) + (
                 slice(None, None, -1),
@@ -3322,10 +3349,13 @@ class AbstractConv_gradInputs(BaseAbstractConv):
 
         if any(p != (0, 0) for p in pad):
             img = img[
-                (slice(None), slice(None))
-                + tuple(
-                    slice(pad[i][0], img.shape[i + 2] - pad[i][1])
-                    for i in range(self.convdim)
+                (
+                    slice(None),
+                    slice(None),
+                    *(
+                        slice(pad[i][0], img.shape[i + 2] - pad[i][1])
+                        for i in range(self.convdim)
+                    ),
                 )
             ]
         o[0] = node.outputs[0].type.filter(img)
@@ -3416,7 +3446,7 @@ class AbstractConv2d_gradInputs(AbstractConv_gradInputs):
         d_top = top.type.filter_variable(d_top)
 
         d_height_width = (pytensor.gradient.DisconnectedType()(),)
-        return (d_weights, d_top) + d_height_width
+        return (d_weights, d_top, *d_height_width)
 
 
 class AbstractConv3d_gradInputs(AbstractConv_gradInputs):
@@ -3475,7 +3505,7 @@ class AbstractConv3d_gradInputs(AbstractConv_gradInputs):
         d_top = top.type.filter_variable(d_top)
 
         d_depth_height_width = (pytensor.gradient.DisconnectedType()(),)
-        return (d_weights, d_top) + d_depth_height_width
+        return (d_weights, d_top, *d_depth_height_width)
 
 
 def conv2d(

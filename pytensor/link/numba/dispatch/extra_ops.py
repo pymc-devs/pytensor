@@ -44,7 +44,7 @@ def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
         if axis < 0 or axis >= ndim:
             raise ValueError(f"Invalid axis {axis} for array with ndim {ndim}")
 
-        reaxis_first = (axis,) + tuple(i for i in range(ndim) if i != axis)
+        reaxis_first = (axis, *(i for i in range(ndim) if i != axis))
         reaxis_first_inv = tuple(np.argsort(reaxis_first))
 
     if mode == "add":

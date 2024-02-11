@@ -1,7 +1,8 @@
+from functools import partial
+
 import numpy as np
 import numpy.linalg
 import pytest
-from numpy import inf
 from numpy.testing import assert_array_almost_equal
 
 import pytensor
@@ -34,6 +35,7 @@ from pytensor.tensor.type import (
     lscalar,
     matrix,
     scalar,
+    tensor,
     tensor3,
     tensor4,
     vector,
@@ -150,29 +152,52 @@ def test_qr_modes():
 
 class TestSvd(utt.InferShapeTester):
     op_class = SVD
-    dtype = "float32"
 
     def setup_method(self):
         super().setup_method()
         self.rng = np.random.default_rng(utt.fetch_seed())
-        self.A = matrix(dtype=self.dtype)
+        self.A = matrix(dtype=config.floatX)
         self.op = svd
 
-    def test_svd(self):
-        A = matrix("A", dtype=self.dtype)
-        U, S, VT = svd(A)
-        fn = function([A], [U, S, VT])
-        a = self.rng.random((4, 4)).astype(self.dtype)
-        n_u, n_s, n_vt = np.linalg.svd(a)
-        t_u, t_s, t_vt = fn(a)
+    @pytest.mark.parametrize(
+        "core_shape", [(3, 3), (4, 3), (3, 4)], ids=["square", "tall", "wide"]
+    )
+    @pytest.mark.parametrize(
+        "full_matrix", [True, False], ids=["full=True", "full=False"]
+    )
+    @pytest.mark.parametrize(
+        "compute_uv", [True, False], ids=["compute_uv=True", "compute_uv=False"]
+    )
+    @pytest.mark.parametrize(
+        "batched", [True, False], ids=["batched=True", "batched=False"]
+    )
+    @pytest.mark.parametrize(
+        "test_imag", [True, False], ids=["test_imag=True", "test_imag=False"]
+    )
+    def test_svd(self, core_shape, full_matrix, compute_uv, batched, test_imag):
+        dtype = config.floatX
+        if test_imag:
+            dtype = "complex128" if dtype.endswith("64") else "complex64"
+        shape = core_shape if not batched else (10, *core_shape)
+        A = tensor("A", shape=shape, dtype=dtype)
+        a = self.rng.random(shape).astype(dtype)
 
-        assert _allclose(n_u, t_u)
-        assert _allclose(n_s, t_s)
-        assert _allclose(n_vt, t_vt)
+        outputs = svd(A, compute_uv=compute_uv, full_matrices=full_matrix)
+        outputs = outputs if isinstance(outputs, list) else [outputs]
+        fn = function(inputs=[A], outputs=outputs)
 
-        fn = function([A], svd(A, compute_uv=False))
-        t_s = fn(a)
-        assert _allclose(n_s, t_s)
+        np_fn = np.vectorize(
+            partial(np.linalg.svd, compute_uv=compute_uv, full_matrices=full_matrix),
+            signature=outputs[0].owner.op.core_op.gufunc_signature,
+        )
+
+        np_outputs = np_fn(a)
+        pt_outputs = fn(a)
+
+        np_outputs = np_outputs if isinstance(np_outputs, tuple) else [np_outputs]
+
+        for np_val, pt_val in zip(np_outputs, pt_outputs):
+            assert _allclose(np_val, pt_val)
 
     def test_svd_infer_shape(self):
         self.validate_shape((4, 4), full_matrices=True, compute_uv=True)
@@ -183,7 +208,7 @@ class TestSvd(utt.InferShapeTester):
 
     def validate_shape(self, shape, compute_uv=True, full_matrices=True):
         A = self.A
-        A_v = self.rng.random(shape).astype(self.dtype)
+        A_v = self.rng.random(shape).astype(config.floatX)
         outputs = self.op(A, full_matrices=full_matrices, compute_uv=compute_uv)
         if not compute_uv:
             outputs = [outputs]
@@ -437,44 +462,82 @@ class TestMatrixPower:
             f(a)
 
 
-class TestNormTests:
+class TestNorm:
     def test_wrong_type_of_ord_for_vector(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Invalid norm order 'fro' for vectors"):
             norm([2, 1], "fro")
 
     def test_wrong_type_of_ord_for_matrix(self):
-        with pytest.raises(ValueError):
-            norm([[2, 1], [3, 4]], 0)
+        ord = 0
+        with pytest.raises(ValueError, match=f"Invalid norm order for matrices: {ord}"):
+            norm([[2, 1], [3, 4]], ord)
 
     def test_non_tensorial_input(self):
-        with pytest.raises(ValueError):
-            norm(3, None)
+        with pytest.raises(
+            ValueError,
+            match="Cannot compute norm when core_dims < 1 or core_dims > 3, found: core_dims = 0",
+        ):
+            norm(3, ord=2)
 
-    def test_tensor_input(self):
-        with pytest.raises(NotImplementedError):
-            norm(np.random.random((3, 4, 5)), None)
+    def test_invalid_axis_input(self):
+        axis = scalar("i", dtype="int")
+        with pytest.raises(
+            TypeError, match="'axis' must be None, an integer, or a tuple of integers"
+        ):
+            norm([[1, 2], [3, 4]], axis=axis)
 
-    def test_numpy_compare(self):
+    @pytest.mark.parametrize(
+        "ord",
+        [None, np.inf, -np.inf, 1, -1, 2, -2],
+        ids=["None", "inf", "-inf", "1", "-1", "2", "-2"],
+    )
+    @pytest.mark.parametrize("core_dims", [(4,), (4, 3)], ids=["vector", "matrix"])
+    @pytest.mark.parametrize("batch_dims", [(), (2,)], ids=["no_batch", "batch"])
+    @pytest.mark.parametrize("test_imag", [True, False], ids=["complex", "real"])
+    @pytest.mark.parametrize(
+        "keepdims", [True, False], ids=["keep_dims=True", "keep_dims=False"]
+    )
+    def test_numpy_compare(
+        self,
+        ord: float,
+        core_dims: tuple[int, ...],
+        batch_dims: tuple[int, ...],
+        test_imag: bool,
+        keepdims: bool,
+        axis=None,
+    ):
+        is_matrix = len(core_dims) == 2
+        has_batch = len(batch_dims) > 0
+        if ord in [np.inf, -np.inf] and not is_matrix:
+            pytest.skip("Infinity norm not defined for vectors")
+        if test_imag and is_matrix and ord == -2:
+            pytest.skip("Complex matrices not supported")
+        if has_batch and not is_matrix:
+            # Handle batched vectors by row-normalizing a matrix
+            axis = (-1,)
+
         rng = np.random.default_rng(utt.fetch_seed())
 
-        M = matrix("A", dtype=config.floatX)
-        V = vector("V", dtype=config.floatX)
+        if test_imag:
+            x_real, x_imag = rng.standard_normal((2, *batch_dims, *core_dims)).astype(
+                config.floatX
+            )
+            dtype = "complex128" if config.floatX.endswith("64") else "complex64"
+            X = (x_real + 1j * x_imag).astype(dtype)
+        else:
+            X = rng.standard_normal(batch_dims + core_dims).astype(config.floatX)
 
-        a = rng.random((4, 4)).astype(config.floatX)
-        b = rng.random(4).astype(config.floatX)
+        if batch_dims == ():
+            np_norm = np.linalg.norm(X, ord=ord, axis=axis, keepdims=keepdims)
+        else:
+            np_norm = np.stack(
+                [np.linalg.norm(x, ord=ord, axis=axis, keepdims=keepdims) for x in X]
+            )
 
-        A = (
-            [None, "fro", "inf", "-inf", 1, -1, None, "inf", "-inf", 0, 1, -1, 2, -2],
-            [M, M, M, M, M, M, V, V, V, V, V, V, V, V],
-            [a, a, a, a, a, a, b, b, b, b, b, b, b, b],
-            [None, "fro", inf, -inf, 1, -1, None, inf, -inf, 0, 1, -1, 2, -2],
-        )
+        pt_norm = norm(X, ord=ord, axis=axis, keepdims=keepdims)
+        f = function([], pt_norm, mode="FAST_COMPILE")
 
-        for i in range(0, 14):
-            f = function([A[1][i]], norm(A[1][i], A[0][i]))
-            t_n = f(A[2][i])
-            n_n = np.linalg.norm(A[2][i], A[3][i])
-            assert _allclose(n_n, t_n)
+        utt.assert_allclose(np_norm, f())
 
 
 class TestTensorInv(utt.InferShapeTester):

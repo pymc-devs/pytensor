@@ -121,23 +121,19 @@ tag_prefix = "rel-"
 addopts = "--durations=50"
 testpaths = "tests/"
 
-[tool.pylint]
-max-line-length = 88
-
-[tool.pylint.messages_control]
-disable = ["C0330", "C0326"]
-
-
 [tool.ruff]
-select = ["C", "E", "F", "I", "UP", "W"]
-ignore = ["C408", "C901", "E501", "E741"]
+line-length = 88
 exclude = ["doc/", "pytensor/_version.py", "bin/pytensor_cache.py"]
 
+[tool.ruff.lint]
+select = ["C", "E", "F", "I", "UP", "W", "RUF"]
+ignore = ["C408", "C901", "E501", "E741", "RUF012"]
 
-[tool.ruff.isort]
+
+[tool.ruff.lint.isort]
 lines-after-imports = 2
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 # TODO: Get rid of these:
 "**/__init__.py" = ["F401", "E402", "F403"]
 "pytensor/tensor/linalg.py" = ["F403"]

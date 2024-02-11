@@ -47,11 +47,11 @@ class TestSP:
                     f = function([kerns, bias, input], output, mode=mode)
 
                     # now test with real values
-                    img2d = np.arange(bsize * np.prod(imshp)).reshape((bsize,) + imshp)
+                    img2d = np.arange(bsize * np.prod(imshp)).reshape((bsize, *imshp))
                     img1d = img2d.reshape(bsize, -1)
 
                     # create filters (need to be flipped to use convolve2d)
-                    filtersflipped = np.zeros((nkern,) + kshp)
+                    filtersflipped = np.zeros((nkern, *kshp))
                     for k in range(nkern):
                         it = reversed(filters[k, :])
                         for i in range(kshp[0]):
@@ -64,7 +64,7 @@ class TestSP:
                     else:
                         fulloutshp = np.array(imshp) + np.array(kshp) - 1
                     ntime1 = time.perf_counter()
-                    refout = np.zeros((bsize,) + tuple(fulloutshp) + (nkern,))
+                    refout = np.zeros((bsize, *fulloutshp, nkern))
                     for b in range(bsize):
                         for n in range(nkern):
                             refout[b, ..., n] = convolve2d(
@@ -134,7 +134,7 @@ class TestSP:
         input = dmatrix()
 
         # build actual input images
-        img2d = np.arange(bsize * np.prod(imshp)).reshape((bsize,) + imshp)
+        img2d = np.arange(bsize * np.prod(imshp)).reshape((bsize, *imshp))
         img1d = img2d.reshape(bsize, -1)
 
         for mode in ("FAST_COMPILE", "FAST_RUN"):

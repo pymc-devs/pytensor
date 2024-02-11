@@ -460,8 +460,8 @@ def test_vector_taps_benchmark(benchmark):
     sitsot_init = scalar("sitsot_init", dtype="float64")
 
     def step(seq1, seq2, mitsot1, mitsot2, sitsot1):
-        mitsot3 = mitsot1 + seq2 + mitsot2 + seq1
-        sitsot2 = sitsot1 + mitsot3
+        mitsot3 = (mitsot1 + seq2 + mitsot2 + seq1) / np.sqrt(4)
+        sitsot2 = (sitsot1 + mitsot3) / np.sqrt(2)
         return mitsot3, sitsot2
 
     outs, _ = scan(

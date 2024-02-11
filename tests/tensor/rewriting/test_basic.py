@@ -1131,7 +1131,7 @@ class TestLocalMergeSwitchSameCond:
         s2 = pt.switch(c, x, y)
         u, v = matrices("uv")
         s3 = pt.switch(c, u, v)
-        g = rewrite(FunctionGraph(mats + [u, v], [op(s1, s2, s3)]))
+        g = rewrite(FunctionGraph([*mats, u, v], [op(s1, s2, s3)]))
         assert debugprint(g, file="str").count("Switch") == 1
 
 
@@ -1442,7 +1442,7 @@ def test_local_flatten_lift(i):
     x_np = np.random.random((5, 4, 3, 2)).astype(config.floatX)
     out_np = f(x_np)
     topo = f.maker.fgraph.toposort()
-    shape_out_np = tuple(x_np.shape[: i - 1]) + (np.prod(x_np.shape[i - 1 :]),)
+    shape_out_np = (*x_np.shape[: i - 1], np.prod(x_np.shape[i - 1 :]))
     assert shape_out_np == out_np.shape
 
     reshape_nodes = [n for n in topo if isinstance(n.op, Reshape)]

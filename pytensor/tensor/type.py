@@ -199,7 +199,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
                             "this loss, you can: "
                             f"1) explicitly cast your data to {self.dtype}, or "
                             '2) set "allow_input_downcast=True" when calling '
-                            f'"function". Value: "{repr(data)}"'
+                            f'"function". Value: "{data!r}"'
                         )
                         raise TypeError(err_msg)
                 elif (
@@ -617,7 +617,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
     def c_code_cache_version(self):
         scalar_version = ps.get_scalar_type(self.dtype).c_code_cache_version()
         if scalar_version:
-            return (11,) + scalar_version
+            return (11, *scalar_version)
         else:
             return ()
 

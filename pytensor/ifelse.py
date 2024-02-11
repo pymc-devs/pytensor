@@ -227,7 +227,7 @@ class IfElse(_NoPythonOp):
 
         return Apply(
             self,
-            [condition] + new_inputs_true_branch + new_inputs_false_branch,
+            [condition, *new_inputs_true_branch, *new_inputs_false_branch],
             output_vars,
         )
 
@@ -275,11 +275,11 @@ class IfElse(_NoPythonOp):
         # condition + epsilon always triggers the same branch as condition
         condition_grad = condition.zeros_like().astype(config.floatX)
 
-        return (
-            [condition_grad]
-            + if_true_op(*inputs_true_grad, return_list=True)
-            + if_false_op(*inputs_false_grad, return_list=True)
-        )
+        return [
+            condition_grad,
+            *if_true_op(*inputs_true_grad, return_list=True),
+            *if_false_op(*inputs_false_grad, return_list=True),
+        ]
 
     def make_thunk(self, node, storage_map, compute_map, no_recycling, impl=None):
         cond = node.inputs[0]
@@ -397,7 +397,7 @@ def ifelse(
 
     new_ifelse = IfElse(n_outs=len(then_branch), as_view=False, name=name)
 
-    ins = [condition] + list(then_branch) + list(else_branch)
+    ins = [condition, *then_branch, *else_branch]
     rval = new_ifelse(*ins, return_list=True)
 
     if rval_type is None:
@@ -611,7 +611,7 @@ class CondMerge(GraphRewriter):
                 mn_fs = merging_node.inputs[1:][merging_node.op.n_outs :]
                 pl_ts = proposal.inputs[1:][: proposal.op.n_outs]
                 pl_fs = proposal.inputs[1:][proposal.op.n_outs :]
-                new_ins = [merging_node.inputs[0]] + mn_ts + pl_ts + mn_fs + pl_fs
+                new_ins = [merging_node.inputs[0], *mn_ts, *pl_ts, *mn_fs, *pl_fs]
                 mn_name = "?"
                 if merging_node.op.name:
                     mn_name = merging_node.op.name
@@ -673,7 +673,7 @@ def cond_remove_identical(fgraph, node):
 
     new_ifelse = IfElse(n_outs=len(nw_ts), as_view=op.as_view, name=op.name)
 
-    new_ins = [node.inputs[0]] + nw_ts + nw_fs
+    new_ins = [node.inputs[0], *nw_ts, *nw_fs]
     new_outs = new_ifelse(*new_ins, return_list=True)
 
     rval = []
@@ -711,7 +711,7 @@ def cond_merge_random_op(fgraph, main_node):
             mn_fs = merging_node.inputs[1:][merging_node.op.n_outs :]
             pl_ts = proposal.inputs[1:][: proposal.op.n_outs]
             pl_fs = proposal.inputs[1:][proposal.op.n_outs :]
-            new_ins = [merging_node.inputs[0]] + mn_ts + pl_ts + mn_fs + pl_fs
+            new_ins = [merging_node.inputs[0], *mn_ts, *pl_ts, *mn_fs, *pl_fs]
             mn_name = "?"
             if merging_node.op.name:
                 mn_name = merging_node.op.name

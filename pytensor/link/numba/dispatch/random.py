@@ -240,15 +240,7 @@ def create_numba_random_fn(
     np_global_env["numba_vectorize"] = numba_basic.numba_vectorize
 
     unique_names = unique_name_generator(
-        [
-            np_random_fn_name,
-        ]
-        + list(np_global_env.keys())
-        + [
-            "rng",
-            "size",
-            "dtype",
-        ],
+        [np_random_fn_name, *np_global_env.keys(), "rng", "size", "dtype"],
         suffix_sep="_",
     )
 

@@ -1038,7 +1038,7 @@ class ModuleCache:
                     _logger.info(f"deleting ModuleCache entry {entry}")
                     key_data.delete_keys_from(self.entry_from_key)
                     del self.module_hash_to_key_data[module_hash]
-                    if key_data.keys and list(key_data.keys)[0][0]:
+                    if key_data.keys and next(iter(key_data.keys))[0]:
                         # this is a versioned entry, so should have been on
                         # disk. Something weird happened to cause this, so we
                         # are responding by printing a warning, removing
@@ -1890,7 +1890,7 @@ class Compiler:
                 os.close(fd)
                 fd = None
                 out, err, p_ret = output_subprocess_Popen(
-                    [compiler] + args + [path, "-o", exe_path] + flags
+                    [compiler, *args, path, "-o", exe_path, *flags]
                 )
                 if p_ret != 0:
                     compilation_ok = False

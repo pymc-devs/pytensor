@@ -416,7 +416,7 @@ class ScalarType(CType, HasDataType, HasShape):
             )
 
     def upcast(self, *others):
-        return upcast(*[x.dtype for x in [self] + list(others)])
+        return upcast(*[x.dtype for x in [self, *others]])
 
     def make_variable(self, name=None):
         return ScalarVariable(self, None, name=name)
@@ -725,7 +725,7 @@ float_types: _ScalarTypes = (float16, float32, float64)
 complex_types: _ScalarTypes = (complex64, complex128)
 
 integer_types: _ScalarTypes = int_types + uint_types
-discrete_types: _ScalarTypes = (bool,) + integer_types
+discrete_types: _ScalarTypes = (bool, *integer_types)
 continuous_types: _ScalarTypes = float_types + complex_types
 all_types: _ScalarTypes = discrete_types + continuous_types
 
@@ -1322,7 +1322,7 @@ class LogicalComparison(BinaryScalarOp):
 
     def c_code_cache_version(self):
         super_version = super().c_code_cache_version()
-        return super_version + (0,)
+        return (*super_version, 0)
 
 
 class FixedLogicalComparison(UnaryScalarOp):
@@ -1355,7 +1355,7 @@ class FixedLogicalComparison(UnaryScalarOp):
 
     def c_code_cache_version(self):
         super_version = super().c_code_cache_version()
-        return super_version + (0,)
+        return (*super_version, 0)
 
 
 class LT(LogicalComparison):
@@ -1501,7 +1501,7 @@ class IsNan(FixedLogicalComparison):
 
     def c_code_cache_version(self):
         scalarop_version = super().c_code_cache_version()
-        return tuple(scalarop_version) + (3,)
+        return (*scalarop_version, 3)
 
 
 isnan = IsNan()
@@ -1529,7 +1529,7 @@ class IsInf(FixedLogicalComparison):
 
     def c_code_cache_version(self):
         scalarop_version = super().c_code_cache_version()
-        return tuple(scalarop_version) + (3,)
+        return (*scalarop_version, 3)
 
 
 isinf = IsInf()
@@ -1716,7 +1716,7 @@ class AND(BinaryBitOp):
 
     def c_code_cache_version(self):
         super_version = super().c_code_cache_version()
-        return super_version + (3,)
+        return (*super_version, 3)
 
 
 and_ = AND()
@@ -1950,7 +1950,7 @@ class Mul(ScalarOp):
                 else:
                     retval += [yr * real(gz) + yi * imag(gz)]
             else:
-                retval += [mul(*([gz] + difference(inputs, [input])))]
+                retval += [mul(*([gz, *difference(inputs, [input])]))]
         return retval
 
 
@@ -2494,7 +2494,7 @@ class Cast(UnaryScalarOp):
     def c_code_cache_version(self):
         s = super().c_code_cache_version()
         if s:
-            return (4,) + s
+            return (4, *s)
         else:
             return s
 
@@ -2641,7 +2641,7 @@ class Sign(UnaryScalarOp):
     def c_code_cache_version(self):
         s = super().c_code_cache_version()
         if s:
-            return (4,) + s
+            return (4, *s)
         else:  # if parent is unversioned, we are too
             return s
 
@@ -4096,9 +4096,10 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
         return tuple(rval)
 
     def c_header_dirs(self, **kwargs):
-        rval = sum(
-            (subnode.op.c_header_dirs(**kwargs) for subnode in self.fgraph.toposort()),
-            [],
+        rval = list(
+            chain.from_iterable(
+                subnode.op.c_header_dirs(**kwargs) for subnode in self.fgraph.toposort()
+            )
         )
         return rval
 

@@ -9,6 +9,18 @@ from pytensor.tensor.type import TensorType
 from pytensor.tensor.variable import _tensor_py_operators
 
 
+def __getattr__(name):
+    if name == "ScalarSharedVariable":
+        warnings.warn(
+            "The class `ScalarSharedVariable` has been deprecated. "
+            "Use `TensorSharedVariable` instead and check for `ndim==0`.",
+            FutureWarning,
+        )
+        return TensorSharedVariable
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 def load_shared_variable(val):
     """
     This function is only here to keep some pickles loading
@@ -53,7 +65,6 @@ def tensor_constructor(
     allow_downcast=None,
     borrow=False,
     shape=None,
-    target="cpu",
     broadcastable=None,
 ):
     r"""`SharedVariable` constructor for `TensorType`\s.
@@ -75,9 +86,6 @@ def tensor_constructor(
         )
         shape = broadcastable
 
-    if target != "cpu":
-        raise TypeError("not for cpu")
-
     # If no shape is given, then the default is to assume that the value might
     # be resized in any dimension in the future.
     if shape is None:
@@ -94,16 +102,12 @@ def tensor_constructor(
     )
 
 
-class ScalarSharedVariable(TensorSharedVariable):
-    pass
-
-
 @shared_constructor.register(np.number)
 @shared_constructor.register(float)
 @shared_constructor.register(int)
 @shared_constructor.register(complex)
 def scalar_constructor(
-    value, name=None, strict=False, allow_downcast=None, borrow=False, target="cpu"
+    value, name=None, strict=False, allow_downcast=None, borrow=False
 ):
     """`SharedVariable` constructor for scalar values.
 
@@ -118,9 +122,6 @@ def scalar_constructor(
     borrow, as it is a hint to PyTensor that we can reuse it.
 
     """
-    if target != "cpu":
-        raise TypeError("not for cpu")
-
     try:
         dtype = value.dtype
     except AttributeError:
@@ -132,7 +133,7 @@ def scalar_constructor(
 
     # Do not pass the dtype to asarray because we want this to fail if
     # strict is True and the types do not match.
-    rval = ScalarSharedVariable(
+    rval = TensorSharedVariable(
         type=tensor_type,
         value=np.array(value, copy=True),
         name=name,

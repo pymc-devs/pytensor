@@ -488,7 +488,7 @@ def test_random_RandomVariable(rv_op, dist_params, base_size, cdf_name, params_c
         rng = shared(np.random.default_rng(29402))
     else:
         rng = shared(np.random.RandomState(29402))
-    g = rv_op(*dist_params, size=(10_000,) + base_size, rng=rng)
+    g = rv_op(*dist_params, size=(10000, *base_size), rng=rng)
     g_fn = compile_random_function(dist_params, g, mode=jax_mode)
     samples = g_fn(
         *[
@@ -501,9 +501,9 @@ def test_random_RandomVariable(rv_op, dist_params, base_size, cdf_name, params_c
     bcast_dist_args = np.broadcast_arrays(*[i.tag.test_value for i in dist_params])
 
     for idx in np.ndindex(*base_size):
-        cdf_params = params_conv(*tuple(arg[idx] for arg in bcast_dist_args))
+        cdf_params = params_conv(*(arg[idx] for arg in bcast_dist_args))
         test_res = stats.cramervonmises(
-            samples[(Ellipsis,) + idx], cdf_name, args=cdf_params
+            samples[(Ellipsis, *idx)], cdf_name, args=cdf_params
         )
         assert not np.isnan(test_res.statistic)
         assert test_res.pvalue > 0.01
@@ -512,7 +512,7 @@ def test_random_RandomVariable(rv_op, dist_params, base_size, cdf_name, params_c
 @pytest.mark.parametrize("size", [(), (4,)])
 def test_random_bernoulli(size):
     rng = shared(np.random.RandomState(123))
-    g = pt.random.bernoulli(0.5, size=(1000,) + size, rng=rng)
+    g = pt.random.bernoulli(0.5, size=(1000, *size), rng=rng)
     g_fn = compile_random_function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), 0.5, 1)
@@ -538,7 +538,7 @@ def test_random_mvnormal():
 )
 def test_random_dirichlet(parameter, size):
     rng = shared(np.random.RandomState(123))
-    g = pt.random.dirichlet(parameter, size=(1000,) + size, rng=rng)
+    g = pt.random.dirichlet(parameter, size=(1000, *size), rng=rng)
     g_fn = compile_random_function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), 0.5, 1)

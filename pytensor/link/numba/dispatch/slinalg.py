@@ -144,8 +144,8 @@ def _check_scipy_linalg_matrix(a, func_name):
         msg = "{}.{}() only supported for array types".format(*interp)
         raise numba.TypingError(msg, highlighting=False)
     if a.ndim not in [1, 2]:
-        msg = "%s.%s() only supported on 1d or 2d arrays, found %s." % (
-            interp + (a.ndim,)
+        msg = "{}.{}() only supported on 1d or 2d arrays, found {}.".format(
+            *interp, a.ndim
         )
         raise numba.TypingError(msg, highlighting=False)
     if not isinstance(a.dtype, (types.Float, types.Complex)):

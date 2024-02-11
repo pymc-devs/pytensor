@@ -81,7 +81,7 @@ class ConvolutionIndices(Op):
         # inshp contains either 2 entries (height,width) or 3 (nfeatures,h,w)
         # in the first case, default nfeatures to 1
         if np.size(inshp) == 2:
-            inshp = (1,) + inshp
+            inshp = (1, *inshp)
 
         inshp = np.array(inshp)
         kshp = np.array(kshp)
@@ -337,7 +337,7 @@ def convolve(
     # inshp contains either 2 entries (height,width) or 3 (nfeatures,h,w)
     # in the first case, default nfeatures to 1
     if np.size(imgshp) == 2:
-        imgshp = (1,) + imgshp
+        imgshp = (1, *imgshp)
 
     # construct indices and index pointers for sparse matrix, which,
     # when multiplied with input images will generate a stack of image
@@ -403,7 +403,7 @@ def max_pool(images, imgshp, maxpoolshp):
     # imgshp contains either 2 entries (height,width) or 3 (nfeatures,h,w)
     # in the first case, default nfeatures to 1
     if np.size(imgshp) == 2:
-        imgshp = (1,) + imgshp
+        imgshp = (1, *imgshp)
 
     # construct indices and index pointers for sparse matrix, which,
     # when multiplied with input images will generate a stack of image

@@ -75,7 +75,7 @@ def test_merge_with_weird_eq():
     MergeOptimizer().rewrite(g)
 
     assert len(g.apply_nodes) == 1
-    node = list(g.apply_nodes)[0]
+    node = next(iter(g.apply_nodes))
     assert len(node.inputs) == 2
     assert node.inputs[0] is node.inputs[1]
 
@@ -87,6 +87,6 @@ def test_merge_with_weird_eq():
     MergeOptimizer().rewrite(g)
 
     assert len(g.apply_nodes) == 1
-    node = list(g.apply_nodes)[0]
+    node = next(iter(g.apply_nodes))
     assert len(node.inputs) == 2
     assert node.inputs[0] is node.inputs[1]

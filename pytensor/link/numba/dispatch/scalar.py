@@ -115,7 +115,7 @@ def {scalar_op_fn_name}({input_names}):
         global_env.update(input_tmp_dtype_names)
 
         unique_names = unique_name_generator(
-            [scalar_op_fn_name, "scalar_func_numba"] + list(global_env.keys()),
+            [scalar_op_fn_name, "scalar_func_numba", *global_env.keys()],
             suffix_sep="_",
         )
 

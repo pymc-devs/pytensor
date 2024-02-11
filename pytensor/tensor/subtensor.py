@@ -736,7 +736,7 @@ class Subtensor(COp):
                 )
 
         padded = [
-            *get_idx_list((None,) + inputs, self.idx_list),
+            *get_idx_list((None, *inputs), self.idx_list),
             *[slice(None, None, None)] * (x.type.ndim - len(idx_list)),
         ]
 
@@ -783,7 +783,7 @@ class Subtensor(COp):
 
         return Apply(
             self,
-            (x,) + inputs,
+            (x, *inputs),
             [tensor(dtype=x.type.dtype, shape=out_shape)],
         )
 
@@ -1587,7 +1587,7 @@ class IncSubtensor(COp):
                     f"Wrong type for Subtensor template. Expected {input.type}, got {expected_type}."
                 )
 
-        return Apply(self, (x, y) + inputs, [x.type()])
+        return Apply(self, (x, y, *inputs), [x.type()])
 
     def decl_view(self):
         return "PyArrayObject * zview = NULL;"
@@ -1897,7 +1897,7 @@ class IncSubtensorPrinter(SubtensorPrinter):
     def process(self, r, pstate):
         x, y, *idx_args = r.owner.inputs
 
-        res = self._process(r.owner.op.idx_list, [x] + idx_args, pstate)
+        res = self._process(r.owner.op.idx_list, [x, *idx_args], pstate)
 
         with set_precedence(pstate, 1000):
             y_str = pstate.pprinter.process(r.owner.inputs[1], pstate)
@@ -1941,7 +1941,7 @@ def _sum_grad_over_bcasted_dims(x, gx):
             assert gx.ndim > x.ndim
             for i in range(x_dim_added):
                 assert gx.broadcastable[i]
-            gx = gx.dimshuffle(*list(range(x_dim_added, gx.ndim)))
+            gx = gx.dimshuffle(*range(x_dim_added, gx.ndim))
         assert gx.broadcastable == x.broadcastable
     return gx
 
@@ -2513,7 +2513,7 @@ class AdvancedIncSubtensor1(COp):
             gy = advanced_subtensor1(g_output, idx_list)
             gy = _sum_grad_over_bcasted_dims(y, gy)
 
-        return [gx, gy] + [DisconnectedType()()]
+        return [gx, gy, DisconnectedType()()]
 
 
 advanced_inc_subtensor1 = AdvancedIncSubtensor1()
@@ -2595,7 +2595,7 @@ class AdvancedSubtensor(Op):
 
         return Apply(
             self,
-            (x,) + index,
+            (x, *index),
             [tensor(dtype=x.type.dtype, shape=out_shape)],
         )
 
@@ -2719,7 +2719,7 @@ class AdvancedIncSubtensor(Op):
             new_inputs.append(inp)
         return Apply(
             self,
-            (x, y) + tuple(new_inputs),
+            (x, y, *new_inputs),
             [
                 tensor(
                     dtype=x.type.dtype,

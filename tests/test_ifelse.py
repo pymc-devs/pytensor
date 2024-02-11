@@ -90,7 +90,7 @@ class TestIfelse(utt.OptimizationTestMixin):
             "constant_folding",
             "constant_folding",
         )
-        y2 = reduce(lambda x, y: x + y, [y] + list(range(200)))
+        y2 = reduce(lambda x, y: x + y, [y, *range(200)])
         f = function([c, x, y], ifelse(c, x, y2), mode=mode)
         # For not inplace ifelse
         ifnode = [n for n in f.maker.fgraph.toposort() if isinstance(n.op, IfElse)]
@@ -194,7 +194,7 @@ class TestIfelse(utt.OptimizationTestMixin):
         f = function([c, x1, x2, y1, y2], z, mode=self.mode)
         self.assertFunctionContains1(f, self.get_ifelse(2))
 
-        ifnode = [x for x in f.maker.fgraph.toposort() if isinstance(x.op, IfElse)][0]
+        ifnode = next(x for x in f.maker.fgraph.toposort() if isinstance(x.op, IfElse))
         assert len(ifnode.outputs) == 2
 
         rng = np.random.default_rng(utt.fetch_seed())
@@ -369,7 +369,7 @@ class TestIfelse(utt.OptimizationTestMixin):
         z = ifelse(c, (x, x), (y, y))
         f = function([c, x, y], z)
 
-        ifnode = [n for n in f.maker.fgraph.toposort() if isinstance(n.op, IfElse)][0]
+        ifnode = next(n for n in f.maker.fgraph.toposort() if isinstance(n.op, IfElse))
         assert len(ifnode.inputs) == 3
 
     @pytest.mark.skip(reason="Optimization temporarily disabled")
@@ -382,7 +382,7 @@ class TestIfelse(utt.OptimizationTestMixin):
         z = ifelse(c, (x1, x1, x1, x2, x2), (y1, y1, y2, y2, y2))
         f = function([c, x1, x2, y1, y2], z)
 
-        ifnode = [x for x in f.maker.fgraph.toposort() if isinstance(x.op, IfElse)][0]
+        ifnode = next(x for x in f.maker.fgraph.toposort() if isinstance(x.op, IfElse))
         assert len(ifnode.outputs) == 3
 
     @pytest.mark.skip(reason="Optimization temporarily disabled")

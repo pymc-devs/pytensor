@@ -270,7 +270,7 @@ class TestPushOutDot:
 
         f = function([h0, W1, W2], o, mode=self.mode)
 
-        scan_node = [x for x in f.maker.fgraph.toposort() if isinstance(x.op, Scan)][0]
+        scan_node = next(x for x in f.maker.fgraph.toposort() if isinstance(x.op, Scan))
         assert (
             len(
                 [
@@ -444,9 +444,9 @@ class TestPushOutNonSeqScan:
         # Ensure that the optimization was performed correctly in f_opt
         # The inner function of scan should have only one output and it should
         # not be the result of a Dot
-        scan_node = [
+        scan_node = next(
             node for node in f_opt.maker.fgraph.toposort() if isinstance(node.op, Scan)
-        ][0]
+        )
         assert len(scan_node.op.inner_outputs) == 1
         assert not isinstance(scan_node.op.inner_outputs[0], Dot)
 
@@ -488,9 +488,9 @@ class TestPushOutNonSeqScan:
         # Ensure that the optimization was performed correctly in f_opt
         # The inner function of scan should have only one output and it should
         # not be the result of a Dot
-        scan_node = [
+        scan_node = next(
             node for node in f_opt.maker.fgraph.toposort() if isinstance(node.op, Scan)
-        ][0]
+        )
         # NOTE: WHEN INFER_SHAPE IS RE-ENABLED, BELOW THE SCAN MUST
         # HAVE ONLY 1 OUTPUT.
         assert len(scan_node.op.inner_outputs) == 2
@@ -536,9 +536,9 @@ class TestPushOutNonSeqScan:
         # Ensure that the optimization was performed correctly in f_opt
         # The inner function of scan should have only one output and it should
         # not be the result of a Dot
-        scan_node = [
+        scan_node = next(
             node for node in f_opt.maker.fgraph.toposort() if isinstance(node.op, Scan)
-        ][0]
+        )
         assert len(scan_node.op.inner_outputs) == 2
         assert not isinstance(scan_node.op.inner_outputs[0], Dot)
 
@@ -1639,7 +1639,7 @@ def test_alloc_inputs1():
     )
 
     f = function([h0, W1, W2], o, mode=get_default_mode().including("scan"))
-    scan_node = [x for x in f.maker.fgraph.toposort() if isinstance(x.op, Scan)][0]
+    scan_node = next(x for x in f.maker.fgraph.toposort() if isinstance(x.op, Scan))
     assert (
         len(
             [
@@ -1673,7 +1673,7 @@ def test_alloc_inputs2():
     )
 
     f = function([h0, W1, W2], o, mode=get_default_mode().including("scan"))
-    scan_node = [x for x in f.maker.fgraph.toposort() if isinstance(x.op, Scan)][0]
+    scan_node = next(x for x in f.maker.fgraph.toposort() if isinstance(x.op, Scan))
 
     assert (
         len(
@@ -1709,7 +1709,7 @@ def test_alloc_inputs3():
 
     # TODO FIXME: This result depends on unrelated rewrites in the "fast" mode.
     f = function([_h0, _W1, _W2], o, mode="FAST_RUN")
-    scan_node = [x for x in f.maker.fgraph.toposort() if isinstance(x.op, Scan)][0]
+    scan_node = next(x for x in f.maker.fgraph.toposort() if isinstance(x.op, Scan))
 
     assert len(scan_node.op.inner_inputs) == 1
 

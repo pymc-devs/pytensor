@@ -298,7 +298,7 @@ class RandomVariable(Op):
 
         outtype = TensorType(dtype=dtype, shape=static_shape)
         out_var = outtype()
-        inputs = (rng, size, dtype_idx) + dist_params
+        inputs = (rng, size, dtype_idx, *dist_params)
         outputs = (rng.type(), out_var)
 
         return Apply(self, inputs, outputs)
@@ -325,7 +325,7 @@ class RandomVariable(Op):
 
         rng_var_out[0] = rng
 
-        smpl_val = self.rng_fn(rng, *(args + [size]))
+        smpl_val = self.rng_fn(rng, *([*args, size]))
 
         if (
             not isinstance(smpl_val, np.ndarray)

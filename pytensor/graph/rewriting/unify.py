@@ -69,7 +69,7 @@ class ConstrainedVar(Var):
         return f"~{self.token} [{self.constraint}]"
 
     def __repr__(self):
-        return f"{type(self).__name__}({repr(self.constraint)}, {self.token})"
+        return f"{type(self).__name__}({self.constraint!r}, {self.token})"
 
 
 def car_Variable(x):
@@ -283,7 +283,7 @@ def convert_strs_to_vars(
             var_map[pattern] = v
             return v
         elif isinstance(y, tuple):
-            return etuple(*tuple(_convert(e) for e in y))
+            return etuple(*(_convert(e) for e in y))
         elif isinstance(y, (Number, np.ndarray)):
             from pytensor.tensor import as_tensor_variable
 

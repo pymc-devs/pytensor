@@ -841,7 +841,7 @@ def safe_multivariate_normal(mean, cov, size=None, rng=None):
     )
 
     if size is not None:
-        res = res.reshape(list(size) + [-1])
+        res = res.reshape([*size, -1])
 
     return res
 

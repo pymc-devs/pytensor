@@ -107,11 +107,11 @@ class Fourier(Op):
         if len(shape_a) == 1:
             return [(n,)]
         elif isinstance(axis, TensorConstant):
-            out_shape = (
-                list(shape_a[0 : axis.data.item()])
-                + [n]
-                + list(shape_a[axis.data + 1 :])
-            )
+            out_shape = [
+                *shape_a[0 : axis.data.item()],
+                n,
+                *shape_a[axis.data + 1 :],
+            ]
         else:
             l = len(shape_a)
             shape_a = stack(shape_a)
@@ -171,9 +171,11 @@ class Fourier(Op):
         res = res.dimshuffle(flip_shape)
 
         # insures that gradient shape conforms to input shape:
-        out_shape = (
-            list(np.arange(0, axis)) + [a.ndim - 1] + list(np.arange(axis, a.ndim - 1))
-        )
+        out_shape = [
+            *np.arange(0, axis),
+            a.ndim - 1,
+            *np.arange(axis, a.ndim - 1),
+        ]
         res = res.dimshuffle(*out_shape)
         return [res, None, None]
 

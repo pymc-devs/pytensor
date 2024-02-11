@@ -1972,7 +1972,7 @@ def jacobian(expression, wrt, consider_constant=None, disconnected_inputs="raise
     jacobs, updates = pytensor.scan(
         inner_function,
         sequences=pytensor.tensor.arange(expression.shape[0]),
-        non_sequences=[expression] + wrt,
+        non_sequences=[expression, *wrt],
     )
     assert not updates, "Scan has returned a list of updates; this should not happen."
     return as_list_or_tuple(using_list, using_tuple, jacobs)

@@ -2456,7 +2456,7 @@ class TestArithmeticCast:
                 op(numpy_arg_1, numpy_arg_2).dtype,
                 op(numpy_arg_2, numpy_arg_1).dtype,
             ]
-            numpy_dtype = ps.upcast(*list(map(str, numpy_dtypes)))
+            numpy_dtype = ps.upcast(*map(str, numpy_dtypes))
 
             if numpy_dtype == pytensor_dtype:
                 # Same data type found, all is good!

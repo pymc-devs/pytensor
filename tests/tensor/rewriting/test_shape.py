@@ -511,10 +511,10 @@ def test_local_Shape_of_SpecifyShape_partial(s1):
 
 def test_local_specify_shape_lift():
     x = vector("x")
-    out = specify_shape([1.0] + x, shape=(5,))
+    out = specify_shape([1.0] + x, shape=(5,))  # noqa: RUF005
 
     new_out = rewrite_graph(out)
-    assert equal_computations([new_out], [[1.0] + specify_shape(x, shape=(5,))])
+    assert equal_computations([new_out], [[1.0] + specify_shape(x, shape=(5,))])  # noqa: RUF005
 
 
 def test_local_Shape_i_ground():

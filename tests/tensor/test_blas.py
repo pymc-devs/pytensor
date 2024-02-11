@@ -549,8 +549,15 @@ class TestGemmNoFlags:
         assert tuple(z_val.shape) == (self.M, self.K)
         ref_val = self.compute_ref(
             *(
-                values
-                + (transpose_A, transpose_B, transpose_C, slice_A, slice_B, slice_C)
+                (
+                    *values,
+                    transpose_A,
+                    transpose_B,
+                    transpose_C,
+                    slice_A,
+                    slice_B,
+                    slice_C,
+                )
             )
         )
         unittest_tools.assert_allclose(ref_val, z_val)
