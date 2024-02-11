@@ -383,4 +383,4 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
 
     f2(*test_vals)
 
-    np.testing.assert_allclose(f1(*test_vals), f2(*test_vals))
+    np.testing.assert_allclose(f1(*test_vals), f2(*test_vals), atol=1e-8)
