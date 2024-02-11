@@ -2758,21 +2758,95 @@ def concatenate(tensor_list, axis=0):
     return join(axis, *tensor_list)
 
 
-def hstack(*args):
+def hstack(tup):
     r"""Stack arrays in sequence horizontally (column wise)."""
 
+    arrs  = atleast_1d(*tup)
+    if not isinstance(arrs, list):
+        arrs = [arrs]
+    # As a special case, dimension 0 of 1-dimensional arrays is "horizontal"
+    if arrs and arrs[0].ndim == 1:
+        return concatenate(arrs, axis=0)
+    else:
+        return concatenate(arrs, axis=1)
+
+
+def vstack(tup):
+    r"""Stack arrays in sequence vertically (row wise)."""
+
+    arrs = atleast_2d(*tup)
+    if not isinstance(arrs, list):
+        arrs = [arrs]
+
+    return concatenate(arrs, axis=0)
+
+
+def horizontal_stack(*args):
+    warnings.warn(
+        "horizontal_stack was renamed to hstack and will be removed in a future release",
+        FutureWarning,
+    )
     if len(args) < 2:
         raise ValueError("Too few arguments")
 
     _args = []
     for arg in args:
         _arg = as_tensor_variable(arg)
+        if _arg.type.ndim != 2:
+            raise ValueError("All arguments must have two dimensions")
         _args.append(_arg)
 
     return concatenate(_args, axis=1)
 
 
-def vstack(*args):
+def vertical_stack(*args):
+    warnings.warn(
+        "vertical_stack was renamed to vstack and will be removed in a future release",
+        FutureWarning,
+    )
+    if len(args) < 2:
+        raise ValueError("Too few arguments")
+
+    _args = []
+    for arg in args:
+        _arg = as_tensor_variable(arg)
+        if _arg.type.ndim != 2:
+            raise ValueError("All arguments must have two dimensions")
+        _args.append(_arg)
+
+    return concatenate(_args, axis=0)
+
+
+def dstack(tup):
+    r"""Stack arrays in sequence along third axis (depth wise)."""
+
+    # arrs = atleast_3d(*tup, left=False)
+    # if not isinstance(arrs, list):
+    #     arrs = [arrs]
+    arrs = []
+    for arr in tup:
+        if arr.ndim == 1:
+            arr = atleast_3d([arr], left=False)
+        else:
+            arr = atleast_3d(arr, left=False)
+        arrs.append(arr)
+    return concatenate(arrs, 2)
+
+
+def column_stack(tup):
+    r"""Stack 1-D arrays as columns into a 2-D array."""
+
+    arrays = []
+    for arr in tup:
+        if arr.ndim < 2:
+            arr = atleast_2d(arr).transpose()
+        arrays.append(arr)
+    return concatenate(arrays, 1)
+
+
+
+
+def vertical_stack(*args):
     r"""Stack arrays in sequence vertically (row wise)."""
 
     if len(args) < 2:
@@ -2781,58 +2855,11 @@ def vstack(*args):
     _args = []
     for arg in args:
         _arg = as_tensor_variable(arg)
+        if _arg.type.ndim != 2:
+            raise ValueError("All arguments must have two dimensions")
         _args.append(_arg)
 
     return concatenate(_args, axis=0)
-
-
-def horizontal_stack(*args):
-    warnings.warn(
-        "horizontal_stack was renamed to hstack and will be removed in a future release",
-        FutureWarning,
-    )
-    return hstack(*args)
-
-
-def vertical_stack(*args):
-    warnings.warn(
-        "vertical_stack was renamed to vstack and will be removed in a future release",
-        FutureWarning,
-    )
-    return vstack(*args)
-
-
-def dstack(*args):
-    r"""Stack arrays in sequence along third axis (depth wise)."""
-
-    if len(args) < 2:
-        raise ValueError("Too few arguments")
-
-    _args = []
-    for arg in args:
-        _arg = as_tensor_variable(arg)
-        if _arg.type.ndim != 3:
-            raise ValueError("All arguments must have three dimensions")
-        _args.append(_arg)
-
-    return concatenate(_args, axis=2)
-
-
-def column_stack(*args):
-    r"""Stack 1-D arrays as columns into a 2-D array."""
-
-    if len(args) < 2:
-        raise ValueError("Too few arguments")
-
-    _args = []
-    for arg in args:
-        _arg = as_tensor_variable(arg)
-        if _arg.type.ndim < 2:
-            _arg = atleast_2d(_arg).transpose()
-        _args.append(_arg)
-
-    return concatenate(_args, axis=1)
-
 
 def is_flat(var, ndim=1):
     """

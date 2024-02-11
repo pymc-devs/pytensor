@@ -55,6 +55,7 @@ from pytensor.tensor.basic import (
     full_like,
     get_scalar_constant_value,
     get_underlying_scalar_constant_value,
+    horizontal_stack,
     get_vector_length,
     hstack,
     identity_like,
@@ -89,6 +90,7 @@ from pytensor.tensor.basic import (
     triu_indices_from,
     vstack,
     zeros_like,
+    vertical_stack,
 )
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
@@ -1745,6 +1747,33 @@ class TestJoinAndSplit:
         out = self.eval_outputs_and_check_join([s])
         assert (out == want).all()
 
+    def test_join_matrix1_using_vertical_stack(self):
+        a = self.shared(np.array([[1, 2, 3], [4, 5, 6]], dtype=self.floatX))
+        b = as_tensor_variable(np.array([[7, 8, 9]], dtype=self.floatX))
+        c = as_tensor_variable(np.array([[9, 8, 7]], dtype=self.floatX))
+        s = vertical_stack(a, b, c)
+
+        want = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9], [9, 8, 7]])
+        out = self.eval_outputs_and_check_join([s])
+        assert (out == want).all()
+
+    def test_join_matrix1_using_horizontal_stack(self):
+        av = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype="float32")
+        bv = np.array([[0.7], [0.8]], dtype="float32")
+        cv = np.array([[0.3, 0.2, 0.1], [0.6, 0.5, 0.4]], dtype="float32")
+        a = self.shared(av)
+        b = as_tensor_variable(bv)
+        c = as_tensor_variable(cv)
+        s = horizontal_stack(a, b, c)
+        want = np.array(
+            [[0.1, 0.2, 0.3, 0.7, 0.3, 0.2, 0.1], [0.4, 0.5, 0.6, 0.8, 0.6, 0.5, 0.4]],
+            dtype="float32",
+        )
+        out = self.eval_outputs_and_check_join([s])
+        assert (out == want).all()
+
+        utt.verify_grad(lambda a, b: join(1, a, b), [av, bv], mode=self.mode)
+    
     def test_join_matrixV(self):
         # variable join axis
         v = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=self.floatX)
@@ -4540,22 +4569,30 @@ def test_full_like(inp, shape):
     )
 
 
-@pytest.mark.parametrize("func", [hstack, vstack, column_stack])
+@pytest.mark.parametrize("func", [hstack, vstack, dstack])
+@pytest.mark.parametrize("dimension", [1, 2, 3])
+def test_stack_helpers(func, dimension):
+
+    if dimension == 1:
+        arrays = [np.arange(i * dimension, (i + 1) * dimension) for i in range(3)]
+    else:
+        arrays = [np.arange(i * dimension * dimension, (i + 1) * dimension * dimension).reshape(dimension, dimension) for i in range(3)]
+    
+    result = func(arrays)
+    np_result = getattr(np, func.__name__)(arrays)
+
+    assert np.array_equal(result.eval(), np_result)
+
+
+@pytest.mark.parametrize("func", [horizontal_stack, vertical_stack])
 def test_oriented_stack_functions(func):
     with pytest.raises(ValueError):
         func()
 
-
-@pytest.mark.parametrize("func", [dstack])
-def test_dstack_function(func):
-    with pytest.raises(ValueError):
-        func()
-
-    a = ptb.tensor(dtype=np.float64, shape=(None, None))
+    a = ptb.tensor(dtype=np.float64, shape=(None, None, None))
 
     with pytest.raises(ValueError):
         func(a, a)
-
 
 def test_trace():
     x_val = np.ones((5, 4, 2))
