@@ -2844,23 +2844,6 @@ def column_stack(tup):
     return concatenate(arrays, 1)
 
 
-
-
-def vertical_stack(*args):
-    r"""Stack arrays in sequence vertically (row wise)."""
-
-    if len(args) < 2:
-        raise ValueError("Too few arguments")
-
-    _args = []
-    for arg in args:
-        _arg = as_tensor_variable(arg)
-        if _arg.type.ndim != 2:
-            raise ValueError("All arguments must have two dimensions")
-        _args.append(_arg)
-
-    return concatenate(_args, axis=0)
-
 def is_flat(var, ndim=1):
     """
     Verifies the dimensionality of the var is equal to
