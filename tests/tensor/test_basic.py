@@ -55,8 +55,8 @@ from pytensor.tensor.basic import (
     full_like,
     get_scalar_constant_value,
     get_underlying_scalar_constant_value,
-    horizontal_stack,
     get_vector_length,
+    horizontal_stack,
     hstack,
     identity_like,
     infer_static_shape,
@@ -88,9 +88,9 @@ from pytensor.tensor.basic import (
     triu,
     triu_indices,
     triu_indices_from,
+    vertical_stack,
     vstack,
     zeros_like,
-    vertical_stack,
 )
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
@@ -1773,7 +1773,7 @@ class TestJoinAndSplit:
         assert (out == want).all()
 
         utt.verify_grad(lambda a, b: join(1, a, b), [av, bv], mode=self.mode)
-    
+
     def test_join_matrixV(self):
         # variable join axis
         v = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=self.floatX)
@@ -4577,7 +4577,7 @@ def test_stack_helpers(func, dimension):
         arrays = [np.arange(i * dimension, (i + 1) * dimension) for i in range(3)]
     else:
         arrays = [np.arange(i * dimension * dimension, (i + 1) * dimension * dimension).reshape(dimension, dimension) for i in range(3)]
-    
+
     result = func(arrays)
     np_result = getattr(np, func.__name__)(arrays)
 
