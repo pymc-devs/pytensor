@@ -4572,11 +4572,15 @@ def test_full_like(inp, shape):
 @pytest.mark.parametrize("func", [hstack, vstack, dstack])
 @pytest.mark.parametrize("dimension", [1, 2, 3])
 def test_stack_helpers(func, dimension):
-
     if dimension == 1:
         arrays = [np.arange(i * dimension, (i + 1) * dimension) for i in range(3)]
     else:
-        arrays = [np.arange(i * dimension * dimension, (i + 1) * dimension * dimension).reshape(dimension, dimension) for i in range(3)]
+        arrays = [
+            np.arange(
+                i * dimension * dimension, (i + 1) * dimension * dimension
+            ).reshape(dimension, dimension)
+            for i in range(3)
+        ]
 
     result = func(arrays)
     np_result = getattr(np, func.__name__)(arrays)
@@ -4593,6 +4597,7 @@ def test_oriented_stack_functions(func):
 
     with pytest.raises(ValueError):
         func(a, a)
+
 
 def test_trace():
     x_val = np.ones((5, 4, 2))

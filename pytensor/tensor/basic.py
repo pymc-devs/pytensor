@@ -2761,7 +2761,7 @@ def concatenate(tensor_list, axis=0):
 def hstack(tup):
     r"""Stack arrays in sequence horizontally (column wise)."""
 
-    arrs  = atleast_1d(*tup)
+    arrs = atleast_1d(*tup)
     if not isinstance(arrs, list):
         arrs = [arrs]
     # As a special case, dimension 0 of 1-dimensional arrays is "horizontal"
