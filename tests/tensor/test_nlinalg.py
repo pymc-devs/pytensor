@@ -250,6 +250,7 @@ class TestSvd(utt.InferShapeTester):
                 partial(svd, compute_uv=compute_uv, full_matrices=full_matrices),
                 [A_v],
                 rng=rng,
+                sum_outputs=True,
             )
 
         else:
