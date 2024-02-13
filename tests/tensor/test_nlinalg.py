@@ -214,6 +214,51 @@ class TestSvd(utt.InferShapeTester):
             outputs = [outputs]
         self._compile_and_check([A], outputs, [A_v], self.op_class, warn=False)
 
+    @pytest.mark.parametrize(
+        "compute_uv, full_matrices",
+        [(True, False), (False, False), (True, True)],
+        ids=[
+            "compute_uv=True, full_matrices=False",
+            "compute_uv=False, full_matrices=False",
+            "compute_uv=True, full_matrices=True",
+        ],
+    )
+    @pytest.mark.parametrize(
+        "shape", [(3, 3), (4, 3), (3, 4)], ids=["(3,3)", "(4,3)", "(3,4)"]
+    )
+    @pytest.mark.parametrize(
+        "batched", [True, False], ids=["batched=True", "batched=False"]
+    )
+    def test_grad(self, compute_uv, full_matrices, shape, batched):
+        rng = np.random.default_rng(utt.fetch_seed())
+        if batched:
+            shape = (4, *shape)
+
+        A_v = self.rng.normal(size=shape).astype(config.floatX)
+        if full_matrices:
+            with pytest.raises(
+                NotImplementedError,
+                match="Gradient of svd not implemented for full_matrices=True",
+            ):
+                U, s, V = svd(
+                    self.A, compute_uv=compute_uv, full_matrices=full_matrices
+                )
+                pytensor.grad(s.sum(), self.A)
+
+        elif compute_uv:
+            utt.verify_grad(
+                partial(svd, compute_uv=compute_uv, full_matrices=full_matrices),
+                [A_v],
+                rng=rng,
+            )
+
+        else:
+            utt.verify_grad(
+                partial(svd, compute_uv=compute_uv, full_matrices=full_matrices),
+                [A_v],
+                rng=rng,
+            )
+
 
 def test_tensorsolve():
     rng = np.random.default_rng(utt.fetch_seed())
