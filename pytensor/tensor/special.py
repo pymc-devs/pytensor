@@ -8,7 +8,7 @@ from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.elemwise import get_normalized_batch_axes
-from pytensor.tensor.math import gamma, gammaln, neg, sum, log
+from pytensor.tensor.math import gamma, gammaln, log, neg, sum
 
 
 class SoftmaxGrad(COp):
