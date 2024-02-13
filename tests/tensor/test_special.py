@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from scipy.special import beta as scipy_beta
 from scipy.special import factorial as scipy_factorial
+from scipy.special import logit as scipy_logit
 from scipy.special import log_softmax as scipy_log_softmax
 from scipy.special import poch as scipy_poch
 from scipy.special import softmax as scipy_softmax
@@ -17,6 +18,7 @@ from pytensor.tensor.special import (
     beta,
     betaln,
     factorial,
+    logit,
     log_softmax,
     poch,
     softmax,
@@ -201,6 +203,18 @@ def test_factorial(n):
     n = random_ranged(0, 5, (2,))
     actual = actual_fn(n)
     expected = scipy_factorial(n)
+    np.testing.assert_allclose(
+        actual, expected, rtol=1e-7 if config.floatX == "float64" else 1e-5
+    )
+
+
+def test_logit():
+    _x = vector("x")
+    actual_fn = function([_x], logit(_x))
+
+    x = random_ranged(0, 1, (5,))
+    actual = actual_fn(x)
+    expected = scipy_logit(x)
     np.testing.assert_allclose(
         actual, expected, rtol=1e-7 if config.floatX == "float64" else 1e-5
     )
