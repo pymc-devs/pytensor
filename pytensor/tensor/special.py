@@ -785,7 +785,7 @@ def logit(x):
     Logit function.
 
     """
-    return log(x/(1-x))
+    return log(x / (1 - x))
 
 
 def beta(a, b):
