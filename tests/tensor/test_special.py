@@ -210,7 +210,7 @@ def test_factorial(n):
 
 def test_logit():
     x = vector("x")
-    actual_fn = function([x], logit(x))
+    actual_fn = function([x], logit(x), allow_input_downcast=True)
 
     x_test = np.linspace(0, 1)
     actual = actual_fn(x_test)
