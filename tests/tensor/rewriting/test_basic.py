@@ -26,6 +26,7 @@ from pytensor.tensor.basic import (
     ScalarFromTensor,
     Split,
     TensorFromScalar,
+    as_tensor,
     cast,
     join,
     tile,
@@ -982,6 +983,21 @@ class TestLocalUselessSwitch:
         assert np.array_equal(f1(vx), vx)
         assert np.array_equal(f0(vx), vx)
         assert np.array_equal(f2(vx, vc), vx)
+
+    def test_left_is_right_constant(self):
+        int8_one = as_tensor(np.int8(1))
+        int8_zero = as_tensor(np.int8(0))
+        int64_zero = as_tensor(np.int64(0))
+        cond = scalar("cond", dtype=bool)
+
+        out = pt.switch(cond, int8_zero, int64_zero)
+        assert equal_computations([rewrite_graph(out)], [int64_zero])
+
+        out = pt.switch(cond, int64_zero, int8_zero)
+        assert equal_computations([rewrite_graph(out)], [int64_zero])
+
+        out = pt.switch(cond, int8_one, int8_zero)
+        assert equal_computations([rewrite_graph(out)], [out])
 
     @pytest.mark.parametrize(
         "dtype1",
