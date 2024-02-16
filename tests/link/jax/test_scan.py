@@ -427,3 +427,13 @@ def test_default_mode_excludes_incompatible_rewrites():
     out, _ = scan(lambda a, b: a @ b, outputs_info=[A], non_sequences=[B], n_steps=2)
     fg = FunctionGraph([A, B], [out])
     compare_jax_and_py(fg, [np.eye(3), np.eye(3)])
+
+
+def test_dynamic_sequence_length():
+    x = pt.tensor("x", shape=(None,))
+    out, _ = scan(lambda x: x + 1, sequences=[x])
+
+    f = function([x], out, mode=get_mode("JAX").excluding("scan"))
+    assert sum(isinstance(node.op, Scan) for node in f.maker.fgraph.apply_nodes) == 1
+    np.testing.assert_allclose(f([]), [])
+    np.testing.assert_allclose(f([1, 2, 3]), np.array([2, 3, 4]))
