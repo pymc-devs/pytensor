@@ -1671,75 +1671,12 @@ class TestJoinAndSplit:
         assert (np.asarray(grad(s.sum(), b).eval()) == 0).all()
         assert (np.asarray(grad(s.sum(), a).eval()) == 0).all()
 
-    def test_join_matrix1_using_vstack(self):
-        a = self.shared(np.array([[1, 2, 3], [4, 5, 6]], dtype=self.floatX))
-        b = as_tensor_variable(np.array([[7, 8, 9]], dtype=self.floatX))
-        c = as_tensor_variable(np.array([[9, 8, 7]], dtype=self.floatX))
-        s = vstack(a, b, c)
-
-        want = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9], [9, 8, 7]])
-        out = self.eval_outputs_and_check_join([s])
-        assert (out == want).all()
-
-    def test_join_matrix1_using_dstack(self):
-        a = self.shared(
-            np.array([[[0.1], [0.2], [0.3]], [[0.4], [0.5], [0.6]]], dtype="float32")
-        )
-
-        b = as_tensor_variable(
-            np.array(
-                [
-                    [
-                        [0.2, 0.3],
-                        [0.3, 0.4],
-                        [0.4, 0.5],
-                    ],
-                    [[0.5, 0.6], [0.6, 0.7], [0.7, 0.8]],
-                ],
-                dtype="float32",
-            )
-        )
-
-        c = as_tensor_variable(
-            np.array([[[0.4], [0.5], [0.6]], [[0.7], [0.8], [0.9]]], dtype="float32")
-        )
-
-        s = dstack(a, b, c)
-
-        want = np.array(
-            [
-                [[0.1, 0.2, 0.3, 0.4], [0.2, 0.3, 0.4, 0.5], [0.3, 0.4, 0.5, 0.6]],
-                [[0.4, 0.5, 0.6, 0.7], [0.5, 0.6, 0.7, 0.8], [0.6, 0.7, 0.8, 0.9]],
-            ],
-            dtype="float32",
-        )
-
-        out = self.eval_outputs_and_check_join([s])
-        assert (out == want).all()
-
-    def test_join_matrix1_using_hstack(self):
-        av = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype="float32")
-        bv = np.array([[0.7], [0.8]], dtype="float32")
-        cv = np.array([[0.3, 0.2, 0.1], [0.6, 0.5, 0.4]], dtype="float32")
-        a = self.shared(av)
-        b = as_tensor_variable(bv)
-        c = as_tensor_variable(cv)
-        s = hstack(a, b, c)
-        want = np.array(
-            [[0.1, 0.2, 0.3, 0.7, 0.3, 0.2, 0.1], [0.4, 0.5, 0.6, 0.8, 0.6, 0.5, 0.4]],
-            dtype="float32",
-        )
-        out = self.eval_outputs_and_check_join([s])
-        assert (out == want).all()
-
-        utt.verify_grad(lambda a, b: join(1, a, b), [av, bv], mode=self.mode)
-
     def test_join_matrix1_using_column_stack(self):
         av = np.array([0.1, 0.2, 0.3], dtype="float32")
         bv = np.array([0.7, 0.8, 0.9], dtype="float32")
         a = self.shared(av)
         b = as_tensor_variable(bv)
-        s = column_stack(a, b)
+        s = column_stack((a, b))
         want = np.array(
             [[0.1, 0.7], [0.2, 0.8], [0.3, 0.9]],
             dtype="float32",
@@ -4590,13 +4527,14 @@ def test_stack_helpers(func, dimension):
 
 @pytest.mark.parametrize("func", [horizontal_stack, vertical_stack])
 def test_oriented_stack_functions(func):
-    with pytest.raises(ValueError):
-        func()
+    with pytest.warns(FutureWarning):
+        with pytest.raises(ValueError):
+            func()
 
-    a = ptb.tensor(dtype=np.float64, shape=(None, None, None))
+        a = ptb.tensor(dtype=np.float64, shape=(None, None, None))
 
-    with pytest.raises(ValueError):
-        func(a, a)
+        with pytest.raises(ValueError):
+            func(a, a)
 
 
 def test_trace():
