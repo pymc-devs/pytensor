@@ -1673,7 +1673,7 @@ def verify_grad(
     abs_tol: Optional[float] = None,
     rel_tol: Optional[float] = None,
     mode: Optional[Union["Mode", str]] = None,
-    cast_to_output_type: bool = False,
+    cast_to_output_type: bool = True,
     no_debug_ref: bool = True,
 ):
     """Test a gradient by Finite Difference Method. Raise error on failure.
