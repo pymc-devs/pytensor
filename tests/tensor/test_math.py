@@ -3030,8 +3030,8 @@ class TestSumProdReduceDtype:
                     uint8="uint64",
                     uint16="uint64",
                     uint32="uint64",
-                    float16="float32",
-                    float32="float64",
+                    float16=config.floatX,
+                    float32=config.floatX,
                     complex64="complex128",
                 ).get(dtype, dtype)
                 f = function([x], s, mode=self.mode)
@@ -3255,8 +3255,8 @@ class TestProdWithoutZerosDtype:
                 uint8="uint64",
                 uint16="uint64",
                 uint32="uint64",
-                float16="float32",
-                float32="float64",
+                float16=config.floatX,
+                float32=config.floatX,
                 complex64="complex128",
             ).get(dtype, dtype)
 
