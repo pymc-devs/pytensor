@@ -592,6 +592,7 @@ def makeTester(
                         mode=self.mode,
                         rel_tol=_grad_rtol,
                         eps=_grad_eps,
+                        cast_to_output_type=True,
                     )
                 except Exception as exc:
                     err_msg = (

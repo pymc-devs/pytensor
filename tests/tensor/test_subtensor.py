@@ -775,11 +775,13 @@ class TestSubtensor(utt.OptimizationTestMixin):
                     lambda m: op(n[:z, :z], m),
                     [mv],
                     mode=self.mode,
+                    cast_to_output_type=True,
                 )
                 utt.verify_grad(
                     lambda nn: op(nn[:z, :z], mv),
                     [data],
                     mode=self.mode,
+                    cast_to_output_type=True,
                 )
 
     def test_grad_0d(self):
