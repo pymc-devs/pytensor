@@ -1176,7 +1176,7 @@ def local_careduce_fusion(fgraph, node):
     car_acc_dtype = node.op.acc_dtype
 
     scalar_elm_inputs = [
-        ps.get_scalar_type(inp.type.dtype).make_variable() for inp in elm_inputs
+        ps.get_scalar_type(car_acc_dtype).make_variable() for inp in elm_inputs
     ]
 
     elm_output = elm_scalar_op(*scalar_elm_inputs)
