@@ -771,8 +771,18 @@ class TestSubtensor(utt.OptimizationTestMixin):
 
                 t = op(n[:z, :z], m)
                 gn, gm = pytensor.grad(pt_sum(t), [n, m])
-                utt.verify_grad(lambda m: op(n[:z, :z], m), [mv], mode=self.mode)
-                utt.verify_grad(lambda nn: op(nn[:z, :z], mv), [data], mode=self.mode)
+                utt.verify_grad(
+                    lambda m: op(n[:z, :z], m),
+                    [mv],
+                    mode=self.mode,
+                    cast_to_output_type=True,
+                )
+                utt.verify_grad(
+                    lambda nn: op(nn[:z, :z], mv),
+                    [data],
+                    mode=self.mode,
+                    cast_to_output_type=True,
+                )
 
     def test_grad_0d(self):
         data = np.asarray(random(2, 3), dtype=self.dtype)

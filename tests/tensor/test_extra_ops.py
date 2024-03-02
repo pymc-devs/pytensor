@@ -631,7 +631,9 @@ class TestRepeat(utt.InferShapeTester):
         a = np.random.random((10,) * ndim).astype(config.floatX)
 
         for axis in self._possible_axis(ndim):
-            utt.verify_grad(lambda x: Repeat(axis=axis)(x, 3), [a])
+            utt.verify_grad(
+                lambda x: Repeat(axis=axis)(x, 3), [a], cast_to_output_type=True
+            )
 
     def test_broadcastable(self):
         x = TensorType(config.floatX, shape=(None, 1, None))()
