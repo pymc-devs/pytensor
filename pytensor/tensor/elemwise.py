@@ -1246,10 +1246,9 @@ class CAReduce(COp):
             The dtype of the internal accumulator.
             If ``None`` (default), we use the dtype in the list below,
             or the input dtype if its precision is higher:
-
             - for int dtypes, we use at least int64;
             - for uint dtypes, we use at least uint64;
-            - for float dtypes, we use at least float64;
+            - for float dtypes, we use at least floatX;
             - for complex dtypes, we use at least complex128.
         upcast_discrete_output
             See
@@ -1333,8 +1332,8 @@ class CAReduce(COp):
                 uint8="uint64",
                 uint16="uint64",
                 uint32="uint64",
-                float16="float32",
-                float32="float64",
+                float16=config.floatX,
+                float32=config.floatX,
                 complex64="complex128",
             ).get(idtype, idtype)
         elif acc_dtype in continuous_dtypes and idtype in discrete_dtypes:
