@@ -218,6 +218,14 @@ def test_tri():
     compare_jax_and_py(fgraph, [])
 
 
+def test_sort():
+    x = matrix("x")
+    out = pytensor.tensor.sort(x)
+    fgraph = FunctionGraph([x], [out])
+    arr = np.array([[1.0, 4.0], [5.0, 2.0]])
+    compare_jax_and_py(fgraph, [arr])
+
+
 def test_tri_nonconcrete():
     """JAX cannot JIT-compile `jax.numpy.tri` when arguments are not concrete values."""
 
