@@ -210,7 +210,7 @@ def jax_funcify_Tri(op, node, **kwargs):
 
 @jax_funcify.register(SortOp)
 def jax_funcify_Sort(op, **kwargs):
-    def sort(arr, *args):
-        return jnp.sort(arr, *args)
+    def sort(arr, axis):
+        return jnp.sort(arr, axis=axis)
 
     return sort
