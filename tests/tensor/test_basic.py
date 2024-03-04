@@ -1682,7 +1682,7 @@ class TestJoinAndSplit:
             dtype="float32",
         )
         out = self.eval_outputs_and_check_join([s])
-        assert (out == want).all()
+        np.testing.assert_array_equal(out, want, strict=True)
 
     def test_join_matrix1_using_vertical_stack(self):
         a = self.shared(np.array([[1, 2, 3], [4, 5, 6]], dtype=self.floatX))
