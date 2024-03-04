@@ -31,7 +31,6 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import (
-    Sum,
     add,
     bitwise_and,
     bitwise_or,
@@ -1325,7 +1324,7 @@ def test_local_sum_make_vector():
     output = rewrite_graph(output)
     between = vars_between([a, b, c], [output])
     for var in between:
-        assert (var.owner is None)
+        assert var.owner is None
 
     # Check single element
     mv = MakeVector(config.floatX)
@@ -1334,7 +1333,7 @@ def test_local_sum_make_vector():
     output = rewrite_graph(output)
     between = vars_between([a, b, c], [output])
     for var in between:
-        assert (var.owner is None)
+        assert var.owner is None
 
     # This is a regression test for #653. Ensure that rewrite is not
     # applied when user requests float32
