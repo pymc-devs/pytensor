@@ -1297,15 +1297,16 @@ def test_local_join_make_vector():
 
 
 def test_local_sum_make_vector():
-    # Check that rewrite is applied
+    # Check that rewrite is applied. Enforce dtype to allow rewrite
+    # even if floatX != "float64"
     a, b, c = scalars("abc")
     mv = MakeVector(config.floatX)
-    output = mv(a, b, c).sum()
+    output = mv(a, b, c).sum(dtype="float64")
 
     output = rewrite_graph(output)
     between = vars_between([a, b, c], [output])
     for var in between:
-        assert (var.owner is None) or (isinstance(var.owner.op, ps.Add))
+        assert (var.owner is None) or (isinstance(var.owner.op, Elemwise))
 
     # Check for empty sum
     a, b, c = scalars("abc")
