@@ -1298,6 +1298,7 @@ def test_local_join_make_vector():
 
 
 def test_local_sum_make_vector():
+    # Check that rewrite is applied
     a, b, c = scalars("abc")
     mv = MakeVector(config.floatX)
     output = mv(a, b, c).sum()
@@ -1305,7 +1306,7 @@ def test_local_sum_make_vector():
     output = rewrite_graph(output)
     between = vars_between([a, b, c], [output])
     for var in between:
-        assert (var.owner is None) or (not isinstance(var.owner.op, MakeVector))
+        assert (var.owner is None) or (isinstance(var.owner.op, ps.Add))
 
     # Check for empty sum
     a, b, c = scalars("abc")
@@ -1315,7 +1316,7 @@ def test_local_sum_make_vector():
     output = rewrite_graph(output)
     between = vars_between([a, b, c], [output])
     for var in between:
-        assert (var.owner is None) or (not isinstance(var.owner.op, Sum))
+        assert (var.owner is None) or (isinstance(var.owner.op, MakeVector))
 
     # Check empty MakeVector
     mv = MakeVector(config.floatX)
@@ -1324,15 +1325,28 @@ def test_local_sum_make_vector():
     output = rewrite_graph(output)
     between = vars_between([a, b, c], [output])
     for var in between:
-        assert (var.owner is None) or (not isinstance(var.owner.op, Sum))
+        assert (var.owner is None)
 
+    # Check single element
     mv = MakeVector(config.floatX)
     output = mv(a).sum()
 
     output = rewrite_graph(output)
     between = vars_between([a, b, c], [output])
     for var in between:
-        assert (var.owner is None) or (not isinstance(var.owner.op, Sum))
+        assert (var.owner is None)
+
+    # This is a regression test for #653. Ensure that rewrite is not
+    # applied when user requests float32
+    with config.change_flags(floatX="float32", warn_float64="raise"):
+        a, b, c = scalars("abc")
+        mv = MakeVector(config.floatX)
+        output = mv(a, b, c).sum()
+
+        output = rewrite_graph(output)
+        between = vars_between([a, b, c], [output])
+        for var in between:
+            assert (var.owner is None) or (not isinstance(var.owner.op, ps.Add))
 
 
 @pytest.mark.parametrize(
