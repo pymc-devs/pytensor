@@ -8,7 +8,7 @@ from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.elemwise import get_normalized_batch_axes
-from pytensor.tensor.math import gamma, gammaln, neg, sum
+from pytensor.tensor.math import gamma, gammaln, log, neg, sum
 
 
 class SoftmaxGrad(COp):
@@ -780,6 +780,14 @@ def factorial(n):
     return gamma(n + 1)
 
 
+def logit(x):
+    """
+    Logit function.
+
+    """
+    return log(x / (1 - x))
+
+
 def beta(a, b):
     """
     Beta function.
@@ -801,6 +809,7 @@ __all__ = [
     "log_softmax",
     "poch",
     "factorial",
+    "logit",
     "beta",
     "betaln",
 ]
