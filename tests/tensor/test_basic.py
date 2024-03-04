@@ -1688,7 +1688,8 @@ class TestJoinAndSplit:
         a = self.shared(np.array([[1, 2, 3], [4, 5, 6]], dtype=self.floatX))
         b = as_tensor_variable(np.array([[7, 8, 9]], dtype=self.floatX))
         c = as_tensor_variable(np.array([[9, 8, 7]], dtype=self.floatX))
-        s = vertical_stack(a, b, c)
+        with pytest.warns(FutureWarning):
+            s = vertical_stack(a, b, c)
 
         want = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9], [9, 8, 7]])
         out = self.eval_outputs_and_check_join([s])
@@ -1701,7 +1702,8 @@ class TestJoinAndSplit:
         a = self.shared(av)
         b = as_tensor_variable(bv)
         c = as_tensor_variable(cv)
-        s = horizontal_stack(a, b, c)
+        with pytest.warns(FutureWarning):
+            s = horizontal_stack(a, b, c)
         want = np.array(
             [[0.1, 0.2, 0.3, 0.7, 0.3, 0.2, 0.1], [0.4, 0.5, 0.6, 0.8, 0.6, 0.5, 0.4]],
             dtype="float32",
