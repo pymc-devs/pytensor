@@ -22,6 +22,7 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.shape import Shape_i
+from pytensor.tensor.sort import SortOp
 
 
 ARANGE_CONCRETE_VALUE_ERROR = """JAX requires the arguments of `jax.numpy.arange`
@@ -205,3 +206,11 @@ def jax_funcify_Tri(op, node, **kwargs):
         return jnp.tri(*args, dtype=op.dtype)
 
     return tri
+
+
+@jax_funcify.register(SortOp)
+def jax_funcify_Sort(op, **kwargs):
+    def sort(arr, axis):
+        return jnp.sort(arr, axis=axis)
+
+    return sort
