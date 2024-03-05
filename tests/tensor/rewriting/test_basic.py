@@ -1301,50 +1301,45 @@ def test_local_sum_make_vector():
     # To check that rewrite is applied, we must enforce dtype to
     # allow rewrite to occur even if floatX != "float64"
     a, b, c = scalars("abc")
+    point = {a: 1.0, b: 2.0, c: 3.0}
     mv = MakeVector(config.floatX)
     output = mv(a, b, c).sum(dtype="float64")
-    func = function([a, b, c], output, mode=rewrite_mode)
     rewrite_output = rewrite_graph(output)
-    rewrite_func = function([a, b, c], rewrite_output, mode=rewrite_mode)
     # check rewrite
     assert not equal_computations([output], [rewrite_output])
     # check logic
-    np.testing.assert_almost_equal(func(1, 2, 3), rewrite_func(1, 2, 3))
+    np.testing.assert_almost_equal(output.eval(point), rewrite_output.eval(point))
 
     # Empty axes should return input vector since no sum is applied
     a, b, c = scalars("abc")
+    point = {a: 1.0, b: 2.0, c: 3.0}
     mv = MakeVector(config.floatX)
     output = mv(a, b, c).sum(axis=[])
-    func = function([a, b, c], output, mode=rewrite_mode)
     rewrite_output = rewrite_graph(output)
-    rewrite_func = function([a, b, c], rewrite_output, mode=rewrite_mode)
     # check rewrite
     assert isinstance(rewrite_output.owner.op, MakeVector)
     # check logic
-    np.testing.assert_almost_equal(func(1, 2, 3), rewrite_func(1, 2, 3))
+    np.testing.assert_almost_equal(output.eval(point), rewrite_output.eval(point))
 
     # Empty input should return 0
     mv = MakeVector(config.floatX)
     output = mv().sum()
-    func = function([], output, mode=rewrite_mode)
     rewrite_output = rewrite_graph(output)
-    rewrite_func = function([], rewrite_output, mode=rewrite_mode)
     # check rewrite
     assert isinstance(rewrite_output, TensorConstant)
     # check logic
-    np.testing.assert_almost_equal(func(), rewrite_func())
+    np.testing.assert_almost_equal(output.eval(), rewrite_output.eval())
 
     # Single element input should return element value
     a = scalars("a")
+    point = {a: 1.0}
     mv = MakeVector(config.floatX)
     output = mv(a).sum()
-    func = function([a], output, mode=rewrite_mode)
     rewrite_output = rewrite_graph(output)
-    rewrite_func = function([a], rewrite_output, mode=rewrite_mode)
     # check rewrite
     assert rewrite_output == a
     # check logic
-    np.testing.assert_almost_equal(func(1), rewrite_func(1))
+    np.testing.assert_almost_equal(output.eval(point), rewrite_output.eval(point))
 
     # This is a regression test for #653. Ensure that rewrite is not
     # applied when user requests float32
