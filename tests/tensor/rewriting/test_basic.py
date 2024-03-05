@@ -12,7 +12,7 @@ from pytensor.compile.function import function
 from pytensor.compile.mode import get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp, deep_copy_op
 from pytensor.configdefaults import config
-from pytensor.graph.basic import equal_computations, vars_between
+from pytensor.graph.basic import equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import check_stack_trace, out2in
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
@@ -104,6 +104,7 @@ from pytensor.tensor.type import (
     values_eq_approx_remove_nan,
     vector,
 )
+from pytensor.tensor.variable import TensorConstant
 from tests import unittest_tools as utt
 
 
@@ -1297,44 +1298,53 @@ def test_local_join_make_vector():
 
 
 def test_local_sum_make_vector():
-    # Check that rewrite is applied. Enforce dtype to allow rewrite
-    # even if floatX != "float64"
+    # To check that rewrite is applied, we must enforce dtype to
+    # allow rewrite to occur even if floatX != "float64"
     a, b, c = scalars("abc")
     mv = MakeVector(config.floatX)
     output = mv(a, b, c).sum(dtype="float64")
+    func = function([a, b, c], output, mode=rewrite_mode)
+    rewrite_output = rewrite_graph(output)
+    rewrite_func = function([a, b, c], rewrite_output, mode=rewrite_mode)
+    # check rewrite
+    assert not equal_computations([output], [rewrite_output])
+    # check logic
+    np.testing.assert_almost_equal(func(1, 2, 3), rewrite_func(1, 2, 3))
 
-    output = rewrite_graph(output)
-    between = vars_between([a, b, c], [output])
-    for var in between:
-        assert (var.owner is None) or (isinstance(var.owner.op, Elemwise))
-
-    # Check for empty sum
+    # Empty axes should return input vector since no sum is applied
     a, b, c = scalars("abc")
     mv = MakeVector(config.floatX)
     output = mv(a, b, c).sum(axis=[])
+    func = function([a, b, c], output, mode=rewrite_mode)
+    rewrite_output = rewrite_graph(output)
+    rewrite_func = function([a, b, c], rewrite_output, mode=rewrite_mode)
+    # check rewrite
+    assert isinstance(rewrite_output.owner.op, MakeVector)
+    # check logic
+    np.testing.assert_almost_equal(func(1, 2, 3), rewrite_func(1, 2, 3))
 
-    output = rewrite_graph(output)
-    between = vars_between([a, b, c], [output])
-    for var in between:
-        assert (var.owner is None) or (isinstance(var.owner.op, MakeVector))
-
-    # Check empty MakeVector
+    # Empty input should return 0
     mv = MakeVector(config.floatX)
     output = mv().sum()
+    func = function([], output, mode=rewrite_mode)
+    rewrite_output = rewrite_graph(output)
+    rewrite_func = function([], rewrite_output, mode=rewrite_mode)
+    # check rewrite
+    assert isinstance(rewrite_output, TensorConstant)
+    # check logic
+    np.testing.assert_almost_equal(func(), rewrite_func())
 
-    output = rewrite_graph(output)
-    between = vars_between([a, b, c], [output])
-    for var in between:
-        assert var.owner is None
-
-    # Check single element
+    # Single element input should return element value
+    a = scalars("a")
     mv = MakeVector(config.floatX)
     output = mv(a).sum()
-
-    output = rewrite_graph(output)
-    between = vars_between([a, b, c], [output])
-    for var in between:
-        assert var.owner is None
+    func = function([a], output, mode=rewrite_mode)
+    rewrite_output = rewrite_graph(output)
+    rewrite_func = function([a], rewrite_output, mode=rewrite_mode)
+    # check rewrite
+    assert rewrite_output == a
+    # check logic
+    np.testing.assert_almost_equal(func(1), rewrite_func(1))
 
     # This is a regression test for #653. Ensure that rewrite is not
     # applied when user requests float32
@@ -1342,11 +1352,8 @@ def test_local_sum_make_vector():
         a, b, c = scalars("abc")
         mv = MakeVector(config.floatX)
         output = mv(a, b, c).sum()
-
-        output = rewrite_graph(output)
-        between = vars_between([a, b, c], [output])
-        for var in between:
-            assert (var.owner is None) or (not isinstance(var.owner.op, ps.Add))
+        rewrite_output = rewrite_graph(output)
+        assert equal_computations([output], [rewrite_output])
 
 
 @pytest.mark.parametrize(
