@@ -26,6 +26,7 @@ from pytensor.tensor.basic import (
     ScalarFromTensor,
     Split,
     TensorFromScalar,
+    cast,
     join,
     tile,
 )
@@ -1305,8 +1306,11 @@ def test_local_sum_make_vector():
     mv = MakeVector(config.floatX)
     output = mv(a, b, c).sum(dtype="float64")
     rewrite_output = rewrite_graph(output)
+    expected_output = cast(
+        add(*[cast(value, "float64") for value in [a, b, c]]), dtype="float64"
+    )
     # check rewrite
-    assert not equal_computations([output], [rewrite_output])
+    assert equal_computations([expected_output], [rewrite_output])
     # check logic
     np.testing.assert_almost_equal(output.eval(point), rewrite_output.eval(point))
 
