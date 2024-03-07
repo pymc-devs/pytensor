@@ -105,7 +105,6 @@ from pytensor.tensor.type import (
     values_eq_approx_remove_nan,
     vector,
 )
-from pytensor.tensor.variable import TensorConstant
 from tests import unittest_tools as utt
 
 
@@ -1330,8 +1329,9 @@ def test_local_sum_make_vector():
     mv = MakeVector(config.floatX)
     output = mv().sum()
     rewrite_output = rewrite_graph(output)
+    expected_output = pt.as_tensor(0, dtype=config.floatX)
     # check rewrite
-    assert isinstance(rewrite_output, TensorConstant)
+    assert equal_computations([expected_output], [rewrite_output])
     # check logic
     np.testing.assert_almost_equal(output.eval(), rewrite_output.eval())
 
