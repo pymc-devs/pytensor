@@ -1320,8 +1320,9 @@ def test_local_sum_make_vector():
     mv = MakeVector(config.floatX)
     output = mv(a, b, c).sum(axis=[])
     rewrite_output = rewrite_graph(output)
+    expected_output = mv(a, b, c)
     # check rewrite
-    assert isinstance(rewrite_output.owner.op, MakeVector)
+    assert equal_computations([expected_output], [rewrite_output])
     # check logic
     np.testing.assert_almost_equal(output.eval(point), rewrite_output.eval(point))
 
@@ -1340,12 +1341,13 @@ def test_local_sum_make_vector():
     mv = MakeVector(config.floatX)
     output = mv(a).sum()
     rewrite_output = rewrite_graph(output)
+    expected_output = cast(a, config.floatX)
     # check rewrite
-    assert rewrite_output == a
+    assert equal_computations([expected_output], [rewrite_output])
     # check logic
     np.testing.assert_almost_equal(output.eval(point), rewrite_output.eval(point))
 
-    # This is a regression test for #653. Ensure that rewrite is not
+    # This is a regression test for #653. Ensure that rewrite is NOT
     # applied when user requests float32
     with config.change_flags(floatX="float32", warn_float64="raise"):
         a, b, c = scalars("abc")
