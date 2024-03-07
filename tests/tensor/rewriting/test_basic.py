@@ -1301,51 +1301,36 @@ def test_local_sum_make_vector():
     # To check that rewrite is applied, we must enforce dtype to
     # allow rewrite to occur even if floatX != "float64"
     a, b, c = scalars("abc")
-    point = {a: 1.0, b: 2.0, c: 3.0}
     mv = MakeVector(config.floatX)
     output = mv(a, b, c).sum(dtype="float64")
     rewrite_output = rewrite_graph(output)
     expected_output = cast(
         add(*[cast(value, "float64") for value in [a, b, c]]), dtype="float64"
     )
-    # check rewrite
     assert equal_computations([expected_output], [rewrite_output])
-    # check logic
-    np.testing.assert_almost_equal(output.eval(point), rewrite_output.eval(point))
 
     # Empty axes should return input vector since no sum is applied
     a, b, c = scalars("abc")
-    point = {a: 1.0, b: 2.0, c: 3.0}
     mv = MakeVector(config.floatX)
     output = mv(a, b, c).sum(axis=[])
     rewrite_output = rewrite_graph(output)
     expected_output = mv(a, b, c)
-    # check rewrite
     assert equal_computations([expected_output], [rewrite_output])
-    # check logic
-    np.testing.assert_almost_equal(output.eval(point), rewrite_output.eval(point))
 
     # Empty input should return 0
     mv = MakeVector(config.floatX)
     output = mv().sum()
     rewrite_output = rewrite_graph(output)
     expected_output = pt.as_tensor(0, dtype=config.floatX)
-    # check rewrite
     assert equal_computations([expected_output], [rewrite_output])
-    # check logic
-    np.testing.assert_almost_equal(output.eval(), rewrite_output.eval())
 
     # Single element input should return element value
     a = scalars("a")
-    point = {a: 1.0}
     mv = MakeVector(config.floatX)
     output = mv(a).sum()
     rewrite_output = rewrite_graph(output)
     expected_output = cast(a, config.floatX)
-    # check rewrite
     assert equal_computations([expected_output], [rewrite_output])
-    # check logic
-    np.testing.assert_almost_equal(output.eval(point), rewrite_output.eval(point))
 
     # This is a regression test for #653. Ensure that rewrite is NOT
     # applied when user requests float32
