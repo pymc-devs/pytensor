@@ -28,7 +28,7 @@ from typing import Union
 import numpy as np
 
 import pytensor.scalar.basic as ps
-from pytensor import compile
+from pytensor import compile, config
 from pytensor.compile.ops import ViewOp
 from pytensor.graph import FunctionGraph
 from pytensor.graph.basic import Constant, Variable
@@ -941,6 +941,11 @@ def local_sum_make_vector(fgraph, node):
     elements = array.owner.inputs
     acc_dtype = node.op.acc_dtype
     out_dtype = node.op.dtype
+
+    # Skip rewrite if it would add unnecessary float64 to the graph
+    if acc_dtype == "float64" and out_dtype != "float64" and config.floatX != "float64":
+        return
+
     if len(elements) == 0:
         element_sum = zeros(dtype=out_dtype, shape=())
     elif len(elements) == 1:
