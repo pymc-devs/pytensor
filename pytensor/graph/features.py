@@ -3,6 +3,7 @@ import sys
 import time
 import warnings
 from collections import OrderedDict
+from difflib import Differ
 from functools import partial
 from io import StringIO
 
@@ -565,8 +566,19 @@ class ReplaceValidate(History, Validator):
     ):
         chk = fgraph.checkpoint()
 
+        interactive = config.optimizer_interactive
+
         if verbose is None:
-            verbose = config.optimizer_verbose
+            verbose = config.optimizer_verbose or interactive
+
+        if interactive:
+            differ = Differ()
+            bef = pytensor.dprint(
+                fgraph, file="str", print_type=True, id_type="", print_topo_order=False
+            )
+            skip_rewrites = config.optimizer_interactive_skip_rewrites.replace(
+                " ", ""
+            ).split(",")
 
         for r, new_r in replacements:
             try:
@@ -613,6 +625,22 @@ class ReplaceValidate(History, Validator):
             print(
                 f"rewriting: rewrite {reason} replaces {r} of {r.owner} with {new_r} of {new_r.owner}"
             )
+            if interactive and str(reason) not in skip_rewrites:
+                aft = pytensor.dprint(
+                    fgraph,
+                    file="str",
+                    print_type=True,
+                    id_type="",
+                    print_topo_order=False,
+                )
+                if bef != aft:
+                    diff = list(
+                        differ.compare(
+                            bef.splitlines(keepends=True), aft.splitlines(keepends=True)
+                        )
+                    )
+                    sys.stdout.writelines(diff)
+                    input("Press any key to continue")
 
         # The return is needed by replace_all_validate_remove
         return chk
