@@ -1,4 +1,5 @@
 import copy
+import logging
 import math
 import sys
 from collections.abc import Iterable, Sequence
@@ -58,6 +59,7 @@ class RewriteDatabase:
             and/or its tags will enable it.
 
         """
+
         if not isinstance(
             rewriter,
             (
@@ -333,10 +335,13 @@ class EquilibriumDB(RewriteDatabase):
         *tags: str,
         final_rewriter: bool = False,
         cleanup: bool = False,
+        logger_level=logging.INFO,
         **kwargs,
     ):
         if final_rewriter and cleanup:
             raise ValueError("`final_rewriter` and `cleanup` cannot both be true.")
+        rewriter.logger = logging.getLogger(rewriter.__class__.__name__)
+        rewriter.logger.setLevel(logger_level)
         super().register(name, rewriter, *tags, **kwargs)
         self.__final__[name] = final_rewriter
         self.__cleanup__[name] = cleanup
