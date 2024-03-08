@@ -329,6 +329,44 @@ def local_func_inv(fgraph, node):
 @register_canonicalize
 @register_specialize
 @node_rewriter([Elemwise])
+def local_func_inv_nan_switch(fgraph, node):
+    """
+    Check for two consecutive switch operations that are functional inverses
+    and remove them from the function graph.
+
+    """
+    inv_pairs = (
+        (aes_math.Log1mexp, aes_math.Log1mexp),
+        (aes.Log, aes.Exp),
+        (aes.Exp, aes.Log),
+    )
+    x = node.inputs[0]
+
+    if not isinstance(node.op, Elemwise):
+        return
+    if not x.owner or not isinstance(x.owner.op, Elemwise):
+        return
+
+    prev_op = x.owner.op.scalar_op
+    node_op = node.op.scalar_op
+
+    for inv_pair in inv_pairs:
+        if is_inverse_pair(node_op, prev_op, inv_pair):
+            # We don't need to copy stack trace, because the rewrite
+            # is trivial and maintains the earlier stack trace
+            ottype = node.out.dtype
+            inp = x.owner.inputs[0]
+            # Functions may have casted integer input to float
+            if inp.dtype != ottype:
+                inp = cast(inp, ottype)
+            return [inp]
+
+    return
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([Elemwise])
 def local_exp_log(fgraph, node):
     x = node.inputs[0]
 
@@ -416,6 +454,15 @@ def local_exp_log_nan_switch(fgraph, node):
         x = x.owner.inputs[0]
         old_out = node.outputs[0]
         new_out = switch(le(x, 0), sub(1, exp(x)), np.asarray(np.nan, old_out.dtype))
+        return [new_out]
+
+    # Case for log1mexp(log1mexp(x)) -> x
+    if isinstance(prev_op, aes_math.Log1mexp) and isinstance(
+        node_op, aes_math.Log1mexp
+    ):
+        x = x.owner.inputs[0]
+        old_out = node.outputs[0]
+        new_out = switch(le(x, 0), x, np.asarray(np.nan, old_out.dtype))
         return [new_out]
 
     # Case for expm1(log1mexp(x)) -> -exp(x)
