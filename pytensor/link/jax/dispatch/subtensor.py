@@ -37,6 +37,8 @@ def subtensor_assert_indices_jax_compatible(node, idx_list):
 
     ilist = indices_from_subtensor(node.inputs[1:], idx_list)
     for idx in ilist:
+        if isinstance(idx, Constant):
+            continue
         if isinstance(idx, TensorVariable):
             if idx.type.dtype == "bool":
                 raise NotImplementedError(BOOLEAN_MASK_ERROR)
