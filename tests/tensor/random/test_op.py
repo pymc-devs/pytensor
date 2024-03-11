@@ -13,13 +13,13 @@ from pytensor.tensor.shape import specify_shape
 from pytensor.tensor.type import all_dtypes, iscalar, tensor
 
 
-@pytest.fixture(scope="module", autouse=True)
-def set_pytensor_flags():
+@pytest.fixture(scope="function", autouse=False)
+def strict_test_value_flags():
     with config.change_flags(cxx="", compute_test_value="raise"):
         yield
 
 
-def test_RandomVariable_basics():
+def test_RandomVariable_basics(strict_test_value_flags):
     str_res = str(
         RandomVariable(
             "normal",
@@ -95,7 +95,7 @@ def test_RandomVariable_basics():
         grad(rv_out, [rv_node.inputs[0]])
 
 
-def test_RandomVariable_bcast():
+def test_RandomVariable_bcast(strict_test_value_flags):
     rv = RandomVariable("normal", 0, [0, 0], config.floatX, inplace=True)
 
     mu = tensor(dtype=config.floatX, shape=(1, None, None))
@@ -125,7 +125,7 @@ def test_RandomVariable_bcast():
     assert res.broadcastable == (True, False)
 
 
-def test_RandomVariable_bcast_specify_shape():
+def test_RandomVariable_bcast_specify_shape(strict_test_value_flags):
     rv = RandomVariable("normal", 0, [0, 0], config.floatX, inplace=True)
 
     s1 = pt.as_tensor(1, dtype=np.int64)
@@ -146,7 +146,7 @@ def test_RandomVariable_bcast_specify_shape():
     assert res.type.shape == (1, None, None, None, 1)
 
 
-def test_RandomVariable_floatX():
+def test_RandomVariable_floatX(strict_test_value_flags):
     test_rv_op = RandomVariable(
         "normal",
         0,
@@ -172,14 +172,14 @@ def test_RandomVariable_floatX():
         (3, default_rng, np.random.default_rng(3)),
     ],
 )
-def test_random_maker_op(seed, maker_op, numpy_res):
+def test_random_maker_op(strict_test_value_flags, seed, maker_op, numpy_res):
     seed = pt.as_tensor_variable(seed)
     z = function(inputs=[], outputs=[maker_op(seed)])()
     aes_res = z[0]
     assert maker_op.random_type.values_eq(aes_res, numpy_res)
 
 
-def test_random_maker_ops_no_seed():
+def test_random_maker_ops_no_seed(strict_test_value_flags):
     # Testing the initialization when seed=None
     # Since internal states randomly generated,
     # we just check the output classes
@@ -192,7 +192,7 @@ def test_random_maker_ops_no_seed():
     assert isinstance(aes_res, np.random.Generator)
 
 
-def test_RandomVariable_incompatible_size():
+def test_RandomVariable_incompatible_size(strict_test_value_flags):
     rv_op = RandomVariable("normal", 0, [0, 0], config.floatX, inplace=True)
     with pytest.raises(
         ValueError, match="Size length is incompatible with batched dimensions"
@@ -216,7 +216,6 @@ class MultivariateRandomVariable(RandomVariable):
         return [dist_params[0].shape[-1]]
 
 
-@config.change_flags(compute_test_value="off")
 def test_multivariate_rv_infer_static_shape():
     """Test that infer shape for multivariate random variable works when a parameter must be broadcasted."""
     mv_op = MultivariateRandomVariable()
@@ -244,9 +243,7 @@ def test_multivariate_rv_infer_static_shape():
 
 def test_vectorize_node():
     vec = tensor(shape=(None,))
-    vec.tag.test_value = [0, 0, 0]
     mat = tensor(shape=(None, None))
-    mat.tag.test_value = [[0, 0, 0], [1, 1, 1]]
 
     # Test without size
     node = normal(vec).owner
@@ -273,4 +270,6 @@ def test_vectorize_node():
     vect_node = vectorize_node(node, *new_inputs)
     assert vect_node.op is normal
     assert vect_node.inputs[3] is mat
-    assert tuple(vect_node.inputs[1].eval({mat: mat.tag.test_value})) == (2, 3)
+    assert tuple(
+        vect_node.inputs[1].eval({mat: np.zeros((2, 3), dtype=config.floatX)})
+    ) == (2, 3)
