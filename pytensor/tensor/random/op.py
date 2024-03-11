@@ -8,7 +8,7 @@ import pytensor
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable, equal_computations
 from pytensor.graph.op import Op
-from pytensor.graph.replace import _vectorize_node
+from pytensor.graph.replace import _vectorize_node, vectorize_graph
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.scalar import ScalarVariable
 from pytensor.tensor.basic import (
@@ -20,7 +20,10 @@ from pytensor.tensor.basic import (
     infer_static_shape,
 )
 from pytensor.tensor.random.type import RandomGeneratorType, RandomStateType, RandomType
-from pytensor.tensor.random.utils import broadcast_params, normalize_size_param
+from pytensor.tensor.random.utils import (
+    explicit_expand_dims,
+    normalize_size_param,
+)
 from pytensor.tensor.shape import shape_tuple
 from pytensor.tensor.type import TensorType, all_dtypes
 from pytensor.tensor.type_other import NoneConst
@@ -387,10 +390,26 @@ def vectorize_random_variable(
     # If size was provided originally and a new size hasn't been provided,
     # We extend it to accommodate the new input batch dimensions.
     # Otherwise, we assume the new size already has the right values
+
+    # Need to make parameters implicit broadcasting explicit
+    original_dist_params = node.inputs[3:]
     old_size = node.inputs[1]
     len_old_size = get_vector_length(old_size)
+
+    original_expanded_dist_params = explicit_expand_dims(
+        original_dist_params, op.ndims_params, len_old_size
+    )
+    # We call vectorize_graph to automatically handle any new explicit expand_dims
+    dist_params = vectorize_graph(
+        original_expanded_dist_params, dict(zip(original_dist_params, dist_params))
+    )
+
     if len_old_size and equal_computations([old_size], [size]):
-        bcasted_param = broadcast_params(dist_params, op.ndims_params)[0]
+        # If the original RV had a size variable and a new one has not been provided,
+        # we need to define a new size as the concatenation of the original size dimensions
+        # and the novel ones implied by new broadcasted batched parameters dimensions.
+        # We use the first broadcasted batch dimension for reference.
+        bcasted_param = explicit_expand_dims(dist_params, op.ndims_params)[0]
         new_param_ndim = (bcasted_param.type.ndim - op.ndims_params[0]) - len_old_size
         if new_param_ndim >= 0:
             new_size_dims = bcasted_param.shape[:new_param_ndim]

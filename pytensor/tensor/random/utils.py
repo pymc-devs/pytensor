@@ -13,7 +13,7 @@ from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import as_tensor_variable, cast, constant
 from pytensor.tensor.extra_ops import broadcast_to
 from pytensor.tensor.math import maximum
-from pytensor.tensor.shape import specify_shape
+from pytensor.tensor.shape import shape_padleft, specify_shape
 from pytensor.tensor.type import int_dtypes
 from pytensor.tensor.variable import TensorVariable
 
@@ -119,6 +119,34 @@ def broadcast_params(params, ndims_params):
     ]
 
     return bcast_params
+
+
+def explicit_expand_dims(
+    params: Sequence[TensorVariable],
+    ndim_params: tuple[int],
+    size_length: int = 0,
+) -> list[TensorVariable]:
+    """Introduce explicit expand_dims in RV parameters that are implicitly broadcasted together and/or by size."""
+
+    batch_dims = [
+        param.type.ndim - ndim_param for param, ndim_param in zip(params, ndim_params)
+    ]
+
+    if size_length:
+        # NOTE: PyTensor is currently treating zero-length size as size=None, which is not what Numpy does
+        # See: https://github.com/pymc-devs/pytensor/issues/568
+        max_batch_dims = size_length
+    else:
+        max_batch_dims = max(batch_dims)
+
+    new_params = []
+    for new_param, batch_dim in zip(params, batch_dims):
+        missing_dims = max_batch_dims - batch_dim
+        if missing_dims:
+            new_param = shape_padleft(new_param, missing_dims)
+        new_params.append(new_param)
+
+    return new_params
 
 
 def normalize_size_param(

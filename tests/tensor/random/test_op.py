@@ -248,7 +248,7 @@ def test_vectorize_node():
     # Test without size
     node = normal(vec).owner
     new_inputs = node.inputs.copy()
-    new_inputs[3] = mat
+    new_inputs[3] = mat  # mu
     vect_node = vectorize_node(node, *new_inputs)
     assert vect_node.op is normal
     assert vect_node.inputs[3] is mat
@@ -256,8 +256,8 @@ def test_vectorize_node():
     # Test with size, new size provided
     node = normal(vec, size=(3,)).owner
     new_inputs = node.inputs.copy()
-    new_inputs[1] = (2, 3)
-    new_inputs[3] = mat
+    new_inputs[1] = (2, 3)  # size
+    new_inputs[3] = mat  # mu
     vect_node = vectorize_node(node, *new_inputs)
     assert vect_node.op is normal
     assert tuple(vect_node.inputs[1].eval()) == (2, 3)
@@ -266,10 +266,37 @@ def test_vectorize_node():
     # Test with size, new size not provided
     node = normal(vec, size=(3,)).owner
     new_inputs = node.inputs.copy()
-    new_inputs[3] = mat
+    new_inputs[3] = mat  # mu
     vect_node = vectorize_node(node, *new_inputs)
     assert vect_node.op is normal
     assert vect_node.inputs[3] is mat
     assert tuple(
         vect_node.inputs[1].eval({mat: np.zeros((2, 3), dtype=config.floatX)})
     ) == (2, 3)
+
+    # Test parameter broadcasting
+    node = normal(vec).owner
+    new_inputs = node.inputs.copy()
+    new_inputs[3] = tensor("mu", shape=(10, 5))  # mu
+    new_inputs[4] = tensor("sigma", shape=(10,))  # sigma
+    vect_node = vectorize_node(node, *new_inputs)
+    assert vect_node.op is normal
+    assert vect_node.default_output().type.shape == (10, 5)
+
+    # Test parameter broadcasting with non-expanding size
+    node = normal(vec, size=(5,)).owner
+    new_inputs = node.inputs.copy()
+    new_inputs[3] = tensor("mu", shape=(10, 5))  # mu
+    new_inputs[4] = tensor("sigma", shape=(10,))  # sigma
+    vect_node = vectorize_node(node, *new_inputs)
+    assert vect_node.op is normal
+    assert vect_node.default_output().type.shape == (10, 5)
+
+    # Test parameter broadcasting with expanding size
+    node = normal(vec, size=(2, 5)).owner
+    new_inputs = node.inputs.copy()
+    new_inputs[3] = tensor("mu", shape=(10, 5))  # mu
+    new_inputs[4] = tensor("sigma", shape=(10,))  # sigma
+    vect_node = vectorize_node(node, *new_inputs)
+    assert vect_node.op is normal
+    assert vect_node.default_output().type.shape == (10, 2, 5)
