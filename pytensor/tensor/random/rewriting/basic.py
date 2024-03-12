@@ -7,7 +7,7 @@ from pytensor.graph.op import compute_test_value
 from pytensor.graph.rewriting.basic import copy_stack_trace, in2out, node_rewriter
 from pytensor.scalar import integer_types
 from pytensor.tensor import NoneConst
-from pytensor.tensor.basic import constant, get_vector_length
+from pytensor.tensor.basic import constant
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.extra_ops import broadcast_to
 from pytensor.tensor.random.op import RandomVariable
@@ -85,7 +85,7 @@ def local_rv_size_lift(fgraph, node):
 
     dist_params = broadcast_params(dist_params, node.op.ndims_params)
 
-    if get_vector_length(size) > 0:
+    if not NoneConst.equals(size):
         dist_params = [
             broadcast_to(
                 p,
@@ -156,20 +156,17 @@ def local_dimshuffle_rv_lift(fgraph, node):
     if is_rv_used_in_graph(base_rv, node, fgraph):
         return False
 
-    batched_dims = rv.ndim - rv_op.ndim_supp
+    batched_dims = rv.type.ndim - rv_op.ndim_supp
     batched_dims_ds_order = tuple(o for o in ds_op.new_order if o not in supp_dims)
 
-    # Make size explicit
-    missing_size_dims = batched_dims - get_vector_length(size)
-    if missing_size_dims > 0:
-        full_size = tuple(broadcast_params(dist_params, rv_op.ndims_params)[0].shape)
-        size = full_size[:missing_size_dims] + tuple(size)
-
-    # Update the size to reflect the DimShuffled dimensions
-    new_size = [
-        constant(1, dtype="int64") if o == "x" else size[o]
-        for o in batched_dims_ds_order
-    ]
+    if NoneConst.equals(size):
+        new_size = NoneConst
+    else:
+        # Update the size to reflect the DimShuffled dimensions
+        new_size = [
+            constant(1, dtype="int64") if o == "x" else size[o]
+            for o in batched_dims_ds_order
+        ]
 
     # Updates the params to reflect the Dimshuffled dimensions
     new_dist_params = []

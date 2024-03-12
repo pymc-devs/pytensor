@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, Literal, Optional, Union
 import numpy as np
 
 from pytensor.compile.sharedvalue import shared
-from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.basic import Variable
 from pytensor.scalar import ScalarVariable
-from pytensor.tensor import get_vector_length
-from pytensor.tensor.basic import as_tensor_variable, cast, constant
+from pytensor.tensor import NoneConst, get_vector_length
+from pytensor.tensor.basic import as_tensor_variable, cast
 from pytensor.tensor.extra_ops import broadcast_to
 from pytensor.tensor.math import maximum
 from pytensor.tensor.shape import shape_padleft, specify_shape
@@ -124,7 +124,7 @@ def broadcast_params(params, ndims_params):
 def explicit_expand_dims(
     params: Sequence[TensorVariable],
     ndim_params: tuple[int],
-    size_length: int = 0,
+    size: Union[TensorVariable, NoneConst] = NoneConst,
 ) -> list[TensorVariable]:
     """Introduce explicit expand_dims in RV parameters that are implicitly broadcasted together and/or by size."""
 
@@ -132,12 +132,10 @@ def explicit_expand_dims(
         param.type.ndim - ndim_param for param, ndim_param in zip(params, ndim_params)
     ]
 
-    if size_length:
-        # NOTE: PyTensor is currently treating zero-length size as size=None, which is not what Numpy does
-        # See: https://github.com/pymc-devs/pytensor/issues/568
-        max_batch_dims = size_length
-    else:
+    if NoneConst.equals(size):
         max_batch_dims = max(batch_dims)
+    else:
+        max_batch_dims = get_vector_length(size)
 
     new_params = []
     for new_param, batch_dim in zip(params, batch_dims):
@@ -153,9 +151,10 @@ def normalize_size_param(
     size: Optional[Union[int, np.ndarray, Variable, Sequence]],
 ) -> Variable:
     """Create an PyTensor value for a ``RandomVariable`` ``size`` parameter."""
-    if size is None:
-        size = constant([], dtype="int64")
-    elif isinstance(size, int):
+    if size is None or NoneConst.equals(size):
+        return NoneConst
+
+    if isinstance(size, int):
         size = as_tensor_variable([size], ndim=1)
     elif not isinstance(size, (np.ndarray, Variable, Sequence)):
         raise TypeError(
@@ -164,7 +163,7 @@ def normalize_size_param(
     else:
         size = cast(as_tensor_variable(size, ndim=1, dtype="int64"), "int64")
 
-        if not isinstance(size, Constant):
+        if size.type.shape == (None,):
             # This should help ensure that the length of non-constant `size`s
             # will be available after certain types of cloning (e.g. the kind
             # `Scan` performs)

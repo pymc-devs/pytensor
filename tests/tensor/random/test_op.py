@@ -6,6 +6,7 @@ from pytensor import config, function
 from pytensor.gradient import NullTypeGradError, grad
 from pytensor.graph.replace import vectorize_node
 from pytensor.raise_op import Assert
+from pytensor.tensor import NoneConst
 from pytensor.tensor.math import eq
 from pytensor.tensor.random import normal
 from pytensor.tensor.random.op import RandomState, RandomVariable, default_rng
@@ -80,8 +81,8 @@ def test_RandomVariable_basics(strict_test_value_flags):
         rv.make_node(rng=1)
 
     # `RandomVariable._infer_shape` should handle no parameters
-    rv_shape = rv._infer_shape(pt.constant([]), (), [])
-    assert rv_shape.equals(pt.constant([], dtype="int64"))
+    rv_shape = rv._infer_shape(NoneConst, (), [])
+    assert rv_shape == ()
 
     # Integer-specified `dtype`
     dtype_1 = all_dtypes[1]
@@ -199,11 +200,21 @@ def test_RandomVariable_incompatible_size(strict_test_value_flags):
     ):
         rv_op(np.zeros((1, 3)), 1, size=(3,))
 
+    with pytest.raises(
+        ValueError, match="Size length is incompatible with batched dimensions"
+    ):
+        rv_op(np.zeros((1, 3)), 1, size=())
+
     rv_op = RandomVariable("dirichlet", 0, [1], config.floatX, inplace=True)
     with pytest.raises(
         ValueError, match="Size length is incompatible with batched dimensions"
     ):
         rv_op(np.zeros((2, 4, 3)), 1, size=(4,))
+
+    with pytest.raises(
+        ValueError, match="Size length is incompatible with batched dimensions"
+    ):
+        rv_op(np.zeros((1, 3)), 1, size=())
 
 
 class MultivariateRandomVariable(RandomVariable):

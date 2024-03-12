@@ -209,7 +209,7 @@ sd_pt.tag.test_value = np.array(1.0, dtype=config.floatX)
 @pytest.mark.parametrize(
     "M, sd, size",
     [
-        (pt.as_tensor_variable(np.array(1.0, dtype=config.floatX)), sd_pt, ()),
+        (pt.as_tensor_variable(np.array(1.0, dtype=config.floatX)), sd_pt, None),
         (
             pt.as_tensor_variable(np.array(1.0, dtype=config.floatX)),
             sd_pt,
@@ -220,10 +220,10 @@ sd_pt.tag.test_value = np.array(1.0, dtype=config.floatX)
             sd_pt,
             (2, M_pt),
         ),
-        (pt.zeros((M_pt,)), sd_pt, ()),
+        (pt.zeros((M_pt,)), sd_pt, None),
         (pt.zeros((M_pt,)), sd_pt, (M_pt,)),
         (pt.zeros((M_pt,)), sd_pt, (2, M_pt)),
-        (pt.zeros((M_pt,)), pt.ones((M_pt,)), ()),
+        (pt.zeros((M_pt,)), pt.ones((M_pt,)), None),
         (pt.zeros((M_pt,)), pt.ones((M_pt,)), (2, M_pt)),
         (
             create_pytensor_param(
@@ -241,9 +241,13 @@ sd_pt.tag.test_value = np.array(1.0, dtype=config.floatX)
 )
 def test_normal_infer_shape(M, sd, size):
     rv = normal(M, sd, size=size)
-    rv_shape = list(normal._infer_shape(size or (), [M, sd], None))
+    symbolic_size = rv.owner.inputs[1]
+    rv_shape = list(normal._infer_shape(symbolic_size, [M, sd], None))
 
-    all_args = (M, sd, *size)
+    if size is None:
+        all_args = (M, sd, size)
+    else:
+        all_args = (M, sd, *size)
     fn_inputs = [
         i
         for i in graph_inputs([a for a in all_args if isinstance(a, Variable)])
@@ -696,19 +700,23 @@ M_pt.tag.test_value = 3
 @pytest.mark.parametrize(
     "M, size",
     [
-        (pt.ones((M_pt,)), ()),
+        (pt.ones((M_pt,)), None),
         (pt.ones((M_pt,)), (M_pt + 1,)),
         (pt.ones((M_pt,)), (2, M_pt)),
-        (pt.ones((M_pt, M_pt + 1)), ()),
+        (pt.ones((M_pt, M_pt + 1)), None),
         (pt.ones((M_pt, M_pt + 1)), (M_pt + 2, M_pt)),
         (pt.ones((M_pt, M_pt + 1)), (2, M_pt + 2, M_pt + 3, M_pt)),
     ],
 )
 def test_dirichlet_infer_shape(M, size):
     rv = dirichlet(M, size=size)
-    rv_shape = list(dirichlet._infer_shape(size or (), [M], None))
+    symbolic_size = rv.owner.inputs[1]
+    rv_shape = list(dirichlet._infer_shape(symbolic_size, [M], None))
 
-    all_args = (M, *size)
+    if size is None:
+        all_args = (M, size)
+    else:
+        all_args = (M, *size)
     fn_inputs = [
         i
         for i in graph_inputs([a for a in all_args if isinstance(a, Variable)])
@@ -1410,15 +1418,17 @@ def test_choice_samples():
 
 def test_choice_infer_shape():
     node = choice([0, 1]).owner
-    res = node.op._infer_shape((), node.inputs[3:], None)
-    assert tuple(res.eval()) == ()
+    symbolic_size = node.inputs[1]
+    res = node.op._infer_shape(symbolic_size, node.inputs[3:], None)
+    assert res == ()
 
-    node = choice([0, 1]).owner
     # The param_shape of a NoneConst is None, during shape_inference
     res = node.op._infer_shape(
-        (), node.inputs[3:], (node.inputs[3].shape, None, node.inputs[5].shape)
+        symbolic_size,
+        node.inputs[3:],
+        (node.inputs[3].shape, None, node.inputs[5].shape),
     )
-    assert tuple(res.eval()) == ()
+    assert res == ()
 
 
 def test_permutation_samples():
