@@ -1,6 +1,5 @@
-"""Defines Updates object for storing a (SharedVariable, new_value) mapping.
+"""Defines Updates object for storing a (SharedVariable, new_value) mapping."""
 
-"""
 import logging
 import warnings
 from collections import OrderedDict

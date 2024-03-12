@@ -2,6 +2,7 @@
 Defines Linkers that deal with C implementations.
 
 """
+
 import logging
 import sys
 from collections import defaultdict
@@ -1566,16 +1567,16 @@ class CLinker(Linker):
 
             # Static methods that can run and destroy the struct built by
             # instantiate.
-            static = """
-        static int {struct_name}_executor({struct_name} *self) {{
+            static = f"""
+        static int {self.struct_name}_executor({self.struct_name} *self) {{
             return self->run();
         }}
 
-        static void {struct_name}_destructor(PyObject *capsule) {{
-            {struct_name} *self = ({struct_name} *)PyCapsule_GetContext(capsule);
+        static void {self.struct_name}_destructor(PyObject *capsule) {{
+            {self.struct_name} *self = ({self.struct_name} *)PyCapsule_GetContext(capsule);
             delete self;
         }}
-    """.format(struct_name=self.struct_name)
+    """
 
             # We add all the support code, compile args, headers and libs we need.
             for support_code in self.support_code() + self.c_support_code_apply:

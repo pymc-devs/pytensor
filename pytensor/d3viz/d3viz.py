@@ -3,7 +3,6 @@
 Author: Christof Angermueller <cangermueller@gmail.com>
 """
 
-
 import json
 import os
 import shutil

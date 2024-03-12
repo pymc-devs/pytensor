@@ -767,10 +767,7 @@ class GemmRelated(COp):
 
     def build_gemm_call(self):
         if hasattr(self, "inplace"):
-            setup_z_Nz_Sz = "if(%(params)s->inplace){{{}}}else{{{}}}".format(
-                self.setup_z_Nz_Sz_inplace,
-                self.setup_z_Nz_Sz_outplace,
-            )
+            setup_z_Nz_Sz = f"if(%(params)s->inplace){{{self.setup_z_Nz_Sz_inplace}}}else{{{self.setup_z_Nz_Sz_outplace}}}"
         else:
             setup_z_Nz_Sz = self.setup_z_Nz_Sz
 

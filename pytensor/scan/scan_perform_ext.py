@@ -5,6 +5,7 @@ To update the `Scan` Cython code you must
 - update the version value in this file and in `scan_perform.pyx`
 
 """
+
 from pytensor.scan.scan_perform import get_version, perform  # noqa: F401
 
 

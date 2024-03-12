@@ -1,4 +1,4 @@
-""" This file don't test everything. It only test one past crash error."""
+"""This file don't test everything. It only test one past crash error."""
 
 import pytensor
 from pytensor import as_symbolic

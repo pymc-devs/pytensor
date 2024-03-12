@@ -4,6 +4,7 @@ We don't have real tests for the cache, but it would be great to make them!
 But this one tests a current behavior that isn't good: the c_code isn't
 deterministic based on the input type and the op.
 """
+
 import multiprocessing
 import os
 import re
@@ -369,8 +370,9 @@ def test_cache_race_condition():
 
         # The module cache must (initially) be `None` for all processes so that
         # `ModuleCache.refresh` is called
-        with patch.object(compiledir_prop, "val", dir_name, create=True), patch.object(
-            pytensor.link.c.cmodule, "_module_cache", None
+        with (
+            patch.object(compiledir_prop, "val", dir_name, create=True),
+            patch.object(pytensor.link.c.cmodule, "_module_cache", None),
         ):
             assert pytensor.config.compiledir == dir_name
 

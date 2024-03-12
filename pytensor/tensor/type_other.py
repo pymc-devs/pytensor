@@ -100,12 +100,7 @@ class SliceConstant(Constant):
         return (SliceConstant, self.data.start, self.data.stop, self.data.step)
 
     def __str__(self):
-        return "{}{{{}, {}, {}}}".format(
-            self.__class__.__name__,
-            self.data.start,
-            self.data.stop,
-            self.data.step,
-        )
+        return f"{self.__class__.__name__}{{{self.data.start}, {self.data.stop}, {self.data.step}}}"
 
 
 SliceType.constant_type = SliceConstant

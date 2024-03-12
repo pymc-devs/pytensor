@@ -3,7 +3,6 @@ Define `SymbolicInput`, `SymbolicOutput`, `In`, `Out`.
 
 """
 
-
 import logging
 
 from pytensor.link.basic import Container

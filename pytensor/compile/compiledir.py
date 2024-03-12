@@ -2,6 +2,7 @@
 This module contains housekeeping functions for cleaning/purging the "compiledir".
 It is used by the "pytensor-cache" CLI tool, located in the /bin folder of the repository.
 """
+
 import logging
 import os
 import pickle

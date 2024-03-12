@@ -473,8 +473,9 @@ def makeTester(
                     f = inplace_func(inputrs, node.outputs, mode=mode, name="test_good")
                 except Exception as exc:
                     err_msg = (
-                        "Test {}::{}: Error occurred while" " trying to make a Function"
-                    ).format(self.op, testname)
+                        f"Test {self.op}::{testname}: Error occurred while"
+                        " trying to make a Function"
+                    )
                     exc.args += (err_msg,)
                     raise
                 if isinstance(self.expected, dict) and testname in self.expected:
@@ -513,29 +514,17 @@ def makeTester(
                         or not np.allclose(variable, expected, atol=eps, rtol=eps)
                     )
                     assert not condition, (
-                        "Test {}::{}: Output {} gave the wrong"
-                        " value. With inputs {}, expected {} (dtype {}),"
-                        " got {} (dtype {}). eps={:f}"
-                        " np.allclose returns {} {}"
-                    ).format(
-                        self.op,
-                        testname,
-                        i,
-                        inputs,
-                        expected,
-                        expected.dtype,
-                        variable,
-                        variable.dtype,
-                        eps,
-                        np.allclose(variable, expected, atol=eps, rtol=eps),
-                        np.allclose(variable, expected),
+                        f"Test {self.op}::{testname}: Output {i} gave the wrong"
+                        f" value. With inputs {inputs}, expected {expected} (dtype {expected.dtype}),"
+                        f" got {variable} (dtype {variable.dtype}). eps={eps:f}"
+                        f" np.allclose returns {np.allclose(variable, expected, atol=eps, rtol=eps)} {np.allclose(variable, expected)}"
                     )
 
                 for description, check in self.checks.items():
                     assert check(inputs, variables), (
-                        "Test {}::{}: Failed check: {} (inputs"
-                        " were {}, outputs were {})"
-                    ).format(self.op, testname, description, inputs, variables)
+                        f"Test {self.op}::{testname}: Failed check: {description} (inputs"
+                        f" were {inputs}, outputs were {variables})"
+                    )
 
         @pytest.mark.skipif(skip, reason="Skipped")
         def test_bad_build(self):
@@ -569,8 +558,9 @@ def makeTester(
                     )
                 except Exception as exc:
                     err_msg = (
-                        "Test {}::{}: Error occurred while trying" " to make a Function"
-                    ).format(self.op, testname)
+                        f"Test {self.op}::{testname}: Error occurred while trying"
+                        " to make a Function"
+                    )
                     exc.args += (err_msg,)
                     raise
 

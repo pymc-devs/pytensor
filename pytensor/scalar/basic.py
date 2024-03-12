@@ -273,7 +273,6 @@ def convert(x, dtype=None):
 
 
 class ScalarType(CType, HasDataType, HasShape):
-
     """
     Internal class, should not be used by clients.
 

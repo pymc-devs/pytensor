@@ -7,6 +7,7 @@ http://www-users.cs.umn.edu/~saad/software/SPARSKIT/paper.ps
 TODO: Automatic methods for determining best sparse format?
 
 """
+
 from typing import Literal
 from warnings import warn
 
@@ -486,13 +487,7 @@ class SparseConstant(TensorConstant, _sparse_py_operators):
         return SparseConstantSignature((self.type, self.data))
 
     def __str__(self):
-        return "{}{{{},{},shape={},nnz={}}}".format(
-            self.__class__.__name__,
-            self.format,
-            self.dtype,
-            self.data.shape,
-            self.data.nnz,
-        )
+        return f"{self.__class__.__name__}{{{self.format},{self.dtype},shape={self.data.shape},nnz={self.data.nnz}}}"
 
     def __repr__(self):
         return str(self)

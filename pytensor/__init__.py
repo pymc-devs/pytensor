@@ -18,7 +18,6 @@ To learn more, check out:
 
 """
 
-
 __docformat__ = "restructuredtext en"
 
 # Set a default logger. It is important to do this before importing some other

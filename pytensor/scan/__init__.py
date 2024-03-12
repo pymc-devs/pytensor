@@ -33,7 +33,6 @@ functions: ``scan()``, ``map()``, ``reduce()``, ``foldl()``,
 
 """
 
-
 __docformat__ = "restructedtext en"
 __authors__ = (
     "Razvan Pascanu "

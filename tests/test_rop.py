@@ -11,7 +11,6 @@ the docstring of the functions: check_mat_rop_lop, check_rop_lop,
 check_nondiff_rop,
 """
 
-
 import numpy as np
 import pytest
 

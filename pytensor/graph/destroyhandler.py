@@ -3,6 +3,7 @@ Classes and functions for validating graphs that contain view
 and inplace operations.
 
 """
+
 import itertools
 from collections import OrderedDict, deque
 

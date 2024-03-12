@@ -1,4 +1,5 @@
 """This module defines the base classes for graph rewriting."""
+
 import abc
 import copy
 import functools
@@ -123,8 +124,7 @@ class GraphRewriter(Rewriter):
         """Rewrite a `FunctionGraph`."""
         return self.rewrite(fgraph)
 
-    def add_requirements(self, fgraph):
-        ...
+    def add_requirements(self, fgraph): ...
 
     def print_summary(self, stream=sys.stdout, level=0, depth=-1):
         name = getattr(self, "name", None)
@@ -1683,9 +1683,8 @@ class PatternNodeRewriter(NodeRewriter):
             else:
                 return str(pattern)
 
-        return "{} -> {}".format(
-            pattern_to_str(self.in_pattern),
-            pattern_to_str(self.out_pattern),
+        return (
+            f"{pattern_to_str(self.in_pattern)} -> {pattern_to_str(self.out_pattern)}"
         )
 
     def __repr__(self):

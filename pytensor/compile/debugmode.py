@@ -5,7 +5,6 @@ TODO: add support for IfElse Op, LazyLinker, etc.
 
 """
 
-
 import copy
 import gc
 import logging
@@ -2317,10 +2316,7 @@ class DebugMode(Mode):
             raise ValueError("DebugMode has to check at least one of c and py code")
 
     def __str__(self):
-        return "DebugMode(linker={}, optimizer={})".format(
-            self.provided_linker,
-            self.provided_optimizer,
-        )
+        return f"DebugMode(linker={self.provided_linker}, optimizer={self.provided_optimizer})"
 
 
 register_mode("DEBUG_MODE", DebugMode(optimizer="fast_run"))

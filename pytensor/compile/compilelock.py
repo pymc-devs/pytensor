@@ -2,6 +2,7 @@
 Locking mechanism to ensure no two compilations occur simultaneously
 in the same compilation directory (which can cause crashes).
 """
+
 import os
 import threading
 from contextlib import contextmanager

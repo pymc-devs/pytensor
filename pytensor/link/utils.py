@@ -503,14 +503,8 @@ def raise_with_op(
                 detailed_err_msg += f", TotalSize: {item[3]} Byte(s)\n"
             else:
                 detailed_err_msg += "\n"
-        detailed_err_msg += " TotalSize: {} Byte(s) {:.3f} GB\n".format(
-            total_size,
-            total_size / 1024 / 1024 / 1024,
-        )
-        detailed_err_msg += " TotalSize inputs: {} Byte(s) {:.3f} GB\n".format(
-            total_size_inputs,
-            total_size_inputs / 1024 / 1024 / 1024,
-        )
+        detailed_err_msg += f" TotalSize: {total_size} Byte(s) {total_size / 1024 / 1024 / 1024:.3f} GB\n"
+        detailed_err_msg += f" TotalSize inputs: {total_size_inputs} Byte(s) {total_size_inputs / 1024 / 1024 / 1024:.3f} GB\n"
 
     else:
         hints.append(

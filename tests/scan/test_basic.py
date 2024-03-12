@@ -1,12 +1,12 @@
 """
-  Questions and notes about scan that should be answered :
+Questions and notes about scan that should be answered :
 
-   * Scan seems to do copies of every input variable. Is that needed?
-   answer : probably not, but it doesn't hurt also ( what we copy is
-   pytensor variables, which just cary information about the type / dimension
-   of the data)
+ * Scan seems to do copies of every input variable. Is that needed?
+ answer : probably not, but it doesn't hurt also ( what we copy is
+ pytensor variables, which just cary information about the type / dimension
+ of the data)
 
-   * There is some of scan functionality that is not well documented
+ * There is some of scan functionality that is not well documented
 """
 
 import os

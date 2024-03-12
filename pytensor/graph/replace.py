@@ -40,8 +40,7 @@ def clone_replace(
     output: Sequence[Variable],
     replace: Optional[ReplaceTypes] = None,
     **rebuild_kwds,
-) -> list[Variable]:
-    ...
+) -> list[Variable]: ...
 
 
 @overload
@@ -51,8 +50,7 @@ def clone_replace(
         Union[Iterable[tuple[Variable, Variable]], dict[Variable, Variable]]
     ] = None,
     **rebuild_kwds,
-) -> Variable:
-    ...
+) -> Variable: ...
 
 
 def clone_replace(
@@ -95,8 +93,7 @@ def graph_replace(
     replace: Optional[ReplaceTypes] = None,
     *,
     strict=True,
-) -> Variable:
-    ...
+) -> Variable: ...
 
 
 @overload
@@ -105,8 +102,7 @@ def graph_replace(
     replace: Optional[ReplaceTypes] = None,
     *,
     strict=True,
-) -> list[Variable]:
-    ...
+) -> list[Variable]: ...
 
 
 def graph_replace(
@@ -229,16 +225,14 @@ def _vectorize_not_needed(op, node, *batched_inputs):
 def vectorize_graph(
     outputs: Variable,
     replace: Mapping[Variable, Variable],
-) -> Variable:
-    ...
+) -> Variable: ...
 
 
 @overload
 def vectorize_graph(
     outputs: Sequence[Variable],
     replace: Mapping[Variable, Variable],
-) -> Sequence[Variable]:
-    ...
+) -> Sequence[Variable]: ...
 
 
 def vectorize_graph(
