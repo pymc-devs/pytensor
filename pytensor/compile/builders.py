@@ -1,4 +1,5 @@
 """Define new Ops from existing Ops"""
+
 from collections import OrderedDict
 from collections.abc import Sequence
 from copy import copy

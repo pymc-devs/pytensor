@@ -912,8 +912,9 @@ def test_infer_static_shape():
     with pytest.raises(TypeError, match="^Shapes must be scalar integers.*"):
         infer_static_shape([constant(1.0)])
 
-    with config.change_flags(exception_verbosity="high"), pytest.raises(
-        TypeError, match=r"A\. x"
+    with (
+        config.change_flags(exception_verbosity="high"),
+        pytest.raises(TypeError, match=r"A\. x"),
     ):
         infer_static_shape([dscalar("x")])
 

@@ -1,4 +1,5 @@
 """Test config options."""
+
 import configparser as stdlib_configparser
 import io
 import pickle

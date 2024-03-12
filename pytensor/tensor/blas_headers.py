@@ -1,4 +1,4 @@
-""" Header text for the C and Fortran BLAS interfaces.
+"""Header text for the C and Fortran BLAS interfaces.
 
 There is no standard name or location for this header, so we just insert it
 ourselves into the C code.

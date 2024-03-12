@@ -2,6 +2,7 @@
 
 Author: Christof Angermueller <cangermueller@gmail.com>
 """
+
 import os
 from functools import reduce
 

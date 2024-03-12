@@ -646,13 +646,7 @@ def _debugprint(
             tot_time_percent = (tot_time_dict[node] / profile.fct_call_time) * 100
 
             print(
-                "{} --> {:8.2e}s {:4.1f}% {:8.2e}s {:4.1f}%".format(
-                    var_output,
-                    op_time,
-                    op_time_percent,
-                    tot_time,
-                    tot_time_percent,
-                ),
+                f"{var_output} --> {op_time:8.2e}s {op_time_percent:4.1f}% {tot_time:8.2e}s {tot_time_percent:4.1f}%",
                 file=file,
             )
         else:
@@ -1157,14 +1151,14 @@ if use_ascii:
         epsilon="\\epsilon",
     )
 else:
-    special = dict(middle_dot="\u00B7", big_sigma="\u03A3")
+    special = dict(middle_dot="\u00b7", big_sigma="\u03a3")
 
     greek = dict(
-        alpha="\u03B1",
-        beta="\u03B2",
-        gamma="\u03B3",
-        delta="\u03B4",
-        epsilon="\u03B5",
+        alpha="\u03b1",
+        beta="\u03b2",
+        gamma="\u03b3",
+        delta="\u03b4",
+        epsilon="\u03b5",
     )
 
 

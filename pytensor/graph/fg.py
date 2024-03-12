@@ -1,4 +1,5 @@
 """A container for specifying and manipulating a graph with distinct inputs and outputs."""
+
 import time
 from collections import OrderedDict
 from collections.abc import Iterable, Sequence

@@ -1,4 +1,4 @@
-""" Tensor optimizations addressing the ops in basic.py.
+"""Tensor optimizations addressing the ops in basic.py.
 
 Notes
 -----

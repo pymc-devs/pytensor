@@ -1,4 +1,5 @@
 """Core graph classes."""
+
 import abc
 import warnings
 from collections import deque
@@ -643,8 +644,7 @@ class AtomicVariable(Variable[_TypeType, None]):
         super().__init__(type=type, owner=None, index=None, name=name, **kwargs)
 
     @abc.abstractmethod
-    def signature(self):
-        ...
+    def signature(self): ...
 
     def merge_signature(self):
         return self.signature()
@@ -1309,8 +1309,7 @@ def general_toposort(
     compute_deps_cache: Callable[[T], Optional[Union[OrderedSet, list[T]]]],
     deps_cache: Optional[dict[T, list[T]]],
     clients: Optional[dict[T, list[T]]],
-) -> list[T]:
-    ...
+) -> list[T]: ...
 
 
 @overload
@@ -1320,8 +1319,7 @@ def general_toposort(
     compute_deps_cache: None,
     deps_cache: None,
     clients: Optional[dict[T, list[T]]],
-) -> list[T]:
-    ...
+) -> list[T]: ...
 
 
 def general_toposort(

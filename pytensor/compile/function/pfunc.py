@@ -35,8 +35,7 @@ def rebuild_collect_shared(
         list[Variable],
         list[SharedVariable],
     ],
-]:
-    ...
+]: ...
 
 
 @overload
@@ -58,8 +57,7 @@ def rebuild_collect_shared(
         list[Variable],
         list[SharedVariable],
     ],
-]:
-    ...
+]: ...
 
 
 @overload
@@ -81,8 +79,7 @@ def rebuild_collect_shared(
         list[Variable],
         list[SharedVariable],
     ],
-]:
-    ...
+]: ...
 
 
 @overload
@@ -104,8 +101,7 @@ def rebuild_collect_shared(
         list[Variable],
         list[SharedVariable],
     ],
-]:
-    ...
+]: ...
 
 
 def rebuild_collect_shared(

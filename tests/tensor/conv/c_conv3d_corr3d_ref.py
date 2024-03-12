@@ -160,13 +160,7 @@ class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
     padD = property(lambda self: self.pad[2])
 
     def __str__(self):
-        return "{}{{{}, {}, {}, {}}}".format(
-            self.__class__.__name__,
-            self.border_mode,
-            str(self.subsample),
-            str(self.filter_dilation),
-            str(self.num_groups),
-        )
+        return f"{self.__class__.__name__}{{{self.border_mode}, {self.subsample!s}, {self.filter_dilation!s}, {self.num_groups!s}}}"
 
     @staticmethod
     def as_common_dtype(in1, in2):

@@ -3,7 +3,6 @@ Function to detect memory sharing for ndarray AND sparse type.
 numpy version support only ndarray.
 """
 
-
 import numpy as np
 
 from pytensor.tensor.type import TensorType

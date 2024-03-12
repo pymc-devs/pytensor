@@ -2,7 +2,6 @@
 Abstract conv interface
 """
 
-
 import logging
 import sys
 import warnings
@@ -2175,8 +2174,8 @@ class BaseAbstractConv(Op):
                     )
                 ):
                     raise ValueError(
-                        "invalid border mode {}. The tuple can only contain integers "
-                        " or pairs of integers".format(border_mode)
+                        f"invalid border mode {border_mode}. The tuple can only contain integers "
+                        " or pairs of integers"
                     )
                 if isinstance(mode, tuple):
                     if convdim != 2:
@@ -2348,29 +2347,29 @@ class BaseAbstractConv(Op):
                         for n in range(output_channel_offset):
                             for im0 in range(input_channel_offset):
                                 if unshared:
-                                    out[
-                                        b, g * output_channel_offset + n, ...
-                                    ] += self.unshared2d(
-                                        img[b, g * input_channel_offset + im0, ...],
-                                        dilated_kern[
-                                            g * output_channel_offset + n, im0, ...
-                                        ],
-                                        out_shape[2:],
-                                        direction,
+                                    out[b, g * output_channel_offset + n, ...] += (
+                                        self.unshared2d(
+                                            img[b, g * input_channel_offset + im0, ...],
+                                            dilated_kern[
+                                                g * output_channel_offset + n, im0, ...
+                                            ],
+                                            out_shape[2:],
+                                            direction,
+                                        )
                                     )
                                 else:
                                     # some cast generates a warning here
-                                    out[
-                                        b, g * output_channel_offset + n, ...
-                                    ] += _convolve2d(
-                                        img[b, g * input_channel_offset + im0, ...],
-                                        dilated_kern[
-                                            g * output_channel_offset + n, im0, ...
-                                        ],
-                                        1,
-                                        val,
-                                        bval,
-                                        0,
+                                    out[b, g * output_channel_offset + n, ...] += (
+                                        _convolve2d(
+                                            img[b, g * input_channel_offset + im0, ...],
+                                            dilated_kern[
+                                                g * output_channel_offset + n, im0, ...
+                                            ],
+                                            1,
+                                            val,
+                                            bval,
+                                            0,
+                                        )
                                     )
 
         elif self.convdim == 3:
@@ -2550,10 +2549,8 @@ class AbstractConv(BaseAbstractConv):
             )
             if kern.shape[1 : 1 + self.convdim] != out_shape[2 : 2 + self.convdim]:
                 raise ValueError(
-                    "Kernel shape {} does not match " "computed output size {}".format(
-                        kern.shape[1 : 1 + self.convdim],
-                        out_shape[2 : 2 + self.convdim],
-                    )
+                    f"Kernel shape {kern.shape[1 : 1 + self.convdim]} does not match "
+                    f"computed output size {out_shape[2 : 2 + self.convdim]}"
                 )
             if any(self.subsample[i] > 1 for i in range(self.convdim)):
                 # Expand regions in kernel to correct for subsampling
@@ -3236,10 +3233,8 @@ class AbstractConv_gradInputs(BaseAbstractConv):
         if tuple(expected_topgrad_shape) != tuple(topgrad.shape):
             raise ValueError(
                 "invalid input_shape for gradInputs: the given input_shape "
-                "would produce an output of shape {}, but the given topgrad "
-                "has shape {}".format(
-                    tuple(expected_topgrad_shape), tuple(topgrad.shape)
-                )
+                f"would produce an output of shape {tuple(expected_topgrad_shape)}, but the given topgrad "
+                f"has shape {tuple(topgrad.shape)}"
             )
         if any(self.subsample[i] > 1 for i in range(self.convdim)):
             new_shape = (

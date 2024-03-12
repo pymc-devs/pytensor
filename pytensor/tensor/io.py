@@ -49,10 +49,8 @@ class LoadFromDisk(Op):
         out[0][0] = result
 
     def __str__(self):
-        return "Load{{dtype: {}, shape: {}, mmep: {}}}".format(
-            self.dtype,
-            self.shape,
-            self.mmap_mode,
+        return (
+            f"Load{{dtype: {self.dtype}, shape: {self.shape}, mmep: {self.mmap_mode}}}"
         )
 
 

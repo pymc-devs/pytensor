@@ -1,6 +1,7 @@
 """
 Tests of printing functionality
 """
+
 import logging
 from io import StringIO
 from textwrap import dedent

@@ -109,8 +109,8 @@ class BaseCorrMM(OpenMPOp, _NoPythonOp):
                     border += ((int(mode), int(mode)),)
                 else:
                     raise ValueError(
-                        "invalid border mode {}. The tuple can only contain "
-                        "integers or tuples of length 2".format(border_mode)
+                        f"invalid border mode {border_mode}. The tuple can only contain "
+                        "integers or tuples of length 2"
                     )
             border_mode = border
         elif border_mode not in ("valid", "full", "half"):
@@ -176,14 +176,7 @@ class BaseCorrMM(OpenMPOp, _NoPythonOp):
     padW_r = property(lambda self: self.pad[1][1])
 
     def __str__(self):
-        return "{}{{{}, {}, {}, {} {}}}".format(
-            self.__class__.__name__,
-            self.border_mode,
-            str(self.subsample),
-            str(self.filter_dilation),
-            str(self.num_groups),
-            str(self.unshared),
-        )
+        return f"{self.__class__.__name__}{{{self.border_mode}, {self.subsample!s}, {self.filter_dilation!s}, {self.num_groups!s} {self.unshared!s}}}"
 
     @staticmethod
     def as_common_dtype(in1, in2):
