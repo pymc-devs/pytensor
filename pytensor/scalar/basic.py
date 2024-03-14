@@ -3030,7 +3030,7 @@ class Log10(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz / (x * np.log(10.0)),)
+        return (gz / (x * np.asarray(math.log(10.0)).astype(x.dtype)),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs

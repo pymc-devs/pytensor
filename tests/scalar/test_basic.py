@@ -544,3 +544,14 @@ def test_shape():
     assert b.shape.type.ndim == 1
     assert b.shape.type.shape == (0,)
     assert b.shape.type.dtype == "int64"
+
+
+def test_grad_log10():
+    # Ensure that log10 does not upcast gradient
+    # This is a regression test for
+    # https://github.com/pymc-devs/pytensor/issues/667
+    a = float32("log10_a")
+    b = log10(a)
+    b_grad = pytensor.gradient.grad(b, a)
+    assert b.dtype == "float32"
+    assert b_grad.dtype == "float32"
