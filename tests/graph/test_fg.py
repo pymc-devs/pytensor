@@ -31,8 +31,8 @@ class TestFunctionGraph:
         s = pickle.dumps(func)
         new_func = pickle.loads(s)
 
-        assert all(type(a) == type(b) for a, b in zip(func.inputs, new_func.inputs))
-        assert all(type(a) == type(b) for a, b in zip(func.outputs, new_func.outputs))
+        assert all(type(a) is type(b) for a, b in zip(func.inputs, new_func.inputs))
+        assert all(type(a) is type(b) for a, b in zip(func.outputs, new_func.outputs))
         assert all(
             type(a.op) is type(b.op)  # noqa: E721
             for a, b in zip(func.apply_nodes, new_func.apply_nodes)

@@ -348,7 +348,7 @@ class TestVerifyGradSparse:
             self.structured = structured
 
         def __eq__(self, other):
-            return (type(self) == type(other)) and self.structured == other.structured
+            return (type(self) is type(other)) and self.structured == other.structured
 
         def __hash__(self):
             return hash(type(self)) ^ hash(self.structured)
