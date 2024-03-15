@@ -44,20 +44,25 @@ class Cholesky(Op):
         nans instead.
     """
 
-    # TODO: inplace
     # TODO: for specific dtypes
     # TODO: LAPACK wrapper with in-place behavior, for solve also
 
-    __props__ = ("lower", "destructive", "on_error")
+    __props__ = ("lower", "overwrite_a", "on_error")
     gufunc_signature = "(m,m)->(m,m)"
 
-    def __init__(self, *, lower=True, check_finite=True, on_error="raise"):
+    def __init__(
+        self, *, lower=True, check_finite=True, on_error="raise", overwrite_a=False
+    ):
         self.lower = lower
         self.destructive = False
         self.check_finite = check_finite
+        self.overwrite_a = overwrite_a
+
         if on_error not in ("raise", "nan"):
             raise ValueError('on_error must be one of "raise" or ""nan"')
         self.on_error = on_error
+        if overwrite_a:
+            self.destroy_map = {0: [0]}
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]
@@ -68,17 +73,27 @@ class Cholesky(Op):
         return Apply(self, [x], [x.type()])
 
     def perform(self, node, inputs, outputs):
-        x = inputs[0]
-        z = outputs[0]
+        (x,) = inputs
+        (z,) = outputs
+        input_dtype = x.dtype
         try:
-            z[0] = scipy.linalg.cholesky(
-                x, lower=self.lower, check_finite=self.check_finite
-            ).astype(x.dtype)
+            if x.flags["C_CONTIGUOUS"] and self.overwrite_a:
+                # Inputs to the LAPACK functions need to be exactly as expected for overwrite_a to work correctly,
+                # see https://github.com/scipy/scipy/issues/8155#issuecomment-343996798
+                x = scipy.linalg.cholesky(
+                    x.T, lower=not self.lower, overwrite_a=self.overwrite_a
+                ).T
+            else:
+                x = scipy.linalg.cholesky(
+                    x, lower=self.lower, overwrite_a=self.overwrite_a
+                )
+
         except scipy.linalg.LinAlgError:
             if self.on_error == "raise":
                 raise
             else:
-                z[0] = (np.zeros(x.shape) * np.nan).astype(x.dtype)
+                x = np.zeros(x.shape) * np.nan
+        z[0] = x.astype(input_dtype)
 
     def L_op(self, inputs, outputs, gradients):
         """
@@ -131,6 +146,12 @@ class Cholesky(Op):
         else:
             return [grad]
 
+    def try_inplace_inputs(self, candidate_inputs: list[int]) -> "Op":
+        if candidate_inputs == [0]:
+            return type(self)(
+                lower=self.lower, overwrite_a=True, on_error=self.on_error
+            )
+
 
 def cholesky(x, lower=True, on_error="raise", check_finite=False):
     return Blockwise(
@@ -145,6 +166,8 @@ class SolveBase(Op):
         "lower",
         "check_finite",
         "b_ndim",
+        "overwrite_a",
+        "overwrite_b",
     )
 
     def __init__(
@@ -153,6 +176,8 @@ class SolveBase(Op):
         lower=False,
         check_finite=True,
         b_ndim,
+        overwrite_a=False,
+        overwrite_b=False,
     ):
         self.lower = lower
         self.check_finite = check_finite
@@ -162,6 +187,16 @@ class SolveBase(Op):
             self.gufunc_signature = "(m,m),(m)->(m)"
         else:
             self.gufunc_signature = "(m,m),(m,n)->(m,n)"
+        self.overwrite_a = overwrite_a
+        self.overwrite_b = overwrite_b
+        destroy_map = {}
+        if self.overwrite_a and self.overwrite_b:
+            destroy_map[0] = [0, 1]
+        elif self.overwrite_a:
+            destroy_map[0] = [0]
+        elif self.overwrite_b:
+            destroy_map[0] = [1]
+        self.destroy_map = destroy_map
 
     def perform(self, node, inputs, outputs):
         pass
@@ -235,7 +270,16 @@ def _default_b_ndim(b, b_ndim):
 
 
 class CholeskySolve(SolveBase):
+    __props__ = (
+        "lower",
+        "check_finite",
+        "b_ndim",
+        "overwrite_b",
+    )
+
     def __init__(self, **kwargs):
+        if kwargs.get("overwrite_a", False):
+            raise ValueError("overwrite_a is not supported for CholeskySolve")
         kwargs.setdefault("lower", True)
         super().__init__(**kwargs)
 
@@ -250,7 +294,14 @@ class CholeskySolve(SolveBase):
         output_storage[0][0] = rval
 
     def L_op(self, *args, **kwargs):
+        # TODO: Base impl should work, let's try it
         raise NotImplementedError()
+
+    def try_inplace_inputs(self, candidate_inputs: list[int]) -> "Op":
+        if 1 in candidate_inputs:
+            new_props = self._props_dict()
+            new_props["overwrite_b"] = True
+            return type(self)(**new_props)
 
 
 def cho_solve(c_and_lower, b, *, check_finite=True, b_ndim: Optional[int] = None):
@@ -286,9 +337,12 @@ class SolveTriangular(SolveBase):
         "lower",
         "check_finite",
         "b_ndim",
+        "overwrite_b",
     )
 
     def __init__(self, *, trans=0, unit_diagonal=False, **kwargs):
+        if kwargs.get("overwrite_a", False):
+            raise ValueError("overwrite_a is not supported for SolverTriangulare")
         super().__init__(**kwargs)
         self.trans = trans
         self.unit_diagonal = unit_diagonal
@@ -313,6 +367,12 @@ class SolveTriangular(SolveBase):
             res[0] = ptb.triu(res[0])
 
         return res
+
+    def try_inplace_inputs(self, candidate_inputs: list[int]) -> "Op":
+        if 1 in candidate_inputs:
+            new_props = self._props_dict()
+            new_props["overwrite_b"] = True
+            return type(self)(**new_props)
 
 
 def solve_triangular(
@@ -373,6 +433,8 @@ class Solve(SolveBase):
         "lower",
         "check_finite",
         "b_ndim",
+        "overwrite_a",
+        "overwrite_b",
     )
 
     def __init__(self, *, assume_a="gen", **kwargs):
@@ -391,6 +453,14 @@ class Solve(SolveBase):
             check_finite=self.check_finite,
             assume_a=self.assume_a,
         )
+
+    def try_inplace_inputs(self, candidate_inputs: list[int]) -> "Op":
+        new_props = self._props_dict()
+        if 0 in candidate_inputs:
+            new_props["overwrite_a"] = True
+        if 1 in candidate_inputs:
+            new_props["overwrite_b"] = True
+        return type(self)(**new_props)
 
 
 def solve(

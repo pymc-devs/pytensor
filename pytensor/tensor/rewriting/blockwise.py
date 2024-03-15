@@ -1,9 +1,11 @@
+import itertools
 from typing import Optional
 
+from pytensor.compile import Supervisor
 from pytensor.compile.mode import optdb
 from pytensor.graph import Constant, node_rewriter
 from pytensor.graph.replace import vectorize_node
-from pytensor.graph.rewriting.basic import copy_stack_trace, out2in
+from pytensor.graph.rewriting.basic import copy_stack_trace, in2out, out2in
 from pytensor.tensor.basic import Alloc, ARange, alloc, shape_padleft
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.math import Dot
@@ -57,7 +59,7 @@ optdb.register(
     "fast_run",
     "fast_compile",
     "blockwise",
-    position=49,
+    position=99,  # TODO: Check if this makes sense
 )
 
 
@@ -200,3 +202,77 @@ def local_blockwise_alloc(fgraph, node):
     assert new_outs[0].type.broadcastable == old_out_type.broadcastable
     copy_stack_trace(node.outputs, new_outs)
     return new_outs
+
+
+@node_rewriter([Blockwise], inplace=True)
+def node_blockwise_inplace(fgraph, node):
+    # Find inputs that are candidates for inplacing
+    blockwise_op = node.op
+
+    if blockwise_op.destroy_map:
+        # Op already has inplace
+        return False
+
+    core_op = blockwise_op.core_op
+    batch_ndim = blockwise_op.batch_ndim(node)
+    out_batch_bcast = node.outputs[0].type.broadcastable[:batch_ndim]
+
+    # TODO: Refactor this code, which is also present in Elemwise Inplacer
+    protected_inputs = [
+        f.protected for f in fgraph._features if isinstance(f, Supervisor)
+    ]
+    protected_inputs = list(itertools.chain.from_iterable(protected_inputs))
+    protected_inputs.extend(fgraph.outputs)
+
+    # TODO: Add test for the broadcastable logic (don't inplace inputs that are being broadcasted)
+    candidate_inputs = [
+        idx
+        for idx, inp in enumerate(node.inputs)
+        if (
+            not isinstance(inp, Constant)
+            and inp.type.broadcastable[:batch_ndim] == out_batch_bcast
+            and not fgraph.has_destroyers([inp])
+            and inp not in protected_inputs
+        )
+    ]
+
+    if not candidate_inputs:
+        return None
+
+    try:
+        inplace_core_op = core_op.try_inplace_inputs(candidate_inputs)
+    except NotImplementedError:
+        return False
+
+    core_destroy_map = inplace_core_op.destroy_map
+
+    if not core_destroy_map:
+        return False
+
+    # Check Op is not trying to inplace on non-candidate inputs
+    for destroyed_inputs in core_destroy_map.values():
+        for destroyed_input in destroyed_inputs:
+            if destroyed_input not in candidate_inputs:
+                raise ValueError("core_op did not respect candidate inputs")
+
+    # Recreate core_op with inplace
+    inplace_blockwise_op = Blockwise(
+        core_op=inplace_core_op,
+        signature=blockwise_op.signature,
+        name=blockwise_op.name,
+        gufunc_spec=blockwise_op.gufunc_spec,
+        destroy_map=core_destroy_map,
+    )
+
+    return inplace_blockwise_op.make_node(*node.inputs).outputs
+
+
+# After destroyhandler(49.5) but before we try to make elemwise things inplace (75)
+blockwise_inplace = in2out(node_blockwise_inplace, name="blockwise_inplace")
+optdb.register(
+    "blockwise_inplace",
+    blockwise_inplace,
+    "fast_run",
+    "inplace",
+    position=69.0,
+)

@@ -1,3 +1,4 @@
+import itertools
 import re
 from itertools import product
 from typing import Optional, Union
@@ -222,6 +223,7 @@ class BlockwiseOpTester:
     core_op = None
     signature = None
     batcheable_axes = None
+    inplace_candidate_inputs = None
 
     @classmethod
     def setup_class(cls):
@@ -265,7 +267,7 @@ class BlockwiseOpTester:
             else:  # no-break
                 yield vec_inputs, vec_inputs_testvals
 
-    def test_perform(self):
+    def ttest_perform(self):
         base_inputs = [
             tensor(shape=(None,) * len(param_sig)) for param_sig in self.params_sig
         ]
@@ -283,7 +285,7 @@ class BlockwiseOpTester:
                 atol=1e-7 if config.floatX == "float64" else 1e-5,
             )
 
-    def test_grad(self):
+    def ttest_grad(self):
         base_inputs = [
             tensor(shape=(None,) * len(param_sig)) for param_sig in self.params_sig
         ]
@@ -316,6 +318,57 @@ class BlockwiseOpTester:
                     atol=1e-6 if config.floatX == "float64" else 1e-4,
                 )
 
+    def test_inplace(self):
+        if not self.inplace_candidate_inputs:
+            pytest.skip("No inplace candidate inputs")
+
+        base_inputs = [
+            tensor(shape=(None,) * len(param_sig)) for param_sig in self.params_sig
+        ]
+        core_func = pytensor.function(base_inputs, self.core_op(*base_inputs))
+        np_func = np.vectorize(core_func, signature=self.signature)
+
+        candidate_inputs = self.inplace_candidate_inputs
+
+        batch_shape = (2,)
+        batch_inputs = []
+        batch_inputs_test_val = []
+        for param_sig in self.params_sig:
+            batch_inputs.append(tensor(shape=batch_shape + (None,) * len(param_sig)))
+            batch_inputs_test_val.append(
+                self.create_testvals(shape=batch_shape + param_sig)
+            )
+
+        # TODO: Document this and the func_inputs logic
+        for selected_inputs in itertools.chain.from_iterable(
+            itertools.combinations(candidate_inputs, r=n)
+            for n in range(1, len(candidate_inputs))
+        ):
+            func_inputs = [
+                pytensor.In(inp, mutable=idx in selected_inputs)
+                for idx, inp in enumerate(batch_inputs)
+            ]
+            pt_func = pytensor.function(func_inputs, self.block_op(*batch_inputs))
+
+            blockwise_op = pt_func.maker.fgraph.outputs[0].owner.op
+            assert set(
+                itertools.chain.from_iterable(blockwise_op.destroy_map.values())
+            ) == set(selected_inputs)
+
+            batch_inputs_test_val_copy = [np.copy(inp) for inp in batch_inputs_test_val]
+            np.testing.assert_allclose(
+                pt_func(*batch_inputs_test_val_copy),
+                np_func(*batch_inputs_test_val),
+                rtol=1e-7 if config.floatX == "float64" else 1e-5,
+                atol=1e-7 if config.floatX == "float64" else 1e-5,
+            )
+            for candidate_input in candidate_inputs:
+                # Note: It may still be working in place and not be detectable by this check
+                assert not np.allclose(
+                    batch_inputs_test_val[candidate_input],
+                    batch_inputs_test_val_copy[candidate_input],
+                )
+
 
 class MatrixOpBlockwiseTester(BlockwiseOpTester):
     def create_testvals(self, shape):
@@ -327,6 +380,7 @@ class MatrixOpBlockwiseTester(BlockwiseOpTester):
 class TestCholesky(MatrixOpBlockwiseTester):
     core_op = Cholesky(lower=True)
     signature = "(m, m) -> (m, m)"
+    inplace_candidate_inputs = [0]
 
 
 class TestMatrixInverse(MatrixOpBlockwiseTester):
@@ -337,11 +391,13 @@ class TestMatrixInverse(MatrixOpBlockwiseTester):
 class TestSolveVector(BlockwiseOpTester):
     core_op = Solve(lower=True, b_ndim=1)
     signature = "(m, m),(m) -> (m)"
+    inplace_candidate_inputs = [0, 1]
 
 
 class TestSolveMatrix(BlockwiseOpTester):
     core_op = Solve(lower=True, b_ndim=2)
     signature = "(m, m),(m, n) -> (m, n)"
+    inplace_candidate_inputs = [0, 1]
 
 
 @pytest.mark.parametrize(
