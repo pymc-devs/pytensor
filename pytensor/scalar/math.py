@@ -1495,19 +1495,18 @@ class BetaInc(ScalarOp):
             ),
         ]
 
-
     def c_support_code(self, **kwargs):
-        with open(os.path.join(os.path.dirname(__file__), "c_code", "betainc.c")) as f:
+        with open(os.path.join(os.path.dirname(__file__), "c_code", "incbet.c")) as f:
             raw = f.read()
             return raw
 
     def c_code(self, node, name, inp, out, sub):
-        (a,b,x) = inp
+        (a, b, x) = inp
         (z,) = out
 
         if node.inputs[0].type in float_types:
             dtype = "npy_" + node.outputs[0].dtype
-            return f"{z} = ({dtype}) betainc({a}, {b}, {x});"
+            return f"{z} = ({dtype}) incbet({a}, {b}, {x});"
 
         raise NotImplementedError("type not supported", type)
 
