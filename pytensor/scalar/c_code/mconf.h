@@ -1,6 +1,6 @@
-/*                                                     mconf.h
+/*							mconf.h
  *
- *     Common include file for math routines
+ *	Common include file for math routines
  *
  *
  *
@@ -12,8 +12,20 @@
  *
  * DESCRIPTION:
  *
- * The file includes a conditional assembly definition for the type of
- * computer arithmetic (IEEE, Motorola IEEE, or UNKnown).
+ * This file contains definitions for error codes that are
+ * passed to the common error handling routine mtherr()
+ * (which see).
+ *
+ * The file also includes a conditional assembly definition
+ * for the type of computer arithmetic (IEEE, DEC, Motorola
+ * IEEE, or UNKnown).
+ * 
+ * For Digital Equipment PDP-11 and VAX computers, certain
+ * IBM systems, and others that use numbers with a 56-bit
+ * significand, the symbol DEC should be defined.  In this
+ * mode, most floating point constants are given as arrays
+ * of octal integers to eliminate decimal to binary conversion
+ * errors that might be introduced by the compiler.
  *
  * For little-endian computers, such as IBM PC, that follow the
  * IEEE Standard for Binary Floating Point Arithmetic (ANSI/IEEE
@@ -44,28 +56,83 @@
  * may fail on many systems.  Verify that they are supposed
  * to work on your computer.
  */
-
 /*
- * Cephes Math Library Release 2.3:  June, 1995
- * Copyright 1984, 1987, 1989, 1995 by Stephen L. Moshier
+Cephes Math Library Release 2.3:  June, 1995
+Copyright 1984, 1987, 1989, 1995 by Stephen L. Moshier
+*/
+
+
+/* Define if the `long double' type works.  */
+#define HAVE_LONG_DOUBLE 1
+
+/* Define as the return type of signal handlers (int or void).  */
+#define RETSIGTYPE void
+
+/* Define if you have the ANSI C header files.  */
+#define STDC_HEADERS 1
+
+/* Define if your processor stores words with the most significant
+   byte first (like Motorola and SPARC, unlike Intel and VAX).  */
+/* #undef WORDS_BIGENDIAN */
+
+/* Define if floating point words are bigendian.  */
+/* #undef FLOAT_WORDS_BIGENDIAN */
+
+/* The number of bytes in a int.  */
+#define SIZEOF_INT 4
+
+/* Define if you have the <string.h> header file.  */
+#define HAVE_STRING_H 1
+
+/* Name of package */
+#define PACKAGE "cephes"
+
+/* Version number of package */
+#define VERSION "2.7"
+
+/* Constant definitions for math error conditions
  */
 
-#ifndef CEPHES_MCONF_H
-#define CEPHES_MCONF_H
+#define DOMAIN		1	/* argument domain error */
+#define SING		2	/* argument singularity */
+#define OVERFLOW	3	/* overflow range error */
+#define UNDERFLOW	4	/* underflow range error */
+#define TLOSS		5	/* total loss of precision */
+#define PLOSS		6	/* partial loss of precision */
 
-#include <Python.h>
-#include <math.h>
-
-#include "cephes_names.h"
-#include "cephes.h"
-#include "polevl.h"
-#include "sf_error.h"
-
-#define MAXITER        500
 #define EDOM		33
 #define ERANGE		34
+/* Complex numeral.  */
+typedef struct
+	{
+	double r;
+	double i;
+	} cmplx;
+
+#ifdef HAVE_LONG_DOUBLE
+/* Long double complex numeral.  */
+typedef struct
+	{
+	long double r;
+	long double i;
+	} cmplxl;
+#endif
+
 
 /* Type of computer arithmetic */
+
+/* PDP-11, Pro350, VAX:
+ */
+/* #define DEC 1 */
+
+/* Intel IEEE, low order words come first:
+ */
+/* #define IBMPC 1 */
+
+/* Motorola IEEE, high order words come first
+ * (Sun 680x0 workstation):
+ */
+/* #define MIEEE 1 */
 
 /* UNKnown arithmetic, invokes coefficients given in
  * normal decimal format.  Beware of range boundary
@@ -73,37 +140,60 @@
  * roundoff problems in pow.c:
  * (Sun SPARCstation)
  */
-
-/* SciPy note: by defining UNK, we prevent the compiler from
- * casting integers to floating point numbers.  If the Endianness
- * is detected incorrectly, this causes problems on some platforms.
- */
 #define UNK 1
+
+/* If you define UNK, then be sure to set BIGENDIAN properly. */
+#ifdef FLOAT_WORDS_BIGENDIAN
+#define BIGENDIAN 1
+#else
+#define BIGENDIAN 0
+#endif
+/* Define this `volatile' if your compiler thinks
+ * that floating point arithmetic obeys the associative
+ * and distributive laws.  It will defeat some optimizations
+ * (but probably not enough of them).
+ *
+ * #define VOLATILE volatile
+ */
+#define VOLATILE
+
+/* For 12-byte long doubles on an i386, pad a 16-bit short 0
+ * to the end of real constants initialized by integer arrays.
+ *
+ * #define XPD 0,
+ *
+ * Otherwise, the type is 10 bytes long and XPD should be
+ * defined blank (e.g., Microsoft C).
+ *
+ * #define XPD
+ */
+#define XPD 0,
 
 /* Define to support tiny denormal numbers, else undefine. */
 #define DENORMAL 1
 
-#define gamma Gamma
+/* Define to ask for infinity support, else undefine. */
+#define INFINITIES 1
 
-/*
- * Enable loop unrolling on GCC and use faster isnan et al.
- */
-#if !defined(__clang__) && defined(__GNUC__) && defined(__GNUC_MINOR__)
-#if __GNUC__ >= 5 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 4)
-#pragma GCC optimize("unroll-loops")
-#define cephes_isnan(x) __builtin_isnan(x)
-#define cephes_isinf(x) __builtin_isinf(x)
-#define cephes_isfinite(x) __builtin_isfinite(x)
-#endif
-#endif
-#ifndef cephes_isnan
-#define cephes_isnan(x) isnan(x)
-#define cephes_isinf(x) isinf(x)
-#define cephes_isfinite(x) isfinite(x)
+/* Define to ask for support of numbers that are Not-a-Number,
+   else undefine.  This may automatically define INFINITIES in some files. */
+#define NANS 1
+
+/* Define to distinguish between -0.0 and +0.0.  */
+#define MINUSZERO 1
+
+/* Define 1 for ANSI C atan2() function
+   See atan.c and clog.c. */
+#define ANSIC 1
+
+/* Get ANSI function prototypes, if you want them. */
+#if 1
+/* #ifdef __STDC__ */
+#define ANSIPROT 1
+int mtherr ( char *, int );
+#else
+int mtherr();
 #endif
 
-/* Constants needed that are not available in the C standard library */
-#define SCIPY_EULER     0.577215664901532860606512090082402431   /* Euler constant */
-#define SCIPY_El        2.718281828459045235360287471352662498L  /* e as long double */
-
-#endif				/* CEPHES_MCONF_H */
+/* Variable for error reporting.  See mtherr.c.  */
+extern int merror;

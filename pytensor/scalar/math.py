@@ -1495,8 +1495,17 @@ class BetaInc(ScalarOp):
             ),
         ]
 
+    def c_header_dirs(self, **kwargs):
+        # Using the mconf_.h header for betainc.c
+        res = [
+            *super().c_header_dirs(**kwargs),
+            os.path.join(os.path.dirname(__file__), "c_code"),
+        ]
+        return res
+
+
     def c_support_code(self, **kwargs):
-        with open(os.path.join(os.path.dirname(__file__), "c_code", "betainc.c")) as f:
+        with open(os.path.join(os.path.dirname(__file__), "c_code", "incbet.c")) as f:
             raw = f.read()
             return raw
 
