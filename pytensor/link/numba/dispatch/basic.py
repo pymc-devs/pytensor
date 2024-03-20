@@ -14,7 +14,7 @@ import scipy
 import scipy.special
 from llvmlite import ir
 from numba import types
-from numba.core.errors import TypingError
+from numba.core.errors import NumbaWarning, TypingError
 from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
 from numba.extending import box, overload
 
@@ -60,6 +60,13 @@ def global_numba_func(func):
 
 def numba_njit(*args, **kwargs):
     kwargs.setdefault("cache", config.numba__cache)
+
+    # Supress caching warnings
+    warnings.filterwarnings(
+        "ignore",
+        message='Cannot cache compiled function "numba_funcified_fgraph" as it uses dynamic globals',
+        category=NumbaWarning,
+    )
 
     if len(args) > 0 and callable(args[0]):
         return numba.njit(*args[1:], **kwargs)(args[0])

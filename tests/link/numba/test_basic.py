@@ -7,6 +7,8 @@ from unittest import mock
 import numpy as np
 import pytest
 
+from tests.tensor.test_math_scipy import scipy
+
 
 numba = pytest.importorskip("numba")
 
@@ -1064,3 +1066,13 @@ def test_OpFromGraph():
     zv = np.ones((2, 2), dtype=config.floatX) * 5
 
     compare_numba_and_py(((x, y, z), (out,)), [xv, yv, zv])
+
+
+@pytest.mark.filterwarnings("error")
+def test_cache_warning_suppressed():
+    x = pt.vector("x", shape=(5,), dtype="float64")
+    out = pt.psi(x) * 2
+    fn = function([x], out, mode="NUMBA")
+
+    x_test = np.random.uniform(size=5)
+    np.testing.assert_allclose(fn(x_test), scipy.special.psi(x_test) * 2)
