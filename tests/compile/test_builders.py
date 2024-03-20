@@ -15,7 +15,7 @@ from pytensor.graph.null_type import NullType
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.utils import MissingInputError
 from pytensor.printing import debugprint
-from pytensor.tensor.basic import as_tensor
+from pytensor.tensor.basic import constant
 from pytensor.tensor.math import dot, exp, sigmoid
 from pytensor.tensor.math import round as pt_round
 from pytensor.tensor.math import sum as pt_sum
@@ -42,12 +42,6 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
         with pytest.raises(TypeError):
             OpFromGraph([1], [1])
-
-        with pytest.raises(TypeError):
-            OpFromGraph([x, as_tensor(1)], [x])
-
-        with pytest.raises(TypeError):
-            OpFromGraph([shared(1)], [1])
 
         with pytest.raises(NotImplementedError):
             OpFromGraph([x], [x], updates={})
@@ -558,6 +552,31 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
         # The original `op.fgraph` outputs should stay the same, though
         assert equal_computations(op.inner_outputs, [x**2 / x], op.inner_inputs, [x])
+
+    def test_explicit_input_from_constant(self):
+        x = pt.dscalar("x")
+        y = constant(1.0, name="y")
+        test_ofg = OpFromGraph([x, y], [x + y])
+
+        out = test_ofg(x, y)
+        assert out.eval({x: 5}) == 6
+
+    def test_explicit_input_from_shared(self):
+        x = pt.dscalar("x")
+        y = shared(1.0, name="y")
+
+        with pytest.raises(
+            ValueError,
+            match=r"The inner-graph implicitly depends on the following shared variables \[y\]",
+        ):
+            OpFromGraph([x], [x + y], strict=True)
+
+        test_ofg = OpFromGraph([x, y], [x + y], strict=True)
+
+        out = test_ofg(x, y)
+        assert out.eval({x: 5}) == 6
+        y.set_value(2.0)
+        assert out.eval({x: 6})
 
 
 @config.change_flags(floatX="float64")
