@@ -92,38 +92,29 @@ def construct_nominal_fgraph(
     dict[Variable, Variable],
 ]:
     """Construct an inner-`FunctionGraph` with ordered nominal inputs."""
-    dummy_inputs = []
-    for n, inp in enumerate(inputs):
-        if (
-            not isinstance(inp, Variable)
-            or isinstance(inp, Constant)
-            or isinstance(inp, SharedVariable)
-        ):
-            raise TypeError(
-                f"Inputs and outputs must be non-Constant/shared Variable instances; got {inp}"
-            )
+    implicit_shared_inputs = []
 
-        dummy_inputs.append(inp.type())
-
-    dummy_shared_inputs = []
-    shared_inputs = []
+    dummy_inputs = [inp.type() for inp in inputs]
+    dummy_implicit_shared_inputs = []
     for var in graph_inputs(outputs, inputs):
+        if var in inputs:
+            continue
         if isinstance(var, SharedVariable):
-            # To correctly support shared variables the inner-graph should
-            # not see them; otherwise, there will be problems with
-            # gradients.
-            # That's why we collect the shared variables and replace them
-            # with dummies.
-            shared_inputs.append(var)
-            dummy_shared_inputs.append(var.type())
-        elif var not in inputs and not isinstance(var, Constant):
-            raise MissingInputError(f"OpFromGraph is missing an input: {var}")
+            # We allow shared inputs to be added automatically to the graph
+            implicit_shared_inputs.append(var)
+            dummy_implicit_shared_inputs.append(var.type())
+        elif not isinstance(var, Constant):
+            raise MissingInputError(f"NominalGraph is missing an input: {var}")
 
-    replacements = dict(zip(inputs + shared_inputs, dummy_inputs + dummy_shared_inputs))
+    replacements = dict(
+        zip(
+            inputs + implicit_shared_inputs, dummy_inputs + dummy_implicit_shared_inputs
+        )
+    )
 
     new = rebuild_collect_shared(
         cast(Sequence[Variable], outputs),
-        inputs=inputs + shared_inputs,
+        inputs=inputs + implicit_shared_inputs,
         replace=replacements,
         copy_inputs_over=False,
     )
@@ -133,7 +124,7 @@ def construct_nominal_fgraph(
         (clone_d, update_d, update_expr, new_shared_inputs),
     ) = new
 
-    assert len(local_inputs) == len(inputs) + len(shared_inputs)
+    assert len(local_inputs) == len(inputs) + len(implicit_shared_inputs)
     assert len(local_outputs) == len(outputs)
     assert not update_d
     assert not update_expr
@@ -155,7 +146,7 @@ def construct_nominal_fgraph(
         fgraph.clients.pop(inp, None)
         fgraph.add_input(nom_inp)
 
-    return fgraph, shared_inputs, update_d, update_expr
+    return fgraph, implicit_shared_inputs, update_d, update_expr
 
 
 class OpFromGraph(Op, HasInnerGraph):
@@ -177,8 +168,6 @@ class OpFromGraph(Op, HasInnerGraph):
         - grad() make it support DisconnectedType and the new interface
         - add support for NullType and DisconnectedType when R_op supports them
         - check how it works with updates.
-        - add test with constant as input or inside the inner graph.
-        - Add support for the GPU? Probably just need an opt to remove transfer
         - Add support to pickle this Op.
         - Add support/test with random generator
         - Add optimization to removing unused inputs/outputs
@@ -310,11 +299,13 @@ class OpFromGraph(Op, HasInnerGraph):
         self,
         inputs: list[Variable],
         outputs: list[Variable],
+        *,
         inline: bool = False,
         lop_overrides: str = "default",
         grad_overrides: str = "default",
         rop_overrides: str = "default",
         connection_pattern: Optional[list[list[bool]]] = None,
+        strict: bool = False,
         name: Optional[str] = None,
         **kwargs,
     ):
@@ -399,6 +390,10 @@ class OpFromGraph(Op, HasInnerGraph):
             must be equal to number of outputs.  connection_pattern If not
             ``None``, this will be used as the connection_pattern for this
             :class:`Op`.
+        strict: bool, default False
+            If true, it raises when any variables needed to compute the inner graph
+            are not provided as explici inputs. This can only happen for graphs with
+            shared variables.
         name
             A name for debugging purposes.
         kwargs
@@ -423,6 +418,12 @@ class OpFromGraph(Op, HasInnerGraph):
         self.fgraph, self.shared_inputs, _, _ = construct_nominal_fgraph(
             inputs, outputs
         )
+
+        if strict and self.shared_inputs:
+            raise ValueError(
+                "All variables needed to compute inner-graph must be provided as inputs under strict=True. "
+                f"The inner-graph implicitly depends on the following shared variables {self.shared_inputs}"
+            )
 
         self.kwargs = kwargs
         self.input_types = [inp.type for inp in inputs]
