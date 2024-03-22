@@ -20,6 +20,7 @@ import tempfile
 import textwrap
 import time
 import warnings
+from functools import cache
 from io import BytesIO, StringIO
 from typing import TYPE_CHECKING, Callable, Optional, Protocol, cast
 
@@ -270,6 +271,14 @@ def _get_ext_suffix():
     return dist_suffix
 
 
+@cache
+def add_gcc_dll_directory() -> None:
+    if (sys.platform == "win32") & (hasattr(os, "add_dll_directory")):
+        gcc_path = shutil.which("gcc")
+        if gcc_path is not None:
+            os.add_dll_directory(os.path.dirname(gcc_path))  # type: ignore
+
+
 def dlimport(fullpath, suffix=None):
     """
     Dynamically load a .so, .pyd, .dll, or .py file.
@@ -319,11 +328,7 @@ def dlimport(fullpath, suffix=None):
     _logger.debug(f"module_name {module_name}")
 
     sys.path[0:0] = [workdir]  # insert workdir at beginning (temporarily)
-    # Explicitly add gcc dll directory on Python 3.8+ on Windows
-    if (sys.platform == "win32") & (hasattr(os, "add_dll_directory")):
-        gcc_path = shutil.which("gcc")
-        if gcc_path is not None:
-            os.add_dll_directory(os.path.dirname(gcc_path))
+    add_gcc_dll_directory()
     global import_time
     try:
         importlib.invalidate_caches()
