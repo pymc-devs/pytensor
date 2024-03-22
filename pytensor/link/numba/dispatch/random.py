@@ -18,6 +18,7 @@ from pytensor.link.utils import (
     get_name_for_object,
     unique_name_generator,
 )
+from pytensor.tensor import NoneConst
 from pytensor.tensor.basic import get_vector_length
 from pytensor.tensor.random.type import RandomStateType
 
@@ -98,8 +99,7 @@ def make_numba_random_fn(node, np_random_func):
     if not isinstance(node.inputs[0].type, RandomStateType):
         raise TypeError("Numba does not support NumPy `Generator`s")
 
-    tuple_size = int(get_vector_length(node.inputs[1]))
-    size_dims = tuple_size - max(i.ndim for i in node.inputs[3:])
+    size = node.inputs[1]
 
     # Make a broadcast-capable version of the Numba supported scalar sampling
     # function
@@ -115,8 +115,6 @@ def make_numba_random_fn(node, np_random_func):
             "np_random_func",
             "numba_vectorize",
             "to_fixed_tuple",
-            "tuple_size",
-            "size_dims",
             "rng",
             "size",
             "dtype",
@@ -152,7 +150,10 @@ def {bcast_fn_name}({bcast_fn_input_names}):
         "out_dtype": out_dtype,
     }
 
-    if tuple_size > 0:
+    if not NoneConst.equals(size):
+        tuple_size = int(get_vector_length(node.inputs[1]))
+        size_dims = tuple_size - max(i.ndim for i in node.inputs[3:])
+
         random_fn_body = dedent(
             f"""
         size = to_fixed_tuple(size, tuple_size)
@@ -302,12 +303,15 @@ def numba_funcify_BernoulliRV(op, node, **kwargs):
 @numba_funcify.register(ptr.CategoricalRV)
 def numba_funcify_CategoricalRV(op, node, **kwargs):
     out_dtype = node.outputs[1].type.numpy_dtype
-    size_len = int(get_vector_length(node.inputs[1]))
+    size = node.inputs[1]
+    none_size = NoneConst.equals(size)
+    if not none_size:
+        size_len = int(get_vector_length(size))
     p_ndim = node.inputs[-1].ndim
 
     @numba_basic.numba_njit
     def categorical_rv(rng, size, dtype, p):
-        if not size_len:
+        if none_size:
             size_tpl = p.shape[:-1]
         else:
             size_tpl = numba_ndarray.to_fixed_tuple(size, size_len)
@@ -333,13 +337,18 @@ def numba_funcify_DirichletRV(op, node, **kwargs):
     out_dtype = node.outputs[1].type.numpy_dtype
     alphas_ndim = node.inputs[3].type.ndim
     neg_ind_shape_len = -alphas_ndim + 1
-    size_len = int(get_vector_length(node.inputs[1]))
+    size = node.inputs[1]
+    none_size = NoneConst.equals(size)
+    if not none_size:
+        size_len = int(get_vector_length(size))
 
     if alphas_ndim > 1:
 
         @numba_basic.numba_njit
         def dirichlet_rv(rng, size, dtype, alphas):
-            if size_len > 0:
+            if none_size:
+                samples_shape = alphas.shape
+            else:
                 size_tpl = numba_ndarray.to_fixed_tuple(size, size_len)
                 if (
                     0 < alphas.ndim - 1 <= len(size_tpl)
@@ -347,8 +356,6 @@ def numba_funcify_DirichletRV(op, node, **kwargs):
                 ):
                     raise ValueError("Parameters shape and size do not match.")
                 samples_shape = size_tpl + alphas.shape[-1:]
-            else:
-                samples_shape = alphas.shape
 
             res = np.empty(samples_shape, dtype=out_dtype)
             alphas_bcast = np.broadcast_to(alphas, samples_shape)
@@ -362,7 +369,8 @@ def numba_funcify_DirichletRV(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def dirichlet_rv(rng, size, dtype, alphas):
-            size = numba_ndarray.to_fixed_tuple(size, size_len)
+            if size is not None:
+                size = numba_ndarray.to_fixed_tuple(size, size_len)
             return (rng, np.random.dirichlet(alphas, size))
 
     return dirichlet_rv

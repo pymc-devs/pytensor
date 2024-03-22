@@ -15,7 +15,6 @@ from pytensor.tensor.basic import (
     as_tensor_variable,
     concatenate,
     constant,
-    get_underlying_scalar_constant_value,
     get_vector_length,
     infer_static_shape,
 )
@@ -133,7 +132,7 @@ class RandomVariable(Op):
 
     def _infer_shape(
         self,
-        size: TensorVariable,
+        size: Union[TensorVariable, NoneConst],
         dist_params: Sequence[TensorVariable],
         param_shapes: Optional[Sequence[tuple[Variable, ...]]] = None,
     ) -> Union[TensorVariable, tuple[ScalarVariable, ...]]:
@@ -162,9 +161,9 @@ class RandomVariable(Op):
                 self._supp_shape_from_params(dist_params, param_shapes=param_shapes)
             )
 
-        size_len = get_vector_length(size)
+        if not NoneConst.equals(size):
+            size_len = get_vector_length(size)
 
-        if size_len > 0:
             # Fail early when size is incompatible with parameters
             for i, (param, param_ndim_supp) in enumerate(
                 zip(dist_params, self.ndims_params)
@@ -174,7 +173,7 @@ class RandomVariable(Op):
                     raise ValueError(
                         f"Size length is incompatible with batched dimensions of parameter {i} {param}:\n"
                         f"len(size) = {size_len}, len(batched dims {param}) = {param_batched_dims}. "
-                        f"Size length must be 0 or >= {param_batched_dims}"
+                        f"Size must be None or have length >= {param_batched_dims}"
                     )
 
             return tuple(size) + supp_shape
@@ -218,21 +217,11 @@ class RandomVariable(Op):
 
         shape = batch_shape + supp_shape
 
-        if not shape:
-            shape = constant([], dtype="int64")
-
         return shape
 
     def infer_shape(self, fgraph, node, input_shapes):
         _, size, _, *dist_params = node.inputs
         _, size_shape, _, *param_shapes = input_shapes
-
-        try:
-            size_len = get_vector_length(size)
-        except ValueError:
-            size_len = get_underlying_scalar_constant_value(size_shape[0])
-
-        size = tuple(size[n] for n in range(size_len))
 
         shape = self._infer_shape(size, dist_params, param_shapes=param_shapes)
 
@@ -313,12 +302,7 @@ class RandomVariable(Op):
 
         out_var = node.outputs[1]
 
-        # If `size == []`, that means no size is enforced, and NumPy is trusted
-        # to draw the appropriate number of samples, NumPy uses `size=None` to
-        # represent that.  Otherwise, NumPy expects a tuple.
-        if np.size(size) == 0:
-            size = None
-        else:
+        if size is not None:
             size = tuple(size)
 
         # Draw from `rng` if `self.inplace` is `True`, and from a copy of `rng`
@@ -394,21 +378,21 @@ def vectorize_random_variable(
     # Need to make parameters implicit broadcasting explicit
     original_dist_params = node.inputs[3:]
     old_size = node.inputs[1]
-    len_old_size = get_vector_length(old_size)
 
     original_expanded_dist_params = explicit_expand_dims(
-        original_dist_params, op.ndims_params, len_old_size
+        original_dist_params, op.ndims_params, old_size
     )
     # We call vectorize_graph to automatically handle any new explicit expand_dims
     dist_params = vectorize_graph(
         original_expanded_dist_params, dict(zip(original_dist_params, dist_params))
     )
 
-    if len_old_size and equal_computations([old_size], [size]):
+    if (not NoneConst.equals(size)) and equal_computations([old_size], [size]):
         # If the original RV had a size variable and a new one has not been provided,
         # we need to define a new size as the concatenation of the original size dimensions
         # and the novel ones implied by new broadcasted batched parameters dimensions.
         # We use the first broadcasted batch dimension for reference.
+        len_old_size = get_vector_length(old_size)
         bcasted_param = explicit_expand_dims(dist_params, op.ndims_params)[0]
         new_param_ndim = (bcasted_param.type.ndim - op.ndims_params[0]) - len_old_size
         if new_param_ndim >= 0:
