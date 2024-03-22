@@ -1675,6 +1675,7 @@ def verify_grad(
     mode: Optional[Union["Mode", str]] = None,
     cast_to_output_type: bool = False,
     no_debug_ref: bool = True,
+    sum_outputs=False,
 ):
     """Test a gradient by Finite Difference Method. Raise error on failure.
 
@@ -1722,7 +1723,9 @@ def verify_grad(
         float16 is not handled here.
     no_debug_ref
         Don't use `DebugMode` for the numerical gradient function.
-
+    sum_outputs: bool, default False
+        If True, the gradient of the sum of all outputs is verified. If False, an error is raised if the function has
+        multiple outputs.
     Notes
     -----
     This function does not support multiple outputs. In `tests.scan.test_basic`
@@ -1782,7 +1785,7 @@ def verify_grad(
     # fun can be either a function or an actual Op instance
     o_output = fun(*tensor_pt)
 
-    if isinstance(o_output, list):
+    if isinstance(o_output, list) and not sum_outputs:
         raise NotImplementedError(
             "Can't (yet) auto-test the gradient of a function with multiple outputs"
         )
@@ -1793,7 +1796,7 @@ def verify_grad(
     o_fn = fn_maker(tensor_pt, o_output, name="gradient.py fwd")
     o_fn_out = o_fn(*[p.copy() for p in pt])
 
-    if isinstance(o_fn_out, tuple) or isinstance(o_fn_out, list):
+    if isinstance(o_fn_out, tuple) or isinstance(o_fn_out, list) and not sum_outputs:
         raise TypeError(
             "It seems like you are trying to use verify_grad "
             "on an Op or a function which outputs a list: there should"
@@ -1802,18 +1805,33 @@ def verify_grad(
 
     # random_projection should not have elements too small,
     # otherwise too much precision is lost in numerical gradient
-    def random_projection():
-        plain = rng.random(o_fn_out.shape) + 0.5
-        if cast_to_output_type and o_output.dtype == "float32":
-            return np.array(plain, o_output.dtype)
+    def random_projection(shape, dtype):
+        plain = rng.random(shape) + 0.5
+        if cast_to_output_type and dtype == "float32":
+            return np.array(plain, dtype)
         return plain
-
-    t_r = shared(random_projection(), borrow=True)
-    t_r.name = "random_projection"
 
     # random projection of o onto t_r
     # This sum() is defined above, it's not the builtin sum.
-    cost = pytensor.tensor.sum(t_r * o_output)
+    if sum_outputs:
+        t_rs = [
+            shared(
+                value=random_projection(o.shape, o.dtype),
+                borrow=True,
+                name=f"random_projection_{i}",
+            )
+            for i, o in enumerate(o_fn_out)
+        ]
+        cost = pytensor.tensor.sum(
+            [pytensor.tensor.sum(x * y) for x, y in zip(t_rs, o_output)]
+        )
+    else:
+        t_r = shared(
+            value=random_projection(o_fn_out.shape, o_fn_out.dtype),
+            borrow=True,
+            name="random_projection",
+        )
+        cost = pytensor.tensor.sum(t_r * o_output)
 
     if no_debug_ref:
         mode_for_cost = mode_not_slow(mode)
@@ -1821,14 +1839,11 @@ def verify_grad(
         mode_for_cost = mode
 
     cost_fn = fn_maker(tensor_pt, cost, name="gradient.py cost", mode=mode_for_cost)
-
     symbolic_grad = grad(cost, tensor_pt, disconnected_inputs="ignore")
-
     grad_fn = fn_maker(tensor_pt, symbolic_grad, name="gradient.py symbolic grad")
 
     for test_num in range(n_tests):
         num_grad = numeric_grad(cost_fn, [p.copy() for p in pt], eps, out_type)
-
         analytic_grad = grad_fn(*[p.copy() for p in pt])
 
         # Since `tensor_pt` is a list, `analytic_grad` should be one too.
@@ -1853,7 +1868,16 @@ def verify_grad(
 
         # get new random projection for next test
         if test_num < n_tests - 1:
-            t_r.set_value(random_projection(), borrow=True)
+            if sum_outputs:
+                for r in t_rs:
+                    r.set_value(
+                        random_projection(r.get_value().shape, r.get_value().dtype)
+                    )
+            else:
+                t_r.set_value(
+                    random_projection(t_r.get_value().shape, t_r.get_value().dtype),
+                    borrow=True,
+                )
 
 
 class GradientError(Exception):
