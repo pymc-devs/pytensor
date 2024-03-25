@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 _logger = logging.getLogger("pytensor.link.c.basic")
 
 
-def get_module_cache(init_args: Optional[dict[str, Any]] = None) -> "ModuleCache":
+def get_module_cache(init_args: dict[str, Any] | None = None) -> "ModuleCache":
     """
 
     Parameters

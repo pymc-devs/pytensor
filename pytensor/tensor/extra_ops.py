@@ -1,5 +1,4 @@
 from collections.abc import Collection, Iterable
-from typing import Optional, Union
 
 import numpy as np
 from numpy.core.multiarray import normalize_axis_index
@@ -280,7 +279,7 @@ class CumOp(COp):
         c_axis=int_t, mode=EnumList(("MODE_ADD", "add"), ("MODE_MUL", "mul"))
     )
 
-    def __init__(self, axis: Optional[int] = None, mode="add"):
+    def __init__(self, axis: int | None = None, mode="add"):
         if mode not in ("add", "mul"):
             raise ValueError(f'{type(self).__name__}: Unknown mode "{mode}"')
         self.axis = axis
@@ -1458,7 +1457,7 @@ def broadcast_shape(*arrays, **kwargs) -> tuple[ps.ScalarVariable, ...]:
 
 
 def broadcast_shape_iter(
-    arrays: Iterable[Union[TensorVariable, tuple[TensorVariable, ...]]],
+    arrays: Iterable[TensorVariable | tuple[TensorVariable, ...]],
     arrays_are_shapes: bool = False,
     allow_runtime_broadcast: bool = False,
 ) -> tuple[ps.ScalarVariable, ...]:
@@ -1598,7 +1597,7 @@ def linspace(start, end, steps):
 
 
 def broadcast_to(
-    x: TensorVariable, shape: Union[TensorVariable, tuple[Variable, ...]]
+    x: TensorVariable, shape: TensorVariable | tuple[Variable, ...]
 ) -> TensorVariable:
     """Broadcast an array to a new shape.
 

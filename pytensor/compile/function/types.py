@@ -6,7 +6,7 @@ import logging
 import time
 import warnings
 from itertools import chain
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -173,7 +173,7 @@ def std_fgraph(
     input_specs: list[SymbolicInput],
     output_specs: list[SymbolicOutput],
     accept_inplace: bool = False,
-    fgraph: Optional[FunctionGraph] = None,
+    fgraph: FunctionGraph | None = None,
     features: list[type[Feature]] = [PreserveVariableAttributes],
     force_clone=False,
 ) -> tuple[FunctionGraph, list[SymbolicOutput]]:
@@ -340,7 +340,7 @@ class Function:
         return_none: bool,
         output_keys,
         maker: "FunctionMaker",
-        name: Optional[str] = None,
+        name: str | None = None,
     ):
         """
         Parameters
@@ -1693,7 +1693,7 @@ def orig_function(
     profile=None,
     on_unused_input=None,
     output_keys=None,
-    fgraph: Optional[FunctionGraph] = None,
+    fgraph: FunctionGraph | None = None,
 ) -> Function:
     """
     Return a Function that will calculate the outputs from the inputs.

@@ -11,11 +11,11 @@ import time
 import traceback
 import warnings
 from collections import UserList, defaultdict, deque
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from collections.abc import Iterable as IterableType
 from functools import _compose_mro, partial, reduce  # type: ignore
 from itertools import chain
-from typing import TYPE_CHECKING, Callable, Literal, Optional, Union, cast
+from typing import TYPE_CHECKING, Literal, Union, cast
 
 import pytensor
 from pytensor.configdefaults import config
@@ -47,7 +47,7 @@ RemoveKeyType = Literal["remove"]
 TransformOutputType = Union[
     bool,
     Sequence[Variable],
-    dict[Union[Variable, Literal["remove"]], Union[Variable, Sequence[Variable]]],
+    dict[Variable | Literal["remove"], Variable | Sequence[Variable]],
 ]
 FailureCallbackType = Callable[
     [
@@ -72,7 +72,7 @@ class MetaNodeRewriterSkip(AssertionError):
 class Rewriter(abc.ABC):
     """Abstract base class for graph/term rewriters."""
 
-    name: Optional[str] = None
+    name: str | None = None
 
     @abc.abstractmethod
     def add_requirements(self, fgraph: FunctionGraph):
@@ -145,7 +145,7 @@ class GraphRewriter(Rewriter):
 class NodeRewriter(Rewriter):
     """A `Rewriter` that is applied to an `Apply` node."""
 
-    def tracks(self) -> Optional[Sequence[Op]]:
+    def tracks(self) -> Sequence[Op] | None:
         """Return the list of `Op` classes to which this rewrite applies.
 
         Returns ``None`` when the rewrite applies to all nodes.
@@ -1098,9 +1098,9 @@ class FromFunctionNodeRewriter(NodeRewriter):
 
 
 def node_rewriter(
-    tracks: Optional[Sequence[Union[Op, type]]],
+    tracks: Sequence[Op | type] | None,
     inplace: bool = False,
-    requirements: Optional[tuple[type, ...]] = (),
+    requirements: tuple[type, ...] | None = (),
 ):
     r"""A decorator used to construct `FromFunctionNodeRewriter` instances.
 
@@ -1541,7 +1541,7 @@ class PatternNodeRewriter(NodeRewriter):
         out_pattern,
         allow_multiple_clients: bool = False,
         skip_identities_fn=None,
-        name: Optional[str] = None,
+        name: str | None = None,
         tracks=(),
         get_nodes=None,
         values_eq_approx=None,
@@ -1782,9 +1782,9 @@ class NodeProcessingGraphRewriter(GraphRewriter):
 
     def __init__(
         self,
-        node_rewriter: Optional[NodeRewriter],
+        node_rewriter: NodeRewriter | None,
         ignore_newtrees: Literal[True, False, "auto"],
-        failure_callback: Optional[FailureCallbackType] = None,
+        failure_callback: FailureCallbackType | None = None,
     ):
         """
 
@@ -1826,11 +1826,11 @@ class NodeProcessingGraphRewriter(GraphRewriter):
     def attach_updater(
         self,
         fgraph: FunctionGraph,
-        importer: Optional[Callable],
-        pruner: Optional[Callable],
-        chin: Optional[Callable] = None,
-        name: Optional[str] = None,
-    ) -> Optional[DispatchingFeature]:
+        importer: Callable | None,
+        pruner: Callable | None,
+        chin: Callable | None = None,
+        name: str | None = None,
+    ) -> DispatchingFeature | None:
         r"""Install `FunctionGraph` listeners to help the navigator deal with the recursion-related functionality.
 
         Parameters
@@ -1861,9 +1861,7 @@ class NodeProcessingGraphRewriter(GraphRewriter):
         fgraph.attach_feature(u)
         return u
 
-    def detach_updater(
-        self, fgraph: FunctionGraph, updater: Optional[DispatchingFeature]
-    ):
+    def detach_updater(self, fgraph: FunctionGraph, updater: DispatchingFeature | None):
         """Undo the work of `attach_updater`.
 
         Parameters
@@ -1885,7 +1883,7 @@ class NodeProcessingGraphRewriter(GraphRewriter):
         self,
         fgraph: FunctionGraph,
         node: Apply,
-        node_rewriter: Optional[NodeRewriter] = None,
+        node_rewriter: NodeRewriter | None = None,
     ):
         r"""Apply `node_rewriter` to `node`.
 
@@ -2002,7 +2000,7 @@ class WalkingGraphRewriter(NodeProcessingGraphRewriter):
         node_rewriter: NodeRewriter,
         order: Literal["out_to_in", "in_to_out"] = "in_to_out",
         ignore_newtrees: bool = False,
-        failure_callback: Optional[FailureCallbackType] = None,
+        failure_callback: FailureCallbackType | None = None,
     ):
         if order not in ("out_to_in", "in_to_out"):
             raise ValueError("order must be 'out_to_in' or 'in_to_out'")
@@ -2230,12 +2228,12 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
     def __init__(
         self,
         rewriters: Sequence[Rewriter],
-        failure_callback: Optional[FailureCallbackType] = None,
+        failure_callback: FailureCallbackType | None = None,
         ignore_newtrees: bool = True,
         tracks_on_change_inputs: bool = False,
-        max_use_ratio: Optional[float] = None,
-        final_rewriters: Optional[Sequence[GraphRewriter]] = None,
-        cleanup_rewriters: Optional[Sequence[GraphRewriter]] = None,
+        max_use_ratio: float | None = None,
+        final_rewriters: Sequence[GraphRewriter] | None = None,
+        cleanup_rewriters: Sequence[GraphRewriter] | None = None,
     ):
         """
 
@@ -2405,7 +2403,7 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
                 if node is not current_node:
                     q.append(node)
 
-            chin: Optional[Callable] = None
+            chin: Callable | None = None
             if self.tracks_on_change_inputs:
 
                 def chin_(node, i, r, new_r, reason):

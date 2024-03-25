@@ -3,7 +3,7 @@ import os
 import shlex
 import sys
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from configparser import (
     ConfigParser,
     InterpolationError,
@@ -13,7 +13,6 @@ from configparser import (
 )
 from functools import wraps
 from io import StringIO
-from typing import Callable, Optional, Union
 
 from pytensor.utils import hash_from_code
 
@@ -232,10 +231,10 @@ class ConfigParam:
 
     def __init__(
         self,
-        default: Union[object, Callable[[object], object]],
+        default: object | Callable[[object], object],
         *,
-        apply: Optional[Callable[[object], object]] = None,
-        validate: Optional[Callable[[object], bool]] = None,
+        apply: Callable[[object], object] | None = None,
+        validate: Callable[[object], bool] | None = None,
         mutable: bool = True,
     ):
         """
@@ -289,7 +288,7 @@ class ConfigParam:
             return self._apply(value)
         return value
 
-    def validate(self, value) -> Optional[bool]:
+    def validate(self, value) -> bool | None:
         """Validates that a parameter values falls into a supported set or range.
 
         Raises

@@ -1,6 +1,5 @@
 import traceback
 from io import StringIO
-from typing import Optional
 from typing import cast as type_cast
 from warnings import warn
 
@@ -654,8 +653,8 @@ class ShapeFeature(Feature):
         self,
         x: Variable,
         y: Variable,
-        dim_x: Optional[int] = None,
-        dim_y: Optional[int] = None,
+        dim_x: int | None = None,
+        dim_y: int | None = None,
     ) -> bool:
         """Return ``True`` if `x` and `y` have the same shape.
 

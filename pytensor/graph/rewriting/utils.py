@@ -1,6 +1,6 @@
 import copy
 from collections.abc import Generator, Sequence
-from typing import TYPE_CHECKING, Optional, Union, cast
+from typing import TYPE_CHECKING, Optional, cast
 
 import pytensor
 from pytensor.graph.basic import (
@@ -19,12 +19,12 @@ if TYPE_CHECKING:
 
 
 def rewrite_graph(
-    graph: Union[Variable, Sequence[Variable], FunctionGraph],
+    graph: Variable | Sequence[Variable] | FunctionGraph,
     include: Sequence[str] = ("canonicalize",),
     custom_rewrite: Optional["GraphRewriter"] = None,
     clone: bool = False,
     **kwargs,
-) -> Union[Variable, Sequence[Variable], FunctionGraph]:
+) -> Variable | Sequence[Variable] | FunctionGraph:
     """Easily apply rewrites to a graph.
 
     Parameters

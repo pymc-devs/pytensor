@@ -1,5 +1,3 @@
-from typing import Optional
-
 from pytensor.compile.mode import optdb
 from pytensor.graph import Constant, node_rewriter
 from pytensor.graph.replace import vectorize_node
@@ -84,7 +82,7 @@ def local_eager_useless_unbatched_blockwise(fgraph, node):
         return local_useless_unbatched_blockwise.fn(fgraph, node)
 
 
-def _squeeze_left(x, stop_at_dim: Optional[int] = None):
+def _squeeze_left(x, stop_at_dim: int | None = None):
     """Squeeze any leading dims of `x` until a real dim or `stop_at_dim` (if not None) is reached."""
     x_dims = x.type.broadcastable
     squeeze_ndim = len(x_dims) if all(x_dims) else x_dims.index(False)

@@ -2,7 +2,7 @@ import logging
 import typing
 import warnings
 from functools import reduce
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import scipy.linalg
@@ -253,7 +253,7 @@ class CholeskySolve(SolveBase):
         raise NotImplementedError()
 
 
-def cho_solve(c_and_lower, b, *, check_finite=True, b_ndim: Optional[int] = None):
+def cho_solve(c_and_lower, b, *, check_finite=True, b_ndim: int | None = None):
     """Solve the linear equations A x = b, given the Cholesky factorization of A.
 
     Parameters
@@ -319,11 +319,11 @@ def solve_triangular(
     a: TensorVariable,
     b: TensorVariable,
     *,
-    trans: Union[int, str] = 0,
+    trans: int | str = 0,
     lower: bool = False,
     unit_diagonal: bool = False,
     check_finite: bool = True,
-    b_ndim: Optional[int] = None,
+    b_ndim: int | None = None,
 ) -> TensorVariable:
     """Solve the equation `a x = b` for `x`, assuming `a` is a triangular matrix.
 
@@ -400,7 +400,7 @@ def solve(
     assume_a="gen",
     lower=False,
     check_finite=True,
-    b_ndim: Optional[int] = None,
+    b_ndim: int | None = None,
 ):
     """Solves the linear equation set ``a * x = b`` for the unknown ``x`` for square ``a`` matrix.
 

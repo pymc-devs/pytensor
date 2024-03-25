@@ -1,7 +1,8 @@
 import typing
 import warnings
 from abc import abstractmethod
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from pytensor.graph.basic import Apply, Constant
 from pytensor.graph.utils import MethodNotDefined

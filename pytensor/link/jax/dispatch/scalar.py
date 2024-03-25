@@ -1,6 +1,6 @@
 import functools
 import typing
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import jax
 import jax.numpy as jnp
@@ -37,7 +37,7 @@ from pytensor.scalar.math import (
 )
 
 
-def try_import_tfp_jax_op(op: ScalarOp, jax_op_name: Optional[str] = None) -> Callable:
+def try_import_tfp_jax_op(op: ScalarOp, jax_op_name: str | None = None) -> Callable:
     try:
         import tensorflow_probability.substrates.jax.math as tfp_jax_math
     except ModuleNotFoundError:

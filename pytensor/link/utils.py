@@ -5,7 +5,7 @@ import sys
 import traceback
 import warnings
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from keyword import iskeyword
 from operator import itemgetter
 from tempfile import NamedTemporaryFile
@@ -13,12 +13,10 @@ from textwrap import dedent, indent
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     NoReturn,
     Optional,
     TextIO,
     TypeVar,
-    Union,
     cast,
 )
 
@@ -147,8 +145,8 @@ def streamline(
     fgraph: FunctionGraph,
     thunks: Sequence[Callable[[], None]],
     order: Sequence[Apply],
-    post_thunk_old_storage: Optional[list["StorageCellType"]] = None,
-    no_recycling: Optional[list["StorageCellType"]] = None,
+    post_thunk_old_storage: list["StorageCellType"] | None = None,
+    no_recycling: list["StorageCellType"] | None = None,
     nice_errors: bool = True,
 ) -> "BasicThunkType":
     """Construct a single thunk that runs a list of thunks.
@@ -332,9 +330,9 @@ def raise_with_op(
     types = [getattr(ipt, "type", "No type") for ipt in node.inputs]
     detailed_err_msg += f"\nInputs types: {types}\n"
 
-    shapes: Union[list, str]
-    strides: Union[list, str]
-    scalar_values: Union[list, str]
+    shapes: list | str
+    strides: list | str
+    scalar_values: list | str
 
     if thunk is not None:
         if hasattr(thunk, "inputs"):
@@ -579,8 +577,8 @@ register_thunk_trace_excepthook()
 def compile_function_src(
     src: str,
     function_name: str,
-    global_env: Optional[dict[Any, Any]] = None,
-    local_env: Optional[dict[Any, Any]] = None,
+    global_env: dict[Any, Any] | None = None,
+    local_env: dict[Any, Any] | None = None,
 ) -> Callable:
     with NamedTemporaryFile(delete=False) as f:
         filename = f.name
@@ -627,7 +625,7 @@ def get_name_for_object(x: Any) -> str:
 
 
 def unique_name_generator(
-    external_names: Optional[list[str]] = None, suffix_sep: str = "_"
+    external_names: list[str] | None = None, suffix_sep: str = "_"
 ) -> Callable:
     """Create a function that generates unique names."""
 
@@ -667,11 +665,11 @@ def fgraph_to_python(
     op_conversion_fn: Callable,
     *,
     type_conversion_fn: Callable = lambda x, **kwargs: x,
-    order: Optional[list[Apply]] = None,
+    order: list[Apply] | None = None,
     storage_map: Optional["StorageMapType"] = None,
     fgraph_name: str = "fgraph_to_python",
-    global_env: Optional[dict[Any, Any]] = None,
-    local_env: Optional[dict[Any, Any]] = None,
+    global_env: dict[Any, Any] | None = None,
+    local_env: dict[Any, Any] | None = None,
     get_name_for_object: Callable[[Any], str] = get_name_for_object,
     squeeze_output: bool = False,
     **kwargs,

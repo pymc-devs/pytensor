@@ -1,5 +1,4 @@
 from textwrap import dedent, indent
-from typing import Optional
 
 import numpy as np
 from numba import types
@@ -20,7 +19,7 @@ from pytensor.tensor.type import TensorType
 def idx_to_str(
     array_name: str,
     offset: int,
-    size: Optional[str] = None,
+    size: str | None = None,
     idx_symbol: str = "i",
     allow_scalar=False,
 ) -> str:
@@ -119,8 +118,8 @@ def numba_funcify_Scan(op, node, **kwargs):
 
     def add_inner_in_expr(
         outer_in_name: str,
-        tap_offset: Optional[int],
-        storage_size_var: Optional[str],
+        tap_offset: int | None,
+        storage_size_var: str | None,
         vector_slice_opt: bool,
     ):
         """Construct an inner-input expression."""
@@ -162,7 +161,7 @@ def numba_funcify_Scan(op, node, **kwargs):
             + op.info.sit_sot_in_slices,
         )
     )
-    inner_in_names_to_output_taps: dict[str, Optional[tuple[int, ...]]] = dict(
+    inner_in_names_to_output_taps: dict[str, tuple[int, ...] | None] = dict(
         zip(outer_in_mit_mot_names, op.info.mit_mot_out_slices)
     )
 

@@ -1,5 +1,4 @@
 from copy import copy
-from typing import Union
 
 import numpy as np
 from numpy.core.numeric import normalize_axis_tuple
@@ -1736,7 +1735,7 @@ def vectorize_dimshuffle(op: DimShuffle, node: Apply, x: TensorVariable) -> Appl
 
 
 def get_normalized_batch_axes(
-    core_axes: Union[None, int, tuple[int, ...]],
+    core_axes: None | int | tuple[int, ...],
     core_ndim: int,
     batch_ndim: int,
 ) -> tuple[int, ...]:

@@ -3,7 +3,7 @@ import traceback as tb
 import warnings
 from collections.abc import Iterable
 from numbers import Number
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 import numpy as np
 
@@ -1026,7 +1026,7 @@ class TensorConstantSignature(tuple):
         return self._no_nan
 
 
-def get_unique_constant_value(x: TensorVariable) -> Optional[Number]:
+def get_unique_constant_value(x: TensorVariable) -> Number | None:
     """Return the unique value of a tensor, if there is one"""
     if isinstance(x, Constant):
         data = x.data
