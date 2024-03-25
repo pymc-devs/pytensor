@@ -56,6 +56,7 @@ dependencies = [
     "miniKanren",
     "cons",
     "typing_extensions",
+    "llvmlite"
 ]
 
 [project.urls]
@@ -69,7 +70,7 @@ pytensor-cache = "pytensor.bin.pytensor_cache:main"
 
 [project.optional-dependencies]
 complete = ["pytensor[jax]", "pytensor[numba]"]
-development = ["pytensor[complete]", "pytensor[tests]", "pytensor[rtd]"]
+development = ["pytensor[complete]", "pytensor[tests]", "pytensor[rtd]", "pytensor[deps]"]
 tests = [
     "pytest",
     "pre-commit",
@@ -81,6 +82,7 @@ tests = [
 rtd = ["sphinx>=5.1.0,<6", "pygments", "pydot", "pydot2", "pydot-ng"]
 jax = ["jax", "jaxlib"]
 numba = ["numba>=0.57"]
+deps = ["deptry>=0.15,<0.16"]
 
 [tool.setuptools.packages.find]
 include = ["pytensor*", "bin"]
@@ -184,3 +186,12 @@ test-skip = ["cp37*", "*musllinux*", "*win32*", "*i686*"]
 # Testing seems to be running into issues locating libs where expected
 # test-requires = ["pytest", "numba", "jax", "jaxlib"]
 # test-command = "pytest {package}/tests"
+
+[tool.deptry]
+pep621_dev_dependency_groups = ["development", "tests", "rtd", "deps"]
+extend_exclude = ["doc", "conftest.py", "versioneer.py", "scripts"]
+
+[tool.deptry.per_rule_ignores]
+DEP001=["pudb", "ipdb", "mkl", "cutils_ext", "lazylinker_ext", "numpyro", "tensorflow_probability"]
+DEP002=["jaxlib"]
+DEP004=["pydot", "pydot_ng"]
