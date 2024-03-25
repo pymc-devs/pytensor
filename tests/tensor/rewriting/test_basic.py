@@ -1089,6 +1089,25 @@ class TestLocalUselessSwitch:
         assert isinstance(f.maker.fgraph.outputs[0].owner.op, Alloc)
         assert not any(node.op == pt.switch for node in f.maker.fgraph.toposort())
 
+    def test_broadcasting_different_dtype(self):
+        cond = vector("x", dtype="bool")
+        float32_branch = as_tensor(np.array([0], dtype="float32"))
+        float64_branch = as_tensor(np.array([0], dtype="float64"))
+
+        out = pt.switch(cond, float32_branch, float64_branch)
+        expected_out = pt.alloc(float64_branch, cond.shape)
+
+        rewritten_out = rewrite_graph(
+            out, include=("canonicalize", "stabilize", "specialize")
+        )
+        assert equal_computations([rewritten_out], [expected_out])
+
+        out = pt.switch(cond, float64_branch, float32_branch)
+        rewritten_out = rewrite_graph(
+            out, include=("canonicalize", "stabilize", "specialize")
+        )
+        assert equal_computations([rewritten_out], [expected_out])
+
 
 class TestLocalMergeSwitchSameCond:
     @pytest.mark.parametrize(
