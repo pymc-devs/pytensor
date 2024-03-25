@@ -1,7 +1,7 @@
 import logging
 import warnings
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from typing import TYPE_CHECKING, Literal, Optional
 
 import numpy as np
 
@@ -772,7 +772,7 @@ pytensor.compile.register_deep_copy_op_c_code(
 )
 
 # Valid static type entries
-ST = Union[int, None]
+ST = int | None
 
 
 def tensor(
