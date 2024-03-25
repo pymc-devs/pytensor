@@ -1,3 +1,4 @@
+import itertools
 import sys
 from collections.abc import Iterable
 
@@ -1700,7 +1701,7 @@ def local_join_subtensors(fgraph, node):
         return
 
     for subtensor1_idx, (subtensor1, subtensor2) in enumerate(
-        zip(tensors[:-1], tensors[1:])
+        itertools.pairwise(tensors)
     ):
         # Check that two consecutive Subtensors are operating on the same base tensor
         if not (
