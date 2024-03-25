@@ -4,7 +4,7 @@ import copy
 import dataclasses
 from itertools import chain
 from sys import maxsize
-from typing import Optional, cast
+from typing import cast
 
 import numpy as np
 
@@ -692,7 +692,7 @@ def push_out_inner_vars(
     old_scan_node: Apply,
     old_scan_args: ScanArgs,
 ) -> tuple[list[Variable], ScanArgs, dict[Variable, Variable]]:
-    tmp_outer_vars: list[Optional[Variable]] = []
+    tmp_outer_vars: list[Variable | None] = []
     new_scan_node = old_scan_node
     new_scan_args = old_scan_args
     replacements: dict[Variable, Variable] = {}
@@ -702,7 +702,7 @@ def push_out_inner_vars(
     for idx in range(len(inner_vars)):
         var = inner_vars[idx]
 
-        new_outer_var: Optional[Variable] = None
+        new_outer_var: Variable | None = None
 
         if var in old_scan_args.inner_in_seqs:
             idx_seq = old_scan_args.inner_in_seqs.index(var)
@@ -946,7 +946,7 @@ class ScanInplaceOptimizer(GraphRewriter):
 
     def attempt_scan_inplace(
         self, fgraph: FunctionGraph, node: Apply[Scan], output_indices: list[int]
-    ) -> Optional[Apply]:
+    ) -> Apply | None:
         """Attempt to replace a `Scan` node by one which computes the specified outputs inplace.
 
         Parameters

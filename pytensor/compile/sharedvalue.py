@@ -3,7 +3,7 @@
 import copy
 from contextlib import contextmanager
 from functools import singledispatch
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from pytensor.graph.basic import Variable
 from pytensor.graph.utils import add_tag_trace
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from pytensor.graph.type import Type
 
 
-__SHARED_CONTEXT__: Optional[list[Variable]] = None
+__SHARED_CONTEXT__: list[Variable] | None = None
 
 
 @contextmanager
@@ -40,8 +40,8 @@ class SharedVariable(Variable):
         value,
         strict: bool,
         allow_downcast=None,
-        container: Optional[Container] = None,
-        name: Optional[str] = None,
+        container: Container | None = None,
+        name: str | None = None,
     ):
         r"""
         Parameters
@@ -90,7 +90,7 @@ class SharedVariable(Variable):
         if isinstance(__SHARED_CONTEXT__, list):
             __SHARED_CONTEXT__.append(self)
 
-        self._default_update: Optional[Variable] = None
+        self._default_update: Variable | None = None
 
     def get_value(self, borrow=False, return_internal_type=False):
         """
@@ -149,7 +149,7 @@ class SharedVariable(Variable):
         return cp
 
     @property
-    def default_update(self) -> Optional[Variable]:
+    def default_update(self) -> Variable | None:
         """A default update expression for this `Variable`.
 
         If this value is non-``None``, its value will be used as the `update`

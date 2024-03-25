@@ -1,7 +1,7 @@
 import contextlib
 import inspect
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, Callable, Optional, Union
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 import numpy as np
@@ -223,9 +223,9 @@ def eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode):
 
 
 def compare_numba_and_py(
-    fgraph: Union[FunctionGraph, tuple[Sequence["Variable"], Sequence["Variable"]]],
+    fgraph: FunctionGraph | tuple[Sequence["Variable"], Sequence["Variable"]],
     inputs: Sequence["TensorLike"],
-    assert_fn: Optional[Callable] = None,
+    assert_fn: Callable | None = None,
     numba_mode=numba_mode,
     py_mode=py_mode,
     updates=None,

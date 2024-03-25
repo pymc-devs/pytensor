@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from copy import copy
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import numpy as np
 
@@ -57,9 +57,9 @@ class Blockwise(Op):
     def __init__(
         self,
         core_op: Op,
-        signature: Optional[str] = None,
-        name: Optional[str] = None,
-        gufunc_spec: Optional[tuple[str, int, int]] = None,
+        signature: str | None = None,
+        name: str | None = None,
+        gufunc_spec: tuple[str, int, int] | None = None,
         **kwargs,
     ):
         """

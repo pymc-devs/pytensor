@@ -1,6 +1,5 @@
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from functools import partial
-from typing import Callable, Optional
 
 import numpy as np
 import pytest
@@ -34,7 +33,7 @@ py_mode = get_mode("FAST_COMPILE")
 def compare_jax_and_py(
     fgraph: FunctionGraph,
     test_inputs: Iterable,
-    assert_fn: Optional[Callable] = None,
+    assert_fn: Callable | None = None,
     must_be_device_array: bool = True,
     jax_mode=jax_mode,
     py_mode=py_mode,

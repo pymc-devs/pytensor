@@ -1,7 +1,7 @@
 import builtins
 import warnings
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 from numpy.core.numeric import normalize_axis_tuple
@@ -2275,7 +2275,7 @@ def _tensordot_as_dot(a, b, axes, dot, batched):
 
 
 def tensordot(
-    a: TensorLike, b: TensorLike, axes: Union[int, Sequence[Sequence[int]]] = 2
+    a: TensorLike, b: TensorLike, axes: int | Sequence[Sequence[int]] = 2
 ) -> TensorVariable:
     """
     Compute tensor dot product along specified axes.

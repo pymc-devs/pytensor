@@ -1,6 +1,5 @@
 import logging
 import os
-from typing import Optional
 
 import pytensor
 from pytensor.configdefaults import config
@@ -58,7 +57,7 @@ class BaseCorrMM(OpenMPOp, _NoPythonOp):
         "unshared",
     )
 
-    _direction: Optional[str] = None
+    _direction: str | None = None
 
     params_type = ParamsType(
         direction=EnumList(

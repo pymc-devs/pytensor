@@ -13,7 +13,6 @@ from io import StringIO
 from itertools import chain
 from itertools import product as itertools_product
 from logging import Logger
-from typing import Optional
 from warnings import warn
 
 import numpy as np
@@ -1354,7 +1353,7 @@ class _Linker(LocalLinker):
         self.maker = maker
         super().__init__(scheduler=schedule)
 
-    def accept(self, fgraph, no_recycling: Optional[list] = None, profile=None):
+    def accept(self, fgraph, no_recycling: list | None = None, profile=None):
         if no_recycling is None:
             no_recycling = []
         if self.fgraph is not None and self.fgraph is not fgraph:

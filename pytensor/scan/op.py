@@ -47,10 +47,9 @@ import dataclasses
 import logging
 import time
 from collections import OrderedDict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from copy import copy
 from itertools import chain, product
-from typing import Callable, Optional, Union
 
 import numpy as np
 
@@ -282,7 +281,7 @@ class ScanInfo:
 
 
 TensorConstructorType = Callable[
-    [Iterable[Optional[Union[bool, int]]], Union[str, np.generic]], TensorType
+    [Iterable[bool | int | None], str | np.generic], TensorType
 ]
 
 
@@ -673,11 +672,11 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         inputs: list[Variable],
         outputs: list[Variable],
         info: ScanInfo,
-        mode: Optional[Mode] = None,
-        typeConstructor: Optional[TensorConstructorType] = None,
+        mode: Mode | None = None,
+        typeConstructor: TensorConstructorType | None = None,
         truncate_gradient: int = -1,
-        name: Optional[str] = None,
-        profile: Optional[Union[str, bool]] = None,
+        name: str | None = None,
+        profile: str | bool | None = None,
         allow_gc: bool = True,
         strict: bool = True,
     ):

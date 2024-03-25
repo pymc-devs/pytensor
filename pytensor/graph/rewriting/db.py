@@ -4,7 +4,7 @@ import sys
 from collections.abc import Iterable, Sequence
 from functools import cmp_to_key
 from io import StringIO
-from typing import Optional, Union
+from typing import Union
 
 from pytensor.configdefaults import config
 from pytensor.graph.rewriting import basic as pytensor_rewriting
@@ -183,16 +183,15 @@ class RewriteDatabaseQuery:
 
     def __init__(
         self,
-        include: Iterable[Union[str, None]],
-        require: Optional[Union[OrderedSet, Sequence[str]]] = None,
-        exclude: Optional[Union[OrderedSet, Sequence[str]]] = None,
-        subquery: Optional[dict[str, "RewriteDatabaseQuery"]] = None,
+        include: Iterable[str | None],
+        require: OrderedSet | Sequence[str] | None = None,
+        exclude: OrderedSet | Sequence[str] | None = None,
+        subquery: dict[str, "RewriteDatabaseQuery"] | None = None,
         position_cutoff: float = math.inf,
-        extra_rewrites: Optional[
-            Sequence[
-                tuple[Union["RewriteDatabaseQuery", RewritesType], Union[int, float]]
-            ]
-        ] = None,
+        extra_rewrites: Sequence[
+            tuple[Union["RewriteDatabaseQuery", RewritesType], int | float]
+        ]
+        | None = None,
     ):
         """
 
@@ -224,7 +223,7 @@ class RewriteDatabaseQuery:
         self.exclude = OrderedSet(exclude) if exclude else OrderedSet()
         self.subquery = subquery or {}
         self.position_cutoff = position_cutoff
-        self.name: Optional[str] = None
+        self.name: str | None = None
         if extra_rewrites is None:
             extra_rewrites = []
         self.extra_rewrites = list(extra_rewrites)
@@ -277,7 +276,7 @@ class RewriteDatabaseQuery:
         )
 
     def register(
-        self, *rewrites: tuple["RewriteDatabaseQuery", Union[int, float]]
+        self, *rewrites: tuple["RewriteDatabaseQuery", int | float]
     ) -> "RewriteDatabaseQuery":
         """Include the given rewrites."""
         return RewriteDatabaseQuery(
@@ -403,9 +402,7 @@ class SequenceDB(RewriteDatabase):
         else:
             raise TypeError(f"`position` must be numeric; got {position}")
 
-    def query(
-        self, *tags, position_cutoff: Optional[Union[int, float]] = None, **kwtags
-    ):
+    def query(self, *tags, position_cutoff: int | float | None = None, **kwtags):
         """
 
         Parameters

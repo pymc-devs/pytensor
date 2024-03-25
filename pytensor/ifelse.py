@@ -13,7 +13,7 @@ is a global operation with a scalar condition.
 
 from collections.abc import Sequence
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -341,10 +341,10 @@ class IfElse(_NoPythonOp):
 
 def ifelse(
     condition: "TensorLike",
-    then_branch: Union[Any, Sequence[Any]],
-    else_branch: Union[Any, Sequence[Any]],
-    name: Optional[str] = None,
-) -> Union[Variable, Sequence[Variable]]:
+    then_branch: Any | Sequence[Any],
+    else_branch: Any | Sequence[Any],
+    name: str | None = None,
+) -> Variable | Sequence[Variable]:
     """Construct a graph for an ``if`` statement.
 
     Parameters

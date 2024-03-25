@@ -1,9 +1,9 @@
 import ctypes
 import importlib
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, cast
+from typing import Any, cast
 
 import numba
 import numpy as np
@@ -36,7 +36,7 @@ class Signature:
     res_c_type: str
     arg_dtypes: list[DTypeLike]
     arg_c_types: list[str]
-    arg_names: list[Optional[str]]
+    arg_names: list[str | None]
 
     @property
     def arg_numba_types(self) -> list[DTypeLike]:
@@ -89,7 +89,7 @@ class Signature:
         )
 
         arg_dtypes = []
-        arg_names: list[Optional[str]] = []
+        arg_names: list[str | None] = []
         arg_c_types = []
         for raw_arg in raw_args.split(b","):
             re_match = re.fullmatch(decl_expr, raw_arg)

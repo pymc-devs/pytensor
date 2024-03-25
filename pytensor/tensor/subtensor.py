@@ -1,9 +1,8 @@
 import logging
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from itertools import chain, groupby
 from textwrap import dedent
-from typing import Callable, Optional, Union
 
 import numpy as np
 
@@ -83,8 +82,8 @@ invalid_tensor_types = (
 
 def indices_from_subtensor(
     op_indices: Iterable[ScalarConstant],
-    idx_list: Optional[list[Union[Type, slice, Variable]]],
-) -> tuple[Union[slice, Variable], ...]:
+    idx_list: list[Type | slice | Variable] | None,
+) -> tuple[slice | Variable, ...]:
     """Recreate the index tuple from which a ``*Subtensor**`` ``Op`` was created.
 
     Parameters
@@ -129,8 +128,8 @@ def indices_from_subtensor(
 
 
 def as_index_constant(
-    a: Optional[Union[slice, int, np.integer, Variable]],
-) -> Optional[Union[Variable, slice]]:
+    a: slice | int | np.integer | Variable | None,
+) -> Variable | slice | None:
     r"""Convert Python literals to PyTensor constants--when possible--in `Subtensor` arguments.
 
     This will leave `Variable`\s untouched.
@@ -152,8 +151,8 @@ def as_index_constant(
 
 
 def as_index_literal(
-    idx: Optional[Union[Variable, slice]],
-) -> Optional[Union[int, slice]]:
+    idx: Variable | slice | None,
+) -> int | slice | None:
     """Convert a symbolic index element to its Python equivalent.
 
     This is like the inverse of `as_index_constant`
@@ -186,7 +185,7 @@ def get_idx_list(inputs, idx_list):
 
 
 def get_canonical_form_slice(
-    theslice: Union[slice, Variable], length: Variable
+    theslice: slice | Variable, length: Variable
 ) -> tuple[Variable, int]:
     """Convert slices to canonical form.
 

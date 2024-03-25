@@ -143,7 +143,7 @@ class Shape(COp):
 _shape = Shape()
 
 
-def shape(x: Union[np.ndarray, Number, Variable]) -> Variable:
+def shape(x: np.ndarray | Number | Variable) -> Variable:
     """Return the shape of `x`."""
     if not isinstance(x, Variable):
         # The following is a type error in Python 3.9 but not 3.12.
@@ -557,8 +557,8 @@ _specify_shape = SpecifyShape()
 
 
 def specify_shape(
-    x: Union[np.ndarray, Number, Variable],
-    shape: Union[ShapeValueType, list[ShapeValueType], tuple[ShapeValueType, ...]],
+    x: np.ndarray | Number | Variable,
+    shape: ShapeValueType | list[ShapeValueType] | tuple[ShapeValueType, ...],
 ):
     """Specify a fixed shape for a `Variable`.
 

@@ -4,7 +4,7 @@ from collections import OrderedDict
 from collections.abc import Sequence
 from copy import copy
 from functools import partial
-from typing import Optional, cast
+from typing import cast
 
 import pytensor.tensor as pt
 from pytensor import function
@@ -304,9 +304,9 @@ class OpFromGraph(Op, HasInnerGraph):
         lop_overrides: str = "default",
         grad_overrides: str = "default",
         rop_overrides: str = "default",
-        connection_pattern: Optional[list[list[bool]]] = None,
+        connection_pattern: list[list[bool]] | None = None,
         strict: bool = False,
-        name: Optional[str] = None,
+        name: str | None = None,
         **kwargs,
     ):
         """

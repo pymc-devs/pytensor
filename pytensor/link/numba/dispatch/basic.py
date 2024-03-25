@@ -5,7 +5,6 @@ from contextlib import contextmanager
 from copy import copy
 from functools import singledispatch
 from textwrap import dedent
-from typing import Union
 
 import numba
 import numba.np.unsafe.ndarray as numba_ndarray
@@ -127,7 +126,7 @@ def get_numba_type(
 
 
 def create_numba_signature(
-    node_or_fgraph: Union[FunctionGraph, Apply],
+    node_or_fgraph: FunctionGraph | Apply,
     force_scalar: bool = False,
     reduce_to_scalar: bool = False,
 ) -> numba.types.Type:
