@@ -1413,7 +1413,7 @@ def local_useless_elemwise_comparison(fgraph, node):
 
     # Elemwise[{LT,GT}](X, X) -> Elemwise[zeros](X)
     if (
-        isinstance(node.op.scalar_op, (ps.LT, ps.GT))
+        isinstance(node.op.scalar_op, ps.LT | ps.GT)
         and node.inputs[0] is node.inputs[1]
     ):
         res = zeros_like(node.inputs[0], dtype=dtype, opt=True)
@@ -1422,7 +1422,7 @@ def local_useless_elemwise_comparison(fgraph, node):
         return [res]
     # Elemwise[{LE,GE}](X, X) -> Elemwise[ones](X)
     if (
-        isinstance(node.op.scalar_op, (ps.LE, ps.GE))
+        isinstance(node.op.scalar_op, ps.LE | ps.GE)
         and node.inputs[0] is node.inputs[1]
     ):
         res = ones_like(node.inputs[0], dtype=dtype, opt=True)
@@ -1432,7 +1432,7 @@ def local_useless_elemwise_comparison(fgraph, node):
         return [res]
     # Elemwise[{minimum,maximum}](X, X) -> X
     if (
-        isinstance(node.op.scalar_op, (ps.ScalarMinimum, ps.ScalarMaximum))
+        isinstance(node.op.scalar_op, ps.ScalarMinimum | ps.ScalarMaximum)
         and node.inputs[0] is node.inputs[1]
     ):
         res = node.inputs[0]
@@ -1552,7 +1552,7 @@ def local_useless_elemwise_comparison(fgraph, node):
 
     def investigate(node):
         "Return True if values will be shapes, so >= 0"
-        if isinstance(node.op, (Shape, Shape_i)):
+        if isinstance(node.op, Shape | Shape_i):
             return True
         elif isinstance(node.op, Subtensor) and node.inputs[0].owner:
             return investigate(node.inputs[0].owner)
@@ -1680,11 +1680,11 @@ def local_reduce_join(fgraph, node):
         if extract_constant(join_node.inputs[0], only_process_constants=True) != 0:
             return
 
-        if isinstance(node.op.scalar_op, (ps.ScalarMaximum, ps.ScalarMinimum)):
+        if isinstance(node.op.scalar_op, ps.ScalarMaximum | ps.ScalarMinimum):
             # Support only 2 inputs for now
             if len(join_node.inputs) != 3:
                 return
-        elif not isinstance(node.op.scalar_op, (ps.Add, ps.Mul)):
+        elif not isinstance(node.op.scalar_op, ps.Add | ps.Mul):
             return
         elif len(join_node.inputs) <= 2:
             # This is a useless join that should get removed by another rewrite?
@@ -2014,7 +2014,7 @@ def local_intdiv_by_one(fgraph, node):
 def local_zero_div(fgraph, node):
     """0 / x -> 0"""
     if isinstance(node.op, Elemwise) and isinstance(
-        node.op.scalar_op, (ps.IntDiv, ps.TrueDiv)
+        node.op.scalar_op, ps.IntDiv | ps.TrueDiv
     ):
         if get_constant(node.inputs[0]) == 0:
             ret = alloc_like(0, node.outputs[0], fgraph)

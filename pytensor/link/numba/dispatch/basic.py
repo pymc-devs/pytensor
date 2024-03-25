@@ -224,7 +224,7 @@ def to_scalar(x):
 
 @numba.extending.overload(to_scalar)
 def impl_to_scalar(x):
-    if isinstance(x, (numba.types.Number, numba.types.Boolean)):
+    if isinstance(x, numba.types.Number | numba.types.Boolean):
         return lambda x: x
     elif isinstance(x, numba.types.Array):
         return lambda x: x.item()
@@ -483,7 +483,7 @@ def create_index_func(node, objmode=False):
             raise ValueError()
 
     set_or_inc = isinstance(
-        node.op, (IncSubtensor, AdvancedIncSubtensor1, AdvancedIncSubtensor)
+        node.op, IncSubtensor | AdvancedIncSubtensor1 | AdvancedIncSubtensor
     )
     index_start_idx = 1 + int(set_or_inc)
 

@@ -222,7 +222,7 @@ class Blockwise(Op):
 
         def as_core(t, core_t):
             # Inputs could be NullType or DisconnectedType
-            if isinstance(t.type, (NullType, DisconnectedType)):
+            if isinstance(t.type, NullType | DisconnectedType):
                 return t
             return core_t.type()
 
@@ -275,7 +275,7 @@ class Blockwise(Op):
             # this op did the right thing.
             new_rval = []
             for elem, inp in zip(rval, inputs):
-                if isinstance(elem.type, (NullType, DisconnectedType)):
+                if isinstance(elem.type, NullType | DisconnectedType):
                     new_rval.append(elem)
                 else:
                     elem = inp.zeros_like()
@@ -289,7 +289,7 @@ class Blockwise(Op):
         batch_ndims = self.batch_ndim(outs[0].owner)
         batch_shape = outs[0].type.shape[:batch_ndims]
         for i, (inp, sig) in enumerate(zip(inputs, self.inputs_sig)):
-            if isinstance(rval[i].type, (NullType, DisconnectedType)):
+            if isinstance(rval[i].type, NullType | DisconnectedType):
                 continue
 
             assert inp.type.ndim == batch_ndims + len(sig)
@@ -375,7 +375,7 @@ class Blockwise(Op):
 @_vectorize_node.register(Op)
 def vectorize_node_fallback(op: Op, node: Apply, *bached_inputs) -> Apply:
     for inp in node.inputs:
-        if not isinstance(inp.type, (TensorType, ScalarType)):
+        if not isinstance(inp.type, TensorType | ScalarType):
             raise NotImplementedError(
                 f"Cannot vectorize node {node} with input {inp} of type {inp.type}"
             )

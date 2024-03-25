@@ -1642,7 +1642,7 @@ class TestIncSubtensor1:
     def test_inc_subtensor_AdvancedSubtensor1(self, ignore_duplicates):
         x = AdvancedSubtensor1()(self.v, self.adv1q)
         a = inc_subtensor(x, self.v[self.adv1q], ignore_duplicates=ignore_duplicates)
-        assert isinstance(a.owner.op, (AdvancedIncSubtensor1, AdvancedIncSubtensor))
+        assert isinstance(a.owner.op, AdvancedIncSubtensor1 | AdvancedIncSubtensor)
         assert getattr(a.owner.op, "ignore_duplicates", False) == ignore_duplicates
 
     def test_1d_inc_adv_selection(self):
@@ -2538,7 +2538,7 @@ def test_basic_shape():
 
 
 def idx_as_tensor(x):
-    if isinstance(x, (slice, type(None))):
+    if isinstance(x, slice | type(None)):
         return x
     else:
         return ptb.as_tensor(x)

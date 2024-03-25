@@ -30,7 +30,7 @@ def test_Bartlett(val):
         [
             i.tag.test_value
             for i in g_fg.inputs
-            if not isinstance(i, (SharedVariable, Constant))
+            if not isinstance(i, SharedVariable | Constant)
         ],
         assert_fn=lambda x, y: np.testing.assert_allclose(x, y, atol=1e-15),
     )
@@ -106,7 +106,7 @@ def test_CumOp(val, axis, mode):
         [
             i.tag.test_value
             for i in g_fg.inputs
-            if not isinstance(i, (SharedVariable, Constant))
+            if not isinstance(i, SharedVariable | Constant)
         ],
     )
 
@@ -129,7 +129,7 @@ def test_FillDiagonal(a, val):
         [
             i.tag.test_value
             for i in g_fg.inputs
-            if not isinstance(i, (SharedVariable, Constant))
+            if not isinstance(i, SharedVariable | Constant)
         ],
     )
 
@@ -163,7 +163,7 @@ def test_FillDiagonalOffset(a, val, offset):
         [
             i.tag.test_value
             for i in g_fg.inputs
-            if not isinstance(i, (SharedVariable, Constant))
+            if not isinstance(i, SharedVariable | Constant)
         ],
     )
 
@@ -248,7 +248,7 @@ def test_RavelMultiIndex(arr, shape, mode, order, exc):
             [
                 i.tag.test_value
                 for i in g_fg.inputs
-                if not isinstance(i, (SharedVariable, Constant))
+                if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
@@ -293,7 +293,7 @@ def test_Repeat(x, repeats, axis, exc):
             [
                 i.tag.test_value
                 for i in g_fg.inputs
-                if not isinstance(i, (SharedVariable, Constant))
+                if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
@@ -362,7 +362,7 @@ def test_Unique(x, axis, return_index, return_inverse, return_counts, exc):
             [
                 i.tag.test_value
                 for i in g_fg.inputs
-                if not isinstance(i, (SharedVariable, Constant))
+                if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
@@ -405,7 +405,7 @@ def test_UnravelIndex(arr, shape, order, exc):
             [
                 i.tag.test_value
                 for i in g_fg.inputs
-                if not isinstance(i, (SharedVariable, Constant))
+                if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
@@ -459,6 +459,6 @@ def test_Searchsorted(a, v, side, sorter, exc):
             [
                 i.tag.test_value
                 for i in g_fg.inputs
-                if not isinstance(i, (SharedVariable, Constant))
+                if not isinstance(i, SharedVariable | Constant)
             ],
         )

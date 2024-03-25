@@ -420,7 +420,7 @@ class EnumType(CType, dict):
                     "Only capital letters, underscores and digits "
                     "are allowed."
                 )
-            if isinstance(kwargs[k], (list, tuple)):
+            if isinstance(kwargs[k], list | tuple):
                 if len(kwargs[k]) != 2:
                     raise TypeError(
                         f"{type(self).__name__}: when using a tuple to define a constant, your tuple should contain 2 values: "
@@ -444,7 +444,7 @@ class EnumType(CType, dict):
                 kwargs[k] = value
             if isinstance(kwargs[k], bool):
                 kwargs[k] = int(kwargs[k])
-            elif not isinstance(kwargs[k], (int, float)):
+            elif not isinstance(kwargs[k], int | float):
                 raise TypeError(
                     f'{type(self).__name__}: constant "{k}": expected integer or floating value, got "{type(kwargs[k]).__name__}".'
                 )
@@ -687,7 +687,7 @@ class EnumList(EnumType):
         cname = kwargs.pop("cname", None)
 
         for arg_rank, arg in enumerate(args):
-            if isinstance(arg, (list, tuple)):
+            if isinstance(arg, list | tuple):
                 if len(arg) != 2:
                     raise TypeError(
                         f"{type(self).__name__}: when using a tuple to define a constant, your tuple should contain 2 values: "

@@ -565,7 +565,7 @@ def get_target_language(mode=None) -> tuple[Literal["py", "c", "numba", "jax"], 
     if isinstance(linker, CLinker):
         return ("c",)
 
-    if isinstance(linker, (VMLinker, OpWiseCLinker)):
+    if isinstance(linker, VMLinker | OpWiseCLinker):
         return ("c", "py") if config.cxx else ("py",)
 
     raise Exception(f"Unsupported Linker: {linker}")

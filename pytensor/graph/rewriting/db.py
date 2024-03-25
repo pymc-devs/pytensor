@@ -60,11 +60,9 @@ class RewriteDatabase:
         """
         if not isinstance(
             rewriter,
-            (
-                RewriteDatabase,
-                pytensor_rewriting.GraphRewriter,
-                pytensor_rewriting.NodeRewriter,
-            ),
+            RewriteDatabase
+            | pytensor_rewriting.GraphRewriter
+            | pytensor_rewriting.NodeRewriter,
         ):
             raise TypeError(f"{rewriter} is not a valid rewrite type.")
 
@@ -397,7 +395,7 @@ class SequenceDB(RewriteDatabase):
                 self.__position__[name] = 0
             else:
                 self.__position__[name] = max(self.__position__.values()) + 1
-        elif isinstance(position, (int, float)):
+        elif isinstance(position, int | float):
             self.__position__[name] = position
         else:
             raise TypeError(f"`position` must be numeric; got {position}")

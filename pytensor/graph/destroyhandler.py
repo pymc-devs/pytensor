@@ -63,7 +63,7 @@ def _contains_cycle(fgraph, orderings):
 
     # this is performance-critical code. it is the largest single-function
     # bottleneck when compiling large graphs.
-    assert isinstance(outputs, (tuple, list, deque))
+    assert isinstance(outputs, tuple | list | deque)
 
     # TODO: For more speed - use a defaultdict for the orderings
     # (defaultdict runs faster than dict in the case where the key

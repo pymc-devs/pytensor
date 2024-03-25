@@ -132,7 +132,7 @@ class PyDotFormatter:
                 fct = [fct]
             elif isinstance(fct, Apply):
                 fct = fct.outputs
-            assert isinstance(fct, (list, tuple))
+            assert isinstance(fct, list | tuple)
             assert all(isinstance(v, Variable) for v in fct)
             fgraph = FunctionGraph(inputs=graph_inputs(fct), outputs=fct)
 
@@ -281,7 +281,7 @@ def var_tag(var):
     """Parse tag attribute of variable node."""
     tag = var.tag
     if hasattr(tag, "trace") and len(tag.trace) and len(tag.trace[0]) == 4:
-        if isinstance(tag.trace[0][0], (tuple, list)):
+        if isinstance(tag.trace[0][0], tuple | list):
             path, line, _, src = tag.trace[0][-1]
         else:
             path, line, _, src = tag.trace[0]

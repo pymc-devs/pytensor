@@ -1384,7 +1384,7 @@ def test_local_tensor_scalar_tensor(dtype):
     f = function([t], t2, mode=rewrite_mode)
     e = f.maker.fgraph.toposort()
     assert not any(
-        n for n in e if isinstance(n.op, (TensorFromScalar, ScalarFromTensor))
+        n for n in e if isinstance(n.op, TensorFromScalar | ScalarFromTensor)
     )
 
 
@@ -1414,7 +1414,7 @@ def test_local_scalar_tensor_scalar(dtype):
     f = function([s], s2, mode=rewrite_mode)
     e = f.maker.fgraph.toposort()
     assert not any(
-        n for n in e if isinstance(n.op, (TensorFromScalar, ScalarFromTensor))
+        n for n in e if isinstance(n.op, TensorFromScalar | ScalarFromTensor)
     )
 
 

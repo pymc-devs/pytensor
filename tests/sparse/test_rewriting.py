@@ -29,7 +29,7 @@ def test_local_csm_properties_csm():
             mode=mode,
         )
         assert not any(
-            isinstance(node.op, (sparse.CSM, sparse.CSMProperties))
+            isinstance(node.op, sparse.CSM | sparse.CSMProperties)
             for node in f.maker.fgraph.toposort()
         )
         v = cast(random_lil((10, 40), config.floatX, 3))

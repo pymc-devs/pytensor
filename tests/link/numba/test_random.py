@@ -295,7 +295,7 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
         [
             i.tag.test_value
             for i in g_fg.inputs
-            if not isinstance(i, (SharedVariable, Constant))
+            if not isinstance(i, SharedVariable | Constant)
         ],
     )
 
@@ -428,7 +428,7 @@ def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_
         *[
             i.tag.test_value
             for i in g_fn.maker.fgraph.inputs
-            if not isinstance(i, (SharedVariable, Constant))
+            if not isinstance(i, SharedVariable | Constant)
         ]
     )
 
@@ -509,7 +509,7 @@ def test_CategoricalRV(dist_args, size, cm):
             [
                 i.tag.test_value
                 for i in g_fg.inputs
-                if not isinstance(i, (SharedVariable, Constant))
+                if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
@@ -592,6 +592,6 @@ def test_random_Generator():
             [
                 i.tag.test_value
                 for i in g_fg.inputs
-                if not isinstance(i, (SharedVariable, Constant))
+                if not isinstance(i, SharedVariable | Constant)
             ],
         )

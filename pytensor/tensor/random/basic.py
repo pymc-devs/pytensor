@@ -1958,7 +1958,7 @@ class RandIntRV(RandomVariable):
 
     def make_node(self, rng, *args, **kwargs):
         if not isinstance(
-            getattr(rng, "type", None), (RandomStateType, RandomStateSharedVariable)
+            getattr(rng, "type", None), RandomStateType | RandomStateSharedVariable
         ):
             raise TypeError("`randint` is only available for `RandomStateType`s")
         return super().make_node(rng, *args, **kwargs)
@@ -2010,7 +2010,7 @@ class IntegersRV(RandomVariable):
     def make_node(self, rng, *args, **kwargs):
         if not isinstance(
             getattr(rng, "type", None),
-            (RandomGeneratorType, RandomGeneratorSharedVariable),
+            RandomGeneratorType | RandomGeneratorSharedVariable,
         ):
             raise TypeError("`integers` is only available for `RandomGeneratorType`s")
         return super().make_node(rng, *args, **kwargs)

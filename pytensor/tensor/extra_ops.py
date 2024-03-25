@@ -1347,7 +1347,7 @@ def unravel_index(indices, dims, order="C"):
 
     """
     res = UnravelIndex(order=order)(indices, dims)
-    if not isinstance(res, (list, tuple)):
+    if not isinstance(res, list | tuple):
         return (res,)
     else:
         return tuple(res)
@@ -1424,7 +1424,7 @@ def ravel_multi_index(multi_index, dims, mode="raise", order="C"):
     unravel_index
 
     """
-    if not isinstance(multi_index, (tuple, list)):
+    if not isinstance(multi_index, tuple | list):
         raise TypeError("multi_index must be a tuple or a list.")
     args = (*multi_index, dims)
     return RavelMultiIndex(mode=mode, order=order)(*args)

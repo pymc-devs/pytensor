@@ -49,7 +49,7 @@ def rewrite_graph(
         fgraph = graph
         return_fgraph = True
     else:
-        if isinstance(graph, (list, tuple)):
+        if isinstance(graph, list | tuple):
             outputs = graph
         else:
             assert isinstance(graph, Variable)
@@ -66,7 +66,7 @@ def rewrite_graph(
     if return_fgraph:
         return fgraph
     else:
-        if isinstance(graph, (list, tuple)):
+        if isinstance(graph, list | tuple):
             return fgraph.outputs
         else:
             return fgraph.outputs[0]

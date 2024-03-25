@@ -135,7 +135,7 @@ def _is_dense(x):
         L{numpy.ndarray}).
 
     """
-    if not isinstance(x, (scipy.sparse.spmatrix, np.ndarray)):
+    if not isinstance(x, scipy.sparse.spmatrix | np.ndarray):
         raise NotImplementedError(
             "this function should only be called on "
             "sparse.scipy.sparse.spmatrix or "

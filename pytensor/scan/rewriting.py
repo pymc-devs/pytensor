@@ -1940,7 +1940,7 @@ class ScanMerge(GraphRewriter):
         )
         new_outs = new_op(*outer_ins)
 
-        if not isinstance(new_outs, (list, tuple)):
+        if not isinstance(new_outs, list | tuple):
             new_outs = [new_outs]
 
         return list(zip(outer_outs, new_outs))
@@ -2150,7 +2150,7 @@ def scan_merge_inouts(fgraph, node):
         )
         outputs = new_op(*outer_inputs)
 
-        if not isinstance(outputs, (list, tuple)):
+        if not isinstance(outputs, list | tuple):
             outputs = [outputs]
 
         na = ScanArgs(
@@ -2415,7 +2415,7 @@ def push_out_dot1_scan(fgraph, node):
                     ]
 
                     new_outs = new_op(*_scan_inputs)
-                    if not isinstance(new_outs, (list, tuple)):
+                    if not isinstance(new_outs, list | tuple):
                         new_outs = [new_outs]
 
                     # We need now to pair correctly the new outputs

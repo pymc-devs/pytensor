@@ -784,7 +784,7 @@ class FunctionGraph(MetaObject):
                 if len(orderings) > 0:
                     all_orderings.append(orderings)
                     for node, prereqs in orderings.items():
-                        if not isinstance(prereqs, (list, OrderedSet)):
+                        if not isinstance(prereqs, list | OrderedSet):
                             raise TypeError(
                                 "prereqs must be a type with a "
                                 "deterministic iteration order, or toposort "

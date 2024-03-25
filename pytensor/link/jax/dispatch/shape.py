@@ -51,7 +51,7 @@ def assert_shape_argument_jax_compatible(shape):
 
     """
     shape_op = shape.owner.op
-    if not isinstance(shape_op, (Shape, Shape_i, JAXShapeTuple)):
+    if not isinstance(shape_op, Shape | Shape_i | JAXShapeTuple):
         raise NotImplementedError(SHAPE_NOT_COMPATIBLE)
 
 

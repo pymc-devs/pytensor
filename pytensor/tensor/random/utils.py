@@ -157,7 +157,7 @@ def normalize_size_param(
         size = constant([], dtype="int64")
     elif isinstance(size, int):
         size = as_tensor_variable([size], ndim=1)
-    elif not isinstance(size, (np.ndarray, Variable, Sequence)):
+    elif not isinstance(size, np.ndarray | Variable | Sequence):
         raise TypeError(
             "Parameter size must be None, an integer, or a sequence with integers."
         )

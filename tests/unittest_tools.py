@@ -217,7 +217,7 @@ class InferShapeTester:
             mode = mode.excluding(*excluding)
         if warn:
             for var, inp in zip(inputs, numeric_inputs):
-                if isinstance(inp, (int, float, list, tuple)):
+                if isinstance(inp, int | float | list | tuple):
                     inp = var.type.filter(inp)
                 if not hasattr(inp, "shape"):
                     continue

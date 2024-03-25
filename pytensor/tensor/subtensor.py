@@ -142,7 +142,7 @@ def as_index_constant(
             as_index_constant(a.stop),
             as_index_constant(a.step),
         )
-    elif isinstance(a, (int, np.integer)):
+    elif isinstance(a, int | np.integer):
         return ps.ScalarConstant(ps.int64, a)
     elif not isinstance(a, Variable):
         return as_tensor_variable(a)
@@ -406,8 +406,8 @@ def is_basic_idx(idx):
     integer can indicate advanced indexing.
 
     """
-    return isinstance(idx, (slice, type(None))) or isinstance(
-        getattr(idx, "type", None), (SliceType, NoneTypeT)
+    return isinstance(idx, slice | type(None)) or isinstance(
+        getattr(idx, "type", None), SliceType | NoneTypeT
     )
 
 
@@ -573,7 +573,7 @@ def index_vars_to_types(entry, slice_ok=True):
 
     """
     if (
-        isinstance(entry, (np.ndarray, Variable))
+        isinstance(entry, np.ndarray | Variable)
         and hasattr(entry, "dtype")
         and entry.dtype == "bool"
     ):
@@ -621,7 +621,7 @@ def index_vars_to_types(entry, slice_ok=True):
             slice_c = None
 
         return slice(slice_a, slice_b, slice_c)
-    elif isinstance(entry, (int, np.integer)):
+    elif isinstance(entry, int | np.integer):
         raise TypeError()
     else:
         raise AdvancedIndexingError("Invalid index type or slice for Subtensor")
@@ -964,7 +964,7 @@ class Subtensor(COp):
             return pos[1]
 
         def init_entry(entry, depth=0):
-            if isinstance(entry, (np.integer, int)):
+            if isinstance(entry, np.integer | int):
                 init_cmds.append("subtensor_spec[%i] = %i;" % (spec_pos(), entry))
                 inc_spec_pos(1)
                 if depth == 0:
@@ -2606,7 +2606,7 @@ class AdvancedSubtensor(Op):
     def infer_shape(self, fgraph, node, ishapes):
         def is_bool_index(idx):
             return (
-                isinstance(idx, (np.bool_, bool))
+                isinstance(idx, np.bool_ | bool)
                 or getattr(idx, "dtype", None) == "bool"
             )
 
@@ -2713,7 +2713,7 @@ class AdvancedIncSubtensor(Op):
 
         new_inputs = []
         for inp in inputs:
-            if isinstance(inp, (list, tuple)):
+            if isinstance(inp, list | tuple):
                 inp = as_tensor_variable(inp)
             new_inputs.append(inp)
         return Apply(
@@ -2819,7 +2819,7 @@ def take(a, indices, axis=None, mode="raise"):
     a = as_tensor_variable(a)
     indices = as_tensor_variable(indices)
 
-    if not isinstance(axis, (int, type(None))):
+    if not isinstance(axis, int | type(None)):
         raise TypeError("`axis` must be an integer or None")
 
     if axis is None:
