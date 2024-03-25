@@ -15,7 +15,7 @@ from collections.abc import Callable, Iterable, Sequence
 from collections.abc import Iterable as IterableType
 from functools import _compose_mro, partial, reduce  # type: ignore
 from itertools import chain
-from typing import TYPE_CHECKING, Literal, Union, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import pytensor
 from pytensor.configdefaults import config
@@ -44,11 +44,11 @@ if TYPE_CHECKING:
 _logger = logging.getLogger("pytensor.graph.rewriting.basic")
 
 RemoveKeyType = Literal["remove"]
-TransformOutputType = Union[
-    bool,
-    Sequence[Variable],
-    dict[Variable | Literal["remove"], Variable | Sequence[Variable]],
-]
+TransformOutputType = (
+    bool
+    | Sequence[Variable]
+    | dict[Variable | Literal["remove"], Variable | Sequence[Variable]]
+)
 FailureCallbackType = Callable[
     [
         Exception,

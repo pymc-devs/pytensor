@@ -12,7 +12,7 @@ from pytensor.misc.ordered_set import OrderedSet
 from pytensor.utils import DefaultOrderedDict
 
 
-RewritesType = Union[pytensor_rewriting.GraphRewriter, pytensor_rewriting.NodeRewriter]
+RewritesType = pytensor_rewriting.GraphRewriter | pytensor_rewriting.NodeRewriter
 
 
 class RewriteDatabase:

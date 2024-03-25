@@ -26,7 +26,7 @@ from pytensor.misc.ordered_set import OrderedSet
 if TYPE_CHECKING:
     from pytensor.graph.op import Op
 
-ApplyOrOutput = Union[Apply, Literal["output"]]
+ApplyOrOutput = Apply | Literal["output"]
 ClientType = tuple[ApplyOrOutput, int]
 
 

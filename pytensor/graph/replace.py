@@ -1,7 +1,7 @@
 import warnings
 from collections.abc import Iterable, Mapping, Sequence
 from functools import partial, singledispatch
-from typing import Union, cast, overload
+from typing import cast, overload
 
 from pytensor.graph.basic import (
     Apply,
@@ -14,7 +14,7 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 
 
-ReplaceTypes = Union[Iterable[tuple[Variable, Variable]], dict[Variable, Variable]]
+ReplaceTypes = Iterable[tuple[Variable, Variable]] | dict[Variable, Variable]
 
 
 def _format_replace(replace: ReplaceTypes | None = None) -> dict[Variable, Variable]:

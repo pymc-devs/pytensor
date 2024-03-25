@@ -1,7 +1,7 @@
 import warnings
 from numbers import Number
 from textwrap import dedent
-from typing import Union, cast
+from typing import cast
 
 import numpy as np
 
@@ -24,7 +24,7 @@ from pytensor.tensor.type_other import NoneConst
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
-ShapeValueType = Union[None, np.integer, int, Variable]
+ShapeValueType = None | np.integer | int | Variable
 
 
 def register_shape_c_code(type, code, version=()):
