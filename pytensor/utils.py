@@ -282,7 +282,7 @@ def to_return_values(values):
 
 
 def from_return_values(values):
-    if isinstance(values, (list, tuple)):
+    if isinstance(values, list | tuple):
         return values
     else:
         return [values]
@@ -293,7 +293,7 @@ def flatten(a):
     Recursively flatten tuple, list and set in a list.
 
     """
-    if isinstance(a, (tuple, list, set)):
+    if isinstance(a, tuple | list | set):
         l = []
         for item in a:
             l.extend(flatten(item))

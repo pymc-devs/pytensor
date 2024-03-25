@@ -204,7 +204,7 @@ def debugprint(
     topo_orders: list[list[Apply] | None] = []
     storage_maps: list[StorageMapType | None] = []
 
-    if isinstance(graph_like, (list, tuple, set)):
+    if isinstance(graph_like, list | tuple | set):
         graphs = graph_like
     else:
         graphs = (graph_like,)
@@ -243,9 +243,9 @@ def debugprint(
             )
             topo = obj.toposort()
             topo_orders.extend([topo for item in obj.outputs])
-        elif isinstance(obj, (int, float, np.ndarray)):
+        elif isinstance(obj, int | float | np.ndarray):
             print(obj, file=_file)
-        elif isinstance(obj, (In, Out)):
+        elif isinstance(obj, In | Out):
             outputs_to_print.append(obj.variable)
             profile_list.append(None)
             storage_maps.append(None)
@@ -1049,7 +1049,7 @@ class PPrinter(Printer):
         self.printers_dict: dict[Op | type | Callable, Printer] = {}
 
     def assign(self, condition: Op | type | Callable, printer: Printer):
-        if isinstance(condition, (Op, type)):
+        if isinstance(condition, Op | type):
             self.printers_dict[condition] = printer
         else:
             self.printers.insert(0, (condition, printer))
@@ -1083,9 +1083,9 @@ class PPrinter(Printer):
     def process_graph(self, inputs, outputs, updates=None, display_inputs=False):
         if updates is None:
             updates = {}
-        if not isinstance(inputs, (list, tuple)):
+        if not isinstance(inputs, list | tuple):
             inputs = [inputs]
-        if not isinstance(outputs, (list, tuple)):
+        if not isinstance(outputs, list | tuple):
             outputs = [outputs]
         current = None
         if display_inputs:
@@ -1131,7 +1131,7 @@ class PPrinter(Printer):
     def __call__(self, *args):
         if len(args) == 1:
             return self.process(*args)
-        elif len(args) == 2 and isinstance(args[1], (PrinterState, dict)):
+        elif len(args) == 2 and isinstance(args[1], PrinterState | dict):
             return self.process(*args)
         elif len(args) > 2:
             return self.process_graph(*args)
@@ -1302,7 +1302,7 @@ def pydotprint(
             fct = [fct]
         elif isinstance(fct, Apply):
             fct = fct.outputs
-        assert isinstance(fct, (list, tuple))
+        assert isinstance(fct, list | tuple)
         assert all(isinstance(v, Variable) for v in fct)
         fct = FunctionGraph(inputs=list(graph_inputs(fct)), outputs=fct)
         profile = None

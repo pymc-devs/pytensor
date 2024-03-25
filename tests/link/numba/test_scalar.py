@@ -38,7 +38,7 @@ def test_Second(x, y):
         [
             i.tag.test_value
             for i in g_fg.inputs
-            if not isinstance(i, (SharedVariable, Constant))
+            if not isinstance(i, SharedVariable | Constant)
         ],
     )
 
@@ -60,7 +60,7 @@ def test_Clip(v, min, max):
         [
             i.tag.test_value
             for i in g_fg.inputs
-            if not isinstance(i, (SharedVariable, Constant))
+            if not isinstance(i, SharedVariable | Constant)
         ],
     )
 
@@ -118,7 +118,7 @@ def test_Cast(v, dtype):
         [
             i.tag.test_value
             for i in g_fg.inputs
-            if not isinstance(i, (SharedVariable, Constant))
+            if not isinstance(i, SharedVariable | Constant)
         ],
     )
 
@@ -137,6 +137,6 @@ def test_reciprocal(v, dtype):
         [
             i.tag.test_value
             for i in g_fg.inputs
-            if not isinstance(i, (SharedVariable, Constant))
+            if not isinstance(i, SharedVariable | Constant)
         ],
     )

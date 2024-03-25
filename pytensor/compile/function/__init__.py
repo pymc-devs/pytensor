@@ -285,7 +285,7 @@ def function(
 
     if givens is None:
         givens = []
-    if not isinstance(inputs, (list, tuple)):
+    if not isinstance(inputs, list | tuple):
         raise Exception(
             "Input variables of an PyTensor function should be "
             "contained in a list, even when there is a single "
@@ -293,7 +293,7 @@ def function(
         )
 
     # compute some features of the arguments:
-    uses_tuple = any(isinstance(i, (list, tuple)) for i in inputs)
+    uses_tuple = any(isinstance(i, list | tuple) for i in inputs)
     uses_updates = bool(updates)
     uses_givens = bool(givens)
 

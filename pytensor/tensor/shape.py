@@ -566,7 +566,7 @@ def specify_shape(
     considered fixed/static at runtime.
     """
 
-    if not isinstance(shape, (tuple, list)):
+    if not isinstance(shape, tuple | list):
         shape = (shape,)
 
     # If shape is a symbolic 1d vector of fixed length, we separate the items into a
@@ -1032,7 +1032,7 @@ class Unbroadcast(COp):
         items = tuple(sorted(axis))
         self.axes = items
         for axis in self.axes:
-            if not isinstance(axis, (np.integer, int)):
+            if not isinstance(axis, np.integer | int):
                 raise TypeError(f"Unbroadcast needs integer axes. Got {axis}")
 
     def __str__(self):

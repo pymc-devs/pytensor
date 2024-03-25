@@ -55,7 +55,7 @@ def cleanup():
                                     have_npy_abi_version = True
                                 elif obj.startswith("c_compiler_str="):
                                     have_c_compiler = True
-                            elif isinstance(obj, (Op, CType)) and hasattr(
+                            elif isinstance(obj, Op | CType) and hasattr(
                                 obj, "c_code_cache_version"
                             ):
                                 v = obj.c_code_cache_version()

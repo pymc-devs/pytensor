@@ -249,7 +249,7 @@ class SequentialGraphRewriter(GraphRewriter, UserList):
             A callback used when a failure happens during rewriting.
 
         """
-        if len(rewrites) == 1 and isinstance(rewrites[0], (list, tuple)):
+        if len(rewrites) == 1 and isinstance(rewrites[0], list | tuple):
             rewrites = rewrites[0]
 
         super().__init__(rewrites)
@@ -1300,7 +1300,7 @@ class SequentialNodeRewriter(NodeRewriter):
                     self.process_count[rewrite] += 1
                 if not new_repl:
                     continue
-                if isinstance(new_repl, (tuple, list)):
+                if isinstance(new_repl, tuple | list):
                     new_vars = new_repl
                 else:  # It must be a dict
                     new_vars = list(new_repl.values())
@@ -1581,7 +1581,7 @@ class PatternNodeRewriter(NodeRewriter):
         self.in_pattern = convert_strs_to_vars(in_pattern, var_map=var_map)
         self.out_pattern = convert_strs_to_vars(out_pattern, var_map=var_map)
         self.values_eq_approx = values_eq_approx
-        if isinstance(in_pattern, (list, tuple)):
+        if isinstance(in_pattern, list | tuple):
             self.op = self.in_pattern[0]
         elif isinstance(in_pattern, dict):
             self.op = self.in_pattern["pattern"][0]
@@ -1670,7 +1670,7 @@ class PatternNodeRewriter(NodeRewriter):
             return self.__name__
 
         def pattern_to_str(pattern):
-            if isinstance(pattern, (list, tuple)):
+            if isinstance(pattern, list | tuple):
                 return "{}({})".format(
                     str(pattern[0]),
                     ", ".join([pattern_to_str(p) for p in pattern[1:]]),
@@ -1934,7 +1934,7 @@ class NodeProcessingGraphRewriter(GraphRewriter):
                 remove = list(cast(Sequence[Variable], replacements.pop("remove")))
             old_vars = list(cast(Sequence[Variable], replacements.keys()))
             replacements = list(cast(Sequence[Variable], replacements.values()))
-        elif not isinstance(replacements, (tuple, list)):
+        elif not isinstance(replacements, tuple | list):
             raise TypeError(
                 f"Node rewriter {node_rewriter} gave wrong type of replacement. "
                 f"Expected list or tuple; got {replacements}"
@@ -2156,7 +2156,7 @@ class OpKeyGraphRewriter(NodeProcessingGraphRewriter):
 
     def apply(self, fgraph):
         op = self.node_rewriter.op_key()
-        if isinstance(op, (list, tuple)):
+        if isinstance(op, list | tuple):
             q = reduce(list.__iadd__, map(fgraph.get_nodes, op))
         else:
             q = list(fgraph.get_nodes(op))
@@ -3024,7 +3024,7 @@ def check_stack_trace(f_or_fgraph, ops_to_check="last", bug_print="raise"):
             raise ValueError("The string ops_to_check is not recognised")
 
     # if ops_to_check is a list/tuple of ops
-    elif isinstance(ops_to_check, (tuple, list)):
+    elif isinstance(ops_to_check, tuple | list):
         # Separate classes from instances in ops_to_check
         op_instances = []
         op_classes = []

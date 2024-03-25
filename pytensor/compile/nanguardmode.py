@@ -34,7 +34,7 @@ def _is_numeric_value(arr, var):
 
     if isinstance(arr, _cdata_type):
         return False
-    elif isinstance(arr, (np.random.mtrand.RandomState, np.random.Generator)):
+    elif isinstance(arr, np.random.mtrand.RandomState | np.random.Generator):
         return False
     elif var and isinstance(var.type, RandomType):
         return False
@@ -62,10 +62,10 @@ def flatten(l):
         A flattened list of objects.
 
     """
-    if isinstance(l, (list, tuple, ValuesView)):
+    if isinstance(l, list | tuple | ValuesView):
         rval = []
         for elem in l:
-            if isinstance(elem, (list, tuple)):
+            if isinstance(elem, list | tuple):
                 rval.extend(flatten(elem))
             else:
                 rval.append(elem)

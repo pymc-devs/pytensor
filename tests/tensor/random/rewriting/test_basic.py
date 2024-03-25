@@ -56,7 +56,7 @@ def apply_local_rewrite_to_rv(
     dist_st = op_fn(dist_op(*dist_params_pt, size=size_pt, rng=rng, name=name))
 
     f_inputs = [
-        p for p in dist_params_pt + size_pt if not isinstance(p, (slice, Constant))
+        p for p in dist_params_pt + size_pt if not isinstance(p, slice | Constant)
     ]
 
     mode = Mode(
@@ -815,13 +815,13 @@ def test_Subtensor_lift(indices, lifted, dist_op, dist_params, size):
     if lifted:
         assert isinstance(new_out.owner.op, RandomVariable)
         assert all(
-            isinstance(i.owner.op, (AdvancedSubtensor, AdvancedSubtensor1, Subtensor))
+            isinstance(i.owner.op, AdvancedSubtensor | AdvancedSubtensor1 | Subtensor)
             for i in new_out.owner.inputs[3:]
             if i.owner
         )
     else:
         assert isinstance(
-            new_out.owner.op, (AdvancedSubtensor, AdvancedSubtensor1, Subtensor)
+            new_out.owner.op, AdvancedSubtensor | AdvancedSubtensor1 | Subtensor
         )
         return
 

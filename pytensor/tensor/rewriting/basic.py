@@ -1002,7 +1002,7 @@ def local_useless_switch(fgraph, node):
     out_bcast = node.outputs[0].type.broadcastable
 
     if (isinstance(cond, np.ndarray) and cond.ndim == 0) or isinstance(
-        cond, (np.number, np.bool_)
+        cond, np.number | np.bool_
     ):
         if cond == 0:
             correct_out = right
@@ -1064,7 +1064,7 @@ def local_merge_switch_same_cond(fgraph, node):
     """
     # node must be binary elemwise or add or mul
     if not isinstance(node.op, Elemwise) or not isinstance(
-        node.op.scalar_op, (ps.BinaryScalarOp, ps.Add, ps.Mul)
+        node.op.scalar_op, ps.BinaryScalarOp | ps.Add | ps.Mul
     ):
         return
     # all inputs must be switch

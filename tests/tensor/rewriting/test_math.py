@@ -631,11 +631,11 @@ class TestAlgebraicCanonizer:
             topo = f.maker.fgraph.toposort()
             elem = [t for t in topo if isinstance(t.op, Elemwise)]
             assert len(elem) == nb_elemwise
-            assert isinstance(elem[0].op, (Elemwise,))
+            assert isinstance(elem[0].op, Elemwise)
             assert any(
                 isinstance(
                     el.op.scalar_op,
-                    (ps.basic.Reciprocal, ps.basic.TrueDiv),
+                    ps.basic.Reciprocal | ps.basic.TrueDiv,
                 )
                 for el in elem
             )
@@ -711,7 +711,7 @@ class TestAlgebraicCanonizer:
             utt.assert_allclose(out, (val_inputs[0] / val_inputs[3]))
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 1
-            assert isinstance(topo[0].op, (Elemwise,))
+            assert isinstance(topo[0].op, Elemwise)
             assert isinstance(topo[0].op.scalar_op, ps.basic.TrueDiv)
             assert len(topo[0].inputs) == 2
             assert out_dtype == out.dtype
@@ -761,10 +761,10 @@ class TestAlgebraicCanonizer:
             utt.assert_allclose(out, (0.5 * val_inputs[0] / val_inputs[1]))
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 2
-            assert isinstance(topo[0].op, (Elemwise,))
+            assert isinstance(topo[0].op, Elemwise)
             assert isinstance(topo[0].op.scalar_op, ps.basic.Mul)
             assert len(topo[0].inputs) == 2
-            assert isinstance(topo[1].op, (Elemwise,))
+            assert isinstance(topo[1].op, Elemwise)
             assert isinstance(topo[1].op.scalar_op, ps.basic.TrueDiv)
             assert len(topo[1].inputs) == 2
             assert out_dtype == out.dtype
@@ -934,7 +934,7 @@ class TestAlgebraicCanonizer:
             utt.assert_allclose(out, val_inputs[0] / val_inputs[1] / val_inputs[2])
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 2
-            assert isinstance(topo[0].op, (Elemwise,))
+            assert isinstance(topo[0].op, Elemwise)
             assert isinstance(topo[0].op.scalar_op, ps.basic.Reciprocal)
             assert len(topo[0].inputs) == 1
             assert out_dtype == out.dtype
@@ -949,7 +949,7 @@ class TestAlgebraicCanonizer:
             utt.assert_allclose(out, val_inputs[0] / (val_inputs[1] / val_inputs[2]))
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 2
-            assert isinstance(topo[0].op, (Elemwise,))
+            assert isinstance(topo[0].op, Elemwise)
             assert isinstance(topo[0].op.scalar_op, ps.basic.Reciprocal)
             assert len(topo[0].inputs) == 1
             assert out_dtype == out.dtype
@@ -1213,7 +1213,7 @@ def test_local_subtensor_of_dot():
     topo = f.maker.fgraph.toposort()
     assert test_equality(f(d1, d2), np.dot(d1, d2)[1])
     # DimShuffle happen in FAST_COMPILE
-    assert isinstance(topo[-1].op, (CGemv, Gemv, DimShuffle))
+    assert isinstance(topo[-1].op, CGemv | Gemv | DimShuffle)
 
     # slice
     f = function([m1, m2], pytensor.tensor.dot(m1, m2)[1:2], mode=mode)
@@ -1868,7 +1868,7 @@ class TestExpLog:
             node
             for node in graph
             if isinstance(node.op, Elemwise)
-            and isinstance(node.op.scalar_op, (ps.Log, ps.Exp))
+            and isinstance(node.op.scalar_op, ps.Log | ps.Exp)
         ]
         assert len(ops_graph) == 0
         np.testing.assert_array_equal(f(data), data)
@@ -1880,7 +1880,7 @@ class TestExpLog:
             node
             for node in f.maker.fgraph.toposort()
             if isinstance(node.op, Elemwise)
-            and isinstance(node.op.scalar_op, (ps.Log, ps.Exp))
+            and isinstance(node.op.scalar_op, ps.Log | ps.Exp)
         ]
         assert len(ops_graph) == 0
 
@@ -1895,7 +1895,7 @@ class TestExpLog:
             node
             for node in graph
             if isinstance(node.op, Elemwise)
-            and isinstance(node.op.scalar_op, (ps.Log, ps.Exp, ps.Log1p, ps.Expm1))
+            and isinstance(node.op.scalar_op, ps.Log | ps.Exp | ps.Log1p | ps.Expm1)
         ]
         assert len(ops_graph) == 0
         np.testing.assert_array_equal(f(data), data)
@@ -1915,7 +1915,7 @@ class TestExpLog:
             node
             for node in graph
             if isinstance(node.op, Elemwise)
-            and isinstance(node.op.scalar_op, (ps.Log, ps.Log1p, ps.Exp, ps.Expm1))
+            and isinstance(node.op.scalar_op, ps.Log | ps.Log1p | ps.Exp | ps.Expm1)
         ]
         assert len(ops_graph) == 0
 
@@ -1941,7 +1941,7 @@ class TestExpLog:
             node
             for node in graph
             if isinstance(node.op, Elemwise)
-            and isinstance(node.op.scalar_op, (ps.Log, ps.Log1p, ps.Exp, ps.Expm1))
+            and isinstance(node.op.scalar_op, ps.Log | ps.Log1p | ps.Exp | ps.Expm1)
         ]
         assert len(ops_graph) == 0
 
@@ -1967,7 +1967,9 @@ class TestExpLog:
             node
             for node in graph
             if isinstance(node.op, Elemwise)
-            and isinstance(node.op.scalar_op, (ps.Log, ps.Log1p, ps.Log1mexp, ps.Expm1))
+            and isinstance(
+                node.op.scalar_op, ps.Log | ps.Log1p | ps.Log1mexp | ps.Expm1
+            )
         ]
         assert len(ops_graph) == 0
 
@@ -1993,7 +1995,7 @@ class TestExpLog:
             if isinstance(node.op, Elemwise)
             and isinstance(
                 node.op.scalar_op,
-                (ps.Log, ps.Log1p, ps.Softplus, ps.Expm1, ps.Switch),
+                ps.Log | ps.Log1p | ps.Softplus | ps.Expm1 | ps.Switch,
             )
         ]
         assert len(ops_graph) == 0
@@ -3512,12 +3514,7 @@ def test_local_sumsqr2dot():
     assert any(
         isinstance(
             n.op,
-            (
-                Dot,
-                Dot22,
-                Gemv,
-                CGemv,
-            ),
+            Dot | Dot22 | Gemv | CGemv,
         )
         for n in f.maker.fgraph.toposort()
     )
@@ -4398,7 +4395,7 @@ def test_logdiffexp():
                 node
                 for node in graph
                 if isinstance(node.op, Elemwise)
-                and isinstance(node.op.scalar_op, (ps.Exp, ps.Log))
+                and isinstance(node.op.scalar_op, ps.Exp | ps.Log)
             ]
         )
         == 0

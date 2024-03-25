@@ -1316,7 +1316,7 @@ class TestJoinAndSplit:
         topo = f.maker.fgraph.toposort()
         assert [True for node in topo if isinstance(node.op, type(self.join_op))]
         variables = f()
-        if isinstance(variables, (tuple, list)) and len(variables) == 1:
+        if isinstance(variables, tuple | list) and len(variables) == 1:
             return variables[0]
         return variables
 
@@ -1327,7 +1327,7 @@ class TestJoinAndSplit:
         topo = f.maker.fgraph.toposort()
         assert [True for node in topo if isinstance(node.op, type(make_vector_op))]
         variables = f()
-        if isinstance(variables, (tuple, list)) and len(variables) == 1:
+        if isinstance(variables, tuple | list) and len(variables) == 1:
             return variables[0]
         return variables
 

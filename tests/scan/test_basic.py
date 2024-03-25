@@ -105,7 +105,7 @@ class multiple_outputs_numeric_grad:
                 rval *= i
             return rval
 
-        if not isinstance(pt, (list, tuple)):
+        if not isinstance(pt, list | tuple):
             pt = [pt]
 
         # This mask tells us if we are dealing with an ndarray input or
@@ -196,7 +196,7 @@ class multiple_outputs_numeric_grad:
 def scan_project_sum(*args, **kwargs):
     rng = RandomStream(123)
     scan_outputs, updates = scan(*args, **kwargs)
-    if not isinstance(scan_outputs, (list, tuple)):
+    if not isinstance(scan_outputs, list | tuple):
         scan_outputs = [scan_outputs]
     # we should ignore the random-state updates so that
     # the uniform numbers are the same every evaluation and on every call

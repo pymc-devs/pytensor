@@ -512,7 +512,7 @@ def construct_pfunc_ins_and_outs(
     if givens is None:
         givens = []
 
-    if not isinstance(params, (list, tuple)):
+    if not isinstance(params, list | tuple):
         raise TypeError("The `params` argument must be a list or a tuple")
 
     if not isinstance(no_default_updates, bool) and not isinstance(
@@ -521,7 +521,7 @@ def construct_pfunc_ins_and_outs(
         raise TypeError("The `no_default_update` argument must be a boolean or list")
 
     if len(updates) > 0 and not all(
-        isinstance(pair, (tuple, list))
+        isinstance(pair, tuple | list)
         and len(pair) == 2
         and isinstance(pair[0], Variable)
         for pair in iter_over_pairs(updates)
@@ -575,7 +575,7 @@ def construct_pfunc_ins_and_outs(
         if outputs is None:
             out_list = []
         else:
-            if isinstance(outputs, (list, tuple)):
+            if isinstance(outputs, list | tuple):
                 out_list = list(outputs)
             else:
                 out_list = [outputs]
@@ -598,7 +598,7 @@ def construct_pfunc_ins_and_outs(
         if outputs is None:
             new_outputs = []
         else:
-            if isinstance(outputs, (list, tuple)):
+            if isinstance(outputs, list | tuple):
                 new_outputs = cloned_extended_outputs[: len(outputs)]
             else:
                 new_outputs = cloned_extended_outputs[0]

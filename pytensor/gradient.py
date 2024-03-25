@@ -193,17 +193,17 @@ def Rop(
         If `f` is a list/tuple, then return a list/tuple with the results.
     """
 
-    if not isinstance(wrt, (list, tuple)):
+    if not isinstance(wrt, list | tuple):
         _wrt: list[Variable] = [pytensor.tensor.as_tensor_variable(wrt)]
     else:
         _wrt = [pytensor.tensor.as_tensor_variable(x) for x in wrt]
 
-    if not isinstance(eval_points, (list, tuple)):
+    if not isinstance(eval_points, list | tuple):
         _eval_points: list[Variable] = [pytensor.tensor.as_tensor_variable(eval_points)]
     else:
         _eval_points = [pytensor.tensor.as_tensor_variable(x) for x in eval_points]
 
-    if not isinstance(f, (list, tuple)):
+    if not isinstance(f, list | tuple):
         _f: list[Variable] = [pytensor.tensor.as_tensor_variable(f)]
     else:
         _f = [pytensor.tensor.as_tensor_variable(x) for x in f]
@@ -381,19 +381,19 @@ def Lop(
         coordinates of the tensor elements.
         If `f` is a list/tuple, then return a list/tuple with the results.
     """
-    if not isinstance(eval_points, (list, tuple)):
+    if not isinstance(eval_points, list | tuple):
         _eval_points: list[Variable] = [pytensor.tensor.as_tensor_variable(eval_points)]
     else:
         _eval_points = [pytensor.tensor.as_tensor_variable(x) for x in eval_points]
 
-    if not isinstance(f, (list, tuple)):
+    if not isinstance(f, list | tuple):
         _f: list[Variable] = [pytensor.tensor.as_tensor_variable(f)]
     else:
         _f = [pytensor.tensor.as_tensor_variable(x) for x in f]
 
     grads = list(_eval_points)
 
-    if not isinstance(wrt, (list, tuple)):
+    if not isinstance(wrt, list | tuple):
         _wrt: list[Variable] = [pytensor.tensor.as_tensor_variable(wrt)]
     else:
         _wrt = [pytensor.tensor.as_tensor_variable(x) for x in wrt]
@@ -547,7 +547,7 @@ def grad(
             )
 
         if not isinstance(
-            g_var.type, (NullType, DisconnectedType)
+            g_var.type, NullType | DisconnectedType
         ) and "float" not in str(g_var.type.dtype):
             raise TypeError(
                 "Gradients must always be NullType, "
@@ -1276,7 +1276,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                                     f"of shape {i_shape}"
                                 )
 
-                if not isinstance(term.type, (NullType, DisconnectedType)):
+                if not isinstance(term.type, NullType | DisconnectedType):
                     if term.type.dtype not in pytensor.tensor.type.float_dtypes:
                         raise TypeError(
                             str(node.op) + ".grad illegally "
@@ -1500,7 +1500,7 @@ class numeric_grad:
             return rval
 
         packed_pt = False
-        if not isinstance(pt, (list, tuple)):
+        if not isinstance(pt, list | tuple):
             pt = [pt]
             packed_pt = True
 
@@ -1732,7 +1732,7 @@ def verify_grad(
     from pytensor.compile.function import function
     from pytensor.compile.sharedvalue import shared
 
-    if not isinstance(pt, (list, tuple)):
+    if not isinstance(pt, list | tuple):
         raise TypeError("`pt` should be a list or tuple")
 
     pt = [np.array(p) for p in pt]
@@ -1933,7 +1933,7 @@ def jacobian(expression, wrt, consider_constant=None, disconnected_inputs="raise
     using_list = isinstance(wrt, list)
     using_tuple = isinstance(wrt, tuple)
 
-    if isinstance(wrt, (list, tuple)):
+    if isinstance(wrt, list | tuple):
         wrt = list(wrt)
     else:
         wrt = [wrt]
@@ -2015,7 +2015,7 @@ def hessian(cost, wrt, consider_constant=None, disconnected_inputs="raise"):
     using_list = isinstance(wrt, list)
     using_tuple = isinstance(wrt, tuple)
 
-    if isinstance(wrt, (list, tuple)):
+    if isinstance(wrt, list | tuple):
         wrt = list(wrt)
     else:
         wrt = [wrt]

@@ -124,7 +124,7 @@ def compare_sample_values(rv, *params, rng=None, test_fn=None, **kwargs):
     fn_inputs = [
         i
         for i in graph_inputs([pytensor_res])
-        if not isinstance(i, (Constant, SharedVariable))
+        if not isinstance(i, Constant | SharedVariable)
     ]
     pytensor_fn = function(fn_inputs, pytensor_res, mode=py_mode)
 
@@ -247,7 +247,7 @@ def test_normal_infer_shape(M, sd, size):
     fn_inputs = [
         i
         for i in graph_inputs([a for a in all_args if isinstance(a, Variable)])
-        if not isinstance(i, (Constant, SharedVariable))
+        if not isinstance(i, Constant | SharedVariable)
     ]
     pytensor_fn = function(
         fn_inputs, [pt.as_tensor(o) for o in [*rv_shape, rv]], mode=py_mode
@@ -257,7 +257,7 @@ def test_normal_infer_shape(M, sd, size):
         *[
             i.tag.test_value
             for i in fn_inputs
-            if not isinstance(i, (SharedVariable, Constant))
+            if not isinstance(i, SharedVariable | Constant)
         ]
     )
 
@@ -712,7 +712,7 @@ def test_dirichlet_infer_shape(M, size):
     fn_inputs = [
         i
         for i in graph_inputs([a for a in all_args if isinstance(a, Variable)])
-        if not isinstance(i, (Constant, SharedVariable))
+        if not isinstance(i, Constant | SharedVariable)
     ]
     pytensor_fn = function(
         fn_inputs, [pt.as_tensor(o) for o in [*rv_shape, rv]], mode=py_mode
@@ -722,7 +722,7 @@ def test_dirichlet_infer_shape(M, size):
         *[
             i.tag.test_value
             for i in fn_inputs
-            if not isinstance(i, (SharedVariable, Constant))
+            if not isinstance(i, SharedVariable | Constant)
         ]
     )
 

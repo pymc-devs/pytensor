@@ -67,18 +67,11 @@ optdb.register(
 def local_eager_useless_unbatched_blockwise(fgraph, node):
     if isinstance(
         node.op.core_op,
-        (
-            # Many Dot-related rewrites (e.g., all of BlasOpt) happen before specialize
-            Dot,
-            # These Ops can't always be trivially vectorized at runtime,
-            # Since their inputs may imply non-rectangular shapes.
-            Alloc,
-            ARange,
-            Subtensor,
-            AdvancedSubtensor,
-            AdvancedIncSubtensor,
-        ),
+        Dot | Alloc | ARange | Subtensor | AdvancedSubtensor | AdvancedIncSubtensor,
     ):
+        # Many Dot-related rewrites (eg, all of BlasOpt) happen before specialize
+        # These other Ops can't always be trivially vectored at runtime,
+        # since their inputs may imply non-rectangular shapes.
         return local_useless_unbatched_blockwise.fn(fgraph, node)
 
 

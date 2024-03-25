@@ -109,7 +109,7 @@ def vectorize(func: Callable, signature: str | None = None) -> Callable:
             raise ValueError("vectorize function returned no outputs")
 
         if signature is not None:
-            if isinstance(core_outputs, (list, tuple)):
+            if isinstance(core_outputs, list | tuple):
                 n_core_outputs = len(core_outputs)
             else:
                 n_core_outputs = 1

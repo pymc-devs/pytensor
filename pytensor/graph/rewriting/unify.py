@@ -283,7 +283,7 @@ def convert_strs_to_vars(
             return v
         elif isinstance(y, tuple):
             return etuple(*(_convert(e) for e in y))
-        elif isinstance(y, (Number, np.ndarray)):
+        elif isinstance(y, Number | np.ndarray):
             from pytensor.tensor import as_tensor_variable
 
             return as_tensor_variable(y)

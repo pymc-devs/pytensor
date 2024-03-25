@@ -108,9 +108,9 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
             self.dtype = np.dtype(dtype).name
 
         def parse_bcast_and_shape(s):
-            if isinstance(s, (bool, np.bool_)):
+            if isinstance(s, bool | np.bool_):
                 return 1 if s else None
-            elif isinstance(s, (int, np.integer)):
+            elif isinstance(s, int | np.integer):
                 return int(s)
             elif s is None:
                 return s
@@ -204,7 +204,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
                         raise TypeError(err_msg)
                 elif (
                     allow_downcast is None
-                    and isinstance(data, (float, np.floating))
+                    and isinstance(data, float | np.floating)
                     and self.dtype == config.floatX
                 ):
                     # Special case where we allow downcasting of Python float

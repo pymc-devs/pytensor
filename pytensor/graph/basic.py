@@ -252,7 +252,7 @@ class Apply(Node, Generic[OpType]):
         """
         from pytensor.graph.op import HasInnerGraph
 
-        assert isinstance(inputs, (list, tuple))
+        assert isinstance(inputs, list | tuple)
         remake_node = False
         new_inputs: list["Variable"] = list(inputs)
 
@@ -1368,7 +1368,7 @@ def general_toposort(
                 d = deps(io)
 
                 if d:
-                    if not isinstance(d, (list, OrderedSet)):
+                    if not isinstance(d, list | OrderedSet):
                         raise TypeError(
                             "Non-deterministic collections found; make"
                             " toposort non-deterministic."

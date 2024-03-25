@@ -137,7 +137,7 @@ class NumpyAutocaster:
 
     def __call__(self, x):
         # Make sure we only deal with scalars.
-        assert isinstance(x, (int, builtins.float)) or (
+        assert isinstance(x, int | builtins.float) or (
             isinstance(x, np.ndarray) and x.ndim == 0
         )
 
@@ -267,7 +267,7 @@ def convert(x, dtype=None):
             x_ = np.asarray(x)
             if x_.size == 0 and not hasattr(x, "dtype"):
                 x_ = np.asarray(x, dtype=config.floatX)
-    assert issubclass(type(x_), (np.ndarray, np.memmap))
+    assert issubclass(type(x_), np.ndarray | np.memmap)
     return x_
 
 
@@ -321,7 +321,7 @@ class ScalarType(CType, HasDataType, HasShape):
                 allow_downcast
                 or (
                     allow_downcast is None
-                    and isinstance(data, (float, np.floating))
+                    and isinstance(data, float | np.floating)
                     and self.dtype == config.floatX
                 )
                 or np.array_equal(data, converted_data, equal_nan=True)
@@ -978,7 +978,7 @@ class transfer_type(MetaObject):
     __props__ = ("transfer",)
 
     def __init__(self, *transfer):
-        assert all(isinstance(x, (int, str)) or x is None for x in transfer)
+        assert all(isinstance(x, int | str) or x is None for x in transfer)
         self.transfer = transfer
 
     def __str__(self):
@@ -1068,7 +1068,7 @@ class unary_out_lookup(MetaObject):
             rval = self.tbl[types]
         except Exception:
             raise TypeError(types)
-        if isinstance(types, (list, tuple)):
+        if isinstance(types, list | tuple):
             return rval
         else:
             return [rval]
@@ -1122,7 +1122,7 @@ class ScalarOp(COp):
     def output_types(self, types):
         if hasattr(self, "output_types_preference"):
             variables = self.output_types_preference(*types)
-            if not isinstance(variables, (list, tuple)) or any(
+            if not isinstance(variables, list | tuple) or any(
                 not isinstance(x, CType) for x in variables
             ):
                 raise TypeError(
