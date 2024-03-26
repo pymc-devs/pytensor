@@ -17,6 +17,7 @@ from pytensor.tensor.nlinalg import (
     det,
     eig,
     eigh,
+    kron,
     lstsq,
     matrix_dot,
     matrix_inverse,
@@ -29,7 +30,6 @@ from pytensor.tensor.nlinalg import (
     tensorinv,
     tensorsolve,
     trace,
-    kron,
 )
 from pytensor.tensor.type import (
     lmatrix,
@@ -582,6 +582,7 @@ class TestTensorInv(utt.InferShapeTester):
         assert _allclose(t_binv, n_binv)
         assert _allclose(t_binv1, n_binv1)
 
+
 class TestKron(utt.InferShapeTester):
     rng = np.random.default_rng(43)
 
@@ -600,13 +601,9 @@ class TestKron(utt.InferShapeTester):
                 f = function([x, y], kron(x, y))
                 b = self.rng.random(shp1).astype(config.floatX)
                 out = f(a, b)
-                # Newer versions of scipy want 4 dimensions at least,
-                # so we have to add a dimension to a and flatten the result.
-                if len(shp0) + len(shp1) == 3:
-                    scipy_val = scipy.linalg.kron(a[np.newaxis, :], b).flatten()
-                else:
-                    scipy_val = scipy.linalg.kron(a, b)
-                np.testing.assert_allclose(out, scipy_val)
+                # Using the np.kron to compare outputs
+                np_val = np.kron(a, b)
+                np.testing.assert_allclose(out, np_val)
 
     def test_numpy_2d(self):
         for shp0 in [(2, 3)]:

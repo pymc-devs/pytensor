@@ -9,9 +9,9 @@ from pytensor import scalar as ps
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
-from pytensor.tensor import reshape
 from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
+from pytensor.tensor import reshape
 from pytensor.tensor.basic import as_tensor_variable, diagonal
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.type import dvector, lscalar, matrix, scalar, vector
@@ -1028,11 +1028,12 @@ __all__ = [
     "tensorsolve",
 ]
 
+
 # Adding the kron function here, which earlier used to be in slinalg.py
 def kron(a, b):
     """Kronecker product.
 
-    Uses the JAX implementation for kron. 
+    Same as np.kron(a, b)
 
     Parameters
     ----------
@@ -1049,8 +1050,6 @@ def kron(a, b):
     They don't have the same shape and order when
     a.ndim != b.ndim != 2.
 
-    This new function now works for ndim > 2
-
     """
     a = as_tensor_variable(a)
     b = as_tensor_variable(b)
@@ -1060,12 +1059,12 @@ def kron(a, b):
             f"You passed {int(a.ndim)} and {int(b.ndim)}."
         )
 
-    if (a.ndim < b.ndim):
+    if a.ndim < b.ndim:
         a = ptb.expand_dims(a, tuple(range(b.ndim - a.ndim)))
-    elif (b.ndim < a.ndim):
+    elif b.ndim < a.ndim:
         b = ptb.expand_dims(b, tuple(range(a.ndim - b.ndim)))
-    a_reshaped = ptb.expand_dims(a, tuple(range(1, 2*a.ndim,2)))
-    b_reshaped = ptb.expand_dims(b, tuple(range(0, 2*b.ndim,2)))
+    a_reshaped = ptb.expand_dims(a, tuple(range(1, 2 * a.ndim, 2)))
+    b_reshaped = ptb.expand_dims(b, tuple(range(0, 2 * b.ndim, 2)))
     out_shape = tuple(a.shape * b.shape)
     output_out_of_shape = a_reshaped * b_reshaped
     output_reshaped = reshape(output_out_of_shape, out_shape)
