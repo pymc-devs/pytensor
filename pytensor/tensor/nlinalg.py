@@ -11,7 +11,6 @@ from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
-from pytensor.tensor import reshape
 from pytensor.tensor.basic import as_tensor_variable, diagonal
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.type import dvector, lscalar, matrix, scalar, vector
@@ -1067,5 +1066,5 @@ def kron(a, b):
     b_reshaped = ptb.expand_dims(b, tuple(range(0, 2 * b.ndim, 2)))
     out_shape = tuple(a.shape * b.shape)
     output_out_of_shape = a_reshaped * b_reshaped
-    output_reshaped = reshape(output_out_of_shape, out_shape)
+    output_reshaped = output_out_of_shape.reshape(out_shape)
     return output_reshaped
