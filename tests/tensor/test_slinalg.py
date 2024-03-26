@@ -510,6 +510,7 @@ def test_expm_grad_3():
 
     utt.verify_grad(expm, [A], rng=rng)
 
+
 def test_solve_discrete_lyapunov_via_direct_real():
     N = 5
     rng = np.random.default_rng(utt.fetch_seed())
