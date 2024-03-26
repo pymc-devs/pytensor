@@ -105,7 +105,7 @@ Here’s an example for the `Eye`\ `Op`:
 
 
    @jax_funcify.register(Eye)
-   def jax_funcify_Eye(op):
+   def jax_funcify_Eye(op, **kwargs):
 
        # Obtain necessary "static" attributes from the Op being converted
        dtype = op.dtype
