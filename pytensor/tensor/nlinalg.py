@@ -9,6 +9,7 @@ from pytensor import scalar as ps
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
+from pytensor.tensor import reshape
 from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable, diagonal
@@ -1031,7 +1032,7 @@ __all__ = [
 def kron(a, b):
     """Kronecker product.
 
-    Same as scipy.linalg.kron(a, b).
+    Uses the JAX implementation for kron. 
 
     Parameters
     ----------
@@ -1048,6 +1049,8 @@ def kron(a, b):
     They don't have the same shape and order when
     a.ndim != b.ndim != 2.
 
+    This new function now works for ndim > 2
+
     """
     a = as_tensor_variable(a)
     b = as_tensor_variable(b)
@@ -1056,18 +1059,14 @@ def kron(a, b):
             "kron: inputs dimensions must sum to 3 or more. "
             f"You passed {int(a.ndim)} and {int(b.ndim)}."
         )
-    o = ptm.outer(a, b)
-    o = o.reshape(ptb.concatenate((a.shape, b.shape)), ndim=a.ndim + b.ndim)
-    shf = o.dimshuffle(0, 2, 1, *range(3, o.ndim))
-    if shf.ndim == 3:
-        shf = o.dimshuffle(1, 0, 2)
-        o = shf.flatten()
-    else:
-        o = shf.reshape(
-            (
-                o.shape[0] * o.shape[2],
-                o.shape[1] * o.shape[3],
-                *(o.shape[i] for i in range(4, o.ndim)),
-            )
-        )
-    return o
+
+    if (a.ndim < b.ndim):
+        a = ptb.expand_dims(a, tuple(range(b.ndim - a.ndim)))
+    elif (b.ndim < a.ndim):
+        b = ptb.expand_dims(b, tuple(range(a.ndim - b.ndim)))
+    a_reshaped = ptb.expand_dims(a, tuple(range(1, 2*a.ndim,2)))
+    b_reshaped = ptb.expand_dims(b, tuple(range(0, 2*b.ndim,2)))
+    out_shape = tuple(a.shape * b.shape)
+    output_out_of_shape = a_reshaped * b_reshaped
+    output_reshaped = reshape(output_out_of_shape, out_shape)
+    return output_reshaped
