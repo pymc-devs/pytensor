@@ -15,7 +15,7 @@ from pytensor.tensor import as_tensor_variable
 from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.nlinalg import matrix_dot
+from pytensor.tensor.nlinalg import kron, matrix_dot
 from pytensor.tensor.shape import reshape
 from pytensor.tensor.type import matrix, tensor, vector
 from pytensor.tensor.variable import TensorVariable
@@ -558,7 +558,9 @@ class EigvalshGrad(Op):
 def eigvalsh(a, b, lower=True):
     return Eigvalsh(lower)(a, b)
 
+
 # Removed kron function from here and moved to nlinalg.py
+
 
 class Expm(Op):
     """
