@@ -7,17 +7,21 @@ from pytensor.tensor.blas import Dot22
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Dot, Prod, _matrix_matrix_matmul, log, prod
-from pytensor.tensor.nlinalg import MatrixInverse, det
+from pytensor.tensor.nlinalg import MatrixInverse, MatrixPinv, det, inv, pinv
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
     register_stabilize,
 )
 from pytensor.tensor.slinalg import (
+    BlockDiagonal,
     Cholesky,
+    KroneckerProduct,
     Solve,
     SolveBase,
+    block_diag,
     cholesky,
+    kron,
     solve,
     solve_triangular,
 )
@@ -310,3 +314,65 @@ def local_log_prod_sqr(fgraph, node):
 
         # TODO: have a reduction like prod and sum that simply
         # returns the sign of the prod multiplication.
+
+
+def local_inv_kron_to_kron_inv(fgraph, node):
+    # check if we have a kron
+    # check if parent node is an inv
+    # if yes, replace with kron(inv, inv)
+
+    pass
+
+
+def local_chol_kron_to_kron_chol(fgraph, node):
+    # check if we have a kron
+    # check if parent node is a cholesky
+    # if yes, replace with kron(cholesky, cholesky)
+
+    pass
+
+
+@register_specialize
+@node_rewriter([Blockwise])
+def local_lift_through_linalg(fgraph, node):
+    """
+    Rewrite a graph like Inv(BlockDiag([A, B, C])) to BlockDiag([Inv(A), Inv(B), Inv(C)])
+
+    Parameters
+    ----------
+    fgraph
+    node
+
+    Returns
+    -------
+
+    """
+    # TODO: Simplify this if we end up Blockwising KroneckerProduct
+    if isinstance(node.op.core_op, (MatrixInverse, Cholesky, MatrixPinv)):
+        y = node.inputs[0]
+        outer_op = node.op
+
+        if y.owner and (
+            isinstance(y.owner.op, Blockwise)
+            and isinstance(y.owner.op.core_op, BlockDiagonal)
+            or isinstance(y.owner.op, KroneckerProduct)
+        ):
+            input_matrices = y.owner.inputs
+
+            if isinstance(outer_op.core_op, MatrixInverse):
+                outer_f = inv
+            elif isinstance(outer_op.core_op, Cholesky):
+                outer_f = cholesky
+            elif isinstance(outer_op.core_op, MatrixPinv):
+                outer_f = pinv
+            else:
+                raise NotImplementedError
+
+            inner_matrices = [outer_f(m) for m in input_matrices]
+
+            if isinstance(y.owner.op, KroneckerProduct):
+                return [kron(*inner_matrices)]
+            elif isinstance(y.owner.op.core_op, BlockDiagonal):
+                return [block_diag(*inner_matrices)]
+            else:
+                raise NotImplementedError

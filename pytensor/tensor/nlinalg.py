@@ -613,7 +613,7 @@ def svd(a, full_matrices: bool = True, compute_uv: bool = True):
 
     Returns
     -------
-    U, V,  D : matrices
+    U, V, D : matrices
 
     """
     return Blockwise(SVD(full_matrices, compute_uv))(a)

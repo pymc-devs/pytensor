@@ -9,6 +9,7 @@ import scipy.linalg
 
 import pytensor
 import pytensor.tensor as pt
+from pytensor.compile.builders import OpFromGraph
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import as_tensor_variable
@@ -559,6 +560,14 @@ def eigvalsh(a, b, lower=True):
     return Eigvalsh(lower)(a, b)
 
 
+class KroneckerProduct(OpFromGraph):
+    """
+    Wrapper Op for Kronecker graphs
+    """
+
+    ...
+
+
 def kron(a, b):
     """Kronecker product.
 
@@ -578,10 +587,13 @@ def kron(a, b):
     numpy.kron(a, b) != scipy.linalg.kron(a, b)!
     They don't have the same shape and order when
     a.ndim != b.ndim != 2.
-
     """
+
+    # TODO: Revisit this implementation?
+
     a = as_tensor_variable(a)
     b = as_tensor_variable(b)
+
     if a.ndim + b.ndim <= 2:
         raise TypeError(
             "kron: inputs dimensions must sum to 3 or more. "
@@ -601,7 +613,8 @@ def kron(a, b):
                 *(o.shape[i] for i in range(4, o.ndim)),
             )
         )
-    return o
+
+    return KroneckerProduct(inputs=[a, b], outputs=[o])(a, b)
 
 
 class Expm(Op):
