@@ -559,9 +559,6 @@ def eigvalsh(a, b, lower=True):
     return Eigvalsh(lower)(a, b)
 
 
-# Removed kron function from here and moved to nlinalg.py
-
-
 class Expm(Op):
     """
     Compute the matrix exponential of a square array.
@@ -979,7 +976,6 @@ __all__ = [
     "cholesky",
     "solve",
     "eigvalsh",
-    "kron",
     "expm",
     "solve_discrete_lyapunov",
     "solve_continuous_lyapunov",

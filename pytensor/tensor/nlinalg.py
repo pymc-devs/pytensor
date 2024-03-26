@@ -1010,25 +1010,6 @@ def tensorsolve(a, b, axes=None):
     return TensorSolve(axes)(a, b)
 
 
-__all__ = [
-    "pinv",
-    "inv",
-    "trace",
-    "matrix_dot",
-    "det",
-    "eig",
-    "eigh",
-    "qr",
-    "svd",
-    "lstsq",
-    "matrix_power",
-    "norm",
-    "tensorinv",
-    "tensorsolve",
-]
-
-
-# Adding the kron function here, which earlier used to be in slinalg.py
 def kron(a, b):
     """Kronecker product.
 
@@ -1042,13 +1023,6 @@ def kron(a, b):
     Returns
     -------
     array_like with a.ndim + b.ndim - 2 dimensions
-
-    Notes
-    -----
-    numpy.kron(a, b) != scipy.linalg.kron(a, b)!
-    They don't have the same shape and order when
-    a.ndim != b.ndim != 2.
-
     """
     a = as_tensor_variable(a)
     b = as_tensor_variable(b)
@@ -1068,3 +1042,22 @@ def kron(a, b):
     output_out_of_shape = a_reshaped * b_reshaped
     output_reshaped = output_out_of_shape.reshape(out_shape)
     return output_reshaped
+
+
+__all__ = [
+    "pinv",
+    "inv",
+    "trace",
+    "matrix_dot",
+    "det",
+    "eig",
+    "eigh",
+    "qr",
+    "svd",
+    "lstsq",
+    "matrix_power",
+    "norm",
+    "tensorinv",
+    "tensorsolve",
+    "kron",
+]
