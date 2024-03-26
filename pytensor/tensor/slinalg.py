@@ -558,51 +558,7 @@ class EigvalshGrad(Op):
 def eigvalsh(a, b, lower=True):
     return Eigvalsh(lower)(a, b)
 
-
-def kron(a, b):
-    """Kronecker product.
-
-    Same as scipy.linalg.kron(a, b).
-
-    Parameters
-    ----------
-    a: array_like
-    b: array_like
-
-    Returns
-    -------
-    array_like with a.ndim + b.ndim - 2 dimensions
-
-    Notes
-    -----
-    numpy.kron(a, b) != scipy.linalg.kron(a, b)!
-    They don't have the same shape and order when
-    a.ndim != b.ndim != 2.
-
-    """
-    a = as_tensor_variable(a)
-    b = as_tensor_variable(b)
-    if a.ndim + b.ndim <= 2:
-        raise TypeError(
-            "kron: inputs dimensions must sum to 3 or more. "
-            f"You passed {int(a.ndim)} and {int(b.ndim)}."
-        )
-    o = ptm.outer(a, b)
-    o = o.reshape(ptb.concatenate((a.shape, b.shape)), ndim=a.ndim + b.ndim)
-    shf = o.dimshuffle(0, 2, 1, *range(3, o.ndim))
-    if shf.ndim == 3:
-        shf = o.dimshuffle(1, 0, 2)
-        o = shf.flatten()
-    else:
-        o = shf.reshape(
-            (
-                o.shape[0] * o.shape[2],
-                o.shape[1] * o.shape[3],
-                *(o.shape[i] for i in range(4, o.ndim)),
-            )
-        )
-    return o
-
+# Removed kron function from here and moved to nlinalg.py
 
 class Expm(Op):
     """
