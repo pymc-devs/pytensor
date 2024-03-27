@@ -606,17 +606,13 @@ class TestKron(utt.InferShapeTester):
                 np.testing.assert_allclose(out, np_val)
 
     def test_kron_commutes_with_inv(self):
-        for shp0 in [(2, 3), (2, 4, 3)]:
+        for shp0, shp1 in zip(
+            [(2, 3), (2, 3), (2, 4, 3)], [(6, 7), (4, 3, 5), (4, 3, 5)]
+        ):
             x = tensor(dtype="floatX", shape=(None,) * len(shp0))
             a = np.asarray(self.rng.random(shp0)).astype(config.floatX)
-            for shp1 in [(6, 7), (4, 3, 5)]:
-                if len(shp0) != len(shp1):
-                    continue
-                if len(shp0) + len(shp1) == 2:
-                    continue
-                y = tensor(dtype="floatX", shape=(None,) * len(shp1))
-                f = function([x, y], kron(x, y))
-                b = self.rng.random(shp1).astype(config.floatX)
-                lhs = matrix_inverse(f(a, b))
-                rhs = f(matrix_inverse(a), matrix_inverse(b))
-                assert np.allclose(lhs, rhs)
+            y = tensor(dtype="floatX", shape=(None,) * len(shp1))
+            b = self.rng.random(shp1).astype(config.floatX)
+            lhs_f = function([x, y], matrix_inverse(kron(x, y)))
+            rhs_f = function([x, y], kron(matrix_inverse(x), matrix_inverse(y)))
+            assert np.testing.assert_allclose(lhs_f(a, b), rhs_f(a, b))
