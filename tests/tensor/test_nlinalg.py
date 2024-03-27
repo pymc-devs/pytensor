@@ -590,32 +590,33 @@ class TestKron(utt.InferShapeTester):
         self.op = kron
         super().setup_method()
 
-    def test_perform(self):
-        for shp0 in [(2,), (2, 3), (2, 3, 4), (2, 3, 4, 5)]:
-            x = tensor(dtype="floatX", shape=(None,) * len(shp0))
-            a = np.asarray(self.rng.random(shp0)).astype(config.floatX)
-            for shp1 in [(6,), (6, 7), (6, 7, 8), (6, 7, 8, 9)]:
-                if len(shp0) + len(shp1) == 2:
-                    continue
-                y = tensor(dtype="floatX", shape=(None,) * len(shp1))
-                f = function([x, y], kron(x, y))
-                b = self.rng.random(shp1).astype(config.floatX)
-                out = f(a, b)
-                # Using the np.kron to compare outputs
-                np_val = np.kron(a, b)
-                np.testing.assert_allclose(out, np_val)
+    @pytest.mark.parametrize("shp0", [(2,), (2, 3), (2, 3, 4), (2, 3, 4, 5)])
+    @pytest.mark.parametrize("shp1", [(6,), (6, 7), (6, 7, 8), (6, 7, 8, 9)])
+    def test_perform(self, shp0, shp1):
+        if len(shp0) + len(shp1) == 2:
+            pytest.skip("Sum of shp0 and shp1 must be more than 2")
+        x = tensor(dtype="floatX", shape=(None,) * len(shp0))
+        a = np.asarray(self.rng.random(shp0)).astype(config.floatX)
+        y = tensor(dtype="floatX", shape=(None,) * len(shp1))
+        f = function([x, y], kron(x, y))
+        b = self.rng.random(shp1).astype(config.floatX)
+        out = f(a, b)
+        # Using the np.kron to compare outputs
+        np_val = np.kron(a, b)
+        np.testing.assert_allclose(out, np_val)
 
-    def test_kron_commutes_with_inv(self):
-        for i, (shp0, shp1) in enumerate(
-            zip([(2, 3), (2, 3), (2, 4, 3)], [(6, 7), (4, 3, 5), (4, 3, 5)])
-        ):
-            if (pytensor.config.floatX == "float32") & (i == 2):
-                pytest.skip("Half precision insufficient for test 3 to pass")
-            x = tensor(dtype="floatX", shape=(None,) * len(shp0))
-            a = np.asarray(self.rng.random(shp0)).astype(config.floatX)
-            y = tensor(dtype="floatX", shape=(None,) * len(shp1))
-            b = self.rng.random(shp1).astype(config.floatX)
-            lhs_f = function([x, y], pinv(kron(x, y)))
-            rhs_f = function([x, y], kron(pinv(x), pinv(y)))
-            atol = 1e-4 if config.floatX == "float32" else 1e-12
-            np.testing.assert_allclose(lhs_f(a, b), rhs_f(a, b), atol=atol)
+    @pytest.mark.parametrize(
+        "i, shp0, shp1",
+        [(0, (2, 3), (6, 7)), (1, (2, 3), (4, 3, 5)), (2, (2, 4, 3), (4, 3, 5))],
+    )
+    def test_kron_commutes_with_inv(self, i, shp0, shp1):
+        if (pytensor.config.floatX == "float32") & (i == 2):
+            pytest.skip("Half precision insufficient for test 3 to pass")
+        x = tensor(dtype="floatX", shape=(None,) * len(shp0))
+        a = np.asarray(self.rng.random(shp0)).astype(config.floatX)
+        y = tensor(dtype="floatX", shape=(None,) * len(shp1))
+        b = self.rng.random(shp1).astype(config.floatX)
+        lhs_f = function([x, y], pinv(kron(x, y)))
+        rhs_f = function([x, y], kron(pinv(x), pinv(y)))
+        atol = 1e-4 if config.floatX == "float32" else 1e-12
+        np.testing.assert_allclose(lhs_f(a, b), rhs_f(a, b), atol=atol)
