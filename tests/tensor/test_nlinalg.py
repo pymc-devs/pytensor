@@ -609,8 +609,10 @@ class TestKron(utt.InferShapeTester):
         for shp0, shp1 in zip(
             [(2, 3), (2, 3), (2, 4, 3)], [(6, 7), (4, 3, 5), (4, 3, 5)]
         ):
-            if len(shp0) == 3 or len(shp1) == 3:
-                continue
+            if (pytensor.config.floatX == "float32") & (
+                len(shp0) == 3 or len(shp1) == 3
+            ):
+                pytest.skip("Kron and inv do not commute at half precision")
             x = tensor(dtype="floatX", shape=(None,) * len(shp0))
             a = np.asarray(self.rng.random(shp0)).astype(config.floatX)
             y = tensor(dtype="floatX", shape=(None,) * len(shp1))
