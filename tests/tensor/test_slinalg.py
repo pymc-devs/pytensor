@@ -20,7 +20,6 @@ from pytensor.tensor.slinalg import (
     cholesky,
     eigvalsh,
     expm,
-    kron,
     solve,
     solve_continuous_lyapunov,
     solve_discrete_are,
@@ -510,46 +509,6 @@ def test_expm_grad_3():
     A = rng.standard_normal((5, 5))
 
     utt.verify_grad(expm, [A], rng=rng)
-
-
-class TestKron(utt.InferShapeTester):
-    rng = np.random.default_rng(43)
-
-    def setup_method(self):
-        self.op = kron
-        super().setup_method()
-
-    def test_perform(self):
-        for shp0 in [(2,), (2, 3), (2, 3, 4), (2, 3, 4, 5)]:
-            x = tensor(dtype="floatX", shape=(None,) * len(shp0))
-            a = np.asarray(self.rng.random(shp0)).astype(config.floatX)
-            for shp1 in [(6,), (6, 7), (6, 7, 8), (6, 7, 8, 9)]:
-                if len(shp0) + len(shp1) == 2:
-                    continue
-                y = tensor(dtype="floatX", shape=(None,) * len(shp1))
-                f = function([x, y], kron(x, y))
-                b = self.rng.random(shp1).astype(config.floatX)
-                out = f(a, b)
-                # Newer versions of scipy want 4 dimensions at least,
-                # so we have to add a dimension to a and flatten the result.
-                if len(shp0) + len(shp1) == 3:
-                    scipy_val = scipy.linalg.kron(a[np.newaxis, :], b).flatten()
-                else:
-                    scipy_val = scipy.linalg.kron(a, b)
-                np.testing.assert_allclose(out, scipy_val)
-
-    def test_numpy_2d(self):
-        for shp0 in [(2, 3)]:
-            x = tensor(dtype="floatX", shape=(None,) * len(shp0))
-            a = np.asarray(self.rng.random(shp0)).astype(config.floatX)
-            for shp1 in [(6, 7)]:
-                if len(shp0) + len(shp1) == 2:
-                    continue
-                y = tensor(dtype="floatX", shape=(None,) * len(shp1))
-                f = function([x, y], kron(x, y))
-                b = self.rng.random(shp1).astype(config.floatX)
-                out = f(a, b)
-                assert np.allclose(out, np.kron(a, b))
 
 
 def test_solve_discrete_lyapunov_via_direct_real():

@@ -1010,6 +1010,40 @@ def tensorsolve(a, b, axes=None):
     return TensorSolve(axes)(a, b)
 
 
+def kron(a, b):
+    """Kronecker product.
+
+    Same as np.kron(a, b)
+
+    Parameters
+    ----------
+    a: array_like
+    b: array_like
+
+    Returns
+    -------
+    array_like with a.ndim + b.ndim - 2 dimensions
+    """
+    a = as_tensor_variable(a)
+    b = as_tensor_variable(b)
+    if a.ndim + b.ndim <= 2:
+        raise TypeError(
+            "kron: inputs dimensions must sum to 3 or more. "
+            f"You passed {int(a.ndim)} and {int(b.ndim)}."
+        )
+
+    if a.ndim < b.ndim:
+        a = ptb.expand_dims(a, tuple(range(b.ndim - a.ndim)))
+    elif b.ndim < a.ndim:
+        b = ptb.expand_dims(b, tuple(range(a.ndim - b.ndim)))
+    a_reshaped = ptb.expand_dims(a, tuple(range(1, 2 * a.ndim, 2)))
+    b_reshaped = ptb.expand_dims(b, tuple(range(0, 2 * b.ndim, 2)))
+    out_shape = tuple(a.shape * b.shape)
+    output_out_of_shape = a_reshaped * b_reshaped
+    output_reshaped = output_out_of_shape.reshape(out_shape)
+    return output_reshaped
+
+
 __all__ = [
     "pinv",
     "inv",
@@ -1025,4 +1059,5 @@ __all__ = [
     "norm",
     "tensorinv",
     "tensorsolve",
+    "kron",
 ]

@@ -17,6 +17,7 @@ from pytensor.tensor.nlinalg import (
     det,
     eig,
     eigh,
+    kron,
     lstsq,
     matrix_dot,
     matrix_inverse,
@@ -580,3 +581,42 @@ class TestTensorInv(utt.InferShapeTester):
         t_binv1 = tf_b1(self.b1)
         assert _allclose(t_binv, n_binv)
         assert _allclose(t_binv1, n_binv1)
+
+
+class TestKron(utt.InferShapeTester):
+    rng = np.random.default_rng(43)
+
+    def setup_method(self):
+        self.op = kron
+        super().setup_method()
+
+    @pytest.mark.parametrize("shp0", [(2,), (2, 3), (2, 3, 4), (2, 3, 4, 5)])
+    @pytest.mark.parametrize("shp1", [(6,), (6, 7), (6, 7, 8), (6, 7, 8, 9)])
+    def test_perform(self, shp0, shp1):
+        if len(shp0) + len(shp1) == 2:
+            pytest.skip("Sum of shp0 and shp1 must be more than 2")
+        x = tensor(dtype="floatX", shape=(None,) * len(shp0))
+        a = np.asarray(self.rng.random(shp0)).astype(config.floatX)
+        y = tensor(dtype="floatX", shape=(None,) * len(shp1))
+        f = function([x, y], kron(x, y))
+        b = self.rng.random(shp1).astype(config.floatX)
+        out = f(a, b)
+        # Using the np.kron to compare outputs
+        np_val = np.kron(a, b)
+        np.testing.assert_allclose(out, np_val)
+
+    @pytest.mark.parametrize(
+        "i, shp0, shp1",
+        [(0, (2, 3), (6, 7)), (1, (2, 3), (4, 3, 5)), (2, (2, 4, 3), (4, 3, 5))],
+    )
+    def test_kron_commutes_with_inv(self, i, shp0, shp1):
+        if (pytensor.config.floatX == "float32") & (i == 2):
+            pytest.skip("Half precision insufficient for test 3 to pass")
+        x = tensor(dtype="floatX", shape=(None,) * len(shp0))
+        a = np.asarray(self.rng.random(shp0)).astype(config.floatX)
+        y = tensor(dtype="floatX", shape=(None,) * len(shp1))
+        b = self.rng.random(shp1).astype(config.floatX)
+        lhs_f = function([x, y], pinv(kron(x, y)))
+        rhs_f = function([x, y], kron(pinv(x), pinv(y)))
+        atol = 1e-4 if config.floatX == "float32" else 1e-12
+        np.testing.assert_allclose(lhs_f(a, b), rhs_f(a, b), atol=atol)
