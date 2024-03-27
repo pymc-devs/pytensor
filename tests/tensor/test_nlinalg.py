@@ -610,7 +610,7 @@ class TestKron(utt.InferShapeTester):
             zip([(2, 3), (2, 3), (2, 4, 3)], [(6, 7), (4, 3, 5), (4, 3, 5)])
         ):
             if (pytensor.config.floatX == "float32") & (i == 2):
-                pytest.skip("Kron and inv do not commute at half precision")
+                pytest.skip("Half precision insufficient for test 3 to pass")
             x = tensor(dtype="floatX", shape=(None,) * len(shp0))
             a = np.asarray(self.rng.random(shp0)).astype(config.floatX)
             y = tensor(dtype="floatX", shape=(None,) * len(shp1))
