@@ -606,12 +606,10 @@ class TestKron(utt.InferShapeTester):
                 np.testing.assert_allclose(out, np_val)
 
     def test_kron_commutes_with_inv(self):
-        for shp0, shp1 in zip(
-            [(2, 3), (2, 3), (2, 4, 3)], [(6, 7), (4, 3, 5), (4, 3, 5)]
+        for i, (shp0, shp1) in enumerate(
+            zip([(2, 3), (2, 3), (2, 4, 3)], [(6, 7), (4, 3, 5), (4, 3, 5)])
         ):
-            if (pytensor.config.floatX == "float32") & (
-                len(shp0) == 3 or len(shp1) == 3
-            ):
+            if (pytensor.config.floatX == "float32") & (i == 2):
                 pytest.skip("Kron and inv do not commute at half precision")
             x = tensor(dtype="floatX", shape=(None,) * len(shp0))
             a = np.asarray(self.rng.random(shp0)).astype(config.floatX)
