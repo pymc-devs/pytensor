@@ -68,7 +68,6 @@ from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays
 from pytensor.tensor.math import Sum, add, eq
 from pytensor.tensor.shape import Shape_i, shape_padleft
-from pytensor.tensor.sort import TopKOp
 from pytensor.tensor.type import DenseTensorType, TensorType
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 from pytensor.utils import NoDuplicateOptWarningFilter
@@ -1222,37 +1221,6 @@ def local_merge_alloc(fgraph, node):
                 )(dim_outer, eq(dim_outer, dim_inner))
         i += 1
     return [alloc(inputs_inner[0], *dims_outer)]
-
-
-@register_useless("fast_compile")
-@node_rewriter([TopKOp])
-def local_useless_topk(fgraph, node):
-    """Remove unused `TopKOp` outputs."""
-    op = node.op
-    if not isinstance(op, TopKOp):
-        return
-    if not (op.return_values and op.return_indices):
-        return False
-
-    x, k = node.inputs
-    ret_val = bool(fgraph.clients[node.outputs[0]])
-    ret_idx = bool(fgraph.clients[node.outputs[1]])
-
-    if not (ret_val ^ ret_idx):
-        # both true -> nothing to remove
-        # both false -> let pruner handle
-        return False
-
-    old_output = node.outputs[ret_idx]
-    new_output = TopKOp(
-        axis=op.axis,
-        sorted=op.sorted,
-        idx_dtype=op.idx_dtype,
-        return_values=ret_val,
-        return_indices=ret_idx,
-    )(x, k)
-    copy_stack_trace(node.outputs[0], new_output)
-    return {old_output: new_output}
 
 
 register_canonicalize(RemovalNodeRewriter(tensor_copy), name="remove_tensor_copy")
