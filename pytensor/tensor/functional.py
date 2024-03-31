@@ -1,11 +1,11 @@
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from pytensor.graph import vectorize_graph
 from pytensor.tensor import TensorVariable
 from pytensor.tensor.utils import _parse_gufunc_signature
 
 
-def vectorize(func: Callable, signature: Optional[str] = None) -> Callable:
+def vectorize(func: Callable, signature: str | None = None) -> Callable:
     """Create a vectorized version of a python function that takes TensorVariables as inputs and outputs.
 
     Similar to numpy.vectorize. See respective docstrings for more details.
@@ -109,7 +109,7 @@ def vectorize(func: Callable, signature: Optional[str] = None) -> Callable:
             raise ValueError("vectorize function returned no outputs")
 
         if signature is not None:
-            if isinstance(core_outputs, (list, tuple)):
+            if isinstance(core_outputs, list | tuple):
                 n_core_outputs = len(core_outputs)
             else:
                 n_core_outputs = 1

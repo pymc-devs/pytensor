@@ -16,7 +16,7 @@ import sys
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Union
 
 import numpy as np
 
@@ -234,15 +234,15 @@ class ProfileStats:
     # Total time spent in Function.vm.__call__
     #
 
-    apply_time: Optional[dict[Union["FunctionGraph", Variable], float]] = None
+    apply_time: dict[Union["FunctionGraph", Variable], float] | None = None
 
-    apply_callcount: Optional[dict[Union["FunctionGraph", Variable], int]] = None
+    apply_callcount: dict[Union["FunctionGraph", Variable], int] | None = None
 
-    apply_cimpl: Optional[dict[Apply, bool]] = None
+    apply_cimpl: dict[Apply, bool] | None = None
     # dict from node -> bool (1 if c, 0 if py)
     #
 
-    message: Optional[str] = None
+    message: str | None = None
     # pretty string to print in summary, to identify this output
     #
 

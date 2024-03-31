@@ -10,7 +10,7 @@ import warnings
 from collections.abc import Sequence
 from functools import partial
 from numbers import Number
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING
 from typing import cast as type_cast
 
 import numpy as np
@@ -280,7 +280,7 @@ def get_scalar_constant_value(
     If 'v' is not a scalar, it raises a NotScalarConstantError.
 
     """
-    if isinstance(v, (Variable, np.ndarray)):
+    if isinstance(v, Variable | np.ndarray):
         if v.ndim != 0:
             raise NotScalarConstantError()
     return get_underlying_scalar_constant_value(
@@ -326,7 +326,7 @@ def get_underlying_scalar_constant_value(
             # to depend on passing it None)
             raise NotScalarConstantError()
 
-        if isinstance(v, (np.integer, int, float)):
+        if isinstance(v, np.integer | int | float):
             return np.asarray(v)
 
         if isinstance(v, np.ndarray):
@@ -359,16 +359,14 @@ def get_underlying_scalar_constant_value(
             max_recur -= 1
             if isinstance(
                 v.owner.op,
-                (
-                    Alloc,
-                    DimShuffle,
-                    Unbroadcast,
-                    # outputguard is only used in debugmode but we
-                    # keep it here to avoid problems with old pickels.
-                    compile.ops.OutputGuard,
-                    compile.DeepCopyOp,
-                ),
+                Alloc
+                | DimShuffle
+                | Unbroadcast
+                | compile.ops.OutputGuard
+                | compile.DeepCopyOp,
             ):
+                # OutputGuard is only used in debugmode but we
+                # keep it here to avoid problems with old pickles
                 v = v.owner.inputs[0]
                 continue
             elif isinstance(v.owner.op, Shape_i):
@@ -385,7 +383,7 @@ def get_underlying_scalar_constant_value(
             # mess with the stabilization optimization and be too slow.
             # We put all the scalar Ops used by get_canonical_form_slice()
             # to allow it to determine the broadcast pattern correctly.
-            elif isinstance(v.owner.op, (ScalarFromTensor, TensorFromScalar)):
+            elif isinstance(v.owner.op, ScalarFromTensor | TensorFromScalar):
                 v = v.owner.inputs[0]
                 continue
             elif isinstance(v.owner.op, CheckAndRaise):
@@ -738,7 +736,7 @@ _cast_mapping = {
 }
 
 
-def cast(x, dtype: Union[str, np.dtype]) -> TensorVariable:
+def cast(x, dtype: str | np.dtype) -> TensorVariable:
     """Symbolically cast `x` to a Tensor of type `dtype`."""
 
     if isinstance(dtype, str) and dtype == "floatX":
@@ -835,7 +833,7 @@ def zeros_like(model, dtype=None, opt=False):
 def zeros(shape, dtype=None):
     """Create a `TensorVariable` filled with zeros, closer to NumPy's syntax than ``alloc``."""
     if not (
-        isinstance(shape, (np.ndarray, Sequence))
+        isinstance(shape, np.ndarray | Sequence)
         or (isinstance(shape, TensorVariable) and shape.ndim > 0)
     ):
         shape = [shape]
@@ -847,7 +845,7 @@ def zeros(shape, dtype=None):
 def ones(shape, dtype=None):
     """Create a `TensorVariable` filled with ones, closer to NumPy's syntax than ``alloc``."""
     if not (
-        isinstance(shape, (np.ndarray, Sequence))
+        isinstance(shape, np.ndarray | Sequence)
         or (isinstance(shape, TensorVariable) and shape.ndim > 0)
     ):
         shape = [shape]
@@ -1159,9 +1157,9 @@ def triu(m, k=0):
 
 
 def tril_indices(
-    n: Union[int, ScalarVariable],
-    k: Union[int, ScalarVariable] = 0,
-    m: Optional[Union[int, ScalarVariable]] = None,
+    n: int | ScalarVariable,
+    k: int | ScalarVariable = 0,
+    m: int | ScalarVariable | None = None,
 ) -> tuple[TensorVariable, TensorVariable]:
     """
     Return the indices for the lower-triangle of an (n, m) array.
@@ -1187,8 +1185,8 @@ def tril_indices(
 
 
 def tril_indices_from(
-    a: Union[np.ndarray, TensorVariable],
-    k: Union[int, ScalarVariable] = 0,
+    a: np.ndarray | TensorVariable,
+    k: int | ScalarVariable = 0,
 ) -> tuple[TensorVariable, TensorVariable]:
     """
     Return the indices for the lower-triangle of arr.
@@ -1217,9 +1215,9 @@ def tril_indices_from(
 
 
 def triu_indices(
-    n: Union[int, ScalarVariable],
-    k: Union[int, ScalarVariable] = 0,
-    m: Optional[Union[int, ScalarVariable]] = None,
+    n: int | ScalarVariable,
+    k: int | ScalarVariable = 0,
+    m: int | ScalarVariable | None = None,
 ) -> tuple[TensorVariable, TensorVariable]:
     """
     Return the indices for the upper-triangle of an (n, m) array.
@@ -1245,8 +1243,8 @@ def triu_indices(
 
 
 def triu_indices_from(
-    a: Union[np.ndarray, TensorVariable],
-    k: Union[int, ScalarVariable] = 0,
+    a: np.ndarray | TensorVariable,
+    k: int | ScalarVariable = 0,
 ) -> tuple[TensorVariable, TensorVariable]:
     """
     Return the indices for the upper-triangle of arr.
@@ -1339,7 +1337,7 @@ def eye(n, m=None, k=0, dtype=None):
     return localop(n, m, k)
 
 
-def identity_like(x, dtype: Optional[Union[str, np.generic, np.dtype]] = None):
+def identity_like(x, dtype: str | np.generic | np.dtype | None = None):
     """Create a tensor with ones on main diagonal and zeroes elsewhere.
 
     Parameters
@@ -1398,8 +1396,8 @@ def register_infer_shape(rewrite, *tags, **kwargs):
 
 
 def infer_static_shape(
-    shape: Union[Variable, Sequence[Union[Variable, int]]],
-) -> tuple[Sequence["TensorLike"], Sequence[Optional[int]]]:
+    shape: Variable | Sequence[Variable | int],
+) -> tuple[Sequence["TensorLike"], Sequence[int | None]]:
     """Infer the static shapes implied by the potentially symbolic elements in `shape`.
 
     `shape` will be validated and constant folded.  As a result, this function
@@ -1671,24 +1669,21 @@ class Alloc(COp):
                 idx == 0
                 and isinstance(
                     client.op,
-                    (
-                        # Ops that will work inplace on the Alloc. So if they
-                        # get constant_folded, they would copy the
-                        # constant and this is less efficients.
-                        # Not doing the constant folding could also lower
-                        # the peak memory usage, as we the "constant" won't
-                        # always exists.
-                        pytensor.tensor.subtensor.IncSubtensor,
-                        pytensor.tensor.subtensor.AdvancedIncSubtensor1,
-                        pytensor.tensor.subtensor.AdvancedIncSubtensor,
-                        pytensor.tensor.blas.Gemv,
-                        pytensor.tensor.blas_c.CGemv,
-                        pytensor.tensor.blas.Ger,
-                        pytensor.tensor.blas_c.CGer,
-                        pytensor.tensor.blas_scipy.ScipyGer,
-                    ),
+                    pytensor.tensor.subtensor.IncSubtensor
+                    | pytensor.tensor.subtensor.AdvancedIncSubtensor1
+                    | pytensor.tensor.subtensor.AdvancedIncSubtensor
+                    | pytensor.tensor.blas.Gemv
+                    | pytensor.tensor.blas_c.CGemv
+                    | pytensor.tensor.blas.Ger
+                    | pytensor.tensor.blas_c.CGer
+                    | pytensor.tensor.blas_scipy.ScipyGer,
                 )
             ):
+                # Ops that will work inplace on the Alloc. So if they
+                # get constant_folded, they would copy the constant
+                # and this is less efficient.
+                # Not doing the constant folding could also lower the
+                # peak memory use, as the "constant" won't always exist.
                 return False
         return True
 
@@ -1729,8 +1724,8 @@ def full(shape, fill_value, dtype=None):
 
 def full_like(
     a: TensorVariable,
-    fill_value: Union[TensorVariable, int, float],
-    dtype: Union[str, np.generic, np.dtype] = None,
+    fill_value: TensorVariable | int | float,
+    dtype: str | np.generic | np.dtype = None,
 ) -> TensorVariable:
     """Equivalent of `numpy.full_like`.
 
@@ -2748,7 +2743,7 @@ def concatenate(tensor_list, axis=0):
     #   c = concatenate(x, y)
     # instead of
     #   c = concatenate((x, y))
-    if not isinstance(tensor_list, (tuple, list)):
+    if not isinstance(tensor_list, tuple | list):
         raise TypeError(
             "The 'tensors' argument must be either a tuple "
             "or a list, make sure you did not forget () or [] around "
@@ -2890,7 +2885,7 @@ def tile(x, reps, ndim=None):
         raise ValueError("ndim should be equal or larger than _x.ndim")
 
     # If reps is a scalar, integer or vector, we convert it to a list.
-    if not isinstance(reps, (list, tuple)):
+    if not isinstance(reps, list | tuple):
         reps_astensor = as_tensor_variable(reps)
         ndim_check = reps_astensor.ndim
         if reps_astensor.dtype not in discrete_dtypes:
@@ -3829,7 +3824,7 @@ def stacklists(arg):
     (2, 2, 4, 4)
 
     """
-    if isinstance(arg, (tuple, list)):
+    if isinstance(arg, tuple | list):
         return stack(list(map(stacklists, arg)))
     else:
         return arg
@@ -3845,9 +3840,9 @@ def swapaxes(y, axis1: int, axis2: int) -> TensorVariable:
 
 
 def moveaxis(
-    a: Union[np.ndarray, TensorVariable],
-    source: Union[int, Sequence[int]],
-    destination: Union[int, Sequence[int]],
+    a: np.ndarray | TensorVariable,
+    source: int | Sequence[int],
+    destination: int | Sequence[int],
 ) -> TensorVariable:
     """Move axes of a TensorVariable to new positions.
 
@@ -3981,7 +3976,7 @@ class Choose(Op):
 
         # Only use make_list if choices have inconsistent shapes
         # otherwise use as_tensor_variable
-        if isinstance(choices, (tuple, list)):
+        if isinstance(choices, tuple | list):
             choice = pytensor.typed_list.make_list(choices)
         else:
             choice = as_tensor_variable(choices)
@@ -4128,7 +4123,7 @@ def empty(shape, dtype=None):
         `numpy.float64`.
     """
     if not (
-        isinstance(shape, (np.ndarray, Sequence))
+        isinstance(shape, np.ndarray | Sequence)
         or (isinstance(shape, TensorVariable) and shape.ndim > 0)
     ):
         shape = [shape]
@@ -4138,8 +4133,8 @@ def empty(shape, dtype=None):
 
 
 def empty_like(
-    prototype: Union[np.ndarray, TensorVariable],
-    dtype: Optional[Union[str, np.generic, np.dtype]] = None,
+    prototype: np.ndarray | TensorVariable,
+    dtype: str | np.generic | np.dtype | None = None,
 ) -> TensorVariable:
     """Return a new array with the same shape and type as a given array.
 
@@ -4160,7 +4155,7 @@ def empty_like(
 
 
 def atleast_Nd(
-    *arys: Union[np.ndarray, TensorVariable], n: int = 1, left: bool = True
+    *arys: np.ndarray | TensorVariable, n: int = 1, left: bool = True
 ) -> TensorVariable:
     """Convert inputs to arrays with at least `n` dimensions."""
     res = []
@@ -4190,7 +4185,7 @@ atleast_3d = partial(atleast_Nd, n=3)
 
 
 def expand_dims(
-    a: Union[np.ndarray, TensorVariable], axis: tuple[int, ...]
+    a: np.ndarray | TensorVariable, axis: tuple[int, ...]
 ) -> TensorVariable:
     """Expand the shape of an array.
 
@@ -4199,7 +4194,7 @@ def expand_dims(
     """
     a = as_tensor(a)
 
-    if not isinstance(axis, (tuple, list)):
+    if not isinstance(axis, tuple | list):
         axis = (axis,)
 
     out_ndim = len(axis) + a.ndim

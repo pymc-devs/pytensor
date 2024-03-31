@@ -1,5 +1,5 @@
+from collections.abc import Callable
 from copy import deepcopy
-from typing import Callable
 
 import numpy as np
 

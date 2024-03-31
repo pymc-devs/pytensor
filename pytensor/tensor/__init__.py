@@ -1,8 +1,8 @@
 """Symbolic tensor types and constructor functions."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import singledispatch
-from typing import TYPE_CHECKING, Any, Callable, NoReturn, Optional, Union
+from typing import TYPE_CHECKING, Any, NoReturn, Optional, Union
 
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.op import Op
@@ -16,7 +16,7 @@ TensorLike = Union[Variable, Sequence[Variable], "ArrayLike"]
 
 
 def as_tensor_variable(
-    x: TensorLike, name: Optional[str] = None, ndim: Optional[int] = None, **kwargs
+    x: TensorLike, name: str | None = None, ndim: int | None = None, **kwargs
 ) -> "TensorVariable":
     """Convert `x` into an equivalent `TensorVariable`.
 
@@ -52,7 +52,7 @@ def as_tensor_variable(
 
 @singledispatch
 def _as_tensor_variable(
-    x: TensorLike, name: Optional[str], ndim: Optional[int], **kwargs
+    x: TensorLike, name: str | None, ndim: int | None, **kwargs
 ) -> "TensorVariable":
     raise NotImplementedError(f"Cannot convert {x!r} to a tensor variable.")
 
@@ -81,7 +81,7 @@ def get_vector_length(v: TensorLike) -> int:
     if v.type.ndim != 1:
         raise TypeError(f"Argument must be a vector; got {v.type}")
 
-    static_shape: Optional[int] = v.type.shape[0]
+    static_shape: int | None = v.type.shape[0]
     if static_shape is not None:
         return static_shape
 
@@ -89,13 +89,13 @@ def get_vector_length(v: TensorLike) -> int:
 
 
 @singledispatch
-def _get_vector_length(op: Union[Op, Variable], var: Variable) -> int:
+def _get_vector_length(op: Op | Variable, var: Variable) -> int:
     """`Op`-based dispatch for `get_vector_length`."""
     raise ValueError(f"Length of {var} cannot be determined")
 
 
 @_get_vector_length.register(Constant)
-def _get_vector_length_Constant(op: Union[Op, Variable], var: Constant) -> int:
+def _get_vector_length_Constant(op: Op | Variable, var: Constant) -> int:
     return len(var.data)
 
 

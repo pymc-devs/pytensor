@@ -2,7 +2,7 @@ import logging
 import typing
 import warnings
 from functools import reduce
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import scipy.linalg
@@ -15,7 +15,7 @@ from pytensor.tensor import as_tensor_variable
 from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.nlinalg import matrix_dot
+from pytensor.tensor.nlinalg import kron, matrix_dot
 from pytensor.tensor.shape import reshape
 from pytensor.tensor.type import matrix, tensor, vector
 from pytensor.tensor.variable import TensorVariable
@@ -253,7 +253,7 @@ class CholeskySolve(SolveBase):
         raise NotImplementedError()
 
 
-def cho_solve(c_and_lower, b, *, check_finite=True, b_ndim: Optional[int] = None):
+def cho_solve(c_and_lower, b, *, check_finite=True, b_ndim: int | None = None):
     """Solve the linear equations A x = b, given the Cholesky factorization of A.
 
     Parameters
@@ -319,11 +319,11 @@ def solve_triangular(
     a: TensorVariable,
     b: TensorVariable,
     *,
-    trans: Union[int, str] = 0,
+    trans: int | str = 0,
     lower: bool = False,
     unit_diagonal: bool = False,
     check_finite: bool = True,
-    b_ndim: Optional[int] = None,
+    b_ndim: int | None = None,
 ) -> TensorVariable:
     """Solve the equation `a x = b` for `x`, assuming `a` is a triangular matrix.
 
@@ -400,7 +400,7 @@ def solve(
     assume_a="gen",
     lower=False,
     check_finite=True,
-    b_ndim: Optional[int] = None,
+    b_ndim: int | None = None,
 ):
     """Solves the linear equation set ``a * x = b`` for the unknown ``x`` for square ``a`` matrix.
 
@@ -557,51 +557,6 @@ class EigvalshGrad(Op):
 
 def eigvalsh(a, b, lower=True):
     return Eigvalsh(lower)(a, b)
-
-
-def kron(a, b):
-    """Kronecker product.
-
-    Same as scipy.linalg.kron(a, b).
-
-    Parameters
-    ----------
-    a: array_like
-    b: array_like
-
-    Returns
-    -------
-    array_like with a.ndim + b.ndim - 2 dimensions
-
-    Notes
-    -----
-    numpy.kron(a, b) != scipy.linalg.kron(a, b)!
-    They don't have the same shape and order when
-    a.ndim != b.ndim != 2.
-
-    """
-    a = as_tensor_variable(a)
-    b = as_tensor_variable(b)
-    if a.ndim + b.ndim <= 2:
-        raise TypeError(
-            "kron: inputs dimensions must sum to 3 or more. "
-            f"You passed {int(a.ndim)} and {int(b.ndim)}."
-        )
-    o = ptm.outer(a, b)
-    o = o.reshape(ptb.concatenate((a.shape, b.shape)), ndim=a.ndim + b.ndim)
-    shf = o.dimshuffle(0, 2, 1, *range(3, o.ndim))
-    if shf.ndim == 3:
-        shf = o.dimshuffle(1, 0, 2)
-        o = shf.flatten()
-    else:
-        o = shf.reshape(
-            (
-                o.shape[0] * o.shape[2],
-                o.shape[1] * o.shape[3],
-                *(o.shape[i] for i in range(4, o.ndim)),
-            )
-        )
-    return o
 
 
 class Expm(Op):
@@ -1021,7 +976,6 @@ __all__ = [
     "cholesky",
     "solve",
     "eigvalsh",
-    "kron",
     "expm",
     "solve_discrete_lyapunov",
     "solve_continuous_lyapunov",

@@ -1,3 +1,4 @@
+import itertools
 import sys
 from collections.abc import Iterable
 
@@ -204,7 +205,7 @@ def get_advsubtensor_axis(indices):
             found_idx = True
 
     if isinstance(
-        indices[axis], (TensorConstant, TensorVariable, TensorSharedVariable)
+        indices[axis], TensorConstant | TensorVariable | TensorSharedVariable
     ):
         return axis
 
@@ -600,7 +601,7 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
         elif isinstance(elem, slice):
             if elem != slice(None):
                 return
-        elif isinstance(elem, (int, np.integer)):
+        elif isinstance(elem, int | np.integer):
             if elem in (0, -1) and node.inputs[0].broadcastable[dim]:
                 remove_dim.append(dim)
         else:
@@ -679,7 +680,7 @@ def local_subtensor_of_alloc(fgraph, node):
     if nw_val.ndim > len(nw_dims):
         return False
     rval = alloc(nw_val, *nw_dims)
-    if not isinstance(rval, (list, tuple)):
+    if not isinstance(rval, list | tuple):
         rval = [rval]
     return rval
 
@@ -749,7 +750,7 @@ def local_subtensor_make_vector(fgraph, node):
     include this kind of work in the constant folding).
     """
 
-    if not isinstance(node.op, (Subtensor, AdvancedSubtensor1)):
+    if not isinstance(node.op, Subtensor | AdvancedSubtensor1):
         return False
 
     x = node.inputs[0]
@@ -768,13 +769,13 @@ def local_subtensor_make_vector(fgraph, node):
 
         (idx,) = idxs
 
-        if isinstance(idx, (ps.ScalarType, TensorType)):
+        if isinstance(idx, ps.ScalarType | TensorType):
             old_idx, idx = idx, node.inputs[1]
             assert idx.type.is_super(old_idx)
     elif isinstance(node.op, AdvancedSubtensor1):
         idx = node.inputs[1]
 
-    if isinstance(idx, (int, np.integer)):
+    if isinstance(idx, int | np.integer):
         return [x.owner.inputs[idx]]
     elif isinstance(idx, Variable):
         if idx.ndim == 0:
@@ -954,7 +955,7 @@ def local_useless_subtensor(fgraph, node):
 
         length_pos = shape_of[node.inputs[0]][pos]
 
-        if isinstance(idx.stop, (int, np.integer)):
+        if isinstance(idx.stop, int | np.integer):
             length_pos_data = sys.maxsize
             try:
                 length_pos_data = get_underlying_scalar_constant_value(
@@ -1200,11 +1201,7 @@ def local_IncSubtensor_serialize(fgraph, node):
             i.owner
             and isinstance(
                 i.owner.op,
-                (
-                    IncSubtensor,
-                    AdvancedIncSubtensor1,
-                    AdvancedIncSubtensor,
-                ),
+                IncSubtensor | AdvancedIncSubtensor1 | AdvancedIncSubtensor,
             )
             and i.type.is_super(o_type)
             and len(fgraph.clients[i]) == 1
@@ -1351,7 +1348,7 @@ def local_incsubtensor_of_zeros(fgraph, node):
 
     """
     if (
-        isinstance(node.op, (IncSubtensor, AdvancedIncSubtensor, AdvancedIncSubtensor1))
+        isinstance(node.op, IncSubtensor | AdvancedIncSubtensor | AdvancedIncSubtensor1)
         and not node.op.set_instead_of_inc
     ):
         x = node.inputs[0]
@@ -1502,7 +1499,7 @@ def local_useless_inc_subtensor_alloc(fgraph, node):
     intermediate `alloc` where possible.
 
     """
-    if isinstance(node.op, (IncSubtensor, AdvancedIncSubtensor, AdvancedIncSubtensor1)):
+    if isinstance(node.op, IncSubtensor | AdvancedIncSubtensor | AdvancedIncSubtensor1):
         x = node.inputs[0]
         y = node.inputs[1]
         i = node.inputs[2:]
@@ -1704,7 +1701,7 @@ def local_join_subtensors(fgraph, node):
         return
 
     for subtensor1_idx, (subtensor1, subtensor2) in enumerate(
-        zip(tensors[:-1], tensors[1:])
+        itertools.pairwise(tensors)
     ):
         # Check that two consecutive Subtensors are operating on the same base tensor
         if not (
@@ -1808,7 +1805,7 @@ def local_join_subtensors(fgraph, node):
 def local_uint_constant_indices(fgraph, node):
     """Convert constant indices to unsigned dtypes."""
 
-    if isinstance(node.op, (IncSubtensor, AdvancedIncSubtensor, AdvancedIncSubtensor1)):
+    if isinstance(node.op, IncSubtensor | AdvancedIncSubtensor | AdvancedIncSubtensor1):
         x, y, *indices = node.inputs
     else:
         x, *indices = node.inputs
@@ -1829,7 +1826,7 @@ def local_uint_constant_indices(fgraph, node):
             # those, as well.
             continue
 
-        assert isinstance(index_val, (np.generic, np.ndarray))
+        assert isinstance(index_val, np.generic | np.ndarray)
 
         if index_val.size == 0:
             continue
@@ -1898,7 +1895,7 @@ def local_blockwise_advanced_inc_subtensor(fgraph, node):
     # It is currently not possible to Vectorize such AdvancedIncSubtensor, but we check again just in case
     if any(
         (
-            isinstance(idx, (SliceType, NoneTypeT))
+            isinstance(idx, SliceType | NoneTypeT)
             or (idx.type.dtype == "bool" and idx.type.ndim > 0)
         )
         for idx in idxs

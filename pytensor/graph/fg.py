@@ -3,7 +3,7 @@
 import time
 from collections import OrderedDict
 from collections.abc import Iterable, Sequence
-from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Literal, Union, cast
 
 import pytensor
 from pytensor.configdefaults import config
@@ -26,7 +26,7 @@ from pytensor.misc.ordered_set import OrderedSet
 if TYPE_CHECKING:
     from pytensor.graph.op import Op
 
-ApplyOrOutput = Union[Apply, Literal["output"]]
+ApplyOrOutput = Apply | Literal["output"]
 ClientType = tuple[ApplyOrOutput, int]
 
 
@@ -64,11 +64,11 @@ class FunctionGraph(MetaObject):
 
     def __init__(
         self,
-        inputs: Optional[Sequence[Variable]] = None,
-        outputs: Optional[Sequence[Variable]] = None,
-        features: Optional[Sequence[Feature]] = None,
+        inputs: Sequence[Variable] | None = None,
+        outputs: Sequence[Variable] | None = None,
+        features: Sequence[Feature] | None = None,
         clone: bool = True,
-        update_mapping: Optional[dict[Variable, Variable]] = None,
+        update_mapping: dict[Variable, Variable] | None = None,
         **clone_kwds,
     ):
         """
@@ -152,7 +152,7 @@ class FunctionGraph(MetaObject):
         self.update_mapping = update_mapping
 
     def add_output(
-        self, var: Variable, reason: Optional[str] = None, import_missing: bool = False
+        self, var: Variable, reason: str | None = None, import_missing: bool = False
     ):
         """Add a new variable as an output to this `FunctionGraph`."""
         self.outputs.append(var)
@@ -208,7 +208,7 @@ class FunctionGraph(MetaObject):
         self,
         var: Variable,
         client_to_remove: ClientType,
-        reason: Optional[str] = None,
+        reason: str | None = None,
         remove_if_empty: bool = False,
     ) -> None:
         """Recursively remove clients of a variable.
@@ -279,7 +279,7 @@ class FunctionGraph(MetaObject):
                         del self.clients[var]
 
     def import_var(
-        self, var: Variable, reason: Optional[str] = None, import_missing: bool = False
+        self, var: Variable, reason: str | None = None, import_missing: bool = False
     ) -> None:
         """Import a `Variable` into this `FunctionGraph`.
 
@@ -320,7 +320,7 @@ class FunctionGraph(MetaObject):
         self,
         apply_node: Apply,
         check: bool = True,
-        reason: Optional[str] = None,
+        reason: str | None = None,
         import_missing: bool = False,
     ) -> None:
         """Recursively import everything between an ``Apply`` node and the ``FunctionGraph``'s outputs.
@@ -385,7 +385,7 @@ class FunctionGraph(MetaObject):
         node: ApplyOrOutput,
         i: int,
         new_var: Variable,
-        reason: Optional[str] = None,
+        reason: str | None = None,
         import_missing: bool = False,
         check: bool = True,
     ) -> None:
@@ -450,8 +450,8 @@ class FunctionGraph(MetaObject):
         self,
         var: Variable,
         new_var: Variable,
-        reason: Optional[str] = None,
-        verbose: Optional[bool] = None,
+        reason: str | None = None,
+        verbose: bool | None = None,
         import_missing: bool = False,
     ) -> None:
         """Replace a variable in the `FunctionGraph`.
@@ -545,7 +545,7 @@ class FunctionGraph(MetaObject):
             out_clients[arrow_idx] = ("output", new_idx)
             new_idx += 1
 
-    def remove_node(self, node: Apply, reason: Optional[str] = None):
+    def remove_node(self, node: Apply, reason: str | None = None):
         """Remove an `Apply` node from the `FunctionGraph`.
 
         This will remove everything that depends on the outputs of `node`, as
@@ -629,7 +629,7 @@ class FunctionGraph(MetaObject):
         # the `FunctionGraph` state subscribers see is valid.
         self.execute_callbacks("on_prune", node, reason)
 
-    def remove_input(self, input_idx: int, reason: Optional[str] = None):
+    def remove_input(self, input_idx: int, reason: str | None = None):
         """Remove the input at index `input_idx`."""
         var = self.inputs.pop(input_idx)
 
@@ -648,7 +648,7 @@ class FunctionGraph(MetaObject):
 
             self.remove_node(client_node, reason=reason)
 
-    def remove_output(self, output_idx: int, reason: Optional[str] = None):
+    def remove_output(self, output_idx: int, reason: str | None = None):
         """Remove the output at index `input_idx`."""
 
         var = self.outputs[output_idx]
@@ -784,7 +784,7 @@ class FunctionGraph(MetaObject):
                 if len(orderings) > 0:
                     all_orderings.append(orderings)
                     for node, prereqs in orderings.items():
-                        if not isinstance(prereqs, (list, OrderedSet)):
+                        if not isinstance(prereqs, list | OrderedSet):
                             raise TypeError(
                                 "prereqs must be a type with a "
                                 "deterministic iteration order, or toposort "
@@ -920,7 +920,7 @@ class FunctionGraph(MetaObject):
             if hasattr(feature, "unpickle"):
                 feature.unpickle(self)
 
-    def __contains__(self, item: Union[Variable, Apply]) -> bool:
+    def __contains__(self, item: Variable | Apply) -> bool:
         if isinstance(item, Variable):
             return item in self.variables
         elif isinstance(item, Apply):

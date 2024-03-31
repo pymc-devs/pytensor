@@ -6,7 +6,6 @@ in the same compilation directory (which can cause crashes).
 import os
 import threading
 from contextlib import contextmanager
-from typing import Optional, Union
 
 import filelock
 
@@ -47,9 +46,9 @@ def force_unlock(lock_dir: os.PathLike):
 
 @contextmanager
 def lock_ctx(
-    lock_dir: Optional[Union[str, os.PathLike]] = None,
+    lock_dir: str | os.PathLike | None = None,
     *,
-    timeout: Optional[float] = None,
+    timeout: float | None = None,
 ):
     """Context manager that wraps around FileLock and SoftFileLock from filelock package.
 

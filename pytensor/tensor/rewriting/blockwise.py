@@ -1,5 +1,3 @@
-from typing import Optional
-
 from pytensor.compile.mode import optdb
 from pytensor.graph import Constant, node_rewriter
 from pytensor.graph.replace import vectorize_node
@@ -69,22 +67,15 @@ optdb.register(
 def local_eager_useless_unbatched_blockwise(fgraph, node):
     if isinstance(
         node.op.core_op,
-        (
-            # Many Dot-related rewrites (e.g., all of BlasOpt) happen before specialize
-            Dot,
-            # These Ops can't always be trivially vectorized at runtime,
-            # Since their inputs may imply non-rectangular shapes.
-            Alloc,
-            ARange,
-            Subtensor,
-            AdvancedSubtensor,
-            AdvancedIncSubtensor,
-        ),
+        Dot | Alloc | ARange | Subtensor | AdvancedSubtensor | AdvancedIncSubtensor,
     ):
+        # Many Dot-related rewrites (eg, all of BlasOpt) happen before specialize
+        # These other Ops can't always be trivially vectored at runtime,
+        # since their inputs may imply non-rectangular shapes.
         return local_useless_unbatched_blockwise.fn(fgraph, node)
 
 
-def _squeeze_left(x, stop_at_dim: Optional[int] = None):
+def _squeeze_left(x, stop_at_dim: int | None = None):
     """Squeeze any leading dims of `x` until a real dim or `stop_at_dim` (if not None) is reached."""
     x_dims = x.type.broadcastable
     squeeze_ndim = len(x_dims) if all(x_dims) else x_dims.index(False)

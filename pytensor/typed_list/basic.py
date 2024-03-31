@@ -624,7 +624,7 @@ class MakeList(Op):
     __props__ = ()
 
     def make_node(self, a):
-        assert isinstance(a, (tuple, list))
+        assert isinstance(a, tuple | list)
         a2 = []
         for elem in a:
             if not isinstance(elem, Variable):

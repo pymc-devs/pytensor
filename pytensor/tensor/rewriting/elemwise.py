@@ -571,7 +571,7 @@ def local_add_mul_fusion(fgraph, node):
     but it catches a few edge cases that are not canonicalized by it
     """
     if not isinstance(node.op, Elemwise) or not isinstance(
-        node.op.scalar_op, (ps.Add, ps.Mul)
+        node.op.scalar_op, ps.Add | ps.Mul
     ):
         return False
 
@@ -1132,7 +1132,7 @@ def local_careduce_fusion(fgraph, node):
 
     # FIXME: This check is needed because of the faulty logic in the FIXME below!
     # Right now, rewrite only works for `Sum`/`Prod`
-    if not isinstance(car_scalar_op, (ps.Add, ps.Mul)):
+    if not isinstance(car_scalar_op, ps.Add | ps.Mul):
         return None
 
     elm_node = car_input.owner

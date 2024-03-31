@@ -1,5 +1,6 @@
+from collections.abc import Callable
 from textwrap import dedent, indent
-from typing import Any, Callable, Optional
+from typing import Any
 
 import numba.np.unsafe.ndarray as numba_ndarray
 import numpy as np
@@ -222,7 +223,7 @@ def create_numba_random_fn(
     op: Op,
     node: Apply,
     scalar_fn: Callable[[str], str],
-    global_env: Optional[dict[str, Any]] = None,
+    global_env: dict[str, Any] | None = None,
 ) -> Callable:
     """Create a vectorized function from a callable that generates the ``str`` function body.
 

@@ -30,7 +30,7 @@ def get_updates_and_outputs(ls):
     """
 
     def is_outputs(elem):
-        if isinstance(elem, (list, tuple)) and all(
+        if isinstance(elem, list | tuple) and all(
             isinstance(x, Variable) for x in elem
         ):
             return True
@@ -43,8 +43,8 @@ def get_updates_and_outputs(ls):
             # Make sure the updates will be applied in a deterministic order
             return True
         # Dictionaries can be given as lists of tuples
-        if isinstance(elem, (list, tuple)) and all(
-            isinstance(x, (list, tuple)) and len(x) == 2 for x in elem
+        if isinstance(elem, list | tuple) and all(
+            isinstance(x, list | tuple) and len(x) == 2 for x in elem
         ):
             return True
         return False
@@ -53,7 +53,7 @@ def get_updates_and_outputs(ls):
         return isinstance(elem, until)
 
     def _list(x):
-        if isinstance(x, (list, tuple)):
+        if isinstance(x, list | tuple):
             return list(x)
         else:
             return [x]
@@ -94,7 +94,7 @@ def get_updates_and_outputs(ls):
     error_msg = (
         f"Scan cannot parse the return value of your lambda expression, which is: {ls}"
     )
-    if not isinstance(ls, (list, tuple)):
+    if not isinstance(ls, list | tuple):
         raise ValueError(error_msg)
     ls = list(ls)
     deprecation_msg = (
@@ -449,7 +449,7 @@ def scan(
         """
         if x is None:
             return []
-        elif not isinstance(x, (list, tuple)):
+        elif not isinstance(x, list | tuple):
             return [x]
         else:
             return list(x)
@@ -472,7 +472,7 @@ def scan(
     # To do that we check here to see the nature of n_steps
     n_fixed_steps = None
 
-    if isinstance(n_steps, (float, int)):
+    if isinstance(n_steps, float | int):
         n_fixed_steps = int(n_steps)
     else:
         try:
@@ -1161,7 +1161,7 @@ def scan(
             pass
         scan_inputs += [arg]
     scan_outs = local_op(*scan_inputs)
-    if not isinstance(scan_outs, (list, tuple)):
+    if not isinstance(scan_outs, list | tuple):
         scan_outs = [scan_outs]
     ##
     # Step 9. Figure out which outs are update rules for shared variables

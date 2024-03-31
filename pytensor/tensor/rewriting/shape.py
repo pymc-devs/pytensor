@@ -1,6 +1,5 @@
 import traceback
 from io import StringIO
-from typing import Optional
 from typing import cast as type_cast
 from warnings import warn
 
@@ -258,7 +257,7 @@ class ShapeFeature(Feature):
             return self.lscalar_one
         if isinstance(s_i, float) and int(s_i) == s_i:
             s_i = int(s_i)
-        if isinstance(s_i, (np.integer, int)) or (
+        if isinstance(s_i, np.integer | int) or (
             isinstance(s_i, np.ndarray) and s_i.ndim == 0
         ):
             # this shape is a constant
@@ -273,7 +272,7 @@ class ShapeFeature(Feature):
                 # message.
                 raise AssertionError(msg)
             return constant(s_i, dtype="int64")
-        if isinstance(s_i, (tuple, list)):
+        if isinstance(s_i, tuple | list):
             # this dimension is the same as many of the inputs
             # which tells us that if one of the inputs is known,
             # the others all become known.
@@ -334,7 +333,7 @@ class ShapeFeature(Feature):
         if s is None:
             self.shape_of[r] = s
         else:
-            if not isinstance(s, (tuple, list)):
+            if not isinstance(s, tuple | list):
                 raise TypeError("shapes must be tuple/list", (r, s))
 
             if r.type.ndim != len(s):
@@ -411,11 +410,11 @@ class ShapeFeature(Feature):
                 #  - Shape_i(i)(other_r);
                 #  - Shape_i(i)(r).
                 merged_shape.append(r_shape[i])
-            elif isinstance(r_shape[i], (Constant, int)):
+            elif isinstance(r_shape[i], Constant | int):
                 # We do this to call less often ancestors and make
                 # sure we have the simplest shape possible.
                 merged_shape.append(r_shape[i])
-            elif isinstance(other_shape[i], (Constant, int)):
+            elif isinstance(other_shape[i], Constant | int):
                 # We do this to call less often ancestors and make
                 # sure we have the simplest shape possible.
                 merged_shape.append(other_shape[i])
@@ -552,7 +551,7 @@ class ShapeFeature(Feature):
         for sh_idx, sh in enumerate(o_shapes):
             if sh is None:
                 continue
-            if not isinstance(sh, (list, tuple)):
+            if not isinstance(sh, list | tuple):
                 raise ValueError(
                     f"infer_shape of {node} didn't return a list of"
                     f" list. It returned '{o_shapes}'"
@@ -654,8 +653,8 @@ class ShapeFeature(Feature):
         self,
         x: Variable,
         y: Variable,
-        dim_x: Optional[int] = None,
-        dim_y: Optional[int] = None,
+        dim_x: int | None = None,
+        dim_y: int | None = None,
     ) -> bool:
         """Return ``True`` if `x` and `y` have the same shape.
 

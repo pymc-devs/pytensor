@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Sequence
 from itertools import zip_longest
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Constant, Variable
@@ -223,7 +223,7 @@ class VM(ABC):
         self.call_counts = [0] * len(nodes)
         self.call_times = [0] * len(nodes)
         self.time_thunks = False
-        self.storage_map: Optional[StorageMapType] = None
+        self.storage_map: StorageMapType | None = None
 
     @abstractmethod
     def __call__(self):
@@ -345,7 +345,7 @@ class Loop(UpdatingVM):
         input_storage,
         output_storage,
         update_vars,
-        post_thunk_clear: Optional[list["StorageCellType"]] = None,
+        post_thunk_clear: list["StorageCellType"] | None = None,
     ):
         r"""
         Parameters
@@ -453,7 +453,7 @@ class Stack(UpdatingVM):
         update_vars,
         compute_map: "ComputeMapType",
         allow_gc: bool,
-        dependencies: Optional[dict[Variable, list[Variable]]] = None,
+        dependencies: dict[Variable, list[Variable]] | None = None,
         callback=None,
         callback_input=None,
     ):

@@ -98,7 +98,7 @@ def reduce(
         mode=mode,
         name=name,
     )
-    if isinstance(rval[0], (list, tuple)):
+    if isinstance(rval[0], list | tuple):
         return [x[-1] for x in rval[0]], rval[1]
     else:
         return rval[0][-1], rval[1]

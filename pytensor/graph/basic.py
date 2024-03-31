@@ -4,6 +4,7 @@ import abc
 import warnings
 from collections import deque
 from collections.abc import (
+    Callable,
     Collection,
     Generator,
     Hashable,
@@ -17,7 +18,6 @@ from itertools import count
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     Generic,
     Optional,
     TypeVar,
@@ -52,7 +52,7 @@ _IdType = TypeVar("_IdType", bound=Hashable)
 
 T = TypeVar("T", bound="Node")
 NoParams = object()
-NodeAndChildren = tuple[T, Optional[Iterable[T]]]
+NodeAndChildren = tuple[T, Iterable[T] | None]
 
 
 class Node(MetaObject):
@@ -64,7 +64,7 @@ class Node(MetaObject):
 
     """
 
-    name: Optional[str]
+    name: str | None
 
     def get_parents(self):
         """
@@ -252,7 +252,7 @@ class Apply(Node, Generic[OpType]):
         """
         from pytensor.graph.op import HasInnerGraph
 
-        assert isinstance(inputs, (list, tuple))
+        assert isinstance(inputs, list | tuple)
         remake_node = False
         new_inputs: list["Variable"] = list(inputs)
 
@@ -432,8 +432,8 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         self,
         type: _TypeType,
         owner: OptionalApplyType,
-        index: Optional[int] = None,
-        name: Optional[str] = None,
+        index: int | None = None,
+        name: str | None = None,
     ) -> None:
         super().__init__()
 
@@ -640,7 +640,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
 class AtomicVariable(Variable[_TypeType, None]):
     """A node type that has no ancestors and should never be considered an input to a graph."""
 
-    def __init__(self, type: _TypeType, name: Optional[str] = None, **kwargs):
+    def __init__(self, type: _TypeType, name: str | None = None, **kwargs):
         super().__init__(type=type, owner=None, index=None, name=name, **kwargs)
 
     @abc.abstractmethod
@@ -706,7 +706,7 @@ class NominalVariable(AtomicVariable[_TypeType]):
 
         return cls.__instances__[(typ, id)]
 
-    def __init__(self, id: _IdType, typ: _TypeType, name: Optional[str] = None):
+    def __init__(self, id: _IdType, typ: _TypeType, name: str | None = None):
         self.id = id
         super().__init__(type=typ, name=name)
 
@@ -749,7 +749,7 @@ class Constant(AtomicVariable[_TypeType]):
 
     # __slots__ = ['data']
 
-    def __init__(self, type: _TypeType, data: Any, name: Optional[str] = None):
+    def __init__(self, type: _TypeType, data: Any, name: str | None = None):
         super().__init__(type, name=name)
         self.data = type.filter(data)
         add_tag_trace(self)
@@ -795,11 +795,11 @@ class Constant(AtomicVariable[_TypeType]):
 
 def walk(
     nodes: Iterable[T],
-    expand: Callable[[T], Optional[Iterable[T]]],
+    expand: Callable[[T], Iterable[T] | None],
     bfs: bool = True,
     return_children: bool = False,
     hash_fn: Callable[[T], int] = id,
-) -> Generator[Union[T, NodeAndChildren], None, None]:
+) -> Generator[T | NodeAndChildren, None, None]:
     r"""Walk through a graph, either breadth- or depth-first.
 
     Parameters
@@ -844,7 +844,7 @@ def walk(
         if node_hash not in rval_set:
             rval_set.add(node_hash)
 
-            new_nodes: Optional[Iterable[T]] = expand(node)
+            new_nodes: Iterable[T] | None = expand(node)
 
             if return_children:
                 yield node, new_nodes
@@ -856,7 +856,7 @@ def walk(
 
 
 def ancestors(
-    graphs: Iterable[Variable], blockers: Optional[Collection[Variable]] = None
+    graphs: Iterable[Variable], blockers: Collection[Variable] | None = None
 ) -> Generator[Variable, None, None]:
     r"""Return the variables that contribute to those in given graphs (inclusive).
 
@@ -877,7 +877,7 @@ def ancestors(
 
     """
 
-    def expand(r: Variable) -> Optional[Iterator[Variable]]:
+    def expand(r: Variable) -> Iterator[Variable] | None:
         if r.owner and (not blockers or r not in blockers):
             return reversed(r.owner.inputs)
 
@@ -885,7 +885,7 @@ def ancestors(
 
 
 def graph_inputs(
-    graphs: Iterable[Variable], blockers: Optional[Collection[Variable]] = None
+    graphs: Iterable[Variable], blockers: Collection[Variable] | None = None
 ) -> Generator[Variable, None, None]:
     r"""Return the inputs required to compute the given Variables.
 
@@ -928,7 +928,7 @@ def vars_between(
 
     """
 
-    def expand(r: Variable) -> Optional[Iterable[Variable]]:
+    def expand(r: Variable) -> Iterable[Variable] | None:
         if r.owner and r not in ins:
             return reversed(r.owner.inputs + r.owner.outputs)
 
@@ -990,7 +990,7 @@ def applys_between(
 
 def truncated_graph_inputs(
     outputs: Sequence[Variable],
-    ancestors_to_include: Optional[Collection[Variable]] = None,
+    ancestors_to_include: Collection[Variable] | None = None,
 ) -> list[Variable]:
     """Get the truncate graph inputs.
 
@@ -1125,7 +1125,7 @@ def clone(
     inputs: Sequence[Variable],
     outputs: Sequence[Variable],
     copy_inputs: bool = True,
-    copy_orphans: Optional[bool] = None,
+    copy_orphans: bool | None = None,
     clone_inner_graphs: bool = False,
 ) -> tuple[list[Variable], list[Variable]]:
     r"""Copies the sub-graph contained between inputs and outputs.
@@ -1176,7 +1176,7 @@ def clone_node_and_cache(
     clone_d: dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]],
     clone_inner_graphs=False,
     **kwargs,
-) -> Optional[Apply]:
+) -> Apply | None:
     """Clone an `Apply` node and cache the results in `clone_d`.
 
     This function handles `Op` clones that are generated by inner-graph
@@ -1194,7 +1194,7 @@ def clone_node_and_cache(
         return None
 
     # Use a cached `Op` clone when available
-    new_op: Optional["Op"] = cast(Optional["Op"], clone_d.get(node.op))
+    new_op: "Op" | None = cast(Optional["Op"], clone_d.get(node.op))
 
     cloned_inputs: list[Variable] = [cast(Variable, clone_d[i]) for i in node.inputs]
 
@@ -1228,9 +1228,8 @@ def clone_get_equiv(
     outputs: Sequence[Variable],
     copy_inputs: bool = True,
     copy_orphans: bool = True,
-    memo: Optional[
-        dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]]
-    ] = None,
+    memo: dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]]
+    | None = None,
     clone_inner_graphs: bool = False,
     **kwargs,
 ) -> dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]]:
@@ -1306,30 +1305,28 @@ def clone_get_equiv(
 def general_toposort(
     outputs: Iterable[T],
     deps: None,
-    compute_deps_cache: Callable[[T], Optional[Union[OrderedSet, list[T]]]],
-    deps_cache: Optional[dict[T, list[T]]],
-    clients: Optional[dict[T, list[T]]],
+    compute_deps_cache: Callable[[T], OrderedSet | list[T] | None],
+    deps_cache: dict[T, list[T]] | None,
+    clients: dict[T, list[T]] | None,
 ) -> list[T]: ...
 
 
 @overload
 def general_toposort(
     outputs: Iterable[T],
-    deps: Callable[[T], Union[OrderedSet, list[T]]],
+    deps: Callable[[T], OrderedSet | list[T]],
     compute_deps_cache: None,
     deps_cache: None,
-    clients: Optional[dict[T, list[T]]],
+    clients: dict[T, list[T]] | None,
 ) -> list[T]: ...
 
 
 def general_toposort(
     outputs: Iterable[T],
-    deps: Optional[Callable[[T], Union[OrderedSet, list[T]]]],
-    compute_deps_cache: Optional[
-        Callable[[T], Optional[Union[OrderedSet, list[T]]]]
-    ] = None,
-    deps_cache: Optional[dict[T, list[T]]] = None,
-    clients: Optional[dict[T, list[T]]] = None,
+    deps: Callable[[T], OrderedSet | list[T]] | None,
+    compute_deps_cache: Callable[[T], OrderedSet | list[T] | None] | None = None,
+    deps_cache: dict[T, list[T]] | None = None,
+    clients: dict[T, list[T]] | None = None,
 ) -> list[T]:
     """Perform a topological sort of all nodes starting from a given node.
 
@@ -1371,7 +1368,7 @@ def general_toposort(
                 d = deps(io)
 
                 if d:
-                    if not isinstance(d, (list, OrderedSet)):
+                    if not isinstance(d, list | OrderedSet):
                         raise TypeError(
                             "Non-deterministic collections found; make"
                             " toposort non-deterministic."
@@ -1433,8 +1430,8 @@ def general_toposort(
 def io_toposort(
     inputs: Iterable[Variable],
     outputs: Reversible[Variable],
-    orderings: Optional[dict[Apply, list[Apply]]] = None,
-    clients: Optional[dict[Variable, list[Variable]]] = None,
+    orderings: dict[Apply, list[Apply]] | None = None,
+    clients: dict[Variable, list[Variable]] | None = None,
 ) -> list[Apply]:
     """Perform topological sort from input and output nodes.
 
@@ -1746,7 +1743,7 @@ def list_of_nodes(
     )
 
 
-def apply_depends_on(apply: Apply, depends_on: Union[Apply, Collection[Apply]]) -> bool:
+def apply_depends_on(apply: Apply, depends_on: Apply | Collection[Apply]) -> bool:
     """Determine if any `depends_on` is in the graph given by ``apply``.
 
     Parameters
@@ -1782,7 +1779,7 @@ def apply_depends_on(apply: Apply, depends_on: Union[Apply, Collection[Apply]]) 
 
 
 def variable_depends_on(
-    variable: Variable, depends_on: Union[Variable, Collection[Variable]]
+    variable: Variable, depends_on: Variable | Collection[Variable]
 ) -> bool:
     """Determine if any `depends_on` is in the graph given by ``variable``.
     Parameters
@@ -1804,10 +1801,10 @@ def variable_depends_on(
 
 
 def equal_computations(
-    xs: list[Union[np.ndarray, Variable]],
-    ys: list[Union[np.ndarray, Variable]],
-    in_xs: Optional[list[Variable]] = None,
-    in_ys: Optional[list[Variable]] = None,
+    xs: list[np.ndarray | Variable],
+    ys: list[np.ndarray | Variable],
+    in_xs: list[Variable] | None = None,
+    in_ys: list[Variable] | None = None,
     strict_dtype=True,
 ) -> bool:
     """Checks if PyTensor graphs represent the same computations.
@@ -1992,7 +1989,7 @@ def get_var_by_name(
     """
     from pytensor.graph.op import HasInnerGraph
 
-    def expand(r) -> Optional[list[Variable]]:
+    def expand(r) -> list[Variable] | None:
         if r.owner:
             res = list(r.owner.inputs)
 

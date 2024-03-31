@@ -1,9 +1,10 @@
 import base64
 import pickle
+from collections.abc import Callable
 from functools import singledispatch
 from numbers import Number
 from textwrap import indent
-from typing import Any, Callable, Optional, Union
+from typing import Any
 
 import numba
 import numpy as np
@@ -136,7 +137,7 @@ def create_vectorize_func(
     scalar_op_fn: Callable,
     node: Apply,
     use_signature: bool = False,
-    identity: Optional[Any] = None,
+    identity: Any | None = None,
     **kwargs,
 ) -> Callable:
     r"""Create a vectorized Numba function from a `Apply`\s Python function."""
@@ -170,7 +171,7 @@ def create_vectorize_func(
 
 def create_axis_reducer(
     scalar_op: Op,
-    identity: Union[np.ndarray, Number],
+    identity: np.ndarray | Number,
     axis: int,
     ndim: int,
     dtype: numba.types.Type,

@@ -2,9 +2,9 @@ import inspect
 import os
 import re
 import warnings
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from re import Pattern
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import numpy as np
 
@@ -141,13 +141,13 @@ class OpenMPOp(COp):
 
     """
 
-    gxx_support_openmp: Optional[bool] = None
+    gxx_support_openmp: bool | None = None
     """
     ``True``/``False`` after we tested this.
 
     """
 
-    def __init__(self, openmp: Optional[bool] = None):
+    def __init__(self, openmp: bool | None = None):
         if openmp is None:
             openmp = config.openmp
         self.openmp = openmp
@@ -242,7 +242,7 @@ def get_sub_macros(sub: dict[str, str]) -> tuple[str, str]:
 
 def get_io_macros(
     inputs: list[str], outputs: list[str]
-) -> Union[tuple[list[str]], tuple[str, str]]:
+) -> tuple[list[str]] | tuple[str, str]:
     define_macros = []
     undef_macros = []
 
@@ -284,8 +284,8 @@ class ExternalCOp(COp):
         "code",
         "code_cleanup",
     }
-    _cop_num_inputs: Optional[int] = None
-    _cop_num_outputs: Optional[int] = None
+    _cop_num_inputs: int | None = None
+    _cop_num_outputs: int | None = None
 
     @classmethod
     def get_path(cls, f: str) -> str:
@@ -300,9 +300,7 @@ class ExternalCOp(COp):
             f = os.path.realpath(os.path.join(class_dir, f))
         return f
 
-    def __init__(
-        self, func_files: Union[str, list[str]], func_name: Optional[str] = None
-    ):
+    def __init__(self, func_files: str | list[str], func_name: str | None = None):
         """
         Sections are loaded from files in order with sections in later
         files overriding sections in previous files.
@@ -519,7 +517,7 @@ class ExternalCOp(COp):
         return ", ".join(inp + out)
 
     def get_c_macros(
-        self, node: Apply, name: str, check_input: Optional[bool] = None
+        self, node: Apply, name: str, check_input: bool | None = None
     ) -> tuple[str, str]:
         "Construct a pair of C ``#define`` and ``#undef`` code strings."
         define_template = "#define %s %s"

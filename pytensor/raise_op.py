@@ -105,7 +105,7 @@ class CheckAndRaise(COp):
         return [[1]] + [[0]] * (len(node.inputs) - 1)
 
     def c_code(self, node, name, inames, onames, props):
-        if not isinstance(node.inputs[0].type, (DenseTensorType, ScalarType)):
+        if not isinstance(node.inputs[0].type, DenseTensorType | ScalarType):
             raise NotImplementedError(
                 f"CheckAndRaise c_code not implemented for input type {node.inputs[0].type}"
             )

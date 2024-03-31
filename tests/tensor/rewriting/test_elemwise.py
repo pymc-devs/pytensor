@@ -974,7 +974,7 @@ class TestFusion:
         if isinstance(out_dtype, dict):
             out_dtype = out_dtype[config.cast_policy]
 
-        if not isinstance(g, (tuple, list)):
+        if not isinstance(g, tuple | list):
             g = (g,)
             answer = (answer,)
             out_dtype = (out_dtype,)

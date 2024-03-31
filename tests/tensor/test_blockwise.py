@@ -1,6 +1,5 @@
 import re
 from itertools import product
-from typing import Optional, Union
 
 import numpy as np
 import pytest
@@ -237,7 +236,7 @@ class BlockwiseOpTester:
         cls.block_op = Blockwise(core_op=cls.core_op, signature=cls.signature)
 
     @staticmethod
-    def parse_shape(shape: tuple[Union[str, int], ...]) -> tuple[int, ...]:
+    def parse_shape(shape: tuple[str | int, ...]) -> tuple[int, ...]:
         """
         Convert (5, "m", "n") -> (5, 7, 11)
         """
@@ -247,7 +246,7 @@ class BlockwiseOpTester:
     def create_testvals(self, shape):
         return self.rng.normal(size=self.parse_shape(shape)).astype(config.floatX)
 
-    def create_batched_inputs(self, batch_idx: Optional[int] = None):
+    def create_batched_inputs(self, batch_idx: int | None = None):
         for batch_shapes in self.test_batch_shapes:
             vec_inputs = []
             vec_inputs_testvals = []

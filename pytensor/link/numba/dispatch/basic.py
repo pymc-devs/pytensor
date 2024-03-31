@@ -5,7 +5,6 @@ from contextlib import contextmanager
 from copy import copy
 from functools import singledispatch
 from textwrap import dedent
-from typing import Union
 
 import numba
 import numba.np.unsafe.ndarray as numba_ndarray
@@ -127,7 +126,7 @@ def get_numba_type(
 
 
 def create_numba_signature(
-    node_or_fgraph: Union[FunctionGraph, Apply],
+    node_or_fgraph: FunctionGraph | Apply,
     force_scalar: bool = False,
     reduce_to_scalar: bool = False,
 ) -> numba.types.Type:
@@ -225,7 +224,7 @@ def to_scalar(x):
 
 @numba.extending.overload(to_scalar)
 def impl_to_scalar(x):
-    if isinstance(x, (numba.types.Number, numba.types.Boolean)):
+    if isinstance(x, numba.types.Number | numba.types.Boolean):
         return lambda x: x
     elif isinstance(x, numba.types.Array):
         return lambda x: x.item()
@@ -484,7 +483,7 @@ def create_index_func(node, objmode=False):
             raise ValueError()
 
     set_or_inc = isinstance(
-        node.op, (IncSubtensor, AdvancedIncSubtensor1, AdvancedIncSubtensor)
+        node.op, IncSubtensor | AdvancedIncSubtensor1 | AdvancedIncSubtensor
     )
     index_start_idx = 1 + int(set_or_inc)
 

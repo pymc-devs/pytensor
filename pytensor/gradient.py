@@ -2,9 +2,9 @@
 
 import time
 import warnings
-from collections.abc import Mapping, MutableSequence, Sequence
+from collections.abc import Callable, Mapping, MutableSequence, Sequence
 from functools import partial, reduce
-from typing import TYPE_CHECKING, Callable, Literal, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Literal, TypeVar, Union
 
 import numpy as np
 
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from pytensor.compile.mode import Mode
 
 
-V = TypeVar("V", bound=Optional[Variable])
+V = TypeVar("V", bound=Variable | None)
 
 
 # TODO: Refactor this so that it's not a global variable
@@ -31,8 +31,8 @@ grad_time: float = 0.0
 
 # TODO: Add `overload` variants
 def as_list_or_tuple(
-    use_list: bool, use_tuple: bool, outputs: Union[V, Sequence[V]]
-) -> Union[V, list[V], tuple[V, ...]]:
+    use_list: bool, use_tuple: bool, outputs: V | Sequence[V]
+) -> V | list[V] | tuple[V, ...]:
     """Return either a single object or a list/tuple of objects.
 
     If `use_list` is True, `outputs` is returned as a list (if `outputs`
@@ -146,12 +146,12 @@ disconnected_type = DisconnectedType()
 
 
 def Rop(
-    f: Union[Variable, Sequence[Variable]],
-    wrt: Union[Variable, Sequence[Variable]],
-    eval_points: Union[Variable, Sequence[Variable]],
+    f: Variable | Sequence[Variable],
+    wrt: Variable | Sequence[Variable],
+    eval_points: Variable | Sequence[Variable],
     disconnected_outputs: Literal["ignore", "warn", "raise"] = "raise",
     return_disconnected: Literal["none", "zero", "disconnected"] = "zero",
-) -> Union[Optional[Variable], Sequence[Optional[Variable]]]:
+) -> Variable | None | Sequence[Variable | None]:
     """Computes the R-operator applied to `f` with respect to `wrt` at `eval_points`.
 
     Mathematically this stands for the Jacobian of `f` right multiplied by the
@@ -193,17 +193,17 @@ def Rop(
         If `f` is a list/tuple, then return a list/tuple with the results.
     """
 
-    if not isinstance(wrt, (list, tuple)):
+    if not isinstance(wrt, list | tuple):
         _wrt: list[Variable] = [pytensor.tensor.as_tensor_variable(wrt)]
     else:
         _wrt = [pytensor.tensor.as_tensor_variable(x) for x in wrt]
 
-    if not isinstance(eval_points, (list, tuple)):
+    if not isinstance(eval_points, list | tuple):
         _eval_points: list[Variable] = [pytensor.tensor.as_tensor_variable(eval_points)]
     else:
         _eval_points = [pytensor.tensor.as_tensor_variable(x) for x in eval_points]
 
-    if not isinstance(f, (list, tuple)):
+    if not isinstance(f, list | tuple):
         _f: list[Variable] = [pytensor.tensor.as_tensor_variable(f)]
     else:
         _f = [pytensor.tensor.as_tensor_variable(x) for x in f]
@@ -298,7 +298,7 @@ def Rop(
     for out in _f:
         _traverse(out.owner)
 
-    rval: list[Optional[Variable]] = []
+    rval: list[Variable | None] = []
     for out in _f:
         if out in _wrt:
             rval.append(_eval_points[_wrt.index(out)])
@@ -346,12 +346,12 @@ def Rop(
 
 
 def Lop(
-    f: Union[Variable, Sequence[Variable]],
-    wrt: Union[Variable, Sequence[Variable]],
-    eval_points: Union[Variable, Sequence[Variable]],
-    consider_constant: Optional[Sequence[Variable]] = None,
+    f: Variable | Sequence[Variable],
+    wrt: Variable | Sequence[Variable],
+    eval_points: Variable | Sequence[Variable],
+    consider_constant: Sequence[Variable] | None = None,
     disconnected_inputs: Literal["ignore", "warn", "raise"] = "raise",
-) -> Union[Optional[Variable], Sequence[Optional[Variable]]]:
+) -> Variable | None | Sequence[Variable | None]:
     """Computes the L-operator applied to `f` with respect to `wrt` at `eval_points`.
 
     Mathematically this stands for the Jacobian of `f` with respect to `wrt`
@@ -381,19 +381,19 @@ def Lop(
         coordinates of the tensor elements.
         If `f` is a list/tuple, then return a list/tuple with the results.
     """
-    if not isinstance(eval_points, (list, tuple)):
+    if not isinstance(eval_points, list | tuple):
         _eval_points: list[Variable] = [pytensor.tensor.as_tensor_variable(eval_points)]
     else:
         _eval_points = [pytensor.tensor.as_tensor_variable(x) for x in eval_points]
 
-    if not isinstance(f, (list, tuple)):
+    if not isinstance(f, list | tuple):
         _f: list[Variable] = [pytensor.tensor.as_tensor_variable(f)]
     else:
         _f = [pytensor.tensor.as_tensor_variable(x) for x in f]
 
     grads = list(_eval_points)
 
-    if not isinstance(wrt, (list, tuple)):
+    if not isinstance(wrt, list | tuple):
         _wrt: list[Variable] = [pytensor.tensor.as_tensor_variable(wrt)]
     else:
         _wrt = [pytensor.tensor.as_tensor_variable(x) for x in wrt]
@@ -415,15 +415,15 @@ def Lop(
 
 
 def grad(
-    cost: Optional[Variable],
-    wrt: Union[Variable, Sequence[Variable]],
-    consider_constant: Optional[Sequence[Variable]] = None,
+    cost: Variable | None,
+    wrt: Variable | Sequence[Variable],
+    consider_constant: Sequence[Variable] | None = None,
     disconnected_inputs: Literal["ignore", "warn", "raise"] = "raise",
     add_names: bool = True,
-    known_grads: Optional[Mapping[Variable, Variable]] = None,
+    known_grads: Mapping[Variable, Variable] | None = None,
     return_disconnected: Literal["none", "zero", "disconnected"] = "zero",
     null_gradients: Literal["raise", "return"] = "raise",
-) -> Union[Optional[Variable], Sequence[Optional[Variable]]]:
+) -> Variable | None | Sequence[Variable | None]:
     """
     Return symbolic gradients of one cost with respect to one or more variables.
 
@@ -547,7 +547,7 @@ def grad(
             )
 
         if not isinstance(
-            g_var.type, (NullType, DisconnectedType)
+            g_var.type, NullType | DisconnectedType
         ) and "float" not in str(g_var.type.dtype):
             raise TypeError(
                 "Gradients must always be NullType, "
@@ -608,7 +608,7 @@ def grad(
         var_to_app_to_idx, grad_dict, _wrt, cost_name
     )
 
-    rval: MutableSequence[Optional[Variable]] = list(_rval)
+    rval: MutableSequence[Variable | None] = list(_rval)
 
     for i in range(len(_rval)):
         if isinstance(_rval[i].type, NullType):
@@ -1276,7 +1276,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                                     f"of shape {i_shape}"
                                 )
 
-                if not isinstance(term.type, (NullType, DisconnectedType)):
+                if not isinstance(term.type, NullType | DisconnectedType):
                     if term.type.dtype not in pytensor.tensor.type.float_dtypes:
                         raise TypeError(
                             str(node.op) + ".grad illegally "
@@ -1500,7 +1500,7 @@ class numeric_grad:
             return rval
 
         packed_pt = False
-        if not isinstance(pt, (list, tuple)):
+        if not isinstance(pt, list | tuple):
             pt = [pt]
             packed_pt = True
 
@@ -1667,12 +1667,12 @@ def verify_grad(
     fun: Callable,
     pt: list[np.ndarray],
     n_tests: int = 2,
-    rng: Optional[Union[np.random.Generator, np.random.RandomState]] = None,
-    eps: Optional[float] = None,
-    out_type: Optional[str] = None,
-    abs_tol: Optional[float] = None,
-    rel_tol: Optional[float] = None,
-    mode: Optional[Union["Mode", str]] = None,
+    rng: np.random.Generator | np.random.RandomState | None = None,
+    eps: float | None = None,
+    out_type: str | None = None,
+    abs_tol: float | None = None,
+    rel_tol: float | None = None,
+    mode: Union["Mode", str] | None = None,
     cast_to_output_type: bool = False,
     no_debug_ref: bool = True,
 ):
@@ -1732,7 +1732,7 @@ def verify_grad(
     from pytensor.compile.function import function
     from pytensor.compile.sharedvalue import shared
 
-    if not isinstance(pt, (list, tuple)):
+    if not isinstance(pt, list | tuple):
         raise TypeError("`pt` should be a list or tuple")
 
     pt = [np.array(p) for p in pt]
@@ -1933,7 +1933,7 @@ def jacobian(expression, wrt, consider_constant=None, disconnected_inputs="raise
     using_list = isinstance(wrt, list)
     using_tuple = isinstance(wrt, tuple)
 
-    if isinstance(wrt, (list, tuple)):
+    if isinstance(wrt, list | tuple):
         wrt = list(wrt)
     else:
         wrt = [wrt]
@@ -2015,7 +2015,7 @@ def hessian(cost, wrt, consider_constant=None, disconnected_inputs="raise"):
     using_list = isinstance(wrt, list)
     using_tuple = isinstance(wrt, tuple)
 
-    if isinstance(wrt, (list, tuple)):
+    if isinstance(wrt, list | tuple):
         wrt = list(wrt)
     else:
         wrt = [wrt]

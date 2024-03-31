@@ -61,7 +61,7 @@ def test_pydotprint_cond_highlight():
 def test_pydotprint_return_image():
     x = dvector()
     ret = pydotprint(x * 2, return_image=True)
-    assert isinstance(ret, (str, bytes))
+    assert isinstance(ret, str | bytes)
 
 
 @pytest.mark.skipif(not pydot_imported, reason="pydot not available")

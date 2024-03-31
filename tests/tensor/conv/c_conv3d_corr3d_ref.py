@@ -1,6 +1,5 @@
 import logging
 import os
-from typing import Optional
 
 import pytensor
 from pytensor.configdefaults import config
@@ -50,7 +49,7 @@ class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
     check_broadcast = False
     __props__ = ("border_mode", "subsample", "filter_dilation", "num_groups")
 
-    _direction: Optional[str] = None
+    _direction: str | None = None
 
     params_type = ParamsType(
         direction=EnumList(

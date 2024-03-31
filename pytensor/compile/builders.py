@@ -4,7 +4,7 @@ from collections import OrderedDict
 from collections.abc import Sequence
 from copy import copy
 from functools import partial
-from typing import Optional, cast
+from typing import cast
 
 import pytensor.tensor as pt
 from pytensor import function
@@ -275,7 +275,7 @@ class OpFromGraph(Op, HasInnerGraph):
         #
         # For now, this converts NullType or DisconnectedType into zeros_like.
         # other types are unmodified: overrider_var -> None
-        if isinstance(grad.type, (NullType, DisconnectedType)):
+        if isinstance(grad.type, NullType | DisconnectedType):
             if hasattr(inp, "zeros_like"):
                 return inp.zeros_like(), grad
             else:
@@ -304,9 +304,9 @@ class OpFromGraph(Op, HasInnerGraph):
         lop_overrides: str = "default",
         grad_overrides: str = "default",
         rop_overrides: str = "default",
-        connection_pattern: Optional[list[list[bool]]] = None,
+        connection_pattern: list[list[bool]] | None = None,
         strict: bool = False,
-        name: Optional[str] = None,
+        name: str | None = None,
         **kwargs,
     ):
         """
@@ -535,7 +535,7 @@ class OpFromGraph(Op, HasInnerGraph):
             all_grads_l = list(all_grads_l)
             all_grads_ov_l = list(all_grads_ov_l)
         elif isinstance(lop_op, Variable):
-            if isinstance(lop_op.type, (DisconnectedType, NullType)):
+            if isinstance(lop_op.type, DisconnectedType | NullType):
                 all_grads_l = [inp.zeros_like() for inp in local_inputs]
                 all_grads_ov_l = [lop_op.type() for _ in range(inp_len)]
             else:
@@ -562,7 +562,7 @@ class OpFromGraph(Op, HasInnerGraph):
                     all_grads_l.append(gnext)
                     all_grads_ov_l.append(gnext_ov)
                 elif isinstance(fn_gov, Variable):
-                    if isinstance(fn_gov.type, (DisconnectedType, NullType)):
+                    if isinstance(fn_gov.type, DisconnectedType | NullType):
                         all_grads_l.append(inp.zeros_like())
                         all_grads_ov_l.append(fn_gov.type())
                     else:

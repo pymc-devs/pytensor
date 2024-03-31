@@ -1,7 +1,7 @@
 import contextlib
 import inspect
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, Callable, Optional, Union
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 import numpy as np
@@ -223,9 +223,9 @@ def eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode):
 
 
 def compare_numba_and_py(
-    fgraph: Union[FunctionGraph, tuple[Sequence["Variable"], Sequence["Variable"]]],
+    fgraph: FunctionGraph | tuple[Sequence["Variable"], Sequence["Variable"]],
     inputs: Sequence["TensorLike"],
-    assert_fn: Optional[Callable] = None,
+    assert_fn: Callable | None = None,
     numba_mode=numba_mode,
     py_mode=py_mode,
     updates=None,
@@ -597,7 +597,7 @@ def test_Reshape(v, shape, ndim):
         [
             i.tag.test_value
             for i in g_fg.inputs
-            if not isinstance(i, (SharedVariable, Constant))
+            if not isinstance(i, SharedVariable | Constant)
         ],
     )
 
@@ -612,7 +612,7 @@ def test_Reshape_scalar():
         [
             i.tag.test_value
             for i in g_fg.inputs
-            if not isinstance(i, (SharedVariable, Constant))
+            if not isinstance(i, SharedVariable | Constant)
         ],
     )
 
@@ -647,7 +647,7 @@ def test_SpecifyShape(v, shape, fails):
             [
                 i.tag.test_value
                 for i in g_fg.inputs
-                if not isinstance(i, (SharedVariable, Constant))
+                if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
@@ -666,7 +666,7 @@ def test_ViewOp(v):
         [
             i.tag.test_value
             for i in g_fg.inputs
-            if not isinstance(i, (SharedVariable, Constant))
+            if not isinstance(i, SharedVariable | Constant)
         ],
     )
 
@@ -711,7 +711,7 @@ def test_perform(inputs, op, exc):
             [
                 i.tag.test_value
                 for i in g_fg.inputs
-                if not isinstance(i, (SharedVariable, Constant))
+                if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
@@ -724,7 +724,7 @@ def test_perform_params():
 
     out = assert_op(x, np.array(True))
 
-    if not isinstance(out, (list, tuple)):
+    if not isinstance(out, list | tuple):
         out = [out]
 
     out_fg = FunctionGraph([x], out)
@@ -743,7 +743,7 @@ def test_perform_type_convert():
 
     out = assert_op(x.sum(), np.array(True))
 
-    if not isinstance(out, (list, tuple)):
+    if not isinstance(out, list | tuple):
         out = [out]
 
     out_fg = FunctionGraph([x], out)
@@ -790,7 +790,7 @@ def test_Dot(x, y, exc):
             [
                 i.tag.test_value
                 for i in g_fg.inputs
-                if not isinstance(i, (SharedVariable, Constant))
+                if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
@@ -835,7 +835,7 @@ def test_Softplus(x, exc):
             [
                 i.tag.test_value
                 for i in g_fg.inputs
-                if not isinstance(i, (SharedVariable, Constant))
+                if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
@@ -882,7 +882,7 @@ def test_BatchedDot(x, y, exc):
             [
                 i.tag.test_value
                 for i in g_fg.inputs
-                if not isinstance(i, (SharedVariable, Constant))
+                if not isinstance(i, SharedVariable | Constant)
             ],
         )
 

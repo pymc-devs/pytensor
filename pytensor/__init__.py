@@ -76,7 +76,7 @@ from pytensor.graph.replace import clone_replace, graph_replace
 # isort: on
 
 
-def as_symbolic(x: Any, name: Optional[str] = None, **kwargs) -> Variable:
+def as_symbolic(x: Any, name: str | None = None, **kwargs) -> Variable:
     """Convert `x` into an equivalent PyTensor `Variable`.
 
     Parameters

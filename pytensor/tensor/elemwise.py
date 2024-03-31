@@ -1,5 +1,4 @@
 from copy import copy
-from typing import Union
 
 import numpy as np
 from numpy.core.numeric import normalize_axis_tuple
@@ -133,7 +132,7 @@ class DimShuffle(ExternalCOp):
         super().__init__([self.c_func_file], self.c_func_name)
 
         self.input_broadcastable = tuple(input_broadcastable)
-        if not all(isinstance(bs, (bool, np.bool_)) for bs in self.input_broadcastable):
+        if not all(isinstance(bs, bool | np.bool_) for bs in self.input_broadcastable):
             raise ValueError(
                 f"input_broadcastable must be boolean, {self.input_broadcastable}"
             )
@@ -143,7 +142,7 @@ class DimShuffle(ExternalCOp):
 
         for i, j in enumerate(new_order):
             if j != "x":
-                if not isinstance(j, (int, np.integer)):
+                if not isinstance(j, int | np.integer):
                     raise TypeError(
                         "DimShuffle indices must be Python ints; got "
                         f"{j} of type {type(j)}."
@@ -239,7 +238,7 @@ class DimShuffle(ExternalCOp):
         (res,) = inp
         (storage,) = out
 
-        if not isinstance(res, (np.ndarray, np.memmap)):
+        if not isinstance(res, np.ndarray | np.memmap):
             raise TypeError(res)
 
         res = res.transpose(self.transposition)
@@ -549,7 +548,7 @@ class Elemwise(OpenMPOp):
             # this op did the right thing.
             new_rval = []
             for elem, ipt in zip(rval, inputs):
-                if isinstance(elem.type, (NullType, DisconnectedType)):
+                if isinstance(elem.type, NullType | DisconnectedType):
                     new_rval.append(elem)
                 else:
                     elem = ipt.zeros_like()
@@ -561,7 +560,7 @@ class Elemwise(OpenMPOp):
 
         # sum out the broadcasted dimensions
         for i, ipt in enumerate(inputs):
-            if isinstance(rval[i].type, (NullType, DisconnectedType)):
+            if isinstance(rval[i].type, NullType | DisconnectedType):
                 continue
 
             # List of all the dimensions that are broadcastable for input[i] so
@@ -585,7 +584,7 @@ class Elemwise(OpenMPOp):
         with config.change_flags(compute_test_value="off"):
 
             def as_scalar(t):
-                if isinstance(t.type, (NullType, DisconnectedType)):
+                if isinstance(t.type, NullType | DisconnectedType):
                     return t
                 return get_scalar_type(t.type.dtype)()
 
@@ -600,7 +599,7 @@ class Elemwise(OpenMPOp):
             for igrad in scalar_igrads:
                 assert igrad is not None, self.scalar_op
 
-        if not isinstance(scalar_igrads, (list, tuple)):
+        if not isinstance(scalar_igrads, list | tuple):
             raise TypeError(
                 f"{self.scalar_op!s}.grad returned {type(scalar_igrads)!s} instead of list or tuple"
             )
@@ -609,7 +608,7 @@ class Elemwise(OpenMPOp):
 
         def transform(r):
             # From a graph of ScalarOps, make a graph of Broadcast ops.
-            if isinstance(r.type, (NullType, DisconnectedType)):
+            if isinstance(r.type, NullType | DisconnectedType):
                 return r
             if r in scalar_inputs:
                 return inputs[scalar_inputs.index(r)]
@@ -628,7 +627,7 @@ class Elemwise(OpenMPOp):
                 return DimShuffle((), ["x"] * nd)(res)
 
             new_r = Elemwise(node.op, {})(*[transform(ipt) for ipt in node.inputs])
-            if isinstance(new_r, (list, tuple)):
+            if isinstance(new_r, list | tuple):
                 # Scalar Op with multiple outputs
                 new_r = new_r[r.owner.outputs.index(r)]
             return new_r
@@ -1264,7 +1263,7 @@ class CAReduce(COp):
         self.scalar_op = scalar_op
 
         if axis is not None:
-            if isinstance(axis, (int, np.integer)) or (
+            if isinstance(axis, int | np.integer) or (
                 isinstance(axis, np.ndarray) and not axis.shape
             ):
                 self.axis = (int(axis),)
@@ -1736,7 +1735,7 @@ def vectorize_dimshuffle(op: DimShuffle, node: Apply, x: TensorVariable) -> Appl
 
 
 def get_normalized_batch_axes(
-    core_axes: Union[None, int, tuple[int, ...]],
+    core_axes: None | int | tuple[int, ...],
     core_ndim: int,
     batch_ndim: int,
 ) -> tuple[int, ...]:

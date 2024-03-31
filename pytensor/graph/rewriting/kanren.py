@@ -1,5 +1,4 @@
-from collections.abc import Iterator
-from typing import Callable, Optional, Union
+from collections.abc import Callable, Iterator
 
 from etuples.core import ExpressionTuple
 from kanren import run
@@ -44,9 +43,8 @@ class KanrenRelationSub(NodeRewriter):
     def __init__(
         self,
         kanren_relation: Callable[[Variable, Var], Callable],
-        results_filter: Optional[
-            Callable[[Iterator], Optional[list[Union[ExpressionTuple, Variable]]]]
-        ] = None,
+        results_filter: Callable[[Iterator], list[ExpressionTuple | Variable] | None]
+        | None = None,
         node_filter: Callable[[Apply], bool] = lambda x: True,
     ):
         r"""Create a `KanrenRelationSub`.
@@ -68,7 +66,7 @@ class KanrenRelationSub(NodeRewriter):
 
             def results_filter(
                 x: Iterator,
-            ) -> Optional[list[Union[ExpressionTuple, Variable]]]:
+            ) -> list[ExpressionTuple | Variable] | None:
                 return next(x, None)
 
         self.kanren_relation = kanren_relation

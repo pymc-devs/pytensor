@@ -68,7 +68,7 @@ def inv_as_solve(fgraph, node):
     """
     This utilizes a boolean `symmetric` tag on the matrices.
     """
-    if isinstance(node.op, (Dot, Dot22)):
+    if isinstance(node.op, Dot | Dot22):
         l, r = node.inputs
         if (
             l.owner
@@ -240,7 +240,7 @@ def cholesky_ldotlt(fgraph, node):
         A.owner is not None
         and (
             (
-                isinstance(A.owner.op, (Dot, Dot22))
+                isinstance(A.owner.op, Dot | Dot22)
                 # This rewrite only applies to matrix Dot
                 and A.owner.inputs[0].type.ndim == 2
             )

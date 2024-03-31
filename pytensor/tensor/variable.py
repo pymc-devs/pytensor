@@ -3,7 +3,7 @@ import traceback as tb
 import warnings
 from collections.abc import Iterable
 from numbers import Number
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 import numpy as np
 
@@ -338,7 +338,7 @@ class _tensor_py_operators:
         DimShuffle
 
         """
-        if (len(pattern) == 1) and (isinstance(pattern[0], (list, tuple))):
+        if (len(pattern) == 1) and (isinstance(pattern[0], list | tuple)):
             pattern = pattern[0]
         op = pt.elemwise.DimShuffle(list(self.type.broadcastable), pattern)
         return op(self)
@@ -445,7 +445,7 @@ class _tensor_py_operators:
 
     def __getitem__(self, args):
         def includes_bool(args_el):
-            if isinstance(args_el, (np.bool_, bool)) or (
+            if isinstance(args_el, np.bool_ | bool) or (
                 hasattr(args_el, "dtype") and args_el.dtype == "bool"
             ):
                 return True
@@ -471,7 +471,7 @@ class _tensor_py_operators:
                 # no increase in index_dim_count
                 ellipses.append(i)
             elif (
-                isinstance(arg, (np.ndarray, Variable))
+                isinstance(arg, np.ndarray | Variable)
                 and hasattr(arg, "dtype")
                 and arg.dtype == "bool"
             ):
@@ -509,7 +509,7 @@ class _tensor_py_operators:
             )
 
         def is_empty_array(val):
-            return (isinstance(val, (tuple, list)) and len(val) == 0) or (
+            return (isinstance(val, tuple | list) and len(val) == 0) or (
                 isinstance(val, np.ndarray) and val.size == 0
             )
 
@@ -1026,7 +1026,7 @@ class TensorConstantSignature(tuple):
         return self._no_nan
 
 
-def get_unique_constant_value(x: TensorVariable) -> Optional[Number]:
+def get_unique_constant_value(x: TensorVariable) -> Number | None:
     """Return the unique value of a tensor, if there is one"""
     if isinstance(x, Constant):
         data = x.data
@@ -1066,7 +1066,7 @@ class TensorConstant(TensorVariable, Constant[_TensorTypeType]):
     def equals(self, other):
         # Override Constant.equals to allow to compare with
         # numpy.ndarray, and python type.
-        if isinstance(other, (np.ndarray, int, float)):
+        if isinstance(other, np.ndarray | int | float):
             # Make a TensorConstant to be able to compare
             other = pt.basic.constant(other)
         return (

@@ -1,6 +1,5 @@
 import abc
 import warnings
-from typing import Optional, Union
 
 import numpy as np
 import scipy.stats as stats
@@ -600,9 +599,9 @@ class GumbelRV(ScipyRandomVariable):
 
     def __call__(
         self,
-        loc: Union[np.ndarray, float],
-        scale: Union[np.ndarray, float] = 1.0,
-        size: Optional[Union[list[int], int]] = None,
+        loc: np.ndarray | float,
+        scale: np.ndarray | float = 1.0,
+        size: list[int] | int | None = None,
         **kwargs,
     ) -> RandomVariable:
         r"""Draw samples from a gumbel distribution.
@@ -630,10 +629,10 @@ class GumbelRV(ScipyRandomVariable):
     @classmethod
     def rng_fn_scipy(
         cls,
-        rng: Union[np.random.Generator, np.random.RandomState],
-        loc: Union[np.ndarray, float],
-        scale: Union[np.ndarray, float],
-        size: Optional[Union[list[int], int]],
+        rng: np.random.Generator | np.random.RandomState,
+        loc: np.ndarray | float,
+        scale: np.ndarray | float,
+        size: list[int] | int | None,
     ) -> np.ndarray:
         return stats.gumbel_r.rvs(loc=loc, scale=scale, size=size, random_state=rng)
 
@@ -1959,7 +1958,7 @@ class RandIntRV(RandomVariable):
 
     def make_node(self, rng, *args, **kwargs):
         if not isinstance(
-            getattr(rng, "type", None), (RandomStateType, RandomStateSharedVariable)
+            getattr(rng, "type", None), RandomStateType | RandomStateSharedVariable
         ):
             raise TypeError("`randint` is only available for `RandomStateType`s")
         return super().make_node(rng, *args, **kwargs)
@@ -2011,7 +2010,7 @@ class IntegersRV(RandomVariable):
     def make_node(self, rng, *args, **kwargs):
         if not isinstance(
             getattr(rng, "type", None),
-            (RandomGeneratorType, RandomGeneratorSharedVariable),
+            RandomGeneratorType | RandomGeneratorSharedVariable,
         ):
             raise TypeError("`integers` is only available for `RandomGeneratorType`s")
         return super().make_node(rng, *args, **kwargs)
