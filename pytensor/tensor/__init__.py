@@ -142,7 +142,7 @@ from pytensor.tensor.shape import (
 
 # We import as `_shared` instead of `shared` to avoid confusion between
 # `pytensor.shared` and `tensor._shared`.
-from pytensor.tensor.sort import argsort, argtopk, sort, topk, topk_and_argtopk
+from pytensor.tensor.sort import argsort, sort
 from pytensor.tensor.subtensor import *
 from pytensor.tensor.type import *
 from pytensor.tensor.type_other import *
