@@ -9,7 +9,7 @@ channels:
 dependencies:
   - python>=3.10
   - compilers
-  - numpy>=1.17.0
+  - conda-forge/label/numpy_dev::numpy=2.0.0rc1
   - scipy>=0.14
   - filelock
   - etuples
