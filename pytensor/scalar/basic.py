@@ -2966,7 +2966,7 @@ class Log2(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz / (x * np.asarray(math.log(2.0)).astype(x.dtype)),)
+        return (gz / (x * np.array(math.log(2.0), dtype=x.dtype)),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3009,7 +3009,7 @@ class Log10(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz / (x * np.asarray(math.log(10.0)).astype(x.dtype)),)
+        return (gz / (x * np.array(math.log(10.0), dtype=x.dtype)),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3124,7 +3124,7 @@ class Exp2(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz * exp2(x) * log(np.cast[x.type](2)),)
+        return (gz * exp2(x) * log(np.array(2, dtype=x.type)),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3263,7 +3263,7 @@ class Deg2Rad(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz * np.asarray(np.pi / 180, gz.type),)
+        return (gz * np.array(np.pi / 180, dtype=gz.type),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3298,7 +3298,7 @@ class Rad2Deg(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz * np.asarray(180.0 / np.pi, gz.type),)
+        return (gz * np.array(180.0 / np.pi, dtype=gz.type),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3371,7 +3371,7 @@ class ArcCos(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (-gz / sqrt(np.cast[x.type](1) - sqr(x)),)
+        return (-gz / sqrt(np.array(1, dtype=x.type) - sqr(x)),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3445,7 +3445,7 @@ class ArcSin(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz / sqrt(np.cast[x.type](1) - sqr(x)),)
+        return (gz / sqrt(np.array(1, dtype=x.type) - sqr(x)),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3517,7 +3517,7 @@ class ArcTan(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz / (np.cast[x.type](1) + sqr(x)),)
+        return (gz / (np.array(1, dtype=x.type) + sqr(x)),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3640,7 +3640,7 @@ class ArcCosh(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz / sqrt(sqr(x) - np.cast[x.type](1)),)
+        return (gz / sqrt(sqr(x) - np.array(1, dtype=x.type)),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3717,7 +3717,7 @@ class ArcSinh(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz / sqrt(sqr(x) + np.cast[x.type](1)),)
+        return (gz / sqrt(sqr(x) + np.array(1, dtype=x.type)),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3795,7 +3795,7 @@ class ArcTanh(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz / (np.cast[x.type](1) - sqr(x)),)
+        return (gz / (np.array(1, dtype=x.type) - sqr(x)),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs

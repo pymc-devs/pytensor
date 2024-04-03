@@ -668,7 +668,7 @@ class Elemwise(OpenMPOp):
             and isinstance(self.nfunc, np.ufunc)
             and node.inputs[0].dtype in discrete_dtypes
         ):
-            char = np.sctype2char(out_dtype)
+            char = np.dtype(out_dtype).char
             sig = char * node.nin + "->" + char * node.nout
             node.tag.sig = sig
         node.tag.fake_node = Apply(

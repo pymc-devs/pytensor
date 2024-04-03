@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal, Optional
 
 import numpy as np
+import numpy.typing as npt
 
 import pytensor
 from pytensor import scalar as ps
@@ -69,7 +70,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
 
     def __init__(
         self,
-        dtype: str | np.dtype,
+        dtype: str | npt.DTypeLike,
         shape: Iterable[bool | int | None] | None = None,
         name: str | None = None,
         broadcastable: Iterable[bool] | None = None,
@@ -101,10 +102,10 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         if str(dtype) == "floatX":
             self.dtype = config.floatX
         else:
-            if np.obj2sctype(dtype) is None:
+            try:
+                self.dtype = str(np.dtype(dtype))
+            except TypeError:
                 raise TypeError(f"Invalid dtype: {dtype}")
-
-            self.dtype = np.dtype(dtype).name
 
         def parse_bcast_and_shape(s):
             if isinstance(s, bool | np.bool_):
@@ -789,14 +790,16 @@ def tensor(
     **kwargs,
 ) -> "TensorVariable":
     if name is not None:
-        # Help catching errors with the new tensor API
-        # Many single letter strings are valid sctypes
-        if str(name) == "floatX" or (len(str(name)) > 1 and np.obj2sctype(name)):
-            np.obj2sctype(name)
-            raise ValueError(
-                f"The first and only positional argument of tensor is now `name`. Got {name}.\n"
-                "This name looks like a dtype, which you should pass as a keyword argument only."
-            )
+        try:
+            # Help catching errors with the new tensor API
+            # Many single letter strings are valid sctypes
+            if str(name) == "floatX" or (len(str(name)) > 1 and np.dtype(name).type):
+                raise ValueError(
+                    f"The first and only positional argument of tensor is now `name`. Got {name}.\n"
+                    "This name looks like a dtype, which you should pass as a keyword argument only."
+                )
+        except TypeError:
+            pass
 
     if dtype is None:
         dtype = config.floatX
