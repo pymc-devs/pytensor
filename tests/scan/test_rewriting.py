@@ -673,7 +673,7 @@ class TestPushOutAddScan:
         zi = tensor3("zi")
         zi_value = x_value
 
-        init = pt.alloc(np.cast[config.floatX](0), batch_size, dim)
+        init = pt.alloc(np.asarray(0, dtype=config.floatX), batch_size, dim)
 
         def rnn_step1(
             # sequences

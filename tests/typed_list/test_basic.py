@@ -577,10 +577,10 @@ class TestMakeList:
         x = tensor3()
         y = tensor3()
 
-        A = np.cast[pytensor.config.floatX](np.random.random((5, 3)))
-        B = np.cast[pytensor.config.floatX](np.random.random((7, 2)))
-        X = np.cast[pytensor.config.floatX](np.random.random((5, 6, 1)))
-        Y = np.cast[pytensor.config.floatX](np.random.random((1, 9, 3)))
+        A = np.random.random((5, 3), dtype=pytensor.config.floatX)
+        B = np.random.random((7, 2), dtype=pytensor.config.floatX)
+        X = np.random.random((5, 6, 1), dtype=pytensor.config.floatX)
+        Y = np.random.random((1, 9, 3), dtype=pytensor.config.floatX)
 
         make_list((3.0, 4.0))
         c = make_list((a, b))
