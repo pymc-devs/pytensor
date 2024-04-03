@@ -21,6 +21,7 @@ import textwrap
 import time
 import warnings
 from collections.abc import Callable
+from functools import cache
 from io import BytesIO, StringIO
 from typing import TYPE_CHECKING, Protocol, cast
 
@@ -271,6 +272,21 @@ def _get_ext_suffix():
     return dist_suffix
 
 
+@cache  # See explanation in docstring.
+def add_gcc_dll_directory() -> None:
+    """On Windows, detect and add the location of gcc to the DLL search directory.
+
+    On non-Windows platforms this is a noop.
+
+    The @cache decorator ensures that this function only executes once to avoid
+    redundant entries. See <https://github.com/pymc-devs/pytensor/pull/678>.
+    """
+    if (sys.platform == "win32") & (hasattr(os, "add_dll_directory")):
+        gcc_path = shutil.which("gcc")
+        if gcc_path is not None:
+            os.add_dll_directory(os.path.dirname(gcc_path))  # type: ignore
+
+
 def dlimport(fullpath, suffix=None):
     """
     Dynamically load a .so, .pyd, .dll, or .py file.
@@ -320,11 +336,7 @@ def dlimport(fullpath, suffix=None):
     _logger.debug(f"module_name {module_name}")
 
     sys.path[0:0] = [workdir]  # insert workdir at beginning (temporarily)
-    # Explicitly add gcc dll directory on Python 3.8+ on Windows
-    if (sys.platform == "win32") & (hasattr(os, "add_dll_directory")):
-        gcc_path = shutil.which("gcc")
-        if gcc_path is not None:
-            os.add_dll_directory(os.path.dirname(gcc_path))
+    add_gcc_dll_directory()
     global import_time
     try:
         importlib.invalidate_caches()
