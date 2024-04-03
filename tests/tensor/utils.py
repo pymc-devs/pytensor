@@ -152,7 +152,7 @@ def upcast_float16_ufunc(fn):
     """
 
     def ret(*args, **kwargs):
-        out_dtype = np.find_common_type([a.dtype for a in args], [np.float16])
+        out_dtype = np.result_type(np.float16, *args)
         if out_dtype == "float16":
             # Force everything to float32
             sig = "f" * fn.nin + "->" + "f" * fn.nout
