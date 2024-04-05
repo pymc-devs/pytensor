@@ -18,6 +18,7 @@ from pytensor.graph.type import Type
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
+from pytensor.npy_2_compat import numpy_version, using_numpy_2
 from pytensor.printing import Printer, pprint, set_precedence
 from pytensor.scalar.basic import ScalarConstant, ScalarVariable
 from pytensor.tensor import (
@@ -2522,6 +2523,7 @@ class AdvancedIncSubtensor1(COp):
         numpy_ver = [int(n) for n in np.__version__.split(".")[:2]]
         if bool(numpy_ver < [1, 8]):
             raise NotImplementedError
+
         x, y, idx = input_names
         out = output_names[0]
         copy_of_x = self.copy_of_x(x)

@@ -4,7 +4,6 @@ from textwrap import dedent
 from typing import Literal
 
 import numpy as np
-from numpy.core.numeric import normalize_axis_tuple
 
 import pytensor.tensor.basic
 from pytensor.configdefaults import config
@@ -17,6 +16,7 @@ from pytensor.link.c.basic import failure_code
 from pytensor.link.c.op import COp, ExternalCOp, OpenMPOp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.misc.frozendict import frozendict
+from pytensor.npy_2_compat import normalize_axis_tuple
 from pytensor.printing import Printer, pprint
 from pytensor.scalar import get_scalar_type
 from pytensor.scalar.basic import bool as scalar_bool
@@ -39,9 +39,6 @@ from pytensor.tensor.utils import (
 )
 from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import uniq
-
-
-_numpy_ver = [int(n) for n in np.__version__.split(".")[:2]]
 
 
 class DimShuffle(ExternalCOp):
