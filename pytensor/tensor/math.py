@@ -5,7 +5,6 @@ from textwrap import dedent
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
-from numpy.core.numeric import normalize_axis_tuple
 
 from pytensor import config, printing
 from pytensor import scalar as ps
@@ -14,6 +13,7 @@ from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
+from pytensor.npy_2_compat import normalize_axis_tuple
 from pytensor.printing import pprint
 from pytensor.raise_op import Assert
 from pytensor.scalar.basic import BinaryScalarOp

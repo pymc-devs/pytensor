@@ -4,13 +4,13 @@ from functools import partial
 from typing import Literal, cast
 
 import numpy as np
-from numpy.core.numeric import normalize_axis_tuple  # type: ignore
 
 from pytensor import scalar as ps
 from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
+from pytensor.npy_2_compat import normalize_axis_tuple
 from pytensor.tensor import TensorLike
 from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm

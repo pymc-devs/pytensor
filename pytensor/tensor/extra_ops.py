@@ -2,7 +2,7 @@ import warnings
 from collections.abc import Collection, Iterable
 
 import numpy as np
-from numpy.core.multiarray import normalize_axis_index
+from numpy.exceptions import AxisError
 
 import pytensor
 import pytensor.scalar.basic as ps
@@ -17,6 +17,10 @@ from pytensor.graph.op import Op
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.link.c.type import EnumList, Generic
+from pytensor.npy_2_compat import (
+    normalize_axis_index,
+    normalize_axis_tuple,
+)
 from pytensor.raise_op import Assert
 from pytensor.scalar import int32 as int_t
 from pytensor.scalar import upcast
@@ -596,9 +600,9 @@ def squeeze(x, axis=None):
 
     # scalar inputs are treated as 1D regarding axis in this `Op`
     try:
-        axis = np.core.numeric.normalize_axis_tuple(axis, ndim=max(1, _x.ndim))
-    except np.AxisError:
-        raise np.AxisError(axis, ndim=_x.ndim)
+        axis = normalize_axis_tuple(axis, ndim=max(1, _x.ndim))
+    except AxisError:
+        raise AxisError(axis, ndim=_x.ndim)
 
     if not axis:
         # Nothing to do

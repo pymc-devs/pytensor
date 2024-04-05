@@ -672,7 +672,7 @@ class TestCAReduce(unittest_tools.InferShapeTester):
         assert self.op(ps.add, axis=(-1,))(x).eval({x: 5}) == 5
 
         with pytest.raises(
-            np.AxisError,
+            np.exceptions.AxisError,
             match=re.escape("axis (-2,) is out of bounds for array of dimension 0"),
         ):
             self.op(ps.add, axis=(-2,))(x)

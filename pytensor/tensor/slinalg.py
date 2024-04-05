@@ -6,6 +6,7 @@ from typing import Literal, cast
 
 import numpy as np
 import scipy.linalg as scipy_linalg
+from numpy.exceptions import ComplexWarning
 
 import pytensor
 import pytensor.tensor as pt
@@ -767,7 +768,7 @@ class ExpmGrad(Op):
         Y = U.dot(V.T.dot(gA).dot(U) * X).dot(V.T)
 
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", np.ComplexWarning)
+            warnings.simplefilter("ignore", ComplexWarning)
             out[0] = Y.astype(A.dtype)
 
 

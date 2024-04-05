@@ -469,7 +469,7 @@ class TestSqueeze(utt.InferShapeTester):
         assert squeeze(x, axis=(0,)).eval({x: 5}) == 5
 
         with pytest.raises(
-            np.AxisError,
+            np.exceptions.AxisError,
             match=re.escape("axis (1,) is out of bounds for array of dimension 0"),
         ):
             squeeze(x, axis=1)
