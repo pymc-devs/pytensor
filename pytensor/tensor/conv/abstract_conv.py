@@ -8,6 +8,7 @@ import warnings
 from math import gcd
 
 import numpy as np
+from numpy.exceptions import ComplexWarning
 
 
 try:
@@ -2341,7 +2342,7 @@ class BaseAbstractConv(Op):
             bval = _bvalfromboundary("fill")
 
             with warnings.catch_warnings():
-                warnings.simplefilter("ignore", np.ComplexWarning)
+                warnings.simplefilter("ignore", ComplexWarning)
                 for b in range(img.shape[0]):
                     for g in range(self.num_groups):
                         for n in range(output_channel_offset):

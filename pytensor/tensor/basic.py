@@ -4198,7 +4198,7 @@ def expand_dims(
         axis = (axis,)
 
     out_ndim = len(axis) + a.ndim
-    axis = np.core.numeric.normalize_axis_tuple(axis, out_ndim)
+    axis = normalize_axis_tuple(axis, out_ndim)
 
     dim_it = iter(range(a.ndim))
     pattern = ["x" if ax in axis else next(dim_it) for ax in range(out_ndim)]

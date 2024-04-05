@@ -1061,7 +1061,7 @@ def openblas_threads_text():
 
 def blas_header_version():
     # Version for the base header
-    version = (9,)
+    version = (10,)
     if detect_macos_sdot_bug():
         if detect_macos_sdot_bug.fix_works:
             # Version with fix
@@ -1079,7 +1079,7 @@ def ____gemm_code(check_ab, a_init, b_init):
         const char * error_string = NULL;
 
         int type_num = PyArray_DESCR(_x)->type_num;
-        int type_size = PyArray_DESCR(_x)->elsize; // in bytes
+        int type_size = PyArray_ITEMSIZE(_x); // in bytes
 
         npy_intp* Nx = PyArray_DIMS(_x);
         npy_intp* Ny = PyArray_DIMS(_y);

@@ -480,12 +480,12 @@ class TestGrad:
         int_type = imatrix().dtype
         float_type = "float64"
 
-        X = np.cast[int_type](rng.standard_normal((m, d)) * 127.0)
-        W = np.cast[W.dtype](rng.standard_normal((d, n)))
-        b = np.cast[b.dtype](rng.standard_normal(n))
+        X = rng.standard_normal((m, d), dtype=int_type) * 127.0
+        W = rng.standard_normal((d, n), dtype=W.dtype)
+        b = rng.standard_normal(n, dtype=b.dtype)
 
         int_result = int_func(X, W, b)
-        float_result = float_func(np.cast[float_type](X), W, b)
+        float_result = float_func(np.asarray(X, dtype=float_type), W, b)
 
         assert np.allclose(int_result, float_result), (int_result, float_result)
 
@@ -507,7 +507,7 @@ class TestGrad:
         # the output
         f = pytensor.function([x], g)
         rng = np.random.default_rng([2012, 9, 5])
-        x = np.cast[x.dtype](rng.standard_normal(3))
+        x = rng.standard_normal(3, dtype=x.dtype)
         g = f(x)
         assert np.allclose(g, np.ones(x.shape, dtype=x.dtype))
 
@@ -629,7 +629,7 @@ def test_known_grads():
 
     rng = np.random.default_rng([2012, 11, 15])
     values = [rng.standard_normal(10), rng.integers(10), rng.standard_normal()]
-    values = [np.cast[ipt.dtype](value) for ipt, value in zip(inputs, values)]
+    values = [np.asarray(value, dtype=ipt.dtype) for ipt, value in zip(inputs, values)]
 
     true_grads = grad(cost, inputs, disconnected_inputs="ignore")
     true_grads = pytensor.function(inputs, true_grads)
@@ -676,7 +676,7 @@ def test_known_grads_integers():
     f = pytensor.function([g_expected], g_grad)
 
     x = -3
-    gv = np.cast[config.floatX](0.6)
+    gv = np.asarray(0.6, dtype=config.floatX)
 
     g_actual = f(gv)
 
@@ -742,7 +742,7 @@ def test_subgraph_grad():
     inputs = [t, x]
     rng = np.random.default_rng([2012, 11, 15])
     values = [rng.standard_normal(2), rng.standard_normal(3)]
-    values = [np.cast[ipt.dtype](value) for ipt, value in zip(inputs, values)]
+    values = [np.asarray(value, dtype=ipt.dtype) for ipt, value in zip(inputs, values)]
 
     wrt = [w2, w1]
     cost = cost2 + cost1
@@ -1026,21 +1026,21 @@ def test_jacobian_scalar():
     # test when the jacobian is called with a tensor as wrt
     Jx = jacobian(y, x)
     f = pytensor.function([x], Jx)
-    vx = np.cast[pytensor.config.floatX](rng.uniform())
+    vx = rng.uniform(dtype=pytensor.config.floatX)
     assert np.allclose(f(vx), 2)
 
     # test when the jacobian is called with a tuple as wrt
     Jx = jacobian(y, (x,))
     assert isinstance(Jx, tuple)
     f = pytensor.function([x], Jx[0])
-    vx = np.cast[pytensor.config.floatX](rng.uniform())
+    vx = rng.uniform(dtype=pytensor.config.floatX)
     assert np.allclose(f(vx), 2)
 
     # test when the jacobian is called with a list as wrt
     Jx = jacobian(y, [x])
     assert isinstance(Jx, list)
     f = pytensor.function([x], Jx[0])
-    vx = np.cast[pytensor.config.floatX](rng.uniform())
+    vx = rng.uniform(dtype=pytensor.config.floatX)
     assert np.allclose(f(vx), 2)
 
     # test when the jacobian is called with a list of two elements
@@ -1048,8 +1048,8 @@ def test_jacobian_scalar():
     y = x * z
     Jx = jacobian(y, [x, z])
     f = pytensor.function([x, z], Jx)
-    vx = np.cast[pytensor.config.floatX](rng.uniform())
-    vz = np.cast[pytensor.config.floatX](rng.uniform())
+    vx = rng.uniform(dtype=pytensor.config.floatX)
+    vz = rng.uniform(dtype=pytensor.config.floatX)
     vJx = f(vx, vz)
 
     assert np.allclose(vJx[0], vz)
