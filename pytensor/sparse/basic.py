@@ -3610,7 +3610,7 @@ class StructuredDotGradCSC(COp):
         out[0] = g_a_data
 
     def c_code_cache_version(self):
-        return (1,)
+        return (2,)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (_indices, _indptr, _d, _g) = inputs
@@ -3647,11 +3647,11 @@ class StructuredDotGradCSC(COp):
             npy_intp nnz = PyArray_DIMS({_indices})[0];
             npy_intp N =  PyArray_DIMS({_indptr})[0]-1; //TODO: error checking with this
 
-            npy_intp Sindices = PyArray_STRIDES({_indices})[0]/PyArray_DESCR({_indices})->elsize;
-            npy_intp Sindptr = PyArray_STRIDES({_indptr})[0]/PyArray_DESCR({_indptr})->elsize;
+            npy_intp Sindices = PyArray_STRIDES({_indices})[0]/PyArray_ITEMSIZE({_indices});
+            npy_intp Sindptr = PyArray_STRIDES({_indptr})[0]/PyArray_ITEMSIZE({_indptr});
 
-            const npy_intp Sd1 = PyArray_STRIDES({_d})[1]/PyArray_DESCR({_d})->elsize;
-            const npy_intp Sg1 = PyArray_STRIDES({_g})[1]/PyArray_DESCR({_g})->elsize;
+            const npy_intp Sd1 = PyArray_STRIDES({_d})[1]/PyArray_ITEMSIZE({_d});
+            const npy_intp Sg1 = PyArray_STRIDES({_g})[1]/PyArray_ITEMSIZE({_g});
 
             const npy_intp K = PyArray_DIMS({_d})[1];
 
@@ -3744,7 +3744,7 @@ class StructuredDotGradCSR(COp):
         out[0] = g_a_data
 
     def c_code_cache_version(self):
-        return (1,)
+        return (2,)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (_indices, _indptr, _d, _g) = inputs
@@ -3782,11 +3782,11 @@ class StructuredDotGradCSR(COp):
             // extract number of rows
             npy_intp N =  PyArray_DIMS({_indptr})[0]-1; //TODO: error checking with this
 
-            npy_intp Sindices = PyArray_STRIDES({_indices})[0]/PyArray_DESCR({_indices})->elsize;
-            npy_intp Sindptr = PyArray_STRIDES({_indptr})[0]/PyArray_DESCR({_indptr})->elsize;
+            npy_intp Sindices = PyArray_STRIDES({_indices})[0]/PyArray_ITEMSIZE({_indices});
+            npy_intp Sindptr = PyArray_STRIDES({_indptr})[0]/PyArray_ITEMSIZE({_indptr});
 
-            const npy_intp Sd1 = PyArray_STRIDES({_d})[1]/PyArray_DESCR({_d})->elsize;
-            const npy_intp Sg1 = PyArray_STRIDES({_g})[1]/PyArray_DESCR({_g})->elsize;
+            const npy_intp Sd1 = PyArray_STRIDES({_d})[1]/PyArray_ITEMSIZE({_d});
+            const npy_intp Sg1 = PyArray_STRIDES({_g})[1]/PyArray_ITEMSIZE({_g});
 
             const npy_intp K = PyArray_DIMS({_d})[1];
 

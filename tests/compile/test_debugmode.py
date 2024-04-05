@@ -146,7 +146,7 @@ class WeirdBrokenOp(COp):
             raise ValueError(self.behaviour)
 
     def c_code_cache_version(self):
-        return (1,)
+        return (2,)
 
     def c_code(self, node, name, inp, out, sub):
         (a,) = inp
@@ -165,8 +165,8 @@ class WeirdBrokenOp(COp):
         prep_vars = f"""
             //the output array has size M x N
             npy_intp M = PyArray_DIMS({a})[0];
-            npy_intp Sa = PyArray_STRIDES({a})[0] / PyArray_DESCR({a})->elsize;
-            npy_intp Sz = PyArray_STRIDES({z})[0] / PyArray_DESCR({z})->elsize;
+            npy_intp Sa = PyArray_STRIDES({a})[0] / PyArray_ITEMSIZE({a});
+            npy_intp Sz = PyArray_STRIDES({z})[0] / PyArray_ITEMSIZE({z});
 
             npy_double * Da = (npy_double*)PyArray_BYTES({a});
             npy_double * Dz = (npy_double*)PyArray_BYTES({z});
