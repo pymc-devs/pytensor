@@ -62,10 +62,16 @@ def numba_njit(*args, **kwargs):
     kwargs.setdefault("no_cpython_wrapper", True)
     kwargs.setdefault("no_cfunc_wrapper", True)
 
-    # Supress caching warnings
+    # Suppress cache warning for internal functions
+    # We have to add an ansi escape code for optional bold text by numba
     warnings.filterwarnings(
         "ignore",
-        message='Cannot cache compiled function "numba_funcified_fgraph" as it uses dynamic globals',
+        message=(
+            "(\x1b\\[1m)*"  # ansi escape code for bold text
+            "Cannot cache compiled function "
+            '"(numba_funcified_fgraph|store_core_outputs)" '
+            "as it uses dynamic globals"
+        ),
         category=NumbaWarning,
     )
 
