@@ -123,7 +123,7 @@ from pytensor.tensor import slinalg
 
 # isort: on
 # Allow accessing numpy constants from pytensor.tensor
-from numpy import e, euler_gamma, inf, infty, nan, newaxis, pi
+from numpy import e, euler_gamma, inf, nan, newaxis, pi
 
 from pytensor.tensor.basic import *
 from pytensor.tensor.blas import batched_dot, batched_tensordot
