@@ -50,8 +50,8 @@ dtype_specs_map = {
     "int32": (int, "npy_int32", "NPY_INT32"),
     "uint64": (int, "npy_uint64", "NPY_UINT64"),
     "int64": (int, "npy_int64", "NPY_INT64"),
-    "complex128": (complex, "pytensor_complex128", "NPY_COMPLEX128"),
-    "complex64": (complex, "pytensor_complex64", "NPY_COMPLEX64"),
+    "complex128": (complex, "npy_complex128", "NPY_COMPLEX128"),
+    "complex64": (complex, "npy_complex64", "NPY_COMPLEX64"),
 }
 
 

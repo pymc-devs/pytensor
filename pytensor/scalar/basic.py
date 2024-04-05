@@ -279,8 +279,6 @@ class ScalarType(CType, HasDataType, HasShape):
     Analogous to TensorType, but for zero-dimensional objects.
     Maps directly to C primitives.
 
-    TODO: refactor to be named ScalarType for consistency with TensorType.
-
     """
 
     __props__ = ("dtype",)
@@ -350,11 +348,14 @@ class ScalarType(CType, HasDataType, HasShape):
         return self.dtype_specs()[1]
 
     def c_headers(self, c_compiler=None, **kwargs):
-        l = ["<math.h>"]
-        # These includes are needed by ScalarType and TensorType,
-        # we declare them here and they will be re-used by TensorType
-        l.append("<numpy/arrayobject.h>")
-        l.append("<numpy/arrayscalars.h>")
+        l = [
+            "<math.h>",
+            # These includes are needed by ScalarType and TensorType,
+            # we declare them here and they will be re-used by TensorType
+            "<numpy/arrayobject.h>",
+            "<numpy/arrayscalars.h>",
+            "<numpy/npy_2_complexcompat.h>",
+        ]
         if config.lib__amblibm and c_compiler.supports_amdlibm:
             l += ["<amdlibm.h>"]
         return l
@@ -396,8 +397,8 @@ class ScalarType(CType, HasDataType, HasShape):
                 "float16": (np.float16, "npy_float16", "Float16"),
                 "float32": (np.float32, "npy_float32", "Float32"),
                 "float64": (np.float64, "npy_float64", "Float64"),
-                "complex128": (np.complex128, "pytensor_complex128", "Complex128"),
-                "complex64": (np.complex64, "pytensor_complex64", "Complex64"),
+                "complex128": (np.complex128, "npy_complex128", "Complex128"),
+                "complex64": (np.complex64, "npy_complex64", "Complex64"),
                 "bool": (np.bool_, "npy_bool", "Bool"),
                 "uint8": (np.uint8, "npy_uint8", "UInt8"),
                 "int8": (np.int8, "npy_int8", "Int8"),
@@ -506,171 +507,11 @@ class ScalarType(CType, HasDataType, HasShape):
     def c_cleanup(self, name, sub):
         return ""
 
-    def c_support_code(self, **kwargs):
-        if self.dtype.startswith("complex"):
-            cplx_types = ["pytensor_complex64", "pytensor_complex128"]
-            real_types = [
-                "npy_int8",
-                "npy_int16",
-                "npy_int32",
-                "npy_int64",
-                "npy_float32",
-                "npy_float64",
-            ]
-            # If the 'int' C type is not exactly the same as an existing
-            # 'npy_intX', some C code may not compile, e.g. when assigning
-            # the value 0 (cast to 'int' in C) to an PyTensor_complex64.
-            if np.dtype("intc").num not in [np.dtype(d[4:]).num for d in real_types]:
-                # In that case we add the 'int' type to the real types.
-                real_types.append("int")
-
-            template = """
-            struct pytensor_complex%(nbits)s : public npy_complex%(nbits)s
-            {
-                typedef pytensor_complex%(nbits)s complex_type;
-                typedef npy_float%(half_nbits)s scalar_type;
-
-                complex_type operator +(const complex_type &y) const {
-                    complex_type ret;
-                    ret.real = this->real + y.real;
-                    ret.imag = this->imag + y.imag;
-                    return ret;
-                }
-
-                complex_type operator -() const {
-                    complex_type ret;
-                    ret.real = -this->real;
-                    ret.imag = -this->imag;
-                    return ret;
-                }
-                bool operator ==(const complex_type &y) const {
-                    return (this->real == y.real) && (this->imag == y.imag);
-                }
-                bool operator ==(const scalar_type &y) const {
-                    return (this->real == y) && (this->imag == 0);
-                }
-                complex_type operator -(const complex_type &y) const {
-                    complex_type ret;
-                    ret.real = this->real - y.real;
-                    ret.imag = this->imag - y.imag;
-                    return ret;
-                }
-                complex_type operator *(const complex_type &y) const {
-                    complex_type ret;
-                    ret.real = this->real * y.real - this->imag * y.imag;
-                    ret.imag = this->real * y.imag + this->imag * y.real;
-                    return ret;
-                }
-                complex_type operator /(const complex_type &y) const {
-                    complex_type ret;
-                    scalar_type y_norm_square = y.real * y.real + y.imag * y.imag;
-                    ret.real = (this->real * y.real + this->imag * y.imag) / y_norm_square;
-                    ret.imag = (this->imag * y.real - this->real * y.imag) / y_norm_square;
-                    return ret;
-                }
-                template <typename T>
-                complex_type& operator =(const T& y);
-
-                pytensor_complex%(nbits)s() {}
-
-                template <typename T>
-                pytensor_complex%(nbits)s(const T& y) { *this = y; }
-
-                template <typename TR, typename TI>
-                pytensor_complex%(nbits)s(const TR& r, const TI& i) { this->real=r; this->imag=i; }
-            };
-            """
-
-            def operator_eq_real(mytype, othertype):
-                return f"""
-                template <> {mytype} & {mytype}::operator=<{othertype}>(const {othertype} & y)
-                {{ this->real=y; this->imag=0; return *this; }}
-                """
-
-            def operator_eq_cplx(mytype, othertype):
-                return f"""
-                template <> {mytype} & {mytype}::operator=<{othertype}>(const {othertype} & y)
-                {{ this->real=y.real; this->imag=y.imag; return *this; }}
-                """
-
-            operator_eq = "".join(
-                operator_eq_real(ctype, rtype)
-                for ctype in cplx_types
-                for rtype in real_types
-            ) + "".join(
-                operator_eq_cplx(ctype1, ctype2)
-                for ctype1 in cplx_types
-                for ctype2 in cplx_types
-            )
-
-            # We are not using C++ generic templating here, because this would
-            # generate two different functions for adding a complex64 and a
-            # complex128, one returning a complex64, the other a complex128,
-            # and the compiler complains it is ambiguous.
-            # Instead, we generate code for known and safe types only.
-
-            def operator_plus_real(mytype, othertype):
-                return f"""
-                const {mytype} operator+(const {mytype} &x, const {othertype} &y)
-                {{ return {mytype}(x.real+y, x.imag); }}
-
-                const {mytype} operator+(const {othertype} &y, const {mytype} &x)
-                {{ return {mytype}(x.real+y, x.imag); }}
-                """
-
-            operator_plus = "".join(
-                operator_plus_real(ctype, rtype)
-                for ctype in cplx_types
-                for rtype in real_types
-            )
-
-            def operator_minus_real(mytype, othertype):
-                return f"""
-                const {mytype} operator-(const {mytype} &x, const {othertype} &y)
-                {{ return {mytype}(x.real-y, x.imag); }}
-
-                const {mytype} operator-(const {othertype} &y, const {mytype} &x)
-                {{ return {mytype}(y-x.real, -x.imag); }}
-                """
-
-            operator_minus = "".join(
-                operator_minus_real(ctype, rtype)
-                for ctype in cplx_types
-                for rtype in real_types
-            )
-
-            def operator_mul_real(mytype, othertype):
-                return f"""
-                const {mytype} operator*(const {mytype} &x, const {othertype} &y)
-                {{ return {mytype}(x.real*y, x.imag*y); }}
-
-                const {mytype} operator*(const {othertype} &y, const {mytype} &x)
-                {{ return {mytype}(x.real*y, x.imag*y); }}
-                """
-
-            operator_mul = "".join(
-                operator_mul_real(ctype, rtype)
-                for ctype in cplx_types
-                for rtype in real_types
-            )
-
-            return (
-                template % dict(nbits=64, half_nbits=32)
-                + template % dict(nbits=128, half_nbits=64)
-                + operator_eq
-                + operator_plus
-                + operator_minus
-                + operator_mul
-            )
-
-        else:
-            return ""
-
     def c_init_code(self, **kwargs):
         return ["import_array();"]
 
     def c_code_cache_version(self):
-        return (13, np.__version__)
+        return (14, np.__version__)
 
     def get_shape_info(self, obj):
         return obj.itemsize
