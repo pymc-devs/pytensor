@@ -48,7 +48,7 @@ keywords = [
 dependencies = [
     "setuptools>=48.0.0",
     "scipy>=0.14",
-    "numpy>=1.17.0",
+    "numpy>=1.17.0,<2",
     "filelock",
     "etuples",
     "logical-unification",
