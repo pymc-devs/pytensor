@@ -289,7 +289,9 @@ class Op(MetaObject):
 
         """
         return_list = kwargs.pop("return_list", False)
+        name = kwargs.pop("name", None)
         node = self.make_node(*inputs, **kwargs)
+        node.outputs[0].name = name
 
         if config.compute_test_value != "off":
             compute_test_value(node)

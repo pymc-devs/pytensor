@@ -232,3 +232,11 @@ def test_op_input_broadcastable():
 
     x = pt.TensorType(dtype="float64", shape=(1,))("x")
     assert SomeOp()(x).type == pt.dvector
+
+
+def test_op_name():
+    x = pt.vector("x")
+    y = pt.vector("y")
+    op_name = "op_name"
+    z = pt.add(x, y, name=op_name)
+    assert z.name == op_name
