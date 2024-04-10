@@ -1437,12 +1437,16 @@ add_vm_configvars()
 add_numba_configvars()
 
 # TODO: `gcc_version_str` is used by other modules.. Should it become an immutable config var?
-try:
-    p_out = output_subprocess_Popen([config.cxx, "-dumpversion"])
-    gcc_version_str = p_out[0].strip().decode()
-except OSError:
-    # Typically means gcc cannot be found.
+if config.cxx != "":
+    try:
+        p_out = output_subprocess_Popen([config.cxx, "-dumpversion"])
+        gcc_version_str = p_out[0].strip().decode()
+    except OSError:
+        # Typically means gcc cannot be found.
+        gcc_version_str = "GCC_NOT_FOUND"
+else:
     gcc_version_str = "GCC_NOT_FOUND"
+
 # TODO: The caching dir resolution is a procedural mess of helper functions, local variables
 # and config definitions. And the result is also not particularly pretty..
 add_caching_dir_configvars()
