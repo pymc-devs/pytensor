@@ -1982,7 +1982,7 @@ def transpose(x, axes=None):
     return ret
 
 
-def matrix_transpose(x, axes=None):
+def matrix_transpose(x: "TensorLike") -> TensorVariable:
     """
     Transposes each 2-dimensional matrix tensor along the last two dimensions of a higher-dimensional tensor.
 
@@ -1991,10 +1991,6 @@ def matrix_transpose(x, axes=None):
     x : array_like
         Input tensor with shape (..., M, N), where `M` and `N` represent the dimensions
         of the matrices. Each matrix is of shape (M, N).
-
-    axes : list of int, optional
-        By default, reverse the dimensions, otherwise permute the axes according
-        to the values given.
 
     Returns
     -------
@@ -2032,10 +2028,10 @@ def matrix_transpose(x, axes=None):
     the last two dimensions. If the input tensor has more than two dimensions, it
     transposes each 2-dimensional matrix independently while preserving other dimensions.
     """
-    _x = as_tensor_variable(x)
-    if _x.ndim < 2:
+    x = as_tensor_variable(x)
+    if x.ndim < 2:
         raise ValueError(
-            f"Input array must be at least 2-dimensional, but it is {_x.ndim}"
+            f"Input array must be at least 2-dimensional, but it is {x.ndim}"
         )
     return swapaxes(x, -1, -2)
 

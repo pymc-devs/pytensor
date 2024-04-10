@@ -3852,17 +3852,17 @@ def test_matrix_transpose():
     f = pytensor.function(
         [x2, x3],
         [
-            ptb.matrix_transpose(x2),
+            x2.mT,
             ptb.matrix_transpose(x3),
         ],
     )
     t2, t3 = f(x2v, x3v)
 
-    assert t2.shape == np.transpose(x2v).shape
-    assert np.all(t2 == np.transpose(x2v))
+    assert equal_computations([t2], [np.transpose(x2v)])
     # TODO: Replace np.asarray([np.transpose(x3v[0]), np.transpose(x3v[1])]) with np.matrix_transpose(x3v) once numpy adds support for it (https://github.com/numpy/numpy/pull/24099)
-    assert t3.shape == np.asarray([np.transpose(x3v[0]), np.transpose(x3v[1])]).shape
-    assert np.all(t3 == np.asarray([np.transpose(x3v[0]), np.transpose(x3v[1])]))
+    assert equal_computations(
+        [t3], [np.asarray([np.transpose(x3v[0]), np.transpose(x3v[1])])]
+    )
 
 
 def test_stacklists():
