@@ -3813,6 +3813,7 @@ def test_transpose():
     )
 
     t1, t2, t3, t1b, t2b, t3b, t2c, t3c, t2d, t3d = f(x1v, x2v, x3v)
+
     assert t1.shape == np.transpose(x1v).shape
     assert t2.shape == np.transpose(x2v).shape
     assert t3.shape == np.transpose(x3v).shape
@@ -3836,6 +3837,32 @@ def test_transpose():
     assert ptb.transpose(x2).name == "x2.T"
     assert ptb.transpose(x3).name == "x3.T"
     assert ptb.transpose(dmatrix()).name is None
+
+
+def test_matrix_transpose():
+    with pytest.raises(ValueError, match="Input array must be at least 2-dimensional"):
+        ptb.matrix_transpose(np.arange(6))
+
+    x2 = dmatrix("x2")
+    x3 = dtensor3("x3")
+
+    x2v = np.arange(6).reshape((2, 3))
+    x3v = np.arange(12).reshape((2, 3, 2))
+
+    f = pytensor.function(
+        [x2, x3],
+        [
+            ptb.matrix_transpose(x2),
+            ptb.matrix_transpose(x3),
+        ],
+    )
+    t2, t3 = f(x2v, x3v)
+
+    assert t2.shape == np.transpose(x2v).shape
+    assert np.all(t2 == np.transpose(x2v))
+    # TODO: Replace np.asarray([np.transpose(x3v[0]), np.transpose(x3v[1])]) with np.matrix_transpose(x3v) once numpy adds support for it (https://github.com/numpy/numpy/pull/24099)
+    assert t3.shape == np.asarray([np.transpose(x3v[0]), np.transpose(x3v[1])]).shape
+    assert np.all(t3 == np.asarray([np.transpose(x3v[0]), np.transpose(x3v[1])]))
 
 
 def test_stacklists():

@@ -43,7 +43,7 @@ def is_matrix_transpose(x: TensorVariable) -> bool:
     return False
 
 
-def _T(x: TensorVariable) -> TensorVariable:
+def _mT(x: TensorVariable) -> TensorVariable:
     """Matrix transpose for potentially higher dimensionality tensors"""
     return swapaxes(x, -1, -2)
 
@@ -83,9 +83,9 @@ def inv_as_solve(fgraph, node):
         ):
             x = r.owner.inputs[0]
             if getattr(x.tag, "symmetric", None) is True:
-                return [_T(solve(x, _T(l)))]
+                return [_mT(solve(x, _mT(l)))]
             else:
-                return [_T(solve(_T(x), _T(l)))]
+                return [_mT(solve(_mT(x), _mT(l)))]
 
 
 @register_stabilize
@@ -216,7 +216,7 @@ def psd_solve_with_chol(fgraph, node):
             #     __if__ no other Op makes use of the L matrix during the
             #     stabilization
             Li_b = solve_triangular(L, b, lower=True, b_ndim=2)
-            x = solve_triangular(_T(L), Li_b, lower=False, b_ndim=2)
+            x = solve_triangular(_mT(L), Li_b, lower=False, b_ndim=2)
             return [x]
 
 

@@ -7,6 +7,7 @@ pytensor/compile/sharedvalue.py
 pytensor/graph/rewriting/basic.py
 pytensor/ifelse.py
 pytensor/link/basic.py
+pytensor/link/c/cmodule.py
 pytensor/link/numba/dispatch/elemwise.py
 pytensor/link/numba/dispatch/random.py
 pytensor/link/numba/dispatch/scan.py
