@@ -2000,18 +2000,19 @@ def matrix_transpose(x: "TensorLike") -> TensorVariable:
 
     Examples
     --------
-    >>> import pytensor as ptb
+    >>> import pytensor as pt
     >>> import numpy as np
     >>> x = np.arange(24).reshape((2, 3, 4))
-    [[[ 0,  1,  2,  3],
-      [ 4,  5,  6,  7],
-      [ 8,  9, 10, 11]],
+    [[[ 0  1  2  3]
+      [ 4  5  6  7]
+      [ 8  9 10 11]]
 
-     [[12, 13, 14, 15],
-      [16, 17, 18, 19],
-      [20, 21, 22, 23]]]
+     [[12 13 14 15]
+      [16 17 18 19]
+      [20 21 22 23]]]
 
-    >>> ptb.matrix_transpose(x)
+
+    >>> pt.matrix_transpose(x).eval()
     [[[ 0  4  8]
       [ 1  5  9]
       [ 2  6 10]
@@ -2021,6 +2022,7 @@ def matrix_transpose(x: "TensorLike") -> TensorVariable:
       [13 17 21]
       [14 18 22]
       [15 19 23]]]
+
 
     Notes
     -----
@@ -4356,6 +4358,7 @@ __all__ = [
     "join",
     "split",
     "transpose",
+    "matrix_transpose",
     "extract_constant",
     "default",
     "tensor_copy",

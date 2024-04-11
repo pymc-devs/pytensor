@@ -3841,28 +3841,20 @@ def test_transpose():
 
 def test_matrix_transpose():
     with pytest.raises(ValueError, match="Input array must be at least 2-dimensional"):
-        ptb.matrix_transpose(np.arange(6))
+        ptb.matrix_transpose(dvector("x1"))
 
     x2 = dmatrix("x2")
     x3 = dtensor3("x3")
 
-    x2v = np.arange(6).reshape((2, 3))
-    x3v = np.arange(12).reshape((2, 3, 2))
+    var1 = ptb.matrix_transpose(x2)
+    expected_var1 = swapaxes(x2, -1, -2)
 
-    f = pytensor.function(
-        [x2, x3],
-        [
-            x2.mT,
-            ptb.matrix_transpose(x3),
-        ],
-    )
-    t2, t3 = f(x2v, x3v)
+    var2 = ptb.matrix_transpose(x3)
+    expected_var2 = swapaxes(x3, -1, -2)
 
-    assert equal_computations([t2], [np.transpose(x2v)])
+    assert equal_computations([var1], [expected_var1])
     # TODO: Replace np.asarray([np.transpose(x3v[0]), np.transpose(x3v[1])]) with np.matrix_transpose(x3v) once numpy adds support for it (https://github.com/numpy/numpy/pull/24099)
-    assert equal_computations(
-        [t3], [np.asarray([np.transpose(x3v[0]), np.transpose(x3v[1])])]
-    )
+    assert equal_computations([var2], [expected_var2])
 
 
 def test_stacklists():
