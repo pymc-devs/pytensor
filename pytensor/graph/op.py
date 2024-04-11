@@ -293,11 +293,8 @@ class Op(MetaObject):
         node = self.make_node(*inputs, **kwargs)
         print(name, kwargs)
         if isinstance(node.outputs, list):
-            print('*'*7)
             for n in node.outputs:
-                # print(n.name)
                 n.name = name
-                print(n.name)
 
         if config.compute_test_value != "off":
             compute_test_value(node)
