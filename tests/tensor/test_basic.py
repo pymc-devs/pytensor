@@ -3849,11 +3849,10 @@ def test_matrix_transpose():
     var1 = ptb.matrix_transpose(x2)
     expected_var1 = swapaxes(x2, -1, -2)
 
-    var2 = ptb.matrix_transpose(x3)
+    var2 = x3.mT
     expected_var2 = swapaxes(x3, -1, -2)
 
     assert equal_computations([var1], [expected_var1])
-    # TODO: Replace np.asarray([np.transpose(x3v[0]), np.transpose(x3v[1])]) with np.matrix_transpose(x3v) once numpy adds support for it (https://github.com/numpy/numpy/pull/24099)
     assert equal_computations([var2], [expected_var2])
 
 
