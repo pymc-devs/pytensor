@@ -284,7 +284,11 @@ def add_gcc_dll_directory() -> None:
     if (sys.platform == "win32") & (hasattr(os, "add_dll_directory")):
         gcc_path = shutil.which("gcc")
         if gcc_path is not None:
-            os.add_dll_directory(os.path.dirname(gcc_path))  # type: ignore
+            # Since add_dll_directory is only defined on windows, we need
+            # the ignore[attr-defined] on non-Windows platforms.
+            # For Windows we need ignore[unused-ignore] since the ignore
+            # is unnecessary with that platform.
+            os.add_dll_directory(os.path.dirname(gcc_path))  # type: ignore[attr-defined,unused-ignore]
 
 
 def dlimport(fullpath, suffix=None):
