@@ -995,7 +995,7 @@ def specify_broadcastable(x, *axes):
     if not axes:
         return x
 
-    if min(axes)<0:
+    if min(axes) < 0:
         axes = list(normalize_axis_tuple(axes, x.type.ndim))
 
     if max(axes) >= x.type.ndim:
