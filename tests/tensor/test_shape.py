@@ -562,11 +562,13 @@ class TestSpecifyBroadcastable:
         x = matrix()
         assert specify_broadcastable(x, 0).type.shape == (1, None)
         assert specify_broadcastable(x, 1).type.shape == (None, 1)
+        assert specify_broadcastable(x, -1).type.shape == (None, 1)
         assert specify_broadcastable(x, 0, 1).type.shape == (1, 1)
 
         x = row()
         assert specify_broadcastable(x, 0) is x
         assert specify_broadcastable(x, 1) is not x
+        assert specify_broadcastable(x, -2) is x
 
     def test_validation(self):
         x = matrix()
