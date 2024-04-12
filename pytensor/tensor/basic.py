@@ -1982,6 +1982,62 @@ def transpose(x, axes=None):
     return ret
 
 
+def matrix_transpose(x: "TensorLike") -> TensorVariable:
+    """
+    Transposes each 2-dimensional matrix tensor along the last two dimensions of a higher-dimensional tensor.
+
+    Parameters
+    ----------
+    x : array_like
+        Input tensor with shape (..., M, N), where `M` and `N` represent the dimensions
+        of the matrices. Each matrix is of shape (M, N).
+
+    Returns
+    -------
+    out : tensor
+        Transposed tensor with the shape (..., N, M), where each 2-dimensional matrix
+        in the input tensor has been transposed along the last two dimensions.
+
+    Examples
+    --------
+    >>> import pytensor as pt
+    >>> import numpy as np
+    >>> x = np.arange(24).reshape((2, 3, 4))
+    [[[ 0  1  2  3]
+      [ 4  5  6  7]
+      [ 8  9 10 11]]
+
+     [[12 13 14 15]
+      [16 17 18 19]
+      [20 21 22 23]]]
+
+
+    >>> pt.matrix_transpose(x).eval()
+    [[[ 0  4  8]
+      [ 1  5  9]
+      [ 2  6 10]
+      [ 3  7 11]]
+
+     [[12 16 20]
+      [13 17 21]
+      [14 18 22]
+      [15 19 23]]]
+
+
+    Notes
+    -----
+    This function transposes each 2-dimensional matrix within the input tensor along
+    the last two dimensions. If the input tensor has more than two dimensions, it
+    transposes each 2-dimensional matrix independently while preserving other dimensions.
+    """
+    x = as_tensor_variable(x)
+    if x.ndim < 2:
+        raise ValueError(
+            f"Input array must be at least 2-dimensional, but it is {x.ndim}"
+        )
+    return swapaxes(x, -1, -2)
+
+
 def split(x, splits_size, n_splits, axis=0):
     the_split = Split(n_splits)
     return the_split(x, axis, splits_size)
@@ -4302,6 +4358,7 @@ __all__ = [
     "join",
     "split",
     "transpose",
+    "matrix_transpose",
     "extract_constant",
     "default",
     "tensor_copy",

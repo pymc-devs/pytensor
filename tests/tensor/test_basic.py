@@ -3813,6 +3813,7 @@ def test_transpose():
     )
 
     t1, t2, t3, t1b, t2b, t3b, t2c, t3c, t2d, t3d = f(x1v, x2v, x3v)
+
     assert t1.shape == np.transpose(x1v).shape
     assert t2.shape == np.transpose(x2v).shape
     assert t3.shape == np.transpose(x3v).shape
@@ -3836,6 +3837,23 @@ def test_transpose():
     assert ptb.transpose(x2).name == "x2.T"
     assert ptb.transpose(x3).name == "x3.T"
     assert ptb.transpose(dmatrix()).name is None
+
+
+def test_matrix_transpose():
+    with pytest.raises(ValueError, match="Input array must be at least 2-dimensional"):
+        ptb.matrix_transpose(dvector("x1"))
+
+    x2 = dmatrix("x2")
+    x3 = dtensor3("x3")
+
+    var1 = ptb.matrix_transpose(x2)
+    expected_var1 = swapaxes(x2, -1, -2)
+
+    var2 = x3.mT
+    expected_var2 = swapaxes(x3, -1, -2)
+
+    assert equal_computations([var1], [expected_var1])
+    assert equal_computations([var2], [expected_var2])
 
 
 def test_stacklists():
