@@ -291,7 +291,6 @@ class Op(MetaObject):
         return_list = kwargs.pop("return_list", False)
         name = kwargs.pop("name", None)
         node = self.make_node(*inputs, **kwargs)
-        print(name, kwargs)
         if isinstance(node.outputs, list):
             for n in node.outputs:
                 n.name = name
