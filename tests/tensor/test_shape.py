@@ -572,8 +572,12 @@ class TestSpecifyBroadcastable:
 
     def test_validation(self):
         x = matrix()
-        with pytest.raises(ValueError, match="^Trying to specify broadcastable of*"):
-            specify_broadcastable(x, 2)
+        axis = 2
+        with pytest.raises(
+            ValueError,
+            match=f"axis {axis} is out of bounds for array of dimension {axis}",
+        ):
+            specify_broadcastable(x, axis)
 
 
 class TestRopLop(RopLopChecker):
