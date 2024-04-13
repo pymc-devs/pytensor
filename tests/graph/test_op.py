@@ -238,5 +238,20 @@ def test_op_name():
     x = pt.vector("x")
     y = pt.vector("y")
     op_name = "op_name"
+
+    class MultiOutOp(Op):
+        def make_node(self, *inputs):
+            outputs = [pt.dmatrix(), pt.dmatrix()]
+            return Apply(self, list(inputs), outputs)
+
+        def perform(self, node, inputs, outputs):
+            outputs[0] = pt.matrix()
+            outputs[1] = pt.matrix()
+
+    multi_op = MultiOutOp()
+    res = multi_op(x, name=op_name)
+    for i, r in enumerate(res):
+        assert r.name == f"{op_name}_{i}"
+
     z = pt.add(x, y, name=op_name)
     assert z.name == op_name
