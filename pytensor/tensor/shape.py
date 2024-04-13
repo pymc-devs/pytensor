@@ -4,7 +4,7 @@ from textwrap import dedent
 from typing import cast
 
 import numpy as np
-from numpy.lib.array_utils import normalize_axis_tuple
+from numpy.core.numeric import normalize_axis_tuple
 
 import pytensor
 from pytensor.gradient import DisconnectedType
