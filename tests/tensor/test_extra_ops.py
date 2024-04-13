@@ -463,14 +463,6 @@ class TestSqueeze(utt.InferShapeTester):
 
         assert res.broadcastable == (False, True, False)
 
-    def test_invalid_axis(self):
-        # Test that trying to squeeze a non broadcastable dimension raises error
-        variable = TensorType(config.floatX, shape=(1, None))()
-        with pytest.raises(
-            ValueError, match="Cannot drop a non-broadcastable dimension"
-        ):
-            squeeze(variable, axis=1)
-
     def test_scalar_input(self):
         x = pt.scalar("x")
 
@@ -481,6 +473,25 @@ class TestSqueeze(utt.InferShapeTester):
             match=re.escape("axis (1,) is out of bounds for array of dimension 0"),
         ):
             squeeze(x, axis=1)
+
+    def test_invalid_input(self):
+        x = pt.vector("x")
+        axis = 0
+
+        f = pytensor.function([x], pt.squeeze(x, axis))
+
+        # Test that we allow squeezing of valid non-broadcastable dimension
+        assert f([0]) == 0
+
+        # Test that we cannot squeeze dimensions whose length is greater than 1
+        error_txt_1 = re.escape("SpecifyShape: Got shape (3,), expected (1,).")
+        error_txt_2 = re.escape("SpecifyShape: dim 0 of input has shape 3, expected 1")
+        match = error_txt_1 if pytensor.config.mode == "FAST_COMPILE" else error_txt_2
+        with pytest.raises(
+            AssertionError,
+            match=match,
+        ):
+            f([0, 1, 2])
 
 
 class TestCompress(utt.InferShapeTester):
