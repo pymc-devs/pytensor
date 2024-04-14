@@ -235,23 +235,52 @@ def test_op_input_broadcastable():
 
 
 def test_op_name():
-    x = pt.vector("x")
-    y = pt.vector("y")
     op_name = "op_name"
 
-    class MultiOutOp(Op):
+    class DummyType(Type):
+        def filter(self, data):
+            return data
+
+        def __eq__(self, other):
+            return isinstance(other, DummyType)
+
+        def __hash__(self):
+            return hash(DummyType)
+
+        def __repr__(self):
+            return "DummyType()"
+
+    def dummy_variable(name):
+        return Variable(DummyType(), None, None, name=name)
+
+    x = dummy_variable("x")
+
+    class SingleOutOp(Op):
         def make_node(self, *inputs):
-            outputs = [pt.dmatrix(), pt.dmatrix()]
+            outputs = [dummy_variable("a")]
             return Apply(self, list(inputs), outputs)
 
         def perform(self, node, inputs, outputs):
-            outputs[0] = pt.matrix()
-            outputs[1] = pt.matrix()
+            raise NotImplementedError()
+
+    single_op = SingleOutOp()
+    res_single = single_op(x, name=op_name)
+    assert res_single.name == op_name
+
+    class MultiOutOp(Op):
+        def make_node(self, *inputs):
+            outputs = [dummy_variable("a"), dummy_variable("b")]
+            return Apply(self, list(inputs), outputs)
+
+        def perform(self, node, inputs, outputs):
+            raise NotImplementedError()
 
     multi_op = MultiOutOp()
     res = multi_op(x, name=op_name)
     for i, r in enumerate(res):
         assert r.name == f"{op_name}_{i}"
 
-    z = pt.add(x, y, name=op_name)
-    assert z.name == op_name
+    multi_op = MultiOutOp()
+    multi_op.default_output = 1
+    res = multi_op(x, name=op_name)
+    assert res.name == op_name
