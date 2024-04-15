@@ -232,6 +232,10 @@ class _tensor_py_operators:
     def T(self):
         return pt.basic.transpose(self)
 
+    @property
+    def mT(self):
+        return pt.basic.matrix_transpose(self)
+
     def transpose(self, *axes):
         """Transpose this array.
 
