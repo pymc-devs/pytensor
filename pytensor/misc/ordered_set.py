@@ -12,7 +12,7 @@ def check_deterministic(iterable):
     # pytensor to use exceptions correctly, so that this can be a TypeError.
     if iterable is not None:
         if not isinstance(
-            iterable, (list, tuple, OrderedSet, types.GeneratorType, str, dict)
+            iterable, list | tuple | OrderedSet | types.GeneratorType | str | dict
         ):
             if len(iterable) > 1:
                 # We need to accept length 1 size to allow unpickle in tests.

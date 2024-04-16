@@ -23,7 +23,6 @@ Many stabilize and stabilization rewrites refuse to be applied when a variable h
 """
 
 import logging
-from typing import Union
 
 import numpy as np
 
@@ -69,7 +68,6 @@ from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays
 from pytensor.tensor.math import Sum, add, eq
 from pytensor.tensor.shape import Shape_i, shape_padleft
-from pytensor.tensor.sort import TopKOp
 from pytensor.tensor.type import DenseTensorType, TensorType
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 from pytensor.utils import NoDuplicateOptWarningFilter
@@ -136,11 +134,11 @@ def alloc_like(
 
 
 def register_useless(
-    node_rewriter: Union[RewriteDatabase, NodeRewriter, str], *tags, **kwargs
+    node_rewriter: RewriteDatabase | NodeRewriter | str, *tags, **kwargs
 ):
     if isinstance(node_rewriter, str):
 
-        def register(inner_rewriter: Union[RewriteDatabase, Rewriter]):
+        def register(inner_rewriter: RewriteDatabase | Rewriter):
             return register_useless(inner_rewriter, node_rewriter, *tags, **kwargs)
 
         return register
@@ -154,11 +152,11 @@ def register_useless(
 
 
 def register_canonicalize(
-    node_rewriter: Union[RewriteDatabase, NodeRewriter, str], *tags: str, **kwargs
+    node_rewriter: RewriteDatabase | NodeRewriter | str, *tags: str, **kwargs
 ):
     if isinstance(node_rewriter, str):
 
-        def register(inner_rewriter: Union[RewriteDatabase, Rewriter]):
+        def register(inner_rewriter: RewriteDatabase | Rewriter):
             return register_canonicalize(inner_rewriter, node_rewriter, *tags, **kwargs)
 
         return register
@@ -171,11 +169,11 @@ def register_canonicalize(
 
 
 def register_stabilize(
-    node_rewriter: Union[RewriteDatabase, NodeRewriter, str], *tags: str, **kwargs
+    node_rewriter: RewriteDatabase | NodeRewriter | str, *tags: str, **kwargs
 ):
     if isinstance(node_rewriter, str):
 
-        def register(inner_rewriter: Union[RewriteDatabase, Rewriter]):
+        def register(inner_rewriter: RewriteDatabase | Rewriter):
             return register_stabilize(inner_rewriter, node_rewriter, *tags, **kwargs)
 
         return register
@@ -188,11 +186,11 @@ def register_stabilize(
 
 
 def register_specialize(
-    node_rewriter: Union[RewriteDatabase, NodeRewriter, str], *tags: str, **kwargs
+    node_rewriter: RewriteDatabase | NodeRewriter | str, *tags: str, **kwargs
 ):
     if isinstance(node_rewriter, str):
 
-        def register(inner_rewriter: Union[RewriteDatabase, Rewriter]):
+        def register(inner_rewriter: RewriteDatabase | Rewriter):
             return register_specialize(inner_rewriter, node_rewriter, *tags, **kwargs)
 
         return register
@@ -205,11 +203,11 @@ def register_specialize(
 
 
 def register_uncanonicalize(
-    node_rewriter: Union[RewriteDatabase, NodeRewriter, str], *tags: str, **kwargs
+    node_rewriter: RewriteDatabase | NodeRewriter | str, *tags: str, **kwargs
 ):
     if isinstance(node_rewriter, str):
 
-        def register(inner_rewriter: Union[RewriteDatabase, Rewriter]):
+        def register(inner_rewriter: RewriteDatabase | Rewriter):
             return register_uncanonicalize(
                 inner_rewriter, node_rewriter, *tags, **kwargs
             )
@@ -1003,7 +1001,7 @@ def local_useless_switch(fgraph, node):
     out_bcast = node.outputs[0].type.broadcastable
 
     if (isinstance(cond, np.ndarray) and cond.ndim == 0) or isinstance(
-        cond, (np.number, np.bool_)
+        cond, np.number | np.bool_
     ):
         if cond == 0:
             correct_out = right
@@ -1024,18 +1022,15 @@ def local_useless_switch(fgraph, node):
 
     # if left is right -> left
     if equivalent_up_to_constant_casting(left, right):
-        if left.type.broadcastable == out_bcast:
-            out_dtype = node.outputs[0].type.dtype
-            if left.type.dtype != out_dtype:
-                left = cast(left, out_dtype)
-                copy_stack_trace(node.outputs + left, left)
-            # When not casting, the other inputs of the switch aren't needed in the traceback
-            return [left]
+        if left.type.broadcastable != out_bcast:
+            left, _ = broadcast_arrays(left, cond)
 
-        else:
-            ret = broadcast_arrays(left, cond)[0]
-            copy_stack_trace(node.outputs + left, ret)
-            return [ret]
+        out_dtype = node.outputs[0].type.dtype
+        if left.type.dtype != out_dtype:
+            left = cast(left, out_dtype)
+
+        copy_stack_trace(node.outputs + node.inputs, left)
+        return [left]
 
     # This case happens with scan.
     # Elemwise{switch}(le(shape_i{id}(X), 0), 0, shape_i{id}(X)) -> shape_i{id}(X)
@@ -1065,7 +1060,7 @@ def local_merge_switch_same_cond(fgraph, node):
     """
     # node must be binary elemwise or add or mul
     if not isinstance(node.op, Elemwise) or not isinstance(
-        node.op.scalar_op, (ps.BinaryScalarOp, ps.Add, ps.Mul)
+        node.op.scalar_op, ps.BinaryScalarOp | ps.Add | ps.Mul
     ):
         return
     # all inputs must be switch
@@ -1226,37 +1221,6 @@ def local_merge_alloc(fgraph, node):
                 )(dim_outer, eq(dim_outer, dim_inner))
         i += 1
     return [alloc(inputs_inner[0], *dims_outer)]
-
-
-@register_useless("fast_compile")
-@node_rewriter([TopKOp])
-def local_useless_topk(fgraph, node):
-    """Remove unused `TopKOp` outputs."""
-    op = node.op
-    if not isinstance(op, TopKOp):
-        return
-    if not (op.return_values and op.return_indices):
-        return False
-
-    x, k = node.inputs
-    ret_val = bool(fgraph.clients[node.outputs[0]])
-    ret_idx = bool(fgraph.clients[node.outputs[1]])
-
-    if not (ret_val ^ ret_idx):
-        # both true -> nothing to remove
-        # both false -> let pruner handle
-        return False
-
-    old_output = node.outputs[ret_idx]
-    new_output = TopKOp(
-        axis=op.axis,
-        sorted=op.sorted,
-        idx_dtype=op.idx_dtype,
-        return_values=ret_val,
-        return_indices=ret_idx,
-    )(x, k)
-    copy_stack_trace(node.outputs[0], new_output)
-    return {old_output: new_output}
 
 
 register_canonicalize(RemovalNodeRewriter(tensor_copy), name="remove_tensor_copy")

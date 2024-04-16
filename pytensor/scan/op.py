@@ -47,10 +47,9 @@ import dataclasses
 import logging
 import time
 from collections import OrderedDict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from copy import copy
 from itertools import chain, product
-from typing import Callable, Optional, Union
 
 import numpy as np
 
@@ -282,7 +281,7 @@ class ScanInfo:
 
 
 TensorConstructorType = Callable[
-    [Iterable[Optional[Union[bool, int]]], Union[str, np.generic]], TensorType
+    [Iterable[bool | int | None], str | np.generic], TensorType
 ]
 
 
@@ -673,11 +672,11 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         inputs: list[Variable],
         outputs: list[Variable],
         info: ScanInfo,
-        mode: Optional[Mode] = None,
-        typeConstructor: Optional[TensorConstructorType] = None,
+        mode: Mode | None = None,
+        typeConstructor: TensorConstructorType | None = None,
         truncate_gradient: int = -1,
-        name: Optional[str] = None,
-        profile: Optional[Union[str, bool]] = None,
+        name: str | None = None,
+        profile: str | bool | None = None,
         allow_gc: bool = True,
         strict: bool = True,
     ):
@@ -1428,7 +1427,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
         profile = None
         if config.profile or (
-            isinstance(self.profile, (str, bool, (int,))) and self.profile
+            isinstance(self.profile, str | bool | int) and self.profile
         ):
             if isinstance(self.profile, str):
                 profile = ScanProfileStats(name=self.profile)
@@ -2366,7 +2365,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         return connection_pattern
 
     def L_op(self, inputs, outs, dC_douts):
-        if not isinstance(outs, (list, tuple)):
+        if not isinstance(outs, list | tuple):
             outs = [outs]
         # `grad_step` equals the number of steps the original scan node has
         # done (if the original scan is a while loop than this number is the
@@ -2991,7 +2990,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             allow_gc=self.allow_gc,
         )
         outputs = local_op(*outer_inputs)
-        if not isinstance(outputs, (list, tuple)):
+        if not isinstance(outputs, list | tuple):
             outputs = [outputs]
         # Re-order the gradients correctly
         gradients = [DisconnectedType()()]
@@ -3136,7 +3135,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         if info.n_shared_outs > 0:
             rop_self_outputs = rop_self_outputs[: -info.n_shared_outs]
         rop_outs = Rop(rop_self_outputs, rop_of_inputs, inner_eval_points)
-        if not isinstance(rop_outs, (list, tuple)):
+        if not isinstance(rop_outs, list | tuple):
             rop_outs = [rop_outs]
         # Step 2. Figure out what corresponds to what in the scan
 
@@ -3308,7 +3307,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             allow_gc=self.allow_gc,
         )
         outputs = local_op(*scan_inputs)
-        if not isinstance(outputs, (list, tuple)):
+        if not isinstance(outputs, list | tuple):
             outputs = [outputs]
         # Select only the result of the R_op results
         final_outs = []

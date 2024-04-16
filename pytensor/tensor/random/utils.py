@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from functools import wraps
 from itertools import zip_longest
 from types import ModuleType
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -150,14 +150,14 @@ def explicit_expand_dims(
 
 
 def normalize_size_param(
-    size: Optional[Union[int, np.ndarray, Variable, Sequence]],
+    size: int | np.ndarray | Variable | Sequence | None,
 ) -> Variable:
     """Create an PyTensor value for a ``RandomVariable`` ``size`` parameter."""
     if size is None:
         size = constant([], dtype="int64")
     elif isinstance(size, int):
         size = as_tensor_variable([size], ndim=1)
-    elif not isinstance(size, (np.ndarray, Variable, Sequence)):
+    elif not isinstance(size, np.ndarray | Variable | Sequence):
         raise TypeError(
             "Parameter size must be None, an integer, or a sequence with integers."
         )
@@ -200,8 +200,8 @@ class RandomStream:
 
     def __init__(
         self,
-        seed: Optional[int] = None,
-        namespace: Optional[ModuleType] = None,
+        seed: int | None = None,
+        namespace: ModuleType | None = None,
         rng_ctor: Literal[
             np.random.RandomState, np.random.Generator
         ] = np.random.default_rng,
@@ -320,9 +320,9 @@ def supp_shape_from_ref_param_shape(
     *,
     ndim_supp: int,
     dist_params: Sequence[Variable],
-    param_shapes: Optional[Sequence[tuple[ScalarVariable, ...]]] = None,
+    param_shapes: Sequence[tuple[ScalarVariable, ...]] | None = None,
     ref_param_idx: int,
-) -> Union[TensorVariable, tuple[ScalarVariable, ...]]:
+) -> TensorVariable | tuple[ScalarVariable, ...]:
     """Extract the support shape of a multivariate `RandomVariable` from the shape of a reference parameter.
 
     Several multivariate `RandomVariable`s have a support shape determined by the last dimensions of a parameter.

@@ -2,15 +2,12 @@ import copy
 import sys
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
-    Optional,
     Protocol,
     TypeVar,
-    Union,
     cast,
 )
 
@@ -31,7 +28,7 @@ if TYPE_CHECKING:
     from pytensor.graph.fg import FunctionGraph
     from pytensor.graph.type import Type
 
-StorageCellType = list[Optional[Any]]
+StorageCellType = list[Any | None]
 StorageMapType = dict[Variable, StorageCellType]
 ComputeMapType = dict[Variable, list[bool]]
 InputStorageType = list[StorageCellType]
@@ -46,8 +43,8 @@ C = TypeVar("C", bound=Callable)
 
 
 class ThunkType(Protocol[C]):
-    inputs: list[list[Optional[list[Any]]]]
-    outputs: list[list[Optional[list[Any]]]]
+    inputs: list[list[list[Any] | None]]
+    outputs: list[list[list[Any] | None]]
     lazy: bool
     __call__: C
     perform: PerformMethodType
@@ -156,7 +153,7 @@ class Op(MetaObject):
 
     """
 
-    default_output: Optional[int] = None
+    default_output: int | None = None
     """
     An ``int`` that specifies which output :meth:`Op.__call__` should return.  If
     ``None``, then all outputs are returned.
@@ -196,8 +193,8 @@ class Op(MetaObject):
 
     """
 
-    itypes: Optional[Sequence["Type"]] = None
-    otypes: Optional[Sequence["Type"]] = None
+    itypes: Sequence["Type"] | None = None
+    otypes: Sequence["Type"] | None = None
 
     _output_type_depends_on_input_value = False
     """
@@ -250,7 +247,7 @@ class Op(MetaObject):
             )
         return Apply(self, inputs, [o() for o in self.otypes])
 
-    def __call__(self, *inputs: Any, **kwargs) -> Union[Variable, list[Variable]]:
+    def __call__(self, *inputs: Any, **kwargs) -> Variable | list[Variable]:
         r"""Construct an `Apply` node using :meth:`Op.make_node` and return its outputs.
 
         This method is just a wrapper around :meth:`Op.make_node`.
@@ -400,7 +397,7 @@ class Op(MetaObject):
         return self.grad(inputs, output_grads)
 
     def R_op(
-        self, inputs: list[Variable], eval_points: Union[Variable, list[Variable]]
+        self, inputs: list[Variable], eval_points: Variable | list[Variable]
     ) -> list[Variable]:
         r"""Construct a graph for the R-operator.
 
@@ -483,9 +480,9 @@ class Op(MetaObject):
     def prepare_node(
         self,
         node: Apply,
-        storage_map: Optional[StorageMapType],
-        compute_map: Optional[ComputeMapType],
-        impl: Optional[str],
+        storage_map: StorageMapType | None,
+        compute_map: ComputeMapType | None,
+        impl: str | None,
     ) -> None:
         """Make any special modifications that the `Op` needs before doing :meth:`Op.make_thunk`.
 
@@ -540,7 +537,7 @@ class Op(MetaObject):
         storage_map: StorageMapType,
         compute_map: ComputeMapType,
         no_recycling: list[Variable],
-        impl: Optional[str] = None,
+        impl: str | None = None,
     ) -> ThunkType:
         r"""Create a thunk.
 
@@ -679,7 +676,7 @@ def missing_test_message(msg: str) -> None:
         assert action in ("ignore", "off")
 
 
-def get_test_values(*args: Variable) -> Union[Any, list[Any]]:
+def get_test_values(*args: Variable) -> Any | list[Any]:
     r"""Get test values for multiple `Variable`\s.
 
     Intended use:

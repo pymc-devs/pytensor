@@ -5,7 +5,6 @@ import sys
 import warnings
 from importlib import reload
 from types import ModuleType
-from typing import Optional
 
 import pytensor
 from pytensor.compile.compilelock import lock_ctx
@@ -17,7 +16,7 @@ _logger = logging.getLogger(__file__)
 
 force_compile = False
 version = 0.212  # must match constant returned in function get_version()
-lazylinker_ext: Optional[ModuleType] = None
+lazylinker_ext: ModuleType | None = None
 
 
 def try_import():

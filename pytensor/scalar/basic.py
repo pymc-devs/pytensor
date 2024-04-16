@@ -16,10 +16,9 @@ from collections.abc import Callable, Mapping
 from copy import copy
 from itertools import chain
 from textwrap import dedent
-from typing import Any, Optional, Union
+from typing import Any, TypeAlias
 
 import numpy as np
-from typing_extensions import TypeAlias
 
 import pytensor
 from pytensor import printing
@@ -138,7 +137,7 @@ class NumpyAutocaster:
 
     def __call__(self, x):
         # Make sure we only deal with scalars.
-        assert isinstance(x, (int, builtins.float)) or (
+        assert isinstance(x, int | builtins.float) or (
             isinstance(x, np.ndarray) and x.ndim == 0
         )
 
@@ -268,7 +267,7 @@ def convert(x, dtype=None):
             x_ = np.asarray(x)
             if x_.size == 0 and not hasattr(x, "dtype"):
                 x_ = np.asarray(x, dtype=config.floatX)
-    assert issubclass(type(x_), (np.ndarray, np.memmap))
+    assert issubclass(type(x_), np.ndarray | np.memmap)
     return x_
 
 
@@ -322,7 +321,7 @@ class ScalarType(CType, HasDataType, HasShape):
                 allow_downcast
                 or (
                     allow_downcast is None
-                    and isinstance(data, (float, np.floating))
+                    and isinstance(data, float | np.floating)
                     and self.dtype == config.floatX
                 )
                 or np.array_equal(data, converted_data, equal_nan=True)
@@ -868,7 +867,7 @@ def constant(x, name=None, dtype=None) -> ScalarConstant:
     return ScalarConstant(get_scalar_type(str(x.dtype)), x, name=name)
 
 
-def as_scalar(x: Any, name: Optional[str] = None) -> ScalarVariable:
+def as_scalar(x: Any, name: str | None = None) -> ScalarVariable:
     from pytensor.tensor.basic import scalar_from_tensor
     from pytensor.tensor.type import TensorType
 
@@ -979,7 +978,7 @@ class transfer_type(MetaObject):
     __props__ = ("transfer",)
 
     def __init__(self, *transfer):
-        assert all(isinstance(x, (int, str)) or x is None for x in transfer)
+        assert all(isinstance(x, int | str) or x is None for x in transfer)
         self.transfer = transfer
 
     def __str__(self):
@@ -1069,7 +1068,7 @@ class unary_out_lookup(MetaObject):
             rval = self.tbl[types]
         except Exception:
             raise TypeError(types)
-        if isinstance(types, (list, tuple)):
+        if isinstance(types, list | tuple):
             return rval
         else:
             return [rval]
@@ -1123,7 +1122,7 @@ class ScalarOp(COp):
     def output_types(self, types):
         if hasattr(self, "output_types_preference"):
             variables = self.output_types_preference(*types)
-            if not isinstance(variables, (list, tuple)) or any(
+            if not isinstance(variables, list | tuple) or any(
                 not isinstance(x, CType) for x in variables
             ):
                 raise TypeError(
@@ -1242,8 +1241,8 @@ class ScalarOp(COp):
 
 class UnaryScalarOp(ScalarOp):
     nin = 1
-    amd_float32: Optional[str] = None
-    amd_float64: Optional[str] = None
+    amd_float32: str | None = None
+    amd_float64: str | None = None
 
     def c_code_contiguous(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -1282,9 +1281,9 @@ class BinaryScalarOp(ScalarOp):
     # One may define in subclasses the following fields:
     #   - `commutative`: whether op(a, b) == op(b, a)
     #   - `associative`: whether op(op(a, b), c) == op(a, op(b, c))
-    commutative: Optional[builtins.bool] = None
-    associative: Optional[builtins.bool] = None
-    identity: Optional[Union[builtins.bool, builtins.float, builtins.int]] = None
+    commutative: builtins.bool | None = None
+    associative: builtins.bool | None = None
+    identity: builtins.bool | builtins.float | builtins.int | None = None
     """
     For an associative operation, the identity object corresponds to the neutral
     element. For instance, it will be ``0`` for addition, ``1`` for multiplication,

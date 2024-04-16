@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 _logger = logging.getLogger("pytensor.link.c.basic")
 
 
-def get_module_cache(init_args: Optional[dict[str, Any]] = None) -> "ModuleCache":
+def get_module_cache(init_args: dict[str, Any] | None = None) -> "ModuleCache":
     """
 
     Parameters
@@ -492,7 +492,7 @@ def apply_policy(fgraph, policy, r, name, sub):
         C{policy[0](r) + policy[1](r) + ...}.
 
     """
-    if isinstance(policy, (list, tuple)):
+    if isinstance(policy, list | tuple):
         ret = ""
         for sub_policy in policy:
             ret += sub_policy(fgraph, r, name, sub)

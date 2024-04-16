@@ -109,7 +109,7 @@ def eval_outputs(outputs, ops=(), mode=None):
     variables = f()
     if ops:
         assert any(isinstance(node.op, ops) for node in f.maker.fgraph.apply_nodes)
-    if isinstance(variables, (tuple, list)) and len(variables) == 1:
+    if isinstance(variables, tuple | list) and len(variables) == 1:
         return variables[0]
     return variables
 
@@ -504,7 +504,7 @@ def makeTester(
                     exc.args += (err_msg,)
                     raise
 
-                if not isinstance(expecteds, (list, tuple)):
+                if not isinstance(expecteds, list | tuple):
                     expecteds = (expecteds,)
 
                 for i, (variable, expected) in enumerate(zip(variables, expecteds)):
@@ -621,7 +621,7 @@ def makeTester(
                     # rounding error in that case.
                 else:
                     expecteds = self.expected(*inputs)
-                if not isinstance(expecteds, (list, tuple)):
+                if not isinstance(expecteds, list | tuple):
                     expecteds = (expecteds,)
 
                 out_grad_vars = []

@@ -1,6 +1,5 @@
 from collections.abc import Sequence
 from itertools import chain
-from typing import Optional
 
 from pytensor.compile import rebuild_collect_shared
 from pytensor.graph.basic import Constant, Variable, clone
@@ -53,8 +52,8 @@ class ScalarLoop(ScalarInnerGraphOp):
         self,
         init: Sequence[Variable],
         update: Sequence[Variable],
-        constant: Optional[Sequence[Variable]] = None,
-        until: Optional[Variable] = None,
+        constant: Sequence[Variable] | None = None,
+        until: Variable | None = None,
         name="ScalarLoop",
     ):
         if constant is None:

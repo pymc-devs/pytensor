@@ -448,14 +448,12 @@ def test_local_subtensor_remove_broadcastable_index():
     for elem in f.maker.fgraph.toposort():
         assert not isinstance(
             elem.op,
-            (
-                Subtensor,
-                AdvancedSubtensor,
-                AdvancedSubtensor1,
-                IncSubtensor,
-                AdvancedIncSubtensor,
-                AdvancedIncSubtensor1,
-            ),
+            Subtensor
+            | AdvancedSubtensor
+            | AdvancedSubtensor1
+            | IncSubtensor
+            | AdvancedIncSubtensor
+            | AdvancedIncSubtensor1,
         )
     rng = np.random.default_rng(seed=utt.fetch_seed())
     xn = rng.random((5, 5))
@@ -1515,7 +1513,7 @@ class TestLocalAdvSub1AdvIncSub1:
             utt.assert_allclose(dy, res)
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 1
-            assert isinstance(topo[0].op, (DeepCopyOp, Elemwise))
+            assert isinstance(topo[0].op, DeepCopyOp | Elemwise)
 
             # inc_subtensor(data[idx], y)
             inc = inc_subtensor(x[idx], y)
@@ -1806,11 +1804,7 @@ def test_local_IncSubtensor_serialize():
             inp.owner
             and isinstance(
                 inp.owner.op,
-                (
-                    IncSubtensor,
-                    AdvancedIncSubtensor,
-                    AdvancedIncSubtensor1,
-                ),
+                IncSubtensor | AdvancedIncSubtensor | AdvancedIncSubtensor1,
             )
             for inp in a.inputs
         )

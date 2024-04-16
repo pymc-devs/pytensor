@@ -83,7 +83,7 @@ class JAXLinker(JITLinker):
         thunk_inputs = []
         for n in self.fgraph.inputs:
             sinput = storage_map[n]
-            if isinstance(sinput[0], (RandomState, Generator)):
+            if isinstance(sinput[0], RandomState | Generator):
                 new_value = jax_typify(
                     sinput[0], dtype=getattr(sinput[0], "dtype", None)
                 )

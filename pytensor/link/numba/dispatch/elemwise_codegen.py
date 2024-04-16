@@ -180,13 +180,11 @@ def make_loop_call(
 
     inner_codegen = context.get_function(scalar_func, scalar_signature)
 
-    if isinstance(
-        scalar_signature.args[0], (types.StarArgTuple, types.StarArgUniTuple)
-    ):
+    if isinstance(scalar_signature.args[0], types.StarArgTuple | types.StarArgUniTuple):
         input_vals = [context.make_tuple(builder, scalar_signature.args[0], input_vals)]
     output_values = inner_codegen(builder, input_vals)
 
-    if isinstance(scalar_signature.return_type, (types.Tuple, types.UniTuple)):
+    if isinstance(scalar_signature.return_type, types.Tuple | types.UniTuple):
         output_values = cgutils.unpack_tuple(builder, output_values)
         func_output_types = scalar_signature.return_type.types
     else:

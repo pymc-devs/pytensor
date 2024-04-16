@@ -1,6 +1,7 @@
 import warnings
+from collections.abc import Callable
 from functools import partial
-from typing import Callable, Literal, Optional, Union
+from typing import Literal
 
 import numpy as np
 from numpy.core.numeric import normalize_axis_tuple  # type: ignore
@@ -728,8 +729,8 @@ VALID_ORD = Literal["fro", "f", "nuc", "inf", "-inf", 0, 1, -1, 2, -2]
 
 def norm(
     x: ptb.TensorVariable,
-    ord: Optional[Union[float, VALID_ORD]] = None,
-    axis: Optional[Union[int, tuple[int, ...]]] = None,
+    ord: float | VALID_ORD | None = None,
+    axis: int | tuple[int, ...] | None = None,
     keepdims: bool = False,
 ):
     """

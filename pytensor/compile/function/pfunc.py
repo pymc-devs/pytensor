@@ -5,7 +5,7 @@ Provide a simple user friendly API.
 
 from collections.abc import Sequence
 from copy import copy
-from typing import Optional, Union, overload
+from typing import overload
 
 from pytensor.compile.function.types import Function, UnusedInputError, orig_function
 from pytensor.compile.io import In, Out
@@ -105,7 +105,7 @@ def rebuild_collect_shared(
 
 
 def rebuild_collect_shared(
-    outputs: Union[Sequence[Variable], Variable, Out, Sequence[Out]],
+    outputs: Sequence[Variable] | Variable | Out | Sequence[Out],
     inputs=None,
     replace=None,
     updates=None,
@@ -115,7 +115,7 @@ def rebuild_collect_shared(
     clone_inner_graphs=False,
 ) -> tuple[
     list[Variable],
-    Union[list[Variable], Variable, Out, list[Out]],
+    list[Variable] | Variable | Out | list[Out],
     tuple[
         dict[Variable, Variable],
         dict[SharedVariable, Variable],
@@ -376,7 +376,7 @@ def pfunc(
     profile=None,
     on_unused_input=None,
     output_keys=None,
-    fgraph: Optional[FunctionGraph] = None,
+    fgraph: FunctionGraph | None = None,
 ) -> Function:
     """
     Function-constructor for graphs with shared variables.
@@ -484,7 +484,7 @@ def construct_pfunc_ins_and_outs(
     no_default_updates=False,
     rebuild_strict=True,
     allow_input_downcast=None,
-    fgraph: Optional[FunctionGraph] = None,
+    fgraph: FunctionGraph | None = None,
 ):
     """Construct inputs and outputs for `pfunc`.
 
@@ -512,7 +512,7 @@ def construct_pfunc_ins_and_outs(
     if givens is None:
         givens = []
 
-    if not isinstance(params, (list, tuple)):
+    if not isinstance(params, list | tuple):
         raise TypeError("The `params` argument must be a list or a tuple")
 
     if not isinstance(no_default_updates, bool) and not isinstance(
@@ -521,7 +521,7 @@ def construct_pfunc_ins_and_outs(
         raise TypeError("The `no_default_update` argument must be a boolean or list")
 
     if len(updates) > 0 and not all(
-        isinstance(pair, (tuple, list))
+        isinstance(pair, tuple | list)
         and len(pair) == 2
         and isinstance(pair[0], Variable)
         for pair in iter_over_pairs(updates)
@@ -575,7 +575,7 @@ def construct_pfunc_ins_and_outs(
         if outputs is None:
             out_list = []
         else:
-            if isinstance(outputs, (list, tuple)):
+            if isinstance(outputs, list | tuple):
                 out_list = list(outputs)
             else:
                 out_list = [outputs]
@@ -598,7 +598,7 @@ def construct_pfunc_ins_and_outs(
         if outputs is None:
             new_outputs = []
         else:
-            if isinstance(outputs, (list, tuple)):
+            if isinstance(outputs, list | tuple):
                 new_outputs = cloned_extended_outputs[: len(outputs)]
             else:
                 new_outputs = cloned_extended_outputs[0]

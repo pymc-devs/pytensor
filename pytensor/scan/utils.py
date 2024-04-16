@@ -4,9 +4,9 @@ import copy
 import dataclasses
 import logging
 from collections import OrderedDict, namedtuple
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from itertools import chain
-from typing import TYPE_CHECKING, Callable, Optional, Union
+from typing import TYPE_CHECKING
 from typing import cast as type_cast
 
 import numpy as np
@@ -36,7 +36,7 @@ class InnerFunctionError(Exception):
 
 
 def safe_new(
-    x: Variable, tag: str = "", dtype: Optional[Union[str, np.dtype]] = None
+    x: Variable, tag: str = "", dtype: str | np.dtype | None = None
 ) -> Variable:
     """Clone variables.
 
@@ -593,7 +593,7 @@ class ScanArgs:
         _inner_inputs: Sequence[Variable],
         _inner_outputs: Sequence[Variable],
         info: "ScanInfo",
-        clone: Optional[bool] = True,
+        clone: bool | None = True,
     ):
         self.n_steps = outer_inputs[0]
         self.as_while = info.as_while
@@ -823,7 +823,7 @@ class ScanArgs:
         )
 
     def get_alt_field(
-        self, var_info: Union[Variable, FieldInfo], alt_prefix: str
+        self, var_info: Variable | FieldInfo, alt_prefix: str
     ) -> Variable:
         """Get the alternate input/output field for a given element of `ScanArgs`.
 
@@ -859,7 +859,7 @@ class ScanArgs:
 
     def find_among_fields(
         self, i: Variable, field_filter: Callable[[str], bool] = default_filter
-    ) -> Optional[FieldInfo]:
+    ) -> FieldInfo | None:
         """Find the type and indices of the field containing a given element.
 
         NOTE: This only returns the *first* field containing the given element.
@@ -911,7 +911,7 @@ class ScanArgs:
 
     def _remove_from_fields(
         self, i: Variable, field_filter: Callable[[str], bool] = default_filter
-    ) -> Optional[FieldInfo]:
+    ) -> FieldInfo | None:
         field_info = self.find_among_fields(i, field_filter=field_filter)
 
         if field_info is None:
@@ -925,7 +925,7 @@ class ScanArgs:
         return field_info
 
     def get_dependent_nodes(
-        self, i: Variable, seen: Optional[set[Variable]] = None
+        self, i: Variable, seen: set[Variable] | None = None
     ) -> set[Variable]:
         if seen is None:
             seen = {i}
@@ -999,13 +999,13 @@ class ScanArgs:
 
     def remove_from_fields(
         self, i: Variable, rm_dependents: bool = True
-    ) -> list[tuple[Variable, Optional[FieldInfo]]]:
+    ) -> list[tuple[Variable, FieldInfo | None]]:
         if rm_dependents:
             vars_to_remove = self.get_dependent_nodes(i) | {i}
         else:
             vars_to_remove = {i}
 
-        rm_info: list[tuple[Variable, Optional[FieldInfo]]] = []
+        rm_info: list[tuple[Variable, FieldInfo | None]] = []
         for v in vars_to_remove:
             dependent_rm_info = self._remove_from_fields(v)
             rm_info.append((v, dependent_rm_info))

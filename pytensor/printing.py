@@ -5,12 +5,12 @@ import logging
 import os
 import sys
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from copy import copy
 from functools import reduce, singledispatch
 from io import StringIO
-from typing import Any, Callable, Literal, Optional, TextIO, Union
+from typing import Any, Literal, TextIO
 
 import numpy as np
 
@@ -103,23 +103,24 @@ def op_debug_information(op: Op, node: Apply) -> dict[Apply, dict[Variable, str]
 
 
 def debugprint(
-    graph_like: Union[
-        Union[Variable, Apply, Function, FunctionGraph],
-        Sequence[Union[Variable, Apply, Function, FunctionGraph]],
-    ],
+    graph_like: Variable
+    | Apply
+    | Function
+    | FunctionGraph
+    | Sequence[Variable | Apply | Function | FunctionGraph],
     depth: int = -1,
     print_type: bool = False,
-    file: Optional[Union[Literal["str"], TextIO]] = None,
+    file: Literal["str"] | TextIO | None = None,
     id_type: IDTypesType = "CHAR",
     stop_on_name: bool = False,
-    done: Optional[dict[Union[Literal["output"], Variable, Apply], str]] = None,
+    done: dict[Literal["output"] | Variable | Apply, str] | None = None,
     print_storage: bool = False,
-    used_ids: Optional[dict[Union[Literal["output"], Variable, Apply], str]] = None,
+    used_ids: dict[Literal["output"] | Variable | Apply, str] | None = None,
     print_op_info: bool = False,
     print_destroy_map: bool = False,
     print_view_map: bool = False,
     print_fgraph_inputs: bool = False,
-) -> Union[str, TextIO]:
+) -> str | TextIO:
     r"""Print a graph as text.
 
     Each line printed represents a `Variable` in a graph.
@@ -185,7 +186,7 @@ def debugprint(
         raise Exception("depth parameter must be an int")
 
     if file == "str":
-        _file: Union[TextIO, StringIO] = StringIO()
+        _file: TextIO | StringIO = StringIO()
     elif file is None:
         _file = sys.stdout
     else:
@@ -199,11 +200,11 @@ def debugprint(
 
     inputs_to_print = []
     outputs_to_print = []
-    profile_list: list[Optional[Any]] = []
-    topo_orders: list[Optional[list[Apply]]] = []
-    storage_maps: list[Optional[StorageMapType]] = []
+    profile_list: list[Any | None] = []
+    topo_orders: list[list[Apply] | None] = []
+    storage_maps: list[StorageMapType | None] = []
 
-    if isinstance(graph_like, (list, tuple, set)):
+    if isinstance(graph_like, list | tuple | set):
         graphs = graph_like
     else:
         graphs = (graph_like,)
@@ -242,9 +243,9 @@ def debugprint(
             )
             topo = obj.toposort()
             topo_orders.extend([topo for item in obj.outputs])
-        elif isinstance(obj, (int, float, np.ndarray)):
+        elif isinstance(obj, int | float | np.ndarray):
             print(obj, file=_file)
-        elif isinstance(obj, (In, Out)):
+        elif isinstance(obj, In | Out):
             outputs_to_print.append(obj.variable)
             profile_list.append(None)
             storage_maps.append(None)
@@ -465,24 +466,24 @@ def _debugprint(
     var: Variable,
     prefix: str = "",
     depth: int = -1,
-    done: Optional[dict[Union[Literal["output"], Variable, Apply], str]] = None,
+    done: dict[Literal["output"] | Variable | Apply, str] | None = None,
     print_type: bool = False,
     file: TextIO = sys.stdout,
     print_destroy_map: bool = False,
     print_view_map: bool = False,
-    topo_order: Optional[Sequence[Apply]] = None,
+    topo_order: Sequence[Apply] | None = None,
     id_type: IDTypesType = "CHAR",
     stop_on_name: bool = False,
-    prefix_child: Optional[str] = None,
-    inner_graph_ops: Optional[list[Variable]] = None,
-    profile: Optional[ProfileStats] = None,
-    inner_to_outer_inputs: Optional[dict[Variable, Variable]] = None,
-    storage_map: Optional[StorageMapType] = None,
-    used_ids: Optional[dict[Union[Literal["output"], Variable, Apply], str]] = None,
-    op_information: Optional[dict[Apply, dict[Variable, str]]] = None,
-    parent_node: Optional[Apply] = None,
+    prefix_child: str | None = None,
+    inner_graph_ops: list[Variable] | None = None,
+    profile: ProfileStats | None = None,
+    inner_to_outer_inputs: dict[Variable, Variable] | None = None,
+    storage_map: StorageMapType | None = None,
+    used_ids: dict[Literal["output"] | Variable | Apply, str] | None = None,
+    op_information: dict[Apply, dict[Variable, str]] | None = None,
+    parent_node: Apply | None = None,
     print_op_info: bool = False,
-    inner_graph_node: Optional[Apply] = None,
+    inner_graph_node: Apply | None = None,
     is_inner_graph_header: bool = False,
 ) -> TextIO:
     r"""Print the graph represented by `var`.
@@ -559,7 +560,7 @@ def _debugprint(
         op_information = {}
 
     def get_id_str(
-        obj: Union[Literal["output"], Apply, Variable], get_printed: bool = True
+        obj: Literal["output"] | Apply | Variable, get_printed: bool = True
     ) -> str:
         id_str: str = ""
         if obj in _used_ids:
@@ -932,7 +933,7 @@ class PatternPrinter(Printer):
 
 
 class FunctionPrinter(Printer):
-    def __init__(self, names: list[str], keywords: Optional[list[str]] = None):
+    def __init__(self, names: list[str], keywords: list[str] | None = None):
         """
         Parameters
         ----------
@@ -1044,16 +1045,16 @@ default_printer = DefaultPrinter()
 
 class PPrinter(Printer):
     def __init__(self):
-        self.printers: list[tuple[Union[Op, type, Callable], Printer]] = []
-        self.printers_dict: dict[Union[Op, type, Callable], Printer] = {}
+        self.printers: list[tuple[Op | type | Callable, Printer]] = []
+        self.printers_dict: dict[Op | type | Callable, Printer] = {}
 
-    def assign(self, condition: Union[Op, type, Callable], printer: Printer):
-        if isinstance(condition, (Op, type)):
+    def assign(self, condition: Op | type | Callable, printer: Printer):
+        if isinstance(condition, Op | type):
             self.printers_dict[condition] = printer
         else:
             self.printers.insert(0, (condition, printer))
 
-    def process(self, r: Variable, pstate: Optional[PrinterState] = None) -> str:
+    def process(self, r: Variable, pstate: PrinterState | None = None) -> str:
         if pstate is None:
             pstate = PrinterState(pprinter=self)
         elif isinstance(pstate, dict):
@@ -1082,9 +1083,9 @@ class PPrinter(Printer):
     def process_graph(self, inputs, outputs, updates=None, display_inputs=False):
         if updates is None:
             updates = {}
-        if not isinstance(inputs, (list, tuple)):
+        if not isinstance(inputs, list | tuple):
             inputs = [inputs]
-        if not isinstance(outputs, (list, tuple)):
+        if not isinstance(outputs, list | tuple):
             outputs = [outputs]
         current = None
         if display_inputs:
@@ -1130,7 +1131,7 @@ class PPrinter(Printer):
     def __call__(self, *args):
         if len(args) == 1:
             return self.process(*args)
-        elif len(args) == 2 and isinstance(args[1], (PrinterState, dict)):
+        elif len(args) == 2 and isinstance(args[1], PrinterState | dict):
             return self.process(*args)
         elif len(args) > 2:
             return self.process_graph(*args)
@@ -1301,7 +1302,7 @@ def pydotprint(
             fct = [fct]
         elif isinstance(fct, Apply):
             fct = fct.outputs
-        assert isinstance(fct, (list, tuple))
+        assert isinstance(fct, list | tuple)
         assert all(isinstance(v, Variable) for v in fct)
         fct = FunctionGraph(inputs=list(graph_inputs(fct)), outputs=fct)
         profile = None
@@ -1845,10 +1846,10 @@ def hex_digest(x):
 
 
 def get_node_by_id(
-    graphs: Union[Variable, Sequence[Variable], Function, FunctionGraph],
+    graphs: Variable | Sequence[Variable] | Function | FunctionGraph,
     target_var_id: str,
     id_types: IDTypesType = "CHAR",
-) -> Optional[Union[Literal["output"], Variable, Apply]]:
+) -> Literal["output"] | Variable | Apply | None:
     r"""Get `Apply` nodes or `Variable`\s in a graph using their `debugprint` IDs.
 
     Parameters
@@ -1867,7 +1868,7 @@ def get_node_by_id(
     """
     from pytensor.printing import debugprint
 
-    used_ids: dict[Union[Literal["output"], Variable, Apply], str] = {}
+    used_ids: dict[Literal["output"] | Variable | Apply, str] = {}
 
     _ = debugprint(graphs, file="str", used_ids=used_ids, id_type=id_types)
 

@@ -20,8 +20,10 @@ import tempfile
 import textwrap
 import time
 import warnings
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from io import BytesIO, StringIO
-from typing import TYPE_CHECKING, Callable, Optional, Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 from setuptools._distutils.sysconfig import (
@@ -52,22 +54,22 @@ if TYPE_CHECKING:
 
 
 class StdLibDirsAndLibsType(Protocol):
-    data: Optional[tuple[list[str], ...]]
-    __call__: Callable[[], Optional[tuple[list[str], ...]]]
+    data: tuple[list[str], ...] | None
+    __call__: Callable[[], tuple[list[str], ...] | None]
 
 
 def is_StdLibDirsAndLibsType(
-    fn: Callable[[], Optional[tuple[list[str], ...]]],
+    fn: Callable[[], tuple[list[str], ...] | None],
 ) -> StdLibDirsAndLibsType:
     return cast(StdLibDirsAndLibsType, fn)
 
 
 class GCCLLVMType(Protocol):
-    is_llvm: Optional[bool]
-    __call__: Callable[[], Optional[bool]]
+    is_llvm: bool | None
+    __call__: Callable[[], bool | None]
 
 
-def is_GCCLLVMType(fn: Callable[[], Optional[bool]]) -> GCCLLVMType:
+def is_GCCLLVMType(fn: Callable[[], bool | None]) -> GCCLLVMType:
     return cast(GCCLLVMType, fn)
 
 
@@ -270,6 +272,26 @@ def _get_ext_suffix():
     return dist_suffix
 
 
+def add_gcc_dll_directory() -> AbstractContextManager[None]:
+    """On Windows, detect and add the location of gcc to the DLL search directory.
+
+    On non-Windows platforms this is a noop.
+
+    Returns a context manager to be used with `with`. The entry is removed when the
+    context manager is closed. See <https://github.com/pymc-devs/pytensor/pull/678>.
+    """
+    cm: AbstractContextManager[None] = nullcontext()
+    if (sys.platform == "win32") & (hasattr(os, "add_dll_directory")):
+        gcc_path = shutil.which("gcc")
+        if gcc_path is not None:
+            # Since add_dll_directory is only defined on windows, we need
+            # the ignore[attr-defined] on non-Windows platforms.
+            # For Windows we need ignore[unused-ignore] since the ignore
+            # is unnecessary with that platform.
+            cm = os.add_dll_directory(os.path.dirname(gcc_path))  # type: ignore[attr-defined,unused-ignore]
+    return cm
+
+
 def dlimport(fullpath, suffix=None):
     """
     Dynamically load a .so, .pyd, .dll, or .py file.
@@ -319,24 +341,20 @@ def dlimport(fullpath, suffix=None):
     _logger.debug(f"module_name {module_name}")
 
     sys.path[0:0] = [workdir]  # insert workdir at beginning (temporarily)
-    # Explicitly add gcc dll directory on Python 3.8+ on Windows
-    if (sys.platform == "win32") & (hasattr(os, "add_dll_directory")):
-        gcc_path = shutil.which("gcc")
-        if gcc_path is not None:
-            os.add_dll_directory(os.path.dirname(gcc_path))
-    global import_time
-    try:
-        importlib.invalidate_caches()
-        t0 = time.perf_counter()
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message="numpy.ndarray size changed")
-            rval = __import__(module_name, {}, {}, [module_name])
-        t1 = time.perf_counter()
-        import_time += t1 - t0
-        if not rval:
-            raise Exception("__import__ failed", fullpath)
-    finally:
-        del sys.path[0]
+    with add_gcc_dll_directory():
+        global import_time
+        try:
+            importlib.invalidate_caches()
+            t0 = time.perf_counter()
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="numpy.ndarray size changed")
+                rval = __import__(module_name, {}, {}, [module_name])
+            t1 = time.perf_counter()
+            import_time += t1 - t0
+            if not rval:
+                raise Exception("__import__ failed", fullpath)
+        finally:
+            del sys.path[0]
 
     assert fullpath.startswith(rval.__file__)
     return rval
@@ -1616,7 +1634,7 @@ def _rmtree(
                 )
 
 
-_module_cache: Optional[ModuleCache] = None
+_module_cache: ModuleCache | None = None
 
 
 def get_module_cache(dirname: str, init_args=None) -> ModuleCache:
@@ -1685,7 +1703,7 @@ def std_include_dirs():
 
 
 @is_StdLibDirsAndLibsType
-def std_lib_dirs_and_libs() -> Optional[tuple[list[str], ...]]:
+def std_lib_dirs_and_libs() -> tuple[list[str], ...] | None:
     # We cache the results as on Windows, this trigger file access and
     # this method is called many times.
     if std_lib_dirs_and_libs.data is not None:
@@ -1799,7 +1817,7 @@ def gcc_version():
 
 
 @is_GCCLLVMType
-def gcc_llvm() -> Optional[bool]:
+def gcc_llvm() -> bool | None:
     """
     Detect if the g++ version used is the llvm one or not.
 

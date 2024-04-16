@@ -1,6 +1,5 @@
 from collections.abc import Sequence
 from copy import copy
-from typing import Optional, Union
 
 import numpy as np
 
@@ -123,7 +122,7 @@ class RandomVariable(Op):
             "`_supp_shape_from_params` must be implemented for multivariate RVs"
         )
 
-    def rng_fn(self, rng, *args, **kwargs) -> Union[int, float, np.ndarray]:
+    def rng_fn(self, rng, *args, **kwargs) -> int | float | np.ndarray:
         """Sample a numeric random variate."""
         return getattr(rng, self.name)(*args, **kwargs)
 
@@ -135,8 +134,8 @@ class RandomVariable(Op):
         self,
         size: TensorVariable,
         dist_params: Sequence[TensorVariable],
-        param_shapes: Optional[Sequence[tuple[Variable, ...]]] = None,
-    ) -> Union[TensorVariable, tuple[ScalarVariable, ...]]:
+        param_shapes: Sequence[tuple[Variable, ...]] | None = None,
+    ) -> TensorVariable | tuple[ScalarVariable, ...]:
         """Compute the output shape given the size and distribution parameters.
 
         Parameters

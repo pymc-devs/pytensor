@@ -203,7 +203,7 @@ def sparse_random_inputs(
     assert 0 <= p <= 1
     assert len(shape) == 2
     assert out_dtype in sparse.all_dtypes
-    assert gap is None or isinstance(gap, (tuple, list))
+    assert gap is None or isinstance(gap, tuple | list)
     if gap is not None and out_dtype.startswith("u"):
         assert gap[0] >= 0
 
@@ -327,7 +327,7 @@ def verify_grad_sparse(op, pt, structured=False, *args, **kwargs):
             dpt.append(p)
             iconv.append(conv_none)
     output = op(*[as_sparse_or_tensor_variable(p) for p in pt])
-    if isinstance(output, (list, tuple)):
+    if isinstance(output, list | tuple):
         raise NotImplementedError("verify_grad can't deal with " "multiple outputs")
     if _is_sparse_variable(output):
         oconv = DenseFromSparse(structured=structured)
@@ -1586,7 +1586,7 @@ class TestDots(utt.InferShapeTester):
                 assert np.all(f_a(vx, vy) == f_b(vx, vy))
                 topo = f_a.maker.fgraph.toposort()
                 assert not any(
-                    isinstance(node.op, (Dot, Usmm, UsmmCscDense)) for node in topo
+                    isinstance(node.op, Dot | Usmm | UsmmCscDense) for node in topo
                 )
 
     def test_int32_dtype(self):
@@ -1861,7 +1861,7 @@ class TestUsmm:
             assert all(f_shape(a_data, x_data, y_data) == f_b_out.shape)
             topo = f_shape.maker.fgraph.toposort()
             assert not any(
-                isinstance(node.op, (Dot, Usmm, UsmmCscDense)) for node in topo
+                isinstance(node.op, Dot | Usmm | UsmmCscDense) for node in topo
             )
 
 

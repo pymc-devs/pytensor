@@ -1,7 +1,7 @@
 import builtins
 import warnings
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 from numpy.core.numeric import normalize_axis_tuple
@@ -148,7 +148,7 @@ class MaxAndArgmax(COp):
     _f16_ok = True
 
     def __init__(self, axis):
-        assert isinstance(axis, (tuple, list))
+        assert isinstance(axis, tuple | list)
         self.axis = tuple(axis)
 
     def get_params(self, node):
@@ -501,7 +501,7 @@ def makeKeepDims(x, y, axis):
 
     if axis is None:
         axis = list(range(x.type.ndim))
-    elif isinstance(axis, (int, np.integer)):
+    elif isinstance(axis, int | np.integer):
         axis = [axis]
     elif isinstance(axis, np.ndarray) and axis.ndim == 0:
         axis = [int(axis)]
@@ -542,11 +542,11 @@ def check_and_normalize_axes(x, axis):
     x = as_tensor_variable(x)
     if axis is None:
         axis = []
-    elif isinstance(axis, (int, np.integer)) or (
+    elif isinstance(axis, int | np.integer) or (
         isinstance(axis, np.ndarray) and axis.ndim == 0
     ):
         axis = [int(axis)]
-    elif isinstance(axis, (tuple, list, np.ndarray)):
+    elif isinstance(axis, tuple | list | np.ndarray):
         axis = [int(i) for i in axis]
     elif isinstance(axis, Variable):
         if NoneConst.equals(axis):
@@ -555,11 +555,11 @@ def check_and_normalize_axes(x, axis):
             raise TypeError(f"Computation needs a constant axis. Got {axis}")
         else:
             assert axis.dtype in integer_dtypes
-            if isinstance(axis.data, (int, np.integer)) or (
+            if isinstance(axis.data, int | np.integer) or (
                 isinstance(axis.data, np.ndarray) and axis.data.ndim == 0
             ):
                 axis = [int(axis.data)]
-            elif isinstance(axis.data, (list, np.ndarray)):
+            elif isinstance(axis.data, list | np.ndarray):
                 axis = [int(i) for i in axis.data]
     else:
         raise TypeError(
@@ -1653,7 +1653,7 @@ def mean(input, axis=None, dtype=None, op=False, keepdims=False, acc_dtype=None)
 
     if axis is None:
         axis = list(range(input.ndim))
-    elif isinstance(axis, (int, np.integer)):
+    elif isinstance(axis, int | np.integer):
         axis = [axis]
     elif isinstance(axis, np.ndarray) and axis.ndim == 0:
         axis = [int(axis)]
@@ -1713,7 +1713,7 @@ def var(input, axis=None, ddof=0, keepdims=False, corrected=False):
     input_ndim = input.type.ndim
     if axis is None:
         axis = list(range(input_ndim))
-    elif isinstance(axis, (int, np.integer)):
+    elif isinstance(axis, int | np.integer):
         axis = [axis]
     elif isinstance(axis, np.ndarray) and axis.ndim == 0:
         axis = [int(axis)]
@@ -2275,7 +2275,7 @@ def _tensordot_as_dot(a, b, axes, dot, batched):
 
 
 def tensordot(
-    a: TensorLike, b: TensorLike, axes: Union[int, Sequence[Sequence[int]]] = 2
+    a: TensorLike, b: TensorLike, axes: int | Sequence[Sequence[int]] = 2
 ) -> TensorVariable:
     """
     Compute tensor dot product along specified axes.

@@ -13,7 +13,7 @@ is a global operation with a scalar condition.
 
 from collections.abc import Sequence
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -108,7 +108,7 @@ class IfElse(_NoPythonOp):
         # of that ifelse are packed back into shape tuples.
         new_ts_inputs = []
         for ts_shape in ts_shapes:
-            if isinstance(ts_shape, (list, tuple)):
+            if isinstance(ts_shape, list | tuple):
                 new_ts_inputs += list(ts_shape)
             else:
                 # It can be None for generic objects
@@ -116,7 +116,7 @@ class IfElse(_NoPythonOp):
 
         new_fs_inputs = []
         for fs_shape in fs_shapes:
-            if isinstance(fs_shape, (list, tuple)):
+            if isinstance(fs_shape, list | tuple):
                 new_fs_inputs += list(fs_shape)
             else:
                 # It can be None for generic objects
@@ -307,7 +307,7 @@ class IfElse(_NoPythonOp):
                             if self.as_view:
                                 storage_map[out][0] = val
                             # Work around broken numpy deepcopy
-                            elif isinstance(val, (np.ndarray, np.memmap)):
+                            elif isinstance(val, np.ndarray | np.memmap):
                                 storage_map[out][0] = val.copy()
                             else:
                                 storage_map[out][0] = deepcopy(val)
@@ -327,7 +327,7 @@ class IfElse(_NoPythonOp):
                             # improves
                             # Work around broken numpy deepcopy
                             val = storage_map[f][0]
-                            if isinstance(val, (np.ndarray, np.memmap)):
+                            if isinstance(val, np.ndarray | np.memmap):
                                 storage_map[out][0] = val.copy()
                             else:
                                 storage_map[out][0] = deepcopy(val)
@@ -341,10 +341,10 @@ class IfElse(_NoPythonOp):
 
 def ifelse(
     condition: "TensorLike",
-    then_branch: Union[Any, Sequence[Any]],
-    else_branch: Union[Any, Sequence[Any]],
-    name: Optional[str] = None,
-) -> Union[Variable, Sequence[Variable]]:
+    then_branch: Any | Sequence[Any],
+    else_branch: Any | Sequence[Any],
+    name: str | None = None,
+) -> Variable | Sequence[Variable]:
     """Construct a graph for an ``if`` statement.
 
     Parameters
@@ -379,12 +379,12 @@ def ifelse(
     """
 
     rval_type = None
-    if isinstance(then_branch, (list, tuple)):
+    if isinstance(then_branch, list | tuple):
         rval_type = type(then_branch)
     else:
         then_branch = [then_branch]
 
-    if not isinstance(else_branch, (list, tuple)):
+    if not isinstance(else_branch, list | tuple):
         else_branch = [else_branch]
 
     if len(then_branch) != len(else_branch):
@@ -628,11 +628,11 @@ class CondMerge(GraphRewriter):
                 new_outs = new_ifelse(*new_ins, return_list=True)
                 new_outs = [clone_replace(x) for x in new_outs]
                 old_outs = []
-                if not isinstance(merging_node.outputs, (list, tuple)):
+                if not isinstance(merging_node.outputs, list | tuple):
                     old_outs += [merging_node.outputs]
                 else:
                     old_outs += merging_node.outputs
-                if not isinstance(proposal.outputs, (list, tuple)):
+                if not isinstance(proposal.outputs, list | tuple):
                     old_outs += [proposal.outputs]
                 else:
                     old_outs += proposal.outputs
@@ -727,11 +727,11 @@ def cond_merge_random_op(fgraph, main_node):
             )
             new_outs = new_ifelse(*new_ins, return_list=True)
             old_outs = []
-            if not isinstance(merging_node.outputs, (list, tuple)):
+            if not isinstance(merging_node.outputs, list | tuple):
                 old_outs += [merging_node.outputs]
             else:
                 old_outs += merging_node.outputs
-            if not isinstance(proposal.outputs, (list, tuple)):
+            if not isinstance(proposal.outputs, list | tuple):
                 old_outs += [proposal.outputs]
             else:
                 old_outs += proposal.outputs

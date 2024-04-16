@@ -6,7 +6,7 @@ import logging
 import time
 import warnings
 from itertools import chain
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -173,7 +173,7 @@ def std_fgraph(
     input_specs: list[SymbolicInput],
     output_specs: list[SymbolicOutput],
     accept_inplace: bool = False,
-    fgraph: Optional[FunctionGraph] = None,
+    fgraph: FunctionGraph | None = None,
     features: list[type[Feature]] = [PreserveVariableAttributes],
     force_clone=False,
 ) -> tuple[FunctionGraph, list[SymbolicOutput]]:
@@ -340,7 +340,7 @@ class Function:
         return_none: bool,
         output_keys,
         maker: "FunctionMaker",
-        name: Optional[str] = None,
+        name: str | None = None,
     ):
         """
         Parameters
@@ -1310,7 +1310,7 @@ class FunctionMaker:
         elif isinstance(input, Variable):
             # r -> SymbolicInput(variable=r)
             return SymbolicInput(input)
-        elif isinstance(input, (list, tuple)):
+        elif isinstance(input, list | tuple):
             # (r, u) -> SymbolicInput(variable=r, update=u)
             if len(input) == 2:
                 return SymbolicInput(input[0], update=input[1])
@@ -1495,10 +1495,10 @@ class FunctionMaker:
         if outputs is None:
             return_none = True
             outputs = []
-        if not isinstance(outputs, (list, tuple)):
+        if not isinstance(outputs, list | tuple):
             unpack_single = True
             outputs = [outputs]
-        if not isinstance(inputs, (list, tuple)):
+        if not isinstance(inputs, list | tuple):
             inputs = [inputs]
 
         # Wrap them in In or Out instances if needed.
@@ -1693,7 +1693,7 @@ def orig_function(
     profile=None,
     on_unused_input=None,
     output_keys=None,
-    fgraph: Optional[FunctionGraph] = None,
+    fgraph: FunctionGraph | None = None,
 ) -> Function:
     """
     Return a Function that will calculate the outputs from the inputs.
@@ -1734,14 +1734,14 @@ def orig_function(
     inputs = list(map(convert_function_input, inputs))
 
     if outputs is not None:
-        if isinstance(outputs, (list, tuple)):
+        if isinstance(outputs, list | tuple):
             outputs = list(map(FunctionMaker.wrap_out, outputs))
         else:
             outputs = FunctionMaker.wrap_out(outputs)
 
     defaults = [getattr(input, "value", None) for input in inputs]
 
-    if isinstance(mode, (list, tuple)):
+    if isinstance(mode, list | tuple):
         raise ValueError("We do not support the passing of multiple modes")
 
     fn = None
@@ -1797,7 +1797,7 @@ def convert_function_input(input):
         raise TypeError(f"A Constant instance is not a legal function input: {input}")
     elif isinstance(input, Variable):
         return In(input)
-    elif isinstance(input, (list, tuple)):
+    elif isinstance(input, list | tuple):
         orig = input
         if not input:
             raise TypeError(f"Nonsensical input specification: {input}")
@@ -1806,7 +1806,7 @@ def convert_function_input(input):
             input = input[1:]
         else:
             name = None
-        if isinstance(input[0], (list, tuple)):
+        if isinstance(input[0], list | tuple):
             if len(input[0]) != 2 or len(input) != 2:
                 raise TypeError(
                     f"Invalid input syntax: {orig} (check "
@@ -1843,7 +1843,7 @@ def convert_function_input(input):
             raise TypeError(
                 f"Unknown update type: {type(update)}, expected Variable instance"
             )
-        if value is not None and isinstance(value, (Variable, SymbolicInput)):
+        if value is not None and isinstance(value, Variable | SymbolicInput):
             raise TypeError(
                 f"The value for input {variable} should not be a Variable "
                 f"or SymbolicInput instance (got: {value})"

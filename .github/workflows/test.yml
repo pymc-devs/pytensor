@@ -53,7 +53,7 @@ jobs:
     if: ${{ needs.changes.outputs.changes == 'true' }}
     strategy:
       matrix:
-        python-version: ["3.9", "3.12"]
+        python-version: ["3.10", "3.12"]
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-python@v5
@@ -71,7 +71,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.12"]
+        python-version: ["3.10", "3.12"]
         fast-compile: [0,1]
         float32: [0,1]
         install-numba: [0]
@@ -87,17 +87,17 @@ jobs:
           - "tests/tensor/test_basic.py tests/tensor/test_inplace.py"          
           - "tests/tensor/test_blas.py tests/tensor/test_elemwise.py tests/tensor/test_math_scipy.py"
         exclude:
-          - python-version: "3.9"
+          - python-version: "3.10"
             fast-compile: 1
-          - python-version: "3.9"
+          - python-version: "3.10"
             float32: 1
-          - python-version: "3.9"
+          - python-version: "3.10"
             part: "tests/tensor/test_math.py"
           - fast-compile: 1
             float32: 1
         include:
           - install-numba: 1
-            python-version: "3.9"
+            python-version: "3.10"
             fast-compile: 0
             float32: 0
             part: "tests/link/numba"
@@ -107,7 +107,7 @@ jobs:
             float32: 0
             part: "tests/link/numba"
           - install-jax: 1
-            python-version: "3.9"
+            python-version: "3.10"
             fast-compile: 0
             float32: 0
             part: "tests/link/jax"
@@ -187,7 +187,7 @@ jobs:
         - uses: actions/checkout@v4
           with:
             fetch-depth: 0
-        - name: Set up Python 3.9
+        - name: Set up Python 3.10
           uses: conda-incubator/setup-miniconda@v3
           with:
             miniforge-variant: Mambaforge
@@ -201,7 +201,7 @@ jobs:
             python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'
             python -c 'import pytensor; assert pytensor.config.blas__ldflags != "", "Blas flags are empty"'
           env:
-            PYTHON_VERSION: 3.9
+            PYTHON_VERSION: 3.10
         - name: Download previous benchmark data
           uses: actions/cache@v4
           with:

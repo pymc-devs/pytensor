@@ -475,12 +475,10 @@ class GemmOptimizer(GraphRewriter):
                     isinstance(node.op, Elemwise)
                     and isinstance(
                         node.op.scalar_op,
-                        (
-                            pytensor.scalar.Add,
-                            pytensor.scalar.Sub,
-                            pytensor.scalar.Neg,
-                            pytensor.scalar.Mul,
-                        ),
+                        pytensor.scalar.Add
+                        | pytensor.scalar.Sub
+                        | pytensor.scalar.Neg
+                        | pytensor.scalar.Mul,
                     )
                 ):
                     continue

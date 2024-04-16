@@ -1,5 +1,5 @@
 from collections.abc import Iterable
-from typing import Literal, Optional, Union
+from typing import Literal
 
 import numpy as np
 import scipy.sparse
@@ -23,7 +23,7 @@ def _is_sparse(x):
         True iff x is a L{scipy.sparse.spmatrix} (and not a L{numpy.ndarray}).
 
     """
-    if not isinstance(x, (scipy.sparse.spmatrix, np.ndarray, tuple, list)):
+    if not isinstance(x, scipy.sparse.spmatrix | np.ndarray | tuple | list):
         raise NotImplementedError(
             "this function should only be called on "
             "sparse.scipy.sparse.spmatrix or "
@@ -67,10 +67,10 @@ class SparseTensorType(TensorType, HasDataType):
     def __init__(
         self,
         format: SparsityTypes,
-        dtype: Union[str, np.dtype],
-        shape: Optional[Iterable[Optional[Union[bool, int]]]] = None,
-        name: Optional[str] = None,
-        broadcastable: Optional[Iterable[bool]] = None,
+        dtype: str | np.dtype,
+        shape: Iterable[bool | int | None] | None = None,
+        name: str | None = None,
+        broadcastable: Iterable[bool] | None = None,
     ):
         if shape is None and broadcastable is None:
             shape = (None, None)
@@ -91,7 +91,7 @@ class SparseTensorType(TensorType, HasDataType):
         broadcastable=None,
         **kwargs,
     ):
-        format: Optional[SparsityTypes] = kwargs.pop("format", self.format)
+        format: SparsityTypes | None = kwargs.pop("format", self.format)
         if dtype is None:
             dtype = self.dtype
         if shape is None:

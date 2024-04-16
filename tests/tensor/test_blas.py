@@ -1002,11 +1002,7 @@ def test_gemm_unrolled():
             for node in unrolled_pytensor.maker.fgraph.toposort()
             if isinstance(
                 node.op,
-                (
-                    Dot,
-                    Dot22,
-                    Gemm,
-                ),
+                Dot | Dot22 | Gemm,
             )
         )
         # Each num_rounds add 3 dot, but one of them is always the same.

@@ -13,7 +13,6 @@ from io import StringIO
 from itertools import chain
 from itertools import product as itertools_product
 from logging import Logger
-from typing import Optional
 from warnings import warn
 
 import numpy as np
@@ -680,7 +679,7 @@ def _lessbroken_deepcopy(a):
     # This logic is also in link.py
     from pytensor.link.c.type import _cdata_type
 
-    if isinstance(a, (np.ndarray, np.memmap)):
+    if isinstance(a, np.ndarray | np.memmap):
         rval = a.copy(order="K")
     elif isinstance(a, _cdata_type):
         # This is not copyable (and should be used for constant data).
@@ -1354,7 +1353,7 @@ class _Linker(LocalLinker):
         self.maker = maker
         super().__init__(scheduler=schedule)
 
-    def accept(self, fgraph, no_recycling: Optional[list] = None, profile=None):
+    def accept(self, fgraph, no_recycling: list | None = None, profile=None):
         if no_recycling is None:
             no_recycling = []
         if self.fgraph is not None and self.fgraph is not fgraph:
@@ -1890,7 +1889,7 @@ class _Linker(LocalLinker):
                         # HACK TO LOOK LIKE A REAL DESTRUCTIVE ACTION
                         # TOOK PLACE
                         if (
-                            isinstance(dr_vals[r][0], (np.ndarray, np.memmap))
+                            isinstance(dr_vals[r][0], np.ndarray | np.memmap)
                             and (dr_vals[r][0].dtype == storage_map[r][0].dtype)
                             and (dr_vals[r][0].shape == storage_map[r][0].shape)
                         ):
@@ -2020,10 +2019,10 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
         if outputs is None:
             return_none = True
             outputs = []
-        if not isinstance(outputs, (list, tuple)):
+        if not isinstance(outputs, list | tuple):
             unpack_single = True
             outputs = [outputs]
-        if not isinstance(inputs, (list, tuple)):
+        if not isinstance(inputs, list | tuple):
             inputs = [inputs]
 
         # Wrap them in In or Out instances if needed.

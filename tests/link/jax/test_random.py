@@ -494,7 +494,7 @@ def test_random_RandomVariable(rv_op, dist_params, base_size, cdf_name, params_c
         *[
             i.tag.test_value
             for i in g_fn.maker.fgraph.inputs
-            if not isinstance(i, (SharedVariable, Constant))
+            if not isinstance(i, SharedVariable | Constant)
         ]
     )
 

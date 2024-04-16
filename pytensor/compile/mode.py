@@ -5,7 +5,7 @@ WRITEME
 
 import logging
 import warnings
-from typing import Literal, Optional, Union
+from typing import Literal
 
 from pytensor.compile.function.types import Supervisor
 from pytensor.configdefaults import config
@@ -260,7 +260,7 @@ optdb.register(
 # final pass just to make sure
 optdb.register("merge3", MergeOptimizer(), "fast_run", "merge", position=100)
 
-_tags: Union[tuple[str, str], tuple]
+_tags: tuple[str, str] | tuple
 
 if config.check_stack_trace in ("raise", "warn", "log"):
     _tags = ("fast_run", "fast_compile")
@@ -297,8 +297,8 @@ class Mode:
 
     def __init__(
         self,
-        linker: Optional[Union[str, Linker]] = None,
-        optimizer: Union[str, RewriteDatabaseQuery] = "default",
+        linker: str | Linker | None = None,
+        optimizer: str | RewriteDatabaseQuery = "default",
         db: RewriteDatabase = None,
     ):
         if linker is None:
@@ -565,7 +565,7 @@ def get_target_language(mode=None) -> tuple[Literal["py", "c", "numba", "jax"], 
     if isinstance(linker, CLinker):
         return ("c",)
 
-    if isinstance(linker, (VMLinker, OpWiseCLinker)):
+    if isinstance(linker, VMLinker | OpWiseCLinker):
         return ("c", "py") if config.cxx else ("py",)
 
     raise Exception(f"Unsupported Linker: {linker}")

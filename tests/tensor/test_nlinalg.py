@@ -136,7 +136,7 @@ def test_qr_modes():
         f = function([A], qr(A, mode))
         t_qr = f(a)
         n_qr = np.linalg.qr(a, mode)
-        if isinstance(n_qr, (list, tuple)):
+        if isinstance(n_qr, list | tuple):
             assert _allclose(n_qr[0], t_qr[0])
             assert _allclose(n_qr[1], t_qr[1])
         else:

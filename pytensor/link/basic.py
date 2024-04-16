@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from copy import copy, deepcopy
-from typing import TYPE_CHECKING, Any, Callable, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
@@ -54,13 +54,13 @@ class Container:
 
     def __init__(
         self,
-        r: Union[Variable, Type],
+        r: Variable | Type,
         storage: list[Any],
         *,
         readonly: bool = False,
         strict: bool = False,
-        allow_downcast: Optional[bool] = None,
-        name: Optional[str] = None,
+        allow_downcast: bool | None = None,
+        name: str | None = None,
     ) -> None:
         if not isinstance(storage, list) or not len(storage) >= 1:
             raise TypeError("storage must be a list of length at least one")
@@ -160,15 +160,15 @@ class Linker(ABC):
     def __init__(
         self,
         *,
-        allow_gc: Optional[bool] = None,
-        scheduler: Optional[Callable[[FunctionGraph], list[Apply]]] = None,
+        allow_gc: bool | None = None,
+        scheduler: Callable[[FunctionGraph], list[Apply]] | None = None,
     ) -> None:
         self._allow_gc = allow_gc
         self._scheduler = scheduler
         super().__init__()
 
     @property
-    def allow_gc(self) -> Optional[bool]:
+    def allow_gc(self) -> bool | None:
         """Determines if the linker may allow garbage collection.
 
         Returns
@@ -178,7 +178,7 @@ class Linker(ABC):
         """
         return self._allow_gc
 
-    def clone(self, allow_gc: Optional[bool] = None) -> "Linker":
+    def clone(self, allow_gc: bool | None = None) -> "Linker":
         new = copy(self)
         if allow_gc is not None:
             new._allow_gc = allow_gc
@@ -281,18 +281,18 @@ class PerformLinker(LocalLinker):
     """
 
     def __init__(
-        self, allow_gc: Optional[bool] = None, schedule: Optional[Callable] = None
+        self, allow_gc: bool | None = None, schedule: Callable | None = None
     ) -> None:
         if allow_gc is None:
             allow_gc = config.allow_gc
-        self.fgraph: Optional[FunctionGraph] = None
+        self.fgraph: FunctionGraph | None = None
         super().__init__(allow_gc=allow_gc, scheduler=schedule)
 
     def accept(
         self,
         fgraph: FunctionGraph,
-        no_recycling: Optional[Sequence[Variable]] = None,
-        profile: Optional[Union[bool, "ProfileStats"]] = None,
+        no_recycling: Sequence[Variable] | None = None,
+        profile: Union[bool, "ProfileStats"] | None = None,
     ) -> "PerformLinker":
         """Associate a `FunctionGraph` with this `Linker`.
 
@@ -435,7 +435,7 @@ class WrapLinker(Linker):
         linkers: Sequence[PerformLinker],
         wrapper: Callable,
     ) -> None:
-        self.fgraph: Optional[FunctionGraph] = None
+        self.fgraph: FunctionGraph | None = None
         self.linkers = linkers
         self.wrapper = wrapper
 
@@ -468,8 +468,8 @@ class WrapLinker(Linker):
     def accept(
         self,
         fgraph: FunctionGraph,
-        no_recycling: Optional[Sequence["TensorVariable"]] = None,
-        profile: Optional[Union[bool, "ProfileStats"]] = None,
+        no_recycling: Sequence["TensorVariable"] | None = None,
+        profile: Union[bool, "ProfileStats"] | None = None,
     ) -> "WrapLinker":
         """
 
@@ -496,7 +496,7 @@ class WrapLinker(Linker):
     def pre(
         self,
         f: "WrapLinker",
-        inputs: Union[list["NDArray"], list[Optional[float]]],
+        inputs: list["NDArray"] | list[float | None],
         order: list[Apply],
         thunk_groups: list[tuple[Callable]],
     ) -> None:
