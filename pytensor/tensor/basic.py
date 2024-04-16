@@ -4247,6 +4247,18 @@ def expand_dims(
 
     Insert a new axis that will appear at the `axis` position in the expanded
     array shape.
+
+    Parameters
+    ----------
+    a :
+        The input array.
+    axis :
+        Position in the expanded axes where the new axis is placed.
+        If `axis` is ``None``, `a` will be returned immediately.
+
+    Returns
+    -------
+    `a` with a new axis at the `axis` position.
     """
     a = as_tensor(a)
 
