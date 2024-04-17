@@ -360,11 +360,7 @@ class Op(MetaObject):
         """
         # raise NotImplementedError()
         (a,) = inputs
-        a_grad = grad_not_implemented(
-            self,
-            0,
-            a,
-        )
+        a_grad = grad_not_implemented(self, 0, a, comment="To be updated")
         return [a_grad]
 
     def L_op(
