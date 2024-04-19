@@ -4,6 +4,7 @@ from pytensor.link.jax.dispatch.basic import jax_funcify, jax_typify
 # Load dispatch specializations
 import pytensor.link.jax.dispatch.blas
 import pytensor.link.jax.dispatch.blockwise
+import pytensor.link.jax.dispatch.einsum
 import pytensor.link.jax.dispatch.elemwise
 import pytensor.link.jax.dispatch.extra_ops
 import pytensor.link.jax.dispatch.pad

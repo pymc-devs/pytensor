@@ -3847,8 +3847,10 @@ def test_transpose():
     assert np.all(t2d == np.transpose(x2v, [0, 1]))
     assert np.all(t3d == np.transpose(x3v, [0, 2, 1]))
 
+    # Check we don't introduce useless transpose
+    assert ptb.transpose(x1) is x1
+
     # Check that we create a name.
-    assert ptb.transpose(x1).name == "x1.T"
     assert ptb.transpose(x2).name == "x2.T"
     assert ptb.transpose(x3).name == "x3.T"
     assert ptb.transpose(dmatrix()).name is None

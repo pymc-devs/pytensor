@@ -842,13 +842,13 @@ class Reshape(COp):
 
 @_vectorize_node.register(Reshape)
 def _vectorize_reshape(op, node, x, shape):
+    from pytensor.tensor.blockwise import vectorize_node_fallback
+
     old_x, old_shape = node.inputs
     batched_ndims = x.type.ndim - old_x.type.ndim
 
     if as_tensor_variable(shape).type.ndim != 1:
-        raise NotImplementedError(
-            "It is not possible to vectorize the shape argument of Reshape"
-        )
+        return vectorize_node_fallback(op, node, x, shape)
 
     if len(tuple(old_shape)) == len(tuple(shape)):
         new_shape = [*x.shape[:batched_ndims], *shape]

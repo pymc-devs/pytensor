@@ -337,6 +337,52 @@ class TestLocalUselessReshape:
         topo = f2.maker.fgraph.toposort()
         assert not any(isinstance(n.op, Reshape) for n in topo)
 
+    def test_constant_shape(self):
+        # Where reshape is a constant that matches the shape
+        x = matrix(shape=(2, 3))
+        shape = pt.as_tensor(np.array([2, 3]))
+        out = reshape(x, shape)
+        new_out = rewrite_graph(out)
+        assert new_out is x
+
+        x = matrix(shape=(2, 3))
+        shape = pt.as_tensor(np.array([-1, 3]))
+        out = reshape(x, shape)
+        new_out = rewrite_graph(out)
+        assert new_out is x
+
+        x = matrix(shape=(None, 3))
+        shape = pt.as_tensor(np.array([-1, 3]))
+        out = reshape(x, shape)
+        new_out = rewrite_graph(out)
+        assert new_out is x
+
+        x = matrix(shape=(None, 3))
+        shape = pt.as_tensor(np.array([2, 3]))
+        out = reshape(x, shape)
+        new_out = rewrite_graph(out)
+        # This could be rewritten as a specify_shape(x, (2, 3))
+        assert new_out is not x
+
+        x = matrix(shape=(2, 3))
+        shape = pt.as_tensor(np.array([3, 2]))
+        out = reshape(x, shape)
+        new_out = rewrite_graph(out)
+        assert new_out is not x
+
+    def test_all_but_one_match(self):
+        x = matrix(shape=(None, None))
+        shape = [x.shape[0], 3]
+        out = reshape(x, shape)
+        new_out = rewrite_graph(out)
+        assert equal_computations([new_out], [specify_shape(x, (None, 3))])
+
+        # Rewrite does not apply if there's also a -1
+        shape = [-1, 3]
+        out = reshape(x, shape)
+        new_out = rewrite_graph(out)
+        assert new_out is out
+
 
 class TestLocalReshapeToDimshuffle:
     def setup_method(self):
