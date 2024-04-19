@@ -1,8 +1,8 @@
 from collections.abc import Callable
 
 from pytensor.graph import vectorize_graph
-from pytensor.tensor import TensorVariable
 from pytensor.tensor.utils import _parse_gufunc_signature
+from pytensor.tensor.variable import TensorVariable
 
 
 def vectorize(func: Callable, signature: str | None = None) -> Callable:

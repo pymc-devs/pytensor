@@ -10,6 +10,7 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
+from pytensor.tensor.shape import Reshape
 from pytensor.tensor.subtensor import AdvancedIncSubtensor, AdvancedSubtensor, Subtensor
 
 
@@ -67,10 +68,16 @@ optdb.register(
 def local_eager_useless_unbatched_blockwise(fgraph, node):
     if isinstance(
         node.op.core_op,
-        Dot | Alloc | ARange | Subtensor | AdvancedSubtensor | AdvancedIncSubtensor,
+        Dot
+        | Alloc
+        | ARange
+        | Subtensor
+        | AdvancedSubtensor
+        | AdvancedIncSubtensor
+        | Reshape,
     ):
         # Many Dot-related rewrites (eg, all of BlasOpt) happen before specialize
-        # These other Ops can't always be trivially vectored at runtime,
+        # These other Ops can't always be trivially vectorized at runtime,
         # since their inputs may imply non-rectangular shapes.
         return local_useless_unbatched_blockwise.fn(fgraph, node)
 
@@ -97,62 +104,67 @@ def local_blockwise_alloc(fgraph, node):
     BOp(matrix, alloc(vector, 10, 5)) -> BOp(matrix, vector)
     """
 
-    if not any(isinstance(inp.owner.op, Alloc) for inp in node.inputs if inp.owner):
-        return None
-
     op: Blockwise = node.op  # type: ignore
 
     batch_ndim = op.batch_ndim(node)
     if not batch_ndim:
         return None
 
+    if not any(var.owner and isinstance(var.owner.op, Alloc) for var in node.inputs):
+        return None
+
     new_inputs = []
     batch_shapes = []
     can_push_any_alloc = False
     for inp, inp_sig in zip(node.inputs, op.inputs_sig):
-        if inp.owner and isinstance(inp.owner.op, Alloc):
-            # Push batch dims from Alloc
-            value, *shape = inp.owner.inputs
+        if not all(inp.type.broadcastable[:batch_ndim]):
+            if inp.owner and isinstance(inp.owner.op, Alloc):
+                # Push batch dims from Alloc
+                value, *shape = inp.owner.inputs
 
-            # Check what to do with the value of the Alloc
-            squeezed_value = _squeeze_left(value, batch_ndim)
-            missing_ndim = len(shape) - value.type.ndim
-            if (
-                (((1,) * missing_ndim + value.type.broadcastable)[batch_ndim:])
-                != inp.type.broadcastable[batch_ndim:]
-            ):
-                # We still need an Alloc for the core dims
-                core_shape = shape[batch_ndim:]
-                # And the batch dims of the squeezed value
-                squeezed_value_batch_ndim = squeezed_value.type.ndim - len(core_shape)
-                batch_shape = [
-                    1 if broadcastable else dim
-                    for broadcastable, dim in zip(
-                        squeezed_value.type.broadcastable[:squeezed_value_batch_ndim],
-                        tuple(squeezed_value.shape)[:squeezed_value_batch_ndim],
+                # Check what to do with the value of the Alloc
+                squeezed_value = _squeeze_left(value, batch_ndim)
+                missing_ndim = len(shape) - value.type.ndim
+                if (
+                    (((1,) * missing_ndim + value.type.broadcastable)[batch_ndim:])
+                    != inp.type.broadcastable[batch_ndim:]
+                ):
+                    # We still need an Alloc for the core dims
+                    core_shape = shape[batch_ndim:]
+                    # And the batch dims of the squeezed value
+                    squeezed_value_batch_ndim = squeezed_value.type.ndim - len(
+                        core_shape
                     )
-                ]
-                squeezed_value = alloc(squeezed_value, *batch_shape, *core_shape)
-                if squeezed_value.type.broadcastable == inp.type.broadcastable:
-                    # We can't change anything about this Alloc input
-                    new_inputs.append(inp)
-                    continue
+                    batch_shape = [
+                        1 if broadcastable else dim
+                        for broadcastable, dim in zip(
+                            squeezed_value.type.broadcastable[
+                                :squeezed_value_batch_ndim
+                            ],
+                            tuple(squeezed_value.shape)[:squeezed_value_batch_ndim],
+                        )
+                    ]
+                    squeezed_value = alloc(squeezed_value, *batch_shape, *core_shape)
+                    if squeezed_value.type.broadcastable == inp.type.broadcastable:
+                        # We can't change anything about this Alloc input
+                        new_inputs.append(inp)
+                        continue
 
-            # We can push batch dims of this Alloc input
-            batch_shapes.append(
-                tuple(
-                    1 if broadcastable else dim
-                    for broadcastable, dim in zip(
-                        inp.type.broadcastable, shape[:batch_ndim]
+                # We can push batch dims of this Alloc input
+                batch_shapes.append(
+                    tuple(
+                        1 if broadcastable else dim
+                        for broadcastable, dim in zip(
+                            inp.type.broadcastable, shape[:batch_ndim]
+                        )
                     )
                 )
-            )
-            new_inputs.append(squeezed_value)
-            can_push_any_alloc = True
+                new_inputs.append(squeezed_value)
+                can_push_any_alloc = True
+                continue
 
-        else:
-            # Nothing to do with this input other than removing dummy batch dims
-            new_inputs.append(_squeeze_left(inp, batch_ndim))
+        # Nothing to do with this input other than removing dummy batch dims
+        new_inputs.append(_squeeze_left(inp, batch_ndim))
 
     if not can_push_any_alloc:
         return None
@@ -167,17 +179,15 @@ def local_blockwise_alloc(fgraph, node):
         missing_ndim = old_out_type.ndim - new_out_type.ndim
         batch_shape = ([1] * missing_ndim + list(new_outs[0].shape))[:batch_ndim]
         for i, batch_dims in enumerate(zip(*batch_shapes)):  # Transpose shape tuples
+            if old_out_type.broadcastable[i]:
+                continue
             for batch_dim in batch_dims:
                 if batch_dim == 1:
                     continue
+                batch_shape[i] = batch_dim
                 if isinstance(batch_dim, Constant):
                     # Give preference to Constants
-                    batch_shape[i] = batch_dim
                     break
-                elif old_out_type.broadcastable[i]:
-                    # Only use non Constant shapes if absolutely necessary
-                    # Otherwise, we use the shape of the non-alloc output
-                    batch_shape[i] = batch_dim
 
         copy_stack_trace(node.outputs, new_outs)
         new_outs = [
@@ -190,3 +200,28 @@ def local_blockwise_alloc(fgraph, node):
         ]
     copy_stack_trace(node.outputs, new_outs)
     return new_outs
+
+
+@register_specialize
+@node_rewriter([Blockwise])
+def local_blockwise_reshape(fgraph, node):
+    """Rewrite away square Blockwise reshapes.
+
+    Reshape is tricky to vectorize eagerly, because a graph like
+    `x.reshape([x.shape[0] * x.shape[1], -1])` has many operations
+    that must be vectorized before we arrize at the reshape operation.
+
+    For the square Reshape case, we must wait for all the intemediate
+    operations to be lifted as Allocs
+    """
+    if not isinstance(node.op.core_op, Reshape):
+        return None
+
+    x, output_shape = node.inputs
+    batch_ndim = node.op.batch_ndim(node)
+    if all(output_shape.type.broadcastable[:batch_ndim]):
+        batched_shape = x.shape[:batch_ndim]
+        core_reshape = _squeeze_left(output_shape, batch_ndim)
+        new_out = x.reshape([*tuple(batched_shape), *tuple(core_reshape)])
+        copy_stack_trace(node.outputs[0], new_out)
+        return [new_out]
