@@ -234,53 +234,44 @@ def test_op_input_broadcastable():
     assert SomeOp()(x).type == pt.dvector
 
 
-def test_op_name():
-    op_name = "op_name"
-
-    class DummyType(Type):
-        def filter(self, data):
-            return data
-
-        def __eq__(self, other):
-            return isinstance(other, DummyType)
-
-        def __hash__(self):
-            return hash(DummyType)
-
-        def __repr__(self):
-            return "DummyType()"
-
+@pytest.mark.parametrize("multi_output", [True, False])
+def test_call_name(multi_output):
     def dummy_variable(name):
-        return Variable(DummyType(), None, None, name=name)
+        return Variable(MyType(thingy=None), None, None, name=name)
 
     x = dummy_variable("x")
 
-    class SingleOutOp(Op):
-        def make_node(self, *inputs):
-            outputs = [dummy_variable("a")]
-            return Apply(self, list(inputs), outputs)
+    class TestCallOp(Op):
+        def __init__(self, default_output, multi_output):
+            super().__init__()
+            self.default_output = default_output
+            self.multi_output = multi_output
+
+        def make_node(self, input):
+            inputs = [input]
+            if self.multi_output:
+                outputs = [input.type(), input.type()]
+            else:
+                outputs = [input.type()]
+            return Apply(self, inputs, outputs)
 
         def perform(self, node, inputs, outputs):
             raise NotImplementedError()
 
-    single_op = SingleOutOp()
-    res_single = single_op(x, name=op_name)
-    assert res_single.name == op_name
+    if multi_output:
+        multi_op = TestCallOp(default_output=None, multi_output=multi_output)
+        res = multi_op(x, name="test_name")
+        for i, r in enumerate(res):
+            assert r.name == f"test_name_{i}"
 
-    class MultiOutOp(Op):
-        def make_node(self, *inputs):
-            outputs = [dummy_variable("a"), dummy_variable("b")]
-            return Apply(self, list(inputs), outputs)
+        multi_op = TestCallOp(default_output=1, multi_output=multi_output)
+        result = multi_op(x, name="test_name")
+        assert result.owner.outputs[0].name is None
+        assert result.name == "test_name"
+    else:
+        single_op = TestCallOp(default_output=None, multi_output=multi_output)
+        res_single = single_op(x, name="test_name")
+        assert res_single.name == "test_name"
 
-        def perform(self, node, inputs, outputs):
-            raise NotImplementedError()
-
-    multi_op = MultiOutOp()
-    res = multi_op(x, name=op_name)
-    for i, r in enumerate(res):
-        assert r.name == f"{op_name}_{i}"
-
-    multi_op = MultiOutOp()
-    multi_op.default_output = 1
-    res = multi_op(x, name=op_name)
-    assert res.name == op_name
+        res_nameless = single_op(x)
+        assert res_nameless.name is None
