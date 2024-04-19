@@ -51,6 +51,7 @@ def test_multiple_output(mode):
     x0 = float64("x0")
     y0 = int64("y0")
     const = float64("const")
+
     x = x0 + const
     y = y0 + 1
 

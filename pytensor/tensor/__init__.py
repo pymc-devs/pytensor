@@ -153,5 +153,7 @@ from pytensor.tensor.variable import TensorConstant, TensorVariable
 from pytensor.tensor.functional import vectorize
 # isort: on
 
+from pytensor.tensor.einsum import einsum
+
 
 __all__ = ["random"]  # noqa: F405
