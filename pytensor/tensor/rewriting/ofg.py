@@ -1,10 +1,22 @@
-from pytensor import clone_replace
+from typing import cast
+
+from pytensor import Variable, clone_replace
 from pytensor.compile import optdb
 from pytensor.compile.builders import OpFromGraph
-from pytensor.graph import node_rewriter
+from pytensor.graph import Apply, node_rewriter
 from pytensor.graph.rewriting.basic import copy_stack_trace, in2out
 from pytensor.tensor.basic import AllocDiag
 from pytensor.tensor.rewriting.basic import register_specialize
+
+
+def inline_ofg_node(node: Apply) -> list[Variable]:
+    op = node.op
+    assert isinstance(op, OpFromGraph)
+    inlined_outs = clone_replace(
+        op.inner_outputs, dict(zip(op.inner_inputs, node.inputs))
+    )
+    copy_stack_trace(op.inner_outputs, inlined_outs)
+    return cast(list[Variable], inlined_outs)
 
 
 @node_rewriter([OpFromGraph])
@@ -18,10 +30,7 @@ def inline_ofg_expansion(fgraph, node):
     if not op.is_inline:
         return False
 
-    new_out = clone_replace(op.inner_outputs, dict(zip(op.inner_inputs, node.inputs)))
-    copy_stack_trace(op.inner_outputs, new_out)
-
-    return new_out
+    return inline_ofg_node(node)
 
 
 # We want to run this before the first merge optimizer
@@ -61,8 +70,4 @@ def late_inline_OpFromGraph(fgraph, node):
     -------
 
     """
-    op = node.op
-    new_out = clone_replace(op.inner_outputs, dict(zip(op.inner_inputs, node.inputs)))
-    copy_stack_trace(op.inner_outputs, new_out)
-
-    return new_out
+    return inline_ofg_node(node)

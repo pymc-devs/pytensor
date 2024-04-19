@@ -14,7 +14,7 @@ from pytensor.graph.type import Type
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.scalar.basic import ScalarConstant
 from pytensor.tensor import as_tensor_variable, broadcast_to, get_vector_length, row
-from pytensor.tensor.basic import MakeVector, as_tensor, constant
+from pytensor.tensor.basic import MakeVector, constant, stack
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.rewriting.shape import ShapeFeature
 from pytensor.tensor.shape import (
@@ -801,8 +801,14 @@ class TestVectorize:
         [vect_out] = vectorize_node(node, mat, new_shape).outputs
         assert equal_computations([vect_out], [reshape(mat, new_shape)])
 
-        with pytest.raises(NotImplementedError):
-            vectorize_node(node, vec, broadcast_to(as_tensor([5, 2, x]), (2, 3)))
+        new_shape = stack([[-1, x], [x - 1, -1]], axis=0)
+        print(new_shape.type)
+        [vect_out] = vectorize_node(node, vec, new_shape).outputs
+        vec_test_value = np.arange(6)
+        np.testing.assert_allclose(
+            vect_out.eval({x: 3, vec: vec_test_value}),
+            np.broadcast_to(vec_test_value.reshape(2, 3), (2, 2, 3)),
+        )
 
         with pytest.raises(
             ValueError,

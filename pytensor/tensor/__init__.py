@@ -151,6 +151,7 @@ from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
 # isort: off
+from pytensor.tensor.einsum import einsum
 from pytensor.tensor.functional import vectorize
 # isort: on
 
