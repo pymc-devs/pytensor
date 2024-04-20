@@ -246,7 +246,9 @@ class Op(MetaObject):
             )
         return Apply(self, inputs, [o() for o in self.otypes])
 
-    def __call__(self, *inputs: Any, **kwargs) -> Variable | list[Variable]:
+    def __call__(
+        self, *inputs: Any, name=None, return_list=False, **kwargs
+    ) -> Variable | list[Variable]:
         r"""Construct an `Apply` node using :meth:`Op.make_node` and return its outputs.
 
         This method is just a wrapper around :meth:`Op.make_node`.
@@ -288,8 +290,15 @@ class Op(MetaObject):
             the :attr:`Op.default_output` property.
 
         """
-        return_list = kwargs.pop("return_list", False)
         node = self.make_node(*inputs, **kwargs)
+        if name is not None:
+            if len(node.outputs) == 1:
+                node.outputs[0].name = name
+            elif self.default_output is not None:
+                node.outputs[self.default_output].name = name
+            else:
+                for i, n in enumerate(node.outputs):
+                    n.name = f"{name}_{i}"
 
         if config.compute_test_value != "off":
             compute_test_value(node)
