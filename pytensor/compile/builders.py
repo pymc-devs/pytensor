@@ -159,16 +159,9 @@ class OpFromGraph(Op, HasInnerGraph):
     Currently does not support ``updates`` or ``givens`` argument.
 
     .. TODO:
-        - examples for a multi-layer mlp. where?
-        - __hash__, __eq__ otherwise won't merge, try
-          is_same_graph_with_merge(op1.local_outputs, op2,
-          local_outputs)
-        - c_code() to remove the double overhead?
-        - grad() make it support DisconnectedType and the new interface
-        - add support for NullType and DisconnectedType when R_op supports them
-        - check how it works with updates.
+        - Allow / test merging of OpFromGraph nodes
+        - Add support for NullType and DisconnectedType when R_op supports them
         - Add support to pickle this Op.
-        - Add support/test with random generator
         - Add optimization to removing unused inputs/outputs
         - Add optimization to work inplace on inputs when not inline
 
