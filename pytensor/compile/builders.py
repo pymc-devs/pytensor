@@ -417,7 +417,10 @@ class OpFromGraph(Op, HasInnerGraph):
                 FutureWarning,
             )
             self._lop_op_interface = False
-        self._lop_op_cache: Callable | None = None
+        # Dictionary where we cache OpFromGraph that represent the L_op
+        # A distinct OpFromGraph is needed to represent each pattern of output_grads connection
+        # It also returns a tuple that indicates which input_gradients are disconnected
+        self._lop_op_cache: dict[tuple[bool, ...], Callable] = {}
         self._rop_op_cache: Callable | None = None
 
         self._connection_pattern = connection_pattern
@@ -480,24 +483,30 @@ class OpFromGraph(Op, HasInnerGraph):
         return outputs
 
     @config.change_flags(compute_test_value="off")
-    def _build_and_cache_lop_op(self) -> Callable:
-        """converts lop_overrides (or grad_overrides) from user supplied form to type(self) instance.
+    def _build_and_cache_lop_op(
+        self, disconnected_output_grads: tuple[bool, ...]
+    ) -> Callable:
+        """converts lop_overrides (or grad_overrides) from user supplied form to type(self) instance,
+        specialized for the pattern of disconnected_output_grads
 
         Results are cached in self._lop_op_cache
         """
-        if self._lop_op_cache is not None:
-            return self._lop_op_cache
+        try:
+            return self._lop_op_cache[disconnected_output_grads]
+        except KeyError:
+            pass
 
         inner_inputs = self.inner_inputs
         inner_outputs = self.inner_outputs
         nin = len(inner_inputs)
+        nout = len(inner_outputs)
         lop_overrides = (
             self.lop_overrides if self._lop_op_interface else self.grad_overrides
         )
 
         if isinstance(lop_overrides, OpFromGraph):
             if self._lop_op_interface:
-                self._lop_op_cache = lop_overrides
+                self._lop_op_cache[disconnected_output_grads] = lop_overrides
                 lop_overrides.kwargs["on_unused_input"] = "ignore"
                 return lop_overrides
 
@@ -507,20 +516,42 @@ class OpFromGraph(Op, HasInnerGraph):
                 def lop_overrides(inps, grads):
                     return self.grad_overrides(*inps, *grads)
 
-        output_grads = [out_t() for out_t in self.output_types]
+        # We try to compute the gradient with respect to connected outputs only
+        connected_inner_outputs = [
+            # We add an identity operation(copy) so that we don't override indirect
+            # gradient contributions to an inner output coming from other inner outputs
+            inner_out.copy()
+            for inner_out, disconnected in zip(
+                inner_outputs, disconnected_output_grads, strict=True
+            )
+            if not disconnected
+        ]
+        connected_output_grads = [
+            out_t()
+            for out_t, disconnected in zip(
+                self.output_types, disconnected_output_grads, strict=True
+            )
+            if not disconnected
+        ]
         fn_grad = partial(
             grad,
             cost=None,
             disconnected_inputs="ignore",
             return_disconnected="disconnected",
             null_gradients="return",
-            known_grads=dict(zip(inner_outputs, output_grads)),
+            known_grads=dict(
+                zip(connected_inner_outputs, connected_output_grads, strict=True)
+            ),
         )
 
         if self._lop_op_interface:
-            callable_args = (inner_inputs, inner_outputs, output_grads)
+            callable_args = (
+                inner_inputs,
+                connected_inner_outputs,
+                connected_output_grads,
+            )
         else:
-            callable_args = (inner_inputs, output_grads)
+            callable_args = (inner_inputs, connected_output_grads)
 
         # we need to convert _lop_op into an OfG instance
         if lop_overrides is None:
@@ -544,14 +575,15 @@ class OpFromGraph(Op, HasInnerGraph):
         else:
             input_grads = self._call_custom_override(lop_overrides, callable_args, nin)
 
-        # Filter out disconnected input and output gradients
+        # Filter out disconnected/null input generated from the inner graph grad
+        # We append them in the outer wrapper function below
         connected_input_grads = [
             inp_grad
             for inp_grad in input_grads
             if not isinstance(inp_grad.type, DisconnectedType | NullType)
         ]
         lop_op = type(self)(
-            inputs=inner_inputs + inner_outputs + output_grads,
+            inputs=inner_inputs + connected_inner_outputs + connected_output_grads,
             outputs=connected_input_grads,
             inline=self.is_inline,
             name=(None if self.name is None else f"{self.name}_LOp"),
@@ -559,9 +591,27 @@ class OpFromGraph(Op, HasInnerGraph):
             on_unused_input="ignore",
         )
 
-        # Return a wrapper that combines connected and disconnected input gradients
+        # Return a wrapper that combines connected and disconnected/null input gradients
+        # And also filters out disconnected/null output gradients
         def wrapper(*inputs: Variable, **kwargs) -> list[Variable]:
-            connected_input_grads = iter(lop_op(*inputs, **kwargs))
+            inputs, outputs, output_grads = (
+                inputs[: -nout * 2],
+                inputs[-nout * 2 : -nout],
+                inputs[-nout:],
+            )
+            connected_outputs = [
+                output
+                for output, output_grad in zip(outputs, output_grads, strict=True)
+                if not isinstance(output_grad.type, DisconnectedType | NullType)
+            ]
+            connected_output_grads = [
+                output_grad
+                for output_grad in output_grads
+                if not isinstance(output_grad.type, DisconnectedType)
+            ]
+            connected_input_grads = iter(
+                lop_op(*inputs, *connected_outputs, *connected_output_grads, **kwargs)
+            )
             return [
                 input_grad
                 if isinstance(input_grad.type, DisconnectedType | NullType)
@@ -569,7 +619,7 @@ class OpFromGraph(Op, HasInnerGraph):
                 for input_grad in input_grads
             ]
 
-        self._lop_op_cache = wrapper
+        self._lop_op_cache[disconnected_output_grads] = wrapper
         return wrapper
 
     @config.change_flags(compute_test_value="off")
@@ -652,7 +702,10 @@ class OpFromGraph(Op, HasInnerGraph):
         return wrapper
 
     def L_op(self, inputs, outputs, output_grads):
-        lop_op = self._build_and_cache_lop_op()
+        disconnected_output_grads = tuple(
+            isinstance(og.type, DisconnectedType) for og in output_grads
+        )
+        lop_op = self._build_and_cache_lop_op(disconnected_output_grads)
         return lop_op(*inputs, *outputs, *output_grads, return_list=True)
 
     def R_op(self, inputs, eval_points):

@@ -8,7 +8,13 @@ from pytensor.compile import shared
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
 from pytensor.configdefaults import config
-from pytensor.gradient import DisconnectedType, Rop, disconnected_type, grad
+from pytensor.gradient import (
+    DisconnectedType,
+    Rop,
+    disconnected_type,
+    grad,
+    verify_grad,
+)
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.null_type import NullType, null_type
@@ -22,7 +28,15 @@ from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.random.utils import RandomStream
 from pytensor.tensor.rewriting.shape import ShapeOptimizer
 from pytensor.tensor.shape import specify_shape
-from pytensor.tensor.type import TensorType, matrices, matrix, scalar, vector, vectors
+from pytensor.tensor.type import (
+    TensorType,
+    dscalars,
+    matrices,
+    matrix,
+    scalar,
+    vector,
+    vectors,
+)
 from tests import unittest_tools
 from tests.graph.utils import MyVariable
 
@@ -637,6 +651,34 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
         out = test_ofg(y, y)
         assert out.eval() == 4
+
+    def test_L_op_disconnected_output_grad(self):
+        x, y = dscalars("x", "y")
+        rng = np.random.default_rng(594)
+        point = list(rng.normal(size=(2,)))
+
+        out1 = x + y
+        out2 = x * y
+        out3 = out1 * out2  # Create dependency between outputs
+        op = OpFromGraph([x, y], [out1, out2, out3])
+        verify_grad(lambda x, y: pt.add(*op(x, y)), point, rng=rng)
+        verify_grad(lambda x, y: pt.add(*op(x, y)[:-1]), point, rng=rng)
+        verify_grad(lambda x, y: pt.add(*op(x, y)[1:]), point, rng=rng)
+        verify_grad(lambda x, y: pt.add(*op(x, y)[::2]), point, rng=rng)
+        verify_grad(lambda x, y: op(x, y)[0], point, rng=rng)
+        verify_grad(lambda x, y: op(x, y)[1], point, rng=rng)
+        verify_grad(lambda x, y: op(x, y)[2], point, rng=rng)
+
+        # Test disconnected graphs are handled correctly
+        op = OpFromGraph([x, y], [x**2, y**3])
+        with pytest.warns(UserWarning):
+            grad_x_wrt_y = grad(
+                op(x, y)[0],
+                wrt=y,
+                return_disconnected="disconnected",
+                disconnected_inputs="warn",
+            )
+            assert isinstance(grad_x_wrt_y.type, DisconnectedType)
 
     def test_repeated_inputs(self):
         x = pt.dscalar("x")
