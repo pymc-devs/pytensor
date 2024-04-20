@@ -890,30 +890,9 @@ class OpFromGraph(Op, HasInnerGraph):
         if self._connection_pattern is not None:
             return self._connection_pattern
 
-        inp_len = len(self.inner_inputs)
-        out_len = len(self.inner_outputs)
-        cpmat_self = io_connection_pattern(self.inner_inputs, self.inner_outputs)
-
-        lop_op = self.get_lop_op()
-        cpmat_grad = io_connection_pattern(
-            lop_op.inner_inputs[inp_len:], lop_op.inner_outputs
-        )
-
-        # cpmat_self |= cpmat_grad.T
-        # cpmat_self &= out_is_disconnected
-        for i, t in enumerate(self._lop_op_stypes_l):
-            if t is not None:
-                if isinstance(t.type, DisconnectedType):
-                    for o in range(out_len):
-                        cpmat_self[i][o] = False
-            for o in range(out_len):
-                cpmat_self[i][o] |= cpmat_grad[o][i]
-
-        # TODO in case DisconnectedType is implemented for R_op,
-        # self._rop_op_stypes_l self._rop_op should considered for
-        # connection_pattern
-
-        return list(map(list, cpmat_self))
+        ret = io_connection_pattern(self.inner_inputs, self.inner_outputs)
+        self._connection_pattern = ret
+        return ret
 
     def infer_shape(self, fgraph, node, shapes):
         # TODO: Use `fgraph.shape_feature` to do this instead.

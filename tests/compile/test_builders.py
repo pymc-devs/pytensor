@@ -244,6 +244,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
                 [x, w, b],
                 [x * w + b],
                 grad_overrides=[go1, NullType()(), DisconnectedType()()],
+                # This is a fake override, so a fake connection_pattern must be provided as well
+                connection_pattern=[[True], [True], [False]],
             )
         zz2 = pt_sum(op_linear2(xx, ww, bb))
         dx2, dw2, db2 = grad(
