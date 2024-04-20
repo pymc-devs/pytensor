@@ -514,8 +514,8 @@ def test_expm_grad_3():
 def test_solve_discrete_lyapunov_via_direct_real():
     N = 5
     rng = np.random.default_rng(utt.fetch_seed())
-    a = pt.dmatrix()
-    q = pt.dmatrix()
+    a = pt.dmatrix("a")
+    q = pt.dmatrix("q")
     f = function([a, q], [solve_discrete_lyapunov(a, q, method="direct")])
 
     A = rng.normal(size=(N, N))
