@@ -1034,6 +1034,11 @@ def kron(a, b):
     """
     a = as_tensor_variable(a)
     b = as_tensor_variable(b)
+
+    if a is b:
+        # In case a is the same as b, we need a different variable to build the OFG
+        b = a.copy()
+
     if a.ndim + b.ndim <= 2:
         raise TypeError(
             "kron: inputs dimensions must sum to 3 or more. "

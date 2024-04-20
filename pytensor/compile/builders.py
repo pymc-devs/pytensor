@@ -400,6 +400,15 @@ class OpFromGraph(Op, HasInnerGraph):
             Check :func:`pytensor.function` for more arguments, only works when not
             inline.
         """
+        ignore_unused_inputs = kwargs.get("on_unused_input", False) == "ignore"
+        if not ignore_unused_inputs and len(inputs) != len(set(inputs)):
+            var_counts = {var: inputs.count(var) for var in inputs}
+            duplicated_inputs = [var for var, count in var_counts.items() if count > 1]
+            raise ValueError(
+                f"There following variables were provided more than once as inputs to the OpFromGraph, resulting in an "
+                f"invalid graph: {duplicated_inputs}. Use dummy variables or var.copy() to distinguish "
+                f"variables when creating the OpFromGraph graph."
+            )
 
         if not (isinstance(inputs, list) and isinstance(outputs, list)):
             raise TypeError("Inputs and outputs must be lists")

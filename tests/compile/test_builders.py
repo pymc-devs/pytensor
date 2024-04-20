@@ -118,6 +118,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         f = op(x, y, z)
         f = f - grad(pt_sum(f), y)
         f = f - grad(pt_sum(f), y)
+
         fn = function([x, y, z], f)
         xv = np.ones((2, 2), dtype=config.floatX)
         yv = np.ones((2, 2), dtype=config.floatX) * 3
@@ -583,6 +584,22 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
         out = test_ofg(y, y)
         assert out.eval() == 4
+
+    def test_repeated_inputs(self):
+        x = pt.dscalar("x")
+        y = pt.dscalar("y")
+
+        with pytest.raises(
+            ValueError,
+            match="There following variables were provided more than once as inputs to the "
+            "OpFromGraph",
+        ):
+            OpFromGraph([x, x, y], [x + y])
+
+        # Test that repeated inputs will be allowed if unused inputs are ignored
+        g = OpFromGraph([x, x, y], [x + y], on_unused_input="ignore")
+        f = g(x, x, y)
+        assert f.eval({x: 5, y: 5}) == 10
 
 
 @config.change_flags(floatX="float64")
