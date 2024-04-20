@@ -1,5 +1,6 @@
 """Define new Ops from existing Ops"""
 
+import warnings
 from collections import OrderedDict
 from collections.abc import Sequence
 from copy import copy
@@ -186,7 +187,7 @@ class OpFromGraph(Op, HasInnerGraph):
     - For overriding, it's recommended to provide pure functions (no side
       effects like setting global variable) as callable(s). The callable(s)
       supplied for overriding gradient/rop will be called only once at the
-      first call to grad/R_op, and will be converted to OpFromGraph instances.
+      first call to L_op/R_op, and will be converted to OpFromGraph instances.
 
     Examples
     --------
@@ -221,7 +222,7 @@ class OpFromGraph(Op, HasInnerGraph):
         e2 = op(x, y, z) + op(z, y, x)
         fn = function([x, y, z], [e2])
 
-    Example 3 override gradient
+    Example 3 override L_op
 
     .. code-block:: python
 
@@ -230,12 +231,15 @@ class OpFromGraph(Op, HasInnerGraph):
 
         x, y, z = pt.scalars('xyz')
         e = x + y * z
-        def rescale_dy(inps, grads):
+        def rescale_dy(inps, outputs, out_grads):
             x, y, z = inps
-            g, = grads
+            g, = out_grads
             return z*2
         op = OpFromGraph(
-            [x, y, z], [e], grad_overrides=['default', rescale_dy, 'default']
+            [x, y, z],
+            [e],
+            lop_overrides=['default', rescale_dy, 'default'],
+        )
         e2 = op(x, y, z)
         dx, dy, dz = grad(e2, [x, y, z])
         fn = function([x, y, z], [dx, dy, dz])
@@ -451,6 +455,10 @@ class OpFromGraph(Op, HasInnerGraph):
                 self.set_lop_overrides(lop_overrides)
                 self._lop_type = "lop"
         elif grad_overrides != "default":
+            warnings.warn(
+                "grad_overrides is deprecated in favor of lop_overrides. Using it will lead to an error in the future.",
+                FutureWarning,
+            )
             self.set_lop_overrides(grad_overrides)
             self._lop_type = "grad"
         else:

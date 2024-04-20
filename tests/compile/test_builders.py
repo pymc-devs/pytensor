@@ -181,8 +181,9 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         dedz = vector("dedz")
         op_mul_grad = cls_ofg([x, y, dedz], go([x, y], [dedz]))
 
-        op_mul = cls_ofg([x, y], [x * y], grad_overrides=go)
-        op_mul2 = cls_ofg([x, y], [x * y], grad_overrides=op_mul_grad)
+        with pytest.warns(FutureWarning, match="grad_overrides is deprecated"):
+            op_mul = cls_ofg([x, y], [x * y], grad_overrides=go)
+            op_mul2 = cls_ofg([x, y], [x * y], grad_overrides=op_mul_grad)
 
         # single override case (function or OfG instance)
         xx, yy = vector("xx"), vector("yy")
@@ -209,9 +210,10 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
         w, b = vectors("wb")
         # we make the 3rd gradient default (no override)
-        op_linear = cls_ofg(
-            [x, w, b], [x * w + b], grad_overrides=[go1, go2, "default"]
-        )
+        with pytest.warns(FutureWarning, match="grad_overrides is deprecated"):
+            op_linear = cls_ofg(
+                [x, w, b], [x * w + b], grad_overrides=[go1, go2, "default"]
+            )
         xx, ww, bb = vector("xx"), vector("yy"), vector("bb")
         zz = pt_sum(op_linear(xx, ww, bb))
         dx, dw, db = grad(zz, [xx, ww, bb])
@@ -225,11 +227,12 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         np.testing.assert_array_almost_equal(np.ones(16, dtype=config.floatX), dbv, 4)
 
         # NullType and DisconnectedType
-        op_linear2 = cls_ofg(
-            [x, w, b],
-            [x * w + b],
-            grad_overrides=[go1, NullType()(), DisconnectedType()()],
-        )
+        with pytest.warns(FutureWarning, match="grad_overrides is deprecated"):
+            op_linear2 = cls_ofg(
+                [x, w, b],
+                [x * w + b],
+                grad_overrides=[go1, NullType()(), DisconnectedType()()],
+            )
         zz2 = pt_sum(op_linear2(xx, ww, bb))
         dx2, dw2, db2 = grad(
             zz2,
@@ -339,13 +342,14 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         def f1_back(inputs, output_gradients):
             return [output_gradients[0], disconnected_type()]
 
-        op = cls_ofg(
-            inputs=[x, y],
-            outputs=[f1(x, y)],
-            grad_overrides=f1_back,
-            connection_pattern=[[True], [False]],  # This is new
-            on_unused_input="ignore",
-        )  # This is new
+        with pytest.warns(FutureWarning, match="grad_overrides is deprecated"):
+            op = cls_ofg(
+                inputs=[x, y],
+                outputs=[f1(x, y)],
+                grad_overrides=f1_back,
+                connection_pattern=[[True], [False]],
+                on_unused_input="ignore",
+            )
 
         c = op(x, y)
 
