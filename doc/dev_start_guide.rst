@@ -220,7 +220,7 @@ Afterward, you can go to `html/index.html` and navigate the changes in a browser
     python -m http.server
 
 **Do not commit the `html` directory. The documentation is built automatically.**
-
+For more documentation customizations such as different formats e.g., PDF, refer to the `Sphinx documentation <https://www.sphinx-doc.org/en/master/usage/builders/index.html>`_.
 
 Other tools that might help
 ===========================
