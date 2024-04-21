@@ -4254,7 +4254,7 @@ def expand_dims(
         The input array.
     axis :
         Position in the expanded axes where the new axis is placed.
-        If `axis` is ``None``, `a` will be returned immediately.
+        If `axis` is empty, `a` will be returned immediately.
     Returns
     -------
     `a` with a new axis at the `axis` position.
