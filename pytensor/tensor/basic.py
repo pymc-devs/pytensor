@@ -4247,6 +4247,17 @@ def expand_dims(
 
     Insert a new axis that will appear at the `axis` position in the expanded
     array shape.
+
+    Parameters
+    ----------
+    a :
+        The input array.
+    axis :
+        Position in the expanded axes where the new axis is placed.
+        If `axis` is empty, `a` will be returned immediately.
+    Returns
+    -------
+    `a` with a new axis at the `axis` position.
     """
     a = as_tensor(a)
 
@@ -4255,6 +4266,9 @@ def expand_dims(
 
     out_ndim = len(axis) + a.ndim
     axis = np.core.numeric.normalize_axis_tuple(axis, out_ndim)
+
+    if not axis:
+        return a
 
     dim_it = iter(range(a.ndim))
     pattern = ["x" if ax in axis else next(dim_it) for ax in range(out_ndim)]
