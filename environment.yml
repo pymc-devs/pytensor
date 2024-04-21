@@ -37,6 +37,7 @@ dependencies:
   - pygments
   - pydot
   - ipython
+  - pymc-sphinx-theme
   # code style
   - ruff
   # developer tools

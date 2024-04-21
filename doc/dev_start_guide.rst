@@ -168,14 +168,8 @@ create a virtual environment in the project directory:
 
 .. code-block:: bash
 
-    conda env create -n pytensor-dev -f environment.yml
+    conda env create -f environment.yml
     conda activate pytensor-dev
-
-Afterward, you can install the development dependencies:
-
-.. code-block:: bash
-
-    pip install -r requirements.txt
 
 Next, ``pre-commit`` needs to be configured so that the linting and code quality
 checks are performed before each commit:
@@ -202,12 +196,12 @@ see the `NumPy development guide <https://numpy.org/doc/stable/dev/>`_.
 Contributing to the documentation
 ---------------------------------
 
-To contribute to the documentation, first follow the instructions in the previous section. Afterward, you can install the documentation dependencies in the virtual environment you created:
-
+The documentation build dependencies have also been included in the virtual environment you created. You can also create a separate virtual environment just for the documentation using the `environment.yml` file located inside the `doc` folder.
 
 .. code-block:: bash
 
-    pip install -r requirements-rtd.txt
+    conda env create -f doc/environment.yml
+    conda activate pytensor-docs
 
 
 You can now build the documentation from the root of the project with:
@@ -215,7 +209,7 @@ You can now build the documentation from the root of the project with:
 
 .. code-block:: bash
 
-    python doc/scripts/docgen.py
+    python -m sphinx -b html ./doc ./html
 
 
 Afterward, you can go to `html/index.html` and navigate the changes in a browser. One way to do this is to go to the `html` directory and run:
@@ -226,7 +220,7 @@ Afterward, you can go to `html/index.html` and navigate the changes in a browser
     python -m http.server
 
 **Do not commit the `html` directory. The documentation is built automatically.**
-
+For more documentation customizations such as different formats e.g., PDF, refer to the `Sphinx documentation <https://www.sphinx-doc.org/en/master/usage/builders/index.html>`_.
 
 Other tools that might help
 ===========================
