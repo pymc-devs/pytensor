@@ -82,7 +82,7 @@ jax = ["jax", "jaxlib"]
 numba = ["numba>=0.57"]
 
 [tool.setuptools.packages.find]
-include = ["pytensor*", "bin"]
+include = ["pytensor*"]
 
 [tool.setuptools.package-data]
 pytensor = ["py.typed"]
@@ -122,7 +122,7 @@ testpaths = "tests/"
 
 [tool.ruff]
 line-length = 88
-exclude = ["doc/", "pytensor/_version.py", "bin/pytensor_cache.py"]
+exclude = ["doc/", "pytensor/_version.py"]
 
 [tool.ruff.lint]
 select = ["C", "E", "F", "I", "UP", "W", "RUF"]
