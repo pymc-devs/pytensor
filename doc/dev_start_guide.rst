@@ -209,7 +209,7 @@ You can now build the documentation from the root of the project with:
 
 .. code-block:: bash
 
-    python doc/scripts/docgen.py
+    python -m sphinx -b html ./doc ./html
 
 
 Afterward, you can go to `html/index.html` and navigate the changes in a browser. One way to do this is to go to the `html` directory and run:
