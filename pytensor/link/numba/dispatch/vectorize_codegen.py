@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import pickle
+from collections.abc import Sequence
 from typing import Any
 
 import numba
@@ -11,6 +12,10 @@ from numba import TypingError, types
 from numba.core import cgutils
 from numba.core.base import BaseContext
 from numba.np import arrayobj
+
+
+def encode_literals(literals: Sequence) -> str:
+    return base64.encodebytes(pickle.dumps(literals)).decode()
 
 
 _jit_options = {
