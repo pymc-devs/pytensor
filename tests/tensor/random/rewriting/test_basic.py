@@ -74,52 +74,28 @@ def apply_local_rewrite_to_rv(
     return new_out, f_inputs, dist_st, f_rewritten
 
 
-def test_inplace_rewrites():
-    out = normal(0, 1)
-    out.owner.inputs[0].default_update = out.owner.outputs[0]
+class TestRVExpraProps(RandomVariable):
+    name = "test"
+    signature = "()->()"
+    __props__ = ("name", "signature", "dtype", "inplace", "extra")
+    dtype = "floatX"
+    _print_name = ("TestExtraProps", "\\operatorname{TestExtra_props}")
 
-    assert out.owner.op.inplace is False
+    def __init__(self, extra, *args, **kwargs):
+        self.extra = extra
+        super().__init__(*args, **kwargs)
 
-    f = function(
-        [],
-        out,
-        mode="FAST_RUN",
-    )
-
-    (new_out, new_rng) = f.maker.fgraph.outputs
-    assert new_out.type == out.type
-    assert isinstance(new_out.owner.op, type(out.owner.op))
-    assert new_out.owner.op.inplace is True
-    assert all(
-        np.array_equal(a.data, b.data)
-        for a, b in zip(new_out.owner.inputs[2:], out.owner.inputs[2:])
-    )
-    assert np.array_equal(new_out.owner.inputs[1].data, [])
+    def rng_fn(self, rng, dtype, sigma, size):
+        return rng.normal(scale=sigma, size=size)
 
 
-def test_inplace_rewrites_extra_props():
-    class Test(RandomVariable):
-        name = "test"
-        ndim_supp = 0
-        ndims_params = [0]
-        __props__ = ("name", "ndim_supp", "ndims_params", "dtype", "inplace", "extra")
-        dtype = "floatX"
-        _print_name = ("Test", "\\operatorname{Test}")
-
-        def __init__(self, extra, *args, **kwargs):
-            self.extra = extra
-            super().__init__(*args, **kwargs)
-
-        def make_node(self, rng, size, dtype, sigma):
-            return super().make_node(rng, size, dtype, sigma)
-
-        def rng_fn(self, rng, sigma, size):
-            return rng.normal(scale=sigma, size=size)
-
-    out = Test(extra="some value")(1)
-    out.owner.inputs[0].default_update = out.owner.outputs[0]
-
-    assert out.owner.op.inplace is False
+@pytest.mark.parametrize("rv_op", [normal, TestRVExpraProps(extra="some value")])
+def test_inplace_rewrites(rv_op):
+    out = rv_op(np.e)
+    node = out.owner
+    op = node.op
+    node.inputs[0].default_update = node.outputs[0]
+    assert op.inplace is False
 
     f = function(
         [],
@@ -129,9 +105,10 @@ def test_inplace_rewrites_extra_props():
 
     (new_out, new_rng) = f.maker.fgraph.outputs
     assert new_out.type == out.type
-    assert isinstance(new_out.owner.op, type(out.owner.op))
-    assert new_out.owner.op.inplace is True
-    assert new_out.owner.op.extra == out.owner.op.extra
+    new_node = new_out.owner
+    new_op = new_node.op
+    assert isinstance(new_op, type(op))
+    assert new_op._props_dict() == (op._props_dict() | {"inplace": True})
     assert all(
         np.array_equal(a.data, b.data)
         for a, b in zip(new_out.owner.inputs[2:], out.owner.inputs[2:])

@@ -23,14 +23,13 @@ def test_RandomVariable_basics(strict_test_value_flags):
     str_res = str(
         RandomVariable(
             "normal",
-            0,
-            [0, 0],
-            "float32",
-            inplace=True,
+            signature="(),()->()",
+            dtype="float32",
+            inplace=False,
         )
     )
 
-    assert str_res == "normal_rv{0, (0, 0), float32, True}"
+    assert str_res == 'normal_rv{"(),()->()"}'
 
     # `ndims_params` should be a `Sequence` type
     with pytest.raises(TypeError, match="^Parameter ndims_params*"):
@@ -64,9 +63,7 @@ def test_RandomVariable_basics(strict_test_value_flags):
     # Confirm that `inplace` works
     rv = RandomVariable(
         "normal",
-        0,
-        [0, 0],
-        "normal",
+        signature="(),()->()",
         inplace=True,
     )
 
@@ -74,7 +71,7 @@ def test_RandomVariable_basics(strict_test_value_flags):
     assert rv.destroy_map == {0: [0]}
 
     # A no-params `RandomVariable`
-    rv = RandomVariable(name="test_rv", ndim_supp=0, ndims_params=())
+    rv = RandomVariable(name="test_rv", signature="->()")
 
     with pytest.raises(TypeError):
         rv.make_node(rng=1)
