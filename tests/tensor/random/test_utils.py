@@ -114,7 +114,7 @@ class TestSharedRandomStream:
         assert hasattr(random, "standard_normal")
 
         with pytest.raises(AttributeError):
-            np_random = RandomStream(namespace=np, rng_ctor=rng_ctor)
+            np_random = RandomStream(namespace=np.random, rng_ctor=rng_ctor)
             np_random.ndarray
 
         fn = function([], random.uniform(0, 1, size=(2, 2)), updates=random.updates())
