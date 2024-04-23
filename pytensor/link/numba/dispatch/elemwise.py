@@ -18,7 +18,7 @@ from pytensor import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.numba.dispatch import elemwise_codegen
+from pytensor.link.numba.dispatch import vectorize_codegen
 from pytensor.link.numba.dispatch.basic import (
     create_numba_signature,
     create_tuple_creator,
@@ -558,14 +558,14 @@ def _vectorized(
         ]
         in_shapes = [cgutils.unpack_tuple(builder, obj.shape) for obj in inputs]
 
-        iter_shape = elemwise_codegen.compute_itershape(
+        iter_shape = vectorize_codegen.compute_itershape(
             ctx,
             builder,
             in_shapes,
             input_bc_patterns_val,
         )
 
-        outputs, output_types = elemwise_codegen.make_outputs(
+        outputs, output_types = vectorize_codegen.make_outputs(
             ctx,
             builder,
             iter_shape,
@@ -576,7 +576,7 @@ def _vectorized(
             input_types,
         )
 
-        elemwise_codegen.make_loop_call(
+        vectorize_codegen.make_loop_call(
             typingctx,
             ctx,
             builder,
