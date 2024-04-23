@@ -123,7 +123,7 @@ def broadcast_params(params, ndims_params):
 
 def explicit_expand_dims(
     params: Sequence[TensorVariable],
-    ndim_params: tuple[int],
+    ndim_params: Sequence[int],
     size_length: int = 0,
 ) -> list[TensorVariable]:
     """Introduce explicit expand_dims in RV parameters that are implicitly broadcasted together and/or by size."""
@@ -137,7 +137,7 @@ def explicit_expand_dims(
         # See: https://github.com/pymc-devs/pytensor/issues/568
         max_batch_dims = size_length
     else:
-        max_batch_dims = max(batch_dims)
+        max_batch_dims = max(batch_dims, default=0)
 
     new_params = []
     for new_param, batch_dim in zip(params, batch_dims):
@@ -353,6 +353,11 @@ def supp_shape_from_ref_param_shape(
     -------
     out: tuple
         Representing the support shape for a `RandomVariable` with the given `dist_params`.
+
+    Notes
+    _____
+    This helper is no longer necessary when using signatures in `RandomVariable` subclasses.
+
 
     """
     if ndim_supp <= 0:

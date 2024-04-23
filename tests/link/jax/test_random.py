@@ -771,8 +771,7 @@ def test_random_unimplemented():
 
     class NonExistentRV(RandomVariable):
         name = "non-existent"
-        ndim_supp = 0
-        ndims_params = []
+        signature = "->()"
         dtype = "floatX"
 
         def __call__(self, size=None, **kwargs):
@@ -798,8 +797,7 @@ def test_random_custom_implementation():
 
     class CustomRV(RandomVariable):
         name = "non-existent"
-        ndim_supp = 0
-        ndims_params = []
+        signature = "->()"
         dtype = "floatX"
 
         def __call__(self, size=None, **kwargs):

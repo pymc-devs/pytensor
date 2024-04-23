@@ -1463,11 +1463,8 @@ def batched_unweighted_choice_without_replacement_tester(
     rng = shared(rng_ctor())
 
     # Batched a implicit size
-    a_core_ndim = 2
-    core_shape_len = 1
     rv_op = ChoiceWithoutReplacement(
-        ndim_supp=max(a_core_ndim - 1, 0) + core_shape_len,
-        ndims_params=[a_core_ndim, core_shape_len],
+        signature="(a0,a1),(1)->(s0,a1)",
         dtype="int64",
     )
 
@@ -1483,11 +1480,8 @@ def batched_unweighted_choice_without_replacement_tester(
         assert np.all((draw >= i * 10) & (draw < (i + 1) * 10))
 
     # Explicit size broadcasts beyond a
-    a_core_ndim = 2
-    core_shape_len = 2
     rv_op = ChoiceWithoutReplacement(
-        ndim_supp=max(a_core_ndim - 1, 0) + core_shape_len,
-        ndims_params=[a_core_ndim, len(core_shape)],
+        signature="(a0,a1),(2)->(s0,s1,a1)",
         dtype="int64",
     )
 
@@ -1515,12 +1509,8 @@ def batched_weighted_choice_without_replacement_tester(
     """
     rng = shared(rng_ctor())
 
-    # 3 ndims params indicates p is passed
-    a_core_ndim = 2
-    core_shape_len = 1
     rv_op = ChoiceWithoutReplacement(
-        ndim_supp=max(a_core_ndim - 1, 0) + core_shape_len,
-        ndims_params=[a_core_ndim, 1, 1],
+        signature="(a0,a1),(a0),(1)->(s0,a1)",
         dtype="int64",
     )
 
@@ -1540,11 +1530,8 @@ def batched_weighted_choice_without_replacement_tester(
 
     # p and a are batched
     # Test implicit arange
-    a_core_ndim = 0
-    core_shape_len = 2
     rv_op = ChoiceWithoutReplacement(
-        ndim_supp=max(a_core_ndim - 1, 0) + core_shape_len,
-        ndims_params=[a_core_ndim, 1, 1],
+        signature="(),(a),(2)->(s0,s1)",
         dtype="int64",
     )
     a = 6
@@ -1566,11 +1553,8 @@ def batched_weighted_choice_without_replacement_tester(
         assert set(draw) == set(range(i, 6, 2))
 
     # Size broadcasts beyond a
-    a_core_ndim = 2
-    core_shape_len = 1
     rv_op = ChoiceWithoutReplacement(
-        ndim_supp=max(a_core_ndim - 1, 0) + core_shape_len,
-        ndims_params=[a_core_ndim, 1, 1],
+        signature="(a0,a1),(a0),(1)->(s0,a1)",
         dtype="int64",
     )
     a = np.arange(4 * 5 * 2).reshape((4, 5, 2))

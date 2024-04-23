@@ -169,7 +169,8 @@ _DIMENSION_NAME = r"\w+"
 _CORE_DIMENSION_LIST = f"(?:{_DIMENSION_NAME}(?:,{_DIMENSION_NAME})*)?"
 _ARGUMENT = rf"\({_CORE_DIMENSION_LIST}\)"
 _ARGUMENT_LIST = f"{_ARGUMENT}(?:,{_ARGUMENT})*"
-_SIGNATURE = f"^{_ARGUMENT_LIST}->{_ARGUMENT_LIST}$"
+# Allow no inputs
+_SIGNATURE = f"^(?:{_ARGUMENT_LIST})?->{_ARGUMENT_LIST}$"
 
 
 def _parse_gufunc_signature(
@@ -200,6 +201,8 @@ def _parse_gufunc_signature(
             tuple(re.findall(_DIMENSION_NAME, arg))
             for arg in re.findall(_ARGUMENT, arg_list)
         ]
+        if arg_list  # ignore no inputs
+        else []
         for arg_list in signature.split("->")
     )
 

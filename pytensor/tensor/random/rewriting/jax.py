@@ -1,3 +1,5 @@
+import re
+
 from pytensor.compile import optdb
 from pytensor.graph.rewriting.basic import in2out, node_rewriter
 from pytensor.graph.rewriting.db import SequenceDB
@@ -164,9 +166,9 @@ def materialize_implicit_arange_choice_without_replacement(fgraph, node):
 
     a_vector_param = arange(a_scalar_param)
     new_props_dict = op._props_dict().copy()
-    new_ndims_params = list(op.ndims_params)
-    new_ndims_params[0] += 1
-    new_props_dict["ndims_params"] = new_ndims_params
+    # Signature changes from something like "(),(a),(2)->(s0, s1)" to "(a),(a),(2)->(s0, s1)"
+    # I.e., we substitute the first `()` by `(a)`
+    new_props_dict["signature"] = re.sub(r"\(\)", "(a)", op.signature, 1)
     new_op = type(op)(**new_props_dict)
     return new_op.make_node(rng, size, dtype, a_vector_param, *other_params).outputs
 

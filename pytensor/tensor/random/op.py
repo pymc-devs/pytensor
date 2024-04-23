@@ -1,3 +1,4 @@
+import warnings
 from collections.abc import Sequence
 from copy import copy
 from typing import cast
@@ -28,6 +29,7 @@ from pytensor.tensor.random.utils import (
 from pytensor.tensor.shape import shape_tuple
 from pytensor.tensor.type import TensorType, all_dtypes
 from pytensor.tensor.type_other import NoneConst
+from pytensor.tensor.utils import _parse_gufunc_signature, safe_signature
 from pytensor.tensor.variable import TensorVariable
 
 
@@ -42,7 +44,7 @@ class RandomVariable(Op):
 
     _output_type_depends_on_input_value = True
 
-    __props__ = ("name", "ndim_supp", "ndims_params", "dtype", "inplace")
+    __props__ = ("name", "signature", "dtype", "inplace")
     default_output = 1
 
     def __init__(
@@ -50,8 +52,9 @@ class RandomVariable(Op):
         name=None,
         ndim_supp=None,
         ndims_params=None,
-        dtype=None,
+        dtype: str | None = None,
         inplace=None,
+        signature: str | None = None,
     ):
         """Create a random variable `Op`.
 
@@ -59,43 +62,62 @@ class RandomVariable(Op):
         ----------
         name: str
             The `Op`'s display name.
-        ndim_supp: int
-            Total number of dimensions for a single draw of the random variable
-            (e.g. a multivariate normal draw is 1D, so ``ndim_supp = 1``).
-        ndims_params: list of int
-            Number of dimensions for each distribution parameter when the
-            parameters only specify a single drawn of the random variable
-            (e.g. a multivariate normal's mean is 1D and covariance is 2D, so
-            ``ndims_params = [1, 2]``).
+        signature: str
+            Numpy-like vectorized signature of the random variable.
         dtype: str (optional)
             The dtype of the sampled output.  If the value ``"floatX"`` is
             given, then ``dtype`` is set to ``pytensor.config.floatX``.  If
             ``None`` (the default), the `dtype` keyword must be set when
             `RandomVariable.make_node` is called.
         inplace: boolean (optional)
-            Determine whether or not the underlying rng state is updated
-            in-place or not (i.e. copied).
+            Determine whether the underlying rng state is mutated or copied.
 
         """
         super().__init__()
 
         self.name = name or getattr(self, "name")
-        self.ndim_supp = (
-            ndim_supp if ndim_supp is not None else getattr(self, "ndim_supp")
+
+        ndim_supp = (
+            ndim_supp if ndim_supp is not None else getattr(self, "ndim_supp", None)
         )
-        self.ndims_params = (
-            ndims_params if ndims_params is not None else getattr(self, "ndims_params")
+        if ndim_supp is not None:
+            warnings.warn(
+                "ndim_supp is deprecated. Provide signature instead.", FutureWarning
+            )
+            self.ndim_supp = ndim_supp
+        ndims_params = (
+            ndims_params
+            if ndims_params is not None
+            else getattr(self, "ndims_params", None)
         )
+        if ndims_params is not None:
+            warnings.warn(
+                "ndims_params is deprecated. Provide signature instead.", FutureWarning
+            )
+            if not isinstance(ndims_params, Sequence):
+                raise TypeError("Parameter ndims_params must be sequence type.")
+            self.ndims_params = tuple(ndims_params)
+
+        self.signature = signature or getattr(self, "signature", None)
+        if self.signature is not None:
+            # Assume a single output. Several methods need to be updated to handle multiple outputs.
+            self.inputs_sig, [self.output_sig] = _parse_gufunc_signature(self.signature)
+            self.ndims_params = [len(input_sig) for input_sig in self.inputs_sig]
+            self.ndim_supp = len(self.output_sig)
+        else:
+            if (
+                getattr(self, "ndim_supp", None) is None
+                or getattr(self, "ndims_params", None) is None
+            ):
+                raise ValueError("signature must be provided")
+            else:
+                self.signature = safe_signature(self.ndims_params, [self.ndim_supp])
+
         self.dtype = dtype or getattr(self, "dtype", None)
 
         self.inplace = (
             inplace if inplace is not None else getattr(self, "inplace", False)
         )
-
-        if not isinstance(self.ndims_params, Sequence):
-            raise TypeError("Parameter ndims_params must be sequence type.")
-
-        self.ndims_params = tuple(self.ndims_params)
 
         if self.inplace:
             self.destroy_map = {0: [0]}
@@ -120,8 +142,31 @@ class RandomVariable(Op):
         values (not shapes) of some parameters. For instance, a `gaussian_random_walk(steps, size=(2,))`,
         might have `support_shape=(steps,)`.
         """
+        if self.signature is not None:
+            # Signature could indicate fixed numerical shapes
+            # As per https://numpy.org/neps/nep-0020-gufunc-signature-enhancement.html
+            output_sig = self.output_sig
+            core_out_shape = {
+                dim: int(dim) if str.isnumeric(dim) else None for dim in self.output_sig
+            }
+
+            # Try to infer missing support dims from signature of params
+            for param, param_sig, ndim_params in zip(
+                dist_params, self.inputs_sig, self.ndims_params
+            ):
+                if ndim_params == 0:
+                    continue
+                for param_dim, dim in zip(param.shape[-ndim_params:], param_sig):
+                    if dim in core_out_shape and core_out_shape[dim] is None:
+                        core_out_shape[dim] = param_dim
+
+            if all(dim is not None for dim in core_out_shape.values()):
+                # We have all we need
+                return [core_out_shape[dim] for dim in output_sig]
+
         raise NotImplementedError(
-            "`_supp_shape_from_params` must be implemented for multivariate RVs"
+            "`_supp_shape_from_params` must be implemented for multivariate RVs "
+            "when signature is not sufficient to infer the support shape"
         )
 
     def rng_fn(self, rng, *args, **kwargs) -> int | float | np.ndarray:
@@ -129,7 +174,24 @@ class RandomVariable(Op):
         return getattr(rng, self.name)(*args, **kwargs)
 
     def __str__(self):
-        props_str = ", ".join(f"{getattr(self, prop)}" for prop in self.__props__[1:])
+        # Only show signature from core props
+        if signature := self.signature:
+            # inp, out = signature.split("->")
+            # extended_signature = f"[rng],[size],{inp}->[rng],{out}"
+            # core_props = [extended_signature]
+            core_props = [f'"{signature}"']
+        else:
+            # Far back compat
+            core_props = [str(self.ndim_supp), str(self.ndims_params)]
+
+        # Add any extra props that the subclass may have
+        extra_props = [
+            str(getattr(self, prop))
+            for prop in self.__props__
+            if prop not in RandomVariable.__props__
+        ]
+
+        props_str = ", ".join(core_props + extra_props)
         return f"{self.name}_rv{{{props_str}}}"
 
     def _infer_shape(
@@ -298,11 +360,11 @@ class RandomVariable(Op):
             dtype_idx = constant(all_dtypes.index(dtype), dtype="int64")
         else:
             dtype_idx = constant(dtype, dtype="int64")
-            dtype = all_dtypes[dtype_idx.data]
 
-        outtype = TensorType(dtype=dtype, shape=static_shape)
-        out_var = outtype()
+        dtype = all_dtypes[dtype_idx.data]
+
         inputs = (rng, size, dtype_idx, *dist_params)
+        out_var = TensorType(dtype=dtype, shape=static_shape)()
         outputs = (rng.type(), out_var)
 
         return Apply(self, inputs, outputs)
@@ -395,9 +457,8 @@ def vectorize_random_variable(
     # We extend it to accommodate the new input batch dimensions.
     # Otherwise, we assume the new size already has the right values
 
-    # Need to make parameters implicit broadcasting explicit
-    original_dist_params = node.inputs[3:]
-    old_size = node.inputs[1]
+    original_dist_params = op.dist_params(node)
+    old_size = op.size_param(node)
     len_old_size = get_vector_length(old_size)
 
     original_expanded_dist_params = explicit_expand_dims(
