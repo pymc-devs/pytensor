@@ -281,38 +281,24 @@ class NormalRV(RandomVariable):
 normal = NormalRV()
 
 
-class StandardNormalRV(NormalRV):
-    r"""A standard normal continuous random variable.
+def standard_normal(*, size=None, rng=None, dtype=None):
+    """Draw samples from a standard normal distribution.
 
-    The probability density function for `standard_normal` is:
+    Signature
+    ---------
 
-    .. math::
+    `nil -> ()`
 
-        f(x) = \frac{1}{\sqrt{2 \pi}} e^{-\frac{x^2}{2}}
+    Parameters
+    ----------
+    size
+        Sample shape. If the given size is, e.g. `(m, n, k)` then `m * n * k`
+        independent, identically distributed random variables are
+        returned. Default is `None` in which case a single random variable
+        is returned.
 
     """
-
-    def __call__(self, size=None, **kwargs):
-        """Draw samples from a standard normal distribution.
-
-        Signature
-        ---------
-
-        `nil -> ()`
-
-        Parameters
-        ----------
-        size
-            Sample shape. If the given size is, e.g. `(m, n, k)` then `m * n * k`
-            independent, identically distributed random variables are
-            returned. Default is `None` in which case a single random variable
-            is returned.
-
-        """
-        return super().__call__(loc=0.0, scale=1.0, size=size, **kwargs)
-
-
-standard_normal = StandardNormalRV()
+    return normal(0.0, 1.0, size=size, rng=rng, dtype=dtype)
 
 
 class HalfNormalRV(ScipyRandomVariable):

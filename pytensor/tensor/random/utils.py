@@ -218,9 +218,9 @@ class RandomStream:
         if namespace is None:
             from pytensor.tensor.random import basic  # pylint: disable=import-self
 
-            self.namespaces = [basic]
+            self.namespaces = [(basic, set(basic.__all__))]
         else:
-            self.namespaces = [namespace]
+            self.namespaces = [(namespace, set(namespace.__all__))]
 
         self.default_instance_seed = seed
         self.state_updates = []
@@ -235,22 +235,20 @@ class RandomStream:
 
     def __getattr__(self, obj):
         ns_obj = next(
-            (getattr(ns, obj) for ns in self.namespaces if hasattr(ns, obj)), None
+            (
+                getattr(ns, obj)
+                for ns, all_ in self.namespaces
+                if obj in all_ and hasattr(ns, obj)
+            ),
+            None,
         )
 
         if ns_obj is None:
             raise AttributeError(f"No attribute {obj}.")
 
-        from pytensor.tensor.random.op import RandomVariable
-
-        if isinstance(ns_obj, RandomVariable):
-
-            @wraps(ns_obj)
-            def meta_obj(*args, **kwargs):
-                return self.gen(ns_obj, *args, **kwargs)
-
-        else:
-            raise AttributeError(f"No attribute {obj}.")
+        @wraps(ns_obj)
+        def meta_obj(*args, **kwargs):
+            return self.gen(ns_obj, *args, **kwargs)
 
         setattr(self, obj, meta_obj)
         return getattr(self, obj)
