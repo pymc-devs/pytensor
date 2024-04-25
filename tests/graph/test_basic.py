@@ -31,6 +31,7 @@ from pytensor.graph.basic import (
 )
 from pytensor.graph.op import Op
 from pytensor.graph.type import Type
+from pytensor.printing import debugprint
 from pytensor.tensor import constant
 from pytensor.tensor.math import max_and_argmax
 from pytensor.tensor.type import TensorType, iscalars, matrix, scalars, vector
@@ -869,3 +870,10 @@ class TestTruncatedGraphInputs:
         assert len(inspect.call_args_list) == len(
             {a for ((a, b), kw) in inspect.call_args_list}
         )
+
+
+def test_dprint():
+    r1, r2 = MyVariable(1), MyVariable(2)
+    o1 = MyOp(r1, r2)
+    assert o1.dprint(file="str") == debugprint(o1, file="str")
+    assert o1.owner.dprint(file="str") == debugprint(o1.owner, file="str")

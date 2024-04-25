@@ -75,6 +75,18 @@ class Node(MetaObject):
         """
         raise NotImplementedError()
 
+    def dprint(self, **kwargs):
+        """Debug print itself
+
+        Parameters
+        ----------
+        kwargs:
+            Optional keyword arguments to pass to debugprint function.
+        """
+        from pytensor.printing import debugprint
+
+        return debugprint(self, **kwargs)
+
 
 class Apply(Node, Generic[OpType]):
     """A `Node` representing the application of an operation to inputs.
