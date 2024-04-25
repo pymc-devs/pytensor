@@ -6,6 +6,7 @@ import pytest
 
 from pytensor import shared
 from pytensor import tensor as pt
+from pytensor.compile import UnusedInputError
 from pytensor.graph.basic import (
     Apply,
     NominalVariable,
@@ -30,6 +31,7 @@ from pytensor.graph.basic import (
 )
 from pytensor.graph.op import Op
 from pytensor.graph.type import Type
+from pytensor.tensor import constant
 from pytensor.tensor.math import max_and_argmax
 from pytensor.tensor.type import TensorType, iscalars, matrix, scalars, vector
 from pytensor.tensor.type_other import NoneConst
@@ -358,6 +360,24 @@ class TestEval:
         t.name = "p"
         with pytest.raises(Exception, match="o not found in graph"):
             t.eval({"o": 1})
+
+    def test_eval_kwargs(self):
+        with pytest.raises(UnusedInputError):
+            self.w.eval({self.z: 3, self.x: 2.5})
+        assert self.w.eval({self.z: 3, self.x: 2.5}, on_unused_input="ignore") == 6.0
+
+    @pytest.mark.filterwarnings("error")
+    def test_eval_unashable_kwargs(self):
+        y_repl = constant(2.0, dtype="floatX")
+
+        assert self.w.eval({self.x: 1.0}, givens=((self.y, y_repl),)) == 6.0
+
+        with pytest.warns(
+            UserWarning,
+            match="Keyword arguments could not be used to create a cache key",
+        ):
+            # givens dict is not hashable
+            assert self.w.eval({self.x: 1.0}, givens={self.y: y_repl}) == 6.0
 
 
 class TestAutoName:
