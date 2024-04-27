@@ -763,7 +763,7 @@ class TestMaxAndArgmax:
         MaxAndArgmax.debug = 0
 
     def test_basic(self):
-        n = as_tensor_variable(5.0)
+        n = as_tensor_variable([5.0])
         v, i = eval_outputs(max_and_argmax(n))
         assert v == 5.0
         assert i == 0
