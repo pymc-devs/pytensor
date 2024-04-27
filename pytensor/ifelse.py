@@ -477,7 +477,7 @@ acceptable_ops = (
     Reshape,
     Unbroadcast,
     pt.math.Dot,
-    pt.math.TensorMax,
+    pt.math.Max,
     pt.math.Argmax,
     pt.subtensor.Subtensor,
     pt.subtensor.IncSubtensor,

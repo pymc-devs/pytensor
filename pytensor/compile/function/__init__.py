@@ -312,6 +312,7 @@ def function(
     else:
         # note: pfunc will also call orig_function -- orig_function is
         #      a choke point that all compilation must pass through
+
         fn = pfunc(
             params=inputs,
             outputs=outputs,

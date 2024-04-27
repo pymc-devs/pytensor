@@ -256,6 +256,8 @@ def compare_numba_and_py(
     if assert_fn is None:
 
         def assert_fn(x, y):
+            print(x)
+            print(y)
             return np.testing.assert_allclose(x, y, rtol=1e-4) and compare_shape_dtype(
                 x, y
             )

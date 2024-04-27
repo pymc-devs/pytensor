@@ -291,6 +291,7 @@ class Op(MetaObject):
 
         """
         node = self.make_node(*inputs, **kwargs)
+
         if name is not None:
             if len(node.outputs) == 1:
                 node.outputs[0].name = name
