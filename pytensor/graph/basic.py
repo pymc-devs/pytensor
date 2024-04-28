@@ -937,7 +937,7 @@ def graph_inputs(
 
 
 def explicit_graph_inputs(
-    graph: Variable[Any, Any] | Iterable[Variable[Any, Any]],
+    graph: Variable | Iterable[Variable],
 ) -> Generator[Variable, None, None]:
     """
     Get the root variables needed as inputs to a function that computes `graph`
