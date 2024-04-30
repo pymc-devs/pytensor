@@ -292,6 +292,14 @@ def test_vectorize_node():
     assert vect_node.op is normal
     assert vect_node.default_output().type.shape == (10, 5)
 
+    node = normal(vec, size=(5,)).owner
+    new_inputs = node.inputs.copy()
+    new_inputs[3] = tensor("mu", shape=(1, 5))  # mu
+    new_inputs[4] = tensor("sigma", shape=(10,))  # sigma
+    vect_node = vectorize_node(node, *new_inputs)
+    assert vect_node.op is normal
+    assert vect_node.default_output().type.shape == (10, 5)
+
     # Test parameter broadcasting with expanding size
     node = normal(vec, size=(2, 5)).owner
     new_inputs = node.inputs.copy()
