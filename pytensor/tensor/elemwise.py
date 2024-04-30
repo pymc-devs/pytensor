@@ -1098,14 +1098,14 @@ class Elemwise(OpenMPOp):
                 all_broadcastable = all(s == 1 for s in var.type.shape)
                 cond1 = " && ".join(
                     [
-                        "PyArray_ISCONTIGUOUS(%s)" % arr
+                        f"PyArray_ISCONTIGUOUS({arr})"
                         for arr, var in z
                         if not all_broadcastable
                     ]
                 )
                 cond2 = " && ".join(
                     [
-                        "PyArray_ISFORTRAN(%s)" % arr
+                        f"PyArray_ISFORTRAN({arr})"
                         for arr, var in z
                         if not all_broadcastable
                     ]

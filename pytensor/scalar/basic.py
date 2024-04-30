@@ -475,7 +475,7 @@ class ScalarType(CType, HasDataType, HasShape):
                     sub,
                     name=name,
                     dtype=specs[1],
-                    pyarr_type="Py%sArrType_Type" % specs[2],
+                    pyarr_type=f"Py{specs[2]}ArrType_Type",
                 )
             )
         else:

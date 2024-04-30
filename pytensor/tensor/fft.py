@@ -20,8 +20,7 @@ class RFFTOp(Op):
         a = as_tensor_variable(a)
         if a.ndim < 2:
             raise TypeError(
-                "%s: input must have dimension > 2, with first dimension batches"
-                % self.__class__.__name__
+                f"{self.__class__.__name__}: input must have dimension > 2, with first dimension batches"
             )
 
         if s is None:
@@ -31,8 +30,8 @@ class RFFTOp(Op):
             s = as_tensor_variable(s)
             if s.dtype not in integer_dtypes:
                 raise TypeError(
-                    "%s: length of the transformed axis must be"
-                    " of type integer" % self.__class__.__name__
+                    f"{self.__class__.__name__}: length of the transformed axis must be"
+                    " of type integer"
                 )
         return Apply(self, [a, s], [self.output_type(a)()])
 
@@ -92,8 +91,8 @@ class IRFFTOp(Op):
             s = as_tensor_variable(s)
             if s.dtype not in integer_dtypes:
                 raise TypeError(
-                    "%s: length of the transformed axis must be"
-                    " of type integer" % self.__class__.__name__
+                    f"{self.__class__.__name__}: length of the transformed axis must be"
+                    " of type integer"
                 )
         return Apply(self, [a, s], [self.output_type(a)()])
 

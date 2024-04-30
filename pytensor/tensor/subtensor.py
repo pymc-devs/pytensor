@@ -2174,7 +2174,7 @@ class AdvancedIncSubtensor1(COp):
         else:
             msg += ",inc"
 
-        return self.__class__.__name__ + "{%s}" % msg
+        return self.__class__.__name__ + f"{{{msg}}}"
 
     def make_node(self, x, y, ilist):
         x_ = as_tensor_variable(x)
