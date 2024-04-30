@@ -50,7 +50,10 @@ def random_make_inplace(fgraph, node):
         props = op._props_dict()
         props["inplace"] = True
         new_op = type(op)(**props)
-        return new_op.make_node(*node.inputs).outputs
+        new_outputs = new_op.make_node(*node.inputs).outputs
+        for old_out, new_out in zip(node.outputs, new_outputs):
+            copy_stack_trace(old_out, new_out)
+        return new_outputs
 
     return False
 
