@@ -9,7 +9,7 @@ from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
 from pytensor.graph.basic import Constant, Variable, ancestors
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.rewriting.basic import EquilibriumGraphRewriter
+from pytensor.graph.rewriting.basic import EquilibriumGraphRewriter, check_stack_trace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.tensor import constant
 from pytensor.tensor.elemwise import DimShuffle
@@ -143,6 +143,7 @@ def test_inplace_rewrites(rv_op):
         for a, b in zip(new_op.dist_params(new_node), op.dist_params(node))
     )
     assert np.array_equal(new_op.size_param(new_node).data, op.size_param(node).data)
+    assert check_stack_trace(f)
 
 
 @config.change_flags(compute_test_value="raise")
