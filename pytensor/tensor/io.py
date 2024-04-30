@@ -28,7 +28,7 @@ class LoadFromDisk(Op):
         if mmap_mode not in (None, "c"):
             raise ValueError(
                 "The only supported values for mmap_mode "
-                "are None and 'c', got %s" % mmap_mode
+                f"are None and 'c', got {mmap_mode}"
             )
         self.mmap_mode = mmap_mode
 

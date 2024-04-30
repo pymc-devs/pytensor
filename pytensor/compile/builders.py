@@ -709,7 +709,7 @@ class OpFromGraph(Op, HasInnerGraph):
             if not isinstance(roverrides_l, list):
                 raise TypeError(
                     "Rop overriding function should return a list, "
-                    'got "%s"' % type(roverrides_l)
+                    f'got "{type(roverrides_l)}"'
                 )
             all_rops_l, all_rops_ov_l = zip(
                 *[

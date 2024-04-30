@@ -652,8 +652,8 @@ class Repeat(Op):
         if repeats.dtype in numpy_unsupported_dtypes:
             raise TypeError(
                 (
-                    "dtypes %s are not supported by numpy.repeat "
-                    "for the 'repeats' parameter, " % str(numpy_unsupported_dtypes)
+                    f"dtypes {numpy_unsupported_dtypes!s} are not supported by numpy.repeat "
+                    "for the 'repeats' parameter, "
                 ),
                 repeats.dtype,
             )
@@ -882,8 +882,8 @@ class FillDiagonal(Op):
         val = ptb.as_tensor_variable(val)
         if a.ndim < 2:
             raise TypeError(
-                "%s: first parameter must have at least"
-                " two dimensions" % self.__class__.__name__
+                f"{self.__class__.__name__}: first parameter must have at least"
+                " two dimensions"
             )
         elif val.ndim != 0:
             raise TypeError(
@@ -892,8 +892,8 @@ class FillDiagonal(Op):
         val = ptb.cast(val, dtype=upcast(a.dtype, val.dtype))
         if val.dtype != a.dtype:
             raise TypeError(
-                "%s: type of second parameter must be the same as"
-                " the first's" % self.__class__.__name__
+                f"{self.__class__.__name__}: type of second parameter must be the same as"
+                " the first's"
             )
         return Apply(self, [a, val], [a.type()])
 
@@ -926,8 +926,8 @@ class FillDiagonal(Op):
             return [None, None]
         elif a.ndim > 2:
             raise NotImplementedError(
-                "%s: gradient is currently implemented"
-                " for matrices only" % self.__class__.__name__
+                f"{self.__class__.__name__}: gradient is currently implemented"
+                " for matrices only"
             )
         wr_a = fill_diagonal(grad, 0)  # valid for any number of dimensions
         # diag is only valid for matrices
@@ -984,8 +984,8 @@ class FillDiagonalOffset(Op):
         offset = ptb.as_tensor_variable(offset)
         if a.ndim != 2:
             raise TypeError(
-                "%s: first parameter must have exactly"
-                " two dimensions" % self.__class__.__name__
+                f"{self.__class__.__name__}: first parameter must have exactly"
+                " two dimensions"
             )
         elif val.ndim != 0:
             raise TypeError(
@@ -998,8 +998,8 @@ class FillDiagonalOffset(Op):
         val = ptb.cast(val, dtype=upcast(a.dtype, val.dtype))
         if val.dtype != a.dtype:
             raise TypeError(
-                "%s: type of second parameter must be the same"
-                " as the first's" % self.__class__.__name__
+                f"{self.__class__.__name__}: type of second parameter must be the same"
+                " as the first's"
             )
         elif offset.dtype not in integer_dtypes:
             raise TypeError(

@@ -180,9 +180,9 @@ class Gemv(Op):
 
     def __str__(self):
         if self.inplace:
-            return "%s{inplace}" % self.__class__.__name__
+            return f"{self.__class__.__name__}{{inplace}}"
         else:
-            return "%s{no_inplace}" % self.__class__.__name__
+            return f"{self.__class__.__name__}{{no_inplace}}"
 
     def make_node(self, y, alpha, A, x, beta):
         y = ptb.as_tensor_variable(y)
@@ -279,9 +279,9 @@ class Ger(Op):
 
     def __str__(self):
         if self.destructive:
-            return "%s{destructive}" % self.__class__.__name__
+            return f"{self.__class__.__name__}{{destructive}}"
         else:
-            return "%s{non-destructive}" % self.__class__.__name__
+            return f"{self.__class__.__name__}{{non-destructive}}"
 
     def make_node(self, A, alpha, x, y):
         A = ptb.as_tensor_variable(A)
@@ -1811,9 +1811,10 @@ class BatchedDot(COp):
                         f"{strides}[{i}] > 0 && {strides}[{i}] % type_size == 0"
                         for i in range(1, ndim)
                     ),
-                    "(%s)"
-                    % " || ".join(
-                        f"{strides}[{i}] == type_size" for i in range(1, ndim)
+                    "({})".format(
+                        " || ".join(
+                            f"{strides}[{i}] == type_size" for i in range(1, ndim)
+                        )
                     ),
                 ]
             )
