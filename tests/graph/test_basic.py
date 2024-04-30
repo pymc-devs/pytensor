@@ -18,6 +18,7 @@ from pytensor.graph.basic import (
     clone,
     clone_get_equiv,
     equal_computations,
+    explicit_graph_inputs,
     general_toposort,
     get_var_by_name,
     graph_inputs,
@@ -520,6 +521,20 @@ def test_graph_inputs():
     res = graph_inputs([o2], blockers=None)
     res_list = list(res)
     assert res_list == [r3, r1, r2]
+
+
+def test_explicit_graph_inputs():
+    x = pt.fscalar()
+    y = pt.constant(2)
+    z = shared(1)
+    a = pt.sum(x + y + z)
+    b = pt.true_div(x, y)
+
+    res = list(explicit_graph_inputs([a]))
+    res1 = list(explicit_graph_inputs(b))
+
+    assert res == [x]
+    assert res1 == [x]
 
 
 def test_variables_and_orphans():

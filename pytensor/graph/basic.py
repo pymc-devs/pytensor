@@ -936,6 +936,55 @@ def graph_inputs(
     yield from (r for r in ancestors(graphs, blockers) if r.owner is None)
 
 
+def explicit_graph_inputs(
+    graph: Variable | Iterable[Variable],
+) -> Generator[Variable, None, None]:
+    """
+    Get the root variables needed as inputs to a function that computes `graph`
+
+    Parameters
+    ----------
+    graph : TensorVariable
+        Output `Variable` instances for which to search backward through
+        owners.
+
+    Returns
+    -------
+    iterable
+        Generator of root Variables (without owner) needed to compile a function that evaluates `graphs`.
+
+    Examples
+    --------
+
+    .. code-block:: python
+
+        import pytensor
+        import pytensor.tensor as pt
+        from pytensor.graph.basic import explicit_graph_inputs
+
+        x = pt.vector('x')
+        y = pt.constant(2)
+        z = pt.mul(x*y)
+
+        inputs = list(explicit_graph_inputs(z))
+        f = pytensor.function(inputs, z)
+        eval = f([1, 2, 3])
+
+        print(eval)
+        # [2. 4. 6.]
+    """
+    from pytensor.compile.sharedvalue import SharedVariable
+
+    if isinstance(graph, Variable):
+        graph = [graph]
+
+    return (
+        v
+        for v in graph_inputs(graph)
+        if isinstance(v, Variable) and not isinstance(v, Constant | SharedVariable)
+    )
+
+
 def vars_between(
     ins: Collection[Variable], outs: Iterable[Variable]
 ) -> Generator[Variable, None, None]:
