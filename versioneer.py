@@ -316,7 +316,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 import functools
 
 have_tomllib = True
@@ -443,9 +443,9 @@ def run_command(commands, args, cwd=None, verbose=False, hide_stderr=False,
 
     for command in commands:
         try:
-            dispcmd = str([command] + args)
+            dispcmd = str([command, *args])
             # remember shell=False, so use git.cmd on windows, not just git
-            process = subprocess.Popen([command] + args, cwd=cwd, env=env,
+            process = subprocess.Popen([command, *args], cwd=cwd, env=env,
                                        stdout=subprocess.PIPE,
                                        stderr=(subprocess.PIPE if hide_stderr
                                                else None), **popen_kwargs)
@@ -1392,7 +1392,7 @@ def do_vcs_install(versionfile_source, ipy):
         with open(".gitattributes", "a+") as fobj:
             fobj.write(f"{versionfile_source} export-subst\n")
         files.append(".gitattributes")
-    run_command(GITS, ["add", "--"] + files)
+    run_command(GITS, ["add", "--", *files])
 
 
 def versions_from_parentdir(parentdir_prefix, root, verbose):
@@ -2106,7 +2106,7 @@ def do_setup():
         cfg = get_config_from_root(root)
     except (OSError, configparser.NoSectionError,
             configparser.NoOptionError) as e:
-        if isinstance(e, (OSError, configparser.NoSectionError)):
+        if isinstance(e, OSError | configparser.NoSectionError):
             print("Adding sample versioneer config to setup.cfg",
                   file=sys.stderr)
             with open(os.path.join(root, "setup.cfg"), "a") as f:
