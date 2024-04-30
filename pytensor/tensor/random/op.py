@@ -20,6 +20,7 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.random.type import RandomGeneratorType, RandomStateType, RandomType
 from pytensor.tensor.random.utils import (
+    compute_batch_shape,
     explicit_expand_dims,
     normalize_size_param,
 )
@@ -403,15 +404,14 @@ def vectorize_random_variable(
         original_expanded_dist_params, dict(zip(original_dist_params, dist_params))
     )
 
-    if len_old_size and equal_computations([old_size], [size]):
+    new_ndim = dist_params[0].type.ndim - original_expanded_dist_params[0].type.ndim
+
+    if new_ndim and len_old_size and equal_computations([old_size], [size]):
         # If the original RV had a size variable and a new one has not been provided,
         # we need to define a new size as the concatenation of the original size dimensions
         # and the novel ones implied by new broadcasted batched parameters dimensions.
-        # We use the first broadcasted batch dimension for reference.
-        bcasted_param = explicit_expand_dims(dist_params, op.ndims_params)[0]
-        new_param_ndim = (bcasted_param.type.ndim - op.ndims_params[0]) - len_old_size
-        if new_param_ndim >= 0:
-            new_size_dims = bcasted_param.shape[:new_param_ndim]
-            size = concatenate([new_size_dims, size])
+        broadcasted_batch_shape = compute_batch_shape(dist_params, op.ndims_params)
+        new_size_dims = broadcasted_batch_shape[:new_ndim]
+        size = concatenate([new_size_dims, size])
 
     return op.make_node(rng, size, dtype, *dist_params)

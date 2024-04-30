@@ -11,7 +11,7 @@ from pytensor.graph.basic import Constant, Variable
 from pytensor.scalar import ScalarVariable
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import as_tensor_variable, cast, constant
-from pytensor.tensor.extra_ops import broadcast_to
+from pytensor.tensor.extra_ops import broadcast_arrays, broadcast_to
 from pytensor.tensor.math import maximum
 from pytensor.tensor.shape import shape_padleft, specify_shape
 from pytensor.tensor.type import int_dtypes
@@ -147,6 +147,15 @@ def explicit_expand_dims(
         new_params.append(new_param)
 
     return new_params
+
+
+def compute_batch_shape(params, ndims_params: Sequence[int]) -> TensorVariable:
+    params = explicit_expand_dims(params, ndims_params)
+    batch_params = [
+        param[(..., *(0,) * core_ndim)]
+        for param, core_ndim in zip(params, ndims_params)
+    ]
+    return broadcast_arrays(*batch_params)[0].shape
 
 
 def normalize_size_param(
