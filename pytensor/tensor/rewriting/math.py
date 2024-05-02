@@ -2120,10 +2120,6 @@ def local_pow_to_nested_squaring(fgraph, node):
                 rval = [rval1]
         if rval:
             rval[0] = cast(rval[0], odtype)
-            # TODO: We can add a specify_broadcastable and/or unbroadcast to make the
-            #  output types compatible. Or work on #408 and let TensorType.filter_variable do it.
-            if rval[0].type.broadcastable != node.outputs[0].type.broadcastable:
-                return None
             return rval
 
 
