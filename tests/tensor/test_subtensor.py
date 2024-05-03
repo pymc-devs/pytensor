@@ -2751,3 +2751,88 @@ def test_vectorize_subtensor_without_batch_indices():
         vectorize_pt(x_test, start_test),
         vectorize_np(x_test, start_test),
     )
+
+
+@pytest.mark.parametrize(
+    "core_idx_fn, signature, x_shape, idx_shape, uses_blockwise",
+    [
+        # Core case
+        ((lambda x, idx: x[:, idx, :]), "(7,5,3),(2)->(7,2,3)", (7, 5, 3), (2,), False),
+        # Batched x, core idx
+        (
+            (lambda x, idx: x[:, idx, :]),
+            "(7,5,3),(2)->(7,2,3)",
+            (11, 7, 5, 3),
+            (2,),
+            False,
+        ),
+        (
+            (lambda x, idx: x[idx, None]),
+            "(5,7,3),(2)->(2,1,7,3)",
+            (11, 5, 7, 3),
+            (2,),
+            False,
+        ),
+        # (this is currently failing because PyTensor tries to vectorize the slice(None) operation,
+        # due to the exact same None constant being used there and in the np.newaxis)
+        pytest.param(
+            (lambda x, idx: x[:, idx, None]),
+            "(7,5,3),(2)->(7,2,1,3)",
+            (11, 7, 5, 3),
+            (2,),
+            False,
+            marks=pytest.mark.xfail(raises=NotImplementedError),
+        ),
+        (
+            (lambda x, idx: x[:, idx, idx, :]),
+            "(7,5,5,3),(2)->(7,2,3)",
+            (11, 7, 5, 5, 3),
+            (2,),
+            False,
+        ),
+        # (not supported, because fallback Blocwise can't handle slices)
+        pytest.param(
+            (lambda x, idx: x[:, idx, :, idx]),
+            "(7,5,3,5),(2)->(2,7,3)",
+            (11, 7, 5, 3, 5),
+            (2,),
+            True,
+            marks=pytest.mark.xfail(raises=NotImplementedError),
+        ),
+        # Core x, batched idx
+        ((lambda x, idx: x[idx]), "(t1),(idx)->(tx)", (7,), (11, 2), True),
+        # Batched x, batched idx
+        ((lambda x, idx: x[idx]), "(t1),(idx)->(tx)", (11, 7), (11, 2), True),
+        # (not supported, because fallback Blocwise can't handle slices)
+        pytest.param(
+            (lambda x, idx: x[:, idx, :]),
+            "(t1,t2,t3),(idx)->(t1,tx,t3)",
+            (11, 7, 5, 3),
+            (11, 2),
+            True,
+            marks=pytest.mark.xfail(raises=NotImplementedError),
+        ),
+    ],
+)
+def test_vectorize_adv_subtensor(
+    core_idx_fn, signature, x_shape, idx_shape, uses_blockwise
+):
+    x = tensor(shape=x_shape, dtype="float64")
+    idx = tensor(shape=idx_shape, dtype="int64")
+    vectorize_pt = function(
+        [x, idx], vectorize(core_idx_fn, signature=signature)(x, idx)
+    )
+
+    has_blockwise = any(
+        isinstance(node.op, Blockwise) for node in vectorize_pt.maker.fgraph.apply_nodes
+    )
+    assert has_blockwise == uses_blockwise
+
+    x_test = np.random.normal(size=x.type.shape).astype(x.type.dtype)
+    # Idx dimension should be length 5
+    idx_test = np.random.randint(0, 5, size=idx.type.shape)
+    vectorize_np = np.vectorize(core_idx_fn, signature=signature)
+    np.testing.assert_allclose(
+        vectorize_pt(x_test, idx_test),
+        vectorize_np(x_test, idx_test),
+    )
