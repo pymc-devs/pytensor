@@ -10,6 +10,7 @@ import pytensor.scalar as ps
 import pytensor.tensor.basic as ptb
 import pytensor.tensor.math as ptm
 from pytensor import compile, config, function, shared
+from pytensor.compile import SharedVariable
 from pytensor.compile.io import In, Out
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.compile.ops import DeepCopyOp
@@ -4564,4 +4565,38 @@ def test_vectorize_extract_diag():
     np.testing.assert_allclose(
         vectorize_pt(x_test),
         vectorize_np(x_test),
+    )
+
+
+@pytest.mark.parametrize("axis", [constant(1), constant(-2), shared(1)])
+@pytest.mark.parametrize("broadcasting_y", ["none", "implicit", "explicit"])
+@config.change_flags(cxx="")  # C code not needed
+def test_vectorize_join(axis, broadcasting_y):
+    # Signature for join along intermediate axis
+    signature = "(a,b1,c),(a,b2,c)->(a,b,c)"
+
+    def core_pt(x, y):
+        return join(axis, x, y)
+
+    def core_np(x, y):
+        return np.concatenate([x, y], axis=axis.eval())
+
+    x = tensor(shape=(4, 2, 3, 5))
+    y_shape = {"none": (4, 2, 3, 5), "implicit": (2, 3, 5), "explicit": (1, 2, 3, 5)}
+    y = tensor(shape=y_shape[broadcasting_y])
+
+    vectorize_pt = function([x, y], vectorize(core_pt, signature=signature)(x, y))
+
+    blockwise_needed = isinstance(axis, SharedVariable) or broadcasting_y != "none"
+    has_blockwise = any(
+        isinstance(node.op, Blockwise) for node in vectorize_pt.maker.fgraph.apply_nodes
+    )
+    assert has_blockwise == blockwise_needed
+
+    x_test = np.random.normal(size=x.type.shape).astype(x.type.dtype)
+    y_test = np.random.normal(size=y.type.shape).astype(y.type.dtype)
+    vectorize_np = np.vectorize(core_np, signature=signature)
+    np.testing.assert_allclose(
+        vectorize_pt(x_test, y_test),
+        vectorize_np(x_test, y_test),
     )

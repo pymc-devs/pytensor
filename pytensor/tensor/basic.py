@@ -23,7 +23,7 @@ from pytensor import compile, config, printing
 from pytensor import scalar as ps
 from pytensor.gradient import DisconnectedType, grad_undefined
 from pytensor.graph import RewriteDatabaseQuery
-from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.basic import Apply, Constant, Variable, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
@@ -42,7 +42,7 @@ from pytensor.tensor import (
     as_tensor_variable,
     get_vector_length,
 )
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
 from pytensor.tensor.elemwise import (
     DimShuffle,
     Elemwise,
@@ -2660,6 +2660,36 @@ def join(axis, *tensors_list):
         return tensors_list[0]
     else:
         return join_(axis, *tensors_list)
+
+
+@_vectorize_node.register(Join)
+def vectorize_join(op: Join, node, batch_axis, *batch_inputs):
+    original_axis, *old_inputs = node.inputs
+    # We can vectorize join as a shifted axis on the batch inputs if:
+    # 1. The batch axis is a constant and has not changed
+    # 2. All inputs are batched with the same broadcastable pattern
+    if (
+        original_axis.type.ndim == 0
+        and isinstance(original_axis, Constant)
+        and equal_computations([original_axis], [batch_axis])
+    ):
+        batch_ndims = {
+            batch_input.type.ndim - old_input.type.ndim
+            for batch_input, old_input in zip(batch_inputs, old_inputs)
+        }
+        if len(batch_ndims) == 1:
+            [batch_ndim] = batch_ndims
+            batch_bcast = batch_inputs[0].type.broadcastable[:batch_ndim]
+            if all(
+                batch_input.type.broadcastable[:batch_ndim] == batch_bcast
+                for batch_input in batch_inputs[1:]
+            ):
+                original_ndim = node.outputs[0].type.ndim
+                original_axis = normalize_axis_index(original_axis.data, original_ndim)
+                batch_axis = original_axis + batch_ndim
+                return op.make_node(batch_axis, *batch_inputs)
+
+    return vectorize_node_fallback(op, node, batch_axis, *batch_inputs)
 
 
 def roll(x, shift, axis=None):
