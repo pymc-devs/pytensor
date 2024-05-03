@@ -8,7 +8,9 @@ import pytest
 
 import pytensor
 import pytensor.scalar as ps
+import pytensor.tensor as pt
 import tests.unittest_tools as utt
+from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
@@ -892,6 +894,25 @@ class TestElemwise(unittest_tools.InferShapeTester):
             match=re.escape("Incompatible Elemwise input shapes [(2,), (3,)]"),
         ):
             x + y
+
+    @pytest.mark.parametrize(
+        "shape_x, shape_y, op, np_op",
+        [
+            ((3, 5), (7, 1, 3), pt.add, np.add),
+            ((2, 3), (1, 4), pt.mul, np.multiply),
+        ],
+    )
+    def test_outer(self, shape_x, shape_y, op, np_op):
+        x = tensor(dtype=np.float64, shape=shape_x)
+        y = tensor(dtype=np.float64, shape=shape_y)
+
+        z = op.outer(x, y)
+
+        f = function([x, y], z)
+        x1 = np.ones(shape_x)
+        y1 = np.ones(shape_y)
+
+        np.testing.assert_array_equal(f(x1, y1), np_op.outer(x1, y1))
 
 
 def test_not_implemented_elemwise_grad():
