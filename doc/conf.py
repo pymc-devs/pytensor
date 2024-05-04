@@ -121,6 +121,32 @@ html_logo = "images/PyTensor_RGB.svg"
 html_theme = "pymc_sphinx_theme"
 html_theme_options = {
     "use_search_override": False,
+    "icon_links": [
+        {
+            "url": "https://github.com/pymc-devs/pytensor/",
+            "icon": "fa-brands fa-github",
+            "name": "GitHub",
+            "type": "fontawesome",
+        },
+        {
+            "url": "https://twitter.com/pymc_devs/",
+            "icon": "fa-brands fa-twitter",
+            "name": "Twitter",
+            "type": "fontawesome",
+        },
+        {
+            "url": "https://www.youtube.com/c/PyMCDevelopers",
+            "icon": "fa-brands fa-youtube",
+            "name": "YouTube",
+            "type": "fontawesome",
+        },
+        {
+            "url": "https://discourse.pymc.io",
+            "icon": "fa-brands fa-discourse",
+            "name": "Discourse",
+            "type": "fontawesome",
+        },
+    ],
 }
 html_context = {
     "github_user": "pymc-devs",
@@ -190,6 +216,7 @@ html_use_smartypants = True
 # Output file base name for HTML help builder.
 htmlhelp_basename = "pytensor_doc"
 
+
 # Options for the linkcode extension
 # ----------------------------------
 # Resolve function
@@ -239,7 +266,13 @@ latex_elements = {
 # (source start file, target name, title, author, document class
 # [howto/manual]).
 latex_documents = [
-    ("index", "pytensor.tex", "PyTensor Documentation", "PyTensor Developers", "manual"),
+    (
+        "index",
+        "pytensor.tex",
+        "PyTensor Documentation",
+        "PyTensor Developers",
+        "manual",
+    ),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of
