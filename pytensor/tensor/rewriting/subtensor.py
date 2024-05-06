@@ -368,6 +368,7 @@ def local_useless_slice(fgraph, node):
     # check if we removed something
     if last_useless_slice < len(idxs):
         new_idxs = idxs[:last_useless_slice]
+
         if new_idxs:
             new_subtensor = Subtensor(new_idxs)
             new_subtensor_inputs = get_slice_elements(
@@ -380,6 +381,58 @@ def local_useless_slice(fgraph, node):
         else:
             # Subtensor is not needed at all
             return [node.inputs[0]]
+
+
+@register_useless
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([Subtensor])
+def local_replace_slice(fgraph, node):
+    """
+    Rewrite Subtensor of the form:
+        X[0:7:1] -> X[None:None:None]
+    where X is a vector of length 7
+
+    """
+    idxs = get_idx_list(node.inputs, node.op.idx_list)
+    x = node.inputs[0]
+
+    if not idxs:
+        return
+
+    new_idxs = list(idxs)
+    idx_flag = False
+    for dim, s in enumerate(new_idxs):
+        if not isinstance(s, slice):
+            continue
+
+        start = s.start
+        stop = s.stop
+        step = s.step
+        if extract_constant(start, only_process_constants=True) == 0:
+            idx_flag = True
+            start = None
+
+        if (
+            x.type.shape[dim] is not None
+            and extract_constant(stop, only_process_constants=True) == x.type.shape[dim]
+        ):
+            idx_flag = True
+            stop = None
+
+        if extract_constant(step, only_process_constants=True) == 1:
+            idx_flag = True
+            step = None
+
+        new_idxs[dim] = slice(start, stop, step)
+
+    if idx_flag is True:
+        out = x[tuple(new_idxs)]
+        # Copy over previous output stacktrace
+        copy_stack_trace(node.outputs, out)
+
+        return [out]
 
 
 # fast_compile to allow opt subtensor(cast{float32}(make_vector))
