@@ -12,7 +12,6 @@ from pytensor.graph.replace import (
     vectorize_node,
 )
 from pytensor.tensor import dvector, fvector, vector
-from tests import unittest_tools as utt
 from tests.graph.utils import MyOp, MyVariable, op_multiple_outputs
 
 
@@ -133,10 +132,10 @@ class TestCloneReplace:
             return function([], out)()
 
         x = shared(np.asarray(0.0, dtype=config.floatX))
-        utt.assert_allclose(
+        np.testing.assert_allclose(
             test(x, pt.sum((x + 1) ** 2), mention_y=False), 1.21000003815
         )
-        utt.assert_allclose(
+        np.testing.assert_allclose(
             test(x, pt.sum((x + 1) ** 2), mention_y=True), 1.21000003815
         )
 

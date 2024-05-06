@@ -3,7 +3,6 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
-import tests.unittest_tools as utt
 from pytensor.compile.mode import Mode
 from pytensor.graph.fg import FunctionGraph
 from pytensor.link.c.basic import DualLinker
@@ -477,11 +476,11 @@ def test_grad_inrange():
         # x is equal to the lower or higher bound but in that case
         # PyTensor defines the gradient to be zero for stability.
         f = pytensor.function([x, low, high], [gx, glow, ghigh])
-        utt.assert_allclose(f(0, 1, 5), [0, 0, 0])
-        utt.assert_allclose(f(1, 1, 5), [0, 0, 0])
-        utt.assert_allclose(f(2, 1, 5), [0, 0, 0])
-        utt.assert_allclose(f(5, 1, 5), [0, 0, 0])
-        utt.assert_allclose(f(7, 1, 5), [0, 0, 0])
+        np.testing.assert_allclose(f(0, 1, 5), [0, 0, 0])
+        np.testing.assert_allclose(f(1, 1, 5), [0, 0, 0])
+        np.testing.assert_allclose(f(2, 1, 5), [0, 0, 0])
+        np.testing.assert_allclose(f(5, 1, 5), [0, 0, 0])
+        np.testing.assert_allclose(f(7, 1, 5), [0, 0, 0])
 
 
 def test_grad_abs():
