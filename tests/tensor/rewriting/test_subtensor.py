@@ -10,7 +10,7 @@ from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph, vectorize_graph
-from pytensor.graph.basic import Constant, Variable, ancestors
+from pytensor.graph.basic import Constant, Variable, ancestors, equal_computations
 from pytensor.graph.rewriting.basic import check_stack_trace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import rewrite_graph
@@ -2402,3 +2402,24 @@ def test_local_blockwise_advanced_inc_subtensor(set_instead_of_inc):
     else:
         expected_out[:, :, core_idxs] += test_y
     np.testing.assert_allclose(fn(test_x, test_y), expected_out)
+
+
+@pytest.mark.parametrize("fstop, lstop, lstep", [(None, 9, 1), (-1, -1, -1)])
+def test_slice_canonicalize(fstop, lstop, lstep):
+    x = tensor(shape=(3, 5, None, 9))
+    y = x[0:fstop, 0:5, 0:7, 0:lstop:lstep]
+    f = pytensor.function([x], y)
+    test_y = f.maker.fgraph.toposort()
+
+    y1 = x[None:None:None, None:None:None, None:7:None, None:None:None]
+
+    if fstop == -1 and lstop == -1 and lstep == -1:
+        y1 = x[None:-1:None, None:None:None, None:7:None, None:-1:-1]
+
+    f1 = pytensor.function([x], y1)
+    expected_y = f1.maker.fgraph.toposort()
+
+    assert all(
+        equal_computations([x1], [y1])
+        for x1, y1 in zip(test_y[0].inputs, expected_y[0].inputs)
+    )
