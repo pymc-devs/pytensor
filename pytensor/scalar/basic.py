@@ -1533,6 +1533,56 @@ class IsInf(FixedLogicalComparison):
 isinf = IsInf()
 
 
+class IsPosInf(FixedLogicalComparison):
+    nfunc_spec = ("isposinf", 1, 1)
+
+    def impl(self, x):
+        return np.isposinf(x)
+
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
+        if node.inputs[0].type in complex_types:
+            raise NotImplementedError()
+        # Discrete type can never be posinf
+        if node.inputs[0].type in discrete_types:
+            return f"{z} = false;"
+
+        return f"{z} = isinf({x}) && !signbit({x});"
+
+    def c_code_cache_version(self):
+        scalarop_version = super().c_code_cache_version()
+        return (*scalarop_version, 4)
+
+
+isposinf = IsPosInf()
+
+
+class IsNegInf(FixedLogicalComparison):
+    nfunc_spec = ("isneginf", 1, 1)
+
+    def impl(self, x):
+        return np.isneginf(x)
+
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
+        if node.inputs[0].type in complex_types:
+            raise NotImplementedError()
+        # Discrete type can never be neginf
+        if node.inputs[0].type in discrete_types:
+            return f"{z} = false;"
+
+        return f"{z} = isinf({x}) && signbit({x});"
+
+    def c_code_cache_version(self):
+        scalarop_version = super().c_code_cache_version()
+        return (*scalarop_version, 4)
+
+
+isneginf = IsNegInf()
+
+
 class InRange(LogicalComparison):
     nin = 3
 

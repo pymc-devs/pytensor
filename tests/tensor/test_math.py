@@ -95,6 +95,7 @@ from pytensor.tensor.math import (
     minimum,
     mod,
     mul,
+    nan_to_num,
     neg,
     neq,
     outer,
@@ -3641,3 +3642,31 @@ class TestPolyGamma:
         n = scalar(dtype="int64")
         with pytest.raises(NullTypeGradError):
             grad(polygamma(n, 0.5), wrt=n)
+
+
+@pytest.mark.parametrize(
+    ["nan", "posinf", "neginf"],
+    [(0, None, None), (0, 0, 0), (0, None, 1000), (3, 1, -1)],
+)
+def test_nan_to_num(nan, posinf, neginf):
+    x = tensor(shape=(7,))
+
+    out = nan_to_num(x, nan, posinf, neginf)
+
+    f = function(
+        [x],
+        nan_to_num(x, nan, posinf, neginf),
+        on_unused_input="warn",
+        allow_input_downcast=True,
+    )
+
+    y = np.array([1, 2, np.nan, np.inf, -np.inf, 3, 4])
+    out = f(y)
+
+    posinf = np.finfo(x.real.dtype).max if posinf is None else posinf
+    neginf = np.finfo(x.real.dtype).min if neginf is None else neginf
+
+    np.testing.assert_allclose(
+        out,
+        np.nan_to_num(y, nan=nan, posinf=posinf, neginf=neginf),
+    )
