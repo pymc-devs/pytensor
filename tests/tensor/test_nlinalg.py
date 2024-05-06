@@ -623,7 +623,7 @@ class TestNorm:
         pt_norm = norm(X, ord=ord, axis=axis, keepdims=keepdims)
         f = function([], pt_norm, mode="FAST_COMPILE")
 
-        utt.assert_allclose(np_norm, f())
+        np.testing.assert_allclose(np_norm, f(), atol=1e-08, rtol=1e-05)
 
 
 class TestTensorInv(utt.InferShapeTester):

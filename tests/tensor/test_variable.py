@@ -5,7 +5,6 @@ import pytest
 from numpy.testing import assert_array_equal, assert_equal, assert_string_equal
 
 import pytensor
-import tests.unittest_tools as utt
 from pytensor.compile import DeepCopyOp
 from pytensor.compile.mode import get_default_mode
 from pytensor.graph.basic import Constant, equal_computations
@@ -77,7 +76,7 @@ def test_numpy_method(fct, value):
     x = dscalar("x")
     y = fct(x)
     f = pytensor.function([x], y)
-    utt.assert_allclose(np.nan_to_num(f(value)), np.nan_to_num(fct(value)))
+    np.testing.assert_allclose(np.nan_to_num(f(value)), np.nan_to_num(fct(value)))
 
 
 def test_dot_method():

@@ -1510,7 +1510,7 @@ class TestLocalAdvSub1AdvIncSub1:
             f = function([x, y, idx], o, self.mode_no_assert)
 
             res = f(dx, dy, didx)
-            utt.assert_allclose(dy, res)
+            np.testing.assert_allclose(dy, res)
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 1
             assert isinstance(topo[0].op, DeepCopyOp | Elemwise)
@@ -1523,7 +1523,7 @@ class TestLocalAdvSub1AdvIncSub1:
             res = f(dx, dy, didx)
             _dx = dx.copy()
             np.add.at(_dx, didx, dy)
-            utt.assert_allclose(_dx[didx], res)
+            np.testing.assert_allclose(_dx[didx], res, atol=1e-05, rtol=1e-05)
             topo = f.maker.fgraph.toposort()
             len(topo) == 2
 
@@ -1533,7 +1533,7 @@ class TestLocalAdvSub1AdvIncSub1:
             f = function([x, y, idx], o, self.mode_no_assert)
 
             res = f(dx, dy, didx)
-            utt.assert_allclose(np.vstack([dy[0], 2 * dy[1], 2 * dy[2]]), res)
+            np.testing.assert_allclose(np.vstack([dy[0], 2 * dy[1], 2 * dy[2]]), res)
 
     def test_assert(self):
         x = matrix("x")
@@ -1665,7 +1665,7 @@ class TestSubtensorAllocRewrites:
         node_is_set_instead_of_inc = inc_nodes[0].op.set_instead_of_inc
         assert node_is_set_instead_of_inc
         test_X = np.random.random((4, 4)).astype(config.floatX)
-        utt.assert_allclose(f(test_X), test_X)
+        np.testing.assert_allclose(f(test_X), test_X)
 
         # also check the flag doesn't get set if first input is not zeros:
         not_all_zeros = np.zeros((4, 4))
@@ -1680,7 +1680,7 @@ class TestSubtensorAllocRewrites:
         assert len(inc_nodes) == 1
         assert inc_nodes[0].op.set_instead_of_inc is False
         test_X = np.random.random((4, 4)).astype(config.floatX)
-        utt.assert_allclose(f(test_X), test_X + not_all_zeros)
+        np.testing.assert_allclose(f(test_X), test_X + not_all_zeros)
 
     def test_advancedincsubtensor1_allocs0(self):
         x = matrix()
@@ -1855,7 +1855,7 @@ def test_local_set_to_inc_subtensor():
     r1 = f1(val)
     r2 = f2(val)
 
-    utt.assert_allclose(r1, r2)
+    np.testing.assert_allclose(r1, r2)
 
     # Finally, test that the stack trace is copied over properly,
     # before and after optimization.

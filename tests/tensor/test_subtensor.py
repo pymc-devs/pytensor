@@ -900,7 +900,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
         n = self.shared(data)
         t = n[self.shared(np.asarray(idx).astype("int64"))[::2]]
         val = self.eval_output_and_check(t, op_type=AdvancedSubtensor1, length=2)
-        utt.assert_allclose(data[idx[::2]], val)
+        np.testing.assert_allclose(data[idx[::2]], val)
 
     def test_err_invalid_list(self):
         n = self.shared(np.asarray(5, dtype=self.dtype))
@@ -1520,7 +1520,7 @@ class TestIncSubtensor:
             else:
                 expected_result[:, :val_sl2_end] += val_inc
 
-            utt.assert_allclose(result, expected_result)
+            np.testing.assert_allclose(result, expected_result)
 
     def test_wrong_dims(self):
         a = matrix()
@@ -1584,7 +1584,7 @@ class TestIncSubtensor:
             else:
                 expected_result[:, sl3, :val_sl2_end] += val_inc
 
-            utt.assert_allclose(result, expected_result)
+            np.testing.assert_allclose(result, expected_result)
 
             # Test when we broadcast the result
             result = method(a[sl1, sl2], increment)
@@ -1599,7 +1599,7 @@ class TestIncSubtensor:
             else:
                 expected_result[:, :val_sl2_end] += val_inc
 
-            utt.assert_allclose(result, expected_result)
+            np.testing.assert_allclose(result, expected_result)
 
     def test_grad_inc_set(self):
         def inc_slice(*s):
@@ -1729,10 +1729,10 @@ class TestIncSubtensor1:
         idxval = np.array([[1, 2], [3, 2]])
         a2val = f(mval, idxval)
 
-        utt.assert_allclose(a2val[0], mval[0])
-        utt.assert_allclose(a2val[1], mval[1] * 2)
-        utt.assert_allclose(a2val[2], mval[2] * 3)
-        utt.assert_allclose(a2val[3], mval[3] * 2)
+        np.testing.assert_allclose(a2val[0], mval[0])
+        np.testing.assert_allclose(a2val[1], mval[1] * 2)
+        np.testing.assert_allclose(a2val[2], mval[2] * 3)
+        np.testing.assert_allclose(a2val[3], mval[3] * 2)
 
     def test_inc_bcastableidx(self):
         idx = ptb.constant([0])
@@ -1746,7 +1746,7 @@ class TestIncSubtensor1:
         incval = self.rng.random((10, 1)).astype(config.floatX)
 
         out1val, out2val = f(mval, incval, incval)
-        utt.assert_allclose(out1val, out2val)
+        np.testing.assert_allclose(out1val, out2val)
 
 
 class TestAdvancedSubtensor:
@@ -1897,7 +1897,7 @@ class TestAdvancedSubtensor:
         ix2v = np.asarray([[0, 1], [1, 0]])
         aval = f(ft4v, ix2v)
         rval = ft4v[0, :, ix2v, :]
-        utt.assert_allclose(rval, aval)
+        np.testing.assert_allclose(rval, aval)
 
     def test_adv_subtensor_w_none_and_matrix(self):
         subt = self.ft4[:, None, :, self.ix2, :]
@@ -1906,7 +1906,7 @@ class TestAdvancedSubtensor:
         ix2v = np.asarray([[0, 1], [1, 0]])
         aval = f(ft4v, ix2v)
         rval = ft4v[:, None, :, ix2v, :]
-        utt.assert_allclose(rval, aval)
+        np.testing.assert_allclose(rval, aval)
 
     def test_adv_subtensor_w_slice_and_matrix(self):
         subt = self.ft4[:, 0:1, self.ix2, :]
@@ -1915,7 +1915,7 @@ class TestAdvancedSubtensor:
         ix2v = np.asarray([[0, 1], [1, 0]])
         aval = f(ft4v, ix2v)
         rval = ft4v[:, 0:1, ix2v, :]
-        utt.assert_allclose(rval, aval)
+        np.testing.assert_allclose(rval, aval)
 
     def test_adv_subtensor_w_matrix_and_int(self):
         subt = self.ft4[:, :, self.ix2, 0]
@@ -1924,7 +1924,7 @@ class TestAdvancedSubtensor:
         ix2v = np.asarray([[0, 1], [1, 0]])
         aval = f(ft4v, ix2v)
         rval = ft4v[:, :, ix2v, 0]
-        utt.assert_allclose(rval, aval)
+        np.testing.assert_allclose(rval, aval)
 
     def test_adv_subtensor_w_matrix_and_none(self):
         subt = self.ft4[:, :, self.ix2, None, :]
@@ -1933,7 +1933,7 @@ class TestAdvancedSubtensor:
         ix2v = np.asarray([[0, 1], [1, 0]])
         aval = f(ft4v, ix2v)
         rval = ft4v[:, :, ix2v, None, :]
-        utt.assert_allclose(rval, aval)
+        np.testing.assert_allclose(rval, aval)
 
     @pytest.mark.parametrize(
         "ignore_duplicates",
@@ -2113,7 +2113,7 @@ class TestAdvancedSubtensor:
 
         f = pytensor.function([X], X[b_idx, r_idx, c_idx], mode=self.mode)
         out = f(xx)
-        utt.assert_allclose(out, xx[b_idx, r_idx, c_idx])
+        np.testing.assert_allclose(out, xx[b_idx, r_idx, c_idx])
 
     def test_adv_sub_slice(self):
         # Reported in https://github.com/Theano/Theano/issues/5898
@@ -2137,7 +2137,7 @@ class TestAdvancedSubtensor:
         assert out_v.shape == (3, 5, 4)
 
         out_np = var_v[:, idx1_v, np.arange(4)]
-        utt.assert_allclose(out_v, out_np)
+        np.testing.assert_allclose(out_v, out_np)
 
     def test_grad(self):
         ones = np.ones((1, 3), dtype=self.dtype)

@@ -418,7 +418,7 @@ class TestMakeVector(utt.InferShapeTester):
 
         if dtype in int_dtypes:
             # The gradient should be 0
-            utt.assert_allclose(g_val, 0)
+            np.testing.assert_allclose(g_val, 0)
         else:
             for var, grval in zip((b, i, d), g_val):
                 float_inputs = []
@@ -2953,7 +2953,7 @@ class TestNdGrid:
         )
         for n, t in zip(nmgrid, tmgrid):
             for ng, tg in zip(n, t):
-                utt.assert_allclose(ng, tg.eval())
+                np.testing.assert_allclose(ng, tg.eval())
 
     def test_ogrid_numpy_equiv(self):
         nogrid = (
@@ -2968,7 +2968,7 @@ class TestNdGrid:
         )
         for n, t in zip(nogrid, togrid):
             for ng, tg in zip(n, t):
-                utt.assert_allclose(ng, tg.eval())
+                np.testing.assert_allclose(ng, tg.eval())
 
     def test_mgrid_pytensor_variable_numpy_equiv(self):
         nfmgrid = np.mgrid[0:1:0.1, 1:10:1.0, 10:100:10.0]
@@ -2981,7 +2981,7 @@ class TestNdGrid:
         fi = pytensor.function([l, m, n], timgrid)
         for n, t in zip((nfmgrid, nimgrid), (ff(0, 10, 10.0), fi(0, 10, 10))):
             for ng, tg in zip(n, t):
-                utt.assert_allclose(ng, tg)
+                np.testing.assert_allclose(ng, tg)
 
     def test_ogrid_pytensor_variable_numpy_equiv(self):
         nfogrid = np.ogrid[0:1:0.1, 1:10:1.0, 10:100:10.0]
@@ -2994,7 +2994,7 @@ class TestNdGrid:
         fi = pytensor.function([l, m, n], tiogrid)
         for n, t in zip((nfogrid, niogrid), (ff(0, 10, 10.0), fi(0, 10, 10))):
             for ng, tg in zip(n, t):
-                utt.assert_allclose(ng, tg)
+                np.testing.assert_allclose(ng, tg)
 
 
 class TestInversePermutation:

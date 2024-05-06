@@ -551,7 +551,6 @@ exception. You can use the ``assert`` keyword to automatically raise an
 
     import numpy as np
     import pytensor
-    from tests import unittest_tools as utt
 
 
     class TestDouble(utt.InferShapeTester):
@@ -569,9 +568,9 @@ exception. You can use the ``assert`` keyword to automatically raise an
             inp = np.asarray(rng.random((5, 4)), dtype=pytensor.config.floatX)
             out = f(inp)
             # Compare the result computed to the expected value.
-            utt.assert_allclose(inp * 2, out)
+            np.testing.assert_allclose(inp * 2, out)
 
-We call ``utt.assert_allclose(expected_value, value)`` to compare
+We call ``np.testing.assert_allclose(expected_value, value)`` to compare
 NumPy ndarray.This raise an error message with more information. Also,
 the default tolerance can be changed with the PyTensor flags
 ``config.tensor__cmp_sloppy`` that take values in 0, 1 and 2. The
