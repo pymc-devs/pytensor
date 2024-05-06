@@ -6,6 +6,7 @@ import scipy.stats as stats
 
 import pytensor
 from pytensor.tensor.basic import arange, as_tensor_variable
+from pytensor.tensor.math import sqrt
 from pytensor.tensor.random.op import RandomVariable
 from pytensor.tensor.random.type import RandomGeneratorType, RandomStateType
 from pytensor.tensor.random.utils import (
@@ -524,6 +525,13 @@ def chisquare(df, size=None, **kwargs):
         is returned.
     """
     return gamma(shape=df / 2.0, scale=2.0, size=size, **kwargs)
+
+
+def rayleigh(scale=1.0, *, size=None, **kwargs):
+    scale = as_tensor_variable(scale)
+    if size is None:
+        size = np.broadcast_shapes(scale.shape)
+    return sqrt(chisquare(df=2, size=size, **kwargs)) * scale
 
 
 class ParetoRV(ScipyRandomVariable):
