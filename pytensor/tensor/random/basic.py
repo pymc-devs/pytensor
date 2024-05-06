@@ -6,6 +6,7 @@ import scipy.stats as stats
 
 import pytensor
 from pytensor.tensor.basic import arange, as_tensor_variable
+from pytensor.tensor.math import sqrt
 from pytensor.tensor.random.op import RandomVariable
 from pytensor.tensor.random.type import RandomGeneratorType, RandomStateType
 from pytensor.tensor.random.utils import (
@@ -524,6 +525,43 @@ def chisquare(df, size=None, **kwargs):
         is returned.
     """
     return gamma(shape=df / 2.0, scale=2.0, size=size, **kwargs)
+
+
+def rayleigh(scale=1.0, *, size=None, **kwargs):
+    r"""Draw samples from a Rayleigh distribution.
+
+    The probability density function for `rayleigh` with parameter `scale` is given by:
+
+    .. math::
+        f(x; s) = \frac{x}{s^2} e^{-x^2/(2 s^2)}
+
+    where :math:`s` is the scale parameter.
+
+    This variable is obtained by taking the square root of the sum of the squares of
+    two independent, standard normally distributed random variables.
+
+    Signature
+    ---------
+    `() -> ()`
+
+    Parameters
+    ----------
+    scale : float or array_like of floats, optional
+        Scale parameter of the distribution (positive). Default is 1.0.
+    size : int or tuple of ints, optional
+        Output shape. If the given shape is, e.g., `(m, n, k)`, then `m * n * k` samples
+        are drawn. Default is None, in which case the output shape is determined by the
+        shape of `scale`.
+
+    Notes
+    -----
+    `Rayleigh` is a special case of `chisquare` with ``df=2``.
+    """
+
+    scale = as_tensor_variable(scale)
+    if size is None:
+        size = scale.shape
+    return sqrt(chisquare(df=2, size=size, **kwargs)) * scale
 
 
 class ParetoRV(ScipyRandomVariable):

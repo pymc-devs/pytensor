@@ -50,6 +50,7 @@ from pytensor.tensor.random.basic import (
     permutation,
     poisson,
     randint,
+    rayleigh,
     standard_normal,
     t,
     triangular,
@@ -388,6 +389,20 @@ def test_gamma_deprecation_wrapper_fn():
 )
 def test_chisquare_samples(df, size):
     compare_sample_values(chisquare, df, size=size, test_fn=fixed_scipy_rvs("chi2"))
+
+
+@pytest.mark.parametrize(
+    "scale, size",
+    [
+        (1, None),
+        (2, []),
+        (4, 100),
+    ],
+)
+def test_rayleigh_samples(scale, size):
+    compare_sample_values(
+        rayleigh, scale=scale, size=size, test_fn=fixed_scipy_rvs("rayleigh")
+    )
 
 
 @pytest.mark.parametrize(
