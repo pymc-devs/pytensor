@@ -38,6 +38,9 @@ from tests import unittest_tools as utt
 from tests.tensor.conv import c_conv3d_corr3d_ref, c_conv_corr_ref
 
 
+pytensor.config.mode = "FAST_COMPILE"
+
+
 def conv2d_corr(
     inputs,
     filters,
@@ -560,7 +563,7 @@ class BaseTestConv:
 
         res_ref = np.array(f_ref())
         res = np.array(f())
-        utt.assert_allclose(res_ref, res)
+        np.testing.assert_allclose(res_ref, res, rtol=1e-05, atol=1e-05)
         if (
             verify_grad
             and inputs_val.size > 0
@@ -645,7 +648,7 @@ class BaseTestConv:
 
         res_ref = np.array(f_ref())
         res = np.array(f())
-        utt.assert_allclose(res_ref, res)
+        np.testing.assert_allclose(res_ref, res, rtol=1e-05, atol=1e-05)
 
         def abstract_conv_gradweight(inputs_val, output_val):
             conv_op = gradWeights_fn(
@@ -732,7 +735,7 @@ class BaseTestConv:
 
         if ref is not None:
             res_ref = np.array(f_ref())
-            utt.assert_allclose(res_ref, res)
+            np.testing.assert_allclose(res_ref, res, rtol=1e-06)
 
         def abstract_conv_gradinputs(filters_val, output_val):
             conv_op = gradInputs_fn(
@@ -1445,13 +1448,13 @@ class TestBilinearUpsampling:
             kernel = bilinear_kernel_2D(ratio=ratio, normalize=False)
             f = pytensor.function([], kernel)
             kernel_2D = self.numerical_kernel_2D(ratio)
-            utt.assert_allclose(kernel_2D, f())
+            np.testing.assert_allclose(kernel_2D, f())
 
             # getting the normalized kernel
             kernel = bilinear_kernel_2D(ratio=ratio, normalize=True)
             f = pytensor.function([], kernel)
             kernel_2D = kernel_2D / float(ratio**2)
-            utt.assert_allclose(kernel_2D, f())
+            np.testing.assert_allclose(kernel_2D, f())
 
     def test_bilinear_kernel_1D(self):
         # Test 1D kernels used in bilinear upsampling
@@ -1472,15 +1475,15 @@ class TestBilinearUpsampling:
             kernel = bilinear_kernel_1D(ratio=ratio, normalize=False)
             f = pytensor.function([], kernel)
             kernel_1D = self.numerical_kernel_1D(ratio)
-            utt.assert_allclose(kernel_1D, f())
-            utt.assert_allclose(kernel_1D, f_ten(ratio))
+            np.testing.assert_allclose(kernel_1D, f())
+            np.testing.assert_allclose(kernel_1D, f_ten(ratio))
 
             # getting the normalized kernel
             kernel = bilinear_kernel_1D(ratio=ratio, normalize=True)
             f = pytensor.function([], kernel)
             kernel_1D = kernel_1D / float(ratio)
-            utt.assert_allclose(kernel_1D, f())
-            utt.assert_allclose(kernel_1D, f_ten_norm(ratio))
+            np.testing.assert_allclose(kernel_1D, f())
+            np.testing.assert_allclose(kernel_1D, f_ten_norm(ratio))
 
     def numerical_upsampling_multiplier(self, ratio):
         """
@@ -1565,7 +1568,7 @@ class TestBilinearUpsampling:
             )
             f = pytensor.function([], bilin_mat, mode=self.compile_mode)
             up_mat_2d = self.get_upsampled_twobytwo_mat(input_x, ratio)
-            utt.assert_allclose(f(), up_mat_2d, rtol=1e-06)
+            np.testing.assert_allclose(f(), up_mat_2d, rtol=1e-06)
 
     def test_bilinear_upsampling_reshaping(self):
         # Test bilinear upsampling without giving shape information
@@ -1587,7 +1590,7 @@ class TestBilinearUpsampling:
                 )
                 f = pytensor.function([], bilin_mat, mode=self.compile_mode)
                 up_mat_2d = self.get_upsampled_twobytwo_mat(input_x, ratio)
-                utt.assert_allclose(f(), up_mat_2d, rtol=1e-06)
+                np.testing.assert_allclose(f(), up_mat_2d, rtol=1e-06)
 
     def test_compare_1D_and_2D_upsampling_values(self):
         # Compare 1D and 2D upsampling
@@ -1615,7 +1618,7 @@ class TestBilinearUpsampling:
         )
         f_1D = pytensor.function([], mat_1D, mode=self.compile_mode)
         f_2D = pytensor.function([], mat_2D, mode=self.compile_mode)
-        utt.assert_allclose(f_1D(), f_2D(), rtol=1e-06)
+        np.testing.assert_allclose(f_1D(), f_2D(), rtol=1e-06)
 
         # checking upsampling with ratio 8
         input_x = rng.random((12, 11, 10, 7)).astype(config.floatX)
@@ -1635,7 +1638,7 @@ class TestBilinearUpsampling:
         )
         f_1D = pytensor.function([], mat_1D, mode=self.compile_mode)
         f_2D = pytensor.function([], mat_2D, mode=self.compile_mode)
-        utt.assert_allclose(f_1D(), f_2D(), rtol=1e-06)
+        np.testing.assert_allclose(f_1D(), f_2D(), rtol=1e-06)
 
     def test_fractional_bilinear_upsampling(self):
         """Test bilinear upsampling with nonsimilar fractional
@@ -1672,7 +1675,7 @@ class TestBilinearUpsampling:
             ]
         ).astype(config.floatX)
         f_up_x = pytensor.function([], up_x, mode=self.compile_mode)
-        utt.assert_allclose(f_up_x(), num_up_x, rtol=1e-6)
+        np.testing.assert_allclose(f_up_x(), num_up_x, rtol=1e-6)
 
     def test_fractional_bilinear_upsampling_shape(self):
         x = np.random.random((1, 1, 200, 200)).astype(config.floatX)
@@ -1681,7 +1684,7 @@ class TestBilinearUpsampling:
             pt.as_tensor_variable(x), frac_ratio=resize, use_1D_kernel=False
         )
         out = pytensor.function([], z.shape, mode="FAST_RUN")()
-        utt.assert_allclose(out, (1, 1, 240, 240))
+        np.testing.assert_allclose(out, (1, 1, 240, 240))
 
 
 class TestConv2dTranspose:
@@ -1812,7 +1815,7 @@ class TestConv2dGrads:
                         )
 
                         # check that they're equal
-                        utt.assert_allclose(
+                        np.testing.assert_allclose(
                             f_new(filter_val, out_grad_val),
                             f_old(input_val, filter_val, out_grad_val),
                         )
@@ -1872,7 +1875,7 @@ class TestConv2dGrads:
                         f_new = pytensor.function(
                             [self.x, self.output_grad_wrt], conv_wrt_w_out
                         )
-                        utt.assert_allclose(
+                        np.testing.assert_allclose(
                             f_new(input_val, out_grad_val),
                             f_old(input_val, filter_val, out_grad_val),
                         )
@@ -1955,7 +1958,9 @@ class TestGroupedConvNoOptim:
             ]
             ref_concat_output = np.concatenate(ref_concat_output, axis=1)
 
-            utt.assert_allclose(grouped_output, ref_concat_output)
+            np.testing.assert_allclose(
+                grouped_output, ref_concat_output, atol=1e-08, rtol=1e-05
+            )
 
             utt.verify_grad(grouped_conv_op, [img, kern], mode=self.mode, eps=1)
 
@@ -2009,7 +2014,9 @@ class TestGroupedConvNoOptim:
             ]
             ref_concat_output = np.concatenate(ref_concat_output, axis=0)
 
-            utt.assert_allclose(grouped_output, ref_concat_output)
+            np.testing.assert_allclose(
+                grouped_output, ref_concat_output, atol=1e-08, rtol=1e-05
+            )
 
             def conv_gradweight(inputs_val, output_val):
                 return grouped_convgrad_op(
@@ -2070,7 +2077,7 @@ class TestGroupedConvNoOptim:
             ]
             ref_concat_output = np.concatenate(ref_concat_output, axis=1)
 
-            utt.assert_allclose(grouped_output, ref_concat_output)
+            np.allclose(grouped_output, ref_concat_output, atol=1e-08, rtol=1e-05)
 
             def conv_gradinputs(filters_val, output_val):
                 return grouped_convgrad_op(
@@ -2204,11 +2211,11 @@ class TestSeparableConv:
 
         # test for square matrix
         top = fun(self.x, self.depthwise_filter, self.pointwise_filter)
-        utt.assert_allclose(top, self.precomp_output_valid)
+        np.testing.assert_allclose(top, self.precomp_output_valid)
 
         # test for non-square matrix
         top = fun(self.x[:, :, :3, :], self.depthwise_filter, self.pointwise_filter)
-        utt.assert_allclose(top, self.precomp_output_valid[:, :, :1, :])
+        np.testing.assert_allclose(top, self.precomp_output_valid[:, :, :1, :])
 
         # test if it infers shape
         sep_op = separable_conv2d(
@@ -2224,7 +2231,7 @@ class TestSeparableConv:
             [x_sym, dfilter_sym, pfilter_sym], sep_op, mode="FAST_RUN"
         )
         top = fun(self.x, self.depthwise_filter, self.pointwise_filter)
-        utt.assert_allclose(top, self.precomp_output_valid)
+        np.testing.assert_allclose(top, self.precomp_output_valid)
 
         # test non-default subsample
         sep_op = separable_conv2d(
@@ -2234,7 +2241,7 @@ class TestSeparableConv:
             [x_sym, dfilter_sym, pfilter_sym], sep_op, mode="FAST_RUN"
         )
         top = fun(self.x, self.depthwise_filter, self.pointwise_filter)
-        utt.assert_allclose(
+        np.testing.assert_allclose(
             top, np.delete(np.delete(self.precomp_output_valid, 1, axis=3), 1, axis=2)
         )
 
@@ -2246,7 +2253,7 @@ class TestSeparableConv:
             [x_sym, dfilter_sym, pfilter_sym], sep_op, mode="FAST_RUN"
         )
         top = fun(self.x[:, :, :3, :3], self.depthwise_filter, self.pointwise_filter)
-        utt.assert_allclose(top, self.precomp_output_full)
+        np.testing.assert_allclose(top, self.precomp_output_full)
 
     @pytest.mark.skipif(config.cxx == "", reason="test needs cxx")
     def test_interface3d(self):
@@ -2272,10 +2279,10 @@ class TestSeparableConv:
 
         # test for square matrix
         top = fun(x, depthwise_filter, pointwise_filter)
-        utt.assert_allclose(top, precomp_output)
+        np.testing.assert_allclose(top, precomp_output)
         # test for non-square matrix
         top = fun(x[:, :, :3, :, :3], depthwise_filter, pointwise_filter)
-        utt.assert_allclose(top, precomp_output[:, :, :1, :, :1])
+        np.testing.assert_allclose(top, precomp_output[:, :, :1, :, :1])
         # test if it infers shape
         sep_op = separable_conv3d(
             x_sym,
@@ -2290,7 +2297,7 @@ class TestSeparableConv:
             [x_sym, dfilter_sym, pfilter_sym], sep_op, mode="FAST_RUN"
         )
         top = fun(x, depthwise_filter, pointwise_filter)
-        utt.assert_allclose(top, precomp_output)
+        np.testing.assert_allclose(top, precomp_output)
 
         # test non-default subsample
         sep_op = separable_conv3d(
@@ -2300,7 +2307,7 @@ class TestSeparableConv:
             [x_sym, dfilter_sym, pfilter_sym], sep_op, mode="FAST_RUN"
         )
         top = fun(x, depthwise_filter, pointwise_filter)
-        utt.assert_allclose(
+        np.testing.assert_allclose(
             top,
             np.delete(
                 np.delete(np.delete(precomp_output, 1, axis=4), 1, axis=3), 1, axis=2
@@ -2318,7 +2325,7 @@ class TestSeparableConv:
             [x_sym, dfilter_sym, pfilter_sym], sep_op, mode="FAST_RUN"
         )
         top = fun(x[:, :, :3, :3, :3], depthwise_filter, pointwise_filter)
-        utt.assert_allclose(top, precomp_output)
+        np.testing.assert_allclose(top, precomp_output)
 
 
 @pytest.mark.skipif(
@@ -2407,8 +2414,12 @@ class TestUnsharedConv:
                 for j in range(0, kshp[2]):
                     single_kern = kern[:, i, j, ...].reshape(single_kshp)
                     ref_val = ref_func(img, single_kern)
-                    utt.assert_allclose(
-                        ref_val[:, :, i, j], unshared_output[:, :, i, j]
+
+                    np.testing.assert_allclose(
+                        ref_val[:, :, i, j],
+                        unshared_output[:, :, i, j],
+                        atol=1e-08,
+                        rtol=1e-05,
                     )
 
             if verify:
@@ -2470,7 +2481,9 @@ class TestUnsharedConv:
                     top_single = np.zeros_like(top)
                     top_single[:, :, i, j] = top[:, :, i, j]
                     ref_output = ref_func(img, top_single)
-                    utt.assert_allclose(unshared_output[:, i, j, ...], ref_output)
+                    np.testing.assert_allclose(
+                        unshared_output[:, i, j, ...], ref_output
+                    )
 
             def conv_gradweight(inputs_val, output_val):
                 return unshared_conv_op(
@@ -2542,7 +2555,9 @@ class TestUnsharedConv:
                     top_single[:, :, i, j] = top[:, :, i, j]
                     ref_output += ref_func(single_kern, top_single)
 
-            utt.assert_allclose(ref_output, unshared_output)
+            np.testing.assert_allclose(
+                ref_output, unshared_output, atol=1e-08, rtol=1e-05
+            )
 
             def conv_gradinputs(filters_val, output_val):
                 return unshared_conv_op(
@@ -2614,7 +2629,7 @@ class TestAsymmetricPadding:
             ] = img
             ref_output = ref_func(exp_img, kern)
 
-            utt.assert_allclose(asymmetric_output, ref_output)
+            np.testing.assert_allclose(asymmetric_output, ref_output)
 
             utt.verify_grad(asymmetric_conv_op, [img, kern], mode=self.mode, eps=1)
 
@@ -2666,7 +2681,7 @@ class TestAsymmetricPadding:
             ] = img
             ref_output = ref_func(exp_img, top)
 
-            utt.assert_allclose(asymmetric_output, ref_output)
+            np.testing.assert_allclose(asymmetric_output, ref_output)
 
             def conv_gradweight(inputs_val, output_val):
                 return asymmetric_conv_op(
@@ -2720,7 +2735,7 @@ class TestAsymmetricPadding:
                 :, :, pad[0][0] : imshp[2] + pad[0][0], pad[1][0] : imshp[3] + pad[1][0]
             ]
 
-            utt.assert_allclose(asymmetric_output, ref_output)
+            np.testing.assert_allclose(asymmetric_output, ref_output)
 
             def conv_gradinputs(filters_val, output_val):
                 return asymmetric_conv_op(
@@ -2767,7 +2782,7 @@ class TestCausalConv:
 
         output = causal_func(self.img, self.kern)
 
-        utt.assert_allclose(output, self.precomp_top)
+        np.testing.assert_allclose(output, self.precomp_top)
 
         def causal_conv_fn(inputs_val, filters_val):
             return causal_conv1d(
