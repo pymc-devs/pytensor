@@ -263,4 +263,5 @@ jobs:
         with:
           directory: ./coverage/
           fail_ci_if_error: true
-          token: ${{ secrets.CODECOV_TOKEN }}
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
