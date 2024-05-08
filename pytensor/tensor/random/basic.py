@@ -528,9 +528,34 @@ def chisquare(df, size=None, **kwargs):
 
 
 def rayleigh(scale=1.0, *, size=None, **kwargs):
+    r"""Draw samples from a Rayleigh distribution.
+
+    The probability density function for `rayleigh` with parameter `scale` is given by:
+
+    .. math::
+        f(x; s) = \frac{x}{s^2} e^{-x^2/(2 s^2)}
+
+    where :math:`s` is the scale parameter.
+
+    This variable is obtained by taking the square root of the sum of the squares of
+    two independent, standard normally distributed random variables.
+
+    Signature
+    ---------
+    `() -> ()`
+
+    Parameters
+    ----------
+    scale : float or array_like of floats, optional
+        Scale parameter of the distribution (positive). Default is 1.0.
+    size : int or tuple of ints, optional
+        Output shape. If the given shape is, e.g., `(m, n, k)`, then `m * n * k` samples
+        are drawn. Default is None, in which case a single value is returned.
+    """
+
     scale = as_tensor_variable(scale)
     if size is None:
-        size = np.broadcast_shapes(scale.shape)
+        size = scale.shape
     return sqrt(chisquare(df=2, size=size, **kwargs)) * scale
 
 
