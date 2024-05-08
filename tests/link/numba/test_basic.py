@@ -406,6 +406,7 @@ def test_Subtensor(x, indices):
     "x, indices",
     [
         (pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), ([1, 2],)),
+        (pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), ([1],)),
     ],
 )
 def test_AdvancedSubtensor1(x, indices):
@@ -498,6 +499,27 @@ def test_IncSubtensor(x, y, indices):
             pt.as_tensor(rng.poisson(size=(2, 4, 5))),
             ([1, 1],),
         ),
+        # Broadcasting values
+        (
+            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            pt.as_tensor(rng.poisson(size=(1, 4, 5))),
+            ([0, 2, 0],),
+        ),
+        (
+            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            pt.as_tensor(rng.poisson(size=(5,))),
+            ([0, 2],),
+        ),
+        (
+            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            pt.as_tensor(rng.poisson(size=())),
+            ([2, 0],),
+        ),
+        (
+            pt.as_tensor(np.arange(5)),
+            pt.as_tensor(rng.poisson(size=())),
+            ([2, 0],),
+        ),
     ],
 )
 def test_AdvancedIncSubtensor1(x, y, indices):
@@ -511,11 +533,21 @@ def test_AdvancedIncSubtensor1(x, y, indices):
     out_fg = FunctionGraph([], [out_pt])
     compare_numba_and_py(out_fg, [])
 
+    # With symbolic inputs
     x_pt = x.type()
-    out_pt = pt_subtensor.AdvancedIncSubtensor1(inplace=True)(x_pt, y, *indices)
+    y_pt = y.type()
+
+    out_pt = pt_subtensor.AdvancedIncSubtensor1(inplace=True)(x_pt, y_pt, *indices)
     assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor1)
-    out_fg = FunctionGraph([x_pt], [out_pt])
-    compare_numba_and_py(out_fg, [x.data])
+    out_fg = FunctionGraph([x_pt, y_pt], [out_pt])
+    compare_numba_and_py(out_fg, [x.data, y.data])
+
+    out_pt = pt_subtensor.AdvancedIncSubtensor1(set_instead_of_inc=True, inplace=True)(
+        x_pt, y_pt, *indices
+    )
+    assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor1)
+    out_fg = FunctionGraph([x_pt, y_pt], [out_pt])
+    compare_numba_and_py(out_fg, [x.data, y.data])
 
 
 @pytest.mark.parametrize(

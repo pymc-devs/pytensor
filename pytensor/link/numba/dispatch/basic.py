@@ -604,36 +604,70 @@ def numba_funcify_IncSubtensor(op, node, **kwargs):
     return numba_njit(incsubtensor_fn, boundscheck=True)
 
 
-@numba_njit(boundscheck=True)
-def advancedincsubtensor1_inplace_set(x, vals, idxs):
-    for idx, val in zip(idxs, vals):
-        x[idx] = val
-    return x
-
-
-@numba_njit(boundscheck=True)
-def advancedincsubtensor1_inplace_inc(x, vals, idxs):
-    for idx, val in zip(idxs, vals):
-        x[idx] += val
-    return x
-
-
 @numba_funcify.register(AdvancedIncSubtensor1)
 def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
     inplace = op.inplace
     set_instead_of_inc = op.set_instead_of_inc
+    x, vals, idxs = node.inputs
+    # TODO: Add explicit expand_dims in make_node so we don't need to worry about this here
+    broadcast = vals.type.ndim < x.type.ndim or vals.type.broadcastable[0]
 
     if set_instead_of_inc:
-        advancedincsubtensor1_inplace = global_numba_func(
-            advancedincsubtensor1_inplace_set
-        )
+        if broadcast:
+
+            @numba_njit(boundscheck=True)
+            def advancedincsubtensor1_inplace(x, val, idxs):
+                if val.ndim == x.ndim:
+                    core_val = val[0]
+                elif val.ndim == 0:
+                    # Workaround for https://github.com/numba/numba/issues/9573
+                    core_val = val.item()
+                else:
+                    core_val = val
+
+                for idx in idxs:
+                    x[idx] = core_val
+                return x
+
+        else:
+
+            @numba_njit(boundscheck=True)
+            def advancedincsubtensor1_inplace(x, vals, idxs):
+                if not len(idxs) == len(vals):
+                    raise ValueError("The number of indices and values must match.")
+                for idx, val in zip(idxs, vals):
+                    x[idx] = val
+                return x
     else:
-        advancedincsubtensor1_inplace = global_numba_func(
-            advancedincsubtensor1_inplace_inc
-        )
+        if broadcast:
+
+            @numba_njit(boundscheck=True)
+            def advancedincsubtensor1_inplace(x, val, idxs):
+                if val.ndim == x.ndim:
+                    core_val = val[0]
+                elif val.ndim == 0:
+                    # Workaround for https://github.com/numba/numba/issues/9573
+                    core_val = val.item()
+                else:
+                    core_val = val
+
+                for idx in idxs:
+                    x[idx] += core_val
+                return x
+
+        else:
+
+            @numba_njit(boundscheck=True)
+            def advancedincsubtensor1_inplace(x, vals, idxs):
+                if not len(idxs) == len(vals):
+                    raise ValueError("The number of indices and values must match.")
+                for idx, val in zip(idxs, vals):
+                    x[idx] += val
+                return x
 
     if inplace:
-        return global_numba_func(advancedincsubtensor1_inplace)
+        return advancedincsubtensor1_inplace
+
     else:
 
         @numba_njit
