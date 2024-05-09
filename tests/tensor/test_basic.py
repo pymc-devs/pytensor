@@ -848,10 +848,15 @@ class TestAlloc:
             inp = np.zeros(shp, dtype=config.floatX)
             assert np.allclose(zeros_tensor(inp), np.zeros(shp))
 
-    def test_full(self):
-        full_pt = ptb.full((2, 3), 3, dtype="int64")
+    @pytest.mark.parametrize(
+        "shape", [(2, 3), 5, np.int32(5), np.array(5), constant(5)]
+    )
+    def test_full(self, shape):
+        full_pt = ptb.full(shape, 3, dtype="int64")
         res = pytensor.function([], full_pt, mode=self.mode)()
-        assert np.array_equal(res, np.full((2, 3), 3, dtype="int64"))
+        if isinstance(shape, ptb.TensorVariable):
+            shape = shape.eval()
+        assert np.array_equal(res, np.full(shape, 3, dtype="int64"))
 
     @pytest.mark.parametrize("func", (ptb.zeros, ptb.empty))
     def test_rebuild(self, func):
