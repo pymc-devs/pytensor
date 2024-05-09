@@ -244,10 +244,7 @@ def scan_nodes_from_fct(fct):
 class TestScan:
     @pytest.mark.parametrize(
         "rng_type",
-        [
-            np.random.default_rng,
-            np.random.RandomState,
-        ],
+        [np.random.default_rng],
     )
     def test_inner_graph_cloning(self, rng_type):
         r"""Scan should remove the updates-providing special properties on `RandomType`\s."""

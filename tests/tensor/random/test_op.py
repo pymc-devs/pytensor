@@ -8,7 +8,7 @@ from pytensor.raise_op import Assert
 from pytensor.tensor.math import eq
 from pytensor.tensor.random import normal
 from pytensor.tensor.random.basic import NormalRV
-from pytensor.tensor.random.op import RandomState, RandomVariable, default_rng
+from pytensor.tensor.random.op import RandomVariable, default_rng
 from pytensor.tensor.shape import specify_shape
 from pytensor.tensor.type import iscalar, tensor
 
@@ -159,7 +159,6 @@ def test_RandomVariable_floatX(strict_test_value_flags):
 @pytest.mark.parametrize(
     "seed, maker_op, numpy_res",
     [
-        (3, RandomState, np.random.RandomState(3)),
         (3, default_rng, np.random.default_rng(3)),
     ],
 )
@@ -174,10 +173,6 @@ def test_random_maker_ops_no_seed(strict_test_value_flags):
     # Testing the initialization when seed=None
     # Since internal states randomly generated,
     # we just check the output classes
-    z = function(inputs=[], outputs=[RandomState()])()
-    aes_res = z[0]
-    assert isinstance(aes_res, np.random.RandomState)
-
     z = function(inputs=[], outputs=[default_rng()])()
     aes_res = z[0]
     assert isinstance(aes_res, np.random.Generator)

@@ -51,7 +51,6 @@ from pytensor.tensor.random.basic import (
     pareto,
     permutation,
     poisson,
-    randint,
     rayleigh,
     standard_normal,
     t,
@@ -1353,27 +1352,6 @@ def test_categorical_basic():
         # The independent dimensions of p have shape=(1, 3) which cannot be
         # broadcasted to (3,)
         categorical.rng_fn(rng, p[None], size=(3,))
-
-
-def test_randint_samples():
-    with pytest.raises(TypeError):
-        randint(10, rng=shared(np.random.default_rng()))
-
-    rng = np.random.RandomState(2313)
-    compare_sample_values(randint, 10, None, rng=rng)
-    compare_sample_values(randint, 0, 1, rng=rng)
-    compare_sample_values(randint, 0, 1, size=[3], rng=rng)
-    compare_sample_values(randint, [0, 1, 2], 5, rng=rng)
-    compare_sample_values(randint, [0, 1, 2], 5, size=[3, 3], rng=rng)
-    compare_sample_values(randint, [0], [5], size=[1], rng=rng)
-    compare_sample_values(randint, pt.as_tensor_variable([-1]), [1], size=[1], rng=rng)
-    compare_sample_values(
-        randint,
-        pt.as_tensor_variable([-1]),
-        [1],
-        size=pt.as_tensor_variable([1]),
-        rng=rng,
-    )
 
 
 def test_integers_samples():
