@@ -30,6 +30,7 @@ from pytensor.tensor.random.rewriting import (
 from pytensor.tensor.rewriting.shape import ShapeFeature, ShapeOptimizer
 from pytensor.tensor.subtensor import AdvancedSubtensor, AdvancedSubtensor1, Subtensor
 from pytensor.tensor.type import iscalar, vector
+from pytensor.tensor.type_other import NoneConst
 
 
 no_mode = Mode("py", RewriteDatabaseQuery(include=[], exclude=[]))
@@ -44,20 +45,25 @@ def apply_local_rewrite_to_rv(
         p_pt.tag.test_value = p
         dist_params_pt.append(p_pt)
 
-    size_pt = []
-    for s in size:
-        # To test DimShuffle with dropping dims we need that size dimension to be constant
-        if s == 1:
-            s_pt = constant(np.array(1, dtype="int32"))
-        else:
-            s_pt = iscalar()
-        s_pt.tag.test_value = s
-        size_pt.append(s_pt)
+    if size is None:
+        size_pt = NoneConst
+    else:
+        size_pt = []
+        for s in size:
+            # To test DimShuffle with dropping dims we need that size dimension to be constant
+            if s == 1:
+                s_pt = constant(np.array(1, dtype="int32"))
+            else:
+                s_pt = iscalar()
+            s_pt.tag.test_value = s
+            size_pt.append(s_pt)
 
     dist_st = op_fn(dist_op(*dist_params_pt, size=size_pt, rng=rng, name=name))
 
     f_inputs = [
-        p for p in dist_params_pt + size_pt if not isinstance(p, slice | Constant)
+        p
+        for p in dist_params_pt + ([] if size is None else size_pt)
+        if not isinstance(p, slice | Constant)
     ]
 
     mode = Mode(
@@ -135,7 +141,7 @@ def test_inplace_rewrites(rv_op):
                 np.array([0.0, 1.0], dtype=config.floatX),
                 np.array(5.0, dtype=config.floatX),
             ],
-            [],
+            None,
         ),
         (
             normal,
@@ -180,7 +186,7 @@ def test_local_rv_size_lift(dist_op, dist_params, size):
         rng,
     )
 
-    assert pt.get_vector_length(new_out.owner.inputs[1]) == 0
+    assert new_out.owner.op.size_param(new_out.owner).data is None
 
 
 @pytest.mark.parametrize(
@@ -194,7 +200,7 @@ def test_local_rv_size_lift(dist_op, dist_params, size):
                 np.array([0.0, -100.0], dtype=np.float64),
                 np.array(1e-6, dtype=np.float64),
             ),
-            (),
+            None,
             1e-7,
         ),
         (
@@ -205,7 +211,7 @@ def test_local_rv_size_lift(dist_op, dist_params, size):
                 np.array(-10.0, dtype=np.float64),
                 np.array(1e-6, dtype=np.float64),
             ),
-            (),
+            None,
             1e-7,
         ),
         (
@@ -216,7 +222,7 @@ def test_local_rv_size_lift(dist_op, dist_params, size):
                 np.array(-10.0, dtype=np.float64),
                 np.array(1e-6, dtype=np.float64),
             ),
-            (),
+            None,
             1e-7,
         ),
         (
@@ -227,7 +233,7 @@ def test_local_rv_size_lift(dist_op, dist_params, size):
                 np.arange(2 * 2 * 2).reshape((2, 2, 2)).astype(config.floatX),
                 np.array(1e-6).astype(config.floatX),
             ),
-            (),
+            None,
             1e-3,
         ),
         (
@@ -440,7 +446,7 @@ def rand_bool_mask(shape, rng=None):
                 np.arange(30, dtype=config.floatX).reshape(3, 5, 2),
                 np.full((1, 5, 1), 1e-6),
             ),
-            (),
+            None,
         ),
         (
             # `size`-only slice
@@ -462,7 +468,7 @@ def rand_bool_mask(shape, rng=None):
                 np.arange(30, dtype=config.floatX).reshape(3, 5, 2),
                 np.full((1, 5, 1), 1e-6),
             ),
-            (),
+            None,
         ),
         (
             # `size`-only slice
@@ -484,7 +490,7 @@ def rand_bool_mask(shape, rng=None):
                 (0.1 - 1e-5) * np.arange(4).astype(dtype=config.floatX),
                 0.1 * np.arange(4).astype(dtype=config.floatX),
             ),
-            (),
+            None,
         ),
         # 5
         (
@@ -570,7 +576,7 @@ def rand_bool_mask(shape, rng=None):
                     dtype=config.floatX,
                 ),
             ),
-            (),
+            None,
         ),
         (
             # Univariate distribution with core-vector parameters
@@ -627,7 +633,7 @@ def rand_bool_mask(shape, rng=None):
                 np.arange(30).reshape(5, 3, 2),
                 1e-6,
             ),
-            (),
+            None,
         ),
         (
             # Multidimensional boolean indexing
@@ -638,7 +644,7 @@ def rand_bool_mask(shape, rng=None):
                 np.arange(30).reshape(5, 3, 2),
                 1e-6,
             ),
-            (),
+            None,
         ),
         (
             # Multidimensional boolean indexing
@@ -649,7 +655,7 @@ def rand_bool_mask(shape, rng=None):
                 np.arange(30).reshape(5, 3, 2),
                 1e-6,
             ),
-            (),
+            None,
         ),
         # 20
         (
@@ -661,7 +667,7 @@ def rand_bool_mask(shape, rng=None):
                 np.arange(30).reshape(5, 3, 2),
                 1e-6,
             ),
-            (),
+            None,
         ),
         (
             # Multidimensional boolean indexing
@@ -687,7 +693,7 @@ def rand_bool_mask(shape, rng=None):
                 np.arange(30).reshape(5, 3, 2),
                 1e-6,
             ),
-            (),
+            None,
         ),
         (
             # Multidimensional boolean indexing,
@@ -703,7 +709,7 @@ def rand_bool_mask(shape, rng=None):
                 np.arange(30).reshape(5, 3, 2),
                 1e-6,
             ),
-            (),
+            None,
         ),
         (
             # Multivariate distribution: indexing dips into core dimension
@@ -714,7 +720,7 @@ def rand_bool_mask(shape, rng=None):
                 np.array([[-1, 20], [300, -4000]], dtype=config.floatX),
                 np.eye(2).astype(config.floatX) * 1e-6,
             ),
-            (),
+            None,
         ),
         # 25
         (
@@ -726,7 +732,7 @@ def rand_bool_mask(shape, rng=None):
                 np.array([[-1, 20], [300, -4000]], dtype=config.floatX),
                 np.eye(2).astype(config.floatX) * 1e-6,
             ),
-            (),
+            None,
         ),
         (
             # Multivariate distribution: advanced integer indexing
@@ -740,7 +746,7 @@ def rand_bool_mask(shape, rng=None):
                 ),
                 np.eye(3, dtype=config.floatX) * 1e-6,
             ),
-            (),
+            None,
         ),
         (
             # Multivariate distribution: dummy slice "dips" into core dimension

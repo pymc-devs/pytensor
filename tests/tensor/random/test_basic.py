@@ -212,7 +212,7 @@ sd_pt.tag.test_value = np.array(1.0, dtype=config.floatX)
 @pytest.mark.parametrize(
     "M, sd, size",
     [
-        (pt.as_tensor_variable(np.array(1.0, dtype=config.floatX)), sd_pt, ()),
+        (pt.as_tensor_variable(np.array(1.0, dtype=config.floatX)), sd_pt, None),
         (
             pt.as_tensor_variable(np.array(1.0, dtype=config.floatX)),
             sd_pt,
@@ -223,10 +223,10 @@ sd_pt.tag.test_value = np.array(1.0, dtype=config.floatX)
             sd_pt,
             (2, M_pt),
         ),
-        (pt.zeros((M_pt,)), sd_pt, ()),
+        (pt.zeros((M_pt,)), sd_pt, None),
         (pt.zeros((M_pt,)), sd_pt, (M_pt,)),
         (pt.zeros((M_pt,)), sd_pt, (2, M_pt)),
-        (pt.zeros((M_pt,)), pt.ones((M_pt,)), ()),
+        (pt.zeros((M_pt,)), pt.ones((M_pt,)), None),
         (pt.zeros((M_pt,)), pt.ones((M_pt,)), (2, M_pt)),
         (
             create_pytensor_param(
@@ -244,9 +244,10 @@ sd_pt.tag.test_value = np.array(1.0, dtype=config.floatX)
 )
 def test_normal_infer_shape(M, sd, size):
     rv = normal(M, sd, size=size)
-    rv_shape = list(normal._infer_shape(size or (), [M, sd], None))
+    size_pt = rv.owner.op.size_param(rv.owner)
+    rv_shape = list(normal._infer_shape(size_pt, [M, sd], None))
 
-    all_args = (M, sd, *size)
+    all_args = (M, sd, *(() if size is None else size))
     fn_inputs = [
         i
         for i in graph_inputs([a for a in all_args if isinstance(a, Variable)])
@@ -525,8 +526,8 @@ def mvnormal_test_fn(mean=None, cov=None, size=None, random_state=None):
         mean = np.array([0.0], dtype=config.floatX)
     if cov is None:
         cov = np.array([[1.0]], dtype=config.floatX)
-    if size is None:
-        size = ()
+    if size is not None:
+        size = tuple(size)
     return multivariate_normal.rng_fn(random_state, mean, cov, size)
 
 
@@ -713,19 +714,20 @@ M_pt.tag.test_value = 3
 @pytest.mark.parametrize(
     "M, size",
     [
-        (pt.ones((M_pt,)), ()),
+        (pt.ones((M_pt,)), None),
         (pt.ones((M_pt,)), (M_pt + 1,)),
         (pt.ones((M_pt,)), (2, M_pt)),
-        (pt.ones((M_pt, M_pt + 1)), ()),
+        (pt.ones((M_pt, M_pt + 1)), None),
         (pt.ones((M_pt, M_pt + 1)), (M_pt + 2, M_pt)),
         (pt.ones((M_pt, M_pt + 1)), (2, M_pt + 2, M_pt + 3, M_pt)),
     ],
 )
 def test_dirichlet_infer_shape(M, size):
     rv = dirichlet(M, size=size)
-    rv_shape = list(dirichlet._infer_shape(size or (), [M], None))
+    size_pt = rv.owner.op.size_param(rv.owner)
+    rv_shape = list(dirichlet._infer_shape(size_pt, [M], None))
 
-    all_args = (M, *size)
+    all_args = (M, *(() if size is None else size))
     fn_inputs = [
         i
         for i in graph_inputs([a for a in all_args if isinstance(a, Variable)])
@@ -1620,8 +1622,7 @@ def test_unnatural_batched_dims(batch_dims_tester):
 
 @config.change_flags(compute_test_value="off")
 def test_pickle():
-    # This is an interesting `Op` case, because it has `None` types and a
-    # conditional dtype
+    # This is an interesting `Op` case, because it has a conditional dtype
     sample_a = choice(5, replace=False, size=(2, 3))
 
     a_pkl = pickle.dumps(sample_a)

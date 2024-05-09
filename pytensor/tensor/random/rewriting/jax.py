@@ -158,7 +158,7 @@ def materialize_implicit_arange_choice_without_replacement(fgraph, node):
         # No need to materialize arange
         return None
 
-    rng, size, dtype, a_scalar_param, *other_params = node.inputs
+    rng, size, a_scalar_param, *other_params = node.inputs
     if a_scalar_param.type.ndim > 0:
         # Automatic vectorization could have made this parameter batched,
         # there is no nice way to materialize a batched arange
@@ -170,7 +170,7 @@ def materialize_implicit_arange_choice_without_replacement(fgraph, node):
     # I.e., we substitute the first `()` by `(a)`
     new_props_dict["signature"] = re.sub(r"\(\)", "(a)", op.signature, 1)
     new_op = type(op)(**new_props_dict)
-    return new_op.make_node(rng, size, dtype, a_vector_param, *other_params).outputs
+    return new_op.make_node(rng, size, a_vector_param, *other_params).outputs
 
 
 random_vars_opt = SequenceDB()
