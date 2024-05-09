@@ -1719,6 +1719,9 @@ def full(shape, fill_value, dtype=None):
     fill_value = as_tensor_variable(fill_value)
     if dtype:
         fill_value = fill_value.astype(dtype)
+
+    if isinstance(shape, int | np.integer):
+        shape = (shape,)
     return alloc(fill_value, *shape)
 
 
