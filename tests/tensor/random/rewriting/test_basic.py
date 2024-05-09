@@ -7,7 +7,7 @@ from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.rewriting.basic import EquilibriumGraphRewriter
+from pytensor.graph.rewriting.basic import EquilibriumGraphRewriter, check_stack_trace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.tensor import constant
 from pytensor.tensor.elemwise import DimShuffle
@@ -95,6 +95,8 @@ def test_inplace_rewrites():
         for a, b in zip(new_out.owner.inputs[2:], out.owner.inputs[2:])
     )
     assert np.array_equal(new_out.owner.inputs[1].data, [])
+
+    assert check_stack_trace(f)
 
 
 def test_inplace_rewrites_extra_props():
