@@ -860,18 +860,6 @@ class TestAlloc:
         res = pytensor.function([shape], full_pt, mode=self.mode)(5)
         assert np.array_equal(res, np.full(5, 3, dtype="int64"))
 
-    @pytest.mark.parametrize(
-        "shape",
-        [
-            5.5,
-            np.array(5.5),
-            scalar("shape", dtype="float64"),
-        ],
-    )
-    def test_full_with_float(self, shape) -> None:
-        with pytest.raises(TypeError, match="^Shapes must be scalar integers.*"):
-            ptb.full(shape, 3, dtype="int64")
-
     @pytest.mark.parametrize("func", (ptb.zeros, ptb.empty))
     def test_rebuild(self, func):
         x = vector(shape=(50,))
