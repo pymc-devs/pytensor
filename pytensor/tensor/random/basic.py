@@ -914,12 +914,11 @@ class MvNormalRV(RandomVariable):
             # multivariate normals (or any other multivariate distributions),
             # so we need to implement that here
 
-            size = tuple(size or ())
-            if size:
+            if size is None:
+                mean, cov = broadcast_params([mean, cov], [1, 2])
+            else:
                 mean = np.broadcast_to(mean, size + mean.shape[-1:])
                 cov = np.broadcast_to(cov, size + cov.shape[-2:])
-            else:
-                mean, cov = broadcast_params([mean, cov], [1, 2])
 
             res = np.empty(mean.shape)
             for idx in np.ndindex(mean.shape[:-1]):
@@ -1800,13 +1799,11 @@ class MultinomialRV(RandomVariable):
     @classmethod
     def rng_fn(cls, rng, n, p, size):
         if n.ndim > 0 or p.ndim > 1:
-            size = tuple(size or ())
-
-            if size:
+            if size is None:
+                n, p = broadcast_params([n, p], [0, 1])
+            else:
                 n = np.broadcast_to(n, size)
                 p = np.broadcast_to(p, size + p.shape[-1:])
-            else:
-                n, p = broadcast_params([n, p], [0, 1])
 
             res = np.empty(p.shape, dtype=cls.dtype)
             for idx in np.ndindex(p.shape[:-1]):
@@ -2155,7 +2152,7 @@ class PermutationRV(RandomVariable):
     def rng_fn(self, rng, x, size):
         # We don't have access to the node in rng_fn :(
         x_batch_ndim = x.ndim - self.ndims_params[0]
-        batch_ndim = max(x_batch_ndim, len(size or ()))
+        batch_ndim = max(x_batch_ndim, 0 if size is None else len(size))
 
         if batch_ndim:
             # rng.permutation has no concept of batch dims

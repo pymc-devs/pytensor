@@ -21,6 +21,7 @@ from pytensor.link.utils import (
 )
 from pytensor.tensor.basic import get_vector_length
 from pytensor.tensor.random.type import RandomStateType
+from pytensor.tensor.type_other import NoneTypeT
 
 
 class RandomStateNumbaType(types.Type):
@@ -101,9 +102,13 @@ def make_numba_random_fn(node, np_random_func):
     if not isinstance(rng_param.type, RandomStateType):
         raise TypeError("Numba does not support NumPy `Generator`s")
 
-    tuple_size = int(get_vector_length(op.size_param(node)))
+    size_param = op.size_param(node)
+    size_len = (
+        None
+        if isinstance(size_param.type, NoneTypeT)
+        else int(get_vector_length(size_param))
+    )
     dist_params = op.dist_params(node)
-    size_dims = tuple_size - max(i.ndim for i in dist_params)
 
     # Make a broadcast-capable version of the Numba supported scalar sampling
     # function
@@ -119,7 +124,7 @@ def make_numba_random_fn(node, np_random_func):
             "np_random_func",
             "numba_vectorize",
             "to_fixed_tuple",
-            "tuple_size",
+            "size_len",
             "size_dims",
             "rng",
             "size",
@@ -155,10 +160,12 @@ def {bcast_fn_name}({bcast_fn_input_names}):
         "out_dtype": out_dtype,
     }
 
-    if tuple_size > 0:
+    if size_len is not None:
+        size_dims = size_len - max(i.ndim for i in dist_params)
+
         random_fn_body = dedent(
             f"""
-        size = to_fixed_tuple(size, tuple_size)
+        size = to_fixed_tuple(size, size_len)
 
         data = np.empty(size, dtype=out_dtype)
         for i in np.ndindex(size[:size_dims]):
@@ -170,7 +177,7 @@ def {bcast_fn_name}({bcast_fn_input_names}):
             {
                 "np": np,
                 "to_fixed_tuple": numba_ndarray.to_fixed_tuple,
-                "tuple_size": tuple_size,
+                "size_len": size_len,
                 "size_dims": size_dims,
             }
         )
@@ -305,19 +312,24 @@ def numba_funcify_BernoulliRV(op, node, **kwargs):
 @numba_funcify.register(ptr.CategoricalRV)
 def numba_funcify_CategoricalRV(op: ptr.CategoricalRV, node, **kwargs):
     out_dtype = node.outputs[1].type.numpy_dtype
-    size_len = int(get_vector_length(op.size_param(node)))
+    size_param = op.size_param(node)
+    size_len = (
+        None
+        if isinstance(size_param.type, NoneTypeT)
+        else int(get_vector_length(size_param))
+    )
     p_ndim = node.inputs[-1].ndim
 
     @numba_basic.numba_njit
     def categorical_rv(rng, size, p):
-        if not size_len:
+        if size_len is None:
             size_tpl = p.shape[:-1]
         else:
             size_tpl = numba_ndarray.to_fixed_tuple(size, size_len)
             p = np.broadcast_to(p, size_tpl + p.shape[-1:])
 
         # Workaround https://github.com/numba/numba/issues/8975
-        if not size_len and p_ndim == 1:
+        if size_len is None and p_ndim == 1:
             unif_samples = np.asarray(np.random.uniform(0, 1))
         else:
             unif_samples = np.random.uniform(0, 1, size_tpl)
@@ -336,13 +348,20 @@ def numba_funcify_DirichletRV(op, node, **kwargs):
     out_dtype = node.outputs[1].type.numpy_dtype
     alphas_ndim = op.dist_params(node)[0].type.ndim
     neg_ind_shape_len = -alphas_ndim + 1
-    size_len = int(get_vector_length(op.size_param(node)))
+    size_param = op.size_param(node)
+    size_len = (
+        None
+        if isinstance(size_param.type, NoneTypeT)
+        else int(get_vector_length(size_param))
+    )
 
     if alphas_ndim > 1:
 
         @numba_basic.numba_njit
         def dirichlet_rv(rng, size, alphas):
-            if size_len > 0:
+            if size_len is None:
+                samples_shape = alphas.shape
+            else:
                 size_tpl = numba_ndarray.to_fixed_tuple(size, size_len)
                 if (
                     0 < alphas.ndim - 1 <= len(size_tpl)
@@ -350,8 +369,6 @@ def numba_funcify_DirichletRV(op, node, **kwargs):
                 ):
                     raise ValueError("Parameters shape and size do not match.")
                 samples_shape = size_tpl + alphas.shape[-1:]
-            else:
-                samples_shape = alphas.shape
 
             res = np.empty(samples_shape, dtype=out_dtype)
             alphas_bcast = np.broadcast_to(alphas, samples_shape)
@@ -365,7 +382,8 @@ def numba_funcify_DirichletRV(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def dirichlet_rv(rng, size, alphas):
-            size = numba_ndarray.to_fixed_tuple(size, size_len)
+            if size_len is not None:
+                size = numba_ndarray.to_fixed_tuple(size, size_len)
             return (rng, np.random.dirichlet(alphas, size))
 
     return dirichlet_rv
@@ -404,8 +422,7 @@ def numba_funcify_choice_without_replacement(op, node, **kwargs):
 
 @numba_funcify.register(ptr.PermutationRV)
 def numba_funcify_permutation(op: ptr.PermutationRV, node, **kwargs):
-    # PyTensor uses size=() to represent size=None
-    size_is_none = op.size_param(node).type.shape == (0,)
+    size_is_none = isinstance(op.size_param(node).type, NoneTypeT)
     batch_ndim = op.batch_ndim(node)
     x_batch_ndim = node.inputs[-1].type.ndim - op.ndims_params[0]
 

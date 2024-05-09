@@ -12,6 +12,7 @@ from pytensor.graph import Constant
 from pytensor.link.jax.dispatch.basic import jax_funcify, jax_typify
 from pytensor.link.jax.dispatch.shape import JAXShapeTuple
 from pytensor.tensor.shape import Shape, Shape_i
+from pytensor.tensor.type_other import NoneTypeT
 
 
 try:
@@ -93,7 +94,6 @@ def jax_funcify_RandomVariable(op: ptr.RandomVariable, node, **kwargs):
     rv = node.outputs[1]
     out_dtype = rv.type.dtype
     static_shape = rv.type.shape
-
     batch_ndim = op.batch_ndim(node)
 
     # Try to pass static size directly to JAX
@@ -102,11 +102,10 @@ def jax_funcify_RandomVariable(op: ptr.RandomVariable, node, **kwargs):
         # Sometimes size can be constant folded during rewrites,
         # without the RandomVariable node being updated with new static types
         size_param = op.size_param(node)
-        if isinstance(size_param, Constant):
-            size_tuple = tuple(size_param.data)
-            # PyTensor uses empty size to represent size = None
-            if len(size_tuple):
-                static_size = tuple(size_param.data)
+        if isinstance(size_param, Constant) and not isinstance(
+            size_param.type, NoneTypeT
+        ):
+            static_size = tuple(size_param.data)
 
     # If one dimension has unknown size, either the size is determined
     # by a `Shape` operator in which case JAX will compile, or it is
@@ -115,9 +114,6 @@ def jax_funcify_RandomVariable(op: ptr.RandomVariable, node, **kwargs):
         assert_size_argument_jax_compatible(node)
 
         def sample_fn(rng, size, *parameters):
-            # PyTensor uses empty size to represent size = None
-            if jax.numpy.asarray(size).shape == (0,):
-                size = None
             return jax_sample_fn(op, node=node)(rng, size, out_dtype, *parameters)
 
     else:

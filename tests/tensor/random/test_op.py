@@ -69,7 +69,7 @@ def test_RandomVariable_basics(strict_test_value_flags):
 
     # `RandomVariable._infer_shape` should handle no parameters
     rv_shape = rv._infer_shape(pt.constant([]), (), [])
-    assert rv_shape.equals(pt.constant([], dtype="int64"))
+    assert rv_shape == ()
 
     # `dtype` is respected
     rv = RandomVariable("normal", signature="(),()->()", dtype="int32")
@@ -299,3 +299,16 @@ def test_vectorize():
     vect_node = vectorize_graph(out, {mu: new_mu, sigma: new_sigma}).owner
     assert isinstance(vect_node.op, NormalRV)
     assert vect_node.default_output().type.shape == (10, 2, 5)
+
+
+def test_size_none_vs_empty():
+    rv = RandomVariable(
+        "normal",
+        signature="(),()->()",
+    )
+    assert rv([0], [1], size=None).type.shape == (1,)
+
+    with pytest.raises(
+        ValueError, match="Size length is incompatible with batched dimensions"
+    ):
+        rv([0], [1], size=())

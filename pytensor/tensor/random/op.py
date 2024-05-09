@@ -16,7 +16,6 @@ from pytensor.tensor.basic import (
     as_tensor_variable,
     concatenate,
     constant,
-    get_underlying_scalar_constant_value,
     get_vector_length,
     infer_static_shape,
 )
@@ -28,7 +27,7 @@ from pytensor.tensor.random.utils import (
 )
 from pytensor.tensor.shape import shape_tuple
 from pytensor.tensor.type import TensorType
-from pytensor.tensor.type_other import NoneConst
+from pytensor.tensor.type_other import NoneConst, NoneTypeT
 from pytensor.tensor.utils import _parse_gufunc_signature, safe_signature
 from pytensor.tensor.variable import TensorVariable
 
@@ -196,10 +195,10 @@ class RandomVariable(Op):
 
     def _infer_shape(
         self,
-        size: TensorVariable,
+        size: TensorVariable | Variable,
         dist_params: Sequence[TensorVariable],
         param_shapes: Sequence[tuple[Variable, ...]] | None = None,
-    ) -> TensorVariable | tuple[ScalarVariable, ...]:
+    ) -> tuple[ScalarVariable | TensorVariable, ...]:
         """Compute the output shape given the size and distribution parameters.
 
         Parameters
@@ -225,9 +224,9 @@ class RandomVariable(Op):
                 self._supp_shape_from_params(dist_params, param_shapes=param_shapes)
             )
 
-        size_len = get_vector_length(size)
+        if not isinstance(size.type, NoneTypeT):
+            size_len = get_vector_length(size)
 
-        if size_len > 0:
             # Fail early when size is incompatible with parameters
             for i, (param, param_ndim_supp) in enumerate(
                 zip(dist_params, self.ndims_params)
@@ -281,21 +280,11 @@ class RandomVariable(Op):
 
         shape = batch_shape + supp_shape
 
-        if not shape:
-            shape = constant([], dtype="int64")
-
         return shape
 
     def infer_shape(self, fgraph, node, input_shapes):
         _, size, *dist_params = node.inputs
-        _, size_shape, *param_shapes = input_shapes
-
-        try:
-            size_len = get_vector_length(size)
-        except ValueError:
-            size_len = get_underlying_scalar_constant_value(size_shape[0])
-
-        size = tuple(size[n] for n in range(size_len))
+        _, _, *param_shapes = input_shapes
 
         shape = self._infer_shape(size, dist_params, param_shapes=param_shapes)
 
@@ -367,8 +356,8 @@ class RandomVariable(Op):
                 "The type of rng should be an instance of either RandomGeneratorType or RandomStateType"
             )
 
-        shape = self._infer_shape(size, dist_params)
-        _, static_shape = infer_static_shape(shape)
+        inferred_shape = self._infer_shape(size, dist_params)
+        _, static_shape = infer_static_shape(inferred_shape)
 
         inputs = (rng, size, *dist_params)
         out_type = TensorType(dtype=self.dtype, shape=static_shape)
@@ -396,21 +385,14 @@ class RandomVariable(Op):
 
         rng, size, *args = inputs
 
-        # If `size == []`, that means no size is enforced, and NumPy is trusted
-        # to draw the appropriate number of samples, NumPy uses `size=None` to
-        # represent that.  Otherwise, NumPy expects a tuple.
-        if np.size(size) == 0:
-            size = None
-        else:
-            size = tuple(size)
-
-        # Draw from `rng` if `self.inplace` is `True`, and from a copy of `rng`
-        # otherwise.
+        # Draw from `rng` if `self.inplace` is `True`, and from a copy of `rng` otherwise.
         if not self.inplace:
             rng = copy(rng)
 
         rng_var_out[0] = rng
 
+        if size is not None:
+            size = tuple(size)
         smpl_val = self.rng_fn(rng, *([*args, size]))
 
         if not isinstance(smpl_val, np.ndarray) or str(smpl_val.dtype) != self.dtype:
@@ -473,7 +455,9 @@ def vectorize_random_variable(
 
     original_dist_params = op.dist_params(node)
     old_size = op.size_param(node)
-    len_old_size = get_vector_length(old_size)
+    len_old_size = (
+        None if isinstance(old_size.type, NoneTypeT) else get_vector_length(old_size)
+    )
 
     original_expanded_dist_params = explicit_expand_dims(
         original_dist_params, op.ndims_params, len_old_size
