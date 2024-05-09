@@ -25,7 +25,6 @@ from pytensor.link.utils import (
 )
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.random.op import RandomVariable, RandomVariableWithCoreShape
-from pytensor.tensor.random.type import RandomStateType
 from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.utils import _parse_gufunc_signature
 
@@ -348,9 +347,6 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
 
     [rv_node] = op.fgraph.apply_nodes
     rv_op: RandomVariable = rv_node.op
-    rng_param = rv_op.rng_param(rv_node)
-    if isinstance(rng_param.type, RandomStateType):
-        raise TypeError("Numba does not support NumPy `RandomStateType`s")
     size = rv_op.size_param(rv_node)
     dist_params = rv_op.dist_params(rv_node)
     size_len = None if isinstance(size.type, NoneTypeT) else get_vector_length(size)

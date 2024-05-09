@@ -2,7 +2,7 @@ from functools import singledispatch
 
 import jax
 import numpy as np
-from numpy.random import Generator, RandomState
+from numpy.random import Generator
 from numpy.random.bit_generator import (  # type: ignore[attr-defined]
     _coerce_to_uint32_array,
 )
@@ -52,15 +52,6 @@ def assert_size_argument_jax_compatible(node):
         not isinstance(size_node.op, Shape | Shape_i | JAXShapeTuple)
     ):
         raise NotImplementedError(SIZE_NOT_COMPATIBLE)
-
-
-@jax_typify.register(RandomState)
-def jax_typify_RandomState(state, **kwargs):
-    state = state.get_state(legacy=False)
-    state["bit_generator"] = numpy_bit_gens[state["bit_generator"]]
-    # XXX: Is this a reasonable approach?
-    state["jax_state"] = state["state"]["key"][0:2]
-    return state
 
 
 @jax_typify.register(Generator)
@@ -214,7 +205,6 @@ def jax_sample_fn_categorical(op, node):
     return sample_fn
 
 
-@jax_sample_fn.register(ptr.RandIntRV)
 @jax_sample_fn.register(ptr.IntegersRV)
 @jax_sample_fn.register(ptr.UniformRV)
 def jax_sample_fn_uniform(op, node):

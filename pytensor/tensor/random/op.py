@@ -20,7 +20,7 @@ from pytensor.tensor.basic import (
     infer_static_shape,
 )
 from pytensor.tensor.blockwise import OpWithCoreShape
-from pytensor.tensor.random.type import RandomGeneratorType, RandomStateType, RandomType
+from pytensor.tensor.random.type import RandomGeneratorType, RandomType
 from pytensor.tensor.random.utils import (
     compute_batch_shape,
     explicit_expand_dims,
@@ -324,9 +324,8 @@ class RandomVariable(Op):
 
         Parameters
         ----------
-        rng: RandomGeneratorType or RandomStateType
-            Existing PyTensor `Generator` or `RandomState` object to be used.  Creates a
-            new one, if `None`.
+        rng: RandomGeneratorType
+            Existing PyTensor `Generator` object to be used.  Creates a new one, if `None`.
         size: int or Sequence
             NumPy-like size parameter.
         dtype: str
@@ -354,7 +353,7 @@ class RandomVariable(Op):
             rng = pytensor.shared(np.random.default_rng())
         elif not isinstance(rng.type, RandomType):
             raise TypeError(
-                "The type of rng should be an instance of either RandomGeneratorType or RandomStateType"
+                "The type of rng should be an instance of RandomGeneratorType "
             )
 
         inferred_shape = self._infer_shape(size, dist_params)
@@ -434,14 +433,6 @@ class AbstractRNGConstructor(Op):
         if seed is not None and seed.size == 1:
             seed = int(seed)
         output_storage[0][0] = getattr(np.random, self.random_constructor)(seed=seed)
-
-
-class RandomStateConstructor(AbstractRNGConstructor):
-    random_type = RandomStateType()
-    random_constructor = "RandomState"
-
-
-RandomState = RandomStateConstructor()
 
 
 class DefaultGeneratorMakerOp(AbstractRNGConstructor):

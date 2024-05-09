@@ -9,14 +9,9 @@ from pytensor.tensor import get_vector_length, specify_shape
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.math import sqrt
 from pytensor.tensor.random.op import RandomVariable
-from pytensor.tensor.random.type import RandomGeneratorType, RandomStateType
 from pytensor.tensor.random.utils import (
     broadcast_params,
     normalize_size_param,
-)
-from pytensor.tensor.random.var import (
-    RandomGeneratorSharedVariable,
-    RandomStateSharedVariable,
 )
 
 
@@ -645,7 +640,7 @@ class GumbelRV(ScipyRandomVariable):
     @classmethod
     def rng_fn_scipy(
         cls,
-        rng: np.random.Generator | np.random.RandomState,
+        rng: np.random.Generator,
         loc: np.ndarray | float,
         scale: np.ndarray | float,
         size: list[int] | int | None,
@@ -1880,58 +1875,6 @@ class CategoricalRV(RandomVariable):
 categorical = CategoricalRV()
 
 
-class RandIntRV(RandomVariable):
-    r"""A discrete uniform random variable.
-
-    Only available for `RandomStateType`. Use `integers` with `RandomGeneratorType`\s.
-
-    """
-
-    name = "randint"
-    signature = "(),()->()"
-    dtype = "int64"
-    _print_name = ("randint", "\\operatorname{randint}")
-
-    def __call__(self, low, high=None, size=None, **kwargs):
-        r"""Draw samples from a discrete uniform distribution.
-
-        Signature
-        ---------
-
-        `() -> ()`
-
-        Parameters
-        ----------
-        low
-            Lower boundary of the output interval. All values generated will
-            be greater than or equal to `low`, unless `high=None`, in which case
-            all values generated are greater than or equal to `0` and
-            smaller than `low` (exclusive).
-        high
-            Upper boundary of the output interval.  All values generated
-            will be smaller than `high` (exclusive).
-        size
-            Sample shape. If the given size is `(m, n, k)`, then `m * n * k`
-            independent, identically distributed samples are
-            returned. Default is `None`, in which case a single
-            sample is returned.
-
-        """
-        if high is None:
-            low, high = 0, low
-        return super().__call__(low, high, size=size, **kwargs)
-
-    def make_node(self, rng, *args, **kwargs):
-        if not isinstance(
-            getattr(rng, "type", None), RandomStateType | RandomStateSharedVariable
-        ):
-            raise TypeError("`randint` is only available for `RandomStateType`s")
-        return super().make_node(rng, *args, **kwargs)
-
-
-randint = RandIntRV()
-
-
 class IntegersRV(RandomVariable):
     r"""A discrete uniform random variable.
 
@@ -1970,14 +1913,6 @@ class IntegersRV(RandomVariable):
         if high is None:
             low, high = 0, low
         return super().__call__(low, high, size=size, **kwargs)
-
-    def make_node(self, rng, *args, **kwargs):
-        if not isinstance(
-            getattr(rng, "type", None),
-            RandomGeneratorType | RandomGeneratorSharedVariable,
-        ):
-            raise TypeError("`integers` is only available for `RandomGeneratorType`s")
-        return super().make_node(rng, *args, **kwargs)
 
 
 integers = IntegersRV()
@@ -2201,7 +2136,6 @@ __all__ = [
     "permutation",
     "choice",
     "integers",
-    "randint",
     "categorical",
     "multinomial",
     "betabinom",

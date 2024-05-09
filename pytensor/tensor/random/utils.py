@@ -209,9 +209,7 @@ class RandomStream:
         self,
         seed: int | None = None,
         namespace: ModuleType | None = None,
-        rng_ctor: Literal[
-            np.random.RandomState, np.random.Generator
-        ] = np.random.default_rng,
+        rng_ctor: Literal[np.random.Generator] = np.random.default_rng,
     ):
         if namespace is None:
             from pytensor.tensor.random import basic  # pylint: disable=import-self
@@ -223,12 +221,6 @@ class RandomStream:
         self.default_instance_seed = seed
         self.state_updates = []
         self.gen_seedgen = np.random.SeedSequence(seed)
-
-        if isinstance(rng_ctor, type) and issubclass(rng_ctor, np.random.RandomState):
-            # The legacy state does not accept `SeedSequence`s directly
-            def rng_ctor(seed):
-                return np.random.RandomState(np.random.MT19937(seed))
-
         self.rng_ctor = rng_ctor
 
     def __getattr__(self, obj):
