@@ -1720,7 +1720,7 @@ def full(shape, fill_value, dtype=None):
     if dtype:
         fill_value = fill_value.astype(dtype)
 
-    if isinstance(shape, int | np.integer):
+    if np.ndim(shape) == 0:
         shape = (shape,)
     return alloc(fill_value, *shape)
 
