@@ -452,13 +452,11 @@ JAX = Mode(
     JAXLinker(),
     RewriteDatabaseQuery(
         include=["fast_run", "jax"],
-        # TODO: "local_uint_constant_indices" can be reintroduced once https://github.com/google/jax/issues/16836 is fixed.
         exclude=[
             "cxx_only",
             "BlasOpt",
             "fusion",
             "inplace",
-            "local_uint_constant_indices",
         ],
     ),
 )
