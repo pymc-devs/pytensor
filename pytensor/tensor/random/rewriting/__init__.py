@@ -4,7 +4,8 @@ from pytensor.tensor.random.rewriting.basic import *
 
 # isort: off
 
-# Register JAX specializations
+# Register Numba and JAX specializations
+import pytensor.tensor.random.rewriting.numba
 import pytensor.tensor.random.rewriting.jax
 
 # isort: on

@@ -1452,9 +1452,7 @@ def test_permutation_shape():
     assert tuple(permutation(np.arange(5), size=(2, 3)).shape.eval()) == (2, 3, 5)
 
 
-def batched_unweighted_choice_without_replacement_tester(
-    mode="FAST_RUN", rng_ctor=np.random.default_rng
-):
+def batched_unweighted_choice_without_replacement_tester(mode="FAST_RUN"):
     """Test unweighted choice without replacement with batched ndims.
 
     This has no corresponding in numpy, but is supported for consistency within the
@@ -1462,7 +1460,7 @@ def batched_unweighted_choice_without_replacement_tester(
 
     It can be triggered by manual buiding the Op or during automatic vectorization.
     """
-    rng = shared(rng_ctor())
+    rng = shared(np.random.default_rng())
 
     # Batched a implicit size
     rv_op = ChoiceWithoutReplacement(
@@ -1499,9 +1497,7 @@ def batched_unweighted_choice_without_replacement_tester(
             assert np.all((draw >= i * 10) & (draw < (i + 1) * 10))
 
 
-def batched_weighted_choice_without_replacement_tester(
-    mode="FAST_RUN", rng_ctor=np.random.default_rng
-):
+def batched_weighted_choice_without_replacement_tester(mode="FAST_RUN"):
     """Test weighted choice without replacement with batched ndims.
 
     This has no corresponding in numpy, but is supported for consistency within the
@@ -1509,7 +1505,7 @@ def batched_weighted_choice_without_replacement_tester(
 
     It can be triggered by manual buiding the Op or during automatic vectorization.
     """
-    rng = shared(rng_ctor())
+    rng = shared(np.random.default_rng())
 
     rv_op = ChoiceWithoutReplacement(
         signature="(a0,a1),(a0),(1)->(s0,a1)",
@@ -1574,7 +1570,7 @@ def batched_weighted_choice_without_replacement_tester(
             assert np.all((draw >= i * 10 + 2) & (draw < (i + 1) * 10))
 
 
-def batched_permutation_tester(mode="FAST_RUN", rng_ctor=np.random.default_rng):
+def batched_permutation_tester(mode="FAST_RUN"):
     """Test permutation with batched ndims.
 
     This has no corresponding in numpy, but is supported for consistency within the
@@ -1583,7 +1579,7 @@ def batched_permutation_tester(mode="FAST_RUN", rng_ctor=np.random.default_rng):
     It can be triggered by manual buiding the Op or during automatic vectorization.
     """
 
-    rng = shared(rng_ctor())
+    rng = shared(np.random.default_rng())
 
     rv_op = PermutationRV(ndim_supp=2, ndims_params=[2], dtype="int64")
     x = np.arange(5 * 3 * 2).reshape((5, 3, 2))

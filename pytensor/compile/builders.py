@@ -27,7 +27,6 @@ from pytensor.graph.op import HasInnerGraph, Op
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import in2out, node_rewriter
 from pytensor.graph.utils import MissingInputError
-from pytensor.tensor.rewriting.shape import ShapeFeature
 
 
 def infer_shape(outs, inputs, input_shapes):
@@ -43,6 +42,10 @@ def infer_shape(outs, inputs, input_shapes):
     # inside.  We don't use the full ShapeFeature interface, but we
     # let it initialize itself with an empty fgraph, otherwise we will
     # need to do it manually
+
+    # TODO: ShapeFeature should live elsewhere
+    from pytensor.tensor.rewriting.shape import ShapeFeature
+
     for inp, inp_shp in zip(inputs, input_shapes):
         if inp_shp is not None and len(inp_shp) != inp.type.ndim:
             assert len(inp_shp) == inp.type.ndim
@@ -307,6 +310,7 @@ class OpFromGraph(Op, HasInnerGraph):
         connection_pattern: list[list[bool]] | None = None,
         strict: bool = False,
         name: str | None = None,
+        destroy_map: dict[int, tuple[int, ...]] | None = None,
         **kwargs,
     ):
         """
@@ -464,6 +468,7 @@ class OpFromGraph(Op, HasInnerGraph):
         if name is not None:
             assert isinstance(name, str), "name must be None or string object"
         self.name = name
+        self.destroy_map = destroy_map if destroy_map is not None else {}
 
     def __eq__(self, other):
         # TODO: recognize a copy
@@ -862,6 +867,7 @@ class OpFromGraph(Op, HasInnerGraph):
                 rop_overrides=self.rop_overrides,
                 connection_pattern=self._connection_pattern,
                 name=self.name,
+                destroy_map=self.destroy_map,
                 **self.kwargs,
             )
             new_inputs = (

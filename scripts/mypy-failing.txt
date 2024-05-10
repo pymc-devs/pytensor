@@ -8,7 +8,6 @@ pytensor/graph/rewriting/basic.py
 pytensor/ifelse.py
 pytensor/link/basic.py
 pytensor/link/numba/dispatch/elemwise.py
-pytensor/link/numba/dispatch/random.py
 pytensor/link/numba/dispatch/scan.py
 pytensor/printing.py
 pytensor/raise_op.py

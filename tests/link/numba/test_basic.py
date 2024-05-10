@@ -29,7 +29,6 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.type import Type
 from pytensor.ifelse import ifelse
 from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.numba.dispatch import numba_typify
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.raise_op import assert_op
 from pytensor.scalar.basic import ScalarOp, as_scalar
@@ -120,7 +119,7 @@ my_multi_out.ufunc = MyMultiOut.impl
 my_multi_out.ufunc.nin = 2
 my_multi_out.ufunc.nout = 2
 opts = RewriteDatabaseQuery(include=[None], exclude=["cxx_only", "BlasOpt"])
-numba_mode = Mode(NumbaLinker(), opts)
+numba_mode = Mode(NumbaLinker(), opts.including("numba"))
 py_mode = Mode("py", opts)
 
 rng = np.random.default_rng(42849)
@@ -229,6 +228,7 @@ def compare_numba_and_py(
     numba_mode=numba_mode,
     py_mode=py_mode,
     updates=None,
+    eval_obj_mode: bool = True,
 ) -> tuple[Callable, Any]:
     """Function to compare python graph output and Numba compiled output for testing equality
 
@@ -247,6 +247,8 @@ def compare_numba_and_py(
         provided uses `np.testing.assert_allclose`.
     updates
         Updates to be passed to `pytensor.function`.
+    eval_obj_mode : bool, default True
+        Whether to do an isolated call in object mode. Used for test coverage
 
     Returns
     -------
@@ -283,7 +285,8 @@ def compare_numba_and_py(
     numba_res = pytensor_numba_fn(*inputs)
 
     # Get some coverage
-    eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode)
+    if eval_obj_mode:
+        eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode)
 
     if len(fn_outputs) > 1:
         for j, p in zip(numba_res, py_res):
@@ -357,26 +360,6 @@ def test_get_numba_type(v, expected, force_scalar, not_implemented):
 def test_create_numba_signature(v, expected, force_scalar):
     res = numba_basic.create_numba_signature(v, force_scalar=force_scalar)
     assert res == expected
-
-
-@pytest.mark.parametrize(
-    "input, wrapper_fn, check_fn",
-    [
-        (
-            np.random.RandomState(1),
-            numba_typify,
-            lambda x, y: np.all(x.get_state()[1] == y.get_state()[1]),
-        )
-    ],
-)
-def test_box_unbox(input, wrapper_fn, check_fn):
-    input = wrapper_fn(input)
-
-    pass_through = numba.njit(lambda x: x)
-    res = pass_through(input)
-
-    assert isinstance(res, type(input))
-    assert check_fn(res, input)
 
 
 @pytest.mark.parametrize(
