@@ -12,6 +12,7 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.tensor import constant
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.random.basic import (
+    NormalRV,
     categorical,
     dirichlet,
     multinomial,
@@ -397,7 +398,7 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
     )
 
     if lifted:
-        assert new_out.owner.op == dist_op
+        assert isinstance(new_out.owner.op, type(dist_op))
         assert all(
             isinstance(i.owner.op, DimShuffle)
             for i in new_out.owner.op.dist_params(new_out.owner)
@@ -832,7 +833,7 @@ def test_Subtensor_lift_restrictions():
     subtensor_node = fg.outputs[0].owner.inputs[1].owner.inputs[0].owner
     assert subtensor_node == y.owner
     assert isinstance(subtensor_node.op, Subtensor)
-    assert subtensor_node.inputs[0].owner.op == normal
+    assert isinstance(subtensor_node.inputs[0].owner.op, NormalRV)
 
     z = pt.ones(x.shape) - x[1]
 
@@ -850,7 +851,7 @@ def test_Subtensor_lift_restrictions():
     EquilibriumGraphRewriter([local_subtensor_rv_lift], max_use_ratio=100).apply(fg)
 
     rv_node = fg.outputs[0].owner.inputs[1].owner.inputs[0].owner
-    assert rv_node.op == normal
+    assert isinstance(rv_node.op, NormalRV)
     assert isinstance(rv_node.inputs[-1].owner.op, Subtensor)
     assert isinstance(rv_node.inputs[-2].owner.op, Subtensor)
 
@@ -872,7 +873,7 @@ def test_Dimshuffle_lift_restrictions():
     dimshuffle_node = fg.outputs[0].owner.inputs[1].owner
     assert dimshuffle_node == y.owner
     assert isinstance(dimshuffle_node.op, DimShuffle)
-    assert dimshuffle_node.inputs[0].owner.op == normal
+    assert isinstance(dimshuffle_node.inputs[0].owner.op, NormalRV)
 
     z = pt.ones(x.shape) - y
 
@@ -890,7 +891,7 @@ def test_Dimshuffle_lift_restrictions():
     EquilibriumGraphRewriter([local_dimshuffle_rv_lift], max_use_ratio=100).apply(fg)
 
     rv_node = fg.outputs[0].owner.inputs[1].owner
-    assert rv_node.op == normal
+    assert isinstance(rv_node.op, NormalRV)
     assert isinstance(rv_node.inputs[-1].owner.op, DimShuffle)
     assert isinstance(rv_node.inputs[-2].owner.op, DimShuffle)
 

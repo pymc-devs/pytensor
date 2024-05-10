@@ -123,7 +123,6 @@ def make_numba_random_fn(node, np_random_func):
             "size_dims",
             "rng",
             "size",
-            "dtype",
         ],
         suffix_sep="_",
     )
@@ -146,7 +145,7 @@ def {bcast_fn_name}({bcast_fn_input_names}):
     )
 
     random_fn_input_names = ", ".join(
-        ["rng", "size", "dtype"] + [unique_names(i) for i in dist_params]
+        ["rng", "size"] + [unique_names(i) for i in dist_params]
     )
 
     # Now, create a Numba JITable function that implements the `size` parameter
@@ -243,7 +242,7 @@ def create_numba_random_fn(
     np_global_env["numba_vectorize"] = numba_basic.numba_vectorize
 
     unique_names = unique_name_generator(
-        [np_random_fn_name, *np_global_env.keys(), "rng", "size", "dtype"],
+        [np_random_fn_name, *np_global_env.keys(), "rng", "size"],
         suffix_sep="_",
     )
 
@@ -310,7 +309,7 @@ def numba_funcify_CategoricalRV(op: ptr.CategoricalRV, node, **kwargs):
     p_ndim = node.inputs[-1].ndim
 
     @numba_basic.numba_njit
-    def categorical_rv(rng, size, dtype, p):
+    def categorical_rv(rng, size, p):
         if not size_len:
             size_tpl = p.shape[:-1]
         else:
@@ -342,7 +341,7 @@ def numba_funcify_DirichletRV(op, node, **kwargs):
     if alphas_ndim > 1:
 
         @numba_basic.numba_njit
-        def dirichlet_rv(rng, size, dtype, alphas):
+        def dirichlet_rv(rng, size, alphas):
             if size_len > 0:
                 size_tpl = numba_ndarray.to_fixed_tuple(size, size_len)
                 if (
@@ -365,7 +364,7 @@ def numba_funcify_DirichletRV(op, node, **kwargs):
     else:
 
         @numba_basic.numba_njit
-        def dirichlet_rv(rng, size, dtype, alphas):
+        def dirichlet_rv(rng, size, alphas):
             size = numba_ndarray.to_fixed_tuple(size, size_len)
             return (rng, np.random.dirichlet(alphas, size))
 
@@ -388,14 +387,14 @@ def numba_funcify_choice_without_replacement(op, node, **kwargs):
     if op.has_p_param:
 
         @numba_basic.numba_njit
-        def choice_without_replacement_rv(rng, size, dtype, a, p, core_shape):
+        def choice_without_replacement_rv(rng, size, a, p, core_shape):
             core_shape = numba_ndarray.to_fixed_tuple(core_shape, core_shape_len)
             samples = np.random.choice(a, size=core_shape, replace=False, p=p)
             return (rng, samples)
     else:
 
         @numba_basic.numba_njit
-        def choice_without_replacement_rv(rng, size, dtype, a, core_shape):
+        def choice_without_replacement_rv(rng, size, a, core_shape):
             core_shape = numba_ndarray.to_fixed_tuple(core_shape, core_shape_len)
             samples = np.random.choice(a, size=core_shape, replace=False)
             return (rng, samples)
@@ -411,7 +410,7 @@ def numba_funcify_permutation(op: ptr.PermutationRV, node, **kwargs):
     x_batch_ndim = node.inputs[-1].type.ndim - op.ndims_params[0]
 
     @numba_basic.numba_njit
-    def permutation_rv(rng, size, dtype, x):
+    def permutation_rv(rng, size, x):
         if batch_ndim:
             x_core_shape = x.shape[x_batch_ndim:]
             if size_is_none:

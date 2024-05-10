@@ -3,14 +3,14 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import config, function
-from pytensor.gradient import NullTypeGradError, grad
-from pytensor.graph.replace import vectorize_node
+from pytensor.graph.replace import vectorize_graph
 from pytensor.raise_op import Assert
 from pytensor.tensor.math import eq
 from pytensor.tensor.random import normal
+from pytensor.tensor.random.basic import NormalRV
 from pytensor.tensor.random.op import RandomState, RandomVariable, default_rng
 from pytensor.tensor.shape import specify_shape
-from pytensor.tensor.type import all_dtypes, iscalar, tensor
+from pytensor.tensor.type import iscalar, tensor
 
 
 @pytest.fixture(scope="function", autouse=False)
@@ -51,15 +51,6 @@ def test_RandomVariable_basics(strict_test_value_flags):
             inplace=True,
         )(0, 1, size={1, 2})
 
-    # No dtype
-    with pytest.raises(TypeError, match="^dtype*"):
-        RandomVariable(
-            "normal",
-            0,
-            [0, 0],
-            inplace=True,
-        )(0, 1)
-
     # Confirm that `inplace` works
     rv = RandomVariable(
         "normal",
@@ -80,16 +71,19 @@ def test_RandomVariable_basics(strict_test_value_flags):
     rv_shape = rv._infer_shape(pt.constant([]), (), [])
     assert rv_shape.equals(pt.constant([], dtype="int64"))
 
-    # Integer-specified `dtype`
-    dtype_1 = all_dtypes[1]
-    rv_node = rv.make_node(None, None, 1)
-    rv_out = rv_node.outputs[1]
-    rv_out.tag.test_value = 1
+    # `dtype` is respected
+    rv = RandomVariable("normal", signature="(),()->()", dtype="int32")
+    with config.change_flags(compute_test_value="off"):
+        rv_out = rv()
+        assert rv_out.dtype == "int32"
+        rv_out = rv(dtype="int64")
+        assert rv_out.dtype == "int64"
 
-    assert rv_out.dtype == dtype_1
-
-    with pytest.raises(NullTypeGradError):
-        grad(rv_out, [rv_node.inputs[0]])
+        with pytest.raises(
+            ValueError,
+            match="Cannot change the dtype of a normal RV from int32 to float32",
+        ):
+            assert rv(dtype="float32").dtype == "float32"
 
 
 def test_RandomVariable_bcast(strict_test_value_flags):
@@ -238,70 +232,70 @@ def test_multivariate_rv_infer_static_shape():
     assert mv_op(param1, param2, size=(10, 2)).type.shape == (10, 2, 3)
 
 
-def test_vectorize_node():
+def test_vectorize():
     vec = tensor(shape=(None,))
     mat = tensor(shape=(None, None))
 
     # Test without size
-    node = normal(vec).owner
-    new_inputs = node.inputs.copy()
-    new_inputs[3] = mat  # mu
-    vect_node = vectorize_node(node, *new_inputs)
-    assert vect_node.op is normal
-    assert vect_node.inputs[3] is mat
+    out = normal(vec)
+    vect_node = vectorize_graph(out, {vec: mat}).owner
+    assert isinstance(vect_node.op, NormalRV)
+    assert vect_node.op.dist_params(vect_node)[0] is mat
 
     # Test with size, new size provided
-    node = normal(vec, size=(3,)).owner
-    new_inputs = node.inputs.copy()
-    new_inputs[1] = (2, 3)  # size
-    new_inputs[3] = mat  # mu
-    vect_node = vectorize_node(node, *new_inputs)
-    assert vect_node.op is normal
-    assert tuple(vect_node.inputs[1].eval()) == (2, 3)
-    assert vect_node.inputs[3] is mat
+    size = pt.as_tensor(np.array((3,), dtype="int64"))
+    out = normal(vec, size=size)
+    vect_node = vectorize_graph(out, {vec: mat, size: (2, 3)}).owner
+    assert isinstance(vect_node.op, NormalRV)
+    assert tuple(vect_node.op.size_param(vect_node).eval()) == (2, 3)
+    assert vect_node.op.dist_params(vect_node)[0] is mat
 
     # Test with size, new size not provided
-    node = normal(vec, size=(3,)).owner
-    new_inputs = node.inputs.copy()
-    new_inputs[3] = mat  # mu
-    vect_node = vectorize_node(node, *new_inputs)
-    assert vect_node.op is normal
-    assert vect_node.inputs[3] is mat
+    out = normal(vec, size=(3,))
+    vect_node = vectorize_graph(out, {vec: mat}).owner
+    assert isinstance(vect_node.op, NormalRV)
+    assert vect_node.op.dist_params(vect_node)[0] is mat
     assert tuple(
-        vect_node.inputs[1].eval({mat: np.zeros((2, 3), dtype=config.floatX)})
+        vect_node.op.size_param(vect_node).eval(
+            {mat: np.zeros((2, 3), dtype=config.floatX)}
+        )
     ) == (2, 3)
 
     # Test parameter broadcasting
-    node = normal(vec).owner
-    new_inputs = node.inputs.copy()
-    new_inputs[3] = tensor("mu", shape=(10, 5))  # mu
-    new_inputs[4] = tensor("sigma", shape=(10,))  # sigma
-    vect_node = vectorize_node(node, *new_inputs)
-    assert vect_node.op is normal
+    mu = vec
+    sigma = pt.as_tensor(np.array(1.0))
+    out = normal(mu, sigma)
+    new_mu = tensor("mu", shape=(10, 5))
+    new_sigma = tensor("sigma", shape=(10,))
+    vect_node = vectorize_graph(out, {mu: new_mu, sigma: new_sigma}).owner
+    assert isinstance(vect_node.op, NormalRV)
     assert vect_node.default_output().type.shape == (10, 5)
 
     # Test parameter broadcasting with non-expanding size
-    node = normal(vec, size=(5,)).owner
-    new_inputs = node.inputs.copy()
-    new_inputs[3] = tensor("mu", shape=(10, 5))  # mu
-    new_inputs[4] = tensor("sigma", shape=(10,))  # sigma
-    vect_node = vectorize_node(node, *new_inputs)
-    assert vect_node.op is normal
+    mu = vec
+    sigma = pt.as_tensor(np.array(1.0))
+    out = normal(mu, sigma, size=(5,))
+    new_mu = tensor("mu", shape=(10, 5))
+    new_sigma = tensor("sigma", shape=(10,))
+    vect_node = vectorize_graph(out, {mu: new_mu, sigma: new_sigma}).owner
+    assert isinstance(vect_node.op, NormalRV)
     assert vect_node.default_output().type.shape == (10, 5)
 
-    node = normal(vec, size=(5,)).owner
-    new_inputs = node.inputs.copy()
-    new_inputs[3] = tensor("mu", shape=(1, 5))  # mu
-    new_inputs[4] = tensor("sigma", shape=(10,))  # sigma
-    vect_node = vectorize_node(node, *new_inputs)
-    assert vect_node.op is normal
+    mu = vec
+    sigma = pt.as_tensor(np.array(1.0))
+    out = normal(mu, sigma, size=(5,))
+    new_mu = tensor("mu", shape=(1, 5))  # mu
+    new_sigma = tensor("sigma", shape=(10,))  # sigma
+    vect_node = vectorize_graph(out, {mu: new_mu, sigma: new_sigma}).owner
+    assert isinstance(vect_node.op, NormalRV)
     assert vect_node.default_output().type.shape == (10, 5)
 
     # Test parameter broadcasting with expanding size
-    node = normal(vec, size=(2, 5)).owner
-    new_inputs = node.inputs.copy()
-    new_inputs[3] = tensor("mu", shape=(10, 5))  # mu
-    new_inputs[4] = tensor("sigma", shape=(10,))  # sigma
-    vect_node = vectorize_node(node, *new_inputs)
-    assert vect_node.op is normal
+    mu = vec
+    sigma = pt.as_tensor(np.array(1.0))
+    out = normal(mu, sigma, size=(2, 5))
+    new_mu = tensor("mu", shape=(1, 5))
+    new_sigma = tensor("sigma", shape=(10,))
+    vect_node = vectorize_graph(out, {mu: new_mu, sigma: new_sigma}).owner
+    assert isinstance(vect_node.op, NormalRV)
     assert vect_node.default_output().type.shape == (10, 2, 5)
