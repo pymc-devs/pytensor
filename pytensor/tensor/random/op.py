@@ -27,7 +27,7 @@ from pytensor.tensor.random.utils import (
     normalize_size_param,
 )
 from pytensor.tensor.shape import shape_tuple
-from pytensor.tensor.type import TensorType, all_dtypes
+from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import NoneConst
 from pytensor.tensor.utils import _parse_gufunc_signature, safe_signature
 from pytensor.tensor.variable import TensorVariable
@@ -65,7 +65,7 @@ class RandomVariable(Op):
         signature: str
             Numpy-like vectorized signature of the random variable.
         dtype: str (optional)
-            The dtype of the sampled output.  If the value ``"floatX"`` is
+            The default dtype of the sampled output.  If the value ``"floatX"`` is
             given, then ``dtype`` is set to ``pytensor.config.floatX``.  If
             ``None`` (the default), the `dtype` keyword must be set when
             `RandomVariable.make_node` is called.
@@ -287,8 +287,8 @@ class RandomVariable(Op):
         return shape
 
     def infer_shape(self, fgraph, node, input_shapes):
-        _, size, _, *dist_params = node.inputs
-        _, size_shape, _, *param_shapes = input_shapes
+        _, size, *dist_params = node.inputs
+        _, size_shape, *param_shapes = input_shapes
 
         try:
             size_len = get_vector_length(size)
@@ -302,14 +302,34 @@ class RandomVariable(Op):
         return [None, list(shape)]
 
     def __call__(self, *args, size=None, name=None, rng=None, dtype=None, **kwargs):
-        res = super().__call__(rng, size, dtype, *args, **kwargs)
+        if dtype is None:
+            dtype = self.dtype
+        if dtype == "floatX":
+            dtype = config.floatX
+
+        # We need to recreate the Op with the right dtype
+        if dtype != self.dtype:
+            # Check we are not switching from float to int
+            if self.dtype is not None:
+                if dtype.startswith("float") != self.dtype.startswith("float"):
+                    raise ValueError(
+                        f"Cannot change the dtype of a {self.name} RV from {self.dtype} to {dtype}"
+                    )
+            props = self._props_dict()
+            props["dtype"] = dtype
+            new_op = type(self)(**props)
+            return new_op.__call__(
+                *args, size=size, name=name, rng=rng, dtype=dtype, **kwargs
+            )
+
+        res = super().__call__(rng, size, *args, **kwargs)
 
         if name is not None:
             res.name = name
 
         return res
 
-    def make_node(self, rng, size, dtype, *dist_params):
+    def make_node(self, rng, size, *dist_params):
         """Create a random variable node.
 
         Parameters
@@ -349,23 +369,10 @@ class RandomVariable(Op):
 
         shape = self._infer_shape(size, dist_params)
         _, static_shape = infer_static_shape(shape)
-        dtype = self.dtype or dtype
 
-        if dtype == "floatX":
-            dtype = config.floatX
-        elif dtype is None or (isinstance(dtype, str) and dtype not in all_dtypes):
-            raise TypeError("dtype is unspecified")
-
-        if isinstance(dtype, str):
-            dtype_idx = constant(all_dtypes.index(dtype), dtype="int64")
-        else:
-            dtype_idx = constant(dtype, dtype="int64")
-
-        dtype = all_dtypes[dtype_idx.data]
-
-        inputs = (rng, size, dtype_idx, *dist_params)
-        out_var = TensorType(dtype=dtype, shape=static_shape)()
-        outputs = (rng.type(), out_var)
+        inputs = (rng, size, *dist_params)
+        out_type = TensorType(dtype=self.dtype, shape=static_shape)
+        outputs = (rng.type(), out_type())
 
         return Apply(self, inputs, outputs)
 
@@ -382,14 +389,12 @@ class RandomVariable(Op):
 
     def dist_params(self, node) -> Sequence[Variable]:
         """Return the node inpust corresponding to dist params"""
-        return node.inputs[3:]
+        return node.inputs[2:]
 
     def perform(self, node, inputs, outputs):
         rng_var_out, smpl_out = outputs
 
-        rng, size, dtype, *args = inputs
-
-        out_var = node.outputs[1]
+        rng, size, *args = inputs
 
         # If `size == []`, that means no size is enforced, and NumPy is trusted
         # to draw the appropriate number of samples, NumPy uses `size=None` to
@@ -408,11 +413,8 @@ class RandomVariable(Op):
 
         smpl_val = self.rng_fn(rng, *([*args, size]))
 
-        if (
-            not isinstance(smpl_val, np.ndarray)
-            or str(smpl_val.dtype) != out_var.type.dtype
-        ):
-            smpl_val = _asarray(smpl_val, dtype=out_var.type.dtype)
+        if not isinstance(smpl_val, np.ndarray) or str(smpl_val.dtype) != self.dtype:
+            smpl_val = _asarray(smpl_val, dtype=self.dtype)
 
         smpl_out[0] = smpl_val
 
@@ -463,7 +465,7 @@ default_rng = DefaultGeneratorMakerOp()
 
 @_vectorize_node.register(RandomVariable)
 def vectorize_random_variable(
-    op: RandomVariable, node: Apply, rng, size, dtype, *dist_params
+    op: RandomVariable, node: Apply, rng, size, *dist_params
 ) -> Apply:
     # If size was provided originally and a new size hasn't been provided,
     # We extend it to accommodate the new input batch dimensions.
@@ -491,4 +493,4 @@ def vectorize_random_variable(
         new_size_dims = broadcasted_batch_shape[:new_ndim]
         size = concatenate([new_size_dims, size])
 
-    return op.make_node(rng, size, dtype, *dist_params)
+    return op.make_node(rng, size, *dist_params)

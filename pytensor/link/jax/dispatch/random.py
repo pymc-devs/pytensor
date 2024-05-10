@@ -114,7 +114,7 @@ def jax_funcify_RandomVariable(op: ptr.RandomVariable, node, **kwargs):
     if None in static_size:
         assert_size_argument_jax_compatible(node)
 
-        def sample_fn(rng, size, dtype, *parameters):
+        def sample_fn(rng, size, *parameters):
             # PyTensor uses empty size to represent size = None
             if jax.numpy.asarray(size).shape == (0,):
                 size = None
@@ -122,7 +122,7 @@ def jax_funcify_RandomVariable(op: ptr.RandomVariable, node, **kwargs):
 
     else:
 
-        def sample_fn(rng, size, dtype, *parameters):
+        def sample_fn(rng, size, *parameters):
             return jax_sample_fn(op, node=node)(
                 rng, static_size, out_dtype, *parameters
             )
