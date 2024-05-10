@@ -77,15 +77,13 @@ from tests.link.numba.test_basic import compare_numba_and_py
         ),
         # nit-sot, shared input/output
         (
-            lambda: RandomStream(seed=1930, rng_ctor=np.random.RandomState).normal(
-                0, 1, name="a"
-            ),
+            lambda: RandomStream(seed=1930).normal(0, 1, name="a"),
             [],
             [{}],
             [],
             3,
             [],
-            [np.array([-1.63408257, 0.18046406, 2.43265803])],
+            [np.array([0.50100236, 2.16822932, 1.36326596])],
             lambda op: op.info.n_shared_outs > 0,
         ),
         # mit-sot (that's also a type of sit-sot)

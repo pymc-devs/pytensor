@@ -2082,10 +2082,7 @@ def choice(a, size=None, replace=True, p=None, rng=None):
         # This is equivalent to the numpy implementation:
         # https://github.com/numpy/numpy/blob/2a9b9134270371b43223fc848b753fceab96b4a5/numpy/random/_generator.pyx#L905-L914
         if p is None:
-            if rng is not None and isinstance(rng.type, RandomStateType):
-                idxs = randint(0, a_size, size=size, rng=rng)
-            else:
-                idxs = integers(0, a_size, size=size, rng=rng)
+            idxs = integers(0, a_size, size=size, rng=rng)
         else:
             idxs = categorical(p, size=size, rng=rng)
 

@@ -19,6 +19,7 @@ from pytensor.tensor.basic import (
     get_vector_length,
     infer_static_shape,
 )
+from pytensor.tensor.blockwise import OpWithCoreShape
 from pytensor.tensor.random.type import RandomGeneratorType, RandomStateType, RandomType
 from pytensor.tensor.random.utils import (
     compute_batch_shape,
@@ -476,3 +477,11 @@ def vectorize_random_variable(
             size = concatenate([new_size_dims, size])
 
     return op.make_node(rng, size, *dist_params)
+
+
+class RandomVariableWithCoreShape(OpWithCoreShape):
+    """Generalizes a random variable `Op` to include a core shape parameter."""
+
+    def __str__(self):
+        [rv_node] = self.fgraph.apply_nodes
+        return f"[{rv_node.op!s}]"
