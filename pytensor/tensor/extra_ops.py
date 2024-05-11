@@ -1,3 +1,4 @@
+import warnings
 from collections.abc import Collection, Iterable
 
 import numpy as np
@@ -20,14 +21,25 @@ from pytensor.misc.safe_asarray import _asarray
 from pytensor.raise_op import Assert
 from pytensor.scalar import int32 as int_t
 from pytensor.scalar import upcast
-from pytensor.tensor import as_tensor_variable
+from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor import basic as ptb
 from pytensor.tensor.basic import alloc, second
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import all as pt_all
+from pytensor.tensor.math import (
+    bitwise_and,
+    ge,
+    gt,
+    log,
+    lt,
+    maximum,
+    minimum,
+    prod,
+    sign,
+    switch,
+)
 from pytensor.tensor.math import eq as pt_eq
-from pytensor.tensor.math import ge, lt, maximum, minimum, prod, switch
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import specify_broadcastable
@@ -1585,27 +1597,294 @@ def broadcast_shape_iter(
     return tuple(result_dims)
 
 
-def geomspace(start, end, steps, base=10.0):
-    from pytensor.tensor.math import log
+def _check_deprecated_inputs(stop, end, num, steps):
+    if end is not None:
+        warnings.warn(
+            "The 'end' parameter is deprecated and will be removed in a future version. Use 'stop' instead.",
+            DeprecationWarning,
+        )
+        stop = end
+    if steps is not None:
+        warnings.warn(
+            "The 'steps' parameter is deprecated and will be removed in a future version. Use 'num' instead.",
+            DeprecationWarning,
+        )
+        num = steps
 
-    start = ptb.as_tensor_variable(start)
-    end = ptb.as_tensor_variable(end)
-    return base ** linspace(log(start) / log(base), log(end) / log(base), steps)
+    return stop, num
 
 
-def logspace(start, end, steps, base=10.0):
-    start = ptb.as_tensor_variable(start)
-    end = ptb.as_tensor_variable(end)
-    return base ** linspace(start, end, steps)
+def _linspace_core(
+    start: TensorVariable,
+    stop: TensorVariable,
+    num: int,
+    dtype: str,
+    endpoint=True,
+    retstep=False,
+    axis=0,
+) -> TensorVariable | tuple[TensorVariable, TensorVariable]:
+    div = (num - 1) if endpoint else num
+    delta = (stop - start).astype(dtype)
+    samples = ptb.arange(0, num, dtype=dtype).reshape((-1,) + (1,) * delta.ndim)
+
+    step = switch(gt(div, 0), delta / div, np.nan)
+    samples = switch(gt(div, 0), samples * delta / div + start, samples * delta + start)
+    samples = switch(
+        bitwise_and(gt(num, 1), np.asarray(endpoint)),
+        set_subtensor(samples[-1, ...], stop),
+        samples,
+    )
+
+    if axis != 0:
+        samples = ptb.moveaxis(samples, 0, axis)
+
+    if retstep:
+        return samples, step
+
+    return samples
 
 
-def linspace(start, end, steps):
-    start = ptb.as_tensor_variable(start)
-    end = ptb.as_tensor_variable(end)
-    arr = ptb.arange(steps)
-    arr = ptb.shape_padright(arr, max(start.ndim, end.ndim))
-    multiplier = (end - start) / (steps - 1)
-    return start + arr * multiplier
+def _broadcast_inputs_and_dtypes(*args, dtype=None):
+    args = map(ptb.as_tensor_variable, args)
+    args = broadcast_arrays(*args)
+
+    if dtype is None:
+        dtype = pytensor.config.floatX
+
+    return args, dtype
+
+
+def _broadcast_base_with_inputs(start, stop, base, dtype, axis):
+    """
+    Broadcast the base tensor with the start and stop tensors if base is not a scalar. This is important because it
+    may change how the axis argument is interpreted in the final output.
+
+    Parameters
+    ----------
+    start
+    stop
+    base
+    dtype
+    axis
+
+    Returns
+    -------
+
+    """
+    base = ptb.as_tensor_variable(base, dtype=dtype)
+    if base.ndim > 0:
+        ndmax = len(broadcast_shape(start, stop, base))
+        start, stop, base = (
+            ptb.shape_padleft(a, ndmax - a.ndim) for a in (start, stop, base)
+        )
+        base = ptb.expand_dims(base, axis=(axis,))
+
+    return start, stop, base
+
+
+def linspace(
+    start: TensorLike,
+    stop: TensorLike,
+    num: TensorLike = 50,
+    endpoint: bool = True,
+    retstep: bool = False,
+    dtype: str | None = None,
+    axis: int = 0,
+    end: TensorLike | None = None,
+    steps: TensorLike | None = None,
+) -> TensorVariable | tuple[TensorVariable, TensorVariable]:
+    """
+    Return evenly spaced numbers over a specified interval.
+
+    Returns `num` evenly spaced samples, calculated over the interval [`start`, `stop`].
+
+    The endpoint of the interval can optionally be excluded.
+
+    Parameters
+    ----------
+    start: int, float, or TensorVariable
+        The starting value of the sequence.
+
+    stop: int, float or TensorVariable
+        The end value of the sequence, unless `endpoint` is set to False.
+        In that case, the sequence consists of all but the last of `num + 1` evenly spaced samples, such that `stop` is excluded.
+
+    num: int
+        Number of samples to generate. Must be non-negative.
+
+    endpoint: bool
+        Whether to include the endpoint in the range.
+
+    retstep: bool
+        If true, returns both the samples and an array of steps between samples.
+
+    dtype: str, optional
+        dtype of the output tensor(s). If None, the dtype is inferred from that of the values provided to the `start`
+        and `end` arguments.
+
+    axis: int
+        Axis along which to generate samples. Ignored if both `start` and `end` have dimension 0. By default, axis=0
+        will insert the samples on a new left-most dimension. To insert samples on a right-most dimension, use axis=-1.
+
+    end:  int, float or TensorVariable
+        .. warning::
+            The "end" parameter is deprecated and will be removed in a future version. Use "stop" instead.
+        The end value of the sequence, unless `endpoint` is set to False.
+        In that case, the sequence consists of all but the last of `num + 1` evenly spaced samples, such that `end` is
+        excluded.
+
+    steps: float, int, or TensorVariable
+        .. warning::
+            The "steps" parameter is deprecated and will be removed in a future version. Use "num" instead.
+
+        Number of samples to generate. Must be non-negative
+
+    Returns
+    -------
+    samples: TensorVariable
+        Tensor containing `num` evenly-spaced values between [start, stop]. The range is inclusive if `endpoint` is True.
+
+    step: TensorVariable
+        Tensor containing the spacing between samples. Only returned if `retstep` is True.
+    """
+    end, num = _check_deprecated_inputs(stop, end, num, steps)
+    (start, stop), type = _broadcast_inputs_and_dtypes(start, stop, dtype=dtype)
+
+    return _linspace_core(
+        start=start,
+        stop=stop,
+        num=num,
+        dtype=dtype,
+        endpoint=endpoint,
+        retstep=retstep,
+        axis=axis,
+    )
+
+
+def geomspace(
+    start: TensorLike,
+    stop: TensorLike,
+    num: int = 50,
+    base: float = 10.0,
+    endpoint: bool = True,
+    dtype: str | None = None,
+    axis: int = 0,
+    end: TensorLike | None = None,
+    steps: TensorLike | None = None,
+) -> TensorVariable:
+    """
+    Return numbers spaced evenly on a log scale (a geometric progression).
+
+    Parameters
+    ----------
+    Returns `num` evenly spaced samples, calculated over the interval [`start`, `stop`].
+
+    The endpoint of the interval can optionally be excluded.
+
+    Parameters
+    ----------
+    start: int, float, or TensorVariable
+        The starting value of the sequence.
+
+    stop: int, float or TensorVariable
+        The end value of the sequence, unless `endpoint` is set to False.
+        In that case, the sequence consists of all but the last of `num + 1` evenly spaced samples, such that `stop` is excluded.
+
+    num: int
+        Number of samples to generate. Must be non-negative.
+
+    base: float
+        The base of the log space. The step size between the elements in ln(samples) / ln(base)
+        (or log_base(samples)) is uniform.
+
+    endpoint: bool
+        Whether to include the endpoint in the range.
+
+    dtype: str, optional
+        dtype of the output tensor(s). If None, the dtype is inferred from that of the values provided to the `start`
+        and `end` arguments.
+
+    axis: int
+        Axis along which to generate samples. Ignored if both `start` and `end` have dimension 0. By default, axis=0
+        will insert the samples on a new left-most dimension. To insert samples on a right-most dimension, use axis=-1.
+
+    end:  int, float or TensorVariable
+        .. warning::
+            The "end" parameter is deprecated and will be removed in a future version. Use "stop" instead.
+        The end value of the sequence, unless `endpoint` is set to False.
+        In that case, the sequence consists of all but the last of `num + 1` evenly spaced samples, such that `end` is
+        excluded.
+
+    steps: float, int, or TensorVariable
+        .. warning::
+            The "steps" parameter is deprecated and will be removed in a future version. Use "num" instead.
+
+        Number of samples to generate. Must be non-negative
+
+    Returns
+    -------
+    samples: TensorVariable
+        Tensor containing `num` evenly-spaced values between [start, stop]. The range is inclusive if `endpoint` is True.
+    """
+    stop, num = _check_deprecated_inputs(stop, end, num, steps)
+    (start, stop), dtype = _broadcast_inputs_and_dtypes(start, stop, dtype=dtype)
+    start, stop, base = _broadcast_base_with_inputs(start, stop, base, dtype, axis)
+
+    out_sign = sign(start)
+    log_start, log_stop = (
+        log(start * out_sign) / log(base),
+        log(stop * out_sign) / log(base),
+    )
+    result = _linspace_core(
+        start=log_start,
+        stop=log_stop,
+        num=num,
+        endpoint=endpoint,
+        dtype=dtype,
+        axis=0,
+        retstep=False,
+    )
+    result = base**result
+
+    if num > 0:
+        set_subtensor(result[0, ...], start, inplace=True)
+        if num > 1 and endpoint:
+            set_subtensor(result[-1, ...], stop, inplace=True)
+
+    result = result * out_sign
+
+    if axis != 0:
+        result = ptb.moveaxis(result, 0, axis)
+
+    return result
+
+
+def logspace(
+    start: TensorLike,
+    stop: TensorLike,
+    num: int = 50,
+    base: float = 10.0,
+    endpoint: bool = True,
+    dtype: str | None = None,
+    axis: int = 0,
+    end: TensorLike | None = None,
+    steps: TensorLike | None = None,
+) -> TensorVariable:
+    stop, num = _check_deprecated_inputs(stop, end, num, steps)
+    (start, stop), type = _broadcast_inputs_and_dtypes(start, stop, dtype=dtype)
+    start, stop, base = _broadcast_base_with_inputs(start, stop, base, dtype, axis)
+
+    ls = _linspace_core(
+        start=start,
+        stop=stop,
+        num=num,
+        endpoint=endpoint,
+        dtype=dtype,
+        axis=axis,
+        retstep=False,
+    )
+
+    return base**ls
 
 
 def broadcast_to(
