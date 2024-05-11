@@ -35,9 +35,6 @@ from pytensor.tensor.extra_ops import (
     diff,
     fill_diagonal,
     fill_diagonal_offset,
-    geomspace,
-    linspace,
-    logspace,
     ravel_multi_index,
     repeat,
     searchsorted,
@@ -1281,25 +1278,28 @@ def test_broadcast_arrays():
 
 
 @pytest.mark.parametrize(
-    "start, stop, num_samples",
+    "op",
+    ["linspace", "logspace", "geomspace"],
+    ids=["linspace", "logspace", "geomspace"],
+)
+@pytest.mark.parametrize(
+    "start, stop, num_samples, endpoint, axis",
     [
-        (1, 10, 50),
-        (np.array([5, 6]), np.array([[10, 10], [10, 10]]), 25),
-        (1, np.array([5, 6]), 30),
+        (1, 10, 50, True, 0),
+        (1, 10, 1, True, 0),
+        (np.array([5, 6]), np.array([[10, 10], [10, 10]]), 25, True, 0),
+        (np.array([5, 6]), np.array([[10, 10], [10, 10]]), 25, True, 1),
+        (np.array([5, 6]), np.array([[10, 10], [10, 10]]), 25, False, -1),
+        (1, np.array([5, 6]), 30, True, 0),
+        (1, np.array([5, 6]), 30, False, -1),
     ],
 )
-def test_space_ops(start, stop, num_samples):
-    z = linspace(start, stop, num_samples)
-    pytensor_res = function(inputs=[], outputs=z)()
-    numpy_res = np.linspace(start, stop, num=num_samples)
-    assert np.allclose(pytensor_res, numpy_res)
+def test_space_ops(op, start, stop, num_samples, endpoint, axis):
+    pt_func = getattr(pt, op)
+    np_func = getattr(np, op)
+    z = pt_func(start, stop, num_samples, endpoint=endpoint, axis=axis)
 
-    z = logspace(start, stop, num_samples)
-    pytensor_res = function(inputs=[], outputs=z)()
-    numpy_res = np.logspace(start, stop, num=num_samples)
-    assert np.allclose(pytensor_res, numpy_res)
+    numpy_res = np_func(start, stop, num=num_samples, endpoint=endpoint, axis=axis)
+    pytensor_res = function(inputs=[], outputs=z, mode="FAST_COMPILE")()
 
-    z = geomspace(start, stop, num_samples)
-    pytensor_res = function(inputs=[], outputs=z)()
-    numpy_res = np.geomspace(start, stop, num=num_samples)
-    assert np.allclose(pytensor_res, numpy_res)
+    np.testing.assert_allclose(pytensor_res, numpy_res, atol=1e-6, rtol=1e-6)
