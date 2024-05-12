@@ -4,7 +4,10 @@ from typing import cast
 
 from pytensor import Variable
 from pytensor.graph import Apply, FunctionGraph
-from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
+from pytensor.graph.rewriting.basic import (
+    copy_stack_trace,
+    node_rewriter,
+)
 from pytensor.tensor.basic import TensorVariable, diagonal
 from pytensor.tensor.blas import Dot22
 from pytensor.tensor.blockwise import Blockwise
