@@ -56,3 +56,4 @@ pytensor-venv/
 testing-report.html
 coverage.xml
 .coverage.*
+pics
