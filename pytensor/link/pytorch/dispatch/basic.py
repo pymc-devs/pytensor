@@ -74,10 +74,6 @@ def pytorch_funcify_IfElse(op, **kwargs):
 @pytorch_funcify.register(Assert)
 @pytorch_funcify.register(CheckAndRaise)
 def pytorch_funcify_CheckAndRaise(op, **kwargs):
-    warnings.warn(
-        f"""Skipping `CheckAndRaise` Op (assertion: {op.msg}) as JAX tracing would remove it.""",
-        stacklevel=2,
-    )
 
     def assert_fn(x, *inputs):
         return x

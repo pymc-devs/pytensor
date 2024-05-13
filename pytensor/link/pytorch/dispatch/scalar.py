@@ -184,10 +184,6 @@ def pytorch_funcify_Identity(op, **kwargs):
 def pytorch_funcify_Clip(op, **kwargs):
     """Register the translation for the `Clip` `Op`.
 
-    PyTensor's `Clip` operator operates differently from NumPy's when the
-    specified `min` is larger than the `max` so we cannot reuse `jax.numpy.clip`
-    to maintain consistency with PyTensor.
-
     """
 
     def clip(x, min, max):
@@ -196,21 +192,21 @@ def pytorch_funcify_Clip(op, **kwargs):
     return clip
 
 
-@pytorch_funcify.register(Composite)
-def pytorch_funcify_Composite(op, node, vectorize=True, **kwargs):
-    jax_impl = pytorch_funcify(op.fgraph)
+# @pytorch_funcify.register(Composite)
+# def pytorch_funcify_Composite(op, node, vectorize=True, **kwargs):
+#     jax_impl = pytorch_funcify(op.fgraph)
 
-    if len(node.outputs) == 1:
+#     if len(node.outputs) == 1:
 
-        def composite(*args):
-            return jax_impl(*args)[0]
+#         def composite(*args):
+#             return jax_impl(*args)[0]
 
-    else:
+#     else:
 
-        def composite(*args):
-            return jax_impl(*args)
+#         def composite(*args):
+#             return jax_impl(*args)
 
-    return jnp.vectorize(composite)
+#     return jnp.vectorize(composite)
 
 
 @pytorch_funcify.register(Second)
