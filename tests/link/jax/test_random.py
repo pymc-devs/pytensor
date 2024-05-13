@@ -595,7 +595,15 @@ def test_random_categorical():
     g = pt.random.categorical(0.25 * np.ones(4), size=(10000, 4), rng=rng)
     g_fn = compile_random_function([], g, mode=jax_mode)
     samples = g_fn()
+    assert samples.shape == (10000, 4)
     np.testing.assert_allclose(samples.mean(axis=0), 6 / 4, 1)
+
+    # Test zero probabilities
+    g = pt.random.categorical([0, 0.5, 0, 0.5], size=(1000,), rng=rng)
+    g_fn = compile_random_function([], g, mode=jax_mode)
+    samples = g_fn()
+    assert samples.shape == (1000,)
+    assert np.all(samples % 2 == 1)
 
 
 def test_random_permutation():
