@@ -169,6 +169,20 @@ def jax_sample_fn_loc_scale(op):
 
 
 @jax_sample_fn.register(ptr.BernoulliRV)
+def jax_sample_fn_bernoulli(op):
+    """JAX implementation of `BernoulliRV`."""
+
+    # We need a separate dispatch, because there is no dtype argument for Bernoulli in JAX
+    def sample_fn(rng, size, dtype, p):
+        rng_key = rng["jax_state"]
+        rng_key, sampling_key = jax.random.split(rng_key, 2)
+        sample = jax.random.bernoulli(sampling_key, p, shape=size)
+        rng["jax_state"] = rng_key
+        return (rng, sample)
+
+    return sample_fn
+
+
 @jax_sample_fn.register(ptr.CategoricalRV)
 def jax_sample_fn_no_dtype(op):
     """Generic JAX implementation of random variables."""
