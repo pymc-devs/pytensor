@@ -210,7 +210,6 @@ def {sized_fn_name}({random_fn_input_names}):
 @numba_funcify.register(ptr.BinomialRV)
 @numba_funcify.register(ptr.MultinomialRV)
 @numba_funcify.register(ptr.RandIntRV)  # only the first two arguments are supported
-@numba_funcify.register(ptr.ChoiceRV)  # the `p` argument is not supported
 @numba_funcify.register(ptr.PermutationRV)
 def numba_funcify_RandomVariable(op, node, **kwargs):
     name = op.name
@@ -367,3 +366,63 @@ def numba_funcify_DirichletRV(op, node, **kwargs):
             return (rng, np.random.dirichlet(alphas, size))
 
     return dirichlet_rv
+
+
+@numba_funcify.register(ptr.ChoiceWithoutReplacement)
+def numba_funcify_choice_without_replacement(op, node, **kwargs):
+    batch_ndim = op.batch_ndim(node)
+    if batch_ndim:
+        # The code isn't too hard to write, but Numba doesn't support a with ndim > 1,
+        # and I don't want to change the batched tests for this
+        # We'll just raise an error for now
+        raise NotImplementedError(
+            "ChoiceWithoutReplacement with batch_ndim not supported in Numba backend"
+        )
+
+    [core_shape_len] = node.inputs[-1].type.shape
+
+    if op.has_p_param:
+
+        @numba_basic.numba_njit
+        def choice_without_replacement_rv(rng, size, dtype, a, p, core_shape):
+            core_shape = numba_ndarray.to_fixed_tuple(core_shape, core_shape_len)
+            samples = np.random.choice(a, size=core_shape, replace=False, p=p)
+            return (rng, samples)
+    else:
+
+        @numba_basic.numba_njit
+        def choice_without_replacement_rv(rng, size, dtype, a, core_shape):
+            core_shape = numba_ndarray.to_fixed_tuple(core_shape, core_shape_len)
+            samples = np.random.choice(a, size=core_shape, replace=False)
+            return (rng, samples)
+
+    return choice_without_replacement_rv
+
+
+@numba_funcify.register(ptr.PermutationRV)
+def numba_funcify_permutation(op, node, **kwargs):
+    # PyTensor uses size=() to represent size=None
+    size_is_none = node.inputs[1].type.shape == (0,)
+    batch_ndim = op.batch_ndim(node)
+    x_batch_ndim = node.inputs[-1].type.ndim - op.ndims_params[0]
+
+    @numba_basic.numba_njit
+    def permutation_rv(rng, size, dtype, x):
+        if batch_ndim:
+            x_core_shape = x.shape[x_batch_ndim:]
+            if size_is_none:
+                size = x.shape[:batch_ndim]
+            else:
+                size = numba_ndarray.to_fixed_tuple(size, batch_ndim)
+                x = np.broadcast_to(x, size + x_core_shape)
+
+            samples = np.empty(size + x_core_shape, dtype=x.dtype)
+            for index in np.ndindex(size):
+                samples[index] = np.random.permutation(x[index])
+
+        else:
+            samples = np.random.permutation(x)
+
+        return (rng, samples)
+
+    return permutation_rv

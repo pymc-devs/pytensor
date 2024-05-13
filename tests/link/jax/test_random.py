@@ -13,6 +13,11 @@ from pytensor.tensor.random.basic import RandomVariable
 from pytensor.tensor.random.type import RandomType
 from pytensor.tensor.random.utils import RandomStream
 from tests.link.jax.test_basic import compare_jax_and_py, jax_mode, set_test_value
+from tests.tensor.random.test_basic import (
+    batched_permutation_tester,
+    batched_unweighted_choice_without_replacement_tester,
+    batched_weighted_choice_without_replacement_tester,
+)
 
 
 jax = pytest.importorskip("jax")
@@ -574,7 +579,7 @@ def test_random_dirichlet(parameter, size):
 
 def test_random_choice():
     # `replace=True` and `p is None`
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     g = pt.random.choice(np.arange(4), size=10_000, rng=rng)
     g_fn = compile_random_function([], g, mode=jax_mode)
     samples = g_fn()
@@ -642,6 +647,19 @@ def test_random_permutation():
     permuted = g_fn()
     with pytest.raises(AssertionError):
         np.testing.assert_allclose(array, permuted)
+
+
+@pytest.mark.parametrize(
+    "batch_dims_tester",
+    [
+        batched_unweighted_choice_without_replacement_tester,
+        batched_weighted_choice_without_replacement_tester,
+        batched_permutation_tester,
+    ],
+)
+def test_unnatural_batched_dims(batch_dims_tester):
+    """Tests for RVs that don't have natural batch dims in JAX API."""
+    batch_dims_tester(mode="JAX")
 
 
 def test_random_geometric():
@@ -792,7 +810,7 @@ def test_random_custom_implementation():
     from pytensor.link.jax.dispatch.random import jax_sample_fn
 
     @jax_sample_fn.register(CustomRV)
-    def jax_sample_fn_custom(op):
+    def jax_sample_fn_custom(op, node):
         def sample_fn(rng, size, dtype, *parameters):
             return (rng, 0)
 
