@@ -103,6 +103,9 @@ def jax_funcify_RandomVariable(op, node, **kwargs):
         assert_size_argument_jax_compatible(node)
 
         def sample_fn(rng, size, dtype, *parameters):
+            # PyTensor uses empty size to represent size = None
+            if jax.numpy.asarray(size).shape == (0,):
+                size = None
             return jax_sample_fn(op)(rng, size, out_dtype, *parameters)
 
     else:
@@ -161,6 +164,8 @@ def jax_sample_fn_loc_scale(op):
         rng_key = rng["jax_state"]
         rng_key, sampling_key = jax.random.split(rng_key, 2)
         loc, scale = parameters
+        if size is None:
+            size = jax.numpy.broadcast_arrays(loc, scale)[0].shape
         sample = loc + jax_op(sampling_key, size, dtype) * scale
         rng["jax_state"] = rng_key
         return (rng, sample)
@@ -184,15 +189,16 @@ def jax_sample_fn_bernoulli(op):
 
 
 @jax_sample_fn.register(ptr.CategoricalRV)
-def jax_sample_fn_no_dtype(op):
-    """Generic JAX implementation of random variables."""
-    name = op.name
-    jax_op = getattr(jax.random, name)
+def jax_sample_fn_categorical(op):
+    """JAX implementation of `CategoricalRV`."""
 
-    def sample_fn(rng, size, dtype, *parameters):
+    # We need a separate dispatch because Categorical expects logits in JAX
+    def sample_fn(rng, size, dtype, p):
         rng_key = rng["jax_state"]
         rng_key, sampling_key = jax.random.split(rng_key, 2)
-        sample = jax_op(sampling_key, *parameters, shape=size)
+
+        logits = jax.scipy.special.logit(p)
+        sample = jax.random.categorical(sampling_key, logits=logits, shape=size)
         rng["jax_state"] = rng_key
         return (rng, sample)
 
@@ -243,6 +249,8 @@ def jax_sample_fn_shape_scale(op):
     def sample_fn(rng, size, dtype, shape, scale):
         rng_key = rng["jax_state"]
         rng_key, sampling_key = jax.random.split(rng_key, 2)
+        if size is None:
+            size = jax.numpy.broadcast_arrays(shape, scale)[0].shape
         sample = jax_op(sampling_key, shape, size, dtype) * scale
         rng["jax_state"] = rng_key
         return (rng, sample)
@@ -254,10 +262,11 @@ def jax_sample_fn_shape_scale(op):
 def jax_sample_fn_exponential(op):
     """JAX implementation of `ExponentialRV`."""
 
-    def sample_fn(rng, size, dtype, *parameters):
+    def sample_fn(rng, size, dtype, scale):
         rng_key = rng["jax_state"]
         rng_key, sampling_key = jax.random.split(rng_key, 2)
-        (scale,) = parameters
+        if size is None:
+            size = jax.numpy.asarray(scale).shape
         sample = jax.random.exponential(sampling_key, size, dtype) * scale
         rng["jax_state"] = rng_key
         return (rng, sample)
@@ -269,14 +278,11 @@ def jax_sample_fn_exponential(op):
 def jax_sample_fn_t(op):
     """JAX implementation of `StudentTRV`."""
 
-    def sample_fn(rng, size, dtype, *parameters):
+    def sample_fn(rng, size, dtype, df, loc, scale):
         rng_key = rng["jax_state"]
         rng_key, sampling_key = jax.random.split(rng_key, 2)
-        (
-            df,
-            loc,
-            scale,
-        ) = parameters
+        if size is None:
+            size = jax.numpy.broadcast_arrays(df, loc, scale)[0].shape
         sample = loc + jax.random.t(sampling_key, df, size, dtype) * scale
         rng["jax_state"] = rng_key
         return (rng, sample)
