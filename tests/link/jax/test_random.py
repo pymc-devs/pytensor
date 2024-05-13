@@ -509,6 +509,34 @@ def test_random_RandomVariable(rv_op, dist_params, base_size, cdf_name, params_c
         assert test_res.pvalue > 0.01
 
 
+@pytest.mark.parametrize(
+    "rv_fn",
+    [
+        lambda param_that_implies_size: ptr.normal(
+            loc=0, scale=pt.exp(param_that_implies_size)
+        ),
+        lambda param_that_implies_size: ptr.exponential(
+            scale=pt.exp(param_that_implies_size)
+        ),
+        lambda param_that_implies_size: ptr.gamma(
+            shape=1, scale=pt.exp(param_that_implies_size)
+        ),
+        lambda param_that_implies_size: ptr.t(
+            df=3, loc=param_that_implies_size, scale=1
+        ),
+    ],
+)
+def test_size_implied_by_broadcasted_parameters(rv_fn):
+    # We need a parameter with untyped shapes to test broadcasting does not result in identical draws
+    param_that_implies_size = pt.matrix("param_that_implies_size", shape=(None, None))
+
+    rv = rv_fn(param_that_implies_size)
+    draws = rv.eval({param_that_implies_size: np.zeros((2, 2))}, mode=jax_mode)
+
+    assert draws.shape == (2, 2)
+    assert np.unique(draws).size == 4
+
+
 @pytest.mark.parametrize("size", [(), (4,)])
 def test_random_bernoulli(size):
     rng = shared(np.random.RandomState(123))
