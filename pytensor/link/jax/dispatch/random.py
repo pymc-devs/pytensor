@@ -93,8 +93,8 @@ def jax_funcify_RandomVariable(op, node, **kwargs):
     out_dtype = rv.type.dtype
     out_size = rv.type.shape
 
-    if op.ndim_supp > 0:
-        out_size = node.outputs[1].type.shape[: -op.ndim_supp]
+    batch_ndim = op.batch_ndim(node)
+    out_size = node.default_output().type.shape[:batch_ndim]
 
     # If one dimension has unknown size, either the size is determined
     # by a `Shape` operator in which case JAX will compile, or it is
@@ -106,18 +106,18 @@ def jax_funcify_RandomVariable(op, node, **kwargs):
             # PyTensor uses empty size to represent size = None
             if jax.numpy.asarray(size).shape == (0,):
                 size = None
-            return jax_sample_fn(op)(rng, size, out_dtype, *parameters)
+            return jax_sample_fn(op, node=node)(rng, size, out_dtype, *parameters)
 
     else:
 
         def sample_fn(rng, size, dtype, *parameters):
-            return jax_sample_fn(op)(rng, out_size, out_dtype, *parameters)
+            return jax_sample_fn(op, node=node)(rng, out_size, out_dtype, *parameters)
 
     return sample_fn
 
 
 @singledispatch
-def jax_sample_fn(op):
+def jax_sample_fn(op, node):
     name = op.name
     raise NotImplementedError(
         f"No JAX implementation for the given distribution: {name}"
@@ -128,7 +128,7 @@ def jax_sample_fn(op):
 @jax_sample_fn.register(ptr.DirichletRV)
 @jax_sample_fn.register(ptr.PoissonRV)
 @jax_sample_fn.register(ptr.MvNormalRV)
-def jax_sample_fn_generic(op):
+def jax_sample_fn_generic(op, node):
     """Generic JAX implementation of random variables."""
     name = op.name
     jax_op = getattr(jax.random, name)
@@ -149,7 +149,7 @@ def jax_sample_fn_generic(op):
 @jax_sample_fn.register(ptr.LogisticRV)
 @jax_sample_fn.register(ptr.NormalRV)
 @jax_sample_fn.register(ptr.StandardNormalRV)
-def jax_sample_fn_loc_scale(op):
+def jax_sample_fn_loc_scale(op, node):
     """JAX implementation of random variables in the loc-scale families.
 
     JAX only implements the standard version of random variables in the
@@ -174,7 +174,7 @@ def jax_sample_fn_loc_scale(op):
 
 
 @jax_sample_fn.register(ptr.BernoulliRV)
-def jax_sample_fn_bernoulli(op):
+def jax_sample_fn_bernoulli(op, node):
     """JAX implementation of `BernoulliRV`."""
 
     # We need a separate dispatch, because there is no dtype argument for Bernoulli in JAX
@@ -189,7 +189,7 @@ def jax_sample_fn_bernoulli(op):
 
 
 @jax_sample_fn.register(ptr.CategoricalRV)
-def jax_sample_fn_categorical(op):
+def jax_sample_fn_categorical(op, node):
     """JAX implementation of `CategoricalRV`."""
 
     # We need a separate dispatch because Categorical expects logits in JAX
@@ -208,7 +208,7 @@ def jax_sample_fn_categorical(op):
 @jax_sample_fn.register(ptr.RandIntRV)
 @jax_sample_fn.register(ptr.IntegersRV)
 @jax_sample_fn.register(ptr.UniformRV)
-def jax_sample_fn_uniform(op):
+def jax_sample_fn_uniform(op, node):
     """JAX implementation of random variables with uniform density.
 
     We need to pass the arguments as keyword arguments since the order
@@ -236,7 +236,7 @@ def jax_sample_fn_uniform(op):
 
 @jax_sample_fn.register(ptr.ParetoRV)
 @jax_sample_fn.register(ptr.GammaRV)
-def jax_sample_fn_shape_scale(op):
+def jax_sample_fn_shape_scale(op, node):
     """JAX implementation of random variables in the shape-scale family.
 
     JAX only implements the standard version of random variables in the
@@ -259,7 +259,7 @@ def jax_sample_fn_shape_scale(op):
 
 
 @jax_sample_fn.register(ptr.ExponentialRV)
-def jax_sample_fn_exponential(op):
+def jax_sample_fn_exponential(op, node):
     """JAX implementation of `ExponentialRV`."""
 
     def sample_fn(rng, size, dtype, scale):
@@ -275,7 +275,7 @@ def jax_sample_fn_exponential(op):
 
 
 @jax_sample_fn.register(ptr.StudentTRV)
-def jax_sample_fn_t(op):
+def jax_sample_fn_t(op, node):
     """JAX implementation of `StudentTRV`."""
 
     def sample_fn(rng, size, dtype, df, loc, scale):
@@ -290,30 +290,111 @@ def jax_sample_fn_t(op):
     return sample_fn
 
 
-@jax_sample_fn.register(ptr.ChoiceRV)
-def jax_funcify_choice(op):
+@jax_sample_fn.register(ptr.ChoiceWithoutReplacement)
+def jax_funcify_choice(op, node):
     """JAX implementation of `ChoiceRV`."""
+
+    batch_ndim = op.batch_ndim(node)
+    a, *p, core_shape = node.inputs[3:]
+    a_core_ndim, *p_core_ndim, _ = op.ndims_params
+
+    if batch_ndim and a_core_ndim == 0:
+        raise NotImplementedError(
+            "Batch dimensions are not supported for 0d arrays. "
+            "A default JAX rewrite should have materialized the implicit arange"
+        )
+
+    a_batch_ndim = a.type.ndim - a_core_ndim
+    if op.has_p_param:
+        [p] = p
+        [p_core_ndim] = p_core_ndim
+        p_batch_ndim = p.type.ndim - p_core_ndim
 
     def sample_fn(rng, size, dtype, *parameters):
         rng_key = rng["jax_state"]
         rng_key, sampling_key = jax.random.split(rng_key, 2)
-        (a, p, replace) = parameters
-        smpl_value = jax.random.choice(sampling_key, a, size, replace, p)
+
+        if op.has_p_param:
+            a, p, core_shape = parameters
+        else:
+            a, core_shape = parameters
+            p = None
+        core_shape = tuple(np.asarray(core_shape))
+
+        if batch_ndim == 0:
+            sample = jax.random.choice(
+                sampling_key, a, shape=core_shape, replace=False, p=p
+            )
+
+        else:
+            if size is None:
+                if p is None:
+                    size = a.shape[:a_batch_ndim]
+                else:
+                    size = jax.numpy.broadcast_shapes(
+                        a.shape[:a_batch_ndim],
+                        p.shape[:p_batch_ndim],
+                    )
+
+            a = jax.numpy.broadcast_to(a, size + a.shape[a_batch_ndim:])
+            if p is not None:
+                p = jax.numpy.broadcast_to(p, size + p.shape[p_batch_ndim:])
+
+            batch_sampling_keys = jax.random.split(sampling_key, np.prod(size))
+
+            # Ravel the batch dimensions because vmap only works along a single axis
+            raveled_batch_a = a.reshape((-1,) + a.shape[batch_ndim:])
+            if p is None:
+                raveled_sample = jax.vmap(
+                    lambda key, a: jax.random.choice(
+                        key, a, shape=core_shape, replace=False, p=None
+                    )
+                )(batch_sampling_keys, raveled_batch_a)
+            else:
+                raveled_batch_p = p.reshape((-1,) + p.shape[batch_ndim:])
+                raveled_sample = jax.vmap(
+                    lambda key, a, p: jax.random.choice(
+                        key, a, shape=core_shape, replace=False, p=p
+                    )
+                )(batch_sampling_keys, raveled_batch_a, raveled_batch_p)
+
+            # Reshape the batch dimensions
+            sample = raveled_sample.reshape(size + raveled_sample.shape[1:])
+
         rng["jax_state"] = rng_key
-        return (rng, smpl_value)
+        return (rng, sample)
 
     return sample_fn
 
 
 @jax_sample_fn.register(ptr.PermutationRV)
-def jax_sample_fn_permutation(op):
+def jax_sample_fn_permutation(op, node):
     """JAX implementation of `PermutationRV`."""
+
+    batch_ndim = op.batch_ndim(node)
+    x_batch_ndim = node.inputs[-1].type.ndim - op.ndims_params[0]
 
     def sample_fn(rng, size, dtype, *parameters):
         rng_key = rng["jax_state"]
         rng_key, sampling_key = jax.random.split(rng_key, 2)
         (x,) = parameters
-        sample = jax.random.permutation(sampling_key, x)
+        if batch_ndim:
+            # jax.random.permutation has no concept of batch dims
+            x_core_shape = x.shape[x_batch_ndim:]
+            if size is None:
+                size = x.shape[:x_batch_ndim]
+            else:
+                x = jax.numpy.broadcast_to(x, size + x_core_shape)
+
+            batch_sampling_keys = jax.random.split(sampling_key, np.prod(size))
+            raveled_batch_x = x.reshape((-1,) + x.shape[batch_ndim:])
+            raveled_sample = jax.vmap(lambda key, x: jax.random.permutation(key, x))(
+                batch_sampling_keys, raveled_batch_x
+            )
+            sample = raveled_sample.reshape(size + raveled_sample.shape[1:])
+        else:
+            sample = jax.random.permutation(sampling_key, x)
+
         rng["jax_state"] = rng_key
         return (rng, sample)
 
@@ -321,7 +402,7 @@ def jax_sample_fn_permutation(op):
 
 
 @jax_sample_fn.register(ptr.BinomialRV)
-def jax_sample_fn_binomial(op):
+def jax_sample_fn_binomial(op, node):
     if not numpyro_available:
         raise NotImplementedError(
             f"No JAX implementation for the given distribution: {op.name}. "
@@ -344,7 +425,7 @@ def jax_sample_fn_binomial(op):
 
 
 @jax_sample_fn.register(ptr.MultinomialRV)
-def jax_sample_fn_multinomial(op):
+def jax_sample_fn_multinomial(op, node):
     if not numpyro_available:
         raise NotImplementedError(
             f"No JAX implementation for the given distribution: {op.name}. "
@@ -367,7 +448,7 @@ def jax_sample_fn_multinomial(op):
 
 
 @jax_sample_fn.register(ptr.VonMisesRV)
-def jax_sample_fn_vonmises(op):
+def jax_sample_fn_vonmises(op, node):
     if not numpyro_available:
         raise NotImplementedError(
             f"No JAX implementation for the given distribution: {op.name}. "

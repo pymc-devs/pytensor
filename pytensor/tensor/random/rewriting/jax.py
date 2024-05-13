@@ -3,10 +3,18 @@ from pytensor.graph.rewriting.basic import in2out, node_rewriter
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.tensor import abs as abs_t
 from pytensor.tensor import broadcast_arrays, exp, floor, log, log1p, reciprocal, sqrt
-from pytensor.tensor.basic import MakeVector, cast, ones_like, switch, zeros_like
+from pytensor.tensor.basic import (
+    MakeVector,
+    arange,
+    cast,
+    ones_like,
+    switch,
+    zeros_like,
+)
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.random.basic import (
     BetaBinomialRV,
+    ChoiceWithoutReplacement,
     GenGammaRV,
     GeometricRV,
     HalfNormalRV,
@@ -137,6 +145,32 @@ def beta_binomial_from_beta_binomial(fgraph, node):
     return [next_rng, b]
 
 
+@node_rewriter([ChoiceWithoutReplacement])
+def materialize_implicit_arange_choice_without_replacement(fgraph, node):
+    """JAX random.choice does not support 0d arrays but when we have batch_ndim we need to vmap through batched `a`.
+
+    This rewrite materializes the implicit `a`
+    """
+    op = node.op
+    if op.batch_ndim(node) == 0 or op.ndims_params[0] > 0:
+        # No need to materialize arange
+        return None
+
+    rng, size, dtype, a_scalar_param, *other_params = node.inputs
+    if a_scalar_param.type.ndim > 0:
+        # Automatic vectorization could have made this parameter batched,
+        # there is no nice way to materialize a batched arange
+        return None
+
+    a_vector_param = arange(a_scalar_param)
+    new_props_dict = op._props_dict().copy()
+    new_ndims_params = list(op.ndims_params)
+    new_ndims_params[0] += 1
+    new_props_dict["ndims_params"] = new_ndims_params
+    new_op = type(op)(**new_props_dict)
+    return new_op.make_node(rng, size, dtype, a_vector_param, *other_params).outputs
+
+
 random_vars_opt = SequenceDB()
 random_vars_opt.register(
     "lognormal_from_normal",
@@ -176,6 +210,11 @@ random_vars_opt.register(
 random_vars_opt.register(
     "beta_binomial_from_beta_binomial",
     in2out(beta_binomial_from_beta_binomial),
+    "jax",
+)
+random_vars_opt.register(
+    "materialize_implicit_arange_choice_without_replacement",
+    in2out(materialize_implicit_arange_choice_without_replacement),
     "jax",
 )
 optdb.register("jax_random_vars_rewrites", random_vars_opt, "jax", position=110)
