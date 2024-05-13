@@ -59,6 +59,8 @@ def global_numba_func(func):
 
 def numba_njit(*args, **kwargs):
     kwargs.setdefault("cache", config.numba__cache)
+    kwargs.setdefault("no_cpython_wrapper", True)
+    kwargs.setdefault("no_cfunc_wrapper", True)
 
     # Supress caching warnings
     warnings.filterwarnings(
