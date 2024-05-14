@@ -14,6 +14,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Dot, Prod, _matrix_matrix_matmul, log, prod
 from pytensor.tensor.nlinalg import (
+    SVD,
     KroneckerProduct,
     MatrixInverse,
     MatrixPinv,
@@ -380,3 +381,31 @@ def local_lift_through_linalg(
                 return [block_diag(*inner_matrices)]
             else:
                 raise NotImplementedError  # pragma: no cover
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([SVD])
+def local_svd_uv_simplify(fgraph, node):
+    """If we have more than one `SVD` `Op`s and at least one has keyword argument
+    `compute_uv=True`, then we can change `compute_uv = False` to `True` everywhere
+    and allow `pytensor` to re-use the decomposition outputs instead of recomputing.
+    """
+    (x,) = node.inputs
+    svd_count = 0
+    compute_uv = False
+    not_compute_uv_svd_list = []
+
+    for cl, _ in fgraph.clients[x]:
+        if isinstance(cl.op, Blockwise) and isinstance(cl.op.core_op, SVD):
+            svd_count += 1
+            if (not compute_uv) and cl.op.core_op.compute_uv:
+                compute_uv = True
+            if not cl.op.core_op.compute_uv:
+                not_compute_uv_svd_list.append(cl)
+
+    if svd_count > 1 and compute_uv:
+        for cl in not_compute_uv_svd_list:
+            cl.op.core_op.compute_uv = True
+    return [cl.outputs[0] for cl in not_compute_uv_svd_list]
