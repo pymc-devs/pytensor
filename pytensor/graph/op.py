@@ -13,6 +13,7 @@ from typing import (
 
 import pytensor
 from pytensor.configdefaults import config
+from pytensor.gradient import grad_not_implemented
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.utils import (
     MetaObject,
@@ -366,7 +367,10 @@ class Op(MetaObject):
         .. [1] Giles, Mike. 2008. “An Extended Collection of Matrix Derivative Results for Forward and Reverse Mode Automatic Differentiation.”
 
         """
-        raise NotImplementedError()
+        # raise NotImplementedError()
+        (a,) = inputs
+        a_grad = grad_not_implemented(self, 0, a, comment="To be updated")
+        return [a_grad]
 
     def L_op(
         self,
