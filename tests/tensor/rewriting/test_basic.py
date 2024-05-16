@@ -19,6 +19,7 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.printing import debugprint, pprint
 from pytensor.raise_op import Assert, CheckAndRaise
+from pytensor.scalar import Composite, float64
 from pytensor.tensor.basic import (
     Alloc,
     Join,
@@ -64,6 +65,7 @@ from pytensor.tensor.rewriting.basic import (
     local_merge_alloc,
     local_useless_alloc,
     local_useless_elemwise,
+    topological_fill_sink,
 )
 from pytensor.tensor.rewriting.math import local_lift_transpose_through_dot
 from pytensor.tensor.rewriting.shape import ShapeFeature
@@ -1992,3 +1994,19 @@ def test_shape_unsafe_tag():
     fn = function([x, y], out, mode=mode.excluding("shape_unsafe"))
     with pytest.raises(ValueError):
         fn([0, 1], [2, 3, 4]), [0, 1]
+
+
+def test_topological_fill_sink_multi_output_client():
+    x = float64("x")
+    elem_op_with_2_outputs = Elemwise(Composite([x], [x + 1, x + 2]))
+
+    x = pt.vector("x", shape=(1,))
+    z = pt.vector("z", shape=(None,))
+    bcast_x = pt.full_like(z, x)
+    out = pt.add(*elem_op_with_2_outputs(pt.exp(bcast_x)))
+
+    fg = FunctionGraph([x, z], [out], copy_inputs=False)
+    topological_fill_sink.rewrite(fg)
+    [new_out] = fg.outputs
+    expected_out = pt.full_like(z, pt.add(*elem_op_with_2_outputs(pt.exp(x))))
+    assert equal_computations([new_out], [expected_out])
