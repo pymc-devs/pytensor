@@ -400,6 +400,7 @@ def local_svd_uv_simplify(fgraph, node):
             if (not compute_uv) and cl.op.core_op.compute_uv:
                 compute_uv = True
                 break
+
     if compute_uv and not node.op.compute_uv:
         full_matrices = node.op.full_matrices
-        return [SVD(x, full_matrices=full_matrices, compute_uv=compute_uv)]
+        return [SVD(full_matrices=full_matrices, compute_uv=compute_uv)]
