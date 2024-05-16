@@ -393,19 +393,13 @@ def local_svd_uv_simplify(fgraph, node):
     and allow `pytensor` to re-use the decomposition outputs instead of recomputing.
     """
     (x,) = node.inputs
-    svd_count = 0
     compute_uv = False
-    not_compute_uv_svd_list = []
 
     for cl, _ in fgraph.clients[x]:
         if isinstance(cl.op, Blockwise) and isinstance(cl.op.core_op, SVD):
-            svd_count += 1
             if (not compute_uv) and cl.op.core_op.compute_uv:
                 compute_uv = True
-            if not cl.op.core_op.compute_uv:
-                not_compute_uv_svd_list.append(cl)
-
-    if svd_count > 1 and compute_uv:
-        for cl in not_compute_uv_svd_list:
-            cl.op.core_op.compute_uv = True
-    return [cl.outputs[0] for cl in not_compute_uv_svd_list]
+                break
+    if compute_uv and not node.op.compute_uv:
+        full_matrices = node.op.full_matrices
+        return [SVD(x, full_matrices=full_matrices, compute_uv=compute_uv)]

@@ -57,3 +57,4 @@ testing-report.html
 coverage.xml
 .coverage.*
 pics
+*.ipynb
