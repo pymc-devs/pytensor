@@ -1,7 +1,7 @@
 import torch
 
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
-from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 
 
@@ -11,18 +11,16 @@ def pytorch_funcify_Elemwise(op, node, **kwargs):
     base_fn = pytorch_funcify(scalar_op, node=node, **kwargs)
 
     def elemwise_fn(*inputs):
-        Elemwise._check_runtime_broadcast(node, tuple(map(torch.tensor, inputs)))
+        # Elemwise._check_runtime_broadcast(node, tuple(map(torch.tensor, inputs)))
         return base_fn(*inputs)
 
     return elemwise_fn
-
 
 
 @pytorch_funcify.register(DimShuffle)
 def pytorch_funcify_DimShuffle(op, **kwargs):
     def dimshuffle(x):
         res = torch.transpose(x, *op.transposition)
-        print(res, '-----')
 
         shape = list(res.shape[: len(op.shuffle)])
 
@@ -32,7 +30,7 @@ def pytorch_funcify_DimShuffle(op, **kwargs):
         res = torch.reshape(res, shape)
 
         if not op.inplace:
-            res = res.clone().detach()
+            res = res.clone()
 
         return res
 
@@ -44,7 +42,6 @@ def pytorch_funcify_Softmax(op, **kwargs):
     axis = op.axis
 
     def softmax(x):
-        x = torch.tensor(x).cuda()
         return torch.nn.functional.softmax(x, dim=axis)
 
     return softmax
