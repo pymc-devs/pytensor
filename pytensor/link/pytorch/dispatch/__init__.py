@@ -3,6 +3,7 @@ from pytensor.link.pytorch.dispatch.basic import pytorch_funcify, pytorch_typify
 
 # # Load dispatch specializations
 import pytensor.link.pytorch.dispatch.scalar
+
 # import pytensor.link.jax.dispatch.tensor_basic
 # import pytensor.link.jax.dispatch.subtensor
 # import pytensor.link.jax.dispatch.shape
