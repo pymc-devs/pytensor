@@ -8,6 +8,7 @@ from numpy.random.bit_generator import (  # type: ignore[attr-defined]
 )
 
 import pytensor.tensor.random.basic as ptr
+from pytensor.graph import Constant
 from pytensor.link.jax.dispatch.basic import jax_funcify, jax_typify
 from pytensor.link.jax.dispatch.shape import JAXShapeTuple
 from pytensor.tensor.shape import Shape, Shape_i
@@ -91,15 +92,26 @@ def jax_funcify_RandomVariable(op, node, **kwargs):
     """JAX implementation of random variables."""
     rv = node.outputs[1]
     out_dtype = rv.type.dtype
-    out_size = rv.type.shape
+    static_shape = rv.type.shape
 
     batch_ndim = op.batch_ndim(node)
-    out_size = node.default_output().type.shape[:batch_ndim]
+
+    # Try to pass static size directly to JAX
+    static_size = static_shape[:batch_ndim]
+    if None in static_size:
+        # Sometimes size can be constant folded during rewrites,
+        # without the RandomVariable node being updated with new static types
+        size_param = node.inputs[1]
+        if isinstance(size_param, Constant):
+            size_tuple = tuple(size_param.data)
+            # PyTensor uses empty size to represent size = None
+            if len(size_tuple):
+                static_size = tuple(size_param.data)
 
     # If one dimension has unknown size, either the size is determined
     # by a `Shape` operator in which case JAX will compile, or it is
     # not and we fail gracefully.
-    if None in out_size:
+    if None in static_size:
         assert_size_argument_jax_compatible(node)
 
         def sample_fn(rng, size, dtype, *parameters):
@@ -111,7 +123,9 @@ def jax_funcify_RandomVariable(op, node, **kwargs):
     else:
 
         def sample_fn(rng, size, dtype, *parameters):
-            return jax_sample_fn(op, node=node)(rng, out_size, out_dtype, *parameters)
+            return jax_sample_fn(op, node=node)(
+                rng, static_size, out_dtype, *parameters
+            )
 
     return sample_fn
 
