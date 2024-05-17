@@ -1,4 +1,3 @@
-import functools
 import typing
 from collections.abc import Callable
 
@@ -7,17 +6,11 @@ import torch
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.scalar import Softplus
 from pytensor.scalar.basic import (
-    Add,
     Cast,
     Clip,
-    Composite,
     Identity,
-    IntDiv,
-    Mod,
-    Mul,
     ScalarOp,
     Second,
-    Sub,
 )
 from pytensor.scalar.math import (
     BetaIncInv,
@@ -51,9 +44,7 @@ def try_import_tfp_jax_op(op: ScalarOp, jax_op_name: str | None = None) -> Calla
 
 
 def all_inputs_are_scalar(node):
-    """Check whether all the inputs of an `Elemwise` are scalar values.
-
-    """
+    """Check whether all the inputs of an `Elemwise` are scalar values."""
     ndims_input = [inp.type.ndim for inp in node.inputs]
     are_inputs_scalars = True
     for ndim in ndims_input:
@@ -74,22 +65,12 @@ def pytorch_funcify_ScalarOp(op, node, **kwargs):
     even though it's dispatched on the Scalar Op.
     """
 
-    # We dispatch some PyTensor operators to Python operators
-    # whenever the inputs are all scalars.
-    if all_inputs_are_scalar(node):
-        pytorch_func = pytorch_funcify_scalar_op_via_py_operators(op)
-        if pytorch_func is not None:
-            return pytorch_func
-
     nfunc_spec = getattr(op, "nfunc_spec", None)
     if nfunc_spec is None:
         raise NotImplementedError(f"Dispatch not implemented for Scalar Op {op}")
 
     func_name = nfunc_spec[0]
-    print
-    # if "." in func_name:
-    #     pytorch_func = functools.reduce(getattr, [jax, *func_name.split(".")])
-    # else:
+
     pytorch_func = getattr(torch, func_name)
 
     if len(node.inputs) > op.nfunc_spec[1]:
@@ -110,60 +91,6 @@ def pytorch_funcify_ScalarOp(op, node, **kwargs):
     return pytorch_func
 
 
-@functools.singledispatch
-def pytorch_funcify_scalar_op_via_py_operators(op):
-    """Specialized JAX dispatch for Elemwise operations where all inputs are Scalar arrays.
-
-    Scalar (constant) arrays in the JAX backend get lowered to the native types (int, floats),
-    which can perform better with Python operators, and more importantly, avoid upcasting to array types
-    not supported by some JAX functions.
-    """
-    return None
-
-
-@pytorch_funcify_scalar_op_via_py_operators.register(Add)
-def pytorch_funcify_scalar_Add(op):
-    def elemwise(*inputs):
-        return sum(inputs)
-
-    return elemwise
-
-
-@pytorch_funcify_scalar_op_via_py_operators.register(Mul)
-def pytorch_funcify_scalar_Mul(op):
-    import operator
-    from functools import reduce
-
-    def elemwise(*inputs):
-        return reduce(operator.mul, inputs, 1)
-
-    return elemwise
-
-
-@pytorch_funcify_scalar_op_via_py_operators.register(Sub)
-def pytorch_funcify_scalar_Sub(op):
-    def elemwise(x, y):
-        return x - y
-
-    return elemwise
-
-
-@pytorch_funcify_scalar_op_via_py_operators.register(IntDiv)
-def pytorch_funcify_scalar_IntDiv(op):
-    def elemwise(x, y):
-        return x // y
-
-    return elemwise
-
-
-@pytorch_funcify_scalar_op_via_py_operators.register(Mod)
-def pytorch_funcify_scalar_Mod(op):
-    def elemwise(x, y):
-        return x % y
-
-    return elemwise
-
-
 @pytorch_funcify.register(Cast)
 def pytorch_funcify_Cast(op, **kwargs):
     def cast(x):
@@ -182,12 +109,10 @@ def pytorch_funcify_Identity(op, **kwargs):
 
 @pytorch_funcify.register(Clip)
 def pytorch_funcify_Clip(op, **kwargs):
-    """Register the translation for the `Clip` `Op`.
-
-    """
+    """Register the translation for the `Clip` `Op`."""
 
     def clip(x, min, max):
-        return torch.where(x < min, min, torch.where(x > max, max, x))
+        return torch.clip(x, min, max)
 
     return clip
 
@@ -311,18 +236,6 @@ def pytorch_funcify_TriGamma(op, node, **kwargs):
 @pytorch_funcify.register(Softplus)
 def pytorch_funcify_Softplus(op, **kwargs):
     def softplus(x):
-        return torch.where(
-            x < -37.0,
-            torch.exp(x),
-            torch.where(
-                x < 18.0,
-                torch.log1p(torch.exp(x)),
-                torch.where(
-                    x < 33.3,
-                    x + torch.exp(-x),
-                    x,
-                ),
-            ),
-        )
+        return torch.nn.functional.softplus(x)
 
     return softplus
