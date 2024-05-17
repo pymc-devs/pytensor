@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from typing import cast as type_cast
 
 import numpy as np
+import torch
 from numpy.core.multiarray import normalize_axis_index
 from numpy.core.numeric import normalize_axis_tuple
 
@@ -181,6 +182,11 @@ def _as_tensor_Sequence(x, name, ndim, dtype=None, **kwargs):
 @_as_tensor_variable.register(np.number)
 @_as_tensor_variable.register(Number)
 @_as_tensor_variable.register(np.ndarray)
+def _as_tensor_numbers(x, name, ndim, dtype=None, **kwargs):
+    return constant(x, name=name, ndim=ndim, dtype=dtype)
+
+
+@_as_tensor_variable.register(torch.Tensor)
 def _as_tensor_numbers(x, name, ndim, dtype=None, **kwargs):
     return constant(x, name=name, ndim=ndim, dtype=dtype)
 

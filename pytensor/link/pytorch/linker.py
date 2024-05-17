@@ -1,9 +1,6 @@
-import warnings
-
 from numpy.random import Generator, RandomState
 
 from pytensor.compile.sharedvalue import SharedVariable, shared
-from pytensor.graph.basic import Constant
 from pytensor.link.basic import JITLinker
 
 
@@ -11,7 +8,7 @@ class PytorchLinker(JITLinker):
     """A `Linker` that compiles NumPy-based operations using torch.compile."""
 
     def fgraph_convert(self, fgraph, input_storage, storage_map, **kwargs):
-        from pytensor.link.pytorch.dispatch import pytorch_typify, pytorch_funcify
+        from pytensor.link.pytorch.dispatch import pytorch_funcify
         from pytensor.tensor.random.type import RandomType
 
         shared_rng_inputs = [
