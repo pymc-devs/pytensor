@@ -4,20 +4,12 @@ from functools import singledispatch
 # import jax
 # import jax.numpy as jnp
 import torch
-import numpy as np
 
 from pytensor.compile.ops import DeepCopyOp, ViewOp
-from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.ifelse import IfElse
 from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import Assert, CheckAndRaise
-
-
-# if config.floatX == "float64":
-#     jax.config.update("jax_enable_x64", True)
-# else:
-#     jax.config.update("jax_enable_x64", False)
 
 
 @singledispatch
@@ -29,10 +21,10 @@ def pytorch_typify(data, dtype=None, **kwargs):
         return torch.tensor(data, dtype=dtype)
 
 
-@pytorch_typify.register(np.ndarray)
-def pytorch_typify_ndarray(data, dtype=None, **kwargs):
-    if len(data.shape) == 0:
-        return data.item()
+@pytorch_typify.register(torch.Tensor)
+def pytorch_typify_tensor(data, dtype=None, **kwargs):
+    # if len(data.shape) == 0:
+    #     return data.item()
     return torch.tensor(data, dtype=dtype)
 
 
@@ -74,8 +66,9 @@ def pytorch_funcify_IfElse(op, **kwargs):
 @pytorch_funcify.register(Assert)
 @pytorch_funcify.register(CheckAndRaise)
 def pytorch_funcify_CheckAndRaise(op, **kwargs):
-
-    def assert_fn(x, *inputs):
+    def assert_fn(x, *conditions):
+        for cond in conditions:
+            assert cond.item()
         return x
 
     return assert_fn
