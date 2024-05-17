@@ -5,6 +5,7 @@ import scipy.stats as stats
 import pytensor
 import pytensor.tensor as pt
 import pytensor.tensor.random.basic as ptr
+from pytensor import clone_replace
 from pytensor.compile.function import function
 from pytensor.compile.sharedvalue import SharedVariable, shared
 from pytensor.graph.basic import Constant
@@ -26,11 +27,11 @@ jax = pytest.importorskip("jax")
 from pytensor.link.jax.dispatch.random import numpyro_available  # noqa: E402
 
 
-def compile_random_function(*args, **kwargs):
+def compile_random_function(*args, mode="JAX", **kwargs):
     with pytest.warns(
         UserWarning, match=r"The RandomType SharedVariables \[.+\] will not be used"
     ):
-        return function(*args, **kwargs)
+        return function(*args, mode=mode, **kwargs)
 
 
 def test_random_RandomStream():
@@ -896,3 +897,24 @@ def test_random_concrete_shape_graph_input():
     out = pt.random.normal(0, 1, size=size_pt, rng=rng)
     jax_fn = compile_random_function([size_pt], out, mode=jax_mode)
     assert jax_fn(10).shape == (10,)
+
+
+def test_constant_shape_after_graph_rewriting():
+    size = pt.vector("size", shape=(2,), dtype=int)
+    x = pt.random.normal(size=size)
+    assert x.type.shape == (None, None)
+
+    with pytest.raises(TypeError):
+        compile_random_function([size], x)([2, 5])
+
+    # Rebuild with strict=False so output type is not updated
+    # This reflects cases where size is constant folded during rewrites but the RV node is not recreated
+    new_x = clone_replace(x, {size: pt.constant([2, 5])}, rebuild_strict=True)
+    assert new_x.type.shape == (None, None)
+    assert compile_random_function([], new_x)().shape == (2, 5)
+
+    # Rebuild with strict=True, so output type is updated
+    # This uses a different path in the dispatch implementation
+    new_x = clone_replace(x, {size: pt.constant([2, 5])}, rebuild_strict=False)
+    assert new_x.type.shape == (2, 5)
+    assert compile_random_function([], new_x)().shape == (2, 5)
