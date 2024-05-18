@@ -1,6 +1,7 @@
 from collections.abc import Callable
-from typing import Literal
+from typing import Literal, cast
 
+from pytensor.compile.builders import OpFromGraph
 from pytensor.scan import scan
 from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import (
@@ -33,6 +34,19 @@ PadMode = Literal[
     "reflect",
 ]
 stat_funcs = {"maximum": pt_max, "minimum": pt_min, "mean": mean}
+
+allowed_kwargs = {
+    "edge": [],
+    "wrap": [],
+    "constant": ["constant_values"],
+    "linear_ramp": ["end_values"],
+    "maximum": ["stat_length"],
+    "mean": ["stat_length"],
+    "median": ["stat_length"],
+    "minimum": ["stat_length"],
+    "reflect": ["reflect_type"],
+    "symmetric": ["reflect_type"],
+}
 
 
 def _slice_at_axis(sl: slice, axis: int) -> tuple[slice, ...]:
@@ -225,17 +239,20 @@ def _get_stats(
 
 
 def _stat_pad(
-    x: TensorVariable, pad_width: TensorVariable, stat_func, stat_length=None
+    x: TensorVariable,
+    pad_width: TensorVariable,
+    stat_func: Callable,
+    stat_length: TensorVariable | None,
 ):
     padded, area_slice, pad_width = _symbolic_pad(x, pad_width)
     if stat_length is None:
-        stat_length = [[None, None]] * padded.ndim
+        stat_length = [[None, None]] * padded.ndim  # type: ignore
     else:
         stat_length = broadcast_to(stat_length, as_tensor((padded.ndim, 2)))
 
     for axis in range(padded.ndim):
         width_pair = pad_width[axis]
-        length_pair = stat_length[axis]
+        length_pair = stat_length[axis]  # type: ignore
         dim_shape = padded.shape[axis]
 
         left_stat, right_stat = _get_stats(
@@ -311,6 +328,10 @@ def _looping_pad(
             # Delay creation of this function to here because we want to use the axis global inside the scan
             def inner_func(i, x):
                 return switch(eq(i % 2, 0), flip(x, axis=axis), x)
+        else:
+            raise ValueError(
+                "You should not have gotten here. Open an issue on github!"
+            )  # pragma no cover
 
         size = x.shape[axis]
         repeats, (left_remainder, right_remainder) = pt_divmod(pad_width[axis], size)
@@ -330,55 +351,81 @@ def _looping_pad(
     return x
 
 
-def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwargs):
-    allowed_kwargs = {
-        "edge": [],
-        "wrap": [],
-        "constant": ["constant_values"],
-        "linear_ramp": ["end_values"],
-        "maximum": ["stat_length"],
-        "mean": ["stat_length"],
-        "median": ["stat_length"],
-        "minimum": ["stat_length"],
-        "reflect": ["reflect_type"],
-        "symmetric": ["reflect_type"],
-    }
+class Pad(OpFromGraph):
+    """
+    Wrapper Op for Pad graphs
+    """
 
+
+def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwargs):
     if any(value not in allowed_kwargs[mode] for value in kwargs.keys()):
         raise ValueError(
             f"Invalid keyword arguments for mode '{mode}': {kwargs.keys()}"
         )
-    x = as_tensor(x)
-    pad_width = as_tensor(pad_width)
+    x = as_tensor(x, name="x")
+    pad_width = as_tensor(pad_width, name="pad_width")
+    inputs = [x, pad_width]
+    attrs = {}
 
     if mode == "constant":
-        constant_values = as_tensor(kwargs.pop("constant_values", 0))
-        return _constant_pad(x, pad_width, constant_values)
+        constant_values = as_tensor(
+            kwargs.pop("constant_values", 0), name="constant_values"
+        )
+        inputs += [constant_values]
+        outputs = _constant_pad(x, pad_width, constant_values)
+
     elif mode == "edge":
-        return _edge_pad(x, pad_width)
+        outputs = _edge_pad(x, pad_width)
+
     elif mode in ["maximum", "minimum", "mean", "median"]:
         if mode == "median":
             # TODO: pt.quantile? pt.median?
             raise NotImplementedError("Median padding not implemented")
-        stat_func = stat_funcs[mode]
-        return _stat_pad(x, pad_width, stat_func, **kwargs)
+        stat_func = cast(Callable, stat_funcs[mode])
+        stat_length = kwargs.get("stat_length")
+        if stat_length is not None:
+            stat_length = as_tensor(stat_length, name="stat_length")
+            inputs += [stat_length]
+
+        attrs.update(
+            {"stat_func": stat_func, "stat_length_input": stat_length is not None}
+        )
+        outputs = _stat_pad(x, pad_width, stat_func, stat_length)
+
     elif mode == "linear_ramp":
         end_values = kwargs.pop("end_values", 0)
-        return _linear_ramp_pad(x, pad_width, end_values)
+        end_values = as_tensor(end_values)
+
+        inputs += [end_values]
+        outputs = _linear_ramp_pad(x, pad_width, end_values)
+
     elif mode == "wrap":
-        return _looping_pad(x, pad_width, kind="wrap")
+        attrs.update({"kind": "wrap"})
+        outputs = _looping_pad(x, pad_width, kind="wrap")
+
     elif mode == "symmetric":
         reflect_type = kwargs.pop("reflect_type", "even")
         if reflect_type == "odd":
             raise NotImplementedError("Odd reflection not implemented")
-        return _looping_pad(x, pad_width, kind="symmetric")
+
+        attrs.update({"kind": reflect_type})
+        outputs = _looping_pad(x, pad_width, kind="symmetric")
+
     elif mode == "reflect":
         reflect_type = kwargs.pop("reflect_type", "even")
         if reflect_type == "odd":
             raise NotImplementedError("Odd reflection not implemented")
+        attrs.update({"reflect_type": reflect_type})
         raise NotImplementedError("Reflect padding not implemented")
     else:
         raise ValueError(f"Invalid mode: {mode}")
+
+    op = Pad(inputs=inputs, outputs=[outputs])(*inputs)  # type: ignore
+
+    setattr(op, "pad_mode", mode)
+    for pad_arg, value in attrs.items():
+        setattr(op, pad_arg, value)
+    return op
 
 
 __all__ = ["pad"]
