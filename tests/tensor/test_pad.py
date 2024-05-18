@@ -26,6 +26,8 @@ def test_constant_pad(
     x = np.random.normal(size=size).astype(floatX)
     expected = np.pad(x, pad_width, mode="constant", constant_values=constant)
     z = pad(x, pad_width, mode="constant", constant_values=constant)
+    assert z.pad_mode == "constant"
+
     f = pytensor.function([], z, mode="FAST_COMPILE")
 
     np.testing.assert_allclose(expected, f(), atol=ATOL, rtol=RTOL)
@@ -41,6 +43,8 @@ def test_edge_pad(size: tuple, pad_width: int | tuple[int, ...]):
     x = np.random.normal(size=size).astype(floatX)
     expected = np.pad(x, pad_width, mode="edge")
     z = pad(x, pad_width, mode="edge")
+    assert z.pad_mode == "edge"
+
     f = pytensor.function([], z, mode="FAST_COMPILE")
 
     np.testing.assert_allclose(expected, f(), atol=ATOL, rtol=RTOL)
@@ -61,6 +65,8 @@ def test_linear_ramp_pad(
     x = np.random.normal(size=size).astype(floatX)
     expected = np.pad(x, pad_width, mode="linear_ramp", end_values=end_values)
     z = pad(x, pad_width, mode="linear_ramp", end_values=end_values)
+    assert z.pad_mode == "linear_ramp"
+
     f = pytensor.function([], z, mode="FAST_COMPILE")
 
     np.testing.assert_allclose(expected, f(), atol=ATOL, rtol=RTOL)
@@ -83,6 +89,9 @@ def test_stat_pad(
     x = np.random.normal(size=size).astype(floatX)
     expected = np.pad(x, pad_width, mode=stat, stat_length=stat_length)
     z = pad(x, pad_width, mode=stat, stat_length=stat_length)
+    assert z.pad_mode == stat
+    assert z.stat_length_input == (stat_length is not None)
+
     f = pytensor.function([], z, mode="FAST_COMPILE")
 
     np.testing.assert_allclose(expected, f(), atol=ATOL, rtol=RTOL)
@@ -98,6 +107,7 @@ def test_wrap_pad(size: tuple, pad_width: int | tuple[int, ...]):
     x = np.random.normal(size=size).astype(floatX)
     expected = np.pad(x, pad_width, mode="wrap")
     z = pad(x, pad_width, mode="wrap")
+    assert z.pad_mode == "wrap"
     f = pytensor.function([], z, mode="FAST_COMPILE")
 
     np.testing.assert_allclose(expected, f(), atol=ATOL, rtol=RTOL)
@@ -118,6 +128,7 @@ def test_symmetric_pad(size, pad_width, reflect_type):
     x = np.random.normal(size=size).astype(floatX)
     expected = np.pad(x, pad_width, mode="symmetric", reflect_type=reflect_type)
     z = pad(x, pad_width, mode="symmetric", reflect_type=reflect_type)
+    assert z.pad_mode == "symmetric"
     f = pytensor.function([], z, mode="FAST_COMPILE")
 
     np.testing.assert_allclose(expected, f(), atol=ATOL, rtol=RTOL)
