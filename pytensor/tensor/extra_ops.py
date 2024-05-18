@@ -1640,6 +1640,8 @@ def _linspace_core(
 
 
 def _broadcast_inputs(*args):
+    """Helper function to preprocess inputs to *space Ops"""
+
     args = map(ptb.as_tensor_variable, args)
     args = broadcast_arrays(*args)
 
@@ -1653,14 +1655,23 @@ def _broadcast_base_with_inputs(start, stop, base, axis):
 
     Parameters
     ----------
-    start
-    stop
-    base
-    axis
+    start: TensorVariable
+        The start value(s) of the sequence(s).
+    stop: TensorVariable
+        The end value(s) of the sequence(s)
+    base: TensorVariable
+        The log base value(s) of the sequence(s)
+    axis: int
+        The axis along which to generate samples.
 
     Returns
     -------
-
+    start: TensorVariable
+        The start value(s) of the sequence(s), broadcast with the base tensor if necessary.
+    stop: TensorVariable
+        The end value(s) of the sequence(s), broadcast with the base tensor if necessary.
+    base: TensorVariable
+        The log base value(s) of the sequence(s), broadcast with the start and stop tensors if necessary.
     """
     base = ptb.as_tensor_variable(base)
     if base.ndim > 0:
@@ -1841,10 +1852,9 @@ def geomspace(
     )
     result = base**result
 
-    if num > 0:
-        result = set_subtensor(result[0, ...], start)
-        if num > 1 and endpoint:
-            result = set_subtensor(result[-1, ...], stop)
+    result = switch(gt(num, 0), set_subtensor(result[0, ...], start), result)
+    if endpoint:
+        result = switch(gt(num, 1), set_subtensor(result[-1, ...], stop), result)
 
     result = result * out_sign
 
