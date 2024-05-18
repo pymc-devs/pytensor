@@ -356,6 +356,14 @@ class Pad(OpFromGraph):
     Wrapper Op for Pad graphs
     """
 
+    def __init__(self, inputs, outputs, pad_mode, reflect_type=None, kind=None):
+        self.pad_mode = pad_mode
+        self.reflect_type = reflect_type
+        self.kind = kind
+        self.reflect_type = reflect_type
+
+        super().__init__(inputs=inputs, outputs=outputs)
+
 
 def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwargs):
     if any(value not in allowed_kwargs[mode] for value in kwargs.keys()):
@@ -388,9 +396,6 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
             stat_length = as_tensor(stat_length, name="stat_length")
             inputs += [stat_length]
 
-        attrs.update(
-            {"stat_func": stat_func, "stat_length_input": stat_length is not None}
-        )
         outputs = _stat_pad(x, pad_width, stat_func, stat_length)
 
     elif mode == "linear_ramp":
@@ -401,7 +406,6 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
         outputs = _linear_ramp_pad(x, pad_width, end_values)
 
     elif mode == "wrap":
-        attrs.update({"kind": "wrap"})
         outputs = _looping_pad(x, pad_width, kind="wrap")
 
     elif mode == "symmetric":
@@ -409,7 +413,7 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
         if reflect_type == "odd":
             raise NotImplementedError("Odd reflection not implemented")
 
-        attrs.update({"kind": reflect_type})
+        attrs.update({"reflect_type": reflect_type})
         outputs = _looping_pad(x, pad_width, kind="symmetric")
 
     elif mode == "reflect":
@@ -421,11 +425,7 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
     else:
         raise ValueError(f"Invalid mode: {mode}")
 
-    op = Pad(inputs=inputs, outputs=[outputs])(*inputs)  # type: ignore
-
-    setattr(op, "pad_mode", mode)
-    for pad_arg, value in attrs.items():
-        setattr(op, pad_arg, value)
+    op = Pad(inputs=inputs, outputs=[outputs], pad_mode=mode, **attrs)(*inputs)
     return op
 
 
