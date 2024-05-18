@@ -1623,7 +1623,7 @@ def _linspace_core(
 ) -> TensorVariable | tuple[TensorVariable, TensorVariable]:
     div = (num - 1) if endpoint else num
     delta = stop - start
-    samples = ptb.arange(0, num).reshape((-1,) + (1,) * delta.ndim)
+    samples = ptb.shape_padright(ptb.arange(0, num), delta.ndim)
 
     step = delta / div
     samples = switch(gt(div, 0), samples * delta / div + start, samples * delta + start)
