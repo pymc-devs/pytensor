@@ -41,6 +41,7 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import RewriteDatabase
 from pytensor.raise_op import Assert, CheckAndRaise, assert_op
+from pytensor.scalar.basic import Second
 from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
@@ -320,56 +321,52 @@ def local_elemwise_alloc(fgraph, node):
     return new_outs
 
 
-@register_canonicalize("shape_unsafe")
 @node_rewriter([Elemwise])
 def local_fill_sink(fgraph, node):
     """
     f(fill(a, b), fill(c, d), e) -> fill(c, fill(a, f(b, d, e)))
     f need to be an elemwise that isn't a fill.
     """
-    if not hasattr(node, "op") or not isinstance(node.op, Elemwise) or node.op == fill:
+    if isinstance(node.op.scalar_op, Second):
         return False
+
     models = []
     inputs = []
     for inp in node.inputs:
         if inp.owner and inp.owner.op == fill:
-            models.append(inp.owner.inputs[0])
-            inputs.append(inp.owner.inputs[1])
+            a, b = inp.owner.inputs
+            if b.type.dtype != inp.dtype:
+                # The input was implicitly casted by the fill operation
+                b = b.cast(inp.dtype)
+            models.append(a)
+            inputs.append(b)
         else:
             inputs.append(inp)
+
     if not models:
         return False
-    c = node.op(*inputs)
-    for model in models:
-        if (
-            model.type.dtype != c.type.dtype
-            or model.type.broadcastable != c.type.broadcastable
-        ):
-            c = fill(model, c)
 
-    # The newly created node c doesn't has 'clients',
-    # so this iteration is took place with node.outputs[0]
-    # TODO: This should just be a WalkingGraphRewrite!
-    replacements = {node.outputs[0]: c}
-    for client, cl_idx in fgraph.clients[node.outputs[0]]:
-        if (
-            hasattr(client, "op")
-            and isinstance(client.op, Elemwise)
-            and client.op != fill
-        ):
-            client_inputs = client.inputs[:]
-            client_inputs[cl_idx] = c
-            new_client = client.op(*client_inputs)
+    outputs = node.op.make_node(*inputs).outputs
 
-            # Add clients to new_client
-            fgraph.clients[new_client.owner.outputs[0]] = fgraph.clients[
-                client.outputs[0]
-            ]
-            r = local_fill_sink.transform(fgraph, new_client.owner)
-            if not r:
-                continue
-            replacements.update(r)
-    return replacements
+    # Check if we need to propagate the fill to the new outputs
+    # It's enough to check the first output, as Elemwise outputs must all have the same shapes
+    # Note: There are orderings that may require fewer fills.
+    old_bcast_pattern = node.outputs[0].type.broadcastable
+    models_iter = iter(models)
+    while old_bcast_pattern != outputs[0].type.broadcastable:
+        model = next(models_iter)
+        # Only apply this model if it would actually do anything
+        if broadcasted_by(outputs[0], model):
+            outputs = [fill(model, output) for output in outputs]
+
+    return outputs
+
+
+# The rewrite is wrapped in an in2out GraphRewriter
+# so that fill can be sinked until the terminal nodes in a single pass through the graph
+# without triggering other rewrites after each local substitution
+topological_fill_sink = in2out(local_fill_sink)
+register_canonicalize(topological_fill_sink, "shape_unsafe")
 
 
 @register_specialize("shape_unsafe")
