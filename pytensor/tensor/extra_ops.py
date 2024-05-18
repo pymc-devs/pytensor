@@ -27,8 +27,8 @@ from pytensor.tensor.basic import alloc, second
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import all as pt_all
+from pytensor.tensor.math import eq as pt_eq
 from pytensor.tensor.math import (
-    bitwise_and,
     ge,
     gt,
     log,
@@ -39,7 +39,6 @@ from pytensor.tensor.math import (
     sign,
     switch,
 )
-from pytensor.tensor.math import eq as pt_eq
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import specify_broadcastable
@@ -1618,22 +1617,18 @@ def _linspace_core(
     start: TensorVariable,
     stop: TensorVariable,
     num: int,
-    dtype: str,
     endpoint=True,
     retstep=False,
     axis=0,
 ) -> TensorVariable | tuple[TensorVariable, TensorVariable]:
     div = (num - 1) if endpoint else num
-    delta = (stop - start).astype(dtype)
-    samples = ptb.arange(0, num, dtype=dtype).reshape((-1,) + (1,) * delta.ndim)
+    delta = stop - start
+    samples = ptb.arange(0, num).reshape((-1,) + (1,) * delta.ndim)
 
-    step = switch(gt(div, 0), delta / div, np.nan)
+    step = delta / div
     samples = switch(gt(div, 0), samples * delta / div + start, samples * delta + start)
-    samples = switch(
-        bitwise_and(gt(num, 1), np.asarray(endpoint)),
-        set_subtensor(samples[-1, ...], stop),
-        samples,
-    )
+    if endpoint:
+        samples = switch(gt(num, 1), set_subtensor(samples[-1, ...], stop), samples)
 
     if axis != 0:
         samples = ptb.moveaxis(samples, 0, axis)
@@ -1644,17 +1639,14 @@ def _linspace_core(
     return samples
 
 
-def _broadcast_inputs_and_dtypes(*args, dtype=None):
+def _broadcast_inputs(*args):
     args = map(ptb.as_tensor_variable, args)
     args = broadcast_arrays(*args)
 
-    if dtype is None:
-        dtype = pytensor.config.floatX
-
-    return args, dtype
+    return args
 
 
-def _broadcast_base_with_inputs(start, stop, base, dtype, axis):
+def _broadcast_base_with_inputs(start, stop, base, axis):
     """
     Broadcast the base tensor with the start and stop tensors if base is not a scalar. This is important because it
     may change how the axis argument is interpreted in the final output.
@@ -1664,14 +1656,13 @@ def _broadcast_base_with_inputs(start, stop, base, dtype, axis):
     start
     stop
     base
-    dtype
     axis
 
     Returns
     -------
 
     """
-    base = ptb.as_tensor_variable(base, dtype=dtype)
+    base = ptb.as_tensor_variable(base)
     if base.ndim > 0:
         ndmax = len(broadcast_shape(start, stop, base))
         start, stop, base = (
@@ -1747,18 +1738,21 @@ def linspace(
     step: TensorVariable
         Tensor containing the spacing between samples. Only returned if `retstep` is True.
     """
+    if dtype is None:
+        dtype = pytensor.config.floatX
     end, num = _check_deprecated_inputs(stop, end, num, steps)
-    (start, stop), type = _broadcast_inputs_and_dtypes(start, stop, dtype=dtype)
+    start, stop = _broadcast_inputs(start, stop)
 
-    return _linspace_core(
+    ls = _linspace_core(
         start=start,
         stop=stop,
         num=num,
-        dtype=dtype,
         endpoint=endpoint,
         retstep=retstep,
         axis=axis,
     )
+
+    return ls.astype(dtype)
 
 
 def geomspace(
@@ -1826,9 +1820,11 @@ def geomspace(
     samples: TensorVariable
         Tensor containing `num` evenly-spaced values between [start, stop]. The range is inclusive if `endpoint` is True.
     """
+    if dtype is None:
+        dtype = pytensor.config.floatX
     stop, num = _check_deprecated_inputs(stop, end, num, steps)
-    (start, stop), dtype = _broadcast_inputs_and_dtypes(start, stop, dtype=dtype)
-    start, stop, base = _broadcast_base_with_inputs(start, stop, base, dtype, axis)
+    start, stop = _broadcast_inputs(start, stop)
+    start, stop, base = _broadcast_base_with_inputs(start, stop, base, axis)
 
     out_sign = sign(start)
     log_start, log_stop = (
@@ -1840,23 +1836,22 @@ def geomspace(
         stop=log_stop,
         num=num,
         endpoint=endpoint,
-        dtype=dtype,
         axis=0,
         retstep=False,
     )
     result = base**result
 
     if num > 0:
-        set_subtensor(result[0, ...], start, inplace=True)
+        result = set_subtensor(result[0, ...], start)
         if num > 1 and endpoint:
-            set_subtensor(result[-1, ...], stop, inplace=True)
+            result = set_subtensor(result[-1, ...], stop)
 
     result = result * out_sign
 
     if axis != 0:
         result = ptb.moveaxis(result, 0, axis)
 
-    return result
+    return result.astype(dtype)
 
 
 def logspace(
@@ -1870,21 +1865,22 @@ def logspace(
     end: TensorLike | None = None,
     steps: TensorLike | None = None,
 ) -> TensorVariable:
+    if dtype is None:
+        dtype = pytensor.config.floatX
     stop, num = _check_deprecated_inputs(stop, end, num, steps)
-    (start, stop), type = _broadcast_inputs_and_dtypes(start, stop, dtype=dtype)
-    start, stop, base = _broadcast_base_with_inputs(start, stop, base, dtype, axis)
+    start, stop = _broadcast_inputs(start, stop)
+    start, stop, base = _broadcast_base_with_inputs(start, stop, base, axis)
 
     ls = _linspace_core(
         start=start,
         stop=stop,
         num=num,
         endpoint=endpoint,
-        dtype=dtype,
         axis=axis,
         retstep=False,
     )
 
-    return base**ls
+    return (base**ls).astype(dtype)
 
 
 def broadcast_to(
