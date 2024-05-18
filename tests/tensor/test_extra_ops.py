@@ -1282,6 +1282,7 @@ def test_broadcast_arrays():
     ["linspace", "logspace", "geomspace"],
     ids=["linspace", "logspace", "geomspace"],
 )
+@pytest.mark.parametrize("dtype", [None, "int", "float"], ids=[None, "int", "float"])
 @pytest.mark.parametrize(
     "start, stop, num_samples, endpoint, axis",
     [
@@ -1294,12 +1295,20 @@ def test_broadcast_arrays():
         (1, np.array([5, 6]), 30, False, -1),
     ],
 )
-def test_space_ops(op, start, stop, num_samples, endpoint, axis):
+def test_space_ops(op, dtype, start, stop, num_samples, endpoint, axis):
     pt_func = getattr(pt, op)
     np_func = getattr(np, op)
-    z = pt_func(start, stop, num_samples, endpoint=endpoint, axis=axis)
+    dtype = dtype + config.floatX[-2:] if dtype is not None else dtype
+    z = pt_func(start, stop, num_samples, endpoint=endpoint, axis=axis, dtype=dtype)
 
-    numpy_res = np_func(start, stop, num=num_samples, endpoint=endpoint, axis=axis)
+    numpy_res = np_func(
+        start, stop, num=num_samples, endpoint=endpoint, dtype=dtype, axis=axis
+    )
     pytensor_res = function(inputs=[], outputs=z, mode="FAST_COMPILE")()
 
-    np.testing.assert_allclose(pytensor_res, numpy_res, atol=1e-6, rtol=1e-6)
+    np.testing.assert_allclose(
+        pytensor_res,
+        numpy_res,
+        atol=1e-6 if config.floatX.endswith("64") else 1e-4,
+        rtol=1e-6 if config.floatX.endswith("64") else 1e-4,
+    )
