@@ -379,7 +379,8 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
 
     elif mode in ["maximum", "minimum", "mean", "median"]:
         if mode == "median":
-            # TODO: pt.quantile? pt.median?
+            # TODO: Revisit this after we implement a quantile function.
+            #  See https://github.com/pymc-devs/pytensor/issues/53
             raise NotImplementedError("Median padding not implemented")
         stat_func = cast(Callable, stat_funcs[mode])
         stat_length = kwargs.get("stat_length")
@@ -428,4 +429,4 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
     return op
 
 
-__all__ = ["pad"]
+__all__ = ["pad", "flip"]
