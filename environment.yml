@@ -26,6 +26,7 @@ dependencies:
   # For testing
   - coveralls
   - diff-cover
+  - mypy
   - pytest
   - pytest-cov
   - pytest-xdist
