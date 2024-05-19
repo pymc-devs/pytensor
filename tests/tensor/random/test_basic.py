@@ -18,6 +18,8 @@ from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.tensor import ones, stack
 from pytensor.tensor.random.basic import (
+    ChoiceWithoutReplacement,
+    PermutationRV,
     _gamma,
     bernoulli,
     beta,
@@ -1394,9 +1396,6 @@ def test_integers_samples():
 
 
 def test_choice_samples():
-    with pytest.raises(NotImplementedError):
-        choice._supp_shape_from_params(np.asarray(5))
-
     compare_sample_values(choice, np.asarray(5))
     compare_sample_values(choice, np.asarray([5]))
     compare_sample_values(choice, np.array([1.0, 5.0], dtype=config.floatX))
@@ -1423,19 +1422,6 @@ def test_choice_samples():
     compare_sample_values(choice, pt.as_tensor_variable([1, 2, 3]), 2, replace=True)
 
 
-def test_choice_infer_shape():
-    node = choice([0, 1]).owner
-    res = node.op._infer_shape((), node.inputs[3:], None)
-    assert tuple(res.eval()) == ()
-
-    node = choice([0, 1]).owner
-    # The param_shape of a NoneConst is None, during shape_inference
-    res = node.op._infer_shape(
-        (), node.inputs[3:], (node.inputs[3].shape, None, node.inputs[5].shape)
-    )
-    assert tuple(res.eval()) == ()
-
-
 def test_permutation_samples():
     compare_sample_values(
         permutation,
@@ -1455,11 +1441,195 @@ def test_permutation_shape():
     assert tuple(permutation(np.arange(5), size=(2, 3)).shape.eval()) == (2, 3, 5)
 
 
+def batched_unweighted_choice_without_replacement_tester(
+    mode="FAST_RUN", rng_ctor=np.random.default_rng
+):
+    """Test unweighted choice without replacement with batched ndims.
+
+    This has no corresponding in numpy, but is supported for consistency within the
+    RandomVariable API.
+
+    It can be triggered by manual buiding the Op or during automatic vectorization.
+    """
+    rng = shared(rng_ctor())
+
+    # Batched a implicit size
+    a_core_ndim = 2
+    core_shape_len = 1
+    rv_op = ChoiceWithoutReplacement(
+        ndim_supp=max(a_core_ndim - 1, 0) + core_shape_len,
+        ndims_params=[a_core_ndim, core_shape_len],
+        dtype="int64",
+    )
+
+    a = np.arange(3 * 5 * 2).reshape((3, 5, 2))
+    core_shape = (4,)
+    rv = rv_op(a, core_shape, rng=rng)
+    assert rv.type.shape == (3, 4, 2)
+    draws = rv.eval(mode=mode)
+
+    for i in range(3):
+        draw = draws[i]
+        assert np.unique(draw).size == 8
+        assert np.all((draw >= i * 10) & (draw < (i + 1) * 10))
+
+    # Explicit size broadcasts beyond a
+    a_core_ndim = 2
+    core_shape_len = 2
+    rv_op = ChoiceWithoutReplacement(
+        ndim_supp=max(a_core_ndim - 1, 0) + core_shape_len,
+        ndims_params=[a_core_ndim, len(core_shape)],
+        dtype="int64",
+    )
+
+    core_shape = (4, 1)
+    rv = rv_op(a, core_shape, size=(2, 3), rng=rng)
+    assert rv.type.shape == (2, 3, 4, 1, 2)
+    draws = rv.eval(mode=mode)
+
+    for j in range(2):
+        for i in range(3):
+            draw = draws[j, i]
+            assert np.unique(draw).size == 8
+            assert np.all((draw >= i * 10) & (draw < (i + 1) * 10))
+
+
+def batched_weighted_choice_without_replacement_tester(
+    mode="FAST_RUN", rng_ctor=np.random.default_rng
+):
+    """Test weighted choice without replacement with batched ndims.
+
+    This has no corresponding in numpy, but is supported for consistency within the
+    RandomVariable API.
+
+    It can be triggered by manual buiding the Op or during automatic vectorization.
+    """
+    rng = shared(rng_ctor())
+
+    # 3 ndims params indicates p is passed
+    a_core_ndim = 2
+    core_shape_len = 1
+    rv_op = ChoiceWithoutReplacement(
+        ndim_supp=max(a_core_ndim - 1, 0) + core_shape_len,
+        ndims_params=[a_core_ndim, 1, 1],
+        dtype="int64",
+    )
+
+    # Batched a implicit size
+    a = np.arange(4 * 5 * 2).reshape((4, 5, 2))
+    p = np.array([0.0, 0.25, 0.25, 0.25, 0.25])
+    core_shape = (3,)
+    rv = rv_op(a, p, core_shape, rng=rng)
+    assert rv.type.shape == (4, 3, 2)
+    draws = rv.eval(mode=mode)
+
+    for i in range(4):
+        draw = draws[i].ravel()
+        assert np.unique(draw).size == 6
+        # The first two entries after each step of 10 have zero probability
+        assert np.all((draw >= i * 10 + 2) & (draw < (i + 1) * 10))
+
+    # p and a are batched
+    # Test implicit arange
+    a_core_ndim = 0
+    core_shape_len = 2
+    rv_op = ChoiceWithoutReplacement(
+        ndim_supp=max(a_core_ndim - 1, 0) + core_shape_len,
+        ndims_params=[a_core_ndim, 1, 1],
+        dtype="int64",
+    )
+    a = 6
+    p = np.array(
+        [
+            # Only even numbers allowed
+            [1 / 3, 0.0, 1 / 3, 0.0, 1 / 3, 0.0],
+            # Only odd numbers allowed
+            [0.0, 1 / 3, 0.0, 1 / 3, 0.0, 1 / 3],
+        ]
+    )
+    core_shape = (3, 1)
+    rv = rv_op(a, p, core_shape, rng=rng)
+    assert rv.type.shape == (2, 3, 1)
+    draws = rv.eval(mode=mode)
+
+    for i in range(2):
+        draw = np.asarray(draws[i].ravel())
+        assert set(draw) == set(range(i, 6, 2))
+
+    # Size broadcasts beyond a
+    a_core_ndim = 2
+    core_shape_len = 1
+    rv_op = ChoiceWithoutReplacement(
+        ndim_supp=max(a_core_ndim - 1, 0) + core_shape_len,
+        ndims_params=[a_core_ndim, 1, 1],
+        dtype="int64",
+    )
+    a = np.arange(4 * 5 * 2).reshape((4, 5, 2))
+    p = np.array([0.0, 0.25, 0.25, 0.25, 0.25])
+    core_shape = (3,)
+    rv = rv_op(a, p, core_shape, size=(5, 1, 4))
+    assert rv.type.shape == (5, 1, 4, 3, 2)
+    draws = rv.eval(mode=mode)
+
+    for j in range(5):
+        for i in range(4):
+            draw = draws[j, 0, i].ravel()
+            assert np.unique(draw).size == 6
+            # The first two entries after each step of 10 have zero probability
+            assert np.all((draw >= i * 10 + 2) & (draw < (i + 1) * 10))
+
+
+def batched_permutation_tester(mode="FAST_RUN", rng_ctor=np.random.default_rng):
+    """Test permutation with batched ndims.
+
+    This has no corresponding in numpy, but is supported for consistency within the
+    RandomVariable API.
+
+    It can be triggered by manual buiding the Op or during automatic vectorization.
+    """
+
+    rng = shared(rng_ctor())
+
+    rv_op = PermutationRV(ndim_supp=2, ndims_params=[2], dtype="int64")
+    x = np.arange(5 * 3 * 2).reshape((5, 3, 2))
+
+    # Batched x and implicit size
+    rv = rv_op(x, rng=rng)
+    assert rv.type.shape == (5, 3, 2)
+
+    draws = rv.eval(mode=mode)
+    for i in range(5):
+        assert set(np.asarray(draws[i].ravel())) == set(range(i * 6, (i + 1) * 6))
+
+    # Size broadcasts beyond x
+    rv = rv_op(x, size=(4, 5), rng=rng)
+    assert rv.type.shape == (4, 5, 3, 2)
+    draws = rv.eval(mode=mode)
+    for j in range(4):
+        for i in range(5):
+            assert set(np.asarray(draws[j, i].ravel())) == set(
+                range(i * 6, (i + 1) * 6)
+            )
+
+
+@pytest.mark.parametrize(
+    "batch_dims_tester",
+    [
+        batched_unweighted_choice_without_replacement_tester,
+        batched_weighted_choice_without_replacement_tester,
+        batched_permutation_tester,
+    ],
+)
+def test_unnatural_batched_dims(batch_dims_tester):
+    "Tests for RVs that don't have natural batch dims in Numpy API."
+    batch_dims_tester()
+
+
 @config.change_flags(compute_test_value="off")
 def test_pickle():
     # This is an interesting `Op` case, because it has `None` types and a
     # conditional dtype
-    sample_a = choice(5, size=(2, 3))
+    sample_a = choice(5, replace=False, size=(2, 3))
 
     a_pkl = pickle.dumps(sample_a)
     a_unpkl = pickle.loads(a_pkl)
