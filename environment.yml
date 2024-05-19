@@ -41,6 +41,7 @@ dependencies:
   # code style
   - ruff
   # developer tools
+  - pandas # required to run mypy script
   - pre-commit
   - packaging
   - typing_extensions
