@@ -23,7 +23,6 @@ from pytensor.graph.basic import (
     get_var_by_name,
     graph_inputs,
     io_toposort,
-    list_of_nodes,
     orphans_between,
     truncated_graph_inputs,
     variable_depends_on,
@@ -565,17 +564,6 @@ def test_ops():
     res = applys_between([r1, r2], [o3])
     res_list = list(res)
     assert res_list == [o3.owner, o2.owner, o1.owner]
-
-
-def test_list_of_nodes():
-    r1, r2, r3 = MyVariable(1), MyVariable(2), MyVariable(3)
-    o1 = MyOp(r1, r2)
-    o1.name = "o1"
-    o2 = MyOp(r3, o1)
-    o2.name = "o2"
-
-    res = list_of_nodes([r1, r2], [o2])
-    assert res == [o2.owner, o1.owner]
 
 
 def test_apply_depends_on():
