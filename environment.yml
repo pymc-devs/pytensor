@@ -27,6 +27,8 @@ dependencies:
   - coveralls
   - diff-cover
   - mypy
+  - types-filelock
+  - types-setuptools
   - pytest
   - pytest-cov
   - pytest-xdist
