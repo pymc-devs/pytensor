@@ -26,6 +26,9 @@ dependencies:
   # For testing
   - coveralls
   - diff-cover
+  - mypy
+  - types-filelock
+  - types-setuptools
   - pytest
   - pytest-cov
   - pytest-xdist
@@ -41,6 +44,7 @@ dependencies:
   # code style
   - ruff
   # developer tools
+  - pandas # required to run mypy script
   - pre-commit
   - packaging
   - typing_extensions
