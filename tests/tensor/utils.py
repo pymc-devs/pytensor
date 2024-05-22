@@ -107,7 +107,6 @@ def inplace_func(
 def eval_outputs(outputs, ops=(), mode=None):
     f = inplace_func([], outputs, mode=mode)
     variables = f()
-
     if ops:
         assert any(isinstance(node.op, ops) for node in f.maker.fgraph.apply_nodes)
     if isinstance(variables, tuple | list) and len(variables) == 1:

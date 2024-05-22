@@ -1758,7 +1758,6 @@ def orig_function(
             name=name,
             fgraph=fgraph,
         )
-        print(m)
         with config.change_flags(compute_test_value="off"):
             fn = m.create(defaults)
     finally:

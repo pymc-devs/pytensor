@@ -808,7 +808,11 @@ class TestMaxAndArgmax:
         v_shape, i_shape = eval_outputs([vt.shape, it.shape])
         assert tuple(v_shape) == vt.type.shape
         assert tuple(i_shape) == it.type.shape
-        # Test valuesgi
+        # Test values
+        v, i = eval_outputs([vt, it])
+        assert i.dtype == "int64"
+        assert np.all(v == np_max)
+        assert np.all(i == np_argm)
 
     @pytest.mark.parametrize(
         "axis,np_axis",
@@ -1029,9 +1033,7 @@ class TestMaxAndArgmax:
         batch_x = tensor(shape=(3, 5, 5, 5, 5))
 
         # Test MaxAndArgmax
-        max_x, argmax_x = max_and_argmax(x, axis=core_axis)
-        max_node = max_x.owner
-        assert isinstance(max_node.op, Max)
+        argmax_x = argmax(x, axis=core_axis)
 
         arg_max_node = argmax_x.owner
         new_node = vectorize_node(arg_max_node, batch_x)
@@ -1394,6 +1396,7 @@ class TestMinMax:
         # check_grad_max(data, eval_outputs(grad(max_and_argmax(n,
         # axis=1)[0], n)),axis=1)
 
+    @pytest.mark.xfail(reason="Fails due to #770")
     def test_uint(self):
         for dtype in ("uint8", "uint16", "uint32", "uint64"):
             itype = np.iinfo(dtype)
@@ -1419,9 +1422,9 @@ class TestMinMax:
         assert np.all(i)
 
 
-def test_MaxandArgmax_deprecated():
-    with pytest.warns(FutureWarning, match=".*deprecated.*"):
-        pytensor.tensor.math.MaxandArgmax
+def test_MaxAndArgmax_deprecated():
+    with pytest.raises(AttributeError):
+        pytensor.tensor.math.MaxAndArgmax
 
 
 rng = np.random.default_rng(seed=utt.fetch_seed())

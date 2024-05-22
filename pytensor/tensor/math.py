@@ -107,6 +107,14 @@ else:
     float64_atol = 1e-8
 
 
+def __getattr__(name):
+    if name == "MaxAndArgmax":
+        raise AttributeError(
+            "The class `MaxAndArgmax` has been deprecated. "
+            "Call `Max` and `Argmax` separately as an alternative."
+        )
+
+
 def _get_atol_rtol(a, b):
     tiny = ("float16",)
     narrow = ("float32", "complex64")
@@ -132,15 +140,6 @@ def _allclose(a, b, rtol=None, atol=None):
         atol_ = atol
 
     return np.allclose(a, b, atol=atol_, rtol=rtol_)
-
-
-def __getattr__(name):
-    if name == "MaxandArgmax":
-        warnings.warn(
-            "The class `MaxandArgmax` has been deprecated. "
-            "Call `Max` and `Argmax` seperately as an alternative.",
-            FutureWarning,
-        )
 
 
 class Argmax(COp):
@@ -193,10 +192,8 @@ class Argmax(COp):
         (x,) = inp
         axes = self.axis
         (max_idx,) = outs
-
         if axes is None:
             axes = tuple(range(x.ndim))
-
         # Numpy does not support multiple axes for argmax
         # Work around
         keep_axes = np.array([i for i in range(x.ndim) if i not in axes], dtype="int64")
@@ -398,21 +395,21 @@ def max_and_argmax(a, axis=None, keepdims=False):
 
     """
     # Check axis and convert it to a Python list of integers.
-    # Axis will be used as an op param of MaxAndArgmax.
+    # Axis will be used as an op param of Max and Argmax.
     a = as_tensor_variable(a)
 
-    flag = False
+    is_axis_empty = False
     if axis == ():
-        flag = True
+        is_axis_empty = True
 
     axis = check_and_normalize_axes(a, axis)
 
-    if len(axis) == 0 and not flag:
+    if len(axis) == 0 and not is_axis_empty:
         axis = None
 
     out = Max(axis)(a)
 
-    if not flag:
+    if not is_axis_empty:
         argout = Argmax(axis)(a)
     else:
         argout = zeros_like(a, dtype="int64")
@@ -495,7 +492,8 @@ class Max(NonZeroDimsCAReduce):
         if g_max_disconnected:
             return [DisconnectedType()()]
 
-        if NoneConst.equals(axis):
+        # if NoneConst.equals(axis):
+        if axis is None:
             axis_ = list(range(x.ndim))
         else:
             axis_ = axis

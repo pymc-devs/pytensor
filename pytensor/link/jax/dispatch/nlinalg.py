@@ -104,56 +104,11 @@ def jax_funcify_BatchedDot(op, **kwargs):
     return batched_dot
 
 
-# @jax_funcify.register(Max)
-# @jax_funcify.register(Argmax)
-# def jax_funcify_MaxAndArgmax(op, **kwargs):
-#     axis = op.axis
-
-#     def maxandargmax(x, axis=axis):
-#         if axis is None:
-#             axes = tuple(range(x.ndim))
-#         else:
-#             axes = tuple(int(ax) for ax in axis)
-
-#         max_res = jnp.max(x, axis)
-
-#         # NumPy does not support multiple axes for argmax; this is a
-#         # work-around
-#         keep_axes = jnp.array(
-#             [i for i in range(x.ndim) if i not in axes], dtype="int64"
-#         )
-#         # Not-reduced axes in front
-#         transposed_x = jnp.transpose(
-#             x, jnp.concatenate((keep_axes, jnp.array(axes, dtype="int64")))
-#         )
-#         kept_shape = transposed_x.shape[: len(keep_axes)]
-#         reduced_shape = transposed_x.shape[len(keep_axes) :]
-
-#         # Numpy.prod returns 1.0 when arg is empty, so we cast it to int64
-#         # Otherwise reshape would complain citing float arg
-#         new_shape = (
-#             *kept_shape,
-#             jnp.prod(jnp.array(reduced_shape, dtype="int64"), dtype="int64"),
-#         )
-#         reshaped_x = transposed_x.reshape(new_shape)
-
-#         max_idx_res = jnp.argmax(reshaped_x, axis=-1).astype("int64")
-
-#         return max_res, max_idx_res
-
-#     return maxandargmax
-
-
 @jax_funcify.register(Max)
 def jax_funcify_Max(op, **kwargs):
     axis = op.axis
 
-    def max(x, axis=axis):
-        # if axis is None:
-        #     axes = tuple(range(x.ndim))
-        # else:
-        #     axes = tuple(int(ax) for ax in axis)
-
+    def max(x):
         max_res = jnp.max(x, axis)
 
         return max_res
@@ -165,7 +120,7 @@ def jax_funcify_Max(op, **kwargs):
 def jax_funcify_Argmax(op, **kwargs):
     axis = op.axis
 
-    def argmax(x, axis=axis):
+    def argmax(x):
         if axis is None:
             axes = tuple(range(x.ndim))
         else:
