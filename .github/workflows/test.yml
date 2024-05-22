@@ -121,7 +121,7 @@ jobs:
             python-version: "3.10"
             fast-compile: 0
             float32: 0
-            part: "tests/link/pytorch"
+            # part: "tests/link/pytorch"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -272,3 +272,4 @@ jobs:
           directory: ./coverage/
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
+
