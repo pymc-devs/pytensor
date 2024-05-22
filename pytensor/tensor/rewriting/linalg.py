@@ -22,6 +22,7 @@ from pytensor.tensor.nlinalg import (
     inv,
     kron,
     pinv,
+    svd,
 )
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
@@ -393,14 +394,35 @@ def local_svd_uv_simplify(fgraph, node):
     and allow `pytensor` to re-use the decomposition outputs instead of recomputing.
     """
     (x,) = node.inputs
-    compute_uv = False
 
-    for cl, _ in fgraph.clients[x]:
-        if isinstance(cl.op, Blockwise) and isinstance(cl.op.core_op, SVD):
-            if (not compute_uv) and cl.op.core_op.compute_uv:
-                compute_uv = True
-                break
+    if node.compute_uv:
+        # compute_uv=True returns [u, s, v].
+        # if at least u or v is used, no need to rewrite this node.
+        if (
+            fgraph.clients[node.outputs[0]] is not None
+            or fgraph.clients[node.outputs[2]] is not None
+        ):
+            return
 
-    if compute_uv and not node.op.compute_uv:
-        full_matrices = node.op.full_matrices
-        return [SVD(full_matrices=full_matrices, compute_uv=compute_uv)]
+        # Else, has to replace the s of this node with s of an SVD Op that compute_uv=False.
+        # First, iterate to see if there is an SVD Op that can be reused.
+        for cl, _ in fgraph.clients[x]:
+            if cl == "output":
+                continue
+            if isinstance(cl.op, Blockwise) and isinstance(cl.op.core_op, SVD):
+                if not cl.op.core_op.compute_uv:
+                    return {fgraph.clients[node.outputs[1]]: cl.outputs[0]}
+
+        # If no SVD reusable, return a new one.
+        return [svd(x, full_matrices=node.full_matrices, compute_uv=False)]
+
+    else:
+        # compute_uv=False returns [s].
+        # We want rewrite if there is another one with compute_uv=True.
+        # For this case, just reuse the `s` from the one with compute_uv=True.
+        for cl, _ in fgraph.clients[x]:
+            if cl == "output":
+                continue
+            if isinstance(cl.op, Blockwise) and isinstance(cl.op.core_op, SVD):
+                if cl.op.core_op.compute_uv:
+                    return [cl.outputs[1]]
