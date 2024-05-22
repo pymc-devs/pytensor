@@ -203,7 +203,7 @@ jobs:
         - name: Install dependencies
           shell: bash -l {0}
           run: |
-            mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" mkl numpy scipy pip mkl-service cython pytest "numba>=0.57" jax jaxlib torch pytest-benchmark
+            mamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" mkl numpy scipy pip mkl-service cython pytest "numba>=0.57" jax jaxlib pytorch pytest-benchmark
             pip install -e ./
             mamba list && pip freeze
             python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'
