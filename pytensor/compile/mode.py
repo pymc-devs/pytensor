@@ -473,7 +473,6 @@ PYTORCH = Mode(
             "BlasOpt",
             "fusion",
             "inplace",
-            "local_uint_constant_indices",
         ],
     ),
 )
