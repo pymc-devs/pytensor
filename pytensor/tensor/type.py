@@ -103,10 +103,13 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         if str(dtype) == "floatX":
             self.dtype = config.floatX
         else:
-            if np.obj2sctype(dtype) is None:
+            if np.obj2sctype(dtype) is None and "torch" not in str(dtype):
                 raise TypeError(f"Invalid dtype: {dtype}")
 
-            self.dtype = np.dtype(dtype).name
+            if "torch" in str(dtype):
+                self.dtype = str(dtype).split(".")[-1]
+            else:
+                self.dtype = np.dtype(dtype).name
 
         def parse_bcast_and_shape(s):
             if isinstance(s, bool | np.bool_):
