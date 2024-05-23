@@ -1,15 +1,13 @@
 import warnings
 from functools import singledispatch
 
-# import jax
-# import jax.numpy as jnp
 import torch
 
 from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.graph.fg import FunctionGraph
 from pytensor.ifelse import IfElse
 from pytensor.link.utils import fgraph_to_python
-from pytensor.raise_op import Assert, CheckAndRaise
+from pytensor.raise_op import CheckAndRaise
 
 
 @singledispatch
@@ -56,14 +54,15 @@ def pytorch_funcify_IfElse(op, **kwargs):
 
     def ifelse(cond, *args, n_outs=n_outs):
         res = torch.where(
-            cond, lambda _: args[:n_outs], lambda _: args[n_outs:], operand=None
+            cond,
+            args[:n_outs][0],
+            args[n_outs:][0],
         )
-        return res if n_outs > 1 else res[0]
+        return res
 
     return ifelse
 
 
-@pytorch_funcify.register(Assert)
 @pytorch_funcify.register(CheckAndRaise)
 def pytorch_funcify_CheckAndRaise(op, **kwargs):
     def assert_fn(x, *conditions):
@@ -76,7 +75,7 @@ def pytorch_funcify_CheckAndRaise(op, **kwargs):
 
 def pytorch_safe_copy(x):
     try:
-        res = x.clone().detach()
+        res = x.clone()
     except NotImplementedError:
         # warnings.warn(
         #     "`jnp.copy` is not implemented yet. Using the object's `copy` method."
