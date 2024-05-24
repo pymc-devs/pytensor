@@ -96,11 +96,14 @@ def make_numba_random_fn(node, np_random_func):
     The functions generated here add parameter broadcasting and the ``size``
     argument to the Numba-supported scalar ``np.random`` functions.
     """
-    if not isinstance(node.inputs[0].type, RandomStateType):
+    op: ptr.RandomVariable = node.op
+    rng_param = op.rng_param(node)
+    if not isinstance(rng_param.type, RandomStateType):
         raise TypeError("Numba does not support NumPy `Generator`s")
 
-    tuple_size = int(get_vector_length(node.inputs[1]))
-    size_dims = tuple_size - max(i.ndim for i in node.inputs[3:])
+    tuple_size = int(get_vector_length(op.size_param(node)))
+    dist_params = op.dist_params(node)
+    size_dims = tuple_size - max(i.ndim for i in dist_params)
 
     # Make a broadcast-capable version of the Numba supported scalar sampling
     # function
@@ -126,7 +129,7 @@ def make_numba_random_fn(node, np_random_func):
     )
 
     bcast_fn_input_names = ", ".join(
-        [unique_names(i, force_unique=True) for i in node.inputs[3:]]
+        [unique_names(i, force_unique=True) for i in dist_params]
     )
     bcast_fn_global_env = {
         "np_random_func": np_random_func,
@@ -143,7 +146,7 @@ def {bcast_fn_name}({bcast_fn_input_names}):
     )
 
     random_fn_input_names = ", ".join(
-        ["rng", "size", "dtype"] + [unique_names(i) for i in node.inputs[3:]]
+        ["rng", "size", "dtype"] + [unique_names(i) for i in dist_params]
     )
 
     # Now, create a Numba JITable function that implements the `size` parameter
@@ -244,7 +247,8 @@ def create_numba_random_fn(
         suffix_sep="_",
     )
 
-    np_names = [unique_names(i, force_unique=True) for i in node.inputs[3:]]
+    dist_params = op.dist_params(node)
+    np_names = [unique_names(i, force_unique=True) for i in dist_params]
     np_input_names = ", ".join(np_names)
     np_random_fn_src = f"""
 @numba_vectorize
@@ -300,9 +304,9 @@ def numba_funcify_BernoulliRV(op, node, **kwargs):
 
 
 @numba_funcify.register(ptr.CategoricalRV)
-def numba_funcify_CategoricalRV(op, node, **kwargs):
+def numba_funcify_CategoricalRV(op: ptr.CategoricalRV, node, **kwargs):
     out_dtype = node.outputs[1].type.numpy_dtype
-    size_len = int(get_vector_length(node.inputs[1]))
+    size_len = int(get_vector_length(op.size_param(node)))
     p_ndim = node.inputs[-1].ndim
 
     @numba_basic.numba_njit
@@ -331,9 +335,9 @@ def numba_funcify_CategoricalRV(op, node, **kwargs):
 @numba_funcify.register(ptr.DirichletRV)
 def numba_funcify_DirichletRV(op, node, **kwargs):
     out_dtype = node.outputs[1].type.numpy_dtype
-    alphas_ndim = node.inputs[3].type.ndim
+    alphas_ndim = op.dist_params(node)[0].type.ndim
     neg_ind_shape_len = -alphas_ndim + 1
-    size_len = int(get_vector_length(node.inputs[1]))
+    size_len = int(get_vector_length(op.size_param(node)))
 
     if alphas_ndim > 1:
 
@@ -400,9 +404,9 @@ def numba_funcify_choice_without_replacement(op, node, **kwargs):
 
 
 @numba_funcify.register(ptr.PermutationRV)
-def numba_funcify_permutation(op, node, **kwargs):
+def numba_funcify_permutation(op: ptr.PermutationRV, node, **kwargs):
     # PyTensor uses size=() to represent size=None
-    size_is_none = node.inputs[1].type.shape == (0,)
+    size_is_none = op.size_param(node).type.shape == (0,)
     batch_ndim = op.batch_ndim(node)
     x_batch_ndim = node.inputs[-1].type.ndim - op.ndims_params[0]
 

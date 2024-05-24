@@ -255,7 +255,7 @@ def local_subtensor_rv_lift(fgraph, node):
         return False
 
     # Check that indexing does not act on support dims
-    batch_ndims = rv.ndim - rv_op.ndim_supp
+    batch_ndims = rv_op.batch_ndim(rv_node)
     # We decompose the boolean indexes, which makes it clear whether they act on support dims or not
     non_bool_indices = tuple(
         chain.from_iterable(

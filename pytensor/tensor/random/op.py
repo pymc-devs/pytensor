@@ -372,6 +372,18 @@ class RandomVariable(Op):
     def batch_ndim(self, node: Apply) -> int:
         return cast(int, node.default_output().type.ndim - self.ndim_supp)
 
+    def rng_param(self, node) -> Variable:
+        """Return the node input corresponding to the rng"""
+        return node.inputs[0]
+
+    def size_param(self, node) -> Variable:
+        """Return the node input corresponding to the size"""
+        return node.inputs[1]
+
+    def dist_params(self, node) -> Sequence[Variable]:
+        """Return the node inpust corresponding to dist params"""
+        return node.inputs[3:]
+
     def perform(self, node, inputs, outputs):
         rng_var_out, smpl_out = outputs
 

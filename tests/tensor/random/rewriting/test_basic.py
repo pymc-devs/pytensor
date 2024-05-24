@@ -111,9 +111,9 @@ def test_inplace_rewrites(rv_op):
     assert new_op._props_dict() == (op._props_dict() | {"inplace": True})
     assert all(
         np.array_equal(a.data, b.data)
-        for a, b in zip(new_out.owner.inputs[2:], out.owner.inputs[2:])
+        for a, b in zip(new_op.dist_params(new_node), op.dist_params(node))
     )
-    assert np.array_equal(new_out.owner.inputs[1].data, [])
+    assert np.array_equal(new_op.size_param(new_node).data, op.size_param(node).data)
 
 
 @config.change_flags(compute_test_value="raise")
@@ -400,7 +400,7 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
         assert new_out.owner.op == dist_op
         assert all(
             isinstance(i.owner.op, DimShuffle)
-            for i in new_out.owner.inputs[3:]
+            for i in new_out.owner.op.dist_params(new_out.owner)
             if i.owner
         )
     else:
@@ -793,7 +793,7 @@ def test_Subtensor_lift(indices, lifted, dist_op, dist_params, size):
         assert isinstance(new_out.owner.op, RandomVariable)
         assert all(
             isinstance(i.owner.op, AdvancedSubtensor | AdvancedSubtensor1 | Subtensor)
-            for i in new_out.owner.inputs[3:]
+            for i in new_out.owner.op.dist_params(new_out.owner)
             if i.owner
         )
     else:

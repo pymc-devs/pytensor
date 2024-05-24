@@ -88,7 +88,7 @@ def jax_typify_Generator(rng, **kwargs):
 
 
 @jax_funcify.register(ptr.RandomVariable)
-def jax_funcify_RandomVariable(op, node, **kwargs):
+def jax_funcify_RandomVariable(op: ptr.RandomVariable, node, **kwargs):
     """JAX implementation of random variables."""
     rv = node.outputs[1]
     out_dtype = rv.type.dtype
@@ -101,7 +101,7 @@ def jax_funcify_RandomVariable(op, node, **kwargs):
     if None in static_size:
         # Sometimes size can be constant folded during rewrites,
         # without the RandomVariable node being updated with new static types
-        size_param = node.inputs[1]
+        size_param = op.size_param(node)
         if isinstance(size_param, Constant):
             size_tuple = tuple(size_param.data)
             # PyTensor uses empty size to represent size = None
@@ -304,11 +304,11 @@ def jax_sample_fn_t(op, node):
 
 
 @jax_sample_fn.register(ptr.ChoiceWithoutReplacement)
-def jax_funcify_choice(op, node):
+def jax_funcify_choice(op: ptr.ChoiceWithoutReplacement, node):
     """JAX implementation of `ChoiceRV`."""
 
     batch_ndim = op.batch_ndim(node)
-    a, *p, core_shape = node.inputs[3:]
+    a, *p, core_shape = op.dist_params(node)
     a_core_ndim, *p_core_ndim, _ = op.ndims_params
 
     if batch_ndim and a_core_ndim == 0:
