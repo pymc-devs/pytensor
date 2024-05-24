@@ -8,6 +8,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import NominalVariable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.utils import MissingInputError
+from pytensor.printing import debugprint
 from tests.graph.utils import (
     MyConstant,
     MyOp,
@@ -706,3 +707,9 @@ class TestFunctionGraph:
         assert nm2 not in fg.inputs
         assert nm in fg.variables
         assert nm2 in fg.variables
+
+    def test_dprint(self):
+        r1, r2 = MyVariable("x"), MyVariable("y")
+        o1 = op1(r1, r2)
+        fg = FunctionGraph([r1, r2], [o1], clone=False)
+        assert fg.dprint(file="str") == debugprint(fg, file="str")
