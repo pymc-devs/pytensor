@@ -141,7 +141,7 @@ def compare_sample_values(rv, *params, rng=None, test_fn=None, **kwargs):
 
 
 @pytest.mark.parametrize(
-    "u, l, size",
+    "l, u, size",
     [
         (np.array(10, dtype=config.floatX), np.array(20, dtype=config.floatX), None),
         (np.array(10, dtype=config.floatX), np.array(20, dtype=config.floatX), []),
@@ -152,8 +152,8 @@ def compare_sample_values(rv, *params, rng=None, test_fn=None, **kwargs):
         ),
     ],
 )
-def test_uniform_samples(u, l, size):
-    compare_sample_values(uniform, u, l, size=size)
+def test_uniform_samples(l, u, size):
+    compare_sample_values(uniform, l, u, size=size)
 
 
 def test_uniform_default_args():
