@@ -2084,6 +2084,10 @@ class ChoiceWithoutReplacement(RandomVariable):
         batch_ndim = max(batch_ndim, size_ndim)
 
         if batch_ndim == 0:
+            # Numpy choice fails with size=() if a.ndim > 1 is batched
+            # https://github.com/numpy/numpy/issues/26518
+            if core_shape == ():
+                core_shape = None
             return rng.choice(a, p=p, size=core_shape, replace=False)
 
         # Numpy choice doesn't have a concept of batch dims
