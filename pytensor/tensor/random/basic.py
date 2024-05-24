@@ -2002,6 +2002,11 @@ class ChoiceWithoutReplacement(RandomVariable):
         a_shape = tuple(a.shape) if param_shapes is None else tuple(param_shapes[0])
         a_batch_ndim = len(a_shape) - self.ndims_params[0]
         a_core_shape = a_shape[a_batch_ndim:]
+        core_shape_ndim = core_shape.type.ndim
+        if core_shape_ndim > 1:
+            # Batch core shapes are only valid if homogeneous or broadcasted,
+            # as otherwise they would imply ragged choice arrays
+            core_shape = core_shape[(0,) * (core_shape_ndim - 1)]
         return tuple(core_shape) + a_core_shape[1:]
 
     def rng_fn(self, *params):
@@ -2011,15 +2016,11 @@ class ChoiceWithoutReplacement(RandomVariable):
             rng, a, core_shape, size = params
             p = None
 
+        if core_shape.ndim > 1:
+            core_shape = core_shape[(0,) * (core_shape.ndim - 1)]
         core_shape = tuple(core_shape)
 
-        # We don't have access to the node in rng_fn for easy computation of batch_ndim :(
-        a_batch_ndim = batch_ndim = a.ndim - self.ndims_params[0]
-        if p is not None:
-            p_batch_ndim = p.ndim - self.ndims_params[1]
-            batch_ndim = max(batch_ndim, p_batch_ndim)
-        size_ndim = 0 if size is None else len(size)
-        batch_ndim = max(batch_ndim, size_ndim)
+        batch_ndim = a.ndim - self.ndims_params[0]
 
         if batch_ndim == 0:
             # Numpy choice fails with size=() if a.ndim > 1 is batched
@@ -2031,16 +2032,16 @@ class ChoiceWithoutReplacement(RandomVariable):
         # Numpy choice doesn't have a concept of batch dims
         if size is None:
             if p is None:
-                size = a.shape[:a_batch_ndim]
+                size = a.shape[:batch_ndim]
             else:
                 size = np.broadcast_shapes(
-                    a.shape[:a_batch_ndim],
-                    p.shape[:p_batch_ndim],
+                    a.shape[:batch_ndim],
+                    p.shape[:batch_ndim],
                 )
 
-        a = np.broadcast_to(a, size + a.shape[a_batch_ndim:])
+        a = np.broadcast_to(a, size + a.shape[batch_ndim:])
         if p is not None:
-            p = np.broadcast_to(p, size + p.shape[p_batch_ndim:])
+            p = np.broadcast_to(p, size + p.shape[batch_ndim:])
 
         a_indexed_shape = a.shape[len(size) + 1 :]
         out = np.empty(size + core_shape + a_indexed_shape, dtype=a.dtype)
@@ -2143,26 +2144,26 @@ class PermutationRV(RandomVariable):
     def _supp_shape_from_params(self, dist_params, param_shapes=None):
         [x] = dist_params
         x_shape = tuple(x.shape if param_shapes is None else param_shapes[0])
-        if x.type.ndim == 0:
-            return (x,)
+        if self.ndims_params[0] == 0:
+            # Implicit arange, this is only valid for homogeneous arrays
+            # Otherwise it would imply a ragged permutation array.
+            return (x.ravel()[0],)
         else:
             batch_x_ndim = x.type.ndim - self.ndims_params[0]
             return x_shape[batch_x_ndim:]
 
     def rng_fn(self, rng, x, size):
         # We don't have access to the node in rng_fn :(
-        x_batch_ndim = x.ndim - self.ndims_params[0]
-        batch_ndim = max(x_batch_ndim, 0 if size is None else len(size))
+        batch_ndim = x.ndim - self.ndims_params[0]
 
         if batch_ndim:
             # rng.permutation has no concept of batch dims
-            x_core_shape = x.shape[x_batch_ndim:]
             if size is None:
-                size = x.shape[:x_batch_ndim]
+                size = x.shape[:batch_ndim]
             else:
-                x = np.broadcast_to(x, size + x_core_shape)
+                x = np.broadcast_to(x, size + x.shape[batch_ndim:])
 
-            out = np.empty(size + x_core_shape, dtype=x.dtype)
+            out = np.empty(size + x.shape[batch_ndim:], dtype=x.dtype)
             for idx in np.ndindex(size):
                 out[idx] = rng.permutation(x[idx])
             return out

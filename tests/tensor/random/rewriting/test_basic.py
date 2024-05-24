@@ -796,13 +796,21 @@ def test_Subtensor_lift(indices, lifted, dist_op, dist_params, size):
         rng,
     )
 
+    def is_subtensor_or_dimshuffle_subtensor(inp) -> bool:
+        subtensor_ops = Subtensor | AdvancedSubtensor | AdvancedSubtensor1
+        if isinstance(inp.owner.op, subtensor_ops):
+            return True
+        if isinstance(inp.owner.op, DimShuffle):
+            return isinstance(inp.owner.inputs[0].owner.op, subtensor_ops)
+        return False
+
     if lifted:
         assert isinstance(new_out.owner.op, RandomVariable)
         assert all(
-            isinstance(i.owner.op, AdvancedSubtensor | AdvancedSubtensor1 | Subtensor)
+            is_subtensor_or_dimshuffle_subtensor(i)
             for i in new_out.owner.op.dist_params(new_out.owner)
             if i.owner
-        )
+        ), new_out.dprint(depth=3, print_type=True)
     else:
         assert isinstance(
             new_out.owner.op, AdvancedSubtensor | AdvancedSubtensor1 | Subtensor
