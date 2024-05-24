@@ -927,3 +927,15 @@ class FunctionGraph(MetaObject):
             return item in self.apply_nodes
         else:
             raise TypeError()
+
+    def dprint(self, **kwargs):
+        """Debug print itself
+
+        Parameters
+        ----------
+        kwargs:
+            Optional keyword arguments to pass to debugprint function.
+        """
+        from pytensor.printing import debugprint
+
+        return debugprint(self, **kwargs)

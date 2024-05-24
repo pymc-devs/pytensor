@@ -1097,6 +1097,18 @@ class Function:
         # NOTE: sync was needed on old gpu backend
         pass
 
+    def dprint(self, **kwargs):
+        """Debug print itself
+
+        Parameters
+        ----------
+        kwargs:
+            Optional keyword arguments to pass to debugprint function.
+        """
+        from pytensor.printing import debugprint
+
+        return debugprint(self, **kwargs)
+
 
 # pickling/deepcopy support for Function
 def _pickle_Function(f):

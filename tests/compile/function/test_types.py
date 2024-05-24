@@ -16,6 +16,7 @@ from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import OpKeyGraphRewriter, PatternNodeRewriter
 from pytensor.graph.utils import MissingInputError
 from pytensor.link.vm import VMLinker
+from pytensor.printing import debugprint
 from pytensor.tensor.math import dot, tanh
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.type import (
@@ -861,6 +862,12 @@ class TestFunction:
 
         with pytest.raises(AssertionError):
             function([x], outputs={(1, "b"): x, 1.0: x**2})
+
+    def test_dprint(self):
+        x = pt.scalar("x")
+        out = x + 1
+        f = function([x], out)
+        assert f.dprint(file="str") == debugprint(f, file="str")
 
 
 class TestPicklefunction:
