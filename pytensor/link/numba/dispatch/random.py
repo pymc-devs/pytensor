@@ -347,7 +347,6 @@ def numba_funcify_CategoricalRV(op: ptr.CategoricalRV, node, **kwargs):
 def numba_funcify_DirichletRV(op, node, **kwargs):
     out_dtype = node.outputs[1].type.numpy_dtype
     alphas_ndim = op.dist_params(node)[0].type.ndim
-    neg_ind_shape_len = -alphas_ndim + 1
     size_param = op.size_param(node)
     size_len = (
         None
@@ -363,11 +362,6 @@ def numba_funcify_DirichletRV(op, node, **kwargs):
                 samples_shape = alphas.shape
             else:
                 size_tpl = numba_ndarray.to_fixed_tuple(size, size_len)
-                if (
-                    0 < alphas.ndim - 1 <= len(size_tpl)
-                    and size_tpl[neg_ind_shape_len:] != alphas.shape[:-1]
-                ):
-                    raise ValueError("Parameters shape and size do not match.")
                 samples_shape = size_tpl + alphas.shape[-1:]
 
             res = np.empty(samples_shape, dtype=out_dtype)

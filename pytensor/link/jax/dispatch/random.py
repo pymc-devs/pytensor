@@ -304,7 +304,6 @@ def jax_funcify_choice(op: ptr.ChoiceWithoutReplacement, node):
     """JAX implementation of `ChoiceRV`."""
 
     batch_ndim = op.batch_ndim(node)
-    a, *p, core_shape = op.dist_params(node)
     a_core_ndim, *p_core_ndim, _ = op.ndims_params
 
     if batch_ndim and a_core_ndim == 0:
@@ -312,12 +311,6 @@ def jax_funcify_choice(op: ptr.ChoiceWithoutReplacement, node):
             "Batch dimensions are not supported for 0d arrays. "
             "A default JAX rewrite should have materialized the implicit arange"
         )
-
-    a_batch_ndim = a.type.ndim - a_core_ndim
-    if op.has_p_param:
-        [p] = p
-        [p_core_ndim] = p_core_ndim
-        p_batch_ndim = p.type.ndim - p_core_ndim
 
     def sample_fn(rng, size, dtype, *parameters):
         rng_key = rng["jax_state"]
@@ -328,7 +321,7 @@ def jax_funcify_choice(op: ptr.ChoiceWithoutReplacement, node):
         else:
             a, core_shape = parameters
             p = None
-        core_shape = tuple(np.asarray(core_shape))
+        core_shape = tuple(np.asarray(core_shape)[(0,) * batch_ndim])
 
         if batch_ndim == 0:
             sample = jax.random.choice(
@@ -338,16 +331,16 @@ def jax_funcify_choice(op: ptr.ChoiceWithoutReplacement, node):
         else:
             if size is None:
                 if p is None:
-                    size = a.shape[:a_batch_ndim]
+                    size = a.shape[:batch_ndim]
                 else:
                     size = jax.numpy.broadcast_shapes(
-                        a.shape[:a_batch_ndim],
-                        p.shape[:p_batch_ndim],
+                        a.shape[:batch_ndim],
+                        p.shape[:batch_ndim],
                     )
 
-            a = jax.numpy.broadcast_to(a, size + a.shape[a_batch_ndim:])
+            a = jax.numpy.broadcast_to(a, size + a.shape[batch_ndim:])
             if p is not None:
-                p = jax.numpy.broadcast_to(p, size + p.shape[p_batch_ndim:])
+                p = jax.numpy.broadcast_to(p, size + p.shape[batch_ndim:])
 
             batch_sampling_keys = jax.random.split(sampling_key, np.prod(size))
 
@@ -381,7 +374,6 @@ def jax_sample_fn_permutation(op, node):
     """JAX implementation of `PermutationRV`."""
 
     batch_ndim = op.batch_ndim(node)
-    x_batch_ndim = node.inputs[-1].type.ndim - op.ndims_params[0]
 
     def sample_fn(rng, size, dtype, *parameters):
         rng_key = rng["jax_state"]
@@ -389,11 +381,10 @@ def jax_sample_fn_permutation(op, node):
         (x,) = parameters
         if batch_ndim:
             # jax.random.permutation has no concept of batch dims
-            x_core_shape = x.shape[x_batch_ndim:]
             if size is None:
-                size = x.shape[:x_batch_ndim]
+                size = x.shape[:batch_ndim]
             else:
-                x = jax.numpy.broadcast_to(x, size + x_core_shape)
+                x = jax.numpy.broadcast_to(x, size + x.shape[batch_ndim:])
 
             batch_sampling_keys = jax.random.split(sampling_key, np.prod(size))
             raveled_batch_x = x.reshape((-1,) + x.shape[batch_ndim:])

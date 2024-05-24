@@ -1,6 +1,7 @@
 import re
 
 from pytensor.compile import optdb
+from pytensor.graph import Constant
 from pytensor.graph.rewriting.basic import in2out, node_rewriter
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.tensor import abs as abs_t
@@ -159,12 +160,17 @@ def materialize_implicit_arange_choice_without_replacement(fgraph, node):
         return None
 
     rng, size, a_scalar_param, *other_params = node.inputs
-    if a_scalar_param.type.ndim > 0:
+    if not all(a_scalar_param.type.broadcastable):
         # Automatic vectorization could have made this parameter batched,
         # there is no nice way to materialize a batched arange
         return None
 
-    a_vector_param = arange(a_scalar_param)
+    # We need to try and do an eager squeeze here because arange will fail in jax
+    # if there is an array leading to it, even if it's constant
+    if isinstance(a_scalar_param, Constant):
+        a_scalar_param = a_scalar_param.data
+    a_vector_param = arange(a_scalar_param.squeeze())
+
     new_props_dict = op._props_dict().copy()
     # Signature changes from something like "(),(a),(2)->(s0, s1)" to "(a),(a),(2)->(s0, s1)"
     # I.e., we substitute the first `()` by `(a)`

@@ -9,7 +9,7 @@ import pytensor
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable, equal_computations
 from pytensor.graph.op import Op
-from pytensor.graph.replace import _vectorize_node, vectorize_graph
+from pytensor.graph.replace import _vectorize_node
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.scalar import ScalarVariable
 from pytensor.tensor.basic import (
@@ -359,6 +359,12 @@ class RandomVariable(Op):
         inferred_shape = self._infer_shape(size, dist_params)
         _, static_shape = infer_static_shape(inferred_shape)
 
+        dist_params = explicit_expand_dims(
+            dist_params,
+            self.ndims_params,
+            size_length=None if NoneConst.equals(size) else get_vector_length(size),
+        )
+
         inputs = (rng, size, *dist_params)
         out_type = TensorType(dtype=self.dtype, shape=static_shape)
         outputs = (rng.type(), out_type())
@@ -459,22 +465,14 @@ def vectorize_random_variable(
         None if isinstance(old_size.type, NoneTypeT) else get_vector_length(old_size)
     )
 
-    original_expanded_dist_params = explicit_expand_dims(
-        original_dist_params, op.ndims_params, len_old_size
-    )
-    # We call vectorize_graph to automatically handle any new explicit expand_dims
-    dist_params = vectorize_graph(
-        original_expanded_dist_params, dict(zip(original_dist_params, dist_params))
-    )
-
-    new_ndim = dist_params[0].type.ndim - original_expanded_dist_params[0].type.ndim
-
-    if new_ndim and len_old_size and equal_computations([old_size], [size]):
+    if len_old_size and equal_computations([old_size], [size]):
         # If the original RV had a size variable and a new one has not been provided,
         # we need to define a new size as the concatenation of the original size dimensions
         # and the novel ones implied by new broadcasted batched parameters dimensions.
-        broadcasted_batch_shape = compute_batch_shape(dist_params, op.ndims_params)
-        new_size_dims = broadcasted_batch_shape[:new_ndim]
-        size = concatenate([new_size_dims, size])
+        new_ndim = dist_params[0].type.ndim - original_dist_params[0].type.ndim
+        if new_ndim >= 0:
+            new_size = compute_batch_shape(dist_params, ndims_params=op.ndims_params)
+            new_size_dims = new_size[:new_ndim]
+            size = concatenate([new_size_dims, size])
 
     return op.make_node(rng, size, *dist_params)
