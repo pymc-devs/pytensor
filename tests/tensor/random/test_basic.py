@@ -1422,6 +1422,15 @@ def test_choice_samples():
     compare_sample_values(choice, pt.as_tensor_variable([1, 2, 3]), 2, replace=True)
 
 
+def test_choice_scalar_size():
+    np.testing.assert_array_equal(
+        choice([[1, 2, 3]], size=(), replace=True).eval(), [1, 2, 3]
+    )
+    np.testing.assert_array_equal(
+        choice([[1, 2, 3]], size=(), replace=False).eval(), [1, 2, 3]
+    )
+
+
 def test_permutation_samples():
     compare_sample_values(
         permutation,
