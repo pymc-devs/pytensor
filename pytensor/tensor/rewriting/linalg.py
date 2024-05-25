@@ -414,7 +414,10 @@ def local_svd_uv_simplify(fgraph, node):
                     return {fgraph.clients[node.outputs[1]]: cl.outputs[0]}
 
         # If no SVD reusable, return a new one.
-        return {"remove": [node.outputs[0], node.ouputs[2]], node.outputs[1]: svd(x, full_matrices=node.full_matrices, compute_uv=False)}
+        return {
+            "remove": [node.outputs[0], node.ouputs[2]],
+            node.outputs[1]: svd(x, full_matrices=node.full_matrices, compute_uv=False),
+        }
 
     else:
         # compute_uv=False returns [s].

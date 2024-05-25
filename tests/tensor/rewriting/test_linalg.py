@@ -15,11 +15,13 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import _allclose, dot, matmul
 from pytensor.tensor.nlinalg import (
+    SVD,
     Det,
     KroneckerProduct,
     MatrixInverse,
     MatrixPinv,
     matrix_inverse,
+    svd,
 )
 from pytensor.tensor.rewriting.linalg import inv_as_solve
 from pytensor.tensor.slinalg import (
@@ -390,3 +392,32 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
     test_vals = [x @ np.swapaxes(x, -1, -2) for x in test_vals]
 
     np.testing.assert_allclose(f1(*test_vals), f2(*test_vals), atol=1e-8)
+
+
+def test_local_svd_uv_simplify():
+    a = matrix("a")
+    s_1 = svd(a, full_matrices=False, compute_uv=False)
+    _, s_2, _ = svd(a, full_matrices=False, compute_uv=True)
+    # full_matrices = True is not supported for grad of svd
+    gs = pt.grad(pt.sum(s_1), a)
+
+    # 1. compute_uv=False needs rewriting with compute_uv=True
+    f_1 = pytensor.function([a], gs)
+    nodes = f_1.maker.fgraph.toposort()
+    for node in nodes:
+        if isinstance(node, SVD):
+            assert node.compute_uv
+
+    # 2. compute_uv=True needs rewriting with compute=False, reuse node
+    f_2 = pytensor.function([a], [s_1, s_2])
+    nodes = f_2.maker.fgraph.toposort()
+    for node in nodes:
+        if isinstance(node, SVD):
+            assert not node.compute_uv
+
+    # 3. compute_uv=True needs rewriting with compute=False, create new node
+    f_3 = pytensor.function([a], [s_2])
+    nodes = f_3.maker.fgraph.toposort()
+    for node in nodes:
+        if isinstance(node, SVD):
+            assert not node.compute_uv
