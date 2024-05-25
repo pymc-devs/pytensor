@@ -15,12 +15,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: mamba-org/setup-micromamba@v1
         with:
-          micromamba-version: "1.5.8-0" # any version from https://github.com/mamba-org/micromamba-releases
+          micromamba-version: "latest" # any version from https://github.com/mamba-org/micromamba-releases
           environment-file: environment.yml
-          environment-name: pytensor-test
-          init-shell: >-
-            bash
-            powershell
+          init-shell: bash
           cache-environment: true
           post-cleanup: "all"
       - name: Install pytensor and mypy dependencies
