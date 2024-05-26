@@ -5,7 +5,7 @@ from typing import cast
 from pytensor import Variable
 from pytensor.graph import Apply, FunctionGraph
 from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
-from pytensor.tensor.basic import TensorVariable, diagonal
+from pytensor.tensor.basic import TensorVariable, diagonal, Eye
 from pytensor.tensor.blas import Dot22
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
@@ -34,7 +34,6 @@ from pytensor.tensor.slinalg import (
     solve,
     solve_triangular,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -377,3 +376,25 @@ def local_lift_through_linalg(
                 return [block_diag(*inner_matrices)]
             else:
                 raise NotImplementedError  # pragma: no cover
+
+# det diag rewrite
+def det_diag_rewrite(node: Apply):
+    # Find if we have determinant Op
+    if not(
+        isinstance(node.op, Blockwise)
+        and isinstance (node.op.core_op, Det)
+        and node.op.signature == '(m,m)->()' # Is it necessary to specify this here
+    ):
+        return None
+
+    x = node.inputs[0]
+    # Check if x is diagonal 
+    if not(
+        isinstance(x.owner.op, Eye)
+    ):
+        return None
+    
+    # Rewriting to get the product of diagonal
+    det_val = pt.diagonal(x).prod()
+
+    return [det_val]
