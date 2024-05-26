@@ -1,7 +1,7 @@
 import pytensor.tensor.basic as ptb
 from pytensor.scan.basic import scan
 from pytensor.tensor.basic import Join
-from pytensor.tensor.math import ceil, eq
+from pytensor.tensor.math import ceil, eq, neq
 from pytensor.tensor.subtensor import set_subtensor
 
 
@@ -130,16 +130,18 @@ def scan_checkpoints(
         # Since padding could be an empty tensor, Join returns a view of s.
         join = Join(view=0)
         for i, s in enumerate(sequences):
-            n = s.shape[0] % save_every_N
-            z = ptb.zeros((n, s.shape[1:]), dtype=s.dtype)
-            sequences[i] = join(0, [s, z])
+            overshoots_by = s.shape[0] % save_every_N
+            overshoots = neq(overshoots_by, 0)
+            n = (save_every_N - overshoots_by) * overshoots
+            z = ptb.zeros((n, *s.shape[1:]), dtype=s.dtype)
+            sequences[i] = join(0, s, z)
 
     # Establish the input variables of the outer scan
     o_sequences = [
         s.reshape(
-            [s.shape[0] / save_every_N, save_every_N]
+            [s.shape[0] // save_every_N, save_every_N]
             + [s.shape[i] for i in range(1, s.ndim)],
-            s.ndim + 1,
+            ndim=s.ndim + 1,
         )
         for s in sequences
     ]

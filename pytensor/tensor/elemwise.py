@@ -1098,14 +1098,14 @@ class Elemwise(OpenMPOp):
                 all_broadcastable = all(s == 1 for s in var.type.shape)
                 cond1 = " && ".join(
                     [
-                        "PyArray_ISCONTIGUOUS(%s)" % arr
+                        f"PyArray_ISCONTIGUOUS({arr})"
                         for arr, var in z
                         if not all_broadcastable
                     ]
                 )
                 cond2 = " && ".join(
                     [
-                        "PyArray_ISFORTRAN(%s)" % arr
+                        f"PyArray_ISFORTRAN({arr})"
                         for arr, var in z
                         if not all_broadcastable
                     ]
@@ -1169,6 +1169,16 @@ class Elemwise(OpenMPOp):
             return tuple(version)
         else:
             return ()
+
+    def outer(self, x, y):
+        from pytensor.tensor.basic import expand_dims
+
+        if self.scalar_op.nin not in (-1, 2):
+            raise NotImplementedError("outer is only available for binary operators")
+
+        x_ = expand_dims(x, tuple(range(-y.ndim, 0)))
+        y_ = expand_dims(y, tuple(range(x.ndim)))
+        return self(x_, y_)
 
 
 class CAReduce(COp):

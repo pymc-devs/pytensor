@@ -1,4 +1,5 @@
 import contextlib
+from functools import partial
 
 import numpy as np
 import pytest
@@ -16,6 +17,11 @@ from tests.link.numba.test_basic import (
     eval_python_only,
     numba_mode,
     set_test_value,
+)
+from tests.tensor.random.test_basic import (
+    batched_permutation_tester,
+    batched_unweighted_choice_without_replacement_tester,
+    batched_weighted_choice_without_replacement_tester,
 )
 
 
@@ -280,6 +286,88 @@ rng = np.random.default_rng(42849)
             ],
             pt.as_tensor(tuple(set_test_value(pt.lscalar(), v) for v in [4, 3, 2])),
             marks=pytest.mark.xfail(reason="Not implemented"),
+        ),
+        (
+            ptr.permutation,
+            [
+                set_test_value(pt.dmatrix(), np.eye(5, dtype=np.float64)),
+            ],
+            (),
+        ),
+        (
+            partial(ptr.choice, replace=True),
+            [
+                set_test_value(pt.dmatrix(), np.eye(5, dtype=np.float64)),
+            ],
+            pt.as_tensor([2]),
+        ),
+        (
+            # p must be passed by kwarg
+            lambda a, p, size, rng: ptr.choice(
+                a, p=p, size=size, replace=True, rng=rng
+            ),
+            [
+                set_test_value(pt.dmatrix(), np.eye(3, dtype=np.float64)),
+                set_test_value(
+                    pt.dvector(), np.array([0.5, 0.0, 0.5], dtype=np.float64)
+                ),
+            ],
+            (),
+        ),
+        (
+            partial(ptr.choice, replace=False),
+            [
+                set_test_value(pt.dvector(), np.arange(5, dtype=np.float64)),
+            ],
+            pt.as_tensor([2]),
+        ),
+        pytest.param(
+            partial(ptr.choice, replace=False),
+            [
+                set_test_value(pt.dmatrix(), np.eye(5, dtype=np.float64)),
+            ],
+            pt.as_tensor([2]),
+            marks=pytest.mark.xfail(
+                raises=ValueError,
+                reason="Numba random.choice does not support >=1D `a`",
+            ),
+        ),
+        pytest.param(
+            # p must be passed by kwarg
+            lambda a, p, size, rng: ptr.choice(
+                a, p=p, size=size, replace=False, rng=rng
+            ),
+            [
+                set_test_value(pt.vector(), np.arange(5, dtype=np.float64)),
+                # Boring p, because the variable is not truly "aligned"
+                set_test_value(
+                    pt.dvector(),
+                    np.array([0.5, 0.0, 0.25, 0.0, 0.25], dtype=np.float64),
+                ),
+            ],
+            (),
+            marks=pytest.mark.xfail(
+                raises=Exception,  # numba.TypeError
+                reason="Numba random.choice does not support `p` parameter",
+            ),
+        ),
+        pytest.param(
+            # p must be passed by kwarg
+            lambda a, p, size, rng: ptr.choice(
+                a, p=p, size=size, replace=False, rng=rng
+            ),
+            [
+                set_test_value(pt.dmatrix(), np.eye(3, dtype=np.float64)),
+                # Boring p, because the variable is not truly "aligned"
+                set_test_value(
+                    pt.dvector(), np.array([0.5, 0.0, 0.5], dtype=np.float64)
+                ),
+            ],
+            (),
+            marks=pytest.mark.xfail(
+                raises=ValueError,
+                reason="Numba random.choice does not support >=1D `a`",
+            ),
         ),
     ],
     ids=str,
@@ -595,3 +683,22 @@ def test_random_Generator():
                 if not isinstance(i, SharedVariable | Constant)
             ],
         )
+
+
+@pytest.mark.parametrize(
+    "batch_dims_tester",
+    [
+        pytest.param(
+            batched_unweighted_choice_without_replacement_tester,
+            marks=pytest.mark.xfail(raises=NotImplementedError),
+        ),
+        pytest.param(
+            batched_weighted_choice_without_replacement_tester,
+            marks=pytest.mark.xfail(raises=NotImplementedError),
+        ),
+        batched_permutation_tester,
+    ],
+)
+def test_unnatural_batched_dims(batch_dims_tester):
+    """Tests for RVs that don't have natural batch dims in Numba API."""
+    batch_dims_tester(mode="NUMBA", rng_ctor=np.random.RandomState)

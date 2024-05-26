@@ -14,9 +14,16 @@ from pytensor.tensor import swapaxes
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import _allclose, dot, matmul
-from pytensor.tensor.nlinalg import Det, MatrixInverse, matrix_inverse
+from pytensor.tensor.nlinalg import (
+    Det,
+    KroneckerProduct,
+    MatrixInverse,
+    MatrixPinv,
+    matrix_inverse,
+)
 from pytensor.tensor.rewriting.linalg import inv_as_solve
 from pytensor.tensor.slinalg import (
+    BlockDiagonal,
     Cholesky,
     Solve,
     SolveBase,
@@ -333,3 +340,53 @@ class TestBatchedVectorBSolveToMatrixBSolve:
             ref_fn(test_a, test_b),
             rtol=1e-7 if config.floatX == "float64" else 1e-5,
         )
+
+
+@pytest.mark.parametrize(
+    "constructor", [pt.dmatrix, pt.tensor3], ids=["not_batched", "batched"]
+)
+@pytest.mark.parametrize(
+    "f_op, f",
+    [
+        (MatrixInverse, pt.linalg.inv),
+        (Cholesky, pt.linalg.cholesky),
+        (MatrixPinv, pt.linalg.pinv),
+    ],
+    ids=["inv", "cholesky", "pinv"],
+)
+@pytest.mark.parametrize(
+    "g_op, g",
+    [(BlockDiagonal, pt.linalg.block_diag), (KroneckerProduct, pt.linalg.kron)],
+    ids=["block_diag", "kron"],
+)
+def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
+    if pytensor.config.floatX.endswith("32"):
+        pytest.skip("Test is flaky at half precision")
+
+    A, B = list(map(constructor, "ab"))
+    X = f(g(A, B))
+
+    f1 = pytensor.function(
+        [A, B], X, mode=get_default_mode().including("local_lift_through_linalg")
+    )
+    f2 = pytensor.function(
+        [A, B], X, mode=get_default_mode().excluding("local_lift_through_linalg")
+    )
+
+    all_apply_nodes = f1.maker.fgraph.apply_nodes
+    f_ops = [
+        x for x in all_apply_nodes if isinstance(getattr(x.op, "core_op", x.op), f_op)
+    ]
+    g_ops = [
+        x for x in all_apply_nodes if isinstance(getattr(x.op, "core_op", x.op), g_op)
+    ]
+
+    assert len(f_ops) == 2
+    assert len(g_ops) == 1
+
+    test_vals = [
+        np.random.normal(size=(3,) * A.ndim).astype(config.floatX) for _ in range(2)
+    ]
+    test_vals = [x @ np.swapaxes(x, -1, -2) for x in test_vals]
+
+    np.testing.assert_allclose(f1(*test_vals), f2(*test_vals), atol=1e-8)

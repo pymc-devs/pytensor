@@ -4,6 +4,7 @@ from textwrap import dedent
 from typing import cast
 
 import numpy as np
+from numpy.core.numeric import normalize_axis_tuple  # type: ignore
 
 import pytensor
 from pytensor.gradient import DisconnectedType
@@ -994,9 +995,7 @@ def specify_broadcastable(x, *axes):
     if not axes:
         return x
 
-    if max(axes) >= x.type.ndim:
-        raise ValueError("Trying to specify broadcastable of non-existent dimension")
-
+    axes = normalize_axis_tuple(axes, x.type.ndim)
     shape_info = [1 if i in axes else s for i, s in enumerate(x.type.shape)]
     return specify_shape(x, shape_info)
 

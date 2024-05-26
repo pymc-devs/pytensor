@@ -75,6 +75,18 @@ class Node(MetaObject):
         """
         raise NotImplementedError()
 
+    def dprint(self, **kwargs):
+        """Debug print itself
+
+        Parameters
+        ----------
+        kwargs:
+            Optional keyword arguments to pass to debugprint function.
+        """
+        from pytensor.printing import debugprint
+
+        return debugprint(self, **kwargs)
+
 
 class Apply(Node, Generic[OpType]):
     """A `Node` representing the application of an operation to inputs.
@@ -555,13 +567,20 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
             return [self.owner]
         return []
 
-    def eval(self, inputs_to_values=None):
-        r"""Evaluate the `Variable`.
+    def eval(
+        self,
+        inputs_to_values: dict[Union["Variable", str], Any] | None = None,
+        **kwargs,
+    ):
+        r"""Evaluate the `Variable` given a set of values for its inputs.
 
         Parameters
         ----------
         inputs_to_values :
-            A dictionary mapping PyTensor `Variable`\s to values.
+            A dictionary mapping PyTensor `Variable`\s or names to values.
+            Not needed if variable has no required inputs.
+        kwargs :
+            Optional keyword arguments to pass to the underlying `pytensor.function`
 
         Examples
         --------
@@ -591,10 +610,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         """
         from pytensor.compile.function import function
 
-        if inputs_to_values is None:
-            inputs_to_values = {}
-
-        def convert_string_keys_to_variables(input_to_values):
+        def convert_string_keys_to_variables(inputs_to_values) -> dict["Variable", Any]:
             new_input_to_values = {}
             for key, value in inputs_to_values.items():
                 if isinstance(key, str):
@@ -608,19 +624,32 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
                     new_input_to_values[key] = value
             return new_input_to_values
 
-        inputs_to_values = convert_string_keys_to_variables(inputs_to_values)
+        parsed_inputs_to_values: dict[Variable, Any] = {}
+        if inputs_to_values is not None:
+            parsed_inputs_to_values = convert_string_keys_to_variables(inputs_to_values)
 
         if not hasattr(self, "_fn_cache"):
-            self._fn_cache = dict()
+            self._fn_cache: dict = dict()
 
-        inputs = tuple(sorted(inputs_to_values.keys(), key=id))
-        if inputs not in self._fn_cache:
-            self._fn_cache[inputs] = function(inputs, self)
-        args = [inputs_to_values[param] for param in inputs]
+        inputs = tuple(sorted(parsed_inputs_to_values.keys(), key=id))
+        cache_key = (inputs, tuple(kwargs.items()))
+        try:
+            fn = self._fn_cache[cache_key]
+        except (KeyError, TypeError):
+            fn = None
 
-        rval = self._fn_cache[inputs](*args)
+        if fn is None:
+            fn = function(inputs, self, **kwargs)
+            try:
+                self._fn_cache[cache_key] = fn
+            except TypeError as exc:
+                warnings.warn(
+                    "Keyword arguments could not be used to create a cache key for the underlying variable. "
+                    f"A function will be recompiled on every call with such keyword arguments.\n{exc}"
+                )
 
-        return rval
+        args = [parsed_inputs_to_values[param] for param in inputs]
+        return fn(*args)
 
     def __getstate__(self):
         d = self.__dict__.copy()
@@ -905,6 +934,55 @@ def graph_inputs(
 
     """
     yield from (r for r in ancestors(graphs, blockers) if r.owner is None)
+
+
+def explicit_graph_inputs(
+    graph: Variable | Iterable[Variable],
+) -> Generator[Variable, None, None]:
+    """
+    Get the root variables needed as inputs to a function that computes `graph`
+
+    Parameters
+    ----------
+    graph : TensorVariable
+        Output `Variable` instances for which to search backward through
+        owners.
+
+    Returns
+    -------
+    iterable
+        Generator of root Variables (without owner) needed to compile a function that evaluates `graphs`.
+
+    Examples
+    --------
+
+    .. code-block:: python
+
+        import pytensor
+        import pytensor.tensor as pt
+        from pytensor.graph.basic import explicit_graph_inputs
+
+        x = pt.vector('x')
+        y = pt.constant(2)
+        z = pt.mul(x*y)
+
+        inputs = list(explicit_graph_inputs(z))
+        f = pytensor.function(inputs, z)
+        eval = f([1, 2, 3])
+
+        print(eval)
+        # [2. 4. 6.]
+    """
+    from pytensor.compile.sharedvalue import SharedVariable
+
+    if isinstance(graph, Variable):
+        graph = [graph]
+
+    return (
+        v
+        for v in graph_inputs(graph)
+        if isinstance(v, Variable) and not isinstance(v, Constant | SharedVariable)
+    )
 
 
 def vars_between(
@@ -1709,38 +1787,6 @@ def view_roots(node: Variable) -> list[Variable]:
             return [node]
     else:
         return [node]
-
-
-def list_of_nodes(
-    inputs: Collection[Variable], outputs: Iterable[Variable]
-) -> list[Apply]:
-    r"""Return the `Apply` nodes of the graph between `inputs` and `outputs`.
-
-    Parameters
-    ----------
-    inputs : list of Variable
-        Input `Variable`\s.
-    outputs : list of Variable
-        Output `Variable`\s.
-
-    """
-
-    def expand(o: Apply) -> list[Apply]:
-        return [
-            inp.owner
-            for inp in o.inputs
-            if inp.owner and not any(i in inp.owner.outputs for i in inputs)
-        ]
-
-    return list(
-        cast(
-            Iterable[Apply],
-            walk(
-                [o.owner for o in outputs if o.owner],
-                expand,
-            ),
-        )
-    )
 
 
 def apply_depends_on(apply: Apply, depends_on: Apply | Collection[Apply]) -> bool:

@@ -5,6 +5,7 @@ import scipy.stats as stats
 import pytensor
 import pytensor.tensor as pt
 import pytensor.tensor.random.basic as ptr
+from pytensor import clone_replace
 from pytensor.compile.function import function
 from pytensor.compile.sharedvalue import SharedVariable, shared
 from pytensor.graph.basic import Constant
@@ -13,6 +14,11 @@ from pytensor.tensor.random.basic import RandomVariable
 from pytensor.tensor.random.type import RandomType
 from pytensor.tensor.random.utils import RandomStream
 from tests.link.jax.test_basic import compare_jax_and_py, jax_mode, set_test_value
+from tests.tensor.random.test_basic import (
+    batched_permutation_tester,
+    batched_unweighted_choice_without_replacement_tester,
+    batched_weighted_choice_without_replacement_tester,
+)
 
 
 jax = pytest.importorskip("jax")
@@ -21,11 +27,11 @@ jax = pytest.importorskip("jax")
 from pytensor.link.jax.dispatch.random import numpyro_available  # noqa: E402
 
 
-def compile_random_function(*args, **kwargs):
+def compile_random_function(*args, mode="JAX", **kwargs):
     with pytest.warns(
         UserWarning, match=r"The RandomType SharedVariables \[.+\] will not be used"
     ):
-        return function(*args, **kwargs)
+        return function(*args, mode=mode, **kwargs)
 
 
 def test_random_RandomStream():
@@ -509,6 +515,34 @@ def test_random_RandomVariable(rv_op, dist_params, base_size, cdf_name, params_c
         assert test_res.pvalue > 0.01
 
 
+@pytest.mark.parametrize(
+    "rv_fn",
+    [
+        lambda param_that_implies_size: ptr.normal(
+            loc=0, scale=pt.exp(param_that_implies_size)
+        ),
+        lambda param_that_implies_size: ptr.exponential(
+            scale=pt.exp(param_that_implies_size)
+        ),
+        lambda param_that_implies_size: ptr.gamma(
+            shape=1, scale=pt.exp(param_that_implies_size)
+        ),
+        lambda param_that_implies_size: ptr.t(
+            df=3, loc=param_that_implies_size, scale=1
+        ),
+    ],
+)
+def test_size_implied_by_broadcasted_parameters(rv_fn):
+    # We need a parameter with untyped shapes to test broadcasting does not result in identical draws
+    param_that_implies_size = pt.matrix("param_that_implies_size", shape=(None, None))
+
+    rv = rv_fn(param_that_implies_size)
+    draws = rv.eval({param_that_implies_size: np.zeros((2, 2))}, mode=jax_mode)
+
+    assert draws.shape == (2, 2)
+    assert np.unique(draws).size == 4
+
+
 @pytest.mark.parametrize("size", [(), (4,)])
 def test_random_bernoulli(size):
     rng = shared(np.random.RandomState(123))
@@ -545,27 +579,49 @@ def test_random_dirichlet(parameter, size):
 
 
 def test_random_choice():
+    # `replace=True` and `p is None`
+    rng = shared(np.random.default_rng(123))
+    g = pt.random.choice(np.arange(4), size=10_000, rng=rng)
+    g_fn = compile_random_function([], g, mode=jax_mode)
+    samples = g_fn()
+    assert samples.shape == (10_000,)
     # Elements are picked at equal frequency
-    num_samples = 10000
-    rng = shared(np.random.RandomState(123))
-    g = pt.random.choice(np.arange(4), size=num_samples, rng=rng)
-    g_fn = compile_random_function([], g, mode=jax_mode)
-    samples = g_fn()
-    np.testing.assert_allclose(np.sum(samples == 3) / num_samples, 0.25, 2)
+    np.testing.assert_allclose(np.mean(samples == 3), 0.25, 2)
 
-    # `replace=False` produces unique results
-    rng = shared(np.random.RandomState(123))
-    g = pt.random.choice(np.arange(100), replace=False, size=99, rng=rng)
+    # `replace=True` and `p is not None`
+    rng = shared(np.random.default_rng(123))
+    g = pt.random.choice(4, p=np.array([0.0, 0.5, 0.0, 0.5]), size=(5, 2), rng=rng)
     g_fn = compile_random_function([], g, mode=jax_mode)
     samples = g_fn()
-    assert len(np.unique(samples)) == 99
+    assert samples.shape == (5, 2)
+    # Only odd numbers are picked
+    assert np.all(samples % 2 == 1)
 
-    # We can pass an array with probabilities
+    # `replace=False` and `p is None`
     rng = shared(np.random.RandomState(123))
-    g = pt.random.choice(np.arange(3), p=np.array([1.0, 0.0, 0.0]), size=10, rng=rng)
+    g = pt.random.choice(np.arange(100), replace=False, size=(2, 49), rng=rng)
     g_fn = compile_random_function([], g, mode=jax_mode)
     samples = g_fn()
-    np.testing.assert_allclose(samples, np.zeros(10))
+    assert samples.shape == (2, 49)
+    # Elements are unique
+    assert len(np.unique(samples)) == 98
+
+    # `replace=False` and `p is not None`
+    rng = shared(np.random.RandomState(123))
+    g = pt.random.choice(
+        8,
+        p=np.array([0.25, 0, 0.25, 0, 0.25, 0, 0.25, 0]),
+        size=3,
+        rng=rng,
+        replace=False,
+    )
+    g_fn = compile_random_function([], g, mode=jax_mode)
+    samples = g_fn()
+    assert samples.shape == (3,)
+    # Elements are unique
+    assert len(np.unique(samples)) == 3
+    # Only even numbers are picked
+    assert np.all(samples % 2 == 0)
 
 
 def test_random_categorical():
@@ -573,7 +629,15 @@ def test_random_categorical():
     g = pt.random.categorical(0.25 * np.ones(4), size=(10000, 4), rng=rng)
     g_fn = compile_random_function([], g, mode=jax_mode)
     samples = g_fn()
+    assert samples.shape == (10000, 4)
     np.testing.assert_allclose(samples.mean(axis=0), 6 / 4, 1)
+
+    # Test zero probabilities
+    g = pt.random.categorical([0, 0.5, 0, 0.5], size=(1000,), rng=rng)
+    g_fn = compile_random_function([], g, mode=jax_mode)
+    samples = g_fn()
+    assert samples.shape == (1000,)
+    assert np.all(samples % 2 == 1)
 
 
 def test_random_permutation():
@@ -584,6 +648,19 @@ def test_random_permutation():
     permuted = g_fn()
     with pytest.raises(AssertionError):
         np.testing.assert_allclose(array, permuted)
+
+
+@pytest.mark.parametrize(
+    "batch_dims_tester",
+    [
+        batched_unweighted_choice_without_replacement_tester,
+        batched_weighted_choice_without_replacement_tester,
+        batched_permutation_tester,
+    ],
+)
+def test_unnatural_batched_dims(batch_dims_tester):
+    """Tests for RVs that don't have natural batch dims in JAX API."""
+    batch_dims_tester(mode="JAX")
 
 
 def test_random_geometric():
@@ -734,7 +811,7 @@ def test_random_custom_implementation():
     from pytensor.link.jax.dispatch.random import jax_sample_fn
 
     @jax_sample_fn.register(CustomRV)
-    def jax_sample_fn_custom(op):
+    def jax_sample_fn_custom(op, node):
         def sample_fn(rng, size, dtype, *parameters):
             return (rng, 0)
 
@@ -820,3 +897,24 @@ def test_random_concrete_shape_graph_input():
     out = pt.random.normal(0, 1, size=size_pt, rng=rng)
     jax_fn = compile_random_function([size_pt], out, mode=jax_mode)
     assert jax_fn(10).shape == (10,)
+
+
+def test_constant_shape_after_graph_rewriting():
+    size = pt.vector("size", shape=(2,), dtype=int)
+    x = pt.random.normal(size=size)
+    assert x.type.shape == (None, None)
+
+    with pytest.raises(TypeError):
+        compile_random_function([size], x)([2, 5])
+
+    # Rebuild with strict=False so output type is not updated
+    # This reflects cases where size is constant folded during rewrites but the RV node is not recreated
+    new_x = clone_replace(x, {size: pt.constant([2, 5])}, rebuild_strict=True)
+    assert new_x.type.shape == (None, None)
+    assert compile_random_function([], new_x)().shape == (2, 5)
+
+    # Rebuild with strict=True, so output type is updated
+    # This uses a different path in the dispatch implementation
+    new_x = clone_replace(x, {size: pt.constant([2, 5])}, rebuild_strict=False)
+    assert new_x.type.shape == (2, 5)
+    assert compile_random_function([], new_x)().shape == (2, 5)

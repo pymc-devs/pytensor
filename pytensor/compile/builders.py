@@ -7,7 +7,7 @@ from functools import partial
 from typing import cast
 
 import pytensor.tensor as pt
-from pytensor import function
+from pytensor.compile.function import function
 from pytensor.compile.function.pfunc import rebuild_collect_shared
 from pytensor.compile.mode import optdb
 from pytensor.compile.sharedvalue import SharedVariable
@@ -400,6 +400,15 @@ class OpFromGraph(Op, HasInnerGraph):
             Check :func:`pytensor.function` for more arguments, only works when not
             inline.
         """
+        ignore_unused_inputs = kwargs.get("on_unused_input", False) == "ignore"
+        if not ignore_unused_inputs and len(inputs) != len(set(inputs)):
+            var_counts = {var: inputs.count(var) for var in inputs}
+            duplicated_inputs = [var for var, count in var_counts.items() if count > 1]
+            raise ValueError(
+                f"There following variables were provided more than once as inputs to the OpFromGraph, resulting in an "
+                f"invalid graph: {duplicated_inputs}. Use dummy variables or var.copy() to distinguish "
+                f"variables when creating the OpFromGraph graph."
+            )
 
         if not (isinstance(inputs, list) and isinstance(outputs, list)):
             raise TypeError("Inputs and outputs must be lists")
@@ -700,7 +709,7 @@ class OpFromGraph(Op, HasInnerGraph):
             if not isinstance(roverrides_l, list):
                 raise TypeError(
                     "Rop overriding function should return a list, "
-                    'got "%s"' % type(roverrides_l)
+                    f'got "{type(roverrides_l)}"'
                 )
             all_rops_l, all_rops_ov_l = zip(
                 *[

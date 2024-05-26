@@ -252,7 +252,7 @@ class FromFunctionOp(Op):
         return hash(type(self)) ^ hash(self.__fn)
 
     def __str__(self):
-        return "FromFunctionOp{%s}" % self.__fn.__name__
+        return f"FromFunctionOp{{{self.__fn.__name__}}}"
 
     def perform(self, node, inputs, outputs):
         outs = self.__fn(*inputs)

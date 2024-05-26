@@ -30,6 +30,7 @@ from pytensor.tensor.math import eq as pt_eq
 from pytensor.tensor.math import ge, lt, maximum, minimum, prod, switch
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import sum as pt_sum
+from pytensor.tensor.shape import specify_broadcastable
 from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
 from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes, vector
 from pytensor.tensor.variable import TensorVariable
@@ -592,6 +593,15 @@ def squeeze(x, axis=None):
         # Nothing to do
         return _x
 
+    if _x.ndim == 0:
+        # Nothing could be squeezed
+        return _x
+
+    # `Dimshuffle` raises when we try to drop an axis that is not statically broadcastable.
+    # We add a `specify_broadcastable` instead of raising.
+    non_broadcastable_axis = [i for i in axis if not _x.broadcastable[i]]
+    _x = specify_broadcastable(_x, *non_broadcastable_axis)
+
     return _x.dimshuffle([i for i in range(_x.ndim) if i not in axis])
 
 
@@ -652,8 +662,8 @@ class Repeat(Op):
         if repeats.dtype in numpy_unsupported_dtypes:
             raise TypeError(
                 (
-                    "dtypes %s are not supported by numpy.repeat "
-                    "for the 'repeats' parameter, " % str(numpy_unsupported_dtypes)
+                    f"dtypes {numpy_unsupported_dtypes!s} are not supported by numpy.repeat "
+                    "for the 'repeats' parameter, "
                 ),
                 repeats.dtype,
             )
@@ -882,8 +892,8 @@ class FillDiagonal(Op):
         val = ptb.as_tensor_variable(val)
         if a.ndim < 2:
             raise TypeError(
-                "%s: first parameter must have at least"
-                " two dimensions" % self.__class__.__name__
+                f"{self.__class__.__name__}: first parameter must have at least"
+                " two dimensions"
             )
         elif val.ndim != 0:
             raise TypeError(
@@ -892,8 +902,8 @@ class FillDiagonal(Op):
         val = ptb.cast(val, dtype=upcast(a.dtype, val.dtype))
         if val.dtype != a.dtype:
             raise TypeError(
-                "%s: type of second parameter must be the same as"
-                " the first's" % self.__class__.__name__
+                f"{self.__class__.__name__}: type of second parameter must be the same as"
+                " the first's"
             )
         return Apply(self, [a, val], [a.type()])
 
@@ -926,8 +936,8 @@ class FillDiagonal(Op):
             return [None, None]
         elif a.ndim > 2:
             raise NotImplementedError(
-                "%s: gradient is currently implemented"
-                " for matrices only" % self.__class__.__name__
+                f"{self.__class__.__name__}: gradient is currently implemented"
+                " for matrices only"
             )
         wr_a = fill_diagonal(grad, 0)  # valid for any number of dimensions
         # diag is only valid for matrices
@@ -984,8 +994,8 @@ class FillDiagonalOffset(Op):
         offset = ptb.as_tensor_variable(offset)
         if a.ndim != 2:
             raise TypeError(
-                "%s: first parameter must have exactly"
-                " two dimensions" % self.__class__.__name__
+                f"{self.__class__.__name__}: first parameter must have exactly"
+                " two dimensions"
             )
         elif val.ndim != 0:
             raise TypeError(
@@ -998,8 +1008,8 @@ class FillDiagonalOffset(Op):
         val = ptb.cast(val, dtype=upcast(a.dtype, val.dtype))
         if val.dtype != a.dtype:
             raise TypeError(
-                "%s: type of second parameter must be the same"
-                " as the first's" % self.__class__.__name__
+                f"{self.__class__.__name__}: type of second parameter must be the same"
+                " as the first's"
             )
         elif offset.dtype not in integer_dtypes:
             raise TypeError(

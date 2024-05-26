@@ -8,6 +8,7 @@ from numpy.testing import assert_array_almost_equal
 import pytensor
 from pytensor import function
 from pytensor.configdefaults import config
+from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.math import _allclose
 from pytensor.tensor.nlinalg import (
     SVD,
@@ -214,6 +215,80 @@ class TestSvd(utt.InferShapeTester):
         if not compute_uv:
             outputs = [outputs]
         self._compile_and_check([A], outputs, [A_v], self.op_class, warn=False)
+
+    @pytest.mark.parametrize(
+        "compute_uv, full_matrices, gradient_test_case",
+        [(False, False, 0)]
+        + [(True, False, i) for i in range(8)]
+        + [(True, True, i) for i in range(8)],
+        ids=(
+            ["compute_uv=False, full_matrices=False"]
+            + [
+                f"compute_uv=True, full_matrices=False, gradient={grad}"
+                for grad in ["U", "s", "V", "U+s", "s+V", "U+V", "U+s+V", "None"]
+            ]
+            + [
+                f"compute_uv=True, full_matrices=True, gradient={grad}"
+                for grad in ["U", "s", "V", "U+s", "s+V", "U+V", "U+s+V", "None"]
+            ]
+        ),
+    )
+    @pytest.mark.parametrize(
+        "shape", [(3, 3), (4, 3), (3, 4)], ids=["(3,3)", "(4,3)", "(3,4)"]
+    )
+    @pytest.mark.parametrize(
+        "batched", [True, False], ids=["batched=True", "batched=False"]
+    )
+    def test_grad(self, compute_uv, full_matrices, gradient_test_case, shape, batched):
+        rng = np.random.default_rng(utt.fetch_seed())
+        if batched:
+            shape = (4, *shape)
+
+        A_v = self.rng.normal(size=shape).astype(config.floatX)
+        if full_matrices:
+            with pytest.raises(
+                NotImplementedError,
+                match="Gradient of svd not implemented for full_matrices=True",
+            ):
+                U, s, V = svd(
+                    self.A, compute_uv=compute_uv, full_matrices=full_matrices
+                )
+                pytensor.grad(s.sum(), self.A)
+
+        elif compute_uv:
+
+            def svd_fn(A, case=0):
+                U, s, V = svd(A, compute_uv=compute_uv, full_matrices=full_matrices)
+                if case == 0:
+                    return U.sum()
+                elif case == 1:
+                    return s.sum()
+                elif case == 2:
+                    return V.sum()
+                elif case == 3:
+                    return U.sum() + s.sum()
+                elif case == 4:
+                    return s.sum() + V.sum()
+                elif case == 5:
+                    return U.sum() + V.sum()
+                elif case == 6:
+                    return U.sum() + s.sum() + V.sum()
+                elif case == 7:
+                    # All inputs disconnected
+                    return as_tensor_variable(3.0)
+
+            utt.verify_grad(
+                partial(svd_fn, case=gradient_test_case),
+                [A_v],
+                rng=rng,
+            )
+
+        else:
+            utt.verify_grad(
+                partial(svd, compute_uv=compute_uv, full_matrices=full_matrices),
+                [A_v],
+                rng=rng,
+            )
 
 
 def test_tensorsolve():
@@ -589,6 +664,14 @@ class TestKron(utt.InferShapeTester):
     def setup_method(self):
         self.op = kron
         super().setup_method()
+
+    def test_vec_vec_kron_raises(self):
+        x = vector()
+        y = vector()
+        with pytest.raises(
+            TypeError, match="kron: inputs dimensions must sum to 3 or more"
+        ):
+            kron(x, y)
 
     @pytest.mark.parametrize("shp0", [(2,), (2, 3), (2, 3, 4), (2, 3, 4, 5)])
     @pytest.mark.parametrize("shp1", [(6,), (6, 7), (6, 7, 8), (6, 7, 8, 9)])

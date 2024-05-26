@@ -29,7 +29,7 @@ class NumbaLinker(JITLinker):
     def jit_compile(self, fn):
         from pytensor.link.numba.dispatch.basic import numba_njit
 
-        jitted_fn = numba_njit(fn)
+        jitted_fn = numba_njit(fn, no_cpython_wrapper=False, no_cfunc_wrapper=False)
         return jitted_fn
 
     def create_thunk_inputs(self, storage_map):
