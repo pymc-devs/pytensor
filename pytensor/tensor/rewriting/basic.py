@@ -351,10 +351,7 @@ def local_fill_sink(fgraph, node):
     # Check if we need to propagate the fill to the new outputs
     # It's enough to check the first output, as Elemwise outputs must all have the same shapes
     # Note: There are orderings that may require fewer fills.
-    old_bcast_pattern = node.outputs[0].type.broadcastable
-    models_iter = iter(models)
-    while old_bcast_pattern != outputs[0].type.broadcastable:
-        model = next(models_iter)
+    for model in models:
         # Only apply this model if it would actually do anything
         if broadcasted_by(outputs[0], model):
             outputs = [fill(model, output) for output in outputs]
