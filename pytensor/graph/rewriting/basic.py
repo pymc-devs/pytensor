@@ -1577,7 +1577,7 @@ class PatternNodeRewriter(NodeRewriter):
         """
         from pytensor.graph.rewriting.unify import convert_strs_to_vars
 
-        var_map: dict[str, "Var"] = {}
+        var_map: dict[str, Var] = {}
         self.in_pattern = convert_strs_to_vars(in_pattern, var_map=var_map)
         self.out_pattern = convert_strs_to_vars(out_pattern, var_map=var_map)
         self.values_eq_approx = values_eq_approx
