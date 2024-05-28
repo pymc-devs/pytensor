@@ -6,5 +6,5 @@ updates:
     schedule:
       interval: "weekly"
     labels:
-      - "Github CI/CD"
+      - "GitHub CI/CD"
       - "no releasenotes"
