@@ -1,3 +1,6 @@
+from typing import Any
+
+import torch
 from numpy.random import Generator, RandomState
 
 from pytensor.compile.sharedvalue import SharedVariable, shared
@@ -6,6 +9,13 @@ from pytensor.link.basic import JITLinker
 
 class PytorchLinker(JITLinker):
     """A `Linker` that compiles NumPy-based operations using torch.compile."""
+
+    def input_filter(self, inp: Any) -> Any:
+        from pytensor.link.pytorch.dispatch import pytorch_typify
+
+        if isinstance(inp, torch.Tensor):
+            return inp
+        return pytorch_typify(inp)
 
     def fgraph_convert(self, fgraph, input_storage, storage_map, **kwargs):
         from pytensor.link.pytorch.dispatch import pytorch_funcify
