@@ -19,7 +19,6 @@ from textwrap import dedent
 from typing import Any, TypeAlias
 
 import numpy as np
-import torch
 
 import pytensor
 from pytensor import printing
@@ -242,9 +241,6 @@ def convert(x, dtype=None):
     """
     if isinstance(x, np.ma.MaskedArray):
         raise NotImplementedError("MaskedArrays are not supported")
-
-    if isinstance(x, torch.Tensor):
-        return x
 
     if dtype is not None:
         # in this case, the semantics are that the caller is forcing the dtype

@@ -1,7 +1,6 @@
 import warnings
 
 import numpy as np
-import torch
 
 from pytensor.compile import SharedVariable, shared_constructor
 from pytensor.misc.safe_asarray import _asarray
@@ -58,7 +57,6 @@ def _get_vector_length_TensorSharedVariable(var_inst, var):
     return len(var.get_value(borrow=True))
 
 
-@shared_constructor.register(torch.Tensor)
 @shared_constructor.register(np.ndarray)
 def tensor_constructor(
     value,
@@ -104,7 +102,6 @@ def tensor_constructor(
     )
 
 
-@shared_constructor.register(torch.Tensor)
 @shared_constructor.register(np.number)
 @shared_constructor.register(float)
 @shared_constructor.register(int)
@@ -131,26 +128,14 @@ def scalar_constructor(
         dtype = np.asarray(value).dtype
 
     dtype = str(dtype)
-    if not isinstance(value, torch.Tensor):
-        value = _asarray(value, dtype=dtype)
+    value = _asarray(value, dtype=dtype)
     tensor_type = TensorType(dtype=str(value.dtype), shape=())
 
-    if isinstance(value, torch.Tensor):
-        rval = TensorSharedVariable(
-            type=tensor_type,
-            value=value,
-            name=name,
-            strict=strict,
-            allow_downcast=allow_downcast,
-        )
-    # Do not pass the dtype to asarray because we want this to fail if
-    # strict is True and the types do not match.
-    else:
-        rval = TensorSharedVariable(
-            type=tensor_type,
-            value=np.array(value, copy=True),
-            name=name,
-            strict=strict,
-            allow_downcast=allow_downcast,
-        )
+    rval = TensorSharedVariable(
+        type=tensor_type,
+        value=np.array(value, copy=True),
+        name=name,
+        strict=strict,
+        allow_downcast=allow_downcast,
+    )
     return rval

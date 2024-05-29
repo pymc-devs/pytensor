@@ -4,7 +4,6 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal, Optional
 
 import numpy as np
-import torch
 
 import pytensor
 from pytensor import scalar as ps
@@ -103,13 +102,10 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         if str(dtype) == "floatX":
             self.dtype = config.floatX
         else:
-            if np.obj2sctype(dtype) is None and "torch" not in str(dtype):
+            if np.obj2sctype(dtype) is None:
                 raise TypeError(f"Invalid dtype: {dtype}")
 
-            if "torch" in str(dtype):
-                self.dtype = str(dtype).split(".")[-1]
-            else:
-                self.dtype = np.dtype(dtype).name
+            self.dtype = np.dtype(dtype).name
 
         def parse_bcast_and_shape(s):
             if isinstance(s, bool | np.bool_):
@@ -164,9 +160,6 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
             # however, casting it would defeat the purpose of not
             # loading the whole data into memory
             pass
-
-        elif isinstance(data, torch.Tensor):
-            return data
 
         elif isinstance(data, np.ndarray) and (data.dtype == self.numpy_dtype):
             if data.dtype.num != self.numpy_dtype.num:

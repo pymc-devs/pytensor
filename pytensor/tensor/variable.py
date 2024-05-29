@@ -6,7 +6,6 @@ from numbers import Number
 from typing import TypeVar
 
 import numpy as np
-import torch
 
 from pytensor import tensor as pt
 from pytensor.configdefaults import config
@@ -961,30 +960,24 @@ class TensorConstantSignature(tuple):
         # Note that in the comparisons below, the elementwise comparisons
         # come last because they are the most expensive checks.
 
-        # Check for pytorch tensor
-        if not isinstance(self[1], torch.Tensor):
-            if self.has_nan:
-                other.no_nan  # Ensure has_nan is computed.
-                return (
-                    other.has_nan
-                    and self.sum == other.sum
-                    and (self.no_nan.mask == other.no_nan.mask).all()
-                    and
-                    # Note that the second test below (==) may crash e.g. for
-                    # a single scalar NaN value, so we do not run it when all
-                    # values are missing.
-                    (self.no_nan.mask.all() or (self.no_nan == other.no_nan).all())
-                )
-            else:
-                # Simple case where we do not need to worry about NaN values.
-                # (note that if there are NaN values in d1, this will return
-                # False, which is why we do not bother with testing `other.has_nan`
-                # here).
-                return (self.sum == other.sum) and np.all(d0 == d1)
-
-        return (self.sum == other.sum) and torch.all(
-            d0 == d1
-        )  # With pytorch there is no `has_nan` attribute
+        if self.has_nan:
+            other.no_nan  # Ensure has_nan is computed.
+            return (
+                other.has_nan
+                and self.sum == other.sum
+                and (self.no_nan.mask == other.no_nan.mask).all()
+                and
+                # Note that the second test below (==) may crash e.g. for
+                # a single scalar NaN value, so we do not run it when all
+                # values are missing.
+                (self.no_nan.mask.all() or (self.no_nan == other.no_nan).all())
+            )
+        else:
+            # Simple case where we do not need to worry about NaN values.
+            # (note that if there are NaN values in d1, this will return
+            # False, which is why we do not bother with testing `other.has_nan`
+            # here).
+            return (self.sum == other.sum) and np.all(d0 == d1)
 
     def __ne__(self, other):
         return not self == other
