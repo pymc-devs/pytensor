@@ -1,6 +1,7 @@
 from collections.abc import Callable, Iterable
 from functools import partial
 
+import numpy as np
 import pytest
 
 from pytensor.compile.function import function
@@ -40,14 +41,14 @@ def compare_pytorch_and_py(
         Numerical inputs for testing the function graph
     assert_fn: func, opt
         Assert function used to check for equality between python and pytorch. If not
-        provided uses torch.testing.assert_close
+        provided uses np.testing.assert_allclose
     must_be_device_array: Bool
         Checks if torch.device.type is cuda
 
 
     """
     if assert_fn is None:
-        assert_fn = partial(torch.testing.assert_close)
+        assert_fn = partial(np.testing.assert_allclose)
 
     fn_inputs = [i for i in fgraph.inputs if not isinstance(i, SharedVariable)]
 
@@ -107,42 +108,42 @@ def test_pytorch_FunctionGraph_once():
     out_fg = FunctionGraph([x, y], outs, clone=False)
     assert len(out_fg.outputs) == 2
 
-    out_jx = pytorch_funcify(out_fg)
+    out_torch = pytorch_funcify(out_fg)
 
     x_val = torch.tensor([1, 2]).to(getattr(torch, config.floatX))
     y_val = torch.tensor([2, 3]).to(getattr(torch, config.floatX))
 
-    res = out_jx(x_val, y_val)
+    res = out_torch(x_val, y_val)
     assert len(res) == 2
     assert op1.called == 1
     assert op2.called == 1
 
-    res = out_jx(x_val, y_val)
+    res = out_torch(x_val, y_val)
     assert len(res) == 2
     assert op1.called == 2
     assert op2.called == 2
 
 
 def test_shared():
-    a = shared(torch.tensor([1, 2, 3], dtype=getattr(torch, config.floatX)))
+    a = shared(np.array([1, 2, 3], dtype=config.floatX))
     pytensor_torch_fn = function([], a, mode="PYTORCH")
     pytorch_res = pytensor_torch_fn()
 
     assert isinstance(pytorch_res, torch.Tensor)
-    torch.testing.assert_close(pytorch_res, a.get_value())
+    np.testing.assert_allclose(pytorch_res, a.get_value())
 
     pytensor_torch_fn = function([], a * 2, mode="PYTORCH")
     pytorch_res = pytensor_torch_fn()
 
     assert isinstance(pytorch_res, torch.Tensor)
-    torch.testing.assert_close(pytorch_res, a.get_value() * 2)
+    np.testing.assert_allclose(pytorch_res, a.get_value() * 2)
 
-    new_a_value = torch.tensor([3, 4, 5], dtype=getattr(torch, config.floatX))
+    new_a_value = np.array([3, 4, 5], dtype=config.floatX)
     a.set_value(new_a_value)
 
     pytorch_res = pytensor_torch_fn()
     assert isinstance(pytorch_res, torch.Tensor)
-    torch.testing.assert_close(pytorch_res, new_a_value * 2)
+    np.testing.assert_allclose(pytorch_res, new_a_value * 2)
 
 
 def test_shared_updates():
@@ -162,10 +163,10 @@ def test_shared_updates():
 
 
 def test_pytorch_ifelse():
-    true_vals = torch.tensor([1, 2, 3])
-    false_vals = torch.tensor([-1, -2, -3])
+    true_vals = np.r_[1, 2, 3]
+    false_vals = np.r_[-1, -2, -3]
 
-    x = ifelse(torch.tensor(True), true_vals, false_vals)
+    x = ifelse(np.array(True), true_vals, false_vals)
     x_fg = FunctionGraph([], [x])
 
     compare_pytorch_and_py(x_fg, [])

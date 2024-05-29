@@ -14,7 +14,7 @@ from pytensor.raise_op import CheckAndRaise
 def pytorch_typify(data, dtype=None, **kwargs):
     r"""Convert instances of PyTensor `Type`\s to PyTorch types."""
     if dtype is None:
-        return data
+        return torch.tensor(data)
     else:
         return torch.as_tensor(data, dtype=dtype)
 
