@@ -16,14 +16,7 @@ def pytorch_typify(data, dtype=None, **kwargs):
     if dtype is None:
         return data
     else:
-        return torch.tensor(data, dtype=dtype)
-
-
-@pytorch_typify.register(torch.Tensor)
-def pytorch_typify_tensor(data, dtype=None, **kwargs):
-    # if len(data.shape) == 0:
-    #     return data.item()
-    return torch.tensor(data, dtype=dtype)
+        return torch.as_tensor(data, dtype=dtype)
 
 
 @singledispatch
@@ -74,17 +67,13 @@ def pytorch_funcify_CheckAndRaise(op, **kwargs):
 
 
 def pytorch_safe_copy(x):
-    try:
-        res = x.clone()
-    except NotImplementedError:
-        # warnings.warn(
-        #     "`jnp.copy` is not implemented yet. Using the object's `copy` method."
-        # )
-        if hasattr(x, "copy"):
-            res = torch.tensor(x.copy())
-        else:
-            warnings.warn(f"Object has no `copy` method: {x}")
-            res = x
+    # Cannot use try-except due to: https://github.com/pytorch/pytorch/issues/93720
+
+    if hasattr(x, "clone"):
+        res = torch.clone(x)
+    else:
+        warnings.warn(f"Object has no `clone` method: {x}")
+        res = x
 
     return res
 

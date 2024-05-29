@@ -11,7 +11,6 @@ def pytorch_funcify_Elemwise(op, node, **kwargs):
     base_fn = pytorch_funcify(scalar_op, node=node, **kwargs)
 
     def elemwise_fn(*inputs):
-        # Elemwise._check_runtime_broadcast(node, tuple(map(torch.tensor, inputs)))
         return base_fn(*inputs)
 
     return elemwise_fn
