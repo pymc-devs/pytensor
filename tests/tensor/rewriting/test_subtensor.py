@@ -2404,22 +2404,36 @@ def test_local_blockwise_advanced_inc_subtensor(set_instead_of_inc):
     np.testing.assert_allclose(fn(test_x, test_y), expected_out)
 
 
-@pytest.mark.parametrize("fstop, lstop, lstep", [(None, 9, 1), (-1, -1, -1)])
-def test_slice_canonicalize(fstop, lstop, lstep):
+def test_slice_canonicalize():
+    rng = np.random.default_rng(43)
     x = tensor(shape=(3, 5, None, 9))
-    y = x[0:fstop, 0:5, 0:7, 0:lstop:lstep]
-    f = pytensor.function([x], y)
-    test_y = f.maker.fgraph.toposort()
+    test_x = rng.normal(size=(3, 5, 8, 9))
+    # Test case 1
+    y = x[0:None, 0:5, 0:7, 0:9:1]
+    f = pytensor.function([x], y, allow_input_downcast=True)
+    test_y = f.maker.fgraph.outputs[0].owner.inputs[0]
 
-    y1 = x[None:None:None, None:None:None, None:7:None, None:None:None]
+    expected_y = x[None:None:None, None:None:None, None:7:None]
 
-    if fstop == -1 and lstop == -1 and lstep == -1:
-        y1 = x[None:-1:None, None:None:None, None:7:None, None:-1:-1]
+    assert equal_computations([test_y], [expected_y])
 
-    f1 = pytensor.function([x], y1)
-    expected_y = f1.maker.fgraph.toposort()
+    np.testing.assert_allclose(
+        f(test_x),
+        test_x[
+            0:None, 0:5, 0:7, 0:9:1
+        ],  # Use the unoptimized slice to make sure our rewrite logic is correct
+    )
 
-    assert all(
-        equal_computations([x1], [y1])
-        for x1, y1 in zip(test_y[0].inputs, expected_y[0].inputs)
+    # Test case 2
+    y1 = x[0:-1, 0:5, 0:7, 0:-1:-1]
+    f1 = pytensor.function([x], y1, allow_input_downcast=True)
+    test_y1 = f1.maker.fgraph.outputs[0].owner.inputs[0]
+
+    expected_y1 = x[None:-1:None, None:None:None, None:7:None, None:-1:-1]
+
+    assert equal_computations([test_y1], [expected_y1])
+
+    np.testing.assert_allclose(
+        f1(test_x),
+        test_x[0:-1, 0:5, 0:7, 0:-1:-1],
     )
