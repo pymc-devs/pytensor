@@ -437,10 +437,15 @@ N.B.:
 
             for out in inner_outputs:
                 if (
-                    isinstance(getattr(out.owner, "op", None), HasInnerGraph)
-                    or hasattr(getattr(out.owner, "op", None), "scalar_op")
-                    and isinstance(out.owner.op.scalar_op, HasInnerGraph)
-                ) and out not in inner_graph_vars:
+                    out.owner is not None
+                    and (
+                        isinstance(out.owner.op, HasInnerGraph)
+                        or isinstance(
+                            getattr(out.owner.op, "scalar_op", None), HasInnerGraph
+                        )
+                    )
+                    and out not in inner_graph_vars
+                ):
                     inner_graph_vars.append(out)
 
                 _debugprint(

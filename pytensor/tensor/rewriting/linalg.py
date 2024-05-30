@@ -299,8 +299,6 @@ def local_det_chol(fgraph, node):
     """
     (x,) = node.inputs
     for cl, xpos in fgraph.clients[x]:
-        if cl == "output":
-            continue
         if isinstance(cl.op, Blockwise) and isinstance(cl.op.core_op, Cholesky):
             L = cl.outputs[0]
             return [prod(diagonal(L, axis1=-2, axis2=-1) ** 2, axis=-1)]

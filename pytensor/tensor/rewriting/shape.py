@@ -401,7 +401,7 @@ class ShapeFeature(Feature):
                 merged_shape.append(other_shape[i])
             elif (
                 ps.owner
-                and isinstance(getattr(ps.owner, "op", None), Shape_i)
+                and isinstance(ps.owner.op, Shape_i)
                 and ps.owner.op.i == i
                 and ps.owner.inputs[0] in (r, other_r)
             ):
@@ -602,7 +602,7 @@ class ShapeFeature(Feature):
         # r is *scheduled*.
         # At that point, node is no longer a client of r, but of new_r
         for shpnode, idx in fgraph.clients[r] + [(node, i)]:
-            if isinstance(getattr(shpnode, "op", None), Shape_i):
+            if isinstance(shpnode.op, Shape_i):
                 idx = shpnode.op.i
                 repl = self.shape_of[new_r][idx]
                 if repl.owner is shpnode:
@@ -1057,7 +1057,10 @@ def local_Shape_of_SpecifyShape(fgraph, node):
 
     specified_shape = node.inputs[0]
 
-    if not isinstance(getattr(specified_shape.owner, "op", None), SpecifyShape):
+    if not (
+        specified_shape.owner is not None
+        and isinstance(specified_shape.owner.op, SpecifyShape)
+    ):
         return False
 
     x, *shape = specified_shape.owner.inputs

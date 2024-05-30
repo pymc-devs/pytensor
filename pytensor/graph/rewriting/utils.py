@@ -1,6 +1,6 @@
 import copy
 from collections.abc import Generator, Sequence
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, Optional
 
 import pytensor
 from pytensor.graph.basic import (
@@ -10,7 +10,7 @@ from pytensor.graph.basic import (
     graph_inputs,
     vars_between,
 )
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 
 
@@ -230,11 +230,9 @@ def get_clients_at_depth(
     for var in node.outputs:
         if depth > 0:
             for out_node, _ in fgraph.clients[var]:
-                if out_node == "output":
+                if isinstance(out_node.op, Output):
                     continue
-                yield from get_clients_at_depth(
-                    fgraph, cast(Apply, out_node), depth - 1
-                )
+                yield from get_clients_at_depth(fgraph, out_node, depth - 1)
         else:
             assert var.owner is not None
             yield var.owner

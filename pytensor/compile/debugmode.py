@@ -30,6 +30,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable, io_toposort
 from pytensor.graph.destroyhandler import DestroyHandler
 from pytensor.graph.features import AlreadyThere, BadOptimization
+from pytensor.graph.fg import Output
 from pytensor.graph.op import HasInnerGraph, Op
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
 from pytensor.link.basic import Container, LocalLinker
@@ -628,7 +629,9 @@ def _is_used_in_graph(fgraph, var):
         True if `var` is used by another node in the graph.
 
     """
-    return not (fgraph.clients[var] == [("output", 1)] or fgraph.clients[var] == [])
+    return any(
+        client for client, _ in fgraph.clients[var] if not isinstance(client.op, Output)
+    )
 
 
 def _check_strides_match(a, b, warn_err, op):
@@ -977,7 +980,7 @@ def _check_preallocated_output(
     # disable memory checks in that mode, since they were already run.
     try:
         changed_inner_mode = False
-        if isinstance(getattr(node, "op", None), HasInnerGraph):
+        if isinstance(node.op, HasInnerGraph):
             fn = node.op.fn
             if not (fn and hasattr(fn, "maker") and hasattr(fn.maker, "mode")):
                 _logger.warning(f"Expected pytensor function not found in {node.op}.fn")
@@ -1132,18 +1135,14 @@ class _FunctionGraphEvent:
 
     def __init__(self, kind, node, idx=None, reason=None):
         self.kind = kind
-        if node == "output":
-            self.node = "output"
-            self.op = "output"
-        else:
-            self.node = node
-            self.op = node.op
+        self.node = node
+        self.op = node.op
         self.idx = idx
         self.reason = str(reason)
 
     def __str__(self):
         if self.kind == "change":
-            if self.op != "output":
+            if not isinstance(self.op, Output):
                 msg = str(len(self.node.inputs))
             else:
                 msg = ""

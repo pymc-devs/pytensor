@@ -78,8 +78,6 @@ def view_tree_set(fgraph, v, treeset):
     """
     treeset.add(v)
     for cl, v_input_pos_to_cl in fgraph.clients[v]:
-        if cl == "output":
-            continue
         vmap = cl.op.view_map
         dmap = cl.op.destroy_map
         for opos, iposlist in chain(vmap.items(), dmap.items()):
@@ -1202,8 +1200,11 @@ def insert_deepcopy(fgraph, wrapped_inputs, wrapped_outputs):
     has_destroyers_attr = hasattr(fgraph, "has_destroyers")
 
     for i in range(len(fgraph.outputs)):
+        original_out = fgraph.outputs[i]
+        output_client = fgraph.get_output_client(i)
+
         views_of_output_i = set()
-        view_tree_set(fgraph, alias_root(fgraph.outputs[i]), views_of_output_i)
+        view_tree_set(fgraph, alias_root(original_out), views_of_output_i)
         copied = False
         # do not allow outputs to be aliased
         for j in range(i + 1, len(fgraph.outputs)):
@@ -1212,16 +1213,16 @@ def insert_deepcopy(fgraph, wrapped_inputs, wrapped_outputs):
             if fgraph.outputs[j] in views_of_output_i:
                 if wrapped_outputs[i].borrow and wrapped_outputs[j].borrow:
                     fgraph.change_node_input(
-                        "output", i, view_op(fgraph.outputs[i]), reason=reason
+                        *output_client, view_op(original_out), reason=reason
                     )
                 else:
                     fgraph.change_node_input(
-                        "output", i, deep_copy_op(fgraph.outputs[i]), reason=reason
+                        *output_client, deep_copy_op(original_out), reason=reason
                     )
                 copied = True
                 break
 
-        if not copied:
+        if not copied:  # no-break
             for input_j in all_graph_inputs:
                 # do not allow outputs to be aliased to an inputs (j), unless
                 # a) that j'th input has been 'destroyed' by
@@ -1239,33 +1240,29 @@ def insert_deepcopy(fgraph, wrapped_inputs, wrapped_outputs):
                         j = fgraph.inputs.index(input_j)
                         if wrapped_outputs[i].borrow and wrapped_inputs[j].borrow:
                             fgraph.change_node_input(
-                                "output",
-                                i,
-                                view_op(fgraph.outputs[i]),
+                                *output_client,
+                                view_op(original_out),
                                 reason=reason,
                             )
                             break
                         else:
                             fgraph.change_node_input(
-                                "output",
-                                i,
-                                deep_copy_op(fgraph.outputs[i]),
+                                *output_client,
+                                deep_copy_op(original_out),
                                 reason=reason,
                             )
                             break
                     elif wrapped_outputs[i].borrow:
                         fgraph.change_node_input(
-                            "output",
-                            i,
-                            view_op(fgraph.outputs[i]),
+                            *output_client,
+                            view_op(original_out),
                             reason=reason,
                         )
                         break
                     else:
                         fgraph.change_node_input(
-                            "output",
-                            i,
-                            deep_copy_op(fgraph.outputs[i]),
+                            *output_client,
+                            deep_copy_op(original_out),
                             reason=reason,
                         )
                         break

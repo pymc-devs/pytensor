@@ -30,7 +30,7 @@ from pytensor.graph.basic import (
     vars_between,
 )
 from pytensor.graph.features import AlreadyThere, Feature, NodeFinder
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
 from pytensor.graph.utils import AssocList, InconsistencyError
 from pytensor.misc.ordered_set import OrderedSet
@@ -738,7 +738,7 @@ class MergeOptimizer(GraphRewriter):
                         if any(
                             i in flatten(c.op.destroy_map.values())
                             for c, i in clients
-                            if c != "output" and c.op.destroy_map
+                            if c.op.destroy_map
                         ):
                             continue
 
@@ -1612,8 +1612,6 @@ class PatternNodeRewriter(NodeRewriter):
 
         if get_nodes and self.get_nodes is not None:
             for real_node in self.get_nodes(fgraph, node):
-                if real_node == "output":
-                    continue
                 ret = self.transform(fgraph, real_node, get_nodes=False)
                 if ret is not False and ret is not None:
                     return dict(zip(real_node.outputs, ret))
@@ -2399,7 +2397,7 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
             if self.tracks_on_change_inputs:
 
                 def chin_(node, i, r, new_r, reason):
-                    if node is not current_node and not isinstance(node, str):
+                    if node is not current_node and not isinstance(node.op, Output):
                         q.append(node)
 
                 chin = chin_

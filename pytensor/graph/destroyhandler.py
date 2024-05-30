@@ -11,6 +11,7 @@ import pytensor
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant
 from pytensor.graph.features import AlreadyThere, Bookkeeper
+from pytensor.graph.fg import Output
 from pytensor.graph.utils import InconsistencyError
 from pytensor.misc.ordered_set import OrderedSet
 
@@ -401,8 +402,6 @@ class DestroyHandler(Bookkeeper):
             def recursive_destroys_finder(protected_var):
                 # protected_var is the idx'th input of app.
                 for app, idx in fgraph.clients[protected_var]:
-                    if app == "output":
-                        continue
                     destroy_maps = app.op.destroy_map.values()
                     # If True means that the apply node, destroys the protected_var.
                     if idx in [dmap for sublist in destroy_maps for dmap in sublist]:
@@ -578,7 +577,7 @@ class DestroyHandler(Bookkeeper):
         app.inputs[i] changed from old_r to new_r.
 
         """
-        if app == "output":
+        if isinstance(app.op, Output):
             # app == 'output' is special key that means FunctionGraph is redefining which nodes are being
             # considered 'outputs' of the graph.
             pass

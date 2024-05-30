@@ -31,15 +31,12 @@ def is_rv_used_in_graph(base_rv, node, fgraph):
     TODO: We should apply all the shape rewrites before these rewrites, since
     that would properly remove the unnecessary dependencies on `base_rv` (when
     possible).
-
     """
-
-    def _node_check(n, i):
-        if n == "output":
-            n = fgraph.outputs[i].owner
-        return n == node or isinstance(n.op, Shape | Shape_i)
-
-    return not all(_node_check(n, i) for n, i in fgraph.clients.get(base_rv, ()))
+    return any(
+        n
+        for n, i in fgraph.clients.get(base_rv, ())
+        if not (n is node or isinstance(n.op, Shape | Shape_i))
+    )
 
 
 @node_rewriter([RandomVariable], inplace=True)
