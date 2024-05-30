@@ -50,8 +50,11 @@ class AssertNoChanges(Feature):
         raise AssertionError()
 
 
-def OpKeyPatternNodeRewriter(p1, p2, ign=False):
-    return OpKeyGraphRewriter(PatternNodeRewriter(p1, p2), ignore_newtrees=ign)
+def OpKeyPatternNodeRewriter(p1, p2, allow_multiple_clients=False, ign=False):
+    return OpKeyGraphRewriter(
+        PatternNodeRewriter(p1, p2, allow_multiple_clients=allow_multiple_clients),
+        ignore_newtrees=ign,
+    )
 
 
 def WalkingPatternNodeRewriter(p1, p2, ign=True):
@@ -207,13 +210,70 @@ class TestPatternNodeRewriter:
         assert str(g) == "FunctionGraph(Op2(Op1(x, x), Op3(x, y)))"
 
     def test_allow_multiple_clients(self):
-        x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
-        e0 = op1(x, y)
-        # `e0` has multiple clients (i.e. the `op4` and `op3` nodes)
-        e = op3(op4(e0), e0)
-        g = FunctionGraph([x, y, z], [e])
-        OpKeyPatternNodeRewriter((op4, (op1, "x", "y")), (op3, "x", "y")).rewrite(g)
-        assert str(g) == "FunctionGraph(Op3(Op4(*1 -> Op1(x, y)), *1))"
+        x, y, z = inputs = MyVariable("x"), MyVariable("y"), MyVariable("z")
+        w = op1(x, y)
+        # `w` has multiple clients (i.e. the `op4` and `op3` nodes)
+        e = op3(op4(w), w)
+
+        # By default, allow_multiple_clients is False
+        # So the replacement should fail
+        outputs = [e]
+        g = FunctionGraph(inputs, outputs, copy_inputs=False)
+        OpKeyPatternNodeRewriter(
+            (op4, (op1, "x", "y")),
+            (op3, "x", "y"),
+        ).rewrite(g)
+        assert equal_computations(g.outputs, outputs)
+
+        # Now it should be fine
+        g = FunctionGraph(inputs, outputs, copy_inputs=False)
+        OpKeyPatternNodeRewriter(
+            (op4, (op1, "x", "y")),
+            (op3, "x", "y"),
+            allow_multiple_clients=True,
+        ).rewrite(g)
+        assert equal_computations(g.outputs, [op3(op3(x, y), w)])
+
+        # The fact that the inputs of the pattern have multiple clients should not matter
+        g = FunctionGraph(inputs, outputs, copy_inputs=False)
+        OpKeyPatternNodeRewriter(
+            (op3, (op4, "w"), "w"),
+            (op3, "w", "w"),
+            allow_multiple_clients=False,
+        ).rewrite(g)
+        assert equal_computations(g.outputs, [op3(w, w)])
+
+        # The fact that are multiple clients above the inputs of the pattern should not matter
+        v = op4(e)
+        e1 = op4(v)
+        e2 = op1(x, x)  # Irrelevant reuse of x that should not block rewrite either
+        e3 = op1(v, v)  # Relevant reuse of v that should block rewrite
+
+        outputs = [e1, e2]
+        g = FunctionGraph(inputs, outputs, copy_inputs=False)
+        OpKeyPatternNodeRewriter(
+            (op4, (op4, "e")),
+            "e",
+            allow_multiple_clients=False,
+        ).rewrite(g)
+        assert equal_computations(g.outputs, [e, e2])
+
+        outputs = [e1, e3]
+        g = FunctionGraph([x, y, z], outputs, copy_inputs=False)
+        OpKeyPatternNodeRewriter(
+            (op4, (op4, "e")),
+            "e",
+            allow_multiple_clients=False,
+        ).rewrite(g)
+        assert equal_computations(g.outputs, outputs)
+
+        g = FunctionGraph(inputs, outputs, copy_inputs=False)
+        OpKeyPatternNodeRewriter(
+            (op4, (op4, "e")),
+            "e",
+            allow_multiple_clients=True,
+        ).rewrite(g)
+        assert equal_computations(g.outputs, [e, e3])
 
     def test_eq(self):
         # replacing the whole graph
