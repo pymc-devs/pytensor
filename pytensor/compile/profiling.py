@@ -16,18 +16,15 @@ import sys
 import time
 from collections import Counter, defaultdict
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 
 import pytensor
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.link.utils import get_destroy_dependencies
-
-
-if TYPE_CHECKING:
-    from pytensor.graph.fg import FunctionGraph
 
 
 @contextmanager
@@ -1038,7 +1035,7 @@ class ProfileStats:
             executable_nodes = set()
             for var in fgraph.inputs:
                 for c, _ in fgraph.clients[var]:
-                    if c != "output":
+                    if not isinstance(c.op, Output):
                         deps = c.inputs + destroy_dependencies[c]
                         if all(compute_map[v][0] for v in deps):
                             executable_nodes.add(c)
@@ -1166,7 +1163,7 @@ class ProfileStats:
 
                         for var in node.outputs:
                             for c, _ in fgraph.clients[var]:
-                                if c != "output":
+                                if not isinstance(c.op, Output):
                                     deps = c.inputs + destroy_dependencies[c]
                                     if all(compute_map[v][0] for v in deps):
                                         new_exec_nodes.add(c)

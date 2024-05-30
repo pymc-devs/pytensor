@@ -24,7 +24,7 @@ from pytensor import scalar as ps
 from pytensor.gradient import DisconnectedType, grad_undefined
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Apply, Constant, Variable, equal_computations
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.rewriting.db import EquilibriumDB
@@ -1679,7 +1679,7 @@ class Alloc(COp):
             return False
 
         for client, idx in clients:
-            if client == "output":
+            if isinstance(client.op, Output):
                 # If the output is a constant, it will have to be deepcopied
                 # each time the function is called.  So we do not fold.
                 return False

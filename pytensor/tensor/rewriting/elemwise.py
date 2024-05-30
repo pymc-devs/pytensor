@@ -14,7 +14,7 @@ from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph
 from pytensor.graph.basic import Apply, Constant, Variable, ancestors, io_toposort
 from pytensor.graph.features import ReplaceValidate
-from pytensor.graph.fg import ApplyOrOutput
+from pytensor.graph.fg import Output
 from pytensor.graph.rewriting.basic import (
     EquilibriumGraphRewriter,
     GraphRewriter,
@@ -688,7 +688,7 @@ class FusionOptimizer(GraphRewriter):
             """
 
             FUSEABLE_MAPPING = defaultdict[Variable, list[Apply]]
-            UNFUSEABLE_MAPPING = defaultdict[Variable, set[ApplyOrOutput]]
+            UNFUSEABLE_MAPPING = defaultdict[Variable, set[Apply]]
 
             def initialize_fuseable_mappings(
                 *, fg: FunctionGraph
@@ -727,7 +727,6 @@ class FusionOptimizer(GraphRewriter):
                     for client, _ in clients:
                         if (
                             out_maybe_fuseable
-                            and not isinstance(client, str)  # "output"
                             and isinstance(client.op, Elemwise)
                             # and not isinstance(client.op.scalar_op, ps.Composite)
                             and len(client.outputs) == 1
@@ -841,7 +840,7 @@ class FusionOptimizer(GraphRewriter):
                             implied_unfuseable_clients = {
                                 c
                                 for client in unfuseable_clients_clone.get(next_out, ())
-                                if not isinstance(client, str)  # "output"
+                                if not isinstance(client.op, Output)
                                 for c in client.outputs
                             }
 

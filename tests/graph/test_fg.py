@@ -6,7 +6,7 @@ import pytest
 
 from pytensor.configdefaults import config
 from pytensor.graph.basic import NominalVariable
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.utils import MissingInputError
 from pytensor.printing import debugprint
 from tests.graph.utils import (
@@ -78,8 +78,13 @@ class TestFunctionGraph:
         assert fg.variables == {var1, var2, var3, var4}
         assert fg.get_clients(var1) == [(var3.owner, 0)]
         assert fg.get_clients(var2) == [(var4.owner, 1)]
-        assert fg.get_clients(var3) == [("output", 0), (var4.owner, 0)]
-        assert fg.get_clients(var4) == [("output", 1)]
+        var3_clients = fg.get_clients(var3)
+        assert len(var3_clients) == 2
+        assert var3_clients[0][0].op == Output(0)
+        assert var3_clients[1] == (var4.owner, 0)
+        var4_clients = fg.get_clients(var4)
+        assert len(var4_clients) == 1
+        assert var4_clients[0][0].op == Output(1)
 
         varC = MyConstant("varC")
         var5 = op1(var1, varC)
@@ -208,8 +213,11 @@ class TestFunctionGraph:
         fg = FunctionGraph([var1, var2], [var3, var5], clone=False)
 
         var6 = MyVariable2("var6")
+        [out_client] = [
+            cl for cl, _ in fg.clients[fg.outputs[0]] if isinstance(cl.op, Output)
+        ]
         with pytest.raises(TypeError):
-            fg.change_node_input("output", 1, var6)
+            fg.change_node_input(out_client, 0, var6)
 
         with pytest.raises(TypeError):
             fg.change_node_input(var5.owner, 1, var6)
@@ -358,12 +366,13 @@ class TestFunctionGraph:
 
         # TODO: What if the index value is greater than 1?  It will throw an
         # `IndexError`, but that doesn't sound like anything we'd want.
+        out_node = Output(idx=1).make_node(var4)
         with pytest.raises(Exception, match="Inconsistent clients list.*"):
-            fg.add_client(var4, ("output", 1))
+            fg.add_client(var4, (out_node, 0))
 
             fg.check_integrity()
 
-        fg.remove_client(var4, ("output", 1))
+        fg.remove_client(var4, (out_node, 0))
 
         with pytest.raises(TypeError, match="The first entry of.*"):
             fg.add_client(var4, (None, 0))
