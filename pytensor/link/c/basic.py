@@ -354,9 +354,7 @@ def get_c_declare(fgraph, r, name, sub):
     # it means they need `r`'s dtype to be declared, so
     # we have to pass `check_input=True` to `c_declare`.
     if any(
-        getattr(c.op, "check_input", config.check_input)
-        for (c, _) in fgraph.clients[r]
-        if not isinstance(c, str)
+        getattr(c.op, "check_input", config.check_input) for (c, _) in fgraph.clients[r]
     ) or (r.owner and getattr(r.owner.op, "check_input", config.check_input)):
         c_declare = r.type.c_declare(name, sub, True)
     else:
