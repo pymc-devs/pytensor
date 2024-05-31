@@ -1473,7 +1473,6 @@ class BetaInc(ScalarOp):
     """
     Regularized incomplete beta function
     """
-
     nin = 3
     nfunc_spec = ("scipy.special.betainc", 3, 1)
 
@@ -1495,8 +1494,21 @@ class BetaInc(ScalarOp):
             ),
         ]
 
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
+    def c_support_code(self, **kwargs):
+        with open(os.path.join(os.path.dirname(__file__), "c_code", "incbet.c")) as f:
+            raw = f.read()
+            return raw
+
+    def c_code(self, node, name, inp, out, sub):
+        (a, b, x) = inp
+        (z,) = out
+        if node.inputs[0].type in float_types:
+            return f"""{z} = BetaInc({a}, {b}, {x});"""
+
+        raise NotImplementedError("type not supported", type)
+
+    def c_code_cache_version(self, ):
+        return ()
 
 
 betainc = BetaInc(upgrade_to_float_no_complex, name="betainc")
