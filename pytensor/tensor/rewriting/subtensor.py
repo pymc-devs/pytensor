@@ -396,7 +396,7 @@ def local_subtensor_lift(fgraph, node):
     """
     if isinstance(node.op, Subtensor):
         u = node.inputs[0]
-        if not u.owner or len(fgraph.clients[u]) > 1:
+        if u.owner is None or len(fgraph.clients[u]) > 1:
             return False
 
         if isinstance(u.owner.op, Elemwise) and len(u.owner.inputs) == 1:

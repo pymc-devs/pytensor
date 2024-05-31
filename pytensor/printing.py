@@ -1339,7 +1339,7 @@ def pydotprint(
     if cond_highlight is not None:
 
         def recursive_pass(x, ls):
-            if not x.owner:
+            if x.owner is None:
                 return ls
             else:
                 ls += [x.owner]
