@@ -173,7 +173,7 @@ def _unify_Variable_Variable(u, v, s):
         yield s
         return
 
-    if not u.owner and not v.owner:
+    if u.owner is None and v.owner is None:
         yield False
         return
 
@@ -201,7 +201,7 @@ _unify.add((Constant, Constant, Mapping), _unify_Constant_Constant)
 
 def _unify_Variable_ExpressionTuple(u, v, s):
     # `Constant`s are "atomic"
-    if not u.owner:
+    if u.owner is None:
         yield False
         return
 

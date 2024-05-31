@@ -1400,7 +1400,7 @@ def inc_subtensor(
             # We insert a SpecifyShape Op to make sure it is the case.
             y = specify_broadcastable(y, dim)
 
-    if not x.owner:
+    if x.owner is None:
         raise TypeError("x must be the result of a subtensor operation")
 
     # retrieve idx_list from x.owner

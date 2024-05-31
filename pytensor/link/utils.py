@@ -445,7 +445,7 @@ def raise_with_op(
                     sz = np.dtype(dtype).itemsize * np.prod(shapeinfo)
                     storage_map_item.append(sz)
                     total_size += sz
-                    if not k.owner:
+                    if k.owner is None:
                         total_size_inputs += sz
                     else:
                         # If it is a view, don't count it twice.
