@@ -695,7 +695,7 @@ def local_subtensor_inc_subtensor(fgraph, node):
     """
     if isinstance(node.op, Subtensor):
         x = node.inputs[0]
-        if not x.owner or not isinstance(x.owner.op, IncSubtensor):
+        if not (x.owner and isinstance(x.owner.op, IncSubtensor)):
             return
         if not x.owner.op.set_instead_of_inc:
             return
@@ -755,7 +755,7 @@ def local_subtensor_make_vector(fgraph, node):
 
     x = node.inputs[0]
 
-    if not x.owner or not isinstance(x.owner.op, MakeVector):
+    if not (x.owner and isinstance(x.owner.op, MakeVector)):
         return False
 
     make_vector_op = x.owner.op

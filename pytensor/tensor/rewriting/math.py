@@ -306,7 +306,7 @@ def local_func_inv(fgraph, node):
 
     if not isinstance(node.op, Elemwise):
         return
-    if not x.owner or not isinstance(x.owner.op, Elemwise):
+    if not (x.owner and isinstance(x.owner.op, Elemwise)):
         return
 
     prev_op = x.owner.op.scalar_op
@@ -332,9 +332,7 @@ def local_func_inv(fgraph, node):
 def local_exp_log(fgraph, node):
     x = node.inputs[0]
 
-    if not isinstance(node.op, Elemwise):
-        return
-    if not x.owner or not isinstance(x.owner.op, Elemwise):
+    if not (x.owner and isinstance(x.owner.op, Elemwise)):
         return
 
     prev_op = x.owner.op.scalar_op
@@ -375,9 +373,7 @@ def local_exp_log_nan_switch(fgraph, node):
     # Rewrites of the kind exp(log...(x)) that require a `nan` switch
     x = node.inputs[0]
 
-    if not isinstance(node.op, Elemwise):
-        return
-    if not x.owner or not isinstance(x.owner.op, Elemwise):
+    if not (x.owner and isinstance(x.owner.op, Elemwise)):
         return
 
     prev_op = x.owner.op.scalar_op
@@ -501,9 +497,11 @@ def local_mul_exp_to_exp_add(fgraph, node):
         rest = [
             n
             for n in node.inputs
-            if not n.owner
-            or not hasattr(n.owner.op, "scalar_op")
-            or not isinstance(n.owner.op.scalar_op, ps.Exp)
+            if not (
+                n.owner
+                and isinstance(n.owner.op, Elemwise)
+                and isinstance(n.owner.op.scalar_op, ps.Exp)
+            )
         ]
         if len(rest) > 0:
             new_out = orig_op(new_out, *rest)
