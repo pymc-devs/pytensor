@@ -184,7 +184,7 @@ def numba_funcify_Scan(op, node, **kwargs):
     # rotation for initially truncated storage.
     output_storage_post_proc_stmts: list[str] = []
 
-    # In truncated storage situations (e.g. created by `save_mem_new_scan`),
+    # In truncated storage situations (e.g. created by `scan_save_mem`),
     # the taps and output storage overlap, instead of the standard situation in
     # which the output storage is large enough to contain both the initial taps
     # values and the output storage.  In this truncated case, we use the
