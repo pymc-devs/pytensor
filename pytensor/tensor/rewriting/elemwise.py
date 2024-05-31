@@ -699,12 +699,10 @@ class FusionOptimizer(GraphRewriter):
                     if node.op.scalar_op.supports_c_code(node.inputs, node.outputs):
                         return True
                     else:
-                        warn(
-                            "Optimization Warning: "
-                            f"The Op {node.op.scalar_op} does not provide a C implementation."
-                            " As well as being potentially slow, this also disables "
-                            "loop fusion."
-                        )
+                        if config.optimizer_verbose:
+                            warn(
+                                f"Loop fusion interrupted because {node.op.scalar_op} does not provide a C implementation."
+                            )
                         return False
 
                 # Fuseable nodes have to be accessed in a deterministic manner
