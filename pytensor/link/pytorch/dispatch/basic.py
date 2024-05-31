@@ -3,7 +3,7 @@ from functools import singledispatch
 
 import torch
 
-from pytensor.compile.ops import DeepCopyOp, ViewOp
+from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.fg import FunctionGraph
 from pytensor.ifelse import IfElse
 from pytensor.link.utils import fgraph_to_python
@@ -84,11 +84,3 @@ def pytorch_funcify_DeepCopyOp(op, **kwargs):
         return pytorch_safe_copy(x)
 
     return deepcopyop
-
-
-@pytorch_funcify.register(ViewOp)
-def pytorch_funcify_ViewOp(op, **kwargs):
-    def viewop(x):
-        return x
-
-    return viewop

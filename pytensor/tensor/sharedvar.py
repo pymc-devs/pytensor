@@ -131,6 +131,8 @@ def scalar_constructor(
     value = _asarray(value, dtype=dtype)
     tensor_type = TensorType(dtype=str(value.dtype), shape=())
 
+    # Do not pass the dtype to asarray because we want this to fail if
+    # strict is True and the types do not match.
     rval = TensorSharedVariable(
         type=tensor_type,
         value=np.array(value, copy=True),

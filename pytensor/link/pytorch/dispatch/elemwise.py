@@ -2,7 +2,6 @@ import torch
 
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 
 
 @pytorch_funcify.register(Elemwise)
@@ -34,34 +33,3 @@ def pytorch_funcify_DimShuffle(op, **kwargs):
         return res
 
     return dimshuffle
-
-
-@pytorch_funcify.register(Softmax)
-def pytorch_funcify_Softmax(op, **kwargs):
-    axis = op.axis
-
-    def softmax(x):
-        return torch.nn.functional.softmax(x, dim=axis)
-
-    return softmax
-
-
-@pytorch_funcify.register(SoftmaxGrad)
-def pytorch_funcify_SoftmaxGrad(op, **kwargs):
-    axis = op.axis
-
-    def softmax_grad(dy, sm):
-        dy_times_sm = dy * sm
-        return dy_times_sm - torch.sum(dy_times_sm, dim=axis, keepdims=True) * sm
-
-    return softmax_grad
-
-
-@pytorch_funcify.register(LogSoftmax)
-def pytorch_funcify_LogSoftmax(op, **kwargs):
-    axis = op.axis
-
-    def log_softmax(x):
-        return torch.nn.functional.log_softmax(x, dim=axis)
-
-    return log_softmax
