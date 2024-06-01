@@ -7,7 +7,7 @@ from pytensor.graph.op import compute_test_value
 from pytensor.graph.rewriting.basic import copy_stack_trace, in2out, node_rewriter
 from pytensor.scalar import integer_types
 from pytensor.tensor import NoneConst
-from pytensor.tensor.basic import constant, get_vector_length
+from pytensor.tensor.basic import constant
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.extra_ops import broadcast_to
 from pytensor.tensor.random.op import RandomVariable
@@ -20,7 +20,7 @@ from pytensor.tensor.subtensor import (
     as_index_variable,
     get_idx_list,
 )
-from pytensor.tensor.type_other import SliceType
+from pytensor.tensor.type_other import NoneTypeT, SliceType
 
 
 def is_rv_used_in_graph(base_rv, node, fgraph):
@@ -81,31 +81,31 @@ def local_rv_size_lift(fgraph, node):
     if not isinstance(node.op, RandomVariable):
         return
 
-    rng, size, dtype, *dist_params = node.inputs
+    rng, size, *dist_params = node.inputs
+
+    if isinstance(size.type, NoneTypeT):
+        return
 
     dist_params = broadcast_params(dist_params, node.op.ndims_params)
 
-    if get_vector_length(size) > 0:
-        dist_params = [
-            broadcast_to(
-                p,
-                (
-                    tuple(size)
-                    + (
-                        tuple(p.shape)[-node.op.ndims_params[i] :]
-                        if node.op.ndims_params[i] > 0
-                        else ()
-                    )
+    dist_params = [
+        broadcast_to(
+            p,
+            (
+                tuple(size)
+                + (
+                    tuple(p.shape)[-node.op.ndims_params[i] :]
+                    if node.op.ndims_params[i] > 0
+                    else ()
                 )
-                if node.op.ndim_supp > 0
-                else size,
             )
-            for i, p in enumerate(dist_params)
-        ]
-    else:
-        return
+            if node.op.ndim_supp > 0
+            else size,
+        )
+        for i, p in enumerate(dist_params)
+    ]
 
-    new_node = node.op.make_node(rng, None, dtype, *dist_params)
+    new_node = node.op.make_node(rng, None, *dist_params)
 
     if config.compute_test_value != "off":
         compute_test_value(new_node)
@@ -141,7 +141,7 @@ def local_dimshuffle_rv_lift(fgraph, node):
         return False
 
     rv_op = rv_node.op
-    rng, size, dtype, *dist_params = rv_node.inputs
+    rng, size, *dist_params = rv_node.inputs
     rv = rv_node.default_output()
 
     # Check that Dimshuffle does not affect support dims
@@ -159,11 +159,10 @@ def local_dimshuffle_rv_lift(fgraph, node):
     batched_dims = rv.ndim - rv_op.ndim_supp
     batched_dims_ds_order = tuple(o for o in ds_op.new_order if o not in supp_dims)
 
-    # Make size explicit
-    missing_size_dims = batched_dims - get_vector_length(size)
-    if missing_size_dims > 0:
-        full_size = tuple(broadcast_params(dist_params, rv_op.ndims_params)[0].shape)
-        size = full_size[:missing_size_dims] + tuple(size)
+    if isinstance(size.type, NoneTypeT):
+        # Make size explicit
+        shape = tuple(broadcast_params(dist_params, rv_op.ndims_params)[0].shape)
+        size = shape[:batched_dims]
 
     # Update the size to reflect the DimShuffled dimensions
     new_size = [
@@ -185,7 +184,7 @@ def local_dimshuffle_rv_lift(fgraph, node):
         )
         new_dist_params.append(param.dimshuffle(param_new_order))
 
-    new_node = rv_op.make_node(rng, new_size, dtype, *new_dist_params)
+    new_node = rv_op.make_node(rng, new_size, *new_dist_params)
 
     if config.compute_test_value != "off":
         compute_test_value(new_node)
@@ -233,7 +232,7 @@ def local_subtensor_rv_lift(fgraph, node):
         return None
 
     rv_op = rv_node.op
-    rng, size, dtype, *dist_params = rv_node.inputs
+    rng, size, *dist_params = rv_node.inputs
 
     # Parse indices
     idx_list = getattr(subtensor_op, "idx_list", None)
@@ -255,7 +254,7 @@ def local_subtensor_rv_lift(fgraph, node):
         return False
 
     # Check that indexing does not act on support dims
-    batch_ndims = rv.ndim - rv_op.ndim_supp
+    batch_ndims = rv_op.batch_ndim(rv_node)
     # We decompose the boolean indexes, which makes it clear whether they act on support dims or not
     non_bool_indices = tuple(
         chain.from_iterable(
@@ -346,7 +345,7 @@ def local_subtensor_rv_lift(fgraph, node):
         new_dist_params.append(batch_param[tuple(batch_indices)])
 
     # Create new RV
-    new_node = rv_op.make_node(rng, new_size, dtype, *new_dist_params)
+    new_node = rv_op.make_node(rng, new_size, *new_dist_params)
     new_rv = new_node.default_output()
 
     copy_stack_trace(rv, new_rv)

@@ -6,7 +6,7 @@ import pytest
 import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor as pt
-from pytensor import shared
+from pytensor import graph_replace, shared
 from pytensor.compile import optdb
 from pytensor.compile.function import function
 from pytensor.compile.mode import get_default_mode, get_mode
@@ -2010,3 +2010,19 @@ def test_topological_fill_sink_multi_output_client():
     [new_out] = fg.outputs
     expected_out = pt.full_like(z, pt.add(*elem_op_with_2_outputs(pt.exp(x))))
     assert equal_computations([new_out], [expected_out])
+
+
+def test_topological_fill_sink_broadcastable_change():
+    """Test rewrite doesn't fail after a graph replacement that provides a broadcastable change."""
+    a = vector("a", shape=(1,))
+    b = vector("b", shape=(1,))
+    zeros = pt.vector("zeros", shape=(None,))
+    initial_out = pt.full_like(zeros, a) + b
+
+    # Make broadcast to zeros irrelevant
+    out = graph_replace(initial_out, {zeros: pt.zeros((1,))}, strict=False)
+
+    fg = FunctionGraph([a, b], [out], copy_inputs=False)
+    topological_fill_sink.rewrite(fg)
+    [new_out] = fg.outputs
+    assert equal_computations([new_out], [a + b])

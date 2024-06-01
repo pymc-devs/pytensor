@@ -58,7 +58,11 @@ def numba_funcify_Scan(op, node, **kwargs):
     # TODO: Not sure this is the right place to do this, should we have a rewrite that
     #  explicitly triggers the optimization of the inner graphs of Scan?
     #  The C-code defers it to the make_thunk phase
-    rewriter = op.mode_instance.excluding(*NUMBA._optimizer.exclude).optimizer
+    rewriter = (
+        op.mode_instance.including("numba")
+        .excluding(*NUMBA._optimizer.exclude)
+        .optimizer
+    )
     rewriter(op.fgraph)
 
     scan_inner_func = numba_basic.numba_njit(numba_funcify(op.fgraph))
@@ -180,7 +184,7 @@ def numba_funcify_Scan(op, node, **kwargs):
     # rotation for initially truncated storage.
     output_storage_post_proc_stmts: list[str] = []
 
-    # In truncated storage situations (e.g. created by `save_mem_new_scan`),
+    # In truncated storage situations (e.g. created by `scan_save_mem`),
     # the taps and output storage overlap, instead of the standard situation in
     # which the output storage is large enough to contain both the initial taps
     # values and the output storage.  In this truncated case, we use the

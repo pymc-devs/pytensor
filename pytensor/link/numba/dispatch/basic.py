@@ -18,6 +18,7 @@ from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
 from numba.extending import box, overload
 
 from pytensor import config
+from pytensor.compile import NUMBA
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.basic import Apply
@@ -62,10 +63,16 @@ def numba_njit(*args, **kwargs):
     kwargs.setdefault("no_cpython_wrapper", True)
     kwargs.setdefault("no_cfunc_wrapper", True)
 
-    # Supress caching warnings
+    # Suppress cache warning for internal functions
+    # We have to add an ansi escape code for optional bold text by numba
     warnings.filterwarnings(
         "ignore",
-        message='Cannot cache compiled function "numba_funcified_fgraph" as it uses dynamic globals',
+        message=(
+            "(\x1b\\[1m)*"  # ansi escape code for bold text
+            "Cannot cache compiled function "
+            '"(numba_funcified_fgraph|store_core_outputs)" '
+            "as it uses dynamic globals"
+        ),
         category=NumbaWarning,
     )
 
@@ -434,6 +441,11 @@ def numba_funcify(op, node=None, storage_map=None, **kwargs):
 def numba_funcify_OpFromGraph(op, node=None, **kwargs):
     _ = kwargs.pop("storage_map", None)
 
+    # Apply inner rewrites
+    # TODO: Not sure this is the right place to do this, should we have a rewrite that
+    #  explicitly triggers the optimization of the inner graphs of OpFromGraph?
+    #  The C-code defers it to the make_thunk phase
+    NUMBA.optimizer(op.fgraph)
     fgraph_fn = numba_njit(numba_funcify(op.fgraph, **kwargs))
 
     if len(op.fgraph.outputs) == 1:

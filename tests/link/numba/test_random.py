@@ -8,13 +8,13 @@ import scipy.stats as stats
 import pytensor.tensor as pt
 import pytensor.tensor.random.basic as ptr
 from pytensor import shared
+from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
 from tests.link.numba.test_basic import (
     compare_numba_and_py,
-    eval_python_only,
     numba_mode,
     set_test_value,
 )
@@ -28,33 +28,138 @@ from tests.tensor.random.test_basic import (
 rng = np.random.default_rng(42849)
 
 
+@pytest.mark.parametrize("mu_shape", [(), (3,), (5, 1)])
+@pytest.mark.parametrize("sigma_shape", [(), (1,), (5, 3)])
+@pytest.mark.parametrize("size_type", (None, "constant", "mutable"))
+def test_random_size(mu_shape, sigma_shape, size_type):
+    test_value_rng = np.random.default_rng(637)
+    mu = test_value_rng.normal(size=mu_shape)
+    sigma = np.exp(test_value_rng.normal(size=sigma_shape))
+
+    # For testing
+    rng = np.random.default_rng(123)
+    pt_rng = shared(rng)
+    if size_type is None:
+        size = None
+        pt_size = None
+    elif size_type == "constant":
+        size = (5, 3)
+        pt_size = pt.as_tensor(size, dtype="int64")
+    else:
+        size = (5, 3)
+        pt_size = shared(np.array(size, dtype="int64"), shape=(2,))
+
+    next_rng, x = pt.random.normal(mu, sigma, rng=pt_rng, size=pt_size).owner.outputs
+    fn = function([], x, updates={pt_rng: next_rng}, mode="NUMBA")
+
+    res1 = fn()
+    np.testing.assert_allclose(
+        res1,
+        rng.normal(mu, sigma, size=size),
+    )
+
+    res2 = fn()
+    np.testing.assert_allclose(
+        res2,
+        rng.normal(mu, sigma, size=size),
+    )
+
+    pt_rng.set_value(np.random.default_rng(123))
+    res3 = fn()
+    np.testing.assert_array_equal(res1, res3)
+
+    if size_type == "mutable" and len(mu_shape) < 2 and len(sigma_shape) < 2:
+        pt_size.set_value(np.array((6, 3), dtype="int64"))
+        res4 = fn()
+        assert res4.shape == (6, 3)
+
+
+def test_rng_copy():
+    rng = shared(np.random.default_rng(123))
+    x = pt.random.normal(rng=rng)
+
+    fn = function([], x, mode="NUMBA")
+    np.testing.assert_array_equal(fn(), fn())
+
+    rng.type.values_eq(rng.get_value(), np.random.default_rng(123))
+
+
+def test_rng_non_default_update():
+    rng = shared(np.random.default_rng(1))
+    rng_new = shared(np.random.default_rng(2))
+
+    x = pt.random.normal(size=10, rng=rng)
+    fn = function([], x, updates={rng: rng_new}, mode=numba_mode)
+
+    ref = np.random.default_rng(1).normal(size=10)
+    np.testing.assert_allclose(fn(), ref)
+
+    ref = np.random.default_rng(2).normal(size=10)
+    np.testing.assert_allclose(fn(), ref)
+    np.testing.assert_allclose(fn(), ref)
+
+
+def test_categorical_rv():
+    """This is also a smoke test for a vector input scalar output RV"""
+    p = np.array(
+        [
+            [
+                [1.0, 0, 0, 0],
+                [0.0, 1.0, 0, 0],
+                [0.0, 0, 1.0, 0],
+            ],
+            [
+                [0, 0, 0, 1.0],
+                [0, 0, 0, 1.0],
+                [0, 0, 0, 1.0],
+            ],
+        ]
+    )
+    x = pt.random.categorical(p=p, size=None)
+    updates = {x.owner.inputs[0]: x.owner.outputs[0]}
+    fn = function([], x, updates=updates, mode="NUMBA")
+    res = fn()
+    assert np.all(np.argmax(p, axis=-1) == res)
+
+    # Batch size
+    x = pt.random.categorical(p=p, size=(3, *p.shape[:-1]))
+    fn = function([], x, updates=updates, mode="NUMBA")
+    new_res = fn()
+    assert new_res.shape == (3, *res.shape)
+    for new_res_row in new_res:
+        assert np.all(new_res_row == res)
+
+
+def test_multivariate_normal():
+    """This is also a smoke test for a multivariate RV"""
+    rng = np.random.default_rng(123)
+
+    x = pt.random.multivariate_normal(
+        mean=np.zeros((3, 2)),
+        cov=np.eye(2),
+        rng=shared(rng),
+    )
+
+    fn = function([], x, mode="NUMBA")
+    np.testing.assert_array_equal(
+        fn(),
+        rng.multivariate_normal(np.zeros(2), np.eye(2), size=(3,)),
+    )
+
+
 @pytest.mark.parametrize(
     "rv_op, dist_args, size",
     [
         (
-            ptr.normal,
-            [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([1.0, 2.0], dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dscalar(),
-                    np.array(1.0, dtype=np.float64),
-                ),
-            ],
-            pt.as_tensor([3, 2]),
-        ),
-        (
             ptr.uniform,
             [
                 set_test_value(
-                    pt.dvector(),
-                    np.array([1.0, 2.0], dtype=np.float64),
-                ),
-                set_test_value(
                     pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
+                ),
+                set_test_value(
+                    pt.dvector(),
+                    np.array([1.0, 2.0], dtype=np.float64),
                 ),
             ],
             pt.as_tensor([3, 2]),
@@ -91,7 +196,7 @@ rng = np.random.default_rng(42849)
             ],
             pt.as_tensor([3, 2]),
         ),
-        pytest.param(
+        (
             ptr.pareto,
             [
                 set_test_value(
@@ -104,7 +209,6 @@ rng = np.random.default_rng(42849)
                 ),
             ],
             pt.as_tensor([3, 2]),
-            marks=pytest.mark.xfail(reason="Not implemented"),
         ),
         (
             ptr.exponential,
@@ -150,7 +254,7 @@ rng = np.random.default_rng(42849)
             ],
             pt.as_tensor([3, 2]),
         ),
-        (
+        pytest.param(
             ptr.hypergeometric,
             [
                 set_test_value(
@@ -167,6 +271,7 @@ rng = np.random.default_rng(42849)
                 ),
             ],
             pt.as_tensor([3, 2]),
+            marks=pytest.mark.xfail,  # Not implemented
         ),
         (
             ptr.wald,
@@ -259,33 +364,70 @@ rng = np.random.default_rng(42849)
             None,
         ),
         (
-            ptr.randint,
+            ptr.beta,
             [
                 set_test_value(
-                    pt.lscalar(),
-                    np.array(0, dtype=np.int64),
+                    pt.dvector(),
+                    np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    pt.lscalar(),
-                    np.array(5, dtype=np.int64),
+                    pt.dscalar(),
+                    np.array(1.0, dtype=np.float64),
                 ),
             ],
-            pt.as_tensor([3, 2]),
+            (2,),
         ),
-        pytest.param(
-            ptr.multivariate_normal,
+        (
+            ptr._gamma,
             [
                 set_test_value(
-                    pt.dmatrix(),
-                    np.array([[1, 2], [3, 4]], dtype=np.float64),
+                    pt.dvector(),
+                    np.array([1.0, 2.0], dtype=np.float64),
                 ),
                 set_test_value(
-                    pt.tensor(dtype="float64", shape=(1, None, None)),
-                    np.eye(2)[None, ...],
+                    pt.dvector(),
+                    np.array([0.5, 3.0], dtype=np.float64),
                 ),
             ],
-            pt.as_tensor(tuple(set_test_value(pt.lscalar(), v) for v in [4, 3, 2])),
-            marks=pytest.mark.xfail(reason="Not implemented"),
+            (2,),
+        ),
+        (
+            ptr.chisquare,
+            [
+                set_test_value(
+                    pt.dvector(),
+                    np.array([1.0, 2.0], dtype=np.float64),
+                )
+            ],
+            (2,),
+        ),
+        (
+            ptr.negative_binomial,
+            [
+                set_test_value(
+                    pt.lvector(),
+                    np.array([100, 200], dtype=np.int64),
+                ),
+                set_test_value(
+                    pt.dscalar(),
+                    np.array(0.09, dtype=np.float64),
+                ),
+            ],
+            (2,),
+        ),
+        (
+            ptr.vonmises,
+            [
+                set_test_value(
+                    pt.dvector(),
+                    np.array([-0.5, 0.5], dtype=np.float64),
+                ),
+                set_test_value(
+                    pt.dscalar(),
+                    np.array(1.0, dtype=np.float64),
+                ),
+            ],
+            (2,),
         ),
         (
             ptr.permutation,
@@ -309,17 +451,21 @@ rng = np.random.default_rng(42849)
             [
                 set_test_value(pt.dmatrix(), np.eye(3, dtype=np.float64)),
                 set_test_value(
-                    pt.dvector(), np.array([0.5, 0.0, 0.5], dtype=np.float64)
+                    pt.dvector(), np.array([0.25, 0.5, 0.25], dtype=np.float64)
                 ),
             ],
-            (),
+            (pt.as_tensor([2, 3])),
         ),
-        (
+        pytest.param(
             partial(ptr.choice, replace=False),
             [
                 set_test_value(pt.dvector(), np.arange(5, dtype=np.float64)),
             ],
             pt.as_tensor([2]),
+            marks=pytest.mark.xfail(
+                AssertionError,
+                reason="Not aligned with NumPy implementation",
+            ),
         ),
         pytest.param(
             partial(ptr.choice, replace=False),
@@ -328,28 +474,23 @@ rng = np.random.default_rng(42849)
             ],
             pt.as_tensor([2]),
             marks=pytest.mark.xfail(
-                raises=ValueError,
-                reason="Numba random.choice does not support >=1D `a`",
+                raises=AssertionError,
+                reason="Not aligned with NumPy implementation",
             ),
         ),
-        pytest.param(
+        (
             # p must be passed by kwarg
             lambda a, p, size, rng: ptr.choice(
                 a, p=p, size=size, replace=False, rng=rng
             ),
             [
                 set_test_value(pt.vector(), np.arange(5, dtype=np.float64)),
-                # Boring p, because the variable is not truly "aligned"
                 set_test_value(
                     pt.dvector(),
                     np.array([0.5, 0.0, 0.25, 0.0, 0.25], dtype=np.float64),
                 ),
             ],
-            (),
-            marks=pytest.mark.xfail(
-                raises=Exception,  # numba.TypeError
-                reason="Numba random.choice does not support `p` parameter",
-            ),
+            pt.as_tensor([2]),
         ),
         pytest.param(
             # p must be passed by kwarg
@@ -358,23 +499,31 @@ rng = np.random.default_rng(42849)
             ),
             [
                 set_test_value(pt.dmatrix(), np.eye(3, dtype=np.float64)),
-                # Boring p, because the variable is not truly "aligned"
                 set_test_value(
-                    pt.dvector(), np.array([0.5, 0.0, 0.5], dtype=np.float64)
+                    pt.dvector(), np.array([0.25, 0.5, 0.25], dtype=np.float64)
                 ),
             ],
             (),
-            marks=pytest.mark.xfail(
-                raises=ValueError,
-                reason="Numba random.choice does not support >=1D `a`",
+        ),
+        pytest.param(
+            # p must be passed by kwarg
+            lambda a, p, size, rng: ptr.choice(
+                a, p=p, size=size, replace=False, rng=rng
             ),
+            [
+                set_test_value(pt.dmatrix(), np.eye(3, dtype=np.float64)),
+                set_test_value(
+                    pt.dvector(), np.array([0.25, 0.5, 0.25], dtype=np.float64)
+                ),
+            ],
+            (pt.as_tensor([2, 1])),
         ),
     ],
     ids=str,
 )
 def test_aligned_RandomVariable(rv_op, dist_args, size):
     """Tests for Numba samplers that are one-to-one with PyTensor's/NumPy's samplers."""
-    rng = shared(np.random.RandomState(29402))
+    rng = shared(np.random.default_rng(29402))
     g = rv_op(*dist_args, size=size, rng=rng)
     g_fg = FunctionGraph(outputs=[g])
 
@@ -385,44 +534,13 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
             for i in g_fg.inputs
             if not isinstance(i, SharedVariable | Constant)
         ],
+        eval_obj_mode=False,  # No python impl
     )
 
 
 @pytest.mark.parametrize(
     "rv_op, dist_args, base_size, cdf_name, params_conv",
     [
-        (
-            ptr.beta,
-            [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([1.0, 2.0], dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dscalar(),
-                    np.array(1.0, dtype=np.float64),
-                ),
-            ],
-            (2,),
-            "beta",
-            lambda *args: args,
-        ),
-        (
-            ptr._gamma,
-            [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([1.0, 2.0], dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dvector(),
-                    np.array([0.5, 3.0], dtype=np.float64),
-                ),
-            ],
-            (2,),
-            "gamma",
-            lambda a, b: (a, 0.0, b),
-        ),
         (
             ptr.cauchy,
             [
@@ -437,18 +555,6 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
             ],
             (2,),
             "cauchy",
-            lambda *args: args,
-        ),
-        (
-            ptr.chisquare,
-            [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([1.0, 2.0], dtype=np.float64),
-                )
-            ],
-            (2,),
-            "chi2",
             lambda *args: args,
         ),
         (
@@ -467,49 +573,11 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
             "gumbel_r",
             lambda *args: args,
         ),
-        (
-            ptr.negative_binomial,
-            [
-                set_test_value(
-                    pt.lvector(),
-                    np.array([100, 200], dtype=np.int64),
-                ),
-                set_test_value(
-                    pt.dscalar(),
-                    np.array(0.09, dtype=np.float64),
-                ),
-            ],
-            (2,),
-            "nbinom",
-            lambda *args: args,
-        ),
-        pytest.param(
-            ptr.vonmises,
-            [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([-0.5, 0.5], dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dscalar(),
-                    np.array(1.0, dtype=np.float64),
-                ),
-            ],
-            (2,),
-            "vonmises_line",
-            lambda mu, kappa: (kappa, mu),
-            marks=pytest.mark.xfail(
-                reason=(
-                    "Numba's parameterization of `vonmises` does not match NumPy's."
-                    "See https://github.com/numba/numba/issues/7886"
-                )
-            ),
-        ),
     ],
 )
 def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_conv):
     """Tests for Numba samplers that are not one-to-one with PyTensor's/NumPy's samplers."""
-    rng = shared(np.random.RandomState(29402))
+    rng = shared(np.random.default_rng(29402))
     g = rv_op(*dist_args, size=(2000, *base_size), rng=rng)
     g_fn = function(dist_args, g, mode=numba_mode)
     samples = g_fn(
@@ -528,78 +596,6 @@ def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_
             samples[(Ellipsis, *idx)], cdf_name, args=cdf_params
         )
         assert test_res.pvalue > 0.1
-
-
-@pytest.mark.parametrize(
-    "dist_args, size, cm",
-    [
-        pytest.param(
-            [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([100000, 1, 1], dtype=np.float64),
-                ),
-            ],
-            None,
-            contextlib.suppress(),
-        ),
-        pytest.param(
-            [
-                set_test_value(
-                    pt.dmatrix(),
-                    np.array(
-                        [[100000, 1, 1], [1, 100000, 1], [1, 1, 100000]],
-                        dtype=np.float64,
-                    ),
-                ),
-            ],
-            (10, 3),
-            contextlib.suppress(),
-        ),
-        pytest.param(
-            [
-                set_test_value(
-                    pt.dmatrix(),
-                    np.array(
-                        [[100000, 1, 1]],
-                        dtype=np.float64,
-                    ),
-                ),
-            ],
-            (5, 4, 3),
-            contextlib.suppress(),
-        ),
-        pytest.param(
-            [
-                set_test_value(
-                    pt.dmatrix(),
-                    np.array(
-                        [[100000, 1, 1], [1, 100000, 1], [1, 1, 100000]],
-                        dtype=np.float64,
-                    ),
-                ),
-            ],
-            (10, 4),
-            pytest.raises(
-                ValueError, match="objects cannot be broadcast to a single shape"
-            ),
-        ),
-    ],
-)
-def test_CategoricalRV(dist_args, size, cm):
-    rng = shared(np.random.RandomState(29402))
-    g = ptr.categorical(*dist_args, size=size, rng=rng)
-    g_fg = FunctionGraph(outputs=[g])
-
-    with cm:
-        compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
-        )
 
 
 @pytest.mark.parametrize(
@@ -633,20 +629,20 @@ def test_CategoricalRV(dist_args, size, cm):
                 ),
             ),
             (10, 4),
-            pytest.raises(ValueError, match="Parameters shape.*"),
+            pytest.raises(
+                ValueError,
+                match="Vectorized input 0 has an incompatible shape in axis 1.",
+            ),
         ),
     ],
 )
 def test_DirichletRV(a, size, cm):
-    rng = shared(np.random.RandomState(29402))
+    rng = shared(np.random.default_rng(29402))
     g = ptr.dirichlet(a, size=size, rng=rng)
     g_fn = function([a], g, mode=numba_mode)
 
     with cm:
         a_val = a.tag.test_value
-
-        # For coverage purposes only...
-        eval_python_only([a], [g], [a_val])
 
         all_samples = []
         for i in range(1000):
@@ -658,47 +654,34 @@ def test_DirichletRV(a, size, cm):
         assert np.allclose(res, exp_res, atol=1e-4)
 
 
-def test_RandomState_updates():
-    rng = shared(np.random.RandomState(1))
-    rng_new = shared(np.random.RandomState(2))
+def test_rv_inside_ofg():
+    rng_np = np.random.default_rng(562)
+    rng = shared(rng_np)
 
-    x = pt.random.normal(size=10, rng=rng)
-    res = function([], x, updates={rng: rng_new}, mode=numba_mode)()
+    rng_dummy = rng.type()
+    next_rng_dummy, rv_dummy = ptr.normal(
+        0, 1, size=(3, 2), rng=rng_dummy
+    ).owner.outputs
+    out_dummy = rv_dummy.T
 
-    ref = np.random.RandomState(2).normal(size=10)
-    assert np.allclose(res, ref)
+    next_rng, out = OpFromGraph([rng_dummy], [next_rng_dummy, out_dummy])(rng)
+    fn = function([], out, updates={rng: next_rng}, mode=numba_mode)
 
+    res1, res2 = fn(), fn()
+    assert res1.shape == (2, 3)
 
-def test_random_Generator():
-    rng = shared(np.random.default_rng(29402))
-    g = ptr.normal(rng=rng)
-    g_fg = FunctionGraph(outputs=[g])
-
-    with pytest.raises(TypeError):
-        compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
-        )
+    np.testing.assert_allclose(res1, rng_np.normal(0, 1, size=(3, 2)).T)
+    np.testing.assert_allclose(res2, rng_np.normal(0, 1, size=(3, 2)).T)
 
 
 @pytest.mark.parametrize(
     "batch_dims_tester",
     [
-        pytest.param(
-            batched_unweighted_choice_without_replacement_tester,
-            marks=pytest.mark.xfail(raises=NotImplementedError),
-        ),
-        pytest.param(
-            batched_weighted_choice_without_replacement_tester,
-            marks=pytest.mark.xfail(raises=NotImplementedError),
-        ),
+        batched_unweighted_choice_without_replacement_tester,
+        batched_weighted_choice_without_replacement_tester,
         batched_permutation_tester,
     ],
 )
 def test_unnatural_batched_dims(batch_dims_tester):
     """Tests for RVs that don't have natural batch dims in Numba API."""
-    batch_dims_tester(mode="NUMBA", rng_ctor=np.random.RandomState)
+    batch_dims_tester(mode="NUMBA")

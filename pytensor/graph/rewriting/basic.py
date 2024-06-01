@@ -1577,7 +1577,7 @@ class PatternNodeRewriter(NodeRewriter):
         """
         from pytensor.graph.rewriting.unify import convert_strs_to_vars
 
-        var_map: dict[str, "Var"] = {}
+        var_map: dict[str, Var] = {}
         self.in_pattern = convert_strs_to_vars(in_pattern, var_map=var_map)
         self.out_pattern = convert_strs_to_vars(out_pattern, var_map=var_map)
         self.values_eq_approx = values_eq_approx
@@ -1616,14 +1616,6 @@ class PatternNodeRewriter(NodeRewriter):
         from etuples.core import ExpressionTuple
         from unification import reify, unify
 
-        # TODO: We shouldn't need to iterate like this.
-        if not self.allow_multiple_clients and any(
-            len(fgraph.clients.get(v)) > 1
-            for v in vars_between(fgraph.inputs, node.outputs)
-            if v not in fgraph.inputs
-        ):
-            return False
-
         if get_nodes and self.get_nodes is not None:
             for real_node in self.get_nodes(fgraph, node):
                 if real_node == "output":
@@ -1647,6 +1639,15 @@ class PatternNodeRewriter(NodeRewriter):
 
         if self.values_eq_approx:
             ret.tag.values_eq_approx = self.values_eq_approx
+
+        if not self.allow_multiple_clients:
+            input_vars = list(s.values())
+            if any(
+                len(fgraph.clients[v]) > 1
+                for v in vars_between(input_vars, node.inputs)
+                if v not in input_vars
+            ):
+                return False
 
         if ret.owner:
             if not (

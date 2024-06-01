@@ -1,3 +1,4 @@
+import warnings
 from collections.abc import Sequence
 from copy import copy
 from typing import cast
@@ -8,26 +9,27 @@ import pytensor
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable, equal_computations
 from pytensor.graph.op import Op
-from pytensor.graph.replace import _vectorize_node, vectorize_graph
+from pytensor.graph.replace import _vectorize_node
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.scalar import ScalarVariable
 from pytensor.tensor.basic import (
     as_tensor_variable,
     concatenate,
     constant,
-    get_underlying_scalar_constant_value,
     get_vector_length,
     infer_static_shape,
 )
-from pytensor.tensor.random.type import RandomGeneratorType, RandomStateType, RandomType
+from pytensor.tensor.blockwise import OpWithCoreShape
+from pytensor.tensor.random.type import RandomGeneratorType, RandomType
 from pytensor.tensor.random.utils import (
     compute_batch_shape,
     explicit_expand_dims,
     normalize_size_param,
 )
 from pytensor.tensor.shape import shape_tuple
-from pytensor.tensor.type import TensorType, all_dtypes
-from pytensor.tensor.type_other import NoneConst
+from pytensor.tensor.type import TensorType
+from pytensor.tensor.type_other import NoneConst, NoneTypeT
+from pytensor.tensor.utils import _parse_gufunc_signature, safe_signature
 from pytensor.tensor.variable import TensorVariable
 
 
@@ -42,7 +44,7 @@ class RandomVariable(Op):
 
     _output_type_depends_on_input_value = True
 
-    __props__ = ("name", "ndim_supp", "ndims_params", "dtype", "inplace")
+    __props__ = ("name", "signature", "dtype", "inplace")
     default_output = 1
 
     def __init__(
@@ -50,8 +52,9 @@ class RandomVariable(Op):
         name=None,
         ndim_supp=None,
         ndims_params=None,
-        dtype=None,
+        dtype: str | None = None,
         inplace=None,
+        signature: str | None = None,
     ):
         """Create a random variable `Op`.
 
@@ -59,43 +62,62 @@ class RandomVariable(Op):
         ----------
         name: str
             The `Op`'s display name.
-        ndim_supp: int
-            Total number of dimensions for a single draw of the random variable
-            (e.g. a multivariate normal draw is 1D, so ``ndim_supp = 1``).
-        ndims_params: list of int
-            Number of dimensions for each distribution parameter when the
-            parameters only specify a single drawn of the random variable
-            (e.g. a multivariate normal's mean is 1D and covariance is 2D, so
-            ``ndims_params = [1, 2]``).
+        signature: str
+            Numpy-like vectorized signature of the random variable.
         dtype: str (optional)
-            The dtype of the sampled output.  If the value ``"floatX"`` is
+            The default dtype of the sampled output.  If the value ``"floatX"`` is
             given, then ``dtype`` is set to ``pytensor.config.floatX``.  If
             ``None`` (the default), the `dtype` keyword must be set when
             `RandomVariable.make_node` is called.
         inplace: boolean (optional)
-            Determine whether or not the underlying rng state is updated
-            in-place or not (i.e. copied).
+            Determine whether the underlying rng state is mutated or copied.
 
         """
         super().__init__()
 
         self.name = name or getattr(self, "name")
-        self.ndim_supp = (
-            ndim_supp if ndim_supp is not None else getattr(self, "ndim_supp")
+
+        ndim_supp = (
+            ndim_supp if ndim_supp is not None else getattr(self, "ndim_supp", None)
         )
-        self.ndims_params = (
-            ndims_params if ndims_params is not None else getattr(self, "ndims_params")
+        if ndim_supp is not None:
+            warnings.warn(
+                "ndim_supp is deprecated. Provide signature instead.", FutureWarning
+            )
+            self.ndim_supp = ndim_supp
+        ndims_params = (
+            ndims_params
+            if ndims_params is not None
+            else getattr(self, "ndims_params", None)
         )
+        if ndims_params is not None:
+            warnings.warn(
+                "ndims_params is deprecated. Provide signature instead.", FutureWarning
+            )
+            if not isinstance(ndims_params, Sequence):
+                raise TypeError("Parameter ndims_params must be sequence type.")
+            self.ndims_params = tuple(ndims_params)
+
+        self.signature = signature or getattr(self, "signature", None)
+        if self.signature is not None:
+            # Assume a single output. Several methods need to be updated to handle multiple outputs.
+            self.inputs_sig, [self.output_sig] = _parse_gufunc_signature(self.signature)
+            self.ndims_params = [len(input_sig) for input_sig in self.inputs_sig]
+            self.ndim_supp = len(self.output_sig)
+        else:
+            if (
+                getattr(self, "ndim_supp", None) is None
+                or getattr(self, "ndims_params", None) is None
+            ):
+                raise ValueError("signature must be provided")
+            else:
+                self.signature = safe_signature(self.ndims_params, [self.ndim_supp])
+
         self.dtype = dtype or getattr(self, "dtype", None)
 
         self.inplace = (
             inplace if inplace is not None else getattr(self, "inplace", False)
         )
-
-        if not isinstance(self.ndims_params, Sequence):
-            raise TypeError("Parameter ndims_params must be sequence type.")
-
-        self.ndims_params = tuple(self.ndims_params)
 
         if self.inplace:
             self.destroy_map = {0: [0]}
@@ -120,8 +142,31 @@ class RandomVariable(Op):
         values (not shapes) of some parameters. For instance, a `gaussian_random_walk(steps, size=(2,))`,
         might have `support_shape=(steps,)`.
         """
+        if self.signature is not None:
+            # Signature could indicate fixed numerical shapes
+            # As per https://numpy.org/neps/nep-0020-gufunc-signature-enhancement.html
+            output_sig = self.output_sig
+            core_out_shape = {
+                dim: int(dim) if str.isnumeric(dim) else None for dim in self.output_sig
+            }
+
+            # Try to infer missing support dims from signature of params
+            for param, param_sig, ndim_params in zip(
+                dist_params, self.inputs_sig, self.ndims_params
+            ):
+                if ndim_params == 0:
+                    continue
+                for param_dim, dim in zip(param.shape[-ndim_params:], param_sig):
+                    if dim in core_out_shape and core_out_shape[dim] is None:
+                        core_out_shape[dim] = param_dim
+
+            if all(dim is not None for dim in core_out_shape.values()):
+                # We have all we need
+                return [core_out_shape[dim] for dim in output_sig]
+
         raise NotImplementedError(
-            "`_supp_shape_from_params` must be implemented for multivariate RVs"
+            "`_supp_shape_from_params` must be implemented for multivariate RVs "
+            "when signature is not sufficient to infer the support shape"
         )
 
     def rng_fn(self, rng, *args, **kwargs) -> int | float | np.ndarray:
@@ -129,15 +174,32 @@ class RandomVariable(Op):
         return getattr(rng, self.name)(*args, **kwargs)
 
     def __str__(self):
-        props_str = ", ".join(f"{getattr(self, prop)}" for prop in self.__props__[1:])
+        # Only show signature from core props
+        if signature := self.signature:
+            # inp, out = signature.split("->")
+            # extended_signature = f"[rng],[size],{inp}->[rng],{out}"
+            # core_props = [extended_signature]
+            core_props = [f'"{signature}"']
+        else:
+            # Far back compat
+            core_props = [str(self.ndim_supp), str(self.ndims_params)]
+
+        # Add any extra props that the subclass may have
+        extra_props = [
+            str(getattr(self, prop))
+            for prop in self.__props__
+            if prop not in RandomVariable.__props__
+        ]
+
+        props_str = ", ".join(core_props + extra_props)
         return f"{self.name}_rv{{{props_str}}}"
 
     def _infer_shape(
         self,
-        size: TensorVariable,
+        size: TensorVariable | Variable,
         dist_params: Sequence[TensorVariable],
         param_shapes: Sequence[tuple[Variable, ...]] | None = None,
-    ) -> TensorVariable | tuple[ScalarVariable, ...]:
+    ) -> tuple[ScalarVariable | TensorVariable, ...]:
         """Compute the output shape given the size and distribution parameters.
 
         Parameters
@@ -163,9 +225,9 @@ class RandomVariable(Op):
                 self._supp_shape_from_params(dist_params, param_shapes=param_shapes)
             )
 
-        size_len = get_vector_length(size)
+        if not isinstance(size.type, NoneTypeT):
+            size_len = get_vector_length(size)
 
-        if size_len > 0:
             # Fail early when size is incompatible with parameters
             for i, (param, param_ndim_supp) in enumerate(
                 zip(dist_params, self.ndims_params)
@@ -219,42 +281,51 @@ class RandomVariable(Op):
 
         shape = batch_shape + supp_shape
 
-        if not shape:
-            shape = constant([], dtype="int64")
-
         return shape
 
     def infer_shape(self, fgraph, node, input_shapes):
-        _, size, _, *dist_params = node.inputs
-        _, size_shape, _, *param_shapes = input_shapes
-
-        try:
-            size_len = get_vector_length(size)
-        except ValueError:
-            size_len = get_underlying_scalar_constant_value(size_shape[0])
-
-        size = tuple(size[n] for n in range(size_len))
+        _, size, *dist_params = node.inputs
+        _, _, *param_shapes = input_shapes
 
         shape = self._infer_shape(size, dist_params, param_shapes=param_shapes)
 
         return [None, list(shape)]
 
     def __call__(self, *args, size=None, name=None, rng=None, dtype=None, **kwargs):
-        res = super().__call__(rng, size, dtype, *args, **kwargs)
+        if dtype is None:
+            dtype = self.dtype
+        if dtype == "floatX":
+            dtype = config.floatX
+
+        # We need to recreate the Op with the right dtype
+        if dtype != self.dtype:
+            # Check we are not switching from float to int
+            if self.dtype is not None:
+                if dtype.startswith("float") != self.dtype.startswith("float"):
+                    raise ValueError(
+                        f"Cannot change the dtype of a {self.name} RV from {self.dtype} to {dtype}"
+                    )
+            props = self._props_dict()
+            props["dtype"] = dtype
+            new_op = type(self)(**props)
+            return new_op.__call__(
+                *args, size=size, name=name, rng=rng, dtype=dtype, **kwargs
+            )
+
+        res = super().__call__(rng, size, *args, **kwargs)
 
         if name is not None:
             res.name = name
 
         return res
 
-    def make_node(self, rng, size, dtype, *dist_params):
+    def make_node(self, rng, size, *dist_params):
         """Create a random variable node.
 
         Parameters
         ----------
-        rng: RandomGeneratorType or RandomStateType
-            Existing PyTensor `Generator` or `RandomState` object to be used.  Creates a
-            new one, if `None`.
+        rng: RandomGeneratorType
+            Existing PyTensor `Generator` object to be used.  Creates a new one, if `None`.
         size: int or Sequence
             NumPy-like size parameter.
         dtype: str
@@ -282,63 +353,56 @@ class RandomVariable(Op):
             rng = pytensor.shared(np.random.default_rng())
         elif not isinstance(rng.type, RandomType):
             raise TypeError(
-                "The type of rng should be an instance of either RandomGeneratorType or RandomStateType"
+                "The type of rng should be an instance of RandomGeneratorType "
             )
 
-        shape = self._infer_shape(size, dist_params)
-        _, static_shape = infer_static_shape(shape)
-        dtype = self.dtype or dtype
+        inferred_shape = self._infer_shape(size, dist_params)
+        _, static_shape = infer_static_shape(inferred_shape)
 
-        if dtype == "floatX":
-            dtype = config.floatX
-        elif dtype is None or (isinstance(dtype, str) and dtype not in all_dtypes):
-            raise TypeError("dtype is unspecified")
+        dist_params = explicit_expand_dims(
+            dist_params,
+            self.ndims_params,
+            size_length=None if NoneConst.equals(size) else get_vector_length(size),
+        )
 
-        if isinstance(dtype, str):
-            dtype_idx = constant(all_dtypes.index(dtype), dtype="int64")
-        else:
-            dtype_idx = constant(dtype, dtype="int64")
-            dtype = all_dtypes[dtype_idx.data]
-
-        outtype = TensorType(dtype=dtype, shape=static_shape)
-        out_var = outtype()
-        inputs = (rng, size, dtype_idx, *dist_params)
-        outputs = (rng.type(), out_var)
+        inputs = (rng, size, *dist_params)
+        out_type = TensorType(dtype=self.dtype, shape=static_shape)
+        outputs = (rng.type(), out_type())
 
         return Apply(self, inputs, outputs)
 
     def batch_ndim(self, node: Apply) -> int:
         return cast(int, node.default_output().type.ndim - self.ndim_supp)
 
+    def rng_param(self, node) -> Variable:
+        """Return the node input corresponding to the rng"""
+        return node.inputs[0]
+
+    def size_param(self, node) -> Variable:
+        """Return the node input corresponding to the size"""
+        return node.inputs[1]
+
+    def dist_params(self, node) -> Sequence[Variable]:
+        """Return the node inpust corresponding to dist params"""
+        return node.inputs[2:]
+
     def perform(self, node, inputs, outputs):
         rng_var_out, smpl_out = outputs
 
-        rng, size, dtype, *args = inputs
+        rng, size, *args = inputs
 
-        out_var = node.outputs[1]
-
-        # If `size == []`, that means no size is enforced, and NumPy is trusted
-        # to draw the appropriate number of samples, NumPy uses `size=None` to
-        # represent that.  Otherwise, NumPy expects a tuple.
-        if np.size(size) == 0:
-            size = None
-        else:
-            size = tuple(size)
-
-        # Draw from `rng` if `self.inplace` is `True`, and from a copy of `rng`
-        # otherwise.
+        # Draw from `rng` if `self.inplace` is `True`, and from a copy of `rng` otherwise.
         if not self.inplace:
             rng = copy(rng)
 
         rng_var_out[0] = rng
 
+        if size is not None:
+            size = tuple(size)
         smpl_val = self.rng_fn(rng, *([*args, size]))
 
-        if (
-            not isinstance(smpl_val, np.ndarray)
-            or str(smpl_val.dtype) != out_var.type.dtype
-        ):
-            smpl_val = _asarray(smpl_val, dtype=out_var.type.dtype)
+        if not isinstance(smpl_val, np.ndarray) or str(smpl_val.dtype) != self.dtype:
+            smpl_val = _asarray(smpl_val, dtype=self.dtype)
 
         smpl_out[0] = smpl_val
 
@@ -371,14 +435,6 @@ class AbstractRNGConstructor(Op):
         output_storage[0][0] = getattr(np.random, self.random_constructor)(seed=seed)
 
 
-class RandomStateConstructor(AbstractRNGConstructor):
-    random_type = RandomStateType()
-    random_constructor = "RandomState"
-
-
-RandomState = RandomStateConstructor()
-
-
 class DefaultGeneratorMakerOp(AbstractRNGConstructor):
     random_type = RandomGeneratorType()
     random_constructor = "default_rng"
@@ -389,33 +445,34 @@ default_rng = DefaultGeneratorMakerOp()
 
 @_vectorize_node.register(RandomVariable)
 def vectorize_random_variable(
-    op: RandomVariable, node: Apply, rng, size, dtype, *dist_params
+    op: RandomVariable, node: Apply, rng, size, *dist_params
 ) -> Apply:
     # If size was provided originally and a new size hasn't been provided,
     # We extend it to accommodate the new input batch dimensions.
     # Otherwise, we assume the new size already has the right values
 
-    # Need to make parameters implicit broadcasting explicit
-    original_dist_params = node.inputs[3:]
-    old_size = node.inputs[1]
-    len_old_size = get_vector_length(old_size)
-
-    original_expanded_dist_params = explicit_expand_dims(
-        original_dist_params, op.ndims_params, len_old_size
-    )
-    # We call vectorize_graph to automatically handle any new explicit expand_dims
-    dist_params = vectorize_graph(
-        original_expanded_dist_params, dict(zip(original_dist_params, dist_params))
+    original_dist_params = op.dist_params(node)
+    old_size = op.size_param(node)
+    len_old_size = (
+        None if isinstance(old_size.type, NoneTypeT) else get_vector_length(old_size)
     )
 
-    new_ndim = dist_params[0].type.ndim - original_expanded_dist_params[0].type.ndim
-
-    if new_ndim and len_old_size and equal_computations([old_size], [size]):
+    if len_old_size and equal_computations([old_size], [size]):
         # If the original RV had a size variable and a new one has not been provided,
         # we need to define a new size as the concatenation of the original size dimensions
         # and the novel ones implied by new broadcasted batched parameters dimensions.
-        broadcasted_batch_shape = compute_batch_shape(dist_params, op.ndims_params)
-        new_size_dims = broadcasted_batch_shape[:new_ndim]
-        size = concatenate([new_size_dims, size])
+        new_ndim = dist_params[0].type.ndim - original_dist_params[0].type.ndim
+        if new_ndim >= 0:
+            new_size = compute_batch_shape(dist_params, ndims_params=op.ndims_params)
+            new_size_dims = new_size[:new_ndim]
+            size = concatenate([new_size_dims, size])
 
-    return op.make_node(rng, size, dtype, *dist_params)
+    return op.make_node(rng, size, *dist_params)
+
+
+class RandomVariableWithCoreShape(OpWithCoreShape):
+    """Generalizes a random variable `Op` to include a core shape parameter."""
+
+    def __str__(self):
+        [rv_node] = self.fgraph.apply_nodes
+        return f"[{rv_node.op!s}]"

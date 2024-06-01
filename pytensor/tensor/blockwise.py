@@ -5,8 +5,9 @@ from typing import Any, cast
 import numpy as np
 
 from pytensor import config
+from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType
-from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.basic import Apply, Constant
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op
 from pytensor.graph.replace import (
@@ -22,25 +23,9 @@ from pytensor.tensor.utils import (
     _parse_gufunc_signature,
     broadcast_static_dim_lengths,
     import_func_from_string,
+    safe_signature,
 )
 from pytensor.tensor.variable import TensorVariable
-
-
-def safe_signature(
-    core_inputs: Sequence[Variable],
-    core_outputs: Sequence[Variable],
-) -> str:
-    def operand_sig(operand: Variable, prefix: str) -> str:
-        operands = ",".join(f"{prefix}{i}" for i in range(operand.type.ndim))
-        return f"({operands})"
-
-    inputs_sig = ",".join(
-        operand_sig(i, prefix=f"i{n}") for n, i in enumerate(core_inputs)
-    )
-    outputs_sig = ",".join(
-        operand_sig(o, prefix=f"o{n}") for n, o in enumerate(core_outputs)
-    )
-    return f"{inputs_sig}->{outputs_sig}"
 
 
 class Blockwise(Op):
@@ -385,8 +370,15 @@ def vectorize_node_fallback(op: Op, node: Apply, *bached_inputs) -> Apply:
     else:
         # TODO: This is pretty bad for shape inference and merge optimization!
         #  Should get better as we add signatures to our Ops
-        signature = safe_signature(node.inputs, node.outputs)
+        signature = safe_signature(
+            [inp.type.ndim for inp in node.inputs],
+            [out.type.ndim for out in node.outputs],
+        )
     return cast(Apply, Blockwise(op, signature=signature).make_node(*bached_inputs))
 
 
 _vectorize_node.register(Blockwise, _vectorize_not_needed)
+
+
+class OpWithCoreShape(OpFromGraph):
+    """Generalizes an `Op` to include core shape as an additional input."""

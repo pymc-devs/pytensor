@@ -9,8 +9,8 @@ import numpy as np
 from pytensor.compile.sharedvalue import shared
 from pytensor.graph.basic import Constant, Variable
 from pytensor.scalar import ScalarVariable
-from pytensor.tensor import get_vector_length
-from pytensor.tensor.basic import as_tensor_variable, cast, constant
+from pytensor.tensor import NoneConst, get_vector_length
+from pytensor.tensor.basic import as_tensor_variable, cast
 from pytensor.tensor.extra_ops import broadcast_arrays, broadcast_to
 from pytensor.tensor.math import maximum
 from pytensor.tensor.shape import shape_padleft, specify_shape
@@ -123,8 +123,8 @@ def broadcast_params(params, ndims_params):
 
 def explicit_expand_dims(
     params: Sequence[TensorVariable],
-    ndim_params: tuple[int],
-    size_length: int = 0,
+    ndim_params: Sequence[int],
+    size_length: int | None = None,
 ) -> list[TensorVariable]:
     """Introduce explicit expand_dims in RV parameters that are implicitly broadcasted together and/or by size."""
 
@@ -132,12 +132,10 @@ def explicit_expand_dims(
         param.type.ndim - ndim_param for param, ndim_param in zip(params, ndim_params)
     ]
 
-    if size_length:
-        # NOTE: PyTensor is currently treating zero-length size as size=None, which is not what Numpy does
-        # See: https://github.com/pymc-devs/pytensor/issues/568
+    if size_length is not None:
         max_batch_dims = size_length
     else:
-        max_batch_dims = max(batch_dims)
+        max_batch_dims = max(batch_dims, default=0)
 
     new_params = []
     for new_param, batch_dim in zip(params, batch_dims):
@@ -159,30 +157,30 @@ def compute_batch_shape(params, ndims_params: Sequence[int]) -> TensorVariable:
 
 
 def normalize_size_param(
-    size: int | np.ndarray | Variable | Sequence | None,
+    shape: int | np.ndarray | Variable | Sequence | None,
 ) -> Variable:
     """Create an PyTensor value for a ``RandomVariable`` ``size`` parameter."""
-    if size is None:
-        size = constant([], dtype="int64")
-    elif isinstance(size, int):
-        size = as_tensor_variable([size], ndim=1)
-    elif not isinstance(size, np.ndarray | Variable | Sequence):
+    if shape is None or NoneConst.equals(shape):
+        return NoneConst
+    elif isinstance(shape, int):
+        shape = as_tensor_variable([shape], ndim=1)
+    elif not isinstance(shape, np.ndarray | Variable | Sequence):
         raise TypeError(
             "Parameter size must be None, an integer, or a sequence with integers."
         )
     else:
-        size = cast(as_tensor_variable(size, ndim=1, dtype="int64"), "int64")
+        shape = cast(as_tensor_variable(shape, ndim=1, dtype="int64"), "int64")
 
-        if not isinstance(size, Constant):
+        if not isinstance(shape, Constant):
             # This should help ensure that the length of non-constant `size`s
             # will be available after certain types of cloning (e.g. the kind
             # `Scan` performs)
-            size = specify_shape(size, (get_vector_length(size),))
+            shape = specify_shape(shape, (get_vector_length(shape),))
 
-    assert not any(s is None for s in size.type.shape)
-    assert size.dtype in int_dtypes
+    assert not any(s is None for s in shape.type.shape)
+    assert shape.dtype in int_dtypes
 
-    return size
+    return shape
 
 
 class RandomStream:
@@ -211,46 +209,36 @@ class RandomStream:
         self,
         seed: int | None = None,
         namespace: ModuleType | None = None,
-        rng_ctor: Literal[
-            np.random.RandomState, np.random.Generator
-        ] = np.random.default_rng,
+        rng_ctor: Literal[np.random.Generator] = np.random.default_rng,
     ):
         if namespace is None:
             from pytensor.tensor.random import basic  # pylint: disable=import-self
 
-            self.namespaces = [basic]
+            self.namespaces = [(basic, set(basic.__all__))]
         else:
-            self.namespaces = [namespace]
+            self.namespaces = [(namespace, set(namespace.__all__))]
 
         self.default_instance_seed = seed
         self.state_updates = []
         self.gen_seedgen = np.random.SeedSequence(seed)
-
-        if isinstance(rng_ctor, type) and issubclass(rng_ctor, np.random.RandomState):
-            # The legacy state does not accept `SeedSequence`s directly
-            def rng_ctor(seed):
-                return np.random.RandomState(np.random.MT19937(seed))
-
         self.rng_ctor = rng_ctor
 
     def __getattr__(self, obj):
         ns_obj = next(
-            (getattr(ns, obj) for ns in self.namespaces if hasattr(ns, obj)), None
+            (
+                getattr(ns, obj)
+                for ns, all_ in self.namespaces
+                if obj in all_ and hasattr(ns, obj)
+            ),
+            None,
         )
 
         if ns_obj is None:
             raise AttributeError(f"No attribute {obj}.")
 
-        from pytensor.tensor.random.op import RandomVariable
-
-        if isinstance(ns_obj, RandomVariable):
-
-            @wraps(ns_obj)
-            def meta_obj(*args, **kwargs):
-                return self.gen(ns_obj, *args, **kwargs)
-
-        else:
-            raise AttributeError(f"No attribute {obj}.")
+        @wraps(ns_obj)
+        def meta_obj(*args, **kwargs):
+            return self.gen(ns_obj, *args, **kwargs)
 
         setattr(self, obj, meta_obj)
         return getattr(self, obj)
@@ -355,6 +343,11 @@ def supp_shape_from_ref_param_shape(
     -------
     out: tuple
         Representing the support shape for a `RandomVariable` with the given `dist_params`.
+
+    Notes
+    _____
+    This helper is no longer necessary when using signatures in `RandomVariable` subclasses.
+
 
     """
     if ndim_supp <= 0:

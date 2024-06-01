@@ -266,7 +266,7 @@ class Apply(Node, Generic[OpType]):
 
         assert isinstance(inputs, list | tuple)
         remake_node = False
-        new_inputs: list["Variable"] = list(inputs)
+        new_inputs: list[Variable] = list(inputs)
 
         # Some Ops like Alloc require the node to always be rebuilt in non-strict mode
         # as the output type depends on the input values and not just their types
@@ -1272,7 +1272,7 @@ def clone_node_and_cache(
         return None
 
     # Use a cached `Op` clone when available
-    new_op: "Op" | None = cast(Optional["Op"], clone_d.get(node.op))
+    new_op: Op | None = cast(Optional["Op"], clone_d.get(node.op))
 
     cloned_inputs: list[Variable] = [cast(Variable, clone_d[i]) for i in node.inputs]
 

@@ -929,12 +929,7 @@ def _populate_var_to_app_to_idx(outputs, wrt, consider_constant):
                     continue
 
                 if ipt not in var_to_app_to_idx:
-                    # This object here *must* be ordered, because
-                    # we iterate over its keys when adding up the terms of the
-                    # gradient on ipt. If it is a regular dict, the grad method
-                    # will return something that is analytically correct, but
-                    # whose order of doing additions depends on the memory
-                    # location of the apply nodes.
+                    # This object *must* be ordered for the grad graph to be deterministic
                     var_to_app_to_idx[ipt] = {}
                 app_to_idx = var_to_app_to_idx[ipt]
                 if app not in app_to_idx:

@@ -2,7 +2,7 @@ from functools import singledispatch
 
 import jax
 import numpy as np
-from numpy.random import Generator, RandomState
+from numpy.random import Generator
 from numpy.random.bit_generator import (  # type: ignore[attr-defined]
     _coerce_to_uint32_array,
 )
@@ -12,6 +12,7 @@ from pytensor.graph import Constant
 from pytensor.link.jax.dispatch.basic import jax_funcify, jax_typify
 from pytensor.link.jax.dispatch.shape import JAXShapeTuple
 from pytensor.tensor.shape import Shape, Shape_i
+from pytensor.tensor.type_other import NoneTypeT
 
 
 try:
@@ -53,15 +54,6 @@ def assert_size_argument_jax_compatible(node):
         raise NotImplementedError(SIZE_NOT_COMPATIBLE)
 
 
-@jax_typify.register(RandomState)
-def jax_typify_RandomState(state, **kwargs):
-    state = state.get_state(legacy=False)
-    state["bit_generator"] = numpy_bit_gens[state["bit_generator"]]
-    # XXX: Is this a reasonable approach?
-    state["jax_state"] = state["state"]["key"][0:2]
-    return state
-
-
 @jax_typify.register(Generator)
 def jax_typify_Generator(rng, **kwargs):
     state = rng.__getstate__()
@@ -88,12 +80,11 @@ def jax_typify_Generator(rng, **kwargs):
 
 
 @jax_funcify.register(ptr.RandomVariable)
-def jax_funcify_RandomVariable(op, node, **kwargs):
+def jax_funcify_RandomVariable(op: ptr.RandomVariable, node, **kwargs):
     """JAX implementation of random variables."""
     rv = node.outputs[1]
     out_dtype = rv.type.dtype
     static_shape = rv.type.shape
-
     batch_ndim = op.batch_ndim(node)
 
     # Try to pass static size directly to JAX
@@ -101,12 +92,11 @@ def jax_funcify_RandomVariable(op, node, **kwargs):
     if None in static_size:
         # Sometimes size can be constant folded during rewrites,
         # without the RandomVariable node being updated with new static types
-        size_param = node.inputs[1]
-        if isinstance(size_param, Constant):
-            size_tuple = tuple(size_param.data)
-            # PyTensor uses empty size to represent size = None
-            if len(size_tuple):
-                static_size = tuple(size_param.data)
+        size_param = op.size_param(node)
+        if isinstance(size_param, Constant) and not isinstance(
+            size_param.type, NoneTypeT
+        ):
+            static_size = tuple(size_param.data)
 
     # If one dimension has unknown size, either the size is determined
     # by a `Shape` operator in which case JAX will compile, or it is
@@ -114,15 +104,12 @@ def jax_funcify_RandomVariable(op, node, **kwargs):
     if None in static_size:
         assert_size_argument_jax_compatible(node)
 
-        def sample_fn(rng, size, dtype, *parameters):
-            # PyTensor uses empty size to represent size = None
-            if jax.numpy.asarray(size).shape == (0,):
-                size = None
+        def sample_fn(rng, size, *parameters):
             return jax_sample_fn(op, node=node)(rng, size, out_dtype, *parameters)
 
     else:
 
-        def sample_fn(rng, size, dtype, *parameters):
+        def sample_fn(rng, size, *parameters):
             return jax_sample_fn(op, node=node)(
                 rng, static_size, out_dtype, *parameters
             )
@@ -162,7 +149,6 @@ def jax_sample_fn_generic(op, node):
 @jax_sample_fn.register(ptr.LaplaceRV)
 @jax_sample_fn.register(ptr.LogisticRV)
 @jax_sample_fn.register(ptr.NormalRV)
-@jax_sample_fn.register(ptr.StandardNormalRV)
 def jax_sample_fn_loc_scale(op, node):
     """JAX implementation of random variables in the loc-scale families.
 
@@ -219,7 +205,6 @@ def jax_sample_fn_categorical(op, node):
     return sample_fn
 
 
-@jax_sample_fn.register(ptr.RandIntRV)
 @jax_sample_fn.register(ptr.IntegersRV)
 @jax_sample_fn.register(ptr.UniformRV)
 def jax_sample_fn_uniform(op, node):
@@ -305,11 +290,10 @@ def jax_sample_fn_t(op, node):
 
 
 @jax_sample_fn.register(ptr.ChoiceWithoutReplacement)
-def jax_funcify_choice(op, node):
+def jax_funcify_choice(op: ptr.ChoiceWithoutReplacement, node):
     """JAX implementation of `ChoiceRV`."""
 
     batch_ndim = op.batch_ndim(node)
-    a, *p, core_shape = node.inputs[3:]
     a_core_ndim, *p_core_ndim, _ = op.ndims_params
 
     if batch_ndim and a_core_ndim == 0:
@@ -317,12 +301,6 @@ def jax_funcify_choice(op, node):
             "Batch dimensions are not supported for 0d arrays. "
             "A default JAX rewrite should have materialized the implicit arange"
         )
-
-    a_batch_ndim = a.type.ndim - a_core_ndim
-    if op.has_p_param:
-        [p] = p
-        [p_core_ndim] = p_core_ndim
-        p_batch_ndim = p.type.ndim - p_core_ndim
 
     def sample_fn(rng, size, dtype, *parameters):
         rng_key = rng["jax_state"]
@@ -333,7 +311,7 @@ def jax_funcify_choice(op, node):
         else:
             a, core_shape = parameters
             p = None
-        core_shape = tuple(np.asarray(core_shape))
+        core_shape = tuple(np.asarray(core_shape)[(0,) * batch_ndim])
 
         if batch_ndim == 0:
             sample = jax.random.choice(
@@ -343,16 +321,16 @@ def jax_funcify_choice(op, node):
         else:
             if size is None:
                 if p is None:
-                    size = a.shape[:a_batch_ndim]
+                    size = a.shape[:batch_ndim]
                 else:
                     size = jax.numpy.broadcast_shapes(
-                        a.shape[:a_batch_ndim],
-                        p.shape[:p_batch_ndim],
+                        a.shape[:batch_ndim],
+                        p.shape[:batch_ndim],
                     )
 
-            a = jax.numpy.broadcast_to(a, size + a.shape[a_batch_ndim:])
+            a = jax.numpy.broadcast_to(a, size + a.shape[batch_ndim:])
             if p is not None:
-                p = jax.numpy.broadcast_to(p, size + p.shape[p_batch_ndim:])
+                p = jax.numpy.broadcast_to(p, size + p.shape[batch_ndim:])
 
             batch_sampling_keys = jax.random.split(sampling_key, np.prod(size))
 
@@ -386,7 +364,6 @@ def jax_sample_fn_permutation(op, node):
     """JAX implementation of `PermutationRV`."""
 
     batch_ndim = op.batch_ndim(node)
-    x_batch_ndim = node.inputs[-1].type.ndim - op.ndims_params[0]
 
     def sample_fn(rng, size, dtype, *parameters):
         rng_key = rng["jax_state"]
@@ -394,11 +371,10 @@ def jax_sample_fn_permutation(op, node):
         (x,) = parameters
         if batch_ndim:
             # jax.random.permutation has no concept of batch dims
-            x_core_shape = x.shape[x_batch_ndim:]
             if size is None:
-                size = x.shape[:x_batch_ndim]
+                size = x.shape[:batch_ndim]
             else:
-                x = jax.numpy.broadcast_to(x, size + x_core_shape)
+                x = jax.numpy.broadcast_to(x, size + x.shape[batch_ndim:])
 
             batch_sampling_keys = jax.random.split(sampling_key, np.prod(size))
             raveled_batch_x = x.reshape((-1,) + x.shape[batch_ndim:])
