@@ -5,10 +5,10 @@ from typing import cast
 from pytensor import Variable
 from pytensor.graph import Apply, FunctionGraph
 from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
-from pytensor.tensor.basic import TensorVariable, diagonal
+from pytensor.tensor.basic import TensorVariable, diagonal, Eye, Mul
 from pytensor.tensor.blas import Dot22
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, Prod, _matrix_matrix_matmul, log, prod
 from pytensor.tensor.nlinalg import (
     KroneckerProduct,
@@ -18,6 +18,7 @@ from pytensor.tensor.nlinalg import (
     inv,
     kron,
     pinv,
+    Det,
 )
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
@@ -377,3 +378,56 @@ def local_lift_through_linalg(
                 return [block_diag(*inner_matrices)]
             else:
                 raise NotImplementedError  # pragma: no cover
+
+
+# Det Diag Rewrite
+def det_diag_rewrite(node: Apply):
+    # Find if we have Blockwise Op
+    if not(
+        isinstance(node.op, Blockwise)
+        and isinstance (node.op.core_op, Det)
+    ):
+        return None
+
+    node_input_op = node.inputs[0]
+    # Check if the op is Elemwise and mul
+    if not(
+        isinstance(node_input_op.owner.op, Elemwise)
+        and isinstance(node_input_op.owner.op.scalar_op, Mul)
+    ):
+        return None
+
+    # Find whether any of the inputs to mul is Eye
+    inputs_to_mul = node_input_op.owner.inputs
+    eye_check = False
+    eye_input = []
+    for mul_input in inputs_to_mul:
+        if isinstance(mul_input.owner.op, Eye):
+            eye_check = True
+            eye_input.append(mul_input)
+            break # This is so that we only find the first one? Can be changed
+    if not (
+        eye_check
+    ):
+        return None
+
+    # Get all non Eye inputs (scalars/matrices/vectors)
+    non_eye_inputs = list(set(inputs_to_mul) - set(eye_input))
+    
+    # Dealing with only one other input
+    if (len(non_eye_inputs) >= 2):
+        raise NotImplementedError
+
+    # Checking if original x was matrix
+    if not non_eye_inputs[0].owner:
+        # It was a matrix
+        det_val = pt.diagonal(non_eye_inputs[0]).prod()
+    else:
+        # Check for scalar (ndim = 0) or vector (ndim = 1)
+        sca_vec_input = non_eye_inputs[0].owner.inputs[0]
+        if (sca_vec_input.ndim == 0):
+            det_val = sca_vec_input**eye_input[0].shape[0]
+        else:
+            det_val = sca_vec_input.prod()
+
+    return [det_val]
