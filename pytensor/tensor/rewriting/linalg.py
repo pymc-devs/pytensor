@@ -388,20 +388,17 @@ def local_lift_through_linalg(
 @register_stabilize
 @register_specialize
 @node_rewriter([SVD])
-def local_svd_uv_simplify(fgraph, node):
+def svd_uv_merge(fgraph, node):
     """If we have more than one `SVD` `Op`s and at least one has keyword argument
     `compute_uv=True`, then we can change `compute_uv = False` to `True` everywhere
     and allow `pytensor` to re-use the decomposition outputs instead of recomputing.
     """
     (x,) = node.inputs
 
-    if node.compute_uv:
+    if node.op.compute_uv:
         # compute_uv=True returns [u, s, v].
         # if at least u or v is used, no need to rewrite this node.
-        if (
-            fgraph.clients[node.outputs[0]] is not None
-            or fgraph.clients[node.outputs[2]] is not None
-        ):
+        if fgraph.clients[node.outputs[0]] or fgraph.clients[node.outputs[2]]:
             return
 
         # Else, has to replace the s of this node with s of an SVD Op that compute_uv=False.
