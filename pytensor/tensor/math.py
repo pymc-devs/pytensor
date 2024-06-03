@@ -1540,7 +1540,7 @@ class Mean(FixedOpCAReduce):
 
     def __str__(self):
         if self.axis is not None:
-            return "Mean{%s}" % (", ".join(str(x) for x in self.axis))
+            return "Mean{{{}}}".format(", ".join(str(x) for x in self.axis))
         else:
             return "Mean"
 

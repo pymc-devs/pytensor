@@ -232,3 +232,46 @@ def test_op_input_broadcastable():
 
     x = pt.TensorType(dtype="float64", shape=(1,))("x")
     assert SomeOp()(x).type == pt.dvector
+
+
+@pytest.mark.parametrize("multi_output", [True, False])
+def test_call_name(multi_output):
+    def dummy_variable(name):
+        return Variable(MyType(thingy=None), None, None, name=name)
+
+    x = dummy_variable("x")
+
+    class TestCallOp(Op):
+        def __init__(self, default_output, multi_output):
+            super().__init__()
+            self.default_output = default_output
+            self.multi_output = multi_output
+
+        def make_node(self, input):
+            inputs = [input]
+            if self.multi_output:
+                outputs = [input.type(), input.type()]
+            else:
+                outputs = [input.type()]
+            return Apply(self, inputs, outputs)
+
+        def perform(self, node, inputs, outputs):
+            raise NotImplementedError()
+
+    if multi_output:
+        multi_op = TestCallOp(default_output=None, multi_output=multi_output)
+        res = multi_op(x, name="test_name")
+        for i, r in enumerate(res):
+            assert r.name == f"test_name_{i}"
+
+        multi_op = TestCallOp(default_output=1, multi_output=multi_output)
+        result = multi_op(x, name="test_name")
+        assert result.owner.outputs[0].name is None
+        assert result.name == "test_name"
+    else:
+        single_op = TestCallOp(default_output=None, multi_output=multi_output)
+        res_single = single_op(x, name="test_name")
+        assert res_single.name == "test_name"
+
+        res_nameless = single_op(x)
+        assert res_nameless.name is None

@@ -1,12 +1,23 @@
+import re
+
 from pytensor.compile import optdb
+from pytensor.graph import Constant
 from pytensor.graph.rewriting.basic import in2out, node_rewriter
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.tensor import abs as abs_t
 from pytensor.tensor import broadcast_arrays, exp, floor, log, log1p, reciprocal, sqrt
-from pytensor.tensor.basic import MakeVector, cast, ones_like, switch, zeros_like
+from pytensor.tensor.basic import (
+    MakeVector,
+    arange,
+    cast,
+    ones_like,
+    switch,
+    zeros_like,
+)
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.random.basic import (
     BetaBinomialRV,
+    ChoiceWithoutReplacement,
     GenGammaRV,
     GeometricRV,
     HalfNormalRV,
@@ -137,6 +148,37 @@ def beta_binomial_from_beta_binomial(fgraph, node):
     return [next_rng, b]
 
 
+@node_rewriter([ChoiceWithoutReplacement])
+def materialize_implicit_arange_choice_without_replacement(fgraph, node):
+    """JAX random.choice does not support 0d arrays but when we have batch_ndim we need to vmap through batched `a`.
+
+    This rewrite materializes the implicit `a`
+    """
+    op = node.op
+    if op.batch_ndim(node) == 0 or op.ndims_params[0] > 0:
+        # No need to materialize arange
+        return None
+
+    rng, size, a_scalar_param, *other_params = node.inputs
+    if not all(a_scalar_param.type.broadcastable):
+        # Automatic vectorization could have made this parameter batched,
+        # there is no nice way to materialize a batched arange
+        return None
+
+    # We need to try and do an eager squeeze here because arange will fail in jax
+    # if there is an array leading to it, even if it's constant
+    if isinstance(a_scalar_param, Constant):
+        a_scalar_param = a_scalar_param.data
+    a_vector_param = arange(a_scalar_param.squeeze())
+
+    new_props_dict = op._props_dict().copy()
+    # Signature changes from something like "(),(a),(2)->(s0, s1)" to "(a),(a),(2)->(s0, s1)"
+    # I.e., we substitute the first `()` by `(a)`
+    new_props_dict["signature"] = re.sub(r"\(\)", "(a)", op.signature, 1)
+    new_op = type(op)(**new_props_dict)
+    return new_op.make_node(rng, size, a_vector_param, *other_params).outputs
+
+
 random_vars_opt = SequenceDB()
 random_vars_opt.register(
     "lognormal_from_normal",
@@ -176,6 +218,11 @@ random_vars_opt.register(
 random_vars_opt.register(
     "beta_binomial_from_beta_binomial",
     in2out(beta_binomial_from_beta_binomial),
+    "jax",
+)
+random_vars_opt.register(
+    "materialize_implicit_arange_choice_without_replacement",
+    in2out(materialize_implicit_arange_choice_without_replacement),
     "jax",
 )
 optdb.register("jax_random_vars_rewrites", random_vars_opt, "jax", position=110)

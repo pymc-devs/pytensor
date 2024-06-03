@@ -105,7 +105,7 @@ class PdbBreakpoint(Op):
             except Exception:
                 raise ValueError(
                     "Some of the inputs to the PdbBreakpoint op "
-                    "'%s' could not be casted to NumPy arrays" % self.name
+                    f"'{self.name}' could not be casted to NumPy arrays"
                 )
 
             print("\n")

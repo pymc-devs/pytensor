@@ -12,7 +12,7 @@ dependencies:
   - sphinx>=5.1.0,<6
   - mock
   - pillow
+  - pymc-sphinx-theme
   - pip
   - pip:
-    - git+https://github.com/pymc-devs/pymc-sphinx-theme
     - -e ..

@@ -262,8 +262,13 @@ class Params(dict):
         self.__dict__.update(__params_type__=params_type, __signatures__=None)
 
     def __repr__(self):
-        return "Params(%s)" % ", ".join(
-            [(f"{k}:{type(self[k]).__name__}:{self[k]}") for k in sorted(self.keys())]
+        return "Params({})".format(
+            ", ".join(
+                [
+                    (f"{k}:{type(self[k]).__name__}:{self[k]}")
+                    for k in sorted(self.keys())
+                ]
+            )
         )
 
     def __getattr__(self, key):
@@ -346,13 +351,11 @@ class ParamsType(CType):
         for attribute_name in kwargs:
             if re.match("^[A-Za-z_][A-Za-z0-9_]*$", attribute_name) is None:
                 raise AttributeError(
-                    'ParamsType: attribute "%s" should be a valid identifier.'
-                    % attribute_name
+                    f'ParamsType: attribute "{attribute_name}" should be a valid identifier.'
                 )
             if attribute_name in c_cpp_keywords:
                 raise SyntaxError(
-                    'ParamsType: "%s" is a potential C/C++ keyword and should not be used as attribute name.'
-                    % attribute_name
+                    f'ParamsType: "{attribute_name}" is a potential C/C++ keyword and should not be used as attribute name.'
                 )
             type_instance = kwargs[attribute_name]
             type_name = type_instance.__class__.__name__
@@ -424,8 +427,10 @@ class ParamsType(CType):
         return super().__getattr__(self, key)
 
     def __repr__(self):
-        return "ParamsType<%s>" % ", ".join(
-            [(f"{self.fields[i]}:{self.types[i]}") for i in range(self.length)]
+        return "ParamsType<{}>".format(
+            ", ".join(
+                [(f"{self.fields[i]}:{self.types[i]}") for i in range(self.length)]
+            )
         )
 
     def __eq__(self, other):
@@ -733,18 +738,18 @@ class ParamsType(CType):
         struct_cleanup = "\n".join(c_cleanup_list)
         struct_extract = "\n\n".join(c_extract_list)
         struct_extract_method = """
-        void extract(PyObject* object, int field_pos) {
-            switch(field_pos) {
+        void extract(PyObject* object, int field_pos) {{
+            switch(field_pos) {{
                 // Extraction cases.
-                %s
+                {}
                 // Default case.
                 default:
-                    PyErr_Format(PyExc_TypeError, "ParamsType: no extraction defined for a field %%d.", field_pos);
+                    PyErr_Format(PyExc_TypeError, "ParamsType: no extraction defined for a field %d.", field_pos);
                     this->setErrorOccurred();
                     break;
-            }
-        }
-        """ % (
+            }}
+        }}
+        """.format(
             "\n".join(
                 [
                     ("case %d: extract_%s(object); break;" % (i, self.fields[i]))
@@ -866,7 +871,7 @@ class ParamsType(CType):
                 struct_name=self.name,
                 length=self.length,
                 fail=sub["fail"],
-                fields_list='"%s"' % '", "'.join(self.fields),
+                fields_list='"{}"'.format('", "'.join(self.fields)),
             )
         )
 

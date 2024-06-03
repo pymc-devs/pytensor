@@ -5,7 +5,7 @@ from pytensor.compile.function import function
 from pytensor.gradient import grad
 from pytensor.scan.basic import scan
 from pytensor.scan.checkpoints import scan_checkpoints
-from pytensor.tensor.basic import ones_like
+from pytensor.tensor.basic import arange, ones_like
 from pytensor.tensor.type import iscalar, vector
 
 
@@ -13,15 +13,18 @@ class TestScanCheckpoint:
     def setup_method(self):
         self.k = iscalar("k")
         self.A = vector("A")
+        seq = arange(self.k, dtype="float32") + 1
         result, _ = scan(
-            fn=lambda prior_result, A: prior_result * A,
+            fn=lambda s, prior_result, A: prior_result * A / s,
             outputs_info=ones_like(self.A),
+            sequences=[seq],
             non_sequences=self.A,
             n_steps=self.k,
         )
         result_check, _ = scan_checkpoints(
-            fn=lambda prior_result, A: prior_result * A,
+            fn=lambda s, prior_result, A: prior_result * A / s,
             outputs_info=ones_like(self.A),
+            sequences=[seq],
             non_sequences=self.A,
             n_steps=self.k,
             save_every_N=100,

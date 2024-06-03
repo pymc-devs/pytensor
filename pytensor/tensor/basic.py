@@ -23,7 +23,7 @@ from pytensor import compile, config, printing
 from pytensor import scalar as ps
 from pytensor.gradient import DisconnectedType, grad_undefined
 from pytensor.graph import RewriteDatabaseQuery
-from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.basic import Apply, Constant, Variable, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
@@ -42,7 +42,7 @@ from pytensor.tensor import (
     as_tensor_variable,
     get_vector_length,
 )
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
 from pytensor.tensor.elemwise import (
     DimShuffle,
     Elemwise,
@@ -1719,6 +1719,9 @@ def full(shape, fill_value, dtype=None):
     fill_value = as_tensor_variable(fill_value)
     if dtype:
         fill_value = fill_value.astype(dtype)
+
+    if np.ndim(shape) == 0:
+        shape = (shape,)
     return alloc(fill_value, *shape)
 
 
@@ -1980,6 +1983,62 @@ def transpose(x, axes=None):
         ret.name = _x.name + ".T"
 
     return ret
+
+
+def matrix_transpose(x: "TensorLike") -> TensorVariable:
+    """
+    Transposes each 2-dimensional matrix tensor along the last two dimensions of a higher-dimensional tensor.
+
+    Parameters
+    ----------
+    x : array_like
+        Input tensor with shape (..., M, N), where `M` and `N` represent the dimensions
+        of the matrices. Each matrix is of shape (M, N).
+
+    Returns
+    -------
+    out : tensor
+        Transposed tensor with the shape (..., N, M), where each 2-dimensional matrix
+        in the input tensor has been transposed along the last two dimensions.
+
+    Examples
+    --------
+    >>> import pytensor as pt
+    >>> import numpy as np
+    >>> x = np.arange(24).reshape((2, 3, 4))
+    [[[ 0  1  2  3]
+      [ 4  5  6  7]
+      [ 8  9 10 11]]
+
+     [[12 13 14 15]
+      [16 17 18 19]
+      [20 21 22 23]]]
+
+
+    >>> pt.matrix_transpose(x).eval()
+    [[[ 0  4  8]
+      [ 1  5  9]
+      [ 2  6 10]
+      [ 3  7 11]]
+
+     [[12 16 20]
+      [13 17 21]
+      [14 18 22]
+      [15 19 23]]]
+
+
+    Notes
+    -----
+    This function transposes each 2-dimensional matrix within the input tensor along
+    the last two dimensions. If the input tensor has more than two dimensions, it
+    transposes each 2-dimensional matrix independently while preserving other dimensions.
+    """
+    x = as_tensor_variable(x)
+    if x.ndim < 2:
+        raise ValueError(
+            f"Input array must be at least 2-dimensional, but it is {x.ndim}"
+        )
+    return swapaxes(x, -1, -2)
 
 
 def split(x, splits_size, n_splits, axis=0):
@@ -2601,6 +2660,36 @@ def join(axis, *tensors_list):
         return tensors_list[0]
     else:
         return join_(axis, *tensors_list)
+
+
+@_vectorize_node.register(Join)
+def vectorize_join(op: Join, node, batch_axis, *batch_inputs):
+    original_axis, *old_inputs = node.inputs
+    # We can vectorize join as a shifted axis on the batch inputs if:
+    # 1. The batch axis is a constant and has not changed
+    # 2. All inputs are batched with the same broadcastable pattern
+    if (
+        original_axis.type.ndim == 0
+        and isinstance(original_axis, Constant)
+        and equal_computations([original_axis], [batch_axis])
+    ):
+        batch_ndims = {
+            batch_input.type.ndim - old_input.type.ndim
+            for batch_input, old_input in zip(batch_inputs, old_inputs)
+        }
+        if len(batch_ndims) == 1:
+            [batch_ndim] = batch_ndims
+            batch_bcast = batch_inputs[0].type.broadcastable[:batch_ndim]
+            if all(
+                batch_input.type.broadcastable[:batch_ndim] == batch_bcast
+                for batch_input in batch_inputs[1:]
+            ):
+                original_ndim = node.outputs[0].type.ndim
+                original_axis = normalize_axis_index(original_axis.data, original_ndim)
+                batch_axis = original_axis + batch_ndim
+                return op.make_node(batch_axis, *batch_inputs)
+
+    return vectorize_node_fallback(op, node, batch_axis, *batch_inputs)
 
 
 def roll(x, shift, axis=None):
@@ -4191,6 +4280,17 @@ def expand_dims(
 
     Insert a new axis that will appear at the `axis` position in the expanded
     array shape.
+
+    Parameters
+    ----------
+    a :
+        The input array.
+    axis :
+        Position in the expanded axes where the new axis is placed.
+        If `axis` is empty, `a` will be returned immediately.
+    Returns
+    -------
+    `a` with a new axis at the `axis` position.
     """
     a = as_tensor(a)
 
@@ -4199,6 +4299,9 @@ def expand_dims(
 
     out_ndim = len(axis) + a.ndim
     axis = np.core.numeric.normalize_axis_tuple(axis, out_ndim)
+
+    if not axis:
+        return a
 
     dim_it = iter(range(a.ndim))
     pattern = ["x" if ax in axis else next(dim_it) for ax in range(out_ndim)]
@@ -4302,6 +4405,7 @@ __all__ = [
     "join",
     "split",
     "transpose",
+    "matrix_transpose",
     "extract_constant",
     "default",
     "tensor_copy",

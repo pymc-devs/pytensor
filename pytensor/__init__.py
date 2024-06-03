@@ -159,6 +159,7 @@ def get_underlying_scalar_constant(v):
 # isort: off
 import pytensor.tensor.random.var
 import pytensor.sparse
+from pytensor.ifelse import ifelse
 from pytensor.scan import checkpoints
 from pytensor.scan.basic import scan
 from pytensor.scan.views import foldl, foldr, map, reduce

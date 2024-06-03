@@ -75,9 +75,9 @@ def main():
             if items:
                 _logger.warning(
                     "There remain elements in the cache dir that you may "
-                    "need to erase manually. The cache dir is:\n  %s\n"
+                    f"need to erase manually. The cache dir is:\n  {config.compiledir}\n"
                     'You can also call "pytensor-cache purge" to '
-                    "remove everything from that directory." % config.compiledir
+                    "remove everything from that directory."
                 )
                 _logger.debug(f"Remaining elements ({len(items)}): {', '.join(items)}")
         elif sys.argv[1] == "list":

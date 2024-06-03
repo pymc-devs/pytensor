@@ -740,13 +740,13 @@ class UnShapeOptimizer(GraphRewriter):
 
 # Register it after merge1 optimization at 0. We don't want to track
 # the shape of merged node.
-pytensor.compile.mode.optdb.register(  # type: ignore
+pytensor.compile.mode.optdb.register(
     "ShapeOpt", ShapeOptimizer(), "fast_run", "fast_compile", position=0.1
 )
 # Not enabled by default for now. Some crossentropy opt use the
 # shape_feature.  They are at step 2.01. uncanonicalize is at step
 # 3. After it goes to 48.5 that move to the gpu. So 10 seems reasonable.
-pytensor.compile.mode.optdb.register("UnShapeOpt", UnShapeOptimizer(), position=10)  # type: ignore
+pytensor.compile.mode.optdb.register("UnShapeOpt", UnShapeOptimizer(), position=10)
 
 
 def local_reshape_chain(op):

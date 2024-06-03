@@ -188,6 +188,5 @@ def local_blockwise_alloc(fgraph, node):
             )
             for new_out in new_outs
         ]
-    assert new_outs[0].type.broadcastable == old_out_type.broadcastable
     copy_stack_trace(node.outputs, new_outs)
     return new_outs

@@ -12,6 +12,7 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.tensor import constant
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.random.basic import (
+    NormalRV,
     categorical,
     dirichlet,
     multinomial,
@@ -29,6 +30,7 @@ from pytensor.tensor.random.rewriting import (
 from pytensor.tensor.rewriting.shape import ShapeFeature, ShapeOptimizer
 from pytensor.tensor.subtensor import AdvancedSubtensor, AdvancedSubtensor1, Subtensor
 from pytensor.tensor.type import iscalar, vector
+from pytensor.tensor.type_other import NoneConst
 
 
 no_mode = Mode("py", RewriteDatabaseQuery(include=[], exclude=[]))
@@ -43,20 +45,25 @@ def apply_local_rewrite_to_rv(
         p_pt.tag.test_value = p
         dist_params_pt.append(p_pt)
 
-    size_pt = []
-    for s in size:
-        # To test DimShuffle with dropping dims we need that size dimension to be constant
-        if s == 1:
-            s_pt = constant(np.array(1, dtype="int32"))
-        else:
-            s_pt = iscalar()
-        s_pt.tag.test_value = s
-        size_pt.append(s_pt)
+    if size is None:
+        size_pt = NoneConst
+    else:
+        size_pt = []
+        for s in size:
+            # To test DimShuffle with dropping dims we need that size dimension to be constant
+            if s == 1:
+                s_pt = constant(np.array(1, dtype="int32"))
+            else:
+                s_pt = iscalar()
+            s_pt.tag.test_value = s
+            size_pt.append(s_pt)
 
     dist_st = op_fn(dist_op(*dist_params_pt, size=size_pt, rng=rng, name=name))
 
     f_inputs = [
-        p for p in dist_params_pt + size_pt if not isinstance(p, slice | Constant)
+        p
+        for p in dist_params_pt + ([] if size is None else size_pt)
+        if not isinstance(p, slice | Constant)
     ]
 
     mode = Mode(
@@ -74,52 +81,28 @@ def apply_local_rewrite_to_rv(
     return new_out, f_inputs, dist_st, f_rewritten
 
 
-def test_inplace_rewrites():
-    out = normal(0, 1)
-    out.owner.inputs[0].default_update = out.owner.outputs[0]
+class TestRVExpraProps(RandomVariable):
+    name = "test"
+    signature = "()->()"
+    __props__ = ("name", "signature", "dtype", "inplace", "extra")
+    dtype = "floatX"
+    _print_name = ("TestExtraProps", "\\operatorname{TestExtra_props}")
 
-    assert out.owner.op.inplace is False
+    def __init__(self, extra, *args, **kwargs):
+        self.extra = extra
+        super().__init__(*args, **kwargs)
 
-    f = function(
-        [],
-        out,
-        mode="FAST_RUN",
-    )
-
-    (new_out, new_rng) = f.maker.fgraph.outputs
-    assert new_out.type == out.type
-    assert isinstance(new_out.owner.op, type(out.owner.op))
-    assert new_out.owner.op.inplace is True
-    assert all(
-        np.array_equal(a.data, b.data)
-        for a, b in zip(new_out.owner.inputs[2:], out.owner.inputs[2:])
-    )
-    assert np.array_equal(new_out.owner.inputs[1].data, [])
+    def rng_fn(self, rng, dtype, sigma, size):
+        return rng.normal(scale=sigma, size=size)
 
 
-def test_inplace_rewrites_extra_props():
-    class Test(RandomVariable):
-        name = "test"
-        ndim_supp = 0
-        ndims_params = [0]
-        __props__ = ("name", "ndim_supp", "ndims_params", "dtype", "inplace", "extra")
-        dtype = "floatX"
-        _print_name = ("Test", "\\operatorname{Test}")
-
-        def __init__(self, extra, *args, **kwargs):
-            self.extra = extra
-            super().__init__(*args, **kwargs)
-
-        def make_node(self, rng, size, dtype, sigma):
-            return super().make_node(rng, size, dtype, sigma)
-
-        def rng_fn(self, rng, sigma, size):
-            return rng.normal(scale=sigma, size=size)
-
-    out = Test(extra="some value")(1)
-    out.owner.inputs[0].default_update = out.owner.outputs[0]
-
-    assert out.owner.op.inplace is False
+@pytest.mark.parametrize("rv_op", [normal, TestRVExpraProps(extra="some value")])
+def test_inplace_rewrites(rv_op):
+    out = rv_op(np.e)
+    node = out.owner
+    op = node.op
+    node.inputs[0].default_update = node.outputs[0]
+    assert op.inplace is False
 
     f = function(
         [],
@@ -129,14 +112,15 @@ def test_inplace_rewrites_extra_props():
 
     (new_out, new_rng) = f.maker.fgraph.outputs
     assert new_out.type == out.type
-    assert isinstance(new_out.owner.op, type(out.owner.op))
-    assert new_out.owner.op.inplace is True
-    assert new_out.owner.op.extra == out.owner.op.extra
+    new_node = new_out.owner
+    new_op = new_node.op
+    assert isinstance(new_op, type(op))
+    assert new_op._props_dict() == (op._props_dict() | {"inplace": True})
     assert all(
         np.array_equal(a.data, b.data)
-        for a, b in zip(new_out.owner.inputs[2:], out.owner.inputs[2:])
+        for a, b in zip(new_op.dist_params(new_node), op.dist_params(node))
     )
-    assert np.array_equal(new_out.owner.inputs[1].data, [])
+    assert np.array_equal(new_op.size_param(new_node).data, op.size_param(node).data)
 
 
 @config.change_flags(compute_test_value="raise")
@@ -157,7 +141,7 @@ def test_inplace_rewrites_extra_props():
                 np.array([0.0, 1.0], dtype=config.floatX),
                 np.array(5.0, dtype=config.floatX),
             ],
-            [],
+            None,
         ),
         (
             normal,
@@ -202,7 +186,7 @@ def test_local_rv_size_lift(dist_op, dist_params, size):
         rng,
     )
 
-    assert pt.get_vector_length(new_out.owner.inputs[1]) == 0
+    assert new_out.owner.op.size_param(new_out.owner).data is None
 
 
 @pytest.mark.parametrize(
@@ -216,7 +200,7 @@ def test_local_rv_size_lift(dist_op, dist_params, size):
                 np.array([0.0, -100.0], dtype=np.float64),
                 np.array(1e-6, dtype=np.float64),
             ),
-            (),
+            None,
             1e-7,
         ),
         (
@@ -227,7 +211,7 @@ def test_local_rv_size_lift(dist_op, dist_params, size):
                 np.array(-10.0, dtype=np.float64),
                 np.array(1e-6, dtype=np.float64),
             ),
-            (),
+            None,
             1e-7,
         ),
         (
@@ -238,7 +222,7 @@ def test_local_rv_size_lift(dist_op, dist_params, size):
                 np.array(-10.0, dtype=np.float64),
                 np.array(1e-6, dtype=np.float64),
             ),
-            (),
+            None,
             1e-7,
         ),
         (
@@ -249,7 +233,7 @@ def test_local_rv_size_lift(dist_op, dist_params, size):
                 np.arange(2 * 2 * 2).reshape((2, 2, 2)).astype(config.floatX),
                 np.array(1e-6).astype(config.floatX),
             ),
-            (),
+            None,
             1e-3,
         ),
         (
@@ -420,10 +404,10 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
     )
 
     if lifted:
-        assert new_out.owner.op == dist_op
+        assert isinstance(new_out.owner.op, type(dist_op))
         assert all(
             isinstance(i.owner.op, DimShuffle)
-            for i in new_out.owner.inputs[3:]
+            for i in new_out.owner.op.dist_params(new_out.owner)
             if i.owner
         )
     else:
@@ -462,7 +446,7 @@ def rand_bool_mask(shape, rng=None):
                 np.arange(30, dtype=config.floatX).reshape(3, 5, 2),
                 np.full((1, 5, 1), 1e-6),
             ),
-            (),
+            None,
         ),
         (
             # `size`-only slice
@@ -484,7 +468,7 @@ def rand_bool_mask(shape, rng=None):
                 np.arange(30, dtype=config.floatX).reshape(3, 5, 2),
                 np.full((1, 5, 1), 1e-6),
             ),
-            (),
+            None,
         ),
         (
             # `size`-only slice
@@ -506,7 +490,7 @@ def rand_bool_mask(shape, rng=None):
                 (0.1 - 1e-5) * np.arange(4).astype(dtype=config.floatX),
                 0.1 * np.arange(4).astype(dtype=config.floatX),
             ),
-            (),
+            None,
         ),
         # 5
         (
@@ -592,7 +576,7 @@ def rand_bool_mask(shape, rng=None):
                     dtype=config.floatX,
                 ),
             ),
-            (),
+            None,
         ),
         (
             # Univariate distribution with core-vector parameters
@@ -649,7 +633,7 @@ def rand_bool_mask(shape, rng=None):
                 np.arange(30).reshape(5, 3, 2),
                 1e-6,
             ),
-            (),
+            None,
         ),
         (
             # Multidimensional boolean indexing
@@ -660,7 +644,7 @@ def rand_bool_mask(shape, rng=None):
                 np.arange(30).reshape(5, 3, 2),
                 1e-6,
             ),
-            (),
+            None,
         ),
         (
             # Multidimensional boolean indexing
@@ -671,7 +655,7 @@ def rand_bool_mask(shape, rng=None):
                 np.arange(30).reshape(5, 3, 2),
                 1e-6,
             ),
-            (),
+            None,
         ),
         # 20
         (
@@ -683,7 +667,7 @@ def rand_bool_mask(shape, rng=None):
                 np.arange(30).reshape(5, 3, 2),
                 1e-6,
             ),
-            (),
+            None,
         ),
         (
             # Multidimensional boolean indexing
@@ -709,7 +693,7 @@ def rand_bool_mask(shape, rng=None):
                 np.arange(30).reshape(5, 3, 2),
                 1e-6,
             ),
-            (),
+            None,
         ),
         (
             # Multidimensional boolean indexing,
@@ -725,7 +709,7 @@ def rand_bool_mask(shape, rng=None):
                 np.arange(30).reshape(5, 3, 2),
                 1e-6,
             ),
-            (),
+            None,
         ),
         (
             # Multivariate distribution: indexing dips into core dimension
@@ -736,7 +720,7 @@ def rand_bool_mask(shape, rng=None):
                 np.array([[-1, 20], [300, -4000]], dtype=config.floatX),
                 np.eye(2).astype(config.floatX) * 1e-6,
             ),
-            (),
+            None,
         ),
         # 25
         (
@@ -748,7 +732,7 @@ def rand_bool_mask(shape, rng=None):
                 np.array([[-1, 20], [300, -4000]], dtype=config.floatX),
                 np.eye(2).astype(config.floatX) * 1e-6,
             ),
-            (),
+            None,
         ),
         (
             # Multivariate distribution: advanced integer indexing
@@ -762,7 +746,7 @@ def rand_bool_mask(shape, rng=None):
                 ),
                 np.eye(3, dtype=config.floatX) * 1e-6,
             ),
-            (),
+            None,
         ),
         (
             # Multivariate distribution: dummy slice "dips" into core dimension
@@ -812,13 +796,21 @@ def test_Subtensor_lift(indices, lifted, dist_op, dist_params, size):
         rng,
     )
 
+    def is_subtensor_or_dimshuffle_subtensor(inp) -> bool:
+        subtensor_ops = Subtensor | AdvancedSubtensor | AdvancedSubtensor1
+        if isinstance(inp.owner.op, subtensor_ops):
+            return True
+        if isinstance(inp.owner.op, DimShuffle):
+            return isinstance(inp.owner.inputs[0].owner.op, subtensor_ops)
+        return False
+
     if lifted:
         assert isinstance(new_out.owner.op, RandomVariable)
         assert all(
-            isinstance(i.owner.op, AdvancedSubtensor | AdvancedSubtensor1 | Subtensor)
-            for i in new_out.owner.inputs[3:]
+            is_subtensor_or_dimshuffle_subtensor(i)
+            for i in new_out.owner.op.dist_params(new_out.owner)
             if i.owner
-        )
+        ), new_out.dprint(depth=3, print_type=True)
     else:
         assert isinstance(
             new_out.owner.op, AdvancedSubtensor | AdvancedSubtensor1 | Subtensor
@@ -855,7 +847,7 @@ def test_Subtensor_lift_restrictions():
     subtensor_node = fg.outputs[0].owner.inputs[1].owner.inputs[0].owner
     assert subtensor_node == y.owner
     assert isinstance(subtensor_node.op, Subtensor)
-    assert subtensor_node.inputs[0].owner.op == normal
+    assert isinstance(subtensor_node.inputs[0].owner.op, NormalRV)
 
     z = pt.ones(x.shape) - x[1]
 
@@ -873,7 +865,7 @@ def test_Subtensor_lift_restrictions():
     EquilibriumGraphRewriter([local_subtensor_rv_lift], max_use_ratio=100).apply(fg)
 
     rv_node = fg.outputs[0].owner.inputs[1].owner.inputs[0].owner
-    assert rv_node.op == normal
+    assert isinstance(rv_node.op, NormalRV)
     assert isinstance(rv_node.inputs[-1].owner.op, Subtensor)
     assert isinstance(rv_node.inputs[-2].owner.op, Subtensor)
 
@@ -895,7 +887,7 @@ def test_Dimshuffle_lift_restrictions():
     dimshuffle_node = fg.outputs[0].owner.inputs[1].owner
     assert dimshuffle_node == y.owner
     assert isinstance(dimshuffle_node.op, DimShuffle)
-    assert dimshuffle_node.inputs[0].owner.op == normal
+    assert isinstance(dimshuffle_node.inputs[0].owner.op, NormalRV)
 
     z = pt.ones(x.shape) - y
 
@@ -913,7 +905,7 @@ def test_Dimshuffle_lift_restrictions():
     EquilibriumGraphRewriter([local_dimshuffle_rv_lift], max_use_ratio=100).apply(fg)
 
     rv_node = fg.outputs[0].owner.inputs[1].owner
-    assert rv_node.op == normal
+    assert isinstance(rv_node.op, NormalRV)
     assert isinstance(rv_node.inputs[-1].owner.op, DimShuffle)
     assert isinstance(rv_node.inputs[-2].owner.op, DimShuffle)
 
