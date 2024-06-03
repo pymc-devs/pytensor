@@ -1,8 +1,6 @@
 /*    adapted from file incbet.c, obtained from the Cephes library (MIT License)
 Cephes Math Library, Release 2.8:  June, 2000
 Copyright 1984, 1995, 2000 by Stephen L. Moshier
-
-and beta.hpp from boost/special_functions/
 */
 
 //For GPU support
@@ -69,18 +67,18 @@ DEVICE double BetaInc(double a, double b, double x)
     t = b * log(xc);
     if( (a+b) < MAXGAM && fabs(y) < MAXLOG && fabs(t) < MAXLOG )
     {
-        t = pow(xc,b);
-        t *= pow(x,a);
+        t = pow(xc, b);
+        t *= pow(x, a);
         t /= a;
         t *= w;
-        t *= tgamma(a+b) / (tgamma(a) * tgamma(b));
+        t *= tgamma(a + b) / (tgamma(a) * tgamma(b));
 
         return t;
     }
 
     /* Resort to logarithms.  */
     y += t + lgamma(a+b) - lgamma(a) - lgamma(b);
-    y += log(w/a);
+    y += log(w / a);
     if( y < MINLOG )
         t = 0.0;
     else
@@ -120,7 +118,7 @@ DEVICE static double incbcf(double a, double b, double x)
     do
     {
 
-        xk = -( x * k1 * k2 )/( k3 * k4 );
+        xk = -( x * k1 * k2 ) / ( k3 * k4 );
         pk = pkm1 +  pkm2 * xk;
         qk = qkm1 +  qkm2 * xk;
         pkm2 = pkm1;
@@ -128,7 +126,7 @@ DEVICE static double incbcf(double a, double b, double x)
         qkm2 = qkm1;
         qkm1 = qk;
 
-        xk = ( x * k5 * k6 )/( k7 * k8 );
+        xk = ( x * k5 * k6 ) / ( k7 * k8 );
         pk = pkm1 +  pkm2 * xk;
         qk = qkm1 +  qkm2 * xk;
         pkm2 = pkm1;
@@ -140,7 +138,7 @@ DEVICE static double incbcf(double a, double b, double x)
             r = pk/qk;
         if( r != 0.0 )
         {
-            t = fabs( (ans - r)/r );
+            t = fabs( (ans - r) / r );
             ans = r;
         }
         else
@@ -210,7 +208,7 @@ DEVICE static double incbd(double a, double b, double x)
     do
     {
 
-        xk = -( z * k1 * k2 )/( k3 * k4 );
+        xk = -( z * k1 * k2 ) / ( k3 * k4 );
         pk = pkm1 +  pkm2 * xk;
         qk = qkm1 +  qkm2 * xk;
         pkm2 = pkm1;
@@ -218,7 +216,7 @@ DEVICE static double incbd(double a, double b, double x)
         qkm2 = qkm1;
         qkm1 = qk;
 
-        xk = ( z * k5 * k6 )/( k7 * k8 );
+        xk = ( z * k5 * k6 ) / ( k7 * k8 );
         pk = pkm1 +  pkm2 * xk;
         qk = qkm1 +  qkm2 * xk;
         pkm2 = pkm1;
@@ -230,7 +228,7 @@ DEVICE static double incbd(double a, double b, double x)
             r = pk/qk;
         if( r != 0 )
         {
-            t = fabs( (ans - r)/r );
+            t = fabs( (ans - r) / r );
             ans = r;
         }
         else
@@ -298,12 +296,12 @@ DEVICE static double pseries(double a, double b, double x)
     u = a * log(x);
     if( (a+b) < MAXGAM && fabs(u) < MAXLOG )
     {
-    t = tgamma(a+b)/(tgamma(a)*tgamma(b));
+    t = tgamma(a + b) / (tgamma(a) * tgamma(b));
     s = s * t * pow(x,a);
     }
     else
     {
-    t = lgamma(a+b) - lgamma(a) - lgamma(b) + u + log(s);
+    t = lgamma(a + b) - lgamma(a) - lgamma(b) + u + log(s);
     if( t < MINLOG )
     s = 0.0;
     else
