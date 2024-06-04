@@ -1509,7 +1509,7 @@ class BetaInc(ScalarOp):
         raise NotImplementedError("type not supported", type)
 
     def c_code_cache_version(self):
-        return ()
+        return (0, 0, 1)
 
 
 betainc = BetaInc(upgrade_to_float_no_complex, name="betainc")
