@@ -1248,7 +1248,7 @@ def local_sum_prod_of_mul_or_div(fgraph, node):
     """
 
     [node_inps] = node.inputs
-    if not node_inps.owner:
+    if node_inps.owner is None:
         return None
 
     inner_op = node_inps.owner.op
@@ -2711,13 +2711,13 @@ def local_grad_log_erfc_neg(fgraph, node):
     Make it so that the test does not generate an error in that case!
 
     """
-    if not node.inputs[1].owner or node.inputs[1].owner.op != erfc:
+    if not (node.inputs[1].owner and node.inputs[1].owner.op == erfc):
         return False
 
     erfc_in = node.inputs[1]
     erfc_x = erfc_in.owner.inputs[0]
 
-    if not node.inputs[0].owner:
+    if node.inputs[0].owner is None:
         return False
 
     # TODO: All of this should be replaced with a single, simple unification
@@ -2744,7 +2744,7 @@ def local_grad_log_erfc_neg(fgraph, node):
             y = mul_in.owner.inputs[:]
             del y[idx]
 
-    if not exp_in.owner.inputs[0].owner:
+    if exp_in.owner.inputs[0].owner is None:
         return False
 
     if exp_in.owner.inputs[0].owner.op == neg:
