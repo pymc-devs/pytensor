@@ -370,7 +370,7 @@ def apply_local_dimshuffle_lift(fgraph, var):
     """
     lift recursively
     """
-    if not var.owner:
+    if var.owner is None:
         return var
     new = local_dimshuffle_lift.transform(fgraph, var.owner)
     if new:

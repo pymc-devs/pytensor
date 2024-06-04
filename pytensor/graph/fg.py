@@ -252,7 +252,7 @@ class FunctionGraph(MetaObject):
 
             # Now, `var` has no more clients, so check if we need to remove it
             # and its `Apply` node
-            if not var.owner:
+            if var.owner is None:
                 self.variables.remove(var)
             else:
                 apply_node = var.owner

@@ -1321,7 +1321,7 @@ class SequentialNodeRewriter(NodeRewriter):
             # only 1 iteration
             if not self.apply_all_rewrites:
                 return new_repl
-            if not new_vars[0].owner:
+            if new_vars[0].owner is None:
                 # We are at the start of the graph.
                 return new_repl
             if len(new_repl) > 1:

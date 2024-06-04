@@ -662,7 +662,7 @@ def local_cast_cast(fgraph, node):
         return
     x = node.inputs[0]
     if (
-        not x.owner
+        x.owner is None
         or not isinstance(x.owner.op, Elemwise)
         or not isinstance(x.owner.op.scalar_op, ps.Cast)
     ):
@@ -1189,7 +1189,7 @@ def local_merge_alloc(fgraph, node):
     """
     if not isinstance(node.op, Alloc):
         return False
-    if not node.inputs[0].owner or not isinstance(node.inputs[0].owner.op, Alloc):
+    if not (node.inputs[0].owner and isinstance(node.inputs[0].owner.op, Alloc)):
         return False
     inputs_outer = node.inputs
     inputs_inner = node.inputs[0].owner.inputs
