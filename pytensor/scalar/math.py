@@ -1508,9 +1508,7 @@ class BetaInc(ScalarOp):
 
         raise NotImplementedError("type not supported", type)
 
-    def c_code_cache_version(
-        self,
-    ):
+    def c_code_cache_version(self):
         return ()
 
 
