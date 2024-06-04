@@ -1473,6 +1473,7 @@ class BetaInc(ScalarOp):
     """
     Regularized incomplete beta function
     """
+
     nin = 3
     nfunc_spec = ("scipy.special.betainc", 3, 1)
 
@@ -1507,7 +1508,9 @@ class BetaInc(ScalarOp):
 
         raise NotImplementedError("type not supported", type)
 
-    def c_code_cache_version(self, ):
+    def c_code_cache_version(
+        self,
+    ):
         return ()
 
 
