@@ -10,10 +10,9 @@ from pytensor.compile.sharedvalue import SharedVariable, shared
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import Op, get_test_value
-from pytensor.ifelse import ifelse
+from pytensor.graph.op import Op
 from pytensor.raise_op import assert_op
-from pytensor.tensor.type import dscalar, scalar, vector
+from pytensor.tensor.type import scalar, vector
 
 
 torch = pytest.importorskip("torch")
@@ -160,23 +159,6 @@ def test_shared_updates():
     assert res1 == 5
     assert res2 == 6
     assert a.get_value() == 7
-
-
-def test_pytorch_ifelse():
-    true_vals = np.r_[1, 2, 3]
-    false_vals = np.r_[-1, -2, -3]
-
-    x = ifelse(np.array(True), true_vals, false_vals)
-    x_fg = FunctionGraph([], [x])
-
-    compare_pytorch_and_py(x_fg, [])
-
-    a = dscalar("a")
-    a.tag.test_value = 0.2
-    x = ifelse(a < 0.5, true_vals, false_vals)
-    x_fg = FunctionGraph([a], [x])
-
-    compare_pytorch_and_py(x_fg, [get_test_value(i) for i in x_fg.inputs])
 
 
 def test_pytorch_checkandraise():

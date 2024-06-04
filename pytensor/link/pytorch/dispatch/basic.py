@@ -5,7 +5,6 @@ import torch
 
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.fg import FunctionGraph
-from pytensor.ifelse import IfElse
 from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import CheckAndRaise
 
@@ -14,7 +13,7 @@ from pytensor.raise_op import CheckAndRaise
 def pytorch_typify(data, dtype=None, **kwargs):
     r"""Convert instances of PyTensor `Type`\s to PyTorch types."""
     if dtype is None:
-        return torch.tensor(data)
+        return torch.as_tensor(data, dtype=None)
     else:
         return torch.as_tensor(data, dtype=dtype)
 
@@ -39,21 +38,6 @@ def pytorch_funcify_FunctionGraph(
         fgraph_name=fgraph_name,
         **kwargs,
     )
-
-
-@pytorch_funcify.register(IfElse)
-def pytorch_funcify_IfElse(op, **kwargs):
-    n_outs = op.n_outs
-
-    def ifelse(cond, *args, n_outs=n_outs):
-        res = torch.where(
-            cond,
-            args[:n_outs][0],
-            args[n_outs:][0],
-        )
-        return res
-
-    return ifelse
 
 
 @pytorch_funcify.register(CheckAndRaise)
