@@ -1847,7 +1847,7 @@ def hex_digest(x):
     Returns a short, mostly hexadecimal hash of a numpy ndarray
     """
     assert isinstance(x, np.ndarray)
-    rval = hashlib.sha256(x.tostring()).hexdigest()
+    rval = hashlib.sha256(x.tobytes()).hexdigest()
     # hex digest must be annotated with strides to avoid collisions
     # because the buffer interface only exposes the raw data, not
     # any info about the semantics of how that data should be arranged
