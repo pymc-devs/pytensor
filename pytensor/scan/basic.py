@@ -68,14 +68,14 @@ def get_updates_and_outputs(ls):
         """
         # Is `x` a container we can iterate on?
         iter_on = None
-        if isinstance(x, list) or isinstance(x, tuple):
+        if isinstance(x, list | tuple):
             iter_on = x
         elif isinstance(x, dict):
             iter_on = x.items()
         if iter_on is not None:
             return all(_filter(y) for y in iter_on)
         else:
-            return isinstance(x, Variable) or isinstance(x, until)
+            return isinstance(x, Variable | until)
 
     if not _filter(ls):
         raise ValueError(
@@ -840,11 +840,7 @@ def scan(
     # add only the non-shared variables and non-constants to the arguments of
     # the dummy function [ a function should not get shared variables or
     # constants as input ]
-    dummy_args = [
-        arg
-        for arg in args
-        if (not isinstance(arg, SharedVariable) and not isinstance(arg, Constant))
-    ]
+    dummy_args = [arg for arg in args if not isinstance(arg, SharedVariable | Constant)]
     # when we apply the lambda expression we get a mixture of update rules
     # and outputs that needs to be separated
 
@@ -1043,16 +1039,14 @@ def scan(
     other_inner_args = []
 
     other_scan_args += [
-        arg
-        for arg in non_seqs
-        if (not isinstance(arg, SharedVariable) and not isinstance(arg, Constant))
+        arg for arg in non_seqs if not isinstance(arg, SharedVariable | Constant)
     ]
 
     # Step 5.6 all shared variables with no update rules
     other_inner_args += [
         safe_new(arg, "_copy")
         for arg in non_seqs
-        if (not isinstance(arg, SharedVariable) and not isinstance(arg, Constant))
+        if not isinstance(arg, SharedVariable | Constant)
     ]
 
     inner_replacements.update(dict(zip(other_scan_args, other_inner_args)))

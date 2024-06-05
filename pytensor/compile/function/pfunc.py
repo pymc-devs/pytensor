@@ -515,9 +515,7 @@ def construct_pfunc_ins_and_outs(
     if not isinstance(params, list | tuple):
         raise TypeError("The `params` argument must be a list or a tuple")
 
-    if not isinstance(no_default_updates, bool) and not isinstance(
-        no_default_updates, list
-    ):
+    if not isinstance(no_default_updates, bool | list):
         raise TypeError("The `no_default_update` argument must be a boolean or list")
 
     if len(updates) > 0 and not all(

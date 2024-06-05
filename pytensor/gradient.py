@@ -1788,7 +1788,7 @@ def verify_grad(
     o_fn = fn_maker(tensor_pt, o_output, name="gradient.py fwd")
     o_fn_out = o_fn(*[p.copy() for p in pt])
 
-    if isinstance(o_fn_out, tuple) or isinstance(o_fn_out, list):
+    if isinstance(o_fn_out, tuple | list):
         raise TypeError(
             "It seems like you are trying to use verify_grad "
             "on an Op or a function which outputs a list: there should"
