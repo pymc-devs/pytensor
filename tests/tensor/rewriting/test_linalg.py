@@ -21,7 +21,7 @@ from pytensor.tensor.nlinalg import (
     MatrixPinv,
     matrix_inverse,
 )
-from pytensor.tensor.rewriting.linalg import inv_as_solve
+from pytensor.tensor.rewriting.linalg import det_diag_rewrite, inv_as_solve
 from pytensor.tensor.slinalg import (
     BlockDiagonal,
     Cholesky,
@@ -390,3 +390,34 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
     test_vals = [x @ np.swapaxes(x, -1, -2) for x in test_vals]
 
     np.testing.assert_allclose(f1(*test_vals), f2(*test_vals), atol=1e-8)
+
+
+@pytest.mark.paramterize(
+    "i,x_test", [(0, 4), (1, [4, 3, 2, 5]), (2, [[3, 7, 4], [2, 5, 6], [6, 2, 3]])]
+)
+def test_det_diag_rewrite(i, x_test):
+    # Initialising x based on scalar/vector/matrix
+    if i == 0:
+        x = pt.dscalar("x")
+        y = pt.eye(7) * x
+    elif i == 1:
+        x = pt.dvector("x")
+        y = pt.eye(x.shape[0]) * x
+    elif i == 2:
+        x = pt.dmatrix("x")
+        y = pt.eye(x.shape[0]) * x
+    # Caluclating determinant value using pt.linalg.det
+    z_det = pt.linalg.det(y)
+    f_det = function([x], z_det)
+    det_val = f_det(x_test)
+    # Applying the det diag rewrite
+    [rewritten] = det_diag_rewrite(z_det.owner)
+    f_rewritten = function([x], rewritten)
+    rewritten_val = f_rewritten(x_test)
+
+    assert_allclose(
+        det_val,
+        rewritten_val,
+        atol=1e-4 if config.floatX == "float32" else 1e-8,
+        rtol=1e-4 if config.floatX == "float32" else 1e-8,
+    )
