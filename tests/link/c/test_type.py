@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -175,7 +175,7 @@ class MyOpCEnumType(COp):
     )
 
     def c_header_dirs(self, **kwargs):
-        return [os.path.join(os.path.dirname(__file__), "c_code")]
+        return [Path(__file__).parent / "c_code"]
 
     def c_headers(self, **kwargs):
         return ["test_cenum.h"]

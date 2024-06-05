@@ -12,11 +12,12 @@
 # serve to show the default value.
 
 # If your extensions are in another directory, add it here. If the directory
-# is relative to the documentation root, use os.path.abspath to make it
+# is relative to the documentation root, use Path.absolute to make it
 # absolute, like shown here.
-# sys.path.append(os.path.abspath('some/directory'))
+# sys.path.append(str(Path("some/directory").absolute()))
 
 import os
+import inspect
 import sys
 import pytensor
 
@@ -236,11 +237,9 @@ def linkcode_resolve(domain, info):
         obj = sys.modules[info["module"]]
         for part in info["fullname"].split("."):
             obj = getattr(obj, part)
-        import inspect
-        import os
 
-        fn = inspect.getsourcefile(obj)
-        fn = os.path.relpath(fn, start=os.path.dirname(pytensor.__file__))
+        fn = Path(inspect.getsourcefile(obj))
+        fn = fn.relative_to(Path(__file__).parent)
         source, lineno = inspect.getsourcelines(obj)
         return fn, lineno, lineno + len(source) - 1
 

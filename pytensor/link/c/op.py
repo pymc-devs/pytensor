@@ -1,8 +1,8 @@
 import inspect
-import os
 import re
 import warnings
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Iterable
+from pathlib import Path
 from re import Pattern
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
@@ -279,28 +279,32 @@ class ExternalCOp(COp):
     _cop_num_outputs: int | None = None
 
     @classmethod
-    def get_path(cls, f: str) -> str:
+    def get_path(cls, f: Path) -> Path:
         """Convert a path relative to the location of the class file into an absolute path.
 
         Paths that are already absolute are passed through unchanged.
 
         """
-        if not os.path.isabs(f):
+        if not f.is_absolute():
             class_file = inspect.getfile(cls)
-            class_dir = os.path.dirname(class_file)
-            f = os.path.realpath(os.path.join(class_dir, f))
+            class_dir = Path(class_file).parent
+            f = (class_dir / f).resolve()
         return f
 
-    def __init__(self, func_files: str | list[str], func_name: str | None = None):
+    def __init__(
+        self,
+        func_files: str | Path | list[str] | list[Path],
+        func_name: str | None = None,
+    ):
         """
         Sections are loaded from files in order with sections in later
         files overriding sections in previous files.
 
         """
         if not isinstance(func_files, list):
-            self.func_files = [func_files]
+            self.func_files = [Path(func_files)]
         else:
-            self.func_files = func_files
+            self.func_files = [Path(func_file) for func_file in func_files]
 
         self.func_codes: list[str] = []
         # Keep the original name. If we reload old pickle, we want to
@@ -325,22 +329,20 @@ class ExternalCOp(COp):
                     "Cannot have an `op_code_cleanup` section and specify `func_name`"
                 )
 
-    def load_c_code(self, func_files: list[str]) -> None:
+    def load_c_code(self, func_files: Iterable[Path]) -> None:
         """Loads the C code to perform the `Op`."""
-        func_files = [self.get_path(f) for f in func_files]
         for func_file in func_files:
-            with open(func_file) as f:
-                self.func_codes.append(f.read())
+            func_file = self.get_path(func_file)
+            self.func_codes.append(func_file.read_text(encoding="utf-8"))
 
         # If both the old section markers and the new section markers are
         # present, raise an error because we don't know which ones to follow.
-        old_markers_present = False
-        new_markers_present = False
-        for code in self.func_codes:
-            if self.backward_re.search(code):
-                old_markers_present = True
-            if self.section_re.search(code):
-                new_markers_present = True
+        old_markers_present = any(
+            self.backward_re.search(code) for code in self.func_codes
+        )
+        new_markers_present = any(
+            self.section_re.search(code) for code in self.func_codes
+        )
 
         if old_markers_present and new_markers_present:
             raise ValueError(
@@ -350,7 +352,7 @@ class ExternalCOp(COp):
                 "be used at the same time."
             )
 
-        for i, code in enumerate(self.func_codes):
+        for func_file, code in zip(func_files, self.func_codes):
             if self.backward_re.search(code):
                 # This is backward compat code that will go away in a while
 
@@ -371,7 +373,7 @@ class ExternalCOp(COp):
                 if split[0].strip() != "":
                     raise ValueError(
                         "Stray code before first #section "
-                        f"statement (in file {func_files[i]}): {split[0]}"
+                        f"statement (in file {func_file}): {split[0]}"
                     )
 
                 # Separate the code into the proper sections
@@ -379,7 +381,7 @@ class ExternalCOp(COp):
                 while n < len(split):
                     if split[n] not in self.SECTIONS:
                         raise ValueError(
-                            f"Unknown section type (in file {func_files[i]}): {split[n]}"
+                            f"Unknown section type (in file {func_file}): {split[n]}"
                         )
                     if split[n] not in self.code_sections:
                         self.code_sections[split[n]] = ""
@@ -388,7 +390,7 @@ class ExternalCOp(COp):
 
             else:
                 raise ValueError(
-                    f"No valid section marker was found in file {func_files[i]}"
+                    f"No valid section marker was found in file {func_file}"
                 )
 
     def __get_op_params(self) -> list[tuple[str, Any]]:

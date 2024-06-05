@@ -1,5 +1,3 @@
-import os
-
 import numpy as np
 import pytest
 
@@ -13,7 +11,7 @@ from pytensor.tensor.io import load
 class TestLoadTensor:
     def setup_method(self):
         self.data = np.arange(5, dtype=np.int32)
-        self.filename = os.path.join(pytensor.config.compiledir, "_test.npy")
+        self.filename = pytensor.config.compiledir / "_test.npy"
         np.save(self.filename, self.data)
 
     def test_basic(self):
@@ -54,4 +52,4 @@ class TestLoadTensor:
         assert type(fn(self.filename)) == np.core.memmap
 
     def teardown_method(self):
-        os.remove(os.path.join(pytensor.config.compiledir, "_test.npy"))
+        (pytensor.config.compiledir / "_test.npy").unlink()

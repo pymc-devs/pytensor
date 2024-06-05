@@ -16,6 +16,7 @@ import sys
 import time
 from collections import Counter, defaultdict
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -34,7 +35,7 @@ def extended_open(filename, mode="r"):
     elif filename == "<stderr>":
         yield sys.stderr
     else:
-        with open(filename, mode=mode) as f:
+        with Path(filename).open(mode=mode) as f:
             yield f
 
 
