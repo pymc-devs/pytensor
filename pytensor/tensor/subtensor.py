@@ -21,7 +21,12 @@ from pytensor.misc.safe_asarray import _asarray
 from pytensor.printing import Printer, pprint, set_precedence
 from pytensor.scalar.basic import ScalarConstant
 from pytensor.tensor import _get_vector_length, as_tensor_variable, get_vector_length
-from pytensor.tensor.basic import alloc, get_underlying_scalar_constant_value, nonzero
+from pytensor.tensor.basic import (
+    ScalarFromTensor,
+    alloc,
+    get_underlying_scalar_constant_value,
+    nonzero,
+)
 from pytensor.tensor.blockwise import vectorize_node_fallback
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.exceptions import AdvancedIndexingError, NotScalarConstantError
@@ -168,8 +173,16 @@ def as_index_literal(
     if isinstance(idx, Constant):
         return idx.data.item() if isinstance(idx, np.ndarray) else idx.data
 
-    if isinstance(getattr(idx, "type", None), SliceType):
-        idx = slice(*idx.owner.inputs)
+    if isinstance(idx, Variable):
+        if (
+            isinstance(idx.type, ps.ScalarType)
+            and idx.owner
+            and isinstance(idx.owner.op, ScalarFromTensor)
+        ):
+            return as_index_literal(idx.owner.inputs[0])
+
+        if isinstance(idx.type, SliceType):
+            idx = slice(*idx.owner.inputs)
 
     if isinstance(idx, slice):
         return slice(

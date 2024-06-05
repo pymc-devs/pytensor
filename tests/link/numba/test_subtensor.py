@@ -1,6 +1,9 @@
+import contextlib
+
 import numpy as np
 import pytest
 
+import pytensor.tensor as pt
 from pytensor.graph import FunctionGraph
 from pytensor.tensor import as_tensor
 from pytensor.tensor.subtensor import (
@@ -48,8 +51,8 @@ def test_Subtensor(x, indices):
 @pytest.mark.parametrize(
     "x, indices",
     [
-        (as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), ([1, 2],)),
-        (as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), ([1],)),
+        (pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), ([1, 2],)),
+        (pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), ([1],)),
     ],
 )
 def test_AdvancedSubtensor1(x, indices):
@@ -69,21 +72,46 @@ def test_AdvancedSubtensor1_out_of_bounds():
 
 
 @pytest.mark.parametrize(
-    "x, indices",
+    "x, indices, objmode_needed",
     [
-        (as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), ([1, 2], [2, 3])),
+        (
+            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            (0, [1, 2, 2, 3]),
+            False,
+        ),
+        (
+            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            (np.array([True, False, False])),
+            False,
+        ),
+        (
+            as_tensor(np.arange(3 * 3).reshape((3, 3))),
+            (np.eye(3).astype(bool)),
+            True,
+        ),
+        (pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), ([1, 2], [2, 3]), True),
         (
             as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             ([1, 2], slice(None), [3, 4]),
+            True,
         ),
     ],
 )
-def test_AdvancedSubtensor(x, indices):
+@pytest.mark.filterwarnings("error")
+def test_AdvancedSubtensor(x, indices, objmode_needed):
     """Test NumPy's advanced indexing in more than one dimension."""
     out_pt = x[indices]
     assert isinstance(out_pt.owner.op, AdvancedSubtensor)
     out_fg = FunctionGraph([], [out_pt])
-    compare_numba_and_py(out_fg, [])
+    with (
+        pytest.warns(
+            UserWarning,
+            match="Numba will use object mode to run AdvancedSubtensor's perform method",
+        )
+        if objmode_needed
+        else contextlib.nullcontext()
+    ):
+        compare_numba_and_py(out_fg, [])
 
 
 @pytest.mark.parametrize(
@@ -194,35 +222,120 @@ def test_AdvancedIncSubtensor1(x, y, indices):
 
 
 @pytest.mark.parametrize(
-    "x, y, indices",
+    "x, y, indices, duplicate_indices, set_requires_objmode, inc_requires_objmode",
     [
+        (
+            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            -np.arange(3 * 5).reshape(3, 5),
+            (slice(None, None, 2), [1, 2, 3]),
+            False,
+            False,
+            False,
+        ),
+        (
+            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            -99,
+            (slice(None, None, 2), [1, 2, 3], -1),
+            False,
+            False,
+            False,
+        ),
+        (
+            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            -99,  # Broadcasted value
+            (slice(None, None, 2), [1, 2, 3]),
+            False,
+            False,
+            False,
+        ),
+        (
+            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            -np.arange(4 * 5).reshape(4, 5),
+            (0, [1, 2, 2, 3]),
+            True,
+            False,
+            True,
+        ),
+        (
+            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            [-99],  # Broadcsasted value
+            (0, [1, 2, 2, 3]),
+            True,
+            False,
+            True,
+        ),
+        (
+            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            -np.arange(1 * 4 * 5).reshape(1, 4, 5),
+            (np.array([True, False, False])),
+            False,
+            False,
+            False,
+        ),
+        (
+            as_tensor(np.arange(3 * 3).reshape((3, 3))),
+            -np.arange(3),
+            (np.eye(3).astype(bool)),
+            False,
+            True,
+            True,
+        ),
         (
             as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             as_tensor(rng.poisson(size=(2, 5))),
             ([1, 2], [2, 3]),
+            False,
+            True,
+            True,
         ),
         (
             as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             as_tensor(rng.poisson(size=(2, 4))),
             ([1, 2], slice(None), [3, 4]),
+            False,
+            True,
+            True,
         ),
         pytest.param(
             as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             as_tensor(rng.poisson(size=(2, 5))),
             ([1, 1], [2, 2]),
+            False,
+            True,
+            True,
         ),
     ],
 )
-def test_AdvancedIncSubtensor(x, y, indices):
+@pytest.mark.filterwarnings("error")
+def test_AdvancedIncSubtensor(
+    x, y, indices, duplicate_indices, set_requires_objmode, inc_requires_objmode
+):
     out_pt = set_subtensor(x[indices], y)
     assert isinstance(out_pt.owner.op, AdvancedIncSubtensor)
     out_fg = FunctionGraph([], [out_pt])
-    compare_numba_and_py(out_fg, [])
 
-    out_pt = inc_subtensor(x[indices], y)
+    with (
+        pytest.warns(
+            UserWarning,
+            match="Numba will use object mode to run AdvancedSetSubtensor's perform method",
+        )
+        if set_requires_objmode
+        else contextlib.nullcontext()
+    ):
+        compare_numba_and_py(out_fg, [])
+
+    out_pt = inc_subtensor(x[indices], y, ignore_duplicates=not duplicate_indices)
     assert isinstance(out_pt.owner.op, AdvancedIncSubtensor)
     out_fg = FunctionGraph([], [out_pt])
-    compare_numba_and_py(out_fg, [])
+    with (
+        pytest.warns(
+            UserWarning,
+            match="Numba will use object mode to run AdvancedIncSubtensor's perform method",
+        )
+        if inc_requires_objmode
+        else contextlib.nullcontext()
+    ):
+        compare_numba_and_py(out_fg, [])
 
     x_pt = x.type()
     out_pt = set_subtensor(x_pt[indices], y)
@@ -231,4 +344,12 @@ def test_AdvancedIncSubtensor(x, y, indices):
     out_pt.owner.op.inplace = True
     assert isinstance(out_pt.owner.op, AdvancedIncSubtensor)
     out_fg = FunctionGraph([x_pt], [out_pt])
-    compare_numba_and_py(out_fg, [x.data])
+    with (
+        pytest.warns(
+            UserWarning,
+            match="Numba will use object mode to run AdvancedSetSubtensor's perform method",
+        )
+        if set_requires_objmode
+        else contextlib.nullcontext()
+    ):
+        compare_numba_and_py(out_fg, [x.data])
