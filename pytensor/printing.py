@@ -63,23 +63,35 @@ _logger = logging.getLogger("pytensor.printing")
 VALID_ASSOC = {"left", "right", "either"}
 
 
-def char_from_number(number):
-    """Convert numbers to strings by rendering it in base 26 using capital letters as digits."""
+def char_from_number(number: int) -> str:
+    """Convert a number to a string.
+
+    It renders it in base 26 using capital letters as digits.
+    For example: 3·26² + 2·26¹ + 0·26⁰ → "DCA"
+
+    Parameters
+    ----------
+    number : int
+        The number to be converted.
+
+    Returns
+    -------
+    str
+        The converted string.
+    """
 
     base = 26
 
-    rval = ""
-
-    if number == 0:
-        rval = "A"
+    remainders = []
 
     while number != 0:
-        remainder = number % base
-        new_char = chr(ord("A") + remainder)
-        rval = new_char + rval
-        number //= base
+        number, remainder = number // base, number % base
+        remainders.append(remainder)
 
-    return rval
+    if not remainders:
+        remainders = [0]
+
+    return "".join(chr(ord("A") + r) for r in remainders[::-1])
 
 
 @singledispatch
