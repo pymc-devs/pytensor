@@ -980,7 +980,7 @@ def _check_preallocated_output(
         changed_inner_mode = False
         if isinstance(getattr(node, "op", None), HasInnerGraph):
             fn = node.op.fn
-            if not fn or not hasattr(fn, "maker") or not hasattr(fn.maker, "mode"):
+            if not (fn and hasattr(fn, "maker") and hasattr(fn.maker, "mode")):
                 _logger.warning(f"Expected pytensor function not found in {node.op}.fn")
             else:
                 if isinstance(fn.maker.mode, DebugMode):

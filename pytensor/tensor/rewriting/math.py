@@ -1016,7 +1016,7 @@ class AlgebraicCanonizer(NodeRewriter):
                 for v in inter:
                     num.remove(v)
                     denum.remove(v)
-                if not redo or not inter:
+                if not (redo and inter):
                     break
         else:
             for v in list(num):

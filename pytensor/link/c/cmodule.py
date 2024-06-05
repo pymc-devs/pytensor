@@ -2288,7 +2288,7 @@ class GCC_compiler(Compiler):
             default_compilation_result, default_execution_result = try_march_flag(
                 GCC_compiler.march_flags
             )
-            if not default_compilation_result or not default_execution_result:
+            if not (default_compilation_result and default_execution_result):
                 march_success = False
                 march_ind = None
                 mtune_ind = None

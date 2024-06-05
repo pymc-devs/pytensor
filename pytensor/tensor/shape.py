@@ -246,7 +246,7 @@ class Shape_i(COp):
         return "%s{%i}" % (self.__class__.__name__, self.i)
 
     def make_node(self, x):
-        if not isinstance(x, Variable) or not hasattr(x.type, "ndim"):
+        if not (isinstance(x, Variable) and hasattr(x.type, "ndim")):
             raise TypeError(
                 f"{x} must be `Variable` with a `Type` having an ndim attribute"
             )
