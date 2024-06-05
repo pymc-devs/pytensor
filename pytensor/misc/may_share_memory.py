@@ -30,7 +30,7 @@ def may_share_memory(a, b, raise_other_type=True):
 
     a_sparse = _is_sparse(a)
     b_sparse = _is_sparse(b)
-    if not (a_ndarray or a_sparse) or not (b_ndarray or b_sparse):
+    if not ((a_ndarray or a_sparse) and (b_ndarray or b_sparse)):
         if raise_other_type:
             raise TypeError("may_share_memory support only ndarray and scipy.sparse")
         return False

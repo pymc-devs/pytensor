@@ -187,7 +187,7 @@ class SparseTensorType(TensorType, HasDataType):
         # WARNING: equality comparison of sparse matrices is not fast or easy
         # we definitely do not want to be doing this un-necessarily during
         # a FAST_RUN computation..
-        if not scipy.sparse.issparse(a) or not scipy.sparse.issparse(b):
+        if not (scipy.sparse.issparse(a) and scipy.sparse.issparse(b)):
             return False
         diff = abs(a - b)
         if diff.nnz == 0:

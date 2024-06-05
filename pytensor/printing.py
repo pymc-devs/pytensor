@@ -653,8 +653,8 @@ def _debugprint(
         else:
             print(var_output, file=file)
 
-        if not already_done and (
-            not stop_on_name or not (hasattr(var, "name") and var.name is not None)
+        if not already_done and not (
+            stop_on_name and hasattr(var, "name") and var.name is not None
         ):
             new_prefix = prefix_child + " ├─ "
             new_prefix_child = prefix_child + " │ "

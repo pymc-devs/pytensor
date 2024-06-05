@@ -2274,7 +2274,7 @@ class TestRemove0(utt.InferShapeTester):
                     unsorted_indices=unsor,
                 )
                 assert 0 in mat.data or not zero
-                assert not mat.has_sorted_indices or not unsor
+                assert not (mat.has_sorted_indices and unsor)
 
                 # the In thingy has to be there because pytensor has as rule not
                 # to optimize inputs
