@@ -2343,12 +2343,14 @@ def local_log_sum_exp(fgraph, node):
     else:
         dimshuffle_op = None
 
-    if not sum_node or not isinstance(sum_node.op, Sum):
+    if not (sum_node and isinstance(sum_node.op, Sum)):
         return
 
     exp_node, axis = sum_node.inputs[0].owner, sum_node.op.axis
-    if not exp_node or not (
-        isinstance(exp_node.op, Elemwise) and isinstance(exp_node.op.scalar_op, ps.Exp)
+    if not (
+        exp_node
+        and isinstance(exp_node.op, Elemwise)
+        and isinstance(exp_node.op.scalar_op, ps.Exp)
     ):
         return
 
@@ -2660,7 +2662,7 @@ def local_log_erfc(fgraph, node):
             10.0541948,10.0541951,.0000001)]
     """
 
-    if not node.inputs[0].owner or node.inputs[0].owner.op != erfc:
+    if not (node.inputs[0].owner and node.inputs[0].owner.op == erfc):
         return False
 
     if hasattr(node.tag, "local_log_erfc_applied"):
@@ -2725,7 +2727,7 @@ def local_grad_log_erfc_neg(fgraph, node):
     if node.inputs[0].owner.op != mul:
         mul_in = None
         y = []
-        if not node.inputs[0].owner or node.inputs[0].owner.op != exp:
+        if not (node.inputs[0].owner and node.inputs[0].owner.op == exp):
             return False
         exp_in = node.inputs[0]
     else:
@@ -2749,7 +2751,9 @@ def local_grad_log_erfc_neg(fgraph, node):
 
     if exp_in.owner.inputs[0].owner.op == neg:
         neg_in = exp_in.owner.inputs[0]
-        if not neg_in.owner.inputs[0].owner or neg_in.owner.inputs[0].owner.op != sqr:
+        if not (
+            neg_in.owner.inputs[0].owner and neg_in.owner.inputs[0].owner.op == sqr
+        ):
             return False
         sqr_in = neg_in.owner.inputs[0]
         x = sqr_in.owner.inputs[0]
@@ -2794,9 +2798,9 @@ def local_grad_log_erfc_neg(fgraph, node):
             return False
 
         if len(mul_neg.owner.inputs) == 2:
-            if (
-                not mul_neg.owner.inputs[1].owner
-                or mul_neg.owner.inputs[1].owner.op != sqr
+            if not (
+                mul_neg.owner.inputs[1].owner
+                and mul_neg.owner.inputs[1].owner.op == sqr
             ):
                 return False
             sqr_in = mul_neg.owner.inputs[1]
@@ -2809,10 +2813,10 @@ def local_grad_log_erfc_neg(fgraph, node):
             return False
 
         if cst2 != -1:
-            if (
-                not erfc_x.owner
-                or erfc_x.owner.op != mul
-                or len(erfc_x.owner.inputs) != 2
+            if not (
+                erfc_x.owner
+                and erfc_x.owner.op == mul
+                and len(erfc_x.owner.inputs) == 2
             ):
                 # todo implement that case
                 return False

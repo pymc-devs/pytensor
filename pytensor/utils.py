@@ -360,7 +360,7 @@ class Singleton:
         # don't want that, so we check the class.  When we add one, we
         # add one only to the current class, so all is working
         # correctly.
-        if cls.__instance is None or not isinstance(cls.__instance, cls):
+        if not (cls.__instance and isinstance(cls.__instance, cls)):
             cls.__instance = super().__new__(cls)
         return cls.__instance
 
