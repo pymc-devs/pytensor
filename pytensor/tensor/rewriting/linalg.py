@@ -5,7 +5,8 @@ from typing import cast
 from pytensor import Variable
 from pytensor.graph import Apply, FunctionGraph
 from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
-from pytensor.tensor.basic import Eye, Mul, TensorVariable, diagonal
+from pytensor.scalar.basic import Mul
+from pytensor.tensor.basic import Eye, TensorVariable, diagonal
 from pytensor.tensor.blas import Dot22
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
