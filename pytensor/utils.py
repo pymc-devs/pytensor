@@ -9,6 +9,7 @@ import sys
 from collections import OrderedDict
 from collections.abc import Callable
 from functools import partial
+from pathlib import Path
 
 
 __all__ = [
@@ -109,7 +110,7 @@ def get_unbound_function(unbound):
     return unbound
 
 
-def maybe_add_to_os_environ_pathlist(var, newpath):
+def maybe_add_to_os_environ_pathlist(var: str, newpath: Path | str):
     """Unfortunately, Conda offers to make itself the default Python
     and those who use it that way will probably not activate envs
     correctly meaning e.g. mingw-w64 g++ may not be on their PATH.
@@ -123,16 +124,18 @@ def maybe_add_to_os_environ_pathlist(var, newpath):
 
     `var` will typically be 'PATH'."""
 
-    import os
+    newpath = Path(newpath).resolve()
 
-    if os.path.isabs(newpath):
-        try:
-            oldpaths = os.environ[var].split(os.pathsep)
-            if newpath not in oldpaths:
-                newpaths = os.pathsep.join([newpath, *oldpaths])
-                os.environ[var] = newpaths
-        except Exception:
-            pass
+    if not newpath.is_absolute():
+        return
+
+    try:
+        oldpaths = os.environ[var].split(os.pathsep)
+        if not any(newpath == Path(p).resolve() for p in oldpaths):
+            newpaths = os.pathsep.join([str(newpath), *oldpaths])
+            os.environ[var] = newpaths
+    except Exception:
+        pass
 
 
 def subprocess_Popen(command, **params):
