@@ -138,7 +138,7 @@ class TestConfigTypes:
             cp._apply("gpu123")
         with pytest.raises(ValueError, match='Valid options start with one of "cpu".'):
             cp._apply("notadevice")
-        assert str(cp) == "None (cpu)"
+        assert str(cp) == "unnamed (cpu)"
 
 
 def test_config_context():

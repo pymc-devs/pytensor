@@ -23,6 +23,7 @@ import warnings
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from io import BytesIO, StringIO
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
@@ -688,7 +689,7 @@ class ModuleCache:
 
     """
 
-    dirname: str = ""
+    dirname: Path
     """
     The working directory that is managed by this interface.
 
@@ -725,8 +726,13 @@ class ModuleCache:
 
     """
 
-    def __init__(self, dirname, check_for_broken_eq=True, do_refresh=True):
-        self.dirname = dirname
+    def __init__(
+        self,
+        dirname: Path | str,
+        check_for_broken_eq: bool = True,
+        do_refresh: bool = True,
+    ):
+        self.dirname = Path(dirname)
         self.module_from_name = dict(self.module_from_name)
         self.entry_from_key = dict(self.entry_from_key)
         self.module_hash_to_key_data = dict(self.module_hash_to_key_data)
@@ -1637,12 +1643,12 @@ def _rmtree(
 _module_cache: ModuleCache | None = None
 
 
-def get_module_cache(dirname: str, init_args=None) -> ModuleCache:
+def get_module_cache(dirname: Path | str, init_args=None) -> ModuleCache:
     """Create a new module_cache.
 
     Parameters
     ----------
-    dirname
+    dirname : Path | str
         The name of the directory used by the cache.
     init_args
         Keyword arguments passed to the `ModuleCache` constructor.

@@ -1,6 +1,7 @@
 import errno
 import os
 import sys
+from pathlib import Path
 
 from pytensor.compile.compilelock import lock_ctx
 from pytensor.configdefaults import config
@@ -87,8 +88,8 @@ try:
     # for the same reason. Note that these 5 lines may seem redundant (they are
     # repeated in compile_str()) but if another cutils_ext does exist then it
     # will be imported and compile_str won't get called at all.
-    sys.path.insert(0, config.compiledir)
-    location = os.path.join(config.compiledir, "cutils_ext")
+    sys.path.insert(0, str(config.compiledir))
+    location = os.path.join(str(config.compiledir), "cutils_ext")
     if not os.path.exists(location):
         try:
             os.mkdir(location)
@@ -115,5 +116,5 @@ try:
                 compile_cutils()
                 from cutils_ext.cutils_ext import *  # noqa
 finally:
-    if sys.path[0] == config.compiledir:
+    if config.compiledir.resolve() == Path(sys.path[0]).resolve():
         del sys.path[0]
