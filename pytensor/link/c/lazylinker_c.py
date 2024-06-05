@@ -4,6 +4,7 @@ import os
 import sys
 import warnings
 from importlib import reload
+from pathlib import Path
 from types import ModuleType
 
 import pytensor
@@ -21,14 +22,14 @@ lazylinker_ext: ModuleType | None = None
 
 def try_import():
     global lazylinker_ext
-    sys.path[0:0] = [config.compiledir]
+    sys.path[0:0] = [str(config.compiledir)]
     import lazylinker_ext
 
     del sys.path[0]
 
 
 def try_reload():
-    sys.path[0:0] = [config.compiledir]
+    sys.path[0:0] = [str(config.compiledir)]
     reload(lazylinker_ext)
     del sys.path[0]
 
@@ -41,8 +42,8 @@ try:
     # Note that these lines may seem redundant (they are repeated in
     # compile_str()) but if another lazylinker_ext does exist then it will be
     # imported and compile_str won't get called at all.
-    location = os.path.join(config.compiledir, "lazylinker_ext")
-    if not os.path.exists(location):
+    location = config.compiledir / "lazylinker_ext"
+    if not location.exists():
         try:
             # Try to make the location
             os.mkdir(location)
@@ -53,18 +54,18 @@ try:
             # are not holding the lock right now, so we could race
             # another process and get error 17 if we lose the race
             assert e.errno == errno.EEXIST
-            assert os.path.isdir(location)
+            assert location.is_dir()
 
-    init_file = os.path.join(location, "__init__.py")
-    if not os.path.exists(init_file):
+    init_file = location / "__init__.py"
+    if not init_file.exists():
         try:
             with open(init_file, "w"):
                 pass
         except OSError as e:
-            if os.path.exists(init_file):
+            if init_file.exists():
                 pass  # has already been created
             else:
-                e.args += (f"{location} exist? {os.path.exists(location)}",)
+                e.args += (f"{location} exist? {location.exists()}",)
                 raise
 
     _need_reload = False
@@ -109,10 +110,8 @@ except ImportError:
                 raise
             _logger.info("Compiling new CVM")
             dirname = "lazylinker_ext"
-            cfile = os.path.join(
-                pytensor.__path__[0], "link", "c", "c_code", "lazylinker_c.c"
-            )
-            if not os.path.exists(cfile):
+            cfile = Path(pytensor.__path__[0]) / "link/c/c_code/lazylinker_c.c"
+            if not cfile.exists():
                 # This can happen in not normal case. We just
                 # disable the c clinker. If we are here the user
                 # didn't disable the compiler, so print a warning.
@@ -127,30 +126,28 @@ except ImportError:
                 )
                 raise ImportError("The file lazylinker_c.c is not available.")
 
-            with open(cfile) as f:
-                code = f.read()
+            code = cfile.read_text("utf-8")
 
-            loc = os.path.join(config.compiledir, dirname)
-            if not os.path.exists(loc):
+            loc = config.compiledir / dirname
+            if not loc.exists():
                 try:
                     os.mkdir(loc)
                 except OSError as e:
                     assert e.errno == errno.EEXIST
-                    assert os.path.exists(loc)
+                    assert loc.exists()
 
             args = GCC_compiler.compile_args()
             GCC_compiler.compile_str(dirname, code, location=loc, preargs=args)
             # Save version into the __init__.py file.
-            init_py = os.path.join(loc, "__init__.py")
+            init_py = loc / "__init__.py"
 
-            with open(init_py, "w") as f:
-                f.write(f"_version = {version}\n")
+            init_py.write_text(f"_version = {version}\n")
 
             # If we just compiled the module for the first time, then it was
             # imported at the same time: we need to make sure we do not
             # reload the now outdated __init__.pyc below.
-            init_pyc = os.path.join(loc, "__init__.pyc")
-            if os.path.isfile(init_pyc):
+            init_pyc = loc / "__init__.pyc"
+            if init_pyc.is_file():
                 os.remove(init_pyc)
 
             try_import()

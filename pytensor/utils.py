@@ -174,7 +174,7 @@ def call_subprocess_Popen(command, **params):
     """
     if "stdout" in params or "stderr" in params:
         raise TypeError("don't use stderr or stdout with call_subprocess_Popen")
-    with open(os.devnull, "wb") as null:
+    with Path(os.devnull).open("wb") as null:
         # stdin to devnull is a workaround for a crash in a weird Windows
         # environment where sys.stdin was None
         params.setdefault("stdin", null)

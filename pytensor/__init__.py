@@ -23,9 +23,9 @@ __docformat__ = "restructuredtext en"
 # Set a default logger. It is important to do this before importing some other
 # pytensor code, since this code may want to log some messages.
 import logging
-import os
 import sys
 from functools import singledispatch
+from pathlib import Path
 from typing import Any, NoReturn, Optional
 
 from pytensor.version import version as __version__
@@ -52,10 +52,8 @@ def disable_log_handler(logger=pytensor_logger, handler=logging_default_handler)
 
 # Raise a meaningful warning/error if the pytensor directory is in the Python
 # path.
-rpath = os.path.realpath(__path__[0])
-for p in sys.path:
-    if os.path.realpath(p) != rpath:
-        continue
+rpath = Path(__file__).parent.resolve()
+if any(rpath == Path(p).resolve() for p in sys.path):
     raise RuntimeError("You have the pytensor directory in your Python path.")
 
 from pytensor.configdefaults import config
