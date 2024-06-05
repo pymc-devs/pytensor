@@ -2134,8 +2134,8 @@ def dense_dot(a, b):
     """
     a, b = as_tensor_variable(a), as_tensor_variable(b)
 
-    if not isinstance(a.type, DenseTensorType) or not isinstance(
-        b.type, DenseTensorType
+    if not (
+        isinstance(a.type, DenseTensorType) and isinstance(b.type, DenseTensorType)
     ):
         raise TypeError("The dense dot product is only supported for dense types")
 

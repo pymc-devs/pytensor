@@ -15,8 +15,8 @@ def sparse_grad(var):
     """
     from pytensor.tensor.subtensor import AdvancedSubtensor, AdvancedSubtensor1
 
-    if var.owner is None or not isinstance(
-        var.owner.op, AdvancedSubtensor | AdvancedSubtensor1
+    if not (
+        var.owner and isinstance(var.owner.op, AdvancedSubtensor | AdvancedSubtensor1)
     ):
         raise TypeError(
             "Sparse gradient is only implemented for AdvancedSubtensor and AdvancedSubtensor1"
