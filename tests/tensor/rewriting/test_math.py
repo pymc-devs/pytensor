@@ -2204,9 +2204,7 @@ class TestLocalErf:
         assert len(topo) == 2
         assert topo[0].op == erf
         assert isinstance(topo[1].op, Elemwise)
-        assert isinstance(topo[1].op.scalar_op, ps.Add) or isinstance(
-            topo[1].op.scalar_op, ps.Sub
-        )
+        assert isinstance(topo[1].op.scalar_op, ps.Add | ps.Sub)
 
     def test_local_erf_minus_one(self):
         val = np.asarray([-30, -3, -2, -1, 0, 1, 2, 3, 30], dtype=config.floatX)
@@ -2227,9 +2225,7 @@ class TestLocalErf:
         assert len(topo) == 2
         assert topo[0].op == erf
         assert isinstance(topo[1].op, Elemwise)
-        assert isinstance(topo[1].op.scalar_op, ps.Add) or isinstance(
-            topo[1].op.scalar_op, ps.Sub
-        )
+        assert isinstance(topo[1].op.scalar_op, ps.Add | ps.Sub)
 
 
 @pytest.mark.skipif(
