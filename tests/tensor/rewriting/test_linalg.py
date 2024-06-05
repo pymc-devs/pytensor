@@ -392,11 +392,16 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
     np.testing.assert_allclose(f1(*test_vals), f2(*test_vals), atol=1e-8)
 
 
-@pytest.mark.paramterize(
+@pytest.fixture
+def x_test_cases():
+    return [(0, 4), (1, [4, 3, 2, 5]), (2, [[3, 7, 4], [2, 5, 6], [6, 2, 3]])]
+
+
+@pytest.mark.parametrize(
     "i,x_test", [(0, 4), (1, [4, 3, 2, 5]), (2, [[3, 7, 4], [2, 5, 6], [6, 2, 3]])]
 )
 def test_det_diag_rewrite(i, x_test):
-    # Initialising x based on scalar/vector/matrix
+    # Initializing x based on scalar/vector/matrix
     if i == 0:
         x = pt.dscalar("x")
         y = pt.eye(7) * x
@@ -406,7 +411,7 @@ def test_det_diag_rewrite(i, x_test):
     elif i == 2:
         x = pt.dmatrix("x")
         y = pt.eye(x.shape[0]) * x
-    # Caluclating determinant value using pt.linalg.det
+    # Calculating determinant value using pt.linalg.det
     z_det = pt.linalg.det(y)
     f_det = function([x], z_det)
     det_val = f_det(x_test)
