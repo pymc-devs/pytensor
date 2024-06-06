@@ -5,7 +5,6 @@ These pickled graphs can be used, for instance, as cases for
 unit tests or regression tests.
 """
 
-import os
 import pickle
 import sys
 import tempfile
@@ -13,6 +12,7 @@ import zipfile
 from collections import defaultdict
 from contextlib import closing
 from io import BytesIO
+from pathlib import Path
 from pickle import HIGHEST_PROTOCOL
 
 import numpy as np
@@ -298,5 +298,4 @@ def zipadd(func, zip_file, name):
         func(temp_file)
         temp_file.close()
         zip_file.write(temp_file.name, arcname=name)
-    if os.path.isfile(temp_file.name):
-        os.remove(temp_file.name)
+    Path(temp_file.name).unlink(missing_ok=True)
