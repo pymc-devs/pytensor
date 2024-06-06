@@ -74,12 +74,8 @@ class PyTensorConfigParser:
     warn_float64: str
     pickle_test_value: bool
     cast_policy: str
-    deterministic: str
     device: str
-    force_device: bool
-    conv__assert_shape: bool
     print_global_stats: bool
-    assert_no_cpu_op: str
     unpickle_function: bool
     # add_compile_configvars
     mode: str
@@ -90,7 +86,6 @@ class PyTensorConfigParser:
     optimizer_verbose: bool
     on_opt_error: str
     nocleanup: bool
-    on_unused_import: str
     gcc__cxxflags: str
     cmodule__warn_no_version: bool
     cmodule__remove_gxx_opt: bool
@@ -98,9 +93,7 @@ class PyTensorConfigParser:
     cmodule__preload_cache: bool
     cmodule__age_thresh_use: int
     cmodule__debug: bool
-    compile__wait: int
     compile__timeout: int
-    ctc__root: str
     # add_tensor_configvars
     tensor__cmp_sloppy: int
     lib__amblibm: bool
@@ -151,8 +144,6 @@ class PyTensorConfigParser:
     cycle_detection: str
     check_stack_trace: str
     metaopt__verbose: int
-    metaopt__optimizer_excluding: str
-    metaopt__optimizer_including: str
     # add_vm_configvars
     profile: bool
     profile_optimizer: bool
@@ -175,10 +166,6 @@ class PyTensorConfigParser:
     # add_blas_configvars
     blas__ldflags: str
     blas__check_openmp: bool
-    # add CUDA (?)
-    cuda__root: Path | None
-    dnn__base_path: Path | None
-    dnn__library_path: Path | None
 
     def __init__(
         self,
