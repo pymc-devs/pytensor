@@ -382,7 +382,10 @@ def local_lift_through_linalg(
 
 
 # Det Diag Rewrite
-def det_diag_rewrite(node: Apply):
+@register_canonicalize
+@register_stabilize
+@node_rewriter([det])
+def det_diag_rewrite(fgraph, node):
     # Find if we have Blockwise Op
     if not (isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Det)):
         return None
