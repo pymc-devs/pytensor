@@ -246,7 +246,7 @@ class SLogDet(Op):
         (x,) = inputs
         (sign, det) = outputs
         try:
-            sign[0], det[0] = (z.astype(x.dtype) for z in np.linalg.slogdet(x))
+            sign[0], det[0] = (np.array(z, dtype=x.dtype) for z in np.linalg.slogdet(x))
         except Exception:
             print("Failed to compute determinant", x)
             raise
@@ -1186,6 +1186,7 @@ __all__ = [
     "lstsq",
     "matrix_power",
     "norm",
+    "slogdet",
     "tensorinv",
     "tensorsolve",
     "kron",
