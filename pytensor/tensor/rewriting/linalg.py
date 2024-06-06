@@ -393,7 +393,8 @@ def det_diag_rewrite(fgraph, node):
     node_input_op = node.inputs[0]
     # Check if the op is Elemwise and mul
     if not (
-        isinstance(node_input_op.owner.op, Elemwise)
+        node_input_op.owner is not None
+        and isinstance(node_input_op.owner.op, Elemwise)
         and isinstance(node_input_op.owner.op.scalar_op, Mul)
     ):
         return None
