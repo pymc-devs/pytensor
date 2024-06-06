@@ -34,62 +34,6 @@ from pytensor.utils import (
 _logger = logging.getLogger("pytensor.configdefaults")
 
 
-def get_cuda_root() -> Path | None:
-    # We look for the cuda path since we need headers from there
-    if (v := os.getenv("CUDA_ROOT")) is not None:
-        return Path(v)
-    if (v := os.getenv("CUDA_PATH")) is not None:
-        return Path(v)
-    if (s := os.getenv("PATH")) is None:
-        return Path()
-    for dir in s.split(os.pathsep):
-        if (Path(dir) / "nvcc").exists():
-            return Path(dir).absolute().parent
-    return None
-
-
-def default_cuda_include() -> Path | None:
-    if config.cuda__root:
-        return config.cuda__root / "include"
-    return None
-
-
-def default_dnn_base_path() -> Path | None:
-    # We want to default to the cuda root if cudnn is installed there
-    if config.cuda__root:
-        # The include doesn't change location between OS.
-        if (config.cuda__root / "include/cudnn.h").exists():
-            return config.cuda__root
-    return None
-
-
-def default_dnn_inc_path() -> Path | None:
-    if config.dnn__base_path:
-        return config.dnn__base_path / "include"
-    return None
-
-
-def default_dnn_lib_path() -> Path | None:
-    if config.dnn__base_path:
-        if sys.platform == "win32":
-            path = config.dnn__base_path / "lib/x64"
-        elif sys.platform == "darwin":
-            path = config.dnn__base_path / "lib"
-        else:
-            # This is linux
-            path = config.dnn__base_path / "lib64"
-        return path
-    return None
-
-
-def default_dnn_bin_path() -> Path | None:
-    if config.dnn__base_path:
-        if sys.platform == "win32":
-            return config.dnn__base_path / "bin"
-        return config.dnn__library_path
-    return None
-
-
 def _filter_mode(val):
     # Do not add FAST_RUN_NOGC to this list (nor any other ALL CAPS shortcut).
     # The way to get FAST_RUN_NOGC is with the flag 'linker=c|py_nogc'.
@@ -604,15 +548,6 @@ def add_compile_configvars():
     owner for more than this period. Refreshes are done every half timeout
     period for running processes.""",
         IntParam(_timeout_default, validate=_is_greater_or_equal_0, mutable=False),
-        in_c_key=False,
-    )
-
-    config.add(
-        "ctc__root",
-        "Directory which contains the root of Baidu CTC library. It is assumed \
-        that the compiled library is either inside the build, lib or lib64 \
-        subdirectory, and the header inside the include directory.",
-        StrParam("", mutable=False),
         in_c_key=False,
     )
 
