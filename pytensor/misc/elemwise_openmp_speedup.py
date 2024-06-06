@@ -3,6 +3,7 @@ import subprocess
 import sys
 from locale import getpreferredencoding
 from optparse import OptionParser
+from pathlib import Path
 
 from pytensor.configdefaults import config
 
@@ -25,7 +26,7 @@ parser.add_option(
 
 def runScript(N):
     script = "elemwise_time_test.py"
-    path = os.path.dirname(os.path.abspath(__file__))
+    path = Path(__file__).parent
     proc = subprocess.Popen(
         ["python", script, "--script", "-N", str(N)],
         stdout=subprocess.PIPE,
