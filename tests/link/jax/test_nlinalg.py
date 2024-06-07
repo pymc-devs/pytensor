@@ -82,7 +82,7 @@ def test_jax_basic_multiout():
 
 @pytest.mark.xfail(
     version_parse(jax.__version__) >= version_parse("0.2.12"),
-    reason="Omnistaging cannot be disabled",
+    reason="JAX Numpy API does not support dynamic shapes",
 )
 def test_jax_basic_multiout_omni():
     # Test that a single output of a multi-output `Op` can be used as input to
@@ -97,7 +97,7 @@ def test_jax_basic_multiout_omni():
 
 @pytest.mark.xfail(
     version_parse(jax.__version__) >= version_parse("0.2.12"),
-    reason="Omnistaging cannot be disabled",
+    reason="`dot` -> `Gemv` optimization is incompatible with JAX",
 )
 def test_tensor_basics():
     y = vector("y")
