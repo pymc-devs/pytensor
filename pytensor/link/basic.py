@@ -730,3 +730,7 @@ class JITLinker(PerformLinker):
             thunks,
             nodes,
         )
+
+    def __repr__(self):
+        # Assumes no subclass needs init arguments
+        return f"{self.__class__.__name__}()"
