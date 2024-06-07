@@ -18,6 +18,7 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import check_stack_trace, out2in
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.link.numba import NumbaLinker
 from pytensor.printing import debugprint, pprint
 from pytensor.raise_op import Assert, CheckAndRaise
 from pytensor.scalar import Composite, float64
@@ -1206,6 +1207,10 @@ class TestLocalOptAlloc:
         f(5)
 
 
+@pytest.mark.xfail(
+    condition=isinstance(get_default_mode().linker, NumbaLinker),
+    reason="Numba does not support float16",
+)
 class TestLocalOptAllocF16(TestLocalOptAlloc):
     dtype = "float16"
 
