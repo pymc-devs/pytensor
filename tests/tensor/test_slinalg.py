@@ -626,6 +626,9 @@ class TestCholeskySolve(utt.InferShapeTester):
 
         # try all dtype combinations
         for A_dtype, b_dtype in itertools.product(dtypes, dtypes):
+            if A_dtype == "float16" or b_dtype == "float16":
+                # Numba does not support float16
+                continue
             A = matrix(dtype=A_dtype)
             b = matrix(dtype=b_dtype)
             x = op(A, b)
