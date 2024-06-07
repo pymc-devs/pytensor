@@ -461,7 +461,18 @@ def add_compile_configvars():
             "linker",
             "Default linker used if the pytensor flags mode is Mode",
             EnumStr(
-                "cvm", ["c|py", "py", "c", "c|py_nogc", "vm", "vm_nogc", "cvm_nogc"]
+                "numba",
+                [
+                    "cvm",
+                    "jax",
+                    "c|py",
+                    "py",
+                    "c",
+                    "c|py_nogc",
+                    "vm",
+                    "vm_nogc",
+                    "cvm_nogc",
+                ],
             ),
             in_c_key=False,
         )
@@ -471,7 +482,7 @@ def add_compile_configvars():
         config.add(
             "linker",
             "Default linker used if the pytensor flags mode is Mode",
-            EnumStr("vm", ["py", "vm_nogc"]),
+            EnumStr("numba", ["vm", "jax", "py", "vm_nogc"]),
             in_c_key=False,
         )
         if type(config).cxx.is_default:
