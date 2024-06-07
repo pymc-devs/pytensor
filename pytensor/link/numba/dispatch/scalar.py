@@ -172,18 +172,64 @@ def {binary_op_name}({input_signature}):
 
 @numba_funcify.register(Add)
 def numba_funcify_Add(op, node, **kwargs):
+    match len(node.inputs):
+        case 2:
+
+            def add(i0, i1):
+                return i0 + i1
+        case 3:
+
+            def add(i0, i1, i2):
+                return i0 + i1 + i2
+        case 4:
+
+            def add(i0, i1, i2, i3):
+                return i0 + i1 + i2 + i3
+        case 5:
+
+            def add(i0, i1, i2, i3, i4):
+                return i0 + i1 + i2 + i3 + i4
+        case _:
+            add = None
+
+    if add is not None:
+        return numba_basic.numba_njit(add)
+
     signature = create_numba_signature(node, force_scalar=True)
     nary_add_fn = binary_to_nary_func(node.inputs, "add", "+")
 
-    return numba_basic.numba_njit(signature)(nary_add_fn)
+    return numba_basic.numba_njit(signature, cache=False)(nary_add_fn)
 
 
 @numba_funcify.register(Mul)
 def numba_funcify_Mul(op, node, **kwargs):
+    match len(node.inputs):
+        case 2:
+
+            def mul(i0, i1):
+                return i0 * i1
+        case 3:
+
+            def mul(i0, i1, i2):
+                return i0 * i1 * i2
+        case 4:
+
+            def mul(i0, i1, i2, i3):
+                return i0 * i1 * i2 * i3
+        case 5:
+
+            def mul(i0, i1, i2, i3, i4):
+                return i0 * i1 * i2 * i3 * i4
+        case _:
+            mul = None
+
+    if mul is not None:
+        return numba_basic.numba_njit(mul)
+
     signature = create_numba_signature(node, force_scalar=True)
     nary_add_fn = binary_to_nary_func(node.inputs, "mul", "*")
 
-    return numba_basic.numba_njit(signature)(nary_add_fn)
+    return numba_basic.numba_njit(signature, cache=False)(nary_add_fn)
 
 
 @numba_funcify.register(Cast)
@@ -233,7 +279,7 @@ def numba_funcify_Composite(op, node, **kwargs):
 
     _ = kwargs.pop("storage_map", None)
 
-    composite_fn = numba_basic.numba_njit(signature)(
+    composite_fn = numba_basic.numba_njit(signature, cache=False)(
         numba_funcify(op.fgraph, squeeze_output=True, **kwargs)
     )
     return composite_fn

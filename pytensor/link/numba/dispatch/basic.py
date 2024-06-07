@@ -39,7 +39,7 @@ from pytensor.tensor.math import Dot
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 from pytensor.tensor.slinalg import Solve
 from pytensor.tensor.type import TensorType
-from pytensor.tensor.type_other import MakeSlice, NoneConst
+from pytensor.tensor.type_other import MakeSlice, NoneConst, NoneTypeT
 
 
 def global_numba_func(func):
@@ -75,7 +75,7 @@ def numba_njit(*args, fastmath=None, **kwargs):
         message=(
             "(\x1b\\[1m)*"  # ansi escape code for bold text
             "Cannot cache compiled function "
-            '"(numba_funcified_fgraph|store_core_outputs|cholesky|solve|solve_triangular|cho_solve)" '
+            '"(store_core_outputs|cholesky|solve|solve_triangular|cho_solve)" '
             "as it uses dynamic globals"
         ),
         category=NumbaWarning,
@@ -477,6 +477,37 @@ def numba_funcify_Reshape(op, **kwargs):
 
 @numba_funcify.register(SpecifyShape)
 def numba_funcify_SpecifyShape(op, node, **kwargs):
+    x, *shape = node.inputs
+    ndim = x.type.ndim
+    specified_dims = tuple(not isinstance(dim.type, NoneTypeT) for dim in shape)
+    match (ndim, specified_dims):
+        case (1, (True,)):
+
+            def func(x, shape_0):
+                assert x.shape[0] == shape_0
+                return x
+        case (2, (True, False)):
+
+            def func(x, shape_0, shape_1):
+                assert x.shape[0] == shape_0
+                return x
+        case (2, (False, True)):
+
+            def func(x, shape_0, shape_1):
+                assert x.shape[1] == shape_1
+                return x
+        case (2, (True, True)):
+
+            def func(x, shape_0, shape_1):
+                assert x.shape[0] == shape_0
+                assert x.shape[1] == shape_1
+                return x
+        case _:
+            func = None
+
+    if func is not None:
+        return numba_njit(func)
+
     shape_inputs = node.inputs[1:]
     shape_input_names = ["shape_" + str(i) for i in range(len(shape_inputs))]
 

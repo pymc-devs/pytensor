@@ -58,6 +58,36 @@ def allocempty({", ".join(shape_var_names)}):
 
 @numba_funcify.register(Alloc)
 def numba_funcify_Alloc(op, node, **kwargs):
+    x, *shape = node.inputs
+    if all(x.type.broadcastable):
+        match len(shape):
+            case 1:
+
+                def alloc(val, dim0):
+                    shape = (dim0.item(),)
+                    res = np.empty(shape, dtype=val.dtype)
+                    res[...] = val
+                    return res
+            case 2:
+
+                def alloc(val, dim0, dim1):
+                    shape = (dim0.item(), dim1.item())
+                    res = np.empty(shape, dtype=val.dtype)
+                    res[...] = val
+                    return res
+            case 3:
+
+                def alloc(val, dim0, dim1, dim2):
+                    shape = (dim0.item(), dim1.item(), dim2.item())
+                    res = np.empty(shape, dtype=val.dtype)
+                    res[...] = val
+                    return res
+            case _:
+                alloc = None
+
+        if alloc is not None:
+            return numba_basic.numba_njit(alloc)
+
     global_env = {"np": np, "to_scalar": numba_basic.to_scalar}
 
     unique_names = unique_name_generator(
@@ -68,7 +98,7 @@ def numba_funcify_Alloc(op, node, **kwargs):
     shape_var_item_names = [f"{name}_item" for name in shape_var_names]
     shapes_to_items_src = indent(
         "\n".join(
-            f"{item_name} = to_scalar({shape_name})"
+            f"{item_name} = {shape_name}.item()"
             for item_name, shape_name in zip(
                 shape_var_item_names, shape_var_names, strict=True
             )
@@ -86,12 +116,11 @@ def numba_funcify_Alloc(op, node, **kwargs):
 
     alloc_def_src = f"""
 def alloc(val, {", ".join(shape_var_names)}):
-    val_np = np.asarray(val)
 {shapes_to_items_src}
     scalar_shape = {create_tuple_string(shape_var_item_names)}
 {check_runtime_broadcast_src}
-    res = np.empty(scalar_shape, dtype=val_np.dtype)
-    res[...] = val_np
+    res = np.empty(scalar_shape, dtype=val.dtype)
+    res[...] = val
     return res
     """
     alloc_fn = compile_function_src(alloc_def_src, "alloc", {**globals(), **global_env})
