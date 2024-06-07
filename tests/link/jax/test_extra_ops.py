@@ -65,7 +65,7 @@ def test_extra_ops():
 
 @pytest.mark.xfail(
     version_parse(jax.__version__) >= version_parse("0.2.12"),
-    reason="Omnistaging cannot be disabled",
+    reason="JAX Numpy API does not support dynamic shapes",
 )
 def test_extra_ops_omni():
     a = matrix("a")
