@@ -385,7 +385,7 @@ def local_lift_through_linalg(
 @register_canonicalize
 @register_stabilize
 @node_rewriter([det])
-def det_diag_rewrite(fgraph: FunctionGraph, node: Apply) -> list[Variable] or None:
+def det_diag_rewrite(fgraph, node):
     """
      This rewrite takes advantage of the fact that for a diagonal matrix, the determinant value is the product of its diagonal elements.
 
