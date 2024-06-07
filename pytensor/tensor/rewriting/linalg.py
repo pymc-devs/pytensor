@@ -387,12 +387,9 @@ def local_lift_through_linalg(
 @node_rewriter([det])
 def det_diag_rewrite(fgraph: FunctionGraph, node: Apply) -> list[Variable] or None:
     """
-    Rewrites the determinant of a diagonal matrix into a simpler computation by using information about how the diagonal matrix arises.
+     This rewrite takes advantage of the fact that for a diagonal matrix, the determinant value is the product of its diagonal elements.
 
-    This rewrite takes advantage of the fact that for a diagonal matrix, the determinant value is the product of its diagonal elements.
-    Scalar : If we multiply a scalar with an identity matrix, the determinant is the the number of diagonal elements times the scalar value
-    Vector : If we multiply a vector with an identity matrix, the determinant is the product of the elements of the vector (which lie along the diagonal of the final matrix)
-    Matrix : If we multiply a matrix with another identity matrix, the determinant is the product of diagonal elements of the original matrix
+    The presence of a diagonal matrix is detected by inspecting the graph. This rewrite can identify diagonal matrices that arise as the result of elementwise multiplication with an identity matrix. Specialized computation is used to make this rewrite as efficient as possible, depending on whether the multiplication was with a scalar, vector or a matrix.
 
     Parameters
     ----------
