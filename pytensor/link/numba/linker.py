@@ -19,3 +19,6 @@ class NumbaLinker(JITLinker):
 
     def create_thunk_inputs(self, storage_map):
         return [storage_map[n] for n in self.fgraph.inputs]
+
+    def __repr__(self):
+        return "NumbaLinker()"
