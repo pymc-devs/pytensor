@@ -385,7 +385,27 @@ def local_lift_through_linalg(
 @register_canonicalize
 @register_stabilize
 @node_rewriter([det])
-def det_diag_rewrite(fgraph, node):
+def det_diag_rewrite(fgraph: FunctionGraph, node: Apply) -> list[Variable] or None:
+    """
+    Rewrites the determinant of a diagonal matrix into a simpler computation by using information about how the diagonal matrix arises.
+
+    This rewrite takes advantage of the fact that for a diagonal matrix, the determinant value is the product of its diagonal elements.
+    Scalar : If we multiply a scalar with an identity matrix, the determinant is the the number of diagonal elements times the scalar value
+    Vector : If we multiply a vector with an identity matrix, the determinant is the product of the elements of the vector (which lie along the diagonal of the final matrix)
+    Matrix : If we multiply a matrix with another identity matrix, the determinant is the product of diagonal elements of the original matrix
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
     # Find if we have Blockwise Op
     if not (isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Det)):
         return None
