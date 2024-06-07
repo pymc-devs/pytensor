@@ -430,5 +430,8 @@ def svd_uv_merge(fgraph, node):
             if cl == "output":
                 continue
             if isinstance(cl.op, Blockwise) and isinstance(cl.op.core_op, SVD):
-                if cl.op.core_op.compute_uv:
+                if cl.op.core_op.compute_uv and (
+                    len(fgraph.clients[cl.outputs[0]]) > 0
+                    or len(fgraph.clients[cl.outputs[2]]) > 0
+                ):
                     return [cl.outputs[1]]
