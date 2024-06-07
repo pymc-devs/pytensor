@@ -1203,6 +1203,7 @@ class TestLocalOptAlloc:
         f(5)
 
 
+@pytest.mark.xfail(reason="Numba does not support float16")
 class TestLocalOptAllocF16(TestLocalOptAlloc):
     dtype = "float16"
 

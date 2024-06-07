@@ -858,6 +858,7 @@ class TestMaxAndArgmax:
             ([1, 0], None),
         ],
     )
+    @pytest.mark.xfail(reason="Numba does not support float16")
     def test_basic_2_float16(self, axis, np_axis):
         # Test negative values and bigger range to make sure numpy don't do the argmax as on uint16
         data = (random(20, 30).astype("float16") - 0.5) * 20
@@ -1114,6 +1115,7 @@ class TestArgminArgmax:
                 v_shape = eval_outputs(fct(n, axis).shape)
                 assert tuple(v_shape) == nfct(data, np_axis).shape
 
+    @pytest.mark.xfail(reason="Numba does not support float16")
     def test2_float16(self):
         # Test negative values and bigger range to make sure numpy don't do the argmax as on uint16
         data = (random(20, 30).astype("float16") - 0.5) * 20
@@ -1980,6 +1982,7 @@ class TestMean:
         res = mean(np.zeros(1))
         assert res.eval() == 0.0
 
+    @pytest.mark.xfail(reason="Numba does not support float16")
     def test_mean_f16(self):
         x = vector(dtype="float16")
         y = x.mean()
@@ -3152,7 +3155,7 @@ class TestSumProdReduceDtype:
     op = CAReduce
     axes = [None, 0, 1, [], [0], [1], [0, 1]]
     methods = ["sum", "prod"]
-    dtypes = list(map(str, ps.all_types))
+    dtypes = tuple(str(x) for x in ps.all_types if x.dtype != "float16")
 
     # Test the default dtype of a method().
     def test_reduce_default_dtype(self):
@@ -3336,7 +3339,10 @@ class TestMeanDtype:
             "uint16",
             "int8",
             "int64",
-            "float16",
+            pytest.param(
+                "float16",
+                marks=pytest.mark.xfail(reason="Numba does not support float16"),
+            ),
             "float32",
             "float64",
             "complex64",
@@ -3350,7 +3356,10 @@ class TestMeanDtype:
             "uint16",
             "int8",
             "int64",
-            "float16",
+            pytest.param(
+                "float16",
+                marks=pytest.mark.xfail(reason="Numba does not support float16"),
+            ),
             "float32",
             "float64",
             "complex64",
@@ -3432,7 +3441,7 @@ class TestProdWithoutZerosDtype:
 
             if "complex" in dtype:
                 continue
-            f = function([x], p)
+            f = function([x], p, mode="C_VM" if dtype == "float16" else None)
             data = np.random.random((2, 3)) * 3
             data = data.astype(dtype)
             # TODO FIXME: This is a bad test
@@ -3745,7 +3754,17 @@ class TestMatMul:
         with pytest.raises(ValueError, match="cannot be scalar"):
             self.op(4, [4, 1])
 
-    @pytest.mark.parametrize("dtype", (np.float16, np.float32, np.float64))
+    @pytest.mark.parametrize(
+        "dtype",
+        (
+            pytest.param(
+                np.float16,
+                marks=pytest.mark.xfail(reason="Numba does not support float16"),
+            ),
+            np.float32,
+            np.float64,
+        ),
+    )
     def test_dtype_param(self, dtype):
         sol = self.op([1, 2, 3], [3, 2, 1], dtype=dtype)
         assert sol.eval().dtype == dtype
