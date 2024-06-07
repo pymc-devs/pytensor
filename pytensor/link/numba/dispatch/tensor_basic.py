@@ -70,7 +70,7 @@ def numba_funcify_Alloc(op, node, **kwargs):
     shapes_to_items_src = indent(
         "\n".join(
             [
-                f"{item_name} = to_scalar({shape_name})"
+                f"{item_name} = {shape_name}.item()"
                 for item_name, shape_name in zip(shape_var_item_names, shape_var_names)
             ]
         ),
@@ -87,7 +87,7 @@ def numba_funcify_Alloc(op, node, **kwargs):
 
     alloc_def_src = f"""
 def alloc(val, {", ".join(shape_var_names)}):
-    val_np = np.asarray(val)
+    val_np = val
 {shapes_to_items_src}
     scalar_shape = {create_tuple_string(shape_var_item_names)}
 {check_runtime_broadcast_src}
