@@ -10,8 +10,10 @@ from scipy import linalg as scipy_linalg
 
 from pytensor import function, grad
 from pytensor import tensor as pt
+from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph.basic import equal_computations
+from pytensor.link.numba import NumbaLinker
 from pytensor.tensor import TensorVariable
 from pytensor.tensor.slinalg import (
     Cholesky,
@@ -606,6 +608,8 @@ class TestCholeskySolve(utt.InferShapeTester):
         )
 
     def test_solve_dtype(self):
+        is_numba = isinstance(get_default_mode().linker, NumbaLinker)
+
         dtypes = [
             "uint8",
             "uint16",
@@ -626,6 +630,9 @@ class TestCholeskySolve(utt.InferShapeTester):
 
         # try all dtype combinations
         for A_dtype, b_dtype in itertools.product(dtypes, dtypes):
+            if is_numba and (A_dtype == "float16" or b_dtype == "float16"):
+                # Numba does not support float16
+                continue
             A = matrix(dtype=A_dtype)
             b = matrix(dtype=b_dtype)
             x = op(A, b)
