@@ -398,7 +398,10 @@ def svd_uv_merge(fgraph, node):
     if node.op.compute_uv:
         # compute_uv=True returns [u, s, v].
         # if at least u or v is used, no need to rewrite this node.
-        if fgraph.clients[node.outputs[0]] or fgraph.clients[node.outputs[2]]:
+        if (
+            len(fgraph.clients[node.outputs[0]]) > 0
+            or len(fgraph.clients[node.outputs[2]]) > 0
+        ):
             return
 
         # Else, has to replace the s of this node with s of an SVD Op that compute_uv=False.
@@ -408,7 +411,10 @@ def svd_uv_merge(fgraph, node):
                 continue
             if isinstance(cl.op, Blockwise) and isinstance(cl.op.core_op, SVD):
                 if not cl.op.core_op.compute_uv:
-                    return {fgraph.clients[node.outputs[1]]: cl.outputs[0]}
+                    return {
+                        "remove": [node.outputs[0], node.ouputs[2]],
+                        node.outputs[1]: cl.outputs[0],
+                    }
 
         # If no SVD reusable, return a new one.
         return {
