@@ -881,46 +881,6 @@ def isinf(a):
     return isinf_(a)
 
 
-@scalar_elemwise
-def isposinf(a):
-    """isposinf(a)"""
-
-
-# Rename isposnan to isposnan_ to allow to bypass it when not needed.
-# glibc 2.23 don't allow isposnan on int, so we remove it from the graph.
-isposinf_ = isposinf
-
-
-def isposinf(a):
-    """isposinf(a)"""
-    a = as_tensor_variable(a)
-    if a.dtype in discrete_dtypes:
-        return alloc(
-            np.asarray(False, dtype="bool"), *[a.shape[i] for i in range(a.ndim)]
-        )
-    return isposinf_(a)
-
-
-@scalar_elemwise
-def isneginf(a):
-    """isneginf(a)"""
-
-
-# Rename isnegnan to isnegnan_ to allow to bypass it when not needed.
-# glibc 2.23 don't allow isnegnan on int, so we remove it from the graph.
-isneginf_ = isneginf
-
-
-def isneginf(a):
-    """isneginf(a)"""
-    a = as_tensor_variable(a)
-    if a.dtype in discrete_dtypes:
-        return alloc(
-            np.asarray(False, dtype="bool"), *[a.shape[i] for i in range(a.ndim)]
-        )
-    return isneginf_(a)
-
-
 def allclose(a, b, rtol=1.0e-5, atol=1.0e-8, equal_nan=False):
     """
     Implement Numpy's ``allclose`` on tensors.
@@ -3117,8 +3077,8 @@ def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
     """
     # Replace NaN's with nan keyword
     is_nan = isnan(x)
-    is_pos_inf = isposinf(x)
-    is_neg_inf = isneginf(x)
+    is_pos_inf = eq(x, np.inf)
+    is_neg_inf = eq(x, -np.inf)
 
     if not any(is_nan) and not any(is_pos_inf) and not any(is_neg_inf):
         return
