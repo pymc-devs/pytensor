@@ -469,7 +469,7 @@ det_diag_from_diag = PatternNodeRewriter(
         ),
     ),
     (prod, "x"),
-    name="determinant_of_diagonal",
+    name="det_diag_from_diag",
     allow_multiple_clients=True,
 )
 register_canonicalize(det_diag_from_diag)
