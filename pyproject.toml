@@ -54,7 +54,6 @@ dependencies = [
     "logical-unification",
     "miniKanren",
     "cons",
-    "typing_extensions",
 ]
 
 [project.urls]
