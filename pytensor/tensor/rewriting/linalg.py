@@ -2,11 +2,15 @@ import logging
 from collections.abc import Callable
 from typing import cast
 
-from pytensor import Variable
+from pytensor import Variable, config
 from pytensor.graph import Apply, FunctionGraph
-from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
+from pytensor.graph.rewriting.basic import (
+    PatternNodeRewriter,
+    copy_stack_trace,
+    node_rewriter,
+)
 from pytensor.scalar.basic import Mul
-from pytensor.tensor.basic import Eye, TensorVariable, diagonal
+from pytensor.tensor.basic import ARange, Eye, TensorVariable, alloc, diagonal
 from pytensor.tensor.blas import Dot22
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
@@ -36,6 +40,7 @@ from pytensor.tensor.slinalg import (
     solve,
     solve_triangular,
 )
+from pytensor.tensor.subtensor import advanced_set_subtensor
 
 
 logger = logging.getLogger(__name__)
@@ -381,11 +386,11 @@ def local_lift_through_linalg(
                 raise NotImplementedError  # pragma: no cover
 
 
-# Det Diag Rewrite
+# Det Diag Rewrites
 @register_canonicalize
 @register_stabilize
 @node_rewriter([det])
-def det_diag_rewrite(fgraph, node):
+def rewrite_det_diag_from_eye_mul(fgraph, node):
     """
      This rewrite takes advantage of the fact that for a diagonal matrix, the determinant value is the product of its diagonal elements.
 
@@ -443,8 +448,30 @@ def det_diag_rewrite(fgraph, node):
         # Check for scalar (ndim = 0) or vector (ndim = 1)
         sca_vec_input = non_eye_inputs[0].owner.inputs[0]
         if sca_vec_input.ndim == 0:
-            det_val = sca_vec_input ** eye_input[0].shape[0]
+            det_val = sca_vec_input ** (eye_input[0].shape[0]).astype(config.floatX)
         else:
             det_val = sca_vec_input.prod()
 
     return [det_val]
+
+
+# Det diag from diag
+arange = ARange("int64")
+det_diag_from_diag = PatternNodeRewriter(
+    (
+        det,
+        (
+            advanced_set_subtensor,
+            (alloc, 0, "sh1", "sh2"),
+            "x",
+            (arange, 0, "stop", 1),
+            (arange, 0, "stop", 1),
+        ),
+    ),
+    (prod, "x"),
+    name="determinant_of_diagonal",
+    allow_multiple_clients=True,
+)
+register_canonicalize(det_diag_from_diag)
+register_stabilize(det_diag_from_diag)
+register_specialize(det_diag_from_diag)

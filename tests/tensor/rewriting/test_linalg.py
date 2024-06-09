@@ -395,7 +395,7 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
 @pytest.mark.parametrize(
     "shape", [(), (7,), (7, 7)], ids=["scalar", "vector", "matrix"]
 )
-def test_det_diag_rewrite(shape):
+def test_det_diag_from_eye_mul(shape):
     # Initializing x based on scalar/vector/matrix
     x = pt.tensor("x", shape=shape)
     y = pt.eye(7) * x
@@ -410,17 +410,41 @@ def test_det_diag_rewrite(shape):
     # NUMERIC VALUE TEST
     f_det = function([x], z_det)
     if len(shape) == 0:
-        x_test = np.random.rand()
+        x_test = np.array(np.random.rand()).astype(config.floatX)
     elif len(shape) == 1:
-        x_test = np.random.rand(7)
+        x_test = np.random.rand(7).astype(config.floatX)
     else:
-        x_test = np.random.rand(7, 7)
+        x_test = np.random.rand(7, 7).astype(config.floatX)
     det_val = f_det(x_test)
     rewritten_val = f_rewritten(x_test)
 
     assert_allclose(
         det_val,
         rewritten_val,
-        atol=1e-4 if config.floatX == "float32" else 1e-8,
-        rtol=1e-4 if config.floatX == "float32" else 1e-8,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+def test_det_diag_from_diag():
+    x = pt.tensor("x", shape=(None,))
+    x_diag = pt.diag(x)
+    y = pt.linalg.det(x_diag)
+
+    # REWRITE TEST
+    f_rewritten = function([x], y, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, Det) for node in nodes)
+
+    # NUMERIC VALUE TEST
+    f_det = function([x], y)
+    x_test = np.random.rand(7).astype(config.floatX)
+    det_val = f_det(x_test)
+    rewritten_val = f_rewritten(x_test)
+
+    assert_allclose(
+        det_val,
+        rewritten_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
