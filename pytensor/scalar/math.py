@@ -1503,13 +1503,17 @@ class BetaInc(ScalarOp):
     def c_code(self, node, name, inp, out, sub):
         (a, b, x) = inp
         (z,) = out
-        if node.inputs[0].type in float_types:
+        if (
+            node.inputs[0].type in float_types
+            and node.inputs[1].type in float_types
+            and node.inputs[2].type in float_types
+        ):
             return f"""{z} = BetaInc({a}, {b}, {x});"""
 
         raise NotImplementedError("type not supported", type)
 
     def c_code_cache_version(self):
-        return (1, )
+        return (1,)
 
 
 betainc = BetaInc(upgrade_to_float_no_complex, name="betainc")
