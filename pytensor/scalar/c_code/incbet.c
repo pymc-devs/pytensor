@@ -16,8 +16,8 @@ Copyright 1984, 1995, 2000 by Stephen L. Moshier
 #include <numpy/npy_math.h>
 
 
-#define MINLOG     -170.0    // XXX TODO!
-#define MAXLOG     +170.0    // XXX TODO!
+#define MINLOG     -170.0
+#define MAXLOG     +170.0
 #define MAXGAM     171.624376956302725
 #define EPSILON     2.2204460492503131e-16
 
