@@ -2358,6 +2358,8 @@ def pull_back(outputs, inputs, output_cotangents):
             recorded_rewrites[node] = new_outputs
 
         for i, cotangent in zip(argnums, input_cotangents, strict=True):
+            if cotangent is None:
+                continue
             input = node.inputs[i]
             if input not in known_cotangents:
                 known_cotangents[input] = cotangent
@@ -2372,8 +2374,10 @@ def pullback_grad(cost, wrt):
 
     At some point we might want to replace pt.grad with this?
     """
+    from pytensor.tensor import as_tensor_variable
+
     # Error checking and allow non-list wrt...
-    return pull_back([cost], wrt, [1.])
+    return pull_back([cost], wrt, [as_tensor_variable(1.)])
 
 def linear_transpose(outputs, inputs, transposed_inputs):
     """Given a linear function from inputs to outputs, return the transposed function."""

@@ -2366,27 +2366,32 @@ def local_log_add_exp(fgraph, node):
 
     TODO: in canonicalize, change log10 and log2 -> log
     """
+    z = node.inputs[0]
+    if not z.owner or z.owner.op != add:
+        return
 
-    if node.op == log:
-        z = node.inputs[0]
-        if z.owner and z.owner.op == add:
-            zi = z.owner.inputs
-            pre_exp = [x.owner.inputs[0] for x in zi if x.owner and x.owner.op == exp]
-            # all arguments to add are exp(<something>)
-            if len(pre_exp) == len(zi):
-                # Do not offset when max_pre = -np.inf, to avoid nan in the output
-                # Switch statement is placed directly inside add to break the self-symmetry
-                # of the returned output (otherwise the rewrite would not stabilize)
-                max_pre = reduce(maximum, pre_exp)
-                ret = max_pre + log(
-                    add(
-                        *[
-                            switch(isinf(max_pre), exp(max_pre), exp(p - max_pre))
-                            for p in pre_exp
-                        ]
-                    )
-                )
-                return [ret]
+    zi = z.owner.inputs
+    pre_exp = [x.owner.inputs[0] for x in zi if x.owner and x.owner.op == exp]
+
+    # all arguments to add are exp(<something>)
+    if len(pre_exp) != len(zi):
+        return
+
+    if len(zi) == 2:
+        a, b = pre_exp
+        replace_val = switch(a > b, a + log1p(a - b), b + log1p(b - a))
+        # Handle inf cases
+        replace_val = switch(eq(a, b), a + log(2), replace_val)
+        return [replace_val]
+
+    # Do not offset when max_pre = -np.inf, to avoid nan in the output
+    # Switch statement is placed directly inside add to break the self-symmetry
+    # of the returned output (otherwise the rewrite would not stabilize)
+    max_pre = reduce(maximum, pre_exp)
+    ret = max_pre + log(
+        add(*[switch(isinf(max_pre), exp(max_pre), exp(p - max_pre)) for p in pre_exp])
+    )
+    return [ret]
 
 
 @register_stabilize

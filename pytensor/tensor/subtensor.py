@@ -9,7 +9,7 @@ import numpy as np
 import pytensor
 from pytensor import scalar as ps
 from pytensor.configdefaults import config
-from pytensor.gradient import DisconnectedType
+from pytensor.gradient import DisconnectedType, linear_transpose, push_forward
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
@@ -836,6 +836,27 @@ class Subtensor(COp):
         assert i == node.outputs[0].ndim
         assert len(outshp) == node.outputs[0].ndim
         return [outshp]
+
+    def linear_transpose(self, node, transposed_inputs, linear_inputs, linear_outputs):
+        assert linear_inputs == [0]
+        assert linear_outputs == [0]
+        (transposed_input,) = transposed_inputs
+
+        x, *others = node.inputs
+        return [IncSubtensor(self.idx_list)(x.zeros_like(), transposed_input, *others)]
+
+    def push_forward(self, node, input_tangents, result_nums):
+        if len(result_nums) == 0:
+            return None, []
+
+        assert result_nums[0] == 0
+
+        value_tangent, *_ = input_tangents
+        if value_tangent is None:
+            return None, [None]
+
+        _, *others = node.inputs
+        return None, [self(value_tangent, *others)]
 
     def grad(self, inputs, grads):
         (gz,) = grads
