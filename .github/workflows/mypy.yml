@@ -10,35 +10,22 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        shell: bash -l {0}
+        shell: bash -leo pipefail {0}
     steps:
       - uses: actions/checkout@v4
-      - name: Cache conda
-        uses: actions/cache@v4
-        env:
-          # Increase this value to reset cache if environment.yml has not changed
-          CACHE_NUMBER: 0
+      - uses: mamba-org/setup-micromamba@v1
         with:
-          path: ~/conda_pkgs_dir
-          key: ${{ runner.os }}-py310-conda-${{ env.CACHE_NUMBER }}-${{
-            hashFiles('environment.yml') }}
-      - uses: conda-incubator/setup-miniconda@v3
-        with:
-          miniforge-variant: Mambaforge
-          miniforge-version: latest
-          mamba-version: "*"
-          activate-environment: pytensor-test
-          channel-priority: strict
+          micromamba-version: "latest" # any version from https://github.com/mamba-org/micromamba-releases
           environment-file: environment.yml
-          python-version: "3.10"
-          use-mamba: true
-          use-only-tar-bz2: false # IMPORTANT: This may break caching of conda packages! See https://github.com/conda-incubator/setup-miniconda/issues/267
-      - name: Install-pytensor and mypy dependencies
+          init-shell: bash
+          cache-environment: true
+          post-cleanup: "all"
+      - name: Install pytensor and mypy dependencies
         run: |
-          conda activate pytensor-test
           pip install -e .
           python --version
+        shell: micromamba-shell {0}
       - name: Run mypy
         run: |
-          conda activate pytensor-test
           python ./scripts/run_mypy.py --verbose
+        shell: micromamba-shell {0}
