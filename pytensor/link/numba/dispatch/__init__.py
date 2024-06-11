@@ -11,5 +11,6 @@ import pytensor.link.numba.dispatch.elemwise
 import pytensor.link.numba.dispatch.scan
 import pytensor.link.numba.dispatch.sparse
 import pytensor.link.numba.dispatch.slinalg
+import pytensor.link.numba.dispatch.subtensor
 
 # isort: on
