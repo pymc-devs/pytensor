@@ -1,13 +1,12 @@
 
 .. _libdoc_graph:
 
-================================================
-:mod:`graph` -- Theano Internals [doc TODO]
-================================================
+========================================
+:mod:`graph` -- PyTensor Graph Internals
+========================================
 
 .. module:: graph
-   :platform: Unix, Windows
-   :synopsis: Theano Internals
+
 .. moduleauthor:: LISA
 
 .. toctree::
@@ -15,6 +14,7 @@
 
     graph
     fgraph
+    replace
     features
     op
     type
