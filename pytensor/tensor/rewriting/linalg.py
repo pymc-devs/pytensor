@@ -16,7 +16,6 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, Prod, _matrix_matrix_matmul, log, prod
 from pytensor.tensor.nlinalg import (
-    Det,
     KroneckerProduct,
     MatrixInverse,
     MatrixPinv,
@@ -408,10 +407,6 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
     list of Variable, optional
         List of optimized variables, or None if no optimization was performed
     """
-    # Find if we have Blockwise Op
-    if not (isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Det)):
-        return None
-
     node_input_op = node.inputs[0]
     # Check if the op is Elemwise and mul
     if not (
@@ -438,7 +433,7 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
 
     # Dealing with only one other input
     if len(non_eye_inputs) >= 2:
-        raise NotImplementedError
+        return None
 
     # Checking if original x was matrix
     if not non_eye_inputs[0].owner:
