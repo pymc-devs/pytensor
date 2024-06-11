@@ -118,8 +118,12 @@ my_multi_out = Elemwise(MyMultiOut())
 my_multi_out.ufunc = MyMultiOut.impl
 my_multi_out.ufunc.nin = 2
 my_multi_out.ufunc.nout = 2
-opts = RewriteDatabaseQuery(include=[None], exclude=["cxx_only", "BlasOpt"])
-numba_mode = Mode(NumbaLinker(), opts.including("numba"))
+opts = RewriteDatabaseQuery(
+    include=[None], exclude=["cxx_only", "BlasOpt", "local_careduce_fusion"]
+)
+numba_mode = Mode(
+    NumbaLinker(), opts.including("numba", "local_useless_unbatched_blockwise")
+)
 py_mode = Mode("py", opts)
 
 rng = np.random.default_rng(42849)
