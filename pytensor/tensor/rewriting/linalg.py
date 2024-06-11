@@ -418,14 +418,12 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
 
     # Find whether any of the inputs to mul is Eye
     inputs_to_mul = node_input_op.owner.inputs
-    eye_check = False
-    eye_input = []
-    for mul_input in inputs_to_mul:
-        if isinstance(mul_input.owner.op, Eye):
-            eye_check = True
-            eye_input.append(mul_input)
-            break  # This is so that we only find the first one? Can be changed
-    if not (eye_check):
+    eye_input = [
+        mul_input
+        for mul_input in inputs_to_mul
+        if mul_input.owner and isinstance(mul_input.owner.op, Eye)
+    ]
+    if not (eye_input[0]):
         return None
 
     # Get all non Eye inputs (scalars/matrices/vectors)
