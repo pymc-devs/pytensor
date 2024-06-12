@@ -12,10 +12,8 @@ from pytensor.raise_op import CheckAndRaise
 @singledispatch
 def pytorch_typify(data, dtype=None, **kwargs):
     r"""Convert instances of PyTensor `Type`\s to PyTorch types."""
-    if dtype is None:
-        return torch.as_tensor(data, dtype=None)
-    else:
-        return torch.as_tensor(data, dtype=dtype)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    return torch.as_tensor(data, dtype=dtype, device=device)
 
 
 @singledispatch
@@ -42,9 +40,13 @@ def pytorch_funcify_FunctionGraph(
 
 @pytorch_funcify.register(CheckAndRaise)
 def pytorch_funcify_CheckAndRaise(op, **kwargs):
+    error = op.exc_type
+    msg = op.msg
+
     def assert_fn(x, *conditions):
         for cond in conditions:
-            assert cond.item()
+            if not cond.item():
+                raise error(msg)
         return x
 
     return assert_fn
