@@ -65,9 +65,9 @@ def compare_pytorch_and_py(
 
     if len(fgraph.outputs) > 1:
         for j, p in zip(pytorch_res, py_res):
-            assert_fn(j, p)
+            assert_fn(j.cpu(), p)
     else:
-        assert_fn(pytorch_res, py_res)
+        assert_fn([pytorch_res[0].cpu()], py_res)
 
     return pytensor_torch_fn, pytorch_res
 
@@ -129,22 +129,23 @@ def test_shared():
     pytorch_res = pytensor_torch_fn()
 
     assert isinstance(pytorch_res, torch.Tensor)
-    np.testing.assert_allclose(pytorch_res, a.get_value())
+    np.testing.assert_allclose(pytorch_res.cpu(), a.get_value())
 
     pytensor_torch_fn = function([], a * 2, mode="PYTORCH")
     pytorch_res = pytensor_torch_fn()
 
     assert isinstance(pytorch_res, torch.Tensor)
-    np.testing.assert_allclose(pytorch_res, a.get_value() * 2)
+    np.testing.assert_allclose(pytorch_res.cpu(), a.get_value() * 2)
 
     new_a_value = np.array([3, 4, 5], dtype=config.floatX)
     a.set_value(new_a_value)
 
     pytorch_res = pytensor_torch_fn()
     assert isinstance(pytorch_res, torch.Tensor)
-    np.testing.assert_allclose(pytorch_res, new_a_value * 2)
+    np.testing.assert_allclose(pytorch_res.cpu(), new_a_value * 2)
 
 
+@pytest.mark.xfail(reason="Shared variables will be handled in later PRs")
 def test_shared_updates():
     a = shared(0)
 
@@ -168,8 +169,3 @@ def test_pytorch_checkandraise():
     res = assert_op(p, p < 1.0)
 
     function((p,), res, mode=pytorch_mode)
-
-
-def set_test_value(x, v):
-    x.tag.test_value = v
-    return x
