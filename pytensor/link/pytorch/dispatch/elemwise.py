@@ -19,7 +19,7 @@ def pytorch_funcify_Elemwise(op, node, **kwargs):
 @pytorch_funcify.register(DimShuffle)
 def pytorch_funcify_DimShuffle(op, **kwargs):
     def dimshuffle(x):
-        res = torch.transpose(x, *op.transposition)
+        res = torch.permute(x, op.transposition)
 
         shape = list(res.shape[: len(op.shuffle)])
 
