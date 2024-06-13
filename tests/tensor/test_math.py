@@ -1032,7 +1032,6 @@ class TestMaxAndArgmax:
         x = tensor(shape=(5, 5, 5, 5))
         batch_x = tensor(shape=(3, 5, 5, 5, 5))
 
-        # Test MaxAndArgmax
         argmax_x = argmax(x, axis=core_axis)
 
         arg_max_node = argmax_x.owner
@@ -1423,7 +1422,10 @@ class TestMinMax:
 
 
 def test_MaxAndArgmax_deprecated():
-    with pytest.raises(AttributeError):
+    with pytest.raises(
+        AttributeError,
+        match="The class `MaxandArgmax` has been deprecated. Call `Max` and `Argmax` seperately as an alternative.",
+    ):
         pytensor.tensor.math.MaxAndArgmax
 
 

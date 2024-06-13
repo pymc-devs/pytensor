@@ -110,9 +110,9 @@ else:
 def __getattr__(name):
     if name == "MaxAndArgmax":
         raise AttributeError(
-            "The class `MaxAndArgmax` has been deprecated. "
-            "Call `Max` and `Argmax` separately as an alternative."
+            "The class `MaxandArgmax` has been deprecated. Call `Max` and `Argmax` seperately as an alternative."
         )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _get_atol_rtol(a, b):
@@ -565,16 +565,6 @@ def max(x, axis=None, keepdims=False):
     We return an error as numpy when we reduce a dim with a shape of 0.
 
     """
-
-    # We have a choice of implementing this call with the
-    # CAReduce op or the MaxAndArgmax op.
-
-    # MaxAndArgmax supports grad and Rop, so we prefer to use that.
-    # CAReduce is faster, but optimizations will replace MaxAndArgmax[0]
-    # with CAReduce at compile time, so at this stage the important
-    # thing is supporting all user interface features, not speed.
-    # Some cases can be implemented only with CAReduce.
-
     out = max_and_argmax(x, axis)[0]
 
     if keepdims:

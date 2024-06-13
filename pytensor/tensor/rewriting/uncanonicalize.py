@@ -52,7 +52,7 @@ def local_max_to_min(fgraph, node):
     Notes
     -----
     We don't need an opt that will do the reverse as by default
-    the interface put only MaxAndArgmax into the graph.
+    the interface put only Max into the graph.
 
     """
     if node.op == neg and node.inputs[0].owner:
