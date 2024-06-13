@@ -7,6 +7,7 @@ import shutil
 import socket
 import sys
 import textwrap
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -1281,6 +1282,12 @@ if config.cxx != "":
         gcc_version_str = "GCC_NOT_FOUND"
 else:
     gcc_version_str = "GCC_NOT_FOUND"
+
+if config.compute_test_value != "off":
+    warnings.warn(
+        "test_value machinery is deprecated and will stop working in the future.",
+        FutureWarning,
+    )
 
 # TODO: The caching dir resolution is a procedural mess of helper functions, local variables
 # and config definitions. And the result is also not particularly pretty..

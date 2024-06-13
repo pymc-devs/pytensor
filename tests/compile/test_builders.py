@@ -523,11 +523,12 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
     @config.change_flags(compute_test_value="raise")
     def test_compute_test_value(self):
-        x = scalar("x")
-        x.tag.test_value = np.array(1.0, dtype=config.floatX)
-        op = OpFromGraph([x], [x**3])
-        y = scalar("y")
-        y.tag.test_value = np.array(1.0, dtype=config.floatX)
+        with pytest.warns(FutureWarning):
+            x = scalar("x")
+            x.tag.test_value = np.array(1.0, dtype=config.floatX)
+            op = OpFromGraph([x], [x**3])
+            y = scalar("y")
+            y.tag.test_value = np.array(1.0, dtype=config.floatX)
         f = op(y)
         grad_f = grad(f, y)
         assert grad_f.tag.test_value is not None
