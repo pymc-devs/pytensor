@@ -1566,6 +1566,48 @@ def std(input, axis=None, ddof=0, keepdims=False, corrected=False):
     return ret
 
 
+def median(x: TensorLike, axis=None) -> TensorVariable:
+    """
+    Computes the median along the given axis(es) of a tensor `input`.
+
+    Parameters
+    ----------
+    x: TensorVariable
+        The input tensor.
+    axis: None or int or (list of int) (see `Sum`)
+        Compute the median along this axis of the tensor.
+        None means all axes (like numpy).
+    """
+    from pytensor.ifelse import ifelse
+
+    x = as_tensor_variable(x)
+    x_ndim = x.type.ndim
+    if axis is None:
+        axis = list(range(x_ndim))
+    else:
+        axis = list(normalize_axis_tuple(axis, x_ndim))
+
+    non_axis = [i for i in range(x_ndim) if i not in axis]
+    non_axis_shape = [x.shape[i] for i in non_axis]
+
+    # Put axis at the end and unravel them
+    x_raveled = x.transpose(*non_axis, *axis)
+    if len(axis) > 1:
+        x_raveled = x_raveled.reshape((*non_axis_shape, -1))
+    raveled_size = x_raveled.shape[-1]
+    k = raveled_size // 2
+
+    # Sort the input tensor along the specified axis and pick median value
+    x_sorted = x_raveled.sort(axis=-1)
+    k_values = x_sorted[..., k]
+    km1_values = x_sorted[..., k - 1]
+
+    even_median = (k_values + km1_values) / 2.0
+    odd_median = k_values.astype(even_median.type.dtype)
+    even_k = eq(mod(raveled_size, 2), 0)
+    return ifelse(even_k, even_median, odd_median, name="median")
+
+
 @scalar_elemwise(symbolname="scalar_maximum")
 def maximum(x, y):
     """elemwise maximum. See max for the maximum in one tensor"""
@@ -3015,6 +3057,7 @@ __all__ = [
     "sum",
     "prod",
     "mean",
+    "median",
     "var",
     "std",
     "std",
