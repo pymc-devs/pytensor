@@ -67,7 +67,8 @@ class TestComputeTestValue:
 
         test_input = SomeType()()
         orig_object = object()
-        test_input.tag.test_value = orig_object
+        with pytest.warns(FutureWarning):
+            test_input.tag.test_value = orig_object
 
         res = InplaceOp(False)(test_input)
         assert res.tag.test_value is orig_object
@@ -76,10 +77,11 @@ class TestComputeTestValue:
         assert res.tag.test_value is not orig_object
 
     def test_variable_only(self):
-        x = matrix("x")
-        x.tag.test_value = np.random.random((3, 4)).astype(config.floatX)
-        y = matrix("y")
-        y.tag.test_value = np.random.random((4, 5)).astype(config.floatX)
+        with pytest.warns(FutureWarning):
+            x = matrix("x")
+            x.tag.test_value = np.random.random((3, 4)).astype(config.floatX)
+            y = matrix("y")
+            y.tag.test_value = np.random.random((4, 5)).astype(config.floatX)
 
         # should work
         z = dot(x, y)
@@ -88,14 +90,16 @@ class TestComputeTestValue:
         assert _allclose(f(x.tag.test_value, y.tag.test_value), z.tag.test_value)
 
         # this test should fail
-        y.tag.test_value = np.random.random((6, 5)).astype(config.floatX)
+        with pytest.warns(FutureWarning):
+            y.tag.test_value = np.random.random((6, 5)).astype(config.floatX)
         with pytest.raises(ValueError):
             dot(x, y)
 
     def test_compute_flag(self):
         x = matrix("x")
         y = matrix("y")
-        y.tag.test_value = np.random.random((4, 5)).astype(config.floatX)
+        with pytest.warns(FutureWarning):
+            y.tag.test_value = np.random.random((4, 5)).astype(config.floatX)
 
         # should skip computation of test value
         with config.change_flags(compute_test_value="off"):
@@ -111,10 +115,11 @@ class TestComputeTestValue:
             dot(x, y)
 
     def test_string_var(self):
-        x = matrix("x")
-        x.tag.test_value = np.random.random((3, 4)).astype(config.floatX)
-        y = matrix("y")
-        y.tag.test_value = np.random.random((4, 5)).astype(config.floatX)
+        with pytest.warns(FutureWarning):
+            x = matrix("x")
+            x.tag.test_value = np.random.random((3, 4)).astype(config.floatX)
+            y = matrix("y")
+            y.tag.test_value = np.random.random((4, 5)).astype(config.floatX)
 
         z = pytensor.shared(np.random.random((5, 6)).astype(config.floatX))
 
@@ -134,7 +139,8 @@ class TestComputeTestValue:
 
     def test_shared(self):
         x = matrix("x")
-        x.tag.test_value = np.random.random((3, 4)).astype(config.floatX)
+        with pytest.warns(FutureWarning):
+            x.tag.test_value = np.random.random((3, 4)).astype(config.floatX)
         y = pytensor.shared(np.random.random((4, 6)).astype(config.floatX), "y")
 
         # should work
@@ -190,21 +196,21 @@ class TestComputeTestValue:
     def test_incorrect_type(self):
         x = vector("x")
         with pytest.raises(TypeError):
-            # Incorrect shape for test value
-            x.tag.test_value = np.empty((2, 2))
+            with pytest.warns(FutureWarning):
+                # Incorrect shape for test value
+                x.tag.test_value = np.empty((2, 2))
 
         x = fmatrix("x")
         with pytest.raises(TypeError):
-            # Incorrect dtype (float64) for test value
-            x.tag.test_value = np.random.random((3, 4))
+            with pytest.warns(FutureWarning):
+                # Incorrect dtype (float64) for test value
+                x.tag.test_value = np.random.random((3, 4))
 
     def test_overided_function(self):
         # We need to test those as they mess with Exception
         # And we don't want the exception to be changed.
         x = matrix()
-        x.tag.test_value = np.zeros((2, 3), dtype=config.floatX)
         y = matrix()
-        y.tag.test_value = np.zeros((2, 2), dtype=config.floatX)
         with pytest.raises(ValueError):
             x.__mul__(y)
 
@@ -212,8 +218,9 @@ class TestComputeTestValue:
         # Test the compute_test_value mechanism Scan.
         k = iscalar("k")
         A = vector("A")
-        k.tag.test_value = 3
-        A.tag.test_value = np.random.random((5,)).astype(config.floatX)
+        with pytest.warns(FutureWarning):
+            k.tag.test_value = 3
+            A.tag.test_value = np.random.random((5,)).astype(config.floatX)
 
         def fx(prior_result, A):
             return prior_result * A
@@ -233,8 +240,9 @@ class TestComputeTestValue:
         # This test should fail when building fx for the first time
         k = iscalar("k")
         A = matrix("A")
-        k.tag.test_value = 3
-        A.tag.test_value = np.random.random((5, 3)).astype(config.floatX)
+        with pytest.warns(FutureWarning):
+            k.tag.test_value = 3
+            A.tag.test_value = np.random.random((5, 3)).astype(config.floatX)
 
         def fx(prior_result, A):
             return dot(prior_result, A)
@@ -253,8 +261,9 @@ class TestComputeTestValue:
         # but when calling the scan's perform()
         k = iscalar("k")
         A = matrix("A")
-        k.tag.test_value = 3
-        A.tag.test_value = np.random.random((5, 3)).astype(config.floatX)
+        with pytest.warns(FutureWarning):
+            k.tag.test_value = 3
+            A.tag.test_value = np.random.random((5, 3)).astype(config.floatX)
 
         def fx(prior_result, A):
             return dot(prior_result, A)
@@ -288,7 +297,8 @@ class TestComputeTestValue:
                 output[0] = input + 1
 
         i = ps.int32("i")
-        i.tag.test_value = 3
+        with pytest.warns(FutureWarning):
+            i.tag.test_value = 3
 
         o = IncOnePython()(i)
 
@@ -304,7 +314,8 @@ class TestComputeTestValue:
     )
     def test_no_perform(self):
         i = ps.int32("i")
-        i.tag.test_value = 3
+        with pytest.warns(FutureWarning):
+            i.tag.test_value = 3
 
         # Class IncOneC is defined outside of the TestComputeTestValue
         # so it can be pickled and unpickled

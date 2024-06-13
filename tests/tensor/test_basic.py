@@ -151,8 +151,6 @@ from tests.tensor.utils import (
 )
 
 
-pytestmark = pytest.mark.filterwarnings("error")
-
 if config.mode == "FAST_COMPILE":
     mode_opt = "FAST_RUN"
 else:
@@ -1110,13 +1108,15 @@ class TestNonzero:
     def test_nonzero(self):
         def check(m):
             m_symb = tensor(dtype=m.dtype, shape=(None,) * m.ndim)
-            m_symb.tag.test_value = m
+            with pytest.warns(FutureWarning):
+                m_symb.tag.test_value = m
 
             res_tuple_pt = nonzero(m_symb, return_matrix=False)
             res_matrix_pt = nonzero(m_symb, return_matrix=True)
 
             res_tuple = tuple(r.tag.test_value for r in res_tuple_pt)
-            res_matrix = res_matrix_pt.tag.test_value
+            with pytest.warns(FutureWarning):
+                res_matrix = res_matrix_pt.tag.test_value
 
             assert np.allclose(res_matrix, np.vstack(np.nonzero(m)))
 
@@ -1139,11 +1139,13 @@ class TestNonzero:
     def test_flatnonzero(self):
         def check(m):
             m_symb = tensor(dtype=m.dtype, shape=(None,) * m.ndim)
-            m_symb.tag.test_value = m
+            with pytest.warns(FutureWarning):
+                m_symb.tag.test_value = m
 
             res_pt = flatnonzero(m_symb)
 
-            result = res_pt.tag.test_value
+            with pytest.warns(FutureWarning):
+                result = res_pt.tag.test_value
             assert np.allclose(result, np.flatnonzero(m))
 
         rand0d = np.empty(())
@@ -1168,11 +1170,13 @@ class TestNonzero:
     def test_nonzero_values(self):
         def check(m):
             m_symb = tensor(dtype=m.dtype, shape=(None,) * m.ndim)
-            m_symb.tag.test_value = m
+            with pytest.warns(FutureWarning):
+                m_symb.tag.test_value = m
 
             res_pt = nonzero_values(m_symb)
 
-            result = res_pt.tag.test_value
+            with pytest.warns(FutureWarning):
+                result = res_pt.tag.test_value
             assert np.allclose(result, m[np.nonzero(m)], equal_nan=True)
 
         rand0d = np.empty(())

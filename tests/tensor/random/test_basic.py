@@ -269,13 +269,14 @@ def test_normal_infer_shape(M, sd, size):
 
 @config.change_flags(compute_test_value="raise")
 def test_normal_ShapeFeature():
-    M_pt = iscalar("M")
-    M_pt.tag.test_value = 3
-    sd_pt = scalar("sd")
-    sd_pt.tag.test_value = np.array(1.0, dtype=config.floatX)
+    with pytest.warns(FutureWarning):
+        M_pt = iscalar("M")
+        M_pt.tag.test_value = 3
+        sd_pt = scalar("sd")
+        sd_pt.tag.test_value = np.array(1.0, dtype=config.floatX)
 
-    d_rv = normal(pt.ones((M_pt,)), sd_pt, size=(2, M_pt))
-    d_rv.tag.test_value
+        d_rv = normal(pt.ones((M_pt,)), sd_pt, size=(2, M_pt))
+        d_rv.tag.test_value
 
     fg = FunctionGraph(
         [i for i in graph_inputs([d_rv]) if not isinstance(i, Constant)],
@@ -627,7 +628,8 @@ def test_mvnormal_default_args():
 @config.change_flags(compute_test_value="raise")
 def test_mvnormal_ShapeFeature():
     M_pt = iscalar("M")
-    M_pt.tag.test_value = 2
+    with pytest.warns(FutureWarning):
+        M_pt.tag.test_value = 2
 
     d_rv = multivariate_normal(pt.ones((M_pt,)), pt.eye(M_pt), size=2)
 
@@ -645,12 +647,14 @@ def test_mvnormal_ShapeFeature():
 
     # Test broadcasted shapes
     mean = tensor(dtype=config.floatX, shape=(1, None))
-    mean.tag.test_value = np.array([[0, 1, 2]], dtype=config.floatX)
+    with pytest.warns(FutureWarning):
+        mean.tag.test_value = np.array([[0, 1, 2]], dtype=config.floatX)
 
     test_covar = np.diag(np.array([1, 10, 100], dtype=config.floatX))
     test_covar = np.stack([test_covar, test_covar * 10.0])
     cov = pt.as_tensor(test_covar).type()
-    cov.tag.test_value = test_covar
+    with pytest.warns(FutureWarning):
+        cov.tag.test_value = test_covar
 
     d_rv = multivariate_normal(mean, cov, size=[2, 3, 2])
 
@@ -736,13 +740,14 @@ def test_dirichlet_infer_shape(M, size):
         fn_inputs, [pt.as_tensor(o) for o in [*rv_shape, rv]], mode=py_mode
     )
 
-    *rv_shape_val, rv_val = pytensor_fn(
-        *[
-            i.tag.test_value
-            for i in fn_inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ]
-    )
+    with pytest.warns(FutureWarning):
+        *rv_shape_val, rv_val = pytensor_fn(
+            *[
+                i.tag.test_value
+                for i in fn_inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ]
+        )
 
     assert tuple(rv_shape_val) == tuple(rv_val.shape)
 
@@ -750,10 +755,11 @@ def test_dirichlet_infer_shape(M, size):
 @config.change_flags(compute_test_value="raise")
 def test_dirichlet_ShapeFeature():
     """Make sure `RandomVariable.infer_shape` works with `ShapeFeature`."""
-    M_pt = iscalar("M")
-    M_pt.tag.test_value = 2
-    N_pt = iscalar("N")
-    N_pt.tag.test_value = 3
+    with pytest.warns(FutureWarning):
+        M_pt = iscalar("M")
+        M_pt.tag.test_value = 2
+        N_pt = iscalar("N")
+        N_pt.tag.test_value = 3
 
     d_rv = dirichlet(pt.ones((M_pt, N_pt)), name="Gamma")
 

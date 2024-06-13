@@ -77,7 +77,8 @@ def test_ScanArgs():
     with pytest.raises(TypeError):
         ScanArgs.from_node(pt.ones(2).owner)
 
-    hmm_model_env = create_test_hmm()
+    with pytest.warns(FutureWarning):
+        hmm_model_env = create_test_hmm()
     scan_args = hmm_model_env["scan_args"]
     scan_op = hmm_model_env["scan_op"]
 
@@ -136,15 +137,16 @@ def test_ScanArgs():
 def test_ScanArgs_basics_mit_sot():
     srng = pt.random.RandomStream()
 
-    N_pt = pt.iscalar("N")
-    N_pt.tag.test_value = 10
-    M_pt = pt.iscalar("M")
-    M_pt.tag.test_value = 2
+    with pytest.warns(FutureWarning):
+        N_pt = pt.iscalar("N")
+        N_pt.tag.test_value = 10
+        M_pt = pt.iscalar("M")
+        M_pt.tag.test_value = 2
 
-    mus_pt = pt.matrix("mus")
-    mus_pt.tag.test_value = np.stack(
-        [np.arange(0.0, 10), np.arange(0.0, -10, -1)], axis=-1
-    ).astype(pytensor.config.floatX)
+        mus_pt = pt.matrix("mus")
+        mus_pt.tag.test_value = np.stack(
+            [np.arange(0.0, 10), np.arange(0.0, -10, -1)], axis=-1
+        ).astype(pytensor.config.floatX)
 
     sigmas_pt = pt.ones((N_pt,))
     sigmas_pt.name = "sigmas"
@@ -199,7 +201,8 @@ def test_ScanArgs_basics_mit_sot():
 
 
 def test_ScanArgs_remove_inner_input():
-    hmm_model_env = create_test_hmm()
+    with pytest.warns(FutureWarning):
+        hmm_model_env = create_test_hmm()
     scan_args = hmm_model_env["scan_args"]
     hmm_model_env["scan_op"]
     Y_t = hmm_model_env["Y_t"]
@@ -269,7 +272,8 @@ def test_ScanArgs_remove_inner_input():
 
 
 def test_ScanArgs_remove_outer_input():
-    hmm_model_env = create_test_hmm()
+    with pytest.warns(FutureWarning):
+        hmm_model_env = create_test_hmm()
     scan_args = hmm_model_env["scan_args"]
     hmm_model_env["scan_op"]
     Y_t = hmm_model_env["Y_t"]
@@ -315,7 +319,8 @@ def test_ScanArgs_remove_outer_input():
 
 
 def test_ScanArgs_remove_inner_output():
-    hmm_model_env = create_test_hmm()
+    with pytest.warns(FutureWarning):
+        hmm_model_env = create_test_hmm()
     scan_args = hmm_model_env["scan_args"]
     hmm_model_env["scan_op"]
     Y_t = hmm_model_env["Y_t"]
@@ -353,7 +358,8 @@ def test_ScanArgs_remove_inner_output():
 
 
 def test_ScanArgs_remove_outer_output():
-    hmm_model_env = create_test_hmm()
+    with pytest.warns(FutureWarning):
+        hmm_model_env = create_test_hmm()
     scan_args = hmm_model_env["scan_args"]
     hmm_model_env["scan_op"]
     Y_t = hmm_model_env["Y_t"]
@@ -390,7 +396,8 @@ def test_ScanArgs_remove_outer_output():
 
 
 def test_ScanArgs_remove_nonseq_outer_input():
-    hmm_model_env = create_test_hmm()
+    with pytest.warns(FutureWarning):
+        hmm_model_env = create_test_hmm()
     scan_args = hmm_model_env["scan_args"]
     hmm_model_env["scan_op"]
     Y_t = hmm_model_env["Y_t"]
@@ -427,7 +434,8 @@ def test_ScanArgs_remove_nonseq_outer_input():
 
 
 def test_ScanArgs_remove_nonseq_inner_input():
-    hmm_model_env = create_test_hmm()
+    with pytest.warns(FutureWarning):
+        hmm_model_env = create_test_hmm()
     scan_args = hmm_model_env["scan_args"]
     hmm_model_env["scan_op"]
     hmm_model_env["Y_t"]
@@ -463,7 +471,8 @@ def test_ScanArgs_remove_nonseq_inner_input():
 
 
 def test_ScanArgs_remove_shared_inner_output():
-    hmm_model_env = create_test_hmm()
+    with pytest.warns(FutureWarning):
+        hmm_model_env = create_test_hmm()
     scan_args = hmm_model_env["scan_args"]
     hmm_model_env["scan_op"]
     hmm_model_env["Y_t"]

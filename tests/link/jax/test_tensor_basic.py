@@ -11,7 +11,6 @@ import pytensor
 import pytensor.tensor.basic as ptb
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import get_test_value
 from pytensor.tensor.type import iscalar, matrix, scalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 from tests.tensor.test_basic import TestAlloc
@@ -81,12 +80,12 @@ def test_arange_nonconcrete():
     """JAX cannot JIT-compile `jax.numpy.arange` when arguments are not concrete values."""
 
     a = scalar("a")
-    a.tag.test_value = 10
+    a_test_value = 10
     out = ptb.arange(a)
 
     with pytest.raises(NotImplementedError):
         fgraph = FunctionGraph([a], [out])
-        compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+        compare_jax_and_py(fgraph, [a_test_value])
 
 
 def test_jax_Join():
@@ -230,9 +229,7 @@ def test_tri_nonconcrete():
         scalar("n", dtype="int64"),
         scalar("k", dtype="int64"),
     )
-    m.tag.test_value = 10
-    n.tag.test_value = 10
-    k.tag.test_value = 0
+    test_values = {m: 10, n: 10, k: 0}
 
     out = ptb.tri(m, n, k)
 
@@ -240,4 +237,4 @@ def test_tri_nonconcrete():
     # the error handler raises an Attribute error first, so that's what this test needs to pass
     with pytest.raises(AttributeError):
         fgraph = FunctionGraph([m, n, k], [out])
-        compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+        compare_jax_and_py(fgraph, [test_values[i] for i in test_values])

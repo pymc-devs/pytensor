@@ -131,26 +131,30 @@ class TestMakeThunk:
 
 
 def test_test_value_python_objects():
-    for x in ([0, 1, 2], 0, 0.5, 1):
-        assert np.all(op.get_test_value(x) == x)
+    with pytest.warns(FutureWarning):
+        for x in ([0, 1, 2], 0, 0.5, 1):
+            assert np.all(op.get_test_value(x) == x)
 
 
 def test_test_value_ndarray():
     x = np.zeros((5, 5))
-    v = op.get_test_value(x)
+    with pytest.warns(FutureWarning):
+        v = op.get_test_value(x)
     assert np.all(v == x)
 
 
 def test_test_value_constant():
     x = pt.as_tensor_variable(np.zeros((5, 5)))
-    v = op.get_test_value(x)
+    with pytest.warns(FutureWarning):
+        v = op.get_test_value(x)
 
     assert np.all(v == np.zeros((5, 5)))
 
 
 def test_test_value_shared():
     x = shared(np.zeros((5, 5)))
-    v = op.get_test_value(x)
+    with pytest.warns(FutureWarning):
+        v = op.get_test_value(x)
 
     assert np.all(v == np.zeros((5, 5)))
 
@@ -158,7 +162,8 @@ def test_test_value_shared():
 @config.change_flags(compute_test_value="raise")
 def test_test_value_op():
     x = log(np.ones((5, 5)))
-    v = op.get_test_value(x)
+    with pytest.warns(FutureWarning):
+        v = op.get_test_value(x)
 
     assert np.allclose(v, np.zeros((5, 5)))
 
@@ -176,7 +181,8 @@ def test_get_test_values_ignore():
     """Tests that `get_test_values` returns `[]` when debugger is set to "ignore" and some values are missing."""
 
     x = vector()
-    assert op.get_test_values(x) == []
+    with pytest.warns(FutureWarning):
+        assert op.get_test_values(x) == []
 
 
 def test_get_test_values_success():
@@ -184,19 +190,20 @@ def test_get_test_values_success():
 
     for mode in ["ignore", "warn", "raise"]:
         with config.change_flags(compute_test_value=mode):
-            x = vector()
-            x.tag.test_value = np.zeros((4,), dtype=config.floatX)
-            y = np.zeros((5, 5))
+            with pytest.warns(FutureWarning):
+                x = vector()
+                x.tag.test_value = np.zeros((4,), dtype=config.floatX)
+                y = np.zeros((5, 5))
 
-            iters = 0
+                iters = 0
 
-            for x_val, y_val in op.get_test_values(x, y):
-                assert x_val.shape == (4,)
-                assert y_val.shape == (5, 5)
+                for x_val, y_val in op.get_test_values(x, y):
+                    assert x_val.shape == (4,)
+                    assert y_val.shape == (5, 5)
 
-                iters += 1
+                    iters += 1
 
-            assert iters == 1
+                assert iters == 1
 
 
 @config.change_flags(compute_test_value="raise")
@@ -204,8 +211,9 @@ def test_get_test_values_exc():
     """Tests that `get_test_values` raises an exception when debugger is set to raise and a value is missing."""
 
     with pytest.raises(TestValueError):
-        x = vector()
-        assert op.get_test_values(x) == []
+        with pytest.warns(FutureWarning):
+            x = vector()
+            assert op.get_test_values(x) == []
 
 
 def test_op_invalid_input_types():

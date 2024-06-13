@@ -15,8 +15,9 @@ from pytensor.tensor.type import iscalar, tensor
 
 @pytest.fixture(scope="function", autouse=False)
 def strict_test_value_flags():
-    with config.change_flags(cxx="", compute_test_value="raise"):
-        yield
+    with pytest.warns(FutureWarning):
+        with config.change_flags(cxx="", compute_test_value="raise"):
+            yield
 
 
 def test_RandomVariable_basics(strict_test_value_flags):
@@ -90,17 +91,17 @@ def test_RandomVariable_bcast(strict_test_value_flags):
     rv = RandomVariable("normal", 0, [0, 0], config.floatX, inplace=True)
 
     mu = tensor(dtype=config.floatX, shape=(1, None, None))
-    mu.tag.test_value = np.zeros((1, 2, 3)).astype(config.floatX)
-    sd = tensor(dtype=config.floatX, shape=(None, None))
-    sd.tag.test_value = np.ones((2, 3)).astype(config.floatX)
-
-    s1 = iscalar()
-    s1.tag.test_value = 1
-    s2 = iscalar()
-    s2.tag.test_value = 2
-    s3 = iscalar()
-    s3.tag.test_value = 3
-    s3 = Assert("testing")(s3, eq(s1, 1))
+    with pytest.warns(FutureWarning):
+        mu.tag.test_value = np.zeros((1, 2, 3)).astype(config.floatX)
+        sd = tensor(dtype=config.floatX, shape=(None, None))
+        sd.tag.test_value = np.ones((2, 3)).astype(config.floatX)
+        s1 = iscalar()
+        s1.tag.test_value = 1
+        s2 = iscalar()
+        s2.tag.test_value = 2
+        s3 = iscalar()
+        s3.tag.test_value = 3
+        s3 = Assert("testing")(s3, eq(s1, 1))
 
     res = rv(mu, sd, size=(s1, s2, s3))
     assert res.broadcastable == (False,) * 3
@@ -119,19 +120,20 @@ def test_RandomVariable_bcast(strict_test_value_flags):
 def test_RandomVariable_bcast_specify_shape(strict_test_value_flags):
     rv = RandomVariable("normal", 0, [0, 0], config.floatX, inplace=True)
 
-    s1 = pt.as_tensor(1, dtype=np.int64)
-    s2 = iscalar()
-    s2.tag.test_value = 2
-    s3 = iscalar()
-    s3.tag.test_value = 3
-    s3 = Assert("testing")(s3, eq(s1, 1))
+    with pytest.warns(FutureWarning):
+        s1 = pt.as_tensor(1, dtype=np.int64)
+        s2 = iscalar()
+        s2.tag.test_value = 2
+        s3 = iscalar()
+        s3.tag.test_value = 3
+        s3 = Assert("testing")(s3, eq(s1, 1))
 
-    size = specify_shape(pt.as_tensor([s1, s3, s2, s2, s1]), (5,))
-    mu = tensor(dtype=config.floatX, shape=(None, None, 1))
-    mu.tag.test_value = np.random.normal(size=(2, 2, 1)).astype(config.floatX)
+        size = specify_shape(pt.as_tensor([s1, s3, s2, s2, s1]), (5,))
+        mu = tensor(dtype=config.floatX, shape=(None, None, 1))
+        mu.tag.test_value = np.random.normal(size=(2, 2, 1)).astype(config.floatX)
 
-    std = tensor(dtype=config.floatX, shape=(None, 1, 1))
-    std.tag.test_value = np.ones((2, 1, 1)).astype(config.floatX)
+        std = tensor(dtype=config.floatX, shape=(None, 1, 1))
+        std.tag.test_value = np.ones((2, 1, 1)).astype(config.floatX)
 
     res = rv(mu, std, size=size)
     assert res.type.shape == (1, None, None, None, 1)

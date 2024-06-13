@@ -1426,11 +1426,12 @@ class TestScan:
         x0 = vector("x0")
         y0 = vector("y0")
 
-        W_in1.tag.test_value = vW_in1
-        u1.tag.test_value = v_u1
-        u2.tag.test_value = v_u2
-        x0.tag.test_value = v_x0
-        y0.tag.test_value = v_y0
+        with pytest.warns(FutureWarning):
+            W_in1.tag.test_value = vW_in1
+            u1.tag.test_value = v_u1
+            u2.tag.test_value = v_u2
+            x0.tag.test_value = v_x0
+            y0.tag.test_value = v_y0
 
         def f_rnn_cmpl(u1_t, u2_tm1, u2_t, u2_tp1, x_tm1, y_tm1, y_tm3, W_in1):
             return [
@@ -2210,7 +2211,8 @@ def test_cython_performance(benchmark):
 def test_compute_test_values():
     """Verify that test values can be used with scan."""
     x = vector("x")
-    x.tag.test_value = np.ones(3, dtype=config.floatX)
+    with pytest.warns(FutureWarning):
+        x.tag.test_value = np.ones(3, dtype=config.floatX)
 
     y = shared(np.arange(3, dtype=config.floatX), name="y")
 
@@ -2239,19 +2241,16 @@ def test_compute_test_value_grad():
     """
     See https://groups.google.com/d/msg/theano-users/fAP3i2CbskQ/3OgBf4yjqiQJ
     """
-    WEIGHT = np.array([1, 2, 1, 3, 4, 1, 5, 6, 1, 7, 8, 1], dtype="float32")
+    # WEIGHT = np.array([1, 2, 1, 3, 4, 1, 5, 6, 1, 7, 8, 1], dtype="float32")
 
     with config.change_flags(compute_test_value="raise", exception_verbosity="high"):
         W_flat = fvector(name="W")
-        W_flat.tag.test_value = WEIGHT
         W = W_flat.reshape((2, 2, 3))
 
         outputs_mi = pt.as_tensor_variable(np.asarray(0, dtype="float32"))
-        outputs_mi.tag.test_value = np.asarray(0, dtype="float32")
 
         def loss_mi(mi, sum_mi, W):
             outputs_ti = pt.as_tensor_variable(np.asarray(0, dtype="float32"))
-            outputs_ti.tag.test_value = np.asarray(0, dtype="float32")
 
             def loss_ti(ti, sum_ti, mi, W):
                 return W.sum().sum().sum() + sum_ti
@@ -2284,7 +2283,10 @@ def test_compute_test_value_grad_cast():
     """
     with config.change_flags(compute_test_value="raise"):
         h = matrix("h")
-        h.tag.test_value = np.array([[1, 2, 3, 4], [5, 6, 7, 8]], dtype=config.floatX)
+        with pytest.warns(FutureWarning):
+            h.tag.test_value = np.array(
+                [[1, 2, 3, 4], [5, 6, 7, 8]], dtype=config.floatX
+            )
 
         w = shared(
             np.random.default_rng(utt.fetch_seed())
