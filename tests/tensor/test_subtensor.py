@@ -2486,9 +2486,10 @@ class TestInferShape(utt.InferShapeTester):
             AdvancedSubtensor,
         )
 
-        admat.tag.test_value = admat_val
-        aivec.tag.test_value = aivec_val
-        bivec.tag.test_value = bivec_val
+        with pytest.warns(FutureWarning):
+            admat.tag.test_value = admat_val
+            aivec.tag.test_value = aivec_val
+            bivec.tag.test_value = bivec_val
 
         # Make sure it doesn't complain about test values
         with config.change_flags(compute_test_value="raise"):
