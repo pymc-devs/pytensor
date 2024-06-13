@@ -265,11 +265,11 @@ def generate_fallback_impl(op, node, storage_map=None, **kwargs):
     Note limitations: https://numba.pydata.org/numba-doc/dev/user/withobjmode.html#the-objmode-context-manager
     """
 
-    warnings.warn(
-        f"Numba will use object mode to run {op}'s perform method. "
-        f"Set `pytensor.config.compiler_verbose = True` to see more details.",
-        UserWarning,
-    )
+    # warnings.warn(
+    #     f"Numba will use object mode to run {op}'s perform method. "
+    #     f"Set `pytensor.config.compiler_verbose = True` to see more details.",
+    #     UserWarning,
+    # )
 
     if config.compiler_verbose:
         node.dprint(depth=5, print_type=True)
