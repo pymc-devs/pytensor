@@ -17,7 +17,11 @@ from pytensor.tensor.type import tensor
 
 
 # Fail for unexpected warnings in this file
-pytestmark = pytest.mark.filterwarnings("error")
+pytestmark = pytest.mark.filterwarnings(
+    "error",
+    r"ignore:^Numba will use object mode to run.*perform method\.:UserWarning",
+    r"ignore:Cannot cache compiled function \"numba_funcified_fgraph\".*:numba.NumbaWarning",
+)
 
 floatX = pytensor.config.floatX
 ATOL = RTOL = 1e-8 if floatX == "float64" else 1e-4

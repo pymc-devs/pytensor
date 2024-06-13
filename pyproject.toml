@@ -121,6 +121,9 @@ tag_prefix = "rel-"
 addopts = "--durations=50 --doctest-modules --ignore=pytensor/link --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/ipython.py"
 testpaths = ["pytensor/", "tests/"]
 xfail_strict = true
+filterwarnings =[
+    'ignore:^Numba will use object mode to run.*perform method\.:UserWarning',
+]
 
 [tool.ruff]
 line-length = 88
