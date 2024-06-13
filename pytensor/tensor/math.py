@@ -26,8 +26,11 @@ from pytensor.tensor.basic import (
     concatenate,
     constant,
     expand_dims,
+    extract_constant,
+    full_like,
     stack,
     switch,
+    take_along_axis,
 )
 from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
 from pytensor.tensor.elemwise import (
@@ -1571,6 +1574,38 @@ def std(input, axis=None, ddof=0, keepdims=False, corrected=False):
     return ret
 
 
+def median(input, axis=None):
+    """
+    Computes the median along the given axis(es) of a tensor `input`.
+
+    Parameters
+    ----------
+    axis: None or int or (list of int) (see `Sum`)
+        Compute the median along this axis of the tensor.
+        None means all axes (like numpy).
+
+    Notes
+    -----
+    This function uses the numpy implementation of median.
+    """
+
+    input = as_tensor_variable(input)
+    sorted_input = input.sort(axis=axis)
+    shape = input.shape[axis]
+    k = extract_constant(shape) // 2
+    if extract_constant(shape % 2) == 0:
+        indices1 = expand_dims(full_like(sorted_input.take(0, axis=axis), k - 1), axis)
+        indices2 = expand_dims(full_like(sorted_input.take(0, axis=axis), k), axis)
+        ans1 = take_along_axis(sorted_input, indices1, axis=axis)
+        ans2 = take_along_axis(sorted_input, indices2, axis=axis)
+        median_val = (ans1 + ans2) / 2.0
+    else:
+        indices = expand_dims(full_like(sorted_input.take(0, axis=axis), k), axis)
+        median_val = take_along_axis(sorted_input, indices, axis=axis)
+    median_val.name = "median"
+    return median_val.squeeze(axis=axis)
+
+
 @scalar_elemwise(symbolname="scalar_maximum")
 def maximum(x, y):
     """elemwise maximum. See max for the maximum in one tensor"""
@@ -3006,6 +3041,7 @@ __all__ = [
     "sum",
     "prod",
     "mean",
+    "median",
     "var",
     "std",
     "std",

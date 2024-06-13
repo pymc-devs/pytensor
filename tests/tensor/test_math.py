@@ -94,6 +94,7 @@ from pytensor.tensor.math import (
     max_and_argmax,
     maximum,
     mean,
+    median,
     min,
     minimum,
     mod,
@@ -3731,3 +3732,33 @@ def test_nan_to_num(nan, posinf, neginf):
         out,
         np.nan_to_num(y, nan=nan, posinf=posinf, neginf=neginf),
     )
+
+
+@pytest.mark.parametrize(
+    "data, axis",
+    [
+        # 1D array
+        ([1, 7, 3, 6, 5, 2, 4], 0),
+        # 2D array
+        ([[6, 2], [4, 3], [1, 5]], 0),
+        ([[6, 2], [4, 3], [1, 5]], 1),
+        # 3D array
+        ([[[6, 2, 3], [1, 5, 8], [4, 7, 9]], [[5, 3, 4], [8, 6, 2], [7, 1, 9]]], 0),
+        ([[[6, 2, 3], [1, 5, 8], [4, 7, 9]], [[5, 3, 4], [8, 6, 2], [7, 1, 9]]], 1),
+        ([[[6, 2, 3], [1, 5, 8], [4, 7, 9]], [[5, 3, 4], [8, 6, 2], [7, 1, 9]]], 2),
+        # 4D array
+        (
+            [
+                [[[3, 1], [4, 3]], [[0, 5], [6, 2]], [[7, 8], [9, 4]]],
+                [[[10, 11], [12, 13]], [[14, 15], [16, 17]], [[18, 19], [20, 21]]],
+            ],
+            3,
+        ),
+    ],
+)
+def test_median(data, axis):
+    x = tensor(shape=np.array(data).shape)
+    f = function([x], median(x, axis=axis))
+    result = f(data)
+    expected = np.median(data, axis=axis)
+    assert np.allclose(result, expected)
