@@ -48,6 +48,7 @@ from pytensor.tensor.subtensor import (
 )
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import MakeSlice, NoneConst
+from pytensor.typed_list import TypedListType
 
 
 def global_numba_func(func):
@@ -130,6 +131,8 @@ def get_numba_type(
             return CSCMatrixType(numba_dtype)
 
         raise NotImplementedError()
+    elif isinstance(pytensor_type, TypedListType):
+        return numba.types.List(get_numba_type(pytensor_type.ttype))
     else:
         raise NotImplementedError(f"Numba type not implemented for {pytensor_type}")
 
