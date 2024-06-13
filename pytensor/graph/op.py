@@ -69,6 +69,12 @@ def compute_test_value(node: Apply):
 
     """
     # Gather the test values for each input of the node
+
+    warnings.warn(
+        "compute_test_value is deprecated and will stop working in the future.",
+        FutureWarning,
+    )
+
     storage_map = {}
     compute_map = {}
     for i, ins in enumerate(node.inputs):
@@ -301,6 +307,10 @@ class Op(MetaObject):
                     n.name = f"{name}_{i}"
 
         if config.compute_test_value != "off":
+            warnings.warn(
+                "test_value machinery is deprecated and will stop working in the future.",
+                FutureWarning,
+            )
             compute_test_value(node)
 
         if self.default_output is not None:
@@ -710,6 +720,11 @@ def get_test_values(*args: Variable) -> Any | list[Any]:
 
     if config.compute_test_value == "off":
         return []
+
+    warnings.warn(
+        "test_value machinery is deprecated and will stop working in the future.",
+        FutureWarning,
+    )
 
     rval = []
 

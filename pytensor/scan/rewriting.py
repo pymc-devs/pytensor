@@ -2,6 +2,7 @@
 
 import copy
 import dataclasses
+import warnings
 from itertools import chain
 from sys import maxsize
 from typing import cast
@@ -305,6 +306,10 @@ def scan_push_out_non_seq(fgraph, node):
             pushed_out_node = nd.op.make_node(*new_inputs)
 
             if config.compute_test_value != "off":
+                warnings.warn(
+                    "test_value machinery is deprecated and will stop working in the future.",
+                    FutureWarning,
+                )
                 compute_test_value(pushed_out_node)
 
             # Step 2. Create variables to replace the old outputs of the node
@@ -511,6 +516,10 @@ def scan_push_out_seq(fgraph, node):
             nw_outer_node = nd.op.make_node(*outside_ins)
 
             if config.compute_test_value != "off":
+                warnings.warn(
+                    "test_value machinery is deprecated and will stop working in the future.",
+                    FutureWarning,
+                )
                 compute_test_value(nw_outer_node)
 
             # Step 2. Create variables for replacements
@@ -545,6 +554,10 @@ def scan_push_out_seq(fgraph, node):
             replace_with_out.append(new_outer)
 
             if hasattr(new_outer.tag, "test_value"):
+                warnings.warn(
+                    "test_value machinery is deprecated and will stop working in the future.",
+                    FutureWarning,
+                )
                 new_sh = new_outer.tag.test_value.shape
                 ref_sh = (outside_ins.tag.test_value.shape[0],)
                 ref_sh += nd.outputs[0].tag.test_value.shape
@@ -982,6 +995,10 @@ class ScanInplaceOptimizer(GraphRewriter):
                 new_lsi = inp.owner.op.make_node(*inp.owner.inputs)
 
                 if config.compute_test_value != "off":
+                    warnings.warn(
+                        "test_value machinery is deprecated and will stop working in the future.",
+                        FutureWarning,
+                    )
                     compute_test_value(new_lsi)
 
                 new_lsi_out = new_lsi.outputs

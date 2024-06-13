@@ -12,6 +12,7 @@ you probably want to use pytensor.tensor.[c,z,f,d,b,w,i,l,]scalar!
 
 import builtins
 import math
+import warnings
 from collections.abc import Callable, Mapping
 from copy import copy
 from itertools import chain
@@ -4414,6 +4415,10 @@ class Compositef32:
             if i.dtype == "float16":
                 mapping[i] = get_scalar_type("float32")()
                 if hasattr(i.tag, "test_value"):
+                    warnings.warn(
+                        "test_value machinery is deprecated and will stop working in the future.",
+                        FutureWarning,
+                    )
                     mapping[i].tag.test_value = i.tag.test_value
             else:
                 mapping[i] = i

@@ -78,6 +78,7 @@ Optimizations associated with these BLAS Ops are in tensor.rewriting.blas
 import logging
 import os
 import time
+import warnings
 
 import numpy as np
 
@@ -1967,6 +1968,10 @@ class BatchedDot(COp):
         test_values_enabled = config.compute_test_value != "off"
 
         if test_values_enabled:
+            warnings.warn(
+                "test_value machinery is deprecated and will stop working in the future.",
+                FutureWarning,
+            )
             try:
                 iv0 = pytensor.graph.op.get_test_value(inputs[0])
             except TestValueError:

@@ -3,6 +3,7 @@
 import copy
 import dataclasses
 import logging
+import warnings
 from collections import OrderedDict, namedtuple
 from collections.abc import Callable, Sequence
 from itertools import chain
@@ -74,6 +75,10 @@ def safe_new(
         nw_x.name = nw_name
         if config.compute_test_value != "off":
             # Copy test value, cast it if necessary
+            warnings.warn(
+                "test_value machinery is deprecated and will stop working in the future.",
+                FutureWarning,
+            )
             try:
                 x_test_value = get_test_value(x)
             except TestValueError:
@@ -104,6 +109,10 @@ def safe_new(
     # between test values, due to inplace operations for instance. This may
     # not be the most efficient memory-wise, though.
     if config.compute_test_value != "off":
+        warnings.warn(
+            "test_value machinery is deprecated and will stop working in the future.",
+            FutureWarning,
+        )
         try:
             nw_x.tag.test_value = copy.deepcopy(get_test_value(x))
         except TestValueError:

@@ -9,6 +9,7 @@ import os
 import pickle
 import sys
 import tempfile
+import warnings
 import zipfile
 from collections import defaultdict
 from contextlib import closing
@@ -61,6 +62,10 @@ class StripPickler(Pickler):
     def __init__(self, file, protocol=0, extra_tag_to_remove=None):
         # Can't use super as Pickler isn't a new style class
         super().__init__(file, protocol)
+        warnings.warn(
+            "compute_test_value is deprecated and will stop working in the future.",
+            FutureWarning,
+        )
         self.tag_to_remove = ["trace", "test_value"]
         if extra_tag_to_remove:
             self.tag_to_remove.extend(extra_tag_to_remove)

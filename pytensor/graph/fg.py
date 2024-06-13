@@ -1,6 +1,7 @@
 """A container for specifying and manipulating a graph with distinct inputs and outputs."""
 
 import time
+import warnings
 from collections import OrderedDict
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, Union, cast
@@ -493,6 +494,10 @@ class FunctionGraph(MetaObject):
             return
 
         if config.compute_test_value != "off":
+            warnings.warn(
+                "test_value machinery is deprecated and will stop working in the future.",
+                FutureWarning,
+            )
             try:
                 tval = pytensor.graph.op.get_test_value(var)
                 new_tval = pytensor.graph.op.get_test_value(new_var)
