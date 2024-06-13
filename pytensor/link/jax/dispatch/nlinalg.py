@@ -2,7 +2,7 @@ import jax.numpy as jnp
 
 from pytensor.link.jax.dispatch import jax_funcify
 from pytensor.tensor.blas import BatchedDot
-from pytensor.tensor.math import Dot, MaxAndArgmax
+from pytensor.tensor.math import Argmax, Dot, Max
 from pytensor.tensor.nlinalg import (
     SVD,
     Det,
@@ -104,17 +104,27 @@ def jax_funcify_BatchedDot(op, **kwargs):
     return batched_dot
 
 
-@jax_funcify.register(MaxAndArgmax)
-def jax_funcify_MaxAndArgmax(op, **kwargs):
+@jax_funcify.register(Max)
+def jax_funcify_Max(op, **kwargs):
     axis = op.axis
 
-    def maxandargmax(x, axis=axis):
+    def max(x):
+        max_res = jnp.max(x, axis)
+
+        return max_res
+
+    return max
+
+
+@jax_funcify.register(Argmax)
+def jax_funcify_Argmax(op, **kwargs):
+    axis = op.axis
+
+    def argmax(x):
         if axis is None:
             axes = tuple(range(x.ndim))
         else:
             axes = tuple(int(ax) for ax in axis)
-
-        max_res = jnp.max(x, axis)
 
         # NumPy does not support multiple axes for argmax; this is a
         # work-around
@@ -138,6 +148,6 @@ def jax_funcify_MaxAndArgmax(op, **kwargs):
 
         max_idx_res = jnp.argmax(reshaped_x, axis=-1).astype("int64")
 
-        return max_res, max_idx_res
+        return max_idx_res
 
-    return maxandargmax
+    return argmax

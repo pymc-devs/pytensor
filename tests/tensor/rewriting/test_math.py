@@ -38,7 +38,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import (
     Dot,
-    MaxAndArgmax,
+    Max,
     Prod,
     Sum,
     _conj,
@@ -3730,8 +3730,8 @@ def check_max_log_sum_exp(x, axis, dimshuffle_op=None):
             return
 
         # In mode FAST_COMPILE, the rewrites don't replace the
-        # `MaxAndArgmax` `Op`.
-        if isinstance(node.op, MaxAndArgmax):
+        # `Max` `Op`.
+        if isinstance(node.op, Max):
             return
 
     # TODO FIXME: Refactor this test so that it makes a direct assertion and

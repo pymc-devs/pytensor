@@ -552,8 +552,53 @@ def test_LogSoftmax(x, axis, exc):
         ),
     ],
 )
-def test_MaxAndArgmax(x, axes, exc):
-    g = ptm.MaxAndArgmax(axes)(x)
+def test_Max(x, axes, exc):
+    g = ptm.Max(axes)(x)
+
+    if isinstance(g, list):
+        g_fg = FunctionGraph(outputs=g)
+    else:
+        g_fg = FunctionGraph(outputs=[g])
+
+    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
+    with cm:
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
+
+
+@pytest.mark.parametrize(
+    "x, axes, exc",
+    [
+        (
+            set_test_value(pt.dscalar(), np.array(0.0, dtype="float64")),
+            [],
+            None,
+        ),
+        (
+            set_test_value(pt.dvector(), rng.random(size=(3,)).astype("float64")),
+            [0],
+            None,
+        ),
+        (
+            set_test_value(pt.dmatrix(), rng.random(size=(3, 2)).astype("float64")),
+            [0],
+            None,
+        ),
+        (
+            set_test_value(pt.dmatrix(), rng.random(size=(3, 2)).astype("float64")),
+            [0, 1],
+            None,
+        ),
+    ],
+)
+def test_Argmax(x, axes, exc):
+    g = ptm.Argmax(axes)(x)
 
     if isinstance(g, list):
         g_fg = FunctionGraph(outputs=g)
