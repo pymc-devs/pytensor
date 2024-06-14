@@ -160,7 +160,6 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
             # however, casting it would defeat the purpose of not
             # loading the whole data into memory
             pass
-
         elif isinstance(data, np.ndarray) and (data.dtype == self.numpy_dtype):
             if data.dtype.num != self.numpy_dtype.num:
                 data = _asarray(data, dtype=self.dtype)

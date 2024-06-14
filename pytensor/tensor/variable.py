@@ -959,7 +959,6 @@ class TensorConstantSignature(tuple):
         self.no_nan  # Ensure has_nan is computed.
         # Note that in the comparisons below, the elementwise comparisons
         # come last because they are the most expensive checks.
-
         if self.has_nan:
             other.no_nan  # Ensure has_nan is computed.
             return (

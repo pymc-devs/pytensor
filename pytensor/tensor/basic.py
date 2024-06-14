@@ -185,10 +185,6 @@ def _as_tensor_numbers(x, name, ndim, dtype=None, **kwargs):
     return constant(x, name=name, ndim=ndim, dtype=dtype)
 
 
-def _as_tensor_numbers(x, name, ndim, dtype=None, **kwargs):
-    return constant(x, name=name, ndim=ndim, dtype=dtype)
-
-
 @_as_tensor_variable.register(bool)
 def _as_tensor_bool(x, name, ndim, **kwargs):
     raise TypeError(
