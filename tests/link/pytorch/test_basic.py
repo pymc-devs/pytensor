@@ -11,7 +11,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
-from pytensor.raise_op import assert_op
+from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.type import scalar, vector
 
 
@@ -163,9 +163,13 @@ def test_shared_updates():
 
 
 def test_pytorch_checkandraise():
-    p = scalar()
-    p.tag.test_value = 0
+    check_and_raise = CheckAndRaise(AssertionError, "testing")
 
-    res = assert_op(p, p < 1.0)
+    x = scalar("x")
+    conds = (x > 0, x > 3)
+    y = check_and_raise(x, *conds)
 
-    function((p,), res, mode=pytorch_mode)
+    y_fn = function([x], y, mode="PYTORCH")
+
+    with pytest.raises(AssertionError, match="testing"):
+        y_fn(0.0)
