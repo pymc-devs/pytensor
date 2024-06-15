@@ -5,12 +5,14 @@ import numpy as np
 import scipy.stats as stats
 
 import pytensor
-from pytensor.tensor.basic import arange, as_tensor_variable
+from pytensor.tensor import get_vector_length, specify_shape
+from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.math import sqrt
 from pytensor.tensor.random.op import RandomVariable
 from pytensor.tensor.random.type import RandomGeneratorType, RandomStateType
 from pytensor.tensor.random.utils import (
     broadcast_params,
+    normalize_size_param,
     supp_shape_from_ref_param_shape,
 )
 from pytensor.tensor.random.var import (
@@ -2057,113 +2059,182 @@ class IntegersRV(RandomVariable):
 integers = IntegersRV()
 
 
-class ChoiceRV(RandomVariable):
+class ChoiceWithoutReplacement(RandomVariable):
     """Randomly choose an element in a sequence."""
 
-    name = "choice"
-    ndim_supp = 0
-    ndims_params = [1, 1, 0]
+    name = "choice_without_replacement"
     dtype = None
-    _print_name = ("choice", "\\operatorname{choice}")
+    _print_name = (
+        "choice_without_replacement",
+        "\\operatorname{choice_without_replacement}",
+    )
 
-    @classmethod
-    def rng_fn(cls, rng, a, p, replace, size):
-        return rng.choice(a, size, replace, p)
+    @property
+    def has_p_param(self) -> bool:
+        return len(self.ndims_params) == 3
 
-    def _supp_shape_from_params(self, *args, **kwargs):
-        raise NotImplementedError()
+    def _supp_shape_from_params(self, dist_params, param_shapes=None):
+        a, *_, core_shape = dist_params
+        a_shape = tuple(a.shape) if param_shapes is None else tuple(param_shapes[0])
+        a_batch_ndim = len(a_shape) - self.ndims_params[0]
+        a_core_shape = a_shape[a_batch_ndim:]
+        return tuple(core_shape) + a_core_shape[1:]
 
-    def _infer_shape(self, size, dist_params, param_shapes=None):
-        a, p, _ = dist_params
-        if isinstance(p.type, pytensor.tensor.type_other.NoneTypeT):
-            param_shapes = param_shapes[:1] if param_shapes is not None else None
-            shape = super()._infer_shape(size, (a,), param_shapes)
+    def rng_fn(self, *params):
+        if self.has_p_param:
+            rng, a, p, core_shape, size = params
         else:
-            param_shapes = param_shapes[:2] if param_shapes is not None else None
-            shape = super()._infer_shape(size, (a, p), param_shapes)
+            rng, a, core_shape, size = params
+            p = None
 
-        return shape
+        core_shape = tuple(core_shape)
 
-    def __call__(self, a, size=None, replace=True, p=None, **kwargs):
-        r"""Generate a random sample from an array.
+        # We don't have access to the node in rng_fn for easy computation of batch_ndim :(
+        a_batch_ndim = batch_ndim = a.ndim - self.ndims_params[0]
+        if p is not None:
+            p_batch_ndim = p.ndim - self.ndims_params[1]
+            batch_ndim = max(batch_ndim, p_batch_ndim)
+        size_ndim = 0 if size is None else len(size)
+        batch_ndim = max(batch_ndim, size_ndim)
 
-        Signature
-        ---------
+        if batch_ndim == 0:
+            return rng.choice(a, p=p, size=core_shape, replace=False)
 
-        `(x) -> ()`
+        # Numpy choice doesn't have a concept of batch dims
+        if size is None:
+            if p is None:
+                size = a.shape[:a_batch_ndim]
+            else:
+                size = np.broadcast_shapes(
+                    a.shape[:a_batch_ndim],
+                    p.shape[:p_batch_ndim],
+                )
 
-        Parameters
-        ----------
-        a
-            The array from which to randomly sample an element. If an int,
-            a sample is generated from `pytensor.tensor.arange(a)`.
-        size
-            Sample shape. If the given size is `(m, n, k)`, then `m * n *
-            k` independent samples are returned. Default is `None`, in
-            which case a single sample is returned.
-        replace
-            When `True`, sampling is performed with replacement.
-        p
-            The probabilities associated with each entry in `a`. If not
-            given, all elements have equal probability.
-        """
-        a = as_tensor_variable(a)
+        a = np.broadcast_to(a, size + a.shape[a_batch_ndim:])
+        if p is not None:
+            p = np.broadcast_to(p, size + p.shape[p_batch_ndim:])
 
-        if a.ndim == 0:
-            a = pytensor.tensor.arange(a)
+        a_indexed_shape = a.shape[len(size) + 1 :]
+        out = np.empty(size + core_shape + a_indexed_shape, dtype=a.dtype)
+        for idx in np.ndindex(size):
+            out[idx] = rng.choice(
+                a[idx], p=None if p is None else p[idx], size=core_shape, replace=False
+            )
+        return out
 
+
+def choice(a, size=None, replace=True, p=None, rng=None):
+    r"""Generate a random sample from an array.
+
+
+    Parameters
+    ----------
+    a
+        The array from which to randomly sample an element. If an int,
+        a sample is generated from `pytensor.tensor.arange(a)`.
+    p
+        The probabilities associated with each entry in `a`. If not
+        given, all elements have equal probability.
+    replace
+        When `True`, sampling is performed with replacement.
+    size
+        Sample shape. If the given size is `(m, n, k)`, then `m * n *
+        k` independent samples are returned. Default is `None`, in
+        which case a single sample is returned.
+    """
+    a = as_tensor_variable(a)
+    a_size = a if (a.type.ndim == 0) else a.shape[0]
+
+    if p is not None:
+        p = specify_shape(p, (a_size,))
+
+    if replace or size is None:
+        # In this case we build an expression out of simpler RVs
+        # This is equivalent to the numpy implementation:
+        # https://github.com/numpy/numpy/blob/2a9b9134270371b43223fc848b753fceab96b4a5/numpy/random/_generator.pyx#L905-L914
         if p is None:
-            p = pytensor.tensor.type_other.NoneConst
+            if rng is not None and isinstance(rng.type, RandomStateType):
+                idxs = randint(0, a_size, size=size, rng=rng)
+            else:
+                idxs = integers(0, a_size, size=size, rng=rng)
+        else:
+            idxs = categorical(p, size=size, rng=rng)
 
-        if isinstance(replace, bool):
-            replace = pytensor.tensor.constant(np.array(replace))
+        if a.type.ndim == 0:
+            # A was an implicit arange, we don't need to do any indexing
+            # TODO: Add rewrite for this optimization if users passed arange
+            return idxs
 
-        return super().__call__(a, p, replace, size=size, dtype=a.dtype, **kwargs)
+        # TODO: Can use take(a, idxs, axis) to support numpy axis argument to choice
+        return a[idxs]
 
+    # Sampling with p is not as trivial
+    # It involves some form of rejection sampling or iterative shuffling under the hood.
+    # We use a specialized RandomVariable Op for these case.
 
-choice = ChoiceRV()
+    # Because choice happens on a single axis, the core case includes a.ndim-1 dimensions
+    # Furthermore, due to replace=False the draws are not independent, and the core case of
+    # this RV includes the user provided size.
+    # If we have a tensor3 and a size=(2, 3) the signature of the underlying RV is
+    # "(a0, a1, a2), (2) -> (s0, s1, a1, a2)" if p is None and
+    # "(a0, a1, a2), (a0), (2) -> (s0, s1, a1, a2)" otherwise
+
+    core_shape = normalize_size_param(size)
+    core_shape_length = get_vector_length(core_shape)
+    a_ndim = a.type.ndim
+    dtype = a.type.dtype
+
+    if p is None:
+        ndims_params = [a_ndim, 1]
+    else:
+        ndims_params = [a_ndim, 1, 1]
+    ndim_supp = max(a_ndim - 1, 0) + core_shape_length
+
+    op = ChoiceWithoutReplacement(
+        ndim_supp=ndim_supp,
+        ndims_params=ndims_params,
+        dtype=dtype,
+    )
+
+    params = (a, core_shape) if p is None else (a, p, core_shape)
+    return op(*params, size=None, rng=rng)
 
 
 class PermutationRV(RandomVariable):
     """Randomly shuffle a sequence."""
 
     name = "permutation"
-    ndim_supp = 1
-    ndims_params = [1]
-    dtype = None
     _print_name = ("permutation", "\\operatorname{permutation}")
 
-    @classmethod
-    def rng_fn(cls, rng, x, size):
-        return rng.permutation(x)
-
     def _supp_shape_from_params(self, dist_params, param_shapes=None):
-        return supp_shape_from_ref_param_shape(
-            ndim_supp=self.ndim_supp,
-            dist_params=dist_params,
-            param_shapes=param_shapes,
-            ref_param_idx=0,
-        )
+        [x] = dist_params
+        x_shape = tuple(x.shape if param_shapes is None else param_shapes[0])
+        if x.type.ndim == 0:
+            return (x,)
+        else:
+            batch_x_ndim = x.type.ndim - self.ndims_params[0]
+            return x_shape[batch_x_ndim:]
 
-    def __call__(self, x, **kwargs):
-        r"""Randomly permute a sequence or a range of values.
+    def rng_fn(self, rng, x, size):
+        # We don't have access to the node in rng_fn :(
+        x_batch_ndim = x.ndim - self.ndims_params[0]
+        batch_ndim = max(x_batch_ndim, len(size or ()))
 
-        Signature
-        ---------
+        if batch_ndim:
+            # rng.permutation has no concept of batch dims
+            x_core_shape = x.shape[x_batch_ndim:]
+            if size is None:
+                size = x.shape[:x_batch_ndim]
+            else:
+                x = np.broadcast_to(x, size + x_core_shape)
 
-        `(x) -> (x)`
+            out = np.empty(size + x_core_shape, dtype=x.dtype)
+            for idx in np.ndindex(size):
+                out[idx] = rng.permutation(x[idx])
+            return out
 
-        Parameters
-        ----------
-        x
-            Elements to be shuffled.
-
-        """
-        x = as_tensor_variable(x)
-        return super().__call__(x, dtype=x.dtype, **kwargs)
-
-
-_permutation = PermutationRV()
+        else:
+            return rng.permutation(x.item() if self.ndims_params[0] == 0 else x)
 
 
 def permutation(x, **kwargs):
@@ -2172,7 +2243,7 @@ def permutation(x, **kwargs):
     Signature
     ---------
 
-    `(x) -> (x)`
+    `() -> (x)` if x is a scalar, `(*x) -> (*x)` otherwise
 
     Parameters
     ----------
@@ -2182,9 +2253,14 @@ def permutation(x, **kwargs):
 
     """
     x = as_tensor_variable(x)
-    if x.type.ndim == 0:
-        x = arange(x)
-    return _permutation(x, **kwargs)
+    x_ndim = x.type.ndim
+    x_dtype = x.type.dtype
+    # PermutationRV has a signature () -> (x) if x is a scalar
+    # and (*x) -> (*x) otherwise, with has many entries as the dimensionsality of x
+    ndim_supp = max(x_ndim, 1)
+    return PermutationRV(ndim_supp=ndim_supp, ndims_params=[x_ndim], dtype=x_dtype)(
+        x, **kwargs
+    )
 
 
 __all__ = [

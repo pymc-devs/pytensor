@@ -59,6 +59,8 @@ def global_numba_func(func):
 
 def numba_njit(*args, **kwargs):
     kwargs.setdefault("cache", config.numba__cache)
+    kwargs.setdefault("no_cpython_wrapper", True)
+    kwargs.setdefault("no_cfunc_wrapper", True)
 
     # Supress caching warnings
     warnings.filterwarnings(
@@ -419,7 +421,12 @@ def generate_fallback_impl(op, node=None, storage_map=None, **kwargs):
 
 @singledispatch
 def numba_funcify(op, node=None, storage_map=None, **kwargs):
-    """Generate a numba function for a given op and apply node."""
+    """Generate a numba function for a given op and apply node.
+
+    The resulting function will usually use the `no_cpython_wrapper`
+    argument in numba, so it can not be called directly from python,
+    but only from other jit functions.
+    """
     return generate_fallback_impl(op, node, storage_map, **kwargs)
 
 

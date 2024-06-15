@@ -470,7 +470,9 @@ _jit_options = {
         "afn",  # Approximate functions
         "reassoc",
         "nsz",  # TODO Do we want this one?
-    }
+    },
+    "no_cpython_wrapper": True,
+    "no_cfunc_wrapper": True,
 }
 
 
@@ -698,7 +700,14 @@ def numba_funcify_Elemwise(op, node, **kwargs):
             return tuple(outputs_summed)
         return outputs_summed[0]
 
-    @overload(elemwise)
+    @overload(
+        elemwise,
+        jit_options={
+            "fastmath": flags,
+            "no_cpython_wrapper": True,
+            "no_cfunc_wrapper": True,
+        },
+    )
     def ov_elemwise(*inputs):
         return elemwise_wrapper
 

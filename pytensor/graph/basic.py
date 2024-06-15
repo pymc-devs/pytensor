@@ -1789,38 +1789,6 @@ def view_roots(node: Variable) -> list[Variable]:
         return [node]
 
 
-def list_of_nodes(
-    inputs: Collection[Variable], outputs: Iterable[Variable]
-) -> list[Apply]:
-    r"""Return the `Apply` nodes of the graph between `inputs` and `outputs`.
-
-    Parameters
-    ----------
-    inputs : list of Variable
-        Input `Variable`\s.
-    outputs : list of Variable
-        Output `Variable`\s.
-
-    """
-
-    def expand(o: Apply) -> list[Apply]:
-        return [
-            inp.owner
-            for inp in o.inputs
-            if inp.owner and not any(i in inp.owner.outputs for i in inputs)
-        ]
-
-    return list(
-        cast(
-            Iterable[Apply],
-            walk(
-                [o.owner for o in outputs if o.owner],
-                expand,
-            ),
-        )
-    )
-
-
 def apply_depends_on(apply: Apply, depends_on: Apply | Collection[Apply]) -> bool:
     """Determine if any `depends_on` is in the graph given by ``apply``.
 

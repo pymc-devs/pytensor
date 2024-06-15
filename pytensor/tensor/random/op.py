@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from copy import copy
+from typing import cast
 
 import numpy as np
 
@@ -305,6 +306,9 @@ class RandomVariable(Op):
         outputs = (rng.type(), out_var)
 
         return Apply(self, inputs, outputs)
+
+    def batch_ndim(self, node: Apply) -> int:
+        return cast(int, node.default_output().type.ndim - self.ndim_supp)
 
     def perform(self, node, inputs, outputs):
         rng_var_out, smpl_out = outputs
