@@ -12,8 +12,7 @@ from pytensor.raise_op import CheckAndRaise
 @singledispatch
 def pytorch_typify(data, dtype=None, **kwargs):
     r"""Convert instances of PyTensor `Type`\s to PyTorch types."""
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    return torch.as_tensor(data, dtype=dtype, device=device)
+    return torch.as_tensor(data, dtype=dtype)
 
 
 @singledispatch
