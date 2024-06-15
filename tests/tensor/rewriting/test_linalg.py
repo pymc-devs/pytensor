@@ -394,8 +394,8 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
 
 @pytest.mark.parametrize(
     "shape",
-    [(), (7,), (1, 7), (7, 1), (7, 7)],
-    ids=["scalar", "vector", "row_vec", "col_vec", "matrix"],
+    [(), (7,), (1, 7), (7, 1), (7, 7), (3, 7, 7)],
+    ids=["scalar", "vector", "row_vec", "col_vec", "matrix", "batched_input"],
 )
 def test_det_diag_from_eye_mul(shape):
     # Initializing x based on scalar/vector/matrix
@@ -410,14 +410,14 @@ def test_det_diag_from_eye_mul(shape):
     assert not any(isinstance(node.op, Det) for node in nodes)
 
     # NUMERIC VALUE TEST
-    f_det = function([x], z_det)
     if len(shape) == 0:
         x_test = np.array(np.random.rand()).astype(config.floatX)
     elif len(shape) == 1:
         x_test = np.random.rand(*shape).astype(config.floatX)
     else:
         x_test = np.random.rand(*shape).astype(config.floatX)
-    det_val = f_det(x_test)
+    x_test_matrix = np.eye(7) * x_test
+    det_val = np.linalg.det(x_test_matrix)
     rewritten_val = f_rewritten(x_test)
 
     assert_allclose(

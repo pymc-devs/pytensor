@@ -407,23 +407,23 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
     list of Variable, optional
         List of optimized variables, or None if no optimization was performed
     """
-    node_input_op = node.inputs[0]
+    node_input = node.inputs[0]
     # Check if the op is Elemwise and mul
     if not (
-        node_input_op.owner is not None
-        and isinstance(node_input_op.owner.op, Elemwise)
-        and isinstance(node_input_op.owner.op.scalar_op, Mul)
+        node_input.owner is not None
+        and isinstance(node_input.owner.op, Elemwise)
+        and isinstance(node_input.owner.op.scalar_op, Mul)
     ):
         return None
 
     # Find whether any of the inputs to mul is Eye
-    inputs_to_mul = node_input_op.owner.inputs
+    inputs_to_mul = node_input.owner.inputs
     eye_input = [
         mul_input
         for mul_input in inputs_to_mul
         if mul_input.owner and isinstance(mul_input.owner.op, Eye)
     ]
-    if not (eye_input[0]):
+    if not (eye_input):
         return None
 
     # Get all non Eye inputs (scalars/matrices/vectors)
@@ -433,17 +433,19 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
     if len(non_eye_inputs) >= 2:
         return None
 
-    # Checking if original x was matrix
-    if not non_eye_inputs[0].owner:
-        # It was a matrix
-        det_val = non_eye_inputs[0].diagonal().prod()
+    # Checking if original x was scalar/vector/matrix
+
+    if non_eye_inputs[0].type.broadcastable[-2:] == (True, True):
+        # For scalar
+        det_val = non_eye_inputs[0].owner.inputs[0] ** (eye_input[0].shape[0]).astype(
+            config.floatX
+        )
+    elif non_eye_inputs[0].type.broadcastable[-2:] == (False, False):
+        # For Matrix
+        det_val = non_eye_inputs[0].diagonal().prod(axis=-1)
     else:
-        # Check for scalar (ndim = 0) or vector (ndim = 1)
-        sca_vec_input = non_eye_inputs[0].owner.inputs[0]
-        if sca_vec_input.ndim == 0:
-            det_val = sca_vec_input ** (eye_input[0].shape[0]).astype(config.floatX)
-        else:
-            det_val = sca_vec_input.prod()
+        # For vector
+        det_val = non_eye_inputs[0].prod(axis=(-1, -2))
 
     return [det_val]
 
