@@ -8,6 +8,7 @@ from pytensor.tensor.nlinalg import (
     Det,
     Eig,
     Eigh,
+    KroneckerProduct,
     MatrixInverse,
     MatrixPinv,
     QRFull,
@@ -102,6 +103,14 @@ def jax_funcify_BatchedDot(op, **kwargs):
         return jnp.matmul(a, b)
 
     return batched_dot
+
+
+@jax_funcify.register(KroneckerProduct)
+def jax_funcify_KroneckerProduct(op, **kwargs):
+    def _kron(x, y):
+        return jnp.kron(x, y)
+
+    return _kron
 
 
 @jax_funcify.register(Max)

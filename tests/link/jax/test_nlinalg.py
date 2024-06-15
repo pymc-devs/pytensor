@@ -165,3 +165,15 @@ def test_pinv_hermitian():
     assert not np.allclose(
         jax_fn(A_not_h_test), np.linalg.pinv(A_not_h_test, hermitian=True)
     )
+
+
+def test_kron():
+    x = matrix("x")
+    y = matrix("y")
+    z = pt_nlinalg.kron(x, y)
+
+    fgraph = FunctionGraph([x, y], [z])
+    x_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
+    y_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
+
+    compare_jax_and_py(fgraph, [x_np, y_np])
