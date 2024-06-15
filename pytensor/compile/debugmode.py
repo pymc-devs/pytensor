@@ -687,7 +687,7 @@ def _lessbroken_deepcopy(a):
     else:
         rval = copy.deepcopy(a)
 
-    assert type(rval) == type(a), (type(rval), type(a))
+    assert type(rval) is type(a), (type(rval), type(a))
 
     if isinstance(rval, np.ndarray):
         assert rval.dtype == a.dtype
@@ -980,7 +980,7 @@ def _check_preallocated_output(
         changed_inner_mode = False
         if isinstance(getattr(node, "op", None), HasInnerGraph):
             fn = node.op.fn
-            if not fn or not hasattr(fn, "maker") or not hasattr(fn.maker, "mode"):
+            if not (fn and hasattr(fn, "maker") and hasattr(fn.maker, "mode")):
                 _logger.warning(f"Expected pytensor function not found in {node.op}.fn")
             else:
                 if isinstance(fn.maker.mode, DebugMode):
@@ -1154,7 +1154,7 @@ class _FunctionGraphEvent:
             return str(self.__dict__)
 
     def __eq__(self, other):
-        rval = type(self) == type(other)
+        rval = type(self) is type(other)
         if rval:
             # nodes are not compared because this comparison is
             # supposed to be true for corresponding events that happen

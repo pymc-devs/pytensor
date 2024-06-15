@@ -17,6 +17,7 @@ from pytensor.printing import (
     PatternPrinter,
     PPrinter,
     Print,
+    char_from_number,
     debugprint,
     default_printer,
     get_node_by_id,
@@ -28,6 +29,22 @@ from pytensor.printing import (
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.type import dmatrix, dvector, matrix
 from tests.graph.utils import MyInnerGraphOp, MyOp, MyVariable
+
+
+@pytest.mark.parametrize(
+    "number,s",
+    [
+        (0, "A"),
+        (1, "B"),
+        (25, "Z"),
+        (26, "BA"),
+        (27, "BB"),
+        (3 * 26**2 + 2 * 26 + 0, "DCA"),
+        (42421337, "DOVPLX"),
+    ],
+)
+def test_char_from_number(number: int, s: str):
+    assert char_from_number(number) == s
 
 
 @pytest.mark.skipif(not pydot_imported, reason="pydot not available")

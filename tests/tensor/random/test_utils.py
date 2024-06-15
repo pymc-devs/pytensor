@@ -101,7 +101,7 @@ class TestSharedRandomStream:
         assert np.all(g() == g())
         assert np.all(abs(nearly_zeros()) < 1e-5)
 
-    @pytest.mark.parametrize("rng_ctor", [np.random.RandomState, np.random.default_rng])
+    @pytest.mark.parametrize("rng_ctor", [np.random.default_rng])
     def test_basics(self, rng_ctor):
         random = RandomStream(seed=utt.fetch_seed(), rng_ctor=rng_ctor)
 
@@ -114,7 +114,7 @@ class TestSharedRandomStream:
         assert hasattr(random, "standard_normal")
 
         with pytest.raises(AttributeError):
-            np_random = RandomStream(namespace=np, rng_ctor=rng_ctor)
+            np_random = RandomStream(namespace=np.random, rng_ctor=rng_ctor)
             np_random.ndarray
 
         fn = function([], random.uniform(0, 1, size=(2, 2)), updates=random.updates())
@@ -132,7 +132,7 @@ class TestSharedRandomStream:
         assert np.allclose(fn_val0, numpy_val0)
         assert np.allclose(fn_val1, numpy_val1)
 
-    @pytest.mark.parametrize("rng_ctor", [np.random.RandomState, np.random.default_rng])
+    @pytest.mark.parametrize("rng_ctor", [np.random.default_rng])
     def test_seed(self, rng_ctor):
         init_seed = 234
         random = RandomStream(init_seed, rng_ctor=rng_ctor)
@@ -176,7 +176,7 @@ class TestSharedRandomStream:
             assert random_state["bit_generator"] == ref_state["bit_generator"]
             assert random_state["state"] == ref_state["state"]
 
-    @pytest.mark.parametrize("rng_ctor", [np.random.RandomState, np.random.default_rng])
+    @pytest.mark.parametrize("rng_ctor", [np.random.default_rng])
     def test_uniform(self, rng_ctor):
         # Test that RandomStream.uniform generates the same results as numpy
         # Check over two calls to see if the random state is correctly updated.
@@ -195,7 +195,7 @@ class TestSharedRandomStream:
         assert np.allclose(fn_val0, numpy_val0)
         assert np.allclose(fn_val1, numpy_val1)
 
-    @pytest.mark.parametrize("rng_ctor", [np.random.RandomState, np.random.default_rng])
+    @pytest.mark.parametrize("rng_ctor", [np.random.default_rng])
     def test_default_updates(self, rng_ctor):
         # Basic case: default_updates
         random_a = RandomStream(utt.fetch_seed(), rng_ctor=rng_ctor)
@@ -244,7 +244,7 @@ class TestSharedRandomStream:
         assert np.all(fn_e_val0 == fn_a_val0)
         assert np.all(fn_e_val1 == fn_e_val0)
 
-    @pytest.mark.parametrize("rng_ctor", [np.random.RandomState, np.random.default_rng])
+    @pytest.mark.parametrize("rng_ctor", [np.random.default_rng])
     def test_multiple_rng_aliasing(self, rng_ctor):
         # Test that when we have multiple random number generators, we do not alias
         # the state_updates member. `state_updates` can be useful when attempting to
@@ -257,7 +257,7 @@ class TestSharedRandomStream:
         assert rng1.state_updates is not rng2.state_updates
         assert rng1.gen_seedgen is not rng2.gen_seedgen
 
-    @pytest.mark.parametrize("rng_ctor", [np.random.RandomState, np.random.default_rng])
+    @pytest.mark.parametrize("rng_ctor", [np.random.default_rng])
     def test_random_state_transfer(self, rng_ctor):
         # Test that random state can be transferred from one pytensor graph to another.
 

@@ -8,10 +8,16 @@ from pytensor.compile import shared
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
 from pytensor.configdefaults import config
-from pytensor.gradient import DisconnectedType, Rop, disconnected_type, grad
+from pytensor.gradient import (
+    DisconnectedType,
+    Rop,
+    disconnected_type,
+    grad,
+    verify_grad,
+)
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.null_type import NullType
+from pytensor.graph.null_type import NullType, null_type
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.utils import MissingInputError
 from pytensor.printing import debugprint
@@ -22,7 +28,15 @@ from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.random.utils import RandomStream
 from pytensor.tensor.rewriting.shape import ShapeOptimizer
 from pytensor.tensor.shape import specify_shape
-from pytensor.tensor.type import TensorType, matrices, matrix, scalar, vector, vectors
+from pytensor.tensor.type import (
+    TensorType,
+    dscalars,
+    matrices,
+    matrix,
+    scalar,
+    vector,
+    vectors,
+)
 from tests import unittest_tools
 from tests.graph.utils import MyVariable
 
@@ -92,6 +106,20 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         res = fn(xv, yv, zv)
         assert res.shape == (2, 5)
         assert np.all(180.0 == res)
+
+    def test_overrides_deprecated_api(self):
+        inp = scalar("x")
+        out = inp + 1
+        for kwarg in ("lop_overrides", "grad_overrides", "rop_overrides"):
+            with pytest.raises(
+                ValueError, match="'default' is no longer a valid value for overrides"
+            ):
+                OpFromGraph([inp], [out], **{kwarg: "default"})
+
+            with pytest.raises(
+                TypeError, match="Variables are no longer valid types for overrides"
+            ):
+                OpFromGraph([inp], [out], **{kwarg: null_type()})
 
     @pytest.mark.parametrize(
         "cls_ofg", [OpFromGraph, partial(OpFromGraph, inline=True)]
@@ -181,8 +209,9 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         dedz = vector("dedz")
         op_mul_grad = cls_ofg([x, y, dedz], go([x, y], [dedz]))
 
-        op_mul = cls_ofg([x, y], [x * y], grad_overrides=go)
-        op_mul2 = cls_ofg([x, y], [x * y], grad_overrides=op_mul_grad)
+        with pytest.warns(FutureWarning, match="grad_overrides is deprecated"):
+            op_mul = cls_ofg([x, y], [x * y], grad_overrides=go)
+            op_mul2 = cls_ofg([x, y], [x * y], grad_overrides=op_mul_grad)
 
         # single override case (function or OfG instance)
         xx, yy = vector("xx"), vector("yy")
@@ -209,9 +238,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
         w, b = vectors("wb")
         # we make the 3rd gradient default (no override)
-        op_linear = cls_ofg(
-            [x, w, b], [x * w + b], grad_overrides=[go1, go2, "default"]
-        )
+        with pytest.warns(FutureWarning, match="grad_overrides is deprecated"):
+            op_linear = cls_ofg([x, w, b], [x * w + b], grad_overrides=[go1, go2, None])
         xx, ww, bb = vector("xx"), vector("yy"), vector("bb")
         zz = pt_sum(op_linear(xx, ww, bb))
         dx, dw, db = grad(zz, [xx, ww, bb])
@@ -225,11 +253,14 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         np.testing.assert_array_almost_equal(np.ones(16, dtype=config.floatX), dbv, 4)
 
         # NullType and DisconnectedType
-        op_linear2 = cls_ofg(
-            [x, w, b],
-            [x * w + b],
-            grad_overrides=[go1, NullType()(), DisconnectedType()()],
-        )
+        with pytest.warns(FutureWarning, match="grad_overrides is deprecated"):
+            op_linear2 = cls_ofg(
+                [x, w, b],
+                [x * w + b],
+                grad_overrides=[go1, NullType()(), DisconnectedType()()],
+                # This is a fake override, so a fake connection_pattern must be provided as well
+                connection_pattern=[[True], [True], [False]],
+            )
         zz2 = pt_sum(op_linear2(xx, ww, bb))
         dx2, dw2, db2 = grad(
             zz2,
@@ -293,6 +324,41 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         dvval2 = fn(xval, Wval, duval)
         np.testing.assert_array_almost_equal(dvval2, dvval, 4)
 
+    def test_rop_multiple_outputs(self):
+        a = vector()
+        M = matrix()
+        b = dot(a, M)
+        op_matmul = OpFromGraph([a, M], [b, -b])
+
+        x = vector()
+        W = matrix()
+        du = vector()
+
+        xval = np.random.random((16,)).astype(config.floatX)
+        Wval = np.random.random((16, 16)).astype(config.floatX)
+        duval = np.random.random((16,)).astype(config.floatX)
+
+        y = op_matmul(x, W)[0]
+        dv = Rop(y, x, du)
+        fn = function([x, W, du], dv)
+        result_dvval = fn(xval, Wval, duval)
+        expected_dvval = np.dot(duval, Wval)
+        np.testing.assert_array_almost_equal(result_dvval, expected_dvval, 4)
+
+        y = op_matmul(x, W)[1]
+        dv = Rop(y, x, du)
+        fn = function([x, W, du], dv)
+        result_dvval = fn(xval, Wval, duval)
+        expected_dvval = -np.dot(duval, Wval)
+        np.testing.assert_array_almost_equal(result_dvval, expected_dvval, 4)
+
+        y = pt.add(*op_matmul(x, W))
+        dv = Rop(y, x, du)
+        fn = function([x, W, du], dv)
+        result_dvval = fn(xval, Wval, duval)
+        expected_dvval = np.zeros_like(np.dot(duval, Wval))
+        np.testing.assert_array_almost_equal(result_dvval, expected_dvval, 4)
+
     @pytest.mark.parametrize(
         "cls_ofg", [OpFromGraph, partial(OpFromGraph, inline=True)]
     )
@@ -339,13 +405,14 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         def f1_back(inputs, output_gradients):
             return [output_gradients[0], disconnected_type()]
 
-        op = cls_ofg(
-            inputs=[x, y],
-            outputs=[f1(x, y)],
-            grad_overrides=f1_back,
-            connection_pattern=[[True], [False]],  # This is new
-            on_unused_input="ignore",
-        )  # This is new
+        with pytest.warns(FutureWarning, match="grad_overrides is deprecated"):
+            op = cls_ofg(
+                inputs=[x, y],
+                outputs=[f1(x, y)],
+                grad_overrides=f1_back,
+                connection_pattern=[[True], [False]],
+                on_unused_input="ignore",
+            )
 
         c = op(x, y)
 
@@ -584,6 +651,34 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
         out = test_ofg(y, y)
         assert out.eval() == 4
+
+    def test_L_op_disconnected_output_grad(self):
+        x, y = dscalars("x", "y")
+        rng = np.random.default_rng(594)
+        point = list(rng.normal(size=(2,)))
+
+        out1 = x + y
+        out2 = x * y
+        out3 = out1 * out2  # Create dependency between outputs
+        op = OpFromGraph([x, y], [out1, out2, out3])
+        verify_grad(lambda x, y: pt.add(*op(x, y)), point, rng=rng)
+        verify_grad(lambda x, y: pt.add(*op(x, y)[:-1]), point, rng=rng)
+        verify_grad(lambda x, y: pt.add(*op(x, y)[1:]), point, rng=rng)
+        verify_grad(lambda x, y: pt.add(*op(x, y)[::2]), point, rng=rng)
+        verify_grad(lambda x, y: op(x, y)[0], point, rng=rng)
+        verify_grad(lambda x, y: op(x, y)[1], point, rng=rng)
+        verify_grad(lambda x, y: op(x, y)[2], point, rng=rng)
+
+        # Test disconnected graphs are handled correctly
+        op = OpFromGraph([x, y], [x**2, y**3])
+        with pytest.warns(UserWarning):
+            grad_x_wrt_y = grad(
+                op(x, y)[0],
+                wrt=y,
+                return_disconnected="disconnected",
+                disconnected_inputs="warn",
+            )
+            assert isinstance(grad_x_wrt_y.type, DisconnectedType)
 
     def test_repeated_inputs(self):
         x = pt.dscalar("x")

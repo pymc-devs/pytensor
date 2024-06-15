@@ -310,8 +310,11 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
 
 
 def _cholesky(a, lower=False, overwrite_a=False, check_finite=True):
-    return linalg.cholesky(
-        a, lower=lower, overwrite_a=overwrite_a, check_finite=check_finite
+    return (
+        linalg.cholesky(
+            a, lower=lower, overwrite_a=overwrite_a, check_finite=check_finite
+        ),
+        0,
     )
 
 
@@ -345,6 +348,15 @@ def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
             LDA,
             INFO,
         )
+
+        if lower:
+            for j in range(1, _N):
+                for i in range(j):
+                    A_copy[i, j] = 0.0
+        else:
+            for j in range(_N):
+                for i in range(j + 1, _N):
+                    A_copy[i, j] = 0.0
 
         return A_copy, int_ptr_to_val(INFO)
 

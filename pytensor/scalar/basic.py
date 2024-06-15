@@ -1074,7 +1074,7 @@ class unary_out_lookup(MetaObject):
             return [rval]
 
     def __eq__(self, other):
-        return type(self) == type(other) and self.tbl == other.tbl
+        return type(self) is type(other) and self.tbl == other.tbl
 
     def __hash__(self):
         return hash(type(self))  # ignore hash of table
@@ -1160,7 +1160,7 @@ class ScalarOp(COp):
         return self.grad(inputs, output_gradients)
 
     def __eq__(self, other):
-        test = type(self) == type(other) and getattr(
+        test = type(self) is type(other) and getattr(
             self, "output_types_preference", None
         ) == getattr(other, "output_types_preference", None)
         return test
@@ -4133,7 +4133,7 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
         if self is other:
             return True
         if (
-            type(self) != type(other)
+            type(self) is not type(other)
             or self.nin != other.nin
             or self.nout != other.nout
         ):

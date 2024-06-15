@@ -3,17 +3,12 @@ import copy
 import numpy as np
 
 from pytensor.compile.sharedvalue import SharedVariable, shared_constructor
-from pytensor.tensor.random.type import random_generator_type, random_state_type
-
-
-class RandomStateSharedVariable(SharedVariable):
-    def __str__(self):
-        return self.name or f"RandomStateSharedVariable({self.container!r})"
+from pytensor.tensor.random.type import random_generator_type
 
 
 class RandomGeneratorSharedVariable(SharedVariable):
     def __str__(self):
-        return self.name or f"RandomGeneratorSharedVariable({self.container!r})"
+        return self.name or f"RNG({self.container!r})"
 
 
 @shared_constructor.register(np.random.RandomState)
@@ -23,11 +18,12 @@ def randomgen_constructor(
 ):
     r"""`SharedVariable` constructor for NumPy's `Generator` and/or `RandomState`."""
     if isinstance(value, np.random.RandomState):
-        rng_sv_type = RandomStateSharedVariable
-        rng_type = random_state_type
-    elif isinstance(value, np.random.Generator):
-        rng_sv_type = RandomGeneratorSharedVariable
-        rng_type = random_generator_type
+        raise TypeError(
+            "`np.RandomState` is no longer supported in PyTensor. Use `np.random.Generator` instead."
+        )
+
+    rng_sv_type = RandomGeneratorSharedVariable
+    rng_type = random_generator_type
 
     if not borrow:
         value = copy.deepcopy(value)

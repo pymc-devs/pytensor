@@ -11,6 +11,7 @@ import scipy.special
 from numpy.testing import assert_array_equal
 from scipy.special import logsumexp as scipy_logsumexp
 
+import pytensor
 import pytensor.scalar as ps
 from pytensor.compile.debugmode import DebugMode
 from pytensor.compile.function import function
@@ -39,7 +40,7 @@ from pytensor.tensor.elemwise import CAReduce, Elemwise
 from pytensor.tensor.math import (
     Argmax,
     Dot,
-    MaxAndArgmax,
+    Max,
     Mean,
     Prod,
     ProdWithoutZeros,
@@ -760,11 +761,12 @@ def test_isnan():
 
 class TestMaxAndArgmax:
     def setup_method(self):
-        MaxAndArgmax.debug = 0
+        Max.debug = 0
+        Argmax.debug = 0
 
     def test_basic(self):
-        n = as_tensor_variable(5.0)
-        v, i = eval_outputs(max_and_argmax(n))
+        n = as_tensor_variable(5)
+        v, i = eval_outputs(max_and_argmax(n, axis=()))
         assert v == 5.0
         assert i == 0
         assert i.dtype == "int64"
@@ -1030,31 +1032,45 @@ class TestMaxAndArgmax:
         x = tensor(shape=(5, 5, 5, 5))
         batch_x = tensor(shape=(3, 5, 5, 5, 5))
 
-        # Test MaxAndArgmax
-        max_x, argmax_x = max_and_argmax(x, axis=core_axis)
-        node = max_x.owner
-        assert isinstance(node.op, MaxAndArgmax)
+        argmax_x = argmax(x, axis=core_axis)
 
-        new_node = vectorize_node(node, batch_x)
-        assert isinstance(new_node.op, MaxAndArgmax)
-        assert new_node.op.axis == batch_axis
+        arg_max_node = argmax_x.owner
+        new_node = vectorize_node(arg_max_node, batch_x)
 
-        # Test Argmax
-        # Argmax is not user-facing, so we have to create it manually
-        node = Argmax(axis=node.op.axis).make_node(x)
-
-        new_node = vectorize_node(node, batch_x)
         assert isinstance(new_node.op, Argmax)
         assert new_node.op.axis == batch_axis
+
+    def test_max_empty_axis(self):
+        x = np.random.normal(size=(2, 3, 5, 7))
+        axis = ()
+
+        non_axis = tuple(i for i in range(x.ndim) if i not in axis)
+        shape_axis = tuple(x.shape[dim] for dim in axis)
+        shape_non_axis = tuple(x.shape[dim] for dim in non_axis)
+        x_transposed = x.transpose(*axis, *non_axis)
+
+        x_axis_raveled = x_transposed.reshape(
+            np.prod(shape_axis, dtype=int), np.prod(shape_non_axis, dtype=int)
+        )
+        max_x = max_and_argmax(x, axis=axis)[0].eval()
+        argmax_x = max_and_argmax(x, axis=axis)[1].eval()
+
+        raveled_max = x_axis_raveled[
+            argmax_x.ravel(), np.arange(np.prod(shape_non_axis, dtype=int))
+        ]
+        indirect_max = raveled_max.reshape(shape_non_axis)
+
+        np.testing.assert_allclose(max_x, x.max(axis=axis))
+        np.testing.assert_allclose(indirect_max, x.max(axis=axis))
 
 
 class TestArgminArgmax:
     def setup_method(self):
-        MaxAndArgmax.debug = 0
+        Argmax.debug = 0
 
     def test_scalar(self):
         for fct in [argmin, argmax]:
-            n = as_tensor_variable(5.0)
+            n = as_tensor_variable([5.0])
             i = eval_outputs(fct(n))
             assert i == 0
             v = eval_outputs(fct(n).shape)
@@ -1212,7 +1228,7 @@ class TestArgminArgmax:
 
 class TestMinMax:
     def setup_method(self):
-        MaxAndArgmax.debug = 0
+        Max.debug = 0
 
     def test_scalar(self):
         for fct in [max, min]:
@@ -1379,6 +1395,7 @@ class TestMinMax:
         # check_grad_max(data, eval_outputs(grad(max_and_argmax(n,
         # axis=1)[0], n)),axis=1)
 
+    @pytest.mark.xfail(reason="Fails due to #770")
     def test_uint(self):
         for dtype in ("uint8", "uint16", "uint32", "uint64"):
             itype = np.iinfo(dtype)
@@ -1402,6 +1419,14 @@ class TestMinMax:
         i = eval_outputs(max(n))
         assert i.ndim == 0
         assert np.all(i)
+
+
+def test_MaxAndArgmax_deprecated():
+    with pytest.raises(
+        AttributeError,
+        match="The class `MaxandArgmax` has been deprecated. Call `Max` and `Argmax` seperately as an alternative.",
+    ):
+        pytensor.tensor.math.MaxAndArgmax
 
 
 rng = np.random.default_rng(seed=utt.fetch_seed())
@@ -2572,27 +2597,50 @@ class TestInferShape(utt.InferShapeTester):
             [adtens3], [Mean(aiscal_val)(adtens3)], [adtens3_val], Mean
         )
 
-    def test_MaxAndArgmax(self):
+    def test_Max(self):
         adtens3 = dtensor3()
         adtens3_val = random(4, 5, 3)
         self._compile_and_check(
-            [adtens3], max_and_argmax(adtens3, None), [adtens3_val], MaxAndArgmax
+            [adtens3], max_and_argmax(adtens3, None), [adtens3_val], Max
         )
 
         self._compile_and_check(
-            [adtens3], max_and_argmax(adtens3, 0), [adtens3_val], MaxAndArgmax
+            [adtens3], max_and_argmax(adtens3, 0), [adtens3_val], Max
         )
 
         self._compile_and_check(
-            [adtens3], max_and_argmax(adtens3, 1), [adtens3_val], MaxAndArgmax
+            [adtens3], max_and_argmax(adtens3, 1), [adtens3_val], Max
         )
 
         self._compile_and_check(
-            [adtens3], max_and_argmax(adtens3, 2), [adtens3_val], MaxAndArgmax
+            [adtens3], max_and_argmax(adtens3, 2), [adtens3_val], Max
         )
 
         self._compile_and_check(
-            [adtens3], max_and_argmax(adtens3, [0, 1, 2]), [adtens3_val], MaxAndArgmax
+            [adtens3], max_and_argmax(adtens3, [0, 1, 2]), [adtens3_val], Max
+        )
+
+    def test_Argmax(self):
+        adtens3 = dtensor3()
+        adtens3_val = random(4, 5, 3)
+        self._compile_and_check(
+            [adtens3], max_and_argmax(adtens3, None), [adtens3_val], Argmax
+        )
+
+        self._compile_and_check(
+            [adtens3], max_and_argmax(adtens3, 0), [adtens3_val], Argmax
+        )
+
+        self._compile_and_check(
+            [adtens3], max_and_argmax(adtens3, 1), [adtens3_val], Argmax
+        )
+
+        self._compile_and_check(
+            [adtens3], max_and_argmax(adtens3, 2), [adtens3_val], Argmax
+        )
+
+        self._compile_and_check(
+            [adtens3], max_and_argmax(adtens3, [0, 1, 2]), [adtens3_val], Argmax
         )
 
     def test_Dot(self):

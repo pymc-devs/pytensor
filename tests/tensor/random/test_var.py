@@ -4,9 +4,7 @@ import pytest
 from pytensor import shared
 
 
-@pytest.mark.parametrize(
-    "rng", [np.random.RandomState(123), np.random.default_rng(123)]
-)
+@pytest.mark.parametrize("rng", [np.random.default_rng(123)])
 def test_GeneratorSharedVariable(rng):
     s_rng_default = shared(rng)
     s_rng_True = shared(rng, borrow=True)
@@ -32,9 +30,7 @@ def test_GeneratorSharedVariable(rng):
     assert v == v0 == v1
 
 
-@pytest.mark.parametrize(
-    "rng", [np.random.RandomState(123), np.random.default_rng(123)]
-)
+@pytest.mark.parametrize("rng", [np.random.default_rng(123)])
 def test_get_value_borrow(rng):
     s_rng = shared(rng)
 
@@ -55,9 +51,7 @@ def test_get_value_borrow(rng):
         assert r_.standard_normal() == r_F.standard_normal()
 
 
-@pytest.mark.parametrize(
-    "rng", [np.random.RandomState(123), np.random.default_rng(123)]
-)
+@pytest.mark.parametrize("rng", [np.random.default_rng(123)])
 def test_get_value_internal_type(rng):
     s_rng = shared(rng)
 
@@ -81,7 +75,7 @@ def test_get_value_internal_type(rng):
         assert r_.standard_normal() == r_F.standard_normal()
 
 
-@pytest.mark.parametrize("rng_ctor", [np.random.RandomState, np.random.default_rng])
+@pytest.mark.parametrize("rng_ctor", [np.random.default_rng])
 def test_set_value_borrow(rng_ctor):
     s_rng = shared(rng_ctor(123))
 

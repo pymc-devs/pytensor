@@ -49,7 +49,7 @@ def test_random_RandomStream():
     assert not np.array_equal(jax_res_1, jax_res_2)
 
 
-@pytest.mark.parametrize("rng_ctor", (np.random.RandomState, np.random.default_rng))
+@pytest.mark.parametrize("rng_ctor", (np.random.default_rng,))
 def test_random_updates(rng_ctor):
     original_value = rng_ctor(seed=98)
     rng = shared(original_value, name="original_rng", borrow=False)
@@ -300,22 +300,6 @@ def test_replaced_shared_rng_storage_ordering_equality():
             lambda *args: args,
         ),
         (
-            ptr.randint,
-            [
-                set_test_value(
-                    pt.lscalar(),
-                    np.array(0, dtype=np.int64),
-                ),
-                set_test_value(  # high-value necessary since test on cdf
-                    pt.lscalar(),
-                    np.array(1000, dtype=np.int64),
-                ),
-            ],
-            (),
-            "randint",
-            lambda *args: args,
-        ),
-        (
             ptr.integers,
             [
                 set_test_value(
@@ -489,11 +473,7 @@ def test_random_RandomVariable(rv_op, dist_params, base_size, cdf_name, params_c
         The parameters passed to the op.
 
     """
-    if rv_op is ptr.integers:
-        # Integers only accepts Generator, not RandomState
-        rng = shared(np.random.default_rng(29402))
-    else:
-        rng = shared(np.random.RandomState(29402))
+    rng = shared(np.random.default_rng(29403))
     g = rv_op(*dist_params, size=(10000, *base_size), rng=rng)
     g_fn = compile_random_function(dist_params, g, mode=jax_mode)
     samples = g_fn(
@@ -545,7 +525,7 @@ def test_size_implied_by_broadcasted_parameters(rv_fn):
 
 @pytest.mark.parametrize("size", [(), (4,)])
 def test_random_bernoulli(size):
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     g = pt.random.bernoulli(0.5, size=(1000, *size), rng=rng)
     g_fn = compile_random_function([], g, mode=jax_mode)
     samples = g_fn()
@@ -553,7 +533,7 @@ def test_random_bernoulli(size):
 
 
 def test_random_mvnormal():
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
 
     mu = np.ones(4)
     cov = np.eye(4)
@@ -571,7 +551,7 @@ def test_random_mvnormal():
     ],
 )
 def test_random_dirichlet(parameter, size):
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     g = pt.random.dirichlet(parameter, size=(1000, *size), rng=rng)
     g_fn = compile_random_function([], g, mode=jax_mode)
     samples = g_fn()
@@ -598,7 +578,7 @@ def test_random_choice():
     assert np.all(samples % 2 == 1)
 
     # `replace=False` and `p is None`
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     g = pt.random.choice(np.arange(100), replace=False, size=(2, 49), rng=rng)
     g_fn = compile_random_function([], g, mode=jax_mode)
     samples = g_fn()
@@ -607,7 +587,7 @@ def test_random_choice():
     assert len(np.unique(samples)) == 98
 
     # `replace=False` and `p is not None`
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     g = pt.random.choice(
         8,
         p=np.array([0.25, 0, 0.25, 0, 0.25, 0, 0.25, 0]),
@@ -625,7 +605,7 @@ def test_random_choice():
 
 
 def test_random_categorical():
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     g = pt.random.categorical(0.25 * np.ones(4), size=(10000, 4), rng=rng)
     g_fn = compile_random_function([], g, mode=jax_mode)
     samples = g_fn()
@@ -642,7 +622,7 @@ def test_random_categorical():
 
 def test_random_permutation():
     array = np.arange(4)
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     g = pt.random.permutation(array, rng=rng)
     g_fn = compile_random_function([], g, mode=jax_mode)
     permuted = g_fn()
@@ -664,7 +644,7 @@ def test_unnatural_batched_dims(batch_dims_tester):
 
 
 def test_random_geometric():
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     p = np.array([0.3, 0.7])
     g = pt.random.geometric(p, size=(10_000, 2), rng=rng)
     g_fn = compile_random_function([], g, mode=jax_mode)
@@ -674,7 +654,7 @@ def test_random_geometric():
 
 
 def test_negative_binomial():
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     n = np.array([10, 40])
     p = np.array([0.3, 0.7])
     g = pt.random.negative_binomial(n, p, size=(10_000, 2), rng=rng)
@@ -688,7 +668,7 @@ def test_negative_binomial():
 
 @pytest.mark.skipif(not numpyro_available, reason="Binomial dispatch requires numpyro")
 def test_binomial():
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     n = np.array([10, 40])
     p = np.array([0.3, 0.7])
     g = pt.random.binomial(n, p, size=(10_000, 2), rng=rng)
@@ -702,7 +682,7 @@ def test_binomial():
     not numpyro_available, reason="BetaBinomial dispatch requires numpyro"
 )
 def test_beta_binomial():
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     n = np.array([10, 40])
     a = np.array([1.5, 13])
     b = np.array([0.5, 9])
@@ -721,7 +701,7 @@ def test_beta_binomial():
     not numpyro_available, reason="Multinomial dispatch requires numpyro"
 )
 def test_multinomial():
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     n = np.array([10, 40])
     p = np.array([[0.3, 0.7, 0.0], [0.1, 0.4, 0.5]])
     g = pt.random.multinomial(n, p, size=(10_000, 2), rng=rng)
@@ -737,7 +717,7 @@ def test_multinomial():
 def test_vonmises_mu_outside_circle():
     # Scipy implementation does not behave as PyTensor/NumPy for mu outside the unit circle
     # We test that the random draws from the JAX dispatch work as expected in these cases
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     mu = np.array([-30, 40])
     kappa = np.array([100, 10])
     g = pt.random.vonmises(mu, kappa, size=(10_000, 2), rng=rng)
@@ -771,8 +751,7 @@ def test_random_unimplemented():
 
     class NonExistentRV(RandomVariable):
         name = "non-existent"
-        ndim_supp = 0
-        ndims_params = []
+        signature = "->()"
         dtype = "floatX"
 
         def __call__(self, size=None, **kwargs):
@@ -782,7 +761,7 @@ def test_random_unimplemented():
             return 0
 
     nonexistentrv = NonExistentRV()
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     out = nonexistentrv(rng=rng)
     fgraph = FunctionGraph([out.owner.inputs[0]], [out], clone=False)
 
@@ -798,8 +777,7 @@ def test_random_custom_implementation():
 
     class CustomRV(RandomVariable):
         name = "non-existent"
-        ndim_supp = 0
-        ndims_params = []
+        signature = "->()"
         dtype = "floatX"
 
         def __call__(self, size=None, **kwargs):
@@ -818,7 +796,7 @@ def test_random_custom_implementation():
         return sample_fn
 
     nonexistentrv = CustomRV()
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     out = nonexistentrv(rng=rng)
     fgraph = FunctionGraph([out.owner.inputs[0]], [out], clone=False)
     with pytest.warns(
@@ -838,7 +816,7 @@ def test_random_concrete_shape():
     `size` parameter satisfies either of these criteria.
 
     """
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     x_pt = pt.dmatrix()
     out = pt.random.normal(0, 1, size=x_pt.shape, rng=rng)
     jax_fn = compile_random_function([x_pt], out, mode=jax_mode)
@@ -846,7 +824,7 @@ def test_random_concrete_shape():
 
 
 def test_random_concrete_shape_from_param():
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     x_pt = pt.dmatrix()
     out = pt.random.normal(x_pt, 1, rng=rng)
     jax_fn = compile_random_function([x_pt], out, mode=jax_mode)
@@ -865,7 +843,7 @@ def test_random_concrete_shape_subtensor():
     slight improvement over their API.
 
     """
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     x_pt = pt.dmatrix()
     out = pt.random.normal(0, 1, size=x_pt.shape[1], rng=rng)
     jax_fn = compile_random_function([x_pt], out, mode=jax_mode)
@@ -881,7 +859,7 @@ def test_random_concrete_shape_subtensor_tuple():
     `jax_size_parameter_as_tuple` rewrite.
 
     """
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     x_pt = pt.dmatrix()
     out = pt.random.normal(0, 1, size=(x_pt.shape[0],), rng=rng)
     jax_fn = compile_random_function([x_pt], out, mode=jax_mode)
@@ -892,7 +870,7 @@ def test_random_concrete_shape_subtensor_tuple():
     reason="`size_pt` should be specified as a static argument", strict=True
 )
 def test_random_concrete_shape_graph_input():
-    rng = shared(np.random.RandomState(123))
+    rng = shared(np.random.default_rng(123))
     size_pt = pt.scalar()
     out = pt.random.normal(0, 1, size=size_pt, rng=rng)
     jax_fn = compile_random_function([size_pt], out, mode=jax_mode)

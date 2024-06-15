@@ -207,7 +207,7 @@ class In(SymbolicInput):
         if implicit is None:
             from pytensor.compile.sharedvalue import SharedVariable
 
-            implicit = isinstance(value, Container) or isinstance(value, SharedVariable)
+            implicit = isinstance(value, Container | SharedVariable)
         super().__init__(
             variable=variable,
             name=name,

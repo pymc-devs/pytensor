@@ -63,23 +63,35 @@ _logger = logging.getLogger("pytensor.printing")
 VALID_ASSOC = {"left", "right", "either"}
 
 
-def char_from_number(number):
-    """Convert numbers to strings by rendering it in base 26 using capital letters as digits."""
+def char_from_number(number: int) -> str:
+    """Convert a number to a string.
+
+    It renders it in base 26 using capital letters as digits.
+    For example: 3·26² + 2·26¹ + 0·26⁰ → "DCA"
+
+    Parameters
+    ----------
+    number : int
+        The number to be converted.
+
+    Returns
+    -------
+    str
+        The converted string.
+    """
 
     base = 26
 
-    rval = ""
-
-    if number == 0:
-        rval = "A"
+    remainders = []
 
     while number != 0:
-        remainder = number % base
-        new_char = chr(ord("A") + remainder)
-        rval = new_char + rval
-        number //= base
+        number, remainder = number // base, number % base
+        remainders.append(remainder)
 
-    return rval
+    if not remainders:
+        remainders = [0]
+
+    return "".join(chr(ord("A") + r) for r in remainders[::-1])
 
 
 @singledispatch
@@ -653,8 +665,8 @@ def _debugprint(
         else:
             print(var_output, file=file)
 
-        if not already_done and (
-            not stop_on_name or not (hasattr(var, "name") and var.name is not None)
+        if not already_done and not (
+            stop_on_name and hasattr(var, "name") and var.name is not None
         ):
             new_prefix = prefix_child + " ├─ "
             new_prefix_child = prefix_child + " │ "
@@ -1188,18 +1200,18 @@ default_colorCodes = {
 
 def pydotprint(
     fct,
-    outfile=None,
-    compact=True,
-    format="png",
-    with_ids=False,
-    high_contrast=True,
+    outfile: str | None = None,
+    compact: bool = True,
+    format: str = "png",
+    with_ids: bool = False,
+    high_contrast: bool = True,
     cond_highlight=None,
-    colorCodes=None,
-    max_label_size=70,
-    scan_graphs=False,
-    var_with_name_simple=False,
-    print_output_file=True,
-    return_image=False,
+    colorCodes: dict | None = None,
+    max_label_size: int = 70,
+    scan_graphs: bool = False,
+    var_with_name_simple: bool = False,
+    print_output_file: bool = True,
+    return_image: bool = False,
 ):
     """Print to a file the graph of a compiled pytensor function's ops. Supports
     all pydot output formats, including png and svg.
@@ -1339,7 +1351,7 @@ def pydotprint(
     if cond_highlight is not None:
 
         def recursive_pass(x, ls):
-            if not x.owner:
+            if x.owner is None:
                 return ls
             else:
                 ls += [x.owner]
@@ -1664,7 +1676,9 @@ class _TagGenerator:
         return rval
 
 
-def min_informative_str(obj, indent_level=0, _prev_obs=None, _tag_generator=None):
+def min_informative_str(
+    obj, indent_level: int = 0, _prev_obs: dict | None = None, _tag_generator=None
+) -> str:
     """
     Returns a string specifying to the user what obj is
     The string will print out as much of the graph as is needed
@@ -1764,7 +1778,7 @@ def min_informative_str(obj, indent_level=0, _prev_obs=None, _tag_generator=None
     return rval
 
 
-def var_descriptor(obj, _prev_obs=None, _tag_generator=None):
+def var_descriptor(obj, _prev_obs: dict | None = None, _tag_generator=None) -> str:
     """
     Returns a string, with no endlines, fully specifying
     how a variable is computed. Does not include any memory
@@ -1820,7 +1834,7 @@ def var_descriptor(obj, _prev_obs=None, _tag_generator=None):
     return rval
 
 
-def position_independent_str(obj):
+def position_independent_str(obj) -> str:
     if isinstance(obj, Variable):
         rval = "pytensor_var"
         rval += "{type=" + str(obj.type) + "}"
@@ -1830,18 +1844,18 @@ def position_independent_str(obj):
     return rval
 
 
-def hex_digest(x):
+def hex_digest(x: np.ndarray) -> str:
     """
     Returns a short, mostly hexadecimal hash of a numpy ndarray
     """
     assert isinstance(x, np.ndarray)
-    rval = hashlib.sha256(x.tostring()).hexdigest()
+    rval = hashlib.sha256(x.tobytes()).hexdigest()
     # hex digest must be annotated with strides to avoid collisions
     # because the buffer interface only exposes the raw data, not
     # any info about the semantics of how that data should be arranged
     # into a tensor
-    rval = rval + "|strides=[" + ",".join(str(stride) for stride in x.strides) + "]"
-    rval = rval + "|shape=[" + ",".join(str(s) for s in x.shape) + "]"
+    rval += "|strides=[" + ",".join(str(stride) for stride in x.strides) + "]"
+    rval += "|shape=[" + ",".join(str(s) for s in x.shape) + "]"
     return rval
 
 

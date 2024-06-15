@@ -62,7 +62,7 @@ class Container:
         allow_downcast: bool | None = None,
         name: str | None = None,
     ) -> None:
-        if not isinstance(storage, list) or not len(storage) >= 1:
+        if not (isinstance(storage, list) and len(storage) >= 1):
             raise TypeError("storage must be a list of length at least one")
         if isinstance(r, Variable):
             self.type = r.type

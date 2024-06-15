@@ -286,7 +286,7 @@ def local_subtensor_of_dot(fgraph, node):
     """
     if not isinstance(node.op, Subtensor):
         return
-    if not node.inputs[0].owner or not isinstance(node.inputs[0].owner.op, Dot):
+    if not (node.inputs[0].owner and isinstance(node.inputs[0].owner.op, Dot)):
         return
     # If there is other node that use the outputs of the dot
     # We don't want to compute twice the sub part.
@@ -396,7 +396,7 @@ def local_subtensor_lift(fgraph, node):
     """
     if isinstance(node.op, Subtensor):
         u = node.inputs[0]
-        if not u.owner or len(fgraph.clients[u]) > 1:
+        if u.owner is None or len(fgraph.clients[u]) > 1:
             return False
 
         if isinstance(u.owner.op, Elemwise) and len(u.owner.inputs) == 1:
@@ -695,7 +695,7 @@ def local_subtensor_inc_subtensor(fgraph, node):
     """
     if isinstance(node.op, Subtensor):
         x = node.inputs[0]
-        if not x.owner or not isinstance(x.owner.op, IncSubtensor):
+        if not (x.owner and isinstance(x.owner.op, IncSubtensor)):
             return
         if not x.owner.op.set_instead_of_inc:
             return
@@ -755,7 +755,7 @@ def local_subtensor_make_vector(fgraph, node):
 
     x = node.inputs[0]
 
-    if not x.owner or not isinstance(x.owner.op, MakeVector):
+    if not (x.owner and isinstance(x.owner.op, MakeVector)):
         return False
 
     make_vector_op = x.owner.op
@@ -1445,7 +1445,7 @@ def local_adv_sub1_adv_inc_sub1(fgraph, node):
     if not isinstance(node.op, AdvancedSubtensor1):
         return
     inp = node.inputs[0]
-    if not inp.owner or not isinstance(inp.owner.op, AdvancedIncSubtensor1):
+    if not (inp.owner and isinstance(inp.owner.op, AdvancedIncSubtensor1)):
         return
     idx = node.inputs[1]
     idx2 = inp.owner.inputs[2]

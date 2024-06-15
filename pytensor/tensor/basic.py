@@ -1956,9 +1956,7 @@ def extract_constant(x, elemwise=True, only_process_constants=False):
         x = get_underlying_scalar_constant_value(x, elemwise, only_process_constants)
     except NotScalarConstantError:
         pass
-    if isinstance(x, ps.ScalarVariable) or isinstance(
-        x, ps.sharedvar.ScalarSharedVariable
-    ):
+    if isinstance(x, ps.ScalarVariable | ps.sharedvar.ScalarSharedVariable):
         if x.owner and isinstance(x.owner.op, ScalarFromTensor):
             x = x.owner.inputs[0]
         else:

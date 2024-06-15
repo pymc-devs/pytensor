@@ -18,6 +18,7 @@ from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
 from numba.extending import box, overload
 
 from pytensor import config
+from pytensor.compile import NUMBA
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.basic import Apply
@@ -62,10 +63,16 @@ def numba_njit(*args, **kwargs):
     kwargs.setdefault("no_cpython_wrapper", True)
     kwargs.setdefault("no_cfunc_wrapper", True)
 
-    # Supress caching warnings
+    # Suppress cache warning for internal functions
+    # We have to add an ansi escape code for optional bold text by numba
     warnings.filterwarnings(
         "ignore",
-        message='Cannot cache compiled function "numba_funcified_fgraph" as it uses dynamic globals',
+        message=(
+            "(\x1b\\[1m)*"  # ansi escape code for bold text
+            "Cannot cache compiled function "
+            '"(numba_funcified_fgraph|store_core_outputs)" '
+            "as it uses dynamic globals"
+        ),
         category=NumbaWarning,
     )
 
@@ -434,6 +441,11 @@ def numba_funcify(op, node=None, storage_map=None, **kwargs):
 def numba_funcify_OpFromGraph(op, node=None, **kwargs):
     _ = kwargs.pop("storage_map", None)
 
+    # Apply inner rewrites
+    # TODO: Not sure this is the right place to do this, should we have a rewrite that
+    #  explicitly triggers the optimization of the inner graphs of OpFromGraph?
+    #  The C-code defers it to the make_thunk phase
+    NUMBA.optimizer(op.fgraph)
     fgraph_fn = numba_njit(numba_funcify(op.fgraph, **kwargs))
 
     if len(op.fgraph.outputs) == 1:
@@ -604,36 +616,70 @@ def numba_funcify_IncSubtensor(op, node, **kwargs):
     return numba_njit(incsubtensor_fn, boundscheck=True)
 
 
-@numba_njit(boundscheck=True)
-def advancedincsubtensor1_inplace_set(x, vals, idxs):
-    for idx, val in zip(idxs, vals):
-        x[idx] = val
-    return x
-
-
-@numba_njit(boundscheck=True)
-def advancedincsubtensor1_inplace_inc(x, vals, idxs):
-    for idx, val in zip(idxs, vals):
-        x[idx] += val
-    return x
-
-
 @numba_funcify.register(AdvancedIncSubtensor1)
 def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
     inplace = op.inplace
     set_instead_of_inc = op.set_instead_of_inc
+    x, vals, idxs = node.inputs
+    # TODO: Add explicit expand_dims in make_node so we don't need to worry about this here
+    broadcast = vals.type.ndim < x.type.ndim or vals.type.broadcastable[0]
 
     if set_instead_of_inc:
-        advancedincsubtensor1_inplace = global_numba_func(
-            advancedincsubtensor1_inplace_set
-        )
+        if broadcast:
+
+            @numba_njit(boundscheck=True)
+            def advancedincsubtensor1_inplace(x, val, idxs):
+                if val.ndim == x.ndim:
+                    core_val = val[0]
+                elif val.ndim == 0:
+                    # Workaround for https://github.com/numba/numba/issues/9573
+                    core_val = val.item()
+                else:
+                    core_val = val
+
+                for idx in idxs:
+                    x[idx] = core_val
+                return x
+
+        else:
+
+            @numba_njit(boundscheck=True)
+            def advancedincsubtensor1_inplace(x, vals, idxs):
+                if not len(idxs) == len(vals):
+                    raise ValueError("The number of indices and values must match.")
+                for idx, val in zip(idxs, vals):
+                    x[idx] = val
+                return x
     else:
-        advancedincsubtensor1_inplace = global_numba_func(
-            advancedincsubtensor1_inplace_inc
-        )
+        if broadcast:
+
+            @numba_njit(boundscheck=True)
+            def advancedincsubtensor1_inplace(x, val, idxs):
+                if val.ndim == x.ndim:
+                    core_val = val[0]
+                elif val.ndim == 0:
+                    # Workaround for https://github.com/numba/numba/issues/9573
+                    core_val = val.item()
+                else:
+                    core_val = val
+
+                for idx in idxs:
+                    x[idx] += core_val
+                return x
+
+        else:
+
+            @numba_njit(boundscheck=True)
+            def advancedincsubtensor1_inplace(x, vals, idxs):
+                if not len(idxs) == len(vals):
+                    raise ValueError("The number of indices and values must match.")
+                for idx, val in zip(idxs, vals):
+                    x[idx] += val
+                return x
 
     if inplace:
-        return global_numba_func(advancedincsubtensor1_inplace)
+        return advancedincsubtensor1_inplace
+
     else:
 
         @numba_njit

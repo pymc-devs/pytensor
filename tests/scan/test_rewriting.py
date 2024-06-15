@@ -304,7 +304,7 @@ class TestPushOutDot:
 
 class TestPushOutNonSeqScan:
     """
-    Tests for the `push_out_non_seq_scan` optimization in the case where the inner
+    Tests for the `scan_push_out_non_seq` optimization in the case where the inner
     function of a `Scan` `Op` has an output which is the result of a `Dot` product
     on a non-sequence matrix input to `Scan` and a vector that is the result of
     computation in the inner function.
@@ -595,7 +595,7 @@ class TestPushOutNonSeqScan:
 
 class TestPushOutAddScan:
     """
-    Test case for the `push_out_add_scan` optimization in the case where the `Scan`
+    Test case for the `scan_push_out_add` optimization in the case where the `Scan`
     is used to compute the sum over the dot products between the corresponding
     elements of two list of matrices.
 
@@ -1208,7 +1208,7 @@ class TestScanInplaceOptimizer:
 
 
 class TestSaveMem:
-    mode = get_default_mode().including("scan_save_mem", "save_mem_new_scan")
+    mode = get_default_mode().including("scan_save_mem", "scan_save_mem")
 
     def test_save_mem(self):
         rng = np.random.default_rng(utt.fetch_seed())

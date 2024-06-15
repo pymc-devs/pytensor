@@ -769,7 +769,7 @@ def blas_header_text():
                 "npy_float": "NPY_FLOAT64",
                 "precision": "d",
             }
-        if not common_code or not template_code:
+        if not (common_code and template_code):
             raise OSError(
                 "Unable to load NumPy implementation of BLAS functions from C source files."
             )

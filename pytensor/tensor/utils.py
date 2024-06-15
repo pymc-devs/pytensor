@@ -169,10 +169,15 @@ _DIMENSION_NAME = r"\w+"
 _CORE_DIMENSION_LIST = f"(?:{_DIMENSION_NAME}(?:,{_DIMENSION_NAME})*)?"
 _ARGUMENT = rf"\({_CORE_DIMENSION_LIST}\)"
 _ARGUMENT_LIST = f"{_ARGUMENT}(?:,{_ARGUMENT})*"
-_SIGNATURE = f"^{_ARGUMENT_LIST}->{_ARGUMENT_LIST}$"
+# Allow no inputs
+_SIGNATURE = f"^(?:{_ARGUMENT_LIST})?->{_ARGUMENT_LIST}$"
 
 
-def _parse_gufunc_signature(signature):
+def _parse_gufunc_signature(
+    signature,
+) -> tuple[
+    list[tuple[str, ...]], ...
+]:  # mypy doesn't know it's alwayl a length two tuple
     """
     Parse string signatures for a generalized universal function.
 
@@ -196,5 +201,24 @@ def _parse_gufunc_signature(signature):
             tuple(re.findall(_DIMENSION_NAME, arg))
             for arg in re.findall(_ARGUMENT, arg_list)
         ]
+        if arg_list  # ignore no inputs
+        else []
         for arg_list in signature.split("->")
     )
+
+
+def safe_signature(
+    core_inputs_ndim: Sequence[int],
+    core_outputs_ndim: Sequence[int],
+) -> str:
+    def operand_sig(operand_ndim: int, prefix: str) -> str:
+        operands = ",".join(f"{prefix}{i}" for i in range(operand_ndim))
+        return f"({operands})"
+
+    inputs_sig = ",".join(
+        operand_sig(ndim, prefix=f"i{n}") for n, ndim in enumerate(core_inputs_ndim)
+    )
+    outputs_sig = ",".join(
+        operand_sig(ndim, prefix=f"o{n}") for n, ndim in enumerate(core_outputs_ndim)
+    )
+    return f"{inputs_sig}->{outputs_sig}"
