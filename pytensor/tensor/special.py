@@ -485,6 +485,36 @@ class Softmax(COp):
 
 
 def softmax(c, axis=None):
+    """
+    Compute the softmax of a vector along a specified axis.
+
+    Parameters
+    ----------
+    c : TensorVariable
+        The input tensor.
+    axis : int
+        The axis along which to compute the softmax.
+
+    Returns
+    -------
+    TensorVariable
+        The softmax of the input tensor along the specified axis.
+
+    Examples
+    --------
+    In PyMC, you can use this function to compute a softmax over a vector of
+    probabilities representing the likelihood of each class in a multiclass
+    classification problem. Here is an example::
+
+        import pymc as pm
+        import pytensor.tensor as pt
+
+        with pm.Model() as model:
+            weights = pm.Gamma('weights', 1, 1, shape=3)
+            softmax_prob = pt.softmax(weights)
+            outcome = pm.Categorical('outcome', p=softmax_prob)
+
+    """
     c = as_tensor_variable(c)
     return Softmax(axis=axis)(c)
 

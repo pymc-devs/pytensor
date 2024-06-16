@@ -757,8 +757,32 @@ def cast(x, dtype: str | np.dtype) -> TensorVariable:
 
 @scalar_elemwise
 def switch(cond, ift, iff):
-    """if cond then ift else iff"""
+    """
+    Conditionally selects elements from two tensors based on a condition tensor.
 
+    This op is similar to NumPy's `np.where` and `np.choose` functions.
+
+    Parameters
+    ----------
+    cond : TensorVariable
+        A boolean-type tensor determining which output value to choose.
+        Should be broadcastable to the shapes of `ift` and `iff`.
+    ift : TensorVariable
+        Values selected at `True` elements of `cond`.
+    iff : TensorVariable
+        Values selected at `False` elements of `cond`.
+
+    Examples
+    --------
+    This example demonstrates how `switch` can be used in PyMC to model a
+    categorical variable.
+
+    .. code:: python
+
+        with pm.Model():
+            x = pm.Categorical('x', np.array([0.1, 0.9]))
+            y_ = pm.Bernoulli('y_', p=switch(x, 0.9, 0.1), shape=10)
+    """
 
 where = switch
 
