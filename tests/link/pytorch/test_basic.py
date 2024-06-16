@@ -72,104 +72,116 @@ def compare_pytorch_and_py(
     return pytensor_torch_fn, pytorch_res
 
 
-def test_pytorch_FunctionGraph_once():
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_pytorch_FunctionGraph_once(device):
     """Make sure that an output is only computed once when it's referenced multiple times."""
     from pytensor.link.pytorch.dispatch import pytorch_funcify
 
-    x = vector("x")
-    y = vector("y")
+    with torch.device(device):
+        x = vector("x")
+        y = vector("y")
 
-    class TestOp(Op):
-        def __init__(self):
-            self.called = 0
+        class TestOp(Op):
+            def __init__(self):
+                self.called = 0
 
-        def make_node(self, *args):
-            return Apply(self, list(args), [x.type() for x in args])
+            def make_node(self, *args):
+                return Apply(self, list(args), [x.type() for x in args])
 
-        def perform(self, inputs, outputs):
-            for i, inp in enumerate(inputs):
-                outputs[i][0] = inp[0]
+            def perform(self, inputs, outputs):
+                for i, inp in enumerate(inputs):
+                    outputs[i][0] = inp[0]
 
-    @pytorch_funcify.register(TestOp)
-    def pytorch_funcify_TestOp(op, **kwargs):
-        def func(*args, op=op):
-            op.called += 1
-            return list(args)
+        @pytorch_funcify.register(TestOp)
+        def pytorch_funcify_TestOp(op, **kwargs):
+            def func(*args, op=op):
+                op.called += 1
+                return list(args)
 
-        return func
+            return func
 
-    op1 = TestOp()
-    op2 = TestOp()
+        op1 = TestOp()
+        op2 = TestOp()
 
-    q, r = op1(x, y)
-    outs = op2(q + r, q + r)
+        q, r = op1(x, y)
+        outs = op2(q + r, q + r)
 
-    out_fg = FunctionGraph([x, y], outs, clone=False)
-    assert len(out_fg.outputs) == 2
+        out_fg = FunctionGraph([x, y], outs, clone=False)
+        assert len(out_fg.outputs) == 2
 
-    out_torch = pytorch_funcify(out_fg)
+        out_torch = pytorch_funcify(out_fg)
 
-    x_val = torch.tensor([1, 2]).to(getattr(torch, config.floatX))
-    y_val = torch.tensor([2, 3]).to(getattr(torch, config.floatX))
+        x_val = torch.tensor([1, 2]).to(getattr(torch, config.floatX))
+        y_val = torch.tensor([2, 3]).to(getattr(torch, config.floatX))
 
-    res = out_torch(x_val, y_val)
-    assert len(res) == 2
-    assert op1.called == 1
-    assert op2.called == 1
+        res = out_torch(x_val, y_val)
+        assert len(res) == 2
+        assert op1.called == 1
+        assert op2.called == 1
 
-    res = out_torch(x_val, y_val)
-    assert len(res) == 2
-    assert op1.called == 2
-    assert op2.called == 2
-
-
-def test_shared():
-    a = shared(np.array([1, 2, 3], dtype=config.floatX))
-    pytensor_torch_fn = function([], a, mode="PYTORCH")
-    pytorch_res = pytensor_torch_fn()
-
-    assert isinstance(pytorch_res, torch.Tensor)
-    np.testing.assert_allclose(pytorch_res.cpu(), a.get_value())
-
-    pytensor_torch_fn = function([], a * 2, mode="PYTORCH")
-    pytorch_res = pytensor_torch_fn()
-
-    assert isinstance(pytorch_res, torch.Tensor)
-    np.testing.assert_allclose(pytorch_res.cpu(), a.get_value() * 2)
-
-    new_a_value = np.array([3, 4, 5], dtype=config.floatX)
-    a.set_value(new_a_value)
-
-    pytorch_res = pytensor_torch_fn()
-    assert isinstance(pytorch_res, torch.Tensor)
-    np.testing.assert_allclose(pytorch_res.cpu(), new_a_value * 2)
+        res = out_torch(x_val, y_val)
+        assert len(res) == 2
+        assert op1.called == 2
+        assert op2.called == 2
 
 
-@pytest.mark.xfail(reason="Shared variables will be handled in later PRs")
-def test_shared_updates():
-    a = shared(0)
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_shared(device):
+    with torch.device(device):
+        a = shared(np.array([1, 2, 3], dtype=config.floatX))
+        pytensor_torch_fn = function([], a, mode="PYTORCH")
+        pytorch_res = pytensor_torch_fn()
 
-    pytensor_torch_fn = function([], a, updates={a: a + 1}, mode="PYTORCH")
-    res1, res2 = pytensor_torch_fn(), pytensor_torch_fn()
-    assert res1 == 0
-    assert res2 == 1
-    assert a.get_value() == 2
+        assert isinstance(pytorch_res, torch.Tensor)
+        assert isinstance(a.get_value(), np.ndarray)
+        np.testing.assert_allclose(pytorch_res.cpu(), a.get_value())
 
-    a.set_value(5)
-    res1, res2 = pytensor_torch_fn(), pytensor_torch_fn()
-    assert res1 == 5
-    assert res2 == 6
-    assert a.get_value() == 7
+        pytensor_torch_fn = function([], a * 2, mode="PYTORCH")
+        pytorch_res = pytensor_torch_fn()
+
+        assert isinstance(pytorch_res, torch.Tensor)
+        assert isinstance(a.get_value(), np.ndarray)
+        np.testing.assert_allclose(pytorch_res.cpu(), a.get_value() * 2)
+
+        new_a_value = np.array([3, 4, 5], dtype=config.floatX)
+        a.set_value(new_a_value)
+
+        pytorch_res = pytensor_torch_fn()
+        assert isinstance(pytorch_res, torch.Tensor)
+        np.testing.assert_allclose(pytorch_res.cpu(), new_a_value * 2)
 
 
-def test_pytorch_checkandraise():
-    check_and_raise = CheckAndRaise(AssertionError, "testing")
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_shared_updates(device):
+    with torch.device(device):
+        a = shared(0)
 
-    x = scalar("x")
-    conds = (x > 0, x > 3)
-    y = check_and_raise(x, *conds)
+        pytensor_torch_fn = function([], a, updates={a: a + 1}, mode="PYTORCH")
+        res1, res2 = pytensor_torch_fn(), pytensor_torch_fn()
+        assert res1 == 0
+        assert res2 == 1
+        assert a.get_value() == 2
+        assert isinstance(a.get_value(), np.ndarray)
 
-    y_fn = function([x], y, mode="PYTORCH")
+        a.set_value(5)
+        res1, res2 = pytensor_torch_fn(), pytensor_torch_fn()
+        assert res1 == 5
+        assert res2 == 6
+        assert a.get_value() == 7
+        assert isinstance(a.get_value(), np.ndarray)
 
-    with pytest.raises(AssertionError, match="testing"):
-        y_fn(0.0)
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_pytorch_checkandraise(device):
+    with torch.device(device):
+        check_and_raise = CheckAndRaise(AssertionError, "testing")
+
+        x = scalar("x")
+        conds = (x > 0, x > 3)
+        y = check_and_raise(x, *conds)
+
+        y_fn = function([x], y, mode="PYTORCH")
+
+        with pytest.raises(AssertionError, match="testing"):
+            y_fn(0.0)
+        assert y_fn(4).item() == 4
