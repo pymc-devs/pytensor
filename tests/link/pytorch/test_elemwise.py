@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-import torch
 
 import pytensor.tensor as pt
 from pytensor.configdefaults import config
@@ -8,6 +7,9 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor import elemwise as pt_elemwise
 from pytensor.tensor.type import matrix, tensor, vector
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
+
+
+torch = pytest.importorskip("torch")
 
 
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
