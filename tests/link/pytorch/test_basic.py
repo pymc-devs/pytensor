@@ -72,7 +72,7 @@ def compare_pytorch_and_py(
     return pytensor_torch_fn, pytorch_res
 
 
-def test_pytorch_FunctionGraph_once(device):
+def test_pytorch_FunctionGraph_once():
     """Make sure that an output is only computed once when it's referenced multiple times."""
     from pytensor.link.pytorch.dispatch import pytorch_funcify
 
