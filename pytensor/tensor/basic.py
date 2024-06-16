@@ -2840,15 +2840,34 @@ def concatenate(tensor_list, axis=0):
     return join(axis, *tensor_list)
 
 
-def horizontal_stack(*args):
+def hstack(tup):
     r"""Stack arrays in sequence horizontally (column wise)."""
-    # Note: 'horizontal_stack' and 'vertical_stack' do not behave exactly like
-    # Numpy's hstack and vstack functions. This is intended, because Numpy's
-    # functions have potentially confusing/incoherent behavior (try them on 1D
-    # arrays). If this is fixed in a future version of Numpy, it may be worth
-    # trying to get closer to Numpy's way of doing things. In the meantime,
-    # better keep different names to emphasize the implementation divergences.
 
+    arrs = atleast_1d(*tup)
+    if not isinstance(arrs, list):
+        arrs = [arrs]
+    # As a special case, dimension 0 of 1-dimensional arrays is "horizontal"
+    if arrs and arrs[0].ndim == 1:
+        return concatenate(arrs, axis=0)
+    else:
+        return concatenate(arrs, axis=1)
+
+
+def vstack(tup):
+    r"""Stack arrays in sequence vertically (row wise)."""
+
+    arrs = atleast_2d(*tup)
+    if not isinstance(arrs, list):
+        arrs = [arrs]
+
+    return concatenate(arrs, axis=0)
+
+
+def horizontal_stack(*args):
+    warnings.warn(
+        "horizontal_stack was renamed to hstack and will be removed in a future release",
+        FutureWarning,
+    )
     if len(args) < 2:
         raise ValueError("Too few arguments")
 
@@ -2863,8 +2882,10 @@ def horizontal_stack(*args):
 
 
 def vertical_stack(*args):
-    r"""Stack arrays in sequence vertically (row wise)."""
-
+    warnings.warn(
+        "vertical_stack was renamed to vstack and will be removed in a future release",
+        FutureWarning,
+    )
     if len(args) < 2:
         raise ValueError("Too few arguments")
 
@@ -2876,6 +2897,33 @@ def vertical_stack(*args):
         _args.append(_arg)
 
     return concatenate(_args, axis=0)
+
+
+def dstack(tup):
+    r"""Stack arrays in sequence along third axis (depth wise)."""
+
+    # arrs = atleast_3d(*tup, left=False)
+    # if not isinstance(arrs, list):
+    #     arrs = [arrs]
+    arrs = []
+    for arr in tup:
+        if arr.ndim == 1:
+            arr = atleast_3d([arr], left=False)
+        else:
+            arr = atleast_3d(arr, left=False)
+        arrs.append(arr)
+    return concatenate(arrs, 2)
+
+
+def column_stack(tup):
+    r"""Stack 1-D arrays as columns into a 2-D array."""
+
+    arrays = []
+    for arr in tup:
+        if arr.ndim < 2:
+            arr = atleast_2d(arr).transpose()
+        arrays.append(arr)
+    return concatenate(arrays, 1)
 
 
 def is_flat(var, ndim=1):
@@ -4394,8 +4442,12 @@ __all__ = [
     "tile",
     "flatten",
     "is_flat",
+    "vstack",
+    "hstack",
     "vertical_stack",
     "horizontal_stack",
+    "dstack",
+    "column_stack",
     "get_vector_length",
     "concatenate",
     "stack",
