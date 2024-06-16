@@ -1,4 +1,3 @@
-import warnings
 from functools import singledispatch
 
 import torch
@@ -18,7 +17,9 @@ def pytorch_typify(data, dtype=None, **kwargs):
 @singledispatch
 def pytorch_funcify(op, node=None, storage_map=None, **kwargs):
     """Create a PyTorch compatible function from an PyTensor `Op`."""
-    raise NotImplementedError(f"No PyTorch conversion for the given `Op`: {op}")
+    raise NotImplementedError(
+        f"No PyTorch conversion for the given `Op`: {op}.\nCheck out `https://github.com/pymc-devs/pytensor/issues/821` for progress or to request we prioritize this operation"
+    )
 
 
 @pytorch_funcify.register(FunctionGraph)
@@ -51,21 +52,9 @@ def pytorch_funcify_CheckAndRaise(op, **kwargs):
     return assert_fn
 
 
-def pytorch_safe_copy(x):
-    # Cannot use try-except due to: https://github.com/pytorch/pytorch/issues/93720
-
-    if hasattr(x, "clone"):
-        res = torch.clone(x)
-    else:
-        warnings.warn(f"Object has no `clone` method: {x}")
-        res = x
-
-    return res
-
-
 @pytorch_funcify.register(DeepCopyOp)
 def pytorch_funcify_DeepCopyOp(op, **kwargs):
     def deepcopyop(x):
-        return pytorch_safe_copy(x)
+        return x.clone()
 
     return deepcopyop
