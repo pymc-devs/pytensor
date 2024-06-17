@@ -439,7 +439,19 @@ def cumprod(x, axis=None):
     axis
         The axis along which the cumulative product is computed.
         The default (None) is to compute the `cumprod` over the flattened array.
+    # noqa W293
+    Example
+    -------
+    Usage in PyMC:
 
+    .. code-block:: python
+
+    import pymc as pm
+
+    with pm.Model() as model:
+        x = pm.Normal('x', shape=(10, 3))
+        # Product of x
+        prod_x = pm.Deterministic('prod_x', pm.math.cumprod(x, axis=0))
 
     .. versionadded:: 0.7
 
