@@ -399,7 +399,7 @@ def test_svd_uv_merge():
     s_1 = svd(a, full_matrices=False, compute_uv=False)
     _, s_2, _ = svd(a, full_matrices=False, compute_uv=True)
     _, s_3, _ = svd(a, full_matrices=True, compute_uv=True)
-    u_4, s_4, v_4 = svd(a, full_matrices=False, compute_uv=True)
+    u_4, s_4, v_4 = svd(a, full_matrices=True, compute_uv=True)
     # `grad` will introduces an SVD Op with compute_uv=True
     # full_matrices = True is not supported for grad of svd
     gs = pt.grad(pt.sum(s_1), a)
@@ -432,7 +432,6 @@ def test_svd_uv_merge():
     for node in nodes:
         if isinstance(node.op, SVD):
             assert not node.op.compute_uv
-            assert not node.op.full_matrices
             svd_counter += 1
     assert svd_counter == 1
 
@@ -453,6 +452,7 @@ def test_svd_uv_merge():
     svd_counter = 0
     for node in nodes:
         if isinstance(node.op, SVD):
+            assert node.op.full_matrices
             assert node.op.compute_uv
             svd_counter += 1
     assert svd_counter == 1
