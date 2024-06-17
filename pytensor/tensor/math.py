@@ -1945,17 +1945,6 @@ def dot(l, r):
     """Return a symbolic dot product.
 
     This is designed to work with both sparse and dense tensors types.
-
-    Example usage with PyMC:
-
-    .. code:: python
-
-        import pymc as pm
-
-        with pm.Model() as model:
-            x = pm.Normal('x', mu=0, sd=1, shape=2)
-            y = pm.Normal('y', mu=0, sd=1, shape=2)
-            z = pt.math.dot(x, y)
     """
 
     if not isinstance(l, Variable):
@@ -2675,17 +2664,6 @@ def prod(
         If this is set to True, the axes which are reduced are left in
         the result as dimensions with size one. With this option, the result
         will broadcast correctly against the original tensor.
-    # noqa W293
-    Example
-    -------
-    .. code-block:: python
-
-        import pymc as pm
-
-        with pm.Model() as model:
-            n = pm.Poisson('n', 1, shape=(2, 3))
-            prod_n = pm.Deterministic('prod_n', pm.math.prod(n, axis=0))
-
     """
 
     out = Prod(

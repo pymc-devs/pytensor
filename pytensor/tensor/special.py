@@ -499,20 +499,6 @@ def softmax(c, axis=None):
     -------
     TensorVariable
         The softmax of the input tensor along the specified axis.
-
-    Examples
-    --------
-    In PyMC, you can use this function to compute a softmax over a vector of
-    probabilities representing the likelihood of each class in a multiclass
-    classification problem. Here is an example::
-
-        import pymc as pm
-
-        with pm.Model() as model:
-            weights = pm.Gamma('weights', 1, 1, shape=3)
-            softmax_prob = pm.math.softmax(weights)
-            outcome = pm.Categorical('outcome', p=softmax_prob)
-
     """
     c = as_tensor_variable(c)
     return Softmax(axis=axis)(c)

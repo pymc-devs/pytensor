@@ -410,19 +410,6 @@ def cumsum(x, axis=None):
     axis
         The axis along which the cumulative sum is computed.
         The default (None) is to compute the cumsum over the flattened array.
-    # noqa W293
-    Example
-    -------
-    Usage in PyMC:
-
-    .. code-block:: python
-
-    with pm.Model() as model:
-        x0 = pm.Normal('x0')
-        x = pm.Normal('x', mu=0, sd=1, shape=10)
-        # Gaussian random walk
-        grw = pm.Deterministic('grw', x0 + pm.math.cumsum(x))
-
     """
     return CumOp(axis=axis, mode="add")(x)
 
@@ -439,22 +426,6 @@ def cumprod(x, axis=None):
     axis
         The axis along which the cumulative product is computed.
         The default (None) is to compute the `cumprod` over the flattened array.
-    # noqa W293
-    Example
-    -------
-    Usage in PyMC:
-
-    .. code-block:: python
-
-    import pymc as pm
-
-    with pm.Model() as model:
-        x = pm.Normal('x', shape=(10, 3))
-        # Product of x
-        prod_x = pm.Deterministic('prod_x', pm.math.cumprod(x, axis=0))
-
-    .. versionadded:: 0.7
-
     """
     return CumOp(axis=axis, mode="mul")(x)
 

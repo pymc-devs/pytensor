@@ -772,18 +772,6 @@ def switch(cond, ift, iff):
     iff : TensorVariable
         Values selected at `False` elements of `cond`.
 
-    Examples
-    --------
-    This example demonstrates how `switch` can be used in PyMC to model a
-    categorical variable.
-
-    .. code:: python
-
-        import pymc as pm
-
-        with pm.Model():
-            x = pm.Categorical('x', np.array([0.1, 0.9]))
-            y = pm.Bernoulli('y', p=pm.math.switch(x, 0.9, 0.1), shape=10)
     """
 
 
