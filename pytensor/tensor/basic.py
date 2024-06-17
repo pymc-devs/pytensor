@@ -784,6 +784,7 @@ def switch(cond, ift, iff):
             y = pm.Bernoulli('y', p=switch(x, 0.9, 0.1), shape=10)
     """
 
+
 where = switch
 
 
