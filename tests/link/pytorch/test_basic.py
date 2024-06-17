@@ -72,55 +72,71 @@ def compare_pytorch_and_py(
     return pytensor_torch_fn, pytorch_res
 
 
-def test_pytorch_FunctionGraph_once():
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_pytorch_FunctionGraph_once(device):
     """Make sure that an output is only computed once when it's referenced multiple times."""
     from pytensor.link.pytorch.dispatch import pytorch_funcify
 
-    x = vector("x")
-    y = vector("y")
+    with torch.device(device):
+        x = vector("x")
+        y = vector("y")
 
-    class TestOp(Op):
-        def __init__(self):
-            self.called = 0
+        class TestOp(Op):
+            def __init__(self):
+                self.called = 0
 
-        def make_node(self, *args):
-            return Apply(self, list(args), [x.type() for x in args])
+            def make_node(self, *args):
+                return Apply(self, list(args), [x.type() for x in args])
 
-        def perform(self, inputs, outputs):
-            for i, inp in enumerate(inputs):
-                outputs[i][0] = inp[0]
+            def perform(self, inputs, outputs):
+                for i, inp in enumerate(inputs):
+                    outputs[i][0] = inp[0]
 
-    @pytorch_funcify.register(TestOp)
-    def pytorch_funcify_TestOp(op, **kwargs):
-        def func(*args, op=op):
-            op.called += 1
-            return list(args)
+        @pytorch_funcify.register(TestOp)
+        def pytorch_funcify_TestOp(op, **kwargs):
+            def func(*args, op=op):
+                op.called += 1
+                for arg in args:
+                    assert arg.device.type == device
+                return list(args)
 
-        return func
+            return func
 
-    op1 = TestOp()
-    op2 = TestOp()
+        op1 = TestOp()
+        op2 = TestOp()
 
-    q, r = op1(x, y)
-    outs = op2(q + r, q + r)
+        q, r = op1(x, y)
+        outs = op2(q + r, q + r)
 
-    out_fg = FunctionGraph([x, y], outs, clone=False)
-    assert len(out_fg.outputs) == 2
+        out_fg = FunctionGraph([x, y], outs, clone=False)
+        assert len(out_fg.outputs) == 2
 
-    out_torch = pytorch_funcify(out_fg)
+        out_torch = pytorch_funcify(out_fg)
 
-    x_val = torch.tensor([1, 2]).to(getattr(torch, config.floatX))
-    y_val = torch.tensor([2, 3]).to(getattr(torch, config.floatX))
+        x_val = torch.tensor([1, 2]).to(getattr(torch, config.floatX))
+        y_val = torch.tensor([2, 3]).to(getattr(torch, config.floatX))
 
-    res = out_torch(x_val, y_val)
-    assert len(res) == 2
-    assert op1.called == 1
-    assert op2.called == 1
+        res = out_torch(x_val, y_val)
 
-    res = out_torch(x_val, y_val)
-    assert len(res) == 2
-    assert op1.called == 2
-    assert op2.called == 2
+        for output in res:
+            assert torch.equal(
+                output, torch.tensor([3, 5]).to(getattr(torch, config.floatX))
+            )
+
+        assert len(res) == 2
+        assert op1.called == 1
+        assert op2.called == 1
+
+        res = out_torch(x_val, y_val)
+
+        for output in res:
+            assert torch.equal(
+                output, torch.tensor([3, 5]).to(getattr(torch, config.floatX))
+            )
+
+        assert len(res) == 2
+        assert op1.called == 2
+        assert op2.called == 2
 
 
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
@@ -169,17 +185,15 @@ def test_shared_updates(device):
         assert isinstance(a.get_value(), np.ndarray)
 
 
-@pytest.mark.parametrize("device", ["cpu", "cuda"])
-def test_pytorch_checkandraise(device):
-    with torch.device(device):
-        check_and_raise = CheckAndRaise(AssertionError, "testing")
+def test_pytorch_checkandraise():
+    check_and_raise = CheckAndRaise(AssertionError, "testing")
 
-        x = scalar("x")
-        conds = (x > 0, x > 3)
-        y = check_and_raise(x, *conds)
+    x = scalar("x")
+    conds = (x > 0, x > 3)
+    y = check_and_raise(x, *conds)
 
-        y_fn = function([x], y, mode="PYTORCH")
+    y_fn = function([x], y, mode="PYTORCH")
 
-        with pytest.raises(AssertionError, match="testing"):
-            y_fn(0.0)
-        assert y_fn(4).item() == 4
+    with pytest.raises(AssertionError, match="testing"):
+        y_fn(0.0)
+    assert y_fn(4).item() == 4
