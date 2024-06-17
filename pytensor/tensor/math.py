@@ -2675,6 +2675,7 @@ def prod(
         If this is set to True, the axes which are reduced are left in
         the result as dimensions with size one. With this option, the result
         will broadcast correctly against the original tensor.
+    # noqa W293
     Example
     -------
     .. code-block:: python
