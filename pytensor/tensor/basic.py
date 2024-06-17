@@ -781,7 +781,7 @@ def switch(cond, ift, iff):
 
         with pm.Model():
             x = pm.Categorical('x', np.array([0.1, 0.9]))
-            y_ = pm.Bernoulli('y_', p=switch(x, 0.9, 0.1), shape=10)
+            y = pm.Bernoulli('y', p=switch(x, 0.9, 0.1), shape=10)
     """
 
 where = switch
