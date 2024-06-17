@@ -507,11 +507,10 @@ def softmax(c, axis=None):
     classification problem. Here is an example::
 
         import pymc as pm
-        import pytensor.tensor as pt
 
         with pm.Model() as model:
             weights = pm.Gamma('weights', 1, 1, shape=3)
-            softmax_prob = pt.softmax(weights)
+            softmax_prob = pm.math.softmax(weights)
             outcome = pm.Categorical('outcome', p=softmax_prob)
 
     """

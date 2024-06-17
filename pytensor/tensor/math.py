@@ -1951,12 +1951,11 @@ def dot(l, r):
     .. code:: python
 
         import pymc as pm
-        import pytensor.tensor as pt
 
         with pm.Model() as model:
             x = pm.Normal('x', mu=0, sd=1, shape=2)
             y = pm.Normal('y', mu=0, sd=1, shape=2)
-            z = pt.dot(x, y)
+            z = pt.math.dot(x, y)
     """
 
     if not isinstance(l, Variable):
@@ -2676,6 +2675,15 @@ def prod(
         If this is set to True, the axes which are reduced are left in
         the result as dimensions with size one. With this option, the result
         will broadcast correctly against the original tensor.
+    PyMC usage example:
+
+    .. code-block:: python
+
+        import pymc as pm
+
+        with pm.Model() as model:
+            n = pm.Poisson('n', 1, shape=(2, 3))
+            prod_n = pm.Deterministic('prod_n', pm.math.prod(n, axis=0))
 
     """
 
