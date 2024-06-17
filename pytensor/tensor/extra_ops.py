@@ -410,9 +410,18 @@ def cumsum(x, axis=None):
     axis
         The axis along which the cumulative sum is computed.
         The default (None) is to compute the cumsum over the flattened array.
+    # noqa W293
+    Example
+    -------
+    Usage in PyMC:
 
+    .. code-block:: python
 
-    .. versionadded:: 0.7
+    with pm.Model() as model:
+        x0 = pm.Normal('x0')
+        x = pm.Normal('x', mu=0, sd=1, shape=10)
+        # Gaussian random walk
+        grw = pm.Deterministic('grw', x0 + pm.math.cumsum(x))
 
     """
     return CumOp(axis=axis, mode="add")(x)
