@@ -811,6 +811,22 @@ def largest(*args):
         return max(stack(args), axis=0)
 
 
+def isposinf(x):
+    """
+    Return if the input variable has positive infinity element
+
+    """
+    return eq(x, np.inf)
+
+
+def isneginf(x):
+    """
+    Return if the input variable has negative infinity element
+
+    """
+    return eq(x, -np.inf)
+
+
 @scalar_elemwise
 def lt(a, b):
     """a < b"""
@@ -3077,11 +3093,8 @@ def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
     """
     # Replace NaN's with nan keyword
     is_nan = isnan(x)
-    is_pos_inf = eq(x, np.inf)
-    is_neg_inf = eq(x, -np.inf)
-
-    if not any(is_nan) and not any(is_pos_inf) and not any(is_neg_inf):
-        return
+    is_pos_inf = isposinf(x)
+    is_neg_inf = isneginf(x)
 
     x = switch(is_nan, nan, x)
 
@@ -3140,6 +3153,8 @@ __all__ = [
     "not_equal",
     "isnan",
     "isinf",
+    "isposinf",
+    "isneginf",
     "allclose",
     "isclose",
     "and_",
