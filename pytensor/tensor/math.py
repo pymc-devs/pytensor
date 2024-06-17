@@ -1950,13 +1950,13 @@ def dot(l, r):
 
     .. code:: python
 
-        import pymc3 as pm
-        import theano.tensor as tt
+        import pymc as pm
+        import pytensor.tensor as pt
 
         with pm.Model() as model:
             x = pm.Normal('x', mu=0, sd=1, shape=2)
             y = pm.Normal('y', mu=0, sd=1, shape=2)
-            z = tt.dot(x, y)
+            z = pt.dot(x, y)
     """
 
     if not isinstance(l, Variable):
