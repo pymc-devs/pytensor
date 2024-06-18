@@ -846,7 +846,23 @@ def zeros_like(model, dtype=None, opt=False):
 
 
 def zeros(shape, dtype=None):
-    """Create a `TensorVariable` filled with zeros, closer to NumPy's syntax than ``alloc``."""
+    """
+    Create a `TensorVariable` filled with zeros, closer to NumPy's syntax than `alloc`.
+
+    Parameters
+    ----------
+    shape : int or tuple of int
+        Shape of the empty array, e.g., ``(2, 3)`` or ``2``.
+    dtype : data-type, optional
+        Desired output data-type for the array, e.g, `numpy.int8`. Default is
+        `numpy.float64`.
+
+    Returns
+    -------
+    tensor
+        Tensor the shape of shape containing zeros of the type of dtype.
+    """
+    # Check if shape is a single integer or a sequence
     if not (
         isinstance(shape, np.ndarray | Sequence)
         or (isinstance(shape, TensorVariable) and shape.ndim > 0)
@@ -858,7 +874,23 @@ def zeros(shape, dtype=None):
 
 
 def ones(shape, dtype=None):
-    """Create a `TensorVariable` filled with ones, closer to NumPy's syntax than ``alloc``."""
+    """
+    Create a `TensorVariable` filled with ones, closer to NumPy's syntax than `alloc`.
+
+    Parameters
+    ----------
+    shape : int or tuple of int
+        Shape of the empty array, e.g., ``(2, 3)`` or ``2``.
+    dtype : data-type, optional
+        Desired output data-type for the array, e.g, `numpy.int8`. Default is
+        `numpy.float64`.
+
+    Returns
+    -------
+    tensor
+        Tensor the shape of shape containing ones of the type of dtype.
+    """
+    # Check if shape is a single integer or a sequence
     if not (
         isinstance(shape, np.ndarray | Sequence)
         or (isinstance(shape, TensorVariable) and shape.ndim > 0)
