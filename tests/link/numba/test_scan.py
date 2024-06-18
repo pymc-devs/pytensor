@@ -251,7 +251,8 @@ def test_scan_multiple_output(benchmark):
 @config.change_flags(compute_test_value="raise")
 def test_scan_tap_output():
     a_pt = pt.scalar("a")
-    a_pt.tag.test_value = 10.0
+    with pytest.warns(FutureWarning):
+        a_pt.tag.test_value = 10.0
 
     b_pt = pt.arange(11).astype(config.floatX)
     b_pt.name = "b"

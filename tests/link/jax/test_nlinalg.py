@@ -22,14 +22,15 @@ jax = pytest.importorskip("jax")
 
 def test_jax_BatchedDot():
     # tensor3 . tensor3
-    a = tensor3("a")
-    a.tag.test_value = (
-        np.linspace(-1, 1, 10 * 5 * 3).astype(config.floatX).reshape((10, 5, 3))
-    )
-    b = tensor3("b")
-    b.tag.test_value = (
-        np.linspace(1, -1, 10 * 3 * 2).astype(config.floatX).reshape((10, 3, 2))
-    )
+    with pytest.warns(FutureWarning):
+        a = tensor3("a")
+        a.tag.test_value = (
+            np.linspace(-1, 1, 10 * 5 * 3).astype(config.floatX).reshape((10, 5, 3))
+        )
+        b = tensor3("b")
+        b.tag.test_value = (
+            np.linspace(1, -1, 10 * 3 * 2).astype(config.floatX).reshape((10, 3, 2))
+        )
     out = pt_blas.BatchedDot()(a, b)
     fgraph = FunctionGraph([a, b], [out])
     compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
@@ -99,16 +100,17 @@ def test_jax_basic_multiout_omni():
     reason="Omnistaging cannot be disabled",
 )
 def test_tensor_basics():
-    y = vector("y")
-    y.tag.test_value = np.r_[1.0, 2.0].astype(config.floatX)
-    x = vector("x")
-    x.tag.test_value = np.r_[3.0, 4.0].astype(config.floatX)
-    A = matrix("A")
-    A.tag.test_value = np.empty((2, 2), dtype=config.floatX)
-    alpha = scalar("alpha")
-    alpha.tag.test_value = np.array(3.0, dtype=config.floatX)
-    beta = scalar("beta")
-    beta.tag.test_value = np.array(5.0, dtype=config.floatX)
+    with pytest.warns(FutureWarning):
+        y = vector("y")
+        y.tag.test_value = np.r_[1.0, 2.0].astype(config.floatX)
+        x = vector("x")
+        x.tag.test_value = np.r_[3.0, 4.0].astype(config.floatX)
+        A = matrix("A")
+        A.tag.test_value = np.empty((2, 2), dtype=config.floatX)
+        alpha = scalar("alpha")
+        alpha.tag.test_value = np.array(3.0, dtype=config.floatX)
+        beta = scalar("beta")
+        beta.tag.test_value = np.array(5.0, dtype=config.floatX)
 
     # This should be converted into a `Gemv` `Op` when the non-JAX compatible
     # optimizations are turned on; however, when using JAX mode, it should

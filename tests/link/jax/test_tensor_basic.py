@@ -81,7 +81,8 @@ def test_arange_nonconcrete():
     """JAX cannot JIT-compile `jax.numpy.arange` when arguments are not concrete values."""
 
     a = scalar("a")
-    a.tag.test_value = 10
+    with pytest.warns(FutureWarning):
+        a.tag.test_value = 10
     out = ptb.arange(a)
 
     with pytest.raises(NotImplementedError):
@@ -235,9 +236,10 @@ def test_tri_nonconcrete():
         scalar("n", dtype="int64"),
         scalar("k", dtype="int64"),
     )
-    m.tag.test_value = 10
-    n.tag.test_value = 10
-    k.tag.test_value = 0
+    with pytest.warns(FutureWarning):
+        m.tag.test_value = 10
+        n.tag.test_value = 10
+        k.tag.test_value = 0
 
     out = ptb.tri(m, n, k)
 

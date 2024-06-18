@@ -46,7 +46,6 @@ relies on the following elements to work properly :
 import dataclasses
 import logging
 import time
-import warnings
 from collections import OrderedDict
 from collections.abc import Callable, Iterable
 from copy import copy
@@ -2651,10 +2650,6 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             # fct add and we want to keep it for all Scan op.  This is
             # used in T_Scan.test_grad_multiple_outs_taps to test
             # that.
-            warnings.warn(
-                "test_value machinery is deprecated and will stop working in the future.",
-                FutureWarning,
-            )
             if info.as_while:
                 n = n_steps.tag.test_value
             else:

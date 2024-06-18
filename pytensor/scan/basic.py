@@ -598,10 +598,6 @@ def scan(
 
                 # Try to transfer test_value to the new variable
                 if config.compute_test_value != "off":
-                    warnings.warn(
-                        "test_value machinery is deprecated and will stop working in the future.",
-                        FutureWarning,
-                    )
                     try:
                         nw_slice.tag.test_value = get_test_value(_seq_val_slice)
                     except TestValueError:
@@ -729,10 +725,6 @@ def scan(
 
             # Try to transfer test_value to the new variable
             if config.compute_test_value != "off":
-                warnings.warn(
-                    "test_value machinery is deprecated and will stop working in the future.",
-                    FutureWarning,
-                )
                 try:
                     arg.tag.test_value = get_test_value(actual_arg)
                 except TestValueError:
@@ -788,10 +780,6 @@ def scan(
 
                 # Try to transfer test_value to the new variable
                 if config.compute_test_value != "off":
-                    warnings.warn(
-                        "test_value machinery is deprecated and will stop working in the future.",
-                        FutureWarning,
-                    )
                     try:
                         nw_slice.tag.test_value = get_test_value(_init_out_var_slice)
                     except TestValueError:

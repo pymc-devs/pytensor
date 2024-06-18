@@ -39,14 +39,15 @@ def test_Alloc(v, shape):
     g = pt.alloc(v, *shape)
     g_fg = FunctionGraph(outputs=[g])
 
-    _, (numba_res,) = compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        _, (numba_res,) = compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
     assert numba_res.shape == shape
 
@@ -69,14 +70,15 @@ def test_AllocEmpty():
 def test_TensorFromScalar(v):
     g = ptb.TensorFromScalar()(v)
     g_fg = FunctionGraph(outputs=[g])
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 @pytest.mark.parametrize(
@@ -88,28 +90,30 @@ def test_TensorFromScalar(v):
 def test_ScalarFromTensor(v):
     g = ptb.ScalarFromTensor()(v)
     g_fg = FunctionGraph(outputs=[g])
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 def test_Unbroadcast():
-    v = set_test_value(pt.row(), np.array([[1.0, 2.0]], dtype=config.floatX))
-    g = Unbroadcast(0)(v)
-    g_fg = FunctionGraph(outputs=[g])
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        v = set_test_value(pt.row(), np.array([[1.0, 2.0]], dtype=config.floatX))
+        g = Unbroadcast(0)(v)
+        g_fg = FunctionGraph(outputs=[g])
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 @pytest.mark.parametrize(
@@ -144,14 +148,15 @@ def test_MakeVector(vals, dtype):
     g = ptb.MakeVector(dtype)(*vals)
     g_fg = FunctionGraph(outputs=[g])
 
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 @pytest.mark.parametrize(
@@ -169,14 +174,15 @@ def test_ARange(start, stop, step, dtype):
     g = ptb.ARange(dtype)(start, stop, step)
     g_fg = FunctionGraph(outputs=[g])
 
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 @pytest.mark.parametrize(
@@ -232,14 +238,15 @@ def test_Join(vals, axis):
     g = pt.join(axis, *vals)
     g_fg = FunctionGraph(outputs=[g])
 
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 def test_Join_view():
@@ -250,7 +257,7 @@ def test_Join_view():
     g = ptb.Join(view=1)(1, *vals)
     g_fg = FunctionGraph(outputs=[g])
 
-    with pytest.raises(NotImplementedError):
+    with pytest.warns(FutureWarning) and pytest.raises(NotImplementedError):
         compare_numba_and_py(
             g_fg,
             [
@@ -311,14 +318,15 @@ def test_Split(n_splits, axis, values, sizes):
         return
     g_fg = FunctionGraph(outputs=[g] if n_splits == 1 else g)
 
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 def test_Split_view():
@@ -370,14 +378,15 @@ def test_ExtractDiag(val, offset):
     g = pt.diag(val, offset)
     g_fg = FunctionGraph(outputs=[g])
 
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 @pytest.mark.parametrize("k", range(-5, 4))
@@ -426,11 +435,12 @@ def test_Eye(n, m, k, dtype):
     g = pt.eye(n, m, k, dtype=dtype)
     g_fg = FunctionGraph(outputs=[g])
 
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )

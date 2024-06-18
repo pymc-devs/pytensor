@@ -33,14 +33,15 @@ def test_Second(x, y):
     # We use the `Elemwise`-wrapped version of `Second`
     g = pt.second(x, y)
     g_fg = FunctionGraph(outputs=[g])
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 @pytest.mark.parametrize(
@@ -55,14 +56,15 @@ def test_Clip(v, min, max):
     g = ps.clip(v, min, max)
     g_fg = FunctionGraph(outputs=[g])
 
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 @pytest.mark.parametrize(
@@ -113,14 +115,15 @@ def test_Composite(inputs, input_values, scalar_fn):
 def test_Cast(v, dtype):
     g = psb.Cast(dtype)(v)
     g_fg = FunctionGraph(outputs=[g])
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 @pytest.mark.parametrize(
@@ -132,11 +135,12 @@ def test_Cast(v, dtype):
 def test_reciprocal(v, dtype):
     g = psb.reciprocal(v)
     g_fg = FunctionGraph(outputs=[g])
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )

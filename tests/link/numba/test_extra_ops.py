@@ -25,15 +25,16 @@ def test_Bartlett(val):
     g = extra_ops.bartlett(val)
     g_fg = FunctionGraph(outputs=[g])
 
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-        assert_fn=lambda x, y: np.testing.assert_allclose(x, y, atol=1e-15),
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+            assert_fn=lambda x, y: np.testing.assert_allclose(x, y, atol=1e-15),
+        )
 
 
 @pytest.mark.parametrize(
@@ -101,14 +102,15 @@ def test_CumOp(val, axis, mode):
     g = extra_ops.CumOp(axis=axis, mode=mode)(val)
     g_fg = FunctionGraph(outputs=[g])
 
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 @pytest.mark.parametrize(
@@ -124,14 +126,15 @@ def test_FillDiagonal(a, val):
     g = extra_ops.FillDiagonal()(a, val)
     g_fg = FunctionGraph(outputs=[g])
 
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 @pytest.mark.parametrize(
@@ -158,14 +161,15 @@ def test_FillDiagonalOffset(a, val, offset):
     g = extra_ops.FillDiagonalOffset()(a, val, offset)
     g_fg = FunctionGraph(outputs=[g])
 
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 @pytest.mark.parametrize(
@@ -242,7 +246,7 @@ def test_RavelMultiIndex(arr, shape, mode, order, exc):
     g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.raises(exc)
-    with cm:
+    with cm and pytest.warns(FutureWarning):
         compare_numba_and_py(
             g_fg,
             [
@@ -287,7 +291,7 @@ def test_Repeat(x, repeats, axis, exc):
     g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
+    with cm and pytest.warns(FutureWarning):
         compare_numba_and_py(
             g_fg,
             [
@@ -356,7 +360,7 @@ def test_Unique(x, axis, return_index, return_inverse, return_counts, exc):
         g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
+    with cm and pytest.warns(FutureWarning):
         compare_numba_and_py(
             g_fg,
             [
@@ -399,7 +403,7 @@ def test_UnravelIndex(arr, shape, order, exc):
         g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.raises(exc)
-    with cm:
+    with cm and pytest.warns(FutureWarning):
         compare_numba_and_py(
             g_fg,
             [
@@ -453,7 +457,7 @@ def test_Searchsorted(a, v, side, sorter, exc):
     g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
+    with cm and pytest.warns(FutureWarning):
         compare_numba_and_py(
             g_fg,
             [

@@ -80,7 +80,8 @@ def test_second_constant_scalar():
 
 def test_identity():
     a = scalar("a")
-    a.tag.test_value = 10
+    with pytest.warns(FutureWarning):
+        a.tag.test_value = 10
 
     out = ps.identity(a)
     fgraph = FunctionGraph([a], [out])
@@ -238,7 +239,8 @@ def test_log1mexp():
 
 def test_nnet():
     x = vector("x")
-    x.tag.test_value = np.r_[1.0, 2.0].astype(config.floatX)
+    with pytest.warns(FutureWarning):
+        x.tag.test_value = np.r_[1.0, 2.0].astype(config.floatX)
 
     out = sigmoid(x)
     fgraph = FunctionGraph([x], [out])
@@ -250,10 +252,11 @@ def test_nnet():
 
 
 def test_jax_variadic_Scalar():
-    mu = vector("mu", dtype=config.floatX)
-    mu.tag.test_value = np.r_[0.1, 1.1].astype(config.floatX)
-    tau = vector("tau", dtype=config.floatX)
-    tau.tag.test_value = np.r_[1.0, 2.0].astype(config.floatX)
+    with pytest.warns(FutureWarning):
+        mu = vector("mu", dtype=config.floatX)
+        mu.tag.test_value = np.r_[0.1, 1.1].astype(config.floatX)
+        tau = vector("tau", dtype=config.floatX)
+        tau.tag.test_value = np.r_[1.0, 2.0].astype(config.floatX)
 
     res = -tau * mu
 
@@ -305,10 +308,11 @@ def test_mod_scalars():
 
 
 def test_jax_multioutput():
-    x = vector("x")
-    x.tag.test_value = np.r_[1.0, 2.0].astype(config.floatX)
-    y = vector("y")
-    y.tag.test_value = np.r_[3.0, 4.0].astype(config.floatX)
+    with pytest.warns(FutureWarning):
+        x = vector("x")
+        x.tag.test_value = np.r_[1.0, 2.0].astype(config.floatX)
+        y = vector("y")
+        y.tag.test_value = np.r_[3.0, 4.0].astype(config.floatX)
 
     w = cosh(x**2 + y / 3.0)
     v = cosh(x / 3.0 + y**2)
@@ -319,14 +323,15 @@ def test_jax_multioutput():
 
 
 def test_jax_logp():
-    mu = vector("mu")
-    mu.tag.test_value = np.r_[0.0, 0.0].astype(config.floatX)
-    tau = vector("tau")
-    tau.tag.test_value = np.r_[1.0, 1.0].astype(config.floatX)
-    sigma = vector("sigma")
-    sigma.tag.test_value = (1.0 / get_test_value(tau)).astype(config.floatX)
-    value = vector("value")
-    value.tag.test_value = np.r_[0.1, -10].astype(config.floatX)
+    with pytest.warns(FutureWarning):
+        mu = vector("mu")
+        mu.tag.test_value = np.r_[0.0, 0.0].astype(config.floatX)
+        tau = vector("tau")
+        tau.tag.test_value = np.r_[1.0, 1.0].astype(config.floatX)
+        sigma = vector("sigma")
+        sigma.tag.test_value = (1.0 / get_test_value(tau)).astype(config.floatX)
+        value = vector("value")
+        value.tag.test_value = np.r_[0.1, -10].astype(config.floatX)
 
     logp = (-tau * (value - mu) ** 2 + log(tau / np.pi / 2.0)) / 2.0
     conditions = [sigma > 0]

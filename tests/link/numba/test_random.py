@@ -527,15 +527,16 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
     g = rv_op(*dist_args, size=size, rng=rng)
     g_fg = FunctionGraph(outputs=[g])
 
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-        eval_obj_mode=False,  # No python impl
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+            eval_obj_mode=False,  # No python impl
+        )
 
 
 @pytest.mark.parametrize(
@@ -580,15 +581,16 @@ def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_
     rng = shared(np.random.default_rng(29402))
     g = rv_op(*dist_args, size=(2000, *base_size), rng=rng)
     g_fn = function(dist_args, g, mode=numba_mode)
-    samples = g_fn(
-        *[
-            i.tag.test_value
-            for i in g_fn.maker.fgraph.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ]
-    )
+    with pytest.warns(FutureWarning):
+        samples = g_fn(
+            *[
+                i.tag.test_value
+                for i in g_fn.maker.fgraph.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ]
+        )
 
-    bcast_dist_args = np.broadcast_arrays(*[i.tag.test_value for i in dist_args])
+        bcast_dist_args = np.broadcast_arrays(*[i.tag.test_value for i in dist_args])
 
     for idx in np.ndindex(*base_size):
         cdf_params = params_conv(*(arg[idx] for arg in bcast_dist_args))
@@ -642,7 +644,8 @@ def test_DirichletRV(a, size, cm):
     g_fn = function([a], g, mode=numba_mode)
 
     with cm:
-        a_val = a.tag.test_value
+        with pytest.warns(FutureWarning):
+            a_val = a.tag.test_value
 
         all_samples = []
         for i in range(1000):

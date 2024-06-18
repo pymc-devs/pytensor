@@ -1162,9 +1162,10 @@ class TestFusion:
         """
         x, y, z = dmatrices("xyz")
 
-        x.tag.test_value = test_value
-        y.tag.test_value = test_value
-        z.tag.test_value = test_value
+        with pytest.warns(FutureWarning):
+            x.tag.test_value = test_value
+            y.tag.test_value = test_value
+            z.tag.test_value = test_value
 
         with config.change_flags(
             compute_test_value="raise", compute_test_value_opt="raise"
@@ -1471,9 +1472,10 @@ def test_local_inline_composite_constants(op, np_op, const_shape):
     y = vector("y")
     out = pt.exp(op(x, const)) + y
 
-    fn = pytensor.function(
-        [x, y], out, mode=get_default_mode().including("specialize", "fusion")
-    )
+    with pytest.warns(FutureWarning):
+        fn = pytensor.function(
+            [x, y], out, mode=get_default_mode().including("specialize", "fusion")
+        )
     # There should be a single Composite after optimization
     [node] = [
         node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Elemwise)

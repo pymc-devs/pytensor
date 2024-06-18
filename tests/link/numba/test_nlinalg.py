@@ -48,7 +48,7 @@ def test_Solve(A, x, lower, exc):
         g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
+    with cm and pytest.warns(FutureWarning):
         compare_numba_and_py(
             g_fg,
             [
@@ -83,7 +83,7 @@ def test_Det(x, exc):
     g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
+    with cm and pytest.warns(FutureWarning):
         compare_numba_and_py(
             g_fg,
             [
@@ -118,7 +118,7 @@ def test_SLogDet(x, exc):
     g_fg = FunctionGraph(outputs=g)
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
+    with cm and pytest.warns(FutureWarning):
         compare_numba_and_py(
             g_fg,
             [
@@ -190,7 +190,7 @@ def test_Eig(x, exc):
         g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
+    with cm and pytest.warns(FutureWarning):
         compare_numba_and_py(
             g_fg,
             [
@@ -233,7 +233,7 @@ def test_Eigh(x, uplo, exc):
         g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
+    with cm and pytest.warns(FutureWarning):
         compare_numba_and_py(
             g_fg,
             [
@@ -294,7 +294,7 @@ def test_matrix_inverses(op, x, exc, op_args):
     g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
+    with cm and pytest.warns(FutureWarning):
         compare_numba_and_py(
             g_fg,
             [
@@ -355,7 +355,7 @@ def test_QRFull(x, mode, exc):
         g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
+    with cm and pytest.warns(FutureWarning):
         compare_numba_and_py(
             g_fg,
             [
@@ -420,7 +420,7 @@ def test_SVD(x, full_matrices, compute_uv, exc):
         g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
+    with cm and pytest.warns(FutureWarning):
         compare_numba_and_py(
             g_fg,
             [

@@ -607,29 +607,31 @@ def test_Shape(x, i):
 def test_Reshape(v, shape, ndim):
     g = Reshape(ndim)(v, shape)
     g_fg = FunctionGraph(outputs=[g])
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 def test_Reshape_scalar():
     v = pt.vector()
-    v.tag.test_value = np.array([1.0], dtype=config.floatX)
-    g = Reshape(1)(v[0], (1,))
-    g_fg = FunctionGraph(outputs=[g])
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        v.tag.test_value = np.array([1.0], dtype=config.floatX)
+        g = Reshape(1)(v[0], (1,))
+        g_fg = FunctionGraph(outputs=[g])
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 @pytest.mark.parametrize(
@@ -657,14 +659,15 @@ def test_SpecifyShape(v, shape, fails):
     g_fg = FunctionGraph(outputs=[g])
     cm = contextlib.suppress() if not fails else pytest.raises(AssertionError)
     with cm:
-        compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
-        )
+        with pytest.warns(FutureWarning):
+            compare_numba_and_py(
+                g_fg,
+                [
+                    i.tag.test_value
+                    for i in g_fg.inputs
+                    if not isinstance(i, SharedVariable | Constant)
+                ],
+            )
 
 
 @pytest.mark.parametrize(
@@ -676,14 +679,15 @@ def test_SpecifyShape(v, shape, fails):
 def test_ViewOp(v):
     g = ViewOp()(v)
     g_fg = FunctionGraph(outputs=[g])
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 @pytest.mark.parametrize(
@@ -720,7 +724,7 @@ def test_perform(inputs, op, exc):
         g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
+    with cm and pytest.warns(FutureWarning):
         compare_numba_and_py(
             g_fg,
             [
@@ -735,7 +739,8 @@ def test_perform_params():
     """This tests for `Op.perform` implementations that require the `params` arguments."""
 
     x = pt.vector()
-    x.tag.test_value = np.array([1.0, 2.0], dtype=config.floatX)
+    with pytest.warns(FutureWarning):
+        x.tag.test_value = np.array([1.0, 2.0], dtype=config.floatX)
 
     out = assert_op(x, np.array(True))
 
@@ -754,7 +759,8 @@ def test_perform_type_convert():
     """
 
     x = pt.vector()
-    x.tag.test_value = np.array([1.0, 2.0], dtype=config.floatX)
+    with pytest.warns(FutureWarning):
+        x.tag.test_value = np.array([1.0, 2.0], dtype=config.floatX)
 
     out = assert_op(x.sum(), np.array(True))
 
@@ -799,7 +805,7 @@ def test_Dot(x, y, exc):
     g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
+    with cm and pytest.warns(FutureWarning):
         compare_numba_and_py(
             g_fg,
             [
@@ -844,7 +850,7 @@ def test_Softplus(x, exc):
     g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
+    with cm and pytest.warns(FutureWarning):
         compare_numba_and_py(
             g_fg,
             [
@@ -891,7 +897,7 @@ def test_BatchedDot(x, y, exc):
         g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
+    with cm and pytest.warns(FutureWarning):
         compare_numba_and_py(
             g_fg,
             [
@@ -1083,7 +1089,7 @@ def test_OpFromGraph():
     compare_numba_and_py(((x, y, z), (out,)), [xv, yv, zv])
 
 
-@pytest.mark.filterwarnings("error")
+# @pytest.mark.filterwarnings("error") Leads to error when adding warning for deprecated test_value
 def test_cache_warning_suppressed():
     x = pt.vector("x", shape=(5,), dtype="float64")
     out = pt.psi(x) * 2

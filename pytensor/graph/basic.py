@@ -451,6 +451,12 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
 
         self.tag = ValidatingScratchpad("test_value", type.filter)
 
+        # if hasattr(self.tag, "test_value"):
+        #     warnings.warn(
+        #         "test_value machinery is deprecated and will stop working in the future.",
+        #         FutureWarning,
+        #     )
+
         self.type = type
 
         self._owner = owner
@@ -479,10 +485,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         if not hasattr(self.tag, "test_value"):
             detailed_err_msg = get_variable_trace_string(self)
             raise TestValueError(f"{self} has no test value {detailed_err_msg}")
-        warnings.warn(
-            "test_value machinery is deprecated and will stop working in the future.",
-            FutureWarning,
-        )
+
         return self.tag.test_value
 
     def __str__(self):

@@ -189,7 +189,8 @@ def test_jax_ifelse():
     compare_jax_and_py(x_fg, [])
 
     a = dscalar("a")
-    a.tag.test_value = np.array(0.2, dtype=config.floatX)
+    with pytest.warns(FutureWarning):
+        a.tag.test_value = np.array(0.2, dtype=config.floatX)
     x = ifelse(a < 0.5, true_vals, false_vals)
     x_fg = FunctionGraph([a], [x])  # I.e. False
 
@@ -198,7 +199,8 @@ def test_jax_ifelse():
 
 def test_jax_checkandraise():
     p = scalar()
-    p.tag.test_value = 0
+    with pytest.warns(FutureWarning):
+        p.tag.test_value = 0
 
     res = assert_op(p, p < 1.0)
 
@@ -207,5 +209,6 @@ def test_jax_checkandraise():
 
 
 def set_test_value(x, v):
-    x.tag.test_value = v
+    with pytest.warns(FutureWarning):
+        x.tag.test_value = v
     return x

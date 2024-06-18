@@ -1,4 +1,3 @@
-import warnings
 from itertools import chain
 
 from pytensor.compile import optdb
@@ -109,10 +108,6 @@ def local_rv_size_lift(fgraph, node):
     new_node = node.op.make_node(rng, None, *dist_params)
 
     if config.compute_test_value != "off":
-        warnings.warn(
-            "test_value machinery is deprecated and will stop working in the future.",
-            FutureWarning,
-        )
         compute_test_value(new_node)
 
     return new_node.outputs
@@ -192,10 +187,6 @@ def local_dimshuffle_rv_lift(fgraph, node):
     new_node = rv_op.make_node(rng, new_size, *new_dist_params)
 
     if config.compute_test_value != "off":
-        warnings.warn(
-            "test_value machinery is deprecated and will stop working in the future.",
-            FutureWarning,
-        )
         compute_test_value(new_node)
 
     out = new_node.outputs[1]

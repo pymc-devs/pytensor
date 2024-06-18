@@ -15,13 +15,15 @@ jax = pytest.importorskip("jax")
 
 
 def set_test_value(x, v):
-    x.tag.test_value = v
+    with pytest.warns(FutureWarning):
+        x.tag.test_value = v
     return x
 
 
 def test_extra_ops():
     a = matrix("a")
-    a.tag.test_value = np.arange(6, dtype=config.floatX).reshape((3, 2))
+    with pytest.warns(FutureWarning):
+        a.tag.test_value = np.arange(6, dtype=config.floatX).reshape((3, 2))
 
     out = pt_extra_ops.cumsum(a, axis=0)
     fgraph = FunctionGraph([a], [out])
@@ -69,7 +71,8 @@ def test_extra_ops():
 )
 def test_extra_ops_omni():
     a = matrix("a")
-    a.tag.test_value = np.arange(6, dtype=config.floatX).reshape((3, 2))
+    with pytest.warns(FutureWarning):
+        a.tag.test_value = np.arange(6, dtype=config.floatX).reshape((3, 2))
 
     # This function also cannot take symbolic input.
     c = ptb.as_tensor(5)
@@ -95,7 +98,8 @@ def test_extra_ops_omni():
 @pytest.mark.xfail(reason="jax.numpy.arange requires concrete inputs")
 def test_unique_nonconcrete():
     a = matrix("a")
-    a.tag.test_value = np.arange(6, dtype=config.floatX).reshape((3, 2))
+    with pytest.warns(FutureWarning):
+        a.tag.test_value = np.arange(6, dtype=config.floatX).reshape((3, 2))
 
     out = pt_extra_ops.Unique()(a)
     fgraph = FunctionGraph([a], [out])

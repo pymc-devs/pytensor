@@ -110,22 +110,24 @@ def test_solve_triangular_raises_on_nan_inf(value):
 
 @pytest.mark.parametrize("lower", [True, False], ids=["lower=True", "lower=False"])
 def test_numba_Cholesky(lower):
-    x = set_test_value(
-        pt.tensor(dtype=config.floatX, shape=(3, 3)),
-        (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype(config.floatX)),
-    )
+    with pytest.warns(FutureWarning):
+        x = set_test_value(
+            pt.tensor(dtype=config.floatX, shape=(3, 3)),
+            (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype(config.floatX)),
+        )
 
     g = pt.linalg.cholesky(x, lower=lower)
     g_fg = FunctionGraph(outputs=[g])
 
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    with pytest.warns(FutureWarning):
+        compare_numba_and_py(
+            g_fg,
+            [
+                i.tag.test_value
+                for i in g_fg.inputs
+                if not isinstance(i, SharedVariable | Constant)
+            ],
+        )
 
 
 def test_numba_Cholesky_raises_on_nan_input():

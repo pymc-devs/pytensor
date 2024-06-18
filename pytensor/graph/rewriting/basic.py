@@ -983,10 +983,6 @@ class MetaNodeRewriter(NodeRewriter):
             if isinstance(input, pytensor.compile.SharedVariable):
                 pass
             elif hasattr(input.tag, "test_value"):
-                warnings.warn(
-                    "compute_test_value is deprecated and will stop working in the future.",
-                    FutureWarning,
-                )
                 givens[input] = pytensor.shared(
                     input.type.filter(input.tag.test_value),
                     input.name,
