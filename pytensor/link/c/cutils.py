@@ -1,5 +1,4 @@
 import errno
-import os
 import sys
 from pathlib import Path
 
@@ -10,8 +9,7 @@ from pytensor.link.c import cmodule
 
 # TODO These two lines may be removed in the future, when we are 100% sure
 # no one has an old cutils_ext.so lying around anymore.
-if os.path.exists(os.path.join(config.compiledir, "cutils_ext.so")):
-    os.remove(os.path.join(config.compiledir, "cutils_ext.so"))
+(config.compiledir / "cutils_ext.so").unlink(missing_ok=True)
 
 
 def compile_cutils():
@@ -69,13 +67,13 @@ def compile_cutils():
     }
     """
 
-    loc = os.path.join(config.compiledir, "cutils_ext")
-    if not os.path.exists(loc):
+    loc = config.compiledir / "cutils_ext"
+    if not loc.exists():
         try:
-            os.mkdir(loc)
+            loc.mkdir()
         except OSError as e:
             assert e.errno == errno.EEXIST
-            assert os.path.exists(loc), loc
+            assert loc.exists(), loc
 
     args = cmodule.GCC_compiler.compile_args(march_flags=False)
     cmodule.GCC_compiler.compile_str("cutils_ext", code, location=loc, preargs=args)
@@ -89,16 +87,14 @@ try:
     # repeated in compile_str()) but if another cutils_ext does exist then it
     # will be imported and compile_str won't get called at all.
     sys.path.insert(0, str(config.compiledir))
-    location = os.path.join(str(config.compiledir), "cutils_ext")
-    if not os.path.exists(location):
+    location = config.compiledir / "cutils_ext"
+    if not location.exists():
         try:
-            os.mkdir(location)
+            location.mkdir()
         except OSError as e:
             assert e.errno == errno.EEXIST
-            assert os.path.exists(location), location
-    if not os.path.exists(os.path.join(location, "__init__.py")):
-        with open(os.path.join(location, "__init__.py"), "w"):
-            pass
+            assert location.exists(), location
+    (location / "__init__.py").touch(exist_ok=True)
 
     try:
         from cutils_ext.cutils_ext import *  # noqa
