@@ -216,7 +216,7 @@ def output_subprocess_Popen(command, **params):
     return (*out, p.returncode)
 
 
-def hash_from_code(msg):
+def hash_from_code(msg: str | bytes) -> str:
     """Return the SHA256 hash of a string or bytes."""
     # hashlib.sha256() requires an object that supports buffer interface,
     # but Python 3 (unicode) strings don't.
