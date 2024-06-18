@@ -31,7 +31,6 @@ from pytensor.tensor.type import (
     scalars,
     vector,
 )
-from pytensor.utils import exc_message
 
 
 def PatternOptimizer(p1, p2, ign=True):
@@ -1181,6 +1180,17 @@ class TestPicklefunction:
 
         def pers_load(id):
             return saves[id]
+
+        def exc_message(e):
+            """
+            In Python 3, when an exception is reraised it saves the original
+            exception in its args, therefore in order to find the actual
+            message, we need to unpack arguments recursively.
+            """
+            msg = e.args[0]
+            if isinstance(msg, Exception):
+                return exc_message(msg)
+            return msg
 
         b = np.random.random((5, 4))
 
