@@ -6,7 +6,9 @@ import os
 import struct
 import subprocess
 import sys
+from collections.abc import Iterable, Sequence
 from functools import partial
+from pathlib import Path
 
 
 __all__ = [
@@ -85,18 +87,6 @@ def add_excepthook(hook):
     sys.excepthook = __call_excepthooks
 
 
-def exc_message(e):
-    """
-    In python 3.x, when an exception is reraised it saves original
-    exception in its args, therefore in order to find the actual
-    message, we need to unpack arguments recursively.
-    """
-    msg = e.args[0]
-    if isinstance(msg, Exception):
-        return exc_message(msg)
-    return msg
-
-
 def get_unbound_function(unbound):
     # Op.make_thunk isn't bound, so don't have a __func__ attr.
     # But bound method, have a __func__ method that point to the
@@ -106,8 +96,9 @@ def get_unbound_function(unbound):
     return unbound
 
 
-def maybe_add_to_os_environ_pathlist(var, newpath):
-    """Unfortunately, Conda offers to make itself the default Python
+def maybe_add_to_os_environ_pathlist(var: str, newpath: Path | str) -> None:
+    """
+    Unfortunately, Conda offers to make itself the default Python
     and those who use it that way will probably not activate envs
     correctly meaning e.g. mingw-w64 g++ may not be on their PATH.
 
@@ -118,18 +109,18 @@ def maybe_add_to_os_environ_pathlist(var, newpath):
     The reason we check first is because Windows environment vars
     are limited to 8191 characters and it is easy to hit that.
 
-    `var` will typically be 'PATH'."""
+    `var` will typically be 'PATH'.
+    """
+    if not Path(newpath).is_absolute():
+        return
 
-    import os
-
-    if os.path.isabs(newpath):
-        try:
-            oldpaths = os.environ[var].split(os.pathsep)
-            if newpath not in oldpaths:
-                newpaths = os.pathsep.join([newpath, *oldpaths])
-                os.environ[var] = newpaths
-        except Exception:
-            pass
+    try:
+        oldpaths = os.environ[var].split(os.pathsep)
+        if str(newpath) not in oldpaths:
+            newpaths = os.pathsep.join([str(newpath), *oldpaths])
+            os.environ[var] = newpaths
+    except Exception:
+        pass
 
 
 def subprocess_Popen(command, **params):
@@ -210,7 +201,7 @@ def output_subprocess_Popen(command, **params):
     return (*out, p.returncode)
 
 
-def hash_from_code(msg):
+def hash_from_code(msg: str | bytes) -> str:
     """Return the SHA256 hash of a string or bytes."""
     # hashlib.sha256() requires an object that supports buffer interface,
     # but Python 3 (unicode) strings don't.
@@ -221,27 +212,7 @@ def hash_from_code(msg):
     return "m" + hashlib.sha256(msg).hexdigest()
 
 
-def memoize(f):
-    """
-    Cache the return value for each tuple of arguments (which must be hashable).
-
-    """
-    cache = {}
-
-    def rval(*args, **kwargs):
-        kwtup = tuple(kwargs.items())
-        key = (args, kwtup)
-        if key not in cache:
-            val = f(*args, **kwargs)
-            cache[key] = val
-        else:
-            val = cache[key]
-        return val
-
-    return rval
-
-
-def uniq(seq):
+def uniq(seq: Sequence) -> list:
     """
     Do not use set, this must always return the same value at the same index.
     If we just exchange other values, but keep the same pattern of duplication,
@@ -253,11 +224,12 @@ def uniq(seq):
     return [x for i, x in enumerate(seq) if seq.index(x) == i]
 
 
-def difference(seq1, seq2):
+def difference(seq1: Iterable, seq2: Iterable):
     r"""
     Returns all elements in seq1 which are not in seq2: i.e ``seq1\seq2``.
 
     """
+    seq2 = list(seq2)
     try:
         # try to use O(const * len(seq1)) algo
         if len(seq2) < 4:  # I'm guessing this threshold -JB
@@ -285,7 +257,7 @@ def from_return_values(values):
         return [values]
 
 
-def flatten(a):
+def flatten(a) -> list:
     """
     Recursively flatten tuple, list and set in a list.
 

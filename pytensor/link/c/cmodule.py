@@ -426,7 +426,7 @@ def is_same_entry(entry_1, entry_2):
     return False
 
 
-def get_module_hash(src_code, key):
+def get_module_hash(src_code: str, key) -> str:
     """
     Return a SHA256 hash that uniquely identifies a module.
 
@@ -466,13 +466,13 @@ def get_module_hash(src_code, key):
         if isinstance(key_element, tuple):
             # This should be the C++ compilation command line parameters or the
             # libraries to link against.
-            to_hash += list(key_element)
+            to_hash += [str(e) for e in key_element]
         elif isinstance(key_element, str):
             if key_element.startswith("md5:") or key_element.startswith("hash:"):
                 # This is actually a sha256 hash of the config options.
                 # Currently, we still keep md5 to don't break old PyTensor.
                 # We add 'hash:' so that when we change it in
-                # the futur, it won't break this version of PyTensor.
+                # the future, it won't break this version of PyTensor.
                 break
             elif key_element.startswith("NPY_ABI_VERSION=0x") or key_element.startswith(
                 "c_compiler_str="
