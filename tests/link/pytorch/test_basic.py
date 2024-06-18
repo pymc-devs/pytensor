@@ -74,7 +74,7 @@ def compare_pytorch_and_py(
 
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
 def test_pytorch_FunctionGraph_once(device):
-    if torch.cuda.is_available() is False:
+    if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA is not available")
     """Make sure that an output is only computed once when it's referenced multiple times."""
     from pytensor.link.pytorch.dispatch import pytorch_funcify
@@ -143,7 +143,7 @@ def test_pytorch_FunctionGraph_once(device):
 
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
 def test_shared(device):
-    if torch.cuda.is_available() is False:
+    if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA is not available")
     with torch.device(device):
         a = shared(np.array([1, 2, 3], dtype=config.floatX))
@@ -171,7 +171,7 @@ def test_shared(device):
 
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
 def test_shared_updates(device):
-    if torch.cuda.is_available() is False:
+    if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA is not available")
     with torch.device(device):
         a = shared(0)
