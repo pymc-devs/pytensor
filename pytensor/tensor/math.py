@@ -698,11 +698,23 @@ def ge(a, b):
 
 
 def eq(a, b):
-    """Elementwise equality comparison, `a == b`."""
+    """Elementwise equality comparison, `a == b`.
+    
+    Notes
+    -----
+    Due to Python rules, it is not possible to correctly overload the equality symbol `==` for hashable objects,  
+    so `eq` must always be used to compute the Elemwise equality of TensorVariables (which are hashable).
+    """
 
 
 def neq(a, b):
-    """Elementwise inequality comparison, `a != b`."""
+    """Elementwise inequality comparison, `a != b`.
+    
+    Notes
+    -----
+    Due to Python rules, it is not possible to overload the non-equality symbol `!=` for hashable objects, 
+    so `neq` must always be used to compute the Elemwise non-equality of TensorVariables (which are hashable).
+    """
 
 
 def isnan(a):
