@@ -330,7 +330,7 @@ def check_and_normalize_axes(x, axis):
 
     Parameters
     ----------
-    x: TensorVariable
+    x: TensorLike
     axis: int, tuple or list of integers
 
     Returns
@@ -720,13 +720,9 @@ def isnan(a):
 
     Elementwise test for NaN (not a number).
 
-    This function is a copy of the `isnan` function defined in the
-    `pytensor/tensor/math.py` file. The only difference is that it includes
-    comments and docstrings.
-
     Parameters
     ----------
-    a : TensorVariable
+    a : TensorLike
         Input tensor.
 
     Returns
@@ -751,7 +747,7 @@ def isinf(a):
 
     Parameters
     ----------
-    a : TensorVariable
+    a : TensorLike
         Input tensor.
 
     Returns
@@ -774,7 +770,7 @@ def isinf(a):
 
     Parameters
     ----------
-    a : TensorVariable
+    a : TensorLike
         Input tensor.
 
     Returns
@@ -3155,7 +3151,7 @@ def tensordot(
 
     Returns
     -------
-    output : TensorVariable
+    output : TensorLike
         The tensor dot product of the input.
         Its shape will be equal to the concatenation of `a` and `b` shapes
         (ignoring the dimensions that were summed over given in ``a_axes``

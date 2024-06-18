@@ -492,7 +492,7 @@ def softmax(c, axis=None):
     ----------
     c : TensorVariable
         The input tensor.
-    axis : int
+    axis : int or None
         The axis along which to compute the softmax.
 
     Returns
