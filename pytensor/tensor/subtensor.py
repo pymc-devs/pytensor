@@ -1992,8 +1992,7 @@ class AdvancedSubtensor1(COp):
             raise TypeError("index must be vector")
         if x_.type.ndim == 0:
             raise TypeError("cannot index into a scalar")
-        out_shape = (ilist_.type.shape[0],) + x_.type.shape[1:]
-        out_shape = tuple(1 if s == 1 else None for s in out_shape)
+        out_shape = (ilist_.type.shape[0], *x_.type.shape[1:])
         return Apply(self, [x_, ilist_], [TensorType(dtype=x.dtype, shape=out_shape)()])
 
     def perform(self, node, inp, out_):
