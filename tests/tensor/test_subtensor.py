@@ -34,6 +34,7 @@ from pytensor.tensor.subtensor import (
     advanced_inc_subtensor1,
     advanced_set_subtensor,
     advanced_set_subtensor1,
+    advanced_subtensor1,
     as_index_literal,
     basic_shape,
     get_canonical_form_slice,
@@ -2707,9 +2708,23 @@ def test_index_vars_to_types():
         [(7, 13), (slice(None, None, 2), slice(-1, 1, -1)), (4, 11)],
     ],
 )
-def test_static_shapes(x_shape, indices, expected):
+def test_subtensor_static_shapes(x_shape, indices, expected):
     x = ptb.tensor(dtype="float64", shape=x_shape)
     y = x[indices]
+    assert y.type.shape == expected
+
+
+@pytest.mark.parametrize(
+    "x_shape, indices, expected",
+    [
+        [(None, 5, None, 3), vector(shape=(1,)), (1, 5, None, 3)],
+        [(None, 5, None, 3), vector(shape=(2,)), (2, 5, None, 3)],
+        [(None, 5, None, 3), vector(shape=(None,)), (None, 5, None, 3)],
+    ],
+)
+def test_advanced_subtensor1_static_shapes(x_shape, indices, expected):
+    x = ptb.tensor(dtype="float64", shape=x_shape)
+    y = advanced_subtensor1(x, indices.astype(int))
     assert y.type.shape == expected
 
 
