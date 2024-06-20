@@ -537,7 +537,10 @@ def indexed_result_shape(array_shape, indices, indices_are_shapes=False):
     return res_shape
 
 
-def get_slice_elements(idxs: list, cond: Callable) -> list:
+def get_slice_elements(
+    idxs: list,
+    cond: Callable = lambda x: isinstance(x, Variable),
+) -> list:
     """Extract slice elements conditional on a given predicate function.
 
     Parameters
