@@ -6,6 +6,7 @@ from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.fg import FunctionGraph
 from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import CheckAndRaise
+from pytensor.tensor.basic import Alloc, AllocEmpty, ARange
 
 
 @singledispatch
@@ -58,3 +59,33 @@ def pytorch_funcify_DeepCopyOp(op, **kwargs):
         return x.clone()
 
     return deepcopyop
+
+
+@pytorch_funcify.register(AllocEmpty)
+def pytorch_funcify_AllocEmpty(op, **kwargs):
+    dtype = getattr(torch, op.dtype)
+
+    def alloc_empty(*shape):
+        return torch.empty(shape, dtype=dtype)
+
+    return alloc_empty
+
+
+@pytorch_funcify.register(Alloc)
+def pytorch_funcify_alloc(op, **kwargs):
+    def alloc(value, *shape):
+        out = torch.empty(shape, dtype=value.dtype)
+        out[...] = value  # broadcast value to shape of out
+        return out
+
+    return alloc
+
+
+@pytorch_funcify.register(ARange)
+def pytorch_funcify_arange(op, **kwargs):
+    dtype = getattr(torch, op.dtype)
+
+    def arange(start, stop, step):
+        return torch.arange(start, stop, step, dtype=dtype)
+
+    return arange
