@@ -1,6 +1,6 @@
 import itertools
 import sys
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from collections.abc import Generator
 from functools import cache
 from typing import TypeVar
@@ -127,7 +127,7 @@ class InplaceElemwiseOptimizer(GraphRewriter):
             "nb_call_replace": 0,
             "nb_call_validate": 0,
             "nb_inconsistent": 0,
-            "ndim": defaultdict(int),
+            "ndim": Counter(),
         }
 
         check_each_change = config.tensor__insert_inplace_optimizer_validate_nb
