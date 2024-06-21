@@ -14,6 +14,7 @@ import pytensor
 import pytensor.compile.profiling
 from pytensor.compile.io import In, SymbolicInput, SymbolicOutput
 from pytensor.compile.ops import deep_copy_op, view_op
+from pytensor.compile.profiling import ProfileStats
 from pytensor.configdefaults import config
 from pytensor.graph.basic import (
     Constant,
@@ -553,11 +554,11 @@ class Function:
 
     def copy(
         self,
-        share_memory=False,
-        swap=None,
-        delete_updates=False,
-        name=None,
-        profile=None,
+        share_memory: bool = False,
+        swap: dict | None = None,
+        delete_updates: bool = False,
+        name: str | None = None,
+        profile: bool | str | ProfileStats | None = None,
     ):
         """
         Copy this function. Copied function will have separated maker and
@@ -584,7 +585,7 @@ class Function:
             If provided, will be the name of the new
             Function. Otherwise, it will be old + " copy"
 
-        profile :
+        profile : bool | str | ProfileStats | None
             as pytensor.function profile parameter
 
         Returns
@@ -723,14 +724,8 @@ class Function:
         # reinitialize new maker and create new function
         if profile is None:
             profile = config.profile or config.print_global_stats
-            # profile -> True or False
         if profile is True:
-            if name:
-                message = name
-            else:
-                message = str(profile.message) + " copy"
-            profile = pytensor.compile.profiling.ProfileStats(message=message)
-            # profile -> object
+            profile = pytensor.compile.profiling.ProfileStats(message=name)
         elif isinstance(profile, str):
             profile = pytensor.compile.profiling.ProfileStats(message=profile)
 
