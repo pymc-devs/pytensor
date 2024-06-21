@@ -423,7 +423,7 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
         for mul_input in inputs_to_mul
         if mul_input.owner and isinstance(mul_input.owner.op, Eye)
     ]
-    if not (eye_input):
+    if eye_input and eye_input[0].broadcastable[-2:] != (False, False):
         return None
 
     # Get all non Eye inputs (scalars/matrices/vectors)
@@ -433,16 +433,20 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
     if len(non_eye_inputs) >= 2:
         return None
 
-    # Checking if original x was scalar/vector/matrix
+    # Rewrite is only applied if all the shapes are known
+    # if (non_eye_inputs[0].type.shape[-2:] == (None, None) or eye_input[0].type.shape[-2:] == (None, None)):
+    # return None
+    # Otherwise, cases such as recantangle eye (pt.eye(7,5)) or degenerate eye (pt.eye(1)) will also be rewritten incorrectly.
 
+    # Checking if original x was scalar/vector/matrix
     if non_eye_inputs[0].type.broadcastable[-2:] == (True, True):
         # For scalar
-        det_val = non_eye_inputs[0].owner.inputs[0] ** (eye_input[0].shape[0]).astype(
-            config.floatX
-        )
+        det_val = non_eye_inputs[0].squeeze(axis=(-1, -2)) ** (
+            eye_input[0].shape[0]
+        ).astype(config.floatX)
     elif non_eye_inputs[0].type.broadcastable[-2:] == (False, False):
         # For Matrix
-        det_val = non_eye_inputs[0].diagonal().prod(axis=-1)
+        det_val = non_eye_inputs[0].diagonal(axis1=-1, axis2=-2).prod(axis=-1)
     else:
         # For vector
         det_val = non_eye_inputs[0].prod(axis=(-1, -2))
