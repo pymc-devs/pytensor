@@ -1,5 +1,3 @@
-from collections import OrderedDict
-
 import numpy as np
 import pytest
 
@@ -637,7 +635,7 @@ def test_known_grads():
 
     for layer in layers:
         first = grad(cost, layer, disconnected_inputs="ignore")
-        known = OrderedDict(zip(layer, first))
+        known = dict(zip(layer, first))
         full = grad(
             cost=None, known_grads=known, wrt=inputs, disconnected_inputs="ignore"
         )
@@ -755,7 +753,7 @@ def test_subgraph_grad():
         param_grad, next_grad = subgraph_grad(
             wrt=params[i], end=grad_ends[i], start=next_grad, cost=costs[i]
         )
-        next_grad = OrderedDict(zip(grad_ends[i], next_grad))
+        next_grad = dict(zip(grad_ends[i], next_grad))
         param_grads.extend(param_grad)
 
     pgrads = pytensor.function(inputs, param_grads)
