@@ -201,12 +201,12 @@ class DimShuffle(ExternalCOp):
                     f"input is incorrect for this op. Expected {self.input_broadcastable}, got {ib}."
                 )
             for expected, b in zip(self.input_broadcastable, ib):
-                if expected is True and b is False:
+                if expected and not b:
                     raise TypeError(
                         "The broadcastable pattern of the "
                         f"input is incorrect for this op. Expected {self.input_broadcastable}, got {ib}."
                     )
-                # else, expected == b or expected is False and b is True
+                # else, expected == b or not expected and b
                 # Both case are good.
 
         out_static_shape = []
