@@ -220,12 +220,7 @@ int main( int argc, const char* argv[] )
 
 def lquote_macro(txt: str) -> str:
     """Turn the last line of text into a ``\\``-commented line."""
-    res = []
-    spl = txt.split("\n")
-    for l in spl[:-1]:
-        res.append(l + " \\")
-    res.append(spl[-1])
-    return "\n".join(res)
+    return " \\\n".join(txt.split("\n"))
 
 
 def get_sub_macros(sub: dict[str, str]) -> tuple[str, str]:
@@ -240,21 +235,17 @@ def get_sub_macros(sub: dict[str, str]) -> tuple[str, str]:
     return "\n".join(define_macros), "\n".join(undef_macros)
 
 
-def get_io_macros(
-    inputs: list[str], outputs: list[str]
-) -> tuple[list[str]] | tuple[str, str]:
-    define_macros = []
-    undef_macros = []
+def get_io_macros(inputs: list[str], outputs: list[str]) -> tuple[str, str]:
+    define_inputs = [f"#define INPUT_{int(i)} {inp}" for i, inp in enumerate(inputs)]
+    define_outputs = [f"#define OUTPUT_{int(i)} {out}" for i, out in enumerate(outputs)]
 
-    for i, inp in enumerate(inputs):
-        define_macros.append(f"#define INPUT_{int(i)} {inp}")
-        undef_macros.append(f"#undef INPUT_{int(i)}")
+    undef_inputs = [f"#undef INPUT_{int(i)}" for i in range(len(inputs))]
+    undef_outputs = [f"#undef OUTPUT_{int(i)}" for i in range(len(outputs))]
 
-    for i, out in enumerate(outputs):
-        define_macros.append(f"#define OUTPUT_{int(i)} {out}")
-        undef_macros.append(f"#undef OUTPUT_{int(i)}")
+    define_all = "\n".join(define_inputs + define_outputs)
+    undef_all = "\n".join(undef_inputs + undef_outputs)
 
-    return "\n".join(define_macros), "\n".join(undef_macros)
+    return define_all, undef_all
 
 
 class ExternalCOp(COp):
@@ -560,9 +551,10 @@ class ExternalCOp(COp):
         define_macros.append(define_template % ("APPLY_SPECIFIC(str)", f"str##_{name}"))
         undef_macros.append(undef_template % "APPLY_SPECIFIC")
 
-        for n, v in self.__get_op_params():
-            define_macros.append(define_template % (n, v))
-            undef_macros.append(undef_template % (n,))
+        define_macros.extend(
+            define_template % (n, v) for n, v in self.__get_op_params()
+        )
+        undef_macros.extend(undef_template % (n,) for n, _ in self.__get_op_params())
 
         return "\n".join(define_macros), "\n".join(undef_macros)
 

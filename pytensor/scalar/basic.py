@@ -1575,9 +1575,7 @@ class InRange(LogicalComparison):
     def L_op(self, inputs, outputs, gout):
         (x, low, hi) = inputs
         (gz,) = gout
-        grads = []
-        for elem in [x, low, hi]:
-            grads.append(self.get_grad(elem))
+        grads = [self.get_grad(elem) for elem in [x, low, hi]]
         return grads
 
 

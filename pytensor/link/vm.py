@@ -1111,9 +1111,8 @@ class VMLinker(LocalLinker):
             # builds the list of prereqs induced by e.g. destroy_handler
             ords = self.fgraph.orderings()
             node_prereqs = []
-            node_output_size = []
+            node_output_size = [0] * len(nodes)
             for i, node in enumerate(nodes):
-                node_output_size.append(0)
                 prereq_var_idxs = []
                 for prereq_node in ords.get(node, []):
                     prereq_var_idxs.extend([vars_idx[v] for v in prereq_node.outputs])

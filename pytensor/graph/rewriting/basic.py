@@ -479,9 +479,9 @@ class SequentialGraphRewriter(GraphRewriter, UserList):
             new_sub_profile.append(p[6][idx])
 
         new_rewrite = SequentialGraphRewriter(*new_l)
-        new_nb_nodes = []
-        for p1, p2 in zip(prof1[8], prof2[8]):
-            new_nb_nodes.append((p1[0] + p2[0], p1[1] + p2[1]))
+        new_nb_nodes = [
+            (p1[0] + p2[0], p1[1] + p2[1]) for p1, p2 in zip(prof1[8], prof2[8])
+        ]
         new_nb_nodes.extend(prof1[8][len(new_nb_nodes) :])
         new_nb_nodes.extend(prof2[8][len(new_nb_nodes) :])
 
@@ -960,9 +960,9 @@ class MetaNodeRewriter(NodeRewriter):
 
         tracks = rewriter.tracks()
         if tracks:
+            self._tracks.extend(tracks)
             for c in tracks:
                 self.track_dict[c].append(rewriter)
-                self._tracks.append(c)
 
         for tag in tag_list:
             self.tag_dict[tag].append(rewriter)

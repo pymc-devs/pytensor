@@ -212,18 +212,14 @@ def std_fgraph(
 
         found_updates.extend(map(SymbolicOutput, updates))
     elif fgraph is None:
-        input_vars = []
-
         # If one of the inputs is non-atomic (i.e. has a non-`None` `Variable.owner`),
         # then we need to create/clone the graph starting at these inputs.
         # The result will be atomic versions of the given inputs connected to
         # the same outputs.
         # Otherwise, when all the inputs are already atomic, there's no need to
         # clone the graph.
-        clone = force_clone
-        for spec in input_specs:
-            input_vars.append(spec.variable)
-            clone |= spec.variable.owner is not None
+        input_vars = [spec.variable for spec in input_specs]
+        clone = force_clone or any(var.owner is not None for var in input_vars)
 
         fgraph = FunctionGraph(
             input_vars,

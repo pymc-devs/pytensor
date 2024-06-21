@@ -1161,8 +1161,10 @@ class Elemwise(OpenMPOp):
             ],
         )
         version.append(self.scalar_op.c_code_cache_version_apply(scalar_node))
-        for i in node.inputs + node.outputs:
-            version.append(get_scalar_type(dtype=i.type.dtype).c_code_cache_version())
+        version.extend(
+            get_scalar_type(dtype=i.type.dtype).c_code_cache_version()
+            for i in node.inputs + node.outputs
+        )
         version.append(("openmp", self.openmp))
         version.append(("openmp_elemwise_minsize", config.openmp_elemwise_minsize))
         if all(version):
@@ -1664,8 +1666,10 @@ class CAReduce(COp):
             ],
         )
         version.append(self.scalar_op.c_code_cache_version_apply(scalar_node))
-        for i in node.inputs + node.outputs:
-            version.append(get_scalar_type(dtype=i.type.dtype).c_code_cache_version())
+        version.extend(
+            get_scalar_type(dtype=i.type.dtype).c_code_cache_version()
+            for i in node.inputs + node.outputs
+        )
         if all(version):
             return tuple(version)
         else:

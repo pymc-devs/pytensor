@@ -270,8 +270,10 @@ class FunctionGraph(MetaObject):
 
                     self.execute_callbacks("on_prune", apply_node, reason)
 
-                    for i, in_var in enumerate(apply_node.inputs):
-                        removal_stack.append((in_var, (apply_node, i)))
+                    removal_stack.extend(
+                        (in_var, (apply_node, i))
+                        for i, in_var in enumerate(apply_node.inputs)
+                    )
 
                     if remove_if_empty:
                         del clients[var]

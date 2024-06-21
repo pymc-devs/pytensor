@@ -238,8 +238,7 @@ class Extend(COp):
         # need to copy toAppend due to destroy_handler limitation
         if toAppend:
             o = out[0]
-            for i in toAppend:
-                o.append(_lessbroken_deepcopy(i))
+            o.extend(_lessbroken_deepcopy(i) for i in toAppend)
 
     def __str__(self):
         return self.__class__.__name__
