@@ -1,6 +1,7 @@
 import copy
 import math
 import sys
+from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from functools import cmp_to_key
 from io import StringIO
@@ -9,7 +10,6 @@ from typing import Union
 from pytensor.configdefaults import config
 from pytensor.graph.rewriting import basic as pytensor_rewriting
 from pytensor.misc.ordered_set import OrderedSet
-from pytensor.utils import DefaultOrderedDict
 
 
 RewritesType = pytensor_rewriting.GraphRewriter | pytensor_rewriting.NodeRewriter
@@ -23,7 +23,7 @@ class RewriteDatabase:
     """
 
     def __init__(self):
-        self.__db__ = DefaultOrderedDict(OrderedSet)
+        self.__db__ = defaultdict(OrderedSet)
         self._names = set()
         # This will be reset by `self.register` (via `obj.name` by the thing
         # doing the registering)
