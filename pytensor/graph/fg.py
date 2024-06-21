@@ -1,7 +1,7 @@
 """A container for specifying and manipulating a graph with distinct inputs and outputs."""
 
 import time
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, Union, cast
 
@@ -109,7 +109,7 @@ class FunctionGraph(MetaObject):
             inputs = [cast(Variable, _memo[i]) for i in inputs]
 
         self.execute_callbacks_time: float = 0.0
-        self.execute_callbacks_times: dict[Feature, float] = {}
+        self.execute_callbacks_times: dict[Feature, float] = defaultdict(float)
 
         if features is None:
             features = []
@@ -673,7 +673,6 @@ class FunctionGraph(MetaObject):
                 attach(self)
             except AlreadyThere:
                 return
-        self.execute_callbacks_times.setdefault(feature, 0.0)
         # It would be nice if we could require a specific class instead of
         # a "workalike" so we could do actual error checking
         # if not isinstance(feature, Feature):
