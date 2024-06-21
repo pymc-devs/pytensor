@@ -1,7 +1,7 @@
 """A container for specifying and manipulating a graph with distinct inputs and outputs."""
 
 import time
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, Union, cast
 
@@ -768,12 +768,12 @@ class FunctionGraph(MetaObject):
 
         """
         assert isinstance(self._features, list)
-        all_orderings: list[OrderedDict] = []
+        all_orderings: list[dict] = []
 
         for feature in self._features:
             if hasattr(feature, "orderings"):
                 orderings = feature.orderings(self)
-                if not isinstance(orderings, OrderedDict):
+                if not isinstance(orderings, dict):
                     raise TypeError(
                         "Non-deterministic return value from "
                         + str(feature.orderings)
@@ -794,7 +794,7 @@ class FunctionGraph(MetaObject):
             return all_orderings[0].copy()
         else:
             # If there is more than 1 ordering, combine them.
-            ords: dict[Apply, list[Apply]] = OrderedDict()
+            ords: dict[Apply, list[Apply]] = {}
             for orderings in all_orderings:
                 for node, prereqs in orderings.items():
                     ords.setdefault(node, []).extend(prereqs)
