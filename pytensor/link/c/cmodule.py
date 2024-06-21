@@ -641,7 +641,7 @@ class ModuleCache:
     The cache contains one directory for each module, containing:
     - the dynamic library file itself (e.g. ``.so/.pyd``),
     - an empty ``__init__.py`` file, so Python can import it,
-    - a file containing the source code for the module (e.g. ``mod.cpp/mod.cu``),
+    - a file containing the source code for the module (e.g. ``mod.cpp``),
     - a ``key.pkl`` file, containing a KeyData object with all the keys
     associated with that module,
     - possibly a ``delete.me`` file, meaning this directory has been marked
