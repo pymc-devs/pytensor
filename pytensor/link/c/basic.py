@@ -1129,19 +1129,18 @@ class CLinker(Linker):
         )
 
     def get_init_tasks(self):
-        init_tasks = []
-        tasks = []
+        vars = [v for v in self.variables if v not in self.consts]
         id = 1
-        for v in self.variables:
-            if v in self.consts:
-                continue
-            init_tasks.append((v, "init", id))
-            tasks.append((v, "get", id + 1))
-            id += 2
-        for node in self.node_order:
-            tasks.append((node, "code", id))
-            init_tasks.append((node, "init", id + 1))
-            id += 2
+        init_tasks = [(v, "init", id + 2 * i) for i, v in enumerate(vars)]
+        tasks = [(v, "get", id + 2 * i + 1) for i, v in enumerate(vars)]
+
+        id += 2 * len(vars)
+        tasks.extend(
+            (node, "code", id + 2 * i) for i, node in enumerate(self.node_order)
+        )
+        init_tasks.extend(
+            (node, "init", id + 2 * i + 1) for i, node in enumerate(self.node_order)
+        )
         return init_tasks, tasks
 
     def make_thunk(
@@ -1492,12 +1491,11 @@ class CLinker(Linker):
         # graph's information used to compute the key. If we mistakenly
         # pretend that inputs with clients don't have any, were are only using
         # those inputs more than once to compute the key.
-        for ipos, var in [
-            (i, var)
-            for i, var in enumerate(fgraph.inputs)
+        sig.extend(
+            (var.type, in_sig(var, -1, ipos))
+            for ipos, var in enumerate(fgraph.inputs)
             if not len(fgraph.clients[var])
-        ]:
-            sig.append((var.type, in_sig(var, -1, ipos)))
+        )
 
         # crystalize the signature and version
         sig = tuple(sig)

@@ -1474,9 +1474,8 @@ def general_toposort(
 
     _clients: dict[T, list[T]] = {}
     sources: deque[T] = deque()
-    search_res_len: int = 0
+    search_res_len = len(search_res)
     for snode, children in search_res:
-        search_res_len += 1
         if children:
             for child in children:
                 _clients.setdefault(child, []).append(snode)
