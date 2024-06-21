@@ -777,7 +777,7 @@ def local_reshape_chain(op):
         # constant value... but in the meantime, better not apply this
         # rewrite.
         if rval.type.ndim == node.outputs[0].type.ndim and all(
-            s1 == s1
+            s1 == s2
             for s1, s2 in zip(rval.type.shape, node.outputs[0].type.shape)
             if s1 == 1 or s2 == 1
         ):
