@@ -13,7 +13,6 @@ from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.basic import failure_code
 from pytensor.link.c.op import COp, ExternalCOp, OpenMPOp
 from pytensor.link.c.params_type import ParamsType
-from pytensor.misc.frozendict import frozendict
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.printing import Printer, pprint
 from pytensor.scalar import get_scalar_type
@@ -374,11 +373,11 @@ class Elemwise(OpenMPOp):
         """
         assert not isinstance(scalar_op, type(self))
         if inplace_pattern is None:
-            inplace_pattern = frozendict({})
+            inplace_pattern = {}
         self.name = name
         self.scalar_op = scalar_op
-        self.inplace_pattern = inplace_pattern
-        self.destroy_map = {o: [i] for o, i in self.inplace_pattern.items()}
+        self.inplace_pattern = tuple(inplace_pattern.items())
+        self.destroy_map = {o: [i] for o, i in self.inplace_pattern}
 
         if nfunc_spec is None:
             nfunc_spec = getattr(scalar_op, "nfunc_spec", None)
@@ -397,7 +396,6 @@ class Elemwise(OpenMPOp):
         super().__setstate__(d)
         self.ufunc = None
         self.nfunc = None
-        self.inplace_pattern = frozendict(self.inplace_pattern)
 
     def get_output_info(self, dim_shuffle, *inputs):
         """Return the outputs dtype and broadcastable pattern and the
@@ -446,27 +444,23 @@ class Elemwise(OpenMPOp):
             )
 
         # inplace_pattern maps output idx -> input idx
-        inplace_pattern = self.inplace_pattern
-        if inplace_pattern:
-            for overwriter, overwritten in inplace_pattern.items():
-                for out_s, in_s in zip(
-                    out_shapes[overwriter],
-                    inputs[overwritten].type.shape,
-                ):
-                    if in_s == 1 and out_s != 1:
-                        raise ValueError(
-                            "Operation cannot be done inplace on an input "
-                            "with broadcasted dimensions."
-                        )
+        for overwriter, overwritten in self.inplace_pattern:
+            for out_s, in_s in zip(
+                out_shapes[overwriter],
+                inputs[overwritten].type.shape,
+            ):
+                if in_s == 1 and out_s != 1:
+                    raise ValueError(
+                        "Operation cannot be done inplace on an input "
+                        "with broadcasted dimensions."
+                    )
 
         out_dtypes = [o.type.dtype for o in shadow.outputs]
-        if any(
-            inputs[i].type.dtype != out_dtypes[o] for o, i in inplace_pattern.items()
-        ):
+        if any(inputs[i].type.dtype != out_dtypes[o] for o, i in self.inplace_pattern):
             raise TypeError(
                 (
                     "Cannot do an inplace operation on incompatible data types.",
-                    ([i.type.dtype for i in inputs], out_dtypes, inplace_pattern),
+                    ([i.type.dtype for i in inputs], out_dtypes, self.inplace_pattern),
                 )
             )
         assert len(out_dtypes) == len(out_shapes)
@@ -755,6 +749,7 @@ class Elemwise(OpenMPOp):
         if nout == 1:
             variables = [variables]
 
+        inplace_pattern = dict(self.inplace_pattern)
         for i, (variable, storage, nout) in enumerate(
             zip(variables, output_storage, node.outputs)
         ):
@@ -763,8 +758,8 @@ class Elemwise(OpenMPOp):
                 # always return an ndarray with dtype object
                 variable = np.asarray(variable, dtype=nout.dtype)
 
-            if i in self.inplace_pattern:
-                odat = inputs[self.inplace_pattern[i]]
+            if i in inplace_pattern:
+                odat = inputs[inplace_pattern[i]]
                 odat[...] = variable
                 storage[0] = odat
 
@@ -832,9 +827,7 @@ class Elemwise(OpenMPOp):
         # The destroy map is a map of output indices to input indices
         # that overwrite them.  We just convert them to the actual
         # Variables.
-        dmap = {
-            node.outputs[o]: [node.inputs[i]] for o, i in self.inplace_pattern.items()
-        }
+        dmap = {node.outputs[o]: [node.inputs[i]] for o, i in self.inplace_pattern}
 
         # dtypes of the inputs
         idtypes = [input.type.dtype_specs()[1] for input in inputs]
