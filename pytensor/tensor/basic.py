@@ -760,7 +760,12 @@ def switch(cond, ift, iff):
     """if cond then ift else iff"""
 
 
-where = switch
+# where = switch
+def where(cond, ift, iff):
+    if ift is not None and iff is not None:
+        return switch(cond, ift, iff)
+    else:
+        pass
 
 
 @scalar_elemwise
