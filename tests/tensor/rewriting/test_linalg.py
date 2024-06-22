@@ -466,7 +466,7 @@ def test_dont_apply_det_diag_rewrite(shape):
 
     # NUMERIC VALUE TEST (only in case of (1,1))
     if shape != (7, 5):
-        x_test = np.random.normal(size=(3, 3))
+        x_test = np.random.normal(size=(3, 3)).astype(config.floatX)
         x_test_matrix = np.eye(*shape) * x_test
         det_val = np.linalg.det(x_test_matrix)
         rewritten_val = f_rewritten(x_test)
