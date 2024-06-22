@@ -9,7 +9,10 @@ def pytorch_funcify_Cumop(op, **kwargs):
     dim = op.axis
     mode = op.mode
 
-    def cumop(x, dim=dim, mode=mode):
+    def cumop(x, dim=dim):
+        if dim is None:
+            x = x.reshape(-1)
+            dim = 0
         if mode == "add":
             return torch.cumsum(x, dim=dim)
         else:
