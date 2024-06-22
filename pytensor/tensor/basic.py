@@ -765,7 +765,7 @@ def where(cond, ift, iff):
     if ift is not None and iff is not None:
         return switch(cond, ift, iff)
     else:
-        pass
+        return cond.nonzero()
 
 
 @scalar_elemwise
