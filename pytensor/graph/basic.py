@@ -748,7 +748,7 @@ class NominalVariable(AtomicVariable[_TypeType]):
             return True
 
         return (
-            type(self) == type(other)
+            type(self) is type(other)
             and self.id == other.id
             and self.type == other.type
         )
@@ -1896,11 +1896,10 @@ def equal_computations(
             if isinstance(x, Constant):
                 return np.array_equal(x.data, y)
             return False
-        if x.owner and not y.owner:
+        x_is_owned, y_is_owned = (x.owner is not None, y.owner is not None)
+        if x_is_owned != y_is_owned:
             return False
-        if y.owner and not x.owner:
-            return False
-        if x.owner and y.owner:
+        if x_is_owned and y_is_owned:
             if x.owner.outputs.index(x) != y.owner.outputs.index(y):
                 return False
         if x not in in_xs and not (y.type.in_same_class(x.type)):
@@ -1918,7 +1917,7 @@ def equal_computations(
     for dx, dy in zip(xs, ys):
         assert isinstance(dx, Variable)
         # We checked above that both dx and dy have an owner or not
-        if not dx.owner:
+        if dx.owner is None:
             if isinstance(dx, Constant) and isinstance(dy, Constant):
                 if not dx.equals(dy):
                     return False

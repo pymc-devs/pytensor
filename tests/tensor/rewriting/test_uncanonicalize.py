@@ -9,8 +9,6 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import out2in
 from pytensor.link.basic import PerformLinker
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from pytensor.tensor.math import MaxAndArgmax, max_and_argmax
-from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.rewriting.uncanonicalize import (
     local_alloc_dimshuffle,
@@ -23,66 +21,11 @@ from pytensor.tensor.type import dtensor4, iscalar, matrix, tensor, vector
 from tests.link.test_link import make_function
 
 
-class TestMaxAndArgmax:
-    def test_optimization(self):
-        # If we use only the max output, we should replace this op with
-        # a faster one.
-        mode = pytensor.compile.mode.get_default_mode().including(
-            "canonicalize", "fast_run"
-        )
-
-        for axis in [0, 1, -1]:
-            n = matrix()
-
-            f = function([n], max_and_argmax(n, axis)[0], mode=mode)
-            topo = f.maker.fgraph.toposort()
-            assert len(topo) == 1
-            assert isinstance(topo[0].op, CAReduce)
-
-            f = function([n], max_and_argmax(n, axis), mode=mode)
-            topo = f.maker.fgraph.toposort()
-            assert len(topo) == 1
-            assert isinstance(topo[0].op, MaxAndArgmax)
-
-
 class TestMinMax:
     def setup_method(self):
         self.mode = pytensor.compile.mode.get_default_mode().including(
             "canonicalize", "fast_run"
         )
-
-    def test_optimization_max(self):
-        data = np.asarray(np.random.random((2, 3)), dtype=config.floatX)
-        n = matrix()
-
-        for axis in [0, 1, -1]:
-            f = function([n], pt_max(n, axis), mode=self.mode)
-            topo = f.maker.fgraph.toposort()
-            assert len(topo) == 1
-            assert isinstance(topo[0].op, CAReduce)
-            f(data)
-
-            f = function([n], pt_max(-n, axis), mode=self.mode)
-            topo = f.maker.fgraph.toposort()
-            assert len(topo) == 2
-            assert isinstance(topo[0].op, Elemwise)
-            assert isinstance(topo[0].op.scalar_op, ps.Neg)
-            assert isinstance(topo[1].op, CAReduce)
-            f(data)
-
-            f = function([n], -pt_max(n, axis), mode=self.mode)
-            topo = f.maker.fgraph.toposort()
-            assert len(topo) == 2
-            assert isinstance(topo[0].op, CAReduce)
-            assert isinstance(topo[1].op, Elemwise)
-            assert isinstance(topo[1].op.scalar_op, ps.Neg)
-            f(data)
-
-            f = function([n], -pt_max(-n, axis), mode=self.mode)
-            topo = f.maker.fgraph.toposort()
-            assert len(topo) == 1
-            assert isinstance(topo[0].op, CAReduce)  # min
-            f(data)
 
     def test_optimization_min(self):
         data = np.asarray(np.random.random((2, 3)), dtype=config.floatX)

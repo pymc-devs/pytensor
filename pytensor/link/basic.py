@@ -62,7 +62,7 @@ class Container:
         allow_downcast: bool | None = None,
         name: str | None = None,
     ) -> None:
-        if not isinstance(storage, list) or not len(storage) >= 1:
+        if not (isinstance(storage, list) and len(storage) >= 1):
             raise TypeError("storage must be a list of length at least one")
         if isinstance(r, Variable):
             self.type = r.type
@@ -600,6 +600,10 @@ class JITLinker(PerformLinker):
     def jit_compile(self, fn: Callable) -> Callable:
         """JIT compile a converted ``FunctionGraph``."""
 
+    def input_filter(self, inp: Any) -> Any:
+        """Apply a filter to the data input."""
+        return inp
+
     def output_filter(self, var: Variable, out: Any) -> Any:
         """Apply a filter to the data output by a JITed function call."""
         return out
@@ -657,7 +661,7 @@ class JITLinker(PerformLinker):
             thunk_inputs=thunk_inputs,
             thunk_outputs=thunk_outputs,
         ):
-            outputs = fgraph_jit(*[x[0] for x in thunk_inputs])
+            outputs = fgraph_jit(*[self.input_filter(x[0]) for x in thunk_inputs])
 
             for o_var, o_storage, o_val in zip(fgraph.outputs, thunk_outputs, outputs):
                 compute_map[o_var][0] = True

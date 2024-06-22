@@ -221,7 +221,7 @@ def function(
                     if not isinstance(node.op.scalar_op, log):
                        return
                     inp = node.inputs[0]
-                    if not inp.owner:
+                    if inp.owner is None:
                        return
                     if not isinstance(inp.owner.op, add):
                        return

@@ -1,6 +1,6 @@
 [build-system]
 requires = [
-    "setuptools>=48.0.0",
+    "setuptools>=59.0.0",
     "cython",
     "numpy>=1.17.0",
     "versioneer[toml]>=0.28",
@@ -46,7 +46,7 @@ keywords = [
     "differentiation",
 ]
 dependencies = [
-    "setuptools>=48.0.0",
+    "setuptools>=59.0.0",
     "scipy>=0.14",
     "numpy>=1.17.0,<2",
     "filelock",
@@ -54,7 +54,6 @@ dependencies = [
     "logical-unification",
     "miniKanren",
     "cons",
-    "typing_extensions",
 ]
 
 [project.urls]
@@ -79,7 +78,7 @@ tests = [
 ]
 rtd = ["sphinx>=5.1.0,<6", "pygments", "pydot", "pydot2", "pydot-ng"]
 jax = ["jax", "jaxlib"]
-numba = ["numba>=0.57"]
+numba = ["numba>=0.57", "llvmlite"]
 
 [tool.setuptools.packages.find]
 include = ["pytensor*"]

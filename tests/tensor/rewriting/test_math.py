@@ -38,7 +38,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import (
     Dot,
-    MaxAndArgmax,
+    Max,
     Prod,
     Sum,
     _conj,
@@ -2204,9 +2204,7 @@ class TestLocalErf:
         assert len(topo) == 2
         assert topo[0].op == erf
         assert isinstance(topo[1].op, Elemwise)
-        assert isinstance(topo[1].op.scalar_op, ps.Add) or isinstance(
-            topo[1].op.scalar_op, ps.Sub
-        )
+        assert isinstance(topo[1].op.scalar_op, ps.Add | ps.Sub)
 
     def test_local_erf_minus_one(self):
         val = np.asarray([-30, -3, -2, -1, 0, 1, 2, 3, 30], dtype=config.floatX)
@@ -2227,9 +2225,7 @@ class TestLocalErf:
         assert len(topo) == 2
         assert topo[0].op == erf
         assert isinstance(topo[1].op, Elemwise)
-        assert isinstance(topo[1].op.scalar_op, ps.Add) or isinstance(
-            topo[1].op.scalar_op, ps.Sub
-        )
+        assert isinstance(topo[1].op.scalar_op, ps.Add | ps.Sub)
 
 
 @pytest.mark.skipif(
@@ -3734,8 +3730,8 @@ def check_max_log_sum_exp(x, axis, dimshuffle_op=None):
             return
 
         # In mode FAST_COMPILE, the rewrites don't replace the
-        # `MaxAndArgmax` `Op`.
-        if isinstance(node.op, MaxAndArgmax):
+        # `Max` `Op`.
+        if isinstance(node.op, Max):
             return
 
     # TODO FIXME: Refactor this test so that it makes a direct assertion and

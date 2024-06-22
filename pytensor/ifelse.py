@@ -78,7 +78,7 @@ class IfElse(_NoPythonOp):
         self.name = name
 
     def __eq__(self, other):
-        if type(self) != type(other):
+        if type(self) is not type(other):
             return False
         if self.as_view != other.as_view:
             return False
@@ -477,7 +477,8 @@ acceptable_ops = (
     Reshape,
     Unbroadcast,
     pt.math.Dot,
-    pt.math.MaxAndArgmax,
+    pt.math.Max,
+    pt.math.Argmax,
     pt.subtensor.Subtensor,
     pt.subtensor.IncSubtensor,
     pt.basic.Alloc,

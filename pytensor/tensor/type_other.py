@@ -18,7 +18,7 @@ def as_int_none_variable(x):
         return NoneConst
     elif NoneConst.equals(x):
         return x
-    x = pytensor.tensor.as_tensor_variable(x, ndim=0)
+    x = pytensor.scalar.as_scalar(x)
     if x.type.dtype not in integer_dtypes:
         raise TypeError("index must be integers")
     return x
@@ -64,7 +64,7 @@ class SliceType(Type[slice]):
         return "slice"
 
     def __eq__(self, other):
-        return type(self) == type(other)
+        return type(self) is type(other)
 
     def __hash__(self):
         return hash(type(self))

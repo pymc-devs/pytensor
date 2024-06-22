@@ -1321,7 +1321,7 @@ class SequentialNodeRewriter(NodeRewriter):
             # only 1 iteration
             if not self.apply_all_rewrites:
                 return new_repl
-            if not new_vars[0].owner:
+            if new_vars[0].owner is None:
                 # We are at the start of the graph.
                 return new_repl
             if len(new_repl) > 1:
@@ -3073,7 +3073,7 @@ def check_stack_trace(f_or_fgraph, ops_to_check="last", bug_print="raise"):
 
     for node in apply_nodes_to_check:
         for output in node.outputs:
-            if not hasattr(output.tag, "trace") or not output.tag.trace:
+            if not (hasattr(output.tag, "trace") and output.tag.trace):
                 return False
 
     return True
@@ -3092,7 +3092,7 @@ class CheckStackTraceFeature(Feature):
                 apply_nodes_to_check = fgraph.apply_nodes
                 for node in apply_nodes_to_check:
                     for output in node.outputs:
-                        if not hasattr(output.tag, "trace") or not output.tag.trace:
+                        if not (hasattr(output.tag, "trace") and output.tag.trace):
                             output.tag.trace = [
                                 [
                                     (

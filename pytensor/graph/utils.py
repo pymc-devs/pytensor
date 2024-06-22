@@ -229,7 +229,7 @@ class MetaType(ABCMeta):
             if "__eq__" not in dct:
 
                 def __eq__(self, other):
-                    return type(self) == type(other) and tuple(
+                    return type(self) is type(other) and tuple(
                         getattr(self, a) for a in props
                     ) == tuple(getattr(other, a) for a in props)
 

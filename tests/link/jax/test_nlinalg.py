@@ -11,7 +11,7 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.link.jax import JAXLinker
 from pytensor.tensor import blas as pt_blas
 from pytensor.tensor import nlinalg as pt_nlinalg
-from pytensor.tensor.math import MaxAndArgmax, maximum
+from pytensor.tensor.math import Argmax, Max, maximum
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.type import dvector, matrix, scalar, tensor3, vector
 from tests.link.jax.test_basic import compare_jax_and_py
@@ -88,7 +88,8 @@ def test_jax_basic_multiout_omni():
     # Test that a single output of a multi-output `Op` can be used as input to
     # another `Op`
     x = dvector()
-    mx, amx = MaxAndArgmax([0])(x)
+    mx = Max([0])(x)
+    amx = Argmax([0])(x)
     out = mx * amx
     out_fg = FunctionGraph([x], [out])
     compare_jax_and_py(out_fg, [np.r_[1, 2]])
@@ -164,3 +165,15 @@ def test_pinv_hermitian():
     assert not np.allclose(
         jax_fn(A_not_h_test), np.linalg.pinv(A_not_h_test, hermitian=True)
     )
+
+
+def test_kron():
+    x = matrix("x")
+    y = matrix("y")
+    z = pt_nlinalg.kron(x, y)
+
+    fgraph = FunctionGraph([x, y], [z])
+    x_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
+    y_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
+
+    compare_jax_and_py(fgraph, [x_np, y_np])

@@ -47,7 +47,6 @@ dependencies:
   - pandas # required to run mypy script
   - pre-commit
   - packaging
-  - typing_extensions
   # optional
   - cython
   - graphviz

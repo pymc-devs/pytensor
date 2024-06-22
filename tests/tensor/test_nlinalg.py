@@ -387,6 +387,11 @@ def test_slogdet():
     sign, det = np.linalg.slogdet(r)
     assert np.equal(sign, f_sign)
     assert np.allclose(det, f_det)
+    # check numpy array types is returned
+    # see https://github.com/pymc-devs/pytensor/issues/799
+    sign, logdet = slogdet(x)
+    det = sign * pytensor.tensor.exp(logdet)
+    assert_array_almost_equal(det.eval({x: [[1]]}), np.array(1.0))
 
 
 def test_trace():

@@ -65,7 +65,7 @@ def cleanup():
                                     have_npy_abi_version = False
                                     break
 
-                        if not have_npy_abi_version or not have_c_compiler:
+                        if not (have_npy_abi_version and have_c_compiler):
                             try:
                                 # This can happen when we move the compiledir.
                                 if keydata.key_pkl != filename:

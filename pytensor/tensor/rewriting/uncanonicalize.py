@@ -35,29 +35,10 @@ from pytensor import scalar as ps
 from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
 from pytensor.tensor.basic import Alloc, alloc, constant
 from pytensor.tensor.elemwise import CAReduce, DimShuffle
-from pytensor.tensor.math import Argmax, Max, MaxAndArgmax, Min, neg
+from pytensor.tensor.math import Min, neg
 from pytensor.tensor.rewriting.basic import register_uncanonicalize
 from pytensor.tensor.shape import Reshape, reshape
 from pytensor.tensor.subtensor import Subtensor
-
-
-@register_uncanonicalize
-@node_rewriter([MaxAndArgmax])
-def local_max_and_argmax(fgraph, node):
-    """
-    If we don't use the argmax, change it to a max only.
-    """
-    if isinstance(node.op, MaxAndArgmax):
-        axis = node.op.axis
-        if len(fgraph.clients[node.outputs[1]]) == 0:
-            new = Max(axis)(node.inputs[0])
-            copy_stack_trace(node.outputs[0], new)
-            return [new, None]
-
-        if len(fgraph.clients[node.outputs[0]]) == 0:
-            new = Argmax(axis)(node.inputs[0])
-            copy_stack_trace(node.outputs[0], new)
-            return [None, new]
 
 
 @register_uncanonicalize
@@ -71,7 +52,7 @@ def local_max_to_min(fgraph, node):
     Notes
     -----
     We don't need an opt that will do the reverse as by default
-    the interface put only MaxAndArgmax into the graph.
+    the interface put only Max into the graph.
 
     """
     if node.op == neg and node.inputs[0].owner:

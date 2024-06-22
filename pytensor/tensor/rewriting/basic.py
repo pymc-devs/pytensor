@@ -658,13 +658,13 @@ def local_cast_cast(fgraph, node):
           and the first cast cause an upcast.
 
     """
-    if not isinstance(node.op, Elemwise) or not isinstance(node.op.scalar_op, ps.Cast):
+    if not (isinstance(node.op, Elemwise) and isinstance(node.op.scalar_op, ps.Cast)):
         return
     x = node.inputs[0]
-    if (
-        not x.owner
-        or not isinstance(x.owner.op, Elemwise)
-        or not isinstance(x.owner.op.scalar_op, ps.Cast)
+    if not (
+        x.owner
+        and isinstance(x.owner.op, Elemwise)
+        and isinstance(x.owner.op.scalar_op, ps.Cast)
     ):
         return
 
@@ -1053,8 +1053,9 @@ def local_merge_switch_same_cond(fgraph, node):
     Example: switch(c, a, b) + switch(c, x, y) -> switch(c, a+x, b+y)
     """
     # node must be binary elemwise or add or mul
-    if not isinstance(node.op, Elemwise) or not isinstance(
-        node.op.scalar_op, ps.BinaryScalarOp | ps.Add | ps.Mul
+    if not (
+        isinstance(node.op, Elemwise)
+        and isinstance(node.op.scalar_op, ps.BinaryScalarOp | ps.Add | ps.Mul)
     ):
         return
     # all inputs must be switch
@@ -1189,7 +1190,7 @@ def local_merge_alloc(fgraph, node):
     """
     if not isinstance(node.op, Alloc):
         return False
-    if not node.inputs[0].owner or not isinstance(node.inputs[0].owner.op, Alloc):
+    if not (node.inputs[0].owner and isinstance(node.inputs[0].owner.op, Alloc)):
         return False
     inputs_outer = node.inputs
     inputs_inner = node.inputs[0].owner.inputs

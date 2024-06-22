@@ -1273,6 +1273,7 @@ def triu_indices_from(
 
 
 class Eye(Op):
+    _output_type_depends_on_input_value = True
     __props__ = ("dtype",)
 
     def __init__(self, dtype=None):
@@ -1287,10 +1288,13 @@ class Eye(Op):
         assert n.ndim == 0
         assert m.ndim == 0
         assert k.ndim == 0
+
+        _, static_shape = infer_static_shape((n, m))
+
         return Apply(
             self,
             [n, m, k],
-            [TensorType(dtype=self.dtype, shape=(None, None))()],
+            [TensorType(dtype=self.dtype, shape=static_shape)()],
         )
 
     def perform(self, node, inp, out_):
@@ -1956,9 +1960,7 @@ def extract_constant(x, elemwise=True, only_process_constants=False):
         x = get_underlying_scalar_constant_value(x, elemwise, only_process_constants)
     except NotScalarConstantError:
         pass
-    if isinstance(x, ps.ScalarVariable) or isinstance(
-        x, ps.sharedvar.ScalarSharedVariable
-    ):
+    if isinstance(x, ps.ScalarVariable | ps.sharedvar.ScalarSharedVariable):
         if x.owner and isinstance(x.owner.op, ScalarFromTensor):
             x = x.owner.inputs[0]
         else:

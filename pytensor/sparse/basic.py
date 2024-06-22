@@ -462,7 +462,7 @@ class SparseConstantSignature(tuple):
         return (
             a == x
             and (b.dtype == y.dtype)
-            and (type(b) == type(y))
+            and (type(b) is type(y))
             and (b.shape == y.shape)
             and (abs(b - y).sum() < 1e-6 * b.nnz)
         )

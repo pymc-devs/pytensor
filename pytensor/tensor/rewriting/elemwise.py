@@ -370,7 +370,7 @@ def apply_local_dimshuffle_lift(fgraph, var):
     """
     lift recursively
     """
-    if not var.owner:
+    if var.owner is None:
         return var
     new = local_dimshuffle_lift.transform(fgraph, var.owner)
     if new:
@@ -473,10 +473,10 @@ def local_useless_dimshuffle_makevector(fgraph, node):
 
     makevector_out = node.inputs[0]
 
-    if (
-        not makevector_out.owner
-        or not isinstance(makevector_out.owner.op, MakeVector)
-        or not makevector_out.broadcastable == (True,)
+    if not (
+        makevector_out.owner
+        and isinstance(makevector_out.owner.op, MakeVector)
+        and makevector_out.broadcastable == (True,)
     ):
         return
 
@@ -570,8 +570,8 @@ def local_add_mul_fusion(fgraph, node):
     This rewrite is almost useless after the AlgebraicCanonizer is used,
     but it catches a few edge cases that are not canonicalized by it
     """
-    if not isinstance(node.op, Elemwise) or not isinstance(
-        node.op.scalar_op, ps.Add | ps.Mul
+    if not (
+        isinstance(node.op, Elemwise) and isinstance(node.op.scalar_op, ps.Add | ps.Mul)
     ):
         return False
 
@@ -1094,8 +1094,8 @@ class FusionOptimizer(GraphRewriter):
 @node_rewriter([Elemwise])
 def local_useless_composite_outputs(fgraph, node):
     """Remove inputs and outputs of Composite Ops that are not used anywhere."""
-    if not isinstance(node.op, Elemwise) or not isinstance(
-        node.op.scalar_op, ps.Composite
+    if not (
+        isinstance(node.op, Elemwise) and isinstance(node.op.scalar_op, ps.Composite)
     ):
         return
     comp = node.op.scalar_op
@@ -1135,7 +1135,7 @@ def local_careduce_fusion(fgraph, node):
 
     elm_node = car_input.owner
 
-    if elm_node is None or not isinstance(elm_node.op, Elemwise):
+    if not (elm_node and isinstance(elm_node.op, Elemwise)):
         return False
 
     elm_scalar_op = elm_node.op.scalar_op

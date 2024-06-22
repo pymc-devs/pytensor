@@ -55,7 +55,7 @@ class TypedListType(CType):
         Two lists are equal if they contain the same type.
 
         """
-        return type(self) == type(other) and self.ttype == other.ttype
+        return type(self) is type(other) and self.ttype == other.ttype
 
     def __hash__(self):
         return hash((type(self), self.ttype))
