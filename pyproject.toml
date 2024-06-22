@@ -1,8 +1,8 @@
 [build-system]
 requires = [
-    "setuptools>=59.0.0",
+    "setuptools>=63.0",
     "cython",
-    "numpy>=1.17.0",
+    "numpy>=1.24",
     "versioneer[toml]>=0.28",
 ]
 build-backend = "setuptools.build_meta"
@@ -47,9 +47,9 @@ keywords = [
 ]
 dependencies = [
     "setuptools>=59.0.0",
-    "scipy>=0.14",
-    "numpy>=1.17.0,<2",
-    "filelock",
+    "scipy>=1.9",
+    "numpy>=1.24,<2",
+    "filelock>=3.8",
     "etuples",
     "logical-unification",
     "miniKanren",
@@ -69,16 +69,16 @@ pytensor-cache = "pytensor.bin.pytensor_cache:main"
 complete = ["pytensor[jax]", "pytensor[numba]"]
 development = ["pytensor[complete]", "pytensor[tests]", "pytensor[rtd]"]
 tests = [
-    "pytest",
-    "pre-commit",
+    "pytest>=7.2",
+    "pre-commit>=2.20",
     "pytest-cov>=2.6.1",
-    "coverage>=5.1",
+    "coverage>=6.5",
     "pytest-benchmark",
-    "pytest-mock",
+    "pytest-mock>=3.9",
 ]
-rtd = ["sphinx>=5.1.0,<6", "pygments", "pydot", "pydot2", "pydot-ng"]
+rtd = ["sphinx>=5.3,<6", "pygments>=2.13", "pydot", "pydot2", "pydot-ng"]
 jax = ["jax", "jaxlib"]
-numba = ["numba>=0.57", "llvmlite"]
+numba = ["numba>=0.57", "llvmlite>=0.38"]
 
 [tool.setuptools.packages.find]
 include = ["pytensor*"]
