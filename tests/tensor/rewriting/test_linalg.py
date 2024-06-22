@@ -452,8 +452,6 @@ def test_det_diag_from_diag():
     )
 
 
-# degenrate eye : pt.eye(1)
-# rectangle : non square eye
 @pytest.mark.parametrize(
     "shape", [(1, 1), (7, 5)], ids=["degenerate_eye", "rectangle_eye"]
 )
@@ -466,12 +464,10 @@ def test_dont_apply_det_diag_rewrite(shape):
 
     assert any(isinstance(node.op, Det) for node in nodes)
 
-    # NUMERIC VALUE TEST
-    shape_new = (2, 2) if shape == (1, 1) else shape
-    x_test = np.random.normal(size=shape_new)
-    x_test_matrix = np.eye(*shape) * x_test
-
+    # NUMERIC VALUE TEST (only in case of (1,1))
     if shape != (7, 5):
+        x_test = np.random.normal(size=(3, 3))
+        x_test_matrix = np.eye(*shape) * x_test
         det_val = np.linalg.det(x_test_matrix)
         rewritten_val = f_rewritten(x_test)
         assert_allclose(

@@ -434,9 +434,11 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
         return None
 
     # Rewrite is only applied if all the shapes are known
-    # if (non_eye_inputs[0].type.shape[-2:] == (None, None) or eye_input[0].type.shape[-2:] == (None, None)):
-    # return None
-    # Otherwise, cases such as recantangle eye (pt.eye(7,5)) or degenerate eye (pt.eye(1)) will also be rewritten incorrectly.
+    if non_eye_inputs[0].type.shape[-2:] == (None, None) or eye_input[0].type.shape[
+        -2:
+    ] == (None, None):
+        return None
+    # This ensures that the rewrite is NOT applied to cases of degenerate eye (pt.eye(1)) and rectangle eye (pt.eye(7,5))
 
     # Checking if original x was scalar/vector/matrix
     if non_eye_inputs[0].type.broadcastable[-2:] == (True, True):
