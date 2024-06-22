@@ -760,12 +760,16 @@ def switch(cond, ift, iff):
     """if cond then ift else iff"""
 
 
-# where = switch
-def where(cond, ift, iff):
-    if ift is not None and iff is not None:
+def where(cond, ift=None, iff=None):
+    # Raise an error if only one of ift or iff is passed
+    if (ift is None and iff is not None) or (ift is not None and iff is None):
+        raise Exception("Either both or none of the parameters should be passed")
+    # Normal switch incase both arguements are passed
+    elif ift is not None and iff is not None:
         return switch(cond, ift, iff)
+    # Add case when only condition is passed
     else:
-        return cond.nonzero()
+        return as_tensor(cond).nonzero()
 
 
 @scalar_elemwise

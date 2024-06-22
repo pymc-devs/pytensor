@@ -87,6 +87,7 @@ from pytensor.tensor.basic import (
     triu_indices,
     triu_indices_from,
     vertical_stack,
+    where,
     zeros_like,
 )
 from pytensor.tensor.blockwise import Blockwise
@@ -4608,3 +4609,11 @@ def test_vectorize_join(axis, broadcasting_y):
         vectorize_pt(x_test, y_test),
         vectorize_np(x_test, y_test),
     )
+
+
+def test_where_for_only_condition():
+    a = np.array([1, 2, 3, 4, 5])
+    cond = a <= 3
+    pt_result = where(cond)[0].eval()
+    np_result = np.where(cond)[0]
+    np.testing.assert_allclose(pt_result, np_result)
