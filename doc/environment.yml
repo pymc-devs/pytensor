@@ -9,7 +9,7 @@ dependencies:
   - numpy
   - scipy
   - six
-  - sphinx>=5.1.0,<6
+  - sphinx>=5.3,<6
   - mock
   - pillow
   - pymc-sphinx-theme
