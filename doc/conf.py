@@ -32,6 +32,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.linkcode",
     "sphinx.ext.mathjax",
+    "sphinx_design"
 ]
 
 needs_sphinx = "3"
