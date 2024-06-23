@@ -2,6 +2,7 @@ import torch
 
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.special import Softmax
 
 
 @pytorch_funcify.register(Elemwise)
@@ -34,3 +35,18 @@ def pytorch_funcify_DimShuffle(op, **kwargs):
         return res
 
     return dimshuffle
+
+
+@pytorch_funcify.register(Softmax)
+def pytorch_funcify_Softmax(op, **kwargs):
+    axis = op.axis
+
+    if axis is None:
+        raise TypeError(
+            "Implicit dimension choice for softmax has been deprecated in Pytorch, specify an axis."
+        )
+
+    def softmax(x):
+        return torch.nn.functional.softmax(x, dim=axis)
+
+    return softmax

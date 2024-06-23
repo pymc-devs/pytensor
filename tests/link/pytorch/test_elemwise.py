@@ -1,9 +1,11 @@
 import numpy as np
+import pytest
 
 import pytensor.tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor import elemwise as pt_elemwise
+from pytensor.tensor.special import softmax
 from pytensor.tensor.type import matrix, tensor, vector
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 
@@ -53,3 +55,17 @@ def test_pytorch_elemwise():
 
     fg = FunctionGraph([x], [out])
     compare_pytorch_and_py(fg, [[0.9, 0.9]])
+
+
+@pytest.mark.parametrize("axis", [None, 0, 1])
+def test_softmax(axis):
+    x = matrix("x")
+    out = softmax(x, axis=axis)
+    fgraph = FunctionGraph([x], [out])
+    test_input = np.arange(6, dtype=config.floatX).reshape(2, 3)
+
+    if axis is None:
+        with pytest.raises(TypeError):
+            compare_pytorch_and_py(fgraph, [test_input])
+    else:
+        compare_pytorch_and_py(fgraph, [test_input])
