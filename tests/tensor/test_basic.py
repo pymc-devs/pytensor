@@ -4618,13 +4618,14 @@ def test_vectorize_join(axis, broadcasting_y):
 )
 def test_where_for_only_condition(ift, iff):
     a = np.array([1, 2, 3, 4, 5])
-    cond = a >= 3
-    if ift is None and iff is None:
-        pt_where = where(cond)
-        np_result = np.where(cond)
-    else:
-        pt_where = where(cond, ift, iff)
+    cond = a < 3
+    if ift is not None and iff is not None:
+        pt_result = function([], where(cond, ift, iff))()
         np_result = np.where(cond, ift, iff)
-    f_test = function([], pt_where)
-    pt_result = f_test()
-    np.testing.assert_allclose(pt_result, np_result)
+        np.testing.assert_allclose(pt_result, np_result)
+    elif ift is None and iff is None:
+        pt_result = function([], where(cond))()
+        np_result = np.where(cond)
+        np.testing.assert_allclose(pt_result, np_result)
+    else:
+        pytest.raises(Exception, where, cond, ift)
