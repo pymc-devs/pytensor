@@ -669,7 +669,7 @@ class Reshape(COp):
         assert shp.ndim == 1
 
         if isinstance(shp, TensorConstant):
-            out_shape = tuple(int(s) if s >= 0 else None for s in shp.data)
+            out_shape = [int(s) if s >= 0 else None for s in shp.data]
         else:
             out_shape = [None] * self.ndim
             shp_list = shp_orig
@@ -684,6 +684,29 @@ class Reshape(COp):
                         out_shape[index] = s_val
                 except NotScalarConstantError:
                     pass
+
+        # If we only don't know the size of one output dimension,
+        # but we know all the input dimensions we can deduce it
+        # This happens often when there is -1 as an input of Reshape
+        if None not in x.type.shape and out_shape.count(None) == 1:
+            full_size = np.prod(x.type.shape)
+            known_size = np.prod([s for s in out_shape if s is not None])
+            out_shape[out_shape.index(None)] = int(full_size // known_size)
+
+        out_shape = tuple(out_shape)
+
+        # Run some eager error checks
+        if len(out_shape) != self.ndim:
+            raise ValueError(
+                "Shape argument to Reshape has incorrect length:"
+                f" {len(out_shape)}, should be {self.ndim}"
+            )
+
+        if None not in x.type.shape and None not in out_shape:
+            if np.prod(x.type.shape) != np.prod(out_shape):
+                raise ValueError(
+                    f"Reshape: Input shape {x.type.shape} is incompatible with new shape {out_shape}"
+                )
 
         return Apply(self, [x, shp], [tensor(dtype=x.type.dtype, shape=out_shape)])
 

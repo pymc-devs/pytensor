@@ -21,7 +21,12 @@ from pytensor.misc.safe_asarray import _asarray
 from pytensor.printing import Printer, pprint, set_precedence
 from pytensor.scalar.basic import ScalarConstant
 from pytensor.tensor import _get_vector_length, as_tensor_variable, get_vector_length
-from pytensor.tensor.basic import alloc, get_underlying_scalar_constant_value, nonzero
+from pytensor.tensor.basic import (
+    ScalarFromTensor,
+    alloc,
+    get_underlying_scalar_constant_value,
+    nonzero,
+)
 from pytensor.tensor.blockwise import vectorize_node_fallback
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.exceptions import AdvancedIndexingError, NotScalarConstantError
@@ -168,8 +173,16 @@ def as_index_literal(
     if isinstance(idx, Constant):
         return idx.data.item() if isinstance(idx, np.ndarray) else idx.data
 
-    if isinstance(getattr(idx, "type", None), SliceType):
-        idx = slice(*idx.owner.inputs)
+    if isinstance(idx, Variable):
+        if (
+            isinstance(idx.type, ps.ScalarType)
+            and idx.owner
+            and isinstance(idx.owner.op, ScalarFromTensor)
+        ):
+            return as_index_literal(idx.owner.inputs[0])
+
+        if isinstance(idx.type, SliceType):
+            idx = slice(*idx.owner.inputs)
 
     if isinstance(idx, slice):
         return slice(
@@ -537,7 +550,10 @@ def indexed_result_shape(array_shape, indices, indices_are_shapes=False):
     return res_shape
 
 
-def get_slice_elements(idxs: list, cond: Callable) -> list:
+def get_slice_elements(
+    idxs: list,
+    cond: Callable = lambda x: isinstance(x, Variable),
+) -> list:
     """Extract slice elements conditional on a given predicate function.
 
     Parameters
@@ -1976,8 +1992,7 @@ class AdvancedSubtensor1(COp):
             raise TypeError("index must be vector")
         if x_.type.ndim == 0:
             raise TypeError("cannot index into a scalar")
-        out_shape = (ilist_.type.shape[0],) + x_.type.shape[1:]
-        out_shape = tuple(1 if s == 1 else None for s in out_shape)
+        out_shape = (ilist_.type.shape[0], *x_.type.shape[1:])
         return Apply(self, [x_, ilist_], [TensorType(dtype=x.dtype, shape=out_shape)()])
 
     def perform(self, node, inp, out_):
