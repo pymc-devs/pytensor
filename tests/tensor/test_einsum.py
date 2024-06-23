@@ -72,6 +72,7 @@ def test_general_dot():
     )
 
 
+@pytest.mark.parametrize("static_shape_known", [True, False])
 @pytest.mark.parametrize(
     "signature",
     [
@@ -95,16 +96,22 @@ def test_general_dot():
         "oij,imj,mjkn,lnk,plk->op",
     ],
 )
-def test_parse_einsum_input(signature):
+def test_enisum_signatures(static_shape_known, signature):
     letters_to_dims = dict(zip("ijklmnop", [2, 3, 5, 7, 11, 13, 17, 19], strict=True))
 
     inputs = signature.split("->")[0].split(",")
 
     shapes = [tuple(letters_to_dims[letter] for letter in inp) for inp in inputs]
+    if static_shape_known:
+        static_shapes = shapes
+    else:
+        static_shapes = [[None] * len(shape) for shape in shapes]
+
     operands = [
-        pt.tensor(name, shape=shape) for name, shape in zip(ascii_lowercase, shapes)
+        pt.tensor(name, shape=static_shape) for name, static_shape in zip(ascii_lowercase, static_shapes)
     ]
     out = pt.einsum(signature, *operands)
+    assert out.owner.op.optimized == static_shape_known
 
     rng = np.random.default_rng(37)
     test_values = [rng.normal(size=shape) for shape in shapes]
@@ -113,9 +120,8 @@ def test_parse_einsum_input(signature):
     fn = function(operands, out)
     pt_out = fn(*test_values)
 
-    # print()
     # import pytensor
-    # pytensor.dprint(fn, print_type=True)
+    # print(); pytensor.dprint(fn, print_type=True)
 
     # assert out.type.shape == np_out.shape  # Reshape operations lose static shape
     np.testing.assert_allclose(pt_out, np_out)

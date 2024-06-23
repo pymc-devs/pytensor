@@ -1,4 +1,5 @@
 import collections
+import itertools
 from collections.abc import Sequence
 from functools import partial, reduce
 from itertools import pairwise
@@ -9,6 +10,8 @@ from numpy.core.numeric import (  # type: ignore
     normalize_axis_index,
     normalize_axis_tuple,
 )
+from opt_einsum.helpers import find_contraction
+from opt_einsum.parser import parse_einsum_input
 
 from pytensor.compile.builders import OpFromGraph
 from pytensor.tensor import TensorLike, vectorize
@@ -32,14 +35,15 @@ class Einsum(OpFromGraph):
     Wrapper Op for Einsum graphs
     """
 
-    __props__ = ("subscripts", "optimize")
+    __props__ = ("subscripts", "path", "optimized")
 
     def __init__(
-        self, *args, subscripts: str, optimize: str | None = "optimal", **kwargs
+        self, *args, subscripts: str, path: str, optimized: bool, **kwargs
     ):
         self.subscripts = subscripts
-        self.optimize = optimize
-        super().__init__(*args, **kwargs)
+        self.path = path
+        self.optimized = optimized
+        super().__init__(*args, **kwargs, strict=True)
 
 
 def _iota(shape: TensorVariable, axis: int) -> TensorVariable:
@@ -142,6 +146,50 @@ def _general_dot(
     return cast(TensorVariable, out)
 
 
+PATH = tuple[tuple[int] | tuple[int, int]]
+
+def contraction_list_from_path(subscripts: str, operands: Sequence[TensorLike], path: PATH):
+    """TODO Docstrings
+
+    Code adapted from einsum_opt
+    """
+    fake_operands = [np.zeros([1 if dim == 1 else 0 for dim in x.type.shape]) for x in operands]
+    input_subscripts, output_subscript, operands = parse_einsum_input((subscripts, *fake_operands))
+
+    # Build a few useful list and sets
+    input_list = input_subscripts.split(',')
+    input_sets = [set(x) for x in input_list]
+    output_set = set(output_subscript)
+
+    # Build contraction tuple (positions, gemm, einsum_str, remaining)
+    contraction_list = []
+    for cnum, contract_inds in enumerate(path):
+        # Make sure we remove inds from right to left
+        contract_inds = tuple(sorted(list(contract_inds), reverse=True))
+
+        contract_tuple = find_contraction(contract_inds, input_sets, output_set)
+        out_inds, input_sets, idx_removed, idx_contract = contract_tuple
+
+        tmp_inputs = [input_list.pop(x) for x in contract_inds]
+
+        # Last contraction
+        if (cnum - len(path)) == -1:
+            idx_result = output_subscript
+        else:
+            # use tensordot order to minimize transpositions
+            all_input_inds = "".join(tmp_inputs)
+            idx_result = "".join(sorted(out_inds, key=all_input_inds.find))
+
+        input_list.append(idx_result)
+        einsum_str = ",".join(tmp_inputs) + "->" + idx_result
+
+        # We only need the first three inputs to build the forward graph
+        contraction = (contract_inds, idx_removed, einsum_str, None, None)
+        contraction_list.append(contraction)
+
+    return contraction_list
+
+
 def einsum(subscripts: str, *operands: "TensorLike") -> TensorVariable:
     """
     Multiplication and summation of tensors using the Einstein summation convention.
@@ -168,18 +216,33 @@ def einsum(subscripts: str, *operands: "TensorLike") -> TensorVariable:
     # TODO: Do we need this as dependency?
     from opt_einsum import contract_path
 
-    operands = cast(tuple[TensorVariable], tuple(map(as_tensor, operands)))
+    operands = [as_tensor(operand) for operand in operands]
     shapes = [operand.type.shape for operand in operands]
 
-    # TODE: Do fast path at creation time, and optimize only in fast_run
-    _, contraction_list = contract_path(
-        subscripts,
-        *shapes,
-        einsum_call=True,
-        use_blas=True,
-        optimize="optimal",
-        shapes=True,
-    )
+    if None in itertools.chain.from_iterable(shapes):
+        # We mark optimized = False, even in cases where there is no ordering optimization to be done
+        # because the inner graph may have to accommodate dynamic shapes.
+        # If those shapes become known later we will likely want to rebuild the Op (unless we inline it)
+        if len(operands) == 1:
+            path = [(0,)]
+        else:
+            # Create default path of repeating (1,0) that executes left to right cyclically
+            # with intermediate outputs being pushed to the end of the stack
+            # We use (1,0) and not (0,1) because that's what opt_einsum tends to prefer, and so the Op signatures will match more often
+            path = [(1,0) for i in range(len(operands) - 1)]
+        contraction_list = contraction_list_from_path(subscripts, operands, path)
+        optimized = False
+    else:
+        _, contraction_list = contract_path(
+            subscripts,
+            *shapes,
+            einsum_call=True,
+            use_blas=True,
+            optimize="optimal",
+            shapes=True,
+        )
+        path = [contraction[0] for contraction in contraction_list]
+        optimized = True
 
     def sum_uniques(
         operand: TensorVariable, names: str, uniques: list[str]
@@ -246,6 +309,7 @@ def einsum(subscripts: str, *operands: "TensorLike") -> TensorVariable:
             lhs, rhs = map(einsum_operands.pop, operand_indices)
             lhs_names, rhs_names = input_names
 
+            # TODO: Do this as well?
             # handle cases where one side of a contracting or batch dimension is 1
             # but its counterpart is not.
             # lhs, lhs_names = filter_singleton_dims(lhs, lhs_names, shape(rhs),
@@ -323,6 +387,8 @@ def einsum(subscripts: str, *operands: "TensorLike") -> TensorVariable:
                     axes=(lhs_cont, rhs_cont),
                     batch_axes=(lhs_batch, rhs_batch),
                 )
+        else:
+            raise ValueError(f"Each step of einsum must have 1 or 2 operands, got {len(operand_indices)}")
 
         # the resulting 'operand' with axis labels 'names' should be a permutation of the desired result
         assert len(names) == len(result_names) == len(set(names))
@@ -338,5 +404,7 @@ def einsum(subscripts: str, *operands: "TensorLike") -> TensorVariable:
         subscripts=subscripts,
         inputs=list(operands),
         outputs=[einsum_result],
+        path=tuple(path),
+        optimized=optimized,
     )(*operands)
     return cast(TensorVariable, out)
