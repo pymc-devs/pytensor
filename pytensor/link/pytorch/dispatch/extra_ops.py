@@ -6,13 +6,15 @@ from pytensor.tensor.extra_ops import CumOp
 
 @pytorch_funcify.register(CumOp)
 def pytorch_funcify_Cumop(op, **kwargs):
-    dim = op.axis
+    axis = op.axis
     mode = op.mode
 
-    def cumop(x, dim=dim):
-        if dim is None:
+    def cumop(x):
+        if axis is None:
             x = x.reshape(-1)
             dim = 0
+        else:
+            dim = axis
         if mode == "add":
             return torch.cumsum(x, dim=dim)
         else:
