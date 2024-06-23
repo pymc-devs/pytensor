@@ -1978,7 +1978,12 @@ def transpose(x, axes=None):
     _x = as_tensor_variable(x)
 
     if axes is None:
-        axes = list(range((_x.type.ndim - 1), -1, -1))
+        axes = tuple(range((_x.type.ndim - 1), -1, -1))
+
+    if tuple(axes) == tuple(range(len(axes))):
+        # No-op
+        return _x
+
     ret = DimShuffle(tuple(s == 1 for s in _x.type.shape), axes)(_x)
 
     if _x.name and axes == list(range((_x.type.ndim - 1), -1, -1)):
@@ -3961,6 +3966,10 @@ def moveaxis(
     source = normalize_axis_tuple(source, a.ndim, "source")
     destination = normalize_axis_tuple(destination, a.ndim, "destination")
 
+    if source == destination:
+        # It's a no-op
+        return a
+
     if len(source) != len(destination):
         raise ValueError(
             "`source` and `destination` arguments must have the same number of elements"
@@ -4275,9 +4284,7 @@ atleast_2d = partial(atleast_Nd, n=2)
 atleast_3d = partial(atleast_Nd, n=3)
 
 
-def expand_dims(
-    a: np.ndarray | TensorVariable, axis: tuple[int, ...]
-) -> TensorVariable:
+def expand_dims(a: np.ndarray | TensorVariable, axis: Sequence[int]) -> TensorVariable:
     """Expand the shape of an array.
 
     Insert a new axis that will appear at the `axis` position in the expanded
@@ -4296,7 +4303,7 @@ def expand_dims(
     """
     a = as_tensor(a)
 
-    if not isinstance(axis, tuple | list):
+    if not isinstance(axis, Sequence):
         axis = (axis,)
 
     out_ndim = len(axis) + a.ndim

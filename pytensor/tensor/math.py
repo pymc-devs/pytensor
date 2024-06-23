@@ -2308,6 +2308,8 @@ def tensordot(
     newshape_b = (N2, -1)
     oldb = [runtime_shape_b[axis] for axis in notin]
 
+    # TODO: These transponse and reshapes don't get simplified into simple dimshuffles when that's the case
+    #  Missing: Rewrite that removes useless Reshape
     at = a.transpose(newaxes_a).reshape(newshape_a)
     bt = b.transpose(newaxes_b).reshape(newshape_b)
     res = _dot(at, bt)
