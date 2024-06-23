@@ -9,6 +9,7 @@ from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,
 )
+from pytensor.raise_op import Assert
 from pytensor.scalar.basic import Mul
 from pytensor.tensor.basic import ARange, Eye, TensorVariable, alloc, diagonal
 from pytensor.tensor.blas import Dot22
@@ -43,6 +44,9 @@ from pytensor.tensor.subtensor import advanced_set_subtensor
 
 
 logger = logging.getLogger(__name__)
+assert_square_matrix_for_det = Assert(
+    "Last 2 dimensions of the input tensor to det are not equal and thus, it is not square!"
+)
 
 
 def is_matrix_transpose(x: TensorVariable) -> bool:
@@ -385,7 +389,6 @@ def local_lift_through_linalg(
                 raise NotImplementedError  # pragma: no cover
 
 
-# Det Diag Rewrites
 @register_canonicalize
 @register_stabilize
 @node_rewriter([det])
@@ -423,6 +426,7 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
         for mul_input in inputs_to_mul
         if mul_input.owner and isinstance(mul_input.owner.op, Eye)
     ]
+    # If the broadcast pattern of eye_input is not (False, False), we do not get a diagonal matrix and thus, dont need to apply the rewrite
     if eye_input and eye_input[0].broadcastable[-2:] != (False, False):
         return None
 
@@ -438,7 +442,6 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
         -2:
     ] == (None, None):
         return None
-    # This ensures that the rewrite is NOT applied to cases of degenerate eye (pt.eye(1)) and rectangle eye (pt.eye(7,5))
 
     # Checking if original x was scalar/vector/matrix
     if non_eye_inputs[0].type.broadcastable[-2:] == (True, True):
@@ -456,7 +459,6 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
     return [det_val]
 
 
-# Det diag from diag
 arange = ARange("int64")
 det_diag_from_diag = PatternNodeRewriter(
     (
