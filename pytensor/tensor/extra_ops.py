@@ -283,11 +283,10 @@ class CumOp(COp):
     def __init__(self, axis: int | None = None, mode="add"):
         if mode not in ("add", "mul"):
             raise ValueError(f'{type(self).__name__}: Unknown mode "{mode}"')
-        if isinstance(axis, int) or axis is None:
-            self.axis = axis
-            self.mode = mode
-        else:
+        if not (isinstance(axis, int) or axis is None):
             raise TypeError("axis must be an integer or None.")
+        self.axis = axis
+        self.mode = mode
 
     c_axis = property(lambda self: np.MAXDIMS if self.axis is None else self.axis)
 
