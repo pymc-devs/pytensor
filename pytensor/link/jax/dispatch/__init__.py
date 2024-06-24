@@ -14,5 +14,6 @@ import pytensor.link.jax.dispatch.elemwise
 import pytensor.link.jax.dispatch.scan
 import pytensor.link.jax.dispatch.sparse
 import pytensor.link.jax.dispatch.blockwise
+import pytensor.link.jax.dispatch.sort
 
 # isort: on
