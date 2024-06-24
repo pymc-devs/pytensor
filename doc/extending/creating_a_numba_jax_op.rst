@@ -104,7 +104,7 @@ With a precise idea of what the PyTensor :class:`Op` does we need to figure out 
 to implement it in JAX, Numba or Pytorch. In the best case scenario, there is a similarly named
 function that performs exactly the same computations as the :class:`Op`. For
 example, the :class:`Eye` operator has a JAX equivalent: :func:`jax.numpy.eye`
-(see `the documentation <https://jax.readthedocs.io/en/latest/_autosummary/jax.numpy.eye.html?highlight=eye>`_) and a Pytorch equivalent :func:`torch.eye` (see `documentation <https://pytorch.org/docs/stable/generated/torch.eye.html>`_).
+and a Pytorch equivalent: :func:`torch.eye`.
 
 If we wanted to implement an :class:`Op` like :class:`DimShuffle`, we might need to
 recreate the functionality with some custom logic.  In many cases, at least some
