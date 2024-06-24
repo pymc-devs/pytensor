@@ -761,13 +761,28 @@ def switch(cond, ift, iff):
 
 
 def where(cond, ift=None, iff=None):
-    # Normal switch incase both arguements are passed
+    """
+    where(condition, [ift, iff])
+    Return elements chosen from `ift` or `iff` depending on `condition`.
+
+    Note: When only condition is provided, this function is a shorthand for `as_tensor(condition).nonzero()`.
+
+    Parameters
+    ----------
+    condition : tensor_like, bool
+        Where True, yield `ift`, otherwise yield `iff`.
+    x, y : tensor_like
+        Values from which to choose.
+
+    Returns
+    -------
+    out : TensorVariable
+        A tensor with elements from `ift` where `condition` is True, and elements from `iff` elsewhere.
+    """
     if ift is not None and iff is not None:
         return switch(cond, ift, iff)
-    # Add case when only condition is passed
     elif ift is None and iff is None:
         return as_tensor(cond).nonzero()
-    # Raise an error if only one arguement is passed
     else:
         raise Exception("Either both or none of the parameters should be passed")
 
