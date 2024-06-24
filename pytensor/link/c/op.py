@@ -59,7 +59,7 @@ class COp(Op, CLinkerOp):
         e = FunctionGraph(node.inputs, node.outputs)
         e_no_recycling = [
             new_o
-            for (new_o, old_o) in zip(e.outputs, node.outputs)
+            for (new_o, old_o) in zip(e.outputs, node.outputs, strict=True)
             if old_o in no_recycling
         ]
         cl = pytensor.link.c.basic.CLinker().accept(e, no_recycling=e_no_recycling)
