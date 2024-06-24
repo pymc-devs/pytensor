@@ -5,7 +5,7 @@ import pytensor.tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor import elemwise as pt_elemwise
-from pytensor.tensor.special import softmax
+from pytensor.tensor.special import log_softmax, softmax
 from pytensor.tensor.type import matrix, tensor, vector
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 
@@ -61,6 +61,16 @@ def test_pytorch_elemwise():
 def test_softmax(axis):
     x = matrix("x")
     out = softmax(x, axis=axis)
+    fgraph = FunctionGraph([x], [out])
+    test_input = np.arange(6, dtype=config.floatX).reshape(2, 3)
+
+    compare_pytorch_and_py(fgraph, [test_input])
+
+
+@pytest.mark.parametrize("axis", [None, 0, 1])
+def test_logsoftmax(axis):
+    x = matrix("x")
+    out = log_softmax(x, axis=axis)
     fgraph = FunctionGraph([x], [out])
     test_input = np.arange(6, dtype=config.floatX).reshape(2, 3)
 

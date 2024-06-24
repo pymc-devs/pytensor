@@ -2,7 +2,7 @@ import torch
 
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.special import Softmax
+from pytensor.tensor.special import LogSoftmax, Softmax
 
 
 @pytorch_funcify.register(Elemwise)
@@ -48,3 +48,16 @@ def pytorch_funcify_Softmax(op, **kwargs):
             return torch.softmax(x.ravel(), dim=0).reshape(x.shape)
 
     return softmax
+
+
+@pytorch_funcify.register(LogSoftmax)
+def pytorch_funcify_LogSoftmax(op, **kwargs):
+    axis = op.axis
+
+    def log_softmax(x):
+        if axis is not None:
+            return torch.log_softmax(x, dim=axis)
+        else:
+            return torch.log_softmax(x.ravel(), dim=0).reshape(x.shape)
+
+    return log_softmax
