@@ -116,7 +116,7 @@ Here's an example for :class:`DimShuffle`:
 
 .. tab-set::
 
-        .. tab-item:: JAX/Numba     
+        .. tab-item:: JAX     
 
             .. code:: python
 
@@ -134,6 +134,105 @@ Here's an example for :class:`DimShuffle`:
                         res = jnp.copy(res)
 
                     return res
+        
+        .. tab-item:: Numba
+
+            .. code:: python
+
+                def numba_funcify_DimShuffle(op, node, **kwargs):
+                    shuffle = tuple(op.shuffle)
+                    transposition = tuple(op.transposition)
+                    augment = tuple(op.augment)
+                    inplace = op.inplace
+
+                    ndim_new_shape = len(shuffle) + len(augment)
+
+                    no_transpose = all(i == j for i, j in enumerate(transposition))
+                    if no_transpose:
+
+                        @numba_basic.numba_njit
+                        def transpose(x):
+                            return x
+
+                    else:
+
+                        @numba_basic.numba_njit
+                        def transpose(x):
+                            return np.transpose(x, transposition)
+
+                    shape_template = (1,) * ndim_new_shape
+
+                    # When `len(shuffle) == 0`, the `shuffle_shape[j]` expression below
+                    # is typed as `getitem(Tuple(), int)`, which has no implementation
+                    # (since getting an item from an empty sequence doesn't make sense).
+                    # To avoid this compile-time error, we omit the expression altogether.
+                    if len(shuffle) > 0:
+                        # Use the statically known shape if available
+                        if all(length is not None for length in node.outputs[0].type.shape):
+                            shape = node.outputs[0].type.shape
+
+                            @numba_basic.numba_njit
+                            def find_shape(array_shape):
+                                return shape
+
+                        else:
+
+                            @numba_basic.numba_njit
+                            def find_shape(array_shape):
+                                shape = shape_template
+                                j = 0
+                                for i in range(ndim_new_shape):
+                                    if i not in augment:
+                                        length = array_shape[j]
+                                        shape = numba_basic.tuple_setitem(shape, i, length)
+                                        j = j + 1
+                                return shape
+
+                    else:
+
+                        @numba_basic.numba_njit
+                        def find_shape(array_shape):
+                            return shape_template
+
+                    if ndim_new_shape > 0:
+
+                        @numba_basic.numba_njit
+                        def dimshuffle_inner(x, shuffle):
+                            x = transpose(x)
+                            shuffle_shape = x.shape[: len(shuffle)]
+                            new_shape = find_shape(shuffle_shape)
+
+                            # FIXME: Numba's `array.reshape` only accepts C arrays.
+                            res_reshape = np.reshape(np.ascontiguousarray(x), new_shape)
+
+                            if not inplace:
+                                return res_reshape.copy()
+                            else:
+                                return res_reshape
+
+                    else:
+
+                        @numba_basic.numba_njit
+                        def dimshuffle_inner(x, shuffle):
+                            return np.reshape(np.ascontiguousarray(x), ())
+
+                    # Without the following wrapper function we would see this error:
+                    # E   No implementation of function Function(<built-in function getitem>) found for signature:
+                    # E
+                    # E    >>> getitem(UniTuple(int64 x 2), slice<a:b>)
+                    # E
+                    # E   There are 22 candidate implementations:
+                    # E      - Of which 22 did not match due to:
+                    # E      Overload of function 'getitem': File: <numerous>: Line N/A.
+                    # E        With argument(s): '(UniTuple(int64 x 2), slice<a:b>)':
+                    # E       No match.
+                    # ...(on this line)...
+                    # E           shuffle_shape = res.shape[: len(shuffle)]
+                    @numba_basic.numba_njit(inline="always")
+                    def dimshuffle(x):
+                        return dimshuffle_inner(np.asarray(x), shuffle)
+
+                    return dimshuffle
 
         .. tab-item:: Pytorch
 
@@ -184,7 +283,7 @@ Here's an example for the `CumOp`\ `Op`:
 
 .. tab-set::
 
-    .. tab-item:: JAX/Numba
+    .. tab-item:: JAX
 
         .. code:: python
 
@@ -229,6 +328,82 @@ Here's an example for the `CumOp`\ `Op`:
                             raise NotImplementedError("JAX does not support cumprod function at the moment.")
 
                     return cumop
+
+    .. tab-item:: Numba
+
+        .. code:: python
+
+            import numpy as np
+
+            from pytensor import config
+            from pytensor.graph import Apply
+            from pytensor.link.numba.dispatch import basic as numba_basic
+            from pytensor.tensor import TensorVariable
+            from pytensor.tensor.extra_ops import CumOp,
+
+            def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
+                axis = op.axis
+                mode = op.mode
+                ndim = cast(TensorVariable, node.outputs[0]).ndim
+
+                if axis is not None:
+                    if axis < 0:
+                        axis = ndim + axis
+                    if axis < 0 or axis >= ndim:
+                        raise ValueError(f"Invalid axis {axis} for array with ndim {ndim}")
+
+                    reaxis_first = (axis, *(i for i in range(ndim) if i != axis))
+                    reaxis_first_inv = tuple(np.argsort(reaxis_first))
+
+                if mode == "add":
+                    if axis is None or ndim == 1:
+
+                        @numba_basic.numba_njit(fastmath=config.numba__fastmath)
+                        def cumop(x):
+                            return np.cumsum(x)
+
+                    else:
+
+                        @numba_basic.numba_njit(boundscheck=False, fastmath=config.numba__fastmath)
+                        def cumop(x):
+                            out_dtype = x.dtype
+                            if x.shape[axis] < 2:
+                                return x.astype(out_dtype)
+
+                            x_axis_first = x.transpose(reaxis_first)
+                            res = np.empty(x_axis_first.shape, dtype=out_dtype)
+
+                            res[0] = x_axis_first[0]
+                            for m in range(1, x.shape[axis]):
+                                res[m] = res[m - 1] + x_axis_first[m]
+
+                            return res.transpose(reaxis_first_inv)
+
+                else:
+                    if axis is None or ndim == 1:
+
+                        @numba_basic.numba_njit(fastmath=config.numba__fastmath)
+                        def cumop(x):
+                            return np.cumprod(x)
+
+                    else:
+
+                        @numba_basic.numba_njit(boundscheck=False, fastmath=config.numba__fastmath)
+                        def cumop(x):
+                            out_dtype = x.dtype
+                            if x.shape[axis] < 2:
+                                return x.astype(out_dtype)
+
+                            x_axis_first = x.transpose(reaxis_first)
+                            res = np.empty(x_axis_first.shape, dtype=out_dtype)
+
+                            res[0] = x_axis_first[0]
+                            for m in range(1, x.shape[axis]):
+                                res[m] = res[m - 1] * x_axis_first[m]
+
+                            return res.transpose(reaxis_first)
+
+                return cumop
 
 
     .. tab-item:: Pytorch
@@ -287,15 +462,15 @@ Step 4: Write tests
 -------------------
 .. tab-set::
 
-    .. tab-item:: JAX/Numba
+    .. tab-item:: JAX
 
         Test that your registered `Op` is working correctly by adding tests to the
-        appropriate test suites in PyTensor (e.g. in ``tests.link.jax`` and one of
-        the modules in ``tests.link.numba``). The tests should ensure that your implementation can
+        appropriate test suites in PyTensor (e.g. in ``tests.link.jax``). 
+        The tests should ensure that your implementation can
         handle the appropriate types of inputs and produce outputs equivalent to `Op.perform`.
         Check the existing tests for the general outline of these kinds of tests. In
         most cases, a helper function can be used to easily verify the correspondence
-        between a JAX/Numba implementation and its `Op`.
+        between a Numba implementation and its `Op`.
 
         For example, the :func:`compare_jax_and_py` function streamlines the steps
         involved in making comparisons with `Op.perform`.
@@ -351,6 +526,44 @@ Step 4: Write tests
                     compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
     
     
+    .. tab-item:: Numba
+
+        Test that your registered `Op` is working correctly by adding tests to the
+        appropriate test suites in PyTensor (e.g. in ``tests.link.numba``). 
+        The tests should ensure that your implementation can
+        handle the appropriate types of inputs and produce outputs equivalent to `Op.perform`.
+        Check the existing tests for the general outline of these kinds of tests. In
+        most cases, a helper function can be used to easily verify the correspondence
+        between a Numba implementation and its `Op`.
+
+        For example, the :func:`compare_numba_and_py` function streamlines the steps
+        involved in making comparisons with `Op.perform`.
+
+        Here's a small example of a test for :class:`CumOp` above:
+
+        .. code:: python
+            
+            from tests.link.numba.test_basic import compare_numba_and_py
+            from pytensor.graph import FunctionGraph
+            from pytensor.compile.sharedvalue import SharedVariable
+            from pytensor.graph.basic import Constant
+            from pytensor.tensor import extra_ops
+
+            def test_CumOp(val, axis, mode):
+                g = extra_ops.CumOp(axis=axis, mode=mode)(val)
+                g_fg = FunctionGraph(outputs=[g])
+
+                compare_numba_and_py(
+                    g_fg,
+                    [
+                        i.tag.test_value
+                        for i in g_fg.inputs
+                        if not isinstance(i, SharedVariable | Constant)
+                    ],
+                )
+    
+
+
     .. tab-item:: Pytorch
         
         Test that your registered `Op` is working correctly by adding tests to the
