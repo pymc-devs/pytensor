@@ -45,7 +45,7 @@ def infer_shape(outs, inputs, input_shapes):
     # TODO: ShapeFeature should live elsewhere
     from pytensor.tensor.rewriting.shape import ShapeFeature
 
-    for inp, inp_shp in zip(inputs, input_shapes):
+    for inp, inp_shp in zip(inputs, input_shapes, strict=True):
         if inp_shp is not None and len(inp_shp) != inp.type.ndim:
             assert len(inp_shp) == inp.type.ndim
 
@@ -53,7 +53,7 @@ def infer_shape(outs, inputs, input_shapes):
     shape_feature.on_attach(FunctionGraph([], []))
 
     # Initialize shape_of with the input shapes
-    for inp, inp_shp in zip(inputs, input_shapes):
+    for inp, inp_shp in zip(inputs, input_shapes, strict=True):
         shape_feature.set_shape(inp, inp_shp)
 
     def local_traverse(out):
@@ -110,7 +110,9 @@ def construct_nominal_fgraph(
 
     replacements = dict(
         zip(
-            inputs + implicit_shared_inputs, dummy_inputs + dummy_implicit_shared_inputs
+            inputs + implicit_shared_inputs,
+            dummy_inputs + dummy_implicit_shared_inputs,
+            strict=True,
         )
     )
 
@@ -140,7 +142,7 @@ def construct_nominal_fgraph(
         NominalVariable(n, var.type) for n, var in enumerate(local_inputs)
     )
 
-    fgraph.replace_all(zip(local_inputs, nominal_local_inputs))
+    fgraph.replace_all(zip(local_inputs, nominal_local_inputs, strict=True))
 
     for i, inp in enumerate(fgraph.inputs):
         nom_inp = nominal_local_inputs[i]
@@ -559,7 +561,9 @@ class OpFromGraph(Op, HasInnerGraph):
             # compute non-overriding downsteam grads from upstreams grads
             # it's normal some input may be disconnected, thus the 'ignore'
             wrt = [
-                lin for lin, gov in zip(inner_inputs, custom_input_grads) if gov is None
+                lin
+                for lin, gov in zip(inner_inputs, custom_input_grads, strict=True)
+                if gov is None
             ]
             default_input_grads = fn_grad(wrt=wrt) if wrt else []
             input_grads = self._combine_list_overrides(
@@ -650,7 +654,7 @@ class OpFromGraph(Op, HasInnerGraph):
             f = [
                 output
                 for output, custom_output_grad in zip(
-                    inner_outputs, custom_output_grads
+                    inner_outputs, custom_output_grads, strict=True
                 )
                 if custom_output_grad is None
             ]
@@ -730,18 +734,24 @@ class OpFromGraph(Op, HasInnerGraph):
 
         non_shared_inputs = [
             inp_t.filter_variable(inp)
-            for inp, inp_t in zip(non_shared_inputs, self.input_types)
+            for inp, inp_t in zip(non_shared_inputs, self.input_types, strict=True)
         ]
 
         new_shared_inputs = inputs[num_expected_inps:]
-        inner_and_input_shareds = list(zip(self.shared_inputs, new_shared_inputs))
+        inner_and_input_shareds = list(
+            zip(self.shared_inputs, new_shared_inputs, strict=True)
+        )
 
         if not all(inp_s == inn_s for inn_s, inp_s in inner_and_input_shareds):
             # The shared variables are not equal to the original shared
             # variables, so we construct a new `Op` that uses the new shared
             # variables instead.
             replace = dict(
-                zip(self.inner_inputs[num_expected_inps:], new_shared_inputs)
+                zip(
+                    self.inner_inputs[num_expected_inps:],
+                    new_shared_inputs,
+                    strict=True,
+                )
             )
 
             # If the new shared variables are inconsistent with the inner-graph,
@@ -808,7 +818,7 @@ class OpFromGraph(Op, HasInnerGraph):
         # each shape call. PyTensor optimizer will clean this up later, but this
         # will make extra work for the optimizer.
 
-        repl = dict(zip(self.inner_inputs, node.inputs))
+        repl = dict(zip(self.inner_inputs, node.inputs, strict=True))
         clone_out_shapes = [s for s in out_shapes if isinstance(s, tuple)]
         cloned = clone_replace(sum(clone_out_shapes, ()), replace=repl)
         ret = []
@@ -850,7 +860,7 @@ class OpFromGraph(Op, HasInnerGraph):
     def perform(self, node, inputs, outputs):
         variables = self.fn(*inputs)
         assert len(variables) == len(outputs)
-        for output, variable in zip(outputs, variables):
+        for output, variable in zip(outputs, variables, strict=True):
             output[0] = variable
 
 
@@ -866,7 +876,9 @@ def inline_ofg_expansion(fgraph, node):
         return False
     if not op.is_inline:
         return False
-    return clone_replace(op.inner_outputs, dict(zip(op.inner_inputs, node.inputs)))
+    return clone_replace(
+        op.inner_outputs, dict(zip(op.inner_inputs, node.inputs, strict=True))
+    )
 
 
 # We want to run this before the first merge optimizer

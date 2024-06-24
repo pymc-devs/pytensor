@@ -603,7 +603,7 @@ def construct_pfunc_ins_and_outs(
 
         new_inputs = []
 
-        for i, iv in zip(inputs, input_variables):
+        for i, iv in zip(inputs, input_variables, strict=True):
             new_i = copy(i)
             new_i.variable = iv
 
@@ -637,13 +637,13 @@ def construct_pfunc_ins_and_outs(
         assert len(fgraph.inputs) == len(inputs)
         assert len(fgraph.outputs) == len(outputs)
 
-        for fg_inp, inp in zip(fgraph.inputs, inputs):
+        for fg_inp, inp in zip(fgraph.inputs, inputs, strict=True):
             if fg_inp != getattr(inp, "variable", inp):
                 raise ValueError(
                     f"`fgraph`'s input does not match the provided input: {fg_inp}, {inp}"
                 )
 
-        for fg_out, out in zip(fgraph.outputs, outputs):
+        for fg_out, out in zip(fgraph.outputs, outputs, strict=True):
             if fg_out != getattr(out, "variable", out):
                 raise ValueError(
                     f"`fgraph`'s output does not match the provided output: {fg_out}, {out}"
