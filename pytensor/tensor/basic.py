@@ -780,9 +780,9 @@ def where(cond, ift=None, iff=None, **kwargs):
         A tensor with elements from `ift` where `condition` is True, and elements from `iff` elsewhere.
     """
     if ift is not None and iff is not None:
-        return switch(cond, ift, iff)
+        return switch(cond, ift, iff, **kwargs)
     elif ift is None and iff is None:
-        return as_tensor(cond).nonzero()
+        return as_tensor(cond).nonzero(**kwargs)
     else:
         raise ValueError("either both or neither of ift and iff should be given")
 
