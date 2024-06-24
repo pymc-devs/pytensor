@@ -97,11 +97,11 @@ def broadcasted_by(x: TensorVariable, y: TensorVariable) -> bool:
     if len(bx) < len(by):
         return True
     bx = bx[-len(by) :]
-    return any(bx_dim and not by_dim for bx_dim, by_dim in zip(bx, by))
+    return any(bx_dim and not by_dim for bx_dim, by_dim in zip(bx, by, strict=True))
 
 
 def merge_broadcastables(broadcastables):
-    return [all(bcast) for bcast in zip(*broadcastables)]
+    return [all(bcast) for bcast in zip(*broadcastables, strict=True)]
 
 
 def alloc_like(
@@ -1203,7 +1203,7 @@ def local_merge_alloc(fgraph, node):
     # broadcasted dimensions to its inputs[0]. Eg:
     # Alloc(Alloc(m, y, 1, 1), x, y, z, w) -> Alloc(m, x, y, z, w)
     i = 0
-    for dim_inner, dim_outer in zip(dims_inner_rev, dims_outer_rev):
+    for dim_inner, dim_outer in zip(dims_inner_rev, dims_outer_rev, strict=False):
         if dim_inner != dim_outer:
             if isinstance(dim_inner, Constant) and dim_inner.data == 1:
                 pass
