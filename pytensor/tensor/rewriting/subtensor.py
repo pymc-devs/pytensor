@@ -683,7 +683,7 @@ def local_subtensor_of_alloc(fgraph, node):
     # Slices to take from val
     val_slices = []
 
-    for i, (sl, dim) in enumerate(zip(slices, dims)):
+    for i, (sl, dim) in enumerate(zip(slices, dims, strict=False)):
         # If val was not copied over that dim,
         # we need to take the appropriate subtensor on it.
         if i >= n_added_dims:
@@ -1803,7 +1803,7 @@ def local_join_subtensors(fgraph, node):
         if all(
             idxs_nonaxis_subtensor1 == idxs_nonaxis_subtensor2
             for i, (idxs_nonaxis_subtensor1, idxs_nonaxis_subtensor2) in enumerate(
-                zip(idxs_subtensor1, idxs_subtensor2)
+                zip(idxs_subtensor1, idxs_subtensor2, strict=True)
             )
             if i != axis
         ):
@@ -1945,7 +1945,7 @@ def local_blockwise_advanced_inc_subtensor(fgraph, node):
 
     x_batch_bcast = x.type.broadcastable[:batch_ndim]
     y_batch_bcast = y.type.broadcastable[:batch_ndim]
-    if any(xb and not yb for xb, yb in zip(x_batch_bcast, y_batch_bcast)):
+    if any(xb and not yb for xb, yb in zip(x_batch_bcast, y_batch_bcast, strict=True)):
         # Need to broadcast batch x dims
         batch_shape = tuple(
             x_dim if (not xb or yb) else y_dim
@@ -1954,6 +1954,7 @@ def local_blockwise_advanced_inc_subtensor(fgraph, node):
                 tuple(x.shape)[:batch_ndim],
                 y_batch_bcast,
                 tuple(y.shape)[:batch_ndim],
+                strict=True,
             )
         )
         core_shape = tuple(x.shape)[batch_ndim:]

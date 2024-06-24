@@ -136,7 +136,7 @@ def test_einsum_signatures(static_shape_known, signature):
 
     operands = [
         pt.tensor(name, shape=static_shape)
-        for name, static_shape in zip(ascii_lowercase, static_shapes)
+        for name, static_shape in zip(ascii_lowercase, static_shapes, strict=False)
     ]
     out = pt.einsum(signature, *operands)
     assert out.owner.op.optimized == static_shape_known or len(operands) <= 2
@@ -156,11 +156,11 @@ def test_einsum_signatures(static_shape_known, signature):
 
 
 def test_batch_dim():
-    shapes = (
-        (7, 3, 5),
-        (5, 2),
-    )
-    x, y = (pt.tensor(name, shape=shape) for name, shape in zip("xy", shapes))
+    shapes = {
+        "x": (7, 3, 5),
+        "y": (5, 2),
+    }
+    x, y = (pt.tensor(name, shape=shape) for name, shape in shapes.items())
     out = pt.einsum("mij,jk->mik", x, y)
 
     assert out.type.shape == (7, 3, 2)

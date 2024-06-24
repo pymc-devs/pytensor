@@ -19,7 +19,7 @@ class TestPyDotFormatter:
     def node_counts(self, graph):
         node_types = [node.get_attributes()["node_type"] for node in graph.get_nodes()]
         a, b = np.unique(node_types, return_counts=True)
-        nc = dict(zip(a, b))
+        nc = dict(zip(a, b, strict=True))
         return nc
 
     @pytest.mark.parametrize("mode", ["FAST_RUN", "FAST_COMPILE"])

@@ -68,6 +68,7 @@ def grad_sources_inputs(sources, inputs):
                 wrt=inputs,
                 consider_constant=inputs,
             ),
+            strict=True,
         )
     )
 
@@ -629,7 +630,9 @@ def test_known_grads():
 
     rng = np.random.default_rng([2012, 11, 15])
     values = [rng.standard_normal(10), rng.integers(10), rng.standard_normal()]
-    values = [np.cast[ipt.dtype](value) for ipt, value in zip(inputs, values)]
+    values = [
+        np.cast[ipt.dtype](value) for ipt, value in zip(inputs, values, strict=True)
+    ]
 
     true_grads = grad(cost, inputs, disconnected_inputs="ignore")
     true_grads = pytensor.function(inputs, true_grads)
@@ -637,14 +640,14 @@ def test_known_grads():
 
     for layer in layers:
         first = grad(cost, layer, disconnected_inputs="ignore")
-        known = dict(zip(layer, first))
+        known = dict(zip(layer, first, strict=True))
         full = grad(
             cost=None, known_grads=known, wrt=inputs, disconnected_inputs="ignore"
         )
         full = pytensor.function(inputs, full)
         full = full(*values)
         assert len(true_grads) == len(full)
-        for a, b, var in zip(true_grads, full, inputs):
+        for a, b, var in zip(true_grads, full, inputs, strict=True):
             assert np.allclose(a, b)
 
 
@@ -742,7 +745,9 @@ def test_subgraph_grad():
     inputs = [t, x]
     rng = np.random.default_rng([2012, 11, 15])
     values = [rng.standard_normal(2), rng.standard_normal(3)]
-    values = [np.cast[ipt.dtype](value) for ipt, value in zip(inputs, values)]
+    values = [
+        np.cast[ipt.dtype](value) for ipt, value in zip(inputs, values, strict=True)
+    ]
 
     wrt = [w2, w1]
     cost = cost2 + cost1
@@ -755,13 +760,13 @@ def test_subgraph_grad():
         param_grad, next_grad = subgraph_grad(
             wrt=params[i], end=grad_ends[i], start=next_grad, cost=costs[i]
         )
-        next_grad = dict(zip(grad_ends[i], next_grad))
+        next_grad = dict(zip(grad_ends[i], next_grad, strict=True))
         param_grads.extend(param_grad)
 
     pgrads = pytensor.function(inputs, param_grads)
     pgrads = pgrads(*values)
 
-    for true_grad, pgrad in zip(true_grads, pgrads):
+    for true_grad, pgrad in zip(true_grads, pgrads, strict=True):
         assert np.sum(np.abs(true_grad - pgrad)) < 0.00001
 
 

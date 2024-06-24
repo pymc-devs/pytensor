@@ -163,10 +163,11 @@ def numba_funcify_Scan(op, node, **kwargs):
             op.info.mit_mot_in_slices
             + op.info.mit_sot_in_slices
             + op.info.sit_sot_in_slices,
+            strict=True,
         )
     )
     inner_in_names_to_output_taps: dict[str, tuple[int, ...] | None] = dict(
-        zip(outer_in_mit_mot_names, op.info.mit_mot_out_slices)
+        zip(outer_in_mit_mot_names, op.info.mit_mot_out_slices, strict=True)
     )
 
     # Inner-outputs consist of:
@@ -373,7 +374,8 @@ def numba_funcify_Scan(op, node, **kwargs):
     inner_out_post_processing_block = "\n".join(inner_out_post_processing_stmts)
 
     inner_out_to_outer_out_stmts = "\n".join(
-        f"{s} = {d}" for s, d in zip(inner_out_to_outer_in_stmts, inner_output_names)
+        f"{s} = {d}"
+        for s, d in zip(inner_out_to_outer_in_stmts, inner_output_names, strict=True)
     )
 
     scan_op_src = f"""

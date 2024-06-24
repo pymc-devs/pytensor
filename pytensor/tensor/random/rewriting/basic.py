@@ -48,7 +48,7 @@ def random_make_inplace(fgraph, node):
         props["inplace"] = True
         new_op = type(op)(**props)
         new_outputs = new_op.make_node(*node.inputs).outputs
-        for old_out, new_out in zip(node.outputs, new_outputs):
+        for old_out, new_out in zip(node.outputs, new_outputs, strict=True):
             copy_stack_trace(old_out, new_out)
         return new_outputs
 
@@ -171,7 +171,7 @@ def local_dimshuffle_rv_lift(fgraph, node):
 
     # Updates the params to reflect the Dimshuffled dimensions
     new_dist_params = []
-    for param, param_ndim_supp in zip(dist_params, rv_op.ndims_params):
+    for param, param_ndim_supp in zip(dist_params, rv_op.ndims_params, strict=True):
         # Add the parameter support dimension indexes to the batched dimensions Dimshuffle
         param_new_order = batched_dims_ds_order + tuple(
             range(batched_dims, batched_dims + param_ndim_supp)
@@ -290,12 +290,12 @@ def local_subtensor_rv_lift(fgraph, node):
     # non-broadcastable (non-degenerate) parameter dims. These parameters and the new size
     # should still correctly broadcast any degenerate parameter dims.
     new_dist_params = []
-    for param, param_ndim_supp in zip(dist_params, rv_op.ndims_params):
+    for param, param_ndim_supp in zip(dist_params, rv_op.ndims_params, strict=True):
         # Check which dims are broadcasted by either size or other parameters
         bcast_param_dims = tuple(
             dim
             for dim, (param_dim_bcast, output_dim_bcast) in enumerate(
-                zip(param.type.broadcastable, rv.type.broadcastable)
+                zip(param.type.broadcastable, rv.type.broadcastable, strict=False)
             )
             if param_dim_bcast and not output_dim_bcast
         )

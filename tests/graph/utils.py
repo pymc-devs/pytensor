@@ -137,7 +137,9 @@ class MyInnerGraphOp(Op, HasInnerGraph):
             if not isinstance(v, Constant)
         ]
         outputs = clone_replace(inner_outputs, replace=input_replacements)
-        _, inputs = zip(*input_replacements) if input_replacements else (None, [])
+        _, inputs = (
+            zip(*input_replacements, strict=True) if input_replacements else (None, [])
+        )
         self.fgraph = FunctionGraph(inputs, outputs, clone=False)
 
     def make_node(self, *inputs):

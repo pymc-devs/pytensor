@@ -508,7 +508,7 @@ def makeTester(
                     expecteds = (expecteds,)
 
                 for i, (variable, expected, out_symbol) in enumerate(
-                    zip(variables, expecteds, node.outputs)
+                    zip(variables, expecteds, node.outputs, strict=True)
                 ):
                     condition = (
                         variable.dtype != out_symbol.type.dtype

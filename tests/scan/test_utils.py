@@ -220,7 +220,7 @@ def test_ScanArgs_remove_inner_input():
     test_v = sigmas_t
 
     rm_info = scan_args_copy.remove_from_fields(test_v, rm_dependents=False)
-    removed_nodes, _ = zip(*rm_info)
+    removed_nodes, _ = zip(*rm_info, strict=True)
 
     assert sigmas_t in removed_nodes
     assert sigmas_t not in scan_args_copy.inner_in_seqs
@@ -232,7 +232,7 @@ def test_ScanArgs_remove_inner_input():
 
     # This removal includes dependents
     rm_info = scan_args_copy.remove_from_fields(test_v, rm_dependents=True)
-    removed_nodes, _ = zip(*rm_info)
+    removed_nodes, _ = zip(*rm_info, strict=True)
 
     # `sigmas[t]` (i.e. inner-graph input) should be gone
     assert sigmas_t in removed_nodes
@@ -288,7 +288,7 @@ def test_ScanArgs_remove_outer_input():
     scan_args_copy = copy(scan_args)
     test_v = sigmas_in
     rm_info = scan_args_copy.remove_from_fields(test_v, rm_dependents=True)
-    removed_nodes, _ = zip(*rm_info)
+    removed_nodes, _ = zip(*rm_info, strict=True)
 
     # `sigmas_in` (i.e. outer-graph input) should be gone
     assert scan_args.outer_in_seqs[-1] in removed_nodes
@@ -334,7 +334,7 @@ def test_ScanArgs_remove_inner_output():
     scan_args_copy = copy(scan_args)
     test_v = Y_t
     rm_info = scan_args_copy.remove_from_fields(test_v, rm_dependents=True)
-    removed_nodes, _ = zip(*rm_info)
+    removed_nodes, _ = zip(*rm_info, strict=True)
 
     # `Y_t` (i.e. inner-graph output) should be gone
     assert Y_t in removed_nodes
@@ -371,7 +371,7 @@ def test_ScanArgs_remove_outer_output():
     scan_args_copy = copy(scan_args)
     test_v = Y_rv
     rm_info = scan_args_copy.remove_from_fields(test_v, rm_dependents=True)
-    removed_nodes, _ = zip(*rm_info)
+    removed_nodes, _ = zip(*rm_info, strict=True)
 
     # `Y_t` (i.e. inner-graph output) should be gone
     assert Y_t in removed_nodes
@@ -409,7 +409,7 @@ def test_ScanArgs_remove_nonseq_outer_input():
     scan_args_copy = copy(scan_args)
     test_v = Gamma_rv
     rm_info = scan_args_copy.remove_from_fields(test_v, rm_dependents=True)
-    removed_nodes, _ = zip(*rm_info)
+    removed_nodes, _ = zip(*rm_info, strict=True)
 
     assert Gamma_rv in removed_nodes
     assert Gamma_in in removed_nodes
@@ -447,7 +447,7 @@ def test_ScanArgs_remove_nonseq_inner_input():
     scan_args_copy = copy(scan_args)
     test_v = Gamma_in
     rm_info = scan_args_copy.remove_from_fields(test_v, rm_dependents=True)
-    removed_nodes, _ = zip(*rm_info)
+    removed_nodes, _ = zip(*rm_info, strict=True)
 
     assert Gamma_in in removed_nodes
     assert Gamma_rv in removed_nodes
@@ -482,7 +482,7 @@ def test_ScanArgs_remove_shared_inner_output():
     scan_update = scan_args.inner_out_shared[0]
     scan_args_copy = copy(scan_args)
     rm_info = scan_args_copy.remove_from_fields(scan_update, rm_dependents=True)
-    removed_nodes, _ = zip(*rm_info)
+    removed_nodes, _ = zip(*rm_info, strict=True)
 
     assert rng_in in removed_nodes
     assert all(v in removed_nodes for v in scan_args.inner_out_shared)

@@ -15,10 +15,12 @@ def test_jax_einsum():
     y = np.random.rand(5, 2)
     z = np.random.rand(2, 4)
 
-    shapes = ((3, 5), (5, 2), (2, 4))
-    x_pt, y_pt, z_pt = (
-        pt.tensor(name, shape=shape) for name, shape in zip("xyz", shapes)
-    )
+    shapes = {
+        "x": (3, 5),
+        "y": (5, 2),
+        "z": (2, 4),
+    }
+    x_pt, y_pt, z_pt = (pt.tensor(name, shape=shape) for name, shape in shapes.items())
     out = pt.einsum(subscripts, x_pt, y_pt, z_pt)
     fg = FunctionGraph([x_pt, y_pt, z_pt], [out])
     compare_jax_and_py(fg, [x, y, z])

@@ -216,7 +216,7 @@ class InferShapeTester:
         if excluding:
             mode = mode.excluding(*excluding)
         if warn:
-            for var, inp in zip(inputs, numeric_inputs):
+            for var, inp in zip(inputs, numeric_inputs, strict=True):
                 if isinstance(inp, int | float | list | tuple):
                     inp = var.type.filter(inp)
                 if not hasattr(inp, "shape"):
@@ -261,7 +261,7 @@ class InferShapeTester:
         # Check that the shape produced agrees with the actual shape.
         numeric_outputs = outputs_function(*numeric_inputs)
         numeric_shapes = shapes_function(*numeric_inputs)
-        for out, shape in zip(numeric_outputs, numeric_shapes):
+        for out, shape in zip(numeric_outputs, numeric_shapes, strict=True):
             assert np.all(out.shape == shape), (out.shape, shape)
 
 

@@ -13,7 +13,7 @@ def inline_ofg_node(node: Apply) -> list[Variable]:
     op = node.op
     assert isinstance(op, OpFromGraph)
     inlined_outs = clone_replace(
-        op.inner_outputs, dict(zip(op.inner_inputs, node.inputs))
+        op.inner_outputs, dict(zip(op.inner_inputs, node.inputs, strict=True))
     )
     copy_stack_trace(op.inner_outputs, inlined_outs)
     return cast(list[Variable], inlined_outs)

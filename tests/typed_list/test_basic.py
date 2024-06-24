@@ -587,7 +587,7 @@ class TestMakeList:
         z = make_list((x, y))
         fc = pytensor.function([a, b], c)
         fz = pytensor.function([x, y], z)
-        for m, n in zip(fc(A, B), [A, B]):
+        for m, n in zip(fc(A, B), [A, B], strict=True):
             assert (m == n).all()
-        for m, n in zip(fz(X, Y), [X, Y]):
+        for m, n in zip(fz(X, Y), [X, Y], strict=True):
             assert (m == n).all()

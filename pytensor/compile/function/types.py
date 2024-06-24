@@ -241,7 +241,7 @@ def std_fgraph(
     fgraph.attach_feature(
         Supervisor(
             input
-            for spec, input in zip(input_specs, fgraph.inputs)
+            for spec, input in zip(input_specs, fgraph.inputs, strict=True)
             if not (
                 spec.mutable
                 or (hasattr(fgraph, "destroyers") and fgraph.has_destroyers([input]))
@@ -442,7 +442,7 @@ class Function:
         # this loop works by modifying the elements (as variable c) of
         # self.input_storage inplace.
         for i, ((input, indices, sinputs), (required, refeed, value)) in enumerate(
-            zip(self.indices, defaults)
+            zip(self.indices, defaults, strict=True)
         ):
             if indices is None:
                 # containers is being used as a stack. Here we pop off
@@ -671,7 +671,7 @@ class Function:
         else:
             outs = list(map(SymbolicOutput, fg_cpy.outputs))
 
-        for out_ori, out_cpy in zip(maker.outputs, outs):
+        for out_ori, out_cpy in zip(maker.outputs, outs, strict=False):
             out_cpy.borrow = out_ori.borrow
 
         # swap SharedVariable
@@ -684,7 +684,7 @@ class Function:
                     raise ValueError(f"SharedVariable: {sv.name} not found")
 
             # Swap SharedVariable in fgraph and In instances
-            for index, (i, in_v) in enumerate(zip(ins, fg_cpy.inputs)):
+            for index, (i, in_v) in enumerate(zip(ins, fg_cpy.inputs, strict=True)):
                 # Variables in maker.inputs are defined by user, therefore we
                 # use them to make comparison and do the mapping.
                 # Otherwise we don't touch them.
@@ -708,7 +708,7 @@ class Function:
 
         # Delete update if needed
         rev_update_mapping = {v: k for k, v in fg_cpy.update_mapping.items()}
-        for n, (inp, in_var) in enumerate(zip(ins, fg_cpy.inputs)):
+        for n, (inp, in_var) in enumerate(zip(ins, fg_cpy.inputs, strict=True)):
             inp.variable = in_var
             if not delete_updates and inp.update is not None:
                 out_idx = rev_update_mapping[n]
@@ -768,7 +768,11 @@ class Function:
         ).create(input_storage, storage_map=new_storage_map)
 
         for in_ori, in_cpy, ori, cpy in zip(
-            maker.inputs, f_cpy.maker.inputs, self.input_storage, f_cpy.input_storage
+            maker.inputs,
+            f_cpy.maker.inputs,
+            self.input_storage,
+            f_cpy.input_storage,
+            strict=True,
         ):
             # Share immutable ShareVariable and constant input's storage
             swapped = swap is not None and in_ori.variable in swap
@@ -999,7 +1003,7 @@ class Function:
         # output reference from the internal storage cells
         if getattr(self.vm, "allow_gc", False):
             for o_container, o_variable in zip(
-                self.output_storage, self.maker.fgraph.outputs
+                self.output_storage, self.maker.fgraph.outputs, strict=True
             ):
                 if o_variable.owner is not None:
                     # this node is the variable of computation
@@ -1009,7 +1013,7 @@ class Function:
         if getattr(self.vm, "need_update_inputs", True):
             # Update the inputs that have an update function
             for input, storage in reversed(
-                list(zip(self.maker.expanded_inputs, input_storage))
+                list(zip(self.maker.expanded_inputs, input_storage, strict=True))
             ):
                 if input.update is not None:
                     storage.data = outputs.pop()
@@ -1040,7 +1044,7 @@ class Function:
                 assert len(self.output_keys) == len(outputs)
 
                 if output_subset is None:
-                    return dict(zip(self.output_keys, outputs))
+                    return dict(zip(self.output_keys, outputs, strict=True))
                 else:
                     return {
                         self.output_keys[index]: outputs[index]
@@ -1108,7 +1112,7 @@ def _pickle_Function(f):
     input_storage = []
 
     for (input, indices, inputs), (required, refeed, default) in zip(
-        f.indices, f.defaults
+        f.indices, f.defaults, strict=True
     ):
         input_storage.append(ins[0])
         del ins[0]
@@ -1150,7 +1154,7 @@ def _constructor_Function(maker, input_storage, inputs_data, trust_input=False):
 
     f = maker.create(input_storage)
     assert len(f.input_storage) == len(inputs_data)
-    for container, x in zip(f.input_storage, inputs_data):
+    for container, x in zip(f.input_storage, inputs_data, strict=True):
         assert (
             (container.data is x)
             or (isinstance(x, np.ndarray) and (container.data == x).all())
@@ -1184,7 +1188,7 @@ def insert_deepcopy(fgraph, wrapped_inputs, wrapped_outputs):
     reason = "insert_deepcopy"
     updated_fgraph_inputs = {
         fgraph_i
-        for i, fgraph_i in zip(wrapped_inputs, fgraph.inputs)
+        for i, fgraph_i in zip(wrapped_inputs, fgraph.inputs, strict=True)
         if getattr(i, "update", False)
     }
 
@@ -1521,7 +1525,9 @@ class FunctionMaker:
         # return the internal storage pointer.
         no_borrow = [
             output
-            for output, spec in zip(fgraph.outputs, outputs + found_updates)
+            for output, spec in zip(
+                fgraph.outputs, outputs + found_updates, strict=True
+            )
             if not spec.borrow
         ]
 
@@ -1590,7 +1596,7 @@ class FunctionMaker:
         # defaults lists.
         assert len(self.indices) == len(input_storage)
         for i, ((input, indices, subinputs), input_storage_i) in enumerate(
-            zip(self.indices, input_storage)
+            zip(self.indices, input_storage, strict=True)
         ):
             # Replace any default value given as a variable by its
             # container.  Note that this makes sense only in the
