@@ -760,7 +760,7 @@ def switch(cond, ift, iff):
     """if cond then ift else iff"""
 
 
-def where(cond, ift=None, iff=None):
+def where(cond, ift=None, iff=None, **kwargs):
     """
     where(condition, [ift, iff])
     Return elements chosen from `ift` or `iff` depending on `condition`.
@@ -784,7 +784,7 @@ def where(cond, ift=None, iff=None):
     elif ift is None and iff is None:
         return as_tensor(cond).nonzero()
     else:
-        raise Exception("Either both or none of the parameters should be passed")
+        raise ValueError("either both or neither of ift and iff should be given")
 
 
 @scalar_elemwise

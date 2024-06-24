@@ -4611,14 +4611,18 @@ def test_vectorize_join(axis, broadcasting_y):
     )
 
 
-@pytest.mark.parametrize(
-    "ift, iff",
-    [(None, None), (7, 10), pytest.param(7, None, marks=[pytest.mark.xfail])],
-    ids=["both none", "both valid", "one none"],
-)
-def test_where_for_only_condition(ift, iff):
-    a = np.array([1, 2, 3, 4, 5])
-    cond = a < 3
-    np_result = np.where(*[x for x in [cond, ift, iff] if x is not None])
-    pt_result = function([], where(cond, ift, iff))()
-    np.testing.assert_allclose(np_result, pt_result)
+def test_where():
+    a = np.arange(10)
+    cond = a < 5
+    ift = np.pi
+    iff = np.e
+    # Test for all 3 inputs
+    np.testing.assert_allclose(np.where(cond, ift, iff), where(cond, ift, iff).eval())
+
+    # Test for only condition input
+    for np_output, pt_output in zip(np.where(cond), where(cond)):
+        np.testing.assert_allclose(np_output, pt_output.eval())
+
+    # Test for error
+    with pytest.raises(ValueError, match="either both"):
+        where(cond, ift)
