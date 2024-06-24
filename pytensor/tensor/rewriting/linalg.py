@@ -385,8 +385,8 @@ def local_lift_through_linalg(
                 raise NotImplementedError  # pragma: no cover
 
 
-@register_canonicalize
-@register_stabilize
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
 @node_rewriter([det])
 def rewrite_det_diag_from_eye_mul(fgraph, node):
     """
@@ -440,18 +440,24 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
     #     return None
 
     # Checking if original x was scalar/vector/matrix
-    if non_eye_inputs[0].type.broadcastable[-2:] == (True, True):
-        # For scalar
-        det_val = non_eye_inputs[0].squeeze(axis=(-1, -2)) ** (
-            eye_input[0].shape[0]
-        ).astype(config.floatX)
-    elif non_eye_inputs[0].type.broadcastable[-2:] == (False, False):
-        # For Matrix
-        det_val = non_eye_inputs[0].diagonal(axis1=-1, axis2=-2).prod(axis=-1)
+    if (
+        eye_input[0].type.shape[-1] is not None
+        and eye_input[0].type.shape[-2] is not None
+    ) and (eye_input[0].type.shape[-1] == eye_input[0].type.shape[-2]):
+        if non_eye_inputs[0].type.broadcastable[-2:] == (True, True):
+            # For scalar
+            det_val = non_eye_inputs[0].squeeze(axis=(-1, -2)) ** (
+                eye_input[0].shape[0]
+            ).astype(config.floatX)
+        elif non_eye_inputs[0].type.broadcastable[-2:] == (False, False):
+            # For Matrix
+            det_val = non_eye_inputs[0].diagonal(axis1=-1, axis2=-2).prod(axis=-1)
+        else:
+            # For vector
+            det_val = non_eye_inputs[0].prod(axis=(-1, -2))
+        return [det_val]
     else:
-        # For vector
-        det_val = non_eye_inputs[0].prod(axis=(-1, -2))
-    return [det_val]
+        return None
 
 
 arange = ARange("int64")

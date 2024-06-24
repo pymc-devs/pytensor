@@ -452,27 +452,39 @@ def test_det_diag_from_diag():
     )
 
 
-@pytest.mark.parametrize(
-    "shape", [(1, 1), (7, 5)], ids=["degenerate_eye", "rectangle_eye"]
-)
-def test_dont_apply_det_diag_rewrite(shape):
+def test_dont_apply_det_diag_rewrite_for_1_1():
     x = pt.matrix("x")
-    x_diag = pt.eye(*shape) * x
+    x_diag = pt.eye(1, 1) * x
     y = pt.linalg.det(x_diag)
     f_rewritten = function([x], y, mode="FAST_RUN")
     nodes = f_rewritten.maker.fgraph.apply_nodes
 
     assert any(isinstance(node.op, Det) for node in nodes)
 
-    # NUMERIC VALUE TEST (only in case of (1,1))
-    if shape != (7, 5):
-        x_test = np.random.normal(size=(3, 3)).astype(config.floatX)
-        x_test_matrix = np.eye(*shape) * x_test
-        det_val = np.linalg.det(x_test_matrix)
-        rewritten_val = f_rewritten(x_test)
-        assert_allclose(
-            det_val,
-            rewritten_val,
-            atol=1e-3 if config.floatX == "float32" else 1e-8,
-            rtol=1e-3 if config.floatX == "float32" else 1e-8,
-        )
+    # Numeric Value test
+    x_test = np.random.normal(size=(3, 3)).astype(config.floatX)
+    x_test_matrix = np.eye(1, 1) * x_test
+    det_val = np.linalg.det(x_test_matrix)
+    rewritten_val = f_rewritten(x_test)
+    assert_allclose(
+        det_val,
+        rewritten_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+def test_det_diag_incorrect_for_rectangle_eye():
+    x = pt.matrix("x")
+    x_diag = pt.eye(7, 5) * x
+    y = pt.linalg.det(x_diag)
+    f_rewritten = function([x], y, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+
+    assert any(isinstance(node.op, Det) for node in nodes)
+
+    # Numeric Value test (should fail)
+    x_test = np.random.normal(size=(7, 5)).astype(config.floatX)
+    x_test_matrix = np.eye(7, 5) * x_test
+    with pytest.raises(np.linalg.LinAlgError, match="Last 2 dimensions"):
+        np.linalg.det(x_test_matrix)
