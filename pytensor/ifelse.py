@@ -170,7 +170,9 @@ class IfElse(_NoPythonOp):
         output_vars = []
         new_inputs_true_branch = []
         new_inputs_false_branch = []
-        for input_t, input_f in zip(inputs_true_branch, inputs_false_branch):
+        for input_t, input_f in zip(
+            inputs_true_branch, inputs_false_branch, strict=True
+        ):
             if not isinstance(input_t, Variable):
                 input_t = as_symbolic(input_t)
             if not isinstance(input_f, Variable):
@@ -207,7 +209,9 @@ class IfElse(_NoPythonOp):
                 # allowed to have distinct shapes from either branch
                 new_shape = tuple(
                     s_t if s_t == s_f else None
-                    for s_t, s_f in zip(input_t.type.shape, input_f.type.shape)
+                    for s_t, s_f in zip(
+                        input_t.type.shape, input_f.type.shape, strict=True
+                    )
                 )
                 # TODO FIXME: The presence of this keyword is a strong
                 # assumption.  Find something that's guaranteed by the/a
@@ -301,7 +305,7 @@ class IfElse(_NoPythonOp):
                     if len(ls) > 0:
                         return ls
                     else:
-                        for out, t in zip(outputs, input_true_branch):
+                        for out, t in zip(outputs, input_true_branch, strict=True):
                             compute_map[out][0] = 1
                             val = storage_map[t][0]
                             if self.as_view:
@@ -321,7 +325,7 @@ class IfElse(_NoPythonOp):
                     if len(ls) > 0:
                         return ls
                     else:
-                        for out, f in zip(outputs, inputs_false_branch):
+                        for out, f in zip(outputs, inputs_false_branch, strict=True):
                             compute_map[out][0] = 1
                             # can't view both outputs unless destroyhandler
                             # improves
@@ -637,7 +641,7 @@ class CondMerge(GraphRewriter):
                     old_outs += [proposal.outputs]
                 else:
                     old_outs += proposal.outputs
-                pairs = list(zip(old_outs, new_outs))
+                pairs = list(zip(old_outs, new_outs, strict=True))
                 fgraph.replace_all_validate(pairs, reason="cond_merge")
 
 
@@ -736,7 +740,7 @@ def cond_merge_random_op(fgraph, main_node):
                 old_outs += [proposal.outputs]
             else:
                 old_outs += proposal.outputs
-            pairs = list(zip(old_outs, new_outs))
+            pairs = list(zip(old_outs, new_outs, strict=True))
             main_outs = clone_replace(main_node.outputs, replace=pairs)
             return main_outs
 

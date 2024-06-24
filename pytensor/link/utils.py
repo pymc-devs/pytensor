@@ -88,7 +88,7 @@ def map_storage(
         assert len(fgraph.inputs) == len(input_storage)
 
     # add input storage into storage_map
-    for r, storage in zip(fgraph.inputs, input_storage):
+    for r, storage in zip(fgraph.inputs, input_storage, strict=True):
         if r in storage_map:
             assert storage_map[r] is storage, (
                 "Given input_storage conflicts "
@@ -108,7 +108,7 @@ def map_storage(
     # allocate output storage
     if output_storage is not None:
         assert len(fgraph.outputs) == len(output_storage)
-        for r, storage in zip(fgraph.outputs, output_storage):
+        for r, storage in zip(fgraph.outputs, output_storage, strict=True):
             if r in storage_map:
                 assert storage_map[r] is storage, (
                     "Given output_storage confl"
@@ -191,7 +191,7 @@ def streamline(
                 x[0] = None
             try:
                 for thunk, node, old_storage in zip(
-                    thunks, order, post_thunk_old_storage
+                    thunks, order, post_thunk_old_storage, strict=True
                 ):
                     thunk()
                     for old_s in old_storage:
@@ -206,7 +206,7 @@ def streamline(
             for x in no_recycling:
                 x[0] = None
             try:
-                for thunk, node in zip(thunks, order):
+                for thunk, node in zip(thunks, order, strict=True):
                     thunk()
             except Exception:
                 raise_with_op(fgraph, node, thunk)

@@ -71,6 +71,7 @@ class TestCasting:
                 _convert_to_float32,
                 _convert_to_float64,
             ],
+            strict=True,
         ),
     )
     def test_basic(self, type1, type2, converter):

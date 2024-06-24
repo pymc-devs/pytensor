@@ -1389,7 +1389,7 @@ class TestLocalSubtensorMerge:
 
             for x_s in self.x_shapes:
                 x_val = self.rng.uniform(size=x_s).astype(config.floatX)
-                for i_val in zip(*values):
+                for i_val in zip(*values, strict=True):
                     f(x_val, *i_val)
 
     def test_none_index(self):
@@ -1447,7 +1447,7 @@ class TestLocalSubtensorMerge:
 
             for x_s in self.x_shapes:
                 x_val = self.rng.uniform(size=x_s).astype(config.floatX)
-                for i_val in zip(*values):
+                for i_val in zip(*values, strict=True):
                     # The index could be out of bounds
                     # In that case, an Exception should be raised,
                     # otherwise, we let DebugMode check f
@@ -1568,7 +1568,7 @@ class TestLocalAdvSub1AdvIncSub1:
         incs = [set_subtensor(x[idx], y) for y in ys]
         outs = [inc[idx] for inc in incs]
 
-        for y, out in zip(ys, outs):
+        for y, out in zip(ys, outs, strict=True):
             f = function([x, y, idx], out, self.mode)
             assert check_stack_trace(f, ops_to_check=(Assert, ps.Cast))
 

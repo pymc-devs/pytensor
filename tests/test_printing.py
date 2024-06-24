@@ -385,7 +385,7 @@ MyInnerGraphOp [id A]
     └─ *1-<MyType()> [id F]
     """
 
-    for exp_line, res_line in zip(exp_res.split("\n"), lines):
+    for exp_line, res_line in zip(exp_res.split("\n"), lines, strict=True):
         assert exp_line.strip() == res_line.strip()
 
     # Test nested inner-graph `Op`s
@@ -413,7 +413,7 @@ MyInnerGraphOp [id C]
     └─ *1-<MyType()> [id E]
     """
 
-    for exp_line, res_line in zip(exp_res.split("\n"), lines):
+    for exp_line, res_line in zip(exp_res.split("\n"), lines, strict=True):
         assert exp_line.strip() == res_line.strip()
 
 

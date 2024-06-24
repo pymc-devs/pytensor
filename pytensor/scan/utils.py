@@ -559,7 +559,7 @@ def reconstruct_graph(inputs, outputs, tag=None):
         tag = ""
     nw_inputs = [safe_new(x, tag) for x in inputs]
 
-    givens = {x: nw_x for nw_x, x in zip(nw_inputs, inputs)}
+    givens = {x: nw_x for nw_x, x in zip(nw_inputs, inputs, strict=True)}
     nw_outputs = clone_replace(outputs, replace=givens)
     return (nw_inputs, nw_outputs)
 

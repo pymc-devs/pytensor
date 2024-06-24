@@ -292,7 +292,7 @@ def compare_numba_and_py(
         eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode)
 
     if len(fn_outputs) > 1:
-        for j, p in zip(numba_res, py_res):
+        for j, p in zip(numba_res, py_res, strict=True):
             assert_fn(j, p)
     else:
         assert_fn(numba_res[0], py_res[0])

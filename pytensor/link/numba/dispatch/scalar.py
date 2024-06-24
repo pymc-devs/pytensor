@@ -114,7 +114,9 @@ def {scalar_op_fn_name}({input_names}):
         input_names = [unique_names(v, force_unique=True) for v in node.inputs]
         converted_call_args = ", ".join(
             f"direct_cast({i_name}, {i_tmp_dtype_name})"
-            for i_name, i_tmp_dtype_name in zip(input_names, input_tmp_dtype_names)
+            for i_name, i_tmp_dtype_name in zip(
+                input_names, input_tmp_dtype_names, strict=False
+            )
         )
         if not has_pyx_skip_dispatch:
             scalar_op_src = f"""

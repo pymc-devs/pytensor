@@ -303,7 +303,7 @@ def _general_dot(
     lhs_signature = [f"l{i}" for i in range(lhs.type.ndim)]
     rhs_signature = [f"r{i}" for i in range(rhs.type.ndim)]
     # Aligned axes get the same dimension name
-    for i, (lhs_axis, rhs_axis) in enumerate(zip(lhs_axes, rhs_axes)):
+    for i, (lhs_axis, rhs_axis) in enumerate(zip(lhs_axes, rhs_axes, strict=True)):
         lhs_signature[lhs_axis] = rhs_signature[rhs_axis] = f"a{i}"
     # Trim away the batch ndims
     lhs_signature = lhs_signature[lhs_n_batch_axes:]
@@ -703,7 +703,10 @@ def einsum(subscripts: str, *operands: "TensorLike", optimize=None) -> TensorVar
 
             if batch_names:
                 lhs_batch, rhs_batch = tuple(
-                    zip(*[(lhs_names.find(n), rhs_names.find(n)) for n in batch_names])
+                    zip(
+                        *[(lhs_names.find(n), rhs_names.find(n)) for n in batch_names],
+                        strict=True,
+                    )
                 )
             else:
                 lhs_batch = rhs_batch = ()
@@ -716,7 +719,8 @@ def einsum(subscripts: str, *operands: "TensorLike", optimize=None) -> TensorVar
                         *[
                             (lhs_names.index(n), rhs_names.index(n))
                             for n in contracted_names
-                        ]
+                        ],
+                        strict=True,
                     )
                 )
             else:

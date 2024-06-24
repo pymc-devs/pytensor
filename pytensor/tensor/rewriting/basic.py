@@ -99,11 +99,11 @@ def broadcasted_by(x: TensorVariable, y: TensorVariable) -> bool:
     if len(bx) < len(by):
         return True
     bx = bx[-len(by) :]
-    return any(bx_dim and not by_dim for bx_dim, by_dim in zip(bx, by))
+    return any(bx_dim and not by_dim for bx_dim, by_dim in zip(bx, by, strict=True))
 
 
 def merge_broadcastables(broadcastables):
-    return [all(bcast) for bcast in zip(*broadcastables)]
+    return [all(bcast) for bcast in zip(*broadcastables, strict=True)]
 
 
 def alloc_like(
@@ -1214,7 +1214,7 @@ def local_merge_alloc(fgraph, node):
     # broadcasted dimensions to its inputs[0]. Eg:
     # Alloc(Alloc(m, y, 1, 1), x, y, z, w) -> Alloc(m, x, y, z, w)
     i = 0
-    for dim_inner, dim_outer in zip(dims_inner_rev, dims_outer_rev):
+    for dim_inner, dim_outer in zip(dims_inner_rev, dims_outer_rev, strict=False):
         if dim_inner != dim_outer:
             if isinstance(dim_inner, Constant) and dim_inner.data == 1:
                 pass
@@ -1307,7 +1307,8 @@ def local_join_of_alloc(fgraph, node):
                     )
                 ]
                 for core_tensor, tensor in zip(core_tensors, tensors, strict=True)
-            )
+            ),
+            strict=True,
         )
     )
 
@@ -1322,7 +1323,7 @@ def local_join_of_alloc(fgraph, node):
 
     # Lift the allocated dimensions
     new_tensors = []
-    for core_tensor, alloc_shape in zip(core_tensors, alloc_shapes):
+    for core_tensor, alloc_shape in zip(core_tensors, alloc_shapes, strict=True):
         pre_join_shape = [
             1 if i in lifteable_alloc_dims else alloc_dim
             for i, alloc_dim in enumerate(alloc_shape)
@@ -1336,7 +1337,7 @@ def local_join_of_alloc(fgraph, node):
 
     # Reintroduce the lifted dims
     post_join_shape = []
-    for i, alloc_dims in enumerate(zip(*alloc_shapes)):
+    for i, alloc_dims in enumerate(zip(*alloc_shapes, strict=True)):
         if i == axis:
             # The alloc dim along the axis is the sum of all the pre-join alloc dims
             post_join_shape.append(add(*alloc_dims))

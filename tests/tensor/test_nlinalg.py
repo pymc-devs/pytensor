@@ -198,7 +198,7 @@ class TestSvd(utt.InferShapeTester):
 
         np_outputs = np_outputs if isinstance(np_outputs, tuple) else [np_outputs]
 
-        for np_val, pt_val in zip(np_outputs, pt_outputs):
+        for np_val, pt_val in zip(np_outputs, pt_outputs, strict=True):
             assert _allclose(np_val, pt_val)
 
     def test_svd_infer_shape(self):

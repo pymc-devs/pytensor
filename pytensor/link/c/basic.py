@@ -1112,11 +1112,15 @@ class CLinker(Linker):
             module,
             [
                 Container(input, storage)
-                for input, storage in zip(self.fgraph.inputs, input_storage)
+                for input, storage in zip(
+                    self.fgraph.inputs, input_storage, strict=True
+                )
             ],
             [
                 Container(output, storage, readonly=True)
-                for output, storage in zip(self.fgraph.outputs, output_storage)
+                for output, storage in zip(
+                    self.fgraph.outputs, output_storage, strict=True
+                )
             ],
             error_storage,
         )
@@ -1887,11 +1891,11 @@ class OpWiseCLinker(LocalLinker):
             f,
             [
                 Container(input, storage)
-                for input, storage in zip(fgraph.inputs, input_storage)
+                for input, storage in zip(fgraph.inputs, input_storage, strict=True)
             ],
             [
                 Container(output, storage, readonly=True)
-                for output, storage in zip(fgraph.outputs, output_storage)
+                for output, storage in zip(fgraph.outputs, output_storage, strict=True)
             ],
             thunks,
             order,
@@ -1989,22 +1993,26 @@ class DualLinker(Linker):
         )
 
         def f():
-            for input1, input2 in zip(i1, i2):
+            for input1, input2 in zip(i1, i2, strict=True):
                 # Set the inputs to be the same in both branches.
                 # The copy is necessary in order for inplace ops not to
                 # interfere.
                 input2.storage[0] = copy(input1.storage[0])
-            for thunk1, thunk2, node1, node2 in zip(thunks1, thunks2, order1, order2):
-                for output, storage in zip(node1.outputs, thunk1.outputs):
+            for thunk1, thunk2, node1, node2 in zip(
+                thunks1, thunks2, order1, order2, strict=True
+            ):
+                for output, storage in zip(node1.outputs, thunk1.outputs, strict=True):
                     if output in no_recycling:
                         storage[0] = None
-                for output, storage in zip(node2.outputs, thunk2.outputs):
+                for output, storage in zip(node2.outputs, thunk2.outputs, strict=True):
                     if output in no_recycling:
                         storage[0] = None
                 try:
                     thunk1()
                     thunk2()
-                    for output1, output2 in zip(thunk1.outputs, thunk2.outputs):
+                    for output1, output2 in zip(
+                        thunk1.outputs, thunk2.outputs, strict=True
+                    ):
                         self.checker(output1, output2)
                 except Exception:
                     raise_with_op(fgraph, node1)

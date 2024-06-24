@@ -30,7 +30,9 @@ def jax_funcify_Scan(op: Scan, **kwargs):
         seqs = op.outer_seqs(outer_inputs)  # JAX `xs`
 
         mit_sot_init = []
-        for tap, seq in zip(op.info.mit_sot_in_slices, op.outer_mitsot(outer_inputs)):
+        for tap, seq in zip(
+            op.info.mit_sot_in_slices, op.outer_mitsot(outer_inputs), strict=True
+        ):
             init_slice = seq[: abs(min(tap))]
             mit_sot_init.append(init_slice)
 
@@ -61,7 +63,9 @@ def jax_funcify_Scan(op: Scan, **kwargs):
             inner_seqs = x
 
             mit_sot_flatten = []
-            for array, index in zip(inner_mit_sot, op.info.mit_sot_in_slices):
+            for array, index in zip(
+                inner_mit_sot, op.info.mit_sot_in_slices, strict=True
+            ):
                 mit_sot_flatten.extend(array[jnp.array(index)])
 
             inner_scan_inputs = [
@@ -98,8 +102,7 @@ def jax_funcify_Scan(op: Scan, **kwargs):
             inner_mit_sot_new = [
                 jnp.concatenate([old_mit_sot[1:], new_val[None, ...]], axis=0)
                 for old_mit_sot, new_val in zip(
-                    inner_mit_sot,
-                    inner_mit_sot_outs,
+                    inner_mit_sot, inner_mit_sot_outs, strict=True
                 )
             ]
 
@@ -152,7 +155,9 @@ def jax_funcify_Scan(op: Scan, **kwargs):
                 + op.outer_nitsot(outer_inputs)
             )
             partial_traces = []
-            for init_state, trace, buffer in zip(init_states, traces, buffers):
+            for init_state, trace, buffer in zip(
+                init_states, traces, buffers, strict=True
+            ):
                 if init_state is not None:
                     # MIT-SOT and SIT-SOT: The final output should be as long as the input buffer
                     trace = jnp.atleast_1d(trace)

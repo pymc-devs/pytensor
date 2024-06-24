@@ -461,7 +461,8 @@ class BaseTestConv:
         self, inputs_shape, filters_shape, subsample, border_mode, filter_dilation
     ):
         dil_filters = tuple(
-            (s - 1) * d + 1 for s, d in zip(filters_shape[2:], filter_dilation)
+            (s - 1) * d + 1
+            for s, d in zip(filters_shape[2:], filter_dilation, strict=True)
         )
         if border_mode == "valid":
             border_mode = (0,) * (len(inputs_shape) - 2)
@@ -484,6 +485,7 @@ class BaseTestConv:
                     subsample,
                     border_mode,
                     filter_dilation,
+                    strict=True,
                 )
             ),
         )
@@ -760,7 +762,7 @@ class BaseTestConv:
         db = self.default_border_mode
         dflip = self.default_filter_flip
         dprovide_shape = self.default_provide_shape
-        for i, f in zip(self.inputs_shapes, self.filters_shapes):
+        for i, f in zip(self.inputs_shapes, self.filters_shapes, strict=True):
             for provide_shape in self.provide_shape:
                 self.run_test_case(i, f, ds, db, dflip, provide_shape)
             if min(i) > 0 and min(f) > 0:
@@ -1761,7 +1763,9 @@ class TestConv2dGrads:
         # the outputs of `pytensor.tensor.conv` forward grads to make sure the
         # results are the same.
 
-        for in_shape, fltr_shape in zip(self.inputs_shapes, self.filters_shapes):
+        for in_shape, fltr_shape in zip(
+            self.inputs_shapes, self.filters_shapes, strict=False
+        ):
             for bm in self.border_modes:
                 for ss in self.subsamples:
                     for ff in self.filter_flip:
@@ -1823,7 +1827,9 @@ class TestConv2dGrads:
         # the outputs of `pytensor.tensor.conv` forward grads to make sure the
         # results are the same.
 
-        for in_shape, fltr_shape in zip(self.inputs_shapes, self.filters_shapes):
+        for in_shape, fltr_shape in zip(
+            self.inputs_shapes, self.filters_shapes, strict=False
+        ):
             for bm in self.border_modes:
                 for ss in self.subsamples:
                     for ff in self.filter_flip:
@@ -1915,7 +1921,7 @@ class TestGroupedConvNoOptim:
             kern_sym = tensor5("kern")
 
         for imshp, kshp, groups in zip(
-            self.img_shape, self.kern_shape, self.num_groups
+            self.img_shape, self.kern_shape, self.num_groups, strict=True
         ):
             img = np.random.random(imshp).astype(config.floatX)
             kern = np.random.random(kshp).astype(config.floatX)
@@ -1951,7 +1957,7 @@ class TestGroupedConvNoOptim:
             )
             ref_concat_output = [
                 ref_func(img_arr, kern_arr)
-                for img_arr, kern_arr in zip(split_imgs, split_kern)
+                for img_arr, kern_arr in zip(split_imgs, split_kern, strict=True)
             ]
             ref_concat_output = np.concatenate(ref_concat_output, axis=1)
 
@@ -1967,7 +1973,11 @@ class TestGroupedConvNoOptim:
             img_sym = tensor5("img")
             top_sym = tensor5("kern")
         for imshp, kshp, tshp, groups in zip(
-            self.img_shape, self.kern_shape, self.top_shape, self.num_groups
+            self.img_shape,
+            self.kern_shape,
+            self.top_shape,
+            self.num_groups,
+            strict=True,
         ):
             img = np.random.random(imshp).astype(config.floatX)
             top = np.random.random(tshp).astype(config.floatX)
@@ -2005,7 +2015,7 @@ class TestGroupedConvNoOptim:
             )
             ref_concat_output = [
                 ref_func(img_arr, top_arr)
-                for img_arr, top_arr in zip(split_imgs, split_top)
+                for img_arr, top_arr in zip(split_imgs, split_top, strict=True)
             ]
             ref_concat_output = np.concatenate(ref_concat_output, axis=0)
 
@@ -2028,7 +2038,11 @@ class TestGroupedConvNoOptim:
             kern_sym = tensor5("kern")
             top_sym = tensor5("top")
         for imshp, kshp, tshp, groups in zip(
-            self.img_shape, self.kern_shape, self.top_shape, self.num_groups
+            self.img_shape,
+            self.kern_shape,
+            self.top_shape,
+            self.num_groups,
+            strict=True,
         ):
             kern = np.random.random(kshp).astype(config.floatX)
             top = np.random.random(tshp).astype(config.floatX)
@@ -2066,7 +2080,7 @@ class TestGroupedConvNoOptim:
             )
             ref_concat_output = [
                 ref_func(kern_arr, top_arr)
-                for kern_arr, top_arr in zip(split_kerns, split_top)
+                for kern_arr, top_arr in zip(split_kerns, split_top, strict=True)
             ]
             ref_concat_output = np.concatenate(ref_concat_output, axis=1)
 
@@ -2368,6 +2382,7 @@ class TestUnsharedConv:
             self.subsample,
             self.num_groups,
             self.verify_flags,
+            strict=True,
         ):
             img = np.random.random(imshp).astype(config.floatX)
             kern = np.random.random(kshp).astype(config.floatX)
@@ -2426,6 +2441,7 @@ class TestUnsharedConv:
             self.subsample,
             self.num_groups,
             self.verify_flags,
+            strict=True,
         ):
             img = np.random.random(imshp).astype(config.floatX)
             top = np.random.random(topshp).astype(config.floatX)
@@ -2494,6 +2510,7 @@ class TestUnsharedConv:
             self.subsample,
             self.num_groups,
             self.verify_flags,
+            strict=True,
         ):
             single_kshp = kshp[:1] + kshp[3:]
 
@@ -2576,7 +2593,9 @@ class TestAsymmetricPadding:
         img_sym = tensor4("img")
         kern_sym = tensor4("kern")
 
-        for imshp, kshp, pad in zip(self.img_shape, self.kern_shape, self.border_mode):
+        for imshp, kshp, pad in zip(
+            self.img_shape, self.kern_shape, self.border_mode, strict=True
+        ):
             img = np.random.random(imshp).astype(config.floatX)
             kern = np.random.random(kshp).astype(config.floatX)
 
@@ -2627,7 +2646,11 @@ class TestAsymmetricPadding:
         top_sym = tensor4("top")
 
         for imshp, kshp, topshp, pad in zip(
-            self.img_shape, self.kern_shape, self.topgrad_shape, self.border_mode
+            self.img_shape,
+            self.kern_shape,
+            self.topgrad_shape,
+            self.border_mode,
+            strict=True,
         ):
             img = np.random.random(imshp).astype(config.floatX)
             top = np.random.random(topshp).astype(config.floatX)
@@ -2684,7 +2707,11 @@ class TestAsymmetricPadding:
         top_sym = tensor4("top")
 
         for imshp, kshp, topshp, pad in zip(
-            self.img_shape, self.kern_shape, self.topgrad_shape, self.border_mode
+            self.img_shape,
+            self.kern_shape,
+            self.topgrad_shape,
+            self.border_mode,
+            strict=True,
         ):
             kern = np.random.random(kshp).astype(config.floatX)
             top = np.random.random(topshp).astype(config.floatX)

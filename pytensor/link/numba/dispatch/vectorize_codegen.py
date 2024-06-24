@@ -44,7 +44,7 @@ def store_core_outputs(core_op_fn: Callable, nin: int, nout: int) -> Callable:
     inner_out_signature = ", ".join(inner_outputs)
     store_outputs = "\n".join(
         f"{output}[...] = {inner_output}"
-        for output, inner_output in zip(outputs, inner_outputs)
+        for output, inner_output in zip(outputs, inner_outputs, strict=True)
     )
     func_src = f"""
 def store_core_outputs({inp_signature}, {out_signature}):
@@ -137,7 +137,7 @@ def _vectorized(
         )
 
     core_input_types = []
-    for input_type, bc_pattern in zip(input_types, input_bc_patterns):
+    for input_type, bc_pattern in zip(input_types, input_bc_patterns, strict=True):
         core_ndim = input_type.ndim - len(bc_pattern)
         # TODO: Reconsider this
         if core_ndim == 0:
@@ -150,14 +150,18 @@ def _vectorized(
 
     core_out_types = [
         types.Array(numba.from_dtype(np.dtype(dtype)), len(output_core_shape), "C")
-        for dtype, output_core_shape in zip(output_dtypes, output_core_shape_types)
+        for dtype, output_core_shape in zip(
+            output_dtypes, output_core_shape_types, strict=True
+        )
     ]
 
     out_types = [
         types.Array(
             numba.from_dtype(np.dtype(dtype)), batch_ndim + len(output_core_shape), "C"
         )
-        for dtype, output_core_shape in zip(output_dtypes, output_core_shape_types)
+        for dtype, output_core_shape in zip(
+            output_dtypes, output_core_shape_types, strict=True
+        )
     ]
 
     for output_idx, input_idx in inplace_pattern:
@@ -211,7 +215,7 @@ def _vectorized(
 
         inputs = [
             arrayobj.make_array(ty)(ctx, builder, val)
-            for ty, val in zip(input_types, inputs)
+            for ty, val in zip(input_types, inputs, strict=True)
         ]
         in_shapes = [cgutils.unpack_tuple(builder, obj.shape) for obj in inputs]
 
@@ -283,7 +287,9 @@ def compute_itershape(
     if size is not None:
         shape = size
         for i in range(batch_ndim):
-            for j, (bc, in_shape) in enumerate(zip(broadcast_pattern, in_shapes)):
+            for j, (bc, in_shape) in enumerate(
+                zip(broadcast_pattern, in_shapes, strict=True)
+            ):
                 length = in_shape[i]
                 if bc[i]:
                     with builder.if_then(
@@ -318,7 +324,9 @@ def compute_itershape(
     else:
         # Size is implied by the broadcast pattern
         for i in range(batch_ndim):
-            for j, (bc, in_shape) in enumerate(zip(broadcast_pattern, in_shapes)):
+            for j, (bc, in_shape) in enumerate(
+                zip(broadcast_pattern, in_shapes, strict=True)
+            ):
                 length = in_shape[i]
                 if bc[i]:
                     with builder.if_then(
@@ -374,7 +382,7 @@ def make_outputs(
     one = ir.IntType(64)(1)
     inplace_dict = dict(inplace)
     for i, (core_shape, bc, dtype) in enumerate(
-        zip(output_core_shapes, out_bc, dtypes)
+        zip(output_core_shapes, out_bc, dtypes, strict=True)
     ):
         if i in inplace_dict:
             output_arrays.append(inputs[inplace_dict[i]])
@@ -388,7 +396,8 @@ def make_outputs(
         # This is actually an internal numba function, I guess we could
         # call `numba.nd.unsafe.ndarray` instead?
         batch_shape = [
-            length if not bc_dim else one for length, bc_dim in zip(iter_shape, bc)
+            length if not bc_dim else one
+            for length, bc_dim in zip(iter_shape, bc, strict=True)
         ]
         shape = batch_shape + core_shape
         array = arrayobj._empty_nd_impl(ctx, builder, arrtype, shape)
@@ -458,10 +467,10 @@ def make_loop_call(
 
     # Load values from input arrays
     input_vals = []
-    for input, input_type, bc in zip(inputs, input_types, input_bc):
+    for input, input_type, bc in zip(inputs, input_types, input_bc, strict=True):
         core_ndim = input_type.ndim - len(bc)
 
-        idxs_bc = [zero if bc else idx for idx, bc in zip(idxs, bc)] + [
+        idxs_bc = [zero if bc else idx for idx, bc in zip(idxs, bc, strict=True)] + [
             zero
         ] * core_ndim
         ptr = cgutils.get_item_pointer2(
@@ -506,13 +515,13 @@ def make_loop_call(
 
     # Create output slices to pass to inner func
     output_slices = []
-    for output, output_type, bc in zip(outputs, output_types, output_bc):
+    for output, output_type, bc in zip(outputs, output_types, output_bc, strict=True):
         core_ndim = output_type.ndim - len(bc)
         size_type = output.shape.type.element  # type: ignore
         output_shape = cgutils.unpack_tuple(builder, output.shape)  # type: ignore
         output_strides = cgutils.unpack_tuple(builder, output.strides)  # type: ignore
 
-        idxs_bc = [zero if bc else idx for idx, bc in zip(idxs, bc)] + [
+        idxs_bc = [zero if bc else idx for idx, bc in zip(idxs, bc, strict=True)] + [
             zero
         ] * core_ndim
         ptr = cgutils.get_item_pointer2(
