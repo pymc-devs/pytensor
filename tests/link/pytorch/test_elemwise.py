@@ -64,8 +64,4 @@ def test_softmax(axis):
     fgraph = FunctionGraph([x], [out])
     test_input = np.arange(6, dtype=config.floatX).reshape(2, 3)
 
-    if axis is None:
-        with pytest.raises(TypeError):
-            compare_pytorch_and_py(fgraph, [test_input])
-    else:
-        compare_pytorch_and_py(fgraph, [test_input])
+    compare_pytorch_and_py(fgraph, [test_input])

@@ -41,12 +41,10 @@ def pytorch_funcify_DimShuffle(op, **kwargs):
 def pytorch_funcify_Softmax(op, **kwargs):
     axis = op.axis
 
-    if axis is None:
-        raise TypeError(
-            "Implicit dimension choice for softmax has been deprecated in Pytorch, specify an axis."
-        )
-
     def softmax(x):
-        return torch.nn.functional.softmax(x, dim=axis)
+        if axis is not None:
+            return torch.softmax(x, dim=axis)
+        else:
+            return torch.softmax(x.ravel(), dim=0).reshape(x.shape)
 
     return softmax
