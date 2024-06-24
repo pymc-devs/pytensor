@@ -64,7 +64,7 @@ def test_debugprint_sitsot():
         ├─ *0-<Vector(float64, shape=(?,))> [id X] -> [id E] (inner_in_sit_sot-0)
         └─ *1-<Vector(float64, shape=(?,))> [id Y] -> [id M] (inner_in_non_seqs-0)"""
 
-    for truth, out in zip(expected_output.split("\n"), lines):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=False):
         assert truth.strip() == out.strip()
 
 
@@ -122,7 +122,7 @@ def test_debugprint_sitsot_no_extra_info():
         ├─ *0-<Vector(float64, shape=(?,))> [id X] -> [id E]
         └─ *1-<Vector(float64, shape=(?,))> [id Y] -> [id M]"""
 
-    for truth, out in zip(expected_output.split("\n"), lines):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=False):
         assert truth.strip() == out.strip()
 
 
@@ -190,7 +190,7 @@ def test_debugprint_nitsot():
            ├─ *2-<Scalar(float64, shape=())> [id BA] -> [id W] (inner_in_non_seqs-0)
            └─ *1-<Scalar(int64, shape=())> [id BB] -> [id U] (inner_in_seqs-1)"""
 
-    for truth, out in zip(expected_output.split("\n"), lines):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=False):
         assert truth.strip() == out.strip()
 
 
@@ -305,7 +305,7 @@ def test_debugprint_nested_scans():
         ├─ *0-<Vector(float64, shape=(?,))> [id CB] -> [id BG] (inner_in_sit_sot-0)
         └─ *1-<Vector(float64, shape=(?,))> [id CC] -> [id BO] (inner_in_non_seqs-0)"""
 
-    for truth, out in zip(expected_output.split("\n"), lines):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=False):
         assert truth.strip() == out.strip()
 
     fg = FunctionGraph([c, k, A], [final_result])
@@ -404,7 +404,7 @@ def test_debugprint_nested_scans():
         ├─ *0-<Vector(float64, shape=(?,))> [id CA] (inner_in_sit_sot-0)
         └─ *1-<Vector(float64, shape=(?,))> [id CB] (inner_in_non_seqs-0)"""
 
-    for truth, out in zip(expected_output.split("\n"), lines):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=False):
         assert truth.strip() == out.strip()
 
 
@@ -479,7 +479,7 @@ def test_debugprint_mitsot():
         ├─ *3-<Scalar(int64, shape=())> [id BF] -> [id O] (inner_in_mit_sot-1-1)
         └─ *2-<Scalar(int64, shape=())> [id BG] -> [id O] (inner_in_mit_sot-1-0)"""
 
-    for truth, out in zip(expected_output.split("\n"), lines):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=False):
         assert truth.strip() == out.strip()
 
 
@@ -615,7 +615,7 @@ def test_debugprint_mitmot():
         ├─ *0-<Vector(float64, shape=(?,))> [id CT] -> [id H] (inner_in_sit_sot-0)
         └─ *1-<Vector(float64, shape=(?,))> [id CW] -> [id P] (inner_in_non_seqs-0)"""
 
-    for truth, out in zip(expected_output.split("\n"), lines):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=False):
         assert truth.strip() == out.strip()
 
 
@@ -677,7 +677,7 @@ def test_debugprint_compiled_fn():
     output_str = debugprint(out, file="str", print_op_info=True)
     lines = output_str.split("\n")
 
-    for truth, out in zip(expected_output.split("\n"), lines):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
 
 

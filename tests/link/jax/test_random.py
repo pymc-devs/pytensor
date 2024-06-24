@@ -61,7 +61,9 @@ def test_random_updates(rng_ctor):
     # Check that original rng variable content was not overwritten when calling jax_typify
     assert all(
         a == b if not isinstance(a, np.ndarray) else np.array_equal(a, b)
-        for a, b in zip(rng.get_value().__getstate__(), original_value.__getstate__())
+        for a, b in zip(
+            rng.get_value().__getstate__(), original_value.__getstate__(), strict=True
+        )
     )
 
 
@@ -92,7 +94,9 @@ def test_replaced_shared_rng_storage_order(noise_first):
     ), "Test may need to be tweaked"
 
     # Confirm that input_storage type and fgraph input order are aligned
-    for storage, fgrapn_input in zip(f.input_storage, f.maker.fgraph.inputs):
+    for storage, fgrapn_input in zip(
+        f.input_storage, f.maker.fgraph.inputs, strict=True
+    ):
         assert storage.type == fgrapn_input.type
 
     assert mu.get_value() == 1

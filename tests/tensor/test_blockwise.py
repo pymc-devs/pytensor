@@ -251,7 +251,7 @@ class BlockwiseOpTester:
             vec_inputs = []
             vec_inputs_testvals = []
             for idx, (batch_shape, param_sig) in enumerate(
-                zip(batch_shapes, self.params_sig)
+                zip(batch_shapes, self.params_sig, strict=True)
             ):
                 if batch_idx is not None and idx != batch_idx:
                     # Skip out combinations in which other inputs are batched
