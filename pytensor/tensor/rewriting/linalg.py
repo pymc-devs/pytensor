@@ -9,7 +9,6 @@ from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,
 )
-from pytensor.raise_op import Assert
 from pytensor.scalar.basic import Mul
 from pytensor.tensor.basic import ARange, Eye, TensorVariable, alloc, diagonal
 from pytensor.tensor.blas import Dot22
@@ -44,9 +43,6 @@ from pytensor.tensor.subtensor import advanced_set_subtensor
 
 
 logger = logging.getLogger(__name__)
-assert_square_matrix_for_det = Assert(
-    "Last 2 dimensions of the input tensor to det are not equal and thus, it is not square!"
-)
 
 
 def is_matrix_transpose(x: TensorVariable) -> bool:
@@ -434,14 +430,14 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
     non_eye_inputs = list(set(inputs_to_mul) - set(eye_input))
 
     # Dealing with only one other input
-    if len(non_eye_inputs) >= 2:
+    if len(non_eye_inputs) != 1:
         return None
 
     # Rewrite is only applied if all the shapes are known
-    if non_eye_inputs[0].type.shape[-2:] == (None, None) or eye_input[0].type.shape[
-        -2:
-    ] == (None, None):
-        return None
+    # if non_eye_inputs[0].type.shape[-2:] == (None, None) or eye_input[0].type.shape[
+    #     -2:
+    # ] == (None, None):
+    #     return None
 
     # Checking if original x was scalar/vector/matrix
     if non_eye_inputs[0].type.broadcastable[-2:] == (True, True):
@@ -455,7 +451,6 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
     else:
         # For vector
         det_val = non_eye_inputs[0].prod(axis=(-1, -2))
-
     return [det_val]
 
 
