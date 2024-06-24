@@ -172,7 +172,7 @@ def local_dimshuffle_rv_lift(fgraph, node):
 
     # Updates the params to reflect the Dimshuffled dimensions
     new_dist_params = []
-    for param, param_ndim_supp in zip(dist_params, rv_op.ndims_params):
+    for param, param_ndim_supp in zip(dist_params, rv_op.ndims_params, strict=True):
         # Add broadcastable dimensions to the parameters that would have been expanded by the size
         padleft = batched_dims - (param.ndim - param_ndim_supp)
         if padleft > 0:
@@ -290,7 +290,7 @@ def local_subtensor_rv_lift(fgraph, node):
     # non-broadcastable (non-degenerate) parameter dims. These parameters and the new size
     # should still correctly broadcast any degenerate parameter dims.
     new_dist_params = []
-    for param, param_ndim_supp in zip(dist_params, rv_op.ndims_params):
+    for param, param_ndim_supp in zip(dist_params, rv_op.ndims_params, strict=True):
         # We first expand any missing parameter dims (and later index them away or keep them with none-slicing)
         batch_param_dims_missing = batch_ndims - (param.ndim - param_ndim_supp)
         batch_param = (
@@ -302,7 +302,7 @@ def local_subtensor_rv_lift(fgraph, node):
         bcast_batch_param_dims = tuple(
             dim
             for dim, (param_dim, output_dim) in enumerate(
-                zip(batch_param.type.shape, rv.type.shape)
+                zip(batch_param.type.shape, rv.type.shape, strict=False)
             )
             if (param_dim == 1) and (output_dim != 1)
         )
