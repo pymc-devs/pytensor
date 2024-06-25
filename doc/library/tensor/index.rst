@@ -1,17 +1,18 @@
 .. _libdoc_tensor:
 
-==================================================
-:mod:`tensor`  -- Types and Ops for Symbolic numpy
-==================================================
+===============================================
+:mod:`tensor`  -- Tensor operations in PyTensor
+===============================================
 
 .. module:: tensor
-   :platform: Unix, Windows
-   :synopsis: symbolic types and operations for n-dimensional arrays.
-.. moduleauthor:: LISA
 
-Theano's strength is in expressing symbolic calculations involving tensors.
-There are many types of symbolic expressions for tensors.
-They are grouped into the following sections:
+PyTensor's strength is in expressing symbolic calculations involving tensors.
+
+PyTensor tries to emulate the numpy interface as much as possible in the tensor module.
+This means that once TensorVariables are created, it should be possibly to define
+symbolic expressions using calls that look just like numpy calls, such as
+`pt.exp(x).transpose(0, 1)[:, None]`
+
 
 
 .. toctree::
@@ -29,3 +30,4 @@ They are grouped into the following sections:
     conv
     math_opt
     basic_opt
+    functional
