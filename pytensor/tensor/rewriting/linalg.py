@@ -385,27 +385,7 @@ def local_lift_through_linalg(
                 raise NotImplementedError  # pragma: no cover
 
 
-@register_canonicalize("shape_unsafe")
-@register_stabilize("shape_unsafe")
-@node_rewriter([det])
-def rewrite_det_diag_from_eye_mul(fgraph, node):
-    """
-     This rewrite takes advantage of the fact that for a diagonal matrix, the determinant value is the product of its diagonal elements.
-
-    The presence of a diagonal matrix is detected by inspecting the graph. This rewrite can identify diagonal matrices that arise as the result of elementwise multiplication with an identity matrix. Specialized computation is used to make this rewrite as efficient as possible, depending on whether the multiplication was with a scalar, vector or a matrix.
-
-    Parameters
-    ----------
-    fgraph: FunctionGraph
-        Function graph being optimized
-    node: Apply
-        Node of the function graph to be optimized
-
-    Returns
-    -------
-    list of Variable, optional
-        List of optimized variables, or None if no optimization was performed
-    """
+def _find_diag_from_eye_mul(node):
     node_input = node.inputs[0]
     # Check if the op is Elemwise and mul
     if not (
@@ -428,6 +408,33 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
 
     # Get all non Eye inputs (scalars/matrices/vectors)
     non_eye_inputs = list(set(inputs_to_mul) - set(eye_input))
+    return eye_input, non_eye_inputs
+
+
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
+@node_rewriter([det])
+def rewrite_det_diag_from_eye_mul(fgraph, node):
+    """
+     This rewrite takes advantage of the fact that for a diagonal matrix, the determinant value is the product of its diagonal elements.
+
+    The presence of a diagonal matrix is detected by inspecting the graph. This rewrite can identify diagonal matrices that arise as the result of elementwise multiplication with an identity matrix. Specialized computation is used to make this rewrite as efficient as possible, depending on whether the multiplication was with a scalar, vector or a matrix.
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
+    eye_non_eye_inputs = _find_diag_from_eye_mul(node)
+    if eye_non_eye_inputs is not None:
+        eye_input, non_eye_inputs = eye_non_eye_inputs
 
     # Dealing with only one other input
     if len(non_eye_inputs) != 1:
