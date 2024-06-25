@@ -435,6 +435,8 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
     eye_non_eye_inputs = _find_diag_from_eye_mul(node)
     if eye_non_eye_inputs is not None:
         eye_input, non_eye_inputs = eye_non_eye_inputs
+    else:
+        return None
 
     # Dealing with only one other input
     if len(non_eye_inputs) != 1:
