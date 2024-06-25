@@ -18,6 +18,9 @@
 API
 ===
 
-.. automodule:: pytensor.tensor.slinalg
-    :members:
+.. automodule:: tensor.slinalg
+.. autosummary::
+   :toctree: generated/
 
+   Cholesky
+   SolveBase
