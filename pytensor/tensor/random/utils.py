@@ -129,7 +129,8 @@ def explicit_expand_dims(
     """Introduce explicit expand_dims in RV parameters that are implicitly broadcasted together and/or by size."""
 
     batch_dims = [
-        param.type.ndim - ndim_param for param, ndim_param in zip(params, ndim_params)
+        param.type.ndim - ndim_param
+        for param, ndim_param in zip(params, ndim_params, strict=True)
     ]
 
     if size_length is not None:
