@@ -410,10 +410,6 @@ def cumsum(x, axis=None):
     axis
         The axis along which the cumulative sum is computed.
         The default (None) is to compute the cumsum over the flattened array.
-
-
-    .. versionadded:: 0.7
-
     """
     return CumOp(axis=axis, mode="add")(x)
 
@@ -430,10 +426,6 @@ def cumprod(x, axis=None):
     axis
         The axis along which the cumulative product is computed.
         The default (None) is to compute the `cumprod` over the flattened array.
-
-
-    .. versionadded:: 0.7
-
     """
     return CumOp(axis=axis, mode="mul")(x)
 
