@@ -458,7 +458,7 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
     else:
         # For vector
         det_val = useful_non_eye.prod(axis=(-1, -2))
-    det_val = det_val.astype(useful_non_eye.dtype)
+    det_val = det_val.astype(node.outputs[0].type.dtype)
     return [det_val]
 
 
