@@ -401,6 +401,11 @@ def _find_diag_from_eye_mul(potential_mul_input):
         for mul_input in inputs_to_mul
         if mul_input.owner and isinstance(mul_input.owner.op, Eye)
     ]
+
+    # Check if 1's are being put on the main diagonal only (k = 1)
+    if eye_input and getattr(eye_input[0].owner.inputs[-1], "data", 0).item() != 0:
+        return None
+
     # If the broadcast pattern of eye_input is not (False, False), we do not get a diagonal matrix and thus, dont need to apply the rewrite
     if eye_input and eye_input[0].broadcastable[-2:] != (False, False):
         return None
