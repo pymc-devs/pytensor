@@ -2050,6 +2050,85 @@ def hessian(cost, wrt, consider_constant=None, disconnected_inputs="raise"):
     return as_list_or_tuple(using_list, using_tuple, hessians)
 
 
+def hessian_vector_product(cost, wrt, p, **grad_kwargs):
+    """Return the expression of the Hessian times a vector p.
+
+    Notes
+    -----
+    This function uses backward autodiff twice to obtain the desired expression.
+    You may want to manually build the equivalent expression by combining backward
+    followed by forward (if all Ops support it) autodiff.
+    See {ref}`docs/_tutcomputinggrads#Hessian-times-a-Vector` for how to do this.
+
+    Parameters
+    ----------
+    cost: Scalar (0-dimensional) variable.
+    wrt: Vector (1-dimensional tensor) 'Variable' or list of Vectors
+    p: Vector (1-dimensional tensor) 'Variable' or list of Vectors
+        Each vector will be used for the hessp wirt to exach input variable
+    **grad_kwargs:
+        Keyword arguments passed to `grad` function.
+
+    Returns
+    -------
+    :class:` Vector or list of Vectors
+        The Hessian times p of the `cost` with respect to (elements of) `wrt`.
+
+    Examples
+    --------
+
+    .. testcode::
+
+        import numpy as np
+        from scipy.optimize import minimize
+        from pytensor import function
+        from pytensor.tensor import vector
+        from pytensor.gradient import grad, hessian_vector_product
+
+        x = vector('x')
+        p = vector('p')
+
+        rosen = (100 * (x[1:] - x[:-1] ** 2) ** 2 + (1 - x[:-1]) ** 2).sum()
+        rosen_jac = grad(rosen, x)
+        rosen_hessp = hessian_vector_product(rosen, x, p)
+
+        rosen_fn = function([x], rosen)
+        rosen_jac_fn = function([x], rosen_jac)
+        rosen_hessp_fn = function([x, p], rosen_hessp)
+        x0 = np.array([1.3, 0.7, 0.8, 1.9, 1.2])
+        res = minimize(
+            rosen_fn,
+            x0,
+            method="Newton-CG",
+            jac=rosen_jac_fn,
+            hessp=rosen_hessp_fn,
+            options={"xtol": 1e-8},
+        )
+        print(res.x)
+
+    .. testoutput::
+
+        [1.         1.         1.         0.99999999 0.99999999]
+
+
+
+    """
+    wrt_list = wrt if isinstance(wrt, Sequence) else [wrt]
+    p_list = p if isinstance(p, Sequence) else [p]
+    grad_wrt_list = grad(cost, wrt=wrt_list, **grad_kwargs)
+    hessian_cost = pytensor.tensor.add(
+        *[
+            (grad_wrt * p).sum()
+            for grad_wrt, p in zip(grad_wrt_list, p_list, strict=True)
+        ]
+    )
+    Hp_list = grad(hessian_cost, wrt=wrt_list, **grad_kwargs)
+
+    if isinstance(wrt, Variable):
+        return Hp_list[0]
+    return Hp_list
+
+
 def _is_zero(x):
     """
     Returns 'yes', 'no', or 'maybe' indicating whether x
