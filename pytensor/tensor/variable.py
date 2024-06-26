@@ -840,7 +840,8 @@ class _tensor_py_operators:
         >>>
         >>> x = pt.ones((3,))
         >>> out = x[1].set(2)
-        >>> out.eval()  # array([1., 2., 1.])
+        >>> out.eval()
+        array([1., 2., 1.])
         """
         return pt.subtensor.set_subtensor(self, y, **kwargs)
 
@@ -861,7 +862,8 @@ class _tensor_py_operators:
         >>>
         >>> x = pt.ones((3,))
         >>> out = x[1].inc(2)
-        >>> out.eval()  # array([1., 3., 1.])
+        >>> out.eval()
+        array([1., 3., 1.])
         """
         return pt.inc_subtensor(self, y, **kwargs)
 
