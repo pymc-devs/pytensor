@@ -2,7 +2,7 @@ import logging
 from collections.abc import Callable
 from typing import cast
 
-from pytensor import Variable, config
+from pytensor import Variable
 from pytensor.graph import Apply, FunctionGraph
 from pytensor.graph.rewriting.basic import (
     PatternNodeRewriter,
@@ -451,15 +451,14 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
     # Checking if original x was scalar/vector/matrix
     if useful_non_eye.type.broadcastable[-2:] == (True, True):
         # For scalar
-        det_val = useful_non_eye.squeeze(axis=(-1, -2)) ** (useful_eye.shape[0]).astype(
-            config.floatX
-        )
+        det_val = useful_non_eye.squeeze(axis=(-1, -2)) ** (useful_eye.shape[0])
     elif useful_non_eye.type.broadcastable[-2:] == (False, False):
         # For Matrix
         det_val = useful_non_eye.diagonal(axis1=-1, axis2=-2).prod(axis=-1)
     else:
         # For vector
         det_val = useful_non_eye.prod(axis=(-1, -2))
+    det_val = det_val.astype(useful_non_eye.dtype)
     return [det_val]
 
 
