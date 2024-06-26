@@ -41,6 +41,7 @@ from pytensor.scalar.basic import (
     upcast,
     upgrade_to_float,
     upgrade_to_float64,
+    upgrade_to_float64_no_complex,
     upgrade_to_float_no_complex,
 )
 from pytensor.scalar.basic import abs as scalar_abs
@@ -323,7 +324,7 @@ class Gamma(UnaryScalarOp):
         raise NotImplementedError("only floating point is implemented")
 
 
-gamma = Gamma(upgrade_to_float, name="gamma")
+gamma = Gamma(upgrade_to_float64, name="gamma")
 
 
 class GammaLn(UnaryScalarOp):
@@ -460,7 +461,7 @@ class Psi(UnaryScalarOp):
         raise NotImplementedError("only floating point is implemented")
 
 
-psi = Psi(upgrade_to_float, name="psi")
+psi = Psi(upgrade_to_float64, name="psi")
 
 
 class TriGamma(UnaryScalarOp):
@@ -549,7 +550,7 @@ class TriGamma(UnaryScalarOp):
 
 
 # Scipy polygamma does not support complex inputs: https://github.com/scipy/scipy/issues/7410
-tri_gamma = TriGamma(upgrade_to_float_no_complex, name="tri_gamma")
+tri_gamma = TriGamma(upgrade_to_float64_no_complex, name="tri_gamma")
 
 
 class PolyGamma(BinaryScalarOp):
@@ -880,7 +881,7 @@ def gammainc_grad(k, x):
 
         def inner_loop_b(sum_b, log_gamma_k_plus_n_plus_1, n, k_plus_n, log_x):
             term = exp(k_plus_n * log_x - log_gamma_k_plus_n_plus_1) * psi(k_plus_n + 1)
-            sum_b += term
+            sum_b += term.astype(dtype)
 
             log_gamma_k_plus_n_plus_1 += log1p(k_plus_n)
             n += 1
@@ -1051,7 +1052,7 @@ class GammaU(BinaryScalarOp):
         return hash(type(self))
 
 
-gammau = GammaU(upgrade_to_float, name="gammau")
+gammau = GammaU(upgrade_to_float64, name="gammau")
 
 
 class GammaL(BinaryScalarOp):
@@ -1089,7 +1090,7 @@ class GammaL(BinaryScalarOp):
         return hash(type(self))
 
 
-gammal = GammaL(upgrade_to_float, name="gammal")
+gammal = GammaL(upgrade_to_float64, name="gammal")
 
 
 class Jv(BinaryScalarOp):
@@ -1335,7 +1336,7 @@ class Sigmoid(UnaryScalarOp):
             return v
 
 
-sigmoid = Sigmoid(upgrade_to_float, name="sigmoid")
+sigmoid = Sigmoid(upgrade_to_float64, name="sigmoid")
 
 
 class Softplus(UnaryScalarOp):
@@ -1631,6 +1632,7 @@ def betainc_grad(p, q, x, wrtp: bool):
             dK = log(x) - reciprocal(p) + psi(p + q) - psi(p)
         else:
             dK = log1p(-x) + psi(p + q) - psi(q)
+        dK = dK.astype(dtype)
 
         derivative = np.array(0, dtype=dtype)
         n = np.array(1, dtype="int16")  # Enough for 200 max iters

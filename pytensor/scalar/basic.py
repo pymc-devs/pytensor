@@ -1027,6 +1027,17 @@ def upgrade_to_float_no_complex(*types):
     return upgrade_to_float(*types)
 
 
+def upgrade_to_float64_no_complex(*types):
+    """
+    Don't accept complex, otherwise call upgrade_to_float64().
+
+    """
+    for type in types:
+        if type in complex_types:
+            raise TypeError("complex argument not supported")
+    return upgrade_to_float64(*types)
+
+
 def same_out_nocomplex(type):
     if type in complex_types:
         raise TypeError("complex argument not supported")
