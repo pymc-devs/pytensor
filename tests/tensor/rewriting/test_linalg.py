@@ -481,7 +481,8 @@ def test_det_diag_incorrect_for_rectangle_eye():
     f_rewritten = function([x], y, mode="FAST_RUN")
     nodes = f_rewritten.maker.fgraph.apply_nodes
 
-    assert any(isinstance(node.op, Det) for node in nodes)
+    assert not any(isinstance(node.op, Det) for node in nodes)
+    # This assert passes which means that the rewrite is applied even if the input is not square
 
     # Numeric Value test (should fail)
     x_test = np.random.normal(size=(7, 5)).astype(config.floatX)

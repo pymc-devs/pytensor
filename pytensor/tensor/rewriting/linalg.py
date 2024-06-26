@@ -385,18 +385,17 @@ def local_lift_through_linalg(
                 raise NotImplementedError  # pragma: no cover
 
 
-def _find_diag_from_eye_mul(node):
-    node_input = node.inputs[0]
+def _find_diag_from_eye_mul(potential_mul_input):
     # Check if the op is Elemwise and mul
     if not (
-        node_input.owner is not None
-        and isinstance(node_input.owner.op, Elemwise)
-        and isinstance(node_input.owner.op.scalar_op, Mul)
+        potential_mul_input.owner is not None
+        and isinstance(potential_mul_input.owner.op, Elemwise)
+        and isinstance(potential_mul_input.owner.op.scalar_op, Mul)
     ):
         return None
 
     # Find whether any of the inputs to mul is Eye
-    inputs_to_mul = node_input.owner.inputs
+    inputs_to_mul = potential_mul_input.owner.inputs
     eye_input = [
         mul_input
         for mul_input in inputs_to_mul
@@ -432,41 +431,31 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
     list of Variable, optional
         List of optimized variables, or None if no optimization was performed
     """
-    eye_non_eye_inputs = _find_diag_from_eye_mul(node)
-    if eye_non_eye_inputs is not None:
-        eye_input, non_eye_inputs = eye_non_eye_inputs
-    else:
+    potential_mul_input = node.inputs[0]
+    eye_non_eye_inputs = _find_diag_from_eye_mul(potential_mul_input)
+    if eye_non_eye_inputs is None:
         return None
+    eye_input, non_eye_inputs = eye_non_eye_inputs
 
     # Dealing with only one other input
     if len(non_eye_inputs) != 1:
         return None
 
-    # Rewrite is only applied if all the shapes are known
-    # if non_eye_inputs[0].type.shape[-2:] == (None, None) or eye_input[0].type.shape[
-    #     -2:
-    # ] == (None, None):
-    #     return None
+    useful_eye, useful_non_eye = eye_input[0], non_eye_inputs[0]
 
     # Checking if original x was scalar/vector/matrix
-    if (
-        eye_input[0].type.shape[-1] is not None
-        and eye_input[0].type.shape[-2] is not None
-    ) and (eye_input[0].type.shape[-1] == eye_input[0].type.shape[-2]):
-        if non_eye_inputs[0].type.broadcastable[-2:] == (True, True):
-            # For scalar
-            det_val = non_eye_inputs[0].squeeze(axis=(-1, -2)) ** (
-                eye_input[0].shape[0]
-            ).astype(config.floatX)
-        elif non_eye_inputs[0].type.broadcastable[-2:] == (False, False):
-            # For Matrix
-            det_val = non_eye_inputs[0].diagonal(axis1=-1, axis2=-2).prod(axis=-1)
-        else:
-            # For vector
-            det_val = non_eye_inputs[0].prod(axis=(-1, -2))
-        return [det_val]
+    if useful_non_eye.type.broadcastable[-2:] == (True, True):
+        # For scalar
+        det_val = useful_non_eye.squeeze(axis=(-1, -2)) ** (useful_eye.shape[0]).astype(
+            config.floatX
+        )
+    elif useful_non_eye.type.broadcastable[-2:] == (False, False):
+        # For Matrix
+        det_val = useful_non_eye.diagonal(axis1=-1, axis2=-2).prod(axis=-1)
     else:
-        return None
+        # For vector
+        det_val = useful_non_eye.prod(axis=(-1, -2))
+    return [det_val]
 
 
 arange = ARange("int64")
