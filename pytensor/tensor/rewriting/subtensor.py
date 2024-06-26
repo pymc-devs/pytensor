@@ -7,6 +7,7 @@ import numpy as np
 import pytensor
 import pytensor.scalar.basic as ps
 from pytensor import compile
+from pytensor.compile import optdb
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
     WalkingGraphRewriter,
@@ -1932,3 +1933,111 @@ def local_blockwise_advanced_inc_subtensor(fgraph, node):
     new_out = op.core_op.make_node(x, y, *symbolic_idxs).outputs
     copy_stack_trace(node.outputs, new_out)
     return new_out
+
+
+@node_rewriter(tracks=[AdvancedSubtensor])
+def ravel_multidimensional_bool_idx(fgraph, node):
+    """Convert multidimensional boolean indexing into equivalent vector boolean index, supported by Numba
+
+    x[eye(3, dtype=bool)] -> x.ravel()[eye(3).ravel()]
+    """
+    x, *idxs = node.inputs
+
+    if any(
+        isinstance(idx.type, TensorType) and idx.type.dtype.startswith("int")
+        for idx in idxs
+    ):
+        # Get out if there are any other advanced indexes
+        return None
+
+    bool_idxs = [
+        (i, idx)
+        for i, idx in enumerate(idxs)
+        if (isinstance(idx.type, TensorType) and idx.dtype == "bool")
+    ]
+
+    if len(bool_idxs) != 1:
+        # Get out if there are no or multiple boolean idxs
+        return None
+
+    [(bool_idx_pos, bool_idx)] = bool_idxs
+    bool_idx_ndim = bool_idx.type.ndim
+    if bool_idx.type.ndim < 2:
+        # No need to do anything if it's a vector or scalar, as it's already supported by Numba
+        return None
+
+    x_shape = x.shape
+    raveled_x = x.reshape(
+        (*x_shape[:bool_idx_pos], -1, *x_shape[bool_idx_pos + bool_idx_ndim :])
+    )
+
+    raveled_bool_idx = bool_idx.ravel()
+    new_idxs = list(idxs)
+    new_idxs[bool_idx_pos] = raveled_bool_idx
+
+    return [raveled_x[tuple(new_idxs)]]
+
+
+@node_rewriter(tracks=[AdvancedSubtensor])
+def ravel_multidimensional_int_idx(fgraph, node):
+    """Convert multidimensional integer indexing into equivalent vector integer index, supported by Numba
+
+    x[eye(3, dtype=int)] -> x[eye(3).ravel()].reshape((3, 3))
+
+
+    NOTE: This is very similar to the rewrite `local_replace_AdvancedSubtensor` except it also handles non-full slices
+
+    x[eye(3, dtype=int), 2:] -> x[eye(3).ravel(), 2:].reshape((3, 3, ...)), where ... are the remaining output shapes
+    """
+    x, *idxs = node.inputs
+
+    if any(
+        isinstance(idx.type, TensorType) and idx.type.dtype.startswith("bool")
+        for idx in idxs
+    ):
+        # Get out if there are any other advanced indexes
+        return None
+
+    int_idxs = [
+        (i, idx)
+        for i, idx in enumerate(idxs)
+        if (isinstance(idx.type, TensorType) and idx.dtype.startswith("int"))
+    ]
+
+    if len(int_idxs) != 1:
+        # Get out if there are no or multiple integer idxs
+        return None
+
+    [(int_idx_pos, int_idx)] = int_idxs
+    if int_idx.type.ndim < 2:
+        # No need to do anything if it's a vector or scalar, as it's already supported by Numba
+        return None
+
+    raveled_int_idx = int_idx.ravel()
+    new_idxs = list(idxs)
+    new_idxs[int_idx_pos] = raveled_int_idx
+    raveled_subtensor = x[tuple(new_idxs)]
+
+    # Reshape into correct shape
+    # Because we only allow one advanced indexing, the output dimension corresponding to the raveled integer indexing
+    # must match the input position. If there were multiple advanced indexes, this could have been forcefully moved to the front
+    raveled_shape = raveled_subtensor.shape
+    unraveled_shape = (
+        *raveled_shape[:int_idx_pos],
+        *int_idx.shape,
+        *raveled_shape[int_idx_pos + 1 :],
+    )
+    return [raveled_subtensor.reshape(unraveled_shape)]
+
+
+optdb["specialize"].register(
+    ravel_multidimensional_bool_idx.__name__,
+    ravel_multidimensional_bool_idx,
+    "numba",
+)
+
+optdb["specialize"].register(
+    ravel_multidimensional_int_idx.__name__,
+    ravel_multidimensional_int_idx,
+    "numba",
+)
