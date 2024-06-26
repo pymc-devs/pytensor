@@ -14,7 +14,7 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import get_test_value
 from pytensor.tensor.type import iscalar, matrix, scalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
-from tests.tensor.test_basic import TestAlloc
+from tests.tensor.test_basic import check_alloc_runtime_broadcast
 
 
 def test_jax_Alloc():
@@ -54,7 +54,7 @@ def test_jax_Alloc():
 
 
 def test_alloc_runtime_broadcast():
-    TestAlloc.check_runtime_broadcast(get_mode("JAX"))
+    check_alloc_runtime_broadcast(get_mode("JAX"))
 
 
 def test_jax_MakeVector():

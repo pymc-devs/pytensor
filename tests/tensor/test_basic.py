@@ -151,7 +151,10 @@ from tests.tensor.utils import (
 )
 
 
-pytestmark = pytest.mark.filterwarnings("error")
+pytestmark = pytest.mark.filterwarnings(
+    "error",
+    "ignore:Numba will use object mode:UserWarning",
+)
 
 if config.mode == "FAST_COMPILE":
     mode_opt = "FAST_RUN"
@@ -717,6 +720,32 @@ class TestAsTensorVariable:
             ptb.as_tensor(x)
 
 
+def check_alloc_runtime_broadcast(mode):
+    """Check we emmit a clear error when runtime broadcasting would occur according to Numpy rules."""
+    floatX = config.floatX
+    x_v = vector("x", shape=(None,))
+
+    out = alloc(x_v, 5, 3)
+    f = pytensor.function([x_v], out, mode=mode)
+    TestAlloc.check_allocs_in_fgraph(f.maker.fgraph, 1)
+
+    np.testing.assert_array_equal(
+        f(x=np.zeros((3,), dtype=floatX)),
+        np.zeros((5, 3), dtype=floatX),
+    )
+    with pytest.raises(ValueError, match="Runtime broadcasting not allowed"):
+        f(x=np.zeros((1,), dtype=floatX))
+
+    out = alloc(specify_shape(x_v, (1,)), 5, 3)
+    f = pytensor.function([x_v], out, mode=mode)
+    TestAlloc.check_allocs_in_fgraph(f.maker.fgraph, 1)
+
+    np.testing.assert_array_equal(
+        f(x=np.zeros((1,), dtype=floatX)),
+        np.zeros((5, 3), dtype=floatX),
+    )
+
+
 class TestAlloc:
     dtype = config.floatX
     mode = mode_opt
@@ -730,69 +759,46 @@ class TestAlloc:
             == n
         )
 
-    @staticmethod
-    def check_runtime_broadcast(mode):
-        """Check we emmit a clear error when runtime broadcasting would occur according to Numpy rules."""
-        floatX = config.floatX
-        x_v = vector("x", shape=(None,))
-
-        out = alloc(x_v, 5, 3)
-        f = pytensor.function([x_v], out, mode=mode)
-        TestAlloc.check_allocs_in_fgraph(f.maker.fgraph, 1)
-
-        np.testing.assert_array_equal(
-            f(x=np.zeros((3,), dtype=floatX)),
-            np.zeros((5, 3), dtype=floatX),
-        )
-        with pytest.raises(ValueError, match="Runtime broadcasting not allowed"):
-            f(x=np.zeros((1,), dtype=floatX))
-
-        out = alloc(specify_shape(x_v, (1,)), 5, 3)
-        f = pytensor.function([x_v], out, mode=mode)
-        TestAlloc.check_allocs_in_fgraph(f.maker.fgraph, 1)
-
-        np.testing.assert_array_equal(
-            f(x=np.zeros((1,), dtype=floatX)),
-            np.zeros((5, 3), dtype=floatX),
-        )
-
     def setup_method(self):
         self.rng = np.random.default_rng(seed=utt.fetch_seed())
 
-    def test_alloc_constant_folding(self):
+    @pytest.mark.parametrize(
+        "subtensor_fn, expected_grad_n_alloc",
+        [
+            # IncSubtensor1
+            (lambda x: x[:60], 1),
+            # AdvancedIncSubtensor1
+            (lambda x: x[np.arange(60)], 1),
+            # AdvancedIncSubtensor
+            (lambda x: x[np.arange(50), np.arange(50)], 1),
+        ],
+    )
+    def test_alloc_constant_folding(self, subtensor_fn, expected_grad_n_alloc):
         test_params = np.asarray(self.rng.standard_normal(50 * 60), self.dtype)
 
         some_vector = vector("some_vector", dtype=self.dtype)
         some_matrix = some_vector.reshape((60, 50))
         variables = self.shared(np.ones((50,), dtype=self.dtype))
-        idx = constant(np.arange(50))
 
-        for alloc_, (subtensor, n_alloc) in zip(
-            self.allocs,
-            [
-                # IncSubtensor1
-                (some_matrix[:60], 2),
-                # AdvancedIncSubtensor1
-                (some_matrix[arange(60)], 2),
-                # AdvancedIncSubtensor
-                (some_matrix[idx, idx], 1),
-            ],
-        ):
-            derp = pt_sum(dense_dot(subtensor, variables))
+        subtensor = subtensor_fn(some_matrix)
 
-            fobj = pytensor.function([some_vector], derp, mode=self.mode)
-            grad_derp = pytensor.grad(derp, some_vector)
-            fgrad = pytensor.function([some_vector], grad_derp, mode=self.mode)
+        derp = pt_sum(dense_dot(subtensor, variables))
+        fobj = pytensor.function([some_vector], derp, mode=self.mode)
+        assert (
+            sum(isinstance(node.op, Alloc) for node in fobj.maker.fgraph.apply_nodes)
+            == 0
+        )
+        # TODO: Assert something about the value if we bothered to call it?
+        fobj(test_params)
 
-            topo_obj = fobj.maker.fgraph.toposort()
-            assert sum(isinstance(node.op, type(alloc_)) for node in topo_obj) == 0
-
-            topo_grad = fgrad.maker.fgraph.toposort()
-            assert (
-                sum(isinstance(node.op, type(alloc_)) for node in topo_grad) == n_alloc
-            ), (alloc_, subtensor, n_alloc, topo_grad)
-            fobj(test_params)
-            fgrad(test_params)
+        grad_derp = pytensor.grad(derp, some_vector)
+        fgrad = pytensor.function([some_vector], grad_derp, mode=self.mode)
+        assert (
+            sum(isinstance(node.op, Alloc) for node in fgrad.maker.fgraph.apply_nodes)
+            == expected_grad_n_alloc
+        )
+        # TODO: Assert something about the value if we bothered to call it?
+        fgrad(test_params)
 
     def test_alloc_output(self):
         val = constant(self.rng.standard_normal((1, 1)), dtype=self.dtype)
@@ -912,7 +918,7 @@ class TestAlloc:
 
     @pytest.mark.parametrize("mode", (Mode("py"), Mode("c")))
     def test_runtime_broadcast(self, mode):
-        self.check_runtime_broadcast(mode)
+        check_alloc_runtime_broadcast(mode)
 
 
 def test_infer_static_shape():

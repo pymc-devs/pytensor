@@ -39,6 +39,7 @@ from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 from pytensor.tensor.slinalg import Solve
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import MakeSlice, NoneConst
+from pytensor.typed_list import TypedListType
 
 
 def global_numba_func(func):
@@ -121,6 +122,8 @@ def get_numba_type(
             return CSCMatrixType(numba_dtype)
 
         raise NotImplementedError()
+    elif isinstance(pytensor_type, TypedListType):
+        return numba.types.List(get_numba_type(pytensor_type.ttype))
     else:
         raise NotImplementedError(f"Numba type not implemented for {pytensor_type}")
 
@@ -566,11 +569,11 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
     shape_input_names = ["shape_" + str(i) for i in range(len(shape_inputs))]
 
     func_conditions = [
-        f"assert x.shape[{i}] == {shape_input_names}"
-        for i, (shape_input, shape_input_names) in enumerate(
+        f"assert x.shape[{i}] == {eval_dim_name}, f'SpecifyShape: dim {{{i}}} of input has shape {{x.shape[{i}]}}, expected {{{eval_dim_name}.item()}}.'"
+        for i, (node_dim_input, eval_dim_name) in enumerate(
             zip(shape_inputs, shape_input_names)
         )
-        if shape_input is not NoneConst
+        if node_dim_input is not NoneConst
     ]
 
     func = dedent(
