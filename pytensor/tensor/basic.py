@@ -1112,23 +1112,24 @@ def tril(m, k=0):
 
     Examples
     --------
-    >>> at.tril(np.arange(1,13).reshape(4,3), -1).eval()
+    >>> import pytensor.tensor as pt
+    >>> pt.tril(pt.arange(1,13).reshape((4,3)), -1).eval()
     array([[ 0,  0,  0],
            [ 4,  0,  0],
            [ 7,  8,  0],
            [10, 11, 12]])
 
-    >>> at.tril(np.arange(3*4*5).reshape(3, 4, 5)).eval()
+    >>> pt.tril(pt.arange(3*4*5).reshape((3, 4, 5))).eval()
     array([[[ 0,  0,  0,  0,  0],
             [ 5,  6,  0,  0,  0],
             [10, 11, 12,  0,  0],
             [15, 16, 17, 18,  0]],
-
+    <BLANKLINE>
            [[20,  0,  0,  0,  0],
             [25, 26,  0,  0,  0],
             [30, 31, 32,  0,  0],
             [35, 36, 37, 38,  0]],
-
+    <BLANKLINE>
            [[40,  0,  0,  0,  0],
             [45, 46,  0,  0,  0],
             [50, 51, 52,  0,  0],
@@ -1154,23 +1155,24 @@ def triu(m, k=0):
 
     Examples
     --------
-    >>> at.triu(np.arange(1,13).reshape(4,3), -1).eval()
+    >>> import pytensor.tensor as pt
+    >>> pt.triu(pt.arange(1, 13).reshape((4, 3)), -1).eval()
     array([[ 1,  2,  3],
            [ 4,  5,  6],
            [ 0,  8,  9],
            [ 0,  0, 12]])
 
-    >>> at.triu(np.arange(3*4*5).reshape(3, 4, 5)).eval()
+    >>> pt.triu(np.arange(3*4*5).reshape((3, 4, 5))).eval()
     array([[[ 0,  1,  2,  3,  4],
             [ 0,  6,  7,  8,  9],
             [ 0,  0, 12, 13, 14],
             [ 0,  0,  0, 18, 19]],
-
+    <BLANKLINE>
            [[20, 21, 22, 23, 24],
             [ 0, 26, 27, 28, 29],
             [ 0,  0, 32, 33, 34],
             [ 0,  0,  0, 38, 39]],
-
+    <BLANKLINE>
            [[40, 41, 42, 43, 44],
             [ 0, 46, 47, 48, 49],
             [ 0,  0, 52, 53, 54],
@@ -2024,28 +2026,14 @@ def matrix_transpose(x: "TensorLike") -> TensorVariable:
 
     Examples
     --------
-    >>> import pytensor as pt
-    >>> import numpy as np
-    >>> x = np.arange(24).reshape((2, 3, 4))
-    [[[ 0  1  2  3]
-      [ 4  5  6  7]
-      [ 8  9 10 11]]
+    >>> import pytensor.tensor as pt
+    >>> x = pt.arange(24).reshape((2, 3, 4))
+    >>> x.type.shape
+    (2, 3, 4)
 
-     [[12 13 14 15]
-      [16 17 18 19]
-      [20 21 22 23]]]
+    >>> pt.matrix_transpose(x).type.shape
+    (2, 4, 3)
 
-
-    >>> pt.matrix_transpose(x).eval()
-    [[[ 0  4  8]
-      [ 1  5  9]
-      [ 2  6 10]
-      [ 3  7 11]]
-
-     [[12 16 20]
-      [13 17 21]
-      [14 18 22]
-      [15 19 23]]]
 
 
     Notes
@@ -2072,15 +2060,21 @@ class Split(COp):
 
     Examples
     --------
-    >>> x = vector()
-    >>> splits = lvector()
+    >>> from pytensor import function
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector(dtype="int")
+    >>> splits = pt.vector(dtype="int")
+
     You have to declare right away how many split_points there will be.
-    >>> ra, rb, rc = split(x, splits, n_splits = 3, axis = 0)
+    >>> ra, rb, rc = pt.split(x, splits, n_splits = 3, axis = 0)
     >>> f = function([x, splits], [ra, rb, rc])
     >>> a, b, c = f([0,1,2,3,4,5], [3, 2, 1])
-    a == [0,1,2]
-    b == [3, 4]
-    c == [5]
+    >>> a
+    array([0, 1, 2])
+    >>> b
+    array([3, 4])
+    >>> c
+    array([5])
 
     TODO: Don't make a copy in C impl
     """
@@ -2329,13 +2323,22 @@ class Join(COp):
 
     Examples
     --------
-    >>> x, y, z = tensor.matrix(), tensor.matrix(), tensor.matrix()
-    >>> u = tensor.vector()
+    >>> import pytensor.tensor as pt
+    >>> x, y, z = pt.matrix(), pt.matrix(), pt.matrix()
+    >>> u = pt.vector()
 
-    >>> r = join(0, x, y, z)
-    >>> c = join(1, x, y, z)
-    >>> join(2, x, y, z)    # WRONG: the axis has to be an index into the shape
-    >>> join(0, x, u)       # WRONG: joined tensors must have the same rank
+    >>> r = pt.join(0, x, y, z)
+    >>> c = pt.join(1, x, y, z)
+
+    The axis has to be an index into the shape
+    >>> pt.join(2, x, y, z)
+    Traceback (most recent call last):
+    ValueError: Axis value 2 is out of range for the given input dimensions
+
+    Joined tensors must have the same rank
+    >>> pt.join(0, x, u)
+    Traceback (most recent call last):
+    TypeError: Only tensors with the same number of dimensions can be joined. Input ndims were: [2, 1].
 
     """
 
@@ -3232,28 +3235,29 @@ class _nd_grid:
 
     Examples
     --------
-    >>> a = at.mgrid[0:5, 0:3]
+    >>> import pytensor.tensor as pt
+    >>> a = pt.mgrid[0:5, 0:3]
     >>> a[0].eval()
     array([[0, 0, 0],
            [1, 1, 1],
            [2, 2, 2],
            [3, 3, 3],
-           [4, 4, 4]], dtype=int8)
+           [4, 4, 4]])
     >>> a[1].eval()
     array([[0, 1, 2],
            [0, 1, 2],
            [0, 1, 2],
            [0, 1, 2],
-           [0, 1, 2]], dtype=int8)
-    >>> b = at.ogrid[0:5, 0:3]
+           [0, 1, 2]])
+    >>> b = pt.ogrid[0:5, 0:3]
     >>> b[0].eval()
     array([[0],
            [1],
            [2],
            [3],
-           [4]], dtype=int8)
+           [4]])
     >>> b[1].eval()
-    array([[0, 1, 2, 3]], dtype=int8)
+    array([[0, 1, 2]])
 
     """
 
@@ -3915,8 +3919,8 @@ def stacklists(arg):
     >>> X = stacklists([[a, b], [c, d]])
     >>> f = function([a, b, c, d], X)
     >>> f(1, 2, 3, 4)
-    array([[ 1.,  2.],
-           [ 3.,  4.]], dtype=float32)
+    array([[1., 2.],
+           [3., 4.]])
 
     We can also stack arbitrarily shaped tensors. Here we stack matrices into
     a 2 by 2 grid:

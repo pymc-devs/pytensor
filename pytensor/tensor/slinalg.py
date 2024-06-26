@@ -963,10 +963,10 @@ def block_diag(*matrices: TensorVariable):
 
         result = block_diagonal(A, B, name='X')
         print(result.eval())
-        >>> Out: array([[1, 2, 0, 0],
-        >>>             [3, 4, 0, 0],
-        >>>             [0, 0, 5, 6],
-        >>>             [0, 0, 7, 8]])
+        Out: array([[1, 2, 0, 0],
+                     [3, 4, 0, 0],
+                     [0, 0, 5, 6],
+                     [0, 0, 7, 8]])
     """
     _block_diagonal_matrix = Blockwise(BlockDiagonal(n_inputs=len(matrices)))
     return _block_diagonal_matrix(*matrices)

@@ -1034,7 +1034,10 @@ def orphans_between(
 
     Examples
     --------
-    >>> orphans_between([x], [(x+y).out])
+    >>> from pytensor.graph.basic import orphans_between
+    >>> from pytensor.tensor import scalars
+    >>> x, y = scalars("xy")
+    >>> list(orphans_between([x], [(x+y)]))
     [y]
 
     """

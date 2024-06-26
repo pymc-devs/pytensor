@@ -2241,7 +2241,7 @@ def grad_clip(x, lower_bound, upper_bound):
     >>> z2 = pytensor.gradient.grad(x**2, x)
     >>> f = pytensor.function([x], outputs = [z, z2])
     >>> print(f(2.0))
-    [array(1.0), array(4.0)]
+    [array(1.), array(4.)]
 
     Notes
     -----
