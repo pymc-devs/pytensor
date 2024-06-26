@@ -78,14 +78,18 @@ def broadcast_params(params, ndims_params):
     >>> mean = np.array([1, 2, 3])
     >>> cov = np.stack([np.eye(3), np.eye(3)])
     >>> params = [mean, cov]
-    >>> res = broadcast_params(params, ndims_params)
-    [array([[1, 2, 3]]),
+    >>> mean_bcast, cov_bcast = broadcast_params(params, ndims_params)
+    >>> mean_bcast
+    array([[1, 2, 3],
+           [1, 2, 3]])
+    >>> cov_bcast
     array([[[1., 0., 0.],
-             [0., 1., 0.],
-             [0., 0., 1.]],
-            [[1., 0., 0.],
-             [0., 1., 0.],
-             [0., 0., 1.]]])]
+            [0., 1., 0.],
+            [0., 0., 1.]],
+    <BLANKLINE>
+           [[1., 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.]]])
 
     Parameters
     ==========

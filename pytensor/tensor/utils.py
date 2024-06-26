@@ -54,8 +54,9 @@ def shape_of_variables(fgraph, input_shapes):
 
     Examples
     --------
-    >>> import pytensor
-    >>> x = pytensor.tensor.matrix('x')
+    >>> import pytensor.tensor as pt
+    >>> from pytensor.graph.fg import FunctionGraph
+    >>> x = pt.matrix('x')
     >>> y = x[512:]; y.name = 'y'
     >>> fgraph = FunctionGraph([x], [y], clone=False)
     >>> d = shape_of_variables(fgraph, {x: (1024, 1024)})

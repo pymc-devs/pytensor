@@ -926,13 +926,13 @@ def shape_padaxis(t, axis):
     --------
     >>> tensor = pytensor.tensor.type.tensor3()
     >>> pytensor.tensor.shape_padaxis(tensor, axis=0)
-    DimShuffle{x,0,1,2}.0
+    ExpandDims{axis=0}.0
     >>> pytensor.tensor.shape_padaxis(tensor, axis=1)
-    DimShuffle{0,x,1,2}.0
+    ExpandDims{axis=1}.0
     >>> pytensor.tensor.shape_padaxis(tensor, axis=3)
-    DimShuffle{0,1,2,x}.0
+    ExpandDims{axis=3}.0
     >>> pytensor.tensor.shape_padaxis(tensor, axis=-1)
-    DimShuffle{0,1,2,x}.0
+    ExpandDims{axis=3}.0
 
     See Also
     --------

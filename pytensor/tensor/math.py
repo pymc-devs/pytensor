@@ -826,31 +826,31 @@ def isclose(a, b, rtol=1.0e-5, atol=1.0e-8, equal_nan=False):
     >>> a = _asarray([1e10, 1e-7], dtype="float64")
     >>> b = _asarray([1.00001e10, 1e-8], dtype="float64")
     >>> pytensor.tensor.isclose(a, b).eval()
-    array([1, 0], dtype=int8)
+    array([ True, False])
     >>> a = _asarray([1e10, 1e-8], dtype="float64")
     >>> b = _asarray([1.00001e10, 1e-9], dtype="float64")
     >>> pytensor.tensor.isclose(a, b).eval()
-    array([1, 1], dtype=int8)
+    array([ True,  True])
     >>> a = _asarray([1e10, 1e-8], dtype="float64")
     >>> b = _asarray([1.0001e10, 1e-9], dtype="float64")
     >>> pytensor.tensor.isclose(a, b).eval()
-    array([0, 1], dtype=int8)
+    array([False,  True])
     >>> a = _asarray([1.0, np.nan], dtype="float64")
     >>> b = _asarray([1.0, np.nan], dtype="float64")
     >>> pytensor.tensor.isclose(a, b).eval()
-    array([1, 0], dtype==int8)
+    array([ True, False])
     >>> a = _asarray([1.0, np.nan], dtype="float64")
     >>> b = _asarray([1.0, np.nan], dtype="float64")
     >>> pytensor.tensor.isclose(a, b, equal_nan=True).eval()
-    array([1, 1], dtype==int8)
+    array([ True,  True])
     >>> a = _asarray([1.0, np.inf], dtype="float64")
     >>> b = _asarray([1.0, -np.inf], dtype="float64")
     >>> pytensor.tensor.isclose(a, b).eval()
-    array([1, 0], dtype==int8)
+    array([ True, False])
     >>> a = _asarray([1.0, np.inf], dtype="float64")
     >>> b = _asarray([1.0, np.inf], dtype="float64")
     >>> pytensor.tensor.isclose(a, b).eval()
-    array([1, 1], dtype==int8)
+    array([ True,  True])
 
     """
     # close will be an int8 array of 1 where within tolerance
@@ -2212,7 +2212,7 @@ def tensordot(
     ...                     cloop[i,j,k] += a[i,l,m] * b[j,k,m,l]
 
     >>> np.allclose(c, cloop)
-    true
+    True
 
     This specific implementation avoids a loop by transposing a and b such that
     the summed axes of ``a`` are last and the summed axes of ``b`` are first. The
@@ -2224,11 +2224,11 @@ def tensordot(
 
     >>> c = np.tensordot(a, b, 0)
     >>> print(a.shape)
-    (2,3,4)
+    (2, 3, 4)
     >>> print(b.shape)
-    (5,6,4,3)
+    (5, 6, 4, 3)
     >>> print(c.shape)
-    (2,3,4,5,6,4,3)
+    (2, 3, 4, 5, 6, 4, 3)
 
     See the documentation of numpy.tensordot for more examples.
 
