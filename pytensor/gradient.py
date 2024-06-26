@@ -12,7 +12,7 @@ import pytensor
 from pytensor.compile.ops import ViewOp
 from pytensor.configdefaults import config
 from pytensor.graph import utils
-from pytensor.graph.basic import Apply, NominalVariable, Variable
+from pytensor.graph.basic import Apply, NominalVariable, Variable, io_toposort
 from pytensor.graph.null_type import NullType, null_type
 from pytensor.graph.op import get_test_values
 from pytensor.graph.type import Type
@@ -2287,3 +2287,90 @@ def grad_scale(x, multiplier):
     0.416...
     """
     return GradScale(multiplier)(x)
+
+
+# ===========================================
+# The following is more or less pseudocode...
+# ===========================================
+
+# Use transpose and forward mode autodiff to get reverse mode autodiff
+# Ops that only define push_forward (Rop) could use this, which is nice
+# because push_forward is usually easier to derive and think about.
+def pull_back_through_transpose(outputs, inputs, output_cotangents):
+    tangents = [input.type() for input in inputs]
+    output_tangents = push_forward(outputs, inputs, tangents)
+    return linear_transpose(output_tangents, tangents, output_cotangents)
+
+
+# Ops that only define pull_back (Lop) could use this to derive push_forward.
+def push_forward_through_pull_back(outputs, inputs, tangents):
+    cotangents = [out.type("u") for out in outputs]
+    input_cotangents = pull_back(outputs, inputs, cotangents)
+    return pull_back(input_cotangents, cotangents, tangents)
+
+
+def push_forward(outputs, inputs, input_tangents):
+    # Get the nodes in topological order and precompute
+    # a set of values that are used in the graph.
+    nodes = io_toposort(inputs, outputs)
+    used_values = set(outputs)
+    for node in reversed(nodes):
+        if any(output in used_values for output in node.outputs):
+            used_values.update(node.inputs)
+
+    # Maybe a lazy gradient op could use this during rewrite time?
+    recorded_rewrites = {}
+    known_tangents = dict(zip(inputs, input_tangents, strict=True))
+    for node in nodes:
+        tangents = [known_tangents.get(input, None) for input in node.inputs]
+        result_nums = [i for i in range(len(node.outputs)) if node.outputs[i] in used_values]
+        new_outputs, output_tangents = node.op.push_forward(node, tangents, result_nums)
+        if new_outputs is not None:
+            recorded_rewrites[node] = new_outputs
+
+        for i, tangent in zip(result_nums, output_tangents, strict=True):
+            known_tangents[node.outputs[i]] = tangent
+
+    return [known_tangents[output] for output in outputs]
+
+
+def pull_back(outputs, inputs, output_cotangents):
+    known_cotangents = dict(zip(outputs, output_cotangents, strict=True))
+
+    nodes = io_toposort(inputs, outputs)
+    used_values = set(outputs)
+    for node in reversed(nodes):
+        if any(output in used_values for output in node.outputs):
+            used_values.update(node.inputs)
+
+    # Maybe a lazy gradient op could use this during rewrite time?
+    recorded_rewrites = {}
+    for node in reversed(nodes):
+        cotangents = [known_cotangents.get(output, None) for output in node.outputs]
+        argnums = [i for i in range(len(node.inputs)) if node.inputs[i] in used_values]
+        new_outputs, input_cotangents = node.op.pull_back(node, cotangents, argnums)
+        if new_outputs is not None:
+            recorded_rewrites[node] = new_outputs
+
+        for i, cotangent in zip(argnums, input_cotangents, strict=True):
+            input = node.inputs[i]
+            if input not in known_cotangents:
+                known_cotangents[input] = cotangent
+            else:
+                # TODO check that we are not broadcasting?
+                known_cotangents[input] += cotangent
+
+    return [known_cotangents[input] for input in inputs]
+
+def pullback_grad(cost, wrt):
+    """A new pt.grad that uses the pull_back function.
+
+    At some point we might want to replace pt.grad with this?
+    """
+    # Error checking and allow non-list wrt...
+    return pull_back([cost], wrt, [1.])
+
+def linear_transpose(outputs, inputs, transposed_inputs):
+    """Given a linear function from inputs to outputs, return the transposed function."""
+    # some loop over inv_toposort...
+    # Should look similar to pull_back?

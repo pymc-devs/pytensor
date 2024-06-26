@@ -6,7 +6,9 @@ from collections.abc import Callable, Sequence
 from typing import (
     TYPE_CHECKING,
     Any,
+    Optional,
     Protocol,
+    Tuple,
     TypeVar,
     cast,
 )
@@ -322,6 +324,119 @@ class Op(MetaObject):
     # Convenience so that subclass implementers don't have to import utils
     # just to self.add_tag_trace
     add_tag_trace = staticmethod(add_tag_trace)
+
+    def linear_transpose(
+        self,
+        node: Apply,
+        transposed_inputs: Sequence[Variable],
+        linear_inputs: Sequence[int],
+        linear_outputs: Sequence[int],
+    ) -> Sequence[Variable]:
+        """Transpose a linear function.
+
+        The function f: [node.inputs[i] for i in linear_inputs] to [node.outputs[i] ofr i in linear_outputs]
+        given the remaining inputs as constants must be linear. This function can then
+        be implemented by an Op, and return f^*(transposed_inputs).
+
+        Parameters
+        ----------
+        node: Apply
+            The point at which to do the transpose
+        transposed_inputs:
+            The inputs for the transposed function.
+        linear_inputs:
+            Indices of input arguments to consider.
+        linear_outputs:
+            Indices of output arguments to consider.
+        """
+        raise NotImplementedError(f"Linear transpos of {self} is not defined or not implemented.")
+
+    def push_forward(
+        self,
+        node: Apply,
+        input_tangents: Sequence[Variable | None],
+        result_nums: Sequence[int],
+    ) -> Tuple[Sequence[Variable] | None, Sequence[Variable | None]]:
+        """Compute the push_forward of tangent vectors at the specified point.
+
+        Parameters
+        ----------
+        node: Apply
+            The point at which to compute the push_forward. (ie at x = node.inputs
+            and f(x) = node.outputs).
+        input_tangents:
+            The values of the tangent vectors that we wish to map. Values that
+            are set to None are assumed to be constants.
+        result_nums:
+            Compute only the output tangents of [node.outputs[i] for i in argnums].
+
+        Returns
+        -------
+        alternative_outputs:
+            Optionally a hint to the rewriter that the outputs of the op could
+            also be computed with the provided values, if the tangents are also
+            computed.
+        output_tangents:
+            The tangents of the outputs specified in argnums.
+            If the value is None, this indicates that the output did
+            not depend on the inputs that had tangents provided..
+        """
+        from pytensor.gradient import DisconnectedType
+        from pytensor.graph.null_type import NullType
+        from pytensor.tensor.basic import zeros_like
+
+        tangents_filled = [
+            # TODO do the R_op methods also accept a disconnected_grad?
+            tangent if tangent is not None else zeros_like(input)
+            for tangent, input in zip(input_tangents, node.inputs, strict=True)
+        ]
+        output_tangents = self.R_op(node.inputs, tangents_filled)
+        output_tangents = [output_tangents[i] for i in result_nums]
+
+        mapped_output_tangents = []
+        for argnum, tangent in zip(result_nums, output_tangents):
+            if isinstance(tangent.type, DisconnectedType):
+                mapped_output_tangents.append(None)
+            elif isinstance(tangent.type, NullType):
+                raise NotImplementedError(
+                    f"The push_forward of argument {argnum} of op "
+                    f"{self} is not implemented or not defined."
+                )
+            else:
+                mapped_output_tangents.append(tangent)
+        return (None, mapped_output_tangents)
+
+    def pull_back(
+        self,
+        node: Apply,
+        output_cotangents: Sequence[Variable | None],
+        argnums: Sequence[int],
+    ) -> Tuple[Sequence[Variable] | None, Sequence[Variable | None]]:
+        from pytensor.gradient import DisconnectedType
+        from pytensor.graph.null_type import NullType
+        from pytensor.tensor.basic import zeros_like
+
+        cotangents_filled = [
+            # TODO do the L_op methods also accept a disconnected_grad?
+            cotangent if cotangent is not None else zeros_like(input)
+            for cotangent, input in zip(output_cotangents, node.outputs, strict=True)
+        ]
+
+        input_cotangents = self.L_op(node.inputs, node.outputs, cotangents_filled)
+        input_cotangents = [input_cotangents[i] for i in argnums]
+
+        mapped_input_cotangents = []
+        for argnum, cotangent in zip(argnums, input_cotangents):
+            if isinstance(cotangent.type, DisconnectedType):
+                mapped_input_cotangents.append(None)
+            elif isinstance(cotangent.type, NullType):
+                raise NotImplementedError(
+                    f"The push_forward of argument {argnum} of op "
+                    f"{self} is not implemented or not defined."
+                )
+            else:
+                mapped_input_cotangents.append(cotangent)
+        return (None, mapped_input_cotangents)
 
     def grad(
         self, inputs: Sequence[Variable], output_grads: Sequence[Variable]
