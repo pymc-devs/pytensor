@@ -10,7 +10,7 @@ dependencies:
   - python>=3.10
   - compilers
   - numpy>=1.17.0
-  - scipy>=0.14
+  - scipy>=0.14,<1.14.0
   - filelock
   - etuples
   - logical-unification
