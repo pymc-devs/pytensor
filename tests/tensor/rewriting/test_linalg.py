@@ -390,3 +390,40 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
     test_vals = [x @ np.swapaxes(x, -1, -2) for x in test_vals]
 
     np.testing.assert_allclose(f1(*test_vals), f2(*test_vals), atol=1e-8)
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [(), (7,), (1, 7), (7, 1), (7, 7), (3, 7, 7)],
+    ids=["scalar", "vector", "row_vec", "col_vec", "matrix", "batched_input"],
+)
+def test_inv_diag_from_eye_mul(shape):
+    # Initializing x based on scalar/vector/matrix
+    x = pt.tensor("x", shape=shape)
+    x_diag = pt.eye(7) * x
+    # Calculating inverse using pt.linalg.inv
+    x_inv = pt.linalg.inv(x_diag)
+
+    # REWRITE TEST
+    f_rewritten = function([x], x_inv, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, MatrixInverse) for node in nodes)
+    assert not any(isinstance(node.op, MatrixPinv) for node in nodes)
+
+    # NUMERIC VALUE TEST
+    if len(shape) == 0:
+        x_test = np.array(np.random.rand()).astype(config.floatX)
+    elif len(shape) == 1:
+        x_test = np.random.rand(*shape).astype(config.floatX)
+    else:
+        x_test = np.random.rand(*shape).astype(config.floatX)
+    x_test_matrix = np.eye(7) * x_test
+    inverse_matrix = np.linalg.inv(x_test_matrix)
+    rewritten_inverse = f_rewritten(x_test)
+
+    assert_allclose(
+        inverse_matrix,
+        rewritten_inverse,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
