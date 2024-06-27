@@ -57,24 +57,40 @@ def test_pytorch_elemwise():
     compare_pytorch_and_py(fg, [[0.9, 0.9]])
 
 
+@pytest.mark.parametrize("dtype", ["float64", "int64"])
 @pytest.mark.parametrize("axis", [None, 0, 1])
-def test_softmax(axis):
-    x = matrix("x")
+def test_softmax(axis, dtype):
+    x = matrix("x", dtype=dtype)
     out = softmax(x, axis=axis)
     fgraph = FunctionGraph([x], [out])
     test_input = np.arange(6, dtype=config.floatX).reshape(2, 3)
 
-    compare_pytorch_and_py(fgraph, [test_input])
+    if dtype == "int64":
+        with pytest.raises(
+            NotImplementedError,
+            match="Pytorch Softmax is not currently implemented for non-float types.",
+        ):
+            compare_pytorch_and_py(fgraph, [test_input])
+    else:
+        compare_pytorch_and_py(fgraph, [test_input])
 
 
+@pytest.mark.parametrize("dtype", ["float64", "int64"])
 @pytest.mark.parametrize("axis", [None, 0, 1])
-def test_logsoftmax(axis):
-    x = matrix("x")
+def test_logsoftmax(axis, dtype):
+    x = matrix("x", dtype=dtype)
     out = log_softmax(x, axis=axis)
     fgraph = FunctionGraph([x], [out])
     test_input = np.arange(6, dtype=config.floatX).reshape(2, 3)
 
-    compare_pytorch_and_py(fgraph, [test_input])
+    if dtype == "int64":
+        with pytest.raises(
+            NotImplementedError,
+            match="Pytorch LogSoftmax is not currently implemented for non-float types.",
+        ):
+            compare_pytorch_and_py(fgraph, [test_input])
+    else:
+        compare_pytorch_and_py(fgraph, [test_input])
 
 
 @pytest.mark.parametrize("axis", [None, 0, 1])

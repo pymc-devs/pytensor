@@ -40,11 +40,14 @@ def pytorch_funcify_DimShuffle(op, **kwargs):
 @pytorch_funcify.register(Softmax)
 def pytorch_funcify_Softmax(op, **kwargs):
     axis = op.axis
+    dtype = kwargs["node"].outputs[0].dtype
+
+    if not dtype.startswith("float"):
+        raise NotImplementedError(
+            "Pytorch Softmax is not currently implemented for non-float types."
+        )
 
     def softmax(x):
-        if not torch.is_floating_point(x):
-            x = x.to(torch.float32)
-
         if axis is not None:
             return torch.softmax(x, dim=axis)
         else:
@@ -56,11 +59,14 @@ def pytorch_funcify_Softmax(op, **kwargs):
 @pytorch_funcify.register(LogSoftmax)
 def pytorch_funcify_LogSoftmax(op, **kwargs):
     axis = op.axis
+    dtype = kwargs["node"].outputs[0].dtype
+
+    if not dtype.startswith("float"):
+        raise NotImplementedError(
+            "Pytorch LogSoftmax is not currently implemented for non-float types."
+        )
 
     def log_softmax(x):
-        if not torch.is_floating_point(x):
-            x = x.to(torch.float32)
-
         if axis is not None:
             return torch.log_softmax(x, dim=axis)
         else:
