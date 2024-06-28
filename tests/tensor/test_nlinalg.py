@@ -366,7 +366,7 @@ def test_det():
 
 
 def test_det_non_square_raises():
-    with pytest.raises(ValueError, match="Det not defined"):
+    with pytest.raises(ValueError, match="Determinant not defined"):
         det(tensor("x", shape=(5, 7)))
 
 
