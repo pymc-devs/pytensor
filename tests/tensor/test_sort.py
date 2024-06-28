@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 import pytensor
 from pytensor.tensor.sort import ArgSortOp, SortOp, argsort, sort
@@ -65,13 +66,12 @@ class TestSort:
             utt.assert_allclose(gv, gt)
 
     def test5(self):
-        a1 = SortOp("mergesort", [])
-        a2 = SortOp("quicksort", [])
+        a1 = SortOp("mergesort")
+        a2 = SortOp("quicksort")
 
-        # All the below should give true
         assert a1 != a2
-        assert a1 == SortOp("mergesort", [])
-        assert a2 == SortOp("quicksort", [])
+        assert a1 == SortOp("mergesort")
+        assert a2 == SortOp("quicksort")
 
     def test_None(self):
         a = dmatrix()
@@ -208,14 +208,11 @@ def test_argsort():
         utt.assert_allclose(gv, gt)
 
     # Example 5
-    a = dmatrix()
-    axis = lscalar()
-    a1 = ArgSortOp("mergesort", [])
-    a2 = ArgSortOp("quicksort", [])
-    # All the below should give true
+    a1 = ArgSortOp("mergesort")
+    a2 = ArgSortOp("quicksort")
     assert a1 != a2
-    assert a1 == ArgSortOp("mergesort", [])
-    assert a2 == ArgSortOp("quicksort", [])
+    assert a1 == ArgSortOp("mergesort")
+    assert a2 == ArgSortOp("quicksort")
 
     # Example 6: Testing axis=None
     a = dmatrix()
@@ -237,3 +234,22 @@ def test_argsort_grad():
 
     data = rng.random((2, 3, 3)).astype(pytensor.config.floatX)
     utt.verify_grad(lambda x: argsort(x, axis=2), [data])
+
+
+@pytest.mark.parametrize("func", (sort, argsort))
+def test_parse_sort_args(func):
+    x = matrix("x")
+
+    assert func(x).owner.op.kind == "quicksort"
+    assert func(x, stable=True).owner.op.kind == "stable"
+
+    with pytest.raises(ValueError, match="kind must be one of"):
+        func(x, kind="hanoi")
+
+    with pytest.raises(
+        ValueError, match="kind and stable cannot be set at the same time"
+    ):
+        func(x, kind="quicksort", stable=True)
+
+    with pytest.raises(ValueError, match="order argument is not applicable"):
+        func(x, order=[])

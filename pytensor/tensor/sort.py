@@ -1,25 +1,32 @@
+import typing
+
 import numpy as np
 
 from pytensor.gradient import grad_undefined
-from pytensor.graph.basic import Apply, Constant
+from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.tensor.basic import arange, as_tensor_variable, switch
-from pytensor.tensor.math import eq, ge, mul
+from pytensor.tensor.math import eq, ge
 from pytensor.tensor.type import TensorType
 
 
-def _variable_is_none(var):
-    return isinstance(var, Constant) and var.data is None
+KIND = typing.Literal["quicksort", "mergesort", "heapsort", "stable"]
+KIND_VALUES = typing.get_args(KIND)
 
 
-def _check_tensor_is_scalar(var):
-    """
-    Checks if a tensor variable is scalar, raise ValueError otherwise
-    """
-    msg = "%(var)s is expected to be 0d tensor, got %(ndim)d"
-    if var.ndim != 0:
-        raise ValueError(msg % (var, var.ndim))
+def _parse_sort_args(kind: KIND | None, order, stable: bool | None) -> KIND:
+    if order is not None:
+        raise ValueError("The order argument is not applicable to PyTensor graphs")
+    if stable is not None and kind is not None:
+        raise ValueError("kind and stable cannot be set at the same time")
+    if stable:
+        kind = "stable"
+    elif kind is None:
+        kind = "quicksort"
+    if kind not in KIND_VALUES:
+        raise ValueError(f"kind must be one of {KIND_VALUES}, got {kind}")
+    return kind
 
 
 class SortOp(Op):
@@ -28,39 +35,23 @@ class SortOp(Op):
 
     """
 
-    __props__ = ("kind", "order")
+    __props__ = ("kind",)
 
-    def __init__(self, kind, order=None):
+    def __init__(self, kind: KIND):
         self.kind = kind
-        self.order = order
-
-    def __str__(self):
-        return self.__class__.__name__ + f"{{{self.kind}, {self.order}}}"
 
     def make_node(self, input, axis=-1):
         input = as_tensor_variable(input)
-        axis = as_tensor_variable(axis)
+        axis = as_tensor_variable(axis, ndim=0, dtype=int)
         out_type = input.type()
         return Apply(self, [input, axis], [out_type])
 
     def perform(self, node, inputs, output_storage):
-        a = inputs[0]
-        axis = inputs[1]
-        if axis is not None:
-            if axis != int(axis):
-                raise ValueError("sort axis must be an integer or None")
-            axis = int(axis)
+        a, axis = inputs
         z = output_storage[0]
-        z[0] = np.sort(a, axis, self.kind, self.order)
+        z[0] = np.sort(a, int(axis), self.kind)
 
     def infer_shape(self, fgraph, node, inputs_shapes):
-        if _variable_is_none(node.inputs[1]):
-            # That means axis = None,
-            # So the array is flattened before being sorted
-            return [(mul(*inputs_shapes[0]),)]
-        # axis should not be None
-        # So there should be the same number of dimensions
-        # in the input and output
         assert node.inputs[0].ndim == node.outputs[0].ndim
         assert inputs_shapes[1] == ()
         return [inputs_shapes[0]]
@@ -100,9 +91,9 @@ class SortOp(Op):
 
         # The goal is to get gradient wrt input from gradient
         # wrt sort(input, axis)
-        idx = argsort(a, axis, kind=self.kind, order=self.order)
+        idx = argsort(a, axis, kind=self.kind)
         # rev_idx is the reverse of previous argsort operation
-        rev_idx = argsort(idx, axis, kind=self.kind, order=self.order)
+        rev_idx = argsort(idx, axis, kind=self.kind)
         indices = []
         axis_data = switch(ge(axis.data, 0), axis.data, a.ndim + axis.data)
         for i in range(a.ndim):
@@ -126,7 +117,9 @@ class SortOp(Op):
     """
 
 
-def sort(a, axis=-1, kind="quicksort", order=None):
+def sort(
+    a, axis=-1, kind: KIND | None = None, order=None, *, stable: bool | None = None
+):
     """
 
     Parameters
@@ -136,12 +129,12 @@ def sort(a, axis=-1, kind="quicksort", order=None):
     axis: TensorVariable
         Axis along which to sort. If None, the array is flattened before
         sorting.
-    kind: {'quicksort', 'mergesort', 'heapsort'}, optional
-        Sorting algorithm. Default is 'quicksort'.
+    kind: {'quicksort', 'mergesort', 'heapsort' 'stable'}, optional
+        Sorting algorithm. Default is 'quicksort' unless stable is defined.
     order: list, optional
-        When `a` is a structured array, this argument specifies which
-        fields to compare first, second, and so on. This list does not
-        need to include all of the fields.
+        For compatibility with numpy sort signature. Cannot be specified.
+    stable: bool, optional
+        Same as specifying kind = 'stable'. Cannot be specified at the same time as kind
 
     Returns
     -------
@@ -149,10 +142,12 @@ def sort(a, axis=-1, kind="quicksort", order=None):
         A sorted copy of an array.
 
     """
+    kind = _parse_sort_args(kind, order, stable)
+
     if axis is None:
         a = a.flatten()
         axis = 0
-    return SortOp(kind, order)(a, axis)
+    return SortOp(kind)(a, axis)
 
 
 class ArgSortOp(Op):
@@ -161,18 +156,14 @@ class ArgSortOp(Op):
 
     """
 
-    __props__ = ("kind", "order")
+    __props__ = ("kind",)
 
-    def __init__(self, kind, order=None):
+    def __init__(self, kind: KIND):
         self.kind = kind
-        self.order = order
-
-    def __str__(self):
-        return self.__class__.__name__ + f"{{{self.kind}, {self.order}}}"
 
     def make_node(self, input, axis=-1):
         input = as_tensor_variable(input)
-        axis = as_tensor_variable(axis)
+        axis = as_tensor_variable(axis, ndim=0, dtype=int)
         return Apply(
             self,
             [input, axis],
@@ -180,22 +171,14 @@ class ArgSortOp(Op):
         )
 
     def perform(self, node, inputs, output_storage):
-        a = inputs[0]
-        axis = inputs[1]
-        if axis is not None:
-            if axis != int(axis):
-                raise ValueError("sort axis must be an integer or None")
-            axis = int(axis)
+        a, axis = inputs
         z = output_storage[0]
         z[0] = _asarray(
-            np.argsort(a, axis, self.kind, self.order), dtype=node.outputs[0].dtype
+            np.argsort(a, int(axis), self.kind),
+            dtype=node.outputs[0].dtype,
         )
 
     def infer_shape(self, fgraph, node, inputs_shapes):
-        if _variable_is_none(node.inputs[1]):
-            return [(mul(*inputs_shapes[0]),)]
-        # axis should not be None, so there should be the same number of
-        # dimensions in the input and output
         assert node.inputs[0].ndim == node.outputs[0].ndim
         assert inputs_shapes[1] == ()
         return [inputs_shapes[0]]
@@ -225,7 +208,9 @@ class ArgSortOp(Op):
     """
 
 
-def argsort(a, axis=-1, kind="quicksort", order=None):
+def argsort(
+    a, axis=-1, kind: KIND | None = None, order=None, stable: bool | None = None
+):
     """
     Returns the indices that would sort an array.
 
@@ -235,70 +220,8 @@ def argsort(a, axis=-1, kind="quicksort", order=None):
     order.
 
     """
+    kind = _parse_sort_args(kind, order, stable)
     if axis is None:
         a = a.flatten()
         axis = 0
-    return ArgSortOp(kind, order)(a, axis)
-
-
-def _topk_py_impl(op, x, k, axis, idx_dtype):
-    ndim = x.ndim
-    assert -ndim <= axis < ndim
-    axis %= ndim
-    if k == 0:
-        raise ValueError("topk: kth cannot be zero")
-    elif k > x.shape[axis]:
-        raise ValueError(
-            f"topk: kth cannot be larger than the size of specified axis {int(axis)}"
-        )
-    if abs(k) == 1:
-        # negative k means min instead of max
-        fn_max = [None, np.max, np.min][k]
-        fn_argmax = [None, np.argmax, np.argmin][k]
-        if not op.return_indices:
-            return np.expand_dims(fn_max(x, axis=axis), axis)
-        elif op.return_values:
-            zi = np.expand_dims(fn_argmax(x, axis=axis), axis)
-            idx2 = tuple(
-                np.arange(s).reshape((s,) + (1,) * (ndim - i - 1)) if i != axis else zi
-                for i, s in enumerate(x.shape)
-            )
-            zv = x[idx2]
-            return zv, zi.astype(idx_dtype)
-        else:
-            zi = np.expand_dims(fn_argmax(x, axis=axis), axis)
-            return zi.astype(idx_dtype)
-
-    if x.shape[axis] == abs(k):
-        if not op.return_indices:
-            return x.copy()
-        else:
-            l = axis
-            r = ndim - l
-            reps = list(x.shape)
-            reps[axis] = 1
-            zi = np.arange(abs(k), dtype=idx_dtype)
-            zi = zi.reshape((1,) * l + (k,) + (1,) * (r - 1))
-            zi = np.tile(zi, reps)
-            if op.return_values:
-                return x.copy(), zi
-            else:
-                return zi
-
-    idx = [slice(None)] * ndim
-    idx[axis] = slice(-k, None) if k > 0 else slice(-k)
-
-    if not op.return_indices:
-        zv = np.partition(x, -k, axis=axis)[tuple(idx)]
-        return zv
-    elif op.return_values:
-        zi = np.argpartition(x, -k, axis=axis)[tuple(idx)]
-        idx2 = tuple(
-            np.arange(s).reshape((s,) + (1,) * (ndim - i - 1)) if i != axis else zi
-            for i, s in enumerate(x.shape)
-        )
-        zv = x[idx2]
-        return zv, zi.astype(idx_dtype)
-    else:
-        zi = np.argpartition(x, -k, axis=axis)[tuple(idx)]
-        return zi.astype(idx_dtype)
+    return ArgSortOp(kind)(a, axis)
