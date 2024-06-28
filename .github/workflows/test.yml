@@ -76,6 +76,7 @@ jobs:
         float32: [0, 1]
         install-numba: [0]
         install-jax: [0]
+        install-torch: [0]
         part:
           - "tests --ignore=tests/tensor --ignore=tests/scan --ignore=tests/sparse"
           - "tests/scan"
@@ -116,6 +117,11 @@ jobs:
             fast-compile: 0
             float32: 0
             part: "tests/link/jax"
+          - install-torch: 1
+            python-version: "3.10"
+            fast-compile: 0
+            float32: 0
+            part: "tests/link/pytorch"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -142,9 +148,12 @@ jobs:
       - name: Install dependencies
         shell: micromamba-shell {0}
         run: |
+
           micromamba install --yes -q "python~=${PYTHON_VERSION}=*_cpython" mkl numpy scipy pip mkl-service graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock sympy
           if [[ $INSTALL_NUMBA == "1" ]]; then micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" "numba>=0.57"; fi
           if [[ $INSTALL_JAX == "1" ]]; then micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" jax jaxlib numpyro && pip install tensorflow-probability; fi
+          if [[ $INSTALL_TORCH == "1" ]]; then micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" pytorch pytorch-cuda=12.1 -c pytorch -c nvidia; fi
+
           pip install -e ./
           micromamba list && pip freeze
           python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'
@@ -153,6 +162,7 @@ jobs:
           PYTHON_VERSION: ${{ matrix.python-version }}
           INSTALL_NUMBA: ${{ matrix.install-numba }}
           INSTALL_JAX: ${{ matrix.install-jax }}
+          INSTALL_TORCH: ${{ matrix.install-torch}}
 
       - name: Run tests
         shell: micromamba-shell {0}
@@ -199,7 +209,7 @@ jobs:
       - name: Install dependencies
         shell: micromamba-shell {0}
         run: |
-          micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" mkl numpy scipy pip mkl-service cython pytest "numba>=0.57" jax jaxlib pytest-benchmark
+          micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" mkl numpy scipy pip mkl-service cython pytest "numba>=0.57" jax jaxlib pytest-benchmark  pytorch pytorch-cuda=12.1 -c pytorch -c nvidia
           pip install -e ./
           micromamba list && pip freeze
           python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'
@@ -268,3 +278,4 @@ jobs:
           directory: ./coverage/
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
+

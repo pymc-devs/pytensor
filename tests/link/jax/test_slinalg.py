@@ -163,3 +163,34 @@ def test_jax_block_diag_blockwise():
             np.random.normal(size=(5, 3, 3)).astype(config.floatX),
         ],
     )
+
+
+@pytest.mark.parametrize("lower", [False, True])
+def test_jax_eigvalsh(lower):
+    A = matrix("A")
+    B = matrix("B")
+
+    out = pt_slinalg.eigvalsh(A, B, lower=lower)
+    out_fg = FunctionGraph([A, B], [out])
+
+    with pytest.raises(NotImplementedError):
+        compare_jax_and_py(
+            out_fg,
+            [
+                np.array(
+                    [[6, 3, 1, 5], [3, 0, 5, 1], [1, 5, 6, 2], [5, 1, 2, 2]]
+                ).astype(config.floatX),
+                np.array(
+                    [[10, 0, 1, 3], [0, 12, 7, 8], [1, 7, 14, 2], [3, 8, 2, 16]]
+                ).astype(config.floatX),
+            ],
+        )
+    compare_jax_and_py(
+        out_fg,
+        [
+            np.array([[6, 3, 1, 5], [3, 0, 5, 1], [1, 5, 6, 2], [5, 1, 2, 2]]).astype(
+                config.floatX
+            ),
+            None,
+        ],
+    )

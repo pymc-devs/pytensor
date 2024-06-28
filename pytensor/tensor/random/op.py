@@ -1,7 +1,7 @@
 import warnings
 from collections.abc import Sequence
 from copy import copy
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 
@@ -218,6 +218,7 @@ class RandomVariable(Op):
 
         from pytensor.tensor.extra_ops import broadcast_shape_iter
 
+        supp_shape: tuple[Any]
         if self.ndim_supp == 0:
             supp_shape = ()
         else:

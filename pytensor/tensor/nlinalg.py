@@ -198,7 +198,15 @@ class Det(Op):
 
     def make_node(self, x):
         x = as_tensor_variable(x)
-        assert x.ndim == 2
+        if x.ndim != 2:
+            raise ValueError(
+                f"Input passed is not a valid 2D matrix. Current ndim {x.ndim} != 2"
+            )
+        # Check for known shapes and square matrix
+        if None not in x.type.shape and (x.type.shape[0] != x.type.shape[1]):
+            raise ValueError(
+                f"Determinant not defined for non-square matrix inputs. Shape received is {x.type.shape}"
+            )
         o = scalar(dtype=x.dtype)
         return Apply(self, [x], [o])
 

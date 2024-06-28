@@ -87,6 +87,7 @@ from pytensor.tensor.basic import (
     triu_indices,
     triu_indices_from,
     vertical_stack,
+    where,
     zeros_like,
 )
 from pytensor.tensor.blockwise import Blockwise
@@ -937,38 +938,46 @@ def test_infer_static_shape():
     assert static_shape == (1,)
 
 
-# This is slow for the ('int8', 3) version.
-def test_eye():
-    def check(dtype, N, M_=None, k=0):
-        # PyTensor does not accept None as a tensor.
-        # So we must use a real value.
-        M = M_
-        # Currently DebugMode does not support None as inputs even if this is
-        # allowed.
-        if M is None and config.mode in ["DebugMode", "DEBUG_MODE"]:
-            M = N
-        N_symb = iscalar()
-        M_symb = iscalar()
-        k_symb = iscalar()
-        f = function([N_symb, M_symb, k_symb], eye(N_symb, M_symb, k_symb, dtype=dtype))
-        result = f(N, M, k)
-        assert np.allclose(result, np.eye(N, M_, k, dtype=dtype))
-        assert result.dtype == np.dtype(dtype)
+class TestEye:
+    # This is slow for the ('int8', 3) version.
+    def test_basic(self):
+        def check(dtype, N, M_=None, k=0):
+            # PyTensor does not accept None as a tensor.
+            # So we must use a real value.
+            M = M_
+            # Currently DebugMode does not support None as inputs even if this is
+            # allowed.
+            if M is None and config.mode in ["DebugMode", "DEBUG_MODE"]:
+                M = N
+            N_symb = iscalar()
+            M_symb = iscalar()
+            k_symb = iscalar()
+            f = function(
+                [N_symb, M_symb, k_symb], eye(N_symb, M_symb, k_symb, dtype=dtype)
+            )
+            result = f(N, M, k)
+            assert np.allclose(result, np.eye(N, M_, k, dtype=dtype))
+            assert result.dtype == np.dtype(dtype)
 
-    for dtype in ALL_DTYPES:
-        check(dtype, 3)
-        # M != N, k = 0
-        check(dtype, 3, 5)
-        check(dtype, 5, 3)
-        # N == M, k != 0
-        check(dtype, 3, 3, 1)
-        check(dtype, 3, 3, -1)
-        # N < M, k != 0
-        check(dtype, 3, 5, 1)
-        check(dtype, 3, 5, -1)
-        # N > M, k != 0
-        check(dtype, 5, 3, 1)
-        check(dtype, 5, 3, -1)
+        for dtype in ALL_DTYPES:
+            check(dtype, 3)
+            # M != N, k = 0
+            check(dtype, 3, 5)
+            check(dtype, 5, 3)
+            # N == M, k != 0
+            check(dtype, 3, 3, 1)
+            check(dtype, 3, 3, -1)
+            # N < M, k != 0
+            check(dtype, 3, 5, 1)
+            check(dtype, 3, 5, -1)
+            # N > M, k != 0
+            check(dtype, 5, 3, 1)
+            check(dtype, 5, 3, -1)
+
+    def test_static_output_type(self):
+        l = lscalar("l")
+        assert eye(5, 3, l).type.shape == (5, 3)
+        assert eye(1, l, 3).type.shape == (1, None)
 
 
 class TestTriangle:
@@ -4600,3 +4609,20 @@ def test_vectorize_join(axis, broadcasting_y):
         vectorize_pt(x_test, y_test),
         vectorize_np(x_test, y_test),
     )
+
+
+def test_where():
+    a = np.arange(10)
+    cond = a < 5
+    ift = np.pi
+    iff = np.e
+    # Test for all 3 inputs
+    np.testing.assert_allclose(np.where(cond, ift, iff), where(cond, ift, iff).eval())
+
+    # Test for only condition input
+    for np_output, pt_output in zip(np.where(cond), where(cond)):
+        np.testing.assert_allclose(np_output, pt_output.eval())
+
+    # Test for error
+    with pytest.raises(ValueError, match="either both"):
+        where(cond, ift)

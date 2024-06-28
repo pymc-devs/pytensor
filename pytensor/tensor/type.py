@@ -138,7 +138,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
             shape = self.shape
         return type(self)(dtype, shape, name=self.name)
 
-    def filter(self, data, strict=False, allow_downcast=None):
+    def filter(self, data, strict=False, allow_downcast=None) -> np.ndarray:
         """Convert `data` to something which can be associated to a `TensorVariable`.
 
         This function is not meant to be called in user code. It is for

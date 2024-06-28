@@ -1,3 +1,5 @@
+import re
+
 import numpy as np
 import pytest
 
@@ -352,6 +354,29 @@ class TestReshape(utt.InferShapeTester, utt.OptimizationTestMixin):
         assert y_new.type.shape == (4, 25)
         assert tuple(y_new.shape.eval({i: i_test})) == (4, 25)
         assert y_new.eval({i: i_test}).shape == (4, 25)
+
+    def test_static_shape(self):
+        dim = lscalar("dim")
+        x1 = tensor(shape=(2, 2, None))
+        x2 = specify_shape(x1, (2, 2, 6))
+
+        assert reshape(x1, (6, 2)).type.shape == (6, 2)
+        assert reshape(x1, (6, -1)).type.shape == (6, None)
+        assert reshape(x1, (6, dim)).type.shape == (6, None)
+        assert reshape(x1, (6, dim, 2)).type.shape == (6, None, 2)
+        assert reshape(x1, (6, 3, 99)).type.shape == (6, 3, 99)
+
+        assert reshape(x2, (6, 4)).type.shape == (6, 4)
+        assert reshape(x2, (6, -1)).type.shape == (6, 4)
+        assert reshape(x2, (6, dim)).type.shape == (6, 4)
+        assert reshape(x2, (6, dim, 2)).type.shape == (6, 2, 2)
+        with pytest.raises(
+            ValueError,
+            match=re.escape(
+                "Reshape: Input shape (2, 2, 6) is incompatible with new shape (6, 3, 99)"
+            ),
+        ):
+            reshape(x2, (6, 3, 99))
 
 
 def test_shape_i_hash():

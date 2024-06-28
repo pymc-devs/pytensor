@@ -28,6 +28,7 @@ from pytensor.link.basic import Linker, PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.link.jax.linker import JAXLinker
 from pytensor.link.numba.linker import NumbaLinker
+from pytensor.link.pytorch.linker import PytorchLinker
 from pytensor.link.vm import VMLinker
 
 
@@ -47,6 +48,7 @@ predefined_linkers = {
     "vm_nogc": VMLinker(allow_gc=False, use_cloop=False),
     "cvm_nogc": VMLinker(allow_gc=False, use_cloop=True),
     "jax": JAXLinker(),
+    "pytorch": PytorchLinker(),
     "numba": NumbaLinker(),
 }
 
@@ -460,6 +462,18 @@ JAX = Mode(
         ],
     ),
 )
+PYTORCH = Mode(
+    PytorchLinker(),
+    RewriteDatabaseQuery(
+        include=["fast_run"],
+        exclude=[
+            "cxx_only",
+            "BlasOpt",
+            "fusion",
+            "inplace",
+        ],
+    ),
+)
 NUMBA = Mode(
     NumbaLinker(),
     RewriteDatabaseQuery(
@@ -474,6 +488,7 @@ predefined_modes = {
     "FAST_RUN": FAST_RUN,
     "JAX": JAX,
     "NUMBA": NUMBA,
+    "PYTORCH": PYTORCH,
 }
 
 instantiated_default_mode = None

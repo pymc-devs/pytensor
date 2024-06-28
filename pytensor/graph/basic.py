@@ -1302,8 +1302,8 @@ def clone_node_and_cache(
 
 
 def clone_get_equiv(
-    inputs: Sequence[Variable],
-    outputs: Sequence[Variable],
+    inputs: Iterable[Variable],
+    outputs: Reversible[Variable],
     copy_inputs: bool = True,
     copy_orphans: bool = True,
     memo: dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]]

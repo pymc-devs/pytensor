@@ -108,7 +108,7 @@ def as_symbolic(x: Any, name: str | None = None, **kwargs) -> Variable:
 
 
 @singledispatch
-def _as_symbolic(x, **kwargs) -> Variable:
+def _as_symbolic(x: Any, **kwargs) -> Variable:
     from pytensor.tensor import as_tensor_variable
 
     return as_tensor_variable(x, **kwargs)

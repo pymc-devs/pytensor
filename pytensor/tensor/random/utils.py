@@ -147,7 +147,9 @@ def explicit_expand_dims(
     return new_params
 
 
-def compute_batch_shape(params, ndims_params: Sequence[int]) -> TensorVariable:
+def compute_batch_shape(
+    params: Sequence[TensorVariable], ndims_params: Sequence[int]
+) -> TensorVariable:
     params = explicit_expand_dims(params, ndims_params)
     batch_params = [
         param[(..., *(0,) * core_ndim)]
