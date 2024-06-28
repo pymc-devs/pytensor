@@ -238,7 +238,7 @@ def test_arange():
     )
 
 
-def test_jax_Join():
+def test_pytorch_Join():
     a = matrix("a")
     b = matrix("b")
 
