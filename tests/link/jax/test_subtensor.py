@@ -67,7 +67,7 @@ def test_jax_Subtensor_constant():
     compare_jax_and_py(out_fg, [x_np])
 
     # Boolean indexing should work if indexes are constant
-    out_pt = x_pt[np.random.binomial(1, 0.5, size=(3, 4, 5))]
+    out_pt = x_pt[np.random.binomial(1, 0.5, size=(3, 4, 5)).astype(bool)]
     out_fg = FunctionGraph([x_pt], [out_pt])
     compare_jax_and_py(out_fg, [x_np])
 
