@@ -1,7 +1,9 @@
 import pytest
 
-from pytensor.graph.basic import Apply, Variable
-from pytensor.graph.features import Feature, NodeFinder, ReplaceValidate
+import pytensor.tensor as pt
+from pytensor.graph import rewrite_graph
+from pytensor.graph.basic import Apply, Variable, equal_computations
+from pytensor.graph.features import Feature, FullHistory, NodeFinder, ReplaceValidate
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.graph.type import Type
@@ -119,3 +121,33 @@ class TestReplaceValidate:
 
         capres = capsys.readouterr()
         assert "rewriting: validate failed on node Op1.0" in capres.out
+
+
+def test_full_history():
+    x = pt.scalar("x")
+    out = pt.log(pt.exp(x) / pt.sum(pt.exp(x)))
+    fg = FunctionGraph(outputs=[out], clone=True, copy_inputs=False)
+    history = FullHistory()
+    fg.attach_feature(history)
+    rewrite_graph(fg, clone=False, include=("canonicalize", "stabilize"))
+
+    history.start()
+    assert equal_computations(fg.outputs, [out])
+
+    history.end()
+    assert equal_computations(fg.outputs, [pt.special.log_softmax(x)])
+
+    history.prev()
+    assert equal_computations(fg.outputs, [pt.log(pt.special.softmax(x))])
+
+    for i in range(10):
+        history.prev()
+    assert equal_computations(fg.outputs, [out])
+
+    history.goto(2)
+    assert equal_computations(fg.outputs, [pt.log(pt.special.softmax(x))])
+
+    for i in range(10):
+        history.next()
+
+    assert equal_computations(fg.outputs, [pt.special.log_softmax(x)])
