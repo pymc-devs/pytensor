@@ -2,23 +2,26 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 
 
 @pytest.mark.parametrize(
+    "dtype",
+    ["float64", "int64"],
+)
+@pytest.mark.parametrize(
     "axis",
     [None, 1, (0,)],
 )
-def test_pytorch_CumOp(axis):
+def test_pytorch_CumOp(axis, dtype):
     """Test PyTorch conversion of the `CumOp` `Op`."""
 
     # Create a symbolic input for the first input of `CumOp`
-    a = pt.matrix("a")
+    a = pt.matrix("a", dtype=dtype)
 
     # Create test value
-    test_value = np.arange(9, dtype=config.floatX).reshape((3, 3))
+    test_value = np.arange(9, dtype=dtype).reshape((3, 3))
 
     # Create the output variable
     if isinstance(axis, tuple):
