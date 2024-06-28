@@ -92,17 +92,11 @@ def pytorch_funcify_arange(op, **kwargs):
 
 
 @pytorch_funcify.register(Join)
-def jax_funcify_Join(op, **kwargs):
+def pytorch_funcify_Join(op, **kwargs):
     def join(axis, *tensors):
         # tensors could also be tuples, and in this case they don't have a ndim
         tensors = [torch.tensor(tensor) for tensor in tensors]
-        view = op.view
-        if (view != -1) and all(
-            tensor.shape[axis] == 0 for tensor in tensors[0:view] + tensors[view + 1 :]
-        ):
-            return tensors[view]
 
-        else:
-            return torch.cat(tensors, dim=axis)
+        return torch.cat(tensors, dim=axis)
 
     return join
