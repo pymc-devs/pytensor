@@ -681,6 +681,22 @@ def largest(*args):
         return max(stack(args), axis=0)
 
 
+def isposinf(x):
+    """
+    Return if the input variable has positive infinity element
+
+    """
+    return eq(x, np.inf)
+
+
+def isneginf(x):
+    """
+    Return if the input variable has negative infinity element
+
+    """
+    return eq(x, -np.inf)
+
+
 @scalar_elemwise
 def lt(a, b):
     """a < b"""
@@ -2913,6 +2929,62 @@ def vectorize_node_dot_to_matmul(op, node, batched_x, batched_y):
         return vectorize_node_fallback(op, node, batched_x, batched_y)
 
 
+def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
+    """
+    Replace NaN with zero and infinity with large finite numbers (default
+    behaviour) or with the numbers defined by the user using the `nan`,
+    `posinf` and/or `neginf` keywords.
+
+    NaN is replaced by zero or by the user defined value in
+    `nan` keyword, infinity is replaced by the largest finite floating point
+    values representable by ``x.dtype`` or by the user defined value in
+    `posinf` keyword and -infinity is replaced by the most negative finite
+    floating point values representable by ``x.dtype`` or by the user defined
+    value in `neginf` keyword.
+
+    Parameters
+    ----------
+    x : symbolic tensor
+        Input array.
+    nan
+        The value to replace NaN's with in the tensor (default = 0).
+    posinf
+        The value to replace +INF with in the tensor (default max
+        in range representable by ``x.dtype``).
+    neginf
+        The value to replace -INF with in the tensor (default min
+        in range representable by ``x.dtype``).
+
+    Returns
+    -------
+    out
+        The tensor with NaN's, +INF, and -INF replaced with the
+        specified and/or default substitutions.
+    """
+    # Replace NaN's with nan keyword
+    is_nan = isnan(x)
+    is_pos_inf = isposinf(x)
+    is_neg_inf = isneginf(x)
+
+    x = switch(is_nan, nan, x)
+
+    # Get max and min values representable by x.dtype
+    maxf = posinf
+    minf = neginf
+
+    # Specify the value to replace +INF and -INF with
+    if maxf is None:
+        maxf = np.finfo(x.real.dtype).max
+    if minf is None:
+        minf = np.finfo(x.real.dtype).min
+
+    # Replace +INF and -INF values
+    x = switch(is_pos_inf, maxf, x)
+    x = switch(is_neg_inf, minf, x)
+
+    return x
+
+
 # NumPy logical aliases
 square = sqr
 
@@ -2951,6 +3023,8 @@ __all__ = [
     "not_equal",
     "isnan",
     "isinf",
+    "isposinf",
+    "isneginf",
     "allclose",
     "isclose",
     "and_",
@@ -3069,4 +3143,5 @@ __all__ = [
     "logaddexp",
     "logsumexp",
     "hyp2f1",
+    "nan_to_num",
 ]
