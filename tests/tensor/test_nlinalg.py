@@ -365,7 +365,7 @@ def test_det():
     assert np.allclose(np.linalg.det(r), f(r))
 
 
-def test_det_non_square():
+def test_det_non_square_raises():
     with pytest.raises(ValueError, match="Det not defined"):
         det(tensor("x", shape=(5, 7)))
 

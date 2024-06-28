@@ -205,7 +205,7 @@ class Det(Op):
         # Check for known shapes and square matrix
         if None not in x.type.shape and (x.type.shape[0] != x.type.shape[1]):
             raise ValueError(
-                f"Det not defined for non-square matrix inputs. Shape received is {x.type.shape}"
+                f"Determinant not defined for non-square matrix inputs. Shape received is {x.type.shape}"
             )
         o = scalar(dtype=x.dtype)
         return Apply(self, [x], [o])
