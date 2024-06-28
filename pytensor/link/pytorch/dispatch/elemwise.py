@@ -2,6 +2,7 @@ import torch
 
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.math import Sum
 
 
 @pytorch_funcify.register(Elemwise)
@@ -34,3 +35,11 @@ def pytorch_funcify_DimShuffle(op, **kwargs):
         return res
 
     return dimshuffle
+
+
+@pytorch_funcify.register(Sum)
+def pytorch_funcify_careduce(op, **kwargs):
+    def torch_sum(x):
+        return torch.sum(x, dim=op.axis)
+
+    return torch_sum

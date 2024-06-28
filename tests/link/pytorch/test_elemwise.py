@@ -53,3 +53,13 @@ def test_pytorch_elemwise():
 
     fg = FunctionGraph([x], [out])
     compare_pytorch_and_py(fg, [[0.9, 0.9]])
+
+
+def test_pytorch_sum():
+    a_pt = vector("a")
+    test_value = np.r_[1, 2, 3].astype(config.floatX)
+
+    x = pt.math.sum(a_pt, axis=None)
+    x_fg = FunctionGraph([a_pt], [x])
+
+    compare_pytorch_and_py(x_fg, [test_value])
