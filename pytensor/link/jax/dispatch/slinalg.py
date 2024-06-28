@@ -20,7 +20,7 @@ def jax_funcify_Eigvalsh(op, **kwargs):
     def eigvalsh(a, b):
         if b is not None:
             raise NotImplementedError(
-                "jax.numpy.linalg.eigvalsh does not support computing eigenvalues with additional symmetric matrix."
+                "jax.numpy.linalg.eigvalsh does not support generalized eigenvector problems (b != None)"
             )
         return jax.numpy.linalg.eigvalsh(a, UPLO=UPLO)
 
