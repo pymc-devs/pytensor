@@ -15,11 +15,13 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import _allclose, dot, matmul
 from pytensor.tensor.nlinalg import (
+    SVD,
     Det,
     KroneckerProduct,
     MatrixInverse,
     MatrixPinv,
     matrix_inverse,
+    svd,
 )
 from pytensor.tensor.rewriting.linalg import inv_as_solve
 from pytensor.tensor.slinalg import (
@@ -390,3 +392,67 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
     test_vals = [x @ np.swapaxes(x, -1, -2) for x in test_vals]
 
     np.testing.assert_allclose(f1(*test_vals), f2(*test_vals), atol=1e-8)
+
+
+def test_svd_uv_merge():
+    a = matrix("a")
+    s_1 = svd(a, full_matrices=False, compute_uv=False)
+    _, s_2, _ = svd(a, full_matrices=False, compute_uv=True)
+    _, s_3, _ = svd(a, full_matrices=True, compute_uv=True)
+    u_4, s_4, v_4 = svd(a, full_matrices=True, compute_uv=True)
+    # `grad` will introduces an SVD Op with compute_uv=True
+    # full_matrices = True is not supported for grad of svd
+    gs = pt.grad(pt.sum(s_1), a)
+
+    # 1. compute_uv=False needs rewriting with compute_uv=True
+    f_1 = pytensor.function([a], gs)
+    nodes = f_1.maker.fgraph.apply_nodes
+    svd_counter = 0
+    for node in nodes:
+        if isinstance(node.op, SVD):
+            assert node.op.compute_uv
+            svd_counter += 1
+    assert svd_counter == 1
+
+    # 2. compute_uv=True needs rewriting with compute=False, reuse node
+    f_2 = pytensor.function([a], [s_1, s_2])
+    nodes = f_2.maker.fgraph.apply_nodes
+    svd_counter = 0
+    for node in nodes:
+        if isinstance(node.op, SVD):
+            assert not node.op.compute_uv
+            svd_counter += 1
+    assert svd_counter == 1
+
+    # 3. compute_uv=True needs rewriting with compute=False, create new node
+    # full_matrices needs to retain the value
+    f_3 = pytensor.function([a], [s_2])
+    nodes = f_3.maker.fgraph.apply_nodes
+    svd_counter = 0
+    for node in nodes:
+        if isinstance(node.op, SVD):
+            assert not node.op.compute_uv
+            svd_counter += 1
+    assert svd_counter == 1
+
+    # Case 2 of 3. for a different full_matrices
+    f_4 = pytensor.function([a], [s_3])
+    nodes = f_4.maker.fgraph.apply_nodes
+    svd_counter = 0
+    for node in nodes:
+        if isinstance(node.op, SVD):
+            assert not node.op.compute_uv
+            assert node.op.full_matrices
+            svd_counter += 1
+    assert svd_counter == 1
+
+    # 4. No rewrite should happen
+    f_5 = pytensor.function([a], [u_4])
+    nodes = f_5.maker.fgraph.apply_nodes
+    svd_counter = 0
+    for node in nodes:
+        if isinstance(node.op, SVD):
+            assert node.op.full_matrices
+            assert node.op.compute_uv
+            svd_counter += 1
+    assert svd_counter == 1
