@@ -130,6 +130,7 @@ def local_dimshuffle_rv_lift(fgraph, node):
     if ds_op.drop:
         return False
 
+    [ds_rv] = node.outputs
     rv_node = node.inputs[0].owner
 
     if not (rv_node and isinstance(rv_node.op, RandomVariable)):
@@ -182,10 +183,17 @@ def local_dimshuffle_rv_lift(fgraph, node):
     if config.compute_test_value != "off":
         compute_test_value(new_node)
 
-    new_rv = new_node.default_output()
+    new_next_rng, new_rv = new_node.outputs
+
     if rv.name:
         new_rv.name = f"{rv.name}_lifted"
-    return [new_rv]
+
+    # We replace uses of the dimshuffled RV by the new RV
+    # And uses of the old RNG update by the new RNG update
+    return {
+        ds_rv: new_rv,
+        next_rng: new_next_rng,
+    }
 
 
 @node_rewriter([Subtensor, AdvancedSubtensor1, AdvancedSubtensor])
@@ -217,7 +225,7 @@ def local_subtensor_rv_lift(fgraph, node):
 
     rv_op = rv_node.op
     rng, size, *dist_params = rv_node.inputs
-    rv = rv_node.default_output()
+    next_rng, rv = rv_node.outputs
 
     # If no one else is using the underlying `RandomVariable`, then we can
     # do this; otherwise, the graph would be internally inconsistent.
@@ -331,8 +339,13 @@ def local_subtensor_rv_lift(fgraph, node):
 
     # Create new RV
     new_node = rv_op.make_node(rng, new_size, *new_dist_params)
-    new_rv = new_node.default_output()
+    new_next_rng, new_rv = new_node.outputs
 
     copy_stack_trace(rv, new_rv)
 
-    return [new_rv]
+    # We replace uses of the indexed RV by the new RV
+    # And uses of the old RNG update by the new RNG update
+    return {
+        indexed_rv: new_rv,
+        next_rng: new_next_rng,
+    }
