@@ -440,6 +440,100 @@ class History(Feature):
 
 
 class FullHistory(Feature):
+    """Keeps track of all changes in FunctionGraph and allows arbitrary back and forth through intermediate states
+
+    .. testcode::
+        import pytensor
+        import pytensor.tensor as pt
+        from pytensor.graph.fg import FunctionGraph
+        from pytensor.graph.features import History, FullHistory
+        from pytensor.graph.rewriting.utils import rewrite_graph
+
+        x = pt.scalar("x")
+        out = pt.log(pt.exp(x) / pt.sum(pt.exp(x)))
+
+        fg = FunctionGraph(outputs=[out])
+        history = FullHistory()
+        fg.attach_feature(history)
+
+        rewrite_graph(fg, clone=False, include=("canonicalize", "stabilize"))
+
+        # Replay rewrites
+        history.start()
+        pytensor.dprint(fg)
+        pytensor.config.optimizer_verbose = True
+        for i in range(3):
+            print(">> ", end="")
+            pytensor.dprint(history.next())
+
+    .. testoutput::
+        Log [id A] 4
+         └─ True_div [id B] 3
+            ├─ Exp [id C] 2
+            │  └─ x [id D]
+            └─ Sum{axes=None} [id E] 1
+               └─ Exp [id F] 0
+                  └─ x [id D]
+        >> MergeOptimizer
+        Log [id A] 3
+         └─ True_div [id B] 2
+            ├─ Exp [id C] 0
+            │  └─ x [id D]
+            └─ Sum{axes=None} [id E] 1
+               └─ Exp [id C] 0
+                  └─ ···
+        >> local_mul_canonizer
+        Log [id A] 1
+         └─ Softmax{axis=None} [id B] 0
+            └─ x [id C]
+        >> local_logsoftmax
+        LogSoftmax{axis=None} [id A] 0
+         └─ x [id B]
+
+
+    .. testcode::
+        # Or in reverse
+        for i in range(3):
+            print(">> ", end="")
+            pytensor.dprint(history.prev())
+        pytensor.config.optimizer_verbose = False
+
+
+    .. testoutput::
+        >> local_logsoftmax
+        Log [id A] 1
+         └─ Softmax{axis=None} [id B] 0
+            └─ x [id C]
+        >> local_mul_canonizer
+        Log [id A] 3
+         └─ True_div [id B] 2
+            ├─ Exp [id C] 0
+            │  └─ x [id D]
+            └─ Sum{axes=None} [id E] 1
+               └─ Exp [id C] 0
+                  └─ ···
+        >> MergeOptimizer
+        Log [id A] 4
+         └─ True_div [id B] 3
+            ├─ Exp [id C] 2
+            │  └─ x [id D]
+            └─ Sum{axes=None} [id E] 1
+               └─ Exp [id F] 0
+                  └─ x [id D]
+
+
+    .. testcode::
+        # Or go to any step
+        pytensor.dprint(history.goto(2))
+
+    .. testoutput::
+        Log [id A] 1
+         └─ Softmax{axis=None} [id B] 0
+            └─ x [id C]
+
+
+    """
+
     def __init__(self):
         self.fw = []
         self.bw = []
