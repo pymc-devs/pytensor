@@ -12,6 +12,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, Prod, _matrix_matrix_matmul, log, prod
 from pytensor.tensor.nlinalg import (
+    SVD,
     KroneckerProduct,
     MatrixInverse,
     MatrixPinv,
@@ -412,12 +413,21 @@ def _find_diag_from_eye_mul(potential_mul_input):
 
 @register_canonicalize
 @register_stabilize
-@node_rewriter([inv])
-def rewrite_inv_diag_from_eye_mul(fgraph, node):
+@node_rewriter([Blockwise])
+def rewrite_inv_for_diag_and_orthonormal(fgraph, node):
     """
-     This rewrite takes advantage of the fact that for a diagonal matrix, the inverse matrix is a diagonal matrix with the new diagonal entries as reciprocals of the original diagonal elements.
+     This rewrite covers a few cases which take advantage of the fact that :
+     1. for a diagonal matrix, the inverse is a diagonal matrix with the new diagonal entries as reciprocals of the original diagonal elements.
+     2. for an orthonormal matrix, the inverse is simply the transpose.
 
-    The presence of a diagonal matrix is detected by inspecting the graph. This rewrite can identify diagonal matrices that arise as the result of elementwise multiplication with an identity matrix.
+     For simplicity, this function deals with the following cases :
+     1. for a diagonal matrix :
+        i) arising from the multiplicaton of eye with a scalar/vector/matrix
+        ii) arising from pt.diag of a vector
+        iii) solve(x, eye) directly returns inv(x)
+    2. for an orthonormal matrix :
+        i) arising from pt.linalg.svd decomposition (U, Vh)
+        ii) arising from pt.linalg.qr
 
     Parameters
     ----------
@@ -431,22 +441,57 @@ def rewrite_inv_diag_from_eye_mul(fgraph, node):
     list of Variable, optional
         List of optimized variables, or None if no optimization was performed
     """
-    potential_mul_input = node.inputs[0]
-    eye_non_eye_inputs = _find_diag_from_eye_mul(potential_mul_input)
-    if eye_non_eye_inputs is None:
+    # List of useful operations : Inv, Pinv, Solve
+    core_op = node.op.core_op
+    if not (
+        isinstance(core_op, inv)
+        or isinstance(core_op, pinv)
+        or isinstance(core_op, solve)
+    ):
         return None
-    eye_input, non_eye_inputs = eye_non_eye_inputs
 
-    # Dealing with only one other input
-    if len(non_eye_inputs) != 1:
-        return None
+    # Dealing with direct inverse Ops
+    if isinstance(core_op, inv) or isinstance(core_op, pinv):
+        # Dealing with diagonal matrix from eye_mul
+        potential_mul_input = node.inputs[0]
+        eye_non_eye_inputs = _find_diag_from_eye_mul(potential_mul_input)
+        if eye_non_eye_inputs is not None:
+            eye_input, non_eye_inputs = eye_non_eye_inputs
 
-    useful_eye, useful_non_eye = eye_input[0], non_eye_inputs[0]
+            # Dealing with only one other input
+            if len(non_eye_inputs) != 1:
+                return None
 
-    # For a matrix, we can first get the diagonal and then only use those
-    if useful_non_eye.type.broadcastable[-2:] == (False, False):
-        # For Matrix
-        return [useful_eye * 1 / useful_non_eye.diagonal(axis1=-1, axis2=-2)]
-    else:
-        # For Scalar/Vector
-        return [useful_eye * 1 / useful_non_eye]
+            useful_eye, useful_non_eye = eye_input[0], non_eye_inputs[0]
+
+            # For a matrix, we can first get the diagonal and then only use those
+            if useful_non_eye.type.broadcastable[-2:] == (False, False):
+                # For Matrix
+                return [useful_eye * 1 / useful_non_eye.diagonal(axis1=-1, axis2=-2)]
+            else:
+                # For Scalar/Vector
+                return [useful_eye * 1 / useful_non_eye]
+
+        # Dealing with orthonormal matrix from SVD
+        else:
+            # Check if input to Inverse is coming from SVD
+            input_to_inv = node.inputs[0]
+            # Check if this input is coming from SVD with compute_uv = True
+            if not (
+                isinstance(input_to_inv.owner.op, Blockwise)
+                and isinstance(input_to_inv.owner.op.core_op, SVD)
+                and input_to_inv.owner.op.core_op.compute_uv is True
+            ):
+                return None
+
+            # To make sure input is orthonormal, we have to check that its not S
+            if input_to_inv == input_to_inv.owner.outputs[1]:
+                return None
+
+            orthonormal_input = input_to_inv
+            inverse = orthonormal_input.T
+            return [inverse]
+
+    # Dealing with solve(x, eye)
+    elif isinstance(core_op, solve):
+        pass
