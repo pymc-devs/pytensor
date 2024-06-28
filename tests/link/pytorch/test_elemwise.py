@@ -1,9 +1,11 @@
 import numpy as np
+import pytest
 
 import pytensor.tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor import elemwise as pt_elemwise
+from pytensor.tensor.special import SoftmaxGrad, log_softmax, softmax
 from pytensor.tensor.type import matrix, tensor, vector
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 
@@ -53,3 +55,50 @@ def test_pytorch_elemwise():
 
     fg = FunctionGraph([x], [out])
     compare_pytorch_and_py(fg, [[0.9, 0.9]])
+
+
+@pytest.mark.parametrize("dtype", ["float64", "int64"])
+@pytest.mark.parametrize("axis", [None, 0, 1])
+def test_softmax(axis, dtype):
+    x = matrix("x", dtype=dtype)
+    out = softmax(x, axis=axis)
+    fgraph = FunctionGraph([x], [out])
+    test_input = np.arange(6, dtype=config.floatX).reshape(2, 3)
+
+    if dtype == "int64":
+        with pytest.raises(
+            NotImplementedError,
+            match="Pytorch Softmax is not currently implemented for non-float types.",
+        ):
+            compare_pytorch_and_py(fgraph, [test_input])
+    else:
+        compare_pytorch_and_py(fgraph, [test_input])
+
+
+@pytest.mark.parametrize("dtype", ["float64", "int64"])
+@pytest.mark.parametrize("axis", [None, 0, 1])
+def test_logsoftmax(axis, dtype):
+    x = matrix("x", dtype=dtype)
+    out = log_softmax(x, axis=axis)
+    fgraph = FunctionGraph([x], [out])
+    test_input = np.arange(6, dtype=config.floatX).reshape(2, 3)
+
+    if dtype == "int64":
+        with pytest.raises(
+            NotImplementedError,
+            match="Pytorch LogSoftmax is not currently implemented for non-float types.",
+        ):
+            compare_pytorch_and_py(fgraph, [test_input])
+    else:
+        compare_pytorch_and_py(fgraph, [test_input])
+
+
+@pytest.mark.parametrize("axis", [None, 0, 1])
+def test_softmax_grad(axis):
+    dy = matrix("dy")
+    dy_value = np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
+    sm = matrix("sm")
+    sm_value = np.arange(6, dtype=config.floatX).reshape(2, 3)
+    out = SoftmaxGrad(axis=axis)(dy, sm)
+    fgraph = FunctionGraph([dy, sm], [out])
+    compare_pytorch_and_py(fgraph, [dy_value, sm_value])
