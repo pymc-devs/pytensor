@@ -4326,13 +4326,8 @@ def block_diag(*matrices: TensorVariable, format: Literal["csc", "csr"] = "csc")
         result_sparse = block_diag(A, B, format='csr', name='X')
 
         print(result_sparse)
-        >>>  SparseVariable{csr,int32}
-
         print(result_sparse.toarray().eval())
-        >>> array([[1, 2, 0, 0],
-        >>> [3, 4, 0, 0],
-        >>> [0, 0, 5, 6],
-        >>> [0, 0, 7, 8]])
+
     """
     if len(matrices) == 1:
         return matrices
