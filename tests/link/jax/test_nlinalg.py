@@ -13,7 +13,7 @@ from pytensor.tensor import blas as pt_blas
 from pytensor.tensor import nlinalg as pt_nlinalg
 from pytensor.tensor.math import MaxAndArgmax, maximum
 from pytensor.tensor.math import max as pt_max
-from pytensor.tensor.type import dvector, matrix, scalar, tensor3, vector
+from pytensor.tensor.type import matrix, scalar, tensor3, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
@@ -82,12 +82,12 @@ def test_jax_basic_multiout():
 
 @pytest.mark.xfail(
     version_parse(jax.__version__) >= version_parse("0.2.12"),
-    reason="JAX Numpy API does not support dynamic shapes",
+    reason="Operation leads to JAX Tracer object is used in a context where a Python integer is expected (jax.errors.TracerIntegerConversionError).",
 )
 def test_jax_basic_multiout_omni():
     # Test that a single output of a multi-output `Op` can be used as input to
     # another `Op`
-    x = dvector()
+    x = vector(dtype="float64", shape=(2,))
     mx, amx = MaxAndArgmax([0])(x)
     out = mx * amx
     out_fg = FunctionGraph([x], [out])
