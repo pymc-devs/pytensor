@@ -930,7 +930,7 @@ class PatternPrinter(Printer):
             )
         idx = node.outputs.index(output)
         pattern, precedences = self.patterns[idx]
-        precedences += (1000,) * len(node.inputs)
+        precedences += (1000,) * (len(node.inputs) - len(precedences))
 
         def pp_process(input, new_precedence):
             with set_precedence(pstate, new_precedence):
@@ -938,10 +938,9 @@ class PatternPrinter(Printer):
             return r
 
         d = {
-            str(i): x
-            for i, x in enumerate(
-                pp_process(input, precedence)
-                for input, precedence in zip(node.inputs, precedences, strict=False)
+            str(i): pp_process(input, precedence)
+            for i, (input, precedence) in enumerate(
+                zip(node.inputs, precedences, strict=True)
             )
         }
         r = pattern % d
