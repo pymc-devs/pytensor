@@ -75,6 +75,8 @@ def test_pytorch_all():
     x_fg = FunctionGraph([a_pt], [x])
 
     compare_pytorch_and_py(x_fg, [test_value])
+
+
 @pytest.mark.parametrize("dtype", ["float64", "int64"])
 @pytest.mark.parametrize("axis", [None, 0, 1])
 def test_softmax(axis, dtype):

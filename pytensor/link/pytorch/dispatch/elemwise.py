@@ -6,7 +6,6 @@ from pytensor.tensor.math import All, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 
 
-
 @pytorch_funcify.register(Elemwise)
 def pytorch_funcify_Elemwise(op, node, **kwargs):
     scalar_op = op.scalar_op
