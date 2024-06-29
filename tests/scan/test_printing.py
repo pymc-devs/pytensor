@@ -62,9 +62,10 @@ def test_debugprint_sitsot():
     Scan{scan_fn, while_loop=False, inplace=none} [id C]
      ← Mul [id W] (inner_out_sit_sot-0)
         ├─ *0-<Vector(float64, shape=(?,))> [id X] -> [id E] (inner_in_sit_sot-0)
-        └─ *1-<Vector(float64, shape=(?,))> [id Y] -> [id M] (inner_in_non_seqs-0)"""
+        └─ *1-<Vector(float64, shape=(?,))> [id Y] -> [id M] (inner_in_non_seqs-0)
+    """
 
-    for truth, out in zip(expected_output.split("\n"), lines, strict=False):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
 
 
@@ -120,9 +121,10 @@ def test_debugprint_sitsot_no_extra_info():
     Scan{scan_fn, while_loop=False, inplace=none} [id C]
      ← Mul [id W]
         ├─ *0-<Vector(float64, shape=(?,))> [id X] -> [id E]
-        └─ *1-<Vector(float64, shape=(?,))> [id Y] -> [id M]"""
+        └─ *1-<Vector(float64, shape=(?,))> [id Y] -> [id M]
+    """
 
-    for truth, out in zip(expected_output.split("\n"), lines, strict=False):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
 
 
@@ -188,9 +190,10 @@ def test_debugprint_nitsot():
         ├─ *0-<Scalar(float64, shape=())> [id Y] -> [id S] (inner_in_seqs-0)
         └─ Pow [id Z]
            ├─ *2-<Scalar(float64, shape=())> [id BA] -> [id W] (inner_in_non_seqs-0)
-           └─ *1-<Scalar(int64, shape=())> [id BB] -> [id U] (inner_in_seqs-1)"""
+           └─ *1-<Scalar(int64, shape=())> [id BB] -> [id U] (inner_in_seqs-1)
+   """
 
-    for truth, out in zip(expected_output.split("\n"), lines, strict=False):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
 
 
@@ -303,9 +306,10 @@ def test_debugprint_nested_scans():
     Scan{scan_fn, while_loop=False, inplace=none} [id BE]
      ← Mul [id CA] (inner_out_sit_sot-0)
         ├─ *0-<Vector(float64, shape=(?,))> [id CB] -> [id BG] (inner_in_sit_sot-0)
-        └─ *1-<Vector(float64, shape=(?,))> [id CC] -> [id BO] (inner_in_non_seqs-0)"""
+        └─ *1-<Vector(float64, shape=(?,))> [id CC] -> [id BO] (inner_in_non_seqs-0)
+    """
 
-    for truth, out in zip(expected_output.split("\n"), lines, strict=False):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
 
     fg = FunctionGraph([c, k, A], [final_result])
@@ -402,9 +406,10 @@ def test_debugprint_nested_scans():
      → *1-<Vector(float64, shape=(?,))> [id CB] -> [id BA] (inner_in_non_seqs-0)
      ← Mul [id CC] (inner_out_sit_sot-0)
         ├─ *0-<Vector(float64, shape=(?,))> [id CA] (inner_in_sit_sot-0)
-        └─ *1-<Vector(float64, shape=(?,))> [id CB] (inner_in_non_seqs-0)"""
+        └─ *1-<Vector(float64, shape=(?,))> [id CB] (inner_in_non_seqs-0)
+    """
 
-    for truth, out in zip(expected_output.split("\n"), lines, strict=False):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
 
 
@@ -477,9 +482,10 @@ def test_debugprint_mitsot():
         └─ *0-<Scalar(int64, shape=())> [id BD] -> [id E] (inner_in_mit_sot-0-0)
      ← Add [id BE] (inner_out_mit_sot-1)
         ├─ *3-<Scalar(int64, shape=())> [id BF] -> [id O] (inner_in_mit_sot-1-1)
-        └─ *2-<Scalar(int64, shape=())> [id BG] -> [id O] (inner_in_mit_sot-1-0)"""
+        └─ *2-<Scalar(int64, shape=())> [id BG] -> [id O] (inner_in_mit_sot-1-0)
+    """
 
-    for truth, out in zip(expected_output.split("\n"), lines, strict=False):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
 
 
@@ -613,9 +619,10 @@ def test_debugprint_mitmot():
     Scan{scan_fn, while_loop=False, inplace=none} [id F]
      ← Mul [id CV] (inner_out_sit_sot-0)
         ├─ *0-<Vector(float64, shape=(?,))> [id CT] -> [id H] (inner_in_sit_sot-0)
-        └─ *1-<Vector(float64, shape=(?,))> [id CW] -> [id P] (inner_in_non_seqs-0)"""
+        └─ *1-<Vector(float64, shape=(?,))> [id CW] -> [id P] (inner_in_non_seqs-0)
+    """
 
-    for truth, out in zip(expected_output.split("\n"), lines, strict=False):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
 
 
