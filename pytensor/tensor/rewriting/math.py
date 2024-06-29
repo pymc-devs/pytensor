@@ -789,9 +789,9 @@ class AlgebraicCanonizer(NodeRewriter):
     --------
     >>> import pytensor.tensor as pt
     >>> from pytensor.tensor.rewriting.math import AlgebraicCanonizer
-    >>> add_canonizer = AlgebraicCanonizer(add, sub, neg, \\
+    >>> add_canonizer = AlgebraicCanonizer(add, sub, neg, \
     ...                                    lambda n, d: sum(n) - sum(d))
-    >>> mul_canonizer = AlgebraicCanonizer(mul, true_div, inv, \\
+    >>> mul_canonizer = AlgebraicCanonizer(mul, true_div, reciprocal, \
     ...                                    lambda n, d: prod(n) / prod(d))
 
     Examples of rewrites `mul_canonizer` can perform:

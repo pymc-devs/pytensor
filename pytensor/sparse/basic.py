@@ -4316,23 +4316,26 @@ def block_diag(*matrices: TensorVariable, format: Literal["csc", "csr"] = "csc")
     --------
     Create a sparse block diagonal matrix from two sparse 2x2 matrices:
 
-    ..code-block:: python
+    .. testcode::
         import numpy as np
         from pytensor.sparse import block_diag
         from scipy.sparse import csr_matrix
 
         A = csr_matrix([[1, 2], [3, 4]])
         B = csr_matrix([[5, 6], [7, 8]])
-        result_sparse = block_diag(A, B, format='csr', name='X')
+        result_sparse = block_diag(A, B, format='csr')
 
         print(result_sparse)
-        >>>  SparseVariable{csr,int32}
-
         print(result_sparse.toarray().eval())
-        >>> array([[1, 2, 0, 0],
-        >>> [3, 4, 0, 0],
-        >>> [0, 0, 5, 6],
-        >>> [0, 0, 7, 8]])
+
+    .. testoutput::
+
+        SparseVariable{csr,int64}
+        [[1 2 0 0]
+         [3 4 0 0]
+         [0 0 5 6]
+         [0 0 7 8]]
+
     """
     if len(matrices) == 1:
         return matrices

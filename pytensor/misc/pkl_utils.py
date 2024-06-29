@@ -239,7 +239,7 @@ def dump(
     >>> foo_2 = pytensor.shared(1, name='foo')
     >>> with open('model.zip', 'wb') as f:
     ...     dump((foo_1, foo_2, np.array(2)), f)
-    >>> np.load('model.zip').keys()
+    >>> list(np.load('model.zip').keys())
     ['foo', 'foo_2', 'array_0', 'pkl']
     >>> np.load('model.zip')['foo']
     array(0)

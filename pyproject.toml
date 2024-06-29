@@ -75,6 +75,7 @@ tests = [
     "coverage>=5.1",
     "pytest-benchmark",
     "pytest-mock",
+    "pytest-sphinx",
 ]
 rtd = ["sphinx>=5.1.0,<6", "pygments", "pydot", "pydot2", "pydot-ng"]
 jax = ["jax", "jaxlib"]
@@ -116,7 +117,7 @@ versionfile_build = "pytensor/_version.py"
 tag_prefix = "rel-"
 
 [tool.pytest]
-addopts = "--durations=50"
+addopts = "--durations=50  --doctest-modules pytensor --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link"
 testpaths = "tests/"
 
 [tool.ruff]
