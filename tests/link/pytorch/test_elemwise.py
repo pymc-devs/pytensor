@@ -63,3 +63,13 @@ def test_pytorch_sum():
     x_fg = FunctionGraph([a_pt], [x])
 
     compare_pytorch_and_py(x_fg, [test_value])
+
+
+def test_pytorch_all():
+    a_pt = matrix("a")
+    test_value = np.array([[1, 2], [3, 4]]).astype(config.floatX)
+
+    x = pt.math.all(a_pt, axis=None)
+    x_fg = FunctionGraph([a_pt], [x])
+
+    compare_pytorch_and_py(x_fg, [test_value])
