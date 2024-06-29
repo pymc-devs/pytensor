@@ -2849,7 +2849,7 @@ class HStack(Op):
             else:
                 return None
 
-        return [choose(c, d) for c, d in zip(is_continuous, derivative)]
+        return [choose(c, d) for c, d in zip(is_continuous, derivative, strict=True)]
 
     def infer_shape(self, fgraph, node, ins_shapes):
         def _get(l):
@@ -2928,7 +2928,7 @@ class VStack(HStack):
             else:
                 return None
 
-        return [choose(c, d) for c, d in zip(is_continuous, derivative)]
+        return [choose(c, d) for c, d in zip(is_continuous, derivative, strict=True)]
 
     def infer_shape(self, fgraph, node, ins_shapes):
         def _get(l):

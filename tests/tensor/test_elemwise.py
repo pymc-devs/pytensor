@@ -337,6 +337,7 @@ class TestBroadcast:
             [self.op, self.cop],
             [self.type, self.ctype],
             [self.rand_val, self.rand_cval],
+            strict=True,
         ):
             x = t(pytensor.config.floatX, shape=(None, None))("x")
             y = t(pytensor.config.floatX, shape=(1, 1))("y")
@@ -368,6 +369,7 @@ class TestBroadcast:
             [self.op, self.cop],
             [self.type, self.ctype],
             [self.rand_val, self.rand_cval],
+            strict=True,
         ):
             x = t(pytensor.config.floatX, shape=(None,) * 5)("x")
             y = t(pytensor.config.floatX, shape=(None,) * 5)("y")
@@ -388,6 +390,7 @@ class TestBroadcast:
             [self.op, self.cop],
             [self.type, self.ctype],
             [self.rand_val, self.rand_cval],
+            strict=True,
         ):
             x = t(pytensor.config.floatX, shape=(None,) * 2)("x")
             e = op(ps.add)(x, x)

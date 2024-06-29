@@ -118,7 +118,7 @@ def {scalar_op_fn_name}({input_names}):
             [
                 f"direct_cast({i_name}, {i_tmp_dtype_name})"
                 for i_name, i_tmp_dtype_name in zip(
-                    input_names, input_tmp_dtype_names.keys()
+                    input_names, input_tmp_dtype_names.keys(), strict=False
                 )
             ]
         )

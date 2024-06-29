@@ -502,7 +502,7 @@ class GemmOptimizer(GraphRewriter):
                     ].tag.values_eq_approx = values_eq_approx_remove_inf_nan
                     try:
                         fgraph.replace_all_validate_remove(
-                            list(zip(node.outputs, new_outputs)),
+                            list(zip(node.outputs, new_outputs, strict=True)),
                             [old_dot22],
                             reason="GemmOptimizer",
                             # For now we disable the warning as we know case

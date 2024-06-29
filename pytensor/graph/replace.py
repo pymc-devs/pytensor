@@ -78,7 +78,7 @@ def clone_replace(
     items = list(_format_replace(replace).items())
 
     tmp_replace = [(x, x.type()) for x, y in items]
-    new_replace = [(x, y) for ((_, x), (_, y)) in zip(tmp_replace, items)]
+    new_replace = [(x, y) for ((_, x), (_, y)) in zip(tmp_replace, items, strict=True)]
     _, _outs, _ = rebuild_collect_shared(output, [], tmp_replace, [], **rebuild_kwds)
 
     # TODO Explain why we call it twice ?!
@@ -295,11 +295,11 @@ def vectorize_graph(
     inputs = truncated_graph_inputs(seq_outputs, ancestors_to_include=replace.keys())
     new_inputs = [replace.get(inp, inp) for inp in inputs]
 
-    vect_vars = dict(zip(inputs, new_inputs))
+    vect_vars = dict(zip(inputs, new_inputs, strict=True))
     for node in io_toposort(inputs, seq_outputs):
         vect_inputs = [vect_vars.get(inp, inp) for inp in node.inputs]
         vect_node = vectorize_node(node, *vect_inputs)
-        for output, vect_output in zip(node.outputs, vect_node.outputs):
+        for output, vect_output in zip(node.outputs, vect_node.outputs, strict=True):
             if output in vect_vars:
                 # This can happen when some outputs of a multi-output node are given a replacement,
                 # while some of the remaining outputs are still needed in the graph.

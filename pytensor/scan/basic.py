@@ -886,7 +886,9 @@ def scan(
     if condition is not None:
         outputs.append(condition)
     fake_nonseqs = [x.type() for x in non_seqs]
-    fake_outputs = clone_replace(outputs, replace=dict(zip(non_seqs, fake_nonseqs)))
+    fake_outputs = clone_replace(
+        outputs, replace=dict(zip(non_seqs, fake_nonseqs, strict=True))
+    )
     all_inputs = filter(
         lambda x: (
             isinstance(x, Variable)
@@ -1049,7 +1051,7 @@ def scan(
         if not isinstance(arg, SharedVariable | Constant)
     ]
 
-    inner_replacements.update(dict(zip(other_scan_args, other_inner_args)))
+    inner_replacements.update(dict(zip(other_scan_args, other_inner_args, strict=True)))
 
     if strict:
         non_seqs_set = set(non_sequences if non_sequences is not None else [])
@@ -1071,7 +1073,7 @@ def scan(
         ]
 
     inner_replacements.update(
-        dict(zip(other_shared_scan_args, other_shared_inner_args))
+        dict(zip(other_shared_scan_args, other_shared_inner_args, strict=True))
     )
 
     ##
