@@ -4,7 +4,7 @@ import time
 import warnings
 from collections.abc import Callable, Mapping, MutableSequence, Sequence
 from functools import partial, reduce
-from typing import TYPE_CHECKING, Literal, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union
 
 import numpy as np
 
@@ -14,7 +14,7 @@ from pytensor.configdefaults import config
 from pytensor.graph import utils
 from pytensor.graph.basic import Apply, NominalVariable, Variable, io_toposort
 from pytensor.graph.null_type import NullType, null_type
-from pytensor.graph.op import get_test_values
+from pytensor.graph.op import Op, OutputStorageType, get_test_values
 from pytensor.graph.type import Type
 
 
@@ -2298,6 +2298,7 @@ def grad_scale(x, multiplier):
 # The following is more or less pseudocode...
 # ===========================================
 
+
 # Use transpose and forward mode autodiff to get reverse mode autodiff
 # Ops that only define push_forward (Rop) could use this, which is nice
 # because push_forward is usually easier to derive and think about.
@@ -2314,7 +2315,7 @@ def push_forward_through_pull_back(outputs, inputs, tangents):
     return pull_back(input_cotangents, cotangents, tangents)
 
 
-def push_forward(outputs, inputs, input_tangents):
+def _push_forward_impl(outputs, inputs, input_tangents):
     # Get the nodes in topological order and precompute
     # a set of values that are used in the graph.
     nodes = io_toposort(inputs, outputs)
@@ -2328,7 +2329,9 @@ def push_forward(outputs, inputs, input_tangents):
     known_tangents = dict(zip(inputs, input_tangents, strict=True))
     for node in nodes:
         tangents = [known_tangents.get(input, None) for input in node.inputs]
-        result_nums = [i for i in range(len(node.outputs)) if node.outputs[i] in used_values]
+        result_nums = [
+            i for i in range(len(node.outputs)) if node.outputs[i] in used_values
+        ]
         new_outputs, output_tangents = node.op.push_forward(node, tangents, result_nums)
         if new_outputs is not None:
             recorded_rewrites[node] = new_outputs
@@ -2339,7 +2342,7 @@ def push_forward(outputs, inputs, input_tangents):
     return [known_tangents[output] for output in outputs]
 
 
-def pull_back(outputs, inputs, output_cotangents):
+def _pull_back_impl(outputs, inputs, output_cotangents):
     known_cotangents = dict(zip(outputs, output_cotangents, strict=True))
 
     nodes = io_toposort(inputs, outputs)
@@ -2369,6 +2372,7 @@ def pull_back(outputs, inputs, output_cotangents):
 
     return [known_cotangents[input] for input in inputs]
 
+
 def pullback_grad(cost, wrt):
     """A new pt.grad that uses the pull_back function.
 
@@ -2377,9 +2381,138 @@ def pullback_grad(cost, wrt):
     from pytensor.tensor import as_tensor_variable
 
     # Error checking and allow non-list wrt...
-    return pull_back([cost], wrt, [as_tensor_variable(1.)])
+    return pull_back([cost], wrt, [as_tensor_variable(1.0)])
+
 
 def linear_transpose(outputs, inputs, transposed_inputs):
     """Given a linear function from inputs to outputs, return the transposed function."""
     # some loop over inv_toposort...
     # Should look similar to pull_back?
+
+
+class PullBackOp(Op):
+    __props__ = ("n_outputs", "n_inputs")
+
+    def __init__(self, n_outputs, n_inputs):
+        self.n_outputs = n_outputs
+        self.n_inputs = n_inputs
+        super().__init__()
+
+    def make_node(self, *all_inputs) -> Apply:
+        # all_inputs is [*outputs, *inputs, *output_cotangents]
+        if len(all_inputs) != 2 * self.n_outputs + self.n_inputs:
+            raise ValueError("Incorrect number of inputs")
+
+        inputs_output_cotangents = all_inputs[self.n_outputs :]
+        inputs = inputs_output_cotangents[: self.n_inputs]
+
+        input_cotangents = [input.type() for input in inputs]
+
+        # TODO
+        continous_dtypes = ["float64", "float32", "float16"]
+        for input in inputs:
+            if input.type.dtype not in continous_dtypes:
+                raise ValueError(
+                    f"Can not compute pullback for non-continous value {input}"
+                )
+
+        return Apply(self, all_inputs, input_cotangents)
+
+    def _get_pullback_primal_outputs(self, node):
+        return node.inputs[: self.n_outputs]
+
+    def _get_pullback_primal_inputs(self, node):
+        return node.inputs[self.n_outputs : self.n_outputs + self.n_inputs]
+
+    def _get_pullback_output_cotangents(self, node):
+        return node.inputs[self.n_outputs + self.n_inputs :]
+
+    def _get_pullback_input_cotangents(self, node):
+        return node.outputs
+
+    def _pullback_split_args(self, node):
+        return (
+            self._get_pullback_primal_outputs(node),
+            self._get_pullback_primal_inputs(node),
+            self._get_pullback_output_cotangents(node),
+        )
+
+    def perform(
+        self, node: Apply, inputs: Sequence[Any], output_storage: OutputStorageType
+    ) -> None:
+        raise NotImplementedError(
+            "PullBackOp can not be executed, but needs to be removed in rewrites"
+        )
+
+    def infer_shape(self, fgraph, node, shapes):
+        return shapes[self.n_outputs + self.n_inputs :]
+
+
+class PushForwardOp(Op):
+    __props__ = ("n_outputs", "n_inputs")
+
+    def __init__(self, n_outputs, n_inputs):
+        self.n_outputs = n_outputs
+        self.n_inputs = n_inputs
+        super().__init__()
+
+    def make_node(self, *all_inputs) -> Apply:
+        # all_inputs is [*outputs, *inputs, *input_tangents]
+        if len(all_inputs) != self.n_outputs + 2 * self.n_inputs:
+            raise ValueError("Incorrect number of inputs")
+
+        outputs = all_inputs[: self.n_outputs]
+        inputs_input_tangents = all_inputs[self.n_outputs :]
+
+        inputs = inputs_input_tangents[: self.n_inputs]
+
+        output_tangents = [output.type() for output in outputs]
+
+        # TODO
+        for input in inputs:
+            continous_dtypes = ["float64", "float32", "float16"]
+            if input.type.dtype not in continous_dtypes:
+                raise ValueError(
+                    f"Can not compute push forward for non-continous value {input}"
+                )
+
+        return Apply(self, all_inputs, output_tangents)
+
+    def _get_push_forward_primal_outputs(self, node):
+        return node.inputs[: self.n_outputs]
+
+    def _get_push_forward_primal_inputs(self, node):
+        return node.inputs[self.n_outputs : self.n_outputs + self.n_inputs]
+
+    def _get_push_forward_output_tangents(self, node):
+        return node.outputs
+
+    def _get_push_forward_input_tangents(self, node):
+        return node.inputs[self.n_outputs + self.n_inputs :]
+
+    def _push_forward_split_args(self, node):
+        return (
+            self._get_push_forward_primal_outputs(node),
+            self._get_push_forward_primal_inputs(node),
+            self._get_push_forward_input_tangents(node),
+        )
+
+    def perform(
+        self, node: Apply, inputs: Sequence[Any], output_storage: OutputStorageType
+    ) -> None:
+        raise NotImplementedError(
+            "PullBackOp can not be executed, but needs to be removed in rewrites"
+        )
+
+    def infer_shape(self, fgraph, node, shapes):
+        return shapes[: self.n_outputs]
+
+
+def pull_back(outputs, inputs, output_cotangents):
+    op = PullBackOp(len(outputs), len(inputs))
+    return op(*outputs, *inputs, *output_cotangents, return_list=True)
+
+
+def push_forward(outputs, inputs, input_tangents):
+    op = PushForwardOp(len(outputs), len(inputs))
+    return op(*outputs, *inputs, *input_tangents, return_list=True)
