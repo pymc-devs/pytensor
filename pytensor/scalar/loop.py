@@ -93,7 +93,7 @@ class ScalarLoop(ScalarInnerGraphOp):
                 )
         else:
             update = outputs
-        for i, u in zip(init, update, strict=False):
+        for i, u in zip(init[: len(update)], update, strict=True):
             if i.type != u.type:
                 raise TypeError(
                     "Init and update types must be the same: "
