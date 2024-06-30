@@ -144,14 +144,14 @@ class Shape(COp):
 _shape = Shape()
 
 
-def shape(x: np.ndarray | Number | Variable) -> Variable:
+def shape(x: np.ndarray | Number | Variable) -> TensorVariable:
     """Return the shape of `x`."""
     if not isinstance(x, Variable):
         # The following is a type error in Python 3.9 but not 3.12.
         # Thus we need to ignore unused-ignore on 3.12.
         x = ptb.as_tensor_variable(x)  # type: ignore[arg-type,unused-ignore]
 
-    return cast(Variable, _shape(x))
+    return cast(TensorVariable, _shape(x))
 
 
 @_get_vector_length.register(Shape)  # type: ignore
@@ -195,7 +195,7 @@ def shape_tuple(x: TensorVariable) -> tuple[Variable, ...]:
             # TODO: Why not use uint64?
             res += (pytensor.scalar.ScalarConstant(pytensor.scalar.int64, shape_val),)
         else:
-            res += (symbolic_shape[i],)  # type: ignore
+            res += (symbolic_shape[i],)
 
     return res
 

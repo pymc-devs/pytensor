@@ -365,6 +365,11 @@ def test_det():
     assert np.allclose(np.linalg.det(r), f(r))
 
 
+def test_det_non_square_raises():
+    with pytest.raises(ValueError, match="Determinant not defined"):
+        det(tensor("x", shape=(5, 7)))
+
+
 def test_det_grad():
     rng = np.random.default_rng(utt.fetch_seed())
 
