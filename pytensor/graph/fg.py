@@ -1,7 +1,7 @@
 """A container for specifying and manipulating a graph with distinct inputs and outputs."""
 
 import time
-from collections import OrderedDict
+from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, Union, cast
 
@@ -109,7 +109,7 @@ class FunctionGraph(MetaObject):
             inputs = [cast(Variable, _memo[i]) for i in inputs]
 
         self.execute_callbacks_time: float = 0.0
-        self.execute_callbacks_times: dict[Feature, float] = {}
+        self.execute_callbacks_times: dict[Feature, float] = defaultdict(float)
 
         if features is None:
             features = []
@@ -270,8 +270,10 @@ class FunctionGraph(MetaObject):
 
                     self.execute_callbacks("on_prune", apply_node, reason)
 
-                    for i, in_var in enumerate(apply_node.inputs):
-                        removal_stack.append((in_var, (apply_node, i)))
+                    removal_stack.extend(
+                        (in_var, (apply_node, i))
+                        for i, in_var in enumerate(apply_node.inputs)
+                    )
 
                     if remove_if_empty:
                         del clients[var]
@@ -671,7 +673,6 @@ class FunctionGraph(MetaObject):
                 attach(self)
             except AlreadyThere:
                 return
-        self.execute_callbacks_times.setdefault(feature, 0.0)
         # It would be nice if we could require a specific class instead of
         # a "workalike" so we could do actual error checking
         # if not isinstance(feature, Feature):
@@ -767,12 +768,12 @@ class FunctionGraph(MetaObject):
 
         """
         assert isinstance(self._features, list)
-        all_orderings: list[OrderedDict] = []
+        all_orderings: list[dict] = []
 
         for feature in self._features:
             if hasattr(feature, "orderings"):
                 orderings = feature.orderings(self)
-                if not isinstance(orderings, OrderedDict):
+                if not isinstance(orderings, dict):
                     raise TypeError(
                         "Non-deterministic return value from "
                         + str(feature.orderings)
@@ -793,7 +794,7 @@ class FunctionGraph(MetaObject):
             return all_orderings[0].copy()
         else:
             # If there is more than 1 ordering, combine them.
-            ords: dict[Apply, list[Apply]] = OrderedDict()
+            ords: dict[Apply, list[Apply]] = {}
             for orderings in all_orderings:
                 for node, prereqs in orderings.items():
                     ords.setdefault(node, []).extend(prereqs)

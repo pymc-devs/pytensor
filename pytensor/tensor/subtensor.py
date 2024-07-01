@@ -952,10 +952,7 @@ class Subtensor(COp):
         return [first] + [DisconnectedType()()] * len(rest)
 
     def connection_pattern(self, node):
-        rval = [[True]]
-
-        for ipt in node.inputs[1:]:
-            rval.append([False])
+        rval = [[True], *([False] for _ in node.inputs[1:])]
 
         return rval
 
@@ -1963,10 +1960,7 @@ class IncSubtensor(COp):
         return self(eval_points[0], eval_points[1], *inputs[2:], return_list=True)
 
     def connection_pattern(self, node):
-        rval = [[True], [True]]
-
-        for ipt in node.inputs[2:]:
-            rval.append([False])
+        rval = [[True], [True], *([False] for _ in node.inputs[2:])]
 
         return rval
 
@@ -2765,10 +2759,7 @@ class AdvancedSubtensor(Op):
         out[0] = rval
 
     def connection_pattern(self, node):
-        rval = [[True]]
-
-        for ipt in node.inputs[1:]:
-            rval.append([False])
+        rval = [[True], *([False] for _ in node.inputs[1:])]
 
         return rval
 
@@ -2912,10 +2903,7 @@ class AdvancedIncSubtensor(Op):
         return [ishapes[0]]
 
     def connection_pattern(self, node):
-        rval = [[True], [True]]
-
-        for ipt in node.inputs[2:]:
-            rval.append([False])
+        rval = [[True], [True], *([False] for _ in node.inputs[2:])]
 
         return rval
 

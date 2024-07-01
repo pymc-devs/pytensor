@@ -3,7 +3,7 @@
 import copy
 import dataclasses
 import logging
-from collections import OrderedDict, namedtuple
+from collections import namedtuple
 from collections.abc import Callable, Sequence
 from itertools import chain
 from typing import TYPE_CHECKING
@@ -258,7 +258,7 @@ class Validator:
         if invalid is None:
             invalid = []
         if valid_equivalent is None:
-            valid_equivalent = OrderedDict()
+            valid_equivalent = {}
 
         # Nodes that are valid to have in the graph computing outputs
         self.valid = set(valid)
@@ -416,7 +416,7 @@ def compress_outs(op, not_required, inputs):
     op_inputs = op.inner_inputs[: op_info.n_seqs]
     op_outputs = []
     node_inputs = inputs[: op_info.n_seqs + 1]
-    map_old_new = OrderedDict()
+    map_old_new = {}
 
     offset = 0
     ni_offset = op_info.n_seqs + 1

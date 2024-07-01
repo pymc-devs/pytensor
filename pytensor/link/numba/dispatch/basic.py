@@ -131,21 +131,19 @@ def create_numba_signature(
     reduce_to_scalar: bool = False,
 ) -> numba.types.Type:
     """Create a Numba type for the signature of an `Apply` node or `FunctionGraph`."""
-    input_types = []
-    for inp in node_or_fgraph.inputs:
-        input_types.append(
-            get_numba_type(
-                inp.type, force_scalar=force_scalar, reduce_to_scalar=reduce_to_scalar
-            )
+    input_types = [
+        get_numba_type(
+            inp.type, force_scalar=force_scalar, reduce_to_scalar=reduce_to_scalar
         )
+        for inp in node_or_fgraph.inputs
+    ]
 
-    output_types = []
-    for out in node_or_fgraph.outputs:
-        output_types.append(
-            get_numba_type(
-                out.type, force_scalar=force_scalar, reduce_to_scalar=reduce_to_scalar
-            )
+    output_types = [
+        get_numba_type(
+            out.type, force_scalar=force_scalar, reduce_to_scalar=reduce_to_scalar
         )
+        for out in node_or_fgraph.outputs
+    ]
 
     if len(output_types) > 1:
         return numba.types.Tuple(output_types)(*input_types)

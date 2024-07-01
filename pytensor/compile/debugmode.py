@@ -906,11 +906,10 @@ def _get_preallocated_maps(
                 name = f"strided{tuple(steps)}"
                 for r in considered_outputs:
                     if r in init_strided:
-                        strides = []
-                        shapes = []
-                        for i, size in enumerate(r_vals[r].shape):
-                            shapes.append(slice(None, size, None))
-                            strides.append(slice(None, None, steps[i]))
+                        shapes = [slice(None, size, None) for size in r_vals[r].shape]
+                        strides = [
+                            slice(None, None, steps[i]) for i in range(r_vals[r].ndim)
+                        ]
 
                         r_buf = init_strided[r]
 

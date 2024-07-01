@@ -524,12 +524,13 @@ class WrapLinker(Linker):
         thunk_groups = list(zip(*thunk_lists))
         order = [x[0] for x in zip(*order_lists)]
 
-        to_reset = []
-        for thunks, node in zip(thunk_groups, order):
-            for j, output in enumerate(node.outputs):
-                if output in no_recycling:
-                    for thunk in thunks:
-                        to_reset.append(thunk.outputs[j])
+        to_reset = [
+            thunk.outputs[j]
+            for thunks, node in zip(thunk_groups, order)
+            for j, output in enumerate(node.outputs)
+            if output in no_recycling
+            for thunk in thunks
+        ]
 
         wrapper = self.wrapper
         pre = self.pre
@@ -696,18 +697,16 @@ class JITLinker(PerformLinker):
         computed, last_user = gc_helper(nodes)
 
         if self.allow_gc:
-            post_thunk_old_storage = []
-
-            for node in nodes:
-                post_thunk_old_storage.append(
-                    [
-                        storage_map[input]
-                        for input in node.inputs
-                        if (input in computed)
-                        and (input not in fgraph.outputs)
-                        and (node == last_user[input])
-                    ]
-                )
+            post_thunk_old_storage = [
+                [
+                    storage_map[input]
+                    for input in node.inputs
+                    if (input in computed)
+                    and (input not in fgraph.outputs)
+                    and (node == last_user[input])
+                ]
+                for node in nodes
+            ]
         else:
             post_thunk_old_storage = None
 

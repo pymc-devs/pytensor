@@ -14,9 +14,9 @@ import logging
 import operator
 import sys
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -204,8 +204,8 @@ class ProfileStats:
         self.fct_call_time = 0.0
         self.fct_callcount = 0
         self.vm_call_time = 0.0
-        self.apply_time = {}
-        self.apply_callcount = {}
+        self.apply_time = defaultdict(float)
+        self.apply_callcount = Counter()
         # self.apply_cimpl = None
         # self.message = None
 
@@ -234,9 +234,9 @@ class ProfileStats:
     # Total time spent in Function.vm.__call__
     #
 
-    apply_time: dict[Union["FunctionGraph", Variable], float] | None = None
+    apply_time: dict[tuple["FunctionGraph", Apply], float]
 
-    apply_callcount: dict[Union["FunctionGraph", Variable], int] | None = None
+    apply_callcount: dict[tuple["FunctionGraph", Apply], int]
 
     apply_cimpl: dict[Apply, bool] | None = None
     # dict from node -> bool (1 if c, 0 if py)
@@ -292,10 +292,9 @@ class ProfileStats:
     # param is called flag_time_thunks because most other attributes with time
     # in the name are times *of* something, rather than configuration flags.
     def __init__(self, atexit_print=True, flag_time_thunks=None, **kwargs):
-        self.apply_callcount = {}
+        self.apply_callcount = Counter()
         self.output_size = {}
-        # Keys are `(FunctionGraph, Variable)`
-        self.apply_time = {}
+        self.apply_time = defaultdict(float)
         self.apply_cimpl = {}
         self.variable_shape = {}
         self.variable_strides = {}
@@ -320,12 +319,10 @@ class ProfileStats:
 
         """
         # timing is stored by node, we compute timing by class on demand
-        rval = {}
-        for (fgraph, node), t in self.apply_time.items():
-            typ = type(node.op)
-            rval.setdefault(typ, 0)
-            rval[typ] += t
-        return rval
+        rval = defaultdict(float)
+        for (_fgraph, node), t in self.apply_time.items():
+            rval[type(node.op)] += t
+        return dict(rval)
 
     def class_callcount(self):
         """
@@ -333,24 +330,18 @@ class ProfileStats:
 
         """
         # timing is stored by node, we compute timing by class on demand
-        rval = {}
-        for (fgraph, node), count in self.apply_callcount.items():
-            typ = type(node.op)
-            rval.setdefault(typ, 0)
-            rval[typ] += count
+        rval = Counter()
+        for (_fgraph, node), count in self.apply_callcount.items():
+            rval[type(node.op)] += count
         return rval
 
-    def class_nodes(self):
+    def class_nodes(self) -> Counter:
         """
         dict op -> total number of nodes
 
         """
         # timing is stored by node, we compute timing by class on demand
-        rval = {}
-        for (fgraph, node), count in self.apply_callcount.items():
-            typ = type(node.op)
-            rval.setdefault(typ, 0)
-            rval[typ] += 1
+        rval = Counter(type(node.op) for _fgraph, node in self.apply_callcount)
         return rval
 
     def class_impl(self):
@@ -360,12 +351,9 @@ class ProfileStats:
         """
         # timing is stored by node, we compute timing by class on demand
         rval = {}
-        for fgraph, node in self.apply_callcount:
+        for _fgraph, node in self.apply_callcount:
             typ = type(node.op)
-            if self.apply_cimpl[node]:
-                impl = "C "
-            else:
-                impl = "Py"
+            impl = "C " if self.apply_cimpl[node] else "Py"
             rval.setdefault(typ, impl)
             if rval[typ] != impl and len(rval[typ]) == 2:
                 rval[typ] += impl
@@ -377,11 +365,10 @@ class ProfileStats:
 
         """
         # timing is stored by node, we compute timing by Op on demand
-        rval = {}
+        rval = defaultdict(float)
         for (fgraph, node), t in self.apply_time.items():
-            rval.setdefault(node.op, 0)
             rval[node.op] += t
-        return rval
+        return dict(rval)
 
     def fill_node_total_time(self, fgraph, node, total_times):
         """
@@ -414,9 +401,8 @@ class ProfileStats:
 
         """
         # timing is stored by node, we compute timing by Op on demand
-        rval = {}
+        rval = Counter()
         for (fgraph, node), count in self.apply_callcount.items():
-            rval.setdefault(node.op, 0)
             rval[node.op] += count
         return rval
 
@@ -426,10 +412,7 @@ class ProfileStats:
 
         """
         # timing is stored by node, we compute timing by Op on demand
-        rval = {}
-        for (fgraph, node), count in self.apply_callcount.items():
-            rval.setdefault(node.op, 0)
-            rval[node.op] += 1
+        rval = Counter(node.op for _fgraph, node in self.apply_callcount)
         return rval
 
     def op_impl(self):
@@ -1204,8 +1187,7 @@ class ProfileStats:
                         compute_map[var][0] = 0
 
                     for k_remove, v_remove in viewedby_remove.items():
-                        for i in v_remove:
-                            viewed_by[k_remove].append(i)
+                        viewed_by[k_remove].extend(v_remove)
 
                     for k_add, v_add in viewedby_add.items():
                         for i in v_add:
@@ -1215,15 +1197,16 @@ class ProfileStats:
                         del view_of[k]
 
             # two data structure used to mimic Python gc
-            viewed_by = {}  # {var1: [vars that view var1]}
+            # * {var1: [vars that view var1]}
             # The len of the list is the value of python ref
             # count. But we use a list, not just the ref count value.
-            # This is more safe to help detect potential bug  in the algo
-            for var in fgraph.variables:
-                viewed_by[var] = []
-            view_of = {}  # {var1: original var viewed by var1}
+            # This is more safe to help detect potential bug in the algo
+            viewed_by = {var: [] for var in fgraph.variables}
+
+            # * {var1: original var viewed by var1}
             # The original mean that we don't keep track of all the intermediate
             # relationship in the view.
+            view_of = {}
 
             min_memory_generator(executable_nodes, viewed_by, view_of)
 

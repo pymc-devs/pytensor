@@ -10,7 +10,7 @@ import pickle
 import sys
 import tempfile
 import zipfile
-from collections import defaultdict
+from collections import Counter
 from contextlib import closing
 from io import BytesIO
 from pickle import HIGHEST_PROTOCOL
@@ -144,7 +144,7 @@ class PersistentSharedVariableID(PersistentNdarrayID):
 
     def __init__(self, zip_file, allow_unnamed=True, allow_duplicates=True):
         super().__init__(zip_file)
-        self.name_counter = defaultdict(int)
+        self.name_counter = Counter()
         self.ndarray_names = {}
         self.allow_unnamed = allow_unnamed
         self.allow_duplicates = allow_duplicates

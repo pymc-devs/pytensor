@@ -520,9 +520,7 @@ def numba_funcify_Elemwise(op, node, **kwargs):
                 if length == 1 and shape and iter_length != 1 and not allow_bc:
                     raise ValueError("Broadcast not allowed.")
 
-        outputs = []
-        for dtype in output_dtypes:
-            outputs.append(np.empty(shape, dtype=dtype))
+        outputs = [np.empty(shape, dtype=dtype) for dtype in output_dtypes]
 
         for idx in np.ndindex(shape):
             vals = [input[idx] for input in inputs_bc]

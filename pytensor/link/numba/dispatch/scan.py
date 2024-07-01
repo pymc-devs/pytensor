@@ -268,15 +268,15 @@ def numba_funcify_Scan(op, node, **kwargs):
                 output_taps = inner_in_names_to_output_taps.get(
                     outer_in_name, [tap_storage_size]
                 )
-                for out_tap in output_taps:
-                    inner_out_to_outer_in_stmts.append(
-                        idx_to_str(
-                            storage_name,
-                            out_tap,
-                            size=storage_size_name,
-                            allow_scalar=True,
-                        )
+                inner_out_to_outer_in_stmts.extend(
+                    idx_to_str(
+                        storage_name,
+                        out_tap,
+                        size=storage_size_name,
+                        allow_scalar=True,
                     )
+                    for out_tap in output_taps
+                )
 
                 add_output_storage_post_proc_stmt(
                     storage_name, output_taps, storage_size_name

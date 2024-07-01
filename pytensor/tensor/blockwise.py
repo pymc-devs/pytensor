@@ -167,9 +167,8 @@ class Blockwise(Op):
 
         batch_ndims = self.batch_ndim(node)
         core_dims: dict[str, Any] = {}
-        batch_shapes = []
+        batch_shapes = [input_shape[:batch_ndims] for input_shape in input_shapes]
         for input_shape, sig in zip(input_shapes, self.inputs_sig):
-            batch_shapes.append(input_shape[:batch_ndims])
             core_shape = input_shape[batch_ndims:]
 
             for core_dim, dim_name in zip(core_shape, sig):

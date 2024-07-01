@@ -247,18 +247,10 @@ def function(
 
     """
     if isinstance(outputs, dict):
-        output_items = list(outputs.items())
+        assert all(isinstance(k, str) for k in outputs)
 
-        for item_pair in output_items:
-            assert isinstance(item_pair[0], str)
-
-        output_items_sorted = sorted(output_items)
-
-        output_keys = []
-        outputs = []
-        for pair in output_items_sorted:
-            output_keys.append(pair[0])
-            outputs.append(pair[1])
+        output_keys = sorted(outputs)
+        outputs = [outputs[key] for key in output_keys]
 
     else:
         output_keys = None
