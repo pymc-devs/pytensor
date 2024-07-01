@@ -479,18 +479,8 @@ def test_dont_apply_det_diag_rewrite_for_1_1():
 def test_det_diag_incorrect_for_rectangle_eye():
     x = pt.matrix("x")
     x_diag = pt.eye(7, 5) * x
-    y = pt.linalg.det(x_diag)
-    f_rewritten = function([x], y, mode="FAST_RUN")
-    nodes = f_rewritten.maker.fgraph.apply_nodes
-
-    assert not any(isinstance(node.op, Det) for node in nodes)
-    # This assert passes which means that the rewrite is applied even if the input is not square
-
-    # Numeric Value test (should fail)
-    x_test = np.random.normal(size=(7, 5)).astype(config.floatX)
-    x_test_matrix = np.eye(7, 5) * x_test
-    with pytest.raises(np.linalg.LinAlgError, match="Last 2 dimensions"):
-        np.linalg.det(x_test_matrix)
+    with pytest.raises(ValueError, match="Determinant not defined"):
+        pt.linalg.det(x_diag)
 
 
 def test_svd_uv_merge():
