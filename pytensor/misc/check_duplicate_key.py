@@ -1,6 +1,6 @@
-import os
 import pickle
 import sys
+from pathlib import Path
 
 from pytensor.configdefaults import config
 
@@ -11,35 +11,29 @@ DISPLAY_MOST_FREQUENT_DUPLICATE_CCODE = False
 dirs = []
 if len(sys.argv) > 1:
     for compiledir in sys.argv[1:]:
-        dirs.extend([os.path.join(compiledir, d) for d in os.listdir(compiledir)])
+        dirs.extend([x.resolve() for x in Path(compiledir).iterdir()])
 else:
-    dirs = os.listdir(config.compiledir)
-    dirs = [os.path.join(config.compiledir, d) for d in dirs]
+    dirs = [x.resolve() for x in config.compiledir.iterdir()]
 keys: dict = {}  # key -> nb seen
 mods: dict = {}
 for dir in dirs:
-    key = None
+    if not dir.is_dir():
+        continue
     try:
-        with open(os.path.join(dir, "key.pkl")) as f:
-            key = f.read()
+        key = (dir / "key.pkl").read_bytes()
         keys.setdefault(key, 0)
         keys[key] += 1
-        del f
-    except OSError:
+    except FileNotFoundError:
         # print dir, "don't have a key.pkl file"
         pass
     try:
-        path = os.path.join(dir, "mod.cpp")
-        if not os.path.exists(path):
-            path = os.path.join(dir, "mod.cu")
-        with open(path) as f:
-            mod = f.read()
+        path = dir / "mod.cpp"
+        if not path.exists():
+            path = dir / "mod.cu"
+        mod = path.read_text(encoding="utf-8")
         mods.setdefault(mod, ())
         mods[mod] += (key,)
-        del mod
-        del f
-        del path
-    except OSError:
+    except FileNotFoundError:
         print(dir, "don't have a mod.{cpp,cu} file")
 
 if DISPLAY_DUPLICATE_KEYS:

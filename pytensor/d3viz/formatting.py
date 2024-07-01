@@ -3,8 +3,8 @@
 Author: Christof Angermueller <cangermueller@gmail.com>
 """
 
-import os
 from functools import reduce
+from pathlib import Path
 
 import numpy as np
 
@@ -285,7 +285,7 @@ def var_tag(var):
             path, line, _, src = tag.trace[0][-1]
         else:
             path, line, _, src = tag.trace[0]
-        path = os.path.basename(path)
+        path = Path(path).name
         path = path.replace("<", "")
         path = path.replace(">", "")
         src = src.encode()

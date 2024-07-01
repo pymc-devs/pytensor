@@ -510,115 +510,11 @@ import ``pytensor`` and print the config variable, as in:
 
     Removing these asserts can speed up execution.
 
-.. attribute:: config.dnn__enabled
-
-    String value: ``'auto'``, ``'True'``, ``'False'``, ``'no_check'``
-
-    Default: ``'auto'``
-
-    If ``'auto'``, automatically detect and use
-    `cuDNN <https://developer.nvidia.com/cudnn>`_ when it is available.
-    If cuDNN is unavailable, do not raise an error.
-
-    If ``'True'``, require the use of cuDNN.  If cuDNN is unavailable, raise an error.
-
-    If ``'False'``, neither use cuDNN nor check if it is available.
-
-    If ``'no_check'``, assume cuDNN is present and that the versions between the
-    header and library match.
-
-.. attribute:: config.dnn__include_path
-
-    Default: ``include`` sub-folder in CUDA root directory, or headers paths defined for the compiler.
-
-    Location of the cuDNN header.
-
-.. attribute:: config.dnn__library_path
-
-    Default: Library sub-folder (``lib64`` on Linux) in CUDA root directory, or
-    libraries paths defined for the compiler.
-
-    Location of the cuDNN library.
-
 .. attribute:: config.conv__assert_shape
 
     If ``True``, ``AbstractConv*`` :class:`Op`\s will verify that user-provided shapes
     match the run-time shapes. This is a debugging option, and may slow down
     compilation.
-
-.. attribute:: config.dnn.conv.workmem
-
-    Deprecated, use :attr:`config.dnn__conv__algo_fwd`.
-
-
-.. attribute:: config.dnn.conv.workmem_bwd
-
-    Deprecated, use :attr:`config.dnn__conv__algo_bwd_filter` and
-    :attr:`config.dnn__conv__algo_bwd_data` instead.
-
-.. attribute:: config.dnn__conv__algo_fwd
-
-    String value:
-    ``'small'``, ``'none'``, ``'large'``, ``'fft'``, ``'fft_tiling'``,
-    ``'winograd'``, ``'winograd_non_fused'``, ``'guess_once'``, ``'guess_on_shape_change'``,
-    ``'time_once'``, ``'time_on_shape_change'``.
-
-    Default: ``'small'``
-
-    3d convolution only support ``'none'``, ``'small'``, ``'fft_tiling'``, ``'guess_once'``,
-    ``'guess_on_shape_change'``, ``'time_once'``, ``'time_on_shape_change'``.
-
-.. attribute:: config.dnn.conv.algo_bwd
-
-    Deprecated, use :attr:`config.dnn__conv__algo_bwd_filter` and
-    :attr:`config.dnn__conv__algo_bwd_data` instead.
-
-.. attribute:: config.dnn__conv__algo_bwd_filter
-
-    String value:
-    ``'none'``, ``'deterministic'``, ``'fft'``, ``'small'``, ``'winograd_non_fused'``, ``'fft_tiling'``, ``'guess_once'``,
-    ``'guess_on_shape_change'``, ``'time_once'``, ``'time_on_shape_change'``.
-
-    Default: ``'none'``
-
-    3d convolution only supports ``'none'``, ``'small'``, ``'guess_once'``,
-    ``'guess_on_shape_change'``, ``'time_once'``, ``'time_on_shape_change'``.
-
-.. attribute:: config.dnn__conv__algo_bwd_data
-
-    String value:
-    ``'none'``, ``'deterministic'``, ``'fft'``, ``'fft_tiling'``, ``'winograd'``,
-    ``'winograd_non_fused'``, ``'guess_once'``, ``'guess_on_shape_change'``, ``'time_once'``,
-    ``'time_on_shape_change'``.
-
-    Default: ``'none'``
-
-    3d convolution only supports ``'none'``, ``'deterministic'``, ``'fft_tiling'``
-    ``'guess_once'``, ``'guess_on_shape_change'``, ``'time_once'``,
-    ``'time_on_shape_change'``.
-
-.. attribute:: config.magma__enabled
-
-    String value: ``'True'``, ``'False'``
-
-    Default: ``'False'``
-
-    If ``'True'``, use `magma <http://icl.cs.utk.edu/magma/>`_ for matrix
-    computations.
-
-    If ``'False'``, disable magma.
-
-.. attribute:: config.magma__include_path
-
-    Default: ``''``
-
-    Location of the magma headers.
-
-.. attribute:: config.magma__library_path
-
-    Default: ``''``
-
-    Location of the magma library.
 
 .. attribute:: config.ctc__root
 
