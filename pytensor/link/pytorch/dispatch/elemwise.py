@@ -2,7 +2,7 @@ import torch
 
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.math import All, Sum
+from pytensor.tensor.math import All, Any, Prod, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 
 
@@ -54,6 +54,26 @@ def pytorch_funcify_all(op, **kwargs):
         return torch.all(x, dim=dim)
 
     return torch_all
+
+
+@pytorch_funcify.register(Prod)
+def pytorch_funcify_prod(op, **kwargs):
+    dim = op.axis[0]
+
+    def torch_prod(x):
+        return torch.prod(x, dim=dim)
+
+    return torch_prod
+
+
+@pytorch_funcify.register(Any)
+def pytorch_funcify_any(op, **kwargs):
+    dim = op.axis
+
+    def torch_any(x):
+        return torch.any(x, dim=dim)
+
+    return torch_any
 
 
 @pytorch_funcify.register(Softmax)

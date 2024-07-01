@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
+import pytensor.tensor.math as ptm
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor import elemwise as pt_elemwise
@@ -57,21 +58,45 @@ def test_pytorch_elemwise():
     compare_pytorch_and_py(fg, [[0.9, 0.9]])
 
 
-def test_pytorch_sum():
-    a_pt = vector("a")
-    test_value = np.r_[1, 2, 3].astype(config.floatX)
+@pytest.mark.parametrize("axis", [None, 0, 1])
+def test_pytorch_sum(axis):
+    a_pt = matrix("a")
+    test_value = np.array([[1, 2], [3, 4]]).astype(config.floatX)
 
-    x = pt.math.sum(a_pt, axis=None)
+    x = pt.math.sum(a_pt, axis=axis)
     x_fg = FunctionGraph([a_pt], [x])
 
     compare_pytorch_and_py(x_fg, [test_value])
 
 
-def test_pytorch_all():
+@pytest.mark.parametrize("axis", [None, 0, 1])
+def test_pytorch_all(axis):
+    a_pt = matrix("a")
+    test_value = np.array([[True, False, True], [False, True, True]])
+
+    x = ptm.all(a_pt, axis=axis)
+    x_fg = FunctionGraph([a_pt], [x])
+
+    compare_pytorch_and_py(x_fg, [test_value])
+
+
+@pytest.mark.parametrize("axis", [0, 1])
+def test_pytorch_prod(axis):
     a_pt = matrix("a")
     test_value = np.array([[1, 2], [3, 4]]).astype(config.floatX)
 
-    x = pt.math.all(a_pt, axis=None)
+    x = ptm.prod(a_pt, axis=axis)
+    x_fg = FunctionGraph([a_pt], [x])
+
+    compare_pytorch_and_py(x_fg, [test_value])
+
+
+@pytest.mark.parametrize("axis", [None, 0, 1])
+def test_pytorch_any(axis):
+    a_pt = matrix("a")
+    test_value = np.array([[True, False, True], [False, True, True]])
+
+    x = ptm.any(a_pt, axis=axis)
     x_fg = FunctionGraph([a_pt], [x])
 
     compare_pytorch_and_py(x_fg, [test_value])
