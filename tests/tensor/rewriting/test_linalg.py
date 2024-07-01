@@ -492,6 +492,7 @@ def test_det_diag_incorrect_for_rectangle_eye():
     with pytest.raises(np.linalg.LinAlgError, match="Last 2 dimensions"):
         np.linalg.det(x_test_matrix)
 
+
 def test_svd_uv_merge():
     a = matrix("a")
     s_1 = svd(a, full_matrices=False, compute_uv=False)
