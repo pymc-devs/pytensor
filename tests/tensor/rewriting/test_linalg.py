@@ -394,6 +394,95 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
     np.testing.assert_allclose(f1(*test_vals), f2(*test_vals), atol=1e-8)
 
 
+@pytest.mark.parametrize(
+    "shape",
+    [(), (7,), (1, 7), (7, 1), (7, 7), (3, 7, 7)],
+    ids=["scalar", "vector", "row_vec", "col_vec", "matrix", "batched_input"],
+)
+def test_det_diag_from_eye_mul(shape):
+    # Initializing x based on scalar/vector/matrix
+    x = pt.tensor("x", shape=shape)
+    y = pt.eye(7) * x
+    # Calculating determinant value using pt.linalg.det
+    z_det = pt.linalg.det(y)
+
+    # REWRITE TEST
+    f_rewritten = function([x], z_det, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, Det) for node in nodes)
+
+    # NUMERIC VALUE TEST
+    if len(shape) == 0:
+        x_test = np.array(np.random.rand()).astype(config.floatX)
+    elif len(shape) == 1:
+        x_test = np.random.rand(*shape).astype(config.floatX)
+    else:
+        x_test = np.random.rand(*shape).astype(config.floatX)
+    x_test_matrix = np.eye(7) * x_test
+    det_val = np.linalg.det(x_test_matrix)
+    rewritten_val = f_rewritten(x_test)
+
+    assert_allclose(
+        det_val,
+        rewritten_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+def test_det_diag_from_diag():
+    x = pt.tensor("x", shape=(None,))
+    x_diag = pt.diag(x)
+    y = pt.linalg.det(x_diag)
+
+    # REWRITE TEST
+    f_rewritten = function([x], y, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, Det) for node in nodes)
+
+    # NUMERIC VALUE TEST
+    x_test = np.random.rand(7).astype(config.floatX)
+    x_test_matrix = np.eye(7) * x_test
+    det_val = np.linalg.det(x_test_matrix)
+    rewritten_val = f_rewritten(x_test)
+
+    assert_allclose(
+        det_val,
+        rewritten_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+def test_dont_apply_det_diag_rewrite_for_1_1():
+    x = pt.matrix("x")
+    x_diag = pt.eye(1, 1) * x
+    y = pt.linalg.det(x_diag)
+    f_rewritten = function([x], y, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+
+    assert any(isinstance(node.op, Det) for node in nodes)
+
+    # Numeric Value test
+    x_test = np.random.normal(size=(3, 3)).astype(config.floatX)
+    x_test_matrix = np.eye(1, 1) * x_test
+    det_val = np.linalg.det(x_test_matrix)
+    rewritten_val = f_rewritten(x_test)
+    assert_allclose(
+        det_val,
+        rewritten_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+def test_det_diag_incorrect_for_rectangle_eye():
+    x = pt.matrix("x")
+    x_diag = pt.eye(7, 5) * x
+    with pytest.raises(ValueError, match="Determinant not defined"):
+        pt.linalg.det(x_diag)
+
+
 def test_svd_uv_merge():
     a = matrix("a")
     s_1 = svd(a, full_matrices=False, compute_uv=False)
