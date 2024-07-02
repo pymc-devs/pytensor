@@ -102,6 +102,28 @@ def test_pytorch_any(axis):
     compare_pytorch_and_py(x_fg, [test_value])
 
 
+@pytest.mark.parametrize("axis", [0, 1])
+def test_pytorch_max(axis):
+    a_pt = matrix("a")
+    test_value = np.array([[1, 2], [3, 4]]).astype(config.floatX)
+
+    x = ptm.max(a_pt, axis=axis)
+    x_fg = FunctionGraph([a_pt], [x])
+
+    compare_pytorch_and_py(x_fg, [test_value])
+
+
+@pytest.mark.parametrize("axis", [0, 1])
+def test_pytorch_min(axis):
+    a_pt = matrix("a")
+    test_value = np.array([[1, 2], [3, 4]]).astype(config.floatX)
+
+    x = ptm.min(a_pt, axis=axis)
+    x_fg = FunctionGraph([a_pt], [x])
+
+    compare_pytorch_and_py(x_fg, [test_value])
+
+
 @pytest.mark.parametrize("dtype", ["float64", "int64"])
 @pytest.mark.parametrize("axis", [None, 0, 1])
 def test_softmax(axis, dtype):
