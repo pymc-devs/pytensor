@@ -6,7 +6,7 @@ from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.fg import FunctionGraph
 from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import CheckAndRaise
-from pytensor.tensor.basic import Alloc, AllocEmpty, ARange
+from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Join
 
 
 @singledispatch
@@ -89,3 +89,14 @@ def pytorch_funcify_arange(op, **kwargs):
         return torch.arange(start, stop, step, dtype=dtype)
 
     return arange
+
+
+@pytorch_funcify.register(Join)
+def pytorch_funcify_Join(op, **kwargs):
+    def join(axis, *tensors):
+        # tensors could also be tuples, and in this case they don't have a ndim
+        tensors = [torch.tensor(tensor) for tensor in tensors]
+
+        return torch.cat(tensors, dim=axis)
+
+    return join

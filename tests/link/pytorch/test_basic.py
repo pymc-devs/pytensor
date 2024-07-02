@@ -4,6 +4,7 @@ from functools import partial
 import numpy as np
 import pytest
 
+import pytensor.tensor.basic as ptb
 from pytensor.compile.function import function
 from pytensor.compile.mode import get_mode
 from pytensor.compile.sharedvalue import SharedVariable, shared
@@ -13,7 +14,7 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor import alloc, arange, as_tensor, empty
-from pytensor.tensor.type import scalar, vector
+from pytensor.tensor.type import matrix, scalar, vector
 
 
 torch = pytest.importorskip("torch")
@@ -234,4 +235,43 @@ def test_arange():
     compare_pytorch_and_py(
         FunctionGraph([start, stop, step], [out]),
         [np.array(1), np.array(10), np.array(2)],
+    )
+
+
+def test_pytorch_Join():
+    a = matrix("a")
+    b = matrix("b")
+
+    x = ptb.join(0, a, b)
+    x_fg = FunctionGraph([a, b], [x])
+    compare_pytorch_and_py(
+        x_fg,
+        [
+            np.c_[[1.0, 2.0, 3.0]].astype(config.floatX),
+            np.c_[[4.0, 5.0, 6.0]].astype(config.floatX),
+        ],
+    )
+    compare_pytorch_and_py(
+        x_fg,
+        [
+            np.c_[[1.0, 2.0, 3.0]].astype(config.floatX),
+            np.c_[[4.0, 5.0]].astype(config.floatX),
+        ],
+    )
+
+    x = ptb.join(1, a, b)
+    x_fg = FunctionGraph([a, b], [x])
+    compare_pytorch_and_py(
+        x_fg,
+        [
+            np.c_[[1.0, 2.0, 3.0]].astype(config.floatX),
+            np.c_[[4.0, 5.0, 6.0]].astype(config.floatX),
+        ],
+    )
+    compare_pytorch_and_py(
+        x_fg,
+        [
+            np.c_[[1.0, 2.0], [3.0, 4.0]].astype(config.floatX),
+            np.c_[[5.0, 6.0]].astype(config.floatX),
+        ],
     )
