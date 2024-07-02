@@ -44,8 +44,8 @@ from pytensor.tensor.math import (
     Prod,
     ProdWithoutZeros,
     Sum,
-    _allclose,
     _dot,
+    _get_atol_rtol,
     abs,
     add,
     allclose,
@@ -3612,7 +3612,8 @@ class TestMatMul:
     def _validate_output(self, a, b):
         pytensor_sol = self.op(a, b).eval()
         numpy_sol = np.matmul(a, b)
-        assert _allclose(numpy_sol, pytensor_sol)
+        atol_, rtol_ = _get_atol_rtol(numpy_sol, pytensor_sol)
+        assert np.allclose(numpy_sol, pytensor_sol, atol=atol_, rtol=rtol_)
 
     @pytest.mark.parametrize(
         "x1, x2",

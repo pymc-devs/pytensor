@@ -8,7 +8,6 @@ import pytest
 import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor.basic as ptb
-import pytensor.tensor.math as ptm
 from pytensor import compile, config, function, shared
 from pytensor.compile import SharedVariable
 from pytensor.compile.io import In, Out
@@ -1256,11 +1255,6 @@ class TestCast:
 # TODO: consider moving this function / functionality to gradient.py
 #      rationale: it's tricky, and necessary every time you want to verify
 #      gradient numerically
-
-
-def test_basic_allclose():
-    # This was raised by a user in https://github.com/Theano/Theano/issues/2975
-    assert ptm._allclose(-0.311023883434, -0.311022856884)
 
 
 def test_get_vector_length():
