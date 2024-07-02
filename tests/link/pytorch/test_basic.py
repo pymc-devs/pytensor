@@ -290,5 +290,5 @@ def test_eye():
             for _k in list(range(_M + 2)) + [-x for x in range(1, _N + 2)]:
                 compare_pytorch_and_py(
                     FunctionGraph([N, M, k], [out]),
-                    [np.array(_N + 1), np.array(_M + 1), np.array(_k)],
+                    [np.array(_N), np.array(_M), np.array(_k)],
                 )
