@@ -13,7 +13,7 @@ from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.raise_op import CheckAndRaise
-from pytensor.tensor import alloc, arange, as_tensor, empty
+from pytensor.tensor import alloc, arange, as_tensor, empty, eye
 from pytensor.tensor.type import matrix, scalar, vector
 
 
@@ -275,3 +275,20 @@ def test_pytorch_Join():
             np.c_[[5.0, 6.0]].astype(config.floatX),
         ],
     )
+
+
+def test_eye():
+    N = scalar("N", dtype="int64")
+    M = scalar("M", dtype="int64")
+    k = scalar("k", dtype="int64")
+
+    out = eye(N, M, k, dtype="int16")
+
+    trange = range(1, 6)
+    for _N in trange:
+        for _M in trange:
+            for _k in list(range(_M + 2)) + [-x for x in range(1, _N + 2)]:
+                compare_pytorch_and_py(
+                    FunctionGraph([N, M, k], [out]),
+                    [np.array(_N + 1), np.array(_M + 1), np.array(_k)],
+                )
