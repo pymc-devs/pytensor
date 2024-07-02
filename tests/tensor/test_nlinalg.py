@@ -9,7 +9,7 @@ import pytensor
 from pytensor import function
 from pytensor.configdefaults import config
 from pytensor.tensor.basic import as_tensor_variable
-from pytensor.tensor.math import _allclose
+from pytensor.tensor.math import _get_atol_rtol
 from pytensor.tensor.nlinalg import (
     SVD,
     Eig,
@@ -60,7 +60,8 @@ def test_pseudoinverse_correctness():
     assert ri.dtype == r.dtype
     # Note that pseudoinverse can be quite imprecise so I prefer to compare
     # the result with what np.linalg returns
-    assert _allclose(ri, np.linalg.pinv(r))
+    atol_, rtol_ = _get_atol_rtol(ri, np.linalg.pinv(r))
+    assert np.allclose(ri, np.linalg.pinv(r), atol=atol_, rtol=rtol_)
 
 
 def test_pseudoinverse_grad():
@@ -92,8 +93,11 @@ class TestMatrixInverse(utt.InferShapeTester):
         rir = np.dot(ri, r)
         rri = np.dot(r, ri)
 
-        assert _allclose(np.identity(4), rir), rir
-        assert _allclose(np.identity(4), rri), rri
+        atol_, rtol_ = _get_atol_rtol(np.identity(4), rir)
+        assert np.allclose(np.identity(4), rir, atol=atol_, rtol=rtol_), rir
+
+        atol_, rtol_ = _get_atol_rtol(np.identity(4), rri)
+        assert np.allclose(np.identity(4), rri, atol=atol_, rtol=rtol_), rri
 
     def test_infer_shape(self):
         r = self.rng.standard_normal((4, 4)).astype(config.floatX)
@@ -119,7 +123,8 @@ def test_matrix_dot():
     for r in rs[1:]:
         numpy_sol = np.dot(numpy_sol, r)
 
-    assert _allclose(numpy_sol, pytensor_sol)
+    atol_, rtol_ = _get_atol_rtol(numpy_sol, pytensor_sol)
+    assert np.allclose(numpy_sol, pytensor_sol, atol=atol_, rtol=rtol_)
 
 
 def test_qr_modes():
@@ -131,23 +136,34 @@ def test_qr_modes():
     f = function([A], qr(A))
     t_qr = f(a)
     n_qr = np.linalg.qr(a)
-    assert _allclose(n_qr, t_qr)
+    atol_, rtol_ = _get_atol_rtol(np.asarray(n_qr), np.asarray(t_qr))
+    assert np.allclose(np.asarray(n_qr), np.asarray(t_qr), atol=atol_, rtol=rtol_)
 
     for mode in ["reduced", "r", "raw"]:
         f = function([A], qr(A, mode))
         t_qr = f(a)
         n_qr = np.linalg.qr(a, mode)
         if isinstance(n_qr, list | tuple):
-            assert _allclose(n_qr[0], t_qr[0])
-            assert _allclose(n_qr[1], t_qr[1])
+            atol_, rtol_ = _get_atol_rtol(np.asarray(n_qr[0]), np.asarray(t_qr[0]))
+            assert np.allclose(
+                np.asarray(n_qr[0]), np.asarray(t_qr[0]), atol=atol_, rtol=rtol_
+            )
+            atol_, rtol_ = _get_atol_rtol(np.asarray(n_qr[1]), np.asarray(t_qr[1]))
+            assert np.allclose(
+                np.asarray(n_qr[1]), np.asarray(t_qr[1]), atol=atol_, rtol=rtol_
+            )
         else:
-            assert _allclose(n_qr, t_qr)
+            atol_, rtol_ = _get_atol_rtol(np.asarray(n_qr), np.asarray(t_qr))
+            assert np.allclose(
+                np.asarray(n_qr), np.asarray(t_qr), atol=atol_, rtol=rtol_
+            )
 
     try:
         n_qr = np.linalg.qr(a, "complete")
         f = function([A], qr(A, "complete"))
         t_qr = f(a)
-        assert _allclose(n_qr, t_qr)
+        atol_, rtol_ = _get_atol_rtol(np.asarray(n_qr), np.asarray(t_qr))
+        assert np.allclose(np.asarray(n_qr), np.asarray(t_qr), atol=atol_, rtol=rtol_)
     except TypeError as e:
         assert "name 'complete' is not defined" in str(e)
 
@@ -199,7 +215,8 @@ class TestSvd(utt.InferShapeTester):
         np_outputs = np_outputs if isinstance(np_outputs, tuple) else [np_outputs]
 
         for np_val, pt_val in zip(np_outputs, pt_outputs):
-            assert _allclose(np_val, pt_val)
+            atol_, rtol_ = _get_atol_rtol(np_val, pt_val)
+            assert np.allclose(np_val, pt_val, atol=atol_, rtol=rtol_)
 
     def test_svd_infer_shape(self):
         self.validate_shape((4, 4), full_matrices=True, compute_uv=True)
@@ -306,7 +323,8 @@ def test_tensorsolve():
 
     n_x = np.linalg.tensorsolve(a, b)
     t_x = fn(a, b)
-    assert _allclose(n_x, t_x)
+    atol_, rtol_ = _get_atol_rtol(n_x, np.asarray(t_x))
+    assert np.allclose(n_x, t_x, atol=atol_, rtol=rtol_)
 
     # check the type upcast now
     C = tensor4("C", dtype="float32")
@@ -319,7 +337,8 @@ def test_tensorsolve():
     d = rng.random((2 * 3, 4)).astype("float64")
     n_y = np.linalg.tensorsolve(c, d)
     t_y = fn(c, d)
-    assert _allclose(n_y, t_y)
+    atol_, rtol_ = _get_atol_rtol(n_y, np.asarray(t_y))
+    assert np.allclose(n_y, t_y, atol=atol_, rtol=rtol_)
     assert n_y.dtype == Y.dtype
 
     # check the type upcast now
@@ -333,7 +352,8 @@ def test_tensorsolve():
     f = rng.random((2 * 3, 4)).astype("float64")
     n_z = np.linalg.tensorsolve(e, f)
     t_z = fn(e, f)
-    assert _allclose(n_z, t_z)
+    atol_, rtol_ = _get_atol_rtol(n_z, np.asarray(t_z))
+    assert np.allclose(n_z, t_z, atol=atol_, rtol=rtol_)
     assert n_z.dtype == Z.dtype
 
 
@@ -653,7 +673,8 @@ class TestTensorInv(utt.InferShapeTester):
         n_ainv = np.linalg.tensorinv(self.a)
         tf_a = function([A], [Ai])
         t_ainv = tf_a(self.a)
-        assert _allclose(n_ainv, t_ainv)
+        atol_, rtol_ = _get_atol_rtol(n_ainv, np.asarray(t_ainv))
+        assert np.allclose(n_ainv, t_ainv, atol=atol_, rtol=rtol_)
 
         B = self.B
         Bi = tensorinv(B)
@@ -664,8 +685,10 @@ class TestTensorInv(utt.InferShapeTester):
         tf_b1 = function([B], [Bi1])
         t_binv = tf_b(self.b)
         t_binv1 = tf_b1(self.b1)
-        assert _allclose(t_binv, n_binv)
-        assert _allclose(t_binv1, n_binv1)
+        atol_, rtol_ = _get_atol_rtol(np.asarray(t_binv), n_binv)
+        assert np.allclose(t_binv, n_binv, atol=atol_, rtol=rtol_)
+        atol_, rtol_ = _get_atol_rtol(np.asarray(t_binv1), n_binv1)
+        assert np.allclose(t_binv1, n_binv1, atol=atol_, rtol=rtol_)
 
 
 class TestKron(utt.InferShapeTester):

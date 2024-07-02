@@ -2091,7 +2091,6 @@ class TestSpSum(utt.InferShapeTester):
                 f = pytensor.function(variable, self.op(variable[0], axis=axis))
                 tested = f(*data)
                 expected = data[0].todense().sum(axis).ravel()
-
                 np.testing.assert_allclose(expected, [tested], atol=1e-08, rtol=1e-05)
 
     def test_infer_shape(self):

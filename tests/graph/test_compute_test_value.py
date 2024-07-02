@@ -10,7 +10,7 @@ from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.graph.type import Type
 from pytensor.link.c.op import COp
-from pytensor.tensor.math import _allclose, dot
+from pytensor.tensor.math import _get_atol_rtol, dot
 from pytensor.tensor.type import fmatrix, iscalar, matrix, vector
 
 
@@ -85,7 +85,15 @@ class TestComputeTestValue:
         z = dot(x, y)
         assert hasattr(z.tag, "test_value")
         f = pytensor.function([x, y], z)
-        assert _allclose(f(x.tag.test_value, y.tag.test_value), z.tag.test_value)
+        atol_, rtol_ = _get_atol_rtol(
+            f(x.tag.test_value, y.tag.test_value), z.tag.test_value
+        )
+        assert np.allclose(
+            f(x.tag.test_value, y.tag.test_value),
+            z.tag.test_value,
+            atol=atol_,
+            rtol=rtol_,
+        )
 
         # this test should fail
         y.tag.test_value = np.random.random((6, 5)).astype(config.floatX)
@@ -122,7 +130,16 @@ class TestComputeTestValue:
         out = dot(dot(x, y), z)
         assert hasattr(out.tag, "test_value")
         tf = pytensor.function([x, y], out)
-        assert _allclose(tf(x.tag.test_value, y.tag.test_value), out.tag.test_value)
+
+        atol_, rtol_ = _get_atol_rtol(
+            tf(x.tag.test_value, y.tag.test_value), out.tag.test_value
+        )
+        assert np.allclose(
+            tf(x.tag.test_value, y.tag.test_value),
+            out.tag.test_value,
+            atol=atol_,
+            rtol=rtol_,
+        )
 
         def f(x, y, z):
             return dot(dot(x, y), z)
@@ -141,7 +158,10 @@ class TestComputeTestValue:
         z = dot(x, y)
         assert hasattr(z.tag, "test_value")
         f = pytensor.function([x], z)
-        assert _allclose(f(x.tag.test_value), z.tag.test_value)
+        atol_, rtol_ = _get_atol_rtol(f(x.tag.test_value), z.tag.test_value)
+        assert np.allclose(
+            f(x.tag.test_value), z.tag.test_value, atol=atol_, rtol=rtol_
+        )
 
         # this test should fail
         y.set_value(np.random.random((5, 6)).astype(config.floatX))
@@ -156,7 +176,8 @@ class TestComputeTestValue:
         z = dot(x, y)
         assert hasattr(z.tag, "test_value")
         f = pytensor.function([], z)
-        assert _allclose(f(), z.tag.test_value)
+        atol_, rtol_ = _get_atol_rtol(f(), z.tag.test_value)
+        assert np.allclose(f(), z.tag.test_value, atol=atol_, rtol=rtol_)
 
         # this test should fail
         x = np.random.random((2, 4)).astype(config.floatX)
@@ -170,7 +191,8 @@ class TestComputeTestValue:
         z = (x + 2) * 3
         assert hasattr(z.tag, "test_value")
         f = pytensor.function([], z)
-        assert _allclose(f(), z.tag.test_value)
+        atol_, rtol_ = _get_atol_rtol(f(), z.tag.test_value)
+        assert np.allclose(f(), z.tag.test_value, atol=atol_, rtol=rtol_)
 
     def test_constant(self):
         x = pt.constant(np.random.random((2, 3)), dtype=config.floatX)
@@ -180,7 +202,8 @@ class TestComputeTestValue:
         z = dot(x, y)
         assert hasattr(z.tag, "test_value")
         f = pytensor.function([], z)
-        assert _allclose(f(), z.tag.test_value)
+        atol_, rtol_ = _get_atol_rtol(f(), z.tag.test_value)
+        assert np.allclose(f(), z.tag.test_value, atol=atol_, rtol=rtol_)
 
         # this test should fail
         x = pt.constant(np.random.random((2, 4)), dtype=config.floatX)
