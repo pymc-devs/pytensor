@@ -38,9 +38,6 @@ from tests import unittest_tools as utt
 from tests.tensor.conv import c_conv3d_corr3d_ref, c_conv_corr_ref
 
 
-pytensor.config.mode = "FAST_COMPILE"
-
-
 def conv2d_corr(
     inputs,
     filters,
@@ -2414,7 +2411,6 @@ class TestUnsharedConv:
                 for j in range(0, kshp[2]):
                     single_kern = kern[:, i, j, ...].reshape(single_kshp)
                     ref_val = ref_func(img, single_kern)
-
                     np.testing.assert_allclose(
                         ref_val[:, :, i, j],
                         unshared_output[:, :, i, j],

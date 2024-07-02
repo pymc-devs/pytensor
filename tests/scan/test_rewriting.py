@@ -1270,7 +1270,7 @@ class TestSaveMem:
 
         (pytensor_dump, pytensor_x, pytensor_y) = f4(v_u1, v_u2, v_x0, v_y0, vW_in1)
 
-        np.testing.assert_allclose(pytensor_x, v_x[-1:][0])
+        np.testing.assert_allclose(pytensor_x, v_x[-1:].squeeze(0))
         np.testing.assert_allclose(pytensor_y, v_y[-1:])
 
     def test_save_mem_reduced_number_of_steps(self):
