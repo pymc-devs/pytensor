@@ -19,7 +19,6 @@ from pytensor.link.vm import VM, Loop, Stack, VMLinker
 from pytensor.tensor.math import cosh, tanh
 from pytensor.tensor.type import lscalar, scalar, scalars, vector, vectors
 from pytensor.tensor.variable import TensorConstant
-from tests import unittest_tools as utt
 
 
 class SomeOp(Op):
@@ -221,7 +220,7 @@ def test_partial_function(linker):
     assert f(3, output_subset=[0, 1, 2]) == f(3)
     assert f(4, output_subset=[0, 2]) == [f(4)[0], f(4)[2]]
 
-    utt.assert_allclose(f(5), np.array([32.0, 16.0, 1.7857142857142858]))
+    np.testing.assert_allclose(f(5), np.array([32.0, 16.0, 1.7857142857142858]))
 
 
 @pytest.mark.parametrize(
