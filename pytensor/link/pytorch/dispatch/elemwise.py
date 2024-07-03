@@ -48,50 +48,55 @@ def pytorch_funcify_sum(op, **kwargs):
 
 @pytorch_funcify.register(All)
 def pytorch_funcify_all(op, **kwargs):
-    dim = op.axis
-
     def torch_all(x):
-        return torch.all(x, dim=dim)
+        return torch.all(x, dim=op.axis)
 
     return torch_all
 
 
 @pytorch_funcify.register(Prod)
 def pytorch_funcify_prod(op, **kwargs):
-    dim = op.axis[0]
-
     def torch_prod(x):
-        return torch.prod(x, dim=dim)
+        if isinstance(op.axis, tuple):
+            for d in op.axis:
+                x = torch.prod(x, dim=d, keepdim=True)
+            return x.squeeze()
+        else:
+            return torch.prod(x.flatten(), dim=0)
 
     return torch_prod
 
 
 @pytorch_funcify.register(Any)
 def pytorch_funcify_any(op, **kwargs):
-    dim = op.axis
-
     def torch_any(x):
-        return torch.any(x, dim=dim)
+        return torch.any(x, dim=op.axis)
 
     return torch_any
 
 
 @pytorch_funcify.register(Max)
 def pytorch_funcify_max(op, **kwargs):
-    dim = op.axis[0]
-
     def torch_max(x):
-        return torch.max(x, dim=dim).values
+        if isinstance(op.axis, tuple):
+            for d in op.axis:
+                x = torch.max(x, dim=d, keepdim=True).values
+            return x.squeeze()
+        else:
+            return torch.max(x.flatten(), dim=0).values
 
     return torch_max
 
 
 @pytorch_funcify.register(Min)
 def pytorch_funcify_min(op, **kwargs):
-    dim = op.axis[0]
-
     def torch_min(x):
-        return torch.min(x, dim=dim).values
+        if isinstance(op.axis, tuple):
+            for d in op.axis:
+                x = torch.min(x, dim=d, keepdim=True).values
+            return x.squeeze()
+        else:
+            return torch.min(x.flatten(), dim=0).values
 
     return torch_min
 

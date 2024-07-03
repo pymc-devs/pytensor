@@ -7,7 +7,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor import elemwise as pt_elemwise
 from pytensor.tensor.special import SoftmaxGrad, log_softmax, softmax
-from pytensor.tensor.type import matrix, tensor, vector
+from pytensor.tensor.type import matrix, tensor, tensor3, vector
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 
 
@@ -58,10 +58,26 @@ def test_pytorch_elemwise():
     compare_pytorch_and_py(fg, [[0.9, 0.9]])
 
 
-@pytest.mark.parametrize("axis", [None, 0, 1])
+@pytest.mark.parametrize("axis", [0, 1, (0, 1), (1, 2), (1, -1)])
 def test_pytorch_sum(axis):
-    a_pt = matrix("a")
-    test_value = np.array([[1, 2], [3, 4]]).astype(config.floatX)
+    a_pt = tensor3("a")
+    test_value = np.array(
+        [
+            [
+                [1, 1, 1, 1],
+                [2, 2, 2, 2],
+            ],
+            [
+                [3, 3, 3, 3],
+                [
+                    4,
+                    4,
+                    4,
+                    4,
+                ],
+            ],
+        ]
+    ).astype(config.floatX)
 
     x = pt.math.sum(a_pt, axis=axis)
     x_fg = FunctionGraph([a_pt], [x])
@@ -80,10 +96,26 @@ def test_pytorch_all(axis):
     compare_pytorch_and_py(x_fg, [test_value])
 
 
-@pytest.mark.parametrize("axis", [0, 1])
+@pytest.mark.parametrize("axis", [None, 0, 1, (0, 1), (1, 2)])
 def test_pytorch_prod(axis):
-    a_pt = matrix("a")
-    test_value = np.array([[1, 2], [3, 4]]).astype(config.floatX)
+    a_pt = tensor3("a")
+    test_value = np.array(
+        [
+            [
+                [1, 1, 1, 1],
+                [2, 2, 2, 2],
+            ],
+            [
+                [3, 3, 3, 3],
+                [
+                    4,
+                    4,
+                    4,
+                    4,
+                ],
+            ],
+        ]
+    ).astype(config.floatX)
 
     x = ptm.prod(a_pt, axis=axis)
     x_fg = FunctionGraph([a_pt], [x])
@@ -91,7 +123,7 @@ def test_pytorch_prod(axis):
     compare_pytorch_and_py(x_fg, [test_value])
 
 
-@pytest.mark.parametrize("axis", [None, 0, 1])
+@pytest.mark.parametrize("axis", [None, 0, 1, (0, 1)])
 def test_pytorch_any(axis):
     a_pt = matrix("a")
     test_value = np.array([[True, False, True], [False, True, True]])
@@ -102,10 +134,26 @@ def test_pytorch_any(axis):
     compare_pytorch_and_py(x_fg, [test_value])
 
 
-@pytest.mark.parametrize("axis", [0, 1])
+@pytest.mark.parametrize("axis", [None, 0, 1, (1, -1)])
 def test_pytorch_max(axis):
-    a_pt = matrix("a")
-    test_value = np.array([[1, 2], [3, 4]]).astype(config.floatX)
+    a_pt = tensor3("a")
+    test_value = np.array(
+        [
+            [
+                [1, 1, 1, 1],
+                [2, 2, 2, 2],
+            ],
+            [
+                [3, 3, 3, 3],
+                [
+                    4,
+                    4,
+                    4,
+                    4,
+                ],
+            ],
+        ]
+    ).astype(config.floatX)
 
     x = ptm.max(a_pt, axis=axis)
     x_fg = FunctionGraph([a_pt], [x])
@@ -113,10 +161,29 @@ def test_pytorch_max(axis):
     compare_pytorch_and_py(x_fg, [test_value])
 
 
-@pytest.mark.parametrize("axis", [0, 1])
+@pytest.mark.parametrize("axis", [None, 0, 1, (1, -1)])
 def test_pytorch_min(axis):
-    a_pt = matrix("a")
-    test_value = np.array([[1, 2], [3, 4]]).astype(config.floatX)
+    a_pt = tensor3("a")
+    test_value = np.array(
+        [
+            [[1, 1, 1, 1], [2, 2, 2, 2], [3, 3, 3, 3]],
+            [
+                [4, 4, 4, 4],
+                [
+                    5,
+                    5,
+                    5,
+                    5,
+                ],
+                [
+                    6,
+                    6,
+                    6,
+                    6,
+                ],
+            ],
+        ]
+    ).astype(config.floatX)
 
     x = ptm.min(a_pt, axis=axis)
     x_fg = FunctionGraph([a_pt], [x])
