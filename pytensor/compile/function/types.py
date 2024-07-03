@@ -14,6 +14,7 @@ import pytensor
 import pytensor.compile.profiling
 from pytensor.compile.io import In, SymbolicInput, SymbolicOutput
 from pytensor.compile.ops import deep_copy_op, view_op
+from pytensor.compile.profiling import ProfileStats
 from pytensor.configdefaults import config
 from pytensor.graph.basic import (
     Constant,
@@ -212,18 +213,14 @@ def std_fgraph(
 
         found_updates.extend(map(SymbolicOutput, updates))
     elif fgraph is None:
-        input_vars = []
-
         # If one of the inputs is non-atomic (i.e. has a non-`None` `Variable.owner`),
         # then we need to create/clone the graph starting at these inputs.
         # The result will be atomic versions of the given inputs connected to
         # the same outputs.
         # Otherwise, when all the inputs are already atomic, there's no need to
         # clone the graph.
-        clone = force_clone
-        for spec in input_specs:
-            input_vars.append(spec.variable)
-            clone |= spec.variable.owner is not None
+        input_vars = [spec.variable for spec in input_specs]
+        clone = force_clone or any(var.owner is not None for var in input_vars)
 
         fgraph = FunctionGraph(
             input_vars,
@@ -557,11 +554,11 @@ class Function:
 
     def copy(
         self,
-        share_memory=False,
-        swap=None,
-        delete_updates=False,
-        name=None,
-        profile=None,
+        share_memory: bool = False,
+        swap: dict | None = None,
+        delete_updates: bool = False,
+        name: str | None = None,
+        profile: bool | str | ProfileStats | None = None,
     ):
         """
         Copy this function. Copied function will have separated maker and
@@ -588,7 +585,7 @@ class Function:
             If provided, will be the name of the new
             Function. Otherwise, it will be old + " copy"
 
-        profile :
+        profile : bool | str | ProfileStats | None
             as pytensor.function profile parameter
 
         Returns
@@ -727,14 +724,8 @@ class Function:
         # reinitialize new maker and create new function
         if profile is None:
             profile = config.profile or config.print_global_stats
-            # profile -> True or False
         if profile is True:
-            if name:
-                message = name
-            else:
-                message = str(profile.message) + " copy"
-            profile = pytensor.compile.profiling.ProfileStats(message=message)
-            # profile -> object
+            profile = pytensor.compile.profiling.ProfileStats(message=name)
         elif isinstance(profile, str):
             profile = pytensor.compile.profiling.ProfileStats(message=profile)
 

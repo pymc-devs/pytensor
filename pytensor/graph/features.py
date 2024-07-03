@@ -2,7 +2,6 @@ import inspect
 import sys
 import time
 import warnings
-from collections import OrderedDict
 from functools import partial
 from io import StringIO
 
@@ -324,7 +323,7 @@ class Feature:
         might be broken for all intents and purposes.
 
         """
-        return OrderedDict()
+        return {}
 
     def clone(self):
         """Create a clone that can be attached to a new `FunctionGraph`.

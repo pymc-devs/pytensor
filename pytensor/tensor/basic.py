@@ -1629,10 +1629,7 @@ class Alloc(COp):
         return [node.inputs[1:]]
 
     def connection_pattern(self, node):
-        rval = [[True]]
-
-        for ipt in node.inputs[1:]:
-            rval.append([False])
+        rval = [[True], *([False] for _ in node.inputs[1:])]
 
         return rval
 
@@ -1859,9 +1856,7 @@ class MakeVector(COp):
         if self.dtype in discrete_dtypes:
             return [ipt.zeros_like().astype(config.floatX) for ipt in inputs]
 
-        grads = []
-        for i, inp in enumerate(inputs):
-            grads.append(output_gradients[0][i])
+        grads = [output_gradients[0][i] for i in range(len(inputs))]
         return grads
 
     def R_op(self, inputs, eval_points):
@@ -2514,13 +2509,11 @@ class Join(COp):
         (out,) = outputs
         fail = sub["fail"]
         adtype = node.inputs[0].type.dtype_specs()[1]
-        copy_to_list = []
 
-        for i, inp in enumerate(tens):
-            copy_to_list.append(
-                f"""Py_INCREF({inp});
-                   PyList_SetItem(list, {i}, (PyObject*){inp});"""
-            )
+        copy_to_list = (
+            f"""Py_INCREF({inp}); PyList_SetItem(list, {i}, (PyObject*){inp});"""
+            for i, inp in enumerate(tens)
+        )
 
         copy_inputs_to_list = "\n".join(copy_to_list)
         n = len(tens)
@@ -3442,9 +3435,7 @@ class PermuteRowElements(Op):
         shp_x = in_shapes[0]
         shp_y = in_shapes[1]
         assert len(shp_x) == len(shp_y)
-        out_shape = []
-        for i in range(len(shp_x)):
-            out_shape.append(maximum(shp_x[i], shp_y[i]))
+        out_shape = [maximum(sx, sy) for sx, sy in zip(shp_x, shp_y, strict=True)]
         return [out_shape]
 
     def grad(self, inp, grads):
