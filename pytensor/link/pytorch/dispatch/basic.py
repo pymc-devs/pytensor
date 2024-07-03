@@ -108,10 +108,10 @@ def pytorch_funcify_eye(op, **kwargs):
 
     def eye(N, M, k):
         mjr, mnr = (M, N) if k > 0 else (N, M)
-        k_abs = abs(k)
+        k_abs = torch.abs(k)
         zeros = torch.zeros(N, M, dtype=dtype)
         if k_abs < mjr:
-            l_ones = min(mjr - k_abs, mnr)
+            l_ones = torch.min(mjr - k_abs, mnr)
             return zeros.diagonal_scatter(torch.ones(l_ones, dtype=dtype), k)
         return zeros
 
