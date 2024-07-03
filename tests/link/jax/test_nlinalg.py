@@ -13,7 +13,7 @@ from pytensor.tensor import blas as pt_blas
 from pytensor.tensor import nlinalg as pt_nlinalg
 from pytensor.tensor.math import Argmax, Max, maximum
 from pytensor.tensor.math import max as pt_max
-from pytensor.tensor.type import matrix, scalar, tensor3, vector
+from pytensor.tensor.type import dvector, matrix, scalar, tensor3, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
