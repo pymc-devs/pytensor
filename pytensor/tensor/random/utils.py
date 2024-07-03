@@ -141,7 +141,7 @@ def explicit_expand_dims(
 
     batch_dims = [
         param.type.ndim - ndim_param
-        for param, ndim_param in zip(params, ndim_params, strict=False)
+        for param, ndim_param in zip(params, ndim_params, strict=True)
     ]
 
     if size_length is not None:
