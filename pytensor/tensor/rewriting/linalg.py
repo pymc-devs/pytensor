@@ -404,7 +404,7 @@ def _find_diag_from_eye_mul(potential_mul_input):
         if mul_input.owner and isinstance(mul_input.owner.op, Eye)
     ]
 
-    # Check if 1's are being put on the main diagonal only (k = 1)
+    # Check if 1's are being put on the main diagonal only (k = 0)
     if eye_input and getattr(eye_input[0].owner.inputs[-1], "data", -1).item() != 0:
         return None
 
