@@ -2,11 +2,12 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
+import pytensor.tensor.math as ptm
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor import elemwise as pt_elemwise
 from pytensor.tensor.special import SoftmaxGrad, log_softmax, softmax
-from pytensor.tensor.type import matrix, tensor, vector
+from pytensor.tensor.type import matrix, tensor, tensor3, vector
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 
 
@@ -55,6 +56,46 @@ def test_pytorch_elemwise():
 
     fg = FunctionGraph([x], [out])
     compare_pytorch_and_py(fg, [[0.9, 0.9]])
+
+
+@pytest.mark.parametrize("fn", [ptm.sum, ptm.prod, ptm.max, ptm.min])
+@pytest.mark.parametrize("axis", [None, 0, 1, (0, -1)])
+def test_pytorch_careduce(fn, axis):
+    a_pt = tensor3("a")
+    test_value = np.array(
+        [
+            [
+                [1, 1, 1, 1],
+                [2, 2, 2, 2],
+            ],
+            [
+                [3, 3, 3, 3],
+                [
+                    4,
+                    4,
+                    4,
+                    4,
+                ],
+            ],
+        ]
+    ).astype(config.floatX)
+
+    x = fn(a_pt, axis=axis)
+    x_fg = FunctionGraph([a_pt], [x])
+
+    compare_pytorch_and_py(x_fg, [test_value])
+
+
+@pytest.mark.parametrize("fn", [ptm.any, ptm.all])
+@pytest.mark.parametrize("axis", [None, 0, 1, (0, 1)])
+def test_pytorch_any_all(fn, axis):
+    a_pt = matrix("a")
+    test_value = np.array([[True, False, True], [False, True, True]])
+
+    x = fn(a_pt, axis=axis)
+    x_fg = FunctionGraph([a_pt], [x])
+
+    compare_pytorch_and_py(x_fg, [test_value])
 
 
 @pytest.mark.parametrize("dtype", ["float64", "int64"])

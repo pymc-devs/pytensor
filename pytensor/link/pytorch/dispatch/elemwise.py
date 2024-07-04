@@ -2,6 +2,7 @@ import torch
 
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.math import All, Any, Max, Min, Prod, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 
 
@@ -35,6 +36,69 @@ def pytorch_funcify_DimShuffle(op, **kwargs):
         return res
 
     return dimshuffle
+
+
+@pytorch_funcify.register(Sum)
+def pytorch_funcify_sum(op, **kwargs):
+    def torch_sum(x):
+        return torch.sum(x, dim=op.axis)
+
+    return torch_sum
+
+
+@pytorch_funcify.register(All)
+def pytorch_funcify_all(op, **kwargs):
+    def torch_all(x):
+        return torch.all(x, dim=op.axis)
+
+    return torch_all
+
+
+@pytorch_funcify.register(Prod)
+def pytorch_funcify_prod(op, **kwargs):
+    def torch_prod(x):
+        if isinstance(op.axis, tuple):
+            for d in sorted(op.axis, reverse=True):
+                x = torch.prod(x, dim=d)
+            return x
+        else:
+            return torch.prod(x.flatten(), dim=0)
+
+    return torch_prod
+
+
+@pytorch_funcify.register(Any)
+def pytorch_funcify_any(op, **kwargs):
+    def torch_any(x):
+        return torch.any(x, dim=op.axis)
+
+    return torch_any
+
+
+@pytorch_funcify.register(Max)
+def pytorch_funcify_max(op, **kwargs):
+    def torch_max(x):
+        if isinstance(op.axis, tuple):
+            for d in sorted(op.axis, reverse=True):
+                x = torch.max(x, dim=d).values
+            return x
+        else:
+            return torch.max(x.flatten(), dim=0).values
+
+    return torch_max
+
+
+@pytorch_funcify.register(Min)
+def pytorch_funcify_min(op, **kwargs):
+    def torch_min(x):
+        if isinstance(op.axis, tuple):
+            for d in sorted(op.axis, reverse=True):
+                x = torch.min(x, dim=d).values
+            return x
+        else:
+            return torch.min(x.flatten(), dim=0).values
+
+    return torch_min
 
 
 @pytorch_funcify.register(Softmax)
