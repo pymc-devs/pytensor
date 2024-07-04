@@ -104,15 +104,15 @@ def pytorch_funcify_Join(op, **kwargs):
 
 @pytorch_funcify.register(Eye)
 def pytorch_funcify_eye(op, **kwargs):
-    dtype = getattr(torch, op.dtype)
+    torch_dtype = getattr(torch, op.dtype)
 
     def eye(N, M, k):
-        mjr, mnr = (M, N) if k > 0 else (N, M)
+        major, minor = (M, N) if k > 0 else (N, M)
         k_abs = torch.abs(k)
-        zeros = torch.zeros(N, M, dtype=dtype)
-        if k_abs < mjr:
-            l_ones = torch.min(mjr - k_abs, mnr)
-            return zeros.diagonal_scatter(torch.ones(l_ones, dtype=dtype), k)
+        zeros = torch.zeros(N, M, dtype=torch_dtype)
+        if k_abs < major:
+            l_ones = torch.min(major - k_abs, minor)
+            return zeros.diagonal_scatter(torch.ones(l_ones, dtype=torch_dtype), k)
         return zeros
 
     return eye
