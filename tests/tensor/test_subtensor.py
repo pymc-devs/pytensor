@@ -154,8 +154,11 @@ class TestGetCanonicalFormSlice:
         assert isinstance(res[0].owner.op, ptb.ScalarFromTensor)
         assert res[1] == 1
 
-    def test_all_integer(self):
-        res = get_canonical_form_slice(slice(1, 5, 2), 7)
+    @pytest.mark.parametrize("int_fn", [int, np.int64, as_tensor, as_scalar])
+    def test_all_integer(self, int_fn):
+        res = get_canonical_form_slice(
+            slice(int_fn(1), int_fn(5), int_fn(2)), int_fn(7)
+        )
         assert isinstance(res[0], slice)
         assert res[1] == 1
 

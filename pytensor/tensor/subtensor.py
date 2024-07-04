@@ -325,7 +325,7 @@ def get_canonical_form_slice(
         and is_step_constant
         and is_length_constant
     ):
-        assert isinstance(length, int)
+        assert isinstance(length, int | np.integer)
         _start, _stop, _step = slice(start, stop, step).indices(length)
         if _start <= _stop and _step >= 1:
             return slice(_start, _stop, _step), 1
