@@ -32,7 +32,15 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.linkcode",
     "sphinx.ext.mathjax",
+    "sphinx_design",
+    "sphinx.ext.intersphinx"
 ]
+
+intersphinx_mapping = {
+    "jax": ("https://jax.readthedocs.io/en/latest", None),
+    "numpy": ("https://numpy.org/doc/stable", None),
+    "torch": ("https://pytorch.org/docs/stable", None),
+}
 
 needs_sphinx = "3"
 
