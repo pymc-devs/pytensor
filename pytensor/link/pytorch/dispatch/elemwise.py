@@ -58,7 +58,7 @@ def pytorch_funcify_all(op, **kwargs):
 def pytorch_funcify_prod(op, **kwargs):
     def torch_prod(x):
         if isinstance(op.axis, tuple):
-            for d in op.axis[::-1]:
+            for d in sorted(op.axis, reverse=True):
                 x = torch.prod(x, dim=d)
             return x
         else:
@@ -79,7 +79,7 @@ def pytorch_funcify_any(op, **kwargs):
 def pytorch_funcify_max(op, **kwargs):
     def torch_max(x):
         if isinstance(op.axis, tuple):
-            for d in op.axis[::-1]:
+            for d in sorted(op.axis, reverse=True):
                 x = torch.max(x, dim=d).values
             return x
         else:
@@ -92,7 +92,7 @@ def pytorch_funcify_max(op, **kwargs):
 def pytorch_funcify_min(op, **kwargs):
     def torch_min(x):
         if isinstance(op.axis, tuple):
-            for d in op.axis[::-1]:
+            for d in sorted(op.axis, reverse=True):
                 x = torch.min(x, dim=d).values
             return x
         else:

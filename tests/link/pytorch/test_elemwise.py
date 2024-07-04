@@ -59,7 +59,7 @@ def test_pytorch_elemwise():
 
 
 @pytest.mark.parametrize("fn", [ptm.sum, ptm.prod, ptm.max, ptm.min])
-@pytest.mark.parametrize("axis", [0, 1, (0, 1), (1, 2), (1, -1)])
+@pytest.mark.parametrize("axis", [None, 0, 1, (0, -1)])
 def test_pytorch_careduce(fn, axis):
     a_pt = tensor3("a")
     test_value = np.array(
