@@ -3231,7 +3231,7 @@ class TestLocalSumProd:
 class TestLocalReduce:
     def setup_method(self):
         self.mode = get_default_mode().including(
-            "canonicalize", "specialize", "uncanonicalize", "local_max_and_argmax"
+            "canonicalize", "specialize", "uncanonicalize"
         )
 
     def test_local_reduce_broadcast_all_0(self):
@@ -3304,62 +3304,94 @@ class TestLocalReduce:
                 isinstance(node.op, CAReduce) for node in f.maker.fgraph.toposort()
             )
 
-    def test_local_reduce_join(self):
+
+class TestReduceJoin:
+    def setup_method(self):
+        self.mode = get_default_mode().including(
+            "canonicalize", "specialize", "uncanonicalize"
+        )
+
+    @pytest.mark.parametrize(
+        "op, nin", [(pt_sum, 3), (pt_max, 2), (pt_min, 2), (prod, 3)]
+    )
+    def test_local_reduce_join(self, op, nin):
         vx = matrix()
         vy = matrix()
         vz = matrix()
         x = np.asarray([[1, 0], [3, 4]], dtype=config.floatX)
         y = np.asarray([[4, 0], [2, 1]], dtype=config.floatX)
         z = np.asarray([[5, 0], [1, 2]], dtype=config.floatX)
-        # Test different reduction scalar operation
-        for out, res in [
-            (pt_max((vx, vy), 0), np.max((x, y), 0)),
-            (pt_min((vx, vy), 0), np.min((x, y), 0)),
-            (pt_sum((vx, vy, vz), 0), np.sum((x, y, z), 0)),
-            (prod((vx, vy, vz), 0), np.prod((x, y, z), 0)),
-            (prod((vx, vy.T, vz), 0), np.prod((x, y.T, z), 0)),
-        ]:
-            f = function([vx, vy, vz], out, on_unused_input="ignore", mode=self.mode)
-            assert (f(x, y, z) == res).all(), out
-            topo = f.maker.fgraph.toposort()
-            assert len(topo) <= 2, out
-            assert isinstance(topo[-1].op, Elemwise), out
 
+        inputs = (vx, vy, vz)[:nin]
+        test_values = (x, y, z)[:nin]
+
+        out = op(inputs, axis=0)
+        f = function(inputs, out, mode=self.mode)
+        np.testing.assert_allclose(
+            f(*test_values), getattr(np, op.__name__)(test_values, axis=0)
+        )
+        topo = f.maker.fgraph.toposort()
+        assert len(topo) <= 2
+        assert isinstance(topo[-1].op, Elemwise)
+
+    def test_type(self):
         # Test different axis for the join and the reduction
         # We must force the dtype, of otherwise, this tests will fail
         # on 32 bit systems
         A = shared(np.array([1, 2, 3, 4, 5], dtype="int64"))
 
         f = function([], pt_sum(pt.stack([A, A]), axis=0), mode=self.mode)
-        utt.assert_allclose(f(), [2, 4, 6, 8, 10])
+        np.testing.assert_allclose(f(), [2, 4, 6, 8, 10])
         topo = f.maker.fgraph.toposort()
         assert isinstance(topo[-1].op, Elemwise)
 
         # Test a case that was bugged in a old PyTensor bug
         f = function([], pt_sum(pt.stack([A, A]), axis=1), mode=self.mode)
 
-        utt.assert_allclose(f(), [15, 15])
+        np.testing.assert_allclose(f(), [15, 15])
         topo = f.maker.fgraph.toposort()
         assert not isinstance(topo[-1].op, Elemwise)
 
         # This case could be rewritten
         A = shared(np.array([1, 2, 3, 4, 5]).reshape(5, 1))
         f = function([], pt_sum(pt.concatenate((A, A), axis=1), axis=1), mode=self.mode)
-        utt.assert_allclose(f(), [2, 4, 6, 8, 10])
+        np.testing.assert_allclose(f(), [2, 4, 6, 8, 10])
         topo = f.maker.fgraph.toposort()
         assert not isinstance(topo[-1].op, Elemwise)
 
         A = shared(np.array([1, 2, 3, 4, 5]).reshape(5, 1))
         f = function([], pt_sum(pt.concatenate((A, A), axis=1), axis=0), mode=self.mode)
-        utt.assert_allclose(f(), [15, 15])
+        np.testing.assert_allclose(f(), [15, 15])
         topo = f.maker.fgraph.toposort()
         assert not isinstance(topo[-1].op, Elemwise)
 
+    def test_not_supported_axis_none(self):
         # Test that the rewrite does not crash in one case where it
         # is not applied.  Reported at
         # https://groups.google.com/d/topic/theano-users/EDgyCU00fFA/discussion
+        vx = matrix()
+        vy = matrix()
+        vz = matrix()
+        x = np.asarray([[1, 0], [3, 4]], dtype=config.floatX)
+        y = np.asarray([[4, 0], [2, 1]], dtype=config.floatX)
+        z = np.asarray([[5, 0], [1, 2]], dtype=config.floatX)
+
         out = pt_sum([vx, vy, vz], axis=None)
-        f = function([vx, vy, vz], out)
+        f = function([vx, vy, vz], out, mode=self.mode)
+        np.testing.assert_allclose(f(x, y, z), np.sum([x, y, z]))
+
+    def test_not_supported_unequal_shapes(self):
+        # Not the same shape along the join axis
+        vx = matrix(shape=(1, 3))
+        vy = matrix(shape=(2, 3))
+        x = np.asarray([[1, 0, 1]], dtype=config.floatX)
+        y = np.asarray([[4, 0, 1], [2, 1, 1]], dtype=config.floatX)
+        out = pt_sum(join(0, vx, vy), axis=0)
+
+        f = function([vx, vy], out, mode=self.mode)
+        np.testing.assert_allclose(
+            f(x, y), np.sum(np.concatenate([x, y], axis=0), axis=0)
+        )
 
 
 def test_local_useless_adds():
