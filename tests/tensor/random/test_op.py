@@ -296,6 +296,16 @@ def test_vectorize():
     assert vect_node.default_output().type.shape == (10, 2, 5)
 
 
+def test_vectorize_empty_size():
+    scalar_mu = pt.scalar("scalar_mu")
+    scalar_x = pt.random.normal(loc=scalar_mu, size=())
+    assert scalar_x.type.shape == ()
+
+    vector_mu = pt.vector("vector_mu", shape=(5,))
+    vector_x = vectorize_graph(scalar_x, {scalar_mu: vector_mu})
+    assert vector_x.type.shape == (5,)
+
+
 def test_size_none_vs_empty():
     rv = RandomVariable(
         "normal",
