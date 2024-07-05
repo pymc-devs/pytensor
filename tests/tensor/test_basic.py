@@ -4577,6 +4577,46 @@ def test_vectorize_extract_diag():
     )
 
 
+@pytest.mark.parametrize(
+    "batch_shapes",
+    [
+        ((3,),),  # edge case of make_vector with a single input
+        ((), (), ()),  # Useless
+        ((3,), (3,), (3,)),  # No broadcasting needed
+        ((3,), (5, 3), ()),  # Broadcasting needed
+    ],
+)
+def test_vectorize_make_vector(batch_shapes):
+    n_inputs = len(batch_shapes)
+    input_sig = ",".join(["()"] * n_inputs)
+    signature = f"{input_sig}->({n_inputs})"  # Something like "(),(),()->(3)"
+
+    def core_pt(*scalars):
+        out = stack(scalars)
+        out.dprint()
+        return out
+
+    def core_np(*scalars):
+        return np.stack(scalars)
+
+    tensors = [tensor(shape=shape) for shape in batch_shapes]
+
+    vectorize_pt = function(tensors, vectorize(core_pt, signature=signature)(*tensors))
+    assert not any(
+        isinstance(node.op, Blockwise) for node in vectorize_pt.maker.fgraph.apply_nodes
+    )
+
+    test_values = [
+        np.random.normal(size=tensor.type.shape).astype(tensor.type.dtype)
+        for tensor in tensors
+    ]
+
+    np.testing.assert_allclose(
+        vectorize_pt(*test_values),
+        np.vectorize(core_np, signature=signature)(*test_values),
+    )
+
+
 @pytest.mark.parametrize("axis", [constant(1), constant(-2), shared(1)])
 @pytest.mark.parametrize("broadcasting_y", ["none", "implicit", "explicit"])
 @config.change_flags(cxx="")  # C code not needed

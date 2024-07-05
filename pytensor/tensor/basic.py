@@ -1890,6 +1890,23 @@ def _get_vector_length_MakeVector(op, var):
     return len(var.owner.inputs)
 
 
+@_vectorize_node.register
+def vectorize_make_vector(op: MakeVector, node, *batch_inputs):
+    # We vectorize make_vector as a join along the last axis of the broadcasted inputs
+    from pytensor.tensor.extra_ops import broadcast_arrays
+
+    # Check if we need to broadcast at all
+    bcast_pattern = batch_inputs[0].type.broadcastable
+    if not all(
+        batch_input.type.broadcastable == bcast_pattern for batch_input in batch_inputs
+    ):
+        batch_inputs = broadcast_arrays(*batch_inputs)
+
+    # Join along the last axis
+    new_out = stack(batch_inputs, axis=-1)
+    return new_out.owner
+
+
 def transfer(var, target):
     """
     Return a version of `var` transferred to `target`.
@@ -2690,6 +2707,10 @@ def vectorize_join(op: Join, node, batch_axis, *batch_inputs):
     # We can vectorize join as a shifted axis on the batch inputs if:
     # 1. The batch axis is a constant and has not changed
     # 2. All inputs are batched with the same broadcastable pattern
+
+    # TODO: We can relax the second condition by broadcasting the batch dimensions
+    #  This can be done with `broadcast_arrays` if the tensors shape match at the axis or reduction
+    #  Or otherwise by calling `broadcast_to` for each tensor that needs it
     if (
         original_axis.type.ndim == 0
         and isinstance(original_axis, Constant)
