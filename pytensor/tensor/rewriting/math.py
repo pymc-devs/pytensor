@@ -91,6 +91,7 @@ from pytensor.tensor.rewriting.basic import (
     register_uncanonicalize,
     register_useless,
 )
+from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
 from pytensor.tensor.shape import Shape, Shape_i
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
@@ -1628,68 +1629,55 @@ def local_reduce_chain(fgraph, node) -> list[TensorVariable] | None:
 @node_rewriter([CAReduce])
 def local_reduce_join(fgraph, node):
     """
-    CAReduce{scalar.op}(Join(axis=0, a, b), axis=0) -> Elemwise{scalar.op}(a, b)
+    CAReduce{scalar.op}(Join(axis=x, a, b), axis=x) -> Elemwise{scalar.op}(a, b)
 
-    Notes
-    -----
-    Supported scalar.op are Maximum, Minimum in some cases and Add and Mul in
-    all cases.
-
-    Currently we must reduce on axis 0. It is probably extensible to the case
-    where we join and reduce on the same set of axis.
+    When a, b have a dim length of 1 along the join axis
 
     """
-    if node.inputs[0].owner and isinstance(node.inputs[0].owner.op, Join):
-        join_node = node.inputs[0].owner
-        if extract_constant(join_node.inputs[0], only_process_constants=True) != 0:
-            return
+    if not (node.inputs[0].owner and isinstance(node.inputs[0].owner.op, Join)):
+        return None
 
-        if isinstance(node.op.scalar_op, ps.ScalarMaximum | ps.ScalarMinimum):
-            # Support only 2 inputs for now
-            if len(join_node.inputs) != 3:
-                return
-        elif not isinstance(node.op.scalar_op, ps.Add | ps.Mul):
-            return
-        elif len(join_node.inputs) <= 2:
-            # This is a useless join that should get removed by another rewrite?
-            return
+    [joined_out] = node.inputs
+    joined_node = joined_out.owner
+    join_axis_tensor, *joined_inputs = joined_node.inputs
 
-        new_inp = []
-        for inp in join_node.inputs[1:]:
-            inp = inp.owner
-            if not inp:
-                return
-            if not isinstance(inp.op, DimShuffle) or inp.op.new_order != (
-                "x",
-                *range(inp.inputs[0].ndim),
-            ):
-                return
-            new_inp.append(inp.inputs[0])
-        ret = Elemwise(node.op.scalar_op)(*new_inp)
+    n_joined_inputs = len(joined_inputs)
+    if n_joined_inputs < 2:
+        # Let some other rewrite get rid of this useless Join
+        return None
+    if n_joined_inputs > 2 and not isinstance(node.op.scalar_op, ps.Add | ps.Mul):
+        # We don't rewrite if a single Elemwise cannot take all inputs at once
+        return None
 
-        if ret.dtype != node.outputs[0].dtype:
-            # The reduction do something about the dtype.
-            return
+    if not isinstance(join_axis_tensor, Constant):
+        return None
+    join_axis = join_axis_tensor.data
 
-        reduce_axis = node.op.axis
-        if reduce_axis is None:
-            reduce_axis = tuple(range(node.inputs[0].ndim))
+    # Check whether reduction happens on joined axis
+    reduce_op = node.op
+    reduce_axis = reduce_op.axis
+    if reduce_axis is None:
+        if joined_out.type.ndim > 1:
+            return None
+    elif reduce_axis != (join_axis,):
+        return None
 
-        if len(reduce_axis) != 1 or 0 not in reduce_axis:
-            return
+    # Check all inputs are broadcastable along the join axis and squeeze those dims away
+    new_inputs = []
+    for inp in joined_inputs:
+        if not inp.type.broadcastable[join_axis]:
+            return None
+        # Most times inputs to join have an expand_dims, we eagerly clean up those here
+        new_input = apply_local_dimshuffle_lift(None, inp.squeeze(join_axis))
+        new_inputs.append(new_input)
 
-        # We add the new check late to don't add extra warning.
-        try:
-            join_axis = get_underlying_scalar_constant_value(
-                join_node.inputs[0], only_process_constants=True
-            )
+    ret = Elemwise(node.op.scalar_op)(*new_inputs)
 
-            if join_axis != reduce_axis[0]:
-                return
-        except NotScalarConstantError:
-            return
+    if ret.dtype != node.outputs[0].dtype:
+        # The reduction do something about the dtype.
+        return None
 
-        return [ret]
+    return [ret]
 
 
 @register_infer_shape
