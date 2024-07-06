@@ -27,7 +27,7 @@ def pytorch_funcify_Cumop(op, **kwargs):
 def pytorch_funcify_Repeat(op, **kwargs):
     axis = op.axis
 
-    def repeat(x, repeats, axis=axis):
+    def repeat(x, repeats):
         return x.repeat_interleave(repeats, dim=axis)
 
     return repeat
@@ -46,13 +46,7 @@ def pytorch_funcify_Unique(op, **kwargs):
     return_inverse = op.return_inverse
     return_counts = op.return_counts
 
-    def unique(
-        x,
-        return_index=return_index,
-        return_inverse=return_inverse,
-        return_counts=return_counts,
-        axis=axis,
-    ):
+    def unique(x):
         return torch.unique(
             x,
             sorted=True,
