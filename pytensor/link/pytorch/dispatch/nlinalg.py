@@ -8,7 +8,7 @@ from pytensor.tensor.math import Dot
 def pytorch_funcify_Dot(op, **kwargs):
     def dot(x, y):
         # Case 1: Vector Product/Matrix Multiplication/1-D Broadcastable Vector
-        if x.shape < 3 and y.shape < 3:
+        if x.shape == 1 or y.shape == 1 or (x.shape < 3 and y.shape < 3):
             return torch.matmul(x, y)
         else:
             # Case 2: Stackable batch dimension
