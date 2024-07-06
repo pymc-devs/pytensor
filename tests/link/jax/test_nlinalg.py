@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-from packaging.version import parse as version_parse
 
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
@@ -80,11 +79,7 @@ def test_jax_basic_multiout():
     compare_jax_and_py(out_fg, [X.astype(config.floatX)], assert_fn=assert_fn)
 
 
-@pytest.mark.xfail(
-    version_parse(jax.__version__) >= version_parse("0.2.12"),
-    reason="Operation leads to JAX Tracer object is used in a context where a Python integer is expected (jax.errors.TracerIntegerConversionError).",
-)
-def test_jax_basic_multiout_omni():
+def test_jax_max_and_argmax():
     # Test that a single output of a multi-output `Op` can be used as input to
     # another `Op`
     x = dvector()
