@@ -277,12 +277,16 @@ def test_pytorch_Join():
     )
 
 
-def test_eye():
+@pytest.mark.parametrize(
+    "dtype",
+    ["int64", config.floatX],
+)
+def test_eye(dtype):
     N = scalar("N", dtype="int64")
     M = scalar("M", dtype="int64")
     k = scalar("k", dtype="int64")
 
-    out = eye(N, M, k, dtype="float32")
+    out = eye(N, M, k, dtype=dtype)
 
     fn = function([N, M, k], out, mode=pytorch_mode)
 
