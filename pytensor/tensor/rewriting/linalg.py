@@ -569,3 +569,21 @@ def svd_uv_merge(fgraph, node):
                     or len(fgraph.clients[cl.outputs[2]]) > 0
                 ):
                     return [cl.outputs[1]]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Blockwise])
+def rewrite_inv_inv(fgraph, node):
+    valid_inverses = (MatrixInverse, MatrixPinv)
+    if not (isinstance(node.op.core_op, valid_inverses)):
+        return None
+
+    potential_inner_inv = node.inputs[0].owner
+    if not (
+        isinstance(potential_inner_inv.op, Blockwise)
+        and isinstance(node.op.core_op, valid_inverses)
+    ):
+        return None
+
+    return [potential_inner_inv.inputs[0]]
