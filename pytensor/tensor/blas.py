@@ -1827,7 +1827,7 @@ class BatchedDot(COp):
         ]
 
         z_shape_correct = " && ".join(
-            "PyArray_DIMS(%s)[%i] == %s" % (_z, i, dim) for i, dim in enumerate(z_dims)
+            f"PyArray_DIMS({_z})[{i}] == {dim}" for i, dim in enumerate(z_dims)
         )
         z_shape = ", ".join(z_dims)
         z_contiguous = contiguous(_z, z_ndim)

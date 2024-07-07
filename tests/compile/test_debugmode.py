@@ -152,28 +152,28 @@ class WeirdBrokenOp(COp):
         (a,) = inp
         (z,) = out
         if "inplace" in self.behaviour:
-            z_code = """
-            {Py_XDECREF(%(z)s);}
-            Py_INCREF(%(a)s);
-            %(z)s = %(a)s;
+            z_code = f"""
+            {{Py_XDECREF({z});}}
+            Py_INCREF({a});
+            {z} = {a};
             """
         else:
-            z_code = """
-            {Py_XDECREF(%(z)s);}
-            %(z)s = (PyArrayObject*) PyArray_SimpleNew(1, PyArray_DIMS(%(a)s), PyArray_DESCR(%(a)s)->type_num);
+            z_code = f"""
+            {{Py_XDECREF({z});}}
+            {z} = (PyArrayObject*) PyArray_SimpleNew(1, PyArray_DIMS({a}), PyArray_DESCR({a})->type_num);
             """
-        prep_vars = """
+        prep_vars = f"""
             //the output array has size M x N
-            npy_intp M = PyArray_DIMS(%(a)s)[0];
-            npy_intp Sa = PyArray_STRIDES(%(a)s)[0] / PyArray_DESCR(%(a)s)->elsize;
-            npy_intp Sz = PyArray_STRIDES(%(z)s)[0] / PyArray_DESCR(%(z)s)->elsize;
+            npy_intp M = PyArray_DIMS({a})[0];
+            npy_intp Sa = PyArray_STRIDES({a})[0] / PyArray_DESCR({a})->elsize;
+            npy_intp Sz = PyArray_STRIDES({z})[0] / PyArray_DESCR({z})->elsize;
 
-            npy_double * Da = (npy_double*)PyArray_BYTES(%(a)s);
-            npy_double * Dz = (npy_double*)PyArray_BYTES(%(z)s);
+            npy_double * Da = (npy_double*)PyArray_BYTES({a});
+            npy_double * Dz = (npy_double*)PyArray_BYTES({z});
 
             //clear the output array
             for (npy_intp m = 0; m < M; ++m)
-            {
+            {{
         """
 
         if self.behaviour == "times2":
@@ -196,7 +196,7 @@ class WeirdBrokenOp(COp):
             }
         """
 
-        total = (z_code + prep_vars + behaviour + prep_vars2) % dict(locals(), **sub)
+        total = z_code + prep_vars + behaviour + prep_vars2
         return total
 
 

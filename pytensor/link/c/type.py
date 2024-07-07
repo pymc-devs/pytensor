@@ -208,29 +208,29 @@ class CDataType(CType[D]):
         freefunc = self.freefunc
         if freefunc is None:
             freefunc = "NULL"
-        s = """
-Py_XDECREF(py_%(name)s);
-if (%(name)s == NULL) {
-  py_%(name)s = Py_None;
-  Py_INCREF(py_%(name)s);
-} else {
-  py_%(name)s = PyCapsule_New((void *)%(name)s, NULL,
+        s = f"""
+Py_XDECREF(py_{name});
+if ({name} == NULL) {{
+  py_{name} = Py_None;
+  Py_INCREF(py_{name});
+}} else {{
+  py_{name} = PyCapsule_New((void *){name}, NULL,
                               _capsule_destructor);
-  if (py_%(name)s != NULL) {
-    if (PyCapsule_SetContext(py_%(name)s, (void *)%(freefunc)s) != 0) {
+  if (py_{name} != NULL) {{
+    if (PyCapsule_SetContext(py_{name}, (void *){freefunc}) != 0) {{
       /* This won't trigger a call to freefunc since it could not be
          set. The error case below will do it. */
-      Py_DECREF(py_%(name)s);
+      Py_DECREF(py_{name});
       /* Signal the error */
-      py_%(name)s = NULL;
-    }
-  }
-}"""
+      py_{name} = NULL;
+    }}
+  }}
+}}"""
         if self.freefunc is not None:
-            s += """
-if (py_%(name)s == NULL) { %(freefunc)s(%(name)s); }
+            s += f"""
+if (py_{name} == NULL) {{ {freefunc}({name}); }}
 """
-        return s % dict(name=name, freefunc=freefunc)
+        return s
 
     def c_cleanup(self, name, sub):
         # No need to do anything here since the CObject/Capsule will

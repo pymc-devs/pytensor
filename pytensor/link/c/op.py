@@ -513,8 +513,6 @@ class ExternalCOp(COp):
         self, node: Apply, name: str, check_input: bool | None = None
     ) -> tuple[str, str]:
         "Construct a pair of C ``#define`` and ``#undef`` code strings."
-        define_template = "#define %s %s"
-        undef_template = "#undef %s"
         define_macros = []
         undef_macros = []
 
@@ -535,28 +533,23 @@ class ExternalCOp(COp):
 
                 vname = variable_names[i]
 
-                macro_items = (f"DTYPE_{vname}", f"npy_{v.type.dtype}")
-                define_macros.append(define_template % macro_items)
-                undef_macros.append(undef_template % macro_items[0])
+                define_macros.append(f"#define DTYPE_{vname} npy_{v.type.dtype}")
+                undef_macros.append(f"#undef DTYPE_{vname}")
 
                 d = np.dtype(v.type.dtype)
 
-                macro_items_2 = (f"TYPENUM_{vname}", d.num)
-                define_macros.append(define_template % macro_items_2)
-                undef_macros.append(undef_template % macro_items_2[0])
+                define_macros.append(f"#define TYPENUM_{vname} {d.num}")
+                undef_macros.append(f"#undef TYPENUM_{vname}")
 
-                macro_items_3 = (f"ITEMSIZE_{vname}", d.itemsize)
-                define_macros.append(define_template % macro_items_3)
-                undef_macros.append(undef_template % macro_items_3[0])
+                define_macros.append(f"#define ITEMSIZE_{vname} {d.itemsize}")
+                undef_macros.append(f"#undef ITEMSIZE_{vname}")
 
         # Generate a macro to mark code as being apply-specific
-        define_macros.append(define_template % ("APPLY_SPECIFIC(str)", f"str##_{name}"))
-        undef_macros.append(undef_template % "APPLY_SPECIFIC")
+        define_macros.append(f"#define APPLY_SPECIFIC(str) str##_{name}")
+        undef_macros.append("#undef APPLY_SPECIFIC")
 
-        define_macros.extend(
-            define_template % (n, v) for n, v in self.__get_op_params()
-        )
-        undef_macros.extend(undef_template % (n,) for n, _ in self.__get_op_params())
+        define_macros.extend(f"#define {n} {v}" for n, v in self.__get_op_params())
+        undef_macros.extend(f"#undef {n}" for n, _ in self.__get_op_params())
 
         return "\n".join(define_macros), "\n".join(undef_macros)
 

@@ -1851,8 +1851,8 @@ class TestBitwise:
 class TestAdd:
     def test_complex_all_ops(self):
         for nbits in (64, 128):
-            a = shared(np.ones(3, dtype="complex%i" % nbits) + 0.5j)
-            b = shared(np.ones(3, dtype="complex%i" % nbits) + 1.5j)
+            a = shared(np.ones(3, dtype=f"complex{nbits}") + 0.5j)
+            b = shared(np.ones(3, dtype=f"complex{nbits}") + 1.5j)
             tests = (
                 ("+", lambda x, y: x + y),
                 ("-", lambda x, y: x - y),

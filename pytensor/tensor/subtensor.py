@@ -1073,20 +1073,20 @@ class Subtensor(COp):
 
         def init_entry(entry, depth=0):
             if isinstance(entry, np.integer | int):
-                init_cmds.append("subtensor_spec[%i] = %i;" % (spec_pos(), entry))
+                init_cmds.append(f"subtensor_spec[{spec_pos()}] = {entry};")
                 inc_spec_pos(1)
                 if depth == 0:
                     is_slice.append(0)
             elif isinstance(entry, Type):
                 init_cmds.append(
-                    "subtensor_spec[%i] = %s;" % (spec_pos(), inputs[input_pos()])
+                    f"subtensor_spec[{spec_pos()}] = {inputs[input_pos()]};"
                 )
                 inc_spec_pos(1)
                 inc_input_pos(1)
                 if depth == 0:
                     is_slice.append(0)
             elif entry is None:
-                init_cmds.append("subtensor_spec[%i] = %i;" % (spec_pos(), NONE_CODE))
+                init_cmds.append(f"subtensor_spec[{spec_pos()}] = {NONE_CODE};")
                 inc_spec_pos(1)
                 if depth == 0:
                     is_slice.append(0)
