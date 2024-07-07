@@ -573,5 +573,5 @@ def test_inv_inv_rewrite(inv_op_1, inv_op_2):
     valid_inverses = (MatrixInverse, MatrixPinv, Solve, SolveTriangular)
 
     assert not any(isinstance(node.op, valid_inverses) for node in nodes)
-    x_testing = np.random.rand(10, 10)
+    x_testing = np.random.rand(10, 10).astype(config.floatX)
     np.testing.assert_allclose(f_rewritten(x_testing), x_testing)

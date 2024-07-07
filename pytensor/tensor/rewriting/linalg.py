@@ -582,9 +582,12 @@ def _find_solve_with_eye(node):
     # Check whether second input to solve is Eye
     solve_inputs = node.inputs
     potential_eye_input = solve_inputs[1].owner
+
     if not (potential_eye_input and isinstance(potential_eye_input.op, Eye)):
         return False
 
+    if getattr(potential_eye_input.inputs[-1], "data", -1).item() != 0:
+        return False
     return True
 
 
