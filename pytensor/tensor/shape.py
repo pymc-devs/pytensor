@@ -578,11 +578,15 @@ def specify_shape(
     x = ptb.as_tensor_variable(x)  # type: ignore[arg-type,unused-ignore]
     # The above is a type error in Python 3.9 but not 3.12.
     # Thus we need to ignore unused-ignore on 3.12.
-    new_shape_info = any(
-        s != xts for (s, xts) in zip(shape, x.type.shape, strict=False) if s is not None
-    )
+
     # If shape does not match x.ndim, we rely on the `Op` to raise a ValueError
-    if not new_shape_info and len(shape) == x.type.ndim:
+    if len(shape) != x.type.ndim:
+        return _specify_shape(x, *shape)
+
+    new_shape_matches = all(
+        s == xts for (s, xts) in zip(shape, x.type.shape, strict=True) if s is not None
+    )
+    if new_shape_matches:
         return x
 
     return _specify_shape(x, *shape)
