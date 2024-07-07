@@ -571,6 +571,20 @@ def svd_uv_merge(fgraph, node):
                     return [cl.outputs[1]]
 
 
+def _find_solve_with_eye(node):
+    # First, we look for the solve op
+    if not (isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Solve)):
+        return None
+
+    # Check whether second input to solve is Eye
+    solve_inputs = node.owner.inputs
+    potential_eye_input = solve_inputs[1].owner
+    if not (isinstance(potential_eye_input.op, Eye)):
+        return None
+
+    return node
+
+
 @register_canonicalize
 @register_stabilize
 @node_rewriter([Blockwise])
@@ -581,7 +595,8 @@ def rewrite_inv_inv(fgraph, node):
 
     potential_inner_inv = node.inputs[0].owner
     if not (
-        isinstance(potential_inner_inv.op, Blockwise)
+        potential_inner_inv
+        and isinstance(potential_inner_inv.op, Blockwise)
         and isinstance(node.op.core_op, valid_inverses)
     ):
         return None
