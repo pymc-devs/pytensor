@@ -2,20 +2,18 @@ from collections.abc import Callable
 from typing import Literal, cast
 
 from pytensor.compile.builders import OpFromGraph
-from pytensor.scan import scan
 from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import (
     TensorVariable,
-    arange,
     as_tensor,
+    expand_dims,
     moveaxis,
-    switch,
     zeros,
 )
 from pytensor.tensor.extra_ops import broadcast_to, linspace
 from pytensor.tensor.math import divmod as pt_divmod
-from pytensor.tensor.math import eq, mean, minimum
 from pytensor.tensor.math import max as pt_max
+from pytensor.tensor.math import mean, minimum
 from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.shape import specify_broadcastable
 from pytensor.tensor.subtensor import set_subtensor
@@ -313,38 +311,36 @@ def flip(x, axis=None):
     return x[index]
 
 
-def _looping_pad(
-    x: TensorVariable, pad_width: TensorVariable, kind: str
-) -> TensorVariable:
+def _wrap_pad(x: TensorVariable, pad_width: TensorVariable) -> TensorVariable:
     pad_width = broadcast_to(pad_width, as_tensor((x.ndim, 2)))
 
     for axis in range(x.ndim):
-        if kind == "wrap":
-
-            def inner_func(i, x):
-                return x
-
-        elif kind == "symmetric":
-            # Delay creation of this function to here because we want to use the axis global inside the scan
-            def inner_func(i, x):
-                return switch(eq(i % 2, 0), flip(x, axis=axis), x)
-        else:
-            raise ValueError(
-                "You should not have gotten here. Open an issue on github!"
-            )  # pragma no cover
-
         size = x.shape[axis]
+
+        # Compute how many complete copies of the input will be padded on this dimension, along with the amount of
+        # overflow on the final copy
         repeats, (left_remainder, right_remainder) = pt_divmod(pad_width[axis], size)
 
+        # In the next step we will generate extra copies of the input, and then trim them down to the correct size.
         left_trim = size - left_remainder
         right_trim = size - right_remainder
-        total_repeats = repeats.sum() + 3  # left, right, center
 
-        parts, _ = scan(inner_func, non_sequences=[x], sequences=arange(total_repeats))
+        # The total number of copies needed is always the sum of the number of complete copies to add, plus the original
+        # input itself, plus the two edge copies that will be trimmed down.
+        total_repeats = repeats.sum() + 3
 
+        # Create a batch dimension and clone the input the required number of times
+        parts = expand_dims(x, (0,)).repeat(total_repeats, axis=0)
+
+        # Move the batch dimension to the active dimension
         parts = moveaxis(parts, 0, axis)
+
+        # Ravel the active dimension while preserving the shapes of the inactive dimensions. This will expand the
+        # active dimension to have the correctly padded shape, plus excess to be trimmed
         new_shape = [-1 if i == axis else x.shape[i] for i in range(x.ndim)]
         x = parts.reshape(new_shape)
+
+        # Trim the excess on the active dimension
         trim_slice = _slice_at_axis(slice(left_trim, -right_trim), axis)
         x = x[trim_slice]
 
@@ -406,7 +402,7 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
         outputs = _linear_ramp_pad(x, pad_width, end_values)
 
     elif mode == "wrap":
-        outputs = _looping_pad(x, pad_width, kind="wrap")
+        outputs = _wrap_pad(x, pad_width)
 
     elif mode == "symmetric":
         reflect_type = kwargs.pop("reflect_type", "even")
@@ -414,7 +410,8 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
             raise NotImplementedError("Odd reflection not implemented")
 
         attrs.update({"reflect_type": reflect_type})
-        outputs = _looping_pad(x, pad_width, kind="symmetric")
+        # outputs = _looping_pad(x, pad_width, kind="symmetric")
+        raise NotImplementedError("Even reflection not implemented")
 
     elif mode == "reflect":
         reflect_type = kwargs.pop("reflect_type", "even")
