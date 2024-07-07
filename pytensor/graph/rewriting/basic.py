@@ -31,7 +31,7 @@ from pytensor.graph.basic import (
 )
 from pytensor.graph.features import AlreadyThere, Feature, NodeFinder
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import Op
+from pytensor.graph.op import HasInnerGraph, Op
 from pytensor.graph.utils import AssocList, InconsistencyError
 from pytensor.misc.ordered_set import OrderedSet
 from pytensor.utils import flatten
@@ -2012,7 +2012,7 @@ class WalkingGraphRewriter(NodeProcessingGraphRewriter):
         io_t = time.perf_counter() - t0
 
         def importer(node):
-            if node is not current_node:
+            if node is not current_node and not isinstance(node.op, HasInnerGraph):
                 q.append(node)
 
         u = self.attach_updater(
@@ -2022,6 +2022,7 @@ class WalkingGraphRewriter(NodeProcessingGraphRewriter):
         try:
             t0 = time.perf_counter()
             while q:
+                # breakpoint
                 if self.order == "out_to_in":
                     node = q.pop()
                 else:
