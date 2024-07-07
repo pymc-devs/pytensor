@@ -9,7 +9,6 @@ import pytensor
 from pytensor import function
 from pytensor import tensor as pt
 from pytensor.compile import get_default_mode
-from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.tensor import swapaxes
 from pytensor.tensor.blockwise import Blockwise
@@ -557,13 +556,17 @@ def test_svd_uv_merge():
     assert svd_counter == 1
 
 
-def test_inv_inv_rewrite():
+@pytest.mark.parametrize(
+    "inv_op", [pt.linalg.inv, pt.linalg.pinv], ids=["MatrixInverse", "MatrixPinv"]
+)
+def test_inv_inv_rewrite(inv_op):
     x = pt.matrix("a")
-    ii_x = pt.linalg.inv(pt.linalg.inv(x))
+    ii_x = inv_op(inv_op(x))
     f_rewritten = function([x], ii_x, mode="FAST_RUN")
     nodes = f_rewritten.maker.fgraph.apply_nodes
 
-    assert all(isinstance(node.op, DeepCopyOp) for node in nodes)
+    valid_inverses = (MatrixInverse, MatrixPinv)
+    assert not any(isinstance(node.op, valid_inverses) for node in nodes)
 
     x_testing = np.random.rand(10, 10)
     np.testing.assert_allclose(f_rewritten(x_testing), x_testing)
