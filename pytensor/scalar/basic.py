@@ -4426,7 +4426,7 @@ class Compositef32:
                     else:
                         ni = i
                     mapping[i] = ni
-            if isinstance(node.op, tuple(self.special.keys())):
+            if isinstance(node.op, tuple(self.special)):
                 self.special[type(node.op)](node, mapping)
                 continue
             new_node = node.clone_with_new_inputs(

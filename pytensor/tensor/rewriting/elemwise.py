@@ -71,7 +71,7 @@ class InplaceElemwiseOptimizer(GraphRewriter):
         ndim = prof["ndim"]
         if ndim:
             print(blanc, "ndim", "nb", file=stream)
-            for n in sorted(ndim.keys()):
+            for n in sorted(ndim):
                 print(blanc, n, ndim[n], file=stream)
 
     def candidate_input_idxs(self, node):

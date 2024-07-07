@@ -889,9 +889,9 @@ class TestPicklefunction:
                 return
             else:
                 raise
-        # if they both return, assume  that they return equivalent things.
-        # print [(k,id(k)) for k in f.finder.keys()]
-        # print [(k,id(k)) for k in g.finder.keys()]
+        # if they both return, assume that they return equivalent things.
+        # print [(k, id(k)) for k in f.finder]
+        # print [(k, id(k)) for k in g.finder]
 
         assert g.container[0].storage is not f.container[0].storage
         assert g.container[1].storage is not f.container[1].storage
@@ -1012,9 +1012,9 @@ class TestPicklefunction:
                 return
             else:
                 raise
-        # if they both return, assume  that they return equivalent things.
-        # print [(k,id(k)) for k in f.finder.keys()]
-        # print [(k,id(k)) for k in g.finder.keys()]
+        # if they both return, assume that they return equivalent things.
+        # print [(k, id(k)) for k in f.finder]
+        # print [(k, id(k)) for k in g.finder]
 
         assert g.container[0].storage is not f.container[0].storage
         assert g.container[1].storage is not f.container[1].storage

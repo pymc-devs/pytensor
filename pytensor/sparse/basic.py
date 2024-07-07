@@ -524,7 +524,7 @@ csc_fmatrix = SparseTensorType(format="csc", dtype="float32")
 csr_fmatrix = SparseTensorType(format="csr", dtype="float32")
 bsr_fmatrix = SparseTensorType(format="bsr", dtype="float32")
 
-all_dtypes = list(SparseTensorType.dtype_specs_map.keys())
+all_dtypes = list(SparseTensorType.dtype_specs_map)
 complex_dtypes = [t for t in all_dtypes if t[:7] == "complex"]
 float_dtypes = [t for t in all_dtypes if t[:5] == "float"]
 int_dtypes = [t for t in all_dtypes if t[:3] == "int"]

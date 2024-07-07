@@ -1449,7 +1449,7 @@ class ProfileStats:
                 file=file,
             )
         if config.profiling__debugprint:
-            fcts = {fgraph for (fgraph, n) in self.apply_time.keys()}
+            fcts = {fgraph for (fgraph, n) in self.apply_time}
             pytensor.printing.debugprint(fcts, print_type=True)
         if self.variable_shape or self.variable_strides:
             self.summary_memory(file, n_apply_to_print)

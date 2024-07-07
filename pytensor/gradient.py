@@ -500,7 +500,7 @@ def grad(
     if cost is not None:
         outputs.append(cost)
     if known_grads is not None:
-        outputs.extend(list(known_grads.keys()))
+        outputs.extend(list(known_grads))
 
     var_to_app_to_idx = _populate_var_to_app_to_idx(outputs, _wrt, consider_constant)
 
@@ -966,7 +966,7 @@ def _populate_var_to_app_to_idx(outputs, wrt, consider_constant):
         visit(elem)
 
     # Remove variables that don't have wrt as a true ancestor
-    orig_vars = list(var_to_app_to_idx.keys())
+    orig_vars = list(var_to_app_to_idx)
     for var in orig_vars:
         if var not in visited:
             del var_to_app_to_idx[var]

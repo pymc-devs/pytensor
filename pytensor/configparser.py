@@ -214,7 +214,7 @@ class PyTensorConfigParser:
         return _ChangeFlagsDecorator(*args, _root=self, **kwargs)
 
     def warn_unused_flags(self):
-        for key in self._flags_dict.keys():
+        for key in self._flags_dict:
             warnings.warn(f"PyTensor does not recognise this flag: {key}")
 
 
