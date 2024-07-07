@@ -6,10 +6,11 @@ import numpy as np
 from numpy.core.numeric import normalize_axis_tuple  # type: ignore
 
 import pytensor
+from pytensor.graph import FunctionGraph, Variable
 from pytensor.utils import hash_from_code
 
 
-def hash_from_ndarray(data):
+def hash_from_ndarray(data) -> str:
     """
     Return a hash from an ndarray.
 
@@ -36,7 +37,9 @@ def hash_from_ndarray(data):
     )
 
 
-def shape_of_variables(fgraph, input_shapes):
+def shape_of_variables(
+    fgraph: FunctionGraph, input_shapes
+) -> dict[Variable, tuple[int, ...]]:
     """
     Compute the numeric shape of all intermediate variables given input shapes.
 
@@ -73,16 +76,14 @@ def shape_of_variables(fgraph, input_shapes):
 
         fgraph.attach_feature(ShapeFeature())
 
+    shape_feature = fgraph.shape_feature  # type: ignore[attr-defined]
+
     input_dims = [
-        dimension
-        for inp in fgraph.inputs
-        for dimension in fgraph.shape_feature.shape_of[inp]
+        dimension for inp in fgraph.inputs for dimension in shape_feature.shape_of[inp]
     ]
 
     output_dims = [
-        dimension
-        for shape in fgraph.shape_feature.shape_of.values()
-        for dimension in shape
+        dimension for shape in shape_feature.shape_of.values() for dimension in shape
     ]
 
     compute_shapes = pytensor.function(input_dims, output_dims)
@@ -100,10 +101,8 @@ def shape_of_variables(fgraph, input_shapes):
     sym_to_num_dict = dict(zip(output_dims, numeric_output_dims))
 
     l = {}
-    for var in fgraph.shape_feature.shape_of:
-        l[var] = tuple(
-            sym_to_num_dict[sym] for sym in fgraph.shape_feature.shape_of[var]
-        )
+    for var in shape_feature.shape_of:
+        l[var] = tuple(sym_to_num_dict[sym] for sym in shape_feature.shape_of[var])
     return l
 
 
@@ -177,7 +176,7 @@ _SIGNATURE = f"^(?:{_ARGUMENT_LIST})?->{_ARGUMENT_LIST}$"
 
 
 def _parse_gufunc_signature(
-    signature,
+    signature: str,
 ) -> tuple[
     list[tuple[str, ...]], ...
 ]:  # mypy doesn't know it's alwayl a length two tuple

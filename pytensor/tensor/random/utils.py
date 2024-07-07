@@ -1,8 +1,8 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import wraps
 from itertools import zip_longest
 from types import ModuleType
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -22,7 +22,9 @@ if TYPE_CHECKING:
     from pytensor.tensor.random.op import RandomVariable
 
 
-def params_broadcast_shapes(param_shapes, ndims_params, use_pytensor=True):
+def params_broadcast_shapes(
+    param_shapes: Sequence, ndims_params: Sequence[int], use_pytensor: bool = True
+) -> list[tuple[int, ...]]:
     """Broadcast parameters that have different dimensions.
 
     Parameters
@@ -36,12 +38,12 @@ def params_broadcast_shapes(param_shapes, ndims_params, use_pytensor=True):
 
     Returns
     =======
-    bcast_shapes : list of ndarray
+    bcast_shapes : list of tuples of ints
         The broadcasted values of `params`.
     """
     max_fn = maximum if use_pytensor else max
 
-    rev_extra_dims = []
+    rev_extra_dims: list[int] = []
     for ndim_param, param_shape in zip(ndims_params, param_shapes):
         # We need this in order to use `len`
         param_shape = tuple(param_shape)
@@ -71,7 +73,9 @@ def params_broadcast_shapes(param_shapes, ndims_params, use_pytensor=True):
     return bcast_shapes
 
 
-def broadcast_params(params, ndims_params):
+def broadcast_params(
+    params: Sequence[np.ndarray | TensorVariable], ndims_params: Sequence[int]
+) -> list[np.ndarray]:
     """Broadcast parameters that have different dimensions.
 
     >>> ndims_params = [1, 2]
@@ -215,7 +219,9 @@ class RandomStream:
         self,
         seed: int | None = None,
         namespace: ModuleType | None = None,
-        rng_ctor: Literal[np.random.Generator] = np.random.default_rng,
+        rng_ctor: Callable[
+            [np.random.SeedSequence], np.random.Generator
+        ] = np.random.default_rng,
     ):
         if namespace is None:
             from pytensor.tensor.random import basic  # pylint: disable=import-self
