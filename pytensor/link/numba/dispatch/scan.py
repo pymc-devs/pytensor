@@ -373,7 +373,7 @@ def numba_funcify_Scan(op, node, **kwargs):
     inner_out_post_processing_block = "\n".join(inner_out_post_processing_stmts)
 
     inner_out_to_outer_out_stmts = "\n".join(
-        [f"{s} = {d}" for s, d in zip(inner_out_to_outer_in_stmts, inner_output_names)]
+        f"{s} = {d}" for s, d in zip(inner_out_to_outer_in_stmts, inner_output_names)
     )
 
     scan_op_src = f"""

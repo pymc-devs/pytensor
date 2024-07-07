@@ -360,7 +360,7 @@ def dict_to_pdnode(d):
     for k, v in d.items():
         if v is not None:
             if isinstance(v, list):
-                v = "\t".join([str(x) for x in v])
+                v = "\t".join(str(x) for x in v)
             else:
                 v = str(v)
             v = str(v)

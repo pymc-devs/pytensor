@@ -1113,7 +1113,7 @@ class Subtensor(COp):
 
         if is_slice:
             is_slice_init = (
-                "int is_slice[] = {" + ",".join([str(s) for s in is_slice]) + "};"
+                "int is_slice[] = {" + ",".join(str(s) for s in is_slice) + "};"
             )
         else:
             is_slice_init = "int* is_slice = NULL;"
@@ -2401,9 +2401,7 @@ class AdvancedIncSubtensor1(COp):
 
         fn_array = (
             "static inplace_map_binop addition_funcs[] = {"
-            + "".join(
-                [gen_binop(type=t, typen=t.upper()) for t in types + complex_types]
-            )
+            + "".join(gen_binop(type=t, typen=t.upper()) for t in types + complex_types)
             + "NULL};\n"
         )
 
@@ -2416,7 +2414,7 @@ class AdvancedIncSubtensor1(COp):
 
         type_number_array = (
             "static int type_numbers[] = {"
-            + "".join([gen_num(typen=t.upper()) for t in types + complex_types])
+            + "".join(gen_num(typen=t.upper()) for t in types + complex_types)
             + "-1000};"
         )
 

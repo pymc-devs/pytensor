@@ -485,8 +485,8 @@ def numba_funcify_Elemwise(op, node, **kwargs):
     nout = len(node.outputs)
     core_op_fn = store_core_outputs(scalar_op_fn, nin=nin, nout=nout)
 
-    input_bc_patterns = tuple([inp.type.broadcastable for inp in node.inputs])
-    output_bc_patterns = tuple([out.type.broadcastable for out in node.outputs])
+    input_bc_patterns = tuple(inp.type.broadcastable for inp in node.inputs)
+    output_bc_patterns = tuple(out.type.broadcastable for out in node.outputs)
     output_dtypes = tuple(out.type.dtype for out in node.outputs)
     inplace_pattern = tuple(op.inplace_pattern.items())
     core_output_shapes = tuple(() for _ in range(nout))

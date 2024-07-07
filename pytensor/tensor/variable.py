@@ -521,12 +521,10 @@ class _tensor_py_operators:
         # Else leave it as is if it is a real number
         # Convert python literals to pytensor constants
         args = tuple(
-            [
-                pt.subtensor.as_index_constant(
-                    np.array(inp, dtype=np.uint8) if is_empty_array(inp) else inp
-                )
-                for inp in args
-            ]
+            pt.subtensor.as_index_constant(
+                np.array(inp, dtype=np.uint8) if is_empty_array(inp) else inp
+            )
+            for inp in args
         )
 
         # Determine if advanced indexing is needed or not.  The logic is

@@ -235,16 +235,16 @@ def struct_gen(args, struct_builders, blocks, sub):
     behavior = code_gen(blocks)
 
     # declares the storage
-    storage_decl = "\n".join([f"PyObject* {arg};" for arg in args])
+    storage_decl = "\n".join(f"PyObject* {arg};" for arg in args)
     # in the constructor, sets the storage to the arguments
-    storage_set = "\n".join([f"this->{arg} = {arg};" for arg in args])
+    storage_set = "\n".join(f"this->{arg} = {arg};" for arg in args)
     # increments the storage's refcount in the constructor
-    storage_incref = "\n".join([f"Py_XINCREF({arg});" for arg in args])
+    storage_incref = "\n".join(f"Py_XINCREF({arg});" for arg in args)
     # decrements the storage's refcount in the destructor
-    storage_decref = "\n".join([f"Py_XDECREF(this->{arg});" for arg in args])
+    storage_decref = "\n".join(f"Py_XDECREF(this->{arg});" for arg in args)
 
     args_names = ", ".join(args)
-    args_decl = ", ".join([f"PyObject* {arg}" for arg in args])
+    args_decl = ", ".join(f"PyObject* {arg}" for arg in args)
 
     # The following code stores the exception data in __ERROR, which
     # is a special field of the struct. __ERROR is a list of length 3

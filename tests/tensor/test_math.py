@@ -3418,7 +3418,7 @@ class TestSumMeanMaxMinArgMaxVarReduceAxes:
 def reduce_bitwise_and(x, axis=-1, dtype="int8"):
     identity = np.array((-1,), dtype=dtype)[0]
 
-    shape_without_axis = tuple([s for i, s in enumerate(x.shape) if i != axis])
+    shape_without_axis = tuple(s for i, s in enumerate(x.shape) if i != axis)
     if 0 in shape_without_axis:
         return np.empty(shape=shape_without_axis, dtype=x.dtype)
 

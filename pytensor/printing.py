@@ -229,32 +229,32 @@ def debugprint(
             topo_orders.append(None)
         elif isinstance(obj, Apply):
             outputs_to_print.extend(obj.outputs)
-            profile_list.extend([None for item in obj.outputs])
-            storage_maps.extend([None for item in obj.outputs])
-            topo_orders.extend([None for item in obj.outputs])
+            profile_list.extend(None for item in obj.outputs)
+            storage_maps.extend(None for item in obj.outputs)
+            topo_orders.extend(None for item in obj.outputs)
         elif isinstance(obj, Function):
             if print_fgraph_inputs:
                 inputs_to_print.extend(obj.maker.fgraph.inputs)
             outputs_to_print.extend(obj.maker.fgraph.outputs)
-            profile_list.extend([obj.profile for item in obj.maker.fgraph.outputs])
+            profile_list.extend(obj.profile for item in obj.maker.fgraph.outputs)
             if print_storage:
                 storage_maps.extend(
-                    [obj.vm.storage_map for item in obj.maker.fgraph.outputs]
+                    obj.vm.storage_map for item in obj.maker.fgraph.outputs
                 )
             else:
-                storage_maps.extend([None for item in obj.maker.fgraph.outputs])
+                storage_maps.extend(None for item in obj.maker.fgraph.outputs)
             topo = obj.maker.fgraph.toposort()
-            topo_orders.extend([topo for item in obj.maker.fgraph.outputs])
+            topo_orders.extend(topo for item in obj.maker.fgraph.outputs)
         elif isinstance(obj, FunctionGraph):
             if print_fgraph_inputs:
                 inputs_to_print.extend(obj.inputs)
             outputs_to_print.extend(obj.outputs)
-            profile_list.extend([getattr(obj, "profile", None) for item in obj.outputs])
+            profile_list.extend(getattr(obj, "profile", None) for item in obj.outputs)
             storage_maps.extend(
-                [getattr(obj, "storage_map", None) for item in obj.outputs]
+                getattr(obj, "storage_map", None) for item in obj.outputs
             )
             topo = obj.toposort()
-            topo_orders.extend([topo for item in obj.outputs])
+            topo_orders.extend(topo for item in obj.outputs)
         elif isinstance(obj, int | float | np.ndarray):
             print(obj, file=_file)
         elif isinstance(obj, In | Out):
@@ -980,10 +980,10 @@ class FunctionPrinter(Printer):
         name = self.names[idx]
         with set_precedence(pstate):
             inputs_str = ", ".join(
-                [pprinter.process(input, pstate) for input in node.inputs]
+                pprinter.process(input, pstate) for input in node.inputs
             )
             keywords_str = ", ".join(
-                [f"{kw}={getattr(node.op, kw)}" for kw in self.keywords]
+                f"{kw}={getattr(node.op, kw)}" for kw in self.keywords
             )
 
             if keywords_str and inputs_str:
@@ -1050,7 +1050,7 @@ class DefaultPrinter(Printer):
         with set_precedence(pstate):
             r = "{}({})".format(
                 str(node.op),
-                ", ".join([pprinter.process(input, pstate) for input in node.inputs]),
+                ", ".join(pprinter.process(input, pstate) for input in node.inputs),
             )
 
         pstate.memo[output] = r

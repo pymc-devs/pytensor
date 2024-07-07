@@ -1112,7 +1112,7 @@ class VMLinker(LocalLinker):
             for i, node in enumerate(nodes):
                 prereq_var_idxs = []
                 for prereq_node in ords.get(node, []):
-                    prereq_var_idxs.extend([vars_idx[v] for v in prereq_node.outputs])
+                    prereq_var_idxs.extend(vars_idx[v] for v in prereq_node.outputs)
                 prereq_var_idxs = list(set(prereq_var_idxs))
                 prereq_var_idxs.sort()  # TODO: why sort?
                 node_prereqs.append(prereq_var_idxs)
@@ -1323,9 +1323,7 @@ class VMLinker(LocalLinker):
 
     def __repr__(self):
         args_str = ", ".join(
-            [
-                f"{name}={getattr(self, name)}"
-                for name in ("use_cloop", "lazy", "allow_partial_eval", "allow_gc")
-            ]
+            f"{name}={getattr(self, name)}"
+            for name in ("use_cloop", "lazy", "allow_partial_eval", "allow_gc")
         )
         return f"{type(self).__name__}({args_str})"

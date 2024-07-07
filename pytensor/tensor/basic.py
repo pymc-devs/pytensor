@@ -1554,7 +1554,7 @@ class Alloc(COp):
     def perform(self, node, inputs, out_):
         (out,) = out_
         v = inputs[0]
-        sh = tuple([int(i) for i in inputs[1:]])
+        sh = tuple(int(i) for i in inputs[1:])
         self._check_runtime_broadcast(node, v, sh)
 
         if out[0] is None or out[0].shape != sh:
@@ -4180,7 +4180,7 @@ class AllocEmpty(COp):
 
     def perform(self, node, inputs, out_):
         (out,) = out_
-        sh = tuple([int(i) for i in inputs])
+        sh = tuple(int(i) for i in inputs)
         if out[0] is None or out[0].shape != sh:
             out[0] = np.empty(sh, dtype=self.dtype)
 

@@ -182,7 +182,7 @@ class DimShuffle(ExternalCOp):
         self.transposition = self.shuffle + drop
         # List of dimensions of the output that are broadcastable and were not
         # in the original input
-        self.augment = sorted([i for i, x in enumerate(new_order) if x == "x"])
+        self.augment = sorted(i for i, x in enumerate(new_order) if x == "x")
         self.drop = drop
 
         if self.inplace:
@@ -893,11 +893,9 @@ class Elemwise(OpenMPOp):
         # In that case, create a fortran output ndarray.
         z = list(zip(inames, inputs))
         alloc_fortran = " && ".join(
-            [
-                f"PyArray_ISFORTRAN({arr})"
-                for arr, var in z
-                if not all(s == 1 for s in var.type.shape)
-            ]
+            f"PyArray_ISFORTRAN({arr})"
+            for arr, var in z
+            if not all(s == 1 for s in var.type.shape)
         )
         # If it is a scalar, make it c contig to prevent problem with
         # NumPy C and F contig not always set as both of them.
@@ -984,12 +982,10 @@ class Elemwise(OpenMPOp):
             if len(all_code) == 1:
                 # No loops
                 task_decl = "".join(
-                    [
-                        f"{dtype}& {name}_i = *{name}_iter;\n"
-                        for name, dtype in zip(
-                            inames + list(real_onames), idtypes + list(real_odtypes)
-                        )
-                    ]
+                    f"{dtype}& {name}_i = *{name}_iter;\n"
+                    for name, dtype in zip(
+                        inames + list(real_onames), idtypes + list(real_odtypes)
+                    )
                 )
 
                 preloops = {}
@@ -1101,18 +1097,14 @@ class Elemwise(OpenMPOp):
                 z = list(zip(inames + onames, inputs + node.outputs))
                 all_broadcastable = all(s == 1 for s in var.type.shape)
                 cond1 = " && ".join(
-                    [
-                        f"PyArray_ISCONTIGUOUS({arr})"
-                        for arr, var in z
-                        if not all_broadcastable
-                    ]
+                    f"PyArray_ISCONTIGUOUS({arr})"
+                    for arr, var in z
+                    if not all_broadcastable
                 )
                 cond2 = " && ".join(
-                    [
-                        f"PyArray_ISFORTRAN({arr})"
-                        for arr, var in z
-                        if not all_broadcastable
-                    ]
+                    f"PyArray_ISFORTRAN({arr})"
+                    for arr, var in z
+                    if not all_broadcastable
                 )
                 loop = """
             if(({cond1}) || ({cond2})){{

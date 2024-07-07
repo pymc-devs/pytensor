@@ -1936,7 +1936,7 @@ class ScanMerge(GraphRewriter):
             profile=old_op.profile,
             truncate_gradient=old_op.truncate_gradient,
             allow_gc=old_op.allow_gc,
-            name="&".join([nd.op.name for nd in nodes]),
+            name="&".join(nd.op.name for nd in nodes),
         )
         new_outs = new_op(*outer_ins)
 

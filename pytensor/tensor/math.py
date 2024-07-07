@@ -258,11 +258,9 @@ class Argmax(COp):
         if self.axis is None:
             return [()]
         rval = tuple(
-            [
-                ishape[i]
-                for (i, b) in enumerate(node.inputs[0].type.broadcastable)
-                if i not in self.axis
-            ]
+            ishape[i]
+            for (i, b) in enumerate(node.inputs[0].type.broadcastable)
+            if i not in self.axis
         )
         return [rval]
 

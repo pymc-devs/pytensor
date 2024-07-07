@@ -1248,7 +1248,7 @@ class Unique(Op):
                     f"Unique axis `{self.axis}` is outside of input ndim = {ndim}."
                 )
             ret[0] = tuple(
-                [fgraph.shape_feature.shape_ir(i, node.outputs[0]) for i in range(ndim)]
+                fgraph.shape_feature.shape_ir(i, node.outputs[0]) for i in range(ndim)
             )
         if self.return_inverse:
             if self.axis is None:

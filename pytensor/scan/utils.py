@@ -749,15 +749,13 @@ class ScanArgs:
     def field_names(self):
         res = ["mit_mot_out_slices", "mit_mot_in_slices", "mit_sot_in_slices"]
         res.extend(
-            [
-                attr
-                for attr in self.__dict__
-                if attr.startswith("inner_in")
-                or attr.startswith("inner_out")
-                or attr.startswith("outer_in")
-                or attr.startswith("outer_out")
-                or attr == "n_steps"
-            ]
+            attr
+            for attr in self.__dict__
+            if attr.startswith("inner_in")
+            or attr.startswith("inner_out")
+            or attr.startswith("outer_in")
+            or attr.startswith("outer_out")
+            or attr == "n_steps"
         )
         return res
 

@@ -1264,7 +1264,7 @@ class SequentialNodeRewriter(NodeRewriter):
         return getattr(
             self,
             "__name__",
-            f"{type(self).__name__}({','.join([str(o) for o in self.rewrites])})",
+            f"{type(self).__name__}({','.join(str(o) for o in self.rewrites)})",
         )
 
     def tracks(self):
@@ -1666,7 +1666,7 @@ class PatternNodeRewriter(NodeRewriter):
             if isinstance(pattern, list | tuple):
                 return "{}({})".format(
                     str(pattern[0]),
-                    ", ".join([pattern_to_str(p) for p in pattern[1:]]),
+                    ", ".join(pattern_to_str(p) for p in pattern[1:]),
                 )
             elif isinstance(pattern, dict):
                 return "{} subject to {}".format(
@@ -2569,7 +2569,7 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
                 d = sorted(
                     loop_process_count[i].items(), key=lambda a: a[1], reverse=True
                 )
-                loop_times = " ".join([str((str(k), v)) for k, v in d[:5]])
+                loop_times = " ".join(str((str(k), v)) for k, v in d[:5])
                 if len(d) > 5:
                     loop_times += " ..."
             print(

@@ -800,10 +800,8 @@ class Reshape(COp):
                 rest_size = input_size // maximum(requ_size, 1)
             return [
                 tuple(
-                    [
-                        ptb.switch(eq(requ[i], -1), rest_size, requ[i])
-                        for i in range(self.ndim)
-                    ]
+                    ptb.switch(eq(requ[i], -1), rest_size, requ[i])
+                    for i in range(self.ndim)
                 )
             ]
 

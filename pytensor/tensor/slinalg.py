@@ -879,7 +879,7 @@ class BaseBlockDiagonal(Op):
     __props__ = ("n_inputs",)
 
     def __init__(self, n_inputs):
-        input_sig = ",".join([f"(m{i},n{i})" for i in range(n_inputs)])
+        input_sig = ",".join(f"(m{i},n{i})" for i in range(n_inputs))
         self.gufunc_signature = f"{input_sig}->(m,n)"
 
         if n_inputs == 0:
