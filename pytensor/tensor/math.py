@@ -215,14 +215,14 @@ class Argmax(COp):
             if len(self.axis) != 1:
                 raise NotImplementedError()
             # params is only used here for now
-            axis_code = """
+            axis_code = f"""
             axis = {params}->c_axis;
             if(axis > PyArray_NDIM({x})-1 || axis < -PyArray_NDIM({x})){{
                 PyErr_SetString(PyExc_ValueError,
                 "Argmax, bad axis argument");
                 {fail}
             }}
-            """.format(**locals())
+            """
         ret = """
         int axis;
 
@@ -1314,7 +1314,8 @@ class Mean(FixedOpCAReduce):
 
     def __str__(self):
         if self.axis is not None:
-            return "Mean{{{}}}".format(", ".join(str(x) for x in self.axis))
+            args = ", ".join(str(x) for x in self.axis)
+            return f"Mean{{{args}}}"
         else:
             return "Mean"
 

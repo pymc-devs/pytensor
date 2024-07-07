@@ -1391,9 +1391,9 @@ class TimesN(ps.basic.UnaryScalarOp):
 
     def c_support_code_apply(self, node, nodename):
         n = str(self.n)
-        return """
+        return f"""
         float {nodename}_timesn(float x) {{ return x * {n}; }}
-        """.format(**locals())
+        """
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs

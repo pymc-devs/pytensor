@@ -262,9 +262,10 @@ class Params(dict):
         self.__dict__.update(__params_type__=params_type, __signatures__=None)
 
     def __repr__(self):
-        return "Params({})".format(
-            ", ".join((f"{k}:{type(self[k]).__name__}:{self[k]}") for k in sorted(self))
+        args = ", ".join(
+            (f"{k}:{type(self[k]).__name__}:{self[k]}") for k in sorted(self)
         )
+        return f"Params({args})"
 
     def __getattr__(self, key):
         if key not in self:
@@ -422,9 +423,10 @@ class ParamsType(CType):
         return super().__getattr__(self, key)
 
     def __repr__(self):
-        return "ParamsType<{}>".format(
-            ", ".join((f"{self.fields[i]}:{self.types[i]}") for i in range(self.length))
+        args = ", ".join(
+            f"{self.fields[i]}:{self.types[i]}" for i in range(self.length)
         )
+        return f"ParamsType<{args}>"
 
     def __eq__(self, other):
         return (
@@ -730,11 +732,15 @@ class ParamsType(CType):
         struct_init = "\n".join(c_init_list)
         struct_cleanup = "\n".join(c_cleanup_list)
         struct_extract = "\n\n".join(c_extract_list)
-        struct_extract_method = """
+        args = "\n".join(
+            f"case {i}: extract_{self.fields[i]}(object); break;"
+            for i in range(self.length)
+        )
+        struct_extract_method = f"""
         void extract(PyObject* object, int field_pos) {{
             switch(field_pos) {{
                 // Extraction cases.
-                {}
+                {args}
                 // Default case.
                 default:
                     PyErr_Format(PyExc_TypeError, "ParamsType: no extraction defined for a field %d.", field_pos);
@@ -742,13 +748,8 @@ class ParamsType(CType):
                     break;
             }}
         }}
-        """.format(
-            "\n".join(
-                ("case %d: extract_%s(object); break;" % (i, self.fields[i]))
-                for i in range(self.length)
-            )
-        )
-        final_struct_code = """
+        """
+        final_struct_code = f"""
         /** ParamsType {struct_name} **/
         #ifndef {struct_name_defined}
         #define {struct_name_defined}
@@ -790,17 +791,7 @@ class ParamsType(CType):
         }};
         #endif
         /** End ParamsType {struct_name} **/
-        """.format(
-            **dict(
-                struct_name_defined=struct_name_defined,
-                struct_name=struct_name,
-                struct_declare=struct_declare,
-                struct_init=struct_init,
-                struct_cleanup=struct_cleanup,
-                struct_extract=struct_extract,
-                struct_extract_method=struct_extract_method,
-            )
-        )
+        """
 
         return [*sorted(c_support_code_set), final_struct_code]
 
@@ -813,9 +804,9 @@ class ParamsType(CType):
     # pointers.
 
     def c_declare(self, name, sub, check_input=True):
-        return """
-        {struct_name}* {name};
-        """.format(**dict(struct_name=self.name, name=name))
+        return f"""
+        {self.name}* {name};
+        """
 
     def c_init(self, name, sub):
         # NB: It seems c_init() is not called for an op param.
@@ -831,40 +822,33 @@ class ParamsType(CType):
         """
 
     def c_extract(self, name, sub, check_input=True, **kwargs):
-        return """
+        fields_list = ", ".join(f'"{x}"' for x in self.fields)
+        return f"""
         /* Seems c_init() is not called for a op param. So I call `new` here. */
-        {name} = new {struct_name};
+        {name} = new {self.name};
 
         {{ // This need a separate namespace for Clinker
         const char* fields[] = {{{fields_list}}};
         if (py_{name} == Py_None) {{
             PyErr_SetString(PyExc_ValueError, "ParamsType: expected an object, not None.");
-            {fail}
+            {sub['fail']}
         }}
-        for (int i = 0; i < {length}; ++i) {{
+        for (int i = 0; i < {self.length}; ++i) {{
             PyObject* o = PyDict_GetItemString(py_{name}, fields[i]);
             if (o == NULL) {{
                 PyErr_Format(PyExc_TypeError, "ParamsType: missing expected attribute \\"%s\\" in object.", fields[i]);
-                {fail}
+                {sub['fail']}
             }}
             {name}->extract(o, i);
             if ({name}->errorOccurred()) {{
                 /* The extract code from attribute type should have already raised a Python exception,
                  * so we just print the attribute name in stderr. */
                 fprintf(stderr, "\\nParamsType: error when extracting value for attribute \\"%s\\".\\n", fields[i]);
-                {fail}
+                {sub['fail']}
             }}
         }}
         }}
-        """.format(
-            **dict(
-                name=name,
-                struct_name=self.name,
-                length=self.length,
-                fail=sub["fail"],
-                fields_list='"{}"'.format('", "'.join(self.fields)),
-            )
-        )
+        """
 
     def c_sync(self, name, sub):
         # FIXME: Looks like we need to decrement a reference count our two.

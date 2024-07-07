@@ -79,10 +79,10 @@ class StructOp(COp):
         return f"counter{name} = 0;"
 
     def c_code(self, node, name, input_names, outputs_names, sub):
-        return """
-{out} = counter{name};
+        return f"""
+{outputs_names[0]} = counter{name};
 counter{name}++;
-""".format(**dict(out=outputs_names[0], name=name))
+"""
 
     def c_code_cache_version(self):
         return (1,)

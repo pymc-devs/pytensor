@@ -464,33 +464,32 @@ class ScalarType(CType, HasDataType, HasShape):
             raise NotImplementedError("float16")
         specs = self.dtype_specs()
         if check_input:
-            pre = """
+            fail = sub["fail"]
+            dtype = specs[1]
+            pyarr_type = f"Py{specs[2]}ArrType_Type"
+            pre = f"""
             if (!PyObject_TypeCheck(py_{name}, &{pyarr_type}))
             {{
                 PyErr_Format(PyExc_ValueError,
                     "Scalar check failed ({dtype})");
                 {fail}
             }}
-            """.format(
-                **dict(
-                    sub,
-                    name=name,
-                    dtype=specs[1],
-                    pyarr_type=f"Py{specs[2]}ArrType_Type",
-                )
-            )
+            """
         else:
             pre = ""
         return (
             pre
-            + """
+            + f"""
         PyArray_ScalarAsCtype(py_{name}, &{name});
-        """.format(**dict(sub, name=name))
+        """
         )
 
     def c_sync(self, name, sub):
         specs = self.dtype_specs()
-        return """
+        fail = sub["fail"]
+        dtype = specs[1]
+        cls = specs[2]
+        return f"""
         Py_XDECREF(py_{name});
         py_{name} = PyArrayScalar_New({cls});
         if (!py_{name})
@@ -502,7 +501,7 @@ class ScalarType(CType, HasDataType, HasShape):
             {fail}
         }}
         PyArrayScalar_ASSIGN(py_{name}, {cls}, {name});
-        """.format(**dict(sub, name=name, dtype=specs[1], cls=specs[2]))
+        """
 
     def c_cleanup(self, name, sub):
         return ""
@@ -1179,10 +1178,9 @@ class ScalarOp(COp):
                 not in ("name", "_op_use_c_code", "bool", "output_types_preference")
             ]
             if param:
-                return "{}{{{}}}".format(
-                    self.__class__.__name__,
-                    ", ".join(f"{k}={v}" for k, v in param),
-                )
+                classname = self.__class__.__name__
+                args = ", ".join(f"{k}={v}" for k, v in param)
+                return f"{classname}{{{args}}}"
             else:
                 return self.__class__.__name__
 

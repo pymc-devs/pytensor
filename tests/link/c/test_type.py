@@ -25,11 +25,12 @@ Py_XDECREF((PyObject *)p);
 """
 
     def c_code(self, node, name, inps, outs, sub):
-        return """
-Py_XDECREF({out});
-{out} = (void *){inp};
-Py_INCREF({inp});
-""".format(**dict(out=outs[0], inp=inps[0]))
+        return f"""
+Py_XDECREF({outs[0]});
+{outs[0]} = (void *){inps[0]};
+Py_INCREF({inps[0]});
+"""
+        # FIXME: should it not be outs[0]?
 
     def c_code_cache_version(self):
         return (0,)
@@ -52,11 +53,11 @@ Py_XDECREF((PyObject *)p);
 """
 
     def c_code(self, node, name, inps, outs, sub):
-        return """
-Py_XDECREF({out});
-{out} = (PyArrayObject *){inp};
-Py_INCREF({out});
-""".format(**dict(out=outs[0], inp=inps[0]))
+        return f"""
+Py_XDECREF({outs[0]});
+{outs[0]} = (PyArrayObject *){inps[0]};
+Py_INCREF({outs[0]});
+"""
 
     def c_code_cache_version(self):
         return (0,)
@@ -136,7 +137,12 @@ class MyOpEnumList(COp):
         return (1,)
 
     def c_code(self, node, name, inputs, outputs, sub):
-        return """
+        op = sub["params"]
+        o = outputs[0]
+        a = inputs[0]
+        b = inputs[1]
+        fail = sub["fail"]
+        return f"""
         switch({op}) {{
             case ADD:
                 {o} = {a} + {b};
@@ -154,15 +160,7 @@ class MyOpEnumList(COp):
                 {{{fail}}}
                 break;
         }}
-        """.format(
-            **dict(
-                op=sub["params"],
-                o=outputs[0],
-                a=inputs[0],
-                b=inputs[1],
-                fail=sub["fail"],
-            )
-        )
+        """
 
 
 class MyOpCEnumType(COp):
@@ -201,15 +199,10 @@ class MyOpCEnumType(COp):
         return (3,)
 
     def c_code(self, node, name, inputs, outputs, sub):
-        return """
-        {o} = {val};
-        """.format(
-            **dict(
-                o=outputs[0],
-                # params in C code will already contains expected C constant value.
-                val=sub["params"],
-            )
-        )
+        # params in C code will already contains expected C constant value.
+        return f"""
+        {outputs[0]} = {sub['params']};
+        """
 
 
 class TestEnumTypes:

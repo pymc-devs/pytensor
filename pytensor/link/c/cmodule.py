@@ -1966,14 +1966,14 @@ class Compiler:
             return False
 
         code = (
-            """
+            f"""
         {preamble}
         int main(int argc, char** argv)
         {{
             {body}
             return 0;
         }}
-        """.format(**locals())
+        """
         ).encode()
         return cls._try_compile_tmp(
             code,

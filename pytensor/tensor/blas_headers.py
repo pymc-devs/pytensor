@@ -1066,7 +1066,7 @@ def blas_header_version():
 
 def ____gemm_code(check_ab, a_init, b_init):
     mod = "%"
-    return """
+    return f"""
         const char * error_string = NULL;
 
         int type_num = PyArray_DESCR(_x)->type_num;
@@ -1203,4 +1203,4 @@ def ____gemm_code(check_ab, a_init, b_init):
         return -1;
 
         /* v 1 */
-    """.format(**locals())
+    """
