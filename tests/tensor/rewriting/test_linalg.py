@@ -556,17 +556,59 @@ def test_svd_uv_merge():
     assert svd_counter == 1
 
 
-@pytest.mark.parametrize(
-    "inv_op", [pt.linalg.inv, pt.linalg.pinv], ids=["MatrixInverse", "MatrixPinv"]
-)
-def test_inv_inv_rewrite(inv_op):
+def test_inv_inv_rewrite():
     x = pt.matrix("a")
-    ii_x = inv_op(inv_op(x))
-    f_rewritten = function([x], ii_x, mode="FAST_RUN")
-    nodes = f_rewritten.maker.fgraph.apply_nodes
-
+    inv_ops = [pt.linalg.inv, pt.linalg.pinv]
+    solve_ops = [pt.linalg.solve, pt.linalg.solve_triangular]
     valid_inverses = (MatrixInverse, MatrixPinv)
-    assert not any(isinstance(node.op, valid_inverses) for node in nodes)
+    valid_solves = (Solve, SolveTriangular)
+    all_valid = (MatrixInverse, MatrixPinv, Solve, SolveTriangular)
+    # inv(inv)
+    for inv_op in inv_ops:
+        for inv_op_2 in inv_ops:
+            ii_x = inv_op(inv_op_2(x))
+            f_rewritten = function([x], ii_x, mode="FAST_RUN")
+            nodes = f_rewritten.maker.fgraph.apply_nodes
 
-    x_testing = np.random.rand(10, 10)
-    np.testing.assert_allclose(f_rewritten(x_testing), x_testing)
+            assert not any(isinstance(node.op, valid_inverses) for node in nodes)
+
+            x_testing = np.random.rand(10, 10)
+            np.testing.assert_allclose(f_rewritten(x_testing), x_testing)
+    # solve(solve)
+    b_eye = pt.eye(10)
+    for solve_op in solve_ops:
+        for solve_op_2 in solve_ops:
+            ss_x = solve_op(solve_op_2(x, b_eye), b_eye)
+            with pytensor.config.change_flags(optimizer_verbose=True):
+                f_rewritten = function([x], ss_x, mode="FAST_RUN")
+            nodes = f_rewritten.maker.fgraph.apply_nodes
+
+            assert not any(isinstance(node.op, valid_solves) for node in nodes)
+
+            x_testing = np.random.rand(10, 10)
+            np.testing.assert_allclose(f_rewritten(x_testing), x_testing)
+
+    # inv(solve)
+    for inv_op in inv_ops:
+        for solve_op in solve_ops:
+            is_x = inv_op(solve_op(x, b_eye))
+            with pytensor.config.change_flags(optimizer_verbose=True):
+                f_rewritten = function([x], is_x, mode="FAST_RUN")
+            nodes = f_rewritten.maker.fgraph.apply_nodes
+            assert not any(isinstance(node.op, all_valid) for node in nodes)
+
+            x_testing = np.random.rand(10, 10)
+            np.testing.assert_allclose(f_rewritten(x_testing), x_testing)
+
+    # solve(inv)
+    for solve_op in solve_ops:
+        for inv_op in inv_ops:
+            si_x = solve_op(inv_op(x), b_eye)
+            with pytensor.config.change_flags(optimizer_verbose=True):
+                f_rewritten = function([x], si_x, mode="FAST_RUN")
+            nodes = f_rewritten.maker.fgraph.apply_nodes
+
+            assert not any(isinstance(node.op, all_valid) for node in nodes)
+
+            x_testing = np.random.rand(10, 10)
+            np.testing.assert_allclose(f_rewritten(x_testing), x_testing)

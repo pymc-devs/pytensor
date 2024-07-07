@@ -40,6 +40,7 @@ from pytensor.tensor.slinalg import (
     Cholesky,
     Solve,
     SolveBase,
+    SolveTriangular,
     block_diag,
     cholesky,
     solve,
@@ -572,28 +573,46 @@ def svd_uv_merge(fgraph, node):
 
 
 def _find_solve_with_eye(node):
+    valid_solves = (Solve, SolveTriangular)
     # First, we look for the solve op
-    if not (isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Solve)):
-        return None
-
+    if not (
+        isinstance(node.op, Blockwise) and isinstance(node.op.core_op, valid_solves)
+    ):
+        return False
     # Check whether second input to solve is Eye
-    solve_inputs = node.owner.inputs
+    solve_inputs = node.inputs
     potential_eye_input = solve_inputs[1].owner
-    if not (isinstance(potential_eye_input.op, Eye)):
-        return None
+    if not (potential_eye_input and isinstance(potential_eye_input.op, Eye)):
+        return False
 
-    return node
+    return True
 
 
 @register_canonicalize
 @register_stabilize
 @node_rewriter([Blockwise])
 def rewrite_inv_inv(fgraph, node):
-    valid_inverses = (MatrixInverse, MatrixPinv)
+    valid_inverses = (MatrixInverse, MatrixPinv, Solve, SolveTriangular)
+    valid_solves = (Solve, SolveTriangular)
+    # Check if Solve has b = eye
+    solve_inv_check = True
+    if isinstance(node.op.core_op, valid_solves):
+        solve_inv_check = _find_solve_with_eye(node)
+
+    if not solve_inv_check:
+        return None
+
     if not (isinstance(node.op.core_op, valid_inverses)):
         return None
 
     potential_inner_inv = node.inputs[0].owner
+    # Check if its an inner solve as well, does that have b = eye
+    solve_inv_check = True
+    if isinstance(potential_inner_inv.op.core_op, valid_solves):
+        solve_inv_check = _find_solve_with_eye(potential_inner_inv)
+    if not solve_inv_check:
+        return None
+
     if not (
         potential_inner_inv
         and isinstance(potential_inner_inv.op, Blockwise)
