@@ -168,7 +168,7 @@ class MissingInputError(Exception):
     def __init__(self, *args, **kwargs):
         if kwargs:
             # The call to list is needed for Python 3
-            assert list(kwargs.keys()) == ["variable"]
+            assert list(kwargs) == ["variable"]
             error_msg = get_variable_trace_string(kwargs["variable"])
             if error_msg:
                 args = (*args, error_msg)

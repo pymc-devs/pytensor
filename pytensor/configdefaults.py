@@ -1318,7 +1318,7 @@ def add_caching_dir_configvars():
     _compiledir_format_dict["short_platform"] = short_platform()
     # Allow to have easily one compiledir per device.
     _compiledir_format_dict["device"] = config.device
-    compiledir_format_keys = ", ".join(sorted(_compiledir_format_dict.keys()))
+    compiledir_format_keys = ", ".join(sorted(_compiledir_format_dict))
     _default_compiledir_format = (
         "compiledir_%(short_platform)s-%(processor)s-"
         "%(python_version)s-%(python_bitwidth)s"

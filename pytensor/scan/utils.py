@@ -269,7 +269,7 @@ class Validator:
         # Mapping from invalid variables to equivalent valid ones.
         self.valid_equivalent = valid_equivalent.copy()
         self.valid.update(list(valid_equivalent.values()))
-        self.invalid.update(list(valid_equivalent.keys()))
+        self.invalid.update(list(valid_equivalent))
 
     def check(self, out):
         """

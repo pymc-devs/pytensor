@@ -15,7 +15,7 @@ from collections.abc import Callable, Iterable, Sequence
 from collections.abc import Iterable as IterableType
 from functools import _compose_mro, partial, reduce  # type: ignore
 from itertools import chain
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 import pytensor
 from pytensor.configdefaults import config
@@ -1924,9 +1924,9 @@ class NodeProcessingGraphRewriter(GraphRewriter):
         remove: list[Variable] = []
         if isinstance(replacements, dict):
             if "remove" in replacements:
-                remove = list(cast(Sequence[Variable], replacements.pop("remove")))
-            old_vars = list(cast(Sequence[Variable], replacements.keys()))
-            replacements = list(cast(Sequence[Variable], replacements.values()))
+                remove = list(replacements.pop("remove"))
+            old_vars = list(replacements)
+            replacements = list(replacements.values())
         elif not isinstance(replacements, tuple | list):
             raise TypeError(
                 f"Node rewriter {node_rewriter} gave wrong type of replacement. "

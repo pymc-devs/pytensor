@@ -472,7 +472,7 @@ class EnumType(CType, dict):
         """
         Return the sorted tuple of all aliases in this enumeration.
         """
-        return tuple(sorted(self.aliases.keys()))
+        return tuple(sorted(self.aliases))
 
     def __repr__(self):
         names_to_aliases = {constant_name: "" for constant_name in self}
@@ -481,9 +481,7 @@ class EnumType(CType, dict):
         return "{}<{}>({})".format(
             type(self).__name__,
             self.ctype,
-            ", ".join(
-                f"{k}{names_to_aliases[k]}:{self[k]}" for k in sorted(self.keys())
-            ),
+            ", ".join(f"{k}{names_to_aliases[k]}:{self[k]}" for k in sorted(self)),
         )
 
     def __getattr__(self, key):
@@ -612,7 +610,7 @@ class EnumType(CType, dict):
                 f"""
             #define {k} {self[k]!s}
             """
-                for k in sorted(self.keys())
+                for k in sorted(self)
             )
             + self.c_to_string()
         )
@@ -772,7 +770,7 @@ class CEnumType(EnumList):
                    case %(i)d: %(name)s = %(constant_cname)s; break;
                    """
                     % dict(i=i, name=name, constant_cname=swapped_dict[i])
-                    for i in sorted(swapped_dict.keys())
+                    for i in sorted(swapped_dict)
                 ),
                 fail=sub["fail"],
             )

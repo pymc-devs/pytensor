@@ -990,7 +990,7 @@ class VMLinker(LocalLinker):
         for pair in reallocated_info.values():
             storage_map[pair[1]] = storage_map[pair[0]]
 
-        return tuple(reallocated_info.keys())
+        return tuple(reallocated_info)
 
     def make_vm(
         self,

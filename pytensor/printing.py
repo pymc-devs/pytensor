@@ -1106,9 +1106,7 @@ class PPrinter(Printer):
             outputs = [outputs]
         current = None
         if display_inputs:
-            strings = [
-                (0, "inputs: " + ", ".join(map(str, list(inputs) + updates.keys())))
-            ]
+            strings = [(0, "inputs: " + ", ".join(str(x) for x in [*inputs, *updates]))]
         else:
             strings = []
         pprinter = self.clone_assign(
@@ -1116,9 +1114,7 @@ class PPrinter(Printer):
         )
         inv_updates = {b: a for (a, b) in updates.items()}
         i = 1
-        for node in io_toposort(
-            list(inputs) + updates.keys(), list(outputs) + updates.values()
-        ):
+        for node in io_toposort([*inputs, *updates], [*outputs, *updates.values()]):
             for output in node.outputs:
                 if output in inv_updates:
                     name = str(inv_updates[output])

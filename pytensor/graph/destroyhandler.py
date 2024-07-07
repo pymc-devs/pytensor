@@ -406,7 +406,7 @@ class DestroyHandler(Bookkeeper):
                     # If True means that the apply node, destroys the protected_var.
                     if idx in [dmap for sublist in destroy_maps for dmap in sublist]:
                         return True
-                    for var_idx in app.op.view_map.keys():
+                    for var_idx in app.op.view_map:
                         if idx in app.op.view_map[var_idx]:
                             # We need to recursively check the destroy_map of all the
                             # outputs that we have a view_map on.

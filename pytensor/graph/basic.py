@@ -631,7 +631,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         if not hasattr(self, "_fn_cache"):
             self._fn_cache: dict = dict()
 
-        inputs = tuple(sorted(parsed_inputs_to_values.keys(), key=id))
+        inputs = tuple(sorted(parsed_inputs_to_values, key=id))
         cache_key = (inputs, tuple(kwargs.items()))
         try:
             fn = self._fn_cache[cache_key]

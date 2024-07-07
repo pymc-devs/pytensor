@@ -659,7 +659,7 @@ class Function:
             exist_svs = [i.variable for i in maker.inputs]
 
             # Check if given ShareVariables exist
-            for sv in swap.keys():
+            for sv in swap:
                 if sv not in exist_svs:
                     raise ValueError(f"SharedVariable: {sv.name} not found")
 
@@ -711,9 +711,9 @@ class Function:
         # it is well tested, we don't share the part of the storage_map.
         if share_memory:
             i_o_vars = maker.fgraph.inputs + maker.fgraph.outputs
-            for key in storage_map.keys():
+            for key, val in storage_map.items():
                 if key not in i_o_vars:
-                    new_storage_map[memo[key]] = storage_map[key]
+                    new_storage_map[memo[key]] = val
 
         if not name and self.name:
             name = self.name + " copy"
@@ -1446,7 +1446,7 @@ class FunctionMaker:
         if not hasattr(mode.linker, "accept"):
             raise ValueError(
                 "'linker' parameter of FunctionMaker should be "
-                f"a Linker with an accept method or one of {list(pytensor.compile.mode.predefined_linkers.keys())}"
+                f"a Linker with an accept method or one of {list(pytensor.compile.mode.predefined_linkers)}"
             )
 
     def __init__(

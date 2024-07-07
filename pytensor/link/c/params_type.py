@@ -264,10 +264,7 @@ class Params(dict):
     def __repr__(self):
         return "Params({})".format(
             ", ".join(
-                [
-                    (f"{k}:{type(self[k]).__name__}:{self[k]}")
-                    for k in sorted(self.keys())
-                ]
+                [(f"{k}:{type(self[k]).__name__}:{self[k]}") for k in sorted(self)]
             )
         )
 
@@ -365,7 +362,7 @@ class ParamsType(CType):
                 )
 
         self.length = len(kwargs)
-        self.fields = tuple(sorted(kwargs.keys()))
+        self.fields = tuple(sorted(kwargs))
         self.types = tuple(kwargs[field] for field in self.fields)
         self.name = self.generate_struct_name()
 

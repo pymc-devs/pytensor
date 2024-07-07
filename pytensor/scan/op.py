@@ -1284,14 +1284,14 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
     def __str__(self):
         inplace = "none"
-        if len(self.destroy_map.keys()) > 0:
+        if self.destroy_map:
             # Check if all outputs are inplace
-            if sorted(self.destroy_map.keys()) == sorted(
+            if sorted(self.destroy_map) == sorted(
                 range(self.info.n_mit_mot + self.info.n_mit_sot + self.info.n_sit_sot)
             ):
                 inplace = "all"
             else:
-                inplace = str(list(self.destroy_map.keys()))
+                inplace = str(list(self.destroy_map))
         return (
             f"Scan{{{self.name}, while_loop={self.info.as_while}, inplace={inplace}}}"
         )
