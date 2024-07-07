@@ -2461,8 +2461,8 @@ class TestArithmeticCast:
         with config.change_flags(cast_policy="numpy+floatX"):
             # We will test all meaningful combinations of
             # scalar and array operations.
-            pytensor_args = list(map(eval, [f"pytensor_{c}" for c in combo]))
-            numpy_args = list(map(eval, [f"numpy_{c}" for c in combo]))
+            pytensor_args = [eval(f"pytensor_{c}") for c in combo]
+            numpy_args = [eval(f"numpy_{c}") for c in combo]
             pytensor_arg_1 = pytensor_args[0](a_type)
             pytensor_arg_2 = pytensor_args[1](b_type)
             pytensor_dtype = op(
