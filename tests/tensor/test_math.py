@@ -80,6 +80,8 @@ from pytensor.tensor.math import (
     isinf,
     isnan,
     isnan_,
+    isneginf,
+    isposinf,
     log,
     log1mexp,
     log1p,
@@ -96,6 +98,7 @@ from pytensor.tensor.math import (
     minimum,
     mod,
     mul,
+    nan_to_num,
     neg,
     neq,
     outer,
@@ -3689,3 +3692,46 @@ class TestPolyGamma:
         n = scalar(dtype="int64")
         with pytest.raises(NullTypeGradError):
             grad(polygamma(n, 0.5), wrt=n)
+
+
+def test_infs():
+    x = tensor(shape=(7,))
+
+    f_pos = function([x], isposinf(x))
+    f_neg = function([x], isneginf(x))
+
+    y = np.array([1, np.inf, 2, np.inf, -np.inf, -np.inf, 4]).astype(x.dtype)
+    out_pos = f_pos(y)
+    out_neg = f_neg(y)
+
+    np.testing.assert_allclose(
+        out_pos,
+        [0, 1, 0, 1, 0, 0, 0],
+    )
+    np.testing.assert_allclose(
+        out_neg,
+        [0, 0, 0, 0, 1, 1, 0],
+    )
+
+
+@pytest.mark.parametrize(
+    ["nan", "posinf", "neginf"],
+    [(0, None, None), (0, 0, 0), (0, None, 1000), (3, 1, -1)],
+)
+def test_nan_to_num(nan, posinf, neginf):
+    x = tensor(shape=(7,))
+
+    out = nan_to_num(x, nan, posinf, neginf)
+
+    f = function([x], out)
+
+    y = np.array([1, 2, np.nan, np.inf, -np.inf, 3, 4]).astype(x.dtype)
+    out = f(y)
+
+    posinf = np.finfo(x.real.dtype).max if posinf is None else posinf
+    neginf = np.finfo(x.real.dtype).min if neginf is None else neginf
+
+    np.testing.assert_allclose(
+        out,
+        np.nan_to_num(y, nan=nan, posinf=posinf, neginf=neginf),
+    )
