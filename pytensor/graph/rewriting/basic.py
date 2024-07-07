@@ -1664,15 +1664,12 @@ class PatternNodeRewriter(NodeRewriter):
 
         def pattern_to_str(pattern):
             if isinstance(pattern, list | tuple):
-                return "{}({})".format(
-                    str(pattern[0]),
-                    ", ".join(pattern_to_str(p) for p in pattern[1:]),
-                )
+                args = ", ".join(pattern_to_str(p) for p in pattern[1:])
+                return f"{pattern[0]!s}({args})"
             elif isinstance(pattern, dict):
-                return "{} subject to {}".format(
-                    pattern_to_str(pattern["pattern"]),
-                    str(pattern.get("constraint", "no conditions")),
-                )
+                a = pattern_to_str(pattern["pattern"])
+                b = pattern.get("constraint", "no conditions")
+                return f"{a} subject to {b}"
             else:
                 return str(pattern)
 

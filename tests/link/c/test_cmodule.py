@@ -189,12 +189,11 @@ def mock_system(request):
 @pytest.fixture()
 def cxx_search_dirs(blas_libs, mock_system):
     libext = {"Linux": "so", "Windows": "dll", "Darwin": "dylib"}
-    libtemplate = f"{{lib}}.{libext[mock_system]}"
     libraries = []
     with tempfile.TemporaryDirectory() as d:
         flags = None
         for lib in blas_libs:
-            lib_path = Path(d) / libtemplate.format(lib=lib)
+            lib_path = Path(d) / f"{lib}.{libext[mock_system]}"
             lib_path.write_bytes(b"1")
             libraries.append(lib_path)
             if flags is None:
@@ -262,14 +261,13 @@ def test_default_blas_ldflags_no_cxx():
 
 @pytest.fixture()
 def windows_conda_libs(blas_libs):
-    libtemplate = "{lib}.dll"
     libraries = []
     with tempfile.TemporaryDirectory() as d:
         subdir = Path(d) / "Library" / "bin"
         subdir.mkdir(exist_ok=True, parents=True)
         flags = f'-L"{subdir}"'
         for lib in blas_libs:
-            lib_path = subdir / libtemplate.format(lib=lib)
+            lib_path = subdir / f"{lib}.dll"
             lib_path.write_bytes(b"1")
             libraries.append(lib_path)
             flags += f" -l{lib}"

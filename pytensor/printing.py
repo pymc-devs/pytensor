@@ -1048,10 +1048,8 @@ class DefaultPrinter(Printer):
         if node is None:
             return leaf_printer.process(output, pstate)
         with set_precedence(pstate):
-            r = "{}({})".format(
-                str(node.op),
-                ", ".join(pprinter.process(input, pstate) for input in node.inputs),
-            )
+            args = ", ".join(pprinter.process(input, pstate) for input in node.inputs)
+            r = f"{node.op}({args})"
 
         pstate.memo[output] = r
         return r

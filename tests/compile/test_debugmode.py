@@ -64,7 +64,8 @@ class BROKEN_ON_PURPOSE_Add(COp):
     def c_code(self, node, name, inp, out, sub):
         a, b = inp
         (z,) = out
-        return """
+        fail = sub["fail"]
+        return f"""
         if (PyArray_NDIM({a}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a) != 1"); {fail};}}
         if (PyArray_NDIM({b}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 1"); {fail};}}
 
@@ -96,7 +97,7 @@ class BROKEN_ON_PURPOSE_Add(COp):
                 + ((double*)PyArray_GETPTR1({b}, m))[0] ;
             }}
         }}
-        """.format(**dict(locals(), **sub))
+        """
 
 
 # inconsistent is a invalid op, whose perform and c_code do not match
@@ -632,7 +633,8 @@ class BrokenCImplementationAdd(COp):
         a, b = inp
         (z,) = out
         debug = 0
-        return """
+        fail = sub["fail"]
+        return f"""
         //printf("executing c_code\\n");
         if (PyArray_NDIM({a}) != 2) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a) != 2"); {fail};}}
         if (PyArray_NDIM({b}) != 2) {{PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 2"); {fail};}}
@@ -690,7 +692,7 @@ class BrokenCImplementationAdd(COp):
                 }}
             }}
         }}
-        """.format(**dict(locals(), **sub))
+        """
 
 
 class VecAsRowAndCol(Op):

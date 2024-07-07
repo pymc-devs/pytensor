@@ -587,24 +587,15 @@ class ExternalCOp(COp):
                 params = f", {sub['params']}"
 
             # Generate the C code
-            return """
+            return f"""
                 {define_macros}
                 {{
-                  if ({func_name}({func_args}{params}) != 0) {{
-                    {fail}
+                  if ({self.func_name}({self.format_c_function_args(inp, out)}{params}) != 0) {{
+                    {sub['fail']}
                   }}
                 }}
                 {undef_macros}
-                """.format(
-                **dict(
-                    func_name=self.func_name,
-                    fail=sub["fail"],
-                    params=params,
-                    func_args=self.format_c_function_args(inp, out),
-                    define_macros=define_macros,
-                    undef_macros=undef_macros,
-                )
-            )
+                """
         else:
             if "code" in self.code_sections:
                 op_code = self.code_sections["code"]

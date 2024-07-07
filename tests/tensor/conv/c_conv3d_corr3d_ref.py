@@ -323,7 +323,9 @@ class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
                 )
             depth = "-1"
 
-        return """
+        fail = sub["fail"]
+        params = sub["params"]
+        return f"""
     // Mandatory args
     int direction = {params}->direction;  // forward, bprop weights, bprop inputs
 
@@ -568,18 +570,7 @@ class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
     }}
     assert (out2 == *out);
 
-""".format(
-            **dict(
-                bottom=bottom,
-                weights=weights,
-                top=top,
-                height=height,
-                width=width,
-                depth=depth,
-                fail=sub["fail"],
-                params=sub["params"],
-            )
-        )
+"""
 
 
 class Corr3dMM(BaseCorr3dMM):
