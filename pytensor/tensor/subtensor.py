@@ -522,7 +522,7 @@ def basic_shape(shape, indices):
 
     """
     res_shape = ()
-    for idx, n in zip(indices, shape, strict=False):
+    for n, idx in zip(shape[: len(indices)], indices, strict=True):
         if isinstance(idx, slice):
             res_shape += (slice_len(idx, n),)
         elif isinstance(getattr(idx, "type", None), SliceType):
