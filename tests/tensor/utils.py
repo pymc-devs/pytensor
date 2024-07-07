@@ -667,7 +667,7 @@ def makeBroadcastTester(op, expected, checks=None, name=None, **kwargs):
         # For instance: sub_inplace -> SubInplace
         capitalize = True
     if capitalize:
-        name = "".join([x.capitalize() for x in name.split("_")])
+        name = "".join(x.capitalize() for x in name.split("_"))
     # Some tests specify a name that already ends with 'Tester', while in other
     # cases we need to add it manually.
     if not name.endswith("Tester"):

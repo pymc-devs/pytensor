@@ -1691,7 +1691,7 @@ class BatchedDot(COp):
         if x.shape[0] != y.shape[0]:
             raise TypeError(
                 f"Inputs [{', '.join(map(str, inp))}] must have the"
-                f" same size in axis 0, but have sizes [{', '.join([str(i.shape[0]) for i in inp])}]."
+                f" same size in axis 0, but have sizes [{', '.join(str(i.shape[0]) for i in inp)}]."
             )
 
         z[0] = np.matmul(x, y)

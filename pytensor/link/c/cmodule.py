@@ -2003,7 +2003,7 @@ def try_blas_flag(flags):
     cflags = list(flags)
     # to support path that includes spaces, we need to wrap it with double quotes on Windows
     path_wrapper = '"' if os.name == "nt" else ""
-    cflags.extend([f"-L{path_wrapper}{d}{path_wrapper}" for d in std_lib_dirs()])
+    cflags.extend(f"-L{path_wrapper}{d}{path_wrapper}" for d in std_lib_dirs())
 
     res = GCC_compiler.try_compile_tmp(
         test_code, tmp_prefix="try_blas_", flags=cflags, try_run=True
@@ -2573,8 +2573,8 @@ class GCC_compiler(Compiler):
             cmd.extend(preargs)
         # to support path that includes spaces, we need to wrap it with double quotes on Windows
         path_wrapper = '"' if os.name == "nt" else ""
-        cmd.extend([f"-I{path_wrapper}{idir}{path_wrapper}" for idir in include_dirs])
-        cmd.extend([f"-L{path_wrapper}{ldir}{path_wrapper}" for ldir in lib_dirs])
+        cmd.extend(f"-I{path_wrapper}{idir}{path_wrapper}" for idir in include_dirs)
+        cmd.extend(f"-L{path_wrapper}{ldir}{path_wrapper}" for ldir in lib_dirs)
         if hide_symbols and sys.platform != "win32":
             # This has been available since gcc 4.0 so we suppose it
             # is always available. We pass it here since it

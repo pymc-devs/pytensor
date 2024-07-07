@@ -160,7 +160,7 @@ class ScalarLoop(ScalarInnerGraphOp):
                 f"Got {n_steps.type.dtype}",
             )
 
-        if self.inputs_type == tuple([i.type for i in inputs]):
+        if self.inputs_type == tuple(i.type for i in inputs):
             return super().make_node(n_steps, *inputs)
         else:
             # Make a new op with the right input types.

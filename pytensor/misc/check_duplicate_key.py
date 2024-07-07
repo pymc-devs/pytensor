@@ -9,10 +9,10 @@ from pytensor.configdefaults import config
 DISPLAY_DUPLICATE_KEYS = False
 DISPLAY_MOST_FREQUENT_DUPLICATE_CCODE = False
 
-dirs = []
+dirs: list = []
 if len(sys.argv) > 1:
     for compiledir in sys.argv[1:]:
-        dirs.extend([os.path.join(compiledir, d) for d in os.listdir(compiledir)])
+        dirs.extend(os.path.join(compiledir, d) for d in os.listdir(compiledir))
 else:
     dirs = os.listdir(config.compiledir)
     dirs = [os.path.join(config.compiledir, d) for d in dirs]
