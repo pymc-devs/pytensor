@@ -5,4 +5,5 @@ from pytensor.link.pytorch.dispatch.basic import pytorch_funcify, pytorch_typify
 import pytensor.link.pytorch.dispatch.scalar
 import pytensor.link.pytorch.dispatch.elemwise
 import pytensor.link.pytorch.dispatch.extra_ops
+import pytensor.link.pytorch.dispatch.sort
 # isort: on
