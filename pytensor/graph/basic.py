@@ -986,7 +986,7 @@ def explicit_graph_inputs(
 
 
 def vars_between(
-    ins: Collection[Variable], outs: Iterable[Variable]
+    ins: Iterable[Variable], outs: Iterable[Variable]
 ) -> Generator[Variable, None, None]:
     r"""Extract the `Variable`\s within the sub-graph between input and output nodes.
 
@@ -1005,6 +1005,8 @@ def vars_between(
     `ins` to `outs`.
 
     """
+
+    ins = set(ins)
 
     def expand(r: Variable) -> Iterable[Variable] | None:
         if r.owner and r not in ins:
