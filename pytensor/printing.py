@@ -1120,7 +1120,7 @@ class PPrinter(Printer):
                     i += 1
                 if output.name is not None or output in outputs:
                     if output.name is None:
-                        name = "out[%i]" % outputs.index(output)
+                        name = f"out[{outputs.index(output)}]"
                     else:
                         name = output.name
                     # backport

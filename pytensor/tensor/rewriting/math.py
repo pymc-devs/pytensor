@@ -3254,7 +3254,7 @@ def simplify_mul(tree):
             rval = [neg, s_inputs]
     else:
         rval = tree
-    # print 'simplify_mul: %s -> %s' % (tree, rval)
+    # print(f"simplify_mul: {tree} -> {rval}")
     return rval
 
 

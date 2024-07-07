@@ -36,7 +36,7 @@ for dir in dirs:
 if DISPLAY_DUPLICATE_KEYS:
     for k, v in keys.items():
         if v > 1:
-            print("Duplicate key (%i copies): %s" % (v, pickle.loads(k)))
+            print(f"Duplicate key ({v} copies): {pickle.loads(k)}")
 
 # nb seen -> how many keys
 nbs_keys = Counter(val for val in keys.values())

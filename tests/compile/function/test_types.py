@@ -902,8 +902,8 @@ class TestPicklefunction:
         assert f._check_for_aliased_inputs is g._check_for_aliased_inputs
         assert f.name == g.name
         assert f.maker.fgraph.name == g.maker.fgraph.name
-        # print 'f.defaults = %s' % (f.defaults, )
-        # print 'g.defaults = %s' % (g.defaults, )
+        # print(f"{f.defaults = }")
+        # print(f"{g.defaults = }")
         for (f_req, f_feed, f_val), (g_req, g_feed, g_val) in zip(
             f.defaults, g.defaults
         ):

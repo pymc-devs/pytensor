@@ -87,9 +87,8 @@ class CodeBlock:
         # for that...)
         # we need the label even if cleanup is empty because the
         # behavior block jumps there on failure
-        self.cleanup = (
-            "__label_%(id)i:\n" % sub + cleanup + "\ndouble __DUMMY_%(id)i;\n" % sub
-        )  # % sub
+        id = sub["id"]
+        self.cleanup = f"__label_{id}:\n{cleanup}\ndouble __DUMMY_{id};\n"
 
 
 def failure_code(sub, use_goto=True):
@@ -114,14 +113,16 @@ def failure_code(sub, use_goto=True):
         goto_statement = "goto __label_%(id)i;" % sub
     else:
         goto_statement = ""
-    return """{
-        %(failure_var)s = %(id)i;
-        if (!PyErr_Occurred()) {
+    id = sub["id"]
+    failure_var = sub["failure_var"]
+    return f"""{{
+        {failure_var} = {id};
+        if (!PyErr_Occurred()) {{
             PyErr_SetString(PyExc_RuntimeError,
                 "Unexpected error in an Op's C code. "
                 "No Python exception was set.");
-        }
-        %(goto_statement)s}""" % dict(sub, goto_statement=goto_statement)
+        }}
+        {goto_statement}}}"""
 
 
 def failure_code_init(sub):
@@ -135,17 +136,15 @@ def failure_code_init(sub):
       * failure_var -> must contain a variable name to use for
       the failure code.
     """
-    return (
-        """{
-        if (!PyErr_Occurred()) {
+    id = sub["id"]
+    return f"""{{
+        if (!PyErr_Occurred()) {{
             PyErr_SetString(PyExc_RuntimeError,
                 "Unexpected error in an Op's C code. "
                 "No Python exception was set.");
-            }
-        return %(id)d;
-}"""
-        % sub
-    )
+            }}
+        return {id};
+}}"""
 
 
 def code_gen(blocks):
@@ -1657,10 +1656,9 @@ class CLinker(Linker):
             file=code,
         )
         print("  assert(PyTuple_Check(argtuple));", file=code)
-        print("  if (%(n_args)i != PyTuple_Size(argtuple)){ " % locals(), file=code)
+        print(f"  if ({n_args} != PyTuple_Size(argtuple)){{ ", file=code)
         print(
-            '     PyErr_Format(PyExc_TypeError, "Wrong number of arguments, expected %(n_args)i, got %%i", (int)PyTuple_Size(argtuple));'
-            % locals(),
+            f'     PyErr_Format(PyExc_TypeError, "Wrong number of arguments, expected {n_args}, got %%i", (int)PyTuple_Size(argtuple));',
             file=code,
         )
         print("     return NULL;", file=code)
