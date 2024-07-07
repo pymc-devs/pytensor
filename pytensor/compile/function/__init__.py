@@ -1,6 +1,7 @@
 import logging
 import re
 import traceback as tb
+from pathlib import Path
 
 from pytensor.compile.function.pfunc import pfunc
 from pytensor.compile.function.types import orig_function
@@ -13,7 +14,7 @@ _logger = logging.getLogger("pytensor.compile.function")
 
 
 def function_dump(
-    filename,
+    filename: str | Path,
     inputs,
     outputs=None,
     mode=None,
@@ -26,7 +27,7 @@ def function_dump(
     allow_input_downcast=None,
     profile=None,
     on_unused_input=None,
-    extra_tag_to_remove=None,
+    extra_tag_to_remove: str | None = None,
 ):
     """
     This is helpful to make a reproducible case for problems during PyTensor
@@ -59,7 +60,7 @@ def function_dump(
     `['annotations', 'replacement_of', 'aggregation_scheme', 'roles']`
 
     """
-    assert isinstance(filename, str)
+    filename = Path(filename)
     d = dict(
         inputs=inputs,
         outputs=outputs,
@@ -74,7 +75,7 @@ def function_dump(
         profile=profile,
         on_unused_input=on_unused_input,
     )
-    with open(filename, "wb") as f:
+    with filename.open("wb") as f:
         import pytensor.misc.pkl_utils
 
         pickler = pytensor.misc.pkl_utils.StripPickler(
