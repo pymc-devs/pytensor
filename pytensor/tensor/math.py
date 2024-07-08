@@ -277,6 +277,28 @@ class Argmax(COp):
         return [x.zeros_like()]
 
 
+def argmax(x, axis=None, keepdims=False):
+    """
+    Returns indices of maximum elements obtained by iterating over given axis.
+
+    When axis is None (the default value), the argmax is performed
+    over the flattened tensor.
+
+    Parameters
+    ----------
+    keepdims : bool
+        If this is set to True, the axes which are reduced are left in
+        the result as dimensions with size one. With this option, the result
+        will broadcast correctly against the original tensor.
+
+    """
+    argout = max_and_argmax(x, axis)[1]
+
+    if keepdims:
+        argout = makeKeepDims(x, argout, axis)
+    return argout
+
+
 @_vectorize_node.register(Argmax)
 def vectorize_argmax_node(op, node, batch_x):
     core_ndim = node.inputs[0].type.ndim
@@ -547,28 +569,6 @@ def max(x, axis=None, keepdims=False):
     if keepdims:
         out = makeKeepDims(x, out, axis)
     return out
-
-
-def argmax(x, axis=None, keepdims=False):
-    """
-    Returns indices of maximum elements obtained by iterating over given axis.
-
-    When axis is None (the default value), the argmax is performed
-    over the flattened tensor.
-
-    Parameters
-    ----------
-    keepdims : bool
-        If this is set to True, the axes which are reduced are left in
-        the result as dimensions with size one. With this option, the result
-        will broadcast correctly against the original tensor.
-
-    """
-    argout = max_and_argmax(x, axis)[1]
-
-    if keepdims:
-        argout = makeKeepDims(x, argout, axis)
-    return argout
 
 
 def min(x, axis=None, keepdims=False):
