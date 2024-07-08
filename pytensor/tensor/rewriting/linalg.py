@@ -509,8 +509,6 @@ def svd_uv_merge(fgraph, node):
         # Else, has to replace the s of this node with s of an SVD Op that compute_uv=False.
         # First, iterate to see if there is an SVD Op that can be reused.
         for cl, _ in fgraph.clients[x]:
-            if cl == "output":
-                continue
             if isinstance(cl.op, Blockwise) and isinstance(cl.op.core_op, SVD):
                 if not cl.op.core_op.compute_uv:
                     return {
@@ -529,8 +527,6 @@ def svd_uv_merge(fgraph, node):
         # We want rewrite if there is another one with compute_uv=True.
         # For this case, just reuse the `s` from the one with compute_uv=True.
         for cl, _ in fgraph.clients[x]:
-            if cl == "output":
-                continue
             if isinstance(cl.op, Blockwise) and isinstance(cl.op.core_op, SVD):
                 if cl.op.core_op.compute_uv and (
                     len(fgraph.clients[cl.outputs[0]]) > 0
