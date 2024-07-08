@@ -1,7 +1,9 @@
 import re
 from collections.abc import Sequence
+from typing import cast
 
 import numpy as np
+from numpy.core.numeric import normalize_axis_tuple  # type: ignore
 
 import pytensor
 from pytensor.utils import hash_from_code
@@ -223,3 +225,19 @@ def safe_signature(
         operand_sig(ndim, prefix=f"o{n}") for n, ndim in enumerate(core_outputs_ndim)
     )
     return f"{inputs_sig}->{outputs_sig}"
+
+
+def normalize_reduce_axis(axis, ndim: int) -> tuple[int, ...] | None:
+    """Normalize the axis parameter for reduce operations."""
+    if axis is None:
+        return None
+
+    # scalar inputs are treated as 1D regarding axis in reduce operations
+    if axis is not None:
+        try:
+            axis = normalize_axis_tuple(axis, ndim=max(1, ndim))
+        except np.AxisError:
+            raise np.AxisError(axis, ndim=ndim)
+
+    # TODO: If axis tuple is equivalent to None, return None for more canonicalization?
+    return cast(tuple, axis)

@@ -30,7 +30,11 @@ from pytensor.tensor.type import (
     float_dtypes,
     lvector,
 )
-from pytensor.tensor.utils import broadcast_static_dim_lengths, import_func_from_string
+from pytensor.tensor.utils import (
+    broadcast_static_dim_lengths,
+    import_func_from_string,
+    normalize_reduce_axis,
+)
 from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import uniq
 
@@ -1371,7 +1375,6 @@ class CAReduce(COp):
 
     def make_node(self, input):
         input = as_tensor_variable(input)
-        inp_dims = input.type.ndim
         inp_dtype = input.type.dtype
 
         # We need to redefine make_node so that, if self.dtype is None,
@@ -1383,29 +1386,19 @@ class CAReduce(COp):
         assert dtype is not None
         assert acc_dtype is not None
 
-        axis = self.axis
+        axis = normalize_reduce_axis(self.axis, ndim=input.type.ndim)
 
-        # scalar inputs are treated as 1D regarding axis in this `Op`
-        if axis is not None:
-            try:
-                axis = normalize_axis_tuple(axis, ndim=max(1, inp_dims))
-            except np.AxisError:
-                raise np.AxisError(axis, ndim=inp_dims)
-
-            out_shape = tuple(
-                s for i, s in enumerate(input.type.shape) if i not in axis
-            )
-        else:
-            out_shape = ()
-
-        if (
-            (axis is not None and any(a < 0 for a in axis))
-            or dtype != self.dtype
-            or acc_dtype != self.acc_dtype
-        ):
+        if axis != self.axis or dtype != self.dtype or acc_dtype != self.acc_dtype:
             op = self.clone(axis=axis, dtype=dtype, acc_dtype=acc_dtype)
         else:
             op = self
+
+        if axis is None:
+            out_shape = ()
+        else:
+            out_shape = tuple(
+                s for i, s in enumerate(input.type.shape) if i not in axis
+            )
 
         output = TensorType(dtype=dtype, shape=out_shape)()
 

@@ -192,9 +192,7 @@ class RopLopChecker:
 
 class TestRopLop(RopLopChecker):
     def test_max(self):
-        # If we call max directly, we will return an CAReduce object
-        # which doesn't have R_op implemented!
-        # self.check_mat_rop_lop(at_max(self.mx, axis=[0,1])[0], ())
+        # self.check_mat_rop_lop(pt_max(self.mx, axis=[0,1])[0], ())
         self.check_mat_rop_lop(pt_max(self.mx, axis=0), (self.mat_in_shape[1],))
         self.check_mat_rop_lop(pt_max(self.mx, axis=1), (self.mat_in_shape[0],))
 

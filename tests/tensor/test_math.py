@@ -154,7 +154,6 @@ from pytensor.tensor.type import (
     vectors,
     zvector,
 )
-from pytensor.tensor.type_other import NoneConst
 from tests import unittest_tools as utt
 from tests.link.test_link import make_function
 from tests.tensor.utils import (
@@ -767,9 +766,10 @@ class TestMaxAndArgmax:
         Max.debug = 0
         Argmax.debug = 0
 
-    def test_basic(self):
+    @pytest.mark.parametrize("empty_axis", [(), None])
+    def test_empty_axis_scalar(self, empty_axis):
         n = as_tensor_variable(5)
-        v, i = eval_outputs(max_and_argmax(n, axis=()))
+        v, i = eval_outputs(max_and_argmax(n, axis=empty_axis))
         assert v == 5.0
         assert i == 0
         assert i.dtype == "int64"
@@ -777,6 +777,29 @@ class TestMaxAndArgmax:
         assert len(v) == 0
         v = eval_outputs(max_and_argmax(n)[1].shape)
         assert len(v) == 0
+
+    def test_empty_axis_tensor(self):
+        x = np.random.normal(size=(2, 3, 5, 7))
+        axis = ()
+
+        non_axis = tuple(i for i in range(x.ndim) if i not in axis)
+        shape_axis = tuple(x.shape[dim] for dim in axis)
+        shape_non_axis = tuple(x.shape[dim] for dim in non_axis)
+        x_transposed = x.transpose(*axis, *non_axis)
+
+        x_axis_raveled = x_transposed.reshape(
+            np.prod(shape_axis, dtype=int), np.prod(shape_non_axis, dtype=int)
+        )
+        max_x = max_and_argmax(x, axis=axis)[0].eval()
+        argmax_x = max_and_argmax(x, axis=axis)[1].eval()
+
+        raveled_max = x_axis_raveled[
+            argmax_x.ravel(), np.arange(np.prod(shape_non_axis, dtype=int))
+        ]
+        indirect_max = raveled_max.reshape(shape_non_axis)
+
+        np.testing.assert_allclose(max_x, x.max(axis=axis))
+        np.testing.assert_allclose(indirect_max, x.max(axis=axis))
 
     def test_basic_1(self):
         n = as_tensor_variable([1, 2, 3, 2, -6])
@@ -796,8 +819,6 @@ class TestMaxAndArgmax:
             (None, None),
             ([0, 1], None),
             ([1, 0], None),
-            (NoneConst.clone(), None),
-            (constant(0), 0),
         ],
     )
     def test_basic_2(self, axis, np_axis):
@@ -826,8 +847,6 @@ class TestMaxAndArgmax:
             (None, None),
             ([0, 1], None),
             ([1, 0], None),
-            (NoneConst.clone(), None),
-            (constant(0), 0),
         ],
     )
     def test_basic_2_float16(self, axis, np_axis):
@@ -986,7 +1005,7 @@ class TestMaxAndArgmax:
             safe_verify_grad(lambda v: max_and_argmax(v, axis=[i])[1], [data])
 
         # Test grad with multiple axes
-        for i in [[0, 1], [0, 0]]:
+        for i in [[0, 1], [0, 2, 3]]:
             safe_verify_grad(lambda v: max_and_argmax(v, axis=i)[0], [data])
             safe_verify_grad(lambda v: max_and_argmax(v, axis=i)[1], [data])
 
@@ -1042,29 +1061,6 @@ class TestMaxAndArgmax:
 
         assert isinstance(new_node.op, Argmax)
         assert new_node.op.axis == batch_axis
-
-    def test_max_empty_axis(self):
-        x = np.random.normal(size=(2, 3, 5, 7))
-        axis = ()
-
-        non_axis = tuple(i for i in range(x.ndim) if i not in axis)
-        shape_axis = tuple(x.shape[dim] for dim in axis)
-        shape_non_axis = tuple(x.shape[dim] for dim in non_axis)
-        x_transposed = x.transpose(*axis, *non_axis)
-
-        x_axis_raveled = x_transposed.reshape(
-            np.prod(shape_axis, dtype=int), np.prod(shape_non_axis, dtype=int)
-        )
-        max_x = max_and_argmax(x, axis=axis)[0].eval()
-        argmax_x = max_and_argmax(x, axis=axis)[1].eval()
-
-        raveled_max = x_axis_raveled[
-            argmax_x.ravel(), np.arange(np.prod(shape_non_axis, dtype=int))
-        ]
-        indirect_max = raveled_max.reshape(shape_non_axis)
-
-        np.testing.assert_allclose(max_x, x.max(axis=axis))
-        np.testing.assert_allclose(indirect_max, x.max(axis=axis))
 
 
 class TestArgminArgmax:
