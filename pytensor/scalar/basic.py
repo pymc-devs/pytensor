@@ -355,6 +355,7 @@ class ScalarType(CType, HasDataType, HasShape):
         # we declare them here and they will be re-used by TensorType
         l.append("<numpy/arrayobject.h>")
         l.append("<numpy/arrayscalars.h>")
+        l.append("<numpy/npy_math.h>")
         if config.lib__amblibm and c_compiler.supports_amdlibm:
             l += ["<amdlibm.h>"]
         return l
