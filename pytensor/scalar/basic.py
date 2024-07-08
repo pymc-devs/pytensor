@@ -577,59 +577,59 @@ class ScalarType(CType, HasDataType, HasShape):
             """
 
             template = """
-            struct pytensor_complex%(nbits)s : public npy_complex%(nbits)s
-            {
-                typedef pytensor_complex%(nbits)s complex_type;
-                typedef npy_float%(half_nbits)s scalar_type;
+            struct pytensor_complex%(nbits)s : public npy_complex%(nbits)s {
+              typedef pytensor_complex%(nbits)s complex_type;
+              typedef npy_float32 scalar_type;
 
-                complex_type operator +(const complex_type &y) const {
-                    complex_type ret;
-                    ret.real = this->real + y.real;
-                    ret.imag = this->imag + y.imag;
-                    return ret;
-                }
+              complex_type operator+(const complex_type &y) const {
+                complex_type ret;
+                set_real%(nbits)s(&ret, get_real%(nbits)s(*this) + get_real%(nbits)s(y));
+                set_imag%(nbits)s(&ret, get_imag%(nbits)s(*this) + get_imag%(nbits)s(y));
+                return ret;
+              }
 
-                complex_type operator -() const {
-                    complex_type ret;
-                    ret.real = -this->real;
-                    ret.imag = -this->imag;
-                    return ret;
-                }
-                bool operator ==(const complex_type &y) const {
-                    return (this->real == y.real) && (this->imag == y.imag);
-                }
-                bool operator ==(const scalar_type &y) const {
-                    return (this->real == y) && (this->imag == 0);
-                }
-                complex_type operator -(const complex_type &y) const {
-                    complex_type ret;
-                    ret.real = this->real - y.real;
-                    ret.imag = this->imag - y.imag;
-                    return ret;
-                }
-                complex_type operator *(const complex_type &y) const {
-                    complex_type ret;
-                    ret.real = this->real * y.real - this->imag * y.imag;
-                    ret.imag = this->real * y.imag + this->imag * y.real;
-                    return ret;
-                }
-                complex_type operator /(const complex_type &y) const {
-                    complex_type ret;
-                    scalar_type y_norm_square = y.real * y.real + y.imag * y.imag;
-                    ret.real = (this->real * y.real + this->imag * y.imag) / y_norm_square;
-                    ret.imag = (this->imag * y.real - this->real * y.imag) / y_norm_square;
-                    return ret;
-                }
-                template <typename T>
-                complex_type& operator =(const T& y);
+              complex_type operator-() const {
+                complex_type ret;
+                set_real%(nbits)s(&ret, -get_real%(nbits)s(*this));
+                set_imag%(nbits)s(&ret, -get_imag%(nbits)s(*this));
+                return ret;
+              }
+              bool operator==(const complex_type &y) const {
+                return (get_real%(nbits)s(*this) == get_real%(nbits)s(y)) && (get_imag%(nbits)s(*this) == get_imag%(nbits)s(y));
+              }
+              bool operator==(const scalar_type &y) const {
+                return (get_real%(nbits)s(*this) == y) && (get_real%(nbits)s(*this) == 0);
+              }
+              complex_type operator-(const complex_type &y) const {
+                complex_type ret;
+                set_real%(nbits)s(&ret, get_real%(nbits)s(*this) - get_real%(nbits)s(y));
+                set_imag%(nbits)s(&ret, get_imag%(nbits)s(*this) - get_imag%(nbits)s(y));
+                return ret;
+              }
+              complex_type operator*(const complex_type &y) const {
+                complex_type ret;
+                set_real%(nbits)s(&ret, get_real%(nbits)s(*this) * get_real%(nbits)s(y) - get_imag%(nbits)s(*this) * get_imag%(nbits)s(y));
+                set_imag%(nbits)s(&ret, get_imag%(nbits)s(*this) * get_real%(nbits)s(y) + get_real%(nbits)s(*this) * get_imag%(nbits)s(y));
+                return ret;
+              }
+              complex_type operator/(const complex_type &y) const {
+                complex_type ret;
+                scalar_type y_norm_square = get_real%(nbits)s(y) * get_real%(nbits)s(y) + get_imag%(nbits)s(y) * get_imag%(nbits)s(y);
+                set_real%(nbits)s(&ret, (get_real%(nbits)s(*this) * get_real%(nbits)s(y) + get_imag%(nbits)s(*this) * get_imag%(nbits)s(y)) / y_norm_square);
+                set_imag%(nbits)s(&ret, (get_imag%(nbits)s(*this) * get_real%(nbits)s(y) - get_real%(nbits)s(*this) * get_imag%(nbits)s(y)) / y_norm_square);
+                return ret;
+              }
+              template <typename T> complex_type &operator=(const T &y);
 
-                pytensor_complex%(nbits)s() {}
+              pytensor_complex%(nbits)s() {}
 
-                template <typename T>
-                pytensor_complex%(nbits)s(const T& y) { *this = y; }
+              template <typename T> pytensor_complex%(nbits)s(const T &y) { *this = y; }
 
-                template <typename TR, typename TI>
-                pytensor_complex%(nbits)s(const TR& r, const TI& i) { this->real=r; this->imag=i; }
+              template <typename TR, typename TI>
+              pytensor_complex%(nbits)s(const TR &r, const TI &i) {
+                set_real%(nbits)s(this, r);
+                set_imag%(nbits)s(this, i);
+              }
             };
             """
 
