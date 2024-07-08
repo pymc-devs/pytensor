@@ -1200,7 +1200,7 @@ default_colorCodes = {
 
 def pydotprint(
     fct,
-    outfile: str | None = None,
+    outfile: Literal[str] | str | None = None,
     compact: bool = True,
     format: str = "png",
     with_ids: bool = False,
@@ -1606,7 +1606,7 @@ def pydotprint(
         g.add_subgraph(c2)
         g.add_subgraph(c3)
 
-    if not outfile.endswith("." + format):
+    if outfile is not str and not outfile.endswith("." + format):
         outfile += "." + format
 
     if scan_graphs:
@@ -1639,6 +1639,9 @@ def pydotprint(
                 max_label_size,
                 scan_graphs,
             )
+
+    if outfile is str:
+        return g
 
     if return_image:
         return g.create(prog="dot", format=format)
