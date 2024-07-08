@@ -509,6 +509,7 @@ class ScalarType(CType, HasDataType, HasShape):
     def c_support_code(self, **kwargs):
         if self.dtype.startswith("complex"):
             cplx_types = ["pytensor_complex64", "pytensor_complex128"]
+            cplx_types_bit_widths = ["64", "128"]
             real_types = [
                 "npy_int8",
                 "npy_int16",
@@ -633,26 +634,29 @@ class ScalarType(CType, HasDataType, HasShape):
             };
             """
 
-            def operator_eq_real(mytype, othertype):
+            def operator_eq_real(bit_width, othertype):
+                mytype = f"pytensor_complex{bit_width}"
                 return f"""
                 template <> {mytype} & {mytype}::operator=<{othertype}>(const {othertype} & y)
-                {{ this->real=y; this->imag=0; return *this; }}
+                {{ set_real{bit_width}(this, y); set_imag{bit_width}(this, 0); return *this; }}
                 """
 
-            def operator_eq_cplx(mytype, othertype):
+            def operator_eq_cplx(bit_width1, bit_width2):
+                mytype = f"pytensor_complex{bit_width1}"
+                othertype = f"pytensor_complex{bit_width2}"
                 return f"""
                 template <> {mytype} & {mytype}::operator=<{othertype}>(const {othertype} & y)
-                {{ this->real=y.real; this->imag=y.imag; return *this; }}
+                {{ set_real{bit_width1}(this, get_real{bit_width2}(y)); set_imag{bit_width1}(this, get_imag{bit_width2}(y)); return *this; }}
                 """
 
             operator_eq = "".join(
-                operator_eq_real(ctype, rtype)
-                for ctype in cplx_types
+                operator_eq_real(bit_width, rtype)
+                for bit_width in cplx_types_bit_widths
                 for rtype in real_types
             ) + "".join(
-                operator_eq_cplx(ctype1, ctype2)
-                for ctype1 in cplx_types
-                for ctype2 in cplx_types
+                operator_eq_cplx(bit_width1, bit_width2)
+                for bit_width1 in cplx_types_bit_widths
+                for bit_width2 in cplx_types_bit_widths
             )
 
             # We are not using C++ generic templating here, because this would
@@ -661,48 +665,51 @@ class ScalarType(CType, HasDataType, HasShape):
             # and the compiler complains it is ambiguous.
             # Instead, we generate code for known and safe types only.
 
-            def operator_plus_real(mytype, othertype):
+            def operator_plus_real(bit_width, othertype):
+                mytype = f"pytensor_complex{bit_width}"
                 return f"""
                 const {mytype} operator+(const {mytype} &x, const {othertype} &y)
-                {{ return {mytype}(x.real+y, x.imag); }}
+                {{ return {mytype}(get_real{bit_width}(x) + y, get_imag{bit_width}(x)); }}
 
                 const {mytype} operator+(const {othertype} &y, const {mytype} &x)
-                {{ return {mytype}(x.real+y, x.imag); }}
+                {{ return {mytype}(get_real{bit_width}(x) + y, get_imag{bit_width}(x)); }}
                 """
 
             operator_plus = "".join(
-                operator_plus_real(ctype, rtype)
-                for ctype in cplx_types
+                operator_plus_real(bit_width, rtype)
+                for bit_width in cplx_types_bit_widths
                 for rtype in real_types
             )
 
-            def operator_minus_real(mytype, othertype):
+            def operator_minus_real(bit_width, othertype):
+                mytype = f"pytensor_complex{bit_width}"
                 return f"""
                 const {mytype} operator-(const {mytype} &x, const {othertype} &y)
-                {{ return {mytype}(x.real-y, x.imag); }}
+                {{ return {mytype}(get_real{bit_width}(x) - y, get_imag{bit_width}(x)); }}
 
                 const {mytype} operator-(const {othertype} &y, const {mytype} &x)
-                {{ return {mytype}(y-x.real, -x.imag); }}
+                {{ return {mytype}(y - get_real{bit_width}(x), -get_imag{bit_width}(x)); }}
                 """
 
             operator_minus = "".join(
-                operator_minus_real(ctype, rtype)
-                for ctype in cplx_types
+                operator_minus_real(bit_width, rtype)
+                for bit_width in cplx_types_bit_widths
                 for rtype in real_types
             )
 
-            def operator_mul_real(mytype, othertype):
+            def operator_mul_real(bit_width, othertype):
+                mytype = f"pytensor_complex{bit_width}"
                 return f"""
                 const {mytype} operator*(const {mytype} &x, const {othertype} &y)
-                {{ return {mytype}(x.real*y, x.imag*y); }}
+                {{ return {mytype}(get_real{bit_width}(x) * y, get_imag{bit_width}(x) * y); }}
 
                 const {mytype} operator*(const {othertype} &y, const {mytype} &x)
-                {{ return {mytype}(x.real*y, x.imag*y); }}
+                {{ return {mytype}(get_real{bit_width}(x) * y, get_imag{bit_width}(x) * y); }}
                 """
 
             operator_mul = "".join(
-                operator_mul_real(ctype, rtype)
-                for ctype in cplx_types
+                operator_mul_real(bit_width, rtype)
+                for bit_width in cplx_types_bit_widths
                 for rtype in real_types
             )
 
