@@ -526,7 +526,6 @@ class ScalarType(CType, HasDataType, HasShape):
                 # In that case we add the 'int' type to the real types.
                 real_types.append("int")
 
-
             # The following aliases provide set_real, get_real, set_imag, get_imag functions
             # that will work for both pytensor_complex64 and pytensor_complex128 by matching
             # the right function (from npy_math.h) to the numpy complex type underlying the
