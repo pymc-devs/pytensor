@@ -125,7 +125,7 @@ line-length = 88
 exclude = ["doc/", "pytensor/_version.py"]
 
 [tool.ruff.lint]
-select = ["C", "E", "F", "I", "UP", "W", "RUF", "PERF"]
+select = ["C", "E", "F", "I", "UP", "W", "RUF", "PERF", "PTH"]
 ignore = ["C408", "C901", "E501", "E741", "RUF012", "PERF203"]
 
 
@@ -136,6 +136,7 @@ lines-after-imports = 2
 # TODO: Get rid of these:
 "**/__init__.py" = ["F401", "E402", "F403"]
 "pytensor/tensor/linalg.py" = ["F403"]
+"pytensor/link/c/cmodule.py" = ["PTH"]
 # For the tests we skip because `pytest.importorskip` is used:
 "tests/link/jax/test_scalar.py" = ["E402"]
 "tests/link/jax/test_tensor_basic.py" = ["E402"]

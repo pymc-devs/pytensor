@@ -1,15 +1,17 @@
 import os
 import shutil
+from pathlib import Path
 from tempfile import mkdtemp
 
 from pytensor.misc.pkl_utils import StripPickler
 from pytensor.tensor.type import matrix
 
 
+# FIXME: this test looks weird
 class TestStripPickler:
     def setup_method(self):
         # Work in a temporary directory to avoid cluttering the repository
-        self.origdir = os.getcwd()
+        self.origdir = Path.cwd()
         self.tmpdir = mkdtemp()
         os.chdir(self.tmpdir)
 
@@ -20,9 +22,9 @@ class TestStripPickler:
             shutil.rmtree(self.tmpdir)
 
     def test_basic(self):
-        with open("test.pkl", "wb") as f:
+        with Path("test.pkl").open("wb"):
             m = matrix()
             dest_pkl = "my_test.pkl"
-            with open(dest_pkl, "wb") as f:
+            with Path(dest_pkl).open("wb") as f:
                 strip_pickler = StripPickler(f, protocol=-1)
                 strip_pickler.dump(m)

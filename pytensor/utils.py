@@ -156,7 +156,7 @@ def subprocess_Popen(command: str | list[str], **params):
     # with the default None values.
     stdin = None
     if "stdin" not in params:
-        stdin = open(os.devnull)
+        stdin = Path(os.devnull).open()
         params["stdin"] = stdin.fileno()
 
     try:
