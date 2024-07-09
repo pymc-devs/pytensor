@@ -1951,7 +1951,7 @@ def _tensordot_as_dot(a, b, axes, dot, batched):
     if not np.isscalar(axes) and len(axes) != 2:
         raise ValueError(
             "Axes should be an integer or a "
-            "list/tuple of len 2 ({axes} was provided)"
+            f"list/tuple of len 2 ({axes} was provided)"
         )
 
     # if 'axes' is a number of axes to multiply and sum over (trailing axes

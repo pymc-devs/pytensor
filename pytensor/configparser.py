@@ -533,12 +533,11 @@ class DeviceParam(ConfigParam):
             )
         elif val == self.default:
             return val
-        else:
-            raise ValueError(
-                'Invalid value ("{val}") for configuration '
-                'variable "{self.name}". Valid options start with '
-                'one of "cpu".'
-            )
+        raise ValueError(
+            f'Invalid value ("{val}") for configuration '
+            f'variable "{self.name}". Valid options start with '
+            'one of "cpu".'
+        )
 
     def __str__(self):
         return f"{self.name} ({self.default})"
