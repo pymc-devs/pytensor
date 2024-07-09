@@ -148,7 +148,7 @@ def _check_scipy_linalg_matrix(a, func_name):
         )
         raise numba.TypingError(msg, highlighting=False)
     if not isinstance(a.dtype, types.Float | types.Complex):
-        msg = "{prefix}.{func_name}() only supported on float and complex arrays."
+        msg = f"{prefix}.{func_name}() only supported on float and complex arrays."
         raise numba.TypingError(msg, highlighting=False)
 
 
