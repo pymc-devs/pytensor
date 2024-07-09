@@ -16,10 +16,12 @@ Copyright 1984, 1995, 2000 by Stephen L. Moshier
 #include <numpy/npy_math.h>
 
 
-#define MINLOG     -170.0
-#define MAXLOG     +170.0
+// Constants borrowed from Scipy
+// https://github.com/scipy/scipy/blob/81c53d48a290b604ec5faa34c0a7d48537b487d6/scipy/special/special/cephes/const.h#L65-L78
+#define MINLOG     -7.451332191019412076235E2    // log 2**-1022
+#define MAXLOG     7.09782712893383996732E2      // log(DBL_MAX)
 #define MAXGAM     171.624376956302725
-#define EPSILON     2.2204460492503131e-16
+#define EPSILON     1.11022302462515654042e-16    // 2**-53
 
 DEVICE static double pseries(double, double, double);
 DEVICE static double incbcf(double, double, double);
