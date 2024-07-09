@@ -4434,8 +4434,7 @@ class Compositef32:
             )
             # make sure we don't produce any float16.
             assert not any(o.dtype == "float16" for o in new_node.outputs)
-            for o, no in zip(node.outputs, new_node.outputs):
-                mapping[o] = no
+            mapping.update(zip(node.outputs, new_node.outputs))
 
         new_ins = [mapping[inp] for inp in fgraph.inputs]
         new_outs = [mapping[out] for out in fgraph.outputs]

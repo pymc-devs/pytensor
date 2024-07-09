@@ -1055,12 +1055,7 @@ class VMLinker(LocalLinker):
             for v in self.fgraph.inputs + self.fgraph.outputs:
                 vars_idx.setdefault(v, len(vars_idx))
 
-            nodes_idx_inv = {}
-            vars_idx_inv = {}
-            for node, i in nodes_idx.items():
-                nodes_idx_inv[i] = node
-            for var, i in vars_idx.items():
-                vars_idx_inv[i] = var
+            vars_idx_inv = {i: var for var, i in vars_idx.items()}
 
             # put storage_map and compute_map into a int-based scheme
             storage_map_list = [

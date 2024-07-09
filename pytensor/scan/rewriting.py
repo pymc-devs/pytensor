@@ -1623,9 +1623,7 @@ def scan_save_mem(fgraph, node):
         (inps, outs, info, node_ins, compress_map) = compress_outs(
             op, not_required, nw_inputs
         )
-        inv_compress_map = {}
-        for k, v in compress_map.items():
-            inv_compress_map[v] = k
+        inv_compress_map = {v: k for k, v in compress_map.items()}
 
         # 3.6 Compose the new scan
         # TODO: currently we don't support scan with 0 step. So
