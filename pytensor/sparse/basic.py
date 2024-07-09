@@ -1382,8 +1382,8 @@ class GetItem2d(Op):
                 isinstance(ind, Variable) and getattr(ind, "ndim", -1) == 0
             ) or np.isscalar(ind):
                 raise NotImplementedError(
-                    "PyTensor has no sparse vector"
-                    + "Use X[a:b, c:d], X[a:b, c:c+1] or X[a:b] instead."
+                    "PyTensor has no sparse vector. "
+                    "Use X[a:b, c:d], X[a:b, c:c+1] or X[a:b] instead."
                 )
             else:
                 raise ValueError(

@@ -1753,7 +1753,7 @@ class ScalarMaximum(BinaryScalarOp):
         if any(i.type in complex_types for i in node.inputs):
             raise NotImplementedError()
         # Test for both y>x and x>=y to detect NaN
-        return f"{z} = (({y})>({x})? ({y}): " f'(({x})>=({y})? ({x}): nan("")));'
+        return f'{z} = (({y})>({x})? ({y}): (({x})>=({y})? ({x}): nan("")));'
 
     def L_op(self, inputs, outputs, gout):
         (x, y) = inputs
@@ -1795,7 +1795,7 @@ class ScalarMinimum(BinaryScalarOp):
         (z,) = outputs
         if any(i.type in complex_types for i in node.inputs):
             raise NotImplementedError()
-        return f"{z} = (({y})<({x})? ({y}): " f'(({x})<=({y})? ({x}): nan("")));'
+        return f'{z} = (({y})<({x})? ({y}): (({x})<=({y})? ({x}): nan("")));'
 
     def L_op(self, inputs, outputs, gout):
         (x, y) = inputs
