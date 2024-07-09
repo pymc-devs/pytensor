@@ -43,47 +43,52 @@ def test_pytorch_CumOp(axis, dtype):
         compare_pytorch_and_py(fgraph, [test_value])
 
 
-def test_pytorch_Repeat():
+@pytest.mark.parametrize("axis", [0, 1])
+def test_pytorch_Repeat(axis):
     a = pt.matrix("a", dtype="float64")
 
     test_value = np.arange(6, dtype="float64").reshape((3, 2))
 
-    # Test along axis 0
-    out = pt.repeat(a, (1, 2, 3), axis=0)
-    fgraph = FunctionGraph([a], [out])
-    compare_pytorch_and_py(fgraph, [test_value])
-
-    # Test along axis 1
-    out = pt.repeat(a, (3, 3), axis=1)
+    out = pt.repeat(a, (1, 2, 3) if axis == 0 else (3, 3), axis=axis)
     fgraph = FunctionGraph([a], [out])
     compare_pytorch_and_py(fgraph, [test_value])
 
 
-def test_pytorch_Unique():
+@pytest.mark.parametrize("axis", [0, 1])
+def test_pytorch_Unique_axis(axis):
     a = pt.matrix("a", dtype="float64")
 
     test_value = np.array(
         [[1.0, 1.0, 2.0], [1.0, 1.0, 2.0], [3.0, 3.0, 0.0]], dtype="float64"
     )
 
-    # Test along axis 0
-    out = pt.unique(a, axis=0)
+    out = pt.unique(a, axis=axis)
     fgraph = FunctionGraph([a], [out])
     compare_pytorch_and_py(fgraph, [test_value])
 
-    # Test along axis 1
-    out = pt.unique(a, axis=1)
-    fgraph = FunctionGraph([a], [out])
+
+@pytest.mark.parametrize(
+    "return_index, return_inverse, return_counts",
+    [
+        (False, True, False),
+        (False, True, True),
+        pytest.param(
+            True, False, False, marks=pytest.mark.xfail(raises=NotImplementedError)
+        ),
+    ],
+)
+def test_pytorch_Unique_params(return_index, return_inverse, return_counts):
+    a = pt.matrix("a", dtype="float64")
+    test_value = np.array(
+        [[1.0, 1.0, 2.0], [1.0, 1.0, 2.0], [3.0, 3.0, 0.0]], dtype="float64"
+    )
+
+    out = pt.unique(
+        a,
+        return_index=return_index,
+        return_inverse=return_inverse,
+        return_counts=return_counts,
+        axis=0,
+    )
+    fgraph = FunctionGraph([a], [out[0] if isinstance(out, list) else out])
     compare_pytorch_and_py(fgraph, [test_value])
-
-    # Test with params
-    out = pt.unique(a, return_inverse=True, return_counts=True, axis=0)
-    fgraph = FunctionGraph([a], [out[0]])
-    compare_pytorch_and_py(fgraph, [test_value])
-
-    # Test with return_index=True
-    out = pt.unique(a, return_index=True, axis=0)
-    fgraph = FunctionGraph([a], [out[0]])
-
-    with pytest.raises(NotImplementedError):
-        compare_pytorch_and_py(fgraph, [test_value])
