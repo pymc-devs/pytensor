@@ -5,7 +5,7 @@ from pytensor.compile import get_mode
 
 
 jax = pytest.importorskip("jax")
-import jax.errors
+from jax import errors
 
 import pytensor
 import pytensor.tensor.basic as ptb
@@ -200,7 +200,7 @@ class TestJaxSplit:
             fn = pytensor.function([a, split_axis], a_splits, mode="JAX")
         # Same as above, an AttributeError surpasses the `TracerIntegerConversionError`
         # Both errors are included for backwards compatibility
-        with pytest.raises((AttributeError, jax.errors.TracerIntegerConversionError)):
+        with pytest.raises((AttributeError, errors.TracerIntegerConversionError)):
             fn(np.zeros((6, 6), dtype=pytensor.config.floatX), 0)
 
 

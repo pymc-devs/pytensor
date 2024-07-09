@@ -51,7 +51,7 @@ class TestLoadTensor:
         path = Variable(Generic(), None)
         x = load(path, "int32", (None,), mmap_mode="c")
         fn = function([path], x)
-        assert type(fn(self.filename)) == np.core.memmap
+        assert isinstance(fn(self.filename), np.core.memmap)
 
     def teardown_method(self):
         os.remove(os.path.join(pytensor.config.compiledir, "_test.npy"))

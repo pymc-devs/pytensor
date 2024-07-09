@@ -228,7 +228,7 @@ def grab_scan_node(output):
         ri = grab_scan_node(i)
         if ri is not None:
             rval += ri
-    if rval is []:
+    if rval == []:
         return None
     else:
         return rval
