@@ -1270,15 +1270,16 @@ class VMLinker(LocalLinker):
         if self.allow_gc:
             post_thunk_clear = []
             for node in order:
-                clear_after_this_thunk = []
-                for input in node.inputs:
+                clear_after_this_thunk = [
+                    storage_map[input]
+                    for input in node.inputs
                     if (
                         input in computed
                         and input not in fgraph.outputs
                         and node == last_user[input]
                         and input not in reallocated_vars
-                    ):
-                        clear_after_this_thunk.append(storage_map[input])
+                    )
+                ]
                 post_thunk_clear.append(clear_after_this_thunk)
         else:
             post_thunk_clear = None
