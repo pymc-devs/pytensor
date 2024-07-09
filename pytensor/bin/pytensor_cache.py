@@ -30,9 +30,7 @@ def print_help(exit_status):
     print('Type "pytensor-cache clear" to erase the cache')
     print('Type "pytensor-cache list" to print the cache content')
     print('Type "pytensor-cache unlock" to unlock the cache directory')
-    print(
-        'Type "pytensor-cache cleanup" to delete keys in the old ' "format/code version"
-    )
+    print('Type "pytensor-cache cleanup" to delete keys in the old format/code version')
     print('Type "pytensor-cache purge" to force deletion of the cache directory')
     print(
         'Type "pytensor-cache basecompiledir" '

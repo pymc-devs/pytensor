@@ -351,8 +351,8 @@ def raise_with_op(
         clients = [[c[0] for c in fgraph.clients[var]] for var in node.outputs]
         detailed_err_msg += (
             f"Inputs shapes: {shapes}"
-            + f"\nInputs strides: {strides}"
-            + f"\nInputs values: {scalar_values}"
+            f"\nInputs strides: {strides}"
+            f"\nInputs values: {scalar_values}"
         )
         if verbosity == "high":
             inpts = [
