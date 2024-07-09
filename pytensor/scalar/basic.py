@@ -2635,7 +2635,7 @@ class Abs(UnaryScalarOp):
         if type in float_types:
             return f"{z} = fabs({x});"
         if type in complex_types:
-            return f"{z} = sqrt({x}.real*{x}.real + {x}.imag*{x}.imag);"
+            return f"{z} = sqrt(get_real({x}) * get_real({x}) + get_imag({x}) * get_imag({x}));"
         if node.outputs[0].type == bool:
             return f"{z} = ({x}) ? 1 : 0;"
         if type in uint_types:
