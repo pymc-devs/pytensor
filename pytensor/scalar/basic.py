@@ -476,7 +476,7 @@ class ScalarType(CType, HasDataType, HasShape):
                     sub,
                     name=name,
                     dtype=specs[1],
-                    pyarr_type="Py%sArrType_Type" % specs[2],
+                    pyarr_type=f"Py{specs[2]}ArrType_Type",
                 )
             )
         else:
@@ -509,7 +509,8 @@ class ScalarType(CType, HasDataType, HasShape):
 
     def c_support_code(self, **kwargs):
         if self.dtype.startswith("complex"):
-            cplx_types = ["pytensor_complex64", "pytensor_complex128"]
+            # complex types are: "pytensor_complex64", "pytensor_complex128"
+            # but it is more convenient to have their bit widths:
             cplx_types_bit_widths = ["64", "128"]
             real_types = [
                 "npy_int8",
@@ -557,7 +558,7 @@ class ScalarType(CType, HasDataType, HasShape):
             const auto& get_imag128 = npy_cimagl;
             const auto& set_real128 = npy_csetreall;
             const auto& set_imag128 = npy_csetimagl;
-            
+
             #elif NPY_BITSOF_DOUBLE == 64
             // if bits of float = 32 and bits of double = 64, then
             // npy_complex128 is npy_cdouble, and
