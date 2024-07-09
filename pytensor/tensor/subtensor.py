@@ -2107,10 +2107,7 @@ class AdvancedSubtensor1(COp):
         out[0] = x.take(i, axis=0, out=o)
 
     def connection_pattern(self, node):
-        rval = [[True]]
-
-        for ipt in node.inputs[1:]:
-            rval.append([False])
+        rval = [[True], *([False] for _ in node.inputs[1:])]
 
         return rval
 

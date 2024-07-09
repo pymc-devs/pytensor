@@ -1450,12 +1450,16 @@ class CLinker(Linker):
             if props:
                 version.append(props)
 
-            for i in node.inputs:
-                if isinstance(i.type, CLinkerObject):
-                    version.append(i.type.c_code_cache_version())
-            for o in node.outputs:
-                if isinstance(o.type, CLinkerObject):
-                    version.append(o.type.c_code_cache_version())
+            version.extend(
+                i.type.c_code_cache_version()
+                for i in node.inputs
+                if isinstance(i.type, CLinkerObject)
+            )
+            version.extend(
+                o.type.c_code_cache_version()
+                for o in node.outputs
+                if isinstance(o.type, CLinkerObject)
+            )
 
             # add the signature for this node
             sig.append(

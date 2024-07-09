@@ -2131,9 +2131,11 @@ class GCC_compiler(Compiler):
                             or "-march=native" in line
                         ):
                             continue
-                        for reg in ("-march=", "-mtune=", "-target-cpu", "-mabi="):
-                            if reg in line:
-                                selected_lines.append(line.strip())
+                        selected_lines.extend(
+                            line.strip()
+                            for reg in ("-march=", "-mtune=", "-target-cpu", "-mabi=")
+                            if reg in line
+                        )
                     lines = list(set(selected_lines))  # to remove duplicate
 
                 return lines

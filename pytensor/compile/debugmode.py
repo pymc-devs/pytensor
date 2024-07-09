@@ -756,10 +756,7 @@ def _get_preallocated_maps(
     # TODO: Sparse? Scalar does not really make sense.
 
     # Do not preallocate memory for outputs that actually work inplace
-    considered_outputs = []
-    for r in node.outputs:
-        if r not in inplace_outs:
-            considered_outputs.append(r)
+    considered_outputs = [r for r in node.outputs if r not in inplace_outs]
 
     # Output storage that was initially present in the storage_map
     if "initial" in prealloc_modes or "ALL" in prealloc_modes:

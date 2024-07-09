@@ -3477,8 +3477,9 @@ def test_grad_useless_sum():
     old_values_eq_approx = staticmethod(TensorType.values_eq_approx)
     TensorType.values_eq_approx = staticmethod(values_eq_approx_remove_nan)
     try:
-        for test_value in test_values:
-            outputs.append(f(np.array([test_value]).astype("float32")))
+        outputs.extend(
+            f(np.array([test_value]).astype("float32")) for test_value in test_values
+        )
     finally:
         TensorType.values_eq_approx = old_values_eq_approx
 
