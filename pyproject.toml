@@ -125,8 +125,8 @@ line-length = 88
 exclude = ["doc/", "pytensor/_version.py"]
 
 [tool.ruff.lint]
-select = ["C", "E", "F", "I", "UP", "W", "RUF"]
-ignore = ["C408", "C901", "E501", "E741", "RUF012"]
+select = ["C", "E", "F", "I", "UP", "W", "RUF", "PERF"]
+ignore = ["C408", "C901", "E501", "E741", "RUF012", "PERF203"]
 
 
 [tool.ruff.lint.isort]
