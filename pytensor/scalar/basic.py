@@ -279,8 +279,6 @@ class ScalarType(CType, HasDataType, HasShape):
     Analogous to TensorType, but for zero-dimensional objects.
     Maps directly to C primitives.
 
-    TODO: refactor to be named ScalarType for consistency with TensorType.
-
     """
 
     __props__ = ("dtype",)
@@ -356,6 +354,7 @@ class ScalarType(CType, HasDataType, HasShape):
         l.append("<numpy/arrayobject.h>")
         l.append("<numpy/arrayscalars.h>")
         l.append("<numpy/npy_math.h>")
+
         if config.lib__amblibm and c_compiler.supports_amdlibm:
             l += ["<amdlibm.h>"]
         return l
@@ -397,8 +396,8 @@ class ScalarType(CType, HasDataType, HasShape):
                 "float16": (np.float16, "npy_float16", "Float16"),
                 "float32": (np.float32, "npy_float32", "Float32"),
                 "float64": (np.float64, "npy_float64", "Float64"),
-                "complex128": (np.complex128, "pytensor_complex128", "Complex128"),
-                "complex64": (np.complex64, "pytensor_complex64", "Complex64"),
+                "complex128": (np.complex128, "npy_complex128", "Complex128"),
+                "complex64": (np.complex64, "npy_complex64", "Complex64"),
                 "bool": (np.bool_, "npy_bool", "Bool"),
                 "uint8": (np.uint8, "npy_uint8", "UInt8"),
                 "int8": (np.int8, "npy_int8", "Int8"),
@@ -732,7 +731,7 @@ class ScalarType(CType, HasDataType, HasShape):
         return ["import_array();"]
 
     def c_code_cache_version(self):
-        return (13, np.__version__)
+        return (14, np.__version__)
 
     def get_shape_info(self, obj):
         return obj.itemsize
