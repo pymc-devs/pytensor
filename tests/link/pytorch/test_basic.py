@@ -66,10 +66,10 @@ def compare_pytorch_and_py(
     py_res = pytensor_py_fn(*test_inputs)
 
     if len(fgraph.outputs) > 1:
-        for j, p in zip(pytorch_res, py_res):
-            assert_fn(j.cpu(), p)
+        for pytorch_res_i, py_res_i in zip(pytorch_res, py_res):
+            assert_fn(pytorch_res_i.detach().cpu().numpy(), py_res_i)
     else:
-        assert_fn([pytorch_res[0].cpu()], py_res)
+        assert_fn(pytorch_res[0].detach().cpu().numpy(), py_res[0])
 
     return pytensor_torch_fn, pytorch_res
 

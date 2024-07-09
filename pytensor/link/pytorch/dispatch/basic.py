@@ -1,24 +1,40 @@
 from functools import singledispatch
 from types import NoneType
 
+import numpy as np
 import torch
 
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.fg import FunctionGraph
 from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import CheckAndRaise
-from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Eye, Join, MakeVector
+from pytensor.tensor.basic import (
+    Alloc,
+    AllocEmpty,
+    ARange,
+    Eye,
+    Join,
+    MakeVector,
+    TensorFromScalar,
+)
 
 
 @singledispatch
-def pytorch_typify(data, dtype=None, **kwargs):
-    r"""Convert instances of PyTensor `Type`\s to PyTorch types."""
+def pytorch_typify(data, **kwargs):
+    raise NotImplementedError(f"pytorch_typify is not implemented for {type(data)}")
+
+
+@pytorch_typify.register(np.ndarray)
+@pytorch_typify.register(torch.Tensor)
+def pytorch_typify_tensor(data, dtype=None, **kwargs):
     return torch.as_tensor(data, dtype=dtype)
 
 
+@pytorch_typify.register(slice)
 @pytorch_typify.register(NoneType)
-def pytorch_typify_None(data, **kwargs):
-    return None
+@pytorch_typify.register(np.number)
+def pytorch_typify_no_conversion_needed(data, **kwargs):
+    return data
 
 
 @singledispatch
@@ -132,3 +148,11 @@ def pytorch_funcify_MakeVector(op, **kwargs):
         return torch.tensor(x, dtype=torch_dtype)
 
     return makevector
+
+
+@pytorch_funcify.register(TensorFromScalar)
+def pytorch_funcify_TensorFromScalar(op, **kwargs):
+    def tensorfromscalar(x):
+        return torch.as_tensor(x)
+
+    return tensorfromscalar
