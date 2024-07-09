@@ -13,6 +13,7 @@ import os
 import pickle
 import shutil
 import sys
+from pathlib import Path
 from tempfile import mkdtemp
 
 import numpy as np
@@ -327,15 +328,15 @@ class TestScan:
             [state, n_steps], output, updates=updates, allow_input_downcast=True
         )
 
-        origdir = os.getcwd()
+        origdir = Path.cwd()
         tmpdir = None
         try:
             tmpdir = mkdtemp()
             os.chdir(tmpdir)
 
-            with open("tmp_scan_test_pickle.pkl", "wb") as f_out:
+            with Path("tmp_scan_test_pickle.pkl").open("wb") as f_out:
                 pickle.dump(_my_f, f_out, protocol=-1)
-            with open("tmp_scan_test_pickle.pkl", "rb") as f_in:
+            with Path("tmp_scan_test_pickle.pkl").open("rb") as f_in:
                 my_f = pickle.load(f_in)
         finally:
             # Get back to the original dir, and delete the temporary one.

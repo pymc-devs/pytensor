@@ -1,6 +1,4 @@
-import errno
 import logging
-import os
 import sys
 import warnings
 from importlib import reload
@@ -43,23 +41,12 @@ try:
     # compile_str()) but if another lazylinker_ext does exist then it will be
     # imported and compile_str won't get called at all.
     location = config.compiledir / "lazylinker_ext"
-    if not location.exists():
-        try:
-            # Try to make the location
-            os.mkdir(location)
-        except OSError as e:
-            # If we get an error, verify that the error was # 17, the
-            # path already exists, and that it is a directory Note: we
-            # can't check if it exists before making it, because we
-            # are not holding the lock right now, so we could race
-            # another process and get error 17 if we lose the race
-            assert e.errno == errno.EEXIST
-            assert location.is_dir()
+    location.mkdir(exist_ok=True)
 
     init_file = location / "__init__.py"
     if not init_file.exists():
         try:
-            with open(init_file, "w"):
+            with init_file.open("w"):
                 pass
         except OSError as e:
             if init_file.exists():
@@ -129,12 +116,7 @@ except ImportError:
             code = cfile.read_text("utf-8")
 
             loc = config.compiledir / dirname
-            if not loc.exists():
-                try:
-                    os.mkdir(loc)
-                except OSError as e:
-                    assert e.errno == errno.EEXIST
-                    assert loc.exists()
+            loc.mkdir(exist_ok=True)
 
             args = GCC_compiler.compile_args()
             GCC_compiler.compile_str(dirname, code, location=loc, preargs=args)
@@ -147,8 +129,7 @@ except ImportError:
             # imported at the same time: we need to make sure we do not
             # reload the now outdated __init__.pyc below.
             init_pyc = loc / "__init__.pyc"
-            if init_pyc.is_file():
-                os.remove(init_pyc)
+            init_pyc.unlink(missing_ok=True)
 
             try_import()
             try_reload()
