@@ -182,7 +182,7 @@ def _build_droot_impact(destroy_handler):
     root_destroyer = {}  # root -> destroyer apply
 
     for app in destroy_handler.destroyers:
-        for output_idx, input_idx_list in app.op.destroy_map.items():
+        for input_idx_list in app.op.destroy_map.values():
             if len(input_idx_list) != 1:
                 raise NotImplementedError()
             input_idx = input_idx_list[0]
@@ -698,7 +698,7 @@ class DestroyHandler(Bookkeeper):
                 # keep track of clients that should run before the current Apply
                 root_clients = set_type()
                 # for each destroyed input...
-                for output_idx, input_idx_list in app.op.destroy_map.items():
+                for input_idx_list in app.op.destroy_map.values():
                     destroyed_idx = input_idx_list[0]
                     destroyed_variable = app.inputs[destroyed_idx]
                     root = droot[destroyed_variable]

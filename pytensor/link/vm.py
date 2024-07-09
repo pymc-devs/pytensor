@@ -545,7 +545,7 @@ class Stack(UpdatingVM):
             # Add the outputs that are needed for the in-place updates of the
             # inputs in `self.update_vars`
             output_subset = list(output_subset)
-            for inp, out in self.update_vars.items():
+            for out in self.update_vars.values():
                 out_idx = self.fgraph.outputs.index(out)
                 if out_idx not in output_subset:
                     output_subset.append(out_idx)

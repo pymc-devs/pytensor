@@ -528,7 +528,7 @@ def makeTester(
 
         @pytest.mark.skipif(skip, reason="Skipped")
         def test_bad_build(self):
-            for testname, inputs in self.bad_build.items():
+            for inputs in self.bad_build.values():
                 inputs = [copy(input) for input in inputs]
                 inputrs = [shared(input) for input in inputs]
                 with pytest.raises(Exception):

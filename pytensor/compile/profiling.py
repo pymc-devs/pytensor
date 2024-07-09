@@ -1380,9 +1380,9 @@ class ProfileStats:
         items.sort(key=lambda a: a[1], reverse=True)
         for idx, ((fgraph, node), node_outputs_size) in enumerate(items[:N]):
             code = ["c"] * len(node.outputs)
-            for out, inp in node.op.destroy_map.items():
+            for out in node.op.destroy_map:
                 code[out] = "i"
-            for out, inp in node.op.view_map.items():
+            for out in node.op.view_map:
                 code[out] = "v"
             shapes = str(fct_shapes[fgraph][node])
 
