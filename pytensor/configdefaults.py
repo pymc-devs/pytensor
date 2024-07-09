@@ -348,7 +348,7 @@ def add_compile_configvars():
         if sys.platform == "win32":
             mingw_w64_gcc = Path(sys.executable).parent / "Library/mingw-w64/bin/g++"
             try:
-                rc = call_subprocess_Popen([mingw_w64_gcc, "-v"])
+                rc = call_subprocess_Popen([str(mingw_w64_gcc), "-v"])
                 if rc == 0:
                     maybe_add_to_os_environ_pathlist("PATH", mingw_w64_gcc.parent)
             except OSError:

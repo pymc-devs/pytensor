@@ -123,7 +123,7 @@ def maybe_add_to_os_environ_pathlist(var: str, newpath: Path | str) -> None:
         pass
 
 
-def subprocess_Popen(command, **params):
+def subprocess_Popen(command: str | list[str], **params):
     """
     Utility function to work around windows behavior that open windows.
 
@@ -131,11 +131,11 @@ def subprocess_Popen(command, **params):
     """
     startupinfo = None
     if os.name == "nt":
-        startupinfo = subprocess.STARTUPINFO()
+        startupinfo = subprocess.STARTUPINFO()  # type: ignore[attr-defined]
         try:
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # type: ignore[attr-defined]
         except AttributeError:
-            startupinfo.dwFlags |= subprocess._subprocess.STARTF_USESHOWWINDOW
+            startupinfo.dwFlags |= subprocess._subprocess.STARTF_USESHOWWINDOW  # type: ignore[attr-defined]
 
         # Anaconda for Windows does not always provide .exe files
         # in the PATH, they also have .bat files that call the corresponding
