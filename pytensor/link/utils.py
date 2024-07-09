@@ -307,7 +307,7 @@ def raise_with_op(
     if exc_info is None:
         exc_info = sys.exc_info()
     exc_type, exc_value, exc_trace = exc_info
-    if exc_type == KeyboardInterrupt:
+    if exc_type is KeyboardInterrupt:
         # print a simple traceback from KeyboardInterrupt
         raise exc_value.with_traceback(exc_trace)
 

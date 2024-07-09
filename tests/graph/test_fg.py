@@ -35,7 +35,7 @@ class TestFunctionGraph:
         assert all(type(a) is type(b) for a, b in zip(func.inputs, new_func.inputs))
         assert all(type(a) is type(b) for a, b in zip(func.outputs, new_func.outputs))
         assert all(
-            type(a.op) is type(b.op)  # noqa: E721
+            type(a.op) is type(b.op)
             for a, b in zip(func.apply_nodes, new_func.apply_nodes)
         )
         assert all(a.type == b.type for a, b in zip(func.variables, new_func.variables))
