@@ -1067,7 +1067,7 @@ class Function:
     container = property(
         lambda self: self._container,
         None,  # this property itself is not settable
-        doc=("dictionary-like access to the containers associated with " "Variables"),
+        doc=("dictionary-like access to the containers associated with Variables"),
     )
 
     def free(self):
