@@ -2240,8 +2240,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         # Non-sequences have a direct equivalent from self.inner_inputs in
         # node.inputs
         inner_non_sequences = self.inner_inputs[len(seqs_shape) + len(outs_shape) :]
-        for in_ns, out_ns in zip(inner_non_sequences, node.inputs[offset:]):
-            out_equivalent[in_ns] = out_ns
+        out_equivalent.update(zip(inner_non_sequences, node.inputs[offset:]))
 
         if info.as_while:
             self_outs = self.inner_outputs[:-1]
