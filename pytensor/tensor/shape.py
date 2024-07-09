@@ -316,7 +316,7 @@ class Shape_i(COp):
                 op=self,
                 x_pos=0,
                 x=inp[0],
-                comment=("No gradient for the shape of a matrix " "is implemented."),
+                comment="No gradient for the shape of a matrix is implemented.",
             )
         ]
 

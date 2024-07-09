@@ -12,7 +12,7 @@ import pytensor
 
 
 __docformat__ = "restructuredtext en"
-__authors__ = "Pascal Lamblin " "PyMC Developers " "PyTensor Developers "
+__authors__ = "Pascal Lamblin PyMC Developers PyTensor Developers "
 __copyright__ = "Copyright 2013, Universite de Montreal"
 __license__ = "3-clause BSD"
 

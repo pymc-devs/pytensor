@@ -1563,9 +1563,7 @@ class CAReduce(COp):
         elif identity is None:
             raise TypeError(f"The {self.scalar_op} does not define an identity.")
 
-        task0_decl = (
-            f"{adtype}& {aname}_i = *{aname}_iter;\n" f"{aname}_i = {identity};"
-        )
+        task0_decl = f"{adtype}& {aname}_i = *{aname}_iter;\n{aname}_i = {identity};"
 
         task1_decl = f"{idtype}& {inames[0]}_i = *{inames[0]}_iter;\n"
 

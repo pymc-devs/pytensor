@@ -1328,7 +1328,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                 elif connected and not actually_connected:
                     msg = f"{node.op}.grad returned DisconnectedType for input {i}."
                     if hasattr(node.op, "connection_pattern"):
-                        msg += " Its connection_pattern method does not" " allow this."
+                        msg += " Its connection_pattern method does not allow this."
                         raise TypeError(msg)
                     else:
                         msg += (

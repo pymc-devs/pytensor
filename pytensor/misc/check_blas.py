@@ -111,7 +111,7 @@ parser.add_option(
     action="store_true",
     dest="quiet",
     default=False,
-    help="If true, do not print the comparison table and config " "options",
+    help="If true, do not print the comparison table and config options",
 )
 parser.add_option(
     "--print_only",
