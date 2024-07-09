@@ -440,9 +440,7 @@ def make_reordered_loop(
         }} // end loop {int(i)}
         """
 
-    return "\n".join(
-        ["{", order_loops, declare_totals, declare_strides, declare_iter, loop, "}\n"]
-    )
+    return f"{{\n{order_loops}\n{declare_totals}\n{declare_strides}\n{declare_iter}\n{loop}\n}}\n"
 
 
 # print make_declare(((0, 1, 2, 3), ('x', 1, 0, 3), ('x', 'x', 'x', 0)),

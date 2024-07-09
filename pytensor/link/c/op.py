@@ -451,7 +451,7 @@ class ExternalCOp(COp):
             code = self.code_sections["init_code_apply"]
 
             define_macros, undef_macros = self.get_c_macros(node, name)
-            return "\n".join(["", define_macros, code, undef_macros])
+            return f"\n{define_macros}\n{code}\n{undef_macros}"
         else:
             return super().c_init_code_apply(node, name)
 
@@ -460,7 +460,7 @@ class ExternalCOp(COp):
             code = self.code_sections["support_code_apply"]
 
             define_macros, undef_macros = self.get_c_macros(node, name)
-            return "\n".join(["", define_macros, code, undef_macros])
+            return f"\n{define_macros}\n{code}\n{undef_macros}"
         else:
             return super().c_support_code_apply(node, name)
 
@@ -469,7 +469,7 @@ class ExternalCOp(COp):
             code = self.code_sections["support_code_struct"]
 
             define_macros, undef_macros = self.get_c_macros(node, name)
-            return "\n".join(["", define_macros, code, undef_macros])
+            return f"\n{define_macros}\n{code}\n{undef_macros}"
         else:
             return super().c_support_code_struct(node, name)
 
@@ -478,7 +478,7 @@ class ExternalCOp(COp):
             code = self.code_sections["cleanup_code_struct"]
 
             define_macros, undef_macros = self.get_c_macros(node, name)
-            return "\n".join(["", define_macros, code, undef_macros])
+            return f"\n{define_macros}\n{code}\n{undef_macros}"
         else:
             return super().c_cleanup_code_struct(node, name)
 
@@ -561,9 +561,7 @@ class ExternalCOp(COp):
             def_macros, undef_macros = self.get_c_macros(node, name)
             def_sub, undef_sub = get_sub_macros(sub)
 
-            return "\n".join(
-                ["", def_macros, def_sub, op_code, undef_sub, undef_macros]
-            )
+            return f"\n{def_macros}\n{def_sub}\n{op_code}\n{undef_sub}\n{undef_macros}"
         else:
             return super().c_init_code_struct(node, name, sub)
 
@@ -597,16 +595,9 @@ class ExternalCOp(COp):
                 def_sub, undef_sub = get_sub_macros(sub)
                 def_io, undef_io = get_io_macros(inp, out)
 
-                return "\n".join(
-                    [
-                        def_macros,
-                        def_sub,
-                        def_io,
-                        op_code,
-                        undef_io,
-                        undef_sub,
-                        undef_macros,
-                    ]
+                return (
+                    f"{def_macros}\n{def_sub}\n{def_io}\n{op_code}"
+                    f"\n{undef_io}\n{undef_sub}\n{undef_macros}"
                 )
             else:
                 raise NotImplementedError()
@@ -620,16 +611,9 @@ class ExternalCOp(COp):
             def_sub, undef_sub = get_sub_macros(sub)
             def_io, undef_io = get_io_macros(inputs, outputs)
 
-            return "\n".join(
-                [
-                    def_macros,
-                    def_sub,
-                    def_io,
-                    op_code,
-                    undef_io,
-                    undef_sub,
-                    undef_macros,
-                ]
+            return (
+                f"{def_macros}\n{def_sub}\n{def_io}\n{op_code}"
+                f"\n{undef_io}\n{undef_sub}\n{undef_macros}"
             )
         else:
             return super().c_code_cleanup(node, name, inputs, outputs, sub)
