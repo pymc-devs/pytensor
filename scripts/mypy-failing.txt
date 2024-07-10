@@ -24,7 +24,6 @@ pytensor/tensor/random/basic.py
 pytensor/tensor/random/op.py
 pytensor/tensor/random/utils.py
 pytensor/tensor/rewriting/basic.py
-pytensor/tensor/slinalg.py
 pytensor/tensor/type.py
 pytensor/tensor/type_other.py
 pytensor/tensor/variable.py
