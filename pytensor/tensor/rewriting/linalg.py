@@ -404,19 +404,44 @@ def _find_diag_from_eye_mul(potential_mul_input):
     eye_input = [
         mul_input
         for mul_input in inputs_to_mul
-        if mul_input.owner and isinstance(mul_input.owner.op, Eye)
+        if mul_input.owner
+        and (
+            isinstance(mul_input.owner.op, Eye)
+            or
+            # This whole condition checks if there is an Eye hiding inside a DimShuffle.
+            # This arises from batched elementwise multiplication between a tensor and an eye, e.g.:
+            # tensor(shape=(None, 3, 3) * eye(3). This is still potentially valid for diag rewrites.
+            (
+                isinstance(mul_input.owner.op, DimShuffle)
+                and mul_input.owner.inputs[0].owner is not None
+                and isinstance(mul_input.owner.inputs[0].owner.op, Eye)
+            )
+        )
     ]
-
-    # Check if 1's are being put on the main diagonal only (k = 0)
-    if eye_input and getattr(eye_input[0].owner.inputs[-1], "data", -1).item() != 0:
+    if not eye_input:
         return None
 
-    # If the broadcast pattern of eye_input is not (False, False), we do not get a diagonal matrix and thus, dont need to apply the rewrite
-    if eye_input and eye_input[0].broadcastable[-2:] != (False, False):
+    eye_input = eye_input[0]
+
+    # If this multiplication came from a batched operation, it will be wrapped in a DimShuffle
+    if isinstance(eye_input.owner.op, DimShuffle):
+        inner_eye = eye_input.owner.inputs[0]
+        if not isinstance(inner_eye.owner.op, Eye):
+            return None
+        # Check if 1's are being put on the main diagonal only (k = 0)
+        # and if the identity matrix is degenerate (column or row matrix)
+        if getattr(
+            inner_eye.owner.inputs[-1], "data", -1
+        ).item() != 0 or inner_eye.broadcastable[-2:] != (False, False):
+            return None
+
+    elif getattr(
+        eye_input.owner.inputs[-1], "data", -1
+    ).item() != 0 or eye_input.broadcastable[-2:] != (False, False):
         return None
 
     # Get all non Eye inputs (scalars/matrices/vectors)
-    non_eye_inputs = list(set(inputs_to_mul) - set(eye_input))
+    non_eye_inputs = list(set(inputs_to_mul) - {eye_input})
     return eye_input, non_eye_inputs
 
 
@@ -448,15 +473,22 @@ def rewrite_det_diag_to_prod_diag(fgraph, node):
     inputs = node.inputs[0]
 
     # Check for use of pt.diag first
-    if inputs.owner and isinstance(inputs.owner.op, AllocDiag2):
+    if (
+        inputs.owner
+        and isinstance(inputs.owner.op, AllocDiag2)
+        and inputs.owner.op.offset == 0
+    ):
         diag_input = inputs.owner.inputs[0]
+        diag_input.dprint()
         det_val = diag_input.prod(axis=-1)
         return [det_val]
 
     # Check if the input is an elemwise multiply with identity matrix -- this also results in a diagonal matrix
     inputs_or_none = _find_diag_from_eye_mul(inputs)
+
     if inputs_or_none is None:
         return None
+
     eye_input, non_eye_inputs = inputs_or_none
 
     # Dealing with only one other input

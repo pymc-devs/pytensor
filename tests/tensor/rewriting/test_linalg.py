@@ -396,20 +396,26 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
 
 @pytest.mark.parametrize(
     "shape",
-    [(), (7,), (1, 7), (7, 1), (7, 7), (3, 7, 7)],
+    [(), (7,), (1, 7), (7, 1), (7, 7), pytest.param((3, 7, 7))],
     ids=["scalar", "vector", "row_vec", "col_vec", "matrix", "batched_input"],
 )
 def test_det_diag_from_eye_mul(shape):
     # Initializing x based on scalar/vector/matrix
     x = pt.tensor("x", shape=shape)
     y = pt.eye(7) * x
+
     # Calculating determinant value using pt.linalg.det
     z_det = pt.linalg.det(y)
 
     # REWRITE TEST
-    f_rewritten = function([x], z_det, mode="FAST_RUN")
+    with pytensor.config.change_flags(optimizer_verbose=True):
+        f_rewritten = function([x], z_det, mode="FAST_RUN")
     nodes = f_rewritten.maker.fgraph.apply_nodes
-    assert not any(isinstance(node.op, Det) for node in nodes)
+
+    assert not any(
+        isinstance(node.op, Det) or isinstance(getattr(node.op, "core_op", None), Det)
+        for node in nodes
+    )
 
     # NUMERIC VALUE TEST
     if len(shape) == 0:
@@ -418,6 +424,7 @@ def test_det_diag_from_eye_mul(shape):
         x_test = np.random.rand(*shape).astype(config.floatX)
     else:
         x_test = np.random.rand(*shape).astype(config.floatX)
+
     x_test_matrix = np.eye(7) * x_test
     det_val = np.linalg.det(x_test_matrix)
     rewritten_val = f_rewritten(x_test)
