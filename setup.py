@@ -1,9 +1,12 @@
 #!/usr/bin/env python
+import os
+
 import numpy
 from setuptools import Extension, setup
 from setuptools.dist import Distribution
-import os
+
 import versioneer
+
 
 dist = Distribution()
 dist.parse_config_files()
@@ -11,7 +14,7 @@ dist.parse_config_files()
 NAME = dist.get_name()  # type: ignore
 
 # Check if building for Pyodide
-is_pyodide = os.getenv('PYODIDE', '0') == '1'
+is_pyodide = os.getenv("PYODIDE", "0") == "1"
 
 # Define the ext_modules conditionally
 ext_modules = []
