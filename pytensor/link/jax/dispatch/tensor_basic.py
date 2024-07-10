@@ -216,6 +216,7 @@ def jax_funcify_Tri(op, node, **kwargs):
 def eagerly_inline_alloc_diag(fgraph, node):
     """
     Inline `AllocDiag2` OpFromGraph into the graph so the component Ops can themselves be jaxified
+
     Parameters
     ----------
     fgraph: FunctionGraph

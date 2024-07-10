@@ -396,7 +396,7 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
 
 @pytest.mark.parametrize(
     "shape",
-    [(), (7,), (1, 7), (7, 1), (7, 7), pytest.param((3, 7, 7))],
+    [(), (7,), (1, 7), (7, 1), (7, 7), (3, 7, 7)],
     ids=["scalar", "vector", "row_vec", "col_vec", "matrix", "batched_input"],
 )
 def test_det_diag_from_eye_mul(shape):

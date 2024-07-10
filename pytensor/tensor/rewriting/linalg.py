@@ -479,7 +479,6 @@ def rewrite_det_diag_to_prod_diag(fgraph, node):
         and inputs.owner.op.offset == 0
     ):
         diag_input = inputs.owner.inputs[0]
-        diag_input.dprint()
         det_val = diag_input.prod(axis=-1)
         return [det_val]
 
