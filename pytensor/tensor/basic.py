@@ -3837,6 +3837,17 @@ class AllocDiag2(OpFromGraph):
     Wrapper Op for alloc_diag graphs
     """
 
+    __props__ = ("offset", "axis1", "axis2", "inline")
+
+    def __init__(self, *args, offset, axis1, axis2, **kwargs):
+        inline = kwargs.pop("inline", False)
+        self.offset = offset
+        self.axis1 = axis1
+        self.axis2 = axis2
+        self.inline = inline
+
+        super().__init__(*args, **kwargs, strict=True, inline=inline)
+
 
 def alloc_diag(diag, offset=0, axis1=0, axis2=1):
     """Insert a vector on the diagonal of a zero-ed matrix.
@@ -3872,7 +3883,9 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
         axes = axes[:axis2] + [last_idx + 2] + axes[axis2:]
         result = result.transpose(axes)
 
-    return AllocDiag2(inputs=[diag], outputs=[result])(diag)
+    return AllocDiag2(
+        inputs=[diag], outputs=[result], offset=offset, axis1=axis1, axis2=axis2
+    )(diag)
 
 
 def diag(v, k=0):
