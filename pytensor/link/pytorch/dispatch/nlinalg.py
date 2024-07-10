@@ -1,8 +1,6 @@
 import torch
 
 from pytensor.link.pytorch.dispatch import pytorch_funcify
-from pytensor.tensor.blas import BatchedDot
-from pytensor.tensor.math import Argmax, Dot, Max
 from pytensor.tensor.nlinalg import (
     SVD,
     Det,
@@ -85,14 +83,6 @@ def pytorch_funcify_QRFull(op, **kwargs):
     return qr_full
 
 
-@pytorch_funcify.register(Dot)
-def pytorch_funcify_Dot(op, **kwargs):
-    def dot(x, y):
-        return torch.dot(x, y)
-
-    return dot
-
-
 @pytorch_funcify.register(MatrixPinv)
 def pytorch_funcify_Pinv(op, **kwargs):
     hermitian = op.hermitian
@@ -103,71 +93,9 @@ def pytorch_funcify_Pinv(op, **kwargs):
     return pinv
 
 
-@pytorch_funcify.register(BatchedDot)
-def pytorch_funcify_BatchedDot(op, **kwargs):
-    def batched_dot(a, b):
-        if a.shape[0] != b.shape[0]:
-            raise TypeError("Shapes must match in the 0-th dimension")
-        return torch.matmul(a, b)
-
-    return batched_dot
-
-
 @pytorch_funcify.register(KroneckerProduct)
 def pytorch_funcify_KroneckerProduct(op, **kwargs):
     def _kron(x, y):
         return torch.kron(x, y)
 
     return _kron
-
-
-@pytorch_funcify.register(Max)
-def pytorch_funcify_Max(op, **kwargs):
-    axis = op.axis
-
-    def max(x):
-        if axis is None:
-            max_res = torch.max(x.flatten())
-            return max_res
-
-        # PyTorch doesn't support multiple axes for max;
-        # this is a work-around
-        axes = [int(ax) for ax in axis]
-
-        new_dim = torch.prod(torch.tensor([x.size(ax) for ax in axes])).item()
-        keep_axes = [i for i in range(x.ndim) if i not in axes]
-        permute_order = keep_axes + axes
-        permuted_x = x.permute(*permute_order)
-        kept_shape = permuted_x.shape[: len(keep_axes)]
-
-        new_shape = (*kept_shape, new_dim)
-        reshaped_x = permuted_x.reshape(new_shape)
-        max_res, _ = torch.max(reshaped_x, dim=-1)
-        return max_res
-
-    return max
-
-
-@pytorch_funcify.register(Argmax)
-def pytorch_funcify_Argmax(op, **kwargs):
-    axis = op.axis
-
-    def argmax(x):
-        if axis is None:
-            return torch.argmax(x.view(-1))
-
-        # PyTorch doesn't support multiple axes for argmax;
-        # this is a work-around
-        axes = [int(ax) for ax in axis]
-
-        new_dim = torch.prod(torch.tensor([x.size(ax) for ax in axes])).item()
-        keep_axes = [i for i in range(x.ndim) if i not in axes]
-        permute_order = keep_axes + axes
-        permuted_x = x.permute(*permute_order)
-        kept_shape = permuted_x.shape[: len(keep_axes)]
-
-        new_shape = (*kept_shape, new_dim)
-        reshaped_x = permuted_x.reshape(new_shape)
-        return torch.argmax(reshaped_x, dim=-1)
-
-    return argmax

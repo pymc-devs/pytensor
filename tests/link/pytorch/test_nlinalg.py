@@ -4,11 +4,8 @@ import pytest
 from pytensor.compile.function import function
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import get_test_value
-from pytensor.tensor import blas as pt_blas
 from pytensor.tensor import nlinalg as pt_nla
-from pytensor.tensor.math import argmax, dot, max
-from pytensor.tensor.type import matrix, tensor3, vector
+from pytensor.tensor.type import matrix
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 
 
@@ -21,27 +18,6 @@ def matrix_test():
 
     x = matrix("x")
     return (x, test_value)
-
-
-def test_BatchedDot():
-    # tensor3 . tensor3
-    a = tensor3("a")
-    a.tag.test_value = (
-        np.linspace(-1, 1, 10 * 5 * 3).astype(config.floatX).reshape((10, 5, 3))
-    )
-    b = tensor3("b")
-    b.tag.test_value = (
-        np.linspace(1, -1, 10 * 3 * 2).astype(config.floatX).reshape((10, 3, 2))
-    )
-    out = pt_blas.BatchedDot()(a, b)
-    fgraph = FunctionGraph([a, b], [out])
-    compare_pytorch_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
-
-    # A dimension mismatch should raise a TypeError for compatibility
-    inputs = [get_test_value(a)[:-1], get_test_value(b)]
-    pytensor_jax_fn = function(fgraph.inputs, fgraph.outputs, mode="PYTORCH")
-    with pytest.raises(TypeError):
-        pytensor_jax_fn(*inputs)
 
 
 @pytest.mark.parametrize(
@@ -147,24 +123,3 @@ def test_kron():
     y_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
 
     compare_pytorch_and_py(fgraph, [x_np, y_np])
-
-
-@pytest.mark.parametrize("func", (max, argmax))
-@pytest.mark.parametrize("axis", [None, [0], [0, 1], [0, 2], [0, 1, 2]])
-def test_max_and_argmax(func, axis):
-    x = tensor3("x")
-    np.random.seed(42)
-    test_value = np.random.randint(0, 20, (4, 3, 2))
-
-    out = func(x, axis=axis)
-    out_fg = FunctionGraph([x], [out])
-    compare_pytorch_and_py(out_fg, [test_value])
-
-
-def test_dot():
-    x = vector("x")
-    test_value = np.array([1, 2, 3])
-
-    out = dot(x, x)
-    out_fg = FunctionGraph([x], [out])
-    compare_pytorch_and_py(out_fg, [test_value])
