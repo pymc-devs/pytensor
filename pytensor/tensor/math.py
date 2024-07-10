@@ -1590,6 +1590,10 @@ def median(input, axis=None):
     """
     from pytensor.ifelse import ifelse
 
+    if axis is None:
+        input = input.flatten()
+        axis = 0
+
     input = as_tensor_variable(input)
     sorted_input = input.sort(axis=axis)
     shape = input.shape[axis]
