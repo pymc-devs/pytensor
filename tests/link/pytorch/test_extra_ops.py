@@ -67,15 +67,11 @@ def test_pytorch_Unique_axis(axis):
     compare_pytorch_and_py(fgraph, [test_value])
 
 
+@pytest.mark.parametrize("return_inverse", [False, True])
+@pytest.mark.parametrize("return_counts", [False, True])
 @pytest.mark.parametrize(
-    "return_index, return_inverse, return_counts",
-    [
-        (False, True, False),
-        (False, True, True),
-        pytest.param(
-            True, False, False, marks=pytest.mark.xfail(raises=NotImplementedError)
-        ),
-    ],
+    "return_index",
+    (False, pytest.param(True, marks=pytest.mark.xfail(raises=NotImplementedError))),
 )
 def test_pytorch_Unique_params(return_index, return_inverse, return_counts):
     a = pt.matrix("a", dtype="float64")
