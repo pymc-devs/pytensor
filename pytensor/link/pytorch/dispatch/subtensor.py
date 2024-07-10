@@ -33,6 +33,6 @@ def pytorch_funcify_Subtensor(op, node, **kwargs):
         if len(indices) == 1:
             indices = indices[0]
 
-        return x[*new_indices]
+        return x[tuple(new_indices)]
 
     return subtensor
