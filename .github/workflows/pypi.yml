@@ -74,7 +74,7 @@ jobs:
 
       - name: Build universal wheel
         run: |
-          PYODIDE=1 venv-sdist/bin/python setup.py bdist_wheel --universal
+          PYODIDE=1 python setup.py bdist_wheel --universal
 
       - uses: actions/upload-artifact@v3
         with:
