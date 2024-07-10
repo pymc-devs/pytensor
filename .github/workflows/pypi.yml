@@ -11,13 +11,10 @@ on:
 
 # Cancels all previous workflow runs for pull requests that have not completed.
 concurrency:
-  # The concurrency group contains the workflow name and the branch name for pull requests
-  # or the commit hash for any other events.
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
   cancel-in-progress: true
 
 jobs:
-  # The job to build precompiled pypi wheels.
   make_sdist:
     name: Make SDist
     runs-on: ubuntu-latest
@@ -56,6 +53,31 @@ jobs:
         with:
           name: wheels-${{ matrix.platform }}
           path: ./wheelhouse/*.whl
+
+  build_universal_wheel:
+    name: Build universal wheel for Pyodide
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install numpy versioneer
+
+      - name: Build universal wheel
+        run: |
+          PYODIDE=1 python setup.py bdist_wheel --universal
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: universal_wheel
+          path: dist/*.whl
 
   check_dist:
     name: Check dist
@@ -102,6 +124,11 @@ jobs:
           pattern: wheels-*
           path: dist
           merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: universal_wheel
+          path: dist
 
       - uses: pypa/gh-action-pypi-publish@v1.9.0
         with:
