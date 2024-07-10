@@ -11,7 +11,6 @@ pytensor/link/numba/dispatch/elemwise.py
 pytensor/link/numba/dispatch/scan.py
 pytensor/printing.py
 pytensor/raise_op.py
-pytensor/scalar/basic.py
 pytensor/sparse/basic.py
 pytensor/sparse/type.py
 pytensor/tensor/basic.py
