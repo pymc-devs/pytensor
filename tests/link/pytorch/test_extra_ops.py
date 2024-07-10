@@ -43,18 +43,29 @@ def test_pytorch_CumOp(axis, dtype):
         compare_pytorch_and_py(fgraph, [test_value])
 
 
-@pytest.mark.parametrize("axis", [0, 1])
-def test_pytorch_Repeat(axis):
+@pytest.mark.parametrize(
+    "axis, repeats",
+    [
+        (0, (1, 2, 3)),
+        (1, (3, 3)),
+        pytest.param(
+            None,
+            3,
+            marks=pytest.mark.xfail(reason="Reshape not implemented"),
+        ),
+    ],
+)
+def test_pytorch_Repeat(axis, repeats):
     a = pt.matrix("a", dtype="float64")
 
     test_value = np.arange(6, dtype="float64").reshape((3, 2))
 
-    out = pt.repeat(a, (1, 2, 3) if axis == 0 else (3, 3), axis=axis)
+    out = pt.repeat(a, repeats, axis=axis)
     fgraph = FunctionGraph([a], [out])
     compare_pytorch_and_py(fgraph, [test_value])
 
 
-@pytest.mark.parametrize("axis", [0, 1])
+@pytest.mark.parametrize("axis", [None, 0, 1])
 def test_pytorch_Unique_axis(axis):
     a = pt.matrix("a", dtype="float64")
 
