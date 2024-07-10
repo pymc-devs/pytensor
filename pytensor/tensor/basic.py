@@ -21,6 +21,7 @@ import pytensor
 import pytensor.scalar.sharedvar
 from pytensor import compile, config, printing
 from pytensor import scalar as ps
+from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType, grad_undefined
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Apply, Constant, Variable, equal_computations
@@ -3831,6 +3832,12 @@ class AllocDiag(Op):
             self.axis2 = 1
 
 
+class AllocDiag2(OpFromGraph):
+    """
+    Wrapper Op for alloc_diag graphs
+    """
+
+
 def alloc_diag(diag, offset=0, axis1=0, axis2=1):
     """Insert a vector on the diagonal of a zero-ed matrix.
 
@@ -3865,7 +3872,7 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
         axes = axes[:axis2] + [last_idx + 2] + axes[axis2:]
         result = result.transpose(axes)
 
-    return result
+    return AllocDiag2(inputs=[diag], outputs=[result])(diag)
 
 
 def diag(v, k=0):
