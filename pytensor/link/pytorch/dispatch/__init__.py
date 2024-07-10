@@ -9,5 +9,5 @@ import pytensor.link.pytorch.dispatch.math
 import pytensor.link.pytorch.dispatch.extra_ops
 import pytensor.link.pytorch.dispatch.shape
 import pytensor.link.pytorch.dispatch.sort
-
+import pytensor.link.pytorch.dispatch.nlinalg
 # isort: on
