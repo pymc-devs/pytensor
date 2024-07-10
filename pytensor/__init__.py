@@ -28,7 +28,10 @@ from functools import singledispatch
 from pathlib import Path
 from typing import Any, NoReturn, Optional
 
-from pytensor.version import version as __version__
+from pytensor import _version
+
+
+__version__: str = _version.get_versions()["version"]
 
 
 pytensor_logger = logging.getLogger("pytensor")

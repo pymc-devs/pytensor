@@ -28,3 +28,4 @@ pytensor/tensor/slinalg.py
 pytensor/tensor/type.py
 pytensor/tensor/type_other.py
 pytensor/tensor/variable.py
+pytensor/_version.py
