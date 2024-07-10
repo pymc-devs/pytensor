@@ -5,12 +5,16 @@ from typing import cast
 from pytensor import Variable
 from pytensor.graph import Apply, FunctionGraph
 from pytensor.graph.rewriting.basic import (
-    PatternNodeRewriter,
     copy_stack_trace,
     node_rewriter,
 )
 from pytensor.scalar.basic import Mul
-from pytensor.tensor.basic import ARange, Eye, TensorVariable, alloc, diagonal
+from pytensor.tensor.basic import (
+    AllocDiag2,
+    Eye,
+    TensorVariable,
+    diagonal,
+)
 from pytensor.tensor.blas import Dot22
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
@@ -41,7 +45,6 @@ from pytensor.tensor.slinalg import (
     solve,
     solve_triangular,
 )
-from pytensor.tensor.subtensor import advanced_set_subtensor
 
 
 logger = logging.getLogger(__name__)
@@ -420,11 +423,15 @@ def _find_diag_from_eye_mul(potential_mul_input):
 @register_canonicalize("shape_unsafe")
 @register_stabilize("shape_unsafe")
 @node_rewriter([det])
-def rewrite_det_diag_from_eye_mul(fgraph, node):
+def rewrite_det_diag_to_prod_diag(fgraph, node):
     """
-     This rewrite takes advantage of the fact that for a diagonal matrix, the determinant value is the product of its diagonal elements.
+     This rewrite takes advantage of the fact that for a diagonal matrix, the determinant value is the product of its
+     diagonal elements.
 
-    The presence of a diagonal matrix is detected by inspecting the graph. This rewrite can identify diagonal matrices that arise as the result of elementwise multiplication with an identity matrix. Specialized computation is used to make this rewrite as efficient as possible, depending on whether the multiplication was with a scalar, vector or a matrix.
+    The presence of a diagonal matrix is detected by inspecting the graph. This rewrite can identify diagonal matrices
+    that arise as the result of elementwise multiplication with an identity matrix. Specialized computation is used to
+    make this rewrite as efficient as possible, depending on whether the multiplication was with a scalar,
+    vector or a matrix.
 
     Parameters
     ----------
@@ -438,51 +445,38 @@ def rewrite_det_diag_from_eye_mul(fgraph, node):
     list of Variable, optional
         List of optimized variables, or None if no optimization was performed
     """
-    potential_mul_input = node.inputs[0]
-    eye_non_eye_inputs = _find_diag_from_eye_mul(potential_mul_input)
-    if eye_non_eye_inputs is None:
+    inputs = node.inputs[0]
+
+    # Check for use of pt.diag first
+    if inputs.owner and isinstance(inputs.owner.op, AllocDiag2):
+        diag_input = inputs.owner.inputs[0]
+        det_val = diag_input.prod(axis=-1)
+        return [det_val]
+
+    # Check if the input is an elemwise multiply with identity matrix -- this also results in a diagonal matrix
+    inputs_or_none = _find_diag_from_eye_mul(inputs)
+    if inputs_or_none is None:
         return None
-    eye_input, non_eye_inputs = eye_non_eye_inputs
+    eye_input, non_eye_inputs = inputs_or_none
 
     # Dealing with only one other input
     if len(non_eye_inputs) != 1:
         return None
 
-    useful_eye, useful_non_eye = eye_input[0], non_eye_inputs[0]
+    eye_input, non_eye_input = eye_input[0], non_eye_inputs[0]
 
     # Checking if original x was scalar/vector/matrix
-    if useful_non_eye.type.broadcastable[-2:] == (True, True):
+    if non_eye_input.type.broadcastable[-2:] == (True, True):
         # For scalar
-        det_val = useful_non_eye.squeeze(axis=(-1, -2)) ** (useful_eye.shape[0])
-    elif useful_non_eye.type.broadcastable[-2:] == (False, False):
+        det_val = non_eye_input.squeeze(axis=(-1, -2)) ** (eye_input.shape[0])
+    elif non_eye_input.type.broadcastable[-2:] == (False, False):
         # For Matrix
-        det_val = useful_non_eye.diagonal(axis1=-1, axis2=-2).prod(axis=-1)
+        det_val = non_eye_input.diagonal(axis1=-1, axis2=-2).prod(axis=-1)
     else:
         # For vector
-        det_val = useful_non_eye.prod(axis=(-1, -2))
+        det_val = non_eye_input.prod(axis=(-1, -2))
     det_val = det_val.astype(node.outputs[0].type.dtype)
     return [det_val]
-
-
-arange = ARange("int64")
-det_diag_from_diag = PatternNodeRewriter(
-    (
-        det,
-        (
-            advanced_set_subtensor,
-            (alloc, 0, "sh1", "sh2"),
-            "x",
-            (arange, 0, "stop", 1),
-            (arange, 0, "stop", 1),
-        ),
-    ),
-    (prod, "x"),
-    name="det_diag_from_diag",
-    allow_multiple_clients=True,
-)
-register_canonicalize(det_diag_from_diag)
-register_stabilize(det_diag_from_diag)
-register_specialize(det_diag_from_diag)
 
 
 @register_canonicalize
