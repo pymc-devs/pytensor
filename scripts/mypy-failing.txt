@@ -6,7 +6,6 @@ pytensor/compile/mode.py
 pytensor/compile/sharedvalue.py
 pytensor/graph/rewriting/basic.py
 pytensor/ifelse.py
-pytensor/link/basic.py
 pytensor/link/numba/dispatch/elemwise.py
 pytensor/link/numba/dispatch/scan.py
 pytensor/printing.py
