@@ -909,6 +909,7 @@ def ancestors(
     def expand(r: Variable) -> Iterator[Variable] | None:
         if r.owner and (not blockers or r not in blockers):
             return reversed(r.owner.inputs)
+        return None
 
     yield from cast(Generator[Variable, None, None], walk(graphs, expand, False))
 
@@ -1011,6 +1012,7 @@ def vars_between(
     def expand(r: Variable) -> Iterable[Variable] | None:
         if r.owner and r not in ins:
             return reversed(r.owner.inputs + r.owner.outputs)
+        return None
 
     yield from cast(Generator[Variable, None, None], walk(outs, expand))
 
@@ -2039,13 +2041,15 @@ def get_var_by_name(
     from pytensor.graph.op import HasInnerGraph
 
     def expand(r) -> list[Variable] | None:
-        if r.owner:
-            res = list(r.owner.inputs)
+        if not r.owner:
+            return None
 
-            if isinstance(r.owner.op, HasInnerGraph):
-                res.extend(r.owner.op.inner_outputs)
+        res = list(r.owner.inputs)
 
-            return res
+        if isinstance(r.owner.op, HasInnerGraph):
+            res.extend(r.owner.op.inner_outputs)
+
+        return res
 
     results: tuple[Variable, ...] = ()
     for var in walk(graphs, expand, False):
