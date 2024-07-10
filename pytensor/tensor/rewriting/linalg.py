@@ -355,34 +355,37 @@ def local_lift_through_linalg(
     """
 
     # TODO: Simplify this if we end up Blockwising KroneckerProduct
-    if isinstance(node.op.core_op, MatrixInverse | Cholesky | MatrixPinv):
-        y = node.inputs[0]
-        outer_op = node.op
+    if not isinstance(node.op.core_op, MatrixInverse | Cholesky | MatrixPinv):
+        return None
 
-        if y.owner and (
-            isinstance(y.owner.op, Blockwise)
-            and isinstance(y.owner.op.core_op, BlockDiagonal)
-            or isinstance(y.owner.op, KroneckerProduct)
-        ):
-            input_matrices = y.owner.inputs
+    y = node.inputs[0]
+    outer_op = node.op
 
-            if isinstance(outer_op.core_op, MatrixInverse):
-                outer_f = cast(Callable, inv)
-            elif isinstance(outer_op.core_op, Cholesky):
-                outer_f = cast(Callable, cholesky)
-            elif isinstance(outer_op.core_op, MatrixPinv):
-                outer_f = cast(Callable, pinv)
-            else:
-                raise NotImplementedError  # pragma: no cover
+    if y.owner and (
+        isinstance(y.owner.op, Blockwise)
+        and isinstance(y.owner.op.core_op, BlockDiagonal)
+        or isinstance(y.owner.op, KroneckerProduct)
+    ):
+        input_matrices = y.owner.inputs
 
-            inner_matrices = [cast(TensorVariable, outer_f(m)) for m in input_matrices]
+        if isinstance(outer_op.core_op, MatrixInverse):
+            outer_f = cast(Callable, inv)
+        elif isinstance(outer_op.core_op, Cholesky):
+            outer_f = cast(Callable, cholesky)
+        elif isinstance(outer_op.core_op, MatrixPinv):
+            outer_f = cast(Callable, pinv)
+        else:
+            raise NotImplementedError  # pragma: no cover
 
-            if isinstance(y.owner.op, KroneckerProduct):
-                return [kron(*inner_matrices)]
-            elif isinstance(y.owner.op.core_op, BlockDiagonal):
-                return [block_diag(*inner_matrices)]
-            else:
-                raise NotImplementedError  # pragma: no cover
+        inner_matrices = [cast(TensorVariable, outer_f(m)) for m in input_matrices]
+
+        if isinstance(y.owner.op, KroneckerProduct):
+            return [kron(*inner_matrices)]
+        elif isinstance(y.owner.op.core_op, BlockDiagonal):
+            return [block_diag(*inner_matrices)]
+        else:
+            raise NotImplementedError  # pragma: no cover
+    return None
 
 
 def _find_diag_from_eye_mul(potential_mul_input):

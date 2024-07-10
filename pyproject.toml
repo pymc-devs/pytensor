@@ -156,17 +156,12 @@ lines-after-imports = 2
 [tool.mypy]
 python_version = "3.10"
 ignore_missing_imports = true
-no_implicit_optional = true
-check_untyped_defs = false
 strict_equality = true
 warn_redundant_casts = true
 warn_unused_configs = true
 warn_unused_ignores = true
 warn_return_any = true
-warn_no_return = false
 warn_unreachable = true
-show_error_codes = true
-allow_redefinition = false
 files = ["pytensor", "tests"]
 plugins = ["numpy.typing.mypy_plugin"]
 
