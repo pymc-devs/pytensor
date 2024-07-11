@@ -599,7 +599,7 @@ def rewrite_inv_inv(fgraph, node):
     valid_solves = (Solve, SolveTriangular)
     # Check if its a valid inverse operation (either inv/pinv or if its solve, then b = eye)
     inv_check = False
-    if hasattr(node.op, "core_op") and isinstance(node.op.core_op, valid_inverses):
+    if isinstance(node.op, Blockwise) and isinstance(node.op.core_op, valid_inverses):
         inv_check = True
         if isinstance(node.op.core_op, valid_solves):
             inv_check = _find_solve_with_eye(node)
@@ -613,7 +613,7 @@ def rewrite_inv_inv(fgraph, node):
 
     # Check if its a valid inverse operation (either inv/pinv or if its solve, then b = eye)
     inv_check = False
-    if hasattr(potential_inner_inv.op, "core_op") and isinstance(
+    if isinstance(potential_inner_inv.op, Blockwise) and isinstance(
         potential_inner_inv.op.core_op, valid_inverses
     ):
         inv_check = True
