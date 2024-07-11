@@ -70,7 +70,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install numpy versioneer
+        run: pip install numpy versioneer wheel
 
       - name: Build universal wheel
         run: |
