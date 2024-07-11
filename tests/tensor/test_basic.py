@@ -3549,11 +3549,11 @@ class TestGetUnderlyingScalarConstantValue:
         a = Assert()(c, c > 1)
         assert get_underlying_scalar_constant_value(a) == 2
 
-        with config.change_flags(compute_test_value="off"):
-            # condition is always False
-            a = Assert()(c, c > 2)
-            with pytest.raises(NotScalarConstantError):
-                get_underlying_scalar_constant_value(a)
+        # with config.change_flags(compute_test_value="off"):
+        # condition is always False
+        a = Assert()(c, c > 2)
+        with pytest.raises(NotScalarConstantError):
+            get_underlying_scalar_constant_value(a)
 
         # condition is not constant
         a = Assert()(c, c > x)

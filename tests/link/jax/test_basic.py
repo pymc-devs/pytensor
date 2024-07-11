@@ -224,4 +224,3 @@ def test_OpFromGraph():
     zv = np.ones((2, 2), dtype=config.floatX) * 5
 
     compare_jax_and_py(out_fg, [xv, yv, zv])
-
