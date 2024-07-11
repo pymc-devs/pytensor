@@ -16,9 +16,11 @@ NAME = dist.get_name()  # type: ignore
 # Check if building for Pyodide
 is_pyodide = os.getenv("PYODIDE", "0") == "1"
 
-# Define the ext_modules conditionally
-ext_modules = []
-if not is_pyodide:
+if is_pyodide:
+    # For pyodide we build a universal wheel that must be pure-python
+    # so we must omit the cython-version of scan.
+    ext_modules = []
+else:
     ext_modules = [
         Extension(
             name="pytensor.scan.scan_perform",
