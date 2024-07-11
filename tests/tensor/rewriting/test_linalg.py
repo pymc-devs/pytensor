@@ -570,6 +570,7 @@ def test_inv_inv_rewrite(inv_op_1, inv_op_2):
     op1 = get_pt_function(x, inv_op_1)
     op2 = get_pt_function(op1, inv_op_2)
     f_rewritten = function([x], op2, mode="FAST_RUN")
+    print(f_rewritten.dprint())
     nodes = f_rewritten.maker.fgraph.apply_nodes
 
     valid_inverses = (MatrixInverse, MatrixPinv, Solve, SolveTriangular)
