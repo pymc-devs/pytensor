@@ -168,7 +168,6 @@ def test_test_value_op():
     assert np.allclose(v, np.zeros((5, 5)))
 
 
-@config.change_flags(compute_test_value="off")
 def test_get_test_values_no_debugger():
     """Tests that `get_test_values` returns `[]` when debugger is off."""
 

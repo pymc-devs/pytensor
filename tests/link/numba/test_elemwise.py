@@ -210,8 +210,8 @@ def test_Dimshuffle(v, new_order):
     compare_numba_and_py(
         g_fg,
         [
-            test_values[i]
-            for i in test_values
+            i.tag.test_value
+            for i in g_fg.inputs
             if not isinstance(i, SharedVariable | Constant)
         ],
     )

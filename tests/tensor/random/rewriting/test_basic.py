@@ -146,7 +146,6 @@ def test_inplace_rewrites(rv_op):
     assert check_stack_trace(f)
 
 
-@config.change_flags(compute_test_value="raise")
 @pytest.mark.parametrize(
     "dist_op, dist_params, size",
     [
@@ -417,7 +416,6 @@ def test_local_rv_size_lift(dist_op, dist_params, size):
         ),
     ],
 )
-@config.change_flags(compute_test_value_opt="raise", compute_test_value="raise")
 def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
     rng = shared(np.random.default_rng(1233532), borrow=False)
 
@@ -803,7 +801,6 @@ def rand_bool_mask(shape, rng=None):
         ),
     ],
 )
-@config.change_flags(compute_test_value_opt="raise", compute_test_value="raise")
 def test_Subtensor_lift(indices, lifted, dist_op, dist_params, size):
     from pytensor.tensor.subtensor import as_index_constant
 

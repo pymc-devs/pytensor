@@ -752,7 +752,6 @@ def test_dirichlet_infer_shape(M, size):
     assert tuple(rv_shape_val) == tuple(rv_val.shape)
 
 
-@config.change_flags(compute_test_value="raise")
 def test_dirichlet_ShapeFeature():
     """Make sure `RandomVariable.infer_shape` works with `ShapeFeature`."""
     with pytest.warns(FutureWarning):
@@ -1600,7 +1599,6 @@ def test_unnatural_batched_dims(batch_dims_tester):
     batch_dims_tester()
 
 
-@config.change_flags(compute_test_value="off")
 def test_pickle():
     # This is an interesting `Op` case, because it has a conditional dtype
     sample_a = choice(5, replace=False, size=(2, 3))
