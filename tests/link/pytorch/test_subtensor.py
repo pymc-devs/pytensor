@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor import subtensor as pt_subtensor
@@ -55,11 +56,13 @@ def test_pytorch_Subtensor():
     # compare_pytorch_and_py(out_fg, [x_np])
 
     # Flipping
-    # out_pt = x_pt[::-1]
-    # out_fg = FunctionGraph([x_pt], [out_pt])
-    # compare_pytorch_and_py(out_fg, [x_np])
+    with pytest.raises(
+        NotImplementedError, match="Negative step sizes are not supported in Pytorch"
+    ):
+        out_pt = x_pt[::-1]
+        out_fg = FunctionGraph([x_pt], [out_pt])
+        compare_pytorch_and_py(out_fg, [x_np])
 
-    # Boolean indexing should work if indexes are constant
     out_pt = x_pt[np.random.binomial(1, 0.5, size=(3, 4, 5)).astype(bool)]
     out_fg = FunctionGraph([x_pt], [out_pt])
     compare_pytorch_and_py(out_fg, [x_np])
