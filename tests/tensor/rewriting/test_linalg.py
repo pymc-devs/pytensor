@@ -94,7 +94,9 @@ def test_transinv_to_invtrans():
     X = matrix("X")
     Y = matrix_inverse(X)
     Z = Y.transpose()
+    print(Z.dprint())
     f = pytensor.function([X], Z)
+    print(f.dprint())
     if config.mode != "FAST_COMPILE":
         for node in f.maker.fgraph.toposort():
             if isinstance(node.op, MatrixInverse):

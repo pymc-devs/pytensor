@@ -595,6 +595,7 @@ def _find_solve_with_eye(node):
 @register_stabilize
 @node_rewriter([Blockwise])
 def rewrite_inv_inv(fgraph, node):
+    print(f"NODE - {node}")
     valid_inverses = (MatrixInverse, MatrixPinv, Solve, SolveTriangular)
     valid_solves = (Solve, SolveTriangular)
     # Check if Solve has b = eye
@@ -609,9 +610,15 @@ def rewrite_inv_inv(fgraph, node):
         return None
 
     potential_inner_inv = node.inputs[0].owner
+    if potential_inner_inv is None:
+        return None
     # Check if its an inner solve as well, does that have b = eye
     solve_inv_check = True
-    if isinstance(potential_inner_inv.op.core_op, valid_solves):
+    if potential_inner_inv.op and isinstance(potential_inner_inv.op, DimShuffle):
+        return None
+    if potential_inner_inv.op.core_op and isinstance(
+        potential_inner_inv.op.core_op, valid_solves
+    ):
         solve_inv_check = _find_solve_with_eye(potential_inner_inv)
     if not solve_inv_check:
         return None
