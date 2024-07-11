@@ -879,7 +879,7 @@ class BaseBlockDiagonal(Op):
     __props__ = ("n_inputs",)
 
     def __init__(self, n_inputs):
-        input_sig = ",".join([f"(m{i},n{i})" for i in range(n_inputs)])
+        input_sig = ",".join(f"(m{i},n{i})" for i in range(n_inputs))
         self.gufunc_signature = f"{input_sig}->(m,n)"
 
         if n_inputs == 0:
@@ -963,10 +963,10 @@ def block_diag(*matrices: TensorVariable):
 
         result = block_diagonal(A, B, name='X')
         print(result.eval())
-        >>> Out: array([[1, 2, 0, 0],
-        >>>             [3, 4, 0, 0],
-        >>>             [0, 0, 5, 6],
-        >>>             [0, 0, 7, 8]])
+        Out: array([[1, 2, 0, 0],
+                     [3, 4, 0, 0],
+                     [0, 0, 5, 6],
+                     [0, 0, 7, 8]])
     """
     _block_diagonal_matrix = Blockwise(BlockDiagonal(n_inputs=len(matrices)))
     return _block_diagonal_matrix(*matrices)

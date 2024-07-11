@@ -11,6 +11,7 @@ import pytensor
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant
 from pytensor.graph.features import AlreadyThere, Bookkeeper
+from pytensor.graph.fg import Output
 from pytensor.graph.utils import InconsistencyError
 from pytensor.misc.ordered_set import OrderedSet
 
@@ -181,7 +182,7 @@ def _build_droot_impact(destroy_handler):
     root_destroyer = {}  # root -> destroyer apply
 
     for app in destroy_handler.destroyers:
-        for output_idx, input_idx_list in app.op.destroy_map.items():
+        for input_idx_list in app.op.destroy_map.values():
             if len(input_idx_list) != 1:
                 raise NotImplementedError()
             input_idx = input_idx_list[0]
@@ -401,13 +402,11 @@ class DestroyHandler(Bookkeeper):
             def recursive_destroys_finder(protected_var):
                 # protected_var is the idx'th input of app.
                 for app, idx in fgraph.clients[protected_var]:
-                    if app == "output":
-                        continue
                     destroy_maps = app.op.destroy_map.values()
                     # If True means that the apply node, destroys the protected_var.
                     if idx in [dmap for sublist in destroy_maps for dmap in sublist]:
                         return True
-                    for var_idx in app.op.view_map.keys():
+                    for var_idx in app.op.view_map:
                         if idx in app.op.view_map[var_idx]:
                             # We need to recursively check the destroy_map of all the
                             # outputs that we have a view_map on.
@@ -578,7 +577,7 @@ class DestroyHandler(Bookkeeper):
         app.inputs[i] changed from old_r to new_r.
 
         """
-        if app == "output":
+        if isinstance(app.op, Output):
             # app == 'output' is special key that means FunctionGraph is redefining which nodes are being
             # considered 'outputs' of the graph.
             pass
@@ -699,7 +698,7 @@ class DestroyHandler(Bookkeeper):
                 # keep track of clients that should run before the current Apply
                 root_clients = set_type()
                 # for each destroyed input...
-                for output_idx, input_idx_list in app.op.destroy_map.items():
+                for input_idx_list in app.op.destroy_map.values():
                     destroyed_idx = input_idx_list[0]
                     destroyed_variable = app.inputs[destroyed_idx]
                     root = droot[destroyed_variable]

@@ -254,7 +254,7 @@ def searchsorted(x, v, side="left", sorter=None):
     --------
     >>> from pytensor import tensor as pt
     >>> from pytensor.tensor import extra_ops
-    >>> x = ptb.dvector()
+    >>> x = pt.dvector("x")
     >>> idx = x.searchsorted(3)
     >>> idx.eval({x: [1,2,3,4,5]})
     array(2)
@@ -1167,12 +1167,12 @@ class Unique(Op):
     >>> x = pytensor.tensor.vector()
     >>> f = pytensor.function([x], Unique(True, True, False)(x))
     >>> f([1, 2., 3, 4, 3, 2, 1.])
-    [array([ 1.,  2.,  3.,  4.]), array([0, 1, 2, 3]), array([0, 1, 2, 3, 2, 1, 0])]
+    [array([1., 2., 3., 4.]), array([0, 1, 2, 3]), array([0, 1, 2, 3, 2, 1, 0])]
 
     >>> y = pytensor.tensor.matrix()
     >>> g = pytensor.function([y], Unique(True, True, False)(y))
     >>> g([[1, 1, 1.0], (2, 3, 3.0)])
-    [array([ 1.,  2.,  3.]), array([0, 3, 4]), array([0, 0, 0, 1, 2, 2])]
+    [array([1., 2., 3.]), array([0, 3, 4]), array([0, 0, 0, 1, 2, 2])]
 
     """
 
@@ -1248,7 +1248,7 @@ class Unique(Op):
                     f"Unique axis `{self.axis}` is outside of input ndim = {ndim}."
                 )
             ret[0] = tuple(
-                [fgraph.shape_feature.shape_ir(i, node.outputs[0]) for i in range(ndim)]
+                fgraph.shape_feature.shape_ir(i, node.outputs[0]) for i in range(ndim)
             )
         if self.return_inverse:
             if self.axis is None:

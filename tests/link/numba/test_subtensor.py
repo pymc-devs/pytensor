@@ -19,7 +19,7 @@ from pytensor.tensor.subtensor import (
     inc_subtensor,
     set_subtensor,
 )
-from tests.link.numba.test_basic import compare_numba_and_py
+from tests.link.numba.test_basic import compare_numba_and_py, numba_mode
 
 
 rng = np.random.default_rng(sum(map(ord, "Numba subtensors")))
@@ -74,6 +74,7 @@ def test_AdvancedSubtensor1_out_of_bounds():
 @pytest.mark.parametrize(
     "x, indices, objmode_needed",
     [
+        # Single vector indexing (supported natively by Numba)
         (
             as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             (0, [1, 2, 2, 3]),
@@ -84,15 +85,52 @@ def test_AdvancedSubtensor1_out_of_bounds():
             (np.array([True, False, False])),
             False,
         ),
+        (pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), ([1, 2], [2, 3]), True),
+        # Single multidimensional indexing (supported after specialization rewrites)
+        (
+            as_tensor(np.arange(3 * 3).reshape((3, 3))),
+            (np.eye(3).astype(int)),
+            False,
+        ),
         (
             as_tensor(np.arange(3 * 3).reshape((3, 3))),
             (np.eye(3).astype(bool)),
+            False,
+        ),
+        (
+            as_tensor(np.arange(3 * 3 * 2).reshape((3, 3, 2))),
+            (np.eye(3).astype(int)),
+            False,
+        ),
+        (
+            as_tensor(np.arange(3 * 3 * 2).reshape((3, 3, 2))),
+            (np.eye(3).astype(bool)),
+            False,
+        ),
+        (
+            as_tensor(np.arange(2 * 3 * 3).reshape((2, 3, 3))),
+            (slice(2, None), np.eye(3).astype(int)),
+            False,
+        ),
+        (
+            as_tensor(np.arange(2 * 3 * 3).reshape((2, 3, 3))),
+            (slice(2, None), np.eye(3).astype(bool)),
+            False,
+        ),
+        # Multiple advanced indexing, only supported in obj mode
+        (
+            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            (slice(None), [1, 2], [3, 4]),
             True,
         ),
-        (pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), ([1, 2], [2, 3]), True),
         (
             as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             ([1, 2], slice(None), [3, 4]),
+            True,
+        ),
+        (
+            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            ([[1, 2], [2, 1]], [0, 0]),
             True,
         ),
     ],
@@ -100,9 +138,10 @@ def test_AdvancedSubtensor1_out_of_bounds():
 @pytest.mark.filterwarnings("error")
 def test_AdvancedSubtensor(x, indices, objmode_needed):
     """Test NumPy's advanced indexing in more than one dimension."""
-    out_pt = x[indices]
+    x_pt = x.type()
+    out_pt = x_pt[indices]
     assert isinstance(out_pt.owner.op, AdvancedSubtensor)
-    out_fg = FunctionGraph([], [out_pt])
+    out_fg = FunctionGraph([x_pt], [out_pt])
     with (
         pytest.warns(
             UserWarning,
@@ -111,7 +150,11 @@ def test_AdvancedSubtensor(x, indices, objmode_needed):
         if objmode_needed
         else contextlib.nullcontext()
     ):
-        compare_numba_and_py(out_fg, [])
+        compare_numba_and_py(
+            out_fg,
+            [x.data],
+            numba_mode=numba_mode.including("specialize"),
+        )
 
 
 @pytest.mark.parametrize(

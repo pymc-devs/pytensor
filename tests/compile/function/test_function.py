@@ -1,8 +1,8 @@
-import os
 import pickle
 import re
 import shutil
 import tempfile
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -31,10 +31,10 @@ def test_function_dump():
     fct1 = function([v], v + 1)
 
     try:
-        tmpdir = tempfile.mkdtemp()
-        fname = os.path.join(tmpdir, "test_function_dump.pkl")
+        tmpdir = Path(tempfile.mkdtemp())
+        fname = tmpdir / "test_function_dump.pkl"
         function_dump(fname, [v], v + 1)
-        with open(fname, "rb") as f:
+        with fname.open("rb") as f:
             l = pickle.load(f)
     finally:
         if tmpdir is not None:
@@ -49,7 +49,7 @@ def test_function_name():
     x = vector("x")
     func = function([x], x + 1.0)
 
-    regex = re.compile(os.path.basename(".*test_function.pyc?"))
+    regex = re.compile(f".*{__file__}c?")
     assert regex.match(func.name) is not None
 
 

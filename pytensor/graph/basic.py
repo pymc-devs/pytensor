@@ -631,7 +631,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         if not hasattr(self, "_fn_cache"):
             self._fn_cache: dict = dict()
 
-        inputs = tuple(sorted(parsed_inputs_to_values.keys(), key=id))
+        inputs = tuple(sorted(parsed_inputs_to_values, key=id))
         cache_key = (inputs, tuple(kwargs.items()))
         try:
             fn = self._fn_cache[cache_key]
@@ -986,7 +986,7 @@ def explicit_graph_inputs(
 
 
 def vars_between(
-    ins: Collection[Variable], outs: Iterable[Variable]
+    ins: Iterable[Variable], outs: Iterable[Variable]
 ) -> Generator[Variable, None, None]:
     r"""Extract the `Variable`\s within the sub-graph between input and output nodes.
 
@@ -1005,6 +1005,8 @@ def vars_between(
     `ins` to `outs`.
 
     """
+
+    ins = set(ins)
 
     def expand(r: Variable) -> Iterable[Variable] | None:
         if r.owner and r not in ins:
@@ -1034,7 +1036,10 @@ def orphans_between(
 
     Examples
     --------
-    >>> orphans_between([x], [(x+y).out])
+    >>> from pytensor.graph.basic import orphans_between
+    >>> from pytensor.tensor import scalars
+    >>> x, y = scalars("xy")
+    >>> list(orphans_between([x], [(x+y)]))
     [y]
 
     """

@@ -9,7 +9,7 @@ import logging
 import os
 import sys
 import textwrap
-from os.path import dirname
+from pathlib import Path
 
 from pytensor.configdefaults import config
 from pytensor.link.c.cmodule import GCC_compiler
@@ -743,36 +743,27 @@ def blas_header_text():
     blas_code = ""
     if not config.blas__ldflags:
         # Include the Numpy version implementation of [sd]gemm_.
-        current_filedir = dirname(__file__)
-        blas_common_filepath = os.path.join(
-            current_filedir, "c_code", "alt_blas_common.h"
-        )
-        blas_template_filepath = os.path.join(
-            current_filedir, "c_code", "alt_blas_template.c"
-        )
-        common_code = ""
-        sblas_code = ""
-        dblas_code = ""
-        with open(blas_common_filepath) as code:
-            common_code = code.read()
-        with open(blas_template_filepath) as code:
-            template_code = code.read()
-            sblas_code = template_code % {
-                "float_type": "float",
-                "float_size": 4,
-                "npy_float": "NPY_FLOAT32",
-                "precision": "s",
-            }
-            dblas_code = template_code % {
-                "float_type": "double",
-                "float_size": 8,
-                "npy_float": "NPY_FLOAT64",
-                "precision": "d",
-            }
-        if not (common_code and template_code):
-            raise OSError(
-                "Unable to load NumPy implementation of BLAS functions from C source files."
-            )
+        current_filedir = Path(__file__).parent
+        blas_common_filepath = current_filedir / "c_code/alt_blas_common.h"
+        blas_template_filepath = current_filedir / "c_code/alt_blas_template.c"
+        try:
+            common_code = blas_common_filepath.read_text(encoding="utf-8")
+            template_code = blas_template_filepath.read_text(encoding="utf-8")
+        except OSError as err:
+            msg = "Unable to load NumPy implementation of BLAS functions from C source files."
+            raise OSError(msg) from err
+        sblas_code = template_code % {
+            "float_type": "float",
+            "float_size": 4,
+            "npy_float": "NPY_FLOAT32",
+            "precision": "s",
+        }
+        dblas_code = template_code % {
+            "float_type": "double",
+            "float_size": 8,
+            "npy_float": "NPY_FLOAT64",
+            "precision": "d",
+        }
         blas_code += common_code
         blas_code += sblas_code
         blas_code += dblas_code

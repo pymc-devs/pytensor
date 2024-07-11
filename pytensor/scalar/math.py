@@ -4,8 +4,8 @@ r"""
 As SciPy is not always available, we treat them separately.
 """
 
-import os
 from functools import reduce
+from pathlib import Path
 from textwrap import dedent
 
 import numpy as np
@@ -45,6 +45,9 @@ from pytensor.scalar.basic import (
 )
 from pytensor.scalar.basic import abs as scalar_abs
 from pytensor.scalar.loop import ScalarLoop
+
+
+C_CODE_PATH = Path(__file__).parent / "c_code"
 
 
 class Erf(UnaryScalarOp):
@@ -154,19 +157,12 @@ class Erfcx(UnaryScalarOp):
 
     def c_header_dirs(self, **kwargs):
         # Using the Faddeeva.hh (c++) header for Faddeevva.cc
-        res = [
-            *super().c_header_dirs(**kwargs),
-            os.path.join(os.path.dirname(__file__), "c_code"),
-        ]
+        res = [*super().c_header_dirs(**kwargs), str(C_CODE_PATH)]
         return res
 
     def c_support_code(self, **kwargs):
         # Using Faddeeva.cc source file from: http://ab-initio.mit.edu/wiki/index.php/Faddeeva_Package
-        with open(
-            os.path.join(os.path.dirname(__file__), "c_code", "Faddeeva.cc")
-        ) as f:
-            raw = f.read()
-            return raw
+        return (C_CODE_PATH / "Faddeeva.cc").read_text(encoding="utf-8")
 
     def c_code(self, node, name, inp, out, sub):
         (x,) = inp
@@ -612,9 +608,7 @@ class Chi2SF(BinaryScalarOp):
         return Chi2SF.st_impl(x, k)
 
     def c_support_code(self, **kwargs):
-        with open(os.path.join(os.path.dirname(__file__), "c_code", "gamma.c")) as f:
-            raw = f.read()
-            return raw
+        return (C_CODE_PATH / "gamma.c").read_text(encoding="utf-8")
 
     def c_code(self, node, name, inp, out, sub):
         x, k = inp
@@ -665,9 +659,7 @@ class GammaInc(BinaryScalarOp):
         ]
 
     def c_support_code(self, **kwargs):
-        with open(os.path.join(os.path.dirname(__file__), "c_code", "gamma.c")) as f:
-            raw = f.read()
-            return raw
+        return (C_CODE_PATH / "gamma.c").read_text(encoding="utf-8")
 
     def c_code(self, node, name, inp, out, sub):
         k, x = inp
@@ -718,9 +710,7 @@ class GammaIncC(BinaryScalarOp):
         ]
 
     def c_support_code(self, **kwargs):
-        with open(os.path.join(os.path.dirname(__file__), "c_code", "gamma.c")) as f:
-            raw = f.read()
-            return raw
+        return (C_CODE_PATH / "gamma.c").read_text(encoding="utf-8")
 
     def c_code(self, node, name, inp, out, sub):
         k, x = inp
@@ -1031,9 +1021,7 @@ class GammaU(BinaryScalarOp):
         return GammaU.st_impl(k, x)
 
     def c_support_code(self, **kwargs):
-        with open(os.path.join(os.path.dirname(__file__), "c_code", "gamma.c")) as f:
-            raw = f.read()
-            return raw
+        return (C_CODE_PATH / "gamma.c").read_text(encoding="utf-8")
 
     def c_code(self, node, name, inp, out, sub):
         k, x = inp
@@ -1069,9 +1057,7 @@ class GammaL(BinaryScalarOp):
         return GammaL.st_impl(k, x)
 
     def c_support_code(self, **kwargs):
-        with open(os.path.join(os.path.dirname(__file__), "c_code", "gamma.c")) as f:
-            raw = f.read()
-            return raw
+        return (C_CODE_PATH / "gamma.c").read_text(encoding="utf-8")
 
     def c_code(self, node, name, inp, out, sub):
         k, x = inp
@@ -1496,9 +1482,7 @@ class BetaInc(ScalarOp):
         ]
 
     def c_support_code(self, **kwargs):
-        with open(os.path.join(os.path.dirname(__file__), "c_code", "incbet.c")) as f:
-            raw = f.read()
-            return raw
+        return (C_CODE_PATH / "incbet.c").read_text(encoding="utf-8")
 
     def c_code(self, node, name, inp, out, sub):
         (a, b, x) = inp
@@ -1513,7 +1497,7 @@ class BetaInc(ScalarOp):
         raise NotImplementedError("type not supported", type)
 
     def c_code_cache_version(self):
-        return (1,)
+        return (2,)
 
 
 betainc = BetaInc(upgrade_to_float_no_complex, name="betainc")

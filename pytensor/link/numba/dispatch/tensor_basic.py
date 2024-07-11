@@ -35,10 +35,8 @@ def numba_funcify_AllocEmpty(op, node, **kwargs):
     shape_var_item_names = [f"{name}_item" for name in shape_var_names]
     shapes_to_items_src = indent(
         "\n".join(
-            [
-                f"{item_name} = to_scalar({shape_name})"
-                for item_name, shape_name in zip(shape_var_item_names, shape_var_names)
-            ]
+            f"{item_name} = to_scalar({shape_name})"
+            for item_name, shape_name in zip(shape_var_item_names, shape_var_names)
         ),
         " " * 4,
     )
@@ -69,10 +67,8 @@ def numba_funcify_Alloc(op, node, **kwargs):
     shape_var_item_names = [f"{name}_item" for name in shape_var_names]
     shapes_to_items_src = indent(
         "\n".join(
-            [
-                f"{item_name} = to_scalar({shape_name})"
-                for item_name, shape_name in zip(shape_var_item_names, shape_var_names)
-            ]
+            f"{item_name} = to_scalar({shape_name})"
+            for item_name, shape_name in zip(shape_var_item_names, shape_var_names)
         ),
         " " * 4,
     )

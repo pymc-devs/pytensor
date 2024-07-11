@@ -24,7 +24,7 @@ def test_CheckAndRaise_str():
     check_and_raise = CheckAndRaise(CustomException, exc_msg)
     assert (
         str(check_and_raise)
-        == f"CheckAndRaise{{{CustomException}(this is the exception)}}"
+        == f"CheckAndRaise{{raises=CustomException, msg='{exc_msg}'}}"
     )
 
 

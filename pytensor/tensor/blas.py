@@ -75,6 +75,7 @@ Optimizations associated with these BLAS Ops are in tensor.rewriting.blas
 
 """
 
+import functools
 import logging
 import os
 import time
@@ -104,7 +105,6 @@ from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import add, mul, neg, sub
 from pytensor.tensor.shape import shape_padright, specify_broadcastable
 from pytensor.tensor.type import DenseTensorType, TensorType, integer_dtypes, tensor
-from pytensor.utils import memoize
 
 
 _logger = logging.getLogger("pytensor.tensor.blas")
@@ -365,8 +365,10 @@ def ldflags(libs=True, flags=False, libs_dir=False, include_dir=False):
     )
 
 
-@memoize
-def _ldflags(ldflags_str, libs, flags, libs_dir, include_dir):
+@functools.cache
+def _ldflags(
+    ldflags_str: str, libs: bool, flags: bool, libs_dir: bool, include_dir: bool
+) -> list[str]:
     """Extract list of compilation flags from a string.
 
     Depending on the options, different type of flags will be kept.
@@ -422,7 +424,7 @@ def _ldflags(ldflags_str, libs, flags, libs_dir, include_dir):
             t = t[1:-1]
 
         try:
-            t0, t1, t2 = t[0:3]
+            t0, t1 = t[0], t[1]
             assert t0 == "-"
         except Exception:
             raise ValueError(f'invalid token "{t}" in ldflags_str: "{ldflags_str}"')
@@ -435,7 +437,6 @@ def _ldflags(ldflags_str, libs, flags, libs_dir, include_dir):
                 " is not wanted.",
                 t,
             )
-            rval.append(t[2:])
         elif libs and t1 == "l":  # example -lmkl
             rval.append(t[2:])
         elif flags and t1 not in ("L", "I", "l"):  # example -openmp
@@ -1690,7 +1691,7 @@ class BatchedDot(COp):
         if x.shape[0] != y.shape[0]:
             raise TypeError(
                 f"Inputs [{', '.join(map(str, inp))}] must have the"
-                f" same size in axis 0, but have sizes [{', '.join([str(i.shape[0]) for i in inp])}]."
+                f" same size in axis 0, but have sizes [{', '.join(str(i.shape[0]) for i in inp)}]."
             )
 
         z[0] = np.matmul(x, y)

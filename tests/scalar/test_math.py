@@ -99,11 +99,16 @@ def test_gammau_nan_c():
     assert np.isnan(test_func(-1, -1))
 
 
-def test_betainc():
+@pytest.mark.parametrize("linker", ["py", "c"])
+def test_betainc(linker):
     a, b, x = pt.scalars("a", "b", "x")
     res = betainc(a, b, x)
-    test_func = function([a, b, x], res, mode=Mode("py"))
+    test_func = function([a, b, x], res, mode=Mode(linker=linker, optimizer="fast_run"))
     assert np.isclose(test_func(15, 10, 0.7), sp.betainc(15, 10, 0.7))
+
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/906
+    if res.dtype == "float64":
+        assert test_func(100, 1.0, 0.1) > 0
 
 
 def test_betainc_derivative_nan():

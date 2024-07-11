@@ -1,4 +1,5 @@
 import jax.numpy as jnp
+import numpy as np
 
 from pytensor.link.jax.dispatch import jax_funcify
 from pytensor.tensor.blas import BatchedDot
@@ -137,12 +138,10 @@ def jax_funcify_Argmax(op, **kwargs):
 
         # NumPy does not support multiple axes for argmax; this is a
         # work-around
-        keep_axes = jnp.array(
-            [i for i in range(x.ndim) if i not in axes], dtype="int64"
-        )
+        keep_axes = np.array([i for i in range(x.ndim) if i not in axes], dtype="int64")
         # Not-reduced axes in front
         transposed_x = jnp.transpose(
-            x, jnp.concatenate((keep_axes, jnp.array(axes, dtype="int64")))
+            x, tuple(np.concatenate((keep_axes, np.array(axes, dtype="int64"))))
         )
         kept_shape = transposed_x.shape[: len(keep_axes)]
         reduced_shape = transposed_x.shape[len(keep_axes) :]
@@ -151,9 +150,9 @@ def jax_funcify_Argmax(op, **kwargs):
         # Otherwise reshape would complain citing float arg
         new_shape = (
             *kept_shape,
-            jnp.prod(jnp.array(reduced_shape, dtype="int64"), dtype="int64"),
+            np.prod(np.array(reduced_shape, dtype="int64"), dtype="int64"),
         )
-        reshaped_x = transposed_x.reshape(new_shape)
+        reshaped_x = transposed_x.reshape(tuple(new_shape))
 
         max_idx_res = jnp.argmax(reshaped_x, axis=-1).astype("int64")
 

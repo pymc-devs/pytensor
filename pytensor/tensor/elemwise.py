@@ -30,7 +30,11 @@ from pytensor.tensor.type import (
     float_dtypes,
     lvector,
 )
-from pytensor.tensor.utils import broadcast_static_dim_lengths, import_func_from_string
+from pytensor.tensor.utils import (
+    broadcast_static_dim_lengths,
+    import_func_from_string,
+    normalize_reduce_axis,
+)
 from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import uniq
 
@@ -178,7 +182,7 @@ class DimShuffle(ExternalCOp):
         self.transposition = self.shuffle + drop
         # List of dimensions of the output that are broadcastable and were not
         # in the original input
-        self.augment = sorted([i for i, x in enumerate(new_order) if x == "x"])
+        self.augment = sorted(i for i, x in enumerate(new_order) if x == "x")
         self.drop = drop
 
         if self.inplace:
@@ -889,11 +893,9 @@ class Elemwise(OpenMPOp):
         # In that case, create a fortran output ndarray.
         z = list(zip(inames, inputs))
         alloc_fortran = " && ".join(
-            [
-                f"PyArray_ISFORTRAN({arr})"
-                for arr, var in z
-                if not all(s == 1 for s in var.type.shape)
-            ]
+            f"PyArray_ISFORTRAN({arr})"
+            for arr, var in z
+            if not all(s == 1 for s in var.type.shape)
         )
         # If it is a scalar, make it c contig to prevent problem with
         # NumPy C and F contig not always set as both of them.
@@ -980,12 +982,10 @@ class Elemwise(OpenMPOp):
             if len(all_code) == 1:
                 # No loops
                 task_decl = "".join(
-                    [
-                        f"{dtype}& {name}_i = *{name}_iter;\n"
-                        for name, dtype in zip(
-                            inames + list(real_onames), idtypes + list(real_odtypes)
-                        )
-                    ]
+                    f"{dtype}& {name}_i = *{name}_iter;\n"
+                    for name, dtype in zip(
+                        inames + list(real_onames), idtypes + list(real_odtypes)
+                    )
                 )
 
                 preloops = {}
@@ -1097,18 +1097,14 @@ class Elemwise(OpenMPOp):
                 z = list(zip(inames + onames, inputs + node.outputs))
                 all_broadcastable = all(s == 1 for s in var.type.shape)
                 cond1 = " && ".join(
-                    [
-                        f"PyArray_ISCONTIGUOUS({arr})"
-                        for arr, var in z
-                        if not all_broadcastable
-                    ]
+                    f"PyArray_ISCONTIGUOUS({arr})"
+                    for arr, var in z
+                    if not all_broadcastable
                 )
                 cond2 = " && ".join(
-                    [
-                        f"PyArray_ISFORTRAN({arr})"
-                        for arr, var in z
-                        if not all_broadcastable
-                    ]
+                    f"PyArray_ISFORTRAN({arr})"
+                    for arr, var in z
+                    if not all_broadcastable
                 )
                 loop = """
             if(({cond1}) || ({cond2})){{
@@ -1371,7 +1367,6 @@ class CAReduce(COp):
 
     def make_node(self, input):
         input = as_tensor_variable(input)
-        inp_dims = input.type.ndim
         inp_dtype = input.type.dtype
 
         # We need to redefine make_node so that, if self.dtype is None,
@@ -1383,29 +1378,19 @@ class CAReduce(COp):
         assert dtype is not None
         assert acc_dtype is not None
 
-        axis = self.axis
+        axis = normalize_reduce_axis(self.axis, ndim=input.type.ndim)
 
-        # scalar inputs are treated as 1D regarding axis in this `Op`
-        if axis is not None:
-            try:
-                axis = normalize_axis_tuple(axis, ndim=max(1, inp_dims))
-            except np.AxisError:
-                raise np.AxisError(axis, ndim=inp_dims)
-
-            out_shape = tuple(
-                s for i, s in enumerate(input.type.shape) if i not in axis
-            )
-        else:
-            out_shape = ()
-
-        if (
-            (axis is not None and any(a < 0 for a in axis))
-            or dtype != self.dtype
-            or acc_dtype != self.acc_dtype
-        ):
+        if axis != self.axis or dtype != self.dtype or acc_dtype != self.acc_dtype:
             op = self.clone(axis=axis, dtype=dtype, acc_dtype=acc_dtype)
         else:
             op = self
+
+        if axis is None:
+            out_shape = ()
+        else:
+            out_shape = tuple(
+                s for i, s in enumerate(input.type.shape) if i not in axis
+            )
 
         output = TensorType(dtype=dtype, shape=out_shape)()
 

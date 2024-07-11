@@ -138,7 +138,7 @@ class TestConfigTypes:
             cp._apply("gpu123")
         with pytest.raises(ValueError, match='Valid options start with one of "cpu".'):
             cp._apply("notadevice")
-        assert str(cp) == "None (cpu)"
+        assert str(cp) == "unnamed (cpu)"
 
 
 def test_config_context():
@@ -222,7 +222,7 @@ def test_config_pickling():
     buffer.seek(0)
     restored = pickle.load(buffer)
     # ...without a change in the config values
-    for name in root._config_var_dict.keys():
+    for name in root._config_var_dict:
         v_original = getattr(root, name)
         v_restored = getattr(restored, name)
         assert (

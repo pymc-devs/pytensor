@@ -6,7 +6,7 @@ from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.fg import FunctionGraph
 from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import CheckAndRaise
-from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Join
+from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Eye, Join
 
 
 @singledispatch
@@ -100,3 +100,19 @@ def pytorch_funcify_Join(op, **kwargs):
         return torch.cat(tensors, dim=axis)
 
     return join
+
+
+@pytorch_funcify.register(Eye)
+def pytorch_funcify_eye(op, **kwargs):
+    torch_dtype = getattr(torch, op.dtype)
+
+    def eye(N, M, k):
+        major, minor = (M, N) if k > 0 else (N, M)
+        k_abs = torch.abs(k)
+        zeros = torch.zeros(N, M, dtype=torch_dtype)
+        if k_abs < major:
+            l_ones = torch.min(major - k_abs, minor)
+            return zeros.diagonal_scatter(torch.ones(l_ones, dtype=torch_dtype), k)
+        return zeros
+
+    return eye

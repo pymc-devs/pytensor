@@ -13,6 +13,7 @@ from configparser import (
 )
 from functools import wraps
 from io import StringIO
+from pathlib import Path
 
 from pytensor.utils import hash_from_code
 
@@ -22,7 +23,7 @@ _logger = logging.getLogger("pytensor.configparser")
 
 class PyTensorConfigWarning(Warning):
     @classmethod
-    def warn(cls, message, stacklevel=0):
+    def warn(cls, message: str, stacklevel: int = 0):
         warnings.warn(message, cls, stacklevel=stacklevel + 3)
 
 
@@ -68,7 +69,110 @@ class _ChangeFlagsDecorator:
 class PyTensorConfigParser:
     """Object that holds configuration settings."""
 
-    def __init__(self, flags_dict: dict, pytensor_cfg, pytensor_raw_cfg):
+    # add_basic_configvars
+    floatX: str
+    warn_float64: str
+    pickle_test_value: bool
+    cast_policy: str
+    device: str
+    print_global_stats: bool
+    unpickle_function: bool
+    # add_compile_configvars
+    mode: str
+    cxx: str
+    linker: str
+    allow_gc: bool
+    optimizer: str
+    optimizer_verbose: bool
+    on_opt_error: str
+    nocleanup: bool
+    gcc__cxxflags: str
+    cmodule__warn_no_version: bool
+    cmodule__remove_gxx_opt: bool
+    cmodule__compilation_warning: bool
+    cmodule__preload_cache: bool
+    cmodule__age_thresh_use: int
+    cmodule__debug: bool
+    compile__timeout: int
+    # add_tensor_configvars
+    tensor__cmp_sloppy: int
+    lib__amblibm: bool
+    tensor__insert_inplace_optimizer_validate_nb: int
+    # add_traceback_configvars
+    traceback__limit: int
+    traceback__compile_limit: int
+    # add_experimental_configvars
+    # add_error_and_warning_configvars
+    warn__ignore_bug_before: int
+    exception_verbosity: str
+    # add_testvalue_and_checking_configvars
+    print_test_value: bool
+    compute_test_value: str
+    compute_test_value_opt: str
+    check_input: bool
+    NanGuardMode__nan_is_error: bool
+    NanGuardMode__inf_is_error: bool
+    NanGuardMode__big_is_error: bool
+    NanGuardMode__action: str
+    DebugMode__patience: int
+    DebugMode__check_c: bool
+    DebugMode__check_py: bool
+    DebugMode__check_finite: bool
+    DebugMode__check_strides: int
+    DebugMode__warn_input_not_reused: bool
+    DebugMode__check_preallocated_output: str
+    DebugMode__check_preallocated_output_ndim: int
+    profiling__time_thunks: bool
+    profiling__n_apply: int
+    profiling__n_ops: int
+    profiling__output_line_width: int
+    profiling__min_memory_size: int
+    profiling__min_peak_memory: bool
+    profiling__destination: str
+    profiling__debugprint: bool
+    profiling__ignore_first_call: bool
+    on_shape_error: str
+    # add_multiprocessing_configvars
+    openmp: bool
+    openmp_elemwise_minsize: int
+    # add_optimizer_configvars
+    optimizer_excluding: str
+    optimizer_including: str
+    optimizer_requiring: str
+    optdb__position_cutoff: float
+    optdb__max_use_ratio: float
+    cycle_detection: str
+    check_stack_trace: str
+    metaopt__verbose: int
+    # add_vm_configvars
+    profile: bool
+    profile_optimizer: bool
+    profile_memory: bool
+    vm__lazy: bool | None
+    # add_deprecated_configvars
+    unittests__rseed: str
+    warn__round: bool
+    # add_scan_configvars
+    scan__allow_gc: bool
+    scan__allow_output_prealloc: bool
+    # add_numba_configvars
+    numba__vectorize_target: str
+    numba__fastmath: bool
+    numba__cache: bool
+    # add_caching_dir_configvars
+    compiledir_format: str
+    base_compiledir: Path
+    compiledir: Path
+    # add_blas_configvars
+    blas__ldflags: str
+    blas__check_openmp: bool
+
+    def __init__(
+        self,
+        flags_dict: dict,
+        pytensor_cfg: ConfigParser,
+        pytensor_raw_cfg: RawConfigParser,
+    ):
         self._flags_dict = flags_dict
         self._pytensor_cfg = pytensor_cfg
         self._pytensor_raw_cfg = pytensor_raw_cfg
@@ -80,7 +184,7 @@ class PyTensorConfigParser:
         self.config_print(buf=sio, print_doc=print_doc)
         return sio.getvalue()
 
-    def config_print(self, buf, print_doc=True):
+    def config_print(self, buf, print_doc: bool = True):
         for cv in self._config_var_dict.values():
             print(cv, file=buf)
             if print_doc:
@@ -104,11 +208,13 @@ class PyTensorConfigParser:
         )
         return hash_from_code(
             "\n".join(
-                [f"{cv.name} = {cv.__get__(self, self.__class__)}" for cv in all_opts]
+                f"{cv.name} = {cv.__get__(self, self.__class__)}" for cv in all_opts
             )
         )
 
-    def add(self, name, doc, configparam, in_c_key=True):
+    def add(
+        self, name: str, doc: str, configparam: "ConfigParam", in_c_key: bool = True
+    ):
         """Add a new variable to PyTensorConfigParser.
 
         This method performs some of the work of initializing `ConfigParam` instances.
@@ -168,7 +274,7 @@ class PyTensorConfigParser:
         # the ConfigParam implements __get__/__set__, enabling us to create a property:
         setattr(self.__class__, name, configparam)
 
-    def fetch_val_for_key(self, key, delete_key=False):
+    def fetch_val_for_key(self, key, delete_key: bool = False):
         """Return the overriding config value for a key.
         A successful search returns a string value.
         An unsuccessful search raises a KeyError
@@ -214,7 +320,7 @@ class PyTensorConfigParser:
         return _ChangeFlagsDecorator(*args, _root=self, **kwargs)
 
     def warn_unused_flags(self):
-        for key in self._flags_dict.keys():
+        for key in self._flags_dict:
             warnings.warn(f"PyTensor does not recognise this flag: {key}")
 
 
@@ -260,9 +366,9 @@ class ConfigParam:
         self._mutable = mutable
         self.is_default = True
         # set by PyTensorConfigParser.add:
-        self.name = None
-        self.doc = None
-        self.in_c_key = None
+        self.name: str = "unnamed"
+        self.doc: str = "undocumented"
+        self.in_c_key: bool
 
         # Note that we do not call `self.filter` on the default value: this
         # will be done automatically in PyTensorConfigParser.add, potentially with a
@@ -288,7 +394,7 @@ class ConfigParam:
             return self._apply(value)
         return value
 
-    def validate(self, value) -> bool | None:
+    def validate(self, value) -> bool:
         """Validates that a parameter values falls into a supported set or range.
 
         Raises
@@ -336,7 +442,7 @@ class ConfigParam:
 
 class EnumStr(ConfigParam):
     def __init__(
-        self, default: str, options: Sequence[str], validate=None, mutable=True
+        self, default: str, options: Sequence[str], validate=None, mutable: bool = True
     ):
         """Creates a str-based parameter that takes a predefined set of options.
 
@@ -400,7 +506,7 @@ class BoolParam(TypedParam):
     True, 1, "true", "True", "1"
     """
 
-    def __init__(self, default, validate=None, mutable=True):
+    def __init__(self, default, validate=None, mutable: bool = True):
         super().__init__(default, apply=self._apply, validate=validate, mutable=mutable)
 
     def _apply(self, value):
@@ -454,7 +560,9 @@ class ContextsParam(ConfigParam):
         return val
 
 
-def parse_config_string(config_string, issue_warnings=True):
+def parse_config_string(
+    config_string: str, issue_warnings: bool = True
+) -> dict[str, str]:
     """
     Parses a config string (comma-separated key=value components) into a dict.
     """
@@ -480,7 +588,7 @@ def parse_config_string(config_string, issue_warnings=True):
     return config_dict
 
 
-def config_files_from_pytensorrc():
+def config_files_from_pytensorrc() -> list[Path]:
     """
     PYTENSORRC can contain a colon-delimited list of config files, like
 
@@ -489,17 +597,17 @@ def config_files_from_pytensorrc():
     In that case, definitions in files on the right (here, ``~/.pytensorrc``)
     have precedence over those in files on the left.
     """
-    rval = [
-        os.path.expanduser(s)
+    paths = [
+        Path(s).expanduser()
         for s in os.getenv("PYTENSORRC", "~/.pytensorrc").split(os.pathsep)
     ]
     if os.getenv("PYTENSORRC") is None and sys.platform == "win32":
         # to don't need to change the filename and make it open easily
-        rval.append(os.path.expanduser("~/.pytensorrc.txt"))
-    return rval
+        paths.append(Path("~/.pytensorrc.txt").expanduser())
+    return paths
 
 
-def _create_default_config():
+def _create_default_config() -> PyTensorConfigParser:
     # The PYTENSOR_FLAGS environment variable should be a list of comma-separated
     # [section__]option=value entries. If the section part is omitted, there should
     # be only one section that contains the given option.
@@ -509,7 +617,7 @@ def _create_default_config():
     config_files = config_files_from_pytensorrc()
     pytensor_cfg = ConfigParser(
         {
-            "USER": os.getenv("USER", os.path.split(os.path.expanduser("~"))[-1]),
+            "USER": os.getenv("USER", Path("~").expanduser().name),
             "LSCRATCH": os.getenv("LSCRATCH", ""),
             "TMPDIR": os.getenv("TMPDIR", ""),
             "TEMP": os.getenv("TEMP", ""),

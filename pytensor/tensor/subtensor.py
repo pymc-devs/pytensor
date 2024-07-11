@@ -755,13 +755,18 @@ def get_constant_idx(
     Examples
     --------
     Example usage where `v` and `a` are appropriately typed PyTensor variables :
+    >>> from pytensor.scalar import int64
+    >>> from pytensor.tensor import matrix
+    >>> v = int64("v")
+    >>> a = matrix("a")
     >>> b = a[v, 1:3]
     >>> b.owner.op.idx_list
     (ScalarType(int64), slice(ScalarType(int64), ScalarType(int64), None))
     >>> get_constant_idx(b.owner.op.idx_list, b.owner.inputs, allow_partial=True)
     [v, slice(1, 3, None)]
     >>> get_constant_idx(b.owner.op.idx_list, b.owner.inputs)
-    NotScalarConstantError: v
+    Traceback (most recent call last):
+    pytensor.tensor.exceptions.NotScalarConstantError
 
     """
     real_idx = get_idx_list(inputs, idx_list)
@@ -1108,7 +1113,7 @@ class Subtensor(COp):
 
         if is_slice:
             is_slice_init = (
-                "int is_slice[] = {" + ",".join([str(s) for s in is_slice]) + "};"
+                "int is_slice[] = {" + ",".join(str(s) for s in is_slice) + "};"
             )
         else:
             is_slice_init = "int* is_slice = NULL;"
@@ -1409,8 +1414,8 @@ def set_subtensor(x, y, inplace=False, tolerate_inplace_aliasing=False):
     Examples
     --------
     To replicate the numpy expression "r[10:] = 5", type
-
-    >>> r = ivector()
+    >>> from pytensor.tensor import vector
+    >>> r = vector("r")
     >>> new_r = set_subtensor(r[10:], 5)
 
     """
@@ -2102,10 +2107,7 @@ class AdvancedSubtensor1(COp):
         out[0] = x.take(i, axis=0, out=o)
 
     def connection_pattern(self, node):
-        rval = [[True]]
-
-        for ipt in node.inputs[1:]:
-            rval.append([False])
+        rval = [[True], *([False] for _ in node.inputs[1:])]
 
         return rval
 
@@ -2396,9 +2398,7 @@ class AdvancedIncSubtensor1(COp):
 
         fn_array = (
             "static inplace_map_binop addition_funcs[] = {"
-            + "".join(
-                [gen_binop(type=t, typen=t.upper()) for t in types + complex_types]
-            )
+            + "".join(gen_binop(type=t, typen=t.upper()) for t in types + complex_types)
             + "NULL};\n"
         )
 
@@ -2411,7 +2411,7 @@ class AdvancedIncSubtensor1(COp):
 
         type_number_array = (
             "static int type_numbers[] = {"
-            + "".join([gen_num(typen=t.upper()) for t in types + complex_types])
+            + "".join(gen_num(typen=t.upper()) for t in types + complex_types)
             + "-1000};"
         )
 

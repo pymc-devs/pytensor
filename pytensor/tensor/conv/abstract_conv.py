@@ -585,10 +585,11 @@ def assert_shape(x, expected_shape, msg="Unexpected shape."):
     if expected_shape is None or not config.conv__assert_shape:
         return x
     shape = x.shape
-    tests = []
-    for i in range(x.ndim):
-        if expected_shape[i] is not None:
-            tests.append(pt.eq(shape[i], expected_shape[i]))
+    tests = [
+        pt.eq(shape[i], expected_shape[i])
+        for i in range(x.ndim)
+        if expected_shape[i] is not None
+    ]
     if tests:
         return Assert(msg)(x, *tests)
     else:

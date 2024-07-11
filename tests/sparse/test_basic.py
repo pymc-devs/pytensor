@@ -1784,13 +1784,14 @@ class TestUsmm:
                     )
                     == len(topo) - 5
                 )
-                new_topo = []
-                for node in topo:
+                new_topo = [
+                    node
+                    for node in topo
                     if not (
                         isinstance(node.op, Elemwise)
                         and isinstance(node.op.scalar_op, pytensor.scalar.basic.Cast)
-                    ):
-                        new_topo.append(node)
+                    )
+                ]
                 topo = new_topo
                 assert len(topo) == 5, topo
                 # Usmm is tested at the same time in debugmode

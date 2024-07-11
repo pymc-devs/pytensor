@@ -139,10 +139,8 @@ class Blockwise(Op):
 
         try:
             batch_shape = tuple(
-                [
-                    broadcast_static_dim_lengths(batch_dims)
-                    for batch_dims in zip(*batch_shapes)
-                ]
+                broadcast_static_dim_lengths(batch_dims)
+                for batch_dims in zip(*batch_shapes)
             )
         except ValueError:
             raise ValueError(

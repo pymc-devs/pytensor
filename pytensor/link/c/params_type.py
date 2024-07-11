@@ -263,12 +263,7 @@ class Params(dict):
 
     def __repr__(self):
         return "Params({})".format(
-            ", ".join(
-                [
-                    (f"{k}:{type(self[k]).__name__}:{self[k]}")
-                    for k in sorted(self.keys())
-                ]
-            )
+            ", ".join((f"{k}:{type(self[k]).__name__}:{self[k]}") for k in sorted(self))
         )
 
     def __getattr__(self, key):
@@ -365,7 +360,7 @@ class ParamsType(CType):
                 )
 
         self.length = len(kwargs)
-        self.fields = tuple(sorted(kwargs.keys()))
+        self.fields = tuple(sorted(kwargs))
         self.types = tuple(kwargs[field] for field in self.fields)
         self.name = self.generate_struct_name()
 
@@ -428,9 +423,7 @@ class ParamsType(CType):
 
     def __repr__(self):
         return "ParamsType<{}>".format(
-            ", ".join(
-                [(f"{self.fields[i]}:{self.types[i]}") for i in range(self.length)]
-            )
+            ", ".join((f"{self.fields[i]}:{self.types[i]}") for i in range(self.length))
         )
 
     def __eq__(self, other):
@@ -751,10 +744,8 @@ class ParamsType(CType):
         }}
         """.format(
             "\n".join(
-                [
-                    ("case %d: extract_%s(object); break;" % (i, self.fields[i]))
-                    for i in range(self.length)
-                ]
+                ("case %d: extract_%s(object); break;" % (i, self.fields[i]))
+                for i in range(self.length)
             )
         )
         final_struct_code = """

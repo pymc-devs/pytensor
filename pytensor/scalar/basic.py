@@ -208,6 +208,7 @@ class autocast_float_as:
 
     Examples
     --------
+    >>> from pytensor.tensor import fvector
     >>> with autocast_float_as('float32'):
     ...    assert (fvector() + 1.1).dtype == 'float32'  # temporary downcasting
     >>> assert (fvector() + 1.1).dtype == 'float64' # back to default behaviour
@@ -4223,8 +4224,8 @@ class Composite(ScalarInnerGraphOp):
             inputs, outputs = res[0], res2[1]
 
         self.inputs, self.outputs = self._cleanup_graph(inputs, outputs)
-        self.inputs_type = tuple([input.type for input in self.inputs])
-        self.outputs_type = tuple([output.type for output in self.outputs])
+        self.inputs_type = tuple(input.type for input in self.inputs)
+        self.outputs_type = tuple(output.type for output in self.outputs)
         self.nin = len(inputs)
         self.nout = len(outputs)
         super().__init__()
@@ -4246,7 +4247,7 @@ class Composite(ScalarInnerGraphOp):
         if len(self.fgraph.outputs) > 1 or len(self.fgraph.apply_nodes) > 10:
             self._name = "Composite{...}"
         else:
-            outputs_str = ", ".join([pprint(output) for output in self.fgraph.outputs])
+            outputs_str = ", ".join(pprint(output) for output in self.fgraph.outputs)
             self._name = f"Composite{{{outputs_str}}}"
 
         return self._name
@@ -4294,7 +4295,7 @@ class Composite(ScalarInnerGraphOp):
         return self.outputs_type
 
     def make_node(self, *inputs):
-        if tuple([i.type for i in self.inputs]) == tuple([i.type for i in inputs]):
+        if tuple(i.type for i in self.inputs) == tuple(i.type for i in inputs):
             return super().make_node(*inputs)
         else:
             # Make a new op with the right input type.
@@ -4425,7 +4426,7 @@ class Compositef32:
                     else:
                         ni = i
                     mapping[i] = ni
-            if isinstance(node.op, tuple(self.special.keys())):
+            if isinstance(node.op, tuple(self.special)):
                 self.special[type(node.op)](node, mapping)
                 continue
             new_node = node.clone_with_new_inputs(
@@ -4433,8 +4434,7 @@ class Compositef32:
             )
             # make sure we don't produce any float16.
             assert not any(o.dtype == "float16" for o in new_node.outputs)
-            for o, no in zip(node.outputs, new_node.outputs):
-                mapping[o] = no
+            mapping.update(zip(node.outputs, new_node.outputs))
 
         new_ins = [mapping[inp] for inp in fgraph.inputs]
         new_outs = [mapping[out] for out in fgraph.outputs]

@@ -337,7 +337,7 @@ def test_reallocation():
         def check_storage(storage_map):
             for i in storage_map:
                 if not isinstance(i, TensorConstant):
-                    keys_copy = list(storage_map.keys())[:]
+                    keys_copy = list(storage_map)[:]
                     keys_copy.remove(i)
                     for o in keys_copy:
                         if storage_map[i][0] and storage_map[i][0] is storage_map[o][0]:

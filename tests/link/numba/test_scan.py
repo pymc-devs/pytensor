@@ -479,14 +479,14 @@ def test_vector_taps_benchmark(benchmark):
         sitsot_init: rng.normal(),
     }
 
-    numba_fn = pytensor.function(list(test.keys()), outs, mode=get_mode("NUMBA"))
+    numba_fn = pytensor.function(list(test), outs, mode=get_mode("NUMBA"))
     scan_nodes = [
         node for node in numba_fn.maker.fgraph.apply_nodes if isinstance(node.op, Scan)
     ]
     assert len(scan_nodes) == 1
     numba_res = numba_fn(*test.values())
 
-    ref_fn = pytensor.function(list(test.keys()), outs, mode=get_mode("FAST_COMPILE"))
+    ref_fn = pytensor.function(list(test), outs, mode=get_mode("FAST_COMPILE"))
     ref_res = ref_fn(*test.values())
     for numba_r, ref_r in zip(numba_res, ref_res):
         np.testing.assert_array_almost_equal(numba_r, ref_r)

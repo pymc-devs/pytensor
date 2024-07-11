@@ -250,6 +250,7 @@ def core_VonMisesRV(op, node):
 
 @numba_core_rv_funcify.register(ptr.ChoiceWithoutReplacement)
 def core_ChoiceWithoutReplacement(op: ptr.ChoiceWithoutReplacement, node):
+    assert isinstance(op.signature, str)
     [core_shape_len_sig] = _parse_gufunc_signature(op.signature)[0][-1]
     core_shape_len = int(core_shape_len_sig)
     implicit_arange = op.ndims_params[0] == 0

@@ -57,7 +57,7 @@ def test_fgraph_to_python_names():
         "scalar_variable",
         "tensor_variable_1",
         r.name,
-    ) == tuple(sig.parameters.keys())
+    ) == tuple(sig.parameters)
     assert (1, 2, 3, 4, 5) == out_jx(1, 2, 3, 4, 5)
 
     obj = object()

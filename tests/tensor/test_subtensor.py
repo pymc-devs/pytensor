@@ -1143,9 +1143,11 @@ class TestSubtensor(utt.OptimizationTestMixin):
         data = random(4)
         data = np.asarray(data, dtype=self.dtype)
         idxs = [[i] for i in range(data.shape[0])]
-        for i in range(data.shape[0]):
-            for j in range(0, data.shape[0], 2):
-                idxs.append([i, j, (i + 1) % data.shape[0]])
+        idxs.extend(
+            [i, j, (i + 1) % data.shape[0]]
+            for i in range(data.shape[0])
+            for j in range(0, data.shape[0], 2)
+        )
         self.grad_list_(idxs, data)
 
         data = random(4, 3)

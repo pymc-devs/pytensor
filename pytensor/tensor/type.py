@@ -401,7 +401,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
                 else:
                     return str(s)
 
-            formatted_shape = ", ".join([shape_str(s) for s in shape])
+            formatted_shape = ", ".join(shape_str(s) for s in shape)
             if len_shape == 1:
                 formatted_shape += ","
 

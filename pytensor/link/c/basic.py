@@ -235,16 +235,16 @@ def struct_gen(args, struct_builders, blocks, sub):
     behavior = code_gen(blocks)
 
     # declares the storage
-    storage_decl = "\n".join([f"PyObject* {arg};" for arg in args])
+    storage_decl = "\n".join(f"PyObject* {arg};" for arg in args)
     # in the constructor, sets the storage to the arguments
-    storage_set = "\n".join([f"this->{arg} = {arg};" for arg in args])
+    storage_set = "\n".join(f"this->{arg} = {arg};" for arg in args)
     # increments the storage's refcount in the constructor
-    storage_incref = "\n".join([f"Py_XINCREF({arg});" for arg in args])
+    storage_incref = "\n".join(f"Py_XINCREF({arg});" for arg in args)
     # decrements the storage's refcount in the destructor
-    storage_decref = "\n".join([f"Py_XDECREF(this->{arg});" for arg in args])
+    storage_decref = "\n".join(f"Py_XDECREF(this->{arg});" for arg in args)
 
     args_names = ", ".join(args)
-    args_decl = ", ".join([f"PyObject* {arg}" for arg in args])
+    args_decl = ", ".join(f"PyObject* {arg}" for arg in args)
 
     # The following code stores the exception data in __ERROR, which
     # is a special field of the struct. __ERROR is a list of length 3
@@ -354,9 +354,7 @@ def get_c_declare(fgraph, r, name, sub):
     # it means they need `r`'s dtype to be declared, so
     # we have to pass `check_input=True` to `c_declare`.
     if any(
-        getattr(c.op, "check_input", config.check_input)
-        for (c, _) in fgraph.clients[r]
-        if not isinstance(c, str)
+        getattr(c.op, "check_input", config.check_input) for (c, _) in fgraph.clients[r]
     ) or (r.owner and getattr(r.owner.op, "check_input", config.check_input)):
         c_declare = r.type.c_declare(name, sub, True)
     else:
@@ -1452,12 +1450,16 @@ class CLinker(Linker):
             if props:
                 version.append(props)
 
-            for i in node.inputs:
-                if isinstance(i.type, CLinkerObject):
-                    version.append(i.type.c_code_cache_version())
-            for o in node.outputs:
-                if isinstance(o.type, CLinkerObject):
-                    version.append(o.type.c_code_cache_version())
+            version.extend(
+                i.type.c_code_cache_version()
+                for i in node.inputs
+                if isinstance(i.type, CLinkerObject)
+            )
+            version.extend(
+                o.type.c_code_cache_version()
+                for o in node.outputs
+                if isinstance(o.type, CLinkerObject)
+            )
 
             # add the signature for this node
             sig.append(

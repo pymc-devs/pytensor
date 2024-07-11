@@ -789,9 +789,9 @@ class AlgebraicCanonizer(NodeRewriter):
     --------
     >>> import pytensor.tensor as pt
     >>> from pytensor.tensor.rewriting.math import AlgebraicCanonizer
-    >>> add_canonizer = AlgebraicCanonizer(add, sub, neg, \\
+    >>> add_canonizer = AlgebraicCanonizer(add, sub, neg, \
     ...                                    lambda n, d: sum(n) - sum(d))
-    >>> mul_canonizer = AlgebraicCanonizer(mul, true_div, inv, \\
+    >>> mul_canonizer = AlgebraicCanonizer(mul, true_div, reciprocal, \
     ...                                    lambda n, d: prod(n) / prod(d))
 
     Examples of rewrites `mul_canonizer` can perform:
@@ -1126,14 +1126,11 @@ class AlgebraicCanonizer(NodeRewriter):
         # this canonized graph...  if so, we do nothing and wait for
         # them to be transformed.
         for c, c_idx in out_clients:
-            if c == "output":
-                continue
             while (
-                isinstance(getattr(c, "op", None), DimShuffle)
-                and len(fgraph.clients[c.outputs[0]]) <= 1
+                isinstance(c.op, DimShuffle) and len(fgraph.clients[c.outputs[0]]) <= 1
             ):
                 c = fgraph.clients[c.outputs[0]][0][0]
-            if getattr(c, "op", "") in [self.main, self.inverse, self.reciprocal]:
+            if c.op in [self.main, self.inverse, self.reciprocal]:
                 return False
 
         # Here we make the canonical version of the graph around this node

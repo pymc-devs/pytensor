@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-from packaging.version import parse as version_parse
 
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
@@ -80,11 +79,7 @@ def test_jax_basic_multiout():
     compare_jax_and_py(out_fg, [X.astype(config.floatX)], assert_fn=assert_fn)
 
 
-@pytest.mark.xfail(
-    version_parse(jax.__version__) >= version_parse("0.2.12"),
-    reason="Omnistaging cannot be disabled",
-)
-def test_jax_basic_multiout_omni():
+def test_jax_max_and_argmax():
     # Test that a single output of a multi-output `Op` can be used as input to
     # another `Op`
     x = dvector()
@@ -95,10 +90,6 @@ def test_jax_basic_multiout_omni():
     compare_jax_and_py(out_fg, [np.r_[1, 2]])
 
 
-@pytest.mark.xfail(
-    version_parse(jax.__version__) >= version_parse("0.2.12"),
-    reason="Omnistaging cannot be disabled",
-)
 def test_tensor_basics():
     y = vector("y")
     y.tag.test_value = np.r_[1.0, 2.0].astype(config.floatX)

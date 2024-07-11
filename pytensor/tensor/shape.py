@@ -800,10 +800,8 @@ class Reshape(COp):
                 rest_size = input_size // maximum(requ_size, 1)
             return [
                 tuple(
-                    [
-                        ptb.switch(eq(requ[i], -1), rest_size, requ[i])
-                        for i in range(self.ndim)
-                    ]
+                    ptb.switch(eq(requ[i], -1), rest_size, requ[i])
+                    for i in range(self.ndim)
                 )
             ]
 
@@ -926,13 +924,13 @@ def shape_padaxis(t, axis):
     --------
     >>> tensor = pytensor.tensor.type.tensor3()
     >>> pytensor.tensor.shape_padaxis(tensor, axis=0)
-    DimShuffle{x,0,1,2}.0
+    ExpandDims{axis=0}.0
     >>> pytensor.tensor.shape_padaxis(tensor, axis=1)
-    DimShuffle{0,x,1,2}.0
+    ExpandDims{axis=1}.0
     >>> pytensor.tensor.shape_padaxis(tensor, axis=3)
-    DimShuffle{0,1,2,x}.0
+    ExpandDims{axis=3}.0
     >>> pytensor.tensor.shape_padaxis(tensor, axis=-1)
-    DimShuffle{0,1,2,x}.0
+    ExpandDims{axis=3}.0
 
     See Also
     --------

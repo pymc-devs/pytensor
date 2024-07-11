@@ -1,5 +1,5 @@
 import logging
-import os
+from pathlib import Path
 
 import pytensor
 from pytensor.configdefaults import config
@@ -17,6 +17,9 @@ from pytensor.tensor.type import TensorType
 
 
 _logger = logging.getLogger(__name__)
+
+
+C_CODE_PATH = Path(__file__).parent / "c_code"
 
 
 class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
@@ -245,14 +248,7 @@ class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
             sub["blas_set_num_threads"] = ""
             sub["blas_get_num_threads"] = "0"
 
-        final_code = ""
-        with open(
-            os.path.join(
-                os.path.split(__file__)[0], os.path.join("c_code", "corr3d_gemm.c")
-            )
-        ) as f:
-            code = f.read()
-            final_code += code
+        final_code = Path(C_CODE_PATH / "corr3d_gemm.c").read_text("utf-8")
         return final_code % sub
 
     def c_code_helper(

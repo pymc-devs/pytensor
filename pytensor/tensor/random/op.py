@@ -238,7 +238,7 @@ class RandomVariable(Op):
                     raise ValueError(
                         f"Size length is incompatible with batched dimensions of parameter {i} {param}:\n"
                         f"len(size) = {size_len}, len(batched dims {param}) = {param_batched_dims}. "
-                        f"Size length must be 0 or >= {param_batched_dims}"
+                        f"Size must be None or have length >= {param_batched_dims}"
                     )
 
             return tuple(size) + supp_shape
@@ -454,11 +454,10 @@ def vectorize_random_variable(
 
     original_dist_params = op.dist_params(node)
     old_size = op.size_param(node)
-    len_old_size = (
-        None if isinstance(old_size.type, NoneTypeT) else get_vector_length(old_size)
-    )
 
-    if len_old_size and equal_computations([old_size], [size]):
+    if not isinstance(old_size.type, NoneTypeT) and equal_computations(
+        [old_size], [size]
+    ):
         # If the original RV had a size variable and a new one has not been provided,
         # we need to define a new size as the concatenation of the original size dimensions
         # and the novel ones implied by new broadcasted batched parameters dimensions.

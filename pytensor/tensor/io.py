@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 
 from pytensor.graph.basic import Apply, Constant
@@ -38,8 +40,8 @@ class LoadFromDisk(Op):
         return Apply(self, [path], [tensor(dtype=self.dtype, shape=self.shape)])
 
     def perform(self, node, inp, out):
-        path = inp[0]
-        if path.split(".")[-1] == "npz":
+        path = Path(inp[0])
+        if path.suffix != ".npy":
             raise ValueError(f"Expected a .npy file, got {path} instead")
         result = np.load(path, mmap_mode=self.mmap_mode)
         if result.dtype != self.dtype:

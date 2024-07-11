@@ -27,7 +27,7 @@ from pytensor.graph.basic import (
 )
 from pytensor.graph.destroyhandler import DestroyHandler
 from pytensor.graph.features import ReplaceValidate
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import compute_test_value
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import (
@@ -1303,7 +1303,7 @@ def scan_save_mem(fgraph, node):
         for cl, _ in fgraph.clients[out]:
             # 2.1 outputs of the function
             # => output needs all its intermediate values
-            if isinstance(cl, str):
+            if isinstance(cl.op, Output):
                 # if the node is actually an output, then
                 # we need to store the entire thing
                 global_nsteps = None
@@ -1412,7 +1412,7 @@ def scan_save_mem(fgraph, node):
     for i, out in enumerate(node.outputs[:c_outs]):
         # look at all its clients
         for cl, _ in fgraph.clients[out]:
-            if isinstance(cl, str):
+            if isinstance(cl.op, Output):
                 store_steps[i] = 0
                 break
             elif not isinstance(cl.op, Subtensor):
@@ -1623,9 +1623,7 @@ def scan_save_mem(fgraph, node):
         (inps, outs, info, node_ins, compress_map) = compress_outs(
             op, not_required, nw_inputs
         )
-        inv_compress_map = {}
-        for k, v in compress_map.items():
-            inv_compress_map[v] = k
+        inv_compress_map = {v: k for k, v in compress_map.items()}
 
         # 3.6 Compose the new scan
         # TODO: currently we don't support scan with 0 step. So
@@ -1936,7 +1934,7 @@ class ScanMerge(GraphRewriter):
             profile=old_op.profile,
             truncate_gradient=old_op.truncate_gradient,
             allow_gc=old_op.allow_gc,
-            name="&".join([nd.op.name for nd in nodes]),
+            name="&".join(nd.op.name for nd in nodes),
         )
         new_outs = new_op(*outer_ins)
 
@@ -2309,7 +2307,7 @@ def scan_push_out_dot1(fgraph, node):
             and isinstance(out.owner.op.scalar_op, ps.Add)
             and inp in out.owner.inputs
             and len(fgraph.clients[outer_out]) == 1
-            and not isinstance(fgraph.clients[outer_out][0][0], str)
+            and not isinstance(fgraph.clients[outer_out][0][0], Output)
             and isinstance(fgraph.clients[outer_out][0][0].op, Subtensor)
             and fgraph.clients[outer_out][0][0].op.idx_list == (-1,)
         ):

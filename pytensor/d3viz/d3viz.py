@@ -4,13 +4,13 @@ Author: Christof Angermueller <cangermueller@gmail.com>
 """
 
 import json
-import os
 import shutil
+from pathlib import Path
 
 from pytensor.d3viz.formatting import PyDotFormatter
 
 
-__path__ = os.path.dirname(os.path.realpath(__file__))
+__path__ = Path(__file__).parent
 
 
 def replace_patterns(x, replace):
@@ -40,7 +40,7 @@ def safe_json(obj):
     return json.dumps(obj).replace("<", "\\u003c")
 
 
-def d3viz(fct, outfile, copy_deps=True, *args, **kwargs):
+def d3viz(fct, outfile: Path | str, copy_deps: bool = True, *args, **kwargs):
     """Create HTML file with dynamic visualizing of an PyTensor function graph.
 
     In the HTML file, the whole graph or single nodes can be moved by drag and
@@ -59,7 +59,7 @@ def d3viz(fct, outfile, copy_deps=True, *args, **kwargs):
     ----------
     fct : pytensor.compile.function.types.Function
         A compiled PyTensor function, variable, apply or a list of variables.
-    outfile : str
+    outfile : Path | str
         Path to output HTML file.
     copy_deps : bool, optional
         Copy javascript and CSS dependencies to output directory.
@@ -78,37 +78,34 @@ def d3viz(fct, outfile, copy_deps=True, *args, **kwargs):
     dot_graph = dot_graph.decode("utf8")
 
     # Create output directory if not existing
-    outdir = os.path.dirname(outfile)
-    if outdir != "" and not os.path.exists(outdir):
-        os.makedirs(outdir)
+    outdir = Path(outfile).parent
+    outdir.mkdir(exist_ok=True)
 
     # Read template HTML file
-    template_file = os.path.join(__path__, "html", "template.html")
-    with open(template_file) as f:
-        template = f.read()
+    template_file = __path__ / "html/template.html"
+    template = template_file.read_text(encoding="utf-8")
 
     # Copy dependencies to output directory
     src_deps = __path__
     if copy_deps:
-        dst_deps = "d3viz"
+        dst_deps = outdir / "d3viz"
         for d in ("js", "css"):
-            dep = os.path.join(outdir, dst_deps, d)
-            if not os.path.exists(dep):
-                shutil.copytree(os.path.join(src_deps, d), dep)
+            dep = dst_deps / d
+            if not dep.exists():
+                shutil.copytree(src_deps / d, dep)
     else:
         dst_deps = src_deps
 
     # Replace patterns in template
     replace = {
-        "%% JS_DIR %%": os.path.join(dst_deps, "js"),
-        "%% CSS_DIR %%": os.path.join(dst_deps, "css"),
+        "%% JS_DIR %%": dst_deps / "js",
+        "%% CSS_DIR %%": dst_deps / "css",
         "%% DOT_GRAPH %%": safe_json(dot_graph),
     }
     html = replace_patterns(template, replace)
 
     # Write HTML file
-    with open(outfile, "w") as f:
-        f.write(html)
+    Path(outfile).write_text(html)
 
 
 def d3write(fct, path, *args, **kwargs):
