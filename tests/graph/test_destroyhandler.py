@@ -2,7 +2,6 @@ from copy import copy
 
 import pytest
 
-from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Constant, Variable, clone
 from pytensor.graph.destroyhandler import DestroyHandler
 from pytensor.graph.features import ReplaceValidate
@@ -408,7 +407,6 @@ def test_value_repl():
     assert g.consistent()
 
 
-@config.change_flags(compute_test_value="off")
 def test_value_repl_2():
     x, y, z = inputs()
     sy = sigmoid(y)
