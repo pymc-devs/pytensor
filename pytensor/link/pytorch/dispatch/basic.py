@@ -12,7 +12,9 @@ from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Eye, Join
 @singledispatch
 def pytorch_typify(data, dtype=None, **kwargs):
     r"""Convert instances of PyTensor `Type`\s to PyTorch types."""
-    return torch.as_tensor(data, dtype=dtype)
+    if data is not None:
+        return torch.as_tensor(data, dtype=dtype)
+    return None
 
 
 @singledispatch
