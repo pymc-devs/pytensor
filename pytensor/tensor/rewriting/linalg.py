@@ -613,10 +613,10 @@ def rewrite_inv_inv(fgraph, node):
     if potential_inner_inv is None or potential_inner_inv.op is None:
         return None
     # Check if its an inner solve as well, does that have b = eye
-    solve_inv_check = True if hasattr(potential_inner_inv.op, "core_op") else False
-    # if potential_inner_inv.op and isinstance(potential_inner_inv.op, DimShuffle):
-    # return None
-    if solve_inv_check and isinstance(potential_inner_inv.op.core_op, valid_solves):
+    solve_inv_check = False
+    if hasattr(potential_inner_inv.op, "core_op") and isinstance(
+        potential_inner_inv.op.core_op, valid_solves
+    ):
         solve_inv_check = _find_solve_with_eye(potential_inner_inv)
     if not solve_inv_check:
         return None
