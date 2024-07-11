@@ -599,8 +599,8 @@ def rewrite_inv_inv(fgraph, node):
     valid_inverses = (MatrixInverse, MatrixPinv, Solve, SolveTriangular)
     valid_solves = (Solve, SolveTriangular)
     # Check if Solve has b = eye
-    solve_inv_check = True
-    if isinstance(node.op.core_op, valid_solves):
+    solve_inv_check = False
+    if hasattr(node.op, "core_op") and isinstance(node.op.core_op, valid_solves):
         solve_inv_check = _find_solve_with_eye(node)
 
     if not solve_inv_check:
