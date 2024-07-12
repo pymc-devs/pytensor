@@ -21,7 +21,9 @@ def pytorch_funcify_SVD(op, **kwargs):
 
     def svd(x):
         U, S, V = torch.linalg.svd(x, full_matrices=full_matrices)
-        return U, S, V if compute_uv else S
+        if compute_uv:
+            return U, S, V
+        return S
 
     return svd
 

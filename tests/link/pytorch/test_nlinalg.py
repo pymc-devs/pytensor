@@ -22,23 +22,13 @@ def matrix_test():
 
 @pytest.mark.parametrize(
     "func",
-    (
-        pt_nla.eig,
-        pt_nla.eigh,
-        pt_nla.slogdet,
-        pytest.param(
-            pt_nla.inv, marks=pytest.mark.xfail(reason="Blockwise not implemented")
-        ),
-        pytest.param(
-            pt_nla.det, marks=pytest.mark.xfail(reason="Blockwise not implemented")
-        ),
-    ),
+    (pt_nla.eig, pt_nla.eigh, pt_nla.slogdet, pt_nla.MatrixInverse(), pt_nla.Det()),
 )
 def test_lin_alg_no_params(func, matrix_test):
     x, test_value = matrix_test
 
-    outs = func(x)
-    out_fg = FunctionGraph([x], outs)
+    out = func(x)
+    out_fg = FunctionGraph([x], out if isinstance(out, list) else [out])
 
     def assert_fn(x, y):
         np.testing.assert_allclose(x, y, rtol=1e-3)
@@ -58,18 +48,17 @@ def test_lin_alg_no_params(func, matrix_test):
 def test_qr(mode, matrix_test):
     x, test_value = matrix_test
     outs = pt_nla.qr(x, mode=mode)
-    out_fg = FunctionGraph([x], [outs] if mode == "r" else outs)
+    out_fg = FunctionGraph([x], outs if isinstance(outs, list) else [outs])
     compare_pytorch_and_py(out_fg, [test_value])
 
 
-@pytest.mark.xfail(reason="Blockwise not implemented")
-@pytest.mark.parametrize("compute_uv", [False, True])
-@pytest.mark.parametrize("full_matrices", [False, True])
+@pytest.mark.parametrize("compute_uv", [True, False])
+@pytest.mark.parametrize("full_matrices", [True, False])
 def test_svd(compute_uv, full_matrices, matrix_test):
     x, test_value = matrix_test
 
-    outs = pt_nla.svd(x, full_matrices=full_matrices, compute_uv=compute_uv)
-    out_fg = FunctionGraph([x], outs)
+    out = pt_nla.SVD(full_matrices=full_matrices, compute_uv=compute_uv)(x)
+    out_fg = FunctionGraph([x], out if isinstance(out, list) else [out])
 
     def assert_fn(x, y):
         np.testing.assert_allclose(x, y, rtol=1e-3)
