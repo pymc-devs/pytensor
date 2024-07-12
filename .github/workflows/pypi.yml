@@ -36,7 +36,7 @@ jobs:
           path: dist/*.tar.gz
 
   build_wheels:
-    name: Build ${{ matrix.python-version }} wheels on ${{ matrix.platform }}
+    name: Build wheels for ${{ matrix.platform }}
     runs-on: ${{ matrix.platform }}
     strategy:
       matrix:
