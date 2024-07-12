@@ -3732,16 +3732,14 @@ class AllocDiag(OpFromGraph):
     Wrapper Op for alloc_diag graphs
     """
 
-    __props__ = ("offset", "axis1", "axis2", "inline")
+    __props__ = ("offset", "axis1", "axis2")
 
     def __init__(self, *args, offset, axis1, axis2, **kwargs):
-        inline = kwargs.pop("inline", False)
         self.offset = offset
         self.axis1 = axis1
         self.axis2 = axis2
-        self.inline = inline
 
-        super().__init__(*args, **kwargs, strict=True, inline=inline)
+        super().__init__(*args, **kwargs, strict=True)
 
 
 def alloc_diag(diag, offset=0, axis1=0, axis2=1):
@@ -3779,7 +3777,12 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
         result = result.transpose(axes)
 
     return AllocDiag(
-        inputs=[diag], outputs=[result], offset=offset, axis1=axis1, axis2=axis2
+        inputs=[diag],
+        outputs=[result],
+        offset=offset,
+        axis1=axis1,
+        axis2=axis2,
+        inline=True,
     )(diag)
 
 
