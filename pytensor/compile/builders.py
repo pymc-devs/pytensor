@@ -758,7 +758,7 @@ class OpFromGraph(Op, HasInnerGraph):
             ]
             new_inner_inputs = self.inner_inputs[:num_expected_inps] + unshared_inputs
 
-            new_op = self(
+            new_op = type(self)(
                 inputs=new_inner_inputs,
                 outputs=new_inner_outputs,
                 inline=self.is_inline,
