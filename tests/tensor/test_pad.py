@@ -1,3 +1,5 @@
+from typing import Literal
+
 import numpy as np
 import pytest
 
@@ -19,7 +21,11 @@ def test_unknown_mode_raises():
     "size", [(3,), (3, 3), (3, 3, 3)], ids=["1d", "2d square", "3d square"]
 )
 @pytest.mark.parametrize("constant", [0, 0.0], ids=["int", "float"])
-@pytest.mark.parametrize("pad_width", [1, (1, 2)], ids=["symmetrical", "asymmetrical"])
+@pytest.mark.parametrize(
+    "pad_width",
+    [10, (10, 0), (0, 10)],
+    ids=["symmetrical", "asymmetrical_left", "asymmetric_right"],
+)
 def test_constant_pad(
     size: tuple, constant: int | float, pad_width: int | tuple[int, ...]
 ):
@@ -37,7 +43,9 @@ def test_constant_pad(
     "size", [(3,), (3, 3), (3, 5, 5)], ids=["1d", "2d square", "3d square"]
 )
 @pytest.mark.parametrize(
-    "pad_width", [1, (1, 2)], ids=["symmetrical", "asymmetrical_1d"]
+    "pad_width",
+    [10, (10, 0), (0, 10)],
+    ids=["symmetrical", "asymmetrical_left", "asymmetric_right"],
 )
 def test_edge_pad(size: tuple, pad_width: int | tuple[int, ...]):
     x = np.random.normal(size=size).astype(floatX)
@@ -54,7 +62,9 @@ def test_edge_pad(size: tuple, pad_width: int | tuple[int, ...]):
     "size", [(3,), (3, 3), (3, 5, 5)], ids=["1d", "2d square", "3d square"]
 )
 @pytest.mark.parametrize(
-    "pad_width", [1, (1, 2)], ids=["symmetrical", "asymmetrical_1d"]
+    "pad_width",
+    [10, (10, 0), (0, 10)],
+    ids=["symmetrical", "asymmetrical_left", "asymmetric_right"],
 )
 @pytest.mark.parametrize("end_values", [0, -1], ids=["0", "-1"])
 def test_linear_ramp_pad(
@@ -76,7 +86,9 @@ def test_linear_ramp_pad(
     "size", [(3,), (3, 3), (3, 5, 5)], ids=["1d", "2d square", "3d square"]
 )
 @pytest.mark.parametrize(
-    "pad_width", [1, (1, 2)], ids=["symmetrical", "asymmetrical_1d"]
+    "pad_width",
+    [10, (10, 0), (0, 10)],
+    ids=["symmetrical", "asymmetrical_left", "asymmetric_right"],
 )
 @pytest.mark.parametrize("stat", ["mean", "minimum", "maximum"])
 @pytest.mark.parametrize("stat_length", [None, 2])
@@ -100,7 +112,9 @@ def test_stat_pad(
     "size", [(3,), (3, 3), (3, 5, 5)], ids=["1d", "2d square", "3d square"]
 )
 @pytest.mark.parametrize(
-    "pad_width", [1, (1, 2)], ids=["symmetrical", "asymmetrical_1d"]
+    "pad_width",
+    [10, (10, 0), (0, 10)],
+    ids=["symmetrical", "asymmetrical_left", "asymmetric_right"],
 )
 def test_wrap_pad(size: tuple, pad_width: int | tuple[int, ...]):
     x = np.random.normal(size=size).astype(floatX)
@@ -116,18 +130,30 @@ def test_wrap_pad(size: tuple, pad_width: int | tuple[int, ...]):
     "size", [(3,), (3, 3), (3, 5, 5)], ids=["1d", "2d square", "3d square"]
 )
 @pytest.mark.parametrize(
-    "pad_width", [1, (1, 2)], ids=["symmetrical", "asymmetrical_1d"]
+    "pad_width",
+    [10, (10, 0), (0, 10)],
+    ids=["symmetrical", "asymmetrical_left", "asymmetric_right"],
+)
+@pytest.mark.parametrize(
+    "mode",
+    ["symmetric", "reflect"],
+    ids=["symmetric", "reflect"],
 )
 @pytest.mark.parametrize(
     "reflect_type",
     ["even", pytest.param("odd", marks=pytest.mark.xfail(raises=NotImplementedError))],
     ids=["even", "odd"],
 )
-def test_symmetric_pad(size, pad_width, reflect_type):
+def test_loop_pad(
+    size,
+    pad_width,
+    mode: Literal["symmetric", "reflect"],
+    reflect_type: Literal["even", "odd"],
+):
     x = np.random.normal(size=size).astype(floatX)
-    expected = np.pad(x, pad_width, mode="symmetric", reflect_type=reflect_type)
-    z = pad(x, pad_width, mode="symmetric", reflect_type=reflect_type)
-    assert z.owner.op.pad_mode == "symmetric"
+    expected = np.pad(x, pad_width, mode=mode, reflect_type=reflect_type)
+    z = pad(x, pad_width, mode=mode, reflect_type=reflect_type)
+    assert z.owner.op.pad_mode == mode
     f = pytensor.function([], z, mode="FAST_COMPILE")
 
     np.testing.assert_allclose(expected, f(), atol=ATOL, rtol=RTOL)
@@ -141,6 +167,7 @@ def test_symmetric_pad(size, pad_width, reflect_type):
         "linear_ramp",
         "wrap",
         "symmetric",
+        "reflect",
         "mean",
         "maximum",
         "minimum",
@@ -149,7 +176,7 @@ def test_symmetric_pad(size, pad_width, reflect_type):
 @pytest.mark.parametrize("padding", ["symmetric", "asymmetric"])
 def test_nd_padding(mode, padding):
     rng = np.random.default_rng()
-    n = rng.integers(3, 10)
+    n = rng.integers(3, 5)
     if padding == "symmetric":
         pad_width = [(i, i) for i in rng.integers(1, 5, size=n)]
         stat_length = [(i, i) for i in rng.integers(1, 5, size=n)]

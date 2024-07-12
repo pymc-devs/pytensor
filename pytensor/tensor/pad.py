@@ -1,19 +1,25 @@
 from collections.abc import Callable
+from functools import partial
 from typing import Literal, cast
 
 from pytensor.compile.builders import OpFromGraph
+from pytensor.ifelse import ifelse
+from pytensor.scan import scan
 from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import (
     TensorVariable,
     as_tensor,
+    concatenate,
     expand_dims,
     moveaxis,
+    roll,
+    switch,
     zeros,
 )
 from pytensor.tensor.extra_ops import broadcast_to, linspace
 from pytensor.tensor.math import divmod as pt_divmod
+from pytensor.tensor.math import eq, gt, mean, minimum
 from pytensor.tensor.math import max as pt_max
-from pytensor.tensor.math import mean, minimum
 from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.shape import specify_broadcastable
 from pytensor.tensor.subtensor import set_subtensor
@@ -347,6 +353,68 @@ def _wrap_pad(x: TensorVariable, pad_width: TensorVariable) -> TensorVariable:
     return x
 
 
+def _symmetric_inner(i, x, axis, before):
+    return i + 1, ifelse(eq((int(before) + i) % 2, 0), flip(x, axis=axis), x)
+
+
+def _reflect_inner(i, x, axis, before):
+    reflect_slice = _slice_at_axis(slice(1, -1), axis)
+    reflected_x = flip(x, axis=axis)[reflect_slice]
+    x_with_reflection = concatenate([x, reflected_x], axis=axis)
+
+    shift = -(i + 1) if before else i + 1
+    original_slice = _slice_at_axis(slice(0, x.shape[axis]), axis)
+
+    x = roll(x_with_reflection, shift, axis=axis)[original_slice]
+    return i + 1, ifelse(eq(i % 2, 0), flip(x, axis=axis), x)
+
+
+inner_func_factory = {"symmetric": _symmetric_inner, "reflect": _reflect_inner}
+
+
+def _build_padding_one_direction(array, repeats, *, axis, before, method):
+    inner_func = partial(inner_func_factory[method], before=before, axis=axis)
+    [_, parts], _ = scan(
+        inner_func, non_sequences=[array], outputs_info=[0, None], n_steps=repeats
+    )
+
+    parts = moveaxis(parts, 0, axis)
+    new_shape = [-1 if i == axis else array.shape[i] for i in range(array.ndim)]
+    padding = parts.reshape(new_shape)
+
+    return padding
+
+
+def _looping_pad(array, pad_width, method="symmetric"):
+    pad_width = broadcast_to(pad_width, as_tensor((array.ndim, 2)))
+
+    for axis in range(array.ndim):
+        original_size = array.shape[axis]
+        repeats, remainders = pt_divmod(pad_width[axis], original_size)
+        has_remainder = gt(remainders, 0)
+        repeats = repeats + has_remainder
+
+        left_padding = _build_padding_one_direction(
+            array, repeats[0], before=True, axis=axis, method=method
+        )
+        right_padding = _build_padding_one_direction(
+            array, repeats[1], before=False, axis=axis, method=method
+        )
+
+        array = concatenate([left_padding, array, right_padding], axis=axis)
+        left_trim = switch(
+            has_remainder[0], (original_size - remainders[0]), remainders[0]
+        )
+        right_trim = array.shape[axis] - switch(
+            has_remainder[1], (original_size - remainders[1]), remainders[1]
+        )
+
+        trim_slice = _slice_at_axis(slice(left_trim, right_trim), axis)
+        array = array[trim_slice]
+
+    return array
+
+
 class Pad(OpFromGraph):
     """
     Wrapper Op for Pad graphs
@@ -410,15 +478,15 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
             raise NotImplementedError("Odd reflection not implemented")
 
         attrs.update({"reflect_type": reflect_type})
-        # outputs = _looping_pad(x, pad_width, kind="symmetric")
-        raise NotImplementedError("Even reflection not implemented")
+        outputs = _looping_pad(x, pad_width, method="symmetric")
 
     elif mode == "reflect":
         reflect_type = kwargs.pop("reflect_type", "even")
         if reflect_type == "odd":
             raise NotImplementedError("Odd reflection not implemented")
         attrs.update({"reflect_type": reflect_type})
-        raise NotImplementedError("Reflect padding not implemented")
+        outputs = _looping_pad(x, pad_width, method="reflect")
+
     else:
         raise ValueError(f"Invalid mode: {mode}")
 
