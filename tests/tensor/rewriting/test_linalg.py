@@ -10,6 +10,7 @@ from pytensor import function
 from pytensor import tensor as pt
 from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
+from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
@@ -567,12 +568,5 @@ def test_inv_inv_rewrite(inv_op_1, inv_op_2):
     x = pt.matrix("x")
     op1 = get_pt_function(x, inv_op_1)
     op2 = get_pt_function(op1, inv_op_2)
-    f_rewritten = function([x], op2, mode="FAST_RUN")
-    print(f_rewritten.dprint())
-    nodes = f_rewritten.maker.fgraph.apply_nodes
-
-    valid_inverses = (MatrixInverse, MatrixPinv, Solve, SolveTriangular)
-
-    assert not any(isinstance(node.op, valid_inverses) for node in nodes)
-    x_testing = np.random.rand(10, 10).astype(config.floatX)
-    np.testing.assert_allclose(f_rewritten(x_testing), x_testing)
+    rewritten_out = rewrite_graph(op2)
+    assert rewritten_out == x
