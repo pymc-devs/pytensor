@@ -572,17 +572,22 @@ def svd_uv_merge(fgraph, node):
                     return [cl.outputs[1]]
 
 
-def _find_solve_with_eye(node):
+def _find_solve_with_eye(node) -> bool:
+    """
+    The result of solve(A, b) is the solution x to the linear equation Ax = b. If b is an identity matrix (Eye), x is simply inv(A).
+    Here, we are just recognising whether the solve operation returns an inverse or not; not replacing it because solve is mathematically more stable than inv.
+    """
     valid_solves = (Solve, SolveTriangular)
-    # First, we look for the solve op
+    # First, we verify whether we have a valid solve op
     if not (
         isinstance(node.op, Blockwise) and isinstance(node.op.core_op, valid_solves)
     ):
         return False
-    # Check whether second input to solve is Eye
+    # If the current op is solve, we check for b. If b is an identity matrix (Eye), we can return True
     solve_inputs = node.inputs
     eye_input = solve_inputs[1].owner
 
+    # We check for b = Eye and also make sure that if it was an Eye, then k = 0 (1's are only across the main diagonal)
     if not (eye_input and isinstance(eye_input.op, Eye)):
         return False
 
@@ -595,9 +600,29 @@ def _find_solve_with_eye(node):
 @register_stabilize
 @node_rewriter([Blockwise])
 def rewrite_inv_inv(fgraph, node):
+    """
+    This rewrite takes advantage of the fact that if there are two consecutive inverse operations (inv(inv(input))), we get back our original input without having to compute inverse once.
+
+    Here, we check for direct inverse operations (inv/pinv) and also solve operations (solve/solve_triangular) in the case when b = Eye. This allows any combination of these "inverse" nodes to be simply rewritten.
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
     valid_inverses = (MatrixInverse, MatrixPinv, Solve, SolveTriangular)
     valid_solves = (Solve, SolveTriangular)
     # Check if its a valid inverse operation (either inv/pinv or if its solve, then b = eye)
+    # In case the outer operation is an inverse, it directly goes to the next step of finding inner operation
+    # If the outer operation is a solve op with b = Eye, it treats it as inverse and finds the inner operation
+    # If the outer operation is not an inverse (neither inv nor solve with eye), we do not apply this rewrite
     inv_check = False
     if isinstance(node.op, Blockwise) and isinstance(node.op.core_op, valid_inverses):
         inv_check = True
@@ -611,16 +636,17 @@ def rewrite_inv_inv(fgraph, node):
     if potential_inner_inv is None or potential_inner_inv.op is None:
         return None
 
-    # Check if its a valid inverse operation (either inv/pinv or if its solve, then b = eye)
-    inv_check = False
+    # Similar to the check for outer operation, we now run the same checks for the inner op.
+    # If its an inverse or solve with eye, we apply the rewrite. Otherwise, we return None.
+    inv_check_inner = False
     if isinstance(potential_inner_inv.op, Blockwise) and isinstance(
         potential_inner_inv.op.core_op, valid_inverses
     ):
-        inv_check = True
+        inv_check_inner = True
         if isinstance(potential_inner_inv.op.core_op, valid_solves):
-            inv_check = _find_solve_with_eye(potential_inner_inv)
+            inv_check_inner = _find_solve_with_eye(potential_inner_inv)
 
-    if not inv_check:
+    if not inv_check_inner:
         return None
 
     if not (
