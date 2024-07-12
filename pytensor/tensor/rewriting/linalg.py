@@ -10,7 +10,7 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.scalar.basic import Mul
 from pytensor.tensor.basic import (
-    AllocDiag2,
+    AllocDiag,
     Eye,
     TensorVariable,
     diagonal,
@@ -475,7 +475,7 @@ def rewrite_det_diag_to_prod_diag(fgraph, node):
     # Check for use of pt.diag first
     if (
         inputs.owner
-        and isinstance(inputs.owner.op, AllocDiag2)
+        and isinstance(inputs.owner.op, AllocDiag)
         and inputs.owner.op.offset == 0
     ):
         diag_input = inputs.owner.inputs[0]

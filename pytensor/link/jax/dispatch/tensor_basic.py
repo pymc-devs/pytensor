@@ -10,7 +10,7 @@ from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import (
     Alloc,
-    AllocDiag2,
+    AllocDiag,
     AllocEmpty,
     ARange,
     ExtractDiag,
@@ -212,10 +212,10 @@ def jax_funcify_Tri(op, node, **kwargs):
 
 
 @register_specialize
-@node_rewriter([AllocDiag2])
+@node_rewriter([AllocDiag])
 def eagerly_inline_alloc_diag(fgraph, node):
     """
-    Inline `AllocDiag2` OpFromGraph into the graph so the component Ops can themselves be jaxified
+    Inline `AllocDiag` OpFromGraph into the graph so the component Ops can themselves be jaxified
 
     Parameters
     ----------
