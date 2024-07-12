@@ -3,17 +3,11 @@ import warnings
 import jax.numpy as jnp
 import numpy as np
 
-import pytensor
-from pytensor.compile import optdb
-from pytensor.graph import node_rewriter
 from pytensor.graph.basic import Constant
-from pytensor.graph.rewriting.basic import in2out
-from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import (
     Alloc,
-    AllocDiag,
     AllocEmpty,
     ARange,
     ExtractDiag,
@@ -211,39 +205,3 @@ def jax_funcify_Tri(op, node, **kwargs):
         return jnp.tri(*args, dtype=op.dtype)
 
     return tri
-
-
-@node_rewriter([AllocDiag])
-def eagerly_inline_alloc_diag(fgraph, node):
-    """
-    Inline `AllocDiag` OpFromGraph into the graph so the component Ops can themselves be jaxified
-
-    Parameters
-    ----------
-    fgraph: FunctionGraph
-        The function graph being rewritten
-    node: Apply
-        Node of the function graph to be optimized
-
-    Returns
-    -------
-
-    """
-    [input] = node.inputs
-    [output] = node.op.inner_outputs
-    inner_input = output.owner.inputs[1]
-
-    inline = pytensor.clone_replace(output, {inner_input: input})
-
-    return [inline]
-
-
-remove_alloc_ofg_opt = SequenceDB()
-remove_alloc_ofg_opt.register(
-    "inline_alloc_diag",
-    in2out(eagerly_inline_alloc_diag),
-    "jax",
-)
-
-# Do this right away so other JAX rewrites can act on the inner graph
-optdb.register("jax_inline_alloc_diag", remove_alloc_ofg_opt, "jax", position=0)
