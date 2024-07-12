@@ -54,7 +54,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels
+          name: wheels-${{ matrix.platform }}
           path: ./wheelhouse/*.whl
 
   check_dist:
@@ -69,9 +69,19 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: wheels
+          name: wheels-macos-12
           path: dist
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-windows-2022
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-ubuntu-20.04
+          path: dist
+  
       - name: Check SDist
         run: |
           mkdir -p test-sdist
@@ -98,7 +108,17 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: wheels
+          name: wheels-macos-12
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-windows-2022
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-ubuntu-20.04
           path: dist
 
       - uses: pypa/gh-action-pypi-publish@v1.9.0
