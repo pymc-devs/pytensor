@@ -1,4 +1,5 @@
 import warnings
+from collections.abc import Callable
 from functools import singledispatch
 
 import jax
@@ -119,7 +120,7 @@ def jax_funcify_ViewOp(op, **kwargs):
 
 
 @jax_funcify.register(OpFromGraph)
-def jax_funcify_OpFromGraph(ofg: OpFromGraph, node=None, **kwargs) -> callable:
+def jax_funcify_OpFromGraph(ofg: OpFromGraph, node=None, **kwargs) -> Callable:
     _ = kwargs.pop("storage_map", None)
 
     # Apply inner rewrites
