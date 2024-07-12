@@ -294,3 +294,10 @@ def test_eye(dtype):
         for _M in range(1, 6):
             for _k in list(range(_M + 2)) + [-x for x in range(1, _N + 2)]:
                 np.testing.assert_array_equal(fn(_N, _M, _k), np.eye(_N, _M, _k))
+
+
+def test_pytorch_MakeVector():
+    x = ptb.make_vector(1, 2, 3)
+    x_fg = FunctionGraph([], [x])
+
+    compare_pytorch_and_py(x_fg, [])
