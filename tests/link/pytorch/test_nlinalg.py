@@ -22,7 +22,7 @@ def matrix_test():
 
 @pytest.mark.parametrize(
     "func",
-    (pt_nla.eig, pt_nla.eigh, pt_nla.slogdet, pt_nla.MatrixInverse(), pt_nla.Det()),
+    (pt_nla.eig, pt_nla.eigh, pt_nla.slogdet, pt_nla.inv, pt_nla.det),
 )
 def test_lin_alg_no_params(func, matrix_test):
     x, test_value = matrix_test
@@ -57,7 +57,7 @@ def test_qr(mode, matrix_test):
 def test_svd(compute_uv, full_matrices, matrix_test):
     x, test_value = matrix_test
 
-    out = pt_nla.SVD(full_matrices=full_matrices, compute_uv=compute_uv)(x)
+    out = pt_nla.svd(x, full_matrices=full_matrices, compute_uv=compute_uv)
     out_fg = FunctionGraph([x], out if isinstance(out, list) else [out])
 
     def assert_fn(x, y):
