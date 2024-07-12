@@ -4,8 +4,11 @@ import jax.numpy as jnp
 import numpy as np
 
 import pytensor
+from pytensor.compile import optdb
 from pytensor.graph import node_rewriter
 from pytensor.graph.basic import Constant
+from pytensor.graph.rewriting.basic import in2out
+from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import (
@@ -24,7 +27,6 @@ from pytensor.tensor.basic import (
     get_underlying_scalar_constant_value,
 )
 from pytensor.tensor.exceptions import NotScalarConstantError
-from pytensor.tensor.rewriting.basic import register_specialize
 from pytensor.tensor.shape import Shape_i
 
 
@@ -211,7 +213,6 @@ def jax_funcify_Tri(op, node, **kwargs):
     return tri
 
 
-@register_specialize
 @node_rewriter([AllocDiag])
 def eagerly_inline_alloc_diag(fgraph, node):
     """
@@ -235,3 +236,14 @@ def eagerly_inline_alloc_diag(fgraph, node):
     inline = pytensor.clone_replace(output, {inner_input: input})
 
     return [inline]
+
+
+remove_alloc_ofg_opt = SequenceDB()
+remove_alloc_ofg_opt.register(
+    "inline_alloc_diag",
+    in2out(eagerly_inline_alloc_diag),
+    "jax",
+)
+
+# Do this right away so other JAX rewrites can act on the inner graph
+optdb.register("jax_inline_alloc_diag", remove_alloc_ofg_opt, "jax", position=0)
