@@ -3782,7 +3782,7 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
         offset=offset,
         axis1=axis1,
         axis2=axis2,
-        inline=True,
+        inline=False,
     )(diag)
 
 
