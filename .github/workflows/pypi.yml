@@ -32,6 +32,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
+          name: sdist
           path: dist/*.tar.gz
 
   build_wheels:
@@ -53,6 +54,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
+          name: wheels
           path: ./wheelhouse/*.whl
 
   check_dist:
@@ -60,10 +62,16 @@ jobs:
     needs: [make_sdist,build_wheels]
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
-          name: artifact
+          name: sdist
           path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels
+          path: dist
+
       - name: Check SDist
         run: |
           mkdir -p test-sdist
@@ -83,12 +91,17 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'release' && github.event.action == 'published'
     steps:
-    - uses: actions/download-artifact@v3
-      with:
-        name: artifact
-        path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
 
-    - uses: pypa/gh-action-pypi-publish@v1.9.0
-      with:
-        user: __token__
-        password: ${{ secrets.pypi_password }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@v1.9.0
+        with:
+          user: __token__
+          password: ${{ secrets.pypi_password }}
