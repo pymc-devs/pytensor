@@ -575,7 +575,7 @@ class OpFromGraph(Op, HasInnerGraph):
             for inp_grad in input_grads
             if not isinstance(inp_grad.type, DisconnectedType | NullType)
         ]
-        lop_op = type(self)(
+        lop_op = OpFromGraph(
             inputs=inner_inputs + connected_inner_outputs + connected_output_grads,
             outputs=connected_input_grads,
             inline=self.is_inline,
@@ -669,7 +669,7 @@ class OpFromGraph(Op, HasInnerGraph):
             for out_grad in output_grads
             if not isinstance(out_grad.type, DisconnectedType | NullType)
         ]
-        rop_op = type(self)(
+        rop_op = OpFromGraph(
             inputs=inner_inputs + eval_points,
             outputs=filtered_output_grads,
             inline=self.is_inline,
