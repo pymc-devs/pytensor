@@ -1155,14 +1155,14 @@ def _default_compiledirname() -> str:
     return safe
 
 
-def _filter_base_compiledir(path: Path) -> Path:
+def _filter_base_compiledir(path: str | Path) -> Path:
     # Expand '~' in path
-    return path.expanduser()
+    return Path(path).expanduser()
 
 
-def _filter_compiledir(path: Path) -> Path:
+def _filter_compiledir(path: str | Path) -> Path:
     # Expand '~' in path
-    path = path.expanduser()
+    path = Path(path).expanduser()
     # Turn path into the 'real' path. This ensures that:
     #   1. There is no relative path, which would fail e.g. when trying to
     #      import modules from the compile dir.
