@@ -57,7 +57,7 @@ def test_pytorch_basic():
         ],
     )
 
-    out = pt_slinalg.Cholesky(lower=False)(x)
+    out = pt_slinalg.cholesky(x, lower=False)
     out_fg = FunctionGraph([x], [out])
     compare_pytorch_and_py(
         out_fg,
@@ -79,7 +79,6 @@ def test_pytorch_basic():
     )
 
 
-@pytest.mark.xfail(reason="Blockwise not implemented")
 @pytest.mark.parametrize(
     "check_finite",
     (False, pytest.param(True, marks=pytest.mark.xfail(raises=NotImplementedError))),
