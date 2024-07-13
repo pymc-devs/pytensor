@@ -135,25 +135,46 @@ def test_wrap_pad(size: tuple, pad_width: int | tuple[int, ...]):
     ids=["symmetrical", "asymmetrical_left", "asymmetric_right"],
 )
 @pytest.mark.parametrize(
-    "mode",
-    ["symmetric", "reflect"],
-    ids=["symmetric", "reflect"],
+    "reflect_type",
+    ["even", pytest.param("odd", marks=pytest.mark.xfail(raises=NotImplementedError))],
+    ids=["even", "odd"],
+)
+def test_symmetric_pad(
+    size,
+    pad_width,
+    reflect_type: Literal["even", "odd"],
+):
+    x = np.random.normal(size=size).astype(floatX)
+    expected = np.pad(x, pad_width, mode="symmetric", reflect_type=reflect_type)
+    z = pad(x, pad_width, mode="symmetric", reflect_type=reflect_type)
+    assert z.owner.op.pad_mode == "symmetric"
+    f = pytensor.function([], z, mode="FAST_COMPILE")
+
+    np.testing.assert_allclose(expected, f(), atol=ATOL, rtol=RTOL)
+
+
+@pytest.mark.parametrize(
+    "size", [(3,), (3, 3), (3, 5, 5)], ids=["1d", "2d square", "3d square"]
+)
+@pytest.mark.parametrize(
+    "pad_width",
+    [10, (10, 0), (0, 10)],
+    ids=["symmetrical", "asymmetrical_left", "asymmetric_right"],
 )
 @pytest.mark.parametrize(
     "reflect_type",
     ["even", pytest.param("odd", marks=pytest.mark.xfail(raises=NotImplementedError))],
     ids=["even", "odd"],
 )
-def test_loop_pad(
+def test_reflect_pad(
     size,
     pad_width,
-    mode: Literal["symmetric", "reflect"],
     reflect_type: Literal["even", "odd"],
 ):
     x = np.random.normal(size=size).astype(floatX)
-    expected = np.pad(x, pad_width, mode=mode, reflect_type=reflect_type)
-    z = pad(x, pad_width, mode=mode, reflect_type=reflect_type)
-    assert z.owner.op.pad_mode == mode
+    expected = np.pad(x, pad_width, mode="reflect", reflect_type=reflect_type)
+    z = pad(x, pad_width, mode="reflect", reflect_type=reflect_type)
+    assert z.owner.op.pad_mode == "reflect"
     f = pytensor.function([], z, mode="FAST_COMPILE")
 
     np.testing.assert_allclose(expected, f(), atol=ATOL, rtol=RTOL)

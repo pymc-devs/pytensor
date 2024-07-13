@@ -12,7 +12,6 @@ from pytensor.tensor.basic import (
     concatenate,
     expand_dims,
     moveaxis,
-    roll,
     switch,
     zeros,
 )
@@ -353,29 +352,12 @@ def _wrap_pad(x: TensorVariable, pad_width: TensorVariable) -> TensorVariable:
     return x
 
 
-def _symmetric_inner(i, x, axis, before):
-    return i + 1, ifelse(eq((int(before) + i) % 2, 0), flip(x, axis=axis), x)
-
-
-def _reflect_inner(i, x, axis, before):
-    reflect_slice = _slice_at_axis(slice(1, -1), axis)
-    reflected_x = flip(x, axis=axis)[reflect_slice]
-    x_with_reflection = concatenate([x, reflected_x], axis=axis)
-
-    shift = -(i + 1) if before else i + 1
-    original_slice = _slice_at_axis(slice(0, x.shape[axis]), axis)
-
-    x = roll(x_with_reflection, shift, axis=axis)[original_slice]
-    return i + 1, ifelse(eq(i % 2, 0), flip(x, axis=axis), x)
-
-
-inner_func_factory = {"symmetric": _symmetric_inner, "reflect": _reflect_inner}
-
-
-def _build_padding_one_direction(array, repeats, *, axis, before, method):
-    inner_func = partial(inner_func_factory[method], before=before, axis=axis)
+def _build_padding_one_direction(array, array_flipped, repeats, *, inner_func, axis):
     [_, parts], _ = scan(
-        inner_func, non_sequences=[array], outputs_info=[0, None], n_steps=repeats
+        inner_func,
+        non_sequences=[array, array_flipped],
+        outputs_info=[0, None],
+        n_steps=repeats,
     )
 
     parts = moveaxis(parts, 0, axis)
@@ -385,34 +367,88 @@ def _build_padding_one_direction(array, repeats, *, axis, before, method):
     return padding
 
 
-def _looping_pad(array, pad_width, method="symmetric"):
-    pad_width = broadcast_to(pad_width, as_tensor((array.ndim, 2)))
+def _symmetric_pad(x, pad_width):
+    def _symmetric_inner(i, x, x_flipped, padding_left):
+        return i + 1, ifelse(eq(i % 2, int(padding_left)), x_flipped, x)
 
-    for axis in range(array.ndim):
-        original_size = array.shape[axis]
+    pad_width = broadcast_to(pad_width, as_tensor((x.ndim, 2)))
+
+    for axis in range(x.ndim):
+        x_flipped = flip(x, axis=axis)
+        original_size = x.shape[axis]
+
         repeats, remainders = pt_divmod(pad_width[axis], original_size)
         has_remainder = gt(remainders, 0)
         repeats = repeats + has_remainder
 
         left_padding = _build_padding_one_direction(
-            array, repeats[0], before=True, axis=axis, method=method
+            x,
+            x_flipped,
+            repeats[0],
+            axis=axis,
+            inner_func=partial(_symmetric_inner, padding_left=True),
         )
         right_padding = _build_padding_one_direction(
-            array, repeats[1], before=False, axis=axis, method=method
+            x,
+            x_flipped,
+            repeats[1],
+            axis=axis,
+            inner_func=partial(_symmetric_inner, padding_left=False),
         )
 
-        array = concatenate([left_padding, array, right_padding], axis=axis)
-        left_trim = switch(
-            has_remainder[0], (original_size - remainders[0]), remainders[0]
+        x = concatenate([flip(left_padding, axis), x, right_padding], axis=axis)
+
+        (left_trim, right_trim) = switch(
+            has_remainder, original_size - remainders, remainders
         )
-        right_trim = array.shape[axis] - switch(
-            has_remainder[1], (original_size - remainders[1]), remainders[1]
-        )
+        right_trim = x.shape[axis] - right_trim
 
         trim_slice = _slice_at_axis(slice(left_trim, right_trim), axis)
-        array = array[trim_slice]
+        x = x[trim_slice]
 
-    return array
+    return x
+
+
+def _reflect_pad(x, pad_width):
+    def _reflect_inner(i, x, x_flipped, padding_left):
+        return i + 1, ifelse(eq(i % 2, int(padding_left)), x_flipped, x)
+
+    pad_width = broadcast_to(pad_width, as_tensor((x.ndim, 2)))
+    for axis in range(x.ndim):
+        trimmed_size = x.shape[axis] - 1
+
+        trim_slice = _slice_at_axis(slice(None, -1), axis)
+        x_trimmed = x[trim_slice]
+        x_flipped = flip(x, axis=axis)[trim_slice]
+
+        repeats, remainders = pt_divmod(pad_width[axis], trimmed_size)
+        repeats = repeats + 1
+
+        left_padding = _build_padding_one_direction(
+            x_trimmed,
+            x_flipped,
+            repeats[0],
+            axis=axis,
+            inner_func=partial(_reflect_inner, padding_left=True),
+        )
+        right_padding = _build_padding_one_direction(
+            x_trimmed,
+            x_flipped,
+            repeats[1],
+            axis=axis,
+            inner_func=partial(_reflect_inner, padding_left=False),
+        )
+
+        left_trim = _slice_at_axis(slice(trimmed_size - remainders[0] - 1, -1), axis)
+        right_trim = _slice_at_axis(
+            slice(1, right_padding.shape[axis] - trimmed_size + remainders[1] + 1), axis
+        )
+
+        x = concatenate(
+            [flip(left_padding, axis)[left_trim], x, right_padding[right_trim]],
+            axis=axis,
+        )
+    return x
 
 
 class Pad(OpFromGraph):
@@ -478,14 +514,14 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
             raise NotImplementedError("Odd reflection not implemented")
 
         attrs.update({"reflect_type": reflect_type})
-        outputs = _looping_pad(x, pad_width, method="symmetric")
+        outputs = _symmetric_pad(x, pad_width)
 
     elif mode == "reflect":
         reflect_type = kwargs.pop("reflect_type", "even")
         if reflect_type == "odd":
             raise NotImplementedError("Odd reflection not implemented")
         attrs.update({"reflect_type": reflect_type})
-        outputs = _looping_pad(x, pad_width, method="reflect")
+        outputs = _reflect_pad(x, pad_width)
 
     else:
         raise ValueError(f"Invalid mode: {mode}")
