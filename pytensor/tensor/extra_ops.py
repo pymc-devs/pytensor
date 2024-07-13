@@ -1639,15 +1639,6 @@ def _linspace_core(
     return samples
 
 
-def _broadcast_inputs(*args):
-    """Helper function to preprocess inputs to *space Ops"""
-
-    args = map(ptb.as_tensor_variable, args)
-    args = broadcast_arrays(*args)
-
-    return args
-
-
 def _broadcast_base_with_inputs(start, stop, base, axis):
     """
     Broadcast the base tensor with the start and stop tensors if base is not a scalar. This is important because it
@@ -1752,7 +1743,7 @@ def linspace(
     if dtype is None:
         dtype = pytensor.config.floatX
     end, num = _check_deprecated_inputs(stop, end, num, steps)
-    start, stop = _broadcast_inputs(start, stop)
+    start, stop = broadcast_arrays(start, stop)
 
     ls = _linspace_core(
         start=start,
@@ -1780,6 +1771,9 @@ def geomspace(
     """
     Return numbers spaced evenly on a log scale (a geometric progression).
 
+    This is similar to logspace, but with endpoints specified directly. Each output sample is a constant multiple of
+    the previous.
+
     Parameters
     ----------
     Returns `num` evenly spaced samples, calculated over the interval [`start`, `stop`].
@@ -1799,8 +1793,7 @@ def geomspace(
         Number of samples to generate. Must be non-negative.
 
     base: float
-        The base of the log space. The step size between the elements in ln(samples) / ln(base)
-        (or log_base(samples)) is uniform.
+        The base of the log space.
 
     endpoint: bool
         Whether to include the endpoint in the range.
@@ -1834,7 +1827,7 @@ def geomspace(
     if dtype is None:
         dtype = pytensor.config.floatX
     stop, num = _check_deprecated_inputs(stop, end, num, steps)
-    start, stop = _broadcast_inputs(start, stop)
+    start, stop = broadcast_arrays(start, stop)
     start, stop, base = _broadcast_base_with_inputs(start, stop, base, axis)
 
     out_sign = sign(start)
@@ -1875,10 +1868,59 @@ def logspace(
     end: TensorLike | None = None,
     steps: TensorLike | None = None,
 ) -> TensorVariable:
+    """
+    Return numbers spaced evenly on a log scale.
+
+    In linear space, the sequence starts at ``base ** start`` (base to the power of start) and ends with ``base ** stop``
+     (see ``endpoint`` below).
+
+    Parameters
+    ----------
+    start: int, float, or TensorVariable
+        ``base ** start`` is the starting value of the sequence
+
+    stop: int, float or TensorVariable
+        ``base ** stop`` is the endpoint of the sequence, unless ``endopoint`` is set to False.
+        In that case, ``num + 1`` values are spaced over the interval in log-space, and the first ``num`` are returned.
+
+    num: int, default = 50
+        Number of samples to generate.
+
+    base: float, default = 10.0
+        The base of the log space. The step size between the elements in ``log(samples) / log(base)``
+         (or ``log_base(samples)`` is uniform.
+
+    endpoint: bool
+        Whether to include the endpoint in the range.
+
+    dtype: str, optional
+        dtype of the output tensor(s). If None, the dtype is inferred from that of the values provided to the `start`
+        and `stop` arguments.
+
+    axis: int
+        Axis along which to generate samples. Ignored if both `start` and `end` have dimension 0. By default, axis=0
+        will insert the samples on a new left-most dimension. To insert samples on a right-most dimension, use axis=-1.
+
+    end:  int float or TensorVariable
+        .. warning::
+            The "end" parameter is deprecated and will be removed in a future version. Use "stop" instead.
+        The end value of the sequence, unless `endpoint` is set to False.
+        In that case, the sequence consists of all but the last of `num + 1` evenly spaced samples, such that `end` is
+        excluded.
+
+    steps: int or TensorVariable
+        .. warning::
+            The "steps" parameter is deprecated and will be removed in a future version. Use "num" instead.
+        Number of samples to generate. Must be non-negative
+
+    Returns
+    -------
+
+    """
     if dtype is None:
         dtype = pytensor.config.floatX
     stop, num = _check_deprecated_inputs(stop, end, num, steps)
-    start, stop = _broadcast_inputs(start, stop)
+    start, stop = broadcast_arrays(start, stop)
     start, stop, base = _broadcast_base_with_inputs(start, stop, base, axis)
 
     ls = _linspace_core(
