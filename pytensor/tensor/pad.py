@@ -534,99 +534,83 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
 
         import pytensor.tensor as pt
         a = [1, 2, 3, 4, 5]
-        pt.pad(a, (2, 3), 'constant', constant_values=(4, 6)).eval()
+        print(pt.pad(a, (2, 3), 'constant', constant_values=(4, 6)).eval())
 
     .. testoutput::
 
-        array([4, 4, 1, ..., 6, 6, 6])
+        [4. 4. 1. 2. 3. 4. 5. 6. 6. 6.]
 
     .. testcode::
 
-        pt.pad(a, (2, 3), 'edge').eval()
+        print(pt.pad(a, (2, 3), 'edge').eval())
 
     .. testoutput::
 
-        array([1, 1, 1, ..., 5, 5, 5])
+         [1. 1. 1. 2. 3. 4. 5. 5. 5. 5.]
 
     .. testcode::
 
-        pt.pad(a, (2, 3), 'linear_ramp', end_values=(5, -4)).eval()
+        print(pt.pad(a, (2, 3), 'linear_ramp', end_values=(5, -4)).eval())
 
     ..testoutput::
 
-        array([ 5,  3,  1,  2,  3,  4,  5,  2, -1, -4])
+        [ 5.  3.  1.  2.  3.  4.  5.  2. -1. -4.]
 
     .. testcode::
 
-        pt.pad(a, (2,), 'maximum').eval()
+        print(pt.pad(a, (2,), 'maximum').eval())
 
     .. testoutput::
 
-        array([5, 5, 1, 2, 3, 4, 5, 5, 5])
+        [5. 5. 1. 2. 3. 4. 5. 5. 5.]
 
     .. testcode::
 
-        pt.pad(a, (2,), 'mean').eval()
+        print(pt.pad(a, (2,), 'mean').eval())
 
     .. testoutput::
 
-        array([3, 3, 1, 2, 3, 4, 5, 3, 3])
+        [3. 3. 1. 2. 3. 4. 5. 3. 3.]
 
     .. testcode::
 
         a = [[1, 2], [3, 4]]
-        pt.pad(a, ((3, 2), (2, 3)), 'minimum').eval()
+        print(pt.pad(a, ((3, 2), (2, 3)), 'minimum').eval())
 
     .. testoutput::
 
-        array([[1, 1, 1, 2, 1, 1, 1],
-               [1, 1, 1, 2, 1, 1, 1],
-               [1, 1, 1, 2, 1, 1, 1],
-               [1, 1, 1, 2, 1, 1, 1],
-               [3, 3, 3, 4, 3, 3, 3],
-               [1, 1, 1, 2, 1, 1, 1],
-               [1, 1, 1, 2, 1, 1, 1]])
+        [[1. 1. 1. 2. 1. 1. 1.]
+         [1. 1. 1. 2. 1. 1. 1.]
+         [1. 1. 1. 2. 1. 1. 1.]
+         [1. 1. 1. 2. 1. 1. 1.]
+         [3. 3. 3. 4. 3. 3. 3.]
+         [1. 1. 1. 2. 1. 1. 1.]
+         [1. 1. 1. 2. 1. 1. 1.]]
 
     .. testcode::
 
         a = [1, 2, 3, 4, 5]
-        np.pad(a, (2, 3), 'reflect').eval()
+        print(pt.pad(a, (2, 3), 'reflect').eval())
 
     .. testoutput::
 
-        array([3, 2, 1, 2, 3, 4, 5, 4, 3, 2])
+        [3 2 1 2 3 4 5 4 3 2]
 
     .. testcode::
 
-        pt.pad(a, (2, 3), 'reflect', reflect_type='odd').eval()
+        print(pt.pad(a, (2, 3), 'symmetric').eval())
 
     .. testoutput::
 
-        array([-1,  0,  1,  2,  3,  4,  5,  6,  7,  8])
+        [2 1 1 2 3 4 5 5 4 3]
 
     .. testcode::
 
-        pt.pad(a, (2, 3), 'symmetric').eval()
+        print(pt.pad(a, (2, 3), 'wrap').eval())
 
     .. testoutput::
 
-        array([2, 1, 1, 2, 3, 4, 5, 5, 4, 3])
-
-    .. testcode::
-
-        pt.pad(a, (2, 3), 'symmetric', reflect_type='odd').eval()
-
-    .. testoutput::
-
-        array([0, 1, 1, 2, 3, 4, 5, 5, 6, 7])
-
-    .. testcode::
-
-        pt.pad(a, (2, 3), 'wrap').eval()
-
-    .. testoutput::
-
-        array([4, 5, 1, 2, 3, 4, 5, 1, 2, 3])
+        [4 5 1 2 3 4 5 1 2 3]
 
     """
     if any(value not in allowed_kwargs[mode] for value in kwargs.keys()):

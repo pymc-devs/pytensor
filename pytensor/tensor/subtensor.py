@@ -3049,11 +3049,11 @@ def slice_at_axis(sl: slice, axis: int) -> tuple[slice, ...]:
         import pytensor.tensor as pt
 
         s = pt.slice_at_axis(slice(None, 1), 1)
-        s
+        print(s)
 
      .. testoutput::
 
-        (slice(None, None, None), slice(None, 3, -1), (...,))
+        (slice(None, None, None), slice(None, 1, None), Ellipsis)
 
     .. testcode::
 
@@ -3062,10 +3062,15 @@ def slice_at_axis(sl: slice, axis: int) -> tuple[slice, ...]:
 
         f = pytensor.function([x], x_sliced)
         x = np.arange(27).reshape(3, 3, 3)
-        f(x)
+        print(f(x))
 
     .. testoutput::
-        Output: array([[[ 0.,  1.,  2.]], [[ 9., 10., 11.]], [[18., 19., 20.]]])
+        [[[ 0.  1.  2.]]
+
+         [[ 9. 10. 11.]]
+
+         [[18. 19. 20.]]]
+
     """
     if axis >= 0:
         return (slice(None),) * axis + (sl,) + (...,)  # type: ignore
@@ -3100,15 +3105,18 @@ def flip(
     .. testcode::
 
         import pytensor
-        import pytensor as pt
+        import pytensor.tensor as pt
 
         x = pt.tensor('x', shape=(None, None))
         x_flipped = pt.flip(x, axis=0)
 
         f = pytensor.function([x], x_flipped)
         x = [[1, 2], [3, 4]]
-        f(x)
-        # Output: [[3, 4], [1, 2]]
+        print(f(x))
+
+    .. testoutput
+        [[3. 4.]
+         [1. 2.]]
 
     """
     if axis is None:
