@@ -540,7 +540,6 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
 
         array([4, 4, 1, ..., 6, 6, 6])
 
-
     .. testcode::
 
         pt.pad(a, (2, 3), 'edge').eval()
@@ -602,6 +601,7 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
         pt.pad(a, (2, 3), 'reflect', reflect_type='odd').eval()
 
     .. testoutput::
+
         array([-1,  0,  1,  2,  3,  4,  5,  6,  7,  8])
 
     .. testcode::
@@ -613,6 +613,7 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
         array([2, 1, 1, 2, 3, 4, 5, 5, 4, 3])
 
     .. testcode::
+
         pt.pad(a, (2, 3), 'symmetric', reflect_type='odd').eval()
 
     .. testoutput::
