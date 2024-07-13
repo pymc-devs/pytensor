@@ -1822,7 +1822,8 @@ def geomspace(
     Returns
     -------
     samples: TensorVariable
-        Tensor containing `num` evenly-spaced values between [start, stop]. The range is inclusive if `endpoint` is True.
+        Tensor containing `num` evenly-spaced (in log space) values between [start, stop]. The range is inclusive if
+         `endpoint` is True.
     """
     if dtype is None:
         dtype = pytensor.config.floatX
@@ -1915,7 +1916,9 @@ def logspace(
 
     Returns
     -------
-
+    samples: TensorVariable
+        Tensor containing `num` evenly-spaced (in log-pace) values between [start, stop]. The range is inclusive if
+        `endpoint` is True.
     """
     if dtype is None:
         dtype = pytensor.config.floatX

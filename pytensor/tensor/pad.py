@@ -425,6 +425,209 @@ class Pad(OpFromGraph):
 
 
 def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwargs):
+    """
+    Pad an array.
+
+    Parameters
+    ----------
+    array : array_like of rank N
+        The array to pad.
+
+    pad_width : sequence, array_like, or int
+        Number of values padded to the edges of each axis.
+        ``((before_1, after_1), ... (before_N, after_N))`` unique pad widths
+        for each axis.
+        ``(before, after)`` or ``((before, after),)`` yields same before
+        and after pad for each axis.
+        ``(pad,)`` or ``int`` is a shortcut for before = after = pad width
+        for all axes.
+
+    mode : str or function, optional
+        One of the following string values or a user supplied function.
+
+        'constant' (default)
+            Pads with a constant value.
+        'edge'
+            Pads with the edge values of array.
+        'linear_ramp'
+            Pads with the linear ramp between end_value and the
+            array edge value.
+        'maximum'
+            Pads with the maximum value of all or part of the
+            vector along each axis.
+        'mean'
+            Pads with the mean value of all or part of the
+            vector along each axis.
+        'minimum'
+            Pads with the minimum value of all or part of the
+            vector along each axis.
+        'reflect'
+            Pads with the reflection of the vector mirrored on
+            the first and last values of the vector along each
+            axis.
+        'symmetric'
+            Pads with the reflection of the vector mirrored
+            along the edge of the array.
+        'wrap'
+            Pads with the wrap of the vector along the axis.
+            The first values are used to pad the end and the
+            end values are used to pad the beginning.
+
+    stat_length : sequence or int, optional
+        Used in 'maximum', 'mean', and 'minimum'.  Number of
+        values at edge of each axis used to calculate the statistic value.
+
+        ``((before_1, after_1), ... (before_N, after_N))`` unique statistic
+        lengths for each axis.
+
+        ``(before, after)`` or ``((before, after),)`` yields same before
+        and after statistic lengths for each axis.
+
+        ``(stat_length,)`` or ``int`` is a shortcut for
+        ``before = after = statistic`` length for all axes.
+
+        Default is ``None``, to use the entire axis.
+
+    constant_values : sequence or scalar, optional
+        Used in 'constant'.  The values to set the padded values for each
+        axis.
+
+        ``((before_1, after_1), ... (before_N, after_N))`` unique pad constants
+        for each axis.
+
+        ``(before, after)`` or ``((before, after),)`` yields same before
+        and after constants for each axis.
+
+        ``(constant,)`` or ``constant`` is a shortcut for
+        ``before = after = constant`` for all axes.
+
+        Default is 0.
+
+    end_values : sequence or scalar, optional
+        Used in 'linear_ramp'.  The values used for the ending value of the
+        linear_ramp and that will form the edge of the padded array.
+
+        ``((before_1, after_1), ... (before_N, after_N))`` unique end values
+        for each axis.
+
+        ``(before, after)`` or ``((before, after),)`` yields same before
+        and after end values for each axis.
+
+        ``(constant,)`` or ``constant`` is a shortcut for
+        ``before = after = constant`` for all axes.
+
+        Default is 0.
+
+    reflect_type : str, optional
+        Only 'even' is currently accepted. Used in 'reflect', and 'symmetric'.  The 'even' style is the
+        default with an unaltered reflection around the edge value.
+
+    Returns
+    -------
+    pad : ndarray
+        Padded array of rank equal to `array` with shape increased
+        according to `pad_width`.
+
+    Examples
+    --------
+    .. testcode::
+
+        import pytensor.tensor as pt
+        a = [1, 2, 3, 4, 5]
+        pt.pad(a, (2, 3), 'constant', constant_values=(4, 6)).eval()
+
+    .. testoutput::
+
+        array([4, 4, 1, ..., 6, 6, 6])
+
+
+    .. testcode::
+
+        pt.pad(a, (2, 3), 'edge').eval()
+
+    .. testoutput::
+
+        array([1, 1, 1, ..., 5, 5, 5])
+
+    .. testcode::
+
+        pt.pad(a, (2, 3), 'linear_ramp', end_values=(5, -4)).eval()
+
+    ..testoutput::
+
+        array([ 5,  3,  1,  2,  3,  4,  5,  2, -1, -4])
+
+    .. testcode::
+
+        pt.pad(a, (2,), 'maximum').eval()
+
+    .. testoutput::
+
+        array([5, 5, 1, 2, 3, 4, 5, 5, 5])
+
+    .. testcode::
+
+        pt.pad(a, (2,), 'mean').eval()
+
+    .. testoutput::
+
+        array([3, 3, 1, 2, 3, 4, 5, 3, 3])
+
+    .. testcode::
+
+        a = [[1, 2], [3, 4]]
+        pt.pad(a, ((3, 2), (2, 3)), 'minimum').eval()
+
+    .. testoutput::
+
+        array([[1, 1, 1, 2, 1, 1, 1],
+               [1, 1, 1, 2, 1, 1, 1],
+               [1, 1, 1, 2, 1, 1, 1],
+               [1, 1, 1, 2, 1, 1, 1],
+               [3, 3, 3, 4, 3, 3, 3],
+               [1, 1, 1, 2, 1, 1, 1],
+               [1, 1, 1, 2, 1, 1, 1]])
+
+    .. testcode::
+
+        a = [1, 2, 3, 4, 5]
+        np.pad(a, (2, 3), 'reflect').eval()
+
+    .. testoutput::
+
+        array([3, 2, 1, 2, 3, 4, 5, 4, 3, 2])
+
+    .. testcode::
+
+        pt.pad(a, (2, 3), 'reflect', reflect_type='odd').eval()
+
+    .. testoutput::
+        array([-1,  0,  1,  2,  3,  4,  5,  6,  7,  8])
+
+    .. testcode::
+
+        pt.pad(a, (2, 3), 'symmetric').eval()
+
+    .. testoutput::
+
+        array([2, 1, 1, 2, 3, 4, 5, 5, 4, 3])
+
+    .. testcode::
+        pt.pad(a, (2, 3), 'symmetric', reflect_type='odd').eval()
+
+    .. testoutput::
+
+        array([0, 1, 1, 2, 3, 4, 5, 5, 6, 7])
+
+    .. testcode::
+
+        pt.pad(a, (2, 3), 'wrap').eval()
+
+    .. testoutput::
+
+        array([4, 5, 1, 2, 3, 4, 5, 1, 2, 3])
+
+    """
     if any(value not in allowed_kwargs[mode] for value in kwargs.keys()):
         raise ValueError(
             f"Invalid keyword arguments for mode '{mode}': {kwargs.keys()}"
