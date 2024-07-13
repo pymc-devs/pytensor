@@ -7,6 +7,7 @@ import pytensor.link.jax.dispatch.tensor_basic
 import pytensor.link.jax.dispatch.subtensor
 import pytensor.link.jax.dispatch.shape
 import pytensor.link.jax.dispatch.extra_ops
+import pytensor.link.jax.dispatch.pad
 import pytensor.link.jax.dispatch.nlinalg
 import pytensor.link.jax.dispatch.slinalg
 import pytensor.link.jax.dispatch.random

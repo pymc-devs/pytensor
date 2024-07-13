@@ -37,7 +37,7 @@ test_kwargs = {
     ],
 )
 def test_jax_pad(mode: PadMode):
-    x_pt = pt.tensor("x", shape=(3, 3))
+    x_pt = pt.dmatrix("x")
     x = np.random.normal(size=(3, 3))
     kwargs = test_kwargs.get(mode, {})
 
