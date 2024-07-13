@@ -3081,7 +3081,7 @@ def flip(
     arr: TensorVariable
         Input tensor.
 
-    axis: int or list of ints, optional
+    axis: int | tuple[int] | TensorVariable, optional
         Axis or axes along which to flip over. The default is to flip over all of the axes of the input tensor.
 
     Returns
@@ -3110,11 +3110,13 @@ def flip(
         index = ((slice(None, None, -1)),) * arr.ndim
     else:
         if isinstance(axis, int):
-            axis = [axis]
-        index = [
-            slice(None, None, -1) if i in axis else slice(None, None, None)
-            for i in range(arr.ndim)
-        ]
+            axis = (axis,)
+        index = tuple(
+            [
+                slice(None, None, -1) if i in axis else slice(None, None, None)
+                for i in range(arr.ndim)
+            ]
+        )
 
     return arr[index]
 
