@@ -21,7 +21,7 @@ from pytensor.tensor.math import eq, gt, mean, minimum
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.shape import specify_broadcastable
-from pytensor.tensor.subtensor import flip, set_subtensor
+from pytensor.tensor.subtensor import flip, set_subtensor, slice_at_axis
 
 
 PadMode = Literal[
@@ -52,37 +52,6 @@ allowed_kwargs = {
 }
 
 
-def _slice_at_axis(sl: slice, axis: int) -> tuple[slice, ...]:
-    """
-    Construct tuple of slices to slice an array in the given dimension.
-
-    Copied from numpy.lib.arraypad._slice_at_axis
-    https://github.com/numpy/numpy/blob/300096d384046eee479b0c7a70f79e308da52bff/numpy/lib/_arraypad_impl.py#L33
-
-    Parameters
-    ----------
-    sl : slice
-        The slice for the given dimension.
-    axis : int
-        The axis to which `sl` is applied. All other dimensions are left
-        "unsliced".
-
-    Returns
-    -------
-    sl : tuple of slices
-        A tuple with slices matching `shape` in length.
-
-    Examples
-    --------
-
-    .. code-block:: python
-
-         _slice_at_axis(slice(None, 3, -1), 1)
-        (slice(None, None, None), slice(None, 3, -1), (...,))
-    """
-    return (slice(None),) * axis + (sl,) + (...,)  # type: ignore
-
-
 def _get_edges(
     padded: TensorVariable, axis: int, width_pair: tuple[TensorVariable, TensorVariable]
 ) -> tuple[TensorVariable, TensorVariable]:
@@ -110,11 +79,11 @@ def _get_edges(
         `axis` which will have a length of 1.
     """
     left_index = width_pair[0]
-    left_slice = _slice_at_axis(slice(left_index, left_index + 1), axis)
+    left_slice = slice_at_axis(slice(left_index, left_index + 1), axis)
     left_edge = padded[left_slice]
 
     right_index = padded.shape[axis] - width_pair[1]
-    right_slice = _slice_at_axis(slice(right_index - 1, right_index), axis)
+    right_slice = slice_at_axis(slice(right_index - 1, right_index), axis)
     right_edge = padded[right_slice]
 
     return left_edge, right_edge
@@ -139,8 +108,8 @@ def _get_padding_slices(
     width_pair: tuple[TensorVariable, TensorVariable],
     axis: int,
 ) -> tuple[tuple[slice, ...], tuple[slice, ...]]:
-    left_slice = _slice_at_axis(slice(None, width_pair[0]), axis)
-    right_slice = _slice_at_axis(slice(dim_shape - width_pair[1], None), axis)
+    left_slice = slice_at_axis(slice(None, width_pair[0]), axis)
+    right_slice = slice_at_axis(slice(dim_shape - width_pair[1], None), axis)
 
     return left_slice, right_slice
 
@@ -224,7 +193,7 @@ def _get_stats(
     left_length = (
         minimum(left_length, max_length) if left_length is not None else max_length
     )
-    left_slice = _slice_at_axis(slice(left_index, left_index + left_length), axis)
+    left_slice = slice_at_axis(slice(left_index, left_index + left_length), axis)
     left_chunk = padded[left_slice]
     left_stat = stat_func(left_chunk, axis=axis, keepdims=True)
     if left_length is None and right_length is None:
@@ -237,7 +206,7 @@ def _get_stats(
     right_length = (
         minimum(right_length, max_length) if right_length is not None else max_length
     )
-    right_slice = _slice_at_axis(slice(right_index - right_length, right_index), axis)
+    right_slice = slice_at_axis(slice(right_index - right_length, right_index), axis)
     right_chunk = padded[right_slice]
     right_stat = stat_func(right_chunk, axis=axis, keepdims=True)
 
@@ -298,7 +267,7 @@ def _linear_ramp_pad(
         )
 
         # Reverse the direction of the ramp for the "right" side
-        right_ramp = right_ramp[_slice_at_axis(slice(None, None, -1), axis)]  # type: ignore
+        right_ramp = right_ramp[slice_at_axis(slice(None, None, -1), axis)]  # type: ignore
 
         padded = set_subtensor(padded[left_slice], left_ramp)
         padded = set_subtensor(padded[right_slice], right_ramp)
@@ -336,7 +305,7 @@ def _wrap_pad(x: TensorVariable, pad_width: TensorVariable) -> TensorVariable:
         x = parts.reshape(new_shape)
 
         # Trim the excess on the active dimension
-        trim_slice = _slice_at_axis(slice(left_trim, -right_trim), axis)
+        trim_slice = slice_at_axis(slice(left_trim, -right_trim), axis)
         x = x[trim_slice]
 
     return x
@@ -393,7 +362,7 @@ def _symmetric_pad(x, pad_width):
         )
         right_trim = x.shape[axis] - right_trim
 
-        trim_slice = _slice_at_axis(slice(left_trim, right_trim), axis)
+        trim_slice = slice_at_axis(slice(left_trim, right_trim), axis)
         x = x[trim_slice]
 
     return x
@@ -407,7 +376,7 @@ def _reflect_pad(x, pad_width):
     for axis in range(x.ndim):
         trimmed_size = x.shape[axis] - 1
 
-        trim_slice = _slice_at_axis(slice(None, -1), axis)
+        trim_slice = slice_at_axis(slice(None, -1), axis)
         x_trimmed = x[trim_slice]
         x_flipped = flip(x, axis=axis)[trim_slice]
 
@@ -429,8 +398,8 @@ def _reflect_pad(x, pad_width):
             inner_func=partial(_reflect_inner, padding_left=False),
         )
 
-        left_trim = _slice_at_axis(slice(trimmed_size - remainders[0] - 1, -1), axis)
-        right_trim = _slice_at_axis(
+        left_trim = slice_at_axis(slice(trimmed_size - remainders[0] - 1, -1), axis)
+        right_trim = slice_at_axis(
             slice(1, right_padding.shape[axis] - trimmed_size + remainders[1] + 1), axis
         )
 

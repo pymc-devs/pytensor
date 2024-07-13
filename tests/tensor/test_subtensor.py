@@ -43,6 +43,7 @@ from pytensor.tensor.subtensor import (
     index_vars_to_types,
     indexed_result_shape,
     set_subtensor,
+    slice_at_axis,
     take,
 )
 from pytensor.tensor.type import (
@@ -2901,6 +2902,16 @@ def test_vectorize_adv_subtensor(
         vectorize_pt(x_test, idx_test),
         vectorize_np(x_test, idx_test),
     )
+
+
+def test_slice_at_axis():
+    x = ptb.tensor("x", shape=(3, 4, 5))
+    x_sliced = x[slice_at_axis(slice(None, 1), axis=0)]
+    assert x_sliced.type.shape == (1, 4, 5)
+
+    # Negative axis
+    x_sliced = x[slice_at_axis(slice(None, 1), axis=-2)]
+    assert x_sliced.type.shape == (3, 1, 5)
 
 
 @pytest.mark.parametrize(
