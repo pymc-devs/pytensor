@@ -16,8 +16,8 @@ test_kwargs = {
     "constant": {"constant_values": 0},
     "linear_ramp": {"end_values": 0},
     "maximum": {"stat_length": None},
-    "mean": {"stat_length": None},
-    "median": {"stat_length": 2},
+    "mean": {"stat_length": (10, 2)},
+    "minimum": {"stat_length": None},
     "reflect": {"reflect_type": "even"},
     "symmetric": {"reflect_type": "even"},
 }
@@ -37,7 +37,7 @@ test_kwargs = {
     ],
 )
 def test_jax_pad(mode: PadMode):
-    x_pt = pt.dmatrix("x")
+    x_pt = pt.tensor("x", shape=(3, 3))
     x = np.random.normal(size=(3, 3))
     kwargs = test_kwargs.get(mode, {})
 

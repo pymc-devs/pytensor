@@ -415,11 +415,12 @@ class Pad(OpFromGraph):
     Wrapper Op for Pad graphs
     """
 
-    def __init__(self, inputs, outputs, pad_mode, reflect_type=None, kind=None):
+    def __init__(
+        self, inputs, outputs, pad_mode, reflect_type=None, has_stat_length=False
+    ):
         self.pad_mode = pad_mode
         self.reflect_type = reflect_type
-        self.kind = kind
-        self.reflect_type = reflect_type
+        self.has_stat_length = has_stat_length
 
         super().__init__(inputs=inputs, outputs=outputs)
 
@@ -641,6 +642,7 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
         stat_func = cast(Callable, stat_funcs[mode])
         stat_length = kwargs.get("stat_length")
         if stat_length is not None:
+            attrs.update({"has_stat_length": True})
             stat_length = as_tensor(stat_length, name="stat_length")
             inputs += [stat_length]
 
