@@ -32,7 +32,6 @@ def test_constant_pad(
     x = np.random.normal(size=size).astype(floatX)
     expected = np.pad(x, pad_width, mode="constant", constant_values=constant)
     z = pad(x, pad_width, mode="constant", constant_values=constant)
-    assert z.owner.op.pad_mode == "constant"
 
     f = pytensor.function([], z, mode="FAST_COMPILE")
 
@@ -51,7 +50,6 @@ def test_edge_pad(size: tuple, pad_width: int | tuple[int, ...]):
     x = np.random.normal(size=size).astype(floatX)
     expected = np.pad(x, pad_width, mode="edge")
     z = pad(x, pad_width, mode="edge")
-    assert z.owner.op.pad_mode == "edge"
 
     f = pytensor.function([], z, mode="FAST_COMPILE")
 
@@ -75,7 +73,6 @@ def test_linear_ramp_pad(
     x = np.random.normal(size=size).astype(floatX)
     expected = np.pad(x, pad_width, mode="linear_ramp", end_values=end_values)
     z = pad(x, pad_width, mode="linear_ramp", end_values=end_values)
-    assert z.owner.op.pad_mode == "linear_ramp"
 
     f = pytensor.function([], z, mode="FAST_COMPILE")
 
@@ -101,7 +98,6 @@ def test_stat_pad(
     x = np.random.normal(size=size).astype(floatX)
     expected = np.pad(x, pad_width, mode=stat, stat_length=stat_length)
     z = pad(x, pad_width, mode=stat, stat_length=stat_length)
-    assert z.owner.op.pad_mode == stat
 
     f = pytensor.function([], z, mode="FAST_COMPILE")
 
@@ -120,7 +116,6 @@ def test_wrap_pad(size: tuple, pad_width: int | tuple[int, ...]):
     x = np.random.normal(size=size).astype(floatX)
     expected = np.pad(x, pad_width, mode="wrap")
     z = pad(x, pad_width, mode="wrap")
-    assert z.owner.op.pad_mode == "wrap"
     f = pytensor.function([], z, mode="FAST_COMPILE")
 
     np.testing.assert_allclose(expected, f(), atol=ATOL, rtol=RTOL)
@@ -147,7 +142,6 @@ def test_symmetric_pad(
     x = np.random.normal(size=size).astype(floatX)
     expected = np.pad(x, pad_width, mode="symmetric", reflect_type=reflect_type)
     z = pad(x, pad_width, mode="symmetric", reflect_type=reflect_type)
-    assert z.owner.op.pad_mode == "symmetric"
     f = pytensor.function([], z, mode="FAST_COMPILE")
 
     np.testing.assert_allclose(expected, f(), atol=ATOL, rtol=RTOL)
@@ -174,7 +168,6 @@ def test_reflect_pad(
     x = np.random.normal(size=size).astype(floatX)
     expected = np.pad(x, pad_width, mode="reflect", reflect_type=reflect_type)
     z = pad(x, pad_width, mode="reflect", reflect_type=reflect_type)
-    assert z.owner.op.pad_mode == "reflect"
     f = pytensor.function([], z, mode="FAST_COMPILE")
 
     np.testing.assert_allclose(expected, f(), atol=ATOL, rtol=RTOL)

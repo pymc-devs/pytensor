@@ -2,7 +2,6 @@ from collections.abc import Callable
 from functools import partial
 from typing import Literal, cast
 
-from pytensor.compile.builders import OpFromGraph
 from pytensor.ifelse import ifelse
 from pytensor.scan import scan
 from pytensor.tensor import TensorLike
@@ -454,20 +453,6 @@ def _reflect_pad(x, pad_width):
     return x
 
 
-class Pad(OpFromGraph):
-    """
-    Wrapper Op for Pad graphs
-    """
-
-    def __init__(self, inputs, outputs, pad_mode, reflect_type=None, kind=None):
-        self.pad_mode = pad_mode
-        self.reflect_type = reflect_type
-        self.kind = kind
-        self.reflect_type = reflect_type
-
-        super().__init__(inputs=inputs, outputs=outputs)
-
-
 def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwargs):
     if any(value not in allowed_kwargs[mode] for value in kwargs.keys()):
         raise ValueError(
@@ -514,7 +499,10 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
     elif mode == "symmetric":
         reflect_type = kwargs.pop("reflect_type", "even")
         if reflect_type == "odd":
-            raise NotImplementedError("Odd reflection not implemented")
+            raise NotImplementedError(
+                "Odd reflection not implemented. If you need this feature, please open an "
+                "issue at https://github.com/pymc-devs/pytensor/issues"
+            )
 
         attrs.update({"reflect_type": reflect_type})
         outputs = _symmetric_pad(x, pad_width)
@@ -522,15 +510,17 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
     elif mode == "reflect":
         reflect_type = kwargs.pop("reflect_type", "even")
         if reflect_type == "odd":
-            raise NotImplementedError("Odd reflection not implemented")
+            raise NotImplementedError(
+                "Odd reflection not implemented. If you need this feature, please open an "
+                "issue at https://github.com/pymc-devs/pytensor/issues"
+            )
         attrs.update({"reflect_type": reflect_type})
         outputs = _reflect_pad(x, pad_width)
 
     else:
         raise ValueError(f"Invalid mode: {mode}")
 
-    op = Pad(inputs=inputs, outputs=[outputs], pad_mode=mode, **attrs)(*inputs)
-    return op
+    return outputs
 
 
 __all__ = ["pad", "flip"]
