@@ -553,7 +553,7 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
 
         print(pt.pad(a, (2, 3), 'linear_ramp', end_values=(5, -4)).eval())
 
-    ..testoutput::
+    .. testoutput::
 
         [ 5.  3.  1.  2.  3.  4.  5.  2. -1. -4.]
 
