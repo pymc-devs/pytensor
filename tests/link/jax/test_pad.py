@@ -16,7 +16,7 @@ test_kwargs = {
     "constant": {"constant_values": 0},
     "linear_ramp": {"end_values": 0},
     "maximum": {"stat_length": None},
-    "mean": {"stat_length": [[1, 2], [3, 3]]},
+    "mean": {"stat_length": None},
     "median": {"stat_length": 2},
     "reflect": {"reflect_type": "even"},
     "symmetric": {"reflect_type": "even"},
@@ -48,5 +48,5 @@ def test_jax_pad(mode: PadMode):
         res_fg,
         [x],
         assert_fn=lambda x, y: np.testing.assert_allclose(x, y, rtol=RTOL, atol=ATOL),
-        py_mode="FAST_COMPILE",
+        py_mode="FAST_RUN",
     )

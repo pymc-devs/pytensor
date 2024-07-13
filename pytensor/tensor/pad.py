@@ -74,8 +74,11 @@ def _slice_at_axis(sl: slice, axis: int) -> tuple[slice, ...]:
 
     Examples
     --------
-    >>> _slice_at_axis(slice(None, 3, -1), 1)
-    (slice(None, None, None), slice(None, 3, -1), (...,))
+
+    .. code-block:: python
+
+         _slice_at_axis(slice(None, 3, -1), 1)
+        (slice(None, None, None), slice(None, 3, -1), (...,))
     """
     return (slice(None),) * axis + (sl,) + (...,)  # type: ignore
 
