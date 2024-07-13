@@ -4,7 +4,6 @@ import configparser as stdlib_configparser
 import io
 import pickle
 from pathlib import Path
-from tempfile import mkdtemp
 
 import pytest
 
@@ -21,13 +20,16 @@ def _create_test_config():
     )
 
 
-def test_config_paths():
-    base_compiledir = mkdtemp()
-    assert configdefaults._filter_base_compiledir(str(base_compiledir)) == Path(
-        base_compiledir
+def test_base_compiledir_str(tmp_path: Path):
+    base_compiledir = tmp_path
+    assert (
+        configdefaults._filter_base_compiledir(str(base_compiledir)) == base_compiledir
     )
-    compiledir = mkdtemp()
-    assert configdefaults._filter_compiledir(str(compiledir)) == Path(compiledir)
+
+
+def test_compiledir_str(tmp_path: Path):
+    compiledir = tmp_path
+    assert configdefaults._filter_compiledir(str(compiledir)) == compiledir
 
 
 def test_invalid_default():
