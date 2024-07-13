@@ -514,15 +514,20 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
     elif mode == "symmetric":
         reflect_type = kwargs.pop("reflect_type", "even")
         if reflect_type == "odd":
-            raise NotImplementedError("Odd reflection not implemented")
-
+            raise NotImplementedError(
+                "Odd reflection not implemented. If you need this feature, please open an "
+                "issue at https://github.com/pymc-devs/pytensor/issues"
+            )
         attrs.update({"reflect_type": reflect_type})
         outputs = _symmetric_pad(x, pad_width)
 
     elif mode == "reflect":
         reflect_type = kwargs.pop("reflect_type", "even")
         if reflect_type == "odd":
-            raise NotImplementedError("Odd reflection not implemented")
+            raise NotImplementedError(
+                "Odd reflection not implemented. If you need this feature, please open an "
+                "issue at https://github.com/pymc-devs/pytensor/issues"
+            )
         attrs.update({"reflect_type": reflect_type})
         outputs = _reflect_pad(x, pad_width)
 
