@@ -71,9 +71,18 @@ def pytorch_funcify_SolveTriangular(op, **kwargs):
         if trans == 2 or trans == "C":
             A_p = A.H
 
-        return torch.linalg.solve_triangular(
-            A_p, b, upper=upper, unitriangular=unit_diagonal
+        b_p = b
+        if b.ndim == 1:
+            b_p = b[:, None]
+
+        res = torch.linalg.solve_triangular(
+            A_p, b_p, upper=upper, unitriangular=unit_diagonal
         )
+
+        if b.ndim == 1 and res.shape[1] == 1:
+            return res.flatten()
+
+        return res
 
     return solve_triangular
 
