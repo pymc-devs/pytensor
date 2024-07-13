@@ -21,7 +21,7 @@ from pytensor.tensor.math import eq, gt, mean, minimum
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.shape import specify_broadcastable
-from pytensor.tensor.subtensor import set_subtensor
+from pytensor.tensor.subtensor import flip, set_subtensor
 
 
 PadMode = Literal[
@@ -304,19 +304,6 @@ def _linear_ramp_pad(
         padded = set_subtensor(padded[right_slice], right_ramp)
 
     return padded
-
-
-def flip(x, axis=None):
-    if axis is None:
-        index = ((slice(None, None, -1)),) * x.ndim
-    else:
-        if isinstance(axis, int):
-            axis = [axis]
-        index = [
-            slice(None, None, -1) if i in axis else slice(None, None, None)
-            for i in range(x.ndim)
-        ]
-    return x[index]
 
 
 def _wrap_pad(x: TensorVariable, pad_width: TensorVariable) -> TensorVariable:

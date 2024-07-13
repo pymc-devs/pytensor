@@ -3021,8 +3021,57 @@ def _get_vector_length_Subtensor(op, var):
         raise ValueError(f"Length of {var} cannot be determined")
 
 
+def flip(
+    arr: TensorVariable, axis: int | tuple[int] | TensorVariable = None
+) -> TensorVariable:
+    """
+    Reverse the order of elements in an tensor along the given axis.
+
+    Parameters
+    ----------
+    arr: TensorVariable
+        Input tensor.
+
+    axis: int or list of ints, optional
+        Axis or axes along which to flip over. The default is to flip over all of the axes of the input tensor.
+
+    Returns
+    -------
+    arr: TensorVariable
+        A view of `arr` with the entries of axis reversed.
+
+    Examples
+    --------
+
+    .. code-block:: python
+
+        import pytensor
+        import pytensor as pt
+
+        x = pt.tensor('x', shape=(None, None))
+        x_flipped = pt.flip(x, axis=0)
+
+        f = pytensor.function([x], x_flipped)
+        x = [[1, 2], [3, 4]]
+        f(x)
+        # Output: [[3, 4], [1, 2]]
+
+    """
+    if axis is None:
+        index = ((slice(None, None, -1)),) * arr.ndim
+    else:
+        if isinstance(axis, int):
+            axis = [axis]
+        index = [
+            slice(None, None, -1) if i in axis else slice(None, None, None)
+            for i in range(arr.ndim)
+        ]
+    return arr[index]
+
+
 __all__ = [
     "take",
+    "flip",
     "inc_subtensor",
     "set_subtensor",
 ]
