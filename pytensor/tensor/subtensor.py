@@ -3051,7 +3051,7 @@ def slice_at_axis(sl: slice, axis: int) -> tuple[slice, ...]:
         s = pt.slice_at_axis(slice(None, 1), 1)
         print(s)
 
-     .. testoutput::
+    .. testoutput::
 
         (slice(None, None, None), slice(None, 1, None), Ellipsis)
 
@@ -3114,7 +3114,7 @@ def flip(
         x = [[1, 2], [3, 4]]
         print(f(x))
 
-    .. testoutput
+    .. testoutput::
         [[3. 4.]
          [1. 2.]]
 

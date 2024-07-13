@@ -530,6 +530,7 @@ def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwar
 
     Examples
     --------
+
     .. testcode::
 
         import pytensor.tensor as pt
