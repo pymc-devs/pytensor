@@ -19,6 +19,9 @@ def jax_funcify_pad(op, **kwargs):
     elif pad_mode == "linear_ramp":
 
         def pad(x, pad_width, end_values):
+            # JAX does not allow a dynamic input if end_values is non-scalar
+            if not isinstance(end_values, int | float):
+                end_values = tuple(np.array(end_values))
             return jnp.pad(x, pad_width, mode=pad_mode, end_values=end_values)
 
     elif pad_mode in ["maximum", "minimum", "mean"] and has_stat_length:

@@ -12,34 +12,29 @@ jax = pytest.importorskip("jax")
 floatX = config.floatX
 RTOL = ATOL = 1e-6 if floatX.endswith("64") else 1e-3
 
-test_kwargs = {
-    "constant": {"constant_values": 0},
-    "linear_ramp": {"end_values": 0},
-    "maximum": {"stat_length": None},
-    "mean": {"stat_length": (10, 2)},
-    "minimum": {"stat_length": None},
-    "reflect": {"reflect_type": "even"},
-    "symmetric": {"reflect_type": "even"},
-}
-
 
 @pytest.mark.parametrize(
-    "mode",
+    "mode, kwargs",
     [
-        "constant",
-        "edge",
-        "linear_ramp",
-        "wrap",
-        "symmetric",
-        "mean",
-        "maximum",
-        "minimum",
+        ("constant", {"constant_values": 0}),
+        ("constant", {"constant_values": (1, 2)}),
+        ("edge", {}),
+        ("linear_ramp", {"end_values": 0}),
+        ("linear_ramp", {"end_values": (1, 2)}),
+        ("reflect", {"reflect_type": "even"}),
+        ("wrap", {}),
+        ("symmetric", {"reflect_type": "even"}),
+        ("mean", {"stat_length": None}),
+        ("mean", {"stat_length": (10, 2)}),
+        ("maximum", {"stat_length": None}),
+        ("maximum", {"stat_length": (10, 2)}),
+        ("minimum", {"stat_length": None}),
+        ("minimum", {"stat_length": (10, 2)}),
     ],
 )
-def test_jax_pad(mode: PadMode):
+def test_jax_pad(mode: PadMode, kwargs):
     x_pt = pt.tensor("x", shape=(3, 3))
     x = np.random.normal(size=(3, 3))
-    kwargs = test_kwargs.get(mode, {})
 
     res = pt.pad(x_pt, mode=mode, pad_width=3, **kwargs)
     res_fg = FunctionGraph([x_pt], [res])
