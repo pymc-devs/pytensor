@@ -3735,32 +3735,30 @@ def test_nan_to_num(nan, posinf, neginf):
 
 
 @pytest.mark.parametrize(
-    "data, axis",
+    "ndim, axis",
     [
-        # 1D array
-        ([1, 7, 3, 6, 5, 2, 4], None),
-        ([1, 7, 3, 6, 5, 2, 4], 0),
-        # 2D array
-        ([[6, 2], [4, 3], [1, 5]], 0),
-        ([[6, 2], [4, 3], [1, 5]], 1),
-        # 3D array
-        ([[[6, 2, 3], [1, 5, 8], [4, 7, 9]], [[5, 3, 4], [8, 6, 2], [7, 1, 9]]], None),
-        ([[[6, 2, 3], [1, 5, 8], [4, 7, 9]], [[5, 3, 4], [8, 6, 2], [7, 1, 9]]], 0),
-        ([[[6, 2, 3], [1, 5, 8], [4, 7, 9]], [[5, 3, 4], [8, 6, 2], [7, 1, 9]]], 1),
-        ([[[6, 2, 3], [1, 5, 8], [4, 7, 9]], [[5, 3, 4], [8, 6, 2], [7, 1, 9]]], 2),
-        # 4D array
-        (
-            [
-                [[[3, 1], [4, 3]], [[0, 5], [6, 2]], [[7, 8], [9, 4]]],
-                [[[10, 11], [12, 13]], [[14, 15], [16, 17]], [[18, 19], [20, 21]]],
-            ],
-            3,
-        ),
+        (2, None),
+        (2, 1),
+        (2, (0, 1)),
+        (3, None),
+        (3, (1, 2)),
+        (4, (1, 3, 0)),
     ],
 )
-def test_median(data, axis):
-    x = tensor(shape=np.array(data).shape)
+def test_median(ndim, axis):
+    # Generate random data with both odd and even lengths
+    shape_even = np.arange(1, ndim + 1) * 2
+    shape_odd = shape_even - 1
+
+    data_even = np.random.rand(*shape_even)
+    data_odd = np.random.rand(*shape_odd)
+
+    x = tensor(dtype="float64", shape=(None,) * ndim)
     f = function([x], median(x, axis=axis))
-    result = f(data)
-    expected = np.median(data, axis=axis)
-    assert np.allclose(result, expected)
+    result_odd = f(data_odd)
+    result_even = f(data_even)
+    expected_odd = np.median(data_odd, axis=axis)
+    expected_even = np.median(data_even, axis=axis)
+
+    assert np.allclose(result_odd, expected_odd)
+    assert np.allclose(result_even, expected_even)

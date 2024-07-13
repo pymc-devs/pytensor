@@ -26,7 +26,6 @@ from pytensor.tensor.basic import (
     concatenate,
     constant,
     expand_dims,
-    extract_constant,
     full_like,
     stack,
     switch,
@@ -1580,34 +1579,48 @@ def median(input, axis=None):
 
     Parameters
     ----------
+    input: TensorVariable
+        The input tensor.
     axis: None or int or (list of int) (see `Sum`)
         Compute the median along this axis of the tensor.
         None means all axes (like numpy).
-
-    Notes
-    -----
-    This function uses the numpy implementation of median.
     """
     from pytensor.ifelse import ifelse
 
+    x = as_tensor_variable(input)
+    x_ndim = x.type.ndim
     if axis is None:
-        input = input.flatten()
-        axis = 0
+        axis = list(range(x_ndim))
+    else:
+        axis = list(normalize_axis_tuple(axis, x_ndim))
 
-    input = as_tensor_variable(input)
-    sorted_input = input.sort(axis=axis)
-    shape = input.shape[axis]
-    k = extract_constant(shape) // 2
-    indices1 = expand_dims(full_like(sorted_input.take(0, axis=axis), k - 1), axis)
-    indices2 = expand_dims(full_like(sorted_input.take(0, axis=axis), k), axis)
-    ans1 = take_along_axis(sorted_input, indices1, axis=axis)
-    ans2 = take_along_axis(sorted_input, indices2, axis=axis)
+    new_axes_order = [i for i in range(x.ndim) if i not in axis] + list(axis)
+    x = x.dimshuffle(new_axes_order)
+    x_shape = x.shape
+
+    remaining_axis_size = shape(x)[: x.ndim - len(axis)]
+
+    x = x.reshape((*remaining_axis_size, -1))
+
+    # Sort the input tensor along the specified axis
+    sorted_x = x.sort(axis=-1)
+    x_shape = x.shape[-1]
+    k = x_shape // 2
+
+    indices1 = expand_dims(full_like(sorted_x.take(0, axis=-1), k), -1)
+    indices2 = expand_dims(full_like(sorted_x.take(0, axis=-1), k - 1), -1)
+    ans1 = take_along_axis(sorted_x, indices1, axis=-1)
+    ans2 = take_along_axis(sorted_x, indices2, axis=-1)
     median_val_even = (ans1 + ans2) / 2.0
-    indices = expand_dims(full_like(sorted_input.take(0, axis=axis), k), axis)
-    median_val_odd = take_along_axis(sorted_input, indices, axis=axis)
-    median_val = ifelse(eq(mod(shape, 2), 0), median_val_even, median_val_odd)
+
+    median_val_odd = (
+        take_along_axis(sorted_x, indices1, axis=-1) / 1.0
+    )  # Divide by one so that the two dtypes passed in ifelse are compatible
+
+    median_val = ifelse(eq(mod(x_shape, 2), 0), median_val_even, median_val_odd)
     median_val.name = "median"
-    return median_val.squeeze(axis=axis)
+
+    return median_val.squeeze(axis=-1)
 
 
 @scalar_elemwise(symbolname="scalar_maximum")
