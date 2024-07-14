@@ -425,7 +425,9 @@ class Pad(OpFromGraph):
         super().__init__(inputs=inputs, outputs=outputs)
 
 
-def pad(x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwargs):
+def pad(
+    x: TensorLike, pad_width: TensorLike, mode: PadMode = "constant", **kwargs
+) -> TensorVariable:
     """
     Pad an array.
 
