@@ -684,7 +684,7 @@ def pad(
         raise ValueError(f"Invalid mode: {mode}")
 
     op = Pad(inputs=inputs, outputs=[outputs], pad_mode=mode, **attrs)(*inputs)
-    return op
+    return cast(TensorVariable, op)
 
 
 __all__ = ["pad", "flip"]
