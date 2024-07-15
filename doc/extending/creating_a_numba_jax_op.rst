@@ -1,5 +1,5 @@
 Adding JAX, Numba and Pytorch support for `Op`\s
-=======================================
+================================================
 
 PyTensor is able to convert its graphs into JAX, Numba and Pytorch compiled functions. In order to do
 this, each :class:`Op` in an PyTensor graph must have an equivalent JAX/Numba/Pytorch implementation function.
@@ -7,7 +7,7 @@ this, each :class:`Op` in an PyTensor graph must have an equivalent JAX/Numba/Py
 This tutorial will explain how JAX, Numba and Pytorch implementations are created for an :class:`Op`. 
 
 Step 1: Identify the PyTensor :class:`Op` you'd like to implement
-------------------------------------------------------------------------
+-----------------------------------------------------------------
 
 Find the source for the PyTensor :class:`Op` you'd like to be supported and
 identify the function signature and return values. These can be determined by
@@ -97,8 +97,8 @@ Next, we look at the :meth:`Op.perform` implementation to see exactly
 how the inputs and outputs are used to compute the outputs for an :class:`Op`
 in Python. This method is effectively what needs to be implemented.
 
-Step 2: Find the relevant method in JAX/Numba/Pytorch (or something close)
----------------------------------------------------------
+Step 2: Find the relevant or close method in JAX/Numba/Pytorch
+--------------------------------------------------------------
 
 With a precise idea of what the PyTensor :class:`Op` does we need to figure out how
 to implement it in JAX, Numba or Pytorch. In the best case scenario, there is a similarly named
@@ -269,7 +269,7 @@ and :func:`torch.cumprod`
             z[0] = np.cumprod(x, axis=self.axis)
 
 Step 3: Register the function with the respective dispatcher
----------------------------------------------------------------
+------------------------------------------------------------
 
 With the PyTensor `Op` replicated, we'll need to register the
 function with the backends `Linker`. This is done through the use of
@@ -626,28 +626,8 @@ Step 4: Write tests
 
 Note
 ----
-In out previous example of extending JAX, :class:`Eye`\ :class:`Op` was used with the test function as follows:
-
-.. code:: python
-
-    def test_jax_Eye():
-        """Test JAX conversion of the `Eye` `Op`."""
-
-        # Create a symbolic input for `Eye`
-        x_at = pt.scalar()
-
-        # Create a variable that is the output of an `Eye` `Op`
-        eye_var = pt.eye(x_at)
-
-        # Create an PyTensor `FunctionGraph`
-        out_fg = FunctionGraph(outputs=[eye_var])
-
-        # Pass the graph and any inputs to the testing function
-        compare_jax_and_py(out_fg, [3])
-
-This one nowadays leads to a test failure due to new restrictions in JAX + JIT,
-as reported in issue `#654 <https://github.com/pymc-devs/pytensor/issues/654>`_.
-All jitted functions now must have constant shape, which means a graph like the
+Due to new restrictions in JAX JIT as reported in issue `#654 <https://github.com/pymc-devs/pytensor/issues/654>`_,
+all jitted functions now must have constant shape. In other words, only PyTensor graphs with static shapes
+can be translated to JAX at the moment. It means a graph like the
 one of :class:`Eye` can never be translated to JAX, since it's fundamentally a
-function with dynamic shapes. In other words, only PyTensor graphs with static shapes
-can be translated to JAX at the moment.
+function with dynamic shapes. 

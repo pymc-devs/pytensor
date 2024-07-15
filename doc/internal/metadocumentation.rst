@@ -8,33 +8,7 @@ Documentation Documentation AKA Meta-Documentation
 How to build documentation
 --------------------------
 
-Let's say you are writing documentation, and want to see the `sphinx
-<http://sphinx.pocoo.org/>`__ output before you push it.
-The documentation will be generated in the ``html`` directory.
-
-.. code-block:: bash
-
-    cd PyTensor/
-    python ./doc/scripts/docgen.py
-
-If you don't want to generate the pdf, do the following:
-
-.. code-block:: bash
-
-    cd PyTensor/
-    python ./doc/scripts/docgen.py --nopdf
-
-
-For more details:
-
-.. code-block:: bash
-
-   $ python doc/scripts/docgen.py --help
-   Usage: doc/scripts/docgen.py [OPTIONS]
-     -o <dir>: output the html files in the specified dir
-     --rst: only compile the doc (requires sphinx)
-     --nopdf: do not produce a PDF file from the doc, only HTML
-     --help: this help
+Refer to `relevant section of Developer Start Guide <https://pytensor.readthedocs.io/en/latest/dev_start_guide.html#contributing-to-the-documentation>`_.
 
 Use ReST for documentation
 --------------------------
