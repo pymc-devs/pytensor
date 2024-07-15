@@ -12,7 +12,10 @@ from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Eye, Join
 @singledispatch
 def pytorch_typify(data, dtype=None, **kwargs):
     r"""Convert instances of PyTensor `Type`\s to PyTorch types."""
-    return torch.as_tensor(data, dtype=dtype)
+    try:
+        return torch.as_tensor(data, dtype=dtype)
+    except RuntimeError:
+        raise RuntimeError(f"Data is of type {type(data)}, it should be an array")
 
 
 @singledispatch
