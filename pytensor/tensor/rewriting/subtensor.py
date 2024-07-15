@@ -48,6 +48,7 @@ from pytensor.tensor.math import (
     maximum,
     minimum,
     or_,
+    variadic_add,
 )
 from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.rewriting.basic import (
@@ -1241,15 +1242,11 @@ def local_IncSubtensor_serialize(fgraph, node):
             new_inputs = [i for i in node.inputs if not movable(i)] + [
                 mi.owner.inputs[0] for mi in movable_inputs
             ]
-            if len(new_inputs) == 0:
-                new_add = new_inputs[0]
-            else:
-                new_add = add(*new_inputs)
-
-                # Copy over stacktrace from original output, as an error
-                # (e.g. an index error) in this add operation should
-                # correspond to an error in the original add operation.
-                copy_stack_trace(node.outputs[0], new_add)
+            new_add = variadic_add(*new_inputs)
+            # Copy over stacktrace from original output, as an error
+            # (e.g. an index error) in this add operation should
+            # correspond to an error in the original add operation.
+            copy_stack_trace(node.outputs[0], new_add)
 
             # stack up the new incsubtensors
             tip = new_add

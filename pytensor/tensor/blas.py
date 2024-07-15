@@ -102,7 +102,7 @@ from pytensor.tensor import basic as ptb
 from pytensor.tensor.basic import expand_dims
 from pytensor.tensor.blas_headers import blas_header_text, blas_header_version
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.math import add, mul, neg, sub
+from pytensor.tensor.math import add, mul, neg, sub, variadic_add
 from pytensor.tensor.shape import shape_padright, specify_broadcastable
 from pytensor.tensor.type import DenseTensorType, TensorType, integer_dtypes, tensor
 
@@ -1399,11 +1399,7 @@ def _gemm_from_factored_list(fgraph, lst):
                     item_to_var(input) for k, input in enumerate(lst) if k not in (i, j)
                 ]
                 add_inputs.extend(gemm_of_sM_list)
-                if len(add_inputs) > 1:
-                    rval = [add(*add_inputs)]
-                else:
-                    rval = add_inputs
-                # print "RETURNING GEMM THING", rval
+                rval = [variadic_add(*add_inputs)]
                 return rval, old_dot22
 
 

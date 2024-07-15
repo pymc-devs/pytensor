@@ -76,6 +76,8 @@ from pytensor.tensor.math import (
     sub,
     tri_gamma,
     true_div,
+    variadic_add,
+    variadic_mul,
 )
 from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import max as pt_max
@@ -1270,17 +1272,13 @@ def local_sum_prod_of_mul_or_div(fgraph, node):
 
         if not outer_terms:
             return None
-        elif len(outer_terms) == 1:
-            [outer_term] = outer_terms
         else:
-            outer_term = mul(*outer_terms)
+            outer_term = variadic_mul(*outer_terms)
 
         if not inner_terms:
             inner_term = None
-        elif len(inner_terms) == 1:
-            [inner_term] = inner_terms
         else:
-            inner_term = mul(*inner_terms)
+            inner_term = variadic_mul(*inner_terms)
 
     else:  # true_div
         # We only care about removing the denominator out of the reduction
@@ -2143,10 +2141,7 @@ def local_add_remove_zeros(fgraph, node):
         assert cst.type.broadcastable == (True,) * ndim
         return [alloc_like(cst, node_output, fgraph)]
 
-    if len(new_inputs) == 1:
-        ret = [alloc_like(new_inputs[0], node_output, fgraph)]
-    else:
-        ret = [alloc_like(add(*new_inputs), node_output, fgraph)]
+    ret = [alloc_like(variadic_add(*new_inputs), node_output, fgraph)]
 
     # The dtype should not be changed. It can happen if the input
     # that was forcing upcasting was equal to 0.
@@ -2257,10 +2252,7 @@ def local_log1p(fgraph, node):
         # scalar_inputs are potentially dimshuffled and fill'd scalars
         if scalars and np.allclose(np.sum(scalars), 1):
             if nonconsts:
-                if len(nonconsts) > 1:
-                    ninp = add(*nonconsts)
-                else:
-                    ninp = nonconsts[0]
+                ninp = variadic_add(*nonconsts)
                 if ninp.dtype != log_arg.type.dtype:
                     ninp = ninp.astype(node.outputs[0].dtype)
                 return [alloc_like(log1p(ninp), node.outputs[0], fgraph)]
@@ -3084,10 +3076,7 @@ def local_exp_over_1_plus_exp(fgraph, node):
         return
     # put the new numerator together
     new_num = sigmoids + [exp(t) for t in num_exp_x] + num_rest
-    if len(new_num) == 1:
-        new_num = new_num[0]
-    else:
-        new_num = mul(*new_num)
+    new_num = variadic_mul(*new_num)
 
     if num_neg ^ denom_neg:
         new_num = -new_num
