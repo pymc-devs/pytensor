@@ -1425,18 +1425,8 @@ def mean(input, axis=None, dtype=None, op=False, keepdims=False, acc_dtype=None)
     else:
         shp = cast(shp, "float64")
 
-    if axis is None:
-        axis = list(range(input.ndim))
-    elif isinstance(axis, int | np.integer):
-        axis = [axis]
-    elif isinstance(axis, np.ndarray) and axis.ndim == 0:
-        axis = [int(axis)]
-    else:
-        axis = [int(a) for a in axis]
-
-    # This sequential division will possibly be optimized by PyTensor:
-    for i in axis:
-        s = true_div(s, shp[i])
+    canonical_axis = s.axis
+    s /= variadic_mul(*[shp[i] for i in canonical_axis])
 
     # This can happen when axis is an empty list/tuple
     if s.dtype != shp.dtype and s.dtype in discrete_dtypes:
@@ -1592,6 +1582,15 @@ def add(a, *other_terms):
     # see decorator for function body
 
 
+def variadic_add(*args):
+    """Add that accepts arbitrary number of inputs, including zero or one."""
+    if not args:
+        return 0
+    if len(args) == 1:
+        return args[0]
+    return add(*args)
+
+
 @scalar_elemwise
 def sub(a, b):
     """elementwise subtraction"""
@@ -1602,6 +1601,15 @@ def sub(a, b):
 def mul(a, *other_terms):
     """elementwise multiplication"""
     # see decorator for function body
+
+
+def variadic_mul(*args):
+    """Mul that accepts arbitrary number of inputs, including zero or one."""
+    if not args:
+        return 1
+    if len(args) == 1:
+        return args[0]
+    return mul(*args)
 
 
 @scalar_elemwise
