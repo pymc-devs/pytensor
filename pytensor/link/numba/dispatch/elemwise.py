@@ -44,7 +44,16 @@ from pytensor.scalar.basic import (
 )
 from pytensor.scalar.basic import add as add_as
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from pytensor.tensor.math import Argmax, MulWithoutZeros, Sum
+from pytensor.tensor.math import (
+    All,
+    Argmax,
+    Max,
+    Min,
+    MulWithoutZeros,
+    Prod,
+    ProdWithoutZeros,
+    Sum,
+)
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 from pytensor.tensor.type import scalar
 
@@ -546,37 +555,52 @@ def numba_funcify_Elemwise(op, node, **kwargs):
 
 
 @numba_funcify.register(Sum)
-def numba_funcify_Sum(op, node, **kwargs):
+@numba_funcify.register(Prod)
+@numba_funcify.register(ProdWithoutZeros)
+@numba_funcify.register(Max)
+@numba_funcify.register(Min)
+@numba_funcify.register(All)
+@numba_funcify.register(Any)
+def numba_funcify_CAReduce_specialized(op, node, **kwargs):
+    if isinstance(op, ProdWithoutZeros):
+        # ProdWithoutZeros is the same as Prod but the gradient can assume no zeros
+        np_op = np.prod
+    else:
+        np_op = getattr(np, op.__class__.__name__.lower())
+
     axes = op.axis
     if axes is None:
         axes = list(range(node.inputs[0].ndim))
 
-    axes = tuple(axes)
+    axes = tuple(sorted(axes))
 
     ndim_input = node.inputs[0].ndim
-
-    if hasattr(op, "acc_dtype") and op.acc_dtype is not None:
-        acc_dtype = op.acc_dtype
-    else:
-        acc_dtype = node.outputs[0].type.dtype
-
-    np_acc_dtype = np.dtype(acc_dtype)
-
     out_dtype = np.dtype(node.outputs[0].dtype)
 
-    if ndim_input == len(axes):
-
-        @numba_njit(fastmath=True)
-        def impl_sum(array):
-            return np.asarray(array.sum(), dtype=np_acc_dtype).astype(out_dtype)
-
-    elif len(axes) == 0:
+    if len(axes) == 0:
 
         @numba_njit(fastmath=True)
         def impl_sum(array):
             return np.asarray(array, dtype=out_dtype)
 
+    elif (
+        len(axes) == 1
+        # Some Ops don't support axis in Numba
+        and not isinstance(op, Prod | ProdWithoutZeros | All | Prod | Mean | Max | Min)
+    ):
+
+        @numba_njit(fastmath=True)
+        def impl_sum(array):
+            return np.asarray(np_op(array, axis=axes[0])).astype(out_dtype)
+
+    elif len(axes) == ndim_input:
+
+        @numba_njit(fastmath=True)
+        def impl_sum(array):
+            return np.asarray(np_op(array)).astype(out_dtype)
+
     else:
+        # Slow path
         impl_sum = numba_funcify_CAReduce(op, node, **kwargs)
 
     return impl_sum

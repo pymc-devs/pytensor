@@ -236,157 +236,21 @@ def test_Dimshuffle_non_contiguous():
     assert func(np.zeros(3), np.array([1])).ndim == 0
 
 
-@pytest.mark.parametrize(
-    "careduce_fn, axis, v",
-    [
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Sum(
-                axis=axis, dtype=dtype, acc_dtype=acc_dtype
-            )(x),
-            0,
-            set_test_value(pt.vector(), np.arange(3, dtype=config.floatX)),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: All(axis)(x),
-            0,
-            set_test_value(pt.vector(), np.arange(3, dtype=config.floatX)),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Any(axis)(x),
-            0,
-            set_test_value(pt.vector(), np.arange(3, dtype=config.floatX)),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Mean(axis)(x),
-            0,
-            set_test_value(pt.vector(), np.arange(3, dtype=config.floatX)),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Mean(axis)(x),
-            0,
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Sum(
-                axis=axis, dtype=dtype, acc_dtype=acc_dtype
-            )(x),
-            0,
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Sum(
-                axis=axis, dtype=dtype, acc_dtype=acc_dtype
-            )(x),
-            (0, 1),
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Sum(
-                axis=axis, dtype=dtype, acc_dtype=acc_dtype
-            )(x),
-            (1, 0),
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Sum(
-                axis=axis, dtype=dtype, acc_dtype=acc_dtype
-            )(x),
-            None,
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Sum(
-                axis=axis, dtype=dtype, acc_dtype=acc_dtype
-            )(x),
-            1,
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Prod(
-                axis=axis, dtype=dtype, acc_dtype=acc_dtype
-            )(x),
-            0,
-            set_test_value(pt.vector(), np.arange(3, dtype=config.floatX)),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: ProdWithoutZeros(
-                axis=axis, dtype=dtype, acc_dtype=acc_dtype
-            )(x),
-            0,
-            set_test_value(pt.vector(), np.arange(3, dtype=config.floatX)),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Prod(
-                axis=axis, dtype=dtype, acc_dtype=acc_dtype
-            )(x),
-            0,
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Prod(
-                axis=axis, dtype=dtype, acc_dtype=acc_dtype
-            )(x),
-            1,
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Max(axis)(x),
-            None,
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Max(axis)(x),
-            None,
-            set_test_value(
-                pt.lmatrix(), np.arange(3 * 2, dtype=np.int64).reshape((3, 2))
-            ),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Min(axis)(x),
-            None,
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Min(axis)(x),
-            None,
-            set_test_value(
-                pt.lmatrix(), np.arange(3 * 2, dtype=np.int64).reshape((3, 2))
-            ),
-        ),
-    ],
-)
-def test_CAReduce(careduce_fn, axis, v):
-    g = careduce_fn(v, axis=axis)
-    g_fg = FunctionGraph(outputs=[g])
+@pytest.mark.parametrize("axis", [0, None, (0, 1)])
+@pytest.mark.parametrize("op", [Sum, Prod, ProdWithoutZeros, All, Any, Mean, Max, Min])
+def test_CAReduce(op, axis):
+    if op == Mean and isinstance(axis, tuple) and len(axis) > 1:
+        pytest.xfail("Mean does not support multiple partial axes")
 
-    compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
-    )
+    bool_reduction = op in (All, Any)
+    x = pt.tensor3("x", dtype=bool if bool_reduction else config.floatX)
+    g = op(axis=axis)(x)
+    g_fg = FunctionGraph([x], [g])
+
+    x_test = np.random.normal(size=(2, 3, 4)).astype(config.floatX)
+    if bool_reduction:
+        x_test = x_test > 0
+    compare_numba_and_py(g_fg, [x_test])
 
 
 def test_scalar_Elemwise_Clip():
