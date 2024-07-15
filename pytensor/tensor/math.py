@@ -1304,12 +1304,18 @@ def complex_from_polar(abs, angle):
 
 
 class Mean(FixedOpCAReduce):
+    # FIXME: Mean is not a true CAReduce in the PyTensor sense, because it needs to keep
+    #  track of the number of elements already reduced in order to work iteratively.
+    #  This should subclass a `ReduceOp` which `CAReduce` could also inherit from.
     __props__ = ("axis",)
     nfunc_spec = ("mean", 1, 1)
 
     def __init__(self, axis=None):
         super().__init__(ps.mean, axis)
-        assert self.axis is None or len(self.axis) == 1
+        if not (self.axis is None or len(self.axis) == 1):
+            raise NotImplementedError(
+                "Mean Op only supports axis=None or a single axis. Use `mean` function instead"
+            )
 
     def __str__(self):
         if self.axis is not None:
