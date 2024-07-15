@@ -31,6 +31,6 @@ def test_pytorch_BatchedDot():
     inputs = [get_test_value(a)[:-1], get_test_value(b)]
     opts = RewriteDatabaseQuery(include=[None], exclude=["cxx_only", "BlasOpt"])
     pytorch_mode = Mode(PytorchLinker(), opts)
-    pytensor_jax_fn = function(fgraph.inputs, fgraph.outputs, mode=pytorch_mode)
+    pytensor_pytorch_fn = function(fgraph.inputs, fgraph.outputs, mode=pytorch_mode)
     with pytest.raises(TypeError):
-        pytensor_jax_fn(*inputs)
+        pytensor_pytorch_fn(*inputs)
