@@ -529,3 +529,27 @@ def test_elemwise_out_type():
     x_val = np.broadcast_to(np.zeros((3,)), (6, 3))
 
     assert func(x_val).shape == (18,)
+
+
+@pytest.mark.parametrize("axis", [0, 2, (0, 2), None])
+@pytest.mark.parametrize("op", [Sum, Max, Any])
+def test_careduce_benchmark(benchmark, op, axis):
+    rng = np.random.default_rng(123)
+    N = 256
+    if op == All:
+        # Sparse tensor
+        value = np.zeros((N, N, N), dtype="bool")
+        true_arrays = np.random.choice(N, size=N // 2, replace=False)
+        true_rows = np.random.choice(N, size=N // 2, replace=False)
+        true_cols = np.random.choice(N, size=N // 2, replace=False)
+        value[true_arrays, true_rows, true_cols] = True
+    else:
+        value = rng.normal(size=(N, N, N))
+
+    x = pytensor.shared(value, name="x")
+    out = op(axis=axis)(x)
+
+    func = pytensor.function([], [out], mode="NUMBA")
+    # JIT compile first
+    func()
+    benchmark(func)
