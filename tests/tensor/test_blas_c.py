@@ -196,8 +196,8 @@ class TestCGemv(OptimizationTestMixin):
         if check_force_gemv_init():
             warn(
                 "WARNING: The current BLAS requires PyTensor to initialize"
-                + " memory for some GEMV calls which will result in a minor"
-                + " degradation in performance for such calls."
+                " memory for some GEMV calls which will result in a minor"
+                " degradation in performance for such calls."
             )
 
     def t_gemv1(self, m_shp):

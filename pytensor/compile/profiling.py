@@ -14,20 +14,18 @@ import logging
 import operator
 import sys
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Union
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 
 import pytensor
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.link.utils import get_destroy_dependencies
-
-
-if TYPE_CHECKING:
-    from pytensor.graph.fg import FunctionGraph
 
 
 @contextmanager
@@ -37,7 +35,7 @@ def extended_open(filename, mode="r"):
     elif filename == "<stderr>":
         yield sys.stderr
     else:
-        with open(filename, mode=mode) as f:
+        with Path(filename).open(mode=mode) as f:
             yield f
 
 
@@ -204,8 +202,8 @@ class ProfileStats:
         self.fct_call_time = 0.0
         self.fct_callcount = 0
         self.vm_call_time = 0.0
-        self.apply_time = {}
-        self.apply_callcount = {}
+        self.apply_time = defaultdict(float)
+        self.apply_callcount = Counter()
         # self.apply_cimpl = None
         # self.message = None
 
@@ -234,9 +232,9 @@ class ProfileStats:
     # Total time spent in Function.vm.__call__
     #
 
-    apply_time: dict[Union["FunctionGraph", Variable], float] | None = None
+    apply_time: dict[tuple["FunctionGraph", Apply], float]
 
-    apply_callcount: dict[Union["FunctionGraph", Variable], int] | None = None
+    apply_callcount: dict[tuple["FunctionGraph", Apply], int]
 
     apply_cimpl: dict[Apply, bool] | None = None
     # dict from node -> bool (1 if c, 0 if py)
@@ -292,10 +290,9 @@ class ProfileStats:
     # param is called flag_time_thunks because most other attributes with time
     # in the name are times *of* something, rather than configuration flags.
     def __init__(self, atexit_print=True, flag_time_thunks=None, **kwargs):
-        self.apply_callcount = {}
+        self.apply_callcount = Counter()
         self.output_size = {}
-        # Keys are `(FunctionGraph, Variable)`
-        self.apply_time = {}
+        self.apply_time = defaultdict(float)
         self.apply_cimpl = {}
         self.variable_shape = {}
         self.variable_strides = {}
@@ -320,12 +317,10 @@ class ProfileStats:
 
         """
         # timing is stored by node, we compute timing by class on demand
-        rval = {}
-        for (fgraph, node), t in self.apply_time.items():
-            typ = type(node.op)
-            rval.setdefault(typ, 0)
-            rval[typ] += t
-        return rval
+        rval = defaultdict(float)
+        for (_fgraph, node), t in self.apply_time.items():
+            rval[type(node.op)] += t
+        return dict(rval)
 
     def class_callcount(self):
         """
@@ -333,24 +328,18 @@ class ProfileStats:
 
         """
         # timing is stored by node, we compute timing by class on demand
-        rval = {}
-        for (fgraph, node), count in self.apply_callcount.items():
-            typ = type(node.op)
-            rval.setdefault(typ, 0)
-            rval[typ] += count
+        rval = Counter()
+        for (_fgraph, node), count in self.apply_callcount.items():
+            rval[type(node.op)] += count
         return rval
 
-    def class_nodes(self):
+    def class_nodes(self) -> Counter:
         """
         dict op -> total number of nodes
 
         """
         # timing is stored by node, we compute timing by class on demand
-        rval = {}
-        for (fgraph, node), count in self.apply_callcount.items():
-            typ = type(node.op)
-            rval.setdefault(typ, 0)
-            rval[typ] += 1
+        rval = Counter(type(node.op) for _fgraph, node in self.apply_callcount)
         return rval
 
     def class_impl(self):
@@ -360,12 +349,9 @@ class ProfileStats:
         """
         # timing is stored by node, we compute timing by class on demand
         rval = {}
-        for fgraph, node in self.apply_callcount:
+        for _fgraph, node in self.apply_callcount:
             typ = type(node.op)
-            if self.apply_cimpl[node]:
-                impl = "C "
-            else:
-                impl = "Py"
+            impl = "C " if self.apply_cimpl[node] else "Py"
             rval.setdefault(typ, impl)
             if rval[typ] != impl and len(rval[typ]) == 2:
                 rval[typ] += impl
@@ -377,11 +363,10 @@ class ProfileStats:
 
         """
         # timing is stored by node, we compute timing by Op on demand
-        rval = {}
+        rval = defaultdict(float)
         for (fgraph, node), t in self.apply_time.items():
-            rval.setdefault(node.op, 0)
             rval[node.op] += t
-        return rval
+        return dict(rval)
 
     def fill_node_total_time(self, fgraph, node, total_times):
         """
@@ -414,9 +399,8 @@ class ProfileStats:
 
         """
         # timing is stored by node, we compute timing by Op on demand
-        rval = {}
+        rval = Counter()
         for (fgraph, node), count in self.apply_callcount.items():
-            rval.setdefault(node.op, 0)
             rval[node.op] += count
         return rval
 
@@ -426,10 +410,7 @@ class ProfileStats:
 
         """
         # timing is stored by node, we compute timing by Op on demand
-        rval = {}
-        for (fgraph, node), count in self.apply_callcount.items():
-            rval.setdefault(node.op, 0)
-            rval[node.op] += 1
+        rval = Counter(node.op for _fgraph, node in self.apply_callcount)
         return rval
 
     def op_impl(self):
@@ -772,14 +753,11 @@ class ProfileStats:
                 )
             # Same as before, this I've sacrificed some information making
             # the output more readable
+        percent = sum(f for f, t, a, nd_id, nb_call in atimes[N:])
+        duration = sum(t for f, t, a, nd_id, nb_call in atimes[N:])
         print(
-            "   ... (remaining %i Apply instances account for "
-            "%.2f%%(%.2fs) of the runtime)"
-            % (
-                max(0, len(atimes) - N),
-                sum(f for f, t, a, nd_id, nb_call in atimes[N:]),
-                sum(t for f, t, a, nd_id, nb_call in atimes[N:]),
-            ),
+            f"   ... (remaining {max(0, len(atimes) - N)} Apply instances account for "
+            f"{percent:.2f}%%({duration:.2f}s) of the runtime)",
             file=file,
         )
         print("", file=file)
@@ -1055,7 +1033,7 @@ class ProfileStats:
             executable_nodes = set()
             for var in fgraph.inputs:
                 for c, _ in fgraph.clients[var]:
-                    if c != "output":
+                    if not isinstance(c.op, Output):
                         deps = c.inputs + destroy_dependencies[c]
                         if all(compute_map[v][0] for v in deps):
                             executable_nodes.add(c)
@@ -1183,7 +1161,7 @@ class ProfileStats:
 
                         for var in node.outputs:
                             for c, _ in fgraph.clients[var]:
-                                if c != "output":
+                                if not isinstance(c.op, Output):
                                     deps = c.inputs + destroy_dependencies[c]
                                     if all(compute_map[v][0] for v in deps):
                                         new_exec_nodes.add(c)
@@ -1204,8 +1182,7 @@ class ProfileStats:
                         compute_map[var][0] = 0
 
                     for k_remove, v_remove in viewedby_remove.items():
-                        for i in v_remove:
-                            viewed_by[k_remove].append(i)
+                        viewed_by[k_remove].extend(v_remove)
 
                     for k_add, v_add in viewedby_add.items():
                         for i in v_add:
@@ -1215,15 +1192,16 @@ class ProfileStats:
                         del view_of[k]
 
             # two data structure used to mimic Python gc
-            viewed_by = {}  # {var1: [vars that view var1]}
+            # * {var1: [vars that view var1]}
             # The len of the list is the value of python ref
             # count. But we use a list, not just the ref count value.
-            # This is more safe to help detect potential bug  in the algo
-            for var in fgraph.variables:
-                viewed_by[var] = []
-            view_of = {}  # {var1: original var viewed by var1}
+            # This is more safe to help detect potential bug in the algo
+            viewed_by = {var: [] for var in fgraph.variables}
+
+            # * {var1: original var viewed by var1}
             # The original mean that we don't keep track of all the intermediate
             # relationship in the view.
+            view_of = {}
 
             min_memory_generator(executable_nodes, viewed_by, view_of)
 
@@ -1399,9 +1377,9 @@ class ProfileStats:
         items.sort(key=lambda a: a[1], reverse=True)
         for idx, ((fgraph, node), node_outputs_size) in enumerate(items[:N]):
             code = ["c"] * len(node.outputs)
-            for out, inp in node.op.destroy_map.items():
+            for out in node.op.destroy_map:
                 code[out] = "i"
-            for out, inp in node.op.view_map.items():
+            for out in node.op.view_map:
                 code[out] = "v"
             shapes = str(fct_shapes[fgraph][node])
 
@@ -1466,7 +1444,7 @@ class ProfileStats:
                 file=file,
             )
         if config.profiling__debugprint:
-            fcts = {fgraph for (fgraph, n) in self.apply_time.keys()}
+            fcts = {fgraph for (fgraph, n) in self.apply_time}
             pytensor.printing.debugprint(fcts, print_type=True)
         if self.variable_shape or self.variable_strides:
             self.summary_memory(file, n_apply_to_print)

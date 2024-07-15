@@ -434,7 +434,7 @@ class OpFromGraph(Op, HasInnerGraph):
     def __str__(self):
         name = self.__class__.__name__ if self.name is None else self.name
         is_inline = self.is_inline
-        return "{name}{{inline={is_inline}}}".format(**locals())
+        return f"{name}{{inline={is_inline}}}"
 
     def _combine_list_overrides(self, default_outs, custom_outs, callable_args):
         """Combines default and custom overrides into a single list of outputs."""

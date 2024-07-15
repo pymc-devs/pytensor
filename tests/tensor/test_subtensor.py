@@ -154,8 +154,11 @@ class TestGetCanonicalFormSlice:
         assert isinstance(res[0].owner.op, ptb.ScalarFromTensor)
         assert res[1] == 1
 
-    def test_all_integer(self):
-        res = get_canonical_form_slice(slice(1, 5, 2), 7)
+    @pytest.mark.parametrize("int_fn", [int, np.int64, as_tensor, as_scalar])
+    def test_all_integer(self, int_fn):
+        res = get_canonical_form_slice(
+            slice(int_fn(1), int_fn(5), int_fn(2)), int_fn(7)
+        )
         assert isinstance(res[0], slice)
         assert res[1] == 1
 
@@ -1140,9 +1143,11 @@ class TestSubtensor(utt.OptimizationTestMixin):
         data = random(4)
         data = np.asarray(data, dtype=self.dtype)
         idxs = [[i] for i in range(data.shape[0])]
-        for i in range(data.shape[0]):
-            for j in range(0, data.shape[0], 2):
-                idxs.append([i, j, (i + 1) % data.shape[0]])
+        idxs.extend(
+            [i, j, (i + 1) % data.shape[0]]
+            for i in range(data.shape[0])
+            for j in range(0, data.shape[0], 2)
+        )
         self.grad_list_(idxs, data)
 
         data = random(4, 3)

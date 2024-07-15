@@ -13,7 +13,7 @@ import os
 import pickle
 import shutil
 import sys
-from collections import OrderedDict
+from pathlib import Path
 from tempfile import mkdtemp
 
 import numpy as np
@@ -177,8 +177,7 @@ class multiple_outputs_numeric_grad:
         for i, (a, b) in enumerate(zip(g_pt, self.gx)):
             if a.shape != b.shape:
                 raise ValueError(
-                    "argument element %i has wrong shape %s"
-                    % (i, str((a.shape, b.shape)))
+                    f"argument element {i} has wrong shape {(a.shape, b.shape)}"
                 )
             errs.append(np.max(multiple_outputs_numeric_grad.abs_rel_err(a, b)))
         if np.all(np.isfinite(errs)):
@@ -229,7 +228,7 @@ def grab_scan_node(output):
         ri = grab_scan_node(i)
         if ri is not None:
             rval += ri
-    if rval is []:
+    if rval == []:
         return None
     else:
         return rval
@@ -328,15 +327,15 @@ class TestScan:
             [state, n_steps], output, updates=updates, allow_input_downcast=True
         )
 
-        origdir = os.getcwd()
+        origdir = Path.cwd()
         tmpdir = None
         try:
             tmpdir = mkdtemp()
             os.chdir(tmpdir)
 
-            with open("tmp_scan_test_pickle.pkl", "wb") as f_out:
+            with Path("tmp_scan_test_pickle.pkl").open("wb") as f_out:
                 pickle.dump(_my_f, f_out, protocol=-1)
-            with open("tmp_scan_test_pickle.pkl", "rb") as f_in:
+            with Path("tmp_scan_test_pickle.pkl").open("rb") as f_in:
                 my_f = pickle.load(f_in)
         finally:
             # Get back to the original dir, and delete the temporary one.
@@ -764,11 +763,9 @@ class TestScan:
         b = shared(np.random.default_rng(utt.fetch_seed()).random((5, 4)))
 
         def inner_func(a):
-            return a + 1, OrderedDict([(b, 2 * b)])
+            return a + 1, {b: 2 * b}
 
-        out, updates = scan(
-            inner_func, outputs_info=[OrderedDict([("initial", init_a)])], n_steps=1
-        )
+        out, updates = scan(inner_func, outputs_info=[{"initial": init_a}], n_steps=1)
         out = out[-1]
         assert out.type.ndim == a.type.ndim
         assert updates[b].type.ndim == b.type.ndim
@@ -934,7 +931,7 @@ class TestScan:
         state = shared(v_state, "vstate")
 
         def f_2():
-            return OrderedDict([(state, 2 * state)])
+            return {state: 2 * state}
 
         n_steps = iscalar("nstep")
         output, updates = scan(
@@ -968,7 +965,7 @@ class TestScan:
         X = shared(np.array(1))
 
         out, updates = scan(
-            lambda: OrderedDict([(X, (X + 1))]),
+            lambda: {X: (X + 1)},
             outputs_info=[],
             non_sequences=[],
             sequences=[],
@@ -984,7 +981,7 @@ class TestScan:
         y = shared(np.array(1))
 
         out, updates = scan(
-            lambda: OrderedDict([(x, x + 1), (y, x)]),
+            lambda: {x: x + 1, y: x},
             outputs_info=[],
             non_sequences=[],
             sequences=[],
@@ -1914,7 +1911,7 @@ class TestScan:
         shared_var = shared(np.float32(1.0))
 
         def inner_fn():
-            return [], OrderedDict([(shared_var, shared_var + np.float32(1.0))])
+            return [], {shared_var: shared_var + np.float32(1.0)}
 
         _, updates = scan(
             inner_fn, n_steps=10, truncate_gradient=-1, go_backwards=False
@@ -2746,7 +2743,7 @@ class TestExamples:
 
         v1 = shared(np.ones(5, dtype=config.floatX))
         v2 = shared(np.ones((5, 5), dtype=config.floatX))
-        shapef = function([W], expr, givens=OrderedDict([(initial, v1), (inpt, v2)]))
+        shapef = function([W], expr, givens={initial: v1, inpt: v2})
         # First execution to cache n_steps
         shapef(np.ones((5, 5), dtype=config.floatX))
 
@@ -2755,7 +2752,7 @@ class TestExamples:
         f = function(
             [W, inpt],
             d_cost_wrt_W,
-            givens=OrderedDict([(initial, shared(np.zeros(5)))]),
+            givens={initial: shared(np.zeros(5))},
         )
 
         rval = np.asarray([[5187989] * 5] * 5, dtype=config.floatX)
@@ -2956,7 +2953,7 @@ class TestExamples:
 
         seq = matrix()
         initial_value = shared(np.zeros((4, 1), dtype=config.floatX))
-        outputs_info = [OrderedDict([("initial", initial_value), ("taps", [-4])]), None]
+        outputs_info = [{"initial": initial_value, "taps": [-4]}, None]
         results, updates = scan(fn=onestep, sequences=seq, outputs_info=outputs_info)
 
         f = function([seq], results[1])
@@ -2979,10 +2976,10 @@ class TestExamples:
 
         seq = matrix()
         initial_value = shared(np.zeros((4, 1), dtype=config.floatX))
-        outputs_info = [OrderedDict([("initial", initial_value), ("taps", [-4])]), None]
+        outputs_info = [{"initial": initial_value, "taps": [-4]}, None]
         results, _ = scan(fn=onestep, sequences=seq, outputs_info=outputs_info)
         sharedvar = shared(np.zeros((1, 1), dtype=config.floatX))
-        updates = OrderedDict([(sharedvar, results[0][-1:])])
+        updates = {sharedvar: results[0][-1:]}
 
         f = function([seq], results[1], updates=updates)
 

@@ -136,20 +136,19 @@ def _check_scipy_linalg_matrix(a, func_name):
     Adapted from https://github.com/numba/numba/blob/bd7ebcfd4b850208b627a3f75d4706000be36275/numba/np/linalg.py#L831
     """
     prefix = "scipy.linalg"
-    interp = (prefix, func_name)
     # Unpack optional type
     if isinstance(a, types.Optional):
         a = a.type
     if not isinstance(a, types.Array):
-        msg = "{}.{}() only supported for array types".format(*interp)
+        msg = f"{prefix}.{func_name}() only supported for array types"
         raise numba.TypingError(msg, highlighting=False)
     if a.ndim not in [1, 2]:
-        msg = "{}.{}() only supported on 1d or 2d arrays, found {}.".format(
-            *interp, a.ndim
+        msg = (
+            f"{prefix}.{func_name}() only supported on 1d or 2d arrays, found {a.ndim}."
         )
         raise numba.TypingError(msg, highlighting=False)
     if not isinstance(a.dtype, types.Float | types.Complex):
-        msg = "{}.{}() only supported on " "float and complex arrays.".format(*interp)
+        msg = f"{prefix}.{func_name}() only supported on float and complex arrays."
         raise numba.TypingError(msg, highlighting=False)
 
 

@@ -485,8 +485,8 @@ def numba_funcify_Elemwise(op, node, **kwargs):
     nout = len(node.outputs)
     core_op_fn = store_core_outputs(scalar_op_fn, nin=nin, nout=nout)
 
-    input_bc_patterns = tuple([inp.type.broadcastable for inp in node.inputs])
-    output_bc_patterns = tuple([out.type.broadcastable for out in node.outputs])
+    input_bc_patterns = tuple(inp.type.broadcastable for inp in node.inputs)
+    output_bc_patterns = tuple(out.type.broadcastable for out in node.outputs)
     output_dtypes = tuple(out.type.dtype for out in node.outputs)
     inplace_pattern = tuple(op.inplace_pattern.items())
     core_output_shapes = tuple(() for _ in range(nout))
@@ -520,9 +520,7 @@ def numba_funcify_Elemwise(op, node, **kwargs):
                 if length == 1 and shape and iter_length != 1 and not allow_bc:
                     raise ValueError("Broadcast not allowed.")
 
-        outputs = []
-        for dtype in output_dtypes:
-            outputs.append(np.empty(shape, dtype=dtype))
+        outputs = [np.empty(shape, dtype=dtype) for dtype in output_dtypes]
 
         for idx in np.ndindex(shape):
             vals = [input[idx] for input in inputs_bc]

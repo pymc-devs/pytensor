@@ -30,7 +30,11 @@ from pytensor.tensor.type import (
     float_dtypes,
     lvector,
 )
-from pytensor.tensor.utils import broadcast_static_dim_lengths, import_func_from_string
+from pytensor.tensor.utils import (
+    broadcast_static_dim_lengths,
+    import_func_from_string,
+    normalize_reduce_axis,
+)
 from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import uniq
 
@@ -178,7 +182,7 @@ class DimShuffle(ExternalCOp):
         self.transposition = self.shuffle + drop
         # List of dimensions of the output that are broadcastable and were not
         # in the original input
-        self.augment = sorted([i for i, x in enumerate(new_order) if x == "x"])
+        self.augment = sorted(i for i, x in enumerate(new_order) if x == "x")
         self.drop = drop
 
         if self.inplace:
@@ -201,12 +205,12 @@ class DimShuffle(ExternalCOp):
                     f"input is incorrect for this op. Expected {self.input_broadcastable}, got {ib}."
                 )
             for expected, b in zip(self.input_broadcastable, ib):
-                if expected is True and b is False:
+                if expected and not b:
                     raise TypeError(
                         "The broadcastable pattern of the "
                         f"input is incorrect for this op. Expected {self.input_broadcastable}, got {ib}."
                     )
-                # else, expected == b or expected is False and b is True
+                # else, expected == b or not expected and b
                 # Both case are good.
 
         out_static_shape = []
@@ -298,10 +302,7 @@ class DimShufflePrinter(Printer):
             return pstate.pprinter.process(r)
         if list(new_order) == list(reversed(range(r.type.ndim))):
             return f"{pstate.pprinter.process(r)}.T"
-        return "DimShuffle{{{}}}({})".format(
-            ", ".join(map(str, new_order)),
-            pstate.pprinter.process(r),
-        )
+        return f"DimShuffle{{{', '.join(str(o) for o in new_order)}}}({pstate.pprinter.process(r)})"
 
     def process(self, r, pstate):
         if r.owner is None:
@@ -889,11 +890,9 @@ class Elemwise(OpenMPOp):
         # In that case, create a fortran output ndarray.
         z = list(zip(inames, inputs))
         alloc_fortran = " && ".join(
-            [
-                f"PyArray_ISFORTRAN({arr})"
-                for arr, var in z
-                if not all(s == 1 for s in var.type.shape)
-            ]
+            f"PyArray_ISFORTRAN({arr})"
+            for arr, var in z
+            if not all(s == 1 for s in var.type.shape)
         )
         # If it is a scalar, make it c contig to prevent problem with
         # NumPy C and F contig not always set as both of them.
@@ -927,13 +926,13 @@ class Elemwise(OpenMPOp):
             # We make the output point to the corresponding input and
             # decrease the reference of whatever the output contained
             # prior to this
-            alloc += """
+            alloc += f"""
             if ({oname}) {{
                 Py_XDECREF({oname});
             }}
             {oname} = {iname};
             Py_XINCREF({oname});
-            """.format(**locals())
+            """
             # We alias the scalar variables
             defines += f"#define {oname}_i {iname}_i\n"
             undefs += f"#undef {oname}_i\n"
@@ -956,13 +955,13 @@ class Elemwise(OpenMPOp):
             [f"{s}_i" for s in onames],
             dict(sub, fail=fail),
         )
-        code = """
+        code = f"""
         {{
             {defines}
             {task_code}
             {undefs}
         }}
-        """.format(**locals())
+        """
 
         loop_orders = orders + [list(range(nnested))] * len(real_onames)
         dtypes = idtypes + list(real_odtypes)
@@ -980,12 +979,10 @@ class Elemwise(OpenMPOp):
             if len(all_code) == 1:
                 # No loops
                 task_decl = "".join(
-                    [
-                        f"{dtype}& {name}_i = *{name}_iter;\n"
-                        for name, dtype in zip(
-                            inames + list(real_onames), idtypes + list(real_odtypes)
-                        )
-                    ]
+                    f"{dtype}& {name}_i = *{name}_iter;\n"
+                    for name, dtype in zip(
+                        inames + list(real_onames), idtypes + list(real_odtypes)
+                    )
                 )
 
                 preloops = {}
@@ -994,19 +991,17 @@ class Elemwise(OpenMPOp):
                         if index != "x":
                             preloops.setdefault(j, "")
                             preloops[j] += (
-                                "%(lv{i})s_iter = ({dtype}*)"
-                                "(PyArray_DATA(%(lv{i})s));\n".format(**locals())
+                                f"%(lv{i})s_iter = ({dtype}*)(PyArray_DATA(%(lv{i})s));\n"
                             ) % sub
                             break
                     else:  # all broadcastable
                         preloops.setdefault(0, "")
                         preloops[0] += (
-                            "%(lv{i})s_iter = ({dtype}*)"
-                            "(PyArray_DATA(%(lv{i})s));\n".format(**locals())
+                            f"%(lv{i})s_iter = ({dtype}*)(PyArray_DATA(%(lv{i})s));\n"
                         ) % sub
 
                 init_array = preloops.get(0, " ")
-                loop = """
+                loop = f"""
                 {{
                   {defines}
                   {init_array}
@@ -1014,7 +1009,7 @@ class Elemwise(OpenMPOp):
                   {task_code}
                   {undefs}
                 }}
-                """.format(**locals())
+                """
             else:
                 loop = cgen.make_loop(
                     loop_orders=loop_orders,
@@ -1074,49 +1069,45 @@ class Elemwise(OpenMPOp):
                     index = ""
                     for x, var in zip(inames + onames, inputs + node.outputs):
                         if not all(s == 1 for s in var.type.shape):
-                            contig += """
+                            contig += f"""
             dtype_{x} * {x}_ptr = (dtype_{x}*) PyArray_DATA({x});
-                            """.format(**locals())
-                            index += """
+                            """
+                            index += f"""
             dtype_{x}& {x}_i = {x}_ptr[i];
-                            """.format(**locals())
+                            """
                         else:
-                            contig += """
+                            contig += f"""
             dtype_{x}& {x}_i = ((dtype_{x}*) PyArray_DATA({x}))[0];
-                            """.format(**locals())
+                            """
                     if self.openmp:
                         contig += f"""#pragma omp parallel for if(n>={int(config.openmp_elemwise_minsize)})
                         """
-                    contig += """
+                    contig += f"""
                     for(int i=0; i<n; i++){{
                         {index}
                         {task_code};
                     }}
-                    """.format(**locals())
+                    """
             if contig is not None:
                 z = list(zip(inames + onames, inputs + node.outputs))
                 all_broadcastable = all(s == 1 for s in var.type.shape)
                 cond1 = " && ".join(
-                    [
-                        f"PyArray_ISCONTIGUOUS({arr})"
-                        for arr, var in z
-                        if not all_broadcastable
-                    ]
+                    f"PyArray_ISCONTIGUOUS({arr})"
+                    for arr, var in z
+                    if not all_broadcastable
                 )
                 cond2 = " && ".join(
-                    [
-                        f"PyArray_ISFORTRAN({arr})"
-                        for arr, var in z
-                        if not all_broadcastable
-                    ]
+                    f"PyArray_ISFORTRAN({arr})"
+                    for arr, var in z
+                    if not all_broadcastable
                 )
-                loop = """
+                loop = f"""
             if(({cond1}) || ({cond2})){{
                 {contig}
             }}else{{
                 {loop}
             }}
-            """.format(**locals())
+            """
         return decl, checks, alloc, loop, ""
 
     def c_code(self, node, nodename, inames, onames, sub):
@@ -1161,8 +1152,10 @@ class Elemwise(OpenMPOp):
             ],
         )
         version.append(self.scalar_op.c_code_cache_version_apply(scalar_node))
-        for i in node.inputs + node.outputs:
-            version.append(get_scalar_type(dtype=i.type.dtype).c_code_cache_version())
+        version.extend(
+            get_scalar_type(dtype=i.type.dtype).c_code_cache_version()
+            for i in node.inputs + node.outputs
+        )
         version.append(("openmp", self.openmp))
         version.append(("openmp_elemwise_minsize", config.openmp_elemwise_minsize))
         if all(version):
@@ -1369,7 +1362,6 @@ class CAReduce(COp):
 
     def make_node(self, input):
         input = as_tensor_variable(input)
-        inp_dims = input.type.ndim
         inp_dtype = input.type.dtype
 
         # We need to redefine make_node so that, if self.dtype is None,
@@ -1381,29 +1373,19 @@ class CAReduce(COp):
         assert dtype is not None
         assert acc_dtype is not None
 
-        axis = self.axis
+        axis = normalize_reduce_axis(self.axis, ndim=input.type.ndim)
 
-        # scalar inputs are treated as 1D regarding axis in this `Op`
-        if axis is not None:
-            try:
-                axis = normalize_axis_tuple(axis, ndim=max(1, inp_dims))
-            except np.AxisError:
-                raise np.AxisError(axis, ndim=inp_dims)
-
-            out_shape = tuple(
-                s for i, s in enumerate(input.type.shape) if i not in axis
-            )
-        else:
-            out_shape = ()
-
-        if (
-            (axis is not None and any(a < 0 for a in axis))
-            or dtype != self.dtype
-            or acc_dtype != self.acc_dtype
-        ):
+        if axis != self.axis or dtype != self.dtype or acc_dtype != self.acc_dtype:
             op = self.clone(axis=axis, dtype=dtype, acc_dtype=acc_dtype)
         else:
             op = self
+
+        if axis is None:
+            out_shape = ()
+        else:
+            out_shape = tuple(
+                s for i, s in enumerate(input.type.shape) if i not in axis
+            )
 
         output = TensorType(dtype=dtype, shape=out_shape)()
 
@@ -1581,9 +1563,7 @@ class CAReduce(COp):
         elif identity is None:
             raise TypeError(f"The {self.scalar_op} does not define an identity.")
 
-        task0_decl = (
-            f"{adtype}& {aname}_i = *{aname}_iter;\n" f"{aname}_i = {identity};"
-        )
+        task0_decl = f"{adtype}& {aname}_i = *{aname}_iter;\n{aname}_i = {identity};"
 
         task1_decl = f"{idtype}& {inames[0]}_i = *{inames[0]}_iter;\n"
 
@@ -1664,8 +1644,10 @@ class CAReduce(COp):
             ],
         )
         version.append(self.scalar_op.c_code_cache_version_apply(scalar_node))
-        for i in node.inputs + node.outputs:
-            version.append(get_scalar_type(dtype=i.type.dtype).c_code_cache_version())
+        version.extend(
+            get_scalar_type(dtype=i.type.dtype).c_code_cache_version()
+            for i in node.inputs + node.outputs
+        )
         if all(version):
             return tuple(version)
         else:

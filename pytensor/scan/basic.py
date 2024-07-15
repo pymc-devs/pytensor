@@ -646,9 +646,7 @@ def scan(
 
     # Since we've added all sequences now we need to level them up based on
     # n_steps or their different shapes
-    lengths_vec = []
-    for seq in scan_seqs:
-        lengths_vec.append(seq.shape[0])
+    lengths_vec = [seq.shape[0] for seq in scan_seqs]
 
     if not isNaN_or_Inf_or_None(n_steps):
         # ^ N_steps should also be considered

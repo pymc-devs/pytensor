@@ -65,7 +65,7 @@ def test_nnet():
             output, cost = nnet.sgd_step(input, target)
             mean_cost += cost
         mean_cost /= float(len(data))
-        # print 'Mean cost at epoch %s: %s' % (epoch, mean_cost)
+        # print(f"Mean cost at epoch {epoch}: {mean_cost}")
     # Seed based test
     assert abs(mean_cost - 0.2301901) < 1e-6
     # Just call functions to make sure they do not crash.

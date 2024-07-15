@@ -23,6 +23,7 @@ from pytensor.tensor.rewriting.shape import (
     ShapeFeature,
     local_reshape_to_dimshuffle,
     local_useless_reshape,
+    local_useless_specify_shape,
 )
 from pytensor.tensor.shape import (
     Reshape,
@@ -474,6 +475,30 @@ class TestSameShape:
             shape_feature.same_shape(x, o, 1, 0)
         with pytest.raises(IndexError):
             shape_feature.same_shape(x, o, 0, 1)
+
+
+def test_useless_specify_shape():
+    x = tensor("x", shape=(None, 5, 3))
+
+    # We avoid the helper specify_shape that optimizes some (but not all) cases eagerly
+    ss = SpecifyShape()
+
+    out = ss(x, None, 5, None)
+    assert isinstance(out.owner.op, SpecifyShape)
+    ret = local_useless_specify_shape.transform(None, out.owner)
+    assert ret == [x]
+
+    # SpecifyShape is needed to enfore unknown dim is 3
+    out = ss(x, 3, 5, None)
+    assert isinstance(out.owner.op, SpecifyShape)
+    ret = local_useless_specify_shape.transform(None, out.owner)
+    assert ret is None
+
+    # SpecifyShape is needed to raise mismatch between static and specified dim
+    out = ss(x, None, 5, 4)
+    assert isinstance(out.owner.op, SpecifyShape)
+    ret = local_useless_specify_shape.transform(None, out.owner)
+    assert ret is None
 
 
 @pytest.mark.parametrize(

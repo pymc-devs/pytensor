@@ -267,6 +267,16 @@ or, making use of the R-operator:
 >>> f([4, 4], [2, 2])
 array([ 4.,  4.])
 
+There is a builtin helper that uses the first method
+
+>>> x = pt.dvector('x')
+>>> v = pt.dvector('v')
+>>> y = pt.sum(x ** 2)
+>>> Hv = pytensor.gradient.hessian_vector_product(y, x, v)
+>>> f = pytensor.function([x, v], Hv)
+>>> f([4, 4], [2, 2])
+array([ 4.,  4.])
+
 
 Final Pointers
 ==============
