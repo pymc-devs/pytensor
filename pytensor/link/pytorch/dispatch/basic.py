@@ -116,3 +116,14 @@ def pytorch_funcify_eye(op, **kwargs):
         return zeros
 
     return eye
+
+def torch_safe_clone(x):
+    # Detach to prevent the autograd overhead from following
+    return torch.clone(x.detach())
+
+@pytorch_funcify.register(DeepCopyOp)
+def pytorch_funcify_DeepCopyOp(op, *kwargs):
+    def deepcopyop(x):
+        return torch_safe_clone(x)
+
+    return deepcopyop

@@ -6,4 +6,6 @@ import pytensor.link.pytorch.dispatch.scalar
 import pytensor.link.pytorch.dispatch.elemwise
 import pytensor.link.pytorch.dispatch.extra_ops
 import pytensor.link.pytorch.dispatch.sort
+import pytensor.link.pytorch.dispatch.basic
 # isort: on
+

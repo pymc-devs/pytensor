@@ -7,6 +7,7 @@ import pytest
 import pytensor.tensor.basic as ptb
 from pytensor.compile.function import function
 from pytensor.compile.mode import get_mode
+from pytensor.compile.ops import DeepCopyOp
 from pytensor.compile.sharedvalue import SharedVariable, shared
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
@@ -294,3 +295,7 @@ def test_eye(dtype):
         for _M in range(1, 6):
             for _k in list(range(_M + 2)) + [-x for x in range(1, _N + 2)]:
                 np.testing.assert_array_equal(fn(_N, _M, _k), np.eye(_N, _M, _k))
+
+@pytest.mark.xfail(raises=NotImplementedError)
+def test_deepcopy():
+    assert False
