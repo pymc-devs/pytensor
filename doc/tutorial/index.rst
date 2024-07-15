@@ -59,6 +59,7 @@ Further reading
 .. toctree::
 
     loading_and_saving
+    prng
     aliasing
     multi_cores
     faq_tutorial
