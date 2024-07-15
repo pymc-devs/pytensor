@@ -6,12 +6,10 @@ pytensor/compile/mode.py
 pytensor/compile/sharedvalue.py
 pytensor/graph/rewriting/basic.py
 pytensor/ifelse.py
-pytensor/link/basic.py
 pytensor/link/numba/dispatch/elemwise.py
 pytensor/link/numba/dispatch/scan.py
 pytensor/printing.py
 pytensor/raise_op.py
-pytensor/scalar/basic.py
 pytensor/sparse/basic.py
 pytensor/sparse/type.py
 pytensor/tensor/basic.py
@@ -24,7 +22,7 @@ pytensor/tensor/random/basic.py
 pytensor/tensor/random/op.py
 pytensor/tensor/random/utils.py
 pytensor/tensor/rewriting/basic.py
-pytensor/tensor/slinalg.py
 pytensor/tensor/type.py
 pytensor/tensor/type_other.py
 pytensor/tensor/variable.py
+pytensor/_version.py

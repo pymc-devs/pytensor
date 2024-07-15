@@ -13,6 +13,7 @@ dependencies:
   - mock
   - pillow
   - pymc-sphinx-theme
+  - sphinx-design
   - pip
   - pip:
     - -e ..

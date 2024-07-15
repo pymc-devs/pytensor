@@ -4,6 +4,7 @@ from functools import partial
 import numpy as np
 import pytest
 
+import pytensor.tensor.basic as ptb
 from pytensor.compile.function import function
 from pytensor.compile.mode import get_mode
 from pytensor.compile.sharedvalue import SharedVariable, shared
@@ -12,8 +13,8 @@ from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.raise_op import CheckAndRaise
-from pytensor.tensor import alloc, arange, as_tensor, empty
-from pytensor.tensor.type import scalar, vector
+from pytensor.tensor import alloc, arange, as_tensor, empty, eye
+from pytensor.tensor.type import matrix, scalar, vector
 
 
 torch = pytest.importorskip("torch")
@@ -235,3 +236,61 @@ def test_arange():
         FunctionGraph([start, stop, step], [out]),
         [np.array(1), np.array(10), np.array(2)],
     )
+
+
+def test_pytorch_Join():
+    a = matrix("a")
+    b = matrix("b")
+
+    x = ptb.join(0, a, b)
+    x_fg = FunctionGraph([a, b], [x])
+    compare_pytorch_and_py(
+        x_fg,
+        [
+            np.c_[[1.0, 2.0, 3.0]].astype(config.floatX),
+            np.c_[[4.0, 5.0, 6.0]].astype(config.floatX),
+        ],
+    )
+    compare_pytorch_and_py(
+        x_fg,
+        [
+            np.c_[[1.0, 2.0, 3.0]].astype(config.floatX),
+            np.c_[[4.0, 5.0]].astype(config.floatX),
+        ],
+    )
+
+    x = ptb.join(1, a, b)
+    x_fg = FunctionGraph([a, b], [x])
+    compare_pytorch_and_py(
+        x_fg,
+        [
+            np.c_[[1.0, 2.0, 3.0]].astype(config.floatX),
+            np.c_[[4.0, 5.0, 6.0]].astype(config.floatX),
+        ],
+    )
+    compare_pytorch_and_py(
+        x_fg,
+        [
+            np.c_[[1.0, 2.0], [3.0, 4.0]].astype(config.floatX),
+            np.c_[[5.0, 6.0]].astype(config.floatX),
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    ["int64", config.floatX],
+)
+def test_eye(dtype):
+    N = scalar("N", dtype="int64")
+    M = scalar("M", dtype="int64")
+    k = scalar("k", dtype="int64")
+
+    out = eye(N, M, k, dtype=dtype)
+
+    fn = function([N, M, k], out, mode=pytorch_mode)
+
+    for _N in range(1, 6):
+        for _M in range(1, 6):
+            for _k in list(range(_M + 2)) + [-x for x in range(1, _N + 2)]:
+                np.testing.assert_array_equal(fn(_N, _M, _k), np.eye(_N, _M, _k))

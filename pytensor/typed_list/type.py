@@ -110,26 +110,27 @@ class TypedListType(CType):
 
     def c_extract(self, name, sub, check_input=True, **kwargs):
         if check_input:
-            pre = """
+            fail = sub["fail"]
+            pre = f"""
             if (!PyList_Check(py_{name})) {{
                 PyErr_SetString(PyExc_TypeError, "expected a list");
                 {fail}
-            }}""".format(**dict(name=name, fail=sub["fail"]))
+            }}"""
         else:
             pre = ""
         return (
             pre
-            + """
+            + f"""
         {name} = (PyListObject*) (py_{name});
-        """.format(**dict(name=name, fail=sub["fail"]))
+        """
         )
 
     def c_sync(self, name, sub):
-        return """
+        return f"""
         Py_XDECREF(py_{name});
         py_{name} = (PyObject*)({name});
         Py_INCREF(py_{name});
-        """.format(**dict(name=name))
+        """
 
     def c_cleanup(self, name, sub):
         return ""

@@ -8,7 +8,6 @@ from numpy.core.numeric import normalize_axis_tuple
 
 from pytensor import config, printing
 from pytensor import scalar as ps
-from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
@@ -26,9 +25,9 @@ from pytensor.tensor.basic import (
     cast,
     concatenate,
     constant,
+    expand_dims,
     stack,
     switch,
-    zeros_like,
 )
 from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
 from pytensor.tensor.elemwise import (
@@ -45,14 +44,11 @@ from pytensor.tensor.type import (
     continuous_dtypes,
     discrete_dtypes,
     int_dtypes,
-    integer_dtypes,
     tensor,
     uint_dtypes,
 )
-from pytensor.tensor.type_other import NoneConst
-from pytensor.tensor.utils import as_list
+from pytensor.tensor.utils import as_list, normalize_reduce_axis
 from pytensor.tensor.variable import (
-    TensorConstant,
     TensorVariable,
     _tensor_py_operators,
 )
@@ -157,7 +153,7 @@ class Argmax(COp):
 
     def __init__(self, axis):
         if axis is not None:
-            axis = tuple(axis)
+            axis = tuple(sorted(axis))
         self.axis = axis
 
     def get_params(self, node):
@@ -168,7 +164,7 @@ class Argmax(COp):
             c_axis = np.int64(-1)
         return self.params_type.get_params(c_axis=c_axis)
 
-    def make_node(self, x, axis=None):
+    def make_node(self, x):
         x = as_tensor_variable(x)
         if self.axis is None:
             all_axes = list(range(x.ndim))
@@ -198,7 +194,9 @@ class Argmax(COp):
         # Work around
         keep_axes = np.array([i for i in range(x.ndim) if i not in axes], dtype="int64")
         # Not-reduced axes in front
-        transposed_x = np.transpose(x, np.concatenate((keep_axes, axes)))
+        transposed_x = np.transpose(
+            x, np.concatenate((keep_axes, np.asarray(axes, dtype="int64")))
+        )
         kept_shape = transposed_x.shape[: len(keep_axes)]
         reduced_shape = transposed_x.shape[len(keep_axes) :]
         new_shape = (*kept_shape, np.prod(reduced_shape, dtype="int64"))
@@ -214,57 +212,54 @@ class Argmax(COp):
         if self.axis is None:
             axis_code = "axis = NPY_MAXDIMS;"
         else:
-            if len(self.axis) > 1:
+            if len(self.axis) != 1:
                 raise NotImplementedError()
             # params is only used here for now
-            axis_code = """
+            axis_code = f"""
             axis = {params}->c_axis;
             if(axis > PyArray_NDIM({x})-1 || axis < -PyArray_NDIM({x})){{
                 PyErr_SetString(PyExc_ValueError,
                 "Argmax, bad axis argument");
                 {fail}
             }}
-            """.format(**locals())
-        ret = """
+            """
+        return f"""
         int axis;
 
-        Py_CLEAR(%(argmax)s);//todo pass them as out parameter.
-        %(axis_code)s
+        Py_CLEAR({argmax});//todo pass them as out parameter.
+        {axis_code}
 
-        %(argmax)s = (PyArrayObject*)PyArray_ArgMax(%(x)s, axis, NULL);
-        if(%(argmax)s == NULL){
-            %(fail)s;
-        }
-        if(!PyArray_CheckExact(%(argmax)s)){
-            %(argmax)s = (PyArrayObject*)PyArray_FromAny((PyObject*)%(argmax)s, NULL, 0, 0, NPY_ARRAY_ENSUREARRAY, NULL);
-            if(%(argmax)s == NULL){
-                %(fail)s;
-            }
-        }
-        if(PyArray_TYPE(%(argmax)s) != NPY_INT64){
-            PyObject * tmp = PyArray_Cast(%(argmax)s, NPY_INT64);
-            if (NULL == tmp){
-                %(fail)s;
-            }
-            Py_DECREF(%(argmax)s);
-            %(argmax)s = (PyArrayObject*)tmp;
-        }
+        {argmax} = (PyArrayObject*)PyArray_ArgMax({x}, axis, NULL);
+        if({argmax} == NULL){{
+            {fail};
+        }}
+        if(!PyArray_CheckExact({argmax})){{
+            {argmax} = (PyArrayObject*)PyArray_FromAny((PyObject*){argmax}, NULL, 0, 0, NPY_ARRAY_ENSUREARRAY, NULL);
+            if({argmax} == NULL){{
+                {fail};
+            }}
+        }}
+        if(PyArray_TYPE({argmax}) != NPY_INT64){{
+            PyObject * tmp = PyArray_Cast({argmax}, NPY_INT64);
+            if (NULL == tmp){{
+                {fail};
+            }}
+            Py_DECREF({argmax});
+            {argmax} = (PyArrayObject*)tmp;
+        }}
         """
-        return ret % locals()
 
     def c_code_cache_version(self):
-        return (1,)
+        return (2,)
 
     def infer_shape(self, fgraph, node, shapes):
         (ishape,) = shapes
         if self.axis is None:
             return [()]
         rval = tuple(
-            [
-                ishape[i]
-                for (i, b) in enumerate(node.inputs[0].type.broadcastable)
-                if i not in self.axis
-            ]
+            ishape[i]
+            for (i, b) in enumerate(node.inputs[0].type.broadcastable)
+            if i not in self.axis
         )
         return [rval]
 
@@ -275,6 +270,40 @@ class Argmax(COp):
         (x,) = inp
 
         return [x.zeros_like()]
+
+
+def argmax(x: TensorLike, axis=None, keepdims: bool = False):
+    """
+    Returns indices of maximum elements obtained by iterating over given axis.
+
+    When axis is None (the default value), the argmax is performed
+    over the flattened tensor.
+
+    Parameters
+    ----------
+    x: TensorLike
+        Array on which to compute argmax
+    axis:
+        Axis along which to compute argmax. Unlike numpy multiple partial axis are supported.
+    keepdims : bool
+        If this is set to True, the axes which are reduced are left in
+        the result as dimensions with size one. With this option, the result
+        will broadcast correctly against the original tensor.
+
+    Returns
+    -------
+    TensorVariable
+        TensorVariable representing the argmax operation
+
+    """
+    x = as_tensor_variable(x)
+    axis = normalize_reduce_axis(axis, ndim=x.type.ndim)
+    out = Argmax(axis)(x)
+
+    if keepdims:
+        out = makeKeepDims(x, out, axis)
+
+    return out
 
 
 @_vectorize_node.register(Argmax)
@@ -297,85 +326,9 @@ def makeKeepDims(x, y, axis):
 
     """
     x = as_tensor_variable(x)
-    y = as_tensor_variable(y)
-
     if axis is None:
         axis = list(range(x.type.ndim))
-    elif isinstance(axis, int | np.integer):
-        axis = [axis]
-    elif isinstance(axis, np.ndarray) and axis.ndim == 0:
-        axis = [int(axis)]
-    else:
-        axis = [int(a) for a in axis]
-    newaxis = []
-    for a in axis:
-        if not isinstance(a, int):
-            raise ValueError("keepdims option can be used only with constant axis")
-        if a < 0:
-            a += x.type.ndim
-        newaxis.append(a)
-    i = 0
-    new_dims = []
-    for j, _ in enumerate(x.type.broadcastable):
-        if j in newaxis:
-            new_dims.append("x")
-        else:
-            new_dims.append(i)
-            i += 1
-    return DimShuffle(y.type.broadcastable, new_dims)(y)
-
-
-def check_and_normalize_axes(x, axis):
-    """Check axes, normalize and convert them to a Python list of integers.
-
-    Parameters
-    ----------
-    x: TensorVariable
-    axis: int, tuple or list of integers
-
-    Returns
-    -------
-    axis: list of integers
-        Return an empty list if argument is None.
-
-    """
-    x = as_tensor_variable(x)
-    if axis is None:
-        axis = []
-    elif isinstance(axis, int | np.integer) or (
-        isinstance(axis, np.ndarray) and axis.ndim == 0
-    ):
-        axis = [int(axis)]
-    elif isinstance(axis, tuple | list | np.ndarray):
-        axis = [int(i) for i in axis]
-    elif isinstance(axis, Variable):
-        if NoneConst.equals(axis):
-            axis = []
-        elif not isinstance(axis, TensorConstant):
-            raise TypeError(f"Computation needs a constant axis. Got {axis}")
-        else:
-            assert axis.dtype in integer_dtypes
-            if isinstance(axis.data, int | np.integer) or (
-                isinstance(axis.data, np.ndarray) and axis.data.ndim == 0
-            ):
-                axis = [int(axis.data)]
-            elif isinstance(axis.data, list | np.ndarray):
-                axis = [int(i) for i in axis.data]
-    else:
-        raise TypeError(
-            f"Axis must be an integer, tuple, list of integers or a TensorVariable. Got {axis}"
-        )
-    if len(axis) > 0:
-        for i in range(len(axis)):
-            if axis[i] < 0:
-                axis[i] += x.type.ndim
-            if axis[i] < 0 or axis[i] >= x.type.ndim:
-                raise ValueError(
-                    f"Computation needs a valid axis number for {int(x.type.ndim)}-D tensor. Got {int(axis[i])}"
-                )
-        axis = list(set(axis))
-        axis.sort()
-    return axis
+    return expand_dims(y, axis)
 
 
 def max_and_argmax(a, axis=None, keepdims=False):
@@ -396,28 +349,10 @@ def max_and_argmax(a, axis=None, keepdims=False):
     """
     # Check axis and convert it to a Python list of integers.
     # Axis will be used as an op param of Max and Argmax.
-    a = as_tensor_variable(a)
-
-    is_axis_empty = False
-    if axis == ():
-        is_axis_empty = True
-
-    axis = check_and_normalize_axes(a, axis)
-
-    if len(axis) == 0 and not is_axis_empty:
-        axis = None
-
-    out = Max(axis)(a)
-
-    if not is_axis_empty:
-        argout = Argmax(axis)(a)
-    else:
-        argout = zeros_like(a, dtype="int64")
-
-    if keepdims:
-        out = makeKeepDims(a, out, axis)
-        argout = makeKeepDims(a, argout, axis)
-    return [out, argout]
+    return [
+        max(a, axis=axis, keepdims=keepdims),
+        argmax(a, axis=axis, keepdims=keepdims),
+    ]
 
 
 class FixedOpCAReduce(CAReduce):
@@ -466,7 +401,7 @@ class Max(NonZeroDimsCAReduce):
         axis = kwargs.get("axis", self.axis)
         return type(self)(axis=axis)
 
-    def grad(self, inp, grads):
+    def L_op(self, inputs, outputs, grads):
         # The strict sense mathematical gradient of the maximum function is
         # not calculated here for it is not defined at every point where some
         # coordinates are identical. However, since the latter set has null
@@ -480,53 +415,27 @@ class Max(NonZeroDimsCAReduce):
         # g_max has one less dimension than x, so you need to complete
         # g_max to x's shape when axis=0 the broadcasting mechanism
         # does it automatically
-        x = inp[0]
-        if self.axis is None:
-            self.axis = tuple(range(x.ndim))
-        axis = as_tensor_variable(self.axis)
-        (g_max,) = grads
+        [x] = inputs
+        [out] = outputs
+        [g_out] = grads
 
-        g_max_disconnected = isinstance(g_max.type, DisconnectedType)
-
-        # if the op is totally disconnected, so are its inputs
-        if g_max_disconnected:
-            return [DisconnectedType()()]
-
-        # if NoneConst.equals(axis):
-        if axis is None:
-            axis_ = list(range(x.ndim))
-        else:
-            axis_ = axis
-        xmax = max(x, axis_)
-
-        # Raise the g_max and xmax to the same number of dim as the input.
-        pattern = []
-        out_dim = 0
-        if NoneConst.equals(axis):
-            # We are taking the max/argmax over all dimensions.
-            axis = None
-        for i in range(x.ndim):
-            if axis is None or i in axis.data:
-                pattern.append("x")
-            else:
-                pattern.append(out_dim)
-                out_dim += 1
-        g_max_pad = DimShuffle(g_max.broadcastable, pattern)(g_max)
-        xmax_pad = DimShuffle(xmax.broadcastable, pattern)(xmax)
+        axis = tuple(range(x.ndim)) if self.axis is None else self.axis
+        out_pad = expand_dims(out, axis)
+        g_out_pad = expand_dims(g_out, axis)
 
         # Set the grad to the correct position.
-        g_x = eq(xmax_pad, x) * g_max_pad
+        g_x = eq(out_pad, x) * g_out_pad
         return (g_x,)
 
     def R_op(self, inputs, eval_points):
         if eval_points[0] is None:
             return [None, None]
         if len(self.axis) != 1:
-            raise ValueError("R_op supported for arg_max only for one axis!")
+            raise ValueError("R_op supported for max only for one axis!")
         if self.axis[0] > 1:
-            raise ValueError("R_op supported for arg_max only when axis is 0 or 1")
+            raise ValueError("R_op supported for max only when axis is 0 or 1")
         if inputs[0].ndim != 2:
-            raise ValueError("R_op supported for arg_max only when input is a matrix")
+            raise ValueError("R_op supported for max only when input is a matrix")
         max_pos = Argmax(self.axis).make_node(*inputs).outputs
         # print(eval_points[0].eval())
         if self.axis[0] == 0:
@@ -565,33 +474,11 @@ def max(x, axis=None, keepdims=False):
     We return an error as numpy when we reduce a dim with a shape of 0.
 
     """
-    out = max_and_argmax(x, axis)[0]
+    out = Max(axis=axis)(x)
 
     if keepdims:
         out = makeKeepDims(x, out, axis)
     return out
-
-
-def argmax(x, axis=None, keepdims=False):
-    """
-    Returns indices of maximum elements obtained by iterating over given axis.
-
-    When axis is None (the default value), the argmax is performed
-    over the flattened tensor.
-
-    Parameters
-    ----------
-    keepdims : bool
-        If this is set to True, the axes which are reduced are left in
-        the result as dimensions with size one. With this option, the result
-        will broadcast correctly against the original tensor.
-
-    """
-    argout = max_and_argmax(x, axis)[1]
-
-    if keepdims:
-        argout = makeKeepDims(x, argout, axis)
-    return argout
 
 
 def min(x, axis=None, keepdims=False):
@@ -679,6 +566,22 @@ def largest(*args):
         return switch(a > b, a, b)
     else:
         return max(stack(args), axis=0)
+
+
+def isposinf(x):
+    """
+    Return if the input variable has positive infinity element
+
+    """
+    return eq(x, np.inf)
+
+
+def isneginf(x):
+    """
+    Return if the input variable has negative infinity element
+
+    """
+    return eq(x, -np.inf)
 
 
 @scalar_elemwise
@@ -826,31 +729,31 @@ def isclose(a, b, rtol=1.0e-5, atol=1.0e-8, equal_nan=False):
     >>> a = _asarray([1e10, 1e-7], dtype="float64")
     >>> b = _asarray([1.00001e10, 1e-8], dtype="float64")
     >>> pytensor.tensor.isclose(a, b).eval()
-    array([1, 0], dtype=int8)
+    array([ True, False])
     >>> a = _asarray([1e10, 1e-8], dtype="float64")
     >>> b = _asarray([1.00001e10, 1e-9], dtype="float64")
     >>> pytensor.tensor.isclose(a, b).eval()
-    array([1, 1], dtype=int8)
+    array([ True,  True])
     >>> a = _asarray([1e10, 1e-8], dtype="float64")
     >>> b = _asarray([1.0001e10, 1e-9], dtype="float64")
     >>> pytensor.tensor.isclose(a, b).eval()
-    array([0, 1], dtype=int8)
+    array([False,  True])
     >>> a = _asarray([1.0, np.nan], dtype="float64")
     >>> b = _asarray([1.0, np.nan], dtype="float64")
     >>> pytensor.tensor.isclose(a, b).eval()
-    array([1, 0], dtype==int8)
+    array([ True, False])
     >>> a = _asarray([1.0, np.nan], dtype="float64")
     >>> b = _asarray([1.0, np.nan], dtype="float64")
     >>> pytensor.tensor.isclose(a, b, equal_nan=True).eval()
-    array([1, 1], dtype==int8)
+    array([ True,  True])
     >>> a = _asarray([1.0, np.inf], dtype="float64")
     >>> b = _asarray([1.0, -np.inf], dtype="float64")
     >>> pytensor.tensor.isclose(a, b).eval()
-    array([1, 0], dtype==int8)
+    array([ True, False])
     >>> a = _asarray([1.0, np.inf], dtype="float64")
     >>> b = _asarray([1.0, np.inf], dtype="float64")
     >>> pytensor.tensor.isclose(a, b).eval()
-    array([1, 1], dtype==int8)
+    array([ True,  True])
 
     """
     # close will be an int8 array of 1 where within tolerance
@@ -1410,7 +1313,8 @@ class Mean(FixedOpCAReduce):
 
     def __str__(self):
         if self.axis is not None:
-            return "Mean{{{}}}".format(", ".join(str(x) for x in self.axis))
+            args = ", ".join(str(x) for x in self.axis)
+            return f"Mean{{{args}}}"
         else:
             return "Mean"
 
@@ -2047,7 +1951,7 @@ def _tensordot_as_dot(a, b, axes, dot, batched):
     if not np.isscalar(axes) and len(axes) != 2:
         raise ValueError(
             "Axes should be an integer or a "
-            "list/tuple of len 2 ({axes} was provided)"
+            f"list/tuple of len 2 ({axes} was provided)"
         )
 
     # if 'axes' is a number of axes to multiply and sum over (trailing axes
@@ -2212,7 +2116,7 @@ def tensordot(
     ...                     cloop[i,j,k] += a[i,l,m] * b[j,k,m,l]
 
     >>> np.allclose(c, cloop)
-    true
+    True
 
     This specific implementation avoids a loop by transposing a and b such that
     the summed axes of ``a`` are last and the summed axes of ``b`` are first. The
@@ -2224,11 +2128,11 @@ def tensordot(
 
     >>> c = np.tensordot(a, b, 0)
     >>> print(a.shape)
-    (2,3,4)
+    (2, 3, 4)
     >>> print(b.shape)
-    (5,6,4,3)
+    (5, 6, 4, 3)
     >>> print(c.shape)
-    (2,3,4,5,6,4,3)
+    (2, 3, 4, 5, 6, 4, 3)
 
     See the documentation of numpy.tensordot for more examples.
 
@@ -2697,10 +2601,7 @@ class MulWithoutZeros(BinaryScalarOp):
     def c_code(self, node, name, inp, out, sub):
         x, y = inp
         (z,) = out
-        return (
-            "%(z)s = ((%(x)s == 0) ? (%(y)s) : "
-            + "((%(y)s == 0) ? (%(x)s) : ((%(y)s)*(%(x)s))) );"
-        ) % locals()
+        return f"{z} = (({x} == 0) ? ({y}) : (({y} == 0) ? ({x}) : (({y})*({x}))) );"
 
     def c_code_cache_version(self):
         return (1,)
@@ -2913,6 +2814,62 @@ def vectorize_node_dot_to_matmul(op, node, batched_x, batched_y):
         return vectorize_node_fallback(op, node, batched_x, batched_y)
 
 
+def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
+    """
+    Replace NaN with zero and infinity with large finite numbers (default
+    behaviour) or with the numbers defined by the user using the `nan`,
+    `posinf` and/or `neginf` keywords.
+
+    NaN is replaced by zero or by the user defined value in
+    `nan` keyword, infinity is replaced by the largest finite floating point
+    values representable by ``x.dtype`` or by the user defined value in
+    `posinf` keyword and -infinity is replaced by the most negative finite
+    floating point values representable by ``x.dtype`` or by the user defined
+    value in `neginf` keyword.
+
+    Parameters
+    ----------
+    x : symbolic tensor
+        Input array.
+    nan
+        The value to replace NaN's with in the tensor (default = 0).
+    posinf
+        The value to replace +INF with in the tensor (default max
+        in range representable by ``x.dtype``).
+    neginf
+        The value to replace -INF with in the tensor (default min
+        in range representable by ``x.dtype``).
+
+    Returns
+    -------
+    out
+        The tensor with NaN's, +INF, and -INF replaced with the
+        specified and/or default substitutions.
+    """
+    # Replace NaN's with nan keyword
+    is_nan = isnan(x)
+    is_pos_inf = isposinf(x)
+    is_neg_inf = isneginf(x)
+
+    x = switch(is_nan, nan, x)
+
+    # Get max and min values representable by x.dtype
+    maxf = posinf
+    minf = neginf
+
+    # Specify the value to replace +INF and -INF with
+    if maxf is None:
+        maxf = np.finfo(x.real.dtype).max
+    if minf is None:
+        minf = np.finfo(x.real.dtype).min
+
+    # Replace +INF and -INF values
+    x = switch(is_pos_inf, maxf, x)
+    x = switch(is_neg_inf, minf, x)
+
+    return x
+
+
 # NumPy logical aliases
 square = sqr
 
@@ -2951,6 +2908,8 @@ __all__ = [
     "not_equal",
     "isnan",
     "isinf",
+    "isposinf",
+    "isneginf",
     "allclose",
     "isclose",
     "and_",
@@ -3069,4 +3028,5 @@ __all__ = [
     "logaddexp",
     "logsumexp",
     "hyp2f1",
+    "nan_to_num",
 ]

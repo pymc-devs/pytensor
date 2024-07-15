@@ -1,7 +1,6 @@
 # License : https://github.com/slezica/python-frozendict/blob/master/LICENSE.txt
 
 
-import collections
 import functools
 import operator
 from collections.abc import Mapping
@@ -43,11 +42,3 @@ class frozendict(Mapping):
             self._hash = functools.reduce(operator.xor, hashes, 0)
 
         return self._hash
-
-
-class FrozenOrderedDict(frozendict):
-    """
-    A FrozenDict subclass that maintains key order
-    """
-
-    dict_cls = collections.OrderedDict

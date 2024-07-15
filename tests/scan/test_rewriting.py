@@ -1097,8 +1097,8 @@ class TestScanInplaceOptimizer:
             allow_input_downcast=True,
         )
         scan_node = [x for x in f9.maker.fgraph.toposort() if isinstance(x.op, Scan)]
-        assert 0 in scan_node[0].op.destroy_map.keys()
-        assert 1 in scan_node[0].op.destroy_map.keys()
+        assert 0 in scan_node[0].op.destroy_map
+        assert 1 in scan_node[0].op.destroy_map
         # compute output in numpy
         numpy_x0 = np.zeros((3,))
         numpy_x1 = np.zeros((3,))
@@ -1163,8 +1163,8 @@ class TestScanInplaceOptimizer:
         )
 
         scan_node = [x for x in f9.maker.fgraph.toposort() if isinstance(x.op, Scan)]
-        assert 0 in scan_node[0].op.destroy_map.keys()
-        assert 1 in scan_node[0].op.destroy_map.keys()
+        assert 0 in scan_node[0].op.destroy_map
+        assert 1 in scan_node[0].op.destroy_map
         # compute output in numpy
         numpy_x0 = np.zeros((3,))
         numpy_x1 = np.zeros((3,))
@@ -1203,8 +1203,8 @@ class TestScanInplaceOptimizer:
 
         f9 = function([], outputs, updates=updates, mode=self.mode)
         scan_node = [x for x in f9.maker.fgraph.toposort() if isinstance(x.op, Scan)]
-        assert 0 not in scan_node[0].op.destroy_map.keys()
-        assert 1 in scan_node[0].op.destroy_map.keys()
+        assert 0 not in scan_node[0].op.destroy_map
+        assert 1 in scan_node[0].op.destroy_map
 
 
 class TestSaveMem:

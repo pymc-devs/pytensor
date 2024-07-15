@@ -76,10 +76,9 @@ visualize it with :py:func:`pytensor.printing.pydotprint` as follows:
 .. code:: python
 
     from pytensor.printing import pydotprint
-    import os
+    from pathlib import Path
 
-    if not os.path.exists('examples'):
-        os.makedirs('examples')
+    Path("examples").mkdir(exist_ok=True)
     pydotprint(predict, 'examples/mlp.png')
 
 
