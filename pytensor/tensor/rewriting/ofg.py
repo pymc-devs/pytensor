@@ -1,11 +1,12 @@
+from pytensor import clone_replace
 from pytensor.compile.builders import OpFromGraph
 from pytensor.graph import node_rewriter
 from pytensor.tensor.rewriting.basic import register_specialize
 
 
-@register_specialize("opfromgraph")
+@register_specialize("inline_ofg")
 @node_rewriter([OpFromGraph])
-def inline_OpFromGraph(fgraph, node):
+def late_inline_OpFromGraph(fgraph, node):
     """
     Inline `OpFromGraph` nodes.
 
@@ -29,13 +30,12 @@ def inline_OpFromGraph(fgraph, node):
     -------
 
     """
-    ofg = node.op
+    op = node.op
 
-    if ofg.is_inline:
+    if not isinstance(op, OpFromGraph):
+        return False
+
+    if op.is_inline:
         return None
 
-    inputs = node.inputs
-    ofg.is_inline = True
-    new_node = ofg(*inputs)
-
-    return [new_node]
+    return clone_replace(op.inner_outputs, dict(zip(op.inner_inputs, node.inputs)))

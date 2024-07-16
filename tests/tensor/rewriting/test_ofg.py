@@ -10,11 +10,11 @@ def test_OpFromGraph_inlined():
     z = x**2
     fx = OpFromGraph([x], [z], inline=False)(x)
     f2 = pytensor.function([x], fx)
+    pytensor.dprint(f2)
 
     nodes = f2.maker.fgraph.apply_nodes
 
-    assert any(isinstance(node.op, OpFromGraph) for node in nodes)
-    assert all(node.op.is_inline for node in nodes if isinstance(node.op, OpFromGraph))
+    assert not any(isinstance(node.op, OpFromGraph) for node in nodes)
 
 
 def test_inherited_ofg_class_inlined():
@@ -28,8 +28,7 @@ def test_inherited_ofg_class_inlined():
 
     nodes = f.maker.fgraph.apply_nodes
 
-    assert any(isinstance(node.op, OpFromGraph) for node in nodes)
-    assert all(node.op.is_inline for node in nodes if isinstance(node.op, OpFromGraph))
+    assert not any(isinstance(node.op, OpFromGraph) for node in nodes)
 
 
 def test_several_ofg_inlined():
@@ -44,8 +43,7 @@ def test_several_ofg_inlined():
 
     nodes = f.maker.fgraph.apply_nodes
 
-    assert any(isinstance(node.op, OpFromGraph) for node in nodes)
-    assert all(node.op.is_inline for node in nodes if isinstance(node.op, OpFromGraph))
+    assert not any(isinstance(node.op, OpFromGraph) for node in nodes)
 
 
 def test_ofg_not_inlined_in_JAX_mode():
