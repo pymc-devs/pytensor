@@ -3,7 +3,7 @@ from pytensor.graph import node_rewriter
 from pytensor.tensor.rewriting.basic import register_specialize
 
 
-@register_specialize
+@register_specialize("opfromgraph")
 @node_rewriter([OpFromGraph])
 def inline_OpFromGraph(fgraph, node):
     """

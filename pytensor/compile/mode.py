@@ -454,12 +454,7 @@ JAX = Mode(
     JAXLinker(),
     RewriteDatabaseQuery(
         include=["fast_run", "jax"],
-        exclude=[
-            "cxx_only",
-            "BlasOpt",
-            "fusion",
-            "inplace",
-        ],
+        exclude=["cxx_only", "BlasOpt", "fusion", "inplace", "opfromgraph"],
     ),
 )
 PYTORCH = Mode(
