@@ -3747,8 +3747,11 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
     diagonal(alloc_diag(x)) == x
     """
     from pytensor.tensor import set_subtensor
+    from pytensor.tensor.math import maximum
 
     diag = as_tensor_variable(diag)
+    offset = as_tensor_variable(offset)
+
     axis1, axis2 = normalize_axis_tuple((axis1, axis2), ndim=diag.type.ndim + 1)
     if axis1 > axis2:
         axis1, axis2 = axis2, axis1
@@ -3760,8 +3763,8 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
     # Create slice for diagonal in final 2 axes
     idxs = arange(diag.shape[-1])
     diagonal_slice = (slice(None),) * (len(result_shape) - 2) + (
-        idxs + np.maximum(0, -offset),
-        idxs + np.maximum(0, offset),
+        idxs + maximum(0, -offset),
+        idxs + maximum(0, offset),
     )
 
     # Fill in final 2 axes with diag
@@ -3776,12 +3779,11 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
         result = result.transpose(axes)
 
     return AllocDiag(
-        inputs=[diag],
+        inputs=[diag, offset],
         outputs=[result],
-        offset=offset,
         axis1=axis1,
         axis2=axis2,
-    )(diag)
+    )(diag, offset)
 
 
 def diag(v, k=0):
