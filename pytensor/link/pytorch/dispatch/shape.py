@@ -6,9 +6,7 @@ from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape, Unbroad
 
 @pytorch_funcify.register(Reshape)
 def pytorch_funcify_Reshape(op, node, **kwargs):
-    shape = node.inputs[1]
-
-    def reshape(x, shape=shape):
+    def reshape(x, shape):
         return torch.reshape(x, tuple(shape))
 
     return reshape

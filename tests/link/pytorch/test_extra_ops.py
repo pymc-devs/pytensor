@@ -51,7 +51,8 @@ def test_pytorch_CumOp(axis, dtype):
         pytest.param(
             None,
             3,
-            marks=pytest.mark.xfail(reason="Reshape not implemented"),
+            marks=pytest.mark.xfail(reason="Issue in Elemwise"),
+            # TODO: add reference to issue
         ),
     ],
 )

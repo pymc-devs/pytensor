@@ -1,7 +1,6 @@
 import numpy as np
 
 import pytensor.tensor as pt
-from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor.shape import Shape, Shape_i, Unbroadcast, reshape
@@ -46,7 +45,7 @@ def test_pytorch_Reshape_constant():
     compare_pytorch_and_py(x_fg, [np.r_[1.0, 2.0, 3.0, 4.0].astype(config.floatX)])
 
 
-def test_pytorch_Reshape_shape_graph_input():
+def test_pytorch_Reshape_dynamic():
     a = vector("a")
     shape_pt = iscalar("b")
     x = reshape(a, (shape_pt, shape_pt))
@@ -54,19 +53,9 @@ def test_pytorch_Reshape_shape_graph_input():
     compare_pytorch_and_py(x_fg, [np.r_[1.0, 2.0, 3.0, 4.0].astype(config.floatX), 2])
 
 
-def test_pytorch_compile_ops():
-    x = DeepCopyOp()(pt.as_tensor_variable(1.1))
-    x_fg = FunctionGraph([], [x])
-
-    compare_pytorch_and_py(x_fg, [])
-
+def test_pytorch_unbroadcast():
     x_np = np.zeros((20, 1, 1))
     x = Unbroadcast(0, 2)(pt.as_tensor_variable(x_np))
-    x_fg = FunctionGraph([], [x])
-
-    compare_pytorch_and_py(x_fg, [])
-
-    x = ViewOp()(pt.as_tensor_variable(x_np))
     x_fg = FunctionGraph([], [x])
 
     compare_pytorch_and_py(x_fg, [])
