@@ -5,18 +5,6 @@ import pytensor.tensor as pt
 from pytensor.compile.builders import OpFromGraph
 
 
-def test_OpFromGraph_inlined():
-    x = pt.tensor("x", shape=(None,))
-    z = x**2
-    fx = OpFromGraph([x], [z], inline=False)(x)
-    f2 = pytensor.function([x], fx)
-    pytensor.dprint(f2)
-
-    nodes = f2.maker.fgraph.apply_nodes
-
-    assert not any(isinstance(node.op, OpFromGraph) for node in nodes)
-
-
 def test_inherited_ofg_class_inlined():
     x = pt.tensor("x", shape=(None,))
 
