@@ -626,8 +626,34 @@ Step 4: Write tests
 
 Note
 ----
-Due to new restrictions in JAX JIT as reported in issue `#654 <https://github.com/pymc-devs/pytensor/issues/654>`_,
-all jitted functions now must have constant shape. In other words, only PyTensor graphs with static shapes
-can be translated to JAX at the moment. It means a graph like the
-one of :class:`Eye` can never be translated to JAX, since it's fundamentally a
-function with dynamic shapes. 
+Due to restrictions in JAX JIT as reported in issue `#654 <https://github.com/pymc-devs/pytensor/issues/654>`_,
+all jitted functions must have constant shape. In other words, only PyTensor graphs with static shapes
+can be translated to JAX at the moment. It means a graph like the old test function for :class:`Eye` `Op`
+
+.. code:: python
+
+    def test_jax_eye():
+        # Create a symbolic input for `Eye`
+        x_at = pt.scalar(dtype=np.int64)
+
+        # Create a variable that is the output of an `Eye` `Op`
+        eye_var = pt.eye(x_at)
+
+        # Create an PyTensor `FunctionGraph`
+        out_fg = FunctionGraph(outputs=[eye_var])
+
+        # Pass the graph and any inputs to the testing function
+        compare_jax_and_py(out_fg, [3])
+
+cannot be translated to JAX, since it involved a function with dynamic shapes.
+That's why the JAX link test for :class:`Eye` `Op` is now
+.. code:: python
+
+    def test_jax_eye():
+        """Tests jaxification of the Eye operator"""
+        out = ptb.eye(3)
+        out_fg = FunctionGraph([], [out])
+
+        compare_jax_and_py(out_fg, [])
+
+with the shape specified explicitly instead of via a variable.

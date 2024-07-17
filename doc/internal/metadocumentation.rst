@@ -8,7 +8,7 @@ Documentation Documentation AKA Meta-Documentation
 How to build documentation
 --------------------------
 
-Refer to `relevant section of Developer Start Guide <https://pytensor.readthedocs.io/en/latest/dev_start_guide.html#contributing-to-the-documentation>`_.
+Refer to relevant section of :doc:`../dev_start_guide`.
 
 Use ReST for documentation
 --------------------------
