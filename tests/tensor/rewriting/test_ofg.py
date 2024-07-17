@@ -1,5 +1,3 @@
-import pytest
-
 import pytensor
 import pytensor.tensor as pt
 from pytensor.compile.builders import OpFromGraph
@@ -32,17 +30,3 @@ def test_several_ofg_inlined():
     nodes = f.maker.fgraph.apply_nodes
 
     assert not any(isinstance(node.op, OpFromGraph) for node in nodes)
-
-
-def test_ofg_not_inlined_in_JAX_mode():
-    pytest.importorskip("jax")
-
-    x = pt.tensor("x", shape=(None,))
-    y = pt.diag(x)
-
-    f = pytensor.function([x], y, mode="JAX")
-    nodes = f.maker.fgraph.apply_nodes
-    assert any(isinstance(node.op, OpFromGraph) for node in nodes)
-    assert not any(
-        node.op.is_inline for node in nodes if isinstance(node.op, OpFromGraph)
-    )
