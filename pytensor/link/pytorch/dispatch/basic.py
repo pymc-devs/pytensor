@@ -125,7 +125,6 @@ def pytorch_funcify_eye(op, **kwargs):
     return eye
 
 
-
 @pytorch_funcify.register(MakeVector)
 def pytorch_funcify_MakeVector(op, **kwargs):
     torch_dtype = getattr(torch, op.dtype)
