@@ -181,6 +181,16 @@ class DimShuffle(ExternalCOp):
         self.augment = sorted([i for i, x in enumerate(new_order) if x == "x"])
         self.drop = drop
 
+        input_ndim = len(input_broadcastable)
+
+        self.is_left_expand_dims = "x" in new_order and (
+            input_ndim == 0 or new_order[:input_ndim] == list(range(input_ndim))
+        )
+
+        self.is_right_expand_dims = "x" in new_order and (
+            input_ndim == 0 or new_order[-input_ndim:] == list(range(input_ndim))
+        )
+
         if self.inplace:
             self.view_map = {0: [0]}
 

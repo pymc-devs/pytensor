@@ -413,6 +413,10 @@ def _find_diag_from_eye_mul(potential_mul_input):
             # tensor(shape=(None, 3, 3) * eye(3). This is still potentially valid for diag rewrites.
             (
                 isinstance(mul_input.owner.op, DimShuffle)
+                and (
+                    mul_input.owner.op.is_left_expand_dims
+                    or mul_input.owner.op.is_right_expand_dims
+                )
                 and mul_input.owner.inputs[0].owner is not None
                 and isinstance(mul_input.owner.inputs[0].owner.op, Eye)
             )
@@ -424,7 +428,10 @@ def _find_diag_from_eye_mul(potential_mul_input):
     eye_input = eye_input[0]
 
     # If this multiplication came from a batched operation, it will be wrapped in a DimShuffle
-    if isinstance(eye_input.owner.op, DimShuffle):
+    if isinstance(eye_input.owner.op, DimShuffle) and (
+        eye_input.owner.op.is_left_expand_dims
+        or eye_input.owner.op.is_right_expand_dims
+    ):
         inner_eye = eye_input.owner.inputs[0]
         if not isinstance(inner_eye.owner.op, Eye):
             return None

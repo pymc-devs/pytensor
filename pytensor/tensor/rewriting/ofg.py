@@ -15,8 +15,6 @@ def inline_ofg_expansion(fgraph, node):
     Doing so can improve optimization at the cost of compilation speed.
     """
     op = node.op
-    if not isinstance(op, OpFromGraph):
-        return False
     if not op.is_inline:
         return False
 
