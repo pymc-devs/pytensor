@@ -136,14 +136,16 @@ This copied generator can be safely used again because it contains the bit gener
 >>> next_rng.name = "next_rng"
 >>> x.name = "x"
 >>> pytensor.dprint([next_rng, x], print_type=True) # doctest: +SKIP
-uniform_rv{0, (0, 0), floatX, False}.0 [id A] <RandomGeneratorType> 'next_rng'
- |rng [id B] <RandomGeneratorType>
- |TensorConstant{(1,) of 2} [id C] <TensorType(int64, (1,))>
- |TensorConstant{11} [id D] <TensorType(int64, ())>
- |TensorConstant{0.0} [id E] <TensorType(float32, ())>
- |TensorConstant{1.0} [id F] <TensorType(float32, ())>
-uniform_rv{0, (0, 0), floatX, False}.1 [id A] <TensorType(float64, (2,))> 'x'
-<ipykernel.iostream.OutStream at 0x7f6c308c3eb0>
+uniform_rv{"(),()->()"}.0 [id A] <RandomGeneratorType> 'next_rng'
+ ├─ rng [id B] <RandomGeneratorType>
+ ├─ [2] [id C] <Vector(int64, shape=(1,))>
+ ├─ ExpandDims{axis=0} [id D] <Vector(float32, shape=(1,))>
+ │  └─ 0.0 [id E] <Scalar(float32, shape=())>
+ └─ ExpandDims{axis=0} [id F] <Vector(float32, shape=(1,))>
+    └─ 1.0 [id G] <Scalar(float32, shape=())>
+uniform_rv{"(),()->()"}.1 [id A] <Vector(float64, shape=(2,))> 'x'
+ └─ ···
+<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
 
 We can see the single node with [id A], has two outputs, which we named next_rng and x. By default only the second output x is given to the user directly, and the other is "hidden".
 
@@ -214,13 +216,16 @@ Another way of doing that is setting a default_update in the shared RNG variable
 >>> f(), f(), f()
 (array(0.68235186), array(0.05382102), array(0.22035987))
 
-Which is exactly what RandomStream does behind the scenes
+This is exactly what RandomStream does behind the scenes
 
 >>> srng = pt.random.RandomStream(seed=123)
 >>> x = srng.uniform()
 >>> x.owner.inputs[0], x.owner.inputs[0].default_update  # doctest: +SKIP
-(RandomGeneratorSharedVariable(<Generator(PCG64) at 0x7F6BEB5E79E0>),
- uniform_rv{0, (0, 0), floatX, False}.0)
+(RNG(<Generator(PCG64) at 0x7FA45F4A3760>), uniform_rv{"(),()->()"}.0)
+
+From the example here, you can see that RandomStream uses a NumPy-like API in contrast to
+the SciPy-like API of `pytensor.tensor.random`. Full documentation can be found at
+:doc:`../library/tensor/random/basic.rst`
 
 >>> f = pytensor.function([], x)
 >>> print(f(), f(), f())
@@ -237,7 +242,7 @@ They are simply shared variables.
 
 >>> x = pt.random.normal()
 >>> x.owner.inputs[0] # doctest: +SKIP
-RandomGeneratorSharedVariable(<Generator(PCG64) at 0x7F6BEB5C5C80>)
+RNG(<Generator(PCG64) at 0x7FA45ED80660>)
 
 Reseeding
 ---------
@@ -278,13 +283,12 @@ As mentioned before, by default RandomVariables return a copy of the next RNG st
 >>> x = pt.random.uniform(rng=rng_shared, name="x")
 >>> f = pytensor.function([], x)
 >>> pytensor.dprint(f, print_destroy_map=True) # doctest: +SKIP
-uniform_rv{0, (0, 0), floatX, False}.1 [id A] 'x' 0
- |rng [id B]
- |TensorConstant{[]} [id C]
- |TensorConstant{11} [id D]
- |TensorConstant{0.0} [id E]
- |TensorConstant{1.0} [id F]
-<ipykernel.iostream.OutStream at 0x7f6c308c3eb0>
+uniform_rv{"(),()->()"}.1 [id A] 'x' 0
+ ├─ rng [id B]
+ ├─ NoneConst{None} [id C]
+ ├─ 0.0 [id D]
+ └─ 1.0 [id E]
+<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
 
 >>> %timeit f()  # doctest: +SKIP
 169 µs ± 24.6 µs per loop (mean ± std. dev. of 7 runs, 10,000 loops each)
@@ -303,13 +307,12 @@ False
 This flag is printed as the last argument of the Op in the `dprint`
 
 >>> pytensor.dprint(x) # doctest: +SKIP
-uniform_rv{0, (0, 0), floatX, False}.1 [id A] 'x'
- |rng [id B]
- |TensorConstant{[]} [id C]
- |TensorConstant{11} [id D]
- |TensorConstant{0.0} [id E]
- |TensorConstant{1.0} [id F]
-<ipykernel.iostream.OutStream at 0x7f6c308c3eb0>
+uniform_rv{"(),()->()"}.1 [id A] 'x' 0
+ ├─ rng [id B]
+ ├─ NoneConst{None} [id C]
+ ├─ 0.0 [id D]
+ └─ 1.0 [id E]
+<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
 
 For illustration purposes, we will subclass the Uniform Op class and set inplace to True by default.
 
@@ -325,13 +328,12 @@ True
 
 >>> inplace_f = pytensor.function([], x, accept_inplace=True)
 >>> pytensor.dprint(inplace_f, print_destroy_map=True) # doctest: +SKIP
-uniform_rv{0, (0, 0), floatX, True}.1 [id A] d={0: [0]} 0
- |RandomGeneratorSharedVariable(<Generator(PCG64) at 0x7F6BEB52BC80>) [id B]
- |TensorConstant{[]} [id C]
- |TensorConstant{11} [id D]
- |TensorConstant{0.0} [id E]
- |TensorConstant{1.0} [id F]
-<ipykernel.iostream.OutStream at 0x7f6c308c3eb0>
+uniform_rv{"(),()->()"}.1 [id A] d={0: [0]} 0
+ ├─ RNG(<Generator(PCG64) at 0x7FA45ED81540>) [id B]
+ ├─ NoneConst{None} [id C]
+ ├─ 0.0 [id D]
+ └─ 1.0 [id E]
+<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
 
 The destroy map annotation tells us that the first output of the x variable is allowed to alter the first input.
 
@@ -360,28 +362,27 @@ See more details in the next section.
 >>>     inplace_f = pytensor.function([In(rng, mutable=True)], [x])
 >>> print("")
 >>> pytensor.dprint(inplace_f, print_destroy_map=True) # doctest: +SKIP
-rewriting: rewrite random_make_inplace replaces uniform_rv{0, (0, 0), floatX, False}.out of uniform_rv{0, (0, 0), floatX, False}(rng, TensorConstant{[]}, TensorConstant{11}, TensorConstant{0.0}, TensorConstant{1.0}) with uniform_rv{0, (0, 0), floatX, True}.out of uniform_rv{0, (0, 0), floatX, True}(rng, TensorConstant{[]}, TensorConstant{11}, TensorConstant{0.0}, TensorConstant{1.0})
-uniform_rv{0, (0, 0), floatX, True}.1 [id A] d={0: [0]} 0
- |rng [id B]
- |TensorConstant{[]} [id C]
- |TensorConstant{11} [id D]
- |TensorConstant{0.0} [id E]
- |TensorConstant{1.0} [id F]
-<ipykernel.iostream.OutStream at 0x7f6c308c3eb0>
+rewriting: rewrite random_make_inplace replaces uniform_rv{"(),()->()"}.out of uniform_rv{"(),()->()"}(rng, NoneConst{None}, 0.0, 1.0) with uniform_rv{"(),()->()"}.out of uniform_rv{"(),()->()"}(rng, NoneConst{None}, 0.0, 1.0)
+uniform_rv{"(),()->()"}.1 [id A] d={0: [0]} 0
+ ├─ rng [id B]
+ ├─ NoneConst{None} [id C]
+ ├─ 0.0 [id D]
+ └─ 1.0 [id E]
+<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
 
 >>> rng = pytensor.shared(np.random.default_rng(), name="rng")
 >>> next_rng, x = pt.random.uniform(rng=rng).owner.outputs
 >>> 
 >>> inplace_f = pytensor.function([], [x], updates={rng: next_rng})
 >>> pytensor.dprint(inplace_f, print_destroy_map=True) # doctest: +SKIP
-uniform_rv{0, (0, 0), floatX, True}.1 [id A] d={0: [0]} 0
- |rng [id B]
- |TensorConstant{[]} [id C]
- |TensorConstant{11} [id D]
- |TensorConstant{0.0} [id E]
- |TensorConstant{1.0} [id F]
-uniform_rv{0, (0, 0), floatX, True}.0 [id A] d={0: [0]} 0
-<ipykernel.iostream.OutStream at 0x7f6c308c3eb0>
+uniform_rv{"(),()->()"}.1 [id A] d={0: [0]} 0
+ ├─ rng [id B]
+ ├─ NoneConst{None} [id C]
+ ├─ 0.0 [id D]
+ └─ 1.0 [id E]
+uniform_rv{"(),()->()"}.0 [id A] d={0: [0]} 0
+ └─ ···
+<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
 
 Multiple random variables
 =========================
@@ -401,21 +402,22 @@ It's common practice to use separate RNG variables for each RandomVariable in Py
 >>> 
 >>> f = pytensor.function([], [x, y])
 >>> pytensor.dprint(f, print_type=True) # doctest: +SKIP
-normal_rv{0, (0, 0), floatX, True}.1 [id A] <TensorType(float64, ())> 0
- |rng_x [id B] <RandomGeneratorType>
- |TensorConstant{[]} [id C] <TensorType(int64, (0,))>
- |TensorConstant{11} [id D] <TensorType(int64, ())>
- |TensorConstant{0} [id E] <TensorType(int8, ())>
- |TensorConstant{10} [id F] <TensorType(int8, ())>
-normal_rv{0, (0, 0), floatX, True}.1 [id G] <TensorType(float64, ())> 1
- |rng_y [id H] <RandomGeneratorType>
- |TensorConstant{[]} [id C] <TensorType(int64, (0,))>
- |TensorConstant{11} [id I] <TensorType(int64, ())>
- |normal_rv{0, (0, 0), floatX, True}.1 [id A] <TensorType(float64, ())> 0
- |TensorConstant{0.1} [id J] <TensorType(float64, ())>
-normal_rv{0, (0, 0), floatX, True}.0 [id A] <RandomGeneratorType> 'next_rng_x' 0
-normal_rv{0, (0, 0), floatX, True}.0 [id G] <RandomGeneratorType> 'next_rng_y' 1
-<ipykernel.iostream.OutStream at 0x7f6c308c3eb0>
+normal_rv{"(),()->()"}.1 [id A] <Scalar(float64, shape=())> 0
+ ├─ rng_x [id B] <RandomGeneratorType>
+ ├─ NoneConst{None} [id C] <NoneTypeT>
+ ├─ 0 [id D] <Scalar(int8, shape=())>
+ └─ 10 [id E] <Scalar(int8, shape=())>
+normal_rv{"(),()->()"}.1 [id F] <Scalar(float64, shape=())> 1
+ ├─ rng_y [id G] <RandomGeneratorType>
+ ├─ NoneConst{None} [id C] <NoneTypeT>
+ ├─ normal_rv{"(),()->()"}.1 [id A] <Scalar(float64, shape=())> 0
+ │  └─ ···
+ └─ 0.1 [id H] <Scalar(float64, shape=())>
+normal_rv{"(),()->()"}.0 [id A] <RandomGeneratorType> 'next_rng_x' 0
+ └─ ···
+normal_rv{"(),()->()"}.0 [id F] <RandomGeneratorType> 'next_rng_y' 1
+ └─ ···
+<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
 
 >>> f(), f(), f()
 ([array(-9.8912135), array(-9.80160951)],
@@ -430,21 +432,22 @@ This is what RandomStream does as well
 >>> 
 >>> f = pytensor.function([], [x, y])
 >>> pytensor.dprint(f, print_type=True) # doctest: +SKIP
-normal_rv{0, (0, 0), floatX, True}.1 [id A] <TensorType(float64, ())> 0
- |RandomGeneratorSharedVariable(<Generator(PCG64) at 0x7F6BEB52B660>) [id B] <RandomGeneratorType>
- |TensorConstant{[]} [id C] <TensorType(int64, (0,))>
- |TensorConstant{11} [id D] <TensorType(int64, ())>
- |TensorConstant{0} [id E] <TensorType(int8, ())>
- |TensorConstant{10} [id F] <TensorType(int8, ())>
-normal_rv{0, (0, 0), floatX, True}.1 [id G] <TensorType(float64, ())> 1
- |RandomGeneratorSharedVariable(<Generator(PCG64) at 0x7F6BEB5E7900>) [id H] <RandomGeneratorType>
- |TensorConstant{[]} [id C] <TensorType(int64, (0,))>
- |TensorConstant{11} [id I] <TensorType(int64, ())>
- |normal_rv{0, (0, 0), floatX, True}.1 [id A] <TensorType(float64, ())> 0
- |TensorConstant{0.1} [id J] <TensorType(float64, ())>
-normal_rv{0, (0, 0), floatX, True}.0 [id A] <RandomGeneratorType> 0
-normal_rv{0, (0, 0), floatX, True}.0 [id G] <RandomGeneratorType> 1
-<ipykernel.iostream.OutStream at 0x7f6c308c3eb0>
+normal_rv{"(),()->()"}.1 [id A] <Scalar(float64, shape=())> 0
+ ├─ RNG(<Generator(PCG64) at 0x7FA45ED835A0>) [id B] <RandomGeneratorType>
+ ├─ NoneConst{None} [id C] <NoneTypeT>
+ ├─ 0 [id D] <Scalar(int8, shape=())>
+ └─ 10 [id E] <Scalar(int8, shape=())>
+normal_rv{"(),()->()"}.1 [id F] <Scalar(float64, shape=())> 1
+ ├─ RNG(<Generator(PCG64) at 0x7FA45ED833E0>) [id G] <RandomGeneratorType>
+ ├─ NoneConst{None} [id C] <NoneTypeT>
+ ├─ normal_rv{"(),()->()"}.1 [id A] <Scalar(float64, shape=())> 0
+ │  └─ ···
+ └─ 0.1 [id H] <Scalar(float64, shape=())>
+normal_rv{"(),()->()"}.0 [id A] <RandomGeneratorType> 0
+ └─ ···
+normal_rv{"(),()->()"}.0 [id F] <RandomGeneratorType> 1
+ └─ ···
+<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
 
 >>> f(), f(), f()
 ([array(-5.81223492), array(-5.85081162)],
@@ -461,20 +464,20 @@ We could have used a single rng.
 >>> 
 >>> f = pytensor.function([], [x, y], updates={rng: next_rng_y})
 >>> pytensor.dprint(f, print_type=True) # doctest: +SKIP
-normal_rv{0, (0, 0), floatX, True}.1 [id A] <TensorType(float64, ())> 0
- |rng [id B] <RandomGeneratorType>
- |TensorConstant{[]} [id C] <TensorType(int64, (0,))>
- |TensorConstant{11} [id D] <TensorType(int64, ())>
- |TensorConstant{0} [id E] <TensorType(int8, ())>
- |TensorConstant{1} [id F] <TensorType(int8, ())>
-normal_rv{0, (0, 0), floatX, True}.1 [id G] <TensorType(float64, ())> 1
- |normal_rv{0, (0, 0), floatX, True}.0 [id A] <RandomGeneratorType> 'next_rng_x' 0
- |TensorConstant{[]} [id C] <TensorType(int64, (0,))>
- |TensorConstant{11} [id H] <TensorType(int64, ())>
- |TensorConstant{100} [id I] <TensorType(int8, ())>
- |TensorConstant{1} [id F] <TensorType(int8, ())>
-normal_rv{0, (0, 0), floatX, True}.0 [id G] <RandomGeneratorType> 'next_rng_y' 1
-<ipykernel.iostream.OutStream at 0x7f6c308c3eb0>
+normal_rv{"(),()->()"}.1 [id A] <Scalar(float64, shape=())> 0
+ ├─ rng [id B] <RandomGeneratorType>
+ ├─ NoneConst{None} [id C] <NoneTypeT>
+ ├─ 0 [id D] <Scalar(int8, shape=())>
+ └─ 1 [id E] <Scalar(int8, shape=())>
+normal_rv{"(),()->()"}.1 [id F] <Scalar(float64, shape=())> 1
+ ├─ normal_rv{"(),()->()"}.0 [id A] <RandomGeneratorType> 'next_rng_x' 0
+ │  └─ ···
+ ├─ NoneConst{None} [id C] <NoneTypeT>
+ ├─ 100 [id G] <Scalar(int8, shape=())>
+ └─ 1 [id E] <Scalar(int8, shape=())>
+normal_rv{"(),()->()"}.0 [id F] <RandomGeneratorType> 'next_rng_y' 1
+ └─ ···
+<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
 
 >>> f(), f()
 ([array(0.91110389), array(101.4795275)],
@@ -670,6 +673,24 @@ NumPy random generator can be used with Numba backend.
 >>> rng = pytensor.shared(np.random.default_rng(123), name="randomstate_rng")
 >>> x = pt.random.normal(rng=rng)
 >>> numba_fn = pytensor.function([], x, mode="NUMBA")
+>>> pytensor.dprint(numba_fn, print_type=True)
+[normal_rv{"(),()->()"}].1 [id A] <Scalar(float64, shape=())> 0
+ ├─ [] [id B] <Vector(int64, shape=(0,))>
+ ├─ randomstate_rng [id C] <RandomGeneratorType>
+ ├─ NoneConst{None} [id D] <NoneTypeT>
+ ├─ 0.0 [id E] <Scalar(float32, shape=())>
+ └─ 1.0 [id F] <Scalar(float32, shape=())>
+Inner graphs:
+[normal_rv{"(),()->()"}] [id A]
+ ← normal_rv{"(),()->()"}.0 [id G] <RandomGeneratorType>
+    ├─ *1-<RandomGeneratorType> [id H] <RandomGeneratorType>
+    ├─ *2-<NoneTypeT> [id I] <NoneTypeT>
+    ├─ *3-<Scalar(float32, shape=())> [id J] <Scalar(float32, shape=())>
+    └─ *4-<Scalar(float32, shape=())> [id K] <Scalar(float32, shape=())>
+ ← normal_rv{"(),()->()"}.1 [id G] <Scalar(float64, shape=())>
+    └─ ···
+<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
+
 >>> print(numba_fn(), numba_fn())
 -0.9891213503478509 -0.9891213503478509
 
@@ -686,6 +707,16 @@ In general, update rules are still respected, but they won't be used on the orig
 >>> rng = pytensor.shared(np.random.default_rng(123), name="rng")
 >>> next_rng, x = pt.random.uniform(rng=rng).owner.outputs
 >>> jax_fn = pytensor.function([], [x], updates={rng: next_rng}, mode="JAX")
+>>> pytensor.dprint(jax_fn, print_type=True)
+uniform_rv{"(),()->()"}.1 [id A] <Scalar(float64, shape=())> 0
+ ├─ RNG(<Generator(PCG64) at 0x7FA448D68200>) [id B] <RandomGeneratorType>
+ ├─ NoneConst{None} [id C] <NoneTypeT>
+ ├─ 0.0 [id D] <Scalar(float32, shape=())>
+ └─ 1.0 [id E] <Scalar(float32, shape=())>
+uniform_rv{"(),()->()"}.0 [id A] <RandomGeneratorType> 0
+ └─ ···
+<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
+
 >>> print(jax_fn(), jax_fn())
 [Array(0.07577298, dtype=float64)] [Array(0.09217023, dtype=float64)]
 
