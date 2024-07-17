@@ -3,7 +3,7 @@ from collections.abc import Callable
 from typing import cast
 
 from pytensor import Variable
-from pytensor.graph import Apply, Constant, FunctionGraph
+from pytensor.graph import Apply, FunctionGraph
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,
@@ -438,15 +438,15 @@ def _find_diag_from_eye_mul(potential_mul_input):
         # Check if 1's are being put on the main diagonal only (k = 0)
         # and if the identity matrix is degenerate (column or row matrix)
         if not (
-            isinstance(inner_eye.owner.inputs[-1], Constant)
-            and inner_eye.owner.inputs[-1].data == 0
+            Eye.is_offset_zero(inner_eye.owner)
             and inner_eye.broadcastable[-1:] != (False, False)
         ):
             return None
 
-    elif getattr(
-        eye_input.owner.inputs[-1], "data", -1
-    ).item() != 0 or eye_input.broadcastable[-2:] != (False, False):
+    elif not (
+        Eye.is_offset_zero(eye_input.owner)
+        and eye_input.broadcastable[-1:] != (False, False)
+    ):
         return None
 
     # Get all non Eye inputs (scalars/matrices/vectors)

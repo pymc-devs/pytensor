@@ -1334,6 +1334,25 @@ class Eye(Op):
     def grad(self, inp, grads):
         return [grad_undefined(self, i, inp[i]) for i in range(3)]
 
+    @staticmethod
+    def is_offset_zero(node) -> bool:
+        """
+        Test if an Eye Op has a diagonal offset of zero
+
+        Parameters
+        ----------
+        node
+            Eye node to test
+
+        Returns
+        -------
+        is_offset_zero: bool
+            True if the offset is zero (``k = 0``).
+        """
+
+        offset = node.inputs[-1]
+        return isinstance(offset, Constant) and offset.data.item() == 0
+
 
 def eye(n, m=None, k=0, dtype=None):
     """Return a 2-D array with ones on the diagonal and zeros elsewhere.
