@@ -41,6 +41,7 @@ Advanced
 .. toctree::
 
     sparse
+    prng
 
 Advanced configuration and debugging
 ------------------------------------
