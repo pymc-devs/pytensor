@@ -1,4 +1,5 @@
 from functools import singledispatch
+from types import NoneType
 
 import torch
 
@@ -6,13 +7,18 @@ from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.fg import FunctionGraph
 from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import CheckAndRaise
-from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Eye, Join
+from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Eye, Join, MakeVector
 
 
 @singledispatch
 def pytorch_typify(data, dtype=None, **kwargs):
     r"""Convert instances of PyTensor `Type`\s to PyTorch types."""
     return torch.as_tensor(data, dtype=dtype)
+
+
+@pytorch_typify.register(NoneType)
+def pytorch_typify_None(data, **kwargs):
+    return None
 
 
 @singledispatch
@@ -116,3 +122,13 @@ def pytorch_funcify_eye(op, **kwargs):
         return zeros
 
     return eye
+
+
+@pytorch_funcify.register(MakeVector)
+def pytorch_funcify_MakeVector(op, **kwargs):
+    torch_dtype = getattr(torch, op.dtype)
+
+    def makevector(*x):
+        return torch.tensor(x, dtype=torch_dtype)
+
+    return makevector
