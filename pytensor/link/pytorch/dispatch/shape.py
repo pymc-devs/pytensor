@@ -25,7 +25,7 @@ def pytorch_funcify_Shape_i(op, **kwargs):
     i = op.i
 
     def shape_i(x):
-        return x.shape[i]
+        return torch.tensor(x.shape[i])
 
     return shape_i
 

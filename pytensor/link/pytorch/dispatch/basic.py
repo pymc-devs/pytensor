@@ -1,4 +1,5 @@
 from functools import singledispatch
+from types import NoneType
 
 import torch
 
@@ -12,8 +13,11 @@ from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Eye, Join, MakeVect
 @singledispatch
 def pytorch_typify(data, dtype=None, **kwargs):
     r"""Convert instances of PyTensor `Type`\s to PyTorch types."""
-    if data is not None:
-        return torch.as_tensor(data, dtype=dtype)
+    return torch.as_tensor(data, dtype=dtype)
+
+
+@pytorch_typify.register(NoneType)
+def pytorch_typify_None(data, **kwargs):
     return None
 
 
