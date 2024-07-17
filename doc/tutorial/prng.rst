@@ -70,6 +70,7 @@ SciPy
 -----
 
 Scipy wraps these Numpy routines in a slightly different API.
+
 >>> import scipy.stats as st
 >>> rng = np.random.default_rng(seed=123)
 >>> print(st.uniform.rvs(size=2, random_state=rng), st.uniform.rvs(size=2, random_state=rng))

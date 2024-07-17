@@ -41,6 +41,7 @@ Advanced
 .. toctree::
 
     sparse
+    prng
 
 Advanced configuration and debugging
 ------------------------------------
@@ -59,7 +60,6 @@ Further reading
 .. toctree::
 
     loading_and_saving
-    prng
     aliasing
     multi_cores
     faq_tutorial
