@@ -1,13 +1,11 @@
 import numpy as np
 import pytest
 
-from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import get_test_value
-from pytensor.graph.rewriting.db import RewriteDatabaseQuery
-from pytensor.link.pytorch import PytorchLinker
+from pytensor.link.pytorch.linker import PytorchLinker
 from pytensor.tensor import blas as pt_blas
 from pytensor.tensor.type import tensor3
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
@@ -25,12 +23,13 @@ def test_pytorch_BatchedDot():
     )
     out = pt_blas.BatchedDot()(a, b)
     fgraph = FunctionGraph([a, b], [out])
-    compare_pytorch_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    pytensor_pytorch_fn, _ = compare_pytorch_and_py(
+        fgraph, [get_test_value(i) for i in fgraph.inputs]
+    )
 
     # A dimension mismatch should raise a TypeError for compatibility
     inputs = [get_test_value(a)[:-1], get_test_value(b)]
-    opts = RewriteDatabaseQuery(include=[None], exclude=["cxx_only", "BlasOpt"])
-    pytorch_mode = Mode(PytorchLinker(), opts)
-    pytensor_pytorch_fn = function(fgraph.inputs, fgraph.outputs, mode=pytorch_mode)
+    pytorch_mode_no_rewrites = Mode(PytorchLinker(), None)
+    pytensor_pytorch_fn.mode = pytorch_mode_no_rewrites
     with pytest.raises(TypeError):
         pytensor_pytorch_fn(*inputs)
