@@ -11,7 +11,8 @@ from pytensor.compile.sharedvalue import SharedVariable, shared
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import Op
+from pytensor.graph.op import Op, get_test_value
+from pytensor.ifelse import ifelse
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor import alloc, arange, as_tensor, empty, eye
 from pytensor.tensor.type import matrix, scalar, vector
@@ -301,3 +302,20 @@ def test_pytorch_MakeVector():
     x_fg = FunctionGraph([], [x])
 
     compare_pytorch_and_py(x_fg, [])
+
+
+def test_pytorch_ifelse():
+    true_vals = np.r_[1, 2, 3]
+    false_vals = np.r_[-1, -2, -3]
+
+    x = ifelse(np.array(True), true_vals, false_vals)
+    x_fg = FunctionGraph([], [x])
+
+    compare_pytorch_and_py(x_fg, [])
+
+    a = scalar("a")
+    a.tag.test_value = np.array(0.2, dtype=config.floatX)
+    x = ifelse(a < 0.5, true_vals, false_vals)
+    x_fg = FunctionGraph([a], [x])  # I.e. False
+
+    compare_pytorch_and_py(x_fg, [get_test_value(i) for i in x_fg.inputs])
