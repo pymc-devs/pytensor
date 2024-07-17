@@ -26,8 +26,10 @@ from pytensor.tensor.basic import (
     concatenate,
     constant,
     expand_dims,
+    full_like,
     stack,
     switch,
+    take_along_axis,
 )
 from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
 from pytensor.tensor.elemwise import (
@@ -2926,6 +2928,104 @@ def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
     return x
 
 
+def percentile(input, q, axis=None):
+    """
+    Computes the percentile along the given axis(es) of a tensor `input` using linear interpolation.
+
+    Parameters
+    ----------
+    input: TensorVariable
+        The input tensor.
+    q: float or list of floats
+        Percentile or sequence of percentiles to compute, which must be between 0 and 100 inclusive.
+    axis: None or int or list of int, optional
+        Axis or axes along which the percentiles are computed. The default is to compute the percentile(s) along a flattened version of the array.
+    """
+    input = as_tensor_variable(input)
+    input_ndim = input.type.ndim
+
+    if axis is None:
+        axis = list(range(input_ndim))
+    elif isinstance(axis, (int | np.integer)):
+        axis = [axis]
+    elif isinstance(axis, np.ndarray) and axis.ndim == 0:
+        axis = [int(axis)]
+    else:
+        axis = [int(a) for a in axis]
+
+    # Compute the shape of the remaining axes
+    new_axes_order = [i for i in range(input.ndim) if i not in axis] + list(axis)
+    input = input.dimshuffle(new_axes_order)
+    input_shape = shape(input)
+    remaining_axis_size = input_shape[: input.ndim - len(axis)]
+    flattened_axis_size = prod(input_shape[input.ndim - len(axis) :])
+    input = input.reshape(concatenate([remaining_axis_size, [flattened_axis_size]]))
+    axis = -1
+
+    # Sort the input tensor along the specified axis
+    sorted_input = input.sort(axis=axis)
+    input_shape = input.shape[axis]
+
+    if isinstance(q, (int | float)):
+        q = [q]
+
+    for percentile in q:
+        if percentile < 0 or percentile > 100:
+            raise ValueError("Percentiles must be in the range [0, 100]")
+
+    result = []
+    for percentile in q:
+        k = (percentile / 100.0) * (input_shape - 1)
+        k_floor = floor(k).astype("int64")
+        k_ceil = ceil(k).astype("int64")
+
+        indices1 = expand_dims(
+            full_like(sorted_input.take(0, axis=axis), k_floor), axis
+        )
+        indices2 = expand_dims(full_like(sorted_input.take(0, axis=axis), k_ceil), axis)
+
+        val1 = take_along_axis(sorted_input, indices1, axis=axis)
+        val2 = take_along_axis(sorted_input, indices2, axis=axis)
+
+        d = k - k_floor
+        percentile_val = val1 + d * (val2 - val1)
+
+        result.append(percentile_val.squeeze(axis=axis))
+
+    if len(result) == 1:
+        result = result[0]
+    else:
+        result = stack(result)
+
+    result.name = "percentile"
+    return result
+
+
+def quantile(input, q, axis=None):
+    """
+    Computes the quantile along the given axis(es) of a tensor `input` using linear interpolation.
+
+    Parameters
+    ----------
+    input: TensorVariable
+        The input tensor.
+    q: float or list of floats
+        Quantile or sequence of quantiles to compute, which must be between 0 and 1 inclusive.
+    axis: None or int or list of int, optional
+        Axis or axes along which the quantiles are computed. The default is to compute the quantile(s) along a flattened version of the array.
+    """
+    if isinstance(q, (int | float)):
+        q = [q]
+
+    for quantile in q:
+        if quantile < 0 or quantile > 1:
+            raise ValueError("Quantiles must be in the range [0, 1]")
+
+    percentiles = [100.0 * x for x in q]
+
+    return percentile(input, percentiles, axis)
+
+
 # NumPy logical aliases
 square = sqr
 
@@ -3080,6 +3180,8 @@ __all__ = [
     "outer",
     "any",
     "all",
+    "percentile",
+    "quantile",
     "ptp",
     "power",
     "logaddexp",
