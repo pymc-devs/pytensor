@@ -1,5 +1,4 @@
 from pytensor import clone_replace
-from pytensor.compile.builders import OpFromGraph
 from pytensor.graph import node_rewriter
 from pytensor.tensor.basic import AllocDiag
 from pytensor.tensor.nlinalg import KroneckerProduct
@@ -7,7 +6,7 @@ from pytensor.tensor.rewriting.basic import register_specialize
 
 
 @register_specialize("inline_ofg")
-@node_rewriter([OpFromGraph])
+@node_rewriter([AllocDiag, KroneckerProduct])
 def late_inline_OpFromGraph(fgraph, node):
     """
     Inline `OpFromGraph` nodes.
@@ -33,11 +32,4 @@ def late_inline_OpFromGraph(fgraph, node):
 
     """
     op = node.op
-
-    if not isinstance(op, AllocDiag | KroneckerProduct):
-        return False
-
-    if op.is_inline:
-        return None
-
     return clone_replace(op.inner_outputs, dict(zip(op.inner_inputs, node.inputs)))
