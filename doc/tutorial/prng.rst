@@ -225,7 +225,7 @@ This is exactly what RandomStream does behind the scenes
 
 From the example here, you can see that RandomStream uses a NumPy-like API in contrast to
 the SciPy-like API of `pytensor.tensor.random`. Full documentation can be found at
-:doc:`../library/tensor/random/basic.rst`
+:doc:`../library/tensor/random/basic`.
 
 >>> f = pytensor.function([], x)
 >>> print(f(), f(), f())
