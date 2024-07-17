@@ -3732,7 +3732,7 @@ class AllocDiag(OpFromGraph):
     Wrapper Op for alloc_diag graphs
     """
 
-    __props__ = ("axis1", "axis2", "is_inline")
+    __props__ = ("axis1", "axis2")
 
     def __init__(self, *args, axis1, axis2, **kwargs):
         self.axis1 = axis1
