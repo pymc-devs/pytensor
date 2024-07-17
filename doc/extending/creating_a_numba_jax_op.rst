@@ -626,34 +626,26 @@ Step 4: Write tests
 
 Note
 ----
-Due to restrictions in JAX JIT as reported in issue `#654 <https://github.com/pymc-devs/pytensor/issues/654>`_,
-all jitted functions must have constant shape. In other words, only PyTensor graphs with static shapes
-can be translated to JAX at the moment. It means a graph like the old test function for :class:`Eye` `Op`
+Due to restrictions with JAX JIT compiler as reported in issue `#654 <https://github.com/pymc-devs/pytensor/issues/654>`_,
+PyTensor graphs with dynamic shapes may be untranslatable to JAX. For example, this code snipper for :class:`Eye` `Op`
 
 .. code:: python
 
-    def test_jax_eye():
-        # Create a symbolic input for `Eye`
-        x_at = pt.scalar(dtype=np.int64)
+    x_at = pt.scalar(dtype=np.int64)
+    eye_var = pt.eye(x_at)
+    f = pytensor.function([x_at], eye_var, mode="JAX")
+    f(3)
 
-        # Create a variable that is the output of an `Eye` `Op`
-        eye_var = pt.eye(x_at)
+cannot be translated to JAX, since it involved a dynamic shape. This is one issue that may pop up during
+linking an `Op` to JAX.
 
-        # Create an PyTensor `FunctionGraph`
-        out_fg = FunctionGraph(outputs=[eye_var])
+Note that not that all dynamic shapes are disallowed.
+For example, if the function depends on input shapes, it still works.
+This code snippet gives the answer that is expected in the example above.
 
-        # Pass the graph and any inputs to the testing function
-        compare_jax_and_py(out_fg, [3])
-
-cannot be translated to JAX, since it involved a function with dynamic shapes.
-That's why the JAX link test for :class:`Eye` `Op` is now
 .. code:: python
 
-    def test_jax_eye():
-        """Tests jaxification of the Eye operator"""
-        out = ptb.eye(3)
-        out_fg = FunctionGraph([], [out])
-
-        compare_jax_and_py(out_fg, [])
-
-with the shape specified explicitly instead of via a variable.
+    x_at = pt.vector(dtype=np.int64)
+    eye_var = pt.eye(x_at.shape[0])
+    f = pytensor.function([x_at], eye_var, mode="JAX")
+    f([3, 3, 3])
