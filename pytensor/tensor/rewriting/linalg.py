@@ -3,7 +3,7 @@ from collections.abc import Callable
 from typing import cast
 
 from pytensor import Variable
-from pytensor.graph import Apply, FunctionGraph
+from pytensor.graph import Apply, Constant, FunctionGraph
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,
@@ -445,6 +445,27 @@ def _find_diag_from_eye_mul(potential_mul_input):
     return eye_input, non_eye_inputs
 
 
+def is_offset_zero(node) -> bool:
+    """
+    Test if an AllocDiag Op has a diagonal offset of zero
+
+    Parameters
+    ----------
+    node
+        AllocDiag node to test
+
+    Returns
+    -------
+    is_offset_zero: bool
+        True if the offset is zero (``k = 0``).
+    """
+    if not isinstance(node.op, AllocDiag):
+        return False
+
+    offset = node.inputs[-1]
+    return isinstance(offset, Constant) and offset.data.item() == 0
+
+
 @register_canonicalize("shape_unsafe")
 @register_stabilize("shape_unsafe")
 @node_rewriter([det])
@@ -476,7 +497,7 @@ def rewrite_det_diag_to_prod_diag(fgraph, node):
     if (
         inputs.owner
         and isinstance(inputs.owner.op, AllocDiag)
-        and inputs.owner.op.offset == 0
+        and is_offset_zero(inputs.owner)
     ):
         diag_input = inputs.owner.inputs[0]
         det_val = diag_input.prod(axis=-1)
