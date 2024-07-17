@@ -430,9 +430,11 @@ def _find_diag_from_eye_mul(potential_mul_input):
             return None
         # Check if 1's are being put on the main diagonal only (k = 0)
         # and if the identity matrix is degenerate (column or row matrix)
-        if getattr(
-            inner_eye.owner.inputs[-1], "data", -1
-        ).item() != 0 or inner_eye.broadcastable[-2:] != (False, False):
+        if not (
+            isinstance(inner_eye.owner.inputs[-1], Constant)
+            and inner_eye.owner.inputs[-1].data == 0
+            and inner_eye.broadcastable[-1:] != (False, False)
+        ):
             return None
 
     elif getattr(
@@ -443,27 +445,6 @@ def _find_diag_from_eye_mul(potential_mul_input):
     # Get all non Eye inputs (scalars/matrices/vectors)
     non_eye_inputs = list(set(inputs_to_mul) - {eye_input})
     return eye_input, non_eye_inputs
-
-
-def is_offset_zero(node) -> bool:
-    """
-    Test if an AllocDiag Op has a diagonal offset of zero
-
-    Parameters
-    ----------
-    node
-        AllocDiag node to test
-
-    Returns
-    -------
-    is_offset_zero: bool
-        True if the offset is zero (``k = 0``).
-    """
-    if not isinstance(node.op, AllocDiag):
-        return False
-
-    offset = node.inputs[-1]
-    return isinstance(offset, Constant) and offset.data.item() == 0
 
 
 @register_canonicalize("shape_unsafe")
@@ -497,7 +478,7 @@ def rewrite_det_diag_to_prod_diag(fgraph, node):
     if (
         inputs.owner
         and isinstance(inputs.owner.op, AllocDiag)
-        and is_offset_zero(inputs.owner)
+        and AllocDiag.is_offset_zero(inputs.owner)
     ):
         diag_input = inputs.owner.inputs[0]
         det_val = diag_input.prod(axis=-1)

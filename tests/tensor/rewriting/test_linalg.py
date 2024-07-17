@@ -368,7 +368,6 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
     A, B = list(map(constructor, "ab"))
     X = f(g(A, B))
 
-    # Exclude inline_ofg so we can count KroneckerProduct Ops (these are typically annihilated by rewrites)
     f1 = pytensor.function(
         [A, B], X, mode=get_default_mode().including("local_lift_through_linalg")
     )
@@ -410,8 +409,7 @@ def test_det_diag_from_eye_mul(shape):
     z_det = pt.linalg.det(y)
 
     # REWRITE TEST
-    with pytensor.config.change_flags(optimizer_verbose=True):
-        f_rewritten = function([x], z_det, mode="FAST_RUN")
+    f_rewritten = function([x], z_det, mode="FAST_RUN")
     nodes = f_rewritten.maker.fgraph.apply_nodes
 
     assert not any(

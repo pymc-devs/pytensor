@@ -1,7 +1,40 @@
 from pytensor import clone_replace
+from pytensor.compile import optdb
+from pytensor.compile.builders import OpFromGraph
 from pytensor.graph import node_rewriter
+from pytensor.graph.rewriting.basic import copy_stack_trace, in2out
 from pytensor.tensor.basic import AllocDiag
 from pytensor.tensor.rewriting.basic import register_specialize
+
+
+@node_rewriter([OpFromGraph])
+def inline_ofg_expansion(fgraph, node):
+    """
+    This optimization expands internal graph of OpFromGraph.
+    Only performed if node.op.is_inline == True
+    Doing so can improve optimization at the cost of compilation speed.
+    """
+    op = node.op
+    if not isinstance(op, OpFromGraph):
+        return False
+    if not op.is_inline:
+        return False
+
+    new_out = clone_replace(op.inner_outputs, dict(zip(op.inner_inputs, node.inputs)))
+    copy_stack_trace(op.inner_outputs, new_out)
+
+    return new_out
+
+
+# We want to run this before the first merge optimizer
+# and before the first scan optimizer.
+optdb.register(
+    "inline_ofg_expansion",
+    in2out(inline_ofg_expansion),
+    "fast_compile",
+    "fast_run",
+    position=-0.01,
+)
 
 
 @register_specialize("inline_ofg")
@@ -31,4 +64,7 @@ def late_inline_OpFromGraph(fgraph, node):
 
     """
     op = node.op
-    return clone_replace(op.inner_outputs, dict(zip(op.inner_inputs, node.inputs)))
+    new_out = clone_replace(op.inner_outputs, dict(zip(op.inner_inputs, node.inputs)))
+    copy_stack_trace(op.inner_outputs, new_out)
+
+    return new_out

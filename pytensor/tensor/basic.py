@@ -3740,6 +3740,25 @@ class AllocDiag(OpFromGraph):
 
         super().__init__(*args, **kwargs, strict=True)
 
+    @staticmethod
+    def is_offset_zero(node) -> bool:
+        """
+        Test if an AllocDiag Op has a diagonal offset of zero
+
+        Parameters
+        ----------
+        node
+            AllocDiag node to test
+
+        Returns
+        -------
+        is_offset_zero: bool
+            True if the offset is zero (``k = 0``).
+        """
+
+        offset = node.inputs[-1]
+        return isinstance(offset, Constant) and offset.data.item() == 0
+
 
 def alloc_diag(diag, offset=0, axis1=0, axis2=1):
     """Insert a vector on the diagonal of a zero-ed matrix.
