@@ -500,7 +500,7 @@ def grad(
     if cost is not None:
         outputs.append(cost)
     if known_grads is not None:
-        outputs.extend(list(known_grads.keys()))
+        outputs.extend(list(known_grads))
 
     var_to_app_to_idx = _populate_var_to_app_to_idx(outputs, _wrt, consider_constant)
 
@@ -802,20 +802,20 @@ def _node_to_pattern(node):
         if not isinstance(connection_pattern, list):
             raise TypeError(
                 "Op.connection_pattern should return "
-                + f"list of list of bool, but for Op={node.op}"
-                + f"got {connection_pattern} with type {type(connection_pattern)}."
+                f"list of list of bool, but for Op={node.op}"
+                f"got {connection_pattern} with type {type(connection_pattern)}."
             )
         if len(connection_pattern) != len(node.inputs):
             raise ValueError(
                 f"{node.op}.connection_pattern should have {len(node.inputs)}"
-                + f" rows but has {len(connection_pattern)}."
+                f" rows but has {len(connection_pattern)}."
             )
         for ii, output_pattern in enumerate(connection_pattern):
             if not isinstance(output_pattern, list):
                 raise TypeError(
                     f"{node.op}.connection_pattern should return"
-                    + f" a list of lists, but element {int(ii)}"
-                    + f"is {output_pattern} of type {type(output_pattern)}."
+                    f" a list of lists, but element {int(ii)}"
+                    f"is {output_pattern} of type {type(output_pattern)}."
                 )
     else:
         connection_pattern = [[True for output in node.outputs] for ipt in node.inputs]
@@ -966,7 +966,7 @@ def _populate_var_to_app_to_idx(outputs, wrt, consider_constant):
         visit(elem)
 
     # Remove variables that don't have wrt as a true ancestor
-    orig_vars = list(var_to_app_to_idx.keys())
+    orig_vars = list(var_to_app_to_idx)
     for var in orig_vars:
         if var not in visited:
             del var_to_app_to_idx[var]
@@ -1328,7 +1328,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                 elif connected and not actually_connected:
                     msg = f"{node.op}.grad returned DisconnectedType for input {i}."
                     if hasattr(node.op, "connection_pattern"):
-                        msg += " Its connection_pattern method does not" " allow this."
+                        msg += " Its connection_pattern method does not allow this."
                         raise TypeError(msg)
                     else:
                         msg += (
@@ -2050,6 +2050,85 @@ def hessian(cost, wrt, consider_constant=None, disconnected_inputs="raise"):
     return as_list_or_tuple(using_list, using_tuple, hessians)
 
 
+def hessian_vector_product(cost, wrt, p, **grad_kwargs):
+    """Return the expression of the Hessian times a vector p.
+
+    Notes
+    -----
+    This function uses backward autodiff twice to obtain the desired expression.
+    You may want to manually build the equivalent expression by combining backward
+    followed by forward (if all Ops support it) autodiff.
+    See {ref}`docs/_tutcomputinggrads#Hessian-times-a-Vector` for how to do this.
+
+    Parameters
+    ----------
+    cost: Scalar (0-dimensional) variable.
+    wrt: Vector (1-dimensional tensor) 'Variable' or list of Vectors
+    p: Vector (1-dimensional tensor) 'Variable' or list of Vectors
+        Each vector will be used for the hessp wirt to exach input variable
+    **grad_kwargs:
+        Keyword arguments passed to `grad` function.
+
+    Returns
+    -------
+    :class:` Vector or list of Vectors
+        The Hessian times p of the `cost` with respect to (elements of) `wrt`.
+
+    Examples
+    --------
+
+    .. testcode::
+
+        import numpy as np
+        from scipy.optimize import minimize
+        from pytensor import function
+        from pytensor.tensor import vector
+        from pytensor.gradient import grad, hessian_vector_product
+
+        x = vector('x')
+        p = vector('p')
+
+        rosen = (100 * (x[1:] - x[:-1] ** 2) ** 2 + (1 - x[:-1]) ** 2).sum()
+        rosen_jac = grad(rosen, x)
+        rosen_hessp = hessian_vector_product(rosen, x, p)
+
+        rosen_fn = function([x], rosen)
+        rosen_jac_fn = function([x], rosen_jac)
+        rosen_hessp_fn = function([x, p], rosen_hessp)
+        x0 = np.array([1.3, 0.7, 0.8, 1.9, 1.2])
+        res = minimize(
+            rosen_fn,
+            x0,
+            method="Newton-CG",
+            jac=rosen_jac_fn,
+            hessp=rosen_hessp_fn,
+            options={"xtol": 1e-8},
+        )
+        print(res.x)
+
+    .. testoutput::
+
+        [1.         1.         1.         0.99999999 0.99999999]
+
+
+
+    """
+    wrt_list = wrt if isinstance(wrt, Sequence) else [wrt]
+    p_list = p if isinstance(p, Sequence) else [p]
+    grad_wrt_list = grad(cost, wrt=wrt_list, **grad_kwargs)
+    hessian_cost = pytensor.tensor.add(
+        *[
+            (grad_wrt * p).sum()
+            for grad_wrt, p in zip(grad_wrt_list, p_list, strict=True)
+        ]
+    )
+    Hp_list = grad(hessian_cost, wrt=wrt_list, **grad_kwargs)
+
+    if isinstance(wrt, Variable):
+        return Hp_list[0]
+    return Hp_list
+
+
 def _is_zero(x):
     """
     Returns 'yes', 'no', or 'maybe' indicating whether x
@@ -2241,7 +2320,7 @@ def grad_clip(x, lower_bound, upper_bound):
     >>> z2 = pytensor.gradient.grad(x**2, x)
     >>> f = pytensor.function([x], outputs = [z, z2])
     >>> print(f(2.0))
-    [array(1.0), array(4.0)]
+    [array(1.), array(4.)]
 
     Notes
     -----

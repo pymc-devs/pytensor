@@ -48,7 +48,7 @@ from pytensor.tensor.shape import (
 )
 from pytensor.tensor.subtensor import Subtensor, get_idx_list
 from pytensor.tensor.type import TensorType, discrete_dtypes, integer_dtypes
-from pytensor.tensor.type_other import NoneConst
+from pytensor.tensor.type_other import NoneConst, NoneTypeT
 
 
 class ShapeFeature(Feature):
@@ -401,7 +401,7 @@ class ShapeFeature(Feature):
                 merged_shape.append(other_shape[i])
             elif (
                 ps.owner
-                and isinstance(getattr(ps.owner, "op", None), Shape_i)
+                and isinstance(ps.owner.op, Shape_i)
                 and ps.owner.op.i == i
                 and ps.owner.inputs[0] in (r, other_r)
             ):
@@ -602,7 +602,7 @@ class ShapeFeature(Feature):
         # r is *scheduled*.
         # At that point, node is no longer a client of r, but of new_r
         for shpnode, idx in fgraph.clients[r] + [(node, i)]:
-            if isinstance(getattr(shpnode, "op", None), Shape_i):
+            if isinstance(shpnode.op, Shape_i):
                 idx = shpnode.op.i
                 repl = self.shape_of[new_r][idx]
                 if repl.owner is shpnode:
@@ -974,6 +974,35 @@ def local_reshape_lift(fgraph, node):
         return [e]
 
 
+@register_useless
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([SpecifyShape])
+def local_useless_specify_shape(fgraph, node):
+    """Remove SpecifyShape when the asserted shapes are already encoded in the static type of the input."""
+    x, *shape = node.inputs
+    for static_dim, specified_dim in zip(x.type.shape, shape, strict=True):
+        if isinstance(specified_dim.type, NoneTypeT):
+            continue
+        if static_dim is None:
+            # There is an unknown static dimension that is being specified
+            return None
+        if not (
+            isinstance(specified_dim, Constant) and specified_dim.data == static_dim
+        ):
+            # The specified dim is either:
+            # 1. Not constant or
+            # 2. Constant that does not match the static dim
+            # Either way, we must keep the SpecifyShape
+            return None
+
+    # If we arrived here, it means SpecifyShape was already encoded in the static shape
+    # We don't need it
+    copy_stack_trace(node.outputs[0], x)
+    return [x]
+
+
 @register_infer_shape
 @register_useless
 @register_canonicalize
@@ -1028,7 +1057,10 @@ def local_Shape_of_SpecifyShape(fgraph, node):
 
     specified_shape = node.inputs[0]
 
-    if not isinstance(getattr(specified_shape.owner, "op", None), SpecifyShape):
+    if not (
+        specified_shape.owner is not None
+        and isinstance(specified_shape.owner.op, SpecifyShape)
+    ):
         return False
 
     x, *shape = specified_shape.owner.inputs
@@ -1189,10 +1221,7 @@ def local_useless_dimshuffle_in_reshape(fgraph, node):
 @register_specialize
 @node_rewriter([Unbroadcast])
 def local_useless_unbroadcast(fgraph, node):
-    """Remove `Unbroadcast` if it does not actually change the broadcasting pattern.
-
-    TODO: Implement equivalent rewrite for SpecifyShape
-    """
+    """Remove `Unbroadcast` if it does not actually change the broadcasting pattern."""
     if isinstance(node.op, Unbroadcast):
         x = node.inputs[0]
         if x.type.ndim == node.outputs[0].type.ndim and all(

@@ -631,7 +631,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         if not hasattr(self, "_fn_cache"):
             self._fn_cache: dict = dict()
 
-        inputs = tuple(sorted(parsed_inputs_to_values.keys(), key=id))
+        inputs = tuple(sorted(parsed_inputs_to_values, key=id))
         cache_key = (inputs, tuple(kwargs.items()))
         try:
             fn = self._fn_cache[cache_key]
@@ -909,6 +909,7 @@ def ancestors(
     def expand(r: Variable) -> Iterator[Variable] | None:
         if r.owner and (not blockers or r not in blockers):
             return reversed(r.owner.inputs)
+        return None
 
     yield from cast(Generator[Variable, None, None], walk(graphs, expand, False))
 
@@ -986,7 +987,7 @@ def explicit_graph_inputs(
 
 
 def vars_between(
-    ins: Collection[Variable], outs: Iterable[Variable]
+    ins: Iterable[Variable], outs: Iterable[Variable]
 ) -> Generator[Variable, None, None]:
     r"""Extract the `Variable`\s within the sub-graph between input and output nodes.
 
@@ -1006,9 +1007,12 @@ def vars_between(
 
     """
 
+    ins = set(ins)
+
     def expand(r: Variable) -> Iterable[Variable] | None:
         if r.owner and r not in ins:
             return reversed(r.owner.inputs + r.owner.outputs)
+        return None
 
     yield from cast(Generator[Variable, None, None], walk(outs, expand))
 
@@ -1034,7 +1038,10 @@ def orphans_between(
 
     Examples
     --------
-    >>> orphans_between([x], [(x+y).out])
+    >>> from pytensor.graph.basic import orphans_between
+    >>> from pytensor.tensor import scalars
+    >>> x, y = scalars("xy")
+    >>> list(orphans_between([x], [(x+y)]))
     [y]
 
     """
@@ -2034,13 +2041,15 @@ def get_var_by_name(
     from pytensor.graph.op import HasInnerGraph
 
     def expand(r) -> list[Variable] | None:
-        if r.owner:
-            res = list(r.owner.inputs)
+        if not r.owner:
+            return None
 
-            if isinstance(r.owner.op, HasInnerGraph):
-                res.extend(r.owner.op.inner_outputs)
+        res = list(r.owner.inputs)
 
-            return res
+        if isinstance(r.owner.op, HasInnerGraph):
+            res.extend(r.owner.op.inner_outputs)
+
+        return res
 
     results: tuple[Variable, ...] = ()
     for var in walk(graphs, expand, False):

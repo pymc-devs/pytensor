@@ -43,10 +43,8 @@ def store_core_outputs(core_op_fn: Callable, nin: int, nout: int) -> Callable:
     out_signature = ", ".join(outputs)
     inner_out_signature = ", ".join(inner_outputs)
     store_outputs = "\n".join(
-        [
-            f"{output}[...] = {inner_output}"
-            for output, inner_output in zip(outputs, inner_outputs)
-        ]
+        f"{output}[...] = {inner_output}"
+        for output, inner_output in zip(outputs, inner_outputs)
     )
     func_src = f"""
 def store_core_outputs({inp_signature}, {out_signature}):

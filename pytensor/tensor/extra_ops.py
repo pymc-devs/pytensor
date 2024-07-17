@@ -79,7 +79,7 @@ class CpuContiguous(COp):
     def c_code(self, node, name, inames, onames, sub):
         (x,) = inames
         (y,) = onames
-        code = """
+        code = f"""
             if (!PyArray_CHKFLAGS({x}, NPY_ARRAY_C_CONTIGUOUS)){{
                 // check to see if output is contiguous first
                 if ({y} != NULL &&
@@ -97,7 +97,7 @@ class CpuContiguous(COp):
                 Py_XDECREF({y});
                 {y} = {x};
             }}
-            """.format(**locals())
+            """
         return code
 
     def c_code_cache_version(self):
@@ -172,13 +172,13 @@ class SearchsortedOp(COp):
     def c_init_code_struct(self, node, name, sub):
         side = sub["params"]
         fail = sub["fail"]
-        return """
+        return f"""
             PyObject* tmp_{name} = PyUnicode_FromString("right");
             if (tmp_{name} == NULL)
                 {fail};
             right_{name} = PyUnicode_Compare({side}, tmp_{name});
             Py_DECREF(tmp_{name});
-        """.format(**locals())
+        """
 
     def c_code(self, node, name, inames, onames, sub):
         sorter = None
@@ -191,7 +191,7 @@ class SearchsortedOp(COp):
         (z,) = onames
         fail = sub["fail"]
 
-        return """
+        return f"""
             Py_XDECREF({z});
             {z} = (PyArrayObject*) PyArray_SearchSorted({x}, (PyObject*) {v},
                                                           right_{name} ? NPY_SEARCHLEFT : NPY_SEARCHRIGHT, (PyObject*) {sorter});
@@ -202,7 +202,7 @@ class SearchsortedOp(COp):
                 Py_XDECREF({z});
                 {z} = (PyArrayObject*) tmp;
             }}
-        """.format(**locals())
+        """
 
     def c_code_cache_version(self):
         return (2,)
@@ -265,7 +265,7 @@ def searchsorted(x, v, side="left", sorter=None):
     --------
     >>> from pytensor import tensor as pt
     >>> from pytensor.tensor import extra_ops
-    >>> x = ptb.dvector()
+    >>> x = pt.dvector("x")
     >>> idx = x.searchsorted(3)
     >>> idx.eval({x: [1,2,3,4,5]})
     array(2)
@@ -359,11 +359,10 @@ class CumOp(COp):
     def c_code(self, node, name, inames, onames, sub):
         (x,) = inames
         (z,) = onames
-        axis = self.axis
         fail = sub["fail"]
         params = sub["params"]
 
-        code = """
+        code = f"""
                 int axis = {params}->c_axis;
                 if (axis == 0 && PyArray_NDIM({x}) == 1)
                     axis = NPY_MAXDIMS;
@@ -400,7 +399,7 @@ class CumOp(COp):
                     // Because PyArray_CumSum/CumProd returns a newly created reference on t.
                     Py_XDECREF(t);
                 }}
-            """.format(**locals())
+            """
 
         return code
 
@@ -1178,12 +1177,12 @@ class Unique(Op):
     >>> x = pytensor.tensor.vector()
     >>> f = pytensor.function([x], Unique(True, True, False)(x))
     >>> f([1, 2., 3, 4, 3, 2, 1.])
-    [array([ 1.,  2.,  3.,  4.]), array([0, 1, 2, 3]), array([0, 1, 2, 3, 2, 1, 0])]
+    [array([1., 2., 3., 4.]), array([0, 1, 2, 3]), array([0, 1, 2, 3, 2, 1, 0])]
 
     >>> y = pytensor.tensor.matrix()
     >>> g = pytensor.function([y], Unique(True, True, False)(y))
     >>> g([[1, 1, 1.0], (2, 3, 3.0)])
-    [array([ 1.,  2.,  3.]), array([0, 3, 4]), array([0, 0, 0, 1, 2, 2])]
+    [array([1., 2., 3.]), array([0, 3, 4]), array([0, 0, 0, 1, 2, 2])]
 
     """
 
@@ -1259,7 +1258,7 @@ class Unique(Op):
                     f"Unique axis `{self.axis}` is outside of input ndim = {ndim}."
                 )
             ret[0] = tuple(
-                [fgraph.shape_feature.shape_ir(i, node.outputs[0]) for i in range(ndim)]
+                fgraph.shape_feature.shape_ir(i, node.outputs[0]) for i in range(ndim)
             )
         if self.return_inverse:
             if self.axis is None:

@@ -13,6 +13,7 @@ import os
 import pickle
 import shutil
 import sys
+from pathlib import Path
 from tempfile import mkdtemp
 
 import numpy as np
@@ -176,8 +177,7 @@ class multiple_outputs_numeric_grad:
         for i, (a, b) in enumerate(zip(g_pt, self.gx)):
             if a.shape != b.shape:
                 raise ValueError(
-                    "argument element %i has wrong shape %s"
-                    % (i, str((a.shape, b.shape)))
+                    f"argument element {i} has wrong shape {(a.shape, b.shape)}"
                 )
             errs.append(np.max(multiple_outputs_numeric_grad.abs_rel_err(a, b)))
         if np.all(np.isfinite(errs)):
@@ -228,7 +228,7 @@ def grab_scan_node(output):
         ri = grab_scan_node(i)
         if ri is not None:
             rval += ri
-    if rval is []:
+    if rval == []:
         return None
     else:
         return rval
@@ -327,15 +327,15 @@ class TestScan:
             [state, n_steps], output, updates=updates, allow_input_downcast=True
         )
 
-        origdir = os.getcwd()
+        origdir = Path.cwd()
         tmpdir = None
         try:
             tmpdir = mkdtemp()
             os.chdir(tmpdir)
 
-            with open("tmp_scan_test_pickle.pkl", "wb") as f_out:
+            with Path("tmp_scan_test_pickle.pkl").open("wb") as f_out:
                 pickle.dump(_my_f, f_out, protocol=-1)
-            with open("tmp_scan_test_pickle.pkl", "rb") as f_in:
+            with Path("tmp_scan_test_pickle.pkl").open("rb") as f_in:
                 my_f = pickle.load(f_in)
         finally:
             # Get back to the original dir, and delete the temporary one.

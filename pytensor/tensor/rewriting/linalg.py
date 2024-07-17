@@ -299,8 +299,6 @@ def local_det_chol(fgraph, node):
     """
     (x,) = node.inputs
     for cl, xpos in fgraph.clients[x]:
-        if cl == "output":
-            continue
         if isinstance(cl.op, Blockwise) and isinstance(cl.op.core_op, Cholesky):
             L = cl.outputs[0]
             return [prod(diagonal(L, axis1=-2, axis2=-1) ** 2, axis=-1)]
@@ -357,34 +355,37 @@ def local_lift_through_linalg(
     """
 
     # TODO: Simplify this if we end up Blockwising KroneckerProduct
-    if isinstance(node.op.core_op, MatrixInverse | Cholesky | MatrixPinv):
-        y = node.inputs[0]
-        outer_op = node.op
+    if not isinstance(node.op.core_op, MatrixInverse | Cholesky | MatrixPinv):
+        return None
 
-        if y.owner and (
-            isinstance(y.owner.op, Blockwise)
-            and isinstance(y.owner.op.core_op, BlockDiagonal)
-            or isinstance(y.owner.op, KroneckerProduct)
-        ):
-            input_matrices = y.owner.inputs
+    y = node.inputs[0]
+    outer_op = node.op
 
-            if isinstance(outer_op.core_op, MatrixInverse):
-                outer_f = cast(Callable, inv)
-            elif isinstance(outer_op.core_op, Cholesky):
-                outer_f = cast(Callable, cholesky)
-            elif isinstance(outer_op.core_op, MatrixPinv):
-                outer_f = cast(Callable, pinv)
-            else:
-                raise NotImplementedError  # pragma: no cover
+    if y.owner and (
+        isinstance(y.owner.op, Blockwise)
+        and isinstance(y.owner.op.core_op, BlockDiagonal)
+        or isinstance(y.owner.op, KroneckerProduct)
+    ):
+        input_matrices = y.owner.inputs
 
-            inner_matrices = [cast(TensorVariable, outer_f(m)) for m in input_matrices]
+        if isinstance(outer_op.core_op, MatrixInverse):
+            outer_f = cast(Callable, inv)
+        elif isinstance(outer_op.core_op, Cholesky):
+            outer_f = cast(Callable, cholesky)
+        elif isinstance(outer_op.core_op, MatrixPinv):
+            outer_f = cast(Callable, pinv)
+        else:
+            raise NotImplementedError  # pragma: no cover
 
-            if isinstance(y.owner.op, KroneckerProduct):
-                return [kron(*inner_matrices)]
-            elif isinstance(y.owner.op.core_op, BlockDiagonal):
-                return [block_diag(*inner_matrices)]
-            else:
-                raise NotImplementedError  # pragma: no cover
+        inner_matrices = [cast(TensorVariable, outer_f(m)) for m in input_matrices]
+
+        if isinstance(y.owner.op, KroneckerProduct):
+            return [kron(*inner_matrices)]
+        elif isinstance(y.owner.op.core_op, BlockDiagonal):
+            return [block_diag(*inner_matrices)]
+        else:
+            raise NotImplementedError  # pragma: no cover
+    return None
 
 
 def _find_diag_from_eye_mul(potential_mul_input):
@@ -511,8 +512,6 @@ def svd_uv_merge(fgraph, node):
         # Else, has to replace the s of this node with s of an SVD Op that compute_uv=False.
         # First, iterate to see if there is an SVD Op that can be reused.
         for cl, _ in fgraph.clients[x]:
-            if cl == "output":
-                continue
             if isinstance(cl.op, Blockwise) and isinstance(cl.op.core_op, SVD):
                 if not cl.op.core_op.compute_uv:
                     return {
@@ -531,8 +530,6 @@ def svd_uv_merge(fgraph, node):
         # We want rewrite if there is another one with compute_uv=True.
         # For this case, just reuse the `s` from the one with compute_uv=True.
         for cl, _ in fgraph.clients[x]:
-            if cl == "output":
-                continue
             if isinstance(cl.op, Blockwise) and isinstance(cl.op.core_op, SVD):
                 if cl.op.core_op.compute_uv and (
                     len(fgraph.clients[cl.outputs[0]]) > 0

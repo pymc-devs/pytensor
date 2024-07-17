@@ -78,9 +78,7 @@ class TestTypedListType:
         myType = TypedListType(TensorType(pytensor.config.floatX, shape=(None, None)))
 
         x = random_ranged(-1000, 1000, [10, 10])
-        testList = []
-        for i in range(10000):
-            testList.append(x)
+        testList = [x for _ in range(10000)]
 
         assert np.array_equal(myType.filter(testList), testList)
 

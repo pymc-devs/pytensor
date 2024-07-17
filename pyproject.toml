@@ -3,7 +3,7 @@ requires = [
     "setuptools>=59.0.0",
     "cython",
     "numpy>=1.17.0",
-    "versioneer[toml]>=0.28",
+    "versioneer[toml]==0.29",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -49,7 +49,7 @@ dependencies = [
     "setuptools>=59.0.0",
     "scipy>=0.14,<1.14",
     "numpy>=1.17.0,<2",
-    "filelock",
+    "filelock>=3.15",
     "etuples",
     "logical-unification",
     "miniKanren",
@@ -75,6 +75,7 @@ tests = [
     "coverage>=5.1",
     "pytest-benchmark",
     "pytest-mock",
+    "pytest-sphinx",
 ]
 rtd = ["sphinx>=5.1.0,<6", "pygments", "pydot", "pydot2", "pydot-ng"]
 jax = ["jax", "jaxlib"]
@@ -116,7 +117,7 @@ versionfile_build = "pytensor/_version.py"
 tag_prefix = "rel-"
 
 [tool.pytest]
-addopts = "--durations=50"
+addopts = "--durations=50  --doctest-modules pytensor --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link"
 testpaths = "tests/"
 
 [tool.ruff]
@@ -124,8 +125,8 @@ line-length = 88
 exclude = ["doc/", "pytensor/_version.py"]
 
 [tool.ruff.lint]
-select = ["C", "E", "F", "I", "UP", "W", "RUF"]
-ignore = ["C408", "C901", "E501", "E741", "RUF012"]
+select = ["C", "E", "F", "I", "UP", "W", "RUF", "PERF", "PTH", "ISC"]
+ignore = ["C408", "C901", "E501", "E741", "RUF012", "PERF203", "ISC001"]
 
 
 [tool.ruff.lint.isort]
@@ -135,6 +136,7 @@ lines-after-imports = 2
 # TODO: Get rid of these:
 "**/__init__.py" = ["F401", "E402", "F403"]
 "pytensor/tensor/linalg.py" = ["F403"]
+"pytensor/link/c/cmodule.py" = ["PTH"]
 # For the tests we skip because `pytest.importorskip` is used:
 "tests/link/jax/test_scalar.py" = ["E402"]
 "tests/link/jax/test_tensor_basic.py" = ["E402"]
@@ -148,23 +150,17 @@ lines-after-imports = 2
 "tests/sparse/test_sp2.py" = ["E402"]
 "tests/sparse/test_utils.py" = ["E402"]
 "tests/sparse/sandbox/test_sp.py" = ["E402", "F401"]
-"versioneer.py" = ["I"]
 
 
 [tool.mypy]
 python_version = "3.10"
 ignore_missing_imports = true
-no_implicit_optional = true
-check_untyped_defs = false
 strict_equality = true
 warn_redundant_casts = true
 warn_unused_configs = true
 warn_unused_ignores = true
 warn_return_any = true
-warn_no_return = false
 warn_unreachable = true
-show_error_codes = true
-allow_redefinition = false
 files = ["pytensor", "tests"]
 plugins = ["numpy.typing.mypy_plugin"]
 

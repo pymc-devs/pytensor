@@ -20,8 +20,8 @@ def test_detect_nan():
             if np.isnan(output[0]).any():
                 print("*** NaN detected ***")
                 debugprint(node)
-                print("Inputs : %s" % [input[0] for input in fn.inputs])
-                print("Outputs: %s" % [output[0] for output in fn.outputs])
+                print(f"Inputs : {[input[0] for input in fn.inputs]}")
+                print(f"Outputs: {[output[0] for output in fn.outputs]}")
                 nan_detected[0] = True
                 break
 
@@ -50,8 +50,8 @@ def test_optimizer():
             if np.isnan(output[0]).any():
                 print("*** NaN detected ***")
                 debugprint(node)
-                print("Inputs : %s" % [input[0] for input in fn.inputs])
-                print("Outputs: %s" % [output[0] for output in fn.outputs])
+                print(f"Inputs : {[input[0] for input in fn.inputs]}")
+                print(f"Outputs: {[output[0] for output in fn.outputs]}")
                 nan_detected[0] = True
                 break
 
@@ -82,8 +82,8 @@ def test_not_inplace():
             if np.isnan(output[0]).any():
                 print("*** NaN detected ***")
                 debugprint(node)
-                print("Inputs : %s" % [input[0] for input in fn.inputs])
-                print("Outputs: %s" % [output[0] for output in fn.outputs])
+                print(f"Inputs : {[input[0] for input in fn.inputs]}")
+                print(f"Outputs: {[output[0] for output in fn.outputs]}")
                 nan_detected[0] = True
                 break
 

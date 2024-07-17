@@ -78,8 +78,6 @@ def view_tree_set(fgraph, v, treeset):
     """
     treeset.add(v)
     for cl, v_input_pos_to_cl in fgraph.clients[v]:
-        if cl == "output":
-            continue
         vmap = cl.op.view_map
         dmap = cl.op.destroy_map
         for opos, iposlist in chain(vmap.items(), dmap.items()):
@@ -661,7 +659,7 @@ class Function:
             exist_svs = [i.variable for i in maker.inputs]
 
             # Check if given ShareVariables exist
-            for sv in swap.keys():
+            for sv in swap:
                 if sv not in exist_svs:
                     raise ValueError(f"SharedVariable: {sv.name} not found")
 
@@ -713,9 +711,9 @@ class Function:
         # it is well tested, we don't share the part of the storage_map.
         if share_memory:
             i_o_vars = maker.fgraph.inputs + maker.fgraph.outputs
-            for key in storage_map.keys():
+            for key, val in storage_map.items():
                 if key not in i_o_vars:
-                    new_storage_map[memo[key]] = storage_map[key]
+                    new_storage_map[memo[key]] = val
 
         if not name and self.name:
             name = self.name + " copy"
@@ -1069,7 +1067,7 @@ class Function:
     container = property(
         lambda self: self._container,
         None,  # this property itself is not settable
-        doc=("dictionary-like access to the containers associated with " "Variables"),
+        doc=("dictionary-like access to the containers associated with Variables"),
     )
 
     def free(self):
@@ -1202,8 +1200,11 @@ def insert_deepcopy(fgraph, wrapped_inputs, wrapped_outputs):
     has_destroyers_attr = hasattr(fgraph, "has_destroyers")
 
     for i in range(len(fgraph.outputs)):
+        original_out = fgraph.outputs[i]
+        output_client = fgraph.get_output_client(i)
+
         views_of_output_i = set()
-        view_tree_set(fgraph, alias_root(fgraph.outputs[i]), views_of_output_i)
+        view_tree_set(fgraph, alias_root(original_out), views_of_output_i)
         copied = False
         # do not allow outputs to be aliased
         for j in range(i + 1, len(fgraph.outputs)):
@@ -1212,16 +1213,16 @@ def insert_deepcopy(fgraph, wrapped_inputs, wrapped_outputs):
             if fgraph.outputs[j] in views_of_output_i:
                 if wrapped_outputs[i].borrow and wrapped_outputs[j].borrow:
                     fgraph.change_node_input(
-                        "output", i, view_op(fgraph.outputs[i]), reason=reason
+                        *output_client, view_op(original_out), reason=reason
                     )
                 else:
                     fgraph.change_node_input(
-                        "output", i, deep_copy_op(fgraph.outputs[i]), reason=reason
+                        *output_client, deep_copy_op(original_out), reason=reason
                     )
                 copied = True
                 break
 
-        if not copied:
+        if not copied:  # no-break
             for input_j in all_graph_inputs:
                 # do not allow outputs to be aliased to an inputs (j), unless
                 # a) that j'th input has been 'destroyed' by
@@ -1239,33 +1240,29 @@ def insert_deepcopy(fgraph, wrapped_inputs, wrapped_outputs):
                         j = fgraph.inputs.index(input_j)
                         if wrapped_outputs[i].borrow and wrapped_inputs[j].borrow:
                             fgraph.change_node_input(
-                                "output",
-                                i,
-                                view_op(fgraph.outputs[i]),
+                                *output_client,
+                                view_op(original_out),
                                 reason=reason,
                             )
                             break
                         else:
                             fgraph.change_node_input(
-                                "output",
-                                i,
-                                deep_copy_op(fgraph.outputs[i]),
+                                *output_client,
+                                deep_copy_op(original_out),
                                 reason=reason,
                             )
                             break
                     elif wrapped_outputs[i].borrow:
                         fgraph.change_node_input(
-                            "output",
-                            i,
-                            view_op(fgraph.outputs[i]),
+                            *output_client,
+                            view_op(original_out),
                             reason=reason,
                         )
                         break
                     else:
                         fgraph.change_node_input(
-                            "output",
-                            i,
-                            deep_copy_op(fgraph.outputs[i]),
+                            *output_client,
+                            deep_copy_op(original_out),
                             reason=reason,
                         )
                         break
@@ -1449,7 +1446,7 @@ class FunctionMaker:
         if not hasattr(mode.linker, "accept"):
             raise ValueError(
                 "'linker' parameter of FunctionMaker should be "
-                f"a Linker with an accept method or one of {list(pytensor.compile.mode.predefined_linkers.keys())}"
+                f"a Linker with an accept method or one of {list(pytensor.compile.mode.predefined_linkers)}"
             )
 
     def __init__(
@@ -1893,11 +1890,7 @@ def get_info_on_inputs(named_inputs, n_unnamed_inputs):
                 )
     else:
         if n_unnamed_inputs == 0:
-            msg = "The function has {} named input{} ({}).".format(
-                n_named_inputs,
-                get_plural(n_named_inputs),
-                ", ".join(named_inputs),
-            )
+            msg = f"The function has {n_named_inputs} named input{get_plural(n_named_inputs)} ({', '.join(named_inputs)})."
         else:
             msg = (
                 f"The function has {n_named_inputs} named input{get_plural(n_named_inputs)} ({', '.join(named_inputs)}), and {n_unnamed_inputs} unnamed "

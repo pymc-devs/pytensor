@@ -15,7 +15,7 @@ from collections.abc import Callable, Iterable, Sequence
 from collections.abc import Iterable as IterableType
 from functools import _compose_mro, partial, reduce  # type: ignore
 from itertools import chain
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 import pytensor
 from pytensor.configdefaults import config
@@ -30,7 +30,7 @@ from pytensor.graph.basic import (
     vars_between,
 )
 from pytensor.graph.features import AlreadyThere, Feature, NodeFinder
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
 from pytensor.graph.utils import AssocList, InconsistencyError
 from pytensor.misc.ordered_set import OrderedSet
@@ -738,7 +738,7 @@ class MergeOptimizer(GraphRewriter):
                         if any(
                             i in flatten(c.op.destroy_map.values())
                             for c, i in clients
-                            if c != "output" and c.op.destroy_map
+                            if c.op.destroy_map
                         ):
                             continue
 
@@ -1264,7 +1264,7 @@ class SequentialNodeRewriter(NodeRewriter):
         return getattr(
             self,
             "__name__",
-            f"{type(self).__name__}({','.join([str(o) for o in self.rewrites])})",
+            f"{type(self).__name__}({','.join(str(o) for o in self.rewrites)})",
         )
 
     def tracks(self):
@@ -1612,8 +1612,6 @@ class PatternNodeRewriter(NodeRewriter):
 
         if get_nodes and self.get_nodes is not None:
             for real_node in self.get_nodes(fgraph, node):
-                if real_node == "output":
-                    continue
                 ret = self.transform(fgraph, real_node, get_nodes=False)
                 if ret is not False and ret is not None:
                     return dict(zip(real_node.outputs, ret))
@@ -1666,15 +1664,12 @@ class PatternNodeRewriter(NodeRewriter):
 
         def pattern_to_str(pattern):
             if isinstance(pattern, list | tuple):
-                return "{}({})".format(
-                    str(pattern[0]),
-                    ", ".join([pattern_to_str(p) for p in pattern[1:]]),
-                )
+                args = ", ".join(pattern_to_str(p) for p in pattern[1:])
+                return f"{pattern[0]!s}({args})"
             elif isinstance(pattern, dict):
-                return "{} subject to {}".format(
-                    pattern_to_str(pattern["pattern"]),
-                    str(pattern.get("constraint", "no conditions")),
-                )
+                a = pattern_to_str(pattern["pattern"])
+                b = pattern.get("constraint", "no conditions")
+                return f"{a} subject to {b}"
             else:
                 return str(pattern)
 
@@ -1926,9 +1921,9 @@ class NodeProcessingGraphRewriter(GraphRewriter):
         remove: list[Variable] = []
         if isinstance(replacements, dict):
             if "remove" in replacements:
-                remove = list(cast(Sequence[Variable], replacements.pop("remove")))
-            old_vars = list(cast(Sequence[Variable], replacements.keys()))
-            replacements = list(cast(Sequence[Variable], replacements.values()))
+                remove = list(replacements.pop("remove"))
+            old_vars = list(replacements)
+            replacements = list(replacements.values())
         elif not isinstance(replacements, tuple | list):
             raise TypeError(
                 f"Node rewriter {node_rewriter} gave wrong type of replacement. "
@@ -2399,7 +2394,7 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
             if self.tracks_on_change_inputs:
 
                 def chin_(node, i, r, new_r, reason):
-                    if node is not current_node and not isinstance(node, str):
+                    if node is not current_node and not isinstance(node.op, Output):
                         q.append(node)
 
                 chin = chin_
@@ -2571,7 +2566,7 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
                 d = sorted(
                     loop_process_count[i].items(), key=lambda a: a[1], reverse=True
                 )
-                loop_times = " ".join([str((str(k), v)) for k, v in d[:5]])
+                loop_times = " ".join(str((str(k), v)) for k, v in d[:5])
                 if len(d) > 5:
                     loop_times += " ..."
             print(

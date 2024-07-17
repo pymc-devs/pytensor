@@ -48,7 +48,13 @@ class CheckAndRaise(COp):
         self.msg = msg
 
     def __str__(self):
-        return f"CheckAndRaise{{{self.exc_type}({self.msg})}}"
+        name = self.__class__.__name__
+        exc_name = self.exc_type.__name__
+        if len(self.msg) > 30:
+            msg = self.msg[:27] + "..."
+        else:
+            msg = self.msg
+        return f"{name}{{raises={exc_name}, msg='{msg}'}}"
 
     def __eq__(self, other):
         if type(self) is not type(other):
@@ -195,7 +201,11 @@ class Assert(CheckAndRaise):
         super().__init__(AssertionError, msg)
 
     def __str__(self):
-        return f"Assert{{msg={self.msg}}}"
+        if len(self.msg) > 30:
+            msg = self.msg[:27] + "..."
+        else:
+            msg = self.msg
+        return f"Assert{{msg='{msg}'}}"
 
 
 assert_op = Assert()

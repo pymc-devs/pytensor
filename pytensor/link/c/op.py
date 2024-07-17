@@ -1,8 +1,8 @@
 import inspect
-import os
 import re
 import warnings
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Iterable
+from pathlib import Path
 from re import Pattern
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
@@ -279,28 +279,32 @@ class ExternalCOp(COp):
     _cop_num_outputs: int | None = None
 
     @classmethod
-    def get_path(cls, f: str) -> str:
+    def get_path(cls, f: Path) -> Path:
         """Convert a path relative to the location of the class file into an absolute path.
 
         Paths that are already absolute are passed through unchanged.
 
         """
-        if not os.path.isabs(f):
+        if not f.is_absolute():
             class_file = inspect.getfile(cls)
-            class_dir = os.path.dirname(class_file)
-            f = os.path.realpath(os.path.join(class_dir, f))
+            class_dir = Path(class_file).parent
+            f = (class_dir / f).resolve()
         return f
 
-    def __init__(self, func_files: str | list[str], func_name: str | None = None):
+    def __init__(
+        self,
+        func_files: str | Path | list[str] | list[Path],
+        func_name: str | None = None,
+    ):
         """
         Sections are loaded from files in order with sections in later
         files overriding sections in previous files.
 
         """
         if not isinstance(func_files, list):
-            self.func_files = [func_files]
+            self.func_files = [Path(func_files)]
         else:
-            self.func_files = func_files
+            self.func_files = [Path(func_file) for func_file in func_files]
 
         self.func_codes: list[str] = []
         # Keep the original name. If we reload old pickle, we want to
@@ -325,22 +329,20 @@ class ExternalCOp(COp):
                     "Cannot have an `op_code_cleanup` section and specify `func_name`"
                 )
 
-    def load_c_code(self, func_files: list[str]) -> None:
+    def load_c_code(self, func_files: Iterable[Path]) -> None:
         """Loads the C code to perform the `Op`."""
-        func_files = [self.get_path(f) for f in func_files]
         for func_file in func_files:
-            with open(func_file) as f:
-                self.func_codes.append(f.read())
+            func_file = self.get_path(func_file)
+            self.func_codes.append(func_file.read_text(encoding="utf-8"))
 
         # If both the old section markers and the new section markers are
         # present, raise an error because we don't know which ones to follow.
-        old_markers_present = False
-        new_markers_present = False
-        for code in self.func_codes:
-            if self.backward_re.search(code):
-                old_markers_present = True
-            if self.section_re.search(code):
-                new_markers_present = True
+        old_markers_present = any(
+            self.backward_re.search(code) for code in self.func_codes
+        )
+        new_markers_present = any(
+            self.section_re.search(code) for code in self.func_codes
+        )
 
         if old_markers_present and new_markers_present:
             raise ValueError(
@@ -350,7 +352,7 @@ class ExternalCOp(COp):
                 "be used at the same time."
             )
 
-        for i, code in enumerate(self.func_codes):
+        for func_file, code in zip(func_files, self.func_codes):
             if self.backward_re.search(code):
                 # This is backward compat code that will go away in a while
 
@@ -371,7 +373,7 @@ class ExternalCOp(COp):
                 if split[0].strip() != "":
                     raise ValueError(
                         "Stray code before first #section "
-                        f"statement (in file {func_files[i]}): {split[0]}"
+                        f"statement (in file {func_file}): {split[0]}"
                     )
 
                 # Separate the code into the proper sections
@@ -379,7 +381,7 @@ class ExternalCOp(COp):
                 while n < len(split):
                     if split[n] not in self.SECTIONS:
                         raise ValueError(
-                            f"Unknown section type (in file {func_files[i]}): {split[n]}"
+                            f"Unknown section type (in file {func_file}): {split[n]}"
                         )
                     if split[n] not in self.code_sections:
                         self.code_sections[split[n]] = ""
@@ -388,7 +390,7 @@ class ExternalCOp(COp):
 
             else:
                 raise ValueError(
-                    f"No valid section marker was found in file {func_files[i]}"
+                    f"No valid section marker was found in file {func_file}"
                 )
 
     def __get_op_params(self) -> list[tuple[str, Any]]:
@@ -449,7 +451,7 @@ class ExternalCOp(COp):
             code = self.code_sections["init_code_apply"]
 
             define_macros, undef_macros = self.get_c_macros(node, name)
-            return "\n".join(["", define_macros, code, undef_macros])
+            return f"\n{define_macros}\n{code}\n{undef_macros}"
         else:
             return super().c_init_code_apply(node, name)
 
@@ -458,7 +460,7 @@ class ExternalCOp(COp):
             code = self.code_sections["support_code_apply"]
 
             define_macros, undef_macros = self.get_c_macros(node, name)
-            return "\n".join(["", define_macros, code, undef_macros])
+            return f"\n{define_macros}\n{code}\n{undef_macros}"
         else:
             return super().c_support_code_apply(node, name)
 
@@ -467,7 +469,7 @@ class ExternalCOp(COp):
             code = self.code_sections["support_code_struct"]
 
             define_macros, undef_macros = self.get_c_macros(node, name)
-            return "\n".join(["", define_macros, code, undef_macros])
+            return f"\n{define_macros}\n{code}\n{undef_macros}"
         else:
             return super().c_support_code_struct(node, name)
 
@@ -476,7 +478,7 @@ class ExternalCOp(COp):
             code = self.code_sections["cleanup_code_struct"]
 
             define_macros, undef_macros = self.get_c_macros(node, name)
-            return "\n".join(["", define_macros, code, undef_macros])
+            return f"\n{define_macros}\n{code}\n{undef_macros}"
         else:
             return super().c_cleanup_code_struct(node, name)
 
@@ -511,8 +513,6 @@ class ExternalCOp(COp):
         self, node: Apply, name: str, check_input: bool | None = None
     ) -> tuple[str, str]:
         "Construct a pair of C ``#define`` and ``#undef`` code strings."
-        define_template = "#define %s %s"
-        undef_template = "#undef %s"
         define_macros = []
         undef_macros = []
 
@@ -533,28 +533,23 @@ class ExternalCOp(COp):
 
                 vname = variable_names[i]
 
-                macro_items = (f"DTYPE_{vname}", f"npy_{v.type.dtype}")
-                define_macros.append(define_template % macro_items)
-                undef_macros.append(undef_template % macro_items[0])
+                define_macros.append(f"#define DTYPE_{vname} npy_{v.type.dtype}")
+                undef_macros.append(f"#undef DTYPE_{vname}")
 
                 d = np.dtype(v.type.dtype)
 
-                macro_items_2 = (f"TYPENUM_{vname}", d.num)
-                define_macros.append(define_template % macro_items_2)
-                undef_macros.append(undef_template % macro_items_2[0])
+                define_macros.append(f"#define TYPENUM_{vname} {d.num}")
+                undef_macros.append(f"#undef TYPENUM_{vname}")
 
-                macro_items_3 = (f"ITEMSIZE_{vname}", d.itemsize)
-                define_macros.append(define_template % macro_items_3)
-                undef_macros.append(undef_template % macro_items_3[0])
+                define_macros.append(f"#define ITEMSIZE_{vname} {d.itemsize}")
+                undef_macros.append(f"#undef ITEMSIZE_{vname}")
 
         # Generate a macro to mark code as being apply-specific
-        define_macros.append(define_template % ("APPLY_SPECIFIC(str)", f"str##_{name}"))
-        undef_macros.append(undef_template % "APPLY_SPECIFIC")
+        define_macros.append(f"#define APPLY_SPECIFIC(str) str##_{name}")
+        undef_macros.append("#undef APPLY_SPECIFIC")
 
-        define_macros.extend(
-            define_template % (n, v) for n, v in self.__get_op_params()
-        )
-        undef_macros.extend(undef_template % (n,) for n, _ in self.__get_op_params())
+        define_macros.extend(f"#define {n} {v}" for n, v in self.__get_op_params())
+        undef_macros.extend(f"#undef {n}" for n, _ in self.__get_op_params())
 
         return "\n".join(define_macros), "\n".join(undef_macros)
 
@@ -566,9 +561,7 @@ class ExternalCOp(COp):
             def_macros, undef_macros = self.get_c_macros(node, name)
             def_sub, undef_sub = get_sub_macros(sub)
 
-            return "\n".join(
-                ["", def_macros, def_sub, op_code, undef_sub, undef_macros]
-            )
+            return f"\n{def_macros}\n{def_sub}\n{op_code}\n{undef_sub}\n{undef_macros}"
         else:
             return super().c_init_code_struct(node, name, sub)
 
@@ -585,24 +578,15 @@ class ExternalCOp(COp):
                 params = f", {sub['params']}"
 
             # Generate the C code
-            return """
+            return f"""
                 {define_macros}
                 {{
-                  if ({func_name}({func_args}{params}) != 0) {{
-                    {fail}
+                  if ({self.func_name}({self.format_c_function_args(inp, out)}{params}) != 0) {{
+                    {sub['fail']}
                   }}
                 }}
                 {undef_macros}
-                """.format(
-                **dict(
-                    func_name=self.func_name,
-                    fail=sub["fail"],
-                    params=params,
-                    func_args=self.format_c_function_args(inp, out),
-                    define_macros=define_macros,
-                    undef_macros=undef_macros,
-                )
-            )
+                """
         else:
             if "code" in self.code_sections:
                 op_code = self.code_sections["code"]
@@ -611,16 +595,9 @@ class ExternalCOp(COp):
                 def_sub, undef_sub = get_sub_macros(sub)
                 def_io, undef_io = get_io_macros(inp, out)
 
-                return "\n".join(
-                    [
-                        def_macros,
-                        def_sub,
-                        def_io,
-                        op_code,
-                        undef_io,
-                        undef_sub,
-                        undef_macros,
-                    ]
+                return (
+                    f"{def_macros}\n{def_sub}\n{def_io}\n{op_code}"
+                    f"\n{undef_io}\n{undef_sub}\n{undef_macros}"
                 )
             else:
                 raise NotImplementedError()
@@ -634,16 +611,9 @@ class ExternalCOp(COp):
             def_sub, undef_sub = get_sub_macros(sub)
             def_io, undef_io = get_io_macros(inputs, outputs)
 
-            return "\n".join(
-                [
-                    def_macros,
-                    def_sub,
-                    def_io,
-                    op_code,
-                    undef_io,
-                    undef_sub,
-                    undef_macros,
-                ]
+            return (
+                f"{def_macros}\n{def_sub}\n{def_io}\n{op_code}"
+                f"\n{undef_io}\n{undef_sub}\n{undef_macros}"
             )
         else:
             return super().c_code_cleanup(node, name, inputs, outputs, sub)

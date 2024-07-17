@@ -16,18 +16,16 @@ import sys
 import time
 from collections import Counter, defaultdict
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 
 import pytensor
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.link.utils import get_destroy_dependencies
-
-
-if TYPE_CHECKING:
-    from pytensor.graph.fg import FunctionGraph
 
 
 @contextmanager
@@ -37,7 +35,7 @@ def extended_open(filename, mode="r"):
     elif filename == "<stderr>":
         yield sys.stderr
     else:
-        with open(filename, mode=mode) as f:
+        with Path(filename).open(mode=mode) as f:
             yield f
 
 
@@ -755,14 +753,11 @@ class ProfileStats:
                 )
             # Same as before, this I've sacrificed some information making
             # the output more readable
+        percent = sum(f for f, t, a, nd_id, nb_call in atimes[N:])
+        duration = sum(t for f, t, a, nd_id, nb_call in atimes[N:])
         print(
-            "   ... (remaining %i Apply instances account for "
-            "%.2f%%(%.2fs) of the runtime)"
-            % (
-                max(0, len(atimes) - N),
-                sum(f for f, t, a, nd_id, nb_call in atimes[N:]),
-                sum(t for f, t, a, nd_id, nb_call in atimes[N:]),
-            ),
+            f"   ... (remaining {max(0, len(atimes) - N)} Apply instances account for "
+            f"{percent:.2f}%%({duration:.2f}s) of the runtime)",
             file=file,
         )
         print("", file=file)
@@ -1038,7 +1033,7 @@ class ProfileStats:
             executable_nodes = set()
             for var in fgraph.inputs:
                 for c, _ in fgraph.clients[var]:
-                    if c != "output":
+                    if not isinstance(c.op, Output):
                         deps = c.inputs + destroy_dependencies[c]
                         if all(compute_map[v][0] for v in deps):
                             executable_nodes.add(c)
@@ -1166,7 +1161,7 @@ class ProfileStats:
 
                         for var in node.outputs:
                             for c, _ in fgraph.clients[var]:
-                                if c != "output":
+                                if not isinstance(c.op, Output):
                                     deps = c.inputs + destroy_dependencies[c]
                                     if all(compute_map[v][0] for v in deps):
                                         new_exec_nodes.add(c)
@@ -1382,9 +1377,9 @@ class ProfileStats:
         items.sort(key=lambda a: a[1], reverse=True)
         for idx, ((fgraph, node), node_outputs_size) in enumerate(items[:N]):
             code = ["c"] * len(node.outputs)
-            for out, inp in node.op.destroy_map.items():
+            for out in node.op.destroy_map:
                 code[out] = "i"
-            for out, inp in node.op.view_map.items():
+            for out in node.op.view_map:
                 code[out] = "v"
             shapes = str(fct_shapes[fgraph][node])
 
@@ -1449,7 +1444,7 @@ class ProfileStats:
                 file=file,
             )
         if config.profiling__debugprint:
-            fcts = {fgraph for (fgraph, n) in self.apply_time.keys()}
+            fcts = {fgraph for (fgraph, n) in self.apply_time}
             pytensor.printing.debugprint(fcts, print_type=True)
         if self.variable_shape or self.variable_strides:
             self.summary_memory(file, n_apply_to_print)

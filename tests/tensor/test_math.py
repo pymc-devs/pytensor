@@ -80,6 +80,8 @@ from pytensor.tensor.math import (
     isinf,
     isnan,
     isnan_,
+    isneginf,
+    isposinf,
     log,
     log1mexp,
     log1p,
@@ -96,6 +98,7 @@ from pytensor.tensor.math import (
     minimum,
     mod,
     mul,
+    nan_to_num,
     neg,
     neq,
     outer,
@@ -151,7 +154,6 @@ from pytensor.tensor.type import (
     vectors,
     zvector,
 )
-from pytensor.tensor.type_other import NoneConst
 from tests import unittest_tools as utt
 from tests.link.test_link import make_function
 from tests.tensor.utils import (
@@ -764,9 +766,10 @@ class TestMaxAndArgmax:
         Max.debug = 0
         Argmax.debug = 0
 
-    def test_basic(self):
+    @pytest.mark.parametrize("empty_axis", [(), None])
+    def test_empty_axis_scalar(self, empty_axis):
         n = as_tensor_variable(5)
-        v, i = eval_outputs(max_and_argmax(n, axis=()))
+        v, i = eval_outputs(max_and_argmax(n, axis=empty_axis))
         assert v == 5.0
         assert i == 0
         assert i.dtype == "int64"
@@ -774,6 +777,29 @@ class TestMaxAndArgmax:
         assert len(v) == 0
         v = eval_outputs(max_and_argmax(n)[1].shape)
         assert len(v) == 0
+
+    def test_empty_axis_tensor(self):
+        x = np.random.normal(size=(2, 3, 5, 7))
+        axis = ()
+
+        non_axis = tuple(i for i in range(x.ndim) if i not in axis)
+        shape_axis = tuple(x.shape[dim] for dim in axis)
+        shape_non_axis = tuple(x.shape[dim] for dim in non_axis)
+        x_transposed = x.transpose(*axis, *non_axis)
+
+        x_axis_raveled = x_transposed.reshape(
+            np.prod(shape_axis, dtype=int), np.prod(shape_non_axis, dtype=int)
+        )
+        max_x = max_and_argmax(x, axis=axis)[0].eval()
+        argmax_x = max_and_argmax(x, axis=axis)[1].eval()
+
+        raveled_max = x_axis_raveled[
+            argmax_x.ravel(), np.arange(np.prod(shape_non_axis, dtype=int))
+        ]
+        indirect_max = raveled_max.reshape(shape_non_axis)
+
+        np.testing.assert_allclose(max_x, x.max(axis=axis))
+        np.testing.assert_allclose(indirect_max, x.max(axis=axis))
 
     def test_basic_1(self):
         n = as_tensor_variable([1, 2, 3, 2, -6])
@@ -793,8 +819,6 @@ class TestMaxAndArgmax:
             (None, None),
             ([0, 1], None),
             ([1, 0], None),
-            (NoneConst.clone(), None),
-            (constant(0), 0),
         ],
     )
     def test_basic_2(self, axis, np_axis):
@@ -823,8 +847,6 @@ class TestMaxAndArgmax:
             (None, None),
             ([0, 1], None),
             ([1, 0], None),
-            (NoneConst.clone(), None),
-            (constant(0), 0),
         ],
     )
     def test_basic_2_float16(self, axis, np_axis):
@@ -983,7 +1005,7 @@ class TestMaxAndArgmax:
             safe_verify_grad(lambda v: max_and_argmax(v, axis=[i])[1], [data])
 
         # Test grad with multiple axes
-        for i in [[0, 1], [0, 0]]:
+        for i in [[0, 1], [0, 2, 3]]:
             safe_verify_grad(lambda v: max_and_argmax(v, axis=i)[0], [data])
             safe_verify_grad(lambda v: max_and_argmax(v, axis=i)[1], [data])
 
@@ -1039,29 +1061,6 @@ class TestMaxAndArgmax:
 
         assert isinstance(new_node.op, Argmax)
         assert new_node.op.axis == batch_axis
-
-    def test_max_empty_axis(self):
-        x = np.random.normal(size=(2, 3, 5, 7))
-        axis = ()
-
-        non_axis = tuple(i for i in range(x.ndim) if i not in axis)
-        shape_axis = tuple(x.shape[dim] for dim in axis)
-        shape_non_axis = tuple(x.shape[dim] for dim in non_axis)
-        x_transposed = x.transpose(*axis, *non_axis)
-
-        x_axis_raveled = x_transposed.reshape(
-            np.prod(shape_axis, dtype=int), np.prod(shape_non_axis, dtype=int)
-        )
-        max_x = max_and_argmax(x, axis=axis)[0].eval()
-        argmax_x = max_and_argmax(x, axis=axis)[1].eval()
-
-        raveled_max = x_axis_raveled[
-            argmax_x.ravel(), np.arange(np.prod(shape_non_axis, dtype=int))
-        ]
-        indirect_max = raveled_max.reshape(shape_non_axis)
-
-        np.testing.assert_allclose(max_x, x.max(axis=axis))
-        np.testing.assert_allclose(indirect_max, x.max(axis=axis))
 
 
 class TestArgminArgmax:
@@ -1852,8 +1851,8 @@ class TestBitwise:
 class TestAdd:
     def test_complex_all_ops(self):
         for nbits in (64, 128):
-            a = shared(np.ones(3, dtype="complex%i" % nbits) + 0.5j)
-            b = shared(np.ones(3, dtype="complex%i" % nbits) + 1.5j)
+            a = shared(np.ones(3, dtype=f"complex{nbits}") + 0.5j)
+            b = shared(np.ones(3, dtype=f"complex{nbits}") + 1.5j)
             tests = (
                 ("+", lambda x, y: x + y),
                 ("-", lambda x, y: x - y),
@@ -2462,8 +2461,8 @@ class TestArithmeticCast:
         with config.change_flags(cast_policy="numpy+floatX"):
             # We will test all meaningful combinations of
             # scalar and array operations.
-            pytensor_args = list(map(eval, [f"pytensor_{c}" for c in combo]))
-            numpy_args = list(map(eval, [f"numpy_{c}" for c in combo]))
+            pytensor_args = [eval(f"pytensor_{c}") for c in combo]
+            numpy_args = [eval(f"numpy_{c}") for c in combo]
             pytensor_arg_1 = pytensor_args[0](a_type)
             pytensor_arg_2 = pytensor_args[1](b_type)
             pytensor_dtype = op(
@@ -2536,7 +2535,7 @@ class TestArithmeticCast:
                 # a float32 may result in a complex64. As
                 # of 1.9.2. this is still the case so it is
                 # probably by design
-                pytest.skip("Known issue with" "numpy see #761")
+                pytest.skip("Known issue with numpy see #761")
             # In any other situation: something wrong is
             # going on!
             raise AssertionError()
@@ -3419,7 +3418,7 @@ class TestSumMeanMaxMinArgMaxVarReduceAxes:
 def reduce_bitwise_and(x, axis=-1, dtype="int8"):
     identity = np.array((-1,), dtype=dtype)[0]
 
-    shape_without_axis = tuple([s for i, s in enumerate(x.shape) if i != axis])
+    shape_without_axis = tuple(s for i, s in enumerate(x.shape) if i != axis)
     if 0 in shape_without_axis:
         return np.empty(shape=shape_without_axis, dtype=x.dtype)
 
@@ -3478,8 +3477,9 @@ def test_grad_useless_sum():
     old_values_eq_approx = staticmethod(TensorType.values_eq_approx)
     TensorType.values_eq_approx = staticmethod(values_eq_approx_remove_nan)
     try:
-        for test_value in test_values:
-            outputs.append(f(np.array([test_value]).astype("float32")))
+        outputs.extend(
+            f(np.array([test_value]).astype("float32")) for test_value in test_values
+        )
     finally:
         TensorType.values_eq_approx = old_values_eq_approx
 
@@ -3689,3 +3689,46 @@ class TestPolyGamma:
         n = scalar(dtype="int64")
         with pytest.raises(NullTypeGradError):
             grad(polygamma(n, 0.5), wrt=n)
+
+
+def test_infs():
+    x = tensor(shape=(7,))
+
+    f_pos = function([x], isposinf(x))
+    f_neg = function([x], isneginf(x))
+
+    y = np.array([1, np.inf, 2, np.inf, -np.inf, -np.inf, 4]).astype(x.dtype)
+    out_pos = f_pos(y)
+    out_neg = f_neg(y)
+
+    np.testing.assert_allclose(
+        out_pos,
+        [0, 1, 0, 1, 0, 0, 0],
+    )
+    np.testing.assert_allclose(
+        out_neg,
+        [0, 0, 0, 0, 1, 1, 0],
+    )
+
+
+@pytest.mark.parametrize(
+    ["nan", "posinf", "neginf"],
+    [(0, None, None), (0, 0, 0), (0, None, 1000), (3, 1, -1)],
+)
+def test_nan_to_num(nan, posinf, neginf):
+    x = tensor(shape=(7,))
+
+    out = nan_to_num(x, nan, posinf, neginf)
+
+    f = function([x], out)
+
+    y = np.array([1, 2, np.nan, np.inf, -np.inf, 3, 4]).astype(x.dtype)
+    out = f(y)
+
+    posinf = np.finfo(x.real.dtype).max if posinf is None else posinf
+    neginf = np.finfo(x.real.dtype).min if neginf is None else neginf
+
+    np.testing.assert_allclose(
+        out,
+        np.nan_to_num(y, nan=nan, posinf=posinf, neginf=neginf),
+    )

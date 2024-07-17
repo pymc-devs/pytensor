@@ -545,7 +545,7 @@ class Stack(UpdatingVM):
             # Add the outputs that are needed for the in-place updates of the
             # inputs in `self.update_vars`
             output_subset = list(output_subset)
-            for inp, out in self.update_vars.items():
+            for out in self.update_vars.values():
                 out_idx = self.fgraph.outputs.index(out)
                 if out_idx not in output_subset:
                     output_subset.append(out_idx)
@@ -954,8 +954,7 @@ class VMLinker(LocalLinker):
             if k.owner and self.fgraph.clients[k]:
                 ls = []
                 for cl in self.fgraph.clients[k]:
-                    if cl[0] != "output":
-                        ls += cl[0].outputs
+                    ls += cl[0].outputs
                 dependencies[k] += ls
         return dependencies
 
@@ -991,7 +990,7 @@ class VMLinker(LocalLinker):
         for pair in reallocated_info.values():
             storage_map[pair[1]] = storage_map[pair[0]]
 
-        return tuple(reallocated_info.keys())
+        return tuple(reallocated_info)
 
     def make_vm(
         self,
@@ -1056,12 +1055,7 @@ class VMLinker(LocalLinker):
             for v in self.fgraph.inputs + self.fgraph.outputs:
                 vars_idx.setdefault(v, len(vars_idx))
 
-            nodes_idx_inv = {}
-            vars_idx_inv = {}
-            for node, i in nodes_idx.items():
-                nodes_idx_inv[i] = node
-            for var, i in vars_idx.items():
-                vars_idx_inv[i] = var
+            vars_idx_inv = {i: var for var, i in vars_idx.items()}
 
             # put storage_map and compute_map into a int-based scheme
             storage_map_list = [
@@ -1113,7 +1107,7 @@ class VMLinker(LocalLinker):
             for i, node in enumerate(nodes):
                 prereq_var_idxs = []
                 for prereq_node in ords.get(node, []):
-                    prereq_var_idxs.extend([vars_idx[v] for v in prereq_node.outputs])
+                    prereq_var_idxs.extend(vars_idx[v] for v in prereq_node.outputs)
                 prereq_var_idxs = list(set(prereq_var_idxs))
                 prereq_var_idxs.sort()  # TODO: why sort?
                 node_prereqs.append(prereq_var_idxs)
@@ -1271,15 +1265,16 @@ class VMLinker(LocalLinker):
         if self.allow_gc:
             post_thunk_clear = []
             for node in order:
-                clear_after_this_thunk = []
-                for input in node.inputs:
+                clear_after_this_thunk = [
+                    storage_map[input]
+                    for input in node.inputs
                     if (
                         input in computed
                         and input not in fgraph.outputs
                         and node == last_user[input]
                         and input not in reallocated_vars
-                    ):
-                        clear_after_this_thunk.append(storage_map[input])
+                    )
+                ]
                 post_thunk_clear.append(clear_after_this_thunk)
         else:
             post_thunk_clear = None
@@ -1324,9 +1319,7 @@ class VMLinker(LocalLinker):
 
     def __repr__(self):
         args_str = ", ".join(
-            [
-                f"{name}={getattr(self, name)}"
-                for name in ("use_cloop", "lazy", "allow_partial_eval", "allow_gc")
-            ]
+            f"{name}={getattr(self, name)}"
+            for name in ("use_cloop", "lazy", "allow_partial_eval", "allow_gc")
         )
         return f"{type(self).__name__}({args_str})"

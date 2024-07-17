@@ -3,6 +3,7 @@
 import configparser as stdlib_configparser
 import io
 import pickle
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +18,18 @@ def _create_test_config():
         pytensor_cfg=stdlib_configparser.ConfigParser(),
         pytensor_raw_cfg=stdlib_configparser.RawConfigParser(),
     )
+
+
+def test_base_compiledir_str(tmp_path: Path):
+    base_compiledir = tmp_path
+    assert (
+        configdefaults._filter_base_compiledir(str(base_compiledir)) == base_compiledir
+    )
+
+
+def test_compiledir_str(tmp_path: Path):
+    compiledir = tmp_path
+    assert configdefaults._filter_compiledir(str(compiledir)) == compiledir
 
 
 def test_invalid_default():
@@ -138,7 +151,7 @@ class TestConfigTypes:
             cp._apply("gpu123")
         with pytest.raises(ValueError, match='Valid options start with one of "cpu".'):
             cp._apply("notadevice")
-        assert str(cp) == "None (cpu)"
+        assert str(cp) == "unnamed (cpu)"
 
 
 def test_config_context():
@@ -222,7 +235,7 @@ def test_config_pickling():
     buffer.seek(0)
     restored = pickle.load(buffer)
     # ...without a change in the config values
-    for name in root._config_var_dict.keys():
+    for name in root._config_var_dict:
         v_original = getattr(root, name)
         v_restored = getattr(restored, name)
         assert (

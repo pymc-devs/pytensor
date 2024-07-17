@@ -30,6 +30,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable, io_toposort
 from pytensor.graph.destroyhandler import DestroyHandler
 from pytensor.graph.features import AlreadyThere, BadOptimization
+from pytensor.graph.fg import Output
 from pytensor.graph.op import HasInnerGraph, Op
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
 from pytensor.link.basic import Container, LocalLinker
@@ -477,7 +478,7 @@ def _check_inputs(
     """
     destroyed_idx_list = []
     destroy_map = node.op.destroy_map
-    for o_pos, i_pos_list in destroy_map.items():
+    for i_pos_list in destroy_map.values():
         destroyed_idx_list.extend(i_pos_list)
     destroyed_res_list = [node.inputs[i] for i in destroyed_idx_list]
 
@@ -597,7 +598,7 @@ def _check_viewmap(fgraph, node, storage_map):
         # TODO: make sure this is correct
         # According to OB, duplicate inputs are rejected on build graph time
         # if they cause problems. So if they are here it should be ok.
-        for key, val in good_alias.items():
+        for key in good_alias:
             bad_alias.pop(key, None)
         if bad_alias:
             raise BadViewMap(node, oi, outstorage, list(bad_alias.values()))
@@ -628,7 +629,9 @@ def _is_used_in_graph(fgraph, var):
         True if `var` is used by another node in the graph.
 
     """
-    return not (fgraph.clients[var] == [("output", 1)] or fgraph.clients[var] == [])
+    return any(
+        client for client, _ in fgraph.clients[var] if not isinstance(client.op, Output)
+    )
 
 
 def _check_strides_match(a, b, warn_err, op):
@@ -753,10 +756,7 @@ def _get_preallocated_maps(
     # TODO: Sparse? Scalar does not really make sense.
 
     # Do not preallocate memory for outputs that actually work inplace
-    considered_outputs = []
-    for r in node.outputs:
-        if r not in inplace_outs:
-            considered_outputs.append(r)
+    considered_outputs = [r for r in node.outputs if r not in inplace_outs]
 
     # Output storage that was initially present in the storage_map
     if "initial" in prealloc_modes or "ALL" in prealloc_modes:
@@ -977,7 +977,7 @@ def _check_preallocated_output(
     # disable memory checks in that mode, since they were already run.
     try:
         changed_inner_mode = False
-        if isinstance(getattr(node, "op", None), HasInnerGraph):
+        if isinstance(node.op, HasInnerGraph):
             fn = node.op.fn
             if not (fn and hasattr(fn, "maker") and hasattr(fn.maker, "mode")):
                 _logger.warning(f"Expected pytensor function not found in {node.op}.fn")
@@ -1132,18 +1132,14 @@ class _FunctionGraphEvent:
 
     def __init__(self, kind, node, idx=None, reason=None):
         self.kind = kind
-        if node == "output":
-            self.node = "output"
-            self.op = "output"
-        else:
-            self.node = node
-            self.op = node.op
+        self.node = node
+        self.op = node.op
         self.idx = idx
         self.reason = str(reason)
 
     def __str__(self):
         if self.kind == "change":
-            if self.op != "output":
+            if not isinstance(self.op, Output):
                 msg = str(len(self.node.inputs))
             else:
                 msg = ""
@@ -1618,14 +1614,10 @@ class _Linker(LocalLinker):
                             opt = str(reason[0][0])
                             msg = (
                                 f"An optimization (probably {opt}) inserted an "
-                                "apply node that raise an error."
-                                + "\nThe information we have about this "
-                                "optimizations is:"
-                                + str(reason[0][1])
-                                + "\n"
-                                + reason[0][2]
-                                + "\n\nThe original exception: \n"
-                                + str(e)
+                                "apply node that raise an error.\n"
+                                "The information we have about this optimization is:"
+                                f"{reason[0][1]}\n{reason[0][2]}\n"
+                                f"\nThe original exception: \n{e}"
                             )
                             new_e = e.__class__(msg)
                             exc_type, exc_value, exc_trace = sys.exc_info()
@@ -1729,15 +1721,11 @@ class _Linker(LocalLinker):
                                 raise
                             opt = str(reason[0][0])
                             msg = (
-                                f"An optimization (probably {opt}) inserted "
-                                "an apply node that raise an error."
-                                + "\nThe information we have about this "
-                                "optimizations is:"
-                                + str(reason[0][1])
-                                + "\n"
-                                + reason[0][2]
-                                + "\n\nThe original exception: \n"
-                                + str(e)
+                                f"An optimization (probably {opt}) inserted an "
+                                "apply node that raise an error.\n"
+                                "The information we have about this optimization is:"
+                                f"{reason[0][1]}\n{reason[0][2]}\n"
+                                f"\nThe original exception: \n{e}"
                             )
                             new_e = e.__class__(msg)
                             exc_type, exc_value, exc_trace = sys.exc_info()

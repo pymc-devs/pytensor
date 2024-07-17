@@ -1,9 +1,8 @@
 #!/usr/bin/env python
 import numpy
+import versioneer
 from setuptools import Extension, setup
 from setuptools.dist import Distribution
-
-import versioneer
 
 
 dist = Distribution()

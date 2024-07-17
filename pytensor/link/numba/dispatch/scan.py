@@ -70,7 +70,7 @@ def numba_funcify_Scan(op, node, **kwargs):
     outer_in_names_to_vars = {
         (f"outer_in_{i}" if i > 0 else "n_steps"): v for i, v in enumerate(node.inputs)
     }
-    outer_in_names = list(outer_in_names_to_vars.keys())
+    outer_in_names = list(outer_in_names_to_vars)
     outer_in_seqs_names = op.outer_seqs(outer_in_names)
     outer_in_mit_mot_names = op.outer_mitmot(outer_in_names)
     outer_in_mit_sot_names = op.outer_mitsot(outer_in_names)
@@ -373,7 +373,7 @@ def numba_funcify_Scan(op, node, **kwargs):
     inner_out_post_processing_block = "\n".join(inner_out_post_processing_stmts)
 
     inner_out_to_outer_out_stmts = "\n".join(
-        [f"{s} = {d}" for s, d in zip(inner_out_to_outer_in_stmts, inner_output_names)]
+        f"{s} = {d}" for s, d in zip(inner_out_to_outer_in_stmts, inner_output_names)
     )
 
     scan_op_src = f"""
