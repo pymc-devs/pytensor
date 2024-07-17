@@ -370,11 +370,7 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
 
     # Exclude inline_ofg so we can count KroneckerProduct Ops (these are typically annihilated by rewrites)
     f1 = pytensor.function(
-        [A, B],
-        X,
-        mode=get_default_mode()
-        .including("local_lift_through_linalg")
-        .excluding("inline_ofg"),
+        [A, B], X, mode=get_default_mode().including("local_lift_through_linalg")
     )
 
     f2 = pytensor.function(
