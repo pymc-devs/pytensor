@@ -187,9 +187,9 @@ jobs:
           FLOAT32: ${{ matrix.float32 }}
 
       - name: Upload coverage file
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: coverage
+          name: coverage-${{ steps.matrix-id.outputs.id }}
           path: coverage/coverage-${{ steps.matrix-id.outputs.id }}.xml
 
   benchmarks:
@@ -273,10 +273,11 @@ jobs:
           python -m pip install -U coverage>=5.1 coveralls
 
       - name: Download coverage file
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
-          name: coverage
+          pattern: coverage-*
           path: coverage
+          merge-multiple: true
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
