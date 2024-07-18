@@ -39,14 +39,7 @@ def pytorch_funcify_Cholesky(op, **kwargs):
 
 @pytorch_funcify.register(Solve)
 def pytorch_funcify_Solve(op, **kwargs):
-    lower = False
-    if op.assume_a != "gen" and op.lower:
-        lower = True
-
     def solve(a, b):
-        if lower:
-            return torch.linalg.solve(torch.tril(a), b)
-
         return torch.linalg.solve(a, b)
 
     return solve
@@ -64,12 +57,12 @@ def pytorch_funcify_SolveTriangular(op, **kwargs):
     trans = op.trans
 
     def solve_triangular(A, b):
-        A_p = A
-        if trans == 1 or trans == "T":
+        if trans in [1, "T"]:
             A_p = A.T
-
-        if trans == 2 or trans == "C":
-            A_p = A.H
+        elif trans in [2, "C"]:
+            A_p = A.conj().T
+        else:
+            A_p = A
 
         b_p = b
         if b.ndim == 1:
