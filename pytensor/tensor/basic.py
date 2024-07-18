@@ -3753,9 +3753,10 @@ class AllocDiag(OpFromGraph):
 
     __props__ = ("axis1", "axis2")
 
-    def __init__(self, *args, axis1, axis2, **kwargs):
+    def __init__(self, *args, axis1, axis2, offset, **kwargs):
         self.axis1 = axis1
         self.axis2 = axis2
+        self.offset = offset
 
         super().__init__(*args, **kwargs, strict=True)
 
@@ -3775,8 +3776,7 @@ class AllocDiag(OpFromGraph):
             True if the offset is zero (``k = 0``).
         """
 
-        offset = node.inputs[-1]
-        return isinstance(offset, Constant) and offset.data.item() == 0
+        return node.op.offset == 0
 
 
 def alloc_diag(diag, offset=0, axis1=0, axis2=1):
@@ -3785,10 +3785,8 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
     diagonal(alloc_diag(x)) == x
     """
     from pytensor.tensor import set_subtensor
-    from pytensor.tensor.math import maximum
 
     diag = as_tensor_variable(diag)
-    offset = as_tensor_variable(offset)
 
     axis1, axis2 = normalize_axis_tuple((axis1, axis2), ndim=diag.type.ndim + 1)
     if axis1 > axis2:
@@ -3801,8 +3799,8 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
     # Create slice for diagonal in final 2 axes
     idxs = arange(diag.shape[-1])
     diagonal_slice = (slice(None),) * (len(result_shape) - 2) + (
-        idxs + maximum(0, -offset),
-        idxs + maximum(0, offset),
+        idxs + np.maximum(0, -offset),
+        idxs + np.maximum(0, offset),
     )
 
     # Fill in final 2 axes with diag
@@ -3817,11 +3815,8 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
         result = result.transpose(axes)
 
     return AllocDiag(
-        inputs=[diag, offset],
-        outputs=[result],
-        axis1=axis1,
-        axis2=axis2,
-    )(diag, offset)
+        inputs=[diag], outputs=[result], axis1=axis1, axis2=axis2, offset=offset
+    )(diag)
 
 
 def diag(v, k=0):
