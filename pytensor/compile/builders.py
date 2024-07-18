@@ -8,7 +8,6 @@ from typing import Union, cast
 
 from pytensor.compile.function import function
 from pytensor.compile.function.pfunc import rebuild_collect_shared
-from pytensor.compile.mode import optdb
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType, Rop, grad
@@ -24,7 +23,6 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import HasInnerGraph, Op
 from pytensor.graph.replace import clone_replace
-from pytensor.graph.rewriting.basic import in2out, node_rewriter
 from pytensor.graph.utils import MissingInputError
 
 
@@ -575,7 +573,7 @@ class OpFromGraph(Op, HasInnerGraph):
             for inp_grad in input_grads
             if not isinstance(inp_grad.type, DisconnectedType | NullType)
         ]
-        lop_op = type(self)(
+        lop_op = OpFromGraph(
             inputs=inner_inputs + connected_inner_outputs + connected_output_grads,
             outputs=connected_input_grads,
             inline=self.is_inline,
@@ -669,7 +667,7 @@ class OpFromGraph(Op, HasInnerGraph):
             for out_grad in output_grads
             if not isinstance(out_grad.type, DisconnectedType | NullType)
         ]
-        rop_op = type(self)(
+        rop_op = OpFromGraph(
             inputs=inner_inputs + eval_points,
             outputs=filtered_output_grads,
             inline=self.is_inline,
@@ -852,29 +850,3 @@ class OpFromGraph(Op, HasInnerGraph):
         assert len(variables) == len(outputs)
         for output, variable in zip(outputs, variables):
             output[0] = variable
-
-
-@node_rewriter([OpFromGraph])
-def inline_ofg_expansion(fgraph, node):
-    """
-    This optimization expands internal graph of OpFromGraph.
-    Only performed if node.op.is_inline == True
-    Doing so can improve optimization at the cost of compilation speed.
-    """
-    op = node.op
-    if not isinstance(op, OpFromGraph):
-        return False
-    if not op.is_inline:
-        return False
-    return clone_replace(op.inner_outputs, dict(zip(op.inner_inputs, node.inputs)))
-
-
-# We want to run this before the first merge optimizer
-# and before the first scan optimizer.
-optdb.register(
-    "inline_ofg_expansion",
-    in2out(inline_ofg_expansion),
-    "fast_compile",
-    "fast_run",
-    position=-0.01,
-)

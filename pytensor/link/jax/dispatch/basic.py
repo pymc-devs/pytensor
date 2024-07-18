@@ -1,10 +1,13 @@
 import warnings
+from collections.abc import Callable
 from functools import singledispatch
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
+from pytensor.compile import JAX
+from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
@@ -114,3 +117,24 @@ def jax_funcify_ViewOp(op, **kwargs):
         return x
 
     return viewop
+
+
+@jax_funcify.register(OpFromGraph)
+def jax_funcify_OpFromGraph(ofg: OpFromGraph, node=None, **kwargs) -> Callable:
+    _ = kwargs.pop("storage_map", None)
+
+    # Apply inner rewrites
+    JAX.optimizer(ofg.fgraph)
+    fgraph_fn = jax_funcify(ofg.fgraph, **kwargs)
+
+    if len(ofg.fgraph.outputs) == 1:
+
+        def opfromgraph(*inputs):
+            return fgraph_fn(*inputs)[0]
+
+    else:
+
+        def opfromgraph(*inputs):
+            return fgraph_fn(*inputs)
+
+    return opfromgraph
