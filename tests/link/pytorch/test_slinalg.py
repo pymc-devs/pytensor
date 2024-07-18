@@ -1,7 +1,6 @@
 import numpy as np
 import pytest
 
-import pytensor.tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor import slinalg as pt_slinalg
@@ -126,20 +125,5 @@ def test_pytorch_block_diag():
             np.random.normal(size=(3, 3)).astype(config.floatX),
             np.random.normal(size=(2, 2)).astype(config.floatX),
             np.random.normal(size=(4, 4)).astype(config.floatX),
-        ],
-    )
-
-
-@pytest.mark.xfail(reason="Blockwise not implemented")
-def test_pytorch_block_diag_blockwise():
-    A = pt.tensor3("A")
-    B = pt.tensor3("B")
-    out = pt_slinalg.block_diag(A, B)
-    out_fg = FunctionGraph([A, B], [out])
-    compare_pytorch_and_py(
-        out_fg,
-        [
-            np.random.normal(size=(5, 5, 5)).astype(config.floatX),
-            np.random.normal(size=(5, 3, 3)).astype(config.floatX),
         ],
     )
