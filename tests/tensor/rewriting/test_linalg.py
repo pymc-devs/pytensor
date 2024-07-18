@@ -466,7 +466,6 @@ def test_dont_apply_det_diag_rewrite_for_1_1():
     x_diag = pt.eye(1, 1) * x
     y = pt.linalg.det(x_diag)
     f_rewritten = function([x], y, mode="FAST_RUN")
-    pytensor.dprint(f_rewritten)
 
     nodes = f_rewritten.maker.fgraph.apply_nodes
 

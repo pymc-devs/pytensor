@@ -422,32 +422,32 @@ def _find_diag_from_eye_mul(potential_mul_input):
             )
         )
     ]
+
     if not eye_input:
         return None
 
     eye_input = eye_input[0]
+    # If eye_input is an Eye Op (it's not wrapped in a DimShuffle), check it doesn't have an offset
+    if isinstance(eye_input.owner.op, Eye) and (
+        not Eye.is_offset_zero(eye_input.owner)
+        or eye_input.broadcastable[-2:] != (False, False)
+    ):
+        return None
 
-    # If this multiplication came from a batched operation, it will be wrapped in a DimShuffle
+    # Otherwise, an Eye was found but it is wrapped in a DimShuffle (i.e. there was some broadcasting going on).
+    # We have to look inside DimShuffle to decide if the rewrite can be applied
     if isinstance(eye_input.owner.op, DimShuffle) and (
         eye_input.owner.op.is_left_expand_dims
         or eye_input.owner.op.is_right_expand_dims
     ):
         inner_eye = eye_input.owner.inputs[0]
-        if not isinstance(inner_eye.owner.op, Eye):
-            return None
-        # Check if 1's are being put on the main diagonal only (k = 0)
-        # and if the identity matrix is degenerate (column or row matrix)
-        if not (
-            Eye.is_offset_zero(inner_eye.owner)
-            and inner_eye.broadcastable[-1:] != (False, False)
+        # We can only rewrite when the Eye is on the main diagonal (the offset is zero) and the identity isn't
+        # degenerate
+        if not Eye.is_offset_zero(inner_eye.owner) or inner_eye.broadcastable[-2:] != (
+            False,
+            False,
         ):
             return None
-
-    elif not (
-        Eye.is_offset_zero(eye_input.owner)
-        and eye_input.broadcastable[-1:] != (False, False)
-    ):
-        return None
 
     # Get all non Eye inputs (scalars/matrices/vectors)
     non_eye_inputs = list(set(inputs_to_mul) - {eye_input})
@@ -493,7 +493,6 @@ def rewrite_det_diag_to_prod_diag(fgraph, node):
 
     # Check if the input is an elemwise multiply with identity matrix -- this also results in a diagonal matrix
     inputs_or_none = _find_diag_from_eye_mul(inputs)
-
     if inputs_or_none is None:
         return None
 
