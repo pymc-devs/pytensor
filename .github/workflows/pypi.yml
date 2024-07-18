@@ -17,7 +17,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The job to build precompiled pypi wheels.
   make_sdist:
     name: Make SDist
     runs-on: ubuntu-latest
@@ -55,6 +54,31 @@ jobs:
         with:
           path: ./wheelhouse/*.whl
 
+  build_universal_wheel:
+    name: Build universal wheel for Pyodide
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install numpy versioneer wheel
+
+      - name: Build universal wheel
+        run: |
+          PYODIDE=1 python setup.py bdist_wheel --universal
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: universal_wheel
+          path: dist/*.whl
+
   check_dist:
     name: Check dist
     needs: [make_sdist,build_wheels]
@@ -83,12 +107,17 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'release' && github.event.action == 'published'
     steps:
-    - uses: actions/download-artifact@v3
-      with:
-        name: artifact
-        path: dist
+      - uses: actions/download-artifact@v3
+        with:
+          name: artifact
+          path: dist
 
-    - uses: pypa/gh-action-pypi-publish@v1.9.0
-      with:
-        user: __token__
-        password: ${{ secrets.pypi_password }}
+      - uses: actions/download-artifact@v3
+        with:
+          name: universal_wheel
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@v1.9.0
+        with:
+          user: __token__
+          password: ${{ secrets.pypi_password }}
