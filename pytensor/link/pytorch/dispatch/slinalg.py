@@ -64,7 +64,7 @@ def pytorch_funcify_SolveTriangular(op, **kwargs):
         else:
             A_p = A
 
-        b_p = b
+        b_p = pt.atleast_2d(b, left=False)
         if b.ndim == 1:
             b_p = b[:, None]
 
