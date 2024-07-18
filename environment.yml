@@ -42,6 +42,7 @@ dependencies:
   - pydot
   - ipython
   - pymc-sphinx-theme
+  - sphinx-design
   # code style
   - ruff
   # developer tools

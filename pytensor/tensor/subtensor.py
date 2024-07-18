@@ -1073,20 +1073,20 @@ class Subtensor(COp):
 
         def init_entry(entry, depth=0):
             if isinstance(entry, np.integer | int):
-                init_cmds.append("subtensor_spec[%i] = %i;" % (spec_pos(), entry))
+                init_cmds.append(f"subtensor_spec[{spec_pos()}] = {entry};")
                 inc_spec_pos(1)
                 if depth == 0:
                     is_slice.append(0)
             elif isinstance(entry, Type):
                 init_cmds.append(
-                    "subtensor_spec[%i] = %s;" % (spec_pos(), inputs[input_pos()])
+                    f"subtensor_spec[{spec_pos()}] = {inputs[input_pos()]};"
                 )
                 inc_spec_pos(1)
                 inc_input_pos(1)
                 if depth == 0:
                     is_slice.append(0)
             elif entry is None:
-                init_cmds.append("subtensor_spec[%i] = %i;" % (spec_pos(), NONE_CODE))
+                init_cmds.append(f"subtensor_spec[{spec_pos()}] = {NONE_CODE};")
                 inc_spec_pos(1)
                 if depth == 0:
                     is_slice.append(0)
@@ -1137,7 +1137,7 @@ class Subtensor(COp):
 
         """
 
-        rval += """
+        rval += f"""
         // One more argument of the view
         npy_intp xview_offset = 0;
 
@@ -1264,7 +1264,7 @@ class Subtensor(COp):
             inner_ii += 1;
             outer_ii += 1;
         }}
-        """.format(**locals())
+        """
         # print rval
         return rval
 
@@ -1284,19 +1284,19 @@ class Subtensor(COp):
 
         decl = "PyArrayObject * xview = NULL;"
 
-        checkNDim = """
+        checkNDim = f"""
         if (PyArray_NDIM({x}) != {ndim}){{
             PyErr_SetString(PyExc_ValueError,
                                      "Expected {ndim} dimensions input"
                                         );
             {fail}
         }}
-        """.format(**locals())
+        """
 
         get_xview = self.helper_c_code(
             node, name, inputs, outputs, sub, self.idx_list, view_ndim
         )
-        build_view = """
+        build_view = f"""
         //TODO: give this Op a second output so that this view can be cached
         //TODO: alternatively, fix the memory leak on failure
         Py_INCREF(PyArray_DESCR({x}));
@@ -1314,7 +1314,7 @@ class Subtensor(COp):
         {{
             {fail};
         }}
-        """.format(**locals())
+        """
 
         finish_view = f"""
         Py_XDECREF({z});
@@ -1761,7 +1761,7 @@ class IncSubtensor(COp):
 
         copy_of_x = self.copy_of_x(x)
 
-        copy_input_if_necessary = """
+        copy_input_if_necessary = f"""
         if ({inplace})
         {{
             if ({x} != {z})
@@ -1780,7 +1780,7 @@ class IncSubtensor(COp):
                 {fail}
             }}
         }}
-        """.format(**locals())
+        """
 
         # get info needed to make zview: a view of %(z)s
         helper_args = self.get_helper_c_code_args()
@@ -1799,7 +1799,7 @@ class IncSubtensor(COp):
         # Make a view on the output, as we will write into it.
         alloc_zview = self.make_view_array(z, view_ndim)
 
-        build_view = """
+        build_view = f"""
         //TODO: give this Op a second output so that this view can be cached
         //TODO: alternatively, fix the memory leak on failure
         {alloc_zview};
@@ -1807,13 +1807,13 @@ class IncSubtensor(COp):
         {{
             {fail};
         }}
-        """.format(**locals())
+        """
 
         copy_into = self.copy_into("zview", y)
 
         add_to_zview = self.add_to_zview(name, y, fail)
 
-        make_modification = """
+        make_modification = f"""
         if ({op_is_set})
         {{
             if ({copy_into}) // does broadcasting
@@ -1826,7 +1826,7 @@ class IncSubtensor(COp):
         {{
             {add_to_zview}
         }}
-        """.format(**locals())
+        """
         return (
             self.decl_view()
             + copy_input_if_necessary
@@ -1896,7 +1896,7 @@ class IncSubtensor(COp):
 
         """
 
-        return """Py_INCREF(PyArray_DESCR({x}));
+        return f"""Py_INCREF(PyArray_DESCR({x}));
         zview = (PyArrayObject*)PyArray_NewFromDescr(
                 &PyArray_Type,
                 PyArray_DESCR({x}),
@@ -1906,7 +1906,7 @@ class IncSubtensor(COp):
                 PyArray_BYTES({x}) + xview_offset, //PyArray_DATA({x}),
                 PyArray_FLAGS({x}),
                 NULL);
-        """.format(**locals())
+        """
 
     def get_helper_c_code_args(self):
         """
@@ -1939,7 +1939,7 @@ class IncSubtensor(COp):
 
         """
 
-        return """
+        return f"""
             PyArrayObject * add_rval = (PyArrayObject*)PyNumber_InPlaceAdd(
                     (PyObject*)zview, py_{x});
             if (add_rval)
@@ -1952,7 +1952,7 @@ class IncSubtensor(COp):
             {{
                 Py_DECREF(zview);
                 {fail};
-            }}""".format(**locals())
+            }}"""
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]
@@ -2162,7 +2162,7 @@ class AdvancedSubtensor1(COp):
         a_name, i_name = input_names[0], input_names[1]
         output_name = output_names[0]
         fail = sub["fail"]
-        return """
+        return f"""
             PyArrayObject *indices;
             int i_type = PyArray_TYPE({i_name});
             if (i_type != NPY_INTP) {{
@@ -2237,7 +2237,7 @@ class AdvancedSubtensor1(COp):
                         {a_name}, (PyObject*)indices, 0, {output_name}, NPY_RAISE);
             Py_DECREF(indices);
             if ({output_name} == NULL) {fail};
-        """.format(**locals())
+        """
 
     def c_code_cache_version(self):
         return (0, 1, 2)
@@ -2523,8 +2523,10 @@ class AdvancedIncSubtensor1(COp):
         x, y, idx = input_names
         out = output_names[0]
         copy_of_x = self.copy_of_x(x)
+        params = sub["params"]
+        fail = sub["fail"]
 
-        return """
+        return f"""
         PyObject* rval = NULL;
         if ({params}->inplace)
         {{
@@ -2548,17 +2550,7 @@ class AdvancedIncSubtensor1(COp):
             {fail};
         }}
         Py_XDECREF(rval);
-        """.format(
-            **dict(
-                x=x,
-                y=y,
-                idx=idx,
-                out=out,
-                copy_of_x=copy_of_x,
-                params=sub["params"],
-                fail=sub["fail"],
-            )
-        )
+        """
 
     def c_code_cache_version(self):
         return (8,)

@@ -597,12 +597,12 @@ class TensorFromScalar(COp):
         (z,) = outputs
         fail = sub["fail"]
 
-        return """
+        return f"""
             {z} = (PyArrayObject*)PyArray_FromScalar(py_{x}, NULL);
             if({z} == NULL){{
                 {fail};
             }}
-            """.format(**locals())
+            """
 
     def c_code_cache_version(self):
         return (2,)
@@ -646,10 +646,9 @@ class ScalarFromTensor(COp):
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
         (z,) = outputs
-        fail = sub["fail"]
-        return """
+        return f"""
         {z} = ((dtype_{x}*)(PyArray_DATA({x})))[0];
-        """.format(**locals())
+        """
 
     def c_code_cache_version(self):
         return (1,)
@@ -1836,18 +1835,18 @@ class MakeVector(COp):
             assert self.dtype == node.inputs[0].dtype
             out_num = f"PyArray_TYPE({inp[0]})"
 
-        ret = """
+        ret = f"""
         npy_intp dims[1];
         dims[0] = {out_shape};
         if(!{out} || PyArray_DIMS({out})[0] != {out_shape}){{
             Py_XDECREF({out});
             {out} = (PyArrayObject*)PyArray_EMPTY(1, dims, {out_num}, 0);
         }}
-        """.format(**locals())
+        """
         for idx, i in enumerate(inp):
-            ret += """
+            ret += f"""
             *(({out_dtype} *)PyArray_GETPTR1({out}, {idx})) = *(({out_dtype} *) PyArray_DATA({i}));
-            """.format(**locals())
+            """
         return ret
 
     def infer_shape(self, fgraph, node, ishapes):
@@ -2225,7 +2224,7 @@ class Split(COp):
         splits_dtype = node.inputs[2].type.dtype_specs()[1]
         expected_splits_count = self.len_splits
 
-        return """
+        return f"""
         int ndim = PyArray_NDIM({x});
         int axis = (int)(*({axis_dtype}*)PyArray_GETPTR1({axis}, 0));
         int splits_count = PyArray_DIM({splits}, 0);
@@ -2322,7 +2321,7 @@ class Split(COp):
         }}
 
         free(split_dims);
-        """.format(**locals())
+        """
 
 
 class Join(COp):
@@ -2373,10 +2372,9 @@ class Join(COp):
         if self.view == -1:
             return self.__class__.__name__
         else:
-            return "{}{{{}}}".format(
-                self.__class__.__name__,
-                ", ".join(f"{p}={getattr(self, p)!r}" for p in self.__props__),
-            )
+            classname = self.__class__.__name__
+            args = ", ".join(f"{p}={getattr(self, p)!r}" for p in self.__props__)
+            return f"{classname}{{{args}}}"
 
     def __setstate__(self, d):
         self.__dict__.update(d)
@@ -2538,7 +2536,7 @@ class Join(COp):
         copy_inputs_to_list = "\n".join(copy_to_list)
         n = len(tens)
 
-        code = """
+        code = f"""
         int axis = (({adtype} *)PyArray_DATA({axis}))[0];
         PyObject* list = PyList_New({l});
         {copy_inputs_to_list}
@@ -2570,7 +2568,7 @@ class Join(COp):
                 {fail}
             }}
         }}
-        """.format(**locals())
+        """
         return code
 
     def R_op(self, inputs, eval_points):
@@ -4192,18 +4190,14 @@ class AllocEmpty(COp):
         params = sub["params"]
         str = f"npy_intp dims[{nd}];\n"
         for idx, sh in enumerate(shps):
-            str += (
-                "dims[{idx}] ="
-                "((npy_intp)((dtype_{sh}*)"
-                " PyArray_DATA({sh}))[0]);\n".format(**locals())
-            )
+            str += f"dims[{idx}] = ((npy_intp)((dtype_{sh}*) PyArray_DATA({sh}))[0]);\n"
 
         # Validate that the output storage exists
         str += f"if({out}==NULL\n"
         for idx, sh in enumerate(shps):
             str += f"||PyArray_DIMS({out})[{idx}]!=dims[{idx}]"
 
-        str += """){{
+        str += f"""){{
             /* Reference received to invalid output variable.
             Decrease received reference's ref count and allocate new
             output variable */
@@ -4218,7 +4212,7 @@ class AllocEmpty(COp):
                 {fail};
             }}
         }}
-        """.format(**locals())
+        """
         return str
 
     def infer_shape(self, fgraph, node, input_shapes):

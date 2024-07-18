@@ -98,12 +98,12 @@ class Generic(CType, Singleton):
         """
 
     def c_sync(self, name, sub):
-        return """
+        return f"""
         assert(py_{name}->ob_refcnt > 1);
         Py_DECREF(py_{name});
         py_{name} = {name} ? {name} : Py_None;
         Py_INCREF(py_{name});
-        """.format(**locals())
+        """
 
     def c_code_cache_version(self):
         return (1,)
@@ -190,46 +190,47 @@ class CDataType(CType[D]):
         return data
 
     def c_declare(self, name, sub, check_input=True):
-        return """
-        {ctype} {name};
-        """.format(**dict(ctype=self.ctype, name=name))
+        return f"""
+        {self.ctype} {name};
+        """
 
     def c_init(self, name, sub):
         return f"{name} = NULL;"
 
     def c_extract(self, name, sub, check_input=True, **kwargs):
-        return """
-  {name} = ({ctype})PyCapsule_GetPointer(py_{name}, NULL);
+        fail = sub["fail"]
+        return f"""
+  {name} = ({self.ctype})PyCapsule_GetPointer(py_{name}, NULL);
   if ({name} == NULL) {fail}
-        """.format(**dict(name=name, ctype=self.ctype, fail=sub["fail"]))
+        """
 
     def c_sync(self, name, sub):
         freefunc = self.freefunc
         if freefunc is None:
             freefunc = "NULL"
-        s = """
-Py_XDECREF(py_%(name)s);
-if (%(name)s == NULL) {
-  py_%(name)s = Py_None;
-  Py_INCREF(py_%(name)s);
-} else {
-  py_%(name)s = PyCapsule_New((void *)%(name)s, NULL,
+        s = f"""
+Py_XDECREF(py_{name});
+if ({name} == NULL) {{
+  py_{name} = Py_None;
+  Py_INCREF(py_{name});
+}} else {{
+  py_{name} = PyCapsule_New((void *){name}, NULL,
                               _capsule_destructor);
-  if (py_%(name)s != NULL) {
-    if (PyCapsule_SetContext(py_%(name)s, (void *)%(freefunc)s) != 0) {
+  if (py_{name} != NULL) {{
+    if (PyCapsule_SetContext(py_{name}, (void *){freefunc}) != 0) {{
       /* This won't trigger a call to freefunc since it could not be
          set. The error case below will do it. */
-      Py_DECREF(py_%(name)s);
+      Py_DECREF(py_{name});
       /* Signal the error */
-      py_%(name)s = NULL;
-    }
-  }
-}"""
+      py_{name} = NULL;
+    }}
+  }}
+}}"""
         if self.freefunc is not None:
-            s += """
-if (py_%(name)s == NULL) { %(freefunc)s(%(name)s); }
+            s += f"""
+if (py_{name} == NULL) {{ {freefunc}({name}); }}
 """
-        return s % dict(name=name, freefunc=freefunc)
+        return s
 
     def c_cleanup(self, name, sub):
         # No need to do anything here since the CObject/Capsule will
@@ -478,11 +479,8 @@ class EnumType(CType, dict):
         names_to_aliases = {constant_name: "" for constant_name in self}
         for alias in self.aliases:
             names_to_aliases[self.aliases[alias]] = f"({alias})"
-        return "{}<{}>({})".format(
-            type(self).__name__,
-            self.ctype,
-            ", ".join(f"{k}{names_to_aliases[k]}:{self[k]}" for k in sorted(self)),
-        )
+        args = ", ".join(f"{k}{names_to_aliases[k]}:{self[k]}" for k in sorted(self))
+        return f"{type(self).__name__}<{self.ctype}>({args})"
 
     def __getattr__(self, key):
         if key in self:
@@ -575,33 +573,27 @@ class EnumType(CType, dict):
         This C function may be useful to retrieve some runtime information.
         It is available in C code when pytensor flag ``config.cmodule__debug`` is set to ``True``.
         """
-        return """
+        cases = "".join(
+            f"""
+                   case {name}: sprintf(out, "{name}"); break;
+                   """
+            for name in self
+        )
+        return f"""
         #ifdef DEBUG
-        int pytensor_enum_to_string_{cname}({ctype} in, char* out) {{
+        int pytensor_enum_to_string_{self.cname}({self.ctype} in, char* out) {{
             int ret = 0;
             switch(in) {{
                 {cases}
                 default:
-                    PyErr_SetString(PyExc_ValueError, "{classname}:  unknown enum value.");
+                    PyErr_SetString(PyExc_ValueError, "{type(self).__name__}:  unknown enum value.");
                     ret = -1;
                     break;
             }}
             return ret;
         }}
         #endif
-        """.format(
-            **dict(
-                cname=self.cname,
-                ctype=self.ctype,
-                classname=type(self).__name__,
-                cases="".join(
-                    """
-                   case {name}: sprintf(out, "{name}"); break;
-                   """.format(**dict(name=name))
-                    for name in self
-                ),
-            )
-        )
+        """
 
     def c_support_code(self, **kwargs):
         return (
@@ -625,16 +617,17 @@ class EnumType(CType, dict):
         return ""
 
     def c_extract(self, name, sub, check_input=True, **kwargs):
-        return """
+        fail = sub["fail"]
+        return f"""
         if (PyInt_Check(py_{name})) {{
-            {name} = ({ctype})PyInt_AsLong(py_{name});
+            {name} = ({self.ctype})PyInt_AsLong(py_{name});
         }} else {{
-            {name} = ({ctype})PyFloat_AsDouble(py_{name});
+            {name} = ({self.ctype})PyFloat_AsDouble(py_{name});
         }}
         if (PyErr_Occurred()) {{
             {fail}
         }}
-        """.format(**dict(ctype=self.ctype, name=name, fail=sub["fail"]))
+        """
 
     def c_code_cache_version(self):
         return (2, self.ctype, self.cname, tuple(self.items()))
@@ -754,7 +747,14 @@ class CEnumType(EnumList):
         swapped_dict = {v: k for (k, v) in self.items()}
         # swapped_dict's keys are integers.
 
-        return """
+        fail = sub["fail"]
+        cases = "".join(
+            f"""
+           case {i}: {name} = {swapped_dict[i]}; break;
+           """
+            for i in sorted(swapped_dict)
+        )
+        return f"""
         switch(PyInt_AsLong(py_{name})) {{
             {cases}
             default:
@@ -762,19 +762,7 @@ class CEnumType(EnumList):
                 {{{fail}}}
                 break;
         }}
-        """.format(
-            **dict(
-                name=name,
-                cases="".join(
-                    """
-                   case %(i)d: %(name)s = %(constant_cname)s; break;
-                   """
-                    % dict(i=i, name=name, constant_cname=swapped_dict[i])
-                    for i in sorted(swapped_dict)
-                ),
-                fail=sub["fail"],
-            )
-        )
+        """
 
     def c_code_cache_version(self):
         return (1, super().c_code_cache_version())

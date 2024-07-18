@@ -1614,14 +1614,10 @@ class _Linker(LocalLinker):
                             opt = str(reason[0][0])
                             msg = (
                                 f"An optimization (probably {opt}) inserted an "
-                                "apply node that raise an error."
-                                + "\nThe information we have about this "
-                                "optimizations is:"
-                                + str(reason[0][1])
-                                + "\n"
-                                + reason[0][2]
-                                + "\n\nThe original exception: \n"
-                                + str(e)
+                                "apply node that raise an error.\n"
+                                "The information we have about this optimization is:"
+                                f"{reason[0][1]}\n{reason[0][2]}\n"
+                                f"\nThe original exception: \n{e}"
                             )
                             new_e = e.__class__(msg)
                             exc_type, exc_value, exc_trace = sys.exc_info()
@@ -1725,15 +1721,11 @@ class _Linker(LocalLinker):
                                 raise
                             opt = str(reason[0][0])
                             msg = (
-                                f"An optimization (probably {opt}) inserted "
-                                "an apply node that raise an error."
-                                + "\nThe information we have about this "
-                                "optimizations is:"
-                                + str(reason[0][1])
-                                + "\n"
-                                + reason[0][2]
-                                + "\n\nThe original exception: \n"
-                                + str(e)
+                                f"An optimization (probably {opt}) inserted an "
+                                "apply node that raise an error.\n"
+                                "The information we have about this optimization is:"
+                                f"{reason[0][1]}\n{reason[0][2]}\n"
+                                f"\nThe original exception: \n{e}"
                             )
                             new_e = e.__class__(msg)
                             exc_type, exc_value, exc_trace = sys.exc_info()

@@ -451,7 +451,7 @@ class ExternalCOp(COp):
             code = self.code_sections["init_code_apply"]
 
             define_macros, undef_macros = self.get_c_macros(node, name)
-            return "\n".join(["", define_macros, code, undef_macros])
+            return f"\n{define_macros}\n{code}\n{undef_macros}"
         else:
             return super().c_init_code_apply(node, name)
 
@@ -460,7 +460,7 @@ class ExternalCOp(COp):
             code = self.code_sections["support_code_apply"]
 
             define_macros, undef_macros = self.get_c_macros(node, name)
-            return "\n".join(["", define_macros, code, undef_macros])
+            return f"\n{define_macros}\n{code}\n{undef_macros}"
         else:
             return super().c_support_code_apply(node, name)
 
@@ -469,7 +469,7 @@ class ExternalCOp(COp):
             code = self.code_sections["support_code_struct"]
 
             define_macros, undef_macros = self.get_c_macros(node, name)
-            return "\n".join(["", define_macros, code, undef_macros])
+            return f"\n{define_macros}\n{code}\n{undef_macros}"
         else:
             return super().c_support_code_struct(node, name)
 
@@ -478,7 +478,7 @@ class ExternalCOp(COp):
             code = self.code_sections["cleanup_code_struct"]
 
             define_macros, undef_macros = self.get_c_macros(node, name)
-            return "\n".join(["", define_macros, code, undef_macros])
+            return f"\n{define_macros}\n{code}\n{undef_macros}"
         else:
             return super().c_cleanup_code_struct(node, name)
 
@@ -513,8 +513,6 @@ class ExternalCOp(COp):
         self, node: Apply, name: str, check_input: bool | None = None
     ) -> tuple[str, str]:
         "Construct a pair of C ``#define`` and ``#undef`` code strings."
-        define_template = "#define %s %s"
-        undef_template = "#undef %s"
         define_macros = []
         undef_macros = []
 
@@ -535,28 +533,23 @@ class ExternalCOp(COp):
 
                 vname = variable_names[i]
 
-                macro_items = (f"DTYPE_{vname}", f"npy_{v.type.dtype}")
-                define_macros.append(define_template % macro_items)
-                undef_macros.append(undef_template % macro_items[0])
+                define_macros.append(f"#define DTYPE_{vname} npy_{v.type.dtype}")
+                undef_macros.append(f"#undef DTYPE_{vname}")
 
                 d = np.dtype(v.type.dtype)
 
-                macro_items_2 = (f"TYPENUM_{vname}", d.num)
-                define_macros.append(define_template % macro_items_2)
-                undef_macros.append(undef_template % macro_items_2[0])
+                define_macros.append(f"#define TYPENUM_{vname} {d.num}")
+                undef_macros.append(f"#undef TYPENUM_{vname}")
 
-                macro_items_3 = (f"ITEMSIZE_{vname}", d.itemsize)
-                define_macros.append(define_template % macro_items_3)
-                undef_macros.append(undef_template % macro_items_3[0])
+                define_macros.append(f"#define ITEMSIZE_{vname} {d.itemsize}")
+                undef_macros.append(f"#undef ITEMSIZE_{vname}")
 
         # Generate a macro to mark code as being apply-specific
-        define_macros.append(define_template % ("APPLY_SPECIFIC(str)", f"str##_{name}"))
-        undef_macros.append(undef_template % "APPLY_SPECIFIC")
+        define_macros.append(f"#define APPLY_SPECIFIC(str) str##_{name}")
+        undef_macros.append("#undef APPLY_SPECIFIC")
 
-        define_macros.extend(
-            define_template % (n, v) for n, v in self.__get_op_params()
-        )
-        undef_macros.extend(undef_template % (n,) for n, _ in self.__get_op_params())
+        define_macros.extend(f"#define {n} {v}" for n, v in self.__get_op_params())
+        undef_macros.extend(f"#undef {n}" for n, _ in self.__get_op_params())
 
         return "\n".join(define_macros), "\n".join(undef_macros)
 
@@ -568,9 +561,7 @@ class ExternalCOp(COp):
             def_macros, undef_macros = self.get_c_macros(node, name)
             def_sub, undef_sub = get_sub_macros(sub)
 
-            return "\n".join(
-                ["", def_macros, def_sub, op_code, undef_sub, undef_macros]
-            )
+            return f"\n{def_macros}\n{def_sub}\n{op_code}\n{undef_sub}\n{undef_macros}"
         else:
             return super().c_init_code_struct(node, name, sub)
 
@@ -587,24 +578,15 @@ class ExternalCOp(COp):
                 params = f", {sub['params']}"
 
             # Generate the C code
-            return """
+            return f"""
                 {define_macros}
                 {{
-                  if ({func_name}({func_args}{params}) != 0) {{
-                    {fail}
+                  if ({self.func_name}({self.format_c_function_args(inp, out)}{params}) != 0) {{
+                    {sub['fail']}
                   }}
                 }}
                 {undef_macros}
-                """.format(
-                **dict(
-                    func_name=self.func_name,
-                    fail=sub["fail"],
-                    params=params,
-                    func_args=self.format_c_function_args(inp, out),
-                    define_macros=define_macros,
-                    undef_macros=undef_macros,
-                )
-            )
+                """
         else:
             if "code" in self.code_sections:
                 op_code = self.code_sections["code"]
@@ -613,16 +595,9 @@ class ExternalCOp(COp):
                 def_sub, undef_sub = get_sub_macros(sub)
                 def_io, undef_io = get_io_macros(inp, out)
 
-                return "\n".join(
-                    [
-                        def_macros,
-                        def_sub,
-                        def_io,
-                        op_code,
-                        undef_io,
-                        undef_sub,
-                        undef_macros,
-                    ]
+                return (
+                    f"{def_macros}\n{def_sub}\n{def_io}\n{op_code}"
+                    f"\n{undef_io}\n{undef_sub}\n{undef_macros}"
                 )
             else:
                 raise NotImplementedError()
@@ -636,16 +611,9 @@ class ExternalCOp(COp):
             def_sub, undef_sub = get_sub_macros(sub)
             def_io, undef_io = get_io_macros(inputs, outputs)
 
-            return "\n".join(
-                [
-                    def_macros,
-                    def_sub,
-                    def_io,
-                    op_code,
-                    undef_io,
-                    undef_sub,
-                    undef_macros,
-                ]
+            return (
+                f"{def_macros}\n{def_sub}\n{def_io}\n{op_code}"
+                f"\n{undef_io}\n{undef_sub}\n{undef_macros}"
             )
         else:
             return super().c_code_cleanup(node, name, inputs, outputs, sub)

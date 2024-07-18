@@ -322,7 +322,7 @@ class PerformLinker(LocalLinker):
         output_storage=None,
         storage_map=None,
     ):
-        fgraph: Any = self.fgraph
+        fgraph = self.fgraph
         order = self.schedule(fgraph)
         no_recycling = self.no_recycling
 
@@ -347,7 +347,7 @@ class PerformLinker(LocalLinker):
             thunks[-1].outputs = [storage_map[v] for v in node.outputs]
 
         computed, last_user = gc_helper(order)
-        post_thunk_old_storage: Any = [] if self.allow_gc else None
+        post_thunk_old_storage = [] if self.allow_gc else None
 
         for node in order:
             if self.allow_gc:

@@ -243,7 +243,7 @@ class Shape_i(COp):
         return ParamsType(i=pytensor.scalar.basic.int64)
 
     def __str__(self):
-        return "%s{%i}" % (self.__class__.__name__, self.i)
+        return f"{self.__class__.__name__}{{{self.i}}}"
 
     def make_node(self, x):
         if not (isinstance(x, Variable) and hasattr(x.type, "ndim")):
@@ -316,7 +316,7 @@ class Shape_i(COp):
                 op=self,
                 x_pos=0,
                 x=inp[0],
-                comment=("No gradient for the shape of a matrix " "is implemented."),
+                comment="No gradient for the shape of a matrix is implemented.",
             )
         ]
 

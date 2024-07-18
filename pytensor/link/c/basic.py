@@ -87,9 +87,8 @@ class CodeBlock:
         # for that...)
         # we need the label even if cleanup is empty because the
         # behavior block jumps there on failure
-        self.cleanup = (
-            "__label_%(id)i:\n" % sub + cleanup + "\ndouble __DUMMY_%(id)i;\n" % sub
-        )  # % sub
+        id = sub["id"]
+        self.cleanup = f"__label_{id}:\n{cleanup}\ndouble __DUMMY_{id};\n"
 
 
 def failure_code(sub, use_goto=True):
@@ -114,14 +113,16 @@ def failure_code(sub, use_goto=True):
         goto_statement = "goto __label_%(id)i;" % sub
     else:
         goto_statement = ""
-    return """{
-        %(failure_var)s = %(id)i;
-        if (!PyErr_Occurred()) {
+    id = sub["id"]
+    failure_var = sub["failure_var"]
+    return f"""{{
+        {failure_var} = {id};
+        if (!PyErr_Occurred()) {{
             PyErr_SetString(PyExc_RuntimeError,
                 "Unexpected error in an Op's C code. "
                 "No Python exception was set.");
-        }
-        %(goto_statement)s}""" % dict(sub, goto_statement=goto_statement)
+        }}
+        {goto_statement}}}"""
 
 
 def failure_code_init(sub):
@@ -135,17 +136,15 @@ def failure_code_init(sub):
       * failure_var -> must contain a variable name to use for
       the failure code.
     """
-    return (
-        """{
-        if (!PyErr_Occurred()) {
+    id = sub["id"]
+    return f"""{{
+        if (!PyErr_Occurred()) {{
             PyErr_SetString(PyExc_RuntimeError,
                 "Unexpected error in an Op's C code. "
                 "No Python exception was set.");
-            }
-        return %(id)d;
-}"""
-        % sub
-    )
+            }}
+        return {id};
+}}"""
 
 
 def code_gen(blocks):
@@ -219,7 +218,6 @@ def struct_gen(args, struct_builders, blocks, sub):
     """
     struct_decl = ""
     struct_init_head = ""
-    struct_init_tail = ""
     struct_cleanup = ""
 
     for block in struct_builders:
@@ -243,7 +241,6 @@ def struct_gen(args, struct_builders, blocks, sub):
     # decrements the storage's refcount in the destructor
     storage_decref = "\n".join(f"Py_XDECREF(this->{arg});" for arg in args)
 
-    args_names = ", ".join(args)
     args_decl = ", ".join(f"PyObject* {arg}" for arg in args)
 
     # The following code stores the exception data in __ERROR, which
@@ -251,7 +248,8 @@ def struct_gen(args, struct_builders, blocks, sub):
     # that holds the type, the value and the traceback. After storing
     # the error, we return the failure code so we know which code
     # block failed.
-    do_return = """
+    failure_var = sub["failure_var"]
+    do_return = f"""
         if ({failure_var}) {{
             // When there is a failure, this code puts the exception
             // in __ERROR.
@@ -274,15 +272,13 @@ def struct_gen(args, struct_builders, blocks, sub):
         }}
         // The failure code is returned to index what code block failed.
         return {failure_var};
-        """.format(**sub)
-
-    sub = dict(sub)
-    sub.update(locals())
+        """
 
     # TODO: add some error checking to make sure storage_<x> are
     # 1-element lists and __ERROR is a 3-elements list.
 
-    struct_code = """
+    name = sub["name"]
+    struct_code = f"""
     namespace {{
     struct {name} {{
         PyObject* __ERROR;
@@ -326,7 +322,7 @@ def struct_gen(args, struct_builders, blocks, sub):
         }}
     }};
     }}
-    """.format(**sub)
+    """
 
     return struct_code
 
@@ -370,13 +366,10 @@ def get_c_init(fgraph, r, name, sub):
     Wrapper around c_init that initializes py_name to Py_None.
 
     """
-    pre = (
-        ""
-        """
+    pre = f"""
     py_{name} = Py_None;
     {{Py_XINCREF(py_{name});}}
-    """.format(**locals())
-    )
+    """
     return pre + r.type.c_init(name, sub)
 
 
@@ -410,10 +403,10 @@ def get_c_extract(fgraph, r, name, sub):
     else:
         c_extract = r.type.c_extract(name, sub, False)
 
-    pre = """
+    pre = f"""
     py_{name} = PyList_GET_ITEM(storage_{name}, 0);
     {{Py_XINCREF(py_{name});}}
-    """.format(**locals())
+    """
     return pre + c_extract
 
 
@@ -439,10 +432,10 @@ def get_c_extract_out(fgraph, r, name, sub):
     else:
         c_extract = r.type.c_extract_out(name, sub, check_input, check_broadcast=False)
 
-    pre = """
+    pre = f"""
     py_{name} = PyList_GET_ITEM(storage_{name}, 0);
     {{Py_XINCREF(py_{name});}}
-    """.format(**locals())
+    """
     return pre + c_extract
 
 
@@ -451,9 +444,9 @@ def get_c_cleanup(fgraph, r, name, sub):
     Wrapper around c_cleanup that decrefs py_name.
 
     """
-    post = """
+    post = f"""
     {{Py_XDECREF(py_{name});}}
-    """.format(**locals())
+    """
     return r.type.c_cleanup(name, sub) + post
 
 
@@ -462,7 +455,9 @@ def get_c_sync(fgraph, r, name, sub):
     Wrapper around c_sync that syncs py_name with storage.
 
     """
-    return """
+    failure_var = sub["failure_var"]
+    sync = r.type.c_sync(name, sub)
+    return f"""
     if (!{failure_var}) {{
       {sync}
       PyObject* old = PyList_GET_ITEM(storage_{name}, 0);
@@ -470,7 +465,7 @@ def get_c_sync(fgraph, r, name, sub):
       PyList_SET_ITEM(storage_{name}, 0, py_{name});
       {{Py_XDECREF(old);}}
     }}
-    """.format(**dict(sync=r.type.c_sync(name, sub), name=name, **sub))
+    """
 
 
 def apply_policy(fgraph, policy, r, name, sub):
@@ -1661,10 +1656,9 @@ class CLinker(Linker):
             file=code,
         )
         print("  assert(PyTuple_Check(argtuple));", file=code)
-        print("  if (%(n_args)i != PyTuple_Size(argtuple)){ " % locals(), file=code)
+        print(f"  if ({n_args} != PyTuple_Size(argtuple)){{ ", file=code)
         print(
-            '     PyErr_Format(PyExc_TypeError, "Wrong number of arguments, expected %(n_args)i, got %%i", (int)PyTuple_Size(argtuple));'
-            % locals(),
+            f'     PyErr_Format(PyExc_TypeError, "Wrong number of arguments, expected {n_args}, got %%i", (int)PyTuple_Size(argtuple));',
             file=code,
         )
         print("     return NULL;", file=code)

@@ -137,7 +137,7 @@ class AddSD_ccode(_NoPythonCOp):
         inplace = int(self.inplace)
         format = {"csc": 0, "csr": 1}[self.format]
         out_typenum = node.outputs[0].type.dtype_specs()[2]
-        code = """
+        code = f"""
                 Py_XDECREF({z});
                 if (!{inplace}){{
                     if(PyArray_TYPE({y}) != {out_typenum}){{
@@ -179,7 +179,7 @@ class AddSD_ccode(_NoPythonCOp):
                   }}
                  }}
                 }}
-             """.format(**dict(locals(), **sub))
+             """
         return code
 
     def infer_shape(self, fgraph, node, shapes):
@@ -310,7 +310,8 @@ class StructuredDotCSC(COp):
         typenum_a_val = node.inputs[0].type.dtype_specs()[2]  # retrieve dtype number
         typenum_b = node.inputs[4].type.dtype_specs()[2]  # retrieve dtype number
 
-        rval = """
+        fail = sub["fail"]
+        rval = f"""
 
         if (PyArray_NDIM({a_val}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a_val) != 1"); {fail};}}
         if (PyArray_NDIM({a_ind}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a_ind) != 1"); {fail};}}
@@ -430,7 +431,7 @@ class StructuredDotCSC(COp):
                 }}
             }}
         }}
-        """.format(**dict(locals(), **sub))
+        """
 
         return rval
 
@@ -517,7 +518,8 @@ class StructuredDotCSR(COp):
         if node.inputs[3].type.dtype in ("complex64", "complex128"):
             raise NotImplementedError("Complex types are not supported for b")
 
-        return """
+        fail = sub["fail"]
+        return f"""
         if (PyArray_NDIM({a_val}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a_val) != 1"); {fail};}}
         if (PyArray_NDIM({a_ind}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a_ind) != 1"); {fail};}}
         if (PyArray_NDIM({a_ptr}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a_ptr) != 1"); {fail};}}
@@ -609,7 +611,7 @@ class StructuredDotCSR(COp):
             }}
         }}
 
-        """.format(**dict(locals(), **sub))
+        """
 
     def c_code_cache_version(self):
         return (2,)
@@ -756,7 +758,8 @@ class UsmmCscDense(_NoPythonCOp):
 
         inplace = int(self.inplace)
 
-        rval = """
+        fail = sub["fail"]
+        rval = f"""
 
         if (PyArray_NDIM({x_val}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(x_val) != 1"); {fail};}}
         if (PyArray_NDIM({x_ind}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(x_ind) != 1"); {fail};}}
@@ -888,7 +891,7 @@ class UsmmCscDense(_NoPythonCOp):
                 }}
             }}
         }}
-        """.format(**dict(locals(), **sub))
+        """
 
         return rval
 
@@ -985,7 +988,8 @@ class CSMGradC(_NoPythonCOp):
         if node.inputs[3].type.dtype in ("complex64", "complex128"):
             raise NotImplementedError("Complex types are not supported for b_val")
 
-        return """
+        fail = sub["fail"]
+        return f"""
         if (PyArray_NDIM({a_val}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a_val) != 1"); {fail};}}
         if (PyArray_NDIM({a_ind}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a_ind) != 1"); {fail};}}
         if (PyArray_NDIM({a_ptr}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a_ptr) != 1"); {fail};}}
@@ -1079,7 +1083,7 @@ class CSMGradC(_NoPythonCOp):
             }}
         }}
 
-        """.format(**dict(locals(), **sub))
+        """
 
     def c_code_cache_version(self):
         return (3,)
@@ -1165,7 +1169,8 @@ class MulSDCSC(_NoPythonCOp):
         if node.inputs[3].type.dtype in ("complex64", "complex128"):
             raise NotImplementedError("Complex types are not supported for b")
 
-        return """
+        fail = sub["fail"]
+        return f"""
         if (PyArray_NDIM({_b}) != 2) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 2");
             {fail};}}
@@ -1231,7 +1236,7 @@ class MulSDCSC(_NoPythonCOp):
             }}
         }}
 
-        """.format(**dict(locals(), **sub))
+        """
 
     def __str__(self):
         return self.__class__.__name__
@@ -1302,7 +1307,8 @@ class MulSDCSR(_NoPythonCOp):
         if node.inputs[3].type.dtype in ("complex64", "complex128"):
             raise NotImplementedError("Complex types are not supported for b")
 
-        return """
+        fail = sub["fail"]
+        return f"""
         if (PyArray_NDIM({_b}) != 2) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 2");
             {fail};}}
@@ -1368,7 +1374,7 @@ class MulSDCSR(_NoPythonCOp):
             }}
         }}
 
-        """.format(**dict(locals(), **sub))
+        """
 
     def __str__(self):
         return self.__class__.__name__
@@ -1491,7 +1497,8 @@ class MulSVCSR(_NoPythonCOp):
         if node.inputs[3].type.dtype in ("complex64", "complex128"):
             raise NotImplementedError("Complex types are not supported for b")
 
-        return """
+        fail = sub["fail"]
+        return f"""
         if (PyArray_NDIM({_b}) != 1) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 1");
             {fail};
@@ -1553,7 +1560,7 @@ class MulSVCSR(_NoPythonCOp):
             }}
         }}
 
-        """.format(**dict(locals(), **sub))
+        """
 
     def __str__(self):
         return self.__class__.__name__
@@ -1663,7 +1670,8 @@ class StructuredAddSVCSR(_NoPythonCOp):
         if node.inputs[3].type.dtype in ("complex64", "complex128"):
             raise NotImplementedError("Complex types are not supported for b")
 
-        return """
+        fail = sub["fail"]
+        return f"""
         if (PyArray_NDIM({_b}) != 1) {{
             PyErr_SetString(PyExc_NotImplementedError, "rank(b) != 1");
             {fail};
@@ -1732,7 +1740,7 @@ class StructuredAddSVCSR(_NoPythonCOp):
             }}
         }}
 
-        """.format(**dict(locals(), **sub))
+        """
 
     def __str__(self):
         return self.__class__.__name__
@@ -1904,7 +1912,8 @@ class SamplingDotCSR(_NoPythonCOp):
         typenum_zi = TensorType(node.outputs[1].dtype, []).dtype_specs()[2]
         typenum_zp = TensorType(node.outputs[2].dtype, []).dtype_specs()[2]
 
-        rval = """
+        fail = sub["fail"]
+        rval = f"""
         if (PyArray_NDIM({x}) != 2) {{
 PyErr_SetString(PyExc_NotImplementedError, "rank(x) != 2"); {fail};}}
         if (PyArray_NDIM({y}) != 2) {{
@@ -2024,7 +2033,7 @@ PyErr_SetString(PyExc_NotImplementedError, "rank(y) != 2"); {fail};}}
                 }}
             }}
         }}
-        """.format(**dict(locals(), **sub))
+        """
 
         return rval
 

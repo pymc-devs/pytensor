@@ -1382,8 +1382,8 @@ class GetItem2d(Op):
                 isinstance(ind, Variable) and getattr(ind, "ndim", -1) == 0
             ) or np.isscalar(ind):
                 raise NotImplementedError(
-                    "PyTensor has no sparse vector"
-                    + "Use X[a:b, c:d], X[a:b, c:c+1] or X[a:b] instead."
+                    "PyTensor has no sparse vector. "
+                    "Use X[a:b, c:d], X[a:b, c:c+1] or X[a:b] instead."
                 )
             else:
                 raise ValueError(
@@ -3617,7 +3617,8 @@ class StructuredDotGradCSC(COp):
         if node.inputs[3].type.dtype in ("complex64", "complex128"):
             raise NotImplementedError("Complex types are not supported for g_ab")
 
-        return """
+        fail = sub["fail"]
+        return f"""
         if (PyArray_NDIM({_d}) != 2) {{PyErr_SetString(PyExc_NotImplementedError, "rank(d) != 2"); {fail};}}
         if (PyArray_NDIM({_g}) != 2) {{PyErr_SetString(PyExc_NotImplementedError, "rank(g) != 2"); {fail};}}
         if (PyArray_NDIM({_indices}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(indices) != 1"); {fail};}}
@@ -3689,7 +3690,7 @@ class StructuredDotGradCSC(COp):
             }}
         }}
 
-        """.format(**dict(locals(), **sub))
+        """
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]
@@ -3750,7 +3751,8 @@ class StructuredDotGradCSR(COp):
         if node.inputs[3].type.dtype in ("complex64", "complex128"):
             raise NotImplementedError("Complex types are not supported for g_ab")
 
-        return """
+        fail = sub["fail"]
+        return f"""
         if (PyArray_NDIM({_d}) != 2) {{PyErr_SetString(PyExc_NotImplementedError, "rank(d) != 2"); {fail};}}
         if (PyArray_NDIM({_g}) != 2) {{PyErr_SetString(PyExc_NotImplementedError, "rank(g) != 2"); {fail};}}
         if (PyArray_NDIM({_indices}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(indices) != 1"); {fail};}}
@@ -3823,7 +3825,7 @@ class StructuredDotGradCSR(COp):
             }}
         }}
 
-        """.format(**dict(locals(), **sub))
+        """
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]

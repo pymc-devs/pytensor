@@ -1067,7 +1067,7 @@ class Function:
     container = property(
         lambda self: self._container,
         None,  # this property itself is not settable
-        doc=("dictionary-like access to the containers associated with " "Variables"),
+        doc=("dictionary-like access to the containers associated with Variables"),
     )
 
     def free(self):
@@ -1890,11 +1890,7 @@ def get_info_on_inputs(named_inputs, n_unnamed_inputs):
                 )
     else:
         if n_unnamed_inputs == 0:
-            msg = "The function has {} named input{} ({}).".format(
-                n_named_inputs,
-                get_plural(n_named_inputs),
-                ", ".join(named_inputs),
-            )
+            msg = f"The function has {n_named_inputs} named input{get_plural(n_named_inputs)} ({', '.join(named_inputs)})."
         else:
             msg = (
                 f"The function has {n_named_inputs} named input{get_plural(n_named_inputs)} ({', '.join(named_inputs)}), and {n_unnamed_inputs} unnamed "

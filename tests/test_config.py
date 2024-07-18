@@ -3,6 +3,7 @@
 import configparser as stdlib_configparser
 import io
 import pickle
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +18,18 @@ def _create_test_config():
         pytensor_cfg=stdlib_configparser.ConfigParser(),
         pytensor_raw_cfg=stdlib_configparser.RawConfigParser(),
     )
+
+
+def test_base_compiledir_str(tmp_path: Path):
+    base_compiledir = tmp_path
+    assert (
+        configdefaults._filter_base_compiledir(str(base_compiledir)) == base_compiledir
+    )
+
+
+def test_compiledir_str(tmp_path: Path):
+    compiledir = tmp_path
+    assert configdefaults._filter_compiledir(str(compiledir)) == compiledir
 
 
 def test_invalid_default():

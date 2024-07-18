@@ -1851,8 +1851,8 @@ class TestBitwise:
 class TestAdd:
     def test_complex_all_ops(self):
         for nbits in (64, 128):
-            a = shared(np.ones(3, dtype="complex%i" % nbits) + 0.5j)
-            b = shared(np.ones(3, dtype="complex%i" % nbits) + 1.5j)
+            a = shared(np.ones(3, dtype=f"complex{nbits}") + 0.5j)
+            b = shared(np.ones(3, dtype=f"complex{nbits}") + 1.5j)
             tests = (
                 ("+", lambda x, y: x + y),
                 ("-", lambda x, y: x - y),
@@ -2535,7 +2535,7 @@ class TestArithmeticCast:
                 # a float32 may result in a complex64. As
                 # of 1.9.2. this is still the case so it is
                 # probably by design
-                pytest.skip("Known issue with" "numpy see #761")
+                pytest.skip("Known issue with numpy see #761")
             # In any other situation: something wrong is
             # going on!
             raise AssertionError()

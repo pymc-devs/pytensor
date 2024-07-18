@@ -802,20 +802,20 @@ def _node_to_pattern(node):
         if not isinstance(connection_pattern, list):
             raise TypeError(
                 "Op.connection_pattern should return "
-                + f"list of list of bool, but for Op={node.op}"
-                + f"got {connection_pattern} with type {type(connection_pattern)}."
+                f"list of list of bool, but for Op={node.op}"
+                f"got {connection_pattern} with type {type(connection_pattern)}."
             )
         if len(connection_pattern) != len(node.inputs):
             raise ValueError(
                 f"{node.op}.connection_pattern should have {len(node.inputs)}"
-                + f" rows but has {len(connection_pattern)}."
+                f" rows but has {len(connection_pattern)}."
             )
         for ii, output_pattern in enumerate(connection_pattern):
             if not isinstance(output_pattern, list):
                 raise TypeError(
                     f"{node.op}.connection_pattern should return"
-                    + f" a list of lists, but element {int(ii)}"
-                    + f"is {output_pattern} of type {type(output_pattern)}."
+                    f" a list of lists, but element {int(ii)}"
+                    f"is {output_pattern} of type {type(output_pattern)}."
                 )
     else:
         connection_pattern = [[True for output in node.outputs] for ipt in node.inputs]
@@ -1328,7 +1328,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                 elif connected and not actually_connected:
                     msg = f"{node.op}.grad returned DisconnectedType for input {i}."
                     if hasattr(node.op, "connection_pattern"):
-                        msg += " Its connection_pattern method does not" " allow this."
+                        msg += " Its connection_pattern method does not allow this."
                         raise TypeError(msg)
                     else:
                         msg += (
