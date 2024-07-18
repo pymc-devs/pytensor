@@ -362,6 +362,8 @@ class TestBatchedVectorBSolveToMatrixBSolve:
     ids=["block_diag", "kron"],
 )
 def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
+    rng = np.random.default_rng(sum(map(ord, "lift_through_linalg")))
+
     if pytensor.config.floatX.endswith("32"):
         pytest.skip("Test is flaky at half precision")
 
@@ -387,9 +389,7 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
     assert len(f_ops) == 2
     assert len(g_ops) == 1
 
-    test_vals = [
-        np.random.normal(size=(3,) * A.ndim).astype(config.floatX) for _ in range(2)
-    ]
+    test_vals = [rng.normal(size=(3,) * A.ndim).astype(config.floatX) for _ in range(2)]
     test_vals = [x @ np.swapaxes(x, -1, -2) for x in test_vals]
 
     np.testing.assert_allclose(f1(*test_vals), f2(*test_vals), atol=1e-8)
@@ -466,6 +466,8 @@ def test_dont_apply_det_diag_rewrite_for_1_1():
     x_diag = pt.eye(1, 1) * x
     y = pt.linalg.det(x_diag)
     f_rewritten = function([x], y, mode="FAST_RUN")
+    pytensor.dprint(f_rewritten)
+
     nodes = f_rewritten.maker.fgraph.apply_nodes
 
     assert any(isinstance(node.op, Det) for node in nodes)
@@ -475,6 +477,7 @@ def test_dont_apply_det_diag_rewrite_for_1_1():
     x_test_matrix = np.eye(1, 1) * x_test
     det_val = np.linalg.det(x_test_matrix)
     rewritten_val = f_rewritten(x_test)
+
     assert_allclose(
         det_val,
         rewritten_val,
