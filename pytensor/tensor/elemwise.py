@@ -302,10 +302,7 @@ class DimShufflePrinter(Printer):
             return pstate.pprinter.process(r)
         if list(new_order) == list(reversed(range(r.type.ndim))):
             return f"{pstate.pprinter.process(r)}.T"
-        return "DimShuffle{{{}}}({})".format(
-            ", ".join(map(str, new_order)),
-            pstate.pprinter.process(r),
-        )
+        return f"DimShuffle{{{', '.join(str(o) for o in new_order)}}}({pstate.pprinter.process(r)})"
 
     def process(self, r, pstate):
         if r.owner is None:
@@ -929,13 +926,13 @@ class Elemwise(OpenMPOp):
             # We make the output point to the corresponding input and
             # decrease the reference of whatever the output contained
             # prior to this
-            alloc += """
+            alloc += f"""
             if ({oname}) {{
                 Py_XDECREF({oname});
             }}
             {oname} = {iname};
             Py_XINCREF({oname});
-            """.format(**locals())
+            """
             # We alias the scalar variables
             defines += f"#define {oname}_i {iname}_i\n"
             undefs += f"#undef {oname}_i\n"
@@ -958,13 +955,13 @@ class Elemwise(OpenMPOp):
             [f"{s}_i" for s in onames],
             dict(sub, fail=fail),
         )
-        code = """
+        code = f"""
         {{
             {defines}
             {task_code}
             {undefs}
         }}
-        """.format(**locals())
+        """
 
         loop_orders = orders + [list(range(nnested))] * len(real_onames)
         dtypes = idtypes + list(real_odtypes)
@@ -994,19 +991,17 @@ class Elemwise(OpenMPOp):
                         if index != "x":
                             preloops.setdefault(j, "")
                             preloops[j] += (
-                                "%(lv{i})s_iter = ({dtype}*)"
-                                "(PyArray_DATA(%(lv{i})s));\n".format(**locals())
+                                f"%(lv{i})s_iter = ({dtype}*)(PyArray_DATA(%(lv{i})s));\n"
                             ) % sub
                             break
                     else:  # all broadcastable
                         preloops.setdefault(0, "")
                         preloops[0] += (
-                            "%(lv{i})s_iter = ({dtype}*)"
-                            "(PyArray_DATA(%(lv{i})s));\n".format(**locals())
+                            f"%(lv{i})s_iter = ({dtype}*)(PyArray_DATA(%(lv{i})s));\n"
                         ) % sub
 
                 init_array = preloops.get(0, " ")
-                loop = """
+                loop = f"""
                 {{
                   {defines}
                   {init_array}
@@ -1014,7 +1009,7 @@ class Elemwise(OpenMPOp):
                   {task_code}
                   {undefs}
                 }}
-                """.format(**locals())
+                """
             else:
                 loop = cgen.make_loop(
                     loop_orders=loop_orders,
@@ -1074,25 +1069,25 @@ class Elemwise(OpenMPOp):
                     index = ""
                     for x, var in zip(inames + onames, inputs + node.outputs):
                         if not all(s == 1 for s in var.type.shape):
-                            contig += """
+                            contig += f"""
             dtype_{x} * {x}_ptr = (dtype_{x}*) PyArray_DATA({x});
-                            """.format(**locals())
-                            index += """
+                            """
+                            index += f"""
             dtype_{x}& {x}_i = {x}_ptr[i];
-                            """.format(**locals())
+                            """
                         else:
-                            contig += """
+                            contig += f"""
             dtype_{x}& {x}_i = ((dtype_{x}*) PyArray_DATA({x}))[0];
-                            """.format(**locals())
+                            """
                     if self.openmp:
                         contig += f"""#pragma omp parallel for if(n>={int(config.openmp_elemwise_minsize)})
                         """
-                    contig += """
+                    contig += f"""
                     for(int i=0; i<n; i++){{
                         {index}
                         {task_code};
                     }}
-                    """.format(**locals())
+                    """
             if contig is not None:
                 z = list(zip(inames + onames, inputs + node.outputs))
                 all_broadcastable = all(s == 1 for s in var.type.shape)
@@ -1106,13 +1101,13 @@ class Elemwise(OpenMPOp):
                     for arr, var in z
                     if not all_broadcastable
                 )
-                loop = """
+                loop = f"""
             if(({cond1}) || ({cond2})){{
                 {contig}
             }}else{{
                 {loop}
             }}
-            """.format(**locals())
+            """
         return decl, checks, alloc, loop, ""
 
     def c_code(self, node, nodename, inames, onames, sub):
@@ -1568,9 +1563,7 @@ class CAReduce(COp):
         elif identity is None:
             raise TypeError(f"The {self.scalar_op} does not define an identity.")
 
-        task0_decl = (
-            f"{adtype}& {aname}_i = *{aname}_iter;\n" f"{aname}_i = {identity};"
-        )
+        task0_decl = f"{adtype}& {aname}_i = *{aname}_iter;\n{aname}_i = {identity};"
 
         task1_decl = f"{idtype}& {inames[0]}_i = *{inames[0]}_iter;\n"
 

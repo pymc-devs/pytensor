@@ -3,7 +3,7 @@ requires = [
     "setuptools>=59.0.0",
     "cython",
     "numpy>=1.17.0",
-    "versioneer[toml]>=0.28",
+    "versioneer[toml]==0.29",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -125,8 +125,8 @@ line-length = 88
 exclude = ["doc/", "pytensor/_version.py"]
 
 [tool.ruff.lint]
-select = ["C", "E", "F", "I", "UP", "W", "RUF", "PERF", "PTH"]
-ignore = ["C408", "C901", "E501", "E741", "RUF012", "PERF203"]
+select = ["C", "E", "F", "I", "UP", "W", "RUF", "PERF", "PTH", "ISC"]
+ignore = ["C408", "C901", "E501", "E741", "RUF012", "PERF203", "ISC001"]
 
 
 [tool.ruff.lint.isort]
@@ -150,23 +150,17 @@ lines-after-imports = 2
 "tests/sparse/test_sp2.py" = ["E402"]
 "tests/sparse/test_utils.py" = ["E402"]
 "tests/sparse/sandbox/test_sp.py" = ["E402", "F401"]
-"versioneer.py" = ["I"]
 
 
 [tool.mypy]
 python_version = "3.10"
 ignore_missing_imports = true
-no_implicit_optional = true
-check_untyped_defs = false
 strict_equality = true
 warn_redundant_casts = true
 warn_unused_configs = true
 warn_unused_ignores = true
 warn_return_any = true
-warn_no_return = false
 warn_unreachable = true
-show_error_codes = true
-allow_redefinition = false
 files = ["pytensor", "tests"]
 plugins = ["numpy.typing.mypy_plugin"]
 

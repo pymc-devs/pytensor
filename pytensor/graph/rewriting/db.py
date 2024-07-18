@@ -229,10 +229,10 @@ class RewriteDatabaseQuery:
     def __str__(self):
         return (
             "RewriteDatabaseQuery("
-            + f"inc={self.include},ex={self.exclude},"
-            + f"require={self.require},subquery={self.subquery},"
-            + f"position_cutoff={self.position_cutoff},"
-            + f"extra_rewrites={self.extra_rewrites})"
+            f"inc={self.include},ex={self.exclude},"
+            f"require={self.require},subquery={self.subquery},"
+            f"position_cutoff={self.position_cutoff},"
+            f"extra_rewrites={self.extra_rewrites})"
         )
 
     def __setstate__(self, state):

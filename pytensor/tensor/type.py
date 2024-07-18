@@ -475,25 +475,28 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
 
     def c_declare(self, name, sub, check_input=True):
         if check_input:
-            check = """
+            dtype = self.dtype_specs()[1]
+            check = f"""
             typedef {dtype} dtype_{name};
-            """.format(**dict(sub, name=name, dtype=self.dtype_specs()[1]))
+            """
         else:
             check = ""
-        declaration = """
+        declaration = f"""
         PyArrayObject* {name};
-        """.format(**dict(sub, name=name, dtype=self.dtype_specs()[1]))
+        """
 
         return declaration + check
 
     def c_init(self, name, sub):
-        return """
+        return f"""
         {name} = NULL;
-        """.format(**dict(sub, name=name, type_num=self.dtype_specs()[2]))
+        """
 
     def c_extract(self, name, sub, check_input=True, **kwargs):
         if check_input:
-            check = """
+            fail = sub["fail"]
+            type_num = self.dtype_specs()[2]
+            check = f"""
             {name} = NULL;
             if (py_{name} == Py_None) {{
                 // We can either fail here or set {name} to NULL and rely on Ops
@@ -541,28 +544,27 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
                              {type_num}, PyArray_TYPE((PyArrayObject*) py_{name}));
                 {fail}
             }}
-            """.format(**dict(sub, name=name, type_num=self.dtype_specs()[2]))
+            """
         else:
             check = ""
         return (
             check
-            + """
+            + f"""
         {name} = (PyArrayObject*)(py_{name});
         Py_XINCREF({name});
-        """.format(**dict(sub, name=name, type_num=self.dtype_specs()[2]))
+        """
         )
 
     def c_cleanup(self, name, sub):
-        return """
+        return f"""
         if ({name}) {{
             Py_XDECREF({name});
         }}
-        """.format(**locals())
+        """
 
     def c_sync(self, name, sub):
         fail = sub["fail"]
-        type_num = self.dtype_specs()[2]
-        return """
+        return f"""
         {{Py_XDECREF(py_{name});}}
         if (!{name}) {{
             Py_INCREF(Py_None);
@@ -597,7 +599,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         );
             {fail}
         }}
-        """.format(**locals())
+        """
 
     def c_headers(self, **kwargs):
         return ps.get_scalar_type(self.dtype).c_headers(**kwargs)

@@ -170,12 +170,14 @@ def make_alloc(loop_orders, dtype, sub, fortran="0"):
         type = type.replace("PYTENSOR_COMPLEX", "NPY_COMPLEX")
     nd = len(loop_orders[0])
     init_dims = compute_output_dims_lengths("dims", loop_orders, sub)
+    olv = sub["olv"]
+    fail = sub["fail"]
 
     # TODO: it would be interesting to allocate the output in such a
     # way that its contiguous dimensions match one of the input's
     # contiguous dimensions, or the dimension with the smallest
     # stride. Right now, it is allocated to be C_CONTIGUOUS.
-    return """
+    return f"""
     {{
         npy_intp dims[{nd}];
         //npy_intp* dims = (npy_intp*)malloc({nd} * sizeof(npy_intp));
@@ -203,7 +205,7 @@ def make_alloc(loop_orders, dtype, sub, fortran="0"):
             {fail}
         }}
     }}
-    """.format(**dict(locals(), **sub))
+    """
 
 
 def make_loop(loop_orders, dtypes, loop_tasks, sub, openmp=None):
@@ -438,9 +440,7 @@ def make_reordered_loop(
         }} // end loop {int(i)}
         """
 
-    return "\n".join(
-        ["{", order_loops, declare_totals, declare_strides, declare_iter, loop, "}\n"]
-    )
+    return f"{{\n{order_loops}\n{declare_totals}\n{declare_strides}\n{declare_iter}\n{loop}\n}}\n"
 
 
 # print make_declare(((0, 1, 2, 3), ('x', 1, 0, 3), ('x', 'x', 'x', 0)),

@@ -215,40 +215,39 @@ class Argmax(COp):
             if len(self.axis) != 1:
                 raise NotImplementedError()
             # params is only used here for now
-            axis_code = """
+            axis_code = f"""
             axis = {params}->c_axis;
             if(axis > PyArray_NDIM({x})-1 || axis < -PyArray_NDIM({x})){{
                 PyErr_SetString(PyExc_ValueError,
                 "Argmax, bad axis argument");
                 {fail}
             }}
-            """.format(**locals())
-        ret = """
+            """
+        return f"""
         int axis;
 
-        Py_CLEAR(%(argmax)s);//todo pass them as out parameter.
-        %(axis_code)s
+        Py_CLEAR({argmax});//todo pass them as out parameter.
+        {axis_code}
 
-        %(argmax)s = (PyArrayObject*)PyArray_ArgMax(%(x)s, axis, NULL);
-        if(%(argmax)s == NULL){
-            %(fail)s;
-        }
-        if(!PyArray_CheckExact(%(argmax)s)){
-            %(argmax)s = (PyArrayObject*)PyArray_FromAny((PyObject*)%(argmax)s, NULL, 0, 0, NPY_ARRAY_ENSUREARRAY, NULL);
-            if(%(argmax)s == NULL){
-                %(fail)s;
-            }
-        }
-        if(PyArray_TYPE(%(argmax)s) != NPY_INT64){
-            PyObject * tmp = PyArray_Cast(%(argmax)s, NPY_INT64);
-            if (NULL == tmp){
-                %(fail)s;
-            }
-            Py_DECREF(%(argmax)s);
-            %(argmax)s = (PyArrayObject*)tmp;
-        }
+        {argmax} = (PyArrayObject*)PyArray_ArgMax({x}, axis, NULL);
+        if({argmax} == NULL){{
+            {fail};
+        }}
+        if(!PyArray_CheckExact({argmax})){{
+            {argmax} = (PyArrayObject*)PyArray_FromAny((PyObject*){argmax}, NULL, 0, 0, NPY_ARRAY_ENSUREARRAY, NULL);
+            if({argmax} == NULL){{
+                {fail};
+            }}
+        }}
+        if(PyArray_TYPE({argmax}) != NPY_INT64){{
+            PyObject * tmp = PyArray_Cast({argmax}, NPY_INT64);
+            if (NULL == tmp){{
+                {fail};
+            }}
+            Py_DECREF({argmax});
+            {argmax} = (PyArrayObject*)tmp;
+        }}
         """
-        return ret % locals()
 
     def c_code_cache_version(self):
         return (2,)
@@ -1314,7 +1313,8 @@ class Mean(FixedOpCAReduce):
 
     def __str__(self):
         if self.axis is not None:
-            return "Mean{{{}}}".format(", ".join(str(x) for x in self.axis))
+            args = ", ".join(str(x) for x in self.axis)
+            return f"Mean{{{args}}}"
         else:
             return "Mean"
 
@@ -1951,7 +1951,7 @@ def _tensordot_as_dot(a, b, axes, dot, batched):
     if not np.isscalar(axes) and len(axes) != 2:
         raise ValueError(
             "Axes should be an integer or a "
-            "list/tuple of len 2 ({axes} was provided)"
+            f"list/tuple of len 2 ({axes} was provided)"
         )
 
     # if 'axes' is a number of axes to multiply and sum over (trailing axes
@@ -2601,10 +2601,7 @@ class MulWithoutZeros(BinaryScalarOp):
     def c_code(self, node, name, inp, out, sub):
         x, y = inp
         (z,) = out
-        return (
-            "%(z)s = ((%(x)s == 0) ? (%(y)s) : "
-            + "((%(y)s == 0) ? (%(x)s) : ((%(y)s)*(%(x)s))) );"
-        ) % locals()
+        return f"{z} = (({x} == 0) ? ({y}) : (({y} == 0) ? ({x}) : (({y})*({x}))) );"
 
     def c_code_cache_version(self):
         return (1,)

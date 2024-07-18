@@ -322,7 +322,9 @@ class BaseCorrMM(OpenMPOp, _NoPythonOp):
                 )
             width = "-1"
 
-        return """
+        fail = sub["fail"]
+        params = sub["params"]
+        return f"""
     // Mandatory args
     int direction = {params}->direction;  // forward, bprop weights, bprop inputs
 
@@ -614,17 +616,7 @@ class BaseCorrMM(OpenMPOp, _NoPythonOp):
     }}
     assert (out2 == *out);
 
-""".format(
-            **dict(
-                bottom=bottom,
-                weights=weights,
-                top=top,
-                height=height,
-                width=width,
-                fail=sub["fail"],
-                params=sub["params"],
-            )
-        )
+"""
 
 
 class CorrMM(BaseCorrMM):

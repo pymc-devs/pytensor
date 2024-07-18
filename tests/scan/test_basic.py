@@ -177,8 +177,7 @@ class multiple_outputs_numeric_grad:
         for i, (a, b) in enumerate(zip(g_pt, self.gx)):
             if a.shape != b.shape:
                 raise ValueError(
-                    "argument element %i has wrong shape %s"
-                    % (i, str((a.shape, b.shape)))
+                    f"argument element {i} has wrong shape {(a.shape, b.shape)}"
                 )
             errs.append(np.max(multiple_outputs_numeric_grad.abs_rel_err(a, b)))
         if np.all(np.isfinite(errs)):

@@ -1072,7 +1072,8 @@ class ScanArgs:
             for p in self.field_names
             if p.startswith("outer_out")
         ]
-        res = "ScanArgs(\n{})".format(",\n".join(inner_arg_strs))
+        args = ",\n".join(inner_arg_strs)
+        res = f"ScanArgs(\n{args})"
         return res
 
     def __repr__(self):

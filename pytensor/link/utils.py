@@ -351,18 +351,14 @@ def raise_with_op(
         clients = [[c[0] for c in fgraph.clients[var]] for var in node.outputs]
         detailed_err_msg += (
             f"Inputs shapes: {shapes}"
-            + f"\nInputs strides: {strides}"
-            + f"\nInputs values: {scalar_values}"
+            f"\nInputs strides: {strides}"
+            f"\nInputs values: {scalar_values}"
         )
         if verbosity == "high":
-            detailed_err_msg += "\nInputs type_num: {}".format(
-                str(
-                    [
-                        getattr(getattr(i[0], "dtype", ""), "num", "")
-                        for i in thunk.inputs
-                    ]
-                )
-            )
+            inpts = [
+                getattr(getattr(i[0], "dtype", ""), "num", "") for i in thunk.inputs
+            ]
+            detailed_err_msg += f"\nInputs type_num: {inpts}"
 
         detailed_err_msg += f"\nOutputs clients: {clients}\n"
     else:

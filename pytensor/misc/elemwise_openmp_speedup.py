@@ -11,7 +11,7 @@ from pytensor.configdefaults import config
 console_encoding = getpreferredencoding()
 
 parser = OptionParser(
-    usage="%prog <options>\n Compute time for" " fast and slow elemwise operations"
+    usage="%prog <options>\n Compute time for fast and slow elemwise operations"
 )
 parser.add_option(
     "-N",

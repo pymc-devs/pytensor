@@ -31,7 +31,7 @@ for letter in letters:
         if len(shape[1]) < 6 or len(set(shape[1])) > 1:
             broadcastable_str = str(shape[1])
         else:
-            broadcastable_str = '(%s,) * %d' % (str(shape[1][0]), len(shape[1]))
+            broadcastable_str = f'({shape[1][0]},) * {len(shape[1])}'
         print('%s%-10s  %-10s  %-4s %-15s  %-20s' %(
                 letter[0], shape[0], letter[1], len(shape[1]), s, broadcastable_str
                 ))

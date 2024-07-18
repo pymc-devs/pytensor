@@ -245,10 +245,9 @@ class MetaType(ABCMeta):
                 else:
 
                     def __str__(self):
-                        return "{}{{{}}}".format(
-                            self.__class__.__name__,
-                            ", ".join(f"{p}={getattr(self, p)!r}" for p in props),
-                        )
+                        classname = self.__class__.__name__
+                        args = ", ".join(f"{p}={getattr(self, p)!r}" for p in props)
+                        return f"{classname}{{{args}}}"
 
                 dct["__str__"] = __str__
 

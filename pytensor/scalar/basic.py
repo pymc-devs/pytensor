@@ -12,7 +12,7 @@ you probably want to use pytensor.tensor.[c,z,f,d,b,w,i,l,]scalar!
 
 import builtins
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from copy import copy
 from itertools import chain
 from textwrap import dedent
@@ -59,7 +59,7 @@ class IntegerDivisionError(Exception):
     """
 
 
-def upcast(dtype, *dtypes):
+def upcast(dtype, *dtypes) -> str:
     # This tries to keep data in floatX or lower precision, unless we
     # explicitly request a higher precision datatype.
     keep_float32 = [
@@ -464,33 +464,32 @@ class ScalarType(CType, HasDataType, HasShape):
             raise NotImplementedError("float16")
         specs = self.dtype_specs()
         if check_input:
-            pre = """
+            fail = sub["fail"]
+            dtype = specs[1]
+            pyarr_type = f"Py{specs[2]}ArrType_Type"
+            pre = f"""
             if (!PyObject_TypeCheck(py_{name}, &{pyarr_type}))
             {{
                 PyErr_Format(PyExc_ValueError,
                     "Scalar check failed ({dtype})");
                 {fail}
             }}
-            """.format(
-                **dict(
-                    sub,
-                    name=name,
-                    dtype=specs[1],
-                    pyarr_type=f"Py{specs[2]}ArrType_Type",
-                )
-            )
+            """
         else:
             pre = ""
         return (
             pre
-            + """
+            + f"""
         PyArray_ScalarAsCtype(py_{name}, &{name});
-        """.format(**dict(sub, name=name))
+        """
         )
 
     def c_sync(self, name, sub):
         specs = self.dtype_specs()
-        return """
+        fail = sub["fail"]
+        dtype = specs[1]
+        cls = specs[2]
+        return f"""
         Py_XDECREF(py_{name});
         py_{name} = PyArrayScalar_New({cls});
         if (!py_{name})
@@ -502,7 +501,7 @@ class ScalarType(CType, HasDataType, HasShape):
             {fail}
         }}
         PyArrayScalar_ASSIGN(py_{name}, {cls}, {name});
-        """.format(**dict(sub, name=name, dtype=specs[1], cls=specs[2]))
+        """
 
     def c_cleanup(self, name, sub):
         return ""
@@ -899,31 +898,31 @@ complexs64 = apply_across_args(complex64)
 complexs128 = apply_across_args(complex128)
 
 
-def upcast_out(*types):
+def upcast_out(*types) -> tuple[ScalarType]:
     dtype = ScalarType.upcast(*types)
     return (get_scalar_type(dtype),)
 
 
-def upcast_out_nobool(*types):
+def upcast_out_nobool(*types) -> tuple[ScalarType]:
     type = upcast_out(*types)
     if type[0] == bool:
         raise TypeError("bool output not supported")
     return type
 
 
-def upcast_out_min8(*types):
+def upcast_out_min8(*types) -> tuple[ScalarType]:
     type = upcast_out(*types)
     if type[0] == bool:
         return (int8,)
     return type
 
 
-def upgrade_to_float(*types):
+def upgrade_to_float(*types) -> tuple[ScalarType]:
     """
     Upgrade any int types to float32 or float64 to avoid losing precision.
 
     """
-    conv: Mapping[type, type] = {
+    conv: dict[ScalarType, ScalarType] = {
         bool: float32,
         int8: float32,
         int16: float32,
@@ -934,12 +933,11 @@ def upgrade_to_float(*types):
         uint32: float64,
         uint64: float64,
     }
-    return (
-        get_scalar_type(ScalarType.upcast(*[conv.get(type, type) for type in types])),
-    )
+    up = ScalarType.upcast(*[conv.get(type, type) for type in types])
+    return (get_scalar_type(up),)
 
 
-def upgrade_to_float64(*types):
+def upgrade_to_float64(*types) -> tuple[ScalarType]:
     """
     Upgrade any int and float32 to float64 to do as SciPy.
 
@@ -947,29 +945,29 @@ def upgrade_to_float64(*types):
     return (get_scalar_type("float64"),)
 
 
-def same_out(type):
+def same_out(type: ScalarType) -> tuple[ScalarType]:
     return (type,)
 
 
-def same_out_nobool(type):
+def same_out_nobool(type: ScalarType) -> tuple[ScalarType]:
     if type == bool:
         raise TypeError("bool input not supported")
     return (type,)
 
 
-def same_out_min8(type):
+def same_out_min8(type: ScalarType) -> tuple[ScalarType]:
     if type == bool:
         return (int8,)
     return (type,)
 
 
-def upcast_out_no_complex(*types):
+def upcast_out_no_complex(*types) -> tuple[ScalarType]:
     if any(type in complex_types for type in types):
         raise TypeError("complex type are not supported")
     return (get_scalar_type(dtype=ScalarType.upcast(*types)),)
 
 
-def same_out_float_only(type):
+def same_out_float_only(type) -> tuple[ScalarType]:
     if type not in float_types:
         raise TypeError("only float type are supported")
     return (type,)
@@ -1180,10 +1178,9 @@ class ScalarOp(COp):
                 not in ("name", "_op_use_c_code", "bool", "output_types_preference")
             ]
             if param:
-                return "{}{{{}}}".format(
-                    self.__class__.__name__,
-                    ", ".join(f"{k}={v}" for k, v in param),
-                )
+                classname = self.__class__.__name__
+                args = ", ".join(f"{k}={v}" for k, v in param)
+                return f"{classname}{{{args}}}"
             else:
                 return self.__class__.__name__
 
@@ -1756,7 +1753,7 @@ class ScalarMaximum(BinaryScalarOp):
         if any(i.type in complex_types for i in node.inputs):
             raise NotImplementedError()
         # Test for both y>x and x>=y to detect NaN
-        return f"{z} = (({y})>({x})? ({y}): " f'(({x})>=({y})? ({x}): nan("")));'
+        return f'{z} = (({y})>({x})? ({y}): (({x})>=({y})? ({x}): nan("")));'
 
     def L_op(self, inputs, outputs, gout):
         (x, y) = inputs
@@ -1798,7 +1795,7 @@ class ScalarMinimum(BinaryScalarOp):
         (z,) = outputs
         if any(i.type in complex_types for i in node.inputs):
             raise NotImplementedError()
-        return f"{z} = (({y})<({x})? ({y}): " f'(({x})<=({y})? ({x}): nan("")));'
+        return f'{z} = (({y})<({x})? ({y}): (({x})<=({y})? ({x}): nan("")));'
 
     def L_op(self, inputs, outputs, gout):
         (x, y) = inputs

@@ -133,7 +133,7 @@ A good place to start contributing is by looking through the issues
 
 
 .. |Project Name| replace:: PyTensor
-.. |Tests Status| image:: https://github.com/pymc-devs/pytensor/workflows/Tests/badge.svg
-  :target: https://github.com/pymc-devs/pytensor/actions?query=workflow%3ATests
+.. |Tests Status| image:: https://github.com/pymc-devs/pytensor/workflows/Tests/badge.svg?branch=main
+  :target: https://github.com/pymc-devs/pytensor/actions?query=workflow%3ATests+branch%3Amain
 .. |Coverage| image:: https://codecov.io/gh/pymc-devs/pytensor/branch/main/graph/badge.svg?token=WVwr8nZYmc
   :target: https://codecov.io/gh/pymc-devs/pytensor

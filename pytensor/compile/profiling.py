@@ -753,14 +753,11 @@ class ProfileStats:
                 )
             # Same as before, this I've sacrificed some information making
             # the output more readable
+        percent = sum(f for f, t, a, nd_id, nb_call in atimes[N:])
+        duration = sum(t for f, t, a, nd_id, nb_call in atimes[N:])
         print(
-            "   ... (remaining %i Apply instances account for "
-            "%.2f%%(%.2fs) of the runtime)"
-            % (
-                max(0, len(atimes) - N),
-                sum(f for f, t, a, nd_id, nb_call in atimes[N:]),
-                sum(t for f, t, a, nd_id, nb_call in atimes[N:]),
-            ),
+            f"   ... (remaining {max(0, len(atimes) - N)} Apply instances account for "
+            f"{percent:.2f}%%({duration:.2f}s) of the runtime)",
             file=file,
         )
         print("", file=file)

@@ -1744,9 +1744,7 @@ def std_lib_dirs_and_libs() -> tuple[list[str], ...] | None:
                 if not os.path.exists(os.path.join(libdir, f)):
                     print(
                         "Your Python version is from Canopy. "
-                        + "You need to install the package '"
-                        + lib
-                        + "' from Canopy package manager."
+                        f"You need to install the package '{lib}' from Canopy package manager."
                     )
             libdirs = [
                 # Used in older Canopy
@@ -1763,9 +1761,7 @@ def std_lib_dirs_and_libs() -> tuple[list[str], ...] | None:
                 ):
                     print(
                         "Your Python version is from Canopy. "
-                        + "You need to install the package '"
-                        + lib
-                        + "' from Canopy package manager."
+                        f"You need to install the package '{lib}' from Canopy package manager."
                     )
             python_lib_dirs.insert(0, libdir)
         std_lib_dirs_and_libs.data = [libname], python_lib_dirs
@@ -1966,14 +1962,14 @@ class Compiler:
             return False
 
         code = (
-            """
+            f"""
         {preamble}
         int main(int argc, char** argv)
         {{
             {body}
             return 0;
         }}
-        """.format(**locals())
+        """
         ).encode()
         return cls._try_compile_tmp(
             code,

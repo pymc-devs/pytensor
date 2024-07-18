@@ -68,7 +68,7 @@ class CpuContiguous(COp):
     def c_code(self, node, name, inames, onames, sub):
         (x,) = inames
         (y,) = onames
-        code = """
+        code = f"""
             if (!PyArray_CHKFLAGS({x}, NPY_ARRAY_C_CONTIGUOUS)){{
                 // check to see if output is contiguous first
                 if ({y} != NULL &&
@@ -86,7 +86,7 @@ class CpuContiguous(COp):
                 Py_XDECREF({y});
                 {y} = {x};
             }}
-            """.format(**locals())
+            """
         return code
 
     def c_code_cache_version(self):
@@ -161,13 +161,13 @@ class SearchsortedOp(COp):
     def c_init_code_struct(self, node, name, sub):
         side = sub["params"]
         fail = sub["fail"]
-        return """
+        return f"""
             PyObject* tmp_{name} = PyUnicode_FromString("right");
             if (tmp_{name} == NULL)
                 {fail};
             right_{name} = PyUnicode_Compare({side}, tmp_{name});
             Py_DECREF(tmp_{name});
-        """.format(**locals())
+        """
 
     def c_code(self, node, name, inames, onames, sub):
         sorter = None
@@ -180,7 +180,7 @@ class SearchsortedOp(COp):
         (z,) = onames
         fail = sub["fail"]
 
-        return """
+        return f"""
             Py_XDECREF({z});
             {z} = (PyArrayObject*) PyArray_SearchSorted({x}, (PyObject*) {v},
                                                           right_{name} ? NPY_SEARCHLEFT : NPY_SEARCHRIGHT, (PyObject*) {sorter});
@@ -191,7 +191,7 @@ class SearchsortedOp(COp):
                 Py_XDECREF({z});
                 {z} = (PyArrayObject*) tmp;
             }}
-        """.format(**locals())
+        """
 
     def c_code_cache_version(self):
         return (2,)
@@ -348,11 +348,10 @@ class CumOp(COp):
     def c_code(self, node, name, inames, onames, sub):
         (x,) = inames
         (z,) = onames
-        axis = self.axis
         fail = sub["fail"]
         params = sub["params"]
 
-        code = """
+        code = f"""
                 int axis = {params}->c_axis;
                 if (axis == 0 && PyArray_NDIM({x}) == 1)
                     axis = NPY_MAXDIMS;
@@ -389,7 +388,7 @@ class CumOp(COp):
                     // Because PyArray_CumSum/CumProd returns a newly created reference on t.
                     Py_XDECREF(t);
                 }}
-            """.format(**locals())
+            """
 
         return code
 
