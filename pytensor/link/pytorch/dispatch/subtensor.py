@@ -20,19 +20,12 @@ def pytorch_funcify_Subtensor(op, node, **kwargs):
         new_indices = []
 
         for i in indices:
-            new_start, new_step, new_stop = None, None, None
             if isinstance(i, slice):
-                if i.start:
-                    new_start = i.start.item()
-                if i.step:
-                    new_step = i.step.item()
-                    if new_step < 0:
-                        raise NotImplementedError(
-                            "Negative step sizes are not supported in Pytorch"
-                        )
-                if i.stop:
-                    new_stop = i.stop.item()
-                new_indices.append(slice(new_start, new_stop, new_step))
+                if i.step and i.step < 0:
+                    raise NotImplementedError(
+                        "Negative step sizes are not supported in Pytorch"
+                    )
+                new_indices.append(i)
             else:
                 new_indices.append(i.tolist())
 
