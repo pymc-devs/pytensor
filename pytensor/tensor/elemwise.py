@@ -182,13 +182,11 @@ class DimShuffle(ExternalCOp):
         self.drop = drop
 
         input_ndim = len(input_broadcastable)
-
-        self.is_left_expand_dims = "x" in new_order and (
-            input_ndim == 0 or new_order[:input_ndim] == list(range(input_ndim))
-        )
-
-        self.is_right_expand_dims = "x" in new_order and (
+        self.is_left_expand_dims = self.augment and (
             input_ndim == 0 or new_order[-input_ndim:] == list(range(input_ndim))
+        )
+        self.is_right_expand_dims = self.augment and new_order[:input_ndim] == list(
+            range(input_ndim)
         )
 
         if self.inplace:
