@@ -21,6 +21,7 @@ import pytensor
 import pytensor.scalar.sharedvar
 from pytensor import compile, config, printing
 from pytensor import scalar as ps
+from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType, grad_undefined
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Apply, Constant, Variable, equal_computations
@@ -1333,6 +1334,25 @@ class Eye(Op):
 
     def grad(self, inp, grads):
         return [grad_undefined(self, i, inp[i]) for i in range(3)]
+
+    @staticmethod
+    def is_offset_zero(node) -> bool:
+        """
+        Test if an Eye Op has a diagonal offset of zero
+
+        Parameters
+        ----------
+        node
+            Eye node to test
+
+        Returns
+        -------
+        is_offset_zero: bool
+            True if the offset is zero (``k = 0``).
+        """
+
+        offset = node.inputs[-1]
+        return isinstance(offset, Constant) and offset.data.item() == 0
 
 
 def eye(n, m=None, k=0, dtype=None):
@@ -3749,109 +3769,37 @@ def trace(a, offset=0, axis1=0, axis2=1):
     return diagonal(a, offset=offset, axis1=axis1, axis2=axis2).sum(-1)
 
 
-class AllocDiag(Op):
-    """An `Op` that copies a vector to the diagonal of a zero-ed matrix."""
+class AllocDiag(OpFromGraph):
+    """
+    Wrapper Op for alloc_diag graphs
+    """
 
-    __props__ = ("offset", "axis1", "axis2")
+    __props__ = ("axis1", "axis2")
 
-    def __init__(self, offset=0, axis1=0, axis2=1):
-        """
-        Parameters
-        ----------
-        offset: int
-            Offset of the diagonal from the main diagonal defined by `axis1`
-            and `axis2`. Can be positive or negative.  Defaults to main
-            diagonal (i.e. 0).
-        axis1: int
-            Axis to be used as the first axis of the 2-D sub-arrays to which
-            the diagonals will be allocated.  Defaults to first axis (i.e. 0).
-        axis2: int
-            Axis to be used as the second axis of the 2-D sub-arrays to which
-            the diagonals will be allocated.  Defaults to second axis (i.e. 1).
-        """
-        warnings.warn(
-            "AllocDiag is deprecated. Use `alloc_diag` instead",
-            FutureWarning,
-        )
-        self.offset = offset
-        if axis1 < 0 or axis2 < 0:
-            raise NotImplementedError("AllocDiag does not support negative axis")
-        if axis1 == axis2:
-            raise ValueError("axis1 and axis2 cannot be the same")
+    def __init__(self, *args, axis1, axis2, offset, **kwargs):
         self.axis1 = axis1
         self.axis2 = axis2
+        self.offset = offset
 
-    def make_node(self, diag):
-        diag = as_tensor_variable(diag)
-        if diag.type.ndim < 1:
-            raise ValueError(
-                "AllocDiag needs an input with 1 or more dimensions", diag.type
-            )
-        return Apply(
-            self,
-            [diag],
-            [diag.type.clone(shape=(None,) * (diag.ndim + 1))()],
-        )
+        super().__init__(*args, **kwargs, strict=True)
 
-    def perform(self, node, inputs, outputs):
-        (x,) = inputs
-        (z,) = outputs
+    @staticmethod
+    def is_offset_zero(node) -> bool:
+        """
+        Test if an AllocDiag Op has a diagonal offset of zero
 
-        axis1 = np.minimum(self.axis1, self.axis2)
-        axis2 = np.maximum(self.axis1, self.axis2)
-        offset = self.offset
+        Parameters
+        ----------
+        node
+            AllocDiag node to test
 
-        # Create array with one extra dimension for resulting matrix
-        result_shape = x.shape[:-1] + (x.shape[-1] + abs(offset),) * 2
-        result = np.zeros(result_shape, dtype=x.dtype)
+        Returns
+        -------
+        is_offset_zero: bool
+            True if the offset is zero (``k = 0``).
+        """
 
-        # Create slice for diagonal in final 2 axes
-        idxs = np.arange(x.shape[-1])
-        diagonal_slice = (len(result_shape) - 2) * [slice(None)] + [
-            idxs + np.maximum(0, -offset),
-            idxs + np.maximum(0, offset),
-        ]
-
-        # Fill in final 2 axes with x
-        result[tuple(diagonal_slice)] = x
-
-        if len(x.shape) > 1:
-            # Re-order axes so they correspond to diagonals at axis1, axis2
-            axes = list(range(len(x.shape[:-1])))
-            last_idx = axes[-1]
-            axes = axes[:axis1] + [last_idx + 1] + axes[axis1:]
-            axes = axes[:axis2] + [last_idx + 2] + axes[axis2:]
-            result = result.transpose(axes)
-
-        z[0] = result
-
-    def grad(self, inputs, gout):
-        (gz,) = gout
-        return [diagonal(gz, offset=self.offset, axis1=self.axis1, axis2=self.axis2)]
-
-    def infer_shape(self, fgraph, nodes, shapes):
-        (x_shape,) = shapes
-        axis1 = np.minimum(self.axis1, self.axis2)
-        axis2 = np.maximum(self.axis1, self.axis2)
-
-        result_shape = list(x_shape[:-1])
-        diag_shape = x_shape[-1] + abs(self.offset)
-        result_shape = result_shape[:axis1] + [diag_shape] + result_shape[axis1:]
-        result_shape = result_shape[:axis2] + [diag_shape] + result_shape[axis2:]
-        return [tuple(result_shape)]
-
-    def __setstate__(self, state):
-        if "view_map" in state:
-            del state["view_map"]
-
-        self.__dict__.update(state)
-
-        if "offset" not in state:
-            self.offset = 0
-        if "axis1" not in state:
-            self.axis1 = 0
-        if "axis2" not in state:
-            self.axis2 = 1
+        return node.op.offset == 0
 
 
 def alloc_diag(diag, offset=0, axis1=0, axis2=1):
@@ -3862,6 +3810,7 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
     from pytensor.tensor import set_subtensor
 
     diag = as_tensor_variable(diag)
+
     axis1, axis2 = normalize_axis_tuple((axis1, axis2), ndim=diag.type.ndim + 1)
     if axis1 > axis2:
         axis1, axis2 = axis2, axis1
@@ -3888,7 +3837,9 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
         axes = axes[:axis2] + [last_idx + 2] + axes[axis2:]
         result = result.transpose(axes)
 
-    return result
+    return AllocDiag(
+        inputs=[diag], outputs=[result], axis1=axis1, axis2=axis2, offset=offset
+    )(diag)
 
 
 def diag(v, k=0):
