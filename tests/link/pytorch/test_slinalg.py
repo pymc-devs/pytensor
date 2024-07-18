@@ -40,11 +40,10 @@ def test_pytorch_eigvalsh(lower):
     )
 
 
-def test_pytorch_basic():
+def test_pytorch_cholesky():
     rng = np.random.default_rng(28494)
 
     x = matrix("x")
-    b = vector("b")
 
     out = pt_slinalg.cholesky(x)
     out_fg = FunctionGraph([x], [out])
@@ -67,6 +66,11 @@ def test_pytorch_basic():
             )
         ],
     )
+
+
+def test_pytorch_solve():
+    x = matrix("x")
+    b = vector("b")
 
     out = pt_slinalg.solve(x, b)
     out_fg = FunctionGraph([x, b], [out])
