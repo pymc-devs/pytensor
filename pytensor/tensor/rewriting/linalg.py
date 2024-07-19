@@ -569,3 +569,45 @@ def svd_uv_merge(fgraph, node):
                     or len(fgraph.clients[cl.outputs[2]]) > 0
                 ):
                     return [cl.outputs[1]]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Blockwise])
+def rewrite_inv_inv(fgraph, node):
+    """
+    This rewrite takes advantage of the fact that if there are two consecutive inverse operations (inv(inv(input))), we get back our original input without having to compute inverse once.
+
+    Here, we check for direct inverse operations (inv/pinv)  and allows for any combination of these "inverse" nodes to be simply rewritten.
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
+    valid_inverses = (MatrixInverse, MatrixPinv)
+    # Check if its a valid inverse operation (either inv/pinv)
+    # In case the outer operation is an inverse, it directly goes to the next step of finding inner operation
+    # If the outer operation is not a valid inverse, we do not apply this rewrite
+    if not isinstance(node.op.core_op, valid_inverses):
+        return None
+
+    potential_inner_inv = node.inputs[0].owner
+    if potential_inner_inv is None or potential_inner_inv.op is None:
+        return None
+
+    # Check if inner op is blockwise and and possible inv
+    if not (
+        potential_inner_inv
+        and isinstance(potential_inner_inv.op, Blockwise)
+        and isinstance(potential_inner_inv.op.core_op, valid_inverses)
+    ):
+        return None
+    return [potential_inner_inv.inputs[0]]
