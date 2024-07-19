@@ -168,7 +168,7 @@ def test_config_context():
 
     with root.change_flags(test__config_context="new_value"):
         assert root.test__config_context == "new_value"
-        with root.change_flags({"test__config_context": "new_value2"}):
+        with root.change_flags(test__config_context="new_value2"):
             assert root.test__config_context == "new_value2"
         assert root.test__config_context == "new_value"
     assert root.test__config_context == "test_default"
