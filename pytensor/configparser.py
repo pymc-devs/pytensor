@@ -214,9 +214,7 @@ class PyTensorConfigParser:
             )
         )
 
-    def add(
-        self, name: str, doc: str, configparam: "ConfigParam", in_c_key: bool = True
-    ):
+    def add(self, name: str, doc: str, configparam: "ConfigParam", in_c_key: bool):
         """Add a new variable to PyTensorConfigParser.
 
         This method performs some of the work of initializing `ConfigParam` instances.
