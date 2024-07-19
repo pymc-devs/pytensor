@@ -261,25 +261,9 @@ def add_basic_configvars():
     )
 
     config.add(
-        "deterministic",
-        "If `more`, sometimes we will select some implementation that "
-        "are more deterministic, but slower.  Also see "
-        "the dnn.conv.algo* flags to cover more cases.",
-        EnumStr("default", ["more"]),
-        in_c_key=False,
-    )
-
-    config.add(
         "device",
         ("Default device for computations. only cpu is supported for now"),
         DeviceParam("cpu", mutable=False),
-        in_c_key=False,
-    )
-
-    config.add(
-        "force_device",
-        "Raise an error if we can't use the specified device",
-        BoolParam(False, mutable=False),
         in_c_key=False,
     )
 
@@ -299,14 +283,6 @@ def add_basic_configvars():
         in_c_key=False,
     )
 
-    # This flag determines whether or not to raise error/warning message if
-    # there is a CPU Op in the computational graph.
-    config.add(
-        "assert_no_cpu_op",
-        "Raise an error/warning if there is a CPU op in the computational graph.",
-        EnumStr("ignore", ["warn", "raise", "pdb"], mutable=True),
-        in_c_key=False,
-    )
     config.add(
         "unpickle_function",
         (
@@ -1043,20 +1019,6 @@ def add_metaopt_configvars():
         in_c_key=False,
     )
 
-    config.add(
-        "metaopt__optimizer_excluding",
-        ("exclude optimizers with these tags. Separate tags with ':'."),
-        StrParam(""),
-        in_c_key=False,
-    )
-
-    config.add(
-        "metaopt__optimizer_including",
-        ("include optimizers with these tags. Separate tags with ':'."),
-        StrParam(""),
-        in_c_key=False,
-    )
-
 
 def add_vm_configvars():
     config.add(
@@ -1294,55 +1256,6 @@ def add_caching_dir_configvars():
         in_c_key=False,
     )
 
-
-# Those are the options provided by PyTensor to choose algorithms at runtime.
-SUPPORTED_DNN_CONV_ALGO_RUNTIME = (
-    "guess_once",
-    "guess_on_shape_change",
-    "time_once",
-    "time_on_shape_change",
-)
-
-# Those are the supported algorithm by PyTensor,
-# The tests will reference those lists.
-SUPPORTED_DNN_CONV_ALGO_FWD = (
-    "small",
-    "none",
-    "large",
-    "fft",
-    "fft_tiling",
-    "winograd",
-    "winograd_non_fused",
-    *SUPPORTED_DNN_CONV_ALGO_RUNTIME,
-)
-
-SUPPORTED_DNN_CONV_ALGO_BWD_DATA = (
-    "none",
-    "deterministic",
-    "fft",
-    "fft_tiling",
-    "winograd",
-    "winograd_non_fused",
-    *SUPPORTED_DNN_CONV_ALGO_RUNTIME,
-)
-
-SUPPORTED_DNN_CONV_ALGO_BWD_FILTER = (
-    "none",
-    "deterministic",
-    "fft",
-    "small",
-    "winograd_non_fused",
-    "fft_tiling",
-    *SUPPORTED_DNN_CONV_ALGO_RUNTIME,
-)
-
-SUPPORTED_DNN_CONV_PRECISION = (
-    "as_input_f32",
-    "as_input",
-    "float16",
-    "float32",
-    "float64",
-)
 
 # Eventually, the instance of `PyTensorConfigParser` should be created right here,
 # where it is also populated with settings.
