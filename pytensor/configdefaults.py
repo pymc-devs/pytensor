@@ -371,23 +371,11 @@ def add_compile_configvars():
 
     if rc == 0 and config.cxx != "":
         # Keep the default linker the same as the one for the mode FAST_RUN
-        config.add(
-            "linker",
-            "Default linker used if the pytensor flags mode is Mode",
-            EnumStr(
-                "cvm", ["c|py", "py", "c", "c|py_nogc", "vm", "vm_nogc", "cvm_nogc"]
-            ),
-            in_c_key=False,
-        )
+        linker_options = ["c|py", "py", "c", "c|py_nogc", "vm", "vm_nogc", "cvm_nogc"]
     else:
         # g++ is not present or the user disabled it,
         # linker should default to python only.
-        config.add(
-            "linker",
-            "Default linker used if the pytensor flags mode is Mode",
-            EnumStr("vm", ["py", "vm_nogc"]),
-            in_c_key=False,
-        )
+        linker_options = ["py", "vm_nogc"]
         if type(config).cxx.is_default:
             # If the user provided an empty value for cxx, do not warn.
             _logger.warning(
@@ -396,6 +384,13 @@ def add_compile_configvars():
                 "Performance may be severely degraded. "
                 "To remove this warning, set PyTensor flags cxx to an empty string."
             )
+
+    config.add(
+        "linker",
+        "Default linker used if the pytensor flags mode is Mode",
+        EnumStr("cvm", linker_options),
+        in_c_key=False,
+    )
 
     # Keep the default value the same as the one for the mode FAST_RUN
     config.add(
