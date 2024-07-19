@@ -75,6 +75,7 @@ class PyTensorConfigParser:
     pickle_test_value: bool
     cast_policy: str
     device: str
+    conv__assert_shape: bool
     print_global_stats: bool
     unpickle_function: bool
     # add_compile_configvars
@@ -86,6 +87,7 @@ class PyTensorConfigParser:
     optimizer_verbose: bool
     on_opt_error: str
     nocleanup: bool
+    on_unused_input: str
     gcc__cxxflags: str
     cmodule__warn_no_version: bool
     cmodule__remove_gxx_opt: bool
@@ -93,6 +95,7 @@ class PyTensorConfigParser:
     cmodule__preload_cache: bool
     cmodule__age_thresh_use: int
     cmodule__debug: bool
+    compile__wait: int
     compile__timeout: int
     # add_tensor_configvars
     tensor__cmp_sloppy: int
@@ -143,6 +146,7 @@ class PyTensorConfigParser:
     optdb__max_use_ratio: float
     cycle_detection: str
     check_stack_trace: str
+    # add_metaopt_configvars
     metaopt__verbose: int
     # add_vm_configvars
     profile: bool
@@ -177,7 +181,6 @@ class PyTensorConfigParser:
         self._pytensor_cfg = pytensor_cfg
         self._pytensor_raw_cfg = pytensor_raw_cfg
         self._config_var_dict: dict = {}
-        super().__init__()
 
     def __str__(self, print_doc=True):
         sio = StringIO()
@@ -375,7 +378,6 @@ class ConfigParam:
         # more appropriate user-provided default value.
         # Calling `filter` here may actually be harmful if the default value is
         # invalid and causes a crash or has unwanted side effects.
-        super().__init__()
 
     @property
     def default(self):
