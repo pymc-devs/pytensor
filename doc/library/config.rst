@@ -355,7 +355,7 @@ import ``pytensor`` and print the config variable, as in:
 
     When ``True``, ignore the first call to an PyTensor function while profiling.
 
-.. attribute:: config.lib__amblibm
+.. attribute:: config.lib__amdlibm
 
     Bool value: either ``True`` or ``False``
 
