@@ -557,12 +557,10 @@ def test_svd_uv_merge():
     assert svd_counter == 1
 
 
-@pytest.mark.parametrize("inv_op_1", ["inv", "pinv", "solve", "solve_triangular"])
-@pytest.mark.parametrize("inv_op_2", ["inv", "pinv", "solve", "solve_triangular"])
+@pytest.mark.parametrize("inv_op_1", ["inv", "pinv"])
+@pytest.mark.parametrize("inv_op_2", ["inv", "pinv"])
 def test_inv_inv_rewrite(inv_op_1, inv_op_2):
     def get_pt_function(x, op_name):
-        if "solve" in op_name:
-            return getattr(pt.linalg, op_name)(x, pt.eye(x.shape[0]))
         return getattr(pt.linalg, op_name)(x)
 
     x = pt.matrix("x")

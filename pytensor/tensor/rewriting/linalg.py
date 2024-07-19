@@ -3,7 +3,7 @@ from collections.abc import Callable
 from typing import cast
 
 from pytensor import Variable
-from pytensor.graph import Apply, Constant, FunctionGraph
+from pytensor.graph import Apply, FunctionGraph
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,
@@ -40,7 +40,6 @@ from pytensor.tensor.slinalg import (
     Cholesky,
     Solve,
     SolveBase,
-    SolveTriangular,
     block_diag,
     cholesky,
     solve,
@@ -572,33 +571,6 @@ def svd_uv_merge(fgraph, node):
                     return [cl.outputs[1]]
 
 
-def _find_solve_with_eye(node) -> bool:
-    """
-    The result of solve(A, b) is the solution x to the linear equation Ax = b. If b is an identity matrix (Eye), x is simply inv(A).
-    Here, we are just recognising whether the solve operation returns an inverse or not; not replacing it because solve is mathematically more stable than inv.
-    """
-    valid_solves = (Solve, SolveTriangular)
-    # First, we verify whether we have a valid solve op
-    if not (
-        isinstance(node.op, Blockwise) and isinstance(node.op.core_op, valid_solves)
-    ):
-        return False
-    # If the current op is solve, we check for b. If b is an identity matrix (Eye), we can return True
-    solve_inputs = node.inputs
-    eye_node = solve_inputs[1].owner
-
-    # We check for b = Eye and also make sure that if it was an Eye, then k = 0 (1's are only across the main diagonal)
-    if not (eye_node and isinstance(eye_node.op, Eye)):
-        return False
-
-    if (
-        isinstance(eye_node.inputs[-1], Constant)
-        and eye_node.inputs[-1].data.item() != 0
-    ):
-        return False
-    return True
-
-
 @register_canonicalize
 @register_stabilize
 @node_rewriter([Blockwise])
@@ -606,7 +578,7 @@ def rewrite_inv_inv(fgraph, node):
     """
     This rewrite takes advantage of the fact that if there are two consecutive inverse operations (inv(inv(input))), we get back our original input without having to compute inverse once.
 
-    Here, we check for direct inverse operations (inv/pinv) and also solve operations (solve/solve_triangular) in the case when b = Eye. This allows any combination of these "inverse" nodes to be simply rewritten.
+    Here, we check for direct inverse operations (inv/pinv)  and allows for any combination of these "inverse" nodes to be simply rewritten.
 
     Parameters
     ----------
@@ -620,16 +592,11 @@ def rewrite_inv_inv(fgraph, node):
     list of Variable, optional
         List of optimized variables, or None if no optimization was performed
     """
-    valid_inverses = (MatrixInverse, MatrixPinv, Solve, SolveTriangular)
-    valid_solves = (Solve, SolveTriangular)
-    # Check if its a valid inverse operation (either inv/pinv or if its solve, then b = eye)
+    valid_inverses = (MatrixInverse, MatrixPinv)
+    # Check if its a valid inverse operation (either inv/pinv)
     # In case the outer operation is an inverse, it directly goes to the next step of finding inner operation
-    # If the outer operation is a solve op with b = Eye, it treats it as inverse and finds the inner operation
-    # If the outer operation is not an inverse (neither inv nor solve with eye), we do not apply this rewrite
+    # If the outer operation is not a valid inverse, we do not apply this rewrite
     if not isinstance(node.op.core_op, valid_inverses):
-        return None
-
-    if isinstance(node.op.core_op, valid_solves) and not _find_solve_with_eye(node):
         return None
 
     potential_inner_inv = node.inputs[0].owner
@@ -642,19 +609,6 @@ def rewrite_inv_inv(fgraph, node):
         and isinstance(potential_inner_inv.op, Blockwise)
         and isinstance(node.op.core_op, valid_inverses)
     ):
-        return None
-
-    # Similar to the check for outer operation, we now run the same checks for the inner op.
-    # If its an inverse or solve with eye, we apply the rewrite. Otherwise, we return None.
-    if not (
-        isinstance(potential_inner_inv.op, Blockwise)
-        and isinstance(potential_inner_inv.op.core_op, valid_inverses)
-    ):
-        return None
-
-    if isinstance(
-        potential_inner_inv.op.core_op, valid_solves
-    ) and not _find_solve_with_eye(potential_inner_inv):
         return None
 
     return [potential_inner_inv.inputs[0]]
