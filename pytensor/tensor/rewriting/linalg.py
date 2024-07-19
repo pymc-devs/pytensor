@@ -607,8 +607,7 @@ def rewrite_inv_inv(fgraph, node):
     if not (
         potential_inner_inv
         and isinstance(potential_inner_inv.op, Blockwise)
-        and isinstance(node.op.core_op, valid_inverses)
+        and isinstance(potential_inner_inv.op.core_op, valid_inverses)
     ):
         return None
-
     return [potential_inner_inv.inputs[0]]
