@@ -10,6 +10,7 @@ from pytensor import function
 from pytensor import tensor as pt
 from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
+from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
@@ -554,3 +555,16 @@ def test_svd_uv_merge():
             assert node.op.compute_uv
             svd_counter += 1
     assert svd_counter == 1
+
+
+@pytest.mark.parametrize("inv_op_1", ["inv", "pinv"])
+@pytest.mark.parametrize("inv_op_2", ["inv", "pinv"])
+def test_inv_inv_rewrite(inv_op_1, inv_op_2):
+    def get_pt_function(x, op_name):
+        return getattr(pt.linalg, op_name)(x)
+
+    x = pt.matrix("x")
+    op1 = get_pt_function(x, inv_op_1)
+    op2 = get_pt_function(op1, inv_op_2)
+    rewritten_out = rewrite_graph(op2)
+    assert rewritten_out == x
