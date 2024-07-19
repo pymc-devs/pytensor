@@ -258,6 +258,7 @@ def add_basic_configvars():
             # was expected, so it is currently not available.
             # numpy,
         ),
+        in_c_key=False,
     )
 
     config.add(
