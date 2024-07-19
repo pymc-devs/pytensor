@@ -104,7 +104,6 @@ class PyTensorConfigParser:
     # add_traceback_configvars
     traceback__limit: int
     traceback__compile_limit: int
-    # add_experimental_configvars
     # add_error_and_warning_configvars
     warn__ignore_bug_before: int
     exception_verbosity: str

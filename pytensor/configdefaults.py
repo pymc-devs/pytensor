@@ -585,10 +585,6 @@ def add_traceback_configvars():
     )
 
 
-def add_experimental_configvars():
-    return
-
-
 def add_error_and_warning_configvars():
     ###
     # To disable some warning about old bug that are fixed now.
@@ -1266,7 +1262,6 @@ add_basic_configvars()
 add_compile_configvars()
 add_tensor_configvars()
 add_traceback_configvars()
-add_experimental_configvars()
 add_error_and_warning_configvars()
 add_testvalue_and_checking_configvars()
 add_multiprocessing_configvars()
