@@ -281,7 +281,7 @@ class PyTensorConfigParser:
 
         The (decreasing) priority order is:
         - PYTENSOR_FLAGS
-        - ~./pytensorrc
+        - ~/.pytensorrc
 
         """
 
