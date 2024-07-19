@@ -547,7 +547,7 @@ def add_tensor_configvars():
 
     # http://developer.amd.com/CPU/LIBRARIES/LIBM/Pages/default.aspx
     config.add(
-        "lib__amblibm",
+        "lib__amdlibm",
         "Use amd's amdlibm numerical library",
         BoolParam(False),
         # Added elsewhere in the c key only when needed.

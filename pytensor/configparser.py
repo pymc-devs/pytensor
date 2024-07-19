@@ -95,7 +95,7 @@ class PyTensorConfigParser:
     compile__timeout: int
     # add_tensor_configvars
     tensor__cmp_sloppy: int
-    lib__amblibm: bool
+    lib__amdlibm: bool
     tensor__insert_inplace_optimizer_validate_nb: int
     # add_traceback_configvars
     traceback__limit: int
