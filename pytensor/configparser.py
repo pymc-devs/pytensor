@@ -32,11 +32,7 @@ class ConfigAccessViolation(AttributeError):
 
 
 class _ChangeFlagsDecorator:
-    def __init__(self, *args, _root=None, **kwargs):
-        # the old API supported passing a dict as the first argument:
-        if args:
-            assert len(args) == 1 and isinstance(args[0], dict)
-            kwargs = dict(**args[0], **kwargs)
+    def __init__(self, _root=None, **kwargs):
         self.confs = {k: _root._config_var_dict[k] for k in kwargs}
         self.new_vals = kwargs
         self._root = _root
@@ -310,14 +306,14 @@ class PyTensorConfigParser:
         except (NoOptionError, NoSectionError):
             raise KeyError(key)
 
-    def change_flags(self, *args, **kwargs) -> _ChangeFlagsDecorator:
+    def change_flags(self, **kwargs) -> _ChangeFlagsDecorator:
         """
         Use this as a decorator or context manager to change the value of
         PyTensor config variables.
 
         Useful during tests.
         """
-        return _ChangeFlagsDecorator(*args, _root=self, **kwargs)
+        return _ChangeFlagsDecorator(_root=self, **kwargs)
 
     def warn_unused_flags(self):
         for key in self._flags_dict:
