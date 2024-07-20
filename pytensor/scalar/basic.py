@@ -351,7 +351,7 @@ class ScalarType(CType, HasDataType, HasShape):
         l = ["<math.h>"]
         # These includes are needed by ScalarType and TensorType,
         # we declare them here and they will be re-used by TensorType
-        l.append("<numpy/npy_2_compat.h.h>")
+        l.append("<numpy/npy_2_compat.h>")
         l.append("<numpy/arrayobject.h>")
         l.append("<numpy/arrayscalars.h>")
         l.append("<numpy/npy_math.h>")
