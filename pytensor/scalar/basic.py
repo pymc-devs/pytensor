@@ -351,6 +351,7 @@ class ScalarType(CType, HasDataType, HasShape):
         l = ["<math.h>"]
         # These includes are needed by ScalarType and TensorType,
         # we declare them here and they will be re-used by TensorType
+        l.append("<numpy/npy_2_compat.h.h>")
         l.append("<numpy/arrayobject.h>")
         l.append("<numpy/arrayscalars.h>")
         l.append("<numpy/npy_math.h>")
@@ -533,32 +534,63 @@ class ScalarType(CType, HasDataType, HasShape):
             #
             # This is necessary because, e.g., npy_complex64 could be an alias for npy_cfloat
             # or npy_cdouble, depending on the whether the system is 64 or 32 bit.
+            #
+            # For backwards compatibility with numpy 1.xx, we include the macros from
+            # numpy/_core/include/numpy/npy_2_complexcompat.h
             get_set_aliases = """
             #ifndef GET_SET_REAL_IMAG
             #define GET_SET_REAL_IMAG
 
+            /* npy_2_complexcompat.h */
+            #ifndef NUMPY_CORE_INCLUDE_NUMPY_NPY_2_COMPLEXCOMPAT_H_
+            #define NUMPY_CORE_INCLUDE_NUMPY_NPY_2_COMPLEXCOMPAT_H_
+
+            #include <numpy/npy_math.h>
+
+            #ifndef NPY_CSETREALF
+            #define NPY_CSETREALF(c, r) (c)->real = (r)
+            #endif
+            #ifndef NPY_CSETIMAGF
+            #define NPY_CSETIMAGF(c, i) (c)->imag = (i)
+            #endif
+            #ifndef NPY_CSETREAL
+            #define NPY_CSETREAL(c, r)  (c)->real = (r)
+            #endif
+            #ifndef NPY_CSETIMAG
+            #define NPY_CSETIMAG(c, i)  (c)->imag = (i)
+            #endif
+            #ifndef NPY_CSETREALL
+            #define NPY_CSETREALL(c, r) (c)->real = (r)
+            #endif
+            #ifndef NPY_CSETIMAGL
+            #define NPY_CSETIMAGL(c, i) (c)->imag = (i)
+            #endif
+
+            #endif /* NUMPY_CORE_INCLUDE_NUMPY_NPY_2_COMPLEXCOMPAT_H_ */
+
+
             #define set_real(X, Y) _Generic((X), \
-              npy_cfloat: npy_csetrealf, \
-              npy_cdouble: npy_csetreal, \
-              npy_clongdouble: npy_csetreall \
+              npy_cfloat: NPY_CSETREALF, \
+              npy_cdouble: NPY_CSETREAL, \
+              npy_clongdouble: NPY_CSETREALL \
             )((X), (Y))
 
             #define set_imag(X, Y) _Generic((X), \
-              npy_cfloat: npy_csetimagf, \
-              npy_cdouble: npy_csetimag, \
-              npy_clongdouble: npy_csetimagl \
+              npy_cfloat: NPY_CSETIMAGF, \
+              npy_cdouble: NPY_CSETIMAG, \
+              npy_clongdouble: NPY_CSETIMAGL \
             )((X), (Y))
 
             #define get_real(X) _Generic((X), \
-              npy_cfloat: npy_crealf, \
-              npy_cdouble: npy_creal, \
-              npy_clongdouble: npy_creall \
+              npy_cfloat: NPY_CREALF, \
+              npy_cdouble: NPY_CREAL, \
+              npy_clongdouble: NPY_CREALL \
             )(X)
 
             #define get_imag(X) _Generic((X), \
-              npy_cfloat: npy_cimagf, \
-              npy_cdouble: npy_cimag, \
-              npy_clongdouble: npy_cimagl \
+              npy_cfloat: NPY_CIMAGF, \
+              npy_cdouble: NPY_CIMAG, \
+              npy_clongdouble: NPY_CIMAGL \
             )(X)
 
             #endif  /* GET_SET_REAL_IMAG */
