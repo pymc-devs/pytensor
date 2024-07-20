@@ -348,14 +348,14 @@ class ScalarType(CType, HasDataType, HasShape):
         return self.dtype_specs()[1]
 
     def c_headers(self, c_compiler=None, **kwargs):
-        l = [
-            "<math.h>",
-            # These includes are needed by ScalarType and TensorType,
-            # we declare them here and they will be re-used by TensorType
-            "<numpy/arrayobject.h>",
-            "<numpy/arrayscalars.h>",
-            "<numpy/npy_2_complexcompat.h>",
-        ]
+        l = ["<math.h>"]
+        # These includes are needed by ScalarType and TensorType,
+        # we declare them here and they will be re-used by TensorType
+        l.append("<numpy/npy_2_compat.h>")
+        l.append("<numpy/arrayobject.h>")
+        l.append("<numpy/arrayscalars.h>")
+        l.append("<numpy/npy_math.h>")
+
         if config.lib__amblibm and c_compiler.supports_amdlibm:
             l += ["<amdlibm.h>"]
         return l
@@ -397,8 +397,8 @@ class ScalarType(CType, HasDataType, HasShape):
                 "float16": (np.float16, "npy_float16", "Float16"),
                 "float32": (np.float32, "npy_float32", "Float32"),
                 "float64": (np.float64, "npy_float64", "Float64"),
-                "complex128": (np.complex128, "npy_complex128", "Complex128"),
-                "complex64": (np.complex64, "npy_complex64", "Complex64"),
+                "complex128": (np.complex128, "pytensor_complex128", "Complex128"),
+                "complex64": (np.complex64, "pytensor_complex64", "Complex64"),
                 "bool": (np.bool_, "npy_bool", "Bool"),
                 "uint8": (np.uint8, "npy_uint8", "UInt8"),
                 "int8": (np.int8, "npy_int8", "Int8"),
@@ -476,7 +476,7 @@ class ScalarType(CType, HasDataType, HasShape):
                     sub,
                     name=name,
                     dtype=specs[1],
-                    pyarr_type="Py%sArrType_Type" % specs[2],
+                    pyarr_type=f"Py{specs[2]}ArrType_Type",
                 )
             )
         else:
@@ -506,6 +506,244 @@ class ScalarType(CType, HasDataType, HasShape):
 
     def c_cleanup(self, name, sub):
         return ""
+
+    def c_support_code(self, **kwargs):
+        if self.dtype.startswith("complex"):
+            # complex types are: "pytensor_complex64", "pytensor_complex128"
+            # but it is more convenient to have their bit widths:
+            cplx_types_bit_widths = ["64", "128"]
+            real_types = [
+                "npy_int8",
+                "npy_int16",
+                "npy_int32",
+                "npy_int64",
+                "npy_float32",
+                "npy_float64",
+            ]
+            # If the 'int' C type is not exactly the same as an existing
+            # 'npy_intX', some C code may not compile, e.g. when assigning
+            # the value 0 (cast to 'int' in C) to an PyTensor_complex64.
+            if np.dtype("intc").num not in [np.dtype(d[4:]).num for d in real_types]:
+                # In that case we add the 'int' type to the real types.
+                real_types.append("int")
+
+            # The following aliases provide set_real, get_real, set_imag, get_imag functions
+            # that will work for both pytensor_complex64 and pytensor_complex128 by matching
+            # the right function (from npy_math.h) to the numpy complex type underlying the
+            # pytensor complex type.
+            #
+            # This is necessary because, e.g., npy_complex64 could be an alias for npy_cfloat
+            # or npy_cdouble, depending on the whether the system is 64 or 32 bit.
+            #
+            # For backwards compatibility with numpy 1.xx, we include the macros from
+            # numpy/_core/include/numpy/npy_2_complexcompat.h
+            get_set_aliases = """
+            #ifndef GET_SET_REAL_IMAG
+            #define GET_SET_REAL_IMAG
+
+            /* npy_2_complexcompat.h */
+            #ifndef NUMPY_CORE_INCLUDE_NUMPY_NPY_2_COMPLEXCOMPAT_H_
+            #define NUMPY_CORE_INCLUDE_NUMPY_NPY_2_COMPLEXCOMPAT_H_
+
+            #include <numpy/npy_math.h>
+
+            #ifndef NPY_CSETREALF
+            #define NPY_CSETREALF(c, r) (c)->real = (r)
+            #endif
+            #ifndef NPY_CSETIMAGF
+            #define NPY_CSETIMAGF(c, i) (c)->imag = (i)
+            #endif
+            #ifndef NPY_CSETREAL
+            #define NPY_CSETREAL(c, r)  (c)->real = (r)
+            #endif
+            #ifndef NPY_CSETIMAG
+            #define NPY_CSETIMAG(c, i)  (c)->imag = (i)
+            #endif
+            #ifndef NPY_CSETREALL
+            #define NPY_CSETREALL(c, r) (c)->real = (r)
+            #endif
+            #ifndef NPY_CSETIMAGL
+            #define NPY_CSETIMAGL(c, i) (c)->imag = (i)
+            #endif
+
+            #endif /* NUMPY_CORE_INCLUDE_NUMPY_NPY_2_COMPLEXCOMPAT_H_ */
+
+
+            #define set_real(X, Y) _Generic((X), \
+              npy_cfloat: NPY_CSETREALF, \
+              npy_cdouble: NPY_CSETREAL, \
+              npy_clongdouble: NPY_CSETREALL \
+            )((X), (Y))
+
+            #define set_imag(X, Y) _Generic((X), \
+              npy_cfloat: NPY_CSETIMAGF, \
+              npy_cdouble: NPY_CSETIMAG, \
+              npy_clongdouble: NPY_CSETIMAGL \
+            )((X), (Y))
+
+            #define get_real(X) _Generic((X), \
+              npy_cfloat: NPY_CREALF, \
+              npy_cdouble: NPY_CREAL, \
+              npy_clongdouble: NPY_CREALL \
+            )(X)
+
+            #define get_imag(X) _Generic((X), \
+              npy_cfloat: NPY_CIMAGF, \
+              npy_cdouble: NPY_CIMAG, \
+              npy_clongdouble: NPY_CIMAGL \
+            )(X)
+
+            #endif  /* GET_SET_REAL_IMAG */
+            """
+
+            template = """
+            struct pytensor_complex%(nbits)s : public npy_complex%(nbits)s {
+              typedef pytensor_complex%(nbits)s complex_type;
+              typedef npy_float32 scalar_type;
+
+              complex_type operator+(const complex_type &y) const {
+                complex_type ret;
+                set_real(&ret, get_real(*this) + get_real(y));
+                set_imag(&ret, get_imag(*this) + get_imag(y));
+                return ret;
+              }
+
+              complex_type operator-() const {
+                complex_type ret;
+                set_real(&ret, -get_real(*this));
+                set_imag(&ret, -get_imag(*this));
+                return ret;
+              }
+              bool operator==(const complex_type &y) const {
+                return (get_real(*this) == get_real(y)) && (get_imag(*this) == get_imag(y));
+              }
+              bool operator==(const scalar_type &y) const {
+                return (get_real(*this) == y) && (get_real(*this) == 0);
+              }
+              complex_type operator-(const complex_type &y) const {
+                complex_type ret;
+                set_real(&ret, get_real(*this) - get_real(y));
+                set_imag(&ret, get_imag(*this) - get_imag(y));
+                return ret;
+              }
+              complex_type operator*(const complex_type &y) const {
+                complex_type ret;
+                set_real(&ret, get_real(*this) * get_real(y) - get_imag(*this) * get_imag(y));
+                set_imag(&ret, get_imag(*this) * get_real(y) + get_real(*this) * get_imag(y));
+                return ret;
+              }
+              complex_type operator/(const complex_type &y) const {
+                complex_type ret;
+                scalar_type y_norm_square = get_real(y) * get_real(y) + get_imag(y) * get_imag(y);
+                set_real(&ret, (get_real(*this) * get_real(y) + get_imag(*this) * get_imag(y)) / y_norm_square);
+                set_imag(&ret, (get_imag(*this) * get_real(y) - get_real(*this) * get_imag(y)) / y_norm_square);
+                return ret;
+              }
+              template <typename T> complex_type &operator=(const T &y);
+
+              pytensor_complex%(nbits)s() {}
+
+              template <typename T> pytensor_complex%(nbits)s(const T &y) { *this = y; }
+
+              template <typename TR, typename TI>
+              pytensor_complex%(nbits)s(const TR &r, const TI &i) {
+                set_real(this, r);
+                set_imag(this, i);
+              }
+            };
+            """
+
+            def operator_eq_real(bit_width, othertype):
+                mytype = f"pytensor_complex{bit_width}"
+                return f"""
+                template <> {mytype} & {mytype}::operator=<{othertype}>(const {othertype} & y)
+                {{ set_real(this, y); set_imag(this, 0); return *this; }}
+                """
+
+            def operator_eq_cplx(bit_width1, bit_width2):
+                mytype = f"pytensor_complex{bit_width1}"
+                othertype = f"pytensor_complex{bit_width2}"
+                return f"""
+                template <> {mytype} & {mytype}::operator=<{othertype}>(const {othertype} & y)
+                {{ set_real(this, get_real(y)); set_imag(this, get_imag(y)); return *this; }}
+                """
+
+            operator_eq = "".join(
+                operator_eq_real(bit_width, rtype)
+                for bit_width in cplx_types_bit_widths
+                for rtype in real_types
+            ) + "".join(
+                operator_eq_cplx(bit_width1, bit_width2)
+                for bit_width1 in cplx_types_bit_widths
+                for bit_width2 in cplx_types_bit_widths
+            )
+
+            # We are not using C++ generic templating here, because this would
+            # generate two different functions for adding a complex64 and a
+            # complex128, one returning a complex64, the other a complex128,
+            # and the compiler complains it is ambiguous.
+            # Instead, we generate code for known and safe types only.
+
+            def operator_plus_real(bit_width, othertype):
+                mytype = f"pytensor_complex{bit_width}"
+                return f"""
+                const {mytype} operator+(const {mytype} &x, const {othertype} &y)
+                {{ return {mytype}(get_real(x) + y, get_imag(x)); }}
+
+                const {mytype} operator+(const {othertype} &y, const {mytype} &x)
+                {{ return {mytype}(get_real(x) + y, get_imag(x)); }}
+                """
+
+            operator_plus = "".join(
+                operator_plus_real(bit_width, rtype)
+                for bit_width in cplx_types_bit_widths
+                for rtype in real_types
+            )
+
+            def operator_minus_real(bit_width, othertype):
+                mytype = f"pytensor_complex{bit_width}"
+                return f"""
+                const {mytype} operator-(const {mytype} &x, const {othertype} &y)
+                {{ return {mytype}(get_real(x) - y, get_imag(x)); }}
+
+                const {mytype} operator-(const {othertype} &y, const {mytype} &x)
+                {{ return {mytype}(y - get_real(x), -get_imag(x)); }}
+                """
+
+            operator_minus = "".join(
+                operator_minus_real(bit_width, rtype)
+                for bit_width in cplx_types_bit_widths
+                for rtype in real_types
+            )
+
+            def operator_mul_real(bit_width, othertype):
+                mytype = f"pytensor_complex{bit_width}"
+                return f"""
+                const {mytype} operator*(const {mytype} &x, const {othertype} &y)
+                {{ return {mytype}(get_real(x) * y, get_imag(x) * y); }}
+
+                const {mytype} operator*(const {othertype} &y, const {mytype} &x)
+                {{ return {mytype}(get_real(x) * y, get_imag(x) * y); }}
+                """
+
+            operator_mul = "".join(
+                operator_mul_real(bit_width, rtype)
+                for bit_width in cplx_types_bit_widths
+                for rtype in real_types
+            )
+
+            return (
+                get_set_aliases
+                + template % dict(nbits=64, half_nbits=32)
+                + template % dict(nbits=128, half_nbits=64)
+                + operator_eq
+                + operator_plus
+                + operator_minus
+                + operator_mul
+            )
+
+        else:
+            return ""
 
     def c_init_code(self, **kwargs):
         return ["import_array();"]
@@ -2428,7 +2666,7 @@ class Abs(UnaryScalarOp):
         if type in float_types:
             return f"{z} = fabs({x});"
         if type in complex_types:
-            return f"{z} = sqrt({x}.real*{x}.real + {x}.imag*{x}.imag);"
+            return f"{z} = sqrt(get_real({x}) * get_real({x}) + get_imag({x}) * get_imag({x}));"
         if node.outputs[0].type == bool:
             return f"{z} = ({x}) ? 1 : 0;"
         if type in uint_types:

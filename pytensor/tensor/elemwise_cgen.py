@@ -166,6 +166,8 @@ def make_alloc(loop_orders, dtype, sub, fortran="0"):
 
     """
     type = dtype.upper()
+    if type.startswith("PYTENSOR_COMPLEX"):
+        type = type.replace("PYTENSOR_COMPLEX", "NPY_COMPLEX")
     nd = len(loop_orders[0])
     init_dims = compute_output_dims_lengths("dims", loop_orders, sub)
 
