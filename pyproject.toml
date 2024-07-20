@@ -117,7 +117,12 @@ versionfile_build = "pytensor/_version.py"
 tag_prefix = "rel-"
 
 [tool.pytest]
-addopts = "--durations=50  --doctest-modules pytensor --import-mode=importlib --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link"
+addopts = [
+    "--durations=50",
+    "--doctest-modules=pytensor",
+    "--ignore=pytensor/misc/check_duplicate_key.py",
+    "--ignore=pytensor/link"
+]
 testpaths = "tests/"
 
 [tool.ruff]
