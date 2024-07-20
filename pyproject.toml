@@ -163,6 +163,7 @@ warn_return_any = true
 warn_unreachable = true
 files = ["pytensor", "tests"]
 plugins = ["numpy.typing.mypy_plugin"]
+explicit_package_bases = true
 
 [tool.cibuildwheel]
 build = "*"
