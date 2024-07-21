@@ -2,6 +2,7 @@ import logging
 from collections.abc import Callable
 from typing import cast
 
+import pytensor.tensor as pt
 from pytensor import Variable
 from pytensor import tensor as pt
 from pytensor.graph import Apply, FunctionGraph
@@ -928,13 +929,24 @@ def rewrite_cholesky_eye_to_eye(fgraph, node):
 @register_canonicalize
 @register_stabilize
 @node_rewriter([Blockwise])
-def rewrite_cholesky_diag_from_eye_mul(fgraph, node):
+def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
     # Find whether cholesky op is being applied
     if not isinstance(node.op.core_op, Cholesky):
         return None
 
-    # Check whether input is diagonal from multiplcation of identity matrix with a tensor
     inputs = node.inputs[0]
+    # Check for use of pt.diag first
+    if (
+        inputs.owner
+        and isinstance(inputs.owner.op, AllocDiag)
+        and AllocDiag.is_offset_zero(inputs.owner)
+    ):
+        cholesky_input = inputs.owner.inputs[0]
+        if cholesky_input.type.ndim == 1:
+            cholesky_val = pt.diag(cholesky_input**0.5)
+            return [cholesky_val]
+
+    # Check if the input is an elemwise multiply with identity matrix -- this also results in a diagonal matrix
     inputs_or_none = _find_diag_from_eye_mul(inputs)
     if inputs_or_none is None:
         return None
@@ -945,6 +957,13 @@ def rewrite_cholesky_diag_from_eye_mul(fgraph, node):
     if len(non_eye_inputs) != 1:
         return None
 
-    eye_input, non_eye_input = eye_input[0], non_eye_inputs[0]
+    non_eye_input = non_eye_inputs[0]
 
-    return [eye_input * (non_eye_input**0.5)]
+    # Now, we can simply return the matrix consisting of sqrt values of the original diagonal elements
+    # For a matrix, we have to first extract the diagonal (non-zero values) and then only use those
+    if non_eye_input.type.broadcastable[-2:] == (False, False):
+        # For Matrix
+        return [eye_input * (non_eye_input.diagonal(axis1=-1, axis2=-2) ** 0.5)]
+    else:
+        # For Vector or Scalar
+        return [eye_input * (non_eye_input**0.5)]

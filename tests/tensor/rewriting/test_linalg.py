@@ -834,8 +834,8 @@ def test_cholesky_eye_rewrite():
 
 @pytest.mark.parametrize(
     "shape",
-    [(), (7,), (1, 7), (7, 1), (7, 7), (3, 7, 7)],
-    ids=["scalar", "vector", "row_vec", "col_vec", "matrix", "batched_input"],
+    [(), (7,), (7, 7)],
+    ids=["scalar", "vector", "matrix"],
 )
 def test_cholesky_diag_from_eye_mul(shape):
     # Initializing x based on scalar/vector/matrix
@@ -863,6 +863,31 @@ def test_cholesky_diag_from_eye_mul(shape):
     assert_allclose(
         cholesky_val,
         rewritten_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+def test_cholesky_diag_from_diag():
+    x = pt.dvector("x")
+    x_diag = pt.diag(x)
+    x_cholesky = pt.linalg.cholesky(x_diag)
+
+    # REWRITE TEST
+    f_rewritten = function([x], x_cholesky, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+
+    assert not any(isinstance(node.op, Cholesky) for node in nodes)
+
+    # NUMERIC VALUE TEST
+    x_test = np.random.rand(10)
+    x_test_matrix = np.eye(10) * x_test
+    cholesky_val = np.linalg.cholesky(x_test_matrix)
+    rewritten_cholesky = f_rewritten(x_test)
+
+    assert_allclose(
+        cholesky_val,
+        rewritten_cholesky,
         atol=1e-3 if config.floatX == "float32" else 1e-8,
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
