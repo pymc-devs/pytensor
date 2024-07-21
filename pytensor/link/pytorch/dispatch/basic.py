@@ -138,9 +138,11 @@ def pytorch_funcify_MakeVector(op, **kwargs):
 @pytorch_funcify.register(IfElse)
 def pytorch_funcify_IfElse(op, **kwargs):
     n_outs = op.n_outs
-    assert n_outs == 1
 
-    def ifelse(cond, *args, n_outs=n_outs):
-        return torch.where(cond, *args)
+    def ifelse(cond, ifpath, elsepath, n_outs=n_outs):
+        if cond:
+            return ifpath
+        else:
+            return elsepath
 
     return ifelse
