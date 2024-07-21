@@ -17,7 +17,7 @@ dependencies:
   - miniKanren
   - cons
   - pydeprecate
-  # Intel BLAS
+  # Apple BLAS
   - libblas=*=*accelerate
   # numba backend
   - numba>=0.57
