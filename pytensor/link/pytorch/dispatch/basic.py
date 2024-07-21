@@ -16,7 +16,9 @@ def pytorch_typify(data, dtype=None, **kwargs):
     try:
         return torch.as_tensor(data, dtype=dtype)
     except RuntimeError:
-        raise RuntimeError(f"Data is of type {type(data)}, it should be an array")
+        raise NotImplementedError(
+            f"pytorch_typify got type {type(data)}, it should be an array"
+        )
 
 
 @pytorch_typify.register(NoneType)

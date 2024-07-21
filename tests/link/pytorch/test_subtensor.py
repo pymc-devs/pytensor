@@ -51,7 +51,7 @@ def test_pytorch_Subtensor():
     out_fg = FunctionGraph([x_pt], [out_pt])
     compare_pytorch_and_py(out_fg, [x_np])
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(NotImplementedError):
         out_pt = x_pt[[1, 2], :, [3, 4]]
         assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedSubtensor)
         out_fg = FunctionGraph([x_pt], [out_pt])
