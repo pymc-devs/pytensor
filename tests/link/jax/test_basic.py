@@ -4,6 +4,7 @@ from functools import partial
 import numpy as np
 import pytest
 
+from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
 from pytensor.compile.mode import get_mode
 from pytensor.compile.sharedvalue import SharedVariable, shared
@@ -13,7 +14,7 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op, get_test_value
 from pytensor.ifelse import ifelse
 from pytensor.raise_op import assert_op
-from pytensor.tensor.type import dscalar, scalar, vector
+from pytensor.tensor.type import dscalar, matrices, scalar, vector
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -209,3 +210,19 @@ def test_jax_checkandraise():
 def set_test_value(x, v):
     x.tag.test_value = v
     return x
+
+
+def test_OpFromGraph():
+    x, y, z = matrices("xyz")
+    ofg_1 = OpFromGraph([x, y], [x + y], inline=False)
+    ofg_2 = OpFromGraph([x, y], [x * y, x - y], inline=False)
+
+    o1, o2 = ofg_2(y, z)
+    out = ofg_1(x, o1) + o2
+    out_fg = FunctionGraph([x, y, z], [out])
+
+    xv = np.ones((2, 2), dtype=config.floatX)
+    yv = np.ones((2, 2), dtype=config.floatX) * 3
+    zv = np.ones((2, 2), dtype=config.floatX) * 5
+
+    compare_jax_and_py(out_fg, [xv, yv, zv])

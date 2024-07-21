@@ -30,12 +30,13 @@ jobs:
       - name: Build SDist
         run: pipx run build --sdist
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
+          name: sdist
           path: dist/*.tar.gz
 
   build_wheels:
-    name: Build ${{ matrix.python-version }} wheels on ${{ matrix.platform }}
+    name: Build wheels for ${{ matrix.platform }}
     runs-on: ${{ matrix.platform }}
     strategy:
       matrix:
@@ -51,8 +52,9 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.19.2
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
+          name: wheels-${{ matrix.platform }}
           path: ./wheelhouse/*.whl
 
   check_dist:
@@ -60,10 +62,17 @@ jobs:
     needs: [make_sdist,build_wheels]
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
-          name: artifact
+          name: sdist
           path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
       - name: Check SDist
         run: |
           mkdir -p test-sdist
@@ -83,12 +92,18 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'release' && github.event.action == 'published'
     steps:
-    - uses: actions/download-artifact@v3
-      with:
-        name: artifact
-        path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
 
-    - uses: pypa/gh-action-pypi-publish@v1.9.0
-      with:
-        user: __token__
-        password: ${{ secrets.pypi_password }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@v1.9.0
+        with:
+          user: __token__
+          password: ${{ secrets.pypi_password }}

@@ -37,11 +37,13 @@ from pytensor.tensor.subtensor import (
     advanced_subtensor1,
     as_index_literal,
     basic_shape,
+    flip,
     get_canonical_form_slice,
     inc_subtensor,
     index_vars_to_types,
     indexed_result_shape,
     set_subtensor,
+    slice_at_axis,
     take,
 )
 from pytensor.tensor.type import (
@@ -2902,3 +2904,39 @@ def test_vectorize_adv_subtensor(
         vectorize_pt(x_test, idx_test),
         vectorize_np(x_test, idx_test),
     )
+
+
+def test_slice_at_axis():
+    x = ptb.tensor("x", shape=(3, 4, 5))
+    x_sliced = x[slice_at_axis(slice(None, 1), axis=0)]
+    assert x_sliced.type.shape == (1, 4, 5)
+
+    # Negative axis
+    x_sliced = x[slice_at_axis(slice(None, 1), axis=-2)]
+    assert x_sliced.type.shape == (3, 1, 5)
+
+
+@pytest.mark.parametrize(
+    "size", [(3,), (3, 3), (3, 5, 5)], ids=["1d", "2d square", "3d square"]
+)
+def test_flip(size: tuple[int]):
+    from itertools import combinations
+
+    ATOL = RTOL = 1e-8 if config.floatX == "float64" else 1e-4
+
+    x = np.random.normal(size=size).astype(config.floatX)
+    x_pt = pytensor.tensor.tensor(shape=size, name="x")
+    expected = np.flip(x, axis=None)
+    z = flip(x_pt, axis=None)
+    f = pytensor.function([x_pt], z, mode="FAST_COMPILE")
+    np.testing.assert_allclose(expected, f(x), atol=ATOL, rtol=RTOL)
+
+    # Test all combinations of axes
+    flip_options = [
+        axes for i in range(1, x.ndim + 1) for axes in combinations(range(x.ndim), r=i)
+    ]
+    for axes in flip_options:
+        expected = np.flip(x, axis=list(axes))
+        z = flip(x_pt, axis=list(axes))
+        f = pytensor.function([x_pt], z, mode="FAST_COMPILE")
+        np.testing.assert_allclose(expected, f(x), atol=ATOL, rtol=RTOL)

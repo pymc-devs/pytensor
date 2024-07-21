@@ -6,6 +6,7 @@ import pytensor.link.jax.dispatch.blas
 import pytensor.link.jax.dispatch.blockwise
 import pytensor.link.jax.dispatch.elemwise
 import pytensor.link.jax.dispatch.extra_ops
+import pytensor.link.jax.dispatch.pad
 import pytensor.link.jax.dispatch.math
 import pytensor.link.jax.dispatch.nlinalg
 import pytensor.link.jax.dispatch.random
