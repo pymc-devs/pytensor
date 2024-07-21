@@ -887,3 +887,64 @@ def rewrite_slogdet_kronecker(fgraph, node):
     logdet_final = [logdets[i] * prod_sizes / sizes[i] for i in range(2)]
 
     return [prod(signs_final, no_zeros_in_input=True), sum(logdet_final)]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Blockwise])
+def rewrite_cholesky_eye_to_eye(fgraph, node):
+    """
+     This rewrite takes advantage of the fact that the cholesky decomposition of an identity matrix is the matrix itself
+
+    The presence of an identity matrix is identified by checking whether we have k = 0 for an Eye Op inside Cholesky.
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
+    # Find whether cholesky op is being applied
+    if not isinstance(node.op.core_op, Cholesky):
+        return None
+
+    # Check whether input to Cholesky is Eye and the 1's are on main diagonal
+    eye_check = node.inputs[0]
+    if not (
+        eye_check.owner
+        and isinstance(eye_check.owner.op, Eye)
+        and getattr(eye_check.owner.inputs[-1], "data", -1).item() == 0
+    ):
+        return None
+    return [eye_check]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Blockwise])
+def rewrite_cholesky_diag_from_eye_mul(fgraph, node):
+    # Find whether cholesky op is being applied
+    if not isinstance(node.op.core_op, Cholesky):
+        return None
+
+    # Check whether input is diagonal from multiplcation of identity matrix with a tensor
+    inputs = node.inputs[0]
+    inputs_or_none = _find_diag_from_eye_mul(inputs)
+    if inputs_or_none is None:
+        return None
+
+    eye_input, non_eye_inputs = inputs_or_none
+
+    # Dealing with only one other input
+    if len(non_eye_inputs) != 1:
+        return None
+
+    eye_input, non_eye_input = eye_input[0], non_eye_inputs[0]
+
+    return [eye_input * (non_eye_input**0.5)]
