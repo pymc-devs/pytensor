@@ -7,7 +7,7 @@ name: pytensor-dev
 channels:
   - conda-forge
 dependencies:
-  - python=3.10
+  - python=>3.10
   - compilers
   - numpy>=1.17.0,<2
   - scipy>=0.14,<1.14.0
