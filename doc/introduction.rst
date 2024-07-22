@@ -159,7 +159,7 @@ to extend PyTensor, please feel free to ask.
 
 .. _LISA:  https://mila.quebec/en
 .. _Greek mathematician: http://en.wikipedia.org/wiki/Theano_(mathematician)
-.. _numpy: http://numpy.scipy.org/
+.. _numpy: https://numpy.org/
 .. _BLAS: http://en.wikipedia.org/wiki/Basic_Linear_Algebra_Subprograms
 
 .. _sympy: http://www.sympy.org/
