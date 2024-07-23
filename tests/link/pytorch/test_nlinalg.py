@@ -60,10 +60,7 @@ def test_svd(compute_uv, full_matrices, matrix_test):
     out = pt_nla.svd(x, full_matrices=full_matrices, compute_uv=compute_uv)
     out_fg = FunctionGraph([x], out if isinstance(out, list) else [out])
 
-    def assert_fn(x, y):
-        np.testing.assert_allclose(x, y, rtol=1e-3)
-
-    compare_pytorch_and_py(out_fg, [test_value], assert_fn=assert_fn)
+    compare_pytorch_and_py(out_fg, [test_value])
 
 
 def test_pinv():
