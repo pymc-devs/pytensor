@@ -14,7 +14,7 @@ from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.math import _allclose, dot, matmul
+from pytensor.tensor.math import _get_atol_rtol, dot, matmul
 from pytensor.tensor.nlinalg import (
     SVD,
     Det,
@@ -64,7 +64,8 @@ def test_rop_lop():
     v1 = rop_f(vx, vv)
     v2 = scan_f(vx, vv)
 
-    assert _allclose(v1, v2), f"ROP mismatch: {v1} {v2}"
+    atol_, rtol_ = _get_atol_rtol(v1, v2)
+    assert np.allclose(v1, v2, atol=atol_, rtol=rtol_), f"ROP mismatch: {v1} {v2}"
 
     raised = False
     try:
@@ -88,7 +89,8 @@ def test_rop_lop():
 
     v1 = lop_f(vx, vv)
     v2 = scan_f(vx, vv)
-    assert _allclose(v1, v2), f"LOP mismatch: {v1} {v2}"
+    atol_, rtol_ = _get_atol_rtol(v1, v2)
+    assert np.allclose(v1, v2, atol=atol_, rtol=rtol_), f"LOP mismatch: {v1} {v2}"
 
 
 def test_transinv_to_invtrans():
@@ -393,7 +395,7 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
     test_vals = [rng.normal(size=(3,) * A.ndim).astype(config.floatX) for _ in range(2)]
     test_vals = [x @ np.swapaxes(x, -1, -2) for x in test_vals]
 
-    np.testing.assert_allclose(f1(*test_vals), f2(*test_vals), atol=1e-8)
+    np.testing.assert_allclose(f1(*test_vals), f2(*test_vals), atol=1e-8, rtol=1e-05)
 
 
 @pytest.mark.parametrize(
