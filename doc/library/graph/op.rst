@@ -1,12 +1,8 @@
-
 .. _libdoc_graph_op:
 
-==============================================================
-:mod:`graph` -- Objects and functions for computational graphs
-==============================================================
+===========================================
+:mod:`op` -- Objects that define operations
+===========================================
 
 .. automodule:: pytensor.graph.op
-   :platform: Unix, Windows
-   :synopsis: Interface for types of symbolic variables
    :members:
-.. moduleauthor:: LISA
