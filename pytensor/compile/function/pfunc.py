@@ -478,7 +478,6 @@ def pfunc(
 def construct_pfunc_ins_and_outs(
     params,
     outputs=None,
-    mode=None,
     updates=None,
     givens=None,
     no_default_updates=False,
