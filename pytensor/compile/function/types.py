@@ -335,6 +335,7 @@ class Function:
         return_none: bool,
         output_keys,
         maker: "FunctionMaker",
+        trust_input: bool,
         name: str | None = None,
     ):
         """
@@ -383,7 +384,7 @@ class Function:
         self.return_none = return_none
         self.maker = maker
         self.profile = None  # reassigned in FunctionMaker.create
-        self.trust_input = False  # If True, we don't check the input parameter
+        self.trust_input = trust_input  # If True, we don't check the input parameter
         self.name = name
         self.nodes_with_inner_function = []
         self.output_keys = output_keys
@@ -1432,6 +1433,7 @@ class FunctionMaker:
         outputs,
         mode=None,
         accept_inplace=False,
+        trust_input=False,
         function_builder=Function,
         profile=None,
         on_unused_input=None,
@@ -1535,6 +1537,7 @@ class FunctionMaker:
         self.unpack_single = unpack_single
         self.return_none = return_none
         self.accept_inplace = accept_inplace
+        self.trust_input = trust_input
         self.function_builder = function_builder
         self.on_unused_input = on_unused_input  # Used for the pickling/copy
         self.output_keys = output_keys
@@ -1666,6 +1669,7 @@ def orig_function(
     outputs,
     mode=None,
     accept_inplace=False,
+    trust_input=False,
     name=None,
     profile=None,
     on_unused_input=None,
@@ -1729,6 +1733,7 @@ def orig_function(
             outputs,
             mode,
             accept_inplace=accept_inplace,
+            trust_input=trust_input,
             profile=profile,
             on_unused_input=on_unused_input,
             output_keys=output_keys,

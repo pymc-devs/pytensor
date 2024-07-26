@@ -101,6 +101,7 @@ def function(
     | dict[Variable, Variable]
     | None = None,
     no_default_updates: bool = False,
+    trust_input: bool = False,
     accept_inplace: bool = False,
     name: str | None = None,
     rebuild_strict: bool = True,
@@ -310,7 +311,7 @@ def function(
                 "semantics, which disallow using updates and givens"
             )
         fn = orig_function(
-            inputs, outputs, mode=mode, accept_inplace=accept_inplace, name=name
+            inputs, outputs, mode=mode, accept_inplace=accept_inplace, name=name, trust_input=trust_input
         )
     else:
         # note: pfunc will also call orig_function -- orig_function is
@@ -322,6 +323,7 @@ def function(
             updates=updates,
             givens=givens,
             no_default_updates=no_default_updates,
+            trust_input=trust_input,
             accept_inplace=accept_inplace,
             name=name,
             rebuild_strict=rebuild_strict,
