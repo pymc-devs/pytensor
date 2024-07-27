@@ -3,6 +3,8 @@ from types import NoneType
 
 import torch
 
+from pytensor.compile import PYTORCH
+from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.fg import FunctionGraph
 from pytensor.link.utils import fgraph_to_python
@@ -132,3 +134,17 @@ def pytorch_funcify_MakeVector(op, **kwargs):
         return torch.tensor(x, dtype=torch_dtype)
 
     return makevector
+
+
+@pytorch_funcify.register(OpFromGraph)
+def pytorch_funcify_OpFromGraph(op, node=None, **kwargs):
+    _ = kwargs.pop("storage_map", None)
+
+    PYTORCH.optimizer(op.fgraph)
+    fgraph_fn = torch.compile(pytorch_funcify(op.fgraph, **kwargs))
+
+    def opfromgraph(*inputs, dim=op.fgraph.outputs):
+        res = fgraph_fn(*inputs)
+        return res[0]
+
+    return opfromgraph
