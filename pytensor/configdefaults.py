@@ -258,14 +258,6 @@ def add_basic_configvars():
             # was expected, so it is currently not available.
             # numpy,
         ),
-    )
-
-    config.add(
-        "deterministic",
-        "If `more`, sometimes we will select some implementation that "
-        "are more deterministic, but slower.  Also see "
-        "the dnn.conv.algo* flags to cover more cases.",
-        EnumStr("default", ["more"]),
         in_c_key=False,
     )
 
@@ -273,13 +265,6 @@ def add_basic_configvars():
         "device",
         ("Default device for computations. only cpu is supported for now"),
         DeviceParam("cpu", mutable=False),
-        in_c_key=False,
-    )
-
-    config.add(
-        "force_device",
-        "Raise an error if we can't use the specified device",
-        BoolParam(False, mutable=False),
         in_c_key=False,
     )
 
@@ -299,14 +284,6 @@ def add_basic_configvars():
         in_c_key=False,
     )
 
-    # This flag determines whether or not to raise error/warning message if
-    # there is a CPU Op in the computational graph.
-    config.add(
-        "assert_no_cpu_op",
-        "Raise an error/warning if there is a CPU op in the computational graph.",
-        EnumStr("ignore", ["warn", "raise", "pdb"], mutable=True),
-        in_c_key=False,
-    )
     config.add(
         "unpickle_function",
         (
@@ -394,23 +371,11 @@ def add_compile_configvars():
 
     if rc == 0 and config.cxx != "":
         # Keep the default linker the same as the one for the mode FAST_RUN
-        config.add(
-            "linker",
-            "Default linker used if the pytensor flags mode is Mode",
-            EnumStr(
-                "cvm", ["c|py", "py", "c", "c|py_nogc", "vm", "vm_nogc", "cvm_nogc"]
-            ),
-            in_c_key=False,
-        )
+        linker_options = ["c|py", "py", "c", "c|py_nogc", "vm", "vm_nogc", "cvm_nogc"]
     else:
         # g++ is not present or the user disabled it,
         # linker should default to python only.
-        config.add(
-            "linker",
-            "Default linker used if the pytensor flags mode is Mode",
-            EnumStr("vm", ["py", "vm_nogc"]),
-            in_c_key=False,
-        )
+        linker_options = ["py", "vm_nogc"]
         if type(config).cxx.is_default:
             # If the user provided an empty value for cxx, do not warn.
             _logger.warning(
@@ -419,6 +384,13 @@ def add_compile_configvars():
                 "Performance may be severely degraded. "
                 "To remove this warning, set PyTensor flags cxx to an empty string."
             )
+
+    config.add(
+        "linker",
+        "Default linker used if the pytensor flags mode is Mode",
+        EnumStr("cvm", linker_options),
+        in_c_key=False,
+    )
 
     # Keep the default value the same as the one for the mode FAST_RUN
     config.add(
@@ -570,7 +542,7 @@ def add_tensor_configvars():
 
     # http://developer.amd.com/CPU/LIBRARIES/LIBM/Pages/default.aspx
     config.add(
-        "lib__amblibm",
+        "lib__amdlibm",
         "Use amd's amdlibm numerical library",
         BoolParam(False),
         # Added elsewhere in the c key only when needed.
@@ -607,10 +579,6 @@ def add_traceback_configvars():
         IntParam(0),
         in_c_key=False,
     )
-
-
-def add_experimental_configvars():
-    return
 
 
 def add_error_and_warning_configvars():
@@ -1043,20 +1011,6 @@ def add_metaopt_configvars():
         in_c_key=False,
     )
 
-    config.add(
-        "metaopt__optimizer_excluding",
-        ("exclude optimizers with these tags. Separate tags with ':'."),
-        StrParam(""),
-        in_c_key=False,
-    )
-
-    config.add(
-        "metaopt__optimizer_including",
-        ("include optimizers with these tags. Separate tags with ':'."),
-        StrParam(""),
-        in_c_key=False,
-    )
-
 
 def add_vm_configvars():
     config.add(
@@ -1295,55 +1249,6 @@ def add_caching_dir_configvars():
     )
 
 
-# Those are the options provided by PyTensor to choose algorithms at runtime.
-SUPPORTED_DNN_CONV_ALGO_RUNTIME = (
-    "guess_once",
-    "guess_on_shape_change",
-    "time_once",
-    "time_on_shape_change",
-)
-
-# Those are the supported algorithm by PyTensor,
-# The tests will reference those lists.
-SUPPORTED_DNN_CONV_ALGO_FWD = (
-    "small",
-    "none",
-    "large",
-    "fft",
-    "fft_tiling",
-    "winograd",
-    "winograd_non_fused",
-    *SUPPORTED_DNN_CONV_ALGO_RUNTIME,
-)
-
-SUPPORTED_DNN_CONV_ALGO_BWD_DATA = (
-    "none",
-    "deterministic",
-    "fft",
-    "fft_tiling",
-    "winograd",
-    "winograd_non_fused",
-    *SUPPORTED_DNN_CONV_ALGO_RUNTIME,
-)
-
-SUPPORTED_DNN_CONV_ALGO_BWD_FILTER = (
-    "none",
-    "deterministic",
-    "fft",
-    "small",
-    "winograd_non_fused",
-    "fft_tiling",
-    *SUPPORTED_DNN_CONV_ALGO_RUNTIME,
-)
-
-SUPPORTED_DNN_CONV_PRECISION = (
-    "as_input_f32",
-    "as_input",
-    "float16",
-    "float32",
-    "float64",
-)
-
 # Eventually, the instance of `PyTensorConfigParser` should be created right here,
 # where it is also populated with settings.
 config = _create_default_config()
@@ -1353,7 +1258,6 @@ add_basic_configvars()
 add_compile_configvars()
 add_tensor_configvars()
 add_traceback_configvars()
-add_experimental_configvars()
 add_error_and_warning_configvars()
 add_testvalue_and_checking_configvars()
 add_multiprocessing_configvars()

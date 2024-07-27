@@ -514,7 +514,7 @@ class TestGemmNoFlags:
         C = self.get_value(C, transpose_C, slice_C)
         return alpha * np.dot(A, B) + beta * C
 
-    @config.change_flags({"blas__ldflags": ""})
+    @config.change_flags(blas__ldflags="")
     def run_gemm(
         self,
         dtype,

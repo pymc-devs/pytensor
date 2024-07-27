@@ -1566,26 +1566,26 @@ class ProfileStats:
             printed_tip = True
 
         # tip 2
-        if not config.lib__amblibm and any(
+        if not config.lib__amdlibm and any(
             amdlibm_speed_up(a.op) for (fgraph, a) in self.apply_time
         ):
             print(
                 "  - Try installing amdlibm and set the PyTensor flag "
-                "lib__amblibm=True. This speeds up only some Elemwise "
+                "lib__amdlibm=True. This speeds up only some Elemwise "
                 "operation.",
                 file=file,
             )
             printed_tip = True
 
         # tip 3
-        if not config.lib__amblibm and any(
+        if not config.lib__amdlibm and any(
             exp_float32_op(a.op) and a.inputs[0].dtype == "float32"
             for (fgraph, a) in self.apply_time
         ):
             print(
                 "  - With the default gcc libm, exp in float32 is slower "
                 "than in float64! Try PyTensor flag floatX=float64, or "
-                "install amdlibm and set the pytensor flags lib__amblibm=True",
+                "install amdlibm and set the pytensor flags lib__amdlibm=True",
                 file=file,
             )
             printed_tip = True

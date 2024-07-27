@@ -32,11 +32,7 @@ class ConfigAccessViolation(AttributeError):
 
 
 class _ChangeFlagsDecorator:
-    def __init__(self, *args, _root=None, **kwargs):
-        # the old API supported passing a dict as the first argument:
-        if args:
-            assert len(args) == 1 and isinstance(args[0], dict)
-            kwargs = dict(**args[0], **kwargs)
+    def __init__(self, _root=None, **kwargs):
         self.confs = {k: _root._config_var_dict[k] for k in kwargs}
         self.new_vals = kwargs
         self._root = _root
@@ -75,6 +71,7 @@ class PyTensorConfigParser:
     pickle_test_value: bool
     cast_policy: str
     device: str
+    conv__assert_shape: bool
     print_global_stats: bool
     unpickle_function: bool
     # add_compile_configvars
@@ -86,6 +83,7 @@ class PyTensorConfigParser:
     optimizer_verbose: bool
     on_opt_error: str
     nocleanup: bool
+    on_unused_input: str
     gcc__cxxflags: str
     cmodule__warn_no_version: bool
     cmodule__remove_gxx_opt: bool
@@ -93,15 +91,15 @@ class PyTensorConfigParser:
     cmodule__preload_cache: bool
     cmodule__age_thresh_use: int
     cmodule__debug: bool
+    compile__wait: int
     compile__timeout: int
     # add_tensor_configvars
     tensor__cmp_sloppy: int
-    lib__amblibm: bool
+    lib__amdlibm: bool
     tensor__insert_inplace_optimizer_validate_nb: int
     # add_traceback_configvars
     traceback__limit: int
     traceback__compile_limit: int
-    # add_experimental_configvars
     # add_error_and_warning_configvars
     warn__ignore_bug_before: int
     exception_verbosity: str
@@ -143,6 +141,7 @@ class PyTensorConfigParser:
     optdb__max_use_ratio: float
     cycle_detection: str
     check_stack_trace: str
+    # add_metaopt_configvars
     metaopt__verbose: int
     # add_vm_configvars
     profile: bool
@@ -177,7 +176,6 @@ class PyTensorConfigParser:
         self._pytensor_cfg = pytensor_cfg
         self._pytensor_raw_cfg = pytensor_raw_cfg
         self._config_var_dict: dict = {}
-        super().__init__()
 
     def __str__(self, print_doc=True):
         sio = StringIO()
@@ -212,9 +210,7 @@ class PyTensorConfigParser:
             )
         )
 
-    def add(
-        self, name: str, doc: str, configparam: "ConfigParam", in_c_key: bool = True
-    ):
+    def add(self, name: str, doc: str, configparam: "ConfigParam", in_c_key: bool):
         """Add a new variable to PyTensorConfigParser.
 
         This method performs some of the work of initializing `ConfigParam` instances.
@@ -281,7 +277,7 @@ class PyTensorConfigParser:
 
         The (decreasing) priority order is:
         - PYTENSOR_FLAGS
-        - ~./pytensorrc
+        - ~/.pytensorrc
 
         """
 
@@ -310,14 +306,14 @@ class PyTensorConfigParser:
         except (NoOptionError, NoSectionError):
             raise KeyError(key)
 
-    def change_flags(self, *args, **kwargs) -> _ChangeFlagsDecorator:
+    def change_flags(self, **kwargs) -> _ChangeFlagsDecorator:
         """
         Use this as a decorator or context manager to change the value of
         PyTensor config variables.
 
         Useful during tests.
         """
-        return _ChangeFlagsDecorator(*args, _root=self, **kwargs)
+        return _ChangeFlagsDecorator(_root=self, **kwargs)
 
     def warn_unused_flags(self):
         for key in self._flags_dict:
@@ -375,7 +371,6 @@ class ConfigParam:
         # more appropriate user-provided default value.
         # Calling `filter` here may actually be harmful if the default value is
         # invalid and causes a crash or has unwanted side effects.
-        super().__init__()
 
     @property
     def default(self):
@@ -541,22 +536,6 @@ class DeviceParam(ConfigParam):
 
     def __str__(self):
         return f"{self.name} ({self.default})"
-
-
-class ContextsParam(ConfigParam):
-    def __init__(self):
-        super().__init__("", apply=self._apply, mutable=False)
-
-    def _apply(self, val):
-        if val == "":
-            return val
-        for v in val.split(";"):
-            s = v.split("->")
-            if len(s) != 2:
-                raise ValueError(f"Malformed context map: {v}")
-            if s[0] == "cpu" or s[0].startswith("cuda") or s[0].startswith("opencl"):
-                raise ValueError(f"Cannot use {s[0]} as context name")
-        return val
 
 
 def parse_config_string(

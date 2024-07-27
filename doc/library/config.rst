@@ -103,14 +103,6 @@ import ``pytensor`` and print the config variable, as in:
 
     String value: either ``'cpu'``
 
-.. attribute:: force_device
-
-    Bool value: either ``True`` or ``False``
-
-    Default: ``False``
-
-    This flag's value cannot be modified during the program execution.
-
 .. attribute:: print_active_device
 
     Bool value: either ``True`` or ``False``
@@ -138,16 +130,6 @@ import ``pytensor`` and print the config variable, as in:
     This option determines what's done when a :class:`TensorVariable` with dtype
     equal to ``float64`` is created.
     This can be used to help find upcasts to ``float64`` in user code.
-
-.. attribute:: deterministic
-
-    String value: either ``'default'``, ``'more'``
-
-    Default: ``'default'``
-
-    If ``more``, sometimes PyTensor will select :class:`Op` implementations that
-    are more "deterministic", but slower.  See the ``dnn.conv.algo*``
-    flags for more cases.
 
 .. attribute:: allow_gc
 
@@ -373,7 +355,7 @@ import ``pytensor`` and print the config variable, as in:
 
     When ``True``, ignore the first call to an PyTensor function while profiling.
 
-.. attribute:: config.lib__amblibm
+.. attribute:: config.lib__amdlibm
 
     Bool value: either ``True`` or ``False``
 
@@ -411,16 +393,6 @@ import ``pytensor`` and print the config variable, as in:
     (i.e. ``'raise'``), drop into the ``pdb`` debugger (i.e. ``'pdb'``), or
     ignore it (i.e. ``'ignore'``).
     We suggest never using ``'ignore'`` except during testing.
-
-.. attribute:: assert_no_cpu_op
-
-    String value: ``'ignore'`` or ``'warn'`` or ``'raise'`` or ``'pdb'``
-
-    Default: ``'ignore'``
-
-    If there is a CPU :class:`Op` in the computational graph, depending on its value,
-    this flag can either raise a warning, an exception or drop into the frame
-    with ``pdb``.
 
 .. attribute:: on_shape_error
 
@@ -797,18 +769,3 @@ import ``pytensor`` and print the config variable, as in:
     The verbosity level of the meta-rewriter: ``0`` for silent, ``1`` to only
     warn when PyTensor cannot meta-rewrite an :class:`Op`, ``2`` for full output (e.g.
     timings and the rewrites selected).
-
-
-.. attribute:: config.metaopt__optimizer_excluding
-
-    Default: ``""``
-
-    A list of rewrite tags that we don't want included in the meta-rewriter.
-    Multiple tags are separate by ``':'``.
-
-.. attribute:: config.metaopt__optimizer_including
-
-    Default: ``""``
-
-    A list of rewriter tags to be included during meta-rewriting.
-    Multiple tags are separate by ``':'``.
