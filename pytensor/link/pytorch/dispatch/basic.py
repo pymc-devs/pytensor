@@ -13,12 +13,12 @@ from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Eye, Join, MakeVect
 @singledispatch
 def pytorch_typify(data, dtype=None, **kwargs):
     r"""Convert instances of PyTensor `Type`\s to PyTorch types."""
-    try:
+    if isinstance(data, NoneType):
+        raise NotImplementedError(f"pytorch_typify is not implemented for {type(data)}")
+    if isinstance(data, slice):
+        raise NotImplementedError(f"pytorch_typify is not implemented for {type(data)}")
+    else:
         return torch.as_tensor(data, dtype=dtype)
-    except RuntimeError:
-        raise NotImplementedError(
-            f"pytorch_typify got type {type(data)}, it should be an array"
-        )
 
 
 @pytorch_typify.register(NoneType)
