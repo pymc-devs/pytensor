@@ -2520,8 +2520,7 @@ class AdvancedIncSubtensor1(COp):
         return code
 
     def c_code(self, node, name, input_names, output_names, sub):
-        numpy_ver = [int(n) for n in np.__version__.split(".")[:2]]
-        if bool(numpy_ver < [1, 8]):
+        if numpy_version < "1.8.0" or using_numpy_2:
             raise NotImplementedError
 
         x, y, idx = input_names
