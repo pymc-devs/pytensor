@@ -1,9 +1,9 @@
 from functools import singledispatch
+from operator import itemgetter
 from types import NoneType
 
 import torch
 
-from pytensor.compile import PYTORCH
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.fg import FunctionGraph
@@ -140,11 +140,9 @@ def pytorch_funcify_MakeVector(op, **kwargs):
 def pytorch_funcify_OpFromGraph(op, node=None, **kwargs):
     _ = kwargs.pop("storage_map", None)
 
-    PYTORCH.optimizer(op.fgraph)
     fgraph_fn = torch.compile(pytorch_funcify(op.fgraph, **kwargs))
-
-    def opfromgraph(*inputs, dim=op.fgraph.outputs):
-        res = fgraph_fn(*inputs)
-        return res[0]
-
-    return opfromgraph
+    return (
+        fgraph_fn
+        if len(op.fgraph.outputs) > 1
+        else lambda *args: itemgetter(0)(fgraph_fn(*args))
+    )
