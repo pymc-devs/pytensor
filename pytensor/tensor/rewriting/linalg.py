@@ -2,7 +2,6 @@ import logging
 from collections.abc import Callable
 from typing import cast
 
-import pytensor.tensor as pt
 from pytensor import Variable
 from pytensor import tensor as pt
 from pytensor.graph import Apply, FunctionGraph
@@ -893,7 +892,7 @@ def rewrite_slogdet_kronecker(fgraph, node):
 @register_canonicalize
 @register_stabilize
 @node_rewriter([Blockwise])
-def rewrite_cholesky_eye_to_eye(fgraph, node):
+def rewrite_remove_useless_cholesky(fgraph, node):
     """
      This rewrite takes advantage of the fact that the cholesky decomposition of an identity matrix is the matrix itself
 
@@ -916,14 +915,15 @@ def rewrite_cholesky_eye_to_eye(fgraph, node):
         return None
 
     # Check whether input to Cholesky is Eye and the 1's are on main diagonal
-    eye_check = node.inputs[0]
+    potential_eye = node.inputs[0]
     if not (
-        eye_check.owner
-        and isinstance(eye_check.owner.op, Eye)
-        and getattr(eye_check.owner.inputs[-1], "data", -1).item() == 0
+        potential_eye.owner
+        and isinstance(potential_eye.owner.op, Eye)
+        and hasattr(potential_eye.owner.inputs[-1], "data")
+        and potential_eye.owner.inputs[-1].data.item() == 0
     ):
         return None
-    return [eye_check]
+    return [potential_eye]
 
 
 @register_canonicalize
@@ -941,10 +941,9 @@ def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
         and isinstance(inputs.owner.op, AllocDiag)
         and AllocDiag.is_offset_zero(inputs.owner)
     ):
-        cholesky_input = inputs.owner.inputs[0]
-        if cholesky_input.type.ndim == 1:
-            cholesky_val = pt.diag(cholesky_input**0.5)
-            return [cholesky_val]
+        diag_input = inputs.owner.inputs[0]
+        cholesky_val = pt.diag(diag_input**0.5)
+        return [cholesky_val]
 
     # Check if the input is an elemwise multiply with identity matrix -- this also results in a diagonal matrix
     inputs_or_none = _find_diag_from_eye_mul(inputs)
@@ -962,8 +961,6 @@ def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
     # Now, we can simply return the matrix consisting of sqrt values of the original diagonal elements
     # For a matrix, we have to first extract the diagonal (non-zero values) and then only use those
     if non_eye_input.type.broadcastable[-2:] == (False, False):
-        # For Matrix
-        return [eye_input * (non_eye_input.diagonal(axis1=-1, axis2=-2) ** 0.5)]
-    else:
-        # For Vector or Scalar
-        return [eye_input * (non_eye_input**0.5)]
+        non_eye_input = non_eye_input.diagonal(axis1=-1, axis2=-2)
+
+    return [eye_input * (non_eye_input**0.5)]

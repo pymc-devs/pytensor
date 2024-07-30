@@ -807,17 +807,12 @@ def test_slogdet_kronecker_rewrite():
 
 def test_cholesky_eye_rewrite():
     x = pt.eye(10)
-    x_mat = pt.matrix("x")
     L = pt.linalg.cholesky(x)
-    L_mat = pt.linalg.cholesky(x_mat)
     f_rewritten = function([], L, mode="FAST_RUN")
-    f_rewritten_mat = function([x_mat], L_mat, mode="FAST_RUN")
     nodes = f_rewritten.maker.fgraph.apply_nodes
-    nodes_mat = f_rewritten_mat.maker.fgraph.apply_nodes
 
     # Rewrite Test
     assert not any(isinstance(node.op, Cholesky) for node in nodes)
-    assert any(isinstance(node.op, Cholesky) for node in nodes_mat)
 
     # Value Test
     x_test = np.eye(10)
@@ -891,3 +886,15 @@ def test_cholesky_diag_from_diag():
         atol=1e-3 if config.floatX == "float32" else 1e-8,
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
+
+
+def test_dont_apply_cholesky():
+    x = pt.tensor("x", shape=(7, 7))
+    y = pt.eye(7, k=-1) * x
+    # Here, y is not a diagonal matrix because of k = -1
+    z_cholesky = pt.linalg.cholesky(y)
+
+    # REWRITE TEST (should not be applied)
+    f_rewritten = function([x], z_cholesky, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert any(isinstance(node.op, Cholesky) for node in nodes)
