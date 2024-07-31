@@ -2926,18 +2926,18 @@ def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
     return x
 
 
-def percentile(input, q, axis=None):
+def quantile(input, q, axis=None):
     """
-    Computes the percentile along the given axis(es) of a tensor `input` using linear interpolation.
+    Computes the quantile along the given axis(es) of a tensor `input` using linear interpolation.
 
     Parameters
     ----------
     input: TensorVariable
         The input tensor.
     q: float or list of floats
-        Percentile or sequence of percentiles to compute, which must be between 0 and 100 inclusive.
+        Quantile or sequence of quantiles to compute, which must be between 0 and 1 inclusive.
     axis: None or int or list of int, optional
-        Axis or axes along which the percentiles are computed. The default is to compute the percentile(s) along a flattened version of the array.
+        Axis or axes along which the quantiles are computed. The default is to compute the quantile(s) along a flattened version of the array.
     """
     x = as_tensor_variable(input)
     x_ndim = x.type.ndim
@@ -2967,13 +2967,13 @@ def percentile(input, q, axis=None):
     if isinstance(q, (int | float)):
         q = [q]
 
-    for percentile in q:
-        if percentile < 0 or percentile > 100:
-            raise ValueError("Percentiles must be in the range [0, 100]")
+    for quantile in q:
+        if quantile < 0 or quantile > 1:
+            raise ValueError("Quantiles must be in the range [0, 1]")
 
     result = []
-    for percentile in q:
-        k = (percentile / 100.0) * (input_shape - 1)
+    for quantile in q:
+        k = (quantile) * (input_shape - 1)
         k_floor = floor(k).astype("int64")
         k_ceil = ceil(k).astype("int64")
 
@@ -2983,42 +2983,42 @@ def percentile(input, q, axis=None):
         val2 = sorted_input[tuple(slices2)]
 
         d = k - k_floor
-        percentile_val = val1 + d * (val2 - val1)
+        quantile_val = val1 + d * (val2 - val1)
 
-        result.append(percentile_val.squeeze(axis=-1))
+        result.append(quantile_val.squeeze(axis=-1))
 
     if len(result) == 1:
         result = result[0]
     else:
         result = stack(result)
 
-    result.name = "percentile"
+    result.name = "quantile"
     return result
 
 
-def quantile(input, q, axis=None):
+def percentile(input, q, axis=None):
     """
-    Computes the quantile along the given axis(es) of a tensor `input` using linear interpolation.
+    Computes the percentile along the given axis(es) of a tensor `input` using linear interpolation.
 
     Parameters
     ----------
     input: TensorVariable
         The input tensor.
     q: float or list of floats
-        Quantile or sequence of quantiles to compute, which must be between 0 and 1 inclusive.
+        Percentile or sequence of percentiles to compute, which must be between 0 and 100 inclusive.
     axis: None or int or list of int, optional
-        Axis or axes along which the quantiles are computed. The default is to compute the quantile(s) along a flattened version of the array.
+        Axis or axes along which the percentiles are computed. The default is to compute the percentile(s) along a flattened version of the array.
     """
     if isinstance(q, (int | float)):
         q = [q]
 
-    for quantile in q:
-        if quantile < 0 or quantile > 1:
-            raise ValueError("Quantiles must be in the range [0, 1]")
+    for percentile in q:
+        if percentile < 0 or percentile > 100:
+            raise ValueError("Percentiles must be in the range [0, 100]")
 
-    percentiles = [100.0 * x for x in q]
+    quantiles = [x / 100 for x in q]
 
-    return percentile(input, percentiles, axis)
+    return quantile(input, quantiles, axis)
 
 
 # NumPy logical aliases
