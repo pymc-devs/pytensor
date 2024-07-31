@@ -26,8 +26,10 @@ from pytensor.tensor.basic import (
     concatenate,
     constant,
     expand_dims,
+    full_like,
     stack,
     switch,
+    take_along_axis,
 )
 from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
 from pytensor.tensor.elemwise import (
@@ -1569,6 +1571,56 @@ def std(input, axis=None, ddof=0, keepdims=False, corrected=False):
     return ret
 
 
+def median(input, axis=None):
+    """
+    Computes the median along the given axis(es) of a tensor `input`.
+
+    Parameters
+    ----------
+    input: TensorVariable
+        The input tensor.
+    axis: None or int or (list of int) (see `Sum`)
+        Compute the median along this axis of the tensor.
+        None means all axes (like numpy).
+    """
+    from pytensor.ifelse import ifelse
+
+    x = as_tensor_variable(input)
+    x_ndim = x.type.ndim
+    if axis is None:
+        axis = list(range(x_ndim))
+    else:
+        axis = list(normalize_axis_tuple(axis, x_ndim))
+
+    new_axes_order = [i for i in range(x.ndim) if i not in axis] + list(axis)
+    x = x.dimshuffle(new_axes_order)
+    x_shape = x.shape
+
+    remaining_axis_size = shape(x)[: x.ndim - len(axis)]
+
+    x = x.reshape((*remaining_axis_size, -1))
+
+    # Sort the input tensor along the specified axis
+    sorted_x = x.sort(axis=-1)
+    x_shape = x.shape[-1]
+    k = x_shape // 2
+
+    indices1 = expand_dims(full_like(sorted_x.take(0, axis=-1), k), -1)
+    indices2 = expand_dims(full_like(sorted_x.take(0, axis=-1), k - 1), -1)
+    ans1 = take_along_axis(sorted_x, indices1, axis=-1)
+    ans2 = take_along_axis(sorted_x, indices2, axis=-1)
+    median_val_even = (ans1 + ans2) / 2.0
+
+    median_val_odd = (
+        take_along_axis(sorted_x, indices1, axis=-1) / 1.0
+    )  # Divide by one so that the two dtypes passed in ifelse are compatible
+
+    median_val = ifelse(eq(mod(x_shape, 2), 0), median_val_even, median_val_odd)
+    median_val.name = "median"
+
+    return median_val.squeeze(axis=-1)
+
+
 @scalar_elemwise(symbolname="scalar_maximum")
 def maximum(x, y):
     """elemwise maximum. See max for the maximum in one tensor"""
@@ -3001,6 +3053,7 @@ __all__ = [
     "sum",
     "prod",
     "mean",
+    "median",
     "var",
     "std",
     "std",
