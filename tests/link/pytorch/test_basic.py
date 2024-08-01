@@ -17,6 +17,8 @@ from pytensor.graph.op import Op
 from pytensor.ifelse import ifelse
 from pytensor.link.pytorch.linker import PytorchLinker
 from pytensor.raise_op import CheckAndRaise
+from pytensor.scalar import float64, int64
+from pytensor.scalar.loop import ScalarLoop
 from pytensor.tensor import alloc, arange, as_tensor, empty, expit, eye, softplus
 from pytensor.tensor.type import matrices, matrix, scalar, vector
 
@@ -388,3 +390,17 @@ def test_pytorch_softplus():
     out = softplus(x)
     f = FunctionGraph([x], [out])
     compare_pytorch_and_py(f, [np.random.rand(3)])
+
+def test_ScalarLoop():
+    n_steps = int64("n_steps")
+    x0 = float64("x0")
+    const = float64("const")
+    x = x0 + const
+
+    op = ScalarLoop(init=[x0], constant=[const], update=[x])
+    x = op(n_steps, x0, const)
+
+    fn = function([n_steps, x0, const], x, mode=pytorch_mode)
+    np.testing.assert_allclose(fn(5, 0, 1), 5)
+    np.testing.assert_allclose(fn(5, 0, 2), 10)
+    np.testing.assert_allclose(fn(4, 3, -1), -1)

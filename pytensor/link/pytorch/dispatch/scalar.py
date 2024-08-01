@@ -8,6 +8,7 @@ from pytensor.scalar.basic import (
     ScalarOp,
 )
 from pytensor.scalar.math import Softplus
+from pytensor.scalar.loop import ScalarLoop
 
 
 @pytorch_funcify.register(ScalarOp)
@@ -58,7 +59,26 @@ def pytorch_funcify_Cast(op: Cast, node, **kwargs):
 
     return cast
 
-
 @pytorch_funcify.register(Softplus)
 def pytorch_funcify_Softplus(op, node, **kwargs):
     return torch.nn.Softplus()
+
+@pytorch_funcify.register(ScalarLoop)
+def pytorch_funicify_ScalarLoop(op, node, **kwargs):
+    update = pytorch_funcify(op.fgraph)
+
+    def inner(steps, start, constant, update=update, is_while=op.is_while):
+        # easiest way to do it is to loop
+        c = start
+        for i in range(steps):
+            outs = update(c, constant)
+            if is_while:
+                n, done = outs
+                if done:
+                    return n
+                c = n
+            else:
+                c = outs[0]
+        return c
+
+    return inner
