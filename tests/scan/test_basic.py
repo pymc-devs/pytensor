@@ -174,7 +174,7 @@ class multiple_outputs_numeric_grad:
             raise ValueError("argument has wrong number of elements", len(g_pt))
         errs = []
 
-        for i, (a, b) in enumerate(zip(g_pt, self.gx)):
+        for i, (a, b) in enumerate(zip(g_pt, self.gx, strict=True)):
             if a.shape != b.shape:
                 raise ValueError(
                     f"argument element {i} has wrong shape {(a.shape, b.shape)}"
@@ -202,7 +202,10 @@ def scan_project_sum(*args, **kwargs):
     rng.add_default_updates = False
     factors = [rng.uniform(0.1, 0.9, size=s.shape) for s in scan_outputs]
     # Random values (?)
-    return (sum((s * f).sum() for s, f in zip(scan_outputs, factors)), updates)
+    return (
+        sum((s * f).sum() for s, f in zip(scan_outputs, factors, strict=True)),
+        updates,
+    )
 
 
 def asarrayX(value):
@@ -3844,7 +3847,7 @@ class TestExamples:
         gparams = grad(cost, params)
         updates = [
             (param, param - gparam * learning_rate)
-            for param, gparam in zip(params, gparams)
+            for param, gparam in zip(params, gparams, strict=True)
         ]
         learn_rnn_fn = function(inputs=[x, t], outputs=cost, updates=updates, mode=mode)
         function(inputs=[x], outputs=y, mode=mode)

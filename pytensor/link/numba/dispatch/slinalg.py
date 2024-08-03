@@ -420,7 +420,7 @@ def numba_funcify_BlockDiagonal(op, node, **kwargs):
         out = np.zeros((out_shape[0], out_shape[1]), dtype=dtype)
 
         r, c = 0, 0
-        for arr, shape in zip(arrs, shapes):
+        for arr, shape in zip(arrs, shapes, strict=True):
             rr, cc = shape
             out[r : r + rr, c : c + cc] = arr
             r += rr

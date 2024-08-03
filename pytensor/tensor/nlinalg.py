@@ -362,7 +362,7 @@ class Eigh(Eig):
 
 def _zero_disconnected(outputs, grads):
     l = []
-    for o, g in zip(outputs, grads):
+    for o, g in zip(outputs, grads, strict=True):
         if isinstance(g.type, DisconnectedType):
             l.append(o.zeros_like())
         else:
@@ -664,7 +664,7 @@ class SVD(Op):
                 return s_grad_only(U, VT, ds)
 
             for disconnected, output_grad, output in zip(
-                is_disconnected, output_grads, [U, s, VT]
+                is_disconnected, output_grads, [U, s, VT], strict=True
             ):
                 if disconnected:
                     new_output_grads.append(output.zeros_like())

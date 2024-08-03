@@ -371,7 +371,7 @@ class TestFunction:
 
             # Assert storages of SharedVariable without updates are shared
             for (input, _1, _2), here, there in zip(
-                ori.indices, ori.input_storage, cpy.input_storage
+                ori.indices, ori.input_storage, cpy.input_storage, strict=True
             ):
                 assert here.data is there.data
 
@@ -467,7 +467,7 @@ class TestFunction:
             swap={train_x: test_x, train_y: test_y}, delete_updates=True
         )
 
-        for in1, in2 in zip(test_def.maker.inputs, test_cpy.maker.inputs):
+        for in1, in2 in zip(test_def.maker.inputs, test_cpy.maker.inputs, strict=True):
             assert in1.value is in2.value
 
     def test_copy_delete_updates(self):
@@ -905,7 +905,7 @@ class TestPicklefunction:
         # print(f"{f.defaults = }")
         # print(f"{g.defaults = }")
         for (f_req, f_feed, f_val), (g_req, g_feed, g_val) in zip(
-            f.defaults, g.defaults
+            f.defaults, g.defaults, strict=True
         ):
             assert f_req == g_req and f_feed == g_feed and f_val == g_val
 
@@ -1076,7 +1076,7 @@ class TestPicklefunction:
         tf = f.maker.fgraph.toposort()
         tg = f.maker.fgraph.toposort()
         assert len(tf) == len(tg)
-        for nf, ng in zip(tf, tg):
+        for nf, ng in zip(tf, tg, strict=True):
             assert nf.op == ng.op
             assert len(nf.inputs) == len(ng.inputs)
             assert len(nf.outputs) == len(ng.outputs)

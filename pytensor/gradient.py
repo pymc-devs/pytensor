@@ -213,7 +213,7 @@ def Rop(
 
     # Check that each element of wrt corresponds to an element
     # of eval_points with the same dimensionality.
-    for i, (wrt_elem, eval_point) in enumerate(zip(_wrt, _eval_points)):
+    for i, (wrt_elem, eval_point) in enumerate(zip(_wrt, _eval_points, strict=True)):
         try:
             if wrt_elem.type.ndim != eval_point.type.ndim:
                 raise ValueError(
@@ -262,7 +262,7 @@ def Rop(
                     seen_nodes[inp.owner][inp.owner.outputs.index(inp)]
                 )
         same_type_eval_points = []
-        for x, y in zip(inputs, local_eval_points):
+        for x, y in zip(inputs, local_eval_points, strict=True):
             if y is not None:
                 if not isinstance(x, Variable):
                     x = pytensor.tensor.as_tensor_variable(x)
@@ -399,7 +399,7 @@ def Lop(
         _wrt = [pytensor.tensor.as_tensor_variable(x) for x in wrt]
 
     assert len(_f) == len(grads)
-    known = dict(zip(_f, grads))
+    known = dict(zip(_f, grads, strict=True))
 
     ret = grad(
         cost=None,
@@ -778,7 +778,7 @@ def subgraph_grad(wrt, end, start=None, cost=None, details=False):
             for i in range(len(grads)):
                 grads[i] += cost_grads[i]
 
-    pgrads = dict(zip(params, grads))
+    pgrads = dict(zip(params, grads, strict=True))
     # separate wrt from end grads:
     wrt_grads = [pgrads[k] for k in wrt]
     end_grads = [pgrads[k] for k in end]
@@ -1044,7 +1044,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                     any(
                         input_to_output and output_to_cost
                         for input_to_output, output_to_cost in zip(
-                            input_to_outputs, outputs_connected
+                            input_to_outputs, outputs_connected, strict=True
                         )
                     )
                 )
@@ -1069,7 +1069,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                     not any(
                         in_to_out and out_to_cost and not out_nan
                         for in_to_out, out_to_cost, out_nan in zip(
-                            in_to_outs, outputs_connected, ograd_is_nan
+                            in_to_outs, outputs_connected, ograd_is_nan, strict=True
                         )
                     )
                 )
@@ -1129,7 +1129,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                 # DO NOT force integer variables to have integer dtype.
                 # This is a violation of the op contract.
                 new_output_grads = []
-                for o, og in zip(node.outputs, output_grads):
+                for o, og in zip(node.outputs, output_grads, strict=True):
                     o_dt = getattr(o.type, "dtype", None)
                     og_dt = getattr(og.type, "dtype", None)
                     if (
@@ -1143,7 +1143,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
 
                 # Make sure that, if new_output_grads[i] has a floating point
                 # dtype, it is the same dtype as outputs[i]
-                for o, ng in zip(node.outputs, new_output_grads):
+                for o, ng in zip(node.outputs, new_output_grads, strict=True):
                     o_dt = getattr(o.type, "dtype", None)
                     ng_dt = getattr(ng.type, "dtype", None)
                     if (
@@ -1165,7 +1165,9 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                 # by the user, not computed by Op.grad, and some gradients are
                 # only computed and returned, but never passed as another
                 # node's output grads.
-                for idx, packed in enumerate(zip(node.outputs, new_output_grads)):
+                for idx, packed in enumerate(
+                    zip(node.outputs, new_output_grads, strict=True)
+                ):
                     orig_output, new_output_grad = packed
                     if not hasattr(orig_output, "shape"):
                         continue
@@ -1231,7 +1233,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                     not in [
                         in_to_out and out_to_cost and not out_int
                         for in_to_out, out_to_cost, out_int in zip(
-                            in_to_outs, outputs_connected, output_is_int
+                            in_to_outs, outputs_connected, output_is_int, strict=True
                         )
                     ]
                 )
@@ -1312,7 +1314,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
             # Check that op.connection_pattern matches the connectivity
             # logic driving the op.grad method
             for i, (ipt, ig, connected) in enumerate(
-                zip(inputs, input_grads, inputs_connected)
+                zip(inputs, input_grads, inputs_connected, strict=True)
             ):
                 actually_connected = not isinstance(ig.type, DisconnectedType)
 
@@ -1599,7 +1601,7 @@ class numeric_grad:
         if len(g_pt) != len(self.gf):
             raise ValueError("argument has wrong number of elements", len(g_pt))
         errs = []
-        for i, (a, b) in enumerate(zip(g_pt, self.gf)):
+        for i, (a, b) in enumerate(zip(g_pt, self.gf, strict=True)):
             if a.shape != b.shape:
                 raise ValueError(
                     f"argument element {i} has wrong shapes {a.shape}, {b.shape}"

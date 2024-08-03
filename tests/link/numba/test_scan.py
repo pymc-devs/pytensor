@@ -488,7 +488,7 @@ def test_vector_taps_benchmark(benchmark):
 
     ref_fn = pytensor.function(list(test), outs, mode=get_mode("FAST_COMPILE"))
     ref_res = ref_fn(*test.values())
-    for numba_r, ref_r in zip(numba_res, ref_res):
+    for numba_r, ref_r in zip(numba_res, ref_res, strict=True):
         np.testing.assert_array_almost_equal(numba_r, ref_r)
 
     benchmark(numba_fn, *test.values())

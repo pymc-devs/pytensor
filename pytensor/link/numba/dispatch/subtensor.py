@@ -158,7 +158,7 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
             def advancedincsubtensor1_inplace(x, vals, idxs):
                 if not len(idxs) == len(vals):
                     raise ValueError("The number of indices and values must match.")
-                for idx, val in zip(idxs, vals):
+                for idx, val in zip(idxs, vals, strict=True):
                     x[idx] = val
                 return x
     else:
@@ -184,7 +184,7 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
             def advancedincsubtensor1_inplace(x, vals, idxs):
                 if not len(idxs) == len(vals):
                     raise ValueError("The number of indices and values must match.")
-                for idx, val in zip(idxs, vals):
+                for idx, val in zip(idxs, vals, strict=True):
                     x[idx] += val
                 return x
 

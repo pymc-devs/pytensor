@@ -385,11 +385,11 @@ class PerformLinker(LocalLinker):
             f,
             [
                 Container(input, storage)
-                for input, storage in zip(fgraph.inputs, input_storage)
+                for input, storage in zip(fgraph.inputs, input_storage, strict=True)
             ],
             [
                 Container(output, storage, readonly=True)
-                for output, storage in zip(fgraph.outputs, output_storage)
+                for output, storage in zip(fgraph.outputs, output_storage, strict=True)
             ],
             thunks,
             order,
@@ -509,7 +509,9 @@ class WrapLinker(Linker):
         kwargs.pop("input_storage", None)
         make_all += [x.make_all(**kwargs) for x in self.linkers[1:]]
 
-        fns, input_lists, output_lists, thunk_lists, order_lists = zip(*make_all)
+        fns, input_lists, output_lists, thunk_lists, order_lists = zip(
+            *make_all, strict=True
+        )
 
         order_list0 = order_lists[0]
         for order_list in order_lists[1:]:
@@ -521,12 +523,12 @@ class WrapLinker(Linker):
         inputs0 = input_lists[0]
         outputs0 = output_lists[0]
 
-        thunk_groups = list(zip(*thunk_lists))
-        order = [x[0] for x in zip(*order_lists)]
+        thunk_groups = list(zip(*thunk_lists, strict=True))
+        order = [x[0] for x in zip(*order_lists, strict=True)]
 
         to_reset = [
             thunk.outputs[j]
-            for thunks, node in zip(thunk_groups, order)
+            for thunks, node in zip(thunk_groups, order, strict=True)
             for j, output in enumerate(node.outputs)
             if output in no_recycling
             for thunk in thunks
@@ -537,12 +539,12 @@ class WrapLinker(Linker):
 
         def f():
             for inputs in input_lists[1:]:
-                for input1, input2 in zip(inputs0, inputs):
+                for input1, input2 in zip(inputs0, inputs, strict=True):
                     input2.storage[0] = copy(input1.storage[0])
             for x in to_reset:
                 x[0] = None
             pre(self, [input.data for input in input_lists[0]], order, thunk_groups)
-            for i, (thunks, node) in enumerate(zip(thunk_groups, order)):
+            for i, (thunks, node) in enumerate(zip(thunk_groups, order, strict=True)):
                 try:
                     wrapper(self.fgraph, i, node, *thunks)
                 except Exception:
@@ -664,7 +666,9 @@ class JITLinker(PerformLinker):
         ):
             outputs = fgraph_jit(*[self.input_filter(x[0]) for x in thunk_inputs])
 
-            for o_var, o_storage, o_val in zip(fgraph.outputs, thunk_outputs, outputs):
+            for o_var, o_storage, o_val in zip(
+                fgraph.outputs, thunk_outputs, outputs, strict=True
+            ):
                 compute_map[o_var][0] = True
                 o_storage[0] = self.output_filter(o_var, o_val)
             return outputs
@@ -730,11 +734,11 @@ class JITLinker(PerformLinker):
             fn,
             [
                 Container(input, storage)
-                for input, storage in zip(fgraph.inputs, input_storage)
+                for input, storage in zip(fgraph.inputs, input_storage, strict=True)
             ],
             [
                 Container(output, storage, readonly=True)
-                for output, storage in zip(fgraph.outputs, output_storage)
+                for output, storage in zip(fgraph.outputs, output_storage, strict=True)
             ],
             thunks,
             nodes,

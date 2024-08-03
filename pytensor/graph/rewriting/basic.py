@@ -399,14 +399,14 @@ class SequentialGraphRewriter(GraphRewriter, UserList):
                 file=stream,
             )
         ll = []
-        for rewrite, nb_n in zip(rewrites, nb_nodes):
+        for rewrite, nb_n in zip(rewrites, nb_nodes, strict=True):
             if hasattr(rewrite, "__name__"):
                 name = rewrite.__name__
             else:
                 name = rewrite.name
             idx = rewrites.index(rewrite)
             ll.append((name, rewrite.__class__.__name__, idx, *nb_n))
-        lll = sorted(zip(prof, ll), key=lambda a: a[0])
+        lll = sorted(zip(prof, ll, strict=True), key=lambda a: a[0])
 
         for t, rewrite in lll[::-1]:
             i = rewrite[2]
@@ -480,7 +480,8 @@ class SequentialGraphRewriter(GraphRewriter, UserList):
 
         new_rewrite = SequentialGraphRewriter(*new_l)
         new_nb_nodes = [
-            (p1[0] + p2[0], p1[1] + p2[1]) for p1, p2 in zip(prof1[8], prof2[8])
+            (p1[0] + p2[0], p1[1] + p2[1])
+            for p1, p2 in zip(prof1[8], prof2[8], strict=True)
         ]
         new_nb_nodes.extend(prof1[8][len(new_nb_nodes) :])
         new_nb_nodes.extend(prof2[8][len(new_nb_nodes) :])
@@ -635,7 +636,7 @@ class MergeFeature(Feature):
 
             inputs_match = all(
                 node_in is cand_in
-                for node_in, cand_in in zip(node.inputs, candidate.inputs)
+                for node_in, cand_in in zip(node.inputs, candidate.inputs, strict=True)
             )
 
             if inputs_match and node.op == candidate.op:
@@ -649,6 +650,7 @@ class MergeFeature(Feature):
                         node.outputs,
                         candidate.outputs,
                         ["merge"] * len(node.outputs),
+                        strict=True,
                     )
                 )
 
@@ -721,7 +723,9 @@ class MergeOptimizer(GraphRewriter):
                         inputs_match = all(
                             node_in is cand_in
                             for node_in, cand_in in zip(
-                                var.owner.inputs, candidate_var.owner.inputs
+                                var.owner.inputs,
+                                candidate_var.owner.inputs,
+                                strict=True,
                             )
                         )
 
@@ -1434,7 +1438,7 @@ class SubstitutionNodeRewriter(NodeRewriter):
         repl = self.op2.make_node(*node.inputs)
         if self.transfer_tags:
             repl.tag = copy.copy(node.tag)
-            for output, new_output in zip(node.outputs, repl.outputs):
+            for output, new_output in zip(node.outputs, repl.outputs, strict=True):
                 new_output.tag = copy.copy(output.tag)
         return repl.outputs
 
@@ -1614,7 +1618,7 @@ class PatternNodeRewriter(NodeRewriter):
             for real_node in self.get_nodes(fgraph, node):
                 ret = self.transform(fgraph, real_node, get_nodes=False)
                 if ret is not False and ret is not None:
-                    return dict(zip(real_node.outputs, ret))
+                    return dict(zip(real_node.outputs, ret, strict=True))
 
         if node.op != self.op:
             return False
@@ -1646,7 +1650,7 @@ class PatternNodeRewriter(NodeRewriter):
                 len(node.outputs) == len(ret.owner.outputs)
                 and all(
                     o.type.is_super(new_o.type)
-                    for o, new_o in zip(node.outputs, ret.owner.outputs)
+                    for o, new_o in zip(node.outputs, ret.owner.outputs, strict=True)
                 )
             ):
                 return False
@@ -1935,7 +1939,7 @@ class NodeProcessingGraphRewriter(GraphRewriter):
             )
         # None in the replacement mean that this variable isn't used
         # and we want to remove it
-        for r, rnew in zip(old_vars, replacements):
+        for r, rnew in zip(old_vars, replacements, strict=True):
             if rnew is None and len(fgraph.clients[r]) > 0:
                 raise ValueError(
                     f"Node rewriter {node_rewriter} tried to remove a variable"
@@ -1945,7 +1949,7 @@ class NodeProcessingGraphRewriter(GraphRewriter):
         # the replacement
         repl_pairs = [
             (r, rnew)
-            for r, rnew in zip(old_vars, replacements)
+            for r, rnew in zip(old_vars, replacements, strict=True)
             if rnew is not r and rnew is not None
         ]
 
@@ -2628,17 +2632,23 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
         print(blanc, "Global, final, and clean up rewriters", file=stream)
         for i in range(len(loop_timing)):
             print(blanc, f"Iter {int(i)}", file=stream)
-            for o, prof in zip(rewrite.global_rewriters, global_sub_profs[i]):
+            for o, prof in zip(
+                rewrite.global_rewriters, global_sub_profs[i], strict=True
+            ):
                 try:
                     o.print_profile(stream, prof, level + 2)
                 except NotImplementedError:
                     print(blanc, "merge not implemented for ", o)
-            for o, prof in zip(rewrite.final_rewriters, final_sub_profs[i]):
+            for o, prof in zip(
+                rewrite.final_rewriters, final_sub_profs[i], strict=True
+            ):
                 try:
                     o.print_profile(stream, prof, level + 2)
                 except NotImplementedError:
                     print(blanc, "merge not implemented for ", o)
-            for o, prof in zip(rewrite.cleanup_rewriters, cleanup_sub_profs[i]):
+            for o, prof in zip(
+                rewrite.cleanup_rewriters, cleanup_sub_profs[i], strict=True
+            ):
                 try:
                     o.print_profile(stream, prof, level + 2)
                 except NotImplementedError:
@@ -2856,7 +2866,7 @@ def pre_greedy_node_rewriter(
                     outs, rewritten_vars = local_recursive_function(
                         rewrite_list, inp, rewritten_vars, depth + 1
                     )
-                    for k, v in zip(inp.owner.outputs, outs):
+                    for k, v in zip(inp.owner.outputs, outs, strict=True):
                         rewritten_vars[k] = v
                     nw_in = outs[inp.owner.outputs.index(inp)]
 
@@ -2874,7 +2884,7 @@ def pre_greedy_node_rewriter(
             if ret is not False and ret is not None:
                 assert isinstance(ret, Sequence)
                 assert len(ret) == len(node.outputs), rewrite
-                for k, v in zip(node.outputs, ret):
+                for k, v in zip(node.outputs, ret, strict=True):
                     rewritten_vars[k] = v
                 results = ret
                 if ret[0].owner:

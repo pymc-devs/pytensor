@@ -1545,6 +1545,7 @@ class Alloc(COp):
                 extended_value_broadcastable,
                 extended_value_static_shape,
                 static_shape,
+                strict=True,
             )
         ):
             # If value is not broadcastable and we don't know the target static shape: use value static shape
@@ -1565,7 +1566,7 @@ class Alloc(COp):
     def _check_runtime_broadcast(node, value, shape):
         value_static_shape = node.inputs[0].type.shape
         for v_static_dim, value_dim, out_dim in zip(
-            value_static_shape[::-1], value.shape[::-1], shape[::-1]
+            value_static_shape[::-1], value.shape[::-1], shape[::-1], strict=False
         ):
             if v_static_dim is None and value_dim == 1 and out_dim != 1:
                 raise ValueError(Alloc._runtime_broadcast_error_msg)
@@ -1668,6 +1669,7 @@ class Alloc(COp):
                 inputs[0].type.shape,
                 # We need the dimensions corresponding to x
                 grads[0].type.shape[-inputs[0].ndim :],
+                strict=False,
             )
         ):
             if ib == 1 and gb != 1:
@@ -2187,7 +2189,7 @@ class Split(COp):
             ]
         # Else, we have to make them zeros before joining them
         new_g_outputs = []
-        for o, g in zip(outputs, g_outputs):
+        for o, g in zip(outputs, g_outputs, strict=True):
             if isinstance(g.type, DisconnectedType):
                 new_g_outputs.append(o.zeros_like())
             else:
@@ -2624,7 +2626,7 @@ class Join(COp):
                 else specify_broadcastable(
                     g, *(ax for (ax, s) in enumerate(t.type.shape) if s == 1)
                 )
-                for t, g in zip(tens, split_gz)
+                for t, g in zip(tens, split_gz, strict=True)
             ]
             rval = rval + split_gz
         else:
@@ -2736,7 +2738,7 @@ def vectorize_join(op: Join, node, batch_axis, *batch_inputs):
     ):
         batch_ndims = {
             batch_input.type.ndim - old_input.type.ndim
-            for batch_input, old_input in zip(batch_inputs, old_inputs)
+            for batch_input, old_input in zip(batch_inputs, old_inputs, strict=True)
         }
         if len(batch_ndims) == 1:
             [batch_ndim] = batch_ndims
@@ -3319,7 +3321,7 @@ class _nd_grid:
             tuple([1] * j + [r.shape[0]] + [1] * (ndim - 1 - j))
             for j, r in enumerate(ranges)
         ]
-        ranges = [r.reshape(shape) for r, shape in zip(ranges, shapes)]
+        ranges = [r.reshape(shape) for r, shape in zip(ranges, shapes, strict=True)]
         if self.sparse:
             grids = ranges
         else:
@@ -3391,7 +3393,7 @@ class PermuteRowElements(Op):
 
         out_shape = [
             1 if xb == 1 and yb == 1 else None
-            for xb, yb in zip(x.type.shape, y.type.shape)
+            for xb, yb in zip(x.type.shape, y.type.shape, strict=True)
         ]
         out_type = tensor(dtype=x.type.dtype, shape=out_shape)
 
@@ -3456,7 +3458,7 @@ class PermuteRowElements(Op):
 
         # Make sure the output is big enough
         out_s = []
-        for xdim, ydim in zip(x_s, y_s):
+        for xdim, ydim in zip(x_s, y_s, strict=True):
             if xdim == ydim:
                 outdim = xdim
             elif xdim == 1:
@@ -3516,7 +3518,7 @@ class PermuteRowElements(Op):
         assert gx.type.ndim == x.type.ndim
         assert all(
             s1 == s2
-            for s1, s2 in zip(gx.type.shape, x.type.shape)
+            for s1, s2 in zip(gx.type.shape, x.type.shape, strict=True)
             if s1 == 1 or s2 == 1
         )
 
@@ -3957,7 +3959,7 @@ def moveaxis(
 
     order = [n for n in range(a.ndim) if n not in source]
 
-    for dest, src in sorted(zip(destination, source)):
+    for dest, src in sorted(zip(destination, source, strict=True)):
         order.insert(dest, src)
 
     result = a.dimshuffle(order)
@@ -4307,7 +4309,7 @@ def _make_along_axis_idx(arr_shape, indices, axis):
     # build a fancy index, consisting of orthogonal aranges, with the
     # requested index inserted at the right location
     fancy_index = []
-    for dim, n in zip(dest_dims, arr_shape):
+    for dim, n in zip(dest_dims, arr_shape, strict=True):
         if dim is None:
             fancy_index.append(indices)
         else:

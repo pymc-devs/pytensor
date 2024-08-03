@@ -508,7 +508,9 @@ def makeTester(
                 if not isinstance(expecteds, list | tuple):
                     expecteds = (expecteds,)
 
-                for i, (variable, expected) in enumerate(zip(variables, expecteds)):
+                for i, (variable, expected) in enumerate(
+                    zip(variables, expecteds, strict=True)
+                ):
                     condition = (
                         variable.dtype != expected.dtype
                         or variable.shape != expected.shape

@@ -125,8 +125,12 @@ line-length = 88
 exclude = ["doc/", "pytensor/_version.py"]
 
 [tool.ruff.lint]
-select = ["C", "E", "F", "I", "UP", "W", "RUF", "PERF", "PTH", "ISC"]
+select = ["B905", "C", "E", "F", "I", "UP", "W", "RUF", "PERF", "PTH", "ISC"]
 ignore = ["C408", "C901", "E501", "E741", "RUF012", "PERF203", "ISC001"]
+unfixable = [
+    # zip-strict: the auto-fix adds `strict=False` but we might want `strict=True` instead
+    "B905",
+]
 
 
 [tool.ruff.lint.isort]

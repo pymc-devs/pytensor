@@ -85,7 +85,7 @@ def vectorize(func: Callable, signature: str | None = None) -> Callable:
 
         # Create dummy core inputs by stripping the batched dimensions of inputs
         core_inputs = []
-        for input, input_sig in zip(inputs, inputs_sig):
+        for input, input_sig in zip(inputs, inputs_sig, strict=True):
             if not isinstance(input, TensorVariable):
                 raise TypeError(
                     f"Inputs to vectorize function must be TensorVariable, got {type(input)}"
@@ -119,7 +119,9 @@ def vectorize(func: Callable, signature: str | None = None) -> Callable:
                 )
 
         # Vectorize graph by replacing dummy core inputs by original inputs
-        outputs = vectorize_graph(core_outputs, replace=dict(zip(core_inputs, inputs)))
+        outputs = vectorize_graph(
+            core_outputs, replace=dict(zip(core_inputs, inputs, strict=True))
+        )
         return outputs
 
     return inner

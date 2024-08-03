@@ -80,7 +80,7 @@ def compare_jax_and_py(
     py_res = pytensor_py_fn(*test_inputs)
 
     if len(fgraph.outputs) > 1:
-        for j, p in zip(jax_res, py_res):
+        for j, p in zip(jax_res, py_res, strict=True):
             assert_fn(j, p)
     else:
         assert_fn(jax_res, py_res)

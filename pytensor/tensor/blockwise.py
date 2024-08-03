@@ -88,7 +88,7 @@ class Blockwise(Op):
 
     def _create_dummy_core_node(self, inputs: Sequence[TensorVariable]) -> Apply:
         core_input_types = []
-        for i, (inp, sig) in enumerate(zip(inputs, self.inputs_sig)):
+        for i, (inp, sig) in enumerate(zip(inputs, self.inputs_sig, strict=True)):
             if inp.type.ndim < len(sig):
                 raise ValueError(
                     f"Input {i} {inp} has insufficient core dimensions for signature {self.signature}"
@@ -106,7 +106,9 @@ class Blockwise(Op):
             raise ValueError(
                 f"Insufficient number of outputs for signature {self.signature}: {len(core_node.outputs)}"
             )
-        for i, (core_out, sig) in enumerate(zip(core_node.outputs, self.outputs_sig)):
+        for i, (core_out, sig) in enumerate(
+            zip(core_node.outputs, self.outputs_sig, strict=True)
+        ):
             if core_out.type.ndim != len(sig):
                 raise ValueError(
                     f"Output {i} of {self.core_op} has wrong number of core dimensions for signature {self.signature}: {core_out.type.ndim}"
@@ -120,12 +122,13 @@ class Blockwise(Op):
         core_node = self._create_dummy_core_node(inputs)
 
         batch_ndims = max(
-            inp.type.ndim - len(sig) for inp, sig in zip(inputs, self.inputs_sig)
+            inp.type.ndim - len(sig)
+            for inp, sig in zip(inputs, self.inputs_sig, strict=True)
         )
 
         batched_inputs = []
         batch_shapes = []
-        for i, (inp, sig) in enumerate(zip(inputs, self.inputs_sig)):
+        for i, (inp, sig) in enumerate(zip(inputs, self.inputs_sig, strict=True)):
             # Append missing dims to the left
             missing_batch_ndims = batch_ndims - (inp.type.ndim - len(sig))
             if missing_batch_ndims:
@@ -140,7 +143,7 @@ class Blockwise(Op):
         try:
             batch_shape = tuple(
                 broadcast_static_dim_lengths(batch_dims)
-                for batch_dims in zip(*batch_shapes)
+                for batch_dims in zip(*batch_shapes, strict=True)
             )
         except ValueError:
             raise ValueError(
@@ -166,10 +169,10 @@ class Blockwise(Op):
         batch_ndims = self.batch_ndim(node)
         core_dims: dict[str, Any] = {}
         batch_shapes = [input_shape[:batch_ndims] for input_shape in input_shapes]
-        for input_shape, sig in zip(input_shapes, self.inputs_sig):
+        for input_shape, sig in zip(input_shapes, self.inputs_sig, strict=True):
             core_shape = input_shape[batch_ndims:]
 
-            for core_dim, dim_name in zip(core_shape, sig):
+            for core_dim, dim_name in zip(core_shape, sig, strict=True):
                 prev_core_dim = core_dims.get(core_dim)
                 if prev_core_dim is None:
                     core_dims[dim_name] = core_dim
@@ -180,7 +183,7 @@ class Blockwise(Op):
         batch_shape = broadcast_shape(*batch_shapes, arrays_are_shapes=True)
 
         out_shapes = []
-        for output, sig in zip(node.outputs, self.outputs_sig):
+        for output, sig in zip(node.outputs, self.outputs_sig, strict=True):
             core_out_shape = []
             for i, dim_name in enumerate(sig):
                 # The output dim is the same as another input dim
@@ -211,17 +214,17 @@ class Blockwise(Op):
         with config.change_flags(compute_test_value="off"):
             safe_inputs = [
                 tensor(dtype=inp.type.dtype, shape=(None,) * len(sig))
-                for inp, sig in zip(inputs, self.inputs_sig)
+                for inp, sig in zip(inputs, self.inputs_sig, strict=True)
             ]
             core_node = self._create_dummy_core_node(safe_inputs)
 
             core_inputs = [
                 as_core(inp, core_inp)
-                for inp, core_inp in zip(inputs, core_node.inputs)
+                for inp, core_inp in zip(inputs, core_node.inputs, strict=True)
             ]
             core_ograds = [
                 as_core(ograd, core_ograd)
-                for ograd, core_ograd in zip(ograds, core_node.outputs)
+                for ograd, core_ograd in zip(ograds, core_node.outputs, strict=True)
             ]
             core_outputs = core_node.outputs
 
@@ -230,7 +233,11 @@ class Blockwise(Op):
         igrads = vectorize_graph(
             [core_igrad for core_igrad in core_igrads if core_igrad is not None],
             replace=dict(
-                zip(core_inputs + core_outputs + core_ograds, inputs + outputs + ograds)
+                zip(
+                    core_inputs + core_outputs + core_ograds,
+                    inputs + outputs + ograds,
+                    strict=True,
+                )
             ),
         )
 
@@ -256,7 +263,7 @@ class Blockwise(Op):
             # the return value obviously zero so that gradient.grad can tell
             # this op did the right thing.
             new_rval = []
-            for elem, inp in zip(rval, inputs):
+            for elem, inp in zip(rval, inputs, strict=True):
                 if isinstance(elem.type, NullType | DisconnectedType):
                     new_rval.append(elem)
                 else:
@@ -270,7 +277,7 @@ class Blockwise(Op):
         # Sum out the broadcasted dimensions
         batch_ndims = self.batch_ndim(outs[0].owner)
         batch_shape = outs[0].type.shape[:batch_ndims]
-        for i, (inp, sig) in enumerate(zip(inputs, self.inputs_sig)):
+        for i, (inp, sig) in enumerate(zip(inputs, self.inputs_sig, strict=True)):
             if isinstance(rval[i].type, NullType | DisconnectedType):
                 continue
 
@@ -278,7 +285,9 @@ class Blockwise(Op):
 
             to_sum = [
                 j
-                for j, (inp_s, out_s) in enumerate(zip(inp.type.shape, batch_shape))
+                for j, (inp_s, out_s) in enumerate(
+                    zip(inp.type.shape, batch_shape, strict=False)
+                )
                 if inp_s == 1 and out_s != 1
             ]
             if to_sum:
@@ -318,9 +327,14 @@ class Blockwise(Op):
 
         for dims_and_bcast in zip(
             *[
-                zip(input.shape[:batch_ndim], sinput.type.broadcastable[:batch_ndim])
-                for input, sinput in zip(inputs, node.inputs)
-            ]
+                zip(
+                    input.shape[:batch_ndim],
+                    sinput.type.broadcastable[:batch_ndim],
+                    strict=True,
+                )
+                for input, sinput in zip(inputs, node.inputs, strict=True)
+            ],
+            strict=True,
         ):
             if any(d != 1 for d, _ in dims_and_bcast) and (1, False) in dims_and_bcast:
                 raise ValueError(
@@ -341,7 +355,9 @@ class Blockwise(Op):
         if not isinstance(res, tuple):
             res = (res,)
 
-        for node_out, out_storage, r in zip(node.outputs, output_storage, res):
+        for node_out, out_storage, r in zip(
+            node.outputs, output_storage, res, strict=True
+        ):
             out_dtype = getattr(node_out, "dtype", None)
             if out_dtype and out_dtype != r.dtype:
                 r = np.asarray(r, dtype=out_dtype)

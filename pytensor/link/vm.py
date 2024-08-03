@@ -244,7 +244,7 @@ class VM(ABC):
     def update_profile(self, profile):
         """Update a profile object."""
         for node, thunk, t, c in zip(
-            self.nodes, self.thunks, self.call_times, self.call_counts
+            self.nodes, self.thunks, self.call_times, self.call_counts, strict=True
         ):
             profile.apply_time[(self.fgraph, node)] += t
 
@@ -310,7 +310,9 @@ class UpdatingVM(VM):
         self.output_storage = output_storage
         self.inp_storage_and_out_idx = tuple(
             (inp_storage, self.fgraph.outputs.index(update_vars[inp]))
-            for inp, inp_storage in zip(self.fgraph.inputs, self.input_storage)
+            for inp, inp_storage in zip(
+                self.fgraph.inputs, self.input_storage, strict=True
+            )
             if inp in update_vars
         )
 
@@ -1241,7 +1243,7 @@ class VMLinker(LocalLinker):
             self.profile.linker_node_make_thunks += t1 - t0
             self.profile.linker_make_thunk_time = linker_make_thunk_time
 
-        for node, thunk in zip(order, thunks):
+        for node, thunk in zip(order, thunks, strict=True):
             thunk.inputs = [storage_map[v] for v in node.inputs]
             thunk.outputs = [storage_map[v] for v in node.outputs]
 
@@ -1298,11 +1300,11 @@ class VMLinker(LocalLinker):
             vm,
             [
                 Container(input, storage)
-                for input, storage in zip(fgraph.inputs, input_storage)
+                for input, storage in zip(fgraph.inputs, input_storage, strict=True)
             ],
             [
                 Container(output, storage, readonly=True)
-                for output, storage in zip(fgraph.outputs, output_storage)
+                for output, storage in zip(fgraph.outputs, output_storage, strict=True)
             ],
             thunks,
             order,

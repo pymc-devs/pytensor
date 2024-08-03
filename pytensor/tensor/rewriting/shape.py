@@ -186,7 +186,7 @@ class ShapeFeature(Feature):
 
             # Only change the variables and dimensions that would introduce
             # extra computation
-            for new_shps, out in zip(o_shapes, node.outputs):
+            for new_shps, out in zip(o_shapes, node.outputs, strict=True):
                 if not hasattr(out.type, "ndim"):
                     continue
 
@@ -578,7 +578,7 @@ class ShapeFeature(Feature):
                 new_shape += sh[len(new_shape) :]
                 o_shapes[sh_idx] = tuple(new_shape)
 
-        for r, s in zip(node.outputs, o_shapes):
+        for r, s in zip(node.outputs, o_shapes, strict=True):
             self.set_shape(r, s)
 
     def on_change_input(self, fgraph, node, i, r, new_r, reason):
@@ -709,7 +709,7 @@ class ShapeFeature(Feature):
         sx = canon_shapes[: len(sx)]
         sy = canon_shapes[len(sx) :]
 
-        for dx, dy in zip(sx, sy):
+        for dx, dy in zip(sx, sy, strict=True):
             if not equal_computations([dx], [dy]):
                 return False
 
@@ -778,7 +778,7 @@ def local_reshape_chain(op):
         # rewrite.
         if rval.type.ndim == node.outputs[0].type.ndim and all(
             s1 == s2
-            for s1, s2 in zip(rval.type.shape, node.outputs[0].type.shape)
+            for s1, s2 in zip(rval.type.shape, node.outputs[0].type.shape, strict=True)
             if s1 == 1 or s2 == 1
         ):
             return [rval]
@@ -817,7 +817,7 @@ def local_useless_reshape(fgraph, node):
         and output.type.ndim == 1
         and all(
             s1 == s2
-            for s1, s2 in zip(inp.type.shape, output.type.shape)
+            for s1, s2 in zip(inp.type.shape, output.type.shape, strict=True)
             if s1 == 1 or s2 == 1
         )
     ):
@@ -1100,7 +1100,9 @@ def local_specify_shape_lift(fgraph, node):
 
             nonbcast_dims = {
                 i
-                for i, (dim, bcast) in enumerate(zip(shape, out_broadcastable))
+                for i, (dim, bcast) in enumerate(
+                    zip(shape, out_broadcastable, strict=True)
+                )
                 if (not bcast and not NoneConst.equals(dim))
             }
             new_elem_inps = elem_inps.copy()
@@ -1202,7 +1204,7 @@ def local_useless_dimshuffle_in_reshape(fgraph, node):
     new_order = node.inputs[0].owner.op.new_order
     inp = node.inputs[0].owner.inputs[0]
     new_order_of_nonbroadcast = []
-    for i, s in zip(new_order, node.inputs[0].type.shape):
+    for i, s in zip(new_order, node.inputs[0].type.shape, strict=True):
         if s != 1:
             new_order_of_nonbroadcast.append(i)
     no_change_in_order = all(
@@ -1226,7 +1228,7 @@ def local_useless_unbroadcast(fgraph, node):
         x = node.inputs[0]
         if x.type.ndim == node.outputs[0].type.ndim and all(
             s1 == s2
-            for s1, s2 in zip(x.type.shape, node.outputs[0].type.shape)
+            for s1, s2 in zip(x.type.shape, node.outputs[0].type.shape, strict=True)
             if s1 == 1 or s2 == 1
         ):
             # No broadcastable flag was modified

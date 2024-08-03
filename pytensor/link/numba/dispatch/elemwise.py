@@ -515,8 +515,10 @@ def numba_funcify_Elemwise(op, node, **kwargs):
         inputs = [np.asarray(input) for input in inputs]
         inputs_bc = np.broadcast_arrays(*inputs)
         shape = inputs[0].shape
-        for input, bc in zip(inputs, input_bc_patterns):
-            for length, allow_bc, iter_length in zip(input.shape, bc, shape):
+        for input, bc in zip(inputs, input_bc_patterns, strict=True):
+            for length, allow_bc, iter_length in zip(
+                input.shape, bc, shape, strict=True
+            ):
                 if length == 1 and shape and iter_length != 1 and not allow_bc:
                     raise ValueError("Broadcast not allowed.")
 
@@ -527,11 +529,11 @@ def numba_funcify_Elemwise(op, node, **kwargs):
             outs = scalar_op_fn(*vals)
             if not isinstance(outs, tuple):
                 outs = (outs,)
-            for out, out_val in zip(outputs, outs):
+            for out, out_val in zip(outputs, outs, strict=True):
                 out[idx] = out_val
 
         outputs_summed = []
-        for output, bc in zip(outputs, output_bc_patterns):
+        for output, bc in zip(outputs, output_bc_patterns, strict=True):
             axes = tuple(np.nonzero(bc)[0])
             outputs_summed.append(output.sum(axes, keepdims=True))
         if len(outputs_summed) != 1:

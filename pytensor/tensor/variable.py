@@ -1061,7 +1061,9 @@ class TensorConstant(TensorVariable, Constant[_TensorTypeType]):
         data_shape = np.shape(data)
 
         if len(data_shape) != type.ndim or any(
-            ds != ts for ds, ts in zip(np.shape(data), type.shape) if ts is not None
+            ds != ts
+            for ds, ts in zip(np.shape(data), type.shape, strict=True)
+            if ts is not None
         ):
             raise ValueError(
                 f"Shape of data ({data_shape}) does not match shape of type ({type.shape})"

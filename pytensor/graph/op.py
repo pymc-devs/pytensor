@@ -231,14 +231,14 @@ class Op(MetaObject):
             )
         if not all(
             expected_type.is_super(var.type)
-            for var, expected_type in zip(inputs, self.itypes)
+            for var, expected_type in zip(inputs, self.itypes, strict=True)
         ):
             raise TypeError(
                 f"Invalid input types for Op {self}:\n"
                 + "\n".join(
                     f"Input {i}/{len(inputs)}: Expected {inp}, got {out}"
                     for i, (inp, out) in enumerate(
-                        zip(self.itypes, (inp.type for inp in inputs)),
+                        zip(self.itypes, (inp.type for inp in inputs), strict=True),
                         start=1,
                     )
                     if inp != out

@@ -865,7 +865,7 @@ def _get_preallocated_maps(
                 # except if broadcastable, or for dimensions above
                 # config.DebugMode__check_preallocated_output_ndim
                 buf_shape = []
-                for s, b in zip(r_vals[r].shape, r.broadcastable):
+                for s, b in zip(r_vals[r].shape, r.broadcastable, strict=True):
                     if b or ((r.ndim - len(buf_shape)) > check_ndim):
                         buf_shape.append(s)
                     else:
@@ -943,7 +943,7 @@ def _get_preallocated_maps(
                         r_shape_diff = shape_diff[: r.ndim]
                         new_buf_shape = [
                             max((s + sd), 0)
-                            for s, sd in zip(r_vals[r].shape, r_shape_diff)
+                            for s, sd in zip(r_vals[r].shape, r_shape_diff, strict=True)
                         ]
                         new_buf = np.empty(new_buf_shape, dtype=r.type.dtype)
                         new_buf[...] = np.asarray(def_val).astype(r.type.dtype)
@@ -1575,7 +1575,7 @@ class _Linker(LocalLinker):
                 # try:
                 # compute the value of all variables
                 for i, (thunk_py, thunk_c, node) in enumerate(
-                    zip(thunks_py, thunks_c, order)
+                    zip(thunks_py, thunks_c, order, strict=True)
                 ):
                     _logger.debug(f"{i} - starting node {i} {node}")
 
@@ -1855,7 +1855,7 @@ class _Linker(LocalLinker):
                     assert s[0] is None
 
                 # store our output variables to their respective storage lists
-                for output, storage in zip(fgraph.outputs, output_storage):
+                for output, storage in zip(fgraph.outputs, output_storage, strict=True):
                     storage[0] = r_vals[output]
 
                 # transfer all inputs back to their respective storage lists
@@ -1931,11 +1931,11 @@ class _Linker(LocalLinker):
             f,
             [
                 Container(input, storage, readonly=False)
-                for input, storage in zip(fgraph.inputs, input_storage)
+                for input, storage in zip(fgraph.inputs, input_storage, strict=True)
             ],
             [
                 Container(output, storage, readonly=True)
-                for output, storage in zip(fgraph.outputs, output_storage)
+                for output, storage in zip(fgraph.outputs, output_storage, strict=True)
             ],
             thunks_py,
             order,
@@ -2122,7 +2122,9 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
 
         no_borrow = [
             output
-            for output, spec in zip(fgraph.outputs, outputs + additional_outputs)
+            for output, spec in zip(
+                fgraph.outputs, outputs + additional_outputs, strict=True
+            )
             if not spec.borrow
         ]
         if no_borrow:

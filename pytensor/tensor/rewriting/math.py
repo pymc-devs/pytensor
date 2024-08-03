@@ -1139,7 +1139,9 @@ class AlgebraicCanonizer(NodeRewriter):
         num, denum = self.simplify(list(orig_num), list(orig_denum), out.type)
 
         def same(x, y):
-            return len(x) == len(y) and all(np.all(xe == ye) for xe, ye in zip(x, y))
+            return len(x) == len(y) and all(
+                np.all(xe == ye) for xe, ye in zip(x, y, strict=True)
+            )
 
         if (
             same(orig_num, num)
@@ -2442,7 +2444,9 @@ def distribute_greedy(pos_pairs, neg_pairs, num, denum, out_type, minscore=0):
             [(n + num, d + denum, out_type) for (n, d) in neg_pairs],
         )
     )
-    for (n, d), (nn, dd) in zip(pos_pairs + neg_pairs, new_pos_pairs + new_neg_pairs):
+    for (n, d), (nn, dd) in zip(
+        pos_pairs + neg_pairs, new_pos_pairs + new_neg_pairs, strict=True
+    ):
         # We calculate how many operations we are saving with the new
         # num and denum
         score += len(n) + div_cost * len(d) - len(nn) - div_cost * len(dd)

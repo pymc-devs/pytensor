@@ -1053,7 +1053,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
                     shapes += [data.get_value(borrow=True)[start:stop:step].shape]
             f = self.function([], outs, mode=mode_opt, op=subtensor_ops, N=0)
             t_shapes = f()
-            for t_shape, shape in zip(t_shapes, shapes):
+            for t_shape, shape in zip(t_shapes, shapes, strict=True):
                 assert np.all(t_shape == shape)
             assert Subtensor not in [x.op for x in f.maker.fgraph.toposort()]
 
@@ -1317,7 +1317,9 @@ class TestSubtensor(utt.OptimizationTestMixin):
 
         f_outs = f(*all_inputs_num)
         assert len(f_outs) == len(all_outputs_num)
-        for params, f_out, output_num in zip(all_params, f_outs, all_outputs_num):
+        for params, f_out, output_num in zip(
+            all_params, f_outs, all_outputs_num, strict=True
+        ):
             # NB: if this assert fails, it will probably be easier to debug if
             # you enable the debug code above.
             assert np.allclose(f_out, output_num), (params, f_out, output_num)
@@ -1394,7 +1396,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
         shape_i = ((4,), (4, 2))
         shape_val = ((3, 1), (3, 1, 1))
 
-        for i, shp_i, shp_v in zip(sym_i, shape_i, shape_val):
+        for i, shp_i, shp_v in zip(sym_i, shape_i, shape_val, strict=True):
             sub_m = m[:, i]
             m1 = set_subtensor(sub_m, np.zeros(shp_v))
             m2 = inc_subtensor(sub_m, np.ones(shp_v))
@@ -1424,7 +1426,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
         shape_i = ((4,), (4, 2))
         shape_val = ((3, 4), (3, 4, 2))
 
-        for i, shp_i, shp_v in zip(sym_i, shape_i, shape_val):
+        for i, shp_i, shp_v in zip(sym_i, shape_i, shape_val, strict=True):
             sub_m = m[:, i]
             m1 = set_subtensor(sub_m, np.zeros(shp_v))
             m2 = inc_subtensor(sub_m, np.ones(shp_v))
@@ -1841,7 +1843,7 @@ class TestAdvancedSubtensor:
         assert a.type.ndim == self.ix2.type.ndim
         assert all(
             s1 == s2
-            for s1, s2 in zip(a.type.shape, self.ix2.type.shape)
+            for s1, s2 in zip(a.type.shape, self.ix2.type.shape, strict=True)
             if s1 == 1 or s2 == 1
         )
 
@@ -2601,7 +2603,9 @@ def idx_as_tensor(x):
 def bcast_shape_tuple(x):
     if not hasattr(x, "shape"):
         return x
-    return tuple(s if ss != 1 else 1 for s, ss in zip(tuple(x.shape), x.type.shape))
+    return tuple(
+        s if ss != 1 else 1 for s, ss in zip(tuple(x.shape), x.type.shape, strict=True)
+    )
 
 
 test_idx = np.ix_(np.array([True, True]), np.array([True]), np.array([True, True]))

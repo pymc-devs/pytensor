@@ -523,7 +523,7 @@ def basic_shape(shape, indices):
 
     """
     res_shape = ()
-    for idx, n in zip(indices, shape):
+    for n, idx in zip(shape[: len(indices)], indices, strict=True):
         if isinstance(idx, slice):
             res_shape += (slice_len(idx, n),)
         elif isinstance(getattr(idx, "type", None), SliceType):
@@ -611,7 +611,7 @@ def indexed_result_shape(array_shape, indices, indices_are_shapes=False):
         )
 
     for basic, grp_dim_indices in idx_groups:
-        dim_nums, grp_indices = zip(*grp_dim_indices)
+        dim_nums, grp_indices = zip(*grp_dim_indices, strict=True)
         remaining_dims = tuple(dim for dim in remaining_dims if dim not in dim_nums)
 
         if basic:
@@ -839,7 +839,7 @@ class Subtensor(COp):
 
         assert len(inputs) == len(input_types)
 
-        for input, expected_type in zip(inputs, input_types):
+        for input, expected_type in zip(inputs, input_types, strict=True):
             if not expected_type.is_super(input.type):
                 raise TypeError(
                     f"Incompatible types for Subtensor template. Expected {input.type}, got {expected_type}."
@@ -861,7 +861,7 @@ class Subtensor(COp):
             except NotScalarConstantError:
                 return value, False
 
-        for the_slice, length in zip(padded, x.type.shape):
+        for the_slice, length in zip(padded, x.type.shape, strict=True):
             if not isinstance(the_slice, slice):
                 continue
 
@@ -916,7 +916,7 @@ class Subtensor(COp):
             len(xshp) - len(self.idx_list)
         )
         i = 0
-        for idx, xl in zip(padded, xshp):
+        for idx, xl in zip(padded, xshp, strict=True):
             if isinstance(idx, slice):
                 # If it is the default (None, None, None) slice, or a variant,
                 # the shape will be xl
@@ -1688,7 +1688,7 @@ class IncSubtensor(COp):
             raise IndexError(
                 "Not enough inputs to fill in the Subtensor template.", inputs, idx_list
             )
-        for input, expected_type in zip(inputs, input_types):
+        for input, expected_type in zip(inputs, input_types, strict=True):
             if not expected_type.is_super(input.type):
                 raise TypeError(
                     f"Wrong type for Subtensor template. Expected {input.type}, got {expected_type}."
@@ -2703,7 +2703,7 @@ class AdvancedSubtensor(Op):
 
         indices = node.inputs[1:]
         index_shapes = []
-        for idx, ishape in zip(indices, ishapes[1:]):
+        for idx, ishape in zip(indices, ishapes[1:], strict=True):
             # Mixed bool indexes are converted to nonzero entries
             if is_bool_index(idx):
                 index_shapes.extend(
@@ -2807,7 +2807,7 @@ def vectorize_advanced_subtensor(op: AdvancedSubtensor, node, *batch_inputs):
     x_is_batched = x.type.ndim < batch_x.type.ndim
     idxs_are_batched = any(
         batch_idx.type.ndim > idx.type.ndim
-        for batch_idx, idx in zip(batch_idxs, idxs)
+        for batch_idx, idx in zip(batch_idxs, idxs, strict=True)
         if isinstance(batch_idx, TensorVariable)
     )
 

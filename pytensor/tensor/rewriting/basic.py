@@ -97,11 +97,11 @@ def broadcasted_by(x: TensorVariable, y: TensorVariable) -> bool:
     if len(bx) < len(by):
         return True
     bx = bx[-len(by) :]
-    return any(bx_dim and not by_dim for bx_dim, by_dim in zip(bx, by))
+    return any(bx_dim and not by_dim for bx_dim, by_dim in zip(bx, by, strict=True))
 
 
 def merge_broadcastables(broadcastables):
-    return [all(bcast) for bcast in zip(*broadcastables)]
+    return [all(bcast) for bcast in zip(*broadcastables, strict=True)]
 
 
 def alloc_like(
@@ -1196,25 +1196,23 @@ def local_merge_alloc(fgraph, node):
     inputs_inner = node.inputs[0].owner.inputs
     dims_outer = inputs_outer[1:]
     dims_inner = inputs_inner[1:]
-    dims_outer_rev = dims_outer[::-1]
-    dims_inner_rev = dims_inner[::-1]
+    assert len(dims_inner) <= len(dims_outer)
     # check if the pattern of broadcasting is matched, in the reversed ordering.
     # The reverse ordering is needed when an Alloc add an implicit new
     # broadcasted dimensions to its inputs[0]. Eg:
     # Alloc(Alloc(m, y, 1, 1), x, y, z, w) -> Alloc(m, x, y, z, w)
-    i = 0
-    for dim_inner, dim_outer in zip(dims_inner_rev, dims_outer_rev):
-        if dim_inner != dim_outer:
-            if isinstance(dim_inner, Constant) and dim_inner.data == 1:
-                pass
-            else:
-                dims_outer[-1 - i] = Assert(
-                    "You have a shape error in your graph. To see a better"
-                    " error message and a stack trace of where in your code"
-                    " the error is created, use the PyTensor flags"
-                    " optimizer=None or optimizer=fast_compile."
-                )(dim_outer, eq(dim_outer, dim_inner))
-        i += 1
+    for i, dim_inner in enumerate(reversed(dims_inner)):
+        dim_outer = dims_outer[-1 - i]
+        if dim_inner == dim_outer:
+            continue
+        if isinstance(dim_inner, Constant) and dim_inner.data == 1:
+            continue
+        dims_outer[-1 - i] = Assert(
+            "You have a shape error in your graph. To see a better"
+            " error message and a stack trace of where in your code"
+            " the error is created, use the PyTensor flags"
+            " optimizer=None or optimizer=fast_compile."
+        )(dim_outer, eq(dim_outer, dim_inner))
     return [alloc(inputs_inner[0], *dims_outer)]
 
 

@@ -18,7 +18,9 @@ def inline_ofg_expansion(fgraph, node):
     if not op.is_inline:
         return False
 
-    new_out = clone_replace(op.inner_outputs, dict(zip(op.inner_inputs, node.inputs)))
+    new_out = clone_replace(
+        op.inner_outputs, dict(zip(op.inner_inputs, node.inputs, strict=True))
+    )
     copy_stack_trace(op.inner_outputs, new_out)
 
     return new_out
@@ -62,7 +64,9 @@ def late_inline_OpFromGraph(fgraph, node):
 
     """
     op = node.op
-    new_out = clone_replace(op.inner_outputs, dict(zip(op.inner_inputs, node.inputs)))
+    new_out = clone_replace(
+        op.inner_outputs, dict(zip(op.inner_inputs, node.inputs, strict=True))
+    )
     copy_stack_trace(op.inner_outputs, new_out)
 
     return new_out

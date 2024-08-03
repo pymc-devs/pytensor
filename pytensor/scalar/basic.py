@@ -1146,7 +1146,7 @@ class ScalarOp(COp):
         else:
             variables = from_return_values(self.impl(*inputs))
             assert len(variables) == len(output_storage)
-            for storage, variable in zip(output_storage, variables):
+            for storage, variable in zip(output_storage, variables, strict=True):
                 storage[0] = variable
 
     def impl(self, *inputs):
@@ -4107,7 +4107,9 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
 
     def c_support_code_apply(self, node, name):
         rval = []
-        for subnode, subnodename in zip(self.fgraph.toposort(), self.nodenames):
+        for subnode, subnodename in zip(
+            self.fgraph.toposort(), self.nodenames, strict=True
+        ):
             subnode_support_code = subnode.op.c_support_code_apply(
                 subnode, subnodename % dict(nodename=name)
             )
@@ -4213,7 +4215,7 @@ class Composite(ScalarInnerGraphOp):
             res2 = pytensor.compile.rebuild_collect_shared(
                 inputs=outputs[0].owner.op.inputs,
                 outputs=outputs[0].owner.op.outputs,
-                replace=dict(zip(outputs[0].owner.op.inputs, res[1])),
+                replace=dict(zip(outputs[0].owner.op.inputs, res[1], strict=True)),
             )
             assert len(res2[1]) == len(outputs)
             assert len(res[0]) == len(inputs)
@@ -4299,7 +4301,7 @@ class Composite(ScalarInnerGraphOp):
             assert len(inputs) == self.nin
             res = pytensor.compile.rebuild_collect_shared(
                 self.outputs,
-                replace=dict(zip(self.inputs, inputs)),
+                replace=dict(zip(self.inputs, inputs, strict=True)),
                 rebuild_strict=False,
             )
             # After rebuild_collect_shared, the Variable in inputs
@@ -4312,7 +4314,7 @@ class Composite(ScalarInnerGraphOp):
 
     def perform(self, node, inputs, output_storage):
         outputs = self.py_perform_fn(*inputs)
-        for storage, out_val in zip(output_storage, outputs):
+        for storage, out_val in zip(output_storage, outputs, strict=True):
             storage[0] = out_val
 
     def grad(self, inputs, output_grads):
@@ -4382,8 +4384,8 @@ class Composite(ScalarInnerGraphOp):
     def c_code(self, node, nodename, inames, onames, sub):
         d = dict(
             chain(
-                zip((f"i{int(i)}" for i in range(len(inames))), inames),
-                zip((f"o{int(i)}" for i in range(len(onames))), onames),
+                zip((f"i{int(i)}" for i in range(len(inames))), inames, strict=True),
+                zip((f"o{int(i)}" for i in range(len(onames))), onames, strict=True),
             ),
             **sub,
         )
@@ -4431,7 +4433,7 @@ class Compositef32:
             )
             # make sure we don't produce any float16.
             assert not any(o.dtype == "float16" for o in new_node.outputs)
-            mapping.update(zip(node.outputs, new_node.outputs))
+            mapping.update(zip(node.outputs, new_node.outputs, strict=True))
 
         new_ins = [mapping[inp] for inp in fgraph.inputs]
         new_outs = [mapping[out] for out in fgraph.outputs]
@@ -4474,7 +4476,7 @@ def handle_composite(node, mapping):
     new_op = node.op.clone_float32()
     new_outs = new_op(*[mapping[i] for i in node.inputs], return_list=True)
     assert len(new_outs) == len(node.outputs)
-    for o, no in zip(node.outputs, new_outs):
+    for o, no in zip(node.outputs, new_outs, strict=True):
         mapping[o] = no
 
 

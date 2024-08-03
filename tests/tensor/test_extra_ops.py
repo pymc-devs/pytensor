@@ -367,6 +367,7 @@ class TestSqueeze(utt.InferShapeTester):
                 [1, None, None],
                 [1, None, 1, 1, None],
             ],
+            strict=True,
         ),
     )
     def test_op(self, shape, var_shape):
@@ -390,6 +391,7 @@ class TestSqueeze(utt.InferShapeTester):
                 [1, None, None],
                 [1, None, 1, 1, None],
             ],
+            strict=True,
         ),
     )
     def test_infer_shape(self, shape, var_shape):
@@ -409,6 +411,7 @@ class TestSqueeze(utt.InferShapeTester):
                 [True, False, False],
                 [True, False, True, True, False],
             ],
+            strict=True,
         ),
     )
     def test_grad(self, shape, broadcast):
@@ -424,6 +427,7 @@ class TestSqueeze(utt.InferShapeTester):
                 [1, None, None],
                 [1, None, 1, 1, None],
             ],
+            strict=True,
         ),
     )
     def test_var_interface(self, shape, var_shape):
@@ -509,6 +513,7 @@ class TestCompress(utt.InferShapeTester):
                 [1, 1, 0, 1, 0],
             ],
             [(2, 3), (4, 3), (4, 3), (4, 3), (4, 3), (3, 5)],
+            strict=True,
         ),
     )
     def test_op(self, axis, cond, shape):
@@ -893,11 +898,13 @@ class TestUnique(utt.InferShapeTester):
             np.unique(inp, False, True, True, axis=axis),
             np.unique(inp, True, True, True, axis=axis),
         ]
-        for params, outs_expected in zip(self.op_params, list_outs_expected):
+        for params, outs_expected in zip(
+            self.op_params, list_outs_expected, strict=True
+        ):
             out = pt.unique(x, *params, axis=axis)
             f = pytensor.function(inputs=[x], outputs=out)
             outs = f(inp)
-            for out, out_exp in zip(outs, outs_expected):
+            for out, out_exp in zip(outs, outs_expected, strict=True):
                 utt.assert_allclose(out, out_exp)
 
     @pytest.mark.parametrize(
@@ -1066,7 +1073,7 @@ def test_broadcast_shape_basic():
         if use_bcast:
             return tuple(
                 s if not bcast else 1
-                for s, bcast in zip(tuple(x.shape), x.broadcastable)
+                for s, bcast in zip(tuple(x.shape), x.broadcastable, strict=True)
             )
         else:
             return tuple(s for s in tuple(x.shape))
@@ -1206,12 +1213,12 @@ def test_broadcast_shape_constants():
 def test_broadcast_shape_symbolic(s1_vals, s2_vals, exp_res):
     s1s = pt.lscalars(len(s1_vals))
     eval_point = {}
-    for s, s_val in zip(s1s, s1_vals):
+    for s, s_val in zip(s1s, s1_vals, strict=True):
         eval_point[s] = s_val
         s.tag.test_value = s_val
 
     s2s = pt.lscalars(len(s2_vals))
-    for s, s_val in zip(s2s, s2_vals):
+    for s, s_val in zip(s2s, s2_vals, strict=True):
         eval_point[s] = s_val
         s.tag.test_value = s_val
 

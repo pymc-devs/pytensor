@@ -98,7 +98,7 @@ def shape_of_variables(
     numeric_input_dims = [dim for inp in fgraph.inputs for dim in input_shapes[inp]]
     numeric_output_dims = compute_shapes(*numeric_input_dims)
 
-    sym_to_num_dict = dict(zip(output_dims, numeric_output_dims))
+    sym_to_num_dict = dict(zip(output_dims, numeric_output_dims, strict=True))
 
     l = {}
     for var in shape_feature.shape_of:

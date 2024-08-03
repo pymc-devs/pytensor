@@ -420,7 +420,7 @@ class TestMakeVector(utt.InferShapeTester):
             # The gradient should be 0
             utt.assert_allclose(g_val, 0)
         else:
-            for var, grval in zip((b, i, d), g_val):
+            for var, grval in zip((b, i, d), g_val, strict=True):
                 float_inputs = []
                 if var.dtype in int_dtypes:
                     pass
@@ -777,6 +777,7 @@ class TestAlloc:
                 # AdvancedIncSubtensor
                 (some_matrix[idx, idx], 1),
             ],
+            strict=True,
         ):
             derp = pt_sum(dense_dot(subtensor, variables))
 
@@ -1120,7 +1121,7 @@ class TestNonzero:
 
             assert np.allclose(res_matrix, np.vstack(np.nonzero(m)))
 
-            for i, j in zip(res_tuple, np.nonzero(m)):
+            for i, j in zip(res_tuple, np.nonzero(m), strict=True):
                 assert np.allclose(i, j)
 
         rand0d = np.empty(())
@@ -2170,7 +2171,7 @@ class TestJoinAndSplit:
         )
         x_test = np.arange(5, dtype=config.floatX)
         res = f(x_test)
-        for r, expected in zip(res, ([], [0, 1, 2], [3, 4])):
+        for r, expected in zip(res, ([], [0, 1, 2], [3, 4]), strict=True):
             assert np.allclose(r, expected)
             if linker == "py":
                 assert r.base is x_test
@@ -2951,8 +2952,8 @@ class TestNdGrid:
             mgrid[0:1:0.1, 1:10:1.0, 10:100:10.0],
             mgrid[0:2:1, 1:10:1, 10:100:10],
         )
-        for n, t in zip(nmgrid, tmgrid):
-            for ng, tg in zip(n, t):
+        for n, t in zip(nmgrid, tmgrid, strict=True):
+            for ng, tg in zip(n, t, strict=True):
                 utt.assert_allclose(ng, tg.eval())
 
     def test_ogrid_numpy_equiv(self):
@@ -2966,8 +2967,8 @@ class TestNdGrid:
             ogrid[0:1:0.1, 1:10:1.0, 10:100:10.0],
             ogrid[0:2:1, 1:10:1, 10:100:10],
         )
-        for n, t in zip(nogrid, togrid):
-            for ng, tg in zip(n, t):
+        for n, t in zip(nogrid, togrid, strict=True):
+            for ng, tg in zip(n, t, strict=True):
                 utt.assert_allclose(ng, tg.eval())
 
     def test_mgrid_pytensor_variable_numpy_equiv(self):
@@ -2979,8 +2980,10 @@ class TestNdGrid:
         timgrid = mgrid[l:2:1, 1:m:1, 10:100:n]
         ff = pytensor.function([i, j, k], tfmgrid)
         fi = pytensor.function([l, m, n], timgrid)
-        for n, t in zip((nfmgrid, nimgrid), (ff(0, 10, 10.0), fi(0, 10, 10))):
-            for ng, tg in zip(n, t):
+        for n, t in zip(
+            (nfmgrid, nimgrid), (ff(0, 10, 10.0), fi(0, 10, 10)), strict=True
+        ):
+            for ng, tg in zip(n, t, strict=True):
                 utt.assert_allclose(ng, tg)
 
     def test_ogrid_pytensor_variable_numpy_equiv(self):
@@ -2992,8 +2995,10 @@ class TestNdGrid:
         tiogrid = ogrid[l:2:1, 1:m:1, 10:100:n]
         ff = pytensor.function([i, j, k], tfogrid)
         fi = pytensor.function([l, m, n], tiogrid)
-        for n, t in zip((nfogrid, niogrid), (ff(0, 10, 10.0), fi(0, 10, 10))):
-            for ng, tg in zip(n, t):
+        for n, t in zip(
+            (nfogrid, niogrid), (ff(0, 10, 10.0), fi(0, 10, 10)), strict=True
+        ):
+            for ng, tg in zip(n, t, strict=True):
                 utt.assert_allclose(ng, tg)
 
 
@@ -3038,7 +3043,7 @@ class TestInversePermutation:
         assert np.all(f_inverse(inv_val) == p_val)
         # Check that, for each permutation,
         # permutation(inverse) == inverse(permutation) = identity
-        for p_row, i_row in zip(p_val, inv_val):
+        for p_row, i_row in zip(p_val, inv_val, strict=True):
             assert np.all(p_row[i_row] == np.arange(10))
             assert np.all(i_row[p_row] == np.arange(10))
 
@@ -3104,7 +3109,9 @@ class TestPermuteRowElements:
 
         # Each row of p contains a permutation to apply to the corresponding
         # row of input
-        out_bis = np.asarray([i_row[p_row] for i_row, p_row in zip(input_val, p_val)])
+        out_bis = np.asarray(
+            [i_row[p_row] for i_row, p_row in zip(input_val, p_val, strict=True)]
+        )
         assert np.all(out_val == out_bis)
 
         # Verify gradient
@@ -4660,7 +4667,7 @@ def test_where():
     np.testing.assert_allclose(np.where(cond, ift, iff), where(cond, ift, iff).eval())
 
     # Test for only condition input
-    for np_output, pt_output in zip(np.where(cond), where(cond)):
+    for np_output, pt_output in zip(np.where(cond), where(cond), strict=True):
         np.testing.assert_allclose(np_output, pt_output.eval())
 
     # Test for error

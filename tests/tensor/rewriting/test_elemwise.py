@@ -988,10 +988,12 @@ class TestFusion:
         else:
             out = [
                 self._shared(np.zeros((5,) * g_.ndim, dtype=od), "out")
-                for g_, od in zip(g, out_dtype)
+                for g_, od in zip(g, out_dtype, strict=True)
             ]
-            assert all(o.dtype == g_.dtype for o, g_ in zip(out, g))
-            f = function(sym_inputs, [], updates=list(zip(out, g)), mode=self.mode)
+            assert all(o.dtype == g_.dtype for o, g_ in zip(out, g, strict=True))
+            f = function(
+                sym_inputs, [], updates=list(zip(out, g, strict=True)), mode=self.mode
+            )
             for x in range(nb_repeat):
                 f(*val_inputs)
             out = [o.get_value() for o in out]
@@ -1001,7 +1003,7 @@ class TestFusion:
             if any(o == "float32" for o in out_dtype):
                 atol = 1e-6
 
-        for o, a in zip(out, answer):
+        for o, a in zip(out, answer, strict=True):
             np.testing.assert_allclose(o, a * nb_repeat, atol=atol)
 
         topo = f.maker.fgraph.toposort()
@@ -1021,7 +1023,7 @@ class TestFusion:
                         )
                         assert expected_len_sym_inputs == len(sym_inputs)
 
-        for od, o in zip(out_dtype, out):
+        for od, o in zip(out_dtype, out, strict=True):
             assert od == o.dtype
 
     def test_fusion_35_inputs(self):

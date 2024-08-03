@@ -212,7 +212,7 @@ class DimShuffle(ExternalCOp):
                     "The number of dimensions of the "
                     f"input is incorrect for this op. Expected {self.input_broadcastable}, got {ib}."
                 )
-            for expected, b in zip(self.input_broadcastable, ib):
+            for expected, b in zip(self.input_broadcastable, ib, strict=True):
                 if expected and not b:
                     raise TypeError(
                         "The broadcastable pattern of the "
@@ -446,7 +446,7 @@ class Elemwise(OpenMPOp):
             out_shapes = [
                 [
                     broadcast_static_dim_lengths(shape)
-                    for shape in zip(*[inp.type.shape for inp in inputs])
+                    for shape in zip(*[inp.type.shape for inp in inputs], strict=True)
                 ]
             ] * shadow.nout
         except ValueError:
@@ -459,8 +459,7 @@ class Elemwise(OpenMPOp):
         if inplace_pattern:
             for overwriter, overwritten in inplace_pattern.items():
                 for out_s, in_s in zip(
-                    out_shapes[overwriter],
-                    inputs[overwritten].type.shape,
+                    out_shapes[overwriter], inputs[overwritten].type.shape, strict=True
                 ):
                     if in_s == 1 and out_s != 1:
                         raise ValueError(
@@ -491,7 +490,7 @@ class Elemwise(OpenMPOp):
         out_dtypes, out_shapes, inputs = self.get_output_info(DimShuffle, *inputs)
         outputs = [
             TensorType(dtype=dtype, shape=shape)()
-            for dtype, shape in zip(out_dtypes, out_shapes)
+            for dtype, shape in zip(out_dtypes, out_shapes, strict=True)
         ]
         return Apply(self, inputs, outputs)
 
@@ -513,7 +512,9 @@ class Elemwise(OpenMPOp):
             bgrads = self._bgrad(inputs, outs, ograds)
             rop_out = None
 
-            for jdx, (inp, eval_point) in enumerate(zip(inputs, eval_points)):
+            for jdx, (inp, eval_point) in enumerate(
+                zip(inputs, eval_points, strict=True)
+            ):
                 # if None, then we can just ignore this branch ..
                 # what we do is to assume that for any non-differentiable
                 # branch, the gradient is actually 0, which I think is not
@@ -556,7 +557,7 @@ class Elemwise(OpenMPOp):
             # the return value obviously zero so that gradient.grad can tell
             # this op did the right thing.
             new_rval = []
-            for elem, ipt in zip(rval, inputs):
+            for elem, ipt in zip(rval, inputs, strict=True):
                 if isinstance(elem.type, NullType | DisconnectedType):
                     new_rval.append(elem)
                 else:
@@ -642,7 +643,7 @@ class Elemwise(OpenMPOp):
             return new_r
 
         ret = []
-        for scalar_igrad, ipt in zip(scalar_igrads, inputs):
+        for scalar_igrad, ipt in zip(scalar_igrads, inputs, strict=True):
             if scalar_igrad is None:
                 # undefined gradient
                 ret.append(None)
@@ -765,7 +766,7 @@ class Elemwise(OpenMPOp):
             variables = [variables]
 
         for i, (variable, storage, nout) in enumerate(
-            zip(variables, output_storage, node.outputs)
+            zip(variables, output_storage, node.outputs, strict=True)
         ):
             if getattr(variable, "dtype", "") == "object":
                 # Since numpy 1.6, function created with numpy.frompyfunc
@@ -800,9 +801,10 @@ class Elemwise(OpenMPOp):
     def _check_runtime_broadcast(node, inputs):
         for dims_and_bcast in zip(
             *[
-                zip(input.shape, sinput.type.broadcastable)
-                for input, sinput in zip(inputs, node.inputs)
-            ]
+                zip(input.shape, sinput.type.broadcastable, strict=False)
+                for input, sinput in zip(inputs, node.inputs, strict=True)
+            ],
+            strict=True,
         ):
             if any(d != 1 for d, _ in dims_and_bcast) and (1, False) in dims_and_bcast:
                 raise ValueError(
@@ -831,9 +833,11 @@ class Elemwise(OpenMPOp):
         # assert that inames and inputs order stay consistent.
         # This is to protect again futur change of uniq.
         assert len(inames) == len(inputs)
-        ii, iii = list(zip(*uniq(list(zip(_inames, node.inputs)))))
-        assert all(x == y for x, y in zip(ii, inames))
-        assert all(x == y for x, y in zip(iii, inputs))
+        ii, iii = list(
+            zip(*uniq(list(zip(_inames, node.inputs, strict=True))), strict=True)
+        )
+        assert all(x == y for x, y in zip(ii, inames, strict=True))
+        assert all(x == y for x, y in zip(iii, inputs, strict=True))
 
         defines = ""
         undefs = ""
@@ -854,9 +858,10 @@ class Elemwise(OpenMPOp):
             zip(
                 *[
                     (r, s, r.type.dtype_specs()[1])
-                    for r, s in zip(node.outputs, onames)
+                    for r, s in zip(node.outputs, onames, strict=True)
                     if r not in dmap
-                ]
+                ],
+                strict=True,
             )
         )
         if real:
@@ -868,7 +873,14 @@ class Elemwise(OpenMPOp):
         # (output, name), transposed (c type name not needed since we don't
         # need to allocate.
         aliased = list(
-            zip(*[(r, s) for (r, s) in zip(node.outputs, onames) if r in dmap])
+            zip(
+                *[
+                    (r, s)
+                    for (r, s) in zip(node.outputs, onames, strict=True)
+                    if r in dmap
+                ],
+                strict=True,
+            )
         )
         if aliased:
             aliased_outputs, aliased_onames = aliased
@@ -886,7 +898,7 @@ class Elemwise(OpenMPOp):
         # dimensionality)
         nnested = len(orders[0])
         sub = dict(sub)
-        for i, (input, iname) in enumerate(zip(inputs, inames)):
+        for i, (input, iname) in enumerate(zip(inputs, inames, strict=True)):
             # the c generators will substitute the input names for
             # references to loop variables lv0, lv1, ...
             sub[f"lv{i}"] = iname
@@ -896,7 +908,7 @@ class Elemwise(OpenMPOp):
 
         # Check if all inputs (except broadcasted scalar) are fortran.
         # In that case, create a fortran output ndarray.
-        z = list(zip(inames, inputs))
+        z = list(zip(inames, inputs, strict=True))
         alloc_fortran = " && ".join(
             f"PyArray_ISFORTRAN({arr})"
             for arr, var in z
@@ -911,7 +923,9 @@ class Elemwise(OpenMPOp):
         # We loop over the "real" outputs, i.e., those that are not
         # inplace (must be allocated) and we declare/allocate/check
         # them
-        for output, oname, odtype in zip(real_outputs, real_onames, real_odtypes):
+        for output, oname, odtype in zip(
+            real_outputs, real_onames, real_odtypes, strict=True
+        ):
             i += 1  # before this loop, i = number of inputs
             sub[f"lv{i}"] = oname
             sub["olv"] = oname
@@ -928,7 +942,7 @@ class Elemwise(OpenMPOp):
         # inplace (overwrite the contents of one of the inputs) and
         # make the output pointers point to their corresponding input
         # pointers.
-        for output, oname in zip(aliased_outputs, aliased_onames):
+        for output, oname in zip(aliased_outputs, aliased_onames, strict=True):
             olv_index = inputs.index(dmap[output][0])
             iname = inames[olv_index]
             # We make the output point to the corresponding input and
@@ -989,12 +1003,16 @@ class Elemwise(OpenMPOp):
                 task_decl = "".join(
                     f"{dtype}& {name}_i = *{name}_iter;\n"
                     for name, dtype in zip(
-                        inames + list(real_onames), idtypes + list(real_odtypes)
+                        inames + list(real_onames),
+                        idtypes + list(real_odtypes),
+                        strict=True,
                     )
                 )
 
                 preloops = {}
-                for i, (loop_order, dtype) in enumerate(zip(loop_orders, dtypes)):
+                for i, (loop_order, dtype) in enumerate(
+                    zip(loop_orders, dtypes, strict=True)
+                ):
                     for j, index in enumerate(loop_order):
                         if index != "x":
                             preloops.setdefault(j, "")
@@ -1066,7 +1084,9 @@ class Elemwise(OpenMPOp):
                     # assume they will have the same size
                     or all(
                         len(set(inp_shape)) == 1 and None not in inp_shape
-                        for inp_shape in zip(*(inp.type.shape for inp in node.inputs))
+                        for inp_shape in zip(
+                            *(inp.type.shape for inp in node.inputs), strict=True
+                        )
                     )
                 ):
                     z = onames[0]
@@ -1075,7 +1095,9 @@ class Elemwise(OpenMPOp):
                     npy_intp n = PyArray_SIZE({z});
                     """
                     index = ""
-                    for x, var in zip(inames + onames, inputs + node.outputs):
+                    for x, var in zip(
+                        inames + onames, inputs + node.outputs, strict=True
+                    ):
                         if not all(s == 1 for s in var.type.shape):
                             contig += f"""
             dtype_{x} * {x}_ptr = (dtype_{x}*) PyArray_DATA({x});
@@ -1097,7 +1119,7 @@ class Elemwise(OpenMPOp):
                     }}
                     """
             if contig is not None:
-                z = list(zip(inames + onames, inputs + node.outputs))
+                z = list(zip(inames + onames, inputs + node.outputs, strict=True))
                 all_broadcastable = all(s == 1 for s in var.type.shape)
                 cond1 = " && ".join(
                     f"PyArray_ISCONTIGUOUS({arr})"
@@ -1505,7 +1527,7 @@ class CAReduce(COp):
         nnested = len(order1)
 
         sub = dict(sub)
-        for i, (input, iname) in enumerate(zip(node.inputs, inames)):
+        for i, (input, iname) in enumerate(zip(node.inputs, inames, strict=True)):
             sub[f"lv{i}"] = iname
 
         decl = ""

@@ -2446,7 +2446,7 @@ class GCC_compiler(Compiler):
         if not libs:
             return flag_list
         libs = GCC_compiler.linking_patch(lib_dirs, libs)
-        for flag_idx, lib in zip(flag_idxs, libs):
+        for flag_idx, lib in zip(flag_idxs, libs, strict=True):
             flag_list[flag_idx] = lib
         return flag_list
 

@@ -32,13 +32,22 @@ class TestFunctionGraph:
         s = pickle.dumps(func)
         new_func = pickle.loads(s)
 
-        assert all(type(a) is type(b) for a, b in zip(func.inputs, new_func.inputs))
-        assert all(type(a) is type(b) for a, b in zip(func.outputs, new_func.outputs))
+        assert all(
+            type(a) is type(b)
+            for a, b in zip(func.inputs, new_func.inputs, strict=True)
+        )
+        assert all(
+            type(a) is type(b)
+            for a, b in zip(func.outputs, new_func.outputs, strict=True)
+        )
         assert all(
             type(a.op) is type(b.op)
-            for a, b in zip(func.apply_nodes, new_func.apply_nodes)
+            for a, b in zip(func.apply_nodes, new_func.apply_nodes, strict=True)
         )
-        assert all(a.type == b.type for a, b in zip(func.variables, new_func.variables))
+        assert all(
+            a.type == b.type
+            for a, b in zip(func.variables, new_func.variables, strict=True)
+        )
 
     def test_validate_inputs(self):
         var1 = op1()

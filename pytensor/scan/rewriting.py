@@ -166,7 +166,7 @@ def remove_constants_and_unused_inputs_scan(fgraph, node):
     # Look through non sequences
     nw_inner_nonseq = []
     nw_outer_nonseq = []
-    for idx, (nw_in, nw_out) in enumerate(zip(non_seqs, outer_non_seqs)):
+    for idx, (nw_in, nw_out) in enumerate(zip(non_seqs, outer_non_seqs, strict=True)):
         if isinstance(nw_out, Constant):
             givens[nw_in] = nw_out
         elif nw_in in all_ins:
@@ -203,7 +203,7 @@ def remove_constants_and_unused_inputs_scan(fgraph, node):
             allow_gc=op.allow_gc,
         )
         nw_outs = nwScan(*nw_outer, return_list=True)
-        return dict([("remove", [node]), *zip(node.outputs, nw_outs)])
+        return dict([("remove", [node]), *zip(node.outputs, nw_outs, strict=True)])
     else:
         return False
 
@@ -348,7 +348,7 @@ def scan_push_out_non_seq(fgraph, node):
         nw_outer = []
         nw_inner = []
         for to_repl, repl_in, repl_out in zip(
-            clean_to_replace, clean_replace_with_in, clean_replace_with_out
+            clean_to_replace, clean_replace_with_in, clean_replace_with_out, strict=True
         ):
             if isinstance(repl_out, Constant):
                 repl_in = repl_out
@@ -380,7 +380,7 @@ def scan_push_out_non_seq(fgraph, node):
         # Do not call make_node for test_value
         nw_node = nwScan(*(node.inputs + nw_outer), return_list=True)[0].owner
 
-        replacements = dict(zip(node.outputs, nw_node.outputs))
+        replacements = dict(zip(node.outputs, nw_node.outputs, strict=True))
         replacements["remove"] = [node]
         return replacements
     elif not to_keep_set:
@@ -584,7 +584,7 @@ def scan_push_out_seq(fgraph, node):
         nw_outer = []
         nw_inner = []
         for to_repl, repl_in, repl_out in zip(
-            clean_to_replace, clean_replace_with_in, clean_replace_with_out
+            clean_to_replace, clean_replace_with_in, clean_replace_with_out, strict=True
         ):
             if isinstance(repl_out, Constant):
                 repl_in = repl_out
@@ -616,7 +616,7 @@ def scan_push_out_seq(fgraph, node):
             return_list=True,
         )[0].owner
 
-        replacements = dict(zip(node.outputs, nw_node.outputs))
+        replacements = dict(zip(node.outputs, nw_node.outputs, strict=True))
         replacements["remove"] = [node]
         return replacements
 
@@ -814,7 +814,7 @@ def add_nitsot_outputs(
     # replacements["remove"] = [old_scan_node]
     # return new_scan_node, replacements
     fgraph.replace_all_validate_remove(  # type: ignore
-        list(zip(old_scan_node.outputs, new_node_old_outputs)),
+        list(zip(old_scan_node.outputs, new_node_old_outputs, strict=True)),
         remove=[old_scan_node],
         reason="scan_pushout_add",
     )
@@ -1020,7 +1020,7 @@ class ScanInplaceOptimizer(GraphRewriter):
             # This whole rewrite should be a simple local rewrite, but, because
             # of this awful approach, it can't be.
             fgraph.replace_all_validate_remove(  # type: ignore
-                list(zip(node.outputs, new_outs)),
+                list(zip(node.outputs, new_outs, strict=True)),
                 remove=[node],
                 reason="scan_make_inplace",
             )
@@ -1941,7 +1941,7 @@ class ScanMerge(GraphRewriter):
         if not isinstance(new_outs, list | tuple):
             new_outs = [new_outs]
 
-        return list(zip(outer_outs, new_outs))
+        return list(zip(outer_outs, new_outs, strict=True))
 
     def belongs_to_set(self, node, set_nodes):
         """
@@ -2010,7 +2010,9 @@ class ScanMerge(GraphRewriter):
         ]
         inner_inputs = op.inner_inputs
         rep_inner_inputs = rep_op.inner_inputs
-        for nominal_input, rep_nominal_input in zip(nominal_inputs, rep_nominal_inputs):
+        for nominal_input, rep_nominal_input in zip(
+            nominal_inputs, rep_nominal_inputs, strict=True
+        ):
             conds.append(node.inputs[mapping[inner_inputs.index(nominal_input)]])
             rep_conds.append(
                 rep_node.inputs[rep_mapping[rep_inner_inputs.index(rep_nominal_input)]]
@@ -2067,7 +2069,7 @@ def make_equiv(lo, li):
     seeno = {}
     left = []
     right = []
-    for o, i in zip(lo, li):
+    for o, i in zip(lo, li, strict=True):
         if o in seeno:
             left += [i]
             right += [o]
@@ -2104,7 +2106,7 @@ def scan_merge_inouts(fgraph, node):
     if has_duplicates(a.outer_in_seqs):
         new_outer_seqs = []
         new_inner_seqs = []
-        for out_seq, in_seq in zip(a.outer_in_seqs, a.inner_in_seqs):
+        for out_seq, in_seq in zip(a.outer_in_seqs, a.inner_in_seqs, strict=True):
             if out_seq in new_outer_seqs:
                 i = new_outer_seqs.index(out_seq)
                 inp_equiv[in_seq] = new_inner_seqs[i]
@@ -2117,7 +2119,9 @@ def scan_merge_inouts(fgraph, node):
     if has_duplicates(a.outer_in_non_seqs):
         new_outer_nseqs = []
         new_inner_nseqs = []
-        for out_nseq, in_nseq in zip(a.outer_in_non_seqs, a.inner_in_non_seqs):
+        for out_nseq, in_nseq in zip(
+            a.outer_in_non_seqs, a.inner_in_non_seqs, strict=True
+        ):
             if out_nseq in new_outer_nseqs:
                 i = new_outer_nseqs.index(out_nseq)
                 inp_equiv[in_nseq] = new_inner_nseqs[i]
@@ -2180,7 +2184,7 @@ def scan_merge_inouts(fgraph, node):
     if has_duplicates(na.outer_in_mit_mot):
         seen = {}
         for omm, imm, _sl in zip(
-            na.outer_in_mit_mot, na.inner_in_mit_mot, na.mit_mot_in_slices
+            na.outer_in_mit_mot, na.inner_in_mit_mot, na.mit_mot_in_slices, strict=True
         ):
             sl = tuple(_sl)
             if (omm, sl) in seen:
@@ -2193,7 +2197,7 @@ def scan_merge_inouts(fgraph, node):
     if has_duplicates(na.outer_in_mit_sot):
         seen = {}
         for oms, ims, _sl in zip(
-            na.outer_in_mit_sot, na.inner_in_mit_sot, na.mit_sot_in_slices
+            na.outer_in_mit_sot, na.inner_in_mit_sot, na.mit_sot_in_slices, strict=True
         ):
             sl = tuple(_sl)
             if (oms, sl) in seen:
@@ -2227,7 +2231,7 @@ def scan_merge_inouts(fgraph, node):
     na.outer_out_nit_sot = [
         map_out(outer_i, inner_o, outer_o, seen)
         for outer_i, inner_o, outer_o in zip(
-            na.outer_in_nit_sot, na.inner_out_nit_sot, na.outer_out_nit_sot
+            na.outer_in_nit_sot, na.inner_out_nit_sot, na.outer_out_nit_sot, strict=True
         )
     ]
 
@@ -2237,7 +2241,7 @@ def scan_merge_inouts(fgraph, node):
     na.outer_out_sit_sot = [
         map_out(outer_i, inner_o, outer_o, seen)
         for outer_i, inner_o, outer_o in zip(
-            na.outer_in_sit_sot, na.inner_out_sit_sot, na.outer_out_sit_sot
+            na.outer_in_sit_sot, na.inner_out_sit_sot, na.outer_out_sit_sot, strict=True
         )
     ]
 
@@ -2247,7 +2251,7 @@ def scan_merge_inouts(fgraph, node):
     na.outer_out_mit_sot = [
         map_out(outer_i, inner_o, outer_o, seen)
         for outer_i, inner_o, outer_o in zip(
-            na.outer_in_mit_sot, na.inner_out_mit_sot, na.outer_out_mit_sot
+            na.outer_in_mit_sot, na.inner_out_mit_sot, na.outer_out_mit_sot, strict=True
         )
     ]
 
@@ -2261,6 +2265,7 @@ def scan_merge_inouts(fgraph, node):
         na.inner_out_mit_mot,
         na.outer_out_mit_mot,
         na.mit_mot_out_slices,
+        strict=True,
     ):
         for s_outer_imm, s_inner_omm, s_outer_omm, sosl in seen:
             if (
@@ -2275,7 +2280,9 @@ def scan_merge_inouts(fgraph, node):
             new_outer_out_mit_mot.append(outer_omm)
     na.outer_out_mit_mot = new_outer_out_mit_mot
     if remove:
-        return dict([("remove", remove), *zip(node.outputs, na.outer_outputs)])
+        return dict(
+            [("remove", remove), *zip(node.outputs, na.outer_outputs, strict=True)]
+        )
     return na.outer_outputs
 
 
@@ -2300,7 +2307,7 @@ def scan_push_out_dot1(fgraph, node):
     sitsot_outs = op.inner_sitsot_outs(op.inner_outputs)
     outer_sitsot = op.outer_sitsot_outs(node.outputs)
     seqs = op.inner_seqs(op.inner_inputs)
-    for inp, out, outer_out in zip(sitsot_ins, sitsot_outs, outer_sitsot):
+    for inp, out, outer_out in zip(sitsot_ins, sitsot_outs, outer_sitsot, strict=True):
         if (
             out.owner
             and isinstance(out.owner.op, Elemwise)
@@ -2453,10 +2460,12 @@ def scan_push_out_dot1(fgraph, node):
                         new_out = dot(val, out_seq)
 
                     pos = node.outputs.index(outer_out)
-                    old_new = list(zip(node.outputs[:pos], new_outs[:pos]))
+                    old_new = list(zip(node.outputs[:pos], new_outs[:pos], strict=True))
                     old = fgraph.clients[node.outputs[pos]][0][0].outputs[0]
                     old_new.append((old, new_out))
-                    old_new += list(zip(node.outputs[pos + 1 :], new_outs[pos:]))
+                    old_new += list(
+                        zip(node.outputs[pos + 1 :], new_outs[pos:], strict=True)
+                    )
                     replacements = dict(old_new)
                     replacements["remove"] = [node]
                     return replacements

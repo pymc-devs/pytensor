@@ -1528,13 +1528,16 @@ def broadcast_shape_iter(
 
         array_shapes = [
             (one,) * (max_dims - a.ndim)
-            + tuple(one if t_sh == 1 else sh for sh, t_sh in zip(a.shape, a.type.shape))
+            + tuple(
+                one if t_sh == 1 else sh
+                for sh, t_sh in zip(a.shape, a.type.shape, strict=True)
+            )
             for a in _arrays
         ]
 
     result_dims = []
 
-    for dim_shapes in zip(*array_shapes):
+    for dim_shapes in zip(*array_shapes, strict=True):
         # Get the shapes in this dimension that are not broadcastable
         # (i.e. not symbolically known to be broadcastable)
         non_bcast_shapes = [shape for shape in dim_shapes if shape != one]

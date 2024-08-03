@@ -170,7 +170,7 @@ def check_broadcast(v1, v2):
     )
     size = min(v1.type.ndim, v2.type.ndim)
     for n, (b1, b2) in enumerate(
-        zip(v1.type.broadcastable[-size:], v2.type.broadcastable[-size:])
+        zip(v1.type.broadcastable[-size:], v2.type.broadcastable[-size:], strict=False)
     ):
         if b1 != b2:
             a1 = n + size - v1.type.ndim + 1
@@ -577,6 +577,7 @@ class ScanMethodsMixin:
             inner_input_indices,
             inner_output_indices,
             outer_output_indices,
+            strict=True,
         ):
             if oout != -1:
                 mappings["outer_inp_from_outer_out"][oout] = oinp
@@ -958,7 +959,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         # them have the same dtype
         argoffset = 0
         for inner_seq, outer_seq in zip(
-            self.inner_seqs(self.inner_inputs), self.outer_seqs(inputs)
+            self.inner_seqs(self.inner_inputs), self.outer_seqs(inputs), strict=True
         ):
             check_broadcast(outer_seq, inner_seq)
             new_inputs.append(copy_var_format(outer_seq, as_var=inner_seq))
@@ -977,6 +978,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 self.info.mit_mot_in_slices,
                 self.info.mit_mot_out_slices[: self.info.n_mit_mot],
                 self.outer_mitmot(inputs),
+                strict=True,
             )
         ):
             outer_mitmot = copy_var_format(_outer_mitmot, as_var=inner_mitmot[ipos])
@@ -1031,6 +1033,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 self.info.mit_sot_in_slices,
                 self.outer_mitsot(inputs),
                 self.inner_mitsot_outs(self.inner_outputs),
+                strict=True,
             )
         ):
             outer_mitsot = copy_var_format(_outer_mitsot, as_var=inner_mitsots[ipos])
@@ -1083,6 +1086,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 self.inner_sitsot(self.inner_inputs),
                 self.outer_sitsot(inputs),
                 self.inner_sitsot_outs(self.inner_outputs),
+                strict=True,
             )
         ):
             outer_sitsot = copy_var_format(_outer_sitsot, as_var=inner_sitsot)
@@ -1130,6 +1134,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 self.inner_shared(self.inner_inputs),
                 self.inner_shared_outs(self.inner_outputs),
                 self.outer_shared(inputs),
+                strict=True,
             )
         ):
             outer_shared = copy_var_format(_outer_shared, as_var=inner_shared)
@@ -1188,7 +1193,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         # type of tensor as the output, it is always a scalar int.
         new_inputs += [as_tensor_variable(ons) for ons in self.outer_nitsot(inputs)]
         for inner_nonseq, _outer_nonseq in zip(
-            self.inner_non_seqs(self.inner_inputs), self.outer_non_seqs(inputs)
+            self.inner_non_seqs(self.inner_inputs),
+            self.outer_non_seqs(inputs),
+            strict=True,
         ):
             outer_nonseq = copy_var_format(_outer_nonseq, as_var=inner_nonseq)
             new_inputs.append(outer_nonseq)
@@ -1271,7 +1278,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         if len(self.inner_outputs) != len(other.inner_outputs):
             return False
 
-        for self_in, other_in in zip(self.inner_inputs, other.inner_inputs):
+        for self_in, other_in in zip(
+            self.inner_inputs, other.inner_inputs, strict=True
+        ):
             if self_in.type != other_in.type:
                 return False
 
@@ -1406,7 +1415,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         fgraph.attach_feature(
             Supervisor(
                 inp
-                for spec, inp in zip(wrapped_inputs, fgraph.inputs)
+                for spec, inp in zip(wrapped_inputs, fgraph.inputs, strict=True)
                 if not (
                     getattr(spec, "mutable", None)
                     or (hasattr(fgraph, "destroyers") and fgraph.has_destroyers([inp]))
@@ -2086,7 +2095,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 jout = j + offset_out
                 output_storage[j][0] = inner_output_storage[jout].storage[0]
 
-            pos = [(idx + 1) % store for idx, store in zip(pos, store_steps)]
+            pos = [
+                (idx + 1) % store for idx, store in zip(pos, store_steps, strict=True)
+            ]
             i = i + 1
 
         # 6. Check if you need to re-order output buffers
@@ -2171,7 +2182,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
     def infer_shape(self, fgraph, node, input_shapes):
         # input_shapes correspond to the shapes of node.inputs
-        for inp, inp_shp in zip(node.inputs, input_shapes):
+        for inp, inp_shp in zip(node.inputs, input_shapes, strict=True):
             assert inp_shp is None or len(inp_shp) == inp.type.ndim
 
         # Here we build 2 variables;
@@ -2240,7 +2251,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         # Non-sequences have a direct equivalent from self.inner_inputs in
         # node.inputs
         inner_non_sequences = self.inner_inputs[len(seqs_shape) + len(outs_shape) :]
-        out_equivalent.update(zip(inner_non_sequences, node.inputs[offset:]))
+        out_equivalent.update(
+            zip(inner_non_sequences, node.inputs[offset:], strict=True)
+        )
 
         if info.as_while:
             self_outs = self.inner_outputs[:-1]
@@ -2274,7 +2287,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 r = node.outputs[n_outs + x]
                 assert r.ndim == 1 + len(out_shape_x)
                 shp = [node.inputs[offset + info.n_shared_outs + x]]
-                for i, shp_i in zip(range(1, r.ndim), out_shape_x):
+                for i, shp_i in zip(range(1, r.ndim), out_shape_x, strict=True):
                     # Validate shp_i. v_shape_i is either None (if invalid),
                     # or a (variable, Boolean) tuple. The Boolean indicates
                     # whether variable is shp_i (if True), or an valid
@@ -2296,7 +2309,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         if info.as_while:
             scan_outs_init = scan_outs
             scan_outs = []
-            for o, x in zip(node.outputs, scan_outs_init):
+            for o, x in zip(node.outputs, scan_outs_init, strict=True):
                 if x is None:
                     scan_outs.append(None)
                 else:
@@ -2572,7 +2585,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 dC_dinps_t[dx] = pt.zeros_like(diff_inputs[dx])
             else:
                 disconnected_dC_dinps_t[dx] = False
-                for Xt, Xt_placeholder in zip(diff_outputs[info.n_mit_mot_outs :], Xts):
+                for Xt, Xt_placeholder in zip(
+                    diff_outputs[info.n_mit_mot_outs :], Xts, strict=True
+                ):
                     tmp = forced_replace(dC_dinps_t[dx], Xt, Xt_placeholder)
                     dC_dinps_t[dx] = tmp
 
@@ -2652,7 +2667,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 n = n_steps.tag.test_value
             else:
                 n = inputs[0].tag.test_value
-            for taps, x in zip(info.mit_sot_in_slices, self.outer_mitsot_outs(outs)):
+            for taps, x in zip(
+                info.mit_sot_in_slices, self.outer_mitsot_outs(outs), strict=True
+            ):
                 mintap = np.min(taps)
                 if hasattr(x[::-1][:mintap], "test_value"):
                     assert x[::-1][:mintap].tag.test_value.shape[0] == n
@@ -2667,7 +2684,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                         assert x[::-1].tag.test_value.shape[0] == n
         outer_inp_seqs += [
             x[::-1][: np.min(taps)]
-            for taps, x in zip(info.mit_sot_in_slices, self.outer_mitsot_outs(outs))
+            for taps, x in zip(
+                info.mit_sot_in_slices, self.outer_mitsot_outs(outs), strict=True
+            )
         ]
         outer_inp_seqs += [x[::-1][:-1] for x in self.outer_sitsot_outs(outs)]
         outer_inp_seqs += [x[::-1] for x in self.outer_nitsot_outs(outs)]
@@ -2998,6 +3017,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             zip(
                 outputs[offset : offset + info.n_seqs],
                 type_outs[offset : offset + info.n_seqs],
+                strict=True,
             )
         ):
             if t == "connected":
@@ -3027,7 +3047,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 gradients.append(NullType(t)())
 
         end = info.n_mit_mot + info.n_mit_sot + info.n_sit_sot
-        for p, (x, t) in enumerate(zip(outputs[:end], type_outs[:end])):
+        for p, (x, t) in enumerate(zip(outputs[:end], type_outs[:end], strict=True)):
             if t == "connected":
                 # If the forward scan is in as_while mode, we need to pad
                 # the gradients, so that they match the size of the input
@@ -3062,7 +3082,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         for idx in range(info.n_shared_outs):
             disconnected = True
             connected_flags = self.connection_pattern(node)[idx + start]
-            for dC_dout, connected in zip(dC_douts, connected_flags):
+            for dC_dout, connected in zip(dC_douts, connected_flags, strict=True):
                 if not isinstance(dC_dout.type, DisconnectedType) and connected:
                     disconnected = False
             if disconnected:
@@ -3079,7 +3099,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         begin = end
 
         end = begin + n_sitsot_outs
-        for p, (x, t) in enumerate(zip(outputs[begin:end], type_outs[begin:end])):
+        for p, (x, t) in enumerate(
+            zip(outputs[begin:end], type_outs[begin:end], strict=True)
+        ):
             if t == "connected":
                 gradients.append(x[-1])
             elif t == "disconnected":
@@ -3156,7 +3178,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         e = 1 + info.n_seqs
         ie = info.n_seqs
         clean_eval_points = []
-        for inp, evp in zip(inputs[b:e], eval_points[b:e]):
+        for inp, evp in zip(inputs[b:e], eval_points[b:e], strict=True):
             if evp is not None:
                 clean_eval_points.append(evp)
             else:
@@ -3171,7 +3193,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         ib = ie
         ie = ie + int(sum(len(x) for x in info.mit_mot_in_slices))
         clean_eval_points = []
-        for inp, evp in zip(inputs[b:e], eval_points[b:e]):
+        for inp, evp in zip(inputs[b:e], eval_points[b:e], strict=True):
             if evp is not None:
                 clean_eval_points.append(evp)
             else:
@@ -3186,7 +3208,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         ib = ie
         ie = ie + int(sum(len(x) for x in info.mit_sot_in_slices))
         clean_eval_points = []
-        for inp, evp in zip(inputs[b:e], eval_points[b:e]):
+        for inp, evp in zip(inputs[b:e], eval_points[b:e], strict=True):
             if evp is not None:
                 clean_eval_points.append(evp)
             else:
@@ -3201,7 +3223,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         ib = ie
         ie = ie + info.n_sit_sot
         clean_eval_points = []
-        for inp, evp in zip(inputs[b:e], eval_points[b:e]):
+        for inp, evp in zip(inputs[b:e], eval_points[b:e], strict=True):
             if evp is not None:
                 clean_eval_points.append(evp)
             else:
@@ -3225,7 +3247,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
         # All other arguments
         clean_eval_points = []
-        for inp, evp in zip(inputs[e:], eval_points[e:]):
+        for inp, evp in zip(inputs[e:], eval_points[e:], strict=True):
             if evp is not None:
                 clean_eval_points.append(evp)
             else:

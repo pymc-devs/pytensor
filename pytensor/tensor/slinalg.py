@@ -897,7 +897,7 @@ class BaseBlockDiagonal(Op):
         return [gout[0][slc] for slc in slices]
 
     def infer_shape(self, fgraph, nodes, shapes):
-        first, second = zip(*shapes)
+        first, second = zip(*shapes, strict=True)
         return [(pt.add(*first), pt.add(*second))]
 
     def _validate_and_prepare_inputs(self, matrices, as_tensor_func):

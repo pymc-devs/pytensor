@@ -272,7 +272,7 @@ class Apply(Node, Generic[OpType]):
         # as the output type depends on the input values and not just their types
         output_type_depends_on_input_value = self.op._output_type_depends_on_input_value
 
-        for i, (curr, new) in enumerate(zip(self.inputs, new_inputs)):
+        for i, (curr, new) in enumerate(zip(self.inputs, new_inputs, strict=True)):
             # Check if the input type changed or if the Op has output types that depend on input values
             if (curr.type != new.type) or output_type_depends_on_input_value:
                 # In strict mode, the cloned graph is assumed to be mathematically equivalent to the original one.
@@ -1302,7 +1302,7 @@ def clone_node_and_cache(
     if new_node.op is not node.op:
         clone_d.setdefault(node.op, new_node.op)
 
-    for old_o, new_o in zip(node.outputs, new_node.outputs):
+    for old_o, new_o in zip(node.outputs, new_node.outputs, strict=True):
         clone_d.setdefault(old_o, new_o)
 
     return new_node
@@ -1891,7 +1891,7 @@ def equal_computations(
     if in_ys is None:
         in_ys = []
 
-    for x, y in zip(xs, ys):
+    for x, y in zip(xs, ys, strict=True):
         if not isinstance(x, Variable) and not isinstance(y, Variable):
             return np.array_equal(x, y)
         if not isinstance(x, Variable):
@@ -1914,13 +1914,13 @@ def equal_computations(
     if len(in_xs) != len(in_ys):
         return False
 
-    for _x, _y in zip(in_xs, in_ys):
+    for _x, _y in zip(in_xs, in_ys, strict=True):
         if not (_y.type.in_same_class(_x.type)):
             return False
 
-    common = set(zip(in_xs, in_ys))
+    common = set(zip(in_xs, in_ys, strict=True))
     different: set[tuple[Variable, Variable]] = set()
-    for dx, dy in zip(xs, ys):
+    for dx, dy in zip(xs, ys, strict=True):
         assert isinstance(dx, Variable)
         # We checked above that both dx and dy have an owner or not
         if dx.owner is None:
@@ -1956,7 +1956,7 @@ def equal_computations(
             return False
         else:
             all_in_common = True
-            for dx, dy in zip(nd_x.outputs, nd_y.outputs):
+            for dx, dy in zip(nd_x.outputs, nd_y.outputs, strict=True):
                 if (dx, dy) in different:
                     return False
                 if (dx, dy) not in common:
@@ -1966,7 +1966,7 @@ def equal_computations(
                 return True
 
             # Compare the individual inputs for equality
-            for dx, dy in zip(nd_x.inputs, nd_y.inputs):
+            for dx, dy in zip(nd_x.inputs, nd_y.inputs, strict=True):
                 if (dx, dy) not in common:
                     # Equality between the variables is unknown, compare
                     # their respective owners, if they have some
@@ -2001,7 +2001,7 @@ def equal_computations(
             # If the code reaches this statement then the inputs are pair-wise
             # equivalent so the outputs of the current nodes are also
             # pair-wise equivalents
-            for dx, dy in zip(nd_x.outputs, nd_y.outputs):
+            for dx, dy in zip(nd_x.outputs, nd_y.outputs, strict=True):
                 common.add((dx, dy))
 
             return True

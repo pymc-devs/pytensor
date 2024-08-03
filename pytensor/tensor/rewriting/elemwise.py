@@ -300,7 +300,7 @@ class InplaceElemwiseOptimizer(GraphRewriter):
                         )
                         new_node = new_outputs[0].owner
 
-                        for r, new_r in zip(node.outputs, new_outputs):
+                        for r, new_r in zip(node.outputs, new_outputs, strict=True):
                             prof["nb_call_replace"] += 1
                             fgraph.replace(
                                 r, new_r, reason="inplace_elemwise_optimizer"
@@ -1036,12 +1036,12 @@ class FusionOptimizer(GraphRewriter):
             )
             if not isinstance(composite_outputs, list):
                 composite_outputs = [composite_outputs]
-            for old_out, composite_out in zip(outputs, composite_outputs):
+            for old_out, composite_out in zip(outputs, composite_outputs, strict=True):
                 if old_out.name:
                     composite_out.name = old_out.name
 
             fgraph.replace_all_validate(
-                list(zip(outputs, composite_outputs)),
+                list(zip(outputs, composite_outputs, strict=True)),
                 reason=self.__class__.__name__,
             )
             nb_replacement += 1
@@ -1117,7 +1117,7 @@ def local_useless_composite_outputs(fgraph, node):
         used_inputs = [node.inputs[i] for i in used_inputs_idxs]
         c = ps.Composite(inputs=used_inner_inputs, outputs=used_inner_outputs)
         e = Elemwise(scalar_op=c)(*used_inputs, return_list=True)
-        return dict(zip([node.outputs[i] for i in used_outputs_idxs], e))
+        return dict(zip([node.outputs[i] for i in used_outputs_idxs], e, strict=True))
 
 
 @node_rewriter([CAReduce])
@@ -1217,7 +1217,9 @@ def local_inline_composite_constants(fgraph, node):
     new_outer_inputs = []
     new_inner_inputs = []
     inner_replacements = {}
-    for outer_inp, inner_inp in zip(node.inputs, composite_op.fgraph.inputs):
+    for outer_inp, inner_inp in zip(
+        node.inputs, composite_op.fgraph.inputs, strict=True
+    ):
         # Complex variables don't have a `c_literal` that can be inlined
         if "complex" not in outer_inp.type.dtype:
             unique_value = get_unique_constant_value(outer_inp)
@@ -1354,7 +1356,7 @@ def local_useless_2f1grad_loop(fgraph, node):
 
     replacements = {converges: new_converges}
     i = 0
-    for grad_var, is_used in zip(grad_vars, grad_var_is_used):
+    for grad_var, is_used in zip(grad_vars, grad_var_is_used, strict=True):
         if not is_used:
             continue
         replacements[grad_var] = new_outs[i]

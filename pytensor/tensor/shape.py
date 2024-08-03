@@ -436,7 +436,7 @@ class SpecifyShape(COp):
             )
 
         type_shape = [None] * x.ndim
-        for i, (xts, s) in enumerate(zip(x.type.shape, shape)):
+        for i, (xts, s) in enumerate(zip(x.type.shape, shape, strict=True)):
             if xts is not None:
                 type_shape[i] = xts
             else:
@@ -459,7 +459,9 @@ class SpecifyShape(COp):
             raise AssertionError(
                 f"SpecifyShape: Got {x.ndim} dimensions (shape {x.shape}), expected {ndim} dimensions with shape {tuple(shape)}."
             )
-        if not all(xs == s for xs, s in zip(x.shape, shape) if s is not None):
+        if not all(
+            xs == s for xs, s in zip(x.shape, shape, strict=True) if s is not None
+        ):
             raise AssertionError(
                 f"SpecifyShape: Got shape {x.shape}, expected {tuple(int(s) if s is not None else None for s in shape)}."
             )
@@ -523,7 +525,9 @@ class SpecifyShape(COp):
             """
         )
 
-        for i, (shp_name, shp) in enumerate(zip(shape_names, node.inputs[1:])):
+        for i, (shp_name, shp) in enumerate(
+            zip(shape_names, node.inputs[1:], strict=True)
+        ):
             if NoneConst.equals(shp):
                 continue
             code += dedent(
@@ -585,11 +589,15 @@ def specify_shape(
     x = ptb.as_tensor_variable(x)  # type: ignore[arg-type,unused-ignore]
     # The above is a type error in Python 3.9 but not 3.12.
     # Thus we need to ignore unused-ignore on 3.12.
-    new_shape_info = any(
-        s != xts for (s, xts) in zip(shape, x.type.shape) if s is not None
-    )
+
     # If shape does not match x.ndim, we rely on the `Op` to raise a ValueError
-    if not new_shape_info and len(shape) == x.type.ndim:
+    if len(shape) != x.type.ndim:
+        return _specify_shape(x, *shape)
+
+    new_shape_matches = all(
+        s == xts for (s, xts) in zip(shape, x.type.shape, strict=True) if s is not None
+    )
+    if new_shape_matches:
         return x
 
     return _specify_shape(x, *shape)

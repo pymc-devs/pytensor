@@ -152,11 +152,13 @@ class RandomVariable(Op):
 
             # Try to infer missing support dims from signature of params
             for param, param_sig, ndim_params in zip(
-                dist_params, self.inputs_sig, self.ndims_params
+                dist_params, self.inputs_sig, self.ndims_params, strict=True
             ):
                 if ndim_params == 0:
                     continue
-                for param_dim, dim in zip(param.shape[-ndim_params:], param_sig):
+                for param_dim, dim in zip(
+                    param.shape[-ndim_params:], param_sig, strict=True
+                ):
                     if dim in core_out_shape and core_out_shape[dim] is None:
                         core_out_shape[dim] = param_dim
 
@@ -231,7 +233,7 @@ class RandomVariable(Op):
 
             # Fail early when size is incompatible with parameters
             for i, (param, param_ndim_supp) in enumerate(
-                zip(dist_params, self.ndims_params)
+                zip(dist_params, self.ndims_params, strict=True)
             ):
                 param_batched_dims = getattr(param, "ndim", 0) - param_ndim_supp
                 if param_batched_dims > size_len:
@@ -255,7 +257,7 @@ class RandomVariable(Op):
 
             batch_shape = tuple(
                 s if not b else constant(1, "int64")
-                for s, b in zip(shape[:-n], p.type.broadcastable[:-n])
+                for s, b in zip(shape[:-n], p.type.broadcastable[:-n], strict=True)
             )
             return batch_shape
 
@@ -264,7 +266,9 @@ class RandomVariable(Op):
         # independent variate dimensions are left.
         params_batch_shape = tuple(
             extract_batch_shape(p, ps, n)
-            for p, ps, n in zip(dist_params, param_shapes, self.ndims_params)
+            for p, ps, n in zip(
+                dist_params, param_shapes, self.ndims_params, strict=False
+            )
         )
 
         if len(params_batch_shape) == 1:

@@ -335,7 +335,7 @@ def verify_grad_sparse(op, pt, structured=False, *args, **kwargs):
         oconv = conv_none
 
     def conv_op(*inputs):
-        ipt = [conv(i) for i, conv in zip(inputs, iconv)]
+        ipt = [conv(i) for i, conv in zip(inputs, iconv, strict=True)]
         out = op(*ipt)
         return oconv(out)
 
@@ -2193,7 +2193,7 @@ class TestEnsureSortedIndices(utt.InferShapeTester):
 
     def test_op(self):
         for format in sparse.sparse_formats:
-            for shape in zip(range(5, 9), range(3, 7)[::-1]):
+            for shape in zip(range(5, 9), range(3, 7)[::-1], strict=True):
                 variable, data = sparse_random_inputs(format, shape=shape)
 
                 f = pytensor.function(variable, self.op(*variable))
@@ -2204,7 +2204,7 @@ class TestEnsureSortedIndices(utt.InferShapeTester):
 
     def test_infer_shape(self):
         for format in sparse.sparse_formats:
-            for shape in zip(range(5, 9), range(3, 7)[::-1]):
+            for shape in zip(range(5, 9), range(3, 7)[::-1], strict=True):
                 variable, data = sparse_random_inputs(format, shape=shape)
                 self._compile_and_check(
                     variable, [self.op(*variable)], data, self.op_class
@@ -2212,7 +2212,7 @@ class TestEnsureSortedIndices(utt.InferShapeTester):
 
     def test_grad(self):
         for format in sparse.sparse_formats:
-            for shape in zip(range(5, 9), range(3, 7)[::-1]):
+            for shape in zip(range(5, 9), range(3, 7)[::-1], strict=True):
                 variable, data = sparse_random_inputs(format, shape=shape)
                 verify_grad_sparse(self.op, data, structured=False)
 
@@ -2224,7 +2224,7 @@ class TestClean(utt.InferShapeTester):
 
     def test_op(self):
         for format in sparse.sparse_formats:
-            for shape in zip(range(5, 9), range(3, 7)[::-1]):
+            for shape in zip(range(5, 9), range(3, 7)[::-1], strict=True):
                 variable, data = sparse_random_inputs(format, shape=shape)
 
                 data[0][0, 0] = data[0][1, 1] = 0
@@ -2243,7 +2243,7 @@ class TestClean(utt.InferShapeTester):
 
     def test_grad(self):
         for format in sparse.sparse_formats:
-            for shape in zip(range(5, 9), range(3, 7)[::-1]):
+            for shape in zip(range(5, 9), range(3, 7)[::-1], strict=True):
                 variable, data = sparse_random_inputs(format, shape=shape)
                 verify_grad_sparse(self.op, data, structured=False)
 

@@ -704,7 +704,7 @@ class ParamsType(CType):
         c_init_list = []
         c_cleanup_list = []
         c_extract_list = []
-        for attribute_name, type_instance in zip(self.fields, self.types):
+        for attribute_name, type_instance in zip(self.fields, self.types, strict=True):
             try:
                 # c_support_code() may return a code string or a list of code strings.
                 support_code = type_instance.c_support_code()
