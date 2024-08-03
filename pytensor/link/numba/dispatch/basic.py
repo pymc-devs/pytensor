@@ -549,11 +549,7 @@ def numba_funcify_Reshape(op, **kwargs):
 
         @numba_njit
         def reshape(x, shape):
-            # TODO: Use this until https://github.com/numba/numba/issues/7353 is closed.
-            return np.reshape(
-                np.ascontiguousarray(np.asarray(x)),
-                numba_ndarray.to_fixed_tuple(shape, ndim),
-            )
+            return np.reshape(x, numba_ndarray.to_fixed_tuple(shape, ndim))
 
     return reshape
 
