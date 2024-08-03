@@ -500,11 +500,11 @@ class TestIfelse(utt.OptimizationTestMixin):
 
     def test_grad_test_values(self):
         # Regression test for test values of `ifelse` gradient.
-        with pytensor.config.change_flags(compute_test_value="raise"):
-            x = scalar("x")
+        x = scalar("x")
+        with pytest.warns(FutureWarning):
             x.tag.test_value = 1
-            # Used to crash due to undefined test value.
-            pytensor.grad(ifelse(0, x, x), x)
+        # Used to crash due to undefined test value.
+        pytensor.grad(ifelse(0, x, x), x)
 
     def test_grad_int_value(self):
         w = pytensor.shared(np.random.random(10))

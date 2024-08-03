@@ -241,18 +241,19 @@ class TestFunctionGraph:
 
     @config.change_flags(compute_test_value="raise")
     def test_replace_test_value(self):
-        var1 = MyVariable("var1")
-        var1.tag.test_value = 1
-        var2 = MyVariable("var2")
-        var2.tag.test_value = 2
-        var3 = op1(var2, var1)
-        var4 = op2(var3, var2)
-        var4.tag.test_value = np.array([1, 2])
-        var5 = op3(var4, var2, var2)
-        fg = FunctionGraph([var1, var2], [var3, var5], clone=False)
+        with pytest.warns(FutureWarning):
+            var1 = MyVariable("var1")
+            var1.tag.test_value = 1
+            var2 = MyVariable("var2")
+            var2.tag.test_value = 2
+            var3 = op1(var2, var1)
+            var4 = op2(var3, var2)
+            var4.tag.test_value = np.array([1, 2])
+            var5 = op3(var4, var2, var2)
+            fg = FunctionGraph([var1, var2], [var3, var5], clone=False)
 
-        var6 = op3()
-        var6.tag.test_value = np.array(0)
+            var6 = op3()
+            var6.tag.test_value = np.array(0)
 
         assert var6.tag.test_value.shape != var4.tag.test_value.shape
 

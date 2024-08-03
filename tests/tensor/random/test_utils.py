@@ -17,7 +17,7 @@ from tests import unittest_tools as utt
 def set_pytensor_flags():
     rewrites_query = RewriteDatabaseQuery(include=[None], exclude=[])
     py_mode = Mode("py", rewrites_query)
-    with config.change_flags(mode=py_mode, compute_test_value="warn"):
+    with config.change_flags(mode=py_mode):
         yield
 
 
@@ -72,16 +72,18 @@ def test_broadcast_params():
 
     # Try it in PyTensor
     with config.change_flags(compute_test_value="raise"):
-        mean = tensor(dtype=config.floatX, shape=(None, 1))
-        mean.tag.test_value = np.array([[0], [10], [100]], dtype=config.floatX)
-        cov = matrix()
-        cov.tag.test_value = np.diag(np.array([1e-6], dtype=config.floatX))
-        params = [mean, cov]
-        res = broadcast_params(params, ndims_params)
-        assert np.array_equal(res[0].get_test_value(), mean.get_test_value())
-        assert np.array_equal(
-            res[1].get_test_value(), np.broadcast_to(cov.get_test_value(), (3, 1, 1))
-        )
+        with pytest.warns(FutureWarning):
+            mean = tensor(dtype=config.floatX, shape=(None, 1))
+            mean.tag.test_value = np.array([[0], [10], [100]], dtype=config.floatX)
+            cov = matrix()
+            cov.tag.test_value = np.diag(np.array([1e-6], dtype=config.floatX))
+            params = [mean, cov]
+            res = broadcast_params(params, ndims_params)
+            assert np.array_equal(res[0].get_test_value(), mean.get_test_value())
+            assert np.array_equal(
+                res[1].get_test_value(),
+                np.broadcast_to(cov.get_test_value(), (3, 1, 1)),
+            )
 
 
 class TestSharedRandomStream:
