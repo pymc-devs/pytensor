@@ -370,6 +370,7 @@ def pfunc(
     givens=None,
     no_default_updates=False,
     accept_inplace=False,
+    trust_input=False,
     name=None,
     rebuild_strict=True,
     allow_input_downcast=None,
@@ -467,6 +468,7 @@ def pfunc(
         cloned_outputs,
         mode,
         accept_inplace=accept_inplace,
+        trust_input=trust_input,
         name=name,
         profile=profile,
         on_unused_input=on_unused_input,
@@ -478,7 +480,6 @@ def pfunc(
 def construct_pfunc_ins_and_outs(
     params,
     outputs=None,
-    mode=None,
     updates=None,
     givens=None,
     no_default_updates=False,
