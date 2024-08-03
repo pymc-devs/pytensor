@@ -337,6 +337,7 @@ def local_subtensor_of_dot(fgraph, node):
 @register_useless
 @register_canonicalize
 @register_specialize
+@register_stabilize
 @node_rewriter([Subtensor])
 def local_useless_slice(fgraph, node):
     """
@@ -344,42 +345,64 @@ def local_useless_slice(fgraph, node):
         1. X[0, :] -> X[0]
         2. X[:] -> X
 
+    Also, rewrite Subtensor of the form:
+        X[0:7:1] -> X[None:None:None]
+        where X is a vector of length 7
+
     """
     idxs = get_idx_list(node.inputs, node.op.idx_list)
+    x = node.inputs[0]
 
     if not idxs:
         return [node.inputs[0]]
 
-    last_useless_slice = len(idxs)
-    for s in idxs[::-1]:
-        # check if slice and then check slice indices
+    new_idxs = list(idxs)
+    change_flag = False
+    last_useful_idx = -1
+    for dim, s in enumerate(new_idxs):
+        if not isinstance(s, slice):
+            last_useful_idx = dim
+            continue
+
+        if s == slice(None):
+            continue
+
+        start = s.start
+        stop = s.stop
+        step = s.step
         if (
-            isinstance(s, slice)
-            and s.start is None
-            and s.stop is None
-            and (
-                s.step is None
-                or extract_constant(s.step, only_process_constants=True) == 1
-            )
+            start is not None
+            and extract_constant(start, only_process_constants=True) == 0
         ):
-            last_useless_slice -= 1
-        else:
-            break
-    # check if we removed something
-    if last_useless_slice < len(idxs):
-        new_idxs = idxs[:last_useless_slice]
-        if new_idxs:
-            new_subtensor = Subtensor(new_idxs)
-            new_subtensor_inputs = get_slice_elements(
-                new_idxs, lambda x: isinstance(x, Variable)
-            )
-            out = new_subtensor(node.inputs[0], *new_subtensor_inputs)
-            # Copy over previous output stacktrace
-            copy_stack_trace(node.outputs, out)
-            return [out]
-        else:
-            # Subtensor is not needed at all
-            return [node.inputs[0]]
+            change_flag = True
+            start = None
+
+        if (
+            stop is not None
+            and x.type.shape[dim] is not None
+            and extract_constant(stop, only_process_constants=True) == x.type.shape[dim]
+        ):
+            change_flag = True
+            stop = None
+
+        if (
+            step is not None
+            and extract_constant(step, only_process_constants=True) == 1
+        ):
+            change_flag = True
+            step = None
+
+        if not (start is None and stop is None and step is None):
+            last_useful_idx = dim
+
+        new_idxs[dim] = slice(start, stop, step)
+
+    if change_flag or ((last_useful_idx + 1) < len(idxs)):
+        out = x[tuple(new_idxs[: last_useful_idx + 1])]
+        # Copy over previous output stacktrace
+        copy_stack_trace(node.outputs, out)
+
+        return [out]
 
 
 # fast_compile to allow opt subtensor(cast{float32}(make_vector))
