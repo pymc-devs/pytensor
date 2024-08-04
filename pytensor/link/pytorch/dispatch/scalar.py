@@ -1,9 +1,8 @@
 import torch
 
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
-from pytensor.scalar.basic import (
-    ScalarOp,
-)
+from pytensor.scalar.basic import ScalarOp
+from pytensor.scalar.loop import ScalarLoop
 
 
 @pytorch_funcify.register(ScalarOp)
@@ -38,3 +37,24 @@ def pytorch_funcify_ScalarOp(op, node, **kwargs):
             )
 
     return pytorch_func
+
+
+@pytorch_funcify.register(ScalarLoop)
+def pytorch_funicify_ScalarLoop(op, node, **kwargs):
+    update = pytorch_funcify(op.fgraph)
+
+    def inner(steps, start, constant, update=update, is_while=op.is_while):
+        # easiest way to do it is to loop
+        c = start
+        for i in range(steps):
+            outs = update(c, constant)
+            if is_while:
+                n, done = outs
+                if done:
+                    return n
+                c = n
+            else:
+                c = outs[0]
+        return c
+
+    return inner
