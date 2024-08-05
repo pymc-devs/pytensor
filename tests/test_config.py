@@ -3,6 +3,7 @@
 import configparser as stdlib_configparser
 import io
 import pickle
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +18,18 @@ def _create_test_config():
         pytensor_cfg=stdlib_configparser.ConfigParser(),
         pytensor_raw_cfg=stdlib_configparser.RawConfigParser(),
     )
+
+
+def test_base_compiledir_str(tmp_path: Path):
+    base_compiledir = tmp_path
+    assert (
+        configdefaults._filter_base_compiledir(str(base_compiledir)) == base_compiledir
+    )
+
+
+def test_compiledir_str(tmp_path: Path):
+    compiledir = tmp_path
+    assert configdefaults._filter_compiledir(str(compiledir)) == compiledir
 
 
 def test_invalid_default():
@@ -85,6 +98,7 @@ def test_config_hash():
         "test__config_hash",
         "A config var from a test case.",
         configparser.StrParam("test_default"),
+        in_c_key=True,
     )
 
     h0 = root.get_config_hash()
@@ -138,7 +152,7 @@ class TestConfigTypes:
             cp._apply("gpu123")
         with pytest.raises(ValueError, match='Valid options start with one of "cpu".'):
             cp._apply("notadevice")
-        assert str(cp) == "None (cpu)"
+        assert str(cp) == "unnamed (cpu)"
 
 
 def test_config_context():
@@ -147,13 +161,14 @@ def test_config_context():
         "test__config_context",
         "A config var from a test case.",
         configparser.StrParam("test_default"),
+        in_c_key=False,
     )
     assert hasattr(root, "test__config_context")
     assert root.test__config_context == "test_default"
 
     with root.change_flags(test__config_context="new_value"):
         assert root.test__config_context == "new_value"
-        with root.change_flags({"test__config_context": "new_value2"}):
+        with root.change_flags(test__config_context="new_value2"):
             assert root.test__config_context == "new_value2"
         assert root.test__config_context == "new_value"
     assert root.test__config_context == "test_default"
@@ -168,6 +183,7 @@ def test_invalid_configvar_access():
         "test__on_test_instance",
         "This config setting was added to the test instance.",
         configparser.IntParam(5),
+        in_c_key=False,
     )
     assert hasattr(root_test, "test__on_test_instance")
     # While the property _actually_ exists on all instances,
@@ -184,6 +200,7 @@ def test_invalid_configvar_access():
             "test__on_test_instance",
             "This config setting was already added to another instance.",
             configparser.IntParam(5),
+            in_c_key=False,
         )
 
 
@@ -222,7 +239,7 @@ def test_config_pickling():
     buffer.seek(0)
     restored = pickle.load(buffer)
     # ...without a change in the config values
-    for name in root._config_var_dict.keys():
+    for name in root._config_var_dict:
         v_original = getattr(root, name)
         v_restored = getattr(restored, name)
         assert (
@@ -235,6 +252,7 @@ def test_config_pickling():
         "test__lambda_kills_pickling",
         "Lambda functions cause pickling problems.",
         configparser.IntParam(5, lambda i: i > 0),
+        in_c_key=False,
     )
     with pytest.raises(AttributeError, match="Can't pickle local object"):
         pickle.dump(root, io.BytesIO())

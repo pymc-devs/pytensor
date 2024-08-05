@@ -75,6 +75,7 @@ Optimizations associated with these BLAS Ops are in tensor.rewriting.blas
 
 """
 
+import functools
 import logging
 import os
 import time
@@ -104,7 +105,6 @@ from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import add, mul, neg, sub
 from pytensor.tensor.shape import shape_padright, specify_broadcastable
 from pytensor.tensor.type import DenseTensorType, TensorType, integer_dtypes, tensor
-from pytensor.utils import memoize
 
 
 _logger = logging.getLogger("pytensor.tensor.blas")
@@ -365,8 +365,10 @@ def ldflags(libs=True, flags=False, libs_dir=False, include_dir=False):
     )
 
 
-@memoize
-def _ldflags(ldflags_str, libs, flags, libs_dir, include_dir):
+@functools.cache
+def _ldflags(
+    ldflags_str: str, libs: bool, flags: bool, libs_dir: bool, include_dir: bool
+) -> list[str]:
     """Extract list of compilation flags from a string.
 
     Depending on the options, different type of flags will be kept.
@@ -422,7 +424,7 @@ def _ldflags(ldflags_str, libs, flags, libs_dir, include_dir):
             t = t[1:-1]
 
         try:
-            t0, t1, t2 = t[0:3]
+            t0, t1 = t[0], t[1]
             assert t0 == "-"
         except Exception:
             raise ValueError(f'invalid token "{t}" in ldflags_str: "{ldflags_str}"')
@@ -435,7 +437,6 @@ def _ldflags(ldflags_str, libs, flags, libs_dir, include_dir):
                 " is not wanted.",
                 t,
             )
-            rval.append(t[2:])
         elif libs and t1 == "l":  # example -lmkl
             rval.append(t[2:])
         elif flags and t1 not in ("L", "I", "l"):  # example -openmp
@@ -1690,7 +1691,7 @@ class BatchedDot(COp):
         if x.shape[0] != y.shape[0]:
             raise TypeError(
                 f"Inputs [{', '.join(map(str, inp))}] must have the"
-                f" same size in axis 0, but have sizes [{', '.join([str(i.shape[0]) for i in inp])}]."
+                f" same size in axis 0, but have sizes [{', '.join(str(i.shape[0]) for i in inp)}]."
             )
 
         z[0] = np.matmul(x, y)
@@ -1805,19 +1806,12 @@ class BatchedDot(COp):
             strides = f"PyArray_STRIDES({var})"
             if ndim == 1:
                 return f"{strides}[0] == type_size"
-            return " && ".join(
-                [
-                    " && ".join(
-                        f"{strides}[{i}] > 0 && {strides}[{i}] % type_size == 0"
-                        for i in range(1, ndim)
-                    ),
-                    "({})".format(
-                        " || ".join(
-                            f"{strides}[{i}] == type_size" for i in range(1, ndim)
-                        )
-                    ),
-                ]
+            ands = " && ".join(
+                f"{strides}[{i}] > 0 && {strides}[{i}] % type_size == 0"
+                for i in range(1, ndim)
             )
+            ors = " || ".join(f"{strides}[{i}] == type_size" for i in range(1, ndim))
+            return f"{ands} && ({ors})"
 
         x_ndim, y_ndim, z_ndim = (
             node.inputs[0].ndim,
@@ -1833,11 +1827,11 @@ class BatchedDot(COp):
         ]
 
         z_shape_correct = " && ".join(
-            "PyArray_DIMS(%s)[%i] == %s" % (_z, i, dim) for i, dim in enumerate(z_dims)
+            f"PyArray_DIMS({_z})[{i}] == {dim}" for i, dim in enumerate(z_dims)
         )
         z_shape = ", ".join(z_dims)
         z_contiguous = contiguous(_z, z_ndim)
-        allocate = """
+        allocate = f"""
             if (NULL == {_z} || !({z_shape_correct})  || !({z_contiguous}))
             {{
                 npy_intp dims[{z_ndim}] = {{{z_shape}}};
@@ -1850,14 +1844,14 @@ class BatchedDot(COp):
                     {fail}
                 }}
             }}
-        """.format(**locals())
+        """
 
         # code to reallocate inputs contiguously if necessary
         contiguate = []
         for var, ndim in [(_x, x_ndim), (_y, y_ndim)]:
             _contiguous = contiguous(var, ndim)
             contiguate.append(
-                """
+                f"""
                 if (!({_contiguous})) {{
                     PyArrayObject * _copy = (PyArrayObject *) PyArray_Copy({var});
                     if (!_copy)
@@ -1865,11 +1859,11 @@ class BatchedDot(COp):
                     Py_XDECREF({var});
                     {var} = _copy;
                 }}
-            """.format(**locals())
+            """
             )
         contiguate = "\n".join(contiguate)
 
-        return """
+        return f"""
         int type_num = PyArray_DESCR({_x})->type_num;
         int type_size = PyArray_DESCR({_x})->elsize; // in bytes
 
@@ -1926,7 +1920,7 @@ class BatchedDot(COp):
             }}
             break;
         }}
-        """.format(**locals())
+        """
 
     def c_code_cache_version(self):
         from pytensor.tensor.blas_headers import blas_header_version

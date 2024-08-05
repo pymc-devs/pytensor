@@ -103,14 +103,6 @@ import ``pytensor`` and print the config variable, as in:
 
     String value: either ``'cpu'``
 
-.. attribute:: force_device
-
-    Bool value: either ``True`` or ``False``
-
-    Default: ``False``
-
-    This flag's value cannot be modified during the program execution.
-
 .. attribute:: print_active_device
 
     Bool value: either ``True`` or ``False``
@@ -138,16 +130,6 @@ import ``pytensor`` and print the config variable, as in:
     This option determines what's done when a :class:`TensorVariable` with dtype
     equal to ``float64`` is created.
     This can be used to help find upcasts to ``float64`` in user code.
-
-.. attribute:: deterministic
-
-    String value: either ``'default'``, ``'more'``
-
-    Default: ``'default'``
-
-    If ``more``, sometimes PyTensor will select :class:`Op` implementations that
-    are more "deterministic", but slower.  See the ``dnn.conv.algo*``
-    flags for more cases.
 
 .. attribute:: allow_gc
 
@@ -373,7 +355,7 @@ import ``pytensor`` and print the config variable, as in:
 
     When ``True``, ignore the first call to an PyTensor function while profiling.
 
-.. attribute:: config.lib__amblibm
+.. attribute:: config.lib__amdlibm
 
     Bool value: either ``True`` or ``False``
 
@@ -411,16 +393,6 @@ import ``pytensor`` and print the config variable, as in:
     (i.e. ``'raise'``), drop into the ``pdb`` debugger (i.e. ``'pdb'``), or
     ignore it (i.e. ``'ignore'``).
     We suggest never using ``'ignore'`` except during testing.
-
-.. attribute:: assert_no_cpu_op
-
-    String value: ``'ignore'`` or ``'warn'`` or ``'raise'`` or ``'pdb'``
-
-    Default: ``'ignore'``
-
-    If there is a CPU :class:`Op` in the computational graph, depending on its value,
-    this flag can either raise a warning, an exception or drop into the frame
-    with ``pdb``.
 
 .. attribute:: on_shape_error
 
@@ -510,115 +482,11 @@ import ``pytensor`` and print the config variable, as in:
 
     Removing these asserts can speed up execution.
 
-.. attribute:: config.dnn__enabled
-
-    String value: ``'auto'``, ``'True'``, ``'False'``, ``'no_check'``
-
-    Default: ``'auto'``
-
-    If ``'auto'``, automatically detect and use
-    `cuDNN <https://developer.nvidia.com/cudnn>`_ when it is available.
-    If cuDNN is unavailable, do not raise an error.
-
-    If ``'True'``, require the use of cuDNN.  If cuDNN is unavailable, raise an error.
-
-    If ``'False'``, neither use cuDNN nor check if it is available.
-
-    If ``'no_check'``, assume cuDNN is present and that the versions between the
-    header and library match.
-
-.. attribute:: config.dnn__include_path
-
-    Default: ``include`` sub-folder in CUDA root directory, or headers paths defined for the compiler.
-
-    Location of the cuDNN header.
-
-.. attribute:: config.dnn__library_path
-
-    Default: Library sub-folder (``lib64`` on Linux) in CUDA root directory, or
-    libraries paths defined for the compiler.
-
-    Location of the cuDNN library.
-
 .. attribute:: config.conv__assert_shape
 
     If ``True``, ``AbstractConv*`` :class:`Op`\s will verify that user-provided shapes
     match the run-time shapes. This is a debugging option, and may slow down
     compilation.
-
-.. attribute:: config.dnn.conv.workmem
-
-    Deprecated, use :attr:`config.dnn__conv__algo_fwd`.
-
-
-.. attribute:: config.dnn.conv.workmem_bwd
-
-    Deprecated, use :attr:`config.dnn__conv__algo_bwd_filter` and
-    :attr:`config.dnn__conv__algo_bwd_data` instead.
-
-.. attribute:: config.dnn__conv__algo_fwd
-
-    String value:
-    ``'small'``, ``'none'``, ``'large'``, ``'fft'``, ``'fft_tiling'``,
-    ``'winograd'``, ``'winograd_non_fused'``, ``'guess_once'``, ``'guess_on_shape_change'``,
-    ``'time_once'``, ``'time_on_shape_change'``.
-
-    Default: ``'small'``
-
-    3d convolution only support ``'none'``, ``'small'``, ``'fft_tiling'``, ``'guess_once'``,
-    ``'guess_on_shape_change'``, ``'time_once'``, ``'time_on_shape_change'``.
-
-.. attribute:: config.dnn.conv.algo_bwd
-
-    Deprecated, use :attr:`config.dnn__conv__algo_bwd_filter` and
-    :attr:`config.dnn__conv__algo_bwd_data` instead.
-
-.. attribute:: config.dnn__conv__algo_bwd_filter
-
-    String value:
-    ``'none'``, ``'deterministic'``, ``'fft'``, ``'small'``, ``'winograd_non_fused'``, ``'fft_tiling'``, ``'guess_once'``,
-    ``'guess_on_shape_change'``, ``'time_once'``, ``'time_on_shape_change'``.
-
-    Default: ``'none'``
-
-    3d convolution only supports ``'none'``, ``'small'``, ``'guess_once'``,
-    ``'guess_on_shape_change'``, ``'time_once'``, ``'time_on_shape_change'``.
-
-.. attribute:: config.dnn__conv__algo_bwd_data
-
-    String value:
-    ``'none'``, ``'deterministic'``, ``'fft'``, ``'fft_tiling'``, ``'winograd'``,
-    ``'winograd_non_fused'``, ``'guess_once'``, ``'guess_on_shape_change'``, ``'time_once'``,
-    ``'time_on_shape_change'``.
-
-    Default: ``'none'``
-
-    3d convolution only supports ``'none'``, ``'deterministic'``, ``'fft_tiling'``
-    ``'guess_once'``, ``'guess_on_shape_change'``, ``'time_once'``,
-    ``'time_on_shape_change'``.
-
-.. attribute:: config.magma__enabled
-
-    String value: ``'True'``, ``'False'``
-
-    Default: ``'False'``
-
-    If ``'True'``, use `magma <http://icl.cs.utk.edu/magma/>`_ for matrix
-    computations.
-
-    If ``'False'``, disable magma.
-
-.. attribute:: config.magma__include_path
-
-    Default: ``''``
-
-    Location of the magma headers.
-
-.. attribute:: config.magma__library_path
-
-    Default: ``''``
-
-    Location of the magma library.
 
 .. attribute:: config.ctc__root
 
@@ -901,18 +769,3 @@ import ``pytensor`` and print the config variable, as in:
     The verbosity level of the meta-rewriter: ``0`` for silent, ``1`` to only
     warn when PyTensor cannot meta-rewrite an :class:`Op`, ``2`` for full output (e.g.
     timings and the rewrites selected).
-
-
-.. attribute:: config.metaopt__optimizer_excluding
-
-    Default: ``""``
-
-    A list of rewrite tags that we don't want included in the meta-rewriter.
-    Multiple tags are separate by ``':'``.
-
-.. attribute:: config.metaopt__optimizer_including
-
-    Default: ``""``
-
-    A list of rewriter tags to be included during meta-rewriting.
-    Multiple tags are separate by ``':'``.

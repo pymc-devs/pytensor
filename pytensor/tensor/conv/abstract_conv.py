@@ -585,10 +585,11 @@ def assert_shape(x, expected_shape, msg="Unexpected shape."):
     if expected_shape is None or not config.conv__assert_shape:
         return x
     shape = x.shape
-    tests = []
-    for i in range(x.ndim):
-        if expected_shape[i] is not None:
-            tests.append(pt.eq(shape[i], expected_shape[i]))
+    tests = [
+        pt.eq(shape[i], expected_shape[i])
+        for i in range(x.ndim)
+        if expected_shape[i] is not None
+    ]
     if tests:
         return Assert(msg)(x, *tests)
     else:
@@ -2283,7 +2284,7 @@ class BaseAbstractConv(Op):
         """
         if mode not in ("valid", "full"):
             raise ValueError(
-                f"invalid mode {mode}, which must be either " '"valid" or "full"'
+                f'invalid mode {mode}, which must be either "valid" or "full"'
             )
         if isinstance(dilation, int):
             dilation = (dilation,) * self.convdim

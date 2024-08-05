@@ -1,6 +1,6 @@
 import filecmp
-import os.path as pt
 import tempfile
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -20,15 +20,15 @@ if not pydot_imported:
 class TestD3Viz:
     def setup_method(self):
         self.rng = np.random.default_rng(0)
-        self.data_dir = pt.join("data", "test_d3viz")
+        self.data_dir = Path("data") / "test_d3viz"
 
     def check(self, f, reference=None, verbose=False):
-        tmp_dir = tempfile.mkdtemp()
-        html_file = pt.join(tmp_dir, "index.html")
+        tmp_dir = Path(tempfile.mkdtemp())
+        html_file = tmp_dir / "index.html"
         if verbose:
             print(html_file)
         d3v.d3viz(f, html_file)
-        assert pt.getsize(html_file) > 0
+        assert html_file.stat().st_size > 0
         if reference:
             assert filecmp.cmp(html_file, reference)
 

@@ -1,4 +1,4 @@
-import os.path as path
+from pathlib import Path
 from tempfile import mkdtemp
 
 import numpy as np
@@ -187,7 +187,7 @@ def test_filter_memmap():
     r"""Make sure `TensorType.filter` can handle NumPy `memmap`\s subclasses."""
     data = np.arange(12, dtype=config.floatX)
     data.resize((3, 4))
-    filename = path.join(mkdtemp(), "newfile.dat")
+    filename = Path(mkdtemp()) / "newfile.dat"
     fp = np.memmap(filename, dtype=config.floatX, mode="w+", shape=(3, 4))
 
     test_type = TensorType(config.floatX, shape=(None, None))

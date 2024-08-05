@@ -46,7 +46,6 @@ relies on the following elements to work properly :
 import dataclasses
 import logging
 import time
-from collections import OrderedDict
 from collections.abc import Callable, Iterable
 from copy import copy
 from itertools import chain, product
@@ -1285,14 +1284,14 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
     def __str__(self):
         inplace = "none"
-        if len(self.destroy_map.keys()) > 0:
+        if self.destroy_map:
             # Check if all outputs are inplace
-            if sorted(self.destroy_map.keys()) == sorted(
+            if sorted(self.destroy_map) == sorted(
                 range(self.info.n_mit_mot + self.info.n_mit_sot + self.info.n_sit_sot)
             ):
                 inplace = "all"
             else:
-                inplace = str(list(self.destroy_map.keys()))
+                inplace = str(list(self.destroy_map))
         return (
             f"Scan{{{self.name}, while_loop={self.info.as_while}, inplace={inplace}}}"
         )
@@ -2188,7 +2187,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         #   corresponding outer inputs that the Scan would use as input for
         #   any given iteration. For simplicity, we use iteration 0.
         inner_ins_shapes = []
-        out_equivalent = OrderedDict()
+        out_equivalent = {}
 
         # The two following blocks are commented as it cause in some
         # cases extra scans in the graph. See gh-XXX for the
@@ -2241,8 +2240,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         # Non-sequences have a direct equivalent from self.inner_inputs in
         # node.inputs
         inner_non_sequences = self.inner_inputs[len(seqs_shape) + len(outs_shape) :]
-        for in_ns, out_ns in zip(inner_non_sequences, node.inputs[offset:]):
-            out_equivalent[in_ns] = out_ns
+        out_equivalent.update(zip(inner_non_sequences, node.inputs[offset:]))
 
         if info.as_while:
             self_outs = self.inner_outputs[:-1]
@@ -2469,7 +2467,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 if (x in diff_inputs)
                 and get_inp_idx(self_inputs.index(x)) in connected_inputs
             ]
-            gmp = OrderedDict()
+            gmp = {}
 
             # Required in case there is a pair of variables X and Y, with X
             # used to compute Y, for both of which there is an external
@@ -2478,7 +2476,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             # it will be the sum of the external gradient signal and the
             # gradient obtained by propagating Y's external gradient signal
             # to X.
-            known_grads = OrderedDict([(k.copy(), v) for (k, v) in known_grads.items()])
+            known_grads = {k.copy(): v for (k, v) in known_grads.items()}
 
             grads = grad(
                 cost=None,
@@ -2548,7 +2546,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 dC_dXt = safe_new(dC_douts[idx][0])
             dC_dXts.append(dC_dXt)
 
-        known_grads = OrderedDict()
+        known_grads = {}
         dc_dxts_idx = 0
         for i in range(len(diff_outputs)):
             if i < idx_nitsot_start or i >= idx_nitsot_end:

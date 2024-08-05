@@ -1,0 +1,53 @@
+# To use:
+#
+#   $ conda env create -f environment.yml  # `mamba` works too for this command
+#   $ conda activate pytensor-dev
+#
+name: pytensor-dev
+channels:
+  - conda-forge
+dependencies:
+  - python=>3.10
+  - compilers
+  - numpy>=1.17.0,<2
+  - scipy>=0.14,<1.14.0
+  - filelock>=3.15
+  - etuples
+  - logical-unification
+  - miniKanren
+  - cons
+  - pydeprecate
+  # Apple BLAS
+  - libblas=*=*accelerate
+  # numba backend
+  - numba>=0.57
+  # For testing
+  - coveralls
+  - diff-cover
+  - mypy
+  - types-setuptools
+  - pytest
+  - pytest-cov
+  - pytest-xdist
+  - pytest-benchmark
+  - pytest-mock
+  - pip:
+    - pytest-sphinx
+  # For building docs
+  - sphinx>=5.1.0,<6
+  - sphinx_rtd_theme
+  - pygments
+  - pydot
+  - ipython
+  - pymc-sphinx-theme
+  - sphinx-design
+  # code style
+  - ruff
+  # developer tools
+  - pandas # required to run mypy script
+  - pre-commit
+  - packaging
+  # optional
+  - cython
+  - graphviz
+  - pydot

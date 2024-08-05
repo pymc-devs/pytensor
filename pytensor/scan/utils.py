@@ -3,7 +3,7 @@
 import copy
 import dataclasses
 import logging
-from collections import OrderedDict, namedtuple
+from collections import namedtuple
 from collections.abc import Callable, Sequence
 from itertools import chain
 from typing import TYPE_CHECKING
@@ -258,7 +258,7 @@ class Validator:
         if invalid is None:
             invalid = []
         if valid_equivalent is None:
-            valid_equivalent = OrderedDict()
+            valid_equivalent = {}
 
         # Nodes that are valid to have in the graph computing outputs
         self.valid = set(valid)
@@ -269,7 +269,7 @@ class Validator:
         # Mapping from invalid variables to equivalent valid ones.
         self.valid_equivalent = valid_equivalent.copy()
         self.valid.update(list(valid_equivalent.values()))
-        self.invalid.update(list(valid_equivalent.keys()))
+        self.invalid.update(list(valid_equivalent))
 
     def check(self, out):
         """
@@ -416,7 +416,7 @@ def compress_outs(op, not_required, inputs):
     op_inputs = op.inner_inputs[: op_info.n_seqs]
     op_outputs = []
     node_inputs = inputs[: op_info.n_seqs + 1]
-    map_old_new = OrderedDict()
+    map_old_new = {}
 
     offset = 0
     ni_offset = op_info.n_seqs + 1
@@ -749,15 +749,13 @@ class ScanArgs:
     def field_names(self):
         res = ["mit_mot_out_slices", "mit_mot_in_slices", "mit_sot_in_slices"]
         res.extend(
-            [
-                attr
-                for attr in self.__dict__
-                if attr.startswith("inner_in")
-                or attr.startswith("inner_out")
-                or attr.startswith("outer_in")
-                or attr.startswith("outer_out")
-                or attr == "n_steps"
-            ]
+            attr
+            for attr in self.__dict__
+            if attr.startswith("inner_in")
+            or attr.startswith("inner_out")
+            or attr.startswith("outer_in")
+            or attr.startswith("outer_out")
+            or attr == "n_steps"
         )
         return res
 
@@ -1074,7 +1072,8 @@ class ScanArgs:
             for p in self.field_names
             if p.startswith("outer_out")
         ]
-        res = "ScanArgs(\n{})".format(",\n".join(inner_arg_strs))
+        args = ",\n".join(inner_arg_strs)
+        res = f"ScanArgs(\n{args})"
         return res
 
     def __repr__(self):

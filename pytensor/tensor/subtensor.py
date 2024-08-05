@@ -3,6 +3,7 @@ import sys
 from collections.abc import Callable, Iterable
 from itertools import chain, groupby
 from textwrap import dedent
+from typing import cast, overload
 
 import numpy as np
 
@@ -19,9 +20,20 @@ from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.printing import Printer, pprint, set_precedence
-from pytensor.scalar.basic import ScalarConstant
-from pytensor.tensor import _get_vector_length, as_tensor_variable, get_vector_length
-from pytensor.tensor.basic import alloc, get_underlying_scalar_constant_value, nonzero
+from pytensor.scalar.basic import ScalarConstant, ScalarVariable
+from pytensor.tensor import (
+    TensorLike,
+    _get_vector_length,
+    as_tensor_variable,
+    get_vector_length,
+)
+from pytensor.tensor.basic import (
+    ScalarFromTensor,
+    alloc,
+    get_underlying_scalar_constant_value,
+    nonzero,
+    scalar_from_tensor,
+)
 from pytensor.tensor.blockwise import vectorize_node_fallback
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.exceptions import AdvancedIndexingError, NotScalarConstantError
@@ -46,8 +58,14 @@ from pytensor.tensor.type import (
     wscalar,
     zscalar,
 )
-from pytensor.tensor.type_other import NoneConst, NoneTypeT, SliceType, make_slice
-from pytensor.tensor.variable import TensorVariable
+from pytensor.tensor.type_other import (
+    NoneConst,
+    NoneTypeT,
+    SliceConstant,
+    SliceType,
+    make_slice,
+)
+from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
 _logger = logging.getLogger("pytensor.tensor.subtensor")
@@ -129,7 +147,7 @@ def indices_from_subtensor(
 
 
 def as_index_constant(
-    a: slice | int | np.integer | Variable | None,
+    a: slice | int | np.integer | Variable | None | TensorLike,
 ) -> Variable | slice | None:
     r"""Convert Python literals to PyTensor constants--when possible--in `Subtensor` arguments.
 
@@ -145,15 +163,41 @@ def as_index_constant(
         )
     elif isinstance(a, int | np.integer):
         return ps.ScalarConstant(ps.int64, a)
-    elif not isinstance(a, Variable):
-        return as_tensor_variable(a)
-    else:
+    elif isinstance(a, Variable):
         return a
+    return as_tensor_variable(a)
+
+
+@overload
+def as_index_literal(idx: int | np.integer) -> int | np.integer: ...
+
+
+@overload
+def as_index_literal(idx: None) -> None: ...
+
+
+@overload
+def as_index_literal(idx: slice | SliceConstant) -> slice: ...
+
+
+@overload
+def as_index_literal(idx: ScalarConstant | TensorConstant) -> int | np.integer: ...
+
+
+@overload
+def as_index_literal(idx: Variable): ...
 
 
 def as_index_literal(
-    idx: Variable | slice | None,
-) -> int | slice | None:
+    idx: None
+    | int
+    | np.integer
+    | slice
+    | SliceConstant
+    | ScalarConstant
+    | TensorConstant
+    | Variable,
+) -> int | np.integer | slice | None:
     """Convert a symbolic index element to its Python equivalent.
 
     This is like the inverse of `as_index_constant`
@@ -162,14 +206,8 @@ def as_index_literal(
     ------
     NotScalarConstantError
     """
-    if idx == np.newaxis or isinstance(getattr(idx, "type", None), NoneTypeT):
-        return np.newaxis
-
-    if isinstance(idx, Constant):
-        return idx.data.item() if isinstance(idx, np.ndarray) else idx.data
-
-    if isinstance(getattr(idx, "type", None), SliceType):
-        idx = slice(*idx.owner.inputs)
+    if idx is None or isinstance(idx, int | np.integer):
+        return idx
 
     if isinstance(idx, slice):
         return slice(
@@ -178,6 +216,33 @@ def as_index_literal(
             as_index_literal(idx.step),
         )
 
+    if not isinstance(idx, Variable):
+        raise TypeError(f"Not an index element: {idx}")
+
+    if isinstance(idx.type, NoneTypeT):
+        return None
+
+    if isinstance(idx, ScalarConstant):
+        return cast(int, idx.data)
+
+    if (
+        isinstance(idx.type, ps.ScalarType)
+        and idx.owner
+        and isinstance(idx.owner.op, ScalarFromTensor)
+    ):
+        return cast(int | np.integer, as_index_literal(idx.owner.inputs[0]))
+
+    if isinstance(idx, TensorConstant):
+        return cast(int, idx.data.item())
+
+    if isinstance(idx, SliceConstant):
+        return cast(slice, idx.data)
+
+    if isinstance(idx.type, SliceType):
+        assert idx.owner is not None
+        return slice(*map(as_index_literal, idx.owner.inputs))
+
+    # Other kinds of variables are not supported
     raise NotScalarConstantError()
 
 
@@ -185,10 +250,30 @@ def get_idx_list(inputs, idx_list):
     return indices_from_subtensor(inputs[1:], idx_list)
 
 
+@overload
 def get_canonical_form_slice(
-    theslice: slice | Variable, length: Variable
-) -> tuple[Variable, int]:
-    """Convert slices to canonical form.
+    theslice: slice,
+    length: int | np.integer | ScalarVariable | TensorVariable,
+) -> tuple[slice, int | ScalarConstant]: ...
+
+
+@overload
+def get_canonical_form_slice(
+    theslice: int | np.integer | ScalarVariable | TensorVariable,
+    length: int | np.integer | ScalarVariable | TensorVariable,
+) -> tuple[ScalarVariable, int]: ...
+
+
+def get_canonical_form_slice(
+    theslice: slice | int | np.integer | ScalarVariable | TensorVariable,
+    length: int | np.integer | ScalarVariable | TensorVariable,
+) -> tuple[slice | ScalarVariable, int | ScalarConstant]:
+    """Convert indices or slices to canonical form.
+
+    Scalar integer indices or python Slices with Scalar/None attributes
+    used in basic Subtensor Ops are supported.
+    Symbolic slices (of SliceType) or vector indices
+    used in advanced Subtensor Ops are not supported.
 
     Given a slice [start:stop:step] transform it into a canonical form
     that respects the conventions imposed by python and numpy.
@@ -197,18 +282,28 @@ def get_canonical_form_slice(
     in which 0 <= start <= stop <= length and step > 0, and a flag which says
     if the resulting set of numbers needs to be reversed or not.
 
+    Given a scalar index `idx` that may or not be negative, convert it to
+    a certainly positive form `idx if idx >= 0 else length + idx`.
+
+    Returns
+    -------
+    slc
+        Canonical form slice or scalar variable.
+    direction
+        Direction to iterate the resulting elements in. (-1 or 1). May be symbolic.
     """
     from pytensor.tensor import ge, lt, sign, switch
 
+    # Other non-slice types are the scalar indexing case
     if not isinstance(theslice, slice):
-        try:
-            value = as_index_literal(theslice)
-        except NotScalarConstantError:
-            value = theslice
+        if isinstance(theslice, int | np.integer | ScalarVariable) or (
+            isinstance(theslice, TensorVariable) and theslice.ndim == 0
+        ):
+            cano = switch(lt(theslice, 0), (theslice + length), theslice)
+            return scalar_from_tensor(cano), 1
+        raise ValueError(f"Slice {theslice} is not a supported slice type.")
 
-        value = switch(lt(value, 0), (value + length), value)
-
-        return value, 1
+    # At this point we have a slice object. Possibly with symbolic inputs.
 
     def analyze(x):
         try:
@@ -230,6 +325,7 @@ def get_canonical_form_slice(
         and is_step_constant
         and is_length_constant
     ):
+        assert isinstance(length, int | np.integer)
         _start, _stop, _step = slice(start, stop, step).indices(length)
         if _start <= _stop and _step >= 1:
             return slice(_start, _stop, _step), 1
@@ -537,7 +633,10 @@ def indexed_result_shape(array_shape, indices, indices_are_shapes=False):
     return res_shape
 
 
-def get_slice_elements(idxs: list, cond: Callable) -> list:
+def get_slice_elements(
+    idxs: list,
+    cond: Callable = lambda x: isinstance(x, Variable),
+) -> list:
     """Extract slice elements conditional on a given predicate function.
 
     Parameters
@@ -656,13 +755,18 @@ def get_constant_idx(
     Examples
     --------
     Example usage where `v` and `a` are appropriately typed PyTensor variables :
+    >>> from pytensor.scalar import int64
+    >>> from pytensor.tensor import matrix
+    >>> v = int64("v")
+    >>> a = matrix("a")
     >>> b = a[v, 1:3]
     >>> b.owner.op.idx_list
     (ScalarType(int64), slice(ScalarType(int64), ScalarType(int64), None))
     >>> get_constant_idx(b.owner.op.idx_list, b.owner.inputs, allow_partial=True)
     [v, slice(1, 3, None)]
     >>> get_constant_idx(b.owner.op.idx_list, b.owner.inputs)
-    NotScalarConstantError: v
+    Traceback (most recent call last):
+    pytensor.tensor.exceptions.NotScalarConstantError
 
     """
     real_idx = get_idx_list(inputs, idx_list)
@@ -853,10 +957,7 @@ class Subtensor(COp):
         return [first] + [DisconnectedType()()] * len(rest)
 
     def connection_pattern(self, node):
-        rval = [[True]]
-
-        for ipt in node.inputs[1:]:
-            rval.append([False])
+        rval = [[True], *([False] for _ in node.inputs[1:])]
 
         return rval
 
@@ -972,20 +1073,20 @@ class Subtensor(COp):
 
         def init_entry(entry, depth=0):
             if isinstance(entry, np.integer | int):
-                init_cmds.append("subtensor_spec[%i] = %i;" % (spec_pos(), entry))
+                init_cmds.append(f"subtensor_spec[{spec_pos()}] = {entry};")
                 inc_spec_pos(1)
                 if depth == 0:
                     is_slice.append(0)
             elif isinstance(entry, Type):
                 init_cmds.append(
-                    "subtensor_spec[%i] = %s;" % (spec_pos(), inputs[input_pos()])
+                    f"subtensor_spec[{spec_pos()}] = {inputs[input_pos()]};"
                 )
                 inc_spec_pos(1)
                 inc_input_pos(1)
                 if depth == 0:
                     is_slice.append(0)
             elif entry is None:
-                init_cmds.append("subtensor_spec[%i] = %i;" % (spec_pos(), NONE_CODE))
+                init_cmds.append(f"subtensor_spec[{spec_pos()}] = {NONE_CODE};")
                 inc_spec_pos(1)
                 if depth == 0:
                     is_slice.append(0)
@@ -1012,7 +1113,7 @@ class Subtensor(COp):
 
         if is_slice:
             is_slice_init = (
-                "int is_slice[] = {" + ",".join([str(s) for s in is_slice]) + "};"
+                "int is_slice[] = {" + ",".join(str(s) for s in is_slice) + "};"
             )
         else:
             is_slice_init = "int* is_slice = NULL;"
@@ -1036,7 +1137,7 @@ class Subtensor(COp):
 
         """
 
-        rval += """
+        rval += f"""
         // One more argument of the view
         npy_intp xview_offset = 0;
 
@@ -1163,7 +1264,7 @@ class Subtensor(COp):
             inner_ii += 1;
             outer_ii += 1;
         }}
-        """.format(**locals())
+        """
         # print rval
         return rval
 
@@ -1183,19 +1284,19 @@ class Subtensor(COp):
 
         decl = "PyArrayObject * xview = NULL;"
 
-        checkNDim = """
+        checkNDim = f"""
         if (PyArray_NDIM({x}) != {ndim}){{
             PyErr_SetString(PyExc_ValueError,
                                      "Expected {ndim} dimensions input"
                                         );
             {fail}
         }}
-        """.format(**locals())
+        """
 
         get_xview = self.helper_c_code(
             node, name, inputs, outputs, sub, self.idx_list, view_ndim
         )
-        build_view = """
+        build_view = f"""
         //TODO: give this Op a second output so that this view can be cached
         //TODO: alternatively, fix the memory leak on failure
         Py_INCREF(PyArray_DESCR({x}));
@@ -1213,7 +1314,7 @@ class Subtensor(COp):
         {{
             {fail};
         }}
-        """.format(**locals())
+        """
 
         finish_view = f"""
         Py_XDECREF({z});
@@ -1313,8 +1414,8 @@ def set_subtensor(x, y, inplace=False, tolerate_inplace_aliasing=False):
     Examples
     --------
     To replicate the numpy expression "r[10:] = 5", type
-
-    >>> r = ivector()
+    >>> from pytensor.tensor import vector
+    >>> r = vector("r")
     >>> new_r = set_subtensor(r[10:], 5)
 
     """
@@ -1660,7 +1761,7 @@ class IncSubtensor(COp):
 
         copy_of_x = self.copy_of_x(x)
 
-        copy_input_if_necessary = """
+        copy_input_if_necessary = f"""
         if ({inplace})
         {{
             if ({x} != {z})
@@ -1679,7 +1780,7 @@ class IncSubtensor(COp):
                 {fail}
             }}
         }}
-        """.format(**locals())
+        """
 
         # get info needed to make zview: a view of %(z)s
         helper_args = self.get_helper_c_code_args()
@@ -1698,7 +1799,7 @@ class IncSubtensor(COp):
         # Make a view on the output, as we will write into it.
         alloc_zview = self.make_view_array(z, view_ndim)
 
-        build_view = """
+        build_view = f"""
         //TODO: give this Op a second output so that this view can be cached
         //TODO: alternatively, fix the memory leak on failure
         {alloc_zview};
@@ -1706,13 +1807,13 @@ class IncSubtensor(COp):
         {{
             {fail};
         }}
-        """.format(**locals())
+        """
 
         copy_into = self.copy_into("zview", y)
 
         add_to_zview = self.add_to_zview(name, y, fail)
 
-        make_modification = """
+        make_modification = f"""
         if ({op_is_set})
         {{
             if ({copy_into}) // does broadcasting
@@ -1725,7 +1826,7 @@ class IncSubtensor(COp):
         {{
             {add_to_zview}
         }}
-        """.format(**locals())
+        """
         return (
             self.decl_view()
             + copy_input_if_necessary
@@ -1795,7 +1896,7 @@ class IncSubtensor(COp):
 
         """
 
-        return """Py_INCREF(PyArray_DESCR({x}));
+        return f"""Py_INCREF(PyArray_DESCR({x}));
         zview = (PyArrayObject*)PyArray_NewFromDescr(
                 &PyArray_Type,
                 PyArray_DESCR({x}),
@@ -1805,7 +1906,7 @@ class IncSubtensor(COp):
                 PyArray_BYTES({x}) + xview_offset, //PyArray_DATA({x}),
                 PyArray_FLAGS({x}),
                 NULL);
-        """.format(**locals())
+        """
 
     def get_helper_c_code_args(self):
         """
@@ -1838,7 +1939,7 @@ class IncSubtensor(COp):
 
         """
 
-        return """
+        return f"""
             PyArrayObject * add_rval = (PyArrayObject*)PyNumber_InPlaceAdd(
                     (PyObject*)zview, py_{x});
             if (add_rval)
@@ -1851,7 +1952,7 @@ class IncSubtensor(COp):
             {{
                 Py_DECREF(zview);
                 {fail};
-            }}""".format(**locals())
+            }}"""
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]
@@ -1864,10 +1965,7 @@ class IncSubtensor(COp):
         return self(eval_points[0], eval_points[1], *inputs[2:], return_list=True)
 
     def connection_pattern(self, node):
-        rval = [[True], [True]]
-
-        for ipt in node.inputs[2:]:
-            rval.append([False])
+        rval = [[True], [True], *([False] for _ in node.inputs[2:])]
 
         return rval
 
@@ -1976,8 +2074,7 @@ class AdvancedSubtensor1(COp):
             raise TypeError("index must be vector")
         if x_.type.ndim == 0:
             raise TypeError("cannot index into a scalar")
-        out_shape = (ilist_.type.shape[0],) + x_.type.shape[1:]
-        out_shape = tuple(1 if s == 1 else None for s in out_shape)
+        out_shape = (ilist_.type.shape[0], *x_.type.shape[1:])
         return Apply(self, [x_, ilist_], [TensorType(dtype=x.dtype, shape=out_shape)()])
 
     def perform(self, node, inp, out_):
@@ -2010,10 +2107,7 @@ class AdvancedSubtensor1(COp):
         out[0] = x.take(i, axis=0, out=o)
 
     def connection_pattern(self, node):
-        rval = [[True]]
-
-        for ipt in node.inputs[1:]:
-            rval.append([False])
+        rval = [[True], *([False] for _ in node.inputs[1:])]
 
         return rval
 
@@ -2068,7 +2162,7 @@ class AdvancedSubtensor1(COp):
         a_name, i_name = input_names[0], input_names[1]
         output_name = output_names[0]
         fail = sub["fail"]
-        return """
+        return f"""
             PyArrayObject *indices;
             int i_type = PyArray_TYPE({i_name});
             if (i_type != NPY_INTP) {{
@@ -2143,7 +2237,7 @@ class AdvancedSubtensor1(COp):
                         {a_name}, (PyObject*)indices, 0, {output_name}, NPY_RAISE);
             Py_DECREF(indices);
             if ({output_name} == NULL) {fail};
-        """.format(**locals())
+        """
 
     def c_code_cache_version(self):
         return (0, 1, 2)
@@ -2304,9 +2398,7 @@ class AdvancedIncSubtensor1(COp):
 
         fn_array = (
             "static inplace_map_binop addition_funcs[] = {"
-            + "".join(
-                [gen_binop(type=t, typen=t.upper()) for t in types + complex_types]
-            )
+            + "".join(gen_binop(type=t, typen=t.upper()) for t in types + complex_types)
             + "NULL};\n"
         )
 
@@ -2319,7 +2411,7 @@ class AdvancedIncSubtensor1(COp):
 
         type_number_array = (
             "static int type_numbers[] = {"
-            + "".join([gen_num(typen=t.upper()) for t in types + complex_types])
+            + "".join(gen_num(typen=t.upper()) for t in types + complex_types)
             + "-1000};"
         )
 
@@ -2431,8 +2523,10 @@ class AdvancedIncSubtensor1(COp):
         x, y, idx = input_names
         out = output_names[0]
         copy_of_x = self.copy_of_x(x)
+        params = sub["params"]
+        fail = sub["fail"]
 
-        return """
+        return f"""
         PyObject* rval = NULL;
         if ({params}->inplace)
         {{
@@ -2456,17 +2550,7 @@ class AdvancedIncSubtensor1(COp):
             {fail};
         }}
         Py_XDECREF(rval);
-        """.format(
-            **dict(
-                x=x,
-                y=y,
-                idx=idx,
-                out=out,
-                copy_of_x=copy_of_x,
-                params=sub["params"],
-                fail=sub["fail"],
-            )
-        )
+        """
 
     def c_code_cache_version(self):
         return (8,)
@@ -2667,10 +2751,7 @@ class AdvancedSubtensor(Op):
         out[0] = rval
 
     def connection_pattern(self, node):
-        rval = [[True]]
-
-        for ipt in node.inputs[1:]:
-            rval.append([False])
+        rval = [[True], *([False] for _ in node.inputs[1:])]
 
         return rval
 
@@ -2814,10 +2895,7 @@ class AdvancedIncSubtensor(Op):
         return [ishapes[0]]
 
     def connection_pattern(self, node):
-        rval = [[True], [True]]
-
-        for ipt in node.inputs[2:]:
-            rval.append([False])
+        rval = [[True], [True], *([False] for _ in node.inputs[2:])]
 
         return rval
 
@@ -2902,7 +2980,7 @@ def take(a, indices, axis=None, mode="raise"):
     return a[full_indices]
 
 
-@_get_vector_length.register(Subtensor)
+@_get_vector_length.register(Subtensor)  # type: ignore
 def _get_vector_length_Subtensor(op, var):
     # If we take a slice, we know how many elements it will result in
     # TODO: We can cover more `*Subtensor` cases.
@@ -2935,8 +3013,123 @@ def _get_vector_length_Subtensor(op, var):
         raise ValueError(f"Length of {var} cannot be determined")
 
 
+def slice_at_axis(sl: slice, axis: int) -> tuple[slice, ...]:
+    """
+    Construct tuple of slices to slice an array in the given dimension.
+
+    Copied from numpy.lib.arraypad._slice_at_axis
+    https://github.com/numpy/numpy/blob/300096d384046eee479b0c7a70f79e308da52bff/numpy/lib/_arraypad_impl.py#L33
+
+    Parameters
+    ----------
+    sl : slice
+        The slice for the given dimension.
+    axis : int
+        The axis to which `sl` is applied. All other dimensions are left
+        "unsliced".
+
+    Returns
+    -------
+    sl : tuple of slices
+        A tuple with slices matching `shape` in length.
+
+    Examples
+    --------
+
+    .. testcode::
+
+        import pytensor.tensor as pt
+
+        s = pt.slice_at_axis(slice(None, 1), 1)
+        print(s)
+
+    .. testoutput::
+
+        (slice(None, None, None), slice(None, 1, None), Ellipsis)
+
+    .. testcode::
+
+        x = pt.tensor('x', shape=(None, None, None))
+        x_sliced = x[s]
+
+        f = pytensor.function([x], x_sliced)
+        x = np.arange(27).reshape(3, 3, 3)
+        print(f(x))
+
+    .. testoutput::
+        [[[ 0.  1.  2.]]
+
+         [[ 9. 10. 11.]]
+
+         [[18. 19. 20.]]]
+
+    """
+    if axis >= 0:
+        return (slice(None),) * axis + (sl,) + (...,)  # type: ignore
+    else:
+        # If axis = -1 we want zero right padding (and so on), so subtract one
+        axis = abs(axis) - 1
+        return (...,) + (sl,) + (slice(None),) * axis  # type: ignore
+
+
+def flip(
+    arr: TensorVariable, axis: int | tuple[int] | TensorVariable | None = None
+) -> TensorVariable:
+    """
+    Reverse the order of elements in an tensor along the given axis.
+
+    Parameters
+    ----------
+    arr: TensorVariable
+        Input tensor.
+
+    axis: int | tuple[int] | TensorVariable, optional
+        Axis or axes along which to flip over. The default is to flip over all of the axes of the input tensor.
+
+    Returns
+    -------
+    arr: TensorVariable
+        A view of `arr` with the entries of axis reversed.
+
+    Examples
+    --------
+
+    .. testcode::
+
+        import pytensor
+        import pytensor.tensor as pt
+
+        x = pt.tensor('x', shape=(None, None))
+        x_flipped = pt.flip(x, axis=0)
+
+        f = pytensor.function([x], x_flipped)
+        x = [[1, 2], [3, 4]]
+        print(f(x))
+
+    .. testoutput::
+        [[3. 4.]
+         [1. 2.]]
+
+    """
+    if axis is None:
+        index = ((slice(None, None, -1)),) * arr.ndim
+    else:
+        if isinstance(axis, int):
+            axis = (axis,)
+        index = tuple(
+            [
+                slice(None, None, -1) if i in axis else slice(None, None, None)
+                for i in range(arr.ndim)
+            ]
+        )
+
+    return cast(TensorVariable, arr[index])
+
+
 __all__ = [
     "take",
+    "flip",
+    "slice_at_axis",
     "inc_subtensor",
     "set_subtensor",
 ]

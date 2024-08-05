@@ -6,10 +6,10 @@ deterministic based on the input type and the op.
 """
 
 import multiprocessing
-import os
 import re
 import sys
 import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -189,14 +189,12 @@ def mock_system(request):
 @pytest.fixture()
 def cxx_search_dirs(blas_libs, mock_system):
     libext = {"Linux": "so", "Windows": "dll", "Darwin": "dylib"}
-    libtemplate = f"{{lib}}.{libext[mock_system]}"
     libraries = []
     with tempfile.TemporaryDirectory() as d:
         flags = None
         for lib in blas_libs:
-            lib_path = os.path.join(d, libtemplate.format(lib=lib))
-            with open(lib_path, "wb") as f:
-                f.write(b"1")
+            lib_path = Path(d) / f"{lib}.{libext[mock_system]}"
+            lib_path.write_bytes(b"1")
             libraries.append(lib_path)
             if flags is None:
                 flags = f"-l{lib}"
@@ -263,16 +261,14 @@ def test_default_blas_ldflags_no_cxx():
 
 @pytest.fixture()
 def windows_conda_libs(blas_libs):
-    libtemplate = "{lib}.dll"
     libraries = []
     with tempfile.TemporaryDirectory() as d:
-        subdir = os.path.join(d, "Library", "bin")
-        os.makedirs(subdir, exist_ok=True)
+        subdir = Path(d) / "Library" / "bin"
+        subdir.mkdir(exist_ok=True, parents=True)
         flags = f'-L"{subdir}"'
         for lib in blas_libs:
-            lib_path = os.path.join(subdir, libtemplate.format(lib=lib))
-            with open(lib_path, "wb") as f:
-                f.write(b"1")
+            lib_path = subdir / f"{lib}.dll"
+            lib_path.write_bytes(b"1")
             libraries.append(lib_path)
             flags += f" -l{lib}"
         if "gomp" in blas_libs and "mkl_gnu_thread" not in blas_libs:
@@ -311,14 +307,14 @@ def test_default_blas_ldflags_conda_windows(
 )
 @patch("sys.platform", "win32")
 def test_patch_ldflags(listdir_mock):
-    mkl_path = "some_path"
+    mkl_path = Path("some_path")
     flag_list = ["-lm", "-lopenblas", f"-L {mkl_path}", "-l mkl_core", "-lmkl_rt"]
     assert GCC_compiler.patch_ldflags(flag_list) == [
         "-lm",
         "-lopenblas",
         f"-L {mkl_path}",
-        '"' + os.path.join(mkl_path, "mkl_core.1.dll") + '"',
-        '"' + os.path.join(mkl_path, "mkl_rt.1.0.dll") + '"',
+        '"' + str(mkl_path / "mkl_core.1.dll") + '"',
+        '"' + str(mkl_path / "mkl_rt.1.0.dll") + '"',
     ]
 
 
@@ -341,8 +337,8 @@ def test_linking_patch(listdir_mock, platform):
             assert GCC_compiler.linking_patch(lib_dirs, libs) == [
                 "-lopenblas",
                 "-lm",
-                '"' + os.path.join(lib_dirs[0].strip('"'), "mkl_core.1.dll") + '"',
-                '"' + os.path.join(lib_dirs[0].strip('"'), "mkl_rt.1.1.dll") + '"',
+                '"' + str(Path(lib_dirs[0].strip('"')) / "mkl_core.1.dll") + '"',
+                '"' + str(Path(lib_dirs[0].strip('"')) / "mkl_rt.1.1.dll") + '"',
             ]
         else:
             GCC_compiler.linking_patch(lib_dirs, libs) == [

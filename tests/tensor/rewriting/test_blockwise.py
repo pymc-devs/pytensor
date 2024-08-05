@@ -1,7 +1,9 @@
 from functools import partial
 
-from pytensor import function
-from pytensor.graph import FunctionGraph, rewrite_graph
+import numpy as np
+
+from pytensor import Mode, config, function
+from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import equal_computations
 from pytensor.scalar import log as scalar_log
 from pytensor.tensor import add, alloc, matrix, tensor, tensor3
@@ -9,6 +11,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.nlinalg import MatrixPinv
 from pytensor.tensor.rewriting.blockwise import local_useless_blockwise
+from pytensor.tensor.shape import Reshape
 
 
 def test_useless_blockwise_of_elemwise():
@@ -45,7 +48,7 @@ def test_blockwise_alloc():
     rewrite = partial(
         rewrite_graph,
         include=("ShapeOpt", "specialize"),
-        exclude=("local_useless_unbatched_blockwise",),
+        exclude=("local_useless_unbatched_blockwise", "local_dimshuffle_alloc"),
     )
 
     vector_add = Blockwise(core_op=add, signature="(x),(x)->(x)")
@@ -104,7 +107,9 @@ def test_blockwise_alloc():
     y = tensor("y", shape=())
     out = vector_add(alloc(x, 3, 1, 5), alloc(y, 7, 5))
     expected_out = alloc(vector_add(alloc(x, 5), alloc(y, 5)), 3, 7, 5)
-    assert equal([rewrite(out)], [expected_out])
+    assert equal(
+        [rewrite(out)], [expected_out]
+    ), None  # pytensor.dprint([expected_out, rewrite(out)], print_type=True)
 
     x = tensor("x", shape=(5,))
     y = tensor("y", shape=())
@@ -118,3 +123,27 @@ def test_blockwise_alloc():
     out = vector_add(x, alloc(y, 5))
     expected_out = out
     assert equal([rewrite(out)], [expected_out])
+
+
+def test_blockwise_reshape():
+    x = tensor("x", shape=(None, None, None))
+    y = x.reshape([x.shape[0] * x.shape[1], -1])
+
+    new_x = tensor("x", shape=(None, None, None, None))
+    new_y = vectorize_graph(y, {x: new_x})
+    assert not isinstance(new_y.owner.op, Reshape)
+    assert isinstance(new_y.owner.op, Blockwise) and isinstance(
+        new_y.owner.op.core_op, Reshape
+    )
+
+    rewritten_y = rewrite_graph(
+        new_y, include=("canonicalize", "specialize"), clone=True
+    )
+    assert isinstance(rewritten_y.owner.op, Reshape)
+
+    no_rewrites = Mode(linker="py", optimizer=None)
+    test_x = np.arange(5 * 4 * 3 * 2).reshape(5, 4, 3, 2).astype(config.floatX)
+    np.testing.assert_allclose(
+        new_y.eval({"x": test_x}, mode=no_rewrites),
+        rewritten_y.eval({"x": test_x}, mode=no_rewrites),
+    )

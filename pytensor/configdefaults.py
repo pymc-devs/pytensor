@@ -6,6 +6,7 @@ import re
 import socket
 import sys
 import textwrap
+from pathlib import Path
 
 import numpy as np
 from setuptools._distutils.spawn import find_executable
@@ -31,66 +32,6 @@ from pytensor.utils import (
 
 
 _logger = logging.getLogger("pytensor.configdefaults")
-
-
-def get_cuda_root():
-    # We look for the cuda path since we need headers from there
-    v = os.getenv("CUDA_ROOT", "")
-    if v:
-        return v
-    v = os.getenv("CUDA_PATH", "")
-    if v:
-        return v
-    s = os.getenv("PATH")
-    if not s:
-        return ""
-    for dir in s.split(os.path.pathsep):
-        if os.path.exists(os.path.join(dir, "nvcc")):
-            return os.path.dirname(os.path.abspath(dir))
-    return ""
-
-
-def default_cuda_include():
-    if config.cuda__root:
-        return os.path.join(config.cuda__root, "include")
-    return ""
-
-
-def default_dnn_base_path():
-    # We want to default to the cuda root if cudnn is installed there
-    root = config.cuda__root
-    # The include doesn't change location between OS.
-    if root and os.path.exists(os.path.join(root, "include", "cudnn.h")):
-        return root
-    return ""
-
-
-def default_dnn_inc_path():
-    if config.dnn__base_path != "":
-        return os.path.join(config.dnn__base_path, "include")
-    return ""
-
-
-def default_dnn_lib_path():
-    if config.dnn__base_path != "":
-        if sys.platform == "win32":
-            path = os.path.join(config.dnn__base_path, "lib", "x64")
-        elif sys.platform == "darwin":
-            path = os.path.join(config.dnn__base_path, "lib")
-        else:
-            # This is linux
-            path = os.path.join(config.dnn__base_path, "lib64")
-        return path
-    return ""
-
-
-def default_dnn_bin_path():
-    if config.dnn__base_path != "":
-        if sys.platform == "win32":
-            return os.path.join(config.dnn__base_path, "bin")
-        else:
-            return config.dnn__library_path
-    return ""
 
 
 def _filter_mode(val):
@@ -317,14 +258,6 @@ def add_basic_configvars():
             # was expected, so it is currently not available.
             # numpy,
         ),
-    )
-
-    config.add(
-        "deterministic",
-        "If `more`, sometimes we will select some implementation that "
-        "are more deterministic, but slower.  Also see "
-        "the dnn.conv.algo* flags to cover more cases.",
-        EnumStr("default", ["more"]),
         in_c_key=False,
     )
 
@@ -332,13 +265,6 @@ def add_basic_configvars():
         "device",
         ("Default device for computations. only cpu is supported for now"),
         DeviceParam("cpu", mutable=False),
-        in_c_key=False,
-    )
-
-    config.add(
-        "force_device",
-        "Raise an error if we can't use the specified device",
-        BoolParam(False, mutable=False),
         in_c_key=False,
     )
 
@@ -358,14 +284,6 @@ def add_basic_configvars():
         in_c_key=False,
     )
 
-    # This flag determines whether or not to raise error/warning message if
-    # there is a CPU Op in the computational graph.
-    config.add(
-        "assert_no_cpu_op",
-        "Raise an error/warning if there is a CPU op in the computational graph.",
-        EnumStr("ignore", ["warn", "raise", "pdb"], mutable=True),
-        in_c_key=False,
-    )
     config.add(
         "unpickle_function",
         (
@@ -405,15 +323,11 @@ def add_compile_configvars():
     # Anaconda on Windows has mingw-w64 packages including GCC, but it may not be on PATH.
     if rc != 0:
         if sys.platform == "win32":
-            mingw_w64_gcc = os.path.join(
-                os.path.dirname(sys.executable), "Library", "mingw-w64", "bin", "g++"
-            )
+            mingw_w64_gcc = Path(sys.executable).parent / "Library/mingw-w64/bin/g++"
             try:
-                rc = call_subprocess_Popen([mingw_w64_gcc, "-v"])
+                rc = call_subprocess_Popen([str(mingw_w64_gcc), "-v"])
                 if rc == 0:
-                    maybe_add_to_os_environ_pathlist(
-                        "PATH", os.path.dirname(mingw_w64_gcc)
-                    )
+                    maybe_add_to_os_environ_pathlist("PATH", mingw_w64_gcc.parent)
             except OSError:
                 rc = 1
             if rc != 0:
@@ -457,23 +371,11 @@ def add_compile_configvars():
 
     if rc == 0 and config.cxx != "":
         # Keep the default linker the same as the one for the mode FAST_RUN
-        config.add(
-            "linker",
-            "Default linker used if the pytensor flags mode is Mode",
-            EnumStr(
-                "cvm", ["c|py", "py", "c", "c|py_nogc", "vm", "vm_nogc", "cvm_nogc"]
-            ),
-            in_c_key=False,
-        )
+        linker_options = ["c|py", "py", "c", "c|py_nogc", "vm", "vm_nogc", "cvm_nogc"]
     else:
         # g++ is not present or the user disabled it,
         # linker should default to python only.
-        config.add(
-            "linker",
-            "Default linker used if the pytensor flags mode is Mode",
-            EnumStr("vm", ["py", "vm_nogc"]),
-            in_c_key=False,
-        )
+        linker_options = ["py", "vm_nogc"]
         if type(config).cxx.is_default:
             # If the user provided an empty value for cxx, do not warn.
             _logger.warning(
@@ -482,6 +384,13 @@ def add_compile_configvars():
                 "Performance may be severely degraded. "
                 "To remove this warning, set PyTensor flags cxx to an empty string."
             )
+
+    config.add(
+        "linker",
+        "Default linker used if the pytensor flags mode is Mode",
+        EnumStr("cvm", linker_options),
+        in_c_key=False,
+    )
 
     # Keep the default value the same as the one for the mode FAST_RUN
     config.add(
@@ -614,15 +523,6 @@ def add_compile_configvars():
         in_c_key=False,
     )
 
-    config.add(
-        "ctc__root",
-        "Directory which contains the root of Baidu CTC library. It is assumed \
-        that the compiled library is either inside the build, lib or lib64 \
-        subdirectory, and the header inside the include directory.",
-        StrParam("", mutable=False),
-        in_c_key=False,
-    )
-
 
 def _is_valid_cmp_sloppy(v):
     return v in (0, 1, 2)
@@ -642,7 +542,7 @@ def add_tensor_configvars():
 
     # http://developer.amd.com/CPU/LIBRARIES/LIBM/Pages/default.aspx
     config.add(
-        "lib__amblibm",
+        "lib__amdlibm",
         "Use amd's amdlibm numerical library",
         BoolParam(False),
         # Added elsewhere in the c key only when needed.
@@ -679,10 +579,6 @@ def add_traceback_configvars():
         IntParam(0),
         in_c_key=False,
     )
-
-
-def add_experimental_configvars():
-    return
 
 
 def add_error_and_warning_configvars():
@@ -1115,20 +1011,6 @@ def add_metaopt_configvars():
         in_c_key=False,
     )
 
-    config.add(
-        "metaopt__optimizer_excluding",
-        ("exclude optimizers with these tags. Separate tags with ':'."),
-        StrParam(""),
-        in_c_key=False,
-    )
-
-    config.add(
-        "metaopt__optimizer_including",
-        ("include optimizers with these tags. Separate tags with ':'."),
-        StrParam(""),
-        in_c_key=False,
-    )
-
 
 def add_vm_configvars():
     config.add(
@@ -1221,27 +1103,27 @@ def add_numba_configvars():
     )
 
 
-def _default_compiledirname():
+def _default_compiledirname() -> str:
     formatted = config.compiledir_format % _compiledir_format_dict
     safe = re.sub(r"[\(\)\s,]+", "_", formatted)
     return safe
 
 
-def _filter_base_compiledir(path):
+def _filter_base_compiledir(path: str | Path) -> Path:
     # Expand '~' in path
-    return os.path.expanduser(str(path))
+    return Path(path).expanduser()
 
 
-def _filter_compiledir(path):
+def _filter_compiledir(path: str | Path) -> Path:
     # Expand '~' in path
-    path = os.path.expanduser(path)
+    path = Path(path).expanduser()
     # Turn path into the 'real' path. This ensures that:
     #   1. There is no relative path, which would fail e.g. when trying to
     #      import modules from the compile dir.
     #   2. The path is stable w.r.t. e.g. symlinks (which makes it easier
     #      to re-use compiled modules).
-    path = os.path.realpath(path)
-    if os.access(path, os.F_OK):  # Do it exist?
+    path = path.resolve()
+    if path.exists():
         if not os.access(path, os.R_OK | os.W_OK | os.X_OK):
             # If it exist we need read, write and listing access
             raise ValueError(
@@ -1250,7 +1132,8 @@ def _filter_compiledir(path):
             )
     else:
         try:
-            os.makedirs(path, 0o770)  # read-write-execute for user and group
+            # 0o770 = read-write-execute for user and group
+            path.mkdir(mode=0o770, parents=True, exist_ok=True)
         except OSError as e:
             # Maybe another parallel execution of pytensor was trying to create
             # the same directory at the same time.
@@ -1264,36 +1147,38 @@ def _filter_compiledir(path):
     # os.system('touch') returned -1 for an unknown reason; the
     # alternate approach here worked in all cases... it was weird.
     # No error should happen as we checked the permissions.
-    init_file = os.path.join(path, "__init__.py")
-    if not os.path.exists(init_file):
+    init_file = path / "__init__.py"
+    if not init_file.exists():
         try:
-            with open(init_file, "w"):
+            with init_file.open("w"):
                 pass
         except OSError as e:
-            if os.path.exists(init_file):
+            if init_file.exists():
                 pass  # has already been created
             else:
-                e.args += (f"{path} exist? {os.path.exists(path)}",)
+                e.args += (f"{path} exist? {path.exists()}",)
                 raise
     return path
 
 
-def _get_home_dir():
+def _get_home_dir() -> Path:
     """
     Return location of the user's home directory.
 
     """
-    home = os.getenv("HOME")
-    if home is None:
-        # This expanduser usually works on Windows (see discussion on
-        # theano-users, July 13 2010).
-        home = os.path.expanduser("~")
-        if home == "~":
-            # This might happen when expanduser fails. Although the cause of
-            # failure is a mystery, it has been seen on some Windows system.
-            home = os.getenv("USERPROFILE")
-    assert home is not None
-    return home
+    if (env_home := os.getenv("HOME")) is not None:
+        return Path(env_home)
+
+    # This usually works on Windows (see discussion on theano-users, July 13 2010).
+    path_home = Path.home()
+    if str(path_home) != "~":
+        return path_home
+
+    # This might happen when expanduser fails. Although the cause of
+    # failure is a mystery, it has been seen on some Windows system.
+    windowsfail_home = os.getenv("USERPROFILE")
+    assert windowsfail_home is not None
+    return Path(windowsfail_home)
 
 
 _compiledir_format_dict = {
@@ -1309,8 +1194,8 @@ _compiledir_format_dict = {
 }
 
 
-def _default_compiledir():
-    return os.path.join(config.base_compiledir, _default_compiledirname())
+def _default_compiledir() -> Path:
+    return config.base_compiledir / _default_compiledirname()
 
 
 def add_caching_dir_configvars():
@@ -1318,7 +1203,7 @@ def add_caching_dir_configvars():
     _compiledir_format_dict["short_platform"] = short_platform()
     # Allow to have easily one compiledir per device.
     _compiledir_format_dict["device"] = config.device
-    compiledir_format_keys = ", ".join(sorted(_compiledir_format_dict.keys()))
+    compiledir_format_keys = ", ".join(sorted(_compiledir_format_dict))
     _default_compiledir_format = (
         "compiledir_%(short_platform)s-%(processor)s-"
         "%(python_version)s-%(python_bitwidth)s"
@@ -1343,9 +1228,9 @@ def add_caching_dir_configvars():
     # part of the roaming part of the user profile. Instead we use the local part
     # of the user profile, when available.
     if sys.platform == "win32" and os.getenv("LOCALAPPDATA") is not None:
-        default_base_compiledir = os.path.join(os.getenv("LOCALAPPDATA"), "PyTensor")
+        default_base_compiledir = Path(os.getenv("LOCALAPPDATA")) / "PyTensor"
     else:
-        default_base_compiledir = os.path.join(_get_home_dir(), ".pytensor")
+        default_base_compiledir = _get_home_dir() / ".pytensor"
 
     config.add(
         "base_compiledir",
@@ -1364,55 +1249,6 @@ def add_caching_dir_configvars():
     )
 
 
-# Those are the options provided by PyTensor to choose algorithms at runtime.
-SUPPORTED_DNN_CONV_ALGO_RUNTIME = (
-    "guess_once",
-    "guess_on_shape_change",
-    "time_once",
-    "time_on_shape_change",
-)
-
-# Those are the supported algorithm by PyTensor,
-# The tests will reference those lists.
-SUPPORTED_DNN_CONV_ALGO_FWD = (
-    "small",
-    "none",
-    "large",
-    "fft",
-    "fft_tiling",
-    "winograd",
-    "winograd_non_fused",
-    *SUPPORTED_DNN_CONV_ALGO_RUNTIME,
-)
-
-SUPPORTED_DNN_CONV_ALGO_BWD_DATA = (
-    "none",
-    "deterministic",
-    "fft",
-    "fft_tiling",
-    "winograd",
-    "winograd_non_fused",
-    *SUPPORTED_DNN_CONV_ALGO_RUNTIME,
-)
-
-SUPPORTED_DNN_CONV_ALGO_BWD_FILTER = (
-    "none",
-    "deterministic",
-    "fft",
-    "small",
-    "winograd_non_fused",
-    "fft_tiling",
-    *SUPPORTED_DNN_CONV_ALGO_RUNTIME,
-)
-
-SUPPORTED_DNN_CONV_PRECISION = (
-    "as_input_f32",
-    "as_input",
-    "float16",
-    "float32",
-    "float64",
-)
-
 # Eventually, the instance of `PyTensorConfigParser` should be created right here,
 # where it is also populated with settings.
 config = _create_default_config()
@@ -1422,7 +1258,6 @@ add_basic_configvars()
 add_compile_configvars()
 add_tensor_configvars()
 add_traceback_configvars()
-add_experimental_configvars()
 add_error_and_warning_configvars()
 add_testvalue_and_checking_configvars()
 add_multiprocessing_configvars()

@@ -85,9 +85,7 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
         unique_names = unique_name_generator(
             [scalar_op_fn_name, "scalar_func_numba"], suffix_sep="_"
         )
-        input_names = ", ".join(
-            [unique_names(v, force_unique=True) for v in node.inputs]
-        )
+        input_names = ", ".join(unique_names(v, force_unique=True) for v in node.inputs)
         if not has_pyx_skip_dispatch:
             scalar_op_src = f"""
 def {scalar_op_fn_name}({input_names}):
@@ -115,12 +113,8 @@ def {scalar_op_fn_name}({input_names}):
 
         input_names = [unique_names(v, force_unique=True) for v in node.inputs]
         converted_call_args = ", ".join(
-            [
-                f"direct_cast({i_name}, {i_tmp_dtype_name})"
-                for i_name, i_tmp_dtype_name in zip(
-                    input_names, input_tmp_dtype_names.keys()
-                )
-            ]
+            f"direct_cast({i_name}, {i_tmp_dtype_name})"
+            for i_name, i_tmp_dtype_name in zip(input_names, input_tmp_dtype_names)
         )
         if not has_pyx_skip_dispatch:
             scalar_op_src = f"""

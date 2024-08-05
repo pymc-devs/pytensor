@@ -168,7 +168,7 @@ class MissingInputError(Exception):
     def __init__(self, *args, **kwargs):
         if kwargs:
             # The call to list is needed for Python 3
-            assert list(kwargs.keys()) == ["variable"]
+            assert list(kwargs) == ["variable"]
             error_msg = get_variable_trace_string(kwargs["variable"])
             if error_msg:
                 args = (*args, error_msg)
@@ -245,10 +245,9 @@ class MetaType(ABCMeta):
                 else:
 
                     def __str__(self):
-                        return "{}{{{}}}".format(
-                            self.__class__.__name__,
-                            ", ".join(f"{p}={getattr(self, p)!r}" for p in props),
-                        )
+                        classname = self.__class__.__name__
+                        args = ", ".join(f"{p}={getattr(self, p)!r}" for p in props)
+                        return f"{classname}{{{args}}}"
 
                 dct["__str__"] = __str__
 

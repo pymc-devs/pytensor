@@ -16,6 +16,7 @@ from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import OpKeyGraphRewriter, PatternNodeRewriter
 from pytensor.graph.utils import MissingInputError
 from pytensor.link.vm import VMLinker
+from pytensor.printing import debugprint
 from pytensor.tensor.math import dot, tanh
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.type import (
@@ -30,7 +31,6 @@ from pytensor.tensor.type import (
     scalars,
     vector,
 )
-from pytensor.utils import exc_message
 
 
 def PatternOptimizer(p1, p2, ign=True):
@@ -862,6 +862,12 @@ class TestFunction:
         with pytest.raises(AssertionError):
             function([x], outputs={(1, "b"): x, 1.0: x**2})
 
+    def test_dprint(self):
+        x = pt.scalar("x")
+        out = x + 1
+        f = function([x], out)
+        assert f.dprint(file="str") == debugprint(f, file="str")
+
 
 class TestPicklefunction:
     def test_deepcopy(self):
@@ -883,9 +889,9 @@ class TestPicklefunction:
                 return
             else:
                 raise
-        # if they both return, assume  that they return equivalent things.
-        # print [(k,id(k)) for k in f.finder.keys()]
-        # print [(k,id(k)) for k in g.finder.keys()]
+        # if they both return, assume that they return equivalent things.
+        # print [(k, id(k)) for k in f.finder]
+        # print [(k, id(k)) for k in g.finder]
 
         assert g.container[0].storage is not f.container[0].storage
         assert g.container[1].storage is not f.container[1].storage
@@ -896,8 +902,8 @@ class TestPicklefunction:
         assert f._check_for_aliased_inputs is g._check_for_aliased_inputs
         assert f.name == g.name
         assert f.maker.fgraph.name == g.maker.fgraph.name
-        # print 'f.defaults = %s' % (f.defaults, )
-        # print 'g.defaults = %s' % (g.defaults, )
+        # print(f"{f.defaults = }")
+        # print(f"{g.defaults = }")
         for (f_req, f_feed, f_val), (g_req, g_feed, g_val) in zip(
             f.defaults, g.defaults
         ):
@@ -1006,9 +1012,9 @@ class TestPicklefunction:
                 return
             else:
                 raise
-        # if they both return, assume  that they return equivalent things.
-        # print [(k,id(k)) for k in f.finder.keys()]
-        # print [(k,id(k)) for k in g.finder.keys()]
+        # if they both return, assume that they return equivalent things.
+        # print [(k, id(k)) for k in f.finder]
+        # print [(k, id(k)) for k in g.finder]
 
         assert g.container[0].storage is not f.container[0].storage
         assert g.container[1].storage is not f.container[1].storage
@@ -1174,6 +1180,17 @@ class TestPicklefunction:
 
         def pers_load(id):
             return saves[id]
+
+        def exc_message(e):
+            """
+            In Python 3, when an exception is reraised it saves the original
+            exception in its args, therefore in order to find the actual
+            message, we need to unpack arguments recursively.
+            """
+            msg = e.args[0]
+            if isinstance(msg, Exception):
+                return exc_message(msg)
+            return msg
 
         b = np.random.random((5, 4))
 

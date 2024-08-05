@@ -16,8 +16,8 @@ from pytensor.configdefaults import config
 from pytensor.graph.op import get_test_value
 from pytensor.graph.rewriting.utils import is_same_graph
 from pytensor.printing import pprint
-from pytensor.scalar.basic import as_scalar
-from pytensor.tensor import get_vector_length, vectorize
+from pytensor.scalar.basic import as_scalar, int16
+from pytensor.tensor import as_tensor, get_vector_length, vectorize
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import exp, isinf
@@ -34,13 +34,16 @@ from pytensor.tensor.subtensor import (
     advanced_inc_subtensor1,
     advanced_set_subtensor,
     advanced_set_subtensor1,
+    advanced_subtensor1,
     as_index_literal,
     basic_shape,
+    flip,
     get_canonical_form_slice,
     inc_subtensor,
     index_vars_to_types,
     indexed_result_shape,
     set_subtensor,
+    slice_at_axis,
     take,
 )
 from pytensor.tensor.type import (
@@ -68,7 +71,13 @@ from pytensor.tensor.type import (
     tensor5,
     vector,
 )
-from pytensor.tensor.type_other import NoneConst, SliceConstant, make_slice, slicetype
+from pytensor.tensor.type_other import (
+    NoneConst,
+    SliceConstant,
+    as_symbolic_slice,
+    make_slice,
+    slicetype,
+)
 from tests import unittest_tools as utt
 from tests.tensor.utils import inplace_func, integers_ranged, random
 
@@ -105,11 +114,54 @@ def test_as_index_literal():
 
 
 class TestGetCanonicalFormSlice:
+    @pytest.mark.parametrize(
+        "idx",
+        [
+            NoneConst,
+            None,
+            as_symbolic_slice(slice(3, 7, 2)),
+            as_symbolic_slice(slice(3, int16(), 2)),
+            vector(),
+        ],
+    )
+    def test_unsupported_inputs(self, idx):
+        with pytest.raises(ValueError, match="not a supported slice"):
+            get_canonical_form_slice(idx, 5)
+
     def test_scalar_constant(self):
         a = as_scalar(0)
         length = lscalar()
         res = get_canonical_form_slice(a, length)
-        assert res[0].owner.op == ptb.switch
+        assert isinstance(res[0].owner.op, ptb.ScalarFromTensor)
+        assert res[1] == 1
+
+    def test_tensor_constant(self):
+        a = as_tensor(0)
+        length = lscalar()
+        res = get_canonical_form_slice(a, length)
+        assert isinstance(res[0].owner.op, ptb.ScalarFromTensor)
+        assert res[1] == 1
+
+    def test_symbolic_scalar(self):
+        a = int16()
+        length = lscalar()
+        res = get_canonical_form_slice(a, length)
+        assert res[0].owner.op, ptb.switch
+        assert res[1] == 1
+
+    def test_symbolic_tensor(self):
+        a = lscalar()
+        length = lscalar()
+        res = get_canonical_form_slice(a, length)
+        assert isinstance(res[0].owner.op, ptb.ScalarFromTensor)
+        assert res[1] == 1
+
+    @pytest.mark.parametrize("int_fn", [int, np.int64, as_tensor, as_scalar])
+    def test_all_integer(self, int_fn):
+        res = get_canonical_form_slice(
+            slice(int_fn(1), int_fn(5), int_fn(2)), int_fn(7)
+        )
+        assert isinstance(res[0], slice)
         assert res[1] == 1
 
     def test_all_symbolic(self):
@@ -1093,9 +1145,11 @@ class TestSubtensor(utt.OptimizationTestMixin):
         data = random(4)
         data = np.asarray(data, dtype=self.dtype)
         idxs = [[i] for i in range(data.shape[0])]
-        for i in range(data.shape[0]):
-            for j in range(0, data.shape[0], 2):
-                idxs.append([i, j, (i + 1) % data.shape[0]])
+        idxs.extend(
+            [i, j, (i + 1) % data.shape[0]]
+            for i in range(data.shape[0])
+            for j in range(0, data.shape[0], 2)
+        )
         self.grad_list_(idxs, data)
 
         data = random(4, 3)
@@ -2707,9 +2761,23 @@ def test_index_vars_to_types():
         [(7, 13), (slice(None, None, 2), slice(-1, 1, -1)), (4, 11)],
     ],
 )
-def test_static_shapes(x_shape, indices, expected):
+def test_subtensor_static_shapes(x_shape, indices, expected):
     x = ptb.tensor(dtype="float64", shape=x_shape)
     y = x[indices]
+    assert y.type.shape == expected
+
+
+@pytest.mark.parametrize(
+    "x_shape, indices, expected",
+    [
+        [(None, 5, None, 3), vector(shape=(1,)), (1, 5, None, 3)],
+        [(None, 5, None, 3), vector(shape=(2,)), (2, 5, None, 3)],
+        [(None, 5, None, 3), vector(shape=(None,)), (None, 5, None, 3)],
+    ],
+)
+def test_advanced_subtensor1_static_shapes(x_shape, indices, expected):
+    x = ptb.tensor(dtype="float64", shape=x_shape)
+    y = advanced_subtensor1(x, indices.astype(int))
     assert y.type.shape == expected
 
 
@@ -2836,3 +2904,39 @@ def test_vectorize_adv_subtensor(
         vectorize_pt(x_test, idx_test),
         vectorize_np(x_test, idx_test),
     )
+
+
+def test_slice_at_axis():
+    x = ptb.tensor("x", shape=(3, 4, 5))
+    x_sliced = x[slice_at_axis(slice(None, 1), axis=0)]
+    assert x_sliced.type.shape == (1, 4, 5)
+
+    # Negative axis
+    x_sliced = x[slice_at_axis(slice(None, 1), axis=-2)]
+    assert x_sliced.type.shape == (3, 1, 5)
+
+
+@pytest.mark.parametrize(
+    "size", [(3,), (3, 3), (3, 5, 5)], ids=["1d", "2d square", "3d square"]
+)
+def test_flip(size: tuple[int]):
+    from itertools import combinations
+
+    ATOL = RTOL = 1e-8 if config.floatX == "float64" else 1e-4
+
+    x = np.random.normal(size=size).astype(config.floatX)
+    x_pt = pytensor.tensor.tensor(shape=size, name="x")
+    expected = np.flip(x, axis=None)
+    z = flip(x_pt, axis=None)
+    f = pytensor.function([x_pt], z, mode="FAST_COMPILE")
+    np.testing.assert_allclose(expected, f(x), atol=ATOL, rtol=RTOL)
+
+    # Test all combinations of axes
+    flip_options = [
+        axes for i in range(1, x.ndim + 1) for axes in combinations(range(x.ndim), r=i)
+    ]
+    for axes in flip_options:
+        expected = np.flip(x, axis=list(axes))
+        z = flip(x_pt, axis=list(axes))
+        f = pytensor.function([x_pt], z, mode="FAST_COMPILE")
+        np.testing.assert_allclose(expected, f(x), atol=ATOL, rtol=RTOL)

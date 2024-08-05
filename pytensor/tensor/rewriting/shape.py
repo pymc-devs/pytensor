@@ -48,7 +48,7 @@ from pytensor.tensor.shape import (
 )
 from pytensor.tensor.subtensor import Subtensor, get_idx_list
 from pytensor.tensor.type import TensorType, discrete_dtypes, integer_dtypes
-from pytensor.tensor.type_other import NoneConst
+from pytensor.tensor.type_other import NoneConst, NoneTypeT
 
 
 class ShapeFeature(Feature):
@@ -401,7 +401,7 @@ class ShapeFeature(Feature):
                 merged_shape.append(other_shape[i])
             elif (
                 ps.owner
-                and isinstance(getattr(ps.owner, "op", None), Shape_i)
+                and isinstance(ps.owner.op, Shape_i)
                 and ps.owner.op.i == i
                 and ps.owner.inputs[0] in (r, other_r)
             ):
@@ -602,7 +602,7 @@ class ShapeFeature(Feature):
         # r is *scheduled*.
         # At that point, node is no longer a client of r, but of new_r
         for shpnode, idx in fgraph.clients[r] + [(node, i)]:
-            if isinstance(getattr(shpnode, "op", None), Shape_i):
+            if isinstance(shpnode.op, Shape_i):
                 idx = shpnode.op.i
                 repl = self.shape_of[new_r][idx]
                 if repl.owner is shpnode:
@@ -749,51 +749,43 @@ pytensor.compile.mode.optdb.register(
 pytensor.compile.mode.optdb.register("UnShapeOpt", UnShapeOptimizer(), position=10)
 
 
-def local_reshape_chain(op):
-    @node_rewriter([op])
-    def f(fgraph, node):
-        """
-        Reshape(Reshape(shape1),shape2) -> Reshape(shape2)
+@register_canonicalize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter([Reshape])
+def local_reshape_chain(fgraph, node):
+    """
+    Reshape(Reshape(x, shape1),shape2) -> Reshape(x, shape2)
 
-        """
-        if not check_chain(node, op, op):
-            return False
+    """
+    if not check_chain(node, Reshape, Reshape):
+        return False
 
-        # TODO: this can permit a failing program to run by eliminating
-        #       the lower reshape
-        rval = node.op(node.inputs[0].owner.inputs[0], node.inputs[1])
+    rval = node.op(node.inputs[0].owner.inputs[0], node.inputs[1])
 
-        # Copy over stacktrace from previous output node, as any error
-        # in new computational graph would have been caused by last op
-        # in the old computational graph.
-        copy_stack_trace(node.outputs, rval)
+    # Copy over stacktrace from previous output node, as any error
+    # in new computational graph would have been caused by last op
+    # in the old computational graph.
+    copy_stack_trace(node.outputs, rval)
 
-        # It might happen that the desired output of this node has a
-        # broadcastable pattern that does not match that of 'rval'. This is
-        # when originally, we were able to figure out that one of the
-        # dimensions of the reshape is one, but some other transformation
-        # replaced the shape by one for which this cannot be guessed.
-        # We should try to figure out why we lost the information about this
-        # constant value... but in the meantime, better not apply this
-        # rewrite.
-        if rval.type.ndim == node.outputs[0].type.ndim and all(
-            s1 == s1
-            for s1, s2 in zip(rval.type.shape, node.outputs[0].type.shape)
-            if s1 == 1 or s2 == 1
-        ):
-            return [rval]
-        else:
-            return False
-
-    return f
+    # It might happen that the desired output of this node has a
+    # broadcastable pattern that does not match that of 'rval'. This is
+    # when originally, we were able to figure out that one of the
+    # dimensions of the reshape is one, but some other transformation
+    # replaced the shape by one for which this cannot be guessed.
+    # We should try to figure out why we lost the information about this
+    # constant value... but in the meantime, better not apply this
+    # rewrite.
+    if rval.type.ndim == node.outputs[0].type.ndim and all(
+        s1 == s2
+        for s1, s2 in zip(rval.type.shape, node.outputs[0].type.shape)
+        if s1 == 1 or s2 == 1
+    ):
+        return [rval]
 
 
-register_canonicalize(local_reshape_chain(Reshape), name="local_reshape_chain")
-
-
-@register_useless
-@register_canonicalize
-@register_stabilize
+@register_useless("shape_unsafe")
+@register_canonicalize("shape_unsafe")
+@register_specialize("shape_unsafe")
 @node_rewriter([Reshape])
 def local_useless_reshape(fgraph, node):
     """Remove two kinds of useless `Reshape`.
@@ -802,24 +794,17 @@ def local_useless_reshape(fgraph, node):
     - Remove `Reshape` when reshaping to the shape of the input.
 
     """
-    inp = node.inputs[0]
-    output = node.outputs[0]
-    output_shape = node.inputs[1]
+    inp, output_shape = node.inputs
+    [output] = node.outputs
 
     if inp.type.ndim != output.type.ndim:
         return False
 
     # Simple case: both input and output have a single dimension.
-    # TODO FIXME XXX: This could hide errors if the user provides inconsistent
-    # shapes.
     if (
         inp.type.ndim == 1
         and output.type.ndim == 1
-        and all(
-            s1 == s2
-            for s1, s2 in zip(inp.type.shape, output.type.shape)
-            if s1 == 1 or s2 == 1
-        )
+        and inp.type.broadcastable == output.type.broadcastable
     ):
         return [inp]
 
@@ -832,8 +817,15 @@ def local_useless_reshape(fgraph, node):
 
     # Match Reshape(x, [x.shape[0], ..., x.shape[-1]]), accounting for
     # broadcastable and constant dimensions
-    if output_shape.owner and isinstance(output_shape.owner.op, MakeVector):
-        output_shape_is = output_shape.owner.inputs
+    if isinstance(output_shape, Constant) or (
+        output_shape.owner and isinstance(output_shape.owner.op, MakeVector)
+    ):
+        if isinstance(output_shape, Constant):
+            output_shape_is = [
+                as_tensor_variable(dim, ndim=0) for dim in output_shape.data
+            ]
+        else:
+            output_shape_is = output_shape.owner.inputs
 
         shape_feature = getattr(fgraph, "shape_feature", None)
 
@@ -865,9 +857,9 @@ def local_useless_reshape(fgraph, node):
                         shape_match[dim] = True
                         continue
 
-            # Match 1 if input.type.shape[dim] == 1
+            # Match constant if input.type.shape[dim] == constant
             cst_outshp_i = extract_constant(outshp_i, only_process_constants=1)
-            if inp.type.shape[dim] == 1 and cst_outshp_i == 1:
+            if inp.type.shape[dim] == cst_outshp_i:
                 shape_match[dim] = True
                 continue
 
@@ -881,17 +873,18 @@ def local_useless_reshape(fgraph, node):
             if shape_feature:
                 inpshp_i = shape_feature.get_shape(inp, dim)
                 if inpshp_i == outshp_i or (
-                    extract_constant(inpshp_i, only_process_constants=1)
-                    == extract_constant(outshp_i, only_process_constants=1)
+                    extract_constant(inpshp_i, only_process_constants=True)
+                    == extract_constant(outshp_i, only_process_constants=True)
                 ):
                     shape_match[dim] = True
                     continue
 
-        if all(shape_match) and nb_m1 <= 1:
+        if nb_m1 <= 1 and all(shape_match):
             return [inp]
 
-        # TODO later: if all the shapes except one match, we may want to
-        # consider it useless as well, like we do in the 1-dim case.
+        if (nb_m1 == 0) and (shape_match.count(False) == output.type.ndim - 1):
+            return [inp]
+
         return False
 
 
@@ -910,9 +903,8 @@ def local_reshape_to_dimshuffle(fgraph, node):
           -> DimShuffle{x,0,x,1,x,x}(Reshape(x, (m, n)))
     """
     op = node.op
-    inp = node.inputs[0]
-    output = node.outputs[0]
-    output_shape = node.inputs[1]
+    inp, output_shape = node.inputs
+    [output] = node.outputs
 
     dimshuffle_new_order = []
     new_output_shape = []
@@ -944,7 +936,7 @@ def local_reshape_to_dimshuffle(fgraph, node):
 
 
 @register_canonicalize
-@register_stabilize
+@register_specialize
 @node_rewriter([Reshape])
 def local_reshape_lift(fgraph, node):
     """
@@ -972,6 +964,35 @@ def local_reshape_lift(fgraph, node):
         # because an error in new cg could have been caused by either ops.
         copy_stack_trace(node.outputs + node.inputs, e)
         return [e]
+
+
+@register_useless
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([SpecifyShape])
+def local_useless_specify_shape(fgraph, node):
+    """Remove SpecifyShape when the asserted shapes are already encoded in the static type of the input."""
+    x, *shape = node.inputs
+    for static_dim, specified_dim in zip(x.type.shape, shape, strict=True):
+        if isinstance(specified_dim.type, NoneTypeT):
+            continue
+        if static_dim is None:
+            # There is an unknown static dimension that is being specified
+            return None
+        if not (
+            isinstance(specified_dim, Constant) and specified_dim.data == static_dim
+        ):
+            # The specified dim is either:
+            # 1. Not constant or
+            # 2. Constant that does not match the static dim
+            # Either way, we must keep the SpecifyShape
+            return None
+
+    # If we arrived here, it means SpecifyShape was already encoded in the static shape
+    # We don't need it
+    copy_stack_trace(node.outputs[0], x)
+    return [x]
 
 
 @register_infer_shape
@@ -1028,7 +1049,10 @@ def local_Shape_of_SpecifyShape(fgraph, node):
 
     specified_shape = node.inputs[0]
 
-    if not isinstance(getattr(specified_shape.owner, "op", None), SpecifyShape):
+    if not (
+        specified_shape.owner is not None
+        and isinstance(specified_shape.owner.op, SpecifyShape)
+    ):
         return False
 
     x, *shape = specified_shape.owner.inputs
@@ -1189,10 +1213,7 @@ def local_useless_dimshuffle_in_reshape(fgraph, node):
 @register_specialize
 @node_rewriter([Unbroadcast])
 def local_useless_unbroadcast(fgraph, node):
-    """Remove `Unbroadcast` if it does not actually change the broadcasting pattern.
-
-    TODO: Implement equivalent rewrite for SpecifyShape
-    """
+    """Remove `Unbroadcast` if it does not actually change the broadcasting pattern."""
     if isinstance(node.op, Unbroadcast):
         x = node.inputs[0]
         if x.type.ndim == node.outputs[0].type.ndim and all(

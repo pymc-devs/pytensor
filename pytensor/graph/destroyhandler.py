@@ -5,12 +5,13 @@ and inplace operations.
 """
 
 import itertools
-from collections import OrderedDict, deque
+from collections import deque
 
 import pytensor
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant
 from pytensor.graph.features import AlreadyThere, Bookkeeper
+from pytensor.graph.fg import Output
 from pytensor.graph.utils import InconsistencyError
 from pytensor.misc.ordered_set import OrderedSet
 
@@ -181,7 +182,7 @@ def _build_droot_impact(destroy_handler):
     root_destroyer = {}  # root -> destroyer apply
 
     for app in destroy_handler.destroyers:
-        for output_idx, input_idx_list in app.op.destroy_map.items():
+        for input_idx_list in app.op.destroy_map.values():
             if len(input_idx_list) != 1:
                 raise NotImplementedError()
             input_idx = input_idx_list[0]
@@ -306,7 +307,7 @@ class DestroyHandler(Bookkeeper):
         TODO: change name to var_to_vroot.
 
         """
-        self.droot = OrderedDict()
+        self.droot = {}
 
         """
         Maps a variable to all variables that are indirect or direct views of it
@@ -317,7 +318,7 @@ class DestroyHandler(Bookkeeper):
         TODO: rename to x_to_views after reverse engineering what x is
 
         """
-        self.impact = OrderedDict()
+        self.impact = {}
 
         """
         If a var is destroyed, then this dict will map
@@ -325,11 +326,11 @@ class DestroyHandler(Bookkeeper):
         TODO: rename to vroot_to_destroyer
 
         """
-        self.root_destroyer = OrderedDict()
+        self.root_destroyer = {}
         if algo is None:
             algo = config.cycle_detection
         self.algo = algo
-        self.fail_validate = OrderedDict()
+        self.fail_validate = {}
 
     def clone(self):
         return type(self)(self.do_imports_on_attach, self.algo)
@@ -370,7 +371,7 @@ class DestroyHandler(Bookkeeper):
         self.view_i = {}  # variable -> variable used in calculation
         self.view_o = {}  # variable -> set of variables that use this one as a direct input
         # clients: how many times does an apply use a given variable
-        self.clients = OrderedDict()  # variable -> apply -> ninputs
+        self.clients = {}  # variable -> apply -> ninputs
         self.stale_droot = True
 
         self.debug_all_apps = set()
@@ -401,13 +402,11 @@ class DestroyHandler(Bookkeeper):
             def recursive_destroys_finder(protected_var):
                 # protected_var is the idx'th input of app.
                 for app, idx in fgraph.clients[protected_var]:
-                    if app == "output":
-                        continue
                     destroy_maps = app.op.destroy_map.values()
                     # If True means that the apply node, destroys the protected_var.
                     if idx in [dmap for sublist in destroy_maps for dmap in sublist]:
                         return True
-                    for var_idx in app.op.view_map.keys():
+                    for var_idx in app.op.view_map:
                         if idx in app.op.view_map[var_idx]:
                             # We need to recursively check the destroy_map of all the
                             # outputs that we have a view_map on.
@@ -527,11 +526,11 @@ class DestroyHandler(Bookkeeper):
 
         # update self.clients
         for i, input in enumerate(app.inputs):
-            self.clients.setdefault(input, OrderedDict()).setdefault(app, 0)
+            self.clients.setdefault(input, {}).setdefault(app, 0)
             self.clients[input][app] += 1
 
         for i, output in enumerate(app.outputs):
-            self.clients.setdefault(output, OrderedDict())
+            self.clients.setdefault(output, {})
 
         self.stale_droot = True
 
@@ -578,7 +577,7 @@ class DestroyHandler(Bookkeeper):
         app.inputs[i] changed from old_r to new_r.
 
         """
-        if app == "output":
+        if isinstance(app.op, Output):
             # app == 'output' is special key that means FunctionGraph is redefining which nodes are being
             # considered 'outputs' of the graph.
             pass
@@ -591,7 +590,7 @@ class DestroyHandler(Bookkeeper):
             if self.clients[old_r][app] == 0:
                 del self.clients[old_r][app]
 
-            self.clients.setdefault(new_r, OrderedDict()).setdefault(app, 0)
+            self.clients.setdefault(new_r, {}).setdefault(app, 0)
             self.clients[new_r][app] += 1
 
             # UPDATE self.view_i, self.view_o
@@ -632,7 +631,7 @@ class DestroyHandler(Bookkeeper):
             if self.algo == "fast":
                 if self.fail_validate:
                     app_err_pairs = self.fail_validate
-                    self.fail_validate = OrderedDict()
+                    self.fail_validate = {}
                     # self.fail_validate can only be a hint that maybe/probably
                     # there is a cycle.This is because inside replace() we could
                     # record many reasons to not accept a change, but we don't
@@ -674,12 +673,8 @@ class DestroyHandler(Bookkeeper):
         c) an Apply destroys (illegally) one of its own inputs by aliasing
 
         """
-        if ordered:
-            set_type = OrderedSet
-            rval = OrderedDict()
-        else:
-            set_type = set
-            rval = dict()
+        set_type = OrderedSet if ordered else set
+        rval = {}
 
         if self.destroyers:
             # BUILD DATA STRUCTURES
@@ -703,7 +698,7 @@ class DestroyHandler(Bookkeeper):
                 # keep track of clients that should run before the current Apply
                 root_clients = set_type()
                 # for each destroyed input...
-                for output_idx, input_idx_list in app.op.destroy_map.items():
+                for input_idx_list in app.op.destroy_map.values():
                     destroyed_idx = input_idx_list[0]
                     destroyed_variable = app.inputs[destroyed_idx]
                     root = droot[destroyed_variable]

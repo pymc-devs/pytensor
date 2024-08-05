@@ -52,6 +52,7 @@ from pytensor.tensor.basic import (
     TensorFromScalar,
     alloc,
     as_tensor_variable,
+    atleast_Nd,
     cast,
     extract_constant,
     fill,
@@ -1219,3 +1220,123 @@ def local_merge_alloc(fgraph, node):
 
 
 register_canonicalize(RemovalNodeRewriter(tensor_copy), name="remove_tensor_copy")
+
+
+@register_specialize
+@node_rewriter([DimShuffle])
+def local_dimshuffle_alloc(fgraph, node):
+    """
+    Lift DimShuffle through Alloc
+
+    dimshuffle{x, 0, 1}(alloc([3 4], 3, 2) => alloc([3 4], 1, 3, 2)
+    """
+    alloc_out = node.inputs[0]
+    alloc_node = alloc_out.owner
+    if not (alloc_node and isinstance(alloc_node.op, Alloc)):
+        return
+
+    ds_op = node.op
+    value, *alloc_shape = alloc_node.inputs
+
+    # Add implicit dimensions of value
+    value = atleast_Nd(value, n=len(alloc_shape))
+
+    # Dimshuffle value and alloc_shape
+    ds_value = value.dimshuffle(ds_op.new_order)
+    ds_alloc_shape = [alloc_shape[i] for i in ds_op.shuffle]
+    for dim in ds_op.augment:
+        ds_alloc_shape.insert(dim, 1)
+
+    return [alloc(ds_value, *ds_alloc_shape)]
+
+
+@register_specialize("shape_unsafe")
+@node_rewriter([Join])
+def local_join_of_alloc(fgraph, node):
+    """Rewrite a Join of Alloc nodes to an Alloc of the Join nodes."""
+    axis, *tensors = node.inputs
+
+    if len(tensors) < 2:
+        # Let other rewrite handle the useless Join
+        return
+
+    if not isinstance(axis, Constant):
+        return
+
+    core_tensors = []
+    alloc_shapes = []
+    for tensor in tensors:
+        if tensor.owner is None:
+            return
+
+        # tensor = expand_dims_to_alloc(tensor)
+        if not isinstance(tensor.owner.op, Alloc):
+            return
+
+        value, *shape = tensor.owner.inputs
+        # Introduce explicit batch dims
+        value = atleast_Nd(value, n=len(shape))
+        core_tensors.append(value)
+        alloc_shapes.append(shape)
+
+    # Find which allocated dimensions can be lifted
+    # Axis can never be lifted
+    # Non-axis allocated dimensions can be lifted if they are all broadcastable
+    [out] = node.outputs
+    axis = axis.data
+
+    broadcasted_dims = list(
+        zip(
+            *(
+                [
+                    bef and not aft
+                    for bef, aft in zip(
+                        core_tensor.type.broadcastable,
+                        tensor.type.broadcastable,
+                        strict=True,
+                    )
+                ]
+                for core_tensor, tensor in zip(core_tensors, tensors, strict=True)
+            )
+        )
+    )
+
+    lifteable_alloc_dims = {
+        dim
+        for dim in range(out.type.ndim)
+        if dim != axis and all(broadcasted_dims[dim])
+    }
+
+    if not lifteable_alloc_dims:
+        return
+
+    # Lift the allocated dimensions
+    new_tensors = []
+    for core_tensor, alloc_shape in zip(core_tensors, alloc_shapes):
+        pre_join_shape = [
+            1 if i in lifteable_alloc_dims else alloc_dim
+            for i, alloc_dim in enumerate(alloc_shape)
+        ]
+        new_tensor = alloc(core_tensor, *pre_join_shape)
+        copy_stack_trace(tensor, new_tensor)
+        new_tensors.append(new_tensor)
+
+    new_join = node.op(axis, *new_tensors)
+    copy_stack_trace(node.outputs[0], new_join)
+
+    # Reintroduce the lifted dims
+    post_join_shape = []
+    for i, alloc_dims in enumerate(zip(*alloc_shapes)):
+        if i == axis:
+            # The alloc dim along the axis is the sum of all the pre-join alloc dims
+            post_join_shape.append(add(*alloc_dims))
+        else:
+            # Otherwise the shapes should all match. We prioritize constants if any
+            for best_alloc_dim in alloc_dims:
+                if isinstance(best_alloc_dim, Constant):
+                    break
+            post_join_shape.append(best_alloc_dim)
+
+    new_out = alloc(new_join, *post_join_shape)
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]

@@ -130,6 +130,7 @@ from pytensor.tensor.blas import batched_dot, batched_tensordot
 from pytensor.tensor.extra_ops import *
 from pytensor.tensor.io import *
 from pytensor.tensor.math import *
+from pytensor.tensor.pad import pad
 from pytensor.tensor.shape import (
     reshape,
     shape,
@@ -150,6 +151,7 @@ from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
 # isort: off
+from pytensor.tensor.einsum import einsum
 from pytensor.tensor.functional import vectorize
 # isort: on
 

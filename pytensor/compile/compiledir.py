@@ -4,9 +4,9 @@ It is used by the "pytensor-cache" CLI tool, located in the /bin folder of the r
 """
 
 import logging
-import os
 import pickle
 import shutil
+from collections import Counter
 
 import numpy as np
 
@@ -32,12 +32,11 @@ def cleanup():
     If there is no key left for a compiled module, we delete the module.
 
     """
-    compiledir = config.compiledir
-    for directory in os.listdir(compiledir):
+    for directory in config.compiledir.iterdir():
         try:
-            filename = os.path.join(compiledir, directory, "key.pkl")
+            filename = directory / "key.pkl"
             # print file
-            with open(filename, "rb") as file:
+            with filename.open("rb") as file:
                 try:
                     keydata = pickle.load(file)
 
@@ -78,7 +77,7 @@ def cleanup():
                                     "the directory containing it."
                                 )
                     if len(keydata.keys) == 0:
-                        shutil.rmtree(os.path.join(compiledir, directory))
+                        shutil.rmtree(directory)
 
                 except (EOFError, AttributeError):
                     _logger.error(
@@ -111,23 +110,21 @@ def print_compiledir_content():
     compiledir = config.compiledir
     table = []
     table_multiple_ops = []
-    table_op_class = {}
+    table_op_class = Counter()
     zeros_op = 0
     big_key_files = []
     total_key_sizes = 0
-    nb_keys = {}
-    for dir in os.listdir(compiledir):
-        filename = os.path.join(compiledir, dir, "key.pkl")
-        if not os.path.exists(filename):
+    nb_keys = Counter()
+    for dir in config.compiledir.iterdir():
+        filename = dir / "key.pkl"
+        if not filename.exists():
             continue
-        with open(filename, "rb") as file:
+        with filename.open("rb") as file:
             try:
                 keydata = pickle.load(file)
                 ops = list({x for x in flatten(keydata.keys) if isinstance(x, Op)})
                 # Whatever the case, we count compilations for OP classes.
-                for op_class in {op.__class__ for op in ops}:
-                    table_op_class.setdefault(op_class, 0)
-                    table_op_class[op_class] += 1
+                table_op_class.update({op.__class__ for op in ops})
                 if len(ops) == 0:
                     zeros_op += 1
                 else:
@@ -135,15 +132,11 @@ def print_compiledir_content():
                         {x for x in flatten(keydata.keys) if isinstance(x, CType)}
                     )
                     compile_start = compile_end = float("nan")
-                    for fn in os.listdir(os.path.join(compiledir, dir)):
-                        if fn.startswith("mod.c"):
-                            compile_start = os.path.getmtime(
-                                os.path.join(compiledir, dir, fn)
-                            )
-                        elif fn.endswith(".so"):
-                            compile_end = os.path.getmtime(
-                                os.path.join(compiledir, dir, fn)
-                            )
+                    for fn in dir.iterdir():
+                        if fn.name == "mod.c":
+                            compile_start = fn.stat().st_mtime
+                        elif fn.suffix == ".so":
+                            compile_end = fn.stat().st_mtime
                     compile_time = compile_end - compile_start
                     if len(ops) == 1:
                         table.append((dir, ops[0], types, compile_time))
@@ -154,12 +147,11 @@ def print_compiledir_content():
                             (dir, ops_to_str, types_to_str, compile_time)
                         )
 
-                size = os.path.getsize(filename)
+                size = filename.stat().st_size
                 total_key_sizes += size
                 if size > max_key_file_size:
                     big_key_files.append((dir, size, ops))
 
-                nb_keys.setdefault(len(keydata.keys), 0)
                 nb_keys[len(keydata.keys)] += 1
             except OSError:
                 pass
@@ -198,8 +190,7 @@ def print_compiledir_content():
         ),
         underline="+",
     )
-    table_op_class = sorted(table_op_class.items(), key=lambda t: t[1])
-    for op_class, nb in table_op_class:
+    for op_class, nb in reversed(table_op_class.most_common()):
         print(op_class, nb)
 
     if big_key_files:
@@ -242,8 +233,8 @@ def basecompiledir_ls():
     """
     subdirs = []
     others = []
-    for f in os.listdir(config.base_compiledir):
-        if os.path.isdir(os.path.join(config.base_compiledir, f)):
+    for f in config.base_compiledir.iterdir():
+        if f.is_dir():
             subdirs.append(f)
         else:
             others.append(f)

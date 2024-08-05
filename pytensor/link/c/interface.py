@@ -558,7 +558,9 @@ class CLinkerType(CLinkerObject):
         uninitialized.
 
         """
-        return """
+        c_init_code = self.c_init(name, sub)
+        c_extract_code = self.c_extract(name, sub, check_input)
+        return f"""
         if (py_{name} == Py_None)
         {{
             {c_init_code}
@@ -567,13 +569,7 @@ class CLinkerType(CLinkerObject):
         {{
             {c_extract_code}
         }}
-        """.format(
-            **dict(
-                name=name,
-                c_init_code=self.c_init(name, sub),
-                c_extract_code=self.c_extract(name, sub, check_input),
-            )
-        )
+        """
 
     def c_cleanup(self, name: str, sub: dict[str, str]) -> str:
         """Return C code to clean up after :meth:`CLinkerType.c_extract`.

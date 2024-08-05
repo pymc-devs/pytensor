@@ -87,6 +87,7 @@ from pytensor.tensor.basic import (
     triu_indices,
     triu_indices_from,
     vertical_stack,
+    where,
     zeros_like,
 )
 from pytensor.tensor.blockwise import Blockwise
@@ -937,38 +938,46 @@ def test_infer_static_shape():
     assert static_shape == (1,)
 
 
-# This is slow for the ('int8', 3) version.
-def test_eye():
-    def check(dtype, N, M_=None, k=0):
-        # PyTensor does not accept None as a tensor.
-        # So we must use a real value.
-        M = M_
-        # Currently DebugMode does not support None as inputs even if this is
-        # allowed.
-        if M is None and config.mode in ["DebugMode", "DEBUG_MODE"]:
-            M = N
-        N_symb = iscalar()
-        M_symb = iscalar()
-        k_symb = iscalar()
-        f = function([N_symb, M_symb, k_symb], eye(N_symb, M_symb, k_symb, dtype=dtype))
-        result = f(N, M, k)
-        assert np.allclose(result, np.eye(N, M_, k, dtype=dtype))
-        assert result.dtype == np.dtype(dtype)
+class TestEye:
+    # This is slow for the ('int8', 3) version.
+    def test_basic(self):
+        def check(dtype, N, M_=None, k=0):
+            # PyTensor does not accept None as a tensor.
+            # So we must use a real value.
+            M = M_
+            # Currently DebugMode does not support None as inputs even if this is
+            # allowed.
+            if M is None and config.mode in ["DebugMode", "DEBUG_MODE"]:
+                M = N
+            N_symb = iscalar()
+            M_symb = iscalar()
+            k_symb = iscalar()
+            f = function(
+                [N_symb, M_symb, k_symb], eye(N_symb, M_symb, k_symb, dtype=dtype)
+            )
+            result = f(N, M, k)
+            assert np.allclose(result, np.eye(N, M_, k, dtype=dtype))
+            assert result.dtype == np.dtype(dtype)
 
-    for dtype in ALL_DTYPES:
-        check(dtype, 3)
-        # M != N, k = 0
-        check(dtype, 3, 5)
-        check(dtype, 5, 3)
-        # N == M, k != 0
-        check(dtype, 3, 3, 1)
-        check(dtype, 3, 3, -1)
-        # N < M, k != 0
-        check(dtype, 3, 5, 1)
-        check(dtype, 3, 5, -1)
-        # N > M, k != 0
-        check(dtype, 5, 3, 1)
-        check(dtype, 5, 3, -1)
+        for dtype in ALL_DTYPES:
+            check(dtype, 3)
+            # M != N, k = 0
+            check(dtype, 3, 5)
+            check(dtype, 5, 3)
+            # N == M, k != 0
+            check(dtype, 3, 3, 1)
+            check(dtype, 3, 3, -1)
+            # N < M, k != 0
+            check(dtype, 3, 5, 1)
+            check(dtype, 3, 5, -1)
+            # N > M, k != 0
+            check(dtype, 5, 3, 1)
+            check(dtype, 5, 3, -1)
+
+    def test_static_output_type(self):
+        l = lscalar("l")
+        assert eye(5, 3, l).type.shape == (5, 3)
+        assert eye(1, l, 3).type.shape == (1, None)
 
 
 class TestTriangle:
@@ -3838,8 +3847,10 @@ def test_transpose():
     assert np.all(t2d == np.transpose(x2v, [0, 1]))
     assert np.all(t3d == np.transpose(x3v, [0, 2, 1]))
 
+    # Check we don't introduce useless transpose
+    assert ptb.transpose(x1) is x1
+
     # Check that we create a name.
-    assert ptb.transpose(x1).name == "x1.T"
     assert ptb.transpose(x2).name == "x2.T"
     assert ptb.transpose(x3).name == "x3.T"
     assert ptb.transpose(dmatrix()).name is None
@@ -4568,6 +4579,46 @@ def test_vectorize_extract_diag():
     )
 
 
+@pytest.mark.parametrize(
+    "batch_shapes",
+    [
+        ((3,),),  # edge case of make_vector with a single input
+        ((), (), ()),  # Useless
+        ((3,), (3,), (3,)),  # No broadcasting needed
+        ((3,), (5, 3), ()),  # Broadcasting needed
+    ],
+)
+def test_vectorize_make_vector(batch_shapes):
+    n_inputs = len(batch_shapes)
+    input_sig = ",".join(["()"] * n_inputs)
+    signature = f"{input_sig}->({n_inputs})"  # Something like "(),(),()->(3)"
+
+    def core_pt(*scalars):
+        out = stack(scalars)
+        out.dprint()
+        return out
+
+    def core_np(*scalars):
+        return np.stack(scalars)
+
+    tensors = [tensor(shape=shape) for shape in batch_shapes]
+
+    vectorize_pt = function(tensors, vectorize(core_pt, signature=signature)(*tensors))
+    assert not any(
+        isinstance(node.op, Blockwise) for node in vectorize_pt.maker.fgraph.apply_nodes
+    )
+
+    test_values = [
+        np.random.normal(size=tensor.type.shape).astype(tensor.type.dtype)
+        for tensor in tensors
+    ]
+
+    np.testing.assert_allclose(
+        vectorize_pt(*test_values),
+        np.vectorize(core_np, signature=signature)(*test_values),
+    )
+
+
 @pytest.mark.parametrize("axis", [constant(1), constant(-2), shared(1)])
 @pytest.mark.parametrize("broadcasting_y", ["none", "implicit", "explicit"])
 @config.change_flags(cxx="")  # C code not needed
@@ -4600,3 +4651,20 @@ def test_vectorize_join(axis, broadcasting_y):
         vectorize_pt(x_test, y_test),
         vectorize_np(x_test, y_test),
     )
+
+
+def test_where():
+    a = np.arange(10)
+    cond = a < 5
+    ift = np.pi
+    iff = np.e
+    # Test for all 3 inputs
+    np.testing.assert_allclose(np.where(cond, ift, iff), where(cond, ift, iff).eval())
+
+    # Test for only condition input
+    for np_output, pt_output in zip(np.where(cond), where(cond)):
+        np.testing.assert_allclose(np_output, pt_output.eval())
+
+    # Test for error
+    with pytest.raises(ValueError, match="either both"):
+        where(cond, ift)

@@ -1,3 +1,5 @@
+import re
+
 import numpy as np
 import pytest
 
@@ -12,7 +14,7 @@ from pytensor.graph.type import Type
 from pytensor.misc.safe_asarray import _asarray
 from pytensor.scalar.basic import ScalarConstant
 from pytensor.tensor import as_tensor_variable, broadcast_to, get_vector_length, row
-from pytensor.tensor.basic import MakeVector, as_tensor, constant
+from pytensor.tensor.basic import MakeVector, constant, stack
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.rewriting.shape import ShapeFeature
 from pytensor.tensor.shape import (
@@ -352,6 +354,29 @@ class TestReshape(utt.InferShapeTester, utt.OptimizationTestMixin):
         assert y_new.type.shape == (4, 25)
         assert tuple(y_new.shape.eval({i: i_test})) == (4, 25)
         assert y_new.eval({i: i_test}).shape == (4, 25)
+
+    def test_static_shape(self):
+        dim = lscalar("dim")
+        x1 = tensor(shape=(2, 2, None))
+        x2 = specify_shape(x1, (2, 2, 6))
+
+        assert reshape(x1, (6, 2)).type.shape == (6, 2)
+        assert reshape(x1, (6, -1)).type.shape == (6, None)
+        assert reshape(x1, (6, dim)).type.shape == (6, None)
+        assert reshape(x1, (6, dim, 2)).type.shape == (6, None, 2)
+        assert reshape(x1, (6, 3, 99)).type.shape == (6, 3, 99)
+
+        assert reshape(x2, (6, 4)).type.shape == (6, 4)
+        assert reshape(x2, (6, -1)).type.shape == (6, 4)
+        assert reshape(x2, (6, dim)).type.shape == (6, 4)
+        assert reshape(x2, (6, dim, 2)).type.shape == (6, 2, 2)
+        with pytest.raises(
+            ValueError,
+            match=re.escape(
+                "Reshape: Input shape (2, 2, 6) is incompatible with new shape (6, 3, 99)"
+            ),
+        ):
+            reshape(x2, (6, 3, 99))
 
 
 def test_shape_i_hash():
@@ -776,8 +801,14 @@ class TestVectorize:
         [vect_out] = vectorize_node(node, mat, new_shape).outputs
         assert equal_computations([vect_out], [reshape(mat, new_shape)])
 
-        with pytest.raises(NotImplementedError):
-            vectorize_node(node, vec, broadcast_to(as_tensor([5, 2, x]), (2, 3)))
+        new_shape = stack([[-1, x], [x - 1, -1]], axis=0)
+        print(new_shape.type)
+        [vect_out] = vectorize_node(node, vec, new_shape).outputs
+        vec_test_value = np.arange(6)
+        np.testing.assert_allclose(
+            vect_out.eval({x: 3, vec: vec_test_value}),
+            np.broadcast_to(vec_test_value.reshape(2, 3), (2, 2, 3)),
+        )
 
         with pytest.raises(
             ValueError,

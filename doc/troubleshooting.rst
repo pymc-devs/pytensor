@@ -259,7 +259,7 @@ PyTensor/BLAS speed test:
 
 .. code-block:: bash
 
-    python `python -c "import os, pytensor; print(os.path.dirname(pytensor.__file__))"`/misc/check_blas.py
+    python $(python -c "import pathlib, pytensor; print(pathlib.Path(pytensor.__file__).parent / 'misc/check_blas.py')")
 
 This will print a table with different versions of BLAS/numbers of
 threads on multiple CPUs. It will also print some PyTensor/NumPy

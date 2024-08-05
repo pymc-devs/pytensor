@@ -8,5 +8,4 @@ global-include *.h
 global-include *.hh
 global-include *.sh
 recursive-include doc *
-include versioneer.py
 include pytensor/_version.py

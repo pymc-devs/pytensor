@@ -12,8 +12,7 @@ scipy = pytest.importorskip("scipy")
 
 from functools import partial
 
-import scipy.special
-import scipy.stats
+from scipy import special, stats
 
 from pytensor import function, grad
 from pytensor import tensor as pt
@@ -45,43 +44,43 @@ mode_no_scipy = get_default_mode()
 
 
 def scipy_special_gammau(k, x):
-    return scipy.special.gammaincc(k, x) * scipy.special.gamma(k)
+    return special.gammaincc(k, x) * special.gamma(k)
 
 
 def scipy_special_gammal(k, x):
-    return scipy.special.gammainc(k, x) * scipy.special.gamma(k)
+    return special.gammainc(k, x) * special.gamma(k)
 
 
 # Precomputing the result is brittle(it have been broken!)
 # As if we do any modification to random number here,
 # The input random number will change and the output!
-expected_erf = scipy.special.erf
-expected_erfc = scipy.special.erfc
-expected_erfinv = scipy.special.erfinv
-expected_erfcinv = scipy.special.erfcinv
-expected_owenst = scipy.special.owens_t
-expected_gamma = scipy.special.gamma
-expected_gammaln = scipy.special.gammaln
-expected_psi = scipy.special.psi
-expected_tri_gamma = partial(scipy.special.polygamma, 1)
-expected_chi2sf = scipy.stats.chi2.sf
-expected_gammainc = scipy.special.gammainc
-expected_gammaincc = scipy.special.gammaincc
+expected_erf = special.erf
+expected_erfc = special.erfc
+expected_erfinv = special.erfinv
+expected_erfcinv = special.erfcinv
+expected_owenst = special.owens_t
+expected_gamma = special.gamma
+expected_gammaln = special.gammaln
+expected_psi = special.psi
+expected_tri_gamma = partial(special.polygamma, 1)
+expected_chi2sf = stats.chi2.sf
+expected_gammainc = special.gammainc
+expected_gammaincc = special.gammaincc
 expected_gammau = scipy_special_gammau
 expected_gammal = scipy_special_gammal
-expected_gammaincinv = scipy.special.gammaincinv
-expected_gammainccinv = scipy.special.gammainccinv
-expected_j0 = scipy.special.j0
-expected_j1 = scipy.special.j1
-expected_jv = scipy.special.jv
-expected_i0 = scipy.special.i0
-expected_i1 = scipy.special.i1
-expected_iv = scipy.special.iv
-expected_ive = scipy.special.ive
-expected_erfcx = scipy.special.erfcx
-expected_sigmoid = scipy.special.expit
-expected_hyp2f1 = scipy.special.hyp2f1
-expected_betaincinv = scipy.special.betaincinv
+expected_gammaincinv = special.gammaincinv
+expected_gammainccinv = special.gammainccinv
+expected_j0 = special.j0
+expected_j1 = special.j1
+expected_jv = special.jv
+expected_i0 = special.i0
+expected_i1 = special.i1
+expected_iv = special.iv
+expected_ive = special.ive
+expected_erfcx = special.erfcx
+expected_sigmoid = special.expit
+expected_hyp2f1 = special.hyp2f1
+expected_betaincinv = special.betaincinv
 
 TestErfBroadcast = makeBroadcastTester(
     op=pt.erf,
@@ -837,14 +836,14 @@ _good_broadcast_ternary_betainc = dict(
 
 TestBetaincBroadcast = makeBroadcastTester(
     op=pt.betainc,
-    expected=scipy.special.betainc,
+    expected=special.betainc,
     good=_good_broadcast_ternary_betainc,
     grad=_good_broadcast_ternary_betainc,
 )
 
 TestBetaincInplaceBroadcast = makeBroadcastTester(
     op=inplace.betainc_inplace,
-    expected=scipy.special.betainc,
+    expected=special.betainc,
     good=_good_broadcast_ternary_betainc,
     grad=_good_broadcast_ternary_betainc,
     inplace=True,
@@ -936,13 +935,13 @@ _good_broadcast_ternary_betaincinv = dict(
 
 TestBetaincinvBroadcast = makeBroadcastTester(
     op=pt.betaincinv,
-    expected=scipy.special.betaincinv,
+    expected=special.betaincinv,
     good=_good_broadcast_ternary_betaincinv,
 )
 
 TestBetaincinvInplaceBroadcast = makeBroadcastTester(
     op=inplace.betaincinv_inplace,
-    expected=scipy.special.betaincinv,
+    expected=special.betaincinv,
     good=_good_broadcast_ternary_betaincinv,
     inplace=True,
 )

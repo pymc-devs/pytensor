@@ -521,12 +521,10 @@ class _tensor_py_operators:
         # Else leave it as is if it is a real number
         # Convert python literals to pytensor constants
         args = tuple(
-            [
-                pt.subtensor.as_index_constant(
-                    np.array(inp, dtype=np.uint8) if is_empty_array(inp) else inp
-                )
-                for inp in args
-            ]
+            pt.subtensor.as_index_constant(
+                np.array(inp, dtype=np.uint8) if is_empty_array(inp) else inp
+            )
+            for inp in args
         )
 
         # Determine if advanced indexing is needed or not.  The logic is
@@ -840,7 +838,8 @@ class _tensor_py_operators:
         >>>
         >>> x = pt.ones((3,))
         >>> out = x[1].set(2)
-        >>> out.eval()  # array([1., 2., 1.])
+        >>> out.eval()
+        array([1., 2., 1.])
         """
         return pt.subtensor.set_subtensor(self, y, **kwargs)
 
@@ -861,7 +860,8 @@ class _tensor_py_operators:
         >>>
         >>> x = pt.ones((3,))
         >>> out = x[1].inc(2)
-        >>> out.eval()  # array([1., 3., 1.])
+        >>> out.eval()
+        array([1., 3., 1.])
         """
         return pt.inc_subtensor(self, y, **kwargs)
 

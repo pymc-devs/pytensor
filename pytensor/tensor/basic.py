@@ -21,10 +21,11 @@ import pytensor
 import pytensor.scalar.sharedvar
 from pytensor import compile, config, printing
 from pytensor import scalar as ps
+from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType, grad_undefined
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Apply, Constant, Variable, equal_computations
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.rewriting.db import EquilibriumDB
@@ -597,12 +598,12 @@ class TensorFromScalar(COp):
         (z,) = outputs
         fail = sub["fail"]
 
-        return """
+        return f"""
             {z} = (PyArrayObject*)PyArray_FromScalar(py_{x}, NULL);
             if({z} == NULL){{
                 {fail};
             }}
-            """.format(**locals())
+            """
 
     def c_code_cache_version(self):
         return (2,)
@@ -646,10 +647,9 @@ class ScalarFromTensor(COp):
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
         (z,) = outputs
-        fail = sub["fail"]
-        return """
+        return f"""
         {z} = ((dtype_{x}*)(PyArray_DATA({x})))[0];
-        """.format(**locals())
+        """
 
     def c_code_cache_version(self):
         return (1,)
@@ -775,7 +775,31 @@ def switch(cond, ift, iff):
     """
 
 
-where = switch
+def where(cond, ift=None, iff=None, **kwargs):
+    """
+    where(condition, [ift, iff])
+    Return elements chosen from `ift` or `iff` depending on `condition`.
+
+    Note: When only condition is provided, this function is a shorthand for `as_tensor(condition).nonzero()`.
+
+    Parameters
+    ----------
+    condition : tensor_like, bool
+        Where True, yield `ift`, otherwise yield `iff`.
+    x, y : tensor_like
+        Values from which to choose.
+
+    Returns
+    -------
+    out : TensorVariable
+        A tensor with elements from `ift` where `condition` is True, and elements from `iff` elsewhere.
+    """
+    if ift is not None and iff is not None:
+        return switch(cond, ift, iff, **kwargs)
+    elif ift is None and iff is None:
+        return as_tensor(cond).nonzero(**kwargs)
+    else:
+        raise ValueError("either both or neither of ift and iff should be given")
 
 
 @scalar_elemwise
@@ -1135,23 +1159,24 @@ def tril(m, k=0):
 
     Examples
     --------
-    >>> at.tril(np.arange(1,13).reshape(4,3), -1).eval()
+    >>> import pytensor.tensor as pt
+    >>> pt.tril(pt.arange(1,13).reshape((4,3)), -1).eval()
     array([[ 0,  0,  0],
            [ 4,  0,  0],
            [ 7,  8,  0],
            [10, 11, 12]])
 
-    >>> at.tril(np.arange(3*4*5).reshape(3, 4, 5)).eval()
+    >>> pt.tril(pt.arange(3*4*5).reshape((3, 4, 5))).eval()
     array([[[ 0,  0,  0,  0,  0],
             [ 5,  6,  0,  0,  0],
             [10, 11, 12,  0,  0],
             [15, 16, 17, 18,  0]],
-
+    <BLANKLINE>
            [[20,  0,  0,  0,  0],
             [25, 26,  0,  0,  0],
             [30, 31, 32,  0,  0],
             [35, 36, 37, 38,  0]],
-
+    <BLANKLINE>
            [[40,  0,  0,  0,  0],
             [45, 46,  0,  0,  0],
             [50, 51, 52,  0,  0],
@@ -1177,23 +1202,24 @@ def triu(m, k=0):
 
     Examples
     --------
-    >>> at.triu(np.arange(1,13).reshape(4,3), -1).eval()
+    >>> import pytensor.tensor as pt
+    >>> pt.triu(pt.arange(1, 13).reshape((4, 3)), -1).eval()
     array([[ 1,  2,  3],
            [ 4,  5,  6],
            [ 0,  8,  9],
            [ 0,  0, 12]])
 
-    >>> at.triu(np.arange(3*4*5).reshape(3, 4, 5)).eval()
+    >>> pt.triu(np.arange(3*4*5).reshape((3, 4, 5))).eval()
     array([[[ 0,  1,  2,  3,  4],
             [ 0,  6,  7,  8,  9],
             [ 0,  0, 12, 13, 14],
             [ 0,  0,  0, 18, 19]],
-
+    <BLANKLINE>
            [[20, 21, 22, 23, 24],
             [ 0, 26, 27, 28, 29],
             [ 0,  0, 32, 33, 34],
             [ 0,  0,  0, 38, 39]],
-
+    <BLANKLINE>
            [[40, 41, 42, 43, 44],
             [ 0, 46, 47, 48, 49],
             [ 0,  0, 52, 53, 54],
@@ -1320,6 +1346,7 @@ def triu_indices_from(
 
 
 class Eye(Op):
+    _output_type_depends_on_input_value = True
     __props__ = ("dtype",)
 
     def __init__(self, dtype=None):
@@ -1334,10 +1361,13 @@ class Eye(Op):
         assert n.ndim == 0
         assert m.ndim == 0
         assert k.ndim == 0
+
+        _, static_shape = infer_static_shape((n, m))
+
         return Apply(
             self,
             [n, m, k],
-            [TensorType(dtype=self.dtype, shape=(None, None))()],
+            [TensorType(dtype=self.dtype, shape=static_shape)()],
         )
 
     def perform(self, node, inp, out_):
@@ -1351,6 +1381,25 @@ class Eye(Op):
 
     def grad(self, inp, grads):
         return [grad_undefined(self, i, inp[i]) for i in range(3)]
+
+    @staticmethod
+    def is_offset_zero(node) -> bool:
+        """
+        Test if an Eye Op has a diagonal offset of zero
+
+        Parameters
+        ----------
+        node
+            Eye node to test
+
+        Returns
+        -------
+        is_offset_zero: bool
+            True if the offset is zero (``k = 0``).
+        """
+
+        offset = node.inputs[-1]
+        return isinstance(offset, Constant) and offset.data.item() == 0
 
 
 def eye(n, m=None, k=0, dtype=None):
@@ -1571,7 +1620,7 @@ class Alloc(COp):
     def perform(self, node, inputs, out_):
         (out,) = out_
         v = inputs[0]
-        sh = tuple([int(i) for i in inputs[1:]])
+        sh = tuple(int(i) for i in inputs[1:])
         self._check_runtime_broadcast(node, v, sh)
 
         if out[0] is None or out[0].shape != sh:
@@ -1648,10 +1697,7 @@ class Alloc(COp):
         return [node.inputs[1:]]
 
     def connection_pattern(self, node):
-        rval = [[True]]
-
-        for ipt in node.inputs[1:]:
-            rval.append([False])
+        rval = [[True], *([False] for _ in node.inputs[1:])]
 
         return rval
 
@@ -1701,21 +1747,22 @@ class Alloc(COp):
             return False
 
         for client, idx in clients:
-            if client == "output":
+            client_op = client.op
+            if isinstance(client_op, Output):
                 # If the output is a constant, it will have to be deepcopied
                 # each time the function is called.  So we do not fold.
                 return False
-            # Allow alloc to be lifted out of Elemwise before constant folding it
-            elif isinstance(client.op, Elemwise):
-                return None
+            # Op's through which Alloc can be lifted
+            elif isinstance(client_op, Elemwise | DimShuffle | Alloc | Join):
+                return False
             # Same for Blockwise, unless it has no batch_dims
-            elif isinstance(client.op, Blockwise) and client.op.batch_ndim(client):
-                return None
+            elif isinstance(client_op, Blockwise) and client.op.batch_ndim(client):
+                return False
             elif (
                 # The following ops work inplace of their input id 0.
                 idx == 0
                 and isinstance(
-                    client.op,
+                    client_op,
                     pytensor.tensor.subtensor.IncSubtensor
                     | pytensor.tensor.subtensor.AdvancedIncSubtensor1
                     | pytensor.tensor.subtensor.AdvancedIncSubtensor
@@ -1856,18 +1903,18 @@ class MakeVector(COp):
             assert self.dtype == node.inputs[0].dtype
             out_num = f"PyArray_TYPE({inp[0]})"
 
-        ret = """
+        ret = f"""
         npy_intp dims[1];
         dims[0] = {out_shape};
         if(!{out} || PyArray_DIMS({out})[0] != {out_shape}){{
             Py_XDECREF({out});
             {out} = (PyArrayObject*)PyArray_EMPTY(1, dims, {out_num}, 0);
         }}
-        """.format(**locals())
+        """
         for idx, i in enumerate(inp):
-            ret += """
+            ret += f"""
             *(({out_dtype} *)PyArray_GETPTR1({out}, {idx})) = *(({out_dtype} *) PyArray_DATA({i}));
-            """.format(**locals())
+            """
         return ret
 
     def infer_shape(self, fgraph, node, ishapes):
@@ -1878,9 +1925,7 @@ class MakeVector(COp):
         if self.dtype in discrete_dtypes:
             return [ipt.zeros_like().astype(config.floatX) for ipt in inputs]
 
-        grads = []
-        for i, inp in enumerate(inputs):
-            grads.append(output_gradients[0][i])
+        grads = [output_gradients[0][i] for i in range(len(inputs))]
         return grads
 
     def R_op(self, inputs, eval_points):
@@ -1910,6 +1955,23 @@ pprint.assign(MakeVector, MakeVectorPrinter())
 @_get_vector_length.register(MakeVector)
 def _get_vector_length_MakeVector(op, var):
     return len(var.owner.inputs)
+
+
+@_vectorize_node.register
+def vectorize_make_vector(op: MakeVector, node, *batch_inputs):
+    # We vectorize make_vector as a join along the last axis of the broadcasted inputs
+    from pytensor.tensor.extra_ops import broadcast_arrays
+
+    # Check if we need to broadcast at all
+    bcast_pattern = batch_inputs[0].type.broadcastable
+    if not all(
+        batch_input.type.broadcastable == bcast_pattern for batch_input in batch_inputs
+    ):
+        batch_inputs = broadcast_arrays(*batch_inputs)
+
+    # Join along the last axis
+    new_out = stack(batch_inputs, axis=-1)
+    return new_out.owner
 
 
 def transfer(var, target):
@@ -2021,10 +2083,15 @@ def transpose(x, axes=None):
     _x = as_tensor_variable(x)
 
     if axes is None:
-        axes = list(range((_x.type.ndim - 1), -1, -1))
+        axes = tuple(range((_x.type.ndim - 1), -1, -1))
+
+    if tuple(axes) == tuple(range(len(axes))):
+        # No-op
+        return _x
+
     ret = DimShuffle(tuple(s == 1 for s in _x.type.shape), axes)(_x)
 
-    if _x.name and axes == list(range((_x.type.ndim - 1), -1, -1)):
+    if _x.name and axes == tuple(range((_x.type.ndim - 1), -1, -1)):
         ret.name = _x.name + ".T"
 
     return ret
@@ -2048,28 +2115,14 @@ def matrix_transpose(x: "TensorLike") -> TensorVariable:
 
     Examples
     --------
-    >>> import pytensor as pt
-    >>> import numpy as np
-    >>> x = np.arange(24).reshape((2, 3, 4))
-    [[[ 0  1  2  3]
-      [ 4  5  6  7]
-      [ 8  9 10 11]]
+    >>> import pytensor.tensor as pt
+    >>> x = pt.arange(24).reshape((2, 3, 4))
+    >>> x.type.shape
+    (2, 3, 4)
 
-     [[12 13 14 15]
-      [16 17 18 19]
-      [20 21 22 23]]]
+    >>> pt.matrix_transpose(x).type.shape
+    (2, 4, 3)
 
-
-    >>> pt.matrix_transpose(x).eval()
-    [[[ 0  4  8]
-      [ 1  5  9]
-      [ 2  6 10]
-      [ 3  7 11]]
-
-     [[12 16 20]
-      [13 17 21]
-      [14 18 22]
-      [15 19 23]]]
 
 
     Notes
@@ -2096,15 +2149,21 @@ class Split(COp):
 
     Examples
     --------
-    >>> x = vector()
-    >>> splits = lvector()
+    >>> from pytensor import function
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector(dtype="int")
+    >>> splits = pt.vector(dtype="int")
+
     You have to declare right away how many split_points there will be.
-    >>> ra, rb, rc = split(x, splits, n_splits = 3, axis = 0)
+    >>> ra, rb, rc = pt.split(x, splits, n_splits = 3, axis = 0)
     >>> f = function([x, splits], [ra, rb, rc])
     >>> a, b, c = f([0,1,2,3,4,5], [3, 2, 1])
-    a == [0,1,2]
-    b == [3, 4]
-    c == [5]
+    >>> a
+    array([0, 1, 2])
+    >>> b
+    array([3, 4])
+    >>> c
+    array([5])
 
     TODO: Don't make a copy in C impl
     """
@@ -2238,7 +2297,7 @@ class Split(COp):
         splits_dtype = node.inputs[2].type.dtype_specs()[1]
         expected_splits_count = self.len_splits
 
-        return """
+        return f"""
         int ndim = PyArray_NDIM({x});
         int axis = (int)(*({axis_dtype}*)PyArray_GETPTR1({axis}, 0));
         int splits_count = PyArray_DIM({splits}, 0);
@@ -2335,7 +2394,7 @@ class Split(COp):
         }}
 
         free(split_dims);
-        """.format(**locals())
+        """
 
 
 class Join(COp):
@@ -2353,13 +2412,22 @@ class Join(COp):
 
     Examples
     --------
-    >>> x, y, z = tensor.matrix(), tensor.matrix(), tensor.matrix()
-    >>> u = tensor.vector()
+    >>> import pytensor.tensor as pt
+    >>> x, y, z = pt.matrix(), pt.matrix(), pt.matrix()
+    >>> u = pt.vector()
 
-    >>> r = join(0, x, y, z)
-    >>> c = join(1, x, y, z)
-    >>> join(2, x, y, z)    # WRONG: the axis has to be an index into the shape
-    >>> join(0, x, u)       # WRONG: joined tensors must have the same rank
+    >>> r = pt.join(0, x, y, z)
+    >>> c = pt.join(1, x, y, z)
+
+    The axis has to be an index into the shape
+    >>> pt.join(2, x, y, z)
+    Traceback (most recent call last):
+    ValueError: Axis value 2 is out of range for the given input dimensions
+
+    Joined tensors must have the same rank
+    >>> pt.join(0, x, u)
+    Traceback (most recent call last):
+    TypeError: Only tensors with the same number of dimensions can be joined. Input ndims were: [2, 1].
 
     """
 
@@ -2377,10 +2445,9 @@ class Join(COp):
         if self.view == -1:
             return self.__class__.__name__
         else:
-            return "{}{{{}}}".format(
-                self.__class__.__name__,
-                ", ".join(f"{p}={getattr(self, p)!r}" for p in self.__props__),
-            )
+            classname = self.__class__.__name__
+            args = ", ".join(f"{p}={getattr(self, p)!r}" for p in self.__props__)
+            return f"{classname}{{{args}}}"
 
     def __setstate__(self, d):
         self.__dict__.update(d)
@@ -2533,18 +2600,16 @@ class Join(COp):
         (out,) = outputs
         fail = sub["fail"]
         adtype = node.inputs[0].type.dtype_specs()[1]
-        copy_to_list = []
 
-        for i, inp in enumerate(tens):
-            copy_to_list.append(
-                f"""Py_INCREF({inp});
-                   PyList_SetItem(list, {i}, (PyObject*){inp});"""
-            )
+        copy_to_list = (
+            f"""Py_INCREF({inp}); PyList_SetItem(list, {i}, (PyObject*){inp});"""
+            for i, inp in enumerate(tens)
+        )
 
         copy_inputs_to_list = "\n".join(copy_to_list)
         n = len(tens)
 
-        code = """
+        code = f"""
         int axis = (({adtype} *)PyArray_DATA({axis}))[0];
         PyObject* list = PyList_New({l});
         {copy_inputs_to_list}
@@ -2576,7 +2641,7 @@ class Join(COp):
                 {fail}
             }}
         }}
-        """.format(**locals())
+        """
         return code
 
     def R_op(self, inputs, eval_points):
@@ -2713,6 +2778,10 @@ def vectorize_join(op: Join, node, batch_axis, *batch_inputs):
     # We can vectorize join as a shifted axis on the batch inputs if:
     # 1. The batch axis is a constant and has not changed
     # 2. All inputs are batched with the same broadcastable pattern
+
+    # TODO: We can relax the second condition by broadcasting the batch dimensions
+    #  This can be done with `broadcast_arrays` if the tensors shape match at the axis or reduction
+    #  Or otherwise by calling `broadcast_to` for each tensor that needs it
     if (
         original_axis.type.ndim == 0
         and isinstance(original_axis, Constant)
@@ -3258,28 +3327,29 @@ class _nd_grid:
 
     Examples
     --------
-    >>> a = at.mgrid[0:5, 0:3]
+    >>> import pytensor.tensor as pt
+    >>> a = pt.mgrid[0:5, 0:3]
     >>> a[0].eval()
     array([[0, 0, 0],
            [1, 1, 1],
            [2, 2, 2],
            [3, 3, 3],
-           [4, 4, 4]], dtype=int8)
+           [4, 4, 4]])
     >>> a[1].eval()
     array([[0, 1, 2],
            [0, 1, 2],
            [0, 1, 2],
            [0, 1, 2],
-           [0, 1, 2]], dtype=int8)
-    >>> b = at.ogrid[0:5, 0:3]
+           [0, 1, 2]])
+    >>> b = pt.ogrid[0:5, 0:3]
     >>> b[0].eval()
     array([[0],
            [1],
            [2],
            [3],
-           [4]], dtype=int8)
+           [4]])
     >>> b[1].eval()
-    array([[0, 1, 2, 3]], dtype=int8)
+    array([[0, 1, 2]])
 
     """
 
@@ -3461,9 +3531,7 @@ class PermuteRowElements(Op):
         shp_x = in_shapes[0]
         shp_y = in_shapes[1]
         assert len(shp_x) == len(shp_y)
-        out_shape = []
-        for i in range(len(shp_x)):
-            out_shape.append(maximum(shp_x[i], shp_y[i]))
+        out_shape = [maximum(sx, sy) for sx, sy in zip(shp_x, shp_y, strict=True)]
         return [out_shape]
 
     def grad(self, inp, grads):
@@ -3754,109 +3822,37 @@ def trace(a, offset=0, axis1=0, axis2=1):
     return diagonal(a, offset=offset, axis1=axis1, axis2=axis2).sum(-1)
 
 
-class AllocDiag(Op):
-    """An `Op` that copies a vector to the diagonal of a zero-ed matrix."""
+class AllocDiag(OpFromGraph):
+    """
+    Wrapper Op for alloc_diag graphs
+    """
 
-    __props__ = ("offset", "axis1", "axis2")
+    __props__ = ("axis1", "axis2")
 
-    def __init__(self, offset=0, axis1=0, axis2=1):
-        """
-        Parameters
-        ----------
-        offset: int
-            Offset of the diagonal from the main diagonal defined by `axis1`
-            and `axis2`. Can be positive or negative.  Defaults to main
-            diagonal (i.e. 0).
-        axis1: int
-            Axis to be used as the first axis of the 2-D sub-arrays to which
-            the diagonals will be allocated.  Defaults to first axis (i.e. 0).
-        axis2: int
-            Axis to be used as the second axis of the 2-D sub-arrays to which
-            the diagonals will be allocated.  Defaults to second axis (i.e. 1).
-        """
-        warnings.warn(
-            "AllocDiag is deprecated. Use `alloc_diag` instead",
-            FutureWarning,
-        )
-        self.offset = offset
-        if axis1 < 0 or axis2 < 0:
-            raise NotImplementedError("AllocDiag does not support negative axis")
-        if axis1 == axis2:
-            raise ValueError("axis1 and axis2 cannot be the same")
+    def __init__(self, *args, axis1, axis2, offset, **kwargs):
         self.axis1 = axis1
         self.axis2 = axis2
+        self.offset = offset
 
-    def make_node(self, diag):
-        diag = as_tensor_variable(diag)
-        if diag.type.ndim < 1:
-            raise ValueError(
-                "AllocDiag needs an input with 1 or more dimensions", diag.type
-            )
-        return Apply(
-            self,
-            [diag],
-            [diag.type.clone(shape=(None,) * (diag.ndim + 1))()],
-        )
+        super().__init__(*args, **kwargs, strict=True)
 
-    def perform(self, node, inputs, outputs):
-        (x,) = inputs
-        (z,) = outputs
+    @staticmethod
+    def is_offset_zero(node) -> bool:
+        """
+        Test if an AllocDiag Op has a diagonal offset of zero
 
-        axis1 = np.minimum(self.axis1, self.axis2)
-        axis2 = np.maximum(self.axis1, self.axis2)
-        offset = self.offset
+        Parameters
+        ----------
+        node
+            AllocDiag node to test
 
-        # Create array with one extra dimension for resulting matrix
-        result_shape = x.shape[:-1] + (x.shape[-1] + abs(offset),) * 2
-        result = np.zeros(result_shape, dtype=x.dtype)
+        Returns
+        -------
+        is_offset_zero: bool
+            True if the offset is zero (``k = 0``).
+        """
 
-        # Create slice for diagonal in final 2 axes
-        idxs = np.arange(x.shape[-1])
-        diagonal_slice = (len(result_shape) - 2) * [slice(None)] + [
-            idxs + np.maximum(0, -offset),
-            idxs + np.maximum(0, offset),
-        ]
-
-        # Fill in final 2 axes with x
-        result[tuple(diagonal_slice)] = x
-
-        if len(x.shape) > 1:
-            # Re-order axes so they correspond to diagonals at axis1, axis2
-            axes = list(range(len(x.shape[:-1])))
-            last_idx = axes[-1]
-            axes = axes[:axis1] + [last_idx + 1] + axes[axis1:]
-            axes = axes[:axis2] + [last_idx + 2] + axes[axis2:]
-            result = result.transpose(axes)
-
-        z[0] = result
-
-    def grad(self, inputs, gout):
-        (gz,) = gout
-        return [diagonal(gz, offset=self.offset, axis1=self.axis1, axis2=self.axis2)]
-
-    def infer_shape(self, fgraph, nodes, shapes):
-        (x_shape,) = shapes
-        axis1 = np.minimum(self.axis1, self.axis2)
-        axis2 = np.maximum(self.axis1, self.axis2)
-
-        result_shape = list(x_shape[:-1])
-        diag_shape = x_shape[-1] + abs(self.offset)
-        result_shape = result_shape[:axis1] + [diag_shape] + result_shape[axis1:]
-        result_shape = result_shape[:axis2] + [diag_shape] + result_shape[axis2:]
-        return [tuple(result_shape)]
-
-    def __setstate__(self, state):
-        if "view_map" in state:
-            del state["view_map"]
-
-        self.__dict__.update(state)
-
-        if "offset" not in state:
-            self.offset = 0
-        if "axis1" not in state:
-            self.axis1 = 0
-        if "axis2" not in state:
-            self.axis2 = 1
+        return node.op.offset == 0
 
 
 def alloc_diag(diag, offset=0, axis1=0, axis2=1):
@@ -3867,6 +3863,7 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
     from pytensor.tensor import set_subtensor
 
     diag = as_tensor_variable(diag)
+
     axis1, axis2 = normalize_axis_tuple((axis1, axis2), ndim=diag.type.ndim + 1)
     if axis1 > axis2:
         axis1, axis2 = axis2, axis1
@@ -3893,7 +3890,9 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
         axes = axes[:axis2] + [last_idx + 2] + axes[axis2:]
         result = result.transpose(axes)
 
-    return result
+    return AllocDiag(
+        inputs=[diag], outputs=[result], axis1=axis1, axis2=axis2, offset=offset
+    )(diag)
 
 
 def diag(v, k=0):
@@ -3943,8 +3942,8 @@ def stacklists(arg):
     >>> X = stacklists([[a, b], [c, d]])
     >>> f = function([a, b, c, d], X)
     >>> f(1, 2, 3, 4)
-    array([[ 1.,  2.],
-           [ 3.,  4.]], dtype=float32)
+    array([[1., 2.],
+           [3., 4.]])
 
     We can also stack arbitrarily shaped tensors. Here we stack matrices into
     a 2 by 2 grid:
@@ -4003,6 +4002,10 @@ def moveaxis(
 
     source = normalize_axis_tuple(source, a.ndim, "source")
     destination = normalize_axis_tuple(destination, a.ndim, "destination")
+
+    if source == destination:
+        # It's a no-op
+        return a
 
     if len(source) != len(destination):
         raise ValueError(
@@ -4183,7 +4186,7 @@ class AllocEmpty(COp):
 
     def perform(self, node, inputs, out_):
         (out,) = out_
-        sh = tuple([int(i) for i in inputs])
+        sh = tuple(int(i) for i in inputs)
         if out[0] is None or out[0].shape != sh:
             out[0] = np.empty(sh, dtype=self.dtype)
 
@@ -4195,18 +4198,14 @@ class AllocEmpty(COp):
         params = sub["params"]
         str = f"npy_intp dims[{nd}];\n"
         for idx, sh in enumerate(shps):
-            str += (
-                "dims[{idx}] ="
-                "((npy_intp)((dtype_{sh}*)"
-                " PyArray_DATA({sh}))[0]);\n".format(**locals())
-            )
+            str += f"dims[{idx}] = ((npy_intp)((dtype_{sh}*) PyArray_DATA({sh}))[0]);\n"
 
         # Validate that the output storage exists
         str += f"if({out}==NULL\n"
         for idx, sh in enumerate(shps):
             str += f"||PyArray_DIMS({out})[{idx}]!=dims[{idx}]"
 
-        str += """){{
+        str += f"""){{
             /* Reference received to invalid output variable.
             Decrease received reference's ref count and allocate new
             output variable */
@@ -4221,7 +4220,7 @@ class AllocEmpty(COp):
                 {fail};
             }}
         }}
-        """.format(**locals())
+        """
         return str
 
     def infer_shape(self, fgraph, node, input_shapes):
@@ -4318,9 +4317,7 @@ atleast_2d = partial(atleast_Nd, n=2)
 atleast_3d = partial(atleast_Nd, n=3)
 
 
-def expand_dims(
-    a: np.ndarray | TensorVariable, axis: tuple[int, ...]
-) -> TensorVariable:
+def expand_dims(a: np.ndarray | TensorVariable, axis: Sequence[int]) -> TensorVariable:
     """Expand the shape of an array.
 
     Insert a new axis that will appear at the `axis` position in the expanded
@@ -4339,7 +4336,7 @@ def expand_dims(
     """
     a = as_tensor(a)
 
-    if not isinstance(axis, tuple | list):
+    if not isinstance(axis, Sequence):
         axis = (axis,)
 
     out_ndim = len(axis) + a.ndim

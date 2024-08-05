@@ -1,7 +1,6 @@
-from collections import OrderedDict
-
 import numpy as np
 import pytest
+from scipy.optimize import rosen_hess_prod
 
 import pytensor
 import pytensor.tensor.basic as ptb
@@ -22,6 +21,7 @@ from pytensor.gradient import (
     grad_scale,
     grad_undefined,
     hessian,
+    hessian_vector_product,
     jacobian,
     subgraph_grad,
     zero_grad,
@@ -637,7 +637,7 @@ def test_known_grads():
 
     for layer in layers:
         first = grad(cost, layer, disconnected_inputs="ignore")
-        known = OrderedDict(zip(layer, first))
+        known = dict(zip(layer, first))
         full = grad(
             cost=None, known_grads=known, wrt=inputs, disconnected_inputs="ignore"
         )
@@ -755,7 +755,7 @@ def test_subgraph_grad():
         param_grad, next_grad = subgraph_grad(
             wrt=params[i], end=grad_ends[i], start=next_grad, cost=costs[i]
         )
-        next_grad = OrderedDict(zip(grad_ends[i], next_grad))
+        next_grad = dict(zip(grad_ends[i], next_grad))
         param_grads.extend(param_grad)
 
     pgrads = pytensor.function(inputs, param_grads)
@@ -1081,3 +1081,40 @@ def test_jacobian_disconnected_inputs():
     func_s = pytensor.function([s2], jacobian_s)
     val = np.array(1.0).astype(pytensor.config.floatX)
     assert np.allclose(func_s(val), np.zeros(1))
+
+
+class TestHessianVectorProdudoct:
+    def test_rosen(self):
+        x = vector("x", dtype="float64")
+        rosen = (100 * (x[1:] - x[:-1] ** 2) ** 2 + (1 - x[:-1]) ** 2).sum()
+
+        p = vector("p", dtype="float64")
+        rosen_hess_prod_pt = hessian_vector_product(rosen, wrt=x, p=p)
+
+        x_test = 0.1 * np.arange(9)
+        p_test = 0.5 * np.arange(9)
+        np.testing.assert_allclose(
+            rosen_hess_prod_pt.eval({x: x_test, p: p_test}),
+            rosen_hess_prod(x_test, p_test),
+        )
+
+    def test_multiple_wrt(self):
+        x = vector("x", dtype="float64")
+        y = vector("y", dtype="float64")
+        p_x = vector("p_x", dtype="float64")
+        p_y = vector("p_y", dtype="float64")
+
+        cost = (x**2 - y**2).sum()
+        hessp_x, hessp_y = hessian_vector_product(cost, wrt=[x, y], p=[p_x, p_y])
+
+        hessp_fn = pytensor.function([x, y, p_x, p_y], [hessp_x, hessp_y])
+        test = {
+            # x, y don't matter
+            "x": np.full((3,), np.nan),
+            "y": np.full((3,), np.nan),
+            "p_x": [1, 2, 3],
+            "p_y": [3, 2, 1],
+        }
+        hessp_x_eval, hessp_y_eval = hessp_fn(**test)
+        np.testing.assert_allclose(hessp_x_eval, [2, 4, 6])
+        np.testing.assert_allclose(hessp_y_eval, [-6, -4, -2])

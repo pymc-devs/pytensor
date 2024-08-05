@@ -25,7 +25,7 @@ class TestProfiling:
             config.profile_memory = True
             config.profiling__min_peak_memory = True
 
-            x = [fvector("val%i" % i) for i in range(3)]
+            x = [fvector(f"val{i}") for i in range(3)]
 
             z = []
             z += [pt.outer(x[i], x[i + 1]).sum(axis=1) for i in range(len(x) - 1)]

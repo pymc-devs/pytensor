@@ -144,14 +144,14 @@ class Shape(COp):
 _shape = Shape()
 
 
-def shape(x: np.ndarray | Number | Variable) -> Variable:
+def shape(x: np.ndarray | Number | Variable) -> TensorVariable:
     """Return the shape of `x`."""
     if not isinstance(x, Variable):
         # The following is a type error in Python 3.9 but not 3.12.
         # Thus we need to ignore unused-ignore on 3.12.
         x = ptb.as_tensor_variable(x)  # type: ignore[arg-type,unused-ignore]
 
-    return cast(Variable, _shape(x))
+    return cast(TensorVariable, _shape(x))
 
 
 @_get_vector_length.register(Shape)  # type: ignore
@@ -195,7 +195,7 @@ def shape_tuple(x: TensorVariable) -> tuple[Variable, ...]:
             # TODO: Why not use uint64?
             res += (pytensor.scalar.ScalarConstant(pytensor.scalar.int64, shape_val),)
         else:
-            res += (symbolic_shape[i],)  # type: ignore
+            res += (symbolic_shape[i],)
 
     return res
 
@@ -243,7 +243,7 @@ class Shape_i(COp):
         return ParamsType(i=pytensor.scalar.basic.int64)
 
     def __str__(self):
-        return "%s{%i}" % (self.__class__.__name__, self.i)
+        return f"{self.__class__.__name__}{{{self.i}}}"
 
     def make_node(self, x):
         if not (isinstance(x, Variable) and hasattr(x.type, "ndim")):
@@ -316,7 +316,7 @@ class Shape_i(COp):
                 op=self,
                 x_pos=0,
                 x=inp[0],
-                comment=("No gradient for the shape of a matrix " "is implemented."),
+                comment="No gradient for the shape of a matrix is implemented.",
             )
         ]
 
@@ -669,7 +669,7 @@ class Reshape(COp):
         assert shp.ndim == 1
 
         if isinstance(shp, TensorConstant):
-            out_shape = tuple(int(s) if s >= 0 else None for s in shp.data)
+            out_shape = [int(s) if s >= 0 else None for s in shp.data]
         else:
             out_shape = [None] * self.ndim
             shp_list = shp_orig
@@ -684,6 +684,29 @@ class Reshape(COp):
                         out_shape[index] = s_val
                 except NotScalarConstantError:
                     pass
+
+        # If we only don't know the size of one output dimension,
+        # but we know all the input dimensions we can deduce it
+        # This happens often when there is -1 as an input of Reshape
+        if None not in x.type.shape and out_shape.count(None) == 1:
+            full_size = np.prod(x.type.shape)
+            known_size = np.prod([s for s in out_shape if s is not None])
+            out_shape[out_shape.index(None)] = int(full_size // known_size)
+
+        out_shape = tuple(out_shape)
+
+        # Run some eager error checks
+        if len(out_shape) != self.ndim:
+            raise ValueError(
+                "Shape argument to Reshape has incorrect length:"
+                f" {len(out_shape)}, should be {self.ndim}"
+            )
+
+        if None not in x.type.shape and None not in out_shape:
+            if np.prod(x.type.shape) != np.prod(out_shape):
+                raise ValueError(
+                    f"Reshape: Input shape {x.type.shape} is incompatible with new shape {out_shape}"
+                )
 
         return Apply(self, [x, shp], [tensor(dtype=x.type.dtype, shape=out_shape)])
 
@@ -777,10 +800,8 @@ class Reshape(COp):
                 rest_size = input_size // maximum(requ_size, 1)
             return [
                 tuple(
-                    [
-                        ptb.switch(eq(requ[i], -1), rest_size, requ[i])
-                        for i in range(self.ndim)
-                    ]
+                    ptb.switch(eq(requ[i], -1), rest_size, requ[i])
+                    for i in range(self.ndim)
                 )
             ]
 
@@ -821,13 +842,13 @@ class Reshape(COp):
 
 @_vectorize_node.register(Reshape)
 def _vectorize_reshape(op, node, x, shape):
+    from pytensor.tensor.blockwise import vectorize_node_fallback
+
     old_x, old_shape = node.inputs
     batched_ndims = x.type.ndim - old_x.type.ndim
 
     if as_tensor_variable(shape).type.ndim != 1:
-        raise NotImplementedError(
-            "It is not possible to vectorize the shape argument of Reshape"
-        )
+        return vectorize_node_fallback(op, node, x, shape)
 
     if len(tuple(old_shape)) == len(tuple(shape)):
         new_shape = [*x.shape[:batched_ndims], *shape]
@@ -903,13 +924,13 @@ def shape_padaxis(t, axis):
     --------
     >>> tensor = pytensor.tensor.type.tensor3()
     >>> pytensor.tensor.shape_padaxis(tensor, axis=0)
-    DimShuffle{x,0,1,2}.0
+    ExpandDims{axis=0}.0
     >>> pytensor.tensor.shape_padaxis(tensor, axis=1)
-    DimShuffle{0,x,1,2}.0
+    ExpandDims{axis=1}.0
     >>> pytensor.tensor.shape_padaxis(tensor, axis=3)
-    DimShuffle{0,1,2,x}.0
+    ExpandDims{axis=3}.0
     >>> pytensor.tensor.shape_padaxis(tensor, axis=-1)
-    DimShuffle{0,1,2,x}.0
+    ExpandDims{axis=3}.0
 
     See Also
     --------

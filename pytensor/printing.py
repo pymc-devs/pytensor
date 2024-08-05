@@ -2,7 +2,6 @@
 
 import hashlib
 import logging
-import os
 import sys
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
@@ -10,6 +9,7 @@ from contextlib import contextmanager
 from copy import copy
 from functools import reduce, singledispatch
 from io import StringIO
+from pathlib import Path
 from typing import Any, Literal, TextIO
 
 import numpy as np
@@ -229,32 +229,32 @@ def debugprint(
             topo_orders.append(None)
         elif isinstance(obj, Apply):
             outputs_to_print.extend(obj.outputs)
-            profile_list.extend([None for item in obj.outputs])
-            storage_maps.extend([None for item in obj.outputs])
-            topo_orders.extend([None for item in obj.outputs])
+            profile_list.extend(None for item in obj.outputs)
+            storage_maps.extend(None for item in obj.outputs)
+            topo_orders.extend(None for item in obj.outputs)
         elif isinstance(obj, Function):
             if print_fgraph_inputs:
                 inputs_to_print.extend(obj.maker.fgraph.inputs)
             outputs_to_print.extend(obj.maker.fgraph.outputs)
-            profile_list.extend([obj.profile for item in obj.maker.fgraph.outputs])
+            profile_list.extend(obj.profile for item in obj.maker.fgraph.outputs)
             if print_storage:
                 storage_maps.extend(
-                    [obj.vm.storage_map for item in obj.maker.fgraph.outputs]
+                    obj.vm.storage_map for item in obj.maker.fgraph.outputs
                 )
             else:
-                storage_maps.extend([None for item in obj.maker.fgraph.outputs])
+                storage_maps.extend(None for item in obj.maker.fgraph.outputs)
             topo = obj.maker.fgraph.toposort()
-            topo_orders.extend([topo for item in obj.maker.fgraph.outputs])
+            topo_orders.extend(topo for item in obj.maker.fgraph.outputs)
         elif isinstance(obj, FunctionGraph):
             if print_fgraph_inputs:
                 inputs_to_print.extend(obj.inputs)
             outputs_to_print.extend(obj.outputs)
-            profile_list.extend([getattr(obj, "profile", None) for item in obj.outputs])
+            profile_list.extend(getattr(obj, "profile", None) for item in obj.outputs)
             storage_maps.extend(
-                [getattr(obj, "storage_map", None) for item in obj.outputs]
+                getattr(obj, "storage_map", None) for item in obj.outputs
             )
             topo = obj.toposort()
-            topo_orders.extend([topo for item in obj.outputs])
+            topo_orders.extend(topo for item in obj.outputs)
         elif isinstance(obj, int | float | np.ndarray):
             print(obj, file=_file)
         elif isinstance(obj, In | Out):
@@ -437,10 +437,15 @@ N.B.:
 
             for out in inner_outputs:
                 if (
-                    isinstance(getattr(out.owner, "op", None), HasInnerGraph)
-                    or hasattr(getattr(out.owner, "op", None), "scalar_op")
-                    and isinstance(out.owner.op.scalar_op, HasInnerGraph)
-                ) and out not in inner_graph_vars:
+                    out.owner is not None
+                    and (
+                        isinstance(out.owner.op, HasInnerGraph)
+                        or isinstance(
+                            getattr(out.owner.op, "scalar_op", None), HasInnerGraph
+                        )
+                    )
+                    and out not in inner_graph_vars
+                ):
                     inner_graph_vars.append(out)
 
                 _debugprint(
@@ -975,10 +980,10 @@ class FunctionPrinter(Printer):
         name = self.names[idx]
         with set_precedence(pstate):
             inputs_str = ", ".join(
-                [pprinter.process(input, pstate) for input in node.inputs]
+                pprinter.process(input, pstate) for input in node.inputs
             )
             keywords_str = ", ".join(
-                [f"{kw}={getattr(node.op, kw)}" for kw in self.keywords]
+                f"{kw}={getattr(node.op, kw)}" for kw in self.keywords
             )
 
             if keywords_str and inputs_str:
@@ -1043,10 +1048,8 @@ class DefaultPrinter(Printer):
         if node is None:
             return leaf_printer.process(output, pstate)
         with set_precedence(pstate):
-            r = "{}({})".format(
-                str(node.op),
-                ", ".join([pprinter.process(input, pstate) for input in node.inputs]),
-            )
+            args = ", ".join(pprinter.process(input, pstate) for input in node.inputs)
+            r = f"{node.op}({args})"
 
         pstate.memo[output] = r
         return r
@@ -1101,9 +1104,7 @@ class PPrinter(Printer):
             outputs = [outputs]
         current = None
         if display_inputs:
-            strings = [
-                (0, "inputs: " + ", ".join(map(str, list(inputs) + updates.keys())))
-            ]
+            strings = [(0, "inputs: " + ", ".join(str(x) for x in [*inputs, *updates]))]
         else:
             strings = []
         pprinter = self.clone_assign(
@@ -1111,9 +1112,7 @@ class PPrinter(Printer):
         )
         inv_updates = {b: a for (a, b) in updates.items()}
         i = 1
-        for node in io_toposort(
-            list(inputs) + updates.keys(), list(outputs) + updates.values()
-        ):
+        for node in io_toposort([*inputs, *updates], [*outputs, *updates.values()]):
             for output in node.outputs:
                 if output in inv_updates:
                     name = str(inv_updates[output])
@@ -1121,7 +1120,7 @@ class PPrinter(Printer):
                     i += 1
                 if output.name is not None or output in outputs:
                     if output.name is None:
-                        name = "out[%i]" % outputs.index(output)
+                        name = f"out[{outputs.index(output)}]"
                     else:
                         name = output.name
                     # backport
@@ -1200,7 +1199,7 @@ default_colorCodes = {
 
 def pydotprint(
     fct,
-    outfile: str | None = None,
+    outfile: Path | str | None = None,
     compact: bool = True,
     format: str = "png",
     with_ids: bool = False,
@@ -1295,9 +1294,9 @@ def pydotprint(
         colorCodes = default_colorCodes
 
     if outfile is None:
-        outfile = os.path.join(
-            config.compiledir, "pytensor.pydotprint." + config.device + "." + format
-        )
+        outfile = config.compiledir / f"pytensor.pydotprint.{config.device}.{format}"
+    elif isinstance(outfile, str):
+        outfile = Path(outfile)
 
     if isinstance(fct, Function):
         profile = getattr(fct, "profile", None)
@@ -1606,23 +1605,19 @@ def pydotprint(
         g.add_subgraph(c2)
         g.add_subgraph(c3)
 
-    if not outfile.endswith("." + format):
-        outfile += "." + format
+    if outfile.suffix != f".{format}":
+        outfile = outfile.with_suffix(f".{format}")
 
     if scan_graphs:
         scan_ops = [(idx, x) for idx, x in enumerate(topo) if isinstance(x.op, Scan)]
-        path, fn = os.path.split(outfile)
-        basename = ".".join(fn.split(".")[:-1])
-        # Safe way of doing things .. a file name may contain multiple .
-        ext = fn[len(basename) :]
 
         for idx, scan_op in scan_ops:
             # is there a chance that name is not defined?
             if hasattr(scan_op.op, "name"):
-                new_name = basename + "_" + scan_op.op.name + "_" + str(idx)
+                new_name = outfile.stem + "_" + scan_op.op.name + "_" + str(idx)
             else:
-                new_name = basename + "_" + str(idx)
-            new_name = os.path.join(path, new_name + ext)
+                new_name = outfile.stem + "_" + str(idx)
+            new_name = outfile.with_stem(new_name)
             if hasattr(scan_op.op, "_fn"):
                 to_print = scan_op.op.fn
             else:

@@ -80,7 +80,7 @@ class IRFFTOp(Op):
         if a.ndim < 3:
             raise TypeError(
                 f"{self.__class__.__name__}: input must have dimension >= 3,  with "
-                + "first dimension batches and last real/imag parts"
+                "first dimension batches and last real/imag parts"
             )
 
         if s is None:
