@@ -934,19 +934,19 @@ def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
     if not isinstance(node.op.core_op, Cholesky):
         return None
 
-    inputs = node.inputs[0]
+    [input] = node.inputs
     # Check for use of pt.diag first
     if (
-        inputs.owner
-        and isinstance(inputs.owner.op, AllocDiag)
-        and AllocDiag.is_offset_zero(inputs.owner)
+        input.owner
+        and isinstance(input.owner.op, AllocDiag)
+        and AllocDiag.is_offset_zero(input.owner)
     ):
-        diag_input = inputs.owner.inputs[0]
+        diag_input = input.owner.inputs[0]
         cholesky_val = pt.diag(diag_input**0.5)
         return [cholesky_val]
 
     # Check if the input is an elemwise multiply with identity matrix -- this also results in a diagonal matrix
-    inputs_or_none = _find_diag_from_eye_mul(inputs)
+    inputs_or_none = _find_diag_from_eye_mul(input)
     if inputs_or_none is None:
         return None
 
@@ -956,7 +956,7 @@ def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
     if len(non_eye_inputs) != 1:
         return None
 
-    non_eye_input = non_eye_inputs[0]
+    [non_eye_input] = non_eye_inputs
 
     # Now, we can simply return the matrix consisting of sqrt values of the original diagonal elements
     # For a matrix, we have to first extract the diagonal (non-zero values) and then only use those
