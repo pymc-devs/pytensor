@@ -209,7 +209,8 @@ You can now build the documentation from the root of the project with:
 
 .. code-block:: bash
 
-    python -m sphinx -b html ./doc ./html
+    # -j for parallel and faster doc build
+    sphinx-build -b html ./doc ./html -j auto
 
 
 Afterward, you can go to `html/index.html` and navigate the changes in a browser. One way to do this is to go to the `html` directory and run:
@@ -219,7 +220,7 @@ Afterward, you can go to `html/index.html` and navigate the changes in a browser
 
     python -m http.server
 
-**Do not commit the `html` directory. The documentation is built automatically.**
+**Do not commit the `html` directory.**
 For more documentation customizations such as different formats e.g., PDF, refer to the `Sphinx documentation <https://www.sphinx-doc.org/en/master/usage/builders/index.html>`_.
 
 Other tools that might help
