@@ -829,8 +829,8 @@ def test_cholesky_eye_rewrite():
 
 @pytest.mark.parametrize(
     "shape",
-    [(), (7,), (7, 7)],
-    ids=["scalar", "vector", "matrix"],
+    [(), (7,), (7, 7), (5, 7, 7)],
+    ids=["scalar", "vector", "matrix", "batched"],
 )
 def test_cholesky_diag_from_eye_mul(shape):
     # Initializing x based on scalar/vector/matrix
@@ -888,13 +888,21 @@ def test_cholesky_diag_from_diag():
     )
 
 
-def test_dont_apply_cholesky():
+def test_rewrite_cholesky_diag_to_sqrt_diag_not_applied():
+    # Case 1 : y is not a diagonal matrix because of k = -1
     x = pt.tensor("x", shape=(7, 7))
     y = pt.eye(7, k=-1) * x
-    # Here, y is not a diagonal matrix because of k = -1
     z_cholesky = pt.linalg.cholesky(y)
 
     # REWRITE TEST (should not be applied)
+    f_rewritten = function([x], z_cholesky, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert any(isinstance(node.op, Cholesky) for node in nodes)
+
+    # Case 2 : eye is degenerate
+    x = pt.scalar("x")
+    y = pt.eye(1) * x
+    z_cholesky = pt.linalg.cholesky(y)
     f_rewritten = function([x], z_cholesky, mode="FAST_RUN")
     nodes = f_rewritten.maker.fgraph.apply_nodes
     assert any(isinstance(node.op, Cholesky) for node in nodes)

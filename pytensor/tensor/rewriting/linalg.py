@@ -962,5 +962,7 @@ def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
     # For a matrix, we have to first extract the diagonal (non-zero values) and then only use those
     if non_eye_input.type.broadcastable[-2:] == (False, False):
         non_eye_input = non_eye_input.diagonal(axis1=-1, axis2=-2)
+        if eye_input.type.ndim > 2:
+            non_eye_input = pt.shape_padaxis(non_eye_input, -2)
 
     return [eye_input * (non_eye_input**0.5)]
