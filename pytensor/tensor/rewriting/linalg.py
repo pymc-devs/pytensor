@@ -3,6 +3,7 @@ from collections.abc import Callable
 from typing import cast
 
 from pytensor import Variable
+from pytensor import tensor as pt
 from pytensor.graph import Apply, FunctionGraph
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
@@ -611,3 +612,96 @@ def rewrite_inv_inv(fgraph, node):
     ):
         return None
     return [potential_inner_inv.inputs[0]]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Blockwise])
+def rewrite_inv_eye_to_eye(fgraph, node):
+    """
+     This rewrite takes advantage of the fact that the inverse of an identity matrix is the matrix itself
+    The presence of an identity matrix is identified by checking whether we have k = 0 for an Eye Op inside an inverse op.
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
+    valid_inverses = (MatrixInverse, MatrixPinv)
+    core_op = node.op.core_op
+    if not (isinstance(core_op, valid_inverses)):
+        return None
+
+    # Check whether input to inverse is Eye and the 1's are on main diagonal
+    eye_check = node.inputs[0]
+    if not (
+        eye_check.owner
+        and isinstance(eye_check.owner.op, Eye)
+        and getattr(eye_check.owner.inputs[-1], "data", -1).item() == 0
+    ):
+        return None
+    return [eye_check]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Blockwise])
+def rewrite_inv_diag_to_diag_reciprocal(fgraph, node):
+    """
+     This rewrite takes advantage of the fact that for a diagonal matrix, the inverse is a diagonal matrix with the new diagonal entries as reciprocals of the original diagonal elements.
+     This function deals with diagonal matrix arising from the multiplicaton of eye with a scalar/vector/matrix
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
+    valid_inverses = (MatrixInverse, MatrixPinv)
+    core_op = node.op.core_op
+    if not (isinstance(core_op, valid_inverses)):
+        return None
+
+    inputs = node.inputs[0]
+    # Check for use of pt.diag first
+    if (
+        inputs.owner
+        and isinstance(inputs.owner.op, AllocDiag)
+        and AllocDiag.is_offset_zero(inputs.owner)
+    ):
+        inv_input = inputs.owner.inputs[0]
+        if inv_input.type.ndim == 1:
+            inv_val = pt.diag(1 / inv_input)
+            return [inv_val]
+
+    # Check if the input is an elemwise multiply with identity matrix -- this also results in a diagonal matrix
+    inputs_or_none = _find_diag_from_eye_mul(inputs)
+    if inputs_or_none is None:
+        return None
+
+    eye_input, non_eye_inputs = inputs_or_none
+
+    # Dealing with only one other input
+    if len(non_eye_inputs) != 1:
+        return None
+
+    non_eye_input = non_eye_inputs[0]
+
+    # For a matrix, we have to first extract the diagonal (non-zero values) and then only use those
+    if non_eye_input.type.broadcastable[-2:] == (False, False):
+        # For Matrix
+        return [eye_input / non_eye_input.diagonal(axis1=-1, axis2=-2)]
+    else:
+        # For Vector or Scalar
+        return [eye_input / non_eye_input]
