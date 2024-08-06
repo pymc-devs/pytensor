@@ -1,5 +1,4 @@
 from functools import singledispatch
-from operator import itemgetter
 from types import NoneType
 
 import torch
@@ -140,9 +139,21 @@ def pytorch_funcify_MakeVector(op, **kwargs):
 def pytorch_funcify_OpFromGraph(op, node=None, **kwargs):
     _ = kwargs.pop("storage_map", None)
 
+    # @todo: Torch compile doesn't capture the scope accounting
+    # for op.fgraph, leading to an import error. Disable the
+    # dynamo compile for these graphs
+    import torch._dynamo.config
+
+    torch._dynamo.config.suppress_errors = True
+
     fgraph_fn = torch.compile(pytorch_funcify(op.fgraph, **kwargs))
-    return (
-        fgraph_fn
-        if len(op.fgraph.outputs) > 1
-        else lambda *args: itemgetter(0)(fgraph_fn(*args))
-    )
+    if len(op.fgraph.outputs) > 1:
+
+        def inner(*args):
+            return fgraph_fn(*args)
+    else:
+
+        def inner(*args):
+            return fgraph_fn(*args)[0]
+
+    return inner
