@@ -307,20 +307,14 @@ def test_pytorch_MakeVector():
 def test_pytorch_OpFromGraph():
     x, y, z = matrices("xyz")
     ofg_1 = OpFromGraph([x, y], [x + y])
-    OpFromGraph([x, y], [x * y, x - y])
+    ofg_2 = OpFromGraph([x, y], [x * y, x - y])
 
-    # o1, o2 = ofg_2(y, z)
-    # out = ofg_1(x, o1) + o2
-
-    out = ofg_1(y, z)
+    o1, o2 = ofg_2(y, z)
+    out = ofg_1(x, o1) + o2
 
     xv = np.ones((2, 2), dtype=config.floatX)
-    np.ones((2, 2), dtype=config.floatX) * 3
+    yv = np.ones((2, 2), dtype=config.floatX) * 3
     zv = np.ones((2, 2), dtype=config.floatX) * 5
 
-    f = FunctionGraph([y, z], [out])
-    import pytensor.printing
-
-    pytensor.printing.debugprint(f)
-
-    compare_pytorch_and_py(f, [xv, zv])
+    f = FunctionGraph([x, y, z], [out])
+    compare_pytorch_and_py(f, [xv, yv, zv])
