@@ -560,12 +560,13 @@ def test_svd_uv_merge():
     assert svd_counter == 1
 
 
+def get_pt_function(x, op_name):
+    return getattr(pt.linalg, op_name)(x)
+
+
 @pytest.mark.parametrize("inv_op_1", ["inv", "pinv"])
 @pytest.mark.parametrize("inv_op_2", ["inv", "pinv"])
 def test_inv_inv_rewrite(inv_op_1, inv_op_2):
-    def get_pt_function(x, op_name):
-        return getattr(pt.linalg, op_name)(x)
-
     x = pt.matrix("x")
     op1 = get_pt_function(x, inv_op_1)
     op2 = get_pt_function(op1, inv_op_2)
@@ -573,9 +574,10 @@ def test_inv_inv_rewrite(inv_op_1, inv_op_2):
     assert rewritten_out == x
 
 
-def test_inv_eye_to_eye():
+@pytest.mark.parametrize("inv_op", ["inv", "pinv"])
+def test_inv_eye_to_eye(inv_op):
     x = pt.eye(10)
-    x_inv = pt.linalg.inv(x)
+    x_inv = get_pt_function(x, inv_op)
     f_rewritten = function([], x_inv, mode="FAST_RUN")
     nodes = f_rewritten.maker.fgraph.apply_nodes
 
@@ -598,15 +600,16 @@ def test_inv_eye_to_eye():
 
 @pytest.mark.parametrize(
     "shape",
-    [(), (7,), (7, 7)],
-    ids=["scalar", "vector", "matrix"],
+    [(), (7,), (7, 7), (5, 7, 7)],
+    ids=["scalar", "vector", "matrix", "batched"],
 )
-def test_inv_diag_from_eye_mul(shape):
+@pytest.mark.parametrize("inv_op", ["inv", "pinv"])
+def test_inv_diag_from_eye_mul(shape, inv_op):
     # Initializing x based on scalar/vector/matrix
     x = pt.tensor("x", shape=shape)
     x_diag = pt.eye(7) * x
     # Calculating inverse using pt.linalg.inv
-    x_inv = pt.linalg.inv(x_diag)
+    x_inv = get_pt_function(x_diag, inv_op)
 
     # REWRITE TEST
     f_rewritten = function([x], x_inv, mode="FAST_RUN")
@@ -634,10 +637,11 @@ def test_inv_diag_from_eye_mul(shape):
     )
 
 
-def test_inv_diag_from_diag():
+@pytest.mark.parametrize("inv_op", ["inv", "pinv"])
+def test_inv_diag_from_diag(inv_op):
     x = pt.dvector("x")
     x_diag = pt.diag(x)
-    x_inv = pt.linalg.inv(x_diag)
+    x_inv = get_pt_function(x_diag, inv_op)
 
     # REWRITE TEST
     f_rewritten = function([x], x_inv, mode="FAST_RUN")
