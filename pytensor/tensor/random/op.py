@@ -1,6 +1,6 @@
 import warnings
 from collections.abc import Sequence
-from copy import copy
+from copy import deepcopy
 from typing import Any, cast
 
 import numpy as np
@@ -395,7 +395,7 @@ class RandomVariable(Op):
 
         # Draw from `rng` if `self.inplace` is `True`, and from a copy of `rng` otherwise.
         if not self.inplace:
-            rng = copy(rng)
+            rng = deepcopy(rng)
 
         outputs[0][0] = rng
         outputs[1][0] = np.asarray(

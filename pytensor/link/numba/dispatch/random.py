@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from copy import copy
+from copy import copy, deepcopy
 from functools import singledispatch
 from textwrap import dedent
 
@@ -34,7 +34,7 @@ def copy_NumPyRandomGenerator(rng):
     def impl(rng):
         # TODO: Open issue on Numba?
         with numba.objmode(new_rng=types.npy_rng):
-            new_rng = copy(rng)
+            new_rng = deepcopy(rng)
 
         return new_rng
 

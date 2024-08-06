@@ -1,6 +1,6 @@
 import pickle
 import re
-from copy import copy
+from copy import deepcopy
 
 import numpy as np
 import pytest
@@ -114,7 +114,9 @@ def compare_sample_values(rv, *params, rng=None, test_fn=None, **kwargs):
 
     pt_rng = shared(rng, borrow=True)
 
-    numpy_res = np.asarray(test_fn(*param_vals, random_state=copy(rng), **kwargs_vals))
+    numpy_res = np.asarray(
+        test_fn(*param_vals, random_state=deepcopy(rng), **kwargs_vals)
+    )
 
     pytensor_res = rv(*params, rng=pt_rng, **kwargs)
 
