@@ -13,7 +13,11 @@ from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
-from pytensor.npy_2_compat import normalize_axis_tuple
+from pytensor.npy_2_compat import (
+    normalize_axis_tuple,
+    npy_2_compat_header,
+    numpy_axis_is_none_flag,
+)
 from pytensor.printing import pprint
 from pytensor.raise_op import Assert
 from pytensor.scalar.basic import BinaryScalarOp
@@ -160,7 +164,7 @@ class Argmax(COp):
             c_axis = np.int64(self.axis[0])
         else:
             # The value here doesn't matter, it won't be used
-            c_axis = np.int64(-1)
+            c_axis = numpy_axis_is_none_flag
         return self.params_type.get_params(c_axis=c_axis)
 
     def make_node(self, x):
@@ -203,13 +207,17 @@ class Argmax(COp):
 
         max_idx[0] = np.asarray(np.argmax(reshaped_x, axis=-1), dtype="int64")
 
+    def c_support_code_apply(self, node: Apply, name: str) -> str:
+        """Needed to define NPY_RAVEL_AXIS"""
+        return npy_2_compat_header()
+
     def c_code(self, node, name, inp, out, sub):
         (x,) = inp
         (argmax,) = out
         fail = sub["fail"]
         params = sub["params"]
         if self.axis is None:
-            axis_code = "axis = NPY_MAXDIMS;"
+            axis_code = "axis = NPY_RAVEL_AXIS;"
         else:
             if len(self.axis) != 1:
                 raise NotImplementedError()

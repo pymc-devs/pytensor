@@ -6,6 +6,7 @@ import scipy
 from pytensor.graph.basic import Apply
 from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
+from pytensor.npy_2_compat import npy_2_compat_header
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.elemwise import get_normalized_batch_axes
 from pytensor.tensor.math import gamma, gammaln, log, neg, sum
@@ -60,12 +61,16 @@ class SoftmaxGrad(COp):
         return [shape[1]]
 
     def c_code_cache_version(self):
-        return (4,)
+        return (5,)
+
+    def c_support_code_apply(self, node: Apply, name: str) -> str:
+        # return super().c_support_code_apply(node, name)
+        return npy_2_compat_header()
 
     def c_code(self, node, name, inp, out, sub):
         dy, sm = inp
         (dx,) = out
-        axis = self.axis if self.axis is not None else np.MAXDIMS
+        axis = self.axis if self.axis is not None else "NPY_RAVEL_AXIS"
         fail = sub["fail"]
 
         return dedent(
@@ -79,7 +84,7 @@ class SoftmaxGrad(COp):
 
             int sm_ndim = PyArray_NDIM({sm});
             int axis = {axis};
-            int iterate_axis = !(axis == NPY_MAXDIMS || sm_ndim == 1);
+            int iterate_axis = !(axis == NPY_RAVEL_AXIS || sm_ndim == 1);
 
             // Validate inputs
             if ((PyArray_TYPE({dy}) != NPY_DOUBLE) &&
@@ -95,13 +100,15 @@ class SoftmaxGrad(COp):
                 {fail};
             }}
 
-            if (axis < 0) axis = sm_ndim + axis;
-            if ((axis < 0) || (iterate_axis && (axis > sm_ndim)))
+            if (iterate_axis)
             {{
-                PyErr_SetString(PyExc_ValueError, "invalid axis in SoftmaxGrad");
-                {fail};
+                if (axis < 0) axis = sm_ndim + axis;
+                if ((axis < 0) || (iterate_axis && (axis > sm_ndim)))
+                {{
+                    PyErr_SetString(PyExc_ValueError, "invalid axis in SoftmaxGrad");
+                    {fail};
+                }}
             }}
-
             if (({dx} == NULL)
                 || !(PyArray_CompareLists(PyArray_DIMS({dx}), PyArray_DIMS({sm}), sm_ndim)))
             {{
@@ -289,10 +296,14 @@ class Softmax(COp):
     def c_headers(self, **kwargs):
         return ["<iostream>", "<cmath>"]
 
+    def c_support_code_apply(self, node: Apply, name: str) -> str:
+        """Needed to define NPY_RAVEL_AXIS"""
+        return npy_2_compat_header()
+
     def c_code(self, node, name, inp, out, sub):
         (x,) = inp
         (sm,) = out
-        axis = self.axis if self.axis is not None else np.MAXDIMS
+        axis = self.axis if self.axis is not None else "NPY_RAVEL_AXIS"
         fail = sub["fail"]
         # dtype = node.inputs[0].type.dtype_specs()[1]
         # TODO: put this into a templated function, in the support code
@@ -309,7 +320,7 @@ class Softmax(COp):
 
             int x_ndim = PyArray_NDIM({x});
             int axis = {axis};
-            int iterate_axis = !(axis == NPY_MAXDIMS || x_ndim == 1);
+            int iterate_axis = !(axis == NPY_RAVEL_AXIS || x_ndim == 1);
 
             // Validate inputs
             if ((PyArray_TYPE({x}) != NPY_DOUBLE) &&
@@ -319,11 +330,14 @@ class Softmax(COp):
                 {fail}
             }}
 
-            if (axis < 0) axis = x_ndim + axis;
-            if ((axis < 0) || (iterate_axis && (axis > x_ndim)))
+            if (iterate_axis)
             {{
-                PyErr_SetString(PyExc_ValueError, "invalid axis in Softmax");
-                {fail}
+                if (axis < 0) axis = x_ndim + axis;
+                if ((axis < 0) || (iterate_axis && (axis > x_ndim)))
+                {{
+                    PyErr_SetString(PyExc_ValueError, "invalid axis in Softmax");
+                    {fail}
+                }}
             }}
 
             // Allocate Output Array
@@ -481,7 +495,7 @@ class Softmax(COp):
 
     @staticmethod
     def c_code_cache_version():
-        return (4,)
+        return (5,)
 
 
 def softmax(c, axis=None):
@@ -541,10 +555,14 @@ class LogSoftmax(COp):
     def c_headers(self, **kwargs):
         return ["<cmath>"]
 
+    def c_support_code_apply(self, node: Apply, name: str) -> str:
+        """Needed to define NPY_RAVEL_AXIS"""
+        return npy_2_compat_header()
+
     def c_code(self, node, name, inp, out, sub):
         (x,) = inp
         (sm,) = out
-        axis = self.axis if self.axis is not None else np.MAXDIMS
+        axis = self.axis if self.axis is not None else "NPY_RAVEL_AXIS"
         fail = sub["fail"]
 
         return dedent(
@@ -558,7 +576,7 @@ class LogSoftmax(COp):
 
             int x_ndim = PyArray_NDIM({x});
             int axis = {axis};
-            int iterate_axis = !(axis == NPY_MAXDIMS || x_ndim == 1);
+            int iterate_axis = !(axis == NPY_RAVEL_AXIS || x_ndim == 1);
 
             // Validate inputs
             if ((PyArray_TYPE({x}) != NPY_DOUBLE) &&
@@ -568,13 +586,15 @@ class LogSoftmax(COp):
                 {fail}
             }}
 
-            if (axis < 0) axis = x_ndim + axis;
-            if ((axis < 0) || (iterate_axis && (axis > x_ndim)))
+            if (iterate_axis)
             {{
-                PyErr_SetString(PyExc_ValueError, "invalid axis in LogSoftmax");
-                {fail}
+                if (axis < 0) axis = x_ndim + axis;
+                if ((axis < 0) || (iterate_axis && (axis > x_ndim)))
+                {{
+                    PyErr_SetString(PyExc_ValueError, "invalid axis in LogSoftmax");
+                    {fail}
+                }}
             }}
-
             // Allocate Output Array
             if (({sm}) == NULL || !(PyArray_CompareLists(PyArray_DIMS({sm}), PyArray_DIMS({x}), x_ndim)))
             {{
@@ -730,7 +750,7 @@ class LogSoftmax(COp):
 
     @staticmethod
     def c_code_cache_version():
-        return (1,)
+        return (2,)
 
 
 def log_softmax(c, axis=None):

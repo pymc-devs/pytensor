@@ -2,7 +2,6 @@ import warnings
 from collections.abc import Collection, Iterable
 
 import numpy as np
-from numpy.exceptions import AxisError
 
 import pytensor
 import pytensor.scalar.basic as ps
@@ -19,10 +18,11 @@ from pytensor.link.c.params_type import ParamsType
 from pytensor.link.c.type import EnumList, Generic
 from pytensor.npy_2_compat import (
     normalize_axis_index,
-    normalize_axis_tuple,
+    npy_2_compat_header,
+    numpy_axis_is_none_flag,
 )
 from pytensor.raise_op import Assert
-from pytensor.scalar import int32 as int_t
+from pytensor.scalar import int64 as int_t
 from pytensor.scalar import upcast
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor import basic as ptb
@@ -47,6 +47,7 @@ from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import Shape_i
 from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
 from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes, vector
+from pytensor.tensor.utils import normalize_reduce_axis
 from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import LOCAL_BITWIDTH, PYTHON_INT_BITWIDTH
 
@@ -302,7 +303,11 @@ class CumOp(COp):
         self.axis = axis
         self.mode = mode
 
-    c_axis = property(lambda self: np.MAXDIMS if self.axis is None else self.axis)
+    @property
+    def c_axis(self) -> int:
+        if self.axis is None:
+            return numpy_axis_is_none_flag
+        return self.axis
 
     def make_node(self, x):
         x = ptb.as_tensor_variable(x)
@@ -359,24 +364,37 @@ class CumOp(COp):
 
         return shapes
 
+    def c_support_code_apply(self, node: Apply, name: str) -> str:
+        """Needed to define NPY_RAVEL_AXIS"""
+        return npy_2_compat_header()
+
     def c_code(self, node, name, inames, onames, sub):
         (x,) = inames
         (z,) = onames
         fail = sub["fail"]
         params = sub["params"]
 
-        code = f"""
-                int axis = {params}->c_axis;
+        if self.axis is None:
+            axis_code = "int axis = NPY_RAVEL_AXIS;\n"
+        else:
+            axis_code = f"int axis = {params}->c_axis;\n"
+
+        code = (
+            axis_code
+            + f"""
+                #undef NPY_UF_DBG_TRACING
+                #define NPY_UF_DBG_TRACING 1
+
                 if (axis == 0 && PyArray_NDIM({x}) == 1)
-                    axis = NPY_MAXDIMS;
+                    axis = NPY_RAVEL_AXIS;
                 npy_intp shape[1] = {{ PyArray_SIZE({x}) }};
-                if(axis == NPY_MAXDIMS && !({z} && PyArray_DIMS({z})[0] == shape[0]))
+                if(axis == NPY_RAVEL_AXIS && !({z} && PyArray_DIMS({z})[0] == shape[0]))
                 {{
                     Py_XDECREF({z});
-                    {z} = (PyArrayObject*) PyArray_SimpleNew(1, shape, PyArray_TYPE((PyArrayObject*) py_{x}));
+                    {z} = (PyArrayObject*) PyArray_SimpleNew(1, shape, PyArray_TYPE({x}));
                 }}
 
-                else if(axis != NPY_MAXDIMS && !({z} && PyArray_CompareLists(PyArray_DIMS({z}), PyArray_DIMS({x}), PyArray_NDIM({x}))))
+                else if(axis != NPY_RAVEL_AXIS && !({z} && PyArray_CompareLists(PyArray_DIMS({z}), PyArray_DIMS({x}), PyArray_NDIM({x}))))
                 {{
                     Py_XDECREF({z});
                     {z} = (PyArrayObject*) PyArray_SimpleNew(PyArray_NDIM({x}), PyArray_DIMS({x}), PyArray_TYPE({x}));
@@ -403,11 +421,12 @@ class CumOp(COp):
                     Py_XDECREF(t);
                 }}
             """
+        )
 
         return code
 
     def c_code_cache_version(self):
-        return (8,)
+        return (9,)
 
     def __str__(self):
         return f"{self.__class__.__name__}{{{self.axis}, {self.mode}}}"
@@ -598,11 +617,7 @@ def squeeze(x, axis=None):
     elif not isinstance(axis, Collection):
         axis = (axis,)
 
-    # scalar inputs are treated as 1D regarding axis in this `Op`
-    try:
-        axis = normalize_axis_tuple(axis, ndim=max(1, _x.ndim))
-    except AxisError:
-        raise AxisError(axis, ndim=_x.ndim)
+    axis = normalize_reduce_axis(axis, ndim=_x.ndim)
 
     if not axis:
         # Nothing to do
