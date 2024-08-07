@@ -101,6 +101,7 @@ from pytensor.tensor.rewriting.math import (
     local_grad_log_erfc_neg,
     local_greedy_distributor,
     local_mul_canonizer,
+    local_reduce_chain,
     local_sum_prod_of_mul_or_div,
     mul_canonizer,
     parse_mul_tree,
@@ -2497,6 +2498,168 @@ class TestLocalMergeSwitchSameCond:
             assert debugprint(g, file="str").count("Switch") == 1
 
 
+class TestReduceChain:
+    def setup_method(self):
+        self.mode = get_default_mode().including("canonicalize", "specialize")
+
+    def test_local_sum_prod_all_to_none(self):
+        a = tensor3()
+        input = np.arange(3 * 4 * 5, dtype=config.floatX).reshape(3, 4, 5)
+        # test sum
+        f = function([a], a.sum(), mode=self.mode)
+        assert len(f.maker.fgraph.apply_nodes) == 1
+        utt.assert_allclose(f(input), input.sum())
+        # test prod
+        f = function([a], a.prod(), mode=self.mode)
+        assert len(f.maker.fgraph.apply_nodes) == 1
+        utt.assert_allclose(f(input), input.prod())
+        # test sum
+        f = function([a], a.sum([0, 1, 2]), mode=self.mode)
+        assert len(f.maker.fgraph.apply_nodes) == 1
+        utt.assert_allclose(f(input), input.sum())
+        # test prod
+        f = function([a], a.prod([0, 1, 2]), mode=self.mode)
+        assert len(f.maker.fgraph.apply_nodes) == 1
+        utt.assert_allclose(f(input), input.prod())
+
+        f = function([a], a.sum(0).sum(0).sum(0), mode=self.mode)
+        assert len(f.maker.fgraph.apply_nodes) == 1
+        utt.assert_allclose(f(input), input.sum())
+
+    def test_local_sum_sum_prod_prod(self):
+        a = tensor3()
+        input = np.arange(3 * 4 * 5, dtype=config.floatX).reshape(3, 4, 5)
+        dims = [
+            (0, 0),
+            (1, 0),
+            (2, 0),
+            (0, 1),
+            (1, 1),
+            (2, 1),
+            ((0, 1), 0),
+            ((1, 2), 0),
+            (0, (0, 1)),
+            (1, (0, 1)),
+            (2, (0, 1)),
+        ]
+
+        def my_prod(data, d, dd):
+            # This prod when d or dd is a tuple of 2 dimensions.
+            if not isinstance(d, tuple) and not isinstance(dd, tuple):
+                return data.prod(d).prod(dd)
+            if isinstance(d, tuple):
+                d = sorted(d)
+                return data.prod(d[1]).prod(d[0]).prod(dd)
+            else:
+                dd = sorted(dd)
+                return data.prod(d).prod(dd[1]).prod(dd[0])
+
+        def my_sum(data, d, dd):
+            # This sum when d or dd is a tuple of 2 dimensions.
+            if not isinstance(d, tuple) and not isinstance(dd, tuple):
+                return data.sum(d).sum(dd)
+            if isinstance(d, tuple):
+                d = sorted(d)
+                return data.sum(d[1]).sum(d[0]).sum(dd)
+            else:
+                dd = sorted(dd)
+                return data.sum(d).sum(dd[1]).sum(dd[0])
+
+        def my_sum_prod(data, d, dd):
+            # This sum when d or dd is a tuple of 2 dimensions.
+            if not isinstance(d, tuple) and not isinstance(dd, tuple):
+                return data.sum(d).prod(dd)
+            if isinstance(d, tuple):
+                d = sorted(d)
+                return data.sum(d[1]).sum(d[0]).prod(dd)
+            else:
+                dd = sorted(dd)
+                return data.sum(d).prod(dd[1]).prod(dd[0])
+
+        for d, dd in dims:
+            expected = my_sum(input, d, dd)
+            f = function([a], a.sum(d).sum(dd), mode=self.mode)
+            utt.assert_allclose(f(input), expected)
+            assert len(f.maker.fgraph.apply_nodes) == 1
+        for d, dd in dims[:6]:
+            f = function([a], a.sum(d).sum(dd).sum(0), mode=self.mode)
+            utt.assert_allclose(f(input), input.sum(d).sum(dd).sum(0))
+            assert len(f.maker.fgraph.apply_nodes) == 1
+        for d in [0, 1, 2]:
+            f = function([a], a.sum(d).sum(None), mode=self.mode)
+            utt.assert_allclose(f(input), input.sum(d).sum())
+            assert len(f.maker.fgraph.apply_nodes) == 1
+        f = function([a], a.sum(None).sum(), mode=self.mode)
+        utt.assert_allclose(f(input), input.sum())
+        assert len(f.maker.fgraph.apply_nodes) == 1
+
+        # test prod
+        for d, dd in dims:
+            expected = my_prod(input, d, dd)
+            f = function([a], a.prod(d).prod(dd), mode=self.mode)
+            utt.assert_allclose(f(input), expected)
+            assert len(f.maker.fgraph.apply_nodes) == 1
+        for d, dd in dims[:6]:
+            f = function([a], a.prod(d).prod(dd).prod(0), mode=self.mode)
+            utt.assert_allclose(f(input), input.prod(d).prod(dd).prod(0))
+            assert len(f.maker.fgraph.apply_nodes) == 1
+        for d in [0, 1, 2]:
+            f = function([a], a.prod(d).prod(None), mode=self.mode)
+            utt.assert_allclose(f(input), input.prod(d).prod())
+            assert len(f.maker.fgraph.apply_nodes) == 1
+        f = function([a], a.prod(None).prod(), mode=self.mode)
+        utt.assert_allclose(f(input), input.prod())
+        assert len(f.maker.fgraph.apply_nodes) == 1
+
+        # Test that sum prod didn't get rewritten.
+        for d, dd in dims:
+            expected = my_sum_prod(input, d, dd)
+            f = function([a], a.sum(d).prod(dd), mode=self.mode)
+            utt.assert_allclose(f(input), expected)
+            assert len(f.maker.fgraph.apply_nodes) == 2
+        for d, dd in dims[:6]:
+            f = function([a], a.sum(d).prod(dd).prod(0), mode=self.mode)
+            utt.assert_allclose(f(input), input.sum(d).prod(dd).prod(0))
+            assert len(f.maker.fgraph.apply_nodes) == 2
+        for d in [0, 1, 2]:
+            f = function([a], a.sum(d).prod(None), mode=self.mode)
+            utt.assert_allclose(f(input), input.sum(d).prod())
+            assert len(f.maker.fgraph.apply_nodes) == 2
+        f = function([a], a.sum(None).prod(), mode=self.mode)
+        utt.assert_allclose(f(input), input.sum())
+        assert len(f.maker.fgraph.apply_nodes) == 1
+
+    def test_local_sum_sum_int8(self):
+        """Test that `local_sum_sum` works when combining two sums on an int8 array.
+
+        This is a regression test for ticket gh-356.
+        """
+
+        x = tensor3(dtype="int8")
+        y = x.sum(axis=0).sum(axis=1)
+
+        with config.change_flags(on_opt_error="raise"):
+            # This compilation would fail prior to fix.
+            function([x], y)
+
+    def test_local_sum_sum_dtype(self):
+        """Test that `local_sum_sum` works when specifying dtypes manually."""
+
+        x = tensor3(dtype="int8")
+        y = x.sum(axis=0, dtype="int32").sum(axis=1, dtype="int64")
+
+        with config.change_flags(on_opt_error="raise"):
+            # This compilation would fail prior to fix.
+            function([x], y)
+
+    def test_all(self):
+        x = tensor3(dtype=bool)
+        out = x.all(axis=-1).all(axis=0)
+        fg = FunctionGraph([x], [out], clone=False)
+        [new_out] = local_reduce_chain.transform(fg, out.owner)
+        assert equal_computations([new_out], [x.all(axis=(0, 2))])
+
+
 class TestLocalSumProd:
     """Test sum/prod rewrites."""
 
@@ -2813,133 +2976,6 @@ class TestLocalSumProd:
                 rewritten_out_fn(*test_vals),
             )
 
-    def test_local_sum_prod_all_to_none(self):
-        a = tensor3()
-        input = np.arange(3 * 4 * 5, dtype=config.floatX).reshape(3, 4, 5)
-        # test sum
-        f = function([a], a.sum(), mode=self.mode)
-        assert len(f.maker.fgraph.apply_nodes) == 1
-        utt.assert_allclose(f(input), input.sum())
-        # test prod
-        f = function([a], a.prod(), mode=self.mode)
-        assert len(f.maker.fgraph.apply_nodes) == 1
-        utt.assert_allclose(f(input), input.prod())
-        # test sum
-        f = function([a], a.sum([0, 1, 2]), mode=self.mode)
-        assert len(f.maker.fgraph.apply_nodes) == 1
-        utt.assert_allclose(f(input), input.sum())
-        # test prod
-        f = function([a], a.prod([0, 1, 2]), mode=self.mode)
-        assert len(f.maker.fgraph.apply_nodes) == 1
-        utt.assert_allclose(f(input), input.prod())
-
-        f = function([a], a.sum(0).sum(0).sum(0), mode=self.mode)
-        assert len(f.maker.fgraph.apply_nodes) == 1
-        utt.assert_allclose(f(input), input.sum())
-
-    def test_local_sum_sum_prod_prod(self):
-        a = tensor3()
-        input = np.arange(3 * 4 * 5, dtype=config.floatX).reshape(3, 4, 5)
-        dims = [
-            (0, 0),
-            (1, 0),
-            (2, 0),
-            (0, 1),
-            (1, 1),
-            (2, 1),
-            ((0, 1), 0),
-            ((1, 2), 0),
-            (0, (0, 1)),
-            (1, (0, 1)),
-            (2, (0, 1)),
-        ]
-
-        def my_prod(data, d, dd):
-            # This prod when d or dd is a tuple of 2 dimensions.
-            if not isinstance(d, tuple) and not isinstance(dd, tuple):
-                return data.prod(d).prod(dd)
-            if isinstance(d, tuple):
-                d = sorted(d)
-                return data.prod(d[1]).prod(d[0]).prod(dd)
-            else:
-                dd = sorted(dd)
-                return data.prod(d).prod(dd[1]).prod(dd[0])
-
-        def my_sum(data, d, dd):
-            # This sum when d or dd is a tuple of 2 dimensions.
-            if not isinstance(d, tuple) and not isinstance(dd, tuple):
-                return data.sum(d).sum(dd)
-            if isinstance(d, tuple):
-                d = sorted(d)
-                return data.sum(d[1]).sum(d[0]).sum(dd)
-            else:
-                dd = sorted(dd)
-                return data.sum(d).sum(dd[1]).sum(dd[0])
-
-        def my_sum_prod(data, d, dd):
-            # This sum when d or dd is a tuple of 2 dimensions.
-            if not isinstance(d, tuple) and not isinstance(dd, tuple):
-                return data.sum(d).prod(dd)
-            if isinstance(d, tuple):
-                d = sorted(d)
-                return data.sum(d[1]).sum(d[0]).prod(dd)
-            else:
-                dd = sorted(dd)
-                return data.sum(d).prod(dd[1]).prod(dd[0])
-
-        for d, dd in dims:
-            expected = my_sum(input, d, dd)
-            f = function([a], a.sum(d).sum(dd), mode=self.mode)
-            utt.assert_allclose(f(input), expected)
-            assert len(f.maker.fgraph.apply_nodes) == 1
-        for d, dd in dims[:6]:
-            f = function([a], a.sum(d).sum(dd).sum(0), mode=self.mode)
-            utt.assert_allclose(f(input), input.sum(d).sum(dd).sum(0))
-            assert len(f.maker.fgraph.apply_nodes) == 1
-        for d in [0, 1, 2]:
-            f = function([a], a.sum(d).sum(None), mode=self.mode)
-            utt.assert_allclose(f(input), input.sum(d).sum())
-            assert len(f.maker.fgraph.apply_nodes) == 1
-        f = function([a], a.sum(None).sum(), mode=self.mode)
-        utt.assert_allclose(f(input), input.sum())
-        assert len(f.maker.fgraph.apply_nodes) == 1
-
-        # test prod
-        for d, dd in dims:
-            expected = my_prod(input, d, dd)
-            f = function([a], a.prod(d).prod(dd), mode=self.mode)
-            utt.assert_allclose(f(input), expected)
-            assert len(f.maker.fgraph.apply_nodes) == 1
-        for d, dd in dims[:6]:
-            f = function([a], a.prod(d).prod(dd).prod(0), mode=self.mode)
-            utt.assert_allclose(f(input), input.prod(d).prod(dd).prod(0))
-            assert len(f.maker.fgraph.apply_nodes) == 1
-        for d in [0, 1, 2]:
-            f = function([a], a.prod(d).prod(None), mode=self.mode)
-            utt.assert_allclose(f(input), input.prod(d).prod())
-            assert len(f.maker.fgraph.apply_nodes) == 1
-        f = function([a], a.prod(None).prod(), mode=self.mode)
-        utt.assert_allclose(f(input), input.prod())
-        assert len(f.maker.fgraph.apply_nodes) == 1
-
-        # Test that sum prod didn't get rewritten.
-        for d, dd in dims:
-            expected = my_sum_prod(input, d, dd)
-            f = function([a], a.sum(d).prod(dd), mode=self.mode)
-            utt.assert_allclose(f(input), expected)
-            assert len(f.maker.fgraph.apply_nodes) == 2
-        for d, dd in dims[:6]:
-            f = function([a], a.sum(d).prod(dd).prod(0), mode=self.mode)
-            utt.assert_allclose(f(input), input.sum(d).prod(dd).prod(0))
-            assert len(f.maker.fgraph.apply_nodes) == 2
-        for d in [0, 1, 2]:
-            f = function([a], a.sum(d).prod(None), mode=self.mode)
-            utt.assert_allclose(f(input), input.sum(d).prod())
-            assert len(f.maker.fgraph.apply_nodes) == 2
-        f = function([a], a.sum(None).prod(), mode=self.mode)
-        utt.assert_allclose(f(input), input.sum())
-        assert len(f.maker.fgraph.apply_nodes) == 1
-
     def test_local_sum_prod_alloc(self):
         a = dtensor3()
         input = np.asarray(np.arange(2 * 3 * 4).reshape(2, 3, 4), dtype="float64")
@@ -3004,29 +3040,6 @@ class TestLocalSumProd:
                 topo = f.maker.fgraph.toposort()
                 assert topo[-1].op == pt.alloc
                 assert not any(isinstance(node.op, Sum) for node in topo)
-
-    def test_local_sum_sum_int8(self):
-        """Test that `local_sum_sum` works when combining two sums on an int8 array.
-
-        This is a regression test for ticket gh-356.
-        """
-
-        x = tensor3(dtype="int8")
-        y = x.sum(axis=0).sum(axis=1)
-
-        with config.change_flags(on_opt_error="raise"):
-            # This compilation would fail prior to fix.
-            function([x], y)
-
-    def test_local_sum_sum_dtype(self):
-        """Test that `local_sum_sum` works when specifying dtypes manually."""
-
-        x = tensor3(dtype="int8")
-        y = x.sum(axis=0, dtype="int32").sum(axis=1, dtype="int64")
-
-        with config.change_flags(on_opt_error="raise"):
-            # This compilation would fail prior to fix.
-            function([x], y)
 
     def test_local_sum_prod_mul_by_scalar_stack_trace(self):
         """Test that stack trace is copied over correctly for `local_sum_prod_mul_by_scalar`."""
@@ -3218,7 +3231,7 @@ class TestLocalSumProd:
 class TestLocalReduce:
     def setup_method(self):
         self.mode = get_default_mode().including(
-            "canonicalize", "specialize", "uncanonicalize", "local_max_and_argmax"
+            "canonicalize", "specialize", "uncanonicalize"
         )
 
     def test_local_reduce_broadcast_all_0(self):
@@ -3291,62 +3304,94 @@ class TestLocalReduce:
                 isinstance(node.op, CAReduce) for node in f.maker.fgraph.toposort()
             )
 
-    def test_local_reduce_join(self):
+
+class TestReduceJoin:
+    def setup_method(self):
+        self.mode = get_default_mode().including(
+            "canonicalize", "specialize", "uncanonicalize"
+        )
+
+    @pytest.mark.parametrize(
+        "op, nin", [(pt_sum, 3), (pt_max, 2), (pt_min, 2), (prod, 3)]
+    )
+    def test_local_reduce_join(self, op, nin):
         vx = matrix()
         vy = matrix()
         vz = matrix()
         x = np.asarray([[1, 0], [3, 4]], dtype=config.floatX)
         y = np.asarray([[4, 0], [2, 1]], dtype=config.floatX)
         z = np.asarray([[5, 0], [1, 2]], dtype=config.floatX)
-        # Test different reduction scalar operation
-        for out, res in [
-            (pt_max((vx, vy), 0), np.max((x, y), 0)),
-            (pt_min((vx, vy), 0), np.min((x, y), 0)),
-            (pt_sum((vx, vy, vz), 0), np.sum((x, y, z), 0)),
-            (prod((vx, vy, vz), 0), np.prod((x, y, z), 0)),
-            (prod((vx, vy.T, vz), 0), np.prod((x, y.T, z), 0)),
-        ]:
-            f = function([vx, vy, vz], out, on_unused_input="ignore", mode=self.mode)
-            assert (f(x, y, z) == res).all(), out
-            topo = f.maker.fgraph.toposort()
-            assert len(topo) <= 2, out
-            assert isinstance(topo[-1].op, Elemwise), out
 
+        inputs = (vx, vy, vz)[:nin]
+        test_values = (x, y, z)[:nin]
+
+        out = op(inputs, axis=0)
+        f = function(inputs, out, mode=self.mode)
+        np.testing.assert_allclose(
+            f(*test_values), getattr(np, op.__name__)(test_values, axis=0)
+        )
+        topo = f.maker.fgraph.toposort()
+        assert len(topo) <= 2
+        assert isinstance(topo[-1].op, Elemwise)
+
+    def test_type(self):
         # Test different axis for the join and the reduction
         # We must force the dtype, of otherwise, this tests will fail
         # on 32 bit systems
         A = shared(np.array([1, 2, 3, 4, 5], dtype="int64"))
 
         f = function([], pt_sum(pt.stack([A, A]), axis=0), mode=self.mode)
-        utt.assert_allclose(f(), [2, 4, 6, 8, 10])
+        np.testing.assert_allclose(f(), [2, 4, 6, 8, 10])
         topo = f.maker.fgraph.toposort()
         assert isinstance(topo[-1].op, Elemwise)
 
         # Test a case that was bugged in a old PyTensor bug
         f = function([], pt_sum(pt.stack([A, A]), axis=1), mode=self.mode)
 
-        utt.assert_allclose(f(), [15, 15])
+        np.testing.assert_allclose(f(), [15, 15])
         topo = f.maker.fgraph.toposort()
         assert not isinstance(topo[-1].op, Elemwise)
 
         # This case could be rewritten
         A = shared(np.array([1, 2, 3, 4, 5]).reshape(5, 1))
         f = function([], pt_sum(pt.concatenate((A, A), axis=1), axis=1), mode=self.mode)
-        utt.assert_allclose(f(), [2, 4, 6, 8, 10])
+        np.testing.assert_allclose(f(), [2, 4, 6, 8, 10])
         topo = f.maker.fgraph.toposort()
         assert not isinstance(topo[-1].op, Elemwise)
 
         A = shared(np.array([1, 2, 3, 4, 5]).reshape(5, 1))
         f = function([], pt_sum(pt.concatenate((A, A), axis=1), axis=0), mode=self.mode)
-        utt.assert_allclose(f(), [15, 15])
+        np.testing.assert_allclose(f(), [15, 15])
         topo = f.maker.fgraph.toposort()
         assert not isinstance(topo[-1].op, Elemwise)
 
+    def test_not_supported_axis_none(self):
         # Test that the rewrite does not crash in one case where it
         # is not applied.  Reported at
         # https://groups.google.com/d/topic/theano-users/EDgyCU00fFA/discussion
+        vx = matrix()
+        vy = matrix()
+        vz = matrix()
+        x = np.asarray([[1, 0], [3, 4]], dtype=config.floatX)
+        y = np.asarray([[4, 0], [2, 1]], dtype=config.floatX)
+        z = np.asarray([[5, 0], [1, 2]], dtype=config.floatX)
+
         out = pt_sum([vx, vy, vz], axis=None)
-        f = function([vx, vy, vz], out)
+        f = function([vx, vy, vz], out, mode=self.mode)
+        np.testing.assert_allclose(f(x, y, z), np.sum([x, y, z]))
+
+    def test_not_supported_unequal_shapes(self):
+        # Not the same shape along the join axis
+        vx = matrix(shape=(1, 3))
+        vy = matrix(shape=(2, 3))
+        x = np.asarray([[1, 0, 1]], dtype=config.floatX)
+        y = np.asarray([[4, 0, 1], [2, 1, 1]], dtype=config.floatX)
+        out = pt_sum(join(0, vx, vy), axis=0)
+
+        f = function([vx, vy], out, mode=self.mode)
+        np.testing.assert_allclose(
+            f(x, y), np.sum(np.concatenate([x, y], axis=0), axis=0)
+        )
 
 
 def test_local_useless_adds():
