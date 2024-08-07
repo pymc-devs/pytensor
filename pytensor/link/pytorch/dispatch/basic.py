@@ -3,6 +3,7 @@ from types import NoneType
 
 import torch
 
+from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.fg import FunctionGraph
 from pytensor.link.utils import fgraph_to_python
@@ -132,3 +133,27 @@ def pytorch_funcify_MakeVector(op, **kwargs):
         return torch.tensor(x, dtype=torch_dtype)
 
     return makevector
+
+
+@pytorch_funcify.register(OpFromGraph)
+def pytorch_funcify_OpFromGraph(op, node=None, **kwargs):
+    _ = kwargs.pop("storage_map", None)
+
+    # @todo: Torch compile doesn't capture the scope accounting
+    # for op.fgraph, leading to an import error. Disable the
+    # dynamo compile for these graphs
+    import torch._dynamo.config
+
+    torch._dynamo.config.suppress_errors = True
+
+    fgraph_fn = torch.compile(pytorch_funcify(op.fgraph, **kwargs))
+    if len(op.fgraph.outputs) > 1:
+
+        def inner(*args):
+            return fgraph_fn(*args)
+    else:
+
+        def inner(*args):
+            return fgraph_fn(*args)[0]
+
+    return inner

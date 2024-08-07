@@ -30,6 +30,7 @@ from pytensor.compile.mode import (
     OPT_O3,
     OPT_STABILIZE,
     OPT_UNSAFE,
+    PYTORCH,
     AddDestroyHandler,
     AddFeatureOptimizer,
     Mode,
