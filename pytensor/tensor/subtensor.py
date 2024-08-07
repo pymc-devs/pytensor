@@ -18,7 +18,7 @@ from pytensor.graph.type import Type
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
-from pytensor.npy_2_compat import numpy_version, using_numpy_2
+from pytensor.npy_2_compat import npy_2_compat_header, numpy_version, using_numpy_2
 from pytensor.printing import Printer, pprint, set_precedence
 from pytensor.scalar.basic import ScalarConstant, ScalarVariable
 from pytensor.tensor import (
@@ -2149,7 +2149,7 @@ class AdvancedSubtensor1(COp):
     def c_support_code(self, **kwargs):
         # In some versions of numpy, NPY_MIN_INTP is defined as MIN_LONG,
         # which is not defined. It should be NPY_MIN_LONG instead in that case.
-        return dedent(
+        return npy_2_compat_header() + dedent(
             """\
                 #ifndef MIN_LONG
                 #define MIN_LONG NPY_MIN_LONG
@@ -2174,7 +2174,7 @@ class AdvancedSubtensor1(COp):
                 if (!PyArray_CanCastSafely(i_type, NPY_INTP) &&
                     PyArray_SIZE({i_name}) > 0) {{
                     npy_int64 min_val, max_val;
-                    PyObject* py_min_val = PyArray_Min({i_name}, NPY_MAXDIMS,
+                    PyObject* py_min_val = PyArray_Min({i_name}, NPY_RAVEL_AXIS,
                                                        NULL);
                     if (py_min_val == NULL) {{
                         {fail};
@@ -2184,7 +2184,7 @@ class AdvancedSubtensor1(COp):
                     if (min_val == -1 && PyErr_Occurred()) {{
                         {fail};
                     }}
-                    PyObject* py_max_val = PyArray_Max({i_name}, NPY_MAXDIMS,
+                    PyObject* py_max_val = PyArray_Max({i_name}, NPY_RAVEL_AXIS,
                                                        NULL);
                     if (py_max_val == NULL) {{
                         {fail};
@@ -2243,7 +2243,7 @@ class AdvancedSubtensor1(COp):
         """
 
     def c_code_cache_version(self):
-        return (0, 1, 2)
+        return (0, 1, 2, 3)
 
 
 advanced_subtensor1 = AdvancedSubtensor1()

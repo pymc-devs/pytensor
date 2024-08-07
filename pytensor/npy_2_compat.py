@@ -46,10 +46,21 @@ else:
     ndarray_c_version = np.core._multiarray_umath._get_ndarray_c_version()  # type: ignore[attr-defined]
 
 
+# used in tests: the type of error thrown if a value is too large for the specified
+# numpy data type is different in numpy 2.x
+UintOverflowError = OverflowError if using_numpy_2 else TypeError
+
+
+# to patch up some of the C code, we need to use these special values...
 if using_numpy_2:
-    UintOverflowError = OverflowError
+    numpy_axis_is_none_flag = np.iinfo(np.int32).min  # the value of "NPY_RAVEL_AXIS"
 else:
-    UintOverflowError = TypeError
+    # 32 is the value used to mark axis = None in Numpy C-API prior to version 2.0
+    numpy_axis_is_none_flag = 32
+
+
+# max number of dims is 64 in numpy 2.x; 32 in older versions
+numpy_maxdims = 64 if using_numpy_2 else 32
 
 
 def npy_2_compat_header() -> str:

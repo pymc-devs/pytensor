@@ -18,6 +18,7 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import vectorize_node
 from pytensor.link.basic import PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
+from pytensor.npy_2_compat import numpy_maxdims
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.basic import get_scalar_constant_value, second
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
@@ -121,7 +122,8 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
 
     def test_too_big_rank(self):
         x = self.type(self.dtype, shape=())()
-        y = x.dimshuffle(("x",) * (np.MAXDIMS + 1))
+        y = x.dimshuffle(("x",) * (numpy_maxdims + 1))
+
         with pytest.raises(ValueError):
             y.eval({x: 0})
 
