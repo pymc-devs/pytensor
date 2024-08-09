@@ -139,10 +139,10 @@ def pytorch_funcify_MakeVector(op, **kwargs):
 def pytorch_funcify_IfElse(op, **kwargs):
     n_outs = op.n_outs
 
-    def ifelse(cond, ifpath, elsepath, n_outs=n_outs):
+    def ifelse(cond, *true_and_false, n_outs=n_outs):
         if cond:
-            return ifpath
+            return torch.stack(true_and_false[:n_outs])
         else:
-            return elsepath
+            return torch.stack(true_and_false[n_outs:])
 
     return ifelse

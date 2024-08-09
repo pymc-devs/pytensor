@@ -305,13 +305,15 @@ def test_pytorch_MakeVector():
 
 
 def test_pytorch_ifelse():
-    true_vals = np.r_[1, 2, 3]
-    false_vals = np.r_[-1, -2, -3]
+    p1_vals = np.r_[1, 2, 3]
+    p2_vals = np.r_[-1, -2, -3]
 
     for test_value, cond in [(0.2, 0.5), (0.5, 0.4)]:
         a = scalar("a")
         a.tag.test_value = np.array(test_value, dtype=config.floatX)
-        x = ifelse(a < cond, true_vals, false_vals)
-        x_fg = FunctionGraph([a], [x])  # I.e. False
+        x = ifelse(
+            a < cond, tuple(np.r_[p1_vals, p2_vals]), tuple(np.r_[p2_vals, p1_vals])
+        )
+        x_fg = FunctionGraph([a], x)
 
         compare_pytorch_and_py(x_fg, [get_test_value(i) for i in x_fg.inputs])
