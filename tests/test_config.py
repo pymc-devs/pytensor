@@ -254,7 +254,10 @@ def test_config_pickling():
         configparser.IntParam(5, lambda i: i > 0),
         in_c_key=False,
     )
-    with pytest.raises(AttributeError, match="Can't get local object 'test_config_pickling.<locals>.<lambda>'"):
+    with pytest.raises(
+            AttributeError, 
+            match="Can't get local object 'test_config_pickling.<locals>.<lambda>'",
+        ):
         pickle.dump(root, io.BytesIO())
 
 
