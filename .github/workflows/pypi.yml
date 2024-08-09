@@ -17,6 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The job to build precompiled pypi wheels.
   make_sdist:
     name: Make SDist
     runs-on: ubuntu-latest

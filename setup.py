@@ -11,7 +11,8 @@ import versioneer
 dist = Distribution()
 dist.parse_config_files()
 
-NAME = dist.get_name()  # type: ignore
+
+NAME: str = dist.get_name()  # type: ignore
 
 # Check if building for Pyodide
 is_pyodide = os.getenv("PYODIDE", "0") == "1"
