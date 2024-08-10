@@ -256,7 +256,7 @@ def test_config_pickling():
     )
     with pytest.raises(
         AttributeError,
-        match="Can't pickle local object 'test_config_pickling.<locals>.<lambda>'",
+        match="Can't (pickle|get) local object 'test_config_pickling.<locals>.<lambda>'",
     ):
         pickle.dump(root, io.BytesIO())
 
