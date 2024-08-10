@@ -12,8 +12,11 @@ from pytensor.graph.rewriting.basic import (
 from pytensor.scalar.basic import Mul
 from pytensor.tensor.basic import (
     AllocDiag,
+    ExtractDiag,
     Eye,
     TensorVariable,
+    concatenate,
+    diag,
     diagonal,
 )
 from pytensor.tensor.blas import Dot22
@@ -701,3 +704,24 @@ def rewrite_inv_diag_to_diag_reciprocal(fgraph, node):
         non_eye_input = pt.shape_padaxis(non_eye_diag, -2)
 
     return [eye_input / non_eye_input]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([ExtractDiag])
+def rewrite_diag_blockdiag(fgraph, node):
+    # Check for inner block_diag operation
+    potential_blockdiag = node.inputs[0].owner
+    if not (
+        potential_blockdiag
+        and isinstance(potential_blockdiag.op, Blockwise)
+        and isinstance(potential_blockdiag.op.core_op, BlockDiagonal)
+    ):
+        return None
+
+    # Find the composing sub_matrices
+    submatrices = potential_blockdiag.inputs
+    submatrices_diag = [diag(submatrices[i]) for i in range(len(submatrices))]
+    output = [concatenate(submatrices_diag)]
+
+    return output
