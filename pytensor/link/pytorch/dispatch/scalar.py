@@ -66,19 +66,27 @@ def pytorch_funcify_Softplus(op, node, **kwargs):
 @pytorch_funcify.register(ScalarLoop)
 def pytorch_funicify_ScalarLoop(op, node, **kwargs):
     update = pytorch_funcify(op.fgraph)
+    if op.is_while:
 
-    def inner(steps, start, constant, update=update, is_while=op.is_while):
-        # easiest way to do it is to loop
-        c = start
-        for i in range(steps):
-            outs = update(c, constant)
-            if is_while:
-                n, done = outs
+        def scalar_loop(steps, *start_and_constants):
+            *carry, constants = start_and_constants
+            constants = constants.unsqueeze(0)
+            done = True
+            for _ in range(steps):
+                *carry, done = update(*carry, *constants)
+                constants = start_and_constants[len(carry) :]
                 if done:
-                    return n
-                c = n
-            else:
-                c = outs[0]
-        return c
+                    break
+            return torch.stack((*carry, done))
+    else:
 
-    return inner
+        def scalar_loop(*args):
+            steps, *start_and_constants = args
+            *carry, constants = start_and_constants
+            constants = constants.unsqueeze(0)
+            for i in range(steps):
+                carry = update(*carry, *constants)
+                constants = start_and_constants[len(carry) :]
+            return torch.stack(carry)
+
+    return scalar_loop
