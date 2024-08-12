@@ -4,6 +4,31 @@
 Baby Steps - Algebra
 ====================
 
+Understanding Tensors
+===========================
+
+Before diving into PyTensor, it's essential to understand the fundamental 
+data structure it operates on: the *tensor*. A *tensor* is a multi-dimensional 
+array that serves as the foundation for symbolic computations.
+
+tensors can represent anything from a single number (scalar) to 
+complex multi-dimensional arrays. Each tensor has a type that dictates its 
+dimensionality and the kind of data it holds.
+
+For example, the following code creates a symbolic scalar and a symbolic matrix:
+
+>>> x = pt.scalar('x')
+>>> y = pt.matrix('y')
+
+Here, `scalar` refers to a tensor with zero dimensions, while `matrix` refers 
+to a tensor with two dimensions. The same principles apply to tensors of other 
+dimensions.
+
+For more information about tensors and their associated operations can be 
+found here: :ref:`tensor <libdoc_tensor>`.
+
+
+
 Adding two Scalars
 ==================
 
@@ -172,25 +197,6 @@ array([[ 11.,  22.],
 It is possible to add scalars to matrices, vectors to matrices,
 scalars to vectors, etc. The behavior of these operations is defined
 by :ref:`broadcasting <libdoc_tensor_broadcastable>`.
-
-The following types are available:
-
-* **byte**: ``bscalar, bvector, bmatrix, brow, bcol, btensor3, btensor4, btensor5, btensor6, btensor7``
-* **16-bit integers**: ``wscalar, wvector, wmatrix, wrow, wcol, wtensor3, wtensor4, wtensor5, wtensor6, wtensor7``
-* **32-bit integers**: ``iscalar, ivector, imatrix, irow, icol, itensor3, itensor4, itensor5, itensor6, itensor7``
-* **64-bit integers**: ``lscalar, lvector, lmatrix, lrow, lcol, ltensor3, ltensor4, ltensor5, ltensor6, ltensor7``
-* **float**: ``fscalar, fvector, fmatrix, frow, fcol, ftensor3, ftensor4, ftensor5, ftensor6, ftensor7``
-* **double**: ``dscalar, dvector, dmatrix, drow, dcol, dtensor3, dtensor4, dtensor5, dtensor6, dtensor7``
-* **complex**: ``cscalar, cvector, cmatrix, crow, ccol, ctensor3, ctensor4, ctensor5, ctensor6, ctensor7``
-
-The previous list is not exhaustive and a guide to all types compatible
-with NumPy arrays may be found here: :ref:`tensor creation<libdoc_tensor_creation>`.
-
-.. note::
-
-   You, the user---not the system architecture---have to choose whether your
-   program will use 32- or 64-bit integers (``i`` prefix vs. the ``l`` prefix)
-   and floats (``f`` prefix vs. the ``d`` prefix).
 
 
 
