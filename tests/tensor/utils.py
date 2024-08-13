@@ -508,15 +508,17 @@ def makeTester(
                 if not isinstance(expecteds, list | tuple):
                     expecteds = (expecteds,)
 
-                for i, (variable, expected) in enumerate(zip(variables, expecteds)):
+                for i, (variable, expected, out_symbol) in enumerate(
+                    zip(variables, expecteds, node.outputs)
+                ):
                     condition = (
-                        variable.dtype != expected.dtype
+                        variable.dtype != out_symbol.type.dtype
                         or variable.shape != expected.shape
                         or not np.allclose(variable, expected, atol=eps, rtol=eps)
                     )
                     assert not condition, (
                         f"Test {self.op}::{testname}: Output {i} gave the wrong"
-                        f" value. With inputs {inputs}, expected {expected} (dtype {expected.dtype}),"
+                        f" value. With inputs {inputs}, expected {expected} (dtype {out_symbol.type.dtype}),"
                         f" got {variable} (dtype {variable.dtype}). eps={eps:f}"
                         f" np.allclose returns {np.allclose(variable, expected, atol=eps, rtol=eps)} {np.allclose(variable, expected)}"
                     )

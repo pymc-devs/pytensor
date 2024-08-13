@@ -767,34 +767,16 @@ class Elemwise(OpenMPOp):
         for i, (variable, storage, nout) in enumerate(
             zip(variables, output_storage, node.outputs)
         ):
-            if getattr(variable, "dtype", "") == "object":
-                # Since numpy 1.6, function created with numpy.frompyfunc
-                # always return an ndarray with dtype object
-                variable = np.asarray(variable, dtype=nout.dtype)
+            storage[0] = variable = np.asarray(variable, dtype=nout.dtype)
 
             if i in self.inplace_pattern:
                 odat = inputs[self.inplace_pattern[i]]
                 odat[...] = variable
                 storage[0] = odat
 
-            # Sometimes NumPy return a Python type.
-            # Some PyTensor op return a different dtype like floor, ceil,
-            # trunc, eq, ...
-            elif not isinstance(variable, np.ndarray) or variable.dtype != nout.dtype:
-                variable = np.asarray(variable, nout.dtype)
-                # The next line is needed for numpy 1.9. Otherwise
-                # there are tests that fail in DebugMode.
-                # Normally we would call pytensor.misc._asarray, but it
-                # is faster to inline the code. We know that the dtype
-                # are the same string, just different typenum.
-                if np.dtype(nout.dtype).num != variable.dtype.num:
-                    variable = variable.view(dtype=nout.dtype)
-                storage[0] = variable
             # numpy.real return a view!
-            elif not variable.flags.owndata:
+            if not variable.flags.owndata:
                 storage[0] = variable.copy()
-            else:
-                storage[0] = variable
 
     @staticmethod
     def _check_runtime_broadcast(node, inputs):
