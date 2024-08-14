@@ -1313,8 +1313,9 @@ def clone_get_equiv(
     outputs: Reversible[Variable],
     copy_inputs: bool = True,
     copy_orphans: bool = True,
-    memo: dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]]
-    | None = None,
+    memo: (
+        dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]] | None
+    ) = None,
     clone_inner_graphs: bool = False,
     **kwargs,
 ) -> dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]]:
