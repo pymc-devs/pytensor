@@ -710,7 +710,7 @@ class AtomicVariable(Variable[_TypeType, None]):
         return cp
 
 
-class NominalVariable(AtomicVariable[_TypeType]):
+class NominalVariable(Generic[_TypeType, _IdType], AtomicVariable[_TypeType]):
     """A variable that enables alpha-equivalent comparisons."""
 
     __instances__: dict[tuple["Type", Hashable], "NominalVariable"] = {}
