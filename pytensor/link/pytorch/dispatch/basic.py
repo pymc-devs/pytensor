@@ -5,6 +5,7 @@ import torch
 
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.fg import FunctionGraph
+from pytensor.ifelse import IfElse
 from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Eye, Join, MakeVector
@@ -132,3 +133,16 @@ def pytorch_funcify_MakeVector(op, **kwargs):
         return torch.tensor(x, dtype=torch_dtype)
 
     return makevector
+
+
+@pytorch_funcify.register(IfElse)
+def pytorch_funcify_IfElse(op, **kwargs):
+    n_outs = op.n_outs
+
+    def ifelse(cond, *true_and_false, n_outs=n_outs):
+        if cond:
+            return torch.stack(true_and_false[:n_outs])
+        else:
+            return torch.stack(true_and_false[n_outs:])
+
+    return ifelse
