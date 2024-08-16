@@ -725,3 +725,24 @@ def rewrite_diag_blockdiag(fgraph, node):
     output = [concatenate(submatrices_diag)]
 
     return output
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([det])
+def rewrite_det_blockdiag(fgraph, node):
+    # Check for inner block_diag operation
+    potential_blockdiag = node.inputs[0].owner
+    if not (
+        potential_blockdiag
+        and isinstance(potential_blockdiag.op, Blockwise)
+        and isinstance(potential_blockdiag.op.core_op, BlockDiagonal)
+    ):
+        return None
+
+    # Find the composing sub_matrices
+    sub_matrices = potential_blockdiag.inputs
+    det_sub_matrices = [det(sub_matrices[i]) for i in range(len(sub_matrices))]
+    prod_det_sub_matrices = prod(det_sub_matrices)
+
+    return [prod_det_sub_matrices]

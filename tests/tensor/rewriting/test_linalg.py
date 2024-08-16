@@ -689,3 +689,30 @@ def test_diag_blockdiag_rewrite():
         atol=1e-3 if config.floatX == "float32" else 1e-8,
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
+
+
+def test_det_blockdiag_rewrite():
+    n_matrices = 100
+    matrix_size = (5, 5)
+    sub_matrices = pt.tensor("sub_matrices", shape=(n_matrices, *matrix_size))
+    bd_output = pt.linalg.block_diag(*[sub_matrices[i] for i in range(n_matrices)])
+    det_output = pt.linalg.det(bd_output)
+    f_rewritten = function([sub_matrices], det_output, mode="FAST_RUN")
+
+    # Rewrite Test
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, BlockDiagonal) for node in nodes)
+
+    # Value Test
+    sub_matrices_test = np.random.rand(n_matrices, *matrix_size)
+    bd_output_test = scipy.linalg.block_diag(
+        *[sub_matrices_test[i] for i in range(n_matrices)]
+    )
+    det_output_test = np.linalg.det(bd_output_test)
+    rewritten_val = f_rewritten(sub_matrices_test)
+    assert_allclose(
+        det_output_test,
+        rewritten_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
