@@ -22,7 +22,7 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.blas import Dot22
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.math import Dot, Prod, _matrix_matrix_matmul, log, prod
+from pytensor.tensor.math import Dot, Prod, _matrix_matrix_matmul, log, outer, prod
 from pytensor.tensor.nlinalg import (
     SVD,
     KroneckerProduct,
@@ -818,3 +818,20 @@ def rewrite_slogdet_blockdiag(fgraph, node):
     )
 
     return [prod(sign_sub_matrices), sum(logdet_sub_matrices)]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([ExtractDiag])
+def rewrite_diag_kronecker(fgraph, node):
+    # Check for inner kron operation
+    potential_kron = node.inputs[0].owner
+    if not (potential_kron and isinstance(potential_kron.op, KroneckerProduct)):
+        return None
+
+    # Find the matrices
+    a, b = potential_kron.inputs
+    diag_a, diag_b = diag(a), diag(b)
+    outer_prod_as_vector = outer(diag_a, diag_b).flatten()
+
+    return [outer_prod_as_vector]
