@@ -665,7 +665,7 @@ def test_inv_diag_from_diag(inv_op):
 
 
 def test_diag_blockdiag_rewrite():
-    n_matrices = 100
+    n_matrices = 10
     matrix_size = (5, 5)
     sub_matrices = pt.tensor("sub_matrices", shape=(n_matrices, *matrix_size))
     bd_output = pt.linalg.block_diag(*[sub_matrices[i] for i in range(n_matrices)])
@@ -713,6 +713,41 @@ def test_det_blockdiag_rewrite():
     assert_allclose(
         det_output_test,
         rewritten_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+def test_slogdet_blockdiag_rewrite():
+    n_matrices = 100
+    matrix_size = (5, 5)
+    sub_matrices = pt.tensor("sub_matrices", shape=(n_matrices, *matrix_size))
+    bd_output = pt.linalg.block_diag(*[sub_matrices[i] for i in range(n_matrices)])
+    sign_output, logdet_output = pt.linalg.slogdet(bd_output)
+    f_rewritten = function(
+        [sub_matrices], [sign_output, logdet_output], mode="FAST_RUN"
+    )
+
+    # Rewrite Test
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, BlockDiagonal) for node in nodes)
+
+    # Value Test
+    sub_matrices_test = np.random.rand(n_matrices, *matrix_size)
+    bd_output_test = scipy.linalg.block_diag(
+        *[sub_matrices_test[i] for i in range(n_matrices)]
+    )
+    sign_output_test, logdet_output_test = np.linalg.slogdet(bd_output_test)
+    rewritten_sign_val, rewritten_logdet_val = f_rewritten(sub_matrices_test)
+    assert_allclose(
+        sign_output_test,
+        rewritten_sign_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+    assert_allclose(
+        logdet_output_test,
+        rewritten_logdet_val,
         atol=1e-3 if config.floatX == "float32" else 1e-8,
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )

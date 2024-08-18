@@ -32,6 +32,7 @@ from pytensor.tensor.nlinalg import (
     inv,
     kron,
     pinv,
+    slogdet,
     svd,
 )
 from pytensor.tensor.rewriting.basic import (
@@ -710,39 +711,110 @@ def rewrite_inv_diag_to_diag_reciprocal(fgraph, node):
 @register_stabilize
 @node_rewriter([ExtractDiag])
 def rewrite_diag_blockdiag(fgraph, node):
+    """
+    This rewrite simplifies extracting the diagonal of a blockdiagonal matrix by concatening the diagonal values of all of the individual sub matrices.
+
+    diag(block_diag(a,b,c,....)) = concat(diag(a), diag(b), diag(c),...)
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
     # Check for inner block_diag operation
-    potential_blockdiag = node.inputs[0].owner
+    potential_block_diag = node.inputs[0].owner
     if not (
-        potential_blockdiag
-        and isinstance(potential_blockdiag.op, Blockwise)
-        and isinstance(potential_blockdiag.op.core_op, BlockDiagonal)
+        potential_block_diag
+        and isinstance(potential_block_diag.op, Blockwise)
+        and isinstance(potential_block_diag.op.core_op, BlockDiagonal)
     ):
         return None
 
     # Find the composing sub_matrices
-    submatrices = potential_blockdiag.inputs
+    submatrices = potential_block_diag.inputs
     submatrices_diag = [diag(submatrices[i]) for i in range(len(submatrices))]
-    output = [concatenate(submatrices_diag)]
 
-    return output
+    return [concatenate(submatrices_diag)]
 
 
 @register_canonicalize
 @register_stabilize
 @node_rewriter([det])
 def rewrite_det_blockdiag(fgraph, node):
+    """
+    This rewrite simplifies the determinant of a blockdiagonal matrix by extracting the individual sub matrices and returning the product of all individual determinant values.
+
+    det(block_diag(a,b,c,....)) = prod(det(a), det(b), det(c),...)
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
     # Check for inner block_diag operation
-    potential_blockdiag = node.inputs[0].owner
+    potential_block_diag = node.inputs[0].owner
     if not (
-        potential_blockdiag
-        and isinstance(potential_blockdiag.op, Blockwise)
-        and isinstance(potential_blockdiag.op.core_op, BlockDiagonal)
+        potential_block_diag
+        and isinstance(potential_block_diag.op, Blockwise)
+        and isinstance(potential_block_diag.op.core_op, BlockDiagonal)
     ):
         return None
 
     # Find the composing sub_matrices
-    sub_matrices = potential_blockdiag.inputs
+    sub_matrices = potential_block_diag.inputs
     det_sub_matrices = [det(sub_matrices[i]) for i in range(len(sub_matrices))]
-    prod_det_sub_matrices = prod(det_sub_matrices)
 
-    return [prod_det_sub_matrices]
+    return [prod(det_sub_matrices)]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([slogdet])
+def rewrite_slogdet_blockdiag(fgraph, node):
+    """
+    This rewrite simplifies the slogdet of a blockdiagonal matrix by extracting the individual sub matrices and returning the sign and logdet values computed using those
+
+    slogdet(block_diag(a,b,c,....)) = prod(sign(a), sign(b), sign(c),...), sum(logdet(a), logdet(b), logdet(c),....)
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
+    # Check for inner block_diag operation
+    potential_block_diag = node.inputs[0].owner
+    if not (
+        potential_block_diag
+        and isinstance(potential_block_diag.op, Blockwise)
+        and isinstance(potential_block_diag.op.core_op, BlockDiagonal)
+    ):
+        return None
+
+    # Find the composing sub_matrices
+    sub_matrices = potential_block_diag.inputs
+    sign_sub_matrices, logdet_sub_matrices = zip(
+        *[slogdet(sub_matrices[i]) for i in range(len(sub_matrices))]
+    )
+
+    return [prod(sign_sub_matrices), sum(logdet_sub_matrices)]
