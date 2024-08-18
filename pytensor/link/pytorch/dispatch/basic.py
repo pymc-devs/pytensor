@@ -2,6 +2,7 @@ from functools import singledispatch
 from types import NoneType
 
 import torch
+import torch.compiler
 
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp
@@ -139,14 +140,8 @@ def pytorch_funcify_MakeVector(op, **kwargs):
 def pytorch_funcify_OpFromGraph(op, node=None, **kwargs):
     _ = kwargs.pop("storage_map", None)
 
-    # @todo: Torch compile doesn't capture the scope accounting
-    # for op.fgraph, leading to an import error. Disable the
-    # dynamo compile for these graphs
-    import torch._dynamo.config
-
-    torch._dynamo.config.suppress_errors = True
-
     fgraph_fn = torch.compile(pytorch_funcify(op.fgraph, **kwargs))
+
     if len(op.fgraph.outputs) > 1:
 
         def inner(*args):
@@ -156,4 +151,11 @@ def pytorch_funcify_OpFromGraph(op, node=None, **kwargs):
         def inner(*args):
             return fgraph_fn(*args)[0]
 
-    return inner
+    # Don't compile the inner function
+    # This is due torch failing to create
+    # guards when parent scoped closure variables
+    # are used in conditional statements.
+    # Instead of rewriting many portions of code
+    # this will allow for only this small section to
+    # not be compiled by the outer graph
+    return torch.compiler.disable(inner)
