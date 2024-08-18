@@ -594,7 +594,6 @@ def rewrite_inv_inv(fgraph, node):
     list of Variable, optional
         List of optimized variables, or None if no optimization was performed
     """
-    ALL_INVERSE_OPS = (MatrixInverse, MatrixPinv)
     # Check if its a valid inverse operation (either inv/pinv)
     # In case the outer operation is an inverse, it directly goes to the next step of finding inner operation
     # If the outer operation is not a valid inverse, we do not apply this rewrite
