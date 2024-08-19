@@ -30,6 +30,7 @@ def newton_solver(x_prev, *args, func, tol):
     grad = pt.linalg.solve(jac, f_root)
     x = x_prev - grad
 
+    # TODO: consider if this can all be done as a single call to `fwd_solver` as in the jax test case
     is_converged = _check_convergence(x - x_prev, tol)
 
     return x, is_converged
