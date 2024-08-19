@@ -29,6 +29,8 @@ def jax_fwd_solver(f, z_init, tol=1e-5):
 
 
 def test_fixed_point_forward():
+    """Test taken from the [Deep Implicit Layers workshop](https://implicit-layers-tutorial.org/implicit_functions/)."""
+
     def g(x, W, b):
         return pt.tanh(pt.dot(W, x) + b)
 
@@ -82,3 +84,5 @@ def test_fixed_point_newton():
 
 # TODO: test the grad is the same as naive grad from propagating through each step of the solver (`pt.grad`)
 # and adjoint implicit function theorem rewritten grad
+# see the [notes](https://theorashid.github.io/notes/fixed-point-iteration
+# and the [Deep Implicit Layers workshop](https://implicit-layers-tutorial.org/implicit_functions/)
