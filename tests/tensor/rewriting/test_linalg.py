@@ -677,7 +677,7 @@ def test_diag_blockdiag_rewrite():
     assert not any(isinstance(node.op, BlockDiagonal) for node in nodes)
 
     # Value Test
-    sub_matrices_test = np.random.rand(n_matrices, *matrix_size)
+    sub_matrices_test = np.random.rand(n_matrices, *matrix_size).astype(config.floatX)
     bd_output_test = scipy.linalg.block_diag(
         *[sub_matrices_test[i] for i in range(n_matrices)]
     )
@@ -704,7 +704,7 @@ def test_det_blockdiag_rewrite():
     assert not any(isinstance(node.op, BlockDiagonal) for node in nodes)
 
     # Value Test
-    sub_matrices_test = np.random.rand(n_matrices, *matrix_size)
+    sub_matrices_test = np.random.rand(n_matrices, *matrix_size).astype(config.floatX)
     bd_output_test = scipy.linalg.block_diag(
         *[sub_matrices_test[i] for i in range(n_matrices)]
     )
@@ -733,7 +733,7 @@ def test_slogdet_blockdiag_rewrite():
     assert not any(isinstance(node.op, BlockDiagonal) for node in nodes)
 
     # Value Test
-    sub_matrices_test = np.random.rand(n_matrices, *matrix_size)
+    sub_matrices_test = np.random.rand(n_matrices, *matrix_size).astype(config.floatX)
     bd_output_test = scipy.linalg.block_diag(
         *[sub_matrices_test[i] for i in range(n_matrices)]
     )
