@@ -45,9 +45,9 @@ def fixed_point_solver(
 ):
     args = [pt.as_tensor(arg) for arg in args]
 
-    def _scan_step(x, *args, func, solver, tol):
+    def _scan_step(x, n_steps, *args, func, solver, tol):
         x, is_converged = solver(x, *args, func=func, tol=tol)
-        return x, until(is_converged)
+        return (x, n_steps + 1), until(is_converged)
 
     partial_step = partial(
         _scan_step,
@@ -58,13 +58,13 @@ def fixed_point_solver(
 
     outputs, updates = pytensor.scan(
         partial_step,
-        outputs_info=[x0],
+        outputs_info=[x0, pt.constant(0, dtype="int64")],
         non_sequences=list(args),
         n_steps=max_iter,
         strict=True,
     )
 
-    x_trace = outputs
+    x_trace, n_steps_trace = outputs
     assert not updates
 
-    return x_trace[-1], x_trace.shape[0]
+    return x_trace[-1], n_steps_trace[-1]
