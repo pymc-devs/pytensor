@@ -23,14 +23,14 @@ def make_declare(loop_orders, dtypes, sub):
                 decl += f"""
                 npy_intp {var}_n{int(value)};
                 ssize_t {var}_stride{int(value)};
-                int {var}_jump{int(value)}_{int(j)};
+                ssize_t {var}_jump{int(value)}_{int(j)};
                 """
 
             else:
                 # if the dimension is broadcasted, we only need
                 # the jump (arbitrary length and stride = 0)
                 decl += f"""
-                int {var}_jump{value}_{int(j)};
+                ssize_t {var}_jump{value}_{int(j)};
                 """
 
     return decl
@@ -383,7 +383,7 @@ def make_reordered_loop(
     )
 
     declare_strides = f"""
-    int init_strides[{int(nvars)}][{int(nnested)}] = {{
+    ssize_t init_strides[{int(nvars)}][{int(nnested)}] = {{
         {strides}
     }};"""
 
@@ -399,7 +399,7 @@ def make_reordered_loop(
         {ovar}_loops_rit = {ovar}_loops.rbegin();"""
         for j in reversed(range(nnested)):
             declare_strides += f"""
-            int {var}_stride_l{int(j)} = init_strides[{int(i)}][{ovar}_loops_rit->second];
+            ssize_t {var}_stride_l{int(j)} = init_strides[{int(i)}][{ovar}_loops_rit->second];
             ++{ovar}_loops_rit;
             """
 
