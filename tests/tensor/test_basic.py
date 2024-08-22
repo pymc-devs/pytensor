@@ -3418,7 +3418,7 @@ def test_unalign():
 def test_dimshuffle_duplicate():
     x = vector()
     with pytest.raises(ValueError, match="may not appear twice"):
-        DimShuffle((False,), (0, 0))(x)
+        DimShuffle(input_ndim=1, new_order=(0, 0))(x)
 
 
 class TestGetUnderlyingScalarConstantValue:

@@ -15,7 +15,7 @@ from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.gradient import grad
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
-from pytensor.tensor import elemwise as pt_elemwise
+from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import All, Any, Max, Mean, Min, Prod, ProdWithoutZeros, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 from tests.link.numba.test_basic import (
@@ -205,7 +205,7 @@ def test_elemwise_speed(benchmark):
     ],
 )
 def test_Dimshuffle(v, new_order):
-    g = pt_elemwise.DimShuffle(v.broadcastable, new_order)(v)
+    g = v.dimshuffle(new_order)
     g_fg = FunctionGraph(outputs=[g])
     compare_numba_and_py(
         g_fg,
@@ -219,7 +219,7 @@ def test_Dimshuffle(v, new_order):
 
 def test_Dimshuffle_returns_array():
     x = pt.vector("x", shape=(1,))
-    y = 2 * pt_elemwise.DimShuffle([True], [])(x)
+    y = 2 * x.dimshuffle([])
     func = pytensor.function([x], y, mode="NUMBA")
     out = func(np.zeros(1, dtype=config.floatX))
     assert out.ndim == 0
@@ -230,7 +230,7 @@ def test_Dimshuffle_non_contiguous():
     non-contiguous arrays, make sure we work around thpt."""
     x = pt.dvector()
     idx = pt.vector(dtype="int64")
-    op = pytensor.tensor.elemwise.DimShuffle([True], [])
+    op = DimShuffle(input_ndim=1, new_order=[])
     out = op(pt.specify_shape(x[idx][::2], (1,)))
     func = pytensor.function([x, idx], out, mode="NUMBA")
     assert func(np.zeros(3), np.array([1])).ndim == 0

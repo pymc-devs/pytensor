@@ -5,7 +5,6 @@ import pytensor.tensor as pt
 import pytensor.tensor.math as ptm
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
-from pytensor.tensor import elemwise as pt_elemwise
 from pytensor.tensor.special import SoftmaxGrad, log_softmax, softmax
 from pytensor.tensor.type import matrix, tensor, tensor3, vector
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
@@ -24,11 +23,6 @@ def test_pytorch_Dimshuffle():
 
     a_pt = tensor(dtype=config.floatX, shape=(None, 1))
     x = a_pt.dimshuffle((0,))
-    x_fg = FunctionGraph([a_pt], [x])
-    compare_pytorch_and_py(x_fg, [np.c_[[1.0, 2.0, 3.0, 4.0]].astype(config.floatX)])
-
-    a_pt = tensor(dtype=config.floatX, shape=(None, 1))
-    x = pt_elemwise.DimShuffle([False, True], (0,))(a_pt)
     x_fg = FunctionGraph([a_pt], [x])
     compare_pytorch_and_py(x_fg, [np.c_[[1.0, 2.0, 3.0, 4.0]].astype(config.floatX)])
 

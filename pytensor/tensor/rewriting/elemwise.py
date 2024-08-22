@@ -422,8 +422,6 @@ def local_dimshuffle_lift(fgraph, node):
 
     """
     op = node.op
-    if not isinstance(op, DimShuffle):
-        return False
 
     inp = node.inputs[0]
     inode = inp.owner
@@ -437,7 +435,7 @@ def local_dimshuffle_lift(fgraph, node):
         # Don't use make_node to have tag.test_value set.
         new_inputs = []
         for inp in inode.inputs:
-            new_inp = op.__class__(inp.type.broadcastable, op.new_order)(inp)
+            new_inp = inp.dimshuffle(op.new_order)
             new_inputs.append(apply_local_dimshuffle_lift(fgraph, new_inp))
         copy_stack_trace(node.outputs[0], new_inputs)
         ret = inode.op(*new_inputs, return_list=True)
@@ -449,7 +447,7 @@ def local_dimshuffle_lift(fgraph, node):
     if is_dimshuffle_useless(new_order, inp):
         return [inp]
     elif inode and isinstance(inode.op, DimShuffle):
-        ret = op.__class__(inp.type.broadcastable, new_order)(inp)
+        ret = inp.dimshuffle(new_order)
         ret = apply_local_dimshuffle_lift(fgraph, ret)
         copy_stack_trace(node.outputs[0], ret)
         return [ret]

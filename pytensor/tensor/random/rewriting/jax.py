@@ -65,7 +65,7 @@ def size_parameter_as_tuple(fgraph, node):
 
     if isinstance(size_node.op, MakeVector) or (
         isinstance(size_node.op, DimShuffle)
-        and size_node.op.input_broadcastable == ()
+        and size_node.op.input_ndim == 0
         and size_node.op.new_order == ("x",)
     ):
         # Here PyTensor converted a tuple or list to a tensor

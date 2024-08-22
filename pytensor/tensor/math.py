@@ -33,7 +33,6 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
 from pytensor.tensor.elemwise import (
     CAReduce,
-    DimShuffle,
     Elemwise,
     get_normalized_batch_axes,
     scalar_elemwise,
@@ -2338,8 +2337,7 @@ class Sum(FixedOpCAReduce):
             else:
                 new_dims.append(i)
                 i += 1
-        ds_op = DimShuffle(gz.type.broadcastable, new_dims)
-        gx = Elemwise(ps.second)(x, ds_op(gz))
+        gx = Elemwise(ps.second)(x, gz.dimshuffle(new_dims))
         return [gx]
 
     def R_op(self, inputs, eval_points):

@@ -4,7 +4,6 @@ import pytest
 import pytensor
 from pytensor import function
 from pytensor.compile.mode import Mode
-from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import any as pt_any
 from pytensor.tensor.math import argmax, argmin, max_and_argmax, mean, prod, std, var
@@ -40,7 +39,7 @@ class TestKeepDims:
                 new_dims.append(i)
                 i += 1
 
-        return DimShuffle(y.type.broadcastable, new_dims)(y)
+        return y.dimshuffle(new_dims)
 
     @pytest.mark.parametrize(
         "axis",

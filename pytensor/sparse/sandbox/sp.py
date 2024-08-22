@@ -19,7 +19,6 @@ from pytensor.graph.op import Op
 from pytensor.tensor.math import dot
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.shape import reshape
-from pytensor.tensor.subtensor import DimShuffle
 
 
 def register_specialize(lopt, *tags, **kwargs):
@@ -375,7 +374,7 @@ def convolve(
         [images.shape[0], pt.as_tensor(np.prod(outshp)), pt.as_tensor(nkern)]
     )
     tensout = reshape(output, newshp, ndim=3)
-    output = DimShuffle((False,) * tensout.ndim, (0, 2, 1))(tensout)
+    output = tensout.transpose(0, 2, 1)
     if flatten:
         output = pt.flatten(output, 2)
 
@@ -443,6 +442,6 @@ def max_pool(images, imgshp, maxpoolshp):
     )
     out2 = reshape(out1, pshape, ndim=3)
 
-    out3 = DimShuffle(out2.broadcastable, (0, 2, 1))(out2)
+    out3 = out2.transpose(0, 2, 1)
 
     return pt.flatten(out3, 2), outshp

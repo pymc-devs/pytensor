@@ -79,7 +79,7 @@ dimshuffle_lift = out2in(local_dimshuffle_lift)
 
 
 def ds(x, y):
-    return DimShuffle(x.type.broadcastable, y)(x)
+    return x.dimshuffle(y)
 
 
 def inputs(xbc=(0, 0), ybc=(0, 0), zbc=(0, 0)):
