@@ -494,7 +494,7 @@ def local_alloc_sink_dimshuffle(fgraph, node):
         dimshuffle_new_order = ["x"] * num_dims_with_size_1_added_to_left + list(
             range(len(new_output_shape))
         )
-        return [DimShuffle(inner.type.broadcastable, dimshuffle_new_order)(inner)]
+        return [inner.dimshuffle(dimshuffle_new_order)]
 
 
 @node_rewriter([AllocEmpty])

@@ -480,12 +480,9 @@ class TestSqueeze(utt.InferShapeTester):
         assert f([0]) == 0
 
         # Test that we cannot squeeze dimensions whose length is greater than 1
-        error_txt_1 = re.escape("SpecifyShape: Got shape (3,), expected (1,).")
-        error_txt_2 = re.escape("SpecifyShape: dim 0 of input has shape 3, expected 1")
-        match = error_txt_1 if pytensor.config.mode == "FAST_COMPILE" else error_txt_2
         with pytest.raises(
-            AssertionError,
-            match=match,
+            ValueError,
+            match="cannot reshape array of size 3 into shape ()",
         ):
             f([0, 1, 2])
 

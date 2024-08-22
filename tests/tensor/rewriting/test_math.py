@@ -160,7 +160,7 @@ _fast_run_rewrites = optdb.query(_fast_run_rewrites)
 
 
 def ds(x, y):
-    return DimShuffle(x.type.broadcastable, y)(x)
+    return x.dimshuffle(y)
 
 
 def rewrite(g, level="fast_run"):
@@ -3749,7 +3749,7 @@ def test_local_log_sum_exp_maximum():
     check_max_log_sum_exp(x, axis=(0, 1, 2), dimshuffle_op=None)
 
     # If a transpose is applied to the sum
-    transpose_op = DimShuffle((False, False), (1, 0))
+    transpose_op = DimShuffle(input_ndim=2, new_order=(1, 0))
     check_max_log_sum_exp(x, axis=2, dimshuffle_op=transpose_op)
 
     # If the sum is performed with keepdims=True
@@ -3770,7 +3770,7 @@ def test_local_log_sum_exp_near_one():
     assert np.allclose(naive_ret, rewritten_ret)
 
     # If a transpose is applied
-    transpose_op = DimShuffle((False, False), (1, 0))
+    transpose_op = DimShuffle(input_ndim=2, new_order=(1, 0))
     f = compile_graph_log_sum_exp(x, axis=(1,), dimshuffle_op=transpose_op)
     naive_ret = np.log(np.sum(np.exp(x_val), axis=1).T)
     rewritten_ret = f(x_val)

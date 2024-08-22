@@ -2042,7 +2042,7 @@ def transpose(x, axes=None):
         # No-op
         return _x
 
-    ret = DimShuffle(tuple(s == 1 for s in _x.type.shape), axes)(_x)
+    ret = _x.dimshuffle(axes)
 
     if _x.name and axes == tuple(range((_x.type.ndim - 1), -1, -1)):
         ret.name = _x.name + ".T"
@@ -3518,7 +3518,7 @@ class PermuteRowElements(Op):
                 newdims.append(i)
                 i += 1
 
-        gx = DimShuffle(tuple(s == 1 for s in gx.type.shape), newdims)(gx)
+        gx = gx.dimshuffle(newdims)
         assert gx.type.ndim == x.type.ndim
         assert all(
             s1 == s2

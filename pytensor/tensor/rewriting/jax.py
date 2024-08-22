@@ -130,7 +130,7 @@ def shape_parameter_as_tuple(fgraph, node):
 
     if isinstance(shape_node.op, MakeVector) or (
         isinstance(shape_node.op, DimShuffle)
-        and shape_node.op.input_broadcastable == ()
+        and shape_node.op.input_ndim == 0
         and shape_node.op.new_order == ("x",)
     ):
         # Here PyTensor converted a tuple or list to a tensor

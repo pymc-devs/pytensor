@@ -204,3 +204,12 @@ class TestFFT:
             pytensor.config.floatX
         )
         utt.verify_grad(f_irfft, [inputs_val], eps=eps)
+
+    def test_rfft_expanded_dims_grad(self):
+        # Regression test for https://github.com/pymc-devs/pytensor/issues/969
+        def test_func(x):
+            return fft.rfft(x[None, :])
+
+        rng = np.random.default_rng(213)
+        inputs_val = rng.random((N,)).astype(pytensor.config.floatX)
+        utt.verify_grad(test_func, [inputs_val], rng=rng)

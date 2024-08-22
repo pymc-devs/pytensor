@@ -593,9 +593,9 @@ class TestAsScalar:
         b = pt.constant(np.asarray([[[0.5]]]))
         b2 = b.dimshuffle()
         assert b2.ndim == 0
-        d_a = DimShuffle([], [])(a)
-        d_b = DimShuffle([True, True, True], [0, 2, 1])(b)
-        d_a2 = DimShuffle([], ["x", "x", "x"])(a)
+        d_a = DimShuffle(input_ndim=0, new_order=[])(a)
+        d_b = DimShuffle(input_ndim=3, new_order=[0, 2, 1])(b)
+        d_a2 = DimShuffle(input_ndim=0, new_order=["x", "x", "x"])(a)
 
         assert _as_scalar(a) == a
         assert _as_scalar(b) != b
@@ -607,13 +607,13 @@ class TestAsScalar:
         # Test that it fails on nonscalar constants
         a = pt.constant(np.ones(5))
         assert _as_scalar(a) is None
-        assert _as_scalar(DimShuffle([False], [0, "x"])(a)) is None
+        assert _as_scalar(DimShuffle(input_ndim=1, new_order=[0, "x"])(a)) is None
 
     def test_basic_2(self):
         # Test that it works on scalar variables
         a = dscalar()
-        d_a = DimShuffle([], [])(a)
-        d_a2 = DimShuffle([], ["x", "x"])(a)
+        d_a = DimShuffle(input_ndim=0, new_order=[])(a)
+        d_a2 = DimShuffle(input_ndim=0, new_order=["x", "x"])(a)
 
         assert _as_scalar(a) is a
         assert _as_scalar(d_a) is a
@@ -623,13 +623,15 @@ class TestAsScalar:
         # Test that it fails on nonscalar variables
         a = matrix()
         assert _as_scalar(a) is None
-        assert _as_scalar(DimShuffle([False, False], [0, "x", 1])(a)) is None
+        assert _as_scalar(DimShuffle(input_ndim=2, new_order=[0, "x", 1])(a)) is None
 
 
 class TestRealMatrix:
     def test_basic(self):
-        assert _is_real_matrix(DimShuffle([False, False], [1, 0])(matrix()))
-        assert not _is_real_matrix(DimShuffle([False], ["x", 0])(dvector()))
+        assert _is_real_matrix(DimShuffle(input_ndim=2, new_order=[1, 0])(matrix()))
+        assert not _is_real_matrix(
+            DimShuffle(input_ndim=1, new_order=["x", 0])(dvector())
+        )
 
 
 """

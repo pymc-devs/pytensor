@@ -39,7 +39,7 @@ def test_jax_Dimshuffle():
     compare_jax_and_py(x_fg, [np.c_[[1.0, 2.0, 3.0, 4.0]].astype(config.floatX)])
 
     a_pt = tensor(dtype=config.floatX, shape=(None, 1))
-    x = pt_elemwise.DimShuffle([False, True], (0,))(a_pt)
+    x = pt_elemwise.DimShuffle(input_ndim=2, new_order=(0,))(a_pt)
     x_fg = FunctionGraph([a_pt], [x])
     compare_jax_and_py(x_fg, [np.c_[[1.0, 2.0, 3.0, 4.0]].astype(config.floatX)])
 

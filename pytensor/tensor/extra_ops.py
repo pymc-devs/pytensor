@@ -41,7 +41,7 @@ from pytensor.tensor.math import (
 )
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.shape import Shape_i, specify_broadcastable
+from pytensor.tensor.shape import Shape_i
 from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
 from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes, vector
 from pytensor.tensor.variable import TensorVariable
@@ -608,11 +608,6 @@ def squeeze(x, axis=None):
     if _x.ndim == 0:
         # Nothing could be squeezed
         return _x
-
-    # `Dimshuffle` raises when we try to drop an axis that is not statically broadcastable.
-    # We add a `specify_broadcastable` instead of raising.
-    non_broadcastable_axis = [i for i in axis if not _x.broadcastable[i]]
-    _x = specify_broadcastable(_x, *non_broadcastable_axis)
 
     return _x.dimshuffle([i for i in range(_x.ndim) if i not in axis])
 
