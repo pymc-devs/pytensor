@@ -37,6 +37,7 @@ from pytensor.tensor.basic import (
     TensorFromScalar,
     Tri,
     alloc,
+    alloc_diag,
     arange,
     as_tensor_variable,
     atleast_Nd,
@@ -3792,6 +3793,18 @@ class TestAllocDiag:
                     grad_diag_input, offset=offset, axis1=axis1, axis2=axis2
                 )
                 assert np.all(true_grad_input == grad_input)
+
+    def test_multiple_ops_same_graph(self):
+        """Regression test when AllocDiag OFG was given insufficient props, causing incompatible Ops to be merged."""
+        v1 = vector("v1", shape=(2,), dtype="float64")
+        v2 = vector("v2", shape=(3,), dtype="float64")
+        a1 = alloc_diag(v1)
+        a2 = alloc_diag(v2)
+
+        fn = function([v1, v2], [a1, a2])
+        res1, res2 = fn(v1=[np.e, np.e], v2=[np.pi, np.pi, np.pi])
+        np.testing.assert_allclose(res1, np.eye(2) * np.e)
+        np.testing.assert_allclose(res2, np.eye(3) * np.pi)
 
 
 def test_diagonal_negative_axis():
