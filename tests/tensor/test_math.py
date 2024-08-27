@@ -3444,22 +3444,6 @@ class TestSumMeanMaxMinArgMaxVarReduceAxes:
             x.var(a)
 
 
-def reduce_bitwise_and(x, axis=-1, dtype="int8"):
-    identity = np.array((-1,), dtype=dtype)[0]
-
-    shape_without_axis = tuple(s for i, s in enumerate(x.shape) if i != axis)
-    if 0 in shape_without_axis:
-        return np.empty(shape=shape_without_axis, dtype=x.dtype)
-
-    def custom_reduce(a):
-        out = identity
-        for i in range(a.size):
-            out = np.bitwise_and(a[i], out)
-        return out
-
-    return np.apply_along_axis(custom_reduce, axis, x)
-
-
 def test_clip_grad():
     # test the gradient of clip
     def func(x, y, z):

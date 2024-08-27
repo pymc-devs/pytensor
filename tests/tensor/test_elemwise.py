@@ -40,7 +40,27 @@ from pytensor.tensor.type import (
 )
 from tests import unittest_tools
 from tests.link.test_link import make_function
-from tests.tensor.test_math import reduce_bitwise_and
+
+
+def reduce_bitwise_and(x, axis=-1, dtype="int8"):
+    """Helper function for TestCAReduce"""
+    if dtype == "uint8":
+        # in numpy version >= 2.0, out of bounds uint8 values are not converted
+        identity = np.array((255,), dtype=dtype)[0]
+    else:
+        identity = np.array((-1,), dtype=dtype)[0]
+
+    shape_without_axis = tuple(s for i, s in enumerate(x.shape) if i != axis)
+    if 0 in shape_without_axis:
+        return np.empty(shape=shape_without_axis, dtype=x.dtype)
+
+    def custom_reduce(a):
+        out = identity
+        for i in range(a.size):
+            out = np.bitwise_and(a[i], out)
+        return out
+
+    return np.apply_along_axis(custom_reduce, axis, x)
 
 
 class TestDimShuffle(unittest_tools.InferShapeTester):
