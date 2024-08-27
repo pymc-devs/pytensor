@@ -48,7 +48,7 @@ keywords = [
 dependencies = [
     "setuptools>=59.0.0",
     "scipy>=1,<2",
-    "numpy>=1.17.0,<2",
+    "numpy>=1.17.0",
     "filelock>=3.15",
     "etuples",
     "logical-unification",
@@ -129,7 +129,7 @@ exclude = ["doc/", "pytensor/_version.py"]
 docstring-code-format = true
 
 [tool.ruff.lint]
-select = ["B905", "C", "E", "F", "I", "UP", "W", "RUF", "PERF", "PTH", "ISC", "T20"]
+select = ["B905", "C", "E", "F", "I", "UP", "W", "RUF", "PERF", "PTH", "ISC", "T20", "NPY201"]
 ignore = ["C408", "C901", "E501", "E741", "RUF012", "PERF203", "ISC001"]
 unfixable = [
     # zip-strict: the auto-fix adds `strict=False` but we might want `strict=True` instead
