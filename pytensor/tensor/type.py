@@ -178,7 +178,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         else:
             if allow_downcast:
                 # Convert to self.dtype, regardless of the type of data
-                data = np.asarray(data, dtype=self.dtype)
+                data = np.asarray(data).astype(self.dtype)
                 # TODO: consider to pad shape with ones to make it consistent
                 # with self.broadcastable... like vector->row type thing
             else:

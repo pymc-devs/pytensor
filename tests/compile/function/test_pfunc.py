@@ -335,6 +335,7 @@ class TestPfunc:
         h = pfunc([a, b, c], (a + b + c))  # Default: allow_input_downcast=None
         # Everything here should behave like with False
         assert np.all(h([3], [6], 0) == 9)
+
         with pytest.raises(TypeError):
             h([3], np.array([6], dtype="int16"), 0)
 
