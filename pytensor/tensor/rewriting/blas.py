@@ -762,8 +762,6 @@ blas_optdb.register(
 )
 
 
-# After destroyhandler(49.5) but before we try to make elemwise things
-# inplace (75)
 blas_opt_inplace = in2out(
     local_inplace_gemm, local_inplace_gemv, local_inplace_ger, name="blas_opt_inplace"
 )
@@ -773,7 +771,8 @@ optdb.register(
     "fast_run",
     "inplace",
     "blas_opt_inplace",
-    position=70.0,
+    # Before we try to make elemwise things inplace (70.5)
+    position=50.2,
 )
 
 
