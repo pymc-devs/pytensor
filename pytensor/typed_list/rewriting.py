@@ -22,5 +22,5 @@ optdb.register(
     ),
     "fast_run",
     "inplace",
-    position=60,
+    position=50.1,
 )

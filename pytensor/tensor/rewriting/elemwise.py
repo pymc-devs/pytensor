@@ -186,9 +186,8 @@ class InplaceElemwiseOptimizer(GraphRewriter):
                     for i in range(len(node.inputs))
                     if i not in baseline.values()
                     and not isinstance(node.inputs[i], Constant)
-                    and
                     # the next line should not be costly most of the time.
-                    not fgraph.has_destroyers([node.inputs[i]])
+                    and not fgraph.has_destroyers([node.inputs[i]])
                     and node.inputs[i] not in protected_inputs
                 ]
             else:
@@ -362,7 +361,7 @@ compile.optdb.register(
     "inplace_elemwise_optimizer",
     "fast_run",
     "inplace",
-    position=75,
+    position=50.5,
 )
 
 
