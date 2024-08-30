@@ -33,5 +33,5 @@ if have_fblas:
         make_scipy_blas_destructive,
         "fast_run",
         "inplace",
-        position=70.0,
+        position=50.2,
     )
