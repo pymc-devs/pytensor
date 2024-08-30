@@ -2492,7 +2492,7 @@ optdb.register(
     "fast_run",
     "inplace",
     "scan",
-    position=75,
+    position=50.5,
 )
 
 scan_eqopt1.register("all_pushout_opt", scan_seqopt1, "fast_run", "scan")

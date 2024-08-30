@@ -210,7 +210,7 @@ pytensor.compile.optdb.register(
     ),
     "fast_run",
     "inplace",
-    position=60,
+    position=50.1,
 )
 
 
@@ -239,9 +239,9 @@ def local_addsd_ccode(fgraph, node):
 pytensor.compile.optdb.register(
     "local_addsd_ccode",
     WalkingGraphRewriter(local_addsd_ccode),
-    # Must be after local_inplace_addsd_ccode at 60
+    # Must be after local_inplace_addsd_ccode at 70.0
     "fast_run",
-    position=61,
+    position=70.1,
 )
 
 

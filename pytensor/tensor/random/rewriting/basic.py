@@ -60,7 +60,7 @@ optdb.register(
     in2out(random_make_inplace, ignore_newtrees=True),
     "fast_run",
     "inplace",
-    position=99,
+    position=50.9,
 )
 
 
