@@ -859,7 +859,7 @@ def rewrite_diag_kronecker(fgraph, node):
 @node_rewriter([slogdet])
 def rewrite_slogdet_kronecker(fgraph, node):
     """
-    This rewrite simplifies the slogdet of a blockdiagonal matrix by extracting the individual sub matrices and returning the sign and logdet values computed using those
+    This rewrite simplifies the slogdet of a kronecker-structured matrix by extracting the individual sub matrices and returning the sign and logdet values computed using those
 
     Parameters
     ----------
