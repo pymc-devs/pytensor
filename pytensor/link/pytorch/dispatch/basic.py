@@ -4,6 +4,7 @@ from types import NoneType
 import torch
 import torch.compiler
 
+from pytensor.compile import PYTORCH
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.fg import FunctionGraph
@@ -137,25 +138,13 @@ def pytorch_funcify_MakeVector(op, **kwargs):
 
 
 @pytorch_funcify.register(OpFromGraph)
-def pytorch_funcify_OpFromGraph(op, node=None, **kwargs):
-    _ = kwargs.pop("storage_map", None)
+def pytorch_funcify_OpFromGraph(op, node, **kwargs):
+    kwargs.pop("storage_map", None)
 
-    fgraph_fn = torch.compile(pytorch_funcify(op.fgraph, **kwargs))
+    # Apply inner rewrites
+    PYTORCH.optimizer(op.fgraph)
 
-    if len(op.fgraph.outputs) > 1:
-
-        def inner(*args):
-            return fgraph_fn(*args)
-    else:
-
-        def inner(*args):
-            return fgraph_fn(*args)[0]
-
-    # Don't compile the inner function
-    # This is due torch failing to create
-    # guards when parent scoped closure variables
-    # are used in conditional statements.
-    # Instead of rewriting many portions of code
-    # this will allow for only this small section to
-    # not be compiled by the outer graph
-    return torch.compiler.disable(inner)
+    fgraph_fn = pytorch_funcify(op.fgraph, **kwargs, squeeze_output=True)
+    # Disable one step inlining to prevent torch from trying to import local functions
+    # defined in `pytorch_funcify`
+    return torch.compiler.disable(fgraph_fn, recursive=False)
