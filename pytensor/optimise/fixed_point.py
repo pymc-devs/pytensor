@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from functools import partial
 
 import pytensor
@@ -37,8 +38,8 @@ def newton_solver(x_prev, *args, func, tol):
 
 
 def fixed_point_solver(
-    f: callable,
-    solver: callable,
+    f: Callable,
+    solver: Callable,
     x0: pt.TensorVariable,
     *args: tuple[pt.Variable, ...],
     max_iter: int = 1000,
