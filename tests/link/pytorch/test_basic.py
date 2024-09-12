@@ -414,6 +414,9 @@ def test_ScalarLoop_while():
 
     op = ScalarLoop(init=[x0], update=[x], until=until)
     fn = function([n_steps, x0], op(n_steps, x0), mode=pytorch_mode)
-    np.testing.assert_allclose(fn(n_steps=20, x0=0), [10, True])
-    np.testing.assert_allclose(fn(n_steps=20, x0=1), [10, True])
-    np.testing.assert_allclose(fn(n_steps=5, x0=1), [6, False])
+    for res, expected in zip(
+        [fn(n_steps=20, x0=0), fn(n_steps=20, x0=1), fn(n_steps=5, x0=1)],
+        [[10, True], [10, True], [6, False]],
+    ):
+        np.testing.assert_allclose(res[0], np.array(expected[0]))
+        np.testing.assert_allclose(res[1], np.array(expected[1]))

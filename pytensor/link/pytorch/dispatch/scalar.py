@@ -79,7 +79,7 @@ def pytorch_funicify_ScalarLoop(op, node, **kwargs):
                 *carry, done = update(*carry, *constants)
                 if done:
                     break
-            return torch.stack((*carry, done))
+            return torch.stack(carry), torch.tensor([done])
     else:
 
         def scalar_loop(*args):
