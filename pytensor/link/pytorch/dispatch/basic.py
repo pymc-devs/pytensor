@@ -163,6 +163,7 @@ def pytorch_funcify_IfElse(op, **kwargs):
 
     return ifelse
 
+
 @pytorch_funcify.register(TensorFromScalar)
 def pytorch_funcify_TensorFromScalar(op, **kwargs):
     def tensorfromscalar(x):
