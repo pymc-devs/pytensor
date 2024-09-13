@@ -1,6 +1,7 @@
 import importlib
 
 import torch
+import torch.compiler
 
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.scalar.basic import (
@@ -92,4 +93,4 @@ def pytorch_funicify_ScalarLoop(op, node, **kwargs):
                 carry = update(*carry, *constants)
             return torch.stack(carry)
 
-    return scalar_loop
+    return torch.compiler.disable(scalar_loop)
