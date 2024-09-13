@@ -83,8 +83,7 @@ def pytorch_funicify_ScalarLoop(op, node, **kwargs):
             return torch.stack(carry), torch.tensor([done])
     else:
 
-        def scalar_loop(*args):
-            steps, *start_and_constants = args
+        def scalar_loop(steps, *start_and_constants):
             carry, constants = (
                 start_and_constants[:state_length],
                 start_and_constants[state_length:],
