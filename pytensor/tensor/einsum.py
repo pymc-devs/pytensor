@@ -52,13 +52,14 @@ class Einsum(OpFromGraph):
     desired. We haven't decided whether we want to provide this functionality.
     """
 
-    __props__ = ("subscripts", "path", "optimized")
-
     def __init__(self, *args, subscripts: str, path: PATH, optimized: bool, **kwargs):
         self.subscripts = subscripts
         self.path = path
         self.optimized = optimized
         super().__init__(*args, **kwargs, strict=True)
+
+    def __str__(self):
+        return f"Einsum{{{self.subscripts=}, {self.path=}, {self.optimized=}}}"
 
 
 def _iota(shape: TensorVariable, axis: int) -> TensorVariable:

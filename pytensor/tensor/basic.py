@@ -3780,14 +3780,15 @@ class AllocDiag(OpFromGraph):
     Wrapper Op for alloc_diag graphs
     """
 
-    __props__ = ("axis1", "axis2")
-
     def __init__(self, *args, axis1, axis2, offset, **kwargs):
         self.axis1 = axis1
         self.axis2 = axis2
         self.offset = offset
 
         super().__init__(*args, **kwargs, strict=True)
+
+    def __str__(self):
+        return f"AllocDiag{{{self.axis1=}, {self.axis2=}, {self.offset=}}}"
 
     @staticmethod
     def is_offset_zero(node) -> bool:
