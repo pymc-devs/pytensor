@@ -308,11 +308,14 @@ def test_pytorch_ifelse():
     p1_vals = np.r_[1, 2, 3]
     p2_vals = np.r_[-1, -2, -3]
 
-    for test_value, cond in [(0.2, 0.5), (0.5, 0.4)]:
-        a = scalar("a")
-        x = ifelse(
-            a < cond, tuple(np.r_[p1_vals, p2_vals]), tuple(np.r_[p2_vals, p1_vals])
-        )
-        x_fg = FunctionGraph([a], x)
+    a = scalar("a")
+    x = ifelse(a < 0.5, tuple(np.r_[p1_vals, p2_vals]), tuple(np.r_[p2_vals, p1_vals]))
+    x_fg = FunctionGraph([a], x)
 
-        compare_pytorch_and_py(x_fg, np.array([test_value], dtype=config.floatX))
+    compare_pytorch_and_py(x_fg, np.array([0.2], dtype=config.floatX))
+
+    a = scalar("a")
+    x = ifelse(a < 0.4, tuple(np.r_[p1_vals, p2_vals]), tuple(np.r_[p2_vals, p1_vals]))
+    x_fg = FunctionGraph([a], x)
+
+    compare_pytorch_and_py(x_fg, np.array([0.5], dtype=config.floatX))
