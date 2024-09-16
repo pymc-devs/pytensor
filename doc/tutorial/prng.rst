@@ -51,10 +51,10 @@ In the long-run this deterministic mapping function should produce draws that ar
 For illustration we implement a very bad mapping function from a bit generator to uniform draws.
 
 .. code:: python
-    
+
     def bad_uniform_rng(rng, size):
         bit_generator = rng.bit_generator
-        
+
         uniform_draws = np.empty(size)
         for i in range(size):
             bit_generator.advance(1)
@@ -175,9 +175,9 @@ Shared variables are global variables that don't need (and can't) be passed as e
 
 >>> rng = pytensor.shared(np.random.default_rng(123))
 >>> next_rng, x = pt.random.uniform(rng=rng).owner.outputs
->>> 
+>>>
 >>> f = pytensor.function([], [next_rng, x])
->>> 
+>>>
 >>> next_rng_val, x = f()
 >>> print(x)
 0.6823518632481435
@@ -200,9 +200,9 @@ In this case it makes sense to simply replace the original value by the next_rng
 
 >>> rng = pytensor.shared(np.random.default_rng(123))
 >>> next_rng, x = pt.random.uniform(rng=rng).owner.outputs
->>> 
+>>>
 >>> f = pytensor.function([], x, updates={rng: next_rng})
->>> 
+>>>
 >>> f(), f(), f()
 (array(0.68235186), array(0.05382102), array(0.22035987))
 
@@ -210,10 +210,10 @@ Another way of doing that is setting a default_update in the shared RNG variable
 
 >>> rng = pytensor.shared(np.random.default_rng(123))
 >>> next_rng, x = pt.random.uniform(rng=rng).owner.outputs
->>> 
+>>>
 >>> rng.default_update = next_rng
 >>> f = pytensor.function([], x)
->>> 
+>>>
 >>> f(), f(), f()
 (array(0.68235186), array(0.05382102), array(0.22035987))
 
@@ -232,12 +232,12 @@ the SciPy-like API of `pytensor.tensor.random`. Full documentation can be found 
 >>> print(f(), f(), f())
 0.19365083425294516 0.7541389670292019 0.2762903411491048
 
-Shared RNGs are created by default 
+Shared RNGs are created by default
 ----------------------------------
 
 If no rng is provided to a RandomVariable Op, a shared RandomGenerator is created automatically.
 
-This can give the appearance that PyTensor functions of random variables don't have any variable inputs, 
+This can give the appearance that PyTensor functions of random variables don't have any variable inputs,
 but this is not true.
 They are simply shared variables.
 
@@ -252,10 +252,10 @@ Shared RNG variables can be "reseeded" by setting them to the original RNG
 
 >>> rng = pytensor.shared(np.random.default_rng(123))
 >>> next_rng, x = pt.random.normal(rng=rng).owner.outputs
->>> 
+>>>
 >>> rng.default_update = next_rng
 >>> f = pytensor.function([], x)
->>> 
+>>>
 >>> print(f(), f())
 >>> rng.set_value(np.random.default_rng(123))
 >>> print(f(), f())
@@ -267,7 +267,7 @@ RandomStreams provide a helper method to achieve the same
 >>> rng = pt.random.RandomStream(seed=123)
 >>> x = srng.normal()
 >>> f = pytensor.function([], x)
->>> 
+>>>
 >>> print(f(), f())
 >>> srng.seed(123)
 >>> print(f(), f())
@@ -373,7 +373,7 @@ uniform_rv{"(),()->()"}.1 [id A] d={0: [0]} 0
 
 >>> rng = pytensor.shared(np.random.default_rng(), name="rng")
 >>> next_rng, x = pt.random.uniform(rng=rng).owner.outputs
->>> 
+>>>
 >>> inplace_f = pytensor.function([], [x], updates={rng: next_rng})
 >>> pytensor.dprint(inplace_f, print_destroy_map=True) # doctest: +SKIP
 uniform_rv{"(),()->()"}.1 [id A] d={0: [0]} 0
@@ -392,15 +392,15 @@ It's common practice to use separate RNG variables for each RandomVariable in Py
 
 >>> rng_x = pytensor.shared(np.random.default_rng(123), name="rng_x")
 >>> rng_y = pytensor.shared(np.random.default_rng(456), name="rng_y")
->>> 
+>>>
 >>> next_rng_x, x = pt.random.normal(loc=0, scale=10, rng=rng_x).owner.outputs
 >>> next_rng_y, y = pt.random.normal(loc=x, scale=0.1, rng=rng_y).owner.outputs
->>> 
+>>>
 >>> next_rng_x.name = "next_rng_x"
 >>> next_rng_y.name = "next_rng_y"
 >>> rng_x.default_update = next_rng_x
 >>> rng_y.default_update = next_rng_y
->>> 
+>>>
 >>> f = pytensor.function([], [x, y])
 >>> pytensor.dprint(f, print_type=True) # doctest: +SKIP
 normal_rv{"(),()->()"}.1 [id A] <Scalar(float64, shape=())> 0
@@ -430,7 +430,7 @@ This is what RandomStream does as well
 >>> srng = pt.random.RandomStream(seed=123)
 >>> x = srng.normal(loc=0, scale=10)
 >>> y = srng.normal(loc=x, scale=0.1)
->>> 
+>>>
 >>> f = pytensor.function([], [x, y])
 >>> pytensor.dprint(f, print_type=True) # doctest: +SKIP
 normal_rv{"(),()->()"}.1 [id A] <Scalar(float64, shape=())> 0
@@ -462,7 +462,7 @@ We could have used a single rng.
 >>> next_rng_x.name = "next_rng_x"
 >>> next_rng_y, y = pt.random.normal(loc=100, scale=1, rng=next_rng_x).owner.outputs
 >>> next_rng_y.name = "next_rng_y"
->>> 
+>>>
 >>> f = pytensor.function([], [x, y], updates={rng: next_rng_y})
 >>> pytensor.dprint(f, print_type=True) # doctest: +SKIP
 normal_rv{"(),()->()"}.1 [id A] <Scalar(float64, shape=())> 0
@@ -508,10 +508,10 @@ Scan works very similar to a function (that is called repeatedly inside an outer
 This means that random variables will always return the same output unless updates are specified.
 
 >>> rng = pytensor.shared(np.random.default_rng(123), name="rng")
->>> 
+>>>
 >>> def constant_step(rng):
 >>>     return pt.random.normal(rng=rng)
->>> 
+>>>
 >>> draws, updates = pytensor.scan(
 >>>     fn=constant_step,
 >>>     outputs_info=[None],
@@ -519,7 +519,7 @@ This means that random variables will always return the same output unless updat
 >>>     n_steps=5,
 >>>     strict=True,
 >>> )
->>> 
+>>>
 >>> f = pytensor.function([], draws, updates=updates)
 >>> f(), f()
 (array([-0.98912135, -0.98912135, -0.98912135, -0.98912135, -0.98912135]),
@@ -528,12 +528,12 @@ This means that random variables will always return the same output unless updat
 Scan accepts an update dictionary as an output to tell how shared variables should be updated after every iteration.
 
 >>> rng = pytensor.shared(np.random.default_rng(123))
->>> 
+>>>
 >>> def random_step(rng):
 >>>     next_rng, x = pt.random.normal(rng=rng).owner.outputs
 >>>     scan_update = {rng: next_rng}
 >>>     return x, scan_update
->>> 
+>>>
 >>> draws, updates = pytensor.scan(
 >>>     fn=random_step,
 >>>     outputs_info=[None],
@@ -541,7 +541,7 @@ Scan accepts an update dictionary as an output to tell how shared variables shou
 >>>     n_steps=5,
 >>>     strict=True
 >>> )
->>> 
+>>>
 >>> f = pytensor.function([], draws)
 >>> f(), f()
 (array([-0.98912135, -0.36778665,  1.28792526,  0.19397442,  0.9202309 ]),
@@ -563,7 +563,7 @@ Like function, scan also respects shared variables default updates
 >>>     next_rng, x = pt.random.normal(rng=rng).owner.outputs
 >>>     rng.default_update = next_rng
 >>>     return x
->>> 
+>>>
 >>> draws, updates = pytensor.scan(
 >>>     fn=random_step,
 >>>     outputs_info=[None],
@@ -589,10 +589,10 @@ As expected, Scan only looks at default updates for shared variables created ins
 >>> rng = pytensor.shared(np.random.default_rng(123), name="rng")
 >>> next_rng, x = pt.random.normal(rng=rng).owner.outputs
 >>> rng.default_update = next_rng
->>>     
->>> def random_step(rng, x):    
+>>>
+>>> def random_step(rng, x):
 >>>     return x
->>> 
+>>>
 >>> draws, updates = pytensor.scan(
 >>>     fn=random_step,
 >>>     outputs_info=[None],
@@ -611,11 +611,11 @@ As expected, Scan only looks at default updates for shared variables created ins
 RNGs in Scan are only supported via shared variables in non-sequences at the moment
 
 >>> rng = pt.random.type.RandomGeneratorType()("rng")
->>> 
+>>>
 >>> def random_step(rng):
 >>>     next_rng, x = pt.random.normal(rng=rng).owner.outputs
 >>>     return next_rng, x
->>> 
+>>>
 >>> try:
 >>>     (next_rngs, draws), updates = pytensor.scan(
 >>>         fn=random_step,
@@ -635,21 +635,21 @@ OpFromGraph
 In contrast to Scan, non-shared RNG variables can be used directly in OpFromGraph
 
 >>> from pytensor.compile.builders import OpFromGraph
->>> 
+>>>
 >>> rng = pt.random.type.RandomGeneratorType()("rng")
->>> 
+>>>
 >>> def lognormal(rng):
 >>>     next_rng, x = pt.random.normal(rng=rng).owner.outputs
 >>>     return [next_rng, pt.exp(x)]
->>> 
+>>>
 >>> lognormal_ofg = OpFromGraph([rng], lognormal(rng))
 
 >>> rng_x = pytensor.shared(np.random.default_rng(1), name="rng_x")
 >>> rng_y = pytensor.shared(np.random.default_rng(2), name="rng_y")
->>> 
+>>>
 >>> next_rng_x, x = lognormal_ofg(rng_x)
->>> next_rng_y, y = lognormal_ofg(rng_y) 
->>> 
+>>> next_rng_y, y = lognormal_ofg(rng_y)
+>>>
 >>> f = pytensor.function([], [x, y], updates={rng_x: next_rng_x, rng_y: next_rng_y})
 
 >>> f(), f(), f()

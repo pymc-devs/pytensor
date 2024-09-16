@@ -226,7 +226,7 @@ import ``pytensor`` and print the config variable, as in:
     in the future.
 
     The ``'numpy+floatX'`` setting attempts to mimic NumPy casting rules,
-    although it prefers to use ``float32` `numbers instead of ``float64`` when
+    although it prefers to use ``float32`` numbers instead of ``float64`` when
     ``config.floatX`` is set to ``'float32'`` and the associated data is not
     explicitly typed as ``float64`` (e.g. regular Python floats).  Note that
     ``'numpy+floatX'`` is not currently behaving exactly as planned (it is a
