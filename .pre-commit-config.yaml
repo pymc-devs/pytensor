@@ -21,6 +21,11 @@ repos:
               pytensor/tensor/variable\.py|
           )$
       - id: check-merge-conflict
+  - repo: https://github.com/sphinx-contrib/sphinx-lint                                  
+    rev: v1.0.0                                                                          
+    hooks:                                                                               
+    - id: sphinx-lint 
+      args: ["."]
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.6.5
     hooks:

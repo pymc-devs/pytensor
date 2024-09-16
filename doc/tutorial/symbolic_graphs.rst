@@ -1,3 +1,3 @@
 :orphan:
 
-This page has been moved. Please refer to: :ref:`graphstructures`. 
+This page has been moved. Please refer to: :ref:`graphstructures`.

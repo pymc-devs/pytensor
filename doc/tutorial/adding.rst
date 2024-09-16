@@ -7,12 +7,12 @@ Baby Steps - Algebra
 Understanding Tensors
 ===========================
 
-Before diving into PyTensor, it's essential to understand the fundamental 
-data structure it operates on: the *tensor*. A *tensor* is a multi-dimensional 
+Before diving into PyTensor, it's essential to understand the fundamental
+data structure it operates on: the *tensor*. A *tensor* is a multi-dimensional
 array that serves as the foundation for symbolic computations.
 
-tensors can represent anything from a single number (scalar) to 
-complex multi-dimensional arrays. Each tensor has a type that dictates its 
+tensors can represent anything from a single number (scalar) to
+complex multi-dimensional arrays. Each tensor has a type that dictates its
 dimensionality and the kind of data it holds.
 
 For example, the following code creates a symbolic scalar and a symbolic matrix:
@@ -20,11 +20,11 @@ For example, the following code creates a symbolic scalar and a symbolic matrix:
 >>> x = pt.scalar('x')
 >>> y = pt.matrix('y')
 
-Here, `scalar` refers to a tensor with zero dimensions, while `matrix` refers 
-to a tensor with two dimensions. The same principles apply to tensors of other 
+Here, `scalar` refers to a tensor with zero dimensions, while `matrix` refers
+to a tensor with two dimensions. The same principles apply to tensors of other
 dimensions.
 
-For more information about tensors and their associated operations can be 
+For more information about tensors and their associated operations can be
 found here: :ref:`tensor <libdoc_tensor>`.
 
 

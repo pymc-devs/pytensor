@@ -152,7 +152,7 @@ This distance between consecutive elements of an array over a given dimension,
 is called the stride of that dimension.
 
 
-Accessing NumPy :class`ndarray`\s' data and properties
+Accessing NumPy :class:`ndarray`'s data and properties
 ------------------------------------------------------
 
 The following macros serve to access various attributes of NumPy :class:`ndarray`\s.
