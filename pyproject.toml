@@ -124,6 +124,9 @@ testpaths = "tests/"
 line-length = 88
 exclude = ["doc/", "pytensor/_version.py"]
 
+[tool.ruff.format]
+docstring-code-format = true
+
 [tool.ruff.lint]
 select = ["C", "E", "F", "I", "UP", "W", "RUF", "PERF", "PTH", "ISC"]
 ignore = ["C408", "C901", "E501", "E741", "RUF012", "PERF203", "ISC001"]

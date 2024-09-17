@@ -207,13 +207,20 @@ def scan(
 
         .. code-block:: python
 
-            scan(fn, sequences = [ dict(input= Sequence1, taps = [-3,2,-1])
-                                 , Sequence2
-                                 , dict(input =  Sequence3, taps = 3) ]
-                   , outputs_info = [ dict(initial =  Output1, taps = [-3,-5])
-                                    , dict(initial = Output2, taps = None)
-                                    , Output3 ]
-                   , non_sequences = [ Argument1, Argument2])
+            scan(
+                fn,
+                sequences=[
+                    dict(input=Sequence1, taps=[-3, 2, -1]),
+                    Sequence2,
+                    dict(input=Sequence3, taps=3),
+                ],
+                outputs_info=[
+                    dict(initial=Output1, taps=[-3, -5]),
+                    dict(initial=Output2, taps=None),
+                    Output3,
+                ],
+                non_sequences=[Argument1, Argument2],
+            )
 
         `fn` should expect the following arguments in this given order:
 
@@ -240,11 +247,12 @@ def scan(
 
             import pytensor.tensor as pt
 
-            W   = pt.matrix()
+            W = pt.matrix()
             W_2 = W**2
 
+
             def f(x):
-                return pt.dot(x,W_2)
+                return pt.dot(x, W_2)
 
         The function `fn` is expected to return two things. One is a list of
         outputs ordered in the same order as `outputs_info`, with the
@@ -266,7 +274,7 @@ def scan(
         .. code-block:: python
 
             ...
-            return [y1_t, y2_t], {x:x+1}, until(x < 50)
+            return [y1_t, y2_t], {x: x + 1}, until(x < 50)
 
         Note that a number of steps--considered in here as the maximum
         number of steps--is still required even though a condition is

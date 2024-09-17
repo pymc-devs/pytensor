@@ -77,7 +77,7 @@ class DimShuffle(ExternalCOp):
 
     .. code-block:: python
 
-        DimShuffle((False, False, False), ['x', 2, 'x', 0, 1])
+        DimShuffle((False, False, False), ["x", 2, "x", 0, 1])
 
     This `Op` will only work on 3d tensors with no broadcastable
     dimensions.  The first dimension will be broadcastable,
@@ -101,16 +101,16 @@ class DimShuffle(ExternalCOp):
     --------
     .. code-block:: python
 
-        DimShuffle((), ['x'])  # make a 0d (scalar) into a 1d vector
+        DimShuffle((), ["x"])  # make a 0d (scalar) into a 1d vector
         DimShuffle((False, False), [0, 1])  # identity
         DimShuffle((False, False), [1, 0])  # inverts the 1st and 2nd dimensions
-        DimShuffle((False,), ['x', 0])  # make a row out of a 1d vector
-                                        # (N to 1xN)
-        DimShuffle((False,), [0, 'x'])  # make a column out of a 1d vector
-                                        # (N to Nx1)
+        DimShuffle((False,), ["x", 0])  # make a row out of a 1d vector
+        # (N to 1xN)
+        DimShuffle((False,), [0, "x"])  # make a column out of a 1d vector
+        # (N to Nx1)
         DimShuffle((False, False, False), [2, 0, 1])  # AxBxC to CxAxB
-        DimShuffle((False, False), [0, 'x', 1])  # AxB to Ax1xB
-        DimShuffle((False, False), [1, 'x', 0])  # AxB to Bx1xA
+        DimShuffle((False, False), [0, "x", 1])  # AxB to Ax1xB
+        DimShuffle((False, False), [1, "x", 0])  # AxB to Bx1xA
 
     The reordering of the dimensions can be done with the numpy.transpose
     function.
@@ -1180,15 +1180,15 @@ class CAReduce(COp):
     -----
     .. code-block:: python
 
-        CAReduce(add)      # sum (ie, acts like the numpy sum operation)
-        CAReduce(mul)      # product
+        CAReduce(add)  # sum (ie, acts like the numpy sum operation)
+        CAReduce(mul)  # product
         CAReduce(maximum)  # max
         CAReduce(minimum)  # min
-        CAReduce(or_)      # any # not lazy
-        CAReduce(and_)     # all # not lazy
-        CAReduce(xor)      # a bit at 1 tell that there was an odd number of
-                           # bit at that position that where 1. 0 it was an
-                           # even number ...
+        CAReduce(or_)  # any # not lazy
+        CAReduce(and_)  # all # not lazy
+        CAReduce(xor)  # a bit at 1 tell that there was an odd number of
+        # bit at that position that where 1. 0 it was an
+        # even number ...
 
     In order to (eventually) optimize memory usage patterns,
     `CAReduce` makes zero guarantees on the order in which it

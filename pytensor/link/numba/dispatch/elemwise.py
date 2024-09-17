@@ -185,7 +185,9 @@ def create_axis_reducer(
     .. code-block:: python
 
         def careduce_axis(x):
-            res_shape = tuple(shape[i] if i < axis else shape[i + 1] for i in range(ndim - 1))
+            res_shape = tuple(
+                shape[i] if i < axis else shape[i + 1] for i in range(ndim - 1)
+            )
             res = np.full(res_shape, identity, dtype=dtype)
 
             x_axis_first = x.transpose(reaxis_first)
