@@ -165,7 +165,7 @@ def pytorch_funcify_OpFromGraph(op, node, **kwargs):
     # defined in `pytorch_funcify`
     return torch.compiler.disable(fgraph_fn, recursive=False)
 
- 
+
 @pytorch_funcify.register(TensorFromScalar)
 def pytorch_funcify_TensorFromScalar(op, **kwargs):
     def tensorfromscalar(x):
