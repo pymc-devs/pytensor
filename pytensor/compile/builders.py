@@ -355,7 +355,7 @@ class OpFromGraph(Op, HasInnerGraph):
             var_counts = {var: inputs.count(var) for var in inputs}
             duplicated_inputs = [var for var, count in var_counts.items() if count > 1]
             raise ValueError(
-                f"There following variables were provided more than once as inputs to the OpFromGraph, resulting in an "
+                f"The following variables were provided more than once as inputs to the OpFromGraph, resulting in an "
                 f"invalid graph: {duplicated_inputs}. Use dummy variables or var.copy() to distinguish "
                 f"variables when creating the OpFromGraph graph."
             )
