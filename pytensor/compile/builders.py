@@ -190,7 +190,8 @@ class OpFromGraph(Op, HasInnerGraph):
 
         from pytensor import function, tensor as pt
         from pytensor.compile.builders import OpFromGraph
-        x, y, z = pt.scalars('xyz')
+
+        x, y, z = pt.scalars("xyz")
         e = x + y * z
         op = OpFromGraph([x, y, z], [e])
         # op behaves like a normal pytensor op
@@ -206,7 +207,7 @@ class OpFromGraph(Op, HasInnerGraph):
         from pytensor import config, function, tensor as pt
         from pytensor.compile.builders import OpFromGraph
 
-        x, y, z = pt.scalars('xyz')
+        x, y, z = pt.scalars("xyz")
         s = pytensor.shared(np.random.random((2, 2)).astype(config.floatX))
         e = x + y * z + s
         op = OpFromGraph([x, y, z], [e])
@@ -221,12 +222,16 @@ class OpFromGraph(Op, HasInnerGraph):
         from pytensor import function, tensor as pt, grad
         from pytensor.compile.builders import OpFromGraph
 
-        x, y, z = pt.scalars('xyz')
+        x, y, z = pt.scalars("xyz")
         e = x + y * z
+
+
         def rescale_dy(inps, outputs, out_grads):
             x, y, z = inps
-            g, = out_grads
-            return z*2
+            (g,) = out_grads
+            return z * 2
+
+
         op = OpFromGraph(
             [x, y, z],
             [e],
@@ -236,7 +241,7 @@ class OpFromGraph(Op, HasInnerGraph):
         dx, dy, dz = grad(e2, [x, y, z])
         fn = function([x, y, z], [dx, dy, dz])
         # the gradient wrt y is now doubled
-        fn(2., 3., 4.) # [1., 8., 3.]
+        fn(2.0, 3.0, 4.0)  # [1., 8., 3.]
 
     """
 

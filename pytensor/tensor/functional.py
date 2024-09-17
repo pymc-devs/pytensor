@@ -39,8 +39,10 @@ def vectorize(func: Callable, signature: str | None = None) -> Callable:
         import pytensor
         import pytensor.tensor as pt
 
+
         def func(x):
             return pt.exp(x) / pt.sum(pt.exp(x))
+
 
         vec_func = pt.vectorize(func, signature="(a)->(a)")
 
@@ -58,8 +60,10 @@ def vectorize(func: Callable, signature: str | None = None) -> Callable:
         import pytensor
         import pytensor.tensor as pt
 
+
         def func(x):
             return x[0], x[-1]
+
 
         vec_func = pt.vectorize(func, signature="(a)->(),()")
 

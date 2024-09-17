@@ -467,6 +467,7 @@ def einsum(subscripts: str, *operands: "TensorLike", optimize=None) -> TensorVar
     .. code-block:: python
 
         import pytensor as pt
+
         A = pt.matrix("A")
         B = pt.matrix("B")
         C = pt.einsum("ij, jk -> ik", A, B)
@@ -481,6 +482,7 @@ def einsum(subscripts: str, *operands: "TensorLike", optimize=None) -> TensorVar
     .. code-block:: python
 
         import pytensor as pt
+
         A = pt.tensor("A", shape=(None, 4, 5))
         B = pt.tensor("B", shape=(None, 5, 6))
         C = pt.einsum("bij, bjk -> bik", A, B)
@@ -496,6 +498,7 @@ def einsum(subscripts: str, *operands: "TensorLike", optimize=None) -> TensorVar
     .. code-block:: python
 
         import pytensor as pt
+
         A = pt.tensor("A", shape=(4, None, None, None, 5))
         B = pt.tensor("B", shape=(5, None, None, None, 6))
         C = pt.einsum("i...j, j...k -> ...ik", A, B)
@@ -510,6 +513,7 @@ def einsum(subscripts: str, *operands: "TensorLike", optimize=None) -> TensorVar
     .. code-block:: python
 
         import pytensor as pt
+
         x = pt.tensor("x", shape=(3,))
         y = pt.tensor("y", shape=(4,))
         z = pt.einsum("i, j -> ij", x, y)

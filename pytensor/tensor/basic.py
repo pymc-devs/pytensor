@@ -1113,13 +1113,13 @@ def tril(m, k=0):
     Examples
     --------
     >>> import pytensor.tensor as pt
-    >>> pt.tril(pt.arange(1,13).reshape((4,3)), -1).eval()
+    >>> pt.tril(pt.arange(1, 13).reshape((4, 3)), -1).eval()
     array([[ 0,  0,  0],
            [ 4,  0,  0],
            [ 7,  8,  0],
            [10, 11, 12]])
 
-    >>> pt.tril(pt.arange(3*4*5).reshape((3, 4, 5))).eval()
+    >>> pt.tril(pt.arange(3 * 4 * 5).reshape((3, 4, 5))).eval()
     array([[[ 0,  0,  0,  0,  0],
             [ 5,  6,  0,  0,  0],
             [10, 11, 12,  0,  0],
@@ -1162,7 +1162,7 @@ def triu(m, k=0):
            [ 0,  8,  9],
            [ 0,  0, 12]])
 
-    >>> pt.triu(np.arange(3*4*5).reshape((3, 4, 5))).eval()
+    >>> pt.triu(np.arange(3 * 4 * 5).reshape((3, 4, 5))).eval()
     array([[[ 0,  1,  2,  3,  4],
             [ 0,  6,  7,  8,  9],
             [ 0,  0, 12, 13, 14],
@@ -2108,9 +2108,9 @@ class Split(COp):
     >>> splits = pt.vector(dtype="int")
 
     You have to declare right away how many split_points there will be.
-    >>> ra, rb, rc = pt.split(x, splits, n_splits = 3, axis = 0)
+    >>> ra, rb, rc = pt.split(x, splits, n_splits=3, axis=0)
     >>> f = function([x, splits], [ra, rb, rc])
-    >>> a, b, c = f([0,1,2,3,4,5], [3, 2, 1])
+    >>> a, b, c = f([0, 1, 2, 3, 4, 5], [3, 2, 1])
     >>> a
     array([0, 1, 2])
     >>> b
@@ -2831,28 +2831,28 @@ def stack(tensors: Sequence["TensorLike"], axis: int = 0):
     >>> b = pytensor.tensor.type.scalar()
     >>> c = pytensor.tensor.type.scalar()
     >>> x = pytensor.tensor.stack([a, b, c])
-    >>> x.ndim # x is a vector of length 3.
+    >>> x.ndim  # x is a vector of length 3.
     1
     >>> a = pytensor.tensor.type.tensor4()
     >>> b = pytensor.tensor.type.tensor4()
     >>> c = pytensor.tensor.type.tensor4()
     >>> x = pytensor.tensor.stack([a, b, c])
-    >>> x.ndim # x is a 5d tensor.
+    >>> x.ndim  # x is a 5d tensor.
     5
     >>> rval = x.eval(dict((t, np.zeros((2, 2, 2, 2))) for t in [a, b, c]))
-    >>> rval.shape # 3 tensors are stacked on axis 0
+    >>> rval.shape  # 3 tensors are stacked on axis 0
     (3, 2, 2, 2, 2)
     >>> x = pytensor.tensor.stack([a, b, c], axis=3)
     >>> x.ndim
     5
     >>> rval = x.eval(dict((t, np.zeros((2, 2, 2, 2))) for t in [a, b, c]))
-    >>> rval.shape # 3 tensors are stacked on axis 3
+    >>> rval.shape  # 3 tensors are stacked on axis 3
     (2, 2, 2, 3, 2)
     >>> x = pytensor.tensor.stack([a, b, c], axis=-2)
     >>> x.ndim
     5
     >>> rval = x.eval(dict((t, np.zeros((2, 2, 2, 2))) for t in [a, b, c]))
-    >>> rval.shape # 3 tensors are stacked on axis -2
+    >>> rval.shape  # 3 tensors are stacked on axis -2
     (2, 2, 2, 3, 2)
     """
     if not isinstance(tensors, Sequence):
@@ -3892,7 +3892,7 @@ def stacklists(arg):
     >>> from pytensor.tensor import stacklists
     >>> from pytensor.tensor.type import scalars, matrices
     >>> from pytensor import function
-    >>> a, b, c, d = scalars('abcd')
+    >>> a, b, c, d = scalars("abcd")
     >>> X = stacklists([[a, b], [c, d]])
     >>> f = function([a, b, c, d], X)
     >>> f(1, 2, 3, 4)
@@ -3903,10 +3903,10 @@ def stacklists(arg):
     a 2 by 2 grid:
 
     >>> from numpy import ones
-    >>> a, b, c, d = matrices('abcd')
+    >>> a, b, c, d = matrices("abcd")
     >>> X = stacklists([[a, b], [c, d]])
     >>> f = function([a, b, c, d], X)
-    >>> x = ones((4, 4), 'float32')
+    >>> x = ones((4, 4), "float32")
     >>> f(x, x, x, x).shape
     (2, 2, 4, 4)
 

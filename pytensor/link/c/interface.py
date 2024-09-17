@@ -30,7 +30,7 @@ class CLinkerObject:
         .. code-block:: python
 
             def c_headers(self, **kwargs):
-                return ['<iostream>', '<math.h>', '/full/path/to/header.h']
+                return ["<iostream>", "<math.h>", "/full/path/to/header.h"]
 
 
         """
@@ -54,7 +54,7 @@ class CLinkerObject:
         .. code-block:: python
 
             def c_header_dirs(self, **kwargs):
-                return ['/usr/local/include', '/opt/weirdpath/src/include']
+                return ["/usr/local/include", "/opt/weirdpath/src/include"]
 
         """
         return []
@@ -134,7 +134,7 @@ class CLinkerObject:
         .. code-block:: python
 
             def c_compile_args(self, **kwargs):
-                return ['-ffast-math']
+                return ["-ffast-math"]
 
         """
         return []

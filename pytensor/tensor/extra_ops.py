@@ -267,13 +267,13 @@ def searchsorted(x, v, side="left", sorter=None):
     >>> from pytensor.tensor import extra_ops
     >>> x = pt.dvector("x")
     >>> idx = x.searchsorted(3)
-    >>> idx.eval({x: [1,2,3,4,5]})
+    >>> idx.eval({x: [1, 2, 3, 4, 5]})
     array(2)
-    >>> extra_ops.searchsorted([1,2,3,4,5], 3).eval()
+    >>> extra_ops.searchsorted([1, 2, 3, 4, 5], 3).eval()
     array(2)
-    >>> extra_ops.searchsorted([1,2,3,4,5], 3, side='right').eval()
+    >>> extra_ops.searchsorted([1, 2, 3, 4, 5], 3, side="right").eval()
     array(3)
-    >>> extra_ops.searchsorted([1,2,3,4,5], [-10, 10, 2, 3]).eval()
+    >>> extra_ops.searchsorted([1, 2, 3, 4, 5], [-10, 10, 2, 3]).eval()
     array([0, 5, 1, 2])
 
     .. versionadded:: 0.9
@@ -1176,7 +1176,7 @@ class Unique(Op):
 
     >>> x = pytensor.tensor.vector()
     >>> f = pytensor.function([x], Unique(True, True, False)(x))
-    >>> f([1, 2., 3, 4, 3, 2, 1.])
+    >>> f([1, 2.0, 3, 4, 3, 2, 1.0])
     [array([1., 2., 3., 4.]), array([0, 1, 2, 3]), array([0, 1, 2, 3, 2, 1, 0])]
 
     >>> y = pytensor.tensor.matrix()

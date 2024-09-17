@@ -692,25 +692,24 @@ def subgraph_grad(wrt, end, start=None, cost=None, details=False):
 
     .. code-block:: python
 
-        x, t = pytensor.tensor.fvector('x'), pytensor.tensor.fvector('t')
-        w1 = pytensor.shared(np.random.standard_normal((3,4)))
-        w2 = pytensor.shared(np.random.standard_normal((4,2)))
-        a1 = pytensor.tensor.tanh(pytensor.tensor.dot(x,w1))
-        a2 = pytensor.tensor.tanh(pytensor.tensor.dot(a1,w2))
+        x, t = pytensor.tensor.fvector("x"), pytensor.tensor.fvector("t")
+        w1 = pytensor.shared(np.random.standard_normal((3, 4)))
+        w2 = pytensor.shared(np.random.standard_normal((4, 2)))
+        a1 = pytensor.tensor.tanh(pytensor.tensor.dot(x, w1))
+        a2 = pytensor.tensor.tanh(pytensor.tensor.dot(a1, w2))
         cost2 = pytensor.tensor.sqr(a2 - t).sum()
         cost2 += pytensor.tensor.sqr(w2.sum())
         cost1 = pytensor.tensor.sqr(w1.sum())
 
-        params = [[w2],[w1]]
-        costs = [cost2,cost1]
+        params = [[w2], [w1]]
+        costs = [cost2, cost1]
         grad_ends = [[a1], [x]]
 
         next_grad = None
         param_grads = []
         for i in range(2):
             param_grad, next_grad = pytensor.subgraph_grad(
-                wrt=params[i], end=grad_ends[i],
-                start=next_grad, cost=costs[i]
+                wrt=params[i], end=grad_ends[i], start=next_grad, cost=costs[i]
             )
             next_grad = dict(zip(grad_ends[i], next_grad))
             param_grads.extend(param_grad)
@@ -1704,9 +1703,11 @@ def verify_grad(
 
     Examples
     --------
-    >>> verify_grad(pytensor.tensor.tanh,
-    ...             (np.asarray([[2, 3, 4], [-1, 3.3, 9.9]]),),
-    ...             rng=np.random.default_rng(23098))
+    >>> verify_grad(
+    ...     pytensor.tensor.tanh,
+    ...     (np.asarray([[2, 3, 4], [-1, 3.3, 9.9]]),),
+    ...     rng=np.random.default_rng(23098),
+    ... )
 
     Parameters
     ----------
@@ -2342,9 +2343,9 @@ def grad_clip(x, lower_bound, upper_bound):
     Examples
     --------
     >>> x = pytensor.tensor.type.scalar()
-    >>> z = pytensor.gradient.grad(grad_clip(x, -1, 1)**2, x)
+    >>> z = pytensor.gradient.grad(grad_clip(x, -1, 1) ** 2, x)
     >>> z2 = pytensor.gradient.grad(x**2, x)
-    >>> f = pytensor.function([x], outputs = [z, z2])
+    >>> f = pytensor.function([x], outputs=[z, z2])
     >>> print(f(2.0))
     [array(1.), array(4.)]
 
@@ -2383,7 +2384,7 @@ def grad_scale(x, multiplier):
     >>> fprime = pytensor.function([x], fp)
     >>> print(fprime(2))  # doctest: +ELLIPSIS
     -0.416...
-    >>> f_inverse=grad_scale(fx, -1.)
+    >>> f_inverse = grad_scale(fx, -1.0)
     >>> fpp = pytensor.grad(f_inverse, wrt=x)
     >>> fpprime = pytensor.function([x], fpp)
     >>> print(fpprime(2))  # doctest: +ELLIPSIS

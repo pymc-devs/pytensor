@@ -209,9 +209,9 @@ class autocast_float_as:
     Examples
     --------
     >>> from pytensor.tensor import fvector
-    >>> with autocast_float_as('float32'):
-    ...    assert (fvector() + 1.1).dtype == 'float32'  # temporary downcasting
-    >>> assert (fvector() + 1.1).dtype == 'float64' # back to default behaviour
+    >>> with autocast_float_as("float32"):
+    ...     assert (fvector() + 1.1).dtype == "float32"  # temporary downcasting
+    >>> assert (fvector() + 1.1).dtype == "float64"  # back to default behaviour
 
     """
 
