@@ -30,12 +30,13 @@ jobs:
       - name: Build SDist
         run: pipx run build --sdist
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
+          name: sdist
           path: dist/*.tar.gz
 
   build_wheels:
-    name: Build ${{ matrix.python-version }} wheels on ${{ matrix.platform }}
+    name: Build wheels for ${{ matrix.platform }}
     runs-on: ${{ matrix.platform }}
     strategy:
       matrix:
@@ -49,21 +50,54 @@ jobs:
           fetch-depth: 0
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.19.2
+        uses: pypa/cibuildwheel@v2.21.0
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
+          name: wheels-${{ matrix.platform }}
           path: ./wheelhouse/*.whl
+
+  build_universal_wheel:
+    name: Build universal wheel for Pyodide
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install numpy versioneer wheel
+
+      - name: Build universal wheel
+        run: |
+          PYODIDE=1 python setup.py bdist_wheel --universal
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: universal_wheel
+          path: dist/*.whl
 
   check_dist:
     name: Check dist
     needs: [make_sdist,build_wheels]
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
-          name: artifact
+          name: sdist
           path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
       - name: Check SDist
         run: |
           mkdir -p test-sdist
@@ -83,12 +117,23 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'release' && github.event.action == 'published'
     steps:
-    - uses: actions/download-artifact@v3
-      with:
-        name: artifact
-        path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
 
-    - uses: pypa/gh-action-pypi-publish@v1.9.0
-      with:
-        user: __token__
-        password: ${{ secrets.pypi_password }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: universal_wheel
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@v1.9.0
+        with:
+          user: __token__
+          password: ${{ secrets.pypi_password }}

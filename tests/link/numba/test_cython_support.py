@@ -76,19 +76,25 @@ def test_signature_provides(have, want, should_provide):
             [np.float64],
             float64(float64, int32),
         ),
-        (
+        pytest.param(
             # expn doesn't have a float32 implementation
             scipy.special.cython_special.expn,
             np.float32,
             [np.float32, np.float32],
             float64(float64, float64, int32),
+            marks=pytest.mark.xfail(
+                reason="Failing in newer versions: https://github.com/pymc-devs/pytensor/issues/980"
+            ),
         ),
-        (
+        pytest.param(
             # We choose the integer implementation if possible
             scipy.special.cython_special.expn,
             np.float32,
             [np.int64, np.float32],
             float64(int64, float64, int32),
+            marks=pytest.mark.xfail(
+                reason="Failing in newer versions: https://github.com/pymc-devs/pytensor/issues/980"
+            ),
         ),
     ],
 )

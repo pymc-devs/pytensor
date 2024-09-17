@@ -21,6 +21,7 @@ import pytensor
 import pytensor.scalar.sharedvar
 from pytensor import compile, config, printing
 from pytensor import scalar as ps
+from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType, grad_undefined
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Apply, Constant, Variable, equal_computations
@@ -1112,13 +1113,13 @@ def tril(m, k=0):
     Examples
     --------
     >>> import pytensor.tensor as pt
-    >>> pt.tril(pt.arange(1,13).reshape((4,3)), -1).eval()
+    >>> pt.tril(pt.arange(1, 13).reshape((4, 3)), -1).eval()
     array([[ 0,  0,  0],
            [ 4,  0,  0],
            [ 7,  8,  0],
            [10, 11, 12]])
 
-    >>> pt.tril(pt.arange(3*4*5).reshape((3, 4, 5))).eval()
+    >>> pt.tril(pt.arange(3 * 4 * 5).reshape((3, 4, 5))).eval()
     array([[[ 0,  0,  0,  0,  0],
             [ 5,  6,  0,  0,  0],
             [10, 11, 12,  0,  0],
@@ -1161,7 +1162,7 @@ def triu(m, k=0):
            [ 0,  8,  9],
            [ 0,  0, 12]])
 
-    >>> pt.triu(np.arange(3*4*5).reshape((3, 4, 5))).eval()
+    >>> pt.triu(np.arange(3 * 4 * 5).reshape((3, 4, 5))).eval()
     array([[[ 0,  1,  2,  3,  4],
             [ 0,  6,  7,  8,  9],
             [ 0,  0, 12, 13, 14],
@@ -1333,6 +1334,25 @@ class Eye(Op):
 
     def grad(self, inp, grads):
         return [grad_undefined(self, i, inp[i]) for i in range(3)]
+
+    @staticmethod
+    def is_offset_zero(node) -> bool:
+        """
+        Test if an Eye Op has a diagonal offset of zero
+
+        Parameters
+        ----------
+        node
+            Eye node to test
+
+        Returns
+        -------
+        is_offset_zero: bool
+            True if the offset is zero (``k = 0``).
+        """
+
+        offset = node.inputs[-1]
+        return isinstance(offset, Constant) and offset.data.item() == 0
 
 
 def eye(n, m=None, k=0, dtype=None):
@@ -1680,21 +1700,22 @@ class Alloc(COp):
             return False
 
         for client, idx in clients:
-            if isinstance(client.op, Output):
+            client_op = client.op
+            if isinstance(client_op, Output):
                 # If the output is a constant, it will have to be deepcopied
                 # each time the function is called.  So we do not fold.
                 return False
-            # Allow alloc to be lifted out of Elemwise before constant folding it
-            elif isinstance(client.op, Elemwise):
-                return None
+            # Op's through which Alloc can be lifted
+            elif isinstance(client_op, Elemwise | DimShuffle | Alloc | Join):
+                return False
             # Same for Blockwise, unless it has no batch_dims
-            elif isinstance(client.op, Blockwise) and client.op.batch_ndim(client):
-                return None
+            elif isinstance(client_op, Blockwise) and client.op.batch_ndim(client):
+                return False
             elif (
                 # The following ops work inplace of their input id 0.
                 idx == 0
                 and isinstance(
-                    client.op,
+                    client_op,
                     pytensor.tensor.subtensor.IncSubtensor
                     | pytensor.tensor.subtensor.AdvancedIncSubtensor1
                     | pytensor.tensor.subtensor.AdvancedIncSubtensor
@@ -2015,10 +2036,15 @@ def transpose(x, axes=None):
     _x = as_tensor_variable(x)
 
     if axes is None:
-        axes = list(range((_x.type.ndim - 1), -1, -1))
+        axes = tuple(range((_x.type.ndim - 1), -1, -1))
+
+    if tuple(axes) == tuple(range(len(axes))):
+        # No-op
+        return _x
+
     ret = DimShuffle(tuple(s == 1 for s in _x.type.shape), axes)(_x)
 
-    if _x.name and axes == list(range((_x.type.ndim - 1), -1, -1)):
+    if _x.name and axes == tuple(range((_x.type.ndim - 1), -1, -1)):
         ret.name = _x.name + ".T"
 
     return ret
@@ -2082,9 +2108,9 @@ class Split(COp):
     >>> splits = pt.vector(dtype="int")
 
     You have to declare right away how many split_points there will be.
-    >>> ra, rb, rc = pt.split(x, splits, n_splits = 3, axis = 0)
+    >>> ra, rb, rc = pt.split(x, splits, n_splits=3, axis=0)
     >>> f = function([x, splits], [ra, rb, rc])
-    >>> a, b, c = f([0,1,2,3,4,5], [3, 2, 1])
+    >>> a, b, c = f([0, 1, 2, 3, 4, 5], [3, 2, 1])
     >>> a
     array([0, 1, 2])
     >>> b
@@ -2805,28 +2831,28 @@ def stack(tensors: Sequence["TensorLike"], axis: int = 0):
     >>> b = pytensor.tensor.type.scalar()
     >>> c = pytensor.tensor.type.scalar()
     >>> x = pytensor.tensor.stack([a, b, c])
-    >>> x.ndim # x is a vector of length 3.
+    >>> x.ndim  # x is a vector of length 3.
     1
     >>> a = pytensor.tensor.type.tensor4()
     >>> b = pytensor.tensor.type.tensor4()
     >>> c = pytensor.tensor.type.tensor4()
     >>> x = pytensor.tensor.stack([a, b, c])
-    >>> x.ndim # x is a 5d tensor.
+    >>> x.ndim  # x is a 5d tensor.
     5
     >>> rval = x.eval(dict((t, np.zeros((2, 2, 2, 2))) for t in [a, b, c]))
-    >>> rval.shape # 3 tensors are stacked on axis 0
+    >>> rval.shape  # 3 tensors are stacked on axis 0
     (3, 2, 2, 2, 2)
     >>> x = pytensor.tensor.stack([a, b, c], axis=3)
     >>> x.ndim
     5
     >>> rval = x.eval(dict((t, np.zeros((2, 2, 2, 2))) for t in [a, b, c]))
-    >>> rval.shape # 3 tensors are stacked on axis 3
+    >>> rval.shape  # 3 tensors are stacked on axis 3
     (2, 2, 2, 3, 2)
     >>> x = pytensor.tensor.stack([a, b, c], axis=-2)
     >>> x.ndim
     5
     >>> rval = x.eval(dict((t, np.zeros((2, 2, 2, 2))) for t in [a, b, c]))
-    >>> rval.shape # 3 tensors are stacked on axis -2
+    >>> rval.shape  # 3 tensors are stacked on axis -2
     (2, 2, 2, 3, 2)
     """
     if not isinstance(tensors, Sequence):
@@ -3749,109 +3775,38 @@ def trace(a, offset=0, axis1=0, axis2=1):
     return diagonal(a, offset=offset, axis1=axis1, axis2=axis2).sum(-1)
 
 
-class AllocDiag(Op):
-    """An `Op` that copies a vector to the diagonal of a zero-ed matrix."""
+class AllocDiag(OpFromGraph):
+    """
+    Wrapper Op for alloc_diag graphs
+    """
 
-    __props__ = ("offset", "axis1", "axis2")
-
-    def __init__(self, offset=0, axis1=0, axis2=1):
-        """
-        Parameters
-        ----------
-        offset: int
-            Offset of the diagonal from the main diagonal defined by `axis1`
-            and `axis2`. Can be positive or negative.  Defaults to main
-            diagonal (i.e. 0).
-        axis1: int
-            Axis to be used as the first axis of the 2-D sub-arrays to which
-            the diagonals will be allocated.  Defaults to first axis (i.e. 0).
-        axis2: int
-            Axis to be used as the second axis of the 2-D sub-arrays to which
-            the diagonals will be allocated.  Defaults to second axis (i.e. 1).
-        """
-        warnings.warn(
-            "AllocDiag is deprecated. Use `alloc_diag` instead",
-            FutureWarning,
-        )
-        self.offset = offset
-        if axis1 < 0 or axis2 < 0:
-            raise NotImplementedError("AllocDiag does not support negative axis")
-        if axis1 == axis2:
-            raise ValueError("axis1 and axis2 cannot be the same")
+    def __init__(self, *args, axis1, axis2, offset, **kwargs):
         self.axis1 = axis1
         self.axis2 = axis2
+        self.offset = offset
 
-    def make_node(self, diag):
-        diag = as_tensor_variable(diag)
-        if diag.type.ndim < 1:
-            raise ValueError(
-                "AllocDiag needs an input with 1 or more dimensions", diag.type
-            )
-        return Apply(
-            self,
-            [diag],
-            [diag.type.clone(shape=(None,) * (diag.ndim + 1))()],
-        )
+        super().__init__(*args, **kwargs, strict=True)
 
-    def perform(self, node, inputs, outputs):
-        (x,) = inputs
-        (z,) = outputs
+    def __str__(self):
+        return f"AllocDiag{{{self.axis1=}, {self.axis2=}, {self.offset=}}}"
 
-        axis1 = np.minimum(self.axis1, self.axis2)
-        axis2 = np.maximum(self.axis1, self.axis2)
-        offset = self.offset
+    @staticmethod
+    def is_offset_zero(node) -> bool:
+        """
+        Test if an AllocDiag Op has a diagonal offset of zero
 
-        # Create array with one extra dimension for resulting matrix
-        result_shape = x.shape[:-1] + (x.shape[-1] + abs(offset),) * 2
-        result = np.zeros(result_shape, dtype=x.dtype)
+        Parameters
+        ----------
+        node
+            AllocDiag node to test
 
-        # Create slice for diagonal in final 2 axes
-        idxs = np.arange(x.shape[-1])
-        diagonal_slice = (len(result_shape) - 2) * [slice(None)] + [
-            idxs + np.maximum(0, -offset),
-            idxs + np.maximum(0, offset),
-        ]
+        Returns
+        -------
+        is_offset_zero: bool
+            True if the offset is zero (``k = 0``).
+        """
 
-        # Fill in final 2 axes with x
-        result[tuple(diagonal_slice)] = x
-
-        if len(x.shape) > 1:
-            # Re-order axes so they correspond to diagonals at axis1, axis2
-            axes = list(range(len(x.shape[:-1])))
-            last_idx = axes[-1]
-            axes = axes[:axis1] + [last_idx + 1] + axes[axis1:]
-            axes = axes[:axis2] + [last_idx + 2] + axes[axis2:]
-            result = result.transpose(axes)
-
-        z[0] = result
-
-    def grad(self, inputs, gout):
-        (gz,) = gout
-        return [diagonal(gz, offset=self.offset, axis1=self.axis1, axis2=self.axis2)]
-
-    def infer_shape(self, fgraph, nodes, shapes):
-        (x_shape,) = shapes
-        axis1 = np.minimum(self.axis1, self.axis2)
-        axis2 = np.maximum(self.axis1, self.axis2)
-
-        result_shape = list(x_shape[:-1])
-        diag_shape = x_shape[-1] + abs(self.offset)
-        result_shape = result_shape[:axis1] + [diag_shape] + result_shape[axis1:]
-        result_shape = result_shape[:axis2] + [diag_shape] + result_shape[axis2:]
-        return [tuple(result_shape)]
-
-    def __setstate__(self, state):
-        if "view_map" in state:
-            del state["view_map"]
-
-        self.__dict__.update(state)
-
-        if "offset" not in state:
-            self.offset = 0
-        if "axis1" not in state:
-            self.axis1 = 0
-        if "axis2" not in state:
-            self.axis2 = 1
+        return node.op.offset == 0
 
 
 def alloc_diag(diag, offset=0, axis1=0, axis2=1):
@@ -3862,6 +3817,7 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
     from pytensor.tensor import set_subtensor
 
     diag = as_tensor_variable(diag)
+
     axis1, axis2 = normalize_axis_tuple((axis1, axis2), ndim=diag.type.ndim + 1)
     if axis1 > axis2:
         axis1, axis2 = axis2, axis1
@@ -3888,7 +3844,9 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
         axes = axes[:axis2] + [last_idx + 2] + axes[axis2:]
         result = result.transpose(axes)
 
-    return result
+    return AllocDiag(
+        inputs=[diag], outputs=[result], axis1=axis1, axis2=axis2, offset=offset
+    )(diag)
 
 
 def diag(v, k=0):
@@ -3934,7 +3892,7 @@ def stacklists(arg):
     >>> from pytensor.tensor import stacklists
     >>> from pytensor.tensor.type import scalars, matrices
     >>> from pytensor import function
-    >>> a, b, c, d = scalars('abcd')
+    >>> a, b, c, d = scalars("abcd")
     >>> X = stacklists([[a, b], [c, d]])
     >>> f = function([a, b, c, d], X)
     >>> f(1, 2, 3, 4)
@@ -3945,10 +3903,10 @@ def stacklists(arg):
     a 2 by 2 grid:
 
     >>> from numpy import ones
-    >>> a, b, c, d = matrices('abcd')
+    >>> a, b, c, d = matrices("abcd")
     >>> X = stacklists([[a, b], [c, d]])
     >>> f = function([a, b, c, d], X)
-    >>> x = ones((4, 4), 'float32')
+    >>> x = ones((4, 4), "float32")
     >>> f(x, x, x, x).shape
     (2, 2, 4, 4)
 
@@ -3998,6 +3956,10 @@ def moveaxis(
 
     source = normalize_axis_tuple(source, a.ndim, "source")
     destination = normalize_axis_tuple(destination, a.ndim, "destination")
+
+    if source == destination:
+        # It's a no-op
+        return a
 
     if len(source) != len(destination):
         raise ValueError(
@@ -4309,9 +4271,7 @@ atleast_2d = partial(atleast_Nd, n=2)
 atleast_3d = partial(atleast_Nd, n=3)
 
 
-def expand_dims(
-    a: np.ndarray | TensorVariable, axis: tuple[int, ...]
-) -> TensorVariable:
+def expand_dims(a: np.ndarray | TensorVariable, axis: Sequence[int]) -> TensorVariable:
     """Expand the shape of an array.
 
     Insert a new axis that will appear at the `axis` position in the expanded
@@ -4330,7 +4290,7 @@ def expand_dims(
     """
     a = as_tensor(a)
 
-    if not isinstance(axis, tuple | list):
+    if not isinstance(axis, Sequence):
         axis = (axis,)
 
     out_ndim = len(axis) + a.ndim

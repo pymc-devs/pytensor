@@ -80,8 +80,8 @@ def load(path, dtype, shape, mmap_mode=None):
     --------
     >>> from pytensor import *
     >>> path = Variable(Generic(), None)
-    >>> x = tensor.load(path, 'int64', (None,))
-    >>> y = x*2
+    >>> x = tensor.load(path, "int64", (None,))
+    >>> y = x * 2
     >>> fn = function([path], y)
     >>> fn("stored-array.npy")  # doctest: +SKIP
     array([0, 2, 4, 6, 8], dtype=int64)

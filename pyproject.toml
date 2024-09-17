@@ -47,7 +47,7 @@ keywords = [
 ]
 dependencies = [
     "setuptools>=59.0.0",
-    "scipy>=0.14,<1.14",
+    "scipy>=1,<2",
     "numpy>=1.17.0,<2",
     "filelock>=3.15",
     "etuples",
@@ -123,6 +123,9 @@ testpaths = "tests/"
 [tool.ruff]
 line-length = 88
 exclude = ["doc/", "pytensor/_version.py"]
+
+[tool.ruff.format]
+docstring-code-format = true
 
 [tool.ruff.lint]
 select = ["C", "E", "F", "I", "UP", "W", "RUF", "PERF", "PTH", "ISC"]

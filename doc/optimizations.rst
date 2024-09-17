@@ -262,8 +262,8 @@ Optimization                                              o4             o3  o2 
     local_remove_all_assert
         This is an unsafe optimization.
         For the fastest possible PyTensor, this optimization can be enabled by
-	setting ``optimizer_including=local_remove_all_assert`` which will
-	remove all assertions in the graph for checking user inputs are valid.
+        setting ``optimizer_including=local_remove_all_assert`` which will
+        remove all assertions in the graph for checking user inputs are valid.
         Use this optimization if you are sure everything is valid in your graph.
 
-	See :ref:`unsafe_rewrites`
+    See :ref:`unsafe_rewrites`

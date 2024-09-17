@@ -218,6 +218,10 @@ def test_tri():
     compare_jax_and_py(fgraph, [])
 
 
+@pytest.mark.skipif(
+    jax.__version__ == "0.4.31",
+    reason="https://github.com/google/jax/issues/22751",
+)
 def test_tri_nonconcrete():
     """JAX cannot JIT-compile `jax.numpy.tri` when arguments are not concrete values."""
 

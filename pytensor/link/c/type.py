@@ -318,7 +318,7 @@ class EnumType(CType, dict):
     .. code-block:: python
 
         enum = EnumType(CONSTANT_1=1, CONSTANT_2=2.5, CONSTANT_3=False, CONSTANT_4=True)
-        print (enum.CONSTANT_1, enum.CONSTANT_2, enum.CONSTANT_3, enum.CONSTANT_4)
+        print(enum.CONSTANT_1, enum.CONSTANT_2, enum.CONSTANT_3, enum.CONSTANT_4)
         # will print 1 2.5 0 1
 
     In C code:
@@ -334,7 +334,7 @@ class EnumType(CType, dict):
 
     .. code-block:: python
 
-        enum = EnumType(CONSTANT_1=0, CONSTANT_2=1, CONSTANT_3=2, ctype='size_t')
+        enum = EnumType(CONSTANT_1=0, CONSTANT_2=1, CONSTANT_3=2, ctype="size_t")
         # In C code, the Op param will then be a ``size_t``.
 
     .. note::
@@ -349,8 +349,9 @@ class EnumType(CType, dict):
 
         .. code-block:: python
 
-            enum = EnumType(CONSTANT_1=0, CONSTANT_2=1, CONSTANT_3=2,
-                            ctype='size_t', cname='MyEnumName')
+            enum = EnumType(
+                CONSTANT_1=0, CONSTANT_2=1, CONSTANT_3=2, ctype="size_t", cname="MyEnumName"
+            )
 
     **Example with aliases**
 
@@ -359,7 +360,7 @@ class EnumType(CType, dict):
 
     To give an alias to a constant in the EnumType constructor, use the following key-value syntax::
 
-        constant_name=(constant_alias, constant_value)
+        constant_name = (constant_alias, constant_value)
 
     You can then retrieve a constant from an alias with method ``EnumType.fromalias()``.
 
@@ -372,23 +373,23 @@ class EnumType(CType, dict):
         from pytensor.link.c.type import EnumType
 
         # You can remark that constant 'C' does not have an alias.
-        enum = EnumType(A=('alpha', 1), B=('beta', 2), C=3, D=('delta', 4))
+        enum = EnumType(A=("alpha", 1), B=("beta", 2), C=3, D=("delta", 4))
 
         # Constants are all directly available by name.
         print(enum.A, enum.B, enum.C, enum.D)
 
         # But we can also now get some constants by alias.
-        a = enum.fromalias('alpha')
-        b = enum.fromalias('beta')
-        d = enum.fromalias('delta')
+        a = enum.fromalias("alpha")
+        b = enum.fromalias("beta")
+        d = enum.fromalias("delta")
 
         # If method fromalias() receives an unknown alias,
         # it will looks for a constant with this alias
         # as exact constant name.
-        c = enum.fromalias('C') # will get enum.C
+        c = enum.fromalias("C")  # will get enum.C
 
         # An alias defined in an EnumType will be correctly converted with non-strict filtering.
-        value = enum.filter('delta', strict=False)
+        value = enum.filter("delta", strict=False)
         # value now contains enum.D, ie. 4.
 
     .. note::
@@ -648,14 +649,24 @@ class EnumList(EnumType):
 
     Example::
 
-        enum = EnumList('CONSTANT_1', 'CONSTANT_2', 'CONSTANT_3', 'CONSTANT_4', 'CONSTANT_5')
-        print (enum.CONSTANT_1, enum.CONSTANT_2, enum.CONSTANT_3, enum.CONSTANT_4, enum.CONSTANT_5)
+        enum = EnumList(
+            "CONSTANT_1", "CONSTANT_2", "CONSTANT_3", "CONSTANT_4", "CONSTANT_5"
+        )
+        print(
+            enum.CONSTANT_1,
+            enum.CONSTANT_2,
+            enum.CONSTANT_3,
+            enum.CONSTANT_4,
+            enum.CONSTANT_5,
+        )
         # will print: 0 1 2 3 4
 
     Like :class:`EnumType`, you can also define the C type and a C name for the op param.
     Default C type is ``int``::
 
-        enum = EnumList('CONSTANT_1', 'CONSTANT_2', 'CONSTANT_3', 'CONSTANT_4', ctype='unsigned int')
+        enum = EnumList(
+            "CONSTANT_1", "CONSTANT_2", "CONSTANT_3", "CONSTANT_4", ctype="unsigned int"
+        )
 
     Like :class:`EnumType`, you can also add an alias to a constant, by replacing the only constant name
     (e.g. ``'CONSTANT_NAME'``) by a couple with constant name first and constant alias second
@@ -663,7 +674,7 @@ class EnumList(EnumType):
 
     .. code-block:: python
 
-        enum = EnumList(('A', 'alpha'), ('B', 'beta'), 'C', 'D', 'E', 'F', ('G', 'gamma'))
+        enum = EnumList(("A", "alpha"), ("B", "beta"), "C", "D", "E", "F", ("G", "gamma"))
 
     See test class :class:`tests.graph.test_types.TestOpEnumList` for a working example.
 
@@ -727,7 +738,9 @@ class CEnumType(EnumList):
 
     .. code-block:: python
 
-        enum = CEnumType('CONSTANT_CNAME_1', 'CONSTANT_CNAME_2', 'CONSTANT_CNAME_3', ctype='long')
+        enum = CEnumType(
+            "CONSTANT_CNAME_1", "CONSTANT_CNAME_2", "CONSTANT_CNAME_3", ctype="long"
+        )
 
     Like :class:`EnumList`, you can also add an alias to a constant, with same syntax as in :class:`EnumList`.
 

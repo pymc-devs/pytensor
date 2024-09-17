@@ -4,7 +4,7 @@ Adding JAX, Numba and Pytorch support for `Op`\s
 PyTensor is able to convert its graphs into JAX, Numba and Pytorch compiled functions. In order to do
 this, each :class:`Op` in an PyTensor graph must have an equivalent JAX/Numba/Pytorch implementation function.
 
-This tutorial will explain how JAX, Numba and Pytorch implementations are created for an :class:`Op`. 
+This tutorial will explain how JAX, Numba and Pytorch implementations are created for an :class:`Op`.
 
 Step 1: Identify the PyTensor :class:`Op` you'd like to implement
 ------------------------------------------------------------------------
@@ -60,7 +60,7 @@ could also have any data type (e.g. floats, ints), so our implementation
 must be able to handle all the possible data types.
 
 It also tells us that there's only one return value, that it has a data type
-determined by :meth:`x.type()` i.e., the data type of the original tensor.
+determined by :meth:`x.type` i.e., the data type of the original tensor.
 This implies that the result is necessarily a matrix.
 
 Some class may have a more complex behavior. For example, the :class:`CumOp`\ :class:`Op`
@@ -116,7 +116,7 @@ Here's an example for :class:`DimShuffle`:
 
 .. tab-set::
 
-        .. tab-item:: JAX     
+        .. tab-item:: JAX
 
             .. code:: python
 
@@ -134,7 +134,7 @@ Here's an example for :class:`DimShuffle`:
                         res = jnp.copy(res)
 
                     return res
-        
+
         .. tab-item:: Numba
 
             .. code:: python
@@ -465,7 +465,7 @@ Step 4: Write tests
     .. tab-item:: JAX
 
         Test that your registered `Op` is working correctly by adding tests to the
-        appropriate test suites in PyTensor (e.g. in ``tests.link.jax``). 
+        appropriate test suites in PyTensor (e.g. in ``tests.link.jax``).
         The tests should ensure that your implementation can
         handle the appropriate types of inputs and produce outputs equivalent to `Op.perform`.
         Check the existing tests for the general outline of these kinds of tests. In
@@ -478,7 +478,7 @@ Step 4: Write tests
         Here's a small example of a test for :class:`CumOp` above:
 
         .. code:: python
-            
+
             import numpy as np
             import pytensor.tensor as pt
             from pytensor.configdefaults import config
@@ -514,22 +514,22 @@ Step 4: Write tests
         .. code:: python
 
             import pytest
-            
+
             def test_jax_CumOp():
                 """Test JAX conversion of the `CumOp` `Op`."""
                 a = pt.matrix("a")
                 a.tag.test_value = np.arange(9, dtype=config.floatX).reshape((3, 3))
-                
+
                 with pytest.raises(NotImplementedError):
                     out = pt.cumprod(a, axis=1)
                     fgraph = FunctionGraph([a], [out])
                     compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
-    
-    
+
+
     .. tab-item:: Numba
 
         Test that your registered `Op` is working correctly by adding tests to the
-        appropriate test suites in PyTensor (e.g. in ``tests.link.numba``). 
+        appropriate test suites in PyTensor (e.g. in ``tests.link.numba``).
         The tests should ensure that your implementation can
         handle the appropriate types of inputs and produce outputs equivalent to `Op.perform`.
         Check the existing tests for the general outline of these kinds of tests. In
@@ -542,7 +542,7 @@ Step 4: Write tests
         Here's a small example of a test for :class:`CumOp` above:
 
         .. code:: python
-            
+
             from tests.link.numba.test_basic import compare_numba_and_py
             from pytensor.graph import FunctionGraph
             from pytensor.compile.sharedvalue import SharedVariable
@@ -561,11 +561,11 @@ Step 4: Write tests
                         if not isinstance(i, SharedVariable | Constant)
                     ],
                 )
-    
+
 
 
     .. tab-item:: Pytorch
-        
+
         Test that your registered `Op` is working correctly by adding tests to the
         appropriate test suites in PyTensor (``tests.link.pytorch``). The tests should ensure that your implementation can
         handle the appropriate types of inputs and produce outputs equivalent to `Op.perform`.
@@ -579,7 +579,7 @@ Step 4: Write tests
         Here's a small example of a test for :class:`CumOp` above:
 
         .. code:: python
-            
+
             import numpy as np
             import pytest
             import pytensor.tensor as pt
@@ -592,7 +592,7 @@ Step 4: Write tests
                 ["float64", "int64"],
             )
             @pytest.mark.parametrize(
-                "axis", 
+                "axis",
                 [None, 1, (0,)],
             )
             def test_pytorch_CumOp(axis, dtype):

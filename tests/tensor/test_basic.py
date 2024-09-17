@@ -37,6 +37,7 @@ from pytensor.tensor.basic import (
     TensorFromScalar,
     Tri,
     alloc,
+    alloc_diag,
     arange,
     as_tensor_variable,
     atleast_Nd,
@@ -3793,6 +3794,18 @@ class TestAllocDiag:
                 )
                 assert np.all(true_grad_input == grad_input)
 
+    def test_multiple_ops_same_graph(self):
+        """Regression test when AllocDiag OFG was given insufficient props, causing incompatible Ops to be merged."""
+        v1 = vector("v1", shape=(2,), dtype="float64")
+        v2 = vector("v2", shape=(3,), dtype="float64")
+        a1 = alloc_diag(v1)
+        a2 = alloc_diag(v2)
+
+        fn = function([v1, v2], [a1, a2])
+        res1, res2 = fn(v1=[np.e, np.e], v2=[np.pi, np.pi, np.pi])
+        np.testing.assert_allclose(res1, np.eye(2) * np.e)
+        np.testing.assert_allclose(res2, np.eye(3) * np.pi)
+
 
 def test_diagonal_negative_axis():
     x = np.arange(2 * 3 * 3).reshape((2, 3, 3))
@@ -3847,8 +3860,10 @@ def test_transpose():
     assert np.all(t2d == np.transpose(x2v, [0, 1]))
     assert np.all(t3d == np.transpose(x3v, [0, 2, 1]))
 
+    # Check we don't introduce useless transpose
+    assert ptb.transpose(x1) is x1
+
     # Check that we create a name.
-    assert ptb.transpose(x1).name == "x1.T"
     assert ptb.transpose(x2).name == "x2.T"
     assert ptb.transpose(x3).name == "x3.T"
     assert ptb.transpose(dmatrix()).name is None

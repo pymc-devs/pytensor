@@ -1,4 +1,5 @@
 from copy import copy
+from textwrap import dedent
 
 import numpy as np
 from numpy.core.numeric import normalize_axis_tuple
@@ -76,7 +77,7 @@ class DimShuffle(ExternalCOp):
 
     .. code-block:: python
 
-        DimShuffle((False, False, False), ['x', 2, 'x', 0, 1])
+        DimShuffle((False, False, False), ["x", 2, "x", 0, 1])
 
     This `Op` will only work on 3d tensors with no broadcastable
     dimensions.  The first dimension will be broadcastable,
@@ -100,16 +101,16 @@ class DimShuffle(ExternalCOp):
     --------
     .. code-block:: python
 
-        DimShuffle((), ['x'])  # make a 0d (scalar) into a 1d vector
+        DimShuffle((), ["x"])  # make a 0d (scalar) into a 1d vector
         DimShuffle((False, False), [0, 1])  # identity
         DimShuffle((False, False), [1, 0])  # inverts the 1st and 2nd dimensions
-        DimShuffle((False,), ['x', 0])  # make a row out of a 1d vector
-                                        # (N to 1xN)
-        DimShuffle((False,), [0, 'x'])  # make a column out of a 1d vector
-                                        # (N to Nx1)
+        DimShuffle((False,), ["x", 0])  # make a row out of a 1d vector
+        # (N to 1xN)
+        DimShuffle((False,), [0, "x"])  # make a column out of a 1d vector
+        # (N to Nx1)
         DimShuffle((False, False, False), [2, 0, 1])  # AxBxC to CxAxB
-        DimShuffle((False, False), [0, 'x', 1])  # AxB to Ax1xB
-        DimShuffle((False, False), [1, 'x', 0])  # AxB to Bx1xA
+        DimShuffle((False, False), [0, "x", 1])  # AxB to Ax1xB
+        DimShuffle((False, False), [1, "x", 0])  # AxB to Bx1xA
 
     The reordering of the dimensions can be done with the numpy.transpose
     function.
@@ -184,6 +185,14 @@ class DimShuffle(ExternalCOp):
         # in the original input
         self.augment = sorted(i for i, x in enumerate(new_order) if x == "x")
         self.drop = drop
+
+        input_ndim = len(input_broadcastable)
+        self.is_left_expand_dims = self.augment and (
+            input_ndim == 0 or new_order[-input_ndim:] == list(range(input_ndim))
+        )
+        self.is_right_expand_dims = self.augment and new_order[:input_ndim] == list(
+            range(input_ndim)
+        )
 
         if self.inplace:
             self.view_map = {0: [0]}
@@ -759,34 +768,16 @@ class Elemwise(OpenMPOp):
         for i, (variable, storage, nout) in enumerate(
             zip(variables, output_storage, node.outputs)
         ):
-            if getattr(variable, "dtype", "") == "object":
-                # Since numpy 1.6, function created with numpy.frompyfunc
-                # always return an ndarray with dtype object
-                variable = np.asarray(variable, dtype=nout.dtype)
+            storage[0] = variable = np.asarray(variable, dtype=nout.dtype)
 
             if i in self.inplace_pattern:
                 odat = inputs[self.inplace_pattern[i]]
                 odat[...] = variable
                 storage[0] = odat
 
-            # Sometimes NumPy return a Python type.
-            # Some PyTensor op return a different dtype like floor, ceil,
-            # trunc, eq, ...
-            elif not isinstance(variable, np.ndarray) or variable.dtype != nout.dtype:
-                variable = np.asarray(variable, nout.dtype)
-                # The next line is needed for numpy 1.9. Otherwise
-                # there are tests that fail in DebugMode.
-                # Normally we would call pytensor.misc._asarray, but it
-                # is faster to inline the code. We know that the dtype
-                # are the same string, just different typenum.
-                if np.dtype(nout.dtype).num != variable.dtype.num:
-                    variable = variable.view(dtype=nout.dtype)
-                storage[0] = variable
             # numpy.real return a view!
-            elif not variable.flags.owndata:
+            if not variable.flags.owndata:
                 storage[0] = variable.copy()
-            else:
-                storage[0] = variable
 
     @staticmethod
     def _check_runtime_broadcast(node, inputs):
@@ -1189,15 +1180,15 @@ class CAReduce(COp):
     -----
     .. code-block:: python
 
-        CAReduce(add)      # sum (ie, acts like the numpy sum operation)
-        CAReduce(mul)      # product
+        CAReduce(add)  # sum (ie, acts like the numpy sum operation)
+        CAReduce(mul)  # product
         CAReduce(maximum)  # max
         CAReduce(minimum)  # min
-        CAReduce(or_)      # any # not lazy
-        CAReduce(and_)     # all # not lazy
-        CAReduce(xor)      # a bit at 1 tell that there was an odd number of
-                           # bit at that position that where 1. 0 it was an
-                           # even number ...
+        CAReduce(or_)  # any # not lazy
+        CAReduce(and_)  # all # not lazy
+        CAReduce(xor)  # a bit at 1 tell that there was an odd number of
+        # bit at that position that where 1. 0 it was an
+        # even number ...
 
     In order to (eventually) optimize memory usage patterns,
     `CAReduce` makes zero guarantees on the order in which it
@@ -1458,15 +1449,16 @@ class CAReduce(COp):
             return ((),)
         return ([ishape[i] for i in range(node.inputs[0].type.ndim) if i not in axis],)
 
-    def _c_all(self, node, name, inames, onames, sub):
-        input = node.inputs[0]
-        output = node.outputs[0]
+    def _c_all(self, node, name, input_names, output_names, sub):
+        [inp] = node.inputs
+        [out] = node.outputs
+        ndim = inp.type.ndim
 
-        iname = inames[0]
-        oname = onames[0]
+        [inp_name] = input_names
+        [out_name] = output_names
 
-        idtype = input.type.dtype_specs()[1]
-        odtype = output.type.dtype_specs()[1]
+        inp_dtype = inp.type.dtype_specs()[1]
+        out_dtype = out.type.dtype_specs()[1]
 
         acc_dtype = getattr(self, "acc_dtype", None)
 
@@ -1474,100 +1466,97 @@ class CAReduce(COp):
             if acc_dtype == "float16":
                 raise MethodNotDefined("no c_code for float16")
             acc_type = TensorType(shape=node.outputs[0].type.shape, dtype=acc_dtype)
-            adtype = acc_type.dtype_specs()[1]
+            acc_dtype = acc_type.dtype_specs()[1]
         else:
-            adtype = odtype
+            acc_dtype = out_dtype
 
         axis = self.axis
         if axis is None:
-            axis = list(range(input.type.ndim))
+            axis = list(range(inp.type.ndim))
 
         if len(axis) == 0:
+            # This is just an Elemwise cast operation
             # The acc_dtype is never a downcast compared to the input dtype
             # So we just need a cast to the output dtype.
-            var = pytensor.tensor.basic.cast(input, node.outputs[0].dtype)
-            if var is input:
-                var = Elemwise(scalar_identity)(input)
+            var = pytensor.tensor.basic.cast(inp, node.outputs[0].dtype)
+            if var is inp:
+                var = Elemwise(scalar_identity)(inp)
             assert var.dtype == node.outputs[0].dtype
-            return var.owner.op._c_all(var.owner, name, inames, onames, sub)
+            return var.owner.op._c_all(var.owner, name, input_names, output_names, sub)
 
-        order1 = [i for i in range(input.type.ndim) if i not in axis]
-        order = order1 + list(axis)
+        inp_dims = list(range(ndim))
+        non_reduced_dims = [i for i in inp_dims if i not in axis]
+        counter = iter(range(ndim))
+        acc_dims = ["x" if i in axis else next(counter) for i in range(ndim)]
 
-        nnested = len(order1)
+        sub = sub.copy()
+        sub["lv0"] = inp_name
+        sub["lv1"] = out_name
+        sub["olv"] = out_name
 
-        sub = dict(sub)
-        for i, (input, iname) in enumerate(zip(node.inputs, inames)):
-            sub[f"lv{i}"] = iname
-
-        decl = ""
-        if adtype != odtype:
+        if acc_dtype != out_dtype:
             # Create an accumulator variable different from the output
-            aname = "acc"
-            decl = acc_type.c_declare(aname, sub)
-            decl += acc_type.c_init(aname, sub)
+            acc_name = "acc"
+            setup = acc_type.c_declare(acc_name, sub) + acc_type.c_init(acc_name, sub)
         else:
             # the output is the accumulator variable
-            aname = oname
+            acc_name = out_name
+            setup = ""
 
-        decl += cgen.make_declare([order], [idtype], sub)
-        checks = cgen.make_checks([order], [idtype], sub)
+        # Define strides of input array
+        setup += cgen.make_declare(
+            [inp_dims], [inp_dtype], sub, compute_stride_jump=False
+        ) + cgen.make_checks([inp_dims], [inp_dtype], sub, compute_stride_jump=False)
 
-        alloc = ""
-        i += 1
-        sub[f"lv{i}"] = oname
-        sub["olv"] = oname
-
-        # Allocate output buffer
-        alloc += cgen.make_declare(
-            [list(range(nnested)) + ["x"] * len(axis)], [odtype], dict(sub, lv0=oname)
-        )
-        alloc += cgen.make_alloc([order1], odtype, sub)
-        alloc += cgen.make_checks(
-            [list(range(nnested)) + ["x"] * len(axis)], [odtype], dict(sub, lv0=oname)
-        )
-
-        if adtype != odtype:
-            # Allocate accumulation buffer
-            sub[f"lv{i}"] = aname
-            sub["olv"] = aname
-
-            alloc += cgen.make_declare(
-                [list(range(nnested)) + ["x"] * len(axis)],
-                [adtype],
-                dict(sub, lv0=aname),
+        # Define strides of output array and allocate it
+        out_sub = sub | {"lv0": out_name}
+        alloc = (
+            cgen.make_declare(
+                [acc_dims], [out_dtype], out_sub, compute_stride_jump=False
             )
-            alloc += cgen.make_alloc([order1], adtype, sub)
-            alloc += cgen.make_checks(
-                [list(range(nnested)) + ["x"] * len(axis)],
-                [adtype],
-                dict(sub, lv0=aname),
+            + cgen.make_alloc([non_reduced_dims], out_dtype, sub)
+            + cgen.make_checks(
+                [acc_dims], [out_dtype], out_sub, compute_stride_jump=False
+            )
+        )
+
+        if acc_dtype != out_dtype:
+            # Define strides of accumulation buffer and allocate it
+            sub["lv1"] = acc_name
+            sub["olv"] = acc_name
+
+            acc_sub = sub | {"lv0": acc_name}
+            alloc += (
+                cgen.make_declare(
+                    [acc_dims], [acc_dtype], acc_sub, compute_stride_jump=False
+                )
+                + cgen.make_alloc([non_reduced_dims], acc_dtype, sub)
+                + cgen.make_checks(
+                    [acc_dims], [acc_dtype], acc_sub, compute_stride_jump=False
+                )
             )
 
         identity = self.scalar_op.identity
-
         if np.isposinf(identity):
-            if input.type.dtype in ("float32", "float64"):
+            if inp.type.dtype in ("float32", "float64"):
                 identity = "__builtin_inf()"
-            elif input.type.dtype.startswith("uint") or input.type.dtype == "bool":
+            elif inp.type.dtype.startswith("uint") or inp.type.dtype == "bool":
                 identity = "1"
             else:
-                identity = "NPY_MAX_" + str(input.type.dtype).upper()
+                identity = "NPY_MAX_" + str(inp.type.dtype).upper()
         elif np.isneginf(identity):
-            if input.type.dtype in ("float32", "float64"):
+            if inp.type.dtype in ("float32", "float64"):
                 identity = "-__builtin_inf()"
-            elif input.type.dtype.startswith("uint") or input.type.dtype == "bool":
+            elif inp.type.dtype.startswith("uint") or inp.type.dtype == "bool":
                 identity = "0"
             else:
-                identity = "NPY_MIN_" + str(input.type.dtype).upper()
+                identity = "NPY_MIN_" + str(inp.type.dtype).upper()
         elif identity is None:
             raise TypeError(f"The {self.scalar_op} does not define an identity.")
 
-        task0_decl = f"{adtype}& {aname}_i = *{aname}_iter;\n{aname}_i = {identity};"
+        initial_value = f"{acc_name}_i = {identity};"
 
-        task1_decl = f"{idtype}& {inames[0]}_i = *{inames[0]}_iter;\n"
-
-        task1_code = self.scalar_op.c_code(
+        inner_task = self.scalar_op.c_code(
             Apply(
                 self.scalar_op,
                 [
@@ -1580,44 +1569,45 @@ class CAReduce(COp):
                 ],
             ),
             None,
-            [f"{aname}_i", f"{inames[0]}_i"],
-            [f"{aname}_i"],
+            [f"{acc_name}_i", f"{inp_name}_i"],
+            [f"{acc_name}_i"],
             sub,
         )
-        code1 = f"""
-        {{
-            {task1_decl}
-            {task1_code}
-        }}
-        """
 
-        if node.inputs[0].type.ndim:
-            if len(axis) == 1:
-                all_code = [("", "")] * nnested + [(task0_decl, code1), ""]
-            else:
-                all_code = (
-                    [("", "")] * nnested
-                    + [(task0_decl, "")]
-                    + [("", "")] * (len(axis) - 2)
-                    + [("", code1), ""]
-                )
+        if out.type.ndim == 0:
+            # Simple case where everything is reduced, no need for loop ordering
+            loop = cgen.make_complete_loop_careduce(
+                inp_var=inp_name,
+                acc_var=acc_name,
+                inp_dtype=inp_dtype,
+                acc_dtype=acc_dtype,
+                initial_value=initial_value,
+                inner_task=inner_task,
+                fail_code=sub["fail"],
+            )
         else:
-            all_code = [task0_decl + code1]
-        loop = cgen.make_loop_careduce(
-            [order, list(range(nnested)) + ["x"] * len(axis)],
-            [idtype, adtype],
-            all_code,
-            sub,
-        )
+            loop = cgen.make_reordered_loop_careduce(
+                inp_var=inp_name,
+                acc_var=acc_name,
+                inp_dtype=inp_dtype,
+                acc_dtype=acc_dtype,
+                inp_ndim=ndim,
+                reduction_axes=axis,
+                initial_value=initial_value,
+                inner_task=inner_task,
+            )
 
-        end = ""
-        if adtype != odtype:
-            end = f"""
-            PyArray_CopyInto({oname}, {aname});
-            """
-            end += acc_type.c_cleanup(aname, sub)
+        if acc_dtype != out_dtype:
+            cast = dedent(
+                f"""
+                PyArray_CopyInto({out_name}, {acc_name});
+                {acc_type.c_cleanup(acc_name, sub)}
+                """
+            )
+        else:
+            cast = ""
 
-        return decl, checks, alloc, loop, end
+        return setup, alloc, loop, cast
 
     def c_code(self, node, name, inames, onames, sub):
         code = "\n".join(self._c_all(node, name, inames, onames, sub))
@@ -1629,7 +1619,7 @@ class CAReduce(COp):
 
     def c_code_cache_version_apply(self, node):
         # the version corresponding to the c code in this Op
-        version = [9]
+        version = [10]
 
         # now we insert versions for the ops on which we depend...
         scalar_node = Apply(

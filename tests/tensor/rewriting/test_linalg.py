@@ -10,6 +10,7 @@ from pytensor import function
 from pytensor import tensor as pt
 from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
+from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
@@ -38,6 +39,9 @@ from pytensor.tensor.slinalg import (
 from pytensor.tensor.type import dmatrix, matrix, tensor, vector
 from tests import unittest_tools as utt
 from tests.test_rop import break_op
+
+
+ATOL = RTOL = 1e-3 if config.floatX == "float32" else 1e-8
 
 
 def test_rop_lop():
@@ -362,6 +366,8 @@ class TestBatchedVectorBSolveToMatrixBSolve:
     ids=["block_diag", "kron"],
 )
 def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
+    rng = np.random.default_rng(sum(map(ord, "lift_through_linalg")))
+
     if pytensor.config.floatX.endswith("32"):
         pytest.skip("Test is flaky at half precision")
 
@@ -371,6 +377,7 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
     f1 = pytensor.function(
         [A, B], X, mode=get_default_mode().including("local_lift_through_linalg")
     )
+
     f2 = pytensor.function(
         [A, B], X, mode=get_default_mode().excluding("local_lift_through_linalg")
     )
@@ -386,9 +393,7 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
     assert len(f_ops) == 2
     assert len(g_ops) == 1
 
-    test_vals = [
-        np.random.normal(size=(3,) * A.ndim).astype(config.floatX) for _ in range(2)
-    ]
+    test_vals = [rng.normal(size=(3,) * A.ndim).astype(config.floatX) for _ in range(2)]
     test_vals = [x @ np.swapaxes(x, -1, -2) for x in test_vals]
 
     np.testing.assert_allclose(f1(*test_vals), f2(*test_vals), atol=1e-8)
@@ -403,13 +408,18 @@ def test_det_diag_from_eye_mul(shape):
     # Initializing x based on scalar/vector/matrix
     x = pt.tensor("x", shape=shape)
     y = pt.eye(7) * x
+
     # Calculating determinant value using pt.linalg.det
     z_det = pt.linalg.det(y)
 
     # REWRITE TEST
     f_rewritten = function([x], z_det, mode="FAST_RUN")
     nodes = f_rewritten.maker.fgraph.apply_nodes
-    assert not any(isinstance(node.op, Det) for node in nodes)
+
+    assert not any(
+        isinstance(node.op, Det) or isinstance(getattr(node.op, "core_op", None), Det)
+        for node in nodes
+    )
 
     # NUMERIC VALUE TEST
     if len(shape) == 0:
@@ -418,6 +428,7 @@ def test_det_diag_from_eye_mul(shape):
         x_test = np.random.rand(*shape).astype(config.floatX)
     else:
         x_test = np.random.rand(*shape).astype(config.floatX)
+
     x_test_matrix = np.eye(7) * x_test
     det_val = np.linalg.det(x_test_matrix)
     rewritten_val = f_rewritten(x_test)
@@ -459,6 +470,7 @@ def test_dont_apply_det_diag_rewrite_for_1_1():
     x_diag = pt.eye(1, 1) * x
     y = pt.linalg.det(x_diag)
     f_rewritten = function([x], y, mode="FAST_RUN")
+
     nodes = f_rewritten.maker.fgraph.apply_nodes
 
     assert any(isinstance(node.op, Det) for node in nodes)
@@ -468,6 +480,7 @@ def test_dont_apply_det_diag_rewrite_for_1_1():
     x_test_matrix = np.eye(1, 1) * x_test
     det_val = np.linalg.det(x_test_matrix)
     rewritten_val = f_rewritten(x_test)
+
     assert_allclose(
         det_val,
         rewritten_val,
@@ -545,3 +558,107 @@ def test_svd_uv_merge():
             assert node.op.compute_uv
             svd_counter += 1
     assert svd_counter == 1
+
+
+def get_pt_function(x, op_name):
+    return getattr(pt.linalg, op_name)(x)
+
+
+@pytest.mark.parametrize("inv_op_1", ["inv", "pinv"])
+@pytest.mark.parametrize("inv_op_2", ["inv", "pinv"])
+def test_inv_inv_rewrite(inv_op_1, inv_op_2):
+    x = pt.matrix("x")
+    op1 = get_pt_function(x, inv_op_1)
+    op2 = get_pt_function(op1, inv_op_2)
+    rewritten_out = rewrite_graph(op2)
+    assert rewritten_out == x
+
+
+@pytest.mark.parametrize("inv_op", ["inv", "pinv"])
+def test_inv_eye_to_eye(inv_op):
+    x = pt.eye(10)
+    x_inv = get_pt_function(x, inv_op)
+    f_rewritten = function([], x_inv, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+
+    # Rewrite Test
+    valid_inverses = (MatrixInverse, MatrixPinv)
+    assert not any(isinstance(node.op, valid_inverses) for node in nodes)
+
+    # Value Test
+    x_test = np.eye(10)
+    x_inv_val = np.linalg.inv(x_test)
+    rewritten_val = f_rewritten()
+
+    assert_allclose(
+        x_inv_val,
+        rewritten_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [(), (7,), (7, 7), (5, 7, 7)],
+    ids=["scalar", "vector", "matrix", "batched"],
+)
+@pytest.mark.parametrize("inv_op", ["inv", "pinv"])
+def test_inv_diag_from_eye_mul(shape, inv_op):
+    # Initializing x based on scalar/vector/matrix
+    x = pt.tensor("x", shape=shape)
+    x_diag = pt.eye(7) * x
+    # Calculating inverse using pt.linalg.inv
+    x_inv = get_pt_function(x_diag, inv_op)
+
+    # REWRITE TEST
+    f_rewritten = function([x], x_inv, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+
+    valid_inverses = (MatrixInverse, MatrixPinv)
+    assert not any(isinstance(node.op, valid_inverses) for node in nodes)
+
+    # NUMERIC VALUE TEST
+    if len(shape) == 0:
+        x_test = np.array(np.random.rand()).astype(config.floatX)
+    elif len(shape) == 1:
+        x_test = np.random.rand(*shape).astype(config.floatX)
+    else:
+        x_test = np.random.rand(*shape).astype(config.floatX)
+    x_test_matrix = np.eye(7) * x_test
+    inverse_matrix = np.linalg.inv(x_test_matrix)
+    rewritten_inverse = f_rewritten(x_test)
+
+    assert_allclose(
+        inverse_matrix,
+        rewritten_inverse,
+        atol=ATOL,
+        rtol=RTOL,
+    )
+
+
+@pytest.mark.parametrize("inv_op", ["inv", "pinv"])
+def test_inv_diag_from_diag(inv_op):
+    x = pt.dvector("x")
+    x_diag = pt.diag(x)
+    x_inv = get_pt_function(x_diag, inv_op)
+
+    # REWRITE TEST
+    f_rewritten = function([x], x_inv, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+
+    valid_inverses = (MatrixInverse, MatrixPinv)
+    assert not any(isinstance(node.op, valid_inverses) for node in nodes)
+
+    # NUMERIC VALUE TEST
+    x_test = np.random.rand(10)
+    x_test_matrix = np.eye(10) * x_test
+    inverse_matrix = np.linalg.inv(x_test_matrix)
+    rewritten_inverse = f_rewritten(x_test)
+
+    assert_allclose(
+        inverse_matrix,
+        rewritten_inverse,
+        atol=ATOL,
+        rtol=RTOL,
+    )

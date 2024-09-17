@@ -3013,8 +3013,123 @@ def _get_vector_length_Subtensor(op, var):
         raise ValueError(f"Length of {var} cannot be determined")
 
 
+def slice_at_axis(sl: slice, axis: int) -> tuple[slice, ...]:
+    """
+    Construct tuple of slices to slice an array in the given dimension.
+
+    Copied from numpy.lib.arraypad._slice_at_axis
+    https://github.com/numpy/numpy/blob/300096d384046eee479b0c7a70f79e308da52bff/numpy/lib/_arraypad_impl.py#L33
+
+    Parameters
+    ----------
+    sl : slice
+        The slice for the given dimension.
+    axis : int
+        The axis to which `sl` is applied. All other dimensions are left
+        "unsliced".
+
+    Returns
+    -------
+    sl : tuple of slices
+        A tuple with slices matching `shape` in length.
+
+    Examples
+    --------
+
+    .. testcode::
+
+        import pytensor.tensor as pt
+
+        s = pt.slice_at_axis(slice(None, 1), 1)
+        print(s)
+
+    .. testoutput::
+
+        (slice(None, None, None), slice(None, 1, None), Ellipsis)
+
+    .. testcode::
+
+        x = pt.tensor('x', shape=(None, None, None))
+        x_sliced = x[s]
+
+        f = pytensor.function([x], x_sliced)
+        x = np.arange(27).reshape(3, 3, 3)
+        print(f(x))
+
+    .. testoutput::
+        [[[ 0.  1.  2.]]
+
+         [[ 9. 10. 11.]]
+
+         [[18. 19. 20.]]]
+
+    """
+    if axis >= 0:
+        return (slice(None),) * axis + (sl,) + (...,)  # type: ignore
+    else:
+        # If axis = -1 we want zero right padding (and so on), so subtract one
+        axis = abs(axis) - 1
+        return (...,) + (sl,) + (slice(None),) * axis  # type: ignore
+
+
+def flip(
+    arr: TensorVariable, axis: int | tuple[int] | TensorVariable | None = None
+) -> TensorVariable:
+    """
+    Reverse the order of elements in an tensor along the given axis.
+
+    Parameters
+    ----------
+    arr: TensorVariable
+        Input tensor.
+
+    axis: int | tuple[int] | TensorVariable, optional
+        Axis or axes along which to flip over. The default is to flip over all of the axes of the input tensor.
+
+    Returns
+    -------
+    arr: TensorVariable
+        A view of `arr` with the entries of axis reversed.
+
+    Examples
+    --------
+
+    .. testcode::
+
+        import pytensor
+        import pytensor.tensor as pt
+
+        x = pt.tensor('x', shape=(None, None))
+        x_flipped = pt.flip(x, axis=0)
+
+        f = pytensor.function([x], x_flipped)
+        x = [[1, 2], [3, 4]]
+        print(f(x))
+
+    .. testoutput::
+        [[3. 4.]
+         [1. 2.]]
+
+    """
+    if axis is None:
+        index = ((slice(None, None, -1)),) * arr.ndim
+    else:
+        if isinstance(axis, int):
+            axis = (axis,)
+        index = tuple(
+            [
+                slice(None, None, -1) if i in axis else slice(None, None, None)
+                for i in range(arr.ndim)
+            ]
+        )
+
+    return cast(TensorVariable, arr[index])
+
+
 __all__ = [
     "take",
+    "flip",
+    "slice_at_axis",
     "inc_subtensor",
     "set_subtensor",
 ]

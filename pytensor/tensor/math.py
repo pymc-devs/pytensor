@@ -1,6 +1,7 @@
 import builtins
 import warnings
 from collections.abc import Sequence
+from textwrap import dedent
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
@@ -361,12 +362,14 @@ class FixedOpCAReduce(CAReduce):
 
 
 class NonZeroDimsCAReduce(FixedOpCAReduce):
-    def _c_all(self, node, name, inames, onames, sub):
-        decl, checks, alloc, loop, end = super()._c_all(node, name, inames, onames, sub)
+    def _c_all(self, node, name, input_names, output_names, sub):
+        setup, alloc, loop, cast = super()._c_all(
+            node, name, input_names, output_names, sub
+        )
 
         # We add an additional check for zero-sized dimensions (This seems like
         # something that could enabled in `elemwise_cgen.make_checks`.)
-        iname = inames[0]
+        [iname] = input_names
 
         axis = self.axis
         if axis is None:
@@ -378,17 +381,19 @@ class NonZeroDimsCAReduce(FixedOpCAReduce):
 
         pattern_ = str(pattern)[1:-1]
 
-        decl += f"""int tosum[]={{{pattern_}}};"""
-        alloc += f"""
-                for(int i=0;i<PyArray_NDIM({iname});i++){{
-                    if(PyArray_DIMS({iname})[i]==0 && tosum[i]){{
-                        PyErr_Format(PyExc_ValueError,
-                            "Input of CAReduce{{{node.op.scalar_op}}} has zero-size on axis %%d",i);
-                        {sub["fail"]};
-                    }}
+        setup = f"int tosum[]={{{pattern_}}};" + setup
+        alloc += dedent(
+            f"""
+            for(int i=0;i<PyArray_NDIM({iname});i++){{
+                if(PyArray_DIMS({iname})[i]==0 && tosum[i]){{
+                    PyErr_Format(PyExc_ValueError,
+                        "Input of CAReduce{{{node.op.scalar_op}}} has zero-size on axis %%d",i);
+                    {sub["fail"]};
                 }}
-                """
-        return decl, checks, alloc, loop, end
+            }}
+            """
+        )
+        return setup, alloc, loop, cast
 
 
 class Max(NonZeroDimsCAReduce):
@@ -2093,27 +2098,27 @@ def tensordot(
     are compatible. The resulting tensor will have shape (2, 5, 6) -- the
     dimensions that are not being summed:
 
-    >>> a = np.random.random((2,3,4))
-    >>> b = np.random.random((5,6,4,3))
+    >>> a = np.random.random((2, 3, 4))
+    >>> b = np.random.random((5, 6, 4, 3))
 
     #tensordot
-    >>> c = np.tensordot(a, b, [[1,2],[3,2]])
+    >>> c = np.tensordot(a, b, [[1, 2], [3, 2]])
 
     #loop replicating tensordot
     >>> a0, a1, a2 = a.shape
     >>> b0, b1, _, _ = b.shape
-    >>> cloop = np.zeros((a0,b0,b1))
+    >>> cloop = np.zeros((a0, b0, b1))
 
     #loop over non-summed indices -- these exist
     #in the tensor product.
     >>> for i in range(a0):
     ...     for j in range(b0):
     ...         for k in range(b1):
-    ...             #loop over summed indices -- these don't exist
-    ...             #in the tensor product.
+    ...             # loop over summed indices -- these don't exist
+    ...             # in the tensor product.
     ...             for l in range(a1):
     ...                 for m in range(a2):
-    ...                     cloop[i,j,k] += a[i,l,m] * b[j,k,m,l]
+    ...                     cloop[i, j, k] += a[i, l, m] * b[j, k, m, l]
 
     >>> np.allclose(c, cloop)
     True

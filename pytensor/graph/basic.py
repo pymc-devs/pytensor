@@ -399,18 +399,24 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         import pytensor
         import pytensor.tensor as pt
 
-        a = pt.constant(1.5)            # declare a symbolic constant
-        b = pt.fscalar()                # declare a symbolic floating-point scalar
+        a = pt.constant(1.5)  # declare a symbolic constant
+        b = pt.fscalar()  # declare a symbolic floating-point scalar
 
-        c = a + b                       # create a simple expression
+        c = a + b  # create a simple expression
 
-        f = pytensor.function([b], [c])   # this works because a has a value associated with it already
+        f = pytensor.function(
+            [b], [c]
+        )  # this works because a has a value associated with it already
 
-        assert 4.0 == f(2.5)            # bind 2.5 to an internal copy of b and evaluate an internal c
+        assert 4.0 == f(2.5)  # bind 2.5 to an internal copy of b and evaluate an internal c
 
-        pytensor.function([a], [c])       # compilation error because b (required by c) is undefined
+        pytensor.function(
+            [a], [c]
+        )  # compilation error because b (required by c) is undefined
 
-        pytensor.function([a,b], [c])     # compilation error because a is constant, it can't be an input
+        pytensor.function(
+            [a, b], [c]
+        )  # compilation error because a is constant, it can't be an input
 
 
     The python variables ``a, b, c`` all refer to instances of type
@@ -587,10 +593,10 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
 
         >>> import numpy as np
         >>> import pytensor.tensor as pt
-        >>> x = pt.dscalar('x')
-        >>> y = pt.dscalar('y')
+        >>> x = pt.dscalar("x")
+        >>> y = pt.dscalar("y")
         >>> z = x + y
-        >>> np.allclose(z.eval({x : 16.3, y : 12.1}), 28.4)
+        >>> np.allclose(z.eval({x: 16.3, y: 12.1}), 28.4)
         True
 
         We passed :meth:`eval` a dictionary mapping symbolic PyTensor
@@ -710,7 +716,7 @@ class AtomicVariable(Variable[_TypeType, None]):
         return cp
 
 
-class NominalVariable(AtomicVariable[_TypeType]):
+class NominalVariable(Generic[_TypeType, _IdType], AtomicVariable[_TypeType]):
     """A variable that enables alpha-equivalent comparisons."""
 
     __instances__: dict[tuple["Type", Hashable], "NominalVariable"] = {}
@@ -963,9 +969,9 @@ def explicit_graph_inputs(
         import pytensor.tensor as pt
         from pytensor.graph.basic import explicit_graph_inputs
 
-        x = pt.vector('x')
+        x = pt.vector("x")
         y = pt.constant(2)
-        z = pt.mul(x*y)
+        z = pt.mul(x * y)
 
         inputs = list(explicit_graph_inputs(z))
         f = pytensor.function(inputs, z)
@@ -1041,7 +1047,7 @@ def orphans_between(
     >>> from pytensor.graph.basic import orphans_between
     >>> from pytensor.tensor import scalars
     >>> x, y = scalars("xy")
-    >>> list(orphans_between([x], [(x+y)]))
+    >>> list(orphans_between([x], [(x + y)]))
     [y]
 
     """
@@ -1313,8 +1319,9 @@ def clone_get_equiv(
     outputs: Reversible[Variable],
     copy_inputs: bool = True,
     copy_orphans: bool = True,
-    memo: dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]]
-    | None = None,
+    memo: (
+        dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]] | None
+    ) = None,
     clone_inner_graphs: bool = False,
     **kwargs,
 ) -> dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]]:

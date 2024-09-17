@@ -21,7 +21,7 @@ For issues a minimal working example (MWE) is strongly recommended when relevant
 (fixing a typo in the documentation does not require a MWE). For discussions,
 MWEs are generally required. All MWEs must be implemented using PyTensor. Please
 do not submit MWEs if they are not implemented in PyTensor. In certain cases,
-pseudocode may be acceptable, but an PyTensor implementation is always preferable.
+pseudocode may be acceptable, but a PyTensor implementation is always preferable.
 
 ## Quick links
 

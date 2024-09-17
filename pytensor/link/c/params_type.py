@@ -29,7 +29,9 @@ In your Op sub-class:
 
 .. code-block:: python
 
-    params_type = ParamsType(attr1=TensorType('int32', shape=(None, None)), attr2=ScalarType('float64'))
+    params_type = ParamsType(
+        attr1=TensorType("int32", shape=(None, None)), attr2=ScalarType("float64")
+    )
 
 If your op contains attributes ``attr1`` **and** ``attr2``, the default ``op.get_params()``
 implementation will automatically try to look for it and generate an appropriate Params object.
@@ -77,26 +79,35 @@ enumerations will be directly available as ParamsType attributes.
     from pytensor.link.c.params_type import ParamsType
     from pytensor.link.c.type import EnumType, EnumList
 
-    wrapper = ParamsType(enum1=EnumList('CONSTANT_1', 'CONSTANT_2', 'CONSTANT_3'),
-                         enum2=EnumType(PI=3.14, EPSILON=0.001))
+    wrapper = ParamsType(
+        enum1=EnumList("CONSTANT_1", "CONSTANT_2", "CONSTANT_3"),
+        enum2=EnumType(PI=3.14, EPSILON=0.001),
+    )
 
     # Each enum constant is available as a wrapper attribute:
-    print(wrapper.CONSTANT_1, wrapper.CONSTANT_2, wrapper.CONSTANT_3,
-          wrapper.PI, wrapper.EPSILON)
+    print(
+        wrapper.CONSTANT_1,
+        wrapper.CONSTANT_2,
+        wrapper.CONSTANT_3,
+        wrapper.PI,
+        wrapper.EPSILON,
+    )
 
     # For convenience, you can also look for a constant by name with
     # ``ParamsType.get_enum()`` method.
-    pi = wrapper.get_enum('PI')
-    epsilon = wrapper.get_enum('EPSILON')
-    constant_2 = wrapper.get_enum('CONSTANT_2')
+    pi = wrapper.get_enum("PI")
+    epsilon = wrapper.get_enum("EPSILON")
+    constant_2 = wrapper.get_enum("CONSTANT_2")
     print(pi, epsilon, constant_2)
 
 This implies that a ParamsType cannot contain different enum types with common enum names::
 
     # Following line will raise an error,
     # as there is a "CONSTANT_1" defined both in enum1 and enum2.
-    wrapper = ParamsType(enum1=EnumList('CONSTANT_1', 'CONSTANT_2'),
-                         enum2=EnumType(CONSTANT_1=0, CONSTANT_3=5))
+    wrapper = ParamsType(
+        enum1=EnumList("CONSTANT_1", "CONSTANT_2"),
+        enum2=EnumType(CONSTANT_1=0, CONSTANT_3=5),
+    )
 
 If your enum types contain constant aliases, you can retrieve them from ParamsType
 with ``ParamsType.enum_from_alias(alias)`` method (see :class:`pytensor.link.c.type.EnumType`
@@ -104,11 +115,12 @@ for more info about enumeration aliases).
 
 .. code-block:: python
 
-    wrapper = ParamsType(enum1=EnumList('A', ('B', 'beta'), 'C'),
-                         enum2=EnumList(('D', 'delta'), 'E', 'F'))
+    wrapper = ParamsType(
+        enum1=EnumList("A", ("B", "beta"), "C"), enum2=EnumList(("D", "delta"), "E", "F")
+    )
     b1 = wrapper.B
-    b2 = wrapper.get_enum('B')
-    b3 = wrapper.enum_from_alias('beta')
+    b2 = wrapper.get_enum("B")
+    b3 = wrapper.enum_from_alias("beta")
     assert b1 == b2 == b3
 
 """
@@ -236,10 +248,13 @@ class Params(dict):
 
         from pytensor.link.c.params_type import ParamsType, Params
         from pytensor.scalar import ScalarType
+
         # You must create a ParamsType first:
-        params_type = ParamsType(attr1=ScalarType('int32'),
-                                 key2=ScalarType('float32'),
-                                 field3=ScalarType('int64'))
+        params_type = ParamsType(
+            attr1=ScalarType("int32"),
+            key2=ScalarType("float32"),
+            field3=ScalarType("int64"),
+        )
         # Then you can create a Params object with
         # the params type defined above and values for attributes.
         params = Params(params_type, attr1=1, key2=2.0, field3=3)
@@ -491,11 +506,13 @@ class ParamsType(CType):
             from pytensor.link.c.type import EnumType, EnumList
             from pytensor.scalar import ScalarType
 
-            wrapper = ParamsType(scalar=ScalarType('int32'),
-                                 letters=EnumType(A=1, B=2, C=3),
-                                 digits=EnumList('ZERO', 'ONE', 'TWO'))
-            print(wrapper.get_enum('C'))  # 3
-            print(wrapper.get_enum('TWO'))  # 2
+            wrapper = ParamsType(
+                scalar=ScalarType("int32"),
+                letters=EnumType(A=1, B=2, C=3),
+                digits=EnumList("ZERO", "ONE", "TWO"),
+            )
+            print(wrapper.get_enum("C"))  # 3
+            print(wrapper.get_enum("TWO"))  # 2
 
             # You can also directly do:
             print(wrapper.C)
@@ -520,17 +537,19 @@ class ParamsType(CType):
             from pytensor.link.c.type import EnumType, EnumList
             from pytensor.scalar import ScalarType
 
-            wrapper = ParamsType(scalar=ScalarType('int32'),
-                                 letters=EnumType(A=(1, 'alpha'), B=(2, 'beta'), C=3),
-                                 digits=EnumList(('ZERO', 'nothing'), ('ONE', 'unit'), ('TWO', 'couple')))
-            print(wrapper.get_enum('C'))  # 3
-            print(wrapper.get_enum('TWO'))  # 2
-            print(wrapper.enum_from_alias('alpha')) # 1
-            print(wrapper.enum_from_alias('nothing')) # 0
+            wrapper = ParamsType(
+                scalar=ScalarType("int32"),
+                letters=EnumType(A=(1, "alpha"), B=(2, "beta"), C=3),
+                digits=EnumList(("ZERO", "nothing"), ("ONE", "unit"), ("TWO", "couple")),
+            )
+            print(wrapper.get_enum("C"))  # 3
+            print(wrapper.get_enum("TWO"))  # 2
+            print(wrapper.enum_from_alias("alpha"))  # 1
+            print(wrapper.enum_from_alias("nothing"))  # 0
 
             # For the following, alias 'C' is not defined, so the method looks for
             # a constant named 'C', and finds it.
-            print(wrapper.enum_from_alias('C')) # 3
+            print(wrapper.enum_from_alias("C"))  # 3
 
         .. note::
 
@@ -567,12 +586,14 @@ class ParamsType(CType):
             from pytensor.tensor.type import dmatrix
             from pytensor.scalar import ScalarType
 
+
             class MyObject:
                 def __init__(self):
                     self.a = 10
                     self.b = numpy.asarray([[1, 2, 3], [4, 5, 6]])
 
-            params_type = ParamsType(a=ScalarType('int32'), b=dmatrix, c=ScalarType('bool'))
+
+            params_type = ParamsType(a=ScalarType("int32"), b=dmatrix, c=ScalarType("bool"))
 
             o = MyObject()
             value_for_c = False

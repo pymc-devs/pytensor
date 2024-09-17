@@ -333,7 +333,7 @@ returns eitehr a new transferred variable (which can be the same as
 the input if no transfer is necessary) or returns None if the transfer
 can't be done.
 
-Then register that function by calling :func:`register_transfer()`
+Then register that function by calling :func:`register_transfer`
 with it as argument.
 
 An example

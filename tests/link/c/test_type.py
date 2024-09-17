@@ -287,6 +287,6 @@ class TestEnumTypes:
         assert val_billion == val_million * 1000
         assert val_two_billions == val_billion * 2
 
-    @pytensor.config.change_flags(**{"cmodule__debug": True})
+    @pytensor.config.change_flags(cmodule__debug=True)
     def test_op_with_cenumtype_debug(self):
         self.test_op_with_cenumtype()
