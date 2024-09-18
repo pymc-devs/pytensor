@@ -3,13 +3,13 @@ import logging
 import os
 import platform
 import re
+import shutil
 import socket
 import sys
 import textwrap
 from pathlib import Path
 
 import numpy as np
-from setuptools._distutils.spawn import find_executable
 
 import pytensor
 from pytensor.configparser import (
@@ -349,7 +349,7 @@ def add_compile_configvars():
 
     # Try to find the full compiler path from the name
     if param != "":
-        newp = find_executable(param)
+        newp = shutil.which(param)
         if newp is not None:
             param = newp
         del newp
