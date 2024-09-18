@@ -686,7 +686,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
         with pytest.raises(
             ValueError,
-            match="There following variables were provided more than once as inputs to the "
+            match="The following variables were provided more than once as inputs to the "
             "OpFromGraph",
         ):
             OpFromGraph([x, x, y], [x + y])
