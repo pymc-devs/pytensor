@@ -20,6 +20,7 @@ from pytensor.raise_op import CheckAndRaise
 from pytensor.scalar import float64, int64
 from pytensor.scalar.loop import ScalarLoop
 from pytensor.tensor import alloc, arange, as_tensor, empty, expit, eye, softplus
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.type import matrices, matrix, scalar, vector
 
 
@@ -420,3 +421,33 @@ def test_ScalarLoop_while():
     ):
         np.testing.assert_allclose(res[0], np.array(expected[0]))
         np.testing.assert_allclose(res[1], np.array(expected[1]))
+
+def test_pytorch_OpFromGraph():
+    x, y, z = matrices("xyz")
+    ofg_1 = OpFromGraph([x, y], [x + y])
+    ofg_2 = OpFromGraph([x, y], [x * y, x - y])
+
+    o1, o2 = ofg_2(y, z)
+    out = ofg_1(x, o1) + o2
+
+    xv = np.ones((2, 2), dtype=config.floatX)
+    yv = np.ones((2, 2), dtype=config.floatX) * 3
+    zv = np.ones((2, 2), dtype=config.floatX) * 5
+
+    f = FunctionGraph([x, y, z], [out])
+    compare_pytorch_and_py(f, [xv, yv, zv])
+
+
+def test_ScalarLoop_Elemwise():
+    n_steps = int64("n_steps")
+    x0 = float64("x0")
+    x = x0 * 2
+    until = x >= 10
+
+    op = ScalarLoop(init=[x0], update=[x], until=until)
+    fn = function([n_steps, x0], Elemwise(op)(n_steps, x0), mode=pytorch_mode)
+
+    states, dones = fn(10, np.array(range(5)))
+
+    np.testing.assert_allclose(states, [0, 4, 8, 12, 16])
+    np.testing.assert_allclose(dones, [False, False, False, True, True])

@@ -78,7 +78,7 @@ def pytorch_funicify_ScalarLoop(op, node, **kwargs):
             done = True
             for _ in range(steps):
                 *carry, done = update(*carry, *constants)
-                if done:
+                if torch.any(done):
                     break
             if len(node.outputs) == 2:
                 return carry[0], done
