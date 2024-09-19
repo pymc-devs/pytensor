@@ -98,4 +98,4 @@ def pytorch_funicify_ScalarLoop(op, node, **kwargs):
             else:
                 return carry
 
-    return torch.compiler.disable(scalar_loop)
+    return torch.compiler.disable(scalar_loop, recursive=False)
