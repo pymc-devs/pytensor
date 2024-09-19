@@ -80,7 +80,10 @@ def pytorch_funicify_ScalarLoop(op, node, **kwargs):
                 *carry, done = update(*carry, *constants)
                 if done:
                     break
-            return torch.stack(carry), torch.tensor([done])
+            if len(node.outputs) == 2:
+                return carry[0], done
+            else:
+                return carry, done
     else:
 
         def scalar_loop(steps, *start_and_constants):
@@ -90,6 +93,9 @@ def pytorch_funicify_ScalarLoop(op, node, **kwargs):
             )
             for _ in range(steps):
                 carry = update(*carry, *constants)
-            return torch.stack(carry)
+            if len(node.outputs) == 1:
+                return carry[0]
+            else:
+                return carry
 
     return torch.compiler.disable(scalar_loop)
