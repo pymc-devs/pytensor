@@ -2411,7 +2411,10 @@ def test_slice_canonicalize():
     # Test case 1
     y = x[0:None, 0:5, 0:7, 0:9:1]
     f = pytensor.function([x], y, allow_input_downcast=True)
+
+    # Get the DeepCopy input and assert that the Op is a DeepCopy
     test_y = f.maker.fgraph.outputs[0].owner.inputs[0]
+    assert isinstance(f.maker.fgraph.outputs[0].owner.op, DeepCopyOp)
 
     expected_y = x[None:None:None, None:None:None, None:7:None]
 
@@ -2427,7 +2430,10 @@ def test_slice_canonicalize():
     # Test case 2
     y1 = x[0:-1, 0:5, 0:7, 0:-1:-1]
     f1 = pytensor.function([x], y1, allow_input_downcast=True)
+
+    # Get the DeepCopy input and assert that the Op is a DeepCopy
     test_y1 = f1.maker.fgraph.outputs[0].owner.inputs[0]
+    assert isinstance(f1.maker.fgraph.outputs[0].owner.op, DeepCopyOp)
 
     expected_y1 = x[None:-1:None, None:None:None, None:7:None, None:-1:-1]
 
