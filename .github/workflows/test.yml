@@ -215,7 +215,7 @@ jobs:
       - name: Install dependencies
         shell: micromamba-shell {0}
         run: |
-          micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" mkl numpy scipy pip mkl-service cython pytest "numba>=0.57" jax jaxlib pytest-benchmark  pytorch pytorch-cuda=12.1 -c pytorch -c nvidia
+          micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}=*_cpython" mkl numpy scipy pip mkl-service cython pytest "numba>=0.57" jax jaxlib pytest-benchmark
           pip install -e ./
           micromamba list && pip freeze
           python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'
