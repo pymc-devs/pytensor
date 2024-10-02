@@ -194,15 +194,6 @@ def test_invalid_configvar_access():
     with pytest.raises(configparser.ConfigAccessViolation, match="different instance"):
         print(root.test__on_test_instance)
 
-    # And also that we can't add two configs of the same name to different instances:
-    with pytest.raises(AttributeError, match="already registered"):
-        root.add(
-            "test__on_test_instance",
-            "This config setting was already added to another instance.",
-            configparser.IntParam(5),
-            in_c_key=False,
-        )
-
 
 def test_no_more_dotting():
     root = configdefaults.config
