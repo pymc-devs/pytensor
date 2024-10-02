@@ -236,11 +236,7 @@ class PyTensorConfigParser:
             raise ValueError(
                 f"Dot-based sections were removed. Use double underscores! ({name})"
             )
-        # Can't use hasattr here, because it returns False upon AttributeErrors
-        if name in dir(self):
-            raise AttributeError(
-                f"A config parameter with the name '{name}' was already registered on another config instance."
-            )
+
         configparam.doc = doc
         configparam.name = name
         configparam.in_c_key = in_c_key
