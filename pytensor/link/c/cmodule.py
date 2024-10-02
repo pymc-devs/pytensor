@@ -74,6 +74,7 @@ def is_GCCLLVMType(fn: Callable[[], bool | None]) -> GCCLLVMType:
 
 
 _logger = logging.getLogger("pytensor.link.c.cmodule")
+_logger.setLevel(logging.DEBUG)
 
 METH_VARARGS = "METH_VARARGS"
 METH_NOARGS = "METH_NOARGS"
