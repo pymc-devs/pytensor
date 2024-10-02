@@ -305,7 +305,6 @@ def test_pytorch_MakeVector():
     compare_pytorch_and_py(x_fg, [])
 
 
-
 def test_pytorch_ifelse():
     p1_vals = np.r_[1, 2, 3]
     p2_vals = np.r_[-1, -2, -3]
@@ -337,4 +336,3 @@ def test_pytorch_OpFromGraph():
 
     f = FunctionGraph([x, y, z], [out])
     compare_pytorch_and_py(f, [xv, yv, zv])
-
