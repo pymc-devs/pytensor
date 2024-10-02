@@ -157,9 +157,9 @@ def pytorch_funcify_IfElse(op, **kwargs):
 
     def ifelse(cond, *true_and_false, n_outs=n_outs):
         if cond:
-            return torch.stack(true_and_false[:n_outs])
+            return true_and_false[:n_outs]
         else:
-            return torch.stack(true_and_false[n_outs:])
+            return true_and_false[n_outs:]
 
     return ifelse
 
