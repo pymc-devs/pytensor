@@ -2098,27 +2098,27 @@ def tensordot(
     are compatible. The resulting tensor will have shape (2, 5, 6) -- the
     dimensions that are not being summed:
 
-    >>> a = np.random.random((2,3,4))
-    >>> b = np.random.random((5,6,4,3))
+    >>> a = np.random.random((2, 3, 4))
+    >>> b = np.random.random((5, 6, 4, 3))
 
     #tensordot
-    >>> c = np.tensordot(a, b, [[1,2],[3,2]])
+    >>> c = np.tensordot(a, b, [[1, 2], [3, 2]])
 
     #loop replicating tensordot
     >>> a0, a1, a2 = a.shape
     >>> b0, b1, _, _ = b.shape
-    >>> cloop = np.zeros((a0,b0,b1))
+    >>> cloop = np.zeros((a0, b0, b1))
 
     #loop over non-summed indices -- these exist
     #in the tensor product.
     >>> for i in range(a0):
     ...     for j in range(b0):
     ...         for k in range(b1):
-    ...             #loop over summed indices -- these don't exist
-    ...             #in the tensor product.
+    ...             # loop over summed indices -- these don't exist
+    ...             # in the tensor product.
     ...             for l in range(a1):
     ...                 for m in range(a2):
-    ...                     cloop[i,j,k] += a[i,l,m] * b[j,k,m,l]
+    ...                     cloop[i, j, k] += a[i, l, m] * b[j, k, m, l]
 
     >>> np.allclose(c, cloop)
     True

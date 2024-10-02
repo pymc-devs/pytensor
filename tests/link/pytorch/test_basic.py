@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 import pytensor.tensor.basic as ptb
+from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
 from pytensor.compile.mode import get_mode
 from pytensor.compile.sharedvalue import SharedVariable, shared
@@ -15,7 +16,7 @@ from pytensor.graph.op import Op
 from pytensor.ifelse import ifelse
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor import alloc, arange, as_tensor, empty, eye
-from pytensor.tensor.type import matrix, scalar, vector
+from pytensor.tensor.type import matrices, matrix, scalar, vector
 
 
 torch = pytest.importorskip("torch")
@@ -304,6 +305,7 @@ def test_pytorch_MakeVector():
     compare_pytorch_and_py(x_fg, [])
 
 
+
 def test_pytorch_ifelse():
     p1_vals = np.r_[1, 2, 3]
     p2_vals = np.r_[-1, -2, -3]
@@ -319,3 +321,20 @@ def test_pytorch_ifelse():
     x_fg = FunctionGraph([a], x)
 
     compare_pytorch_and_py(x_fg, np.array([0.5], dtype=config.floatX))
+
+
+def test_pytorch_OpFromGraph():
+    x, y, z = matrices("xyz")
+    ofg_1 = OpFromGraph([x, y], [x + y])
+    ofg_2 = OpFromGraph([x, y], [x * y, x - y])
+
+    o1, o2 = ofg_2(y, z)
+    out = ofg_1(x, o1) + o2
+
+    xv = np.ones((2, 2), dtype=config.floatX)
+    yv = np.ones((2, 2), dtype=config.floatX) * 3
+    zv = np.ones((2, 2), dtype=config.floatX) * 5
+
+    f = FunctionGraph([x, y, z], [out])
+    compare_pytorch_and_py(f, [xv, yv, zv])
+

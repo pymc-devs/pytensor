@@ -3,7 +3,10 @@ from types import NoneType
 
 import numpy as np
 import torch
+import torch.compiler
 
+from pytensor.compile import PYTORCH
+from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.fg import FunctionGraph
 from pytensor.ifelse import IfElse
@@ -151,6 +154,7 @@ def pytorch_funcify_MakeVector(op, **kwargs):
     return makevector
 
 
+
 @pytorch_funcify.register(IfElse)
 def pytorch_funcify_IfElse(op, **kwargs):
     n_outs = op.n_outs
@@ -162,6 +166,19 @@ def pytorch_funcify_IfElse(op, **kwargs):
             return true_and_false[n_outs:]
 
     return ifelse
+
+
+@pytorch_funcify.register(OpFromGraph)
+def pytorch_funcify_OpFromGraph(op, node, **kwargs):
+    kwargs.pop("storage_map", None)
+
+    # Apply inner rewrites
+    PYTORCH.optimizer(op.fgraph)
+
+    fgraph_fn = pytorch_funcify(op.fgraph, **kwargs, squeeze_output=True)
+    # Disable one step inlining to prevent torch from trying to import local functions
+    # defined in `pytorch_funcify`
+    return torch.compiler.disable(fgraph_fn, recursive=False)
 
 
 @pytorch_funcify.register(TensorFromScalar)

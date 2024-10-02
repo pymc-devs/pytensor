@@ -36,7 +36,7 @@ The ``inputs`` argument to ``pytensor.function`` is a list, containing the ``Var
       ``self.<name>``. The default value is ``None``.
 
       ``value``: literal or ``Container``. The initial/default value for this
-        input. If update is`` None``, this input acts just like
+        input. If update is ``None``, this input acts just like
         an argument with a default value in Python. If update is not ``None``,
         changes to this
         value will "stick around", whether due to an update or a user's

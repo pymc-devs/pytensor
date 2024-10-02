@@ -1247,10 +1247,11 @@ def pydotprint(
         .. code-block:: python
 
             import pytensor
+
             v = pytensor.tensor.vector()
             from IPython.display import SVG
-            SVG(pytensor.printing.pydotprint(v*2, return_image=True,
-                                           format='svg'))
+
+            SVG(pytensor.printing.pydotprint(v * 2, return_image=True, format="svg"))
 
     In the graph, ellipses are Apply Nodes (the execution of an op)
     and boxes are variables.  If variables have names they are used as

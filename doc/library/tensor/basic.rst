@@ -908,8 +908,8 @@ Reductions
     :Parameter: *x* -  symbolic Tensor (or compatible)
     :Parameter: *axis* - axis or axes along which to compute the maximum
     :Parameter: *keepdims* - (boolean) If this is set to True, the axes which are reduced are
-		left in the result as dimensions with size one. With this option, the result
-		will broadcast correctly against the original tensor.
+        left in the result as dimensions with size one. With this option, the result
+        will broadcast correctly against the original tensor.
     :Returns: maximum of *x* along *axis*
 
     axis can be:
@@ -922,8 +922,8 @@ Reductions
     :Parameter: *x* - symbolic Tensor (or compatible)
     :Parameter: *axis* - axis along which to compute the index of the maximum
     :Parameter: *keepdims* - (boolean) If this is set to True, the axis which is reduced is
-		left in the result as a dimension with size one. With this option, the result
-		will broadcast correctly against the original tensor.
+        left in the result as a dimension with size one. With this option, the result
+        will broadcast correctly against the original tensor.
     :Returns: the index of the maximum value along a given axis
 
     if ``axis == None``, `argmax` over the flattened tensor (like NumPy)
@@ -933,8 +933,8 @@ Reductions
     :Parameter: *x* - symbolic Tensor (or compatible)
     :Parameter: *axis* - axis along which to compute the maximum and its index
     :Parameter: *keepdims* - (boolean) If this is set to True, the axis which is reduced is
-		left in the result as a dimension with size one. With this option, the result
-		will broadcast correctly against the original tensor.
+        left in the result as a dimension with size one. With this option, the result
+        will broadcast correctly against the original tensor.
     :Returns: the maximum value along a given axis and its index.
 
     if ``axis == None``, `max_and_argmax` over the flattened tensor (like NumPy)
@@ -944,8 +944,8 @@ Reductions
     :Parameter: *x* -  symbolic Tensor (or compatible)
     :Parameter: *axis* - axis or axes along which to compute the minimum
     :Parameter: *keepdims* - (boolean) If this is set to True, the axes which are reduced are
-		left in the result as dimensions with size one. With this option, the result
-		will broadcast correctly against the original tensor.
+        left in the result as dimensions with size one. With this option, the result
+        will broadcast correctly against the original tensor.
     :Returns: minimum of *x* along *axis*
 
     `axis` can be:
@@ -958,8 +958,8 @@ Reductions
     :Parameter: *x* - symbolic Tensor (or compatible)
     :Parameter: *axis* - axis along which to compute the index of the minimum
     :Parameter: *keepdims* - (boolean) If this is set to True, the axes which are reduced are
-		left in the result as dimensions with size one. With this option, the result
-		will broadcast correctly against the original tensor.
+        left in the result as dimensions with size one. With this option, the result
+        will broadcast correctly against the original tensor.
     :Returns: the index of the minimum value along a given axis
 
     if ``axis == None``, `argmin` over the flattened tensor (like NumPy)
@@ -980,8 +980,8 @@ Reductions
         This default dtype does _not_ depend on the value of "acc_dtype".
 
     :Parameter: *keepdims* - (boolean) If this is set to True, the axes which are reduced are
-		left in the result as dimensions with size one. With this option, the result
-		will broadcast correctly against the original tensor.
+        left in the result as dimensions with size one. With this option, the result
+        will broadcast correctly against the original tensor.
 
     :Parameter: *acc_dtype* -  The dtype of the internal accumulator.
         If None (default), we use the dtype in the list below,
@@ -1015,8 +1015,8 @@ Reductions
         This default dtype does _not_ depend on the value of "acc_dtype".
 
     :Parameter: *keepdims* - (boolean) If this is set to True, the axes which are reduced are
-		left in the result as dimensions with size one. With this option, the result
-		will broadcast correctly against the original tensor.
+        left in the result as dimensions with size one. With this option, the result
+        will broadcast correctly against the original tensor.
 
     :Parameter: *acc_dtype* -  The dtype of the internal accumulator.
         If None (default), we use the dtype in the list below,
@@ -1031,16 +1031,16 @@ Reductions
          as we need to handle 3 different cases: without zeros in the
          input reduced group, with 1 zero or with more zeros.
 
-	 This could slow you down, but more importantly, we currently
-	 don't support the second derivative of the 3 cases. So you
-	 cannot take the second derivative of the default prod().
+    This could slow you down, but more importantly, we currently
+    don't support the second derivative of the 3 cases. So you
+    cannot take the second derivative of the default prod().
 
-	 To remove the handling of the special cases of 0 and so get
-	 some small speed up and allow second derivative set
-	 ``no_zeros_in_inputs`` to ``True``. It defaults to ``False``.
+    To remove the handling of the special cases of 0 and so get
+    some small speed up and allow second derivative set
+    ``no_zeros_in_inputs`` to ``True``. It defaults to ``False``.
 
-	 **It is the user responsibility to make sure there are no zeros
-	 in the inputs. If there are, the grad will be wrong.**
+    **It is the user responsibility to make sure there are no zeros
+    in the inputs. If there are, the grad will be wrong.**
 
     :Returns: product of every term in *x* along *axis*
 
@@ -1058,13 +1058,13 @@ Reductions
         done in float64 (acc_dtype would be float64 by default),
         but that result will be casted back in float32.
     :Parameter: *keepdims* - (boolean) If this is set to True, the axes which are reduced are
-		left in the result as dimensions with size one. With this option, the result
-		will broadcast correctly against the original tensor.
+        left in the result as dimensions with size one. With this option, the result
+        will broadcast correctly against the original tensor.
     :Parameter: *acc_dtype* -  The dtype of the internal accumulator of the
         inner summation. This will not necessarily be the dtype of the
         output (in particular if it is a discrete (int/uint) dtype, the
         output will be in a float type).  If None, then we use the same
-        rules as :func:`sum()`.
+        rules as :func:`sum`.
     :Returns: mean value of *x* along *axis*
 
     `axis` can be:
@@ -1077,8 +1077,8 @@ Reductions
     :Parameter: *x* -  symbolic Tensor (or compatible)
     :Parameter: *axis* - axis or axes along which to compute the variance
     :Parameter: *keepdims* - (boolean) If this is set to True, the axes which are reduced are
-		left in the result as dimensions with size one. With this option, the result
-		will broadcast correctly against the original tensor.
+        left in the result as dimensions with size one. With this option, the result
+        will broadcast correctly against the original tensor.
     :Returns: variance of *x* along *axis*
 
     `axis` can be:
@@ -1091,8 +1091,8 @@ Reductions
     :Parameter: *x* -  symbolic Tensor (or compatible)
     :Parameter: *axis* - axis or axes along which to compute the standard deviation
     :Parameter: *keepdims* - (boolean) If this is set to True, the axes which are reduced are
-		left in the result as dimensions with size one. With this option, the result
-		will broadcast correctly against the original tensor.
+        left in the result as dimensions with size one. With this option, the result
+        will broadcast correctly against the original tensor.
     :Returns: variance of *x* along *axis*
 
     `axis` can be:
@@ -1105,8 +1105,8 @@ Reductions
     :Parameter: *x* -  symbolic Tensor (or compatible)
     :Parameter: *axis* - axis or axes along which to apply 'bitwise and'
     :Parameter: *keepdims* - (boolean) If this is set to True, the axes which are reduced are
-		left in the result as dimensions with size one. With this option, the result
-		will broadcast correctly against the original tensor.
+        left in the result as dimensions with size one. With this option, the result
+        will broadcast correctly against the original tensor.
     :Returns: bitwise and of *x* along *axis*
 
     `axis` can be:
@@ -1119,8 +1119,8 @@ Reductions
     :Parameter: *x* -  symbolic Tensor (or compatible)
     :Parameter: *axis* - axis or axes along which to apply bitwise or
     :Parameter: *keepdims* - (boolean) If this is set to True, the axes which are reduced are
-		left in the result as dimensions with size one. With this option, the result
-		will broadcast correctly against the original tensor.
+        left in the result as dimensions with size one. With this option, the result
+        will broadcast correctly against the original tensor.
     :Returns: bitwise or of *x* along *axis*
 
     `axis` can be:
@@ -1745,7 +1745,7 @@ Linear Algebra
               when indexed, so that each returned argument has the same shape.
               The dimensions and number of the output arrays are equal to the
               number of indexing dimensions. If the step length is not a complex
-	      number, then the stop is not inclusive.
+              number, then the stop is not inclusive.
 
     Example:
 
