@@ -154,7 +154,6 @@ def pytorch_funcify_MakeVector(op, **kwargs):
     return makevector
 
 
-
 @pytorch_funcify.register(IfElse)
 def pytorch_funcify_IfElse(op, **kwargs):
     n_outs = op.n_outs
