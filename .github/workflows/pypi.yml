@@ -35,6 +35,18 @@ jobs:
           name: sdist
           path: dist/*.tar.gz
 
+  run_checks:
+    name: Build & inspect our package.
+    # Note: the resulting builds are not actually published.
+    # This is purely for additional testing and diagnostic purposes.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: hynek/build-and-inspect-python-package@v2
+
   build_wheels:
     name: Build wheels for ${{ matrix.platform }}
     runs-on: ${{ matrix.platform }}
