@@ -10,7 +10,7 @@ from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph, vectorize_graph
-from pytensor.graph.basic import Constant, Variable, ancestors
+from pytensor.graph.basic import Constant, Variable, ancestors, equal_computations
 from pytensor.graph.rewriting.basic import check_stack_trace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import rewrite_graph
@@ -2402,3 +2402,44 @@ def test_local_blockwise_advanced_inc_subtensor(set_instead_of_inc):
     else:
         expected_out[:, :, core_idxs] += test_y
     np.testing.assert_allclose(fn(test_x, test_y), expected_out)
+
+
+def test_slice_canonicalize():
+    rng = np.random.default_rng(43)
+    x = tensor(shape=(3, 5, None, 9))
+    test_x = rng.normal(size=(3, 5, 8, 9))
+    # Test case 1
+    y = x[0:None, 0:5, 0:7, 0:9:1]
+    f = pytensor.function([x], y, allow_input_downcast=True)
+
+    # Get the DeepCopy input and assert that the Op is a DeepCopy
+    test_y = f.maker.fgraph.outputs[0].owner.inputs[0]
+    assert isinstance(f.maker.fgraph.outputs[0].owner.op, DeepCopyOp)
+
+    expected_y = x[None:None:None, None:None:None, None:7:None]
+
+    assert equal_computations([test_y], [expected_y])
+
+    np.testing.assert_allclose(
+        f(test_x),
+        test_x[
+            0:None, 0:5, 0:7, 0:9:1
+        ],  # Use the unoptimized slice to make sure our rewrite logic is correct
+    )
+
+    # Test case 2
+    y1 = x[0:-1, 0:5, 0:7, 0:-1:-1]
+    f1 = pytensor.function([x], y1, allow_input_downcast=True)
+
+    # Get the DeepCopy input and assert that the Op is a DeepCopy
+    test_y1 = f1.maker.fgraph.outputs[0].owner.inputs[0]
+    assert isinstance(f1.maker.fgraph.outputs[0].owner.op, DeepCopyOp)
+
+    expected_y1 = x[None:-1:None, None:None:None, None:7:None, None:-1:-1]
+
+    assert equal_computations([test_y1], [expected_y1])
+
+    np.testing.assert_allclose(
+        f1(test_x),
+        test_x[0:-1, 0:5, 0:7, 0:-1:-1],
+    )
