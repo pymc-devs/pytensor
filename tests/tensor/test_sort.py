@@ -35,7 +35,7 @@ class TestSort:
         a = dmatrix()
         w = sort(a)
         f = pytensor.function([a], w)
-        utt.assert_allclose(f(self.m_val), np.sort(self.m_val))
+        np.testing.assert_allclose(f(self.m_val), np.sort(self.m_val))
 
     def test2(self):
         a = dmatrix()
@@ -45,7 +45,7 @@ class TestSort:
         for axis_val in 0, 1:
             gv = f(self.m_val, axis_val)
             gt = np.sort(self.m_val, axis_val)
-            utt.assert_allclose(gv, gt)
+            np.testing.assert_allclose(gv, gt)
 
     def test3(self):
         a = dvector()
@@ -53,7 +53,7 @@ class TestSort:
         f = pytensor.function([a], w2)
         gv = f(self.v_val)
         gt = np.sort(self.v_val)
-        utt.assert_allclose(gv, gt)
+        np.testing.assert_allclose(gv, gt)
 
     def test4(self):
         a = dmatrix()
@@ -63,7 +63,7 @@ class TestSort:
         for axis_val in 0, 1:
             gv = f(self.m_val, axis_val)
             gt = np.sort(self.m_val, axis_val)
-            utt.assert_allclose(gv, gt)
+            np.testing.assert_allclose(gv, gt)
 
     def test5(self):
         a1 = SortOp("mergesort")
@@ -79,7 +79,7 @@ class TestSort:
         f = pytensor.function([a], l)
         gv = f(self.m_val)
         gt = np.sort(self.m_val, None)
-        utt.assert_allclose(gv, gt)
+        np.testing.assert_allclose(gv, gt)
 
     def test_grad_vector(self):
         data = self.rng.random(10).astype(pytensor.config.floatX)
@@ -177,7 +177,7 @@ def test_argsort():
     f = pytensor.function([a], w)
     gv = f(m_val)
     gt = np.argsort(m_val)
-    utt.assert_allclose(gv, gt)
+    np.testing.assert_allclose(gv, gt)
 
     # Example 2
     a = dmatrix()
@@ -187,7 +187,7 @@ def test_argsort():
     for axis_val in 0, 1:
         gv = f(m_val, axis_val)
         gt = np.argsort(m_val, axis_val)
-        utt.assert_allclose(gv, gt)
+        np.testing.assert_allclose(gv, gt)
 
     # Example 3
     a = dvector()
@@ -195,7 +195,7 @@ def test_argsort():
     f = pytensor.function([a], w2)
     gv = f(v_val)
     gt = np.argsort(v_val)
-    utt.assert_allclose(gv, gt)
+    np.testing.assert_allclose(gv, gt)
 
     # Example 4
     a = dmatrix()
@@ -205,7 +205,7 @@ def test_argsort():
     for axis_val in 0, 1:
         gv = f(m_val, axis_val)
         gt = np.argsort(m_val, axis_val)
-        utt.assert_allclose(gv, gt)
+        np.testing.assert_allclose(gv, gt)
 
     # Example 5
     a1 = ArgSortOp("mergesort")
@@ -220,7 +220,7 @@ def test_argsort():
     f = pytensor.function([a], w2)
     gv = f(m_val)
     gt = np.argsort(m_val, None)
-    utt.assert_allclose(gv, gt)
+    np.testing.assert_allclose(gv, gt)
 
 
 def test_argsort_grad():
