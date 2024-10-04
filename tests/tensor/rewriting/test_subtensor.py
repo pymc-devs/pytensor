@@ -95,7 +95,9 @@ z = create_pytensor_param(np.random.default_rng().integers(0, 4, size=(2, 2)))
 def test_local_replace_AdvancedSubtensor(indices, is_none):
     X_val = np.random.normal(size=(4, 4, 4))
     X = tensor(dtype=np.float64, shape=(None, None, None), name="X")
-    X.tag.test_value = X_val
+
+    with pytest.warns(FutureWarning):
+        X.tag.test_value = X_val
 
     Y = X[indices]
 
@@ -124,8 +126,12 @@ def test_local_replace_AdvancedSubtensor(indices, is_none):
             if v.owner
         )
 
-        res_val = res_fn(*[i.tag.test_value for i in inputs])
-        exp_res_val = exp_res_fn(*[i.tag.test_value for i in inputs])
+        with pytest.warns(
+            FutureWarning,
+            match="test_value machinery is deprecated and will stop working in the future.",
+        ):
+            res_val = res_fn(*[i.tag.test_value for i in inputs])
+            exp_res_val = exp_res_fn(*[i.tag.test_value for i in inputs])
 
         assert np.array_equal(res_val, exp_res_val)
 

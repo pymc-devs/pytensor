@@ -1,6 +1,7 @@
 import linecache
 import sys
 import traceback
+import warnings
 from abc import ABCMeta
 from collections.abc import Sequence
 from io import StringIO
@@ -282,9 +283,19 @@ class Scratchpad:
 
     # These two methods have been added to help Mypy
     def __getattribute__(self, name):
+        if name == "test_value":
+            warnings.warn(
+                "test_value machinery is deprecated and will stop working in the future.",
+                FutureWarning,
+            )
         return super().__getattribute__(name)
 
     def __setattr__(self, name: str, value: Any) -> None:
+        if name == "test_value":
+            warnings.warn(
+                "test_value machinery is deprecated and will stop working in the future.",
+                FutureWarning,
+            )
         self.__dict__[name] = value
 
 
@@ -299,6 +310,11 @@ class ValidatingScratchpad(Scratchpad):
 
     def __setattr__(self, attr, obj):
         if getattr(self, "attr", None) == attr:
+            if attr == "test_value":
+                warnings.warn(
+                    "test_value machinery is deprecated and will stop working in the future.",
+                    FutureWarning,
+                )
             obj = self.attr_filter(obj)
 
         return object.__setattr__(self, attr, obj)

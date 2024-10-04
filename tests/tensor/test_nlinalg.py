@@ -528,7 +528,8 @@ class TestMatrixPower:
             config.floatX
         )
         A = matrix("A", dtype=config.floatX)
-        A.tag.test_value = a
+        with pytest.warns(FutureWarning):
+            A.tag.test_value = a
         Q = matrix_power(A, n)
         n_p = np.linalg.matrix_power(a, n)
         assert np.allclose(n_p, Q.get_test_value())
