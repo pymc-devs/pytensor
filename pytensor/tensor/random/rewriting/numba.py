@@ -15,7 +15,7 @@ def introduce_explicit_core_shape_rv(fgraph, node):
     This core_shape is used by the numba backend to pre-allocate the output array.
 
     If available, the core shape is extracted from the shape feature of the graph,
-    which has a higher change of having been simplified, optimized, constant-folded.
+    which has a higher chance of having been simplified, optimized, constant-folded.
     If missing, we fall back to the op._supp_shape_from_params method.
 
     This rewrite is required for the numba backend implementation of RandomVariable.

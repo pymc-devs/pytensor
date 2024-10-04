@@ -244,7 +244,7 @@ def compare_numba_and_py(
     Parameters
     ----------
     fgraph
-        `FunctionGraph` or inputs to compare.
+        `FunctionGraph` or tuple(inputs, outputs) to compare.
     inputs
         Numeric inputs to be passed to the compiled graphs.
     assert_fn
