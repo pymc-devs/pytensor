@@ -442,3 +442,11 @@ _vectorize_node.register(Blockwise, _vectorize_not_needed)
 
 class OpWithCoreShape(OpFromGraph):
     """Generalizes an `Op` to include core shape as an additional input."""
+
+
+class BlockwiseWithCoreShape(OpWithCoreShape):
+    """Generalizes a Blockwise `Op` to include a core shape parameter."""
+
+    def __str__(self):
+        [blockwise_node] = self.fgraph.apply_nodes
+        return f"[{blockwise_node.op!s}]"
