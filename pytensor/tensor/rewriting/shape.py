@@ -42,7 +42,6 @@ from pytensor.tensor.shape import (
     Shape_i,
     SpecifyShape,
     Unbroadcast,
-    shape_i,
     specify_shape,
     unbroadcast,
 )
@@ -1060,7 +1059,7 @@ def local_Shape_of_SpecifyShape(fgraph, node):
     # Replace `NoneConst` by `shape_i`
     for i, sh in enumerate(shape):
         if NoneConst.equals(sh):
-            shape[i] = shape_i(x, i, fgraph)
+            shape[i] = x.shape[i]
 
     return [stack(shape).astype(np.int64)]
 

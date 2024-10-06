@@ -363,16 +363,6 @@ def shape_i(var, i, fgraph=None):
     return shape(var)[i]
 
 
-def shape_i_op(i):
-    key = i
-    if key not in shape_i_op.cache:
-        shape_i_op.cache[key] = Shape_i(i)
-    return shape_i_op.cache[key]
-
-
-shape_i_op.cache = {}  # type: ignore
-
-
 def register_shape_i_c_code(typ, code, check_input, version=()):
     """
     Tell Shape_i how to generate C code for an PyTensor Type.
