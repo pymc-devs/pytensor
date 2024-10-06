@@ -8,7 +8,6 @@ from pytensor import Mode, function, grad
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable, equal_computations
-from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import clone_replace, vectorize_node
 from pytensor.graph.type import Type
 from pytensor.misc.safe_asarray import _asarray
@@ -16,7 +15,6 @@ from pytensor.scalar.basic import ScalarConstant
 from pytensor.tensor import as_tensor_variable, broadcast_to, get_vector_length, row
 from pytensor.tensor.basic import MakeVector, constant, stack
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.rewriting.shape import ShapeFeature
 from pytensor.tensor.shape import (
     Reshape,
     Shape,
@@ -26,7 +24,6 @@ from pytensor.tensor.shape import (
     _specify_shape,
     reshape,
     shape,
-    shape_i,
     shape_tuple,
     specify_broadcastable,
     specify_shape,
@@ -633,13 +630,12 @@ def test_nonstandard_shapes():
     tl_shape = shape(tl)
     assert np.array_equal(tl_shape.get_test_value(), (2, 2, 3, 4))
 
-    # There's no `FunctionGraph`, so it should return a `Subtensor`
-    tl_shape_i = shape_i(tl, 0)
+    # Test specific dim
+    tl_shape_i = shape(tl)[0]
     assert isinstance(tl_shape_i.owner.op, Subtensor)
     assert tl_shape_i.get_test_value() == 2
 
-    tl_fg = FunctionGraph([a, b], [tl], features=[ShapeFeature()])
-    tl_shape_i = shape_i(tl, 0, fgraph=tl_fg)
+    tl_shape_i = Shape_i(0)(tl)
     assert not isinstance(tl_shape_i.owner.op, Subtensor)
     assert tl_shape_i.get_test_value() == 2
 

@@ -38,7 +38,7 @@ from pytensor.tensor.blockwise import vectorize_node_fallback
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.exceptions import AdvancedIndexingError, NotScalarConstantError
 from pytensor.tensor.math import clip
-from pytensor.tensor.shape import Reshape, shape_i, specify_broadcastable
+from pytensor.tensor.shape import Reshape, Shape_i, specify_broadcastable
 from pytensor.tensor.type import (
     TensorType,
     bscalar,
@@ -2705,10 +2705,9 @@ class AdvancedSubtensor(Op):
         index_shapes = []
         for idx, ishape in zip(indices, ishapes[1:]):
             # Mixed bool indexes are converted to nonzero entries
+            shape0_op = Shape_i(0)
             if is_bool_index(idx):
-                index_shapes.extend(
-                    (shape_i(nz_dim, 0, fgraph=fgraph),) for nz_dim in nonzero(idx)
-                )
+                index_shapes.extend((shape0_op(nz_dim),) for nz_dim in nonzero(idx))
             # The `ishapes` entries for `SliceType`s will be None, and
             # we need to give `indexed_result_shape` the actual slices.
             elif isinstance(getattr(idx, "type", None), SliceType):
