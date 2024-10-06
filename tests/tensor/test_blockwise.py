@@ -259,6 +259,58 @@ def test_blockwise_shape():
     assert tuple(shape_fn(inp1_test, inp2_test)[1]) == (7, 5, 4)
 
 
+def test_blockwise_infer_core_shape():
+    class TestOpWithInferShape(Op):
+        def make_node(self, a, b):
+            assert a.type.ndim == 1
+            assert b.type.ndim == 1
+            c = tensor(shape=(None,))
+            d = tensor(shape=(None,))
+            return Apply(self, [a, b], [c, d])
+
+        def perform(self, node, inputs, outputs):
+            a, b = inputs
+            c, d = outputs
+            c[0] = np.arange(a.size + b.size)
+            d[0] = np.arange(a.sum() + b.sum())
+
+        def infer_shape(self, fgraph, node, input_shapes):
+            # First output shape depends only on input_shapes
+            # Second output shape depends on input values
+            x, y = node.inputs
+            [(x_shape,), (y_shape,)] = input_shapes
+            return (x_shape + y_shape,), (x.sum() + y.sum(),)
+
+    blockwise_op = Blockwise(
+        core_op=TestOpWithInferShape(), signature="(a),(b)->(c),(d)"
+    )
+
+    a = tensor("a", shape=(5, 3))
+    b = tensor("b", shape=(1, 4))
+    c, d = blockwise_op(a, b)
+    assert c.type.shape == (5, None)
+    assert d.type.shape == (5, None)
+
+    c_shape_fn = pytensor.function([a, b], c.shape)
+    # c_shape can be computed from the input shapes alone
+    assert not any(
+        isinstance(getattr(n.op, "core_op", n.op), TestOpWithInferShape)
+        for n in c_shape_fn.maker.fgraph.apply_nodes
+    )
+
+    d_shape_fn = pytensor.function([a, b], d.shape)
+    # d_shape cannot be computed from the input shapes alone
+    assert any(
+        isinstance(getattr(n.op, "core_op", n.op), TestOpWithInferShape)
+        for n in d_shape_fn.maker.fgraph.apply_nodes
+    )
+
+    a_test = np.zeros(a.type.shape, dtype=a.type.dtype)
+    b_test = np.zeros(b.type.shape, dtype=b.type.dtype)
+    assert tuple(c_shape_fn(a_test, b_test)) == (5, 7)
+    assert tuple(d_shape_fn(a_test, b_test)) == (5, 0)
+
+
 class BlockwiseOpTester:
     """Base class to test Blockwise works for specific Ops"""
 
