@@ -7,7 +7,8 @@ import numpy as np
 from pytensor import config
 from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType
-from pytensor.graph.basic import Apply, Constant
+from pytensor.graph import FunctionGraph
+from pytensor.graph.basic import Apply, Constant, ancestors
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op
 from pytensor.graph.replace import (
@@ -179,15 +180,37 @@ class Blockwise(Op):
 
         batch_shape = broadcast_shape(*batch_shapes, arrays_are_shapes=True)
 
+        # Try to extract the core shapes from the core_op
+        if hasattr(self.core_op, "infer_shape"):
+            dummy_core_node = self._create_dummy_core_node(node.inputs)
+            dummy_core_inputs = dummy_core_node.inputs
+            dummy_fgraph = FunctionGraph(outputs=dummy_core_node.outputs, clone=False)
+            core_input_shapes = [
+                input_shape[batch_ndims:] for input_shape in input_shapes
+            ]
+            core_output_shapes = self.core_op.infer_shape(
+                dummy_fgraph, dummy_core_node, core_input_shapes
+            )
+
         out_shapes = []
-        for output, sig in zip(node.outputs, self.outputs_sig):
+        for o, (output, sig) in enumerate(zip(node.outputs, self.outputs_sig)):
             core_out_shape = []
             for i, dim_name in enumerate(sig):
                 # The output dim is the same as another input dim
                 if dim_name in core_dims:
                     core_out_shape.append(core_dims[dim_name])
                 else:
-                    # TODO: We could try to make use of infer_shape of core_op
+                    if hasattr(self.core_op, "infer_shape"):
+                        # If the input values are needed to compute the dimension length, we can't use the infer_shape
+                        # of the core_node as the value is not constant across batch dims of the Blockwise
+                        core_out_dim = core_output_shapes[o][i]
+                        if not (
+                            set(dummy_core_inputs) & set(ancestors([core_out_dim]))
+                        ):
+                            core_out_shape.append(core_out_dim)
+                            continue
+
+                    # Fallback shape requires evaluating the Blockwise Op
                     core_out_shape.append(Shape_i(batch_ndims + i)(output))
             out_shapes.append((*batch_shape, *core_out_shape))
 
