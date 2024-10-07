@@ -27,8 +27,8 @@ def fetch_seed(pseed=None):
     None, which is equivalent to seeding with a random seed.
 
     Useful for seeding RandomState or Generator objects.
-    >>> rng = np.random.RandomState(unittest_tools.fetch_seed())
-    >>> rng = np.random.default_rng(unittest_tools.fetch_seed())
+    >>> rng = np.random.RandomState(fetch_seed())
+    >>> rng = np.random.default_rng(fetch_seed())
     """
 
     seed = pseed or config.unittests__rseed
