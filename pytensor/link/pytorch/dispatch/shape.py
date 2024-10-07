@@ -15,7 +15,7 @@ def pytorch_funcify_Reshape(op, node, **kwargs):
 @pytorch_funcify.register(Shape)
 def pytorch_funcify_Shape(op, **kwargs):
     def shape(x):
-        return x.shape
+        return torch.tensor(x.shape)
 
     return shape
 

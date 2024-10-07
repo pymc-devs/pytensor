@@ -1,8 +1,9 @@
 import numpy as np
 import pytest
 
-import pytensor
 import pytensor.tensor as pt
+from pytensor.graph import FunctionGraph
+from tests.link.jax.test_basic import compare_jax_and_py
 
 
 jax = pytest.importorskip("jax")
@@ -19,9 +20,8 @@ def test_jax_einsum():
         pt.tensor(name, shape=shape) for name, shape in zip("xyz", shapes)
     )
     out = pt.einsum(subscripts, x_pt, y_pt, z_pt)
-    f = pytensor.function([x_pt, y_pt, z_pt], out, mode="JAX")
-
-    np.testing.assert_allclose(f(x, y, z), np.einsum(subscripts, x, y, z))
+    fg = FunctionGraph([x_pt, y_pt, z_pt], [out])
+    compare_jax_and_py(fg, [x, y, z])
 
 
 @pytest.mark.xfail(raises=NotImplementedError)
@@ -33,6 +33,5 @@ def test_ellipsis_einsum():
     x_pt = pt.tensor("x", shape=x.shape)
     y_pt = pt.tensor("y", shape=y.shape)
     out = pt.einsum(subscripts, x_pt, y_pt)
-    f = pytensor.function([x_pt, y_pt], out, mode="JAX")
-
-    np.testing.assert_allclose(f(x, y), np.einsum(subscripts, x, y))
+    fg = FunctionGraph([x_pt, y_pt], [out])
+    compare_jax_and_py(fg, [x, y])

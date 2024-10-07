@@ -34,8 +34,13 @@ def pytorch_funcify_Subtensor(op, node, **kwargs):
 
 @pytorch_funcify.register(MakeSlice)
 def pytorch_funcify_makeslice(op, **kwargs):
-    def makeslice(*x):
-        return slice(x)
+    def makeslice(start, stop, step):
+        # Torch does not like numpy integers in indexing slices
+        return slice(
+            None if start is None else int(start),
+            None if stop is None else int(stop),
+            None if step is None else int(step),
+        )
 
     return makeslice
 

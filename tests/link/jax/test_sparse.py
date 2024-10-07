@@ -51,7 +51,7 @@ def test_sparse_dot_constant_sparse(x_type, y_type, op):
 
     dot_pt = op(x_pt, y_pt)
     fgraph = FunctionGraph(inputs, [dot_pt])
-    compare_jax_and_py(fgraph, test_values)
+    compare_jax_and_py(fgraph, test_values, jax_mode="JAX")
 
 
 def test_sparse_dot_non_const_raises():
