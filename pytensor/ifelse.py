@@ -273,7 +273,7 @@ class IfElse(_NoPythonOp):
         # `condition` does affect the elements of the output so it is connected.
         # For the sake of making the gradient convenient we assume that
         # condition + epsilon always triggers the same branch as condition
-        condition_grad = condition.zeros_like().astype(config.floatX)
+        condition_grad = condition.zeros_like(dtype=config.floatX)
 
         return [
             condition_grad,

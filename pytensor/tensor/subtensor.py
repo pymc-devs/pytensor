@@ -946,7 +946,7 @@ class Subtensor(COp):
         x = inputs[0]
         rest = inputs[1:]
         if x.dtype in discrete_dtypes:
-            first = x.zeros_like().astype(config.floatX)
+            first = x.zeros_like(dtype=config.floatX)
         else:
             # For best optimization, we let this as an inc.
             # This allow the opt local_IncSubtensor_serialize to apply first.
