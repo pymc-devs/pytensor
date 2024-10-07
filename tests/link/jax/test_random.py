@@ -705,7 +705,7 @@ def test_multinomial():
     n = np.array([10, 40])
     p = np.array([[0.3, 0.7, 0.0], [0.1, 0.4, 0.5]])
     g = pt.random.multinomial(n, p, size=(10_000, 2), rng=rng)
-    g_fn = compile_random_function([], g, mode=jax_mode)
+    g_fn = compile_random_function([], g, mode="JAX")
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), n[..., None] * p, rtol=0.1)
     np.testing.assert_allclose(
