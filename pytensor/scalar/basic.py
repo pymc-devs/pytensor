@@ -2036,7 +2036,10 @@ class TrueDiv(BinaryScalarOp):
         # to the output; x/y is still a function of x
         # and y; it's just a step function.
         if all(a.dtype in discrete_dtypes for a in (x, y)):
-            return [x.zeros_like(), y.zeros_like()]
+            return [
+                x.zeros_like(dtype=config.floatX),
+                y.zeros_like(dtype=config.floatX),
+            ]
 
         first_part = gz / y
 
