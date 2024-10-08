@@ -22,7 +22,7 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.blas import Dot22
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.math import Dot, Prod, _matrix_matrix_matmul, log, prod
+from pytensor.tensor.math import Dot, Prod, _matrix_matrix_matmul, log, outer, prod
 from pytensor.tensor.nlinalg import (
     SVD,
     KroneckerProduct,
@@ -818,3 +818,72 @@ def rewrite_slogdet_blockdiag(fgraph, node):
     )
 
     return [prod(sign_sub_matrices), sum(logdet_sub_matrices)]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([ExtractDiag])
+def rewrite_diag_kronecker(fgraph, node):
+    """
+    This rewrite simplifies the diagonal of the kronecker product of 2 matrices by extracting the individual sub matrices and returning their outer product as a vector.
+
+    diag(kron(a,b)) -> outer(diag(a), diag(b))
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
+    # Check for inner kron operation
+    potential_kron = node.inputs[0].owner
+    if not (potential_kron and isinstance(potential_kron.op, KroneckerProduct)):
+        return None
+
+    # Find the matrices
+    a, b = potential_kron.inputs
+    diag_a, diag_b = diag(a), diag(b)
+    outer_prod_as_vector = outer(diag_a, diag_b).flatten()
+
+    return [outer_prod_as_vector]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([slogdet])
+def rewrite_slogdet_kronecker(fgraph, node):
+    """
+    This rewrite simplifies the slogdet of a kronecker-structured matrix by extracting the individual sub matrices and returning the sign and logdet values computed using those
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
+    # Check for inner kron operation
+    potential_kron = node.inputs[0].owner
+    if not (potential_kron and isinstance(potential_kron.op, KroneckerProduct)):
+        return None
+
+    # Find the matrices
+    a, b = potential_kron.inputs
+    signs, logdets = zip(*[slogdet(a), slogdet(b)])
+    sizes = [a.shape[-1], b.shape[-1]]
+    prod_sizes = prod(sizes, no_zeros_in_input=True)
+    signs_final = [signs[i] ** (prod_sizes / sizes[i]) for i in range(2)]
+    logdet_final = [logdets[i] * prod_sizes / sizes[i] for i in range(2)]
+
+    return [prod(signs_final, no_zeros_in_input=True), sum(logdet_final)]

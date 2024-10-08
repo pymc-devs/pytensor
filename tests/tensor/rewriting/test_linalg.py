@@ -751,3 +751,55 @@ def test_slogdet_blockdiag_rewrite():
         atol=1e-3 if config.floatX == "float32" else 1e-8,
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
+
+
+def test_diag_kronecker_rewrite():
+    a, b = pt.dmatrices("a", "b")
+    kron_prod = pt.linalg.kron(a, b)
+    diag_kron_prod = pt.diag(kron_prod)
+    f_rewritten = function([a, b], diag_kron_prod, mode="FAST_RUN")
+
+    # Rewrite Test
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, KroneckerProduct) for node in nodes)
+
+    # Value Test
+    a_test, b_test = np.random.rand(2, 20, 20)
+    kron_prod_test = np.kron(a_test, b_test)
+    diag_kron_prod_test = np.diag(kron_prod_test)
+    rewritten_val = f_rewritten(a_test, b_test)
+    assert_allclose(
+        diag_kron_prod_test,
+        rewritten_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+def test_slogdet_kronecker_rewrite():
+    a, b = pt.dmatrices("a", "b")
+    kron_prod = pt.linalg.kron(a, b)
+    sign_output, logdet_output = pt.linalg.slogdet(kron_prod)
+    f_rewritten = function([kron_prod], [sign_output, logdet_output], mode="FAST_RUN")
+
+    # Rewrite Test
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, KroneckerProduct) for node in nodes)
+
+    # Value Test
+    a_test, b_test = np.random.rand(2, 20, 20)
+    kron_prod_test = np.kron(a_test, b_test)
+    sign_output_test, logdet_output_test = np.linalg.slogdet(kron_prod_test)
+    rewritten_sign_val, rewritten_logdet_val = f_rewritten(kron_prod_test)
+    assert_allclose(
+        sign_output_test,
+        rewritten_sign_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+    assert_allclose(
+        logdet_output_test,
+        rewritten_logdet_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
