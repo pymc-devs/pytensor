@@ -173,7 +173,7 @@ class InplaceElemwiseOptimizer(GraphRewriter):
                 # original node add already some inplace patter and we
                 # still try to add more pattern.
 
-                baseline = op.inplace_pattern
+                baseline = dict(op.inplace_pattern)
                 candidate_outputs = [
                     i for i in self.candidate_input_idxs(node) if i not in baseline
                 ]

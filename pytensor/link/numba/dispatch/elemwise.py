@@ -490,7 +490,7 @@ def numba_funcify_Elemwise(op, node, **kwargs):
     input_bc_patterns = tuple(inp.type.broadcastable for inp in node.inputs)
     output_bc_patterns = tuple(out.type.broadcastable for out in node.outputs)
     output_dtypes = tuple(out.type.dtype for out in node.outputs)
-    inplace_pattern = tuple(op.inplace_pattern.items())
+    inplace_pattern = op.inplace_pattern
     core_output_shapes = tuple(() for _ in range(nout))
 
     # numba doesn't support nested literals right now...
