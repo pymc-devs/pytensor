@@ -193,6 +193,43 @@ def local_0_dot_x(fgraph, node):
 
 
 @register_canonicalize
+@register_stabilize
+@node_rewriter([Dot])
+def local_1_dot_x(fgraph, node):
+    if not isinstance(node.op, Dot):
+        return False
+
+    x = node.inputs[0]
+    y = node.inputs[1]
+    replace = False
+    try:
+        if get_underlying_scalar_constant_value(x, only_process_constants=True) == 1:
+            replace = True
+            var = y
+    except NotScalarConstantError:
+        pass
+
+    try:
+        if get_underlying_scalar_constant_value(y, only_process_constants=True) == 1:
+            replace = True
+            var = x
+    except NotScalarConstantError:
+        pass
+
+    if replace:
+        new_out = var
+        old_out = node.outputs[0]
+
+        if new_out.dtype != old_out.dtype:
+            new_out = cast(new_out, old_out.dtype)
+        if not old_out.type.is_super(new_out.type):
+            new_out = new_out.reshape(old_out.shape)
+            # new_out = alloc_like(new_out, old_out, fgraph)
+
+        return [new_out]
+
+
+@register_canonicalize
 @node_rewriter([DimShuffle])
 def local_lift_transpose_through_dot(fgraph, node):
     r"""Perform the rewrite ``dot(x,y).T -> dot(y.T, x.T)``.

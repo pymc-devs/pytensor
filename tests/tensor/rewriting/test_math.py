@@ -4516,3 +4516,22 @@ def test_local_batched_matmul_to_core_matmul():
     x_test = rng.normal(size=(5, 3, 2))
     y_test = rng.normal(size=(5, 2, 2))
     np.testing.assert_allclose(fn(x_test, y_test), x_test @ y_test)
+
+
+@pytest.mark.parametrize(
+    "x",
+    (
+        pt.col("x"),
+        fmatrix("x"),
+        vector("x"),
+        pt.tensor("x", shape=(1, 3, 2), dtype="float64"),
+    ),
+)
+def test_mul_with_1(x):
+    f = x @ [[1.0]]
+    with pytensor.config.change_flags(optimizer_verbose=True):
+        fn = pytensor.function([x], f, mode=get_default_mode().excluding("BlasOpt"))
+
+    pytensor.dprint(fn)
+
+    assert 0
