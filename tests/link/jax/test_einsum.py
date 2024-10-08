@@ -24,7 +24,6 @@ def test_jax_einsum():
     compare_jax_and_py(fg, [x, y, z])
 
 
-@pytest.mark.xfail(raises=NotImplementedError)
 def test_ellipsis_einsum():
     subscripts = "...i,...i->..."
     x = np.random.rand(2, 5)
