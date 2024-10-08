@@ -240,7 +240,7 @@ class SLogDet(Op):
     """
 
     __props__ = ()
-    gufunc_signature = "(m, m)->(),()"
+    gufunc_signature = "(m,m)->(),()"
     gufunc_spec = ("numpy.linalg.slogdet", 1, 2)
 
     def make_node(self, x):
