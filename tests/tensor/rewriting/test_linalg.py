@@ -803,3 +803,106 @@ def test_slogdet_kronecker_rewrite():
         atol=1e-3 if config.floatX == "float32" else 1e-8,
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
+
+
+def test_cholesky_eye_rewrite():
+    x = pt.eye(10)
+    L = pt.linalg.cholesky(x)
+    f_rewritten = function([], L, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+
+    # Rewrite Test
+    assert not any(isinstance(node.op, Cholesky) for node in nodes)
+
+    # Value Test
+    x_test = np.eye(10)
+    L = np.linalg.cholesky(x_test)
+    rewritten_val = f_rewritten()
+
+    assert_allclose(
+        L,
+        rewritten_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [(), (7,), (7, 7), (5, 7, 7)],
+    ids=["scalar", "vector", "matrix", "batched"],
+)
+def test_cholesky_diag_from_eye_mul(shape):
+    # Initializing x based on scalar/vector/matrix
+    x = pt.tensor("x", shape=shape)
+    y = pt.eye(7) * x
+    # Performing cholesky decomposition using pt.linalg.cholesky
+    z_cholesky = pt.linalg.cholesky(y)
+
+    # REWRITE TEST
+    f_rewritten = function([x], z_cholesky, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, Cholesky) for node in nodes)
+
+    # NUMERIC VALUE TEST
+    if len(shape) == 0:
+        x_test = np.array(np.random.rand()).astype(config.floatX)
+    elif len(shape) == 1:
+        x_test = np.random.rand(*shape).astype(config.floatX)
+    else:
+        x_test = np.random.rand(*shape).astype(config.floatX)
+    x_test_matrix = np.eye(7) * x_test
+    cholesky_val = np.linalg.cholesky(x_test_matrix)
+    rewritten_val = f_rewritten(x_test)
+
+    assert_allclose(
+        cholesky_val,
+        rewritten_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+def test_cholesky_diag_from_diag():
+    x = pt.dvector("x")
+    x_diag = pt.diag(x)
+    x_cholesky = pt.linalg.cholesky(x_diag)
+
+    # REWRITE TEST
+    f_rewritten = function([x], x_cholesky, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+
+    assert not any(isinstance(node.op, Cholesky) for node in nodes)
+
+    # NUMERIC VALUE TEST
+    x_test = np.random.rand(10)
+    x_test_matrix = np.eye(10) * x_test
+    cholesky_val = np.linalg.cholesky(x_test_matrix)
+    rewritten_cholesky = f_rewritten(x_test)
+
+    assert_allclose(
+        cholesky_val,
+        rewritten_cholesky,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+def test_rewrite_cholesky_diag_to_sqrt_diag_not_applied():
+    # Case 1 : y is not a diagonal matrix because of k = -1
+    x = pt.tensor("x", shape=(7, 7))
+    y = pt.eye(7, k=-1) * x
+    z_cholesky = pt.linalg.cholesky(y)
+
+    # REWRITE TEST (should not be applied)
+    f_rewritten = function([x], z_cholesky, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert any(isinstance(node.op, Cholesky) for node in nodes)
+
+    # Case 2 : eye is degenerate
+    x = pt.scalar("x")
+    y = pt.eye(1) * x
+    z_cholesky = pt.linalg.cholesky(y)
+    f_rewritten = function([x], z_cholesky, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert any(isinstance(node.op, Cholesky) for node in nodes)

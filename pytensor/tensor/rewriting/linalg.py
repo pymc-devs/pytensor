@@ -887,3 +887,82 @@ def rewrite_slogdet_kronecker(fgraph, node):
     logdet_final = [logdets[i] * prod_sizes / sizes[i] for i in range(2)]
 
     return [prod(signs_final, no_zeros_in_input=True), sum(logdet_final)]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Blockwise])
+def rewrite_remove_useless_cholesky(fgraph, node):
+    """
+     This rewrite takes advantage of the fact that the cholesky decomposition of an identity matrix is the matrix itself
+
+    The presence of an identity matrix is identified by checking whether we have k = 0 for an Eye Op inside Cholesky.
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
+    # Find whether cholesky op is being applied
+    if not isinstance(node.op.core_op, Cholesky):
+        return None
+
+    # Check whether input to Cholesky is Eye and the 1's are on main diagonal
+    potential_eye = node.inputs[0]
+    if not (
+        potential_eye.owner
+        and isinstance(potential_eye.owner.op, Eye)
+        and hasattr(potential_eye.owner.inputs[-1], "data")
+        and potential_eye.owner.inputs[-1].data.item() == 0
+    ):
+        return None
+    return [potential_eye]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Blockwise])
+def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
+    # Find whether cholesky op is being applied
+    if not isinstance(node.op.core_op, Cholesky):
+        return None
+
+    [input] = node.inputs
+    # Check for use of pt.diag first
+    if (
+        input.owner
+        and isinstance(input.owner.op, AllocDiag)
+        and AllocDiag.is_offset_zero(input.owner)
+    ):
+        diag_input = input.owner.inputs[0]
+        cholesky_val = pt.diag(diag_input**0.5)
+        return [cholesky_val]
+
+    # Check if the input is an elemwise multiply with identity matrix -- this also results in a diagonal matrix
+    inputs_or_none = _find_diag_from_eye_mul(input)
+    if inputs_or_none is None:
+        return None
+
+    eye_input, non_eye_inputs = inputs_or_none
+
+    # Dealing with only one other input
+    if len(non_eye_inputs) != 1:
+        return None
+
+    [non_eye_input] = non_eye_inputs
+
+    # Now, we can simply return the matrix consisting of sqrt values of the original diagonal elements
+    # For a matrix, we have to first extract the diagonal (non-zero values) and then only use those
+    if non_eye_input.type.broadcastable[-2:] == (False, False):
+        non_eye_input = non_eye_input.diagonal(axis1=-1, axis2=-2)
+        if eye_input.type.ndim > 2:
+            non_eye_input = pt.shape_padaxis(non_eye_input, -2)
+
+    return [eye_input * (non_eye_input**0.5)]
