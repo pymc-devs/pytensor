@@ -335,6 +335,7 @@ class Function:
         return_none: bool,
         output_keys,
         maker: "FunctionMaker",
+        trust_input: bool,
         name: str | None = None,
     ):
         """
@@ -383,7 +384,7 @@ class Function:
         self.return_none = return_none
         self.maker = maker
         self.profile = None  # reassigned in FunctionMaker.create
-        self.trust_input = False  # If True, we don't check the input parameter
+        self.trust_input = trust_input  # If True, we don't check the input parameter
         self.name = name
         self.nodes_with_inner_function = []
         self.output_keys = output_keys
@@ -792,18 +793,14 @@ class Function:
             The function inputs can be passed as keyword argument. For this, use
             the name of the input or the input instance as the key.
 
-            Keyword argument ``output_subset`` is a list of either indices of the
-            function's outputs or the keys belonging to the `output_keys` dict
-            and represent outputs that are requested to be calculated. Regardless
-            of the presence of ``output_subset``, the updates are always calculated
-            and processed. To disable the updates, you should use the ``copy``
+            The updates are always calculated and processed.
+            To disable the updates, you should use the ``copy``
             method with ``delete_updates=True``.
 
         Returns
         -------
         list
-            List of outputs on indices/keys from ``output_subset`` or all of them,
-            if ``output_subset`` is not passed.
+            List of outputs.
         """
 
         def restore_defaults():
@@ -815,10 +812,6 @@ class Function:
 
         profile = self.profile
         t0 = time.perf_counter()
-
-        output_subset = kwargs.pop("output_subset", None)
-        if output_subset is not None and self.output_keys is not None:
-            output_subset = [self.output_keys.index(key) for key in output_subset]
 
         # Reinitialize each container's 'provided' counter
         if self.trust_input:
@@ -955,11 +948,7 @@ class Function:
         # Do the actual work
         t0_fn = time.perf_counter()
         try:
-            outputs = (
-                self.vm()
-                if output_subset is None
-                else self.vm(output_subset=output_subset)
-            )
+            outputs = self.vm()
         except Exception:
             restore_defaults()
             if hasattr(self.vm, "position_of_error"):
@@ -1040,24 +1029,13 @@ class Function:
                 profile.ignore_first_call = False
         if self.return_none:
             return None
-        elif self.unpack_single and len(outputs) == 1 and output_subset is None:
+        elif self.unpack_single and len(outputs) == 1:
             return outputs[0]
         else:
             if self.output_keys is not None:
                 assert len(self.output_keys) == len(outputs)
-
-                if output_subset is None:
-                    return dict(zip(self.output_keys, outputs))
-                else:
-                    return {
-                        self.output_keys[index]: outputs[index]
-                        for index in output_subset
-                    }
-
-            if output_subset is None:
-                return outputs
-            else:
-                return [outputs[i] for i in output_subset]
+                return dict(zip(self.output_keys, outputs))
+            return outputs
 
     value = property(
         lambda self: self._value,
@@ -1455,6 +1433,7 @@ class FunctionMaker:
         outputs,
         mode=None,
         accept_inplace=False,
+        trust_input=False,
         function_builder=Function,
         profile=None,
         on_unused_input=None,
@@ -1558,6 +1537,7 @@ class FunctionMaker:
         self.unpack_single = unpack_single
         self.return_none = return_none
         self.accept_inplace = accept_inplace
+        self.trust_input = trust_input
         self.function_builder = function_builder
         self.on_unused_input = on_unused_input  # Used for the pickling/copy
         self.output_keys = output_keys
@@ -1689,6 +1669,7 @@ def orig_function(
     outputs,
     mode=None,
     accept_inplace=False,
+    trust_input=False,
     name=None,
     profile=None,
     on_unused_input=None,
@@ -1752,6 +1733,7 @@ def orig_function(
             outputs,
             mode,
             accept_inplace=accept_inplace,
+            trust_input=trust_input,
             profile=profile,
             on_unused_input=on_unused_input,
             output_keys=output_keys,
