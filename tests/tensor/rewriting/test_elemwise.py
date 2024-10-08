@@ -1056,7 +1056,6 @@ class TestFusion:
             for node in dlogp.maker.fgraph.toposort()
         )
 
-    @pytest.mark.xfail(reason="Fails due to #1244")
     def test_add_mul_fusion_precedence(self):
         """Test that additions and multiplications are "fused together" before
         a `Composite` `Op` is introduced. This fusion is done by canonicalization
