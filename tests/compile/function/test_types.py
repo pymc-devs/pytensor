@@ -19,6 +19,8 @@ from pytensor.link.vm import VMLinker
 from pytensor.printing import debugprint
 from pytensor.tensor.math import dot, tanh
 from pytensor.tensor.math import sum as pt_sum
+from pytensor.tensor.random import normal
+from pytensor.tensor.random.type import random_generator_type
 from pytensor.tensor.type import (
     dmatrix,
     dscalar,
@@ -1280,3 +1282,15 @@ def test_empty_givens_updates():
     y = x * 2
     function([In(x)], y, givens={})
     function([In(x)], y, updates={})
+
+
+@pytest.mark.parametrize("trust_input", [True, False])
+def test_minimal_random_function_call_benchmark(trust_input, benchmark):
+    rng = random_generator_type()
+    x = normal(rng=rng, size=(100,))
+
+    f = function([In(rng, mutable=True)], x)
+    f.trust_input = trust_input
+
+    rng_val = np.random.default_rng()
+    benchmark(f, rng_val)
