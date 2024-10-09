@@ -126,12 +126,6 @@ class NoneTypeT(Generic):
         else:
             raise TypeError("Expected None!")
 
-    @staticmethod
-    def may_share_memory(a, b):
-        # None never share memory between object, in the sense of DebugMode.
-        # Python None are singleton
-        return False
-
 
 none_type_t = NoneTypeT()
 
