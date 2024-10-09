@@ -10,6 +10,9 @@ from pytensor.tensor.type import matrix, tensor, tensor3, vector
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 
 
+torch = pytest.importorskip("torch")
+
+
 def test_pytorch_Dimshuffle():
     a_pt = matrix("a")
 
@@ -137,3 +140,13 @@ def test_softmax_grad(axis):
     out = SoftmaxGrad(axis=axis)(dy, sm)
     fgraph = FunctionGraph([dy, sm], [out])
     compare_pytorch_and_py(fgraph, [dy_value, sm_value])
+
+
+def test_cast():
+    x = matrix("x", dtype="float32")
+    out = pt.cast(x, "int32")
+    fgraph = FunctionGraph([x], [out])
+    _, [res] = compare_pytorch_and_py(
+        fgraph, [np.arange(6, dtype="float32").reshape(2, 3)]
+    )
+    assert res.dtype == torch.int32
