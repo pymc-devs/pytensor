@@ -32,7 +32,6 @@ from pytensor.graph.type import HasDataType, HasShape
 from pytensor.graph.utils import MetaObject, MethodNotDefined
 from pytensor.link.c.op import COp
 from pytensor.link.c.type import CType
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.printing import pprint
 from pytensor.utils import (
     apply_across_args,
@@ -150,7 +149,7 @@ class NumpyAutocaster:
                 and rval.dtype in ("float64", "float32")
                 and rval.dtype != config.floatX
             ):
-                rval = _asarray(rval, dtype=config.floatX)
+                rval = rval.astype(config.floatX)
             return rval
 
         # The following is the original code, corresponding to the 'custom'
@@ -176,7 +175,7 @@ class NumpyAutocaster:
             and config.floatX in self.dtypes
             and config.floatX != "float64"
         ):
-            return _asarray(x, dtype=config.floatX)
+            return np.asarray(x, dtype=config.floatX)
 
         # Don't autocast to float16 unless config.floatX is float16
         try_dtypes = [
@@ -184,7 +183,7 @@ class NumpyAutocaster:
         ]
 
         for dtype in try_dtypes:
-            x_ = _asarray(x, dtype=dtype)
+            x_ = np.asarray(x).astype(dtype=dtype)
             if np.all(x == x_):
                 break
         # returns either an exact x_==x, or the last cast x_
@@ -245,7 +244,9 @@ def convert(x, dtype=None):
 
     if dtype is not None:
         # in this case, the semantics are that the caller is forcing the dtype
-        x_ = _asarray(x, dtype=dtype)
+        if dtype == "floatX":
+            dtype = config.floatX
+        x_ = np.asarray(x).astype(dtype)
     else:
         # In this case, this function should infer the dtype according to the
         # autocasting rules. See autocasting above.
@@ -256,7 +257,7 @@ def convert(x, dtype=None):
             except OverflowError:
                 # This is to imitate numpy behavior which tries to fit
                 # bigger numbers into a uint64.
-                x_ = _asarray(x, dtype="uint64")
+                x_ = np.asarray(x, dtype="uint64")
         elif isinstance(x, builtins.float):
             x_ = autocast_float(x)
         elif isinstance(x, np.ndarray):

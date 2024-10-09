@@ -13,7 +13,6 @@ except ImportError:
     scipy_imported = False
 
 from pytensor.misc.may_share_memory import may_share_memory
-from pytensor.misc.safe_asarray import _asarray
 
 
 def may_share_memory_core(a, b):
@@ -84,7 +83,7 @@ if scipy_imported:
         b = scipy.sparse.csc_matrix(scipy.sparse.eye(4, 3))
 
         def as_ar(a):
-            return _asarray(a, dtype="int32")
+            return np.asarray(a, dtype="int32")
 
         for a_, b_, rep in [
             (a, a, True),

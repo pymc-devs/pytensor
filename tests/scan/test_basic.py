@@ -33,7 +33,6 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.basic import MergeOptimizer
 from pytensor.graph.utils import MissingInputError
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.raise_op import assert_op
 from pytensor.scan.basic import scan
 from pytensor.scan.op import Scan
@@ -206,7 +205,7 @@ def scan_project_sum(*args, **kwargs):
 
 
 def asarrayX(value):
-    return _asarray(value, dtype=config.floatX)
+    return np.asarray(value, dtype=config.floatX)
 
 
 def clone_optimized_graph(f):

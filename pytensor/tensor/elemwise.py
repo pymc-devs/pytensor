@@ -17,7 +17,6 @@ from pytensor.link.c.basic import failure_code
 from pytensor.link.c.op import COp, ExternalCOp, OpenMPOp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.misc.frozendict import frozendict
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.printing import Printer, pprint
 from pytensor.scalar import get_scalar_type
 from pytensor.scalar.basic import bool as scalar_bool
@@ -1412,7 +1411,7 @@ class CAReduce(COp):
 
         out = self.ufunc.reduce(input, axis=axis, dtype=acc_dtype)
 
-        output[0] = _asarray(out, dtype=out_dtype)
+        output[0] = np.asarray(out, dtype=out_dtype)
 
     def infer_shape(self, fgraph, node, shapes):
         (ishape,) = shapes

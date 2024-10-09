@@ -18,7 +18,6 @@ from pytensor.graph.type import Type
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.printing import Printer, pprint, set_precedence
 from pytensor.scalar.basic import ScalarConstant, ScalarVariable
 from pytensor.tensor import (
@@ -2093,7 +2092,7 @@ class AdvancedSubtensor1(COp):
         # if they don't, that should be an error (no array can have that
         # many elements on a 32-bit arch).
         if i.dtype != np.intp:
-            i_ = _asarray(i, dtype=np.intp)
+            i_ = np.asarray(i, dtype=np.intp)
             if not np.can_cast(i.dtype, np.intp):
                 # Check if there was actually an incorrect conversion
                 if np.any(i != i_):

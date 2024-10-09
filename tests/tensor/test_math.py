@@ -23,7 +23,6 @@ from pytensor.graph.basic import Variable, ancestors, applys_between
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import vectorize_node
 from pytensor.link.c.basic import DualLinker
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.printing import pprint
 from pytensor.raise_op import Assert
 from pytensor.tensor import blas, blas_c
@@ -1802,8 +1801,8 @@ class TestBitwise:
         for dtype in self.dtype:
             x, y = vector(dtype=dtype), vector(dtype=dtype)
             fn = inplace_func([x, y], x | y)
-            l = _asarray([0, 0, 1, 1], dtype=dtype)
-            r = _asarray([0, 1, 0, 1], dtype=dtype)
+            l = np.asarray([0, 0, 1, 1], dtype=dtype)
+            r = np.asarray([0, 1, 0, 1], dtype=dtype)
             v = fn(l, r)
             assert np.all(v == operator.or_(l, r)), (l, r, v)
 
@@ -1811,8 +1810,8 @@ class TestBitwise:
         for dtype in self.dtype:
             x, y = vector(dtype=dtype), vector(dtype=dtype)
             fn = inplace_func([x, y], x ^ y)
-            l = _asarray([0, 0, 1, 1], dtype=dtype)
-            r = _asarray([0, 1, 0, 1], dtype=dtype)
+            l = np.asarray([0, 0, 1, 1], dtype=dtype)
+            r = np.asarray([0, 1, 0, 1], dtype=dtype)
             v = fn(l, r)
             assert np.all(v == operator.xor(l, r)), (l, r, v)
 
@@ -1820,8 +1819,8 @@ class TestBitwise:
         for dtype in self.dtype:
             x, y = vector(dtype=dtype), vector(dtype=dtype)
             fn = inplace_func([x, y], x & y)
-            l = _asarray([0, 0, 1, 1], dtype=dtype)
-            r = _asarray([0, 1, 0, 1], dtype=dtype)
+            l = np.asarray([0, 0, 1, 1], dtype=dtype)
+            r = np.asarray([0, 1, 0, 1], dtype=dtype)
             v = fn(l, r)
             assert np.all(v == operator.and_(l, r)), (l, r, v)
 
@@ -1836,7 +1835,7 @@ class TestBitwise:
                 [0, 1, 0, 1],
                 [-1, 2**16, 2**16 - 1],
             ]:
-                l = _asarray([0, 0, 1, 1], dtype=dtype)
+                l = np.asarray([0, 0, 1, 1], dtype=dtype)
                 v = fn(l)
                 assert np.all(v == ~l), (l, v)
 

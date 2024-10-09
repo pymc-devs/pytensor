@@ -18,7 +18,6 @@ from pytensor.gradient import grad, hessian
 from pytensor.graph.basic import Apply, equal_computations
 from pytensor.graph.op import Op
 from pytensor.graph.replace import clone_replace
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.raise_op import Assert
 from pytensor.scalar import autocast_float, autocast_float_as
 from pytensor.tensor import NoneConst, vectorize
@@ -2264,8 +2263,8 @@ def test_flatten_ndim_default():
     a = dmatrix()
     c = flatten(a)
     f = inplace_func([a], c)
-    a_val = _asarray([[0, 1, 2], [3, 4, 5]], dtype="float64")
-    c_val = _asarray([0, 1, 2, 3, 4, 5], dtype="float64")
+    a_val = np.asarray([[0, 1, 2], [3, 4, 5]], dtype="float64")
+    c_val = np.asarray([0, 1, 2, 3, 4, 5], dtype="float64")
     assert np.all(f(a_val) == c_val)
     f = inplace_func([a], c)
     assert np.all(f(a_val) == c_val)
@@ -2277,8 +2276,8 @@ def test_flatten_scalar():
     a = dscalar()
     c = flatten(a)
     f = inplace_func([a], c)
-    a_val = _asarray(3.0, dtype="float64")
-    c_val = _asarray([3.0], dtype="float64")
+    a_val = np.asarray(3.0, dtype="float64")
+    c_val = np.asarray([3.0], dtype="float64")
     assert np.all(f(a_val) == c_val)
     f = inplace_func([a], c)
     assert np.all(f(a_val) == c_val)
@@ -2290,8 +2289,8 @@ def test_flatten_ndim1():
     a = dmatrix()
     c = flatten(a, 1)
     f = inplace_func([a], c)
-    a_val = _asarray([[0, 1, 2], [3, 4, 5]], dtype="float64")
-    c_val = _asarray([0, 1, 2, 3, 4, 5], dtype="float64")
+    a_val = np.asarray([[0, 1, 2], [3, 4, 5]], dtype="float64")
+    c_val = np.asarray([0, 1, 2, 3, 4, 5], dtype="float64")
     assert np.all(f(a_val) == c_val)
     f = inplace_func([a], c)
     assert np.all(f(a_val) == c_val)
@@ -2303,7 +2302,7 @@ def test_flatten_ndim2():
     a = dmatrix()
     c = flatten(a, 2)
     f = inplace_func([a], c)
-    a_val = _asarray([[0, 1, 2], [3, 4, 5]], dtype="float64")
+    a_val = np.asarray([[0, 1, 2], [3, 4, 5]], dtype="float64")
     assert np.all(f(a_val) == a_val)
     f = inplace_func([a], c)
     assert np.all(f(a_val) == a_val)
@@ -2316,8 +2315,8 @@ def test_flatten_ndim2_of_3():
     a = TensorType("float64", shape=(None, None, None))()
     c = flatten(a, 2)
     f = inplace_func([a], c)
-    a_val = _asarray([[[0, 1], [2, 3]], [[4, 5], [6, 7]]], dtype="float64")
-    c_val = _asarray([[0, 1, 2, 3], [4, 5, 6, 7]], dtype="float64")
+    a_val = np.asarray([[[0, 1], [2, 3]], [[4, 5], [6, 7]]], dtype="float64")
+    c_val = np.asarray([[0, 1, 2, 3], [4, 5, 6, 7]], dtype="float64")
     assert np.all(f(a_val) == c_val)
     f = inplace_func([a], c)
     assert np.all(f(a_val) == c_val)
@@ -3240,8 +3239,8 @@ def test_autocast_custom():
     with autocast_float_as("float32"):
         assert (dvector() + 1.1).dtype == "float64"
         assert (fvector() + 1.1).dtype == "float32"
-        assert (fvector() + _asarray(1.1, dtype="float64")).dtype == "float64"
-        assert (fvector() + _asarray(1.1, dtype="float32")).dtype == "float32"
+        assert (fvector() + np.asarray(1.1, dtype="float64")).dtype == "float64"
+        assert (fvector() + np.asarray(1.1, dtype="float32")).dtype == "float32"
 
         assert (dvector() + 1).dtype == "float64"
         assert (fvector() + 1).dtype == "float32"
@@ -3251,8 +3250,8 @@ def test_autocast_custom():
         assert (dvector() + 1.1).dtype == "float64"
         assert (fvector() + 1.1).dtype == "float64"
         assert (fvector() + 1.0).dtype == "float64"
-        assert (fvector() + _asarray(1.1, dtype="float64")).dtype == "float64"
-        assert (fvector() + _asarray(1.1, dtype="float32")).dtype == "float32"
+        assert (fvector() + np.asarray(1.1, dtype="float64")).dtype == "float64"
+        assert (fvector() + np.asarray(1.1, dtype="float32")).dtype == "float32"
 
         assert (dvector() + 1).dtype == "float64"
         assert (fvector() + 1).dtype == "float32"

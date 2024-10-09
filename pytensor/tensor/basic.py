@@ -32,7 +32,6 @@ from pytensor.graph.rewriting.db import EquilibriumDB
 from pytensor.graph.type import HasShape, Type
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.printing import Printer, min_informative_str, pprint, set_precedence
 from pytensor.raise_op import CheckAndRaise, assert_op
 from pytensor.scalar import int32
@@ -512,7 +511,7 @@ def get_underlying_scalar_constant_value(
                     ret = v.owner.inputs[0].owner.inputs[idx]
                     ret = get_underlying_scalar_constant_value(ret, max_recur=max_recur)
                     # MakeVector can cast implicitly its input in some case.
-                    return _asarray(ret, dtype=v.type.dtype)
+                    return np.asarray(ret, dtype=v.type.dtype)
 
                 # This is needed when we take the grad as the Shape op
                 # are not already changed into MakeVector
@@ -1834,7 +1833,7 @@ class MakeVector(COp):
         (out,) = out_
         # not calling pytensor._asarray as optimization
         if (out[0] is None) or (out[0].size != len(inputs)):
-            out[0] = _asarray(inputs, dtype=node.outputs[0].dtype)
+            out[0] = np.asarray(inputs, dtype=node.outputs[0].dtype)
         else:
             # assume that out has correct dtype. there is no cheap way to check
             out[0][...] = inputs
@@ -2537,7 +2536,7 @@ class Join(COp):
                     f"Join axis {int(axis)} out of bounds [0, {int(ndim)})"
                 )
 
-            out[0] = _asarray(
+            out[0] = np.asarray(
                 np.concatenate(tens, axis=axis), dtype=node.outputs[0].type.dtype
             )
 

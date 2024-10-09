@@ -12,7 +12,6 @@ from pytensor.graph.basic import Variable
 from pytensor.graph.type import HasDataType, HasShape
 from pytensor.graph.utils import MetaType
 from pytensor.link.c.type import CType
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.utils import apply_across_args
 
 
@@ -162,7 +161,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
             pass
         elif isinstance(data, np.ndarray) and (data.dtype == self.numpy_dtype):
             if data.dtype.num != self.numpy_dtype.num:
-                data = _asarray(data, dtype=self.dtype)
+                data = np.asarray(data, dtype=self.dtype)
             # -- now fall through to ndim check
         elif strict:
             # If any of the two conditions above was not met,
@@ -178,7 +177,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         else:
             if allow_downcast:
                 # Convert to self.dtype, regardless of the type of data
-                data = _asarray(data, dtype=self.dtype)
+                data = np.asarray(data, dtype=self.dtype)
                 # TODO: consider to pad shape with ones to make it consistent
                 # with self.broadcastable... like vector->row type thing
             else:
@@ -191,7 +190,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
                         # scalar array, see
                         # http://projects.scipy.org/numpy/ticket/1611
                         # data = data.astype(self.dtype)
-                        data = _asarray(data, dtype=self.dtype)
+                        data = np.asarray(data, dtype=self.dtype)
                     if up_dtype != self.dtype:
                         err_msg = (
                             f"{self} cannot store a value of dtype {data.dtype} without "
@@ -209,11 +208,11 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
                 ):
                     # Special case where we allow downcasting of Python float
                     # literals to floatX, even when floatX=='float32'
-                    data = _asarray(data, self.dtype)
+                    data = np.asarray(data, self.dtype)
                 else:
                     # data has to be converted.
                     # Check that this conversion is lossless
-                    converted_data = _asarray(data, self.dtype)
+                    converted_data = np.asarray(data, self.dtype)
                     # We use the `values_eq` static function from TensorType
                     # to handle NaN values.
                     if TensorType.values_eq(

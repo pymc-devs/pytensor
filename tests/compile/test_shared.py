@@ -5,7 +5,6 @@ import pytensor.tensor
 from pytensor.compile.sharedvalue import SharedVariable, shared
 from pytensor.configdefaults import config
 from pytensor.link.c.type import generic
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.tensor.type import (
     TensorType,
     bscalar,
@@ -124,7 +123,7 @@ class TestSharedVariable:
             pass
 
         # check that an assignment of a perfect value results in no copying
-        uval = _asarray([5, 6, 7, 8], dtype="float64")
+        uval = np.asarray([5, 6, 7, 8], dtype="float64")
         u.set_value(uval, borrow=True)
         assert u.get_value(borrow=True) is uval
 
