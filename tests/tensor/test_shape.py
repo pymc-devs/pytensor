@@ -10,7 +10,6 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable, equal_computations
 from pytensor.graph.replace import clone_replace, vectorize_node
 from pytensor.graph.type import Type
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.scalar.basic import ScalarConstant
 from pytensor.tensor import as_tensor_variable, broadcast_to, get_vector_length, row
 from pytensor.tensor.basic import MakeVector, constant, stack
@@ -165,9 +164,9 @@ class TestReshape(utt.InferShapeTester, utt.OptimizationTestMixin):
         assert np.array_equal(a_val, a_val_copy)
 
         # test that it works with inplace operations
-        a_val = _asarray([0, 1, 2, 3, 4, 5], dtype="float64")
-        a_val_copy = _asarray([0, 1, 2, 3, 4, 5], dtype="float64")
-        b_val = _asarray([[0, 1, 2], [3, 4, 5]], dtype="float64")
+        a_val = np.asarray([0, 1, 2, 3, 4, 5], dtype="float64")
+        a_val_copy = np.asarray([0, 1, 2, 3, 4, 5], dtype="float64")
+        b_val = np.asarray([[0, 1, 2], [3, 4, 5]], dtype="float64")
 
         f_sub = self.function([a, b], c - b)
         assert np.array_equal(f_sub(a_val, b_val), np.zeros_like(b_val))
@@ -175,7 +174,7 @@ class TestReshape(utt.InferShapeTester, utt.OptimizationTestMixin):
 
         # verify gradient
         def just_vals(v):
-            return Reshape(2)(v, _asarray([2, 3], dtype="int32"))
+            return Reshape(2)(v, np.asarray([2, 3], dtype="int32"))
 
         utt.verify_grad(just_vals, [a_val], mode=self.mode)
 

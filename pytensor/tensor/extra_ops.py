@@ -17,7 +17,6 @@ from pytensor.graph.op import Op
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.link.c.type import EnumList, Generic
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.raise_op import Assert
 from pytensor.scalar import int32 as int_t
 from pytensor.scalar import upcast
@@ -1307,7 +1306,7 @@ class UnravelIndex(Op):
         res = np.unravel_index(indices, dims, order=self.order)
         assert len(res) == len(out)
         for i in range(len(out)):
-            ret = _asarray(res[i], node.outputs[0].dtype)
+            ret = np.asarray(res[i], node.outputs[0].dtype)
             if ret.base is not None:
                 # NumPy will return a view when it can.
                 # But we don't want that.
@@ -1382,7 +1381,7 @@ class RavelMultiIndex(Op):
     def perform(self, node, inp, out):
         multi_index, dims = inp[:-1], inp[-1]
         res = np.ravel_multi_index(multi_index, dims, mode=self.mode, order=self.order)
-        out[0][0] = _asarray(res, node.outputs[0].dtype)
+        out[0][0] = np.asarray(res, node.outputs[0].dtype)
 
 
 def ravel_multi_index(multi_index, dims, mode="raise", order="C"):

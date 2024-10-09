@@ -12,7 +12,6 @@ from pytensor import function, shared
 from pytensor.compile.mode import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph.utils import MethodNotDefined
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.tensor.type import (
     TensorType,
     complex_dtypes,
@@ -315,7 +314,7 @@ def _numpy_true_div(x, y):
     out = np.true_divide(x, y)
     # Use floatX as the result of int / int
     if x.dtype in discrete_dtypes and y.dtype in discrete_dtypes:
-        out = _asarray(out, dtype=config.floatX)
+        out = np.asarray(out, dtype=config.floatX)
     return out
 
 

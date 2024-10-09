@@ -5,7 +5,6 @@ import numpy as np
 from pytensor.gradient import grad_undefined
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.tensor.basic import arange, as_tensor_variable, switch
 from pytensor.tensor.math import eq, ge
 from pytensor.tensor.type import TensorType
@@ -173,7 +172,7 @@ class ArgSortOp(Op):
     def perform(self, node, inputs, output_storage):
         a, axis = inputs
         z = output_storage[0]
-        z[0] = _asarray(
+        z[0] = np.asarray(
             np.argsort(a, int(axis), self.kind),
             dtype=node.outputs[0].dtype,
         )

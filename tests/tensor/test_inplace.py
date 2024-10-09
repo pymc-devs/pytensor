@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 
 from pytensor import config
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.scalar.basic import round_half_away_from_zero_vec, upcast
 from pytensor.tensor.inplace import (
     abs_inplace,
@@ -456,8 +455,8 @@ def test_XOR_inplace():
 
     for dtype in dtype:
         x, y = vector(dtype=dtype), vector(dtype=dtype)
-        l = _asarray([0, 0, 1, 1], dtype=dtype)
-        r = _asarray([0, 1, 0, 1], dtype=dtype)
+        l = np.asarray([0, 0, 1, 1], dtype=dtype)
+        r = np.asarray([0, 1, 0, 1], dtype=dtype)
         ix = x
         ix = xor_inplace(ix, y)
         gn = inplace_func([x, y], ix)

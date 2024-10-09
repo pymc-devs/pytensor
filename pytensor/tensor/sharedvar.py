@@ -3,7 +3,6 @@ import warnings
 import numpy as np
 
 from pytensor.compile import SharedVariable, shared_constructor
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.tensor import _get_vector_length
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.variable import TensorVariable
@@ -128,7 +127,7 @@ def scalar_constructor(
         dtype = np.asarray(value).dtype
 
     dtype = str(dtype)
-    value = _asarray(value, dtype=dtype)
+    value = np.asarray(value, dtype=dtype)
     tensor_type = TensorType(dtype=str(value.dtype), shape=())
 
     # Do not pass the dtype to asarray because we want this to fail if

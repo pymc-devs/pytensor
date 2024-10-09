@@ -19,7 +19,6 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.utils import get_clients_at_depth
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.raise_op import assert_op
 from pytensor.tensor.basic import (
     Alloc,
@@ -1205,7 +1204,7 @@ def mul_calculate(num, denum, aslist=False, out_type=None):
         out_dtype = ps.upcast(*[v.dtype for v in (num + denum)])
     else:
         out_dtype = out_type.dtype
-    one = _asarray(1, dtype=out_dtype)
+    one = np.asarray(1, dtype=out_dtype)
 
     v = reduce(np.multiply, num, one) / reduce(np.multiply, denum, one)
     if aslist:
@@ -1878,7 +1877,7 @@ def local_mul_zero(fgraph, node):
         # print 'MUL by value', value, node.inputs
         if value == 0:
             # print '... returning zeros'
-            return [broadcast_arrays(_asarray(0, dtype=otype.dtype), *node.inputs)[0]]
+            return [broadcast_arrays(np.asarray(0, dtype=otype.dtype), *node.inputs)[0]]
 
 
 # TODO: Add this to the canonicalization to reduce redundancy.
@@ -2353,8 +2352,8 @@ def add_calculate(num, denum, aslist=False, out_type=None):
     if out_type is None:
         zero = 0.0
     else:
-        zero = _asarray(0, dtype=out_type.dtype)
-    # zero = 0.0 if out_type is None else _asarray(0,
+        zero = np.asarray(0, dtype=out_type.dtype)
+    # zero = 0.0 if out_type is None else np.asarray(0,
     # dtype=out_type.dtype)
     if out_type and out_type.dtype == "bool":
         if len(denum) == 0:

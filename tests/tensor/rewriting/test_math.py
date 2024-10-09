@@ -27,7 +27,6 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import is_same_graph, rewrite_graph
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.printing import debugprint
 from pytensor.scalar import PolyGamma, Psi, TriGamma
 from pytensor.tensor import inplace
@@ -186,7 +185,7 @@ def inputs(xbc=(0, 0), ybc=(0, 0), zbc=(0, 0)):
 def test_add_canonizer_problem0():
     n_segments = 10
     label = lscalar("label")
-    segment_labels = label + _asarray([0] * n_segments, dtype="int64")
+    segment_labels = label + np.asarray([0] * n_segments, dtype="int64")
 
     r = segment_labels * 5
     f = function([label], r)
@@ -278,14 +277,14 @@ class TestAlgebraicCanonizer:
         dx, dy, dz = dmatrices("xyz")
         # fv = fvector('r').dimshuffle('x', 0)
         # dv = dvector('s').dimshuffle('x', 0)
-        fxv = _asarray(np.random.random(shp), dtype="float32")
-        fyv = _asarray(np.random.random(shp), dtype="float32")
-        fzv = _asarray(np.random.random(shp), dtype="float32")
-        # fvv = _asarray(np.random.random((shp[0]), dtype='float32').reshape(1, shp[0])
-        # dxv = _asarray(np.random.random((*shp), dtype='float64')
-        # dyv = _asarray(np.random.random((*shp), dtype='float64')
-        # dzv = _asarray(np.random.random((*shp), dtype='float64')
-        # dvv = _asarray(np.random.random((shp[0]), dtype='float64').reshape(1, shp[0])
+        fxv = np.asarray(np.random.random(shp), dtype="float32")
+        fyv = np.asarray(np.random.random(shp), dtype="float32")
+        fzv = np.asarray(np.random.random(shp), dtype="float32")
+        # fvv = np.asarray(np.random.random((shp[0]), dtype='float32').reshape(1, shp[0])
+        # dxv = np.asarray(np.random.random((*shp), dtype='float64')
+        # dyv = np.asarray(np.random.random((*shp), dtype='float64')
+        # dzv = np.asarray(np.random.random((*shp), dtype='float64')
+        # dvv = np.asarray(np.random.random((shp[0]), dtype='float64').reshape(1, shp[0])
         cases = [
             (fx + fy, (fx, fy), (fxv, fyv), 1, "float32"),
             (fx * fy, (fx, fy), (fxv, fyv), 1, "float32"),
@@ -409,14 +408,14 @@ class TestAlgebraicCanonizer:
         dx, dy, dz = dmatrices("xyz")
         fv = fvector("r").dimshuffle("x", 0)
         dv = dvector("s").dimshuffle("x", 0)
-        fxv = _asarray(np.random.random(shp), dtype="float32")
-        fyv = _asarray(np.random.random(shp), dtype="float32")
-        fzv = _asarray(np.random.random(shp), dtype="float32")
-        fvv = _asarray(np.random.random(shp[0]), dtype="float32").reshape(1, shp[0])
-        dxv = _asarray(np.random.random(shp), dtype="float64")
-        dyv = _asarray(np.random.random(shp), dtype="float64")
-        dzv = _asarray(np.random.random(shp), dtype="float64")
-        dvv = _asarray(np.random.random(shp[0]), dtype="float64").reshape(1, shp[0])
+        fxv = np.asarray(np.random.random(shp), dtype="float32")
+        fyv = np.asarray(np.random.random(shp), dtype="float32")
+        fzv = np.asarray(np.random.random(shp), dtype="float32")
+        fvv = np.asarray(np.random.random(shp[0]), dtype="float32").reshape(1, shp[0])
+        dxv = np.asarray(np.random.random(shp), dtype="float64")
+        dyv = np.asarray(np.random.random(shp), dtype="float64")
+        dzv = np.asarray(np.random.random(shp), dtype="float64")
+        dvv = np.asarray(np.random.random(shp[0]), dtype="float64").reshape(1, shp[0])
         cases = [
             (fx + fy, (fx, fy), (fxv, fyv), 1, "float32"),
             (fx * fy, (fx, fy), (fxv, fyv), 1, "float32"),
@@ -548,16 +547,16 @@ class TestAlgebraicCanonizer:
         dx, dy, dz, dw = dmatrices("xyzw")
         fv = fvector("r").dimshuffle("x", 0)
         dv = dvector("s").dimshuffle("x", 0)
-        fxv = _asarray(np.random.random(shp), dtype="float32")
-        fyv = _asarray(np.random.random(shp), dtype="float32")
-        fzv = _asarray(np.random.random(shp), dtype="float32")
-        fwv = _asarray(np.random.random(shp), dtype="float32")
-        fvv = _asarray(np.random.random(shp[0]), dtype="float32").reshape(1, shp[0])
-        dxv = _asarray(np.random.random(shp), dtype="float64")
-        dyv = _asarray(np.random.random(shp), dtype="float64")
-        dzv = _asarray(np.random.random(shp), dtype="float64")
-        dwv = _asarray(np.random.random(shp), dtype="float64")
-        dvv = _asarray(np.random.random(shp[0]), dtype="float64").reshape(1, shp[0])
+        fxv = np.asarray(np.random.random(shp), dtype="float32")
+        fyv = np.asarray(np.random.random(shp), dtype="float32")
+        fzv = np.asarray(np.random.random(shp), dtype="float32")
+        fwv = np.asarray(np.random.random(shp), dtype="float32")
+        fvv = np.asarray(np.random.random(shp[0]), dtype="float32").reshape(1, shp[0])
+        dxv = np.asarray(np.random.random(shp), dtype="float64")
+        dyv = np.asarray(np.random.random(shp), dtype="float64")
+        dzv = np.asarray(np.random.random(shp), dtype="float64")
+        dwv = np.asarray(np.random.random(shp), dtype="float64")
+        dvv = np.asarray(np.random.random(shp[0]), dtype="float64").reshape(1, shp[0])
 
         # We must be sure that the `AlgebraicCanonizer` is working, but that we don't have other
         # rewrites that could hide bugs in the `AlgebraicCanonizer` as `local_elemwise_fusion`
@@ -911,13 +910,13 @@ class TestAlgebraicCanonizer:
         shp = (4, 4)
         fx, fy, fz = fmatrices("xyz")
         dx, dy, dz = dmatrices("xyz")
-        fxv = _asarray(np.random.random(shp), dtype="float32")
-        fyv = _asarray(np.random.random(shp), dtype="float32")
-        fzv = _asarray(np.random.random(shp), dtype="float32")
-        dxv = _asarray(np.random.random(shp), dtype="float32")
-        dyv = _asarray(np.random.random(shp), dtype="float32")
-        dzv = _asarray(np.random.random(shp), dtype="float32")
-        # fvv = _asarray(np.random.random((shp[0]), dtype='float32').reshape(1, shp[0])
+        fxv = np.asarray(np.random.random(shp), dtype="float32")
+        fyv = np.asarray(np.random.random(shp), dtype="float32")
+        fzv = np.asarray(np.random.random(shp), dtype="float32")
+        dxv = np.asarray(np.random.random(shp), dtype="float32")
+        dyv = np.asarray(np.random.random(shp), dtype="float32")
+        dzv = np.asarray(np.random.random(shp), dtype="float32")
+        # fvv = np.asarray(np.random.random((shp[0]), dtype='float32').reshape(1, shp[0])
 
         mode = get_default_mode()
 

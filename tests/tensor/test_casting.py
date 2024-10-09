@@ -4,7 +4,6 @@ import pytest
 import pytensor
 from pytensor import function
 from pytensor.compile.io import In
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.tensor.basic import (
     _convert_to_complex64,
     _convert_to_complex128,
@@ -36,7 +35,7 @@ class TestCasting:
         x = type_fn()
         f = function([x], op_fn(x))
 
-        xval = _asarray(np.random.random(10) * 10, dtype=type_fn.dtype)
+        xval = np.asarray(np.random.random(10) * 10, dtype=type_fn.dtype)
         yval = f(xval)
         assert str(yval.dtype) == op_fn.scalar_op.output_types_preference.spec[0].dtype
 

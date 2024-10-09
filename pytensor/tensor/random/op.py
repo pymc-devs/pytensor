@@ -10,7 +10,6 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable, equal_computations
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.scalar import ScalarVariable
 from pytensor.tensor.basic import (
     as_tensor_variable,
@@ -403,7 +402,7 @@ class RandomVariable(Op):
         smpl_val = self.rng_fn(rng, *([*args, size]))
 
         if not isinstance(smpl_val, np.ndarray) or str(smpl_val.dtype) != self.dtype:
-            smpl_val = _asarray(smpl_val, dtype=self.dtype)
+            smpl_val = np.asarray(smpl_val, dtype=self.dtype)
 
         smpl_out[0] = smpl_val
 

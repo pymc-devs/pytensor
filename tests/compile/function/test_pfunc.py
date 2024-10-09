@@ -9,7 +9,6 @@ from pytensor.compile.io import In
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.graph.utils import MissingInputError
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.type import (
     bscalar,
@@ -426,7 +425,7 @@ class TestPfunc:
 
         z = ivector()
         c = z * y
-        f = pfunc([y], (c + 7), givens={z: _asarray([4, 4, 4], dtype="int32")})
+        f = pfunc([y], (c + 7), givens={z: np.asarray([4, 4, 4], dtype="int32")})
         assert np.all(f([1, 1, 1]) == [11, 11, 11])
         assert x.get_value() == 0
 

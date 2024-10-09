@@ -19,7 +19,6 @@ from pytensor.gradient import grad
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import in2out
 from pytensor.graph.utils import InconsistencyError
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.tensor import inplace
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blas import (
@@ -309,7 +308,7 @@ class TestGemm:
         C = rng.random((4, 5))[:, :4]
 
         def t(z, x, y, a=1.0, b=0.0, l="c|py", dt="float64"):
-            z, a, x, y, b = (_asarray(p, dtype=dt) for p in (z, a, x, y, b))
+            z, a, x, y, b = (np.asarray(p, dtype=dt) for p in (z, a, x, y, b))
             # z_orig = z.copy()
             z_after = self._gemm(z, a, x, y, b)
 
@@ -368,7 +367,7 @@ class TestGemm:
         C = rng.random((4, 4, 3))
 
         def t(z, x, y, a=1.0, b=0.0, l="c|py", dt="float64"):
-            z, a, x, y, b = (_asarray(p, dtype=dt) for p in (z, a, x, y, b))
+            z, a, x, y, b = (np.asarray(p, dtype=dt) for p in (z, a, x, y, b))
             z_orig = z.copy()
             z_after = np.zeros_like(z_orig)
             for i in range(3):
@@ -1495,8 +1494,8 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
     def test_gemv_dimensions(self):
         A = matrix("A")
         x, y = vectors("x", "y")
-        alpha = shared(_asarray(1.0, dtype=config.floatX), name="alpha")
-        beta = shared(_asarray(1.0, dtype=config.floatX), name="beta")
+        alpha = shared(np.asarray(1.0, dtype=config.floatX), name="alpha")
+        beta = shared(np.asarray(1.0, dtype=config.floatX), name="beta")
 
         z = beta * y + alpha * dot(A, x)
         f = function([A, x, y], z)
@@ -2092,7 +2091,7 @@ class TestBlasStrides:
     mode = mode.including("fast_run").excluding("gpu", "c_blas", "scipy_blas")
 
     def random(self, *shape, rng=None):
-        return _asarray(rng.random(shape), dtype=self.dtype)
+        return np.asarray(rng.random(shape), dtype=self.dtype)
 
     def cmp_dot22(self, b_shp, c_shp, rng):
         av = np.zeros((0, 0), dtype=self.dtype)

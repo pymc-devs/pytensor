@@ -16,7 +16,6 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import check_stack_trace, out2in
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import rewrite_graph
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.raise_op import assert_op
 from pytensor.scalar.basic import Composite, float64
 from pytensor.tensor.basic import MakeVector
@@ -259,12 +258,12 @@ class TestFusion:
     fxv = my_init("float32", 2)
     fyv = my_init("float32", 3)
     fzv = my_init("float32", 4)
-    fvv = _asarray(np.random.random(5), dtype="float32")
+    fvv = np.asarray(np.random.random(5), dtype="float32")
     fsv = np.asarray(np.random.random(), dtype="float32")
     dwv = my_init("float64", 5)
-    ixv = _asarray(my_init(num=60), dtype="int32")
-    iyv = _asarray(my_init(num=70), dtype="int32")
-    izv = _asarray(my_init(num=70), dtype="int32")
+    ixv = np.asarray(my_init(num=60), dtype="int32")
+    iyv = np.asarray(my_init(num=70), dtype="int32")
+    izv = np.asarray(my_init(num=70), dtype="int32")
     fwx = fw + fx
     ftanx = tan(fx)
 

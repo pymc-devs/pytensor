@@ -14,7 +14,6 @@ from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.type import HasShape
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
-from pytensor.misc.safe_asarray import _asarray
 from pytensor.scalar import int32
 from pytensor.tensor import _get_vector_length, as_tensor_variable, get_vector_length
 from pytensor.tensor import basic as ptb
@@ -81,7 +80,7 @@ class Shape(COp):
     def perform(self, node, inp, out_):
         (x,) = inp
         (out,) = out_
-        out[0] = _asarray(np.shape(x), dtype="int64")
+        out[0] = np.asarray(np.shape(x), dtype="int64")
 
     def infer_shape(self, fgraph, node, in_shapes):
         return [[len(in_shapes[0])]]
@@ -258,7 +257,7 @@ class Shape_i(COp):
         (x,) = inp
         (out,) = out_
         if out[0] is None:
-            out[0] = _asarray(np.shape(x)[self.i], dtype="int64")
+            out[0] = np.asarray(np.shape(x)[self.i], dtype="int64")
         else:
             out[0][...] = np.shape(x)[self.i]
 
