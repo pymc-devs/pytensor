@@ -513,6 +513,7 @@ class Op(MetaObject):
         """
         node_input_storage = [storage_map[r] for r in node.inputs]
         node_output_storage = [storage_map[r] for r in node.outputs]
+        node_compute_map = [compute_map[r] for r in node.outputs]
 
         if debug and hasattr(self, "debug_perform"):
             p = node.op.debug_perform
@@ -520,10 +521,16 @@ class Op(MetaObject):
             p = node.op.perform
 
         @is_thunk_type
-        def rval(p=p, i=node_input_storage, o=node_output_storage, n=node):
+        def rval(
+            p=p,
+            i=node_input_storage,
+            o=node_output_storage,
+            n=node,
+            cm=node_compute_map,
+        ):
             r = p(n, [x[0] for x in i], o)
-            for o in node.outputs:
-                compute_map[o][0] = True
+            for entry in cm:
+                entry[0] = True
             return r
 
         rval.inputs = node_input_storage
