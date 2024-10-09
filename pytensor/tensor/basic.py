@@ -757,7 +757,22 @@ def cast(x, dtype: str | np.dtype) -> TensorVariable:
 
 @scalar_elemwise
 def switch(cond, ift, iff):
-    """if cond then ift else iff"""
+    """
+    Conditionally selects elements from two tensors based on a condition tensor.
+
+    This op is similar to NumPy's `np.where` and `np.choose` functions.
+
+    Parameters
+    ----------
+    cond : TensorVariable
+        A boolean-type tensor determining which output value to choose.
+        Should be broadcastable to the shapes of `ift` and `iff`.
+    ift : TensorVariable
+        Values selected at `True` elements of `cond`.
+    iff : TensorVariable
+        Values selected at `False` elements of `cond`.
+
+    """
 
 
 def where(cond, ift=None, iff=None, **kwargs):
@@ -855,7 +870,23 @@ def zeros_like(model, dtype=None, opt=False):
 
 
 def zeros(shape, dtype=None):
-    """Create a `TensorVariable` filled with zeros, closer to NumPy's syntax than ``alloc``."""
+    """
+    Create a `TensorVariable` filled with zeros, closer to NumPy's syntax than `alloc`.
+
+    Parameters
+    ----------
+    shape : int or tuple of int
+        Shape of the empty array, e.g., ``(2, 3)`` or ``2``.
+    dtype : data-type, optional
+        Desired output data-type for the array, e.g, `numpy.int8`. Default is
+        `numpy.float64`.
+
+    Returns
+    -------
+    tensor
+        Tensor the shape of shape containing zeros of the type of dtype.
+    """
+    # Check if shape is a single integer or a sequence
     if not (
         isinstance(shape, np.ndarray | Sequence)
         or (isinstance(shape, TensorVariable) and shape.ndim > 0)
@@ -867,7 +898,23 @@ def zeros(shape, dtype=None):
 
 
 def ones(shape, dtype=None):
-    """Create a `TensorVariable` filled with ones, closer to NumPy's syntax than ``alloc``."""
+    """
+    Create a `TensorVariable` filled with ones, closer to NumPy's syntax than `alloc`.
+
+    Parameters
+    ----------
+    shape : int or tuple of int
+        Shape of the empty array, e.g., ``(2, 3)`` or ``2``.
+    dtype : data-type, optional
+        Desired output data-type for the array, e.g, `numpy.int8`. Default is
+        `numpy.float64`.
+
+    Returns
+    -------
+    tensor
+        Tensor the shape of shape containing ones of the type of dtype.
+    """
+    # Check if shape is a single integer or a sequence
     if not (
         isinstance(shape, np.ndarray | Sequence)
         or (isinstance(shape, TensorVariable) and shape.ndim > 0)
