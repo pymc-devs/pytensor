@@ -128,9 +128,6 @@ class DisconnectedType(Type):
             " a symbolic placeholder."
         )
 
-    def may_share_memory(a, b):
-        return False
-
     def value_eq(a, b, force_same_dtype=True):
         raise AssertionError(
             "If you're assigning to a DisconnectedType you're"

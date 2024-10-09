@@ -48,10 +48,7 @@ class Type(MetaObject, Generic[D]):
         unique element (i.e. it uses `self.__eq__`).
 
         """
-        if self == otype:
-            return True
-
-        return False
+        return self == otype
 
     def is_super(self, otype: "Type") -> bool | None:
         """Determine if `self` is a supertype of `otype`.
