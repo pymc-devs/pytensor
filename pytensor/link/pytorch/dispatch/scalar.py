@@ -2,6 +2,7 @@ import torch
 
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.scalar.basic import (
+    Cast,
     ScalarOp,
 )
 
@@ -38,3 +39,13 @@ def pytorch_funcify_ScalarOp(op, node, **kwargs):
             )
 
     return pytorch_func
+
+
+@pytorch_funcify.register(Cast)
+def pytorch_funcify_Cast(op: Cast, node, **kwargs):
+    dtype = getattr(torch, op.o_type.dtype)
+
+    def cast(x):
+        return x.to(dtype=dtype)
+
+    return cast
