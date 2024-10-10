@@ -304,7 +304,7 @@ class TestLocalCanonicalizeAlloc:
             # Error raised by Alloc Op
             with pytest.raises(
                 ValueError,
-                match=r"could not broadcast input array from shape \(3,7\) into shape \(6,7\)",
+                match=r"cannot assign slice from input of different size",
             ):
                 f()
 
@@ -1208,6 +1208,7 @@ class TestLocalOptAlloc:
         f(5)
 
 
+@pytest.mark.xfail(reason="Numba does not support float16")
 class TestLocalOptAllocF16(TestLocalOptAlloc):
     dtype = "float16"
 
