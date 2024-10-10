@@ -387,6 +387,9 @@ class Function:
         self.nodes_with_inner_function = []
         self.output_keys = output_keys
 
+        if self.output_keys is not None:
+            warnings.warn("output_keys is deprecated.", FutureWarning)
+
         assert len(self.input_storage) == len(self.maker.fgraph.inputs)
         assert len(self.output_storage) == len(self.maker.fgraph.outputs)
 
@@ -836,8 +839,10 @@ class Function:
             t0 = time.perf_counter()
 
         output_subset = kwargs.pop("output_subset", None)
-        if output_subset is not None and self.output_keys is not None:
-            output_subset = [self.output_keys.index(key) for key in output_subset]
+        if output_subset is not None:
+            warnings.warn("output_subset is deprecated.", FutureWarning)
+            if self.output_keys is not None:
+                output_subset = [self.output_keys.index(key) for key in output_subset]
 
         # Reinitialize each container's 'provided' counter
         if self.trust_input:
@@ -1560,6 +1565,8 @@ class FunctionMaker:
             )
             for i in self.inputs
         ]
+        if any(self.refeed):
+            warnings.warn("Inputs with default values are deprecated.", FutureWarning)
 
     def create(self, input_storage=None, storage_map=None):
         """
