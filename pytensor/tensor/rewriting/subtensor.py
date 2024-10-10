@@ -1307,7 +1307,7 @@ compile.optdb.register(
     ),
     "fast_run",
     "inplace",
-    position=60,
+    position=50.1,
 )
 
 
@@ -1329,7 +1329,7 @@ compile.optdb.register(
     ),
     "fast_run",
     "inplace",
-    position=60,
+    position=70.6,
 )
 
 
@@ -1355,7 +1355,7 @@ compile.optdb.register(
     ),
     "fast_run",
     "inplace",
-    position=60,
+    position=70.6,
 )
 
 
