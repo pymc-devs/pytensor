@@ -117,7 +117,12 @@ versionfile_build = "pytensor/_version.py"
 tag_prefix = "rel-"
 
 [tool.pytest]
-addopts = "--durations=50  --doctest-modules pytensor --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link"
+addopts = [
+    "--durations=50",
+    "--doctest-modules=pytensor",
+    "--ignore=pytensor/misc/check_duplicate_key.py",
+    "--ignore=pytensor/link"
+]
 testpaths = "tests/"
 
 [tool.ruff]
@@ -166,6 +171,7 @@ warn_return_any = true
 warn_unreachable = true
 files = ["pytensor", "tests"]
 plugins = ["numpy.typing.mypy_plugin"]
+explicit_package_bases = true
 
 [tool.cibuildwheel]
 build = "*"
