@@ -93,6 +93,7 @@ from pytensor.tensor.math import (
     max_and_argmax,
     maximum,
     mean,
+    median,
     min,
     minimum,
     mod,
@@ -3735,3 +3736,33 @@ def test_nan_to_num(nan, posinf, neginf):
         out,
         np.nan_to_num(y, nan=nan, posinf=posinf, neginf=neginf),
     )
+
+
+@pytest.mark.parametrize(
+    "ndim, axis",
+    [
+        (2, None),
+        (2, 1),
+        (2, (0, 1)),
+        (3, None),
+        (3, (1, 2)),
+        (4, (1, 3, 0)),
+    ],
+)
+def test_median(ndim, axis):
+    # Generate random data with both odd and even lengths
+    shape_even = np.arange(1, ndim + 1) * 2
+    shape_odd = shape_even - 1
+
+    data_even = np.random.rand(*shape_even)
+    data_odd = np.random.rand(*shape_odd)
+
+    x = tensor(dtype="float64", shape=(None,) * ndim)
+    f = function([x], median(x, axis=axis))
+    result_odd = f(data_odd)
+    result_even = f(data_even)
+    expected_odd = np.median(data_odd, axis=axis)
+    expected_even = np.median(data_even, axis=axis)
+
+    assert np.allclose(result_odd, expected_odd)
+    assert np.allclose(result_even, expected_even)
