@@ -863,15 +863,55 @@ class TestRandomShapeInputs:
         jax_fn = compile_random_function([x_pt], out)
         assert jax_fn(np.ones((2, 3))).shape == (2,)
 
+    def test_random_scalar_shape_input(self):
+        dim0 = pt.scalar("dim0", dtype=int)
+        dim1 = pt.scalar("dim1", dtype=int)
+
+        out = pt.random.normal(0, 1, size=dim0)
+        jax_fn = compile_random_function([dim0], out)
+        assert jax_fn(np.array(2)).shape == (2,)
+        assert jax_fn(np.array(3)).shape == (3,)
+
+        out = pt.random.normal(0, 1, size=[dim0, dim1])
+        jax_fn = compile_random_function([dim0, dim1], out)
+        assert jax_fn(np.array(2), np.array(3)).shape == (2, 3)
+        assert jax_fn(np.array(4), np.array(5)).shape == (4, 5)
+
     @pytest.mark.xfail(
-        reason="`size_pt` should be specified as a static argument", strict=True
+        raises=TypeError, reason="Cannot convert scalar input to integer"
     )
-    def test_random_concrete_shape_graph_input(self):
-        rng = shared(np.random.default_rng(123))
-        size_pt = pt.scalar()
-        out = pt.random.normal(0, 1, size=size_pt, rng=rng)
-        jax_fn = compile_random_function([size_pt], out)
-        assert jax_fn(10).shape == (10,)
+    def test_random_scalar_shape_input_not_supported(self):
+        dim = pt.scalar("dim", dtype=int)
+        out1 = pt.random.normal(0, 1, size=dim)
+        # An operation that wouldn't work if we replaced 0d array by integer
+        out2 = dim[...].set(1)
+        jax_fn = compile_random_function([dim], [out1, out2])
+
+        res1, res2 = jax_fn(np.array(2))
+        assert res1.shape == (2,)
+        assert res2 == 1
+
+    @pytest.mark.xfail(
+        raises=TypeError, reason="Cannot convert scalar input to integer"
+    )
+    def test_random_scalar_shape_input_not_supported2(self):
+        dim = pt.scalar("dim", dtype=int)
+        # This could theoretically be supported
+        # but would require knowing that * 2 is a safe operation for a python integer
+        out = pt.random.normal(0, 1, size=dim * 2)
+        jax_fn = compile_random_function([dim], out)
+        assert jax_fn(np.array(2)).shape == (4,)
+
+    @pytest.mark.xfail(
+        raises=TypeError, reason="Cannot convert tensor input to shape tuple"
+    )
+    def test_random_vector_shape_graph_input(self):
+        shape = pt.vector("shape", shape=(2,), dtype=int)
+        out = pt.random.normal(0, 1, size=shape)
+
+        jax_fn = compile_random_function([shape], out)
+        assert jax_fn(np.array([2, 3])).shape == (2, 3)
+        assert jax_fn(np.array([4, 5])).shape == (4, 5)
 
     def test_constant_shape_after_graph_rewriting(self):
         size = pt.vector("size", shape=(2,), dtype=int)
