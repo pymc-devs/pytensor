@@ -16,7 +16,7 @@ from tests.link.numba.test_basic import (
     compare_shape_dtype,
     set_test_value,
 )
-from tests.tensor.test_basic import TestAlloc
+from tests.tensor.test_basic import check_alloc_runtime_broadcast
 
 
 pytest.importorskip("numba")
@@ -52,7 +52,7 @@ def test_Alloc(v, shape):
 
 
 def test_alloc_runtime_broadcast():
-    TestAlloc.check_runtime_broadcast(get_mode("NUMBA"))
+    check_alloc_runtime_broadcast(get_mode("NUMBA"))
 
 
 def test_AllocEmpty():
