@@ -146,7 +146,7 @@ def test_elemwise_speed(benchmark):
 
 
 @pytest.mark.parametrize(
-    "v, new_order",
+    "test_values, new_order",
     [
         # `{'drop': [], 'shuffle': [], 'augment': [0, 1]}`
         (
@@ -204,14 +204,15 @@ def test_elemwise_speed(benchmark):
         ),
     ],
 )
-def test_Dimshuffle(v, new_order):
+def test_Dimshuffle(test_values, new_order):
+    v = next(iter(test_values.keys()))
     g = v.dimshuffle(new_order)
     g_fg = FunctionGraph(outputs=[g])
     compare_numba_and_py(
         g_fg,
         [
-            i.tag.test_value
-            for i in g_fg.inputs
+            test_values[i]
+            for i in test_values
             if not isinstance(i, SharedVariable | Constant)
         ],
     )
