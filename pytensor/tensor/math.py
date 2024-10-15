@@ -125,18 +125,6 @@ def _get_atol_rtol(a, b):
     return atol, rtol
 
 
-def _allclose(a, b, rtol=None, atol=None):
-    a = np.asarray(a)
-    b = np.asarray(b)
-    atol_, rtol_ = _get_atol_rtol(a, b)
-    if rtol is not None:
-        rtol_ = rtol
-    if atol is not None:
-        atol_ = atol
-
-    return np.allclose(a, b, atol=atol_, rtol=rtol_)
-
-
 class Argmax(COp):
     """
     Calculate the argmax over a given axis or over all axes.

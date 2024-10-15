@@ -663,7 +663,12 @@ def values_eq_approx(
         if str(a.dtype) not in continuous_dtypes:
             return np.all(a == b)
         else:
-            cmp = pytensor.tensor.math._allclose(a, b, rtol=rtol, atol=atol)
+            atol_, rtol_ = pytensor.tensor.math._get_atol_rtol(a, b)
+            if rtol is not None:
+                rtol_ = rtol
+            if atol is not None:
+                atol_ = atol
+            cmp = np.allclose(np.asarray(a), np.asarray(b), rtol=rtol_, atol=atol_)
             if cmp:
                 # Numpy claims they are close, this is good enough for us.
                 return True

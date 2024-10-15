@@ -894,7 +894,7 @@ class TestUnique(utt.InferShapeTester):
             f = pytensor.function(inputs=[x], outputs=out)
             outs = f(inp)
             for out, out_exp in zip(outs, outs_expected):
-                utt.assert_allclose(out, out_exp)
+                np.testing.assert_allclose(out, out_exp)
 
     @pytest.mark.parametrize(
         ("x", "inp", "axis"),
