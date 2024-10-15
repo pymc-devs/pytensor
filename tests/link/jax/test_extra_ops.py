@@ -4,7 +4,6 @@ import pytest
 import pytensor.tensor.basic as ptb
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import get_test_value
 from pytensor.tensor import extra_ops as pt_extra_ops
 from pytensor.tensor.type import matrix, tensor
 from tests.link.jax.test_basic import compare_jax_and_py
@@ -52,7 +51,9 @@ def test_extra_ops():
     out = pt_extra_ops.unravel_index(indices, (3, 4), order="C")
     fgraph = FunctionGraph([], out)
     compare_jax_and_py(
-        fgraph, [get_test_value(i) for i in fgraph.inputs], must_be_device_array=False
+        fgraph,
+        [],
+        must_be_device_array=False,
     )
 
 

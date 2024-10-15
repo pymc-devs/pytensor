@@ -620,10 +620,11 @@ class TestRopLop(RopLopChecker):
 
 @config.change_flags(compute_test_value="raise")
 def test_nonstandard_shapes():
-    a = tensor3(config.floatX)
-    a.tag.test_value = np.random.random((2, 3, 4)).astype(config.floatX)
-    b = tensor3(config.floatX)
-    b.tag.test_value = np.random.random((2, 3, 4)).astype(config.floatX)
+    with pytest.warns(FutureWarning):
+        a = tensor3(config.floatX)
+        a.tag.test_value = np.random.random((2, 3, 4)).astype(config.floatX)
+        b = tensor3(config.floatX)
+        b.tag.test_value = np.random.random((2, 3, 4)).astype(config.floatX)
 
     tl = make_list([a, b])
     tl_shape = shape(tl)

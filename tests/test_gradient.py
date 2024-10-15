@@ -910,7 +910,6 @@ def test_grad_scale():
     assert np.allclose(out, (8, 4))
 
 
-@config.change_flags(compute_test_value="off")
 def test_undefined_grad_opt():
     # Make sure that undefined grad get removed in optimized graph.
     random = RandomStream(np.random.default_rng().integers(1, 2147462579))

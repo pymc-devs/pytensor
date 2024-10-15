@@ -1,6 +1,7 @@
 """Provide a simple user friendly API to PyTensor-managed memory."""
 
 import copy
+import warnings
 from contextlib import contextmanager
 from functools import singledispatch
 from typing import TYPE_CHECKING
@@ -134,6 +135,10 @@ class SharedVariable(Variable):
             self.container.value = copy.deepcopy(new_value)
 
     def get_test_value(self):
+        warnings.warn(
+            "test_value machinery is deprecated and will stop working in the future.",
+            FutureWarning,
+        )
         return self.get_value(borrow=True, return_internal_type=True)
 
     def clone(self, **kwargs):

@@ -15,32 +15,38 @@ rng = np.random.default_rng(42849)
 
 
 @pytest.mark.parametrize(
-    "A, x, lower, exc",
+    "inputs, lower, exc",
     [
         (
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
-            set_test_value(pt.dvector(), rng.random(size=(3,)).astype("float64")),
+            [
+                set_test_value(
+                    pt.dmatrix(),
+                    (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
+                ),
+                set_test_value(pt.dvector(), rng.random(size=(3,)).astype("float64")),
+            ],
             "gen",
             None,
         ),
         (
-            set_test_value(
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
+            [
+                set_test_value(
+                    pt.lmatrix(),
+                    (lambda x: x.T.dot(x))(
+                        rng.integers(1, 10, size=(3, 3)).astype("int64")
+                    ),
                 ),
-            ),
-            set_test_value(pt.dvector(), rng.random(size=(3,)).astype("float64")),
+                set_test_value(pt.dvector(), rng.random(size=(3,)).astype("float64")),
+            ],
             "gen",
             None,
         ),
     ],
 )
-def test_Solve(A, x, lower, exc):
-    g = slinalg.Solve(lower=lower, b_ndim=1)(A, x)
+def test_Solve(inputs, lower, exc):
+    test_values = {k: v for d in inputs for k, v in d.items()}
+    inputs = list(test_values.keys())
+    g = slinalg.Solve(lower=lower, b_ndim=1)(*inputs)
 
     if isinstance(g, list):
         g_fg = FunctionGraph(outputs=g)
@@ -52,15 +58,15 @@ def test_Solve(A, x, lower, exc):
         compare_numba_and_py(
             g_fg,
             [
-                i.tag.test_value
-                for i in g_fg.inputs
+                test_values[i]
+                for i in test_values
                 if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
 
 @pytest.mark.parametrize(
-    "x, exc",
+    "test_values, exc",
     [
         (
             set_test_value(
@@ -78,7 +84,8 @@ def test_Solve(A, x, lower, exc):
         ),
     ],
 )
-def test_Det(x, exc):
+def test_Det(test_values, exc):
+    x = next(iter(test_values.keys()))
     g = nlinalg.Det()(x)
     g_fg = FunctionGraph(outputs=[g])
 
@@ -87,15 +94,15 @@ def test_Det(x, exc):
         compare_numba_and_py(
             g_fg,
             [
-                i.tag.test_value
-                for i in g_fg.inputs
+                test_values[i]
+                for i in test_values
                 if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
 
 @pytest.mark.parametrize(
-    "x, exc",
+    "test_values, exc",
     [
         (
             set_test_value(
@@ -113,7 +120,8 @@ def test_Det(x, exc):
         ),
     ],
 )
-def test_SLogDet(x, exc):
+def test_SLogDet(test_values, exc):
+    x = next(iter(test_values.keys()))
     g = nlinalg.SLogDet()(x)
     g_fg = FunctionGraph(outputs=g)
 
@@ -122,8 +130,8 @@ def test_SLogDet(x, exc):
         compare_numba_and_py(
             g_fg,
             [
-                i.tag.test_value
-                for i in g_fg.inputs
+                test_values[i]
+                for i in test_values
                 if not isinstance(i, SharedVariable | Constant)
             ],
         )
@@ -154,7 +162,7 @@ y = np.array(
 
 
 @pytest.mark.parametrize(
-    "x, exc",
+    "test_values, exc",
     [
         (
             set_test_value(
@@ -181,7 +189,8 @@ y = np.array(
         ),
     ],
 )
-def test_Eig(x, exc):
+def test_Eig(test_values, exc):
+    x = next(iter(test_values.keys()))
     g = nlinalg.Eig()(x)
 
     if isinstance(g, list):
@@ -194,15 +203,15 @@ def test_Eig(x, exc):
         compare_numba_and_py(
             g_fg,
             [
-                i.tag.test_value
-                for i in g_fg.inputs
+                test_values[i]
+                for i in test_values
                 if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
 
 @pytest.mark.parametrize(
-    "x, uplo, exc",
+    "test_values, uplo, exc",
     [
         (
             set_test_value(
@@ -224,7 +233,8 @@ def test_Eig(x, exc):
         ),
     ],
 )
-def test_Eigh(x, uplo, exc):
+def test_Eigh(test_values, uplo, exc):
+    x = next(iter(test_values.keys()))
     g = nlinalg.Eigh(uplo)(x)
 
     if isinstance(g, list):
@@ -237,15 +247,15 @@ def test_Eigh(x, uplo, exc):
         compare_numba_and_py(
             g_fg,
             [
-                i.tag.test_value
-                for i in g_fg.inputs
+                test_values[i]
+                for i in test_values
                 if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
 
 @pytest.mark.parametrize(
-    "op, x, exc, op_args",
+    "op, test_values, exc, op_args",
     [
         (
             nlinalg.MatrixInverse,
@@ -289,7 +299,8 @@ def test_Eigh(x, uplo, exc):
         ),
     ],
 )
-def test_matrix_inverses(op, x, exc, op_args):
+def test_matrix_inverses(op, test_values, exc, op_args):
+    x = next(iter(test_values.keys()))
     g = op(*op_args)(x)
     g_fg = FunctionGraph(outputs=[g])
 
@@ -298,15 +309,15 @@ def test_matrix_inverses(op, x, exc, op_args):
         compare_numba_and_py(
             g_fg,
             [
-                i.tag.test_value
-                for i in g_fg.inputs
+                test_values[i]
+                for i in test_values
                 if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
 
 @pytest.mark.parametrize(
-    "x, mode, exc",
+    "test_values, mode, exc",
     [
         (
             set_test_value(
@@ -346,7 +357,8 @@ def test_matrix_inverses(op, x, exc, op_args):
         ),
     ],
 )
-def test_QRFull(x, mode, exc):
+def test_QRFull(test_values, mode, exc):
+    x = next(iter(test_values.keys()))
     g = nlinalg.QRFull(mode)(x)
 
     if isinstance(g, list):
@@ -359,15 +371,15 @@ def test_QRFull(x, mode, exc):
         compare_numba_and_py(
             g_fg,
             [
-                i.tag.test_value
-                for i in g_fg.inputs
+                test_values[i]
+                for i in test_values
                 if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
 
 @pytest.mark.parametrize(
-    "x, full_matrices, compute_uv, exc",
+    "test_values, full_matrices, compute_uv, exc",
     [
         (
             set_test_value(
@@ -411,7 +423,8 @@ def test_QRFull(x, mode, exc):
         ),
     ],
 )
-def test_SVD(x, full_matrices, compute_uv, exc):
+def test_SVD(test_values, full_matrices, compute_uv, exc):
+    x = next(iter(test_values.keys()))
     g = nlinalg.SVD(full_matrices, compute_uv)(x)
 
     if isinstance(g, list):
@@ -424,8 +437,8 @@ def test_SVD(x, full_matrices, compute_uv, exc):
         compare_numba_and_py(
             g_fg,
             [
-                i.tag.test_value
-                for i in g_fg.inputs
+                test_values[i]
+                for i in test_values
                 if not isinstance(i, SharedVariable | Constant)
             ],
         )

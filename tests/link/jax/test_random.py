@@ -474,17 +474,19 @@ def test_random_RandomVariable(rv_op, dist_params, base_size, cdf_name, params_c
 
     """
     rng = shared(np.random.default_rng(29403))
+    test_values = {k: v for d in dist_params for k, v in d.items() if d}
+    dist_params = list(test_values.keys())
     g = rv_op(*dist_params, size=(10000, *base_size), rng=rng)
     g_fn = compile_random_function(dist_params, g, mode=jax_mode)
     samples = g_fn(
         *[
-            i.tag.test_value
-            for i in g_fn.maker.fgraph.inputs
+            test_values[i]
+            for i in test_values
             if not isinstance(i, SharedVariable | Constant)
         ]
     )
 
-    bcast_dist_args = np.broadcast_arrays(*[i.tag.test_value for i in dist_params])
+    bcast_dist_args = np.broadcast_arrays(*[test_values[i] for i in test_values])
 
     for idx in np.ndindex(*base_size):
         cdf_params = params_conv(*(arg[idx] for arg in bcast_dist_args))

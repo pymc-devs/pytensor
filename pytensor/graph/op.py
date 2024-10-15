@@ -717,6 +717,11 @@ def get_test_values(*args: Variable) -> Any | list[Any]:
     if config.compute_test_value == "off":
         return []
 
+    warnings.warn(
+        "test_value machinery is deprecated and will stop working in the future.",
+        FutureWarning,
+    )
+
     rval = []
 
     for i, arg in enumerate(args):
