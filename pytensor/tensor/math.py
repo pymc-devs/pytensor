@@ -26,10 +26,8 @@ from pytensor.tensor.basic import (
     concatenate,
     constant,
     expand_dims,
-    full_like,
     stack,
     switch,
-    take_along_axis,
 )
 from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
 from pytensor.tensor.elemwise import (
@@ -2941,11 +2939,11 @@ def percentile(input, q, axis=None):
     axis: None or int or list of int, optional
         Axis or axes along which the percentiles are computed. The default is to compute the percentile(s) along a flattened version of the array.
     """
-    input = as_tensor_variable(input)
-    input_ndim = input.type.ndim
+    x = as_tensor_variable(input)
+    x_ndim = x.type.ndim
 
     if axis is None:
-        axis = list(range(input_ndim))
+        axis = list(range(x_ndim))
     elif isinstance(axis, (int | np.integer)):
         axis = [axis]
     elif isinstance(axis, np.ndarray) and axis.ndim == 0:
@@ -2954,17 +2952,17 @@ def percentile(input, q, axis=None):
         axis = [int(a) for a in axis]
 
     # Compute the shape of the remaining axes
-    new_axes_order = [i for i in range(input.ndim) if i not in axis] + list(axis)
-    input = input.dimshuffle(new_axes_order)
-    input_shape = shape(input)
-    remaining_axis_size = input_shape[: input.ndim - len(axis)]
-    flattened_axis_size = prod(input_shape[input.ndim - len(axis) :])
-    input = input.reshape(concatenate([remaining_axis_size, [flattened_axis_size]]))
-    axis = -1
+    new_axes_order = [i for i in range(x.ndim) if i not in axis] + list(axis)
+    x = x.dimshuffle(new_axes_order)
+    input_shape = shape(x)
+    remaining_axis_size = input_shape[: x.ndim - len(axis)]
+    x = x.reshape((*remaining_axis_size, -1))
 
     # Sort the input tensor along the specified axis
-    sorted_input = input.sort(axis=axis)
-    input_shape = input.shape[axis]
+    sorted_input = x.sort(axis=-1)
+    slices1 = [slice(None)] * sorted_input.ndim
+    slices2 = [slice(None)] * sorted_input.ndim
+    input_shape = x.shape[-1]
 
     if isinstance(q, (int | float)):
         q = [q]
@@ -2979,18 +2977,15 @@ def percentile(input, q, axis=None):
         k_floor = floor(k).astype("int64")
         k_ceil = ceil(k).astype("int64")
 
-        indices1 = expand_dims(
-            full_like(sorted_input.take(0, axis=axis), k_floor), axis
-        )
-        indices2 = expand_dims(full_like(sorted_input.take(0, axis=axis), k_ceil), axis)
-
-        val1 = take_along_axis(sorted_input, indices1, axis=axis)
-        val2 = take_along_axis(sorted_input, indices2, axis=axis)
+        slices1[-1] = slice(k_floor, k_floor + 1)
+        slices2[-1] = slice(k_ceil, k_ceil + 1)
+        val1 = sorted_input[tuple(slices1)]
+        val2 = sorted_input[tuple(slices2)]
 
         d = k - k_floor
         percentile_val = val1 + d * (val2 - val1)
 
-        result.append(percentile_val.squeeze(axis=axis))
+        result.append(percentile_val.squeeze(axis=-1))
 
     if len(result) == 1:
         result = result[0]
