@@ -3805,6 +3805,7 @@ def test_percentile(ndim, axis, q):
         (3, None, [0.25, 0.75]),
         (3, 0, 0.5),
         (3, (1, 2), 0.5),
+        (3, (1, 2), [0.1, 0.9]),
     ],
 )
 def test_quantile(ndim, axis, q):
