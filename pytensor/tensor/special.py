@@ -485,6 +485,21 @@ class Softmax(COp):
 
 
 def softmax(c, axis=None):
+    """
+    Compute the softmax of a vector along a specified axis.
+
+    Parameters
+    ----------
+    c : TensorVariable
+        The input tensor.
+    axis : int or None
+        The axis along which to compute the softmax.
+
+    Returns
+    -------
+    TensorVariable
+        The softmax of the input tensor along the specified axis.
+    """
     c = as_tensor_variable(c)
     return Softmax(axis=axis)(c)
 

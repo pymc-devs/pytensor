@@ -589,37 +589,43 @@ def isneginf(x):
 
 @scalar_elemwise
 def lt(a, b):
-    """a < b"""
+    """Elementwise less-than comparison, `a < b`."""
 
 
-@scalar_elemwise
 def gt(a, b):
-    """a > b"""
+    """Elementwise greater-than comparison, `a > b`."""
 
 
-@scalar_elemwise
 def le(a, b):
-    """a <= b"""
+    """Elementwise less-than-or-equal-to comparison, `a <= b`."""
 
 
-@scalar_elemwise
 def ge(a, b):
-    """a >= b"""
+    """Elementwise greater-than-or-equal-to comparison, `a >= b`."""
 
 
-@scalar_elemwise
 def eq(a, b):
-    """a == b"""
+    """Elementwise equality comparison, `a == b`.
+
+    Notes
+    -----
+    Due to Python rules, it is not possible to correctly overload the equality symbol `==` for hashable objects,
+    so `eq` must always be used to compute the Elemwise equality of TensorVariables (which are hashable).
+    """
 
 
-@scalar_elemwise
 def neq(a, b):
-    """a != b"""
+    """Elementwise inequality comparison, `a != b`.
+
+    Notes
+    -----
+    Due to Python rules, it is not possible to overload the non-equality symbol `!=` for hashable objects,
+    so `neq` must always be used to compute the Elemwise non-equality of TensorVariables (which are hashable).
+    """
 
 
-@scalar_elemwise
 def isnan(a):
-    """isnan(a)"""
+    """Elementwise test for NaN (not a number)."""
 
 
 # Rename isnan to isnan_ to allow to bypass it when not needed.
@@ -628,7 +634,21 @@ isnan_ = isnan
 
 
 def isnan(a):
-    """isnan(a)"""
+    """
+    isnan(a)
+
+    Elementwise test for NaN (not a number).
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor.
+
+    Returns
+    -------
+    TensorVariable
+        TensorVariable representing the elementwise test for NaN.
+    """
     a = as_tensor_variable(a)
     if a.dtype in discrete_dtypes:
         return alloc(
@@ -639,7 +659,21 @@ def isnan(a):
 
 @scalar_elemwise
 def isinf(a):
-    """isinf(a)"""
+    """
+    isinf(a)
+
+    Elementwise test for infinite value.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor.
+
+    Returns
+    -------
+    TensorVariable
+        TensorVariable representing the elementwise test for infinite value.
+    """
 
 
 # Rename isnan to isnan_ to allow to bypass it when not needed.
@@ -648,9 +682,24 @@ isinf_ = isinf
 
 
 def isinf(a):
-    """isinf(a)"""
+    """
+    isinf(a)
+
+    Elementwise test for infinite value.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor.
+
+    Returns
+    -------
+    TensorVariable
+        TensorVariable representing the elementwise test for infinite value.
+    """
     a = as_tensor_variable(a)
     if a.dtype in discrete_dtypes:
+        # For discrete types, return a tensor of False
         return alloc(
             np.asarray(False, dtype="bool"), *[a.shape[i] for i in range(a.ndim)]
         )
@@ -804,22 +853,22 @@ def isclose(a, b, rtol=1.0e-5, atol=1.0e-8, equal_nan=False):
 
 @scalar_elemwise
 def and_(a, b):
-    """bitwise a & b"""
+    """Bitwise AND of a and b."""
 
 
 @scalar_elemwise
 def or_(a, b):
-    """bitwise a | b"""
+    """Bitwise OR of a and b."""
 
 
 @scalar_elemwise
 def xor(a, b):
-    """bitwise a ^ b"""
+    """Bitwise XOR of a and b."""
 
 
 @scalar_elemwise
 def invert(a):
-    """bitwise ~a"""
+    """Bitwise NOT of a."""
 
 
 ##########################
@@ -829,7 +878,19 @@ def invert(a):
 
 @scalar_elemwise
 def abs(a):
-    """|`a`|"""
+    """Compute the absolute value of each element in `a`.
+
+    Parameters
+    ----------
+    a : array_like
+        Input array.
+
+    Returns
+    -------
+    res : Tensor
+        A new array with each element representing the absolute value of the
+        corresponding element in `a`.
+    """
 
 
 pprint.assign(abs, printing.PatternPrinter(("|%(0)s|", -1000)))
@@ -837,52 +898,171 @@ pprint.assign(abs, printing.PatternPrinter(("|%(0)s|", -1000)))
 
 @scalar_elemwise
 def exp(a):
-    """e^`a`"""
+    """Compute the exponential of each element in `a`.
+
+    Parameters
+    ----------
+    a : array_like
+        Input array.
+
+    Returns
+    -------
+    res : Tensor
+        A new array with each element representing the exponential of the
+        corresponding element in `a`.
+    """
 
 
 @scalar_elemwise
 def exp2(a):
-    """2^`a`"""
+    """Compute the base 2 exponential of each element in `a`.
+
+    Parameters
+    ----------
+    a : array_like
+        Input array.
+
+    Returns
+    -------
+    res : Tensor
+        A new array with each element representing the base 2 exponential
+        of the corresponding element in `a`.
+    """
 
 
 @scalar_elemwise
 def expm1(a):
-    """e^`a` - 1"""
+    """Compute exp(a) - 1.
+
+    Parameters
+    ----------
+    a : array_like
+        Input values.
+
+    Returns
+    -------
+    res : Tensor
+        Elementwise exponential minus one, i.e., exp(a) - 1.
+    """
 
 
 @scalar_elemwise
 def neg(a):
-    """-a"""
+    """
+    Negate each element in `a`.
+
+    Parameters
+    ----------
+    a : array_like
+        Input array.
+
+    Returns
+    -------
+    Tensor
+        Array with each element negated.
+    """
 
 
 @scalar_elemwise
 def reciprocal(a):
-    """1.0/a"""
+    """
+    Compute the element-wise reciprocal of `a`.
+
+    Parameters
+    ----------
+    a : array_like
+        Input array.
+
+    Returns
+    -------
+    Tensor
+        Array with the element-wise reciprocal of `a`.
+    """
 
 
 @scalar_elemwise
 def log(a):
-    """base e logarithm of a"""
+    """
+    Compute the natural logarithm of `a`.
+
+    Parameters
+    ----------
+    a : array_like
+        Input array.
+
+    Returns
+    -------
+    Tensor
+        Array with the natural logarithm of `a`.
+    """
 
 
 @scalar_elemwise
 def log2(a):
-    """base 2 logarithm of a"""
+    """
+    Compute the base-2 logarithm of `a`.
+
+    Parameters
+    ----------
+    a : array_like
+        Input array.
+
+    Returns
+    -------
+    Tensor
+        Array with the base-2 logarithm of `a`.
+    """
 
 
 @scalar_elemwise
 def log10(a):
-    """base 10 logarithm of a"""
+    """
+    Compute the base-10 logarithm of `a`.
+
+    Parameters
+    ----------
+    a : array_like
+        Input array.
+
+    Returns
+    -------
+    Tensor
+        Array with the base-10 logarithm of `a`.
+    """
 
 
 @scalar_elemwise
 def log1p(a):
-    """log(1+a)"""
+    """
+    Compute the logarithm of `1 + a`.
+
+    Parameters
+    ----------
+    a : array_like
+        Input array.
+
+    Returns
+    -------
+    Tensor
+        Array with the logarithm of `1 + a`.
+    """
 
 
 @scalar_elemwise
 def sign(a):
-    """sign of a"""
+    """
+    Compute the sign of an array.
+
+    Parameters
+    ----------
+    a : array_like
+        Input array.
+
+    Returns
+    -------
+    Tensor
+        An array of the same shape as `a`, with the sign elementwise.
+    """
 
 
 def sgn(a):
@@ -897,27 +1077,109 @@ def sgn(a):
 
 @scalar_elemwise
 def ceil(a):
-    """ceiling of a"""
+    """
+    Ceiling of an array.
+
+    Parameters
+    ----------
+    a : array_like
+        Input array.
+
+    Returns
+    -------
+    Tensor
+        An array of the same shape as `a`, with the ceiling elementwise.
+    """
 
 
 @scalar_elemwise
 def floor(a):
-    """floor of a"""
+    """
+    Return the floor of the input, element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input array.
+
+    Returns
+    -------
+    Tensor
+        An array of the same shape as `a`, with the floor of each element.
+        The floor of a real number is the largest integer less than or equal to that number.
+    """
 
 
 @scalar_elemwise
 def trunc(a):
-    """trunc of a"""
+    """
+    Truncate the elements of an array.
+
+    Parameters
+    ----------
+    a : array_like
+        Input array.
+
+    Returns
+    -------
+    Tensor
+        An array of the same shape as `a`, with each element truncated to an
+        integer.
+    """
 
 
 def iround(a, mode=None):
-    """cast(round(a,mode),'int64')"""
+    """
+    Round the elements of an array `a` to the nearest integer and cast the result to an integer tensor.
+
+    Parameters
+    ----------
+    a : array_like
+        Input array.
+    mode : {'half_away_from_zero', 'half_to_even'}, optional
+        Rounding mode. Default is 'half_to_even'.
+
+    Returns
+    -------
+    Tensor
+        An integer tensor of the same shape as `a`, with each element rounded to the nearest integer.
+    """
     return cast(round(a, mode), "int64")
 
 
 def round(a, mode=None):
-    """round_mode(a) with mode in [half_away_from_zero, half_to_even].
-    Default to half_to_even."""
+    """
+    Round the elements of an array.
+
+    Parameters
+    ----------
+    a : array_like
+        Input array.
+    mode : {'half_away_from_zero', 'half_to_even'}, optional
+        Rounding mode. Default is 'half_to_even'.
+
+    Returns
+    -------
+    Tensor
+        An array of the same shape as `a`, with each element rounded to an
+        integer.
+
+    Raises
+    ------
+    Exception
+        If `mode` is not implemented.
+
+    Notes
+    -----
+    The rounding modes are defined as follows:
+
+    - 'half_away_from_zero' (default): round to the nearest even number.
+      If the number is halfway between two integers, round to the nearest
+      one away from zero.
+    - 'half_to_even': round to the nearest even number. If the number is
+      halfway between two integers, round to the nearest even number.
+
+    """
     if mode is None:
         mode = "half_to_even"
         if config.warn__round:
@@ -932,22 +1194,55 @@ def round(a, mode=None):
     elif mode == "half_to_even":
         return round_half_to_even(a)
     else:
-        raise Exception(f"round mode {mode} is not implemented.")
+        raise Exception(f"Rounding mode '{mode}' is not implemented.")
 
 
 @scalar_elemwise
 def round_half_to_even(a):
-    """round_half_to_even(a)"""
+    """Rounds each element of `a` to the nearest even number if the number is halfway between two integers.
+
+    Parameters
+    ----------
+    a : Tensor
+        Input tensor.
+
+    Returns
+    -------
+    Tensor
+        An array with the same shape as `a`, with each element rounded to the nearest even number.
+    """
 
 
 @scalar_elemwise
 def round_half_away_from_zero(a):
-    """round_half_away_from_zero(a)"""
+    """Rounds each element of `a` to the nearest integer away from zero if the number is halfway between two integers.
+
+    Parameters
+    ----------
+    a : Tensor
+        Input tensor.
+
+    Returns
+    -------
+    Tensor
+        An array with the same shape as `a`, with each element rounded to the nearest integer away from zero.
+    """
 
 
 @scalar_elemwise
 def sqr(a):
-    """square of a"""
+    """Squares each element of `a`.
+
+    Parameters
+    ----------
+    a : Tensor
+        Input tensor.
+
+    Returns
+    -------
+    Tensor
+        An array with the same shape as `a`, with each element squared.
+    """
 
 
 def cov(m, y=None, rowvar=True, bias=False, ddof=None, fweights=None, aweights=None):
@@ -1018,127 +1313,433 @@ def cov(m, y=None, rowvar=True, bias=False, ddof=None, fweights=None, aweights=N
 
 @scalar_elemwise
 def sqrt(a):
-    """square root of a"""
+    """
+    Compute the square root of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the square root of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def deg2rad(a):
-    """convert degree a to radian"""
+    """
+    Convert angles from degrees to radians.
+
+    Parameters
+    ----------
+    a : array_like
+        Input angles in degrees.
+
+    Returns
+    -------
+    out : Tensor
+        The corresponding angles in radians.
+    """
 
 
 @scalar_elemwise
 def rad2deg(a):
-    """convert radian a to degree"""
+    """
+    Convert angles from radians to degrees.
+
+    Parameters
+    ----------
+    a : array_like
+        Input angles in radians.
+
+    Returns
+    -------
+    out : Tensor
+        The corresponding angles in degrees.
+    """
 
 
 @scalar_elemwise
 def cos(a):
-    """cosine of a"""
+    """
+    Compute the cosine of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor, in radians.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the cosine of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def arccos(a):
-    """arccosine of a"""
+    """
+    Compute the arccosine of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor, should have values in the interval [-1, 1].
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the arccosine of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def sin(a):
-    """sine of a"""
+    """
+    Compute the sine of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor, in radians.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the sine of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def arcsin(a):
-    """arcsine of a"""
+    """
+    Compute the arcsine of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor, should have values in the interval [-1, 1].
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the arcsine of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def tan(a):
-    """tangent of a"""
+    """
+    Compute the tangent of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor, in radians.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the tangent of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def arctan(a):
-    """arctangent of a"""
+    """
+    Compute the arctangent of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the arctangent of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def arctan2(a, b):
-    """arctangent of a / b"""
+    """
+    Element-wise arc tangent of `a` / `b` choosing the quadrant correctly.
+
+    Parameters
+    ----------
+    a : array_like
+        Y-coordinates.
+    b : array_like
+        X-coordinates.
+
+    Returns
+    -------
+    out : Tensor
+        An tensor containing the arctangent of each element in `a` / `b`.
+    """
 
 
 @scalar_elemwise
 def cosh(a):
-    """hyperbolic cosine of a"""
+    """
+    Compute the hyperbolic cosine of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the hyperbolic cosine of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def arccosh(a):
-    """hyperbolic arc cosine of a"""
+    """
+    Compute the hyperbolic arc cosine of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor, should have values greater than 1.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the hyperbolic arc cosine of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def sinh(a):
-    """hyperbolic sine of a"""
+    """
+    Compute the hyperbolic sine of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the hyperbolic sine of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def arcsinh(a):
-    """hyperbolic arc sine of a"""
+    """
+    Compute the hyperbolic arc sine of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the hyperbolic arc sine of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def tanh(a):
-    """hyperbolic tangent of a"""
+    """
+    Compute the hyperbolic tangent of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the hyperbolic tangent of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def arctanh(a):
-    """hyperbolic arc tangent of a"""
+    """
+    Compute the hyperbolic arc tangent of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the hyperbolic arc tangent of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def erf(a):
-    """error function"""
+    """
+    Compute the error function of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the error function of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def erfc(a):
-    """complementary error function"""
+    """
+    Compute the complementary error function of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the complementary error function of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def erfcx(a):
-    """scaled complementary error function"""
+    """
+    Compute the scaled complementary error function of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the scaled complementary error function of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def erfinv(a):
-    """inverse error function"""
+    """
+    Compute the inverse error function of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the inverse error function of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def erfcinv(a):
-    """inverse complementary error function"""
+    """
+    Compute the inverse complementary error function of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the inverse complementary error function of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def owens_t(h, a):
-    """owens t function"""
+    """
+    Compute the Owen's T function of a tensor element-wise.
+
+    Parameters
+    ----------
+    h : array_like
+        The input tensor.
+    a : array_like
+        The second input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the Owen's T function of each element in `h`
+        and `a`.
+    """
 
 
 @scalar_elemwise
 def gamma(a):
-    """gamma function"""
+    """
+    Compute the gamma function of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the gamma function of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def gammaln(a):
-    """log gamma function"""
+    """
+    Compute the log gamma function of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the log gamma function of each element in `a`.
+    """
 
 
 @scalar_elemwise
 def psi(a):
-    """derivative of log gamma function"""
+    """
+    Compute the derivative of the log gamma function of a tensor element-wise.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the derivative of the log gamma function of each
+        element in `a`.
+    """
 
 
 digamma = psi
@@ -1146,92 +1747,353 @@ digamma = psi
 
 @scalar_elemwise
 def tri_gamma(a):
-    """second derivative of the log gamma function"""
+    """
+    Second derivative of the log gamma function.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the second derivative of the log gamma function of
+        each element in `a`.
+    """
 
 
 @scalar_elemwise
 def polygamma(n, x):
-    """Polygamma function of order n evaluated at x"""
+    """
+    Polygamma function of order n evaluated at x.
+
+    Parameters
+    ----------
+    n : array_like
+        Order of the polygamma function.
+    x : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the polygamma function of order `n` evaluated at
+        each element in `x`.
+    """
 
 
 @scalar_elemwise
 def chi2sf(x, k):
-    """chi squared survival function"""
+    """
+    Chi squared survival function.
+
+    Parameters
+    ----------
+    x : array_like
+        Input tensor.
+    k : array_like
+        Degrees of freedom.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the chi squared survival function for each element
+        in `x` with `k` degrees of freedom.
+    """
 
 
 @scalar_elemwise
 def gammainc(k, x):
-    """Regularized lower gamma function"""
+    """
+    Regularized lower gamma function.
+
+    Parameters
+    ----------
+    k : array_like
+        Input tensor.
+    x : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the regularized lower gamma function of each
+        element in `k` at `x`.
+    """
 
 
 @scalar_elemwise
 def gammaincc(k, x):
-    """Regularized upper gamma function"""
+    """
+    Regularized upper gamma function.
+
+    Parameters
+    ----------
+    k : array_like
+        Input tensor.
+    x : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the regularized upper gamma function of each
+        element in `k` at `x`.
+    """
 
 
 @scalar_elemwise
 def gammau(k, x):
-    """Upper incomplete gamma function."""
+    """
+    Upper incomplete gamma function.
+
+    Parameters
+    ----------
+    k : array_like
+        Input tensor.
+    x : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the upper incomplete gamma function of each
+        element in `k` at `x`.
+    """
 
 
 @scalar_elemwise
 def gammal(k, x):
-    """Lower incomplete gamma function."""
+    """
+    Lower incomplete gamma function.
+
+    Parameters
+    ----------
+    k : array_like
+        Input tensor.
+    x : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the lower incomplete gamma function of each
+        element in `k` at `x`.
+    """
 
 
 @scalar_elemwise
 def gammaincinv(k, x):
-    """Inverse to the regularized lower incomplete gamma function"""
+    """
+    Inverse to the regularized lower incomplete gamma function.
+
+    Parameters
+    ----------
+    k : array_like
+        Input tensor.
+    x : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the inverse of the regularized lower incomplete
+        gamma function of each element in `k` at `x`.
+    """
 
 
 @scalar_elemwise
 def gammainccinv(k, x):
-    """Inverse of the regularized upper incomplete gamma function"""
+    """
+    Inverse of the regularized upper incomplete gamma function.
+
+    Parameters
+    ----------
+    k : array_like
+        Input tensor.
+    x : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the inverse of the regularized upper incomplete
+        gamma function of each element in `k` at `x`.
+    """
 
 
 @scalar_elemwise
 def hyp2f1(a, b, c, z):
-    """Gaussian hypergeometric function."""
+    """
+    Gaussian hypergeometric function.
+
+    Parameters
+    ----------
+    a : array_like
+        Input tensor.
+    b : array_like
+        Input tensor.
+    c : array_like
+        Input tensor.
+    z : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the Gaussian hypergeometric function of each
+        element in `a`, `b`, `c`, and `z`.
+    """
 
 
 @scalar_elemwise
 def j0(x):
-    """Bessel function of the first kind of order 0."""
+    """
+    Bessel function of the first kind of order 0.
+
+    Parameters
+    ----------
+    x : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the values of the Bessel function of the
+        first kind of order 0 at each element in `x`.
+    """
 
 
 @scalar_elemwise
 def j1(x):
-    """Bessel function of the first kind of order 1."""
+    """
+    Bessel function of the first kind of order 1.
+
+    Parameters
+    ----------
+    x : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the values of the Bessel function of the
+        first kind of order 1 at each element in `x`.
+    """
 
 
 @scalar_elemwise
 def jv(v, x):
-    """Bessel function of the first kind of order v (real)."""
+    """
+    Bessel function of the first kind of order v (real).
+
+    Parameters
+    ----------
+    v : array_like
+        Input tensor.
+    x : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the values of the Bessel function of the
+        first kind of order `v` at each element in `x`.
+    """
 
 
 @scalar_elemwise
 def i0(x):
-    """Modified Bessel function of the first kind of order 0."""
+    """
+    Modified Bessel function of the first kind of order 0.
+
+    Parameters
+    ----------
+    x : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the values of the modified Bessel function of
+        the first kind of order 0 at each element in `x`.
+    """
 
 
 @scalar_elemwise
 def i1(x):
-    """Modified Bessel function of the first kind of order 1."""
+    """
+    Modified Bessel function of the first kind of order 1.
+
+    Parameters
+    ----------
+    x : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the values of the modified Bessel function of
+        the first kind of order 1 at each element in `x`.
+    """
 
 
 @scalar_elemwise
 def iv(v, x):
-    """Modified Bessel function of the first kind of order v (real)."""
+    """
+    Modified Bessel function of the first kind of order `v` (real).
+
+    Parameters
+    ----------
+    v : array_like
+        Input tensor.
+    x : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the values of the modified Bessel function of
+        the first kind of order `v` at each element in `x`.
+    """
 
 
 @scalar_elemwise
 def ive(v, x):
-    """Exponentially scaled modified Bessel function of the first kind of order v (real)."""
+    """
+    Exponentially scaled modified Bessel function of the first kind of order `v` (real).
+
+    Parameters
+    ----------
+    v : array_like
+        Input tensor.
+    x : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the values of the exponentially scaled modified Bessel
+        function of the first kind of order `v` at each element in `x`.
+    """
 
 
 @scalar_elemwise
 def sigmoid(x):
-    """Logistic sigmoid function (1 / (1 + exp(-x)), also known as expit or inverse logit"""
+    """
+    Logistic sigmoid function (1 / (1 + exp(-x)), also known as expit or inverse logit.
+
+    Parameters
+    ----------
+    x : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the values of the logistic sigmoid function at each element in `x`.
+    """
 
 
 expit = sigmoid
@@ -1239,7 +2101,19 @@ expit = sigmoid
 
 @scalar_elemwise
 def softplus(x):
-    """Compute log(1 + exp(x)), also known as softplus or log1pexp"""
+    """
+    Compute log(1 + exp(x)), also known as softplus or log1pexp.
+
+    Parameters
+    ----------
+    x : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the values of the softplus function at each element in `x`.
+    """
 
 
 log1pexp = softplus
@@ -1247,22 +2121,74 @@ log1pexp = softplus
 
 @scalar_elemwise
 def log1mexp(x):
-    """Compute log(1 - exp(x)), also known as log1mexp"""
+    """Compute log(1 - exp(x)), also known as log1mexp.
+
+    Parameters
+    ----------
+    x : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the values of the function at each element in `x`.
+    """
 
 
 @scalar_elemwise
 def betainc(a, b, x):
-    """Regularized incomplete beta function"""
+    """Regularized incomplete beta function.
+
+    Parameters
+    ----------
+    a : array_like
+        Shape parameter of the beta distribution.
+    b : array_like
+        Shape parameter of the beta distribution.
+    x : array_like
+        Integration limit between 0 and 1.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the values of the function at each element in `x`.
+    """
 
 
 @scalar_elemwise
 def betaincinv(a, b, x):
-    """Inverse of the regularized incomplete beta function"""
+    """Inverse of the regularized incomplete beta function.
+
+    Parameters
+    ----------
+    a : array_like
+        Shape parameter of the beta distribution.
+    b : array_like
+        Shape parameter of the beta distribution.
+    x : array_like
+        Integration limit between 0 and 1.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the values of the function at each element in `x`.
+    """
 
 
 @scalar_elemwise
 def real(z):
-    """Return real component of complex-valued tensor `z`."""
+    """Return real component of complex-valued tensor `z`.
+
+    Parameters
+    ----------
+    z : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the real component of each element in `z`.
+    """
 
 
 _tensor_py_operators.real = property(real, doc=real.__doc__)
@@ -1270,7 +2196,19 @@ _tensor_py_operators.real = property(real, doc=real.__doc__)
 
 @scalar_elemwise
 def imag(z):
-    """Return imaginary component of complex-valued tensor `z`."""
+    """
+    Return imaginary component of complex-valued tensor `z`.
+
+    Parameters
+    ----------
+    z : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the imaginary component of each element in `z`.
+    """
 
 
 _tensor_py_operators.imag = property(imag, doc=imag.__doc__)
@@ -1278,17 +2216,55 @@ _tensor_py_operators.imag = property(imag, doc=imag.__doc__)
 
 @scalar_elemwise
 def angle(z):
-    """Return polar-coordinate angle of complex-valued tensor `z`"""
+    """
+    Return polar-coordinate angle of complex-valued tensor `z`.
+
+    Parameters
+    ----------
+    z : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the angle of each element in `z`.
+    """
 
 
 @scalar_elemwise  # numpy.complex cannot build tensors
 def complex(real, imag):
-    """Return complex-valued tensor with `real` and `imag` components"""
+    """
+    Return complex-valued tensor with `real` and `imag` components.
+
+    Parameters
+    ----------
+    real : array_like
+        The real component of the complex tensor.
+    imag : array_like
+        The imaginary component of the complex tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing complex-valued elements.
+    """
 
 
 @scalar_elemwise(symbolname="conj")
 def _conj(z):
-    """Return the complex conjugate of `z`."""
+    """
+    Return the complex conjugate of `z`.
+
+    Parameters
+    ----------
+    z : array_like
+        Input tensor.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing the complex conjugate of each element in `z`.
+    """
 
 
 def conjugate(x):
@@ -1303,7 +2279,21 @@ conj = conjugate
 
 @scalar_elemwise
 def complex_from_polar(abs, angle):
-    """Return complex-valued tensor from polar coordinate specification."""
+    """
+    Return complex-valued tensor from polar coordinate specification.
+
+    Parameters
+    ----------
+    abs : array_like
+        The absolute value of each complex number.
+    angle : array_like
+        The angle (in radians) of each complex number.
+
+    Returns
+    -------
+    out : Tensor
+        A tensor containing complex-valued elements.
+    """
 
 
 class Mean(FixedOpCAReduce):
@@ -2135,7 +3125,7 @@ def tensordot(
 
     Returns
     -------
-    output : TensorVariable
+    output : TensorLike
         The tensor dot product of the input.
         Its shape will be equal to the concatenation of `a` and `b` shapes
         (ignoring the dimensions that were summed over given in ``a_axes``
@@ -2624,7 +3614,6 @@ def prod(
         If this is set to True, the axes which are reduced are left in
         the result as dimensions with size one. With this option, the result
         will broadcast correctly against the original tensor.
-
     """
 
     out = Prod(
