@@ -388,7 +388,7 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
         return rng, draws
 
     def random(core_shape, rng, size, *dist_params):
-        pass
+        raise NotImplementedError("Non-jitted random variable not implemented")
 
     @overload(random, jit_options=_jit_options)
     def ov_random(core_shape, rng, size, *dist_params):
