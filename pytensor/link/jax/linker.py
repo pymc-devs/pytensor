@@ -3,15 +3,19 @@ import warnings
 from numpy.random import Generator, RandomState
 
 from pytensor.compile.sharedvalue import SharedVariable, shared
-from pytensor.graph.basic import Constant
 from pytensor.link.basic import JITLinker
 
 
 class JAXLinker(JITLinker):
     """A `Linker` that JIT-compiles NumPy-based operations using JAX."""
 
+    def __init__(self, *args, **kwargs):
+        self.scalar_shape_inputs: tuple[int] = ()  # type: ignore[annotation-unchecked]
+        super().__init__(*args, **kwargs)
+
     def fgraph_convert(self, fgraph, input_storage, storage_map, **kwargs):
         from pytensor.link.jax.dispatch import jax_funcify
+        from pytensor.link.jax.dispatch.shape import JAXShapeTuple
         from pytensor.tensor.random.type import RandomType
 
         shared_rng_inputs = [
@@ -63,6 +67,21 @@ class JAXLinker(JITLinker):
                 fgraph.inputs.remove(new_inp)
                 fgraph.inputs.insert(old_inp_fgrap_index, new_inp)
 
+        fgraph_inputs = fgraph.inputs
+        clients = fgraph.clients
+        # Detect scalar shape inputs that are used only in JAXShapeTuple nodes
+        scalar_shape_inputs = [
+            inp
+            for node in fgraph.apply_nodes
+            if isinstance(node.op, JAXShapeTuple)
+            for inp in node.inputs
+            if inp in fgraph_inputs
+            and all(isinstance(node.op, JAXShapeTuple) for node, _ in clients[inp])
+        ]
+        self.scalar_shape_inputs = tuple(
+            fgraph_inputs.index(inp) for inp in scalar_shape_inputs
+        )
+
         return jax_funcify(
             fgraph, input_storage=input_storage, storage_map=storage_map, **kwargs
         )
@@ -70,12 +89,19 @@ class JAXLinker(JITLinker):
     def jit_compile(self, fn):
         import jax
 
-        # I suppose we can consider `Constant`s to be "static" according to
-        # JAX.
-        static_argnums = [
-            n for n, i in enumerate(self.fgraph.inputs) if isinstance(i, Constant)
-        ]
-        return jax.jit(fn, static_argnums=static_argnums)
+        jit_fn = jax.jit(fn, static_argnums=self.scalar_shape_inputs)
+
+        if not self.scalar_shape_inputs:
+            return jit_fn
+
+        def convert_scalar_shape_inputs(*args):
+            new_args = [
+                int(arg) if i in self.scalar_shape_inputs else arg
+                for i, arg in enumerate(args)
+            ]
+            return jit_fn(*new_args)
+
+        return convert_scalar_shape_inputs
 
     def create_thunk_inputs(self, storage_map):
         from pytensor.link.jax.dispatch import jax_typify
