@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from pytensor.compile import UnusedInputError, get_mode
+from pytensor.compile import UnusedInputError, get_default_mode, get_mode
 from pytensor.compile.function import function, pfunc
 from pytensor.compile.function.pfunc import rebuild_collect_shared
 from pytensor.compile.io import In
@@ -732,16 +732,13 @@ class TestAliasingRules:
     # 2. shared variables are allocated in this memory space, as are the
     # temporaries used for Function evaluation.
     #
-    # 3. Physically, this managed memory space may be spread across the host,
-    # on a GPU device(s), or even on a remote machine.
-    #
-    # 4. PyTensor assumes that shared variables are never aliased to one another,
+    # 3. PyTensor assumes that shared variables are never aliased to one another,
     # and tries to make it impossible to accidentally alias them.
     #
-    # 5. PyTensor's managed data is constant while PyTensor Functions are not running
+    # 4. PyTensor's managed data is constant while PyTensor Functions are not running
     # and pytensor library code is not running.
     #
-    # 6. The default behaviour of Function is to return user-space values for
+    # 5. The default behaviour of Function is to return user-space values for
     # outputs, but this can be overridden (borrow=True) for better performance,
     # in which case the returned value may be aliased to managed memory, and
     # potentially invalidated by the next PyTensor Function call or call to pytensor
@@ -810,6 +807,9 @@ class TestAliasingRules:
         assert np.allclose(vals.todense(), bogus_vals.todense())
 
     def test_input_aliasing_affecting_inplace_operations(self):
+        # Note: The input aliasing check was disabled, so this test now just confirms that wrong values
+        # will be obtained if the inputs are aliased.
+
         # Note: to trigger this bug with pytensor rev 4586:2bc6fc7f218b,
         #        you need to make in inputs mutable (so that inplace
         #        operations are used) and to break the elemwise composition
@@ -826,6 +826,7 @@ class TestAliasingRules:
                 In(m2, mutable=True),
             ],
             pt.dot((x * 2), m1) + pt.dot((y * 3), m2),
+            mode=get_default_mode().including("inplace"),
         )
         # Test 1. If the same variable is given twice
 
@@ -860,9 +861,12 @@ class TestAliasingRules:
         v_copy = v.copy()
         vals = f(v, v_copy, m, m_copy)
 
-        assert np.allclose(vals, bogus_vals)
+        assert not np.allclose(vals, bogus_vals)
 
     def test_partial_input_aliasing_affecting_inplace_operations(self):
+        # Note: The input aliasing check was disabled, so this test now just confirms that wrong values
+        # will be obtained if the inputs are aliased.
+
         # Note: to trigger this bug with pytensor rev 4586:2bc6fc7f218b,
         #        you need to make in inputs mutable ( so that inplace
         #        operations are used) and to break the elemwise composition
@@ -889,6 +893,7 @@ class TestAliasingRules:
                 In(m3, mutable=True),
             ],
             (pt.dot((x * 2), m1) + pt.dot((y * 3), m2) + pt.dot((z * 4), m3)),
+            mode=get_default_mode().including("inplace"),
         )
 
         # Compute bogus values
@@ -906,7 +911,7 @@ class TestAliasingRules:
         v_copy2 = v.copy()
         vals = f(v[:2], v_copy1[1:3], v_copy2[2:4], m, m_copy1, m_copy2)
 
-        assert np.allclose(vals, bogus_vals)
+        assert not np.allclose(vals, bogus_vals)
 
     def test_potential_output_aliasing_induced_by_updates(self):
         A = self.shared(np.zeros((2, 2)))

@@ -752,52 +752,6 @@ class TestFunction:
         except TypeError:
             assert funct(first=1) == x
 
-    def test_check_for_aliased_inputs(self):
-        b = np.random.random((5, 4))
-        s1 = shared(b)
-        s2 = shared(b)
-        x1 = vector()
-        x2 = vector(shape=(3,))
-        x3 = vector(shape=(1,))
-
-        # Assert cases we should not check for aliased inputs
-        for d in [
-            dict(outputs=[s1 + 1]),
-            dict(outputs=[s1 + 1, s2 + 3]),
-            dict(outputs=[s1 + 1], updates=[(s2, s2 + 3)]),
-            dict(inputs=[x1], outputs=[x1 + 1], updates=[(s2, s2 + 3)]),
-            dict(
-                inputs=[In(x1, mutable=True)], outputs=[x1 + 1], updates=[(s2, s2 + 3)]
-            ),
-            dict(
-                inputs=[In(x2, mutable=True), In(x3, mutable=True)],
-                outputs=[x2 + 2, x3 + 3],
-            ),
-        ]:
-            if "inputs" not in d:
-                d["inputs"] = []
-            f = function(**d)
-            assert not f._potential_aliased_input_groups, d
-
-        # Assert cases we should check for aliased inputs
-        for d in [
-            dict(
-                inputs=[In(x1, mutable=True), In(x2, mutable=True)],
-                outputs=[x1 + 1, x2 + 2],
-                updates=[(s2, s2 + 3)],
-            ),
-            dict(
-                inputs=[In(x1, mutable=True), In(x3, mutable=True)],
-                outputs=[x1 + 1, x3 + 3],
-                updates=[(s2, s2 + 3)],
-            ),
-        ]:
-            if "inputs" not in d:
-                d["inputs"] = []
-            f = function(**d)
-
-            assert f._potential_aliased_input_groups, d
-
     def test_output_dictionary(self):
         # Tests that function works when outputs is a dictionary
 
@@ -939,12 +893,6 @@ class TestPicklefunction:
         assert x not in g.container
         assert x not in g.value
         assert len(f.defaults) == len(g.defaults)
-        # Shared variable is the first input
-        assert (
-            f._potential_aliased_input_groups
-            == g._potential_aliased_input_groups
-            == ((1, 2),)
-        )
         assert f.name == g.name
         assert f.maker.fgraph.name == g.maker.fgraph.name
         # print(f"{f.defaults = }")

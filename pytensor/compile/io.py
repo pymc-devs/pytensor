@@ -128,11 +128,11 @@ class In(SymbolicInput):
         expression variable after each function call. If update is None, the
         update will be the default value of the input.
     mutable : bool
-        Defaults to False if update is None, True if update is not None.
-        True: permit the compiled function to modify the python object
-        being passed as the input.
-        False: do not permit the compiled function to modify the
-        python object being passed as the input.
+        Defaults to ``True`` if ``update`` is not ``None``, ``False`` otherwise.
+        When ``True``, permit the compiled function to modify the python object
+        being passed as the input to save memory. When an input is mutable,
+        it shouldn't be aliased (a view) of any other input. Otherwise,
+        behavior is undefined, and will likely yield wrong results.
     borrow : bool
         Default : take the same value as mutable.
         True: permit the output of the compiled function to be aliased
