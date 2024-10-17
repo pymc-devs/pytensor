@@ -2027,7 +2027,6 @@ def _sum_grad_over_bcasted_dims(x, gx):
     if gx.broadcastable != x.broadcastable:
         x_dim_added = gx.ndim - x.ndim
         x_broad = (True,) * x_dim_added + x.broadcastable
-        assert sum(gx.broadcastable) <= sum(x_broad)
         axis_to_sum = []
         for i in range(gx.ndim):
             if gx.broadcastable[i] is False and x_broad[i] is True:
@@ -2045,7 +2044,7 @@ def _sum_grad_over_bcasted_dims(x, gx):
             for i in range(x_dim_added):
                 assert gx.broadcastable[i]
             gx = gx.dimshuffle(*range(x_dim_added, gx.ndim))
-        assert gx.broadcastable == x.broadcastable
+        assert x.type.is_super(gx.type)
     return gx
 
 

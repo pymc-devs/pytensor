@@ -12,7 +12,9 @@ import pytensor.tensor.basic as ptb
 from pytensor import function
 from pytensor.compile import DeepCopyOp, shared
 from pytensor.compile.io import In
+from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
+from pytensor.gradient import grad
 from pytensor.graph.op import get_test_value
 from pytensor.graph.rewriting.utils import is_same_graph
 from pytensor.printing import pprint
@@ -22,6 +24,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import exp, isinf
 from pytensor.tensor.math import sum as pt_sum
+from pytensor.tensor.shape import specify_shape
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
@@ -1659,6 +1662,25 @@ class TestIncSubtensor:
                     np.asarray([9, 9.0]),
                 ),
             )
+
+    def test_grad_broadcastable_specialization(self):
+        # Make sure gradient does not fail when gx has a more precise static_shape after indexing.
+        # This is a regression test for a bug reported in
+        # https://discourse.pymc.io/t/marginalized-mixture-wont-begin-sampling-throws-assertion-error/15969
+
+        x = vector("x")  # Unknown write time shape = (2,)
+        out = x.zeros_like()
+
+        # Update a subtensor of unknown write time shape = (1,)
+        out = out[1:].set(exp(x[1:]))
+        out = specify_shape(out, 2)
+        gx = grad(out.sum(), x)
+
+        mode = Mode(linker="py", optimizer=None)
+        np.testing.assert_allclose(
+            gx.eval({x: [1, 1]}, mode=mode),
+            [0, np.e],
+        )
 
 
 class TestIncSubtensor1:
