@@ -393,41 +393,6 @@ class Function:
         assert len(self.input_storage) == len(self.maker.fgraph.inputs)
         assert len(self.output_storage) == len(self.maker.fgraph.outputs)
 
-        # Group indexes of inputs that are potentially aliased to each other
-        # Note: Historically, we only worried about aliasing inputs if they belonged to the same type,
-        #  even though there could be two distinct types that use the same kinds of underlying objects.
-        potential_aliased_input_groups = []
-        for inp in maker.inputs:
-            # If the input is a shared variable, the memory region is under PyTensor control
-            # and can't be aliased.
-            if not (
-                isinstance(inp, In)
-                and inp.borrow
-                and not inp.shared
-                and hasattr(inp.variable.type, "may_share_memory")
-            ):
-                continue
-
-            for group in potential_aliased_input_groups:
-                # If one is super of the other, that means one could be replaced by the other
-                if any(
-                    inp.variable.type.is_super(other_inp.variable.type)
-                    or other_inp.variable.type.is_super(inp.variable.type)
-                    for other_inp in group
-                ):
-                    group.append(inp)
-                    break
-            else:  # no break
-                # Input makes a new group
-                potential_aliased_input_groups.append([inp])
-
-        # Potential aliased inputs are those that belong to the same group
-        self._potential_aliased_input_groups: tuple[tuple[int, ...], ...] = tuple(
-            tuple(maker.inputs.index(inp) for inp in group)
-            for group in potential_aliased_input_groups
-            if len(group) > 1
-        )
-
         # We will be popping stuff off this `containers` object.  It is a copy.
         containers = list(self.input_storage)
         finder = {}
@@ -844,11 +809,18 @@ class Function:
             if self.output_keys is not None:
                 output_subset = [self.output_keys.index(key) for key in output_subset]
 
-        # Reinitialize each container's 'provided' counter
         if self.trust_input:
+            # Set positional arguments
             for arg_container, arg in zip(input_storage, args, strict=False):
                 arg_container.storage[0] = arg
+
+            # Set keyword arguments
+            if kwargs:  # for speed, skip the items for empty kwargs
+                for k, arg in kwargs.items():
+                    self[k] = arg
+
         else:
+            # Reinitialize each container's 'provided' counter
             for arg_container in input_storage:
                 arg_container.provided = 0
 
@@ -899,39 +871,10 @@ class Function:
                         raise
                 arg_container.provided += 1
 
-        # Set keyword arguments
-        if kwargs:  # for speed, skip the items for empty kwargs
-            for k, arg in kwargs.items():
-                self[k] = arg
-
-        if not self.trust_input:
-            # Collect aliased inputs among the storage space
-            for potential_group in self._potential_aliased_input_groups:
-                args_share_memory: list[list[int]] = []
-                for i in potential_group:
-                    i_type = self.maker.inputs[i].variable.type
-                    i_val = input_storage[i].storage[0]
-
-                    # Check if value is aliased with any of the values in one of the groups
-                    for j_group in args_share_memory:
-                        if any(
-                            i_type.may_share_memory(input_storage[j].storage[0], i_val)
-                            for j in j_group
-                        ):
-                            j_group.append(i)
-                            break
-                    else:  # no break
-                        # Create a new group
-                        args_share_memory.append([i])
-
-                # Check for groups of more than one argument that share memory
-                for group in args_share_memory:
-                    if len(group) > 1:
-                        # copy all but the first
-                        for i in group[1:]:
-                            input_storage[i].storage[0] = copy.copy(
-                                input_storage[i].storage[0]
-                            )
+            # Set keyword arguments
+            if kwargs:  # for speed, skip the items for empty kwargs
+                for k, arg in kwargs.items():
+                    self[k] = arg
 
             # Check if inputs are missing, or if inputs were set more than once, or
             # if we tried to provide inputs that are supposed to be implicit.
