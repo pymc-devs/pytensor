@@ -19,6 +19,8 @@ from pytensor.link.vm import VMLinker
 from pytensor.printing import debugprint
 from pytensor.tensor.math import dot, tanh
 from pytensor.tensor.math import sum as pt_sum
+from pytensor.tensor.random import normal
+from pytensor.tensor.random.type import random_generator_type
 from pytensor.tensor.type import (
     dmatrix,
     dscalar,
@@ -31,6 +33,9 @@ from pytensor.tensor.type import (
     scalars,
     vector,
 )
+
+
+pytestmark = pytest.mark.filterwarnings("error")
 
 
 def PatternOptimizer(p1, p2, ign=True):
@@ -193,7 +198,10 @@ class TestFunction:
         x, s = scalars("xs")
 
         # x's name is not ignored (as in test_naming_rule2) because a has a default value.
-        f = function([x, In(a, value=1.0), s], a / s + x)
+        with pytest.warns(
+            FutureWarning, match="Inputs with default values are deprecated."
+        ):
+            f = function([x, In(a, value=1.0), s], a / s + x)
         assert f(9, 2, 4) == 9.5  # can specify all args in order
         assert f(9, 2, s=4) == 9.5  # can give s as kwarg
         assert f(9, s=4) == 9.25  # can give s as kwarg, get default a
@@ -212,7 +220,10 @@ class TestFunction:
         a = scalar()  # the a is for 'anonymous' (un-named).
         x, s = scalars("xs")
 
-        f = function([x, In(a, value=1.0, name="a"), s], a / s + x)
+        with pytest.warns(
+            FutureWarning, match="Inputs with default values are deprecated."
+        ):
+            f = function([x, In(a, value=1.0, name="a"), s], a / s + x)
 
         assert f(9, 2, 4) == 9.5  # can specify all args in order
         assert f(9, 2, s=4) == 9.5  # can give s as kwarg
@@ -246,11 +257,14 @@ class TestFunction:
         a = scalar()
         x, s = scalars("xs")
 
-        f = function(
-            [x, In(a, value=1.0, name="a"), In(s, value=0.0, update=s + a * x)],
-            s + a * x,
-            mode=mode,
-        )
+        with pytest.warns(
+            FutureWarning, match="Inputs with default values are deprecated."
+        ):
+            f = function(
+                [x, In(a, value=1.0, name="a"), In(s, value=0.0, update=s + a * x)],
+                s + a * x,
+                mode=mode,
+            )
 
         assert f[a] == 1.0
         assert f[s] == 0.0
@@ -301,16 +315,19 @@ class TestFunction:
         a = scalar()
         x, s = scalars("xs")
 
-        f = function(
-            [
-                x,
-                In(a, value=1.0, name="a"),
-                In(s, value=0.0, update=s + a * x, mutable=True),
-            ],
-            s + a * x,
-        )
+        with pytest.warns(
+            FutureWarning, match="Inputs with default values are deprecated."
+        ):
+            f = function(
+                [
+                    x,
+                    In(a, value=1.0, name="a"),
+                    In(s, value=0.0, update=s + a * x, mutable=True),
+                ],
+                s + a * x,
+            )
 
-        g = copy.copy(f)
+            g = copy.copy(f)
 
         assert f.unpack_single == g.unpack_single
         assert f.trust_input == g.trust_input
@@ -502,22 +519,25 @@ class TestFunction:
         a = scalar()  # the a is for 'anonymous' (un-named).
         x, s = scalars("xs")
 
-        f = function(
-            [
-                x,
-                In(a, value=1.0, name="a"),
-                In(s, value=0.0, update=s + a * x, mutable=True),
-            ],
-            s + a * x,
-        )
-        g = function(
-            [
-                x,
-                In(a, value=1.0, name="a"),
-                In(s, value=f.container[s], update=s - a * x, mutable=True),
-            ],
-            s + a * x,
-        )
+        with pytest.warns(
+            FutureWarning, match="Inputs with default values are deprecated."
+        ):
+            f = function(
+                [
+                    x,
+                    In(a, value=1.0, name="a"),
+                    In(s, value=0.0, update=s + a * x, mutable=True),
+                ],
+                s + a * x,
+            )
+            g = function(
+                [
+                    x,
+                    In(a, value=1.0, name="a"),
+                    In(s, value=f.container[s], update=s - a * x, mutable=True),
+                ],
+                s + a * x,
+            )
 
         f(1, 2)
         assert f[s] == 2
@@ -530,17 +550,20 @@ class TestFunction:
         a = scalar()  # the a is for 'anonymous' (un-named).
         x, s = scalars("xs")
 
-        f = function(
-            [
-                x,
-                In(a, value=1.0, name="a"),
-                In(s, value=0.0, update=s + a * x, mutable=True),
-            ],
-            s + a * x,
-        )
-        g = function(
-            [x, In(a, value=1.0, name="a"), In(s, value=f.container[s])], s + a * x
-        )
+        with pytest.warns(
+            FutureWarning, match="Inputs with default values are deprecated."
+        ):
+            f = function(
+                [
+                    x,
+                    In(a, value=1.0, name="a"),
+                    In(s, value=0.0, update=s + a * x, mutable=True),
+                ],
+                s + a * x,
+            )
+            g = function(
+                [x, In(a, value=1.0, name="a"), In(s, value=f.container[s])], s + a * x
+            )
 
         f(1, 2)
         assert f[s] == 2
@@ -554,17 +577,20 @@ class TestFunction:
         a = scalar()  # the a is for 'anonymous' (un-named).
         x, s = scalars("xs")
 
-        f = function(
-            [
-                x,
-                In(a, value=1.0, name="a"),
-                In(s, value=0.0, update=s + a * x, mutable=False),
-            ],
-            s + a * x,
-        )
-        g = function(
-            [x, In(a, value=1.0, name="a"), In(s, value=f.container[s])], s + a * x
-        )
+        with pytest.warns(
+            FutureWarning, match="Inputs with default values are deprecated."
+        ):
+            f = function(
+                [
+                    x,
+                    In(a, value=1.0, name="a"),
+                    In(s, value=0.0, update=s + a * x, mutable=False),
+                ],
+                s + a * x,
+            )
+            g = function(
+                [x, In(a, value=1.0, name="a"), In(s, value=f.container[s])], s + a * x
+            )
 
         f(1, 2)
         assert f[s] == 2
@@ -716,60 +742,22 @@ class TestFunction:
 
         a, b = dscalars("a", "b")
         c = a + b
-        funct = function([In(a, name="first"), In(b, value=1, name="second")], c)
+        with pytest.warns(
+            FutureWarning, match="Inputs with default values are deprecated."
+        ):
+            funct = function([In(a, name="first"), In(b, value=1, name="second")], c)
         x = funct(first=1)
         try:
             funct(second=2)
         except TypeError:
             assert funct(first=1) == x
 
-    def test_check_for_aliased_inputs(self):
-        b = np.random.random((5, 4))
-        s1 = shared(b)
-        s2 = shared(b)
-        x1 = vector()
-
-        # Assert cases we should not check for aliased inputs
-        for d in [
-            dict(outputs=[s1 + 1]),
-            dict(outputs=[s1 + 1, s2 + 3]),
-            dict(outputs=[s1 + 1], updates=[(s2, s2 + 3)]),
-            dict(inputs=[x1], outputs=[x1 + 1], updates=[(s2, s2 + 3)]),
-        ]:
-            if "inputs" not in d:
-                d["inputs"] = []
-            f = function(**d)
-            assert not f._check_for_aliased_inputs, d
-
-        # Assert cases we should check for aliased inputs
-        for d in [
-            dict(
-                inputs=[In(x1, borrow=True)],
-                outputs=[x1 + 1],
-                updates=[(s2, s2 + 3)],
-            ),
-            dict(
-                inputs=[In(x1, borrow=True, mutable=True)],
-                outputs=[x1 + 1],
-                updates=[(s2, s2 + 3)],
-            ),
-            dict(
-                inputs=[In(x1, mutable=True)],
-                outputs=[x1 + 1],
-                updates=[(s2, s2 + 3)],
-            ),
-        ]:
-            if "inputs" not in d:
-                d["inputs"] = []
-            f = function(**d)
-
-            assert f._check_for_aliased_inputs, d
-
     def test_output_dictionary(self):
         # Tests that function works when outputs is a dictionary
 
         x = scalar()
-        f = function([x], outputs={"a": x, "c": x * 2, "b": x * 3, "1": x * 4})
+        with pytest.warns(FutureWarning, match="output_keys is deprecated."):
+            f = function([x], outputs={"a": x, "c": x * 2, "b": x * 3, "1": x * 4})
 
         outputs = f(10.0)
 
@@ -784,7 +772,8 @@ class TestFunction:
         x = scalar("x")
         y = scalar("y")
 
-        f = function([x, y], outputs={"a": x + y, "b": x * y})
+        with pytest.warns(FutureWarning, match="output_keys is deprecated."):
+            f = function([x, y], outputs={"a": x + y, "b": x * y})
 
         assert f(2, 4) == {"a": 6, "b": 8}
         assert f(2, y=4) == f(2, 4)
@@ -799,9 +788,10 @@ class TestFunction:
         e1 = scalar("1")
         e2 = scalar("2")
 
-        f = function(
-            [x, y, z, e1, e2], outputs={"x": x, "y": y, "z": z, "1": e1, "2": e2}
-        )
+        with pytest.warns(FutureWarning, match="output_keys is deprecated."):
+            f = function(
+                [x, y, z, e1, e2], outputs={"x": x, "y": y, "z": z, "1": e1, "2": e2}
+            )
 
         assert "1" in str(f.outputs[0])
         assert "2" in str(f.outputs[1])
@@ -819,7 +809,8 @@ class TestFunction:
         a = x + y
         b = x * y
 
-        f = function([x, y], outputs={"a": a, "b": b})
+        with pytest.warns(FutureWarning, match="output_keys is deprecated."):
+            f = function([x, y], outputs={"a": a, "b": b})
 
         a = scalar("a")
         b = scalar("b")
@@ -874,14 +865,17 @@ class TestPicklefunction:
         a = scalar()  # the a is for 'anonymous' (un-named).
         x, s = scalars("xs")
 
-        f = function(
-            [
-                x,
-                In(a, value=1.0, name="a"),
-                In(s, value=0.0, update=s + a * x, mutable=True),
-            ],
-            s + a * x,
-        )
+        with pytest.warns(
+            FutureWarning, match="Inputs with default values are deprecated."
+        ):
+            f = function(
+                [
+                    x,
+                    In(a, value=1.0, name="a", mutable=True),
+                    In(s, value=0.0, update=s + a * x, mutable=True),
+                ],
+                s + a * x,
+            )
         try:
             g = copy.deepcopy(f)
         except NotImplementedError as e:
@@ -899,7 +893,6 @@ class TestPicklefunction:
         assert x not in g.container
         assert x not in g.value
         assert len(f.defaults) == len(g.defaults)
-        assert f._check_for_aliased_inputs is g._check_for_aliased_inputs
         assert f.name == g.name
         assert f.maker.fgraph.name == g.maker.fgraph.name
         # print(f"{f.defaults = }")
@@ -930,14 +923,17 @@ class TestPicklefunction:
         a = dscalar()  # the a is for 'anonymous' (un-named).
         x, s = dscalars("xs")
 
-        f = function(
-            [
-                x,
-                In(a, value=1.0, name="a"),
-                In(s, value=0.0, update=s + a * x, mutable=True),
-            ],
-            s + a * x,
-        )
+        with pytest.warns(
+            FutureWarning, match="Inputs with default values are deprecated."
+        ):
+            f = function(
+                [
+                    x,
+                    In(a, value=1.0, name="a"),
+                    In(s, value=0.0, update=s + a * x, mutable=True),
+                ],
+                s + a * x,
+            )
         f.trust_input = True
         try:
             g = copy.deepcopy(f)
@@ -956,11 +952,13 @@ class TestPicklefunction:
 
     def test_output_keys(self):
         x = vector()
-        f = function([x], {"vec": x**2})
+        with pytest.warns(FutureWarning, match="output_keys is deprecated."):
+            f = function([x], {"vec": x**2})
         o = f([2, 3, 4])
         assert isinstance(o, dict)
         assert np.allclose(o["vec"], [4, 9, 16])
-        g = copy.deepcopy(f)
+        with pytest.warns(FutureWarning, match="output_keys is deprecated."):
+            g = copy.deepcopy(f)
         o = g([2, 3, 4])
         assert isinstance(o, dict)
         assert np.allclose(o["vec"], [4, 9, 16])
@@ -969,7 +967,10 @@ class TestPicklefunction:
         # Ensure that shared containers remain shared after a deep copy.
         a, x = scalars("ax")
 
-        h = function([In(a, value=0.0)], a)
+        with pytest.warns(
+            FutureWarning, match="Inputs with default values are deprecated."
+        ):
+            h = function([In(a, value=0.0)], a)
         f = function([x, In(a, value=h.container[a], implicit=True)], x + a)
 
         try:
@@ -993,14 +994,17 @@ class TestPicklefunction:
         a = scalar()  # the a is for 'anonymous' (un-named).
         x, s = scalars("xs")
 
-        f = function(
-            [
-                x,
-                In(a, value=1.0, name="a"),
-                In(s, value=0.0, update=s + a * x, mutable=True),
-            ],
-            s + a * x,
-        )
+        with pytest.warns(
+            FutureWarning, match="Inputs with default values are deprecated."
+        ):
+            f = function(
+                [
+                    x,
+                    In(a, value=1.0, name="a"),
+                    In(s, value=0.0, update=s + a * x, mutable=True),
+                ],
+                s + a * x,
+            )
 
         try:
             # Note that here we also test protocol 0 on purpose, since it
@@ -1094,25 +1098,31 @@ class TestPicklefunction:
         # some derived thing, whose inputs aren't all in the list
         list_of_things.append(a * x + s)
 
-        f1 = function(
-            [
-                x,
-                In(a, value=1.0, name="a"),
-                In(s, value=0.0, update=s + a * x, mutable=True),
-            ],
-            s + a * x,
-        )
+        with pytest.warns(
+            FutureWarning, match="Inputs with default values are deprecated."
+        ):
+            f1 = function(
+                [
+                    x,
+                    In(a, value=1.0, name="a"),
+                    In(s, value=0.0, update=s + a * x, mutable=True),
+                ],
+                s + a * x,
+            )
         list_of_things.append(f1)
 
         # now put in a function sharing container with the previous one
-        f2 = function(
-            [
-                x,
-                In(a, value=1.0, name="a"),
-                In(s, value=f1.container[s], update=s + a * x, mutable=True),
-            ],
-            s + a * x,
-        )
+        with pytest.warns(
+            FutureWarning, match="Inputs with default values are deprecated."
+        ):
+            f2 = function(
+                [
+                    x,
+                    In(a, value=1.0, name="a"),
+                    In(s, value=f1.container[s], update=s + a * x, mutable=True),
+                ],
+                s + a * x,
+            )
         list_of_things.append(f2)
 
         assert isinstance(f2.container[s].storage, list)
@@ -1120,7 +1130,10 @@ class TestPicklefunction:
 
         # now put in a function with non-scalar
         v_value = np.asarray([2, 3, 4.0], dtype=config.floatX)
-        f3 = function([x, In(v, value=v_value)], x + v)
+        with pytest.warns(
+            FutureWarning, match="Inputs with default values are deprecated."
+        ):
+            f3 = function([x, In(v, value=v_value)], x + v)
         list_of_things.append(f3)
 
         # try to pickle the entire things
@@ -1252,23 +1265,29 @@ class SomethingToPickle:
 
         self.e = a * x + s
 
-        self.f1 = function(
-            [
-                x,
-                In(a, value=1.0, name="a"),
-                In(s, value=0.0, update=s + a * x, mutable=True),
-            ],
-            s + a * x,
-        )
+        with pytest.warns(
+            FutureWarning, match="Inputs with default values are deprecated."
+        ):
+            self.f1 = function(
+                [
+                    x,
+                    In(a, value=1.0, name="a"),
+                    In(s, value=0.0, update=s + a * x, mutable=True),
+                ],
+                s + a * x,
+            )
 
-        self.f2 = function(
-            [
-                x,
-                In(a, value=1.0, name="a"),
-                In(s, value=self.f1.container[s], update=s + a * x, mutable=True),
-            ],
-            s + a * x,
-        )
+        with pytest.warns(
+            FutureWarning, match="Inputs with default values are deprecated."
+        ):
+            self.f2 = function(
+                [
+                    x,
+                    In(a, value=1.0, name="a"),
+                    In(s, value=self.f1.container[s], update=s + a * x, mutable=True),
+                ],
+                s + a * x,
+            )
 
 
 def test_empty_givens_updates():
@@ -1280,3 +1299,15 @@ def test_empty_givens_updates():
     y = x * 2
     function([In(x)], y, givens={})
     function([In(x)], y, updates={})
+
+
+@pytest.mark.parametrize("trust_input", [True, False])
+def test_minimal_random_function_call_benchmark(trust_input, benchmark):
+    rng = random_generator_type()
+    x = normal(rng=rng, size=(100,))
+
+    f = function([In(rng, mutable=True)], x)
+    f.trust_input = trust_input
+
+    rng_val = np.random.default_rng()
+    benchmark(f, rng_val)
