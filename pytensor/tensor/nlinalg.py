@@ -266,7 +266,10 @@ class SLogDet(Op):
         return "SLogDet"
 
 
-slogdet = Blockwise(SLogDet())
+# slogdet = Blockwise(SLogDet())
+def slogdet(x):
+    det_val = det(x)
+    return ptm.sign(det_val), ptm.log(ptm.abs(det_val))
 
 
 class Eig(Op):
