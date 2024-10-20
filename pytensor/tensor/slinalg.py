@@ -778,6 +778,7 @@ expm = Expm()
 
 class SolveContinuousLyapunov(Op):
     __props__ = ()
+    gufunc_signature = "(m,m),(m,m)->(m,m)"
 
     def make_node(self, A, B):
         A = as_tensor_variable(A)
@@ -814,6 +815,8 @@ class SolveContinuousLyapunov(Op):
 
 
 class BilinearSolveDiscreteLyapunov(Op):
+    gufunc_signature = "(m,m),(m,m)->(m,m)"
+
     def make_node(self, A, B):
         A = as_tensor_variable(A)
         B = as_tensor_variable(B)
@@ -849,46 +852,55 @@ class BilinearSolveDiscreteLyapunov(Op):
         return [A_bar, Q_bar]
 
 
-_solve_continuous_lyapunov = SolveContinuousLyapunov()
-_solve_bilinear_direct_lyapunov = cast(typing.Callable, BilinearSolveDiscreteLyapunov())
+_solve_continuous_lyapunov = Blockwise(SolveContinuousLyapunov())
+_solve_bilinear_direct_lyapunov = cast(
+    typing.Callable, Blockwise(BilinearSolveDiscreteLyapunov())
+)
 
 
-def _direct_solve_discrete_lyapunov(A: "TensorLike", Q: "TensorLike") -> TensorVariable:
-    A_ = as_tensor_variable(A)
-    Q_ = as_tensor_variable(Q)
+def _direct_solve_discrete_lyapunov(
+    A: TensorVariable, Q: TensorVariable
+) -> TensorVariable:
+    # By default kron acts on tensors, but we need a vectorized version over matrices for this function
+    vec_kron = pt.vectorize(kron, "(m,n),(o,p)->(q,r)")
 
-    if "complex" in A_.type.dtype:
-        AA = kron(A_, A_.conj())
+    if A.type.dtype.startswith("complex"):
+        AxA = vec_kron(A, A.conj())
     else:
-        AA = kron(A_, A_)
+        AxA = vec_kron(A, A)
 
-    X = solve(pt.eye(AA.shape[0]) - AA, Q_.ravel())
-    return cast(TensorVariable, reshape(X, Q_.shape))
+    eye = pt.eye(AxA.shape[-1])
+    q_shape = pt.concatenate([Q.shape[:-2], [-1]])
+
+    vec_Q = Q.reshape(q_shape)
+    vec_X = solve(eye - AxA, vec_Q, b_ndim=1)
+
+    return cast(TensorVariable, reshape(vec_X, A.shape))
 
 
 def solve_discrete_lyapunov(
-    A: "TensorLike", Q: "TensorLike", method: Literal["direct", "bilinear"] = "direct"
+    A: TensorVariable,
+    Q: TensorVariable,
+    method: Literal["direct", "bilinear"] = "direct",
 ) -> TensorVariable:
     """Solve the discrete Lyapunov equation :math:`A X A^H - X = Q`.
 
     Parameters
     ----------
-    A
-        Square matrix of shape N x N; must have the same shape as Q
-    Q
-        Square matrix of shape N x N; must have the same shape as A
-    method
-        Solver method used, one of ``"direct"`` or ``"bilinear"``. ``"direct"``
-        solves the problem directly via matrix inversion.  This has a pure
-        PyTensor implementation and can thus be cross-compiled to supported
-        backends, and should be preferred when ``N`` is not large. The direct
-        method scales poorly with the size of ``N``, and the bilinear can be
+    A: TensorVariable
+        Square matrix of shape N x N
+    Q: TensorVariable
+        Square matrix of shape N x N
+    method: str, one of ``"direct"`` or ``"bilinear"``
+        Solver method used, . ``"direct"`` solves the problem directly via matrix inversion.  This has a pure
+        PyTensor implementation and can thus be cross-compiled to supported backends, and should be preferred when
+         ``N`` is not large. The direct method scales poorly with the size of ``N``, and the bilinear can be
         used in these cases.
 
     Returns
     -------
-        Square matrix of shape ``N x N``, representing the solution to the
-        Lyapunov equation
+    X: TensorVariable
+        Square matrix of shape ``N x N``. Solution to the Lyapunov equation
 
     """
     if method not in ["direct", "bilinear"]:
@@ -896,26 +908,31 @@ def solve_discrete_lyapunov(
             f'Parameter "method" must be one of "direct" or "bilinear", found {method}'
         )
 
+    A = as_tensor_variable(A)
+    Q = as_tensor_variable(Q)
+
     if method == "direct":
         return _direct_solve_discrete_lyapunov(A, Q)
+
     if method == "bilinear":
         return cast(TensorVariable, _solve_bilinear_direct_lyapunov(A, Q))
 
 
-def solve_continuous_lyapunov(A: "TensorLike", Q: "TensorLike") -> TensorVariable:
-    """Solve the continuous Lyapunov equation :math:`A X + X A^H + Q = 0`.
+def solve_continuous_lyapunov(A: TensorVariable, Q: TensorVariable) -> TensorVariable:
+    """
+    Solve the continuous Lyapunov equation :math:`A X + X A^H + Q = 0`.
 
     Parameters
     ----------
-    A
-        Square matrix of shape ``N x N``; must have the same shape as `Q`.
-    Q
-        Square matrix of shape ``N x N``; must have the same shape as `A`.
+    A: TensorVariable
+        Square matrix of shape ``N x N``.
+    Q: TensorVariable
+        Square matrix of shape ``N x N``.
 
     Returns
     -------
-        Square matrix of shape ``N x N``, representing the solution to the
-        Lyapunov equation
+    X: TensorVariable
+        Square matrix of shape ``N x N``
 
     """
 
@@ -923,10 +940,14 @@ def solve_continuous_lyapunov(A: "TensorLike", Q: "TensorLike") -> TensorVariabl
 
 
 class SolveDiscreteARE(pt.Op):
-    __props__ = ("enforce_Q_symmetric",)
+    __props__ = ("enforce_Q_symmetric", "use_bilinear_lyapunov")
+    gufunc_signature = "(m,m),(m,n),(m,m),(n,n)->(m,m)"
 
-    def __init__(self, enforce_Q_symmetric=False):
+    def __init__(
+        self, enforce_Q_symmetric: bool = False, use_bilinear_lyapunov: bool = True
+    ):
         self.enforce_Q_symmetric = enforce_Q_symmetric
+        self.use_bilinear_lyapunov = use_bilinear_lyapunov
 
     def make_node(self, A, B, Q, R):
         A = as_tensor_variable(A)
@@ -961,13 +982,20 @@ class SolveDiscreteARE(pt.Op):
         X = self(A, B, Q, R)
 
         K_inner = R + pt.linalg.matrix_dot(B.T, X, B)
-        K_inner_inv = pt.linalg.solve(K_inner, pt.eye(R.shape[0]))
-        K = matrix_dot(K_inner_inv, B.T, X, A)
+
+        # K_inner is guaranteed to be symmetric, because X and R are symmetric
+        K_inner_inv_BT = pt.linalg.solve(K_inner, B.T, assume_a="sym")
+        K = matrix_dot(K_inner_inv_BT, X, A)
 
         A_tilde = A - B.dot(K)
 
         dX_symm = 0.5 * (dX + dX.T)
-        S = solve_discrete_lyapunov(A_tilde, dX_symm).astype(dX.type.dtype)
+        method: Literal["bilinear", "direct"] = (
+            "bilinear" if self.use_bilinear_lyapunov else "direct"
+        )
+        S = solve_discrete_lyapunov(A_tilde, dX_symm, method=method).astype(
+            dX.type.dtype
+        )
 
         A_bar = 2 * matrix_dot(X, A_tilde, S)
         B_bar = -2 * matrix_dot(X, A_tilde, S, K.T)
@@ -977,30 +1005,43 @@ class SolveDiscreteARE(pt.Op):
         return [A_bar, B_bar, Q_bar, R_bar]
 
 
-def solve_discrete_are(A, B, Q, R, enforce_Q_symmetric=False) -> TensorVariable:
+def solve_discrete_are(
+    A: TensorVariable,
+    B: TensorVariable,
+    Q: TensorVariable,
+    R: TensorVariable,
+    enforce_Q_symmetric: bool = False,
+    use_bilinear_lyapunov: bool = True,
+) -> TensorVariable:
     """
     Solve the discrete Algebraic Riccati equation :math:`A^TXA - X - (A^TXB)(R + B^TXB)^{-1}(B^TXA) + Q = 0`.
 
     Parameters
     ----------
-    A: ArrayLike
+    A: TensorVariable
         Square matrix of shape M x M
-    B: ArrayLike
+    B: TensorVariable
         Square matrix of shape M x M
-    Q: ArrayLike
+    Q: TensorVariable
         Symmetric square matrix of shape M x M
-    R: ArrayLike
+    R: TensorVariable
         Square matrix of shape N x N
     enforce_Q_symmetric: bool
         If True, the provided Q matrix is transformed to 0.5 * (Q + Q.T) to ensure symmetry
+    use_bilinear_lyapunov: bool
+        If True, the bilinear method is used to solve a discrete Lyapunov equation when computing the gradients of
+        the ARE. If False, the direct method is used instead. See the docstring for ``solve_discrete_lyapunov`` for
+        details.
 
     Returns
     -------
-    X: pt.matrix
+    X: TensorVariable
         Square matrix of shape M x M, representing the solution to the DARE
     """
 
-    return cast(TensorVariable, SolveDiscreteARE(enforce_Q_symmetric)(A, B, Q, R))
+    return cast(
+        TensorVariable, Blockwise(SolveDiscreteARE(enforce_Q_symmetric))(A, B, Q, R)
+    )
 
 
 def _largest_common_dtype(tensors: typing.Sequence[TensorVariable]) -> np.dtype:
