@@ -4,9 +4,11 @@ from typing import cast
 
 from pytensor import Variable
 from pytensor import tensor as pt
+from pytensor.compile import optdb
 from pytensor.graph import Apply, FunctionGraph
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
+    in2out,
     node_rewriter,
 )
 from pytensor.scalar.basic import Mul
@@ -41,10 +43,12 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.slinalg import (
+    BilinearSolveDiscreteLyapunov,
     BlockDiagonal,
     Cholesky,
     Solve,
     SolveBase,
+    _direct_solve_discrete_lyapunov,
     block_diag,
     cholesky,
     solve,
@@ -966,3 +970,30 @@ def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
             non_eye_input = pt.shape_padaxis(non_eye_input, -2)
 
     return [eye_input * (non_eye_input**0.5)]
+
+
+@node_rewriter([Blockwise])
+def jax_bilinaer_lyapunov_to_direct(fgraph: FunctionGraph, node: Apply):
+    """
+    Replace BilinearSolveDiscreteLyapunov with a direct computation that is supported by JAX
+    """
+
+    # Check if the op is BilinearSolveDiscreteLyapunov
+    if not isinstance(node.op.core_op, BilinearSolveDiscreteLyapunov):
+        return None
+
+    # Extract the inputs
+    (A, B) = node.inputs
+
+    # Compute the result
+    result = _direct_solve_discrete_lyapunov(A, B)
+
+    return [result]
+
+
+optdb.register(
+    "jax_bilinaer_lyapunov_to_direct",
+    in2out(jax_bilinaer_lyapunov_to_direct),
+    "jax",
+    position=100,
+)
