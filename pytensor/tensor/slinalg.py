@@ -911,7 +911,14 @@ def solve_discrete_lyapunov(
     A = as_tensor_variable(A)
     Q = as_tensor_variable(Q)
 
-    return cast(TensorVariable, _solve_bilinear_direct_lyapunov(A, Q))
+    if method == "direct":
+        return _direct_solve_discrete_lyapunov(A, Q)
+
+    elif method == "bilinear":
+        return cast(TensorVariable, _solve_bilinear_direct_lyapunov(A, Q))
+
+    else:
+        raise ValueError(f"Unknown method {method}")
 
 
 def solve_continuous_lyapunov(A: TensorVariable, Q: TensorVariable) -> TensorVariable:
