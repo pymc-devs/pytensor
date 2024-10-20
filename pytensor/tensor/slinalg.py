@@ -881,7 +881,7 @@ def _direct_solve_discrete_lyapunov(
 def solve_discrete_lyapunov(
     A: TensorVariable,
     Q: TensorVariable,
-    method: Literal["direct", "bilinear"] = "direct",
+    method: Literal["direct", "bilinear"] = "bilinear",
 ) -> TensorVariable:
     """Solve the discrete Lyapunov equation :math:`A X A^H - X = Q`.
 
@@ -911,11 +911,7 @@ def solve_discrete_lyapunov(
     A = as_tensor_variable(A)
     Q = as_tensor_variable(Q)
 
-    if method == "direct":
-        return _direct_solve_discrete_lyapunov(A, Q)
-
-    if method == "bilinear":
-        return cast(TensorVariable, _solve_bilinear_direct_lyapunov(A, Q))
+    return cast(TensorVariable, _solve_bilinear_direct_lyapunov(A, Q))
 
 
 def solve_continuous_lyapunov(A: TensorVariable, Q: TensorVariable) -> TensorVariable:
@@ -940,7 +936,7 @@ def solve_continuous_lyapunov(A: TensorVariable, Q: TensorVariable) -> TensorVar
 
 
 class SolveDiscreteARE(pt.Op):
-    __props__ = ("enforce_Q_symmetric", "use_bilinear_lyapunov")
+    __props__ = ("enforce_Q_symmetric",)
     gufunc_signature = "(m,m),(m,n),(m,m),(n,n)->(m,m)"
 
     def __init__(
@@ -990,12 +986,7 @@ class SolveDiscreteARE(pt.Op):
         A_tilde = A - B.dot(K)
 
         dX_symm = 0.5 * (dX + dX.T)
-        method: Literal["bilinear", "direct"] = (
-            "bilinear" if self.use_bilinear_lyapunov else "direct"
-        )
-        S = solve_discrete_lyapunov(A_tilde, dX_symm, method=method).astype(
-            dX.type.dtype
-        )
+        S = solve_discrete_lyapunov(A_tilde, dX_symm).astype(dX.type.dtype)
 
         A_bar = 2 * matrix_dot(X, A_tilde, S)
         B_bar = -2 * matrix_dot(X, A_tilde, S, K.T)
@@ -1011,7 +1002,6 @@ def solve_discrete_are(
     Q: TensorVariable,
     R: TensorVariable,
     enforce_Q_symmetric: bool = False,
-    use_bilinear_lyapunov: bool = True,
 ) -> TensorVariable:
     """
     Solve the discrete Algebraic Riccati equation :math:`A^TXA - X - (A^TXB)(R + B^TXB)^{-1}(B^TXA) + Q = 0`.
@@ -1028,10 +1018,6 @@ def solve_discrete_are(
         Square matrix of shape N x N
     enforce_Q_symmetric: bool
         If True, the provided Q matrix is transformed to 0.5 * (Q + Q.T) to ensure symmetry
-    use_bilinear_lyapunov: bool
-        If True, the bilinear method is used to solve a discrete Lyapunov equation when computing the gradients of
-        the ARE. If False, the direct method is used instead. See the docstring for ``solve_discrete_lyapunov`` for
-        details.
 
     Returns
     -------
