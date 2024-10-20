@@ -17,7 +17,10 @@ from pytensor.graph.op import Op
 from pytensor.ifelse import ifelse
 from pytensor.link.pytorch.linker import PytorchLinker
 from pytensor.raise_op import CheckAndRaise
+from pytensor.scalar import float64, int64
+from pytensor.scalar.loop import ScalarLoop
 from pytensor.tensor import alloc, arange, as_tensor, empty, eye
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.type import matrices, matrix, scalar, vector
 
 
@@ -312,6 +315,37 @@ def test_pytorch_MakeVector():
     compare_pytorch_and_py(x_fg, [])
 
 
+def test_ScalarLoop():
+    n_steps = int64("n_steps")
+    x0 = float64("x0")
+    const = float64("const")
+    x = x0 + const
+
+    op = ScalarLoop(init=[x0], constant=[const], update=[x])
+    x = op(n_steps, x0, const)
+
+    fn = function([n_steps, x0, const], x, mode=pytorch_mode)
+    np.testing.assert_allclose(fn(5, 0, 1), 5)
+    np.testing.assert_allclose(fn(5, 0, 2), 10)
+    np.testing.assert_allclose(fn(4, 3, -1), -1)
+
+
+def test_ScalarLoop_while():
+    n_steps = int64("n_steps")
+    x0 = float64("x0")
+    x = x0 + 1
+    until = x >= 10
+
+    op = ScalarLoop(init=[x0], update=[x], until=until)
+    fn = function([n_steps, x0], op(n_steps, x0), mode=pytorch_mode)
+    for res, expected in zip(
+        [fn(n_steps=20, x0=0), fn(n_steps=20, x0=1), fn(n_steps=5, x0=1)],
+        [[10, True], [10, True], [6, False]],
+    ):
+        np.testing.assert_allclose(res[0], np.array(expected[0]))
+        np.testing.assert_allclose(res[1], np.array(expected[1]))
+
+
 def test_pytorch_ifelse():
     p1_vals = np.r_[1, 2, 3]
     p2_vals = np.r_[-1, -2, -3]
@@ -343,3 +377,18 @@ def test_pytorch_OpFromGraph():
 
     f = FunctionGraph([x, y, z], [out])
     compare_pytorch_and_py(f, [xv, yv, zv])
+
+
+def test_ScalarLoop_Elemwise():
+    n_steps = int64("n_steps")
+    x0 = float64("x0")
+    x = x0 * 2
+    until = x >= 10
+
+    op = ScalarLoop(init=[x0], update=[x], until=until)
+    fn = function([n_steps, x0], Elemwise(op)(n_steps, x0), mode=pytorch_mode)
+
+    states, dones = fn(10, np.array(range(5)))
+
+    np.testing.assert_allclose(states, [0, 4, 8, 12, 16])
+    np.testing.assert_allclose(dones, [False, False, False, True, True])

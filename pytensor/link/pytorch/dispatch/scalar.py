@@ -1,10 +1,12 @@
 import torch
+import torch.compiler
 
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.scalar.basic import (
     Cast,
     ScalarOp,
 )
+from pytensor.scalar.loop import ScalarLoop
 
 
 @pytorch_funcify.register(ScalarOp)
@@ -39,6 +41,43 @@ def pytorch_funcify_ScalarOp(op, node, **kwargs):
             )
 
     return pytorch_func
+
+
+@pytorch_funcify.register(ScalarLoop)
+def pytorch_funicify_ScalarLoop(op, node, **kwargs):
+    update = pytorch_funcify(op.fgraph)
+    state_length = op.nout
+    if op.is_while:
+
+        def scalar_loop(steps, *start_and_constants):
+            carry, constants = (
+                start_and_constants[:state_length],
+                start_and_constants[state_length:],
+            )
+            done = True
+            for _ in range(steps):
+                *carry, done = update(*carry, *constants)
+                if torch.any(done):
+                    break
+            if len(node.outputs) == 2:
+                return carry[0], done
+            else:
+                return carry, done
+    else:
+
+        def scalar_loop(steps, *start_and_constants):
+            carry, constants = (
+                start_and_constants[:state_length],
+                start_and_constants[state_length:],
+            )
+            for _ in range(steps):
+                carry = update(*carry, *constants)
+            if len(node.outputs) == 1:
+                return carry[0]
+            else:
+                return carry
+
+    return torch.compiler.disable(scalar_loop, recursive=False)
 
 
 @pytorch_funcify.register(Cast)
