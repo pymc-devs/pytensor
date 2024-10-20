@@ -983,7 +983,7 @@ def jax_bilinaer_lyapunov_to_direct(fgraph: FunctionGraph, node: Apply):
         return None
 
     # Extract the inputs
-    (A, B) = node.inputs
+    A, B = (cast(TensorVariable, x) for x in node.inputs)
 
     # Compute the result
     result = _direct_solve_discrete_lyapunov(A, B)
