@@ -320,6 +320,8 @@ def get_underlying_scalar_constant_value(
 
     """
     from pytensor.compile.ops import DeepCopyOp, OutputGuard
+    from pytensor.sparse import CSM
+    from pytensor.tensor.subtensor import Subtensor
 
     v = orig_v
     while True:
@@ -350,16 +352,16 @@ def get_underlying_scalar_constant_value(
             raise NotScalarConstantError()
 
         if not only_process_constants and getattr(v, "owner", None) and max_recur > 0:
+            op = v.owner.op
             max_recur -= 1
             if isinstance(
-                v.owner.op,
-                Alloc | DimShuffle | Unbroadcast | OutputGuard | DeepCopyOp,
+                op, Alloc | DimShuffle | Unbroadcast | OutputGuard | DeepCopyOp
             ):
                 # OutputGuard is only used in debugmode but we
                 # keep it here to avoid problems with old pickles
                 v = v.owner.inputs[0]
                 continue
-            elif isinstance(v.owner.op, Shape_i):
+            elif isinstance(op, Shape_i):
                 i = v.owner.op.i
                 inp = v.owner.inputs[0]
                 if isinstance(inp, Constant):
@@ -373,10 +375,10 @@ def get_underlying_scalar_constant_value(
             # mess with the stabilization optimization and be too slow.
             # We put all the scalar Ops used by get_canonical_form_slice()
             # to allow it to determine the broadcast pattern correctly.
-            elif isinstance(v.owner.op, ScalarFromTensor | TensorFromScalar):
+            elif isinstance(op, ScalarFromTensor | TensorFromScalar):
                 v = v.owner.inputs[0]
                 continue
-            elif isinstance(v.owner.op, CheckAndRaise):
+            elif isinstance(op, CheckAndRaise):
                 # check if all conditions are constant and true
                 conds = [
                     get_underlying_scalar_constant_value(c, max_recur=max_recur)
@@ -385,7 +387,7 @@ def get_underlying_scalar_constant_value(
                 if builtins.all(0 == c.ndim and c != 0 for c in conds):
                     v = v.owner.inputs[0]
                     continue
-            elif isinstance(v.owner.op, ps.ScalarOp):
+            elif isinstance(op, ps.ScalarOp):
                 if isinstance(v.owner.op, ps.Second):
                     # We don't need both input to be constant for second
                     shp, val = v.owner.inputs
@@ -402,7 +404,7 @@ def get_underlying_scalar_constant_value(
             # In fast_compile, we don't enable local_fill_to_alloc, so
             # we need to investigate Second as Alloc. So elemwise
             # don't disable the check for Second.
-            elif isinstance(v.owner.op, Elemwise):
+            elif isinstance(op, Elemwise):
                 if isinstance(v.owner.op.scalar_op, ps.Second):
                     # We don't need both input to be constant for second
                     shp, val = v.owner.inputs
@@ -418,10 +420,7 @@ def get_underlying_scalar_constant_value(
                     ret = [[None]]
                     v.owner.op.perform(v.owner, const, ret)
                     return np.asarray(ret[0][0].copy())
-            elif (
-                isinstance(v.owner.op, pytensor.tensor.subtensor.Subtensor)
-                and v.ndim == 0
-            ):
+            elif isinstance(op, Subtensor) and v.ndim == 0:
                 if isinstance(v.owner.inputs[0], TensorConstant):
                     from pytensor.tensor.subtensor import get_constant_idx
 
@@ -545,6 +544,14 @@ def get_underlying_scalar_constant_value(
 
                     if isinstance(grandparent, Constant):
                         return np.asarray(np.shape(grandparent.data)[idx])
+            elif isinstance(op, CSM):
+                data = get_underlying_scalar_constant_value(
+                    v.owner.inputs, elemwise=elemwise, max_recur=max_recur
+                )
+                # Sparse variable can only be constant if zero (or I guess if homogeneously dense)
+                if data == 0:
+                    return data
+                break
 
         raise NotScalarConstantError()
 
@@ -4071,7 +4078,7 @@ class Choose(Op):
         static_out_shape = ()
         for s in out_shape:
             try:
-                s_val = pytensor.get_underlying_scalar_constant(s)
+                s_val = get_underlying_scalar_constant_value(s)
             except (NotScalarConstantError, AttributeError):
                 s_val = None
 

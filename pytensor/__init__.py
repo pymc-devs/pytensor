@@ -24,6 +24,7 @@ __docformat__ = "restructuredtext en"
 # pytensor code, since this code may want to log some messages.
 import logging
 import sys
+import warnings
 from functools import singledispatch
 from pathlib import Path
 from typing import Any, NoReturn, Optional
@@ -148,13 +149,13 @@ def get_underlying_scalar_constant(v):
     If `v` is not some view of constant data, then raise a
     `NotScalarConstantError`.
     """
-    # Is it necessary to test for presence of pytensor.sparse at runtime?
-    sparse = globals().get("sparse")
-    if sparse and isinstance(v.type, sparse.SparseTensorType):
-        if v.owner is not None and isinstance(v.owner.op, sparse.CSM):
-            data = v.owner.inputs[0]
-            return tensor.get_underlying_scalar_constant_value(data)
-    return tensor.get_underlying_scalar_constant_value(v)
+    warnings.warn(
+        "get_underlying_scalar_constant is deprecated. Use tensor.get_underlying_scalar_constant_value instead.",
+        FutureWarning,
+    )
+    from pytensor.tensor.basic import get_underlying_scalar_constant_value
+
+    return get_underlying_scalar_constant_value(v)
 
 
 # isort: off
