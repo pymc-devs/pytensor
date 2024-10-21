@@ -20,7 +20,7 @@ from pytensor.tensor import basic as ptb
 from pytensor.tensor.elemwise import get_normalized_batch_axes
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.type import DenseTensorType, TensorType, int_dtypes, tensor
-from pytensor.tensor.type_other import NoneConst
+from pytensor.tensor.type_other import NoneConst, NoneTypeT
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
@@ -401,8 +401,6 @@ class SpecifyShape(COp):
     _output_type_depends_on_input_value = True
 
     def make_node(self, x, *shape):
-        from pytensor.tensor.basic import get_underlying_scalar_constant_value
-
         x = ptb.as_tensor_variable(x)
 
         shape = tuple(
@@ -428,11 +426,9 @@ class SpecifyShape(COp):
         for i, (xts, s) in enumerate(zip(x.type.shape, shape, strict=True)):
             if xts is not None:
                 type_shape[i] = xts
-            else:
+            elif not isinstance(s.type, NoneTypeT):
                 try:
-                    type_s = get_underlying_scalar_constant_value(s)
-                    if type_s is not None:
-                        type_shape[i] = int(type_s)
+                    type_shape[i] = int(ptb.get_underlying_scalar_constant_value(s))
                 except NotScalarConstantError:
                     pass
 
@@ -460,22 +456,13 @@ class SpecifyShape(COp):
     def infer_shape(self, fgraph, node, shapes):
         xshape, *_ = shapes
         shape = node.inputs[1:]
-        new_shape = []
-        for dim in range(node.inputs[0].type.ndim):
-            s = shape[dim]
-            try:
-                s = ptb.get_underlying_scalar_constant_value(s)
-                # We assume that `None` shapes are always retrieved by
-                # `get_underlying_scalar_constant_value`, and only in that case do we default to
-                # the shape of the input variable
-                if s is None:
-                    s = xshape[dim]
-            except NotScalarConstantError:
-                pass
-            new_shape.append(ptb.as_tensor_variable(s))
-
-        assert len(new_shape) == len(xshape)
-        return [new_shape]
+        # Use x shape if specified dim is None, otherwise the specified shape
+        return [
+            [
+                xshape[i] if isinstance(dim.type, NoneTypeT) else dim
+                for i, dim in enumerate(shape)
+            ]
+        ]
 
     def connection_pattern(self, node):
         return [[True], *[[False]] * len(node.inputs[1:])]

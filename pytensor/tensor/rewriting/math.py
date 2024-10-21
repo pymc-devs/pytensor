@@ -106,7 +106,6 @@ from pytensor.tensor.type import (
 from pytensor.tensor.variable import (
     TensorConstant,
     TensorVariable,
-    get_unique_constant_value,
 )
 
 
@@ -138,16 +137,8 @@ def get_constant(v):
         numeric constant. If v is a plain Variable, returns None.
 
     """
-    if isinstance(v, Constant):
-        unique_value = get_unique_constant_value(v)
-        if unique_value is not None:
-            data = unique_value
-        else:
-            data = v.data
-        if data.ndim == 0:
-            return data
-        else:
-            return None
+    if isinstance(v, TensorConstant):
+        return v.unique_value
     elif isinstance(v, Variable):
         return None
     else:
@@ -628,7 +619,14 @@ def local_mul_switch_sink(fgraph, node):
             # Look for a zero as the first or second branch of the switch
             for branch in range(2):
                 zero_switch_input = switch_node.inputs[1 + branch]
-                if not get_unique_constant_value(zero_switch_input) == 0.0:
+                if (
+                    not get_underlying_scalar_constant_value(
+                        zero_switch_input,
+                        only_process_constants=True,
+                        raise_not_constant=False,
+                    )
+                    == 0.0
+                ):
                     continue
 
                 switch_cond = switch_node.inputs[0]
@@ -685,7 +683,14 @@ def local_div_switch_sink(fgraph, node):
         # Look for a zero as the first or second branch of the switch
         for branch in range(2):
             zero_switch_input = switch_node.inputs[1 + branch]
-            if not get_unique_constant_value(zero_switch_input) == 0.0:
+            if (
+                not get_underlying_scalar_constant_value(
+                    zero_switch_input,
+                    only_process_constants=True,
+                    raise_not_constant=False,
+                )
+                == 0.0
+            ):
                 continue
 
             switch_cond = switch_node.inputs[0]
