@@ -26,7 +26,7 @@ from pytensor.tensor.basic import (
     as_tensor,
     cast,
     concatenate,
-    extract_constant,
+    get_scalar_constant_value,
     get_underlying_scalar_constant_value,
     register_infer_shape,
     switch,
@@ -373,7 +373,10 @@ def local_useless_slice(fgraph, node):
         step = s.step
         if (
             start is not None
-            and extract_constant(start, only_process_constants=True) == 0
+            and get_scalar_constant_value(
+                start, only_process_constants=True, raise_not_constant=False
+            )
+            == 0
         ):
             change_flag = True
             start = None
@@ -381,14 +384,20 @@ def local_useless_slice(fgraph, node):
         if (
             stop is not None
             and x.type.shape[dim] is not None
-            and extract_constant(stop, only_process_constants=True) == x.type.shape[dim]
+            and get_scalar_constant_value(
+                stop, only_process_constants=True, raise_not_constant=False
+            )
+            == x.type.shape[dim]
         ):
             change_flag = True
             stop = None
 
         if (
             step is not None
-            and extract_constant(step, only_process_constants=True) == 1
+            and get_scalar_constant_value(
+                step, only_process_constants=True, raise_not_constant=False
+            )
+            == 1
         ):
             change_flag = True
             step = None
@@ -878,7 +887,10 @@ def local_useless_inc_subtensor(fgraph, node):
         and e.stop is None
         and (
             e.step is None
-            or extract_constant(e.step, only_process_constants=True) == -1
+            or get_scalar_constant_value(
+                e.step, only_process_constants=True, raise_not_constant=False
+            )
+            == -1
         )
         for e in idx_cst
     ):
@@ -1479,7 +1491,10 @@ def local_adv_sub1_adv_inc_sub1(fgraph, node):
         and
         # Don't use only_process_constants=True. We need to
         # investigate Alloc of 0s but with non constant shape.
-        extract_constant(x, elemwise=False) != 0
+        get_underlying_scalar_constant_value(
+            x, elemwise=False, raise_not_constant=False
+        )
+        != 0
     ):
         return
 
