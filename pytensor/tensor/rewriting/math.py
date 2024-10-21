@@ -105,7 +105,6 @@ from pytensor.tensor.type import (
 from pytensor.tensor.variable import (
     TensorConstant,
     TensorVariable,
-    get_unique_constant_value,
 )
 
 
@@ -137,16 +136,8 @@ def get_constant(v):
         numeric constant. If v is a plain Variable, returns None.
 
     """
-    if isinstance(v, Constant):
-        unique_value = get_unique_constant_value(v)
-        if unique_value is not None:
-            data = unique_value
-        else:
-            data = v.data
-        if data.ndim == 0:
-            return data
-        else:
-            return None
+    if isinstance(v, TensorConstant):
+        return v.unique_value
     elif isinstance(v, Variable):
         return None
     else:
