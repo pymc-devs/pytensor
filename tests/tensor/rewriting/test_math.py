@@ -4376,11 +4376,13 @@ def test_local_add_neg_to_sub(first_negative):
     assert np.allclose(f(x_test, y_test), exp)
 
 
-def test_local_add_neg_to_sub_const():
+@pytest.mark.parametrize("const_left", (True, False))
+def test_local_add_neg_to_sub_const(const_left):
     x = vector("x")
-    const = 5.0
+    const = np.full((3, 2), 5.0)
+    out = -const + x if const_left else x + (-const)
 
-    f = function([x], x + (-const), mode=Mode("py"))
+    f = function([x], out, mode=Mode("py"))
 
     nodes = [
         node.op
