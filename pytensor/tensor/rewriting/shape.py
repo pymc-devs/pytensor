@@ -23,7 +23,6 @@ from pytensor.tensor.basic import (
     cast,
     constant,
     get_scalar_constant_value,
-    get_underlying_scalar_constant_value,
     register_infer_shape,
     stack,
 )
@@ -213,7 +212,7 @@ class ShapeFeature(Feature):
             # Do not call make_node for test_value
             s = Shape_i(i)(r)
             try:
-                s = get_underlying_scalar_constant_value(s)
+                s = get_scalar_constant_value(s)
             except NotScalarConstantError:
                 pass
             return s
@@ -297,7 +296,7 @@ class ShapeFeature(Feature):
             assert len(idx) == 1
             idx = idx[0]
             try:
-                i = get_underlying_scalar_constant_value(idx)
+                i = get_scalar_constant_value(idx)
             except NotScalarConstantError:
                 pass
             else:
@@ -452,7 +451,7 @@ class ShapeFeature(Feature):
             )
             or self.lscalar_one.equals(merged_shape[i])
             or self.lscalar_one.equals(
-                get_underlying_scalar_constant_value(
+                get_scalar_constant_value(
                     merged_shape[i],
                     only_process_constants=True,
                     raise_not_constant=False,
@@ -481,9 +480,7 @@ class ShapeFeature(Feature):
             or r.type.shape[idx] != 1
             or self.lscalar_one.equals(new_shape[idx])
             or self.lscalar_one.equals(
-                get_underlying_scalar_constant_value(
-                    new_shape[idx], raise_not_constant=False
-                )
+                get_scalar_constant_value(new_shape[idx], raise_not_constant=False)
             )
             for idx in range(r.type.ndim)
         )
