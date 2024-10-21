@@ -1808,7 +1808,7 @@ pprint.assign(alloc, printing.FunctionPrinter(["alloc"]))
 @_get_vector_length.register(Alloc)
 def _get_vector_length_Alloc(var_inst, var):
     try:
-        return get_underlying_scalar_constant_value(var.owner.inputs[1])
+        return get_scalar_constant_value(var.owner.inputs[1])
     except NotScalarConstantError:
         raise ValueError(f"Length of {var} cannot be determined")
 
@@ -2509,7 +2509,7 @@ class Join(COp):
 
             if not isinstance(axis, int):
                 try:
-                    axis = int(get_underlying_scalar_constant_value(axis))
+                    axis = int(get_scalar_constant_value(axis))
                 except NotScalarConstantError:
                     pass
 
@@ -2753,7 +2753,7 @@ pprint.assign(Join, printing.FunctionPrinter(["join"]))
 def _get_vector_length_Join(op, var):
     axis, *arrays = var.owner.inputs
     try:
-        axis = get_underlying_scalar_constant_value(axis)
+        axis = get_scalar_constant_value(axis)
         assert axis == 0 and builtins.all(a.ndim == 1 for a in arrays)
         return builtins.sum(get_vector_length(a) for a in arrays)
     except NotScalarConstantError:
@@ -4146,7 +4146,7 @@ class Choose(Op):
         static_out_shape = ()
         for s in out_shape:
             try:
-                s_val = get_underlying_scalar_constant_value(s)
+                s_val = get_scalar_constant_value(s)
             except (NotScalarConstantError, AttributeError):
                 s_val = None
 

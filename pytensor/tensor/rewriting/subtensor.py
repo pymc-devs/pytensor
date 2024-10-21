@@ -999,7 +999,7 @@ def local_useless_subtensor(fgraph, node):
         if isinstance(idx.stop, int | np.integer):
             length_pos_data = sys.maxsize
             try:
-                length_pos_data = get_underlying_scalar_constant_value(
+                length_pos_data = get_scalar_constant_value(
                     length_pos, only_process_constants=True
                 )
             except NotScalarConstantError:
@@ -1064,7 +1064,7 @@ def local_useless_AdvancedSubtensor1(fgraph, node):
 
     # get length of the indexed tensor along the first axis
     try:
-        length = get_underlying_scalar_constant_value(
+        length = get_scalar_constant_value(
             shape_of[node.inputs[0]][0], only_process_constants=True
         )
     except NotScalarConstantError:
@@ -1736,7 +1736,7 @@ def local_join_subtensors(fgraph, node):
     axis, tensors = node.inputs[0], node.inputs[1:]
 
     try:
-        axis = get_underlying_scalar_constant_value(axis)
+        axis = get_scalar_constant_value(axis)
     except NotScalarConstantError:
         return
 
@@ -1797,12 +1797,7 @@ def local_join_subtensors(fgraph, node):
             if step is None:
                 continue
             try:
-                if (
-                    get_underlying_scalar_constant_value(
-                        step, only_process_constants=True
-                    )
-                    != 1
-                ):
+                if get_scalar_constant_value(step, only_process_constants=True) != 1:
                     return None
             except NotScalarConstantError:
                 return None
