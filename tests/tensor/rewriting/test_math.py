@@ -1379,11 +1379,11 @@ class TestLocalUselessElemwiseComparison:
         if op == deep_copy_op:
             assert len(elem.inputs) == 1, elem.inputs
             assert isinstance(elem.inputs[0], TensorConstant), elem
-            assert pt.extract_constant(elem.inputs[0]) == val, val
+            assert pt.get_underlying_scalar_constant_value(elem.inputs[0]) == val, val
         else:
             assert len(elem.inputs) == 2, elem.inputs
             assert isinstance(elem.inputs[0], TensorConstant), elem
-            assert pt.extract_constant(elem.inputs[0]) == val, val
+            assert pt.get_underlying_scalar_constant_value(elem.inputs[0]) == val, val
 
     def assert_identity(self, f):
         topo = f.maker.fgraph.toposort()
@@ -4376,11 +4376,13 @@ def test_local_add_neg_to_sub(first_negative):
     assert np.allclose(f(x_test, y_test), exp)
 
 
-def test_local_add_neg_to_sub_const():
+@pytest.mark.parametrize("const_left", (True, False))
+def test_local_add_neg_to_sub_const(const_left):
     x = vector("x")
-    const = 5.0
+    const = np.full((3, 2), 5.0)
+    out = -const + x if const_left else x + (-const)
 
-    f = function([x], x + (-const), mode=Mode("py"))
+    f = function([x], out, mode=Mode("py"))
 
     nodes = [
         node.op

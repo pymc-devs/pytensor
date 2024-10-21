@@ -28,7 +28,6 @@ from pytensor.tensor.basic import (
     as_tensor_variable,
     cast,
     constant,
-    extract_constant,
     get_underlying_scalar_constant_value,
     moveaxis,
     ones_like,
@@ -105,7 +104,6 @@ from pytensor.tensor.type import (
 from pytensor.tensor.variable import (
     TensorConstant,
     TensorVariable,
-    get_unique_constant_value,
 )
 
 
@@ -127,32 +125,6 @@ def scalarconsts_rest(inputs, elemwise=True, only_process_constants=False):
     return consts, origconsts, nonconsts
 
 
-def get_constant(v):
-    """
-
-    Returns
-    -------
-    object
-        A numeric constant if v is a Constant or, well, a
-        numeric constant. If v is a plain Variable, returns None.
-
-    """
-    if isinstance(v, Constant):
-        unique_value = get_unique_constant_value(v)
-        if unique_value is not None:
-            data = unique_value
-        else:
-            data = v.data
-        if data.ndim == 0:
-            return data
-        else:
-            return None
-    elif isinstance(v, Variable):
-        return None
-    else:
-        return v
-
-
 @register_canonicalize
 @register_stabilize
 @node_rewriter([Dot])
@@ -162,18 +134,16 @@ def local_0_dot_x(fgraph, node):
 
     x = node.inputs[0]
     y = node.inputs[1]
-    replace = False
-    try:
-        if get_underlying_scalar_constant_value(x, only_process_constants=True) == 0:
-            replace = True
-    except NotScalarConstantError:
-        pass
-
-    try:
-        if get_underlying_scalar_constant_value(y, only_process_constants=True) == 0:
-            replace = True
-    except NotScalarConstantError:
-        pass
+    replace = (
+        get_underlying_scalar_constant_value(
+            x, only_process_constants=True, raise_not_constant=False
+        )
+        == 0
+        or get_underlying_scalar_constant_value(
+            y, only_process_constants=True, raise_not_constant=False
+        )
+        == 0
+    )
 
     if replace:
         constant_zero = constant(0, dtype=node.outputs[0].type.dtype)
@@ -574,10 +544,13 @@ def local_expm1(fgraph, node):
         in1.owner
         and isinstance(in1.owner.op, Elemwise)
         and isinstance(in1.owner.op.scalar_op, ps.Exp)
-        and extract_constant(in2, only_process_constants=False) == 1
+        and get_underlying_scalar_constant_value(in2, raise_not_constant=False) == 1
     ):
         in11 = in1.owner.inputs[0]
         new_out = expm1(in11)
+
+        if new_out.type.broadcastable != out.type.broadcastable:
+            new_out = broadcast_arrays(in11, in2)[0]
 
         if new_out.dtype != out.dtype:
             new_out = cast(new_out, dtype=out.dtype)
@@ -1030,8 +1003,8 @@ class AlgebraicCanonizer(NodeRewriter):
         """
         Find all constants and put them together into a single constant.
 
-        Finds all constants in orig_num and orig_denum (using
-        get_constant) and puts them together into a single
+        Finds all constants in orig_num and orig_denum
+        and puts them together into a single
         constant. The constant is inserted as the first element of the
         numerator. If the constant is the neutral element, it is
         removed from the numerator.
@@ -1052,17 +1025,15 @@ class AlgebraicCanonizer(NodeRewriter):
         numct, denumct = [], []
 
         for v in orig_num:
-            ct = get_constant(v)
-            if ct is not None:
+            if isinstance(v, TensorConstant) and v.unique_value is not None:
                 # We found a constant in the numerator!
                 # We add it to numct
-                numct.append(ct)
+                numct.append(v.unique_value)
             else:
                 num.append(v)
         for v in orig_denum:
-            ct = get_constant(v)
-            if ct is not None:
-                denumct.append(ct)
+            if isinstance(v, TensorConstant) and v.unique_value is not None:
+                denumct.append(v.unique_value)
             else:
                 denum.append(v)
 
@@ -1086,11 +1057,13 @@ class AlgebraicCanonizer(NodeRewriter):
 
         if orig_num and len(numct) == 1 and len(denumct) == 0 and ct:
             # In that case we should only have one constant in `ct`.
-            assert len(ct) == 1
-            first_num_ct = get_constant(orig_num[0])
-            if first_num_ct is not None and ct[0].type.values_eq(
-                ct[0].data, first_num_ct
-            ):
+            [var_ct] = ct
+
+            num_ct = None
+            if isinstance(var_ct, TensorConstant):
+                num_ct = var_ct.unique_value
+
+            if num_ct is not None and var_ct.type.values_eq(var_ct.data, num_ct):
                 # This is an important trick :( if it so happens that:
                 # * there's exactly one constant on the numerator and none on
                 #   the denominator
@@ -1379,12 +1352,13 @@ def local_useless_elemwise_comparison(fgraph, node):
     the graph easier to read.
 
     """
+    # TODO: Refactor this function. So much repeated code!
+
     if node.op.scalar_op.nin != 2:
         return
 
-    # We call zeros_like and one_like with opt=True to generate a
-    # cleaner graph.
-    dtype = node.outputs[0].dtype
+    dtype = node.outputs[0].type.dtype
+    out_bcast = node.outputs[0].type.broadcastable
 
     # Elemwise[{LT,GT}](X, X) -> Elemwise[zeros](X)
     if (
@@ -1395,6 +1369,7 @@ def local_useless_elemwise_comparison(fgraph, node):
         # Copy over stacktrace from previous output.
         copy_stack_trace(node.outputs, res)
         return [res]
+
     # Elemwise[{LE,GE}](X, X) -> Elemwise[ones](X)
     if (
         isinstance(node.op.scalar_op, ps.LE | ps.GE)
@@ -1405,6 +1380,7 @@ def local_useless_elemwise_comparison(fgraph, node):
         # Copy over stacktrace from previous output.
         copy_stack_trace(node.outputs, res)
         return [res]
+
     # Elemwise[{minimum,maximum}](X, X) -> X
     if (
         isinstance(node.op.scalar_op, ps.ScalarMinimum | ps.ScalarMaximum)
@@ -1420,64 +1396,72 @@ def local_useless_elemwise_comparison(fgraph, node):
         isinstance(node.op.scalar_op, ps.LT)
         and node.inputs[0].owner
         and isinstance(node.inputs[0].owner.op, Shape_i)
-        and extract_constant(node.inputs[1], only_process_constants=True) == 0
+        and get_underlying_scalar_constant_value(
+            node.inputs[1], only_process_constants=True, raise_not_constant=False
+        )
+        == 0
     ):
         res = zeros_like(node.inputs[0], dtype=dtype, opt=True)
+        if res.type.broadcastable != out_bcast:
+            res = broadcast_arrays(res, node.inputs[1])[0]
         # Copy over stacktrace from previous output.
         copy_stack_trace(node.outputs, res)
         return [res]
+
     # Elemwise[GE](X.shape[i], 0) -> Elemwise[ones](X)
     if (
         isinstance(node.op.scalar_op, ps.GE)
         and node.inputs[0].owner
         and isinstance(node.inputs[0].owner.op, Shape_i)
-        and extract_constant(node.inputs[1], only_process_constants=True) == 0
+        and get_underlying_scalar_constant_value(
+            node.inputs[1], only_process_constants=True, raise_not_constant=False
+        )
+        == 0
     ):
         res = ones_like(node.inputs[0], dtype=dtype, opt=True)
-        # Copy over stacktrace from previous output.
-        copy_stack_trace(node.outputs, res)
-        return [res]
-    # Elemwise[maximum](X.shape[i], 0) -> X.shape[i]
-    if (
-        isinstance(node.op.scalar_op, ps.ScalarMaximum)
-        and node.inputs[0].owner
-        and isinstance(node.inputs[0].owner.op, Shape_i)
-        and extract_constant(node.inputs[1], only_process_constants=True) == 0
-    ):
-        # No need to copy over stacktrace.
-        return [node.inputs[0]]
-    # Elemwise[maximum](0, X.shape[i]) -> X.shape[i]
-    if (
-        isinstance(node.op.scalar_op, ps.ScalarMaximum)
-        and extract_constant(node.inputs[0], only_process_constants=True) == 0
-        and node.inputs[1].owner
-        and isinstance(node.inputs[1].owner.op, Shape_i)
-    ):
-        # No need to copy over stacktrace.
-        return [node.inputs[1]]
-    # Elemwise[minimum](X.shape[i], 0) -> 0
-    if (
-        isinstance(node.op.scalar_op, ps.ScalarMinimum)
-        and node.inputs[0].owner
-        and isinstance(node.inputs[0].owner.op, Shape_i)
-        and extract_constant(node.inputs[1], only_process_constants=True) == 0
-    ):
-        res = zeros_like(node.inputs[0], dtype=dtype, opt=True)
+        if res.type.broadcastable != out_bcast:
+            res = broadcast_arrays(res, node.inputs[1])[0]
         # Copy over stacktrace from previous output.
         copy_stack_trace(node.outputs, res)
         return [res]
 
-    # Elemwise[minimum](0, X.shape[i]) -> 0
-    if (
-        isinstance(node.op.scalar_op, ps.ScalarMinimum)
-        and extract_constant(node.inputs[0], only_process_constants=True) == 0
-        and node.inputs[1].owner
-        and isinstance(node.inputs[1].owner.op, Shape_i)
-    ):
-        res = zeros_like(node.inputs[1], dtype=dtype, opt=True)
-        # Copy over stacktrace from previous output.
-        copy_stack_trace(node.outputs, res)
-        return [res]
+    # Elemwise[maximum](X.shape[i], 0) -> X.shape[i]
+    if isinstance(node.op.scalar_op, ps.ScalarMaximum):
+        for idx in range(2):
+            if (
+                node.inputs[idx].owner
+                and isinstance(node.inputs[idx].owner.op, Shape_i)
+                and get_underlying_scalar_constant_value(
+                    node.inputs[1 - idx],
+                    only_process_constants=True,
+                    raise_not_constant=False,
+                )
+                == 0
+            ):
+                res = node.inputs[idx]
+                if res.type.broadcastable != out_bcast:
+                    res = broadcast_arrays(res, node.inputs[1 - idx])[0]
+                # No need to copy over stacktrace.
+                return [res]
+
+    # Elemwise[minimum](X.shape[i], 0) -> 0
+    if isinstance(node.op.scalar_op, ps.ScalarMinimum):
+        for idx in range(2):
+            if (
+                node.inputs[idx].owner
+                and isinstance(node.inputs[idx].owner.op, Shape_i)
+                and get_underlying_scalar_constant_value(
+                    node.inputs[1 - idx],
+                    only_process_constants=True,
+                    raise_not_constant=False,
+                )
+                == 0
+            ):
+                res = zeros_like(node.inputs[idx], dtype=dtype, opt=True)
+                if res.type.broadcastable != out_bcast:
+                    res = broadcast_arrays(res, node.inputs[1 - idx])[0]
+                # No need to copy over stacktrace.
+                return [res]
 
     # Elemwise[LT](add([anything that is shapes]), 0) -> Elemwise[zeros](X)
     if (
@@ -1489,12 +1473,18 @@ def local_useless_elemwise_comparison(fgraph, node):
             isinstance(var.owner and var.owner.op, Shape_i)
             for var in node.inputs[0].owner.inputs
         )
-        and extract_constant(node.inputs[1], only_process_constants=True) == 0
+        and get_underlying_scalar_constant_value(
+            node.inputs[1], only_process_constants=True, raise_not_constant=False
+        )
+        == 0
     ):
         res = zeros_like(node.inputs[0], dtype=dtype, opt=True)
+        if res.type.broadcastable != out_bcast:
+            res = broadcast_arrays(res, node.inputs[1])[0]
         # Copy over stacktrace from previous output.
         copy_stack_trace(node.outputs, res)
         return [res]
+
     # Elemwise[GE](add([anything that is shapes]), 0) -> Elemwise[ones](X)
     if (
         isinstance(node.op.scalar_op, ps.GE)
@@ -1505,57 +1495,60 @@ def local_useless_elemwise_comparison(fgraph, node):
             isinstance(var.owner and var.owner.op, Shape_i)
             for var in node.inputs[0].owner.inputs
         )
-        and extract_constant(node.inputs[1], only_process_constants=True) == 0
+        and get_underlying_scalar_constant_value(
+            node.inputs[1], only_process_constants=True, raise_not_constant=False
+        )
+        == 0
     ):
         res = ones_like(node.inputs[0], dtype=dtype, opt=True)
-
+        if res.type.broadcastable != out_bcast:
+            res = broadcast_arrays(res, node.inputs[1])[0]
         # Copy over stacktrace from previous output.
         copy_stack_trace(node.outputs, res)
         return [res]
 
-        # Elemwise[EQ](Subtensor(Shape(x)), -N)
-        # Elemwise[EQ](somegraph that only depend of shape, -N)
-        # TODO: handle the case where the -N is on either side
-        """
- |Elemwise{eq,no_inplace} [id B] ''
- | |Subtensor{int64} [id C] ''
- | | |Join [id D] ''
- | | | |TensorConstant{0} [id E]
- | | | |Subtensor{int64:int64:} [id F] ''
- | | | | |Shape [id G] ''
-        """
+    # Elemwise[EQ](Subtensor(Shape(x)), -N)
+    # Elemwise[EQ](somegraph that only depend of shape, -N)
+    # TODO: handle the case where the -N is on either side
+    """
+|Elemwise{eq,no_inplace} [id B] ''
+| |Subtensor{int64} [id C] ''
+| | |Join [id D] ''
+| | | |TensorConstant{0} [id E]
+| | | |Subtensor{int64:int64:} [id F] ''
+| | | | |Shape [id G] ''
+    """
 
-    def investigate(node):
+    def investigate_if_shape(node) -> bool:
         "Return True if values will be shapes, so >= 0"
         if isinstance(node.op, Shape | Shape_i):
             return True
         elif isinstance(node.op, Subtensor) and node.inputs[0].owner:
-            return investigate(node.inputs[0].owner)
+            return investigate_if_shape(node.inputs[0].owner)
         elif isinstance(node.op, Join):
-            return all(v.owner and investigate(v.owner) for v in node.inputs[1:])
+            return all(
+                v.owner and investigate_if_shape(v.owner) for v in node.inputs[1:]
+            )
         elif isinstance(node.op, MakeVector):
-            return all(v.owner and investigate(v.owner) for v in node.inputs)
+            return all(v.owner and investigate_if_shape(v.owner) for v in node.inputs)
 
     if (
         isinstance(node.op.scalar_op, ps.EQ)
         and node.inputs[0].owner
-        and investigate(node.inputs[0].owner)
+        and investigate_if_shape(node.inputs[0].owner)
+        and (
+            isinstance(node.inputs[1], TensorConstant)
+            and node.inputs[1].unique_value is not None
+            and node.inputs[1].unique_value < 0
+        )
     ):
-        try:
-            cst = get_underlying_scalar_constant_value(
-                node.inputs[1], only_process_constants=True
-            )
+        res = zeros_like(node.inputs[0], dtype=dtype, opt=True)
+        if res.type.broadcastable != out_bcast:
+            res = broadcast_arrays(res, node.inputs[1])[0]
+        # Copy over stacktrace from previous output.
+        copy_stack_trace(node.outputs, res)
+        return [res]
 
-            res = zeros_like(node.inputs[0], dtype=dtype, opt=True)
-
-            if cst < 0:
-                # Copy over stacktrace from previous output.
-                copy_stack_trace(node.outputs, res)
-
-                return [res]
-
-        except NotScalarConstantError:
-            pass
     return
 
 
@@ -1853,9 +1846,12 @@ def local_add_neg_to_sub(fgraph, node):
                     return [new_out]
 
             # Check if it is a negative constant
-            const = get_constant(second)
-            if const is not None and const < 0:
-                new_out = sub(first, np.abs(const))
+            if (
+                isinstance(second, TensorConstant)
+                and second.unique_value is not None
+                and second.unique_value < 0
+            ):
+                new_out = sub(first, np.abs(second.data))
                 return [new_out]
 
 
@@ -1884,7 +1880,12 @@ def local_mul_zero(fgraph, node):
 @register_specialize
 @node_rewriter([true_div])
 def local_div_to_reciprocal(fgraph, node):
-    if np.all(get_constant(node.inputs[0]) == 1.0):
+    if (
+        get_underlying_scalar_constant_value(
+            node.inputs[0], only_process_constants=True, raise_not_constant=False
+        )
+        == 1.0
+    ):
         out = node.outputs[0]
         new_out = reciprocal(local_mul_canonizer.merge_num_denum(node.inputs[1:], []))
         # The ones could have forced upcasting
@@ -1905,7 +1906,9 @@ def local_reciprocal_canon(fgraph, node):
 @register_canonicalize
 @node_rewriter([pt_pow])
 def local_pow_canonicalize(fgraph, node):
-    cst = get_constant(node.inputs[1])
+    cst = get_underlying_scalar_constant_value(
+        node.inputs[1], only_process_constants=True, raise_not_constant=False
+    )
     if cst == 0:
         return [alloc_like(1, node.outputs[0], fgraph)]
     if cst == 1:
@@ -1936,7 +1939,12 @@ def local_intdiv_by_one(fgraph, node):
 @node_rewriter([int_div, true_div])
 def local_zero_div(fgraph, node):
     """0 / x -> 0"""
-    if get_constant(node.inputs[0]) == 0:
+    if (
+        get_underlying_scalar_constant_value(
+            node.inputs[0], only_process_constants=True, raise_not_constant=False
+        )
+        == 0
+    ):
         ret = alloc_like(0, node.outputs[0], fgraph)
         ret.tag.values_eq_approx = values_eq_approx_remove_nan
         return [ret]
@@ -1949,7 +1957,9 @@ def local_pow_specialize(fgraph, node):
     odtype = node.outputs[0].dtype
     xsym = node.inputs[0]
     ysym = node.inputs[1]
-    y = get_constant(ysym)
+    y = get_underlying_scalar_constant_value(
+        ysym, only_process_constants=True, raise_not_constant=False
+    )
     if (y is not None) and not broadcasted_by(xsym, ysym):
         rval = None
 
@@ -1987,7 +1997,9 @@ def local_pow_to_nested_squaring(fgraph, node):
     odtype = node.outputs[0].dtype
     xsym = node.inputs[0]
     ysym = node.inputs[1]
-    y = get_constant(ysym)
+    y = get_underlying_scalar_constant_value(
+        ysym, only_process_constants=True, raise_not_constant=False
+    )
 
     # the next line is needed to fix a strange case that I don't
     # know how to make a separate test.
@@ -2070,7 +2082,9 @@ def local_mul_specialize(fgraph, node):
             nb_neg_node += 1
 
         # remove special case arguments of 1, -1 or 0
-        y = get_constant(inp)
+        y = get_underlying_scalar_constant_value(
+            inp, raise_not_constant=False, only_process_constants=True
+        )
         if y == 1.0:
             nb_cst += 1
         elif y == -1.0:
@@ -2122,7 +2136,7 @@ def local_add_remove_zeros(fgraph, node):
             y = get_underlying_scalar_constant_value(inp)
         except NotScalarConstantError:
             y = inp
-        if np.all(y == 0.0):
+        if y == 0.0:
             continue
         new_inputs.append(inp)
 
@@ -2220,7 +2234,7 @@ def local_abs_merge(fgraph, node):
                     )
                 except NotScalarConstantError:
                     return False
-                if not (const >= 0).all():
+                if not const >= 0:
                     return False
                 inputs.append(i)
             else:
@@ -2257,12 +2271,19 @@ def local_log1p(fgraph, node):
                 return [alloc_like(log1p(ninp), node.outputs[0], fgraph)]
 
     elif log_arg.owner and log_arg.owner.op == sub:
-        one = extract_constant(log_arg.owner.inputs[0], only_process_constants=True)
+        one, other = node.inputs
+        one = get_underlying_scalar_constant_value(
+            one, only_process_constants=True, raise_not_constant=False
+        )
         if one != 1:
             return
-        other = log_arg.owner.inputs[1]
-        if other.dtype != log_arg.dtype:
+
+        if other.type.broadcastable != log_arg.type.broadcastable:
+            other = broadcast_arrays(other, one)[0]
+
+        if other.type.dtype != log_arg.type.dtype:
             other = other.astype(log_arg.dtype)
+
         return [log1p(neg(other))]
 
 
@@ -2861,7 +2882,7 @@ def _is_1(expr):
     """
     try:
         v = get_underlying_scalar_constant_value(expr)
-        return np.allclose(v, 1)
+        return np.isclose(v, 1)
     except NotScalarConstantError:
         return False
 
@@ -3029,7 +3050,7 @@ def is_neg(var):
         for idx, mul_input in enumerate(var_node.inputs):
             try:
                 constant = get_underlying_scalar_constant_value(mul_input)
-                is_minus_1 = np.allclose(constant, -1)
+                is_minus_1 = np.isclose(constant, -1)
             except NotScalarConstantError:
                 is_minus_1 = False
             if is_minus_1:

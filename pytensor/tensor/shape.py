@@ -15,7 +15,11 @@ from pytensor.graph.type import HasShape
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.scalar import int32
-from pytensor.tensor import _get_vector_length, as_tensor_variable, get_vector_length
+from pytensor.tensor import (
+    _get_vector_length,
+    as_tensor_variable,
+    get_vector_length,
+)
 from pytensor.tensor import basic as ptb
 from pytensor.tensor.elemwise import get_normalized_batch_axes
 from pytensor.tensor.exceptions import NotScalarConstantError
@@ -401,8 +405,6 @@ class SpecifyShape(COp):
     _output_type_depends_on_input_value = True
 
     def make_node(self, x, *shape):
-        from pytensor.tensor.basic import get_underlying_scalar_constant_value
-
         x = ptb.as_tensor_variable(x)
 
         shape = tuple(
@@ -430,7 +432,7 @@ class SpecifyShape(COp):
                 type_shape[i] = xts
             else:
                 try:
-                    type_s = get_underlying_scalar_constant_value(s)
+                    type_s = ptb.get_scalar_constant_value(s)
                     if type_s is not None:
                         type_shape[i] = int(type_s)
                 except NotScalarConstantError:
@@ -461,7 +463,7 @@ class SpecifyShape(COp):
         for dim in range(node.inputs[0].type.ndim):
             s = shape[dim]
             try:
-                s = ptb.get_underlying_scalar_constant_value(s)
+                s = ptb.get_scalar_constant_value(s)
                 # We assume that `None` shapes are always retrieved by
                 # `get_underlying_scalar_constant_value`, and only in that case do we default to
                 # the shape of the input variable
@@ -587,7 +589,7 @@ def specify_shape(
 @_get_vector_length.register(SpecifyShape)  # type: ignore
 def _get_vector_length_SpecifyShape(op: Op, var: TensorVariable) -> int:
     try:
-        return int(ptb.get_underlying_scalar_constant_value(var.owner.inputs[1]).item())
+        return int(ptb.get_scalar_constant_value(var.owner.inputs[1]).item())
     except NotScalarConstantError:
         raise ValueError(f"Length of {var} cannot be determined")
 
@@ -668,7 +670,7 @@ class Reshape(COp):
                 y = shp_list[index]
                 y = ptb.as_tensor_variable(y)
                 try:
-                    s_val = ptb.get_underlying_scalar_constant_value(y).item()
+                    s_val = ptb.get_scalar_constant_value(y).item()
                     if s_val >= 0:
                         out_shape[index] = s_val
                 except NotScalarConstantError:
