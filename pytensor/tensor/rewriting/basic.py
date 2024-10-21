@@ -57,7 +57,6 @@ from pytensor.tensor.basic import (
     cast,
     fill,
     get_scalar_constant_value,
-    get_underlying_scalar_constant_value,
     join,
     ones_like,
     register_infer_shape,
@@ -739,7 +738,7 @@ def local_remove_useless_assert(fgraph, node):
     n_conds = len(node.inputs[1:])
     for c in node.inputs[1:]:
         try:
-            const = get_underlying_scalar_constant_value(c)
+            const = get_scalar_constant_value(c)
 
             if 0 != const.ndim or const == 0:
                 # Should we raise an error here? How to be sure it
@@ -834,7 +833,7 @@ def local_join_empty(fgraph, node):
         return
     new_inputs = []
     try:
-        join_idx = get_underlying_scalar_constant_value(
+        join_idx = get_scalar_constant_value(
             node.inputs[0], only_process_constants=True
         )
     except NotScalarConstantError:

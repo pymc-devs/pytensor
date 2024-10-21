@@ -55,7 +55,6 @@ from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
     get_scalar_constant_value,
-    get_underlying_scalar_constant_value,
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
@@ -1976,13 +1975,13 @@ class ScanMerge(GraphRewriter):
 
         nsteps = node.inputs[0]
         try:
-            nsteps = int(get_underlying_scalar_constant_value(nsteps))
+            nsteps = int(get_scalar_constant_value(nsteps))
         except NotScalarConstantError:
             pass
 
         rep_nsteps = rep_node.inputs[0]
         try:
-            rep_nsteps = int(get_underlying_scalar_constant_value(rep_nsteps))
+            rep_nsteps = int(get_scalar_constant_value(rep_nsteps))
         except NotScalarConstantError:
             pass
 
