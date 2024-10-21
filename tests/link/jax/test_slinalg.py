@@ -199,16 +199,20 @@ def test_jax_eigvalsh(lower):
 
 
 @pytest.mark.parametrize("method", ["direct", "bilinear"])
-def test_jax_solve_discrete_lyapunov(method: Literal["direct", "bilinear"]):
-    A = matrix("A")
-    B = matrix("B")
+@pytest.mark.parametrize("shape", [(5, 5), (5, 5, 5)], ids=["matrix", "batch"])
+def test_jax_solve_discrete_lyapunov(
+    method: Literal["direct", "bilinear"], shape: tuple[int]
+):
+    A = pt.tensor(name="A", shape=shape)
+    B = pt.tensor(name="B", shape=shape)
     out = pt_slinalg.solve_discrete_lyapunov(A, B, method=method)
     out_fg = FunctionGraph([A, B], [out])
 
     compare_jax_and_py(
         out_fg,
         [
-            np.random.normal(size=(5, 5)).astype(config.floatX),
-            np.random.normal(size=(5, 5)).astype(config.floatX),
+            np.random.normal(size=shape).astype(config.floatX),
+            np.random.normal(size=shape).astype(config.floatX),
         ],
+        jax_mode="JAX",
     )

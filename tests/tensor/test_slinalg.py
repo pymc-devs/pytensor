@@ -525,7 +525,7 @@ def recover_Q(A, X, continuous=True):
 vec_recover_Q = np.vectorize(recover_Q, signature="(m,m),(m,m),()->(m,m)")
 
 
-@pytest.mark.parametrize("use_complex", [False, True])
+@pytest.mark.parametrize("use_complex", [False, True], ids=["float", "complex"])
 @pytest.mark.parametrize("shape", [(5, 5), (5, 5, 5)], ids=["matrix", "batch"])
 @pytest.mark.parametrize("method", ["direct", "bilinear"])
 @pytest.mark.filterwarnings("ignore::UserWarning")
@@ -541,7 +541,8 @@ def test_solve_discrete_lyapunov(
     a = pt.tensor(name="a", shape=shape, dtype=dtype)
     q = pt.tensor(name="q", shape=shape, dtype=dtype)
 
-    f = function([a, q], solve_discrete_lyapunov(a, q, method=method))
+    x = solve_discrete_lyapunov(a, q, method=method)
+    f = function([a, q], x)
 
     A = rng.normal(size=shape)
     Q = rng.normal(size=shape)
@@ -551,7 +552,9 @@ def test_solve_discrete_lyapunov(
     np.testing.assert_allclose(Q_recovered, Q)
 
     utt.verify_grad(
-        functools.partial(solve_discrete_lyapunov, method=method), pt=[A, Q], rng=rng
+        functools.partial(solve_discrete_lyapunov, method=method),
+        pt=[A, Q],
+        rng=rng,
     )
 
 
@@ -588,7 +591,6 @@ def test_solve_discrete_are_forward(add_batch_dim):
 
     x = solve_discrete_are(a, b, q, r)
 
-    # A^TXA - X - (A^TXB)(R + B^TXB)^{-1}(B^TXA) + Q
     def eval_fun(a, b, q, r, x):
         term_1 = a.T @ x @ a
         term_2 = a.T @ x @ b
