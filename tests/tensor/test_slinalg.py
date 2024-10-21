@@ -528,7 +528,6 @@ vec_recover_Q = np.vectorize(recover_Q, signature="(m,m),(m,m),()->(m,m)")
 @pytest.mark.parametrize("use_complex", [False, True], ids=["float", "complex"])
 @pytest.mark.parametrize("shape", [(5, 5), (5, 5, 5)], ids=["matrix", "batch"])
 @pytest.mark.parametrize("method", ["direct", "bilinear"])
-@pytest.mark.filterwarnings("ignore::UserWarning")
 def test_solve_discrete_lyapunov(
     use_complex, shape: tuple[int], method: Literal["direct", "bilinear"]
 ):
