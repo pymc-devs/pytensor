@@ -30,7 +30,7 @@ import pytensor.scalar.basic as ps
 from pytensor import compile, config
 from pytensor.compile.ops import ViewOp
 from pytensor.graph import FunctionGraph
-from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import (
     NodeProcessingGraphRewriter,
     NodeRewriter,
@@ -55,8 +55,8 @@ from pytensor.tensor.basic import (
     as_tensor_variable,
     atleast_Nd,
     cast,
-    extract_constant,
     fill,
+    get_scalar_constant_value,
     get_underlying_scalar_constant_value,
     join,
     ones_like,
@@ -478,7 +478,12 @@ def local_alloc_sink_dimshuffle(fgraph, node):
     output_shape = node.inputs[1:]
     num_dims_with_size_1_added_to_left = 0
     for i in range(len(output_shape) - inp.ndim):
-        if extract_constant(output_shape[i], only_process_constants=True) == 1:
+        if (
+            get_scalar_constant_value(
+                output_shape[i], only_process_constants=True, raise_not_constant=False
+            )
+            == 1
+        ):
             num_dims_with_size_1_added_to_left += 1
         else:
             break
@@ -538,93 +543,90 @@ def local_useless_elemwise(fgraph, node):
         xor(x, x) -> zeros_like(x)
 
     TODO: This implementation is painfully redundant.
+    TODO: Allow rewrite when useless input broadcasts output
 
     """
-    if isinstance(node.op, Elemwise):
-        # We call zeros_like and one_like with opt=True to generate a
-        # cleaner graph.
-        dtype = node.outputs[0].dtype
+    out_bcast = node.outputs[0].type.broadcastable
+    dtype = node.outputs[0].type.dtype
+    scalar_op = node.op.scalar_op
 
-        if node.op.scalar_op == ps.eq and len(node.inputs) == 2:
-            if node.inputs[0] == node.inputs[1]:
-                # it is the same var in the graph. That will always be true
-                ret = ones_like(node.inputs[0], dtype=dtype, opt=True)
+    if isinstance(scalar_op, ps.EQ) and len(node.inputs) == 2:
+        if node.inputs[0] is node.inputs[1]:
+            # it is the same var in the graph. That will always be true
+            ret = ones_like(node.inputs[0], dtype=dtype, opt=True)
 
-                # Copy stack trace from input to constant output
-                copy_stack_trace(node.outputs[0], ret)
-                return [ret]
-        elif node.op.scalar_op == ps.neq and len(node.inputs) == 2:
-            if node.inputs[0] == node.inputs[1]:
-                # it is the same var in the graph. That will always be false
-                ret = zeros_like(node.inputs[0], dtype=dtype, opt=True)
+            # Copy stack trace from input to constant output
+            copy_stack_trace(node.outputs[0], ret)
+            return [ret]
+    elif isinstance(scalar_op, ps.NEQ | ps.XOR) and len(node.inputs) == 2:
+        if node.inputs[0] is node.inputs[1]:
+            # it is the same var in the graph. That will always be false
+            ret = zeros_like(node.inputs[0], dtype=dtype, opt=True)
 
-                # Copy stack trace from input to constant output
-                copy_stack_trace(node.outputs[0], ret)
-                return [ret]
+            # Copy stack trace from input to constant output
+            copy_stack_trace(node.outputs[0], ret)
+            return [ret]
 
-        elif node.op.scalar_op == ps.mul and len(node.inputs) == 1:
-            # No need to copy over any stack trace
-            return [node.inputs[0]]
+    elif (
+        isinstance(node.op.scalar_op, ps.Mul | ps.Add | ps.Identity)
+        and len(node.inputs) == 1
+    ):
+        # No need to copy over any stack trace
+        return [node.inputs[0]]
 
-        elif node.op.scalar_op == ps.add and len(node.inputs) == 1:
-            # No need to copy over any stack trace
-            return [node.inputs[0]]
-        elif node.op.scalar_op == ps.identity and len(node.inputs) == 1:
-            return [node.inputs[0]]
+    elif isinstance(node.op.scalar_op, ps.AND) and len(node.inputs) == 2:
+        if (
+            isinstance(node.inputs[0], TensorConstant)
+            and node.inputs[1].type.broadcastable == out_bcast
+        ):
+            const_val = node.inputs[0].unique_value
+            if const_val is not None:
+                if const_val == 0:
+                    return [zeros_like(node.inputs[1], dtype=dtype, opt=True)]
+                elif node.outputs[0].dtype == "bool":
+                    # If the output is not Boolean, it is the bitwise AND,
+                    # and this rewrite would be wrong
+                    return [node.inputs[1].astype(node.outputs[0].dtype)]
 
-        elif isinstance(node.op.scalar_op, ps.AND) and len(node.inputs) == 2:
-            if isinstance(node.inputs[0], TensorConstant):
-                const_val = extract_constant(
-                    node.inputs[0], only_process_constants=True
-                )
-                if not isinstance(const_val, Variable):
-                    if const_val == 0:
-                        return [zeros_like(node.inputs[1], dtype=dtype, opt=True)]
-                    elif node.outputs[0].dtype == "bool":
-                        # If the output is not Boolean, it is the bitwise AND,
-                        # and this rewrite would be wrong
-                        return [node.inputs[1].astype(node.outputs[0].dtype)]
+        if (
+            isinstance(node.inputs[1], TensorConstant)
+            and node.inputs[0].type.broadcastable == out_bcast
+        ):
+            const_val = node.inputs[1].unique_value
+            if const_val is not None:
+                if const_val == 0:
+                    return [zeros_like(node.inputs[0], dtype=dtype, opt=True)]
+                elif node.outputs[0].dtype == "bool":
+                    # If the output is not Boolean, it is the bitwise AND,
+                    # and this rewrite would be wrong
+                    return [node.inputs[0].astype(node.outputs[0].dtype)]
 
-            if isinstance(node.inputs[1], TensorConstant):
-                const_val = extract_constant(
-                    node.inputs[1], only_process_constants=True
-                )
-                if not isinstance(const_val, Variable):
-                    if const_val == 0:
-                        return [zeros_like(node.inputs[0], dtype=dtype, opt=True)]
-                    elif node.outputs[0].dtype == "bool":
-                        # If the output is not Boolean, it is the bitwise AND,
-                        # and this rewrite would be wrong
-                        return [node.inputs[0].astype(node.outputs[0].dtype)]
+    elif isinstance(node.op.scalar_op, ps.OR) and len(node.inputs) == 2:
+        if (
+            isinstance(node.inputs[0], TensorConstant)
+            and node.inputs[1].type.broadcastable == out_bcast
+        ):
+            const_val = node.inputs[0].unique_value
+            if const_val is not None:
+                if const_val == 0:
+                    return [node.inputs[1].astype(node.outputs[0].dtype)]
+                elif node.outputs[0].dtype == "bool":
+                    # If the output is not Boolean, it is the bitwise OR,
+                    # and this rewrite would be wrong
+                    return [ones_like(node.inputs[1], dtype=dtype, opt=True)]
 
-        elif isinstance(node.op.scalar_op, ps.OR) and len(node.inputs) == 2:
-            if isinstance(node.inputs[0], TensorConstant):
-                const_val = extract_constant(
-                    node.inputs[0], only_process_constants=True
-                )
-                if not isinstance(const_val, Variable):
-                    if const_val == 0:
-                        return [node.inputs[1].astype(node.outputs[0].dtype)]
-                    elif node.outputs[0].dtype == "bool":
-                        # If the output is not Boolean, it is the bitwise OR,
-                        # and this rewrite would be wrong
-                        return [ones_like(node.inputs[1], dtype=dtype, opt=True)]
-
-            if isinstance(node.inputs[1], TensorConstant):
-                const_val = extract_constant(
-                    node.inputs[1], only_process_constants=True
-                )
-                if not isinstance(const_val, Variable):
-                    if const_val == 0:
-                        return [node.inputs[0].astype(node.outputs[0].dtype)]
-                    elif node.outputs[0].dtype == "bool":
-                        # If the output is not Boolean, it is the bitwise OR,
-                        # and this rewrite would be wrong
-                        return [ones_like(node.inputs[0], dtype=dtype, opt=True)]
-
-        elif isinstance(node.op.scalar_op, ps.XOR) and len(node.inputs) == 2:
-            if node.inputs[0] is node.inputs[1]:
-                return [zeros_like(node.inputs[0], dtype=dtype, opt=True)]
+        if (
+            isinstance(node.inputs[1], TensorConstant)
+            and node.inputs[0].type.broadcastable == out_bcast
+        ):
+            const_val = node.inputs[1].unique_value
+            if const_val is not None:
+                if const_val == 0:
+                    return [node.inputs[0].astype(node.outputs[0].dtype)]
+                elif node.outputs[0].dtype == "bool":
+                    # If the output is not Boolean, it is the bitwise OR,
+                    # and this rewrite would be wrong
+                    return [ones_like(node.inputs[0], dtype=dtype, opt=True)]
 
 
 @register_specialize
@@ -988,13 +990,10 @@ def local_useless_switch(fgraph, node):
     left = node.inputs[1]
     right = node.inputs[2]
     cond_var = node.inputs[0]
-    cond = extract_constant(cond_var, only_process_constants=True)
     out_bcast = node.outputs[0].type.broadcastable
 
-    if (isinstance(cond, np.ndarray) and cond.ndim == 0) or isinstance(
-        cond, np.number | np.bool_
-    ):
-        if cond == 0:
+    if isinstance(cond_var, TensorConstant) and cond_var.unique_value is not None:
+        if cond_var.unique_value == 0:
             correct_out = right
         else:
             correct_out = left
@@ -1014,7 +1013,7 @@ def local_useless_switch(fgraph, node):
     # if left is right -> left
     if equivalent_up_to_constant_casting(left, right):
         if left.type.broadcastable != out_bcast:
-            left, _ = broadcast_arrays(left, cond)
+            left, _ = broadcast_arrays(left, cond_var)
 
         out_dtype = node.outputs[0].type.dtype
         if left.type.dtype != out_dtype:
@@ -1026,13 +1025,22 @@ def local_useless_switch(fgraph, node):
     # This case happens with scan.
     # Elemwise{switch}(le(shape_i{id}(X), 0), 0, shape_i{id}(X)) -> shape_i{id}(X)
     if (
-        cond_var.owner
+        node.outputs[0].type.ndim == 0
+        and cond_var.owner
         and isinstance(cond_var.owner.op, Elemwise)
         and isinstance(cond_var.owner.op.scalar_op, ps.LE)
         and cond_var.owner.inputs[0].owner
         and isinstance(cond_var.owner.inputs[0].owner.op, Shape_i)
-        and extract_constant(cond_var.owner.inputs[1], only_process_constants=True) == 0
-        and extract_constant(left, only_process_constants=True) == 0
+        and get_scalar_constant_value(
+            cond_var.owner.inputs[1],
+            only_process_constants=True,
+            raise_not_constant=False,
+        )
+        == 0
+        and get_scalar_constant_value(
+            left, only_process_constants=True, raise_not_constant=False
+        )
+        == 0
         and right == cond_var.owner.inputs[0]
     ):
         assert node.outputs[0].type.is_super(right.type)
