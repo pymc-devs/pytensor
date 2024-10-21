@@ -18,7 +18,6 @@ from pytensor.scalar import int32
 from pytensor.tensor import (
     _get_vector_length,
     as_tensor_variable,
-    get_scalar_constant_value,
     get_vector_length,
 )
 from pytensor.tensor import basic as ptb
@@ -433,7 +432,7 @@ class SpecifyShape(COp):
                 type_shape[i] = xts
             else:
                 try:
-                    type_s = get_scalar_constant_value(s)
+                    type_s = ptb.get_scalar_constant_value(s)
                     if type_s is not None:
                         type_shape[i] = int(type_s)
                 except NotScalarConstantError:
