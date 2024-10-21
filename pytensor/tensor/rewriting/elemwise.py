@@ -41,7 +41,7 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
 )
 from pytensor.tensor.shape import shape_padleft
-from pytensor.tensor.variable import TensorConstant, get_unique_constant_value
+from pytensor.tensor.variable import TensorConstant
 
 
 class InplaceElemwiseOptimizer(GraphRewriter):
@@ -513,7 +513,6 @@ def local_upcast_elemwise_constant_inputs(fgraph, node):
                     new_inputs.append(i)
                 else:
                     try:
-                        # works only for scalars
                         cval_i = get_underlying_scalar_constant_value(
                             i, only_process_constants=True
                         )
@@ -1218,11 +1217,13 @@ def local_inline_composite_constants(fgraph, node):
         node.inputs, composite_op.fgraph.inputs, strict=True
     ):
         # Complex variables don't have a `c_literal` that can be inlined
-        if "complex" not in outer_inp.type.dtype:
-            unique_value = get_unique_constant_value(outer_inp)
-            if unique_value is not None:
+        if (
+            isinstance(outer_inp, TensorConstant)
+            and "complex" not in outer_inp.type.dtype
+        ):
+            if outer_inp.unique_value is not None:
                 inner_replacements[inner_inp] = ps.constant(
-                    unique_value, dtype=inner_inp.dtype
+                    outer_inp.unique_value, dtype=inner_inp.dtype
                 )
                 continue
         new_outer_inputs.append(outer_inp)

@@ -19,7 +19,7 @@ from numpy.core.numeric import normalize_axis_tuple
 
 import pytensor
 import pytensor.scalar.sharedvar
-from pytensor import compile, config, printing
+from pytensor import config, printing
 from pytensor import scalar as ps
 from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType, grad_undefined
@@ -35,7 +35,7 @@ from pytensor.link.c.params_type import ParamsType
 from pytensor.printing import Printer, min_informative_str, pprint, set_precedence
 from pytensor.raise_op import CheckAndRaise, assert_op
 from pytensor.scalar import int32
-from pytensor.scalar.basic import ScalarConstant, ScalarVariable
+from pytensor.scalar.basic import ScalarConstant, ScalarType, ScalarVariable
 from pytensor.tensor import (
     _as_tensor_variable,
     _get_vector_length,
@@ -71,10 +71,10 @@ from pytensor.tensor.type import (
     uint_dtypes,
     values_eq_approx_always_true,
 )
+from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.variable import (
     TensorConstant,
     TensorVariable,
-    get_unique_constant_value,
 )
 
 
@@ -319,6 +319,8 @@ def get_underlying_scalar_constant_value(
         but I'm not sure where it is.
 
     """
+    from pytensor.compile.ops import DeepCopyOp, OutputGuard
+
     v = orig_v
     while True:
         if v is None:
@@ -336,34 +338,22 @@ def get_underlying_scalar_constant_value(
                 raise NotScalarConstantError()
 
         if isinstance(v, Constant):
-            unique_value = get_unique_constant_value(v)
-            if unique_value is not None:
-                data = unique_value
-            else:
-                data = v.data
+            if isinstance(v.type, TensorType) and v.unique_value is not None:
+                return v.unique_value
 
-            if isinstance(data, np.ndarray):
-                try:
-                    return np.array(data.item(), dtype=v.dtype)
-                except ValueError:
-                    raise NotScalarConstantError()
+            elif isinstance(v.type, ScalarType):
+                return v.data
 
-            from pytensor.sparse.type import SparseTensorType
+            elif isinstance(v.type, NoneTypeT):
+                return None
 
-            if isinstance(v.type, SparseTensorType):
-                raise NotScalarConstantError()
-
-            return data
+            raise NotScalarConstantError()
 
         if not only_process_constants and getattr(v, "owner", None) and max_recur > 0:
             max_recur -= 1
             if isinstance(
                 v.owner.op,
-                Alloc
-                | DimShuffle
-                | Unbroadcast
-                | compile.ops.OutputGuard
-                | compile.DeepCopyOp,
+                Alloc | DimShuffle | Unbroadcast | OutputGuard | DeepCopyOp,
             ):
                 # OutputGuard is only used in debugmode but we
                 # keep it here to avoid problems with old pickles

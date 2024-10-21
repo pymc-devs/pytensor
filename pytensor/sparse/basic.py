@@ -491,6 +491,10 @@ class SparseConstant(SparseVariable, TensorConstant):
     def __repr__(self):
         return str(self)
 
+    @property
+    def unique_value(self):
+        return None
+
 
 SparseTensorType.variable_type = SparseVariable
 SparseTensorType.constant_type = SparseConstant

@@ -11,7 +11,10 @@ from pytensor import tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, OptionalApplyType, Variable
 from pytensor.graph.utils import MetaType
-from pytensor.scalar import ComplexError, IntegerDivisionError
+from pytensor.scalar import (
+    ComplexError,
+    IntegerDivisionError,
+)
 from pytensor.tensor import _get_vector_length
 from pytensor.tensor.exceptions import AdvancedIndexingError
 from pytensor.tensor.type import TensorType
@@ -1042,17 +1045,9 @@ class TensorConstantSignature(tuple):
 
 def get_unique_constant_value(x: TensorVariable) -> Number | None:
     """Return the unique value of a tensor, if there is one"""
-    if isinstance(x, Constant):
-        data = x.data
-
-        if isinstance(data, np.ndarray) and data.size > 0:
-            if data.size == 1:
-                return data.squeeze()
-
-            flat_data = data.ravel()
-            if (flat_data == flat_data[0]).all():
-                return flat_data[0]
-
+    warnings.warn("get_unique_constant_value is deprecated.", FutureWarning)
+    if isinstance(x, TensorConstant):
+        return x.unique_value
     return None
 
 
@@ -1080,6 +1075,30 @@ class TensorConstant(TensorVariable, Constant[_TensorTypeType]):
 
     def signature(self):
         return TensorConstantSignature((self.type, self.data))
+
+    @property
+    def unique_value(self) -> Number | None:
+        """Return the unique value of a tensor, if there is one"""
+        try:
+            return self._unique_value
+        except AttributeError:
+            data = self.data
+            unique_value = None
+            if data.size > 0:
+                if data.size == 1:
+                    unique_value = data.squeeze()
+                else:
+                    flat_data = data.ravel()
+                    if (flat_data == flat_data[0]).all():
+                        unique_value = flat_data[0]
+
+                if unique_value is not None:
+                    # Don't allow the unique value to be changed
+                    unique_value.setflags(write=False)
+
+            self._unique_value = unique_value
+
+        return self._unique_value
 
     def equals(self, other):
         # Override Constant.equals to allow to compare with
