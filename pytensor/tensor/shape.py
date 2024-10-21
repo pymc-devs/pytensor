@@ -428,7 +428,7 @@ class SpecifyShape(COp):
                 type_shape[i] = xts
             elif not isinstance(s.type, NoneTypeT):
                 try:
-                    type_shape[i] = int(ptb.get_underlying_scalar_constant_value(s))
+                    type_shape[i] = int(ptb.get_scalar_constant_value(s))
                 except NotScalarConstantError:
                     pass
 
@@ -580,7 +580,7 @@ def specify_shape(
 @_get_vector_length.register(SpecifyShape)  # type: ignore
 def _get_vector_length_SpecifyShape(op: Op, var: TensorVariable) -> int:
     try:
-        return int(ptb.get_underlying_scalar_constant_value(var.owner.inputs[1]).item())
+        return int(ptb.get_scalar_constant_value(var.owner.inputs[1]).item())
     except NotScalarConstantError:
         raise ValueError(f"Length of {var} cannot be determined")
 
@@ -661,7 +661,7 @@ class Reshape(COp):
                 y = shp_list[index]
                 y = ptb.as_tensor_variable(y)
                 try:
-                    s_val = ptb.get_underlying_scalar_constant_value(y).item()
+                    s_val = ptb.get_scalar_constant_value(y).item()
                     if s_val >= 0:
                         out_shape[index] = s_val
                 except NotScalarConstantError:

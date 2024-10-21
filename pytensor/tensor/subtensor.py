@@ -29,7 +29,7 @@ from pytensor.tensor import (
 from pytensor.tensor.basic import (
     ScalarFromTensor,
     alloc,
-    get_underlying_scalar_constant_value,
+    get_scalar_constant_value,
     nonzero,
     scalar_from_tensor,
 )
@@ -778,7 +778,7 @@ def get_constant_idx(
             return slice(conv(val.start), conv(val.stop), conv(val.step))
         else:
             try:
-                return get_underlying_scalar_constant_value(
+                return get_scalar_constant_value(
                     val,
                     only_process_constants=only_process_constants,
                     elemwise=elemwise,
@@ -855,7 +855,7 @@ class Subtensor(COp):
             if value is None:
                 return value, True
             try:
-                value = get_underlying_scalar_constant_value(value)
+                value = get_scalar_constant_value(value)
                 return value, True
             except NotScalarConstantError:
                 return value, False
@@ -3022,17 +3022,17 @@ def _get_vector_length_Subtensor(op, var):
         start = (
             None
             if indices[0].start is None
-            else get_underlying_scalar_constant_value(indices[0].start)
+            else get_scalar_constant_value(indices[0].start)
         )
         stop = (
             None
             if indices[0].stop is None
-            else get_underlying_scalar_constant_value(indices[0].stop)
+            else get_scalar_constant_value(indices[0].stop)
         )
         step = (
             None
             if indices[0].step is None
-            else get_underlying_scalar_constant_value(indices[0].step)
+            else get_scalar_constant_value(indices[0].step)
         )
 
         if start == stop:

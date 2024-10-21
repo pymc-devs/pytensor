@@ -484,7 +484,7 @@ def scan(
         n_fixed_steps = int(n_steps)
     else:
         try:
-            n_fixed_steps = pt.get_underlying_scalar_constant_value(n_steps)
+            n_fixed_steps = pt.get_scalar_constant_value(n_steps)
         except NotScalarConstantError:
             n_fixed_steps = None
 

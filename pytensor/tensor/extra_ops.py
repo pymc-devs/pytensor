@@ -678,7 +678,7 @@ class Repeat(Op):
             out_shape = [None]
         else:
             try:
-                const_reps = ptb.get_underlying_scalar_constant_value(repeats)
+                const_reps = ptb.get_scalar_constant_value(repeats)
             except NotScalarConstantError:
                 const_reps = None
             if const_reps == 1:
