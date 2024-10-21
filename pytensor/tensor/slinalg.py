@@ -853,26 +853,20 @@ class BilinearSolveDiscreteLyapunov(Op):
 
 
 _solve_continuous_lyapunov = Blockwise(SolveContinuousLyapunov())
-_solve_bilinear_direct_lyapunov = cast(
+_solve_bilinear_discrete_lyapunov = cast(
     typing.Callable, Blockwise(BilinearSolveDiscreteLyapunov())
 )
 
 
-def _direct_solve_discrete_lyapunov(
-    A: TensorVariable, Q: TensorVariable
-) -> TensorVariable:
-    # By default kron acts on tensors, but we need a vectorized version over matrices for this function
-    vec_kron = pt.vectorize(kron, "(m,n),(o,p)->(q,r)")
-
+def _direct_solve_discrete_lyapunov(A, Q) -> TensorVariable:
     if A.type.dtype.startswith("complex"):
-        AxA = vec_kron(A, A.conj())
+        AxA = kron(A, A.conj())
     else:
-        AxA = vec_kron(A, A)
+        AxA = kron(A, A)
 
     eye = pt.eye(AxA.shape[-1])
-    q_shape = pt.concatenate([Q.shape[:-2], [-1]])
 
-    vec_Q = Q.reshape(q_shape)
+    vec_Q = Q.ravel()
     vec_X = solve(eye - AxA, vec_Q, b_ndim=1)
 
     return cast(TensorVariable, reshape(vec_X, A.shape))
@@ -912,10 +906,11 @@ def solve_discrete_lyapunov(
     Q = as_tensor_variable(Q)
 
     if method == "direct":
-        return _direct_solve_discrete_lyapunov(A, Q)
+        signature = BilinearSolveDiscreteLyapunov.gufunc_signature
+        return pt.vectorize(_direct_solve_discrete_lyapunov, signature=signature)(A, Q)
 
     elif method == "bilinear":
-        return cast(TensorVariable, _solve_bilinear_direct_lyapunov(A, Q))
+        return cast(TensorVariable, _solve_bilinear_discrete_lyapunov(A, Q))
 
     else:
         raise ValueError(f"Unknown method {method}")
