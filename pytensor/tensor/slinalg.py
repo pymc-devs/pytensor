@@ -792,8 +792,8 @@ class SolveContinuousLyapunov(Op):
     def perform(self, node, inputs, output_storage):
         (A, B) = inputs
         X = output_storage[0]
-
-        X[0] = scipy.linalg.solve_continuous_lyapunov(A, B)
+        out_dtype = pytensor.scalar.upcast(A.dtype, B.dtype)
+        X[0] = scipy.linalg.solve_continuous_lyapunov(A, B).astype(out_dtype)
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]
@@ -830,7 +830,10 @@ class BilinearSolveDiscreteLyapunov(Op):
         (A, B) = inputs
         X = output_storage[0]
 
-        X[0] = scipy.linalg.solve_discrete_lyapunov(A, B, method="bilinear")
+        dtype = pytensor.scalar.upcast(A.dtype, B.dtype)
+        X[0] = scipy.linalg.solve_discrete_lyapunov(A, B, method="bilinear").astype(
+            dtype
+        )
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]

@@ -543,12 +543,33 @@ def test_solve_discrete_lyapunov(
     x = solve_discrete_lyapunov(a, q, method=method)
     f = function([a, q], x)
 
-    A = rng.normal(size=shape)
-    Q = rng.normal(size=shape)
+    A = rng.normal(size=shape).astype(dtype)
+    Q = rng.normal(size=shape).astype(dtype)
 
     X = f(A, Q)
     Q_recovered = vec_recover_Q(A, X, continuous=False)
-    np.testing.assert_allclose(Q_recovered, Q)
+
+    atol = rtol = 1e-4 if config.floatX == "float32" else 1e-8
+    np.testing.assert_allclose(Q_recovered, Q, atol=atol, rtol=rtol)
+
+
+@pytest.mark.parametrize("use_complex", [False, True], ids=["float", "complex"])
+@pytest.mark.parametrize("shape", [(5, 5), (5, 5, 5)], ids=["matrix", "batch"])
+@pytest.mark.parametrize("method", ["direct", "bilinear"])
+def test_solve_discrete_lyapunov_gradient(
+    use_complex, shape: tuple[int], method: Literal["direct", "bilinear"]
+):
+    if config.floatX == "float32":
+        pytest.skip(reason="Not enough precision in float32 to get a good gradient")
+
+    rng = np.random.default_rng(utt.fetch_seed())
+    dtype = config.floatX
+    if use_complex:
+        precision = int(dtype[-2:])  # 64 or 32
+        dtype = f"complex{int(2 * precision)}"
+
+    A = rng.normal(size=shape).astype(dtype)
+    Q = rng.normal(size=shape).astype(dtype)
 
     utt.verify_grad(
         functools.partial(solve_discrete_lyapunov, method=method),
@@ -564,13 +585,25 @@ def test_solve_continuous_lyapunov(shape: tuple[int]):
     q = pt.tensor(name="q", shape=shape)
     f = function([a, q], [solve_continuous_lyapunov(a, q)])
 
-    A = rng.normal(size=shape)
-    Q = rng.normal(size=shape)
+    A = rng.normal(size=shape).astype(config.floatX)
+    Q = rng.normal(size=shape).astype(config.floatX)
     X = f(A, Q)
 
     Q_recovered = vec_recover_Q(A, X, continuous=True)
 
-    np.testing.assert_allclose(Q_recovered.squeeze(), Q)
+    atol = rtol = 1e-2 if config.floatX == "float32" else 1e-8
+    np.testing.assert_allclose(Q_recovered.squeeze(), Q, atol=atol, rtol=rtol)
+
+
+@pytest.mark.parametrize("shape", [(5, 5), (5, 5, 5)], ids=["matrix", "batched"])
+def test_solve_continuous_lyapunov_grad(shape: tuple[int]):
+    if config.floatX == "float32":
+        pytest.skip(reason="Not enough precision in float32 to get a good gradient")
+
+    rng = np.random.default_rng(utt.fetch_seed())
+    A = rng.normal(size=shape).astype(config.floatX)
+    Q = rng.normal(size=shape).astype(config.floatX)
+
     utt.verify_grad(solve_continuous_lyapunov, pt=[A, Q], rng=rng)
 
 
