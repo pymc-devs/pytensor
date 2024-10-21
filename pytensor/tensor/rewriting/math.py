@@ -152,18 +152,16 @@ def local_0_dot_x(fgraph, node):
 
     x = node.inputs[0]
     y = node.inputs[1]
-    replace = False
-    try:
-        if get_underlying_scalar_constant_value(x, only_process_constants=True) == 0:
-            replace = True
-    except NotScalarConstantError:
-        pass
-
-    try:
-        if get_underlying_scalar_constant_value(y, only_process_constants=True) == 0:
-            replace = True
-    except NotScalarConstantError:
-        pass
+    replace = (
+        get_underlying_scalar_constant_value(
+            x, only_process_constants=True, raise_not_constant=False
+        )
+        == 0
+        or get_underlying_scalar_constant_value(
+            y, only_process_constants=True, raise_not_constant=False
+        )
+        == 0
+    )
 
     if replace:
         constant_zero = constant(0, dtype=node.outputs[0].type.dtype)
@@ -2135,7 +2133,7 @@ def local_add_remove_zeros(fgraph, node):
             y = get_underlying_scalar_constant_value(inp)
         except NotScalarConstantError:
             y = inp
-        if np.all(y == 0.0):
+        if y == 0.0:
             continue
         new_inputs.append(inp)
 
@@ -2233,7 +2231,7 @@ def local_abs_merge(fgraph, node):
                     )
                 except NotScalarConstantError:
                     return False
-                if not (const >= 0).all():
+                if not const >= 0:
                     return False
                 inputs.append(i)
             else:
@@ -2881,7 +2879,7 @@ def _is_1(expr):
     """
     try:
         v = get_underlying_scalar_constant_value(expr)
-        return np.allclose(v, 1)
+        return np.isclose(v, 1)
     except NotScalarConstantError:
         return False
 
@@ -3049,7 +3047,7 @@ def is_neg(var):
         for idx, mul_input in enumerate(var_node.inputs):
             try:
                 constant = get_underlying_scalar_constant_value(mul_input)
-                is_minus_1 = np.allclose(constant, -1)
+                is_minus_1 = np.isclose(constant, -1)
             except NotScalarConstantError:
                 is_minus_1 = False
             if is_minus_1:
