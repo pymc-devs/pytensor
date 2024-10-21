@@ -127,8 +127,8 @@ def local_blockwise_alloc(fgraph, node):
                 value, *shape = inp.owner.inputs
 
                 # Check what to do with the value of the Alloc
-                squeezed_value = _squeeze_left(value, batch_ndim)
-                missing_ndim = len(shape) - value.type.ndim
+                missing_ndim = inp.type.ndim - value.type.ndim
+                squeezed_value = _squeeze_left(value, (batch_ndim - missing_ndim))
                 if (
                     (((1,) * missing_ndim + value.type.broadcastable)[batch_ndim:])
                     != inp.type.broadcastable[batch_ndim:]
