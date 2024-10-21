@@ -28,7 +28,6 @@ from pytensor.tensor.basic import (
     as_tensor_variable,
     cast,
     constant,
-    extract_constant,
     get_underlying_scalar_constant_value,
     moveaxis,
     ones_like,
@@ -566,10 +565,13 @@ def local_expm1(fgraph, node):
         in1.owner
         and isinstance(in1.owner.op, Elemwise)
         and isinstance(in1.owner.op.scalar_op, ps.Exp)
-        and extract_constant(in2, only_process_constants=False) == 1
+        and get_underlying_scalar_constant_value(in2, raise_not_constant=False) == 1
     ):
         in11 = in1.owner.inputs[0]
         new_out = expm1(in11)
+
+        if new_out.type.broadcastable != out.type.broadcastable:
+            new_out = broadcast_arrays(in11, in2)[0]
 
         if new_out.dtype != out.dtype:
             new_out = cast(new_out, dtype=out.dtype)
@@ -1345,12 +1347,13 @@ def local_useless_elemwise_comparison(fgraph, node):
     the graph easier to read.
 
     """
+    # TODO: Refactor this function. So much repeated code!
+
     if node.op.scalar_op.nin != 2:
         return
 
-    # We call zeros_like and one_like with opt=True to generate a
-    # cleaner graph.
-    dtype = node.outputs[0].dtype
+    dtype = node.outputs[0].type.dtype
+    out_bcast = node.outputs[0].type.broadcastable
 
     # Elemwise[{LT,GT}](X, X) -> Elemwise[zeros](X)
     if (
@@ -1361,6 +1364,7 @@ def local_useless_elemwise_comparison(fgraph, node):
         # Copy over stacktrace from previous output.
         copy_stack_trace(node.outputs, res)
         return [res]
+
     # Elemwise[{LE,GE}](X, X) -> Elemwise[ones](X)
     if (
         isinstance(node.op.scalar_op, ps.LE | ps.GE)
@@ -1371,6 +1375,7 @@ def local_useless_elemwise_comparison(fgraph, node):
         # Copy over stacktrace from previous output.
         copy_stack_trace(node.outputs, res)
         return [res]
+
     # Elemwise[{minimum,maximum}](X, X) -> X
     if (
         isinstance(node.op.scalar_op, ps.ScalarMinimum | ps.ScalarMaximum)
@@ -1386,64 +1391,72 @@ def local_useless_elemwise_comparison(fgraph, node):
         isinstance(node.op.scalar_op, ps.LT)
         and node.inputs[0].owner
         and isinstance(node.inputs[0].owner.op, Shape_i)
-        and extract_constant(node.inputs[1], only_process_constants=True) == 0
+        and get_underlying_scalar_constant_value(
+            node.inputs[1], only_process_constants=True, raise_not_constant=False
+        )
+        == 0
     ):
         res = zeros_like(node.inputs[0], dtype=dtype, opt=True)
+        if res.type.broadcastable != out_bcast:
+            res = broadcast_arrays(res, node.inputs[1])[0]
         # Copy over stacktrace from previous output.
         copy_stack_trace(node.outputs, res)
         return [res]
+
     # Elemwise[GE](X.shape[i], 0) -> Elemwise[ones](X)
     if (
         isinstance(node.op.scalar_op, ps.GE)
         and node.inputs[0].owner
         and isinstance(node.inputs[0].owner.op, Shape_i)
-        and extract_constant(node.inputs[1], only_process_constants=True) == 0
+        and get_underlying_scalar_constant_value(
+            node.inputs[1], only_process_constants=True, raise_not_constant=False
+        )
+        == 0
     ):
         res = ones_like(node.inputs[0], dtype=dtype, opt=True)
-        # Copy over stacktrace from previous output.
-        copy_stack_trace(node.outputs, res)
-        return [res]
-    # Elemwise[maximum](X.shape[i], 0) -> X.shape[i]
-    if (
-        isinstance(node.op.scalar_op, ps.ScalarMaximum)
-        and node.inputs[0].owner
-        and isinstance(node.inputs[0].owner.op, Shape_i)
-        and extract_constant(node.inputs[1], only_process_constants=True) == 0
-    ):
-        # No need to copy over stacktrace.
-        return [node.inputs[0]]
-    # Elemwise[maximum](0, X.shape[i]) -> X.shape[i]
-    if (
-        isinstance(node.op.scalar_op, ps.ScalarMaximum)
-        and extract_constant(node.inputs[0], only_process_constants=True) == 0
-        and node.inputs[1].owner
-        and isinstance(node.inputs[1].owner.op, Shape_i)
-    ):
-        # No need to copy over stacktrace.
-        return [node.inputs[1]]
-    # Elemwise[minimum](X.shape[i], 0) -> 0
-    if (
-        isinstance(node.op.scalar_op, ps.ScalarMinimum)
-        and node.inputs[0].owner
-        and isinstance(node.inputs[0].owner.op, Shape_i)
-        and extract_constant(node.inputs[1], only_process_constants=True) == 0
-    ):
-        res = zeros_like(node.inputs[0], dtype=dtype, opt=True)
+        if res.type.broadcastable != out_bcast:
+            res = broadcast_arrays(res, node.inputs[1])[0]
         # Copy over stacktrace from previous output.
         copy_stack_trace(node.outputs, res)
         return [res]
 
-    # Elemwise[minimum](0, X.shape[i]) -> 0
-    if (
-        isinstance(node.op.scalar_op, ps.ScalarMinimum)
-        and extract_constant(node.inputs[0], only_process_constants=True) == 0
-        and node.inputs[1].owner
-        and isinstance(node.inputs[1].owner.op, Shape_i)
-    ):
-        res = zeros_like(node.inputs[1], dtype=dtype, opt=True)
-        # Copy over stacktrace from previous output.
-        copy_stack_trace(node.outputs, res)
-        return [res]
+    # Elemwise[maximum](X.shape[i], 0) -> X.shape[i]
+    if isinstance(node.op.scalar_op, ps.ScalarMaximum):
+        for idx in range(2):
+            if (
+                node.inputs[idx].owner
+                and isinstance(node.inputs[idx].owner.op, Shape_i)
+                and get_underlying_scalar_constant_value(
+                    node.inputs[1 - idx],
+                    only_process_constants=True,
+                    raise_not_constant=False,
+                )
+                == 0
+            ):
+                res = node.inputs[idx]
+                if res.type.broadcastable != out_bcast:
+                    res = broadcast_arrays(res, node.inputs[1 - idx])[0]
+                # No need to copy over stacktrace.
+                return [res]
+
+    # Elemwise[minimum](X.shape[i], 0) -> 0
+    if isinstance(node.op.scalar_op, ps.ScalarMinimum):
+        for idx in range(2):
+            if (
+                node.inputs[idx].owner
+                and isinstance(node.inputs[idx].owner.op, Shape_i)
+                and get_underlying_scalar_constant_value(
+                    node.inputs[1 - idx],
+                    only_process_constants=True,
+                    raise_not_constant=False,
+                )
+                == 0
+            ):
+                res = zeros_like(node.inputs[idx], dtype=dtype, opt=True)
+                if res.type.broadcastable != out_bcast:
+                    res = broadcast_arrays(res, node.inputs[1 - idx])[0]
+                # No need to copy over stacktrace.
+                return [res]
 
     # Elemwise[LT](add([anything that is shapes]), 0) -> Elemwise[zeros](X)
     if (
@@ -1455,12 +1468,18 @@ def local_useless_elemwise_comparison(fgraph, node):
             isinstance(var.owner and var.owner.op, Shape_i)
             for var in node.inputs[0].owner.inputs
         )
-        and extract_constant(node.inputs[1], only_process_constants=True) == 0
+        and get_underlying_scalar_constant_value(
+            node.inputs[1], only_process_constants=True, raise_not_constant=False
+        )
+        == 0
     ):
         res = zeros_like(node.inputs[0], dtype=dtype, opt=True)
+        if res.type.broadcastable != out_bcast:
+            res = broadcast_arrays(res, node.inputs[1])[0]
         # Copy over stacktrace from previous output.
         copy_stack_trace(node.outputs, res)
         return [res]
+
     # Elemwise[GE](add([anything that is shapes]), 0) -> Elemwise[ones](X)
     if (
         isinstance(node.op.scalar_op, ps.GE)
@@ -1471,57 +1490,61 @@ def local_useless_elemwise_comparison(fgraph, node):
             isinstance(var.owner and var.owner.op, Shape_i)
             for var in node.inputs[0].owner.inputs
         )
-        and extract_constant(node.inputs[1], only_process_constants=True) == 0
+        and get_underlying_scalar_constant_value(
+            node.inputs[1], only_process_constants=True, raise_not_constant=False
+        )
+        == 0
     ):
         res = ones_like(node.inputs[0], dtype=dtype, opt=True)
-
+        if res.type.broadcastable != out_bcast:
+            res = broadcast_arrays(res, node.inputs[1])[0]
         # Copy over stacktrace from previous output.
         copy_stack_trace(node.outputs, res)
         return [res]
 
-        # Elemwise[EQ](Subtensor(Shape(x)), -N)
-        # Elemwise[EQ](somegraph that only depend of shape, -N)
-        # TODO: handle the case where the -N is on either side
-        """
- |Elemwise{eq,no_inplace} [id B] ''
- | |Subtensor{int64} [id C] ''
- | | |Join [id D] ''
- | | | |TensorConstant{0} [id E]
- | | | |Subtensor{int64:int64:} [id F] ''
- | | | | |Shape [id G] ''
-        """
+    # Elemwise[EQ](Subtensor(Shape(x)), -N)
+    # Elemwise[EQ](somegraph that only depend of shape, -N)
+    # TODO: handle the case where the -N is on either side
+    """
+|Elemwise{eq,no_inplace} [id B] ''
+| |Subtensor{int64} [id C] ''
+| | |Join [id D] ''
+| | | |TensorConstant{0} [id E]
+| | | |Subtensor{int64:int64:} [id F] ''
+| | | | |Shape [id G] ''
+    """
 
-    def investigate(node):
+    def investigate_if_shape(node) -> bool:
         "Return True if values will be shapes, so >= 0"
         if isinstance(node.op, Shape | Shape_i):
             return True
         elif isinstance(node.op, Subtensor) and node.inputs[0].owner:
-            return investigate(node.inputs[0].owner)
+            return investigate_if_shape(node.inputs[0].owner)
         elif isinstance(node.op, Join):
-            return all(v.owner and investigate(v.owner) for v in node.inputs[1:])
+            return all(
+                v.owner and investigate_if_shape(v.owner) for v in node.inputs[1:]
+            )
         elif isinstance(node.op, MakeVector):
-            return all(v.owner and investigate(v.owner) for v in node.inputs)
+            return all(v.owner and investigate_if_shape(v.owner) for v in node.inputs)
+        return False
 
     if (
         isinstance(node.op.scalar_op, ps.EQ)
         and node.inputs[0].owner
-        and investigate(node.inputs[0].owner)
+        and investigate_if_shape(node.inputs[0].owner)
+        and (
+            isinstance(node.inputs[1], TensorConstant)
+            and node.inputs[1].unique_value is not None
+            and node.inputs[1].unique_value < 0
+        )
     ):
-        try:
-            cst = get_underlying_scalar_constant_value(
-                node.inputs[1], only_process_constants=True
-            )
+        res = zeros_like(node.inputs[0], dtype=dtype, opt=True)
+        if res.type.broadcastable != out_bcast:
+            res = broadcast_arrays(res, node.inputs[1])[0]
+        # Copy over stacktrace from previous output.
+        copy_stack_trace(node.outputs, res)
+        return [res]
 
-            res = zeros_like(node.inputs[0], dtype=dtype, opt=True)
-
-            if cst < 0:
-                # Copy over stacktrace from previous output.
-                copy_stack_trace(node.outputs, res)
-
-                return [res]
-
-        except NotScalarConstantError:
-            pass
     return
 
 
@@ -2223,12 +2246,21 @@ def local_log1p(fgraph, node):
                 return [alloc_like(log1p(ninp), node.outputs[0], fgraph)]
 
     elif log_arg.owner and log_arg.owner.op == sub:
-        one = extract_constant(log_arg.owner.inputs[0], only_process_constants=True)
+        one, other = log_arg.owner.inputs
+        try:
+            one = get_underlying_scalar_constant_value(one, only_process_constants=True)
+        except NotScalarConstantError:
+            return
+
         if one != 1:
             return
-        other = log_arg.owner.inputs[1]
-        if other.dtype != log_arg.dtype:
+
+        if other.type.broadcastable != log_arg.type.broadcastable:
+            other = broadcast_arrays(other, one)[0]
+
+        if other.type.dtype != log_arg.type.dtype:
             other = other.astype(log_arg.dtype)
+
         return [log1p(neg(other))]
 
 

@@ -22,7 +22,7 @@ from pytensor.tensor.basic import (
     as_tensor_variable,
     cast,
     constant,
-    extract_constant,
+    get_scalar_constant_value,
     get_underlying_scalar_constant_value,
     register_infer_shape,
     stack,
@@ -354,7 +354,9 @@ class ShapeFeature(Feature):
                 not hasattr(r.type, "shape")
                 or r.type.shape[i] != 1
                 or self.lscalar_one.equals(shape_vars[i])
-                or self.lscalar_one.equals(extract_constant(shape_vars[i]))
+                or self.lscalar_one.equals(
+                    get_scalar_constant_value(shape_vars[i], raise_not_constant=False)
+                )
                 for i in range(r.type.ndim)
             )
             self.shape_of[r] = tuple(shape_vars)
@@ -450,7 +452,11 @@ class ShapeFeature(Feature):
             )
             or self.lscalar_one.equals(merged_shape[i])
             or self.lscalar_one.equals(
-                extract_constant(merged_shape[i], only_process_constants=True)
+                get_underlying_scalar_constant_value(
+                    merged_shape[i],
+                    only_process_constants=True,
+                    raise_not_constant=False,
+                )
             )
             for i in range(r.type.ndim)
         )
@@ -474,7 +480,11 @@ class ShapeFeature(Feature):
             not hasattr(r.type, "shape")
             or r.type.shape[idx] != 1
             or self.lscalar_one.equals(new_shape[idx])
-            or self.lscalar_one.equals(extract_constant(new_shape[idx]))
+            or self.lscalar_one.equals(
+                get_underlying_scalar_constant_value(
+                    new_shape[idx], raise_not_constant=False
+                )
+            )
             for idx in range(r.type.ndim)
         )
         self.shape_of[r] = tuple(new_shape)
@@ -847,7 +857,10 @@ def local_useless_reshape(fgraph, node):
                 outshp_i.owner
                 and isinstance(outshp_i.owner.op, Subtensor)
                 and len(outshp_i.owner.inputs) == 2
-                and extract_constant(outshp_i.owner.inputs[1]) == dim
+                and get_scalar_constant_value(
+                    outshp_i.owner.inputs[1], raise_not_constant=False
+                )
+                == dim
             ):
                 subtensor_inp = outshp_i.owner.inputs[0]
                 if subtensor_inp.owner and isinstance(subtensor_inp.owner.op, Shape):
@@ -857,7 +870,9 @@ def local_useless_reshape(fgraph, node):
                         continue
 
             # Match constant if input.type.shape[dim] == constant
-            cst_outshp_i = extract_constant(outshp_i, only_process_constants=1)
+            cst_outshp_i = get_scalar_constant_value(
+                outshp_i, only_process_constants=True, raise_not_constant=False
+            )
             if inp.type.shape[dim] == cst_outshp_i:
                 shape_match[dim] = True
                 continue
@@ -872,8 +887,12 @@ def local_useless_reshape(fgraph, node):
             if shape_feature:
                 inpshp_i = shape_feature.get_shape(inp, dim)
                 if inpshp_i == outshp_i or (
-                    extract_constant(inpshp_i, only_process_constants=True)
-                    == extract_constant(outshp_i, only_process_constants=True)
+                    get_scalar_constant_value(
+                        inpshp_i, only_process_constants=True, raise_not_constant=False
+                    )
+                    == get_scalar_constant_value(
+                        outshp_i, only_process_constants=True, raise_not_constant=False
+                    )
                 ):
                     shape_match[dim] = True
                     continue
@@ -909,11 +928,14 @@ def local_reshape_to_dimshuffle(fgraph, node):
     new_output_shape = []
     index = 0  # index over the output of the new reshape
     for i in range(output.ndim):
-        # Since output_shape is a symbolic vector, we trust extract_constant
+        # Since output_shape is a symbolic vector, we trust get_scalar_constant_value
         # to go through however it is formed to see if its i-th element is 1.
         # We need only_process_constants=False for that.
-        dim = extract_constant(
-            output_shape[i], only_process_constants=False, elemwise=False
+        dim = get_scalar_constant_value(
+            output_shape[i],
+            only_process_constants=False,
+            elemwise=False,
+            raise_not_constant=False,
         )
         if dim == 1:
             dimshuffle_new_order.append("x")
