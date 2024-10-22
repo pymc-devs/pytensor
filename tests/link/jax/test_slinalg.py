@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Literal
 
 import numpy as np
@@ -208,6 +209,7 @@ def test_jax_solve_discrete_lyapunov(
     out = pt_slinalg.solve_discrete_lyapunov(A, B, method=method)
     out_fg = FunctionGraph([A, B], [out])
 
+    atol = rtol = 1e-8 if config.floatX == "float64" else 1e-3
     compare_jax_and_py(
         out_fg,
         [
@@ -215,4 +217,5 @@ def test_jax_solve_discrete_lyapunov(
             np.random.normal(size=shape).astype(config.floatX),
         ],
         jax_mode="JAX",
+        assert_fn=partial(np.testing.assert_allclose, atol=atol, rtol=rtol),
     )

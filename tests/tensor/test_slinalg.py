@@ -537,8 +537,8 @@ def test_solve_discrete_lyapunov(
         precision = int(dtype[-2:])  # 64 or 32
         dtype = f"complex{int(2 * precision)}"
 
-    A1, A2 = rng.normal(size=(2, *shape)).astype(dtype)
-    Q1, Q2 = rng.normal(size=(2, *shape)).astype(dtype)
+    A1, A2 = rng.normal(size=(2, *shape))
+    Q1, Q2 = rng.normal(size=(2, *shape))
 
     if use_complex:
         A = A1 + 1j * A2
@@ -546,6 +546,8 @@ def test_solve_discrete_lyapunov(
     else:
         A = A1
         Q = Q1
+
+    A, Q = A.astype(dtype), Q.astype(dtype)
 
     a = pt.tensor(name="a", shape=shape, dtype=dtype)
     q = pt.tensor(name="q", shape=shape, dtype=dtype)
@@ -585,15 +587,20 @@ def test_solve_discrete_lyapunov_gradient(
 @pytest.mark.parametrize("shape", [(5, 5), (5, 5, 5)], ids=["matrix", "batched"])
 @pytest.mark.parametrize("use_complex", [False, True], ids=["float", "complex"])
 def test_solve_continuous_lyapunov(shape: tuple[int], use_complex: bool):
+    dtype = config.floatX
+    if use_complex and dtype == "float32":
+        pytest.skip(
+            "Not enough precision in complex64 to do schur decomposition "
+            "(ill-conditioned matrix errors arise)"
+        )
     rng = np.random.default_rng(utt.fetch_seed())
 
-    dtype = config.floatX
     if use_complex:
         precision = int(dtype[-2:])  # 64 or 32
         dtype = f"complex{int(2 * precision)}"
 
-    A1, A2 = rng.normal(size=(2, *shape)).astype(dtype)
-    Q1, Q2 = rng.normal(size=(2, *shape)).astype(dtype)
+    A1, A2 = rng.normal(size=(2, *shape))
+    Q1, Q2 = rng.normal(size=(2, *shape))
 
     if use_complex:
         A = A1 + 1j * A2
@@ -602,9 +609,13 @@ def test_solve_continuous_lyapunov(shape: tuple[int], use_complex: bool):
         A = A1
         Q = Q1
 
+    A, Q = A.astype(dtype), Q.astype(dtype)
+
     a = pt.tensor(name="a", shape=shape, dtype=dtype)
     q = pt.tensor(name="q", shape=shape, dtype=dtype)
-    f = function([a, q], [solve_continuous_lyapunov(a, q)])
+    x = solve_continuous_lyapunov(a, q)
+
+    f = function([a, q], x)
 
     X = f(A, Q)
 

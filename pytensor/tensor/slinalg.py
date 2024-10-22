@@ -797,7 +797,8 @@ class SolveContinuousLyapunov(Op):
     def perform(self, node, inputs, output_storage):
         (A, B) = inputs
         X = output_storage[0]
-        out_dtype = pytensor.scalar.upcast(A.dtype, B.dtype)
+        out_dtype = node.outputs[0].type.dtype
+
         X[0] = scipy.linalg.solve_continuous_lyapunov(A, B).astype(out_dtype)
 
     def infer_shape(self, fgraph, node, shapes):
@@ -843,9 +844,9 @@ class BilinearSolveDiscreteLyapunov(Op):
         (A, B) = inputs
         X = output_storage[0]
 
-        dtype = pytensor.scalar.upcast(A.dtype, B.dtype)
+        out_dtype = node.outputs[0].type.dtype
         X[0] = scipy.linalg.solve_discrete_lyapunov(A, B, method="bilinear").astype(
-            dtype
+            out_dtype
         )
 
     def infer_shape(self, fgraph, node, shapes):
@@ -866,12 +867,6 @@ class BilinearSolveDiscreteLyapunov(Op):
         ) + pytensor.tensor.linalg.matrix_dot(S.conj().T, A, X)
         Q_bar = S
         return [A_bar, Q_bar]
-
-
-_solve_continuous_lyapunov = Blockwise(SolveContinuousLyapunov())
-_solve_bilinear_discrete_lyapunov = cast(
-    typing.Callable, Blockwise(BilinearSolveDiscreteLyapunov())
-)
 
 
 def _direct_solve_discrete_lyapunov(
@@ -937,7 +932,7 @@ def solve_discrete_lyapunov(
         return cast(TensorVariable, X)
 
     elif method == "bilinear":
-        return cast(TensorVariable, _solve_bilinear_discrete_lyapunov(A, Q))
+        return cast(TensorVariable, Blockwise(BilinearSolveDiscreteLyapunov())(A, Q))
 
     else:
         raise ValueError(f"Unknown method {method}")
@@ -961,10 +956,10 @@ def solve_continuous_lyapunov(A: TensorLike, Q: TensorLike) -> TensorVariable:
 
     """
 
-    return cast(TensorVariable, _solve_continuous_lyapunov(A, Q))
+    return cast(TensorVariable, Blockwise(SolveContinuousLyapunov())(A, Q))
 
 
-class SolveDiscreteARE(pt.Op):
+class SolveDiscreteARE(Op):
     __props__ = ("enforce_Q_symmetric",)
     gufunc_signature = "(m,m),(m,n),(m,m),(n,n)->(m,m)"
 
