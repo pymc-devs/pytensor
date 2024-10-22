@@ -972,7 +972,7 @@ def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
     return [eye_input * (non_eye_input**0.5)]
 
 
-@node_rewriter([Blockwise])  #  type: ignore
+@node_rewriter([Blockwise])
 def jax_bilinaer_lyapunov_to_direct(fgraph: FunctionGraph, node: Apply):
     """
     Replace BilinearSolveDiscreteLyapunov with a direct computation that is supported by JAX
