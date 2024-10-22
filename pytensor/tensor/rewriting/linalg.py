@@ -43,11 +43,11 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.slinalg import (
-    BilinearSolveDiscreteLyapunov,
     BlockDiagonal,
     Cholesky,
     Solve,
     SolveBase,
+    _bilinear_solve_discrete_lyapunov,
     block_diag,
     cholesky,
     solve,
@@ -972,14 +972,11 @@ def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
     return [eye_input * (non_eye_input**0.5)]
 
 
-@node_rewriter([Blockwise])
+@node_rewriter([_bilinear_solve_discrete_lyapunov])
 def jax_bilinaer_lyapunov_to_direct(fgraph: FunctionGraph, node: Apply):
     """
     Replace BilinearSolveDiscreteLyapunov with a direct computation that is supported by JAX
     """
-    if not isinstance(node.op.core_op, BilinearSolveDiscreteLyapunov):
-        return None
-
     A, B = (cast(TensorVariable, x) for x in node.inputs)
     result = solve_discrete_lyapunov(A, B, method="direct")
 
