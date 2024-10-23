@@ -28,6 +28,41 @@ from pytensor.tensor.slinalg import (
 from pytensor.tensor.utils import _parse_gufunc_signature
 
 
+def test_perform_method_per_node():
+    """Confirm that Blockwise uses one perform method per node.
+
+    This is important if the perform method requires node information (such as dtypes)
+    """
+
+    class NodeDependentPerformOp(Op):
+        def make_node(self, x):
+            return Apply(self, [x], [x.type()])
+
+        def perform(self, node, inputs, outputs):
+            [x] = inputs
+            if node.inputs[0].type.dtype.startswith("float"):
+                y = x + 1
+            else:
+                y = x - 1
+            outputs[0][0] = y
+
+    blockwise_op = Blockwise(core_op=NodeDependentPerformOp(), signature="()->()")
+    x = tensor("x", shape=(3,), dtype="float32")
+    y = tensor("y", shape=(3,), dtype="int32")
+
+    out_x = blockwise_op(x)
+    out_y = blockwise_op(y)
+    fn = pytensor.function([x, y], [out_x, out_y])
+    [op1, op2] = [node.op for node in fn.maker.fgraph.apply_nodes]
+    # Confirm both nodes have the same Op
+    assert op1 is blockwise_op
+    assert op1 is op2
+
+    res_out_x, res_out_y = fn(np.zeros(3, dtype="float32"), np.zeros(3, dtype="int32"))
+    np.testing.assert_array_equal(res_out_x, np.ones(3, dtype="float32"))
+    np.testing.assert_array_equal(res_out_y, -np.ones(3, dtype="int32"))
+
+
 def test_vectorize_blockwise():
     mat = tensor(shape=(None, None))
     tns = tensor(shape=(None, None, None))
