@@ -1,5 +1,4 @@
 from collections.abc import Sequence
-from copy import copy
 from typing import Any, cast
 
 import numpy as np
@@ -79,7 +78,6 @@ class Blockwise(Op):
         self.name = name
         self.inputs_sig, self.outputs_sig = _parse_gufunc_signature(signature)
         self.gufunc_spec = gufunc_spec
-        self._gufunc = None
         if destroy_map is not None:
             self.destroy_map = destroy_map
         if self.destroy_map != core_op.destroy_map:
@@ -90,11 +88,6 @@ class Blockwise(Op):
             )
 
         super().__init__(**kwargs)
-
-    def __getstate__(self):
-        d = copy(self.__dict__)
-        d["_gufunc"] = None
-        return d
 
     def _create_dummy_core_node(self, inputs: Sequence[TensorVariable]) -> Apply:
         core_input_types = []
@@ -296,32 +289,40 @@ class Blockwise(Op):
 
         return rval
 
-    def _create_gufunc(self, node):
+    def _create_node_gufunc(self, node) -> None:
+        """Define (or retrieve) the node gufunc used in `perform`.
+
+        If the Blockwise or core_op have a `gufunc_spec`, the relevant numpy or scipy gufunc is used directly.
+        Otherwise, we default to `np.vectorize` of the core_op `perform` method for a dummy node.
+
+        The gufunc is stored in the tag of the node.
+        """
         gufunc_spec = self.gufunc_spec or getattr(self.core_op, "gufunc_spec", None)
 
         if gufunc_spec is not None:
-            self._gufunc = import_func_from_string(gufunc_spec[0])
-            if self._gufunc:
-                return self._gufunc
-            else:
+            gufunc = import_func_from_string(gufunc_spec[0])
+            if gufunc is None:
                 raise ValueError(f"Could not import gufunc {gufunc_spec[0]} for {self}")
 
-        n_outs = len(self.outputs_sig)
-        core_node = self._create_dummy_core_node(node.inputs)
+        else:
+            # Wrap core_op perform method in numpy vectorize
+            n_outs = len(self.outputs_sig)
+            core_node = self._create_dummy_core_node(node.inputs)
 
-        def core_func(*inner_inputs):
-            inner_outputs = [[None] for _ in range(n_outs)]
+            def core_func(*inner_inputs):
+                inner_outputs = [[None] for _ in range(n_outs)]
 
-            inner_inputs = [np.asarray(inp) for inp in inner_inputs]
-            self.core_op.perform(core_node, inner_inputs, inner_outputs)
+                inner_inputs = [np.asarray(inp) for inp in inner_inputs]
+                self.core_op.perform(core_node, inner_inputs, inner_outputs)
 
-            if len(inner_outputs) == 1:
-                return inner_outputs[0][0]
-            else:
-                return tuple(r[0] for r in inner_outputs)
+                if len(inner_outputs) == 1:
+                    return inner_outputs[0][0]
+                else:
+                    return tuple(r[0] for r in inner_outputs)
 
-        self._gufunc = np.vectorize(core_func, signature=self.signature)
-        return self._gufunc
+            gufunc = np.vectorize(core_func, signature=self.signature)
+
+        node.tag.gufunc = gufunc
 
     def _check_runtime_broadcast(self, node, inputs):
         batch_ndim = self.batch_ndim(node)
@@ -340,10 +341,12 @@ class Blockwise(Op):
                 )
 
     def perform(self, node, inputs, output_storage):
-        gufunc = self._gufunc
+        gufunc = getattr(node.tag, "gufunc", None)
 
         if gufunc is None:
-            gufunc = self._create_gufunc(node)
+            # Cache it once per node
+            self._create_node_gufunc(node)
+            gufunc = node.tag.gufunc
 
         self._check_runtime_broadcast(node, inputs)
 
