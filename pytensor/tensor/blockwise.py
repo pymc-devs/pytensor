@@ -308,17 +308,23 @@ class Blockwise(Op):
             # Wrap core_op perform method in numpy vectorize
             n_outs = len(self.outputs_sig)
             core_node = self._create_dummy_core_node(node.inputs)
+            inner_outputs_storage = [[None] for _ in range(n_outs)]
 
-            def core_func(*inner_inputs):
-                inner_outputs = [[None] for _ in range(n_outs)]
+            def core_func(
+                *inner_inputs,
+                core_node=core_node,
+                inner_outputs_storage=inner_outputs_storage,
+            ):
+                self.core_op.perform(
+                    core_node,
+                    [np.asarray(inp) for inp in inner_inputs],
+                    inner_outputs_storage,
+                )
 
-                inner_inputs = [np.asarray(inp) for inp in inner_inputs]
-                self.core_op.perform(core_node, inner_inputs, inner_outputs)
-
-                if len(inner_outputs) == 1:
-                    return inner_outputs[0][0]
+                if n_outs == 1:
+                    return inner_outputs_storage[0][0]
                 else:
-                    return tuple(r[0] for r in inner_outputs)
+                    return tuple(r[0] for r in inner_outputs_storage)
 
             gufunc = np.vectorize(core_func, signature=self.signature)
 
