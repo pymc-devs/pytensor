@@ -1,3 +1,6 @@
+from functools import partial
+from typing import Literal
+
 import numpy as np
 import pytest
 
@@ -193,4 +196,26 @@ def test_jax_eigvalsh(lower):
             ),
             None,
         ],
+    )
+
+
+@pytest.mark.parametrize("method", ["direct", "bilinear"])
+@pytest.mark.parametrize("shape", [(5, 5), (5, 5, 5)], ids=["matrix", "batch"])
+def test_jax_solve_discrete_lyapunov(
+    method: Literal["direct", "bilinear"], shape: tuple[int]
+):
+    A = pt.tensor(name="A", shape=shape)
+    B = pt.tensor(name="B", shape=shape)
+    out = pt_slinalg.solve_discrete_lyapunov(A, B, method=method)
+    out_fg = FunctionGraph([A, B], [out])
+
+    atol = rtol = 1e-8 if config.floatX == "float64" else 1e-3
+    compare_jax_and_py(
+        out_fg,
+        [
+            np.random.normal(size=shape).astype(config.floatX),
+            np.random.normal(size=shape).astype(config.floatX),
+        ],
+        jax_mode="JAX",
+        assert_fn=partial(np.testing.assert_allclose, atol=atol, rtol=rtol),
     )
