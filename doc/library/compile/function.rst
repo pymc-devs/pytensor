@@ -56,8 +56,9 @@ Reference
 
     .. attribute:: mutable
 
-        ``True`` means the compiled-function is allowed to modify this
-        argument. ``False`` means it is not allowed.
+        Defaults to ``True`` if ``update`` is not ``None``, ``False`` otherwise.
+        When ``True``, permit the compiled function to modify the python object being passed as the input to save memory.
+        When an input is mutable, it shouldn't be aliased (a view) of any other input. Otherwise, behavior is undefined, and will likely yield wrong results.
 
     .. attribute:: borrow
 
