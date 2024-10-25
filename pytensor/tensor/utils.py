@@ -120,7 +120,7 @@ def import_func_from_string(func_string: str):  # -> Optional[Callable]:
     if func is not None:
         return func
 
-    # Not inside NumPy or Scipy. So probably another package like scipy.
+    # Not inside NumPy. So probably another package like Scipy.
     module = None
     items = func_string.split(".")
     for idx in range(1, len(items)):
