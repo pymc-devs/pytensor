@@ -4,6 +4,7 @@ from functools import partial
 import numpy as np
 import pytest
 
+import pytensor.tensor as pt
 import pytensor.tensor.basic as ptb
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
@@ -444,10 +445,19 @@ def test_ScalarLoop_Elemwise():
     x = x0 * 2
     until = x >= 10
 
-    op = ScalarLoop(init=[x0], update=[x], until=until)
-    fn = function([n_steps, x0], Elemwise(op)(n_steps, x0), mode=pytorch_mode)
+    scalarop = ScalarLoop(init=[x0], update=[x], until=until)
+    op = Elemwise(scalarop)
 
-    states, dones = fn(10, np.array(range(5)))
+    n_steps = pt.scalar("n_steps", dtype="int32")
+    x0 = pt.vector("x0", dtype="float32")
+    state, done = op(n_steps, x0)
 
-    np.testing.assert_allclose(states, [0, 4, 8, 12, 16])
-    np.testing.assert_allclose(dones, [False, False, False, True, True])
+    fn = function([n_steps, x0], [state, done], mode=pytorch_mode)
+    py_fn = function([n_steps, x0], [state, done])
+
+    args = [np.array(10).astype("int32"), np.arange(0, 5).astype("float32")]
+    torch_states, torch_dones = fn(*args)
+    py_states, py_dones = py_fn(*args)
+
+    np.testing.assert_allclose(torch_states, py_states)
+    np.testing.assert_allclose(torch_dones, py_dones)

@@ -1,8 +1,10 @@
 import importlib
+from itertools import chain
 
 import torch
 
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
+from pytensor.scalar import ScalarLoop
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import All, Any, Max, Min, Prod, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
@@ -33,6 +35,33 @@ def pytorch_funcify_Elemwise(op, node, **kwargs):
             Elemwise._check_runtime_broadcast(node, inputs)
             return base_fn(*inputs)
 
+    elif isinstance(scalar_op, ScalarLoop):
+        # note: scalarloop + elemwise is too common
+        # to not work, but @1031, vmap won't allow it.
+        # Instead, we will just successively unbind
+        def elemwise_fn(*inputs):
+            Elemwise._check_runtime_broadcast(node, inputs)
+            shaped_inputs = torch.broadcast_tensors(*inputs)
+            expected_size = shaped_inputs[0].numel()
+            final_inputs = [s.clone() for s in shaped_inputs]
+            for _ in range(shaped_inputs[0].dim() - 1):
+                for i, _ in enumerate(shaped_inputs):
+                    layer = chain.from_iterable([s.unbind(0) for s in final_inputs[i]])
+                    final_inputs[i] = list(layer)
+
+            # make sure we still have the same number of things
+            assert len(final_inputs) == len(shaped_inputs)
+
+            # make sure each group of things are the expected size
+            assert all(len(x) == expected_size for x in final_inputs)
+
+            # make sure they are all single elements
+            assert all(len(x.shape) == 0 for tensor in final_inputs for x in tensor)
+            res = [base_fn(*args) for args in zip(*final_inputs)]
+            states = torch.stack(tuple(out[0] for out in res))
+            done = torch.stack(tuple(out[1] for out in res))
+            return states, done
+
     else:
 
         def elemwise_fn(*inputs):
@@ -42,6 +71,7 @@ def pytorch_funcify_Elemwise(op, node, **kwargs):
             for _ in range(broadcast_inputs[0].dim()):
                 ufunc = torch.vmap(ufunc)
             return ufunc(*broadcast_inputs)
+            return base_fn(*inputs)
 
     return elemwise_fn
 
