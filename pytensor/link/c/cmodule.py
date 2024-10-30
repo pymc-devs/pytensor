@@ -2458,7 +2458,23 @@ class GCC_compiler(Compiler):
     @staticmethod
     def linking_patch(lib_dirs: list[str], libs: list[str]) -> list[str]:
         if sys.platform != "win32":
-            return [f"-l{l}" for l in libs]
+            patched_libs = []
+            framework = False
+            for lib in libs:
+                # The clang framework flag is handled differently.
+                # The flag will have the format -framework framework_name
+                # If we find a lib that is called -framework, we keep it and the following
+                # entry in the lib list unchanged. Anything else, we add the standard
+                # -l library prefix.
+                if lib == "-framework":
+                    framework = True
+                    patched_libs.append(lib)
+                elif framework:
+                    framework = False
+                    patched_libs.append(lib)
+                else:
+                    patched_libs.append(f"-l{lib}")
+            return patched_libs
         else:
             # In explicit else because of https://github.com/python/mypy/issues/10773
             def sort_key(lib):
@@ -2466,6 +2482,8 @@ class GCC_compiler(Compiler):
                 return (extension == "dll", tuple(map(int, numbers)))
 
             patched_lib_ldflags = []
+            # Should we also add a framework possibility on windows? I didn't do so because
+            # clang is not intended to be used there at the moment.
             for lib in libs:
                 ldflag = f"-l{lib}"
                 for lib_dir in lib_dirs:
@@ -2874,8 +2892,20 @@ def default_blas_ldflags():
     except Exception as e:
         _logger.debug(e)
     try:
+        # 3. Mac Accelerate framework
+        _logger.debug("Checking Accelerate framework")
+        flags = ["-framework", "Accelerate"]
+        if rpath:
+            flags = [*flags, f"-Wl,-rpath,{rpath}"]
+        validated_flags = try_blas_flag(flags)
+        if validated_flags == "":
+            raise Exception("Accelerate framework flag failed ")
+        return validated_flags
+    except Exception as e:
+        _logger.debug(e)
+    try:
         _logger.debug("Checking Lapack + blas")
-        # 3. Try to use LAPACK + BLAS
+        # 4. Try to use LAPACK + BLAS
         return check_libs(
             all_libs,
             required_libs=["lapack", "blas", "cblas", "m"],
@@ -2885,7 +2915,7 @@ def default_blas_ldflags():
     except Exception as e:
         _logger.debug(e)
     try:
-        # 4. Try to use BLAS alone
+        # 5. Try to use BLAS alone
         _logger.debug("Checking blas alone")
         return check_libs(
             all_libs,
@@ -2896,7 +2926,7 @@ def default_blas_ldflags():
     except Exception as e:
         _logger.debug(e)
     try:
-        # 5. Try to use openblas
+        # 6. Try to use openblas
         _logger.debug("Checking openblas")
         return check_libs(
             all_libs,
