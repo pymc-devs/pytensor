@@ -78,7 +78,9 @@ Optimizations associated with these BLAS Ops are in tensor.rewriting.blas
 import functools
 import logging
 import os
+import shlex
 import time
+from pathlib import Path
 
 import numpy as np
 
@@ -396,7 +398,7 @@ def _ldflags(
     rval = []
     if libs_dir:
         found_dyn = False
-        dirs = [x[2:] for x in ldflags_str.split() if x.startswith("-L")]
+        dirs = [x[2:] for x in shlex.split(ldflags_str) if x.startswith("-L")]
         l = _ldflags(
             ldflags_str=ldflags_str,
             libs=True,
@@ -409,6 +411,9 @@ def _ldflags(
                 if f.endswith(".so") or f.endswith(".dylib") or f.endswith(".dll"):
                     if any(f.find(ll) >= 0 for ll in l):
                         found_dyn = True
+        # Special treatment of clang framework. Specifically for MacOS Accelerate
+        if "-framework" in l and "Accelerate" in l:
+            found_dyn = True
         if not found_dyn and dirs:
             _logger.warning(
                 "We did not find a dynamic library in the "
@@ -416,7 +421,12 @@ def _ldflags(
                 "ATLAS, make sure to compile it with dynamics library."
             )
 
-    for t in ldflags_str.split():
+    split_flags = shlex.split(ldflags_str)
+    skip = False
+    for pos, t in enumerate(split_flags):
+        if skip:
+            skip = False
+            continue
         # Remove extra quote.
         if (t.startswith("'") and t.endswith("'")) or (
             t.startswith('"') and t.endswith('"')
@@ -425,10 +435,26 @@ def _ldflags(
 
         try:
             t0, t1 = t[0], t[1]
-            assert t0 == "-"
+            assert t0 == "-" or Path(t).exists()
         except Exception:
             raise ValueError(f'invalid token "{t}" in ldflags_str: "{ldflags_str}"')
-        if libs_dir and t1 == "L":
+        if t == "-framework":
+            skip = True
+            # Special treatment of clang framework. Specifically for MacOS Accelerate
+            # The clang framework implicitly adds: header dirs, libraries, and library dirs.
+            # If we choose to always return these flags, we run into a huge deal amount of
+            # incompatibilities. For this reason, we only return the framework if libs are
+            # requested.
+            if (
+                libs
+                and len(split_flags) >= pos
+                and split_flags[pos + 1] == "Accelerate"
+            ):
+                # We only add the Accelerate framework, but in the future we could extend it to
+                # other frameworks
+                rval.append(t)
+                rval.append(split_flags[pos + 1])
+        elif libs_dir and t1 == "L":
             rval.append(t[2:])
         elif include_dir and t1 == "I":
             raise ValueError(
