@@ -2007,13 +2007,18 @@ def try_blas_flag(flags):
     cflags.extend(f"-L{path_wrapper}{d}{path_wrapper}" for d in std_lib_dirs())
 
     res = GCC_compiler.try_compile_tmp(
-        test_code, tmp_prefix="try_blas_", flags=cflags, try_run=True
+        test_code, tmp_prefix="try_blas_", flags=cflags, try_run=True, output=True
     )
     # res[0]: shows successful compilation
     # res[1]: shows successful execution
+    # res[2]: shows execution results
+    # res[3]: shows execution or compilation error message
     if res and res[0] and res[1]:
         return " ".join(flags)
     else:
+        _logger.debug(
+            "try_blas_flags of flags: %r\nfailed with error message %s", flags, res[3]
+        )
         return ""
 
 
@@ -2801,7 +2806,6 @@ def default_blas_ldflags():
             _logger.debug("The following blas flags will be used: '%s'", res)
             return res
         else:
-            _logger.debug(f"Supplied flags {res} failed to compile")
             _logger.debug("Supplied flags '%s' failed to compile", res)
             raise RuntimeError(f"Supplied flags {flags} failed to compile")
 
