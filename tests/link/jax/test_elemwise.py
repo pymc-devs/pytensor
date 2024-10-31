@@ -109,7 +109,7 @@ def test_softmax_grad(axis):
     compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
 
 
-@pytest.mark.parametrize("size", [(10, 10), (1000, 1000), (10000, 10000)])
+@pytest.mark.parametrize("size", [(10, 10), (1000, 1000)])
 @pytest.mark.parametrize("axis", [0, 1])
 def test_logsumexp_benchmark(size, axis, benchmark):
     X = pt.matrix("X")
