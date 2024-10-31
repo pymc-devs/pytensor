@@ -2404,42 +2404,74 @@ def test_local_blockwise_advanced_inc_subtensor(set_instead_of_inc):
     np.testing.assert_allclose(fn(test_x, test_y), expected_out)
 
 
-def test_slice_canonicalize():
-    rng = np.random.default_rng(43)
-    x = tensor(shape=(3, 5, None, 9))
-    test_x = rng.normal(size=(3, 5, 8, 9))
-    # Test case 1
-    y = x[0:None, 0:5, 0:7, 0:9:1]
-    f = pytensor.function([x], y, allow_input_downcast=True)
+class TestUselessSlice:
+    def test_positive_step(self):
+        # When steps are positive, default start and end are `0` and `len(dim)`
+        x = tensor(shape=(3, 5, None, 9), dtype="float64")
+        test_x = np.random.normal(size=(3, 5, 8, 9))
 
-    # Get the DeepCopy input and assert that the Op is a DeepCopy
-    test_y = f.maker.fgraph.outputs[0].owner.inputs[0]
-    assert isinstance(f.maker.fgraph.outputs[0].owner.op, DeepCopyOp)
+        y = x[0:3:1, 1:5:2, 0:7:1, 0:9:1]
+        f = pytensor.function([x], y)
 
-    expected_y = x[None:None:None, None:None:None, None:7:None]
+        # Get the DeepCopy input and assert that the Op is a DeepCopy
+        deep_copy_node = f.maker.fgraph.outputs[0].owner
+        assert isinstance(deep_copy_node.op, DeepCopyOp)
 
-    assert equal_computations([test_y], [expected_y])
+        rewritten_y = deep_copy_node.inputs[0]
+        expected_y = x[None:None:None, 1:None:2, None:7:None]
+        assert equal_computations([rewritten_y], [expected_y])
 
-    np.testing.assert_allclose(
-        f(test_x),
-        test_x[
-            0:None, 0:5, 0:7, 0:9:1
-        ],  # Use the unoptimized slice to make sure our rewrite logic is correct
-    )
+        np.testing.assert_allclose(
+            f(test_x),
+            # Use the unoptimized slice to make sure our rewrite logic is correct
+            test_x[0:3:1, 1:5:2, 0:7:1, 0:9:1],
+        )
 
-    # Test case 2
-    y1 = x[0:-1, 0:5, 0:7, 0:-1:-1]
-    f1 = pytensor.function([x], y1, allow_input_downcast=True)
+    def test_negative_step(self):
+        # When steps are negative, default start and end are `-1` and `-len(dim) - 1`
+        x = tensor(shape=(3, 5, None, 9), dtype="float64")
+        test_x = np.random.normal(size=(3, 5, 8, 9))
 
-    # Get the DeepCopy input and assert that the Op is a DeepCopy
-    test_y1 = f1.maker.fgraph.outputs[0].owner.inputs[0]
-    assert isinstance(f1.maker.fgraph.outputs[0].owner.op, DeepCopyOp)
+        y = x[-1:-4:-1, 0:5:-2, -1:-9:-1, 0:9:None]
+        f = pytensor.function([x], y)
 
-    expected_y1 = x[None:-1:None, None:None:None, None:7:None, None:-1:-1]
+        # Get the DeepCopy input and assert that the Op is a DeepCopy
+        deep_copy_node = f.maker.fgraph.outputs[0].owner
+        assert isinstance(deep_copy_node.op, DeepCopyOp)
 
-    assert equal_computations([test_y1], [expected_y1])
+        rewritten_y = deep_copy_node.inputs[0]
+        expected_y = x[None:None:-1, 0:5:-2, None:-9:-1]
+        assert equal_computations([rewritten_y], [expected_y])
 
-    np.testing.assert_allclose(
-        f1(test_x),
-        test_x[0:-1, 0:5, 0:7, 0:-1:-1],
-    )
+        np.testing.assert_allclose(
+            f(test_x),
+            test_x[-1:-4:-1, 0:5:-2, -1:-9:-1, 0:9:None],
+        )
+
+    def test_unknown_step(self):
+        # If step isn't known, we can't canonicalize start and stop points
+        step = pt.scalar("step", dtype=int)
+        x = tensor(shape=(3, 5, None), dtype="float64")
+        test_x = np.random.normal(size=(3, 5, 7))
+
+        y = x[0:3:step, -1:-6:-step, ::]
+        # Need this rewrite when `FAST_COMPILE` otherwise step = -1 * step instead of neg(step)
+        mode = get_default_mode().including("local_mul_specialize")
+        f = pytensor.function([x, step], y, mode=mode)
+
+        # Get the DeepCopy input and assert that the Op is a DeepCopy
+        deep_copy_node = f.maker.fgraph.outputs[0].owner
+        assert isinstance(deep_copy_node.op, DeepCopyOp)
+
+        rewritten_y = deep_copy_node.inputs[0]
+        expected_y = x[0:3:step, -1:-6:-step]
+        assert equal_computations([rewritten_y], [expected_y])
+
+        np.testing.assert_allclose(
+            f(test_x, 1),
+            test_x[0:3:1, -1:-6:-1, ::],
+        )
+        np.testing.assert_allclose(
+            f(test_x, -2),
+            test_x[0:3:-2, -1:-6:2, ::],
+        )
