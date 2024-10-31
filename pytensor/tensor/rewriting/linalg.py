@@ -985,26 +985,30 @@ def check_log_abs_det(fgraph, client):
 
 @node_rewriter(tracks=[det])
 def slogdet_specialization(fgraph, node):
-    x = node.inputs[0]
-    sign_det_x, slog_det_x = SLogDet()(x)
     replacements = {}
     for client in fgraph.clients[node.outputs[0]]:
         # Check for sign(det)
         if isinstance(client[0].op, Elemwise) and isinstance(
             client[0].op.scalar_op, Sign
         ):
-            replacements[client[0].owner.outputs[0]] = sign_det_x
+            x = node.inputs[0]
+            sign_det_x, slog_det_x = SLogDet()(x)
+            replacements[client[0].outputs[0]] = sign_det_x
 
         # Check for log(abs(det))
         elif check_log_abs_det(fgraph, client[0]):
-            replacements[client[0].owner.outputs[0]] = slog_det_x
+            x = node.inputs[0]
+            sign_det_x, slog_det_x = SLogDet()(x)
+            replacements[fgraph.clients[client[0].outputs[0]][0][0].outputs[0]] = (
+                slog_det_x
+            )
 
         # Check for log(det)
-        elif isinstance(client[0].op, Elemwise) and isinstance(
-            client[0].op.scalar_op, Log
-        ):
-            pass
-            # replacements[client[0].owner.outputs[0]] = pt.where(pt.eq(sign_det_x, -1), np.nan, slog_det_x)
+        # elif isinstance(client[0].op, Elemwise) and isinstance(
+        # client[0].op.scalar_op, Log
+        # ):
+        # pass
+        # replacements[client[0].owner.outputs[0]] = pt.where(pt.eq(sign_det_x, -1), np.nan, slog_det_x)
 
         # Det is used directly for something else, don't rewrite to avoid computing two dets
         else:
