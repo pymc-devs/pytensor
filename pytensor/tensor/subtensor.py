@@ -2627,6 +2627,11 @@ def as_index_variable(idx):
     idx = as_tensor_variable(idx)
     if idx.type.dtype not in discrete_dtypes:
         raise TypeError("index must be integers or a boolean mask")
+    if idx.type.dtype == "bool" and idx.type.ndim == 0:
+        raise NotImplementedError(
+            "Boolean scalar indexing not implemented. "
+            "Open an issue in https://github.com/pymc-devs/pytensor/issues if you need this behavior."
+        )
     return idx
 
 
