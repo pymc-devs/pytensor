@@ -342,13 +342,17 @@ def local_subtensor_of_dot(fgraph, node):
 @node_rewriter([Subtensor])
 def local_useless_slice(fgraph, node):
     """
-    Remove Subtensor of the form:
+    Remove useless slice(None) of the form:
         1. X[0, :] -> X[0]
         2. X[:] -> X
 
-    Also, rewrite Subtensor of the form:
+    Also, canonicalize slices of the form:
         X[0:7:1] -> X[None:None:None]
         where X is a vector of length 7
+
+    And:
+        X[-1:-8:-1] -> X[::-1]
+        where x is a vector of length 7
 
     """
     idxs = get_idx_list(node.inputs, node.op.idx_list)
@@ -368,32 +372,40 @@ def local_useless_slice(fgraph, node):
         if s == slice(None):
             continue
 
+        step = s.step
+
+        if step is None:
+            positive_step = True
+        elif isinstance(step, Constant):
+            step_value = step.data
+            positive_step = step.data > 0
+            if step_value == 1:
+                change_flag = True
+                step = None
+        else:
+            # We can only canonicalize start and stop if we know the sign of step
+            last_useful_idx = dim
+            continue
+
         start = s.start
         stop = s.stop
-        step = s.step
-        if (
-            start is not None
-            and extract_constant(start, only_process_constants=True) == 0
-        ):
+
+        if start is not None and extract_constant(
+            start, only_process_constants=True
+        ) == (0 if positive_step else -1):
             change_flag = True
             start = None
 
         if (
             stop is not None
             and x.type.shape[dim] is not None
-            and extract_constant(stop, only_process_constants=True) == x.type.shape[dim]
+            and extract_constant(stop, only_process_constants=True)
+            == (x.type.shape[dim] if positive_step else -x.type.shape[dim] - 1)
         ):
             change_flag = True
             stop = None
 
-        if (
-            step is not None
-            and extract_constant(step, only_process_constants=True) == 1
-        ):
-            change_flag = True
-            step = None
-
-        if not (start is None and stop is None and step is None):
+        if start is not None or stop is not None or step is not None:
             last_useful_idx = dim
 
         new_idxs[dim] = slice(start, stop, step)
@@ -402,7 +414,6 @@ def local_useless_slice(fgraph, node):
         out = x[tuple(new_idxs[: last_useful_idx + 1])]
         # Copy over previous output stacktrace
         copy_stack_trace(node.outputs, out)
-
         return [out]
 
 
