@@ -239,7 +239,7 @@ class ScalarLoop(ScalarInnerGraphOp):
                 if var not in self.fgraph.inputs:
                     # This is an orphan
                     if isinstance(var, Constant) and isinstance(var.type, CLinkerType):
-                        subd[var] = var.type.c_literal(var.data)
+                        subd[var] = f"({var.type.c_literal(var.data)})"
                     else:
                         raise ValueError(
                             "All orphans in the fgraph to ScalarLoop must"
@@ -342,4 +342,4 @@ class ScalarLoop(ScalarInnerGraphOp):
         return res
 
     def c_code_cache_version_outer(self):
-        return (2,)
+        return (3,)
