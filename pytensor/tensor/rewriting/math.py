@@ -621,65 +621,43 @@ def local_mul_switch_sink(fgraph, node):
     part of the graph.
 
     """
-    for idx, i in enumerate(node.inputs):
-        if i.owner and i.owner.op == switch:
-            switch_node = i.owner
-            try:
-                if (
-                    get_underlying_scalar_constant_value(
-                        switch_node.inputs[1], only_process_constants=True
-                    )
-                    == 0.0
-                ):
-                    listmul = node.inputs[:idx] + node.inputs[idx + 1 :]
-                    fmul = mul(*([*listmul, switch_node.inputs[2]]))
+    for mul_inp_idx, mul_inp in enumerate(node.inputs):
+        if mul_inp.owner and mul_inp.owner.op == switch:
+            switch_node = mul_inp.owner
+            # Look for a zero as the first or second branch of the switch
+            for branch in range(2):
+                zero_switch_input = switch_node.inputs[1 + branch]
+                if not get_unique_constant_value(zero_switch_input) == 0.0:
+                    continue
 
-                    # Copy over stacktrace for elementwise multiplication op
-                    # from previous elementwise multiplication op.
-                    # An error in the multiplication (e.g. errors due to
-                    # inconsistent shapes), will point to the
-                    # multiplication op.
-                    copy_stack_trace(node.outputs, fmul)
+                switch_cond = switch_node.inputs[0]
+                other_switch_input = switch_node.inputs[1 + (1 - branch)]
 
-                    fct = [switch(switch_node.inputs[0], 0, fmul)]
-                    fct[0].tag.values_eq_approx = values_eq_approx_remove_nan
+                listmul = list(node.inputs)
+                listmul[mul_inp_idx] = other_switch_input
+                fmul = mul(*listmul)
 
-                    # Copy over stacktrace for switch op from both previous
-                    #  elementwise multiplication op and previous switch op,
-                    # because an error in this part can be caused by either
-                    # of the two previous ops.
-                    copy_stack_trace(node.outputs + switch_node.outputs, fct)
-                    return fct
-            except NotScalarConstantError:
-                pass
-            try:
-                if (
-                    get_underlying_scalar_constant_value(
-                        switch_node.inputs[2], only_process_constants=True
-                    )
-                    == 0.0
-                ):
-                    listmul = node.inputs[:idx] + node.inputs[idx + 1 :]
-                    fmul = mul(*([*listmul, switch_node.inputs[1]]))
-                    # Copy over stacktrace for elementwise multiplication op
-                    # from previous elementwise multiplication op.
-                    # An error in the multiplication (e.g. errors due to
-                    # inconsistent shapes), will point to the
-                    # multiplication op.
-                    copy_stack_trace(node.outputs, fmul)
+                # Copy over stacktrace for elementwise multiplication op
+                # from previous elementwise multiplication op.
+                # An error in the multiplication (e.g. errors due to
+                # inconsistent shapes), will point to the
+                # multiplication op.
+                copy_stack_trace(node.outputs, fmul)
 
-                    fct = [switch(switch_node.inputs[0], fmul, 0)]
-                    fct[0].tag.values_eq_approx = values_eq_approx_remove_nan
+                if branch == 0:
+                    fct = switch(switch_cond, zero_switch_input, fmul)
+                else:
+                    fct = switch(switch_cond, fmul, zero_switch_input)
 
-                    # Copy over stacktrace for switch op from both previous
-                    # elementwise multiplication op and previous switch op,
-                    # because an error in this part can be caused by either
-                    # of the two previous ops.
-                    copy_stack_trace(node.outputs + switch_node.outputs, fct)
-                    return fct
-            except NotScalarConstantError:
-                pass
-    return False
+                # Tell debug_mode than the output is correct, even if nan disappear
+                fct.tag.values_eq_approx = values_eq_approx_remove_nan
+
+                # Copy over stacktrace for switch op from both previous
+                #  elementwise multiplication op and previous switch op,
+                # because an error in this part can be caused by either
+                # of the two previous ops.
+                copy_stack_trace(node.outputs + switch_node.outputs, fct)
+                return [fct]
 
 
 @register_canonicalize
@@ -699,62 +677,39 @@ def local_div_switch_sink(fgraph, node):
     See `local_mul_switch_sink` for more details.
 
     """
-    op = node.op
-    if node.inputs[0].owner and node.inputs[0].owner.op == switch:
-        switch_node = node.inputs[0].owner
-        try:
-            if (
-                get_underlying_scalar_constant_value(
-                    switch_node.inputs[1], only_process_constants=True
-                )
-                == 0.0
-            ):
-                fdiv = op(switch_node.inputs[2], node.inputs[1])
-                # Copy over stacktrace for elementwise division op
-                # from previous elementwise multiplication op.
-                # An error in the division (e.g. errors due to
-                # inconsistent shapes or division by zero),
-                # will point to the new division op.
-                copy_stack_trace(node.outputs, fdiv)
+    num, denom = node.inputs
 
-                fct = [switch(switch_node.inputs[0], 0, fdiv)]
-                fct[0].tag.values_eq_approx = values_eq_approx_remove_nan
+    if num.owner and num.owner.op == switch:
+        switch_node = num.owner
+        # Look for a zero as the first or second branch of the switch
+        for branch in range(2):
+            zero_switch_input = switch_node.inputs[1 + branch]
+            if not get_unique_constant_value(zero_switch_input) == 0.0:
+                continue
 
-                # Copy over stacktrace for switch op from both previous
-                # elementwise division op and previous switch op,
-                # because an error in this part can be caused by either
-                # of the two previous ops.
-                copy_stack_trace(node.outputs + switch_node.outputs, fct)
-                return fct
-        except NotScalarConstantError:
-            pass
-        try:
-            if (
-                get_underlying_scalar_constant_value(
-                    switch_node.inputs[2], only_process_constants=True
-                )
-                == 0.0
-            ):
-                fdiv = op(switch_node.inputs[1], node.inputs[1])
-                # Copy over stacktrace for elementwise division op
-                # from previous elementwise multiplication op.
-                # An error in the division (e.g. errors due to
-                # inconsistent shapes or division by zero),
-                # will point to the new division op.
-                copy_stack_trace(node.outputs, fdiv)
+            switch_cond = switch_node.inputs[0]
+            other_switch_input = switch_node.inputs[1 + (1 - branch)]
 
-                fct = [switch(switch_node.inputs[0], fdiv, 0)]
-                fct[0].tag.values_eq_approx = values_eq_approx_remove_nan
+            fdiv = node.op(other_switch_input, denom)
 
-                # Copy over stacktrace for switch op from both previous
-                # elementwise division op and previous switch op,
-                # because an error in this part can be caused by either
-                # of the two previous ops.
-                copy_stack_trace(node.outputs + switch_node.outputs, fct)
-                return fct
-        except NotScalarConstantError:
-            pass
-    return False
+            # Copy over stacktrace for elementwise division op
+            # from previous elementwise multiplication op.
+            # An error in the division (e.g. errors due to
+            # inconsistent shapes or division by zero),
+            # will point to the new division op.
+            copy_stack_trace(node.outputs, fdiv)
+
+            fct = switch(switch_cond, zero_switch_input, fdiv)
+
+            # Tell debug_mode than the output is correct, even if nan disappear
+            fct.tag.values_eq_approx = values_eq_approx_remove_nan
+
+            # Copy over stacktrace for switch op from both previous
+            # elementwise division op and previous switch op,
+            # because an error in this part can be caused by either
+            # of the two previous ops.
+            copy_stack_trace(node.outputs + switch_node.outputs, fct)
+            return [fct]
 
 
 class AlgebraicCanonizer(NodeRewriter):
