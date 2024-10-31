@@ -968,30 +968,17 @@ def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
 
 
 # SLogDet Rewrites
-def check_sign_det(node):
-    if not (isinstance(node.op, Elemwise) and isinstance(node.op.scalar_op, Sign)):
+def check_log_abs_det(fgraph, client):
+    # First, we find abs
+    if not (isinstance(client.op, Elemwise) and isinstance(client.op.scalar_op, Abs)):
         return False
 
-    return True
-
-
-def check_log_abs_det(node):
-    if not (isinstance(node.op, Elemwise) and isinstance(node.op.scalar_op, Log)):
-        return False
-
-    potential_abs = node.inputs[0].owner
-    if not (
-        isinstance(potential_abs.op, Elemwise)
-        and isinstance(potential_abs.op.scalar_op, Abs)
-    ):
-        return False
-
-    return True
-
-
-def check_log_det(node):
-    if not (isinstance(node.op, Elemwise) and isinstance(node.op.scalar_op, Log)):
-        return False
+    # Check whether log is a client of abs
+    for client_2 in fgraph.clients[client.outputs[0]]:
+        if not (
+            isinstance(client_2.op, Elemwise) and isinstance(client_2.op.scalar_op, Log)
+        ):
+            return False
 
     return True
 
@@ -1001,17 +988,21 @@ def slogdet_specialization(fgraph, node):
     x = node.inputs[0]
     sign_det_x, slog_det_x = SLogDet()(x)
     replacements = {}
-    for client in list(fgraph.clients.keys()):
+    for client in fgraph.clients[node.outputs[0]]:
         # Check for sign(det)
-        if check_sign_det(client[0].owner):
+        if isinstance(client[0].op, Elemwise) and isinstance(
+            client[0].op.scalar_op, Sign
+        ):
             replacements[client[0].owner.outputs[0]] = sign_det_x
 
         # Check for log(abs(det))
-        elif check_log_abs_det(client[0].owner):
+        elif check_log_abs_det(fgraph, client[0]):
             replacements[client[0].owner.outputs[0]] = slog_det_x
 
         # Check for log(det)
-        elif check_log_det(client[0].owner):
+        elif isinstance(client[0].op, Elemwise) and isinstance(
+            client[0].op.scalar_op, Log
+        ):
             pass
             # replacements[client[0].owner.outputs[0]] = pt.where(pt.eq(sign_det_x, -1), np.nan, slog_det_x)
 
