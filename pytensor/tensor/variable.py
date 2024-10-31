@@ -598,7 +598,7 @@ class _tensor_py_operators:
 
     def __setitem__(self, key, value):
         raise TypeError(
-            "TensorVariable does not support item assignment. Use the output of `set` or `add` instead."
+            "TensorVariable does not support item assignment. Use the output of `x[idx].set` or `x[idx].inc` instead."
         )
 
     def take(self, indices, axis=None, mode="raise"):
