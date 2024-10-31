@@ -103,6 +103,7 @@ from pytensor.tensor.rewriting.math import (
     local_mul_canonizer,
     local_mul_switch_sink,
     local_reduce_chain,
+    local_reduce_join,
     local_sum_prod_of_mul_or_div,
     mul_canonizer,
     parse_mul_tree,
@@ -3414,6 +3415,24 @@ class TestReduceJoin:
         np.testing.assert_allclose(
             f(x, y), np.sum(np.concatenate([x, y], axis=0), axis=0)
         )
+
+    def test_non_ds_inputs(self):
+        """Make sure rewrite works when inputs to join are not the usual DimShuffle.
+
+        Sum{axis=1} [id A] <Vector(float64, shape=(3,))>
+         └─ Join [id B] <Matrix(float64, shape=(3, 3))>
+            ├─ 1 [id C] <Scalar(int8, shape=())>
+            ├─ ExpandDims{axis=1} [id D] <Matrix(float64, shape=(3, 1))>
+            ├─ Sub [id E] <Matrix(float64, shape=(3, 1))>
+            └─ Sub [id F] <Matrix(float64, shape=(3, 1))>
+        """
+        x = vector("x")
+        out = join(0, exp(x[None]), log(x[None])).sum(axis=0)
+
+        fg = FunctionGraph([x], [out], clone=False)
+        [rewritten_out] = local_reduce_join.transform(fg, out.owner)
+        expected_out = add(exp(x), log(x))
+        assert equal_computations([rewritten_out], [expected_out])
 
 
 def test_local_useless_adds():
