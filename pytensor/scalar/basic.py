@@ -4246,7 +4246,11 @@ class Composite(ScalarInnerGraphOp):
             r.name = f"o{int(i)}"
         io = set(self.fgraph.inputs + self.fgraph.outputs)
         for i, r in enumerate(self.fgraph.variables):
-            if r not in io and len(self.fgraph.clients[r]) > 1:
+            if (
+                not isinstance(r, Constant)
+                and r not in io
+                and len(self.fgraph.clients[r]) > 1
+            ):
                 r.name = f"t{int(i)}"
 
         if len(self.fgraph.outputs) > 1 or len(self.fgraph.apply_nodes) > 10:
