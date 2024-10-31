@@ -97,9 +97,11 @@ from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
 from pytensor.tensor.rewriting.math import (
     compute_mul,
     is_1pexp,
+    local_div_switch_sink,
     local_grad_log_erfc_neg,
     local_greedy_distributor,
     local_mul_canonizer,
+    local_mul_switch_sink,
     local_reduce_chain,
     local_sum_prod_of_mul_or_div,
     mul_canonizer,
@@ -2115,7 +2117,6 @@ class TestLocalSwitchSink:
         f = self.function_remove_nan([x], pytensor.gradient.grad(y, x), self.mode)
         assert f(5) == 1, f(5)
 
-    @pytest.mark.slow
     def test_local_div_switch_sink(self):
         c = dscalar()
         idx = 0
@@ -2148,6 +2149,28 @@ class TestLocalSwitchSink:
                         idx
                     ].size
                 idx += 1
+
+    @pytest.mark.parametrize(
+        "op, rewrite", [(mul, local_mul_switch_sink), (true_div, local_div_switch_sink)]
+    )
+    def test_local_mul_div_switch_sink_cast(self, op, rewrite):
+        """Check that we don't downcast during the rewrite.
+
+        Regression test for: https://github.com/pymc-devs/pytensor/issues/1037
+        """
+        cond = scalar("cond", dtype="bool")
+        # The zero branch upcasts the output, so we can't ignore its dtype
+        zero_branch = constant(np.array(0, dtype="float64"), name="zero_branch")
+        other_branch = scalar("other_branch", dtype="float32")
+        outer_var = scalar("mul_var", dtype="bool")
+
+        out = op(switch(cond, zero_branch, other_branch), outer_var)
+        fgraph = FunctionGraph(outputs=[out], clone=False)
+        [new_out] = rewrite.transform(fgraph, out.owner)
+        assert new_out.type.dtype == out.type.dtype
+
+        expected_out = switch(cond, zero_branch, op(other_branch, outer_var))
+        assert equal_computations([new_out], [expected_out])
 
 
 @pytest.mark.skipif(
