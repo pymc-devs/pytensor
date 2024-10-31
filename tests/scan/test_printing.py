@@ -654,24 +654,22 @@ def test_debugprint_compiled_fn():
     Inner graphs:
 
     Scan{scan_fn, while_loop=False, inplace=all} [id A]
-     ← Composite{switch(lt(i0, i1), i2, i0)} [id I] (inner_out_sit_sot-0)
-        ├─ 0 [id J]
-        ├─ Subtensor{i, j, k} [id K]
-        │  ├─ *2-<Tensor3(float64, shape=(20000, 2, 2))> [id L] -> [id H] (inner_in_non_seqs-0)
-        │  ├─ ScalarFromTensor [id M]
-        │  │  └─ *0-<Scalar(int64, shape=())> [id N] -> [id C] (inner_in_seqs-0)
-        │  ├─ ScalarFromTensor [id O]
-        │  │  └─ *1-<Scalar(int64, shape=())> [id P] -> [id D] (inner_in_sit_sot-0)
-        │  └─ 0 [id Q]
-        └─ 1 [id R]
+     ← Composite{switch(lt(0, i0), 1, 0)} [id I] (inner_out_sit_sot-0)
+        └─ Subtensor{i, j, k} [id J]
+           ├─ *2-<Tensor3(float64, shape=(20000, 2, 2))> [id K] -> [id H] (inner_in_non_seqs-0)
+           ├─ ScalarFromTensor [id L]
+           │  └─ *0-<Scalar(int64, shape=())> [id M] -> [id C] (inner_in_seqs-0)
+           ├─ ScalarFromTensor [id N]
+           │  └─ *1-<Scalar(int64, shape=())> [id O] -> [id D] (inner_in_sit_sot-0)
+           └─ 0 [id P]
 
-    Composite{switch(lt(i0, i1), i2, i0)} [id I]
-     ← Switch [id S] 'o0'
-        ├─ LT [id T]
-        │  ├─ i0 [id U]
-        │  └─ i1 [id V]
-        ├─ i2 [id W]
-        └─ i0 [id U]
+    Composite{switch(lt(0, i0), 1, 0)} [id I]
+     ← Switch [id Q] 'o0'
+        ├─ LT [id R]
+        │  ├─ 0 [id S]
+        │  └─ i0 [id T]
+        ├─ 1 [id U]
+        └─ 0 [id S]
     """
 
     output_str = debugprint(out, file="str", print_op_info=True)
