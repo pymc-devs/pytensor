@@ -1045,11 +1045,13 @@ def get_unique_constant_value(x: TensorVariable) -> Number | None:
     if isinstance(x, Constant):
         data = x.data
 
-        if isinstance(data, np.ndarray) and data.ndim > 0:
+        if isinstance(data, np.ndarray) and data.size > 0:
+            if data.size == 1:
+                return data.squeeze()
+
             flat_data = data.ravel()
-            if flat_data.shape[0]:
-                if (flat_data == flat_data[0]).all():
-                    return flat_data[0]
+            if (flat_data == flat_data[0]).all():
+                return flat_data[0]
 
     return None
 
