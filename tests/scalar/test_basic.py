@@ -36,6 +36,7 @@ from pytensor.scalar.basic import (
     floats,
     int8,
     int32,
+    int64,
     ints,
     invert,
     log,
@@ -44,6 +45,7 @@ from pytensor.scalar.basic import (
     log10,
     mean,
     mul,
+    neg,
     neq,
     rad2deg,
     reciprocal,
@@ -155,6 +157,21 @@ class TestComposite:
             fn(test_x, test_y),
             (literal_value + test_y) * (test_x / test_y),
         )
+
+    def test_negative_constant(self):
+        # Test that a negative constant is wrapped in parentheses to avoid confusing - (unary minus) and -- (decrement)
+        x = int64("x")
+        e = neg(constant(-1.5)) % x
+        comp_op = Composite([x], [e])
+        comp_node = comp_op.make_node(x)
+
+        c_code = comp_node.op.c_code(comp_node, "dummy", ["x", "y"], ["z"], dict(id=0))
+        assert "-1.5" in c_code
+
+        g = FunctionGraph([x], [comp_node.out])
+        fn = make_function(DualLinker().accept(g))
+        assert fn(2) == 1.5
+        assert fn(1) == 0.5
 
     def test_many_outputs(self):
         x, y, z = floats("xyz")
