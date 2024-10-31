@@ -2228,6 +2228,11 @@ class TestAdvancedSubtensor:
             mode=self.mode,
         )
 
+    def test_boolean_scalar_raises(self):
+        x = vector("x")
+        with pytest.raises(NotImplementedError):
+            x[np.array(True)]
+
 
 class TestInferShape(utt.InferShapeTester):
     @staticmethod
