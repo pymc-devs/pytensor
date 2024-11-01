@@ -2,6 +2,8 @@ import logging
 from collections.abc import Callable
 from typing import cast
 
+import numpy as np
+
 from pytensor import Variable
 from pytensor import tensor as pt
 from pytensor.graph import Apply, FunctionGraph
@@ -967,8 +969,7 @@ def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
     return [eye_input * (non_eye_input**0.5)]
 
 
-# SLogDet Rewrites
-def check_log_abs_det(fgraph, client):
+def _check_log_abs_det(fgraph, client):
     # First, we find abs
     if not (isinstance(client.op, Elemwise) and isinstance(client.op.scalar_op, Abs)):
         return False
@@ -976,14 +977,16 @@ def check_log_abs_det(fgraph, client):
     # Check whether log is a client of abs
     for client_2 in fgraph.clients[client.outputs[0]]:
         if not (
-            isinstance(client_2.op, Elemwise) and isinstance(client_2.op.scalar_op, Log)
+            isinstance(client_2[0].op, Elemwise)
+            and isinstance(client_2[0].op.scalar_op, Log)
         ):
             return False
 
     return True
 
 
-@node_rewriter(tracks=[det])
+@register_specialize
+@node_rewriter([det])
 def slogdet_specialization(fgraph, node):
     replacements = {}
     for client in fgraph.clients[node.outputs[0]]:
@@ -996,7 +999,7 @@ def slogdet_specialization(fgraph, node):
             replacements[client[0].outputs[0]] = sign_det_x
 
         # Check for log(abs(det))
-        elif check_log_abs_det(fgraph, client[0]):
+        elif _check_log_abs_det(fgraph, client[0]):
             x = node.inputs[0]
             sign_det_x, slog_det_x = SLogDet()(x)
             replacements[fgraph.clients[client[0].outputs[0]][0][0].outputs[0]] = (
@@ -1004,11 +1007,14 @@ def slogdet_specialization(fgraph, node):
             )
 
         # Check for log(det)
-        # elif isinstance(client[0].op, Elemwise) and isinstance(
-        # client[0].op.scalar_op, Log
-        # ):
-        # pass
-        # replacements[client[0].owner.outputs[0]] = pt.where(pt.eq(sign_det_x, -1), np.nan, slog_det_x)
+        elif isinstance(client[0].op, Elemwise) and isinstance(
+            client[0].op.scalar_op, Log
+        ):
+            x = node.inputs[0]
+            sign_det_x, slog_det_x = SLogDet()(x)
+            replacements[client[0].outputs[0]] = pt.where(
+                pt.eq(sign_det_x, -1), np.nan, slog_det_x
+            )
 
         # Det is used directly for something else, don't rewrite to avoid computing two dets
         else:

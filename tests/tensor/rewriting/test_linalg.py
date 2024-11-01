@@ -21,6 +21,7 @@ from pytensor.tensor.nlinalg import (
     KroneckerProduct,
     MatrixInverse,
     MatrixPinv,
+    SLogDet,
     matrix_inverse,
     svd,
 )
@@ -900,3 +901,23 @@ def test_rewrite_cholesky_diag_to_sqrt_diag_not_applied():
     f_rewritten = function([x], z_cholesky, mode="FAST_RUN")
     nodes = f_rewritten.maker.fgraph.apply_nodes
     assert any(isinstance(node.op, Cholesky) for node in nodes)
+
+
+def test_slogdet_specialisation():
+    x = pt.dmatrix("x")
+    det_x = pt.linalg.det(x)
+    log_abs_det_x = pt.log(pt.abs(det_x))
+    sign_det_x = pt.sign(det_x)
+    exp_det_x = pt.exp(det_x)
+    # sign(det(x))
+    f = function([x], [sign_det_x], mode="FAST_RUN")
+    nodes = f.maker.fgraph.apply_nodes
+    assert any(isinstance(node.op, SLogDet) for node in nodes)
+    # log(abs(det(x)))
+    f = function([x], [log_abs_det_x], mode="FAST_RUN")
+    nodes = f.maker.fgraph.apply_nodes
+    assert any(isinstance(node.op, SLogDet) for node in nodes)
+    # other functions (rewrite shouldnt be applied to these)
+    f = function([x], [exp_det_x], mode="FAST_RUN")
+    nodes = f.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, SLogDet) for node in nodes)
