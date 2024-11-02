@@ -1,3 +1,5 @@
+import importlib
+
 import torch
 
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
@@ -19,9 +21,14 @@ def pytorch_funcify_ScalarOp(op, node, **kwargs):
     if nfunc_spec is None:
         raise NotImplementedError(f"Dispatch not implemented for Scalar Op {op}")
 
-    func_name = nfunc_spec[0]
+    func_name = nfunc_spec[0].replace("scipy.", "")
 
-    pytorch_func = getattr(torch, func_name)
+    if "." in func_name:
+        loc = func_name.split(".")
+        mod = importlib.import_module(".".join(["torch", *loc[:-1]]))
+        pytorch_func = getattr(mod, loc[-1])
+    else:
+        pytorch_func = getattr(torch, func_name)
 
     if len(node.inputs) > op.nfunc_spec[1]:
         # Some Scalar Ops accept multiple number of inputs, behaving as a variadic function,
