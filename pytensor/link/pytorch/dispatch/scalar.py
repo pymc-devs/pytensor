@@ -7,6 +7,7 @@ from pytensor.scalar.basic import (
     Cast,
     ScalarOp,
 )
+from pytensor.scalar.math import Softplus
 
 
 @pytorch_funcify.register(ScalarOp)
@@ -56,3 +57,8 @@ def pytorch_funcify_Cast(op: Cast, node, **kwargs):
         return x.to(dtype=dtype)
 
     return cast
+
+
+@pytorch_funcify.register(Softplus)
+def pytorch_funcify_Softplus(op, node, **kwargs):
+    return torch.nn.Softplus()
