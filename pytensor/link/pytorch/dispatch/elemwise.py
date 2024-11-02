@@ -13,6 +13,7 @@ from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 @pytorch_funcify.register(Elemwise)
 def pytorch_funcify_Elemwise(op, node, **kwargs):
     scalar_op = op.scalar_op
+
     base_fn = pytorch_funcify(scalar_op, node=node, **kwargs)
 
     def check_special_scipy(func_name):
@@ -36,31 +37,7 @@ def pytorch_funcify_Elemwise(op, node, **kwargs):
             return base_fn(*inputs)
 
     elif isinstance(scalar_op, ScalarLoop):
-        # note: scalarloop + elemwise is too common
-        # to not work, but @1031, vmap won't allow it.
-        # Instead, we will just successively unbind
-        def elemwise_fn(*inputs):
-            Elemwise._check_runtime_broadcast(node, inputs)
-            shaped_inputs = torch.broadcast_tensors(*inputs)
-            expected_size = shaped_inputs[0].numel()
-            final_inputs = [s.clone() for s in shaped_inputs]
-            for _ in range(shaped_inputs[0].dim() - 1):
-                for i, _ in enumerate(shaped_inputs):
-                    layer = chain.from_iterable([s.unbind(0) for s in final_inputs[i]])
-                    final_inputs[i] = list(layer)
-
-            # make sure we still have the same number of things
-            assert len(final_inputs) == len(shaped_inputs)
-
-            # make sure each group of things are the expected size
-            assert all(len(x) == expected_size for x in final_inputs)
-
-            # make sure they are all single elements
-            assert all(len(x.shape) == 0 for tensor in final_inputs for x in tensor)
-            res = [base_fn(*args) for args in zip(*final_inputs)]
-            states = torch.stack(tuple(out[0] for out in res))
-            done = torch.stack(tuple(out[1] for out in res))
-            return states, done
+        return elemwise_scalar_loop(base_fn, op, node, **kwargs)
 
     else:
 
@@ -206,3 +183,56 @@ def jax_funcify_SoftmaxGrad(op, **kwargs):
         return dy_times_sm - torch.sum(dy_times_sm, dim=axis, keepdim=True) * sm
 
     return softmax_grad
+
+
+def elemwise_scalar_loop(base_fn, op, node, **kwargs):
+    """
+    ScalarLoop + Elemwise is too common
+    to not work, but @1031, vmap won't allow it.
+    Instead, we can do the following strategy
+    1. `.unbind(dim)` will return a list of tensors
+       representing `dim` but "unwrapped". e.x.
+       ```
+       t = torch.ones(3, 4, 2)
+       len(t.unbind(0)) == 3
+       t[0].shape == torch.Size[4, 2]
+    2. If we successfully apply, the length of the list will grow
+       by the next dimension in the tensor if we flatten the previous
+       dimension result
+       ```
+       inputs = [torch.ones(3, 4, 2)]
+       level_1 = chain.from_iterable(t.unbind(0) for t in inputs)
+       level_2 = chain.from_iterable(t.unbind(0) for t in level_1)
+       len(level_2) == 3 * 4
+       ```
+    3. Eventually we'll reach single dimension tensors. At that point
+       we can iterate over each input in an element by element manner
+       and call some function
+
+    For scalar loop, we need to broadcast the tensors so all
+    the necessary values are repeated, and we "evenly" iterate through everything
+    """
+
+    def elemwise_fn(*inputs):
+        Elemwise._check_runtime_broadcast(node, inputs)
+        shaped_inputs = torch.broadcast_tensors(*inputs)
+        expected_size = shaped_inputs[0].numel()
+        final_inputs = [s.clone() for s in shaped_inputs]
+        for _ in range(shaped_inputs[0].dim() - 1):
+            for i, _ in enumerate(shaped_inputs):
+                layer = chain.from_iterable([s.unbind(0) for s in final_inputs[i]])
+                final_inputs[i] = list(layer)
+
+        # make sure we still have the same number of things
+        assert len(final_inputs) == len(shaped_inputs)
+
+        # make sure each group of things are the expected size
+        assert all(len(x) == expected_size for x in final_inputs)
+
+        # make sure they are all single elements
+        assert all(len(x.shape) == 0 for tensor in final_inputs for x in tensor)
+        res = [base_fn(*args) for args in zip(*final_inputs)]
+
+        return [torch.stack(tuple(out[i] for out in res)) for i in range(len(res[0]))]
+
+    return elemwise_fn
