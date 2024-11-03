@@ -1,5 +1,7 @@
 from collections.abc import Callable, Iterable
 from functools import partial
+from itertools import repeat, starmap
+from unittest.mock import MagicMock, call, patch
 
 import numpy as np
 import pytest
@@ -452,12 +454,29 @@ def test_ScalarLoop_Elemwise():
     x0 = pt.vector("x0", dtype="float32")
     state, done = op(n_steps, x0)
 
-    fn = function([n_steps, x0], [state, done], mode=pytorch_mode)
-    py_fn = function([n_steps, x0], [state, done])
-
+    f = FunctionGraph([n_steps, x0], [state, done])
     args = [np.array(10).astype("int32"), np.arange(0, 5).astype("float32")]
-    torch_states, torch_dones = fn(*args)
-    py_states, py_dones = py_fn(*args)
+    compare_pytorch_and_py(f, args)
 
-    np.testing.assert_allclose(torch_states, py_states)
-    np.testing.assert_allclose(torch_dones, py_dones)
+
+torch_elemwise = pytest.importorskip("pytensor.link.pytorch.dispatch.elemwise")
+
+
+@pytest.mark.parametrize("input_shapes", [[(5, 1, 1, 8), (3, 1, 1), (8,)]])
+@patch("pytensor.link.pytorch.dispatch.elemwise.Elemwise")
+def test_ScalarLoop_Elemwise_iteration_logic(_, input_shapes):
+    args = [torch.ones(*s) for s in input_shapes[:-1]] + [
+        torch.zeros(*input_shapes[-1])
+    ]
+    mock_inner_func = MagicMock()
+    ret_value = torch.rand(2, 2).unbind(0)
+    mock_inner_func.f.return_value = ret_value
+    elemwise_fn = torch_elemwise.elemwise_scalar_loop(mock_inner_func.f, None, None)
+    result = elemwise_fn(*args)
+    for actual, expected in zip(ret_value, result):
+        assert torch.all(torch.eq(*torch.broadcast_tensors(actual, expected)))
+    np.testing.assert_equal(mock_inner_func.f.call_count, len(result[0]))
+
+    expected_args = torch.FloatTensor([1.0] * (len(input_shapes) - 1) + [0.0]).unbind(0)
+    expected_calls = starmap(call, repeat(expected_args, mock_inner_func.f.call_count))
+    mock_inner_func.f.assert_has_calls(expected_calls)
