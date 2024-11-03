@@ -71,7 +71,6 @@ from pytensor.tensor.type import (
     vector,
     vectors,
 )
-from tests import unittest_tools as utt
 
 
 dimshuffle_lift = out2in(local_dimshuffle_lift)
@@ -1443,22 +1442,22 @@ def test_local_useless_composite_outputs():
     assert len(topo[0].inputs) == 2
     assert len(topo[0].outputs) == 2
     res1, res2 = f([[1.0]], [[1.0]], [[np.nan]])
-    utt.assert_allclose(res1, [[2.0]])
-    utt.assert_allclose(res2, [[0.0]])
+    np.testing.assert_allclose(res1, [[2.0]])
+    np.testing.assert_allclose(res2, [[0.0]])
 
     f = function([X, Y, Z], o1, mode=mode)
     topo = f.maker.fgraph.toposort()
     assert len(topo) == 1
     assert len(topo[0].inputs) == 1
     assert len(topo[0].outputs) == 1
-    utt.assert_allclose(f([[1.0]], [[np.nan]], [[np.nan]]), [[2.0]])
+    np.testing.assert_allclose(f([[1.0]], [[np.nan]], [[np.nan]]), [[2.0]])
 
     f = function([X, Y, Z], o2, mode=mode)
     topo = f.maker.fgraph.toposort()
     assert len(topo) == 1
     assert len(topo[0].inputs) == 1
     assert len(topo[0].outputs) == 1
-    utt.assert_allclose(f([[np.nan]], [[1.0]], [[np.nan]]), [[0.0]])
+    np.testing.assert_allclose(f([[np.nan]], [[1.0]], [[np.nan]]), [[0.0]])
 
 
 @pytest.mark.parametrize("const_shape", [(), (1,), (5,), (1, 5), (2, 5)])

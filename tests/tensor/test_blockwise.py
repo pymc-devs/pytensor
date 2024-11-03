@@ -538,7 +538,10 @@ class TestInplace:
             A_val_copy, b_val_copy
         )
         np.testing.assert_allclose(
-            out, expected_out, atol=1e-6 if config.floatX == "float32" else 0
+            out,
+            expected_out,
+            atol=1e-08 if config.floatX == "float32" else 0,
+            rtol=1e-05,
         )
 
         # Confirm input was destroyed

@@ -9,7 +9,6 @@ import pytest
 import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor as pt
-import tests.unittest_tools as utt
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
@@ -245,7 +244,7 @@ class TestBroadcast:
             yv = rand_val(ysh)
             zv = xv + yv
 
-            unittest_tools.assert_allclose(f(xv, yv), zv)
+            np.testing.assert_allclose(f(xv, yv), zv)
 
             # test Elemwise.infer_shape
             # the Shape op don't implement c_code!
@@ -523,7 +522,7 @@ class TestCAReduce(unittest_tools.InferShapeTester):
             else:
                 f_xv = f(xv)
                 assert f_xv.shape == zv.shape, (f_xv, zv)
-                utt.assert_allclose(zv, f_xv)
+                np.testing.assert_allclose(zv, f_xv, rtol=1e-06)
 
             x = self.type(
                 dtype, shape=tuple(entry if entry == 1 else None for entry in xsh)

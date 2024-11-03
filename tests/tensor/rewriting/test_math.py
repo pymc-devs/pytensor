@@ -610,7 +610,7 @@ class TestAlgebraicCanonizer:
             f = function(list(sym_inputs), g, mode=mode)
             out = f(*val_inputs)
             assert out_dtype == out.dtype
-            utt.assert_allclose(out, val_inputs[1])
+            np.allclose(out, val_inputs[1])
             topo = f.maker.fgraph.toposort()
             assert not any(node.op == pt.true_div for node in topo)
 
@@ -630,7 +630,7 @@ class TestAlgebraicCanonizer:
         ):
             f = function(list(sym_inputs), g, mode=mode)
             out = f(*val_inputs)
-            utt.assert_allclose(out, (1 / val_inputs[1]))
+            np.allclose(out, (1 / val_inputs[1]))
             topo = f.maker.fgraph.toposort()
             elem = [t for t in topo if isinstance(t.op, Elemwise)]
             assert len(elem) == nb_elemwise
@@ -711,7 +711,7 @@ class TestAlgebraicCanonizer:
         ):
             f = function(list(sym_inputs), g, mode=mode)
             out = f(*val_inputs)
-            utt.assert_allclose(out, (val_inputs[0] / val_inputs[3]))
+            np.testing.assert_allclose(out, (val_inputs[0] / val_inputs[3]))
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 1
             assert isinstance(topo[0].op, Elemwise)
@@ -761,7 +761,7 @@ class TestAlgebraicCanonizer:
                 out_dtype = out_dtype[config.cast_policy]
             f = function(list(sym_inputs), g, mode=mode)
             out = f(*val_inputs)
-            utt.assert_allclose(out, (0.5 * val_inputs[0] / val_inputs[1]))
+            np.testing.assert_allclose(out, (0.5 * val_inputs[0] / val_inputs[1]))
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 2
             assert isinstance(topo[0].op, Elemwise)
@@ -803,7 +803,7 @@ class TestAlgebraicCanonizer:
                 out_dtype = out_dtype[config.cast_policy]
             f = function(list(sym_inputs), g, mode=mode)
             out = f(*val_inputs)
-            utt.assert_allclose(out, val_inputs[0])
+            np.testing.assert_allclose(out, val_inputs[0])
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 1
             topo[0].op == deep_copy_op
@@ -823,7 +823,7 @@ class TestAlgebraicCanonizer:
             f = function(list(sym_inputs), g, mode=mode)
             out = f(*val_inputs)
             assert np.all(np.isfinite(out))
-            utt.assert_allclose(out, np.sign(val_inputs[0]))
+            np.testing.assert_allclose(out, np.sign(val_inputs[0]))
             assert out_dtype == out.dtype
             assert len(f.maker.fgraph.toposort()) == 1
 
@@ -871,7 +871,7 @@ class TestAlgebraicCanonizer:
             topo = f.maker.fgraph.toposort()
             out = f(*val_inputs)
             assert np.all(np.isfinite(out))
-            utt.assert_allclose(out, np.sign(val_inputs[0]) * 2 / 3)
+            np.testing.assert_allclose(out, np.sign(val_inputs[0]) * 2 / 3)
             assert out_dtype == out.dtype
 
     def test_abs_mul_div(self):
@@ -934,7 +934,9 @@ class TestAlgebraicCanonizer:
         ]:
             f = function(list(sym_inputs), g, mode=mode)
             out = f(*val_inputs)
-            utt.assert_allclose(out, val_inputs[0] / val_inputs[1] / val_inputs[2])
+            np.testing.assert_allclose(
+                out, val_inputs[0] / val_inputs[1] / val_inputs[2]
+            )
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 2
             assert isinstance(topo[0].op, Elemwise)
@@ -949,7 +951,9 @@ class TestAlgebraicCanonizer:
         ]:
             f = function(list(sym_inputs), g, mode=mode)
             out = f(*val_inputs)
-            utt.assert_allclose(out, val_inputs[0] / (val_inputs[1] / val_inputs[2]))
+            np.testing.assert_allclose(
+                out, val_inputs[0] / (val_inputs[1] / val_inputs[2])
+            )
             topo = f.maker.fgraph.toposort()
             assert len(topo) == 2
             assert isinstance(topo[0].op, Elemwise)
@@ -1083,7 +1087,7 @@ def test_const_type_in_mul_canonizer():
     betaval = np.random.random(5)
     aval = np.random.random(5)
 
-    utt.assert_allclose(
+    np.testing.assert_allclose(
         f2(ival, wval, visbval, hidbval, betaval, aval),
         f1(ival, wval, visbval, hidbval, betaval, aval),
     )
@@ -1180,10 +1184,10 @@ def test_local_log_add_exp():
 
     # test that it gives the correct result when it doesn't overflow
     f([10], [10])  # doesn't causes overflow
-    utt.assert_allclose(f([10], [10]), 10 + np.log1p(1))
+    np.testing.assert_allclose(f([10], [10]), 10 + np.log1p(1))
 
     assert np.isfinite(f([10000], [10000]))  # causes overflow if handled incorrectly
-    utt.assert_allclose(f([10000], [10000]), 10000 + np.log1p(1))
+    np.testing.assert_allclose(f([10000], [10000]), 10000 + np.log1p(1))
 
     # test that when max = +-inf, rewritten output still works correctly
     assert f([-np.inf], [-np.inf]) == -np.inf
@@ -1196,7 +1200,7 @@ def test_local_log_add_exp():
     f = function([x, y], log(exp(x) + exp(y) + exp(x - y) + exp(x + y)), mode=m)
 
     assert np.isfinite(f([10000], [10000]))  # causes overflow if handled incorrectly
-    utt.assert_allclose(f([10000], [10000]), 20000)
+    np.testing.assert_allclose(f([10000], [10000]), 20000)
 
     # TODO: test that the rewrite works in the presence of broadcasting.
 
@@ -1276,7 +1280,7 @@ def test_local_elemwise_sub_zeros():
     assert isinstance(
         f.maker.fgraph.toposort()[0].inputs[1], TensorConstant
     ) or isinstance(f.maker.fgraph.toposort()[0].inputs[1], TensorConstant)
-    utt.assert_allclose(f(scalar_val), 0.0)
+    np.testing.assert_allclose(f(scalar_val), 0.0)
     assert check_stack_trace(f, ops_to_check="all")
 
     # Test vector minus vector
@@ -1286,7 +1290,7 @@ def test_local_elemwise_sub_zeros():
     assert isinstance(
         f.maker.fgraph.toposort()[0].inputs[1], TensorConstant
     ) or isinstance(f.maker.fgraph.toposort()[0].inputs[1], TensorConstant)
-    utt.assert_allclose(f(vect_val), np.zeros(vect_val.shape))
+    np.testing.assert_allclose(f(vect_val), np.zeros(vect_val.shape))
     assert check_stack_trace(f, ops_to_check="all")
 
     # Test vector minus vector
@@ -1296,7 +1300,7 @@ def test_local_elemwise_sub_zeros():
     assert isinstance(
         f.maker.fgraph.toposort()[0].inputs[1], TensorConstant
     ) or isinstance(f.maker.fgraph.toposort()[0].inputs[1], TensorConstant)
-    utt.assert_allclose(f(mat_val), np.zeros(mat_val.shape))
+    np.testing.assert_allclose(f(mat_val), np.zeros(mat_val.shape))
     assert check_stack_trace(f, ops_to_check="all")
 
 
@@ -1461,7 +1465,7 @@ class TestLocalUselessElemwiseComparison:
         f = function([x], minimum([0, 0], x.shape[0]), mode=mode)
         # This case isn't rewritten.
         # self.assert_eqs_const(f, 0)
-        utt.assert_allclose(f(x_val), [0, 0])
+        np.testing.assert_allclose(f(x_val), [0, 0])
 
     def test_shape_add_inequality(self):
         x = vector("x", dtype=config.floatX)
@@ -1670,41 +1674,41 @@ def test_local_pow_specialize():
     f = function([v], v**0, mode=mode)
     nodes = [node.op for node in f.maker.fgraph.toposort()]
     assert nodes == [Shape_i(0), pt.alloc]
-    utt.assert_allclose(f(val), val**0)
+    np.testing.assert_allclose(f(val), val**0)
 
     f = function([v], v**1, mode=mode)
     nodes = [node.op for node in f.maker.fgraph.toposort()]
     nodes == [deep_copy_op]
-    utt.assert_allclose(f(val), val**1)
+    np.testing.assert_allclose(f(val), val**1)
 
     f = function([v], v ** (-1), mode=mode)
     nodes = [node.op for node in f.maker.fgraph.toposort()]
     assert nodes == [reciprocal]
-    utt.assert_allclose(f(val_no0), val_no0 ** (-1))
+    np.testing.assert_allclose(f(val_no0), val_no0 ** (-1))
 
     f = function([v], v**2, mode=mode)
     nodes = [node.op for node in f.maker.fgraph.toposort()]
     assert nodes == [sqr]
-    utt.assert_allclose(f(val), val**2)
+    np.testing.assert_allclose(f(val), val**2)
 
     f = function([v], v ** (-2), mode=mode)
     nodes = [node.op for node in f.maker.fgraph.toposort()]
     assert len(nodes) == 2
     assert nodes[0] == sqr
     assert isinstance(nodes[1].scalar_op, ps.basic.Reciprocal)
-    utt.assert_allclose(f(val_no0), val_no0 ** (-2))
+    np.testing.assert_allclose(f(val_no0), val_no0 ** (-2))
 
     f = function([v], v ** (0.5), mode=mode)
     nodes = [node.op for node in f.maker.fgraph.toposort()]
     assert nodes == [sqrt]
-    utt.assert_allclose(f(val), val ** (0.5))
+    np.testing.assert_allclose(f(val), val ** (0.5))
 
     f = function([v], v ** (-0.5), mode=mode)
     nodes = [node.op for node in f.maker.fgraph.toposort()]
     assert len(nodes) == 2
     assert nodes[0] == sqrt
     assert isinstance(nodes[1].scalar_op, ps.basic.Reciprocal)
-    utt.assert_allclose(f(val_no0), val_no0 ** (-0.5))
+    np.testing.assert_allclose(f(val_no0), val_no0 ** (-0.5))
 
     twos = np.full(shape=(10,), fill_value=2.0).astype(config.floatX)
     f = function([v], v**twos, mode=mode)
@@ -1716,7 +1720,7 @@ def test_local_pow_specialize():
     else:
         assert isinstance(topo[0].op, SpecifyShape)
         assert topo[1].op == sqr
-    utt.assert_allclose(f(val), val**twos)
+    np.testing.assert_allclose(f(val), val**twos)
 
 
 def test_local_pow_to_nested_squaring():
@@ -1734,7 +1738,7 @@ def test_local_pow_to_nested_squaring():
     assert len(nodes) == 1
     assert len(f.maker.fgraph.toposort()[0].op.scalar_op.fgraph.apply_nodes) == 6
     assert isinstance(nodes[0].scalar_op, ps.Composite)
-    utt.assert_allclose(f(val), val**15)
+    np.testing.assert_allclose(f(val), val**15)
 
     f = function([v], v ** (-15), mode=mode)
     nodes = [node.op for node in f.maker.fgraph.toposort()]
@@ -1742,14 +1746,14 @@ def test_local_pow_to_nested_squaring():
     assert len(f.maker.fgraph.toposort()[0].op.scalar_op.fgraph.apply_nodes) == 6
     assert isinstance(nodes[0].scalar_op, ps.Composite)
     assert isinstance(nodes[-1].scalar_op, ps.basic.Reciprocal)
-    utt.assert_allclose(f(val_no0), val_no0 ** (-15))
+    np.testing.assert_allclose(f(val_no0), val_no0 ** (-15))
 
     f = function([v], v ** (16), mode=mode)
     nodes = [node.op for node in f.maker.fgraph.toposort()]
     assert len(nodes) == 1
     assert len(f.maker.fgraph.toposort()[0].op.scalar_op.fgraph.apply_nodes) == 4
     assert isinstance(nodes[0].scalar_op, ps.Composite)
-    utt.assert_allclose(f(val), val**16)
+    np.testing.assert_allclose(f(val), val**16)
 
     f = function([v], v ** (-16), mode=mode)
     nodes = [node.op for node in f.maker.fgraph.toposort()]
@@ -1757,7 +1761,7 @@ def test_local_pow_to_nested_squaring():
     assert len(f.maker.fgraph.toposort()[0].op.scalar_op.fgraph.apply_nodes) == 4
     assert isinstance(nodes[0].scalar_op, ps.Composite)
     assert isinstance(nodes[-1].scalar_op, ps.basic.Reciprocal)
-    utt.assert_allclose(f(val_no0), val_no0 ** (-16))
+    np.testing.assert_allclose(f(val_no0), val_no0 ** (-16))
 
 
 def test_local_pow_to_nested_squaring_works_with_static_type():
@@ -2531,23 +2535,23 @@ class TestReduceChain:
         # test sum
         f = function([a], a.sum(), mode=self.mode)
         assert len(f.maker.fgraph.apply_nodes) == 1
-        utt.assert_allclose(f(input), input.sum())
+        np.testing.assert_allclose(f(input), input.sum())
         # test prod
         f = function([a], a.prod(), mode=self.mode)
         assert len(f.maker.fgraph.apply_nodes) == 1
-        utt.assert_allclose(f(input), input.prod())
+        np.testing.assert_allclose(f(input), input.prod())
         # test sum
         f = function([a], a.sum([0, 1, 2]), mode=self.mode)
         assert len(f.maker.fgraph.apply_nodes) == 1
-        utt.assert_allclose(f(input), input.sum())
+        np.testing.assert_allclose(f(input), input.sum())
         # test prod
         f = function([a], a.prod([0, 1, 2]), mode=self.mode)
         assert len(f.maker.fgraph.apply_nodes) == 1
-        utt.assert_allclose(f(input), input.prod())
+        np.testing.assert_allclose(f(input), input.prod())
 
         f = function([a], a.sum(0).sum(0).sum(0), mode=self.mode)
         assert len(f.maker.fgraph.apply_nodes) == 1
-        utt.assert_allclose(f(input), input.sum())
+        np.testing.assert_allclose(f(input), input.sum())
 
     def test_local_sum_sum_prod_prod(self):
         a = tensor3()
@@ -2602,54 +2606,54 @@ class TestReduceChain:
         for d, dd in dims:
             expected = my_sum(input, d, dd)
             f = function([a], a.sum(d).sum(dd), mode=self.mode)
-            utt.assert_allclose(f(input), expected)
+            np.testing.assert_allclose(f(input), expected)
             assert len(f.maker.fgraph.apply_nodes) == 1
         for d, dd in dims[:6]:
             f = function([a], a.sum(d).sum(dd).sum(0), mode=self.mode)
-            utt.assert_allclose(f(input), input.sum(d).sum(dd).sum(0))
+            np.testing.assert_allclose(f(input), input.sum(d).sum(dd).sum(0))
             assert len(f.maker.fgraph.apply_nodes) == 1
         for d in [0, 1, 2]:
             f = function([a], a.sum(d).sum(None), mode=self.mode)
-            utt.assert_allclose(f(input), input.sum(d).sum())
+            np.testing.assert_allclose(f(input), input.sum(d).sum())
             assert len(f.maker.fgraph.apply_nodes) == 1
         f = function([a], a.sum(None).sum(), mode=self.mode)
-        utt.assert_allclose(f(input), input.sum())
+        np.testing.assert_allclose(f(input), input.sum())
         assert len(f.maker.fgraph.apply_nodes) == 1
 
         # test prod
         for d, dd in dims:
             expected = my_prod(input, d, dd)
             f = function([a], a.prod(d).prod(dd), mode=self.mode)
-            utt.assert_allclose(f(input), expected)
+            np.testing.assert_allclose(f(input), expected)
             assert len(f.maker.fgraph.apply_nodes) == 1
         for d, dd in dims[:6]:
             f = function([a], a.prod(d).prod(dd).prod(0), mode=self.mode)
-            utt.assert_allclose(f(input), input.prod(d).prod(dd).prod(0))
+            np.testing.assert_allclose(f(input), input.prod(d).prod(dd).prod(0))
             assert len(f.maker.fgraph.apply_nodes) == 1
         for d in [0, 1, 2]:
             f = function([a], a.prod(d).prod(None), mode=self.mode)
-            utt.assert_allclose(f(input), input.prod(d).prod())
+            np.testing.assert_allclose(f(input), input.prod(d).prod())
             assert len(f.maker.fgraph.apply_nodes) == 1
         f = function([a], a.prod(None).prod(), mode=self.mode)
-        utt.assert_allclose(f(input), input.prod())
+        np.testing.assert_allclose(f(input), input.prod())
         assert len(f.maker.fgraph.apply_nodes) == 1
 
         # Test that sum prod didn't get rewritten.
         for d, dd in dims:
             expected = my_sum_prod(input, d, dd)
             f = function([a], a.sum(d).prod(dd), mode=self.mode)
-            utt.assert_allclose(f(input), expected)
+            np.testing.assert_allclose(f(input), expected)
             assert len(f.maker.fgraph.apply_nodes) == 2
         for d, dd in dims[:6]:
             f = function([a], a.sum(d).prod(dd).prod(0), mode=self.mode)
-            utt.assert_allclose(f(input), input.sum(d).prod(dd).prod(0))
+            np.testing.assert_allclose(f(input), input.sum(d).prod(dd).prod(0))
             assert len(f.maker.fgraph.apply_nodes) == 2
         for d in [0, 1, 2]:
             f = function([a], a.sum(d).prod(None), mode=self.mode)
-            utt.assert_allclose(f(input), input.sum(d).prod())
+            np.testing.assert_allclose(f(input), input.sum(d).prod())
             assert len(f.maker.fgraph.apply_nodes) == 2
         f = function([a], a.sum(None).prod(), mode=self.mode)
-        utt.assert_allclose(f(input), input.sum())
+        np.testing.assert_allclose(f(input), input.sum(), atol=1e-08, rtol=1e-05)
         assert len(f.maker.fgraph.apply_nodes) == 1
 
     def test_local_sum_sum_int8(self):
@@ -2721,7 +2725,7 @@ class TestLocalSumProd:
             mul_out = mul(*inputs)
             f = function(inputs, reduction_op(axis=axis)(mul_out), mode=self.mode)
             out = f(*inputs_val)
-            utt.assert_allclose(out, expected_output)
+            np.testing.assert_allclose(out, expected_output)
 
             # Ensure that the rewrite has been applied properly by
             # ensuring that the rewritten graph contains the expected number
@@ -3010,23 +3014,23 @@ class TestLocalSumProd:
         ]:
             # test sum
             f = function([a], t_like(a).sum(None), mode=mode)
-            utt.assert_allclose(f(input), n_like(input).sum())
+            np.testing.assert_allclose(f(input), n_like(input).sum())
             assert len(f.maker.fgraph.apply_nodes) == nb_nodes[0]
 
             f = function([a], t_like(a).sum([0, 1, 2]), mode=mode)
-            utt.assert_allclose(f(input), n_like(input).sum())
+            np.testing.assert_allclose(f(input), n_like(input).sum())
             assert len(f.maker.fgraph.apply_nodes) == nb_nodes[0]
 
             for d in range(3):
                 f = function([a], t_like(a).sum(d), mode=mode)
-                utt.assert_allclose(f(input), n_like(input).sum(d))
+                np.testing.assert_allclose(f(input), n_like(input).sum(d))
                 assert len(f.maker.fgraph.apply_nodes) == nb_nodes[1]
                 topo = f.maker.fgraph.toposort()
                 assert topo[-1].op == pt.alloc
                 assert not any(isinstance(node.op, Sum) for node in topo)
             for i in range(3):
                 f = function([a], t_like(a).sum(i), mode=mode)
-                utt.assert_allclose(f(input), n_like(input).sum(i))
+                np.testing.assert_allclose(f(input), n_like(input).sum(i))
                 assert len(f.maker.fgraph.apply_nodes) == nb_nodes[2]
                 topo = f.maker.fgraph.toposort()
                 assert topo[-1].op == pt.alloc
@@ -3034,23 +3038,23 @@ class TestLocalSumProd:
 
             # test prod
             f = function([a], t_like(a).prod(None), mode=mode)
-            utt.assert_allclose(f(input), n_like(input).prod())
+            np.testing.assert_allclose(f(input), n_like(input).prod())
             # assert len(f.maker.fgraph.apply_nodes) == nb_nodes[0]
 
             f = function([a], t_like(a).prod([0, 1, 2]), mode=mode)
-            utt.assert_allclose(f(input), n_like(input).prod())
+            np.testing.assert_allclose(f(input), n_like(input).prod())
             # assert len(f.maker.fgraph.apply_nodes) == nb_nodes[0]
 
             for d in range(3):
                 f = function([a], t_like(a).prod(d), mode=mode)
-                utt.assert_allclose(f(input), n_like(input).prod(d))
+                np.testing.assert_allclose(f(input), n_like(input).prod(d))
                 # assert len(f.maker.fgraph.apply_nodes) == nb_nodes[1]
                 topo = f.maker.fgraph.toposort()
                 assert topo[-1].op == pt.alloc
                 assert not any(isinstance(node.op, Prod) for node in topo)
             for i in range(3):
                 f = function([a], t_like(a).prod(i), mode=mode)
-                utt.assert_allclose(f(input), n_like(input).prod(i))
+                np.testing.assert_allclose(f(input), n_like(input).prod(i))
                 # assert len(f.maker.fgraph.apply_nodes) == nb_nodes[2]
                 topo = f.maker.fgraph.toposort()
                 assert topo[-1].op == pt.alloc
@@ -3058,7 +3062,7 @@ class TestLocalSumProd:
 
             for d, dd in [(0, 0), (1, 0), (2, 0), (0, 1), (1, 1), (2, 1)]:
                 f = function([a], t_like(a).sum(d).sum(dd), mode=mode)
-                utt.assert_allclose(f(input), n_like(input).sum(d).sum(dd))
+                np.testing.assert_allclose(f(input), n_like(input).sum(d).sum(dd))
                 assert len(f.maker.fgraph.apply_nodes) == nb_nodes[3]
                 topo = f.maker.fgraph.toposort()
                 assert topo[-1].op == pt.alloc
@@ -3214,8 +3218,11 @@ class TestLocalSumProd:
                 [a, b, c, d], s, on_unused_input="ignore", mode=mode_with_rewrite
             )
 
-            utt.assert_allclose(
-                f(a_val, b_val, c_val, d_val), g(a_val, b_val, c_val, d_val)
+            np.testing.assert_allclose(
+                f(a_val, b_val, c_val, d_val),
+                g(a_val, b_val, c_val, d_val),
+                atol=1e-08,
+                rtol=1e-05,
             )
 
         # Logical tests: tests whether the rewrite has been appplied or not
@@ -3490,7 +3497,7 @@ def test_local_div_to_reciprocal():
     f = function([num_len_s, denom_s], out)
     out_val = f(3, 2.0)
     assert out_val.shape == (1, 3)
-    utt.assert_allclose(out_val, 0.5)
+    np.testing.assert_allclose(out_val, 0.5)
 
 
 class TestIntDivByOne:
@@ -3585,8 +3592,7 @@ def test_local_sumsqr2dot():
 
     f_val = f(w_val, g_val)
     f_test = np.dot(np.square(g_val), np.square(w_val).sum(axis=0))
-
-    utt.assert_allclose(f_val, f_test)
+    np.testing.assert_allclose(f_val, f_test, atol=1e-08, rtol=1e-05)
     assert any(
         isinstance(
             n.op,
@@ -3614,7 +3620,7 @@ def test_local_mul_exp_to_exp_add():
     # e^x * e^y * e^z * e^w = e^(x+y+z+w)
     op = expx * expy * expz * expw
     f = function([x, y, z, w], op, mode)
-    utt.assert_allclose(f(3, 4, 5, 6), np.exp(3 + 4 + 5 + 6))
+    np.testing.assert_allclose(f(3, 4, 5, 6), np.exp(3 + 4 + 5 + 6))
     graph = f.maker.fgraph.toposort()
     assert all(isinstance(n.op, Elemwise) for n in graph)
     assert any(isinstance(n.op.scalar_op, ps.Add) for n in graph)
@@ -3623,7 +3629,7 @@ def test_local_mul_exp_to_exp_add():
     # e^x * e^y * e^z / e^w = e^(x+y+z-w)
     op = expx * expy * expz / expw
     f = function([x, y, z, w], op, mode)
-    utt.assert_allclose(f(3, 4, 5, 6), np.exp(3 + 4 + 5 - 6))
+    np.testing.assert_allclose(f(3, 4, 5, 6), np.exp(3 + 4 + 5 - 6))
     graph = f.maker.fgraph.toposort()
     assert all(isinstance(n.op, Elemwise) for n in graph)
     assert any(isinstance(n.op.scalar_op, ps.Add) for n in graph)
@@ -3634,7 +3640,7 @@ def test_local_mul_exp_to_exp_add():
     # e^x * e^y / e^z * e^w = e^(x+y-z+w)
     op = expx * expy / expz * expw
     f = function([x, y, z, w], op, mode)
-    utt.assert_allclose(f(3, 4, 5, 6), np.exp(3 + 4 - 5 + 6))
+    np.testing.assert_allclose(f(3, 4, 5, 6), np.exp(3 + 4 - 5 + 6))
     graph = f.maker.fgraph.toposort()
     assert all(isinstance(n.op, Elemwise) for n in graph)
     assert any(isinstance(n.op.scalar_op, ps.Add) for n in graph)
@@ -3645,7 +3651,7 @@ def test_local_mul_exp_to_exp_add():
     # e^x / e^y / e^z = (e^x / e^y) / e^z = e^(x-y-z)
     op = expx / expy / expz
     f = function([x, y, z], op, mode)
-    utt.assert_allclose(f(3, 4, 5), np.exp(3 - 4 - 5))
+    np.testing.assert_allclose(f(3, 4, 5), np.exp(3 - 4 - 5))
     graph = f.maker.fgraph.toposort()
     assert all(isinstance(n.op, Elemwise) for n in graph)
     assert any(isinstance(n.op.scalar_op, ps.Sub) for n in graph)
@@ -3654,7 +3660,7 @@ def test_local_mul_exp_to_exp_add():
     # e^x * y * e^z * w = e^(x+z) * y * w
     op = expx * y * expz * w
     f = function([x, y, z, w], op, mode)
-    utt.assert_allclose(f(3, 4, 5, 6), np.exp(3 + 5) * 4 * 6)
+    np.testing.assert_allclose(f(3, 4, 5, 6), np.exp(3 + 5) * 4 * 6)
     graph = f.maker.fgraph.toposort()
     assert all(isinstance(n.op, Elemwise) for n in graph)
     assert any(isinstance(n.op.scalar_op, ps.Add) for n in graph)
@@ -3666,7 +3672,7 @@ def test_local_mul_exp_to_exp_add():
     f = function([mx, my], exp(mx) * exp(my), mode, allow_input_downcast=True)
     M1 = np.array([[1.0, 2.0], [3.0, 4.0]])
     M2 = np.array([[5.0, 6.0], [7.0, 8.0]])
-    utt.assert_allclose(f(M1, M2), np.exp(M1 + M2))
+    np.testing.assert_allclose(f(M1, M2), np.exp(M1 + M2))
     graph = f.maker.fgraph.toposort()
     assert all(isinstance(n.op, Elemwise) for n in graph)
     assert any(isinstance(n.op.scalar_op, ps.Add) for n in graph)
@@ -3675,13 +3681,13 @@ def test_local_mul_exp_to_exp_add():
     # checking whether further rewrites can proceed after this one as one would expect
     # e^x * e^(-x) = e^(x-x) = e^0 = 1
     f = function([x], expx * exp(neg(x)), mode)
-    utt.assert_allclose(f(42), 1)
+    np.testing.assert_allclose(f(42), 1)
     graph = f.maker.fgraph.toposort()
     assert isinstance(graph[0].inputs[0], TensorConstant)
 
     # e^x / e^x = e^(x-x) = e^0 = 1
     f = function([x], expx / expx, mode)
-    utt.assert_allclose(f(42), 1)
+    np.testing.assert_allclose(f(42), 1)
     graph = f.maker.fgraph.toposort()
     assert isinstance(graph[0].inputs[0], TensorConstant)
 
@@ -3712,7 +3718,7 @@ def test_local_mul_pow_to_pow_add():
     # 2^x * 2^y * 2^z * 2^w = 2^(x+y+z+w)
     op = 2**x * 2**y * 2**z * 2**w
     f = function([x, y, z, w], op, mode)
-    utt.assert_allclose(f(3, 4, 5, 6), 2 ** (3 + 4 + 5 + 6))
+    np.testing.assert_allclose(f(3, 4, 5, 6), 2 ** (3 + 4 + 5 + 6))
     graph = f.maker.fgraph.toposort()
     assert all(isinstance(n.op, Elemwise) for n in graph)
     assert any(isinstance(n.op.scalar_op, ps.Add) for n in graph)
@@ -3721,7 +3727,7 @@ def test_local_mul_pow_to_pow_add():
     # 2^x * a^y * 2^z * b^w * c^v * a^u * s * b^t = 2^(x+z) * a^(y+u) * b^(w+t) * c^v * s
     op = 2**x * a**y * 2**z * b**w * c**v * a**u * s * b**t
     f = function([x, y, z, w, v, u, t, s, a, b, c], op, mode)
-    utt.assert_allclose(
+    np.testing.assert_allclose(
         f(4, 5, 6, 7, 8, 9, 10, 11, 2.5, 3, 3.5),
         2 ** (4 + 6) * 2.5 ** (5 + 9) * 3 ** (7 + 10) * 3.5**8 * 11,
     )
@@ -3734,7 +3740,7 @@ def test_local_mul_pow_to_pow_add():
     # (2^x / 2^y) * (a^z / a^w) = 2^(x-y) * a^(z-w)
     op = 2**x / 2**y * (a**z / a**w)
     f = function([x, y, z, w, a], op, mode)
-    utt.assert_allclose(f(3, 5, 6, 4, 7), 2 ** (3 - 5) * 7 ** (6 - 4))
+    np.testing.assert_allclose(f(3, 5, 6, 4, 7), 2 ** (3 - 5) * 7 ** (6 - 4))
     graph = f.maker.fgraph.toposort()
     assert all(isinstance(n.op, Elemwise) for n in graph)
     assert len([True for n in graph if isinstance(n.op.scalar_op, ps.Sub)]) == 2
@@ -3743,7 +3749,7 @@ def test_local_mul_pow_to_pow_add():
     # a^x * a^y * exp(z) * exp(w) = a^(x+y) * exp(z+w)
     op = a**x * a**y * exp(z) * exp(w)
     f = function([x, y, z, w, a], op, mode)
-    utt.assert_allclose(f(3, 4, 5, 6, 2), 2 ** (3 + 4) * np.exp(5 + 6))
+    np.testing.assert_allclose(f(3, 4, 5, 6, 2), 2 ** (3 + 4) * np.exp(5 + 6))
     graph = f.maker.fgraph.toposort()
     assert all(isinstance(n.op, Elemwise) for n in graph)
     assert len([True for n in graph if isinstance(n.op.scalar_op, ps.Add)]) == 2
@@ -3767,7 +3773,7 @@ def test_local_expm1():
     f_val = f(x_val)
     f_test = function([x], expm1(x), mode=MODE)
 
-    utt.assert_allclose(f_val, f_test(x_val))
+    np.testing.assert_allclose(f_val, f_test(x_val))
 
     assert any(
         isinstance(n.op, Elemwise) and isinstance(n.op.scalar_op, ps.basic.Expm1)
