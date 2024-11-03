@@ -52,3 +52,6 @@ class NumbaLinker(JITLinker):
             thunk_inputs.append(sinput)
 
         return thunk_inputs
+
+    def __repr__(self):
+        return "NumbaLinker()"
