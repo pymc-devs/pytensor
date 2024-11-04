@@ -32,6 +32,7 @@ from pytensor.compile.ops import ViewOp
 from pytensor.graph import FunctionGraph
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
+    NodeProcessingGraphRewriter,
     NodeRewriter,
     RemovalNodeRewriter,
     Rewriter,
@@ -1101,10 +1102,7 @@ def local_useless_split(fgraph, node):
 
 
 @node_rewriter(None)
-def constant_folding(fgraph, node):
-    if not node.op.do_constant_folding(fgraph, node):
-        return False
-
+def unconditional_constant_folding(fgraph, node):
     if not all(isinstance(inp, Constant) for inp in node.inputs):
         return False
 
@@ -1149,6 +1147,23 @@ def constant_folding(fgraph, node):
         rval.append(v)
 
     return rval
+
+
+topo_unconditional_constant_folding = in2out(
+    unconditional_constant_folding,
+    ignore_newtrees=True,
+    name="topo_unconditional_constant_folding",
+    # Not all Ops have a perform method, so we ignore failures to constant_fold
+    failure_callback=NodeProcessingGraphRewriter.warn_ignore,
+)
+
+
+@node_rewriter(None)
+def constant_folding(fgraph, node):
+    if not node.op.do_constant_folding(fgraph, node):
+        return False
+
+    return unconditional_constant_folding.transform(fgraph, node)
 
 
 topo_constant_folding = in2out(
