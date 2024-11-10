@@ -12,4 +12,5 @@ import pytensor.link.pytorch.dispatch.shape
 import pytensor.link.pytorch.dispatch.sort
 import pytensor.link.pytorch.dispatch.subtensor
 import pytensor.link.pytorch.dispatch.blockwise
+import pytensor.link.pytorch.dispatch.random
 # isort: on
