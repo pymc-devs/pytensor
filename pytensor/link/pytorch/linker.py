@@ -13,7 +13,12 @@ class PytorchLinker(JITLinker):
         return pytorch_typify(inp)
 
     def output_filter(self, var: Variable, out: Any) -> Any:
-        return out.cpu()
+        from torch import is_tensor
+
+        if is_tensor(out) and out.device.type == "cpu":
+            return out.detach().numpy()
+        else:
+            return out
 
     def fgraph_convert(self, fgraph, input_storage, storage_map, **kwargs):
         from pytensor.link.pytorch.dispatch import pytorch_funcify
