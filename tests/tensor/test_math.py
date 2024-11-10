@@ -2492,11 +2492,22 @@ class TestArithmeticCast:
         def numpy_i_scalar(dtype):
             return numpy_scalar(dtype)
 
+        pytensor_funcs = {
+            "scalar": pytensor_scalar,
+            "array": pytensor_array,
+            "i_scalar": pytensor_i_scalar,
+        }
+        numpy_funcs = {
+            "scalar": numpy_scalar,
+            "array": numpy_array,
+            "i_scalar": numpy_i_scalar,
+        }
+
         with config.change_flags(cast_policy="numpy+floatX"):
             # We will test all meaningful combinations of
             # scalar and array operations.
-            pytensor_args = [eval(f"pytensor_{c}") for c in combo]
-            numpy_args = [eval(f"numpy_{c}") for c in combo]
+            pytensor_args = [pytensor_funcs[c] for c in combo]
+            numpy_args = [numpy_funcs[c] for c in combo]
             pytensor_arg_1 = pytensor_args[0](a_type)
             pytensor_arg_2 = pytensor_args[1](b_type)
             pytensor_dtype = op(
