@@ -699,7 +699,10 @@ def local_div_switch_sink(fgraph, node):
             # will point to the new division op.
             copy_stack_trace(node.outputs, fdiv)
 
-            fct = switch(switch_cond, zero_switch_input, fdiv)
+            if branch == 0:
+                fct = switch(switch_cond, zero_switch_input, fdiv)
+            else:
+                fct = switch(switch_cond, fdiv, zero_switch_input)
 
             # Tell debug_mode than the output is correct, even if nan disappear
             fct.tag.values_eq_approx = values_eq_approx_remove_nan

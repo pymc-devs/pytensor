@@ -2163,7 +2163,7 @@ class TestLocalSwitchSink:
         # The zero branch upcasts the output, so we can't ignore its dtype
         zero_branch = constant(np.array(0, dtype="float64"), name="zero_branch")
         other_branch = scalar("other_branch", dtype="float32")
-        outer_var = scalar("mul_var", dtype="bool")
+        outer_var = scalar("outer_var", dtype="bool")
 
         out = op(switch(cond, zero_branch, other_branch), outer_var)
         fgraph = FunctionGraph(outputs=[out], clone=False)
@@ -2172,6 +2172,27 @@ class TestLocalSwitchSink:
 
         expected_out = switch(cond, zero_branch, op(other_branch, outer_var))
         assert equal_computations([new_out], [expected_out])
+
+    @pytest.mark.parametrize(
+        "op, rewrite", [(mul, local_mul_switch_sink), (true_div, local_div_switch_sink)]
+    )
+    def test_local_mul_div_switch_sink_branch_order(self, op, rewrite):
+        cond = scalar("cond", dtype="bool")
+        zero_branch = constant(np.array(0.0, dtype="float64"), "zero_branch")
+        other_branch = scalar("other_branch", dtype="float64")
+        outer_var = scalar("outer_var", dtype="float64")
+
+        left = op(switch(cond, zero_branch, other_branch), outer_var)
+        right = op(switch(cond, other_branch, zero_branch), outer_var)
+        fgraph = FunctionGraph(outputs=[left, right], clone=False)
+        [new_left] = rewrite.transform(fgraph, left.owner)
+        [new_right] = rewrite.transform(fgraph, right.owner)
+
+        expected_left = switch(cond, zero_branch, op(other_branch, outer_var))
+        expected_right = switch(cond, op(other_branch, outer_var), zero_branch)
+        assert equal_computations(
+            [new_left, new_right], [expected_left, expected_right]
+        )
 
 
 @pytest.mark.skipif(
