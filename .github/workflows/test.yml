@@ -133,7 +133,7 @@ jobs:
             fast-compile: 0
             float32: 0
             part: "tests/link/pytorch"
-          - os: macos-latest
+          - os: macos-15
             python-version: "3.12"
             fast-compile: 0
             float32: 0
@@ -169,7 +169,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
 
-          if [[ $OS == "macos-latest" ]]; then
+          if [[ $OS == "macos-15" ]]; then
             micromamba install --yes -q "python~=${PYTHON_VERSION}=*_cpython" numpy scipy pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock libblas=*=*accelerate;
           else
             micromamba install --yes -q "python~=${PYTHON_VERSION}=*_cpython" mkl numpy scipy pip mkl-service graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock;
@@ -182,7 +182,7 @@ jobs:
           pip install -e ./
           micromamba list && pip freeze
           python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'
-          if [[ $OS == "macos-latest" ]]; then
+          if [[ $OS == "macos-15" ]]; then
             python -c 'import pytensor; assert pytensor.config.blas__ldflags.startswith("-framework Accelerate"), "Blas flags are not set to MacOS Accelerate"';
           else
             python -c 'import pytensor; assert pytensor.config.blas__ldflags != "", "Blas flags are empty"';
