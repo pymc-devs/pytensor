@@ -2379,6 +2379,14 @@ class GCC_compiler(Compiler):
         if sys.platform == "darwin":
             # Use the already-loaded python symbols.
             cxxflags.extend(["-undefined", "dynamic_lookup"])
+            # XCode15 introduced ld_prime linker. At the time of writing, this linker
+            # leads to multiple issues, so we supply a flag to use the older dynamic
+            # linker: ld64
+            if int(platform.mac_ver()[0].split(".")[0]) >= 15:
+                # This might be incorrect. We know that ld_prime was introduced in
+                # XCode15, but we don't know if the platform version is aligned with
+                # xcode's version.
+                cxxflags.append("-ld64")
 
         if sys.platform == "win32":
             # Workaround for https://github.com/Theano/Theano/issues/4926.
