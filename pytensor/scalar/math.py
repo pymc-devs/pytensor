@@ -1281,6 +1281,38 @@ class Ive(BinaryScalarOp):
 ive = Ive(upgrade_to_float, name="ive")
 
 
+class Kve(BinaryScalarOp):
+    """Exponentially scaled modified Bessel function of the second kind of real order v."""
+
+    nfunc_spec = ("scipy.special.kve", 2, 1)
+
+    @staticmethod
+    def st_impl(v, x):
+        return scipy.special.kve(v, x)
+
+    def impl(self, v, x):
+        return self.st_impl(v, x)
+
+    def L_op(self, inputs, outputs, output_grads):
+        v, x = inputs
+        [kve_vx] = outputs
+        [g_out] = output_grads
+        # (1 -v/x) * kve(v, x) - kve(v - 1, x)
+        kve_vm1x = self(v - 1, x)
+        dx = (1 - v / x) * kve_vx - kve_vm1x
+
+        return [
+            grad_not_implemented(self, 0, v),
+            g_out * dx,
+        ]
+
+    def c_code(self, *args, **kwargs):
+        raise NotImplementedError()
+
+
+kve = Kve(upgrade_to_float, name="kve")
+
+
 class Sigmoid(UnaryScalarOp):
     """
     Logistic sigmoid function (1 / (1 + exp(-x)), also known as expit or inverse logit

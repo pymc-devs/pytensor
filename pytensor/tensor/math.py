@@ -1230,6 +1230,16 @@ def ive(v, x):
 
 
 @scalar_elemwise
+def kve(v, x):
+    """Exponentially scaled modified Bessel function of the second kind of real order v."""
+
+
+def kv(v, x):
+    """Modified Bessel function of the second kind of real order v."""
+    return kve(v, x) * exp(-x)
+
+
+@scalar_elemwise
 def sigmoid(x):
     """Logistic sigmoid function (1 / (1 + exp(-x)), also known as expit or inverse logit"""
 
@@ -3040,6 +3050,8 @@ __all__ = [
     "i1",
     "iv",
     "ive",
+    "kv",
+    "kve",
     "sigmoid",
     "expit",
     "softplus",

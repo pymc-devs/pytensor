@@ -21,6 +21,7 @@ from pytensor.tensor.math import (
     gammainccinv,
     gammaincinv,
     iv,
+    kve,
     log,
     log1mexp,
     polygamma,
@@ -157,6 +158,7 @@ def test_erfinv():
         (erfcx, (0.7,)),
         (erfcinv, (0.7,)),
         (iv, (0.3, 0.7)),
+        (kve, (-2.5, 2.0)),
     ],
 )
 @pytest.mark.skipif(not TFP_INSTALLED, reason="Test requires tensorflow-probability")
