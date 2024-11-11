@@ -622,9 +622,9 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
                 if isinstance(key, str):
                     matching_vars = get_var_by_name([self], key)
                     if not matching_vars:
-                        raise Exception(f"{key} not found in graph")
+                        raise ValueError(f"{key} not found in graph")
                     elif len(matching_vars) > 1:
-                        raise Exception(f"Found multiple variables with name {key}")
+                        raise ValueError(f"Found multiple variables with name {key}")
                     new_input_to_values[matching_vars[0]] = value
                 else:
                     new_input_to_values[key] = value
