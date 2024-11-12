@@ -56,6 +56,7 @@ from pytensor.tensor.math import (
     ge,
     int_div,
     isinf,
+    kve,
     le,
     log,
     log1mexp,
@@ -3494,3 +3495,18 @@ local_polygamma_to_tri_gamma = PatternNodeRewriter(
 )
 
 register_specialize(local_polygamma_to_tri_gamma)
+
+
+local_log_kv = PatternNodeRewriter(
+    # Rewrite log(kv(v, x)) = log(kve(v, x) * exp(-x)) -> log(kve(v, x)) - x
+    # During stabilize -x is converted to -1.0 * x
+    (log, (mul, (kve, "v", "x"), (exp, (mul, -1.0, "x")))),
+    (sub, (log, (kve, "v", "x")), "x"),
+    allow_multiple_clients=True,
+    name="local_log_kv",
+    # Start the rewrite from the less likely kve node
+    tracks=[kve],
+    get_nodes=get_clients_at_depth2,
+)
+
+register_stabilize(local_log_kv)

@@ -61,6 +61,7 @@ from pytensor.tensor.math import (
     ge,
     gt,
     int_div,
+    kv,
     le,
     log,
     log1mexp,
@@ -4578,3 +4579,17 @@ def test_local_batched_matmul_to_core_matmul():
     x_test = rng.normal(size=(5, 3, 2))
     y_test = rng.normal(size=(5, 2, 2))
     np.testing.assert_allclose(fn(x_test, y_test), x_test @ y_test)
+
+
+def test_log_kv_stabilization():
+    x = pt.scalar("x")
+    out = log(kv(4.5, x))
+
+    # Expression would underflow to -inf without rewrite
+    mode = get_default_mode().including("stabilize")
+    # Reference value from mpmath
+    # mpmath.log(mpmath.besselk(4.5, 1000.0))
+    np.testing.assert_allclose(
+        out.eval({x: 1000.0}, mode=mode),
+        -1003.2180912984705,
+    )
