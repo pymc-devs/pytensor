@@ -367,6 +367,10 @@ class TestEval:
             self.w.eval({self.z: 3, self.x: 2.5})
         assert self.w.eval({self.z: 3, self.x: 2.5}, on_unused_input="ignore") == 6.0
 
+        # regression test for https://github.com/pymc-devs/pytensor/issues/1084
+        q = self.x + 1
+        assert q.eval({"x": 1, "y": 2}, on_unused_input="ignore") == 2.0
+
     @pytest.mark.filterwarnings("error")
     def test_eval_unashable_kwargs(self):
         y_repl = constant(2.0, dtype="floatX")
