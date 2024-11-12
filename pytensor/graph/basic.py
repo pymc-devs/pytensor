@@ -616,7 +616,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         """
         from pytensor.compile.function import function
 
-        on_unused_input = kwargs.get("on_unused_input", None)
+        ignore_unused_input = kwargs.get("on_unused_input", None) in ("ignore", "warn")
 
         def convert_string_keys_to_variables(inputs_to_values) -> dict["Variable", Any]:
             new_input_to_values = {}
@@ -624,7 +624,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
                 if isinstance(key, str):
                     matching_vars = get_var_by_name([self], key)
                     if not matching_vars:
-                        if on_unused_input in ["raise", None]:
+                        if not ignore_unused_input:
                             raise ValueError(f"{key} not found in graph")
                     elif len(matching_vars) > 1:
                         raise ValueError(f"Found multiple variables with name {key}")
