@@ -616,16 +616,20 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         """
         from pytensor.compile.function import function
 
+        on_unused_input = kwargs.get("on_unused_input", None)
+
         def convert_string_keys_to_variables(inputs_to_values) -> dict["Variable", Any]:
             new_input_to_values = {}
             for key, value in inputs_to_values.items():
                 if isinstance(key, str):
                     matching_vars = get_var_by_name([self], key)
                     if not matching_vars:
-                        raise ValueError(f"{key} not found in graph")
+                        if on_unused_input in ["raise", None]:
+                            raise ValueError(f"{key} not found in graph")
                     elif len(matching_vars) > 1:
                         raise ValueError(f"Found multiple variables with name {key}")
-                    new_input_to_values[matching_vars[0]] = value
+                    else:
+                        new_input_to_values[matching_vars[0]] = value
                 else:
                     new_input_to_values[key] = value
             return new_input_to_values

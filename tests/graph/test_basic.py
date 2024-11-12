@@ -365,7 +365,16 @@ class TestEval:
     def test_eval_kwargs(self):
         with pytest.raises(UnusedInputError):
             self.w.eval({self.z: 3, self.x: 2.5})
+        with pytest.warns(
+            UserWarning,
+            match="pytensor.function was asked to create a function",
+        ):
+            self.w.eval({self.z: 3, self.x: 2.5}, on_unused_input="warn")
         assert self.w.eval({self.z: 3, self.x: 2.5}, on_unused_input="ignore") == 6.0
+
+        # regression test for
+        q = self.x + 1
+        assert q.eval({"x": 1, "y": 2}, on_unused_input="ignore") == 2.0
 
     @pytest.mark.filterwarnings("error")
     def test_eval_unashable_kwargs(self):
