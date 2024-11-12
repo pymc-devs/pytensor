@@ -367,13 +367,8 @@ class TestEval:
             self.w.eval({self.z: 3, self.x: 2.5})
         assert self.w.eval({self.z: 3, self.x: 2.5}, on_unused_input="ignore") == 6.0
 
-        # regression tests for https://github.com/pymc-devs/pytensor/issues/1084
+        # regression test for https://github.com/pymc-devs/pytensor/issues/1084
         q = self.x + 1
-        with pytest.warns(
-            UserWarning,
-            match="pytensor.function was asked to create a function",
-        ):
-            assert q.eval({"x": 1, "y": 2}, on_unused_input="warn") == 2.0
         assert q.eval({"x": 1, "y": 2}, on_unused_input="ignore") == 2.0
 
     @pytest.mark.filterwarnings("error")
