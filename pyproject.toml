@@ -119,7 +119,7 @@ tag_prefix = "rel-"
 
 [tool.pytest.ini_options]
 addopts = "--durations=50 --doctest-modules --ignore=pytensor/link --ignore=pytensor/misc/check_duplicate_key.py"
-testpaths = ["pytensor/", "tests/"]
+testpaths = ["pytensor/", "tests/", "doc/"]
 xfail_strict = true
 
 [tool.ruff]
