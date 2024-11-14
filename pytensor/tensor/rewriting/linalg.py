@@ -42,6 +42,7 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
+from pytensor.tensor.shape import Reshape
 from pytensor.tensor.slinalg import (
     BlockDiagonal,
     Cholesky,
@@ -989,3 +990,23 @@ optdb.register(
     "jax",
     position=0.9,  # Run before canonicalization
 )
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Reshape])
+def rewrite_dot_kron(fgraph, node):
+    if not (isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Dot)):
+        return False
+
+    potential_kron = node.inputs[0].owner
+    if not (isinstance(potential_kron.op, KroneckerProduct)):
+        return False
+
+    c = node.inputs[1]
+    [a, b] = potential_kron.inputs
+
+    m, n = a.type.shape
+    p, q = b.type.shape
+    out_clever = (b @ c.reshape(shape=(n, q)).T @ a.T).ravel()
+    return [out_clever]
