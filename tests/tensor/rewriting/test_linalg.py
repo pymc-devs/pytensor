@@ -781,7 +781,7 @@ def test_det_kronecker_rewrite():
     a, b = pt.dmatrices("a", "b")
     kron_prod = pt.linalg.kron(a, b)
     det_output = pt.linalg.det(kron_prod)
-    f_rewritten = function([kron_prod], [det_output], mode="FAST_RUN")
+    f_rewritten = function([a, b], [det_output], mode="FAST_RUN")
 
     # Rewrite Test
     nodes = f_rewritten.maker.fgraph.apply_nodes
@@ -791,10 +791,39 @@ def test_det_kronecker_rewrite():
     a_test, b_test = np.random.rand(2, 20, 20)
     kron_prod_test = np.kron(a_test, b_test)
     det_output_test = np.linalg.det(kron_prod_test)
-    rewritten_det_val = f_rewritten(kron_prod_test)
+    rewritten_det_val = f_rewritten(a_test, b_test)
     assert_allclose(
         det_output_test,
         rewritten_det_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+def test_slogdet_kronecker_rewrite():
+    a, b = pt.dmatrices("a", "b")
+    kron_prod = pt.linalg.kron(a, b)
+    sign_output, logdet_output = pt.linalg.slogdet(kron_prod)
+    f_rewritten = function([a, b], [sign_output, logdet_output], mode="FAST_RUN")
+
+    # Rewrite Test
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, KroneckerProduct) for node in nodes)
+
+    # Value Test
+    a_test, b_test = np.random.rand(2, 20, 20)
+    kron_prod_test = np.kron(a_test, b_test)
+    sign_output_test, logdet_output_test = np.linalg.slogdet(kron_prod_test)
+    rewritten_sign_val, rewritten_logdet_val = f_rewritten(a_test, b_test)
+    assert_allclose(
+        sign_output_test,
+        rewritten_sign_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+    assert_allclose(
+        logdet_output_test,
+        rewritten_logdet_val,
         atol=1e-3 if config.floatX == "float32" else 1e-8,
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
@@ -904,20 +933,60 @@ def test_rewrite_cholesky_diag_to_sqrt_diag_not_applied():
 
 
 def test_slogdet_specialisation():
-    x = pt.dmatrix("x")
-    det_x = pt.linalg.det(x)
-    log_abs_det_x = pt.log(pt.abs(det_x))
-    sign_det_x = pt.sign(det_x)
+    x, a = pt.dmatrix("x"), np.random.rand(20, 20)
+    det_x, det_a = pt.linalg.det(x), np.linalg.det(a)
+    log_abs_det_x, log_abs_det_a = pt.log(pt.abs(det_x)), np.log(np.abs(det_a))
+    log_det_x, log_det_a = pt.log(det_x), np.log(det_a)
+    sign_det_x, sign_det_a = pt.sign(det_x), np.sign(det_a)
     exp_det_x = pt.exp(det_x)
+    # REWRITE TESTS
     # sign(det(x))
     f = function([x], [sign_det_x], mode="FAST_RUN")
     nodes = f.maker.fgraph.apply_nodes
-    assert any(isinstance(node.op, SLogDet) for node in nodes)
+    assert len([node for node in nodes if isinstance(node.op, SLogDet)]) == 1
+    assert not any(isinstance(node.op, Det) for node in nodes)
+    rw_sign_det_a = f(a)
+    assert_allclose(
+        sign_det_a,
+        rw_sign_det_a,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
     # log(abs(det(x)))
     f = function([x], [log_abs_det_x], mode="FAST_RUN")
     nodes = f.maker.fgraph.apply_nodes
-    assert any(isinstance(node.op, SLogDet) for node in nodes)
+    assert len([node for node in nodes if isinstance(node.op, SLogDet)]) == 1
+    assert not any(isinstance(node.op, Det) for node in nodes)
+    rw_log_abs_det_a = f(a)
+    assert_allclose(
+        log_abs_det_a,
+        rw_log_abs_det_a,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+    # log(det(x))
+    f = function([x], [log_det_x], mode="FAST_RUN")
+    nodes = f.maker.fgraph.apply_nodes
+    assert len([node for node in nodes if isinstance(node.op, SLogDet)]) == 1
+    assert not any(isinstance(node.op, Det) for node in nodes)
+    rw_log_det_a = f(a)
+    assert_allclose(
+        log_det_a,
+        rw_log_det_a,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+    # more than 1 valid function
+    f = function([x], [sign_det_x, log_abs_det_x], mode="FAST_RUN")
+    nodes = f.maker.fgraph.apply_nodes
+    assert len([node for node in nodes if isinstance(node.op, SLogDet)]) == 1
+    assert not any(isinstance(node.op, Det) for node in nodes)
     # other functions (rewrite shouldnt be applied to these)
+    # only invalid functions
     f = function([x], [exp_det_x], mode="FAST_RUN")
+    nodes = f.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, SLogDet) for node in nodes)
+    # invalid + valid function
+    f = function([x], [exp_det_x, sign_det_x], mode="FAST_RUN")
     nodes = f.maker.fgraph.apply_nodes
     assert not any(isinstance(node.op, SLogDet) for node in nodes)
