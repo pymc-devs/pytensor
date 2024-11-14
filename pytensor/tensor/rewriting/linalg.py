@@ -972,13 +972,11 @@ def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
 @register_specialize
 @node_rewriter([det])
 def slogdet_specialization(fgraph, node):
-    replacements = {}
+    dummy_replacements = {}
     for client, _ in fgraph.clients[node.outputs[0]]:
         # Check for sign(det)
         if isinstance(client.op, Elemwise) and isinstance(client.op.scalar_op, Sign):
-            x = node.inputs[0]
-            sign_det_x, slog_det_x = SLogDet()(x)
-            replacements[client.outputs[0]] = sign_det_x
+            dummy_replacements[client.outputs[0]] = "sign"
 
         # Check for log(abs(det))
         elif isinstance(client.op, Elemwise) and isinstance(client.op.scalar_op, Abs):
@@ -986,22 +984,27 @@ def slogdet_specialization(fgraph, node):
                 if isinstance(client_2.op, Elemwise) and isinstance(
                     client_2.op.scalar_op, Log
                 ):
-                    x = node.inputs[0]
-                    sign_det_x, slog_det_x = SLogDet()(x)
-                    replacements[fgraph.clients[client.outputs[0]][0][0].outputs[0]] = (
-                        slog_det_x
-                    )
+                    dummy_replacements[
+                        fgraph.clients[client.outputs[0]][0][0].outputs[0]
+                    ] = "log_abs_det"
 
         # Check for log(det)
         elif isinstance(client.op, Elemwise) and isinstance(client.op.scalar_op, Log):
-            x = node.inputs[0]
-            sign_det_x, slog_det_x = SLogDet()(x)
-            replacements[client.outputs[0]] = pt.where(
-                pt.eq(sign_det_x, -1), np.nan, slog_det_x
-            )
+            dummy_replacements[client.outputs[0]] = "log_det"
 
         # Det is used directly for something else, don't rewrite to avoid computing two dets
         else:
             return None
 
+    [x] = node.inputs
+    sign_det_x, log_abs_det_x = SLogDet()(x)
+    log_det_x = pt.where(pt.eq(sign_det_x, -1), np.nan, log_abs_det_x)
+    slogdet_specialization_map = {
+        "sign": sign_det_x,
+        "log_abs_det": log_abs_det_x,
+        "log_det": log_det_x,
+    }
+    replacements = {
+        k: slogdet_specialization_map[v] for k, v in dummy_replacements.items()
+    }
     return replacements or None
