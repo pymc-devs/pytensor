@@ -906,3 +906,29 @@ def test_rewrite_cholesky_diag_to_sqrt_diag_not_applied():
     f_rewritten = function([x], z_cholesky, mode="FAST_RUN")
     nodes = f_rewritten.maker.fgraph.apply_nodes
     assert any(isinstance(node.op, Cholesky) for node in nodes)
+
+
+def test_dot_kron_rewrite():
+    m, n, p, q = 3, 4, 6, 7
+    a = pt.matrix("a", shape=(m, n))
+    b = pt.matrix("b", shape=(p, q))
+    c = pt.matrix("c", shape=(n * q, 1))
+    out_direct = pt.linalg.kron(a, b) @ c
+
+    # REWRITE TEST
+    f_direct_rewritten = function([a, b, c], out_direct, mode="FAST_RUN")
+    nodes = f_direct_rewritten.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, KroneckerProduct) for node in nodes)
+
+    # NUMERIC VALUE TEST
+    a_test = np.random.rand(m, n).astype(config.floatX)
+    b_test = np.random.rand(p, q).astype(config.floatX)
+    c_test = np.random.rand(n * q, 1).astype(config.floatX)
+    out_direct_val = np.kron(a_test, b_test) @ c_test
+    out_clever_val = f_direct_rewritten(a_test, b_test, c_test)
+    assert_allclose(
+        out_direct_val,
+        out_clever_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
