@@ -357,6 +357,9 @@ hold here as well. PyTensor's random objects are defined and implemented in
 :ref:`RandomStream<libdoc_tensor_random_utils>` and, at a lower level,
 in :ref:`RandomVariable<libdoc_tensor_random_basic>`.
 
+For a more technical explanation of how PyTensor implements random variables see :ref:`prng`.
+
+
 Brief Example
 -------------
 

@@ -30,6 +30,7 @@ sophisticated `Op`\s like `Scan`, which makes it a user-friendly random variable
 interface in PyTensor.
 
 For an example of how to use random numbers, see :ref:`Using Random Numbers <using_random_numbers>`.
+For a technical explanation of how PyTensor implements random variables see :ref:`prng`.
 
 
 .. class:: RandomStream()
