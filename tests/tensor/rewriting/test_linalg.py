@@ -921,9 +921,9 @@ def test_dot_kron_rewrite():
     assert not any(isinstance(node.op, KroneckerProduct) for node in nodes)
 
     # NUMERIC VALUE TEST
-    a_test = np.random.rand(m, n)
-    b_test = np.random.rand(p, q)
-    c_test = np.random.rand(n * q, 1)
+    a_test = np.random.rand(m, n).astype(config.floatX)
+    b_test = np.random.rand(p, q).astype(config.floatX)
+    c_test = np.random.rand(n * q, 1).astype(config.floatX)
     out_direct_val = np.kron(a_test, b_test) @ c_test
     out_clever_val = f_direct_rewritten(a_test, b_test, c_test)
     assert_allclose(
