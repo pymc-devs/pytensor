@@ -5,7 +5,9 @@ Pseudo random number generation in PyTensor
 ===========================================
 
 PyTensor has native support for `pseudo random number generation (PRNG) <https://en.wikipedia.org/wiki/Pseudorandom_number_generator>`_.
-This document describes how PRNGs are implemented in PyTensor, via the RandomVariable Operator.
+
+This document describes the details of how PRNGs are implemented in PyTensor, via the RandomVariable Operator.
+For a more applied example see :ref:`using_random_numbers`
 
 We also discuss how initial seeding and seeding updates are implemented, and some harder cases such as using RandomVariables inside Scan, or with other backends like JAX.
 
