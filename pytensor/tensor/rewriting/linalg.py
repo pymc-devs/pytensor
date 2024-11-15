@@ -996,7 +996,7 @@ optdb.register(
 @node_rewriter([Dot])
 def rewrite_dot_kron(fgraph, node):
     potential_kron = node.inputs[0].owner
-    if not (isinstance(potential_kron.op, KroneckerProduct)):
+    if not (potential_kron and isinstance(potential_kron.op, KroneckerProduct)):
         return False
 
     c = node.inputs[1]
@@ -1004,5 +1004,5 @@ def rewrite_dot_kron(fgraph, node):
 
     m, n = a.type.shape
     p, q = b.type.shape
-    out_clever = (b @ c.reshape(shape=(n, q)).T @ a.T).ravel()
+    out_clever = pt.expand_dims((b @ c.reshape(shape=(n, q)).T @ a.T).T.ravel(), 1)
     return [out_clever]

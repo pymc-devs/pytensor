@@ -14,7 +14,7 @@ from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.math import Dot, _allclose, dot, matmul
+from pytensor.tensor.math import _allclose, dot, matmul
 from pytensor.tensor.nlinalg import (
     SVD,
     Det,
@@ -918,8 +918,7 @@ def test_dot_kron_rewrite():
     # REWRITE TEST
     f_direct_rewritten = function([a, b, c], out_direct, mode="FAST_RUN")
     nodes = f_direct_rewritten.maker.fgraph.apply_nodes
-    print(nodes)
-    assert not any(isinstance(node.op.core_op, Dot) for node in nodes)
+    assert not any(isinstance(node.op, KroneckerProduct) for node in nodes)
 
     # NUMERIC VALUE TEST
     a_test = np.random.rand(m, n)
