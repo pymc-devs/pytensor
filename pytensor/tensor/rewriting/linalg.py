@@ -6,9 +6,11 @@ import numpy as np
 
 from pytensor import Variable
 from pytensor import tensor as pt
+from pytensor.compile import optdb
 from pytensor.graph import Apply, FunctionGraph
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
+    in2out,
     node_rewriter,
 )
 from pytensor.scalar.basic import Abs, Log, Mul, Sign
@@ -47,9 +49,11 @@ from pytensor.tensor.slinalg import (
     Cholesky,
     Solve,
     SolveBase,
+    _bilinear_solve_discrete_lyapunov,
     block_diag,
     cholesky,
     solve,
+    solve_discrete_lyapunov,
     solve_triangular,
 )
 
@@ -783,45 +787,6 @@ def rewrite_det_blockdiag(fgraph, node):
     return [prod(det_sub_matrices)]
 
 
-# @register_canonicalize
-# @register_stabilize
-# @node_rewriter([slogdet])
-# def rewrite_slogdet_blockdiag(fgraph, node):
-#     """
-#     This rewrite simplifies the slogdet of a blockdiagonal matrix by extracting the individual sub matrices and returning the sign and logdet values computed using those
-
-#     slogdet(block_diag(a,b,c,....)) = prod(sign(a), sign(b), sign(c),...), sum(logdet(a), logdet(b), logdet(c),....)
-
-#     Parameters
-#     ----------
-#     fgraph: FunctionGraph
-#         Function graph being optimized
-#     node: Apply
-#         Node of the function graph to be optimized
-
-#     Returns
-#     -------
-#     list of Variable, optional
-#         List of optimized variables, or None if no optimization was performed
-#     """
-#     # Check for inner block_diag operation
-#     potential_block_diag = node.inputs[0].owner
-#     if not (
-#         potential_block_diag
-#         and isinstance(potential_block_diag.op, Blockwise)
-#         and isinstance(potential_block_diag.op.core_op, BlockDiagonal)
-#     ):
-#         return None
-
-#     # Find the composing sub_matrices
-#     sub_matrices = potential_block_diag.inputs
-#     sign_sub_matrices, logdet_sub_matrices = zip(
-#         *[slogdet(sub_matrices[i]) for i in range(len(sub_matrices))]
-#     )
-
-#     return [prod(sign_sub_matrices), sum(logdet_sub_matrices)]
-
-
 @register_canonicalize
 @register_stabilize
 @node_rewriter([ExtractDiag])
@@ -967,6 +932,25 @@ def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
             non_eye_input = pt.shape_padaxis(non_eye_input, -2)
 
     return [eye_input * (non_eye_input**0.5)]
+
+
+@node_rewriter([_bilinear_solve_discrete_lyapunov])
+def jax_bilinaer_lyapunov_to_direct(fgraph: FunctionGraph, node: Apply):
+    """
+    Replace BilinearSolveDiscreteLyapunov with a direct computation that is supported by JAX
+    """
+    A, B = (cast(TensorVariable, x) for x in node.inputs)
+    result = solve_discrete_lyapunov(A, B, method="direct")
+
+    return [result]
+
+
+optdb.register(
+    "jax_bilinaer_lyapunov_to_direct",
+    in2out(jax_bilinaer_lyapunov_to_direct),
+    "jax",
+    position=0.9,  # Run before canonicalization
+)
 
 
 @register_specialize
