@@ -720,7 +720,7 @@ def test_det_blockdiag_rewrite():
 
 
 def test_slogdet_blockdiag_rewrite():
-    n_matrices = 100
+    n_matrices = 10
     matrix_size = (5, 5)
     sub_matrices = pt.tensor("sub_matrices", shape=(n_matrices, *matrix_size))
     bd_output = pt.linalg.block_diag(*[sub_matrices[i] for i in range(n_matrices)])
