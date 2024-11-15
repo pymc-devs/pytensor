@@ -42,7 +42,6 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.shape import Reshape
 from pytensor.tensor.slinalg import (
     BlockDiagonal,
     Cholesky,
@@ -994,11 +993,8 @@ optdb.register(
 
 @register_canonicalize
 @register_stabilize
-@node_rewriter([Reshape])
+@node_rewriter([Dot])
 def rewrite_dot_kron(fgraph, node):
-    if not (isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Dot)):
-        return False
-
     potential_kron = node.inputs[0].owner
     if not (isinstance(potential_kron.op, KroneckerProduct)):
         return False
