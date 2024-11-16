@@ -293,7 +293,7 @@ def slogdet(x: ptb.TensorVariable) -> tuple[ptb.TensorVariable, ptb.TensorVariab
     ``sign * exp(logabsdet)``.
     """
     det_val = det(x)
-    return [ptm.sign(det_val), ptm.log(ptm.abs(det_val))]
+    return ptm.sign(det_val), ptm.log(ptm.abs(det_val))
 
 
 class Eig(Op):
