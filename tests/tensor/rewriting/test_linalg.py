@@ -932,7 +932,7 @@ def test_rewrite_cholesky_diag_to_sqrt_diag_not_applied():
     assert any(isinstance(node.op, Cholesky) for node in nodes)
 
 
-def test_slogdet_specialisation():
+def test_slogdet_specialization():
     x, a = pt.dmatrix("x"), np.random.rand(20, 20)
     det_x, det_a = pt.linalg.det(x), np.linalg.det(a)
     log_abs_det_x, log_abs_det_a = pt.log(pt.abs(det_x)), np.log(np.abs(det_a))

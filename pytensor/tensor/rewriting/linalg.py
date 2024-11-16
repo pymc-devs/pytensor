@@ -956,6 +956,21 @@ optdb.register(
 @register_specialize
 @node_rewriter([det])
 def slogdet_specialization(fgraph, node):
+    """
+    This rewrite targets specific operations related to slogdet i.e sign(det), log(det) and log(abs(det)) and rewrites them using the SLogDet operation.
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    dictionary of Variables, optional
+        Dictionary of nodes and what they should be replaced with, or None if no optimization was performed
+    """
     dummy_replacements = {}
     for client, _ in fgraph.clients[node.outputs[0]]:
         # Check for sign(det)
@@ -964,13 +979,16 @@ def slogdet_specialization(fgraph, node):
 
         # Check for log(abs(det))
         elif isinstance(client.op, Elemwise) and isinstance(client.op.scalar_op, Abs):
+            potential_log = None
             for client_2, _ in fgraph.clients[client.outputs[0]]:
                 if isinstance(client_2.op, Elemwise) and isinstance(
                     client_2.op.scalar_op, Log
                 ):
-                    dummy_replacements[
-                        fgraph.clients[client.outputs[0]][0][0].outputs[0]
-                    ] = "log_abs_det"
+                    potential_log = client_2
+            if potential_log:
+                dummy_replacements[potential_log.outputs[0]] = "log_abs_det"
+            else:
+                return None
 
         # Check for log(det)
         elif isinstance(client.op, Elemwise) and isinstance(client.op.scalar_op, Log):
@@ -980,15 +998,18 @@ def slogdet_specialization(fgraph, node):
         else:
             return None
 
-    [x] = node.inputs
-    sign_det_x, log_abs_det_x = SLogDet()(x)
-    log_det_x = pt.where(pt.eq(sign_det_x, -1), np.nan, log_abs_det_x)
-    slogdet_specialization_map = {
-        "sign": sign_det_x,
-        "log_abs_det": log_abs_det_x,
-        "log_det": log_det_x,
-    }
-    replacements = {
-        k: slogdet_specialization_map[v] for k, v in dummy_replacements.items()
-    }
-    return replacements or None
+    if not dummy_replacements:
+        return None
+    else:
+        [x] = node.inputs
+        sign_det_x, log_abs_det_x = SLogDet()(x)
+        log_det_x = pt.where(pt.eq(sign_det_x, -1), np.nan, log_abs_det_x)
+        slogdet_specialization_map = {
+            "sign": sign_det_x,
+            "log_abs_det": log_abs_det_x,
+            "log_det": log_det_x,
+        }
+        replacements = {
+            k: slogdet_specialization_map[v] for k, v in dummy_replacements.items()
+        }
+        return replacements
