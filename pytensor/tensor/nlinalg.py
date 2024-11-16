@@ -268,7 +268,29 @@ class SLogDet(Op):
 
 def slogdet(x: ptb.TensorVariable) -> tuple[ptb.TensorVariable, ptb.TensorVariable]:
     """
-    This function simplfies the slogdet operation into 2 separate operations using directly the det op : sign(det_val) and log(abs(det_val))
+    Compute the sign and (natural) logarithm of the determinant of an array.
+
+    Returns a naive graph which is optimized later using rewrites with the det operation.
+
+    Parameters
+    ----------
+    x : (..., M, M) tensor or tensor_like
+        Input tensor, has to be square.
+
+    Returns
+    -------
+    A namedtuple with the following attributes:
+
+    sign : (...) tensor_like
+        A number representing the sign of the determinant. For a real matrix,
+        this is 1, 0, or -1. For a complex matrix, this is a complex number
+        with absolute value 1 (i.e., it is on the unit circle), or else 0.
+    logabsdet : (...) tensor_like
+        The natural log of the absolute value of the determinant.
+
+    If the determinant is zero, then `sign` will be 0 and `logabsdet`
+    will be -inf. In all cases, the determinant is equal to
+    ``sign * exp(logabsdet)``.
     """
     det_val = det(x)
     return [ptm.sign(det_val), ptm.log(ptm.abs(det_val))]
