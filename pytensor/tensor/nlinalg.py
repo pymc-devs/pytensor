@@ -271,7 +271,7 @@ def slogdet(x: ptb.TensorVariable) -> tuple[ptb.TensorVariable, ptb.TensorVariab
     This function simplfies the slogdet operation into 2 separate operations using directly the det op : sign(det_val) and log(abs(det_val))
     """
     det_val = det(x)
-    return ptm.sign(det_val), ptm.log(ptm.abs(det_val))
+    return [ptm.sign(det_val), ptm.log(ptm.abs(det_val))]
 
 
 class Eig(Op):
