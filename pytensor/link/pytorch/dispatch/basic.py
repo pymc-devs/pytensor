@@ -54,14 +54,16 @@ def pytorch_funcify_FunctionGraph(
     fgraph,
     node=None,
     fgraph_name="pytorch_funcified_fgraph",
+    conversion_func=pytorch_funcify,
     **kwargs,
 ):
+    built_kwargs = {"conversion_func": conversion_func, **kwargs}
     return fgraph_to_python(
         fgraph,
-        pytorch_funcify,
+        conversion_func,
         type_conversion_fn=pytorch_typify,
         fgraph_name=fgraph_name,
-        **kwargs,
+        **built_kwargs,
     )
 
 
@@ -173,11 +175,8 @@ def pytorch_funcify_OpFromGraph(op, node, **kwargs):
 
     # Apply inner rewrites
     PYTORCH.optimizer(op.fgraph)
-
     fgraph_fn = pytorch_funcify(op.fgraph, **kwargs, squeeze_output=True)
-    # Disable one step inlining to prevent torch from trying to import local functions
-    # defined in `pytorch_funcify`
-    return torch.compiler.disable(fgraph_fn, recursive=False)
+    return fgraph_fn
 
 
 @pytorch_funcify.register(TensorFromScalar)

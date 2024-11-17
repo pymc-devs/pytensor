@@ -29,7 +29,6 @@ class TestOp(Op):
 
 @basic.pytorch_funcify.register(TestOp)
 def evaluate_test_op(op, **_):
-    @torch.compiler.disable(recursive=False)
     def func(a, b):
         op.call_shapes.extend(map(torch.Tensor.size, [a, b]))
         return a @ b
