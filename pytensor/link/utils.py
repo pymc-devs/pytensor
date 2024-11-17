@@ -675,6 +675,7 @@ def fgraph_to_python(
     local_env: dict[Any, Any] | None = None,
     get_name_for_object: Callable[[Any], str] = get_name_for_object,
     squeeze_output: bool = False,
+    unique_name: Callable | None = None,
     **kwargs,
 ) -> Callable:
     """Convert a `FunctionGraph` into a regular Python function.
@@ -706,6 +707,8 @@ def fgraph_to_python(
     get_name_for_object
         A function used to provide names for the objects referenced within the
         generated function.
+    unique_name
+        A function to make random function names for generated code
     squeeze_output
         If the `FunctionGraph` has only one output and this option is
         ``True``, return the single output instead of a tuple with the output.
@@ -719,7 +722,11 @@ def fgraph_to_python(
     if storage_map is None:
         storage_map = {}
 
-    unique_name = unique_name_generator([fgraph_name])
+    if not unique_name:
+        unique_name = unique_name_generator([fgraph_name])
+
+    # make sure we plumb this through
+    kwargs["unique_name"] = unique_name
 
     if global_env is None:
         global_env = {}

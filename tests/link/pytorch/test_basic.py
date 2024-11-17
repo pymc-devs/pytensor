@@ -22,6 +22,7 @@ from pytensor.tensor.type import matrices, matrix, scalar, vector
 
 
 torch = pytest.importorskip("torch")
+torch_dispatch = pytest.importorskip("pytensor.link.pytorch.dispatch.basic")
 
 
 optimizer = RewriteDatabaseQuery(
@@ -335,7 +336,7 @@ def test_pytorch_OpFromGraph():
     ofg_2 = OpFromGraph([x, y], [x * y, x - y])
 
     o1, o2 = ofg_2(y, z)
-    out = ofg_1(x, o1) + o2
+    out = ofg_1(x, o1) / o2
 
     xv = np.ones((2, 2), dtype=config.floatX)
     yv = np.ones((2, 2), dtype=config.floatX) * 3
@@ -343,3 +344,33 @@ def test_pytorch_OpFromGraph():
 
     f = FunctionGraph([x, y, z], [out])
     compare_pytorch_and_py(f, [xv, yv, zv])
+
+
+def test_pytorch_link_references():
+    import pytensor.link.utils as m
+
+    class BasicOp(Op):
+        def __init__(self):
+            super().__init__()
+
+        def make_node(self, *x):
+            return Apply(self, list(x), [xi.type() for xi in x])
+
+        def perform(self, *_):
+            raise RuntimeError("In perform")
+
+    @torch_dispatch.pytorch_funcify.register(BasicOp)
+    def fn(op, node, **kwargs):
+        def inner_fn(x):
+            assert "inner_fn" in dir(m), "not available during dispatch"
+            return x
+
+        return inner_fn
+
+    x = vector("x")
+    op = BasicOp()
+    out = op(x)
+
+    f = function([x], out, mode="PYTORCH")
+    f(torch.ones(3))
+    assert "inner_fn" not in dir(m), "function call reference leaked"
