@@ -1770,14 +1770,9 @@ def verify_grad(
     if rel_tol is None:
         rel_tol = max(_type_tol[str(p.dtype)] for p in pt)
 
+    # Initialize RNG if not provided
     if rng is None:
-        raise TypeError(
-            "rng should be a valid instance of "
-            "numpy.random.RandomState. You may "
-            "want to use tests.unittest"
-            "_tools.verify_grad instead of "
-            "pytensor.gradient.verify_grad."
-        )
+        rng = np.random.default_rng()
 
     # We allow input downcast in `function`, because `numeric_grad` works in
     # the most precise dtype used among the inputs, so we may need to cast
