@@ -11,6 +11,7 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
+from pytensor.tensor import TensorLike
 from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable, diagonal
@@ -266,7 +267,33 @@ class SLogDet(Op):
         return "SLogDet"
 
 
-slogdet = Blockwise(SLogDet())
+def slogdet(x: TensorLike) -> tuple[ptb.TensorVariable, ptb.TensorVariable]:
+    """
+    Compute the sign and (natural) logarithm of the determinant of an array.
+
+    Returns a naive graph which is optimized later using rewrites with the det operation.
+
+    Parameters
+    ----------
+    x : (..., M, M) tensor or tensor_like
+        Input tensor, has to be square.
+
+    Returns
+    -------
+    A tuple with the following attributes:
+
+    sign : (...) tensor_like
+        A number representing the sign of the determinant. For a real matrix,
+        this is 1, 0, or -1.
+    logabsdet : (...) tensor_like
+        The natural log of the absolute value of the determinant.
+
+    If the determinant is zero, then `sign` will be 0 and `logabsdet`
+    will be -inf. In all cases, the determinant is equal to
+    ``sign * exp(logabsdet)``.
+    """
+    det_val = det(x)
+    return ptm.sign(det_val), ptm.log(ptm.abs(det_val))
 
 
 class Eig(Op):

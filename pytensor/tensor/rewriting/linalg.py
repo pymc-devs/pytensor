@@ -2,6 +2,8 @@ import logging
 from collections.abc import Callable
 from typing import cast
 
+import numpy as np
+
 from pytensor import Variable
 from pytensor import tensor as pt
 from pytensor.compile import optdb
@@ -11,7 +13,7 @@ from pytensor.graph.rewriting.basic import (
     in2out,
     node_rewriter,
 )
-from pytensor.scalar.basic import Mul
+from pytensor.scalar.basic import Abs, Log, Mul, Sign
 from pytensor.tensor.basic import (
     AllocDiag,
     ExtractDiag,
@@ -30,11 +32,11 @@ from pytensor.tensor.nlinalg import (
     KroneckerProduct,
     MatrixInverse,
     MatrixPinv,
+    SLogDet,
     det,
     inv,
     kron,
     pinv,
-    slogdet,
     svd,
 )
 from pytensor.tensor.rewriting.basic import (
@@ -787,45 +789,6 @@ def rewrite_det_blockdiag(fgraph, node):
 
 @register_canonicalize
 @register_stabilize
-@node_rewriter([slogdet])
-def rewrite_slogdet_blockdiag(fgraph, node):
-    """
-    This rewrite simplifies the slogdet of a blockdiagonal matrix by extracting the individual sub matrices and returning the sign and logdet values computed using those
-
-    slogdet(block_diag(a,b,c,....)) = prod(sign(a), sign(b), sign(c),...), sum(logdet(a), logdet(b), logdet(c),....)
-
-    Parameters
-    ----------
-    fgraph: FunctionGraph
-        Function graph being optimized
-    node: Apply
-        Node of the function graph to be optimized
-
-    Returns
-    -------
-    list of Variable, optional
-        List of optimized variables, or None if no optimization was performed
-    """
-    # Check for inner block_diag operation
-    potential_block_diag = node.inputs[0].owner
-    if not (
-        potential_block_diag
-        and isinstance(potential_block_diag.op, Blockwise)
-        and isinstance(potential_block_diag.op.core_op, BlockDiagonal)
-    ):
-        return None
-
-    # Find the composing sub_matrices
-    sub_matrices = potential_block_diag.inputs
-    sign_sub_matrices, logdet_sub_matrices = zip(
-        *[slogdet(sub_matrices[i]) for i in range(len(sub_matrices))]
-    )
-
-    return [prod(sign_sub_matrices), sum(logdet_sub_matrices)]
-
-
-@register_canonicalize
-@register_stabilize
 @node_rewriter([ExtractDiag])
 def rewrite_diag_kronecker(fgraph, node):
     """
@@ -860,10 +823,10 @@ def rewrite_diag_kronecker(fgraph, node):
 
 @register_canonicalize
 @register_stabilize
-@node_rewriter([slogdet])
-def rewrite_slogdet_kronecker(fgraph, node):
+@node_rewriter([det])
+def rewrite_det_kronecker(fgraph, node):
     """
-    This rewrite simplifies the slogdet of a kronecker-structured matrix by extracting the individual sub matrices and returning the sign and logdet values computed using those
+    This rewrite simplifies the determinant of a kronecker-structured matrix by extracting the individual sub matrices and returning the det values computed using those
 
     Parameters
     ----------
@@ -884,13 +847,12 @@ def rewrite_slogdet_kronecker(fgraph, node):
 
     # Find the matrices
     a, b = potential_kron.inputs
-    signs, logdets = zip(*[slogdet(a), slogdet(b)])
+    dets = [det(a), det(b)]
     sizes = [a.shape[-1], b.shape[-1]]
     prod_sizes = prod(sizes, no_zeros_in_input=True)
-    signs_final = [signs[i] ** (prod_sizes / sizes[i]) for i in range(2)]
-    logdet_final = [logdets[i] * prod_sizes / sizes[i] for i in range(2)]
+    det_final = prod([dets[i] ** (prod_sizes / sizes[i]) for i in range(2)])
 
-    return [prod(signs_final, no_zeros_in_input=True), sum(logdet_final)]
+    return [det_final]
 
 
 @register_canonicalize
@@ -989,3 +951,65 @@ optdb.register(
     "jax",
     position=0.9,  # Run before canonicalization
 )
+
+
+@register_specialize
+@node_rewriter([det])
+def slogdet_specialization(fgraph, node):
+    """
+    This rewrite targets specific operations related to slogdet i.e sign(det), log(det) and log(abs(det)) and rewrites them using the SLogDet operation.
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    dictionary of Variables, optional
+        Dictionary of nodes and what they should be replaced with, or None if no optimization was performed
+    """
+    dummy_replacements = {}
+    for client, _ in fgraph.clients[node.outputs[0]]:
+        # Check for sign(det)
+        if isinstance(client.op, Elemwise) and isinstance(client.op.scalar_op, Sign):
+            dummy_replacements[client.outputs[0]] = "sign"
+
+        # Check for log(abs(det))
+        elif isinstance(client.op, Elemwise) and isinstance(client.op.scalar_op, Abs):
+            potential_log = None
+            for client_2, _ in fgraph.clients[client.outputs[0]]:
+                if isinstance(client_2.op, Elemwise) and isinstance(
+                    client_2.op.scalar_op, Log
+                ):
+                    potential_log = client_2
+            if potential_log:
+                dummy_replacements[potential_log.outputs[0]] = "log_abs_det"
+            else:
+                return None
+
+        # Check for log(det)
+        elif isinstance(client.op, Elemwise) and isinstance(client.op.scalar_op, Log):
+            dummy_replacements[client.outputs[0]] = "log_det"
+
+        # Det is used directly for something else, don't rewrite to avoid computing two dets
+        else:
+            return None
+
+    if not dummy_replacements:
+        return None
+    else:
+        [x] = node.inputs
+        sign_det_x, log_abs_det_x = SLogDet()(x)
+        log_det_x = pt.where(pt.eq(sign_det_x, -1), np.nan, log_abs_det_x)
+        slogdet_specialization_map = {
+            "sign": sign_det_x,
+            "log_abs_det": log_abs_det_x,
+            "log_det": log_det_x,
+        }
+        replacements = {
+            k: slogdet_specialization_map[v] for k, v in dummy_replacements.items()
+        }
+        return replacements
