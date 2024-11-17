@@ -11,6 +11,7 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
+from pytensor.tensor import TensorLike
 from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable, diagonal
@@ -266,7 +267,7 @@ class SLogDet(Op):
         return "SLogDet"
 
 
-def slogdet(x: ptb.TensorVariable) -> tuple[ptb.TensorVariable, ptb.TensorVariable]:
+def slogdet(x: TensorLike) -> tuple[ptb.TensorVariable, ptb.TensorVariable]:
     """
     Compute the sign and (natural) logarithm of the determinant of an array.
 
@@ -279,12 +280,11 @@ def slogdet(x: ptb.TensorVariable) -> tuple[ptb.TensorVariable, ptb.TensorVariab
 
     Returns
     -------
-    A namedtuple with the following attributes:
+    A tuple with the following attributes:
 
     sign : (...) tensor_like
         A number representing the sign of the determinant. For a real matrix,
-        this is 1, 0, or -1. For a complex matrix, this is a complex number
-        with absolute value 1 (i.e., it is on the unit circle), or else 0.
+        this is 1, 0, or -1.
     logabsdet : (...) tensor_like
         The natural log of the absolute value of the determinant.
 

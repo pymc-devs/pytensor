@@ -939,6 +939,7 @@ def test_slogdet_specialization():
     log_det_x, log_det_a = pt.log(det_x), np.log(det_a)
     sign_det_x, sign_det_a = pt.sign(det_x), np.sign(det_a)
     exp_det_x = pt.exp(det_x)
+
     # REWRITE TESTS
     # sign(det(x))
     f = function([x], [sign_det_x], mode="FAST_RUN")
@@ -952,6 +953,7 @@ def test_slogdet_specialization():
         atol=1e-3 if config.floatX == "float32" else 1e-8,
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
+
     # log(abs(det(x)))
     f = function([x], [log_abs_det_x], mode="FAST_RUN")
     nodes = f.maker.fgraph.apply_nodes
@@ -964,6 +966,7 @@ def test_slogdet_specialization():
         atol=1e-3 if config.floatX == "float32" else 1e-8,
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
+
     # log(det(x))
     f = function([x], [log_det_x], mode="FAST_RUN")
     nodes = f.maker.fgraph.apply_nodes
@@ -976,17 +979,20 @@ def test_slogdet_specialization():
         atol=1e-3 if config.floatX == "float32" else 1e-8,
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
-    # more than 1 valid function
+
+    # More than 1 valid function
     f = function([x], [sign_det_x, log_abs_det_x], mode="FAST_RUN")
     nodes = f.maker.fgraph.apply_nodes
     assert len([node for node in nodes if isinstance(node.op, SLogDet)]) == 1
     assert not any(isinstance(node.op, Det) for node in nodes)
-    # other functions (rewrite shouldnt be applied to these)
-    # only invalid functions
+
+    # Other functions (rewrite shouldnt be applied to these)
+    # Only invalid functions
     f = function([x], [exp_det_x], mode="FAST_RUN")
     nodes = f.maker.fgraph.apply_nodes
     assert not any(isinstance(node.op, SLogDet) for node in nodes)
-    # invalid + valid function
+
+    # Invalid + Valid function
     f = function([x], [exp_det_x, sign_det_x], mode="FAST_RUN")
     nodes = f.maker.fgraph.apply_nodes
     assert not any(isinstance(node.op, SLogDet) for node in nodes)
