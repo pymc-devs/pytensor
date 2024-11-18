@@ -317,7 +317,7 @@ class Blockwise(Op):
             ):
                 self.core_op.perform(
                     core_node,
-                    [np.asarray(inp) for inp in inner_inputs],
+                    inner_inputs,
                     inner_outputs_storage,
                 )
 
@@ -326,7 +326,11 @@ class Blockwise(Op):
                 else:
                     return tuple(r[0] for r in inner_outputs_storage)
 
-            gufunc = np.vectorize(core_func, signature=self.signature)
+            gufunc = np.vectorize(
+                core_func,
+                signature=self.signature,
+                otypes=[out.type.dtype for out in node.outputs],
+            )
 
         node.tag.gufunc = gufunc
 
@@ -361,9 +365,6 @@ class Blockwise(Op):
             res = (res,)
 
         for node_out, out_storage, r in zip(node.outputs, output_storage, res):
-            out_dtype = getattr(node_out, "dtype", None)
-            if out_dtype and out_dtype != r.dtype:
-                r = np.asarray(r, dtype=out_dtype)
             out_storage[0] = r
 
     def __str__(self):
