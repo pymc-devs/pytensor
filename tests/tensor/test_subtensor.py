@@ -403,7 +403,6 @@ class TestSubtensor(utt.OptimizationTestMixin):
         with pytest.raises(IndexError):
             n.__getitem__(0)
 
-    @config.change_flags(compute_test_value="off")
     def test_err_bounds(self):
         n = self.shared(np.ones(3, dtype=self.dtype))
         t = n[7]
@@ -484,7 +483,6 @@ class TestSubtensor(utt.OptimizationTestMixin):
         assert tval.shape == (2,)
         assert (tval == [0.0, 2.0]).all()
 
-    @config.change_flags(compute_test_value="off")
     def test_err_bounds0(self):
         n = self.shared(np.ones((2, 3), dtype=self.dtype) * 5)
         for idx in [(0, 4), (0, -4)]:
@@ -500,7 +498,6 @@ class TestSubtensor(utt.OptimizationTestMixin):
             finally:
                 _logger.setLevel(oldlevel)
 
-    @config.change_flags(compute_test_value="off")
     def test_err_bounds1(self):
         n = self.shared(np.ones((2, 3), dtype=self.dtype) * 5)
         t = n[4:5, 3]
@@ -722,71 +719,70 @@ class TestSubtensor(utt.OptimizationTestMixin):
             inc_subtensor(n4[test_array > 2, ..., 0, 1], 1).eval(),
         )
 
-        with config.change_flags(compute_test_value="off"):
-            # the boolean mask should have the correct shape
-            # - too large, padded with True
-            mask = np.array([True, False, True])
-            with pytest.raises(IndexError):
-                test_array[mask].eval()
-            with pytest.raises(IndexError):
-                test_array[mask, ...].eval()
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask], 1).eval()
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask, ...], 1).eval()
-            mask = np.array([[True, False, False, True], [False, True, False, True]])
-            with pytest.raises(IndexError):
-                test_array[mask].eval()
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask], 1).eval()
-            # - too large, padded with False (this works in NumPy < 0.13.0)
-            mask = np.array([True, False, False])
-            with pytest.raises(IndexError):
-                test_array[mask].eval()
-            with pytest.raises(IndexError):
-                test_array[mask, ...].eval()
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask], 1).eval()
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask, ...], 1).eval()
-            mask = np.array([[True, False, False, False], [False, True, False, False]])
-            with pytest.raises(IndexError):
-                test_array[mask].eval()
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask], 1).eval()
-            # - mask too small (this works in NumPy < 0.13.0)
-            mask = np.array([True])
-            with pytest.raises(IndexError):
-                test_array[mask].eval()
-            with pytest.raises(IndexError):
-                test_array[mask, ...].eval()
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask], 1).eval()
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask, ...], 1).eval()
-            mask = np.array([[True], [True]])
-            with pytest.raises(IndexError):
-                test_array[mask].eval()
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask], 1).eval()
-            # - too many dimensions
-            mask = np.array([[[True, False, False], [False, True, False]]])
-            with pytest.raises(IndexError):
-                test_array.__getitem__(mask)
-            with pytest.raises(IndexError):
-                test_array.__getitem__(mask)
+        # the boolean mask should have the correct shape
+        # - too large, padded with True
+        mask = np.array([True, False, True])
+        with pytest.raises(IndexError):
+            test_array[mask].eval()
+        with pytest.raises(IndexError):
+            test_array[mask, ...].eval()
+        with pytest.raises(IndexError):
+            inc_subtensor(test_array[mask], 1).eval()
+        with pytest.raises(IndexError):
+            inc_subtensor(test_array[mask, ...], 1).eval()
+        mask = np.array([[True, False, False, True], [False, True, False, True]])
+        with pytest.raises(IndexError):
+            test_array[mask].eval()
+        with pytest.raises(IndexError):
+            inc_subtensor(test_array[mask], 1).eval()
+        # - too large, padded with False (this works in NumPy < 0.13.0)
+        mask = np.array([True, False, False])
+        with pytest.raises(IndexError):
+            test_array[mask].eval()
+        with pytest.raises(IndexError):
+            test_array[mask, ...].eval()
+        with pytest.raises(IndexError):
+            inc_subtensor(test_array[mask], 1).eval()
+        with pytest.raises(IndexError):
+            inc_subtensor(test_array[mask, ...], 1).eval()
+        mask = np.array([[True, False, False, False], [False, True, False, False]])
+        with pytest.raises(IndexError):
+            test_array[mask].eval()
+        with pytest.raises(IndexError):
+            inc_subtensor(test_array[mask], 1).eval()
+        # - mask too small (this works in NumPy < 0.13.0)
+        mask = np.array([True])
+        with pytest.raises(IndexError):
+            test_array[mask].eval()
+        with pytest.raises(IndexError):
+            test_array[mask, ...].eval()
+        with pytest.raises(IndexError):
+            inc_subtensor(test_array[mask], 1).eval()
+        with pytest.raises(IndexError):
+            inc_subtensor(test_array[mask, ...], 1).eval()
+        mask = np.array([[True], [True]])
+        with pytest.raises(IndexError):
+            test_array[mask].eval()
+        with pytest.raises(IndexError):
+            inc_subtensor(test_array[mask], 1).eval()
+        # - too many dimensions
+        mask = np.array([[[True, False, False], [False, True, False]]])
+        with pytest.raises(IndexError):
+            test_array.__getitem__(mask)
+        with pytest.raises(IndexError):
+            test_array.__getitem__(mask)
 
-            # special cases: Python bools and bools nested in Python arrays are not supported
-            with pytest.raises(TypeError):
-                test_array.__getitem__((True,))
-            with pytest.raises(TypeError):
-                test_array.__getitem__((False,))
-            with pytest.raises(TypeError):
-                test_array.__getitem__((True, False))
-            with pytest.raises(TypeError):
-                test_array.__getitem__(([0, 1], [0, False]))
-            with pytest.raises(TypeError):
-                test_array.__getitem__(([0, 1], [0, pytensor.shared(True)]))
+        # special cases: Python bools and bools nested in Python arrays are not supported
+        with pytest.raises(TypeError):
+            test_array.__getitem__((True,))
+        with pytest.raises(TypeError):
+            test_array.__getitem__((False,))
+        with pytest.raises(TypeError):
+            test_array.__getitem__((True, False))
+        with pytest.raises(TypeError):
+            test_array.__getitem__(([0, 1], [0, False]))
+        with pytest.raises(TypeError):
+            test_array.__getitem__(([0, 1], [0, pytensor.shared(True)]))
 
     def test_grad_1d(self):
         subi = 0
@@ -2513,18 +2509,18 @@ class TestInferShape(utt.InferShapeTester):
             AdvancedSubtensor,
         )
 
-        admat.tag.test_value = admat_val
-        aivec.tag.test_value = aivec_val
-        bivec.tag.test_value = bivec_val
+        with pytest.warns(FutureWarning):
+            admat.tag.test_value = admat_val
+            aivec.tag.test_value = aivec_val
+            bivec.tag.test_value = bivec_val
 
         # Make sure it doesn't complain about test values
-        with config.change_flags(compute_test_value="raise"):
-            self._compile_and_check(
-                [admat, aivec],
-                [admat[1:3, aivec]],
-                [admat_val, aivec_val],
-                AdvancedSubtensor,
-            )
+        self._compile_and_check(
+            [admat, aivec],
+            [admat[1:3, aivec]],
+            [admat_val, aivec_val],
+            AdvancedSubtensor,
+        )
 
     def test_AdvancedSubtensor_bool(self):
         n = dmatrix()

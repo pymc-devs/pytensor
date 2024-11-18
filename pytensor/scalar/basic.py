@@ -1224,7 +1224,7 @@ class ScalarOp(COp):
                     tmp_s_input.append(tmp)
                     mapping[ii] = tmp_s_input[-1]
 
-            with config.change_flags(compute_test_value="ignore"):
+            with config.change_flags(compute_test_value="off"):
                 s_op = self(*tmp_s_input, return_list=True)
 
             # if the scalar_op don't have a c implementation,

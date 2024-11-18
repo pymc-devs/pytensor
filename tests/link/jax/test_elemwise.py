@@ -7,7 +7,6 @@ import pytensor.tensor as pt
 from pytensor.compile import get_mode
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import get_test_value
 from pytensor.tensor import elemwise as pt_elemwise
 from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import prod
@@ -46,7 +45,6 @@ def test_jax_Dimshuffle():
 
 def test_jax_CAReduce():
     a_pt = vector("a")
-    a_pt.tag.test_value = np.r_[1, 2, 3].astype(config.floatX)
 
     x = pt_sum(a_pt, axis=None)
     x_fg = FunctionGraph([a_pt], [x])
@@ -54,7 +52,6 @@ def test_jax_CAReduce():
     compare_jax_and_py(x_fg, [np.r_[1, 2, 3].astype(config.floatX)])
 
     a_pt = matrix("a")
-    a_pt.tag.test_value = np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)
 
     x = pt_sum(a_pt, axis=0)
     x_fg = FunctionGraph([a_pt], [x])
@@ -67,7 +64,6 @@ def test_jax_CAReduce():
     compare_jax_and_py(x_fg, [np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)])
 
     a_pt = matrix("a")
-    a_pt.tag.test_value = np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)
 
     x = prod(a_pt, axis=0)
     x_fg = FunctionGraph([a_pt], [x])
@@ -83,30 +79,30 @@ def test_jax_CAReduce():
 @pytest.mark.parametrize("axis", [None, 0, 1])
 def test_softmax(axis):
     x = matrix("x")
-    x.tag.test_value = np.arange(6, dtype=config.floatX).reshape(2, 3)
     out = softmax(x, axis=axis)
     fgraph = FunctionGraph([x], [out])
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py(fgraph, [np.arange(6, dtype=config.floatX).reshape(2, 3)])
 
 
 @pytest.mark.parametrize("axis", [None, 0, 1])
 def test_logsoftmax(axis):
     x = matrix("x")
-    x.tag.test_value = np.arange(6, dtype=config.floatX).reshape(2, 3)
     out = log_softmax(x, axis=axis)
     fgraph = FunctionGraph([x], [out])
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py(fgraph, [np.arange(6, dtype=config.floatX).reshape(2, 3)])
 
 
 @pytest.mark.parametrize("axis", [None, 0, 1])
 def test_softmax_grad(axis):
     dy = matrix("dy")
-    dy.tag.test_value = np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
     sm = matrix("sm")
-    sm.tag.test_value = np.arange(6, dtype=config.floatX).reshape(2, 3)
+    test_value = [
+        np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX),
+        np.arange(6, dtype=config.floatX).reshape(2, 3),
+    ]
     out = SoftmaxGrad(axis=axis)(dy, sm)
     fgraph = FunctionGraph([dy, sm], [out])
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py(fgraph, list(test_value))
 
 
 @pytest.mark.parametrize("size", [(10, 10), (1000, 1000)])

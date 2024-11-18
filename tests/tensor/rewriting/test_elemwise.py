@@ -1160,9 +1160,10 @@ class TestFusion:
         """
         x, y, z = dmatrices("xyz")
 
-        x.tag.test_value = test_value
-        y.tag.test_value = test_value
-        z.tag.test_value = test_value
+        with pytest.warns(FutureWarning):
+            x.tag.test_value = test_value
+            y.tag.test_value = test_value
+            z.tag.test_value = test_value
 
         with config.change_flags(
             compute_test_value="raise", compute_test_value_opt="raise"

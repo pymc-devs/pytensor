@@ -406,6 +406,7 @@ class TestTensorInstanceMethods:
         indices = [1, 0, 1]
         assert_array_equal(X.take(indices, 1).eval({X: x}), x.take(indices, 1))
         indices = np.array([-10, 5, 12], dtype="int32")
+
         assert_array_equal(
             X.take(indices, 1, mode="wrap").eval({X: x}),
             x.take(indices, 1, mode="wrap"),

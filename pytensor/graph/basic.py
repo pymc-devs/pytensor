@@ -794,6 +794,10 @@ class Constant(AtomicVariable[_TypeType]):
         add_tag_trace(self)
 
     def get_test_value(self):
+        warnings.warn(
+            "test_value machinery is deprecated and will stop working in the future.",
+            FutureWarning,
+        )
         return self.data
 
     def signature(self):

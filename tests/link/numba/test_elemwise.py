@@ -146,7 +146,7 @@ def test_elemwise_speed(benchmark):
 
 
 @pytest.mark.parametrize(
-    "v, new_order",
+    "test_values, new_order",
     [
         # `{'drop': [], 'shuffle': [], 'augment': [0, 1]}`
         (
@@ -204,14 +204,15 @@ def test_elemwise_speed(benchmark):
         ),
     ],
 )
-def test_Dimshuffle(v, new_order):
+def test_Dimshuffle(test_values, new_order):
+    v = next(iter(test_values.keys()))
     g = v.dimshuffle(new_order)
     g_fg = FunctionGraph(outputs=[g])
     compare_numba_and_py(
         g_fg,
         [
-            i.tag.test_value
-            for i in g_fg.inputs
+            test_values[i]
+            for i in test_values
             if not isinstance(i, SharedVariable | Constant)
         ],
     )
@@ -237,7 +238,7 @@ def test_Dimshuffle_non_contiguous():
 
 
 @pytest.mark.parametrize(
-    "careduce_fn, axis, v",
+    "careduce_fn, axis, test_values",
     [
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Sum(
@@ -375,15 +376,16 @@ def test_Dimshuffle_non_contiguous():
         ),
     ],
 )
-def test_CAReduce(careduce_fn, axis, v):
+def test_CAReduce(careduce_fn, axis, test_values):
+    v = next(iter(test_values.keys()))
     g = careduce_fn(v, axis=axis)
     g_fg = FunctionGraph(outputs=[g])
 
     compare_numba_and_py(
         g_fg,
         [
-            i.tag.test_value
-            for i in g_fg.inputs
+            test_values[i]
+            for i in test_values
             if not isinstance(i, SharedVariable | Constant)
         ],
     )
@@ -401,36 +403,50 @@ def test_scalar_Elemwise_Clip():
 
 
 @pytest.mark.parametrize(
-    "dy, sm, axis, exc",
+    "inputs, axis, exc",
     [
         (
-            set_test_value(
-                pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
-            ),
-            set_test_value(pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+            [
+                set_test_value(
+                    pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
+                ),
+                set_test_value(
+                    pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)
+                ),
+            ],
             None,
             None,
         ),
         (
-            set_test_value(
-                pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
-            ),
-            set_test_value(pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+            [
+                set_test_value(
+                    pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
+                ),
+                set_test_value(
+                    pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)
+                ),
+            ],
             0,
             None,
         ),
         (
-            set_test_value(
-                pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
-            ),
-            set_test_value(pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+            [
+                set_test_value(
+                    pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
+                ),
+                set_test_value(
+                    pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)
+                ),
+            ],
             1,
             None,
         ),
     ],
 )
-def test_SoftmaxGrad(dy, sm, axis, exc):
-    g = SoftmaxGrad(axis=axis)(dy, sm)
+def test_SoftmaxGrad(inputs, axis, exc):
+    test_values = {k: v for d in inputs for k, v in d.items()}
+    inputs = list(test_values.keys())
+    g = SoftmaxGrad(axis=axis)(*inputs)
     g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
@@ -438,8 +454,8 @@ def test_SoftmaxGrad(dy, sm, axis, exc):
         compare_numba_and_py(
             g_fg,
             [
-                i.tag.test_value
-                for i in g_fg.inputs
+                test_values[i]
+                for i in test_values
                 if not isinstance(i, SharedVariable | Constant)
             ],
         )
@@ -456,7 +472,7 @@ def test_SoftMaxGrad_constant_dy():
 
 
 @pytest.mark.parametrize(
-    "x, axis, exc",
+    "test_values, axis, exc",
     [
         (
             set_test_value(pt.vector(), rng.random(size=(2,)).astype(config.floatX)),
@@ -475,7 +491,8 @@ def test_SoftMaxGrad_constant_dy():
         ),
     ],
 )
-def test_Softmax(x, axis, exc):
+def test_Softmax(test_values, axis, exc):
+    x = next(iter(test_values.keys()))
     g = Softmax(axis=axis)(x)
     g_fg = FunctionGraph(outputs=[g])
 
@@ -484,15 +501,15 @@ def test_Softmax(x, axis, exc):
         compare_numba_and_py(
             g_fg,
             [
-                i.tag.test_value
-                for i in g_fg.inputs
+                test_values[i]
+                for i in test_values
                 if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
 
 @pytest.mark.parametrize(
-    "x, axis, exc",
+    "test_values, axis, exc",
     [
         (
             set_test_value(pt.vector(), rng.random(size=(2,)).astype(config.floatX)),
@@ -511,7 +528,8 @@ def test_Softmax(x, axis, exc):
         ),
     ],
 )
-def test_LogSoftmax(x, axis, exc):
+def test_LogSoftmax(test_values, axis, exc):
+    x = next(iter(test_values.keys()))
     g = LogSoftmax(axis=axis)(x)
     g_fg = FunctionGraph(outputs=[g])
 
@@ -520,15 +538,15 @@ def test_LogSoftmax(x, axis, exc):
         compare_numba_and_py(
             g_fg,
             [
-                i.tag.test_value
-                for i in g_fg.inputs
+                test_values[i]
+                for i in test_values
                 if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
 
 @pytest.mark.parametrize(
-    "x, axes, exc",
+    "test_values, axes, exc",
     [
         (
             set_test_value(pt.dscalar(), np.array(0.0, dtype="float64")),
@@ -552,7 +570,8 @@ def test_LogSoftmax(x, axis, exc):
         ),
     ],
 )
-def test_Max(x, axes, exc):
+def test_Max(test_values, axes, exc):
+    x = next(iter(test_values.keys()))
     g = ptm.Max(axes)(x)
 
     if isinstance(g, list):
@@ -565,15 +584,15 @@ def test_Max(x, axes, exc):
         compare_numba_and_py(
             g_fg,
             [
-                i.tag.test_value
-                for i in g_fg.inputs
+                test_values[i]
+                for i in test_values
                 if not isinstance(i, SharedVariable | Constant)
             ],
         )
 
 
 @pytest.mark.parametrize(
-    "x, axes, exc",
+    "test_values, axes, exc",
     [
         (
             set_test_value(pt.dscalar(), np.array(0.0, dtype="float64")),
@@ -597,7 +616,8 @@ def test_Max(x, axes, exc):
         ),
     ],
 )
-def test_Argmax(x, axes, exc):
+def test_Argmax(test_values, axes, exc):
+    x = next(iter(test_values.keys()))
     g = ptm.Argmax(axes)(x)
 
     if isinstance(g, list):
@@ -610,8 +630,8 @@ def test_Argmax(x, axes, exc):
         compare_numba_and_py(
             g_fg,
             [
-                i.tag.test_value
-                for i in g_fg.inputs
+                test_values[i]
+                for i in test_values
                 if not isinstance(i, SharedVariable | Constant)
             ],
         )

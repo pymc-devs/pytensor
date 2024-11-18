@@ -327,7 +327,7 @@ def test_multivariate_normal():
                     np.array(1.0, dtype=np.float64),
                 ),
             ],
-            pt.as_tensor(tuple(set_test_value(pt.lscalar(), v) for v in [3, 2])),
+            [set_test_value(pt.lscalar(), v) for v in [3, 2]],
         ),
         (
             ptr.poisson,
@@ -523,15 +523,22 @@ def test_multivariate_normal():
 )
 def test_aligned_RandomVariable(rv_op, dist_args, size):
     """Tests for Numba samplers that are one-to-one with PyTensor's/NumPy's samplers."""
+    inputs = {k: v for d in dist_args for k, v in d.items()}
+    dist_args = list(inputs.keys())
     rng = shared(np.random.default_rng(29402))
+    test_values = {}
+    if isinstance(size, list):
+        size = {k: v for d in size for k, v in d.items()}
+        test_values.update(size)
+        size = pt.as_tensor(tuple(size.keys()))
+    test_values.update(inputs)
     g = rv_op(*dist_args, size=size, rng=rng)
     g_fg = FunctionGraph(outputs=[g])
-
     compare_numba_and_py(
         g_fg,
         [
-            i.tag.test_value
-            for i in g_fg.inputs
+            test_values[i]
+            for i in test_values
             if not isinstance(i, SharedVariable | Constant)
         ],
         eval_obj_mode=False,  # No python impl
@@ -577,18 +584,20 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
 )
 def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_conv):
     """Tests for Numba samplers that are not one-to-one with PyTensor's/NumPy's samplers."""
+    test_values = {k: v for d in dist_args for k, v in d.items()}
+    dist_args = list(test_values.keys())
     rng = shared(np.random.default_rng(29402))
     g = rv_op(*dist_args, size=(2000, *base_size), rng=rng)
     g_fn = function(dist_args, g, mode=numba_mode)
     samples = g_fn(
         *[
-            i.tag.test_value
-            for i in g_fn.maker.fgraph.inputs
+            test_values[i]
+            for i in test_values
             if not isinstance(i, SharedVariable | Constant)
         ]
     )
 
-    bcast_dist_args = np.broadcast_arrays(*[i.tag.test_value for i in dist_args])
+    bcast_dist_args = np.broadcast_arrays(*[test_values[i] for i in test_values])
 
     for idx in np.ndindex(*base_size):
         cdf_params = params_conv(*(arg[idx] for arg in bcast_dist_args))
@@ -599,7 +608,7 @@ def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_
 
 
 @pytest.mark.parametrize(
-    "a, size, cm",
+    "test_values, size, cm",
     [
         pytest.param(
             set_test_value(
@@ -636,13 +645,14 @@ def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_
         ),
     ],
 )
-def test_DirichletRV(a, size, cm):
+def test_DirichletRV(test_values, size, cm):
+    a = next(iter(test_values.keys()))
     rng = shared(np.random.default_rng(29402))
     g = ptr.dirichlet(a, size=size, rng=rng)
     g_fn = function([a], g, mode=numba_mode)
 
     with cm:
-        a_val = a.tag.test_value
+        a_val = test_values[a]
 
         all_samples = []
         for i in range(1000):

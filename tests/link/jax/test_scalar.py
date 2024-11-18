@@ -5,7 +5,6 @@ import pytensor.scalar.basic as ps
 import pytensor.tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import get_test_value
 from pytensor.scalar.basic import Composite
 from pytensor.tensor import as_tensor
 from pytensor.tensor.elemwise import Elemwise
@@ -81,11 +80,11 @@ def test_second_constant_scalar():
 
 def test_identity():
     a = scalar("a")
-    a.tag.test_value = 10
+    a_test_value = 10
 
     out = ps.identity(a)
     fgraph = FunctionGraph([a], [out])
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py(fgraph, [a_test_value])
 
 
 @pytest.mark.parametrize(
@@ -240,34 +239,36 @@ def test_log1mexp():
 
 def test_nnet():
     x = vector("x")
-    x.tag.test_value = np.r_[1.0, 2.0].astype(config.floatX)
+    x_test_value = np.r_[1.0, 2.0].astype(config.floatX)
 
     out = sigmoid(x)
     fgraph = FunctionGraph([x], [out])
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py(fgraph, [x_test_value])
 
     out = softplus(x)
     fgraph = FunctionGraph([x], [out])
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py(fgraph, [x_test_value])
 
 
 def test_jax_variadic_Scalar():
     mu = vector("mu", dtype=config.floatX)
-    mu.tag.test_value = np.r_[0.1, 1.1].astype(config.floatX)
     tau = vector("tau", dtype=config.floatX)
-    tau.tag.test_value = np.r_[1.0, 2.0].astype(config.floatX)
+    test_values = {
+        mu: np.r_[0.1, 1.1].astype(config.floatX),
+        tau: np.r_[1.0, 2.0].astype(config.floatX),
+    }
 
     res = -tau * mu
 
     fgraph = FunctionGraph([mu, tau], [res])
 
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py(fgraph, [test_values[i] for i in test_values])
 
     res = -tau * (tau - mu) ** 2
 
     fgraph = FunctionGraph([mu, tau], [res])
 
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py(fgraph, [test_values[i] for i in test_values])
 
 
 def test_add_scalars():
@@ -308,27 +309,31 @@ def test_mod_scalars():
 
 def test_jax_multioutput():
     x = vector("x")
-    x.tag.test_value = np.r_[1.0, 2.0].astype(config.floatX)
     y = vector("y")
-    y.tag.test_value = np.r_[3.0, 4.0].astype(config.floatX)
+    test_values = {
+        x: np.r_[1.0, 2.0].astype(config.floatX),
+        y: np.r_[3.0, 4.0].astype(config.floatX),
+    }
 
     w = cosh(x**2 + y / 3.0)
     v = cosh(x / 3.0 + y**2)
 
     fgraph = FunctionGraph([x, y], [w, v])
 
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py(fgraph, [test_values[i] for i in test_values])
 
 
 def test_jax_logp():
     mu = vector("mu")
-    mu.tag.test_value = np.r_[0.0, 0.0].astype(config.floatX)
     tau = vector("tau")
-    tau.tag.test_value = np.r_[1.0, 1.0].astype(config.floatX)
     sigma = vector("sigma")
-    sigma.tag.test_value = (1.0 / get_test_value(tau)).astype(config.floatX)
     value = vector("value")
-    value.tag.test_value = np.r_[0.1, -10].astype(config.floatX)
+    test_values = {
+        mu: np.r_[0.0, 0.0].astype(config.floatX),
+        tau: np.r_[1.0, 1.0].astype(config.floatX),
+        sigma: (1.0 / np.r_[1.0, 1.0].astype(config.floatX)).astype(config.floatX),
+        value: np.r_[0.1, -10].astype(config.floatX),
+    }
 
     logp = (-tau * (value - mu) ** 2 + log(tau / np.pi / 2.0)) / 2.0
     conditions = [sigma > 0]
@@ -337,4 +342,4 @@ def test_jax_logp():
 
     fgraph = FunctionGraph([mu, tau, sigma, value], [normal_logp])
 
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py(fgraph, [test_values[i] for i in test_values])

@@ -63,7 +63,8 @@ from tests import unittest_tools as utt
 
 
 def set_test_value(x, v):
-    x.tag.test_value = v
+    with pytest.warns(FutureWarning):
+        x.tag.test_value = v
     return x
 
 
@@ -1202,14 +1203,16 @@ def test_broadcast_shape_constants():
 def test_broadcast_shape_symbolic(s1_vals, s2_vals, exp_res):
     s1s = pt.lscalars(len(s1_vals))
     eval_point = {}
-    for s, s_val in zip(s1s, s1_vals):
-        eval_point[s] = s_val
-        s.tag.test_value = s_val
+    with pytest.warns(FutureWarning):
+        for s, s_val in zip(s1s, s1_vals):
+            eval_point[s] = s_val
+            s.tag.test_value = s_val
 
     s2s = pt.lscalars(len(s2_vals))
-    for s, s_val in zip(s2s, s2_vals):
-        eval_point[s] = s_val
-        s.tag.test_value = s_val
+    with pytest.warns(FutureWarning):
+        for s, s_val in zip(s2s, s2_vals):
+            eval_point[s] = s_val
+            s.tag.test_value = s_val
 
     res = broadcast_shape(s1s, s2s, arrays_are_shapes=True)
     res = pt.as_tensor(res)
