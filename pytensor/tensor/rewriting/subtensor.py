@@ -683,7 +683,7 @@ def local_subtensor_of_alloc(fgraph, node):
     # Slices to take from val
     val_slices = []
 
-    for i, (sl, dim) in enumerate(zip(slices, dims[: len(slices)], strict=True)):
+    for i, (sl, dim) in enumerate(zip(slices, dims, strict=False)):
         # If val was not copied over that dim,
         # we need to take the appropriate subtensor on it.
         if i >= n_added_dims:

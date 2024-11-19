@@ -93,7 +93,7 @@ class ScalarLoop(ScalarInnerGraphOp):
                 )
         else:
             update = outputs
-        for i, u in zip(init[: len(update)], update, strict=True):
+        for i, u in zip(init, update, strict=False):
             if i.type != u.type:
                 raise TypeError(
                     "Init and update types must be the same: "
@@ -207,7 +207,8 @@ class ScalarLoop(ScalarInnerGraphOp):
             for i in range(n_steps):
                 carry = inner_fn(*carry, *constant)
 
-        for storage, out_val in zip(output_storage, carry, strict=True):
+        # strict=False because we are in a hot loop
+        for storage, out_val in zip(output_storage, carry, strict=False):
             storage[0] = out_val
 
     @property

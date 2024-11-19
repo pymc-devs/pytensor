@@ -1002,8 +1002,9 @@ class Function:
         # if we are allowing garbage collection, remove the
         # output reference from the internal storage cells
         if getattr(self.vm, "allow_gc", False):
+            # strict=False because we are in a hot loop
             for o_container, o_variable in zip(
-                self.output_storage, self.maker.fgraph.outputs, strict=True
+                self.output_storage, self.maker.fgraph.outputs, strict=False
             ):
                 if o_variable.owner is not None:
                     # this node is the variable of computation
@@ -1012,8 +1013,9 @@ class Function:
 
         if getattr(self.vm, "need_update_inputs", True):
             # Update the inputs that have an update function
+            # strict=False because we are in a hot loop
             for input, storage in reversed(
-                list(zip(self.maker.expanded_inputs, input_storage, strict=True))
+                list(zip(self.maker.expanded_inputs, input_storage, strict=False))
             ):
                 if input.update is not None:
                     storage.data = outputs.pop()
@@ -1044,7 +1046,8 @@ class Function:
                 assert len(self.output_keys) == len(outputs)
 
                 if output_subset is None:
-                    return dict(zip(self.output_keys, outputs, strict=True))
+                    # strict=False because we are in a hot loop
+                    return dict(zip(self.output_keys, outputs, strict=False))
                 else:
                     return {
                         self.output_keys[index]: outputs[index]
@@ -1111,8 +1114,9 @@ def _pickle_Function(f):
     ins = list(f.input_storage)
     input_storage = []
 
+    # strict=False because we are in a hot loop
     for (input, indices, inputs), (required, refeed, default) in zip(
-        f.indices, f.defaults, strict=True
+        f.indices, f.defaults, strict=False
     ):
         input_storage.append(ins[0])
         del ins[0]

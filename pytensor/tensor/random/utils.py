@@ -44,7 +44,8 @@ def params_broadcast_shapes(
     max_fn = maximum if use_pytensor else max
 
     rev_extra_dims: list[int] = []
-    for ndim_param, param_shape in zip(ndims_params, param_shapes, strict=True):
+    # strict=False because we are in a hot loop
+    for ndim_param, param_shape in zip(ndims_params, param_shapes, strict=False):
         # We need this in order to use `len`
         param_shape = tuple(param_shape)
         extras = tuple(param_shape[: (len(param_shape) - ndim_param)])
@@ -63,11 +64,12 @@ def params_broadcast_shapes(
 
     extra_dims = tuple(reversed(rev_extra_dims))
 
+    # strict=False because we are in a hot loop
     bcast_shapes = [
         (extra_dims + tuple(param_shape)[-ndim_param:])
         if ndim_param > 0
         else extra_dims
-        for ndim_param, param_shape in zip(ndims_params, param_shapes, strict=True)
+        for ndim_param, param_shape in zip(ndims_params, param_shapes, strict=False)
     ]
 
     return bcast_shapes
@@ -110,10 +112,11 @@ def broadcast_params(
     use_pytensor = False
     param_shapes = []
     for p in params:
+        # strict=False because we are in a hot loop
         param_shape = tuple(
             1 if bcast else s
             for s, bcast in zip(
-                p.shape, getattr(p, "broadcastable", (False,) * p.ndim), strict=True
+                p.shape, getattr(p, "broadcastable", (False,) * p.ndim), strict=False
             )
         )
         use_pytensor |= isinstance(p, Variable)
@@ -124,9 +127,10 @@ def broadcast_params(
     )
     broadcast_to_fn = broadcast_to if use_pytensor else np.broadcast_to
 
+    # strict=False because we are in a hot loop
     bcast_params = [
         broadcast_to_fn(param, shape)
-        for shape, param in zip(shapes, params, strict=True)
+        for shape, param in zip(shapes, params, strict=False)
     ]
 
     return bcast_params
