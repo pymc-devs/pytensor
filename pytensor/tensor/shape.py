@@ -448,8 +448,9 @@ class SpecifyShape(COp):
             raise AssertionError(
                 f"SpecifyShape: Got {x.ndim} dimensions (shape {x.shape}), expected {ndim} dimensions with shape {tuple(shape)}."
             )
+        # strict=False because we are in a hot loop
         if not all(
-            xs == s for xs, s in zip(x.shape, shape, strict=True) if s is not None
+            xs == s for xs, s in zip(x.shape, shape, strict=False) if s is not None
         ):
             raise AssertionError(
                 f"SpecifyShape: Got shape {x.shape}, expected {tuple(int(s) if s is not None else None for s in shape)}."
@@ -578,15 +579,12 @@ def specify_shape(
     x = ptb.as_tensor_variable(x)  # type: ignore[arg-type,unused-ignore]
     # The above is a type error in Python 3.9 but not 3.12.
     # Thus we need to ignore unused-ignore on 3.12.
+    new_shape_info = any(
+        s != xts for (s, xts) in zip(shape, x.type.shape, strict=False) if s is not None
+    )
 
     # If shape does not match x.ndim, we rely on the `Op` to raise a ValueError
-    if len(shape) != x.type.ndim:
-        return _specify_shape(x, *shape)
-
-    new_shape_matches = all(
-        s == xts for (s, xts) in zip(shape, x.type.shape, strict=True) if s is not None
-    )
-    if new_shape_matches:
+    if not new_shape_info and len(shape) == x.type.ndim:
         return x
 
     return _specify_shape(x, *shape)

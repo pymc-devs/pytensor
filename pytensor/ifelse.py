@@ -305,7 +305,8 @@ class IfElse(_NoPythonOp):
                     if len(ls) > 0:
                         return ls
                     else:
-                        for out, t in zip(outputs, input_true_branch, strict=True):
+                        # strict=False because we are in a hot loop
+                        for out, t in zip(outputs, input_true_branch, strict=False):
                             compute_map[out][0] = 1
                             val = storage_map[t][0]
                             if self.as_view:
@@ -325,7 +326,8 @@ class IfElse(_NoPythonOp):
                     if len(ls) > 0:
                         return ls
                     else:
-                        for out, f in zip(outputs, inputs_false_branch, strict=True):
+                        # strict=False because we are in a hot loop
+                        for out, f in zip(outputs, inputs_false_branch, strict=False):
                             compute_map[out][0] = 1
                             # can't view both outputs unless destroyhandler
                             # improves

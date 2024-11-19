@@ -1150,8 +1150,9 @@ class ScalarOp(COp):
         else:
             variables = from_return_values(self.impl(*inputs))
             assert len(variables) == len(output_storage)
+            # strict=False because we are in a hot loop
             for out, storage, variable in zip(
-                node.outputs, output_storage, variables, strict=True
+                node.outputs, output_storage, variables, strict=False
             ):
                 dtype = out.dtype
                 storage[0] = self._cast_scalar(variable, dtype)
@@ -4328,7 +4329,8 @@ class Composite(ScalarInnerGraphOp):
 
     def perform(self, node, inputs, output_storage):
         outputs = self.py_perform_fn(*inputs)
-        for storage, out_val in zip(output_storage, outputs, strict=True):
+        # strict=False because we are in a hot loop
+        for storage, out_val in zip(output_storage, outputs, strict=False):
             storage[0] = out_val
 
     def grad(self, inputs, output_grads):

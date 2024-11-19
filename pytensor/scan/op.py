@@ -1278,8 +1278,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         if len(self.inner_outputs) != len(other.inner_outputs):
             return False
 
+        # strict=False because length already compared above
         for self_in, other_in in zip(
-            self.inner_inputs, other.inner_inputs, strict=True
+            self.inner_inputs, other.inner_inputs, strict=False
         ):
             if self_in.type != other_in.type:
                 return False

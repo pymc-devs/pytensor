@@ -342,16 +342,17 @@ class Blockwise(Op):
     def _check_runtime_broadcast(self, node, inputs):
         batch_ndim = self.batch_ndim(node)
 
+        # strict=False because we are in a hot loop
         for dims_and_bcast in zip(
             *[
                 zip(
                     input.shape[:batch_ndim],
                     sinput.type.broadcastable[:batch_ndim],
-                    strict=True,
+                    strict=False,
                 )
-                for input, sinput in zip(inputs, node.inputs, strict=True)
+                for input, sinput in zip(inputs, node.inputs, strict=False)
             ],
-            strict=True,
+            strict=False,
         ):
             if any(d != 1 for d, _ in dims_and_bcast) and (1, False) in dims_and_bcast:
                 raise ValueError(
@@ -374,8 +375,9 @@ class Blockwise(Op):
         if not isinstance(res, tuple):
             res = (res,)
 
+        # strict=False because we are in a hot loop
         for node_out, out_storage, r in zip(
-            node.outputs, output_storage, res, strict=True
+            node.outputs, output_storage, res, strict=False
         ):
             out_dtype = getattr(node_out, "dtype", None)
             if out_dtype and out_dtype != r.dtype:
