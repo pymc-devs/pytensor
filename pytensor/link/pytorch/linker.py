@@ -1,7 +1,3 @@
-import copy
-from typing import Any
-
-from pytensor.graph.basic import Variable
 from pytensor.link.basic import JITLinker
 from pytensor.link.utils import unique_name_generator
 
@@ -12,14 +8,6 @@ class PytorchLinker(JITLinker):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.gen_functors = []
-
-    def input_filter(self, inp: Any) -> Any:
-        from pytensor.link.pytorch.dispatch import pytorch_typify
-
-        return pytorch_typify(inp)
-
-    def output_filter(self, var: Variable, out: Any) -> Any:
-        return out.cpu()
 
     def fgraph_convert(self, fgraph, input_storage, storage_map, **kwargs):
         from pytensor.link.pytorch.dispatch import pytorch_funcify
@@ -49,6 +37,8 @@ class PytorchLinker(JITLinker):
     def jit_compile(self, fn):
         import torch
 
+        from pytensor.link.pytorch.dispatch import pytorch_typify
+
         class wrapper:
             """
             Pytorch would fail compiling our method when trying
@@ -62,7 +52,7 @@ class PytorchLinker(JITLinker):
 
             def __init__(self, fn, gen_functors):
                 self.fn = torch.compile(fn)
-                self.gen_functors = copy.copy(gen_functors)
+                self.gen_functors = gen_functors.copy()
 
             def __call__(self, *args, **kwargs):
                 import pytensor.link.utils
@@ -83,9 +73,15 @@ class PytorchLinker(JITLinker):
             def __del__(self):
                 del self.gen_functors
 
-        res = wrapper(fn, self.gen_functors)
+        inner_fn = wrapper(fn, self.gen_functors)
         self.gen_functors = []
-        return res
+
+        # Torch does not accept numpy inputs and may return GPU objects
+        def fn(*inputs, inner_fn=inner_fn):
+            outs = inner_fn(*(pytorch_typify(inp) for inp in inputs))
+            return tuple(out.cpu().numpy() for out in outs)
+
+        return fn
 
     def create_thunk_inputs(self, storage_map):
         thunk_inputs = []

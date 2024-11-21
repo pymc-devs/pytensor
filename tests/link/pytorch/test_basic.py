@@ -53,8 +53,6 @@ def compare_pytorch_and_py(
     assert_fn: func, opt
         Assert function used to check for equality between python and pytorch. If not
         provided uses np.testing.assert_allclose
-    must_be_device_array: Bool
-        Checks if torch.device.type is cuda
 
 
     """
@@ -66,20 +64,19 @@ def compare_pytorch_and_py(
     pytensor_torch_fn = function(fn_inputs, fgraph.outputs, mode=pytorch_mode)
     pytorch_res = pytensor_torch_fn(*test_inputs)
 
-    if must_be_device_array:
-        if isinstance(pytorch_res, list):
-            assert all(isinstance(res, torch.Tensor) for res in pytorch_res)
-        else:
-            assert pytorch_res.device.type == "cuda"
+    if isinstance(pytorch_res, list):
+        assert all(isinstance(res, np.ndarray) for res in pytorch_res)
+    else:
+        assert isinstance(pytorch_res, np.ndarray)
 
     pytensor_py_fn = function(fn_inputs, fgraph.outputs, mode=py_mode)
     py_res = pytensor_py_fn(*test_inputs)
 
     if len(fgraph.outputs) > 1:
         for pytorch_res_i, py_res_i in zip(pytorch_res, py_res, strict=True):
-            assert_fn(pytorch_res_i.detach().cpu().numpy(), py_res_i)
+            assert_fn(pytorch_res_i, py_res_i)
     else:
-        assert_fn(pytorch_res[0].detach().cpu().numpy(), py_res[0])
+        assert_fn(pytorch_res[0], py_res[0])
 
     return pytensor_torch_fn, pytorch_res
 
@@ -162,23 +159,23 @@ def test_shared(device):
         pytensor_torch_fn = function([], a, mode="PYTORCH")
         pytorch_res = pytensor_torch_fn()
 
-        assert isinstance(pytorch_res, torch.Tensor)
+        assert isinstance(pytorch_res, np.ndarray)
         assert isinstance(a.get_value(), np.ndarray)
-        np.testing.assert_allclose(pytorch_res.cpu(), a.get_value())
+        np.testing.assert_allclose(pytorch_res, a.get_value())
 
         pytensor_torch_fn = function([], a * 2, mode="PYTORCH")
         pytorch_res = pytensor_torch_fn()
 
-        assert isinstance(pytorch_res, torch.Tensor)
+        assert isinstance(pytorch_res, np.ndarray)
         assert isinstance(a.get_value(), np.ndarray)
-        np.testing.assert_allclose(pytorch_res.cpu(), a.get_value() * 2)
+        np.testing.assert_allclose(pytorch_res, a.get_value() * 2)
 
         new_a_value = np.array([3, 4, 5], dtype=config.floatX)
         a.set_value(new_a_value)
 
         pytorch_res = pytensor_torch_fn()
-        assert isinstance(pytorch_res, torch.Tensor)
-        np.testing.assert_allclose(pytorch_res.cpu(), new_a_value * 2)
+        assert isinstance(pytorch_res, np.ndarray)
+        np.testing.assert_allclose(pytorch_res, new_a_value * 2)
 
 
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
@@ -225,7 +222,7 @@ def test_alloc_and_empty():
     fn = function([dim1], out, mode=pytorch_mode)
     res = fn(7)
     assert res.shape == (5, 7, 3)
-    assert res.dtype == torch.float32
+    assert res.dtype == np.float32
 
     v = vector("v", shape=(3,), dtype="float64")
     out = alloc(v, dim0, dim1, 3)

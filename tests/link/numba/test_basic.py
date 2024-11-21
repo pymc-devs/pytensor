@@ -889,3 +889,20 @@ def test_cache_warning_suppressed():
 
     x_test = np.random.uniform(size=5)
     np.testing.assert_allclose(fn(x_test), scipy.special.psi(x_test) * 2)
+
+
+@pytest.mark.parametrize("mode", ("default", "trust_input", "direct"))
+def test_function_overhead(mode, benchmark):
+    x = pt.vector("x")
+    out = pt.exp(x)
+
+    fn = function([x], out, mode="NUMBA")
+    if mode == "trust_input":
+        fn.trust_input = True
+    elif mode == "direct":
+        fn = fn.vm.jit_fn
+
+    test_x = np.zeros(1000)
+    assert np.sum(fn(test_x)) == 1000
+
+    benchmark(fn, test_x)
