@@ -152,7 +152,7 @@ def test_cast():
     _, [res] = compare_pytorch_and_py(
         fgraph, [np.arange(6, dtype="float32").reshape(2, 3)]
     )
-    assert res.dtype == torch.int32
+    assert res.dtype == np.int32
 
 
 def test_vmap_elemwise():
