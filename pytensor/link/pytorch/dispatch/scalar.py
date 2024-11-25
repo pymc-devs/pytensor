@@ -67,7 +67,7 @@ def pytorch_funcify_Softplus(op, node, **kwargs):
 
 @pytorch_funcify.register(ScalarLoop)
 def pytorch_funicify_ScalarLoop(op, node, **kwargs):
-    update = pytorch_funcify(op.fgraph)
+    update = pytorch_funcify(op.fgraph, **kwargs)
     state_length = op.nout
     if op.is_while:
 
@@ -96,4 +96,4 @@ def pytorch_funicify_ScalarLoop(op, node, **kwargs):
             else:
                 return carry
 
-    return torch.compiler.disable(scalar_loop, recursive=False)
+    return scalar_loop
