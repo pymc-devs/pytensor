@@ -425,7 +425,30 @@ def test_ScalarLoop_while():
         np.testing.assert_allclose(res[1], np.array(expected[1]))
 
 
-def test_ScalarLoop_Elemwise():
+def test_ScalarLoop_Elemwise_single_carries():
+    n_steps = int64("n_steps")
+    x0 = float64("x0")
+    x = x0 * 2
+    until = x >= 10
+
+    scalarop = ScalarLoop(init=[x0], update=[x], until=until)
+    op = Elemwise(scalarop)
+
+    n_steps = pt.scalar("n_steps", dtype="int32")
+    x0 = pt.vector("x0", dtype="float32")
+    state, done = op(n_steps, x0)
+
+    f = FunctionGraph([n_steps, x0], [state, done])
+    args = [
+        np.array(10).astype("int32"),
+        np.arange(0, 5).astype("float32"),
+    ]
+    compare_pytorch_and_py(
+        f, args, assert_fn=partial(np.testing.assert_allclose, rtol=1e-6)
+    )
+
+
+def test_ScalarLoop_Elemwise_multi_carries():
     n_steps = int64("n_steps")
     x0 = float64("x0")
     x1 = float64("x1")
