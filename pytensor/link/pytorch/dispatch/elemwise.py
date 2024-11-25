@@ -46,7 +46,6 @@ def pytorch_funcify_Elemwise(op, node, **kwargs):
             for _ in range(broadcast_inputs[0].dim()):
                 ufunc = torch.vmap(ufunc)
             return ufunc(*broadcast_inputs)
-            return base_fn(*inputs)
 
     return elemwise_fn
 
