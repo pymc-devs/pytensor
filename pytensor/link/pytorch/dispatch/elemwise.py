@@ -186,8 +186,8 @@ def jax_funcify_SoftmaxGrad(op, **kwargs):
 def elemwise_scalar_loop(base_fn, op, node, **kwargs):
     """
     ScalarLoop + Elemwise is too common
-    to not work, but @1031, vmap won't allow it.
-    Instead, we can ravel all the inputs, broadcasted
+    to not work, but https://github.com/pymc-devs/pytensor/issues/1031,
+    vmap won't allow it. Instead, we can ravel all the inputs, broadcasted
     according to torch
     """
 
