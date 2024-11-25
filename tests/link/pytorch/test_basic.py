@@ -428,16 +428,25 @@ def test_ScalarLoop_while():
 def test_ScalarLoop_Elemwise():
     n_steps = int64("n_steps")
     x0 = float64("x0")
+    x1 = float64("x1")
     x = x0 * 2
+    x1_n = x1 * 3
     until = x >= 10
 
-    scalarop = ScalarLoop(init=[x0], update=[x], until=until)
+    scalarop = ScalarLoop(init=[x0, x1], update=[x, x1_n], until=until)
     op = Elemwise(scalarop)
 
     n_steps = pt.scalar("n_steps", dtype="int32")
     x0 = pt.vector("x0", dtype="float32")
-    state, done = op(n_steps, x0)
+    x1 = pt.tensor("c0", dtype="float32", shape=(7, 3, 1))
+    *states, done = op(n_steps, x0, x1)
 
-    f = FunctionGraph([n_steps, x0], [state, done])
-    args = [np.array(10).astype("int32"), np.arange(0, 5).astype("float32")]
-    compare_pytorch_and_py(f, args)
+    f = FunctionGraph([n_steps, x0, x1], [*states, done])
+    args = [
+        np.array(10).astype("int32"),
+        np.arange(0, 5).astype("float32"),
+        np.random.rand(7, 3, 1).astype("float32"),
+    ]
+    compare_pytorch_and_py(
+        f, args, assert_fn=partial(np.testing.assert_allclose, rtol=1e-6)
+    )

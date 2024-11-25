@@ -64,6 +64,7 @@ def pytorch_funcify_Cast(op: Cast, node, **kwargs):
 def pytorch_funcify_Softplus(op, node, **kwargs):
     return torch.nn.Softplus()
 
+
 @pytorch_funcify.register(ScalarLoop)
 def pytorch_funicify_ScalarLoop(op, node, **kwargs):
     update = pytorch_funcify(op.fgraph)
@@ -80,7 +81,7 @@ def pytorch_funicify_ScalarLoop(op, node, **kwargs):
                 *carry, done = update(*carry, *constants)
                 if torch.any(done):
                     break
-           return *carry, done
+            return *carry, done
     else:
 
         def scalar_loop(steps, *start_and_constants):
