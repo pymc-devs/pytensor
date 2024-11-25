@@ -10,13 +10,15 @@ from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 def pytorch_funcify_Elemwise(op, node, **kwargs):
     scalar_op = op.scalar_op
     base_fn = pytorch_funcify(scalar_op, node=node, **kwargs)
-
-    if hasattr(scalar_op, "nfunc_spec") and hasattr(torch, scalar_op.nfunc_spec[0]):
+    if hasattr(scalar_op, "nfunc_spec") and (
+        hasattr(torch, scalar_op.nfunc_spec[0]) or "scipy." in scalar_op.nfunc_spec[0]
+    ):
         # torch can handle this scalar
         # broadcast, we'll let it.
         def elemwise_fn(*inputs):
             Elemwise._check_runtime_broadcast(node, inputs)
             return base_fn(*inputs)
+
     else:
 
         def elemwise_fn(*inputs):
