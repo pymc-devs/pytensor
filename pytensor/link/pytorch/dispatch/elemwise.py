@@ -1,6 +1,4 @@
 import importlib
-from itertools import chain
-
 import torch
 
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
@@ -189,50 +187,32 @@ def elemwise_scalar_loop(base_fn, op, node, **kwargs):
     """
     ScalarLoop + Elemwise is too common
     to not work, but @1031, vmap won't allow it.
-    Instead, we can do the following strategy
-    1. `.unbind(dim)` will return a list of tensors
-       representing `dim` but "unwrapped". e.x.
-       ```
-       t = torch.ones(3, 4, 2)
-       len(t.unbind(0)) == 3
-       t[0].shape == torch.Size[4, 2]
-    2. If we successfully apply, the length of the list will grow
-       by the next dimension in the tensor if we flatten the previous
-       dimension result
-       ```
-       inputs = [torch.ones(3, 4, 2)]
-       level_1 = chain.from_iterable(t.unbind(0) for t in inputs)
-       level_2 = chain.from_iterable(t.unbind(0) for t in level_1)
-       len(level_2) == 3 * 4
-       ```
-    3. Eventually we'll reach single dimension tensors. At that point
-       we can iterate over each input in an element by element manner
-       and call some function
-
-    For scalar loop, we need to broadcast the tensors so all
-    the necessary values are repeated, and we "evenly" iterate through everything
+    Instead, we can ravel all the inputs, broadcasted
+    according to torch
     """
 
+    n_outputs = len(node.outputs)
+
     def elemwise_fn(*inputs):
-        Elemwise._check_runtime_broadcast(node, inputs)
-        shaped_inputs = torch.broadcast_tensors(*inputs)
-        expected_size = shaped_inputs[0].numel()
-        final_inputs = [s.clone() for s in shaped_inputs]
-        for _ in range(shaped_inputs[0].dim() - 1):
-            for i, _ in enumerate(shaped_inputs):
-                layer = chain.from_iterable([s.unbind(0) for s in final_inputs[i]])
-                final_inputs[i] = list(layer)
+        bcasted_inputs = torch.broadcast_tensors(*inputs)
+        raveled_inputs = [inp.ravel() for inp in bcasted_inputs]
 
-        # make sure we still have the same number of things
-        assert len(final_inputs) == len(shaped_inputs)
+        out_shape = bcasted_inputs[0].size()
+        out_size = out_shape.numel()
+        raveled_outputs = [torch.zeros(out_size) for out in node.outputs]
 
-        # make sure each group of things are the expected size
-        assert all(len(x) == expected_size for x in final_inputs)
+        for i in range(out_size):
+            core_outs = base_fn(*(inp[i] for inp in raveled_inputs))
+            if n_outputs == 1:
+                raveled_outputs[0][i] = core_outs
+            else:
+                for o in range(n_outputs):
+                    raveled_outputs[o][i] = core_outs[o]
 
-        # make sure they are all single elements
-        assert all(len(x.shape) == 0 for tensor in final_inputs for x in tensor)
-        res = [base_fn(*args) for args in zip(*final_inputs)]
-
-        return [torch.stack(tuple(out[i] for out in res)) for i in range(len(res[0]))]
+        outputs = tuple(out.view(out_shape) for out in raveled_outputs)
+        if n_outputs == 1:
+            return outputs[0]
+        else:
+            return outputs
 
     return elemwise_fn
