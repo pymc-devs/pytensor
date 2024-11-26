@@ -228,9 +228,11 @@ def compare_numba_and_py(
     fgraph: FunctionGraph | tuple[Sequence["Variable"], Sequence["Variable"]],
     inputs: Sequence["TensorLike"],
     assert_fn: Callable | None = None,
+    *,
     numba_mode=numba_mode,
     py_mode=py_mode,
     updates=None,
+    inplace: bool = False,
     eval_obj_mode: bool = True,
 ) -> tuple[Callable, Any]:
     """Function to compare python graph output and Numba compiled output for testing equality
@@ -276,7 +278,14 @@ def compare_numba_and_py(
     pytensor_py_fn = function(
         fn_inputs, fn_outputs, mode=py_mode, accept_inplace=True, updates=updates
     )
-    py_res = pytensor_py_fn(*inputs)
+
+    test_inputs = (inp.copy() for inp in inputs) if inplace else inputs
+    py_res = pytensor_py_fn(*test_inputs)
+
+    # Get some coverage (and catch errors in python mode before unreadable numba ones)
+    if eval_obj_mode:
+        test_inputs = (inp.copy() for inp in inputs) if inplace else inputs
+        eval_python_only(fn_inputs, fn_outputs, test_inputs, mode=numba_mode)
 
     pytensor_numba_fn = function(
         fn_inputs,
@@ -285,11 +294,9 @@ def compare_numba_and_py(
         accept_inplace=True,
         updates=updates,
     )
-    numba_res = pytensor_numba_fn(*inputs)
 
-    # Get some coverage
-    if eval_obj_mode:
-        eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode)
+    test_inputs = (inp.copy() for inp in inputs) if inplace else inputs
+    numba_res = pytensor_numba_fn(*test_inputs)
 
     if len(fn_outputs) > 1:
         for j, p in zip(numba_res, py_res, strict=True):
