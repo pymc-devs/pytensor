@@ -85,7 +85,11 @@ def test_AdvancedSubtensor1_out_of_bounds():
             (np.array([True, False, False])),
             False,
         ),
-        (pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))), ([1, 2], [2, 3]), True),
+        (
+            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            ([1, 2], [2, 3]),
+            False,
+        ),
         # Single multidimensional indexing (supported after specialization rewrites)
         (
             as_tensor(np.arange(3 * 3).reshape((3, 3))),
@@ -117,17 +121,23 @@ def test_AdvancedSubtensor1_out_of_bounds():
             (slice(2, None), np.eye(3).astype(bool)),
             False,
         ),
-        # Multiple advanced indexing, only supported in obj mode
         (
             as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             (slice(None), [1, 2], [3, 4]),
-            True,
+            False,
         ),
+        (
+            as_tensor(np.arange(3 * 5 * 7).reshape((3, 5, 7))),
+            ([1, 2], [3, 4], [5, 6]),
+            False,
+        ),
+        # Non-contiguous vector indexing, only supported in obj mode
         (
             as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             ([1, 2], slice(None), [3, 4]),
             True,
         ),
+        # >1d vector indexing, only supported in obj mode
         (
             as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             ([[1, 2], [2, 1]], [0, 0]),
@@ -135,7 +145,7 @@ def test_AdvancedSubtensor1_out_of_bounds():
         ),
     ],
 )
-@pytest.mark.filterwarnings("error")
+@pytest.mark.filterwarnings("error")  # Raise if we did not expect objmode to be needed
 def test_AdvancedSubtensor(x, indices, objmode_needed):
     """Test NumPy's advanced indexing in more than one dimension."""
     x_pt = x.type()
@@ -268,94 +278,151 @@ def test_AdvancedIncSubtensor1(x, y, indices):
     "x, y, indices, duplicate_indices, set_requires_objmode, inc_requires_objmode",
     [
         (
-            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            np.arange(3 * 4 * 5).reshape((3, 4, 5)),
             -np.arange(3 * 5).reshape(3, 5),
-            (slice(None, None, 2), [1, 2, 3]),
+            (slice(None, None, 2), [1, 2, 3]),  # Mixed basic and vector index
             False,
             False,
             False,
         ),
         (
-            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
-            -99,
-            (slice(None, None, 2), [1, 2, 3], -1),
+            np.arange(3 * 4 * 5).reshape((3, 4, 5)),
+            np.array(-99),  # Broadcasted value
+            (
+                slice(None, None, 2),
+                [1, 2, 3],
+                -1,
+            ),  # Mixed basic and broadcasted vector idx
             False,
             False,
             False,
         ),
         (
-            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
-            -99,  # Broadcasted value
-            (slice(None, None, 2), [1, 2, 3]),
+            np.arange(3 * 4 * 5).reshape((3, 4, 5)),
+            np.array(-99),  # Broadcasted value
+            (slice(None, None, 2), [1, 2, 3]),  # Mixed basic and vector idx
             False,
             False,
             False,
         ),
         (
-            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            np.arange(3 * 4 * 5).reshape((3, 4, 5)),
             -np.arange(4 * 5).reshape(4, 5),
-            (0, [1, 2, 2, 3]),
+            (0, [1, 2, 2, 3]),  # Broadcasted vector index
             True,
             False,
             True,
         ),
         (
-            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
-            [-99],  # Broadcsasted value
-            (0, [1, 2, 2, 3]),
+            np.arange(3 * 4 * 5).reshape((3, 4, 5)),
+            np.array([-99]),  # Broadcasted value
+            (0, [1, 2, 2, 3]),  # Broadcasted vector index
             True,
             False,
             True,
         ),
         (
-            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            np.arange(3 * 4 * 5).reshape((3, 4, 5)),
             -np.arange(1 * 4 * 5).reshape(1, 4, 5),
-            (np.array([True, False, False])),
+            (np.array([True, False, False])),  # Broadcasted boolean index
             False,
             False,
             False,
         ),
         (
-            as_tensor(np.arange(3 * 3).reshape((3, 3))),
+            np.arange(3 * 3).reshape((3, 3)),
             -np.arange(3),
-            (np.eye(3).astype(bool)),
+            (np.eye(3).astype(bool)),  # Boolean index
             False,
             True,
             True,
         ),
         (
-            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
-            as_tensor(rng.poisson(size=(2, 5))),
-            ([1, 2], [2, 3]),
+            np.arange(3 * 4 * 5).reshape((3, 4, 5)),
+            rng.poisson(size=(2, 5)),
+            ([1, 2], [2, 3]),  # 2 vector indices
+            False,
+            False,
+            False,
+        ),
+        (
+            np.arange(3 * 4 * 5).reshape((3, 4, 5)),
+            rng.poisson(size=(3, 2)),
+            (slice(None), [1, 2], [2, 3]),  # 2 vector indices
+            False,
+            False,
+            False,
+        ),
+        (
+            np.arange(3 * 4 * 6).reshape((3, 4, 6)),
+            rng.poisson(size=(2,)),
+            ([1, 2], [2, 3], [4, 5]),  # 3 vector indices
+            False,
+            False,
+            False,
+        ),
+        (
+            np.arange(3 * 4 * 5).reshape((3, 4, 5)),
+            np.array(-99),  # Broadcasted value
+            ([1, 2], [2, 3]),  # 2 vector indices
             False,
             True,
             True,
         ),
         (
-            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
-            as_tensor(rng.poisson(size=(2, 4))),
-            ([1, 2], slice(None), [3, 4]),
+            np.arange(3 * 4 * 5).reshape((3, 4, 5)),
+            rng.poisson(size=(2, 4)),
+            ([1, 2], slice(None), [3, 4]),  # Non-contiguous vector indices
+            False,
+            True,
+            True,
+        ),
+        (
+            np.arange(3 * 4 * 5).reshape((3, 4, 5)),
+            rng.poisson(size=(2, 2)),
+            (
+                slice(1, None),
+                [1, 2],
+                [3, 4],
+            ),  # Mixed double vector index and basic index
+            False,
+            True,
+            True,
+        ),
+        (
+            np.arange(5),
+            rng.poisson(size=(2, 2)),
+            ([[1, 2], [2, 3]]),  # matrix indices
             False,
             True,
             True,
         ),
         pytest.param(
-            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
-            as_tensor(rng.poisson(size=(2, 5))),
-            ([1, 1], [2, 2]),
+            np.arange(3 * 4 * 5).reshape((3, 4, 5)),
+            rng.poisson(size=(2, 5)),
+            ([1, 1], [2, 2]),  # Repeated indices
+            True,
             False,
-            True,
-            True,
+            False,
         ),
     ],
 )
-@pytest.mark.filterwarnings("error")
+@pytest.mark.parametrize("inplace", (False, True))
+@pytest.mark.filterwarnings("error")  # Raise if we did not expect objmode to be needed
 def test_AdvancedIncSubtensor(
-    x, y, indices, duplicate_indices, set_requires_objmode, inc_requires_objmode
+    x,
+    y,
+    indices,
+    duplicate_indices,
+    set_requires_objmode,
+    inc_requires_objmode,
+    inplace,
 ):
-    out_pt = set_subtensor(x[indices], y)
+    x_pt = pt.as_tensor(x).type("x")
+    y_pt = pt.as_tensor(y).type("y")
+
+    out_pt = set_subtensor(x_pt[indices], y_pt, inplace=inplace)
     assert isinstance(out_pt.owner.op, AdvancedIncSubtensor)
-    out_fg = FunctionGraph([], [out_pt])
 
     with (
         pytest.warns(
@@ -365,11 +432,18 @@ def test_AdvancedIncSubtensor(
         if set_requires_objmode
         else contextlib.nullcontext()
     ):
-        compare_numba_and_py(out_fg, [])
+        fn, _ = compare_numba_and_py(([x_pt, y_pt], [out_pt]), [x, y])
 
-    out_pt = inc_subtensor(x[indices], y, ignore_duplicates=not duplicate_indices)
+    if inplace:
+        # Test updates inplace
+        x_orig = x.copy()
+        fn(x, y + 1)
+        assert not np.all(x == x_orig)
+
+    out_pt = inc_subtensor(
+        x_pt[indices], y_pt, ignore_duplicates=not duplicate_indices, inplace=inplace
+    )
     assert isinstance(out_pt.owner.op, AdvancedIncSubtensor)
-    out_fg = FunctionGraph([], [out_pt])
     with (
         pytest.warns(
             UserWarning,
@@ -378,21 +452,9 @@ def test_AdvancedIncSubtensor(
         if inc_requires_objmode
         else contextlib.nullcontext()
     ):
-        compare_numba_and_py(out_fg, [])
-
-    x_pt = x.type()
-    out_pt = set_subtensor(x_pt[indices], y)
-    # Inplace isn't really implemented for `AdvancedIncSubtensor`, so we just
-    # hack it on here
-    out_pt.owner.op.inplace = True
-    assert isinstance(out_pt.owner.op, AdvancedIncSubtensor)
-    out_fg = FunctionGraph([x_pt], [out_pt])
-    with (
-        pytest.warns(
-            UserWarning,
-            match="Numba will use object mode to run AdvancedSetSubtensor's perform method",
-        )
-        if set_requires_objmode
-        else contextlib.nullcontext()
-    ):
-        compare_numba_and_py(out_fg, [x.data])
+        fn, _ = compare_numba_and_py(([x_pt, y_pt], [out_pt]), [x, y])
+    if inplace:
+        # Test updates inplace
+        x_orig = x.copy()
+        fn(x, y)
+        assert not np.all(x == x_orig)

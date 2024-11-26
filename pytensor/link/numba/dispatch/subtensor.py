@@ -5,6 +5,7 @@ from pytensor.link.numba.dispatch import numba_funcify
 from pytensor.link.numba.dispatch.basic import generate_fallback_impl, numba_njit
 from pytensor.link.utils import compile_function_src, unique_name_generator
 from pytensor.tensor import TensorType
+from pytensor.tensor.rewriting.subtensor import is_full_slice
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
@@ -13,6 +14,7 @@ from pytensor.tensor.subtensor import (
     IncSubtensor,
     Subtensor,
 )
+from pytensor.tensor.type_other import NoneTypeT, SliceType
 
 
 @numba_funcify.register(Subtensor)
@@ -104,18 +106,73 @@ def {function_name}({", ".join(input_names)}):
 @numba_funcify.register(AdvancedSubtensor)
 @numba_funcify.register(AdvancedIncSubtensor)
 def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
-    idxs = node.inputs[1:] if isinstance(op, AdvancedSubtensor) else node.inputs[2:]
-    adv_idxs_dims = [
-        idx.type.ndim
+    if isinstance(op, AdvancedSubtensor):
+        x, y, idxs = node.inputs[0], None, node.inputs[1:]
+    else:
+        x, y, *idxs = node.inputs
+
+    basic_idxs = [
+        idx
         for idx in idxs
-        if (isinstance(idx.type, TensorType) and idx.type.ndim > 0)
+        if (
+            isinstance(idx.type, NoneTypeT)
+            or (isinstance(idx.type, SliceType) and not is_full_slice(idx))
+        )
+    ]
+    adv_idxs = [
+        {
+            "axis": i,
+            "dtype": idx.type.dtype,
+            "bcast": idx.type.broadcastable,
+            "ndim": idx.type.ndim,
+        }
+        for i, idx in enumerate(idxs)
+        if isinstance(idx.type, TensorType)
     ]
 
+    # Special case for consecutive consecutive vector indices
+    def broadcasted_to(x_bcast: tuple[bool, ...], to_bcast: tuple[bool, ...]):
+        # Check that x is not broadcasted to y based on broadcastable info
+        if len(x_bcast) < len(to_bcast):
+            return True
+        for x_bcast_dim, to_bcast_dim in zip(x_bcast, to_bcast, strict=True):
+            if x_bcast_dim and not to_bcast_dim:
+                return True
+        return False
+
+    # Special implementation for consecutive integer vector indices
+    if (
+        not basic_idxs
+        and len(adv_idxs) >= 2
+        # Must be integer vectors
+        # Todo: we could allow shape=(1,) if this is the shape of x
+        and all(
+            (adv_idx["bcast"] == (False,) and adv_idx["dtype"] != "bool")
+            for adv_idx in adv_idxs
+        )
+        # Must be consecutive
+        and not op.non_contiguous_adv_indexing(node)
+        # y in set/inc_subtensor cannot be broadcasted
+        and (
+            y is None
+            or not broadcasted_to(
+                y.type.broadcastable,
+                (
+                    x.type.broadcastable[: adv_idxs[0]["axis"]]
+                    + x.type.broadcastable[adv_idxs[-1]["axis"] :]
+                ),
+            )
+        )
+    ):
+        return numba_funcify_multiple_integer_vector_indexing(op, node, **kwargs)
+
+    # Other cases not natively supported by Numba (fallback to obj-mode)
     if (
         # Numba does not support indexes with more than one dimension
+        any(idx["ndim"] > 1 for idx in adv_idxs)
         # Nor multiple vector indexes
-        (len(adv_idxs_dims) > 1 or adv_idxs_dims[0] > 1)
-        # The default index implementation does not handle duplicate indices correctly
+        or sum(idx["ndim"] > 0 for idx in adv_idxs) > 1
+        # The default PyTensor implementation does not handle duplicate indices correctly
         or (
             isinstance(op, AdvancedIncSubtensor)
             and not op.set_instead_of_inc
@@ -124,7 +181,89 @@ def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
     ):
         return generate_fallback_impl(op, node, **kwargs)
 
+    # What's left should all be supported natively by numba
     return numba_funcify_default_subtensor(op, node, **kwargs)
+
+
+def numba_funcify_multiple_integer_vector_indexing(
+    op: AdvancedSubtensor | AdvancedIncSubtensor, node, **kwargs
+):
+    # Special-case implementation for multiple consecutive vector integer indices (and set/incsubtensor)
+    if isinstance(op, AdvancedSubtensor):
+        y, idxs = None, node.inputs[1:]
+    else:
+        y, *idxs = node.inputs[1:]
+
+    first_axis = next(
+        i for i, idx in enumerate(idxs) if isinstance(idx.type, TensorType)
+    )
+    try:
+        after_last_axis = next(
+            i
+            for i, idx in enumerate(idxs[first_axis:], start=first_axis)
+            if not isinstance(idx.type, TensorType)
+        )
+    except StopIteration:
+        after_last_axis = len(idxs)
+
+    if isinstance(op, AdvancedSubtensor):
+
+        @numba_njit
+        def advanced_subtensor_multiple_vector(x, *idxs):
+            none_slices = idxs[:first_axis]
+            vec_idxs = idxs[first_axis:after_last_axis]
+
+            x_shape = x.shape
+            idx_shape = vec_idxs[0].shape
+            shape_bef = x_shape[:first_axis]
+            shape_aft = x_shape[after_last_axis:]
+            out_shape = (*shape_bef, *idx_shape, *shape_aft)
+            out_buffer = np.empty(out_shape, dtype=x.dtype)
+            for i, scalar_idxs in enumerate(zip(*vec_idxs)):  # noqa: B905
+                out_buffer[(*none_slices, i)] = x[(*none_slices, *scalar_idxs)]
+            return out_buffer
+
+        return advanced_subtensor_multiple_vector
+
+    elif op.set_instead_of_inc:
+        inplace = op.inplace
+
+        @numba_njit
+        def advanced_set_subtensor_multiple_vector(x, y, *idxs):
+            vec_idxs = idxs[first_axis:after_last_axis]
+            x_shape = x.shape
+
+            if inplace:
+                out = x
+            else:
+                out = x.copy()
+
+            for outer in np.ndindex(x_shape[:first_axis]):
+                for i, scalar_idxs in enumerate(zip(*vec_idxs)):  # noqa: B905
+                    out[(*outer, *scalar_idxs)] = y[(*outer, i)]
+            return out
+
+        return advanced_set_subtensor_multiple_vector
+
+    else:
+        inplace = op.inplace
+
+        @numba_njit
+        def advanced_inc_subtensor_multiple_vector(x, y, *idxs):
+            vec_idxs = idxs[first_axis:after_last_axis]
+            x_shape = x.shape
+
+            if inplace:
+                out = x
+            else:
+                out = x.copy()
+
+            for outer in np.ndindex(x_shape[:first_axis]):
+                for i, scalar_idxs in enumerate(zip(*vec_idxs)):  # noqa: B905
+                    out[(*outer, *scalar_idxs)] += y[(*outer, i)]
+            return out
+
+        return advanced_inc_subtensor_multiple_vector
 
 
 @numba_funcify.register(AdvancedIncSubtensor1)

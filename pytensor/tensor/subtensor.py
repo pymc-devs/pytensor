@@ -2937,6 +2937,31 @@ class AdvancedIncSubtensor(Op):
             gy = _sum_grad_over_bcasted_dims(y, gy)
         return [gx, gy] + [DisconnectedType()() for _ in idxs]
 
+    @staticmethod
+    def non_contiguous_adv_indexing(node: Apply) -> bool:
+        """
+        Check if the advanced indexing is non-contiguous (i.e. interrupted by basic indexing).
+
+        This function checks if the advanced indexing is non-contiguous,
+        in which case the advanced index dimensions are placed on the left of the
+        output array, regardless of their opriginal position.
+
+        See: https://numpy.org/doc/stable/user/basics.indexing.html#combining-advanced-and-basic-indexing
+
+
+        Parameters
+        ----------
+        node : Apply
+            The node of the AdvancedSubtensor operation.
+
+        Returns
+        -------
+        bool
+            True if the advanced indexing is non-contiguous, False otherwise.
+        """
+        _, _, *idxs = node.inputs
+        return _non_contiguous_adv_indexing(idxs)
+
 
 advanced_inc_subtensor = AdvancedIncSubtensor()
 advanced_set_subtensor = AdvancedIncSubtensor(set_instead_of_inc=True)
