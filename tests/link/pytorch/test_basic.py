@@ -17,7 +17,7 @@ from pytensor.graph.op import Op
 from pytensor.ifelse import ifelse
 from pytensor.link.pytorch.linker import PytorchLinker
 from pytensor.raise_op import CheckAndRaise
-from pytensor.tensor import alloc, arange, as_tensor, empty, eye
+from pytensor.tensor import alloc, arange, as_tensor, empty, expit, eye, softplus
 from pytensor.tensor.type import matrices, matrix, scalar, vector
 
 
@@ -374,3 +374,17 @@ def test_pytorch_link_references():
     f = function([x], out, mode="PYTORCH")
     f(torch.ones(3))
     assert "inner_fn" not in dir(m), "function call reference leaked"
+
+
+def test_pytorch_scipy():
+    x = vector("a", shape=(3,))
+    out = expit(x)
+    f = FunctionGraph([x], [out])
+    compare_pytorch_and_py(f, [np.random.rand(3)])
+
+
+def test_pytorch_softplus():
+    x = vector("a", shape=(3,))
+    out = softplus(x)
+    f = FunctionGraph([x], [out])
+    compare_pytorch_and_py(f, [np.random.rand(3)])
