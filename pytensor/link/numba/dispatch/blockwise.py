@@ -1,3 +1,4 @@
+import sys
 from typing import cast
 
 from numba.core.extending import overload
@@ -60,7 +61,10 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
             src,
             "to_tuple",
             global_env={"to_fixed_tuple": to_fixed_tuple},
-        )
+        ),
+        # cache=True leads to a numba.cloudpickle dump failure in Python 3.10
+        # May be fine in Python 3.11, but I didn't test. It was fine in 3.12
+        cache=sys.version_info >= (3, 12),
     )
 
     def blockwise_wrapper(*inputs_and_core_shapes):
