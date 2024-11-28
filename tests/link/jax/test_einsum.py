@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from pytensor.graph import FunctionGraph
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
@@ -22,8 +21,7 @@ def test_jax_einsum():
     }
     x_pt, y_pt, z_pt = (pt.tensor(name, shape=shape) for name, shape in shapes.items())
     out = pt.einsum(subscripts, x_pt, y_pt, z_pt)
-    fg = FunctionGraph([x_pt, y_pt, z_pt], [out])
-    compare_jax_and_py(fg, [x, y, z])
+    compare_jax_and_py([x_pt, y_pt, z_pt], [out], [x, y, z])
 
 
 def test_ellipsis_einsum():
@@ -34,5 +32,4 @@ def test_ellipsis_einsum():
     x_pt = pt.tensor("x", shape=x.shape)
     y_pt = pt.tensor("y", shape=y.shape)
     out = pt.einsum(subscripts, x_pt, y_pt)
-    fg = FunctionGraph([x_pt, y_pt], [out])
-    compare_jax_and_py(fg, [x, y])
+    compare_jax_and_py([x_pt, y_pt], [out], [x, y])

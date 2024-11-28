@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 
 from pytensor import config
-from pytensor.graph import FunctionGraph
 from pytensor.tensor import tensor
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.math import Dot, matmul
@@ -32,8 +31,7 @@ def test_matmul(matmul_op):
 
     out = matmul_op(a, b)
     assert isinstance(out.owner.op, Blockwise)
-    fg = FunctionGraph([a, b], [out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    fn, _ = compare_jax_and_py([a, b], [out], test_values)
 
     # Check we are not adding any unnecessary stuff
     jaxpr = str(jax.make_jaxpr(fn.vm.jit_fn)(*test_values))

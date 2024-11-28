@@ -4,11 +4,8 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from pytensor.compile.sharedvalue import SharedVariable
-from pytensor.graph.basic import Constant
-from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor import nlinalg
-from tests.link.numba.test_basic import compare_numba_and_py, set_test_value
+from tests.link.numba.test_basic import compare_numba_and_py
 
 
 rng = np.random.default_rng(42849)
@@ -18,14 +15,14 @@ rng = np.random.default_rng(42849)
     "x, exc",
     [
         (
-            set_test_value(
+            (
                 pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
             None,
         ),
         (
-            set_test_value(
+            (
                 pt.lmatrix(),
                 (lambda x: x.T.dot(x))(rng.poisson(size=(3, 3)).astype("int64")),
             ),
@@ -34,18 +31,15 @@ rng = np.random.default_rng(42849)
     ],
 )
 def test_Det(x, exc):
+    x, test_x = x
     g = nlinalg.Det()(x)
-    g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            [x],
+            g,
+            [test_x],
         )
 
 
@@ -53,14 +47,14 @@ def test_Det(x, exc):
     "x, exc",
     [
         (
-            set_test_value(
+            (
                 pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
             None,
         ),
         (
-            set_test_value(
+            (
                 pt.lmatrix(),
                 (lambda x: x.T.dot(x))(rng.poisson(size=(3, 3)).astype("int64")),
             ),
@@ -69,18 +63,15 @@ def test_Det(x, exc):
     ],
 )
 def test_SLogDet(x, exc):
+    x, test_x = x
     g = nlinalg.SLogDet()(x)
-    g_fg = FunctionGraph(outputs=g)
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            [x],
+            g,
+            [test_x],
         )
 
 
@@ -112,21 +103,21 @@ y = np.array(
     "x, exc",
     [
         (
-            set_test_value(
+            (
                 pt.dmatrix(),
                 (lambda x: x.T.dot(x))(x),
             ),
             None,
         ),
         (
-            set_test_value(
+            (
                 pt.dmatrix(),
                 (lambda x: x.T.dot(x))(y),
             ),
             None,
         ),
         (
-            set_test_value(
+            (
                 pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
@@ -137,22 +128,15 @@ y = np.array(
     ],
 )
 def test_Eig(x, exc):
+    x, test_x = x
     g = nlinalg.Eig()(x)
-
-    if isinstance(g, list):
-        g_fg = FunctionGraph(outputs=g)
-    else:
-        g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            [x],
+            g,
+            [test_x],
         )
 
 
@@ -160,7 +144,7 @@ def test_Eig(x, exc):
     "x, uplo, exc",
     [
         (
-            set_test_value(
+            (
                 pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
@@ -168,7 +152,7 @@ def test_Eig(x, exc):
             None,
         ),
         (
-            set_test_value(
+            (
                 pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
@@ -180,22 +164,15 @@ def test_Eig(x, exc):
     ],
 )
 def test_Eigh(x, uplo, exc):
+    x, test_x = x
     g = nlinalg.Eigh(uplo)(x)
-
-    if isinstance(g, list):
-        g_fg = FunctionGraph(outputs=g)
-    else:
-        g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            [x],
+            g,
+            [test_x],
         )
 
 
@@ -204,7 +181,7 @@ def test_Eigh(x, uplo, exc):
     [
         (
             nlinalg.MatrixInverse,
-            set_test_value(
+            (
                 pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
@@ -213,7 +190,7 @@ def test_Eigh(x, uplo, exc):
         ),
         (
             nlinalg.MatrixInverse,
-            set_test_value(
+            (
                 pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
@@ -224,7 +201,7 @@ def test_Eigh(x, uplo, exc):
         ),
         (
             nlinalg.MatrixPinv,
-            set_test_value(
+            (
                 pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
@@ -233,7 +210,7 @@ def test_Eigh(x, uplo, exc):
         ),
         (
             nlinalg.MatrixPinv,
-            set_test_value(
+            (
                 pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
@@ -245,18 +222,15 @@ def test_Eigh(x, uplo, exc):
     ],
 )
 def test_matrix_inverses(op, x, exc, op_args):
+    x, test_x = x
     g = op(*op_args)(x)
-    g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            [x],
+            g,
+            [test_x],
         )
 
 
@@ -264,7 +238,7 @@ def test_matrix_inverses(op, x, exc, op_args):
     "x, mode, exc",
     [
         (
-            set_test_value(
+            (
                 pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
@@ -272,7 +246,7 @@ def test_matrix_inverses(op, x, exc, op_args):
             None,
         ),
         (
-            set_test_value(
+            (
                 pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
@@ -280,7 +254,7 @@ def test_matrix_inverses(op, x, exc, op_args):
             None,
         ),
         (
-            set_test_value(
+            (
                 pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
@@ -290,7 +264,7 @@ def test_matrix_inverses(op, x, exc, op_args):
             None,
         ),
         (
-            set_test_value(
+            (
                 pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
@@ -302,22 +276,15 @@ def test_matrix_inverses(op, x, exc, op_args):
     ],
 )
 def test_QRFull(x, mode, exc):
+    x, test_x = x
     g = nlinalg.QRFull(mode)(x)
-
-    if isinstance(g, list):
-        g_fg = FunctionGraph(outputs=g)
-    else:
-        g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            [x],
+            g,
+            [test_x],
         )
 
 
@@ -325,7 +292,7 @@ def test_QRFull(x, mode, exc):
     "x, full_matrices, compute_uv, exc",
     [
         (
-            set_test_value(
+            (
                 pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
@@ -334,7 +301,7 @@ def test_QRFull(x, mode, exc):
             None,
         ),
         (
-            set_test_value(
+            (
                 pt.dmatrix(),
                 (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
             ),
@@ -343,7 +310,7 @@ def test_QRFull(x, mode, exc):
             None,
         ),
         (
-            set_test_value(
+            (
                 pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
@@ -354,7 +321,7 @@ def test_QRFull(x, mode, exc):
             None,
         ),
         (
-            set_test_value(
+            (
                 pt.lmatrix(),
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
@@ -367,20 +334,13 @@ def test_QRFull(x, mode, exc):
     ],
 )
 def test_SVD(x, full_matrices, compute_uv, exc):
+    x, test_x = x
     g = nlinalg.SVD(full_matrices, compute_uv)(x)
-
-    if isinstance(g, list):
-        g_fg = FunctionGraph(outputs=g)
-    else:
-        g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            [x],
+            g,
+            [test_x],
         )

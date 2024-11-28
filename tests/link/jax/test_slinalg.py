@@ -6,7 +6,6 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor.configdefaults import config
-from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor import nlinalg as pt_nlinalg
 from pytensor.tensor import slinalg as pt_slinalg
 from pytensor.tensor import subtensor as pt_subtensor
@@ -30,13 +29,11 @@ def test_jax_basic():
     out = pt_subtensor.inc_subtensor(out[0, 1], 2.0)
     out = out[:5, :3]
 
-    out_fg = FunctionGraph([x, y], [out])
-
     test_input_vals = [
         np.tile(np.arange(10), (10, 1)).astype(config.floatX),
         np.tile(np.arange(10, 20), (10, 1)).astype(config.floatX),
     ]
-    _, [jax_res] = compare_jax_and_py(out_fg, test_input_vals)
+    _, [jax_res] = compare_jax_and_py([x, y], [out], test_input_vals)
 
     # Confirm that the `Subtensor` slice operations are correct
     assert jax_res.shape == (5, 3)
@@ -46,19 +43,17 @@ def test_jax_basic():
     assert jax_res[0, 1] == -8.0
 
     out = clip(x, y, 5)
-    out_fg = FunctionGraph([x, y], [out])
-    compare_jax_and_py(out_fg, test_input_vals)
+    compare_jax_and_py([x, y], [out], test_input_vals)
 
     out = pt.diagonal(x, 0)
-    out_fg = FunctionGraph([x], [out])
     compare_jax_and_py(
-        out_fg, [np.arange(10 * 10).reshape((10, 10)).astype(config.floatX)]
+        [x], [out], [np.arange(10 * 10).reshape((10, 10)).astype(config.floatX)]
     )
 
     out = pt_slinalg.cholesky(x)
-    out_fg = FunctionGraph([x], [out])
     compare_jax_and_py(
-        out_fg,
+        [x],
+        [out],
         [
             (np.eye(10) + rng.standard_normal(size=(10, 10)) * 0.01).astype(
                 config.floatX
@@ -68,9 +63,9 @@ def test_jax_basic():
 
     # not sure why this isn't working yet with lower=False
     out = pt_slinalg.Cholesky(lower=False)(x)
-    out_fg = FunctionGraph([x], [out])
     compare_jax_and_py(
-        out_fg,
+        [x],
+        [out],
         [
             (np.eye(10) + rng.standard_normal(size=(10, 10)) * 0.01).astype(
                 config.floatX
@@ -79,9 +74,9 @@ def test_jax_basic():
     )
 
     out = pt_slinalg.solve(x, b)
-    out_fg = FunctionGraph([x, b], [out])
     compare_jax_and_py(
-        out_fg,
+        [x, b],
+        [out],
         [
             np.eye(10).astype(config.floatX),
             np.arange(10).astype(config.floatX),
@@ -89,19 +84,17 @@ def test_jax_basic():
     )
 
     out = pt.diag(b)
-    out_fg = FunctionGraph([b], [out])
-    compare_jax_and_py(out_fg, [np.arange(10).astype(config.floatX)])
+    compare_jax_and_py([b], [out], [np.arange(10).astype(config.floatX)])
 
     out = pt_nlinalg.det(x)
-    out_fg = FunctionGraph([x], [out])
     compare_jax_and_py(
-        out_fg, [np.arange(10 * 10).reshape((10, 10)).astype(config.floatX)]
+        [x], [out], [np.arange(10 * 10).reshape((10, 10)).astype(config.floatX)]
     )
 
     out = pt_nlinalg.matrix_inverse(x)
-    out_fg = FunctionGraph([x], [out])
     compare_jax_and_py(
-        out_fg,
+        [x],
+        [out],
         [
             (np.eye(10) + rng.standard_normal(size=(10, 10)) * 0.01).astype(
                 config.floatX
@@ -124,9 +117,9 @@ def test_jax_SolveTriangular(trans, lower, check_finite):
         lower=lower,
         check_finite=check_finite,
     )
-    out_fg = FunctionGraph([x, b], [out])
     compare_jax_and_py(
-        out_fg,
+        [x, b],
+        [out],
         [
             np.eye(10).astype(config.floatX),
             np.arange(10).astype(config.floatX),
@@ -141,10 +134,10 @@ def test_jax_block_diag():
     D = matrix("D")
 
     out = pt_slinalg.block_diag(A, B, C, D)
-    out_fg = FunctionGraph([A, B, C, D], [out])
 
     compare_jax_and_py(
-        out_fg,
+        [A, B, C, D],
+        [out],
         [
             np.random.normal(size=(5, 5)).astype(config.floatX),
             np.random.normal(size=(3, 3)).astype(config.floatX),
@@ -158,9 +151,10 @@ def test_jax_block_diag_blockwise():
     A = pt.tensor3("A")
     B = pt.tensor3("B")
     out = pt_slinalg.block_diag(A, B)
-    out_fg = FunctionGraph([A, B], [out])
+
     compare_jax_and_py(
-        out_fg,
+        [A, B],
+        [out],
         [
             np.random.normal(size=(5, 5, 5)).astype(config.floatX),
             np.random.normal(size=(5, 3, 3)).astype(config.floatX),
@@ -174,11 +168,11 @@ def test_jax_eigvalsh(lower):
     B = matrix("B")
 
     out = pt_slinalg.eigvalsh(A, B, lower=lower)
-    out_fg = FunctionGraph([A, B], [out])
 
     with pytest.raises(NotImplementedError):
         compare_jax_and_py(
-            out_fg,
+            [A, B],
+            [out],
             [
                 np.array(
                     [[6, 3, 1, 5], [3, 0, 5, 1], [1, 5, 6, 2], [5, 1, 2, 2]]
@@ -189,7 +183,8 @@ def test_jax_eigvalsh(lower):
             ],
         )
     compare_jax_and_py(
-        out_fg,
+        [A, B],
+        [out],
         [
             np.array([[6, 3, 1, 5], [3, 0, 5, 1], [1, 5, 6, 2], [5, 1, 2, 2]]).astype(
                 config.floatX
@@ -207,11 +202,11 @@ def test_jax_solve_discrete_lyapunov(
     A = pt.tensor(name="A", shape=shape)
     B = pt.tensor(name="B", shape=shape)
     out = pt_slinalg.solve_discrete_lyapunov(A, B, method=method)
-    out_fg = FunctionGraph([A, B], [out])
 
     atol = rtol = 1e-8 if config.floatX == "float64" else 1e-3
     compare_jax_and_py(
-        out_fg,
+        [A, B],
+        [out],
         [
             np.random.normal(size=shape).astype(config.floatX),
             np.random.normal(size=shape).astype(config.floatX),
