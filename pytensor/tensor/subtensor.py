@@ -1456,11 +1456,8 @@ def inc_subtensor(
         views; if they overlap, the result of this `Op` will generally be
         incorrect. This value has no effect if ``inplace=False``.
     ignore_duplicates
-        This determines whether or not ``x[indices] += y`` is used or
-        ``np.add.at(x, indices, y)``.  When the special duplicates handling of
-        ``np.add.at`` isn't required, setting this option to ``True``
-        (i.e. using ``x[indices] += y``) can resulting in faster compiled
-        graphs.
+        This determines whether ``x[indices] += y`` is used or
+        ``np.add.at(x, indices, y)``.
 
     Examples
     --------

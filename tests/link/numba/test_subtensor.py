@@ -334,8 +334,19 @@ def test_AdvancedIncSubtensor1(x, y, indices):
             -np.arange(3),
             (np.eye(3).astype(bool)),  # Boolean index
             False,
-            True,
-            True,
+            False,
+            False,
+        ),
+        (
+            np.arange(3 * 3 * 5).reshape((3, 3, 5)),
+            rng.poisson(size=(3, 2)),
+            (
+                np.eye(3).astype(bool),
+                slice(-2, None),
+            ),  # Boolean index, mixed with basic index
+            False,
+            False,
+            False,
         ),
         (
             np.arange(3 * 4 * 5).reshape((3, 4, 5)),
@@ -394,10 +405,18 @@ def test_AdvancedIncSubtensor1(x, y, indices):
             rng.poisson(size=(2, 2)),
             ([[1, 2], [2, 3]]),  # matrix indices
             False,
+            False,  # Gets converted to AdvancedIncSubtensor1
+            True,  # This is actually supported with the default `ignore_duplicates=False`
+        ),
+        (
+            np.arange(3 * 5).reshape((3, 5)),
+            rng.poisson(size=(1, 2, 2)),
+            (slice(1, 3), [[1, 2], [2, 3]]),  # matrix indices, mixed with basic index
+            False,
             True,
             True,
         ),
-        pytest.param(
+        (
             np.arange(3 * 4 * 5).reshape((3, 4, 5)),
             rng.poisson(size=(2, 5)),
             ([1, 1], [2, 2]),  # Repeated indices
@@ -418,6 +437,9 @@ def test_AdvancedIncSubtensor(
     inc_requires_objmode,
     inplace,
 ):
+    # Need rewrite to support certain forms of advanced indexing without object mode
+    mode = numba_mode.including("specialize")
+
     x_pt = pt.as_tensor(x).type("x")
     y_pt = pt.as_tensor(y).type("y")
 
@@ -432,7 +454,7 @@ def test_AdvancedIncSubtensor(
         if set_requires_objmode
         else contextlib.nullcontext()
     ):
-        fn, _ = compare_numba_and_py(([x_pt, y_pt], [out_pt]), [x, y])
+        fn, _ = compare_numba_and_py(([x_pt, y_pt], [out_pt]), [x, y], numba_mode=mode)
 
     if inplace:
         # Test updates inplace
@@ -452,7 +474,7 @@ def test_AdvancedIncSubtensor(
         if inc_requires_objmode
         else contextlib.nullcontext()
     ):
-        fn, _ = compare_numba_and_py(([x_pt, y_pt], [out_pt]), [x, y])
+        fn, _ = compare_numba_and_py(([x_pt, y_pt], [out_pt]), [x, y], numba_mode=mode)
     if inplace:
         # Test updates inplace
         x_orig = x.copy()
