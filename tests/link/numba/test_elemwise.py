@@ -11,10 +11,7 @@ import pytensor.tensor.math as ptm
 from pytensor import config, function
 from pytensor.compile import get_mode
 from pytensor.compile.ops import deep_copy_op
-from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.gradient import grad
-from pytensor.graph.basic import Constant
-from pytensor.graph.fg import FunctionGraph
 from pytensor.scalar import float64
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import All, Any, Max, Min, Prod, ProdWithoutZeros, Sum
@@ -22,7 +19,6 @@ from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 from tests.link.numba.test_basic import (
     compare_numba_and_py,
     scalar_my_multi_out,
-    set_test_value,
 )
 from tests.tensor.test_elemwise import (
     careduce_benchmark_tester,
@@ -116,13 +112,13 @@ rng = np.random.default_rng(42849)
 def test_Elemwise(inputs, input_vals, output_fn, exc):
     outputs = output_fn(*inputs)
 
-    out_fg = FunctionGraph(
-        outputs=[outputs] if not isinstance(outputs, list) else outputs
-    )
-
     cm = contextlib.suppress() if exc is None else pytest.raises(exc)
     with cm:
-        compare_numba_and_py(out_fg, input_vals)
+        compare_numba_and_py(
+            inputs,
+            outputs,
+            input_vals,
+        )
 
 
 @pytest.mark.xfail(reason="Logic had to be reversed due to surprising segfaults")
@@ -154,7 +150,7 @@ def test_elemwise_speed(benchmark):
     [
         # `{'drop': [], 'shuffle': [], 'augment': [0, 1]}`
         (
-            set_test_value(
+            (
                 pt.lscalar(name="a"),
                 np.array(1, dtype=np.int64),
             ),
@@ -163,21 +159,17 @@ def test_elemwise_speed(benchmark):
         # I.e. `a_pt.T`
         # `{'drop': [], 'shuffle': [1, 0], 'augment': []}`
         (
-            set_test_value(
-                pt.matrix("a"), np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
-            ),
+            (pt.matrix("a"), np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)),
             (1, 0),
         ),
         # `{'drop': [], 'shuffle': [0, 1], 'augment': [2]}`
         (
-            set_test_value(
-                pt.matrix("a"), np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
-            ),
+            (pt.matrix("a"), np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)),
             (1, 0, "x"),
         ),
         # `{'drop': [1], 'shuffle': [2, 0], 'augment': [0, 2, 4]}`
         (
-            set_test_value(
+            (
                 pt.tensor(dtype=config.floatX, shape=(None, 1, None), name="a"),
                 np.array([[[1.0, 2.0]], [[3.0, 4.0]]], dtype=config.floatX),
             ),
@@ -186,21 +178,21 @@ def test_elemwise_speed(benchmark):
         # I.e. `a_pt.dimshuffle((0,))`
         # `{'drop': [1], 'shuffle': [0], 'augment': []}`
         (
-            set_test_value(
+            (
                 pt.tensor(dtype=config.floatX, shape=(None, 1), name="a"),
                 np.array([[1.0], [2.0], [3.0], [4.0]], dtype=config.floatX),
             ),
             (0,),
         ),
         (
-            set_test_value(
+            (
                 pt.tensor(dtype=config.floatX, shape=(None, 1), name="a"),
                 np.array([[1.0], [2.0], [3.0], [4.0]], dtype=config.floatX),
             ),
             (0,),
         ),
         (
-            set_test_value(
+            (
                 pt.tensor(dtype=config.floatX, shape=(1, 1, 1), name="a"),
                 np.array([[[1.0]]], dtype=config.floatX),
             ),
@@ -208,16 +200,13 @@ def test_elemwise_speed(benchmark):
         ),
     ],
 )
-def test_Dimshuffle(v, new_order):
+def test_Dimshuffle(v, new_order, test_values):
+    v, v_test_value = v
     g = v.dimshuffle(new_order)
-    g_fg = FunctionGraph(outputs=[g])
     compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        [v],
+        [g],
+        [v_test_value],
     )
 
 
@@ -248,79 +237,68 @@ def test_Dimshuffle_non_contiguous():
                 axis=axis, dtype=dtype, acc_dtype=acc_dtype
             )(x),
             0,
-            set_test_value(pt.vector(), np.arange(3, dtype=config.floatX)),
+            (pt.vector(), np.arange(3, dtype=config.floatX)),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: All(axis)(x),
             0,
-            set_test_value(pt.vector(dtype="bool"), np.array([False, True, False])),
+            (pt.vector(dtype="bool"), np.array([False, True, False])),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Any(axis)(x),
             0,
-            set_test_value(pt.vector(dtype="bool"), np.array([False, True, False])),
+            (pt.vector(dtype="bool"), np.array([False, True, False])),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Sum(
                 axis=axis, dtype=dtype, acc_dtype=acc_dtype
             )(x),
             0,
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
+            (pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Sum(
                 axis=axis, dtype=dtype, acc_dtype=acc_dtype
             )(x),
             (0, 1),
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
+            (pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Sum(
                 axis=axis, dtype=dtype, acc_dtype=acc_dtype
             )(x),
             (1, 0),
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
+            (pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Sum(
                 axis=axis, dtype=dtype, acc_dtype=acc_dtype
             )(x),
             None,
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
+            (pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Sum(
                 axis=axis, dtype=dtype, acc_dtype=acc_dtype
             )(x),
             1,
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
+            (pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Prod(
                 axis=axis, dtype=dtype, acc_dtype=acc_dtype
             )(x),
             (),  # Empty axes would normally be rewritten away, but we want to test it still works
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
+            (pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Prod(
                 axis=axis, dtype=dtype, acc_dtype=acc_dtype
             )(x),
             None,
-            set_test_value(
-                pt.scalar(), np.array(99.0, dtype=config.floatX)
+            (
+                pt.scalar(),
+                np.array(99.0, dtype=config.floatX),
             ),  # Scalar input would normally be rewritten away, but we want to test it still works
         ),
         (
@@ -328,77 +306,62 @@ def test_Dimshuffle_non_contiguous():
                 axis=axis, dtype=dtype, acc_dtype=acc_dtype
             )(x),
             0,
-            set_test_value(pt.vector(), np.arange(3, dtype=config.floatX)),
+            (pt.vector(), np.arange(3, dtype=config.floatX)),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: ProdWithoutZeros(
                 axis=axis, dtype=dtype, acc_dtype=acc_dtype
             )(x),
             0,
-            set_test_value(pt.vector(), np.arange(3, dtype=config.floatX)),
+            (pt.vector(), np.arange(3, dtype=config.floatX)),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Prod(
                 axis=axis, dtype=dtype, acc_dtype=acc_dtype
             )(x),
             0,
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
+            (pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Prod(
                 axis=axis, dtype=dtype, acc_dtype=acc_dtype
             )(x),
             1,
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
+            (pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Max(axis)(x),
             None,
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
+            (pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Max(axis)(x),
             None,
-            set_test_value(
-                pt.lmatrix(), np.arange(3 * 2, dtype=np.int64).reshape((3, 2))
-            ),
+            (pt.lmatrix(), np.arange(3 * 2, dtype=np.int64).reshape((3, 2))),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Min(axis)(x),
             None,
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
+            (pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Min(axis)(x),
             None,
-            set_test_value(
-                pt.lmatrix(), np.arange(3 * 2, dtype=np.int64).reshape((3, 2))
-            ),
+            (pt.lmatrix(), np.arange(3 * 2, dtype=np.int64).reshape((3, 2))),
         ),
     ],
 )
 def test_CAReduce(careduce_fn, axis, v):
+    v, v_test_value = v
     g = careduce_fn(v, axis=axis)
-    g_fg = FunctionGraph(outputs=[g])
 
     fn, _ = compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        [v],
+        [g],
+        [v_test_value],
     )
     # Confirm CAReduce is in the compiled function
-    fn.dprint()
+    # fn.dprint()
     [node] = fn.maker.fgraph.apply_nodes
     assert isinstance(node.op, CAReduce)
 
@@ -406,102 +369,91 @@ def test_CAReduce(careduce_fn, axis, v):
 def test_scalar_Elemwise_Clip():
     a = pt.scalar("a")
     b = pt.scalar("b")
+    inputs = [a, b]
 
     z = pt.switch(1, a, b)
     c = pt.clip(z, 1, 3)
-    c_fg = FunctionGraph(outputs=[c])
 
-    compare_numba_and_py(c_fg, [1, 1])
+    compare_numba_and_py(inputs, [c], [1, 1])
 
 
 @pytest.mark.parametrize(
     "dy, sm, axis, exc",
     [
         (
-            set_test_value(
-                pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
-            ),
-            set_test_value(pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+            (pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)),
+            (pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
             None,
             None,
         ),
         (
-            set_test_value(
-                pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
-            ),
-            set_test_value(pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+            (pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)),
+            (pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
             0,
             None,
         ),
         (
-            set_test_value(
-                pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)
-            ),
-            set_test_value(pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+            (pt.matrix(), np.array([[1, 1, 1], [0, 0, 0]], dtype=config.floatX)),
+            (pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
             1,
             None,
         ),
     ],
 )
-def test_SoftmaxGrad(dy, sm, axis, exc):
+def test_SoftmaxGrad(dy, sm, axis, exc, test_values):
+    dy, dy_test_value = dy
+    sm, sm_test_value = sm
     g = SoftmaxGrad(axis=axis)(dy, sm)
-    g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            [dy, sm],
+            [g],
+            [dy_test_value, sm_test_value],
         )
 
 
 def test_SoftMaxGrad_constant_dy():
     dy = pt.constant(np.zeros((3,), dtype=config.floatX))
     sm = pt.vector(shape=(3,))
+    inputs = [sm]
 
     g = SoftmaxGrad(axis=None)(dy, sm)
-    g_fg = FunctionGraph(outputs=[g])
 
-    compare_numba_and_py(g_fg, [np.ones((3,), dtype=config.floatX)])
+    compare_numba_and_py(inputs, [g], [np.ones((3,), dtype=config.floatX)])
 
 
 @pytest.mark.parametrize(
     "x, axis, exc",
     [
         (
-            set_test_value(pt.vector(), rng.random(size=(2,)).astype(config.floatX)),
+            (pt.vector(), rng.random(size=(2,)).astype(config.floatX)),
             None,
             None,
         ),
         (
-            set_test_value(pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+            (pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
             None,
             None,
         ),
         (
-            set_test_value(pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+            (pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
             0,
             None,
         ),
     ],
 )
-def test_Softmax(x, axis, exc):
+def test_Softmax(x, axis, exc, test_values):
+    x, x_test_value = x
     g = Softmax(axis=axis)(x)
-    g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            [x],
+            [g],
+            [x_test_value],
         )
 
 
@@ -509,35 +461,32 @@ def test_Softmax(x, axis, exc):
     "x, axis, exc",
     [
         (
-            set_test_value(pt.vector(), rng.random(size=(2,)).astype(config.floatX)),
+            (pt.vector(), rng.random(size=(2,)).astype(config.floatX)),
             None,
             None,
         ),
         (
-            set_test_value(pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+            (pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
             0,
             None,
         ),
         (
-            set_test_value(pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+            (pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
             1,
             None,
         ),
     ],
 )
-def test_LogSoftmax(x, axis, exc):
+def test_LogSoftmax(x, axis, exc, test_values):
+    x, x_test_value = x
     g = LogSoftmax(axis=axis)(x)
-    g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            [x],
+            [g],
+            [x_test_value],
         )
 
 
@@ -545,44 +494,37 @@ def test_LogSoftmax(x, axis, exc):
     "x, axes, exc",
     [
         (
-            set_test_value(pt.dscalar(), np.array(0.0, dtype="float64")),
+            (pt.dscalar(), np.array(0.0, dtype="float64")),
             [],
             None,
         ),
         (
-            set_test_value(pt.dvector(), rng.random(size=(3,)).astype("float64")),
+            (pt.dvector(), rng.random(size=(3,)).astype("float64")),
             [0],
             None,
         ),
         (
-            set_test_value(pt.dmatrix(), rng.random(size=(3, 2)).astype("float64")),
+            (pt.dmatrix(), rng.random(size=(3, 2)).astype("float64")),
             [0],
             None,
         ),
         (
-            set_test_value(pt.dmatrix(), rng.random(size=(3, 2)).astype("float64")),
+            (pt.dmatrix(), rng.random(size=(3, 2)).astype("float64")),
             [0, 1],
             None,
         ),
     ],
 )
 def test_Max(x, axes, exc):
+    x, x_test_value = x
     g = ptm.Max(axes)(x)
-
-    if isinstance(g, list):
-        g_fg = FunctionGraph(outputs=g)
-    else:
-        g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            [x],
+            [g],
+            [x_test_value],
         )
 
 
@@ -590,44 +532,37 @@ def test_Max(x, axes, exc):
     "x, axes, exc",
     [
         (
-            set_test_value(pt.dscalar(), np.array(0.0, dtype="float64")),
+            (pt.dscalar(), np.array(0.0, dtype="float64")),
             [],
             None,
         ),
         (
-            set_test_value(pt.dvector(), rng.random(size=(3,)).astype("float64")),
+            (pt.dvector(), rng.random(size=(3,)).astype("float64")),
             [0],
             None,
         ),
         (
-            set_test_value(pt.dmatrix(), rng.random(size=(3, 2)).astype("float64")),
+            (pt.dmatrix(), rng.random(size=(3, 2)).astype("float64")),
             [0],
             None,
         ),
         (
-            set_test_value(pt.dmatrix(), rng.random(size=(3, 2)).astype("float64")),
+            (pt.dmatrix(), rng.random(size=(3, 2)).astype("float64")),
             [0, 1],
             None,
         ),
     ],
 )
-def test_Argmax(x, axes, exc):
+def test_Argmax(x, axes, exc, test_values):
+    x, x_test_value = x
     g = ptm.Argmax(axes)(x)
-
-    if isinstance(g, list):
-        g_fg = FunctionGraph(outputs=g)
-    else:
-        g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            [x],
+            [g],
+            [x_test_value],
         )
 
 
