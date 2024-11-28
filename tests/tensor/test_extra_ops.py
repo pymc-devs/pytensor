@@ -63,11 +63,6 @@ from pytensor.utils import LOCAL_BITWIDTH, PYTHON_INT_BITWIDTH
 from tests import unittest_tools as utt
 
 
-def set_test_value(x, v):
-    x.tag.test_value = v
-    return x
-
-
 def test_cpu_contiguous():
     a = fmatrix("a")
     i = iscalar("i")

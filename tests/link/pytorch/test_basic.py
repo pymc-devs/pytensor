@@ -9,10 +9,10 @@ import pytensor.tensor.basic as ptb
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
 from pytensor.compile.mode import PYTORCH, Mode
-from pytensor.compile.sharedvalue import SharedVariable, shared
+from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.graph import RewriteDatabaseQuery
-from pytensor.graph.basic import Apply
+from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.ifelse import ifelse
@@ -39,10 +39,10 @@ py_mode = Mode(linker="py", optimizer=None)
 
 
 def compare_pytorch_and_py(
-    fgraph: FunctionGraph,
+    graph_inputs: Iterable[Variable],
+    graph_outputs: Variable | Iterable[Variable],
     test_inputs: Iterable,
     assert_fn: Callable | None = None,
-    must_be_device_array: bool = True,
     pytorch_mode=pytorch_mode,
     py_mode=py_mode,
 ):
@@ -50,8 +50,10 @@ def compare_pytorch_and_py(
 
     Parameters
     ----------
-    fgraph: FunctionGraph
-        PyTensor function Graph object
+    graph_inputs
+        Symbolic inputs to the graph
+    graph_outputs:
+        Symbolic outputs of the graph
     test_inputs: iter
         Numerical inputs for testing the function graph
     assert_fn: func, opt
@@ -63,24 +65,22 @@ def compare_pytorch_and_py(
     if assert_fn is None:
         assert_fn = partial(np.testing.assert_allclose)
 
-    fn_inputs = [i for i in fgraph.inputs if not isinstance(i, SharedVariable)]
+    if any(inp.owner is not None for inp in graph_inputs):
+        raise ValueError("Inputs must be root variables")
 
-    pytensor_torch_fn = function(fn_inputs, fgraph.outputs, mode=pytorch_mode)
+    pytensor_torch_fn = function(graph_inputs, graph_outputs, mode=pytorch_mode)
     pytorch_res = pytensor_torch_fn(*test_inputs)
 
-    if isinstance(pytorch_res, list):
-        assert all(isinstance(res, np.ndarray) for res in pytorch_res)
-    else:
-        assert isinstance(pytorch_res, np.ndarray)
-
-    pytensor_py_fn = function(fn_inputs, fgraph.outputs, mode=py_mode)
+    pytensor_py_fn = function(graph_inputs, graph_outputs, mode=py_mode)
     py_res = pytensor_py_fn(*test_inputs)
 
-    if len(fgraph.outputs) > 1:
+    if isinstance(graph_outputs, list | tuple):
         for pytorch_res_i, py_res_i in zip(pytorch_res, py_res, strict=True):
+            assert not isinstance(pytorch_res_i, torch.Tensor)
             assert_fn(pytorch_res_i, py_res_i)
     else:
-        assert_fn(pytorch_res[0], py_res[0])
+        assert not isinstance(pytorch_res, torch.Tensor)
+        assert_fn(pytorch_res, py_res)
 
     return pytensor_torch_fn, pytorch_res
 
@@ -231,7 +231,8 @@ def test_alloc_and_empty():
     v = vector("v", shape=(3,), dtype="float64")
     out = alloc(v, dim0, dim1, 3)
     compare_pytorch_and_py(
-        FunctionGraph([v, dim1], [out]),
+        [v, dim1],
+        [out],
         [np.array([1, 2, 3]), np.array(7)],
     )
 
@@ -244,7 +245,8 @@ def test_arange():
     out = arange(start, stop, step, dtype="int16")
 
     compare_pytorch_and_py(
-        FunctionGraph([start, stop, step], [out]),
+        [start, stop, step],
+        [out],
         [np.array(1), np.array(10), np.array(2)],
     )
 
@@ -254,16 +256,18 @@ def test_pytorch_Join():
     b = matrix("b")
 
     x = ptb.join(0, a, b)
-    x_fg = FunctionGraph([a, b], [x])
+
     compare_pytorch_and_py(
-        x_fg,
+        [a, b],
+        [x],
         [
             np.c_[[1.0, 2.0, 3.0]].astype(config.floatX),
             np.c_[[4.0, 5.0, 6.0]].astype(config.floatX),
         ],
     )
     compare_pytorch_and_py(
-        x_fg,
+        [a, b],
+        [x],
         [
             np.c_[[1.0, 2.0, 3.0]].astype(config.floatX),
             np.c_[[4.0, 5.0]].astype(config.floatX),
@@ -271,16 +275,18 @@ def test_pytorch_Join():
     )
 
     x = ptb.join(1, a, b)
-    x_fg = FunctionGraph([a, b], [x])
+
     compare_pytorch_and_py(
-        x_fg,
+        [a, b],
+        [x],
         [
             np.c_[[1.0, 2.0, 3.0]].astype(config.floatX),
             np.c_[[4.0, 5.0, 6.0]].astype(config.floatX),
         ],
     )
     compare_pytorch_and_py(
-        x_fg,
+        [a, b],
+        [x],
         [
             np.c_[[1.0, 2.0], [3.0, 4.0]].astype(config.floatX),
             np.c_[[5.0, 6.0]].astype(config.floatX),
@@ -309,9 +315,8 @@ def test_eye(dtype):
 
 def test_pytorch_MakeVector():
     x = ptb.make_vector(1, 2, 3)
-    x_fg = FunctionGraph([], [x])
 
-    compare_pytorch_and_py(x_fg, [])
+    compare_pytorch_and_py([], [x], [])
 
 
 def test_pytorch_ifelse():
@@ -320,15 +325,13 @@ def test_pytorch_ifelse():
 
     a = scalar("a")
     x = ifelse(a < 0.5, tuple(np.r_[p1_vals, p2_vals]), tuple(np.r_[p2_vals, p1_vals]))
-    x_fg = FunctionGraph([a], x)
 
-    compare_pytorch_and_py(x_fg, np.array([0.2], dtype=config.floatX))
+    compare_pytorch_and_py([a], x, np.array([0.2], dtype=config.floatX))
 
     a = scalar("a")
     x = ifelse(a < 0.4, tuple(np.r_[p1_vals, p2_vals]), tuple(np.r_[p2_vals, p1_vals]))
-    x_fg = FunctionGraph([a], x)
 
-    compare_pytorch_and_py(x_fg, np.array([0.5], dtype=config.floatX))
+    compare_pytorch_and_py([a], x, np.array([0.5], dtype=config.floatX))
 
 
 def test_pytorch_OpFromGraph():
@@ -343,8 +346,7 @@ def test_pytorch_OpFromGraph():
     yv = np.ones((2, 2), dtype=config.floatX) * 3
     zv = np.ones((2, 2), dtype=config.floatX) * 5
 
-    f = FunctionGraph([x, y, z], [out])
-    compare_pytorch_and_py(f, [xv, yv, zv])
+    compare_pytorch_and_py([x, y, z], [out], [xv, yv, zv])
 
 
 def test_pytorch_link_references():
@@ -380,15 +382,13 @@ def test_pytorch_link_references():
 def test_pytorch_scipy():
     x = vector("a", shape=(3,))
     out = expit(x)
-    f = FunctionGraph([x], [out])
-    compare_pytorch_and_py(f, [np.random.rand(3)])
+    compare_pytorch_and_py([x], [out], [np.random.rand(3)])
 
 
 def test_pytorch_softplus():
     x = vector("a", shape=(3,))
     out = softplus(x)
-    f = FunctionGraph([x], [out])
-    compare_pytorch_and_py(f, [np.random.rand(3)])
+    compare_pytorch_and_py([x], [out], [np.random.rand(3)])
 
 
 def test_ScalarLoop():
@@ -436,13 +436,15 @@ def test_ScalarLoop_Elemwise_single_carries():
     x0 = pt.vector("x0", dtype="float32")
     state, done = op(n_steps, x0)
 
-    f = FunctionGraph([n_steps, x0], [state, done])
     args = [
         np.array(10).astype("int32"),
         np.arange(0, 5).astype("float32"),
     ]
     compare_pytorch_and_py(
-        f, args, assert_fn=partial(np.testing.assert_allclose, rtol=1e-6)
+        [n_steps, x0],
+        [state, done],
+        args,
+        assert_fn=partial(np.testing.assert_allclose, rtol=1e-6),
     )
 
 
@@ -462,14 +464,16 @@ def test_ScalarLoop_Elemwise_multi_carries():
     x1 = pt.tensor("c0", dtype="float32", shape=(7, 3, 1))
     *states, done = op(n_steps, x0, x1)
 
-    f = FunctionGraph([n_steps, x0, x1], [*states, done])
     args = [
         np.array(10).astype("int32"),
         np.arange(0, 5).astype("float32"),
         np.random.rand(7, 3, 1).astype("float32"),
     ]
     compare_pytorch_and_py(
-        f, args, assert_fn=partial(np.testing.assert_allclose, rtol=1e-6)
+        [n_steps, x0, x1],
+        [*states, done],
+        args,
+        assert_fn=partial(np.testing.assert_allclose, rtol=1e-6),
     )
 
 
@@ -518,6 +522,5 @@ def test_Split(n_splits, axis, values, sizes):
     assert len(g) == n_splits
     if n_splits == 0:
         return
-    g_fg = FunctionGraph(inputs=[i, s], outputs=[g] if n_splits == 1 else g)
 
-    compare_pytorch_and_py(g_fg, [values, sizes])
+    compare_pytorch_and_py([i, s], g, [values, sizes])

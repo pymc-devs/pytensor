@@ -5,7 +5,6 @@ import pytensor
 import pytensor.tensor as pt
 from pytensor import config, function, grad
 from pytensor.compile.mode import Mode, get_mode
-from pytensor.graph.fg import FunctionGraph
 from pytensor.scalar import Log1p
 from pytensor.scan.basic import scan
 from pytensor.scan.op import Scan
@@ -147,7 +146,7 @@ def test_xit_xot_types(
 
     if output_vals is None:
         compare_numba_and_py(
-            (sequences + non_sequences, res), input_vals, updates=updates
+            sequences + non_sequences, res, input_vals, updates=updates
         )
     else:
         numba_mode = get_mode("NUMBA")
@@ -217,10 +216,7 @@ def test_scan_multiple_output(benchmark):
     logp_c_all.name = "C_t_logp"
     logp_d_all.name = "D_t_logp"
 
-    out_fg = FunctionGraph(
-        [pt_C, pt_D, st0, et0, it0, logp_c, logp_d, beta, gamma, delta],
-        [st, et, it, logp_c_all, logp_d_all],
-    )
+    out = [st, et, it, logp_c_all, logp_d_all]
 
     s0, e0, i0 = 100, 50, 25
     logp_c0 = np.array(0.0, dtype=config.floatX)
@@ -243,21 +239,21 @@ def test_scan_multiple_output(benchmark):
         gamma_val,
         delta_val,
     ]
-    scan_fn, _ = compare_numba_and_py(out_fg, test_input_vals)
+    scan_fn, _ = compare_numba_and_py(
+        [pt_C, pt_D, st0, et0, it0, logp_c, logp_d, beta, gamma, delta],
+        out,
+        test_input_vals,
+    )
 
     benchmark(scan_fn, *test_input_vals)
 
 
-@config.change_flags(compute_test_value="raise")
 def test_scan_tap_output():
     a_pt = pt.scalar("a")
-    a_pt.tag.test_value = 10.0
 
-    b_pt = pt.arange(11).astype(config.floatX)
-    b_pt.name = "b"
+    b_pt = pt.vector("b")
 
-    c_pt = pt.arange(20, 31, dtype=config.floatX)
-    c_pt.name = "c"
+    c_pt = pt.vector("c")
 
     def input_step_fn(b, b2, c, x_tm1, y_tm1, y_tm3, a):
         x_tm1.name = "x_tm1"
@@ -301,14 +297,12 @@ def test_scan_tap_output():
         strict=True,
     )
 
-    out_fg = FunctionGraph([a_pt, b_pt, c_pt], scan_res)
-
     test_input_vals = [
         np.array(10.0).astype(config.floatX),
         np.arange(11, dtype=config.floatX),
         np.arange(20, 31, dtype=config.floatX),
     ]
-    compare_numba_and_py(out_fg, test_input_vals)
+    compare_numba_and_py([a_pt, b_pt, c_pt], scan_res, test_input_vals)
 
 
 def test_scan_while():
@@ -323,12 +317,10 @@ def test_scan_while():
         n_steps=1024,
     )
 
-    out_fg = FunctionGraph([max_value], [values])
-
     test_input_vals = [
         np.array(45).astype(config.floatX),
     ]
-    compare_numba_and_py(out_fg, test_input_vals)
+    compare_numba_and_py([max_value], [values], test_input_vals)
 
 
 def test_scan_multiple_none_output():
@@ -343,11 +335,8 @@ def test_scan_multiple_none_output():
         outputs_info=[pt.ones_like(A), None, None],
         n_steps=3,
     )
-
-    out_fg = FunctionGraph([A], result)
     test_input_vals = (np.array([1.0, 2.0]),)
-
-    compare_numba_and_py(out_fg, test_input_vals)
+    compare_numba_and_py([A], result, test_input_vals)
 
 
 @pytest.mark.parametrize("n_steps_val", [1, 5])
@@ -372,11 +361,14 @@ def test_scan_save_mem_basic(n_steps_val):
     numba_mode = get_mode("NUMBA").including("scan_save_mem")
     py_mode = Mode("py").including("scan_save_mem")
 
-    out_fg = FunctionGraph([init_x, n_steps], [output])
     test_input_vals = (state_val, n_steps_val)
 
     compare_numba_and_py(
-        out_fg, test_input_vals, numba_mode=numba_mode, py_mode=py_mode
+        [init_x, n_steps],
+        [output],
+        test_input_vals,
+        numba_mode=numba_mode,
+        py_mode=py_mode,
     )
 
 
@@ -410,14 +402,12 @@ def test_mitmots_basic():
     numba_mode = get_mode("NUMBA").including("scan_save_mem")
     py_mode = Mode("py").including("scan_save_mem")
 
-    out_fg = FunctionGraph([seq, init_x], g_outs)
-
     seq_val = np.arange(3)
     init_x_val = np.r_[-2, -1]
     test_input_vals = (seq_val, init_x_val)
 
     compare_numba_and_py(
-        out_fg, test_input_vals, numba_mode=numba_mode, py_mode=py_mode
+        [seq, init_x], g_outs, test_input_vals, numba_mode=numba_mode, py_mode=py_mode
     )
 
 

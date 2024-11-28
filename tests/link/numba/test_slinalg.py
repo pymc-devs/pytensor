@@ -9,14 +9,14 @@ from scipy import linalg as scipy_linalg
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor.graph import FunctionGraph
+from pytensor import config
 from tests import unittest_tools as utt
 from tests.link.numba.test_basic import compare_numba_and_py
 
 
 numba = pytest.importorskip("numba")
 
-floatX = pytensor.config.floatX
+floatX = config.floatX
 
 rng = np.random.default_rng(42849)
 
@@ -88,7 +88,12 @@ def test_solve_triangular(b_shape: tuple[int], lower, trans, unit_diag, is_compl
 
     np.testing.assert_allclose(test_input @ X_np, b_val, atol=ATOL, rtol=RTOL)
 
-    compare_numba_and_py(f.maker.fgraph, [A_func(A_val.copy()), b_val.copy()])
+    compiled_fgraph = f.maker.fgraph
+    compare_numba_and_py(
+        compiled_fgraph.inputs,
+        compiled_fgraph.outputs,
+        [A_func(A_val.copy()), b_val.copy()],
+    )
 
 
 @pytest.mark.parametrize(
@@ -159,12 +164,10 @@ def test_numba_Cholesky(lower, trans):
         cov_ = cov
     chol = pt.linalg.cholesky(cov_, lower=lower)
 
-    fg = FunctionGraph(outputs=[chol])
-
     x = np.array([0.1, 0.2, 0.3]).astype(floatX)
     val = np.eye(3).astype(floatX) + x[None, :] * x[:, None]
 
-    compare_numba_and_py(fg, [val])
+    compare_numba_and_py([cov], [chol], [val])
 
 
 def test_numba_Cholesky_raises_on_nan_input():
@@ -218,8 +221,7 @@ def test_block_diag():
     B_val = np.random.normal(size=(3, 3)).astype(floatX)
     C_val = np.random.normal(size=(2, 2)).astype(floatX)
     D_val = np.random.normal(size=(4, 4)).astype(floatX)
-    out_fg = pytensor.graph.FunctionGraph([A, B, C, D], [X])
-    compare_numba_and_py(out_fg, [A_val, B_val, C_val, D_val])
+    compare_numba_and_py([A, B, C, D], [X], [A_val, B_val, C_val, D_val])
 
 
 def test_lamch():
@@ -390,7 +392,7 @@ def test_solve(b_shape: tuple[int], assume_a: Literal["gen", "sym", "pos"]):
     )
     op = f.maker.fgraph.outputs[0].owner.op
 
-    compare_numba_and_py(([A, b], [X]), inputs=[A_val, b_val], inplace=True)
+    compare_numba_and_py([A, b], [X], test_inputs=[A_val, b_val], inplace=True)
 
     # Calling this is destructive and will rewrite b_val to be the answer. Store copies of the inputs first.
     A_val_copy = A_val.copy()

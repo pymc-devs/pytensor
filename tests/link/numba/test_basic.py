@@ -1,6 +1,6 @@
 import contextlib
 import inspect
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 from unittest import mock
 
@@ -21,10 +21,8 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
 from pytensor.compile.ops import ViewOp
-from pytensor.compile.sharedvalue import SharedVariable
-from pytensor.graph.basic import Apply, Constant
-from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import Op, get_test_value
+from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.op import Op
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.type import Type
 from pytensor.ifelse import ifelse
@@ -39,7 +37,6 @@ from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 
 if TYPE_CHECKING:
     from pytensor.graph.basic import Variable
-    from pytensor.tensor import TensorLike
 
 
 class MyType(Type):
@@ -126,11 +123,6 @@ numba_mode = Mode(
 py_mode = Mode("py", opts)
 
 rng = np.random.default_rng(42849)
-
-
-def set_test_value(x, v):
-    x.tag.test_value = v
-    return x
 
 
 def compare_shape_dtype(x, y):
@@ -225,28 +217,30 @@ def eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode):
 
 
 def compare_numba_and_py(
-    fgraph: FunctionGraph | tuple[Sequence["Variable"], Sequence["Variable"]],
-    inputs: Sequence["TensorLike"],
-    assert_fn: Callable | None = None,
+    graph_inputs: Iterable[Variable],
+    graph_outputs: Variable | Iterable[Variable],
+    test_inputs: Iterable,
     *,
+    assert_fn: Callable | None = None,
     numba_mode=numba_mode,
     py_mode=py_mode,
     updates=None,
     inplace: bool = False,
     eval_obj_mode: bool = True,
 ) -> tuple[Callable, Any]:
-    """Function to compare python graph output and Numba compiled output for testing equality
+    """Function to compare python function output and Numba compiled output for testing equality
 
-    In the tests below computational graphs are defined in PyTensor. These graphs are then passed to
-    this function which then compiles the graphs in both Numba and python, runs the calculation
-    in both and checks if the results are the same
+    The inputs and outputs are then passed to this function which then compiles the given function in both
+    numba and python, runs the calculation in both and checks if the results are the same
 
     Parameters
     ----------
-    fgraph
-        `FunctionGraph` or tuple(inputs, outputs) to compare.
-    inputs
-        Numeric inputs to be passed to the compiled graphs.
+    graph_inputs:
+        Symbolic inputs to the graph
+    graph_outputs:
+        Symbolic outputs of the graph
+    test_inputs
+        Numerical inputs with which to evaluate the graph.
     assert_fn
         Assert function used to check for equality between python and Numba. If not
         provided uses `np.testing.assert_allclose`.
@@ -267,42 +261,38 @@ def compare_numba_and_py(
                 x, y
             )
 
-    if isinstance(fgraph, FunctionGraph):
-        fn_inputs = fgraph.inputs
-        fn_outputs = fgraph.outputs
-    else:
-        fn_inputs, fn_outputs = fgraph
-
-    fn_inputs = [i for i in fn_inputs if not isinstance(i, SharedVariable)]
+    if any(inp.owner is not None for inp in graph_inputs):
+        raise ValueError("Inputs must be root variables")
 
     pytensor_py_fn = function(
-        fn_inputs, fn_outputs, mode=py_mode, accept_inplace=True, updates=updates
+        graph_inputs, graph_outputs, mode=py_mode, accept_inplace=True, updates=updates
     )
 
-    test_inputs = (inp.copy() for inp in inputs) if inplace else inputs
-    py_res = pytensor_py_fn(*test_inputs)
+    test_inputs_copy = (inp.copy() for inp in test_inputs) if inplace else test_inputs
+    py_res = pytensor_py_fn(*test_inputs_copy)
 
     # Get some coverage (and catch errors in python mode before unreadable numba ones)
     if eval_obj_mode:
-        test_inputs = (inp.copy() for inp in inputs) if inplace else inputs
-        eval_python_only(fn_inputs, fn_outputs, test_inputs, mode=numba_mode)
+        test_inputs_copy = (
+            (inp.copy() for inp in test_inputs) if inplace else test_inputs
+        )
+        eval_python_only(graph_inputs, graph_outputs, test_inputs_copy, mode=numba_mode)
 
     pytensor_numba_fn = function(
-        fn_inputs,
-        fn_outputs,
+        graph_inputs,
+        graph_outputs,
         mode=numba_mode,
         accept_inplace=True,
         updates=updates,
     )
+    test_inputs_copy = (inp.copy() for inp in test_inputs) if inplace else test_inputs
+    numba_res = pytensor_numba_fn(*test_inputs_copy)
 
-    test_inputs = (inp.copy() for inp in inputs) if inplace else inputs
-    numba_res = pytensor_numba_fn(*test_inputs)
-
-    if len(fn_outputs) > 1:
+    if isinstance(graph_outputs, tuple | list):
         for j, p in zip(numba_res, py_res, strict=True):
             assert_fn(j, p)
     else:
-        assert_fn(numba_res[0], py_res[0])
+        assert_fn(numba_res, py_res)
 
     return pytensor_numba_fn, numba_res
 
@@ -380,53 +370,53 @@ def test_create_numba_signature(v, expected, force_scalar):
 )
 def test_Shape(x, i):
     g = Shape()(pt.as_tensor_variable(x))
-    g_fg = FunctionGraph([], [g])
 
-    compare_numba_and_py(g_fg, [])
+    compare_numba_and_py([], [g], [])
 
     g = Shape_i(i)(pt.as_tensor_variable(x))
-    g_fg = FunctionGraph([], [g])
 
-    compare_numba_and_py(g_fg, [])
+    compare_numba_and_py([], [g], [])
 
 
 @pytest.mark.parametrize(
     "v, shape, ndim",
     [
-        (set_test_value(pt.vector(), np.array([4], dtype=config.floatX)), (), 0),
-        (set_test_value(pt.vector(), np.arange(4, dtype=config.floatX)), (2, 2), 2),
+        ((pt.vector(), np.array([4], dtype=config.floatX)), ((), None), 0),
+        ((pt.vector(), np.arange(4, dtype=config.floatX)), ((2, 2), None), 2),
         (
-            set_test_value(pt.vector(), np.arange(4, dtype=config.floatX)),
-            set_test_value(pt.lvector(), np.array([2, 2], dtype="int64")),
+            (pt.vector(), np.arange(4, dtype=config.floatX)),
+            (pt.lvector(), np.array([2, 2], dtype="int64")),
             2,
         ),
     ],
 )
 def test_Reshape(v, shape, ndim):
+    v, v_test_value = v
+    shape, shape_test_value = shape
+
     g = Reshape(ndim)(v, shape)
-    g_fg = FunctionGraph(outputs=[g])
+    inputs = [v] if not isinstance(shape, Variable) else [v, shape]
+    test_values = (
+        [v_test_value]
+        if not isinstance(shape, Variable)
+        else [v_test_value, shape_test_value]
+    )
     compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        inputs,
+        [g],
+        test_values,
     )
 
 
 def test_Reshape_scalar():
     v = pt.vector()
-    v.tag.test_value = np.array([1.0], dtype=config.floatX)
+    v_test_value = np.array([1.0], dtype=config.floatX)
     g = Reshape(1)(v[0], (1,))
-    g_fg = FunctionGraph(outputs=[g])
+
     compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        [v],
+        g,
+        [v_test_value],
     )
 
 
@@ -434,53 +424,44 @@ def test_Reshape_scalar():
     "v, shape, fails",
     [
         (
-            set_test_value(pt.matrix(), np.array([[1.0]], dtype=config.floatX)),
+            (pt.matrix(), np.array([[1.0]], dtype=config.floatX)),
             (1, 1),
             False,
         ),
         (
-            set_test_value(pt.matrix(), np.array([[1.0, 2.0]], dtype=config.floatX)),
+            (pt.matrix(), np.array([[1.0, 2.0]], dtype=config.floatX)),
             (1, 1),
             True,
         ),
         (
-            set_test_value(pt.matrix(), np.array([[1.0, 2.0]], dtype=config.floatX)),
+            (pt.matrix(), np.array([[1.0, 2.0]], dtype=config.floatX)),
             (1, None),
             False,
         ),
     ],
 )
 def test_SpecifyShape(v, shape, fails):
+    v, v_test_value = v
     g = SpecifyShape()(v, *shape)
-    g_fg = FunctionGraph(outputs=[g])
     cm = contextlib.suppress() if not fails else pytest.raises(AssertionError)
+
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            [v],
+            [g],
+            [v_test_value],
         )
 
 
-@pytest.mark.parametrize(
-    "v",
-    [
-        set_test_value(pt.vector(), np.arange(4, dtype=config.floatX)),
-    ],
-)
-def test_ViewOp(v):
+def test_ViewOp():
+    v = pt.vector()
+    v_test_value = np.arange(4, dtype=config.floatX)
     g = ViewOp()(v)
-    g_fg = FunctionGraph(outputs=[g])
+
     compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        [v],
+        [g],
+        [v_test_value],
     )
 
 
@@ -489,20 +470,16 @@ def test_ViewOp(v):
     [
         (
             [
-                set_test_value(
-                    pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)
-                ),
-                set_test_value(pt.lmatrix(), rng.poisson(size=(2, 3))),
+                (pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+                (pt.lmatrix(), rng.poisson(size=(2, 3))),
             ],
             MySingleOut,
             UserWarning,
         ),
         (
             [
-                set_test_value(
-                    pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)
-                ),
-                set_test_value(pt.lmatrix(), rng.poisson(size=(2, 3))),
+                (pt.matrix(), rng.random(size=(2, 3)).astype(config.floatX)),
+                (pt.lmatrix(), rng.poisson(size=(2, 3))),
             ],
             MyMultiOut,
             UserWarning,
@@ -510,38 +487,32 @@ def test_ViewOp(v):
     ],
 )
 def test_perform(inputs, op, exc):
+    inputs, test_values = zip(*inputs, strict=True)
     g = op()(*inputs)
 
     if isinstance(g, list):
-        g_fg = FunctionGraph(outputs=g)
+        outputs = g
     else:
-        g_fg = FunctionGraph(outputs=[g])
+        outputs = [g]
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            inputs,
+            outputs,
+            test_values,
         )
 
 
 def test_perform_params():
     """This tests for `Op.perform` implementations that require the `params` arguments."""
 
-    x = pt.vector()
-    x.tag.test_value = np.array([1.0, 2.0], dtype=config.floatX)
+    x = pt.vector(shape=(2,))
+    x_test_value = np.array([1.0, 2.0], dtype=config.floatX)
 
     out = assert_op(x, np.array(True))
 
-    if not isinstance(out, list | tuple):
-        out = [out]
-
-    out_fg = FunctionGraph([x], out)
-    compare_numba_and_py(out_fg, [get_test_value(i) for i in out_fg.inputs])
+    compare_numba_and_py([x], out, [x_test_value])
 
 
 def test_perform_type_convert():
@@ -552,59 +523,50 @@ def test_perform_type_convert():
     """
 
     x = pt.vector()
-    x.tag.test_value = np.array([1.0, 2.0], dtype=config.floatX)
+    x_test_value = np.array([1.0, 2.0], dtype=config.floatX)
 
     out = assert_op(x.sum(), np.array(True))
 
-    if not isinstance(out, list | tuple):
-        out = [out]
-
-    out_fg = FunctionGraph([x], out)
-    compare_numba_and_py(out_fg, [get_test_value(i) for i in out_fg.inputs])
+    compare_numba_and_py([x], out, [x_test_value])
 
 
 @pytest.mark.parametrize(
     "x, y, exc",
     [
         (
-            set_test_value(pt.matrix(), rng.random(size=(3, 2)).astype(config.floatX)),
-            set_test_value(pt.vector(), rng.random(size=(2,)).astype(config.floatX)),
+            (pt.matrix(), rng.random(size=(3, 2)).astype(config.floatX)),
+            (pt.vector(), rng.random(size=(2,)).astype(config.floatX)),
             None,
         ),
         (
-            set_test_value(
-                pt.matrix(dtype="float64"), rng.random(size=(3, 2)).astype("float64")
-            ),
-            set_test_value(
-                pt.vector(dtype="float32"), rng.random(size=(2,)).astype("float32")
-            ),
+            (pt.matrix(dtype="float64"), rng.random(size=(3, 2)).astype("float64")),
+            (pt.vector(dtype="float32"), rng.random(size=(2,)).astype("float32")),
             None,
         ),
         (
-            set_test_value(pt.lmatrix(), rng.poisson(size=(3, 2))),
-            set_test_value(pt.fvector(), rng.random(size=(2,)).astype("float32")),
+            (pt.lmatrix(), rng.poisson(size=(3, 2))),
+            (pt.fvector(), rng.random(size=(2,)).astype("float32")),
             None,
         ),
         (
-            set_test_value(pt.lvector(), rng.random(size=(2,)).astype(np.int64)),
-            set_test_value(pt.lvector(), rng.random(size=(2,)).astype(np.int64)),
+            (pt.lvector(), rng.random(size=(2,)).astype(np.int64)),
+            (pt.lvector(), rng.random(size=(2,)).astype(np.int64)),
             None,
         ),
     ],
 )
 def test_Dot(x, y, exc):
+    x, x_test_value = x
+    y, y_test_value = y
+
     g = ptm.Dot()(x, y)
-    g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            [x, y],
+            [g],
+            [x_test_value, y_test_value],
         )
 
 
@@ -612,44 +574,41 @@ def test_Dot(x, y, exc):
     "x, exc",
     [
         (
-            set_test_value(ps.float64(), np.array(0.0, dtype="float64")),
+            (ps.float64(), np.array(0.0, dtype="float64")),
             None,
         ),
         (
-            set_test_value(ps.float64(), np.array(-32.0, dtype="float64")),
+            (ps.float64(), np.array(-32.0, dtype="float64")),
             None,
         ),
         (
-            set_test_value(ps.float64(), np.array(-40.0, dtype="float64")),
+            (ps.float64(), np.array(-40.0, dtype="float64")),
             None,
         ),
         (
-            set_test_value(ps.float64(), np.array(32.0, dtype="float64")),
+            (ps.float64(), np.array(32.0, dtype="float64")),
             None,
         ),
         (
-            set_test_value(ps.float64(), np.array(40.0, dtype="float64")),
+            (ps.float64(), np.array(40.0, dtype="float64")),
             None,
         ),
         (
-            set_test_value(ps.int64(), np.array(32, dtype="int64")),
+            (ps.int64(), np.array(32, dtype="int64")),
             None,
         ),
     ],
 )
 def test_Softplus(x, exc):
+    x, x_test_value = x
     g = psm.Softplus(ps.upgrade_to_float)(x)
-    g_fg = FunctionGraph(outputs=[g])
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            [x],
+            [g],
+            [x_test_value],
         )
 
 
@@ -657,22 +616,22 @@ def test_Softplus(x, exc):
     "x, y, exc",
     [
         (
-            set_test_value(
+            (
                 pt.dtensor3(),
                 rng.random(size=(2, 3, 3)).astype("float64"),
             ),
-            set_test_value(
+            (
                 pt.dtensor3(),
                 rng.random(size=(2, 3, 3)).astype("float64"),
             ),
             None,
         ),
         (
-            set_test_value(
+            (
                 pt.dtensor3(),
                 rng.random(size=(2, 3, 3)).astype("float64"),
             ),
-            set_test_value(
+            (
                 pt.ltensor3(),
                 rng.poisson(size=(2, 3, 3)).astype("int64"),
             ),
@@ -681,22 +640,17 @@ def test_Softplus(x, exc):
     ],
 )
 def test_BatchedDot(x, y, exc):
-    g = blas.BatchedDot()(x, y)
+    x, x_test_value = x
+    y, y_test_value = y
 
-    if isinstance(g, list):
-        g_fg = FunctionGraph(outputs=g)
-    else:
-        g_fg = FunctionGraph(outputs=[g])
+    g = blas.BatchedDot()(x, y)
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            [x, y],
+            g,
+            [x_test_value, y_test_value],
         )
 
 
@@ -767,15 +721,15 @@ y = np.array(
     [
         ([], lambda: np.array(True), np.r_[1, 2, 3], np.r_[-1, -2, -3]),
         (
-            [set_test_value(pt.dscalar(), np.array(0.2, dtype=np.float64))],
+            [(pt.dscalar(), np.array(0.2, dtype=np.float64))],
             lambda x: x < 0.5,
             np.r_[1, 2, 3],
             np.r_[-1, -2, -3],
         ),
         (
             [
-                set_test_value(pt.dscalar(), np.array(0.3, dtype=np.float64)),
-                set_test_value(pt.dscalar(), np.array(0.5, dtype=np.float64)),
+                (pt.dscalar(), np.array(0.3, dtype=np.float64)),
+                (pt.dscalar(), np.array(0.5, dtype=np.float64)),
             ],
             lambda x, y: x > y,
             x,
@@ -783,8 +737,8 @@ y = np.array(
         ),
         (
             [
-                set_test_value(pt.dvector(), np.array([0.3, 0.1], dtype=np.float64)),
-                set_test_value(pt.dvector(), np.array([0.5, 0.9], dtype=np.float64)),
+                (pt.dvector(), np.array([0.3, 0.1], dtype=np.float64)),
+                (pt.dvector(), np.array([0.5, 0.9], dtype=np.float64)),
             ],
             lambda x, y: pt.all(x > y),
             x,
@@ -792,8 +746,8 @@ y = np.array(
         ),
         (
             [
-                set_test_value(pt.dvector(), np.array([0.3, 0.1], dtype=np.float64)),
-                set_test_value(pt.dvector(), np.array([0.5, 0.9], dtype=np.float64)),
+                (pt.dvector(), np.array([0.3, 0.1], dtype=np.float64)),
+                (pt.dvector(), np.array([0.5, 0.9], dtype=np.float64)),
             ],
             lambda x, y: pt.all(x > y),
             [x, 2 * x],
@@ -801,8 +755,8 @@ y = np.array(
         ),
         (
             [
-                set_test_value(pt.dvector(), np.array([0.5, 0.9], dtype=np.float64)),
-                set_test_value(pt.dvector(), np.array([0.3, 0.1], dtype=np.float64)),
+                (pt.dvector(), np.array([0.5, 0.9], dtype=np.float64)),
+                (pt.dvector(), np.array([0.3, 0.1], dtype=np.float64)),
             ],
             lambda x, y: pt.all(x > y),
             [x, 2 * x],
@@ -811,14 +765,9 @@ y = np.array(
     ],
 )
 def test_IfElse(inputs, cond_fn, true_vals, false_vals):
+    inputs, test_values = zip(*inputs, strict=True) if inputs else ([], [])
     out = ifelse(cond_fn(*inputs), true_vals, false_vals)
-
-    if not isinstance(out, list):
-        out = [out]
-
-    out_fg = FunctionGraph(inputs, out)
-
-    compare_numba_and_py(out_fg, [get_test_value(i) for i in out_fg.inputs])
+    compare_numba_and_py(inputs, out, test_values)
 
 
 @pytest.mark.xfail(reason="https://github.com/numba/numba/issues/7409")
@@ -883,7 +832,7 @@ def test_OpFromGraph():
     yv = np.ones((2, 2), dtype=config.floatX) * 3
     zv = np.ones((2, 2), dtype=config.floatX) * 5
 
-    compare_numba_and_py(((x, y, z), (out,)), [xv, yv, zv])
+    compare_numba_and_py([x, y, z], [out], [xv, yv, zv])
 
 
 @pytest.mark.filterwarnings("error")

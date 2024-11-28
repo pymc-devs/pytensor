@@ -7,13 +7,11 @@ import pytensor.tensor as pt
 import pytensor.tensor.random.basic as ptr
 from pytensor import clone_replace
 from pytensor.compile.function import function
-from pytensor.compile.sharedvalue import SharedVariable, shared
-from pytensor.graph.basic import Constant
-from pytensor.graph.fg import FunctionGraph
+from pytensor.compile.sharedvalue import shared
 from pytensor.tensor.random.basic import RandomVariable
 from pytensor.tensor.random.type import RandomType
 from pytensor.tensor.random.utils import RandomStream
-from tests.link.jax.test_basic import compare_jax_and_py, jax_mode, set_test_value
+from tests.link.jax.test_basic import compare_jax_and_py, jax_mode
 from tests.tensor.random.test_basic import (
     batched_permutation_tester,
     batched_unweighted_choice_without_replacement_tester,
@@ -147,11 +145,11 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.beta,
             [
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
-                set_test_value(
+                (
                     pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
@@ -163,11 +161,11 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.cauchy,
             [
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
-                set_test_value(
+                (
                     pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
@@ -179,7 +177,7 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.exponential,
             [
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
@@ -191,11 +189,11 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr._gamma,
             [
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([0.5, 3.0], dtype=np.float64),
                 ),
@@ -207,11 +205,11 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.gumbel,
             [
-                set_test_value(
+                (
                     pt.lvector(),
                     np.array([1, 2], dtype=np.int64),
                 ),
-                set_test_value(
+                (
                     pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
@@ -223,8 +221,8 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.laplace,
             [
-                set_test_value(pt.dvector(), np.array([1.0, 2.0], dtype=np.float64)),
-                set_test_value(pt.dscalar(), np.array(1.0, dtype=np.float64)),
+                (pt.dvector(), np.array([1.0, 2.0], dtype=np.float64)),
+                (pt.dscalar(), np.array(1.0, dtype=np.float64)),
             ],
             (2,),
             "laplace",
@@ -233,11 +231,11 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.logistic,
             [
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
-                set_test_value(
+                (
                     pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
@@ -249,11 +247,11 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.lognormal,
             [
-                set_test_value(
+                (
                     pt.lvector(),
                     np.array([0, 0], dtype=np.int64),
                 ),
-                set_test_value(
+                (
                     pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
@@ -265,11 +263,11 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.normal,
             [
-                set_test_value(
+                (
                     pt.lvector(),
                     np.array([1, 2], dtype=np.int64),
                 ),
-                set_test_value(
+                (
                     pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
@@ -281,11 +279,11 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.pareto,
             [
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([2.0, 10.0], dtype=np.float64),
                 ),
@@ -297,7 +295,7 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.poisson,
             [
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([100000.0, 200000.0], dtype=np.float64),
                 ),
@@ -309,11 +307,11 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.integers,
             [
-                set_test_value(
+                (
                     pt.lscalar(),
                     np.array(0, dtype=np.int64),
                 ),
-                set_test_value(  # high-value necessary since test on cdf
+                (  # high-value necessary since test on cdf
                     pt.lscalar(),
                     np.array(1000, dtype=np.int64),
                 ),
@@ -332,15 +330,15 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.t,
             [
-                set_test_value(
+                (
                     pt.dscalar(),
                     np.array(2.0, dtype=np.float64),
                 ),
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
-                set_test_value(
+                (
                     pt.dscalar(),
                     np.array(1.0, dtype=np.float64),
                 ),
@@ -352,11 +350,11 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.uniform,
             [
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([1.0, 2.0], dtype=np.float64),
                 ),
-                set_test_value(
+                (
                     pt.dscalar(),
                     np.array(1000.0, dtype=np.float64),
                 ),
@@ -368,11 +366,11 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.halfnormal,
             [
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([-1.0, 200.0], dtype=np.float64),
                 ),
-                set_test_value(
+                (
                     pt.dscalar(),
                     np.array(1000.0, dtype=np.float64),
                 ),
@@ -384,11 +382,11 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.invgamma,
             [
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([10.4, 2.8], dtype=np.float64),
                 ),
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([3.4, 7.3], dtype=np.float64),
                 ),
@@ -400,7 +398,7 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.chisquare,
             [
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([2.4, 4.9], dtype=np.float64),
                 ),
@@ -412,15 +410,15 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.gengamma,
             [
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([10.4, 2.8], dtype=np.float64),
                 ),
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([3.4, 7.3], dtype=np.float64),
                 ),
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([0.9, 2.0], dtype=np.float64),
                 ),
@@ -432,11 +430,11 @@ def test_replaced_shared_rng_storage_ordering_equality():
         (
             ptr.wald,
             [
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([10.4, 2.8], dtype=np.float64),
                 ),
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([4.5, 2.0], dtype=np.float64),
                 ),
@@ -449,11 +447,11 @@ def test_replaced_shared_rng_storage_ordering_equality():
         pytest.param(
             ptr.vonmises,
             [
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([-0.5, 1.3], dtype=np.float64),
                 ),
-                set_test_value(
+                (
                     pt.dvector(),
                     np.array([5.5, 13.0], dtype=np.float64),
                 ),
@@ -478,20 +476,16 @@ def test_random_RandomVariable(rv_op, dist_params, base_size, cdf_name, params_c
         The transpiled `RandomVariable` `Op`.
     dist_params
         The parameters passed to the op.
-
     """
+    dist_params, test_values = (
+        zip(*dist_params, strict=True) if dist_params else ([], [])
+    )
     rng = shared(np.random.default_rng(29403))
     g = rv_op(*dist_params, size=(10000, *base_size), rng=rng)
     g_fn = compile_random_function(dist_params, g, mode=jax_mode)
-    samples = g_fn(
-        *[
-            i.tag.test_value
-            for i in g_fn.maker.fgraph.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ]
-    )
+    samples = g_fn(*test_values)
 
-    bcast_dist_args = np.broadcast_arrays(*[i.tag.test_value for i in dist_params])
+    bcast_dist_args = np.broadcast_arrays(*test_values)
 
     for idx in np.ndindex(*base_size):
         cdf_params = params_conv(*(arg[idx] for arg in bcast_dist_args))
@@ -775,13 +769,12 @@ def test_random_unimplemented():
     nonexistentrv = NonExistentRV()
     rng = shared(np.random.default_rng(123))
     out = nonexistentrv(rng=rng)
-    fgraph = FunctionGraph([out.owner.inputs[0]], [out], clone=False)
 
     with pytest.raises(NotImplementedError):
         with pytest.warns(
             UserWarning, match=r"The RandomType SharedVariables \[.+\] will not be used"
         ):
-            compare_jax_and_py(fgraph, [])
+            compare_jax_and_py([], [out], [])
 
 
 def test_random_custom_implementation():
@@ -810,11 +803,10 @@ def test_random_custom_implementation():
     nonexistentrv = CustomRV()
     rng = shared(np.random.default_rng(123))
     out = nonexistentrv(rng=rng)
-    fgraph = FunctionGraph([out.owner.inputs[0]], [out], clone=False)
     with pytest.warns(
         UserWarning, match=r"The RandomType SharedVariables \[.+\] will not be used"
     ):
-        compare_jax_and_py(fgraph, [])
+        compare_jax_and_py([], [out], [])
 
 
 def test_random_concrete_shape():

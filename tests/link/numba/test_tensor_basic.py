@@ -6,15 +6,11 @@ import pytensor.tensor as pt
 import pytensor.tensor.basic as ptb
 from pytensor import config, function
 from pytensor.compile import get_mode
-from pytensor.compile.sharedvalue import SharedVariable
-from pytensor.graph.basic import Constant
-from pytensor.graph.fg import FunctionGraph
 from pytensor.scalar import Add
 from pytensor.tensor.shape import Unbroadcast
 from tests.link.numba.test_basic import (
     compare_numba_and_py,
     compare_shape_dtype,
-    set_test_value,
 )
 from tests.tensor.test_basic import check_alloc_runtime_broadcast
 
@@ -31,21 +27,18 @@ rng = np.random.default_rng(42849)
     [
         (0.0, (2, 3)),
         (1.1, (2, 3)),
-        (set_test_value(pt.scalar("a"), np.array(10.0, dtype=config.floatX)), (20,)),
-        (set_test_value(pt.vector("a"), np.ones(10, dtype=config.floatX)), (20, 10)),
+        ((pt.scalar("a"), np.array(10.0, dtype=config.floatX)), (20,)),
+        ((pt.vector("a"), np.ones(10, dtype=config.floatX)), (20, 10)),
     ],
 )
 def test_Alloc(v, shape):
+    v, v_test = v if isinstance(v, tuple) else (v, None)
     g = pt.alloc(v, *shape)
-    g_fg = FunctionGraph(outputs=[g])
 
     _, (numba_res,) = compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        [v] if v_test is not None else [],
+        [g],
+        [v_test] if v_test is not None else [],
     )
 
     assert numba_res.shape == shape
@@ -57,58 +50,38 @@ def test_alloc_runtime_broadcast():
 
 def test_AllocEmpty():
     x = pt.empty((2, 3), dtype="float32")
-    x_fg = FunctionGraph([], [x])
 
     # We cannot compare the values in the arrays, only the shapes and dtypes
-    compare_numba_and_py(x_fg, [], assert_fn=compare_shape_dtype)
+    compare_numba_and_py([], x, [], assert_fn=compare_shape_dtype)
 
 
-@pytest.mark.parametrize(
-    "v", [set_test_value(ps.float64(), np.array(1.0, dtype="float64"))]
-)
-def test_TensorFromScalar(v):
+def test_TensorFromScalar():
+    v, v_test = ps.float64(), np.array(1.0, dtype="float64")
     g = ptb.TensorFromScalar()(v)
-    g_fg = FunctionGraph(outputs=[g])
     compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        [v],
+        g,
+        [v_test],
     )
 
 
-@pytest.mark.parametrize(
-    "v",
-    [
-        set_test_value(pt.scalar(), np.array(1.0, dtype=config.floatX)),
-    ],
-)
-def test_ScalarFromTensor(v):
+def test_ScalarFromTensor():
+    v, v_test = pt.scalar(), np.array(1.0, dtype=config.floatX)
     g = ptb.ScalarFromTensor()(v)
-    g_fg = FunctionGraph(outputs=[g])
     compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        [v],
+        g,
+        [v_test],
     )
 
 
 def test_Unbroadcast():
-    v = set_test_value(pt.row(), np.array([[1.0, 2.0]], dtype=config.floatX))
+    v, v_test = pt.row(), np.array([[1.0, 2.0]], dtype=config.floatX)
     g = Unbroadcast(0)(v)
-    g_fg = FunctionGraph(outputs=[g])
     compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        [v],
+        g,
+        [v_test],
     )
 
 
@@ -117,65 +90,52 @@ def test_Unbroadcast():
     [
         (
             (
-                set_test_value(pt.scalar(), np.array(1, dtype=config.floatX)),
-                set_test_value(pt.scalar(), np.array(2, dtype=config.floatX)),
-                set_test_value(pt.scalar(), np.array(3, dtype=config.floatX)),
+                (pt.scalar(), np.array(1, dtype=config.floatX)),
+                (pt.scalar(), np.array(2, dtype=config.floatX)),
+                (pt.scalar(), np.array(3, dtype=config.floatX)),
             ),
             config.floatX,
         ),
         (
             (
-                set_test_value(pt.dscalar(), np.array(1, dtype=np.float64)),
-                set_test_value(pt.lscalar(), np.array(3, dtype=np.int32)),
+                (pt.dscalar(), np.array(1, dtype=np.float64)),
+                (pt.lscalar(), np.array(3, dtype=np.int32)),
             ),
             "float64",
         ),
         (
-            (set_test_value(pt.iscalar(), np.array(1, dtype=np.int32)),),
+            ((pt.iscalar(), np.array(1, dtype=np.int32)),),
             "float64",
         ),
         (
-            (set_test_value(pt.scalar(dtype=bool), True),),
+            ((pt.scalar(dtype=bool), True),),
             bool,
         ),
     ],
 )
 def test_MakeVector(vals, dtype):
+    vals, vals_test = zip(*vals, strict=True)
     g = ptb.MakeVector(dtype)(*vals)
-    g_fg = FunctionGraph(outputs=[g])
 
     compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        vals,
+        [g],
+        vals_test,
     )
 
 
-@pytest.mark.parametrize(
-    "start, stop, step, dtype",
-    [
-        (
-            set_test_value(pt.lscalar(), np.array(1)),
-            set_test_value(pt.lscalar(), np.array(10)),
-            set_test_value(pt.lscalar(), np.array(3)),
-            config.floatX,
-        ),
-    ],
-)
-def test_ARange(start, stop, step, dtype):
+def test_ARange():
+    start, start_test = pt.lscalar(), np.array(1)
+    stop, stop_tset = pt.lscalar(), np.array(10)
+    step, step_test = pt.lscalar(), np.array(3)
+    dtype = config.floatX
+
     g = ptb.ARange(dtype)(start, stop, step)
-    g_fg = FunctionGraph(outputs=[g])
 
     compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        [start, stop, step],
+        g,
+        [start_test, stop_tset, step_test],
     )
 
 
@@ -184,80 +144,60 @@ def test_ARange(start, stop, step, dtype):
     [
         (
             (
-                set_test_value(
-                    pt.matrix(), rng.normal(size=(1, 2)).astype(config.floatX)
-                ),
-                set_test_value(
-                    pt.matrix(), rng.normal(size=(1, 2)).astype(config.floatX)
-                ),
+                (pt.matrix(), rng.normal(size=(1, 2)).astype(config.floatX)),
+                (pt.matrix(), rng.normal(size=(1, 2)).astype(config.floatX)),
             ),
             0,
         ),
         (
             (
-                set_test_value(
-                    pt.matrix(), rng.normal(size=(2, 1)).astype(config.floatX)
-                ),
-                set_test_value(
-                    pt.matrix(), rng.normal(size=(3, 1)).astype(config.floatX)
-                ),
+                (pt.matrix(), rng.normal(size=(2, 1)).astype(config.floatX)),
+                (pt.matrix(), rng.normal(size=(3, 1)).astype(config.floatX)),
             ),
             0,
         ),
         (
             (
-                set_test_value(
-                    pt.matrix(), rng.normal(size=(1, 2)).astype(config.floatX)
-                ),
-                set_test_value(
-                    pt.matrix(), rng.normal(size=(1, 2)).astype(config.floatX)
-                ),
+                (pt.matrix(), rng.normal(size=(1, 2)).astype(config.floatX)),
+                (pt.matrix(), rng.normal(size=(1, 2)).astype(config.floatX)),
             ),
             1,
         ),
         (
             (
-                set_test_value(
-                    pt.matrix(), rng.normal(size=(2, 2)).astype(config.floatX)
-                ),
-                set_test_value(
-                    pt.matrix(), rng.normal(size=(2, 1)).astype(config.floatX)
-                ),
+                (pt.matrix(), rng.normal(size=(2, 2)).astype(config.floatX)),
+                (pt.matrix(), rng.normal(size=(2, 1)).astype(config.floatX)),
             ),
             1,
         ),
     ],
 )
 def test_Join(vals, axis):
+    vals, vals_test = zip(*vals, strict=True)
     g = pt.join(axis, *vals)
-    g_fg = FunctionGraph(outputs=[g])
 
     compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        vals,
+        g,
+        vals_test,
     )
 
 
 def test_Join_view():
-    vals = (
-        set_test_value(pt.matrix(), rng.normal(size=(2, 2)).astype(config.floatX)),
-        set_test_value(pt.matrix(), rng.normal(size=(2, 2)).astype(config.floatX)),
+    vals, vals_test = zip(
+        *(
+            (pt.matrix(), rng.normal(size=(2, 2)).astype(config.floatX)),
+            (pt.matrix(), rng.normal(size=(2, 2)).astype(config.floatX)),
+        ),
+        strict=True,
     )
     g = ptb.Join(view=1)(1, *vals)
-    g_fg = FunctionGraph(outputs=[g])
 
     with pytest.raises(NotImplementedError):
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            vals,
+            g,
+            vals_test,
         )
 
 
@@ -267,57 +207,47 @@ def test_Join_view():
         (
             0,
             0,
-            set_test_value(pt.vector(), rng.normal(size=20).astype(config.floatX)),
-            set_test_value(pt.vector(dtype="int64"), []),
+            (pt.vector(), rng.normal(size=20).astype(config.floatX)),
+            (pt.vector(dtype="int64"), []),
         ),
         (
             5,
             0,
-            set_test_value(pt.vector(), rng.normal(size=5).astype(config.floatX)),
-            set_test_value(
-                pt.vector(dtype="int64"), rng.multinomial(5, np.ones(5) / 5)
-            ),
+            (pt.vector(), rng.normal(size=5).astype(config.floatX)),
+            (pt.vector(dtype="int64"), rng.multinomial(5, np.ones(5) / 5)),
         ),
         (
             5,
             0,
-            set_test_value(pt.vector(), rng.normal(size=10).astype(config.floatX)),
-            set_test_value(
-                pt.vector(dtype="int64"), rng.multinomial(10, np.ones(5) / 5)
-            ),
+            (pt.vector(), rng.normal(size=10).astype(config.floatX)),
+            (pt.vector(dtype="int64"), rng.multinomial(10, np.ones(5) / 5)),
         ),
         (
             5,
             -1,
-            set_test_value(pt.matrix(), rng.normal(size=(11, 7)).astype(config.floatX)),
-            set_test_value(
-                pt.vector(dtype="int64"), rng.multinomial(7, np.ones(5) / 5)
-            ),
+            (pt.matrix(), rng.normal(size=(11, 7)).astype(config.floatX)),
+            (pt.vector(dtype="int64"), rng.multinomial(7, np.ones(5) / 5)),
         ),
         (
             5,
             -2,
-            set_test_value(pt.matrix(), rng.normal(size=(11, 7)).astype(config.floatX)),
-            set_test_value(
-                pt.vector(dtype="int64"), rng.multinomial(11, np.ones(5) / 5)
-            ),
+            (pt.matrix(), rng.normal(size=(11, 7)).astype(config.floatX)),
+            (pt.vector(dtype="int64"), rng.multinomial(11, np.ones(5) / 5)),
         ),
     ],
 )
 def test_Split(n_splits, axis, values, sizes):
+    values, values_test = values
+    sizes, sizes_test = sizes
     g = pt.split(values, sizes, n_splits, axis=axis)
     assert len(g) == n_splits
     if n_splits == 0:
         return
-    g_fg = FunctionGraph(outputs=[g] if n_splits == 1 else g)
 
     compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        [values, sizes],
+        g,
+        [values_test, sizes_test],
     )
 
 
@@ -349,34 +279,27 @@ def test_Split_view():
     "val, offset",
     [
         (
-            set_test_value(
-                pt.matrix(), np.arange(10 * 10, dtype=config.floatX).reshape((10, 10))
-            ),
+            (pt.matrix(), np.arange(10 * 10, dtype=config.floatX).reshape((10, 10))),
             0,
         ),
         (
-            set_test_value(
-                pt.matrix(), np.arange(10 * 10, dtype=config.floatX).reshape((10, 10))
-            ),
+            (pt.matrix(), np.arange(10 * 10, dtype=config.floatX).reshape((10, 10))),
             -1,
         ),
         (
-            set_test_value(pt.vector(), np.arange(10, dtype=config.floatX)),
+            (pt.vector(), np.arange(10, dtype=config.floatX)),
             0,
         ),
     ],
 )
 def test_ExtractDiag(val, offset):
+    val, val_test = val
     g = pt.diag(val, offset)
-    g_fg = FunctionGraph(outputs=[g])
 
     compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        [val],
+        g,
+        [val_test],
     )
 
 
@@ -407,30 +330,28 @@ def test_ExtractDiag_exhaustive(k, axis1, axis2, reverse_axis):
 @pytest.mark.parametrize(
     "n, m, k, dtype",
     [
-        (set_test_value(pt.lscalar(), np.array(1, dtype=np.int64)), None, 0, None),
+        ((pt.lscalar(), np.array(1, dtype=np.int64)), None, 0, None),
         (
-            set_test_value(pt.lscalar(), np.array(1, dtype=np.int64)),
-            set_test_value(pt.lscalar(), np.array(2, dtype=np.int64)),
+            (pt.lscalar(), np.array(1, dtype=np.int64)),
+            (pt.lscalar(), np.array(2, dtype=np.int64)),
             0,
             "float32",
         ),
         (
-            set_test_value(pt.lscalar(), np.array(1, dtype=np.int64)),
-            set_test_value(pt.lscalar(), np.array(2, dtype=np.int64)),
+            (pt.lscalar(), np.array(1, dtype=np.int64)),
+            (pt.lscalar(), np.array(2, dtype=np.int64)),
             1,
             "int64",
         ),
     ],
 )
 def test_Eye(n, m, k, dtype):
+    n, n_test = n
+    m, m_test = m if m is not None else (None, None)
     g = pt.eye(n, m, k, dtype=dtype)
-    g_fg = FunctionGraph(outputs=[g])
 
     compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        [n, m] if m is not None else [n],
+        g,
+        [n_test, m_test] if m is not None else [n_test],
     )

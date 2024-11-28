@@ -7,7 +7,6 @@ import pytensor.tensor as pt
 from pytensor import function, shared
 from pytensor.compile import get_mode
 from pytensor.configdefaults import config
-from pytensor.graph.fg import FunctionGraph
 from pytensor.scan import until
 from pytensor.scan.basic import scan
 from pytensor.scan.op import Scan
@@ -30,9 +29,8 @@ def test_scan_sit_sot(view):
     )
     if view:
         xs = xs[view]
-    fg = FunctionGraph([x0], [xs])
     test_input_vals = [np.e]
-    compare_jax_and_py(fg, test_input_vals, jax_mode="JAX")
+    compare_jax_and_py([x0], [xs], test_input_vals, jax_mode="JAX")
 
 
 @pytest.mark.parametrize("view", [None, (-1,), slice(-4, -1, None)])
@@ -45,9 +43,8 @@ def test_scan_mit_sot(view):
     )
     if view:
         xs = xs[view]
-    fg = FunctionGraph([x0], [xs])
     test_input_vals = [np.full((3,), np.e)]
-    compare_jax_and_py(fg, test_input_vals, jax_mode="JAX")
+    compare_jax_and_py([x0], [xs], test_input_vals, jax_mode="JAX")
 
 
 @pytest.mark.parametrize("view_x", [None, (-1,), slice(-4, -1, None)])
@@ -72,9 +69,8 @@ def test_scan_multiple_mit_sot(view_x, view_y):
     if view_y:
         ys = ys[view_y]
 
-    fg = FunctionGraph([x0, y0], [xs, ys])
     test_input_vals = [np.full((3,), np.e), np.full((4,), np.pi)]
-    compare_jax_and_py(fg, test_input_vals, jax_mode="JAX")
+    compare_jax_and_py([x0, y0], [xs, ys], test_input_vals, jax_mode="JAX")
 
 
 @pytest.mark.parametrize("view", [None, (-2,), slice(None, None, 2)])
@@ -90,12 +86,11 @@ def test_scan_nit_sot(view):
     )
     if view:
         ys = ys[view]
-    fg = FunctionGraph([xs], [ys])
     test_input_vals = [rng.normal(size=10)]
     # We need to remove pushout rewrites, or the whole scan would just be
     # converted to an Elemwise on xs
     jax_fn, _ = compare_jax_and_py(
-        fg, test_input_vals, jax_mode=get_mode("JAX").excluding("scan_pushout")
+        [xs], [ys], test_input_vals, jax_mode=get_mode("JAX").excluding("scan_pushout")
     )
     scan_nodes = [
         node for node in jax_fn.maker.fgraph.apply_nodes if isinstance(node.op, Scan)
@@ -112,8 +107,7 @@ def test_scan_mit_mot():
         n_steps=10,
     )
     grads_wrt_xs = pt.grad(ys.sum(), wrt=xs)
-    fg = FunctionGraph([xs], [grads_wrt_xs])
-    compare_jax_and_py(fg, [np.arange(10)])
+    compare_jax_and_py([xs], [grads_wrt_xs], [np.arange(10)])
 
 
 def test_scan_update():
@@ -192,8 +186,7 @@ def test_scan_while():
         n_steps=100,
     )
 
-    fg = FunctionGraph([], [xs])
-    compare_jax_and_py(fg, [])
+    compare_jax_and_py([], [xs], [])
 
 
 def test_scan_SEIR():
@@ -257,11 +250,6 @@ def test_scan_SEIR():
     logp_c_all.name = "C_t_logp"
     logp_d_all.name = "D_t_logp"
 
-    out_fg = FunctionGraph(
-        [at_C, at_D, st0, et0, it0, logp_c, logp_d, beta, gamma, delta],
-        [st, et, it, logp_c_all, logp_d_all],
-    )
-
     s0, e0, i0 = 100, 50, 25
     logp_c0 = np.array(0.0, dtype=config.floatX)
     logp_d0 = np.array(0.0, dtype=config.floatX)
@@ -283,7 +271,12 @@ def test_scan_SEIR():
         gamma_val,
         delta_val,
     ]
-    compare_jax_and_py(out_fg, test_input_vals, jax_mode="JAX")
+    compare_jax_and_py(
+        [at_C, at_D, st0, et0, it0, logp_c, logp_d, beta, gamma, delta],
+        [st, et, it, logp_c_all, logp_d_all],
+        test_input_vals,
+        jax_mode="JAX",
+    )
 
 
 def test_scan_mitsot_with_nonseq():
@@ -313,10 +306,8 @@ def test_scan_mitsot_with_nonseq():
     y_scan_pt.name = "y"
     y_scan_pt.owner.inputs[0].name = "y_all"
 
-    out_fg = FunctionGraph([a_pt], [y_scan_pt])
-
     test_input_vals = [np.array(10.0).astype(config.floatX)]
-    compare_jax_and_py(out_fg, test_input_vals, jax_mode="JAX")
+    compare_jax_and_py([a_pt], [y_scan_pt], test_input_vals, jax_mode="JAX")
 
 
 @pytest.mark.parametrize("x0_func", [dvector, dmatrix])
@@ -343,9 +334,8 @@ def test_nd_scan_sit_sot(x0_func, A_func):
     )
     A_val = np.eye(k, dtype=config.floatX)
 
-    fg = FunctionGraph([x0, A], [xs])
     test_input_vals = [x0_val, A_val]
-    compare_jax_and_py(fg, test_input_vals, jax_mode="JAX")
+    compare_jax_and_py([x0, A], [xs], test_input_vals, jax_mode="JAX")
 
 
 def test_nd_scan_sit_sot_with_seq():
@@ -366,9 +356,8 @@ def test_nd_scan_sit_sot_with_seq():
     x_val = np.arange(n_steps * k, dtype=config.floatX).reshape(n_steps, k)
     A_val = np.eye(k, dtype=config.floatX)
 
-    fg = FunctionGraph([x, A], [xs])
     test_input_vals = [x_val, A_val]
-    compare_jax_and_py(fg, test_input_vals, jax_mode="JAX")
+    compare_jax_and_py([x, A], [xs], test_input_vals, jax_mode="JAX")
 
 
 def test_nd_scan_mit_sot():
@@ -384,13 +373,12 @@ def test_nd_scan_mit_sot():
         n_steps=10,
     )
 
-    fg = FunctionGraph([x0, A, B], [xs])
     x0_val = np.arange(9, dtype=config.floatX).reshape(3, 3)
     A_val = np.eye(3, dtype=config.floatX)
     B_val = np.eye(3, dtype=config.floatX)
 
     test_input_vals = [x0_val, A_val, B_val]
-    compare_jax_and_py(fg, test_input_vals, jax_mode="JAX")
+    compare_jax_and_py([x0, A, B], [xs], test_input_vals, jax_mode="JAX")
 
 
 def test_nd_scan_sit_sot_with_carry():
@@ -409,12 +397,11 @@ def test_nd_scan_sit_sot_with_carry():
         mode=get_mode("JAX"),
     )
 
-    fg = FunctionGraph([x0, A], xs)
     x0_val = np.arange(3, dtype=config.floatX)
     A_val = np.eye(3, dtype=config.floatX)
 
     test_input_vals = [x0_val, A_val]
-    compare_jax_and_py(fg, test_input_vals, jax_mode="JAX")
+    compare_jax_and_py([x0, A], xs, test_input_vals, jax_mode="JAX")
 
 
 def test_default_mode_excludes_incompatible_rewrites():
@@ -422,8 +409,7 @@ def test_default_mode_excludes_incompatible_rewrites():
     A = matrix("A")
     B = matrix("B")
     out, _ = scan(lambda a, b: a @ b, outputs_info=[A], non_sequences=[B], n_steps=2)
-    fg = FunctionGraph([A, B], [out])
-    compare_jax_and_py(fg, [np.eye(3), np.eye(3)], jax_mode="JAX")
+    compare_jax_and_py([A, B], [out], [np.eye(3), np.eye(3)], jax_mode="JAX")
 
 
 def test_dynamic_sequence_length():

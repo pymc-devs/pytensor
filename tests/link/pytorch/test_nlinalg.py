@@ -1,11 +1,8 @@
-from collections.abc import Sequence
-
 import numpy as np
 import pytest
 
 from pytensor.compile.function import function
 from pytensor.configdefaults import config
-from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor import nlinalg as pt_nla
 from pytensor.tensor.type import matrix
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
@@ -29,13 +26,12 @@ def matrix_test():
 def test_lin_alg_no_params(func, matrix_test):
     x, test_value = matrix_test
 
-    out = func(x)
-    out_fg = FunctionGraph([x], out if isinstance(out, Sequence) else [out])
+    outs = func(x)
 
     def assert_fn(x, y):
         np.testing.assert_allclose(x, y, rtol=1e-3)
 
-    compare_pytorch_and_py(out_fg, [test_value], assert_fn=assert_fn)
+    compare_pytorch_and_py([x], outs, [test_value], assert_fn=assert_fn)
 
 
 @pytest.mark.parametrize(
@@ -50,8 +46,8 @@ def test_lin_alg_no_params(func, matrix_test):
 def test_qr(mode, matrix_test):
     x, test_value = matrix_test
     outs = pt_nla.qr(x, mode=mode)
-    out_fg = FunctionGraph([x], outs if isinstance(outs, list) else [outs])
-    compare_pytorch_and_py(out_fg, [test_value])
+
+    compare_pytorch_and_py([x], outs, [test_value])
 
 
 @pytest.mark.parametrize("compute_uv", [True, False])
@@ -60,18 +56,16 @@ def test_svd(compute_uv, full_matrices, matrix_test):
     x, test_value = matrix_test
 
     out = pt_nla.svd(x, full_matrices=full_matrices, compute_uv=compute_uv)
-    out_fg = FunctionGraph([x], out if isinstance(out, list) else [out])
 
-    compare_pytorch_and_py(out_fg, [test_value])
+    compare_pytorch_and_py([x], out, [test_value])
 
 
 def test_pinv():
     x = matrix("x")
     x_inv = pt_nla.pinv(x)
 
-    fgraph = FunctionGraph([x], [x_inv])
     x_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
-    compare_pytorch_and_py(fgraph, [x_np])
+    compare_pytorch_and_py([x], [x_inv], [x_np])
 
 
 @pytest.mark.parametrize("hermitian", [False, True])
@@ -106,8 +100,7 @@ def test_kron():
     y = matrix("y")
     z = pt_nla.kron(x, y)
 
-    fgraph = FunctionGraph([x, y], [z])
     x_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
     y_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
 
-    compare_pytorch_and_py(fgraph, [x_np, y_np])
+    compare_pytorch_and_py([x, y], [z], [x_np, y_np])

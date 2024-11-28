@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from pytensor.graph import FunctionGraph
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 
 
@@ -31,16 +30,14 @@ def test_pytorch_CumOp(axis, dtype):
             out = pt.cumprod(a, axis=axis)
     else:
         out = pt.cumsum(a, axis=axis)
-        # Create a PyTensor `FunctionGraph`
-        fgraph = FunctionGraph([a], [out])
 
-        # Pass the graph and inputs to the testing function
-        compare_pytorch_and_py(fgraph, [test_value])
+        # Pass the inputs and outputs to the testing function
+        compare_pytorch_and_py([a], [out], [test_value])
 
         # For the second mode of CumOp
         out = pt.cumprod(a, axis=axis)
-        fgraph = FunctionGraph([a], [out])
-        compare_pytorch_and_py(fgraph, [test_value])
+
+        compare_pytorch_and_py([a], [out], [test_value])
 
 
 @pytest.mark.parametrize("axis, repeats", [(0, (1, 2, 3)), (1, (3, 3)), (None, 3)])
@@ -50,8 +47,8 @@ def test_pytorch_Repeat(axis, repeats):
     test_value = np.arange(6, dtype="float64").reshape((3, 2))
 
     out = pt.repeat(a, repeats, axis=axis)
-    fgraph = FunctionGraph([a], [out])
-    compare_pytorch_and_py(fgraph, [test_value])
+
+    compare_pytorch_and_py([a], [out], [test_value])
 
 
 @pytest.mark.parametrize("axis", [None, 0, 1])
@@ -63,8 +60,8 @@ def test_pytorch_Unique_axis(axis):
     )
 
     out = pt.unique(a, axis=axis)
-    fgraph = FunctionGraph([a], [out])
-    compare_pytorch_and_py(fgraph, [test_value])
+
+    compare_pytorch_and_py([a], [out], [test_value])
 
 
 @pytest.mark.parametrize("return_inverse", [False, True])
@@ -86,5 +83,7 @@ def test_pytorch_Unique_params(return_index, return_inverse, return_counts):
         return_counts=return_counts,
         axis=0,
     )
-    fgraph = FunctionGraph([a], [out[0] if isinstance(out, list) else out])
-    compare_pytorch_and_py(fgraph, [test_value])
+
+    compare_pytorch_and_py(
+        [a], [out[0] if isinstance(out, list) else out], [test_value]
+    )

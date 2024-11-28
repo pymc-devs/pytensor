@@ -5,7 +5,6 @@ import scipy.sparse
 import pytensor.sparse as ps
 import pytensor.tensor as pt
 from pytensor import function
-from pytensor.graph import FunctionGraph
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
@@ -50,8 +49,7 @@ def test_sparse_dot_constant_sparse(x_type, y_type, op):
         test_values.append(y_test)
 
     dot_pt = op(x_pt, y_pt)
-    fgraph = FunctionGraph(inputs, [dot_pt])
-    compare_jax_and_py(fgraph, test_values, jax_mode="JAX")
+    compare_jax_and_py(inputs, [dot_pt], test_values, jax_mode="JAX")
 
 
 def test_sparse_dot_non_const_raises():

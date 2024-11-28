@@ -100,4 +100,4 @@ def test_sparse_objmode():
         UserWarning,
         match="Numba will use object mode to run SparseDot's perform method",
     ):
-        compare_numba_and_py(((x, y), (out,)), [x_val, y_val])
+        compare_numba_and_py([x, y], out, [x_val, y_val])
