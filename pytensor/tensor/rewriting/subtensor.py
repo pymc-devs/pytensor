@@ -249,7 +249,7 @@ def local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1(fgraph, node):
     This is only done when there's a single vector index.
     """
 
-    if not isinstance(node.op, AdvancedIncSubtensor) or node.op.ignore_duplicates:
+    if node.op.ignore_duplicates:
         # `AdvancedIncSubtensor1` does not ignore duplicate index values
         return
 
@@ -1967,19 +1967,26 @@ def local_blockwise_advanced_inc_subtensor(fgraph, node):
     return new_out
 
 
-@node_rewriter(tracks=[AdvancedSubtensor])
+@node_rewriter(tracks=[AdvancedSubtensor, AdvancedIncSubtensor])
 def ravel_multidimensional_bool_idx(fgraph, node):
     """Convert multidimensional boolean indexing into equivalent vector boolean index, supported by Numba
 
     x[eye(3, dtype=bool)] -> x.ravel()[eye(3).ravel()]
+    x[eye(3, dtype=bool)].set(y) -> x.ravel()[eye(3).ravel()].set(y).reshape(x.shape)
     """
-    x, *idxs = node.inputs
+    if isinstance(node.op, AdvancedSubtensor):
+        x, *idxs = node.inputs
+    else:
+        x, y, *idxs = node.inputs
 
     if any(
-        isinstance(idx.type, TensorType) and idx.type.dtype.startswith("int")
+        (
+            (isinstance(idx.type, TensorType) and idx.type.dtype.startswith("int"))
+            or isinstance(idx.type, NoneTypeT)
+        )
         for idx in idxs
     ):
-        # Get out if there are any other advanced indexes
+        # Get out if there are any other advanced indexes or np.newaxis
         return None
 
     bool_idxs = [
@@ -2007,7 +2014,16 @@ def ravel_multidimensional_bool_idx(fgraph, node):
     new_idxs = list(idxs)
     new_idxs[bool_idx_pos] = raveled_bool_idx
 
-    return [raveled_x[tuple(new_idxs)]]
+    if isinstance(node.op, AdvancedSubtensor):
+        new_out = node.op(raveled_x, *new_idxs)
+    else:
+        # The dimensions of y that correspond to the boolean indices
+        # must already be raveled in the original graph, so we don't need to do anything to it
+        new_out = node.op(raveled_x, y, *new_idxs)
+        # But we must reshape the output to math the original shape
+        new_out = new_out.reshape(x_shape)
+
+    return [copy_stack_trace(node.outputs[0], new_out)]
 
 
 @node_rewriter(tracks=[AdvancedSubtensor])
@@ -2024,10 +2040,13 @@ def ravel_multidimensional_int_idx(fgraph, node):
     x, *idxs = node.inputs
 
     if any(
-        isinstance(idx.type, TensorType) and idx.type.dtype.startswith("bool")
+        (
+            (isinstance(idx.type, TensorType) and idx.type.dtype == "bool")
+            or isinstance(idx.type, NoneTypeT)
+        )
         for idx in idxs
     ):
-        # Get out if there are any other advanced indexes
+        # Get out if there are any other advanced indexes or np.newaxis
         return None
 
     int_idxs = [
@@ -2059,7 +2078,8 @@ def ravel_multidimensional_int_idx(fgraph, node):
         *int_idx.shape,
         *raveled_shape[int_idx_pos + 1 :],
     )
-    return [raveled_subtensor.reshape(unraveled_shape)]
+    new_out = raveled_subtensor.reshape(unraveled_shape)
+    return [copy_stack_trace(node.outputs[0], new_out)]
 
 
 optdb["specialize"].register(
