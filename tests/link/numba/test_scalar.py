@@ -5,63 +5,56 @@ import pytensor.scalar as ps
 import pytensor.scalar.basic as psb
 import pytensor.tensor as pt
 from pytensor import config
-from pytensor.compile.sharedvalue import SharedVariable
-from pytensor.graph.basic import Constant
-from pytensor.graph.fg import FunctionGraph
 from pytensor.scalar.basic import Composite
 from pytensor.tensor.elemwise import Elemwise
-from tests.link.numba.test_basic import compare_numba_and_py, set_test_value
+from tests.link.numba.test_basic import compare_numba_and_py
 
 
 rng = np.random.default_rng(42849)
 
 
 @pytest.mark.parametrize(
-    "x, y",
+    "x, y,test_values",
     [
         (
-            set_test_value(pt.lvector(), np.arange(4, dtype="int64")),
-            set_test_value(pt.dvector(), np.arange(4, dtype="float64")),
+            pt.lvector(),
+            pt.dvector(),
+            [np.arange(4, dtype="int64"), np.arange(4, dtype="float64")],
         ),
         (
-            set_test_value(pt.dmatrix(), np.arange(4, dtype="float64").reshape((2, 2))),
-            set_test_value(pt.lscalar(), np.array(4, dtype="int64")),
+            pt.dmatrix(),
+            pt.lscalar(),
+            [np.arange(4, dtype="float64").reshape((2, 2)), np.array(4, dtype="int64")],
         ),
     ],
 )
-def test_Second(x, y):
+def test_Second(x, y, test_values):
     # We use the `Elemwise`-wrapped version of `Second`
     g = pt.second(x, y)
-    g_fg = FunctionGraph(outputs=[g])
+    inputs = [x, y]
     compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        inputs,
+        [g],
+        test_values,
     )
 
 
 @pytest.mark.parametrize(
-    "v, min, max",
+    "v, min, max,test_values",
     [
-        (set_test_value(pt.scalar(), np.array(10, dtype=config.floatX)), 3.0, 7.0),
-        (set_test_value(pt.scalar(), np.array(1, dtype=config.floatX)), 3.0, 7.0),
-        (set_test_value(pt.scalar(), np.array(10, dtype=config.floatX)), 7.0, 3.0),
+        (pt.scalar(), 3.0, 7.0, [np.array(10, dtype=config.floatX)]),
+        (pt.scalar(), 3.0, 7.0, [np.array(1, dtype=config.floatX)]),
+        (pt.scalar(), 7.0, 3.0, [np.array(10, dtype=config.floatX)]),
     ],
 )
-def test_Clip(v, min, max):
+def test_Clip(v, min, max, test_values):
     g = ps.clip(v, min, max)
-    g_fg = FunctionGraph(outputs=[g])
+    inputs = [v]
 
     compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        inputs,
+        [g],
+        test_values,
     )
 
 
@@ -99,44 +92,37 @@ def test_Clip(v, min, max):
 def test_Composite(inputs, input_values, scalar_fn):
     composite_inputs = [ps.ScalarType(config.floatX)(name=i.name) for i in inputs]
     comp_op = Elemwise(Composite(composite_inputs, [scalar_fn(*composite_inputs)]))
-    out_fg = FunctionGraph(inputs, [comp_op(*inputs)])
-    compare_numba_and_py(out_fg, input_values)
+    compare_numba_and_py(inputs, [comp_op(*inputs)], input_values)
 
 
 @pytest.mark.parametrize(
-    "v, dtype",
+    "v, dtype, test_values",
     [
-        (set_test_value(pt.fscalar(), np.array(1.0, dtype="float32")), psb.float64),
-        (set_test_value(pt.dscalar(), np.array(1.0, dtype="float64")), psb.float32),
+        (pt.fscalar(), psb.float64, [np.array(1.0, dtype="float32")]),
+        (pt.dscalar(), psb.float32, [np.array(1.0, dtype="float64")]),
     ],
 )
-def test_Cast(v, dtype):
+def test_Cast(v, dtype, test_values):
     g = psb.Cast(dtype)(v)
-    g_fg = FunctionGraph(outputs=[g])
+    inputs = [v]
     compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        inputs,
+        [g],
+        test_values,
     )
 
 
 @pytest.mark.parametrize(
-    "v, dtype",
+    "v, dtype,test_values",
     [
-        (set_test_value(pt.iscalar(), np.array(10, dtype="int32")), psb.float64),
+        (pt.iscalar(), psb.float64, [np.array(10, dtype="int32")]),
     ],
 )
-def test_reciprocal(v, dtype):
+def test_reciprocal(v, dtype, test_values):
     g = psb.reciprocal(v)
-    g_fg = FunctionGraph(outputs=[g])
+    inputs = [v]
     compare_numba_and_py(
-        g_fg,
-        [
-            i.tag.test_value
-            for i in g_fg.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ],
+        inputs,
+        [g],
+        test_values,
     )

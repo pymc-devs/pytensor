@@ -50,20 +50,19 @@ def test_second():
     b = scalar("b")
 
     out = ps.second(a0, b)
-    fgraph = FunctionGraph([a0, b], [out])
-    compare_jax_and_py(fgraph, [10.0, 5.0])
+    compare_jax_and_py([a0, b], [out], [10.0, 5.0])
 
     a1 = vector("a1")
     out = pt.second(a1, b)
-    fgraph = FunctionGraph([a1, b], [out])
-    compare_jax_and_py(fgraph, [np.zeros([5], dtype=config.floatX), 5.0])
+    compare_jax_and_py([a1, b], [out], [np.zeros([5], dtype=config.floatX), 5.0])
 
     a2 = matrix("a2", shape=(1, None), dtype="float64")
     b2 = matrix("b2", shape=(None, 1), dtype="int32")
     out = pt.second(a2, b2)
-    fgraph = FunctionGraph([a2, b2], [out])
     compare_jax_and_py(
-        fgraph, [np.zeros((1, 3), dtype="float64"), np.ones((5, 1), dtype="int32")]
+        [a2, b2],
+        [out],
+        [np.zeros((1, 3), dtype="float64"), np.ones((5, 1), dtype="int32")],
     )
 
 
@@ -83,8 +82,7 @@ def test_identity():
     a.tag.test_value = 10
 
     out = ps.identity(a)
-    fgraph = FunctionGraph([a], [out])
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py([a], [out], [a.tag.test_value])
 
 
 @pytest.mark.parametrize(
@@ -108,13 +106,11 @@ def test_jax_Composite_singe_output(x, y, x_val, y_val):
 
     out = comp_op(x, y)
 
-    out_fg = FunctionGraph([x, y], [out])
-
     test_input_vals = [
         x_val.astype(config.floatX),
         y_val.astype(config.floatX),
     ]
-    _ = compare_jax_and_py(out_fg, test_input_vals)
+    _ = compare_jax_and_py([x, y], [out], test_input_vals)
 
 
 def test_jax_Composite_multi_output():
@@ -123,32 +119,28 @@ def test_jax_Composite_multi_output():
     x_s = ps.float64("xs")
     outs = Elemwise(Composite(inputs=[x_s], outputs=[x_s + 1, x_s - 1]))(x)
 
-    fgraph = FunctionGraph([x], outs)
-    compare_jax_and_py(fgraph, [np.arange(10, dtype=config.floatX)])
+    compare_jax_and_py([x], outs, [np.arange(10, dtype=config.floatX)])
 
 
 def test_erf():
     x = scalar("x")
     out = erf(x)
-    fg = FunctionGraph([x], [out])
 
-    compare_jax_and_py(fg, [1.0])
+    compare_jax_and_py([x], [out], [1.0])
 
 
 def test_erfc():
     x = scalar("x")
     out = erfc(x)
-    fg = FunctionGraph([x], [out])
 
-    compare_jax_and_py(fg, [1.0])
+    compare_jax_and_py([x], [out], [1.0])
 
 
 def test_erfinv():
     x = scalar("x")
     out = erfinv(x)
-    fg = FunctionGraph([x], [out])
 
-    compare_jax_and_py(fg, [0.95])
+    compare_jax_and_py([x], [out], [0.95])
 
 
 @pytest.mark.parametrize(
@@ -164,8 +156,7 @@ def test_tfp_ops(op, test_values):
     inputs = [as_tensor(test_value).type() for test_value in test_values]
     output = op(*inputs)
 
-    fg = FunctionGraph(inputs, [output])
-    compare_jax_and_py(fg, test_values)
+    compare_jax_and_py(inputs, [output], test_values)
 
 
 def test_betaincinv():
@@ -173,9 +164,10 @@ def test_betaincinv():
     b = vector("b", dtype="float64")
     x = vector("x", dtype="float64")
     out = betaincinv(a, b, x)
-    fg = FunctionGraph([a, b, x], [out])
+
     compare_jax_and_py(
-        fg,
+        [a, b, x],
+        [out],
         [
             np.array([5.5, 7.0]),
             np.array([5.5, 7.0]),
@@ -188,39 +180,40 @@ def test_gammaincinv():
     k = vector("k", dtype="float64")
     x = vector("x", dtype="float64")
     out = gammaincinv(k, x)
-    fg = FunctionGraph([k, x], [out])
-    compare_jax_and_py(fg, [np.array([5.5, 7.0]), np.array([0.25, 0.7])])
+
+    compare_jax_and_py([k, x], [out], [np.array([5.5, 7.0]), np.array([0.25, 0.7])])
 
 
 def test_gammainccinv():
     k = vector("k", dtype="float64")
     x = vector("x", dtype="float64")
     out = gammainccinv(k, x)
-    fg = FunctionGraph([k, x], [out])
-    compare_jax_and_py(fg, [np.array([5.5, 7.0]), np.array([0.25, 0.7])])
+
+    compare_jax_and_py([k, x], [out], [np.array([5.5, 7.0]), np.array([0.25, 0.7])])
 
 
 def test_psi():
     x = scalar("x")
     out = psi(x)
-    fg = FunctionGraph([x], [out])
-    compare_jax_and_py(fg, [3.0])
+
+    compare_jax_and_py([x], [out], [3.0])
 
 
 def test_tri_gamma():
     x = vector("x", dtype="float64")
     out = tri_gamma(x)
-    fg = FunctionGraph([x], [out])
-    compare_jax_and_py(fg, [np.array([3.0, 5.0])])
+
+    compare_jax_and_py([x], [out], [np.array([3.0, 5.0])])
 
 
 def test_polygamma():
     n = vector("n", dtype="int32")
     x = vector("x", dtype="float32")
     out = polygamma(n, x)
-    fg = FunctionGraph([n, x], [out])
+
     compare_jax_and_py(
-        fg,
+        [n, x],
+        [out],
         [
             np.array([0, 1, 2]).astype("int32"),
             np.array([0.5, 0.9, 2.5]).astype("float32"),
@@ -231,9 +224,8 @@ def test_polygamma():
 def test_log1mexp():
     x = vector("x")
     out = log1mexp(x)
-    fg = FunctionGraph([x], [out])
 
-    compare_jax_and_py(fg, [[-1.0, -0.75, -0.5, -0.25]])
+    compare_jax_and_py([x], [out], [[-1.0, -0.75, -0.5, -0.25]])
 
 
 def test_nnet():
@@ -241,12 +233,10 @@ def test_nnet():
     x.tag.test_value = np.r_[1.0, 2.0].astype(config.floatX)
 
     out = sigmoid(x)
-    fgraph = FunctionGraph([x], [out])
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py([x], [out], [x.tag.test_value])
 
     out = softplus(x)
-    fgraph = FunctionGraph([x], [out])
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py([x], [out], [x.tag.test_value])
 
 
 def test_jax_variadic_Scalar():
@@ -257,15 +247,11 @@ def test_jax_variadic_Scalar():
 
     res = -tau * mu
 
-    fgraph = FunctionGraph([mu, tau], [res])
-
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py([mu, tau], [res], [mu.tag.test_value, tau.tag.test_value])
 
     res = -tau * (tau - mu) ** 2
 
-    fgraph = FunctionGraph([mu, tau], [res])
-
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py([mu, tau], [res], [mu.tag.test_value, tau.tag.test_value])
 
 
 def test_add_scalars():
@@ -273,8 +259,7 @@ def test_add_scalars():
     size = x.shape[0] + x.shape[0] + x.shape[1]
     out = pt.ones(size).astype(config.floatX)
 
-    out_fg = FunctionGraph([x], [out])
-    compare_jax_and_py(out_fg, [np.ones((2, 3)).astype(config.floatX)])
+    compare_jax_and_py([x], [out], [np.ones((2, 3)).astype(config.floatX)])
 
 
 def test_mul_scalars():
@@ -282,8 +267,7 @@ def test_mul_scalars():
     size = x.shape[0] * x.shape[0] * x.shape[1]
     out = pt.ones(size).astype(config.floatX)
 
-    out_fg = FunctionGraph([x], [out])
-    compare_jax_and_py(out_fg, [np.ones((2, 3)).astype(config.floatX)])
+    compare_jax_and_py([x], [out], [np.ones((2, 3)).astype(config.floatX)])
 
 
 def test_div_scalars():
@@ -291,8 +275,7 @@ def test_div_scalars():
     size = x.shape[0] // x.shape[1]
     out = pt.ones(size).astype(config.floatX)
 
-    out_fg = FunctionGraph([x], [out])
-    compare_jax_and_py(out_fg, [np.ones((12, 3)).astype(config.floatX)])
+    compare_jax_and_py([x], [out], [np.ones((12, 3)).astype(config.floatX)])
 
 
 def test_mod_scalars():
@@ -300,8 +283,7 @@ def test_mod_scalars():
     size = x.shape[0] % x.shape[1]
     out = pt.ones(size).astype(config.floatX)
 
-    out_fg = FunctionGraph([x], [out])
-    compare_jax_and_py(out_fg, [np.ones((12, 3)).astype(config.floatX)])
+    compare_jax_and_py([x], [out], [np.ones((12, 3)).astype(config.floatX)])
 
 
 def test_jax_multioutput():
@@ -313,9 +295,7 @@ def test_jax_multioutput():
     w = cosh(x**2 + y / 3.0)
     v = cosh(x / 3.0 + y**2)
 
-    fgraph = FunctionGraph([x, y], [w, v])
-
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py([x, y], [w, v], [x.tag.test_value, y.tag.test_value])
 
 
 def test_jax_logp():
@@ -333,6 +313,13 @@ def test_jax_logp():
     alltrue = pt_all([pt_all(1 * val) for val in conditions])
     normal_logp = pt.switch(alltrue, logp, -np.inf)
 
-    fgraph = FunctionGraph([mu, tau, sigma, value], [normal_logp])
-
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py(
+        [mu, tau, sigma, value],
+        [normal_logp],
+        [
+            mu.tag.test_value,
+            tau.tag.test_value,
+            sigma.tag.test_value,
+            value.tag.test_value,
+        ],
+    )

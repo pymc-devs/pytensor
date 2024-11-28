@@ -4,128 +4,111 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from pytensor.compile.sharedvalue import SharedVariable
-from pytensor.graph.basic import Constant
-from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor import nlinalg, slinalg
-from tests.link.numba.test_basic import compare_numba_and_py, set_test_value
+from tests.link.numba.test_basic import compare_numba_and_py
 
 
 rng = np.random.default_rng(42849)
 
 
 @pytest.mark.parametrize(
-    "A, x, lower, exc",
+    "A, x, lower, exc,test_values",
     [
         (
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
-            set_test_value(pt.dvector(), rng.random(size=(3,)).astype("float64")),
+            pt.dmatrix(),
+            pt.dvector(),
             "gen",
             None,
+            [
+                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
+                rng.random(size=(3,)).astype("float64"),
+            ],
         ),
         (
-            set_test_value(
-                pt.lmatrix(),
+            pt.lmatrix(),
+            pt.dvector(),
+            "gen",
+            None,
+            [
                 (lambda x: x.T.dot(x))(
                     rng.integers(1, 10, size=(3, 3)).astype("int64")
                 ),
-            ),
-            set_test_value(pt.dvector(), rng.random(size=(3,)).astype("float64")),
-            "gen",
-            None,
+                rng.random(size=(3,)).astype("float64"),
+            ],
         ),
     ],
 )
-def test_Solve(A, x, lower, exc):
+def test_Solve(A, x, lower, exc, test_values):
     g = slinalg.Solve(lower=lower, b_ndim=1)(A, x)
-
+    inputs = [A, x]
+    outputs = []
     if isinstance(g, list):
-        g_fg = FunctionGraph(outputs=g)
+        outputs = g
     else:
-        g_fg = FunctionGraph(outputs=[g])
+        outputs = [g]
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            inputs,
+            outputs,
+            test_values,
         )
 
 
 @pytest.mark.parametrize(
-    "x, exc",
+    "x, exc,test_values",
     [
         (
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
+            pt.dmatrix(),
             None,
+            [(lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64"))],
         ),
         (
-            set_test_value(
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(rng.poisson(size=(3, 3)).astype("int64")),
-            ),
+            pt.lmatrix(),
             None,
+            [(lambda x: x.T.dot(x))(rng.poisson(size=(3, 3)).astype("int64"))],
         ),
     ],
 )
-def test_Det(x, exc):
+def test_Det(x, exc, test_values):
     g = nlinalg.Det()(x)
-    g_fg = FunctionGraph(outputs=[g])
+    inputs = [x]
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            inputs,
+            [g],
+            test_values,
         )
 
 
 @pytest.mark.parametrize(
-    "x, exc",
+    "x, exc,test_values",
     [
         (
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
+            pt.dmatrix(),
             None,
+            [(lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64"))],
         ),
         (
-            set_test_value(
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(rng.poisson(size=(3, 3)).astype("int64")),
-            ),
+            pt.lmatrix(),
             None,
+            [(lambda x: x.T.dot(x))(rng.poisson(size=(3, 3)).astype("int64"))],
         ),
     ],
 )
-def test_SLogDet(x, exc):
+def test_SLogDet(x, exc, test_values):
     g = nlinalg.SLogDet()(x)
-    g_fg = FunctionGraph(outputs=g)
+    inputs = [x]
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            inputs,
+            g,
+            test_values,
         )
 
 
@@ -154,278 +137,209 @@ y = np.array(
 
 
 @pytest.mark.parametrize(
-    "x, exc",
+    "x, exc, test_values",
     [
+        (pt.dmatrix(), None, [(lambda x: x.T.dot(x))(x)]),
+        (pt.dmatrix(), None, [(lambda x: x.T.dot(x))(y)]),
         (
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(x),
-            ),
+            pt.lmatrix(),
             None,
-        ),
-        (
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(y),
-            ),
-            None,
-        ),
-        (
-            set_test_value(
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
-            None,
+            [(lambda x: x.T.dot(x))(rng.integers(1, 10, size=(3, 3)).astype("int64"))],
         ),
     ],
 )
-def test_Eig(x, exc):
+def test_Eig(x, exc, test_values):
     g = nlinalg.Eig()(x)
-
+    inputs = [x]
+    outputs = []
     if isinstance(g, list):
-        g_fg = FunctionGraph(outputs=g)
+        outputs = g
     else:
-        g_fg = FunctionGraph(outputs=[g])
+        outputs = [g]
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            inputs,
+            outputs,
+            test_values,
         )
 
 
 @pytest.mark.parametrize(
-    "x, uplo, exc",
+    "x, uplo, exc, test_values",
     [
         (
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
+            pt.dmatrix(),
             "L",
             None,
+            [(lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64"))],
         ),
         (
-            set_test_value(
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
+            pt.lmatrix(),
             "U",
             UserWarning,
+            [(lambda x: x.T.dot(x))(rng.integers(1, 10, size=(3, 3)).astype("int64"))],
         ),
     ],
 )
-def test_Eigh(x, uplo, exc):
+def test_Eigh(x, uplo, exc, test_values):
     g = nlinalg.Eigh(uplo)(x)
-
+    inputs = [x]
+    outputs = []
     if isinstance(g, list):
-        g_fg = FunctionGraph(outputs=g)
+        outputs = g
     else:
-        g_fg = FunctionGraph(outputs=[g])
+        outputs = [g]
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            inputs,
+            outputs,
+            test_values,
         )
 
 
 @pytest.mark.parametrize(
-    "op, x, exc, op_args",
+    "op, x, exc, op_args,test_values",
     [
         (
             nlinalg.MatrixInverse,
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
+            pt.dmatrix(),
             None,
             (),
+            [(lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64"))],
         ),
         (
             nlinalg.MatrixInverse,
-            set_test_value(
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
+            pt.lmatrix(),
             None,
             (),
+            [(lambda x: x.T.dot(x))(rng.integers(1, 10, size=(3, 3)).astype("int64"))],
         ),
         (
             nlinalg.MatrixPinv,
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
+            pt.dmatrix(),
             None,
             (True,),
+            [(lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64"))],
         ),
         (
             nlinalg.MatrixPinv,
-            set_test_value(
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
+            pt.lmatrix(),
             None,
             (False,),
+            [(lambda x: x.T.dot(x))(rng.integers(1, 10, size=(3, 3)).astype("int64"))],
         ),
     ],
 )
-def test_matrix_inverses(op, x, exc, op_args):
+def test_matrix_inverses(op, x, exc, op_args, test_values):
     g = op(*op_args)(x)
-    g_fg = FunctionGraph(outputs=[g])
+    inputs = [x]
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            inputs,
+            [g],
+            test_values,
         )
 
 
 @pytest.mark.parametrize(
-    "x, mode, exc",
+    "x, mode, exc,  test_values",
     [
         (
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
+            pt.dmatrix(),
             "reduced",
             None,
+            [(lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64"))],
         ),
         (
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
+            pt.dmatrix(),
             "r",
             None,
+            [(lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64"))],
         ),
         (
-            set_test_value(
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
+            pt.lmatrix(),
             "reduced",
             None,
+            [(lambda x: x.T.dot(x))(rng.integers(1, 10, size=(3, 3)).astype("int64"))],
         ),
         (
-            set_test_value(
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
+            pt.lmatrix(),
             "complete",
             UserWarning,
+            [(lambda x: x.T.dot(x))(rng.integers(1, 10, size=(3, 3)).astype("int64"))],
         ),
     ],
 )
-def test_QRFull(x, mode, exc):
+def test_QRFull(x, mode, exc, test_values):
     g = nlinalg.QRFull(mode)(x)
-
+    inputs = [x]
+    outputs = []
     if isinstance(g, list):
-        g_fg = FunctionGraph(outputs=g)
+        outputs = g
     else:
-        g_fg = FunctionGraph(outputs=[g])
+        outputs = [g]
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            inputs,
+            outputs,
+            test_values,
         )
 
 
 @pytest.mark.parametrize(
-    "x, full_matrices, compute_uv, exc",
+    "x, full_matrices, compute_uv, exc,test_values",
     [
         (
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
+            pt.dmatrix(),
             True,
             True,
             None,
+            [(lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64"))],
         ),
         (
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
+            pt.dmatrix(),
             False,
             True,
             None,
+            [(lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64"))],
         ),
         (
-            set_test_value(
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
+            pt.lmatrix(),
             True,
             True,
             None,
+            [(lambda x: x.T.dot(x))(rng.integers(1, 10, size=(3, 3)).astype("int64"))],
         ),
         (
-            set_test_value(
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
+            pt.lmatrix(),
             True,
             False,
             None,
+            [(lambda x: x.T.dot(x))(rng.integers(1, 10, size=(3, 3)).astype("int64"))],
         ),
     ],
 )
-def test_SVD(x, full_matrices, compute_uv, exc):
+def test_SVD(x, full_matrices, compute_uv, exc, test_values):
     g = nlinalg.SVD(full_matrices, compute_uv)(x)
-
+    inputs = [x]
+    outputs = []
     if isinstance(g, list):
-        g_fg = FunctionGraph(outputs=g)
+        outputs = g
     else:
-        g_fg = FunctionGraph(outputs=[g])
+        outputs = [g]
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:
         compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
+            inputs,
+            outputs,
+            test_values,
         )

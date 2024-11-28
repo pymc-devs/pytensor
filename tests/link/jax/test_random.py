@@ -7,13 +7,11 @@ import pytensor.tensor as pt
 import pytensor.tensor.random.basic as ptr
 from pytensor import clone_replace
 from pytensor.compile.function import function
-from pytensor.compile.sharedvalue import SharedVariable, shared
-from pytensor.graph.basic import Constant
-from pytensor.graph.fg import FunctionGraph
+from pytensor.compile.sharedvalue import shared
 from pytensor.tensor.random.basic import RandomVariable
 from pytensor.tensor.random.type import RandomType
 from pytensor.tensor.random.utils import RandomStream
-from tests.link.jax.test_basic import compare_jax_and_py, jax_mode, set_test_value
+from tests.link.jax.test_basic import compare_jax_and_py, jax_mode
 from tests.tensor.random.test_basic import (
     batched_permutation_tester,
     batched_unweighted_choice_without_replacement_tester,
@@ -135,332 +133,276 @@ def test_replaced_shared_rng_storage_ordering_equality():
 
 
 @pytest.mark.parametrize(
-    "rv_op, dist_params, base_size, cdf_name, params_conv",
+    "rv_op, dist_params, base_size, cdf_name, params_conv, test_values",
     [
         (
             ptr.beta,
             [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([1.0, 2.0], dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dscalar(),
-                    np.array(1.0, dtype=np.float64),
-                ),
+                pt.dvector(),
+                pt.dscalar(),
             ],
             (2,),
             "beta",
             lambda *args: args,
+            [
+                np.array([1.0, 2.0], dtype=np.float64),
+                np.array(1.0, dtype=np.float64),
+            ],
         ),
         (
             ptr.cauchy,
             [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([1.0, 2.0], dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dscalar(),
-                    np.array(1.0, dtype=np.float64),
-                ),
+                pt.dvector(),
+                pt.dscalar(),
             ],
             (2,),
             "cauchy",
             lambda *args: args,
+            [np.array([1.0, 2.0], dtype=np.float64), np.array(1.0, dtype=np.float64)],
         ),
         (
             ptr.exponential,
             [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([1.0, 2.0], dtype=np.float64),
-                ),
+                pt.dvector(),
             ],
             (2,),
             "expon",
             lambda *args: (0, args[0]),
+            [np.array([1.0, 2.0], dtype=np.float64)],
         ),
         (
             ptr._gamma,
             [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([1.0, 2.0], dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dvector(),
-                    np.array([0.5, 3.0], dtype=np.float64),
-                ),
+                pt.dvector(),
+                pt.dvector(),
             ],
             (2,),
             "gamma",
             lambda a, b: (a, 0.0, b),
+            [
+                np.array([1.0, 2.0], dtype=np.float64),
+                np.array([0.5, 3.0], dtype=np.float64),
+            ],
         ),
         (
             ptr.gumbel,
             [
-                set_test_value(
-                    pt.lvector(),
-                    np.array([1, 2], dtype=np.int64),
-                ),
-                set_test_value(
-                    pt.dscalar(),
-                    np.array(1.0, dtype=np.float64),
-                ),
+                pt.lvector(),
+                pt.dscalar(),
             ],
             (2,),
             "gumbel_r",
             lambda *args: args,
+            [np.array([1, 2], dtype=np.int64), np.array(1.0, dtype=np.float64)],
         ),
         (
             ptr.laplace,
             [
-                set_test_value(pt.dvector(), np.array([1.0, 2.0], dtype=np.float64)),
-                set_test_value(pt.dscalar(), np.array(1.0, dtype=np.float64)),
+                pt.dvector(),
+                pt.dscalar(),
             ],
             (2,),
             "laplace",
             lambda *args: args,
+            [np.array([1.0, 2.0], dtype=np.float64), np.array(1.0, dtype=np.float64)],
         ),
         (
             ptr.logistic,
             [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([1.0, 2.0], dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dscalar(),
-                    np.array(1.0, dtype=np.float64),
-                ),
+                pt.dvector(),
+                pt.dscalar(),
             ],
             (2,),
             "logistic",
             lambda *args: args,
+            [np.array([1.0, 2.0], dtype=np.float64), np.array(1.0, dtype=np.float64)],
         ),
         (
             ptr.lognormal,
             [
-                set_test_value(
-                    pt.lvector(),
-                    np.array([0, 0], dtype=np.int64),
-                ),
-                set_test_value(
-                    pt.dscalar(),
-                    np.array(1.0, dtype=np.float64),
-                ),
+                pt.lvector(),
+                pt.dscalar(),
             ],
             (2,),
             "lognorm",
             lambda mu, sigma: (sigma, 0, np.exp(mu)),
+            [np.array([0, 0], dtype=np.int64), np.array(1.0, dtype=np.float64)],
         ),
         (
             ptr.normal,
             [
-                set_test_value(
-                    pt.lvector(),
-                    np.array([1, 2], dtype=np.int64),
-                ),
-                set_test_value(
-                    pt.dscalar(),
-                    np.array(1.0, dtype=np.float64),
-                ),
+                pt.lvector(),
+                pt.dscalar(),
             ],
             (2,),
             "norm",
             lambda *args: args,
+            [np.array([1, 2], dtype=np.int64), np.array(1.0, dtype=np.float64)],
         ),
         (
             ptr.pareto,
             [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([1.0, 2.0], dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dvector(),
-                    np.array([2.0, 10.0], dtype=np.float64),
-                ),
+                pt.dvector(),
+                pt.dvector(),
             ],
             (2,),
             "pareto",
             lambda shape, scale: (shape, 0.0, scale),
+            [
+                np.array([1.0, 2.0], dtype=np.float64),
+                np.array([2.0, 10.0], dtype=np.float64),
+            ],
         ),
         (
             ptr.poisson,
             [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([100000.0, 200000.0], dtype=np.float64),
-                ),
+                pt.dvector(),
             ],
             (2,),
             "poisson",
             lambda *args: args,
+            [
+                np.array([100000.0, 200000.0], dtype=np.float64),
+            ],
         ),
         (
             ptr.integers,
             [
-                set_test_value(
-                    pt.lscalar(),
-                    np.array(0, dtype=np.int64),
-                ),
-                set_test_value(  # high-value necessary since test on cdf
-                    pt.lscalar(),
-                    np.array(1000, dtype=np.int64),
-                ),
+                pt.lscalar(),
+                pt.lscalar(),
             ],
             (),
             "randint",
             lambda *args: args,
+            [
+                np.array(0, dtype=np.int64),
+                np.array(1000, dtype=np.int64),
+            ],
         ),
-        (
-            ptr.standard_normal,
-            [],
-            (2,),
-            "norm",
-            lambda *args: args,
-        ),
+        (ptr.standard_normal, [], (2,), "norm", lambda *args: args, []),
         (
             ptr.t,
             [
-                set_test_value(
-                    pt.dscalar(),
-                    np.array(2.0, dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dvector(),
-                    np.array([1.0, 2.0], dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dscalar(),
-                    np.array(1.0, dtype=np.float64),
-                ),
+                pt.dscalar(),
+                pt.dvector(),
+                pt.dscalar(),
             ],
             (2,),
             "t",
             lambda *args: args,
+            [
+                np.array(2.0, dtype=np.float64),
+                np.array([1.0, 2.0], dtype=np.float64),
+                np.array(1.0, dtype=np.float64),
+            ],
         ),
         (
             ptr.uniform,
             [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([1.0, 2.0], dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dscalar(),
-                    np.array(1000.0, dtype=np.float64),
-                ),
+                pt.dvector(),
+                pt.dscalar(),
             ],
             (2,),
             "uniform",
             lambda *args: args,
+            [
+                np.array([1.0, 2.0], dtype=np.float64),
+                np.array(1000.0, dtype=np.float64),
+            ],
         ),
         (
             ptr.halfnormal,
             [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([-1.0, 200.0], dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dscalar(),
-                    np.array(1000.0, dtype=np.float64),
-                ),
+                pt.dvector(),
+                pt.dscalar(),
             ],
             (2,),
             "halfnorm",
             lambda *args: args,
+            [
+                np.array([-1.0, 200.0], dtype=np.float64),
+                np.array(1000.0, dtype=np.float64),
+            ],
         ),
         (
             ptr.invgamma,
             [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([10.4, 2.8], dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dvector(),
-                    np.array([3.4, 7.3], dtype=np.float64),
-                ),
+                pt.dvector(),
+                pt.dvector(),
             ],
             (2,),
             "invgamma",
             lambda a, b: (a, 0, b),
+            [
+                np.array([10.4, 2.8], dtype=np.float64),
+                np.array([3.4, 7.3], dtype=np.float64),
+            ],
         ),
         (
             ptr.chisquare,
             [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([2.4, 4.9], dtype=np.float64),
-                ),
+                pt.dvector(),
             ],
             (2,),
             "chi2",
             lambda *args: args,
+            [
+                np.array([2.4, 4.9], dtype=np.float64),
+            ],
         ),
         (
             ptr.gengamma,
             [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([10.4, 2.8], dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dvector(),
-                    np.array([3.4, 7.3], dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dvector(),
-                    np.array([0.9, 2.0], dtype=np.float64),
-                ),
+                pt.dvector(),
+                pt.dvector(),
+                pt.dvector(),
             ],
             (2,),
             "gengamma",
             lambda alpha, p, lambd: (alpha / p, p, 0, lambd),
+            [
+                np.array([10.4, 2.8], dtype=np.float64),
+                np.array([3.4, 7.3], dtype=np.float64),
+                np.array([0.9, 2.0], dtype=np.float64),
+            ],
         ),
         (
             ptr.wald,
             [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([10.4, 2.8], dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dvector(),
-                    np.array([4.5, 2.0], dtype=np.float64),
-                ),
+                pt.dvector(),
+                pt.dvector(),
             ],
             (2,),
             "invgauss",
             # https://stackoverflow.com/a/48603469
             lambda mean, scale: (mean / scale, 0, scale),
+            [
+                np.array([10.4, 2.8], dtype=np.float64),
+                np.array([4.5, 2.0], dtype=np.float64),
+            ],
         ),
         pytest.param(
             ptr.vonmises,
             [
-                set_test_value(
-                    pt.dvector(),
-                    np.array([-0.5, 1.3], dtype=np.float64),
-                ),
-                set_test_value(
-                    pt.dvector(),
-                    np.array([5.5, 13.0], dtype=np.float64),
-                ),
+                pt.dvector(),
+                pt.dvector(),
             ],
             (2,),
             "vonmises",
             lambda mu, kappa: (kappa, mu),
+            [
+                np.array([-0.5, 1.3], dtype=np.float64),
+                np.array([5.5, 13.0], dtype=np.float64),
+            ],
             marks=pytest.mark.skipif(
                 not numpyro_available, reason="VonMises dispatch requires numpyro"
             ),
         ),
     ],
 )
-def test_random_RandomVariable(rv_op, dist_params, base_size, cdf_name, params_conv):
+def test_random_RandomVariable(
+    rv_op, dist_params, base_size, cdf_name, params_conv, test_values
+):
     """The JAX samplers are not one-to-one with NumPy samplers so we
     need to use a statistical test to make sure that the transpilation
     is correct.
@@ -471,20 +413,14 @@ def test_random_RandomVariable(rv_op, dist_params, base_size, cdf_name, params_c
         The transpiled `RandomVariable` `Op`.
     dist_params
         The parameters passed to the op.
-
     """
+
     rng = shared(np.random.default_rng(29403))
     g = rv_op(*dist_params, size=(10000, *base_size), rng=rng)
     g_fn = compile_random_function(dist_params, g, mode=jax_mode)
-    samples = g_fn(
-        *[
-            i.tag.test_value
-            for i in g_fn.maker.fgraph.inputs
-            if not isinstance(i, SharedVariable | Constant)
-        ]
-    )
+    samples = g_fn(*test_values)
 
-    bcast_dist_args = np.broadcast_arrays(*[i.tag.test_value for i in dist_params])
+    bcast_dist_args = np.broadcast_arrays(*test_values)
 
     for idx in np.ndindex(*base_size):
         cdf_params = params_conv(*(arg[idx] for arg in bcast_dist_args))
@@ -763,13 +699,12 @@ def test_random_unimplemented():
     nonexistentrv = NonExistentRV()
     rng = shared(np.random.default_rng(123))
     out = nonexistentrv(rng=rng)
-    fgraph = FunctionGraph([out.owner.inputs[0]], [out], clone=False)
 
     with pytest.raises(NotImplementedError):
         with pytest.warns(
             UserWarning, match=r"The RandomType SharedVariables \[.+\] will not be used"
         ):
-            compare_jax_and_py(fgraph, [])
+            compare_jax_and_py([out.owner.inputs[0]], [out], [])
 
 
 def test_random_custom_implementation():
@@ -798,11 +733,10 @@ def test_random_custom_implementation():
     nonexistentrv = CustomRV()
     rng = shared(np.random.default_rng(123))
     out = nonexistentrv(rng=rng)
-    fgraph = FunctionGraph([out.owner.inputs[0]], [out], clone=False)
     with pytest.warns(
         UserWarning, match=r"The RandomType SharedVariables \[.+\] will not be used"
     ):
-        compare_jax_and_py(fgraph, [])
+        compare_jax_and_py([out.owner.inputs[0]], [out], [])
 
 
 def test_random_concrete_shape():

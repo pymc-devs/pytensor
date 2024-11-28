@@ -10,9 +10,9 @@ from pytensor.compile.mode import JAX, Mode
 from pytensor.compile.sharedvalue import SharedVariable, shared
 from pytensor.configdefaults import config
 from pytensor.graph import RewriteDatabaseQuery
-from pytensor.graph.basic import Apply
+from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import Op, get_test_value
+from pytensor.graph.op import Op
 from pytensor.ifelse import ifelse
 from pytensor.link.jax import JAXLinker
 from pytensor.raise_op import assert_op
@@ -34,25 +34,27 @@ py_mode = Mode(linker="py", optimizer=None)
 
 
 def compare_jax_and_py(
-    fgraph: FunctionGraph,
-    test_inputs: Iterable,
+    inputs: Iterable[Variable] | None = None,
+    outputs: Variable | Iterable[Variable] | dict[str, Variable] | None = None,
+    test_inputs: Iterable | None = None,
     assert_fn: Callable | None = None,
     must_be_device_array: bool = True,
     jax_mode=jax_mode,
     py_mode=py_mode,
 ):
-    """Function to compare python graph output and jax compiled output for testing equality
+    """Function to compare python function output and jax compiled output for testing equality
 
-    In the tests below computational graphs are defined in PyTensor. These graphs are then passed to
-    this function which then compiles the graphs in both jax and python, runs the calculation
-    in both and checks if the results are the same
+    The inputs and outputs are then passed to this function which then compiles the given function in both
+    jax and python, runs the calculation in both and checks if the results are the same
 
     Parameters
     ----------
-    fgraph: FunctionGraph
-        PyTensor function Graph object
+    inputs: iterable[variable]
+        Input variables of the function.
+    outputs: interable[variable]
+        Output variables of the function.
     test_inputs: iter
-        Numerical inputs for testing the function graph
+        Numerical inputs for testing the function.
     assert_fn: func, opt
         Assert function used to check for equality between python and jax. If not
         provided uses np.testing.assert_allclose
@@ -68,8 +70,8 @@ def compare_jax_and_py(
     if assert_fn is None:
         assert_fn = partial(np.testing.assert_allclose, rtol=1e-4)
 
-    fn_inputs = [i for i in fgraph.inputs if not isinstance(i, SharedVariable)]
-    pytensor_jax_fn = function(fn_inputs, fgraph.outputs, mode=jax_mode)
+    fn_inputs = [i for i in inputs if not isinstance(i, SharedVariable)]
+    pytensor_jax_fn = function(fn_inputs, outputs, mode=jax_mode)
     jax_res = pytensor_jax_fn(*test_inputs)
 
     if must_be_device_array:
@@ -78,10 +80,10 @@ def compare_jax_and_py(
         else:
             assert isinstance(jax_res, jax.interpreters.xla.DeviceArray)
 
-    pytensor_py_fn = function(fn_inputs, fgraph.outputs, mode=py_mode)
+    pytensor_py_fn = function(fn_inputs, outputs, mode=py_mode)
     py_res = pytensor_py_fn(*test_inputs)
 
-    if len(fgraph.outputs) > 1:
+    if len(outputs) > 1:
         for j, p in zip(jax_res, py_res):
             assert_fn(j, p)
     else:
@@ -187,16 +189,14 @@ def test_jax_ifelse():
     false_vals = np.r_[-1, -2, -3]
 
     x = ifelse(np.array(True), true_vals, false_vals)
-    x_fg = FunctionGraph([], [x])
 
-    compare_jax_and_py(x_fg, [])
+    compare_jax_and_py([], [x], [])
 
     a = dscalar("a")
     a.tag.test_value = np.array(0.2, dtype=config.floatX)
     x = ifelse(a < 0.5, true_vals, false_vals)
-    x_fg = FunctionGraph([a], [x])  # I.e. False
 
-    compare_jax_and_py(x_fg, [get_test_value(i) for i in x_fg.inputs])
+    compare_jax_and_py([a], [x], [a.tag.test_value])
 
 
 def test_jax_checkandraise():
@@ -209,11 +209,6 @@ def test_jax_checkandraise():
         function((p,), res, mode=jax_mode)
 
 
-def set_test_value(x, v):
-    x.tag.test_value = v
-    return x
-
-
 def test_OpFromGraph():
     x, y, z = matrices("xyz")
     ofg_1 = OpFromGraph([x, y], [x + y], inline=False)
@@ -221,10 +216,11 @@ def test_OpFromGraph():
 
     o1, o2 = ofg_2(y, z)
     out = ofg_1(x, o1) + o2
-    out_fg = FunctionGraph([x, y, z], [out])
 
     xv = np.ones((2, 2), dtype=config.floatX)
     yv = np.ones((2, 2), dtype=config.floatX) * 3
     zv = np.ones((2, 2), dtype=config.floatX) * 5
 
-    compare_jax_and_py(out_fg, [xv, yv, zv])
+    compare_jax_and_py([x, y, z], [out], [xv, yv, zv])
+
+    test_shared()

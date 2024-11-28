@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from pytensor.graph import FunctionGraph
 from pytensor.tensor import as_tensor
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -44,8 +43,7 @@ def test_Subtensor(x, indices):
     """Test NumPy's basic indexing."""
     out_pt = x[indices]
     assert isinstance(out_pt.owner.op, Subtensor)
-    out_fg = FunctionGraph([], [out_pt])
-    compare_numba_and_py(out_fg, [])
+    compare_numba_and_py([], [out_pt], [])
 
 
 @pytest.mark.parametrize(
@@ -59,16 +57,14 @@ def test_AdvancedSubtensor1(x, indices):
     """Test NumPy's advanced indexing in one dimension."""
     out_pt = advanced_subtensor1(x, *indices)
     assert isinstance(out_pt.owner.op, AdvancedSubtensor1)
-    out_fg = FunctionGraph([], [out_pt])
-    compare_numba_and_py(out_fg, [])
+    compare_numba_and_py([], [out_pt], [])
 
 
 def test_AdvancedSubtensor1_out_of_bounds():
     out_pt = advanced_subtensor1(np.arange(3), [4])
     assert isinstance(out_pt.owner.op, AdvancedSubtensor1)
-    out_fg = FunctionGraph([], [out_pt])
     with pytest.raises(IndexError):
-        compare_numba_and_py(out_fg, [])
+        compare_numba_and_py([], [out_pt], [])
 
 
 @pytest.mark.parametrize(
@@ -141,7 +137,6 @@ def test_AdvancedSubtensor(x, indices, objmode_needed):
     x_pt = x.type()
     out_pt = x_pt[indices]
     assert isinstance(out_pt.owner.op, AdvancedSubtensor)
-    out_fg = FunctionGraph([x_pt], [out_pt])
     with (
         pytest.warns(
             UserWarning,
@@ -151,7 +146,8 @@ def test_AdvancedSubtensor(x, indices, objmode_needed):
         else contextlib.nullcontext()
     ):
         compare_numba_and_py(
-            out_fg,
+            [x_pt],
+            [out_pt],
             [x.data],
             numba_mode=numba_mode.including("specialize"),
         )
@@ -185,19 +181,16 @@ def test_AdvancedSubtensor(x, indices, objmode_needed):
 def test_IncSubtensor(x, y, indices):
     out_pt = set_subtensor(x[indices], y)
     assert isinstance(out_pt.owner.op, IncSubtensor)
-    out_fg = FunctionGraph([], [out_pt])
-    compare_numba_and_py(out_fg, [])
+    compare_numba_and_py([], [out_pt], [])
 
     out_pt = inc_subtensor(x[indices], y)
     assert isinstance(out_pt.owner.op, IncSubtensor)
-    out_fg = FunctionGraph([], [out_pt])
-    compare_numba_and_py(out_fg, [])
+    compare_numba_and_py([], [out_pt], [])
 
     x_pt = x.type()
     out_pt = set_subtensor(x_pt[indices], y, inplace=True)
     assert isinstance(out_pt.owner.op, IncSubtensor)
-    out_fg = FunctionGraph([x_pt], [out_pt])
-    compare_numba_and_py(out_fg, [x.data])
+    compare_numba_and_py([x_pt], [out_pt], [x.data])
 
 
 @pytest.mark.parametrize(
@@ -239,13 +232,11 @@ def test_IncSubtensor(x, y, indices):
 def test_AdvancedIncSubtensor1(x, y, indices):
     out_pt = advanced_set_subtensor1(x, y, *indices)
     assert isinstance(out_pt.owner.op, AdvancedIncSubtensor1)
-    out_fg = FunctionGraph([], [out_pt])
-    compare_numba_and_py(out_fg, [])
+    compare_numba_and_py([], [out_pt], [])
 
     out_pt = advanced_inc_subtensor1(x, y, *indices)
     assert isinstance(out_pt.owner.op, AdvancedIncSubtensor1)
-    out_fg = FunctionGraph([], [out_pt])
-    compare_numba_and_py(out_fg, [])
+    compare_numba_and_py([], [out_pt], [])
 
     # With symbolic inputs
     x_pt = x.type()
@@ -253,15 +244,13 @@ def test_AdvancedIncSubtensor1(x, y, indices):
 
     out_pt = AdvancedIncSubtensor1(inplace=True)(x_pt, y_pt, *indices)
     assert isinstance(out_pt.owner.op, AdvancedIncSubtensor1)
-    out_fg = FunctionGraph([x_pt, y_pt], [out_pt])
-    compare_numba_and_py(out_fg, [x.data, y.data])
+    compare_numba_and_py([x_pt, y_pt], [out_pt], [x.data, y.data])
 
     out_pt = AdvancedIncSubtensor1(set_instead_of_inc=True, inplace=True)(
         x_pt, y_pt, *indices
     )
     assert isinstance(out_pt.owner.op, AdvancedIncSubtensor1)
-    out_fg = FunctionGraph([x_pt, y_pt], [out_pt])
-    compare_numba_and_py(out_fg, [x.data, y.data])
+    compare_numba_and_py([x_pt, y_pt], [out_pt], [x.data, y.data])
 
 
 @pytest.mark.parametrize(
@@ -355,7 +344,6 @@ def test_AdvancedIncSubtensor(
 ):
     out_pt = set_subtensor(x[indices], y)
     assert isinstance(out_pt.owner.op, AdvancedIncSubtensor)
-    out_fg = FunctionGraph([], [out_pt])
 
     with (
         pytest.warns(
@@ -365,11 +353,10 @@ def test_AdvancedIncSubtensor(
         if set_requires_objmode
         else contextlib.nullcontext()
     ):
-        compare_numba_and_py(out_fg, [])
+        compare_numba_and_py([], [out_pt], [])
 
     out_pt = inc_subtensor(x[indices], y, ignore_duplicates=not duplicate_indices)
     assert isinstance(out_pt.owner.op, AdvancedIncSubtensor)
-    out_fg = FunctionGraph([], [out_pt])
     with (
         pytest.warns(
             UserWarning,
@@ -378,7 +365,7 @@ def test_AdvancedIncSubtensor(
         if inc_requires_objmode
         else contextlib.nullcontext()
     ):
-        compare_numba_and_py(out_fg, [])
+        compare_numba_and_py([], [out_pt], [])
 
     x_pt = x.type()
     out_pt = set_subtensor(x_pt[indices], y)
@@ -386,7 +373,6 @@ def test_AdvancedIncSubtensor(
     # hack it on here
     out_pt.owner.op.inplace = True
     assert isinstance(out_pt.owner.op, AdvancedIncSubtensor)
-    out_fg = FunctionGraph([x_pt], [out_pt])
     with (
         pytest.warns(
             UserWarning,
@@ -395,4 +381,4 @@ def test_AdvancedIncSubtensor(
         if set_requires_objmode
         else contextlib.nullcontext()
     ):
-        compare_numba_and_py(out_fg, [x.data])
+        compare_numba_and_py([x_pt], [out_pt], [x.data])
