@@ -35,7 +35,7 @@ def pytorch_funcify_Elemwise(op, node, **kwargs):
             return base_fn(*inputs)
 
     elif isinstance(scalar_op, ScalarLoop):
-        return elemwise_scalar_loop(base_fn, op, node, **kwargs)
+        return elemwise_ravel_fn(base_fn, op, node, **kwargs)
 
     else:
 
@@ -182,7 +182,7 @@ def jax_funcify_SoftmaxGrad(op, **kwargs):
     return softmax_grad
 
 
-def elemwise_scalar_loop(base_fn, op, node, **kwargs):
+def elemwise_ravel_fn(base_fn, op, node, **kwargs):
     """
     ScalarLoop + Elemwise is too common
     to not work, but https://github.com/pymc-devs/pytensor/issues/1031,
