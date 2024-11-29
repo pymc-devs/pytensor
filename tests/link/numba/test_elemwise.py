@@ -16,7 +16,7 @@ from pytensor.gradient import grad
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.math import All, Any, Max, Mean, Min, Prod, ProdWithoutZeros, Sum
+from pytensor.tensor.math import All, Any, Max, Min, Prod, ProdWithoutZeros, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 from tests.link.numba.test_basic import (
     compare_numba_and_py,
@@ -255,18 +255,6 @@ def test_Dimshuffle_non_contiguous():
             lambda x, axis=None, dtype=None, acc_dtype=None: Any(axis)(x),
             0,
             set_test_value(pt.vector(), np.arange(3, dtype=config.floatX)),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Mean(axis)(x),
-            0,
-            set_test_value(pt.vector(), np.arange(3, dtype=config.floatX)),
-        ),
-        (
-            lambda x, axis=None, dtype=None, acc_dtype=None: Mean(axis)(x),
-            0,
-            set_test_value(
-                pt.matrix(), np.arange(3 * 2, dtype=config.floatX).reshape((3, 2))
-            ),
         ),
         (
             lambda x, axis=None, dtype=None, acc_dtype=None: Sum(

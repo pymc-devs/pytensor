@@ -1316,63 +1316,7 @@ def complex_from_polar(abs, angle):
     """Return complex-valued tensor from polar coordinate specification."""
 
 
-class Mean(FixedOpCAReduce):
-    __props__ = ("axis",)
-    nfunc_spec = ("mean", 1, 1)
-
-    def __init__(self, axis=None):
-        super().__init__(ps.mean, axis)
-        assert self.axis is None or len(self.axis) == 1
-
-    def __str__(self):
-        if self.axis is not None:
-            args = ", ".join(str(x) for x in self.axis)
-            return f"Mean{{{args}}}"
-        else:
-            return "Mean"
-
-    def _output_dtype(self, idtype):
-        # we want to protect against overflow
-        return "float64"
-
-    def perform(self, node, inp, out):
-        (input,) = inp
-        (output,) = out
-        if self.axis is None:
-            axis = None
-        else:
-            axis = self.axis[0]
-        # numpy.asarray is needed as otherwise we can end up with a
-        # numpy scalar.
-        output[0] = np.asarray(np.mean(input, dtype="float64", axis=axis))
-
-    def c_code(self, node, name, inames, onames, sub):
-        ret = super().c_code(node, name, inames, onames, sub)
-
-        if self.axis is not None:
-            return ret
-
-        # TODO: c_code perform support only axis is None
-        return (
-            ret
-            + f"""
-  *((double *)PyArray_DATA({onames[0]})) /= PyArray_SIZE({inames[0]});
-  """
-        )
-
-    def clone(self, **kwargs):
-        axis = kwargs.get("axis", self.axis)
-        return type(self)(axis=axis)
-
-
-# TODO: implement the grad. When done and tested, you can make this the default
-# version.
-#    def grad(self, (x,), (gout,)):
-#      import pdb;pdb.set_trace()
-#      return grad(mean(x, self.axis, op=False),[x])
-
-
-def mean(input, axis=None, dtype=None, op=False, keepdims=False, acc_dtype=None):
+def mean(input, axis=None, dtype=None, keepdims=False, acc_dtype=None):
     """
     Computes the mean value along the given axis(es) of a tensor `input`.
 
@@ -1397,25 +1341,6 @@ def mean(input, axis=None, dtype=None, op=False, keepdims=False, acc_dtype=None)
         be in a float type). If None, then we use the same rules as `sum()`.
     """
     input = as_tensor_variable(input)
-    if op:
-        if dtype not in (None, "float64"):
-            raise NotImplementedError(
-                "The Mean op does not support the dtype argument, "
-                "and will always use float64. If you want to specify "
-                "the dtype, call tensor.mean(..., op=False).",
-                dtype,
-            )
-        if acc_dtype not in (None, "float64"):
-            raise NotImplementedError(
-                "The Mean op does not support the acc_dtype argument, "
-                "and will always use float64. If you want to specify "
-                "acc_dtype, call tensor.mean(..., op=False).",
-                dtype,
-            )
-        out = Mean(axis)(input)
-        if keepdims:
-            out = makeKeepDims(input, out, axis)
-        return out
 
     if dtype is not None:
         # The summation will be done with the specified dtype.

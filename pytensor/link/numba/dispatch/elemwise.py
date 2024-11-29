@@ -34,7 +34,6 @@ from pytensor.scalar.basic import (
     Add,
     Composite,
     IntDiv,
-    Mean,
     Mul,
     ScalarMaximum,
     ScalarMinimum,
@@ -75,11 +74,6 @@ def scalar_in_place_fn_Add(op, idx, res, arr):
 @scalar_in_place_fn.register(Sub)
 def scalar_in_place_fn_Sub(op, idx, res, arr):
     return f"{res}[{idx}] -= {arr}"
-
-
-@scalar_in_place_fn.register(Mean)
-def scalar_in_place_fn_Mean(op, idx, res, arr):
-    return f"{res}[{idx}] += ({arr} - {res}[{idx}]) / (i + 1)"
 
 
 @scalar_in_place_fn.register(Mul)
