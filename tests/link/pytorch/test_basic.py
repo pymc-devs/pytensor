@@ -393,6 +393,7 @@ def test_pytorch_softplus():
     f = FunctionGraph([x], [out])
     compare_pytorch_and_py(f, [np.random.rand(3)])
 
+
 def test_ScalarLoop():
     n_steps = int64("n_steps")
     x0 = float64("x0")
