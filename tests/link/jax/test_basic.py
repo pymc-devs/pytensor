@@ -76,7 +76,7 @@ def compare_jax_and_py(
         if isinstance(jax_res, list):
             assert all(isinstance(res, jax.Array) for res in jax_res)
         else:
-            assert isinstance(jax_res, jax.interpreters.xla.DeviceArray)
+            assert isinstance(jax_res, jax.Array)
 
     pytensor_py_fn = function(fn_inputs, fgraph.outputs, mode=py_mode)
     py_res = pytensor_py_fn(*test_inputs)

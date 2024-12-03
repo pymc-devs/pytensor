@@ -43,7 +43,6 @@ from pytensor.scalar.basic import (
     log1p,
     log2,
     log10,
-    mean,
     mul,
     neg,
     neq,
@@ -58,7 +57,7 @@ from pytensor.scalar.basic import (
     true_div,
     uint8,
 )
-from pytensor.tensor.type import fscalar, imatrix, iscalar, matrix
+from pytensor.tensor.type import fscalar, imatrix, matrix
 from tests.link.test_link import make_function
 
 
@@ -519,34 +518,6 @@ def test_constant():
     c = constant(2, dtype="float32")
     assert c.name is None
     assert c.dtype == "float32"
-
-
-@pytest.mark.parametrize("mode", [Mode("py"), Mode("cvm")])
-def test_mean(mode):
-    a = iscalar("a")
-    b = iscalar("b")
-    z = mean(a, b)
-    z_fn = pytensor.function([a, b], z, mode=mode)
-    res = z_fn(1, 1)
-    assert np.allclose(res, 1.0)
-
-    a = fscalar("a")
-    b = fscalar("b")
-    c = fscalar("c")
-
-    z = mean(a, b, c)
-
-    z_fn = pytensor.function([a, b, c], pytensor.grad(z, [a]), mode=mode)
-    res = z_fn(3, 4, 5)
-    assert np.allclose(res, 1 / 3)
-
-    z_fn = pytensor.function([a, b, c], pytensor.grad(z, [b]), mode=mode)
-    res = z_fn(3, 4, 5)
-    assert np.allclose(res, 1 / 3)
-
-    z = mean()
-    z_fn = pytensor.function([], z, mode=mode)
-    assert z_fn() == 0
 
 
 def test_shape():

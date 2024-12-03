@@ -3,7 +3,6 @@ import warnings
 from numpy.random import Generator, RandomState
 
 from pytensor.compile.sharedvalue import SharedVariable, shared
-from pytensor.graph.basic import Constant
 from pytensor.link.basic import JITLinker
 
 
@@ -72,12 +71,7 @@ class JAXLinker(JITLinker):
     def jit_compile(self, fn):
         import jax
 
-        # I suppose we can consider `Constant`s to be "static" according to
-        # JAX.
-        static_argnums = [
-            n for n, i in enumerate(self.fgraph.inputs) if isinstance(i, Constant)
-        ]
-        return jax.jit(fn, static_argnums=static_argnums)
+        return jax.jit(fn)
 
     def create_thunk_inputs(self, storage_map):
         from pytensor.link.jax.dispatch import jax_typify
