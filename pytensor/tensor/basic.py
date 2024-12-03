@@ -19,7 +19,7 @@ from numpy.core.numeric import normalize_axis_tuple
 
 import pytensor
 import pytensor.scalar.sharedvar
-from pytensor import compile, config, printing
+from pytensor import config, printing
 from pytensor import scalar as ps
 from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType, grad_undefined
@@ -35,7 +35,7 @@ from pytensor.link.c.params_type import ParamsType
 from pytensor.printing import Printer, min_informative_str, pprint, set_precedence
 from pytensor.raise_op import CheckAndRaise, assert_op
 from pytensor.scalar import int32
-from pytensor.scalar.basic import ScalarConstant, ScalarVariable
+from pytensor.scalar.basic import ScalarConstant, ScalarType, ScalarVariable
 from pytensor.tensor import (
     _as_tensor_variable,
     _get_vector_length,
@@ -71,10 +71,10 @@ from pytensor.tensor.type import (
     uint_dtypes,
     values_eq_approx_always_true,
 )
+from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.variable import (
     TensorConstant,
     TensorVariable,
-    get_unique_constant_value,
 )
 
 
@@ -268,27 +268,7 @@ _scalar_constant_value_elemwise_ops = (
 )
 
 
-def get_scalar_constant_value(
-    v, elemwise=True, only_process_constants=False, max_recur=10
-):
-    """
-    Checks whether 'v' is a scalar (ndim = 0).
-
-    If 'v' is a scalar then this function fetches the underlying constant by calling
-    'get_underlying_scalar_constant_value()'.
-
-    If 'v' is not a scalar, it raises a NotScalarConstantError.
-
-    """
-    if isinstance(v, Variable | np.ndarray):
-        if v.ndim != 0:
-            raise NotScalarConstantError()
-    return get_underlying_scalar_constant_value(
-        v, elemwise, only_process_constants, max_recur
-    )
-
-
-def get_underlying_scalar_constant_value(
+def _get_underlying_scalar_constant_value(
     orig_v, elemwise=True, only_process_constants=False, max_recur=10
 ):
     """Return the constant scalar(0-D) value underlying variable `v`.
@@ -319,6 +299,10 @@ def get_underlying_scalar_constant_value(
         but I'm not sure where it is.
 
     """
+    from pytensor.compile.ops import DeepCopyOp, OutputGuard
+    from pytensor.sparse import CSM
+    from pytensor.tensor.subtensor import Subtensor
+
     v = orig_v
     while True:
         if v is None:
@@ -336,40 +320,28 @@ def get_underlying_scalar_constant_value(
                 raise NotScalarConstantError()
 
         if isinstance(v, Constant):
-            unique_value = get_unique_constant_value(v)
-            if unique_value is not None:
-                data = unique_value
-            else:
-                data = v.data
+            if isinstance(v.type, TensorType) and v.unique_value is not None:
+                return v.unique_value
 
-            if isinstance(data, np.ndarray):
-                try:
-                    return np.array(data.item(), dtype=v.dtype)
-                except ValueError:
-                    raise NotScalarConstantError()
+            elif isinstance(v.type, ScalarType):
+                return v.data
 
-            from pytensor.sparse.type import SparseTensorType
+            elif isinstance(v.type, NoneTypeT):
+                return None
 
-            if isinstance(v.type, SparseTensorType):
-                raise NotScalarConstantError()
-
-            return data
+            raise NotScalarConstantError()
 
         if not only_process_constants and getattr(v, "owner", None) and max_recur > 0:
+            op = v.owner.op
             max_recur -= 1
             if isinstance(
-                v.owner.op,
-                Alloc
-                | DimShuffle
-                | Unbroadcast
-                | compile.ops.OutputGuard
-                | compile.DeepCopyOp,
+                op, Alloc | DimShuffle | Unbroadcast | OutputGuard | DeepCopyOp
             ):
                 # OutputGuard is only used in debugmode but we
                 # keep it here to avoid problems with old pickles
                 v = v.owner.inputs[0]
                 continue
-            elif isinstance(v.owner.op, Shape_i):
+            elif isinstance(op, Shape_i):
                 i = v.owner.op.i
                 inp = v.owner.inputs[0]
                 if isinstance(inp, Constant):
@@ -383,19 +355,19 @@ def get_underlying_scalar_constant_value(
             # mess with the stabilization optimization and be too slow.
             # We put all the scalar Ops used by get_canonical_form_slice()
             # to allow it to determine the broadcast pattern correctly.
-            elif isinstance(v.owner.op, ScalarFromTensor | TensorFromScalar):
+            elif isinstance(op, ScalarFromTensor | TensorFromScalar):
                 v = v.owner.inputs[0]
                 continue
-            elif isinstance(v.owner.op, CheckAndRaise):
+            elif isinstance(op, CheckAndRaise):
                 # check if all conditions are constant and true
                 conds = [
-                    get_underlying_scalar_constant_value(c, max_recur=max_recur)
+                    _get_underlying_scalar_constant_value(c, max_recur=max_recur)
                     for c in v.owner.inputs[1:]
                 ]
                 if builtins.all(0 == c.ndim and c != 0 for c in conds):
                     v = v.owner.inputs[0]
                     continue
-            elif isinstance(v.owner.op, ps.ScalarOp):
+            elif isinstance(op, ps.ScalarOp):
                 if isinstance(v.owner.op, ps.Second):
                     # We don't need both input to be constant for second
                     shp, val = v.owner.inputs
@@ -403,7 +375,7 @@ def get_underlying_scalar_constant_value(
                     continue
                 if isinstance(v.owner.op, _scalar_constant_value_elemwise_ops):
                     const = [
-                        get_underlying_scalar_constant_value(i, max_recur=max_recur)
+                        _get_underlying_scalar_constant_value(i, max_recur=max_recur)
                         for i in v.owner.inputs
                     ]
                     ret = [[None]]
@@ -412,7 +384,7 @@ def get_underlying_scalar_constant_value(
             # In fast_compile, we don't enable local_fill_to_alloc, so
             # we need to investigate Second as Alloc. So elemwise
             # don't disable the check for Second.
-            elif isinstance(v.owner.op, Elemwise):
+            elif isinstance(op, Elemwise):
                 if isinstance(v.owner.op.scalar_op, ps.Second):
                     # We don't need both input to be constant for second
                     shp, val = v.owner.inputs
@@ -422,16 +394,13 @@ def get_underlying_scalar_constant_value(
                     v.owner.op.scalar_op, _scalar_constant_value_elemwise_ops
                 ):
                     const = [
-                        get_underlying_scalar_constant_value(i, max_recur=max_recur)
+                        _get_underlying_scalar_constant_value(i, max_recur=max_recur)
                         for i in v.owner.inputs
                     ]
                     ret = [[None]]
                     v.owner.op.perform(v.owner, const, ret)
                     return np.asarray(ret[0][0].copy())
-            elif (
-                isinstance(v.owner.op, pytensor.tensor.subtensor.Subtensor)
-                and v.ndim == 0
-            ):
+            elif isinstance(op, Subtensor) and v.ndim == 0:
                 if isinstance(v.owner.inputs[0], TensorConstant):
                     from pytensor.tensor.subtensor import get_constant_idx
 
@@ -468,7 +437,7 @@ def get_underlying_scalar_constant_value(
                     ):
                         idx = v.owner.op.idx_list[0]
                         if isinstance(idx, Type):
-                            idx = get_underlying_scalar_constant_value(
+                            idx = _get_underlying_scalar_constant_value(
                                 v.owner.inputs[1], max_recur=max_recur
                             )
                         try:
@@ -502,14 +471,13 @@ def get_underlying_scalar_constant_value(
                 ):
                     idx = v.owner.op.idx_list[0]
                     if isinstance(idx, Type):
-                        idx = get_underlying_scalar_constant_value(
+                        idx = _get_underlying_scalar_constant_value(
                             v.owner.inputs[1], max_recur=max_recur
                         )
-                    # Python 2.4 does not support indexing with numpy.integer
-                    # So we cast it.
-                    idx = int(idx)
                     ret = v.owner.inputs[0].owner.inputs[idx]
-                    ret = get_underlying_scalar_constant_value(ret, max_recur=max_recur)
+                    ret = _get_underlying_scalar_constant_value(
+                        ret, max_recur=max_recur
+                    )
                     # MakeVector can cast implicitly its input in some case.
                     return np.asarray(ret, dtype=v.type.dtype)
 
@@ -524,7 +492,7 @@ def get_underlying_scalar_constant_value(
                     idx_list = op.idx_list
                     idx = idx_list[0]
                     if isinstance(idx, Type):
-                        idx = get_underlying_scalar_constant_value(
+                        idx = _get_underlying_scalar_constant_value(
                             owner.inputs[1], max_recur=max_recur
                         )
                     grandparent = leftmost_parent.owner.inputs[0]
@@ -534,7 +502,9 @@ def get_underlying_scalar_constant_value(
                         grandparent.owner.op, Unbroadcast
                     ):
                         ggp_shape = grandparent.owner.inputs[0].type.shape
-                        l = [get_underlying_scalar_constant_value(s) for s in ggp_shape]
+                        l = [
+                            _get_underlying_scalar_constant_value(s) for s in ggp_shape
+                        ]
                         gp_shape = tuple(l)
 
                     if not (idx < ndim):
@@ -555,8 +525,103 @@ def get_underlying_scalar_constant_value(
 
                     if isinstance(grandparent, Constant):
                         return np.asarray(np.shape(grandparent.data)[idx])
+            elif isinstance(op, CSM):
+                data = _get_underlying_scalar_constant_value(
+                    v.owner.inputs, elemwise=elemwise, max_recur=max_recur
+                )
+                # Sparse variable can only be constant if zero (or I guess if homogeneously dense)
+                if data == 0:
+                    return data
+                break
 
         raise NotScalarConstantError()
+
+
+def get_underlying_scalar_constant_value(
+    v,
+    *,
+    elemwise=True,
+    only_process_constants=False,
+    max_recur=10,
+    raise_not_constant=True,
+):
+    """Return the unique constant scalar(0-D) value underlying variable `v`.
+
+    If `v` is the output of dimshuffles, fills, allocs, etc,
+    cast, OutputGuard, DeepCopyOp, ScalarFromTensor, ScalarOp, Elemwise
+    and some pattern with Subtensor, this function digs through them.
+
+    If `v` is not some view of constant scalar data, then raise a
+    NotScalarConstantError.
+
+    This function performs symbolic reasoning about the value of `v`, as opposed to numerical reasoning by
+    constant folding the inputs of `v`.
+
+    Parameters
+    ----------
+    v: Variable
+    elemwise : bool
+        If False, we won't try to go into elemwise. So this call is faster.
+        But we still investigate in Second Elemwise (as this is a substitute
+        for Alloc)
+    only_process_constants : bool
+        If True, we only attempt to obtain the value of `orig_v` if it's
+        directly constant and don't try to dig through dimshuffles, fills,
+        allocs, and other to figure out its value.
+    max_recur : int
+        The maximum number of recursion.
+    raise_not_constant: bool, default True
+        If True, raise a NotScalarConstantError if `v` does not have an
+        underlying constant scalar value. If False, return `v` as is.
+
+
+    Raises
+    ------
+    NotScalarConstantError
+        `v` does not have an underlying constant scalar value.
+        Only rasise if raise_not_constant is True.
+
+    """
+    try:
+        return _get_underlying_scalar_constant_value(
+            v,
+            elemwise=elemwise,
+            only_process_constants=only_process_constants,
+            max_recur=max_recur,
+        )
+    except NotScalarConstantError:
+        if raise_not_constant:
+            raise
+    return v
+
+
+def get_scalar_constant_value(
+    v,
+    elemwise=True,
+    only_process_constants=False,
+    max_recur=10,
+    raise_not_constant: bool = True,
+):
+    """
+    Checks whether 'v' is a scalar (ndim = 0).
+
+    If 'v' is a scalar then this function fetches the underlying constant by calling
+    'get_underlying_scalar_constant_value()'.
+
+    If 'v' is not a scalar, it raises a NotScalarConstantError.
+
+    """
+    if isinstance(v, TensorVariable | np.ndarray):
+        if v.ndim != 0:
+            print(v, v.ndim)
+            raise NotScalarConstantError("Input ndim != 0")
+    return get_underlying_scalar_constant_value(
+        v,
+        elemwise=elemwise,
+        only_process_constants=only_process_constants,
+        max_recur=max_recur,
+        raise_not_constant=raise_not_constant,
+    )
 
 
 class TensorFromScalar(COp):
@@ -1743,7 +1808,7 @@ pprint.assign(alloc, printing.FunctionPrinter(["alloc"]))
 @_get_vector_length.register(Alloc)
 def _get_vector_length_Alloc(var_inst, var):
     try:
-        return get_underlying_scalar_constant_value(var.owner.inputs[1])
+        return get_scalar_constant_value(var.owner.inputs[1])
     except NotScalarConstantError:
         raise ValueError(f"Length of {var} cannot be determined")
 
@@ -2015,16 +2080,16 @@ def extract_constant(x, elemwise=True, only_process_constants=False):
     ScalarVariable, we convert it to a tensor with tensor_from_scalar.
 
     """
-    try:
-        x = get_underlying_scalar_constant_value(x, elemwise, only_process_constants)
-    except NotScalarConstantError:
-        pass
-    if isinstance(x, ps.ScalarVariable | ps.sharedvar.ScalarSharedVariable):
-        if x.owner and isinstance(x.owner.op, ScalarFromTensor):
-            x = x.owner.inputs[0]
-        else:
-            x = tensor_from_scalar(x)
-    return x
+    warnings.warn(
+        "extract_constant is deprecated. Use `get_underlying_scalar_constant_value(..., raise_not_constant=False)`",
+        FutureWarning,
+    )
+    return get_underlying_scalar_constant_value(
+        x,
+        elemwise=elemwise,
+        only_process_constants=only_process_constants,
+        raise_not_constant=False,
+    )
 
 
 def transpose(x, axes=None):
@@ -2444,7 +2509,7 @@ class Join(COp):
 
             if not isinstance(axis, int):
                 try:
-                    axis = int(get_underlying_scalar_constant_value(axis))
+                    axis = int(get_scalar_constant_value(axis))
                 except NotScalarConstantError:
                     pass
 
@@ -2688,7 +2753,7 @@ pprint.assign(Join, printing.FunctionPrinter(["join"]))
 def _get_vector_length_Join(op, var):
     axis, *arrays = var.owner.inputs
     try:
-        axis = get_underlying_scalar_constant_value(axis)
+        axis = get_scalar_constant_value(axis)
         assert axis == 0 and builtins.all(a.ndim == 1 for a in arrays)
         return builtins.sum(get_vector_length(a) for a in arrays)
     except NotScalarConstantError:
@@ -4081,7 +4146,7 @@ class Choose(Op):
         static_out_shape = ()
         for s in out_shape:
             try:
-                s_val = pytensor.get_underlying_scalar_constant(s)
+                s_val = get_scalar_constant_value(s)
             except (NotScalarConstantError, AttributeError):
                 s_val = None
 
@@ -4404,7 +4469,6 @@ __all__ = [
     "split",
     "transpose",
     "matrix_transpose",
-    "extract_constant",
     "default",
     "tensor_copy",
     "transfer",

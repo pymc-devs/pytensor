@@ -19,7 +19,7 @@ from pytensor.graph.replace import vectorize_node
 from pytensor.link.basic import PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.tensor import as_tensor_variable
-from pytensor.tensor.basic import second
+from pytensor.tensor.basic import get_scalar_constant_value, second
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import Any, Sum, exp
 from pytensor.tensor.math import all as pt_all
@@ -807,8 +807,8 @@ class TestElemwise(unittest_tools.InferShapeTester):
 
         assert len(res_shape) == 1
         assert len(res_shape[0]) == 2
-        assert pytensor.get_underlying_scalar_constant(res_shape[0][0]) == 1
-        assert pytensor.get_underlying_scalar_constant(res_shape[0][1]) == 1
+        assert get_scalar_constant_value(res_shape[0][0]) == 1
+        assert get_scalar_constant_value(res_shape[0][1]) == 1
 
     def test_infer_shape_multi_output(self):
         class CustomElemwise(Elemwise):
