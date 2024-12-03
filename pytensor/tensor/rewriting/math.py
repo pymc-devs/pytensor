@@ -1824,15 +1824,6 @@ def local_add_neg_to_sub(fgraph, node):
                     new_out = sub(first, pre_neg)
                     return [new_out]
 
-            # Check if it is a negative constant
-            if (
-                isinstance(second, TensorConstant)
-                and second.unique_value is not None
-                and second.unique_value < 0
-            ):
-                new_out = sub(first, np.abs(second.data))
-                return [new_out]
-
 
 @register_canonicalize
 @node_rewriter([mul])
