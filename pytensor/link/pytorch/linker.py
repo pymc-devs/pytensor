@@ -54,21 +54,22 @@ class PytorchLinker(JITLinker):
                 self.fn = torch.compile(fn)
                 self.gen_functors = gen_functors.copy()
 
-            def __call__(self, *args, **kwargs):
+            def __call__(self, *inputs, **kwargs):
                 import pytensor.link.utils
 
                 # set attrs
                 for n, fn in self.gen_functors:
                     setattr(pytensor.link.utils, n[1:], fn)
 
-                res = self.fn(*args, **kwargs)
+                # Torch does not accept numpy inputs and may return GPU objects
+                outs = self.fn(*(pytorch_typify(inp) for inp in inputs), **kwargs)
 
                 # unset attrs
                 for n, _ in self.gen_functors:
                     if getattr(pytensor.link.utils, n[1:], False):
                         delattr(pytensor.link.utils, n[1:])
 
-                return res
+                return tuple(out.cpu().numpy() for out in outs)
 
             def __del__(self):
                 del self.gen_functors
@@ -76,12 +77,7 @@ class PytorchLinker(JITLinker):
         inner_fn = wrapper(fn, self.gen_functors)
         self.gen_functors = []
 
-        # Torch does not accept numpy inputs and may return GPU objects
-        def fn(*inputs, inner_fn=inner_fn):
-            outs = inner_fn(*(pytorch_typify(inp) for inp in inputs))
-            return tuple(out.cpu().numpy() for out in outs)
-
-        return fn
+        return inner_fn
 
     def create_thunk_inputs(self, storage_map):
         thunk_inputs = []

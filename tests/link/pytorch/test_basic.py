@@ -4,6 +4,7 @@ from functools import partial
 import numpy as np
 import pytest
 
+import pytensor.tensor as pt
 import pytensor.tensor.basic as ptb
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
@@ -17,7 +18,10 @@ from pytensor.graph.op import Op
 from pytensor.ifelse import ifelse
 from pytensor.link.pytorch.linker import PytorchLinker
 from pytensor.raise_op import CheckAndRaise
+from pytensor.scalar import float64, int64
+from pytensor.scalar.loop import ScalarLoop
 from pytensor.tensor import alloc, arange, as_tensor, empty, expit, eye, softplus
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.type import matrices, matrix, scalar, vector
 
 
@@ -385,3 +389,85 @@ def test_pytorch_softplus():
     out = softplus(x)
     f = FunctionGraph([x], [out])
     compare_pytorch_and_py(f, [np.random.rand(3)])
+
+
+def test_ScalarLoop():
+    n_steps = int64("n_steps")
+    x0 = float64("x0")
+    const = float64("const")
+    x = x0 + const
+
+    op = ScalarLoop(init=[x0], constant=[const], update=[x])
+    x = op(n_steps, x0, const)
+
+    fn = function([n_steps, x0, const], x, mode=pytorch_mode)
+    np.testing.assert_allclose(fn(5, 0, 1), 5)
+    np.testing.assert_allclose(fn(5, 0, 2), 10)
+    np.testing.assert_allclose(fn(4, 3, -1), -1)
+
+
+def test_ScalarLoop_while():
+    n_steps = int64("n_steps")
+    x0 = float64("x0")
+    x = x0 + 1
+    until = x >= 10
+
+    op = ScalarLoop(init=[x0], update=[x], until=until)
+    fn = function([n_steps, x0], op(n_steps, x0), mode=pytorch_mode)
+    for res, expected in zip(
+        [fn(n_steps=20, x0=0), fn(n_steps=20, x0=1), fn(n_steps=5, x0=1)],
+        [[10, True], [10, True], [6, False]],
+        strict=True,
+    ):
+        np.testing.assert_allclose(res[0], np.array(expected[0]))
+        np.testing.assert_allclose(res[1], np.array(expected[1]))
+
+
+def test_ScalarLoop_Elemwise_single_carries():
+    n_steps = int64("n_steps")
+    x0 = float64("x0")
+    x = x0 * 2
+    until = x >= 10
+
+    scalarop = ScalarLoop(init=[x0], update=[x], until=until)
+    op = Elemwise(scalarop)
+
+    n_steps = pt.scalar("n_steps", dtype="int32")
+    x0 = pt.vector("x0", dtype="float32")
+    state, done = op(n_steps, x0)
+
+    f = FunctionGraph([n_steps, x0], [state, done])
+    args = [
+        np.array(10).astype("int32"),
+        np.arange(0, 5).astype("float32"),
+    ]
+    compare_pytorch_and_py(
+        f, args, assert_fn=partial(np.testing.assert_allclose, rtol=1e-6)
+    )
+
+
+def test_ScalarLoop_Elemwise_multi_carries():
+    n_steps = int64("n_steps")
+    x0 = float64("x0")
+    x1 = float64("x1")
+    x = x0 * 2
+    x1_n = x1 * 3
+    until = x >= 10
+
+    scalarop = ScalarLoop(init=[x0, x1], update=[x, x1_n], until=until)
+    op = Elemwise(scalarop)
+
+    n_steps = pt.scalar("n_steps", dtype="int32")
+    x0 = pt.vector("x0", dtype="float32")
+    x1 = pt.tensor("c0", dtype="float32", shape=(7, 3, 1))
+    *states, done = op(n_steps, x0, x1)
+
+    f = FunctionGraph([n_steps, x0, x1], [*states, done])
+    args = [
+        np.array(10).astype("int32"),
+        np.arange(0, 5).astype("float32"),
+        np.random.rand(7, 3, 1).astype("float32"),
+    ]
+    compare_pytorch_and_py(
+        f, args, assert_fn=partial(np.testing.assert_allclose, rtol=1e-6)
+    )

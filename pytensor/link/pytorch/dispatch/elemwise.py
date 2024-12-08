@@ -3,6 +3,7 @@ import importlib
 import torch
 
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
+from pytensor.scalar import ScalarLoop
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import All, Any, Max, Min, Prod, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
@@ -11,6 +12,7 @@ from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 @pytorch_funcify.register(Elemwise)
 def pytorch_funcify_Elemwise(op, node, **kwargs):
     scalar_op = op.scalar_op
+
     base_fn = pytorch_funcify(scalar_op, node=node, **kwargs)
 
     def check_special_scipy(func_name):
@@ -32,6 +34,9 @@ def pytorch_funcify_Elemwise(op, node, **kwargs):
         def elemwise_fn(*inputs):
             Elemwise._check_runtime_broadcast(node, inputs)
             return base_fn(*inputs)
+
+    elif isinstance(scalar_op, ScalarLoop):
+        return elemwise_ravel_fn(base_fn, op, node, **kwargs)
 
     else:
 
@@ -176,3 +181,37 @@ def jax_funcify_SoftmaxGrad(op, **kwargs):
         return dy_times_sm - torch.sum(dy_times_sm, dim=axis, keepdim=True) * sm
 
     return softmax_grad
+
+
+def elemwise_ravel_fn(base_fn, op, node, **kwargs):
+    """
+    Dispatch methods using `.item()` (ScalarLoop + Elemwise) is common, but vmap
+    in torch has a limitation: https://github.com/pymc-devs/pytensor/issues/1031,
+    Instead, we can ravel all the inputs, broadcasted according to torch
+    """
+
+    n_outputs = len(node.outputs)
+
+    def elemwise_fn(*inputs):
+        bcasted_inputs = torch.broadcast_tensors(*inputs)
+        raveled_inputs = [inp.ravel() for inp in bcasted_inputs]
+
+        out_shape = bcasted_inputs[0].size()
+        out_size = out_shape.numel()
+        raveled_outputs = [torch.empty(out_size) for out in node.outputs]
+
+        for i in range(out_size):
+            core_outs = base_fn(*(inp[i] for inp in raveled_inputs))
+            if n_outputs == 1:
+                raveled_outputs[0][i] = core_outs
+            else:
+                for o in range(n_outputs):
+                    raveled_outputs[o][i] = core_outs[o]
+
+        outputs = tuple(out.view(out_shape) for out in raveled_outputs)
+        if n_outputs == 1:
+            return outputs[0]
+        else:
+            return outputs
+
+    return elemwise_fn
