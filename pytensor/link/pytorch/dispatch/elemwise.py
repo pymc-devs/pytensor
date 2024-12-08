@@ -198,7 +198,7 @@ def elemwise_ravel_fn(base_fn, op, node, **kwargs):
 
         out_shape = bcasted_inputs[0].size()
         out_size = out_shape.numel()
-        raveled_outputs = [torch.zeros(out_size) for out in node.outputs]
+        raveled_outputs = [torch.empty(out_size) for out in node.outputs]
 
         for i in range(out_size):
             core_outs = base_fn(*(inp[i] for inp in raveled_inputs))

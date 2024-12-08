@@ -1,7 +1,6 @@
 import importlib
 
 import torch
-import torch.compiler
 
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.scalar.basic import (
