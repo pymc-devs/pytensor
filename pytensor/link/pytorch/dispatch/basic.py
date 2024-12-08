@@ -24,8 +24,11 @@ from pytensor.tensor.basic import (
 
 
 @singledispatch
-def pytorch_typify(data, **kwargs):
-    raise NotImplementedError(f"pytorch_typify is not implemented for {type(data)}")
+def pytorch_typify(data, dtype=None, **kwargs):
+    if dtype is None:
+        return data
+    else:
+        return torch.tensor(data, dtype=dtype)
 
 
 @pytorch_typify.register(np.ndarray)
