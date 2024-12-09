@@ -1383,11 +1383,11 @@ class TestLocalUselessElemwiseComparison:
         if op == deep_copy_op:
             assert len(elem.inputs) == 1, elem.inputs
             assert isinstance(elem.inputs[0], TensorConstant), elem
-            assert pt.extract_constant(elem.inputs[0]) == val, val
+            assert pt.get_underlying_scalar_constant_value(elem.inputs[0]) == val, val
         else:
             assert len(elem.inputs) == 2, elem.inputs
             assert isinstance(elem.inputs[0], TensorConstant), elem
-            assert pt.extract_constant(elem.inputs[0]) == val, val
+            assert pt.get_underlying_scalar_constant_value(elem.inputs[0]) == val, val
 
     def assert_identity(self, f):
         topo = f.maker.fgraph.toposort()
@@ -4438,23 +4438,6 @@ def test_local_add_neg_to_sub(first_negative):
     y_test = np.full(5, 2.0, dtype=config.floatX)
     exp = -x_test + y_test if first_negative else x_test + (-y_test)
     assert np.allclose(f(x_test, y_test), exp)
-
-
-def test_local_add_neg_to_sub_const():
-    x = vector("x")
-    const = 5.0
-
-    f = function([x], x + (-const), mode=Mode("py"))
-
-    nodes = [
-        node.op
-        for node in f.maker.fgraph.toposort()
-        if not isinstance(node.op, DimShuffle)
-    ]
-    assert nodes == [pt.sub]
-
-    x_test = np.array([3, 4], dtype=config.floatX)
-    assert np.allclose(f(x_test), x_test + (-const))
 
 
 def test_log1mexp_stabilization():

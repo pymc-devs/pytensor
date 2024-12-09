@@ -46,7 +46,6 @@ from pytensor.tensor.basic import (
     default,
     diag,
     expand_dims,
-    extract_constant,
     eye,
     fill,
     flatnonzero,
@@ -3571,12 +3570,13 @@ class TestGetUnderlyingScalarConstantValue:
         assert get_underlying_scalar_constant_value(s) == c.data
 
     def test_copy(self):
-        # Make sure we do not return the internal storage of a constant,
+        # Make sure we do not return a writeable internal storage of a constant,
         # so we cannot change the value of a constant by mistake.
         c = constant(3)
-        d = extract_constant(c)
-        d += 1
-        e = extract_constant(c)
+        d = get_scalar_constant_value(c)
+        with pytest.raises(ValueError, match="output array is read-only"):
+            d += 1
+        e = get_scalar_constant_value(c)
         assert e == 3, (c, d, e)
 
     @pytest.mark.parametrize("only_process_constants", (True, False))
