@@ -66,9 +66,6 @@ class RewriteDatabase:
         ):
             raise TypeError(f"{rewriter} is not a valid rewrite type.")
 
-        # if name in self.__db__:
-        #
-
         if use_db_name_as_tag:
             if self.name is not None:
                 tags = (*tags, self.name)
