@@ -17,6 +17,13 @@ class TestRewriter(GraphRewriter):
         pass
 
 
+class NewTestRewriter(GraphRewriter):
+    name = "bleh"
+
+    def apply(self, fgraph):
+        pass
+
+
 class TestDB:
     def test_register(self):
         db = RewriteDatabase()
@@ -31,7 +38,9 @@ class TestDB:
         assert "c" in db
 
         with pytest.raises(ValueError, match=r"The tag.*"):
-            db.register("c", TestRewriter())  # name taken
+            db.register("c", NewTestRewriter())  # name taken
+
+        db.register("c", NewTestRewriter(), overwrite_existing=True)
 
         with pytest.raises(ValueError, match=r"The tag.*"):
             db.register("z", TestRewriter())  # name collides with tag
