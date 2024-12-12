@@ -5,10 +5,16 @@ import torch
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.scalar.basic import (
     Cast,
+    Invert,
     ScalarOp,
 )
 from pytensor.scalar.loop import ScalarLoop
 from pytensor.scalar.math import Softplus
+
+
+@pytorch_funcify.register(Invert)
+def pytorch_funcify_invert(op, node, **kwargs):
+    return torch.bitwise_not
 
 
 @pytorch_funcify.register(ScalarOp)
