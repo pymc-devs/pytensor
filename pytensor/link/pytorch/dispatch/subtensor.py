@@ -1,3 +1,4 @@
+from pytensor.graph.basic import Constant
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -23,7 +24,21 @@ def check_negative_steps(indices):
 @pytorch_funcify.register(Subtensor)
 def pytorch_funcify_Subtensor(op, node, **kwargs):
     idx_list = op.idx_list
+    x, *idxs = node.inputs
 
+    if all(isinstance(idx, Constant) for idx in idxs):
+        # Use constant indices to avoid graph break
+        constant_indices = indices_from_subtensor(
+            [int(idx.data) for idx in idxs], idx_list
+        )
+        check_negative_steps(constant_indices)
+
+        def constant_index_subtensor(x, *_):
+            return x[constant_indices]
+
+        return constant_index_subtensor
+
+    # Fallback that will introduce a graph break
     def subtensor(x, *flattened_indices):
         indices = indices_from_subtensor(flattened_indices, idx_list)
         check_negative_steps(indices)
