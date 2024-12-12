@@ -35,6 +35,7 @@ class RewriteDatabase:
         rewriter: Union["RewriteDatabase", RewritesType],
         *tags: str,
         use_db_name_as_tag=True,
+        overwrite_existing=False,
     ):
         """Register a new rewriter to the database.
 
@@ -56,7 +57,8 @@ class RewriteDatabase:
             ``local_remove_all_assert``. Setting `use_db_name_as_tag` to
             ``False`` removes that behavior. This means that only the rewrite's name
             and/or its tags will enable it.
-
+        overwrite_existing:
+            Overwrite the existing rewriter with a new one having the same name
         """
         if not isinstance(
             rewriter,
@@ -66,22 +68,27 @@ class RewriteDatabase:
         ):
             raise TypeError(f"{rewriter} is not a valid rewrite type.")
 
-        if name in self.__db__:
-            raise ValueError(f"The tag '{name}' is already present in the database.")
-
         if use_db_name_as_tag:
             if self.name is not None:
                 tags = (*tags, self.name)
 
         rewriter.name = name
-        # This restriction is there because in many place we suppose that
-        # something in the RewriteDatabase is there only once.
-        if rewriter.name in self.__db__:
-            raise ValueError(
-                f"Tried to register {rewriter.name} again under the new name {name}. "
-                "The same rewrite cannot be registered multiple times in"
-                " an `RewriteDatabase`; use `ProxyDB` instead."
-            )
+
+        # if tag collides with name
+        if name in self.__db__ and name not in self._names:
+            raise ValueError(f"The tag '{name}' is already present in the database.")
+
+        if name in self.__db__ or rewriter.name in self.__db__:
+            if overwrite_existing:
+                self.remove_tags(name, *tags)
+                old_rewriter = self.__db__[name].pop()
+                self._names.remove(name)
+                self.__db__[old_rewriter.__class__.__name__].remove(old_rewriter)
+            else:
+                raise ValueError(
+                    f"The tag '{name}' is already present in the database."
+                )
+
         self.__db__[name] = OrderedSet([rewriter])
         self._names.add(name)
         self.__db__[rewriter.__class__.__name__].add(rewriter)

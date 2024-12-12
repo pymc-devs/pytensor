@@ -1,5 +1,6 @@
 import pytest
 
+from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import GraphRewriter, SequentialGraphRewriter
 from pytensor.graph.rewriting.db import (
     EquilibriumDB,
@@ -17,6 +18,30 @@ class TestRewriter(GraphRewriter):
         pass
 
 
+class NewTestRewriter(GraphRewriter):
+    name = "bleh"
+
+    def apply(self, fgraph):
+        pass
+
+
+counter1 = 0
+
+counter2 = 0
+
+
+class TestOverwrite1(GraphRewriter):
+    def apply(self, fgraph):
+        global counter1
+        counter1 += 1
+
+
+class TestOverwrite2(GraphRewriter):
+    def apply(self, fgraph):
+        global counter2
+        counter2 += 1
+
+
 class TestDB:
     def test_register(self):
         db = RewriteDatabase()
@@ -31,7 +56,9 @@ class TestDB:
         assert "c" in db
 
         with pytest.raises(ValueError, match=r"The tag.*"):
-            db.register("c", TestRewriter())  # name taken
+            db.register("c", NewTestRewriter())  # name taken
+
+        db.register("c", NewTestRewriter(), overwrite_existing=True)
 
         with pytest.raises(ValueError, match=r"The tag.*"):
             db.register("z", TestRewriter())  # name collides with tag
@@ -41,6 +68,24 @@ class TestDB:
 
         with pytest.raises(TypeError, match=r".* is not a valid.*"):
             db.register("d", 1)
+
+    def test_overwrite(self):
+        db = RewriteDatabase()
+        fg = FunctionGraph([], [])
+
+        db.register("a", TestRewriter())
+        Rewriter = db.__getitem__("a")
+        Rewriter.rewrite(fg)
+
+        db.register("a", TestOverwrite1(), overwrite_existing=True)
+        Rewriter = db.__getitem__("a")
+        Rewriter.rewrite(fg)
+        assert counter1 == 1 and counter2 == 0
+
+        db.register("a", TestOverwrite2(), overwrite_existing=True)
+        Rewriter = db.__getitem__("a")
+        Rewriter.rewrite(fg)
+        assert counter1 == 1 and counter2 == 1
 
     def test_EquilibriumDB(self):
         eq_db = EquilibriumDB()
