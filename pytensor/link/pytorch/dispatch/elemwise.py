@@ -32,7 +32,7 @@ def pytorch_funcify_Elemwise(op, node, **kwargs):
         # torch can handle this scalar
         # broadcast, we'll let it.
         def elemwise_fn(*inputs):
-            Elemwise._check_runtime_broadcast(node, inputs)
+            # Elemwise._check_runtime_broadcast(node, inputs)
             return base_fn(*inputs)
 
     elif isinstance(scalar_op, ScalarLoop):
@@ -41,7 +41,7 @@ def pytorch_funcify_Elemwise(op, node, **kwargs):
     else:
 
         def elemwise_fn(*inputs):
-            Elemwise._check_runtime_broadcast(node, inputs)
+            # Elemwise._check_runtime_broadcast(node, inputs)
             broadcast_inputs = torch.broadcast_tensors(*inputs)
             ufunc = base_fn
             for _ in range(broadcast_inputs[0].dim()):
