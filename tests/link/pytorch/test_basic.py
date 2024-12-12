@@ -471,3 +471,53 @@ def test_ScalarLoop_Elemwise_multi_carries():
     compare_pytorch_and_py(
         f, args, assert_fn=partial(np.testing.assert_allclose, rtol=1e-6)
     )
+
+
+rng = np.random.default_rng(42849)
+
+
+@pytest.mark.parametrize(
+    "n_splits, axis, values, sizes",
+    [
+        (
+            0,
+            0,
+            rng.normal(size=20).astype(config.floatX),
+            [],
+        ),
+        (
+            5,
+            0,
+            rng.normal(size=5).astype(config.floatX),
+            rng.multinomial(5, np.ones(5) / 5),
+        ),
+        (
+            5,
+            0,
+            rng.normal(size=10).astype(config.floatX),
+            rng.multinomial(10, np.ones(5) / 5),
+        ),
+        (
+            5,
+            -1,
+            rng.normal(size=(11, 7)).astype(config.floatX),
+            rng.multinomial(7, np.ones(5) / 5),
+        ),
+        (
+            5,
+            -2,
+            rng.normal(size=(11, 7)).astype(config.floatX),
+            rng.multinomial(11, np.ones(5) / 5),
+        ),
+    ],
+)
+def test_Split(n_splits, axis, values, sizes):
+    i = pt.tensor("i", shape=values.shape, dtype=config.floatX)
+    s = pt.vector("s", dtype="int64")
+    g = pt.split(i, s, n_splits, axis=axis)
+    assert len(g) == n_splits
+    if n_splits == 0:
+        return
+    g_fg = FunctionGraph(inputs=[i, s], outputs=[g] if n_splits == 1 else g)
+
+    compare_pytorch_and_py(g_fg, [values, sizes])
