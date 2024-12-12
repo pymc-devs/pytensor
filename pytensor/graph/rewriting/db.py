@@ -35,6 +35,7 @@ class RewriteDatabase:
         rewriter: Union["RewriteDatabase", RewritesType],
         *tags: str,
         use_db_name_as_tag=True,
+        overwrite_existing=False,
     ):
         """Register a new rewriter to the database.
 
@@ -56,7 +57,8 @@ class RewriteDatabase:
             ``local_remove_all_assert``. Setting `use_db_name_as_tag` to
             ``False`` removes that behavior. This means that only the rewrite's name
             and/or its tags will enable it.
-
+        overwrite_existing:
+            Overwrite the existing rewriter with a new one having the same name
         """
         if not isinstance(
             rewriter,
@@ -72,8 +74,12 @@ class RewriteDatabase:
 
         rewriter.name = name
 
+        # if tag collides with name
+        if name in self.__db__ and name not in self._names:
+            raise ValueError(f"The tag '{name}' is already present in the database.")
+
         if name in self.__db__ or rewriter.name in self.__db__:
-            if "overwrite_existing" in tags:
+            if overwrite_existing:
                 old_rewriter = self.__db__[name].pop()
                 self._names.remove(name)
                 self.__db__[old_rewriter.__class__.__name__].remove(old_rewriter)
@@ -82,7 +88,7 @@ class RewriteDatabase:
                     f"The tag '{name}' is already present in the database."
                 )
         else:
-            if "overwrite_existing" in tags:
+            if overwrite_existing:
                 raise ValueError(
                     f"The tag '{name}' does not exist in the database. Cannot be overwritten."
                 )
@@ -90,7 +96,7 @@ class RewriteDatabase:
         self.__db__[name] = OrderedSet([rewriter])
         self._names.add(name)
         self.__db__[rewriter.__class__.__name__].add(rewriter)
-        if "overwrite_existing" not in tags:
+        if not overwrite_existing:
             self.add_tags(name, *tags)
 
     def add_tags(self, name, *tags):
