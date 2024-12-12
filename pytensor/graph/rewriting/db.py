@@ -66,26 +66,35 @@ class RewriteDatabase:
         ):
             raise TypeError(f"{rewriter} is not a valid rewrite type.")
 
-        if name in self.__db__:
-            raise ValueError(f"The tag '{name}' is already present in the database.")
+        # if name in self.__db__:
+        #
 
         if use_db_name_as_tag:
             if self.name is not None:
                 tags = (*tags, self.name)
 
         rewriter.name = name
-        # This restriction is there because in many place we suppose that
-        # something in the RewriteDatabase is there only once.
-        if rewriter.name in self.__db__:
-            raise ValueError(
-                f"Tried to register {rewriter.name} again under the new name {name}. "
-                "The same rewrite cannot be registered multiple times in"
-                " an `RewriteDatabase`; use `ProxyDB` instead."
-            )
+
+        if name in self.__db__ or rewriter.name in self.__db__:
+            if "overwrite_existing" in tags:
+                old_rewriter = self.__db__[name].pop()
+                self._names.remove(name)
+                self.__db__[old_rewriter.__class__.__name__].remove(old_rewriter)
+            else:
+                raise ValueError(
+                    f"The tag '{name}' is already present in the database."
+                )
+        else:
+            if "overwrite_existing" in tags:
+                raise ValueError(
+                    f"The tag '{name}' does not exist in the database. Cannot be overwritten."
+                )
+
         self.__db__[name] = OrderedSet([rewriter])
         self._names.add(name)
         self.__db__[rewriter.__class__.__name__].add(rewriter)
-        self.add_tags(name, *tags)
+        if "overwrite_existing" not in tags:
+            self.add_tags(name, *tags)
 
     def add_tags(self, name, *tags):
         obj = self.__db__[name]
