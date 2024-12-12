@@ -1,9 +1,9 @@
 [build-system]
 requires = [
-    "setuptools>=59.0.0",
-    "cython",
-    "numpy>=1.17.0",
-    "versioneer[toml]==0.29",
+  "setuptools>=59.0.0",
+  "cython",
+  "numpy>=1.17.0",
+  "versioneer[toml]==0.29",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -17,44 +17,44 @@ readme = "README.rst"
 license = "BSD-3-Clause"
 license-files = ["LICENSE.txt"]
 classifiers = [
-    "Development Status :: 6 - Mature",
-    "Intended Audience :: Education",
-    "Intended Audience :: Science/Research",
-    "Intended Audience :: Developers",
-    "Programming Language :: Python",
-    "Topic :: Software Development :: Code Generators",
-    "Topic :: Software Development :: Compilers",
-    "Topic :: Scientific/Engineering :: Mathematics",
-    "Operating System :: Microsoft :: Windows",
-    "Operating System :: POSIX",
-    "Operating System :: Unix",
-    "Operating System :: MacOS",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
+  "Development Status :: 6 - Mature",
+  "Intended Audience :: Education",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python",
+  "Topic :: Software Development :: Code Generators",
+  "Topic :: Software Development :: Compilers",
+  "Topic :: Scientific/Engineering :: Mathematics",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX",
+  "Operating System :: Unix",
+  "Operating System :: MacOS",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
 ]
 
 keywords = [
-    "pytensor",
-    "math",
-    "numerical",
-    "symbolic",
-    "blas",
-    "numpy",
-    "autodiff",
-    "differentiation",
+  "pytensor",
+  "math",
+  "numerical",
+  "symbolic",
+  "blas",
+  "numpy",
+  "autodiff",
+  "differentiation",
 ]
 dependencies = [
-    "setuptools>=59.0.0",
-    "scipy>=1,<2",
-    "numpy>=1.17.0",
-    "filelock>=3.15",
-    "etuples",
-    "logical-unification",
-    "miniKanren",
-    "cons",
+  "setuptools>=59.0.0",
+  "scipy>=1,<2",
+  "numpy>=1.17.0",
+  "filelock>=3.15",
+  "etuples",
+  "logical-unification",
+  "miniKanren",
+  "cons",
 ]
 
 [project.urls]
@@ -70,16 +70,16 @@ pytensor-cache = "pytensor.bin.pytensor_cache:main"
 complete = ["pytensor[jax]", "pytensor[numba]"]
 development = ["pytensor[complete]", "pytensor[tests]", "pytensor[rtd]"]
 tests = [
-    "pytest",
-    "pre-commit",
-    "pytest-cov>=2.6.1",
-    "coverage>=5.1",
-    "pytest-benchmark",
-    "pytest-mock",
-    "pytest-sphinx",
+  "pytest",
+  "pre-commit",
+  "pytest-cov>=2.6.1",
+  "coverage>=5.1",
+  "pytest-benchmark",
+  "pytest-mock",
+  "pytest-sphinx",
 ]
 rtd = ["sphinx>=5.1.0,<6", "pygments", "pydot"]
-jax = ["jax", "jaxlib"]
+jax = ["jax", "jaxlib", "equinox"]
 numba = ["numba>=0.57", "llvmlite"]
 
 [tool.setuptools.packages.find]
@@ -91,16 +91,16 @@ pytensor = ["py.typed"]
 
 [tool.coverage.run]
 omit = [
-    "pytensor/_version.py",
-    "tests/*",
-    "pytensor/assert_op.py",
-    "pytensor/graph/opt.py",
-    "pytensor/graph/opt_utils.py",
-    "pytensor/graph/optdb.py",
-    "pytensor/graph/kanren.py",
-    "pytensor/graph/unify.py",
-    "pytensor/link/jax/jax_linker.py",
-    "pytensor/link/jax/jax_dispatch.py",
+  "pytensor/_version.py",
+  "tests/*",
+  "pytensor/assert_op.py",
+  "pytensor/graph/opt.py",
+  "pytensor/graph/opt_utils.py",
+  "pytensor/graph/optdb.py",
+  "pytensor/graph/kanren.py",
+  "pytensor/graph/unify.py",
+  "pytensor/link/jax/jax_linker.py",
+  "pytensor/link/jax/jax_dispatch.py",
 ]
 branch = true
 relative_files = true
@@ -130,11 +130,24 @@ exclude = ["doc/", "pytensor/_version.py"]
 docstring-code-format = true
 
 [tool.ruff.lint]
-select = ["C", "E", "F", "I", "UP", "W", "RUF", "PERF", "PTH", "ISC", "T20", "NPY201"]
+select = [
+  "C",
+  "E",
+  "F",
+  "I",
+  "UP",
+  "W",
+  "RUF",
+  "PERF",
+  "PTH",
+  "ISC",
+  "T20",
+  "NPY201",
+]
 ignore = ["C408", "C901", "E501", "E741", "RUF012", "PERF203", "ISC001"]
 unfixable = [
-    # zip-strict: the auto-fix adds `strict=False` but we might want `strict=True` instead
-    "B905",
+  # zip-strict: the auto-fix adds `strict=False` but we might want `strict=True` instead
+  "B905",
 ]
 
 
