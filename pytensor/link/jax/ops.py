@@ -241,7 +241,11 @@ def _get_vjp_sol_op_jax(jaxfunc, len_gz):
 
         primals, vjp_fn = jax.vjp(func, *y0)
         gz = tree_map(
-            lambda g, primal: jnp.broadcast_to(g, jnp.shape(primal)),
+            lambda g, primal: jnp.broadcast_to(g, jnp.shape(primal)).astype(
+                primal.dtype
+            ),  # Also cast to the dtype of the primal, this shouldn't be
+            # necessary, but it happens that the returned dtype of the gradient isn't
+            # the same anymore.
             gz,
             primals,
         )
@@ -326,6 +330,7 @@ def _return_pytensor_ops_classes(name):
             self.num_inputs = len(inputs)
 
             # Define our output variables
+            print(self.output_types)
             outputs = [pt.as_tensor_variable(type()) for type in self.output_types]
             self.num_outputs = len(outputs)
 
