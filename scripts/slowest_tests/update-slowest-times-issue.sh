@@ -28,6 +28,12 @@ function skip_job() {
     return 1
 }
 
+# Remove common prefix from the name
+function remove_prefix() {
+    name=$1
+    echo $name | sed -e 's/^ubuntu-latest test py3.12 : fast-compile 0 : float32 0 : //'
+}
+
 all_times=""
 echo "$jobs" | jq -c '.[]' | while read -r job; do
     id=$(echo $job | jq -r '.id')
@@ -49,6 +55,8 @@ echo "$jobs" | jq -c '.[]' | while read -r job; do
     fi
 
     echo $times
+
+    name=$(remove_prefix $name)
 
     top="<details><summary>$name</summary>\n\n\n\`\`\`"
     bottom="\`\`\`\n\n</details>"
