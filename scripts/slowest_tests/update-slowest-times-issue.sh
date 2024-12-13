@@ -10,17 +10,41 @@ workflow=Tests
 latest_id=$(gh run list --workflow $workflow --status success --limit 1 --json databaseId --jq '.[0].databaseId')
 jobs=$(gh api /repos/$owner/$repo/actions/runs/$latest_id/jobs --jq '.jobs | map({name: .name, run_id: .run_id, id: .id})')
 
+# Skip 3.10, float32, and Benchmark tests
+function skip_job() {
+    name=$1
+    if [[ $name == *"py3.10"* ]]; then
+        return 0
+    fi
+
+    if [[ $name == *"float32 1"* ]]; then
+        return 0
+    fi
+
+    if [[ $name == *"Benchmark"* ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
 all_times=""
 echo "$jobs" | jq -c '.[]' | while read -r job; do
     id=$(echo $job | jq -r '.id')
     name=$(echo $job | jq -r '.name')
     run_id=$(echo $job | jq -r '.run_id')
 
+    if skip_job $name; then
+        echo "Skipping $name"
+        continue
+    fi
+
     echo "Processing job: $name (ID: $id, Run ID: $run_id)"
     times=$(gh run view --job $id --log | python extract-slow-tests.py)
 
     if [ -z "$times" ]; then
         # Some of the jobs are non-test jobs, so we skip them
+        echo "No tests found for '$name', skipping"
         continue
     fi
 
