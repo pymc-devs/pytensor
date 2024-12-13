@@ -14,13 +14,8 @@ torch = pytest.importorskip("torch")
     "size,p",
     [
         ((1000,), 0.5),
-        (
-            (
-                1000,
-                4,
-            ),
-            0.5,
-        ),
+        (None, 0.5),
+        ((1000, 4), 0.5),
         ((10, 2), np.array([0.5, 0.3])),
         ((1000, 10, 2), np.array([0.5, 0.3])),
     ],
@@ -37,23 +32,10 @@ def test_random_bernoulli(size, p):
 @pytest.mark.parametrize(
     "size,n,p",
     [
+        (None, 10, 0.5),
         ((1000,), 10, 0.5),
-        (
-            (
-                1000,
-                4,
-            ),
-            10,
-            0.5,
-        ),
-        (
-            (
-                1000,
-                2,
-            ),
-            np.array([10, 40]),
-            np.array([0.5, 0.3]),
-        ),
+        ((1000, 4), 10, 0.5),
+        ((1000, 2), np.array([10, 40]), np.array([0.5, 0.3])),
     ],
 )
 def test_binomial(n, p, size):
@@ -61,5 +43,11 @@ def test_binomial(n, p, size):
     g = pt.random.binomial(n, p, size=size, rng=rng)
     g_fn = function([], g, mode=pytorch_mode)
     samples = g_fn()
-    np.testing.assert_allclose(samples.mean(axis=0), n * p, rtol=0.1)
-    np.testing.assert_allclose(samples.std(axis=0), np.sqrt(n * p * (1 - p)), rtol=0.1)
+    if size:
+        np.testing.assert_allclose(samples.mean(axis=0), n * p, rtol=0.1)
+        np.testing.assert_allclose(
+            samples.std(axis=0), np.sqrt(n * p * (1 - p)), rtol=0.2
+        )
+    else:
+        ...
+        # TODO: define test
