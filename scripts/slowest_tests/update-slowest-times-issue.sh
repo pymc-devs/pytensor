@@ -58,8 +58,6 @@ echo "$jobs" | jq -c '.[]' | while read -r job; do
     started_at=$(echo $job | jq -r '.started_at')
     completed_at=$(echo $job | jq -r '.completed_at')
 
-    human_readable=$(human_readable_time $started_at $completed_at)
-
     if skip_job $name; then
         echo "Skipping $name"
         continue
@@ -77,9 +75,6 @@ echo "$jobs" | jq -c '.[]' | while read -r job; do
     echo $times
 
     human_readable=$(human_readable_time $started_at $completed_at)
-
-    echo $human_readable
-
     name=$(remove_prefix $name)
 
     top="<details><summary>($human_readable) $name</summary>\n\n\n\`\`\`"
