@@ -8,7 +8,7 @@ issue_number=1124
 title="Speed up test times :rocket:"
 workflow=Tests
 latest_id=$(gh run list --workflow $workflow --status success --limit 1 --json databaseId --jq '.[0].databaseId')
-jobs=$(gh api /repos/$owner/$repo/actions/runs/$latest_id/jobs --jq '.jobs | map({name: .name, run_id: .run_id, id: .id})')
+jobs=$(gh api /repos/$owner/$repo/actions/runs/$latest_id/jobs --jq '.jobs | map({name: .name, run_id: .run_id, id: .id, started_at: .started_at, completed_at: .completed_at})')
 
 # Skip 3.10, float32, and Benchmark tests
 function skip_job() {
@@ -34,11 +34,31 @@ function remove_prefix() {
     echo $name | sed -e 's/^ubuntu-latest test py3.12 : fast-compile 0 : float32 0 : //'
 }
 
+function human_readable_time() {
+    started_at=$1
+    completed_at=$2
+
+    start_seconds=$(date -d "$started_at" +%s)
+    end_seconds=$(date -d "$completed_at" +%s)
+
+    seconds=$(($end_seconds - $start_seconds))
+
+    if [ $seconds -lt 60 ]; then
+        echo "$seconds seconds"
+    else
+        echo "$(date -u -d @$seconds +'%-M minutes %-S seconds')"
+    fi
+}
+
 all_times=""
 echo "$jobs" | jq -c '.[]' | while read -r job; do
     id=$(echo $job | jq -r '.id')
     name=$(echo $job | jq -r '.name')
     run_id=$(echo $job | jq -r '.run_id')
+    started_at=$(echo $job | jq -r '.started_at')
+    completed_at=$(echo $job | jq -r '.completed_at')
+
+    human_readable=$(human_readable_time $started_at $completed_at)
 
     if skip_job $name; then
         echo "Skipping $name"
@@ -56,9 +76,13 @@ echo "$jobs" | jq -c '.[]' | while read -r job; do
 
     echo $times
 
+    human_readable=$(human_readable_time $started_at $completed_at)
+
+    echo $human_readable
+
     name=$(remove_prefix $name)
 
-    top="<details><summary>$name</summary>\n\n\n\`\`\`"
+    top="<details><summary>($human_readable) $name</summary>\n\n\n\`\`\`"
     bottom="\`\`\`\n\n</details>"
 
     formatted_times="$top\n$times\n$bottom"
