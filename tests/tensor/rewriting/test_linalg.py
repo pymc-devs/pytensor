@@ -18,6 +18,7 @@ from pytensor.tensor.math import _allclose, dot, matmul
 from pytensor.tensor.nlinalg import (
     SVD,
     Det,
+    Eig,
     KroneckerProduct,
     MatrixInverse,
     MatrixPinv,
@@ -996,3 +997,81 @@ def test_slogdet_specialization():
     f = function([x], [exp_det_x, sign_det_x], mode="FAST_RUN")
     nodes = f.maker.fgraph.apply_nodes
     assert not any(isinstance(node.op, SLogDet) for node in nodes)
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [(), (7,), (1, 7), (7, 1), (7, 7)],
+    ids=["scalar", "vector", "row_vec", "col_vec", "matrix"],
+)
+def test_eig_diag_from_eye_mul(shape):
+    # Initializing x based on scalar/vector/matrix
+    x = pt.tensor("x", shape=shape)
+    y = pt.eye(7) * x
+
+    # Calculating eigval and eigvec using pt.linalg.eig
+    eigval, eigvec = pt.linalg.eig(y)
+
+    # REWRITE TEST
+    f_rewritten = function([x], [eigval, eigvec], mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+
+    assert not any(
+        isinstance(node.op, Eig) or isinstance(getattr(node.op, "core_op", None), Eig)
+        for node in nodes
+    )
+
+    # NUMERIC VALUE TEST
+    if len(shape) == 0:
+        x_test = np.array(np.random.rand()).astype(config.floatX)
+    elif len(shape) == 1:
+        x_test = np.random.rand(*shape).astype(config.floatX)
+    else:
+        x_test = np.random.rand(*shape).astype(config.floatX)
+
+    x_test_matrix = np.eye(7) * x_test
+    eigval, eigvec = np.linalg.eig(x_test_matrix)
+    rewritten_eigval, rewritten_eigvec = f_rewritten(x_test)
+
+    assert_allclose(
+        eigval,
+        rewritten_eigval,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+    assert_allclose(
+        eigvec,
+        rewritten_eigvec,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+def test_eig_diag_from_diag():
+    x = pt.tensor("x", shape=(None,))
+    x_diag = pt.diag(x)
+    eigval, eigvec = pt.linalg.eig(x_diag)
+
+    # REWRITE TEST
+    f_rewritten = function([x], [eigval, eigvec], mode="FAST_RUN")
+    f_rewritten.dprint()
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, Eig) for node in nodes)
+
+    # NUMERIC VALUE TEST
+    x_test = np.random.rand(7).astype(config.floatX)
+    x_test_matrix = np.eye(7) * x_test
+    eigval, eigvec = np.linalg.eig(x_test_matrix)
+    rewritten_eigval, rewritten_eigvec = f_rewritten(x_test)
+    assert_allclose(
+        eigval,
+        rewritten_eigval,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+    assert_allclose(
+        eigvec,
+        rewritten_eigvec,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )

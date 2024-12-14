@@ -34,6 +34,7 @@ from pytensor.tensor.nlinalg import (
     MatrixPinv,
     SLogDet,
     det,
+    eig,
     inv,
     kron,
     pinv,
@@ -1013,3 +1014,70 @@ def slogdet_specialization(fgraph, node):
             k: slogdet_specialization_map[v] for k, v in dummy_replacements.items()
         }
         return replacements
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([eig])
+def rewrite_eig_diag(fgraph, node):
+    """
+     This rewrite takes advantage of the fact that for a diagonal matrix, the eigenvalues are simply the diagonal elements and the eigenvectors are the identity matrix.
+
+    The presence of a diagonal matrix is detected by inspecting the graph. This rewrite can identify diagonal matrices
+    that arise as the result of elementwise multiplication with an identity matrix. Specialized computation is used to
+    make this rewrite as efficient as possible, depending on whether the multiplication was with a scalar,
+    vector or a matrix.
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
+    inputs = node.inputs[0]
+
+    # Check for use of pt.diag first
+    if (
+        inputs.owner
+        and isinstance(inputs.owner.op, AllocDiag)
+        and AllocDiag.is_offset_zero(inputs.owner)
+    ):
+        eigval_rewritten = pt.diag(inputs)
+        eigvec_rewritten = pt.eye(inputs.shape[-1])
+        return [eigval_rewritten, eigvec_rewritten]
+
+    # Check if the input is an elemwise multiply with identity matrix -- this also results in a diagonal matrix
+    inputs_or_none = _find_diag_from_eye_mul(inputs)
+    if inputs_or_none is None:
+        return None
+
+    eye_input, non_eye_inputs = inputs_or_none
+
+    # Dealing with only one other input
+    if len(non_eye_inputs) != 1:
+        return None
+
+    eye_input, non_eye_input = eye_input, non_eye_inputs[0]
+    # eigval_rewritten = pt.diag(non_eye_input)
+    eigvec_rewritten = eye_input
+
+    # Checking if original x was scalar/vector/matrix
+    if non_eye_input.type.broadcastable[-2:] == (True, True):
+        # For scalar
+        eigval_rewritten = pt.full(
+            (eye_input.shape[0],), non_eye_input.squeeze(axis=(-1, -2))
+        )
+    elif non_eye_input.type.broadcastable[-2:] == (False, False):
+        # For Matrix
+        eigval_rewritten = pt.diag(non_eye_input)
+    else:
+        # For vector
+        eigval_rewritten = non_eye_input.squeeze()
+
+    return [eigval_rewritten, eigvec_rewritten]
