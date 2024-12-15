@@ -51,7 +51,8 @@ class PytorchLinker(JITLinker):
             """
 
             def __init__(self, fn, gen_functors):
-                self.fn = torch.compile(fn)
+                with torch.no_grad():
+                    self.fn = torch.compile(fn)
                 self.gen_functors = gen_functors.copy()
 
             def __call__(self, *inputs, **kwargs):
@@ -62,7 +63,9 @@ class PytorchLinker(JITLinker):
                     setattr(pytensor.link.utils, n[1:], fn)
 
                 # Torch does not accept numpy inputs and may return GPU objects
-                outs = self.fn(*(pytorch_typify(inp) for inp in inputs), **kwargs)
+                with torch.no_grad():
+                    ins = (pytorch_typify(inp) for inp in inputs)
+                    outs = self.fn(*ins, **kwargs)
 
                 # unset attrs
                 for n, _ in self.gen_functors:
