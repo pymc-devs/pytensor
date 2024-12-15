@@ -4,9 +4,8 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from pytensor import config, grad
+from pytensor import as_jax_op, config, grad
 from pytensor.graph.fg import FunctionGraph
-from pytensor.link.jax.ops import as_jax_op
 from pytensor.scalar import all_types
 from pytensor.tensor import tensor
 from tests.link.jax.test_basic import compare_jax_and_py

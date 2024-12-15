@@ -25,32 +25,29 @@ def _filter_ptvars(x):
 
 
 def as_jax_op(jaxfunc, name=None):
-    """Return a Pytensor from a JAX jittable function.
+    """Return a Pytensor function from a JAX jittable function.
 
-    This decorator transforms any JAX jittable function into a function that accepts
-    and returns `pytensor.Variables`. The jax jittable function can accept any
-    nested python structure (pytrees) as input, and return any nested Python structure.
-
-    It requires to define the output types of the returned values as pytensor types. A
-    unique name should also be passed in case the name of the jaxfunc is identical to
-    some other node. The design of this function is based on
-    https://www.pymc-labs.io/blog-posts/jax-functions-in-pymc-3-quick-examples/
+    This decorator transforms any JAX-jittable function into a function that accepts
+    and returns `pytensor.Variable`. The JAX-jittable function can accept any
+    nested python structure (a `Pytree
+    <https://jax.readthedocs.io/en/latest/pytrees.html>`_) as input, and might return
+    any nested Python structure.
 
     Parameters
     ----------
-    jaxfunc : jax jittable function
-        function for which the node is created, can return multiple tensors as a tuple.
-        It is required that all return values are able to transformed to
-        pytensor.Variable.
-    name: str
+    jaxfunc : JAX-jittable function
+        JAX function which will be wrapped in a Pytensor Op.
+    name: str, optional
         Name of the created pytensor Op, defaults to the name of the passed function.
         Only used internally in the pytensor graph.
 
     Returns
     -------
-        A function which can be used in a pymc.Model as function, is differentiable
-        and the resulting model can be compiled either with the default C backend, or
-        the JAX backend.
+    Callable :
+        A function which expects a nested python structure of `pytensor.Variable` and
+        static variables as inputs and returns `pytensor.Variable` with the same
+        API as the original jaxfunc. The resulting model can be compiled either with the
+        default C backend or the JAX backend.
 
 
     Notes
