@@ -84,16 +84,8 @@ def as_jax_op(jaxfunc, name=None):
         )
         vars_from_func = tree_map(lambda x: x.get_vars(), func_vars)
         pt_vars = dict(vars=pt_vars, vars_from_func=vars_from_func)
-        """
-        def func_unwrapped(vars_all, static_vars):
-            vars, vars_from_func = vars_all["vars"], vars_all["vars_from_func"]
-            func_vars_evaled = tree_map(
-                lambda x, y: x.get_func_with_vars(y), func_vars, vars_from_func
-            )
-            args, kwargs = eqx.combine(vars, static_vars, func_vars_evaled)
-            return self.jaxfunc(*args, **kwargs)
-        """
 
+        # Infer shapes and types of the variables
         pt_vars_flat, vars_treedef = tree_flatten(pt_vars)
         pt_vars_types_flat = [var.type for var in pt_vars_flat]
         shapes_vars_flat = pytensor.compile.builders.infer_shape(pt_vars_flat, (), ())
@@ -135,17 +127,30 @@ def as_jax_op(jaxfunc, name=None):
         vjp_sol_op_jax = _get_vjp_sol_op_jax(func_flattened, len_gz)
         jitted_vjp_sol_op_jax = jax.jit(vjp_sol_op_jax)
 
+        # Get classes that creates a Pytensor Op out of our function that accept
+        # flattened inputs. They are created each time, to set a custom name for the
+        # class.
+        class JAXOp_local(JAXOp):
+            pass
+
+        class VJPJAXOp_local(VJPJAXOp):
+            pass
+
         if name is None:
             curr_name = jaxfunc.__name__
         else:
             curr_name = name
+        JAXOp_local.__name__ = curr_name
+        JAXOp_local.__qualname__ = ".".join(
+            JAXOp_local.__qualname__.split(".")[:-1] + [curr_name]
+        )
 
-        # Get classes that creates a Pytensor Op out of our function that accept
-        # flattened inputs. They are created each time, to set a custom name for the
-        # class.
-        SolOp, VJPSolOp = _return_pytensor_ops_classes(curr_name)
+        VJPJAXOp_local.__name__ = "VJP_" + curr_name
+        VJPJAXOp_local.__qualname__ = ".".join(
+            VJPJAXOp_local.__qualname__.split(".")[:-1] + ["VJP_" + curr_name]
+        )
 
-        local_op = SolOp(
+        local_op = JAXOp_local(
             vars_treedef,
             outvars_treedef,
             input_types=pt_vars_types_flat,
@@ -153,14 +158,6 @@ def as_jax_op(jaxfunc, name=None):
             jitted_sol_op_jax=jitted_sol_op_jax,
             jitted_vjp_sol_op_jax=jitted_vjp_sol_op_jax,
         )
-
-        @jax_funcify.register(SolOp)
-        def sol_op_jax_funcify(op, **kwargs):
-            return local_op.perform_jax
-
-        @jax_funcify.register(VJPSolOp)
-        def vjp_sol_op_jax_funcify(op, **kwargs):
-            return local_op.vjp_sol_op.perform_jax
 
         ### Evaluate the Pytensor Op and return unflattened results
         output_flat = local_op(*pt_vars_flat)
@@ -307,123 +304,123 @@ def _normalize_flat_output(output):
         return output[0]
 
 
-def _return_pytensor_ops_classes(name):
-    class SolOp(Op):
-        def __init__(
-            self,
-            input_treedef,
-            output_treeedef,
-            input_types,
-            output_types,
-            jitted_sol_op_jax,
-            jitted_vjp_sol_op_jax,
-        ):
-            self.vjp_sol_op = None
-            self.input_treedef = input_treedef
-            self.output_treedef = output_treeedef
-            self.input_types = input_types
-            self.output_types = output_types
-            self.jitted_sol_op_jax = jitted_sol_op_jax
-            self.jitted_vjp_sol_op_jax = jitted_vjp_sol_op_jax
+class JAXOp(Op):
+    def __init__(
+        self,
+        input_treedef,
+        output_treeedef,
+        input_types,
+        output_types,
+        jitted_sol_op_jax,
+        jitted_vjp_sol_op_jax,
+    ):
+        self.vjp_sol_op = None
+        self.input_treedef = input_treedef
+        self.output_treedef = output_treeedef
+        self.input_types = input_types
+        self.output_types = output_types
+        self.jitted_sol_op_jax = jitted_sol_op_jax
+        self.jitted_vjp_sol_op_jax = jitted_vjp_sol_op_jax
 
-        def make_node(self, *inputs):
-            self.num_inputs = len(inputs)
+    def make_node(self, *inputs):
+        self.num_inputs = len(inputs)
 
-            # Define our output variables
-            print(self.output_types)
-            outputs = [pt.as_tensor_variable(type()) for type in self.output_types]
-            self.num_outputs = len(outputs)
+        # Define our output variables
+        print(self.output_types)
+        outputs = [pt.as_tensor_variable(type()) for type in self.output_types]
+        self.num_outputs = len(outputs)
 
-            self.vjp_sol_op = VJPSolOp(
-                self.input_treedef,
-                self.input_types,
-                self.jitted_vjp_sol_op_jax,
-            )
+        self.vjp_sol_op = VJPJAXOp(
+            self.input_treedef,
+            self.input_types,
+            self.jitted_vjp_sol_op_jax,
+        )
 
-            return Apply(self, inputs, outputs)
+        return Apply(self, inputs, outputs)
 
-        def perform(self, node, inputs, outputs):
-            results = self.jitted_sol_op_jax(inputs)
-            if self.num_outputs > 1:
-                for i in range(self.num_outputs):
-                    outputs[i][0] = np.array(results[i], self.output_types[i].dtype)
-            else:
-                outputs[0][0] = np.array(results, self.output_types[0].dtype)
-
-        def perform_jax(self, *inputs):
-            results = self.jitted_sol_op_jax(inputs)
-            return results
-
-        def grad(self, inputs, output_gradients):
-            # If a output is not used, it is disconnected and doesn't have a gradient.
-            # Set gradient here to zero for those outputs.
+    def perform(self, node, inputs, outputs):
+        results = self.jitted_sol_op_jax(inputs)
+        if self.num_outputs > 1:
             for i in range(self.num_outputs):
-                if isinstance(output_gradients[i].type, DisconnectedType):
-                    if None not in self.output_types[i].shape:
-                        output_gradients[i] = pt.zeros(
-                            self.output_types[i].shape, self.output_types[i].dtype
-                        )
-                    else:
-                        output_gradients[i] = pt.zeros((), self.output_types[i].dtype)
-            result = self.vjp_sol_op(inputs, output_gradients)
+                outputs[i][0] = np.array(results[i], self.output_types[i].dtype)
+        else:
+            outputs[0][0] = np.array(results, self.output_types[0].dtype)
 
-            if self.num_inputs > 1:
-                return result
-            else:
-                return (result,)  # Pytensor requires a tuple here
+    def perform_jax(self, *inputs):
+        results = self.jitted_sol_op_jax(inputs)
+        return results
 
-    # vector-jacobian product Op
-    class VJPSolOp(Op):
-        def __init__(
-            self,
-            input_treedef,
-            input_types,
-            jitted_vjp_sol_op_jax,
-        ):
-            self.input_treedef = input_treedef
-            self.input_types = input_types
-            self.jitted_vjp_sol_op_jax = jitted_vjp_sol_op_jax
-
-        def make_node(self, y0, gz):
-            y0 = [
-                pt.as_tensor_variable(
-                    _y,
-                ).astype(self.input_types[i].dtype)
-                for i, _y in enumerate(y0)
-            ]
-            gz_not_disconntected = [
-                pt.as_tensor_variable(_gz)
-                for _gz in gz
-                if not isinstance(_gz.type, DisconnectedType)
-            ]
-            outputs = [in_type() for in_type in self.input_types]
-            self.num_outputs = len(outputs)
-            return Apply(self, y0 + gz_not_disconntected, outputs)
-
-        def perform(self, node, inputs, outputs):
-            results = self.jitted_vjp_sol_op_jax(tuple(inputs))
-            if len(self.input_types) > 1:
-                for i, result in enumerate(results):
-                    outputs[i][0] = np.array(result, self.input_types[i].dtype)
-            else:
-                outputs[0][0] = np.array(results, self.input_types[0].dtype)
-
-        def perform_jax(self, *inputs):
-            results = self.jitted_vjp_sol_op_jax(tuple(inputs))
-            if self.num_outputs == 1:
-                if isinstance(results, Sequence):
-                    return results[0]
+    def grad(self, inputs, output_gradients):
+        # If a output is not used, it is disconnected and doesn't have a gradient.
+        # Set gradient here to zero for those outputs.
+        for i in range(self.num_outputs):
+            if isinstance(output_gradients[i].type, DisconnectedType):
+                if None not in self.output_types[i].shape:
+                    output_gradients[i] = pt.zeros(
+                        self.output_types[i].shape, self.output_types[i].dtype
+                    )
                 else:
-                    return results
+                    output_gradients[i] = pt.zeros((), self.output_types[i].dtype)
+        result = self.vjp_sol_op(inputs, output_gradients)
+
+        if self.num_inputs > 1:
+            return result
+        else:
+            return (result,)  # Pytensor requires a tuple here
+
+
+# vector-jacobian product Op
+class VJPJAXOp(Op):
+    def __init__(
+        self,
+        input_treedef,
+        input_types,
+        jitted_vjp_sol_op_jax,
+    ):
+        self.input_treedef = input_treedef
+        self.input_types = input_types
+        self.jitted_vjp_sol_op_jax = jitted_vjp_sol_op_jax
+
+    def make_node(self, y0, gz):
+        y0 = [
+            pt.as_tensor_variable(
+                _y,
+            ).astype(self.input_types[i].dtype)
+            for i, _y in enumerate(y0)
+        ]
+        gz_not_disconntected = [
+            pt.as_tensor_variable(_gz)
+            for _gz in gz
+            if not isinstance(_gz.type, DisconnectedType)
+        ]
+        outputs = [in_type() for in_type in self.input_types]
+        self.num_outputs = len(outputs)
+        return Apply(self, y0 + gz_not_disconntected, outputs)
+
+    def perform(self, node, inputs, outputs):
+        results = self.jitted_vjp_sol_op_jax(tuple(inputs))
+        if len(self.input_types) > 1:
+            for i, result in enumerate(results):
+                outputs[i][0] = np.array(result, self.input_types[i].dtype)
+        else:
+            outputs[0][0] = np.array(results, self.input_types[0].dtype)
+
+    def perform_jax(self, *inputs):
+        results = self.jitted_vjp_sol_op_jax(tuple(inputs))
+        if self.num_outputs == 1:
+            if isinstance(results, Sequence):
+                return results[0]
             else:
-                return tuple(results)
+                return results
+        else:
+            return tuple(results)
 
-    SolOp.__name__ = name
-    SolOp.__qualname__ = ".".join(SolOp.__qualname__.split(".")[:-1] + [name])
 
-    VJPSolOp.__name__ = "VJP_" + name
-    VJPSolOp.__qualname__ = ".".join(
-        VJPSolOp.__qualname__.split(".")[:-1] + ["VJP_" + name]
-    )
+@jax_funcify.register(JAXOp)
+def sol_op_jax_funcify(op, **kwargs):
+    return op.perform_jax
 
-    return SolOp, VJPSolOp
+
+@jax_funcify.register(VJPJAXOp)
+def vjp_sol_op_jax_funcify(op, **kwargs):
+    return op.perform_jax
