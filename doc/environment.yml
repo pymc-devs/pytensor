@@ -24,4 +24,4 @@ dependencies:
   - pip
   - pip:
     - sphinx_sitemap
-    - -e ..
+    - -e ..[jax]
