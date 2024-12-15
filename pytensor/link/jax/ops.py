@@ -85,8 +85,12 @@ def as_jax_op(jaxfunc, name=None):
         vars_from_func = tree_map(lambda x: x.get_vars(), func_vars)
         pt_vars = dict(vars=pt_vars, vars_from_func=vars_from_func)
 
-        # Infer shapes and types of the variables
+        # Flatten nested python structures, e.g. {"a": tensor_a, "b": [tensor_b]}
+        # becomes [tensor_a, tensor_b], because pytensor ops only accepts lists of
+        # pytensor.Variables as input.
         pt_vars_flat, vars_treedef = tree_flatten(pt_vars)
+
+        # Infer shapes and types of the variables
         pt_vars_types_flat = [var.type for var in pt_vars_flat]
         shapes_vars_flat = pytensor.compile.builders.infer_shape(pt_vars_flat, (), ())
         shapes_vars = tree_unflatten(vars_treedef, shapes_vars_flat)
