@@ -49,6 +49,33 @@ def as_jax_op(jaxfunc, name=None):
         API as the original jaxfunc. The resulting model can be compiled either with the
         default C backend or the JAX backend.
 
+    Examples
+    --------
+
+    We define a JAX function `f_jax` that accepts a matrix `x`, a vector `y` and a
+    dictionary as input. This is transformed to a pytensor function  with the decorator
+    `as_jax_op`, and can subsequently be used like normal pytensor operators, i.e.
+    for evaluation and calculating gradients.
+
+    >>> import numpy
+    >>> import jax.numpy as jnp
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.tensor("x", shape=(2,))
+    >>> y = pt.tensor("y", shape=(2, 2))
+    >>> a = pt.tensor("a", shape=())
+    >>> args_dict = {"a": a}
+    >>> @pytensor.as_jax_op
+    ... def f_jax(x, y, args_dict):
+    ...     z = jnp.dot(x, y) + args_dict["a"]
+    ...     return z
+    >>> z = f_jax(x, y, args_dict)
+    >>> z_sum = pt.sum(z)
+    >>> grad_wrt_a = pt.grad(z_sum, a)
+    >>> f_all = pytensor.function([x, y, a], [z_sum, grad_wrt_a])
+    >>> f_all(numpy.array([1, 2]), numpy.array([[1, 2], [3, 4]]), 1)
+    [array(19.), array(2.)]
+
 
     Notes
     -----
@@ -327,7 +354,6 @@ class JAXOp(Op):
         self.num_inputs = len(inputs)
 
         # Define our output variables
-        print(self.output_types)
         outputs = [pt.as_tensor_variable(type()) for type in self.output_types]
         self.num_outputs = len(outputs)
 
