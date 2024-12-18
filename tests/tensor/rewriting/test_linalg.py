@@ -1047,14 +1047,40 @@ def test_eig_diag_from_eye_mul(shape):
     )
 
 
-def test_eig_diag_from_diag():
+def test_eig_eye():
+    x = pt.eye(10)
+    eigval, eigvec = pt.linalg.eig(x)
+
+    # REWRITE TEST
+    f_rewritten = function([], [eigval, eigvec], mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, Eig) for node in nodes)
+
+    # NUMERIC VALUE TEST
+    x_test = np.eye(10)
+    eigval, eigvec = np.linalg.eig(x_test)
+    rewritten_eigval, rewritten_eigvec = f_rewritten()
+    assert_allclose(
+        eigval,
+        rewritten_eigval,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+    assert_allclose(
+        eigvec,
+        rewritten_eigvec,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+def test_eig_diag():
     x = pt.tensor("x", shape=(None,))
     x_diag = pt.diag(x)
     eigval, eigvec = pt.linalg.eig(x_diag)
 
     # REWRITE TEST
     f_rewritten = function([x], [eigval, eigvec], mode="FAST_RUN")
-    f_rewritten.dprint()
     nodes = f_rewritten.maker.fgraph.apply_nodes
     assert not any(isinstance(node.op, Eig) for node in nodes)
 

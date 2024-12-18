@@ -1019,9 +1019,43 @@ def slogdet_specialization(fgraph, node):
 @register_canonicalize
 @register_stabilize
 @node_rewriter([eig])
+def rewrite_eig_eye(fgraph, node):
+    """
+     This rewrite takes advantage of the fact that for any identity matrix, all the eigenvalues are 1 and the eigenvectors are the standard basis.
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
+    # Check whether input to Eig is Eye and the 1's are on main diagonal
+    potential_eye = node.inputs[0]
+    if not (
+        potential_eye.owner
+        and isinstance(potential_eye.owner.op, Eye)
+        and getattr(potential_eye.owner.inputs[-1], "data", -1).item() == 0
+    ):
+        return None
+
+    eigval_rewritten = pt.ones(potential_eye.shape[-1])
+    eigvec_rewritten = pt.eye(potential_eye.shape[-1])
+
+    return [eigval_rewritten, eigvec_rewritten]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([eig])
 def rewrite_eig_diag(fgraph, node):
     """
-     This rewrite takes advantage of the fact that for a diagonal matrix, the eigenvalues are simply the diagonal elements and the eigenvectors are the identity matrix.
+     This rewrite takes advantage of the fact that for a diagonal matrix, the eigenvalues are simply the diagonal elements and the eigenvectors are the standard basis.
 
     The presence of a diagonal matrix is detected by inspecting the graph. This rewrite can identify diagonal matrices
     that arise as the result of elementwise multiplication with an identity matrix. Specialized computation is used to
