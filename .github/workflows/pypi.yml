@@ -21,6 +21,10 @@ jobs:
   make_sdist:
     name: Make SDist
     runs-on: ubuntu-latest
+    permissions:
+      # write id-token and attestations are required to attest build provenance
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,6 +33,11 @@ jobs:
 
       - name: Build SDist
         run: pipx run build --sdist
+
+      - name: Attest GitHub build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/*.tar.gz
 
       - uses: actions/upload-artifact@v4
         with:
@@ -50,6 +59,10 @@ jobs:
   build_wheels:
     name: Build wheels for ${{ matrix.platform }}
     runs-on: ${{ matrix.platform }}
+    permissions:
+      # write id-token and attestations are required to attest build provenance
+      id-token: write
+      attestations: write
     strategy:
       matrix:
         platform:
@@ -64,6 +77,11 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.22.0
 
+      - name: Attest GitHub build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: ./wheelhouse/*.whl
+
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.platform }}
@@ -72,6 +90,10 @@ jobs:
   build_universal_wheel:
     name: Build universal wheel for Pyodide
     runs-on: ubuntu-latest
+    permissions:
+      # write id-token and attestations are required to attest build provenance
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -88,6 +110,11 @@ jobs:
       - name: Build universal wheel
         run: |
           PYODIDE=1 python setup.py bdist_wheel --universal
+
+      - name: Attest GitHub build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/*.whl
 
       - uses: actions/upload-artifact@v4
         with:
@@ -125,6 +152,10 @@ jobs:
 
   upload_pypi:
     name: Upload to PyPI on release
+    environment: release
+    permissions:
+      # write id-token is required for upload attestation
+      id-token: write
     needs: [check_dist]
     runs-on: ubuntu-latest
     if: github.event_name == 'release' && github.event.action == 'published'
@@ -146,6 +177,3 @@ jobs:
           path: dist
 
       - uses: pypa/gh-action-pypi-publish@v1.12.2
-        with:
-          user: __token__
-          password: ${{ secrets.pypi_password }}
