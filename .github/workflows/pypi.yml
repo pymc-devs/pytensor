@@ -156,9 +156,11 @@ jobs:
 
   upload_pypi:
     name: Upload to PyPI on release
+    # Use the `release` GitHub environment to protect the Trusted Publishing (OIDC)
+    # workflow by requiring signoff from a maintainer.
     environment: release
     permissions:
-      # write id-token is required for upload attestation
+      # write id-token is required for trusted publishing (OIDC)
       id-token: write
     needs: [check_dist]
     runs-on: ubuntu-latest
@@ -182,3 +184,4 @@ jobs:
           path: dist
 
       - uses: pypa/gh-action-pypi-publish@v1.12.2
+        # Implicitly attests that the packages were uploaded in the context of this workflow.
