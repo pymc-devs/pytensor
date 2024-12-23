@@ -162,7 +162,8 @@ jobs:
       id-token: write
     needs: [check_dist]
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' && github.event.action == 'published'
+    # Don't publish from forks
+    if: github.repository_owner == 'pymc-devs' && github.event_name == 'release' && github.event.action == 'published'
     steps:
       - uses: actions/download-artifact@v4
         with:
