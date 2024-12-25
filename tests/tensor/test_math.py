@@ -40,7 +40,6 @@ from pytensor.tensor.math import (
     Argmax,
     Dot,
     Max,
-    Mean,
     Prod,
     ProdWithoutZeros,
     Sum,
@@ -2587,15 +2586,6 @@ def test_mod_compile():
 
 
 class TestInferShape(utt.InferShapeTester):
-    def test_Mean(self):
-        adtens3 = dtensor3()
-        adtens3_val = random(3, 4, 5)
-        aiscal_val = 2
-        self._compile_and_check([adtens3], [Mean(None)(adtens3)], [adtens3_val], Mean)
-        self._compile_and_check(
-            [adtens3], [Mean(aiscal_val)(adtens3)], [adtens3_val], Mean
-        )
-
     def test_Max(self):
         adtens3 = dtensor3()
         adtens3_val = random(4, 5, 3)

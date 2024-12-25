@@ -598,7 +598,7 @@ class _tensor_py_operators:
 
     def __setitem__(self, key, value):
         raise TypeError(
-            "TensorVariable does not support item assignment. Use the output of `set` or `add` instead."
+            "TensorVariable does not support item assignment. Use the output of `x[idx].set` or `x[idx].inc` instead."
         )
 
     def take(self, indices, axis=None, mode="raise"):
@@ -1045,11 +1045,13 @@ def get_unique_constant_value(x: TensorVariable) -> Number | None:
     if isinstance(x, Constant):
         data = x.data
 
-        if isinstance(data, np.ndarray) and data.ndim > 0:
+        if isinstance(data, np.ndarray) and data.size > 0:
+            if data.size == 1:
+                return data.squeeze()
+
             flat_data = data.ravel()
-            if flat_data.shape[0]:
-                if (flat_data == flat_data[0]).all():
-                    return flat_data[0]
+            if (flat_data == flat_data[0]).all():
+                return flat_data[0]
 
     return None
 
@@ -1061,7 +1063,9 @@ class TensorConstant(TensorVariable, Constant[_TensorTypeType]):
         data_shape = np.shape(data)
 
         if len(data_shape) != type.ndim or any(
-            ds != ts for ds, ts in zip(np.shape(data), type.shape) if ts is not None
+            ds != ts
+            for ds, ts in zip(np.shape(data), type.shape, strict=True)
+            if ts is not None
         ):
             raise ValueError(
                 f"Shape of data ({data_shape}) does not match shape of type ({type.shape})"

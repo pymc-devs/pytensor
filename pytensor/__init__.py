@@ -164,6 +164,7 @@ from pytensor.ifelse import ifelse
 from pytensor.scan import checkpoints
 from pytensor.scan.basic import scan
 from pytensor.scan.views import foldl, foldr, map, reduce
+from pytensor.compile.builders import OpFromGraph
 
 # isort: on
 

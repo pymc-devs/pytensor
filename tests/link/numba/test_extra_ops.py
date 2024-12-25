@@ -135,7 +135,7 @@ def test_FillDiagonalOffset(a, val, offset, test_values):
             "raise",
             "C",
             None,
-            [[0], np.array([2])],
+            [0, np.array([2])],
         ),
         (
             tuple(pt.lscalar() for v in np.array([0, 0, 3])),

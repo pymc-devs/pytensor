@@ -120,7 +120,7 @@ def local_blockwise_alloc(fgraph, node):
     new_inputs = []
     batch_shapes = []
     can_push_any_alloc = False
-    for inp, inp_sig in zip(node.inputs, op.inputs_sig):
+    for inp, inp_sig in zip(node.inputs, op.inputs_sig, strict=True):
         if not all(inp.type.broadcastable[:batch_ndim]):
             if inp.owner and isinstance(inp.owner.op, Alloc):
                 # Push batch dims from Alloc
@@ -146,6 +146,7 @@ def local_blockwise_alloc(fgraph, node):
                                 :squeezed_value_batch_ndim
                             ],
                             tuple(squeezed_value.shape)[:squeezed_value_batch_ndim],
+                            strict=True,
                         )
                     ]
                     squeezed_value = alloc(squeezed_value, *batch_shape, *core_shape)
@@ -159,7 +160,7 @@ def local_blockwise_alloc(fgraph, node):
                     tuple(
                         1 if broadcastable else dim
                         for broadcastable, dim in zip(
-                            inp.type.broadcastable, shape[:batch_ndim]
+                            inp.type.broadcastable, shape[:batch_ndim], strict=False
                         )
                     )
                 )
@@ -182,7 +183,9 @@ def local_blockwise_alloc(fgraph, node):
         # We pick the most parsimonious batch dim from the pushed Alloc
         missing_ndim = old_out_type.ndim - new_out_type.ndim
         batch_shape = ([1] * missing_ndim + list(new_outs[0].shape))[:batch_ndim]
-        for i, batch_dims in enumerate(zip(*batch_shapes)):  # Transpose shape tuples
+        for i, batch_dims in enumerate(
+            zip(*batch_shapes, strict=True)
+        ):  # Transpose shape tuples
             if old_out_type.broadcastable[i]:
                 continue
             for batch_dim in batch_dims:

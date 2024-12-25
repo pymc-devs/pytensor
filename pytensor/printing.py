@@ -311,7 +311,7 @@ N.B.:
         )
 
     for var, profile, storage_map, topo_order in zip(
-        outputs_to_print, profile_list, storage_maps, topo_orders
+        outputs_to_print, profile_list, storage_maps, topo_orders, strict=True
     ):
         if hasattr(var.owner, "op"):
             if (
@@ -930,7 +930,7 @@ class PatternPrinter(Printer):
             )
         idx = node.outputs.index(output)
         pattern, precedences = self.patterns[idx]
-        precedences += (1000,) * len(node.inputs)
+        precedences += (1000,) * (len(node.inputs) - len(precedences))
 
         def pp_process(input, new_precedence):
             with set_precedence(pstate, new_precedence):
@@ -938,10 +938,9 @@ class PatternPrinter(Printer):
             return r
 
         d = {
-            str(i): x
-            for i, x in enumerate(
-                pp_process(input, precedence)
-                for input, precedence in zip(node.inputs, precedences)
+            str(i): pp_process(input, precedence)
+            for i, (input, precedence) in enumerate(
+                zip(node.inputs, precedences, strict=True)
             )
         }
         r = pattern % d
@@ -1449,7 +1448,7 @@ def pydotprint(
     if isinstance(fct, Function):
         # TODO: Get rid of all this `expanded_inputs` nonsense and use
         # `fgraph.update_mapping`
-        function_inputs = zip(fct.maker.expanded_inputs, fgraph.inputs)
+        function_inputs = zip(fct.maker.expanded_inputs, fgraph.inputs, strict=True)
         for i, fg_ii in reversed(list(function_inputs)):
             if i.update is not None:
                 k = outputs.pop()

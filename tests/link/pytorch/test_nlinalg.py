@@ -21,7 +21,7 @@ def matrix_test():
 
 @pytest.mark.parametrize(
     "func",
-    (pt_nla.eig, pt_nla.eigh, pt_nla.slogdet, pt_nla.inv, pt_nla.det),
+    (pt_nla.eig, pt_nla.eigh, pt_nla.SLogDet(), pt_nla.inv, pt_nla.det),
 )
 def test_lin_alg_no_params(func, matrix_test):
     x, test_value = matrix_test

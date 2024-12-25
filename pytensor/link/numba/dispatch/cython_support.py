@@ -45,7 +45,7 @@ class Signature:
     def can_cast_args(self, args: list[DTypeLike]) -> bool:
         ok = True
         count = 0
-        for name, dtype in zip(self.arg_names, self.arg_dtypes):
+        for name, dtype in zip(self.arg_names, self.arg_dtypes, strict=True):
             if name == "__pyx_skip_dispatch":
                 continue
             if len(args) <= count:
@@ -164,7 +164,12 @@ class _CythonWrapper(numba.types.WrapperAddressProtocol):
         return self._func_ptr
 
     def __call__(self, *args, **kwargs):
-        args = [dtype(arg) for arg, dtype in zip(args, self._signature.arg_dtypes)]
+        # no strict argument because of the JIT
+        # TODO: check
+        args = [
+            dtype(arg)
+            for arg, dtype in zip(args, self._signature.arg_dtypes)  # noqa: B905
+        ]
         if self.has_pyx_skip_dispatch():
             output = self._pyfunc(*args[:-1], **kwargs)
         else:

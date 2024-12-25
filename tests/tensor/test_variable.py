@@ -1,3 +1,4 @@
+import re
 from copy import copy
 
 import numpy as np
@@ -444,7 +445,7 @@ class TestTensorInstanceMethods:
     def test_set_item_error(self):
         x = matrix("x")
 
-        msg = "Use the output of `set` or `add` instead."
+        msg = re.escape("Use the output of `x[idx].set` or `x[idx].inc` instead.")
         with pytest.raises(TypeError, match=msg):
             x[0] = 5
         with pytest.raises(TypeError, match=msg):

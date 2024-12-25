@@ -4,6 +4,7 @@ from functools import partial
 import numpy as np
 import pytest
 
+import pytensor.tensor as pt
 import pytensor.tensor.basic as ptb
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
@@ -17,11 +18,15 @@ from pytensor.graph.op import Op
 from pytensor.ifelse import ifelse
 from pytensor.link.pytorch.linker import PytorchLinker
 from pytensor.raise_op import CheckAndRaise
-from pytensor.tensor import alloc, arange, as_tensor, empty, eye
+from pytensor.scalar import float64, int64
+from pytensor.scalar.loop import ScalarLoop
+from pytensor.tensor import alloc, arange, as_tensor, empty, expit, eye, softplus
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.type import matrices, matrix, scalar, vector
 
 
 torch = pytest.importorskip("torch")
+torch_dispatch = pytest.importorskip("pytensor.link.pytorch.dispatch.basic")
 
 
 optimizer = RewriteDatabaseQuery(
@@ -59,8 +64,6 @@ def compare_pytorch_and_py(
     assert_fn: func, opt
         Assert function used to check for equality between python and pytorch. If not
         provided uses np.testing.assert_allclose
-    must_be_device_array: Bool
-        Checks if torch.device.type is cuda
 
 
     """
@@ -72,20 +75,20 @@ def compare_pytorch_and_py(
     pytensor_torch_fn = function(inputs, outputs, mode=pytorch_mode)
     pytorch_res = pytensor_torch_fn(*test_inputs)
 
-    if must_be_device_array:
-        if isinstance(pytorch_res, list):
-            assert all(isinstance(res, torch.Tensor) for res in pytorch_res)
-        else:
-            assert pytorch_res.device.type == "cuda"
+    if isinstance(pytorch_res, list):
+        assert all(isinstance(res, np.ndarray) for res in pytorch_res)
+    else:
+        assert isinstance(pytorch_res, np.ndarray)
 
     pytensor_py_fn = function(fn_inputs, outputs, mode=py_mode)
     py_res = pytensor_py_fn(*test_inputs)
 
     if len(outputs) > 1:
-        for pytorch_res_i, py_res_i in zip(pytorch_res, py_res):
-            assert_fn(pytorch_res_i.detach().cpu().numpy(), py_res_i)
+        for pytorch_res_i, py_res_i in zip(pytorch_res, py_res, strict=True):
+            assert_fn(pytorch_res_i, py_res_i)
+
     else:
-        assert_fn(pytorch_res[0].detach().cpu().numpy(), py_res[0])
+        assert_fn(pytorch_res[0], py_res[0])
 
     return pytensor_torch_fn, pytorch_res
 
@@ -168,23 +171,23 @@ def test_shared(device):
         pytensor_torch_fn = function([], a, mode="PYTORCH")
         pytorch_res = pytensor_torch_fn()
 
-        assert isinstance(pytorch_res, torch.Tensor)
+        assert isinstance(pytorch_res, np.ndarray)
         assert isinstance(a.get_value(), np.ndarray)
-        np.testing.assert_allclose(pytorch_res.cpu(), a.get_value())
+        np.testing.assert_allclose(pytorch_res, a.get_value())
 
         pytensor_torch_fn = function([], a * 2, mode="PYTORCH")
         pytorch_res = pytensor_torch_fn()
 
-        assert isinstance(pytorch_res, torch.Tensor)
+        assert isinstance(pytorch_res, np.ndarray)
         assert isinstance(a.get_value(), np.ndarray)
-        np.testing.assert_allclose(pytorch_res.cpu(), a.get_value() * 2)
+        np.testing.assert_allclose(pytorch_res, a.get_value() * 2)
 
         new_a_value = np.array([3, 4, 5], dtype=config.floatX)
         a.set_value(new_a_value)
 
         pytorch_res = pytensor_torch_fn()
-        assert isinstance(pytorch_res, torch.Tensor)
-        np.testing.assert_allclose(pytorch_res.cpu(), new_a_value * 2)
+        assert isinstance(pytorch_res, np.ndarray)
+        np.testing.assert_allclose(pytorch_res, new_a_value * 2)
 
 
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
@@ -231,7 +234,7 @@ def test_alloc_and_empty():
     fn = function([dim1], out, mode=pytorch_mode)
     res = fn(7)
     assert res.shape == (5, 7, 3)
-    assert res.dtype == torch.float32
+    assert res.dtype == np.float32
 
     v = vector("v", shape=(3,), dtype="float64")
     out = alloc(v, dim0, dim1, 3)
@@ -345,10 +348,139 @@ def test_pytorch_OpFromGraph():
     ofg_2 = OpFromGraph([x, y], [x * y, x - y])
 
     o1, o2 = ofg_2(y, z)
-    out = ofg_1(x, o1) + o2
+    out = ofg_1(x, o1) / o2
 
     xv = np.ones((2, 2), dtype=config.floatX)
     yv = np.ones((2, 2), dtype=config.floatX) * 3
     zv = np.ones((2, 2), dtype=config.floatX) * 5
-
     compare_pytorch_and_py([x, y, z], [out], [xv, yv, zv])
+
+
+def test_pytorch_link_references():
+    import pytensor.link.utils as m
+
+    class BasicOp(Op):
+        def __init__(self):
+            super().__init__()
+
+        def make_node(self, *x):
+            return Apply(self, list(x), [xi.type() for xi in x])
+
+        def perform(self, *_):
+            raise RuntimeError("In perform")
+
+    @torch_dispatch.pytorch_funcify.register(BasicOp)
+    def fn(op, node, **kwargs):
+        def inner_fn(x):
+            assert "inner_fn" in dir(m), "not available during dispatch"
+            return x
+
+        return inner_fn
+
+    x = vector("x")
+    op = BasicOp()
+    out = op(x)
+
+    f = function([x], out, mode="PYTORCH")
+    f(torch.ones(3))
+    assert "inner_fn" not in dir(m), "function call reference leaked"
+
+
+def test_pytorch_scipy():
+    x = vector("a", shape=(3,))
+    out = expit(x)
+
+    compare_pytorch_and_py([x], [out], [np.random.rand(3)])
+
+
+def test_pytorch_softplus():
+    x = vector("a", shape=(3,))
+    out = softplus(x)
+
+    compare_pytorch_and_py([x], [out], [np.random.rand(3)])
+
+
+def test_ScalarLoop():
+    n_steps = int64("n_steps")
+    x0 = float64("x0")
+    const = float64("const")
+    x = x0 + const
+
+    op = ScalarLoop(init=[x0], constant=[const], update=[x])
+    x = op(n_steps, x0, const)
+
+    fn = function([n_steps, x0, const], x, mode=pytorch_mode)
+    np.testing.assert_allclose(fn(5, 0, 1), 5)
+    np.testing.assert_allclose(fn(5, 0, 2), 10)
+    np.testing.assert_allclose(fn(4, 3, -1), -1)
+
+
+def test_ScalarLoop_while():
+    n_steps = int64("n_steps")
+    x0 = float64("x0")
+    x = x0 + 1
+    until = x >= 10
+
+    op = ScalarLoop(init=[x0], update=[x], until=until)
+    fn = function([n_steps, x0], op(n_steps, x0), mode=pytorch_mode)
+    for res, expected in zip(
+        [fn(n_steps=20, x0=0), fn(n_steps=20, x0=1), fn(n_steps=5, x0=1)],
+        [[10, True], [10, True], [6, False]],
+        strict=True,
+    ):
+        np.testing.assert_allclose(res[0], np.array(expected[0]))
+        np.testing.assert_allclose(res[1], np.array(expected[1]))
+
+
+def test_ScalarLoop_Elemwise_single_carries():
+    n_steps = int64("n_steps")
+    x0 = float64("x0")
+    x = x0 * 2
+    until = x >= 10
+
+    scalarop = ScalarLoop(init=[x0], update=[x], until=until)
+    op = Elemwise(scalarop)
+
+    n_steps = pt.scalar("n_steps", dtype="int32")
+    x0 = pt.vector("x0", dtype="float32")
+    state, done = op(n_steps, x0)
+
+    args = [
+        np.array(10).astype("int32"),
+        np.arange(0, 5).astype("float32"),
+    ]
+    compare_pytorch_and_py(
+        [n_steps, x0],
+        [state, done],
+        args,
+        assert_fn=partial(np.testing.assert_allclose, rtol=1e-6),
+    )
+
+
+def test_ScalarLoop_Elemwise_multi_carries():
+    n_steps = int64("n_steps")
+    x0 = float64("x0")
+    x1 = float64("x1")
+    x = x0 * 2
+    x1_n = x1 * 3
+    until = x >= 10
+
+    scalarop = ScalarLoop(init=[x0, x1], update=[x, x1_n], until=until)
+    op = Elemwise(scalarop)
+
+    n_steps = pt.scalar("n_steps", dtype="int32")
+    x0 = pt.vector("x0", dtype="float32")
+    x1 = pt.tensor("c0", dtype="float32", shape=(7, 3, 1))
+    *states, done = op(n_steps, x0, x1)
+
+    args = [
+        np.array(10).astype("int32"),
+        np.arange(0, 5).astype("float32"),
+        np.random.rand(7, 3, 1).astype("float32"),
+    ]
+    compare_pytorch_and_py(
+        [n_steps, x0, x1],
+        [*states, done],
+        args,
+        assert_fn=partial(np.testing.assert_allclose, rtol=1e-6),
+    )

@@ -61,6 +61,7 @@ from pytensor.tensor.math import (
     ge,
     gt,
     int_div,
+    kv,
     le,
     log,
     log1mexp,
@@ -97,10 +98,13 @@ from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
 from pytensor.tensor.rewriting.math import (
     compute_mul,
     is_1pexp,
+    local_div_switch_sink,
     local_grad_log_erfc_neg,
     local_greedy_distributor,
     local_mul_canonizer,
+    local_mul_switch_sink,
     local_reduce_chain,
+    local_reduce_join,
     local_sum_prod_of_mul_or_div,
     mul_canonizer,
     parse_mul_tree,
@@ -2115,7 +2119,6 @@ class TestLocalSwitchSink:
         f = self.function_remove_nan([x], pytensor.gradient.grad(y, x), self.mode)
         assert f(5) == 1, f(5)
 
-    @pytest.mark.slow
     def test_local_div_switch_sink(self):
         c = dscalar()
         idx = 0
@@ -2148,6 +2151,49 @@ class TestLocalSwitchSink:
                         idx
                     ].size
                 idx += 1
+
+    @pytest.mark.parametrize(
+        "op, rewrite", [(mul, local_mul_switch_sink), (true_div, local_div_switch_sink)]
+    )
+    def test_local_mul_div_switch_sink_cast(self, op, rewrite):
+        """Check that we don't downcast during the rewrite.
+
+        Regression test for: https://github.com/pymc-devs/pytensor/issues/1037
+        """
+        cond = scalar("cond", dtype="bool")
+        # The zero branch upcasts the output, so we can't ignore its dtype
+        zero_branch = constant(np.array(0, dtype="float64"), name="zero_branch")
+        other_branch = scalar("other_branch", dtype="float32")
+        outer_var = scalar("outer_var", dtype="bool")
+
+        out = op(switch(cond, zero_branch, other_branch), outer_var)
+        fgraph = FunctionGraph(outputs=[out], clone=False)
+        [new_out] = rewrite.transform(fgraph, out.owner)
+        assert new_out.type.dtype == out.type.dtype
+
+        expected_out = switch(cond, zero_branch, op(other_branch, outer_var))
+        assert equal_computations([new_out], [expected_out])
+
+    @pytest.mark.parametrize(
+        "op, rewrite", [(mul, local_mul_switch_sink), (true_div, local_div_switch_sink)]
+    )
+    def test_local_mul_div_switch_sink_branch_order(self, op, rewrite):
+        cond = scalar("cond", dtype="bool")
+        zero_branch = constant(np.array(0.0, dtype="float64"), "zero_branch")
+        other_branch = scalar("other_branch", dtype="float64")
+        outer_var = scalar("outer_var", dtype="float64")
+
+        left = op(switch(cond, zero_branch, other_branch), outer_var)
+        right = op(switch(cond, other_branch, zero_branch), outer_var)
+        fgraph = FunctionGraph(outputs=[left, right], clone=False)
+        [new_left] = rewrite.transform(fgraph, left.owner)
+        [new_right] = rewrite.transform(fgraph, right.owner)
+
+        expected_left = switch(cond, zero_branch, op(other_branch, outer_var))
+        expected_right = switch(cond, op(other_branch, outer_var), zero_branch)
+        assert equal_computations(
+            [new_left, new_right], [expected_left, expected_right]
+        )
 
 
 @pytest.mark.skipif(
@@ -3392,6 +3438,24 @@ class TestReduceJoin:
             f(x, y), np.sum(np.concatenate([x, y], axis=0), axis=0)
         )
 
+    def test_non_ds_inputs(self):
+        """Make sure rewrite works when inputs to join are not the usual DimShuffle.
+
+        Sum{axis=1} [id A] <Vector(float64, shape=(3,))>
+         └─ Join [id B] <Matrix(float64, shape=(3, 3))>
+            ├─ 1 [id C] <Scalar(int8, shape=())>
+            ├─ ExpandDims{axis=1} [id D] <Matrix(float64, shape=(3, 1))>
+            ├─ Sub [id E] <Matrix(float64, shape=(3, 1))>
+            └─ Sub [id F] <Matrix(float64, shape=(3, 1))>
+        """
+        x = vector("x")
+        out = join(0, exp(x[None]), log(x[None])).sum(axis=0)
+
+        fg = FunctionGraph([x], [out], clone=False)
+        [rewritten_out] = local_reduce_join.transform(fg, out.owner)
+        expected_out = add(exp(x), log(x))
+        assert equal_computations([rewritten_out], [expected_out])
+
 
 def test_local_useless_adds():
     default_mode = get_default_mode()
@@ -4515,3 +4579,17 @@ def test_local_batched_matmul_to_core_matmul():
     x_test = rng.normal(size=(5, 3, 2))
     y_test = rng.normal(size=(5, 2, 2))
     np.testing.assert_allclose(fn(x_test, y_test), x_test @ y_test)
+
+
+def test_log_kv_stabilization():
+    x = pt.scalar("x")
+    out = log(kv(4.5, x))
+
+    # Expression would underflow to -inf without rewrite
+    mode = get_default_mode().including("stabilize")
+    # Reference value from mpmath
+    # mpmath.log(mpmath.besselk(4.5, 1000.0))
+    np.testing.assert_allclose(
+        out.eval({x: 1000.0}, mode=mode),
+        -1003.2180912984705,
+    )

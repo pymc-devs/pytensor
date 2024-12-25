@@ -165,13 +165,22 @@ def test_flag_detection():
 
 @pytest.fixture(
     scope="module",
-    params=["mkl_intel", "mkl_gnu", "openblas", "lapack", "blas", "no_blas"],
+    params=[
+        "mkl_intel",
+        "mkl_gnu",
+        "accelerate",
+        "openblas",
+        "lapack",
+        "blas",
+        "no_blas",
+    ],
 )
 def blas_libs(request):
     key = request.param
     libs = {
         "mkl_intel": ["mkl_core", "mkl_rt", "mkl_intel_thread", "iomp5", "pthread"],
         "mkl_gnu": ["mkl_core", "mkl_rt", "mkl_gnu_thread", "gomp", "pthread"],
+        "accelerate": ["vecLib_placeholder"],
         "openblas": ["openblas", "gfortran", "gomp", "m"],
         "lapack": ["lapack", "blas", "cblas", "m"],
         "blas": ["blas", "cblas"],
@@ -190,25 +199,37 @@ def mock_system(request):
 def cxx_search_dirs(blas_libs, mock_system):
     libext = {"Linux": "so", "Windows": "dll", "Darwin": "dylib"}
     libraries = []
+    enabled_accelerate_framework = False
     with tempfile.TemporaryDirectory() as d:
         flags = None
         for lib in blas_libs:
-            lib_path = Path(d) / f"{lib}.{libext[mock_system]}"
-            lib_path.write_bytes(b"1")
-            libraries.append(lib_path)
-            if flags is None:
-                flags = f"-l{lib}"
+            if lib == "vecLib_placeholder":
+                if mock_system != "Darwin":
+                    flags = ""
+                else:
+                    flags = "-framework Accelerate"
+                    enabled_accelerate_framework = True
             else:
-                flags += f" -l{lib}"
+                lib_path = Path(d) / f"{lib}.{libext[mock_system]}"
+                lib_path.write_bytes(b"1")
+                libraries.append(lib_path)
+                if flags is None:
+                    flags = f"-l{lib}"
+                else:
+                    flags += f" -l{lib}"
         if "gomp" in blas_libs and "mkl_gnu_thread" not in blas_libs:
             flags += " -fopenmp"
         if len(blas_libs) == 0:
             flags = ""
-        yield f"libraries: ={d}".encode(sys.stdout.encoding), flags
+        yield (
+            f"libraries: ={d}".encode(sys.stdout.encoding),
+            flags,
+            enabled_accelerate_framework,
+        )
 
 
 @pytest.fixture(
-    scope="function", params=[False, True], ids=["Working_CXX", "Broken_CXX"]
+    scope="function", params=[True, False], ids=["Working_CXX", "Broken_CXX"]
 )
 def cxx_search_dirs_status(request):
     return request.param
@@ -219,22 +240,39 @@ def cxx_search_dirs_status(request):
 def test_default_blas_ldflags(
     mock_std_lib_dirs, mock_check_mkl_openmp, cxx_search_dirs, cxx_search_dirs_status
 ):
-    cxx_search_dirs, expected_blas_ldflags = cxx_search_dirs
+    cxx_search_dirs, expected_blas_ldflags, enabled_accelerate_framework = (
+        cxx_search_dirs
+    )
     mock_process = MagicMock()
     if cxx_search_dirs_status:
         error_message = ""
         mock_process.communicate = lambda *args, **kwargs: (cxx_search_dirs, b"")
         mock_process.returncode = 0
     else:
+        enabled_accelerate_framework = False
         error_message = "Unsupported argument -print-search-dirs"
         error_message_bytes = error_message.encode(sys.stderr.encoding)
         mock_process.communicate = lambda *args, **kwargs: (b"", error_message_bytes)
         mock_process.returncode = 1
+
+    def patched_compile_tmp(*args, **kwargs):
+        def wrapped(test_code, tmp_prefix, flags, try_run, output):
+            if len(flags) >= 2 and flags[:2] == ["-framework", "Accelerate"]:
+                print(enabled_accelerate_framework)
+                if enabled_accelerate_framework:
+                    return (True, True)
+                else:
+                    return (False, False, "", "Invalid flags -framework Accelerate")
+            else:
+                return (True, True)
+
+        return wrapped
+
     with patch("pytensor.link.c.cmodule.subprocess_Popen", return_value=mock_process):
         with patch.object(
             pytensor.link.c.cmodule.GCC_compiler,
             "try_compile_tmp",
-            return_value=(True, True),
+            new_callable=patched_compile_tmp,
         ):
             if cxx_search_dirs_status:
                 assert set(default_blas_ldflags().split(" ")) == set(
@@ -267,6 +305,9 @@ def windows_conda_libs(blas_libs):
         subdir.mkdir(exist_ok=True, parents=True)
         flags = f'-L"{subdir}"'
         for lib in blas_libs:
+            if lib == "vecLib_placeholder":
+                flags = ""
+                break
             lib_path = subdir / f"{lib}.dll"
             lib_path.write_bytes(b"1")
             libraries.append(lib_path)
@@ -287,6 +328,16 @@ def test_default_blas_ldflags_conda_windows(
     mock_process = MagicMock()
     mock_process.communicate = lambda *args, **kwargs: (b"", b"")
     mock_process.returncode = 0
+
+    def patched_compile_tmp(*args, **kwargs):
+        def wrapped(test_code, tmp_prefix, flags, try_run, output):
+            if len(flags) >= 2 and flags[:2] == ["-framework", "Accelerate"]:
+                return (False, False, "", "Invalid flags -framework Accelerate")
+            else:
+                return (True, True)
+
+        return wrapped
+
     with patch("sys.platform", "win32"):
         with patch("sys.prefix", mock_sys_prefix):
             with patch(
@@ -295,7 +346,7 @@ def test_default_blas_ldflags_conda_windows(
                 with patch.object(
                     pytensor.link.c.cmodule.GCC_compiler,
                     "try_compile_tmp",
-                    return_value=(True, True),
+                    new_callable=patched_compile_tmp,
                 ):
                     assert set(default_blas_ldflags().split(" ")) == set(
                         expected_blas_ldflags.split(" ")

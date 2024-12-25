@@ -1862,7 +1862,8 @@ class CategoricalRV(RandomVariable):
             # to `p.shape[:-1]` in the call to `vsearchsorted` below.
             if len(size) < (p.ndim - 1):
                 raise ValueError("`size` is incompatible with the shape of `p`")
-            for s, ps in zip(reversed(size), reversed(p.shape[:-1])):
+            # strict=False because we are in a hot loop
+            for s, ps in zip(reversed(size), reversed(p.shape[:-1]), strict=False):
                 if s == 1 and ps != 1:
                     raise ValueError("`size` is incompatible with the shape of `p`")
 

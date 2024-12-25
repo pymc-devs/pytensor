@@ -88,7 +88,7 @@ def map_storage(
         assert len(fgraph.inputs) == len(input_storage)
 
     # add input storage into storage_map
-    for r, storage in zip(fgraph.inputs, input_storage):
+    for r, storage in zip(fgraph.inputs, input_storage, strict=True):
         if r in storage_map:
             assert storage_map[r] is storage, (
                 "Given input_storage conflicts "
@@ -108,7 +108,7 @@ def map_storage(
     # allocate output storage
     if output_storage is not None:
         assert len(fgraph.outputs) == len(output_storage)
-        for r, storage in zip(fgraph.outputs, output_storage):
+        for r, storage in zip(fgraph.outputs, output_storage, strict=True):
             if r in storage_map:
                 assert storage_map[r] is storage, (
                     "Given output_storage confl"
@@ -190,8 +190,9 @@ def streamline(
             for x in no_recycling:
                 x[0] = None
             try:
+                # strict=False because we are in a hot loop
                 for thunk, node, old_storage in zip(
-                    thunks, order, post_thunk_old_storage
+                    thunks, order, post_thunk_old_storage, strict=False
                 ):
                     thunk()
                     for old_s in old_storage:
@@ -206,7 +207,8 @@ def streamline(
             for x in no_recycling:
                 x[0] = None
             try:
-                for thunk, node in zip(thunks, order):
+                # strict=False because we are in a hot loop
+                for thunk, node in zip(thunks, order, strict=False):
                     thunk()
             except Exception:
                 raise_with_op(fgraph, node, thunk)
@@ -673,6 +675,7 @@ def fgraph_to_python(
     local_env: dict[Any, Any] | None = None,
     get_name_for_object: Callable[[Any], str] = get_name_for_object,
     squeeze_output: bool = False,
+    unique_name: Callable | None = None,
     **kwargs,
 ) -> Callable:
     """Convert a `FunctionGraph` into a regular Python function.
@@ -704,6 +707,8 @@ def fgraph_to_python(
     get_name_for_object
         A function used to provide names for the objects referenced within the
         generated function.
+    unique_name
+        A function to make random function names for generated code
     squeeze_output
         If the `FunctionGraph` has only one output and this option is
         ``True``, return the single output instead of a tuple with the output.
@@ -717,7 +722,11 @@ def fgraph_to_python(
     if storage_map is None:
         storage_map = {}
 
-    unique_name = unique_name_generator([fgraph_name])
+    if not unique_name:
+        unique_name = unique_name_generator([fgraph_name])
+
+    # make sure we plumb this through
+    kwargs["unique_name"] = unique_name
 
     if global_env is None:
         global_env = {}

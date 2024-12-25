@@ -34,7 +34,8 @@ def pytorch_funcify_Shape_i(op, **kwargs):
 def pytorch_funcify_SpecifyShape(op, node, **kwargs):
     def specifyshape(x, *shape):
         assert x.ndim == len(shape)
-        for actual, expected in zip(x.shape, shape):
+        # strict=False because asserted above
+        for actual, expected in zip(x.shape, shape, strict=False):
             if expected is None:
                 continue
             if actual != expected:

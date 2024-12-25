@@ -59,7 +59,7 @@ class COp(Op, CLinkerOp):
         e = FunctionGraph(node.inputs, node.outputs)
         e_no_recycling = [
             new_o
-            for (new_o, old_o) in zip(e.outputs, node.outputs)
+            for (new_o, old_o) in zip(e.outputs, node.outputs, strict=True)
             if old_o in no_recycling
         ]
         cl = pytensor.link.c.basic.CLinker().accept(e, no_recycling=e_no_recycling)
@@ -352,7 +352,7 @@ class ExternalCOp(COp):
                 "be used at the same time."
             )
 
-        for func_file, code in zip(func_files, self.func_codes):
+        for func_file, code in zip(func_files, self.func_codes, strict=True):
             if self.backward_re.search(code):
                 # This is backward compat code that will go away in a while
 

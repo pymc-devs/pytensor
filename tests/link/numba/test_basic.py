@@ -21,7 +21,6 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
 from pytensor.compile.ops import ViewOp
-from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
@@ -221,11 +220,13 @@ def eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode):
 def compare_numba_and_py(
     inputs: Iterable[Variable],
     outputs: Variable | Iterable[Variable] | dict[str, Variable],
-    input_types: Sequence["TensorLike"],
+    test_inputs: Sequence["TensorLike"],
     assert_fn: Callable | None = None,
+    *,
     numba_mode=numba_mode,
     py_mode=py_mode,
     updates=None,
+    inplace: bool = False,
     eval_obj_mode: bool = True,
 ) -> tuple[Callable, Any]:
     """Function to compare python function output and Numba compiled output for testing equality
@@ -261,28 +262,32 @@ def compare_numba_and_py(
                 x, y
             )
 
-    fn_inputs = [i for i in inputs if not isinstance(i, SharedVariable)]
+    # inputs = [i for i in inputs if not isinstance(i, SharedVariable)]
 
     pytensor_py_fn = function(
         inputs, outputs, mode=py_mode, accept_inplace=True, updates=updates
     )
-    py_res = pytensor_py_fn(*input_types)
+    test_inputs = (inp.copy() for inp in test_inputs) if inplace else test_inputs
+    py_res = pytensor_py_fn(*test_inputs)
+
+    # Get some coverage (and catch errors in python mode before unreadable numba ones)
+    if eval_obj_mode:
+        test_inputs = (inp.copy() for inp in test_inputs) if inplace else test_inputs
+        eval_python_only(inputs, outputs, test_inputs, mode=numba_mode)
 
     pytensor_numba_fn = function(
-        fn_inputs,
+        inputs,
         outputs,
         mode=numba_mode,
         accept_inplace=True,
         updates=updates,
     )
-    numba_res = pytensor_numba_fn(*input_types)
 
-    # Get some coverage
-    if eval_obj_mode:
-        eval_python_only(inputs, outputs, input_types, mode=numba_mode)
+    test_inputs = (inp.copy() for inp in test_inputs) if inplace else test_inputs
+    numba_res = pytensor_numba_fn(*test_inputs)
 
     if len(outputs) > 1:
-        for j, p in zip(numba_res, py_res):
+        for j, p in zip(numba_res, py_res, strict=True):
             assert_fn(j, p)
     else:
         assert_fn(numba_res[0], py_res[0])
@@ -569,17 +574,17 @@ def test_Dot(x, y, exc, test_values):
 
 
 @pytest.mark.parametrize(
-    "x, exc,test_values",
+    "x, test_values, exc,",
     [
-        (ps.float64(), None, [np.array(0.0, dtype="float64")]),
-        (ps.float64(), None, [np.array(-32.0, dtype="float64")]),
-        (ps.float64(), None, [np.array(-40.0, dtype="float64")]),
-        (ps.float64(), None, [np.array(32.0, dtype="float64")]),
-        (ps.float64(), None, [np.array(40.0, dtype="float64")]),
-        (ps.int64(), None, [np.array(32, dtype="int64")]),
+        (ps.float64(), [np.array(0.0, dtype="float64")], None),
+        (ps.float64(), [np.array(-32.0, dtype="float64")], None),
+        (ps.float64(), [np.array(-40.0, dtype="float64")], None),
+        (ps.float64(), [np.array(32.0, dtype="float64")], None),
+        (ps.float64(), [np.array(40.0, dtype="float64")], None),
+        (ps.int64(), [np.array(32, dtype="int64")], None),
     ],
 )
-def test_Softplus(x, exc, test_values):
+def test_Softplus(x, test_values, exc):
     g = psm.Softplus(ps.upgrade_to_float)(x)
     inputs = [x]
 
@@ -834,3 +839,20 @@ def test_cache_warning_suppressed():
 
     x_test = np.random.uniform(size=5)
     np.testing.assert_allclose(fn(x_test), scipy.special.psi(x_test) * 2)
+
+
+@pytest.mark.parametrize("mode", ("default", "trust_input", "direct"))
+def test_function_overhead(mode, benchmark):
+    x = pt.vector("x")
+    out = pt.exp(x)
+
+    fn = function([x], out, mode="NUMBA")
+    if mode == "trust_input":
+        fn.trust_input = True
+    elif mode == "direct":
+        fn = fn.vm.jit_fn
+
+    test_x = np.zeros(1000)
+    assert np.sum(fn(test_x)) == 1000
+
+    benchmark(fn, test_x)

@@ -330,6 +330,7 @@ class TestBroadcast:
             [self.op, self.cop],
             [self.type, self.ctype],
             [self.rand_val, self.rand_cval],
+            strict=True,
         ):
             x = t(pytensor.config.floatX, shape=(None, None))("x")
             y = t(pytensor.config.floatX, shape=(1, 1))("y")
@@ -361,6 +362,7 @@ class TestBroadcast:
             [self.op, self.cop],
             [self.type, self.ctype],
             [self.rand_val, self.rand_cval],
+            strict=True,
         ):
             x = t(pytensor.config.floatX, shape=(None,) * 5)("x")
             y = t(pytensor.config.floatX, shape=(None,) * 5)("y")
@@ -381,6 +383,7 @@ class TestBroadcast:
             [self.op, self.cop],
             [self.type, self.ctype],
             [self.rand_val, self.rand_cval],
+            strict=True,
         ):
             x = t(pytensor.config.floatX, shape=(None,) * 2)("x")
             e = op(ps.add)(x, x)
@@ -980,6 +983,22 @@ class TestVectorize:
         assert vect_node.inputs[0] is bool_tns
 
 
+def careduce_benchmark_tester(axis, c_contiguous, mode, benchmark):
+    N = 256
+    x_test = np.random.uniform(size=(N, N, N))
+    transpose_axis = (0, 1, 2) if c_contiguous else (2, 0, 1)
+
+    x = pytensor.shared(x_test, name="x", shape=x_test.shape)
+    out = x.transpose(transpose_axis).sum(axis=axis)
+    fn = pytensor.function([], out, mode=mode)
+
+    np.testing.assert_allclose(
+        fn(),
+        x_test.transpose(transpose_axis).sum(axis=axis),
+    )
+    benchmark(fn)
+
+
 @pytest.mark.parametrize(
     "axis",
     (0, 1, 2, (0, 1), (0, 2), (1, 2), None),
@@ -990,17 +1009,7 @@ class TestVectorize:
     (True, False),
     ids=lambda x: f"c_contiguous={x}",
 )
-def test_careduce_benchmark(axis, c_contiguous, benchmark):
-    N = 256
-    x_test = np.random.uniform(size=(N, N, N))
-    transpose_axis = (0, 1, 2) if c_contiguous else (2, 0, 1)
-
-    x = pytensor.shared(x_test, name="x", shape=x_test.shape)
-    out = x.transpose(transpose_axis).sum(axis=axis)
-    fn = pytensor.function([], out)
-
-    np.testing.assert_allclose(
-        fn(),
-        x_test.transpose(transpose_axis).sum(axis=axis),
+def test_c_careduce_benchmark(axis, c_contiguous, benchmark):
+    return careduce_benchmark_tester(
+        axis, c_contiguous, mode="FAST_RUN", benchmark=benchmark
     )
-    benchmark(fn)

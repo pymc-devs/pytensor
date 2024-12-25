@@ -385,11 +385,11 @@ class PerformLinker(LocalLinker):
             f,
             [
                 Container(input, storage)
-                for input, storage in zip(fgraph.inputs, input_storage)
+                for input, storage in zip(fgraph.inputs, input_storage, strict=True)
             ],
             [
                 Container(output, storage, readonly=True)
-                for output, storage in zip(fgraph.outputs, output_storage)
+                for output, storage in zip(fgraph.outputs, output_storage, strict=True)
             ],
             thunks,
             order,
@@ -509,7 +509,9 @@ class WrapLinker(Linker):
         kwargs.pop("input_storage", None)
         make_all += [x.make_all(**kwargs) for x in self.linkers[1:]]
 
-        fns, input_lists, output_lists, thunk_lists, order_lists = zip(*make_all)
+        fns, input_lists, output_lists, thunk_lists, order_lists = zip(
+            *make_all, strict=True
+        )
 
         order_list0 = order_lists[0]
         for order_list in order_lists[1:]:
@@ -521,12 +523,12 @@ class WrapLinker(Linker):
         inputs0 = input_lists[0]
         outputs0 = output_lists[0]
 
-        thunk_groups = list(zip(*thunk_lists))
-        order = [x[0] for x in zip(*order_lists)]
+        thunk_groups = list(zip(*thunk_lists, strict=True))
+        order = [x[0] for x in zip(*order_lists, strict=True)]
 
         to_reset = [
             thunk.outputs[j]
-            for thunks, node in zip(thunk_groups, order)
+            for thunks, node in zip(thunk_groups, order, strict=True)
             for j, output in enumerate(node.outputs)
             if output in no_recycling
             for thunk in thunks
@@ -537,12 +539,14 @@ class WrapLinker(Linker):
 
         def f():
             for inputs in input_lists[1:]:
-                for input1, input2 in zip(inputs0, inputs):
+                # strict=False because we are in a hot loop
+                for input1, input2 in zip(inputs0, inputs, strict=False):
                     input2.storage[0] = copy(input1.storage[0])
             for x in to_reset:
                 x[0] = None
             pre(self, [input.data for input in input_lists[0]], order, thunk_groups)
-            for i, (thunks, node) in enumerate(zip(thunk_groups, order)):
+            # strict=False because we are in a hot loop
+            for i, (thunks, node) in enumerate(zip(thunk_groups, order, strict=False)):
                 try:
                     wrapper(self.fgraph, i, node, *thunks)
                 except Exception:
@@ -649,38 +653,36 @@ class JITLinker(PerformLinker):
         )
 
         thunk_inputs = self.create_thunk_inputs(storage_map)
-
-        thunks = []
-
         thunk_outputs = [storage_map[n] for n in self.fgraph.outputs]
-
         fgraph_jit = self.jit_compile(converted_fgraph)
 
         def thunk(
-            fgraph=self.fgraph,
             fgraph_jit=fgraph_jit,
             thunk_inputs=thunk_inputs,
             thunk_outputs=thunk_outputs,
         ):
-            outputs = fgraph_jit(*[self.input_filter(x[0]) for x in thunk_inputs])
+            try:
+                outputs = fgraph_jit(*(x[0] for x in thunk_inputs))
+            except Exception:
+                # TODO: Should we add a fake node that combines all outputs,
+                #  since the error may come from any of them?
+                raise_with_op(self.fgraph, output_nodes[0], thunk)
 
-            for o_var, o_storage, o_val in zip(fgraph.outputs, thunk_outputs, outputs):
-                compute_map[o_var][0] = True
-                o_storage[0] = self.output_filter(o_var, o_val)
-            return outputs
+            # strict=False because we are in a hot loop
+            for o_storage, o_val in zip(thunk_outputs, outputs, strict=False):
+                o_storage[0] = o_val
 
         thunk.inputs = thunk_inputs
         thunk.outputs = thunk_outputs
         thunk.lazy = False
 
-        thunks.append(thunk)
+        thunks = [thunk]
 
         return thunks, output_nodes, fgraph_jit
 
     def make_all(self, input_storage=None, output_storage=None, storage_map=None):
         fgraph = self.fgraph
         nodes = self.schedule(fgraph)
-        no_recycling = self.no_recycling
 
         input_storage, output_storage, storage_map = map_storage(
             fgraph, nodes, input_storage, output_storage, storage_map
@@ -694,34 +696,7 @@ class JITLinker(PerformLinker):
             compute_map, nodes, input_storage, output_storage, storage_map
         )
 
-        computed, last_user = gc_helper(nodes)
-
-        if self.allow_gc:
-            post_thunk_old_storage = [
-                [
-                    storage_map[input]
-                    for input in node.inputs
-                    if (input in computed)
-                    and (input not in fgraph.outputs)
-                    and (node == last_user[input])
-                ]
-                for node in nodes
-            ]
-        else:
-            post_thunk_old_storage = None
-
-        if no_recycling is True:
-            no_recycling = list(storage_map.values())
-            no_recycling = difference(no_recycling, input_storage)
-        else:
-            no_recycling = [
-                storage_map[r] for r in no_recycling if r not in fgraph.inputs
-            ]
-
-        fn = streamline(
-            fgraph, thunks, nodes, post_thunk_old_storage, no_recycling=no_recycling
-        )
-
+        [fn] = thunks
         fn.jit_fn = jit_fn
         fn.allow_gc = self.allow_gc
         fn.storage_map = storage_map
@@ -730,11 +705,11 @@ class JITLinker(PerformLinker):
             fn,
             [
                 Container(input, storage)
-                for input, storage in zip(fgraph.inputs, input_storage)
+                for input, storage in zip(fgraph.inputs, input_storage, strict=True)
             ],
             [
                 Container(output, storage, readonly=True)
-                for output, storage in zip(fgraph.outputs, output_storage)
+                for output, storage in zip(fgraph.outputs, output_storage, strict=True)
             ],
             thunks,
             nodes,

@@ -74,16 +74,16 @@ def test_RandomVariable_basics(strict_test_value_flags):
     # `dtype` is respected
     rv = RandomVariable("normal", signature="(),()->()", dtype="int32")
     with config.change_flags(compute_test_value="off"):
-        rv_out = rv()
+        rv_out = rv(0, 0)
         assert rv_out.dtype == "int32"
-        rv_out = rv(dtype="int64")
+        rv_out = rv(0, 0, dtype="int64")
         assert rv_out.dtype == "int64"
 
         with pytest.raises(
             ValueError,
             match="Cannot change the dtype of a normal RV from int32 to float32",
         ):
-            assert rv(dtype="float32").dtype == "float32"
+            assert rv(0, 0, dtype="float32").dtype == "float32"
 
 
 def test_RandomVariable_bcast(strict_test_value_flags):

@@ -36,14 +36,15 @@ from pytensor.scalar.basic import (
     floats,
     int8,
     int32,
+    int64,
     ints,
     invert,
     log,
     log1p,
     log2,
     log10,
-    mean,
     mul,
+    neg,
     neq,
     rad2deg,
     reciprocal,
@@ -56,7 +57,7 @@ from pytensor.scalar.basic import (
     true_div,
     uint8,
 )
-from pytensor.tensor.type import fscalar, imatrix, iscalar, matrix
+from pytensor.tensor.type import fscalar, imatrix, matrix
 from tests.link.test_link import make_function
 
 
@@ -155,6 +156,21 @@ class TestComposite:
             fn(test_x, test_y),
             (literal_value + test_y) * (test_x / test_y),
         )
+
+    def test_negative_constant(self):
+        # Test that a negative constant is wrapped in parentheses to avoid confusing - (unary minus) and -- (decrement)
+        x = int64("x")
+        e = neg(constant(-1.5)) % x
+        comp_op = Composite([x], [e])
+        comp_node = comp_op.make_node(x)
+
+        c_code = comp_node.op.c_code(comp_node, "dummy", ["x", "y"], ["z"], dict(id=0))
+        assert "-1.5" in c_code
+
+        g = FunctionGraph([x], [comp_node.out])
+        fn = make_function(DualLinker().accept(g))
+        assert fn(2) == 1.5
+        assert fn(1) == 0.5
 
     def test_many_outputs(self):
         x, y, z = floats("xyz")
@@ -502,34 +518,6 @@ def test_constant():
     c = constant(2, dtype="float32")
     assert c.name is None
     assert c.dtype == "float32"
-
-
-@pytest.mark.parametrize("mode", [Mode("py"), Mode("cvm")])
-def test_mean(mode):
-    a = iscalar("a")
-    b = iscalar("b")
-    z = mean(a, b)
-    z_fn = pytensor.function([a, b], z, mode=mode)
-    res = z_fn(1, 1)
-    assert np.allclose(res, 1.0)
-
-    a = fscalar("a")
-    b = fscalar("b")
-    c = fscalar("c")
-
-    z = mean(a, b, c)
-
-    z_fn = pytensor.function([a, b, c], pytensor.grad(z, [a]), mode=mode)
-    res = z_fn(3, 4, 5)
-    assert np.allclose(res, 1 / 3)
-
-    z_fn = pytensor.function([a, b, c], pytensor.grad(z, [b]), mode=mode)
-    res = z_fn(3, 4, 5)
-    assert np.allclose(res, 1 / 3)
-
-    z = mean()
-    z_fn = pytensor.function([], z, mode=mode)
-    assert z_fn() == 0
 
 
 def test_shape():

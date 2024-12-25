@@ -62,9 +62,10 @@ def test_debugprint_sitsot():
     Scan{scan_fn, while_loop=False, inplace=none} [id C]
      ← Mul [id W] (inner_out_sit_sot-0)
         ├─ *0-<Vector(float64, shape=(?,))> [id X] -> [id E] (inner_in_sit_sot-0)
-        └─ *1-<Vector(float64, shape=(?,))> [id Y] -> [id M] (inner_in_non_seqs-0)"""
+        └─ *1-<Vector(float64, shape=(?,))> [id Y] -> [id M] (inner_in_non_seqs-0)
+    """
 
-    for truth, out in zip(expected_output.split("\n"), lines):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
 
 
@@ -120,9 +121,10 @@ def test_debugprint_sitsot_no_extra_info():
     Scan{scan_fn, while_loop=False, inplace=none} [id C]
      ← Mul [id W]
         ├─ *0-<Vector(float64, shape=(?,))> [id X] -> [id E]
-        └─ *1-<Vector(float64, shape=(?,))> [id Y] -> [id M]"""
+        └─ *1-<Vector(float64, shape=(?,))> [id Y] -> [id M]
+    """
 
-    for truth, out in zip(expected_output.split("\n"), lines):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
 
 
@@ -188,9 +190,10 @@ def test_debugprint_nitsot():
         ├─ *0-<Scalar(float64, shape=())> [id Y] -> [id S] (inner_in_seqs-0)
         └─ Pow [id Z]
            ├─ *2-<Scalar(float64, shape=())> [id BA] -> [id W] (inner_in_non_seqs-0)
-           └─ *1-<Scalar(int64, shape=())> [id BB] -> [id U] (inner_in_seqs-1)"""
+           └─ *1-<Scalar(int64, shape=())> [id BB] -> [id U] (inner_in_seqs-1)
+   """
 
-    for truth, out in zip(expected_output.split("\n"), lines):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
 
 
@@ -303,9 +306,10 @@ def test_debugprint_nested_scans():
     Scan{scan_fn, while_loop=False, inplace=none} [id BE]
      ← Mul [id CA] (inner_out_sit_sot-0)
         ├─ *0-<Vector(float64, shape=(?,))> [id CB] -> [id BG] (inner_in_sit_sot-0)
-        └─ *1-<Vector(float64, shape=(?,))> [id CC] -> [id BO] (inner_in_non_seqs-0)"""
+        └─ *1-<Vector(float64, shape=(?,))> [id CC] -> [id BO] (inner_in_non_seqs-0)
+    """
 
-    for truth, out in zip(expected_output.split("\n"), lines):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
 
     fg = FunctionGraph([c, k, A], [final_result])
@@ -402,9 +406,10 @@ def test_debugprint_nested_scans():
      → *1-<Vector(float64, shape=(?,))> [id CB] -> [id BA] (inner_in_non_seqs-0)
      ← Mul [id CC] (inner_out_sit_sot-0)
         ├─ *0-<Vector(float64, shape=(?,))> [id CA] (inner_in_sit_sot-0)
-        └─ *1-<Vector(float64, shape=(?,))> [id CB] (inner_in_non_seqs-0)"""
+        └─ *1-<Vector(float64, shape=(?,))> [id CB] (inner_in_non_seqs-0)
+    """
 
-    for truth, out in zip(expected_output.split("\n"), lines):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
 
 
@@ -477,9 +482,10 @@ def test_debugprint_mitsot():
         └─ *0-<Scalar(int64, shape=())> [id BD] -> [id E] (inner_in_mit_sot-0-0)
      ← Add [id BE] (inner_out_mit_sot-1)
         ├─ *3-<Scalar(int64, shape=())> [id BF] -> [id O] (inner_in_mit_sot-1-1)
-        └─ *2-<Scalar(int64, shape=())> [id BG] -> [id O] (inner_in_mit_sot-1-0)"""
+        └─ *2-<Scalar(int64, shape=())> [id BG] -> [id O] (inner_in_mit_sot-1-0)
+    """
 
-    for truth, out in zip(expected_output.split("\n"), lines):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
 
 
@@ -613,9 +619,10 @@ def test_debugprint_mitmot():
     Scan{scan_fn, while_loop=False, inplace=none} [id F]
      ← Mul [id CV] (inner_out_sit_sot-0)
         ├─ *0-<Vector(float64, shape=(?,))> [id CT] -> [id H] (inner_in_sit_sot-0)
-        └─ *1-<Vector(float64, shape=(?,))> [id CW] -> [id P] (inner_in_non_seqs-0)"""
+        └─ *1-<Vector(float64, shape=(?,))> [id CW] -> [id P] (inner_in_non_seqs-0)
+    """
 
-    for truth, out in zip(expected_output.split("\n"), lines):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
 
 
@@ -654,30 +661,28 @@ def test_debugprint_compiled_fn():
     Inner graphs:
 
     Scan{scan_fn, while_loop=False, inplace=all} [id A]
-     ← Composite{switch(lt(i0, i1), i2, i0)} [id I] (inner_out_sit_sot-0)
-        ├─ 0 [id J]
-        ├─ Subtensor{i, j, k} [id K]
-        │  ├─ *2-<Tensor3(float64, shape=(20000, 2, 2))> [id L] -> [id H] (inner_in_non_seqs-0)
-        │  ├─ ScalarFromTensor [id M]
-        │  │  └─ *0-<Scalar(int64, shape=())> [id N] -> [id C] (inner_in_seqs-0)
-        │  ├─ ScalarFromTensor [id O]
-        │  │  └─ *1-<Scalar(int64, shape=())> [id P] -> [id D] (inner_in_sit_sot-0)
-        │  └─ 0 [id Q]
-        └─ 1 [id R]
+     ← Composite{switch(lt(0, i0), 1, 0)} [id I] (inner_out_sit_sot-0)
+        └─ Subtensor{i, j, k} [id J]
+           ├─ *2-<Tensor3(float64, shape=(20000, 2, 2))> [id K] -> [id H] (inner_in_non_seqs-0)
+           ├─ ScalarFromTensor [id L]
+           │  └─ *0-<Scalar(int64, shape=())> [id M] -> [id C] (inner_in_seqs-0)
+           ├─ ScalarFromTensor [id N]
+           │  └─ *1-<Scalar(int64, shape=())> [id O] -> [id D] (inner_in_sit_sot-0)
+           └─ 0 [id P]
 
-    Composite{switch(lt(i0, i1), i2, i0)} [id I]
-     ← Switch [id S] 'o0'
-        ├─ LT [id T]
-        │  ├─ i0 [id U]
-        │  └─ i1 [id V]
-        ├─ i2 [id W]
-        └─ i0 [id U]
+    Composite{switch(lt(0, i0), 1, 0)} [id I]
+     ← Switch [id Q] 'o0'
+        ├─ LT [id R]
+        │  ├─ 0 [id S]
+        │  └─ i0 [id T]
+        ├─ 1 [id U]
+        └─ 0 [id S]
     """
 
     output_str = debugprint(out, file="str", print_op_info=True)
     lines = output_str.split("\n")
 
-    for truth, out in zip(expected_output.split("\n"), lines):
+    for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
 
 

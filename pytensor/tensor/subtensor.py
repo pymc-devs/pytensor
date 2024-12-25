@@ -522,7 +522,7 @@ def basic_shape(shape, indices):
 
     """
     res_shape = ()
-    for idx, n in zip(indices, shape):
+    for n, idx in zip(shape[: len(indices)], indices, strict=True):
         if isinstance(idx, slice):
             res_shape += (slice_len(idx, n),)
         elif isinstance(getattr(idx, "type", None), SliceType):
@@ -610,7 +610,7 @@ def indexed_result_shape(array_shape, indices, indices_are_shapes=False):
         )
 
     for basic, grp_dim_indices in idx_groups:
-        dim_nums, grp_indices = zip(*grp_dim_indices)
+        dim_nums, grp_indices = zip(*grp_dim_indices, strict=True)
         remaining_dims = tuple(dim for dim in remaining_dims if dim not in dim_nums)
 
         if basic:
@@ -838,7 +838,7 @@ class Subtensor(COp):
 
         assert len(inputs) == len(input_types)
 
-        for input, expected_type in zip(inputs, input_types):
+        for input, expected_type in zip(inputs, input_types, strict=True):
             if not expected_type.is_super(input.type):
                 raise TypeError(
                     f"Incompatible types for Subtensor template. Expected {input.type}, got {expected_type}."
@@ -860,7 +860,7 @@ class Subtensor(COp):
             except NotScalarConstantError:
                 return value, False
 
-        for the_slice, length in zip(padded, x.type.shape):
+        for the_slice, length in zip(padded, x.type.shape, strict=True):
             if not isinstance(the_slice, slice):
                 continue
 
@@ -915,7 +915,7 @@ class Subtensor(COp):
             len(xshp) - len(self.idx_list)
         )
         i = 0
-        for idx, xl in zip(padded, xshp):
+        for idx, xl in zip(padded, xshp, strict=True):
             if isinstance(idx, slice):
                 # If it is the default (None, None, None) slice, or a variant,
                 # the shape will be xl
@@ -1456,11 +1456,8 @@ def inc_subtensor(
         views; if they overlap, the result of this `Op` will generally be
         incorrect. This value has no effect if ``inplace=False``.
     ignore_duplicates
-        This determines whether or not ``x[indices] += y`` is used or
-        ``np.add.at(x, indices, y)``.  When the special duplicates handling of
-        ``np.add.at`` isn't required, setting this option to ``True``
-        (i.e. using ``x[indices] += y``) can resulting in faster compiled
-        graphs.
+        This determines whether ``x[indices] += y`` is used or
+        ``np.add.at(x, indices, y)``.
 
     Examples
     --------
@@ -1687,7 +1684,7 @@ class IncSubtensor(COp):
             raise IndexError(
                 "Not enough inputs to fill in the Subtensor template.", inputs, idx_list
             )
-        for input, expected_type in zip(inputs, input_types):
+        for input, expected_type in zip(inputs, input_types, strict=True):
             if not expected_type.is_super(input.type):
                 raise TypeError(
                     f"Wrong type for Subtensor template. Expected {input.type}, got {expected_type}."
@@ -2627,6 +2624,11 @@ def as_index_variable(idx):
     idx = as_tensor_variable(idx)
     if idx.type.dtype not in discrete_dtypes:
         raise TypeError("index must be integers or a boolean mask")
+    if idx.type.dtype == "bool" and idx.type.ndim == 0:
+        raise NotImplementedError(
+            "Boolean scalar indexing not implemented. "
+            "Open an issue in https://github.com/pymc-devs/pytensor/issues if you need this behavior."
+        )
     return idx
 
 
@@ -2708,7 +2710,7 @@ class AdvancedSubtensor(Op):
 
         indices = node.inputs[1:]
         index_shapes = []
-        for idx, ishape in zip(indices, ishapes[1:]):
+        for idx, ishape in zip(indices, ishapes[1:], strict=True):
             # Mixed bool indexes are converted to nonzero entries
             shape0_op = Shape_i(0)
             if is_bool_index(idx):
@@ -2811,7 +2813,7 @@ def vectorize_advanced_subtensor(op: AdvancedSubtensor, node, *batch_inputs):
     x_is_batched = x.type.ndim < batch_x.type.ndim
     idxs_are_batched = any(
         batch_idx.type.ndim > idx.type.ndim
-        for batch_idx, idx in zip(batch_idxs, idxs)
+        for batch_idx, idx in zip(batch_idxs, idxs, strict=True)
         if isinstance(batch_idx, TensorVariable)
     )
 
@@ -2931,6 +2933,31 @@ class AdvancedIncSubtensor(Op):
             # added or broadcasted
             gy = _sum_grad_over_bcasted_dims(y, gy)
         return [gx, gy] + [DisconnectedType()() for _ in idxs]
+
+    @staticmethod
+    def non_contiguous_adv_indexing(node: Apply) -> bool:
+        """
+        Check if the advanced indexing is non-contiguous (i.e. interrupted by basic indexing).
+
+        This function checks if the advanced indexing is non-contiguous,
+        in which case the advanced index dimensions are placed on the left of the
+        output array, regardless of their opriginal position.
+
+        See: https://numpy.org/doc/stable/user/basics.indexing.html#combining-advanced-and-basic-indexing
+
+
+        Parameters
+        ----------
+        node : Apply
+            The node of the AdvancedSubtensor operation.
+
+        Returns
+        -------
+        bool
+            True if the advanced indexing is non-contiguous, False otherwise.
+        """
+        _, _, *idxs = node.inputs
+        return _non_contiguous_adv_indexing(idxs)
 
 
 advanced_inc_subtensor = AdvancedIncSubtensor()

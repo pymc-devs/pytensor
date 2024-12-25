@@ -3,7 +3,7 @@ import warnings
 import numpy as np
 import pytest
 
-from pytensor.gradient import verify_grad
+from pytensor.gradient import NullTypeGradError, verify_grad
 from pytensor.scalar import ScalarLoop
 from pytensor.tensor.elemwise import Elemwise
 
@@ -18,7 +18,7 @@ from pytensor import function, grad
 from pytensor import tensor as pt
 from pytensor.compile.mode import get_default_mode
 from pytensor.configdefaults import config
-from pytensor.tensor import gammaincc, inplace, vector
+from pytensor.tensor import gammaincc, inplace, kv, kve, vector
 from tests import unittest_tools as utt
 from tests.tensor.utils import (
     _good_broadcast_unary_chi2sf,
@@ -1196,3 +1196,37 @@ class TestHyp2F1Grad:
             [dd for i, dd in enumerate(expected_dds) if i in wrt],
             rtol=rtol,
         )
+
+
+def test_kve():
+    rng = np.random.default_rng(3772)
+    v = vector("v")
+    x = vector("x")
+
+    out = kve(v[:, None], x[None, :])
+    test_v = np.array([-3.7, 4, 4.5, 5], dtype=v.type.dtype)
+    test_x = np.linspace(0, 1005, 10, dtype=x.type.dtype)
+
+    np.testing.assert_allclose(
+        out.eval({v: test_v, x: test_x}),
+        scipy.special.kve(test_v[:, None], test_x[None, :]),
+    )
+
+    with pytest.raises(NullTypeGradError):
+        grad(out.sum(), v)
+
+    verify_grad(lambda x: kv(4.5, x), [test_x + 0.5], rng=rng)
+
+
+def test_kv():
+    v = vector("v")
+    x = vector("x")
+
+    out = kv(v[:, None], x[None, :])
+    test_v = np.array([-3.7, 4, 4.5, 5], dtype=v.type.dtype)
+    test_x = np.linspace(0, 512, 10, dtype=x.type.dtype)
+
+    np.testing.assert_allclose(
+        out.eval({v: test_v, x: test_x}),
+        scipy.special.kv(test_v[:, None], test_x[None, :]),
+    )

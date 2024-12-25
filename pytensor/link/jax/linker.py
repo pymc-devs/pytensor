@@ -3,7 +3,6 @@ import warnings
 from numpy.random import Generator, RandomState
 
 from pytensor.compile.sharedvalue import SharedVariable, shared
-from pytensor.graph.basic import Constant
 from pytensor.link.basic import JITLinker
 
 
@@ -35,12 +34,14 @@ class JAXLinker(JITLinker):
             ]
 
             fgraph.replace_all(
-                zip(shared_rng_inputs, new_shared_rng_inputs),
+                zip(shared_rng_inputs, new_shared_rng_inputs, strict=True),
                 import_missing=True,
                 reason="JAXLinker.fgraph_convert",
             )
 
-            for old_inp, new_inp in zip(shared_rng_inputs, new_shared_rng_inputs):
+            for old_inp, new_inp in zip(
+                shared_rng_inputs, new_shared_rng_inputs, strict=True
+            ):
                 new_inp_storage = [new_inp.get_value(borrow=True)]
                 storage_map[new_inp] = new_inp_storage
                 old_inp_storage = storage_map.pop(old_inp)
@@ -70,12 +71,7 @@ class JAXLinker(JITLinker):
     def jit_compile(self, fn):
         import jax
 
-        # I suppose we can consider `Constant`s to be "static" according to
-        # JAX.
-        static_argnums = [
-            n for n, i in enumerate(self.fgraph.inputs) if isinstance(i, Constant)
-        ]
-        return jax.jit(fn, static_argnums=static_argnums)
+        return jax.jit(fn)
 
     def create_thunk_inputs(self, storage_map):
         from pytensor.link.jax.dispatch import jax_typify

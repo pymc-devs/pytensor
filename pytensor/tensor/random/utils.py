@@ -44,7 +44,8 @@ def params_broadcast_shapes(
     max_fn = maximum if use_pytensor else max
 
     rev_extra_dims: list[int] = []
-    for ndim_param, param_shape in zip(ndims_params, param_shapes):
+    # strict=False because we are in a hot loop
+    for ndim_param, param_shape in zip(ndims_params, param_shapes, strict=False):
         # We need this in order to use `len`
         param_shape = tuple(param_shape)
         extras = tuple(param_shape[: (len(param_shape) - ndim_param)])
@@ -63,11 +64,12 @@ def params_broadcast_shapes(
 
     extra_dims = tuple(reversed(rev_extra_dims))
 
+    # strict=False because we are in a hot loop
     bcast_shapes = [
         (extra_dims + tuple(param_shape)[-ndim_param:])
         if ndim_param > 0
         else extra_dims
-        for ndim_param, param_shape in zip(ndims_params, param_shapes)
+        for ndim_param, param_shape in zip(ndims_params, param_shapes, strict=False)
     ]
 
     return bcast_shapes
@@ -110,9 +112,12 @@ def broadcast_params(
     use_pytensor = False
     param_shapes = []
     for p in params:
+        # strict=False because we are in a hot loop
         param_shape = tuple(
             1 if bcast else s
-            for s, bcast in zip(p.shape, getattr(p, "broadcastable", (False,) * p.ndim))
+            for s, bcast in zip(
+                p.shape, getattr(p, "broadcastable", (False,) * p.ndim), strict=False
+            )
         )
         use_pytensor |= isinstance(p, Variable)
         param_shapes.append(param_shape)
@@ -122,8 +127,10 @@ def broadcast_params(
     )
     broadcast_to_fn = broadcast_to if use_pytensor else np.broadcast_to
 
+    # strict=False because we are in a hot loop
     bcast_params = [
-        broadcast_to_fn(param, shape) for shape, param in zip(shapes, params)
+        broadcast_to_fn(param, shape)
+        for shape, param in zip(shapes, params, strict=False)
     ]
 
     return bcast_params
@@ -137,7 +144,8 @@ def explicit_expand_dims(
     """Introduce explicit expand_dims in RV parameters that are implicitly broadcasted together and/or by size."""
 
     batch_dims = [
-        param.type.ndim - ndim_param for param, ndim_param in zip(params, ndim_params)
+        param.type.ndim - ndim_param
+        for param, ndim_param in zip(params, ndim_params, strict=True)
     ]
 
     if size_length is not None:
@@ -146,7 +154,7 @@ def explicit_expand_dims(
         max_batch_dims = max(batch_dims, default=0)
 
     new_params = []
-    for new_param, batch_dim in zip(params, batch_dims):
+    for new_param, batch_dim in zip(params, batch_dims, strict=True):
         missing_dims = max_batch_dims - batch_dim
         if missing_dims:
             new_param = shape_padleft(new_param, missing_dims)
@@ -161,7 +169,7 @@ def compute_batch_shape(
     params = explicit_expand_dims(params, ndims_params)
     batch_params = [
         param[(..., *(0,) * core_ndim)]
-        for param, core_ndim in zip(params, ndims_params)
+        for param, core_ndim in zip(params, ndims_params, strict=True)
     ]
     return broadcast_arrays(*batch_params)[0].shape
 
@@ -279,7 +287,9 @@ class RandomStream:
         self.gen_seedgen = np.random.SeedSequence(seed)
         old_r_seeds = self.gen_seedgen.spawn(len(self.state_updates))
 
-        for (old_r, new_r), old_r_seed in zip(self.state_updates, old_r_seeds):
+        for (old_r, new_r), old_r_seed in zip(
+            self.state_updates, old_r_seeds, strict=True
+        ):
             old_r.set_value(self.rng_ctor(old_r_seed), borrow=True)
 
     def gen(self, op: "RandomVariable", *args, **kwargs) -> TensorVariable:

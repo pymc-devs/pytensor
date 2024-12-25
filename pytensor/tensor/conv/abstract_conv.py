@@ -506,7 +506,7 @@ def check_conv_gradinputs_shape(
 
     return all(
         check_dim(given, computed)
-        for (given, computed) in zip(output_shape, computed_output_shape)
+        for (given, computed) in zip(output_shape, computed_output_shape, strict=True)
     )
 
 

@@ -1,3 +1,5 @@
+import importlib
+
 import torch
 
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
@@ -5,6 +7,8 @@ from pytensor.scalar.basic import (
     Cast,
     ScalarOp,
 )
+from pytensor.scalar.loop import ScalarLoop
+from pytensor.scalar.math import Softplus
 
 
 @pytorch_funcify.register(ScalarOp)
@@ -19,9 +23,14 @@ def pytorch_funcify_ScalarOp(op, node, **kwargs):
     if nfunc_spec is None:
         raise NotImplementedError(f"Dispatch not implemented for Scalar Op {op}")
 
-    func_name = nfunc_spec[0]
+    func_name = nfunc_spec[0].replace("scipy.", "")
 
-    pytorch_func = getattr(torch, func_name)
+    if "." in func_name:
+        loc = func_name.split(".")
+        mod = importlib.import_module(".".join(["torch", *loc[:-1]]))
+        pytorch_func = getattr(mod, loc[-1])
+    else:
+        pytorch_func = getattr(torch, func_name)
 
     if len(node.inputs) > op.nfunc_spec[1]:
         # Some Scalar Ops accept multiple number of inputs, behaving as a variadic function,
@@ -49,3 +58,42 @@ def pytorch_funcify_Cast(op: Cast, node, **kwargs):
         return x.to(dtype=dtype)
 
     return cast
+
+
+@pytorch_funcify.register(Softplus)
+def pytorch_funcify_Softplus(op, node, **kwargs):
+    return torch.nn.Softplus()
+
+
+@pytorch_funcify.register(ScalarLoop)
+def pytorch_funicify_ScalarLoop(op, node, **kwargs):
+    update = pytorch_funcify(op.fgraph, **kwargs)
+    state_length = op.nout
+    if op.is_while:
+
+        def scalar_loop(steps, *start_and_constants):
+            carry, constants = (
+                start_and_constants[:state_length],
+                start_and_constants[state_length:],
+            )
+            done = True
+            for _ in range(steps):
+                *carry, done = update(*carry, *constants)
+                if torch.any(done):
+                    break
+            return *carry, done
+    else:
+
+        def scalar_loop(steps, *start_and_constants):
+            carry, constants = (
+                start_and_constants[:state_length],
+                start_and_constants[state_length:],
+            )
+            for _ in range(steps):
+                carry = update(*carry, *constants)
+            if len(node.outputs) == 1:
+                return carry[0]
+            else:
+                return carry
+
+    return scalar_loop

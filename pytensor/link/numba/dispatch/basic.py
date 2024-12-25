@@ -401,9 +401,10 @@ def generate_fallback_impl(op, node=None, storage_map=None, **kwargs):
     else:
 
         def py_perform_return(inputs):
+            # strict=False because we are in a hot loop
             return tuple(
                 out_type.filter(out[0])
-                for out_type, out in zip(output_types, py_perform(inputs))
+                for out_type, out in zip(output_types, py_perform(inputs), strict=False)
             )
 
     @numba_njit
@@ -566,7 +567,7 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
     func_conditions = [
         f"assert x.shape[{i}] == {shape_input_names}"
         for i, (shape_input, shape_input_names) in enumerate(
-            zip(shape_inputs, shape_input_names)
+            zip(shape_inputs, shape_input_names, strict=True)
         )
         if shape_input is not NoneConst
     ]

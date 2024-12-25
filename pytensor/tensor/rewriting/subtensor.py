@@ -249,7 +249,7 @@ def local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1(fgraph, node):
     This is only done when there's a single vector index.
     """
 
-    if not isinstance(node.op, AdvancedIncSubtensor) or node.op.ignore_duplicates:
+    if node.op.ignore_duplicates:
         # `AdvancedIncSubtensor1` does not ignore duplicate index values
         return
 
@@ -342,13 +342,17 @@ def local_subtensor_of_dot(fgraph, node):
 @node_rewriter([Subtensor])
 def local_useless_slice(fgraph, node):
     """
-    Remove Subtensor of the form:
+    Remove useless slice(None) of the form:
         1. X[0, :] -> X[0]
         2. X[:] -> X
 
-    Also, rewrite Subtensor of the form:
+    Also, canonicalize slices of the form:
         X[0:7:1] -> X[None:None:None]
         where X is a vector of length 7
+
+    And:
+        X[-1:-8:-1] -> X[::-1]
+        where x is a vector of length 7
 
     """
     idxs = get_idx_list(node.inputs, node.op.idx_list)
@@ -368,32 +372,40 @@ def local_useless_slice(fgraph, node):
         if s == slice(None):
             continue
 
+        step = s.step
+
+        if step is None:
+            positive_step = True
+        elif isinstance(step, Constant):
+            step_value = step.data
+            positive_step = step.data > 0
+            if step_value == 1:
+                change_flag = True
+                step = None
+        else:
+            # We can only canonicalize start and stop if we know the sign of step
+            last_useful_idx = dim
+            continue
+
         start = s.start
         stop = s.stop
-        step = s.step
-        if (
-            start is not None
-            and extract_constant(start, only_process_constants=True) == 0
-        ):
+
+        if start is not None and extract_constant(
+            start, only_process_constants=True
+        ) == (0 if positive_step else -1):
             change_flag = True
             start = None
 
         if (
             stop is not None
             and x.type.shape[dim] is not None
-            and extract_constant(stop, only_process_constants=True) == x.type.shape[dim]
+            and extract_constant(stop, only_process_constants=True)
+            == (x.type.shape[dim] if positive_step else -x.type.shape[dim] - 1)
         ):
             change_flag = True
             stop = None
 
-        if (
-            step is not None
-            and extract_constant(step, only_process_constants=True) == 1
-        ):
-            change_flag = True
-            step = None
-
-        if not (start is None and stop is None and step is None):
+        if start is not None or stop is not None or step is not None:
             last_useful_idx = dim
 
         new_idxs[dim] = slice(start, stop, step)
@@ -402,7 +414,6 @@ def local_useless_slice(fgraph, node):
         out = x[tuple(new_idxs[: last_useful_idx + 1])]
         # Copy over previous output stacktrace
         copy_stack_trace(node.outputs, out)
-
         return [out]
 
 
@@ -672,7 +683,7 @@ def local_subtensor_of_alloc(fgraph, node):
     # Slices to take from val
     val_slices = []
 
-    for i, (sl, dim) in enumerate(zip(slices, dims)):
+    for i, (sl, dim) in enumerate(zip(slices, dims, strict=False)):
         # If val was not copied over that dim,
         # we need to take the appropriate subtensor on it.
         if i >= n_added_dims:
@@ -1792,7 +1803,7 @@ def local_join_subtensors(fgraph, node):
         if all(
             idxs_nonaxis_subtensor1 == idxs_nonaxis_subtensor2
             for i, (idxs_nonaxis_subtensor1, idxs_nonaxis_subtensor2) in enumerate(
-                zip(idxs_subtensor1, idxs_subtensor2)
+                zip(idxs_subtensor1, idxs_subtensor2, strict=True)
             )
             if i != axis
         ):
@@ -1934,7 +1945,7 @@ def local_blockwise_advanced_inc_subtensor(fgraph, node):
 
     x_batch_bcast = x.type.broadcastable[:batch_ndim]
     y_batch_bcast = y.type.broadcastable[:batch_ndim]
-    if any(xb and not yb for xb, yb in zip(x_batch_bcast, y_batch_bcast)):
+    if any(xb and not yb for xb, yb in zip(x_batch_bcast, y_batch_bcast, strict=True)):
         # Need to broadcast batch x dims
         batch_shape = tuple(
             x_dim if (not xb or yb) else y_dim
@@ -1943,6 +1954,7 @@ def local_blockwise_advanced_inc_subtensor(fgraph, node):
                 tuple(x.shape)[:batch_ndim],
                 y_batch_bcast,
                 tuple(y.shape)[:batch_ndim],
+                strict=True,
             )
         )
         core_shape = tuple(x.shape)[batch_ndim:]
@@ -1955,19 +1967,26 @@ def local_blockwise_advanced_inc_subtensor(fgraph, node):
     return new_out
 
 
-@node_rewriter(tracks=[AdvancedSubtensor])
+@node_rewriter(tracks=[AdvancedSubtensor, AdvancedIncSubtensor])
 def ravel_multidimensional_bool_idx(fgraph, node):
     """Convert multidimensional boolean indexing into equivalent vector boolean index, supported by Numba
 
     x[eye(3, dtype=bool)] -> x.ravel()[eye(3).ravel()]
+    x[eye(3, dtype=bool)].set(y) -> x.ravel()[eye(3).ravel()].set(y).reshape(x.shape)
     """
-    x, *idxs = node.inputs
+    if isinstance(node.op, AdvancedSubtensor):
+        x, *idxs = node.inputs
+    else:
+        x, y, *idxs = node.inputs
 
     if any(
-        isinstance(idx.type, TensorType) and idx.type.dtype.startswith("int")
+        (
+            (isinstance(idx.type, TensorType) and idx.type.dtype.startswith("int"))
+            or isinstance(idx.type, NoneTypeT)
+        )
         for idx in idxs
     ):
-        # Get out if there are any other advanced indexes
+        # Get out if there are any other advanced indexes or np.newaxis
         return None
 
     bool_idxs = [
@@ -1995,7 +2014,16 @@ def ravel_multidimensional_bool_idx(fgraph, node):
     new_idxs = list(idxs)
     new_idxs[bool_idx_pos] = raveled_bool_idx
 
-    return [raveled_x[tuple(new_idxs)]]
+    if isinstance(node.op, AdvancedSubtensor):
+        new_out = node.op(raveled_x, *new_idxs)
+    else:
+        # The dimensions of y that correspond to the boolean indices
+        # must already be raveled in the original graph, so we don't need to do anything to it
+        new_out = node.op(raveled_x, y, *new_idxs)
+        # But we must reshape the output to math the original shape
+        new_out = new_out.reshape(x_shape)
+
+    return [copy_stack_trace(node.outputs[0], new_out)]
 
 
 @node_rewriter(tracks=[AdvancedSubtensor])
@@ -2012,10 +2040,13 @@ def ravel_multidimensional_int_idx(fgraph, node):
     x, *idxs = node.inputs
 
     if any(
-        isinstance(idx.type, TensorType) and idx.type.dtype.startswith("bool")
+        (
+            (isinstance(idx.type, TensorType) and idx.type.dtype == "bool")
+            or isinstance(idx.type, NoneTypeT)
+        )
         for idx in idxs
     ):
-        # Get out if there are any other advanced indexes
+        # Get out if there are any other advanced indexes or np.newaxis
         return None
 
     int_idxs = [
@@ -2047,7 +2078,8 @@ def ravel_multidimensional_int_idx(fgraph, node):
         *int_idx.shape,
         *raveled_shape[int_idx_pos + 1 :],
     )
-    return [raveled_subtensor.reshape(unraveled_shape)]
+    new_out = raveled_subtensor.reshape(unraveled_shape)
+    return [copy_stack_trace(node.outputs[0], new_out)]
 
 
 optdb["specialize"].register(

@@ -59,7 +59,9 @@ def test_random_updates(rng_ctor):
     # Check that original rng variable content was not overwritten when calling jax_typify
     assert all(
         a == b if not isinstance(a, np.ndarray) else np.array_equal(a, b)
-        for a, b in zip(rng.get_value().__getstate__(), original_value.__getstate__())
+        for a, b in zip(
+            rng.get_value().__getstate__(), original_value.__getstate__(), strict=True
+        )
     )
 
 
@@ -90,7 +92,9 @@ def test_replaced_shared_rng_storage_order(noise_first):
     ), "Test may need to be tweaked"
 
     # Confirm that input_storage type and fgraph input order are aligned
-    for storage, fgrapn_input in zip(f.input_storage, f.maker.fgraph.inputs):
+    for storage, fgrapn_input in zip(
+        f.input_storage, f.maker.fgraph.inputs, strict=True
+    ):
         assert storage.type == fgrapn_input.type
 
     assert mu.get_value() == 1
@@ -133,7 +137,7 @@ def test_replaced_shared_rng_storage_ordering_equality():
 
 
 @pytest.mark.parametrize(
-    "rv_op, dist_params, base_size, cdf_name, params_conv, test_values",
+    "rv_op, dist_params, test_values, base_size, cdf_name, params_conv",
     [
         (
             ptr.beta,
@@ -141,13 +145,13 @@ def test_replaced_shared_rng_storage_ordering_equality():
                 pt.dvector(),
                 pt.dscalar(),
             ],
-            (2,),
-            "beta",
-            lambda *args: args,
             [
                 np.array([1.0, 2.0], dtype=np.float64),
                 np.array(1.0, dtype=np.float64),
             ],
+            (2,),
+            "beta",
+            lambda *args: args,
         ),
         (
             ptr.cauchy,
@@ -155,20 +159,20 @@ def test_replaced_shared_rng_storage_ordering_equality():
                 pt.dvector(),
                 pt.dscalar(),
             ],
+            [np.array([1.0, 2.0], dtype=np.float64), np.array(1.0, dtype=np.float64)],
             (2,),
             "cauchy",
             lambda *args: args,
-            [np.array([1.0, 2.0], dtype=np.float64), np.array(1.0, dtype=np.float64)],
         ),
         (
             ptr.exponential,
             [
                 pt.dvector(),
             ],
+            [np.array([1.0, 2.0], dtype=np.float64)],
             (2,),
             "expon",
             lambda *args: (0, args[0]),
-            [np.array([1.0, 2.0], dtype=np.float64)],
         ),
         (
             ptr._gamma,
@@ -176,13 +180,13 @@ def test_replaced_shared_rng_storage_ordering_equality():
                 pt.dvector(),
                 pt.dvector(),
             ],
-            (2,),
-            "gamma",
-            lambda a, b: (a, 0.0, b),
             [
                 np.array([1.0, 2.0], dtype=np.float64),
                 np.array([0.5, 3.0], dtype=np.float64),
             ],
+            (2,),
+            "gamma",
+            lambda a, b: (a, 0.0, b),
         ),
         (
             ptr.gumbel,
@@ -190,10 +194,10 @@ def test_replaced_shared_rng_storage_ordering_equality():
                 pt.lvector(),
                 pt.dscalar(),
             ],
+            [np.array([1, 2], dtype=np.int64), np.array(1.0, dtype=np.float64)],
             (2,),
             "gumbel_r",
             lambda *args: args,
-            [np.array([1, 2], dtype=np.int64), np.array(1.0, dtype=np.float64)],
         ),
         (
             ptr.laplace,
@@ -201,10 +205,10 @@ def test_replaced_shared_rng_storage_ordering_equality():
                 pt.dvector(),
                 pt.dscalar(),
             ],
+            [np.array([1.0, 2.0], dtype=np.float64), np.array(1.0, dtype=np.float64)],
             (2,),
             "laplace",
             lambda *args: args,
-            [np.array([1.0, 2.0], dtype=np.float64), np.array(1.0, dtype=np.float64)],
         ),
         (
             ptr.logistic,
@@ -212,10 +216,10 @@ def test_replaced_shared_rng_storage_ordering_equality():
                 pt.dvector(),
                 pt.dscalar(),
             ],
+            [np.array([1.0, 2.0], dtype=np.float64), np.array(1.0, dtype=np.float64)],
             (2,),
             "logistic",
             lambda *args: args,
-            [np.array([1.0, 2.0], dtype=np.float64), np.array(1.0, dtype=np.float64)],
         ),
         (
             ptr.lognormal,
@@ -223,10 +227,10 @@ def test_replaced_shared_rng_storage_ordering_equality():
                 pt.lvector(),
                 pt.dscalar(),
             ],
+            [np.array([0, 0], dtype=np.int64), np.array(1.0, dtype=np.float64)],
             (2,),
             "lognorm",
             lambda mu, sigma: (sigma, 0, np.exp(mu)),
-            [np.array([0, 0], dtype=np.int64), np.array(1.0, dtype=np.float64)],
         ),
         (
             ptr.normal,
@@ -234,10 +238,10 @@ def test_replaced_shared_rng_storage_ordering_equality():
                 pt.lvector(),
                 pt.dscalar(),
             ],
+            [np.array([1, 2], dtype=np.int64), np.array(1.0, dtype=np.float64)],
             (2,),
             "norm",
             lambda *args: args,
-            [np.array([1, 2], dtype=np.int64), np.array(1.0, dtype=np.float64)],
         ),
         (
             ptr.pareto,
@@ -245,25 +249,25 @@ def test_replaced_shared_rng_storage_ordering_equality():
                 pt.dvector(),
                 pt.dvector(),
             ],
-            (2,),
-            "pareto",
-            lambda shape, scale: (shape, 0.0, scale),
             [
                 np.array([1.0, 2.0], dtype=np.float64),
                 np.array([2.0, 10.0], dtype=np.float64),
             ],
+            (2,),
+            "pareto",
+            lambda shape, scale: (shape, 0.0, scale),
         ),
         (
             ptr.poisson,
             [
                 pt.dvector(),
             ],
-            (2,),
-            "poisson",
-            lambda *args: args,
             [
                 np.array([100000.0, 200000.0], dtype=np.float64),
             ],
+            (2,),
+            "poisson",
+            lambda *args: args,
         ),
         (
             ptr.integers,
@@ -271,15 +275,22 @@ def test_replaced_shared_rng_storage_ordering_equality():
                 pt.lscalar(),
                 pt.lscalar(),
             ],
-            (),
-            "randint",
-            lambda *args: args,
             [
                 np.array(0, dtype=np.int64),
                 np.array(1000, dtype=np.int64),
             ],
+            (),
+            "randint",
+            lambda *args: args,
         ),
-        (ptr.standard_normal, [], (2,), "norm", lambda *args: args, []),
+        (
+            ptr.standard_normal,
+            [],
+            [],
+            (2,),
+            "norm",
+            lambda *args: args,
+        ),
         (
             ptr.t,
             [
@@ -287,14 +298,14 @@ def test_replaced_shared_rng_storage_ordering_equality():
                 pt.dvector(),
                 pt.dscalar(),
             ],
-            (2,),
-            "t",
-            lambda *args: args,
             [
                 np.array(2.0, dtype=np.float64),
                 np.array([1.0, 2.0], dtype=np.float64),
                 np.array(1.0, dtype=np.float64),
             ],
+            (2,),
+            "t",
+            lambda *args: args,
         ),
         (
             ptr.uniform,
@@ -302,13 +313,13 @@ def test_replaced_shared_rng_storage_ordering_equality():
                 pt.dvector(),
                 pt.dscalar(),
             ],
-            (2,),
-            "uniform",
-            lambda *args: args,
             [
                 np.array([1.0, 2.0], dtype=np.float64),
                 np.array(1000.0, dtype=np.float64),
             ],
+            (2,),
+            "uniform",
+            lambda *args: args,
         ),
         (
             ptr.halfnormal,
@@ -316,13 +327,13 @@ def test_replaced_shared_rng_storage_ordering_equality():
                 pt.dvector(),
                 pt.dscalar(),
             ],
-            (2,),
-            "halfnorm",
-            lambda *args: args,
             [
                 np.array([-1.0, 200.0], dtype=np.float64),
                 np.array(1000.0, dtype=np.float64),
             ],
+            (2,),
+            "halfnorm",
+            lambda *args: args,
         ),
         (
             ptr.invgamma,
@@ -330,25 +341,25 @@ def test_replaced_shared_rng_storage_ordering_equality():
                 pt.dvector(),
                 pt.dvector(),
             ],
-            (2,),
-            "invgamma",
-            lambda a, b: (a, 0, b),
             [
                 np.array([10.4, 2.8], dtype=np.float64),
                 np.array([3.4, 7.3], dtype=np.float64),
             ],
+            (2,),
+            "invgamma",
+            lambda a, b: (a, 0, b),
         ),
         (
             ptr.chisquare,
             [
                 pt.dvector(),
             ],
-            (2,),
-            "chi2",
-            lambda *args: args,
             [
                 np.array([2.4, 4.9], dtype=np.float64),
             ],
+            (2,),
+            "chi2",
+            lambda *args: args,
         ),
         (
             ptr.gengamma,
@@ -357,14 +368,14 @@ def test_replaced_shared_rng_storage_ordering_equality():
                 pt.dvector(),
                 pt.dvector(),
             ],
-            (2,),
-            "gengamma",
-            lambda alpha, p, lambd: (alpha / p, p, 0, lambd),
             [
                 np.array([10.4, 2.8], dtype=np.float64),
                 np.array([3.4, 7.3], dtype=np.float64),
                 np.array([0.9, 2.0], dtype=np.float64),
             ],
+            (2,),
+            "gengamma",
+            lambda alpha, p, lambd: (alpha / p, p, 0, lambd),
         ),
         (
             ptr.wald,
@@ -372,14 +383,14 @@ def test_replaced_shared_rng_storage_ordering_equality():
                 pt.dvector(),
                 pt.dvector(),
             ],
-            (2,),
-            "invgauss",
-            # https://stackoverflow.com/a/48603469
-            lambda mean, scale: (mean / scale, 0, scale),
             [
                 np.array([10.4, 2.8], dtype=np.float64),
                 np.array([4.5, 2.0], dtype=np.float64),
             ],
+            (2,),
+            "invgauss",
+            # https://stackoverflow.com/a/48603469
+            lambda mean, scale: (mean / scale, 0, scale),
         ),
         pytest.param(
             ptr.vonmises,
@@ -401,7 +412,12 @@ def test_replaced_shared_rng_storage_ordering_equality():
     ],
 )
 def test_random_RandomVariable(
-    rv_op, dist_params, base_size, cdf_name, params_conv, test_values
+    rv_op,
+    dist_params,
+    test_values,
+    base_size,
+    cdf_name,
+    params_conv,
 ):
     """The JAX samplers are not one-to-one with NumPy samplers so we
     need to use a statistical test to make sure that the transpilation

@@ -186,7 +186,8 @@ def numba_funcify_RavelMultiIndex(op, node, **kwargs):
 
             new_arr = arr.T.astype(np.float64).copy()
             for i, b in enumerate(new_arr):
-                for j, (d, v) in enumerate(zip(shape, b)):
+                # no strict argument to this zip because numba doesn't support it
+                for j, (d, v) in enumerate(zip(shape, b)):  # noqa: B905
                     if v < 0 or v >= d:
                         mode_fn(new_arr, i, j, v, d)
 

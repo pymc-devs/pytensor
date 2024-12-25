@@ -722,5 +722,5 @@ OpFromGraph{inline=False} [id A]
        └─ *2-<Matrix(float64, shape=(?, ?))> [id I]
 """
 
-    for truth, out in zip(exp_res.split("\n"), lines):
+    for truth, out in zip(exp_res.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()

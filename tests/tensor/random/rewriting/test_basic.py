@@ -140,7 +140,7 @@ def test_inplace_rewrites(rv_op):
     assert new_op._props_dict() == (op._props_dict() | {"inplace": True})
     assert all(
         np.array_equal(a.data, b.data)
-        for a, b in zip(new_op.dist_params(new_node), op.dist_params(node))
+        for a, b in zip(new_op.dist_params(new_node), op.dist_params(node), strict=True)
     )
     assert np.array_equal(new_op.size_param(new_node).data, op.size_param(node).data)
     assert check_stack_trace(f)

@@ -7,7 +7,7 @@ import pytest
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
 from pytensor.compile.mode import JAX, Mode
-from pytensor.compile.sharedvalue import SharedVariable, shared
+from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Apply, Variable
@@ -70,21 +70,20 @@ def compare_jax_and_py(
     if assert_fn is None:
         assert_fn = partial(np.testing.assert_allclose, rtol=1e-4)
 
-    fn_inputs = [i for i in inputs if not isinstance(i, SharedVariable)]
-    pytensor_jax_fn = function(fn_inputs, outputs, mode=jax_mode)
+    pytensor_jax_fn = function(inputs, outputs, mode=jax_mode)
     jax_res = pytensor_jax_fn(*test_inputs)
 
     if must_be_device_array:
         if isinstance(jax_res, list):
             assert all(isinstance(res, jax.Array) for res in jax_res)
         else:
-            assert isinstance(jax_res, jax.interpreters.xla.DeviceArray)
+            assert isinstance(jax_res, jax.Array)
 
-    pytensor_py_fn = function(fn_inputs, outputs, mode=py_mode)
+    pytensor_py_fn = function(inputs, outputs, mode=py_mode)
     py_res = pytensor_py_fn(*test_inputs)
 
     if len(outputs) > 1:
-        for j, p in zip(jax_res, py_res):
+        for j, p in zip(jax_res, py_res, strict=True):
             assert_fn(j, p)
     else:
         assert_fn(jax_res, py_res)

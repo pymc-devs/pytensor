@@ -291,7 +291,7 @@ def test_multivariate_normal():
         ),
         (
             ptr.halfnormal,
-            [pt.lvector(), pt.dscalar()],
+            [pt.dscalar(), pt.lvector()],
             None,
             [
                 np.array(1.0, dtype=np.float64),

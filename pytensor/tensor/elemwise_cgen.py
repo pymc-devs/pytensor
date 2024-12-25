@@ -10,7 +10,7 @@ def make_declare(loop_orders, dtypes, sub, compute_stride_jump=True):
 
     """
     decl = ""
-    for i, (loop_order, dtype) in enumerate(zip(loop_orders, dtypes)):
+    for i, (loop_order, dtype) in enumerate(zip(loop_orders, dtypes, strict=True)):
         var = sub[f"lv{i}"]  # input name corresponding to ith loop variable
         # we declare an iteration variable
         # and an integer for the number of dimensions
@@ -35,7 +35,7 @@ def make_declare(loop_orders, dtypes, sub, compute_stride_jump=True):
 
 def make_checks(loop_orders, dtypes, sub, compute_stride_jump=True):
     init = ""
-    for i, (loop_order, dtype) in enumerate(zip(loop_orders, dtypes)):
+    for i, (loop_order, dtype) in enumerate(zip(loop_orders, dtypes, strict=True)):
         var = sub[f"lv{i}"]
         # List of dimensions of var that are not broadcasted
         nonx = [x for x in loop_order if x != "x"]
@@ -89,7 +89,7 @@ def make_checks(loop_orders, dtypes, sub, compute_stride_jump=True):
         "If broadcasting was intended, use `specify_broadcastable` on the relevant input."
     )
 
-    for matches in zip(*loop_orders):
+    for matches in zip(*loop_orders, strict=True):
         to_compare = [(j, x) for j, x in enumerate(matches) if x != "x"]
 
         # elements of to_compare are pairs ( input_variable_idx, input_variable_dim_idx )
@@ -139,7 +139,7 @@ def compute_output_dims_lengths(array_name: str, loop_orders, sub) -> str:
     Note: We could specialize C code even further with the known static output shapes
     """
     dims_c_code = ""
-    for i, candidates in enumerate(zip(*loop_orders)):
+    for i, candidates in enumerate(zip(*loop_orders, strict=True)):
         # Borrow the length of the first non-broadcastable input dimension
         for j, candidate in enumerate(candidates):
             if candidate != "x":
@@ -209,7 +209,13 @@ def make_alloc(loop_orders, dtype, sub, fortran="0"):
     )
 
 
-def make_loop(loop_orders, dtypes, loop_tasks, sub, openmp=None):
+def make_loop(
+    loop_orders: list[tuple[int | str, ...]],
+    dtypes: list,
+    loop_tasks: list,
+    sub: dict[str, str],
+    openmp: bool = False,
+):
     """
     Make a nested loop over several arrays and associate specific code
     to each level of nesting.
@@ -227,7 +233,7 @@ def make_loop(loop_orders, dtypes, loop_tasks, sub, openmp=None):
         string is code to be executed before the ith loop starts, the second
         one contains code to be executed just before going to the next element
         of the ith dimension.
-        The last element if loop_tasks is a single string, containing code
+        The last element of loop_tasks is a single string, containing code
         to be executed at the very end.
     sub : dictionary
         Maps 'lv#' to a suitable variable name.
@@ -260,8 +266,8 @@ def make_loop(loop_orders, dtypes, loop_tasks, sub, openmp=None):
         }}
         """
 
-    preloops = {}
-    for i, (loop_order, dtype) in enumerate(zip(loop_orders, dtypes)):
+    preloops: dict[int, str] = {}
+    for i, (loop_order, dtype) in enumerate(zip(loop_orders, dtypes, strict=True)):
         for j, index in enumerate(loop_order):
             if index != "x":
                 preloops.setdefault(j, "")
@@ -277,9 +283,8 @@ def make_loop(loop_orders, dtypes, loop_tasks, sub, openmp=None):
 
     s = ""
 
-    for i, (pre_task, task), indices in reversed(
-        list(zip(range(len(loop_tasks) - 1), loop_tasks, list(zip(*loop_orders))))
-    ):
+    tasks_indices = zip(loop_tasks[:-1], zip(*loop_orders, strict=True), strict=True)
+    for i, ((pre_task, task), indices) in reversed(list(enumerate(tasks_indices))):
         s = loop_over(preloops.get(i, "") + pre_task, s + task, indices, i)
 
     s += loop_tasks[-1]

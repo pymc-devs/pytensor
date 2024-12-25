@@ -263,7 +263,9 @@ def _linear_ramp_pad(
                 dtype=padded.dtype,
                 axis=axis,
             )
-            for end_value, edge, width in zip(end_value_pair, edge_pair, width_pair)
+            for end_value, edge, width in zip(
+                end_value_pair, edge_pair, width_pair, strict=True
+            )
         )
 
         # Reverse the direction of the ramp for the "right" side
