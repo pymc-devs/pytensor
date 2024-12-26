@@ -15,7 +15,8 @@ from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.gradient import grad
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
-from pytensor.tensor.elemwise import CAReduce, DimShuffle
+from pytensor.scalar import float64
+from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import All, Any, Max, Min, Prod, ProdWithoutZeros, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 from tests.link.numba.test_basic import (
@@ -691,3 +692,17 @@ def test_numba_careduce_benchmark(axis, c_contiguous, benchmark):
     return careduce_benchmark_tester(
         axis, c_contiguous, mode="NUMBA", benchmark=benchmark
     )
+
+
+def test_scalar_loop():
+    a = float64("a")
+    scalar_loop = pytensor.scalar.ScalarLoop([a], [a + a])
+
+    x = pt.tensor("x", shape=(3,))
+    elemwise_loop = Elemwise(scalar_loop)(3, x)
+
+    with pytest.warns(UserWarning, match="object mode"):
+        compare_numba_and_py(
+            ([x], [elemwise_loop]),
+            (np.array([1, 2, 3], dtype="float64"),),
+        )
