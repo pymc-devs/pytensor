@@ -27,7 +27,8 @@ def test_blockwise(core_op, shape_opt):
     )
     x_test = np.eye(3) * np.arange(1, 6)[:, None, None]
     compare_numba_and_py(
-        ([x], outs),
+        [x],
+        outs,
         [x_test],
         numba_mode=mode,
         eval_obj_mode=False,

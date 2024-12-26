@@ -6,7 +6,6 @@ import pytest
 import pytensor
 import pytensor.tensor as pt
 from pytensor import config
-from pytensor.graph import FunctionGraph
 from tests.link.numba.test_basic import compare_numba_and_py
 
 
@@ -117,12 +116,10 @@ def test_numba_Cholesky(lower, trans):
         cov_ = cov
     chol = pt.linalg.cholesky(cov_, lower=lower)
 
-    fg = FunctionGraph(outputs=[chol])
-
     x = np.array([0.1, 0.2, 0.3])
     val = np.eye(3) + x[None, :] * x[:, None]
 
-    compare_numba_and_py(fg, [val])
+    compare_numba_and_py([cov_], [chol], [val])
 
 
 def test_numba_Cholesky_raises_on_nan_input():
@@ -166,5 +163,4 @@ def test_block_diag():
     B_val = np.random.normal(size=(3, 3))
     C_val = np.random.normal(size=(2, 2))
     D_val = np.random.normal(size=(4, 4))
-    out_fg = pytensor.graph.FunctionGraph([A, B, C, D], [X])
-    compare_numba_and_py(out_fg, [A_val, B_val, C_val, D_val])
+    compare_numba_and_py([A, B, C, D], [X], [A_val, B_val, C_val, D_val])

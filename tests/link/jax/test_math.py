@@ -2,8 +2,6 @@ import numpy as np
 import pytest
 
 from pytensor.configdefaults import config
-from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import get_test_value
 from pytensor.tensor.math import Argmax, Max, maximum
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.type import dvector, matrix, scalar, vector
@@ -20,8 +18,7 @@ def test_jax_max_and_argmax():
     mx = Max([0])(x)
     amx = Argmax([0])(x)
     out = mx * amx
-    out_fg = FunctionGraph([x], [out])
-    compare_jax_and_py(out_fg, [np.r_[1, 2]])
+    compare_jax_and_py([x], [out], [np.r_[1, 2]])
 
 
 def test_dot():
@@ -40,13 +37,20 @@ def test_dot():
     # optimizations are turned on; however, when using JAX mode, it should
     # leave the expression alone.
     out = y.dot(alpha * A).dot(x) + beta * y
-    fgraph = FunctionGraph([y, x, A, alpha, beta], [out])
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py(
+        [y, x, A, alpha, beta],
+        [out],
+        [
+            y.tag.test_value,
+            x.tag.test_value,
+            A.tag.test_value,
+            alpha.tag.test_value,
+            beta.tag.test_value,
+        ],
+    )
 
     out = maximum(y, x)
-    fgraph = FunctionGraph([y, x], [out])
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py([y, x], [out], [y.tag.test_value, x.tag.test_value])
 
     out = pt_max(y)
-    fgraph = FunctionGraph([y], [out])
-    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+    compare_jax_and_py([y], [out], [y.tag.test_value])
