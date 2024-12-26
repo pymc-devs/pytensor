@@ -267,11 +267,11 @@ def compare_numba_and_py(
                 x, y
             )
 
-    if isinstance(fgraph, tuple):
-        fn_inputs, fn_outputs = fgraph
-    else:
+    if isinstance(fgraph, FunctionGraph):
         fn_inputs = fgraph.inputs
         fn_outputs = fgraph.outputs
+    else:
+        fn_inputs, fn_outputs = fgraph
 
     fn_inputs = [i for i in fn_inputs if not isinstance(i, SharedVariable)]
 

@@ -30,20 +30,19 @@ from pytensor.scalar.basic import (
     OR,
     XOR,
     Add,
-    Composite,
     IntDiv,
     Mul,
     ScalarMaximum,
     ScalarMinimum,
     Sub,
     TrueDiv,
+    get_scalar_type,
     scalar_maximum,
 )
 from pytensor.scalar.basic import add as add_as
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import Argmax, MulWithoutZeros, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
-from pytensor.tensor.type import scalar
 
 
 @singledispatch
@@ -348,13 +347,8 @@ def create_axis_apply_fn(fn, axis, ndim, dtype):
 
 @numba_funcify.register(Elemwise)
 def numba_funcify_Elemwise(op, node, **kwargs):
-    # Creating a new scalar node is more involved and unnecessary
-    # if the scalar_op is composite, as the fgraph already contains
-    # all the necessary information.
-    scalar_node = None
-    if not isinstance(op.scalar_op, Composite):
-        scalar_inputs = [scalar(dtype=input.dtype) for input in node.inputs]
-        scalar_node = op.scalar_op.make_node(*scalar_inputs)
+    scalar_inputs = [get_scalar_type(dtype=input.dtype)() for input in node.inputs]
+    scalar_node = op.scalar_op.make_node(*scalar_inputs)
 
     scalar_op_fn = numba_funcify(
         op.scalar_op,
