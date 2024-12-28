@@ -2,7 +2,7 @@ from collections.abc import Callable
 from difflib import get_close_matches
 from typing import Literal, get_args
 
-from pytensor.tensor import TensorLike
+from pytensor import Variable
 from pytensor.tensor.basic import as_tensor_variable, switch
 from pytensor.tensor.extra_ops import searchsorted
 from pytensor.tensor.functional import vectorize
@@ -64,13 +64,13 @@ def _stepwise_mean_interp1d(x, y, x_hat, idx, left_pad, right_pad, extrapolate=T
 
 
 def interpolate1d(
-    x: TensorLike,
-    y: TensorLike,
+    x: Variable,
+    y: Variable,
     method: InterpolationMethod = "linear",
-    left_pad: TensorLike | None = None,
-    right_pad: TensorLike | None = None,
+    left_pad: Variable | None = None,
+    right_pad: Variable | None = None,
     extrapolate: bool = True,
-) -> Callable[[TensorLike], TensorLike]:
+) -> Callable[[Variable], Variable]:
     """
     Create a function to interpolate one-dimensional data.
 
@@ -112,11 +112,11 @@ def interpolate1d(
     y = y[sort_idx]
 
     if left_pad is None:
-        left_pad = y[0]
+        left_pad = y[0]  #  type: ignore
     else:
         left_pad = as_tensor_variable(left_pad)
     if right_pad is None:
-        right_pad = y[-1]
+        right_pad = y[-1]  # type: ignore
     else:
         right_pad = as_tensor_variable(right_pad)
 
