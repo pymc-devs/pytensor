@@ -6,6 +6,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import get_test_value
 from pytensor.tensor import extra_ops as pt_extra_ops
+from pytensor.tensor.sort import argsort
 from pytensor.tensor.type import matrix, tensor
 from tests.link.jax.test_basic import compare_jax_and_py
 
@@ -54,6 +55,13 @@ def test_extra_ops():
     compare_jax_and_py(
         fgraph, [get_test_value(i) for i in fgraph.inputs], must_be_device_array=False
     )
+
+    v = ptb.as_tensor_variable(6.0)
+    sorted_idx = argsort(a.ravel())
+
+    out = pt_extra_ops.searchsorted(a.ravel()[sorted_idx], v)
+    fgraph = FunctionGraph([a], [out])
+    compare_jax_and_py(fgraph, [a_test])
 
 
 @pytest.mark.xfail(reason="Jitted JAX does not support dynamic shapes")
