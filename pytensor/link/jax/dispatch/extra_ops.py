@@ -10,6 +10,7 @@ from pytensor.tensor.extra_ops import (
     FillDiagonalOffset,
     RavelMultiIndex,
     Repeat,
+    SearchsortedOp,
     Unique,
     UnravelIndex,
 )
@@ -130,3 +131,13 @@ def jax_funcify_FillDiagonalOffset(op, **kwargs):
     # return filldiagonaloffset
 
     raise NotImplementedError("flatiter not implemented in JAX")
+
+
+@jax_funcify.register(SearchsortedOp)
+def jax_funcify_SearchsortedOp(op, **kwargs):
+    side = op.side
+
+    def searchsorted(a, v, side=side, sorter=None):
+        return jnp.searchsorted(a=a, v=v, side=side, sorter=sorter)
+
+    return searchsorted
