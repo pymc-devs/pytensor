@@ -1329,7 +1329,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                                 f" {i}. Since this input is only connected "
                                 "to integer-valued outputs, it should "
                                 "evaluate to zeros, but it evaluates to"
-                                f"{pytensor.get_underlying_scalar_constant(term)}."
+                                f"{pytensor.get_underlying_scalar_constant_value(term)}."
                             )
                             raise ValueError(msg)
 
@@ -2157,6 +2157,9 @@ def _is_zero(x):
     'maybe' means that x is an expression that is complicated enough
     that we can't tell that it simplifies to 0.
     """
+    from pytensor.tensor import get_underlying_scalar_constant_value
+    from pytensor.tensor.exceptions import NotScalarConstantError
+
     if not hasattr(x, "type"):
         return np.all(x == 0.0)
     if isinstance(x.type, NullType):
@@ -2166,9 +2169,9 @@ def _is_zero(x):
 
     no_constant_value = True
     try:
-        constant_value = pytensor.get_underlying_scalar_constant(x)
+        constant_value = get_underlying_scalar_constant_value(x)
         no_constant_value = False
-    except pytensor.tensor.exceptions.NotScalarConstantError:
+    except NotScalarConstantError:
         pass
 
     if no_constant_value:

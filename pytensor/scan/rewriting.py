@@ -54,7 +54,7 @@ from pytensor.scan.utils import (
 from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
-    get_underlying_scalar_constant_value,
+    get_scalar_constant_value,
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
@@ -71,7 +71,7 @@ from pytensor.tensor.subtensor import (
     get_slice_elements,
     set_subtensor,
 )
-from pytensor.tensor.variable import TensorConstant, get_unique_constant_value
+from pytensor.tensor.variable import TensorConstant
 
 
 list_opt_slice = [
@@ -136,10 +136,7 @@ def remove_constants_and_unused_inputs_scan(fgraph, node):
     all_ins = list(graph_inputs(op_outs))
     for idx in range(op_info.n_seqs):
         node_inp = node.inputs[idx + 1]
-        if (
-            isinstance(node_inp, TensorConstant)
-            and get_unique_constant_value(node_inp) is not None
-        ):
+        if isinstance(node_inp, TensorConstant) and node_inp.unique_value is not None:
             try:
                 # This works if input is a constant that has all entries
                 # equal
@@ -668,8 +665,10 @@ def inner_sitsot_only_last_step_used(
         client = fgraph.clients[outer_var][0][0]
         if isinstance(client, Apply) and isinstance(client.op, Subtensor):
             lst = get_idx_list(client.inputs, client.op.idx_list)
-            if len(lst) == 1 and pt.extract_constant(lst[0]) == -1:
-                return True
+            return (
+                len(lst) == 1
+                and get_scalar_constant_value(lst[0], raise_not_constant=False) == -1
+            )
 
     return False
 
@@ -1344,10 +1343,17 @@ def scan_save_mem(fgraph, node):
                 if isinstance(this_slice[0], slice) and this_slice[0].stop is None:
                     global_nsteps = None
                 if isinstance(cf_slice[0], slice):
-                    stop = pt.extract_constant(cf_slice[0].stop)
+                    stop = get_scalar_constant_value(
+                        cf_slice[0].stop, raise_not_constant=False
+                    )
                 else:
-                    stop = pt.extract_constant(cf_slice[0]) + 1
-                if stop == maxsize or stop == pt.extract_constant(length):
+                    stop = (
+                        get_scalar_constant_value(cf_slice[0], raise_not_constant=False)
+                        + 1
+                    )
+                if stop == maxsize or stop == get_scalar_constant_value(
+                    length, raise_not_constant=False
+                ):
                     stop = None
                 else:
                     # there is a **gotcha** here ! Namely, scan returns an
@@ -1451,9 +1457,13 @@ def scan_save_mem(fgraph, node):
                     cf_slice = get_canonical_form_slice(this_slice[0], length)
 
                     if isinstance(cf_slice[0], slice):
-                        start = pt.extract_constant(cf_slice[0].start)
+                        start = pt.get_scalar_constant_value(
+                            cf_slice[0].start, raise_not_constant=False
+                        )
                     else:
-                        start = pt.extract_constant(cf_slice[0])
+                        start = pt.get_scalar_constant_value(
+                            cf_slice[0], raise_not_constant=False
+                        )
 
                 if start == 0 or store_steps[i] == 0:
                     store_steps[i] = 0
@@ -1628,7 +1638,7 @@ def scan_save_mem(fgraph, node):
         # 3.6 Compose the new scan
         # TODO: currently we don't support scan with 0 step. So
         # don't create one.
-        if pt.extract_constant(node_ins[0]) == 0:
+        if get_scalar_constant_value(node_ins[0], raise_not_constant=False) == 0:
             return False
 
         # Do not call make_node for test_value
@@ -1965,13 +1975,13 @@ class ScanMerge(GraphRewriter):
 
         nsteps = node.inputs[0]
         try:
-            nsteps = int(get_underlying_scalar_constant_value(nsteps))
+            nsteps = int(get_scalar_constant_value(nsteps))
         except NotScalarConstantError:
             pass
 
         rep_nsteps = rep_node.inputs[0]
         try:
-            rep_nsteps = int(get_underlying_scalar_constant_value(rep_nsteps))
+            rep_nsteps = int(get_scalar_constant_value(rep_nsteps))
         except NotScalarConstantError:
             pass
 
