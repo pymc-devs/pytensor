@@ -17,6 +17,7 @@ from pytensor.link.numba.dispatch.basic import numba_funcify
 from pytensor.tensor.slinalg import (
     BlockDiagonal,
     Cholesky,
+    CholeskySolve,
     Solve,
     SolveTriangular,
 )
@@ -752,6 +753,123 @@ def solve_symmetric_impl(
     return impl
 
 
+def _posv():
+    """
+    Placeholder for solving a linear system with a positive-definite matrix; used by linalg.solve. Not used by pytensor
+    to numbify graphs.
+    """
+    pass
+
+
+@overload(_posv)
+def posv_impl(
+    A,
+    B,
+    lower=False,
+    overwrite_a=False,
+    overwrite_b=False,
+    check_finite=True,
+    transposed=False,
+):
+    ensure_lapack()
+    _check_scipy_linalg_matrix(A, "solve")
+    _check_scipy_linalg_matrix(B, "solve")
+    dtype = A.dtype
+    w_type = _get_underlying_float(dtype)
+    numba_posv = _LAPACK().numba_xposv(dtype)
+
+    def impl(
+        A,
+        B,
+        lower=False,
+        overwrite_a=False,
+        overwrite_b=False,
+        check_finite=True,
+        transposed=False,
+    ):
+        _solve_check_input_shapes(A, B)
+
+        _N = np.int32(A.shape[-1])
+        A_copy = _copy_to_fortran_order(A)
+
+        B_is_1d = B.ndim == 1
+        if B_is_1d:
+            B_copy = np.asfortranarray(np.expand_dims(B, -1))
+        else:
+            B_copy = _copy_to_fortran_order(B)
+
+        UPLO = val_to_int_ptr(ord("L") if lower else ord("U"))
+        B_NDIM = 1 if B_is_1d else int(B.shape[-1])
+        N = val_to_int_ptr(_N)
+        NRHS = val_to_int_ptr(B_NDIM)
+        LDA = val_to_int_ptr(_N)
+        LDB = val_to_int_ptr(_N)
+        INFO = val_to_int_ptr(0)
+
+        numba_posv(
+            UPLO,
+            N,
+            NRHS,
+            A_copy.view(w_type).ctypes,
+            LDA,
+            B_copy.view(w_type).ctypes,
+            LDB,
+            INFO,
+        )
+
+        if B_is_1d:
+            return B_copy[..., 0], int_ptr_to_val(INFO)
+        return B_copy, int_ptr_to_val(INFO)
+
+    return impl
+
+
+def _solve_psd(
+    A, B, lower=False, overwrite_a=False, overwrite_b=False, check_finite=True
+):
+    return linalg.solve(
+        A,
+        B,
+        lower=lower,
+        overwrite_a=overwrite_a,
+        overwrite_b=overwrite_b,
+        check_finite=check_finite,
+        assume_a="pos",
+    )
+
+
+@overload(_solve_psd)
+def solve_psd_impl(
+    A,
+    B,
+    lower=False,
+    overwrite_a=False,
+    overwrite_b=False,
+    check_finite=True,
+    transposed=False,
+):
+    ensure_lapack()
+    _check_scipy_linalg_matrix(A, "solve")
+    _check_scipy_linalg_matrix(B, "solve")
+
+    def impl(
+        A,
+        B,
+        lower=False,
+        overwrite_a=False,
+        overwrite_b=False,
+        check_finite=True,
+        transposed=False,
+    ):
+        _solve_check_input_shapes(A, B)
+        x, info = _posv(A, B, lower, overwrite_a, overwrite_b)
+        _solve_check(A.shape[-1], info)
+
+        return x
+
+    return impl
+
+
 @numba_funcify.register(Solve)
 def numba_funcify_Solve(op, node, **kwargs):
     assume_a = op.assume_a
@@ -771,6 +889,8 @@ def numba_funcify_Solve(op, node, **kwargs):
         solve_fn = _solve_gen
     elif assume_a == "sym":
         solve_fn = _solve_symmetric
+    elif assume_a == "pos":
+        solve_fn = _solve_psd
     else:
         raise NotImplementedError(f"Assumption {assume_a} not supported in Numba mode")
 
@@ -790,3 +910,97 @@ def numba_funcify_Solve(op, node, **kwargs):
         return res
 
     return solve
+
+
+def _cho_solve(A_and_lower, B, overwrite_a=False, overwrite_b=False, check_finite=True):
+    """
+    Solve a positive-definite linear system using the Cholesky decomposition.
+    """
+    A, lower = A_and_lower
+    return linalg.cho_solve((A, lower), B)
+
+
+@overload(_cho_solve)
+def cho_solve_impl(C, B, lower=False, overwrite_b=False, check_finite=True):
+    ensure_lapack()
+    _check_scipy_linalg_matrix(C, "cho_solve")
+    _check_scipy_linalg_matrix(B, "cho_solve")
+    dtype = C.dtype
+    w_type = _get_underlying_float(dtype)
+    numba_potrs = _LAPACK().numba_xpotrs(dtype)
+
+    def impl(C, B, lower=False, overwrite_b=False, check_finite=True):
+        _solve_check_input_shapes(C, B)
+
+        _N = np.int32(C.shape[-1])
+        C_copy = _copy_to_fortran_order(C)
+
+        B_is_1d = B.ndim == 1
+        if B_is_1d:
+            B_copy = np.asfortranarray(np.expand_dims(B, -1))
+        else:
+            B_copy = _copy_to_fortran_order(B)
+        B_NDIM = 1 if B_is_1d else int(B.shape[-1])
+
+        UPLO = val_to_int_ptr(ord("L") if lower else ord("U"))
+        N = val_to_int_ptr(_N)
+        NRHS = val_to_int_ptr(B_NDIM)
+        LDA = val_to_int_ptr(_N)
+        LDB = val_to_int_ptr(_N)
+        INFO = val_to_int_ptr(0)
+
+        numba_potrs(
+            UPLO,
+            N,
+            NRHS,
+            C_copy.view(w_type).ctypes,
+            LDA,
+            B_copy.view(w_type).ctypes,
+            LDB,
+            INFO,
+        )
+
+        if B_is_1d:
+            return B_copy[..., 0], int_ptr_to_val(INFO)
+        return B_copy, int_ptr_to_val(INFO)
+
+    return impl
+
+
+@numba_funcify.register(CholeskySolve)
+def numba_funcify_CholeskySolve(op, node, **kwargs):
+    lower = op.lower
+    overwrite_b = op.overwrite_b
+    check_finite = op.check_finite
+
+    dtype = node.inputs[0].dtype
+    if str(dtype).startswith("complex"):
+        raise NotImplementedError(
+            "Complex inputs not currently supported by cho_solve in Numba mode"
+        )
+
+    @numba_basic.numba_njit(inline="always")
+    def cho_solve(c, b):
+        if check_finite:
+            if np.any(np.bitwise_or(np.isinf(c), np.isnan(c))):
+                raise np.linalg.LinAlgError(
+                    "Non-numeric values (nan or inf) in input A to cho_solve"
+                )
+            if np.any(np.bitwise_or(np.isinf(b), np.isnan(b))):
+                raise np.linalg.LinAlgError(
+                    "Non-numeric values (nan or inf) in input b to cho_solve"
+                )
+
+        res, info = _cho_solve(
+            c, b, lower=lower, overwrite_b=overwrite_b, check_finite=check_finite
+        )
+
+        if info < 0:
+            raise np.linalg.LinAlgError("Illegal values found in input to cho_solve")
+        elif info > 0:
+            raise np.linalg.LinAlgError(
+                "Matrix is not positive definite in input to cho_solve"
+            )
+        return res
+
+    return cho_solve
