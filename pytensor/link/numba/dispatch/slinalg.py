@@ -14,11 +14,16 @@ from pytensor.link.numba.dispatch._LAPACK import (
     val_to_int_ptr,
 )
 from pytensor.link.numba.dispatch.basic import numba_funcify
-from pytensor.tensor.slinalg import BlockDiagonal, Cholesky, Solve, SolveTriangular
+from pytensor.tensor.slinalg import (
+    BlockDiagonal,
+    Cholesky,
+    Solve,
+    SolveTriangular,
+)
 
 
 @numba_basic.numba_njit(inline="always")
-def _solve_check(n, info, lamch=None, rcond=None):
+def _solve_check(n, info, lamch=False, rcond=None):
     """
     Check arguments during the different steps of the solution phase
     Adapted from https://github.com/scipy/scipy/blob/7f7f04caa4a55306a9c6613c89eef91fedbd72d4/scipy/linalg/_basic.py#L38
@@ -30,15 +35,13 @@ def _solve_check(n, info, lamch=None, rcond=None):
     elif 0 < info:
         raise LinAlgError("Matrix is singular.")
 
-    if lamch is None:
-        return
-
-    # TODO: implement lamch in numba
-    # E = lamch('E')
-    # if rcond < E:
-    #     warn(f'Ill-conditioned matrix (rcond={rcond:.6g}): '
-    #          'result may not be accurate.',
-    #          LinAlgWarning, stacklevel=3)
+    if lamch:
+        E = _xlamch("E")
+        if rcond < E:
+            # TODO: This should be a warning, but we can't raise warnings in numba mode
+            print(
+                "Ill-conditioned matrix, rcond=", rcond, ", result may not be accurate."
+            )
 
 
 def _check_scipy_linalg_matrix(a, func_name):
@@ -296,6 +299,36 @@ def numba_funcify_BlockDiagonal(op, node, **kwargs):
     return block_diag
 
 
+def _xlamch():
+    """
+    Placeholder for getting machine precision; used by linalg.solve. Not used by pytensor to numbify graphs.
+    """
+    pass
+
+
+@overload(_xlamch)
+def xlamch_impl(kind="E"):
+    from pytensor import config
+
+    ensure_lapack()
+    w_type = _get_underlying_float(config.floatX)
+
+    if w_type == "float32":
+        dtype = types.float32
+    elif w_type == "float64":
+        dtype = types.float64
+    else:
+        raise NotImplementedError("Unsupported dtype")
+
+    numba_lamch = _LAPACK().numba_xlamch(dtype)
+
+    def impl(kind="E"):
+        KIND = val_to_int_ptr(ord(kind))
+        return numba_lamch(KIND)
+
+    return impl
+
+
 def _xlange():
     """
     Placeholder for computing the norm of a matrix; used by linalg.solve. Not used by pytensor to numbify graphs.
@@ -530,9 +563,191 @@ def solve_gen_impl(
         _solve_check(N, INFO)
         RCOND, INFO = _xgecon(LU, norm, "1")
 
-        _solve_check(N, INFO, None, RCOND)
+        _solve_check(N, INFO, True, RCOND)
 
         return X
+
+    return impl
+
+
+def _sysv():
+    """
+    Placeholder for solving a linear system with a symmetric matrix; used by linalg.solve. Not used by pytensor to
+    numbify graphs.
+    """
+    pass
+
+
+@overload(_sysv)
+def sysv_impl(A, B, lower=False, overwrite_a=False, overwrite_b=False):
+    ensure_lapack()
+    _check_scipy_linalg_matrix(A, "sysv")
+    _check_scipy_linalg_matrix(B, "sysv")
+    dtype = A.dtype
+    w_type = _get_underlying_float(dtype)
+    numba_sysv = _LAPACK().numba_xsysv(dtype)
+
+    def impl(A, B, lower=False, overwrite_a=False, overwrite_b=False):
+        _LDA, _N = np.int32(A.shape[-2:])
+        _solve_check_input_shapes(A, B)
+        A_copy = _copy_to_fortran_order(A)
+
+        B_is_1d = B.ndim == 1
+        if B_is_1d:
+            B_copy = np.asfortranarray(np.expand_dims(B, -1))
+        else:
+            B_copy = _copy_to_fortran_order(B)
+        B_NDIM = 1 if B_is_1d else int(B.shape[-1])
+
+        UPLO = val_to_int_ptr(ord("L") if lower else ord("U"))
+        N = val_to_int_ptr(_N)
+        NRHS = val_to_int_ptr(B_NDIM)
+        LDA = val_to_int_ptr(_LDA)
+        IPIV = np.empty(_N, dtype=np.int32)
+        LDB = val_to_int_ptr(_N)
+        WORK = np.empty(1, dtype=dtype)
+        LWORK = val_to_int_ptr(-1)
+        INFO = val_to_int_ptr(0)
+
+        # Workspace query
+        numba_sysv(
+            UPLO,
+            N,
+            NRHS,
+            A_copy.view(w_type).ctypes,
+            LDA,
+            IPIV.ctypes,
+            B_copy.view(w_type).ctypes,
+            LDB,
+            WORK.view(w_type).ctypes,
+            LWORK,
+            INFO,
+        )
+
+        WS_SIZE = np.int32(WORK[0].real)
+        LWORK = val_to_int_ptr(WS_SIZE)
+        WORK = np.empty(WS_SIZE, dtype=dtype)
+
+        # Actual solve
+        numba_sysv(
+            UPLO,
+            N,
+            NRHS,
+            A_copy.view(w_type).ctypes,
+            LDA,
+            IPIV.ctypes,
+            B_copy.view(w_type).ctypes,
+            LDB,
+            WORK.view(w_type).ctypes,
+            LWORK,
+            INFO,
+        )
+
+        if B_is_1d:
+            return B_copy[..., 0], IPIV, int_ptr_to_val(INFO)
+        return B_copy, IPIV, int_ptr_to_val(INFO)
+
+    return impl
+
+
+def _sycon():
+    """
+    Placeholder for computing the condition number of a symmetric matrix; used by linalg.solve. Not used by pytensor to
+    numbify graphs.
+    """
+    pass
+
+
+@overload(_sycon)
+def sycon_impl(A, ipiv, anorm):
+    ensure_lapack()
+    _check_scipy_linalg_matrix(A, "sycon")
+    dtype = A.dtype
+    w_type = _get_underlying_float(dtype)
+    numba_sycon = _LAPACK().numba_xsycon(dtype)
+
+    def impl(A, ipiv, anorm):
+        _N = np.int32(A.shape[-1])
+        A_copy = _copy_to_fortran_order(A)
+
+        N = val_to_int_ptr(_N)
+        LDA = val_to_int_ptr(_N)
+        UPLO = val_to_int_ptr(ord("L"))
+        ANORM = np.array(anorm, dtype=dtype)
+        RCOND = np.empty(1, dtype=dtype)
+        WORK = np.empty(2 * _N, dtype=dtype)
+        IWORK = np.empty(_N, dtype=np.int32)
+        INFO = val_to_int_ptr(0)
+
+        numba_sycon(
+            UPLO,
+            N,
+            A_copy.view(w_type).ctypes,
+            LDA,
+            ipiv.ctypes,
+            ANORM.view(w_type).ctypes,
+            RCOND.view(w_type).ctypes,
+            WORK.view(w_type).ctypes,
+            IWORK.ctypes,
+            INFO,
+        )
+
+        return RCOND, int_ptr_to_val(INFO)
+
+    return impl
+
+
+def _solve_symmetric(
+    A,
+    B,
+    lower=False,
+    overwrite_a=False,
+    overwrite_b=False,
+    check_finite=True,
+    transposed=False,
+):
+    return linalg.solve(
+        A,
+        B,
+        lower=lower,
+        overwrite_a=overwrite_a,
+        overwrite_b=overwrite_b,
+        check_finite=check_finite,
+        assume_a="sym",
+        transposed=transposed,
+    )
+
+
+@overload(_solve_symmetric)
+def solve_symmetric_impl(
+    A,
+    B,
+    lower=False,
+    overwrite_a=False,
+    overwrite_b=False,
+    check_finite=True,
+    transposed=False,
+):
+    ensure_lapack()
+    _check_scipy_linalg_matrix(A, "solve")
+    _check_scipy_linalg_matrix(B, "solve")
+
+    def impl(
+        A,
+        B,
+        lower=False,
+        overwrite_a=False,
+        overwrite_b=False,
+        check_finite=True,
+        transposed=False,
+    ):
+        _solve_check_input_shapes(A, B)
+        x, ipiv, info = _sysv(A, B, lower, overwrite_a, overwrite_b)
+        _solve_check(A.shape[-1], info)
+        rcond, info = _sycon(A, ipiv, _xlange(A, order="I"))
+        _solve_check(A.shape[-1], info, True, rcond)
+
+        return x
 
     return impl
 
@@ -553,25 +768,25 @@ def numba_funcify_Solve(op, node, **kwargs):
         )
 
     if assume_a == "gen":
-
-        @numba_basic.numba_njit(inline="always")
-        def solve(a, b):
-            if check_finite:
-                if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
-                    raise np.linalg.LinAlgError(
-                        "Non-numeric values (nan or inf) in input A to solve"
-                    )
-                if np.any(np.bitwise_or(np.isinf(b), np.isnan(b))):
-                    raise np.linalg.LinAlgError(
-                        "Non-numeric values (nan or inf) in input b to solve"
-                    )
-
-            res = _solve_gen(
-                a, b, lower, overwrite_a, overwrite_b, check_finite, transposed
-            )
-            return res
-
+        solve_fn = _solve_gen
+    elif assume_a == "sym":
+        solve_fn = _solve_symmetric
     else:
         raise NotImplementedError(f"Assumption {assume_a} not supported in Numba mode")
+
+    @numba_basic.numba_njit(inline="always")
+    def solve(a, b):
+        if check_finite:
+            if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
+                raise np.linalg.LinAlgError(
+                    "Non-numeric values (nan or inf) in input A to solve"
+                )
+            if np.any(np.bitwise_or(np.isinf(b), np.isnan(b))):
+                raise np.linalg.LinAlgError(
+                    "Non-numeric values (nan or inf) in input b to solve"
+                )
+
+        res = solve_fn(a, b, lower, overwrite_a, overwrite_b, check_finite, transposed)
+        return res
 
     return solve

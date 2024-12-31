@@ -171,6 +171,25 @@ def test_block_diag():
     compare_numba_and_py(out_fg, [A_val, B_val, C_val, D_val])
 
 
+def test_lamch():
+    from scipy.linalg import get_lapack_funcs
+
+    from pytensor.link.numba.dispatch.slinalg import _xlamch
+
+    @numba.njit()
+    def xlamch(kind):
+        return _xlamch(kind)
+
+    lamch = get_lapack_funcs("lamch", (np.array([0.0], dtype=config.floatX),))
+
+    np.testing.assert_allclose(xlamch("E"), lamch("E"))
+    np.testing.assert_allclose(xlamch("S"), lamch("S"))
+    np.testing.assert_allclose(xlamch("P"), lamch("P"))
+    np.testing.assert_allclose(xlamch("B"), lamch("B"))
+    np.testing.assert_allclose(xlamch("R"), lamch("R"))
+    np.testing.assert_allclose(xlamch("M"), lamch("M"))
+
+
 @pytest.mark.parametrize(
     "ord_numba, ord_scipy", [("F", "fro"), ("1", 1), ("I", np.inf)]
 )
@@ -267,7 +286,7 @@ def test_getrs(trans):
     [(pt.matrix, (5, 1)), (pt.matrix, (5, 5)), (pt.vector, (5,))],
     ids=["b_col_vec", "b_matrix", "b_vec"],
 )
-@pytest.mark.parametrize("assume_a", ["gen"], ids=str)
+@pytest.mark.parametrize("assume_a", ["gen", "sym"], ids=str)
 @pytest.mark.parametrize("transposed", [True, False], ids=["trans", "no_trans"])
 @pytest.mark.filterwarnings(
     'ignore:Cannot cache compiled function "numba_funcified_fgraph"'

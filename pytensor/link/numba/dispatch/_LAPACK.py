@@ -199,6 +199,20 @@ class _LAPACK:
         return functype(lapack_ptr)
 
     @classmethod
+    def numba_xlamch(cls, dtype):
+        """
+        Determine machine precision for floating point arithmetic.
+        """
+
+        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "lamch")
+        output_dtype = _get_output_ctype(dtype)
+        functype = ctypes.CFUNCTYPE(
+            output_dtype,  # Output
+            _ptr_int,  # CMACH
+        )
+        return functype(lapack_ptr)
+
+    @classmethod
     def numba_xgecon(cls, dtype):
         """
         Estimates the condition number of a matrix A, using the LU factorization computed by numba_getrf.
@@ -225,7 +239,7 @@ class _LAPACK:
         """
         Compute partial pivoting LU factorization of a general M-by-N matrix A using row interchanges.
 
-        Called by scipy.linalg.solve when assume_a == "gen"
+        Called by scipy.linalg.lu_factor
         """
         lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "getrf")
         functype = ctypes.CFUNCTYPE(
@@ -245,7 +259,7 @@ class _LAPACK:
         Solve a system of linear equations A @ X = B or A.T @ X = B with a general N-by-N matrix A using the LU
         factorization computed by numba_getrf.
 
-        Called by scipy.linalg.solve when assume_a == "gen"
+        Called by scipy.linalg.lu_solve
         """
         ...
         lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "getrs")
@@ -257,6 +271,100 @@ class _LAPACK:
             float_pointer,  # A
             _ptr_int,  # LDA
             _ptr_int,  # IPIV
+            float_pointer,  # B
+            _ptr_int,  # LDB
+            _ptr_int,  # INFO
+        )
+        return functype(lapack_ptr)
+
+    @classmethod
+    def numba_xsysv(cls, dtype):
+        """
+        Solve a system of linear equations A @ X = B with a symmetric matrix A using the factorization computed by
+        sytrf (LDL or UDU).
+
+        Called by scipy.linalg.solve when assume_a == "sym"
+        """
+        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "sysv")
+        functype = ctypes.CFUNCTYPE(
+            None,
+            _ptr_int,  # UPLO
+            _ptr_int,  # N
+            _ptr_int,  # NRHS
+            float_pointer,  # A
+            _ptr_int,  # LDA
+            _ptr_int,  # IPIV
+            float_pointer,  # B
+            _ptr_int,  # LDB
+            float_pointer,  # WORK
+            _ptr_int,  # LWORK
+            _ptr_int,  # INFO
+        )
+        return functype(lapack_ptr)
+
+    @classmethod
+    def numba_xsycon(cls, dtype):
+        """
+        Estimates the reciprocal of the condition number of a symmetric matrix A using the factorization computed by
+        sytrf (LDL or UDU).
+
+        Called by scipy.linalg.solve when assume_a == "sym"
+        """
+        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "sycon")
+
+        functype = ctypes.CFUNCTYPE(
+            None,
+            _ptr_int,  # UPLO
+            _ptr_int,  # N
+            float_pointer,  # A
+            _ptr_int,  # LDA
+            _ptr_int,  # IPIV
+            float_pointer,  # ANORM
+            float_pointer,  # RCOND
+            float_pointer,  # WORK
+            _ptr_int,  # IWORK
+            _ptr_int,  # INFO
+        )
+        return functype(lapack_ptr)
+
+    @classmethod
+    def numba_xpocon(cls, dtype):
+        """
+        Estimates the reciprocal of the condition number of a positive definite matrix A using the Cholesky factorization
+        computed by potrf.
+
+        Called by scipy.linalg.solve when assume_a == "pos"
+        """
+        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "pocon")
+        functype = ctypes.CFUNCTYPE(
+            None,
+            _ptr_int,  # UPLO
+            _ptr_int,  # N
+            float_pointer,  # A
+            _ptr_int,  # LDA
+            float_pointer,  # ANORM
+            float_pointer,  # RCOND
+            float_pointer,  # WORK
+            _ptr_int,  # IWORK
+            _ptr_int,  # INFO
+        )
+        return functype(lapack_ptr)
+
+    @classmethod
+    def numba_xposv(cls, dtype):
+        """
+        Solve a system of linear equations A @ X = B with a symmetric positive definite matrix A using the Cholesky
+        factorization computed by potrf.
+        """
+
+        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "posv")
+        functype = ctypes.CFUNCTYPE(
+            None,
+            _ptr_int,  # UPLO
+            _ptr_int,  # N
+            _ptr_int,  # NRHS
+            float_pointer,  # A
+            _ptr_int,  # LDA
             float_pointer,  # B
             _ptr_int,  # LDB
             _ptr_int,  # INFO
