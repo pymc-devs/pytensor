@@ -368,7 +368,7 @@ def cho_solve(c_and_lower, b, *, check_finite=True, b_ndim: int | None = None):
         Whether to check that the input matrices contain only finite numbers.
         Disabling may give a performance gain, but may result in problems
         (crashes, non-termination) if the inputs do contain infinities or NaNs.
-        b_ndim : int
+    b_ndim : int
         Whether the core case of b is a vector (1) or matrix (2).
         This will influence how batched dimensions are interpreted.
     """
@@ -1181,4 +1181,5 @@ __all__ = [
     "solve_discrete_are",
     "solve_triangular",
     "block_diag",
+    "cho_solve",
 ]
