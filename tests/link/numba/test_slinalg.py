@@ -252,7 +252,10 @@ def test_getrf():
 
     assert info == 0
     assert_allclose(LU, lu)
-    assert_allclose(IPIV, ipiv)
+
+    # TODO: It seems IPIV is 1-indexed in FORTRAN, so we need to subtract 1. I can't find evidence that scipy is doing
+    #  this, though.
+    assert_allclose(IPIV - 1, ipiv)
 
 
 @pytest.mark.parametrize("trans", [0, 1])
