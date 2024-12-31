@@ -178,6 +178,28 @@ class _LAPACK:
         return functype(lapack_ptr)
 
     @classmethod
+    def numba_xpotrs(cls, dtype):
+        """
+        Solve a system of linear equations A @ X = B with a symmetric positive definite matrix A using the Cholesky
+        factorization computed by numba_potrf.
+
+        Called by scipy.linalg.cho_solve
+        """
+        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "potrs")
+        functype = ctypes.CFUNCTYPE(
+            None,
+            _ptr_int,  # UPLO
+            _ptr_int,  # N
+            _ptr_int,  # NRHS
+            float_pointer,  # A
+            _ptr_int,  # LDA
+            float_pointer,  # B
+            _ptr_int,  # LDB
+            _ptr_int,  # INFO
+        )
+        return functype(lapack_ptr)
+
+    @classmethod
     def numba_xlange(cls, dtype):
         """
         Compute the value of the 1-norm, Frobenius norm, infinity-norm, or the largest absolute value of any element of
