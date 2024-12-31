@@ -1,134 +1,44 @@
-import ctypes
-
 import numba
 import numpy as np
-from numba.core import cgutils, types
-from numba.extending import get_cython_function_address, intrinsic, overload
-from numba.np.linalg import _copy_to_fortran_order, ensure_lapack, get_blas_kind
+from numba.core import types
+from numba.extending import overload
+from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
+from numpy.linalg import LinAlgError
 from scipy import linalg
 
 from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch._LAPACK import (
+    _LAPACK,
+    _get_underlying_float,
+    int_ptr_to_val,
+    val_to_int_ptr,
+)
 from pytensor.link.numba.dispatch.basic import numba_funcify
-from pytensor.tensor.slinalg import BlockDiagonal, Cholesky, SolveTriangular
+from pytensor.tensor.slinalg import BlockDiagonal, Cholesky, Solve, SolveTriangular
 
 
-_PTR = ctypes.POINTER
+@numba_basic.numba_njit(inline="always")
+def _solve_check(n, info, lamch=None, rcond=None):
+    """
+    Check arguments during the different steps of the solution phase
+    Adapted from https://github.com/scipy/scipy/blob/7f7f04caa4a55306a9c6613c89eef91fedbd72d4/scipy/linalg/_basic.py#L38
+    """
+    if info < 0:
+        # TODO: figure out how to do an fstring here
+        msg = "LAPACK reported an illegal value in input"
+        raise ValueError(msg)
+    elif 0 < info:
+        raise LinAlgError("Matrix is singular.")
 
-_dbl = ctypes.c_double
-_float = ctypes.c_float
-_char = ctypes.c_char
-_int = ctypes.c_int
+    if lamch is None:
+        return
 
-_ptr_float = _PTR(_float)
-_ptr_dbl = _PTR(_dbl)
-_ptr_char = _PTR(_char)
-_ptr_int = _PTR(_int)
-
-
-@numba.core.extending.register_jitable
-def _check_finite_matrix(a, func_name):
-    for v in np.nditer(a):
-        if not np.isfinite(v.item()):
-            raise np.linalg.LinAlgError(
-                "Non-numeric values (nan or inf) in input to " + func_name
-            )
-
-
-@intrinsic
-def val_to_dptr(typingctx, data):
-    def impl(context, builder, signature, args):
-        ptr = cgutils.alloca_once_value(builder, args[0])
-        return ptr
-
-    sig = types.CPointer(types.float64)(types.float64)
-    return sig, impl
-
-
-@intrinsic
-def val_to_zptr(typingctx, data):
-    def impl(context, builder, signature, args):
-        ptr = cgutils.alloca_once_value(builder, args[0])
-        return ptr
-
-    sig = types.CPointer(types.complex128)(types.complex128)
-    return sig, impl
-
-
-@intrinsic
-def val_to_sptr(typingctx, data):
-    def impl(context, builder, signature, args):
-        ptr = cgutils.alloca_once_value(builder, args[0])
-        return ptr
-
-    sig = types.CPointer(types.float32)(types.float32)
-    return sig, impl
-
-
-@intrinsic
-def val_to_int_ptr(typingctx, data):
-    def impl(context, builder, signature, args):
-        ptr = cgutils.alloca_once_value(builder, args[0])
-        return ptr
-
-    sig = types.CPointer(types.int32)(types.int32)
-    return sig, impl
-
-
-@intrinsic
-def int_ptr_to_val(typingctx, data):
-    def impl(context, builder, signature, args):
-        val = builder.load(args[0])
-        return val
-
-    sig = types.int32(types.CPointer(types.int32))
-    return sig, impl
-
-
-@intrinsic
-def dptr_to_val(typingctx, data):
-    def impl(context, builder, signature, args):
-        val = builder.load(args[0])
-        return val
-
-    sig = types.float64(types.CPointer(types.float64))
-    return sig, impl
-
-
-@intrinsic
-def sptr_to_val(typingctx, data):
-    def impl(context, builder, signature, args):
-        val = builder.load(args[0])
-        return val
-
-    sig = types.float32(types.CPointer(types.float32))
-    return sig, impl
-
-
-def _get_float_pointer_for_dtype(blas_dtype):
-    if blas_dtype in ["s", "c"]:
-        return _ptr_float
-    elif blas_dtype in ["d", "z"]:
-        return _ptr_dbl
-
-
-def _get_underlying_float(dtype):
-    s_dtype = str(dtype)
-    out_type = s_dtype
-    if s_dtype == "complex64":
-        out_type = "float32"
-    elif s_dtype == "complex128":
-        out_type = "float64"
-
-    return np.dtype(out_type)
-
-
-def _get_lapack_ptr_and_ptr_type(dtype, name):
-    d = get_blas_kind(dtype)
-    func_name = f"{d}{name}"
-    float_pointer = _get_float_pointer_for_dtype(d)
-    lapack_ptr = get_cython_function_address("scipy.linalg.cython_lapack", func_name)
-
-    return lapack_ptr, float_pointer
+    # TODO: implement lamch in numba
+    # E = lamch('E')
+    # if rcond < E:
+    #     warn(f'Ill-conditioned matrix (rcond={rcond:.6g}): '
+    #          'result may not be accurate.',
+    #          LinAlgWarning, stacklevel=3)
 
 
 def _check_scipy_linalg_matrix(a, func_name):
@@ -152,60 +62,30 @@ def _check_scipy_linalg_matrix(a, func_name):
         raise numba.TypingError(msg, highlighting=False)
 
 
-class _LAPACK:
-    """
-    Functions to return type signatures for wrapped LAPACK functions.
-
-    Patterned after https://github.com/numba/numba/blob/bd7ebcfd4b850208b627a3f75d4706000be36275/numba/np/linalg.py#L74
-    """
-
-    def __init__(self):
-        ensure_lapack()
-
-    @classmethod
-    def numba_xtrtrs(cls, dtype):
-        """
-        Called by scipy.linalg.solve_triangular
-        """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "trtrs")
-
-        functype = ctypes.CFUNCTYPE(
-            None,
-            _ptr_int,  # UPLO
-            _ptr_int,  # TRANS
-            _ptr_int,  # DIAG
-            _ptr_int,  # N
-            _ptr_int,  # NRHS
-            float_pointer,  # A
-            _ptr_int,  # LDA
-            float_pointer,  # B
-            _ptr_int,  # LDB
-            _ptr_int,  # INFO
-        )
-
-        return functype(lapack_ptr)
-
-    @classmethod
-    def numba_xpotrf(cls, dtype):
-        """
-        Called by scipy.linalg.cholesky
-        """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "potrf")
-        functype = ctypes.CFUNCTYPE(
-            None,
-            _ptr_int,  # UPLO,
-            _ptr_int,  # N
-            float_pointer,  # A
-            _ptr_int,  # LDA
-            _ptr_int,  # INFO
-        )
-        return functype(lapack_ptr)
-
-
 def _solve_triangular(A, B, trans=0, lower=False, unit_diagonal=False):
     return linalg.solve_triangular(
         A, B, trans=trans, lower=lower, unit_diagonal=unit_diagonal
     )
+
+
+@numba_basic.numba_njit(inline="always")
+def _trans_char_to_int(trans):
+    if trans not in [0, 1, 2]:
+        raise ValueError('Parameter "trans" should be one of 0, 1, 2')
+    if trans == 0:
+        return ord("N")
+    elif trans == 1:
+        return ord("T")
+    else:
+        return ord("C")
+
+
+@numba_basic.numba_njit(inline="always")
+def _solve_check_input_shapes(A, B):
+    if A.shape[0] != B.shape[0]:
+        raise linalg.LinAlgError("Dimensions of A and B do not conform")
+    if A.shape[-2] != A.shape[-1]:
+        raise linalg.LinAlgError("Last 2 dimensions of A must be square")
 
 
 @overload(_solve_triangular)
@@ -219,33 +99,18 @@ def solve_triangular_impl(A, B, trans=0, lower=False, unit_diagonal=False):
     numba_trtrs = _LAPACK().numba_xtrtrs(dtype)
 
     def impl(A, B, trans=0, lower=False, unit_diagonal=False):
-        B_is_1d = B.ndim == 1
-
         _N = np.int32(A.shape[-1])
-        if A.shape[-2] != _N:
-            raise linalg.LinAlgError("Last 2 dimensions of A must be square")
+        _solve_check_input_shapes(A, B)
 
-        if A.shape[0] != B.shape[0]:
-            raise linalg.LinAlgError("Dimensions of A and B do not conform")
-
+        B_is_1d = B.ndim == 1
         if B_is_1d:
             B_copy = np.asfortranarray(np.expand_dims(B, -1))
         else:
             B_copy = _copy_to_fortran_order(B)
-
-        if trans not in [0, 1, 2]:
-            raise ValueError('Parameter "trans" should be one of N, C, T or 0, 1, 2')
-        if trans == 0:
-            transval = ord("N")
-        elif trans == 1:
-            transval = ord("T")
-        else:
-            transval = ord("C")
-
-        B_NDIM = 1 if B_is_1d else int(B.shape[1])
+        B_NDIM = 1 if B_is_1d else int(B.shape[-1])
 
         UPLO = val_to_int_ptr(ord("L") if lower else ord("U"))
-        TRANS = val_to_int_ptr(transval)
+        TRANS = val_to_int_ptr(_trans_char_to_int(trans))
         DIAG = val_to_int_ptr(ord("U") if unit_diagonal else ord("N"))
         N = val_to_int_ptr(_N)
         NRHS = val_to_int_ptr(B_NDIM)
@@ -429,3 +294,284 @@ def numba_funcify_BlockDiagonal(op, node, **kwargs):
         return out
 
     return block_diag
+
+
+def _xlange():
+    """
+    Placeholder for computing the norm of a matrix; used by linalg.solve. Not used by pytensor to numbify graphs.
+    """
+    pass
+
+
+@overload(_xlange)
+def xlange_impl(A, order=None):
+    ensure_lapack()
+    _check_scipy_linalg_matrix(A, "norm")
+    dtype = A.dtype
+    w_type = _get_underlying_float(dtype)
+    numba_lange = _LAPACK().numba_xlange(dtype)
+
+    def impl(A, order=None):
+        _M, _N = np.int32(A.shape[-2:])
+        A_copy = _copy_to_fortran_order(A)
+
+        M = val_to_int_ptr(_M)
+        N = val_to_int_ptr(_N)
+        LDA = val_to_int_ptr(_M)
+
+        NORM = (
+            val_to_int_ptr(ord(order))
+            if order is not None
+            else val_to_int_ptr(ord("1"))
+        )
+        WORK = np.empty(_M, dtype=dtype)
+
+        result = numba_lange(
+            NORM, M, N, A_copy.view(w_type).ctypes, LDA, WORK.view(w_type).ctypes
+        )
+
+        return result
+
+    return impl
+
+
+def _xgecon():
+    """
+    Placeholder for computing the condition number of a matrix; used by linalg.solve. Not used by pytensor to numbify
+    graphs.
+    """
+    pass
+
+
+@overload(_xgecon)
+def xgecon_impl(A, A_norm, norm):
+    ensure_lapack()
+    _check_scipy_linalg_matrix(A, "gecon")
+    dtype = A.dtype
+    w_type = _get_underlying_float(dtype)
+    numba_gecon = _LAPACK().numba_xgecon(dtype)
+
+    def impl(A, A_norm, norm):
+        _N = np.int32(A.shape[-1])
+        A_copy = _copy_to_fortran_order(A)
+
+        N = val_to_int_ptr(_N)
+        LDA = val_to_int_ptr(_N)
+        A_NORM = np.array(A_norm, dtype=dtype)
+        NORM = val_to_int_ptr(ord(norm))
+        RCOND = np.empty(1, dtype=dtype)
+        WORK = np.empty(4 * _N, dtype=dtype)
+        IWORK = np.empty(_N, dtype=np.int32)
+        INFO = val_to_int_ptr(1)
+
+        numba_gecon(
+            NORM,
+            N,
+            A_copy.view(w_type).ctypes,
+            LDA,
+            A_NORM.view(w_type).ctypes,
+            RCOND.view(w_type).ctypes,
+            WORK.view(w_type).ctypes,
+            IWORK.ctypes,
+            INFO,
+        )
+
+        return RCOND, int_ptr_to_val(INFO)
+
+    return impl
+
+
+def _getrf():
+    """
+    Placeholder for LU factorization; used by linalg.solve.
+
+    # TODO: Implement an LU_factor Op, then dispatch to this function in numba mode.
+    """
+    pass
+
+
+@overload(_getrf)
+def getrf_impl(A):
+    ensure_lapack()
+    _check_scipy_linalg_matrix(A, "getrf")
+    dtype = A.dtype
+    w_type = _get_underlying_float(dtype)
+    numba_getrf = _LAPACK().numba_xgetrf(dtype)
+
+    def impl(A):
+        _M, _N = np.int32(A.shape[-2:])
+        A_copy = _copy_to_fortran_order(A)
+
+        M = val_to_int_ptr(_M)
+        N = val_to_int_ptr(_N)
+        LDA = val_to_int_ptr(_M)
+        IPIV = np.empty(_N, dtype=np.int32)
+        INFO = val_to_int_ptr(0)
+
+        numba_getrf(M, N, A_copy.view(w_type).ctypes, LDA, IPIV.ctypes, INFO)
+
+        return A_copy, IPIV, int_ptr_to_val(INFO)
+
+    return impl
+
+
+def _getrs():
+    """
+    Placeholder for solving a linear system with a matrix that has been LU-factored; used by linalg.solve.
+
+    # TODO: Implement an LU_solve Op, then dispatch to this function in numba mode.
+    """
+    pass
+
+
+@overload(_getrs)
+def getrs_impl(LU, B, IPIV, trans=0):
+    ensure_lapack()
+    _check_scipy_linalg_matrix(LU, "getrs")
+    _check_scipy_linalg_matrix(B, "getrs")
+    dtype = LU.dtype
+    w_type = _get_underlying_float(dtype)
+    numba_getrs = _LAPACK().numba_xgetrs(dtype)
+
+    def impl(LU, B, IPIV, trans=0):
+        _N = np.int32(LU.shape[-1])
+        _solve_check_input_shapes(LU, B)
+
+        B_is_1d = B.ndim == 1
+        if B_is_1d:
+            B_copy = np.asfortranarray(np.expand_dims(B, -1))
+        else:
+            B_copy = _copy_to_fortran_order(B)
+        B_NDIM = 1 if B_is_1d else int(B.shape[-1])
+
+        TRANS = val_to_int_ptr(_trans_char_to_int(trans))
+        N = val_to_int_ptr(_N)
+        NRHS = val_to_int_ptr(B_NDIM)
+        LDA = val_to_int_ptr(_N)
+        LDB = val_to_int_ptr(_N)
+        IPIV = _copy_to_fortran_order(IPIV)
+        INFO = val_to_int_ptr(0)
+
+        numba_getrs(
+            TRANS,
+            N,
+            NRHS,
+            LU.view(w_type).ctypes,
+            LDA,
+            IPIV.ctypes,
+            B_copy.view(w_type).ctypes,
+            LDB,
+            INFO,
+        )
+
+        if B_is_1d:
+            return B_copy[..., 0], int_ptr_to_val(INFO)
+
+        return B_copy, int_ptr_to_val(INFO)
+
+    return impl
+
+
+def _solve_gen(
+    A,
+    B,
+    lower=False,
+    overwrite_a=False,
+    overwrite_b=False,
+    check_finite=True,
+    transposed=False,
+):
+    return linalg.solve(
+        A,
+        B,
+        lower=lower,
+        overwrite_a=overwrite_a,
+        overwrite_b=overwrite_b,
+        check_finite=check_finite,
+        assume_a="gen",
+        transposed=transposed,
+    )
+
+
+@overload(_solve_gen)
+def solve_gen_impl(
+    A,
+    B,
+    lower=False,
+    overwrite_a=False,
+    overwrite_b=False,
+    check_finite=True,
+    transposed=False,
+):
+    ensure_lapack()
+    _check_scipy_linalg_matrix(A, "solve")
+    _check_scipy_linalg_matrix(B, "solve")
+
+    def impl(
+        A,
+        B,
+        lower=False,
+        overwrite_a=False,
+        overwrite_b=False,
+        check_finite=True,
+        transposed=False,
+    ):
+        _N = np.int32(A.shape[-1])
+        _solve_check_input_shapes(A, B)
+
+        order = "I" if transposed else "1"
+        norm = _xlange(A, order=order)
+
+        N = A.shape[1]
+        LU, IPIV, INFO = _getrf(A)
+        _solve_check(N, INFO)
+
+        X, INFO = _getrs(LU, B, IPIV, transposed)
+        _solve_check(N, INFO)
+        RCOND, INFO = _xgecon(LU, norm, "1")
+
+        _solve_check(N, INFO, None, RCOND)
+
+        return X
+
+    return impl
+
+
+@numba_funcify.register(Solve)
+def numba_funcify_Solve(op, node, **kwargs):
+    assume_a = op.assume_a
+    lower = op.lower
+    check_finite = op.check_finite
+    overwrite_a = op.overwrite_a
+    overwrite_b = op.overwrite_b
+    transposed = op.transposed
+
+    dtype = node.inputs[0].dtype
+    if str(dtype).startswith("complex"):
+        raise NotImplementedError(
+            "Complex inputs not currently supported by solve in Numba mode"
+        )
+
+    if assume_a == "gen":
+
+        @numba_basic.numba_njit(inline="always")
+        def solve(a, b):
+            if check_finite:
+                if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
+                    raise np.linalg.LinAlgError(
+                        "Non-numeric values (nan or inf) in input A to solve"
+                    )
+                if np.any(np.bitwise_or(np.isinf(b), np.isnan(b))):
+                    raise np.linalg.LinAlgError(
+                        "Non-numeric values (nan or inf) in input b to solve"
+                    )
+
+            res = _solve_gen(
+                a, b, lower, overwrite_a, overwrite_b, check_finite, transposed
+            )
+            return res
+
+    else:
+        raise NotImplementedError(f"Assumption {assume_a} not supported in Numba mode")
+
+    return solve

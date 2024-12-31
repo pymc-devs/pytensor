@@ -8,6 +8,7 @@ import pytensor.tensor as pt
 from pytensor import config
 from pytensor.graph import FunctionGraph
 from tests.link.numba.test_basic import compare_numba_and_py
+from tests.unittest_tools import assert_allclose
 
 
 numba = pytest.importorskip("numba")
@@ -168,3 +169,127 @@ def test_block_diag():
     D_val = np.random.normal(size=(4, 4))
     out_fg = pytensor.graph.FunctionGraph([A, B, C, D], [X])
     compare_numba_and_py(out_fg, [A_val, B_val, C_val, D_val])
+
+
+@pytest.mark.parametrize(
+    "ord_numba, ord_scipy", [("F", "fro"), ("1", 1), ("I", np.inf)]
+)
+def test_xlange(ord_numba, ord_scipy):
+    # xlange is called internally only, we don't dispatch pt.linalg.norm to it
+    from scipy import linalg
+
+    from pytensor.link.numba.dispatch.slinalg import _xlange
+
+    @numba.njit()
+    def xlange(x, ord):
+        return _xlange(x, ord)
+
+    x = np.random.normal(size=(5, 5))
+    np.testing.assert_allclose(xlange(x, ord_numba), linalg.norm(x, ord_scipy))
+
+
+@pytest.mark.parametrize("ord_numba, ord_scipy", [("1", 1), ("I", np.inf)])
+def test_xgecon(ord_numba, ord_scipy):
+    # gecon is called internally only, we don't dispatch pt.linalg.norm to it
+    from scipy.linalg import get_lapack_funcs
+
+    from pytensor.link.numba.dispatch.slinalg import _xgecon, _xlange
+
+    @numba.njit()
+    def gecon(x, norm):
+        anorm = _xlange(x, norm)
+        cond, info = _xgecon(x, anorm, norm)
+        return cond, info
+
+    x = np.random.normal(size=(5, 5))
+
+    rcond, info = gecon(x, norm=ord_numba)
+
+    # Test against direct call to the underlying LAPACK functions
+    # Solution does **not** agree with 1 / np.linalg.cond(x) !
+    lange, gecon = get_lapack_funcs(("lange", "gecon"), (x,))
+    norm = lange(ord_numba, x)
+    rcond2, _ = gecon(x, norm, norm=ord_numba)
+
+    assert info == 0
+    np.testing.assert_allclose(rcond, rcond2)
+
+
+def test_getrf():
+    from scipy.linalg import lu_factor
+
+    from pytensor.link.numba.dispatch.slinalg import _getrf
+
+    # TODO: Refactor this test to use compare_numba_and_py after we implement lu_factor in pytensor
+
+    @numba.njit()
+    def getrf(x):
+        return _getrf(x)
+
+    x = np.random.normal(size=(5, 5))
+    LU, IPIV, info = getrf(x)
+    lu, ipiv = lu_factor(x)
+
+    assert info == 0
+    assert_allclose(LU, lu)
+    assert_allclose(IPIV, ipiv)
+
+
+@pytest.mark.parametrize("trans", [0, 1])
+def test_getrs(trans):
+    from scipy.linalg import lu_factor
+    from scipy.linalg import lu_solve as sp_lu_solve
+
+    from pytensor.link.numba.dispatch.slinalg import _getrf, _getrs
+
+    # TODO: Refactor this test to use compare_numba_and_py after we implement lu_solve in pytensor
+
+    @numba.njit()
+    def lu_solve(a, b, trans):
+        lu, ipiv, info = _getrf(a)
+        x, info = _getrs(lu, b, ipiv, trans)
+        return x, info
+
+    a = np.random.normal(size=(5, 5))
+    b = np.random.normal(size=(5, 3))
+
+    lu_and_piv = lu_factor(a)
+
+    x_sp = sp_lu_solve(lu_and_piv, b, trans)
+    x, info = lu_solve(a, b, trans)
+    assert info == 0
+
+    assert_allclose(x, x_sp)
+
+
+@pytest.mark.parametrize(
+    "b_func, b_size",
+    [(pt.matrix, (5, 1)), (pt.matrix, (5, 5)), (pt.vector, (5,))],
+    ids=["b_col_vec", "b_matrix", "b_vec"],
+)
+@pytest.mark.parametrize("assume_a", ["gen"], ids=str)
+@pytest.mark.parametrize("transposed", [True, False], ids=["trans", "no_trans"])
+@pytest.mark.filterwarnings(
+    'ignore:Cannot cache compiled function "numba_funcified_fgraph"'
+)
+def test_solve(b_func, b_size, assume_a, transposed):
+    dtype = config.floatX
+
+    A = pt.matrix("A", dtype=dtype)
+    b = b_func("b", dtype=dtype)
+
+    X = pt.linalg.solve(
+        A, b, lower=False, assume_a=assume_a, transposed=transposed, b_ndim=len(b_size)
+    )
+    f = pytensor.function([A, b], X, mode="NUMBA")
+
+    A = np.random.normal(size=(5, 5))
+    if assume_a == "sym":
+        A = A @ A.conj().T
+    b = np.random.normal(size=b_size)
+    b = b.astype(dtype)
+
+    X_np = f(A, b)
+    np.testing.assert_allclose(
+        transpose_func(A, transposed) @ X_np, b, atol=ATOL, rtol=RTOL
+    )
