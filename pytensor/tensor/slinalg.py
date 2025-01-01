@@ -368,7 +368,7 @@ def cho_solve(c_and_lower, b, *, check_finite=True, b_ndim: int | None = None):
         Whether to check that the input matrices contain only finite numbers.
         Disabling may give a performance gain, but may result in problems
         (crashes, non-termination) if the inputs do contain infinities or NaNs.
-        b_ndim : int
+    b_ndim : int
         Whether the core case of b is a vector (1) or matrix (2).
         This will influence how batched dimensions are interpreted.
     """
@@ -490,14 +490,16 @@ class Solve(SolveBase):
         "b_ndim",
         "overwrite_a",
         "overwrite_b",
+        "transposed",
     )
 
-    def __init__(self, *, assume_a="gen", **kwargs):
+    def __init__(self, *, assume_a="gen", transposed=False, **kwargs):
         if assume_a not in ("gen", "sym", "her", "pos"):
             raise ValueError(f"{assume_a} is not a recognized matrix structure")
 
         super().__init__(**kwargs)
         self.assume_a = assume_a
+        self.transposed = transposed
 
     def perform(self, node, inputs, outputs):
         a, b = inputs
@@ -509,6 +511,7 @@ class Solve(SolveBase):
             assume_a=self.assume_a,
             overwrite_a=self.overwrite_a,
             overwrite_b=self.overwrite_b,
+            transposed=self.transposed,
         )
 
     def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
@@ -533,6 +536,7 @@ def solve(
     assume_a="gen",
     lower=False,
     check_finite=True,
+    transposed=False,
     b_ndim: int | None = None,
 ):
     """Solves the linear equation set ``a * x = b`` for the unknown ``x`` for square ``a`` matrix.
@@ -570,6 +574,8 @@ def solve(
         (crashes, non-termination) if the inputs do contain infinities or NaNs.
     assume_a : str, optional
         Valid entries are explained above.
+    transposed: bool, optional
+        If True, solve ``A.T @ x = b``
     b_ndim : int
         Whether the core case of b is a vector (1) or matrix (2).
         This will influence how batched dimensions are interpreted.
@@ -581,6 +587,7 @@ def solve(
             check_finite=check_finite,
             assume_a=assume_a,
             b_ndim=b_ndim,
+            transposed=transposed,
         )
     )(a, b)
 
@@ -1174,4 +1181,5 @@ __all__ = [
     "solve_discrete_are",
     "solve_triangular",
     "block_diag",
+    "cho_solve",
 ]
