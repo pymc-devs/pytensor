@@ -838,7 +838,13 @@ def test_config_options_fastmath():
         pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
         print(list(pytensor_numba_fn.vm.jit_fn.py_func.__globals__))
         numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
-        assert numba_mul_fn.targetoptions["fastmath"] is True
+        assert numba_mul_fn.targetoptions["fastmath"] == {
+            "afn",
+            "arcp",
+            "contract",
+            "nsz",
+            "reassoc",
+        }
 
 
 def test_config_options_cached():

@@ -6,7 +6,6 @@ import numpy as np
 from numba.core.extending import overload
 from numpy.core.numeric import normalize_axis_index, normalize_axis_tuple
 
-from pytensor import config
 from pytensor.graph.op import Op
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
@@ -281,7 +280,6 @@ def jit_compile_reducer(
         res = numba_basic.numba_njit(
             *args,
             boundscheck=False,
-            fastmath=config.numba__fastmath,
             **kwds,
         )(fn)
 
@@ -315,7 +313,6 @@ def numba_funcify_Elemwise(op, node, **kwargs):
         op.scalar_op,
         node=scalar_node,
         parent_node=node,
-        fastmath=_jit_options["fastmath"],
         **kwargs,
     )
 
@@ -403,13 +400,13 @@ def numba_funcify_Sum(op, node, **kwargs):
 
     if ndim_input == len(axes):
         # Slightly faster than `numba_funcify_CAReduce` for this case
-        @numba_njit(fastmath=config.numba__fastmath)
+        @numba_njit
         def impl_sum(array):
             return np.asarray(array.sum(), dtype=np_acc_dtype).astype(out_dtype)
 
     elif len(axes) == 0:
         # These cases should be removed by rewrites!
-        @numba_njit(fastmath=config.numba__fastmath)
+        @numba_njit
         def impl_sum(array):
             return np.asarray(array, dtype=out_dtype)
 
@@ -568,9 +565,7 @@ def numba_funcify_Softmax(op, node, **kwargs):
             add_as, 0.0, (axis,), x_at.ndim, x_dtype, keepdims=True
         )
 
-        jit_fn = numba_basic.numba_njit(
-            boundscheck=False, fastmath=config.numba__fastmath
-        )
+        jit_fn = numba_basic.numba_njit(boundscheck=False)
         reduce_max = jit_fn(reduce_max_py)
         reduce_sum = jit_fn(reduce_sum_py)
     else:
@@ -602,9 +597,7 @@ def numba_funcify_SoftmaxGrad(op, node, **kwargs):
             add_as, 0.0, (axis,), sm_at.ndim, sm_dtype, keepdims=True
         )
 
-        jit_fn = numba_basic.numba_njit(
-            boundscheck=False, fastmath=config.numba__fastmath
-        )
+        jit_fn = numba_basic.numba_njit(boundscheck=False)
         reduce_sum = jit_fn(reduce_sum_py)
     else:
         reduce_sum = np.sum
@@ -642,9 +635,7 @@ def numba_funcify_LogSoftmax(op, node, **kwargs):
             add_as, 0.0, (axis,), x_at.ndim, x_dtype, keepdims=True
         )
 
-        jit_fn = numba_basic.numba_njit(
-            boundscheck=False, fastmath=config.numba__fastmath
-        )
+        jit_fn = numba_basic.numba_njit(boundscheck=False)
         reduce_max = jit_fn(reduce_max_py)
         reduce_sum = jit_fn(reduce_sum_py)
     else:
