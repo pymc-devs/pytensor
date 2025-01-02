@@ -16,4 +16,4 @@ dependencies:
   - sphinx-design
   - pip
   - pip:
-    - -e ..
+    - -e ..[jax]
