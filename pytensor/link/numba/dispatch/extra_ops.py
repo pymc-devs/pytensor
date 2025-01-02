@@ -4,7 +4,6 @@ from typing import cast
 import numba
 import numpy as np
 
-from pytensor import config
 from pytensor.graph import Apply
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import get_numba_type, numba_funcify
@@ -50,13 +49,13 @@ def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
     if mode == "add":
         if axis is None or ndim == 1:
 
-            @numba_basic.numba_njit(fastmath=config.numba__fastmath)
+            @numba_basic.numba_njit
             def cumop(x):
                 return np.cumsum(x)
 
         else:
 
-            @numba_basic.numba_njit(boundscheck=False, fastmath=config.numba__fastmath)
+            @numba_basic.numba_njit(boundscheck=False)
             def cumop(x):
                 out_dtype = x.dtype
                 if x.shape[axis] < 2:
@@ -74,13 +73,13 @@ def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
     else:
         if axis is None or ndim == 1:
 
-            @numba_basic.numba_njit(fastmath=config.numba__fastmath)
+            @numba_basic.numba_njit
             def cumop(x):
                 return np.cumprod(x)
 
         else:
 
-            @numba_basic.numba_njit(boundscheck=False, fastmath=config.numba__fastmath)
+            @numba_basic.numba_njit(boundscheck=False)
             def cumop(x):
                 out_dtype = x.dtype
                 if x.shape[axis] < 2:

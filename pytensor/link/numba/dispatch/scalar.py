@@ -2,7 +2,6 @@ import math
 
 import numpy as np
 
-from pytensor import config
 from pytensor.compile.ops import ViewOp
 from pytensor.graph.basic import Variable
 from pytensor.link.numba.dispatch import basic as numba_basic
@@ -137,7 +136,6 @@ def {scalar_op_fn_name}({', '.join(input_names)}):
 
     return numba_basic.numba_njit(
         signature,
-        fastmath=config.numba__fastmath,
         # Functions that call a function pointer can't be cached
         cache=False,
     )(scalar_op_fn)
@@ -177,9 +175,7 @@ def numba_funcify_Add(op, node, **kwargs):
     signature = create_numba_signature(node, force_scalar=True)
     nary_add_fn = binary_to_nary_func(node.inputs, "add", "+")
 
-    return numba_basic.numba_njit(signature, fastmath=config.numba__fastmath)(
-        nary_add_fn
-    )
+    return numba_basic.numba_njit(signature)(nary_add_fn)
 
 
 @numba_funcify.register(Mul)
@@ -187,9 +183,7 @@ def numba_funcify_Mul(op, node, **kwargs):
     signature = create_numba_signature(node, force_scalar=True)
     nary_add_fn = binary_to_nary_func(node.inputs, "mul", "*")
 
-    return numba_basic.numba_njit(signature, fastmath=config.numba__fastmath)(
-        nary_add_fn
-    )
+    return numba_basic.numba_njit(signature)(nary_add_fn)
 
 
 @numba_funcify.register(Cast)
@@ -239,7 +233,7 @@ def numba_funcify_Composite(op, node, **kwargs):
 
     _ = kwargs.pop("storage_map", None)
 
-    composite_fn = numba_basic.numba_njit(signature, fastmath=config.numba__fastmath)(
+    composite_fn = numba_basic.numba_njit(signature)(
         numba_funcify(op.fgraph, squeeze_output=True, **kwargs)
     )
     return composite_fn
@@ -267,7 +261,7 @@ def numba_funcify_Reciprocal(op, node, **kwargs):
     return numba_basic.global_numba_func(reciprocal)
 
 
-@numba_basic.numba_njit(fastmath=config.numba__fastmath)
+@numba_basic.numba_njit
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
@@ -277,7 +271,7 @@ def numba_funcify_Sigmoid(op, node, **kwargs):
     return numba_basic.global_numba_func(sigmoid)
 
 
-@numba_basic.numba_njit(fastmath=config.numba__fastmath)
+@numba_basic.numba_njit
 def gammaln(x):
     return math.lgamma(x)
 
@@ -287,7 +281,7 @@ def numba_funcify_GammaLn(op, node, **kwargs):
     return numba_basic.global_numba_func(gammaln)
 
 
-@numba_basic.numba_njit(fastmath=config.numba__fastmath)
+@numba_basic.numba_njit
 def logp1mexp(x):
     if x < np.log(0.5):
         return np.log1p(-np.exp(x))
@@ -300,7 +294,7 @@ def numba_funcify_Log1mexp(op, node, **kwargs):
     return numba_basic.global_numba_func(logp1mexp)
 
 
-@numba_basic.numba_njit(fastmath=config.numba__fastmath)
+@numba_basic.numba_njit
 def erf(x):
     return math.erf(x)
 
@@ -310,7 +304,7 @@ def numba_funcify_Erf(op, **kwargs):
     return numba_basic.global_numba_func(erf)
 
 
-@numba_basic.numba_njit(fastmath=config.numba__fastmath)
+@numba_basic.numba_njit
 def erfc(x):
     return math.erfc(x)
 
