@@ -49,10 +49,23 @@ def global_numba_func(func):
     return func
 
 
-def numba_njit(*args, **kwargs):
+def numba_njit(*args, fastmath=None, **kwargs):
     kwargs.setdefault("cache", config.numba__cache)
     kwargs.setdefault("no_cpython_wrapper", True)
     kwargs.setdefault("no_cfunc_wrapper", True)
+    if fastmath is None:
+        if config.numba__fastmath:
+            # Opinionated default on fastmath flags
+            # https://llvm.org/docs/LangRef.html#fast-math-flags
+            fastmath = {
+                "arcp",  # Allow Reciprocal
+                "contract",  # Allow floating-point contraction
+                "afn",  # Approximate functions
+                "reassoc",
+                "nsz",  # no-signed zeros
+            }
+        else:
+            fastmath = False
 
     # Suppress cache warning for internal functions
     # We have to add an ansi escape code for optional bold text by numba
@@ -68,9 +81,9 @@ def numba_njit(*args, **kwargs):
     )
 
     if len(args) > 0 and callable(args[0]):
-        return numba.njit(*args[1:], **kwargs)(args[0])
+        return numba.njit(*args[1:], fastmath=fastmath, **kwargs)(args[0])
 
-    return numba.njit(*args, **kwargs)
+    return numba.njit(*args, fastmath=fastmath, **kwargs)
 
 
 def numba_vectorize(*args, **kwargs):

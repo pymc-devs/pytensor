@@ -358,13 +358,13 @@ Here's an example for the `CumOp`\ `Op`:
                 if mode == "add":
                     if axis is None or ndim == 1:
 
-                        @numba_basic.numba_njit(fastmath=config.numba__fastmath)
+                        @numba_basic.numba_njit()
                         def cumop(x):
                             return np.cumsum(x)
 
                     else:
 
-                        @numba_basic.numba_njit(boundscheck=False, fastmath=config.numba__fastmath)
+                        @numba_basic.numba_njit(boundscheck=False)
                         def cumop(x):
                             out_dtype = x.dtype
                             if x.shape[axis] < 2:
@@ -382,13 +382,13 @@ Here's an example for the `CumOp`\ `Op`:
                 else:
                     if axis is None or ndim == 1:
 
-                        @numba_basic.numba_njit(fastmath=config.numba__fastmath)
+                        @numba_basic.numba_njit()
                         def cumop(x):
                             return np.cumprod(x)
 
                     else:
 
-                        @numba_basic.numba_njit(boundscheck=False, fastmath=config.numba__fastmath)
+                        @numba_basic.numba_njit(boundscheck=False)
                         def cumop(x):
                             out_dtype = x.dtype
                             if x.shape[axis] < 2:

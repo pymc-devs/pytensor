@@ -9,6 +9,7 @@ from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.scalar.basic import Composite
+from pytensor.tensor import tensor
 from pytensor.tensor.elemwise import Elemwise
 from tests.link.numba.test_basic import compare_numba_and_py, set_test_value
 
@@ -139,4 +140,22 @@ def test_reciprocal(v, dtype):
             for i in g_fg.inputs
             if not isinstance(i, SharedVariable | Constant)
         ],
+    )
+
+
+@pytest.mark.parametrize("composite", (False, True))
+def test_isnan(composite):
+    # Testing with tensor just to make sure Elemwise does not revert the scalar behavior of fastmath
+    x = tensor(shape=(2,), dtype="float64")
+
+    if composite:
+        x_scalar = psb.float64()
+        scalar_out = ~psb.isnan(x_scalar)
+        out = Elemwise(Composite([x_scalar], [scalar_out]))(x)
+    else:
+        out = pt.isnan(x)
+
+    compare_numba_and_py(
+        ([x], [out]),
+        [np.array([1, 0], dtype="float64")],
     )
