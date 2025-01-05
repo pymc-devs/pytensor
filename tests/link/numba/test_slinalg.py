@@ -42,7 +42,6 @@ def transpose_func(x, trans):
 @pytest.mark.filterwarnings(
     'ignore:Cannot cache compiled function "numba_funcified_fgraph"'
 )
-@pytest.mark.parametrize("overwrite_b", [True, False])
 def test_solve_triangular(
     b_func, b_size, lower, trans, unit_diag, complex, overwrite_b
 ):
@@ -58,7 +57,7 @@ def test_solve_triangular(
     b = b_func("b", dtype=dtype)
 
     X = pt.linalg.solve_triangular(
-        A, b, lower=lower, trans=trans, unit_diagonal=unit_diag, overwrite_b=overwrite_b
+        A, b, lower=lower, trans=trans, unit_diagonal=unit_diag
     )
     f = pytensor.function([A, b], X, mode="NUMBA")
 
@@ -322,9 +321,7 @@ def test_getrs(trans, overwrite_a, overwrite_b, b_shape):
 @pytest.mark.filterwarnings(
     'ignore:Cannot cache compiled function "numba_funcified_fgraph"'
 )
-@pytest.mark.parametrize("overwrite_a", [True, False])
-@pytest.mark.parametrize("overwrite_b", [True, False])
-def test_solve(b_func, b_size, assume_a, transposed, overwrite_a, overwrite_b):
+def test_solve(b_func, b_size, assume_a, transposed):
     A = pt.matrix("A", dtype=floatX)
     b = b_func("b", dtype=floatX)
 
@@ -333,23 +330,38 @@ def test_solve(b_func, b_size, assume_a, transposed, overwrite_a, overwrite_b):
         b,
         lower=False,
         assume_a=assume_a,
-        overwrite_a=overwrite_a,
-        overwrite_b=overwrite_b,
         transposed=transposed,
         b_ndim=len(b_size),
     )
-    f = pytensor.function([A, b], X, mode="NUMBA")
-
-    A = np.random.normal(size=(5, 5)).astype(floatX)
-    if assume_a in ["sym", "pos"]:
-        A = A @ A.conj().T
-    b = np.random.normal(size=b_size)
-    b = b.astype(floatX)
-
-    X_np = f(A, b)
-    np.testing.assert_allclose(
-        transpose_func(A, transposed) @ X_np, b, atol=ATOL, rtol=RTOL
+    f = pytensor.function(
+        [pytensor.In(A, mutable=True), pytensor.In(b, mutable=True)], X, mode="NUMBA"
     )
+
+    A_val = np.random.normal(size=(5, 5)).astype(floatX)
+
+    if assume_a in ["sym", "pos"]:
+        A_val = A_val @ A_val.conj().T
+    A_val = np.asfortranarray(A_val)
+
+    b_val = np.random.normal(size=b_size)
+    b_val = b_val.astype(floatX)
+    b_val = np.asfortranarray(b_val)
+
+    A_val_copy = A_val.copy()
+    b_val_copy = b_val.copy()
+
+    X_np = f(A_val, b_val)
+    op = f.maker.fgraph.outputs[0].owner.op
+    # overwrite_b is preferred when both inputs can be destroyed
+    assert op.destroy_map == {0: [1]}
+
+    np.testing.assert_allclose(
+        transpose_func(A_val_copy, transposed) @ X_np, b_val_copy, atol=ATOL, rtol=RTOL
+    )
+
+    # Confirm input was destroyed
+    assert (A_val == A_val_copy).all() == (op.destroy_map.get(0, None) != [0])
+    assert (b_val == b_val_copy).all() == (op.destroy_map.get(0, None) != [1])
 
 
 @pytest.mark.parametrize(

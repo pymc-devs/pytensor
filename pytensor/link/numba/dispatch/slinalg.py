@@ -565,10 +565,10 @@ def solve_gen_impl(
         norm = _xlange(A, order=order)
 
         N = A.shape[1]
-        LU, IPIV, INFO = _getrf(A)
+        LU, IPIV, INFO = _getrf(A, overwrite_a=overwrite_a)
         _solve_check(N, INFO)
 
-        X, INFO = _getrs(LU, B, IPIV, transposed)
+        X, INFO = _getrs(LU, B, IPIV, transposed, overwrite_b=overwrite_b)
         _solve_check(N, INFO)
         RCOND, INFO = _xgecon(LU, norm, "1")
 
