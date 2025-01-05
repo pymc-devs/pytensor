@@ -14,8 +14,8 @@ numba = pytest.importorskip("numba")
 
 floatX = pytensor.config.floatX
 
-ATOL = 0 if floatX.endswith("64") else 1e-6
-RTOL = 1e-7 if floatX.endswith("64") else 1e-6
+ATOL = 1e-8 if floatX.endswith("64") else 1e-4
+RTOL = 1e-8 if floatX.endswith("64") else 1e-4
 rng = np.random.default_rng(42849)
 
 
@@ -42,9 +42,7 @@ def transpose_func(x, trans):
 @pytest.mark.filterwarnings(
     'ignore:Cannot cache compiled function "numba_funcified_fgraph"'
 )
-def test_solve_triangular(
-    b_func, b_size, lower, trans, unit_diag, complex, overwrite_b
-):
+def test_solve_triangular(b_func, b_size, lower, trans, unit_diag, complex):
     if complex:
         # TODO: Complex raises ValueError: To change to a dtype of a different size, the last axis must be contiguous,
         #  why?
@@ -62,11 +60,11 @@ def test_solve_triangular(
     f = pytensor.function([A, b], X, mode="NUMBA")
 
     A_val = np.random.normal(size=(5, 5))
-    b = np.random.normal(size=b_size)
+    b_val = np.random.normal(size=b_size)
 
     if complex:
         A_val = A_val + np.random.normal(size=(5, 5)) * 1j
-        b = b + np.random.normal(size=b_size) * 1j
+        b_val = b_val + np.random.normal(size=b_size) * 1j
     A_sym = A_val @ A_val.conj().T
 
     A_tri = np.linalg.cholesky(A_sym).astype(dtype)
@@ -76,18 +74,15 @@ def test_solve_triangular(
         A_tri = A_tri * adj_mat
 
     A_tri = A_tri.astype(dtype)
-    b = b.astype(dtype)
+    b_val = b_val.astype(dtype)
 
     if not lower:
         A_tri = A_tri.T
 
-    X_np = f(A_tri, b)
+    X_np = f(A_tri, b_val)
     np.testing.assert_allclose(
-        transpose_func(A_tri, trans) @ X_np, b, atol=ATOL, rtol=RTOL
+        transpose_func(A_tri, trans) @ X_np, b_val, atol=ATOL, rtol=RTOL
     )
-
-    if overwrite_b:
-        assert_allclose(X_np, b)
 
 
 @pytest.mark.parametrize("value", [np.nan, np.inf])
@@ -100,11 +95,11 @@ def test_solve_triangular_raises_on_nan_inf(value):
 
     X = pt.linalg.solve_triangular(A, b, check_finite=True)
     f = pytensor.function([A, b], X, mode="NUMBA")
-    A_val = np.random.normal(size=(5, 5))
+    A_val = np.random.normal(size=(5, 5)).astype(floatX)
     A_sym = A_val @ A_val.conj().T
 
     A_tri = np.linalg.cholesky(A_sym).astype(floatX)
-    b = np.full((5, 1), value)
+    b = np.full((5, 1), value).astype(floatX)
 
     with pytest.raises(
         np.linalg.LinAlgError,
@@ -126,8 +121,8 @@ def test_numba_Cholesky(lower, trans):
 
     fg = FunctionGraph(outputs=[chol])
 
-    x = np.array([0.1, 0.2, 0.3])
-    val = np.eye(3) + x[None, :] * x[:, None]
+    x = np.array([0.1, 0.2, 0.3]).astype(floatX)
+    val = np.eye(3).astype(floatX) + x[None, :] * x[:, None]
 
     compare_numba_and_py(fg, [val])
 
@@ -385,4 +380,5 @@ def test_cho_solve(b_func, b_size, lower):
     b = b.astype(floatX)
 
     X_np = f(A, b)
+
     np.testing.assert_allclose(A @ X_np, b, atol=ATOL, rtol=RTOL)

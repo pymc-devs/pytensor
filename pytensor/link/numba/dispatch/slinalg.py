@@ -388,6 +388,7 @@ def xgecon_impl(A, A_norm, norm):
 
     def impl(A, A_norm, norm):
         _N = np.int32(A.shape[-1])
+        A_copy = _copy_to_fortran_order(A)
 
         N = val_to_int_ptr(_N)
         LDA = val_to_int_ptr(_N)
@@ -401,7 +402,7 @@ def xgecon_impl(A, A_norm, norm):
         numba_gecon(
             NORM,
             N,
-            A.view(w_type).ctypes,
+            A_copy.view(w_type).ctypes,
             LDA,
             A_NORM.view(w_type).ctypes,
             RCOND.view(w_type).ctypes,
