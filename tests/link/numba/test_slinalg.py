@@ -2,12 +2,12 @@ import re
 
 import numpy as np
 import pytest
+from numpy.testing import assert_allclose
 
 import pytensor
 import pytensor.tensor as pt
 from pytensor.graph import FunctionGraph
 from tests.link.numba.test_basic import compare_numba_and_py
-from tests.unittest_tools import assert_allclose
 
 
 numba = pytest.importorskip("numba")
@@ -42,7 +42,10 @@ def transpose_func(x, trans):
 @pytest.mark.filterwarnings(
     'ignore:Cannot cache compiled function "numba_funcified_fgraph"'
 )
-def test_solve_triangular(b_func, b_size, lower, trans, unit_diag, complex):
+@pytest.mark.parametrize("overwrite_b", [True, False])
+def test_solve_triangular(
+    b_func, b_size, lower, trans, unit_diag, complex, overwrite_b
+):
     if complex:
         # TODO: Complex raises ValueError: To change to a dtype of a different size, the last axis must be contiguous,
         #  why?
@@ -55,7 +58,7 @@ def test_solve_triangular(b_func, b_size, lower, trans, unit_diag, complex):
     b = b_func("b", dtype=dtype)
 
     X = pt.linalg.solve_triangular(
-        A, b, lower=lower, trans=trans, unit_diagonal=unit_diag
+        A, b, lower=lower, trans=trans, unit_diagonal=unit_diag, overwrite_b=overwrite_b
     )
     f = pytensor.function([A, b], X, mode="NUMBA")
 
@@ -83,6 +86,9 @@ def test_solve_triangular(b_func, b_size, lower, trans, unit_diag, complex):
     np.testing.assert_allclose(
         transpose_func(A_tri, trans) @ X_np, b, atol=ATOL, rtol=RTOL
     )
+
+    if overwrite_b:
+        assert_allclose(X_np, b)
 
 
 @pytest.mark.parametrize("value", [np.nan, np.inf])
@@ -235,7 +241,8 @@ def test_xgecon(ord_numba, ord_scipy):
     np.testing.assert_allclose(rcond, rcond2)
 
 
-def test_getrf():
+@pytest.mark.parametrize("overwrite_a", [True, False])
+def test_getrf(overwrite_a):
     from scipy.linalg import lu_factor
 
     from pytensor.link.numba.dispatch.slinalg import _getrf
@@ -243,15 +250,22 @@ def test_getrf():
     # TODO: Refactor this test to use compare_numba_and_py after we implement lu_factor in pytensor
 
     @numba.njit()
-    def getrf(x):
-        return _getrf(x)
+    def getrf(x, overwrite_a):
+        return _getrf(x, overwrite_a=overwrite_a)
 
     x = np.random.normal(size=(5, 5)).astype(floatX)
-    LU, IPIV, info = getrf(x)
-    lu, ipiv = lu_factor(x)
+    x = np.asfortranarray(
+        x
+    )  # x needs to be fortran-contiguous going into getrf for the overwrite option to work
+
+    lu, ipiv = lu_factor(x, overwrite_a=False)
+    LU, IPIV, info = getrf(x, overwrite_a=overwrite_a)
 
     assert info == 0
     assert_allclose(LU, lu)
+
+    if overwrite_a:
+        assert_allclose(x, LU)
 
     # TODO: It seems IPIV is 1-indexed in FORTRAN, so we need to subtract 1. I can't find evidence that scipy is doing
     #  this, though.
@@ -259,7 +273,10 @@ def test_getrf():
 
 
 @pytest.mark.parametrize("trans", [0, 1])
-def test_getrs(trans):
+@pytest.mark.parametrize("overwrite_a", [True, False])
+@pytest.mark.parametrize("overwrite_b", [True, False])
+@pytest.mark.parametrize("b_shape", [(5,), (5, 3)], ids=["b_1d", "b_2d"])
+def test_getrs(trans, overwrite_a, overwrite_b, b_shape):
     from scipy.linalg import lu_factor
     from scipy.linalg import lu_solve as sp_lu_solve
 
@@ -268,19 +285,29 @@ def test_getrs(trans):
     # TODO: Refactor this test to use compare_numba_and_py after we implement lu_solve in pytensor
 
     @numba.njit()
-    def lu_solve(a, b, trans):
-        lu, ipiv, info = _getrf(a)
-        x, info = _getrs(lu, b, ipiv, trans)
-        return x, info
+    def lu_solve(a, b, trans, overwrite_a, overwrite_b):
+        lu, ipiv, info = _getrf(a, overwrite_a=overwrite_a)
+        x, info = _getrs(lu, b, ipiv, trans=trans, overwrite_b=overwrite_b)
+        return x, lu, info
 
     a = np.random.normal(size=(5, 5)).astype(floatX)
-    b = np.random.normal(size=(5, 3)).astype(floatX)
+    b = np.random.normal(size=b_shape).astype(floatX)
 
-    lu_and_piv = lu_factor(a)
+    # inputs need to be fortran-contiguous going into getrf and getrs for the overwrite option to work
+    a = np.asfortranarray(a)
+    b = np.asfortranarray(b)
 
-    x_sp = sp_lu_solve(lu_and_piv, b, trans)
-    x, info = lu_solve(a, b, trans)
+    lu_and_piv = lu_factor(a, overwrite_a=False)
+    x_sp = sp_lu_solve(lu_and_piv, b, trans, overwrite_b=False)
+
+    x, lu, info = lu_solve(
+        a, b, trans, overwrite_a=overwrite_a, overwrite_b=overwrite_b
+    )
     assert info == 0
+    if overwrite_a:
+        assert_allclose(a, lu)
+    if overwrite_b:
+        assert_allclose(b, x)
 
     assert_allclose(x, x_sp)
 
@@ -295,12 +322,21 @@ def test_getrs(trans):
 @pytest.mark.filterwarnings(
     'ignore:Cannot cache compiled function "numba_funcified_fgraph"'
 )
-def test_solve(b_func, b_size, assume_a, transposed):
+@pytest.mark.parametrize("overwrite_a", [True, False])
+@pytest.mark.parametrize("overwrite_b", [True, False])
+def test_solve(b_func, b_size, assume_a, transposed, overwrite_a, overwrite_b):
     A = pt.matrix("A", dtype=floatX)
     b = b_func("b", dtype=floatX)
 
     X = pt.linalg.solve(
-        A, b, lower=False, assume_a=assume_a, transposed=transposed, b_ndim=len(b_size)
+        A,
+        b,
+        lower=False,
+        assume_a=assume_a,
+        overwrite_a=overwrite_a,
+        overwrite_b=overwrite_b,
+        transposed=transposed,
+        b_ndim=len(b_size),
     )
     f = pytensor.function([A, b], X, mode="NUMBA")
 

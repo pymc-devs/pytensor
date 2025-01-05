@@ -436,6 +436,7 @@ def solve_triangular(
     trans: int | str = 0,
     lower: bool = False,
     unit_diagonal: bool = False,
+    overwrite_b: bool = False,
     check_finite: bool = True,
     b_ndim: int | None = None,
 ) -> TensorVariable:
@@ -461,6 +462,8 @@ def solve_triangular(
         Whether to check that the input matrices contain only finite numbers.
         Disabling may give a performance gain, but may result in problems
         (crashes, non-termination) if the inputs do contain infinities or NaNs.
+    overwrite_b: bool, optional
+        If True, memory allocated to input B will be re-used for the output. Default is False.
     b_ndim : int
         Whether the core case of b is a vector (1) or matrix (2).
         This will influence how batched dimensions are interpreted.
@@ -472,6 +475,7 @@ def solve_triangular(
             trans=trans,
             unit_diagonal=unit_diagonal,
             check_finite=check_finite,
+            overwrite_b=overwrite_b,
             b_ndim=b_ndim,
         )
     )(a, b)
@@ -537,6 +541,8 @@ def solve(
     lower=False,
     check_finite=True,
     transposed=False,
+    overwrite_a=False,
+    overwrite_b=False,
     b_ndim: int | None = None,
 ):
     """Solves the linear equation set ``a * x = b`` for the unknown ``x`` for square ``a`` matrix.
@@ -574,6 +580,10 @@ def solve(
         (crashes, non-termination) if the inputs do contain infinities or NaNs.
     assume_a : str, optional
         Valid entries are explained above.
+    overwrite_a: bool, optional
+        If True, use A as a work space to avoid allocating new memory. Default is False
+    overwrite_b: bool, optional
+        If True, use B to store result. Otherwise, allocate new memory. Default is False
     transposed: bool, optional
         If True, solve ``A.T @ x = b``
     b_ndim : int
@@ -588,6 +598,8 @@ def solve(
             assume_a=assume_a,
             b_ndim=b_ndim,
             transposed=transposed,
+            overwrite_a=overwrite_a,
+            overwrite_b=overwrite_b,
         )
     )(a, b)
 

@@ -107,6 +107,7 @@ def solve_triangular_impl(A, B, trans=0, lower=False, unit_diagonal=False):
         _solve_check_input_shapes(A, B)
 
         B_is_1d = B.ndim == 1
+
         if B_is_1d:
             B_copy = np.asfortranarray(np.expand_dims(B, -1))
         else:
@@ -387,7 +388,6 @@ def xgecon_impl(A, A_norm, norm):
 
     def impl(A, A_norm, norm):
         _N = np.int32(A.shape[-1])
-        A_copy = _copy_to_fortran_order(A)
 
         N = val_to_int_ptr(_N)
         LDA = val_to_int_ptr(_N)
@@ -401,7 +401,7 @@ def xgecon_impl(A, A_norm, norm):
         numba_gecon(
             NORM,
             N,
-            A_copy.view(w_type).ctypes,
+            A.view(w_type).ctypes,
             LDA,
             A_NORM.view(w_type).ctypes,
             RCOND.view(w_type).ctypes,
@@ -425,16 +425,20 @@ def _getrf():
 
 
 @overload(_getrf)
-def getrf_impl(A):
+def getrf_impl(A, overwrite_a=False):
     ensure_lapack()
     _check_scipy_linalg_matrix(A, "getrf")
     dtype = A.dtype
     w_type = _get_underlying_float(dtype)
     numba_getrf = _LAPACK().numba_xgetrf(dtype)
 
-    def impl(A):
+    def impl(A, overwrite_a=False):
         _M, _N = np.int32(A.shape[-2:])
-        A_copy = _copy_to_fortran_order(A)
+
+        if not overwrite_a:
+            A_copy = _copy_to_fortran_order(A)
+        else:
+            A_copy = A
 
         M = val_to_int_ptr(_M)
         N = val_to_int_ptr(_N)
@@ -459,7 +463,7 @@ def _getrs():
 
 
 @overload(_getrs)
-def getrs_impl(LU, B, IPIV, trans=0):
+def getrs_impl(LU, B, IPIV, trans=0, overwrite_b=False):
     ensure_lapack()
     _check_scipy_linalg_matrix(LU, "getrs")
     _check_scipy_linalg_matrix(B, "getrs")
@@ -467,15 +471,19 @@ def getrs_impl(LU, B, IPIV, trans=0):
     w_type = _get_underlying_float(dtype)
     numba_getrs = _LAPACK().numba_xgetrs(dtype)
 
-    def impl(LU, B, IPIV, trans=0):
+    def impl(LU, B, IPIV, trans=0, overwrite_b=False):
         _N = np.int32(LU.shape[-1])
         _solve_check_input_shapes(LU, B)
 
         B_is_1d = B.ndim == 1
-        if B_is_1d:
-            B_copy = np.asfortranarray(np.expand_dims(B, -1))
-        else:
+
+        if not overwrite_b:
             B_copy = _copy_to_fortran_order(B)
+        else:
+            B_copy = B
+        if B_is_1d:
+            B_copy = np.asfortranarray(np.expand_dims(B_copy, -1))
+
         B_NDIM = 1 if B_is_1d else int(B.shape[-1])
 
         TRANS = val_to_int_ptr(_trans_char_to_int(trans))
@@ -591,13 +599,21 @@ def sysv_impl(A, B, lower=False, overwrite_a=False, overwrite_b=False):
     def impl(A, B, lower=False, overwrite_a=False, overwrite_b=False):
         _LDA, _N = np.int32(A.shape[-2:])
         _solve_check_input_shapes(A, B)
-        A_copy = _copy_to_fortran_order(A)
+
+        if not overwrite_a:
+            A_copy = _copy_to_fortran_order(A)
+        else:
+            A_copy = A
 
         B_is_1d = B.ndim == 1
-        if B_is_1d:
-            B_copy = np.asfortranarray(np.expand_dims(B, -1))
-        else:
+
+        if not overwrite_b:
             B_copy = _copy_to_fortran_order(B)
+        else:
+            B_copy = B
+        if B_is_1d:
+            B_copy = np.asfortranarray(np.expand_dims(B_copy, -1))
+
         B_NDIM = 1 if B_is_1d else int(B.shape[-1])
 
         UPLO = val_to_int_ptr(ord("L") if lower else ord("U"))
@@ -790,13 +806,22 @@ def posv_impl(
         _solve_check_input_shapes(A, B)
 
         _N = np.int32(A.shape[-1])
-        A_copy = _copy_to_fortran_order(A)
+
+        if not overwrite_a:
+            A_copy = _copy_to_fortran_order(A)
+        else:
+            A_copy = A
 
         B_is_1d = B.ndim == 1
-        if B_is_1d:
-            B_copy = np.asfortranarray(np.expand_dims(B, -1))
-        else:
+
+        if not overwrite_b:
             B_copy = _copy_to_fortran_order(B)
+        else:
+            B_copy = B
+        if B_is_1d:
+            B_copy = np.asfortranarray(np.expand_dims(B_copy, -1))
+
+        B_NDIM = 1 if B_is_1d else int(B.shape[-1])
 
         UPLO = val_to_int_ptr(ord("L") if lower else ord("U"))
         B_NDIM = 1 if B_is_1d else int(B.shape[-1])
@@ -889,6 +914,11 @@ def numba_funcify_Solve(op, node, **kwargs):
         solve_fn = _solve_gen
     elif assume_a == "sym":
         solve_fn = _solve_symmetric
+    elif assume_a == "her":
+        raise NotImplementedError(
+            'Use assume_a = "sym" for symmetric real matrices. If you need compelx support, '
+            "please open an issue on github."
+        )
     elif assume_a == "pos":
         solve_fn = _solve_psd
     else:
