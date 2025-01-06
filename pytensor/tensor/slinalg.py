@@ -407,6 +407,7 @@ class SolveTriangular(SolveBase):
             trans=self.trans,
             unit_diagonal=self.unit_diagonal,
             check_finite=self.check_finite,
+            overwrite_b=self.overwrite_b,
         )
 
     def L_op(self, inputs, outputs, output_gradients):
