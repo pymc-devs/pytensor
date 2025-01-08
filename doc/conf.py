@@ -21,6 +21,8 @@ import inspect
 import sys
 import pytensor
 
+sys.path.insert(0, os.path.abspath(os.path.join("..", "scripts")))
+
 # General configuration
 # ---------------------
 
@@ -34,7 +36,9 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinx.ext.mathjax",
     "sphinx_design",
-    "sphinx.ext.intersphinx"
+    "sphinx.ext.intersphinx",
+    "myst_nb",
+    "generate_gallery",
 ]
 
 intersphinx_mapping = {
@@ -295,3 +299,30 @@ latex_documents = [
 
 # If false, no module index is generated.
 # latex_use_modindex = True
+
+
+# -- MyST config  -------------------------------------------------
+myst_enable_extensions = [
+    "colon_fence",
+    "deflist",
+    "dollarmath",
+    "amsmath",
+    "substitution",
+]
+myst_dmath_double_inline = True
+
+myst_substitutions = {
+    "pip_dependencies": "{{ extra_dependencies }}",
+    "conda_dependencies": "{{ extra_dependencies }}",
+    "extra_install_notes": "",
+}
+
+nb_execution_mode = "off"
+nbsphinx_execute = "never"
+nbsphinx_allow_errors = True
+
+
+# -- Bibtex config  -------------------------------------------------
+bibtex_bibfiles = ["references.bib"]
+bibtex_default_style = "unsrt"
+bibtex_reference_style = "author_year"

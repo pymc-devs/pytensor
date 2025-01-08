@@ -43,6 +43,10 @@ dependencies:
   - ipython
   - pymc-sphinx-theme
   - sphinx-design
+  - myst-nb
+  - matplotlib
+  - watermark
+
   # code style
   - ruff
   # developer tools

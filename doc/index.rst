@@ -80,6 +80,7 @@ Community
    introduction
    user_guide
    API <library/index>
+   Examples <gallery/gallery>
    Contributing <dev_start_guide>
 
 .. _Theano: https://github.com/Theano/Theano
