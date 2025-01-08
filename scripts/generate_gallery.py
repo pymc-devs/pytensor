@@ -130,7 +130,7 @@ class NotebookGenerator:
 def main(app):
     logger.info("Starting thumbnail extractor.")
 
-    working_dir = Path.getcwd()
+    working_dir = Path.cwd()
     os.chdir(app.builder.srcdir)
 
     file = [HEAD]
@@ -157,7 +157,7 @@ def main(app):
                 for descr in external_nbs[folder]
             ]
 
-        nb_paths = sorted(Path.glob(f"gallery/{folder}/*.ipynb"))
+        nb_paths = sorted(Path("gallery", "folder").glob("*.ipynb"))
 
         for nb_path in nb_paths:
             nbg = NotebookGenerator(
