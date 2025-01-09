@@ -21,7 +21,8 @@ from matplotlib import image
 
 logger = sphinx.util.logging.getLogger(__name__)
 
-DOC_SRC = Path(__file__).resolve().parent
+# DOC_SRC = Path(__file__).resolve().parent
+#
 # DEFAULT_IMG_LOC = os.path.join(os.path.dirname(DOC_SRC), "_static", "PyMC.png")
 
 DEFAULT_IMG_LOC = None
@@ -157,7 +158,7 @@ def main(app):
                 for descr in external_nbs[folder]
             ]
 
-        nb_paths = sorted(Path("gallery", "folder").glob("*.ipynb"))
+        nb_paths = sorted(Path("gallery", folder).glob("*.ipynb"))
 
         for nb_path in nb_paths:
             nbg = NotebookGenerator(
