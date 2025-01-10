@@ -259,9 +259,10 @@ class SolveBase(Op):
             raise ValueError(f"`b` must have {self.b_ndim} dims; got {b.type} instead.")
 
         # Infer dtype by solving the most simple case with 1x1 matrices
-        o_dtype = scipy.linalg.solve(
-            np.eye(1).astype(A.dtype), np.eye(1).astype(b.dtype)
-        ).dtype
+        inp_arr = [np.eye(1).astype(A.dtype), np.eye(1).astype(b.dtype)]
+        out_arr = [[None]]
+        self.perform(None, inp_arr, out_arr)
+        o_dtype = out_arr[0][0].dtype
         x = tensor(dtype=o_dtype, shape=b.type.shape)
         return Apply(self, [A, b], [x])
 

@@ -169,7 +169,12 @@ def test_eigvalsh_grad():
     )
 
 
-class TestSolveBase(utt.InferShapeTester):
+class TestSolveBase:
+    class SolveTest(SolveBase):
+        def perform(self, node, inputs, outputs):
+            A, b = inputs
+            outputs[0][0] = scipy.linalg.solve(A, b)
+
     @pytest.mark.parametrize(
         "A_func, b_func, error_message",
         [
@@ -191,16 +196,16 @@ class TestSolveBase(utt.InferShapeTester):
         with pytest.raises(ValueError, match=error_message):
             A = A_func()
             b = b_func()
-            SolveBase(b_ndim=2)(A, b)
+            self.SolveTest(b_ndim=2)(A, b)
 
     def test__repr__(self):
         np.random.default_rng(utt.fetch_seed())
         A = matrix()
         b = matrix()
-        y = SolveBase(b_ndim=2)(A, b)
+        y = self.SolveTest(b_ndim=2)(A, b)
         assert (
             y.__repr__()
-            == "SolveBase{lower=False, check_finite=True, b_ndim=2, overwrite_a=False, overwrite_b=False}.0"
+            == "SolveTest{lower=False, check_finite=True, b_ndim=2, overwrite_a=False, overwrite_b=False}.0"
         )
 
 
@@ -239,8 +244,9 @@ class TestSolve(utt.InferShapeTester):
         A_val = np.asarray(rng.random((5, 5)), dtype=config.floatX)
         A_val = np.dot(A_val.transpose(), A_val)
 
-        assert np.allclose(
-            scipy.linalg.solve(A_val, b_val), gen_solve_func(A_val, b_val)
+        np.testing.assert_allclose(
+            scipy.linalg.solve(A_val, b_val, assume_a="gen"),
+            gen_solve_func(A_val, b_val),
         )
 
         A_undef = np.array(
@@ -253,7 +259,7 @@ class TestSolve(utt.InferShapeTester):
             ],
             dtype=config.floatX,
         )
-        assert np.allclose(
+        np.testing.assert_allclose(
             scipy.linalg.solve(A_undef, b_val), gen_solve_func(A_undef, b_val)
         )
 
@@ -450,7 +456,7 @@ class TestCholeskySolve(utt.InferShapeTester):
             fn = function([A, b], x)
             x_result = fn(A_val.astype(A_dtype), b_val.astype(b_dtype))
 
-            assert x.dtype == x_result.dtype
+            assert x.dtype == x_result.dtype, (A_dtype, b_dtype)
 
 
 def test_cho_solve():
