@@ -56,9 +56,7 @@ ITEM_TEMPLATE = """
       :shadow: none
 """
 
-folder_title_map = {
-    "introduction": "Introduction",
-}
+folder_title_map = {"introduction": "Introduction", "rewrites": "Graph Rewriting"}
 
 
 def create_thumbnail(infile, width=275, height=275, cx=0.5, cy=0.5, border=4):
