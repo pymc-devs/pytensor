@@ -21,7 +21,7 @@ from matplotlib import image
 
 logger = sphinx.util.logging.getLogger(__name__)
 
-DOC_SRC = Path(__file__).resolve().parent
+DOC_SRC = Path(__file__).resolve().parent.parent
 DEFAULT_IMG_LOC = DOC_SRC / "doc" / "images" / "PyTensor_logo.png"
 
 external_nbs = {}
