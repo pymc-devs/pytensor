@@ -21,11 +21,9 @@ from matplotlib import image
 
 logger = sphinx.util.logging.getLogger(__name__)
 
-# DOC_SRC = Path(__file__).resolve().parent
-#
-# DEFAULT_IMG_LOC = os.path.join(os.path.dirname(DOC_SRC), "_static", "PyMC.png")
+DOC_SRC = Path(__file__).resolve().parent
+DEFAULT_IMG_LOC = DOC_SRC / "doc" / "images" / "PyTensor_logo.png"
 
-DEFAULT_IMG_LOC = None
 external_nbs = {}
 
 HEAD = """
