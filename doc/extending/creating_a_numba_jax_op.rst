@@ -1,5 +1,5 @@
 Adding JAX, Numba and Pytorch support for `Op`\s
-=======================================
+================================================
 
 PyTensor is able to convert its graphs into JAX, Numba and Pytorch compiled functions. In order to do
 this, each :class:`Op` in an PyTensor graph must have an equivalent JAX/Numba/Pytorch implementation function.
@@ -7,7 +7,7 @@ this, each :class:`Op` in an PyTensor graph must have an equivalent JAX/Numba/Py
 This tutorial will explain how JAX, Numba and Pytorch implementations are created for an :class:`Op`.
 
 Step 1: Identify the PyTensor :class:`Op` you'd like to implement
-------------------------------------------------------------------------
+-----------------------------------------------------------------
 
 Find the source for the PyTensor :class:`Op` you'd like to be supported and
 identify the function signature and return values. These can be determined by
@@ -98,7 +98,7 @@ how the inputs and outputs are used to compute the outputs for an :class:`Op`
 in Python. This method is effectively what needs to be implemented.
 
 Step 2: Find the relevant method in JAX/Numba/Pytorch (or something close)
----------------------------------------------------------
+--------------------------------------------------------------------------
 
 With a precise idea of what the PyTensor :class:`Op` does we need to figure out how
 to implement it in JAX, Numba or Pytorch. In the best case scenario, there is a similarly named
@@ -269,7 +269,7 @@ and :func:`torch.cumprod`
             z[0] = np.cumprod(x, axis=self.axis)
 
 Step 3: Register the function with the respective dispatcher
----------------------------------------------------------------
+------------------------------------------------------------
 
 With the PyTensor `Op` replicated, we'll need to register the
 function with the backends `Linker`. This is done through the use of
