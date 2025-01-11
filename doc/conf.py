@@ -2,14 +2,12 @@ import os
 import inspect
 import sys
 import pytensor
+from pathlib import Path
 
-sys.path.insert(0, os.path.abspath(os.path.join("..", "scripts")))
+sys.path.insert(0, str(Path("..").resolve() / "scripts"))
 
 # General configuration
 # ---------------------
-
-# Add any Sphinx extension module names here, as strings. They can be
-# extensions coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.todo",
@@ -19,6 +17,8 @@ extensions = [
     "sphinx.ext.mathjax",
     "sphinx_design",
     "sphinx.ext.intersphinx",
+    "sphinx.ext.autosummary",
+    "sphinx.ext.autosectionlabel",
     "ablog",
     "myst_nb",
     "generate_gallery",
