@@ -145,7 +145,7 @@ might not have PyTensor installed, who are using a different Python version, or 
 you are planning to save your model for a long time (in which case version
 mismatches might make it difficult to unpickle objects).
 
-See :func:`pytensor.misc.pkl_utils.dump` and :func:`pytensor.misc.pkl_utils.load`.
+See :meth:`pytensor.misc.pkl_utils.StripPickler.dump` and :meth:`pytensor.misc.pkl_utils.StripPickler.load`.
 
 
 Long-Term Serialization
