@@ -1,0 +1,24 @@
+{% if pagename in ablog %}
+
+<!-- Generate correct links and render github/binder/colab badges -->
+{% set gh_basepath =  github_user + '/' + github_repo + '/blob/' + github_version + '/' %}
+{% set encoded_base =  github_user + '%252F' + github_repo  %}
+{% set gh_binder = github_user + '/' + github_repo + '/' + github_version %}
+{% set doc_path_aux = doc_path | trim('/') %}
+{% set file_path = doc_path_aux + '/' + pagename + ".ipynb" %}
+{% set encoded_path = file_path | replace("/", "%252F") %}
+
+
+<div class="sd-text-right">
+  <p>
+    <a href="{{ github_url + '/' + gh_basepath + file_path }}", role="button" target="_blank">
+    <img src="{{ pathto('_static/github.svg', 1) }}" alt="View On GitHub"></a>
+
+    <a href="{{ 'https://mybinder.org/v2/gh/' + sandbox_repo + '?urlpath=git-pull%3Frepo%3Dhttps%253A%252F%252Fgithub.com%252F' + encoded_base + '%26urlpath%3Dtree%252F' + github_repo + '%252F' + encoded_path + '%26branch%3D' + github_version }}" target="_blank">
+    <img src="{{ pathto('_static/binder.svg', 1) }}" alt="Open In Binder"></a>
+
+    <a href="{{ 'https://colab.research.google.com/github/' + gh_basepath + file_path }}" target="_blank">
+    <img src="{{ pathto('_static/colab.svg', 1) }}" alt="Open In Colab"/></a>
+  </p>
+</div>
+{% endif %}

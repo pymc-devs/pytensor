@@ -96,7 +96,7 @@ class NotebookGenerator:
 
         self.basename = Path(filename).name
         self.stripped_name = Path(filename).stem
-        self.image_dir = Path(root_dir) / "_thumbnails" / folder
+        self.image_dir = Path(root_dir) / "doc" / "_thumbnails" / folder
         self.png_path = self.image_dir / f"{self.stripped_name}.png"
 
         with filename.open(encoding="utf-8") as fid:
@@ -143,7 +143,7 @@ def main(app):
             )
         )
 
-        thumbnail_dir = Path("..") / "_thumbnails" / folder
+        thumbnail_dir = Path("_thumbnails") / folder
         if not thumbnail_dir.exists():
             Path.mkdir(thumbnail_dir, parents=True)
 

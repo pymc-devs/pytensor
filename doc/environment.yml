@@ -20,6 +20,7 @@ dependencies:
   - myst-nb
   - matplotlib
   - watermark
+  - ablog
   - pip
   - pip:
     - -e ..

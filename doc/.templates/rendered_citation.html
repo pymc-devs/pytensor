@@ -1,0 +1,13 @@
+<!-- continuation of examples/page_footer.md -->
+{% if pagename in ablog %}
+  {% set post = ablog[pagename] %}
+    {% for coll in post.author %}
+      {% if coll|length %}
+        {{ coll }}
+        {% if loop.index < post.author | length %},{% endif %}
+      {% else %}
+        {{ coll }}
+        {% if loop.index < post.author | length %},{% endif %}
+      {% endif %}
+    {% endfor %}. "{{ title.split(' — ')[0] }}". In: <i>Pytensor Examples</i>. Ed. by Pytensor Team. <!-- DOI: <a href={{ doi_url }}>{{ doi_code }}</a>  -->
+{% endif %}
