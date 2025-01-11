@@ -107,8 +107,6 @@ def add_tag_trace(thing: T, user_line: int | None = None) -> T:
         "pytensor\\graph\\",
         "pytensor/scalar/basic.py",
         "pytensor\\scalar\\basic.py",
-        "pytensor/sandbox/",
-        "pytensor\\sandbox\\",
         "pytensor/scan/",
         "pytensor\\scan\\",
         "pytensor/sparse/",
