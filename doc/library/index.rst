@@ -22,7 +22,6 @@ Modules
    gradient
    misc/pkl_utils
    printing
-   sandbox/index
    scalar/index
    scan
    sparse/index

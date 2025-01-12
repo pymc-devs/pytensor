@@ -1,0 +1,3 @@
+User-agent: *
+
+Sitemap: https://pytensor.readthedocs.io/en/latest/sitemap.xml

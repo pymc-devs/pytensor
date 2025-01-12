@@ -22,7 +22,15 @@ extensions = [
     "ablog",
     "myst_nb",
     "generate_gallery",
+    "sphinx_sitemap",
 ]
+
+# Don't auto-generate summary for class members.
+numpydoc_show_class_members = False
+autosummary_generate = True
+autodoc_typehints = "none"
+remove_from_toctrees = ["**/classmethods/*"]
+
 
 intersphinx_mapping = {
     "jax": ("https://jax.readthedocs.io/en/latest", None),
@@ -103,19 +111,15 @@ pygments_style = "sphinx"
 # Options for HTML output
 # -----------------------
 
-# The style sheet to use for HTML and HTML Help pages. A file of that name
-# must exist either in Sphinx' static/ path, or in one of the custom paths
-# given in html_static_path.
-# html_style = 'default.css'
-# html_theme = 'sphinxdoc'
-
-# html4_writer added to Fix colon & whitespace misalignment
-# https://github.com/readthedocs/sphinx_rtd_theme/issues/766#issuecomment-513852197
-# https://github.com/readthedocs/sphinx_rtd_theme/issues/766#issuecomment-629666319
-# html4_writer = False
-
-html_logo = "images/PyTensor_RGB.svg"
+# The theme to use for HTML and HTML Help pages.  See the documentation for
+# a list of builtin themes.
 html_theme = "pymc_sphinx_theme"
+html_logo = "images/PyTensor_RGB.svg"
+
+html_baseurl = "https://pytensor.readthedocs.io"
+sitemap_url_scheme = f"{{lang}}{rtd_version}/{{link}}"
+
+
 html_theme_options = {
     "use_search_override": False,
     "icon_links": [

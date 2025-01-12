@@ -23,4 +23,5 @@ dependencies:
   - ablog
   - pip
   - pip:
+    - sphinx_sitemap
     - -e ..
