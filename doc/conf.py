@@ -357,4 +357,4 @@ fontawesome_included = True
 # post_auto_image = 1
 # post_auto_excerpt = 2
 
-notfound_urls_prefix = "/projects/examples/en/latest/"
+# notfound_urls_prefix = ""
