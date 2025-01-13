@@ -14,6 +14,14 @@ dependencies:
   - pillow
   - pymc-sphinx-theme
   - sphinx-design
+  - pygments
+  - pydot
+  - ipython
+  - myst-nb
+  - matplotlib
+  - watermark
+  - ablog
   - pip
   - pip:
+    - sphinx_sitemap
     - -e ..

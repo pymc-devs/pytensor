@@ -477,7 +477,7 @@ them perfectly, but a `dscalar` otherwise.
     you'll want to call.
 
 
-.. autoclass:: pytensor.tensor.var._tensor_py_operators
+.. autoclass:: pytensor.tensor.variable._tensor_py_operators
    :members:
 
     This mix-in class adds convenient attributes, methods, and support

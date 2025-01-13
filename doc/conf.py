@@ -1,31 +1,13 @@
-# pytensor documentation build configuration file, created by
-# sphinx-quickstart on Tue Oct  7 16:34:06 2008.
-#
-# This file is execfile()d with the current directory set to its containing
-# directory.
-#
-# The contents of this file are pickled, so don't put values in the namespace
-# that aren't pickleable (module imports are okay, they're removed
-# automatically).
-#
-# All configuration values have a default value; values that are commented out
-# serve to show the default value.
-
-# If your extensions are in another directory, add it here. If the directory
-# is relative to the documentation root, use Path.absolute to make it
-# absolute, like shown here.
-# sys.path.append(str(Path("some/directory").absolute()))
-
 import os
 import inspect
 import sys
 import pytensor
+from pathlib import Path
+
+sys.path.insert(0, str(Path("..").resolve() / "scripts"))
 
 # General configuration
 # ---------------------
-
-# Add any Sphinx extension module names here, as strings. They can be
-# extensions coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.todo",
@@ -34,8 +16,21 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinx.ext.mathjax",
     "sphinx_design",
-    "sphinx.ext.intersphinx"
+    "sphinx.ext.intersphinx",
+    "sphinx.ext.autosummary",
+    "sphinx.ext.autosectionlabel",
+    "ablog",
+    "myst_nb",
+    "generate_gallery",
+    "sphinx_sitemap",
 ]
+
+# Don't auto-generate summary for class members.
+numpydoc_show_class_members = False
+autosummary_generate = True
+autodoc_typehints = "none"
+remove_from_toctrees = ["**/classmethods/*"]
+
 
 intersphinx_mapping = {
     "jax": ("https://jax.readthedocs.io/en/latest", None),
@@ -92,6 +87,7 @@ today_fmt = "%B %d, %Y"
 # List of directories, relative to source directories, that shouldn't be
 # searched for source files.
 exclude_dirs = ["images", "scripts", "sandbox"]
+exclude_patterns = ['page_footer.md', '**/*.myst.md']
 
 # The reST default role (used for this markup: `text`) to use for all
 # documents.
@@ -115,19 +111,15 @@ pygments_style = "sphinx"
 # Options for HTML output
 # -----------------------
 
-# The style sheet to use for HTML and HTML Help pages. A file of that name
-# must exist either in Sphinx' static/ path, or in one of the custom paths
-# given in html_static_path.
-# html_style = 'default.css'
-# html_theme = 'sphinxdoc'
-
-# html4_writer added to Fix colon & whitespace misalignment
-# https://github.com/readthedocs/sphinx_rtd_theme/issues/766#issuecomment-513852197
-# https://github.com/readthedocs/sphinx_rtd_theme/issues/766#issuecomment-629666319
-# html4_writer = False
-
-html_logo = "images/PyTensor_RGB.svg"
+# The theme to use for HTML and HTML Help pages.  See the documentation for
+# a list of builtin themes.
 html_theme = "pymc_sphinx_theme"
+html_logo = "images/PyTensor_RGB.svg"
+
+html_baseurl = "https://pytensor.readthedocs.io"
+sitemap_url_scheme = f"{{lang}}{rtd_version}/{{link}}"
+
+
 html_theme_options = {
     "use_search_override": False,
     "icon_links": [
@@ -156,15 +148,27 @@ html_theme_options = {
             "type": "fontawesome",
         },
     ],
+    "secondary_sidebar_items": ["page-toc", "edit-this-page", "sourcelink", "donate"],
+    "navbar_start": ["navbar-logo"],
+    "article_header_end": ["nb-badges"],
+    "article_footer_items": ["rendered_citation.html"],
 }
 html_context = {
+    "github_url": "https://github.com",
     "github_user": "pymc-devs",
     "github_repo": "pytensor",
-    "github_version": "main",
+    "github_version": version if "." in rtd_version else "main",
+    "sandbox_repo": f"pymc-devs/pymc-sandbox/{version}",
     "doc_path": "doc",
     "default_mode": "light",
 }
 
+# Add any paths that contain custom static files (such as style sheets) here,
+# relative to this directory. They are copied after the builtin static files,
+# so a file named "default.css" will overwrite the builtin "default.css".
+# html_static_path = ["../_static"]
+html_extra_path = ["_thumbnails", 'images', "robots.txt"]
+templates_path = [".templates"]
 
 # The name for this set of Sphinx documents.  If None, it defaults to
 # "<project> v<release> documentation".
@@ -295,3 +299,62 @@ latex_documents = [
 
 # If false, no module index is generated.
 # latex_use_modindex = True
+
+
+# -- MyST config  -------------------------------------------------
+myst_enable_extensions = [
+    "colon_fence",
+    "deflist",
+    "dollarmath",
+    "amsmath",
+    "substitution",
+]
+myst_dmath_double_inline = True
+
+citation_code = f"""
+```bibtex
+@incollection{{citekey,
+  author    = "<notebook authors, see above>",
+  title     = "<notebook title>",
+  editor    = "Pytensor Team",
+  booktitle = "Pytensor Examples",
+}}
+```
+"""
+
+myst_substitutions = {
+    "pip_dependencies": "{{ extra_dependencies }}",
+    "conda_dependencies": "{{ extra_dependencies }}",
+    "extra_install_notes": "",
+    "citation_code": citation_code,
+}
+
+nb_execution_mode = "off"
+nbsphinx_execute = "never"
+nbsphinx_allow_errors = True
+
+rediraffe_redirects = {
+    "index.md": "gallery.md",
+}
+
+# -- Bibtex config  -------------------------------------------------
+bibtex_bibfiles = ["references.bib"]
+bibtex_default_style = "unsrt"
+bibtex_reference_style = "author_year"
+
+
+# -- ablog config  -------------------------------------------------
+blog_baseurl = "https://pytensor.readthedocs.io/en/latest/index.html"
+blog_title = "Pytensor Examples"
+blog_path = "blog"
+blog_authors = {
+    "contributors": ("Pytensor Contributors", "https://pytensor.readthedocs.io"),
+}
+blog_default_author = "contributors"
+post_show_prev_next = False
+fontawesome_included = True
+# post_redirect_refresh = 1
+# post_auto_image = 1
+# post_auto_excerpt = 2
+
+# notfound_urls_prefix = ""

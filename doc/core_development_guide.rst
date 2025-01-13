@@ -26,12 +26,4 @@ some of them might be outdated though:
 
 * :ref:`unittest` -- Tutorial on how to use unittest in testing PyTensor.
 
-* :ref:`sandbox_debugging_step_mode` -- How to step through the execution of
-  an PyTensor function and print the inputs and outputs of each op.
-
-* :ref:`sandbox_elemwise` -- Description of element wise operations.
-
-* :ref:`sandbox_randnb` -- Description of how PyTensor deals with random
-  numbers.
-
 * :ref:`sparse` -- Description of the ``sparse`` type in PyTensor.

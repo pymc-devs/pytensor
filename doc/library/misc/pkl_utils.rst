@@ -9,10 +9,6 @@
 
    from pytensor.misc.pkl_utils import *
 
-.. autofunction:: pytensor.misc.pkl_utils.dump
-
-.. autofunction:: pytensor.misc.pkl_utils.load
-
 .. autoclass:: pytensor.misc.pkl_utils.StripPickler
 
 .. seealso::
