@@ -1,15 +1,28 @@
 import torch
 
+from pytensor.graph.basic import Constant
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape, Unbroadcast
 
 
 @pytorch_funcify.register(Reshape)
 def pytorch_funcify_Reshape(op, node, **kwargs):
-    def reshape(x, shape):
-        return torch.reshape(x, tuple(shape))
+    _, shape = node.inputs
 
-    return reshape
+    if isinstance(shape, Constant):
+        constant_shape = tuple(int(dim) for dim in shape.data)
+
+        def reshape_constant_shape(x, *_):
+            return torch.reshape(x, constant_shape)
+
+        return reshape_constant_shape
+
+    else:
+
+        def reshape(x, shape):
+            return torch.reshape(x, tuple(shape))
+
+        return reshape
 
 
 @pytorch_funcify.register(Shape)
