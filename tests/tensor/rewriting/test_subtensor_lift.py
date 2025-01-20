@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-import unittest_tools as utt
 
 from pytensor import (
     Mode,
@@ -25,13 +24,11 @@ from pytensor.printing import debugprint
 from pytensor.tensor import (
     add,
     exp,
-    inplace,
     iscalar,
     iscalars,
     lscalar,
     lscalars,
     matrix,
-    scalar,
     shape,
     slicetype,
     specify_shape,
@@ -43,6 +40,7 @@ from pytensor.tensor.basic import MakeVector, expand_dims, make_vector
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.rewriting.subtensor_lift import (
     local_subtensor_make_vector,
+    local_subtensor_of_elemwise,
     local_subtensor_shape_constant,
 )
 from pytensor.tensor.shape import SpecifyShape, _shape
@@ -58,22 +56,8 @@ mode_opt = get_mode(mode_opt)
 NO_OPTIMIZATION_MODE = Mode(linker="py", optimizer=None)
 
 
-class TestLocalSubtensorLift:
-    def test_basic(self):
-        # basic test that the Op works
-        x = matrix("x")
-        f = function([x], exp(x)[0], mode=mode_opt)
-
-        # Check stacktrace was copied over correctly after opt was applied
-        assert check_stack_trace(f, ops_to_check="all")
-
-        prog = f.maker.fgraph.toposort()
-        assert isinstance(prog[0].op, Subtensor)  # first subtensor
-        assert prog[1].op == exp
-        assert len(prog) == 2
-        f([[0, 1], [2, 3]])  # let debugmode test something
-
-    def test_basic_1(self):
+class TestLocalSubtensorOfElemwise:
+    def test_unary_multiple_clients(self):
         # as test0, but we reuse the output of the elemwise
         # So we should not lift the subtensor
         x = matrix("x")
@@ -87,85 +71,16 @@ class TestLocalSubtensorLift:
         assert isinstance(prog[1].op, Subtensor)  # first subtensor
         assert isinstance(prog[2].op, DeepCopyOp)
         assert len(prog) == 3
-        f([[0, 1], [2, 3]])  # let debugmode test something
 
-    def test_basic_2(self):
-        # basic test that the optimization work with scalar broadcasted
-        x = matrix("x")
-        y = scalar("y")
-        z = matrix("z")
-        f = function([x, y, z], exp(x + y + z)[0], mode=mode_opt)
+        x_test = [[0, 1], [2, 3]]
+        res1, res2 = f(x_test)
+        np.testing.assert_allclose(
+            res1,
+            np.exp(x_test)[0],
+        )
+        np.testing.assert_allclose(res2, np.exp(x_test))
 
-        prog = f.maker.fgraph.toposort()
-        assert isinstance(prog[0].op, Subtensor)
-        assert isinstance(prog[1].op, DimShuffle)
-        assert isinstance(prog[2].op, Subtensor)
-        assert isinstance(prog[3].op.scalar_op, ps.Composite)  # Composite{add,add}
-        assert len(prog) == 4
-
-        # Check stacktrace was copied over correctly after opt was applied
-        assert check_stack_trace(f, ops_to_check=[Subtensor])
-
-        # let debugmode test something
-        f([[0, 1], [2, 3]], 4, [[4, 5], [6, 7]])
-
-    def test_basic_3(self):
-        # as 1, but take a slice
-        x = matrix("x")
-        y = scalar("y")
-        z = matrix("z")
-        f = function([x, y, z], exp(x + y + z)[0:2], mode=mode_opt)
-
-        prog = f.maker.fgraph.toposort()
-        assert isinstance(prog[0].op, Subtensor)
-        assert isinstance(prog[1].op, DimShuffle)
-        assert isinstance(prog[2].op, Subtensor)
-        assert isinstance(prog[3].op.scalar_op, ps.Composite)  # Composite{add,add}
-        assert len(prog) == 4
-
-        # Check stacktrace was copied over correctly after opt was applied
-        assert check_stack_trace(f, ops_to_check=[Subtensor])
-
-        # let debugmode test something
-        f([[0, 1], [2, 3]], 4, [[4, 5], [6, 7]])
-
-    def test_basic_4(self):
-        # basic test that the optimization does work with broadcasting
-        # for unary elemwise.
-        y = vector("y")
-        f = function([y], exp(y.dimshuffle(0, "x"))[0], mode=mode_opt)
-
-        # Check stacktrace was copied over correctly after opt was applied
-        assert check_stack_trace(f, ops_to_check="all")
-
-        prog = f.maker.fgraph.toposort()
-        assert isinstance(prog[0].op, Subtensor)
-        assert isinstance(prog[1].op, DimShuffle)
-        assert prog[2].op == exp
-        assert len(prog) == 3
-        f([4, 5])  # let debugmode test something
-
-    @utt.assertFailure_fast
-    def test_basic_5(self):
-        # basic test that the optimization doesn't work with broadcasting
-        # ... It *could* be extended to,
-        # ... but right now it doesn't, so it shouldn't try.
-        x = matrix("x")
-        y = vector("y")
-        f = function([x, y], exp(x + y)[0], mode=mode_opt)
-
-        # Opt doesn't apply, so no need for check_stack_trace
-        # assert check_stack_trace(f, ops_to_check='all')
-
-        prog = f.maker.fgraph.toposort()
-        assert isinstance(prog[0].op, DimShuffle)
-        assert prog[1].op == add
-        assert isinstance(prog[2].op, Subtensor)  # first subtensor
-        assert prog[3].op == inplace.exp_inplace
-        assert len(prog) == 4
-        f([[0, 1], [2, 3]], [4, 5])  # let debugmode test something
-
-    def test_basic_6(self):
+    def test_multinary_multiple_clients(self):
         # test that we don't lift when we reuse the output of the
         # elemwise for other computation.
         x = matrix("x")
@@ -181,26 +96,84 @@ class TestLocalSubtensorLift:
         # first subtensor
         assert isinstance(prog[2].op, Subtensor)
         assert len(prog) == 3
-        f([[0, 1], [2, 3]], [4, 5])  # let debugmode test something
 
-    def test_basic_7(self):
-        # basic test that the optimization works with a scalar as input,
-        # and a scalar as output (no broadcasting of the scalar needed).
-        # The optimization used to fail and display an ERROR message.
+        x_test = np.array([[0, 1], [2, 3]]).astype(x.dtype)
+        y_test = np.array([4, 5]).astype(y.dtype)
+        res1, res2 = f(x_test, y_test)
+        np.testing.assert_allclose(
+            res1,
+            np.exp(x_test + y_test)[0],
+        )
+        np.testing.assert_allclose(
+            res2,
+            np.exp(x_test + y_test) + x_test,
+        )
 
-        x = vector("x")
-        y = scalar("y")
-        f = function([x, y], exp(x + y)[0], mode=mode_opt)
+    @pytest.mark.parametrize(
+        "original_fn, expected_fn",
+        [
+            # Unary integer indexing
+            (lambda x, y: exp(x)[0], lambda x, y: exp(x[0])),
+            # Unary integer with expand_dims
+            (lambda x, y: exp(x[:, None])[0], lambda x, y: exp(x[0][None])),
+            # Integer indexing on non-broadcastable dimension
+            (lambda x, y: add(x, y)[0], lambda x, y: add(x[0], y[0])),
+            # Slice indexing on non-broadcastable dimension
+            (lambda x, y: add(x, y)[1:], lambda x, y: add(x[1:], y[1:])),
+            # Integer indexing on broacastable dimension
+            (lambda x, y: add(x[None], y[None])[0], lambda x, y: add(x, y)),
+            (lambda x, y: add(x[None], y[None])[0, 1], lambda x, y: add(x[1], y[1])),
+            (
+                lambda x, y: add(x[None, :], y[:, None])[2],
+                lambda x, y: add(x, y[2][None]),
+            ),
+            (
+                lambda x, y: add(x[:, None], y[None, :])[:, 2],
+                lambda x, y: add(x, y[2][None]),
+            ),
+            # Slice indexing on broadcastable dimension
+            (
+                lambda x, y: add(x[None], y[None])[1:],
+                lambda x, y: add(x[None][1:], y[None][1:]),
+            ),
+            (
+                lambda x, y: add(x[None, :], y[:, None])[1:],
+                lambda x, y: add(x[None, :], y[1:][:, None]),
+            ),
+        ],
+    )
+    def test_local_subtensor_of_elemwise(self, original_fn, expected_fn):
+        rng = np.random.default_rng(257)
+        x = pt.matrix("x", shape=(5, 3))
+        y = pt.matrix("y", shape=(5, 3))
+        x_test = rng.normal(size=x.type.shape).astype(x.dtype)
+        y_test = rng.normal(size=y.type.shape).astype(y.dtype)
 
-        # Check stacktrace was copied over correctly after opt was applied
-        assert check_stack_trace(f, ops_to_check=Subtensor)
+        out = original_fn(x, y)
+        expected_opt_out = expected_fn(x, y)
+        opt_out = rewrite_graph(out)
+        assert equal_computations([opt_out], [expected_opt_out]), debugprint(
+            [expected_opt_out, opt_out], print_type=True
+        )
+        eval_kwargs = dict(mode=NO_OPTIMIZATION_MODE, on_unused_input="ignore")
+        np.testing.assert_allclose(
+            opt_out.eval({x: x_test, y: y_test}, **eval_kwargs),
+            out.eval({x: x_test, y: y_test}, **eval_kwargs),
+        )
 
-        prog = f.maker.fgraph.toposort()
-        assert isinstance(prog[0].op, Subtensor)
-        # Composite{add,exp}
-        assert isinstance(prog[1].op.scalar_op, ps.Composite)
-        assert len(prog) == 2
-        f([1, 2, 3], 4)  # let debugmode test something
+    def test_local_subtensor_of_elemwise_multiple_clients(self):
+        x = pt.matrix("x", shape=(5, 3))
+        y = pt.matrix("y", shape=(5, 3))
+        out1 = add(x, y)
+        out2 = out1[0]
+
+        # Rewrite should fail when another node uses out1 directly (in this case it's an extra output)
+        fgraph = FunctionGraph([x, y], [out1, out2], clone=False)
+        assert local_subtensor_of_elemwise.transform(fgraph, out2.owner) is None
+
+        # Otherwise it should work
+        fgraph.remove_output(0)
+        assert local_subtensor_of_elemwise.transform(fgraph, out2.owner) is not None
 
 
 @pytest.mark.parametrize(
