@@ -5,6 +5,7 @@ import numpy as np
 from pytensor import Variable
 from pytensor.graph import Constant, node_rewriter
 from pytensor.graph.rewriting.basic import copy_stack_trace
+from pytensor.npy_2_compat import normalize_axis_tuple
 from pytensor.scalar import basic as ps
 from pytensor.tensor.basic import (
     Alloc,
@@ -15,7 +16,7 @@ from pytensor.tensor.basic import (
     get_underlying_scalar_constant_value,
     register_infer_shape,
 )
-from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.math import Dot, ceil_intdiv, dot
@@ -181,6 +182,63 @@ def local_subtensor_of_elemwise(fgraph, node):
     copy_stack_trace([old_out, *node.inputs], new_out)
 
     return [new_out]
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([Subtensor])
+def local_subtensor_of_reduce(fgraph, node):
+    """Lift a Subtensor through a CAReduce Op.
+
+    For now rewrite is restricted to single axis of reduction, for simplicity.
+
+    sum(x, axis=1)[0] -> sum(x[0], axis=0)
+    sum(x, axis=1)[1:] -> sum(x[1:], axis=1)
+    sum(x, axis=0)[0] -> sum(x[:, 0], axis=0)
+    sum(x, axis=0)[1:] -> sum(x[:, 1:], axis=0)
+
+    """
+    red, *idx = node.inputs
+
+    if not (red.owner and isinstance(red.owner.op, CAReduce)):
+        return None
+
+    if len(fgraph.clients[red]) > 1:
+        # Don't apply rewrite if another node requires the full reduction
+        return None
+
+    [x] = red.owner.inputs
+    axis = red.owner.op.axis
+
+    if axis is None:
+        axis = tuple(range(x.type.ndim))
+
+    # TODO: Allow reduction across multiple axis
+    if len(axis) != 1:
+        return None
+
+    [axis] = normalize_axis_tuple(axis, x.ndim)
+    idx_tuple = indices_from_subtensor(idx, node.op.idx_list)
+
+    # Index input of reduction.
+    new_idxs = list(idx_tuple)
+    if axis < len(idx_tuple):
+        # When there are indexes beyond the axis of reduction, we need to shift them with None slices.
+        new_idxs.insert(axis, slice(None))
+    x_sub = x[tuple(new_idxs)]
+
+    [old_out] = node.outputs
+    copy_stack_trace(old_out, x_sub)
+
+    # Adjust axis of reduction when indexing drops dimensions (integer indexing as apposed to slice indexing)
+    axis -= len(
+        [idx_item for idx_item in idx_tuple[:axis] if not isinstance(idx_item, slice)]
+    )
+
+    # Apply reduction to indexed input
+    out = type(red.owner.op)(axis=axis)(x_sub)
+    copy_stack_trace(old_out, out)
+    return [out]
 
 
 @register_canonicalize("shape_unsafe")

@@ -38,6 +38,7 @@ from pytensor.tensor import (
 )
 from pytensor.tensor.basic import MakeVector, expand_dims, make_vector
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.rewriting.subtensor_lift import (
     local_subtensor_make_vector,
     local_subtensor_of_elemwise,
@@ -174,6 +175,40 @@ class TestLocalSubtensorOfElemwise:
         # Otherwise it should work
         fgraph.remove_output(0)
         assert local_subtensor_of_elemwise.transform(fgraph, out2.owner) is not None
+
+
+@pytest.mark.parametrize(
+    "original_fn, expected_fn",
+    [
+        # Indexing before axis of reduction
+        (lambda x: pt_sum(x, axis=2)[0], lambda x: pt_sum(x[0], axis=1)),
+        (lambda x: pt_sum(x, axis=2)[0, 1], lambda x: pt_sum(x[0, 1], axis=None)),
+        (lambda x: pt_sum(x, axis=2)[1:], lambda x: pt_sum(x[1:], axis=2)),
+        # Indexing "at" axis of reduction
+        (lambda x: pt_sum(x, axis=0)[2], lambda x: pt_sum(x[:, 2], axis=0)),
+        (lambda x: pt_sum(x, axis=0)[:-2], lambda x: pt_sum(x[:, :-2], axis=0)),
+        # Index after axis of reduction
+        (lambda x: pt_sum(x, axis=0)[:, 1:], lambda x: pt_sum(x[:, :, 1:], axis=0)),
+        # Index before and after axis reduction
+        (lambda x: pt_sum(x, axis=1)[-2, 1:], lambda x: pt_sum(x[-2, :, 1:], axis=0)),
+        (lambda x: pt_sum(x, axis=1)[1:, -2], lambda x: pt_sum(x[1:, :, -2], axis=1)),
+    ],
+)
+def test_local_subtensor_of_reduce(original_fn, expected_fn):
+    rng = np.random.default_rng(245)
+    x = pt.tensor("x", shape=(5, 3, 2))
+    x_test = rng.normal(size=x.type.shape).astype(x.dtype)
+
+    out = original_fn(x)
+    expected_opt_out = expected_fn(x)
+    opt_out = rewrite_graph(out)
+    assert equal_computations([opt_out], [expected_opt_out]), debugprint(
+        [expected_opt_out, opt_out], print_type=True
+    )
+    np.testing.assert_allclose(
+        opt_out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+        out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+    )
 
 
 @pytest.mark.parametrize(
