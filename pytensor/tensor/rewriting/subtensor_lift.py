@@ -11,10 +11,11 @@ from pytensor.tensor.basic import (
     MakeVector,
     alloc,
     as_tensor,
+    expand_dims,
     get_underlying_scalar_constant_value,
     register_infer_shape,
 )
-from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import Dot, ceil_intdiv, dot
 from pytensor.tensor.rewriting.basic import (
@@ -22,7 +23,7 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.rewriting.subtensor import register_useless
+from pytensor.tensor.rewriting.subtensor import is_full_slice, register_useless
 from pytensor.tensor.shape import (
     Shape,
     SpecifyShape,
@@ -37,6 +38,7 @@ from pytensor.tensor.subtensor import (
     get_canonical_form_slice,
     get_constant_idx,
     get_idx_list,
+    indices_from_subtensor,
 )
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import SliceType
@@ -202,6 +204,80 @@ def local_subtensor_lift(fgraph, node):
             copy_stack_trace([node.outputs[0], node.inputs[0]], rbcast_subt_x)
 
             return [rbcast_subt_x]
+
+
+@register_canonicalize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter([Subtensor])
+def local_subtensor_of_expand_dims(fgraph, node):
+    """Lift a Subtensor through a DimShuffle that only expands dims.
+
+    expand_dims(x, axis=0)[0] -> x
+    expand_dims(x, axis=0)[:, 0] -> expand_dims(x[0], axis=0)
+    expand_dims(x, axis=2)[0] -> expand_dims(x[0], axis=1)
+
+    This goes beyond `local_subtensor_remove_broadcastable_index` which
+    simply removes useless subtensors on broadcastable dimensions.
+    """
+    ds, *idx = node.inputs
+
+    if not (ds.owner and isinstance(ds.owner.op, DimShuffle)):
+        return None
+
+    ds_op = ds.owner.op
+
+    if not ds_op.is_expand_dims:
+        return None
+
+    expanded_axes = ds_op.augment
+    [x] = ds.owner.inputs
+
+    idx_tuple = indices_from_subtensor(idx, node.op.idx_list)
+
+    # Keep indexes for the original dimensions, and drop indexes for the expanded dimensions when safe
+    new_idxs = []
+    for i, idx_item in enumerate(idx_tuple):
+        if i in expanded_axes:
+            if isinstance(idx_item, slice):
+                # Slice could be keeping or dropping this dimension
+                if is_full_slice(idx_item):
+                    # A None slice, always keeps the dimension.
+                    # We skip the index, and later introduce the needed expand_dim
+                    continue
+                else:
+                    # Other slices could keep or drop the dimension.
+                    # Get out instead o trying to figure out which case it is
+                    return None
+            else:
+                # Integer indexing can only drop the dimension (if it's a valid graph)
+                # We can just drop the index and avoid expanding the dimension
+                # This is why this rewrite is tagged with "shape_unsafe"
+                continue
+        else:
+            # Keep indexes for non-expanded dimensions
+            new_idxs.append(idx_item)
+
+    [old_out] = node.outputs
+    out = x[tuple(new_idxs)]
+    copy_stack_trace(old_out, out)
+
+    if out.type.broadcastable != old_out.type.broadcastable:
+        # Re-introduce needed new dimensions (corresponding to full slices on the original expanded dimensions)
+        # If out.type.broadcastable == (False) and old_out.type.broadcastable == (True, False, True)
+        # then axis = (0, 2)
+        old_bcast = list(old_out.type.broadcastable)
+        expanded_bcast = list(out.type.broadcastable)
+        axis = []
+        i = 0
+        while i < len(old_bcast):
+            if i == len(expanded_bcast) or expanded_bcast[i] != old_bcast[i]:
+                expanded_bcast.insert(i, True)
+                axis.append(i)
+            i += 1
+        out = expand_dims(out, axis=axis)
+        copy_stack_trace(old_out, out)
+
+    return [out]
 
 
 @register_infer_shape

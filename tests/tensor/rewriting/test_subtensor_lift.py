@@ -19,7 +19,9 @@ from pytensor.graph import (
     Type,
     rewrite_graph,
 )
+from pytensor.graph.basic import equal_computations
 from pytensor.graph.rewriting.basic import check_stack_trace
+from pytensor.printing import debugprint
 from pytensor.tensor import (
     add,
     exp,
@@ -38,7 +40,7 @@ from pytensor.tensor import (
     tensor3,
     vector,
 )
-from pytensor.tensor.basic import MakeVector, make_vector
+from pytensor.tensor.basic import MakeVector, expand_dims, make_vector
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.rewriting.subtensor_lift import (
     local_subtensor_make_vector,
@@ -52,6 +54,9 @@ mode_opt = config.mode
 if mode_opt == "FAST_COMPILE":
     mode_opt = "FAST_RUN"
 mode_opt = get_mode(mode_opt)
+
+
+NO_OPTIMIZATION_MODE = Mode(linker="py", optimizer=None)
 
 
 class TestLocalSubtensorLift:
@@ -135,8 +140,8 @@ class TestLocalSubtensorLift:
         assert check_stack_trace(f, ops_to_check="all")
 
         prog = f.maker.fgraph.toposort()
-        assert isinstance(prog[0].op, DimShuffle)
-        assert isinstance(prog[1].op, Subtensor)
+        assert isinstance(prog[0].op, Subtensor)
+        assert isinstance(prog[1].op, DimShuffle)
         assert prog[2].op == exp
         assert len(prog) == 3
         f([4, 5])  # let debugmode test something
@@ -255,6 +260,65 @@ class TestLocalSubtensorLift:
         assert isinstance(prog[0].op, Subtensor)
         assert isinstance(prog[1].op, Unbroadcast)
         assert (f4(zval) == zval[:, 3, 0]).all()
+
+
+@pytest.mark.parametrize(
+    "original_fn, expected_fn",
+    [
+        # Integer indexing
+        (lambda x: expand_dims(x, axis=0)[0], lambda x: x),
+        (
+            lambda x: expand_dims(x, axis=1)[0],
+            lambda x: expand_dims(x[0], axis=0),
+        ),
+        (
+            lambda x: expand_dims(x, axis=(1, 3))[0],
+            lambda x: expand_dims(x[0], axis=(0, 2)),
+        ),
+        # Slice indexing
+        (
+            lambda x: expand_dims(x, axis=1)[1:],
+            lambda x: expand_dims(x[1:], axis=1),
+        ),
+        (
+            lambda x: expand_dims(x, axis=(1, 3))[1:],
+            lambda x: expand_dims(x[1:], axis=(1, 3)),
+        ),
+        # Not supported, slice indexing on expanded dimension
+        (
+            lambda x: expand_dims(x, axis=0)[1:],
+            lambda x: expand_dims(x, axis=0)[1:],
+        ),
+        # Mixed indexing
+        (
+            lambda x: expand_dims(x, axis=1)[0, :, 1:],
+            lambda x: expand_dims(x[0, 1:], axis=0),
+        ),
+        (
+            lambda x: expand_dims(x, axis=1)[1:, :, 0],
+            lambda x: expand_dims(x[1:, 0], axis=1),
+        ),
+        (
+            lambda x: expand_dims(x, axis=(1, 2))[1:, :, 0],
+            lambda x: expand_dims(x[1:], axis=1),
+        ),
+    ],
+)
+def test_local_subtensor_of_expand_dims(original_fn, expected_fn):
+    rng = np.random.default_rng(232)
+    x = tensor("x", shape=(5, 3))
+    x_test = rng.normal(size=x.type.shape)
+
+    out = original_fn(x)
+    expected_opt_out = expected_fn(x)
+    opt_out = rewrite_graph(out, exclude=["local_uint_constant_indices"])
+    assert equal_computations([opt_out], [expected_opt_out]), debugprint(
+        [opt_out, expected_opt_out], print_type=True
+    )
+    np.testing.assert_allclose(
+        opt_out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+        out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+    )
 
 
 def test_local_subtensor_of_alloc():
