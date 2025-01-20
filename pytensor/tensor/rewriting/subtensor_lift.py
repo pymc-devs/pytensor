@@ -1,4 +1,4 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 
@@ -17,12 +17,14 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.math import Dot, ceil_intdiv, dot
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
     register_stabilize,
 )
+from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
 from pytensor.tensor.rewriting.subtensor import is_full_slice, register_useless
 from pytensor.tensor.shape import (
     Shape,
@@ -42,6 +44,12 @@ from pytensor.tensor.subtensor import (
 )
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import SliceType
+
+
+def _dims_dropped_by_basic_index(idxs: Sequence[slice | int]) -> tuple[int, ...]:
+    # Inputs can be slice or integer indexes
+    # Slices keep the dimensions, integers collapse them
+    return tuple(i for i, idx in enumerate(idxs) if not isinstance(idx, slice))
 
 
 @register_canonicalize
@@ -278,6 +286,55 @@ def local_subtensor_of_expand_dims(fgraph, node):
         copy_stack_trace(old_out, out)
 
     return [out]
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([Subtensor])
+def local_subtensor_of_transpose(fgraph, node):
+    """Lift a Subtensor through a DimShuffle that only transposes.
+
+    transpose(x, (1, 0, 2))[i:, j:, k:] -> transpose(x[j:, i:, k:], (1, 0, 2))
+    """
+    ds, *idx = node.inputs
+
+    if not (ds.owner and isinstance(ds.owner.op, DimShuffle)):
+        return None
+
+    ds_op = ds.owner.op
+    if not ds_op.is_transpose:
+        return None
+
+    transposition = ds_op.transposition
+    [x] = ds.owner.inputs
+
+    idx_tuple = indices_from_subtensor(idx, node.op.idx_list)
+
+    # Apply the transposition to the indexes
+    ndim = x.type.ndim
+    n_implicit_idxs = ndim - len(idx_tuple)
+    idx_tuple = idx_tuple + (slice(None),) * n_implicit_idxs
+    new_idxs = [idx_tuple[transposition.index(i)] for i in range(ndim)]
+    new_x = x[tuple(new_idxs)]
+
+    # Reintroduce any dims dropped by indexing so the original transpose still works
+    dims_dropped_by_new_idx = _dims_dropped_by_basic_index(new_idxs)
+    if dims_dropped_by_new_idx:
+        new_x = expand_dims(new_x, axis=dims_dropped_by_new_idx)
+
+    # Apply the transpose
+    new_out = ds_op(new_x)
+
+    # Squeeze dims again now that the transpose is done
+    if dims_dropped_by_new_idx:
+        dims_dropped_by_original_idx = _dims_dropped_by_basic_index(idx_tuple)
+        new_out = squeeze(new_out, axis=dims_dropped_by_original_idx)
+
+    # Cleanup consecutive expand_dims / transpose / squeeze (if any)
+    if dims_dropped_by_new_idx:
+        [new_out] = local_dimshuffle_lift.transform(fgraph, new_out.owner)
+
+    return [new_out]
 
 
 @register_infer_shape
