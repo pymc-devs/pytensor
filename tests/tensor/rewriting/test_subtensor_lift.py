@@ -36,7 +36,7 @@ from pytensor.tensor import (
     tensor3,
     vector,
 )
-from pytensor.tensor.basic import MakeVector, expand_dims, make_vector
+from pytensor.tensor.basic import MakeVector, concatenate, expand_dims, make_vector
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.rewriting.subtensor_lift import (
@@ -598,6 +598,60 @@ class TestLocalSubtensorMakeVector:
         assert isinstance(node.op, Subtensor)
 
         assert local_subtensor_make_vector.transform(fgraph, node) == [v]
+
+
+shared_axis = shared(1, "axis")
+
+
+@pytest.mark.parametrize(
+    "original_fn, expected_fn",
+    [
+        (
+            lambda x, y: concatenate([x, y], axis=1)[1],
+            lambda x, y: concatenate([x[1], y[1]], axis=0),
+        ),
+        (
+            lambda x, y: concatenate([x, y], axis=-1)[1:],
+            lambda x, y: concatenate([x[1:], y[1:]], axis=1),
+        ),
+        # Indexing on both axis of concatenation and somewhere else:
+        (
+            lambda x, y: concatenate([x, y], axis=1)[0, 1:],
+            lambda x, y: concatenate([x[0], y[0]], axis=0)[1:],
+        ),
+        # Not supported, indexing on axis of concatenation
+        (
+            lambda x, y: concatenate([x, y], axis=0)[0],
+            lambda x, y: concatenate([x, y], axis=0)[0],
+        ),
+        (
+            lambda x, y: concatenate([x, y], axis=1)[:, 1:],
+            lambda x, y: concatenate([x, y], axis=1)[:, 1:],
+        ),
+        # Not supported, axis of concatenation is dynamically determined
+        (
+            lambda x, y: concatenate([x, y], axis=shared_axis)[1],
+            lambda x, y: concatenate([x, y], axis=shared_axis)[1],
+        ),
+    ],
+)
+def test_local_subtensor_of_join(original_fn, expected_fn):
+    rng = np.random.default_rng(257)
+    x = pt.matrix("x", shape=(5, 3))
+    y = pt.matrix("y", shape=(5, 3))
+    x_test = rng.normal(size=x.type.shape).astype(x.dtype)
+    y_test = rng.normal(size=y.type.shape).astype(y.dtype)
+
+    out = original_fn(x, y)
+    expected_opt_out = expected_fn(x, y)
+    opt_out = rewrite_graph(out)
+    assert equal_computations([opt_out], [expected_opt_out]), debugprint(
+        [expected_opt_out, opt_out], print_type=True
+    )
+    np.testing.assert_allclose(
+        opt_out.eval({x: x_test, y: y_test}, mode=NO_OPTIMIZATION_MODE),
+        out.eval({x: x_test, y: y_test}, mode=NO_OPTIMIZATION_MODE),
+    )
 
 
 def test_local_subtensor_shape_constant():
