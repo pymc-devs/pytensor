@@ -252,9 +252,38 @@ def test_local_subtensor_of_expand_dims(original_fn, expected_fn):
 
     out = original_fn(x)
     expected_opt_out = expected_fn(x)
-    opt_out = rewrite_graph(out, exclude=["local_uint_constant_indices"])
+    opt_out = rewrite_graph(out)
     assert equal_computations([opt_out], [expected_opt_out]), debugprint(
         [opt_out, expected_opt_out], print_type=True
+    )
+    np.testing.assert_allclose(
+        opt_out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+        out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+    )
+
+
+@pytest.mark.parametrize(
+    "original_fn, expected_fn",
+    [
+        (lambda x: x.transpose(2, 1, 0)[0], lambda x: x[:, :, 0].transpose(1, 0)),
+        (lambda x: x.transpose(2, 1, 0)[:, :, 1:], lambda x: x[1:].transpose(2, 1, 0)),
+        (
+            lambda x: x.transpose(2, 1, 0)[0, :1, 1:],
+            lambda x: x[1:, :1, 0].transpose(1, 0),
+        ),
+        (lambda x: x.transpose(2, 1, 0)[0, :1, 1], lambda x: x[1, :1, 0]),
+    ],
+)
+def test_local_subtensor_of_transpose(original_fn, expected_fn):
+    rng = np.random.default_rng(232)
+    x = tensor("x", shape=(7, 5, 3))
+    x_test = rng.normal(size=x.type.shape).astype(x.dtype)
+
+    out = original_fn(x)
+    expected_opt_out = expected_fn(x)
+    opt_out = rewrite_graph(out)
+    assert equal_computations([opt_out], [expected_opt_out]), debugprint(
+        [expected_opt_out, opt_out], print_type=True
     )
     np.testing.assert_allclose(
         opt_out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
