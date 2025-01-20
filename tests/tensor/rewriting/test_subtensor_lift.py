@@ -45,6 +45,7 @@ from pytensor.tensor.rewriting.subtensor_lift import (
     local_subtensor_shape_constant,
 )
 from pytensor.tensor.shape import SpecifyShape, _shape
+from pytensor.tensor.special import softmax
 from pytensor.tensor.subtensor import Subtensor
 
 
@@ -197,6 +198,44 @@ class TestLocalSubtensorOfElemwise:
 def test_local_subtensor_of_reduce(original_fn, expected_fn):
     rng = np.random.default_rng(245)
     x = pt.tensor("x", shape=(5, 3, 2))
+    x_test = rng.normal(size=x.type.shape).astype(x.dtype)
+
+    out = original_fn(x)
+    expected_opt_out = expected_fn(x)
+    opt_out = rewrite_graph(out)
+    assert equal_computations([opt_out], [expected_opt_out]), debugprint(
+        [expected_opt_out, opt_out], print_type=True
+    )
+    np.testing.assert_allclose(
+        opt_out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+        out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+    )
+
+
+@pytest.mark.parametrize(
+    "original_fn, expected_fn",
+    [
+        # Lift single index that does not ovelap with axis of softmax
+        (lambda x: softmax(x, axis=1)[0], lambda x: softmax(x[0], axis=0)),
+        (lambda x: softmax(x, axis=1)[1:], lambda x: softmax(x[1:], axis=1)),
+        (lambda x: softmax(x, axis=0)[:, 0], lambda x: softmax(x[:, 0], axis=0)),
+        (lambda x: softmax(x, axis=0)[:, 1:], lambda x: softmax(x[:, 1:], axis=0)),
+        # Do nothing to single index over axis of softmax
+        (lambda x: softmax(x, axis=0)[0], lambda x: softmax(x, axis=0)[0]),
+        (lambda x: softmax(x, axis=1)[:, 1:], lambda x: softmax(x, axis=1)[:, 1:]),
+        # Split indexing on axis of softmax
+        (lambda x: softmax(x, axis=0)[1:, 0], lambda x: softmax(x[:, 0], axis=0)[1:]),
+        (lambda x: softmax(x, axis=1)[1:, 0], lambda x: softmax(x[1:], axis=1)[:, 0]),
+        (
+            lambda x: softmax(x, axis=0)[0, :5:2],
+            lambda x: softmax(x[:, :5:2], axis=0)[0],
+        ),
+        (lambda x: softmax(x, axis=1)[0, :5:2], lambda x: softmax(x[0], axis=0)[:5:2]),
+    ],
+)
+def test_local_subtensor_of_softmax(original_fn, expected_fn):
+    rng = np.random.default_rng(230)
+    x = pt.matrix("x", shape=(5, 3))
     x_test = rng.normal(size=x.type.shape).astype(x.dtype)
 
     out = original_fn(x)
