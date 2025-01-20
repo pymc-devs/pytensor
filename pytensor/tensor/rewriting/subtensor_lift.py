@@ -5,7 +5,7 @@ import numpy as np
 from pytensor import Variable
 from pytensor.graph import Constant, node_rewriter
 from pytensor.graph.rewriting.basic import copy_stack_trace
-from pytensor.npy_2_compat import normalize_axis_tuple
+from pytensor.npy_2_compat import normalize_axis_index, normalize_axis_tuple
 from pytensor.scalar import basic as ps
 from pytensor.tensor.basic import (
     Alloc,
@@ -32,6 +32,7 @@ from pytensor.tensor.shape import (
     SpecifyShape,
     specify_shape,
 )
+from pytensor.tensor.special import Softmax, softmax
 from pytensor.tensor.subtensor import (
     AdvancedSubtensor1,
     Subtensor,
@@ -49,6 +50,20 @@ def _dims_dropped_by_basic_index(idxs: Sequence[slice | int]) -> tuple[int, ...]
     # Inputs can be slice or integer indexes
     # Slices keep the dimensions, integers collapse them
     return tuple(i for i, idx in enumerate(idxs) if not isinstance(idx, slice))
+
+
+def _ndim_dropped_left_of_axis_by_basic_index(
+    idxs: Sequence[slice | int], axis: int
+) -> int:
+    return len(_dims_dropped_by_basic_index(idxs[:axis]))
+
+
+def _axis_is_indexed_by_basic_index(
+    idxs: Sequence[slice | int], axis: int | Sequence[int]
+) -> bool:
+    if isinstance(axis, int):
+        axis = (axis,)
+    return any(ax < len(idxs) and not is_full_slice(idxs[ax]) for ax in axis)
 
 
 @register_canonicalize
@@ -237,6 +252,84 @@ def local_subtensor_of_reduce(fgraph, node):
 
     # Apply reduction to indexed input
     out = type(red.owner.op)(axis=axis)(x_sub)
+    copy_stack_trace(old_out, out)
+    return [out]
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([Subtensor])
+def local_subtensor_of_softmax(fgraph, node):
+    """Lift a Subtensor through a Softmax.
+
+    softmax(x, axis=1)[0] -> softmax(x[0], axis=0)
+    softmax(x, axis=1)[:, :, 0] -> softmax(x[:, :, 0], axis=1)
+
+    If part of the indexing acts on the axis of reduction, we split it
+    softmax(x, axis=1)[:, 0, 1:] -> softmax(x[:, :, 1:], axis=1)[0]
+
+    """
+    sm, *idx = node.inputs
+
+    if not (sm.owner and isinstance(sm.owner.op, Softmax)):
+        return None
+
+    if len(fgraph.clients[sm]) > 1:
+        return None
+
+    [x] = sm.owner.inputs
+    axis = sm.owner.op.axis
+
+    if axis is None:
+        if x.type.ndim == 1:
+            axis = 0
+        else:
+            # All dimensions are mixed, we can't lift the subtensor
+            return None
+    else:
+        # Softmax currently only allows None or a single integer axis
+        # Unlike CAReduce it does not normalize negative indices
+        axis = normalize_axis_index(axis, sm.ndim)
+
+    [old_out] = node.outputs
+    idx_tuple = indices_from_subtensor(idx, node.op.idx_list)
+
+    if _axis_is_indexed_by_basic_index(idx_tuple, axis):
+        # If there are more dimensions being indexed, we can split them
+        # And lift the non-axis indexes while keeping the axis index
+        real_indices = [idx for idx in idx_tuple if not is_full_slice(idx)]
+        if len(real_indices) > 1 and sm.type.ndim > 1:
+            # Split the subtensor
+            idx_to_keep = idx_tuple[axis]
+            idxs_to_lift = (*idx_tuple[:axis], slice(None), *idx_tuple[axis + 1 :])
+
+            # Lift the non-axis indexes by calling the rewrite itself
+            opt_sm = sm[idxs_to_lift]
+            [opt_sm] = local_subtensor_of_softmax.transform(fgraph, opt_sm.owner)
+            copy_stack_trace([old_out, sm], opt_sm)
+
+            # Then reintroduce the axis index
+            ndim_reduced_left = _ndim_dropped_left_of_axis_by_basic_index(
+                idx_tuple, axis
+            )
+            new_axis = axis - ndim_reduced_left
+            idxs_to_keep = (*(slice(None),) * new_axis, idx_to_keep)
+            new_out = opt_sm[idxs_to_keep]
+            copy_stack_trace(old_out, new_out)
+            return [new_out]
+
+        else:
+            return None
+
+    # Index input to softmax
+    x_sub = x[idx_tuple]
+
+    # Adjust axis of reduction when indexing drops dimensions (integer indexing as apposed to slice indexing)
+    axis -= len(
+        [idx_item for idx_item in idx_tuple[:axis] if not isinstance(idx_item, slice)]
+    )
+
+    out = softmax(x_sub, axis=axis)
     copy_stack_trace(old_out, out)
     return [out]
 
