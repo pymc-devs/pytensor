@@ -51,6 +51,7 @@ class PytorchLinker(JITLinker):
             """
 
             def __init__(self, fn, gen_functors):
+                self._fn = fn
                 self.fn = torch.compile(fn)
                 self.gen_functors = gen_functors.copy()
 

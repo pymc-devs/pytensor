@@ -749,9 +749,25 @@ def fgraph_to_python(
             )
             if input_storage[0] is not None or isinstance(i, Constant):
                 # Constants need to be assigned locally and referenced
-                global_env[local_input_name] = type_conversion_fn(
+                getter_or_value = type_conversion_fn(
                     input_storage[0], variable=i, storage=input_storage, **kwargs
                 )
+                if callable(getter_or_value):
+                    # we got passed a function, this could be used to indicate something
+                    # to the backend. We'll embed it
+                    new_output_name = unique_name(i)
+                    getter_unique_name = unique_name(getter_or_value)
+                    global_env[getter_unique_name] = getter_or_value
+                    assign_str = (
+                        f"{new_output_name} = {getter_unique_name}()"
+                    )
+                    body_assigns.append(assign_str)
+                    node_input_names.append(new_output_name)
+                    continue
+                else:
+                    global_env[local_input_name] = type_conversion_fn(
+                        input_storage[0], variable=i, storage=input_storage, **kwargs
+                    )
                 # TODO: We could attempt to use the storage arrays directly
                 # E.g. `local_input_name = f"{local_input_name}[0]"`
             node_input_names.append(local_input_name)
