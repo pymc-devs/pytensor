@@ -77,7 +77,7 @@ from pytensor.tensor.subtensor import (
     indices_from_subtensor,
 )
 from pytensor.tensor.type import TensorType, integer_dtypes
-from pytensor.tensor.type_other import NoneTypeT, SliceConstant, SliceType
+from pytensor.tensor.type_other import NoneTypeT, SliceType
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
@@ -157,19 +157,21 @@ def transform_take(a, indices, axis):
 
 def is_full_slice(x):
     """Determine if `x` is a ``slice(None)`` or a symbolic equivalent."""
-    if (
-        (isinstance(x, slice) and x == slice(None))
-        or (isinstance(x, SliceConstant) and x.value == slice(None))
-        or (
-            not isinstance(x, SliceConstant)
-            and isinstance(getattr(x, "type", None), SliceType)
-            and x.owner is not None
-            and all(
-                isinstance(getattr(i, "type", None), NoneTypeT) for i in x.owner.inputs
-            )
-        )
-    ):
-        return True
+    if isinstance(x, slice):
+        return x == slice(None)
+
+    if isinstance(x, Variable) and isinstance(x.type, SliceType):
+        if x.owner is None:
+            if isinstance(x, Constant):
+                return x.data == slice(None)
+            else:
+                # Root slice variable
+                return False
+
+        # Symbolic MakeSlice
+        # Ignores start = 0, step = 1 cases
+        return all(isinstance(i.type, NoneTypeT) for i in x.owner.inputs)
+
     return False
 
 
