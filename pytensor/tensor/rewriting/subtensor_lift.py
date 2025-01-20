@@ -4,6 +4,7 @@ from typing import cast
 import numpy as np
 
 from pytensor import Variable
+from pytensor.compile import optdb
 from pytensor.graph import Constant, FunctionGraph, node_rewriter
 from pytensor.graph.rewriting.basic import NodeRewriter, copy_stack_trace
 from pytensor.npy_2_compat import normalize_axis_index, normalize_axis_tuple
@@ -37,8 +38,10 @@ from pytensor.tensor.shape import (
 )
 from pytensor.tensor.special import Softmax, softmax
 from pytensor.tensor.subtensor import (
+    AdvancedSubtensor,
     AdvancedSubtensor1,
     Subtensor,
+    _non_consecutive_adv_indexing,
     as_index_literal,
     get_canonical_form_slice,
     get_constant_idx,
@@ -46,7 +49,7 @@ from pytensor.tensor.subtensor import (
     indices_from_subtensor,
 )
 from pytensor.tensor.type import TensorType
-from pytensor.tensor.type_other import SliceType
+from pytensor.tensor.type_other import NoneTypeT, SliceType
 from pytensor.tensor.variable import TensorVariable
 
 
@@ -769,3 +772,79 @@ def local_subtensor_shape_constant(fgraph, node):
             return [as_tensor([1] * len(shape_parts), dtype=np.int64, ndim=1)]
     elif shape_parts:
         return [as_tensor(1, dtype=np.int64)]
+
+
+@node_rewriter([Subtensor])
+def local_subtensor_of_adv_subtensor(fgraph, node):
+    """Lift a simple Subtensor through an AdvancedSubtensor, when basic index dimensions are to the left of any advanced ones.
+
+    x[:, :, vec_idx][i, j] -> x[i, j][vec_idx]
+    x[:, vec_idx][i, j, k] -> x[i][vec_idx][j, k]
+
+    Restricted to a single advanced indexing dimension.
+
+    An alternative approach could have fused the basic and advanced indices,
+    so it is not clear this rewrite should be canonical or a specialization.
+    Users must include it manually if it fits their use case.
+    """
+    adv_subtensor, *idxs = node.inputs
+
+    if not (
+        adv_subtensor.owner and isinstance(adv_subtensor.owner.op, AdvancedSubtensor)
+    ):
+        return None
+
+    if len(fgraph.clients[adv_subtensor]) > 1:
+        # AdvancedSubtensor involves a full_copy, so we don't want to do it twice
+        return None
+
+    x, *adv_idxs = adv_subtensor.owner.inputs
+
+    # Advanced indexing is a minefield, avoid all cases except for consecutive integer indices
+    if any(
+        (
+            isinstance(adv_idx.type, NoneTypeT)
+            or (isinstance(adv_idx.type, TensorType) and adv_idx.type.dtype == "bool")
+            or (isinstance(adv_idx.type, SliceType) and not is_full_slice(adv_idx))
+        )
+        for adv_idx in adv_idxs
+    ) or _non_consecutive_adv_indexing(adv_idxs):
+        return None
+
+    for first_adv_idx_dim, adv_idx in enumerate(adv_idxs):
+        # We already made sure there were only None slices besides integer indexes
+        if isinstance(adv_idx.type, TensorType):
+            break
+    else:  # no-break
+        # Not sure if this should ever happen, but better safe than sorry
+        return None
+
+    basic_idxs = indices_from_subtensor(idxs, node.op.idx_list)
+    basic_idxs_lifted = basic_idxs[:first_adv_idx_dim]
+    basic_idxs_kept = ((slice(None),) * len(basic_idxs_lifted)) + basic_idxs[
+        first_adv_idx_dim:
+    ]
+
+    if all(basic_idx == slice(None) for basic_idx in basic_idxs_lifted):
+        # All basic indices happen to the right of the advanced indices
+        return None
+
+    [basic_subtensor] = node.outputs
+    dropped_dims = _dims_dropped_by_basic_index(basic_idxs_lifted)
+
+    x_indexed = x[basic_idxs_lifted]
+    copy_stack_trace([basic_subtensor, adv_subtensor], x_indexed)
+
+    x_after_index_lift = expand_dims(x_indexed, dropped_dims)
+    x_after_adv_idx = adv_subtensor.owner.op(x_after_index_lift, *adv_idxs)
+    copy_stack_trace([basic_subtensor, adv_subtensor], x_after_adv_idx)
+
+    new_out = squeeze(x_after_adv_idx[basic_idxs_kept], dropped_dims)
+    return [new_out]
+
+
+# Rewrite will only be included if tagged by name
+r = local_subtensor_of_adv_subtensor
+optdb["canonicalize"].register(r.__name__, r, use_db_name_as_tag=False)
+optdb["specialize"].register(r.__name__, r, use_db_name_as_tag=False)
+del r
