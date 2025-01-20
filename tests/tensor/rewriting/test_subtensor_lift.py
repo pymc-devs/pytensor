@@ -46,7 +46,7 @@ from pytensor.tensor.rewriting.subtensor_lift import (
 )
 from pytensor.tensor.shape import SpecifyShape, _shape
 from pytensor.tensor.special import softmax
-from pytensor.tensor.subtensor import Subtensor
+from pytensor.tensor.subtensor import AdvancedSubtensor, Subtensor
 
 
 mode_opt = config.mode
@@ -695,3 +695,47 @@ def test_local_subtensor_shape_constant():
     x = shape(Variable(MyType(), None, None))[0]
 
     assert not local_subtensor_shape_constant.transform(None, x.owner)
+
+
+@pytest.mark.parametrize(
+    "original_fn, supported",
+    [
+        (lambda x: x[:, [0, 1]][0], True),
+        (lambda x: x[:, [0, 1], [0, 0]][1:], True),
+        (lambda x: x[:, [[0, 1], [0, 0]]][1:], True),
+        # Not supported, basic indexing on advanced indexing dim
+        (lambda x: x[[0, 1]][0], False),
+        # Not implemented, basic indexing on the right of advanced indexing
+        (lambda x: x[[0, 1]][:, 0], False),
+        # Not implemented, complex flavors of advanced indexing
+        (lambda x: x[:, None, [0, 1]][0], False),
+        (lambda x: x[:, 5:, [0, 1]][0], False),
+        (lambda x: x[:, :, np.array([True, False, False])][0], False),
+        (lambda x: x[[0, 1], :, [0, 1]][:, 0], False),
+    ],
+)
+def test_local_subtensor_of_adv_subtensor(original_fn, supported):
+    rng = np.random.default_rng(257)
+    x = pt.tensor3("x", shape=(7, 5, 3))
+    x_test = rng.normal(size=x.type.shape).astype(x.dtype)
+
+    out = original_fn(x)
+    opt_out = rewrite_graph(
+        out, include=("canonicalize", "local_subtensor_of_adv_subtensor")
+    )
+    # The graphs generated are too complicated to assert
+    # We simply check that the happens before the advanced subtensor
+    toposort = FunctionGraph(outputs=[opt_out], clone=False).toposort()
+    [idx_subtensor] = [
+        i for i, node in enumerate(toposort) if isinstance(node.op, Subtensor)
+    ]
+    [idx_adv_subtensor] = [
+        i for i, node in enumerate(toposort) if isinstance(node.op, AdvancedSubtensor)
+    ]
+    swapped = idx_subtensor < idx_adv_subtensor
+    correct = swapped if supported else not swapped
+    assert correct, debugprint(opt_out, print_type=True)
+    np.testing.assert_allclose(
+        opt_out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+        out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+    )
