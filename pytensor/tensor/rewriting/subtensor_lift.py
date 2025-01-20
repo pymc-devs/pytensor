@@ -110,108 +110,79 @@ def local_subtensor_of_dot(fgraph, node):
     return [r]
 
 
-# fast_compile to allow opt subtensor(cast{float32}(make_vector))
-@register_canonicalize("fast_compile")
+@register_canonicalize("shape_unsafe")
+@register_specialize("shape_unsafe")
 @node_rewriter([Subtensor])
-def local_subtensor_lift(fgraph, node):
+def local_subtensor_of_elemwise(fgraph, node):
+    """Lift a Subtensor through an Elemwise and its implicit broadcasting behavior.
+
+    exp(x)[:, 0] -> exp(x[:, 0])
+    add(x, y)[0] -> add(x[0], y[0])
+    add(x[None], y)[2] -> add(x, y[2])
     """
-    unary(x)[idx] -> unary(x[idx])#any broadcast pattern.
+    elem, *idx = node.inputs
 
-    Handles the following unary ops:
-    elemwise(x,...)[idx] -> elemwise(x[idx],...)
-      when x,... are broadcasted scalar or not broadcasted at all
-    Unbroadcast(x)[idx] => Unbroadcast(x[idx])
+    if not (elem.owner and isinstance(elem.owner.op, Elemwise)):
+        return None
 
-    """
-    if isinstance(node.op, Subtensor):
-        u = node.inputs[0]
-        if u.owner is None or len(fgraph.clients[u]) > 1:
-            return False
+    if len(fgraph.clients[elem]) > 1:
+        # Elemwise output is used beyond the Subtensor.
+        # Get out to avoid repeated computations
+        return None
 
-        if isinstance(u.owner.op, Elemwise) and len(u.owner.inputs) == 1:
-            idx = node.inputs[1:]
-            x_idx = node.op(u.owner.inputs[0], *idx)
-            # Copy over previous output stacktrace
-            copy_stack_trace(node.outputs, x_idx)
-            ret = u.owner.op(x_idx)
-            # Copy over previous output stacktrace
-            # and stacktrace from previous unary operation
-            copy_stack_trace([node.outputs[0], node.inputs[0]], ret)
-            return [ret]
+    idx_tuple = indices_from_subtensor(idx, node.op.idx_list)
 
-        if isinstance(u.owner.op, Elemwise):
-            new_inputs = []
-            if all(sum(i.type.broadcastable) == 0 for i in u.owner.inputs):
-                # There is no broadcastable in the inputs
-                idx = node.inputs[1:]
-                new_inputs = [node.op(i, *idx) for i in u.owner.inputs]
-                # Copy over previous output stacktrace
-                copy_stack_trace(node.outputs[0], new_inputs)
+    elem_inputs = elem.owner.inputs
+    elem_bcast = elem.type.broadcastable
+    if all(inp.type.broadcastable == elem_bcast for inp in elem_inputs):
+        # No need to worry about implicit broadcasting.
+        indexed_inputs = [inp[idx_tuple] for inp in elem_inputs]
 
-                ret = u.owner.op(*new_inputs)
-                # Copy over previous output stacktrace
-                # and stacktrace from previous unary operation
-                copy_stack_trace([node.outputs[0], node.inputs[0]], ret)
-                return [ret]
-            elif all(sum(i.type.broadcastable) in [i.ndim, 0] for i in u.owner.inputs):
-                # There is no broadcastable in the inputs or it is scalar
-                idx = node.inputs[1:]
-                new_inputs = []
-                for i in u.owner.inputs:
-                    if sum(i.type.broadcastable) == 0:
-                        new_inputs.append(node.op(i, *idx))
-                    else:
-                        # If the subtensor remove some dims, we must
-                        # lower the number of dimensions of this scalar.
-                        if node.outputs[0].ndim == i.ndim:
-                            new_inputs.append(i)
-                        else:
-                            new_inputs.append(
-                                i.dimshuffle(["x"] * node.outputs[0].ndim)
-                            )
+    else:
+        # The original indices may not make sense on some of the broadcasted dimensions
+        new_idxs = [list(idx_tuple) for _ in elem_inputs]
+        for dim, (dim_idx, dim_bcast_out, *dim_bcast_inputs) in enumerate(
+            zip(
+                idx_tuple,
+                elem_bcast,
+                *(inp.type.broadcastable for inp in elem_inputs),
+                # Indices can be shorter than input ndims
+                strict=False,
+            )
+        ):
+            if is_full_slice(dim_idx):
+                # Full slice can be safely applied to all inputs
+                continue
 
-                # Copy over previous output stacktrace
-                copy_stack_trace(node.outputs[0], new_inputs)
+            if all(dim_bcast_inp == elem_bcast for dim_bcast_inp in dim_bcast_inputs):
+                # This dim is not broadcasted for any of the inputs, original index can be applied to all inputs
+                continue
 
-                ret = u.owner.op(*new_inputs)
-                # Copy over previous output stacktrace
-                # and stacktrace from previous unary operation
-                copy_stack_trace([node.outputs[0], node.inputs[0]], ret)
-                return [ret]
+            # Some dims are broadcasted, so we need to adapt their indices
+            # Slice indexing keeps the dimension, so we use a full slice for broadcasted inputs
+            # Integer indexing drops the dimension, so we index by zero for the broadcsated inputs
+            safe_bcast_dim_idx = slice(None) if isinstance(dim_idx, slice) else 0
+            for inp_idx, dim_bcast_inp in zip(new_idxs, dim_bcast_inputs, strict=True):
+                if dim_bcast_inp:
+                    inp_idx[dim] = safe_bcast_dim_idx
 
-        if isinstance(u.owner.op, Unbroadcast):
-            # Subtensor might reduce dim., adapt broadcast pattern accordingly
-            old_axes = u.owner.op.axes
-            new_axes = []
+        indexed_inputs = [
+            inp[tuple(new_idx)]
+            for inp, new_idx in zip(elem_inputs, new_idxs, strict=True)
+        ]
 
-            # loop through indices being subtensor-ed
-            # i indexes broadcastable pattern before subtensor
-            # j indexes broadcastable pattern after subtensor
-            j = 0
-            for i, x in enumerate(node.op.idx_list):
-                # if it is not a slice, it will reduce the dimension, should
-                # not appear in the broascastable dimensions
-                if isinstance(x, slice):
-                    if i in old_axes:
-                        new_axes.append(j)
-                    j += 1
-            # now keep the broadcastable pattern of all
-            # items not appearing in subtensor list
-            for i in range(len(node.op.idx_list), len(u.broadcastable)):
-                if i in old_axes:
-                    new_axes.append(j)
-                j += 1
+    [old_out] = node.outputs
 
-            subt_x = node.op(u.owner.inputs[0], *node.inputs[1:])
-            # Copy over previous output stacktrace
-            copy_stack_trace(node.outputs[0], subt_x)
+    # Copy stack trace to new inputs
+    [copy_stack_trace(old_out, new_inp) for new_inp in indexed_inputs]
 
-            rbcast_subt_x = unbroadcast(subt_x, *new_axes)
-            # Copy over previous output stacktrace
-            # and stacktrace from previous unary operation
-            copy_stack_trace([node.outputs[0], node.inputs[0]], rbcast_subt_x)
+    # Define elemwise operation on indexed inputs
+    new_out = elem.owner.op(*indexed_inputs)
 
-            return [rbcast_subt_x]
+    # Copy stack trace to new output
+    copy_stack_trace([old_out, *node.inputs], new_out)
+
+    return [new_out]
 
 
 @register_canonicalize("shape_unsafe")
@@ -335,6 +306,51 @@ def local_subtensor_of_transpose(fgraph, node):
         [new_out] = local_dimshuffle_lift.transform(fgraph, new_out.owner)
 
     return [new_out]
+
+
+@register_canonicalize("fast_compile")
+@node_rewriter([Subtensor])
+def local_subtensor_of_unbroadcast(fgraph, node):
+    """
+    Unbroadcast(x)[idx] => Unbroadcast(x[idx])
+    """
+    u = node.inputs[0]
+    if u.owner is None or len(fgraph.clients[u]) > 1:
+        return False
+
+    if isinstance(u.owner.op, Unbroadcast):
+        # Subtensor might reduce dim., adapt broadcast pattern accordingly
+        old_axes = u.owner.op.axes
+        new_axes = []
+
+        # loop through indices being subtensor-ed
+        # i indexes broadcastable pattern before subtensor
+        # j indexes broadcastable pattern after subtensor
+        j = 0
+        for i, x in enumerate(node.op.idx_list):
+            # if it is not a slice, it will reduce the dimension, should
+            # not appear in the broascastable dimensions
+            if isinstance(x, slice):
+                if i in old_axes:
+                    new_axes.append(j)
+                j += 1
+        # now keep the broadcastable pattern of all
+        # items not appearing in subtensor list
+        for i in range(len(node.op.idx_list), len(u.broadcastable)):
+            if i in old_axes:
+                new_axes.append(j)
+            j += 1
+
+        subt_x = node.op(u.owner.inputs[0], *node.inputs[1:])
+        # Copy over previous output stacktrace
+        copy_stack_trace(node.outputs[0], subt_x)
+
+        rbcast_subt_x = unbroadcast(subt_x, *new_axes)
+        # Copy over previous output stacktrace
+        # and stacktrace from previous unary operation
+        copy_stack_trace([node.outputs[0], node.inputs[0]], rbcast_subt_x)
+
+        return [rbcast_subt_x]
 
 
 @register_infer_shape
