@@ -1,6 +1,5 @@
 import logging
 import os
-import shlex
 import sys
 import warnings
 from collections.abc import Callable, Sequence
@@ -14,6 +13,7 @@ from configparser import (
 from functools import wraps
 from io import StringIO
 from pathlib import Path
+from shlex import shlex
 
 from pytensor.utils import hash_from_code
 
@@ -541,7 +541,7 @@ def parse_config_string(
     Parses a config string (comma-separated key=value components) into a dict.
     """
     config_dict = {}
-    my_splitter = shlex.shlex(config_string, posix=True)
+    my_splitter = shlex(config_string, posix=True)
     my_splitter.whitespace = ","
     my_splitter.whitespace_split = True
     for kv_pair in my_splitter:
