@@ -3,10 +3,10 @@ import logging
 import os
 import platform
 import re
-import shutil
 import sys
 import textwrap
 from pathlib import Path
+from shutil import which
 
 import numpy as np
 
@@ -348,7 +348,7 @@ def add_compile_configvars():
 
     # Try to find the full compiler path from the name
     if param != "":
-        newp = shutil.which(param)
+        newp = which(param)
         if newp is not None:
             param = newp
         del newp
