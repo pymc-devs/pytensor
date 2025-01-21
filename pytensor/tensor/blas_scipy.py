@@ -2,30 +2,19 @@
 Implementations of BLAS Ops based on scipy's BLAS bindings.
 """
 
-import numpy as np
-
-from pytensor.tensor.blas import Ger, have_fblas
-
-
-if have_fblas:
-    from pytensor.tensor.blas import fblas
-
-    _blas_ger_fns = {
-        np.dtype("float32"): fblas.sger,
-        np.dtype("float64"): fblas.dger,
-        np.dtype("complex64"): fblas.cgeru,
-        np.dtype("complex128"): fblas.zgeru,
-    }
+from pytensor.tensor.blas import Ger
 
 
 class ScipyGer(Ger):
     def perform(self, node, inputs, output_storage):
+        from scipy.linalg.blas import get_blas_funcs
+
         cA, calpha, cx, cy = inputs
         (cZ,) = output_storage
         # N.B. some versions of scipy (e.g. mine) don't actually work
         # in-place on a, even when I tell it to.
         A = cA
-        local_ger = _blas_ger_fns[cA.dtype]
+        local_ger = get_blas_funcs("ger", dtype=cA.dtype)
         if A.size == 0:
             # We don't have to compute anything, A is empty.
             # We need this special case because Numpy considers it

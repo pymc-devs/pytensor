@@ -108,50 +108,19 @@ from pytensor.tensor.type import DenseTensorType, tensor
 
 _logger = logging.getLogger("pytensor.tensor.blas")
 
-try:
-    import scipy.linalg.blas
-
-    have_fblas = True
-    try:
-        fblas = scipy.linalg.blas.fblas
-    except AttributeError:
-        # A change merged in Scipy development version on 2012-12-02 replaced
-        # `scipy.linalg.blas.fblas` with `scipy.linalg.blas`.
-        # See http://github.com/scipy/scipy/pull/358
-        fblas = scipy.linalg.blas
-    _blas_gemv_fns = {
-        np.dtype("float32"): fblas.sgemv,
-        np.dtype("float64"): fblas.dgemv,
-        np.dtype("complex64"): fblas.cgemv,
-        np.dtype("complex128"): fblas.zgemv,
-    }
-except ImportError as e:
-    have_fblas = False
-    # This is used in Gemv and ScipyGer. We use CGemv and CGer
-    # when config.blas__ldflags is defined. So we don't need a
-    # warning in that case.
-    if not config.blas__ldflags:
-        _logger.warning(
-            "Failed to import scipy.linalg.blas, and "
-            "PyTensor flag blas__ldflags is empty. "
-            "Falling back on slower implementations for "
-            "dot(matrix, vector), dot(vector, matrix) and "
-            f"dot(vector, vector) ({e!s})"
-        )
-
 
 # If check_init_y() == True we need to initialize y when beta == 0.
 def check_init_y():
+    # TODO: What is going on here?
+    from scipy.linalg.blas import get_blas_funcs
+
     if check_init_y._result is None:
-        if not have_fblas:  # pragma: no cover
-            check_init_y._result = False
-        else:
-            y = float("NaN") * np.ones((2,))
-            x = np.ones((2,))
-            A = np.ones((2, 2))
-            gemv = _blas_gemv_fns[y.dtype]
-            gemv(1.0, A.T, x, 0.0, y, overwrite_y=True, trans=True)
-            check_init_y._result = np.isnan(y).any()
+        y = float("NaN") * np.ones((2,))
+        x = np.ones((2,))
+        A = np.ones((2, 2))
+        gemv = get_blas_funcs("gemv", dtype=y.dtype)
+        gemv(1.0, A.T, x, 0.0, y, overwrite_y=True, trans=True)
+        check_init_y._result = np.isnan(y).any()
 
     return check_init_y._result
 
@@ -208,14 +177,15 @@ class Gemv(Op):
         return Apply(self, inputs, [y.type()])
 
     def perform(self, node, inputs, out_storage):
+        from scipy.linalg.blas import get_blas_funcs
+
         y, alpha, A, x, beta = inputs
         if (
-            have_fblas
-            and y.shape[0] != 0
+            y.shape[0] != 0
             and x.shape[0] != 0
-            and y.dtype in _blas_gemv_fns
+            and y.dtype in {"float32", "float64", "complex64", "complex128"}
         ):
-            gemv = _blas_gemv_fns[y.dtype]
+            gemv = get_blas_funcs("gemv", dtype=y.dtype)
 
             if A.shape[0] != y.shape[0] or A.shape[1] != x.shape[0]:
                 raise ValueError(
