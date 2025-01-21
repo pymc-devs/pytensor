@@ -1,7 +1,6 @@
 from textwrap import dedent
 
 import numpy as np
-import scipy
 
 from pytensor.graph.basic import Apply
 from pytensor.graph.replace import _vectorize_node
@@ -267,9 +266,11 @@ class Softmax(COp):
         return Apply(self, [x], [x.type()])
 
     def perform(self, node, input_storage, output_storage):
+        from scipy.special import softmax
+
         (x,) = input_storage
         (z,) = output_storage
-        z[0] = scipy.special.softmax(x, axis=self.axis)
+        z[0] = softmax(x, axis=self.axis)
 
     def L_op(self, inp, outputs, grads):
         (x,) = inp
@@ -519,9 +520,11 @@ class LogSoftmax(COp):
         return Apply(self, [x], [x.type()])
 
     def perform(self, node, input_storage, output_storage):
+        from scipy.special import log_softmax
+
         (x,) = input_storage
         (z,) = output_storage
-        z[0] = scipy.special.log_softmax(x, axis=self.axis)
+        z[0] = log_softmax(x, axis=self.axis)
 
     def grad(self, inp, grads):
         (x,) = inp

@@ -5,7 +5,6 @@ from functools import reduce
 from typing import Literal, cast
 
 import numpy as np
-import scipy.linalg
 
 import pytensor
 import pytensor.tensor as pt
@@ -52,37 +51,41 @@ class Cholesky(Op):
         return [shapes[0]]
 
     def make_node(self, x):
+        from scipy.linalg import cholesky
+
         x = as_tensor_variable(x)
         if x.type.ndim != 2:
             raise TypeError(
                 f"Cholesky only allowed on matrix (2-D) inputs, got {x.type.ndim}-D input"
             )
         # Call scipy to find output dtype
-        dtype = scipy.linalg.cholesky(np.eye(1, dtype=x.type.dtype)).dtype
+        dtype = cholesky(np.eye(1, dtype=x.type.dtype)).dtype
         return Apply(self, [x], [tensor(shape=x.type.shape, dtype=dtype)])
 
     def perform(self, node, inputs, outputs):
+        from scipy.linalg import LinAlgError, cholesky
+
         [x] = inputs
         [out] = outputs
         try:
             # Scipy cholesky only makes use of overwrite_a when it is F_CONTIGUOUS
             # If we have a `C_CONTIGUOUS` array we transpose to benefit from it
             if self.overwrite_a and x.flags["C_CONTIGUOUS"]:
-                out[0] = scipy.linalg.cholesky(
+                out[0] = cholesky(
                     x.T,
                     lower=not self.lower,
                     check_finite=self.check_finite,
                     overwrite_a=True,
                 ).T
             else:
-                out[0] = scipy.linalg.cholesky(
+                out[0] = cholesky(
                     x,
                     lower=self.lower,
                     check_finite=self.check_finite,
                     overwrite_a=self.overwrite_a,
                 )
 
-        except scipy.linalg.LinAlgError:
+        except LinAlgError:
             if self.on_error == "raise":
                 raise
             else:
@@ -333,8 +336,10 @@ class CholeskySolve(SolveBase):
         super().__init__(**kwargs)
 
     def perform(self, node, inputs, output_storage):
+        from scipy.linalg import cho_solve
+
         C, b = inputs
-        rval = scipy.linalg.cho_solve(
+        rval = cho_solve(
             (C, self.lower),
             b,
             check_finite=self.check_finite,
@@ -400,8 +405,10 @@ class SolveTriangular(SolveBase):
         self.unit_diagonal = unit_diagonal
 
     def perform(self, node, inputs, outputs):
+        from scipy.linalg import solve_triangular
+
         A, b = inputs
-        outputs[0][0] = scipy.linalg.solve_triangular(
+        outputs[0][0] = solve_triangular(
             A,
             b,
             lower=self.lower,
@@ -501,8 +508,10 @@ class Solve(SolveBase):
         self.assume_a = assume_a
 
     def perform(self, node, inputs, outputs):
+        from scipy.linalg import solve
+
         a, b = inputs
-        outputs[0][0] = scipy.linalg.solve(
+        outputs[0][0] = solve(
             a=a,
             b=b,
             lower=self.lower,
@@ -617,11 +626,13 @@ class Eigvalsh(Op):
             return Apply(self, [a, b], [w])
 
     def perform(self, node, inputs, outputs):
+        from scipy.linalg import eigvalsh
+
         (w,) = outputs
         if len(inputs) == 2:
-            w[0] = scipy.linalg.eigvalsh(a=inputs[0], b=inputs[1], lower=self.lower)
+            w[0] = eigvalsh(a=inputs[0], b=inputs[1], lower=self.lower)
         else:
-            w[0] = scipy.linalg.eigvalsh(a=inputs[0], b=None, lower=self.lower)
+            w[0] = eigvalsh(a=inputs[0], b=None, lower=self.lower)
 
     def grad(self, inputs, g_outputs):
         a, b = inputs
@@ -674,8 +685,10 @@ class EigvalshGrad(Op):
         return Apply(self, [a, b, gw], [out1, out2])
 
     def perform(self, node, inputs, outputs):
+        from scipy.linalg import eigh
+
         (a, b, gw) = inputs
-        w, v = scipy.linalg.eigh(a, b, lower=self.lower)
+        w, v = eigh(a, b, lower=self.lower)
         gA = v.dot(np.diag(gw).dot(v.T))
         gB = -v.dot(np.diag(gw * w).dot(v.T))
 
@@ -716,9 +729,11 @@ class Expm(Op):
         )
 
     def perform(self, node, inputs, outputs):
+        from scipy.linalg import expm
+
         (A,) = inputs
-        (expm,) = outputs
-        expm[0] = scipy.linalg.expm(A)
+        (out,) = outputs
+        out[0] = expm(A)
 
     def grad(self, inputs, outputs):
         (A,) = inputs
@@ -753,13 +768,15 @@ class ExpmGrad(Op):
         return [shapes[0]]
 
     def perform(self, node, inputs, outputs):
+        from scipy.linalg import eig, inv
+
         # Kalbfleisch and Lawless, J. Am. Stat. Assoc. 80 (1985) Equation 3.4
         # Kind of... You need to do some algebra from there to arrive at
         # this expression.
         (A, gA) = inputs
         (out,) = outputs
-        w, V = scipy.linalg.eig(A, right=True)
-        U = scipy.linalg.inv(V).T
+        w, V = eig(A, right=True)
+        U = inv(V).T
 
         exp_w = np.exp(w)
         X = np.subtract.outer(exp_w, exp_w) / np.subtract.outer(w, w)
@@ -796,11 +813,13 @@ class SolveContinuousLyapunov(Op):
         return pytensor.graph.basic.Apply(self, [A, B], [X])
 
     def perform(self, node, inputs, output_storage):
+        from scipy.linalg import solve_continuous_lyapunov
+
         (A, B) = inputs
         X = output_storage[0]
 
         out_dtype = node.outputs[0].type.dtype
-        X[0] = scipy.linalg.solve_continuous_lyapunov(A, B).astype(out_dtype)
+        X[0] = solve_continuous_lyapunov(A, B).astype(out_dtype)
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]
@@ -866,13 +885,13 @@ class BilinearSolveDiscreteLyapunov(Op):
         return pytensor.graph.basic.Apply(self, [A, B], [X])
 
     def perform(self, node, inputs, output_storage):
+        from scipy.linalg import solve_discrete_lyapunov
+
         (A, B) = inputs
         X = output_storage[0]
 
         out_dtype = node.outputs[0].type.dtype
-        X[0] = scipy.linalg.solve_discrete_lyapunov(A, B, method="bilinear").astype(
-            out_dtype
-        )
+        X[0] = solve_discrete_lyapunov(A, B, method="bilinear").astype(out_dtype)
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]
@@ -985,6 +1004,8 @@ class SolveDiscreteARE(Op):
         return pytensor.graph.basic.Apply(self, [A, B, Q, R], [X])
 
     def perform(self, node, inputs, output_storage):
+        from scipy.linalg import solve_discrete_are
+
         A, B, Q, R = inputs
         X = output_storage[0]
 
@@ -992,7 +1013,7 @@ class SolveDiscreteARE(Op):
             Q = 0.5 * (Q + Q.T)
 
         out_dtype = node.outputs[0].type.dtype
-        X[0] = scipy.linalg.solve_discrete_are(A, B, Q, R).astype(out_dtype)
+        X[0] = solve_discrete_are(A, B, Q, R).astype(out_dtype)
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]
@@ -1117,8 +1138,10 @@ class BlockDiagonal(BaseBlockDiagonal):
         return Apply(self, matrices, [out_type])
 
     def perform(self, node, inputs, output_storage, params=None):
+        from scipy.linalg import block_diag
+
         dtype = node.outputs[0].type.dtype
-        output_storage[0][0] = scipy.linalg.block_diag(*inputs).astype(dtype)
+        output_storage[0][0] = block_diag(*inputs).astype(dtype)
 
 
 def block_diag(*matrices: TensorVariable):

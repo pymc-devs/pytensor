@@ -9,8 +9,6 @@ from pathlib import Path
 from textwrap import dedent
 
 import numpy as np
-import scipy.special
-import scipy.stats
 
 from pytensor.configdefaults import config
 from pytensor.gradient import grad_not_implemented, grad_undefined
@@ -54,7 +52,9 @@ class Erf(UnaryScalarOp):
     nfunc_spec = ("scipy.special.erf", 1, 1)
 
     def impl(self, x):
-        return scipy.special.erf(x)
+        from scipy.special import erf
+
+        return erf(x)
 
     def L_op(self, inputs, outputs, grads):
         (x,) = inputs
@@ -88,7 +88,9 @@ class Erfc(UnaryScalarOp):
     nfunc_spec = ("scipy.special.erfc", 1, 1)
 
     def impl(self, x):
-        return scipy.special.erfc(x)
+        from scipy.special import erfc
+
+        return erfc(x)
 
     def L_op(self, inputs, outputs, grads):
         (x,) = inputs
@@ -137,7 +139,9 @@ class Erfcx(UnaryScalarOp):
     nfunc_spec = ("scipy.special.erfcx", 1, 1)
 
     def impl(self, x):
-        return scipy.special.erfcx(x)
+        from scipy.special import erfcx
+
+        return erfcx(x)
 
     def L_op(self, inputs, outputs, grads):
         (x,) = inputs
@@ -193,7 +197,9 @@ class Erfinv(UnaryScalarOp):
     nfunc_spec = ("scipy.special.erfinv", 1, 1)
 
     def impl(self, x):
-        return scipy.special.erfinv(x)
+        from scipy.special import erfinv
+
+        return erfinv(x)
 
     def L_op(self, inputs, outputs, grads):
         (x,) = inputs
@@ -228,7 +234,9 @@ class Erfcinv(UnaryScalarOp):
     nfunc_spec = ("scipy.special.erfcinv", 1, 1)
 
     def impl(self, x):
-        return scipy.special.erfcinv(x)
+        from scipy.special import erfcinv
+
+        return erfcinv(x)
 
     def L_op(self, inputs, outputs, grads):
         (x,) = inputs
@@ -264,7 +272,9 @@ class Owens_t(BinaryScalarOp):
 
     @staticmethod
     def st_impl(h, a):
-        return scipy.special.owens_t(h, a)
+        from scipy.special import owens_t
+
+        return owens_t(h, a)
 
     def impl(self, h, a):
         return Owens_t.st_impl(h, a)
@@ -293,7 +303,9 @@ class Gamma(UnaryScalarOp):
 
     @staticmethod
     def st_impl(x):
-        return scipy.special.gamma(x)
+        from scipy.special import gamma
+
+        return gamma(x)
 
     def impl(self, x):
         return Gamma.st_impl(x)
@@ -332,7 +344,9 @@ class GammaLn(UnaryScalarOp):
 
     @staticmethod
     def st_impl(x):
-        return scipy.special.gammaln(x)
+        from scipy.special import gammaln
+
+        return gammaln(x)
 
     def impl(self, x):
         return GammaLn.st_impl(x)
@@ -376,7 +390,9 @@ class Psi(UnaryScalarOp):
 
     @staticmethod
     def st_impl(x):
-        return scipy.special.psi(x)
+        from scipy.special import psi
+
+        return psi(x)
 
     def impl(self, x):
         return Psi.st_impl(x)
@@ -467,7 +483,9 @@ class TriGamma(UnaryScalarOp):
 
     @staticmethod
     def st_impl(x):
-        return scipy.special.polygamma(1, x)
+        from scipy.special import polygamma
+
+        return polygamma(1, x)
 
     def impl(self, x):
         return TriGamma.st_impl(x)
@@ -570,7 +588,9 @@ class PolyGamma(BinaryScalarOp):
 
     @staticmethod
     def st_impl(n, x):
-        return scipy.special.polygamma(n, x)
+        from scipy.special import polygamma
+
+        return polygamma(n, x)
 
     def impl(self, n, x):
         return PolyGamma.st_impl(n, x)
@@ -602,7 +622,9 @@ class Chi2SF(BinaryScalarOp):
 
     @staticmethod
     def st_impl(x, k):
-        return scipy.stats.chi2.sf(x, k)
+        from scipy.stats import chi2
+
+        return chi2.sf(x, k)
 
     def impl(self, x, k):
         return Chi2SF.st_impl(x, k)
@@ -645,7 +667,9 @@ class GammaInc(BinaryScalarOp):
 
     @staticmethod
     def st_impl(k, x):
-        return scipy.special.gammainc(k, x)
+        from scipy.special import gammainc
+
+        return gammainc(k, x)
 
     def impl(self, k, x):
         return GammaInc.st_impl(k, x)
@@ -696,7 +720,9 @@ class GammaIncC(BinaryScalarOp):
 
     @staticmethod
     def st_impl(k, x):
-        return scipy.special.gammaincc(k, x)
+        from scipy.special import gammaincc
+
+        return gammaincc(k, x)
 
     def impl(self, k, x):
         return GammaIncC.st_impl(k, x)
@@ -747,7 +773,9 @@ class GammaIncInv(BinaryScalarOp):
 
     @staticmethod
     def st_impl(k, x):
-        return scipy.special.gammaincinv(k, x)
+        from scipy.special import gammaincinv
+
+        return gammaincinv(k, x)
 
     def impl(self, k, x):
         return GammaIncInv.st_impl(k, x)
@@ -776,7 +804,9 @@ class GammaIncCInv(BinaryScalarOp):
 
     @staticmethod
     def st_impl(k, x):
-        return scipy.special.gammainccinv(k, x)
+        from scipy.special import gammainccinv
+
+        return gammainccinv(k, x)
 
     def impl(self, k, x):
         return GammaIncCInv.st_impl(k, x)
@@ -1015,7 +1045,9 @@ class GammaU(BinaryScalarOp):
 
     @staticmethod
     def st_impl(k, x):
-        return scipy.special.gammaincc(k, x) * scipy.special.gamma(k)
+        from scipy.special import gamma, gammaincc
+
+        return gammaincc(k, x) * gamma(k)
 
     def impl(self, k, x):
         return GammaU.st_impl(k, x)
@@ -1051,7 +1083,9 @@ class GammaL(BinaryScalarOp):
 
     @staticmethod
     def st_impl(k, x):
-        return scipy.special.gammainc(k, x) * scipy.special.gamma(k)
+        from scipy.special import gamma, gammainc
+
+        return gammainc(k, x) * gamma(k)
 
     def impl(self, k, x):
         return GammaL.st_impl(k, x)
@@ -1087,7 +1121,9 @@ class Jv(BinaryScalarOp):
 
     @staticmethod
     def st_impl(v, x):
-        return scipy.special.jv(v, x)
+        from scipy.special import jv
+
+        return jv(v, x)
 
     def impl(self, v, x):
         return self.st_impl(v, x)
@@ -1116,7 +1152,9 @@ class J1(UnaryScalarOp):
 
     @staticmethod
     def st_impl(x):
-        return scipy.special.j1(x)
+        from scipy.special import j1
+
+        return j1(x)
 
     def impl(self, x):
         return self.st_impl(x)
@@ -1147,7 +1185,9 @@ class J0(UnaryScalarOp):
 
     @staticmethod
     def st_impl(x):
-        return scipy.special.j0(x)
+        from scipy.special import j0
+
+        return j0(x)
 
     def impl(self, x):
         return self.st_impl(x)
@@ -1178,7 +1218,9 @@ class Iv(BinaryScalarOp):
 
     @staticmethod
     def st_impl(v, x):
-        return scipy.special.iv(v, x)
+        from scipy.special import iv
+
+        return iv(v, x)
 
     def impl(self, v, x):
         return self.st_impl(v, x)
@@ -1207,7 +1249,9 @@ class I1(UnaryScalarOp):
 
     @staticmethod
     def st_impl(x):
-        return scipy.special.i1(x)
+        from scipy.special import i1
+
+        return i1(x)
 
     def impl(self, x):
         return self.st_impl(x)
@@ -1233,7 +1277,9 @@ class I0(UnaryScalarOp):
 
     @staticmethod
     def st_impl(x):
-        return scipy.special.i0(x)
+        from scipy.special import i0
+
+        return i0(x)
 
     def impl(self, x):
         return self.st_impl(x)
@@ -1259,7 +1305,9 @@ class Ive(BinaryScalarOp):
 
     @staticmethod
     def st_impl(v, x):
-        return scipy.special.ive(v, x)
+        from scipy.special import ive
+
+        return ive(v, x)
 
     def impl(self, v, x):
         return self.st_impl(v, x)
@@ -1288,7 +1336,9 @@ class Kve(BinaryScalarOp):
 
     @staticmethod
     def st_impl(v, x):
-        return scipy.special.kve(v, x)
+        from scipy.special import kve
+
+        return kve(v, x)
 
     def impl(self, v, x):
         return self.st_impl(v, x)
@@ -1321,7 +1371,9 @@ class Sigmoid(UnaryScalarOp):
     nfunc_spec = ("scipy.special.expit", 1, 1)
 
     def impl(self, x):
-        return scipy.special.expit(x)
+        from scipy.special import expit
+
+        return expit(x)
 
     def grad(self, inp, grads):
         (x,) = inp
@@ -1496,7 +1548,9 @@ class BetaInc(ScalarOp):
     nfunc_spec = ("scipy.special.betainc", 3, 1)
 
     def impl(self, a, b, x):
-        return scipy.special.betainc(a, b, x)
+        from scipy.special import betainc
+
+        return betainc(a, b, x)
 
     def grad(self, inp, grads):
         a, b, x = inp
@@ -1756,7 +1810,9 @@ class BetaIncInv(ScalarOp):
     nfunc_spec = ("scipy.special.betaincinv", 3, 1)
 
     def impl(self, a, b, x):
-        return scipy.special.betaincinv(a, b, x)
+        from scipy.special import betaincinv
+
+        return betaincinv(a, b, x)
 
     def grad(self, inputs, grads):
         (a, b, x) = inputs
@@ -1796,7 +1852,9 @@ class Hyp2F1(ScalarOp):
 
     @staticmethod
     def st_impl(a, b, c, z):
-        return scipy.special.hyp2f1(a, b, c, z)
+        from scipy.special import hyp2f1
+
+        return hyp2f1(a, b, c, z)
 
     def impl(self, a, b, c, z):
         return Hyp2F1.st_impl(a, b, c, z)
