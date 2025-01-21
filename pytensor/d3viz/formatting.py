@@ -12,13 +12,7 @@ import pytensor
 from pytensor.compile import Function, builders
 from pytensor.graph.basic import Apply, Constant, Variable, graph_inputs
 from pytensor.graph.fg import FunctionGraph
-from pytensor.printing import pydot_imported, pydot_imported_msg
-
-
-try:
-    from pytensor.printing import pd
-except ImportError:
-    pass
+from pytensor.printing import _try_pydot_import
 
 
 class PyDotFormatter:
@@ -41,8 +35,7 @@ class PyDotFormatter:
 
     def __init__(self, compact=True):
         """Construct PyDotFormatter object."""
-        if not pydot_imported:
-            raise ImportError("Failed to import pydot. " + pydot_imported_msg)
+        _try_pydot_import()
 
         self.compact = compact
         self.node_colors = {
@@ -115,6 +108,8 @@ class PyDotFormatter:
         pydot.Dot
             Pydot graph of `fct`
         """
+        pd = _try_pydot_import()
+
         if graph is None:
             graph = pd.Dot()
 
@@ -356,6 +351,8 @@ def type_to_str(t):
 
 def dict_to_pdnode(d):
     """Create pydot node from dict."""
+    pd = _try_pydot_import()
+
     e = dict()
     for k, v in d.items():
         if v is not None:

@@ -17,18 +17,25 @@ from pytensor.printing import (
     PatternPrinter,
     PPrinter,
     Print,
+    _try_pydot_import,
     char_from_number,
     debugprint,
     default_printer,
     get_node_by_id,
     min_informative_str,
     pp,
-    pydot_imported,
     pydotprint,
 )
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.type import dmatrix, dvector, matrix
 from tests.graph.utils import MyInnerGraphOp, MyOp, MyVariable
+
+
+try:
+    _try_pydot_import()
+    pydot_imported = True
+except Exception:
+    pydot_imported = False
 
 
 @pytest.mark.parametrize(

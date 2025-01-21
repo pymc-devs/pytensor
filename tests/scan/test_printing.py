@@ -5,7 +5,7 @@ import pytensor
 import pytensor.tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
-from pytensor.printing import debugprint, pydot_imported, pydotprint
+from pytensor.printing import _try_pydot_import, debugprint, pydotprint
 from pytensor.tensor.type import dvector, iscalar, scalar, vector
 
 
@@ -684,6 +684,13 @@ def test_debugprint_compiled_fn():
 
     for truth, out in zip(expected_output.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
+
+
+try:
+    _try_pydot_import()
+    pydot_imported = True
+except Exception:
+    pydot_imported = False
 
 
 @pytest.mark.skipif(not pydot_imported, reason="pydot not available")

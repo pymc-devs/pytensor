@@ -3,11 +3,13 @@ import pytest
 
 from pytensor import config, function
 from pytensor.d3viz.formatting import PyDotFormatter
-from pytensor.printing import pydot_imported, pydot_imported_msg
+from pytensor.printing import _try_pydot_import
 
 
-if not pydot_imported:
-    pytest.skip("pydot not available: " + pydot_imported_msg, allow_module_level=True)
+try:
+    _try_pydot_import()
+except Exception as e:
+    pytest.skip(f"pydot not available: {e!s}", allow_module_level=True)
 
 from tests.d3viz import models
 
