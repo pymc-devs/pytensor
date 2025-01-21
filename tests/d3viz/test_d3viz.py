@@ -9,12 +9,14 @@ import pytensor.d3viz as d3v
 from pytensor import compile
 from pytensor.compile.function import function
 from pytensor.configdefaults import config
-from pytensor.printing import pydot_imported, pydot_imported_msg
+from pytensor.printing import _try_pydot_import
 from tests.d3viz import models
 
 
-if not pydot_imported:
-    pytest.skip("pydot not available: " + pydot_imported_msg, allow_module_level=True)
+try:
+    _try_pydot_import()
+except Exception as e:
+    pytest.skip(f"pydot not available: {e!s}", allow_module_level=True)
 
 
 class TestD3Viz:
