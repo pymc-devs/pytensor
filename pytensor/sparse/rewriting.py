@@ -1,5 +1,5 @@
 import numpy as np
-import scipy
+from scipy.sparse import csc_matrix, csr_matrix
 
 import pytensor
 import pytensor.scalar as ps
@@ -279,9 +279,7 @@ class StructuredDotCSC(COp):
     def perform(self, node, inputs, outputs):
         (a_val, a_ind, a_ptr, a_nrows, b) = inputs
         (out,) = outputs
-        a = scipy.sparse.csc_matrix(
-            (a_val, a_ind, a_ptr), (a_nrows, b.shape[0]), copy=False
-        )
+        a = csc_matrix((a_val, a_ind, a_ptr), (a_nrows, b.shape[0]), copy=False)
         # out[0] = a.dot(b)
         out[0] = np.asarray(a * b, dtype=node.outputs[0].type.dtype)
         assert _is_dense(out[0])  # scipy 0.7 automatically converts to dense
@@ -478,7 +476,7 @@ class StructuredDotCSR(COp):
     def perform(self, node, inputs, outputs):
         (a_val, a_ind, a_ptr, b) = inputs
         (out,) = outputs
-        a = scipy.sparse.csr_matrix(
+        a = csr_matrix(
             (a_val, a_ind, a_ptr), (len(a_ptr) - 1, b.shape[0]), copy=True
         )  # use view_map before setting this to False
         # out[0] = a.dot(b)

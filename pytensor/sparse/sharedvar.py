@@ -1,6 +1,6 @@
 import copy
 
-import scipy.sparse
+from scipy.sparse import spmatrix
 
 from pytensor.compile import shared_constructor
 from pytensor.sparse.basic import SparseTensorType, SparseVariable
@@ -13,7 +13,7 @@ class SparseTensorSharedVariable(TensorSharedVariable, SparseVariable):
         return self.type.format
 
 
-@shared_constructor.register(scipy.sparse.spmatrix)
+@shared_constructor.register(spmatrix)
 def sparse_constructor(
     value, name=None, strict=False, allow_downcast=None, borrow=False, format=None
 ):

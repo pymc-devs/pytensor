@@ -1,9 +1,5 @@
-import pytest
-
-
-sp = pytest.importorskip("scipy", minversion="0.7.0")
-
 import numpy as np
+import scipy as sp
 
 import pytensor
 from pytensor import sparse
@@ -20,11 +16,14 @@ from tests import unittest_tools as utt
 from tests.sparse.test_basic import as_sparse_format
 
 
+sparse_formats = ["csr", "csc"]
+
+
 class TestPoisson(utt.InferShapeTester):
     x = {}
     a = {}
 
-    for format in sparse.sparse_formats:
+    for format in sparse_formats:
         variable = getattr(pytensor.sparse, format + "_matrix")
 
         a_val = np.array(
@@ -40,7 +39,7 @@ class TestPoisson(utt.InferShapeTester):
         self.op_class = Poisson
 
     def test_op(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             f = pytensor.function([self.x[format]], poisson(self.x[format]))
 
             tested = f(self.a[format])
@@ -51,7 +50,7 @@ class TestPoisson(utt.InferShapeTester):
             assert tested.shape == self.a[format].shape
 
     def test_infer_shape(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             self._compile_and_check(
                 [self.x[format]],
                 [poisson(self.x[format])],
@@ -76,7 +75,7 @@ class TestBinomial(utt.InferShapeTester):
         self.op_class = Binomial
 
     def test_op(self):
-        for sp_format in sparse.sparse_formats:
+        for sp_format in sparse_formats:
             for o_type in sparse.float_dtypes:
                 f = pytensor.function(
                     self.inputs, Binomial(sp_format, o_type)(*self.inputs)
@@ -90,7 +89,7 @@ class TestBinomial(utt.InferShapeTester):
                 assert np.allclose(np.floor(tested.todense()), tested.todense())
 
     def test_infer_shape(self):
-        for sp_format in sparse.sparse_formats:
+        for sp_format in sparse_formats:
             for o_type in sparse.float_dtypes:
                 self._compile_and_check(
                     self.inputs,

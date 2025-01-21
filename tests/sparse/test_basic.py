@@ -3,6 +3,7 @@ from itertools import product
 
 import numpy as np
 import pytest
+import scipy as sp
 from packaging import version
 
 import pytensor
@@ -82,7 +83,6 @@ from pytensor.sparse.basic import (
     _is_dense_variable,
     _is_sparse,
     _is_sparse_variable,
-    _mtypes,
 )
 from pytensor.sparse.rewriting import (
     AddSD_ccode,
@@ -115,8 +115,8 @@ from tests import unittest_tools as utt
 from tests.tensor.test_sharedvar import makeSharedTester
 
 
-sp = pytest.importorskip("scipy", minversion="0.7.0")
-
+sparse_formats = ["csc", "csr"]
+_mtypes = [sp.sparse.csc_matrix, sp.sparse.csr_matrix]
 
 # Probability distributions are currently tested in test_sp2.py
 # from pytensor.sparse import (
@@ -1997,7 +1997,7 @@ class TestColScaleCSC(utt.InferShapeTester):
         self.op = sparse.col_scale
 
     def test_op(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             variable, data = sparse_random_inputs(format, shape=(8, 10))
             variable.append(vector())
             data.append(np.random.random(10).astype(config.floatX))
@@ -2020,7 +2020,7 @@ class TestColScaleCSC(utt.InferShapeTester):
             self._compile_and_check(variable, [self.op(*variable)], data, cls)
 
     def test_grad(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             variable, data = sparse_random_inputs(format, shape=(8, 10))
             variable.append(vector())
             data.append(np.random.random(10).astype(config.floatX))
@@ -2034,7 +2034,7 @@ class TestRowScaleCSC(utt.InferShapeTester):
         self.op = sparse.row_scale
 
     def test_op(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             variable, data = sparse_random_inputs(format, shape=(8, 10))
             variable.append(vector())
             data.append(np.random.random(8).astype(config.floatX))
@@ -2057,7 +2057,7 @@ class TestRowScaleCSC(utt.InferShapeTester):
             self._compile_and_check(variable, [self.op(*variable)], data, cls)
 
     def test_grad(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             variable, data = sparse_random_inputs(format, shape=(8, 10))
             variable.append(vector())
             data.append(np.random.random(8).astype(config.floatX))
@@ -2075,7 +2075,7 @@ class TestSpSum(utt.InferShapeTester):
 
     @pytest.mark.parametrize("op_type", ["func", "method"])
     def test_op(self, op_type):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for axis in self.possible_axis:
                 variable, data = sparse_random_inputs(format, shape=(10, 10))
 
@@ -2095,7 +2095,7 @@ class TestSpSum(utt.InferShapeTester):
                 utt.assert_allclose(expected, tested)
 
     def test_infer_shape(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for axis in self.possible_axis:
                 variable, data = sparse_random_inputs(format, shape=(9, 10))
                 self._compile_and_check(
@@ -2103,7 +2103,7 @@ class TestSpSum(utt.InferShapeTester):
                 )
 
     def test_grad(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for axis in self.possible_axis:
                 for struct in [True, False]:
                     variable, data = sparse_random_inputs(format, shape=(9, 10))
@@ -2121,7 +2121,7 @@ class TestDiag(utt.InferShapeTester):
         self.op = diag
 
     def test_op(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             variable, data = sparse_random_inputs(format, shape=(10, 10))
 
             z = self.op(*variable)
@@ -2134,14 +2134,14 @@ class TestDiag(utt.InferShapeTester):
             utt.assert_allclose(expected, tested)
 
     def test_infer_shape(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             variable, data = sparse_random_inputs(format, shape=(10, 10))
             self._compile_and_check(
                 variable, [self.op(*variable)], data, self.op_class, warn=False
             )
 
     def test_grad(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             variable, data = sparse_random_inputs(format, shape=(10, 10))
             verify_grad_sparse(self.op, data, structured=False)
 
@@ -2153,7 +2153,7 @@ class TestSquareDiagonal(utt.InferShapeTester):
         self.op = square_diagonal
 
     def test_op(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for size in range(5, 9):
                 variable = [vector()]
                 data = [np.random.random(size).astype(config.floatX)]
@@ -2167,7 +2167,7 @@ class TestSquareDiagonal(utt.InferShapeTester):
                 assert tested.shape == expected.shape
 
     def test_infer_shape(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for size in range(5, 9):
                 variable = [vector()]
                 data = [np.random.random(size).astype(config.floatX)]
@@ -2177,7 +2177,7 @@ class TestSquareDiagonal(utt.InferShapeTester):
                 )
 
     def test_grad(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for size in range(5, 9):
                 data = [np.random.random(size).astype(config.floatX)]
 
@@ -2191,7 +2191,7 @@ class TestEnsureSortedIndices(utt.InferShapeTester):
         self.op = ensure_sorted_indices
 
     def test_op(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for shape in zip(range(5, 9), range(3, 7)[::-1], strict=True):
                 variable, data = sparse_random_inputs(format, shape=shape)
 
@@ -2202,7 +2202,7 @@ class TestEnsureSortedIndices(utt.InferShapeTester):
                 utt.assert_allclose(expected, tested)
 
     def test_infer_shape(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for shape in zip(range(5, 9), range(3, 7)[::-1], strict=True):
                 variable, data = sparse_random_inputs(format, shape=shape)
                 self._compile_and_check(
@@ -2210,7 +2210,7 @@ class TestEnsureSortedIndices(utt.InferShapeTester):
                 )
 
     def test_grad(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for shape in zip(range(5, 9), range(3, 7)[::-1], strict=True):
                 variable, data = sparse_random_inputs(format, shape=shape)
                 verify_grad_sparse(self.op, data, structured=False)
@@ -2222,7 +2222,7 @@ class TestClean(utt.InferShapeTester):
         self.op = clean
 
     def test_op(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for shape in zip(range(5, 9), range(3, 7)[::-1], strict=True):
                 variable, data = sparse_random_inputs(format, shape=shape)
 
@@ -2241,7 +2241,7 @@ class TestClean(utt.InferShapeTester):
                 utt.assert_allclose(expected, tested)
 
     def test_grad(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for shape in zip(range(5, 9), range(3, 7)[::-1], strict=True):
                 variable, data = sparse_random_inputs(format, shape=shape)
                 verify_grad_sparse(self.op, data, structured=False)
@@ -2629,7 +2629,7 @@ class TestCasting(utt.InferShapeTester):
 
     # slow but only test
     def test_cast(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for i_dtype in sparse.all_dtypes:
                 for o_dtype in sparse.all_dtypes:
                     (variable,), (data,) = sparse_random_inputs(
@@ -2658,7 +2658,7 @@ class TestCasting(utt.InferShapeTester):
 
     @pytest.mark.slow
     def test_infer_shape(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for i_dtype in sparse.all_dtypes:
                 for o_dtype in sparse.all_dtypes:
                     variable, data = sparse_random_inputs(
@@ -2669,7 +2669,7 @@ class TestCasting(utt.InferShapeTester):
                     )
 
     def test_grad(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for i_dtype in sparse.float_dtypes:
                 for o_dtype in float_dtypes:
                     if o_dtype == "float16":
@@ -2690,7 +2690,7 @@ def _format_info(nb):
     x = {}
     mat = {}
 
-    for format in sparse.sparse_formats:
+    for format in sparse_formats:
         variable = getattr(pytensor.sparse, format + "_matrix")
         spa = getattr(sp.sparse, format + "_matrix")
 
@@ -2710,8 +2710,8 @@ class _TestHVStack(utt.InferShapeTester):
     x, mat = _format_info(nb)
 
     def test_op(self):
-        for format in sparse.sparse_formats:
-            for out_f in sparse.sparse_formats:
+        for format in sparse_formats:
+            for out_f in sparse_formats:
                 for dtype in sparse.all_dtypes:
                     blocks = self.mat[format]
 
@@ -2729,7 +2729,7 @@ class _TestHVStack(utt.InferShapeTester):
                     assert tested.dtype == expected.dtype
 
     def test_infer_shape(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             self._compile_and_check(
                 self.x[format],
                 [self.op_class(dtype="float64")(*self.x[format])],
@@ -2738,8 +2738,8 @@ class _TestHVStack(utt.InferShapeTester):
             )
 
     def test_grad(self):
-        for format in sparse.sparse_formats:
-            for out_f in sparse.sparse_formats:
+        for format in sparse_formats:
+            for out_f in sparse_formats:
                 for dtype in sparse.float_dtypes:
                     verify_grad_sparse(
                         self.op_class(format=out_f, dtype=dtype),
@@ -2782,7 +2782,7 @@ class TestAddSSData(utt.InferShapeTester):
         super().setup_method()
         self.op_class = AddSSData
 
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             variable = getattr(pytensor.sparse, format + "_matrix")
 
             a_val = np.array(
@@ -2795,7 +2795,7 @@ class TestAddSSData(utt.InferShapeTester):
             self.a[format] = [constant for t in range(2)]
 
     def test_op(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             f = pytensor.function(self.x[format], add_s_s_data(*self.x[format]))
 
             tested = f(*self.a[format])
@@ -2806,7 +2806,7 @@ class TestAddSSData(utt.InferShapeTester):
             assert tested.dtype == expected.dtype
 
     def test_infer_shape(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             self._compile_and_check(
                 self.x[format],
                 [add_s_s_data(*self.x[format])],
@@ -2815,7 +2815,7 @@ class TestAddSSData(utt.InferShapeTester):
             )
 
     def test_grad(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             verify_grad_sparse(self.op_class(), self.a[format], structured=True)
 
 
@@ -2864,7 +2864,7 @@ def elemwise_checker(
             assert eval(self.__class__.__name__) is self.__class__
 
         def test_op(self):
-            for format in sparse.sparse_formats:
+            for format in sparse_formats:
                 for dtype in test_dtypes:
                     if dtype == "int8" or dtype == "uint8":
                         continue
@@ -2967,7 +2967,7 @@ def elemwise_checker(
         if grad_test:
 
             def test_grad(self):
-                for format in sparse.sparse_formats:
+                for format in sparse_formats:
                     for dtype in sparse.float_dtypes:
                         variable, data = sparse_random_inputs(
                             format, shape=(4, 7), out_dtype=dtype, gap=self.gap_grad
@@ -3244,7 +3244,7 @@ class TestTrueDot(utt.InferShapeTester):
         self.op_class = TrueDot
 
     def test_op_ss(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for dtype in sparse.all_dtypes:
                 variable, data = sparse_random_inputs(
                     format, shape=(10, 10), out_dtype=dtype, n=2, p=0.1
@@ -3263,7 +3263,7 @@ class TestTrueDot(utt.InferShapeTester):
                 utt.assert_allclose(tested, expected)
 
     def test_op_sd(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for dtype in sparse.all_dtypes:
                 variable, data = sparse_random_inputs(
                     format, shape=(10, 10), out_dtype=dtype, n=2, p=0.1
@@ -3282,7 +3282,7 @@ class TestTrueDot(utt.InferShapeTester):
                 utt.assert_allclose(tested, expected)
 
     def test_infer_shape(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for dtype in sparse.all_dtypes:
                 (x,), (x_value,) = sparse_random_inputs(
                     format, shape=(9, 10), out_dtype=dtype, p=0.1
@@ -3297,7 +3297,7 @@ class TestTrueDot(utt.InferShapeTester):
                 )
 
     def test_grad(self):
-        for format in sparse.sparse_formats:
+        for format in sparse_formats:
             for dtype in sparse.float_dtypes:
                 (x,), (x_value,) = sparse_random_inputs(
                     format, shape=(9, 10), out_dtype=dtype, p=0.1
