@@ -1,7 +1,6 @@
 import pickle
 
 import numpy as np
-import pytest
 
 import pytensor
 from pytensor import tensor as pt
@@ -12,7 +11,6 @@ from tests.tensor.test_blas import TestBlasStrides, gemm_no_inplace
 from tests.unittest_tools import OptimizationTestMixin
 
 
-@pytest.mark.skipif(not pytensor.tensor.blas_scipy.have_fblas, reason="fblas needed")
 class TestScipyGer(OptimizationTestMixin):
     def setup_method(self):
         self.mode = pytensor.compile.get_default_mode()
