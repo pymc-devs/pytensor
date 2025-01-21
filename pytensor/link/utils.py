@@ -758,9 +758,7 @@ def fgraph_to_python(
                     new_output_name = unique_name(i)
                     getter_unique_name = unique_name(getter_or_value)
                     global_env[getter_unique_name] = getter_or_value
-                    assign_str = (
-                        f"{new_output_name} = {getter_unique_name}()"
-                    )
+                    assign_str = f"{new_output_name} = {getter_unique_name}()"
                     body_assigns.append(assign_str)
                     node_input_names.append(new_output_name)
                     continue

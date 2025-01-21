@@ -39,9 +39,11 @@ def pytorch_typify_tensor(data, dtype=None, **kwargs):
 def pytorch_typify_no_conversion_needed(data, **kwargs):
     return data
 
+
 @pytorch_typify.register(np.number)
 def pytorch_typify_extract(data, **kwargs):
     return data.item()
+
 
 @singledispatch
 def pytorch_funcify(op, node=None, storage_map=None, **kwargs):
