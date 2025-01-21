@@ -8,8 +8,6 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-import filelock
-
 from pytensor.configdefaults import config
 
 
@@ -35,8 +33,9 @@ def force_unlock(lock_dir: os.PathLike):
     lock_dir : os.PathLike
         Path to a directory that was locked with `lock_ctx`.
     """
+    from filelock import FileLock
 
-    fl = filelock.FileLock(Path(lock_dir) / ".lock")
+    fl = FileLock(Path(lock_dir) / ".lock")
     fl.release(force=True)
 
     dir_key = f"{lock_dir}-{os.getpid()}"
@@ -62,6 +61,8 @@ def lock_ctx(
         Timeout in seconds for waiting in lock acquisition.
         Defaults to `pytensor.config.compile__timeout`.
     """
+    from filelock import FileLock
+
     if lock_dir is None:
         lock_dir = config.compiledir
 
@@ -73,7 +74,7 @@ def lock_ctx(
 
     if dir_key not in local_mem._locks:
         local_mem._locks[dir_key] = True
-        fl = filelock.FileLock(Path(lock_dir) / ".lock")
+        fl = FileLock(Path(lock_dir) / ".lock")
         fl.acquire(timeout=timeout)
         try:
             yield
