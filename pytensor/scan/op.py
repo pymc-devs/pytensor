@@ -74,7 +74,6 @@ from pytensor.graph.op import HasInnerGraph, Op
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.utils import InconsistencyError, MissingInputError
 from pytensor.link.c.basic import CLinker
-from pytensor.link.c.exceptions import MissingGXX
 from pytensor.printing import op_debug_information
 from pytensor.scan.utils import ScanProfileStats, Validator, forced_replace, safe_new
 from pytensor.tensor.basic import as_tensor_variable
@@ -1499,6 +1498,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         then it must not do so for variables in the no_recycling list.
 
         """
+        from pytensor.link.c.exceptions import MissingGXX
 
         # Before building the thunk, validate that the inner graph is
         # coherent

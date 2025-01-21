@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Any
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.link.basic import Container, LocalLinker
-from pytensor.link.c.exceptions import MissingGXX
 from pytensor.link.utils import (
     gc_helper,
     get_destroy_dependencies,
@@ -1006,6 +1005,8 @@ class VMLinker(LocalLinker):
         compute_map,
         updated_vars,
     ):
+        from pytensor.link.c.exceptions import MissingGXX
+
         pre_call_clear = [storage_map[v] for v in self.no_recycling]
 
         try:
