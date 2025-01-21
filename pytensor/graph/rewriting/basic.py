@@ -5,7 +5,6 @@ import copy
 import functools
 import inspect
 import logging
-import pdb
 import sys
 import time
 import traceback
@@ -237,6 +236,8 @@ class SequentialGraphRewriter(GraphRewriter, UserList):
         if config.on_opt_error == "raise":
             raise exc
         elif config.on_opt_error == "pdb":
+            import pdb
+
             pdb.post_mortem(sys.exc_info()[2])
 
     def __init__(self, *rewrites, failure_callback=None):
@@ -1752,6 +1753,8 @@ class NodeProcessingGraphRewriter(GraphRewriter):
             _logger.error("TRACEBACK:")
             _logger.error(traceback.format_exc())
         if config.on_opt_error == "pdb":
+            import pdb
+
             pdb.post_mortem(sys.exc_info()[2])
         elif isinstance(exc, AssertionError) or config.on_opt_error == "raise":
             # We always crash on AssertionError because something may be
