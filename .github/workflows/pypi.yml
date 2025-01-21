@@ -36,7 +36,7 @@ jobs:
         run: pipx run build --sdist
 
       - name: Attest GitHub build provenance
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v2
         with:
           subject-path: dist/*.tar.gz
 
@@ -81,7 +81,7 @@ jobs:
         uses: pypa/cibuildwheel@v2.22.0
 
       - name: Attest GitHub build provenance
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v2
         with:
           subject-path: ./wheelhouse/*.whl
 
@@ -116,7 +116,7 @@ jobs:
           PYODIDE=1 python setup.py bdist_wheel --universal
 
       - name: Attest GitHub build provenance
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v2
         with:
           subject-path: dist/*.whl
 
