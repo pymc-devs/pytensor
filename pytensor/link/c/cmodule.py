@@ -26,19 +26,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
-from setuptools._distutils.sysconfig import (
-    get_config_h_filename,
-    get_config_var,
-    get_python_inc,
-    get_python_lib,
-)
 
 # we will abuse the lockfile mechanism when reading and writing the registry
 from pytensor.compile.compilelock import lock_ctx
 from pytensor.configdefaults import config, gcc_version_str
 from pytensor.configparser import BoolParam, StrParam
 from pytensor.graph.op import Op
-from pytensor.link.c.exceptions import CompileError, MissingGXX
 from pytensor.utils import (
     LOCAL_BITWIDTH,
     flatten,
@@ -266,6 +259,8 @@ class DynamicModule:
 
 def _get_ext_suffix():
     """Get the suffix for compiled extensions"""
+    from setuptools._distutils.sysconfig import get_config_var
+
     dist_suffix = get_config_var("EXT_SUFFIX")
     if dist_suffix is None:
         dist_suffix = get_config_var("SO")
@@ -1697,6 +1692,8 @@ def get_gcc_shared_library_arg():
 
 
 def std_include_dirs():
+    from setuptools._distutils.sysconfig import get_python_inc
+
     numpy_inc_dirs = [np.get_include()]
     py_inc = get_python_inc()
     py_plat_spec_inc = get_python_inc(plat_specific=True)
@@ -1709,6 +1706,12 @@ def std_include_dirs():
 
 @is_StdLibDirsAndLibsType
 def std_lib_dirs_and_libs() -> tuple[list[str], ...] | None:
+    from setuptools._distutils.sysconfig import (
+        get_config_var,
+        get_python_inc,
+        get_python_lib,
+    )
+
     # We cache the results as on Windows, this trigger file access and
     # this method is called many times.
     if std_lib_dirs_and_libs.data is not None:
@@ -2388,23 +2391,6 @@ class GCC_compiler(Compiler):
                 # xcode's version.
                 cxxflags.append("-ld64")
 
-        if sys.platform == "win32":
-            # Workaround for https://github.com/Theano/Theano/issues/4926.
-            # https://github.com/python/cpython/pull/11283/ removed the "hypot"
-            # redefinition for recent CPython versions (>=2.7.16 and >=3.7.3).
-            # The following nullifies that redefinition, if it is found.
-            python_version = sys.version_info[:3]
-            if (3,) <= python_version < (3, 7, 3):
-                config_h_filename = get_config_h_filename()
-                try:
-                    with open(config_h_filename) as config_h:
-                        if any(
-                            line.startswith("#define hypot _hypot") for line in config_h
-                        ):
-                            cxxflags.append("-D_hypot=hypot")
-                except OSError:
-                    pass
-
         return cxxflags
 
     @classmethod
@@ -2555,8 +2541,9 @@ class GCC_compiler(Compiler):
 
         """
         # TODO: Do not do the dlimport in this function
-
         if not config.cxx:
+            from pytensor.link.c.exceptions import MissingGXX
+
             raise MissingGXX("g++ not available! We can't compile c code.")
 
         if include_dirs is None:
@@ -2586,6 +2573,8 @@ class GCC_compiler(Compiler):
                 cppfile.write("\n")
 
         if platform.python_implementation() == "PyPy":
+            from setuptools._distutils.sysconfig import get_config_var
+
             suffix = "." + get_lib_extension()
 
             dist_suffix = get_config_var("SO")
@@ -2642,6 +2631,8 @@ class GCC_compiler(Compiler):
         status = p_out[2]
 
         if status:
+            from pytensor.link.c.exceptions import CompileError
+
             tf = tempfile.NamedTemporaryFile(
                 mode="w", prefix="pytensor_compilation_error_", delete=False
             )
