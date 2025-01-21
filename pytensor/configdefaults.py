@@ -4,7 +4,6 @@ import os
 import platform
 import re
 import shutil
-import socket
 import sys
 import textwrap
 from pathlib import Path
@@ -1190,7 +1189,7 @@ _compiledir_format_dict = {
     "pytensor_version": pytensor.__version__,
     "numpy_version": np.__version__,
     "gxx_version": "xxx",
-    "hostname": socket.gethostname(),
+    "hostname": platform.node(),
 }
 
 
