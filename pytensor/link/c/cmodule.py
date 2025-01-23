@@ -1985,7 +1985,7 @@ class Compiler:
         )
 
 
-def try_blas_flag(flags):
+def try_blas_flag(flags) -> str:
     test_code = textwrap.dedent(
         """\
         extern "C" double ddot_(int*, double*, int*, double*, int*);
@@ -2734,12 +2734,30 @@ sure you have the right version you *will* get wrong results.
         )
 
 
-def default_blas_ldflags():
-    """Read local NumPy and MKL build settings and construct `ld` flags from them.
+def default_blas_ldflags() -> str:
+    """Look for an available BLAS implementation in the system.
+
+    This function tries to compile a simple C code that uses the BLAS
+    if the required files are found in the system.
+    It sequentially tries to link to the following implementations, until one is found:
+    1. Intel MKL with Intel OpenMP threading
+    2. Intel MKL with GNU OpenMP threading
+    3. Lapack + BLAS
+    4. BLAS alone
+    5. OpenBLAS
 
     Returns
     -------
-    str
+    blas flags: str
+        Blas flags needed to link to the BLAS implementation found in the system.
+        If no BLAS implementation is found, an empty string is returned.
+
+    Notes
+    -----
+    This function is triggered when `pytensor.config.blas__ldflags` is not given a user
+    default, and it is first accessed at runtime. It can be rather slow, so it is advised
+    to cache the results of this function in PYTENSORRC configuration file or
+    PyTensor environment flags.
 
     """
 
@@ -2788,7 +2806,7 @@ def default_blas_ldflags():
 
     def check_libs(
         all_libs, required_libs, extra_compile_flags=None, cxx_library_dirs=None
-    ):
+    ) -> str:
         if cxx_library_dirs is None:
             cxx_library_dirs = []
         if extra_compile_flags is None:
@@ -2938,6 +2956,14 @@ def default_blas_ldflags():
     except Exception as e:
         _logger.debug(e)
     _logger.debug("Failed to identify blas ldflags. Will leave them empty.")
+    warnings.warn(
+        "PyTensor could not link to a BLAS installation. Operations that might benefit from BLAS will be severely degraded.\n"
+        "This usually happens when PyTensor is installed via pip. We recommend it be installed via conda/mamba/pixi instead.\n"
+        "Alternatively, you can use an experimental backend such as Numba or JAX that perform their own BLAS optimizations, "
+        "by setting `pytensor.config.mode == 'NUMBA'` or passing `mode='NUMBA'` when compiling a PyTensor function.\n"
+        "For more options and details see https://pytensor.readthedocs.io/en/latest/troubleshooting.html#how-do-i-configure-test-my-blas-library",
+        UserWarning,
+    )
     return ""
 
 

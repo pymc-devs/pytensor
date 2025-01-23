@@ -145,44 +145,64 @@ How do I configure/test my BLAS library
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 There are many ways to configure BLAS for PyTensor. This is done with the PyTensor
-flags ``blas__ldflags`` (:ref:`libdoc_config`). The default is to use the BLAS
-installation information in NumPy, accessible via
-``numpy.__config__.show()``.  You can tell pytensor to use a different
-version of BLAS, in case you did not compile NumPy with a fast BLAS or if NumPy
-was compiled with a static library of BLAS (the latter is not supported in
-PyTensor).
+flags ``blas__ldflags`` (:ref:`libdoc_config`). If not specified, PyTensor will
+attempt to find a local BLAS library to link against, prioritizing specialized implementations.
+The details can be found in :func:`pytensor.link.c.cmodule.default_blas_ldflags`.
 
-The short way to configure the PyTensor flags ``blas__ldflags`` is by setting the
-environment variable :envvar:`PYTENSOR_FLAGS` to ``blas__ldflags=XXX`` (in bash
-``export PYTENSOR_FLAGS=blas__ldflags=XXX``)
+Users can manually set the PyTensor flags ``blas__ldflags`` to link against a
+specific version. This is useful even if the default version is the desired one,
+as it will avoid the costly work of trying to find the best BLAS library at runtime.
 
-The ``${HOME}/.pytensorrc`` file is the simplest way to set a relatively
-permanent option like this one.  Add a ``[blas]`` section with an ``ldflags``
-entry like this:
+The PyTensor flags can be set in a few ways:
+
+1. In the ``${HOME}/.pytensorrc`` file.
 
 .. code-block:: cfg
 
     # other stuff can go here
     [blas]
-    ldflags = -lf77blas -latlas -lgfortran #put your flags here
+    ldflags = -llapack -lblas -lcblas  # put your flags here
 
     # other stuff can go here
 
-For more information on the formatting of ``~/.pytensorrc`` and the
-configuration options that you can put there, see :ref:`libdoc_config`.
+2. In BASH before running your script:
+
+.. code-block:: bash
+
+    export PYTENSOR_FLAGS="blas__ldflags='-llapack -lblas -lcblas'"
+
+3. In an Ipython/Jupyter notebook before importing PyTensor:
+
+.. code-block:: python
+
+    %set_env PYTENSOR_FLAGS=blas__ldflags='-llapack -lblas -lcblas'
+
+
+4. In `pytensor.config` directly:
+
+.. code-block:: python
+
+    import pytensor
+    pytensor.config.blas__ldflags = '-llapack -lblas -lcblas'
+
+
+(For more information on the formatting of ``~/.pytensorrc`` and the
+configuration options that you can put there, see :ref:`libdoc_config`.)
+
+You can find the default BLAS library that PyTensor is linking against by
+checking ``pytensor.config.blas__ldflags``
+or running :func:`pytensor.link.c.cmodule.default_blas_ldflags`.
 
 Here are some different way to configure BLAS:
 
-0) Do nothing and use the default config, which is to link against the same
-BLAS against which NumPy was built. This does not work in the case NumPy was
-compiled with a static library (e.g. ATLAS is compiled by default only as a
-static library).
+0) Do nothing and use the default config.
+This will usually work great for installation via conda/mamba/pixi (conda-forge channel).
+It will usually fail to link altogether for installation via pip.
 
 1) Disable the usage of BLAS and fall back on NumPy for dot products. To do
-this, set the value of ``blas__ldflags`` as the empty string (ex: ``export
-PYTENSOR_FLAGS=blas__ldflags=``). Depending on the kind of matrix operations your
-PyTensor code performs, this might slow some things down (vs. linking with BLAS
-directly).
+this, set the value of ``blas__ldflags`` as the empty string.
+Depending on the kind of matrix operations your PyTensor code performs,
+this might slow some things down (vs. linking with BLAS directly).
 
 2) You can install the default (reference) version of BLAS if the NumPy version
 (against which PyTensor links) does not work. If you have root or sudo access in
@@ -208,10 +228,29 @@ correctly (for example, for MKL this might be ``-lmkl -lguide -lpthread`` or
 ``-lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core -lguide -liomp5 -lmkl_mc
 -lpthread``).
 
+5) Use another backend such as Numba or JAX that perform their own BLAS optimizations,
+by setting the configuration mode to ``"NUMBA"`` or ``"JAX"`` and making sure those packages are installed.
+This configuration mode can be set in all the ways that the BLAS flags can be set, described above.
+
+Alternatively, you can pass `mode='NUMBA'` when compiling individual PyTensor functions without changing the default.
+or use the ``config.change_flags`` context manager.
+
+.. code-block:: python
+
+    from pytensor import function, config
+    from pytensor.tensor import matrix
+
+    x = matrix('x')
+    y = x @ x.T
+    f = function([x], y, mode='NUMBA')
+
+    with config.change_flags(mode='NUMBA'):
+        # compiling function that benefits from BLAS using NUMBA
+        f = function([x], y)
+
 .. note::
 
-    Make sure your BLAS
-    libraries are available as dynamically-loadable libraries.
+    Make sure your BLAS libraries are available as dynamically-loadable libraries.
     ATLAS is often installed only as a static library.  PyTensor is not able to
     use this static library. Your ATLAS installation might need to be modified
     to provide dynamically loadable libraries.  (On Linux this
@@ -267,7 +306,7 @@ configuration information. Then, it will print the running time of the same
 benchmarks for your installation. Try to find a CPU similar to yours in
 the table, and check that the single-threaded timings are roughly the same.
 
-PyTensor should link to a parallel version of Blas and use all cores
+PyTensor should link to a parallel version of BLAS and use all cores
 when possible. By default it should use all cores. Set the environment
 variable "OMP_NUM_THREADS=N" to specify to use N threads.
 
