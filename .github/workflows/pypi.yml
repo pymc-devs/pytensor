@@ -37,8 +37,6 @@ jobs:
 
       - name: Attest GitHub build provenance
         uses: actions/attest-build-provenance@v2
-        # Don't attest from forks
-        if: github.repository_owner == 'pymc-devs'
         with:
           subject-path: dist/*.tar.gz
 
@@ -84,8 +82,6 @@ jobs:
 
       - name: Attest GitHub build provenance
         uses: actions/attest-build-provenance@v2
-        # Don't attest from forks
-        if: github.repository_owner == 'pymc-devs'
         with:
           subject-path: ./wheelhouse/*.whl
 
@@ -121,8 +117,6 @@ jobs:
 
       - name: Attest GitHub build provenance
         uses: actions/attest-build-provenance@v2
-        # Don't attest from forks
-        if: github.repository_owner == 'pymc-devs'
         with:
           subject-path: dist/*.whl
 
