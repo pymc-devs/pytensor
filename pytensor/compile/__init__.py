@@ -37,7 +37,6 @@ from pytensor.compile.mode import (
     PrintCurrentFunctionGraph,
     get_default_mode,
     get_mode,
-    instantiated_default_mode,
     local_useless,
     optdb,
     predefined_linkers,
