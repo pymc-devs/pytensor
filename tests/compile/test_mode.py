@@ -13,6 +13,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.features import NoOutputFromInplace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery, SequenceDB
 from pytensor.link.basic import LocalLinker
+from pytensor.link.jax import JAXLinker
 from pytensor.tensor.math import dot, tanh
 from pytensor.tensor.type import matrix, vector
 
@@ -142,3 +143,15 @@ def test_get_target_language():
     test_mode = Mode(linker=MyLinker())
     with pytest.raises(Exception):
         get_target_language(test_mode)
+
+
+def test_predefined_modes_respected():
+    default_mode = get_default_mode()
+    assert not isinstance(default_mode.linker, JAXLinker)
+
+    with config.change_flags(mode="JAX"):
+        jax_mode = get_default_mode()
+        assert isinstance(jax_mode.linker, JAXLinker)
+
+    default_mode_again = get_default_mode()
+    assert not isinstance(default_mode_again.linker, JAXLinker)

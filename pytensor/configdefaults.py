@@ -387,7 +387,8 @@ def add_compile_configvars():
     config.add(
         "linker",
         "Default linker used if the pytensor flags mode is Mode",
-        EnumStr("cvm", linker_options),
+        # Not mutable because the default mode is cached after the first use.
+        EnumStr("cvm", linker_options, mutable=False),
         in_c_key=False,
     )
 
@@ -410,6 +411,7 @@ def add_compile_configvars():
         EnumStr(
             "o4",
             ["o3", "o2", "o1", "unsafe", "fast_run", "fast_compile", "merge", "None"],
+            mutable=False,  # Not mutable because the default mode is cached after the first use.
         ),
         in_c_key=False,
     )

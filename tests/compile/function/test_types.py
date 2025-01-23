@@ -1105,14 +1105,10 @@ class TestPicklefunction:
             ((a.T.T) * (dot(xm, (sm.T.T.T)) + x).T * (x / x) + s),
         )
         old_default_mode = config.mode
-        old_default_opt = config.optimizer
-        old_default_link = config.linker
         try:
             try:
                 str_f = pickle.dumps(f, protocol=-1)
-                config.mode = "Mode"
-                config.linker = "py"
-                config.optimizer = "None"
+                config.mode = "NUMBA"
                 g = pickle.loads(str_f)
                 # print g.maker.mode
                 # print compile.mode.default_mode
@@ -1121,8 +1117,6 @@ class TestPicklefunction:
                     g = "ok"
         finally:
             config.mode = old_default_mode
-            config.optimizer = old_default_opt
-            config.linker = old_default_link
 
         if g == "ok":
             return

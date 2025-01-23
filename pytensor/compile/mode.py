@@ -492,7 +492,7 @@ predefined_modes = {
     "PYTORCH": PYTORCH,
 }
 
-instantiated_default_mode = None
+_CACHED_RUNTIME_MODES: dict[str, Mode] = {}
 
 
 def get_mode(orig_string):
@@ -500,50 +500,46 @@ def get_mode(orig_string):
         string = config.mode
     else:
         string = orig_string
+
     if not isinstance(string, str):
         return string  # it is hopefully already a mode...
 
-    global instantiated_default_mode
-    # The default mode is cached. However, config.mode can change
-    # If instantiated_default_mode has the right class, use it.
-    if orig_string is None and instantiated_default_mode:
-        if string in predefined_modes:
-            default_mode_class = predefined_modes[string].__class__.__name__
-        else:
-            default_mode_class = string
-        if instantiated_default_mode.__class__.__name__ == default_mode_class:
-            return instantiated_default_mode
+    # Keep the original string for error messages
+    upper_string = string.upper()
 
-    if string in ("Mode", "DebugMode", "NanGuardMode"):
-        if string == "DebugMode":
-            # need to import later to break circular dependency.
-            from .debugmode import DebugMode
+    if upper_string in predefined_modes:
+        return predefined_modes[upper_string]
 
-            # DebugMode use its own linker.
-            ret = DebugMode(optimizer=config.optimizer)
-        elif string == "NanGuardMode":
-            # need to import later to break circular dependency.
-            from .nanguardmode import NanGuardMode
+    global _CACHED_RUNTIME_MODES
 
-            # NanGuardMode use its own linker.
-            ret = NanGuardMode(True, True, True, optimizer=config.optimizer)
-        else:
-            # TODO: Can't we look up the name and invoke it rather than using eval here?
-            ret = eval(string + "(linker=config.linker, optimizer=config.optimizer)")
-    elif string in predefined_modes:
-        ret = predefined_modes[string]
+    if upper_string in _CACHED_RUNTIME_MODES:
+        return _CACHED_RUNTIME_MODES[upper_string]
+
+    # Need to define the mode for the first time
+    if upper_string == "MODE":
+        ret = Mode(linker=config.linker, optimizer=config.optimizer)
+    elif upper_string in ("DEBUGMODE", "DEBUG_MODE"):
+        from pytensor.compile.debugmode import DebugMode
+
+        # DebugMode use its own linker.
+        ret = DebugMode(optimizer=config.optimizer)
+    elif upper_string == "NANGUARDMODE":
+        from pytensor.compile.nanguardmode import NanGuardMode
+
+        # NanGuardMode use its own linker.
+        ret = NanGuardMode(True, True, True, optimizer=config.optimizer)
+
     else:
-        raise Exception(f"No predefined mode exist for string: {string}")
+        raise ValueError(f"No predefined mode exist for string: {string}")
 
-    if orig_string is None:
-        # Build and cache the default mode
-        if config.optimizer_excluding:
-            ret = ret.excluding(*config.optimizer_excluding.split(":"))
-        if config.optimizer_including:
-            ret = ret.including(*config.optimizer_including.split(":"))
-        if config.optimizer_requiring:
-            ret = ret.requiring(*config.optimizer_requiring.split(":"))
-        instantiated_default_mode = ret
+    if config.optimizer_excluding:
+        ret = ret.excluding(*config.optimizer_excluding.split(":"))
+    if config.optimizer_including:
+        ret = ret.including(*config.optimizer_including.split(":"))
+    if config.optimizer_requiring:
+        ret = ret.requiring(*config.optimizer_requiring.split(":"))
+    # Cache the mode for next time
+    _CACHED_RUNTIME_MODES[upper_string] = ret
 
     return ret
 
