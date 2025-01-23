@@ -742,6 +742,11 @@ def blas_header_text():
 
     blas_code = ""
     if not config.blas__ldflags:
+        # This code can only be reached by compiling a function with a manually specified GEMM Op.
+        # Normal PyTensor usage will end up with Dot22 or Dot22Scalar instead,
+        # which opt out of C-code completely if the blas flags are missing
+        _logger.warning("Using NumPy C-API based implementation for BLAS functions.")
+
         # Include the Numpy version implementation of [sd]gemm_.
         current_filedir = Path(__file__).parent
         blas_common_filepath = current_filedir / "c_code/alt_blas_common.h"
@@ -1001,10 +1006,6 @@ def blas_header_text():
             )
 
     return header + blas_code
-
-
-if not config.blas__ldflags:
-    _logger.warning("Using NumPy C-API based implementation for BLAS functions.")
 
 
 def mkl_threads_text():
