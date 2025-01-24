@@ -256,7 +256,7 @@ def _general_dot(
 
     .. testoutput::
 
-        (3, 4, 2)
+        (np.int64(3), np.int64(4), np.int64(2))
     """
     # Shortcut for non batched case
     if not batch_axes[0] and not batch_axes[1]:

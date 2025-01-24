@@ -757,13 +757,15 @@ def get_constant_idx(
     Example usage where `v` and `a` are appropriately typed PyTensor variables :
     >>> from pytensor.scalar import int64
     >>> from pytensor.tensor import matrix
+    >>> import numpy as np
+    >>>
     >>> v = int64("v")
     >>> a = matrix("a")
     >>> b = a[v, 1:3]
     >>> b.owner.op.idx_list
     (ScalarType(int64), slice(ScalarType(int64), ScalarType(int64), None))
     >>> get_constant_idx(b.owner.op.idx_list, b.owner.inputs, allow_partial=True)
-    [v, slice(1, 3, None)]
+    [v, slice(np.int64(1), np.int64(3), None)]
     >>> get_constant_idx(b.owner.op.idx_list, b.owner.inputs)
     Traceback (most recent call last):
     pytensor.tensor.exceptions.NotScalarConstantError
