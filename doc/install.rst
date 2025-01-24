@@ -10,7 +10,7 @@ The latest release of PyTensor can be installed from Pypi using `pip`:
     pip install pytensor
 
 
-Or via conda-force:
+Or via conda-forge:
 
 .. code-block:: bash
 
