@@ -70,9 +70,9 @@ jobs:
     strategy:
       matrix:
         platform:
-          - macos-12
-          - windows-2022
-          - ubuntu-20.04
+          - macos-latest
+          - windows-latest
+          - ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
