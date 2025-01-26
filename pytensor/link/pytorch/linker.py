@@ -37,9 +37,8 @@ class PytorchLinker(JITLinker):
     def jit_compile(self, fn):
         import torch
 
-        # two flags that tend to help our graphs
-        torch._dynamo.config.capture_func_transforms = True
-        torch._dynamo.config.capture_scalar_outputs = True
+        # flag that tend to help our graphs
+        torch._dynamo.config.capture_dynamic_output_shape_ops = True
 
         from pytensor.link.pytorch.dispatch import pytorch_typify
 
