@@ -4571,3 +4571,22 @@ def test_log_kv_stabilization():
         out.eval({x: 1000.0}, mode=mode),
         -1003.2180912984705,
     )
+
+
+@pytest.mark.parametrize("shape", [(), (4, 5, 6)], ids=["scalar", "tensor"])
+def test_pow_1_rewrite(shape):
+    x = pt.tensor("x", shape=shape)
+    z = 1**x
+
+    f1 = pytensor.function([x], z, mode=get_default_mode().excluding("canonicalize"))
+    assert debugprint(f1, file="str").count("Pow") == 1
+
+    x_val = np.random.random(shape).astype(config.floatX)
+    z_val_1 = f1(x_val)
+
+    f2 = pytensor.function([x], z)
+    assert debugprint(f2, file="str").count("Pow") == 0
+
+    z_val_2 = f2(x_val)
+
+    np.testing.assert_allclose(z_val_1, z_val_2)

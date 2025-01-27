@@ -9,7 +9,8 @@ import numpy as np
 
 import pytensor.scalar.basic as ps
 import pytensor.scalar.math as ps_math
-from pytensor.graph.basic import Constant, Variable
+from pytensor.graph import FunctionGraph
+from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.rewriting.basic import (
     NodeRewriter,
     PatternNodeRewriter,
@@ -1910,6 +1911,33 @@ def local_pow_canonicalize(fgraph, node):
     )
     if cst == 0:
         return [alloc_like(1, node.outputs[0], fgraph)]
+    if cst == 1:
+        return [alloc_like(node.inputs[0], node.outputs[0], fgraph)]
+
+
+@register_canonicalize
+@node_rewriter([pt_pow])
+def local_pow_canonicalize_base_1(
+    fgraph: FunctionGraph, node: Apply
+) -> list[TensorVariable] | None:
+    """
+    Replace `1 ** x` with 1, broadcast to the shape of the output.
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Full function graph being rewritten
+    node: Apply
+        Specific node being rewritten
+
+    Returns
+    -------
+    rewritten_output: list[TensorVariable] | None
+        Rewritten output of node, or None if no rewrite is possible
+    """
+    cst = get_underlying_scalar_constant_value(
+        node.inputs[0], only_process_constants=True, raise_not_constant=False
+    )
     if cst == 1:
         return [alloc_like(node.inputs[0], node.outputs[0], fgraph)]
 
