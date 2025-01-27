@@ -29,7 +29,7 @@ from pytensor.tensor.basic import (
     stack,
     switch,
 )
-from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import (
     CAReduce,
     Elemwise,
@@ -2726,6 +2726,22 @@ def logsumexp(x, axis=None, keepdims=False):
     return log(sum(exp(x), axis=axis, keepdims=keepdims))
 
 
+# Predefine all batched variations of Dot
+_inner_prod = Blockwise(
+    _dot,
+    signature="(n),(n)->()",
+)
+
+_matrix_vec_prod = Blockwise(
+    _dot,
+    signature="(m,k),(k)->(m)",
+)
+
+_vec_matrix_prod = Blockwise(
+    _dot,
+    signature="(k),(k,n)->(n)",
+)
+
 _matrix_matrix_matmul = Blockwise(
     _dot,
     signature="(m,k),(k,n)->(m,n)",
@@ -2795,14 +2811,24 @@ def matmul(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None
 
 
 @_vectorize_node.register(Dot)
-def vectorize_node_dot_to_matmul(op, node, batched_x, batched_y):
+def vectorize_node_dot(op, node, batched_x, batched_y):
     old_x, old_y = node.inputs
-    if old_x.type.ndim == 2 and old_y.type.ndim == 2:
-        # If original input is equivalent to a matrix-matrix product,
-        # return specialized Matmul Op to avoid unnecessary new Ops.
-        return matmul(batched_x, batched_y).owner
-    else:
-        return vectorize_node_fallback(op, node, batched_x, batched_y)
+    old_x_ndim = old_x.type.ndim
+    old_y_ndim = old_y.type.ndim
+    match (old_x_ndim, old_y_ndim):
+        case (1, 1):
+            batch_op = _inner_prod
+        case (2, 1):
+            batch_op = _matrix_vec_prod
+        case (1, 2):
+            batch_op = _vec_matrix_prod
+        case (2, 2):
+            batch_op = _matrix_matrix_matmul
+        case _:
+            raise ValueError(
+                f"Core dot Op should have 1D or 2D inputs, got {old_x_ndim}D and {old_y_ndim}D."
+            )
+    return batch_op(batched_x, batched_y).owner
 
 
 def nan_to_num(x, nan=0.0, posinf=None, neginf=None):

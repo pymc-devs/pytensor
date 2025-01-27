@@ -16,7 +16,8 @@ from pytensor.compile.function import function
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp, deep_copy_op
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, equal_computations
+from pytensor.graph import vectorize_graph
+from pytensor.graph.basic import Apply, ancestors, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import (
     SequentialNodeRewriter,
@@ -4590,3 +4591,53 @@ def test_pow_1_rewrite(shape):
 
     x_val = np.random.random(shape).astype(config.floatX)
     np.testing.assert_allclose(z.eval({x: x_val}), f(x_val))
+
+
+@pytest.mark.parametrize(
+    "a_shape,b_shape",
+    [
+        ((1,), (1,)),
+        ((3, 1), (1,)),
+        ((1,), (1, 3)),
+        ((3, 1), (1, 3)),
+    ],
+    ids=str,
+)
+@pytest.mark.parametrize("batched", (False, True))
+def test_local_dot_to_mul(batched, a_shape, b_shape):
+    a = tensor("a", shape=a_shape)
+    b = tensor("b", shape=b_shape)
+
+    out = dot(a, b)
+    if batched:
+        batch_a = tensor("batch_a", shape=(1, 5, *a_shape))
+        batch_b = tensor("batch_b", shape=(7, 1, *b_shape))
+        out = vectorize_graph(out, {a: batch_a, b: batch_b})
+        a = batch_a
+        b = batch_b
+
+    assert (
+        sum(
+            isinstance(var.owner.op, (Blockwise | Dot))
+            for var in ancestors([out])
+            if var.owner
+        )
+        == 1
+    )
+
+    # For now rewrite only applies to Batched Dots
+    rewritten_out = rewrite_graph(out)
+    assert rewritten_out.type.shape == out.type.shape
+    assert sum(
+        isinstance(var.owner.op, (Blockwise | Dot))
+        for var in ancestors([rewritten_out])
+        if var.owner
+    ) == (0 if batched else 1)
+
+    a_test = np.random.normal(size=a.type.shape).astype(a.type.dtype)
+    b_test = np.random.normal(size=b.type.shape).astype(b.type.dtype)
+    test_mode = Mode(linker="py", optimizer=None)
+    np.testing.assert_allclose(
+        out.eval({a: a_test, b: b_test}, mode=test_mode),
+        rewritten_out.eval({a: a_test, b: b_test}, mode=test_mode),
+    )
