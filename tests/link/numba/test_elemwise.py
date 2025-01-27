@@ -24,7 +24,10 @@ from tests.link.numba.test_basic import (
     scalar_my_multi_out,
     set_test_value,
 )
-from tests.tensor.test_elemwise import TestElemwise, careduce_benchmark_tester
+from tests.tensor.test_elemwise import (
+    careduce_benchmark_tester,
+    check_elemwise_runtime_broadcast,
+)
 
 
 rng = np.random.default_rng(42849)
@@ -124,7 +127,7 @@ def test_Elemwise(inputs, input_vals, output_fn, exc):
 
 @pytest.mark.xfail(reason="Logic had to be reversed due to surprising segfaults")
 def test_elemwise_runtime_broadcast():
-    TestElemwise.check_runtime_broadcast(get_mode("NUMBA"))
+    check_elemwise_runtime_broadcast(get_mode("NUMBA"))
 
 
 def test_elemwise_speed(benchmark):

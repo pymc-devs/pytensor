@@ -705,6 +705,33 @@ class TestBitOpReduceGrad:
             assert np.all(gx_val == 0)
 
 
+def check_elemwise_runtime_broadcast(mode):
+    """Check we emmit a clear error when runtime broadcasting would occur according to Numpy rules."""
+    x_v = matrix("x")
+    m_v = vector("m")
+
+    z_v = x_v - m_v
+    f = pytensor.function([x_v, m_v], z_v, mode=mode)
+
+    # Test invalid broadcasting by either x or m
+    for x_sh, m_sh in [((2, 1), (3,)), ((2, 3), (1,))]:
+        x = np.ones(x_sh).astype(config.floatX)
+        m = np.zeros(m_sh).astype(config.floatX)
+
+        # This error is introduced by PyTensor, so it's the same across different backends
+        with pytest.raises(ValueError, match="Runtime broadcasting not allowed"):
+            f(x, m)
+
+    x = np.ones((2, 3)).astype(config.floatX)
+    m = np.zeros((1,)).astype(config.floatX)
+
+    x = np.ones((2, 4)).astype(config.floatX)
+    m = np.zeros((3,)).astype(config.floatX)
+    # This error is backend specific, and may have different types
+    with pytest.raises((ValueError, TypeError)):
+        f(x, m)
+
+
 class TestElemwise(unittest_tools.InferShapeTester):
     def test_elemwise_grad_bool(self):
         x = scalar(dtype="bool")
@@ -750,42 +777,15 @@ class TestElemwise(unittest_tools.InferShapeTester):
         g = pytensor.function([a, b, c, d, e, f], s, mode=Mode(linker="py"))
         g(*[np.zeros(2**11, config.floatX) for i in range(6)])
 
-    @staticmethod
-    def check_runtime_broadcast(mode):
-        """Check we emmit a clear error when runtime broadcasting would occur according to Numpy rules."""
-        x_v = matrix("x")
-        m_v = vector("m")
-
-        z_v = x_v - m_v
-        f = pytensor.function([x_v, m_v], z_v, mode=mode)
-
-        # Test invalid broadcasting by either x or m
-        for x_sh, m_sh in [((2, 1), (3,)), ((2, 3), (1,))]:
-            x = np.ones(x_sh).astype(config.floatX)
-            m = np.zeros(m_sh).astype(config.floatX)
-
-            # This error is introduced by PyTensor, so it's the same across different backends
-            with pytest.raises(ValueError, match="Runtime broadcasting not allowed"):
-                f(x, m)
-
-        x = np.ones((2, 3)).astype(config.floatX)
-        m = np.zeros((1,)).astype(config.floatX)
-
-        x = np.ones((2, 4)).astype(config.floatX)
-        m = np.zeros((3,)).astype(config.floatX)
-        # This error is backend specific, and may have different types
-        with pytest.raises((ValueError, TypeError)):
-            f(x, m)
-
     def test_runtime_broadcast_python(self):
-        self.check_runtime_broadcast(Mode(linker="py"))
+        check_elemwise_runtime_broadcast(Mode(linker="py"))
 
     @pytest.mark.skipif(
         not pytensor.config.cxx,
         reason="G++ not available, so we need to skip this test.",
     )
     def test_runtime_broadcast_c(self):
-        self.check_runtime_broadcast(Mode(linker="c"))
+        check_elemwise_runtime_broadcast(Mode(linker="c"))
 
     def test_str(self):
         op = Elemwise(ps.add, inplace_pattern={0: 0}, name=None)
