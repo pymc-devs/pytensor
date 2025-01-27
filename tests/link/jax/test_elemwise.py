@@ -15,11 +15,11 @@ from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.special import SoftmaxGrad, log_softmax, softmax
 from pytensor.tensor.type import matrix, tensor, vector, vectors
 from tests.link.jax.test_basic import compare_jax_and_py
-from tests.tensor.test_elemwise import TestElemwise
+from tests.tensor.test_elemwise import check_elemwise_runtime_broadcast
 
 
 def test_elemwise_runtime_broadcast():
-    TestElemwise.check_runtime_broadcast(get_mode("JAX"))
+    check_elemwise_runtime_broadcast(get_mode("JAX"))
 
 
 def test_jax_Dimshuffle():
