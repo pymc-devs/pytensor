@@ -1923,10 +1923,13 @@ def local_pow_canonicalize(fgraph, node):
     new_out = None
 
     if cst_base == 1:
+        # 1 ** x = 1
         new_out = broadcast_arrays(*node.inputs)[0]
     elif cst_exponent == 0:
+        # x ** 0 = 1
         new_out = broadcast_arrays(ones_like(node.inputs[0]), node.inputs[1])[0]
     elif cst_exponent == 1:
+        # x ** 1 = x
         new_out = broadcast_arrays(*node.inputs)[0]
 
     if not new_out:
