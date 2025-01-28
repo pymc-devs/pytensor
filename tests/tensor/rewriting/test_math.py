@@ -4571,3 +4571,22 @@ def test_log_kv_stabilization():
         out.eval({x: 1000.0}, mode=mode),
         -1003.2180912984705,
     )
+
+
+@pytest.mark.parametrize("shape", [(), (4, 5, 6)], ids=["scalar", "tensor"])
+def test_pow_1_rewrite(shape):
+    x = pt.tensor("x", shape=shape)
+    z = 1**x
+
+    assert isinstance(z.owner.op, Elemwise) and isinstance(
+        z.owner.op.scalar_op, ps.basic.Pow
+    )
+
+    f = pytensor.function([x], z)
+    assert not any(
+        isinstance(node.op, Elemwise) and isinstance(node.op.scalar_op, ps.basic.Pow)
+        for node in f.maker.fgraph.toposort()
+    )
+
+    x_val = np.random.random(shape).astype(config.floatX)
+    np.testing.assert_allclose(z.eval({x: x_val}), f(x_val))
