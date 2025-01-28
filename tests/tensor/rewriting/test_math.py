@@ -4578,15 +4578,15 @@ def test_pow_1_rewrite(shape):
     x = pt.tensor("x", shape=shape)
     z = 1**x
 
-    f1 = pytensor.function([x], z, mode=get_default_mode().excluding("canonicalize"))
-    assert debugprint(f1, file="str").count("Pow") == 1
+    assert isinstance(z.owner.op, Elemwise) and isinstance(
+        z.owner.op.scalar_op, ps.basic.Pow
+    )
+
+    f = pytensor.function([x], z)
+    assert not any(
+        isinstance(node.op, Elemwise) and isinstance(node.op.scalar_op, ps.basic.Pow)
+        for node in f.maker.fgraph.toposort()
+    )
 
     x_val = np.random.random(shape).astype(config.floatX)
-    z_val_1 = f1(x_val)
-
-    f2 = pytensor.function([x], z)
-    assert debugprint(f2, file="str").count("Pow") == 0
-
-    z_val_2 = f2(x_val)
-
-    np.testing.assert_allclose(z_val_1, z_val_2)
+    np.testing.assert_allclose(z.eval({x: x_val}), f(x_val))
