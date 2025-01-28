@@ -1918,7 +1918,7 @@ def local_pow_canonicalize(fgraph, node):
         node.inputs[0], only_process_constants=True, raise_not_constant=False
     )
     if cst_base == 1:
-        return [alloc_like(1, node.outputs[0], fgraph)]
+        return [broadcast_arrays(*node.inputs)[0].astype(node.outputs[0].dtype)]
 
     cst_exponent = get_underlying_scalar_constant_value(
         node.inputs[1], only_process_constants=True, raise_not_constant=False
