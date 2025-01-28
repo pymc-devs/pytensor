@@ -9,8 +9,7 @@ import numpy as np
 
 import pytensor.scalar.basic as ps
 import pytensor.scalar.math as ps_math
-from pytensor.graph import FunctionGraph
-from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
     NodeRewriter,
     PatternNodeRewriter,
@@ -1906,39 +1905,27 @@ def local_reciprocal_canon(fgraph, node):
 @register_canonicalize
 @node_rewriter([pt_pow])
 def local_pow_canonicalize(fgraph, node):
-    cst = get_underlying_scalar_constant_value(
-        node.inputs[1], only_process_constants=True, raise_not_constant=False
-    )
-    if cst == 0:
-        return [alloc_like(1, node.outputs[0], fgraph)]
-    if cst == 1:
-        return [alloc_like(node.inputs[0], node.outputs[0], fgraph)]
-
-
-@register_canonicalize
-@node_rewriter([pt_pow])
-def local_pow_canonicalize_base_1(
-    fgraph: FunctionGraph, node: Apply
-) -> list[TensorVariable] | None:
     """
-    Replace `1 ** x` with 1, broadcast to the shape of the output.
+    Rewrites for exponential functions with straight-forward simplifications:
+    1. x ** 0 -> 1
+    2. x ** 1 -> x
+    3. 1 ** x -> 1
 
-    Parameters
-    ----------
-    fgraph: FunctionGraph
-        Full function graph being rewritten
-    node: Apply
-        Specific node being rewritten
-
-    Returns
-    -------
-    rewritten_output: list[TensorVariable] | None
-        Rewritten output of node, or None if no rewrite is possible
+    In all cases, the shape of the output is the result of broadcasting the shapes of the inputs.
     """
-    cst = get_underlying_scalar_constant_value(
+
+    cst_base = get_underlying_scalar_constant_value(
         node.inputs[0], only_process_constants=True, raise_not_constant=False
     )
-    if cst == 1:
+    if cst_base == 1:
+        return [alloc_like(1, node.outputs[0], fgraph)]
+
+    cst_exponent = get_underlying_scalar_constant_value(
+        node.inputs[1], only_process_constants=True, raise_not_constant=False
+    )
+    if cst_exponent == 0:
+        return [alloc_like(1, node.outputs[0], fgraph)]
+    if cst_exponent == 1:
         return [alloc_like(node.inputs[0], node.outputs[0], fgraph)]
 
 
