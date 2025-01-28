@@ -25,23 +25,6 @@ class NewTestRewriter(GraphRewriter):
         pass
 
 
-counter1 = 0
-
-counter2 = 0
-
-
-class TestOverwrite1(GraphRewriter):
-    def apply(self, fgraph):
-        global counter1
-        counter1 += 1
-
-
-class TestOverwrite2(GraphRewriter):
-    def apply(self, fgraph):
-        global counter2
-        counter2 += 1
-
-
 class TestDB:
     def test_register(self):
         db = RewriteDatabase()
@@ -58,8 +41,6 @@ class TestDB:
         with pytest.raises(ValueError, match=r"The tag.*"):
             db.register("c", NewTestRewriter())  # name taken
 
-        db.register("c", NewTestRewriter(), overwrite_existing=True)
-
         with pytest.raises(ValueError, match=r"The tag.*"):
             db.register("z", TestRewriter())  # name collides with tag
 
@@ -69,23 +50,39 @@ class TestDB:
         with pytest.raises(TypeError, match=r".* is not a valid.*"):
             db.register("d", 1)
 
-    def test_overwrite(self):
-        db = RewriteDatabase()
+    def test_overwrite_existing(self):
+        class TestOverwrite1(GraphRewriter):
+            def apply(self, fgraph):
+                fgraph.counter[0] += 1
+
+        class TestOverwrite2(GraphRewriter):
+            def apply(self, fgraph):
+                fgraph.counter[1] += 1
+
+        db = SequenceDB()
         fg = FunctionGraph([], [])
+        fg.counter = [0, 0]
 
-        db.register("a", TestRewriter())
-        Rewriter = db.__getitem__("a")
-        Rewriter.rewrite(fg)
+        db.register("a", TestRewriter(), "basic")
+        rewriter = db.query("+basic")
+        rewriter.rewrite(fg)
+        assert fg.counter == [0, 0]
 
-        db.register("a", TestOverwrite1(), overwrite_existing=True)
-        Rewriter = db.__getitem__("a")
-        Rewriter.rewrite(fg)
-        assert counter1 == 1 and counter2 == 0
+        with pytest.raises(ValueError, match=r"The tag.*"):
+            db.register("a", TestOverwrite1(), "basic")
+        rewriter = db.query("+basic")
+        rewriter.rewrite(fg)
+        assert fg.counter == [0, 0]
 
-        db.register("a", TestOverwrite2(), overwrite_existing=True)
-        Rewriter = db.__getitem__("a")
-        Rewriter.rewrite(fg)
-        assert counter1 == 1 and counter2 == 1
+        db.register("a", TestOverwrite1(), "basic", overwrite_existing=True)
+        rewriter = db.query("+basic")
+        rewriter.rewrite(fg)
+        assert fg.counter == [1, 0]
+
+        db.register("a", TestOverwrite2(), "basic", overwrite_existing=True)
+        rewriter = db.query("+basic")
+        rewriter.rewrite(fg)
+        assert fg.counter == [1, 1]
 
     def test_EquilibriumDB(self):
         eq_db = EquilibriumDB()
