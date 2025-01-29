@@ -87,8 +87,8 @@ class RandomGeneratorType(RandomType[np.random.Generator]):
 
     @staticmethod
     def values_eq(a, b):
-        sa = a if isinstance(a, dict) else a.__getstate__()
-        sb = b if isinstance(b, dict) else b.__getstate__()
+        sa = a if isinstance(a, dict) else a.bit_generator.state
+        sb = b if isinstance(b, dict) else b.bit_generator.state
 
         def _eq(sa, sb):
             for key in sa:
