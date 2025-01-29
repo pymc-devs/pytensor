@@ -200,7 +200,7 @@ input(s)'s memory). From there, go to the previous section.
    certainly lead to erroneous computations.
 
    You can often identify an incorrect `Op.view_map` or :attr:`Op.destroy_map`
-   by using :ref:`DebugMode`.
+   by using :ref:`DebugMode <debugmode>`.
 
 .. note::
    Consider using :class:`DebugMode` when developing

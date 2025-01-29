@@ -923,7 +923,7 @@ pre-defined macros.  These section tags have no macros: ``init_code``,
 discussed below.
 
 *      ``APPLY_SPECIFIC(str)`` which will automatically append a name
-       unique to the :ref:`Apply` node that applies the `Op` at the end
+       unique to the :ref:`apply` node that applies the `Op` at the end
        of the provided ``str``. The use of this macro is discussed
        further below.
 
@@ -994,7 +994,7 @@ Apply node in their own names to avoid conflicts between the different
 versions of the apply-specific code. The code that wasn't
 apply-specific was simply defined in the ``c_support_code`` method.
 
-To make indentifiers that include the :ref:`Apply` node name use the
+To make indentifiers that include the :ref:`apply` node name use the
 ``APPLY_SPECIFIC(str)`` macro. In the above example, this macro is
 used when defining the functions ``vector_elemwise_mult`` and
 ``vector_times_vector`` as well as when calling function

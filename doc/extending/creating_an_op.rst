@@ -7,7 +7,7 @@ Creating a new :class:`Op`: Python implementation
 So suppose you have looked through the library documentation and you don't see
 a function that does what you want.
 
-If you can implement something in terms of an existing :ref:`Op`, you should do that.
+If you can implement something in terms of an existing :ref:`op`, you should do that.
 Odds are your function that uses existing PyTensor expressions is short,
 has no bugs, and potentially profits from rewrites that have already been
 implemented.

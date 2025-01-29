@@ -347,15 +347,7 @@ afterwards compile this expression to get functions,
 using pseudo-random numbers is not as straightforward as it is in
 NumPy, though also not too complicated.
 
-The way to think about putting randomness into PyTensor's computations is
-to put random variables in your graph. PyTensor will allocate a NumPy
-`RandomStream` object (a random number generator) for each such
-variable, and draw from it as necessary. We will call this sort of
-sequence of random numbers a *random stream*. *Random streams* are at
-their core shared variables, so the observations on shared variables
-hold here as well. PyTensor's random objects are defined and implemented in
-:ref:`RandomStream<libdoc_tensor_random_utils>` and, at a lower level,
-in :ref:`RandomVariable<libdoc_tensor_random_basic>`.
+The general user-facing API is documented in :ref:`RandomStream<libdoc_tensor_random_basic>`
 
 For a more technical explanation of how PyTensor implements random variables see :ref:`prng`.
 
