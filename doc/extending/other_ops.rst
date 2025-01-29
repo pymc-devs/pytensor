@@ -197,7 +197,7 @@ Want C speed without writing C code for your new Op? You can use Numba
 to generate the C code for you! Here is an `example
 Op <https://gist.github.com/nouiz/5492778#file-theano_op-py>`_ doing that.
 
-.. _alternate_PyTensor_types:
+.. _alternate_pytensor_types:
 
 Alternate PyTensor Types
 ========================

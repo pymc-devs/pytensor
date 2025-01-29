@@ -83,7 +83,7 @@ Low-level objects
 .. automodule:: pytensor.tensor.random.op
    :members: RandomVariable, default_rng
 
-..automodule:: pytensor.tensor.random.type
+.. automodule:: pytensor.tensor.random.type
    :members: RandomType, RandomGeneratorType, random_generator_type
 
 .. automodule:: pytensor.tensor.random.var

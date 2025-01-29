@@ -26,4 +26,4 @@ some of them might be outdated though:
 
 * :ref:`unittest` -- Tutorial on how to use unittest in testing PyTensor.
 
-* :ref:`sparse` -- Description of the ``sparse`` type in PyTensor.
+* :ref:`libdoc_sparse` -- Description of the ``sparse`` type in PyTensor.
