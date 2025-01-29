@@ -63,7 +63,9 @@ def test_random_updates(rng_ctor):
     assert all(
         a == b if not isinstance(a, np.ndarray) else np.array_equal(a, b)
         for a, b in zip(
-            rng.get_value().__getstate__(), original_value.__getstate__(), strict=True
+            rng.get_value().bit_generator.state,
+            original_value.bit_generator.state,
+            strict=True,
         )
     )
 

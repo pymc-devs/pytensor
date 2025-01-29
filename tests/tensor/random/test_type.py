@@ -52,7 +52,7 @@ class TestRandomGeneratorType:
         with pytest.raises(TypeError):
             rng_type.filter(1)
 
-        rng_dict = rng.__getstate__()
+        rng_dict = rng.bit_generator.state
 
         assert rng_type.is_valid_value(rng_dict) is False
         assert rng_type.is_valid_value(rng_dict, strict=False)
@@ -88,13 +88,13 @@ class TestRandomGeneratorType:
         assert rng_type.values_eq(bitgen_g, bitgen_h)
 
         assert rng_type.is_valid_value(bitgen_a, strict=True)
-        assert rng_type.is_valid_value(bitgen_b.__getstate__(), strict=False)
+        assert rng_type.is_valid_value(bitgen_b.bit_generator.state, strict=False)
         assert rng_type.is_valid_value(bitgen_c, strict=True)
-        assert rng_type.is_valid_value(bitgen_d.__getstate__(), strict=False)
+        assert rng_type.is_valid_value(bitgen_d.bit_generator.state, strict=False)
         assert rng_type.is_valid_value(bitgen_e, strict=True)
-        assert rng_type.is_valid_value(bitgen_f.__getstate__(), strict=False)
+        assert rng_type.is_valid_value(bitgen_f.bit_generator.state, strict=False)
         assert rng_type.is_valid_value(bitgen_g, strict=True)
-        assert rng_type.is_valid_value(bitgen_h.__getstate__(), strict=False)
+        assert rng_type.is_valid_value(bitgen_h.bit_generator.state, strict=False)
 
     def test_may_share_memory(self):
         bg_a = np.random.PCG64()

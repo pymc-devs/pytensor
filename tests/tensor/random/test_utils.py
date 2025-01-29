@@ -165,14 +165,20 @@ class TestSharedRandomStream:
         state_rng = random.state_updates[0][0].get_value(borrow=True)
 
         if hasattr(state_rng, "get_state"):
-            ref_state = ref_rng.get_state()
             random_state = state_rng.get_state()
+
+            # hack to try to get something reasonable for ref_rng
+            try:
+                ref_state = ref_rng.get_state()
+            except AttributeError:
+                ref_state = list(ref_rng.bit_generator.state.values())
+
             assert np.array_equal(random_state[1], ref_state[1])
             assert random_state[0] == ref_state[0]
             assert random_state[2:] == ref_state[2:]
         else:
-            ref_state = ref_rng.__getstate__()
-            random_state = state_rng.__getstate__()
+            ref_state = ref_rng.bit_generator.state
+            random_state = state_rng.bit_generator.state
             assert random_state["bit_generator"] == ref_state["bit_generator"]
             assert random_state["state"] == ref_state["state"]
 

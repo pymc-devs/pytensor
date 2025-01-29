@@ -56,7 +56,7 @@ def assert_size_argument_jax_compatible(node):
 
 @jax_typify.register(Generator)
 def jax_typify_Generator(rng, **kwargs):
-    state = rng.__getstate__()
+    state = rng.bit_generator.state
     state["bit_generator"] = numpy_bit_gens[state["bit_generator"]]
 
     # XXX: Is this a reasonable approach?
