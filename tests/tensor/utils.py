@@ -339,6 +339,7 @@ def makeTester(
     good=None,
     bad_build=None,
     bad_runtime=None,
+    bad_compile=None,
     grad=None,
     mode=None,
     grad_rtol=None,
@@ -373,6 +374,7 @@ def makeTester(
     _test_memmap = test_memmap
     _check_name = check_name
     _grad_eps = grad_eps
+    _bad_compile = bad_compile or {}
 
     class Checker:
         op = staticmethod(_op)
@@ -382,6 +384,7 @@ def makeTester(
         good = _good
         bad_build = _bad_build
         bad_runtime = _bad_runtime
+        bad_compile = _bad_compile
         grad = _grad
         mode = _mode
         skip = skip_
@@ -538,6 +541,24 @@ def makeTester(
                 # The old error string was ("Test %s::%s: %s was successfully
                 # instantiated on the following bad inputs: %s"
                 # % (self.op, testname, node, inputs))
+
+        @config.change_flags(compute_test_value="off")
+        @pytest.mark.skipif(skip, reason="Skipped")
+        def test_bad_compile(self):
+            for testname, inputs in self.bad_compile.items():
+                inputrs = [shared(input) for input in inputs]
+                try:
+                    node = safe_make_node(self.op, *inputrs)
+                except Exception as exc:
+                    err_msg = (
+                        f"Test {self.op}::{testname}: Error occurred while trying"
+                        f" to make a node with inputs {inputs}"
+                    )
+                    exc.args += (err_msg,)
+                    raise
+
+                with pytest.raises(Exception):
+                    inplace_func([], node.outputs, mode=mode, name="test_bad_runtime")
 
         @config.change_flags(compute_test_value="off")
         @pytest.mark.skipif(skip, reason="Skipped")
