@@ -63,6 +63,28 @@ else:
 numpy_maxdims = 64 if using_numpy_2 else 32
 
 
+# function that replicates np.unique from numpy < 2.0
+def old_np_unique(
+    arr, return_index=False, return_inverse=False, return_counts=False, axis=None
+):
+    """Replicate np.unique from numpy versions < 2.0"""
+    if not return_inverse or not using_numpy_2:
+        return np.unique(arr, return_index, return_inverse, return_counts, axis)
+
+    outs = list(np.unique(arr, return_index, return_inverse, return_counts, axis))
+
+    inv_idx = 2 if return_index else 1
+
+    if axis is None:
+        outs[inv_idx] = np.ravel(outs[inv_idx])
+    else:
+        inv_shape = (arr.shape[axis],)
+        outs[inv_idx] = outs[inv_idx].reshape(inv_shape)
+
+    return tuple(outs)
+
+
+# compatibility header for C code
 def npy_2_compat_header() -> str:
     """Compatibility header that Numpy suggests is vendored with code that uses Numpy < 2.0 and Numpy 2.x"""
     return dedent("""

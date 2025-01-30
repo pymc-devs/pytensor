@@ -9,6 +9,7 @@ from pytensor import tensor as pt
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, applys_between, equal_computations
+from pytensor.npy_2_compat import old_np_unique
 from pytensor.raise_op import Assert
 from pytensor.tensor import alloc
 from pytensor.tensor.elemwise import DimShuffle
@@ -899,14 +900,14 @@ class TestUnique(utt.InferShapeTester):
     )
     def test_basic_vector(self, x, inp, axis):
         list_outs_expected = [
-            np.unique(inp, axis=axis),
-            np.unique(inp, True, axis=axis),
-            np.unique(inp, False, True, axis=axis),
-            np.unique(inp, True, True, axis=axis),
-            np.unique(inp, False, False, True, axis=axis),
-            np.unique(inp, True, False, True, axis=axis),
-            np.unique(inp, False, True, True, axis=axis),
-            np.unique(inp, True, True, True, axis=axis),
+            old_np_unique(inp, axis=axis),
+            old_np_unique(inp, True, axis=axis),
+            old_np_unique(inp, False, True, axis=axis),
+            old_np_unique(inp, True, True, axis=axis),
+            old_np_unique(inp, False, False, True, axis=axis),
+            old_np_unique(inp, True, False, True, axis=axis),
+            old_np_unique(inp, False, True, True, axis=axis),
+            old_np_unique(inp, True, True, True, axis=axis),
         ]
         for params, outs_expected in zip(
             self.op_params, list_outs_expected, strict=True

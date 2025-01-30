@@ -20,6 +20,7 @@ from pytensor.npy_2_compat import (
     normalize_axis_index,
     npy_2_compat_header,
     numpy_axis_is_none_flag,
+    old_np_unique,
 )
 from pytensor.raise_op import Assert
 from pytensor.scalar import int64 as int_t
@@ -1226,6 +1227,9 @@ class Unique(Op):
     """
     Wraps `numpy.unique`.
 
+    The indices returned when `return_inverse` is True are ravelled
+    to match the behavior of `numpy.unique` from before numpy version 2.0.
+
     Examples
     --------
     >>> import numpy as np
@@ -1271,17 +1275,21 @@ class Unique(Op):
 
         outputs = [TensorType(dtype=x.dtype, shape=out_shape)()]
         typ = TensorType(dtype="int64", shape=(None,))
+
         if self.return_index:
             outputs.append(typ())
+
         if self.return_inverse:
             outputs.append(typ())
+
         if self.return_counts:
             outputs.append(typ())
+
         return Apply(self, [x], outputs)
 
     def perform(self, node, inputs, output_storage):
         [x] = inputs
-        outs = np.unique(
+        outs = old_np_unique(
             x,
             return_index=self.return_index,
             return_inverse=self.return_inverse,
@@ -1306,9 +1314,14 @@ class Unique(Op):
             out_shapes[0] = tuple(shape)
 
         if self.return_inverse:
-            shape = prod(x_shape) if self.axis is None else x_shape[axis]
             return_index_out_idx = 2 if self.return_index else 1
-            out_shapes[return_index_out_idx] = (shape,)
+
+            if self.axis is not None:
+                shape = (x_shape[axis],)
+            else:
+                shape = (prod(x_shape),)
+
+            out_shapes[return_index_out_idx] = shape
 
         return out_shapes
 
