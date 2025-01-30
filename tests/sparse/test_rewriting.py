@@ -14,6 +14,9 @@ from tests import unittest_tools as utt
 from tests.sparse.test_basic import random_lil
 
 
+sparse_formats = ["csc", "csr"]
+
+
 def test_local_csm_properties_csm():
     data = vector()
     indices, indptr, shape = (ivector(), ivector(), ivector())
@@ -71,7 +74,7 @@ def test_local_mul_s_d():
     mode = get_default_mode()
     mode = mode.including("specialize", "local_mul_s_d")
 
-    for sp_format in sparse.sparse_formats:
+    for sp_format in sparse_formats:
         inputs = [getattr(pytensor.sparse, sp_format + "_matrix")(), matrix()]
 
         f = pytensor.function(inputs, sparse.mul_s_d(*inputs), mode=mode)
