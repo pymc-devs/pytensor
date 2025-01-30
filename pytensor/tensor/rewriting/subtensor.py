@@ -14,6 +14,7 @@ from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     in2out,
     node_rewriter,
+    out2in,
 )
 from pytensor.raise_op import Assert
 from pytensor.tensor.basic import (
@@ -1826,7 +1827,6 @@ def local_join_subtensors(fgraph, node):
                 return [merged_subtensors]
 
 
-@register_specialize
 @node_rewriter(
     [
         Subtensor,
@@ -1912,6 +1912,18 @@ def local_uint_constant_indices(fgraph, node):
     new_out = op(*new_args)
     copy_stack_trace(node.outputs[0], new_out)
     return [new_out]
+
+
+compile.optdb.register(
+    local_uint_constant_indices.__name__,
+    out2in(local_uint_constant_indices),
+    "fast_run",
+    # After specialization and uncanonicalization
+    # Other rewrites don't worry about the dtype of the indices
+    # And can cause unnecessary passes of this optimization
+    # Such as x.shape[np.int(0)] -> x.shape[np.uint(0)]
+    position=4,
+)
 
 
 @register_canonicalize("shape_unsafe")
