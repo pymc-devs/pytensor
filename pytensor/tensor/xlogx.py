@@ -10,14 +10,10 @@ class XlogX(ps.UnaryScalarOp):
 
     """
 
-    @staticmethod
-    def st_impl(x):
+    def impl(self, x):
         if x == 0.0:
             return 0.0
         return x * np.log(x)
-
-    def impl(self, x):
-        return XlogX.st_impl(x)
 
     def grad(self, inputs, grads):
         (x,) = inputs
@@ -45,14 +41,10 @@ class XlogY0(ps.BinaryScalarOp):
 
     """
 
-    @staticmethod
-    def st_impl(x, y):
+    def impl(self, x, y):
         if x == 0.0:
             return 0.0
         return x * np.log(y)
-
-    def impl(self, x, y):
-        return XlogY0.st_impl(x, y)
 
     def grad(self, inputs, grads):
         x, y = inputs
