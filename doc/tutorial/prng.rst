@@ -31,8 +31,8 @@ In the first line np.random.default_rng(seed) creates a random Generator.
 >>> rng # doctest: +SKIP
 Generator(PCG64) at 0x7F6C04535820
 
-Every numpy Generator holds a BitGenerator, which is able to generate high-quality sequences of pseudo random bits.
-Numpy generators convert these sequences of bits into sequences of numbers that follow a specific statistical distribution.
+Every NumPy Generator holds a BitGenerator, which is able to generate high-quality sequences of pseudo random bits.
+NumPy generators' methods convert these sequences of bits into sequences of numbers that follow a specific statistical distribution.
 For more details, you can read `NumPy random sampling documentation <https://numpy.org/doc/stable/reference/random>`_.
 
 >>> rng.bit_generator # doctest: +SKIP
@@ -47,6 +47,7 @@ For more details, you can read `NumPy random sampling documentation <https://num
 
 When we call rng.uniform(size=2), the Generator class requested a new array of pseudo random bits (state) from the BitGenerator,
 and used a deterministic mapping function to convert those into a float64 numbers.
+
 It did this twice, because we requested two draws via the size argument.
 In the long-run this deterministic mapping function should produce draws that are statistically indistinguishable from a true uniform distribution.
 
@@ -71,7 +72,7 @@ array([0.033, 0.972, 0.459, 0.71 , 0.765])
 SciPy
 -----
 
-Scipy wraps these Numpy routines in a slightly different API.
+SciPy wraps these NumPy routines in a slightly different API.
 
 >>> import scipy.stats as st
 >>> rng = np.random.default_rng(seed=123)
@@ -82,7 +83,7 @@ PyTensor
 --------
 
 PyTensor does not implement its own bit/generators methods.
-Just like Scipy, it borrows NumPy routines directly.
+Just like SciPy, it borrows NumPy routines directly.
 
 The low-level API of PyTensor RNGs is similar to that of SciPy,
 whereas the higher-level API of RandomStreams is more like that of NumPy.
@@ -95,20 +96,19 @@ We will look at RandomStreams shortly, but we will start with the low-level API.
 >>> x = pt.random.uniform(size=2, rng=rng)
 >>> f = pytensor.function([rng], x)
 
-We created a function that takes a Numpy RandomGenerator and returns two uniform draws. Let's evaluate it
+We created a function that takes a NumPy RandomGenerator and returns two uniform draws. Let's evaluate it
 
 >>> rng_val = np.random.default_rng(123)
 >>> print(f(rng_val), f(rng_val))
 [0.68235186 0.05382102] [0.68235186 0.05382102]
 
-The first numbers were exactly the same as the numpy and scipy calls, because we are using the very same routines.
+The first numbers were exactly the same as the NumPy and SciPy calls, because we are using the very same routines.
 
 Perhaps surprisingly, we got the same results when we called the function the second time!
 This is because PyTensor functions do not hold an internal state and do not modify inputs inplace unless requested to.
 
-We made sure that the rng_val was not modified when calling our Pytensor function, by copying it before using it.
-This may feel inefficient (and it is), but PyTensor is built on a pure functional approach, which is not allowed to have side-effects
-(such as changing global variables) by default.
+We made sure that the rng_val was not modified when calling our PyTensor function, by copying it before using it.
+This may feel inefficient (and it is), but PyTensor is built on a pure functional approach, which is not allowed to have side-effects by default.
 
 We will later see how we can get around this issue by making the inputs mutable or using shared variables with explicit update rules.
 
@@ -129,8 +129,8 @@ In this case we had to advance it twice to get two completely new draws, because
 But other distributions could need more states for a single draw, or they could be clever and reuse the same state for multiple draws.
 
 Because it is not in generally possible to know how much one should modify the generator's bit generator,
-PyTensor RandomVariables actually return the copied generator as a hidden output.
-This copied generator can be safely used again because it contains the bit generator that was already modified when taking draws.
+PyTensor RandomVariables actually return the used generator as a hidden output.
+This generator can be safely used again because it contains the bit generator that was already modified when taking draws.
 
 >>> next_rng, x = x.owner.outputs
 >>> next_rng.type, x.type
@@ -148,7 +148,6 @@ uniform_rv{"(),()->()"}.0 [id A] <RandomGeneratorType> 'next_rng'
     └─ 1.0 [id G] <Scalar(float32, shape=())>
 uniform_rv{"(),()->()"}.1 [id A] <Vector(float64, shape=(2,))> 'x'
  └─ ···
-<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
 
 We can see the single node with [id A], has two outputs, which we named next_rng and x. By default only the second output x is given to the user directly, and the other is "hidden".
 
@@ -226,13 +225,13 @@ This is exactly what RandomStream does behind the scenes
 >>> x.owner.inputs[0], x.owner.inputs[0].default_update  # doctest: +SKIP
 (RNG(<Generator(PCG64) at 0x7FA45F4A3760>), uniform_rv{"(),()->()"}.0)
 
-From the example here, you can see that RandomStream uses a NumPy-like API in contrast to
-the SciPy-like API of `pytensor.tensor.random`. Full documentation can be found at
-:doc:`../library/tensor/random/basic`.
-
 >>> f = pytensor.function([], x)
 >>> print(f(), f(), f())
 0.19365083425294516 0.7541389670292019 0.2762903411491048
+
+From the example here, you can see that RandomStream uses a NumPy-like API in contrast to
+the SciPy-like API of `pytensor.tensor.random`. Full documentation can be found at
+:doc:`libdoc_tensor_random_basic`.
 
 Shared RNGs are created by default
 ----------------------------------
@@ -279,7 +278,7 @@ RandomStreams provide a helper method to achieve the same
 Inplace optimization
 ====================
 
-As mentioned before, by default RandomVariables return a copy of the next RNG state, which can be quite slow.
+As mentioned, RandomVariable Ops default to making a copy of the input RNG before using it, which can be quite slow.
 
 >>> rng = np.random.default_rng(123)
 >>> rng_shared = pytensor.shared(rng, name="rng")
@@ -291,13 +290,13 @@ uniform_rv{"(),()->()"}.1 [id A] 'x' 0
  ├─ NoneConst{None} [id C]
  ├─ 0.0 [id D]
  └─ 1.0 [id E]
-<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
+
 
 >>> %timeit f()  # doctest: +SKIP
-169 µs ± 24.6 µs per loop (mean ± std. dev. of 7 runs, 10,000 loops each)
+81.8 µs ± 15.4 µs per loop (mean ± std. dev. of 7 runs, 10000 loops each)
 
 >>> %timeit rng.uniform()  # doctest: +SKIP
-3.56 µs ± 106 ns per loop (mean ± std. dev. of 7 runs, 100,000 loops each)
+2.15 µs ± 63.4 ns per loop (mean ± std. dev. of 7 runs, 100000 loops each)
 
 Like other PyTensor operators, RandomVariable's can be given permission to modify inputs inplace during their operation.
 
@@ -306,16 +305,6 @@ If the flag is set, the RNG will not be copied before taking random draws.
 
 >>> x.owner.op.inplace
 False
-
-This flag is printed as the last argument of the Op in the `dprint`
-
->>> pytensor.dprint(x) # doctest: +SKIP
-uniform_rv{"(),()->()"}.1 [id A] 'x' 0
- ├─ rng [id B]
- ├─ NoneConst{None} [id C]
- ├─ 0.0 [id D]
- └─ 1.0 [id E]
-<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
 
 For illustration purposes, we will subclass the Uniform Op class and set inplace to True by default.
 
@@ -336,27 +325,21 @@ uniform_rv{"(),()->()"}.1 [id A] d={0: [0]} 0
  ├─ NoneConst{None} [id C]
  ├─ 0.0 [id D]
  └─ 1.0 [id E]
-<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
 
-The destroy map annotation tells us that the first output of the x variable is allowed to alter the first input.
+The destroy map annotation tells us that the first output of the x variable is allowed to modify the first input.
 
 >>> %timeit inplace_f() # doctest: +SKIP
-35.5 µs ± 1.87 µs per loop (mean ± std. dev. of 7 runs, 10,000 loops each)
+9.71 µs ± 2.06 µs per loop (mean ± std. dev. of 7 runs, 100000 loops each)
 
-Performance is now much closer to calling numpy directly, with only a small overhead introduced by the PyTensor function.
+Performance is now much closer to calling NumPy directly, with a small overhead introduced by the PyTensor function.
 
 The `random_make_inplace <https://github.com/pymc-devs/pytensor/blob/3fcf6369d013c597a9c964b2400a3c5e20aa8dce/pytensor/tensor/random/rewriting/basic.py#L42-L52>`_
 rewrite automatically replaces RandomVariable Ops by their inplace counterparts, when such operation is deemed safe. This happens when:
 
 #. An input RNG is flagged as `mutable` and is used in not used anywhere else.
-#. A RNG is created intermediately and used in not used anywhere else.
+#. A RNG is created intermediately and not used anywhere else.
 
-The first case is true when a users uses the `mutable` `kwarg` directly, or much more commonly,
-when a shared RNG is used and a (default or manual) update expression is given.
-In this case, a RandomVariable is allowed to modify the RNG because the shared variable holding it will be rewritten anyway.
-
-The second case is not very common, because RNGs are not usually chained across multiple RandomVariable Ops.
-See more details in the next section.
+The first case is true when a users uses the `mutable` `kwarg` directly.
 
 >>> from pytensor.compile.io import In
 >>> rng = pt.random.type.RandomGeneratorType()("rng")
@@ -371,7 +354,9 @@ uniform_rv{"(),()->()"}.1 [id A] d={0: [0]} 0
  ├─ NoneConst{None} [id C]
  ├─ 0.0 [id D]
  └─ 1.0 [id E]
-<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
+
+Or, much more commonly, when a shared RNG is used and a (default or manual) update expression is given.
+In this case, a RandomVariable is allowed to modify the RNG because the shared variable holding it will be rewritten anyway.
 
 >>> rng = pytensor.shared(np.random.default_rng(), name="rng")
 >>> next_rng, x = pt.random.uniform(rng=rng).owner.outputs
@@ -385,7 +370,9 @@ uniform_rv{"(),()->()"}.1 [id A] d={0: [0]} 0
  └─ 1.0 [id E]
 uniform_rv{"(),()->()"}.0 [id A] d={0: [0]} 0
  └─ ···
-<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
+
+The second case is not very common, because RNGs are not usually chained across multiple RandomVariable Ops.
+See more details in the next section.
 
 Multiple random variables
 =========================
@@ -420,7 +407,6 @@ normal_rv{"(),()->()"}.0 [id A] <RandomGeneratorType> 'next_rng_x' 0
  └─ ···
 normal_rv{"(),()->()"}.0 [id F] <RandomGeneratorType> 'next_rng_y' 1
  └─ ···
-<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
 
 >>> f(), f(), f()
 ([array(-9.8912135), array(-9.80160951)],
@@ -450,7 +436,6 @@ normal_rv{"(),()->()"}.0 [id A] <RandomGeneratorType> 0
  └─ ···
 normal_rv{"(),()->()"}.0 [id F] <RandomGeneratorType> 1
  └─ ···
-<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
 
 >>> f(), f(), f()
 ([array(-5.81223492), array(-5.85081162)],
@@ -460,15 +445,15 @@ normal_rv{"(),()->()"}.0 [id F] <RandomGeneratorType> 1
 We could have used a single rng.
 
 >>> rng_x = pytensor.shared(np.random.default_rng(seed=123), name="rng_x")
->>> next_rng_x, x = pt.random.normal(loc=0, scale=1, rng=rng).owner.outputs
+>>> next_rng_x, x = pt.random.normal(loc=0, scale=1, rng=rng_x).owner.outputs
 >>> next_rng_x.name = "next_rng_x"
 >>> next_rng_y, y = pt.random.normal(loc=100, scale=1, rng=next_rng_x).owner.outputs
 >>> next_rng_y.name = "next_rng_y"
 >>>
->>> f = pytensor.function([], [x, y], updates={rng: next_rng_y})
+>>> f = pytensor.function([], [x, y], updates={rng_x: next_rng_y})
 >>> pytensor.dprint(f, print_type=True) # doctest: +SKIP
 normal_rv{"(),()->()"}.1 [id A] <Scalar(float64, shape=())> 0
- ├─ rng [id B] <RandomGeneratorType>
+ ├─ rng_x [id B] <RandomGeneratorType>
  ├─ NoneConst{None} [id C] <NoneTypeT>
  ├─ 0 [id D] <Scalar(int8, shape=())>
  └─ 1 [id E] <Scalar(int8, shape=())>
@@ -480,24 +465,23 @@ normal_rv{"(),()->()"}.1 [id F] <Scalar(float64, shape=())> 1
  └─ 1 [id E] <Scalar(int8, shape=())>
 normal_rv{"(),()->()"}.0 [id F] <RandomGeneratorType> 'next_rng_y' 1
  └─ ···
-<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
 
 >>> f(), f()
-([array(0.91110389), array(101.4795275)],
- [array(0.0908175), array(100.59639646)])
+([array(-0.98912135), array(99.63221335)],
+ [array(1.28792526), array(100.19397442)])
 
-It works, but that graph is slightly unorthodox in Pytensor.
+It works, but that graph is slightly unorthodox in PyTensor.
 
-One practical reason is that it is more difficult to define the correct update expression for the shared RNG variable.
+One practical reason why, is that it is more difficult to define the correct update expression for the shared RNG variable.
 
-One techincal reason is that it makes rewrites more challenging in cases where RandomVariables could otherwise be manipulated independently.
+One techincal reason why, is that it makes rewrites more challenging in cases where RandomVariables could otherwise be manipulated independently.
 
 Creating multiple RNG variables
 -------------------------------
 
 RandomStreams generate high quality seeds for multiple variables, following the NumPy best practices https://numpy.org/doc/stable/reference/random/parallel.html#parallel-random-number-generation.
 
-Users who create their own RNGs should follow the same practice!
+Users who sidestep RandomStreams, either by creating their own RNGs or relying on RandomVariable's default shared RNGs, should follow the same practice!
 
 Random variables in inner graphs
 ================================
@@ -629,7 +613,7 @@ RNGs in Scan are only supported via shared variables in non-sequences at the mom
 >>>     print(err)
 Tensor type field must be a TensorType; found <class 'pytensor.tensor.random.type.RandomGeneratorType'>.
 
-In the future, TensorTypes may be allowed as explicit recurring states, rendering the use of updates optional or unnecessary
+In the future, RandomGenerator variables may be allowed as explicit recurring states, rendering the internal use of updates optional or unnecessary
 
 OpFromGraph
 -----------
@@ -671,7 +655,7 @@ Other backends (and their limitations)
 Numba
 -----
 
-NumPy random generator can be used with Numba backend.
+NumPy random generators can be natively used with the Numba backend.
 
 >>> rng = pytensor.shared(np.random.default_rng(123), name="randomstate_rng")
 >>> x = pt.random.normal(rng=rng)
@@ -692,7 +676,6 @@ Inner graphs:
     └─ *4-<Scalar(float32, shape=())> [id K] <Scalar(float32, shape=())>
  ← normal_rv{"(),()->()"}.1 [id G] <Scalar(float64, shape=())>
     └─ ···
-<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
 
 >>> print(numba_fn(), numba_fn())
 -0.9891213503478509 -0.9891213503478509
@@ -700,11 +683,11 @@ Inner graphs:
 JAX
 ---
 
-JAX uses a different type of PRNG than those of Numpy. This means that the standard shared RNGs cannot be used directly in graphs transpiled to JAX.
+JAX uses a different type of PRNG than those of NumPy. This means that the standard shared RNGs cannot be used directly in graphs transpiled to JAX.
 
-Instead a copy of the Shared RNG variable is made, and its bit generator state is given a jax_state entry that is actually used by the JAX random variables.
+Instead a copy of the Shared RNG variable is made, and its bit generator state is expanded with a jax_state entry. This is what's actually used by the JAX random variables.
 
-In general, update rules are still respected, but they won't be used on the original shared variable, only the copied one actually used in the transpiled function
+In general, update rules are still respected, but they won't update/rely on the original shared variable.
 
 >>> import jax
 >>> rng = pytensor.shared(np.random.default_rng(123), name="rng")
@@ -718,7 +701,6 @@ uniform_rv{"(),()->()"}.1 [id A] <Scalar(float64, shape=())> 0
  └─ 1.0 [id E] <Scalar(float32, shape=())>
 uniform_rv{"(),()->()"}.0 [id A] <RandomGeneratorType> 0
  └─ ···
-<ipykernel.iostream.OutStream at 0x7fa5d3a475e0>
 
 >>> print(jax_fn(), jax_fn())
 [Array(0.07577298, dtype=float64)] [Array(0.09217023, dtype=float64)]
