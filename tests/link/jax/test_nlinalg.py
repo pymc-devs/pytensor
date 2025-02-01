@@ -3,7 +3,6 @@ import pytest
 
 from pytensor.compile.function import function
 from pytensor.configdefaults import config
-from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor import nlinalg as pt_nlinalg
 from pytensor.tensor.type import matrix
 from tests.link.jax.test_basic import compare_jax_and_py
@@ -21,41 +20,34 @@ def test_jax_basic_multiout():
     x = matrix("x")
 
     outs = pt_nlinalg.eig(x)
-    out_fg = FunctionGraph([x], outs)
 
     def assert_fn(x, y):
         np.testing.assert_allclose(x.astype(config.floatX), y, rtol=1e-3)
 
-    compare_jax_and_py(out_fg, [X.astype(config.floatX)], assert_fn=assert_fn)
+    compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
 
     outs = pt_nlinalg.eigh(x)
-    out_fg = FunctionGraph([x], outs)
-    compare_jax_and_py(out_fg, [X.astype(config.floatX)], assert_fn=assert_fn)
+    compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
 
     outs = pt_nlinalg.qr(x, mode="full")
-    out_fg = FunctionGraph([x], outs)
-    compare_jax_and_py(out_fg, [X.astype(config.floatX)], assert_fn=assert_fn)
+    compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
 
     outs = pt_nlinalg.qr(x, mode="reduced")
-    out_fg = FunctionGraph([x], outs)
-    compare_jax_and_py(out_fg, [X.astype(config.floatX)], assert_fn=assert_fn)
+    compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
 
     outs = pt_nlinalg.svd(x)
-    out_fg = FunctionGraph([x], outs)
-    compare_jax_and_py(out_fg, [X.astype(config.floatX)], assert_fn=assert_fn)
+    compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
 
     outs = pt_nlinalg.slogdet(x)
-    out_fg = FunctionGraph([x], outs)
-    compare_jax_and_py(out_fg, [X.astype(config.floatX)], assert_fn=assert_fn)
+    compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
 
 
 def test_pinv():
     x = matrix("x")
     x_inv = pt_nlinalg.pinv(x)
 
-    fgraph = FunctionGraph([x], [x_inv])
     x_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
-    compare_jax_and_py(fgraph, [x_np])
+    compare_jax_and_py([x], [x_inv], [x_np])
 
 
 def test_pinv_hermitian():
@@ -94,8 +86,7 @@ def test_kron():
     y = matrix("y")
     z = pt_nlinalg.kron(x, y)
 
-    fgraph = FunctionGraph([x, y], [z])
     x_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
     y_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
 
-    compare_jax_and_py(fgraph, [x_np, y_np])
+    compare_jax_and_py([x, y], [z], [x_np, y_np])
