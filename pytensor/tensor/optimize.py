@@ -2,11 +2,11 @@ from copy import copy
 
 from scipy.optimize import minimize as scipy_minimize
 
-from pytensor import function
+from pytensor import function, graph_replace
 from pytensor.gradient import grad
-from pytensor.graph import Apply, Constant, FunctionGraph, clone_replace
+from pytensor.graph import Apply, Constant, FunctionGraph
 from pytensor.graph.basic import truncated_graph_inputs
-from pytensor.graph.op import HasInnerGraph, Op
+from pytensor.graph.op import ComputeMapType, HasInnerGraph, Op, StorageMapType
 from pytensor.scalar import bool as scalar_bool
 
 
@@ -17,7 +17,9 @@ class MinimizeOp(Op, HasInnerGraph):
         *args,
         output,
         method="BFGS",
-        jac=False,
+        jac=True,
+        hess=False,
+        hessp=False,
         options: dict | None = None,
         debug: bool = False,
     ):
@@ -28,7 +30,9 @@ class MinimizeOp(Op, HasInnerGraph):
             self.fgraph.add_output(grad_wrt_x)
 
         self.jac = jac
-        # self.hess = hess
+        self.hess = hess
+        self.hessp = hessp
+
         self.method = method
         self.options = options if options is not None else {}
         self.debug = debug
@@ -78,14 +82,19 @@ class MinimizeOp(Op, HasInnerGraph):
         copy_op.fgraph = self.fgraph.clone()
         return copy_op
 
-    # def prepare_node():
-    #     # ... trigger the compilation of the inner fgraph so it shows in the dprint before the first call
-    #     ...
+    def prepare_node(
+        self,
+        node: Apply,
+        storage_map: StorageMapType | None,
+        compute_map: ComputeMapType | None,
+        impl: str | None,
+    ):
+        """Trigger the compilation of the inner fgraph so it shows in the dprint before the first call"""
+        # TODO: Implemet this method
 
     def make_node(self, *inputs):
-        # print(inputs)
         assert len(inputs) == len(self.inner_inputs)
-        # Assert type is correct.
+
         return Apply(
             self, inputs, [self.inner_outputs[0].type(), scalar_bool("success")]
         )
@@ -114,18 +123,14 @@ class MinimizeOp(Op, HasInnerGraph):
         x_star, success = outputs
         output_grad, _ = output_grads
 
-        # x_root, stats = root(func, x0, args=[arg], tol=1e-8)
-
         inner_x, *inner_args = self.fgraph.inputs
         inner_fx = self.fgraph.outputs[0]
-
-        # f_x_star = clone_replace(inner_fx, replace={inner_x: x_star})
 
         inner_grads = grad(inner_fx, [inner_x, *inner_args])
 
         # TODO: Does clone replace do what we want? It might need a merge optimization pass afterwards
         replace = dict(zip(self.fgraph.inputs, (x_star, *args), strict=True))
-        grad_f_wrt_x_star, *grad_f_wrt_args = clone_replace(
+        grad_f_wrt_x_star, *grad_f_wrt_args = graph_replace(
             inner_grads, replace=replace
         )
 
@@ -142,16 +147,52 @@ class MinimizeOp(Op, HasInnerGraph):
 
 
 def minimize(
-    objective, x, jac: bool = True, debug: bool = False, options: dict | None = None
+    objective,
+    x,
+    method: str = "BFGS",
+    jac: bool = True,
+    debug: bool = False,
+    options: dict | None = None,
 ):
+    """
+    Minimize a scalar objective function using scipy.optimize.minimize.
+
+    Parameters
+    ----------
+    objective : TensorVariable
+        The objective function to minimize. This should be a pytensor variable representing a scalar value.
+
+    x : TensorVariable
+        The variable with respect to which the objective function is minimized. It must be an input to the
+        computational graph of `objective`.
+
+    method : str, optional
+        The optimization method to use. Default is "BFGS". See scipy.optimize.minimize for other options.
+
+    jac : bool, optional
+        Whether to compute and use the gradient of teh objective function with respect to x for optimization.
+        Default is True.
+
+    debug : bool, optional
+        If True, prints raw scipy result after optimization. Default is False.
+
+    **optimizer_kwargs
+        Additional keyword arguments to pass to scipy.optimize.minimize
+
+    Returns
+    -------
+    TensorVariable
+        The optimized value of x that minimizes the objective function.
+
+    """
     args = [
         arg
         for arg in truncated_graph_inputs([objective], [x])
         if (arg is not x and not isinstance(arg, Constant))
     ]
-    # print(args)
+
     minimize_op = MinimizeOp(
-        x, *args, output=objective, jac=jac, debug=debug, options=options
+        x, *args, output=objective, method=method, jac=jac, debug=debug, options=options
     )
     return minimize_op(x, *args)
 
