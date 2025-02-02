@@ -20,7 +20,6 @@ def test_simple_minimize():
     out = (x - b * c) ** 2
 
     minimized_x, success = minimize(out, x)
-    minimized_x.dprint()
 
     a_val = 2.0
     c_val = 3.0

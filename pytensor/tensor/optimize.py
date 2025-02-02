@@ -5,12 +5,12 @@ from scipy.optimize import minimize as scipy_minimize
 from scipy.optimize import root as scipy_root
 
 from pytensor import Variable, function, graph_replace
-from pytensor.gradient import grad, jacobian
+from pytensor.gradient import DisconnectedType, grad, jacobian
 from pytensor.graph import Apply, Constant, FunctionGraph
 from pytensor.graph.basic import truncated_graph_inputs
 from pytensor.graph.op import ComputeMapType, HasInnerGraph, Op, StorageMapType
 from pytensor.scalar import bool as scalar_bool
-from pytensor.tensor.basic import atleast_2d
+from pytensor.tensor.basic import atleast_2d, concatenate
 from pytensor.tensor.slinalg import solve
 from pytensor.tensor.variable import TensorVariable
 
@@ -146,18 +146,40 @@ class MinimizeOp(ScipyWrapperOp):
         inner_x, *inner_args = self.fgraph.inputs
         inner_fx = self.fgraph.outputs[0]
 
-        inner_grads = grad(inner_fx, [inner_x, *inner_args])
+        implicit_f = grad(inner_fx, inner_x)
+
+        df_dx = atleast_2d(concatenate(jacobian(implicit_f, [inner_x]), axis=-1))
+
+        df_dtheta = concatenate(
+            [
+                atleast_2d(x, left=False)
+                for x in jacobian(implicit_f, inner_args, disconnected_inputs="ignore")
+            ],
+            axis=-1,
+        )
 
         replace = dict(zip(self.fgraph.inputs, (x_star, *args), strict=True))
 
-        grad_f_wrt_x_star, *grad_f_wrt_args = graph_replace(
-            inner_grads, replace=replace
-        )
+        df_dx_star, df_dtheta_star = graph_replace([df_dx, df_dtheta], replace=replace)
 
-        grad_wrt_args = [
-            -grad_f_wrt_arg / grad_f_wrt_x_star * output_grad
-            for grad_f_wrt_arg in grad_f_wrt_args
-        ]
+        grad_wrt_args_vector = solve(-df_dtheta_star, df_dx_star)
+
+        cursor = 0
+        grad_wrt_args = []
+
+        for output_grad, arg in zip(output_grads, args, strict=True):
+            arg_shape = arg.shape
+            arg_size = arg_shape.prod()
+            arg_grad = grad_wrt_args_vector[cursor : cursor + arg_size].reshape(
+                arg_shape
+            )
+
+            grad_wrt_args.append(
+                arg_grad * output_grad
+                if not isinstance(output_grad.type, DisconnectedType)
+                else DisconnectedType()
+            )
+            cursor += arg_size
 
         return [x.zeros_like(), *grad_wrt_args]
 
