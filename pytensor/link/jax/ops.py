@@ -24,7 +24,7 @@ def _filter_ptvars(x):
     return isinstance(x, pt.Variable)
 
 
-def as_jax_op(jaxfunc, name=None):
+def as_jax_op(jaxfunc, use_infer_static_shape=True, name=None):
     """Return a Pytensor function from a JAX jittable function.
 
     This decorator transforms any JAX-jittable function into a function that accepts
@@ -57,10 +57,10 @@ def as_jax_op(jaxfunc, name=None):
     `as_jax_op`, and can subsequently be used like normal pytensor operators, i.e.
     for evaluation and calculating gradients.
 
-    >>> import numpy
-    >>> import jax.numpy as jnp
-    >>> import pytensor
-    >>> import pytensor.tensor as pt
+    >>> import numpy  # doctest: +ELLIPSIS
+    >>> import jax.numpy as jnp  # doctest: +ELLIPSIS
+    >>> import pytensor  # doctest: +ELLIPSIS
+    >>> import pytensor.tensor as pt  # doctest: +ELLIPSIS
     >>> x = pt.tensor("x", shape=(2,))
     >>> y = pt.tensor("y", shape=(2, 2))
     >>> a = pt.tensor("a", shape=())
@@ -116,16 +116,27 @@ def as_jax_op(jaxfunc, name=None):
 
         # Infer shapes and types of the variables
         pt_vars_types_flat = [var.type for var in pt_vars_flat]
-        shapes_vars_flat = pytensor.compile.builders.infer_shape(pt_vars_flat, (), ())
-        shapes_vars = tree_unflatten(vars_treedef, shapes_vars_flat)
 
-        dummy_inputs_jax = jax.tree_util.tree_map(
-            lambda var, shape: jnp.empty(
-                [int(dim.eval()) for dim in shape], dtype=var.type.dtype
-            ),
-            pt_vars,
-            shapes_vars,
-        )
+        if use_infer_static_shape:
+            shapes_vars_flat = [
+                pt.basic.infer_static_shape(var.shape)[1] for var in pt_vars_flat
+            ]
+
+            dummy_inputs_jax_flat = [
+                jnp.empty(shape, dtype=var.type.dtype)
+                for var, shape in zip(pt_vars_flat, shapes_vars_flat, strict=True)
+            ]
+
+        else:
+            shapes_vars_flat = pytensor.compile.builders.infer_shape(
+                pt_vars_flat, (), ()
+            )
+            dummy_inputs_jax_flat = [
+                jnp.empty([int(dim.eval()) for dim in shape], dtype=var.type.dtype)
+                for var, shape in zip(pt_vars_flat, shapes_vars_flat, strict=True)
+            ]
+
+        dummy_inputs_jax = tree_unflatten(vars_treedef, dummy_inputs_jax_flat)
 
         # Combine the static variables with the inputs, and split them again in the
         # output. Static variables don't take part in the graph, or might be a
