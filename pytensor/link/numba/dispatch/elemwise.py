@@ -9,10 +9,8 @@ from numpy.core.numeric import normalize_axis_index, normalize_axis_tuple
 from pytensor.graph.op import Op
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
-    create_numba_signature,
     numba_funcify,
     numba_njit,
-    use_optimized_cheap_pass,
 )
 from pytensor.link.numba.dispatch.vectorize_codegen import (
     _jit_options,
@@ -245,47 +243,6 @@ def create_multiaxis_reducer(
     return careduce_fn
 
 
-def jit_compile_reducer(
-    node, fn, *, reduce_to_scalar=False, infer_signature=True, **kwds
-):
-    """Compile Python source for reduction loops using additional optimizations.
-
-    Parameters
-    ==========
-    node
-        An node from which the signature can be derived.
-    fn
-        The Python function object to compile.
-    reduce_to_scalar: bool, default False
-        Whether to reduce output to a scalar (instead of 0d array)
-    infer_signature: bool: default True
-        Whether to try and infer the function signature from the Apply node.
-    kwds
-        Extra keywords to be added to the :func:`numba.njit` function.
-
-    Returns
-    =======
-    A :func:`numba.njit`-compiled function.
-
-    """
-    if infer_signature:
-        signature = create_numba_signature(node, reduce_to_scalar=reduce_to_scalar)
-        args = (signature,)
-    else:
-        args = ()
-
-    # Eagerly compile the function using increased optimizations.  This should
-    # help improve nested loop reductions.
-    with use_optimized_cheap_pass():
-        res = numba_basic.numba_njit(
-            *args,
-            boundscheck=False,
-            **kwds,
-        )(fn)
-
-    return res
-
-
 def create_axis_apply_fn(fn, axis, ndim, dtype):
     axis = normalize_axis_index(axis, ndim)
 
@@ -448,7 +405,7 @@ def numba_funcify_CAReduce(op, node, **kwargs):
         np.dtype(node.outputs[0].type.dtype),
     )
 
-    careduce_fn = jit_compile_reducer(node, careduce_py_fn, reduce_to_scalar=False)
+    careduce_fn = numba_njit(careduce_py_fn, boundscheck=False)
     return careduce_fn
 
 
@@ -579,7 +536,7 @@ def numba_funcify_Softmax(op, node, **kwargs):
         sm = e_x / w
         return sm
 
-    softmax = jit_compile_reducer(node, softmax_py_fn)
+    softmax = numba_njit(softmax_py_fn, boundscheck=False)
 
     return softmax
 
@@ -608,8 +565,7 @@ def numba_funcify_SoftmaxGrad(op, node, **kwargs):
         dx = dy_times_sm - sum_dy_times_sm * sm
         return dx
 
-    # The signature inferred by jit_compile_reducer is wrong when dy is a constant (readonly=True)
-    softmax_grad = jit_compile_reducer(node, softmax_grad_py_fn, infer_signature=False)
+    softmax_grad = numba_njit(softmax_grad_py_fn, boundscheck=False)
 
     return softmax_grad
 
@@ -647,7 +603,7 @@ def numba_funcify_LogSoftmax(op, node, **kwargs):
         lsm = xdev - np.log(reduce_sum(np.exp(xdev)))
         return lsm
 
-    log_softmax = jit_compile_reducer(node, log_softmax_py_fn)
+    log_softmax = numba_njit(log_softmax_py_fn, boundscheck=False)
     return log_softmax
 
 
