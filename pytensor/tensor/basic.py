@@ -10,7 +10,7 @@ import warnings
 from collections.abc import Sequence
 from functools import partial
 from numbers import Number
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 from typing import cast as type_cast
 
 import numpy as np
@@ -33,7 +33,7 @@ from pytensor.graph.type import HasShape, Type
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.printing import Printer, min_informative_str, pprint, set_precedence
-from pytensor.raise_op import CheckAndRaise, assert_op
+from pytensor.raise_op import CheckAndRaise
 from pytensor.scalar import int32
 from pytensor.scalar.basic import ScalarConstant, ScalarType, ScalarVariable
 from pytensor.tensor import (
@@ -3084,87 +3084,132 @@ def flatten(x, ndim=1):
     return x_reshaped
 
 
-def tile(x, reps, ndim=None):
+def tile(
+    A: "TensorLike", reps: Union[Sequence[Union[int, "TensorLike"]], "TensorLike"]
+) -> TensorVariable:
     """
-    Tile input array `x` according to `reps`.
+    Tile input tensor `A` according to `reps`.
 
     See the docstring of `numpy.tile` for details.
 
-    'reps' can be constant integer (e.g. 3), constant vector(e.g. [2 3]),
-    symbolic scalar (e.g. tensor.iscalar()), symbolic vector (e.g. tensor.ivector())
-    or a list of symbolic scalar (e.g. [tensor.iscalar(), tensor.iscalar()]).
+    If `reps` is a PyTensor vector, its length must be statically known.
+    You can use `specify_shape` to set the length.
 
-    ndim is the number of the dimensions of the output, if it is provided, ndim
-    should be equal or larger than x.ndim and len(reps), otherwise, we will use
-    max(x.ndim, len(reps)) as ndim. If reps is symbolic vector, the ndim has to
-    be provided.
+    Examples
+    --------
+
+    .. testcode::
+
+        import pytensor.tensor as pt
+
+        A = pt.matrix("A", dtype=int)
+        A_tiled = pt.tile(A, 2)
+        print(A_tiled.eval({A: [[1, 2], [3, 4]]}))
+
+    .. testoutput::
+
+        [[1 2 1 2]
+         [3 4 3 4]]
+
+    Reps can be a sequence of constants and/ or symbolic integer variables
+
+    .. testcode::
+
+        rep0 = pt.scalar("rep0", dtype=int)
+        A_tiled = pt.tile(A, (rep0, 1))
+        print(A_tiled.eval({A: [[1, 2], [3, 4]], rep0: 2}))
+
+    .. testoutput::
+
+        [[1 2]
+         [3 4]
+         [1 2]
+         [3 4]]
+
+    Reps can be a single integer vector, in which case its length must be statically known.
+    Either of the following is a valid way to specify the length:
+
+    .. testcode::
+
+        reps = pt.vector("reps", dtype=int, shape=(2,))
+        A_tiled = pt.tile(A, reps)
+        print(A_tiled.eval({A: [[1, 2], [3, 4]], reps: [1, 2]}))
+
+    .. testoutput::
+
+        [[1 2 1 2]
+         [3 4 3 4]]
+
+    .. testcode::
+
+        reps = pt.vector("reps", dtype=int)
+        reps = pt.specify_shape(reps, (2,))
+        A_tiled = pt.tile(A, reps)
+        print(A_tiled.eval({A: [[1, 2], [3, 4]], reps: [2, 2]}))
+
+    .. testoutput::
+
+        [[1 2 1 2]
+         [3 4 3 4]
+         [1 2 1 2]
+         [3 4 3 4]]
 
     """
-    from pytensor.tensor.math import ge
 
-    _x = as_tensor_variable(x)
-    if ndim is not None and ndim < _x.ndim:
-        raise ValueError("ndim should be equal or larger than _x.ndim")
+    A = as_tensor_variable(A)
 
-    # If reps is a scalar, integer or vector, we convert it to a list.
+    # Convert symbolic reps to a tuple
     if not isinstance(reps, list | tuple):
-        reps_astensor = as_tensor_variable(reps)
-        ndim_check = reps_astensor.ndim
-        if reps_astensor.dtype not in discrete_dtypes:
-            raise ValueError("elements of reps must be integer dtype")
-
-        # The scalar/integer case
-        if ndim_check == 0:
-            reps = [reps]
-
-        # The vector case
-        elif ndim_check == 1:
-            if ndim is None:
+        reps = as_tensor_variable(reps)
+        if reps.type.ndim == 0:
+            reps = (reps,)
+        elif reps.type.ndim == 1:
+            try:
+                reps = tuple(reps)
+            except ValueError:
                 raise ValueError(
-                    "if reps is tensor.vector, you should specify the ndim"
+                    "Length of repetitions tensor cannot be determined. Use specify_shape to set the length."
                 )
-            else:
-                offset = ndim - reps.shape[0]
-
-                # assert that reps.shape[0] does not exceed ndim
-                offset = assert_op(offset, ge(offset, 0))
-
-                # if reps.ndim is less than _x.ndim, we pad the reps with
-                # "1" so that reps will have the same ndim as _x.
-                reps_ = [switch(i < offset, 1, reps[i - offset]) for i in range(ndim)]
-                reps = reps_
-
-        # For others, raise an error
         else:
-            raise ValueError("the dimension of reps should not exceed 1")
-    else:
-        if ndim is not None and len(reps) > ndim:
-            raise ValueError("len(reps) should be equal or less than ndim")
-        if not all(
-            isinstance(r, int)
-            or (isinstance(r, TensorVariable) and r.dtype in discrete_dtypes)
-            for r in reps
-        ):
-            raise ValueError("elements of reps must be scalars of integer dtype")
+            raise ValueError(
+                f"Repetitions tensor must be a scalar or a vector, got ndim={reps.type.ndim}"
+            )
 
-    # If reps.ndim is less than _x.ndim, we pad the reps with
-    # "1" so that reps will have the same ndim as _x
-    reps = list(reps)
-    if ndim is None:
-        ndim = builtins.max(len(reps), _x.ndim)
-    if len(reps) < ndim:
-        reps = [1] * (ndim - len(reps)) + reps
+    reps = [as_tensor_variable(rep) for rep in reps]
+    if not all(
+        rep.type.ndim == 0 and rep.type.dtype in discrete_dtypes for rep in reps
+    ):
+        raise ValueError(
+            f"All reps entries shoud be scalar integers, got {reps} of type {[rep.type for rep in reps]}"
+        )
 
-    _shape = [1] * (ndim - _x.ndim) + [_x.shape[i] for i in range(_x.ndim)]
-    alloc_shape = reps + _shape
-    y = alloc(_x, *alloc_shape)
-    shuffle_ind = np.arange(ndim * 2).reshape(2, ndim)
-    shuffle_ind = shuffle_ind.transpose().flatten()
-    y = y.dimshuffle(*shuffle_ind)
-    new_shapes = [sh * reps[i] for i, sh in enumerate(_shape)]
-    y = y.reshape(new_shapes)
+    len_reps = len(reps)
+    out_ndim = builtins.max(len_reps, A.type.ndim)
 
-    return y
+    # Pad reps on the left (if needed)
+    if len_reps < out_ndim:
+        reps = (*((1,) * (out_ndim - len_reps)), *reps)
+
+    # Pad A's shape on the left (if needed)
+    elif A.type.ndim < out_ndim:
+        A = shape_padleft(A, out_ndim - A.type.ndim)
+
+    # Expand every other dim of A and expand n-reps via Alloc
+    # A_replicated = alloc(A[None, :, ..., None, :], reps[0], A.shape[0], ..., reps[-1], A.shape[-1])
+    A_shape = A.shape
+    interleaved_reps_shape = [
+        d for pair in zip(reps, A_shape, strict=True) for d in pair
+    ]
+    every_other_axis = tuple(range(0, out_ndim * 2, 2))
+    A_replicated = alloc(
+        expand_dims(A, every_other_axis),
+        *interleaved_reps_shape,
+    )
+
+    # Combine replicate and original dimensions via reshape
+    # A_tiled = A_replicated.reshape(reps[0] * A.shape[0], ..., reps[-1] * A.shape[-1])
+    tiled_shape = tuple(rep * A_dim for rep, A_dim in zip(reps, A_shape, strict=True))
+    return A_replicated.reshape(tiled_shape)
 
 
 class ARange(Op):

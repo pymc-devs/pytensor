@@ -2386,194 +2386,120 @@ def test_is_flat():
     assert not ptb.is_flat(X.reshape((iscalar(),) * 3))
 
 
-def test_tile():
-    """
-    TODO FIXME: Split this apart and parameterize.  Also, find out why it's
-    unreasonably slow.
-    """
+class TestTile:
+    @pytest.mark.parametrize(
+        "A_shape, reps_test",
+        [
+            ((), (2,)),
+            ((5,), (2,)),
+            ((2, 4), (2, 3)),
+            ((2, 4), (2, 3, 4)),
+            ((2, 4, 3), (2, 3)),
+            ((2, 4, 3), (2, 3, 4)),
+            ((2, 4, 3, 5), (2, 3, 4, 6)),
+        ],
+    )
+    def test_tile_separate_reps_entries(self, A_shape, reps_test):
+        rng = np.random.default_rng(2400)
 
-    def run_tile(x, x_, reps, use_symbolic_reps):
-        if use_symbolic_reps:
-            rep_symbols = [iscalar() for _ in range(len(reps))]
-            f = function([x, *rep_symbols], tile(x, rep_symbols))
-            return f(*([x_, *reps]))
-        else:
-            f = function([x], tile(x, reps))
-            return f(x_)
+        A = tensor("A", shape=(None,) * len(A_shape))
+        reps = [iscalar(f"r{i}") for i in range(len(reps_test))]
+        tile_out = tile(A, reps)
 
-    rng = np.random.default_rng(utt.fetch_seed())
+        tile_fn = function([A, *reps], tile_out)
 
-    for use_symbolic_reps in [False, True]:
-        # Test the one-dimensional case.
-        x = vector()
-        x_ = rng.standard_normal(5).astype(config.floatX)
-        assert np.all(run_tile(x, x_, (2,), use_symbolic_reps) == np.tile(x_, (2,)))
-
-        # Test the two-dimensional case.
-        x = matrix()
-        x_ = rng.standard_normal((2, 4)).astype(config.floatX)
-        assert np.all(run_tile(x, x_, (2, 3), use_symbolic_reps) == np.tile(x_, (2, 3)))
-
-        # Test the three-dimensional case.
-        x = tensor3()
-        x_ = rng.standard_normal((2, 4, 3)).astype(config.floatX)
-        assert np.all(
-            run_tile(x, x_, (2, 3, 4), use_symbolic_reps) == np.tile(x_, (2, 3, 4))
+        A_test = rng.standard_normal(A_shape).astype(config.floatX)
+        np.testing.assert_array_equal(
+            tile_fn(A_test, *reps_test),
+            np.tile(A_test, reps_test),
+            strict=True,
         )
 
-        # Test the four-dimensional case.
-        x = tensor4()
-        x_ = rng.standard_normal((2, 4, 3, 5)).astype(config.floatX)
-        assert np.all(
-            run_tile(x, x_, (2, 3, 4, 6), use_symbolic_reps)
-            == np.tile(x_, (2, 3, 4, 6))
+    @pytest.mark.parametrize("reps", (2, np.array([2, 3, 4])))
+    def test_combined_reps_entries(self, reps):
+        rng = np.random.default_rng(2422)
+        A_test = rng.standard_normal((2, 4, 3)).astype(config.floatX)
+        expected_eval = np.tile(A_test, reps)
+
+        A = tensor3("A")
+        np.testing.assert_array_equal(
+            tile(A, reps).eval({A: A_test}),
+            expected_eval,
+            strict=True,
         )
 
-        # Test passing a float
-        x = scalar()
-        x_val = 1.0
-        assert np.array_equal(
-            run_tile(x, x_val, (2,), use_symbolic_reps), np.tile(x_val, (2,))
+        sym_reps = as_tensor_variable(reps).type()
+        np.testing.assert_array_equal(
+            tile(A, sym_reps).eval({A: A_test, sym_reps: reps}),
+            expected_eval,
+            strict=True,
         )
 
+    def test_mixed_reps_type(self):
+        A = np.arange(9).reshape(3, 3)
+        reps = [2, iscalar("3"), 4]
+        np.testing.assert_array_equal(
+            tile(A, reps).eval({"3": 3}),
+            np.tile(A, [2, 3, 4]),
+            strict=True,
+        )
+
+    def test_tensorlike_A(self):
         # Test when x is a list
-        x = matrix()
         x_val = [[1.0, 2.0], [3.0, 4.0]]
-        assert np.array_equal(
-            run_tile(x, x_val, (2,), use_symbolic_reps), np.tile(x_val, (2,))
+        assert equal_computations(
+            [tile(x_val, (2,))],
+            [tile(as_tensor_variable(x_val), (2,))],
         )
 
-    # Test when reps is integer, scalar or vector.
-    # Test 1,2,3,4-dimensional cases.
-    # Test input x has the shape [2], [2, 4], [2, 4, 3], [2, 4, 3, 5].
-    test_shape = [2, 4, 3, 5]
-    k = 0
-    for xtype in [vector(), matrix(), tensor3(), tensor4()]:
-        x = xtype
-        k = k + 1
-        x_ = rng.standard_normal(test_shape[0:k]).astype(config.floatX)
-
-        # integer:
-        reps_ = 2
-        f = function([x], tile(x, reps_))
-        assert np.all(f(x_) == np.tile(x_, reps_))
-
-        # scalar:
-        reps = iscalar()
-        reps_ = 2
-        f = function([x, reps], tile(x, reps))
-        assert np.all(f(x_, reps_) == np.tile(x_, reps_))
-
-        # vector:
-        reps = ivector()
-        reps_ = [2] if k == 1 or k == 2 else [2, 3]
-        ndim_ = k
-        f = function([x, reps], tile(x, reps, ndim_))
-        assert np.all(f(x_, reps_) == np.tile(x_, reps_))
-
-        # list of integers:
-        reps_ = [2, 3, 4]
-        f = function([x], tile(x, reps_))
-        assert np.all(f(x_) == np.tile(x_, reps_))
-
-        # list of integers and scalars:
-        d = iscalar()
-        reps = [2, d, 4]
-        f = function([x, d], tile(x, reps))
-        reps_ = [2, 3, 4]
-        assert np.all(f(x_, 3) == np.tile(x_, reps_))
-
-        # reps is list, len(reps) > x.ndim, 3 cases below:
-        r = [2, 3, 4, 5, 6]
-        reps_ = r[: k + 1]  # len(reps_) = x.ndim+1
-        # (1) ndim = None.
-        f = function([x], tile(x, reps_))
-        assert np.all(f(x_) == np.tile(x_, reps_))
-        # (2) ndim = len(reps).
-        ndim_ = len(reps_)
-        f = function([x], tile(x, reps_, ndim_))
-        assert np.all(f(x_) == np.tile(x_, reps_))
-        # (3) ndim > len(reps)
-        ndim_ = len(reps_) + 1
-        f = function([x], tile(x, reps_, ndim_))
-        assert np.all(f(x_) == np.tile(x_, [1, *reps_]))
-
-        # reps is list, ndim > x.ndim > len(reps):
-        r = [2, 3, 4, 5]
-        if k > 1:
-            ndim_ = k + 1
-            reps_ = r[: k - 1]
-            f = function([x], tile(x, reps_, ndim_))
-            assert np.all(f(x_) == np.tile(x_, [1, 1, *reps_]))
-
+    def test_error_unknown_reps_length(self):
         # error raising test: ndim not specified when reps is vector
         reps = ivector()
-        with pytest.raises(ValueError):
-            tile(x, reps)
+        with pytest.raises(ValueError, match="Use specify_shape to set the length"):
+            tile(arange(3), reps)
 
-        # error raising test: not a integer
-        for reps in [2.5, fscalar(), fvector()]:
+        # fine with specify_shape
+        out = tile(arange(3), specify_shape(reps, 2))
+        np.testing.assert_array_equal(
+            out.eval({reps: [2, 3]}),
+            np.tile(np.arange(3), [2, 3]),
+            strict=True,
+        )
+
+    def test_error_non_integer_reps(self):
+        for reps in (
+            2.5,
+            fscalar(),
+            vector(shape=(3,), dtype="float64"),
+            [2, fscalar()],
+        ):
             with pytest.raises(ValueError):
-                tile(x, reps)
+                tile(arange(3), reps)
 
-        # error raising test: the dimension of reps exceeds 1
-        reps = imatrix()
-        with pytest.raises(ValueError):
-            tile(x, reps)
+    def test_error_reps_ndim(self):
+        for reps in (
+            matrix(shape=(3, 1), dtype=int),
+            [2, vector(shape=(2,), dtype=int)],
+        ):
+            with pytest.raises(ValueError):
+                tile(arange(3), reps)
 
-        # error raising test: ndim is not None, ndim < x.ndim
-        # 3 cases below (reps is list/scalar/vector):
-        for reps in [[2, 3, 4], iscalar(), ivector()]:
-            if k > 1:
-                ndim = k - 1
-                with pytest.raises(ValueError):
-                    tile(x, reps, ndim)
+    def test_tile_grad(self):
+        A = tensor3("A")
+        reps = vector("reps", shape=(3,), dtype=int)
+        A_tile = tile(A, reps)
+        grad_tile = grad(A_tile.sum(), A)
 
-        # error raising test: reps is list, len(reps) > ndim
-        r = [2, 3, 4, 5, 6]
-        reps = r[: k + 1]
-        ndim = k
-        with pytest.raises(ValueError):
-            tile(x, reps, ndim)
-
-        # error raising test:
-        # reps is vector and len(reps_value) > ndim,
-        # reps_value is the real value when executing the function.
-        reps = ivector()
-        r = [2, 3, 4, 5, 6, 7]
-        reps_ = r[: k + 2]
-        ndim_ = k + 1
-        f = function([x, reps], tile(x, reps, ndim_))
-        with pytest.raises(AssertionError):
-            f(x_, reps_)
-
-
-def test_tile_grad():
-    def grad_tile(x, reps, np_x):
-        y = tile(x, reps)
-        z = y.sum()
-        g = pytensor.function([x], grad(z, x))
-        grad_res = g(np_x)
         # The gradient should be the product of the tiling dimensions
         # (since the gradients are additive through the tiling operation)
-        assert np.all(grad_res == np.prod(reps))
-
-    rng = np.random.default_rng(utt.fetch_seed())
-
-    # test vector
-    grad_tile(vector("x"), [3], rng.standard_normal(5).astype(config.floatX))
-    # test matrix
-    grad_tile(matrix("x"), [3, 4], rng.standard_normal((2, 3)).astype(config.floatX))
-    # test tensor3
-    grad_tile(
-        tensor3("x"), [3, 4, 5], rng.standard_normal((2, 4, 3)).astype(config.floatX)
-    )
-    # test tensor4
-    grad_tile(
-        tensor4("x"),
-        [3, 4, 5, 6],
-        rng.standard_normal((2, 4, 3, 5)).astype(config.floatX),
-    )
+        rng = np.random.default_rng(2489)
+        A_test = rng.normal(size=(2, 4, 3)).astype(config.floatX)
+        reps_test = [3, 4, 5]
+        np.testing.assert_array_equal(
+            grad_tile.eval({A: A_test, reps: reps_test}),
+            np.full(A_test.shape, np.prod(reps_test).astype(config.floatX)),
+            strict=True,
+        )
 
 
 class TestARange:
