@@ -546,8 +546,6 @@ def einsum(subscripts: str, *operands: "TensorLike", optimize=None) -> TensorVar
             "If you need this functionality open an issue in https://github.com/pymc-devs/pytensor/issues to let us know. "
         )
 
-    # TODO: Is this doing something clever about unknown shapes?
-    # contract_path = _poly_einsum_handlers.get(ty, _default_poly_einsum_handler)
     tensor_operands = [as_tensor(operand) for operand in operands]
     shapes = [operand.type.shape for operand in tensor_operands]
 
