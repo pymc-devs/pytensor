@@ -61,20 +61,13 @@ def pytorch_funcify_FunctionGraph(
     conversion_func=pytorch_funcify,
     **kwargs,
 ):
-    def constants_wrapper(x, **kwargs):
-        x = pytorch_typify(x)
-
-        @torch.compiler.assume_constant_result
-        def torch_assume_constant(arg=x):
-            return arg
-
-        return torch_assume_constant
+    if "type_conversion_fn" not in kwargs:
+        kwargs["type_conversion_fn"] = pytorch_typify
 
     built_kwargs = {"conversion_func": conversion_func, **kwargs}
     return fgraph_to_python(
         fgraph,
         conversion_func,
-        type_conversion_fn=constants_wrapper,
         fgraph_name=fgraph_name,
         **built_kwargs,
     )

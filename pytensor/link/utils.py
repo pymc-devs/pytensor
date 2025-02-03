@@ -766,8 +766,8 @@ def fgraph_to_python(
                     global_env[local_input_name] = type_conversion_fn(
                         input_storage[0], variable=i, storage=input_storage, **kwargs
                     )
-                # TODO: We could attempt to use the storage arrays directly
-                # E.g. `local_input_name = f"{local_input_name}[0]"`
+            # TODO: We could attempt to use the storage arrays directly
+            # E.g. `local_input_name = f"{local_input_name}[0]"`
             node_input_names.append(local_input_name)
 
         node_output_names = [unique_name(v) for v in node.outputs]
