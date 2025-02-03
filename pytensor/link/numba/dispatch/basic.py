@@ -1,7 +1,6 @@
 import operator
 import sys
 import warnings
-from contextlib import contextmanager
 from copy import copy
 from functools import singledispatch
 from textwrap import dedent
@@ -360,23 +359,6 @@ def create_tuple_string(x):
 def create_arg_string(x):
     args = ", ".join(x)
     return args
-
-
-@contextmanager
-def use_optimized_cheap_pass(*args, **kwargs):
-    """Temporarily replace the cheap optimization pass with a better one."""
-    from numba.core.registry import cpu_target
-
-    context = cpu_target.target_context._internal_codegen
-    old_pm = context._mpm_cheap
-    new_pm = context._module_pass_manager(
-        loop_vectorize=True, slp_vectorize=True, opt=3, cost="cheap"
-    )
-    context._mpm_cheap = new_pm
-    try:
-        yield
-    finally:
-        context._mpm_cheap = old_pm
 
 
 @singledispatch
