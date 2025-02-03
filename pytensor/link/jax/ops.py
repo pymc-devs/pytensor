@@ -160,11 +160,11 @@ def as_jax_op(jaxfunc, use_infer_static_shape=True, name=None):
 
         ### Call the function that accepts flat inputs, which in turn calls the one that
         ### combines the inputs and static variables.
-        jitted_sol_op_jax = jax.jit(func_flattened)
+        jitted_jax_op = jax.jit(func_flattened)
         len_gz = len(pttypes_outvars)
 
-        vjp_sol_op_jax = _get_vjp_sol_op_jax(func_flattened, len_gz)
-        jitted_vjp_sol_op_jax = jax.jit(vjp_sol_op_jax)
+        vjp_jax_op = _get_vjp_jax_op(func_flattened, len_gz)
+        jitted_vjp_jax_op = jax.jit(vjp_jax_op)
 
         # Get classes that creates a Pytensor Op out of our function that accept
         # flattened inputs. They are created each time, to set a custom name for the
@@ -194,8 +194,8 @@ def as_jax_op(jaxfunc, use_infer_static_shape=True, name=None):
             outvars_treedef,
             input_types=pt_vars_types_flat,
             output_types=pttypes_outvars,
-            jitted_sol_op_jax=jitted_sol_op_jax,
-            jitted_vjp_sol_op_jax=jitted_vjp_sol_op_jax,
+            jitted_jax_op=jitted_jax_op,
+            jitted_vjp_jax_op=jitted_vjp_jax_op,
         )
 
         ### Evaluate the Pytensor Op and return unflattened results
@@ -265,8 +265,8 @@ class _WrappedFunc:
         return interior_func
 
 
-def _get_vjp_sol_op_jax(jaxfunc, len_gz):
-    def vjp_sol_op_jax(args):
+def _get_vjp_jax_op(jaxfunc, len_gz):
+    def vjp_jax_op(args):
         y0 = args[:-len_gz]
         gz = args[-len_gz:]
         if len(gz) == 1:
@@ -290,7 +290,7 @@ def _get_vjp_sol_op_jax(jaxfunc, len_gz):
         else:
             return tuple(vjp_fn(gz))
 
-    return vjp_sol_op_jax
+    return vjp_jax_op
 
 
 def _partition_jaxfunc(jaxfunc, static_vars, func_vars):
@@ -350,16 +350,16 @@ class JAXOp(Op):
         output_treeedef,
         input_types,
         output_types,
-        jitted_sol_op_jax,
-        jitted_vjp_sol_op_jax,
+        jitted_jax_op,
+        jitted_vjp_jax_op,
     ):
-        self.vjp_sol_op = None
+        self.vjp_jax_op = None
         self.input_treedef = input_treedef
         self.output_treedef = output_treeedef
         self.input_types = input_types
         self.output_types = output_types
-        self.jitted_sol_op_jax = jitted_sol_op_jax
-        self.jitted_vjp_sol_op_jax = jitted_vjp_sol_op_jax
+        self.jitted_jax_op = jitted_jax_op
+        self.jitted_vjp_jax_op = jitted_vjp_jax_op
 
     def make_node(self, *inputs):
         self.num_inputs = len(inputs)
@@ -368,16 +368,16 @@ class JAXOp(Op):
         outputs = [pt.as_tensor_variable(type()) for type in self.output_types]
         self.num_outputs = len(outputs)
 
-        self.vjp_sol_op = VJPJAXOp(
+        self.vjp_jax_op = VJPJAXOp(
             self.input_treedef,
             self.input_types,
-            self.jitted_vjp_sol_op_jax,
+            self.jitted_vjp_jax_op,
         )
 
         return Apply(self, inputs, outputs)
 
     def perform(self, node, inputs, outputs):
-        results = self.jitted_sol_op_jax(inputs)
+        results = self.jitted_jax_op(inputs)
         if self.num_outputs > 1:
             for i in range(self.num_outputs):
                 outputs[i][0] = np.array(results[i], self.output_types[i].dtype)
@@ -385,7 +385,7 @@ class JAXOp(Op):
             outputs[0][0] = np.array(results, self.output_types[0].dtype)
 
     def perform_jax(self, *inputs):
-        results = self.jitted_sol_op_jax(inputs)
+        results = self.jitted_jax_op(inputs)
         return results
 
     def grad(self, inputs, output_gradients):
@@ -399,7 +399,7 @@ class JAXOp(Op):
                     )
                 else:
                     output_gradients[i] = pt.zeros((), self.output_types[i].dtype)
-        result = self.vjp_sol_op(inputs, output_gradients)
+        result = self.vjp_jax_op(inputs, output_gradients)
 
         if self.num_inputs > 1:
             return result
@@ -413,11 +413,11 @@ class VJPJAXOp(Op):
         self,
         input_treedef,
         input_types,
-        jitted_vjp_sol_op_jax,
+        jitted_vjp_jax_op,
     ):
         self.input_treedef = input_treedef
         self.input_types = input_types
-        self.jitted_vjp_sol_op_jax = jitted_vjp_sol_op_jax
+        self.jitted_vjp_jax_op = jitted_vjp_jax_op
 
     def make_node(self, y0, gz):
         y0 = [
@@ -436,7 +436,7 @@ class VJPJAXOp(Op):
         return Apply(self, y0 + gz_not_disconntected, outputs)
 
     def perform(self, node, inputs, outputs):
-        results = self.jitted_vjp_sol_op_jax(tuple(inputs))
+        results = self.jitted_vjp_jax_op(tuple(inputs))
         if len(self.input_types) > 1:
             for i, result in enumerate(results):
                 outputs[i][0] = np.array(result, self.input_types[i].dtype)
@@ -444,7 +444,7 @@ class VJPJAXOp(Op):
             outputs[0][0] = np.array(results, self.input_types[0].dtype)
 
     def perform_jax(self, *inputs):
-        results = self.jitted_vjp_sol_op_jax(tuple(inputs))
+        results = self.jitted_vjp_jax_op(tuple(inputs))
         if self.num_outputs == 1:
             if isinstance(results, Sequence):
                 return results[0]
@@ -455,10 +455,10 @@ class VJPJAXOp(Op):
 
 
 @jax_funcify.register(JAXOp)
-def sol_op_jax_funcify(op, **kwargs):
+def jax_op_funcify(op, **kwargs):
     return op.perform_jax
 
 
 @jax_funcify.register(VJPJAXOp)
-def vjp_sol_op_jax_funcify(op, **kwargs):
+def vjp_jax_op_funcify(op, **kwargs):
     return op.perform_jax
