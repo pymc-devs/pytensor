@@ -262,3 +262,22 @@ def test_broadcastable_dims():
     atol = 1e-12 if config.floatX == "float64" else 1e-2
     np.testing.assert_allclose(suboptimal_eval, np_eval, atol=atol)
     np.testing.assert_allclose(optimal_eval, np_eval, atol=atol)
+
+
+@pytest.mark.parametrize("static_length", [False, True])
+def test_threeway_mul(static_length):
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/1184
+    # x, y, z = vectors("x", "y", "z")
+    sh = (3,) if static_length else (None,)
+    x = tensor("x", shape=sh)
+    y = tensor("y", shape=sh)
+    z = tensor("z", shape=sh)
+    out = einsum("..., ..., ... -> ...", x, y, z)
+
+    x_test = np.ones((3,), dtype=x.dtype)
+    y_test = x_test + 1
+    z_test = x_test + 2
+    np.testing.assert_allclose(
+        out.eval({x: x_test, y: y_test, z: z_test}),
+        np.full((3,), fill_value=6),
+    )
