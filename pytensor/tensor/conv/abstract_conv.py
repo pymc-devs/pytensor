@@ -2199,7 +2199,7 @@ class BaseAbstractConv(Op):
         ):
             border_mode = "valid"
 
-        self.imshp = tuple(imshp) if imshp else (None,) * (2 + convdim)
+        self.imshp = tuple(imshp) if imshp is not None else (None,) * (2 + convdim)
         for imshp_i in self.imshp:
             if imshp_i is not None:
                 # Components of imshp should be constant or ints
@@ -2209,7 +2209,7 @@ class BaseAbstractConv(Op):
                     raise ValueError(
                         "imshp should be None or a tuple of constant int values"
                     ).with_traceback(sys.exc_info()[2])
-        if kshp:
+        if kshp is not None:
             self.kshp = tuple(kshp)
         else:
             self.kshp = (None,) * ((2 + 2 * convdim) if unshared else (2 + convdim))

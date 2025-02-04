@@ -569,7 +569,7 @@ def construct_pfunc_ins_and_outs(
     if not fgraph:
         # Extend the outputs with the updates on input variables so they are
         # also cloned
-        additional_outputs = [i.update for i in inputs if i.update]
+        additional_outputs = [i.update for i in inputs if i.update is not None]
         if outputs is None:
             out_list = []
         else:
@@ -608,7 +608,7 @@ def construct_pfunc_ins_and_outs(
             new_i.variable = iv
 
             # If needed, replace the input's update by its cloned equivalent
-            if i.update:
+            if i.update is not None:
                 new_i.update = clone_d[i.update]
 
             new_inputs.append(new_i)

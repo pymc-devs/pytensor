@@ -3430,7 +3430,14 @@ class _nd_grid:
                 raise NotImplementedError(
                     "Not implemented for slices whose step is complex"
                 )
-        ranges = [arange(sl.start or 0, sl.stop, sl.step or 1) for sl in args[0]]
+        ranges = [
+            arange(
+                sl.start if sl.start is not None else 0,
+                sl.stop,
+                sl.step if sl.step is not None else 1,
+            )
+            for sl in args[0]
+        ]
         shapes = [
             tuple([1] * j + [r.shape[0]] + [1] * (ndim - 1 - j))
             for j, r in enumerate(ranges)
