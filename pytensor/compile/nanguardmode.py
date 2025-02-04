@@ -36,7 +36,7 @@ def _is_numeric_value(arr, var):
         return False
     elif isinstance(arr, np.random.mtrand.RandomState | np.random.Generator):
         return False
-    elif var and isinstance(var.type, RandomType):
+    elif var is not None and isinstance(var.type, RandomType):
         return False
     elif isinstance(arr, slice):
         return False

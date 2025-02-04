@@ -856,7 +856,7 @@ def gammaincc_grad(k, x, skip_loops=constant(False, dtype="bool")):
             dfac = k_minus_one_minus_n * dfac + fac
             fac *= k_minus_one_minus_n
             delta = dfac / xpow
-            return (sum_a, delta, xpow, k_minus_one_minus_n, fac, dfac), ()
+            return (sum_a, delta, xpow, k_minus_one_minus_n, fac, dfac), None
 
         init = [sum_a0, delta, xpow, k_minus_one_minus_n, fac, dfac]
         constant = [x]

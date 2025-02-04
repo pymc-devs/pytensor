@@ -1811,14 +1811,14 @@ class Dot(Op):
         if eval_points[0] is None and eval_points[1] is None:
             return [None]
 
-        if eval_points[0]:
+        if eval_points[0] is not None:
             t1 = self(eval_points[0], inputs[1])
-        if eval_points[1]:
+        if eval_points[1] is not None:
             t2 = self(inputs[0], eval_points[1])
 
-        if eval_points[0] and eval_points[1]:
+        if eval_points[0] is not None and eval_points[1] is not None:
             return [t1 + t2]
-        elif eval_points[0]:
+        elif eval_points[0] is not None:
             return [t1]
         else:
             return [t2]

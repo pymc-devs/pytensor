@@ -399,7 +399,7 @@ def test_tensor_creator_dtype_catch(dtype):
         tensor(dtype, shape=(None,))
 
     # This should work
-    assert tensor(dtype=dtype, shape=(None,))
+    assert tensor(dtype=dtype, shape=(None,)) is not None
 
 
 def test_tensor_creator_ignores_rare_dtype_name():

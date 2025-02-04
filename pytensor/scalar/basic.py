@@ -823,6 +823,37 @@ discrete_dtypes = tuple(t.dtype for t in discrete_types)
 
 
 class _scalar_py_operators:
+    # These can't work because Python requires native output types
+    def __bool__(self):
+        raise TypeError(
+            "ScalarVariable cannot be converted to Python boolean. "
+            "Call `.astype(bool)` for the symbolic equivalent."
+        )
+
+    def __index__(self):
+        raise TypeError(
+            "ScalarVariable cannot be converted to Python integer. "
+            "Call `.astype(int)` for the symbolic equivalent."
+        )
+
+    def __int__(self):
+        raise TypeError(
+            "ScalarVariable cannot be converted to Python integer. "
+            "Call `.astype(int)` for the symbolic equivalent."
+        )
+
+    def __float__(self):
+        raise TypeError(
+            "ScalarVariable cannot be converted to Python float. "
+            "Call `.astype(float)` for the symbolic equivalent."
+        )
+
+    def __complex__(self):
+        raise TypeError(
+            "ScalarVariable cannot be converted to Python complex number. "
+            "Call `.astype(complex)` for the symbolic equivalent."
+        )
+
     # So that we can simplify checking code when we have a mixture of ScalarType
     # variables and Tensor variables
     ndim = 0
@@ -842,11 +873,6 @@ class _scalar_py_operators:
 
     def __neg__(self):
         return neg(self)
-
-    # CASTS
-    # def __int__(self): return AsInt(self).out
-    # def __float__(self): return AsDouble(self).out
-    # def __complex__(self): return AsComplex(self).out
 
     # BITWISE
     def __invert__(self):
