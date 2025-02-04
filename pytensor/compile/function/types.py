@@ -198,7 +198,7 @@ def std_fgraph(
     update_mapping = {}
     out_idx = len(output_specs)
     for idx, input_spec in enumerate(input_specs):
-        if input_spec.update:
+        if input_spec.update is not None:
             updates.append(input_spec.update)
             update_mapping[out_idx] = idx
             out_idx += 1
@@ -1195,7 +1195,7 @@ def insert_deepcopy(fgraph, wrapped_inputs, wrapped_outputs):
     updated_fgraph_inputs = {
         fgraph_i
         for i, fgraph_i in zip(wrapped_inputs, fgraph.inputs, strict=True)
-        if getattr(i, "update", False)
+        if getattr(i, "update", None) is not None
     }
 
     # We can't use fgraph.inputs as this don't include Constant Value.
@@ -1351,7 +1351,11 @@ class FunctionMaker:
             ancestors(
                 (
                     [o.variable for o in outputs]
-                    + [i.update for i in inputs if getattr(i, "update", False)]
+                    + [
+                        i.update
+                        for i in inputs
+                        if getattr(i, "update", None) is not None
+                    ]
                 ),
                 blockers=[i.variable for i in inputs],
             )

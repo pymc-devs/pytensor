@@ -979,7 +979,7 @@ def scan(
         # user-specified within the inner-function (e.g. by returning an update
         # `dict`) or the `SharedVariable.default_update`s of a shared variable
         # created in the inner-function.
-        if input.update and (is_local or input.variable in updates):
+        if input.update is not None and (is_local or input.variable in updates):
             # We need to remove the `default_update`s on the shared
             # variables created within the context of the loop function
             # (e.g. via use of `RandomStream`); otherwise, they'll get

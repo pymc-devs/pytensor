@@ -2582,7 +2582,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
         # mask inputs that get no gradients
         for dx in range(len(dC_dinps_t)):
-            if not dC_dinps_t[dx]:
+            if dC_dinps_t[dx] is None:
                 dC_dinps_t[dx] = pt.zeros_like(diff_inputs[dx])
             else:
                 disconnected_dC_dinps_t[dx] = False
