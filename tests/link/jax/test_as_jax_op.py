@@ -11,8 +11,7 @@ from pytensor.tensor import tensor
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
-def test_as_jax_op1():
-    # 2 parameters input, single output
+def test_2in_1out():
     rng = np.random.default_rng(1)
     x = tensor("a", shape=(2,))
     y = tensor("b", shape=(2,))
@@ -33,8 +32,7 @@ def test_as_jax_op1():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_as_jax_op2():
-    # 2 parameters input, tuple output
+def test_2in_tupleout():
     rng = np.random.default_rng(2)
     x = tensor("a", shape=(2,))
     y = tensor("b", shape=(2,))
@@ -55,8 +53,7 @@ def test_as_jax_op2():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_as_jax_op3():
-    # 2 parameters input, list output
+def test_2in_listout():
     rng = np.random.default_rng(3)
     x = tensor("a", shape=(2,))
     y = tensor("b", shape=(2,))
@@ -77,8 +74,7 @@ def test_as_jax_op3():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_as_jax_op4():
-    # single 1d input, tuple output
+def test_1din_tupleout():
     rng = np.random.default_rng(4)
     x = tensor("a", shape=(2,))
     test_values = [rng.normal(size=(x.type.shape)).astype(config.floatX)]
@@ -96,8 +92,7 @@ def test_as_jax_op4():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_as_jax_op5():
-    # single 0d input, tuple output
+def test_0din_tupleout():
     rng = np.random.default_rng(5)
     x = tensor("a", shape=())
     test_values = [rng.normal(size=(x.type.shape)).astype(config.floatX)]
@@ -115,8 +110,7 @@ def test_as_jax_op5():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_as_jax_op6():
-    # single input, list output
+def test_1in_listout():
     rng = np.random.default_rng(6)
     x = tensor("a", shape=(2,))
     test_values = [rng.normal(size=(x.type.shape)).astype(config.floatX)]
@@ -135,8 +129,7 @@ def test_as_jax_op6():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_as_jax_op7():
-    # 2 parameters input with pytree, tuple output
+def test_pytreein_tupleout():
     rng = np.random.default_rng(7)
     x = tensor("a", shape=(2,))
     y = tensor("b", shape=(2,))
@@ -159,8 +152,7 @@ def test_as_jax_op7():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_as_jax_op8():
-    # 2 parameters input with pytree, pytree output
+def test_pytreein_pytreeout():
     rng = np.random.default_rng(8)
     x = tensor("a", shape=(3,))
     y = tensor("b", shape=(1,))
@@ -180,8 +172,7 @@ def test_as_jax_op8():
     fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_as_jax_op9():
-    # 2 parameters input with pytree, pytree output and non-graph argument
+def test_pytreein_pytreeout_w_nongraphargs():
     rng = np.random.default_rng(9)
     x = tensor("a", shape=(3,))
     y = tensor("b", shape=(1,))
@@ -191,17 +182,34 @@ def test_as_jax_op9():
     ]
 
     @as_jax_op
-    def f(x, y, non_model_arg):
-        return jnp.exp(x), jax.tree_util.tree_map(jax.nn.sigmoid, y)
+    def f(x, y, depth, which_variable):
+        if which_variable == "x":
+            var = x
+        elif which_variable == "y":
+            var = y["a"] + y["b"][0]
+        else:
+            return "Unsupported argument"
+        for _ in range(depth):
+            var = jax.nn.sigmoid(var)
+        return var
 
-    out = f(x, y_tmp, "Hello World!")
-    grad_out = grad(pt.sum(out[0]), [x])
-
+    # arguments depth and which_variable are not part of the graph
+    out = f(x, y_tmp, depth=3, which_variable="x")
+    grad_out = grad(pt.sum(out), [x])
     fg = FunctionGraph([x, y], [out[0], *grad_out])
     fn, _ = compare_jax_and_py(fg, test_values)
-
     with jax.disable_jit():
         fn, _ = compare_jax_and_py(fg, test_values)
+
+    out = f(x, y_tmp, depth=7, which_variable="y")
+    grad_out = grad(pt.sum(out), [x])
+    fg = FunctionGraph([x, y], [out[0], *grad_out])
+    fn, _ = compare_jax_and_py(fg, test_values)
+    with jax.disable_jit():
+        fn, _ = compare_jax_and_py(fg, test_values)
+
+    out = f(x, y_tmp, depth=10, which_variable="z")
+    assert out == "Unsupported argument"
 
 
 def test_as_jax_op10():
