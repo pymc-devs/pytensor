@@ -1403,18 +1403,37 @@ class TestMinMax:
         # check_grad_max(data, eval_outputs(grad(max_and_argmax(n,
         # axis=1)[0], n)),axis=1)
 
+    @pytest.mark.parametrize(
+        "dtype",
+        (
+            "uint8",
+            "uint16",
+            "uint32",
+            pytest.param("uint64", marks=pytest.mark.xfail(reason="Fails due to #770")),
+        ),
+    )
+    def test_uint(self, dtype):
+        itype = np.iinfo(dtype)
+        data = np.array([itype.min + 3, itype.min, itype.max - 5, itype.max], dtype)
+        n = as_tensor_variable(data)
+
+        assert min(n).dtype == dtype
+        i_min = eval_outputs(min(n))
+        assert i_min == itype.min
+
+        assert max(n).dtype == dtype
+        i_max = eval_outputs(max(n))
+        assert i_max == itype.max
+
     @pytest.mark.xfail(reason="Fails due to #770")
-    def test_uint(self):
-        for dtype in ("uint8", "uint16", "uint32", "uint64"):
-            itype = np.iinfo(dtype)
-            data = np.array([itype.min + 3, itype.min, itype.max - 5, itype.max], dtype)
-            n = as_tensor_variable(data)
-            assert min(n).dtype == dtype
-            i = eval_outputs(min(n))
-            assert i == itype.min
-            assert max(n).dtype == dtype
-            i = eval_outputs(max(n))
-            assert i == itype.max
+    def test_uint64_special_value(self):
+        """Example from issue #770"""
+        dtype = "uint64"
+        data = np.array([0, 9223372036854775], dtype=dtype)
+        n = as_tensor_variable(data)
+
+        i_max = eval_outputs(max(n))
+        assert i_max == data.max()
 
     def test_bool(self):
         data = np.array([True, False], "bool")
