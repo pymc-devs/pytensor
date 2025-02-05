@@ -18,14 +18,8 @@
 #define PYTENSOR_EXTERN
 #endif
 
-#if PY_MAJOR_VERSION < 3
-#define PYTENSOR_RTYPE void
-#else
-#define PYTENSOR_RTYPE PyObject *
-#endif
-
 /* We need to redefine PyMODINIT_FUNC to add MOD_PUBLIC in the middle */
 #undef PyMODINIT_FUNC
-#define PyMODINIT_FUNC PYTENSOR_EXTERN MOD_PUBLIC PYTENSOR_RTYPE
+#define PyMODINIT_FUNC PYTENSOR_EXTERN MOD_PUBLIC PyObject *
 
 #endif
