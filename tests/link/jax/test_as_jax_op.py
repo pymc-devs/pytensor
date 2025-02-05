@@ -11,7 +11,7 @@ from pytensor.tensor import tensor
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
-def test_2in_1out():
+def test_two_inputs_single_output():
     rng = np.random.default_rng(1)
     x = tensor("a", shape=(2,))
     y = tensor("b", shape=(2,))
@@ -32,7 +32,7 @@ def test_2in_1out():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_2in_tupleout():
+def test_two_inputs_tuple_output():
     rng = np.random.default_rng(2)
     x = tensor("a", shape=(2,))
     y = tensor("b", shape=(2,))
@@ -53,7 +53,7 @@ def test_2in_tupleout():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_2in_listout():
+def test_two_inputs_list_output():
     rng = np.random.default_rng(3)
     x = tensor("a", shape=(2,))
     y = tensor("b", shape=(2,))
@@ -74,7 +74,7 @@ def test_2in_listout():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_1din_tupleout():
+def test_single_input_tuple_output():
     rng = np.random.default_rng(4)
     x = tensor("a", shape=(2,))
     test_values = [rng.normal(size=(x.type.shape)).astype(config.floatX)]
@@ -92,7 +92,7 @@ def test_1din_tupleout():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_0din_tupleout():
+def test_scalar_input_tuple_output():
     rng = np.random.default_rng(5)
     x = tensor("a", shape=())
     test_values = [rng.normal(size=(x.type.shape)).astype(config.floatX)]
@@ -110,7 +110,7 @@ def test_0din_tupleout():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_1in_listout():
+def test_single_input_list_output():
     rng = np.random.default_rng(6)
     x = tensor("a", shape=(2,))
     test_values = [rng.normal(size=(x.type.shape)).astype(config.floatX)]
@@ -129,7 +129,7 @@ def test_1in_listout():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_pytreein_tupleout():
+def test_pytree_input_tuple_output():
     rng = np.random.default_rng(7)
     x = tensor("a", shape=(2,))
     y = tensor("b", shape=(2,))
@@ -152,7 +152,7 @@ def test_pytreein_tupleout():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_pytreein_pytreeout():
+def test_pytree_input_pytree_output():
     rng = np.random.default_rng(8)
     x = tensor("a", shape=(3,))
     y = tensor("b", shape=(1,))
@@ -172,7 +172,7 @@ def test_pytreein_pytreeout():
     fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_pytreein_pytreeout_w_nongraphargs():
+def test_pytree_input_with_non_graph_args():
     rng = np.random.default_rng(9)
     x = tensor("a", shape=(3,))
     y = tensor("b", shape=(1,))
@@ -212,8 +212,7 @@ def test_pytreein_pytreeout_w_nongraphargs():
     assert out == "Unsupported argument"
 
 
-def test_as_jax_op10():
-    # Use "None" in shape specification and have a non-used output of higher rank
+def test_unused_matrix_product_and_exp_gradient():
     rng = np.random.default_rng(10)
     x = tensor("a", shape=(3,))
     y = tensor("b", shape=(3,))
@@ -235,8 +234,7 @@ def test_as_jax_op10():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_as_jax_op11():
-    # Test unknown static shape
+def test_unknown_static_shape():
     rng = np.random.default_rng(11)
     x = tensor("a", shape=(3,))
     y = tensor("b", shape=(3,))
@@ -260,8 +258,7 @@ def test_as_jax_op11():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_as_jax_op12():
-    # Test non-array return values
+def test_non_array_return_values():
     rng = np.random.default_rng(12)
     x = tensor("a", shape=(3,))
     y = tensor("b", shape=(3,))
@@ -283,8 +280,7 @@ def test_as_jax_op12():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_as_jax_op13():
-    # Test nested functions
+def test_nested_functions():
     rng = np.random.default_rng(13)
     x = tensor("a", shape=(3,))
     y = tensor("b", shape=(3,))
