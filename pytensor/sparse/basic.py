@@ -14,6 +14,7 @@ from warnings import warn
 import numpy as np
 import scipy.sparse
 from numpy.lib.stride_tricks import as_strided
+from scipy.sparse import issparse, spmatrix
 
 import pytensor
 from pytensor import _as_symbolic, as_symbolic
@@ -70,20 +71,6 @@ from pytensor.tensor.variable import (
 )
 
 
-sparse_formats = ["csc", "csr"]
-
-"""
-Types of sparse matrices to use for testing.
-
-"""
-_mtypes = [scipy.sparse.csc_matrix, scipy.sparse.csr_matrix]
-# _mtypes = [sparse.csc_matrix, sparse.csr_matrix, sparse.dok_matrix,
-# sparse.lil_matrix, sparse.coo_matrix]
-# * new class ``dia_matrix`` : the sparse DIAgonal format
-# * new class ``bsr_matrix`` : the Block CSR format
-_mtype_to_str = {scipy.sparse.csc_matrix: "csc", scipy.sparse.csr_matrix: "csr"}
-
-
 def _is_sparse_variable(x):
     """
 
@@ -134,7 +121,7 @@ def _is_dense(x):
         L{numpy.ndarray}).
 
     """
-    if not isinstance(x, scipy.sparse.spmatrix | np.ndarray):
+    if not isinstance(x, spmatrix | np.ndarray):
         raise NotImplementedError(
             "this function should only be called on "
             "sparse.scipy.sparse.spmatrix or "
@@ -144,7 +131,7 @@ def _is_dense(x):
     return isinstance(x, np.ndarray)
 
 
-@_as_symbolic.register(scipy.sparse.spmatrix)
+@_as_symbolic.register(spmatrix)
 def as_symbolic_sparse(x, **kwargs):
     return as_sparse_variable(x, **kwargs)
 
@@ -198,7 +185,7 @@ as_sparse_or_tensor_variable = as_symbolic
 
 
 def constant(x, name=None):
-    if not isinstance(x, scipy.sparse.spmatrix):
+    if not isinstance(x, spmatrix):
         raise TypeError("sparse.constant must be called on a scipy.sparse.spmatrix")
     try:
         return SparseConstant(
@@ -3337,7 +3324,7 @@ class TrueDot(Op):
         x, y = inp
         (out,) = out_
         rval = x.dot(y)
-        if not scipy.sparse.issparse(rval):
+        if not issparse(rval):
             rval = getattr(scipy.sparse, x.format + "_matrix")(rval)
         # x.dot call tocsr() that will "upcast" to ['int8', 'uint8', 'short',
         # 'ushort', 'intc', 'uintc', 'longlong', 'ulonglong', 'single',
@@ -3604,7 +3591,7 @@ class StructuredDotGradCSC(COp):
                 # the following dot product can result in a scalar or
                 # a (1, 1) sparse matrix.
                 dot_val = np.dot(g_ab[i], b[j].T)
-                if isinstance(dot_val, scipy.sparse.spmatrix):
+                if isinstance(dot_val, spmatrix):
                     dot_val = dot_val[0, 0]
                 g_a_data[i_idx] = dot_val
         out[0] = g_a_data
@@ -3738,7 +3725,7 @@ class StructuredDotGradCSR(COp):
                 # the following dot product can result in a scalar or
                 # a (1, 1) sparse matrix.
                 dot_val = np.dot(g_ab[i], b[j].T)
-                if isinstance(dot_val, scipy.sparse.spmatrix):
+                if isinstance(dot_val, spmatrix):
                     dot_val = dot_val[0, 0]
                 g_a_data[j_idx] = dot_val
         out[0] = g_a_data
@@ -3955,9 +3942,9 @@ class Dot(Op):
         # Sparse dot product should have at least one sparse variable
         # as input. If the other one is not sparse, it has to be converted
         # into a tensor.
-        if isinstance(x, scipy.sparse.spmatrix):
+        if isinstance(x, spmatrix):
             x = as_sparse_variable(x)
-        if isinstance(y, scipy.sparse.spmatrix):
+        if isinstance(y, spmatrix):
             y = as_sparse_variable(y)
 
         x_is_sparse_var = _is_sparse_variable(x)
@@ -4147,7 +4134,7 @@ class Usmm(Op):
             raise TypeError(x)
 
         rval = x * y
-        if isinstance(rval, scipy.sparse.spmatrix):
+        if isinstance(rval, spmatrix):
             rval = rval.toarray()
         if rval.dtype == alpha.dtype:
             rval *= alpha  # Faster because operation is inplace

@@ -2,7 +2,6 @@ import abc
 import warnings
 
 import numpy as np
-import scipy.stats as stats
 
 import pytensor
 from pytensor.tensor import get_vector_length, specify_shape
@@ -350,7 +349,9 @@ class HalfNormalRV(ScipyRandomVariable):
             is returned.
 
         """
-        return stats.halfnorm.rvs(loc, scale, random_state=rng, size=size)
+        from scipy.stats import halfnorm
+
+        return halfnorm.rvs(loc, scale, random_state=rng, size=size)
 
 
 halfnormal = HalfNormalRV()
@@ -583,7 +584,9 @@ class ParetoRV(ScipyRandomVariable):
 
     @classmethod
     def rng_fn_scipy(cls, rng, b, scale, size):
-        return stats.pareto.rvs(b, scale=scale, size=size, random_state=rng)
+        from scipy.stats import pareto
+
+        return pareto.rvs(b, scale=scale, size=size, random_state=rng)
 
 
 pareto = ParetoRV()
@@ -645,7 +648,9 @@ class GumbelRV(ScipyRandomVariable):
         scale: np.ndarray | float,
         size: list[int] | int | None,
     ) -> np.ndarray:
-        return stats.gumbel_r.rvs(loc=loc, scale=scale, size=size, random_state=rng)
+        from scipy.stats import gumbel_r
+
+        return gumbel_r.rvs(loc=loc, scale=scale, size=size, random_state=rng)
 
 
 gumbel = GumbelRV()
@@ -840,8 +845,10 @@ def safe_multivariate_normal(mean, cov, size=None, rng=None):
     variable.
 
     """
+    from scipy.stats import multivariate_normal
+
     res = np.atleast_1d(
-        stats.multivariate_normal(mean=mean, cov=cov, allow_singular=True).rvs(
+        multivariate_normal(mean=mean, cov=cov, allow_singular=True).rvs(
             size=size, random_state=rng
         )
     )
@@ -1173,7 +1180,9 @@ class CauchyRV(ScipyRandomVariable):
 
     @classmethod
     def rng_fn_scipy(cls, rng, loc, scale, size):
-        return stats.cauchy.rvs(loc=loc, scale=scale, random_state=rng, size=size)
+        from scipy.stats import cauchy
+
+        return cauchy.rvs(loc=loc, scale=scale, random_state=rng, size=size)
 
 
 cauchy = CauchyRV()
@@ -1223,7 +1232,9 @@ class HalfCauchyRV(ScipyRandomVariable):
 
     @classmethod
     def rng_fn_scipy(cls, rng, loc, scale, size):
-        return stats.halfcauchy.rvs(loc=loc, scale=scale, random_state=rng, size=size)
+        from scipy.stats import halfcauchy
+
+        return halfcauchy.rvs(loc=loc, scale=scale, random_state=rng, size=size)
 
 
 halfcauchy = HalfCauchyRV()
@@ -1277,7 +1288,9 @@ class InvGammaRV(ScipyRandomVariable):
 
     @classmethod
     def rng_fn_scipy(cls, rng, shape, scale, size):
-        return stats.invgamma.rvs(shape, scale=scale, size=size, random_state=rng)
+        from scipy.stats import invgamma
+
+        return invgamma.rvs(shape, scale=scale, size=size, random_state=rng)
 
 
 invgamma = InvGammaRV()
@@ -1376,9 +1389,9 @@ class TruncExponentialRV(ScipyRandomVariable):
 
     @classmethod
     def rng_fn_scipy(cls, rng, b, loc, scale, size):
-        return stats.truncexpon.rvs(
-            b, loc=loc, scale=scale, size=size, random_state=rng
-        )
+        from scipy.stats import truncexpon
+
+        return truncexpon.rvs(b, loc=loc, scale=scale, size=size, random_state=rng)
 
 
 truncexpon = TruncExponentialRV()
@@ -1432,7 +1445,9 @@ class StudentTRV(ScipyRandomVariable):
 
     @classmethod
     def rng_fn_scipy(cls, rng, df, loc, scale, size):
-        return stats.t.rvs(df, loc=loc, scale=scale, size=size, random_state=rng)
+        from scipy.stats import t
+
+        return t.rvs(df, loc=loc, scale=scale, size=size, random_state=rng)
 
 
 t = StudentTRV()
@@ -1485,7 +1500,9 @@ class BernoulliRV(ScipyRandomVariable):
 
     @classmethod
     def rng_fn_scipy(cls, rng, p, size):
-        return stats.bernoulli.rvs(p, size=size, random_state=rng)
+        from scipy.stats import bernoulli
+
+        return bernoulli.rvs(p, size=size, random_state=rng)
 
 
 bernoulli = BernoulliRV()
@@ -1624,7 +1641,9 @@ class NegBinomialRV(ScipyRandomVariable):
 
     @classmethod
     def rng_fn_scipy(cls, rng, n, p, size):
-        return stats.nbinom.rvs(n, p, size=size, random_state=rng)
+        from scipy.stats import nbinom
+
+        return nbinom.rvs(n, p, size=size, random_state=rng)
 
 
 nbinom = NegBinomialRV()
@@ -1681,7 +1700,9 @@ class BetaBinomialRV(ScipyRandomVariable):
 
     @classmethod
     def rng_fn_scipy(cls, rng, n, a, b, size):
-        return stats.betabinom.rvs(n, a, b, size=size, random_state=rng)
+        from scipy.stats import betabinom
+
+        return betabinom.rvs(n, a, b, size=size, random_state=rng)
 
 
 betabinom = BetaBinomialRV()
@@ -1733,9 +1754,9 @@ class GenGammaRV(ScipyRandomVariable):
 
     @classmethod
     def rng_fn_scipy(cls, rng, alpha, p, lambd, size):
-        return stats.gengamma.rvs(
-            alpha / p, p, scale=lambd, size=size, random_state=rng
-        )
+        from scipy.stats import gengamma
+
+        return gengamma.rvs(alpha / p, p, scale=lambd, size=size, random_state=rng)
 
 
 gengamma = GenGammaRV()

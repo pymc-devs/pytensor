@@ -2,7 +2,7 @@ from collections.abc import Iterable
 from typing import Literal
 
 import numpy as np
-import scipy.sparse
+from scipy.sparse import bsr_matrix, csc_matrix, csr_matrix, issparse, spmatrix
 
 import pytensor
 from pytensor import scalar as ps
@@ -23,14 +23,14 @@ def _is_sparse(x):
         True iff x is a L{scipy.sparse.spmatrix} (and not a L{numpy.ndarray}).
 
     """
-    if not isinstance(x, scipy.sparse.spmatrix | np.ndarray | tuple | list):
+    if not isinstance(x, spmatrix | np.ndarray | tuple | list):
         raise NotImplementedError(
             "this function should only be called on "
             "sparse.scipy.sparse.spmatrix or "
             "numpy.ndarray, not,",
             x,
         )
-    return isinstance(x, scipy.sparse.spmatrix)
+    return isinstance(x, spmatrix)
 
 
 class SparseTensorType(TensorType, HasDataType):
@@ -44,9 +44,9 @@ class SparseTensorType(TensorType, HasDataType):
 
     __props__ = ("dtype", "format", "shape")
     format_cls = {
-        "csr": scipy.sparse.csr_matrix,
-        "csc": scipy.sparse.csc_matrix,
-        "bsr": scipy.sparse.bsr_matrix,
+        "csr": csr_matrix,
+        "csc": csc_matrix,
+        "bsr": bsr_matrix,
     }
     dtype_specs_map = {
         "float32": (float, "npy_float32", "NPY_FLOAT32"),
@@ -187,7 +187,7 @@ class SparseTensorType(TensorType, HasDataType):
         # WARNING: equality comparison of sparse matrices is not fast or easy
         # we definitely do not want to be doing this un-necessarily during
         # a FAST_RUN computation..
-        if not (scipy.sparse.issparse(a) and scipy.sparse.issparse(b)):
+        if not (issparse(a) and issparse(b)):
             return False
         diff = abs(a - b)
         if diff.nnz == 0:
@@ -203,14 +203,10 @@ class SparseTensorType(TensorType, HasDataType):
         # WARNING: equality comparison of sparse matrices is not fast or easy
         # we definitely do not want to be doing this un-necessarily during
         # a FAST_RUN computation..
-        return (
-            scipy.sparse.issparse(a)
-            and scipy.sparse.issparse(b)
-            and abs(a - b).sum() == 0.0
-        )
+        return issparse(a) and issparse(b) and abs(a - b).sum() == 0.0
 
     def is_valid_value(self, a):
-        return scipy.sparse.issparse(a) and (a.format == self.format)
+        return issparse(a) and (a.format == self.format)
 
     def get_shape_info(self, obj):
         obj = self.filter(obj)
