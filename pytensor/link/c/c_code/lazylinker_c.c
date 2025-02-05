@@ -5,9 +5,6 @@
 
 #if PY_VERSION_HEX >= 0x03000000
 #include "numpy/npy_3kcompat.h"
-#define PyCObject_AsVoidPtr NpyCapsule_AsVoidPtr
-#define PyCObject_GetDesc NpyCapsule_GetDesc
-#define PyCObject_Check NpyCapsule_Check
 #endif
 
 #ifndef Py_TYPE
@@ -323,9 +320,9 @@ static int CLazyLinker_init(CLazyLinker *self, PyObject *args, PyObject *kwds) {
       if (PyObject_HasAttrString(thunk, "cthunk")) {
         PyObject *cthunk = PyObject_GetAttrString(thunk, "cthunk");
         // new reference
-        assert(cthunk && PyCObject_Check(cthunk));
-        self->thunk_cptr_fn[i] = PyCObject_AsVoidPtr(cthunk);
-        self->thunk_cptr_data[i] = PyCObject_GetDesc(cthunk);
+        assert(cthunk && NpyCapsule_Check(cthunk));
+        self->thunk_cptr_fn[i] = NpyCapsule_AsVoidPtr(cthunk);
+        self->thunk_cptr_data[i] = NpyCapsule_GetDesc(cthunk);
         Py_DECREF(cthunk);
         // cthunk is kept alive by membership in self->thunks
       }
@@ -487,8 +484,8 @@ static PyObject *pycall(CLazyLinker *self, Py_ssize_t node_idx, int verbose) {
       PyList_SetItem(self->call_times, node_idx,
                      PyFloat_FromDouble(t1 - t0 + ti));
       PyObject *count = PyList_GetItem(self->call_counts, node_idx);
-      long icount = PyInt_AsLong(count);
-      PyList_SetItem(self->call_counts, node_idx, PyInt_FromLong(icount + 1));
+      long icount = PyLong_AsLong(count);
+      PyList_SetItem(self->call_counts, node_idx, PyLong_FromLong(icount + 1));
     }
   } else {
     if (verbose) {
@@ -512,8 +509,8 @@ static int c_call(CLazyLinker *self, Py_ssize_t node_idx, int verbose) {
     PyList_SetItem(self->call_times, node_idx,
                    PyFloat_FromDouble(t1 - t0 + ti));
     PyObject *count = PyList_GetItem(self->call_counts, node_idx);
-    long icount = PyInt_AsLong(count);
-    PyList_SetItem(self->call_counts, node_idx, PyInt_FromLong(icount + 1));
+    long icount = PyLong_AsLong(count);
+    PyList_SetItem(self->call_counts, node_idx, PyLong_FromLong(icount + 1));
   } else {
     err = fn(self->thunk_cptr_data[node_idx]);
   }
@@ -774,20 +771,20 @@ static PyObject *CLazyLinker_call(PyObject *_self, PyObject *args,
       output_subset = (char *)calloc(self->n_output_vars, sizeof(char));
       for (int it = 0; it < output_subset_size; ++it) {
         PyObject *elem = PyList_GetItem(output_subset_ptr, it);
-        if (!PyInt_Check(elem)) {
+        if (!PyLong_Check(elem)) {
           err = 1;
           PyErr_SetString(PyExc_RuntimeError,
                           "Some elements of output_subset list are not int");
         }
-        output_subset[PyInt_AsLong(elem)] = 1;
+        output_subset[PyLong_AsLong(elem)] = 1;
       }
     }
   }
 
   self->position_of_error = -1;
   // create constants used to fill the var_compute_cells
-  PyObject *one = PyInt_FromLong(1);
-  PyObject *zero = PyInt_FromLong(0);
+  PyObject *one = PyLong_FromLong(1);
+  PyObject *zero = PyLong_FromLong(0);
 
   // pre-allocate our return value
   Py_INCREF(Py_None);
@@ -942,11 +939,8 @@ static PyMemberDef CLazyLinker_members[] = {
 };
 
 static PyTypeObject lazylinker_ext_CLazyLinkerType = {
-#if defined(NPY_PY3K)
     PyVarObject_HEAD_INIT(NULL, 0)
-#else
-    PyObject_HEAD_INIT(NULL) 0, /*ob_size*/
-#endif
+
         "lazylinker_ext.CLazyLinker",         /*tp_name*/
     sizeof(CLazyLinker),                      /*tp_basicsize*/
     0,                                        /*tp_itemsize*/
@@ -987,7 +981,7 @@ static PyTypeObject lazylinker_ext_CLazyLinkerType = {
 };
 
 static PyObject *get_version(PyObject *dummy, PyObject *args) {
-  PyObject *result = PyFloat_FromDouble(0.212);
+  PyObject *result = PyFloat_FromDouble(0.3);
   return result;
 }
 
@@ -996,7 +990,7 @@ static PyMethodDef lazylinker_ext_methods[] = {
     {NULL, NULL, 0, NULL} /* Sentinel */
 };
 
-#if defined(NPY_PY3K)
+
 static struct PyModuleDef moduledef = {PyModuleDef_HEAD_INIT,
                                        "lazylinker_ext",
                                        NULL,
@@ -1006,28 +1000,19 @@ static struct PyModuleDef moduledef = {PyModuleDef_HEAD_INIT,
                                        NULL,
                                        NULL,
                                        NULL};
-#endif
-#if defined(NPY_PY3K)
-#define RETVAL m
+
 PyMODINIT_FUNC PyInit_lazylinker_ext(void) {
-#else
-#define RETVAL
-PyMODINIT_FUNC initlazylinker_ext(void) {
-#endif
+
   PyObject *m;
 
   lazylinker_ext_CLazyLinkerType.tp_new = PyType_GenericNew;
   if (PyType_Ready(&lazylinker_ext_CLazyLinkerType) < 0)
-    return RETVAL;
-#if defined(NPY_PY3K)
+    return NULL;
+
   m = PyModule_Create(&moduledef);
-#else
-  m = Py_InitModule3("lazylinker_ext", lazylinker_ext_methods,
-                     "Example module that creates an extension type.");
-#endif
   Py_INCREF(&lazylinker_ext_CLazyLinkerType);
   PyModule_AddObject(m, "CLazyLinker",
                      (PyObject *)&lazylinker_ext_CLazyLinkerType);
 
-  return RETVAL;
+  return m;
 }
