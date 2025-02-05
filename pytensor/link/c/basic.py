@@ -875,10 +875,10 @@ class CLinker(Linker):
         self.c_init_code_apply = c_init_code_apply
 
         if (self.init_tasks, self.tasks) != self.get_init_tasks():
-            print("init_tasks\n", self.init_tasks, file=sys.stderr)
-            print(self.get_init_tasks()[0], file=sys.stderr)
-            print("tasks\n", self.tasks, file=sys.stderr)
-            print(self.get_init_tasks()[1], file=sys.stderr)
+            print("init_tasks\n", self.init_tasks, file=sys.stderr)  # noqa: T201
+            print(self.get_init_tasks()[0], file=sys.stderr)  # noqa: T201
+            print("tasks\n", self.tasks, file=sys.stderr)  # noqa: T201
+            print(self.get_init_tasks()[1], file=sys.stderr)  # noqa: T201
             assert (self.init_tasks, self.tasks) == self.get_init_tasks()
 
         # List of indices that should be ignored when passing the arguments
@@ -1756,7 +1756,7 @@ class _CThunk:
                 exc_value = exc_type(_exc_value)
                 exc_value.__thunk_trace__ = trace
             except Exception:
-                print(
+                print(  # noqa: T201
                     (
                         "ERROR retrieving error_storage."
                         "Was the error set in the c code?"
@@ -1764,7 +1764,7 @@ class _CThunk:
                     end=" ",
                     file=sys.stderr,
                 )
-                print(self.error_storage, file=sys.stderr)
+                print(self.error_storage, file=sys.stderr)  # noqa: T201
                 raise
             raise exc_value.with_traceback(exc_trace)
 

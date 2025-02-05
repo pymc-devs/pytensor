@@ -726,7 +726,7 @@ def _print_fn(op, xin):
             pmsg = temp()
         else:
             pmsg = temp
-        print(op.message, attr, "=", pmsg)
+        print(op.message, attr, "=", pmsg)  # noqa: T201
 
 
 class Print(Op):
@@ -1657,7 +1657,7 @@ def pydotprint(
             raise
 
         if print_output_file:
-            print("The output file is available at", outfile)
+            print("The output file is available at", outfile)  # noqa: T201
 
 
 class _TagGenerator:
@@ -1824,8 +1824,7 @@ def var_descriptor(obj, _prev_obs: dict | None = None, _tag_generator=None) -> s
             # The __str__ method is encoding the object's id in its str
             name = position_independent_str(obj)
             if " at 0x" in name:
-                print(name)
-                raise AssertionError()
+                raise AssertionError(name)
 
     prefix = cur_tag + "="
 

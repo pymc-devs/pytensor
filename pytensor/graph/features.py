@@ -491,7 +491,7 @@ class Validator(Feature):
                 if verbose:
                     r = uf.f_locals.get("r", "")
                     reason = uf_info.function
-                    print(f"validate failed on node {r}.\n Reason: {reason}, {e}")
+                    print(f"validate failed on node {r}.\n Reason: {reason}, {e}")  # noqa: T201
                 raise
         t1 = time.perf_counter()
         if fgraph.profile:
@@ -603,13 +603,13 @@ class ReplaceValidate(History, Validator):
         except Exception as e:
             fgraph.revert(chk)
             if verbose:
-                print(
+                print(  # noqa: T201
                     f"rewriting: validate failed on node {r}.\n Reason: {reason}, {e}"
                 )
             raise
 
         if verbose:
-            print(
+            print(  # noqa: T201
                 f"rewriting: rewrite {reason} replaces {r} of {r.owner} with {new_r} of {new_r.owner}"
             )
 
@@ -692,11 +692,11 @@ class NodeFinder(Bookkeeper):
         except TypeError:  # node.op is unhashable
             return
         except Exception as e:
-            print("OFFENDING node", type(node), type(node.op), file=sys.stderr)
+            print("OFFENDING node", type(node), type(node.op), file=sys.stderr)  # noqa: T201
             try:
-                print("OFFENDING node hash", hash(node.op), file=sys.stderr)
+                print("OFFENDING node hash", hash(node.op), file=sys.stderr)  # noqa: T201
             except Exception:
-                print("OFFENDING node not hashable", file=sys.stderr)
+                print("OFFENDING node not hashable", file=sys.stderr)  # noqa: T201
             raise e
 
     def on_prune(self, fgraph, node, reason):
@@ -725,7 +725,7 @@ class PrintListener(Feature):
 
     def on_attach(self, fgraph):
         if self.active:
-            print("-- attaching to: ", fgraph)
+            print("-- attaching to: ", fgraph)  # noqa: T201
 
     def on_detach(self, fgraph):
         """
@@ -733,19 +733,19 @@ class PrintListener(Feature):
         that it installed into the function_graph
         """
         if self.active:
-            print("-- detaching from: ", fgraph)
+            print("-- detaching from: ", fgraph)  # noqa: T201
 
     def on_import(self, fgraph, node, reason):
         if self.active:
-            print(f"-- importing: {node}, reason: {reason}")
+            print(f"-- importing: {node}, reason: {reason}")  # noqa: T201
 
     def on_prune(self, fgraph, node, reason):
         if self.active:
-            print(f"-- pruning: {node}, reason: {reason}")
+            print(f"-- pruning: {node}, reason: {reason}")  # noqa: T201
 
     def on_change_input(self, fgraph, node, i, r, new_r, reason=None):
         if self.active:
-            print(f"-- changing ({node}.inputs[{i}]) from {r} to {new_r}")
+            print(f"-- changing ({node}.inputs[{i}]) from {r} to {new_r}")  # noqa: T201
 
 
 class PreserveVariableAttributes(Feature):

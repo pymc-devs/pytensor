@@ -1,4 +1,3 @@
-import time
 from collections import Counter
 
 import numpy as np
@@ -108,23 +107,25 @@ def test_speed():
         return z
 
     def time_numpy():
+        # TODO: Make this a benchmark test
         steps_a = 5
         steps_b = 100
         x = np.asarray([2.0, 3.0], dtype=config.floatX)
 
         numpy_version(x, steps_a)
-        t0 = time.perf_counter()
-        # print numpy_version(x, steps_a)
-        t1 = time.perf_counter()
-        t2 = time.perf_counter()
-        # print numpy_version(x, steps_b)
-        t3 = time.perf_counter()
-        t_a = t1 - t0
-        t_b = t3 - t2
+        # t0 = time.perf_counter()
+        numpy_version(x, steps_a)
+        # t1 = time.perf_counter()
+        # t2 = time.perf_counter()
+        numpy_version(x, steps_b)
+        # t3 = time.perf_counter()
+        # t_a = t1 - t0
+        # t_b = t3 - t2
 
-        print(f"numpy takes {1000 * (t_b - t_a) / (steps_b - steps_a):f} s/Kop")
+        # print(f"numpy takes {1000 * (t_b - t_a) / (steps_b - steps_a):f} s/Kop")
 
     def time_linker(name, linker):
+        # TODO: Make this a benchmark test
         steps_a = 5
         steps_b = 100
         x = vector()
@@ -135,20 +136,20 @@ def test_speed():
         f_b = function([x], b, mode=Mode(optimizer=None, linker=linker()))
 
         f_a([2.0, 3.0])
-        t0 = time.perf_counter()
+        # t0 = time.perf_counter()
         f_a([2.0, 3.0])
-        t1 = time.perf_counter()
+        # t1 = time.perf_counter()
 
         f_b([2.0, 3.0])
 
-        t2 = time.perf_counter()
+        # t2 = time.perf_counter()
         f_b([2.0, 3.0])
-        t3 = time.perf_counter()
+        # t3 = time.perf_counter()
 
-        t_a = t1 - t0
-        t_b = t3 - t2
+        # t_a = t1 - t0
+        # t_b = t3 - t2
 
-        print(f"{name} takes {1000 * (t_b - t_a) / (steps_b - steps_a):f} s/Kop")
+        # print(f"{name} takes {1000 * (t_b - t_a) / (steps_b - steps_a):f} s/Kop")
 
     time_linker("c|py", OpWiseCLinker)
     time_linker("vmLinker", VMLinker)
@@ -167,7 +168,7 @@ def test_speed():
     ],
 )
 def test_speed_lazy(linker):
-    # TODO FIXME: This isn't a real test.
+    # TODO FIXME: This isn't a real test. Make this a benchmark test
 
     def build_graph(x, depth=5):
         z = x
@@ -185,20 +186,20 @@ def test_speed_lazy(linker):
     f_b = function([x], b, mode=Mode(optimizer=None, linker=linker))
 
     f_a([2.0])
-    t0 = time.perf_counter()
+    # t0 = time.perf_counter()
     f_a([2.0])
-    t1 = time.perf_counter()
+    # t1 = time.perf_counter()
 
     f_b([2.0])
 
-    t2 = time.perf_counter()
+    # t2 = time.perf_counter()
     f_b([2.0])
-    t3 = time.perf_counter()
+    # t3 = time.perf_counter()
 
-    t_a = t1 - t0
-    t_b = t3 - t2
+    # t_a = t1 - t0
+    # t_b = t3 - t2
 
-    print(f"{linker} takes {1000 * (t_b - t_a) / (steps_b - steps_a):f} s/Kop")
+    # print(f"{linker} takes {1000 * (t_b - t_a) / (steps_b - steps_a):f} s/Kop")
 
 
 @pytest.mark.parametrize(

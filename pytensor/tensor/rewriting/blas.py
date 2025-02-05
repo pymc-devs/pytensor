@@ -573,7 +573,7 @@ class GemmOptimizer(GraphRewriter):
             print(blanc, " callbacks_time", file=stream)
             for i in sorted(prof[12].items(), key=lambda a: a[1]):
                 if i[1] > 0:
-                    print(i)
+                    print(i)  # noqa: T201
 
 
 @node_rewriter([Dot])

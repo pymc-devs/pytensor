@@ -1,5 +1,6 @@
 import logging
 import sys
+import warnings
 from copy import copy, deepcopy
 from functools import wraps
 
@@ -41,12 +42,9 @@ def fetch_seed(pseed=None):
         else:
             seed = None
     except ValueError:
-        print(
-            (
-                "Error: config.unittests__rseed contains "
-                "invalid seed, using None instead"
-            ),
-            file=sys.stderr,
+        warnings.warn(
+            "Error: config.unittests__rseed contains "
+            "invalid seed, using None instead"
         )
         seed = None
 

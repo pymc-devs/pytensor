@@ -79,7 +79,7 @@ class COp(Op, CLinkerOp):
                 # that don't implement c code. In those cases, we
                 # don't want to print a warning.
                 cl.get_dynamic_module()
-                print(f"Disabling C code for {self} due to unsupported float16")
+                warnings.warn(f"Disabling C code for {self} due to unsupported float16")
                 raise NotImplementedError("float16")
         outputs = cl.make_thunk(
             input_storage=node_input_storage, output_storage=node_output_storage

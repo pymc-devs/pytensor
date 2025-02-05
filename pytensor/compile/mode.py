@@ -178,7 +178,7 @@ class PrintCurrentFunctionGraph(GraphRewriter):
     def apply(self, fgraph):
         import pytensor.printing
 
-        print("PrintCurrentFunctionGraph:", self.header)
+        print("PrintCurrentFunctionGraph:", self.header)  # noqa: T201
         pytensor.printing.debugprint(fgraph.outputs)
 
 

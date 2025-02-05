@@ -1002,7 +1002,7 @@ class MetaNodeRewriter(NodeRewriter):
         # ensure we have data for all input variables that need it
         if missing:
             if self.verbose > 0:
-                print(
+                print(  # noqa: T201
                     f"{self.__class__.__name__} cannot meta-rewrite {node}, "
                     f"{len(missing)} of {int(node.nin)} input shapes unknown"
                 )
@@ -1010,7 +1010,7 @@ class MetaNodeRewriter(NodeRewriter):
         # now we can apply the different rewrites in turn,
         # compile the resulting subgraphs and time their execution
         if self.verbose > 1:
-            print(
+            print(  # noqa: T201
                 f"{self.__class__.__name__} meta-rewriting {node} ({len(self.get_rewrites(node))} choices):"
             )
         timings = []
@@ -1027,20 +1027,20 @@ class MetaNodeRewriter(NodeRewriter):
                     continue
                 except Exception as e:
                     if self.verbose > 0:
-                        print(f"* {node_rewriter}: exception", e)
+                        print(f"* {node_rewriter}: exception", e)  # noqa: T201
                     continue
                 else:
                     if self.verbose > 1:
-                        print(f"* {node_rewriter}: {timing:.5g} sec")
+                        print(f"* {node_rewriter}: {timing:.5g} sec")  # noqa: T201
                     timings.append((timing, outputs, node_rewriter))
             else:
                 if self.verbose > 0:
-                    print(f"* {node_rewriter}: not applicable")
+                    print(f"* {node_rewriter}: not applicable")  # noqa: T201
         # finally, we choose the fastest one
         if timings:
             timings.sort()
             if self.verbose > 1:
-                print(f"= {timings[0][2]}")
+                print(f"= {timings[0][2]}")  # noqa: T201
             return timings[0][1]
         return
 
@@ -1305,7 +1305,7 @@ class SequentialNodeRewriter(NodeRewriter):
                     new_vars = list(new_repl.values())
 
                 if config.optimizer_verbose:
-                    print(
+                    print(  # noqa: T201
                         f"rewriting: rewrite {rewrite} replaces node {node} with {new_repl}"
                     )
 
@@ -2641,21 +2641,21 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
                 try:
                     o.print_profile(stream, prof, level + 2)
                 except NotImplementedError:
-                    print(blanc, "merge not implemented for ", o)
+                    print(blanc, "merge not implemented for ", o)  # noqa: T201
             for o, prof in zip(
                 rewrite.final_rewriters, final_sub_profs[i], strict=True
             ):
                 try:
                     o.print_profile(stream, prof, level + 2)
                 except NotImplementedError:
-                    print(blanc, "merge not implemented for ", o)
+                    print(blanc, "merge not implemented for ", o)  # noqa: T201
             for o, prof in zip(
                 rewrite.cleanup_rewriters, cleanup_sub_profs[i], strict=True
             ):
                 try:
                     o.print_profile(stream, prof, level + 2)
                 except NotImplementedError:
-                    print(blanc, "merge not implemented for ", o)
+                    print(blanc, "merge not implemented for ", o)  # noqa: T201
 
     @staticmethod
     def merge_profile(prof1, prof2):

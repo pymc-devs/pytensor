@@ -258,7 +258,6 @@ def test_default_blas_ldflags(
     def patched_compile_tmp(*args, **kwargs):
         def wrapped(test_code, tmp_prefix, flags, try_run, output):
             if len(flags) >= 2 and flags[:2] == ["-framework", "Accelerate"]:
-                print(enabled_accelerate_framework)
                 if enabled_accelerate_framework:
                     return (True, True)
                 else:
