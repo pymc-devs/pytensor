@@ -192,7 +192,7 @@ def test_invalid_configvar_access():
 
     # But we can make sure that nothing crazy happens when we access it:
     with pytest.raises(configparser.ConfigAccessViolation, match="different instance"):
-        print(root.test__on_test_instance)
+        assert root.test__on_test_instance is not None
 
 
 def test_no_more_dotting():

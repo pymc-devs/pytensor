@@ -216,9 +216,8 @@ class Det(Op):
         (z,) = outputs
         try:
             z[0] = np.asarray(np.linalg.det(x), dtype=x.dtype)
-        except Exception:
-            print("Failed to compute determinant", x)
-            raise
+        except Exception as e:
+            raise ValueError("Failed to compute determinant", x) from e
 
     def grad(self, inputs, g_outputs):
         (gz,) = g_outputs
@@ -256,9 +255,8 @@ class SLogDet(Op):
         (sign, det) = outputs
         try:
             sign[0], det[0] = (np.array(z, dtype=x.dtype) for z in np.linalg.slogdet(x))
-        except Exception:
-            print("Failed to compute determinant", x)
-            raise
+        except Exception as e:
+            raise ValueError("Failed to compute determinant", x) from e
 
     def infer_shape(self, fgraph, node, shapes):
         return [(), ()]

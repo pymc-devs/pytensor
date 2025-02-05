@@ -613,7 +613,6 @@ def get_scalar_constant_value(
     """
     if isinstance(v, TensorVariable | np.ndarray):
         if v.ndim != 0:
-            print(v, v.ndim)
             raise NotScalarConstantError("Input ndim != 0")
     return get_underlying_scalar_constant_value(
         v,

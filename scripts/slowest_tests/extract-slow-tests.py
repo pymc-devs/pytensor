@@ -72,7 +72,7 @@ def main(read_lines):
     lines = read_lines()
     times = extract_lines(lines)
     parsed_times = format_times(times)
-    print("\n".join(parsed_times))
+    print("\n".join(parsed_times))  # noqa: T201
 
 
 if __name__ == "__main__":

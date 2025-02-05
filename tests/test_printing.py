@@ -138,9 +138,9 @@ def test_min_informative_str():
   D. D
   E. E"""
 
-    if mis != reference:
-        print("--" + mis + "--")
-        print("--" + reference + "--")
+    # if mis != reference:
+    #     print("--" + mis + "--")
+    #     print("--" + reference + "--")
 
     assert mis == reference
 

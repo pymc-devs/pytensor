@@ -12,7 +12,6 @@ Questions and notes about scan that should be answered :
 import os
 import pickle
 import shutil
-import sys
 from pathlib import Path
 from tempfile import mkdtemp
 
@@ -3076,7 +3075,7 @@ class TestExamples:
 
         cost = result_outer[0][-1]
         H = hessian(cost, W)
-        print(".", file=sys.stderr)
+        # print(".", file=sys.stderr)
         f = function([W, n_steps], H)
         benchmark(f, np.ones((8,), dtype="float32"), 1)
 

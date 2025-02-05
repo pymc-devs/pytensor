@@ -314,14 +314,14 @@ class InplaceElemwiseOptimizer(GraphRewriter):
                     except (ValueError, InconsistencyError) as e:
                         prof["nb_inconsistent"] += 1
                         if check_each_change != 1 and not raised_warning:
-                            print(
+                            print(  # noqa: T201
                                 (
                                     "Some inplace rewriting was not "
                                     "performed due to an unexpected error:"
                                 ),
                                 file=sys.stderr,
                             )
-                            print(e, file=sys.stderr)
+                            print(e, file=sys.stderr)  # noqa: T201
                             raised_warning = True
                         fgraph.revert(chk)
                         continue
@@ -335,7 +335,7 @@ class InplaceElemwiseOptimizer(GraphRewriter):
                 fgraph.validate()
             except Exception:
                 if not raised_warning:
-                    print(
+                    print(  # noqa: T201
                         (
                             "Some inplace rewriting was not "
                             "performed due to an unexpected error"
@@ -1080,7 +1080,7 @@ class FusionOptimizer(GraphRewriter):
             print(blanc, " callbacks_time", file=stream)
             for i in sorted(prof[6].items(), key=lambda a: a[1])[::-1]:
                 if i[1] > 0:
-                    print(blanc, "     ", i)
+                    print(blanc, "     ", i)  # noqa: T201
         print(blanc, " time_toposort", prof[7], file=stream)
 
 

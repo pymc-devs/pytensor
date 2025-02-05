@@ -108,14 +108,14 @@ class PdbBreakpoint(Op):
                     f"'{self.name}' could not be casted to NumPy arrays"
                 )
 
-            print("\n")
-            print("-------------------------------------------------")
-            print(f"Conditional breakpoint '{self.name}' activated\n")
-            print("The monitored variables are stored, in order,")
-            print("in the list variable 'monitored' as NumPy arrays.\n")
-            print("Their contents can be altered and, when execution")
-            print("resumes, the updated values will be used.")
-            print("-------------------------------------------------")
+            print("\n")  # noqa: T201
+            print("-------------------------------------------------")  # noqa: T201
+            print(f"Conditional breakpoint '{self.name}' activated\n")  # noqa: T201
+            print("The monitored variables are stored, in order,")  # noqa: T201
+            print("in the list variable 'monitored' as NumPy arrays.\n")  # noqa: T201
+            print("Their contents can be altered and, when execution")  # noqa: T201
+            print("resumes, the updated values will be used.")  # noqa: T201
+            print("-------------------------------------------------")  # noqa: T201
 
             try:
                 import pudb

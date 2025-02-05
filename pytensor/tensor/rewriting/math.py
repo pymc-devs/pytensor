@@ -3434,14 +3434,14 @@ def perform_sigm_times_exp(
         sigm_minus_x = []
     if full_tree is None:
         full_tree = tree
-    if False:  # Debug code.
-        print("<perform_sigm_times_exp>")
-        print(f"  full_tree   = {full_tree}")
-        print(f"  tree        = {tree}")
-        print(f"  exp_x       = {exp_x}")
-        print(f"  exp_minus_x = {exp_minus_x}")
-        print(f"  sigm_x      = {sigm_x}")
-        print(f"  sigm_minus_x= {sigm_minus_x}")
+    # if False:  # Debug code.
+    #     print("<perform_sigm_times_exp>")
+    #     print(f"  full_tree   = {full_tree}")
+    #     print(f"  tree        = {tree}")
+    #     print(f"  exp_x       = {exp_x}")
+    #     print(f"  exp_minus_x = {exp_minus_x}")
+    #     print(f"  sigm_x      = {sigm_x}")
+    #     print(f"  sigm_minus_x= {sigm_minus_x}")
     neg, inputs = tree
     if isinstance(inputs, list):
         # Recurse through inputs of the multiplication.

@@ -28,7 +28,7 @@ class TestD3Viz:
         tmp_dir = Path(tempfile.mkdtemp())
         html_file = tmp_dir / "index.html"
         if verbose:
-            print(html_file)
+            print(html_file)  # noqa: T201
         d3v.d3viz(f, html_file)
         assert html_file.stat().st_size > 0
         if reference:

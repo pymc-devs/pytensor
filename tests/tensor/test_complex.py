@@ -73,9 +73,7 @@ class TestRealImag:
         try:
             utt.verify_grad(f, [aval])
         except GradientError as e:
-            print(e.num_grad.gf)
-            print(e.analytic_grad)
-            raise
+            raise ValueError(f"Failed: {e.num_grad.gf=} {e.analytic_grad=}") from e
 
     @pytest.mark.skip(reason="Complex grads not enabled, see #178")
     def test_mul_mixed1(self):
@@ -88,9 +86,7 @@ class TestRealImag:
         try:
             utt.verify_grad(f, [aval])
         except GradientError as e:
-            print(e.num_grad.gf)
-            print(e.analytic_grad)
-            raise
+            raise ValueError(f"Failed: {e.num_grad.gf=} {e.analytic_grad=}") from e
 
     @pytest.mark.skip(reason="Complex grads not enabled, see #178")
     def test_mul_mixed(self):
@@ -104,9 +100,7 @@ class TestRealImag:
         try:
             utt.verify_grad(f, [aval, bval])
         except GradientError as e:
-            print(e.num_grad.gf)
-            print(e.analytic_grad)
-            raise
+            raise ValueError(f"Failed: {e.num_grad.gf=} {e.analytic_grad=}") from e
 
     @pytest.mark.skip(reason="Complex grads not enabled, see #178")
     def test_polar_grads(self):

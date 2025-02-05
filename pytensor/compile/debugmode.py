@@ -1315,9 +1315,9 @@ class _VariableEquivalenceTracker:
 
     def printstuff(self):
         for key in self.equiv:
-            print(key)
+            print(key)  # noqa: T201
             for e in self.equiv[key]:
-                print("  ", e)
+                print("  ", e)  # noqa: T201
 
 
 # List of default version of make thunk.
@@ -1569,7 +1569,7 @@ class _Linker(LocalLinker):
                 #####
                 for r, s in storage_map.items():
                     if s[0] is not None:
-                        print(r, s)
+                        print(r, s)  # noqa: T201
                     assert s[0] is None
 
                 # try:
@@ -2079,7 +2079,7 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
                     raise StochasticOrder(infolog.getvalue())
                 else:
                     if self.verbose:
-                        print(
+                        print(  # noqa: T201
                             "OPTCHECK: optimization",
                             i,
                             "of",

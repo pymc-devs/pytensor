@@ -274,9 +274,9 @@ class Scratchpad:
         return "scratchpad" + str(self.__dict__)
 
     def info(self):
-        print(f"<pytensor.graph.utils.scratchpad instance at {id(self)}>")
+        print(f"<pytensor.graph.utils.scratchpad instance at {id(self)}>")  # noqa: T201
         for k, v in self.__dict__.items():
-            print(f"  {k}: {v}")
+            print(f"  {k}: {v}")  # noqa: T201
 
     # These two methods have been added to help Mypy
     def __getattribute__(self, name):

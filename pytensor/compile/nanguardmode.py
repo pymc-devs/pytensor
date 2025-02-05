@@ -236,7 +236,7 @@ class NanGuardMode(Mode):
                 if config.NanGuardMode__action == "raise":
                     raise AssertionError(msg)
                 elif config.NanGuardMode__action == "pdb":
-                    print(msg)
+                    print(msg)  # noqa: T201
                     import pdb
 
                     pdb.set_trace()

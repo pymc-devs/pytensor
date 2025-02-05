@@ -82,7 +82,7 @@ def _atexit_print_fn():
                         to_sum.append(ps)
                 else:
                     # TODO print the name if there is one!
-                    print("Skipping empty Profile")
+                    print("Skipping empty Profile")  # noqa: T201
             if len(to_sum) > 1:
                 # Make a global profile
                 cum = copy.copy(to_sum[0])
@@ -125,7 +125,7 @@ def _atexit_print_fn():
                             assert len(merge) == len(cum.rewriter_profile[1])
                             cum.rewriter_profile = (cum.rewriter_profile[0], merge)
                         except Exception as e:
-                            print(e)
+                            print(e)  # noqa: T201
                             cum.rewriter_profile = None
                     else:
                         cum.rewriter_profile = None

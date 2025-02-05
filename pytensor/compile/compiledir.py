@@ -95,10 +95,10 @@ def cleanup():
 def print_title(title, overline="", underline=""):
     len_title = len(title)
     if overline:
-        print(str(overline) * len_title)
-    print(title)
+        print(str(overline) * len_title)  # noqa: T201
+    print(title)  # noqa: T201
     if underline:
-        print(str(underline) * len_title)
+        print(str(underline) * len_title)  # noqa: T201
 
 
 def print_compiledir_content():
@@ -159,7 +159,7 @@ def print_compiledir_content():
                 _logger.error(f"Could not read key file '{filename}'.")
 
     print_title(f"PyTensor cache: {compiledir}", overline="=", underline="=")
-    print()
+    print()  # noqa: T201
 
     print_title(f"List of {len(table)} compiled individual ops", underline="+")
     print_title(
@@ -168,9 +168,9 @@ def print_compiledir_content():
     )
     table = sorted(table, key=lambda t: str(t[1]))
     for dir, op, types, compile_time in table:
-        print(dir, f"{compile_time:.3f}s", op, types)
+        print(dir, f"{compile_time:.3f}s", op, types)  # noqa: T201
 
-    print()
+    print()  # noqa: T201
     print_title(
         f"List of {len(table_multiple_ops)} compiled sets of ops", underline="+"
     )
@@ -180,9 +180,9 @@ def print_compiledir_content():
     )
     table_multiple_ops = sorted(table_multiple_ops, key=lambda t: (t[1], t[2]))
     for dir, ops_to_str, types_to_str, compile_time in table_multiple_ops:
-        print(dir, f"{compile_time:.3f}s", ops_to_str, types_to_str)
+        print(dir, f"{compile_time:.3f}s", ops_to_str, types_to_str)  # noqa: T201
 
-    print()
+    print()  # noqa: T201
     print_title(
         (
             f"List of {len(table_op_class)} compiled Op classes and "
@@ -191,33 +191,33 @@ def print_compiledir_content():
         underline="+",
     )
     for op_class, nb in reversed(table_op_class.most_common()):
-        print(op_class, nb)
+        print(op_class, nb)  # noqa: T201
 
     if big_key_files:
         big_key_files = sorted(big_key_files, key=lambda t: str(t[1]))
         big_total_size = sum(sz for _, sz, _ in big_key_files)
-        print(
+        print(  # noqa: T201
             f"There are directories with key files bigger than {int(max_key_file_size)} bytes "
             "(they probably contain big tensor constants)"
         )
-        print(
+        print(  # noqa: T201
             f"They use {int(big_total_size)} bytes out of {int(total_key_sizes)} (total size "
             "used by all key files)"
         )
 
         for dir, size, ops in big_key_files:
-            print(dir, size, ops)
+            print(dir, size, ops)  # noqa: T201
 
     nb_keys = sorted(nb_keys.items())
-    print()
+    print()  # noqa: T201
     print_title("Number of keys for a compiled module", underline="+")
     print_title(
         "number of keys/number of modules with that number of keys", underline="-"
     )
     for n_k, n_m in nb_keys:
-        print(n_k, n_m)
-    print()
-    print(
+        print(n_k, n_m)  # noqa: T201
+    print()  # noqa: T201
+    print(  # noqa: T201
         f"Skipped {int(zeros_op)} files that contained 0 op "
         "(are they always pytensor.scalar ops?)"
     )
@@ -242,18 +242,18 @@ def basecompiledir_ls():
     subdirs = sorted(subdirs)
     others = sorted(others)
 
-    print(f"Base compile dir is {config.base_compiledir}")
-    print("Sub-directories (possible compile caches):")
+    print(f"Base compile dir is {config.base_compiledir}")  # noqa: T201
+    print("Sub-directories (possible compile caches):")  # noqa: T201
     for d in subdirs:
-        print(f"    {d}")
+        print(f"    {d}")  # noqa: T201
     if not subdirs:
-        print("    (None)")
+        print("    (None)")  # noqa: T201
 
     if others:
-        print()
-        print("Other files in base_compiledir:")
+        print()  # noqa: T201
+        print("Other files in base_compiledir:")  # noqa: T201
         for f in others:
-            print(f"    {f}")
+            print(f"    {f}")  # noqa: T201
 
 
 def basecompiledir_purge():

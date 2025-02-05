@@ -1628,6 +1628,7 @@ def test_local_mul_specialize():
 
 
 def speed_local_pow_specialize_range():
+    # TODO: This should be a benchmark test
     val = np.random.random(1e7)
     v = vector()
     mode = get_default_mode()
@@ -1641,9 +1642,9 @@ def speed_local_pow_specialize_range():
         t2 = time.perf_counter()
         f2(val)
         t3 = time.perf_counter()
-        print(i, t2 - t1, t3 - t2, t2 - t1 < t3 - t2)
+        # print(i, t2 - t1, t3 - t2, t2 - t1 < t3 - t2)
         if not t2 - t1 < t3 - t2:
-            print("WARNING WE ARE SLOWER")
+            raise ValueError("WARNING WE ARE SLOWER")
     for i in range(-3, -1500, -1):
         f1 = function([v], v**i, mode=mode)
         f2 = function([v], v**i, mode=mode_without_pow_rewrite)
@@ -1653,9 +1654,9 @@ def speed_local_pow_specialize_range():
         t2 = time.perf_counter()
         f2(val)
         t3 = time.perf_counter()
-        print(i, t2 - t1, t3 - t2, t2 - t1 < t3 - t2)
+        # print(i, t2 - t1, t3 - t2, t2 - t1 < t3 - t2)
         if not t2 - t1 < t3 - t2:
-            print("WARNING WE ARE SLOWER")
+            raise ValueError("WARNING WE ARE SLOWER")
 
 
 def test_local_pow_specialize():
@@ -2483,19 +2484,20 @@ class TestLocalErfc:
         assert f.maker.fgraph.outputs[0].dtype == config.floatX
 
     def speed_local_log_erfc(self):
+        # TODO: Make this a benchmark test!
         val = np.random.random(1e6)
         x = vector()
         mode = get_mode("FAST_RUN")
         f1 = function([x], log(erfc(x)), mode=mode.excluding("local_log_erfc"))
         f2 = function([x], log(erfc(x)), mode=mode)
-        print(f1.maker.fgraph.toposort())
-        print(f2.maker.fgraph.toposort())
-        t0 = time.perf_counter()
+        # print(f1.maker.fgraph.toposort())
+        # print(f2.maker.fgraph.toposort())
+        # t0 = time.perf_counter()
         f1(val)
-        t1 = time.perf_counter()
+        # t1 = time.perf_counter()
         f2(val)
-        t2 = time.perf_counter()
-        print(t1 - t0, t2 - t1)
+        # t2 = time.perf_counter()
+        # print(t1 - t0, t2 - t1)
 
 
 class TestLocalMergeSwitchSameCond:
@@ -4144,13 +4146,13 @@ class TestSigmoidRewrites:
             perform_sigm_times_exp(trees[0])
             trees[0] = simplify_mul(trees[0])
             good = is_same_graph(compute_mul(trees[0]), compute_mul(trees[1]))
-            if not good:
-                print(trees[0])
-                print(trees[1])
-                print("***")
-                pytensor.printing.debugprint(compute_mul(trees[0]))
-                print("***")
-                pytensor.printing.debugprint(compute_mul(trees[1]))
+            # if not good:
+            #     print(trees[0])
+            #     print(trees[1])
+            #     print("***")
+            #     pytensor.printing.debugprint(compute_mul(trees[0]))
+            #     print("***")
+            #     pytensor.printing.debugprint(compute_mul(trees[1]))
             assert good
 
         check(sigmoid(x) * exp_op(-x), sigmoid(-x))

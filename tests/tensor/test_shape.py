@@ -797,7 +797,6 @@ class TestVectorize:
         assert equal_computations([vect_out], [reshape(mat, new_shape)])
 
         new_shape = stack([[-1, x], [x - 1, -1]], axis=0)
-        print(new_shape.type)
         [vect_out] = vectorize_node(node, vec, new_shape).outputs
         vec_test_value = np.arange(6)
         np.testing.assert_allclose(
