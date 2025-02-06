@@ -6,8 +6,9 @@ import pytest
 import pytensor.tensor as pt
 from pytensor import as_jax_op, config, grad
 from pytensor.graph.fg import FunctionGraph
+from pytensor.link.jax.ops import JAXOp
 from pytensor.scalar import all_types
-from pytensor.tensor import tensor
+from pytensor.tensor import TensorType, tensor
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
@@ -19,17 +20,28 @@ def test_two_inputs_single_output():
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
     ]
 
-    @as_jax_op
     def f(x, y):
         return jax.nn.sigmoid(x + y)
 
-    out = f(x, y)
+    # Test with as_jax_op decorator
+    out = as_jax_op(f)(x, y)
     grad_out = grad(pt.sum(out), [x, y])
 
     fg = FunctionGraph([x, y], [out, *grad_out])
     fn, _ = compare_jax_and_py(fg, test_values)
     with jax.disable_jit():
         fn, _ = compare_jax_and_py(fg, test_values)
+
+    # Test direct JAXOp usage
+    jax_op = JAXOp(
+        [x.type, y.type],
+        [TensorType(config.floatX, shape=(2,))],
+        f,
+    )
+    out = jax_op(x, y)
+    grad_out = grad(pt.sum(out), [x, y])
+    fg = FunctionGraph([x, y], [out, *grad_out])
+    fn, _ = compare_jax_and_py(fg, test_values)
 
 
 def test_two_inputs_tuple_output():
@@ -40,11 +52,11 @@ def test_two_inputs_tuple_output():
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
     ]
 
-    @as_jax_op
     def f(x, y):
         return jax.nn.sigmoid(x + y), y * 2
 
-    out1, out2 = f(x, y)
+    # Test with as_jax_op decorator
+    out1, out2 = as_jax_op(f)(x, y)
     grad_out = grad(pt.sum(out1 + out2), [x, y])
 
     fg = FunctionGraph([x, y], [out1, out2, *grad_out])
@@ -53,6 +65,17 @@ def test_two_inputs_tuple_output():
         # must_be_device_array is False, because the with disabled jit compilation,
         # inputs are not automatically transformed to jax.Array anymore
         fn, _ = compare_jax_and_py(fg, test_values, must_be_device_array=False)
+
+    # Test direct JAXOp usage
+    jax_op = JAXOp(
+        [x.type, y.type],
+        [TensorType(config.floatX, shape=(2,)), TensorType(config.floatX, shape=(2,))],
+        f,
+    )
+    out1, out2 = jax_op(x, y)
+    grad_out = grad(pt.sum(out1 + out2), [x, y])
+    fg = FunctionGraph([x, y], [out1, out2, *grad_out])
+    fn, _ = compare_jax_and_py(fg, test_values)
 
 
 def test_two_inputs_list_output_one_unused_output():
@@ -64,11 +87,11 @@ def test_two_inputs_list_output_one_unused_output():
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
     ]
 
-    @as_jax_op
     def f(x, y):
         return [jax.nn.sigmoid(x + y), y * 2]
 
-    out, _ = f(x, y)
+    # Test with as_jax_op decorator
+    out, _ = as_jax_op(f)(x, y)
     grad_out = grad(pt.sum(out), [x, y])
 
     fg = FunctionGraph([x, y], [out, *grad_out])
@@ -76,23 +99,45 @@ def test_two_inputs_list_output_one_unused_output():
     with jax.disable_jit():
         fn, _ = compare_jax_and_py(fg, test_values)
 
+    # Test direct JAXOp usage
+    jax_op = JAXOp(
+        [x.type, y.type],
+        [TensorType(config.floatX, shape=(2,)), TensorType(config.floatX, shape=(2,))],
+        f,
+    )
+    out, _ = jax_op(x, y)
+    grad_out = grad(pt.sum(out), [x, y])
+    fg = FunctionGraph([x, y], [out, *grad_out])
+    fn, _ = compare_jax_and_py(fg, test_values)
+
 
 def test_single_input_tuple_output():
     rng = np.random.default_rng(4)
     x = tensor("x", shape=(2,))
     test_values = [rng.normal(size=(x.type.shape)).astype(config.floatX)]
 
-    @as_jax_op
     def f(x):
         return jax.nn.sigmoid(x), x * 2
 
-    out1, out2 = f(x)
+    # Test with as_jax_op decorator
+    out1, out2 = as_jax_op(f)(x)
     grad_out = grad(pt.sum(out1), [x])
 
     fg = FunctionGraph([x], [out1, out2, *grad_out])
     fn, _ = compare_jax_and_py(fg, test_values)
     with jax.disable_jit():
         fn, _ = compare_jax_and_py(fg, test_values, must_be_device_array=False)
+
+    # Test direct JAXOp usage
+    jax_op = JAXOp(
+        [x.type],
+        [TensorType(config.floatX, shape=(2,)), TensorType(config.floatX, shape=(2,))],
+        f,
+    )
+    out1, out2 = jax_op(x)
+    grad_out = grad(pt.sum(out1), [x])
+    fg = FunctionGraph([x], [out1, out2, *grad_out])
+    fn, _ = compare_jax_and_py(fg, test_values)
 
 
 def test_scalar_input_tuple_output():
@@ -100,17 +145,28 @@ def test_scalar_input_tuple_output():
     x = tensor("x", shape=())
     test_values = [rng.normal(size=(x.type.shape)).astype(config.floatX)]
 
-    @as_jax_op
     def f(x):
         return jax.nn.sigmoid(x), x
 
-    out1, out2 = f(x)
+    # Test with as_jax_op decorator
+    out1, out2 = as_jax_op(f)(x)
     grad_out = grad(pt.sum(out1), [x])
 
     fg = FunctionGraph([x], [out1, out2, *grad_out])
     fn, _ = compare_jax_and_py(fg, test_values)
     with jax.disable_jit():
         fn, _ = compare_jax_and_py(fg, test_values, must_be_device_array=False)
+
+    # Test direct JAXOp usage
+    jax_op = JAXOp(
+        [x.type],
+        [TensorType(config.floatX, shape=()), TensorType(config.floatX, shape=())],
+        f,
+    )
+    out1, out2 = jax_op(x)
+    grad_out = grad(pt.sum(out1), [x])
+    fg = FunctionGraph([x], [out1, out2, *grad_out])
+    fn, _ = compare_jax_and_py(fg, test_values)
 
 
 def test_single_input_list_output():
@@ -118,17 +174,31 @@ def test_single_input_list_output():
     x = tensor("x", shape=(2,))
     test_values = [rng.normal(size=(x.type.shape)).astype(config.floatX)]
 
-    @as_jax_op
     def f(x):
         return [jax.nn.sigmoid(x), 2 * x]
 
-    out1, out2 = f(x)
+    # Test with as_jax_op decorator
+    out1, out2 = as_jax_op(f)(x)
     grad_out = grad(pt.sum(out1), [x])
 
     fg = FunctionGraph([x], [out1, out2, *grad_out])
     fn, _ = compare_jax_and_py(fg, test_values)
     with jax.disable_jit():
         fn, _ = compare_jax_and_py(fg, test_values, must_be_device_array=False)
+
+    # Test direct JAXOp usage, with unspecified output shapes
+    jax_op = JAXOp(
+        [x.type],
+        [
+            TensorType(config.floatX, shape=(None,)),
+            TensorType(config.floatX, shape=(None,)),
+        ],
+        f,
+    )
+    out1, out2 = jax_op(x)
+    grad_out = grad(pt.sum(out1), [x])
+    fg = FunctionGraph([x], [out1, out2, *grad_out])
+    fn, _ = compare_jax_and_py(fg, test_values)
 
 
 def test_pytree_input_tuple_output():
@@ -144,6 +214,7 @@ def test_pytree_input_tuple_output():
     def f(x, y):
         return jax.nn.sigmoid(x), 2 * x + y["y"] + y["y2"][0]
 
+    # Test with as_jax_op decorator
     out = f(x, y_tmp)
     grad_out = grad(pt.sum(out[1]), [x, y])
 
@@ -167,6 +238,7 @@ def test_pytree_input_pytree_output():
     def f(x, y):
         return x, jax.tree_util.tree_map(lambda x: jnp.exp(x), y)
 
+    # Test with as_jax_op decorator
     out = f(x, y_tmp)
     grad_out = grad(pt.sum(out[1]["b"][0]), [x, y])
 
@@ -198,6 +270,7 @@ def test_pytree_input_with_non_graph_args():
             var = jax.nn.sigmoid(var)
         return var
 
+    # Test with as_jax_op decorator
     # arguments depth and which_variable are not part of the graph
     out = f(x, y_tmp, depth=3, which_variable="x")
     grad_out = grad(pt.sum(out), [x])
@@ -228,11 +301,11 @@ def test_unused_matrix_product():
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
     ]
 
-    @as_jax_op
     def f(x, y):
         return x[:, None] @ y[None], jnp.exp(x)
 
-    out = f(x, y)
+    # Test with as_jax_op decorator
+    out = as_jax_op(f)(x, y)
     grad_out = grad(pt.sum(out[1]), [x])
 
     fg = FunctionGraph([x, y], [out[1], *grad_out])
@@ -240,6 +313,20 @@ def test_unused_matrix_product():
 
     with jax.disable_jit():
         fn, _ = compare_jax_and_py(fg, test_values)
+
+    # Test direct JAXOp usage
+    jax_op = JAXOp(
+        [x.type, y.type],
+        [
+            TensorType(config.floatX, shape=(3, 3)),
+            TensorType(config.floatX, shape=(3,)),
+        ],
+        f,
+    )
+    out = jax_op(x, y)
+    grad_out = grad(pt.sum(out[1]), [x])
+    fg = FunctionGraph([x, y], [out[1], *grad_out])
+    fn, _ = compare_jax_and_py(fg, test_values)
 
 
 def test_unknown_static_shape():
@@ -252,11 +339,10 @@ def test_unknown_static_shape():
 
     x_cumsum = pt.cumsum(x)  # Now x_cumsum has an unknown shape
 
-    @as_jax_op
     def f(x, y):
         return x * jnp.ones(3)
 
-    out = f(x_cumsum, y)
+    out = as_jax_op(f)(x_cumsum, y)
     grad_out = grad(pt.sum(out), [x])
 
     fg = FunctionGraph([x, y], [out, *grad_out])
@@ -264,6 +350,17 @@ def test_unknown_static_shape():
 
     with jax.disable_jit():
         fn, _ = compare_jax_and_py(fg, test_values)
+
+    # Test direct JAXOp usage
+    jax_op = JAXOp(
+        [x.type, y.type],
+        [TensorType(config.floatX, shape=(None,))],
+        f,
+    )
+    out = jax_op(x_cumsum, y)
+    grad_out = grad(pt.sum(out), [x])
+    fg = FunctionGraph([x, y], [out, *grad_out])
+    fn, _ = compare_jax_and_py(fg, test_values)
 
 
 def test_nested_functions():
