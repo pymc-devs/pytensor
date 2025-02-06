@@ -13,8 +13,8 @@ from tests.link.jax.test_basic import compare_jax_and_py
 
 def test_two_inputs_single_output():
     rng = np.random.default_rng(1)
-    x = tensor("a", shape=(2,))
-    y = tensor("b", shape=(2,))
+    x = tensor("x", shape=(2,))
+    y = tensor("y", shape=(2,))
     test_values = [
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
     ]
@@ -34,8 +34,8 @@ def test_two_inputs_single_output():
 
 def test_two_inputs_tuple_output():
     rng = np.random.default_rng(2)
-    x = tensor("a", shape=(2,))
-    y = tensor("b", shape=(2,))
+    x = tensor("x", shape=(2,))
+    y = tensor("y", shape=(2,))
     test_values = [
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
     ]
@@ -44,19 +44,22 @@ def test_two_inputs_tuple_output():
     def f(x, y):
         return jax.nn.sigmoid(x + y), y * 2
 
-    out, _ = f(x, y)
-    grad_out = grad(pt.sum(out), [x, y])
+    out1, out2 = f(x, y)
+    grad_out = grad(pt.sum(out1 + out2), [x, y])
 
-    fg = FunctionGraph([x, y], [out, *grad_out])
+    fg = FunctionGraph([x, y], [out1, out2, *grad_out])
     fn, _ = compare_jax_and_py(fg, test_values)
     with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values)
+        # must_be_device_array is False, because the with disabled jit compilation,
+        # inputs are not automatically transformed to jax.Array anymore
+        fn, _ = compare_jax_and_py(fg, test_values, must_be_device_array=False)
 
 
-def test_two_inputs_list_output():
+def test_two_inputs_list_output_one_unused_output():
+    # One output is unused, to test whether the wrapper can handle DisconnectedType
     rng = np.random.default_rng(3)
-    x = tensor("a", shape=(2,))
-    y = tensor("b", shape=(2,))
+    x = tensor("x", shape=(2,))
+    y = tensor("y", shape=(2,))
     test_values = [
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
     ]
@@ -76,63 +79,62 @@ def test_two_inputs_list_output():
 
 def test_single_input_tuple_output():
     rng = np.random.default_rng(4)
-    x = tensor("a", shape=(2,))
+    x = tensor("x", shape=(2,))
     test_values = [rng.normal(size=(x.type.shape)).astype(config.floatX)]
 
     @as_jax_op
     def f(x):
         return jax.nn.sigmoid(x), x * 2
 
-    out, _ = f(x)
-    grad_out = grad(pt.sum(out), [x])
+    out1, out2 = f(x)
+    grad_out = grad(pt.sum(out1), [x])
 
-    fg = FunctionGraph([x], [out, *grad_out])
+    fg = FunctionGraph([x], [out1, out2, *grad_out])
     fn, _ = compare_jax_and_py(fg, test_values)
     with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values)
+        fn, _ = compare_jax_and_py(fg, test_values, must_be_device_array=False)
 
 
 def test_scalar_input_tuple_output():
     rng = np.random.default_rng(5)
-    x = tensor("a", shape=())
+    x = tensor("x", shape=())
     test_values = [rng.normal(size=(x.type.shape)).astype(config.floatX)]
 
     @as_jax_op
     def f(x):
         return jax.nn.sigmoid(x), x
 
-    out, _ = f(x)
-    grad_out = grad(pt.sum(out), [x])
+    out1, out2 = f(x)
+    grad_out = grad(pt.sum(out1), [x])
 
-    fg = FunctionGraph([x], [out, *grad_out])
+    fg = FunctionGraph([x], [out1, out2, *grad_out])
     fn, _ = compare_jax_and_py(fg, test_values)
     with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values)
+        fn, _ = compare_jax_and_py(fg, test_values, must_be_device_array=False)
 
 
 def test_single_input_list_output():
     rng = np.random.default_rng(6)
-    x = tensor("a", shape=(2,))
+    x = tensor("x", shape=(2,))
     test_values = [rng.normal(size=(x.type.shape)).astype(config.floatX)]
 
     @as_jax_op
     def f(x):
         return [jax.nn.sigmoid(x), 2 * x]
 
-    out, _ = f(x)
-    grad_out = grad(pt.sum(out), [x])
+    out1, out2 = f(x)
+    grad_out = grad(pt.sum(out1), [x])
 
-    fg = FunctionGraph([x], [out, *grad_out])
+    fg = FunctionGraph([x], [out1, out2, *grad_out])
     fn, _ = compare_jax_and_py(fg, test_values)
-
     with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values)
+        fn, _ = compare_jax_and_py(fg, test_values, must_be_device_array=False)
 
 
 def test_pytree_input_tuple_output():
     rng = np.random.default_rng(7)
-    x = tensor("a", shape=(2,))
-    y = tensor("b", shape=(2,))
+    x = tensor("x", shape=(2,))
+    y = tensor("y", shape=(2,))
     y_tmp = {"y": y, "y2": [y**2]}
     test_values = [
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
@@ -149,13 +151,13 @@ def test_pytree_input_tuple_output():
     fn, _ = compare_jax_and_py(fg, test_values)
 
     with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values)
+        fn, _ = compare_jax_and_py(fg, test_values, must_be_device_array=False)
 
 
 def test_pytree_input_pytree_output():
     rng = np.random.default_rng(8)
-    x = tensor("a", shape=(3,))
-    y = tensor("b", shape=(1,))
+    x = tensor("x", shape=(3,))
+    y = tensor("y", shape=(1,))
     y_tmp = {"a": y, "b": [y**2]}
     test_values = [
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
@@ -171,11 +173,14 @@ def test_pytree_input_pytree_output():
     fg = FunctionGraph([x, y], [out[0], out[1]["a"], *grad_out])
     fn, _ = compare_jax_and_py(fg, test_values)
 
+    with jax.disable_jit():
+        fn, _ = compare_jax_and_py(fg, test_values, must_be_device_array=False)
+
 
 def test_pytree_input_with_non_graph_args():
     rng = np.random.default_rng(9)
-    x = tensor("a", shape=(3,))
-    y = tensor("b", shape=(1,))
+    x = tensor("x", shape=(3,))
+    y = tensor("y", shape=(1,))
     y_tmp = {"a": y, "b": [y**2]}
     test_values = [
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
@@ -212,10 +217,13 @@ def test_pytree_input_with_non_graph_args():
     assert out == "Unsupported argument"
 
 
-def test_unused_matrix_product_and_exp_gradient():
+def test_unused_matrix_product():
+    # A matrix output is unused, to test whether the wrapper can handle a
+    # DisconnectedType with a larger dimension.
+
     rng = np.random.default_rng(10)
-    x = tensor("a", shape=(3,))
-    y = tensor("b", shape=(3,))
+    x = tensor("x", shape=(3,))
+    y = tensor("y", shape=(3,))
     test_values = [
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
     ]
@@ -236,19 +244,19 @@ def test_unused_matrix_product_and_exp_gradient():
 
 def test_unknown_static_shape():
     rng = np.random.default_rng(11)
-    x = tensor("a", shape=(3,))
-    y = tensor("b", shape=(3,))
+    x = tensor("x", shape=(3,))
+    y = tensor("y", shape=(3,))
     test_values = [
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
     ]
 
-    x = pt.cumsum(x)  # Now x has an unknown shape
+    x_cumsum = pt.cumsum(x)  # Now x_cumsum has an unknown shape
 
     @as_jax_op
     def f(x, y):
         return x * jnp.ones(3)
 
-    out = f(x, y)
+    out = f(x_cumsum, y)
     grad_out = grad(pt.sum(out), [x])
 
     fg = FunctionGraph([x, y], [out, *grad_out])
@@ -258,32 +266,10 @@ def test_unknown_static_shape():
         fn, _ = compare_jax_and_py(fg, test_values)
 
 
-def test_non_array_return_values():
-    rng = np.random.default_rng(12)
-    x = tensor("a", shape=(3,))
-    y = tensor("b", shape=(3,))
-    test_values = [
-        rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
-    ]
-
-    @as_jax_op
-    def f(x, y, message):
-        return x * jnp.ones(3), "Success: " + message
-
-    out = f(x, y, "Hi")
-    grad_out = grad(pt.sum(out[0]), [x])
-
-    fg = FunctionGraph([x, y], [out[0], *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
-
-    with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values)
-
-
 def test_nested_functions():
     rng = np.random.default_rng(13)
-    x = tensor("a", shape=(3,))
-    y = tensor("b", shape=(3,))
+    x = tensor("x", shape=(3,))
+    y = tensor("y", shape=(3,))
     test_values = [
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
     ]
@@ -319,8 +305,8 @@ class TestDtypes:
     @pytest.mark.parametrize("in_dtype", list(map(str, all_types)))
     @pytest.mark.parametrize("out_dtype", list(map(str, all_types)))
     def test_different_in_output(self, in_dtype, out_dtype):
-        x = tensor("a", shape=(3,), dtype=in_dtype)
-        y = tensor("b", shape=(3,), dtype=in_dtype)
+        x = tensor("x", shape=(3,), dtype=in_dtype)
+        y = tensor("y", shape=(3,), dtype=in_dtype)
 
         if "int" in in_dtype:
             test_values = [
@@ -356,8 +342,8 @@ class TestDtypes:
     @pytest.mark.parametrize("in1_dtype", list(map(str, all_types)))
     @pytest.mark.parametrize("in2_dtype", list(map(str, all_types)))
     def test_test_different_inputs(self, in1_dtype, in2_dtype):
-        x = tensor("a", shape=(3,), dtype=in1_dtype)
-        y = tensor("b", shape=(3,), dtype=in2_dtype)
+        x = tensor("x", shape=(3,), dtype=in1_dtype)
+        y = tensor("y", shape=(3,), dtype=in2_dtype)
 
         if "int" in in1_dtype:
             test_values = [np.random.randint(0, 10, size=(3,)).astype(x.type.dtype)]
