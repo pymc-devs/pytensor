@@ -118,7 +118,7 @@ def calculate_reallocate_info(
                     # where gc
                     for i in range(idx + 1, len(order)):
                         if reuse_out is not None:
-                            break  # type: ignore
+                            break
                         for out in order[i].outputs:
                             if (
                                 getattr(out.type, "ndim", None) == 0
