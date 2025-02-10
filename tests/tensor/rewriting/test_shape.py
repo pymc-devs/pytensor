@@ -383,6 +383,13 @@ class TestLocalUselessReshape:
         new_out = rewrite_graph(out)
         assert new_out is out
 
+        # Or if more than one dimension cannot be matched
+        x = tensor(shape=(None, None, None))
+        shape = [x.shape[0], 3, 3]
+        out = reshape(x, shape)
+        new_out = rewrite_graph(out)
+        assert new_out is out
+
 
 class TestLocalReshapeToDimshuffle:
     def setup_method(self):
