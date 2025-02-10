@@ -644,6 +644,8 @@ class Reshape(COp):
         x = ptb.as_tensor_variable(x)
         shp_orig = shp
         shp = ptb.as_tensor_variable(shp, ndim=1)
+        if shp.type.shape == (None,):
+            shp = specify_shape(shp, self.ndim)
         if not (
             shp.dtype in int_dtypes
             or (isinstance(shp, TensorConstant) and shp.data.size == 0)

@@ -98,6 +98,7 @@ class TestReshape(utt.InferShapeTester, utt.OptimizationTestMixin):
             Shape_i,
             DimShuffle,
             Elemwise,
+            SpecifyShape,
         )
         super().setup_method()
 
@@ -253,9 +254,7 @@ class TestReshape(utt.InferShapeTester, utt.OptimizationTestMixin):
             f(a_val, [7, 5])
         with pytest.raises(ValueError):
             f(a_val, [-1, -1])
-        with pytest.raises(
-            ValueError, match=".*Shape argument to Reshape has incorrect length.*"
-        ):
+        with pytest.raises(AssertionError):
             f(a_val, [3, 4, 1])
 
     def test_0(self):
