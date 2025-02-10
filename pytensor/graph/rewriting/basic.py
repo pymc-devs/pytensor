@@ -2800,16 +2800,6 @@ def _check_chain(r, chain):
     return r is not None
 
 
-def check_chain(r, *chain):
-    """
-    WRITEME
-
-    """
-    if isinstance(r, Apply):
-        r = r.outputs[0]
-    return _check_chain(r, reduce(list.__iadd__, ([x, 0] for x in chain)))
-
-
 def pre_greedy_node_rewriter(
     fgraph: FunctionGraph, rewrites: Sequence[NodeRewriter], out: Variable
 ) -> Variable:
