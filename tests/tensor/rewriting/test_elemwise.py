@@ -56,7 +56,10 @@ from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.math import round as pt_round
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.rewriting.elemwise import FusionOptimizer, local_dimshuffle_lift
-from pytensor.tensor.rewriting.shape import local_useless_dimshuffle_in_reshape
+from pytensor.tensor.rewriting.shape import (
+    local_fuse_squeeze_reshape,
+    local_useless_expand_dims_in_reshape,
+)
 from pytensor.tensor.shape import reshape
 from pytensor.tensor.type import (
     TensorType,
@@ -182,7 +185,7 @@ class TestDimshuffleLift:
         assert not local_dimshuffle_lift.transform(g, g.outputs[0].owner)
 
 
-def test_local_useless_dimshuffle_in_reshape():
+def test_local_useless_expand_dims_in_reshape():
     vec = TensorType(dtype="float64", shape=(None,))("vector")
     mat = TensorType(dtype="float64", shape=(None, None))("mat")
     row = TensorType(dtype="float64", shape=(1, None))("row")
@@ -204,7 +207,11 @@ def test_local_useless_dimshuffle_in_reshape():
         clone=False,
     )
     assert len(g.apply_nodes) == 4 * 3
-    useless_dimshuffle_in_reshape = out2in(local_useless_dimshuffle_in_reshape)
+    useless_dimshuffle_in_reshape = out2in(
+        local_useless_expand_dims_in_reshape,
+        # Useless squeeze in reshape is not a canonicalization anymore
+        local_fuse_squeeze_reshape,
+    )
     useless_dimshuffle_in_reshape.rewrite(g)
     assert equal_computations(
         g.outputs,
@@ -218,15 +225,12 @@ def test_local_useless_dimshuffle_in_reshape():
     # Check stacktrace was copied over correctly after rewrite was applied
     assert check_stack_trace(g, ops_to_check="all")
 
-    # Check that the rewrite does not get applied when the order
-    # of dimensions has changed.
+    # Check that the rewrite does not mess meaningful transpositions before the reshape
     reshape_dimshuffle_mat2 = reshape(mat.dimshuffle("x", 1, "x", 0), mat.shape)
     h = FunctionGraph([mat], [reshape_dimshuffle_mat2], clone=False)
     assert len(h.apply_nodes) == 3
     useless_dimshuffle_in_reshape.rewrite(h)
-    assert equal_computations(
-        h.outputs, [reshape(mat.dimshuffle("x", 1, "x", 0), mat.shape)]
-    )
+    assert equal_computations(h.outputs, [reshape(mat.dimshuffle(1, 0), mat.shape)])
 
 
 class TestFusion:
