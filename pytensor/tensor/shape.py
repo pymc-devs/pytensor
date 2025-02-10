@@ -1,7 +1,9 @@
 import warnings
+from collections.abc import Sequence
 from numbers import Number
 from textwrap import dedent
-from typing import cast
+from typing import TYPE_CHECKING, Union, cast
+from typing import cast as typing_cast
 
 import numpy as np
 from numpy.core.numeric import normalize_axis_tuple  # type: ignore
@@ -23,6 +25,9 @@ from pytensor.tensor.type import DenseTensorType, TensorType, int_dtypes, tensor
 from pytensor.tensor.type_other import NoneConst, NoneTypeT
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 
+
+if TYPE_CHECKING:
+    from pytensor.tensor import TensorLike
 
 ShapeValueType = None | np.integer | int | Variable
 
@@ -842,9 +847,14 @@ def _vectorize_reshape(op, node, x, shape):
     return reshape(x, new_shape, ndim=len(new_shape)).owner
 
 
-def reshape(x, newshape, ndim=None):
+def reshape(
+    x: "TensorLike",
+    newshape: Union["TensorLike", Sequence["TensorLike"]],
+    *,
+    ndim: int | None = None,
+) -> TensorVariable:
     if ndim is None:
-        newshape = ptb.as_tensor_variable(newshape)
+        newshape = ptb.as_tensor_variable(newshape)  # type: ignore
         if newshape.type.ndim != 1:
             raise TypeError(
                 "New shape in reshape must be a vector or a list/tuple of"
@@ -862,7 +872,7 @@ def reshape(x, newshape, ndim=None):
             )
     op = Reshape(ndim)
     rval = op(x, newshape)
-    return rval
+    return typing_cast(TensorVariable, rval)
 
 
 def shape_padleft(t, n_ones=1):

@@ -918,7 +918,7 @@ def _direct_solve_discrete_lyapunov(
     vec_Q = Q.ravel()
     vec_X = solve(eye - AxA, vec_Q, b_ndim=1)
 
-    return cast(TensorVariable, reshape(vec_X, A.shape))
+    return reshape(vec_X, A.shape)
 
 
 def solve_discrete_lyapunov(
