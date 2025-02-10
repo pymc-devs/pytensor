@@ -8,6 +8,7 @@ import torch.compiler
 from pytensor.compile import PYTORCH
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp
+from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.ifelse import IfElse
 from pytensor.link.utils import fgraph_to_python
@@ -19,6 +20,7 @@ from pytensor.tensor.basic import (
     Eye,
     Join,
     MakeVector,
+    Split,
     TensorFromScalar,
 )
 
@@ -120,14 +122,23 @@ def pytorch_funcify_arange(op, **kwargs):
 
 
 @pytorch_funcify.register(Join)
-def pytorch_funcify_Join(op, **kwargs):
-    def join(axis, *tensors):
-        # tensors could also be tuples, and in this case they don't have a ndim
-        tensors = [torch.tensor(tensor) for tensor in tensors]
+def pytorch_funcify_Join(op, node, **kwargs):
+    axis = node.inputs[0]
 
-        return torch.cat(tensors, dim=axis)
+    if isinstance(axis, Constant):
+        axis = int(axis.data)
 
-    return join
+        def join_constant_axis(_, *tensors):
+            return torch.cat(tensors, dim=axis)
+
+        return join_constant_axis
+
+    else:
+
+        def join(axis, *tensors):
+            return torch.cat(tensors, dim=axis)
+
+        return join
 
 
 @pytorch_funcify.register(Eye)
@@ -172,7 +183,6 @@ def pytorch_funcify_IfElse(op, **kwargs):
 @pytorch_funcify.register(OpFromGraph)
 def pytorch_funcify_OpFromGraph(op, node, **kwargs):
     kwargs.pop("storage_map", None)
-
     # Apply inner rewrites
     PYTORCH.optimizer(op.fgraph)
     fgraph_fn = pytorch_funcify(op.fgraph, **kwargs, squeeze_output=True)
@@ -185,3 +195,23 @@ def pytorch_funcify_TensorFromScalar(op, **kwargs):
         return torch.as_tensor(x)
 
     return tensorfromscalar
+
+
+@pytorch_funcify.register(Split)
+def pytorch_funcify_Split(op, node, **kwargs):
+    x, dim, split_sizes = node.inputs
+    if isinstance(dim, Constant) and isinstance(split_sizes, Constant):
+        dim = int(dim.data)
+        split_sizes = tuple(int(size) for size in split_sizes.data)
+
+        def split_constant_axis_and_sizes(x, *_):
+            return x.split(split_sizes, dim=dim)
+
+        return split_constant_axis_and_sizes
+
+    else:
+
+        def inner_fn(x, dim, split_amounts):
+            return x.split(split_amounts.tolist(), dim=dim.item())
+
+        return inner_fn
