@@ -897,7 +897,8 @@ def local_useless_reshape(fgraph, node):
         if nb_m1 <= 1 and all(shape_match):
             return [inp]
 
-        if (nb_m1 == 0) and (shape_match.count(False) == output.type.ndim - 1):
+        # There is one missing match, but all other dimensions match
+        if (nb_m1 == 0) and (shape_match.count(False) == 1):
             return [inp]
 
         return False
