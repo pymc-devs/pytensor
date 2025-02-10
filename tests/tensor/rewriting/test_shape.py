@@ -6,7 +6,7 @@ import pytest
 import pytensor.tensor as pt
 from pytensor import shared
 from pytensor.compile.function import function
-from pytensor.compile.mode import get_default_mode, get_mode
+from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import deep_copy_op
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable, equal_computations
@@ -425,6 +425,60 @@ class TestLocalReshapeToDimshuffle:
         assert equal_computations([g.outputs[1]], [exp_y])
 
         assert check_stack_trace(g, ops_to_check=(DimShuffle, Reshape))
+
+    def test_expand_dims(self):
+        x = pt.scalar()
+        # This reshape does an implicit expand_dims
+        out = x.reshape((1, -1))
+        assert isinstance(out.owner.op, Reshape)
+        new_out = rewrite_graph(out, include=("canonicalize",))
+        assert equal_computations([new_out], [pt.expand_dims(x, (0, 1))])
+
+    def test_squeeze_of_alloc(self):
+        # This shows up in the graph of repeat
+        x = pt.vector("x", shape=(9,))
+        bcast_x = pt.alloc(x, 1, 12, x.shape[0])
+
+        # This reshape does an implicit squeeze
+        out = bcast_x.reshape((12, x.shape[0]))
+
+        new_out = rewrite_graph(out, include=("canonicalize", "ShapeOpt"))
+        assert equal_computations([new_out], [pt.alloc(x, 12, 9)], strict_dtype=False)
+
+
+def test_expand_dims_squeeze_reshape_fusion():
+    x = pt.tensor("x", shape=(1, 9))
+    reshape_x = x.squeeze(0).reshape((3, 3))[..., None]
+
+    assert isinstance(reshape_x.owner.op, DimShuffle)
+    assert isinstance(reshape_x.owner.inputs[0].owner.op, Reshape)
+    assert isinstance(reshape_x.owner.inputs[0].owner.inputs[0].owner.op, DimShuffle)
+
+    out = rewrite_graph(reshape_x, include=("specialize",))
+
+    # In this case we cannot get rid of the reshape, squeeze or expand_dims,
+    # so we fuse them all in one reshape
+    assert equal_computations([out], [x.reshape((3, 3, 1))])
+
+
+def test_implicit_broadcasting_via_repeat():
+    x = pt.vector("x", shape=(3,), dtype=int)
+    y = pt.vector("y", shape=(9,), dtype=int)
+    out = x[None, :].repeat(9, axis=0) <= y[:, None].repeat(3, axis=1)
+    # There are two Reshapes in the graph
+    assert isinstance(out.owner.inputs[0].owner.op, Reshape)
+    assert isinstance(out.owner.inputs[1].owner.op, Reshape)
+
+    new_out = rewrite_graph(out, include=("canonicalize", "specialize"))
+    assert equal_computations([new_out], [x[None] <= y[:, None]])
+
+    no_rewrite_mode = Mode(linker="py", optimizer=None)
+    x_test = np.arange(3) + 1
+    y_test = np.arange(9)
+    np.testing.assert_allclose(
+        new_out.eval({x: x_test, y: y_test}, mode=no_rewrite_mode),
+        out.eval({x: x_test, y: y_test}, mode=no_rewrite_mode),
+    )
 
 
 def test_local_reshape_lift():

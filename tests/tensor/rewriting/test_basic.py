@@ -332,7 +332,6 @@ class TestLocalCanonicalizeAlloc:
 
         mode = rewrite_mode.including(
             "local_dimshuffle_lift",
-            "local_useless_dimshuffle_in_reshape",
             "local_alloc_sink_dimshuffle",
         )
         f = function([x], [y], mode=mode)
