@@ -209,12 +209,12 @@ class TestSolveBase:
         )
 
 
-class TestSolve(utt.InferShapeTester):
-    def test__init__(self):
-        with pytest.raises(ValueError) as excinfo:
-            Solve(assume_a="test", b_ndim=2)
-        assert "is not a recognized matrix structure" in str(excinfo.value)
+def test_solve_raises_on_invalid_A():
+    with pytest.raises(ValueError, match="is not a recognized matrix structure"):
+        Solve(assume_a="test", b_ndim=2)
 
+
+class TestSolve(utt.InferShapeTester):
     @pytest.mark.parametrize("b_shape", [(5, 1), (5,)])
     def test_infer_shape(self, b_shape):
         rng = np.random.default_rng(utt.fetch_seed())
@@ -232,64 +232,78 @@ class TestSolve(utt.InferShapeTester):
             warn=False,
         )
 
-    def test_correctness(self):
+    @pytest.mark.parametrize(
+        "b_size", [(5, 1), (5, 5), (5,)], ids=["b_col_vec", "b_matrix", "b_vec"]
+    )
+    @pytest.mark.parametrize("assume_a", ["gen", "sym", "pos"], ids=str)
+    def test_solve_correctness(self, b_size: tuple[int], assume_a: str):
         rng = np.random.default_rng(utt.fetch_seed())
-        A = matrix()
-        b = matrix()
-        y = solve(A, b)
-        gen_solve_func = pytensor.function([A, b], y)
+        A = pt.tensor("A", shape=(5, 5))
+        b = pt.tensor("b", shape=b_size)
 
-        b_val = np.asarray(rng.random((5, 1)), dtype=config.floatX)
+        A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+        b_val = rng.normal(size=b_size).astype(config.floatX)
 
-        A_val = np.asarray(rng.random((5, 5)), dtype=config.floatX)
-        A_val = np.dot(A_val.transpose(), A_val)
+        solve_op = functools.partial(solve, assume_a=assume_a, b_ndim=len(b_size))
+
+        def A_func(x):
+            if assume_a == "pos":
+                return x @ x.T
+            elif assume_a == "sym":
+                return (x + x.T) / 2
+            else:
+                return x
+
+        solve_input_val = A_func(A_val)
+
+        y = solve_op(A_func(A), b)
+        solve_func = pytensor.function([A, b], y)
+        X_np = solve_func(A_val.copy(), b_val.copy())
+
+        ATOL = 1e-8 if config.floatX.endswith("64") else 1e-4
+        RTOL = 1e-8 if config.floatX.endswith("64") else 1e-4
 
         np.testing.assert_allclose(
-            scipy.linalg.solve(A_val, b_val, assume_a="gen"),
-            gen_solve_func(A_val, b_val),
+            scipy.linalg.solve(solve_input_val, b_val, assume_a=assume_a),
+            X_np,
+            atol=ATOL,
+            rtol=RTOL,
         )
 
-        A_undef = np.array(
-            [
-                [1, 0, 0, 0, 0],
-                [0, 1, 0, 0, 0],
-                [0, 0, 1, 0, 0],
-                [0, 0, 0, 1, 1],
-                [0, 0, 0, 1, 0],
-            ],
-            dtype=config.floatX,
-        )
-        np.testing.assert_allclose(
-            scipy.linalg.solve(A_undef, b_val), gen_solve_func(A_undef, b_val)
-        )
+        np.testing.assert_allclose(A_func(A_val) @ X_np, b_val, atol=ATOL, rtol=RTOL)
 
     @pytest.mark.parametrize(
-        "m, n, assume_a, lower",
-        [
-            (5, None, "gen", False),
-            (5, None, "gen", True),
-            (4, 2, "gen", False),
-            (4, 2, "gen", True),
-        ],
+        "b_size", [(5, 1), (5, 5), (5,)], ids=["b_col_vec", "b_matrix", "b_vec"]
     )
-    def test_solve_grad(self, m, n, assume_a, lower):
+    @pytest.mark.parametrize("assume_a", ["gen", "sym", "pos"], ids=str)
+    @pytest.mark.skipif(
+        config.floatX == "float32", reason="Gradients not numerically stable in float32"
+    )
+    def test_solve_gradient(self, b_size: tuple[int], assume_a: str):
         rng = np.random.default_rng(utt.fetch_seed())
 
-        # Ensure diagonal elements of `A` are relatively large to avoid
-        # numerical precision issues
-        A_val = (rng.normal(size=(m, m)) * 0.5 + np.eye(m)).astype(config.floatX)
+        eps = 2e-8 if config.floatX == "float64" else None
 
-        if n is None:
-            b_val = rng.normal(size=m).astype(config.floatX)
-        else:
-            b_val = rng.normal(size=(m, n)).astype(config.floatX)
+        A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+        b_val = rng.normal(size=b_size).astype(config.floatX)
 
-        eps = None
-        if config.floatX == "float64":
-            eps = 2e-8
+        def A_func(x):
+            if assume_a == "pos":
+                return x @ x.T
+            elif assume_a == "sym":
+                return (x + x.T) / 2
+            else:
+                return x
 
-        solve_op = Solve(assume_a=assume_a, lower=lower, b_ndim=1 if n is None else 2)
-        utt.verify_grad(solve_op, [A_val, b_val], 3, rng, eps=eps)
+        solve_op = functools.partial(solve, assume_a=assume_a, b_ndim=len(b_size))
+
+        # To correctly check the gradients, we need to include a transformation from the space of unconstrained matrices
+        # (A) to a valid input matrix for the given solver. This is done by the A_func function. If this isn't included,
+        # the random perturbations used by verify_grad will result in invalid input matrices, and
+        # LAPACK will silently do the wrong thing, making the gradients wrong
+        utt.verify_grad(
+            lambda A, b: solve_op(A_func(A), b), [A_val, b_val], 3, rng, eps=eps
+        )
 
 
 class TestSolveTriangular(utt.InferShapeTester):

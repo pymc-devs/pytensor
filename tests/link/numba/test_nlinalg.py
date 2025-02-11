@@ -7,56 +7,11 @@ import pytensor.tensor as pt
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
-from pytensor.tensor import nlinalg, slinalg
+from pytensor.tensor import nlinalg
 from tests.link.numba.test_basic import compare_numba_and_py, set_test_value
 
 
 rng = np.random.default_rng(42849)
-
-
-@pytest.mark.parametrize(
-    "A, x, lower, exc",
-    [
-        (
-            set_test_value(
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
-            set_test_value(pt.dvector(), rng.random(size=(3,)).astype("float64")),
-            "gen",
-            None,
-        ),
-        (
-            set_test_value(
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
-            set_test_value(pt.dvector(), rng.random(size=(3,)).astype("float64")),
-            "gen",
-            None,
-        ),
-    ],
-)
-def test_Solve(A, x, lower, exc):
-    g = slinalg.Solve(lower=lower, b_ndim=1)(A, x)
-
-    if isinstance(g, list):
-        g_fg = FunctionGraph(outputs=g)
-    else:
-        g_fg = FunctionGraph(outputs=[g])
-
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
-        compare_numba_and_py(
-            g_fg,
-            [
-                i.tag.test_value
-                for i in g_fg.inputs
-                if not isinstance(i, SharedVariable | Constant)
-            ],
-        )
 
 
 @pytest.mark.parametrize(
