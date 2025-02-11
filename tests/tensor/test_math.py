@@ -19,7 +19,7 @@ from pytensor.compile.mode import get_default_mode
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.gradient import NullTypeGradError, grad, numeric_grad
-from pytensor.graph.basic import Variable, ancestors, applys_between
+from pytensor.graph.basic import Variable, ancestors, applys_between, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import vectorize_node
 from pytensor.link.c.basic import DualLinker
@@ -2278,7 +2278,7 @@ class TestTensordot:
 
         with pytest.raises(
             ValueError,
-            match="Input arrays have inconsistent broadcastable pattern or type shape",
+            match="Input arrays have inconsistent type shape",
         ):
             tensordot(ones(shape=(7, 4)), ones(shape=(7, 4)), axes=1)
 
@@ -2322,6 +2322,41 @@ class TestTensordot:
                     z.eval({x: xv, y: yv})
         else:
             assert np.allclose(np.tensordot(xv, yv, axes=axes), z.eval({x: xv, y: yv}))
+
+    def test_eager_simplification(self):
+        # Test that cases where tensordot isn't needed, it returns a simple graph
+        scl = tensor(shape=())
+        vec = tensor(shape=(None,))
+        mat = tensor(shape=(None, None))
+
+        # scalar product
+        out = tensordot(scl, scl, axes=[[], []])
+        assert equal_computations([out], [scl * scl])
+
+        # vector-vector product
+        out = tensordot(vec, vec, axes=[[-1], [-1]])
+        assert equal_computations([out], [dot(vec, vec)])
+
+        # matrix-vector product
+        out = tensordot(mat, vec, axes=[[-1], [-1]])
+        assert equal_computations([out], [dot(mat, vec)])
+
+        out = tensordot(mat, vec, axes=[[-2], [-1]])
+        assert equal_computations([out], [dot(mat.T, vec)])
+
+        # vector-matrix product
+        out = tensordot(vec, mat, axes=[[-1], [-2]])
+        assert equal_computations([out], [dot(vec, mat)])
+
+        out = tensordot(vec, mat, axes=[[-1], [-1]])
+        assert equal_computations([out], [dot(vec, mat.T)])
+
+        # matrix-matrix product
+        out = tensordot(mat, mat, axes=[[-1], [-2]])
+        assert equal_computations([out], [dot(mat, mat)])
+
+        out = tensordot(mat, mat, axes=[[-1], [-1]])
+        assert equal_computations([out], [dot(mat, mat.T)])
 
 
 def test_smallest():
