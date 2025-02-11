@@ -23,6 +23,7 @@ from pytensor.tensor.slinalg import (
     cholesky,
     eigvalsh,
     expm,
+    lu,
     solve,
     solve_continuous_lyapunov,
     solve_discrete_are,
@@ -582,6 +583,85 @@ class TestCholeskySolve(utt.InferShapeTester):
             x_result = fn(A_val.astype(A_dtype), b_val.astype(b_dtype))
 
             assert x.dtype == x_result.dtype, (A_dtype, b_dtype)
+
+
+@pytest.mark.parametrize(
+    "permute_l, p_indices",
+    [(False, True), (True, False), (False, False)],
+    ids=["PL", "p_indices", "P"],
+)
+@pytest.mark.parametrize("complex", [False, True], ids=["real", "complex"])
+@pytest.mark.parametrize("shape", [(3, 5, 5), (5, 5)], ids=["batched", "not_batched"])
+def test_lu_decomposition(
+    permute_l: bool, p_indices: bool, complex: bool, shape: tuple[int]
+):
+    dtype = config.floatX if not complex else f"complex{int(config.floatX[-2:]) * 2}"
+
+    A = tensor("A", shape=shape, dtype=dtype)
+    out = lu(A, permute_l=permute_l, p_indices=p_indices)
+
+    f = pytensor.function([A], out)
+
+    rng = np.random.default_rng(utt.fetch_seed())
+    x = rng.normal(size=shape).astype(config.floatX)
+    if complex:
+        x = x + 1j * rng.normal(size=shape).astype(config.floatX)
+
+    out = f(x)
+
+    if permute_l:
+        PL, U = out
+    elif p_indices:
+        p, L, U = out
+        if len(shape) == 2:
+            P = np.eye(5)[p]
+        else:
+            P = np.stack([np.eye(5)[idx] for idx in p])
+        PL = np.einsum("...nk,...km->...nm", P, L)
+    else:
+        P, L, U = out
+        PL = np.einsum("...nk,...km->...nm", P, L)
+
+    x_rebuilt = np.einsum("...nk,...km->...nm", PL, U)
+
+    np.testing.assert_allclose(
+        x,
+        x_rebuilt,
+        atol=1e-8 if config.floatX == "float64" else 1e-4,
+        rtol=1e-8 if config.floatX == "float64" else 1e-4,
+    )
+    scipy_out = scipy.linalg.lu(x, permute_l=permute_l, p_indices=p_indices)
+
+    for a, b in zip(out, scipy_out, strict=True):
+        np.testing.assert_allclose(a, b)
+
+
+@pytest.mark.parametrize(
+    "grad_case", [0, 1, 2], ids=["dU_only", "dL_only", "dU_and_dL"]
+)
+@pytest.mark.parametrize(
+    "permute_l, p_indices",
+    [(True, False), (False, True), (False, False)],
+    ids=["PL", "p_indices", "P"],
+)
+@pytest.mark.parametrize("shape", [(3, 5, 5), (5, 5)], ids=["batched", "not_batched"])
+def test_lu_grad(grad_case, permute_l, p_indices, shape):
+    rng = np.random.default_rng(utt.fetch_seed())
+    A_value = rng.normal(size=shape).astype(config.floatX)
+
+    def f_pt(A):
+        # lu returns either (P_or_index, L, U) or (PL, U), depending on settings
+        out = lu(A, permute_l=permute_l, p_indices=p_indices, check_finite=False)
+
+        match grad_case:
+            case 0:
+                return out[-1].sum()
+            case 1:
+                return out[-2].sum()
+            case 2:
+                return out[-1].sum() + out[-2].sum()
+
+    utt.verify_grad(f_pt, [A_value], rng=rng)
 
 
 def test_cho_solve():
