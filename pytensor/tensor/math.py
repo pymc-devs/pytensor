@@ -1154,9 +1154,10 @@ def polygamma(n, x):
     """Polygamma function of order n evaluated at x"""
 
 
-@scalar_elemwise
 def chi2sf(x, k):
     """chi squared survival function"""
+    warnings.warn("chi2sf is deprecated. Use `gammaincc(k / 2, x / 2)` instead")
+    return gammaincc(k / 2, x / 2)
 
 
 @scalar_elemwise

@@ -40,7 +40,6 @@ from pytensor.scalar.basic import (
     true_div,
     upcast,
     upgrade_to_float,
-    upgrade_to_float64,
     upgrade_to_float_no_complex,
 )
 from pytensor.scalar.basic import abs as scalar_abs
@@ -590,50 +589,6 @@ class PolyGamma(BinaryScalarOp):
 
 
 polygamma = PolyGamma(name="polygamma")
-
-
-class Chi2SF(BinaryScalarOp):
-    """
-    Compute (1 - chi2_cdf(x))
-        ie. chi2 pvalue (chi2 'survival function')
-    """
-
-    nfunc_spec = ("scipy.stats.chi2.sf", 2, 1)
-
-    @staticmethod
-    def st_impl(x, k):
-        return scipy.stats.chi2.sf(x, k)
-
-    def impl(self, x, k):
-        return Chi2SF.st_impl(x, k)
-
-    def c_support_code(self, **kwargs):
-        return (C_CODE_PATH / "gamma.c").read_text(encoding="utf-8")
-
-    def c_code(self, node, name, inp, out, sub):
-        x, k = inp
-        (z,) = out
-        if node.inputs[0].type in float_types:
-            dtype = "npy_" + node.outputs[0].dtype
-            return f"""{z} =
-                ({dtype}) 1 - GammaP({k}/2., {x}/2.);"""
-        raise NotImplementedError("only floatingpoint is implemented")
-
-    def __eq__(self, other):
-        return type(self) is type(other)
-
-    def __hash__(self):
-        return hash(type(self))
-
-    def c_code_cache_version(self):
-        v = super().c_code_cache_version()
-        if v:
-            return (2, *v)
-        else:
-            return v
-
-
-chi2sf = Chi2SF(upgrade_to_float64, name="chi2sf")
 
 
 class GammaInc(BinaryScalarOp):

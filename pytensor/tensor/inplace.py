@@ -259,11 +259,6 @@ def tri_gamma_inplace(a):
 
 
 @scalar_elemwise
-def chi2sf_inplace(x, k):
-    """chi squared survival function"""
-
-
-@scalar_elemwise
 def gammainc_inplace(k, x):
     """regularized lower gamma function (P)"""
 
