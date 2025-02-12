@@ -3481,20 +3481,18 @@ class PermuteRowElements(Op):
     permutation instead.
     """
 
-    __props__ = ()
+    __props__ = ("inverse",)
 
-    def make_node(self, x, y, inverse):
+    def __init__(self, inverse: bool):
+        super().__init__()
+        self.inverse = inverse
+
+    def make_node(self, x, y):
         x = as_tensor_variable(x)
         y = as_tensor_variable(y)
-        if inverse:  # as_tensor_variable does not accept booleans
-            inverse = as_tensor_variable(1)
-        else:
-            inverse = as_tensor_variable(0)
 
         # y should contain integers
         assert y.type.dtype in integer_dtypes
-        # Inverse should be an integer scalar
-        assert inverse.type.ndim == 0 and inverse.type.dtype in integer_dtypes
 
         # Match shapes of x and y
         x_dim = x.type.ndim
@@ -3511,7 +3509,7 @@ class PermuteRowElements(Op):
         ]
         out_type = tensor(dtype=x.type.dtype, shape=out_shape)
 
-        inputlist = [x, y, inverse]
+        inputlist = [x, y]
         outputlist = [out_type]
         return Apply(self, inputlist, outputlist)
 
@@ -3564,7 +3562,7 @@ class PermuteRowElements(Op):
                 raise ValueError(f"Dimension mismatch: {xs0}, {ys0}")
 
     def perform(self, node, inp, out):
-        x, y, inverse = inp
+        x, y = inp
         (outs,) = out
         x_s = x.shape
         y_s = y.shape
@@ -3587,7 +3585,7 @@ class PermuteRowElements(Op):
         if outs[0] is None or outs[0].shape != out_s:
             outs[0] = np.empty(out_s, dtype=x.dtype)
 
-        self._rec_perform(node, x, y, inverse, outs[0], curdim=0)
+        self._rec_perform(node, x, y, self.inverse, outs[0], curdim=0)
 
     def infer_shape(self, fgraph, node, in_shapes):
         from pytensor.tensor.math import maximum
@@ -3599,14 +3597,14 @@ class PermuteRowElements(Op):
         return [out_shape]
 
     def grad(self, inp, grads):
-        from pytensor.tensor.math import Sum, eq
+        from pytensor.tensor.math import Sum
 
-        x, y, inverse = inp
+        x, y = inp
         (gz,) = grads
         # First, compute the gradient wrt the broadcasted x.
         # If 'inverse' is False (0), apply the inverse of y on gz.
         # Else, apply y on gz.
-        gx = permute_row_elements(gz, y, eq(inverse, 0))
+        gx = permute_row_elements(gz, y, not self.inverse)
 
         # If x has been broadcasted along some axes, we need to sum
         # the gradient over these axes, but keep the dimension (as
@@ -3643,20 +3641,17 @@ class PermuteRowElements(Op):
         if x.type.dtype in discrete_dtypes:
             gx = x.zeros_like()
 
-        # The elements of y and of inverse both affect the output,
+        # The elements of y affect the output,
         # so they are connected to the output,
         # and the transformation isn't defined if their values
         # are non-integer, so the gradient with respect to them is
         # undefined
 
-        return [gx, grad_undefined(self, 1, y), grad_undefined(self, 1, inverse)]
+        return [gx, grad_undefined(self, 1, y)]
 
 
-_permute_row_elements = PermuteRowElements()
-
-
-def permute_row_elements(x, y, inverse=0):
-    return _permute_row_elements(x, y, inverse)
+def permute_row_elements(x, y, inverse=False):
+    return PermuteRowElements(inverse=inverse)(x, y)
 
 
 def inverse_permutation(perm):
