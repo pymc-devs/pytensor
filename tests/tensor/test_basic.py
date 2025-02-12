@@ -3972,13 +3972,12 @@ class TestInferShape(utt.InferShapeTester):
         advec = dvector()
         aivec = ivector()
 
-        abool = True
         rng = np.random.default_rng(utt.fetch_seed())
         advec_val = random(5)
         aivec_val = rng.permutation(5).astype("int32")
         self._compile_and_check(
             [advec, aivec],
-            [PermuteRowElements()(advec, aivec, abool)],
+            [PermuteRowElements(inverse=True)(advec, aivec)],
             [advec_val, aivec_val],
             PermuteRowElements,
         )
@@ -3986,7 +3985,7 @@ class TestInferShape(utt.InferShapeTester):
         admat_val = random(3, 5)
         self._compile_and_check(
             [admat, aivec],
-            [PermuteRowElements()(admat, aivec, abool)],
+            [PermuteRowElements(inverse=False)(admat, aivec)],
             [admat_val, aivec_val],
             PermuteRowElements,
         )
@@ -3995,7 +3994,7 @@ class TestInferShape(utt.InferShapeTester):
         adtens3_val = random(3, 2, 5)
         self._compile_and_check(
             [adtens3, aivec],
-            [PermuteRowElements()(adtens3, aivec, abool)],
+            [PermuteRowElements(inverse=True)(adtens3, aivec)],
             [adtens3_val, aivec_val],
             PermuteRowElements,
         )
@@ -4008,7 +4007,7 @@ class TestInferShape(utt.InferShapeTester):
         admat_val = random(3, 5)
         self._compile_and_check(
             [admat, aimat],
-            [PermuteRowElements()(admat, aimat, abool)],
+            [PermuteRowElements(inverse=False)(admat, aimat)],
             [admat_val, aimat_val],
             PermuteRowElements,
         )
@@ -4023,7 +4022,7 @@ class TestInferShape(utt.InferShapeTester):
         aitens3_val[1, ::, ::] = bimat_val
         self._compile_and_check(
             [admat, aitens3],
-            [PermuteRowElements()(admat, aitens3, abool)],
+            [PermuteRowElements(inverse=True)(admat, aitens3)],
             [admat_val, aitens3_val],
             PermuteRowElements,
         )
