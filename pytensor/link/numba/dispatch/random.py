@@ -144,11 +144,24 @@ def core_CategoricalRV(op, node):
 
 @numba_core_rv_funcify.register(ptr.MvNormalRV)
 def core_MvNormalRV(op, node):
+    method = op.method
+
     @numba_basic.numba_njit
     def random_fn(rng, mean, cov):
-        chol = np.linalg.cholesky(cov)
-        stdnorm = rng.normal(size=cov.shape[-1])
-        return np.dot(chol, stdnorm) + mean
+        if method == "cholesky":
+            A = np.linalg.cholesky(cov)
+        elif method == "svd":
+            A, s, _ = np.linalg.svd(cov)
+            A *= np.sqrt(s)[None, :]
+        else:
+            w, A = np.linalg.eigh(cov)
+            A *= np.sqrt(w)[None, :]
+
+        out = rng.normal(size=cov.shape[-1])
+        # out argument not working correctly: https://github.com/numba/numba/issues/9924
+        out[:] = np.dot(A, out)
+        out += mean
+        return out
 
     random_fn.handles_out = True
     return random_fn

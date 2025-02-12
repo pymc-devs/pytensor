@@ -128,7 +128,6 @@ def jax_sample_fn(op, node):
 @jax_sample_fn.register(ptr.BetaRV)
 @jax_sample_fn.register(ptr.DirichletRV)
 @jax_sample_fn.register(ptr.PoissonRV)
-@jax_sample_fn.register(ptr.MvNormalRV)
 def jax_sample_fn_generic(op, node):
     """Generic JAX implementation of random variables."""
     name = op.name
@@ -167,6 +166,20 @@ def jax_sample_fn_loc_scale(op, node):
         if size is None:
             size = jax.numpy.broadcast_arrays(loc, scale)[0].shape
         sample = loc + jax_op(sampling_key, size, dtype) * scale
+        rng["jax_state"] = rng_key
+        return (rng, sample)
+
+    return sample_fn
+
+
+@jax_sample_fn.register(ptr.MvNormalRV)
+def jax_sample_mvnormal(op, node):
+    def sample_fn(rng, size, dtype, mean, cov):
+        rng_key = rng["jax_state"]
+        rng_key, sampling_key = jax.random.split(rng_key, 2)
+        sample = jax.random.multivariate_normal(
+            sampling_key, mean, cov, shape=size, dtype=dtype, method=op.method
+        )
         rng["jax_state"] = rng_key
         return (rng, sample)
 

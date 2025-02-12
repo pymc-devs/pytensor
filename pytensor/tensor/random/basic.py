@@ -1,13 +1,16 @@
 import abc
 import warnings
+from typing import Literal
 
 import numpy as np
 import scipy.stats as stats
 from numpy import broadcast_shapes as np_broadcast_shapes
 from numpy import einsum as np_einsum
+from numpy import sqrt as np_sqrt
 from numpy.linalg import cholesky as np_cholesky
+from numpy.linalg import eigh as np_eigh
+from numpy.linalg import svd as np_svd
 
-import pytensor
 from pytensor.tensor import get_vector_length, specify_shape
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.math import sqrt
@@ -852,8 +855,17 @@ class MvNormalRV(RandomVariable):
     signature = "(n),(n,n)->(n)"
     dtype = "floatX"
     _print_name = ("MultivariateNormal", "\\operatorname{MultivariateNormal}")
+    __props__ = ("name", "signature", "dtype", "inplace", "method")
 
-    def __call__(self, mean=None, cov=None, size=None, **kwargs):
+    def __init__(self, *args, method: Literal["cholesky", "svd", "eigh"], **kwargs):
+        super().__init__(*args, **kwargs)
+        if method not in ("cholesky", "svd", "eigh"):
+            raise ValueError(
+                f"Unknown method {method}. The method must be one of 'cholesky', 'svd', or 'eigh'."
+            )
+        self.method = method
+
+    def __call__(self, mean, cov, size=None, **kwargs):
         r""" "Draw samples from a multivariate normal distribution.
 
         Signature
@@ -876,33 +888,34 @@ class MvNormalRV(RandomVariable):
             is specified, a single `N`-dimensional sample is returned.
 
         """
-        dtype = pytensor.config.floatX if self.dtype == "floatX" else self.dtype
-
-        if mean is None:
-            mean = np.array([0.0], dtype=dtype)
-        if cov is None:
-            cov = np.array([[1.0]], dtype=dtype)
         return super().__call__(mean, cov, size=size, **kwargs)
 
-    @classmethod
-    def rng_fn(cls, rng, mean, cov, size):
+    def rng_fn(self, rng, mean, cov, size):
         if size is None:
             size = np_broadcast_shapes(mean.shape[:-1], cov.shape[:-2])
 
-        chol = np_cholesky(cov)
+        if self.method == "cholesky":
+            A = np_cholesky(cov)
+        elif self.method == "svd":
+            A, s, _ = np_svd(cov)
+            A *= np_sqrt(s, out=s)[..., None, :]
+        else:
+            w, A = np_eigh(cov)
+            A *= np_sqrt(w, out=w)[..., None, :]
+
         out = rng.normal(size=(*size, mean.shape[-1]))
         np_einsum(
             "...ij,...j->...i",  # numpy doesn't have a batch matrix-vector product
-            chol,
+            A,
             out,
-            out=out,
             optimize=False,  # Nothing to optimize with two operands, skip costly setup
+            out=out,
         )
         out += mean
         return out
 
 
-multivariate_normal = MvNormalRV()
+multivariate_normal = MvNormalRV(method="cholesky")
 
 
 class DirichletRV(RandomVariable):
