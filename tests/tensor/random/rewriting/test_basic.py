@@ -778,8 +778,10 @@ def rand_bool_mask(shape, rng=None):
             multivariate_normal,
             (
                 np.array([200, 250], dtype=config.floatX),
-                # Second covariance is invalid, to test it is not chosen
-                np.dstack([np.eye(2), np.eye(2) * 0, np.eye(2)]).T.astype(config.floatX)
+                # Second covariance is very large, to test it is not chosen
+                np.dstack([np.eye(2), np.eye(2) * 1000, np.eye(2)]).T.astype(
+                    config.floatX
+                )
                 * 1e-6,
             ),
             (3,),

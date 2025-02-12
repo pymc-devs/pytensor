@@ -3,6 +3,9 @@ import warnings
 
 import numpy as np
 import scipy.stats as stats
+from numpy import broadcast_shapes as np_broadcast_shapes
+from numpy import einsum as np_einsum
+from numpy.linalg import cholesky as np_cholesky
 
 import pytensor
 from pytensor.tensor import get_vector_length, specify_shape
@@ -831,27 +834,6 @@ class VonMisesRV(RandomVariable):
 vonmises = VonMisesRV()
 
 
-def safe_multivariate_normal(mean, cov, size=None, rng=None):
-    """A shape consistent multivariate normal sampler.
-
-    What we mean by "shape consistent": SciPy will return scalars when the
-    arguments are vectors with dimension of size 1.  We require that the output
-    be at least 1D, so that it's consistent with the underlying random
-    variable.
-
-    """
-    res = np.atleast_1d(
-        stats.multivariate_normal(mean=mean, cov=cov, allow_singular=True).rvs(
-            size=size, random_state=rng
-        )
-    )
-
-    if size is not None:
-        res = res.reshape([*size, -1])
-
-    return res
-
-
 class MvNormalRV(RandomVariable):
     r"""A multivariate normal random variable.
 
@@ -904,25 +886,20 @@ class MvNormalRV(RandomVariable):
 
     @classmethod
     def rng_fn(cls, rng, mean, cov, size):
-        if mean.ndim > 1 or cov.ndim > 2:
-            # Neither SciPy nor NumPy implement parameter broadcasting for
-            # multivariate normals (or any other multivariate distributions),
-            # so we need to implement that here
+        if size is None:
+            size = np_broadcast_shapes(mean.shape[:-1], cov.shape[:-2])
 
-            if size is None:
-                mean, cov = broadcast_params([mean, cov], [1, 2])
-            else:
-                mean = np.broadcast_to(mean, size + mean.shape[-1:])
-                cov = np.broadcast_to(cov, size + cov.shape[-2:])
-
-            res = np.empty(mean.shape)
-            for idx in np.ndindex(mean.shape[:-1]):
-                m = mean[idx]
-                c = cov[idx]
-                res[idx] = safe_multivariate_normal(m, c, rng=rng)
-            return res
-        else:
-            return safe_multivariate_normal(mean, cov, size=size, rng=rng)
+        chol = np_cholesky(cov)
+        out = rng.normal(size=(*size, mean.shape[-1]))
+        np_einsum(
+            "...ij,...j->...i",  # numpy doesn't have a batch matrix-vector product
+            chol,
+            out,
+            out=out,
+            optimize=False,  # Nothing to optimize with two operands, skip costly setup
+        )
+        out += mean
+        return out
 
 
 multivariate_normal = MvNormalRV()
