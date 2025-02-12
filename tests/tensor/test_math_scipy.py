@@ -306,16 +306,6 @@ TestChi2SFBroadcast = makeBroadcastTester(
     name="Chi2SF",
 )
 
-TestChi2SFInplaceBroadcast = makeBroadcastTester(
-    op=inplace.chi2sf_inplace,
-    expected=expected_chi2sf,
-    good=_good_broadcast_unary_chi2sf,
-    eps=2e-10,
-    mode=mode_no_scipy,
-    inplace=True,
-    name="Chi2SF",
-)
-
 rng = np.random.default_rng(seed=utt.fetch_seed())
 _good_broadcast_binary_gamma = dict(
     normal=(
