@@ -18,6 +18,7 @@ from tests.tensor.random.test_basic import (
     batched_permutation_tester,
     batched_unweighted_choice_without_replacement_tester,
     batched_weighted_choice_without_replacement_tester,
+    create_mvnormal_cov_decomposition_method_test,
 )
 
 
@@ -545,6 +546,11 @@ def test_random_mvnormal():
     g_fn = compile_random_function([], g, mode=jax_mode)
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), mu, atol=0.1)
+
+
+test_mvnormal_cov_decomposition_method = create_mvnormal_cov_decomposition_method_test(
+    "JAX"
+)
 
 
 @pytest.mark.parametrize(

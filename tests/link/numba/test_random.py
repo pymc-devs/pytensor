@@ -22,6 +22,7 @@ from tests.tensor.random.test_basic import (
     batched_permutation_tester,
     batched_unweighted_choice_without_replacement_tester,
     batched_weighted_choice_without_replacement_tester,
+    create_mvnormal_cov_decomposition_method_test,
 )
 
 
@@ -145,6 +146,11 @@ def test_multivariate_normal():
         fn(),
         rng.multivariate_normal(np.zeros(2), np.eye(2), size=(3,)),
     )
+
+
+test_mvnormal_cov_decomposition_method = create_mvnormal_cov_decomposition_method_test(
+    "NUMBA"
+)
 
 
 @pytest.mark.parametrize(
