@@ -521,13 +521,19 @@ def test_pareto_samples(alpha, scale, size):
 
 
 def mvnormal_test_fn(mean=None, cov=None, size=None, random_state=None):
-    if mean is None:
-        mean = np.array([0.0], dtype=config.floatX)
-    if cov is None:
-        cov = np.array([[1.0]], dtype=config.floatX)
-    if size is not None:
-        size = tuple(size)
-    return multivariate_normal.rng_fn(random_state, mean, cov, size)
+    rng = random_state if random_state is not None else np.random.default_rng()
+
+    if size is None:
+        size = np.broadcast_shapes(mean.shape[:-1], cov.shape[:-2])
+
+    mean = np.broadcast_to(mean, (*size, *mean.shape[-1:]))
+    cov = np.broadcast_to(cov, (*size, *cov.shape[-2:]))
+
+    @np.vectorize(signature="(n),(n,n)->(n)")
+    def vec_mvnormal(mean, cov):
+        return rng.multivariate_normal(mean, cov, method="cholesky")
+
+    return vec_mvnormal(mean, cov)
 
 
 @pytest.mark.parametrize(
@@ -609,18 +615,30 @@ def mvnormal_test_fn(mean=None, cov=None, size=None, random_state=None):
         ),
     ],
 )
+@pytest.mark.skipif(
+    config.floatX == "float32",
+    reason="Draws are only strictly equal to numpy in float64",
+)
 def test_mvnormal_samples(mu, cov, size):
     compare_sample_values(
         multivariate_normal, mu, cov, size=size, test_fn=mvnormal_test_fn
     )
 
 
-def test_mvnormal_default_args():
-    compare_sample_values(multivariate_normal, test_fn=mvnormal_test_fn)
+def test_mvnormal_no_default_args():
+    with pytest.raises(
+        TypeError, match="missing 2 required positional arguments: 'mean' and 'cov'"
+    ):
+        multivariate_normal()
 
+
+def test_mvnormal_impl_catches_incompatible_size():
     with pytest.raises(ValueError, match="operands could not be broadcast together "):
         multivariate_normal.rng_fn(
-            None, np.zeros((3, 2)), np.ones((3, 2, 2)), size=(4,)
+            np.random.default_rng(),
+            np.zeros((3, 2)),
+            np.broadcast_to(np.eye(2), (3, 2, 2)),
+            size=(4,),
         )
 
 
