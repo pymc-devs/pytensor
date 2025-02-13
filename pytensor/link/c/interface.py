@@ -1,7 +1,7 @@
 import typing
 import warnings
 from abc import abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 from typing import Optional
 
 from pytensor.graph.basic import Apply, Constant
@@ -155,7 +155,7 @@ class CLinkerObject:
         """Return a list of code snippets to be inserted in module initialization."""
         return []
 
-    def c_code_cache_version(self) -> tuple[int, ...]:
+    def c_code_cache_version(self) -> tuple[Hashable, ...]:
         """Return a tuple of integers indicating the version of this `Op`.
 
         An empty tuple indicates an "unversioned" `Op` that will not be cached
@@ -223,7 +223,7 @@ class CLinkerOp(CLinkerObject):
         """
         raise NotImplementedError()
 
-    def c_code_cache_version_apply(self, node: Apply) -> tuple[int, ...]:
+    def c_code_cache_version_apply(self, node: Apply) -> tuple[Hashable, ...]:
         """Return a tuple of integers indicating the version of this `Op`.
 
         An empty tuple indicates an "unversioned" `Op` that will not be
