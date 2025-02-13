@@ -86,9 +86,7 @@ of symbolic differentiation).
    ``i`` of the output list is the gradient of the first argument of
    `pt.grad` with respect to the ``i``-th element of the list given as second argument.
    The first argument of `pt.grad` has to be a scalar (a tensor
-   of size 1). For more information on the semantics of the arguments of
-   `pt.grad` and details about the implementation, see
-   :ref:`this<libdoc_gradient>` section of the library.
+   of size 1).
 
    Additional information on the inner workings of differentiation may also be
    found in the more advanced tutorial :ref:`Extending PyTensor<extending>`.
@@ -204,7 +202,21 @@ you need to do something similar to this:
 >>> f([[1, 1], [1, 1]], [[2, 2], [2, 2]], [0,1])
 array([ 2.,  2.])
 
-:ref:`List <R_op_list>` of Op that implement Rop.
+By default, the R-operator is implemented as a double application of the L_operator
+(see `reference <https://j-towns.github.io/2017/06/12/A-new-trick.html>`_).
+In most cases this should be as performant as a specialized implementation of the R-operator.
+However, PyTensor may sometimes fail to prune dead branches or fuse common expressions within composite operators,
+such as Scan and OpFromGraph, that would be more easily avoidable in a direct implentation of the R-operator.
+
+When this is a concern, it is possible to force `Rop` to use the specialized `Op.R_op` methods by passing
+`use_op_rop_implementation=True`. Note that this will fail if the graph contains `Op`s that don't implement this method.
+
+
+>>> JV = pytensor.gradient.Rop(y, W, V, use_op_rop_implementation=True)
+>>> f = pytensor.function([W, V, x], JV)
+>>> f([[1, 1], [1, 1]], [[2, 2], [2, 2]], [0,1])
+array([ 2.,  2.])
+
 
 L-operator
 ----------
@@ -234,7 +246,6 @@ array([[ 0.,  0.],
     as the input parameter, while the result of the R-operator has a shape similar
     to that of the output.
 
-   :ref:`List of op with r op support <R_op_list>`.
 
 Hessian times a Vector
 ======================

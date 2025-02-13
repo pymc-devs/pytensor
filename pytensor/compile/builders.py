@@ -340,6 +340,12 @@ class OpFromGraph(Op, HasInnerGraph):
             ``None``, this will be used as the connection_pattern for this
             :class:`Op`.
 
+        .. warning::
+
+            rop overrides is ignored when `pytensor.gradient.Rop` is called with
+            `use_op_rop_implementation=False` (default). In this case the Lop
+            is used twice to obtain a mathematically equivalent Rop.
+
         strict: bool, default False
             If true, it raises when any variables needed to compute the inner graph
             are not provided as explici inputs. This can only happen for graphs with
@@ -641,7 +647,12 @@ class OpFromGraph(Op, HasInnerGraph):
             return rop_overrides
 
         eval_points = [inp_t() for inp_t in self.input_types]
-        fn_rop = partial(Rop, wrt=inner_inputs, eval_points=eval_points)
+        fn_rop = partial(
+            Rop,
+            wrt=inner_inputs,
+            eval_points=eval_points,
+            use_op_rop_implementation=True,
+        )
 
         callable_args = (inner_inputs, eval_points)
         if rop_overrides is None:

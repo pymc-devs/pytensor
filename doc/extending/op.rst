@@ -506,4 +506,3 @@ These are the function required to work with :func:`pytensor.gradient.grad`.
    the outputs) back to their corresponding shapes and return them as the
    output of the :meth:`Op.R_op` method.
 
-   :ref:`List of op with r op support <R_op_list>`.

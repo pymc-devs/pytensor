@@ -1791,5 +1791,3 @@ Gradient / Differentiation
     :members: grad
     :noindex:
 
-See the :ref:`gradient <libdoc_gradient>` page for complete documentation
-of the gradient module.
