@@ -878,6 +878,8 @@ class Function:
                 output_subset = [self.output_keys.index(key) for key in output_subset]
 
         # Reinitialize each container's 'provided' counter
+        if len(args) == 0:  # for speed we trust the input for empty args
+            trust_input = True
         if trust_input:
             for arg_container, arg in zip(input_storage, args, strict=False):
                 arg_container.storage[0] = arg
