@@ -3165,7 +3165,12 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             rop_self_outputs = self_outputs
         if info.n_shared_outs > 0:
             rop_self_outputs = rop_self_outputs[: -info.n_shared_outs]
-        rop_outs = Rop(rop_self_outputs, rop_of_inputs, inner_eval_points)
+        rop_outs = Rop(
+            rop_self_outputs,
+            rop_of_inputs,
+            inner_eval_points,
+            use_op_rop_implementation=True,
+        )
         if not isinstance(rop_outs, list | tuple):
             rop_outs = [rop_outs]
         # Step 2. Figure out what corresponds to what in the scan

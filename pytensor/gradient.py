@@ -142,13 +142,50 @@ class DisconnectedType(Type):
 disconnected_type = DisconnectedType()
 
 
-def Rop(
-    f: Variable | Sequence[Variable],
-    wrt: Variable | Sequence[Variable],
-    eval_points: Variable | Sequence[Variable],
+def pushforward_through_pullback(
+    outputs: Sequence[Variable],
+    inputs: Sequence[Variable],
+    tangents: Sequence[Variable],
     disconnected_outputs: Literal["ignore", "warn", "raise"] = "raise",
     return_disconnected: Literal["none", "zero", "disconnected"] = "zero",
-) -> Variable | None | Sequence[Variable | None]:
+) -> Sequence[Variable | None]:
+    """Compute the pushforward (Rop) through two applications of a pullback (Lop) operation.
+
+    References
+    ----------
+    .. [1] J. Towns, "A new trick for calculating Jacobian vector products", 2017.
+           Available: https://j-towns.github.io/2017/06/12/A-new-trick.html
+
+    """
+    # Cotangents are just auxiliary variables that should be pruned from the final graph,
+    # but that would require a graph rewrite before the user tries to compile a pytensor function.
+    # To avoid trouble we use .zeros_like() instead of .type(), which does not create a new root variable.
+    cotangents = [out.zeros_like(dtype=config.floatX) for out in outputs]  # type: ignore
+
+    input_cotangents = Lop(
+        f=outputs,
+        wrt=inputs,
+        eval_points=cotangents,
+        disconnected_inputs=disconnected_outputs,
+        return_disconnected="zero",
+    )
+
+    return Lop(
+        f=input_cotangents,  # type: ignore
+        wrt=cotangents,
+        eval_points=tangents,
+        disconnected_inputs="ignore",
+        return_disconnected=return_disconnected,
+    )
+
+
+def _rop_legacy(
+    f: Sequence[Variable],
+    wrt: Sequence[Variable],
+    eval_points: Sequence[Variable],
+    disconnected_outputs: Literal["ignore", "warn", "raise"] = "raise",
+    return_disconnected: Literal["none", "zero", "disconnected"] = "zero",
+) -> Sequence[Variable | None]:
     """Computes the R-operator applied to `f` with respect to `wrt` at `eval_points`.
 
     Mathematically this stands for the Jacobian of `f` right multiplied by the
@@ -190,38 +227,6 @@ def Rop(
         If `f` is a list/tuple, then return a list/tuple with the results.
     """
 
-    if not isinstance(wrt, list | tuple):
-        _wrt: list[Variable] = [pytensor.tensor.as_tensor_variable(wrt)]
-    else:
-        _wrt = [pytensor.tensor.as_tensor_variable(x) for x in wrt]
-
-    if not isinstance(eval_points, list | tuple):
-        _eval_points: list[Variable] = [pytensor.tensor.as_tensor_variable(eval_points)]
-    else:
-        _eval_points = [pytensor.tensor.as_tensor_variable(x) for x in eval_points]
-
-    if not isinstance(f, list | tuple):
-        _f: list[Variable] = [pytensor.tensor.as_tensor_variable(f)]
-    else:
-        _f = [pytensor.tensor.as_tensor_variable(x) for x in f]
-
-    if len(_wrt) != len(_eval_points):
-        raise ValueError("`wrt` must be the same length as `eval_points`.")
-
-    # Check that each element of wrt corresponds to an element
-    # of eval_points with the same dimensionality.
-    for i, (wrt_elem, eval_point) in enumerate(zip(_wrt, _eval_points, strict=True)):
-        try:
-            if wrt_elem.type.ndim != eval_point.type.ndim:
-                raise ValueError(
-                    f"Elements {i} of `wrt` and `eval_point` have mismatched dimensionalities: "
-                    f"{wrt_elem.type.ndim} and {eval_point.type.ndim}"
-                )
-        except AttributeError:
-            # wrt_elem and eval_point don't always have ndim like random type
-            # Tensor, Sparse have the ndim attribute
-            pass
-
     seen_nodes: dict[Apply, Sequence[Variable]] = {}
 
     def _traverse(node):
@@ -237,8 +242,8 @@ def Rop(
         # inputs of the node
         local_eval_points = []
         for inp in inputs:
-            if inp in _wrt:
-                local_eval_points.append(_eval_points[_wrt.index(inp)])
+            if inp in wrt:
+                local_eval_points.append(eval_points[wrt.index(inp)])
             elif inp.owner is None:
                 try:
                     local_eval_points.append(inp.zeros_like())
@@ -292,13 +297,13 @@ def Rop(
     # end _traverse
 
     # Populate the dictionary
-    for out in _f:
+    for out in f:
         _traverse(out.owner)
 
     rval: list[Variable | None] = []
-    for out in _f:
-        if out in _wrt:
-            rval.append(_eval_points[_wrt.index(out)])
+    for out in f:
+        if out in wrt:
+            rval.append(eval_points[wrt.index(out)])
         elif (
             seen_nodes.get(out.owner, None) is None
             or seen_nodes[out.owner][out.owner.outputs.index(out)] is None
@@ -337,6 +342,116 @@ def Rop(
         else:
             rval.append(seen_nodes[out.owner][out.owner.outputs.index(out)])
 
+    return rval
+
+
+def Rop(
+    f: Variable | Sequence[Variable],
+    wrt: Variable | Sequence[Variable],
+    eval_points: Variable | Sequence[Variable],
+    disconnected_outputs: Literal["ignore", "warn", "raise"] = "raise",
+    return_disconnected: Literal["none", "zero", "disconnected"] = "zero",
+    use_op_rop_implementation: bool = False,
+) -> Variable | None | Sequence[Variable | None]:
+    """Computes the R-operator applied to `f` with respect to `wrt` at `eval_points`.
+
+    Mathematically this stands for the Jacobian of `f` right multiplied by the
+    `eval_points`.
+
+    By default, the R-operator is implemented as a double application of the L_operator [1]_.
+    In most cases this should be as performant as a specialized implementation of the R-operator.
+    However, PyTensor may sometimes fail to prune dead branches or fuse common expressions within composite operators,
+    such as Scan and OpFromGraph, that would be more easily avoidable in a direct implentation of the R-operator.
+
+    When this is a concern, it is possible to force `Rop` to use the specialized `Op.R_op` methods by passing
+    `use_op_rop_implementation=True`. Note that this will fail if the graph contains `Op`s that don't implement this method.
+
+    Parameters
+    ----------
+    f
+        The outputs of the computational graph to which the R-operator is
+        applied.
+    wrt
+        Variables for which the R-operator of `f` is computed.
+    eval_points
+        Points at which to evaluate each of the variables in `wrt`.
+    disconnected_outputs
+        Defines the behaviour if some of the variables in `f`
+        have no dependency on any of the variable in `wrt` (or if
+        all links are non-differentiable). The possible values are:
+
+        - ``'ignore'``: considers that the gradient on these parameters is zero.
+        - ``'warn'``: consider the gradient zero, and print a warning.
+        - ``'raise'``: raise `DisconnectedInputError`.
+
+    return_disconnected
+        - ``'zero'`` : If ``wrt[i]`` is disconnected, return value ``i`` will be
+          ``wrt[i].zeros_like()``.
+        - ``'none'`` : If ``wrt[i]`` is disconnected, return value ``i`` will be
+          ``None``
+        - ``'disconnected'`` : returns variables of type `DisconnectedType`
+    use_op_lop_implementation: bool, default=True
+        If `True`, we obtain Rop via double application of Lop.
+        If `False`, the legacy Rop implementation is used. The number of graphs that support this form
+        is much more restricted, and the generated graphs may be less optimized.
+
+    Returns
+    -------
+    :class:`~pytensor.graph.basic.Variable` or list/tuple of Variables
+        A symbolic expression such obeying
+        ``R_op[i] = sum_j (d f[i] / d wrt[j]) eval_point[j]``,
+        where the indices in that expression are magic multidimensional
+        indices that specify both the position within a list and all
+        coordinates of the tensor elements.
+        If `f` is a list/tuple, then return a list/tuple with the results.
+
+    References
+    ----------
+    .. [1] J. Towns, "A new trick for calculating Jacobian vector products", 2017.
+           Available: https://j-towns.github.io/2017/06/12/A-new-trick.html
+    """
+
+    if not isinstance(wrt, list | tuple):
+        _wrt: list[Variable] = [pytensor.tensor.as_tensor_variable(wrt)]
+    else:
+        _wrt = [pytensor.tensor.as_tensor_variable(x) for x in wrt]
+
+    if not isinstance(eval_points, list | tuple):
+        _eval_points: list[Variable] = [pytensor.tensor.as_tensor_variable(eval_points)]
+    else:
+        _eval_points = [pytensor.tensor.as_tensor_variable(x) for x in eval_points]
+
+    if not isinstance(f, list | tuple):
+        _f: list[Variable] = [pytensor.tensor.as_tensor_variable(f)]
+    else:
+        _f = [pytensor.tensor.as_tensor_variable(x) for x in f]
+
+    if len(_wrt) != len(_eval_points):
+        raise ValueError("`wrt` must be the same length as `eval_points`.")
+
+    # Check that each element of wrt corresponds to an element
+    # of eval_points with the same dimensionality.
+    for i, (wrt_elem, eval_point) in enumerate(zip(_wrt, _eval_points, strict=True)):
+        try:
+            if wrt_elem.type.ndim != eval_point.type.ndim:
+                raise ValueError(
+                    f"Elements {i} of `wrt` and `eval_point` have mismatched dimensionalities: "
+                    f"{wrt_elem.type.ndim} and {eval_point.type.ndim}"
+                )
+        except AttributeError:
+            # wrt_elem and eval_point don't always have ndim like random type
+            # Tensor, Sparse have the ndim attribute
+            pass
+
+    if use_op_rop_implementation:
+        rval = _rop_legacy(
+            _f, _wrt, _eval_points, disconnected_outputs, return_disconnected
+        )
+    else:
+        rval = pushforward_through_pullback(
+            _f, _wrt, _eval_points, disconnected_outputs, return_disconnected
+        )
+
     using_list = isinstance(f, list)
     using_tuple = isinstance(f, tuple)
     return as_list_or_tuple(using_list, using_tuple, rval)
@@ -348,6 +463,7 @@ def Lop(
     eval_points: Variable | Sequence[Variable],
     consider_constant: Sequence[Variable] | None = None,
     disconnected_inputs: Literal["ignore", "warn", "raise"] = "raise",
+    return_disconnected: Literal["none", "zero", "disconnected"] = "zero",
 ) -> Variable | None | Sequence[Variable | None]:
     """Computes the L-operator applied to `f` with respect to `wrt` at `eval_points`.
 
@@ -404,6 +520,7 @@ def Lop(
         consider_constant=consider_constant,
         wrt=_wrt,
         disconnected_inputs=disconnected_inputs,
+        return_disconnected=return_disconnected,
     )
 
     using_list = isinstance(wrt, list)

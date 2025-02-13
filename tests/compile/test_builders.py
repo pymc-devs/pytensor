@@ -306,7 +306,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
     @pytest.mark.parametrize(
         "cls_ofg", [OpFromGraph, partial(OpFromGraph, inline=True)]
     )
-    def test_rop(self, cls_ofg):
+    @pytest.mark.parametrize("use_op_rop_implementation", [True, False])
+    def test_rop(self, cls_ofg, use_op_rop_implementation):
         a = vector()
         M = matrix()
         b = dot(a, M)
@@ -315,7 +316,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         W = matrix()
         y = op_matmul(x, W)
         du = vector()
-        dv = Rop(y, x, du)
+        dv = Rop(y, x, du, use_op_rop_implementation=use_op_rop_implementation)
         fn = function([x, W, du], dv)
         xval = np.random.random((16,)).astype(config.floatX)
         Wval = np.random.random((16, 16)).astype(config.floatX)
@@ -324,7 +325,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         dvval2 = fn(xval, Wval, duval)
         np.testing.assert_array_almost_equal(dvval2, dvval, 4)
 
-    def test_rop_multiple_outputs(self):
+    @pytest.mark.parametrize("use_op_rop_implementation", [True, False])
+    def test_rop_multiple_outputs(self, use_op_rop_implementation):
         a = vector()
         M = matrix()
         b = dot(a, M)
@@ -339,21 +341,21 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         duval = np.random.random((16,)).astype(config.floatX)
 
         y = op_matmul(x, W)[0]
-        dv = Rop(y, x, du)
+        dv = Rop(y, x, du, use_op_rop_implementation=use_op_rop_implementation)
         fn = function([x, W, du], dv)
         result_dvval = fn(xval, Wval, duval)
         expected_dvval = np.dot(duval, Wval)
         np.testing.assert_array_almost_equal(result_dvval, expected_dvval, 4)
 
         y = op_matmul(x, W)[1]
-        dv = Rop(y, x, du)
+        dv = Rop(y, x, du, use_op_rop_implementation=use_op_rop_implementation)
         fn = function([x, W, du], dv)
         result_dvval = fn(xval, Wval, duval)
         expected_dvval = -np.dot(duval, Wval)
         np.testing.assert_array_almost_equal(result_dvval, expected_dvval, 4)
 
         y = pt.add(*op_matmul(x, W))
-        dv = Rop(y, x, du)
+        dv = Rop(y, x, du, use_op_rop_implementation=use_op_rop_implementation)
         fn = function([x, W, du], dv)
         result_dvval = fn(xval, Wval, duval)
         expected_dvval = np.zeros_like(np.dot(duval, Wval))
@@ -362,7 +364,16 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
     @pytest.mark.parametrize(
         "cls_ofg", [OpFromGraph, partial(OpFromGraph, inline=True)]
     )
-    def test_rop_override(self, cls_ofg):
+    @pytest.mark.parametrize(
+        "use_op_rop_implementation",
+        [
+            True,
+            pytest.param(
+                False, marks=pytest.mark.xfail(reason="Custom ROp is ignored")
+            ),
+        ],
+    )
+    def test_rop_override(self, cls_ofg, use_op_rop_implementation):
         x, y = vectors("xy")
 
         def ro(inps, epts):
@@ -380,7 +391,12 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         du, dv = vector("du"), vector("dv")
         for op in [op_mul, op_mul2]:
             zz = op_mul(xx, yy)
-            dw = Rop(zz, [xx, yy], [du, dv])
+            dw = Rop(
+                zz,
+                [xx, yy],
+                [du, dv],
+                use_op_rop_implementation=use_op_rop_implementation,
+            )
             fn = function([xx, yy, du, dv], dw)
             vals = np.random.random((4, 32)).astype(config.floatX)
             dwval = fn(*vals)
