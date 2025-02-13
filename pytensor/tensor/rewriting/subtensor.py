@@ -1147,7 +1147,7 @@ def merge_two_slices(fgraph, slice1, len1, slice2, len2):
             val = switch(le(len2, 0), len1 + 1, val)
             val = switch(ge(sl2, len2), len1 + 1, val)
             val = switch(lt(sl2, 0), -len1 - 1, val)
-            if sl1.step:
+            if sl1.step is not None:
                 val = switch(eq(sl1.step, 0), len1 + 1, val)
             return val
     else:

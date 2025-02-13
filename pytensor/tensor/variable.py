@@ -26,53 +26,54 @@ _TensorTypeType = TypeVar("_TensorTypeType", bound=TensorType)
 
 
 class _tensor_py_operators:
+    # These can't work because Python requires native output types
+    def __bool__(self):
+        raise TypeError(
+            "TensorVariable cannot be converted to Python boolean. "
+            "Call `.astype(bool)` for the symbolic equivalent."
+        )
+
+    def __index__(self):
+        raise TypeError(
+            "TensorVariable cannot be converted to Python integer. "
+            "Call `.astype(int)` for the symbolic equivalent."
+        )
+
+    def __int__(self):
+        raise TypeError(
+            "TensorVariable cannot be converted to Python integer. "
+            "Call `.astype(int)` for the symbolic equivalent."
+        )
+
+    def __float__(self):
+        raise TypeError(
+            "TensorVariables cannot be converted to Python float. "
+            "Call `.astype(float)` for the symbolic equivalent."
+        )
+
+    def __complex__(self):
+        raise TypeError(
+            "TensorVariables cannot be converted to Python complex number. "
+            "Call `.astype(complex)` for the symbolic equivalent."
+        )
+
     def __abs__(self):
         return pt.math.abs(self)
 
     def __neg__(self):
         return pt.math.neg(self)
 
-    # These won't work because Python requires an int return value
-    # def __int__(self): return convert_to_int32(self)
-    # def __float__(self): return convert_to_float64(self)
-    # def __complex__(self): return convert_to_complex128(self)
-
-    _is_nonzero = True
-
     def __lt__(self, other):
-        rval = pt.math.lt(self, other)
-        rval._is_nonzero = False
-        return rval
+        return pt.math.lt(self, other)
 
     def __le__(self, other):
-        rval = pt.math.le(self, other)
-        rval._is_nonzero = False
-        return rval
+        return pt.math.le(self, other)
 
     def __gt__(self, other):
-        rval = pt.math.gt(self, other)
-        rval._is_nonzero = False
-        return rval
+        return pt.math.gt(self, other)
 
     def __ge__(self, other):
-        rval = pt.math.ge(self, other)
-        rval._is_nonzero = False
-        return rval
-
-    def __bool__(self):
-        # This is meant to prohibit stuff like a < b < c, which is internally
-        # implemented as (a < b) and (b < c). The trouble with this is the
-        # side-effect that checking for a non-NULL a by typing "if a: ..."
-        # uses the same __nonzero__ method.  We want these both to work, but
-        # it seems impossible.  Currently, all vars evaluate to nonzero except
-        # the return values of comparison operators, which raise this
-        # exception.  If you can think of a better solution, go for it!
-        #
-        # __bool__ is Python 3.x data model. __nonzero__ is Python 2.x.
-        if self._is_nonzero:
-            return True
-        else:
-            raise TypeError("Variables do not support boolean operations.")
+        return pt.math.ge(self, other)
 
     def __invert__(self):
         return pt.math.invert(self)

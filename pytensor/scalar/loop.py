@@ -60,12 +60,12 @@ class ScalarLoop(ScalarInnerGraphOp):
             constant = []
         if not len(init) == len(update):
             raise ValueError("An update must be given for each init variable")
-        if until:
+        if until is not None:
             inputs, outputs = clone([*init, *constant], [*update, until])
         else:
             inputs, outputs = clone([*init, *constant], update)
 
-        self.is_while = bool(until)
+        self.is_while = until is not None
         self.inputs, self.outputs = self._cleanup_graph(inputs, outputs)
         self._validate_updates(self.inputs, self.outputs)
 
