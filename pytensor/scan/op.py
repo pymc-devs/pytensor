@@ -72,6 +72,7 @@ from pytensor.graph.basic import (
 from pytensor.graph.features import NoOutputFromInplace
 from pytensor.graph.op import HasInnerGraph, Op
 from pytensor.graph.replace import clone_replace
+from pytensor.graph.type import HasShape
 from pytensor.graph.utils import InconsistencyError, MissingInputError
 from pytensor.link.c.basic import CLinker
 from pytensor.printing import op_debug_information
@@ -2591,7 +2592,11 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         # mask inputs that get no gradients
         for dx in range(len(dC_dinps_t)):
             if dC_dinps_t[dx] is None:
-                dC_dinps_t[dx] = dC_dinps_t[dx] = pt.zeros_like(diff_inputs[dx])
+                dC_dinps_t[dx] = dC_dinps_t[dx] = (
+                    pt.zeros_like(diff_inputs[dx])
+                    if isinstance(diff_inputs[dx].type, HasShape)
+                    else pt.zeros(())
+                )
             else:
                 disconnected_dC_dinps_t[dx] = False
                 for Xt, Xt_placeholder in zip(
@@ -2965,7 +2970,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             else:
                 outer_inp_sitsot.append(
                     pt.zeros(
-                        [grad_steps + 1] + [x.shape[i] for i in range(x.ndim)],
+                        [grad_steps + 1]
+                        + (list(x.shape) if isinstance(x.type, HasShape) else []),
                         dtype=y.dtype,
                     )
                 )
