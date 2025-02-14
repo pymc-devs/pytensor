@@ -603,7 +603,7 @@ class TestSpecifyBroadcastable:
 
 class TestRopLop(RopLopChecker):
     def test_shape(self):
-        self.check_nondiff_rop(self.x.shape[0])
+        self.check_nondiff_rop(self.x.shape[0], self.x, self.v)
 
     def test_specifyshape(self):
         self.check_rop_lop(specify_shape(self.x, self.in_shape), self.in_shape)

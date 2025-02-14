@@ -1992,9 +1992,9 @@ class TestScan:
         vnu, vnh0, vnW = fn_rop(v_u, v_h0, v_W, v_eu, v_eh0, v_eW)
         tnu, tnh0, tnW = fn_test(v_u, v_h0, v_W, v_eu, v_eh0, v_eW)
 
-        utt.assert_allclose(vnu, tnu, atol=1e-6)
-        utt.assert_allclose(vnh0, tnh0, atol=1e-6)
-        utt.assert_allclose(vnW, tnW, atol=1e-6)
+        np.testing.assert_allclose(vnu, tnu, atol=1e-6)
+        np.testing.assert_allclose(vnh0, tnh0, atol=1e-6)
+        np.testing.assert_allclose(vnW, tnW, atol=1e-6)
 
     @pytest.mark.slow
     def test_R_op_2(self):
@@ -2074,9 +2074,9 @@ class TestScan:
         )
 
         tnu, tnh0, tnW, tno = fn_test(v_u, v_h0, v_W, v_eu, v_eh0, v_eW)
-        utt.assert_allclose(vnu, tnu, atol=1e-6)
-        utt.assert_allclose(vnh0, tnh0, atol=1e-6)
-        utt.assert_allclose(vnW, tnW, atol=2e-6)
+        np.testing.assert_allclose(vnu, tnu, atol=1e-6)
+        np.testing.assert_allclose(vnh0, tnh0, atol=1e-6)
+        np.testing.assert_allclose(vnW, tnW, atol=2e-6)
 
     def test_R_op_mitmot(self):
         # this test is a copy paste from the script given by Justin Bayer to
@@ -2094,13 +2094,10 @@ class TestScan:
         W1 = pars[:3].reshape(W1shape)
         W2 = pars[3:].reshape(W2shape)
 
-        # Define recurrent model. We are using a model where each input is a
-        # tensor
-        # of shape (T, B, D) where T is the number of timesteps, B is the
-        # number of
-        # sequences iterated over in parallel and D is the dimensionality of
-        # each
-        # item at a timestep.
+        # Define recurrent model. We are using a model where each input
+        # is a tensor of shape (T, B, D) where T is the number of timesteps,
+        # B is the number of sequences iterated over in parallel and
+        # D is the dimensionality of each item at a timestep.
 
         inpt = tensor3("inpt")
         target = tensor3("target")
@@ -2128,6 +2125,7 @@ class TestScan:
         d_cost_wrt_pars = grad(cost, pars)
 
         p = dvector()
+        # TODO: We should test something about the Rop!
         Rop(d_cost_wrt_pars, pars, p)
 
 
