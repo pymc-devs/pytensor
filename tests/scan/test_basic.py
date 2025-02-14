@@ -2128,6 +2128,57 @@ class TestScan:
         # TODO: We should test something about the Rop!
         Rop(d_cost_wrt_pars, pars, p)
 
+    def test_second_derivative_disconnected_cost_with_mit_mot(self):
+        # This test is a regression test for a bug that was revealed
+        # when we computed the pushforward of a Scan gradient via two applications of pullback
+        seq = pt.vector("seq", shape=(2,))
+        z = pt.scalar("z")
+        x0 = pt.vector("x0", shape=(2,))
+
+        # When s is 1 and z is 2, xs[-1] is just a sneaky
+        # x ** 4 (after two nsteps)
+        # grad should be 4 * x ** 3
+        # and grad of grad should be 12 * x ** 2
+        def step(s, xtm2, xtm1, z):
+            return s * ((xtm2 * 0 + xtm1) ** 2) * (z / 2)
+
+        xs, _ = scan(
+            step,
+            sequences=[seq],
+            outputs_info=[{"initial": x0, "taps": (-2, -1)}],
+            non_sequences=[z],
+            n_steps=2,
+        )
+        last_x = xs[-1]
+
+        g_wrt_x0, g_wrt_z, g_wrt_seq = pt.grad(last_x, [x0, z, seq])
+        g = g_wrt_x0.sum() + g_wrt_z.sum() * 0 + g_wrt_seq.sum() * 0
+        assert g.eval({seq: [1, 1], x0: [1, 1], z: 2}) == 4
+        gg = pt.grad(g, wrt=x0).sum()
+        assert gg.eval({seq: [1, 1], x0: [1, 1], z: 2}) == 12
+        assert gg.eval({seq: [2, 2], x0: [1, 1], z: 2}) == 96
+
+        # Leave out z
+        g_wrt_x0, g_wrt_seq = pt.grad(last_x, [x0, seq])
+        g = g_wrt_x0.sum() + g_wrt_seq.sum() * 0
+        gg = pt.grad(g, wrt=x0).sum()
+        assert gg.eval({seq: [1, 1], x0: [1, 1], z: 2}) == 12
+        assert gg.eval({seq: [2, 2], x0: [1, 1], z: 2}) == 96
+
+        # Leave out seq
+        g_wrt_x0, g_wrt_z = pt.grad(last_x, [x0, z])
+        g = g_wrt_x0.sum() + g_wrt_z.sum() * 0
+        gg = pt.grad(g, wrt=x0).sum()
+        assert gg.eval({seq: [1, 1], x0: [1, 1], z: 2}) == 12
+        assert gg.eval({seq: [1, 1], x0: [1, 1], z: 1}) == 3 / 2
+
+        # Leave out z and seq
+        g_wrt_x0 = pt.grad(last_x, x0)
+        g = g_wrt_x0.sum()
+        gg = pt.grad(g, wrt=x0).sum()
+        assert gg.eval({seq: [1, 1], x0: [1, 1], z: 2}) == 12
+        assert gg.eval({seq: [1, 1], x0: [1, 1], z: 1}) == 3 / 2
+
 
 @pytest.mark.skipif(
     not config.cxx, reason="G++ not available, so we need to skip this test."

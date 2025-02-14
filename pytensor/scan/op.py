@@ -2509,13 +2509,25 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             return rval
 
         var_mappings = self.get_oinp_iinp_iout_oout_mappings()
-        dC_dinps_t = [None for inp in diff_inputs]
         disconnected_dC_dinps_t = [True for inp in diff_inputs]
+
+        n_mit_mot_outs = info.n_mit_mot_outs
+        # In the case of mit-mot there can be more inner outputs than outer ones
+        n_extra_mit_mot_outs = n_mit_mot_outs - info.n_mit_mot
+        idx_nitsot_out_start = n_mit_mot_outs + info.n_mit_sot + info.n_sit_sot
+        idx_nitsot_out_end = idx_nitsot_out_start + info.n_nit_sot
+
+        # Create dummy variables for the internal input gradients
+        states = (
+            self.inner_mitmot(self_inputs)
+            + self.inner_mitsot(self_inputs)
+            + self.inner_sitsot(self_inputs)
+        )
         dC_dXts = []
         Xts = []
         for idx, Xt in enumerate(diff_outputs):
             # We are looking for x[t-1] for a given x[t]
-            if idx >= info.n_mit_mot_outs:
+            if idx >= n_mit_mot_outs:
                 Xt_placeholder = safe_new(Xt)
                 Xts.append(Xt_placeholder)
 
@@ -2523,9 +2535,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             # or not. NOTE : This cannot be done by using
             # "if Xt not in self.inner_nitsot_outs(self_outputs)" because
             # the exact same variable can be used as multiple outputs.
-            idx_nitsot_start = info.n_mit_mot + info.n_mit_sot + info.n_sit_sot
-            idx_nitsot_end = idx_nitsot_start + info.n_nit_sot
-            if idx < idx_nitsot_start or idx >= idx_nitsot_end:
+            if idx < idx_nitsot_out_start or idx >= idx_nitsot_out_end:
                 # What we do here is loop through dC_douts and collect all
                 # those that are connected to the specific one and do an
                 # upcast on all of their dtypes to get the dtype for this
@@ -2533,12 +2543,6 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 # specific previous step is defined or not is done somewhere
                 # else.
                 dtypes = []
-                states = (
-                    self.inner_mitmot(self_inputs)
-                    + self.inner_mitsot(self_inputs)
-                    + self.inner_sitsot(self_inputs)
-                )
-
                 for pos, inp in enumerate(states):
                     if inp in graph_inputs([Xt]):
                         # Get the index of the outer output that to which
@@ -2555,35 +2559,39 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     new_dtype = config.floatX
                 dC_dXt = safe_new(Xt, dtype=new_dtype)
             else:
-                if isinstance(dC_douts[idx].type, DisconnectedType):
+                # nit-sot outputs
+                # If not disconnected assume the output gradient type is a valid type for the input gradient
+                if isinstance(
+                    dC_douts[idx - n_extra_mit_mot_outs].type, DisconnectedType
+                ):
                     continue
-                dC_dXt = safe_new(dC_douts[idx][0])
+                dC_dXt = safe_new(dC_douts[idx - n_extra_mit_mot_outs][0])
             dC_dXts.append(dC_dXt)
 
+        # Handle cases where the very same variable may be used as different outputs
+        # TODO: Couldn't we add a view Op to avoid this when building the Scan graph?
         known_grads = {}
         dc_dxts_idx = 0
         for i in range(len(diff_outputs)):
-            if i < idx_nitsot_start or i >= idx_nitsot_end:
-                if diff_outputs[i] in known_grads:
-                    known_grads[diff_outputs[i]] += dC_dXts[dc_dxts_idx]
-                else:
-                    known_grads[diff_outputs[i]] = dC_dXts[dc_dxts_idx]
-                dc_dxts_idx += 1
+            if not (i < idx_nitsot_out_start or i >= idx_nitsot_out_end) and isinstance(
+                dC_douts[i - n_extra_mit_mot_outs].type, DisconnectedType
+            ):
+                # Special case where we don't have a dC_dXt for disconnected nitsot outputs
+                continue
+
+            # Just some trouble to avoid a +0
+            if diff_outputs[i] in known_grads:
+                known_grads[diff_outputs[i]] += dC_dXts[dc_dxts_idx]
             else:
-                if isinstance(dC_douts[i].type, DisconnectedType):
-                    continue
-                else:
-                    if diff_outputs[i] in known_grads:
-                        known_grads[diff_outputs[i]] += dC_dXts[dc_dxts_idx]
-                    else:
-                        known_grads[diff_outputs[i]] = dC_dXts[dc_dxts_idx]
-                    dc_dxts_idx += 1
+                known_grads[diff_outputs[i]] = dC_dXts[dc_dxts_idx]
+            dc_dxts_idx += 1
+
         dC_dinps_t = compute_all_gradients(known_grads)
 
         # mask inputs that get no gradients
         for dx in range(len(dC_dinps_t)):
-            if not dC_dinps_t[dx]:
-                dC_dinps_t[dx] = pt.zeros_like(diff_inputs[dx])
+            if dC_dinps_t[dx] is None:
+                dC_dinps_t[dx] = dC_dinps_t[dx] = pt.zeros_like(diff_inputs[dx])
             else:
                 disconnected_dC_dinps_t[dx] = False
                 for Xt, Xt_placeholder in zip(
@@ -2846,7 +2854,6 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         for idx in range(info.n_sit_sot):
             mitmot_inp_taps.append([0, 1])
             mitmot_out_taps.append([1])
-            through_shared = False
             if not isinstance(dC_douts[idx + offset].type, DisconnectedType):
                 outer_inp_mitmot.append(dC_douts[idx + offset][::-1])
             else:
@@ -3007,9 +3014,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             name=f"grad_of_{self.name}" if self.name else None,
             allow_gc=self.allow_gc,
         )
-        outputs = local_op(*outer_inputs)
-        if not isinstance(outputs, list | tuple):
-            outputs = [outputs]
+        outputs = local_op(*outer_inputs, return_list=True)
         # Re-order the gradients correctly
         gradients = [DisconnectedType()()]
 
@@ -3095,7 +3100,6 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     )
                 )
 
-        start = len(gradients)
         gradients += [DisconnectedType()() for _ in range(info.n_nit_sot)]
         begin = end
 
