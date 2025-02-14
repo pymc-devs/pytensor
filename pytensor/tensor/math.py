@@ -431,20 +431,25 @@ class Max(NonZeroDimsCAReduce):
         return (g_x,)
 
     def R_op(self, inputs, eval_points):
+        [x] = inputs
         if eval_points[0] is None:
-            return [None, None]
-        if len(self.axis) != 1:
-            raise ValueError("R_op supported for max only for one axis!")
-        if self.axis[0] > 1:
-            raise ValueError("R_op supported for max only when axis is 0 or 1")
+            return [None]
+        axis = tuple(range(x.ndim) if self.axis is None else self.axis)
+        if isinstance(axis, int):
+            axis = [axis]
+        if len(axis) != 1:
+            raise NotImplementedError("R_op supported for max only for one axis!")
+        if axis[0] > 1:
+            raise NotImplementedError("R_op supported for max only when axis is 0 or 1")
         if inputs[0].ndim != 2:
-            raise ValueError("R_op supported for max only when input is a matrix")
-        max_pos = Argmax(self.axis).make_node(*inputs).outputs
-        # print(eval_points[0].eval())
+            raise NotImplementedError(
+                "R_op supported for max only when input is a matrix"
+            )
+        max_pos = Argmax(self.axis)(*inputs)
         if self.axis[0] == 0:
-            return [eval_points[0][max_pos, arange(eval_points[0].shape[1])], None]
+            return [eval_points[0][max_pos, arange(eval_points[0].shape[1])]]
         else:
-            return [eval_points[0][arange(eval_points[0].shape[0]), max_pos], None]
+            return [eval_points[0][arange(eval_points[0].shape[0]), max_pos]]
 
 
 class Min(NonZeroDimsCAReduce):
