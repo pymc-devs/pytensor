@@ -195,7 +195,7 @@ class Op(MetaObject):
     itypes: Sequence["Type"] | None = None
     otypes: Sequence["Type"] | None = None
 
-    _output_type_depends_on_input_value = False
+    _data_dependent_output_shapes = False
     """
     Whether the static output type depends on the inferred value of one of the inputs.
     (e.g, via constant folding or static shape inference).
