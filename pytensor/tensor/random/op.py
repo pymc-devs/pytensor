@@ -41,7 +41,7 @@ class RandomVariable(Op):
 
     """
 
-    _data_dependent_output_shapes = True
+    data_dependent_output_shape = True
 
     __props__ = ("name", "signature", "dtype", "inplace")
     default_output = 1

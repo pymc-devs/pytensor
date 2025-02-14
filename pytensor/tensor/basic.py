@@ -1362,7 +1362,7 @@ def triu_indices_from(
 
 
 class Eye(Op):
-    _data_dependent_output_shapes = True
+    data_dependent_output_shape = True
     __props__ = ("dtype",)
 
     def __init__(self, dtype=None):
@@ -1577,7 +1577,7 @@ class Alloc(COp):
     """
 
     _f16_ok = True
-    _data_dependent_output_shapes = True
+    data_dependent_output_shape = True
 
     __props__ = ()
 
@@ -4213,7 +4213,7 @@ class Choose(Op):
 class AllocEmpty(COp):
     """Implement Alloc on the cpu, but without initializing memory."""
 
-    _data_dependent_output_shapes = True
+    data_dependent_output_shape = True
 
     __props__ = ("dtype",)
     params_type = ParamsType(typecode=int32)
