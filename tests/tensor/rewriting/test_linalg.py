@@ -42,9 +42,6 @@ from tests import unittest_tools as utt
 from tests.test_rop import break_op
 
 
-ATOL = RTOL = 1e-3 if config.floatX == "float32" else 1e-8
-
-
 def test_rop_lop():
     mx = matrix("mx")
     mv = matrix("mv")
@@ -630,11 +627,12 @@ def test_inv_diag_from_eye_mul(shape, inv_op):
     inverse_matrix = np.linalg.inv(x_test_matrix)
     rewritten_inverse = f_rewritten(x_test)
 
+    atol = rtol = 1e-3 if config.floatX == "float32" else 1e-8
     assert_allclose(
         inverse_matrix,
         rewritten_inverse,
-        atol=ATOL,
-        rtol=RTOL,
+        atol=atol,
+        rtol=rtol,
     )
 
 
@@ -657,11 +655,12 @@ def test_inv_diag_from_diag(inv_op):
     inverse_matrix = np.linalg.inv(x_test_matrix)
     rewritten_inverse = f_rewritten(x_test)
 
+    atol = rtol = 1e-3 if config.floatX == "float32" else 1e-8
     assert_allclose(
         inverse_matrix,
         rewritten_inverse,
-        atol=ATOL,
-        rtol=RTOL,
+        atol=atol,
+        rtol=rtol,
     )
 
 
