@@ -74,12 +74,8 @@ def jax_funcify_DimShuffle(op, **kwargs):
     def dimshuffle(x):
         res = jnp.transpose(x, op.transposition)
 
-        shape = list(res.shape[: len(op.shuffle)])
-
-        for augm in op.augment:
-            shape.insert(augm, 1)
-
-        res = jnp.reshape(res, shape)
+        res = jax.lax.expand_dims(res, op.augment)
+        res = jax.lax.squeeze(res, op.drop)
 
         if not op.inplace:
             res = jnp.copy(res)
