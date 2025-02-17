@@ -107,14 +107,6 @@ def shape_of_variables(
     return l
 
 
-def as_list(x):
-    """Convert x to a list if it is an iterable; otherwise, wrap it in a list."""
-    try:
-        return list(x)
-    except TypeError:
-        return [x]
-
-
 def import_func_from_string(func_string: str):  # -> Optional[Callable]:
     func = getattr(np, func_string, None)
     if func is not None:
