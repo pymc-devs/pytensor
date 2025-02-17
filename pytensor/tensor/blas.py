@@ -79,9 +79,13 @@ import functools
 import logging
 import os
 import shlex
+import warnings
 from pathlib import Path
 
 import numpy as np
+
+from pytensor.graph import vectorize_graph
+from pytensor.npy_2_compat import normalize_axis_tuple
 
 
 try:
@@ -100,9 +104,9 @@ from pytensor.link.c.params_type import ParamsType
 from pytensor.printing import FunctionPrinter, pprint
 from pytensor.scalar import bool as bool_t
 from pytensor.tensor import basic as ptb
-from pytensor.tensor.basic import expand_dims
 from pytensor.tensor.blas_headers import blas_header_text, blas_header_version
-from pytensor.tensor.shape import shape_padright, specify_broadcastable
+from pytensor.tensor.math import dot, tensordot
+from pytensor.tensor.shape import specify_broadcastable
 from pytensor.tensor.type import DenseTensorType, tensor
 
 
@@ -1604,8 +1608,8 @@ class BatchedDot(COp):
         x, y = inp
         (gz,) = grads
 
-        xgrad = batched_dot(gz, y.dimshuffle(0, 2, 1))
-        ygrad = batched_dot(x.dimshuffle(0, 2, 1), gz)
+        xgrad = _batched_dot(gz, y.dimshuffle(0, 2, 1))
+        ygrad = _batched_dot(x.dimshuffle(0, 2, 1), gz)
 
         # If x or y contain broadcastable dimensions but only one of
         # them know that a matching dimensions is broadcastable, the
@@ -1729,31 +1733,22 @@ def batched_dot(a, b):
             dot products in terms of batched matrix-matrix dot products, so
             it may be possible to further optimize for performance.
     """
+    warnings.warn(
+        "batched_dot is deprecated. "
+        "Use `dot` in conjution with `tensor.vectorize` or `graph.replace.vectorize_graph`",
+        FutureWarning,
+    )
     a, b = ptb.as_tensor_variable(a), ptb.as_tensor_variable(b)
 
     if a.ndim == 0:
         raise TypeError("a must have at least one (batch) axis")
     elif b.ndim == 0:
         raise TypeError("b must have at least one (batch) axis")
-    elif a.ndim == 1:
-        return shape_padright(a, (b.ndim - 1)) * b
-    elif b.ndim == 1:
-        return a * shape_padright(b, (a.ndim - 1))
-    elif a.ndim > 3 or b.ndim > 3:
-        return batched_tensordot(a, b, [[a.ndim - 1], [np.maximum(1, b.ndim - 2)]])
-    else:
-        # If either a or b is a batched vector, expand dims and later squeeze them
-        expanded_axis = []
-        if a.ndim == 2:
-            a = expand_dims(a, axis=1)
-            expanded_axis.append(1)
-        if b.ndim == 2:
-            b = expand_dims(b, axis=2)
-            expanded_axis.append(2)
-        out = _batched_dot(a, b)
-        if expanded_axis:
-            out = out.squeeze(axis=expanded_axis)
-        return out
+
+    core_a = a[0].type()
+    core_b = b[0].type()
+    core_dot = dot(core_a, core_b)
+    return vectorize_graph(core_dot, replace={core_a: a, core_b: b})
 
 
 def batched_tensordot(x, y, axes=2):
@@ -1791,6 +1786,22 @@ def batched_tensordot(x, y, axes=2):
     reshapes to reduce the tensor dot product to a matrix or vector
     dot product.  Finally, it calls batched_dot to compute the result.
     """
-    from pytensor.tensor.math import _tensordot_as_dot
+    warnings.warn(
+        "batched_tensordot is deprecated. "
+        "Use `tensordot` in conjuction with `tensor.vectorize` or `graph.replace.vectorize_graph`",
+        FutureWarning,
+    )
 
-    return _tensordot_as_dot(x, y, axes, dot=batched_dot, batched=True)
+    if isinstance(axes, int):
+        core_axes = axes
+    else:
+        # Convert batched axes to core axes
+        core_axes_a = [a - 1 for a in normalize_axis_tuple(axes[0], x.type.ndim)]
+        core_axes = [a - 1 for a in normalize_axis_tuple(axes[1], y.type.ndim)]
+        core_axes = [core_axes_a, core_axes]
+
+    core_x = x[0].type()
+    core_y = y[0].type()
+    core_tensordot = tensordot(core_x, core_y, axes=core_axes)
+
+    return vectorize_graph(core_tensordot, replace={core_x: x, core_y: y})
