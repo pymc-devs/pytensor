@@ -373,6 +373,7 @@ class Function:
         return_none: bool,
         output_keys,
         maker: "FunctionMaker",
+        trust_input: bool = False,
         name: str | None = None,
     ):
         """
@@ -407,6 +408,10 @@ class Function:
             TODO
         maker
             The `FunctionMaker` that created this instance.
+        trust_input : bool
+            If True, the inputs are trusted to be correct. This is used to avoid
+            the overhead of checking the inputs for correctness. This should only
+            be used if the inputs are guaranteed to be correct.
         name
             A string name.
         """
@@ -420,7 +425,7 @@ class Function:
         self.return_none = return_none
         self.maker = maker
         self.profile = None  # reassigned in FunctionMaker.create
-        self.trust_input = False  # If True, we don't check the input parameter
+        self.trust_input = trust_input  # If True, we don't check the input parameter
         self.name = name
         self.nodes_with_inner_function = []
         self.output_keys = output_keys
@@ -916,8 +921,6 @@ class Function:
                 output_subset = [self.output_keys.index(key) for key in output_subset]
 
         # Reinitialize each container's 'provided' counter
-        if len(args) == 0:  # for speed we trust the input for empty args
-            trust_input = True
         if trust_input:
             for arg_container, arg in zip(input_storage, args, strict=False):
                 arg_container.storage[0] = arg
@@ -1343,7 +1346,10 @@ class FunctionMaker:
     name : str
         An optional name for this function. If used, the profile mode will
         print the time spent in this function.
-
+    trust_input : bool
+        If True, the inputs are trusted to be correct. This is used to avoid
+        the overhead of checking the inputs for correctness. This should only
+        be used if the inputs are guaranteed to be correct.
     """
 
     @staticmethod
@@ -1509,6 +1515,7 @@ class FunctionMaker:
         output_keys=None,
         name=None,
         no_fgraph_prep=False,
+        trust_input=False,
     ):
         # Save the provided mode, not the instantiated mode.
         # The instantiated mode don't pickle and if we unpickle an PyTensor
@@ -1611,6 +1618,7 @@ class FunctionMaker:
         self.on_unused_input = on_unused_input  # Used for the pickling/copy
         self.output_keys = output_keys
         self.name = name
+        self.trust_input = trust_input
 
         self.required = [(i.value is None) for i in self.inputs]
         self.refeed = [
@@ -1728,6 +1736,7 @@ class FunctionMaker:
             self.return_none,
             self.output_keys,
             self,
+            trust_input=self.trust_input,
             name=self.name,
         )
 
@@ -1745,6 +1754,7 @@ def orig_function(
     on_unused_input=None,
     output_keys=None,
     fgraph: FunctionGraph | None = None,
+    trust_input: bool = False,
 ) -> Function:
     """
     Return a Function that will calculate the outputs from the inputs.
@@ -1775,7 +1785,10 @@ def orig_function(
     fgraph
         An existing `FunctionGraph` to use instead of constructing a new one
         from cloned `outputs`.
-
+    trust_input : bool
+        If True, the inputs are trusted to be correct. This is used to avoid
+        the overhead of checking the inputs for correctness. This should only
+        be used if the inputs are guaranteed to be correct.
     """
 
     if profile:
@@ -1808,6 +1821,7 @@ def orig_function(
             output_keys=output_keys,
             name=name,
             fgraph=fgraph,
+            trust_input=trust_input,
         )
         with config.change_flags(compute_test_value="off"):
             fn = m.create(defaults)
