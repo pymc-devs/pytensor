@@ -10,6 +10,7 @@ import pytensor.tensor.random.basic as ptr
 from pytensor import shared
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
+from pytensor.tensor.random.op import RandomVariableWithCoreShape
 from tests.link.numba.test_basic import (
     compare_numba_and_py,
     numba_mode,
@@ -672,3 +673,14 @@ def test_rv_inside_ofg():
 def test_unnatural_batched_dims(batch_dims_tester):
     """Tests for RVs that don't have natural batch dims in Numba API."""
     batch_dims_tester(mode="NUMBA")
+
+
+def test_repeated_args():
+    v = pt.scalar()
+    x = ptr.beta(v, v)
+    fn, _ = compare_numba_and_py([v], [x], [0.5 * 1e6], eval_obj_mode=False)
+
+    # Confirm we are testing a RandomVariable with repeated inputs
+    final_node = fn.maker.fgraph.outputs[0].owner
+    assert isinstance(final_node.op, RandomVariableWithCoreShape)
+    assert final_node.inputs[-2] is final_node.inputs[-1]
