@@ -18,7 +18,7 @@ from pytensor.graph.replace import (
 from pytensor.scalar import ScalarType
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.shape import shape_padleft
-from pytensor.tensor.type import TensorType, continuous_dtypes, discrete_dtypes, tensor
+from pytensor.tensor.type import TensorType, tensor
 from pytensor.tensor.utils import (
     _parse_gufunc_signature,
     broadcast_static_dim_lengths,
@@ -256,6 +256,10 @@ class Blockwise(Op):
                 as_core(ograd, core_ograd)
                 for ograd, core_ograd in zip(ograds, core_node.outputs, strict=True)
             ]
+            # FIXME: These core_outputs do not depend on core_inputs, not pretty
+            # It's not neccessarily a problem because if they are referenced by the gradient,
+            # they get replaced later in vectorize. But if the Op was to make any decision
+            # by introspecting the dependencies of output on inputs it would fail badly!
             core_outputs = core_node.outputs
 
             core_igrads = self.core_op.L_op(core_inputs, core_outputs, core_ograds)
@@ -282,27 +286,6 @@ class Blockwise(Op):
 
         # Compute grad with respect to broadcasted input
         rval = self._bgrad(inputs, outs, ograds)
-
-        # TODO: (Borrowed from Elemwise) make sure that zeros are clearly identifiable
-        # to the gradient.grad method when the outputs have
-        # some integer and some floating point outputs
-        if any(out.type.dtype not in continuous_dtypes for out in outs):
-            # For integer output, return value may only be zero or undefined
-            # We don't bother with trying to check that the scalar ops
-            # correctly returned something that evaluates to 0, we just make
-            # the return value obviously zero so that gradient.grad can tell
-            # this op did the right thing.
-            new_rval = []
-            for elem, inp in zip(rval, inputs, strict=True):
-                if isinstance(elem.type, NullType | DisconnectedType):
-                    new_rval.append(elem)
-                else:
-                    elem = inp.zeros_like()
-                    if str(elem.type.dtype) not in continuous_dtypes:
-                        elem = elem.astype(config.floatX)
-                    assert str(elem.type.dtype) not in discrete_dtypes
-                    new_rval.append(elem)
-            return new_rval
 
         # Sum out the broadcasted dimensions
         batch_ndims = self.batch_ndim(outs[0].owner)
