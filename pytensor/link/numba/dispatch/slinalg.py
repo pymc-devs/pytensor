@@ -126,13 +126,17 @@ def solve_triangular_impl(A, B, trans, lower, unit_diagonal, b_ndim, overwrite_b
 
         B_is_1d = B.ndim == 1
 
-        if not overwrite_b:
-            B_copy = _copy_to_fortran_order(B)
-        else:
+        if overwrite_b:
             B_copy = B
+        else:
+            if B_is_1d:
+                # _copy_to_fortran_order does nothing with vectors
+                B_copy = np.copy(B)
+            else:
+                B_copy = _copy_to_fortran_order(B)
 
         if B_is_1d:
-            B_copy = np.expand_dims(B, -1)
+            B_copy = np.expand_dims(B_copy, -1)
 
         NRHS = 1 if B_is_1d else int(B_copy.shape[-1])
 

@@ -79,9 +79,9 @@ def test_solve_triangular(b_shape: tuple[int], lower, trans, unit_diag, is_compl
         A_val = A_val + np.random.normal(size=(5, 5)) * 1j
         b_val = b_val + np.random.normal(size=b_shape) * 1j
 
-    X_np = f(A_func(A_val.copy()), b_val.copy())
+    X_np = f(A_func(A_val), b_val)
 
-    test_input = transpose_func(A_func(A_val.copy()), trans)
+    test_input = transpose_func(A_func(A_val), trans)
 
     ATOL = 1e-8 if floatX.endswith("64") else 1e-4
     RTOL = 1e-8 if floatX.endswith("64") else 1e-4
@@ -92,7 +92,7 @@ def test_solve_triangular(b_shape: tuple[int], lower, trans, unit_diag, is_compl
     compare_numba_and_py(
         compiled_fgraph.inputs,
         compiled_fgraph.outputs,
-        [A_func(A_val.copy()), b_val.copy()],
+        [A_func(A_val), b_val],
     )
 
 
