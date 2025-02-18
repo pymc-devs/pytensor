@@ -38,9 +38,13 @@ def pytorch_typify_tensor(data, dtype=None, **kwargs):
 
 @pytorch_typify.register(slice)
 @pytorch_typify.register(NoneType)
-@pytorch_typify.register(np.number)
 def pytorch_typify_no_conversion_needed(data, **kwargs):
     return data
+
+
+@pytorch_typify.register(np.number)
+def pytorch_typify_extract(data, **kwargs):
+    return data.item()
 
 
 @singledispatch
@@ -59,11 +63,13 @@ def pytorch_funcify_FunctionGraph(
     conversion_func=pytorch_funcify,
     **kwargs,
 ):
+    if "type_conversion_fn" not in kwargs:
+        kwargs["type_conversion_fn"] = pytorch_typify
+
     built_kwargs = {"conversion_func": conversion_func, **kwargs}
     return fgraph_to_python(
         fgraph,
         conversion_func,
-        type_conversion_fn=pytorch_typify,
         fgraph_name=fgraph_name,
         **built_kwargs,
     )

@@ -10,7 +10,9 @@ class PytorchLinker(JITLinker):
         self.gen_functors = []
 
     def fgraph_convert(self, fgraph, input_storage, storage_map, **kwargs):
-        from pytensor.link.pytorch.dispatch import pytorch_funcify
+        import torch
+
+        from pytensor.link.pytorch.dispatch import pytorch_funcify, pytorch_typify
 
         # We want to have globally unique names
         # across the entire pytensor graph, not
@@ -25,9 +27,21 @@ class PytorchLinker(JITLinker):
             self.gen_functors.append((f"_{name}", functor))
             return functor
 
+        def constants_wrapper(x, **kwargs):
+            x = pytorch_typify(x)
+
+            @torch.compiler.assume_constant_result
+            def torch_assume_constant(arg=x):
+                return arg
+
+            name = kwargs["unique_name"](torch_assume_constant)
+            self.gen_functors.append((f"_{name}", torch_assume_constant))
+            return torch_assume_constant
+
         built_kwargs = {
             "unique_name": generator,
             "conversion_func": conversion_func_register,
+            "type_conversion_fn": constants_wrapper,
             **kwargs,
         }
         return pytorch_funcify(
