@@ -10,9 +10,8 @@ from numpy.exceptions import ComplexWarning
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType
-from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor import basic as ptb
@@ -616,7 +615,7 @@ class PivotToPermutations(Op):
             outputs[0][0] = np.argsort(p_inv)
 
 
-def pivot_to_permutation(p: TensorLike, inverse=False) -> Variable:
+def pivot_to_permutation(p: TensorLike, inverse=False):
     p = pt.as_tensor_variable(p)
     return PivotToPermutations(inverse=inverse)(p)
 
@@ -722,29 +721,6 @@ def lu_factor(
         tuple[TensorVariable, TensorVariable],
         Blockwise(LUFactor(check_finite=check_finite))(a),
     )
-
-
-class LUSolve(OpFromGraph):
-    """Solve a system of linear equations given the LU decomposition of the matrix."""
-
-    __props__ = ("trans", "b_ndim", "check_finite", "overwrite_b")
-
-    def __init__(
-        self,
-        inputs: list[Variable],
-        outputs: list[Variable],
-        trans: bool = False,
-        b_ndim: int | None = None,
-        check_finite: bool = False,
-        overwrite_b: bool = False,
-        **kwargs,
-    ):
-        self.trans = trans
-        self.b_ndim = b_ndim
-        self.check_finite = check_finite
-        self.overwrite_b = overwrite_b
-
-        super().__init__(inputs=inputs, outputs=outputs, **kwargs)
 
 
 def lu_solve(
