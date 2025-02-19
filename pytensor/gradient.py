@@ -11,7 +11,7 @@ import numpy as np
 import pytensor
 from pytensor.compile.ops import ViewOp
 from pytensor.configdefaults import config
-from pytensor.graph import utils
+from pytensor.graph import utils, vectorize_graph
 from pytensor.graph.basic import Apply, NominalVariable, Variable
 from pytensor.graph.null_type import NullType, null_type
 from pytensor.graph.op import get_test_values
@@ -703,15 +703,15 @@ def grad(
         grad_dict[var] = g_var
 
     def handle_disconnected(var):
-        message = (
-            "grad method was asked to compute the gradient "
-            "with respect to a variable that is not part of "
-            "the computational graph of the cost, or is used "
-            f"only by a non-differentiable operator: {var}"
-        )
         if disconnected_inputs == "ignore":
-            pass
+            return
         elif disconnected_inputs == "warn":
+            message = (
+                "grad method was asked to compute the gradient "
+                "with respect to a variable that is not part of "
+                "the computational graph of the cost, or is used "
+                f"only by a non-differentiable operator: {var}"
+            )
             warnings.warn(message, stacklevel=2)
         elif disconnected_inputs == "raise":
             message = utils.get_variable_trace_string(var)
@@ -2021,13 +2021,19 @@ GradientError: numeric gradient and analytic gradient exceed tolerance:
 Exception args: {args_msg}"""
 
 
-def jacobian(expression, wrt, consider_constant=None, disconnected_inputs="raise"):
+def jacobian(
+    expression,
+    wrt,
+    consider_constant=None,
+    disconnected_inputs="raise",
+    vectorize=False,
+):
     """
     Compute the full Jacobian, row by row.
 
     Parameters
     ----------
-    expression : Vector (1-dimensional) :class:`~pytensor.graph.basic.Variable`
+    expression :class:`~pytensor.graph.basic.Variable`
         Values that we are differentiating (that we want the Jacobian of)
     wrt : :class:`~pytensor.graph.basic.Variable` or list of Variables
         Term[s] with respect to which we compute the Jacobian
@@ -2051,18 +2057,18 @@ def jacobian(expression, wrt, consider_constant=None, disconnected_inputs="raise
         output, then a zero variable is returned. The return value is
         of same type as `wrt`: a list/tuple or TensorVariable in all cases.
     """
+    from pytensor.tensor.basic import eye
+    from pytensor.tensor.extra_ops import broadcast_to
 
     if not isinstance(expression, Variable):
         raise TypeError("jacobian expects a Variable as `expression`")
 
-    if expression.ndim > 1:
-        raise ValueError(
-            "jacobian expects a 1 dimensional variable as `expression`."
-            " If not use flatten to make it a vector"
-        )
-
     using_list = isinstance(wrt, list)
     using_tuple = isinstance(wrt, tuple)
+    grad_kwargs = {
+        "consider_constant": consider_constant,
+        "disconnected_inputs": disconnected_inputs,
+    }
 
     if isinstance(wrt, list | tuple):
         wrt = list(wrt)
@@ -2070,43 +2076,55 @@ def jacobian(expression, wrt, consider_constant=None, disconnected_inputs="raise
         wrt = [wrt]
 
     if all(expression.type.broadcastable):
-        # expression is just a scalar, use grad
-        return as_list_or_tuple(
-            using_list,
-            using_tuple,
-            grad(
-                expression.squeeze(),
-                wrt,
-                consider_constant=consider_constant,
-                disconnected_inputs=disconnected_inputs,
-            ),
+        jacobian_matrices = grad(expression.squeeze(), wrt, **grad_kwargs)
+
+    elif vectorize:
+        expression_flat = expression.ravel()
+        row_tangent = _float_ones_like(expression_flat).type("row_tangent")
+        jacobian_single_rows = Lop(expression.ravel(), wrt, row_tangent, **grad_kwargs)
+
+        n_rows = expression_flat.size
+        jacobian_matrices = vectorize_graph(
+            jacobian_single_rows,
+            replace={row_tangent: eye(n_rows, dtype=row_tangent.dtype)},
         )
+        if disconnected_inputs != "raise":
+            # If the input is disconnected from the cost, `vectorize_graph` has no effect on the respective jacobian
+            # We have to broadcast the zeros explicitly here
+            for i, (jacobian_single_row, jacobian_matrix) in enumerate(
+                zip(jacobian_single_rows, jacobian_matrices, strict=True)
+            ):
+                if jacobian_single_row.ndim == jacobian_matrix.ndim:
+                    jacobian_matrices[i] = broadcast_to(
+                        jacobian_matrix, shape=(n_rows, *jacobian_matrix.shape)
+                    )
 
-    def inner_function(*args):
-        idx = args[0]
-        expr = args[1]
-        rvals = []
-        for inp in args[2:]:
-            rval = grad(
-                expr[idx],
-                inp,
-                consider_constant=consider_constant,
-                disconnected_inputs=disconnected_inputs,
+    else:
+
+        def inner_function(*args):
+            idx, expr, *wrt = args
+            return grad(expr[idx], wrt, **grad_kwargs)
+
+        jacobian_matrices, updates = pytensor.scan(
+            inner_function,
+            sequences=pytensor.tensor.arange(expression.size),
+            non_sequences=[expression.ravel(), *wrt],
+            return_list=True,
+        )
+        if updates:
+            raise ValueError(
+                "The scan used to build the jacobian matrices returned a list of updates"
             )
-            rvals.append(rval)
-        return rvals
 
-    # Computing the gradients does not affect the random seeds on any random
-    # generator used n expression (because during computing gradients we are
-    # just backtracking over old values. (rp Jan 2012 - if anyone has a
-    # counter example please show me)
-    jacobs, updates = pytensor.scan(
-        inner_function,
-        sequences=pytensor.tensor.arange(expression.shape[0]),
-        non_sequences=[expression, *wrt],
-    )
-    assert not updates, "Scan has returned a list of updates; this should not happen."
-    return as_list_or_tuple(using_list, using_tuple, jacobs)
+    if jacobian_matrices[0].ndim < (expression.ndim + wrt[0].ndim):
+        # There was some raveling or squeezing done prior to getting the jacobians
+        # Reshape into original shapes
+        jacobian_matrices = [
+            jac_matrix.reshape((*expression.shape, *w.shape))
+            for jac_matrix, w in zip(jacobian_matrices, wrt, strict=True)
+        ]
+
+    return as_list_or_tuple(using_list, using_tuple, jacobian_matrices)
 
 
 def hessian(cost, wrt, consider_constant=None, disconnected_inputs="raise"):
