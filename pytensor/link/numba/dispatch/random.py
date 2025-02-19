@@ -64,7 +64,6 @@ def numba_core_rv_funcify(op: Op, node: Apply) -> Callable:
 @numba_core_rv_funcify.register(ptr.LaplaceRV)
 @numba_core_rv_funcify.register(ptr.BinomialRV)
 @numba_core_rv_funcify.register(ptr.NegBinomialRV)
-@numba_core_rv_funcify.register(ptr.MultinomialRV)
 @numba_core_rv_funcify.register(ptr.PermutationRV)
 @numba_core_rv_funcify.register(ptr.IntegersRV)
 def numba_core_rv_default(op, node):
@@ -132,12 +131,44 @@ def numba_core_ParetoRV(op, node):
     return random
 
 
+@numba_core_rv_funcify.register(ptr.InvGammaRV)
+def numba_core_InvGammaRV(op, node):
+    @numba_basic.numba_njit
+    def random(rng, shape, scale):
+        return 1 / rng.gamma(shape, 1 / scale)
+
+    return random
+
+
 @numba_core_rv_funcify.register(ptr.CategoricalRV)
 def core_CategoricalRV(op, node):
     @numba_basic.numba_njit
     def random_fn(rng, p):
         unif_sample = rng.uniform(0, 1)
         return np.searchsorted(np.cumsum(p), unif_sample)
+
+    return random_fn
+
+
+@numba_core_rv_funcify.register(ptr.MultinomialRV)
+def core_MultinomialRV(op, node):
+    dtype = op.dtype
+
+    @numba_basic.numba_njit
+    def random_fn(rng, n, p):
+        n_cat = p.shape[0]
+        draws = np.zeros(n_cat, dtype=dtype)
+        remaining_p = np.float64(1.0)
+        remaining_n = n
+        for i in range(n_cat - 1):
+            draws[i] = rng.binomial(remaining_n, p[i] / remaining_p)
+            remaining_n -= draws[i]
+            if remaining_n <= 0:
+                break
+            remaining_p -= p[i]
+        if remaining_n > 0:
+            draws[n_cat - 1] = remaining_n
+        return draws
 
     return random_fn
 

@@ -514,6 +514,31 @@ test_mvnormal_cov_decomposition_method = create_mvnormal_cov_decomposition_metho
             ],
             (pt.as_tensor([2, 1])),
         ),
+        (
+            ptr.invgamma,
+            [
+                (
+                    pt.dvector("shape"),
+                    np.array([1.0, 2.0], dtype=np.float64),
+                ),
+                (
+                    pt.dvector("scale"),
+                    np.array([0.5, 3.0], dtype=np.float64),
+                ),
+            ],
+            (2,),
+        ),
+        (
+            ptr.multinomial,
+            [
+                (
+                    pt.lvector("n"),
+                    np.array([1, 10, 1000], dtype=np.int64),
+                ),
+                (pt.dvector("p"), np.array([0.3, 0.7], dtype=np.float64)),
+            ],
+            None,
+        ),
     ],
     ids=str,
 )
