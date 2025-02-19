@@ -89,6 +89,11 @@ echo "$jobs" | jq -c '.[]' | while read -r job; do
     fi
 done
 
+if [ -z "$all_times" ]; then
+    echo "No slow tests found, exiting"
+    exit 1
+fi
+
 run_date=$(date +"%Y-%m-%d")
 body=$(cat << EOF
 If you are motivated to help speed up some tests, we would appreciate it!
