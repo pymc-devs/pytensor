@@ -16,7 +16,6 @@ from pytensor.graph.type import HasShape
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.npy_2_compat import normalize_axis_tuple
-from pytensor.scalar import int32
 from pytensor.tensor import _get_vector_length, as_tensor_variable, get_vector_length
 from pytensor.tensor import basic as ptb
 from pytensor.tensor.elemwise import get_normalized_batch_axes
@@ -628,14 +627,11 @@ class Reshape(COp):
 
     check_input = False
     __props__ = ("ndim",)
-    params_type = ParamsType(ndim=int32)
-    # name does not participate because it doesn't affect computations
 
-    def __init__(self, ndim, name=None):
+    def __init__(self, ndim):
         self.ndim = int(ndim)
         if ndim < 0:
             raise ValueError("The output dimensions after reshape must be 0 or greater")
-        assert name is None, "name attribute for Reshape has been deprecated"
 
     def __str__(self):
         return f"{self.__class__.__name__}{{{self.ndim}}}"
@@ -795,32 +791,31 @@ class Reshape(COp):
             ]
 
     def c_code_cache_version(self):
-        return (9,)
+        return (10,)
 
     def c_code(self, node, name, inputs, outputs, sub):
         x, shp = inputs
+        shp_dtype = node.inputs[1].type.dtype_specs()[1]
         (z,) = outputs
         fail = sub["fail"]
-        params = sub["params"]
+        ndim = self.ndim
+
         return f"""
         assert (PyArray_NDIM({shp}) == 1);
 
+        // Unpack shape into new_dims
+        npy_intp new_dims[{ndim}];
+        for (int ii = 0; ii < {ndim}; ++ii)
+        {{
+            new_dims[ii] = (({shp_dtype}*)(PyArray_BYTES({shp}) + ii * PyArray_STRIDES({shp})[0]))[0];
+        }}
+
         PyArray_Dims newshape;
-
-        if (!PyArray_IntpConverter((PyObject *){shp}, &newshape)) {{
-            {fail};
-        }}
-
-        if ({params}->ndim != newshape.len) {{
-            PyErr_SetString(PyExc_ValueError, "Shape argument to Reshape has incorrect length");
-            PyDimMem_FREE(newshape.ptr);
-            {fail};
-        }}
+        newshape.len = {ndim};
+        newshape.ptr = new_dims;
 
         Py_XDECREF({z});
         {z} = (PyArrayObject *) PyArray_Newshape({x}, &newshape, NPY_CORDER);
-
-        PyDimMem_FREE(newshape.ptr);
 
         if (!{z}) {{
             //The error message should have been set by PyArray_Newshape
