@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 import pytensor
-from pytensor import Mode, function, grad
+from pytensor import In, Mode, Out, function, grad
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable, equal_computations
@@ -12,7 +12,7 @@ from pytensor.graph.replace import clone_replace, vectorize_node
 from pytensor.graph.type import Type
 from pytensor.scalar.basic import ScalarConstant
 from pytensor.tensor import as_tensor_variable, broadcast_to, get_vector_length, row
-from pytensor.tensor.basic import MakeVector, constant, stack
+from pytensor.tensor.basic import MakeVector, arange, constant, stack
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.shape import (
     Reshape,
@@ -372,6 +372,43 @@ class TestReshape(utt.InferShapeTester, utt.OptimizationTestMixin):
             ),
         ):
             reshape(x2, (6, 3, 99))
+
+    def test_shape_strides(self):
+        # Directly test the concern behind commit 223ee1548574b6bb8e73611ed605a97e29f13e7b
+        x = arange(8)
+        shape = vector("shape", dtype=int, shape=(3,))
+        fn = function([shape], x.reshape(shape))
+
+        # Empty strides
+        test_shape = np.broadcast_to(np.array(2), (3,))
+        assert test_shape.strides == (0,)
+        np.testing.assert_array_equal(
+            fn(test_shape),
+            np.arange(8).reshape(test_shape),
+        )
+
+        # Negative non-contiguous strides
+        test_shape = np.array([0, 4, 0, 2, 0, 1])[::-2]
+        assert np.all(test_shape == (1, 2, 4))
+        assert test_shape.strides == (-16,)
+        np.testing.assert_array_equal(
+            fn(test_shape),
+            np.arange(8).reshape(test_shape),
+        )
+
+    def test_benchmark(self, benchmark):
+        x = tensor3("x")
+        x_val = np.random.random((2, 3, 4)).astype(config.floatX)
+        y1 = x.reshape((6, 4))
+        y2 = x.reshape((2, 12))
+        y3 = x.reshape((-1,))
+        # Borrow to avoid deepcopy overhead
+        reshape_fn = pytensor.function(
+            [In(x, borrow=True)],
+            [Out(y1, borrow=True), Out(y2, borrow=True), Out(y3, borrow=True)],
+        )
+        reshape_fn.trust_input = True
+        benchmark(reshape_fn, x_val)
 
 
 def test_shape_i_hash():
