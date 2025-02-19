@@ -101,9 +101,12 @@ PyTensor implements the :func:`pytensor.gradient.jacobian` macro that does all
 that is needed to compute the Jacobian. The following text explains how
 to do it manually.
 
+Using Scan
+----------
+
 In order to manually compute the Jacobian of some function ``y`` with
-respect to some parameter ``x`` we need to use `scan`. What we
-do is to loop over the entries in ``y`` and compute the gradient of
+respect to some parameter ``x`` we can use `scan`.
+In this case, we loop over the entries in ``y`` and compute the gradient of
 ``y[i]`` with respect to ``x``.
 
 .. note::
@@ -111,8 +114,7 @@ do is to loop over the entries in ``y`` and compute the gradient of
     `scan` is a generic op in PyTensor that allows writing in a symbolic
     manner all kinds of recurrent equations. While creating
     symbolic loops (and optimizing them for performance) is a hard task,
-    effort is being done for improving the performance of `scan`. We
-    shall return to :ref:`scan<tutloop>` later in this tutorial.
+    efforts are being made to improving the performance of `scan`.
 
 >>> import pytensor
 >>> import pytensor.tensor as pt
@@ -124,9 +126,9 @@ do is to loop over the entries in ``y`` and compute the gradient of
 array([[ 8.,  0.],
        [ 0.,  8.]])
 
-What we do in this code is to generate a sequence of integers from ``0`` to
-``y.shape[0]`` using `pt.arange`. Then we loop through this sequence, and
-at each step, we compute the gradient of element ``y[i]`` with respect to
+This code generates a sequence of integers from ``0`` to
+``y.shape[0]`` using `pt.arange`. Then it loops through this sequence, and
+at each step, computes the gradient of element ``y[i]`` with respect to
 ``x``. `scan` automatically concatenates all these rows, generating a
 matrix which corresponds to the Jacobian.
 
@@ -137,6 +139,31 @@ matrix which corresponds to the Jacobian.
     even though from the documentation of scan this
     seems possible. The reason is that ``y_i`` will not be a function of
     ``x`` anymore, while ``y[i]`` still is.
+
+
+Using automatic vectorization
+-----------------------------
+An alternative way to build the Jacobian is to vectorize the graph that computes a single row or colum of the jacobian
+We can use `Lop` or `Rop` (more about it below) to obtain the row or column of the jacobian and `vectorize_graph`
+to vectorize it to the full jacobian matrix.
+
+>>> import pytensor
+>>> import pytensor.tensor as pt
+>>> from pytensor.gradient import Lop
+>>> from pytensor.graph import vectorize_graph
+>>> x = pt.dvector('x')
+>>> y = x ** 2
+>>> row_cotangent = pt.dvector("row_cotangent")  # Helper variable, it will be replaced during vectorization
+>>> J_row = Lop(y, x, row_cotangent)
+>>> J = vectorize_graph(J_row, replace={row_cotangent: pt.eye(x.size)})
+>>> f = pytensor.function([x], J)
+>>> f([4, 4])
+array([[ 8.,  0.],
+       [ 0.,  8.]])
+
+This avoids the overhead of scan, at the cost of higher memory usage if the jacobian expression has large intermediate operations.
+Also, not all graphs are safely vectorizable (e.g., if different rows require intermediate operations of different sizes).
+For these reasons `jacobian` uses scan by default. The behavior can be changed by setting `vectorize=True`.
 
 
 Computing the Hessian
