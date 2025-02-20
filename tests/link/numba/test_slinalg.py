@@ -476,3 +476,35 @@ def test_block_diag():
     C_val = np.random.normal(size=(2, 2)).astype(floatX)
     D_val = np.random.normal(size=(4, 4)).astype(floatX)
     compare_numba_and_py([A, B, C, D], [X], [A_val, B_val, C_val, D_val])
+
+
+@pytest.mark.parametrize(
+    "permute_l, p_indices",
+    [(True, False), (False, True), (False, False)],
+    ids=["PL", "p_indices", "P"],
+)
+@pytest.mark.parametrize("shape", [(3, 5, 5), (5, 5)], ids=["batched", "not_batched"])
+def test_numba_lu(permute_l, p_indices, shape: tuple[int]):
+    rng = np.random.default_rng()
+    A = pt.tensor(
+        "A",
+        shape=shape,
+        dtype=config.floatX,
+    )
+
+    out = pt.linalg.lu(A, permute_l=permute_l, p_indices=p_indices)
+    f = pytensor.function([A], out, mode="NUMBA")
+
+    A_val = rng.normal(size=shape).astype(config.floatX)
+    if len(shape) == 2:
+        compare_numba_and_py([A], out, test_inputs=[A_val], inplace=True)
+
+    else:
+        # compare_numba_and_py fails: NotImplementedError: Non-jitted BlockwiseWithCoreShape not implemented
+        nb_out = f(A_val.copy())
+        sp_out = scipy_linalg.lu(
+            A_val.copy(), permute_l=permute_l, p_indices=p_indices, check_finite=False
+        )
+
+        for a, b in zip(nb_out, sp_out, strict=True):
+            np.testing.assert_allclose(a, b)
