@@ -24,9 +24,9 @@ jobs=$(gh api /repos/$owner/$repo/actions/runs/$latest_id/jobs --jq '
 # Skip 3.10, float32, and Benchmark tests
 function skip_job() {
     name=$1
-    if [[ $name == *"py3.10"* ]]; then
-        return 0
-    fi
+    # if [[ $name == *"py3.10"* ]]; then
+    #     return 0
+    # fi
 
     if [[ $name == *"float32 1"* ]]; then
         return 0
