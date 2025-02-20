@@ -7,7 +7,7 @@ repo=pytensor
 issue_number=1124
 title="Speed up test times :rocket:"
 workflow=Tests
-latest_id=$(gh run list --branch main --limit 1 --workflow "Tests" --status success --json databaseId,startedAt,updatedAt --jq '
+latest_id=$(gh run list --branch main --limit 1 --workflow $workflow --status success --json databaseId,startedAt,updatedAt --jq '
 . | map({
   databaseId: .databaseId,
   startedAt: .startedAt,
