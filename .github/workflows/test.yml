@@ -83,7 +83,7 @@ jobs:
         install-jax: [0]
         install-torch: [0]
         part:
-          - "--doctest-modules pytensor --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link"
+          - "--doctest-modules pytensor doc --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link"
           - "tests --ignore=tests/tensor --ignore=tests/scan --ignore=tests/sparse"
           - "tests/scan"
           - "tests/sparse"
@@ -102,9 +102,9 @@ jobs:
             part: "tests/tensor/test_math.py"
           - fast-compile: 1
             float32: 1
-          - part: "--doctest-modules pytensor --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link"
+          - part: "--doctest-modules pytensor doc --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link"
             float32: 1
-          - part: "--doctest-modules pytensor --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link"
+          - part: "--doctest-modules pytensor doc --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link"
             fast-compile: 1
           - numpy-version: "~=1.26.0"
             fast-compile: 1
