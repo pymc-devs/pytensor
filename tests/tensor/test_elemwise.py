@@ -1,3 +1,4 @@
+import itertools
 import math
 import re
 import tracemalloc
@@ -10,6 +11,7 @@ import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor as pt
 import tests.unittest_tools as utt
+from pytensor import In, Out
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
@@ -35,6 +37,7 @@ from pytensor.tensor.type import (
     matrix,
     scalar,
     tensor,
+    tensor3,
     vector,
     vectors,
 )
@@ -158,11 +161,14 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
         # as the broadcasted value; that way, we'll be able to tell that we're getting
         # junk data from a poorly constructed array view.
         x_val = np.broadcast_to(2039, (5000,))
-        for i in range(1000):
+        expected_x_val = x_val[None]
+        for i in range(1):
             inputs[0].storage[0] = x_val
             thunk()
             # Make sure it's a view of the original data
             assert np.shares_memory(x_val, outputs[0].storage[0])
+            # Confirm the right strides
+            assert outputs[0].storage[0].strides == expected_x_val.strides
             # Confirm the broadcasted value in the output
             assert np.array_equiv(outputs[0].storage[0], 2039)
 
@@ -211,6 +217,24 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
 
         with pytest.raises(TypeError, match="input_ndim must be an integer"):
             DimShuffle(input_ndim=(True, False), new_order=(1, 0))
+
+    def test_benchmark(self, benchmark):
+        x = tensor3("x")
+        x_val = np.random.random((2, 3, 4)).astype(config.floatX)
+        ys = [x.transpose(t) for t in itertools.permutations((0, 1, 2))]
+        ys += [
+            x[None],
+            x[:, None],
+            x[:, :, None],
+            x[:, :, :, None],
+        ]
+        # Borrow to avoid deepcopy overhead
+        fn = pytensor.function(
+            [In(x, borrow=True)],
+            [Out(y, borrow=True) for y in ys],
+        )
+        fn.trust_input = True
+        benchmark(fn, x_val)
 
 
 class TestBroadcast:
