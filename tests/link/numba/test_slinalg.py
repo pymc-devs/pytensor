@@ -498,3 +498,35 @@ def test_cho_solve(b_func, b_size, lower):
     RTOL = 1e-8 if floatX.endswith("64") else 1e-4
 
     np.testing.assert_allclose(A @ X_np, b, atol=ATOL, rtol=RTOL)
+
+
+@pytest.mark.parametrize(
+    "permute_l, p_indices",
+    [(True, False), (False, True), (False, False)],
+    ids=["PL", "p_indices", "P"],
+)
+@pytest.mark.parametrize("shape", [(3, 5, 5), (5, 5)], ids=["batched", "not_batched"])
+def test_numba_lu(permute_l, p_indices, shape: tuple[int]):
+    rng = np.random.default_rng()
+    A = pt.tensor(
+        "A",
+        shape=shape,
+        dtype=config.floatX,
+    )
+
+    out = pt.linalg.lu(A, permute_l=permute_l, p_indices=p_indices)
+    f = pytensor.function([A], out, mode="NUMBA")
+
+    A_val = rng.normal(size=shape).astype(config.floatX)
+    if len(shape) == 2:
+        compare_numba_and_py([A], out, test_inputs=[A_val], inplace=True)
+
+    else:
+        # compare_numba_and_py fails: NotImplementedError: Non-jitted BlockwiseWithCoreShape not implemented
+        nb_out = f(A_val.copy())
+        sp_out = scipy_linalg.lu(
+            A_val.copy(), permute_l=permute_l, p_indices=p_indices, check_finite=False
+        )
+
+        for a, b in zip(nb_out, sp_out, strict=True):
+            np.testing.assert_allclose(a, b)
