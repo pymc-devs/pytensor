@@ -21,7 +21,7 @@ from pytensor.printing import Printer, pprint
 from pytensor.scalar import get_scalar_type
 from pytensor.scalar.basic import bool as scalar_bool
 from pytensor.scalar.basic import identity as scalar_identity
-from pytensor.scalar.basic import transfer_type, upcast
+from pytensor.scalar.basic import int64, transfer_type, upcast
 from pytensor.tensor import elemwise_cgen as cgen
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import _get_vector_length, as_tensor_variable
@@ -121,11 +121,17 @@ class DimShuffle(ExternalCOp):
     @property
     def params_type(self):
         return ParamsType(
-            shuffle=lvector,
-            augment=lvector,
-            transposition=lvector,
+            _new_order=lvector,
             inplace=scalar_bool,
+            input_ndim=int64,
         )
+
+    @property
+    def _new_order(self):
+        # Param for C code.
+        # self.new_order may contain 'x', which is not a valid integer value.
+        # We replace it with -1.
+        return [(-1 if x == "x" else x) for x in self.new_order]
 
     def __init__(self, *, input_ndim: int, new_order: Sequence[int | Literal["x"]]):
         super().__init__([self.c_func_file], self.c_func_name)
