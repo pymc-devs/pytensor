@@ -523,10 +523,31 @@ def test_numba_lu(permute_l, p_indices, shape: tuple[int]):
 
     else:
         # compare_numba_and_py fails: NotImplementedError: Non-jitted BlockwiseWithCoreShape not implemented
-        nb_out = f(A_val.copy())
+        pt_out = f(A_val.copy())
         sp_out = scipy_linalg.lu(
             A_val.copy(), permute_l=permute_l, p_indices=p_indices, check_finite=False
         )
 
-        for a, b in zip(nb_out, sp_out, strict=True):
+        for a, b in zip(pt_out, sp_out, strict=True):
+            np.testing.assert_allclose(a, b)
+
+
+@pytest.mark.parametrize("shape", [(3, 5, 5), (5, 5)], ids=["batched", "not_batched"])
+def test_numba_lu_factor(shape: tuple[int]):
+    rng = np.random.default_rng(utt.fetch_seed())
+    A = pt.tensor("A", shape=shape, dtype=config.floatX)
+    out = pt.linalg.lu_factor(A)
+
+    A_val = rng.normal(size=shape).astype(config.floatX)
+    f = pytensor.function([A], out, mode="NUMBA")
+
+    if len(shape) == 2:
+        compare_numba_and_py([A], out, [A_val], inplace=True)
+    else:
+        pt_out = f(A_val.copy())
+        sp_out = np.vectorize(scipy_linalg.lu_factor, signature="(n,n)->(n,n),(n)")(
+            A_val.copy()
+        )
+
+        for a, b in zip(pt_out, sp_out, strict=True):
             np.testing.assert_allclose(a, b)

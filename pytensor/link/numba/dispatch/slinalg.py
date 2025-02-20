@@ -478,7 +478,8 @@ def xgecon_impl(
 
 def _getrf(A, overwrite_a=False) -> tuple[np.ndarray, np.ndarray, int]:
     """
-    Placeholder for LU factorization; used by linalg.solve.
+    Underlying LAPACK function used for LU factorization. Compared to scipy.linalg.lu_factorize, this function also
+    returns an info code with diagnostic information.
     """
     getrf = scipy.linalg.get_lapack_funcs("getrf", (A,))
     A_copy, ipiv, info = getrf(A, overwrite_a=overwrite_a)
@@ -515,6 +516,29 @@ def getrf_impl(
         numba_getrf(M, N, A_copy.view(w_type).ctypes, LDA, IPIV.ctypes, INFO)
 
         return A_copy, IPIV, int_ptr_to_val(INFO)
+
+    return impl
+
+
+def _lu_factor(A, overwrite_a=False) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Thin wrapper around scipy.linalg.lu_factor. Used as an overload target to avoid side-effects on users who import
+    Pytensor.
+    """
+    return linalg.lu_factor(A, overwrite_a=overwrite_a)
+
+
+@overload(_lu_factor)
+def lu_factor_impl(
+    A: np.ndarray, overwrite_a: bool = False
+) -> Callable[[np.ndarray, bool], tuple[np.ndarray, np.ndarray]]:
+    ensure_lapack()
+    _check_scipy_linalg_matrix(A, "lu_factor")
+
+    def impl(A: np.ndarray, overwrite_a: bool = False) -> tuple[np.ndarray, np.ndarray]:
+        A_copy, IPIV, INFO = _getrf(A, overwrite_a=overwrite_a)
+        _solve_check(int_ptr_to_val(INFO), 0)
+        return A_copy, IPIV
 
     return impl
 
