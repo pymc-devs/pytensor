@@ -1361,4 +1361,5 @@ __all__ = [
     "solve_triangular",
     "block_diag",
     "cho_solve",
+    "lu",
 ]
