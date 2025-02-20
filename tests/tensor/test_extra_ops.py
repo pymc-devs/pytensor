@@ -480,10 +480,7 @@ class TestSqueeze(utt.InferShapeTester):
         assert f([0]) == 0
 
         # Test that we cannot squeeze dimensions whose length is greater than 1
-        with pytest.raises(
-            ValueError,
-            match="cannot reshape array of size 3 into shape ()",
-        ):
+        with pytest.raises(ValueError):
             f([0, 1, 2])
 
 

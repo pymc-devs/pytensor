@@ -1,82 +1,93 @@
 #section support_code_apply
 
-int APPLY_SPECIFIC(cpu_dimshuffle)(PyArrayObject *input, PyArrayObject **res,
-                                   PARAMS_TYPE *params) {
+int APPLY_SPECIFIC(cpu_dimshuffle)(PyArrayObject *input, PyArrayObject **res, PARAMS_TYPE *params) {
+    npy_int64* new_order;
+    npy_intp nd_in;
+    npy_intp nd_out;
+    npy_intp* dimensions;
+    npy_intp* strides;
 
-  // This points to either the original input or a copy we create below.
-  // Either way, this is what we should be working on/with.
-  PyArrayObject *_input;
+    // This points to either the original input or a copy we create below.
+    // Either way, this is what we should be working on/with.
+    PyArrayObject *_input;
 
-  if (*res)
-    Py_XDECREF(*res);
-
-  if (params->inplace) {
-    _input = input;
-    Py_INCREF((PyObject *)_input);
-  } else {
-    _input = (PyArrayObject *)PyArray_FromAny(
-        (PyObject *)input, NULL, 0, 0, NPY_ARRAY_ALIGNED | NPY_ARRAY_ENSURECOPY,
-        NULL);
-  }
-
-  PyArray_Dims permute;
-
-  if (!PyArray_IntpConverter((PyObject *)params->transposition, &permute)) {
-    return 1;
-  }
-
-  /*
-    res = res.transpose(self.transposition)
-  */
-  PyArrayObject *transposed_input =
-      (PyArrayObject *)PyArray_Transpose(_input, &permute);
-
-  Py_DECREF(_input);
-
-  PyDimMem_FREE(permute.ptr);
-
-  npy_intp *res_shape = PyArray_DIMS(transposed_input);
-  npy_intp N_shuffle = PyArray_SIZE(params->shuffle);
-  npy_intp N_augment = PyArray_SIZE(params->augment);
-  npy_intp N = N_augment + N_shuffle;
-  npy_intp *_reshape_shape = PyDimMem_NEW(N);
-
-  if (_reshape_shape == NULL) {
-    PyErr_NoMemory();
-    return 1;
-  }
-
-  /*
-    shape = list(res.shape[: len(self.shuffle)])
-    for augm in self.augment:
-        shape.insert(augm, 1)
-  */
-  npy_intp aug_idx = 0;
-  int res_idx = 0;
-  for (npy_intp i = 0; i < N; i++) {
-    if (aug_idx < N_augment &&
-        i == *((npy_intp *)PyArray_GetPtr(params->augment, &aug_idx))) {
-      _reshape_shape[i] = 1;
-      aug_idx++;
-    } else {
-      _reshape_shape[i] = res_shape[res_idx];
-      res_idx++;
+    if (!PyArray_IS_C_CONTIGUOUS(params->_new_order)) {
+        PyErr_SetString(PyExc_RuntimeError, "DimShuffle: param _new_order must be C-contiguous.");
+        return 1;
     }
-  }
+    new_order = (npy_int64*) PyArray_DATA(params->_new_order);
+    nd_in = (npy_intp)(params->input_ndim);
+    nd_out = PyArray_SIZE(params->_new_order);
 
-  PyArray_Dims reshape_shape = {.ptr = _reshape_shape, .len = (int)N};
+    if (PyArray_NDIM(input) != nd_in) {
+        PyErr_SetString(PyExc_NotImplementedError, "DimShuffle: Input has less dimensions than expected.");
+        return 1;
+    }
 
-  /* res = res.reshape(shape) */
-  *res = (PyArrayObject *)PyArray_Newshape(transposed_input, &reshape_shape,
-                                           NPY_CORDER);
+    // Compute new dimensions and strides
+    dimensions = (npy_intp*) malloc(nd_out * sizeof(npy_intp));
+    strides = (npy_intp*) malloc(nd_out * sizeof(npy_intp));
+    if (dimensions == NULL || strides == NULL) {
+        PyErr_NoMemory();
+        free(dimensions);
+        free(strides);
+        return 1;
+    };
 
-  Py_DECREF(transposed_input);
+    npy_intp original_size = PyArray_SIZE(_input);
+    npy_intp new_size = 1;
+    for (npy_intp i = 0; i < nd_out; ++i) {
+        if (new_order[i] != -1) {
+            dimensions[i] = PyArray_DIMS(_input)[new_order[i]];
+            strides[i] = PyArray_DIMS(_input)[new_order[i]] == 1 ? 0 : PyArray_STRIDES(_input)[new_order[i]];
+        } else {
+            dimensions[i] = 1;
+            strides[i] = 0;
+        }
+        new_size *= dimensions[i];
+    }
 
-  PyDimMem_FREE(reshape_shape.ptr);
+    if (original_size != new_size) {
+        PyErr_SetString(PyExc_ValueError, "DimShuffle: Attempting to squeeze axes with size not equal to one.");
+        free(dimensions);
+        free(strides);
+        return 1;
+    }
 
-  if (!*res) {
-    return 1;
-  }
+    if (*res)
+        Py_XDECREF(*res);
 
-  return 0;
+    if (params->inplace) {
+        _input = input;
+        Py_INCREF((PyObject*)_input);
+    } else {
+        _input = (PyArrayObject *)PyArray_FromAny(
+            (PyObject *)input, NULL, 0, 0, NPY_ARRAY_ALIGNED | NPY_ARRAY_ENSURECOPY,
+            NULL);
+    }
+
+    // Create the new array.
+    *res = (PyArrayObject*)PyArray_New(&PyArray_Type, nd_out, dimensions,
+                                       PyArray_TYPE(_input), strides,
+                                       PyArray_DATA(_input), PyArray_ITEMSIZE(_input),
+                                       // borrow only the writable flag from the base
+                                       // the NPY_OWNDATA flag will default to 0.
+                                       (NPY_ARRAY_WRITEABLE * PyArray_ISWRITEABLE(_input)),
+                                       NULL);
+
+    if (*res == NULL) {
+        free(dimensions);
+        free(strides);
+        return 1;
+    }
+
+    // recalculate flags: CONTIGUOUS, FORTRAN, ALIGNED
+    PyArray_UpdateFlags(*res, NPY_ARRAY_UPDATE_ALL);
+
+    // we are making a view in both inplace and non-inplace cases
+    PyArray_SetBaseObject(*res, (PyObject*)_input);
+
+    free(strides);
+    free(dimensions);
+    return 0;
 }
