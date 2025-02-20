@@ -29,7 +29,7 @@ def test_jax_Alloc():
     x = ptb.AllocEmpty("float32")(2, 3)
 
     def compare_shape_dtype(x, y):
-        np.testing.assert_array_equal(x, y, strict=True)
+        assert x.shape == y.shape and x.dtype == y.dtype
 
     compare_jax_and_py([], [x], [], assert_fn=compare_shape_dtype)
 
