@@ -24,9 +24,9 @@ jobs=$(gh api /repos/$owner/$repo/actions/runs/$latest_id/jobs --jq '
 # Skip 3.10, float32, and Benchmark tests
 function skip_job() {
     name=$1
-    # if [[ $name == *"py3.10"* ]]; then
-    #     return 0
-    # fi
+    if [[ $name == *"py3.10"* ]]; then
+        return 0
+    fi
 
     if [[ $name == *"float32 1"* ]]; then
         return 0
@@ -75,7 +75,11 @@ echo "$jobs" | jq -c '.[]' | while read -r job; do
     fi
 
     echo "Processing job: $name (ID: $id, Run ID: $run_id)"
-    times=$(gh run view --job $id --log | python extract-slow-tests.py)
+
+    # Seeing a bit more stabilty with the API rather than the CLI
+    # https://docs.github.com/en/rest/actions/workflow-jobs?apiVersion=2022-11-28#download-job-logs-for-a-workflow-run
+    times=$(gh api /repos/$owner/$repo/actions/jobs/$id/logs | python extract-slow-tests.py)
+    # times=$(gh run view --job $id --log | python extract-slow-tests.py)
 
     if [ -z "$times" ]; then
         # Some of the jobs are non-test jobs, so we skip them
