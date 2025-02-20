@@ -12,6 +12,7 @@ from pytensor.tensor import slinalg as pt_slinalg
 from pytensor.tensor import subtensor as pt_subtensor
 from pytensor.tensor.math import clip, cosh
 from pytensor.tensor.type import matrix, vector
+from tests import unittest_tools as utt
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
@@ -257,3 +258,17 @@ def test_jax_lu(permute_l, p_indices, complex, shape: tuple[int]):
             compare_jax_and_py(graph_inputs=[A], graph_outputs=out, test_inputs=[x])
     else:
         compare_jax_and_py(graph_inputs=[A], graph_outputs=out, test_inputs=[x])
+
+
+@pytest.mark.parametrize("shape", [(5, 5), (5, 5, 5)], ids=["matrix", "batch"])
+def test_jax_lu_factor(shape):
+    rng = np.random.default_rng(utt.fetch_seed())
+    A = pt.tensor(name="A", shape=shape)
+    A_value = rng.normal(size=shape).astype(config.floatX)
+    out = pt_slinalg.lu_factor(A)
+
+    compare_jax_and_py(
+        [A],
+        out,
+        [A_value],
+    )
