@@ -84,9 +84,9 @@ from pytensor.graph.utils import InconsistencyError
 from pytensor.tensor import basic as ptb
 from pytensor.tensor.blas import (
     Dot22,
+    _batched_dot,
     _dot22,
     _dot22scalar,
-    batched_dot,
     gemm_inplace,
     gemm_no_inplace,
     gemv_inplace,
@@ -928,7 +928,7 @@ def specialize_matmul_to_batched_dot(fgraph, node):
         x = x.reshape((-1, x_shape[-2], x_shape[-1]))
         y = y.reshape((-1, y_shape[-2], y_shape[-1]))
 
-    new_out = batched_dot(x, y)
+    new_out = _batched_dot(x, y)
 
     if len(x_shape) > 3:
         # And then unravel it
