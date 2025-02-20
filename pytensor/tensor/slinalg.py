@@ -577,6 +577,103 @@ def lu(
     )
 
 
+class LUFactor(Op):
+    __props__ = ("overwrite_a", "check_finite")
+
+    def __init__(self, *, overwrite_a=False, check_finite=True):
+        self.overwrite_a = overwrite_a
+        self.check_finite = check_finite
+        self.gufunc_signature = "(m,m)->(m,m),(m)"
+
+        if self.overwrite_a:
+            self.destroy_map = {0: [0]}
+
+    def make_node(self, A):
+        A = as_tensor_variable(A)
+        if A.type.ndim != 2:
+            raise TypeError(
+                f"LU only allowed on matrix (2-D) inputs, got {A.type.ndim}-D input"
+            )
+
+        LU = matrix(shape=A.type.shape, dtype=A.type.dtype)
+        pivots = vector(shape=(A.type.shape[0],), dtype="int32")
+        return Apply(self, [A], [LU, pivots])
+
+    def infer_shape(self, fgraph, node, shapes):
+        n = shapes[0][0]
+        return [(n, n), (n,)]
+
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
+        if 0 in allowed_inplace_inputs:
+            new_props = self._props_dict()  # type: ignore
+            new_props["overwrite_a"] = True
+            return type(self)(**new_props)
+        else:
+            return self
+
+    def perform(self, node, inputs, outputs):
+        A = inputs[0]
+        LU, pivots = scipy_linalg.lu_factor(
+            A,
+            overwrite_a=self.overwrite_a,
+            check_finite=self.check_finite,
+        )
+
+        outputs[0][0] = LU
+        outputs[1][0] = pivots
+
+    def L_op(self, inputs, outputs, output_gradients):
+        A = inputs[0]
+        LU_bar, _ = output_gradients
+
+        # We need the permutation matrix P, not the pivot indices. Easiest way is to just do another LU forward.
+        # Alternative is to do a scan over the pivot indices to convert them to permutation indices. I don't know if
+        # that's faster or slower.
+        P, L, U = lu(
+            A, permute_l=False, check_finite=self.check_finite, p_indices=False
+        )
+
+        # Split LU_bar into L_bar and U_bar. This is valid because of the triangular structure of L and U
+        L_bar = ptb.tril(LU_bar, k=-1)
+        U_bar = ptb.triu(LU_bar)
+
+        # From here we're in the same situation as the LU gradient derivation
+        x1 = ptb.tril(L.T @ L_bar, k=-1)
+        x2 = ptb.triu(U_bar @ U.T)
+
+        LT_inv_x = solve_triangular(L.T, x1 + x2, lower=False, unit_diagonal=True)
+        A_bar = P @ solve_triangular(U, LT_inv_x.T, lower=False).T
+
+        return [A_bar]
+
+
+def lu_factor(
+    a: TensorLike, *, check_finite=True
+) -> tuple[TensorVariable, TensorVariable]:
+    """
+    LU factorization with partial pivoting.
+
+    Parameters
+    ----------
+    a: TensorLike
+        Matrix to be factorized
+    check_finite: bool
+        Whether to check that the input matrix contains only finite numbers.
+
+    Returns
+    -------
+    LU: TensorVariable
+        LU decomposition of `a`
+    pivots: TensorVariable
+        Permutation indices
+    """
+
+    return cast(
+        tuple[TensorVariable, TensorVariable],
+        Blockwise(LUFactor(check_finite=check_finite))(a),
+    )
+
+
 class SolveTriangular(SolveBase):
     """Solve a system of linear equations."""
 
@@ -1448,4 +1545,5 @@ __all__ = [
     "block_diag",
     "cho_solve",
     "lu",
+    "lu_factor",
 ]

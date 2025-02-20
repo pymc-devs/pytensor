@@ -24,6 +24,7 @@ from pytensor.tensor.slinalg import (
     eigvalsh,
     expm,
     lu,
+    lu_factor,
     solve,
     solve_continuous_lyapunov,
     solve_discrete_are,
@@ -662,6 +663,22 @@ def test_lu_grad(grad_case, permute_l, p_indices, shape):
                 return out[-1].sum() + out[-2].sum()
 
     utt.verify_grad(f_pt, [A_value], rng=rng)
+
+
+def test_lu_factor():
+    rng = np.random.default_rng(utt.fetch_seed())
+    A = matrix()
+    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+
+    f = pytensor.function([A], lu_factor(A))
+
+    LU, pivots = f(A_val)
+    sp_LU, sp_pivots = scipy.linalg.lu_factor(A_val)
+
+    np.testing.assert_allclose(LU, sp_LU)
+    np.testing.assert_allclose(pivots, sp_pivots)
+
+    utt.verify_grad(lambda A: lu_factor(A)[0].sum(), [A_val], rng=rng)
 
 
 def test_cho_solve():
