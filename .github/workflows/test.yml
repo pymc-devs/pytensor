@@ -98,8 +98,6 @@ jobs:
             fast-compile: 1
           - python-version: "3.10"
             float32: 1
-          - python-version: "3.10"
-            part: "tests/tensor/test_math.py"
           - fast-compile: 1
             float32: 1
           - part: "--doctest-modules pytensor --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link"
@@ -159,15 +157,6 @@ jobs:
             install-jax: 0
             install-torch: 0
             part: "tests/tensor/test_blas.py tests/tensor/test_elemwise.py tests/tensor/test_math_scipy.py"
-          - os: "ubuntu-latest"
-            python-version: "3.10"
-            numpy-version: "~=1.26.0"
-            fast-compile: 0
-            float32: 0
-            install-numba: 0
-            install-jax: 0
-            install-torch: 0
-            part: "tests/tensor/test_math.py"
 
     steps:
       - uses: actions/checkout@v4
