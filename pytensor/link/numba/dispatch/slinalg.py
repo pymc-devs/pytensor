@@ -483,7 +483,7 @@ def _getrf(A, overwrite_a=False) -> tuple[np.ndarray, np.ndarray, int]:
     getrf = scipy.linalg.get_lapack_funcs("getrf", (A,))
     A_copy, ipiv, info = getrf(A, overwrite_a=overwrite_a)
 
-    return A_copy, ipiv
+    return A_copy, ipiv, info
 
 
 @overload(_getrf)
