@@ -42,7 +42,7 @@ function skip_job() {
 # Remove common prefix from the name
 function remove_prefix() {
     name=$1
-    echo $name | sed -e 's/^ubuntu-latest test py3.12 numpy>=2.0 : fast-compile 0 : float32 0 : //'
+    echo $name | sed -e 's/^ubuntu-latest test py3.13 numpy>=2.0 : fast-compile 0 : float32 0 : //'
 }
 
 function human_readable_time() {
