@@ -23,6 +23,7 @@ from tests.link.numba.test_basic import (
 from tests.tensor.test_elemwise import (
     careduce_benchmark_tester,
     check_elemwise_runtime_broadcast,
+    dimshuffle_benchmark,
 )
 
 
@@ -201,7 +202,7 @@ def test_Dimshuffle_returns_array():
 
 def test_Dimshuffle_non_contiguous():
     """The numba impl of reshape doesn't work with
-    non-contiguous arrays, make sure we work around thpt."""
+    non-contiguous arrays, make sure we work around that."""
     x = pt.dvector()
     idx = pt.vector(dtype="int64")
     op = DimShuffle(input_ndim=1, new_order=[])
@@ -643,3 +644,7 @@ class TestsBenchmark:
         return careduce_benchmark_tester(
             axis, c_contiguous, mode="NUMBA", benchmark=benchmark
         )
+
+    @pytest.mark.parametrize("c_contiguous", (True, False))
+    def test_dimshuffle(self, c_contiguous, benchmark):
+        dimshuffle_benchmark("NUMBA", c_contiguous, benchmark)
