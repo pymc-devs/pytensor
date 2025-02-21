@@ -15,9 +15,11 @@ from pytensor.tensor import TensorVariable
 from pytensor.tensor.slinalg import (
     Cholesky,
     CholeskySolve,
+    LUSolve,
     Solve,
     SolveBase,
     SolveTriangular,
+    _pivot_to_permutation,
     block_diag,
     cho_solve,
     cholesky,
@@ -25,6 +27,7 @@ from pytensor.tensor.slinalg import (
     expm,
     lu,
     lu_factor,
+    lu_solve,
     solve,
     solve_continuous_lyapunov,
     solve_discrete_are,
@@ -665,20 +668,92 @@ def test_lu_grad(grad_case, permute_l, p_indices, shape):
     utt.verify_grad(f_pt, [A_value], rng=rng)
 
 
-def test_lu_factor():
+def test_pivot_to_permutation():
+    rng = np.random.default_rng(utt.fetch_seed())
+    A_val = rng.normal(size=(5, 5))
+    _, pivots = scipy.linalg.lu_factor(A_val)
+    perm_idx, *_ = scipy.linalg.lu(A_val, p_indices=True)
+
+    permutations = pt.argsort(_pivot_to_permutation(pivots)).eval()
+    np.testing.assert_array_equal(permutations, perm_idx)
+
+
+class TestLUSolve(utt.InferShapeTester):
+    @staticmethod
+    def factor_and_solve(A, b, sum=False, **lu_kwargs):
+        lu_and_pivots = lu_factor(A)
+        x = lu_solve(lu_and_pivots, b, **lu_kwargs)
+        if not sum:
+            return x
+        return x.sum()
+
+    @pytest.mark.parametrize("b_shape", [(5,), (5, 5)])
+    @pytest.mark.parametrize("trans", [True, False])
+    def test_lu_solve(self, b_shape: tuple[int], trans):
+        rng = np.random.default_rng(utt.fetch_seed())
+        A = pt.tensor("A", shape=(5, 5))
+        b = pt.tensor("b", shape=b_shape)
+
+        A_val = rng.normal(size=(5, 5)).astype(config.floatX) + np.eye(5) * 0.5
+        b_val = rng.normal(size=b_shape).astype(config.floatX)
+
+        x = self.factor_and_solve(A, b, trans=trans, sum=False)
+
+        f = pytensor.function([A, b], x)
+        x_pt = f(A_val.copy(), b_val.copy())
+        x_sp = scipy.linalg.lu_solve(
+            scipy.linalg.lu_factor(A_val.copy()), b_val.copy(), trans=trans
+        )
+
+        np.testing.assert_allclose(x_pt, x_sp)
+
+        def T(x):
+            if trans:
+                return x.T
+            return x
+
+        np.testing.assert_allclose(
+            T(A_val) @ x_pt,
+            b_val,
+            atol=1e-8 if config.floatX == "float64" else 1e-4,
+            rtol=1e-8 if config.floatX == "float64" else 1e-4,
+        )
+        np.testing.assert_allclose(x_pt, x_sp)
+
+    @pytest.mark.parametrize("b_shape", [(5,), (5, 5)], ids=["b_vec", "b_matrix"])
+    @pytest.mark.parametrize("trans", [True, False], ids=["x_T", "x"])
+    def test_lu_solve_gradient(self, b_shape: tuple[int], trans: bool):
+        rng = np.random.default_rng(utt.fetch_seed())
+
+        A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+        b_val = rng.normal(size=b_shape).astype(config.floatX)
+
+        test_fn = functools.partial(self.factor_and_solve, sum=True, trans=trans)
+        utt.verify_grad(test_fn, [A_val, b_val], 3, rng)
+
+
+@pytest.mark.parametrize("permutation_indices", [True, False])
+def test_lu_factor(permutation_indices):
     rng = np.random.default_rng(utt.fetch_seed())
     A = matrix()
     A_val = rng.normal(size=(5, 5)).astype(config.floatX)
 
-    f = pytensor.function([A], lu_factor(A))
+    f = pytensor.function([A], lu_factor(A, permutation_indices=permutation_indices))
 
-    LU, pivots = f(A_val)
-    sp_LU, sp_pivots = scipy.linalg.lu_factor(A_val)
+    LU, pt_p_idx = f(A_val)
+    sp_LU, sp_p_idx = scipy.linalg.lu_factor(A_val)
+
+    if permutation_indices:
+        sp_p_idx, *_ = scipy.linalg.lu(A_val, p_indices=True)
 
     np.testing.assert_allclose(LU, sp_LU)
-    np.testing.assert_allclose(pivots, sp_pivots)
+    np.testing.assert_allclose(pt_p_idx, sp_p_idx)
 
-    utt.verify_grad(lambda A: lu_factor(A)[0].sum(), [A_val], rng=rng)
+    utt.verify_grad(
+        lambda A: lu_factor(A, permutation_indices=permutation_indices)[0].sum(),
+        [A_val],
+        rng=rng,
+    )
 
 
 def test_cho_solve():
@@ -958,3 +1033,33 @@ def test_block_diagonal_blockwise():
     B = np.random.normal(size=(1, batch_size, 4, 4)).astype(config.floatX)
     result = block_diag(A, B).eval()
     assert result.shape == (10, batch_size, 6, 6)
+
+
+def lu_solve_1(A, b):
+    lu, pivots = pt.linalg.lu_factor(A)
+    return pt.linalg.lu_solve((lu, pivots), b)
+
+
+def lu_solve_2(A, b, b_ndim=1, trans=0, check_finite=False):
+    lu, pivots = pt.linalg.lu_factor(A)
+    return LUSolve(b_ndim=1, trans=0, check_finite=False)(lu, pivots, b)
+
+
+@pytest.mark.parametrize(
+    "op", [lu_solve_1, lu_solve_2, pt.linalg.solve], ids=["lu_1", "lu_2", "solve"]
+)
+@pytest.mark.parametrize("n", [500])
+def test_solve_methods(op, n, benchmark):
+    A = pt.tensor("A", shape=(n, n))
+    b = pt.tensor("b", shape=(n,))
+
+    x = op(A, b)
+    gx = pt.grad(x.sum(), [A, b])
+    f = pytensor.function([A, b], [x, *gx])
+
+    A_val = np.random.normal(size=(n, n)).astype(config.floatX)
+    b_val = np.random.normal(size=(n,)).astype(config.floatX)
+
+    # Trigger compilation if we're a jit mode
+    f(A_val, b_val)
+    benchmark(f, A_val, b_val)
