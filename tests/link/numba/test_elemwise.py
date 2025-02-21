@@ -23,6 +23,7 @@ from tests.link.numba.test_basic import (
 from tests.tensor.test_elemwise import (
     careduce_benchmark_tester,
     check_elemwise_runtime_broadcast,
+    dimshuffle_benchmark,
 )
 
 
@@ -643,3 +644,7 @@ class TestsBenchmark:
         return careduce_benchmark_tester(
             axis, c_contiguous, mode="NUMBA", benchmark=benchmark
         )
+
+    @pytest.mark.parametrize("c_contiguous", (True, False))
+    def test_dimshuffle(self, c_contiguous, benchmark):
+        dimshuffle_benchmark("NUMBA", c_contiguous, benchmark)
