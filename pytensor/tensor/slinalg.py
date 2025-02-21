@@ -300,7 +300,17 @@ class SolveBase(Op):
         c_bar = output_gradients[0]
 
         props_dict = self._props_dict()
-        props_dict["transposed"] = not self.transposed
+
+        if isinstance(self, SolveTriangular):
+            # SolveTriangular has a special trans argument we have to handle
+            transposed = props_dict.pop("trans") in [1, "T"]
+            props_dict["trans"] = not transposed
+        else:
+            transposed = props_dict.pop("transposed")
+            props_dict["transposed"] = not transposed
+
+        # TODO: We were flipping lower before, but it doesn't appear we need to -- all tests pass without taking it into
+        #  account.
         # props_dict['lower'] = not self.lower
 
         solve_op = type(self)(**props_dict)
@@ -309,7 +319,7 @@ class SolveBase(Op):
         # force outer product if vector second input
         A_bar = -ptm.outer(b_bar, c) if c.ndim == 1 else -b_bar.dot(c.T)
 
-        if self.transposed:
+        if transposed:
             A_bar = A_bar.T
 
         return [A_bar, b_bar]
@@ -402,9 +412,10 @@ class SolveTriangular(SolveBase):
     def __init__(self, *, trans=0, unit_diagonal=False, **kwargs):
         if kwargs.get("overwrite_a", False):
             raise ValueError("overwrite_a is not supported for SolverTriangulare")
+
         super().__init__(**kwargs)
-        self.trans = trans
         self.unit_diagonal = unit_diagonal
+        self.trans = trans
 
     def perform(self, node, inputs, outputs):
         A, b = inputs

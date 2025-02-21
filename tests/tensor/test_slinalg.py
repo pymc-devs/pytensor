@@ -367,56 +367,48 @@ class TestSolveTriangular(utt.InferShapeTester):
             warn=False,
         )
 
+    @pytest.mark.parametrize("b_shape", [(5, 1), (5,)])
     @pytest.mark.parametrize("lower", [True, False])
-    def test_correctness(self, lower):
+    @pytest.mark.parametrize("trans", ["N", "T"])
+    def test_correctness(self, b_shape: tuple[int], lower, trans):
         rng = np.random.default_rng(utt.fetch_seed())
 
-        b_val = np.asarray(rng.random((5, 1)), dtype=config.floatX)
-
+        b_val = np.asarray(rng.random(b_shape), dtype=config.floatX)
         A_val = np.asarray(rng.random((5, 5)), dtype=config.floatX)
         A_val = np.dot(A_val.transpose(), A_val)
 
         C_val = scipy.linalg.cholesky(A_val, lower=lower)
 
         A = matrix()
-        b = matrix()
+        b = pt.tensor("b", shape=b_shape)
 
         cholesky = Cholesky(lower=lower)
         C = cholesky(A)
-        y_lower = solve_triangular(C, b, lower=lower)
+        y_lower = solve_triangular(C, b, lower=lower, trans=trans)
         lower_solve_func = pytensor.function([C, b], y_lower)
 
         assert np.allclose(
-            scipy.linalg.solve_triangular(C_val, b_val, lower=lower),
+            scipy.linalg.solve_triangular(C_val, b_val, lower=lower, trans=trans),
             lower_solve_func(C_val, b_val),
         )
 
-    @pytest.mark.parametrize(
-        "m, n, lower",
-        [
-            (5, None, False),
-            (5, None, True),
-            (4, 2, False),
-            (4, 2, True),
-        ],
-    )
-    def test_solve_grad(self, m, n, lower):
+    @pytest.mark.parametrize("b_shape", [(5, 1), (5,)])
+    @pytest.mark.parametrize("lower", [True, False])
+    @pytest.mark.parametrize("trans", ["N", "T"])
+    def test_solve_grad(self, b_shape: tuple[int], lower, trans):
         rng = np.random.default_rng(utt.fetch_seed())
+        m = b_shape[0]
 
         # Ensure diagonal elements of `A` are relatively large to avoid
         # numerical precision issues
         A_val = (rng.normal(size=(m, m)) * 0.5 + np.eye(m)).astype(config.floatX)
-
-        if n is None:
-            b_val = rng.normal(size=m).astype(config.floatX)
-        else:
-            b_val = rng.normal(size=(m, n)).astype(config.floatX)
+        b_val = rng.normal(size=b_shape).astype(config.floatX)
 
         eps = None
         if config.floatX == "float64":
             eps = 2e-8
 
-        solve_op = SolveTriangular(lower=lower, b_ndim=1 if n is None else 2)
+        solve_op = SolveTriangular(lower=lower, b_ndim=len(b_shape), trans=trans)
         utt.verify_grad(solve_op, [A_val, b_val], 3, rng, eps=eps)
 
 
