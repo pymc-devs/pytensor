@@ -1,7 +1,9 @@
 from collections.abc import Callable
+from typing import cast as typing_cast
 
 import numba
 import numpy as np
+import scipy.linalg
 from numba.core import types
 from numba.extending import overload
 from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
@@ -17,6 +19,7 @@ from pytensor.link.numba.dispatch._LAPACK import (
 )
 from pytensor.link.numba.dispatch.basic import numba_funcify
 from pytensor.tensor.slinalg import (
+    LU,
     BlockDiagonal,
     Cholesky,
     CholeskySolve,
@@ -469,11 +472,13 @@ def xgecon_impl(
 
 def _getrf(A, overwrite_a=False) -> tuple[np.ndarray, np.ndarray, int]:
     """
-    Placeholder for LU factorization; used by linalg.solve.
-
-    # TODO: Implement an LU_factor Op, then dispatch to this function in numba mode.
+    Underlying LAPACK function used for LU factorization. Compared to scipy.linalg.lu_factorize, this function also
+    returns an info code with diagnostic information.
     """
-    return  # type: ignore
+    getrf = scipy.linalg.get_lapack_funcs("getrf", (A,))
+    A_copy, ipiv, info = getrf(A, overwrite_a=overwrite_a)
+
+    return A_copy, ipiv, info
 
 
 @overload(_getrf)
@@ -507,6 +512,286 @@ def getrf_impl(
         return A_copy, IPIV, int_ptr_to_val(INFO)
 
     return impl
+
+
+def _lu_factor(A, overwrite_a=False) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Thin wrapper around scipy.linalg.lu_factor. Used as an overload target to avoid side-effects on users who import
+    Pytensor.
+    """
+    return linalg.lu_factor(A, overwrite_a=overwrite_a)
+
+
+@overload(_lu_factor)
+def lu_factor_impl(
+    A: np.ndarray, overwrite_a: bool = False
+) -> Callable[[np.ndarray, bool], tuple[np.ndarray, np.ndarray]]:
+    ensure_lapack()
+    _check_scipy_linalg_matrix(A, "lu_factor")
+
+    def impl(A: np.ndarray, overwrite_a: bool = False) -> tuple[np.ndarray, np.ndarray]:
+        A_copy, IPIV, INFO = _getrf(A, overwrite_a=overwrite_a)
+        _solve_check(int_ptr_to_val(INFO), 0)
+        return A_copy, IPIV
+
+    return impl
+
+
+def _lu_1(
+    a: np.ndarray,
+    permute_l: bool,
+    check_finite: bool,
+    p_indices: bool,
+    overwrite_a: bool,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Thin wrapper around scipy.linalg.lu. Used as an overload target to avoid side-effects on users to import Pytensor.
+
+    Called when permute_l is True and p_indices is False, and returns a tuple of (perm, L, U), where perm an integer
+    array of row swaps, such that L[perm] @ U = A.
+    """
+    return typing_cast(
+        tuple[np.ndarray, np.ndarray, np.ndarray],
+        linalg.lu(
+            a,
+            permute_l=permute_l,
+            check_finite=check_finite,
+            p_indices=p_indices,
+            overwrite_a=overwrite_a,
+        ),
+    )
+
+
+def _lu_2(
+    a: np.ndarray,
+    permute_l: bool,
+    check_finite: bool,
+    p_indices: bool,
+    overwrite_a: bool,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Thin wrapper around scipy.linalg.lu. Used as an overload target to avoid side-effects on users to import Pytensor.
+
+    Called when permute_l is False and p_indices is True, and returns a tuple of (PL, U), where PL is the
+    permuted L matrix, PL = P @ L.
+    """
+    return typing_cast(
+        tuple[np.ndarray, np.ndarray],
+        linalg.lu(
+            a,
+            permute_l=permute_l,
+            check_finite=check_finite,
+            p_indices=p_indices,
+            overwrite_a=overwrite_a,
+        ),
+    )
+
+
+def _lu_3(
+    a: np.ndarray,
+    permute_l: bool,
+    check_finite: bool,
+    p_indices: bool,
+    overwrite_a: bool,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Thin wrapper around scipy.linalg.lu. Used as an overload target to avoid side-effects on users to import Pytensor.
+
+    Called when permute_l is False and p_indices is False, and returns a tuple of (P, L, U), where P is the permutation
+    matrix, P @ L @ U = A.
+    """
+    return typing_cast(
+        tuple[np.ndarray, np.ndarray, np.ndarray],
+        linalg.lu(
+            a,
+            permute_l=permute_l,
+            check_finite=check_finite,
+            p_indices=p_indices,
+            overwrite_a=overwrite_a,
+        ),
+    )
+
+
+@overload(_lu_1)
+def lu_impl_1(
+    a: np.ndarray,
+    permute_l: bool,
+    check_finite: bool,
+    p_indices: bool,
+    overwrite_a: bool,
+) -> Callable[
+    [np.ndarray, bool, bool, bool, bool], tuple[np.ndarray, np.ndarray, np.ndarray]
+]:
+    """
+    Overload scipy.linalg.lu with a numba function. This function is called when permute_l is True and p_indices is
+    False. Returns a tuple of (perm, L, U), where perm an integer array of row swaps, such that L[perm] @ U = A.
+    """
+    ensure_lapack()
+    _check_scipy_linalg_matrix(a, "lu")
+    dtype = a.dtype
+
+    def impl(
+        a: np.ndarray,
+        permute_l: bool,
+        check_finite: bool,
+        p_indices: bool,
+        overwrite_a: bool,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        A_copy, IPIV, INFO = _getrf(a, overwrite_a=overwrite_a)
+
+        L = np.eye(A_copy.shape[-1], dtype=dtype)
+        L += np.tril(A_copy, k=-1)
+        U = np.triu(A_copy)
+
+        # Fortran is 1 indexed, so we need to subtract 1 from the IPIV array
+        IPIV = IPIV - 1
+        p_inv = np.arange(len(IPIV))
+        for i in range(len(IPIV)):
+            p_inv[i], p_inv[IPIV[i]] = p_inv[IPIV[i]], p_inv[i]
+
+        perm = np.argsort(p_inv)
+        return perm, L, U
+
+    return impl
+
+
+@overload(_lu_2)
+def lu_impl_2(
+    a: np.ndarray,
+    permute_l: bool,
+    check_finite: bool,
+    p_indices: bool,
+    overwrite_a: bool,
+) -> Callable[[np.ndarray, bool, bool, bool, bool], tuple[np.ndarray, np.ndarray]]:
+    """
+    Overload scipy.linalg.lu with a numba function. This function is called when permute_l is False and p_indices is
+    True. Returns a tuple of (PL, U), where PL is the permuted L matrix, PL = P @ L.
+    """
+
+    ensure_lapack()
+    _check_scipy_linalg_matrix(a, "lu")
+    dtype = a.dtype
+
+    def impl(
+        a: np.ndarray,
+        permute_l: bool,
+        check_finite: bool,
+        p_indices: bool,
+        overwrite_a: bool,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        A_copy, IPIV, INFO = _getrf(a, overwrite_a=overwrite_a)
+
+        L = np.eye(A_copy.shape[-1], dtype=dtype)
+        L += np.tril(A_copy, k=-1)
+        U = np.triu(A_copy)
+
+        # Fortran is 1 indexed, so we need to subtract 1 from the IPIV array
+        IPIV = IPIV - 1
+        p_inv = np.arange(len(IPIV))
+        for i in range(len(IPIV)):
+            p_inv[i], p_inv[IPIV[i]] = p_inv[IPIV[i]], p_inv[i]
+
+        perm = np.argsort(p_inv)
+        PL = L[perm]
+        return PL, U
+
+    return impl
+
+
+@overload(_lu_3)
+def lu_impl_3(
+    a: np.ndarray,
+    permute_l: bool,
+    check_finite: bool,
+    p_indices: bool,
+    overwrite_a: bool,
+) -> Callable[
+    [np.ndarray, bool, bool, bool, bool], tuple[np.ndarray, np.ndarray, np.ndarray]
+]:
+    """
+    Overload scipy.linalg.lu with a numba function. This function is called when permute_l is True and p_indices is
+    False. Returns a tuple of (P, L, U), such that P @ L @ U = A.
+    """
+    ensure_lapack()
+    _check_scipy_linalg_matrix(a, "lu")
+    dtype = a.dtype
+
+    def impl(
+        a: np.ndarray,
+        permute_l: bool,
+        check_finite: bool,
+        p_indices: bool,
+        overwrite_a: bool,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        A_copy, IPIV, INFO = _getrf(a, overwrite_a=overwrite_a)
+
+        L = np.eye(A_copy.shape[-1], dtype=dtype)
+        L += np.tril(A_copy, k=-1)
+        U = np.triu(A_copy)
+
+        # Fortran is 1 indexed, so we need to subtract 1 from the IPIV array
+        IPIV = IPIV - 1
+        p_inv = np.arange(len(IPIV))
+        for i in range(len(IPIV)):
+            p_inv[i], p_inv[IPIV[i]] = p_inv[IPIV[i]], p_inv[i]
+
+        perm = np.argsort(p_inv)
+        P = np.eye(A_copy.shape[-1], dtype=dtype)[perm]
+
+        return P, L, U
+
+    return impl
+
+
+@numba_funcify.register(LU)
+def numba_funcify_LU(op, node, **kwargs):
+    permute_l = op.permute_l
+    check_finite = op.check_finite
+    p_indices = op.p_indices
+    overwrite_a = op.overwrite_a
+
+    dtype = node.inputs[0].dtype
+    if str(dtype).startswith("complex"):
+        raise NotImplementedError(
+            "Complex inputs not currently supported by lu in Numba mode"
+        )
+
+    @numba_basic.numba_njit(inline="always")
+    def lu(a):
+        if check_finite:
+            if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
+                raise np.linalg.LinAlgError(
+                    "Non-numeric values (nan or inf) found in input to lu"
+                )
+
+        if p_indices:
+            res = _lu_1(
+                a,
+                permute_l=permute_l,
+                check_finite=check_finite,
+                p_indices=p_indices,
+                overwrite_a=overwrite_a,
+            )
+        elif permute_l:
+            res = _lu_2(
+                a,
+                permute_l=permute_l,
+                check_finite=check_finite,
+                p_indices=p_indices,
+                overwrite_a=overwrite_a,
+            )
+        else:
+            res = _lu_3(
+                a,
+                permute_l=permute_l,
+                check_finite=check_finite,
+                p_indices=p_indices,
+                overwrite_a=overwrite_a,
+            )
+
+        return res
+
+    return lu
 
 
 def _getrs(
