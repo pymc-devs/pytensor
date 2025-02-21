@@ -214,6 +214,22 @@ def test_solve_raises_on_invalid_A():
         Solve(assume_a="test", b_ndim=2)
 
 
+solve_test_cases = [
+    ("gen", False, False),
+    ("gen", False, True),
+    ("sym", False, False),
+    ("sym", True, False),
+    ("sym", True, True),
+    ("pos", False, False),
+    ("pos", True, False),
+    ("pos", True, True),
+]
+solve_test_ids = [
+    f'{assume_a}_{"lower" if lower else "upper"}_{"A^T" if transposed else "A"}'
+    for assume_a, lower, transposed in solve_test_cases
+]
+
+
 class TestSolve(utt.InferShapeTester):
     @pytest.mark.parametrize("b_shape", [(5, 1), (5,)])
     def test_infer_shape(self, b_shape):
@@ -235,8 +251,12 @@ class TestSolve(utt.InferShapeTester):
     @pytest.mark.parametrize(
         "b_size", [(5, 1), (5, 5), (5,)], ids=["b_col_vec", "b_matrix", "b_vec"]
     )
-    @pytest.mark.parametrize("assume_a", ["gen", "sym", "pos"], ids=str)
-    def test_solve_correctness(self, b_size: tuple[int], assume_a: str):
+    @pytest.mark.parametrize(
+        "assume_a, lower, transposed", solve_test_cases, ids=solve_test_ids
+    )
+    def test_solve_correctness(
+        self, b_size: tuple[int], assume_a: str, lower: bool, transposed: bool
+    ):
         rng = np.random.default_rng(utt.fetch_seed())
         A = pt.tensor("A", shape=(5, 5))
         b = pt.tensor("b", shape=b_size)
@@ -244,7 +264,13 @@ class TestSolve(utt.InferShapeTester):
         A_val = rng.normal(size=(5, 5)).astype(config.floatX)
         b_val = rng.normal(size=b_size).astype(config.floatX)
 
-        solve_op = functools.partial(solve, assume_a=assume_a, b_ndim=len(b_size))
+        solve_op = functools.partial(
+            solve,
+            assume_a=assume_a,
+            lower=lower,
+            transposed=transposed,
+            b_ndim=len(b_size),
+        )
 
         def A_func(x):
             if assume_a == "pos":
@@ -253,6 +279,11 @@ class TestSolve(utt.InferShapeTester):
                 return (x + x.T) / 2
             else:
                 return x
+
+        def T(x):
+            if transposed:
+                return x.T
+            return x
 
         solve_input_val = A_func(A_val)
 
@@ -264,30 +295,27 @@ class TestSolve(utt.InferShapeTester):
         RTOL = 1e-8 if config.floatX.endswith("64") else 1e-4
 
         np.testing.assert_allclose(
-            scipy.linalg.solve(solve_input_val, b_val, assume_a=assume_a),
+            scipy.linalg.solve(
+                solve_input_val,
+                b_val,
+                assume_a=assume_a,
+                transposed=transposed,
+                lower=lower,
+            ),
             X_np,
             atol=ATOL,
             rtol=RTOL,
         )
 
-        np.testing.assert_allclose(A_func(A_val) @ X_np, b_val, atol=ATOL, rtol=RTOL)
+        np.testing.assert_allclose(T(A_func(A_val)) @ X_np, b_val, atol=ATOL, rtol=RTOL)
 
     @pytest.mark.parametrize(
         "b_size", [(5, 1), (5, 5), (5,)], ids=["b_col_vec", "b_matrix", "b_vec"]
     )
     @pytest.mark.parametrize(
         "assume_a, lower, transposed",
-        [
-            ("gen", False, False),
-            ("gen", False, True),
-            ("sym", False, False),
-            ("sym", True, False),
-            ("sym", True, True),
-            ("pos", False, False),
-            ("pos", True, False),
-            ("pos", True, True),
-        ],
-        ids=str,
+        solve_test_cases,
+        ids=solve_test_ids,
     )
     @pytest.mark.skipif(
         config.floatX == "float32", reason="Gradients not numerically stable in float32"
