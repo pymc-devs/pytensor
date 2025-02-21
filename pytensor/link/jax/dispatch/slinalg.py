@@ -53,7 +53,6 @@ def jax_funcify_Solve(op, **kwargs):
 @jax_funcify.register(SolveTriangular)
 def jax_funcify_SolveTriangular(op, **kwargs):
     lower = op.lower
-    trans = op.trans
     unit_diagonal = op.unit_diagonal
     check_finite = op.check_finite
 
@@ -62,7 +61,7 @@ def jax_funcify_SolveTriangular(op, **kwargs):
             A,
             b,
             lower=lower,
-            trans=trans,
+            trans=0,  # this is handled by explicitly transposing A, so it will always be 0 when we get to here.
             unit_diagonal=unit_diagonal,
             check_finite=check_finite,
         )

@@ -205,7 +205,7 @@ class TestSolveBase:
         y = self.SolveTest(b_ndim=2)(A, b)
         assert (
             y.__repr__()
-            == "SolveTest{lower=False, check_finite=True, b_ndim=2, overwrite_a=False, overwrite_b=False}.0"
+            == "SolveTest{lower=False, transposed=False, check_finite=True, b_ndim=2, overwrite_a=False, overwrite_b=False}.0"
         )
 
 
@@ -275,11 +275,26 @@ class TestSolve(utt.InferShapeTester):
     @pytest.mark.parametrize(
         "b_size", [(5, 1), (5, 5), (5,)], ids=["b_col_vec", "b_matrix", "b_vec"]
     )
-    @pytest.mark.parametrize("assume_a", ["gen", "sym", "pos"], ids=str)
+    @pytest.mark.parametrize(
+        "assume_a, lower, transposed",
+        [
+            ("gen", False, False),
+            ("gen", False, True),
+            ("sym", False, False),
+            ("sym", True, False),
+            ("sym", True, True),
+            ("pos", False, False),
+            ("pos", True, False),
+            ("pos", True, True),
+        ],
+        ids=str,
+    )
     @pytest.mark.skipif(
         config.floatX == "float32", reason="Gradients not numerically stable in float32"
     )
-    def test_solve_gradient(self, b_size: tuple[int], assume_a: str):
+    def test_solve_gradient(
+        self, b_size: tuple[int], assume_a: str, lower: bool, transposed: bool
+    ):
         rng = np.random.default_rng(utt.fetch_seed())
 
         eps = 2e-8 if config.floatX == "float64" else None

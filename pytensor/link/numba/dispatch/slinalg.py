@@ -180,7 +180,6 @@ def solve_triangular_impl(A, B, trans, lower, unit_diagonal, b_ndim, overwrite_b
 
 @numba_funcify.register(SolveTriangular)
 def numba_funcify_SolveTriangular(op, node, **kwargs):
-    trans = bool(op.trans)
     lower = op.lower
     unit_diagonal = op.unit_diagonal
     check_finite = op.check_finite
@@ -208,7 +207,7 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
         res = _solve_triangular(
             a,
             b,
-            trans=trans,
+            trans=0,  # transposing is handled explicitly on the graph, so we never use this argument
             lower=lower,
             unit_diagonal=unit_diagonal,
             overwrite_b=overwrite_b,
