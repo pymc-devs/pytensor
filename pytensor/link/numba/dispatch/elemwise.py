@@ -414,7 +414,6 @@ def numba_funcify_DimShuffle(op, node, **kwargs):
     shuffle = tuple(op.shuffle)
     transposition = tuple(op.transposition)
     augment = tuple(op.augment)
-    inplace = op.inplace
 
     ndim_new_shape = len(shuffle) + len(augment)
 
@@ -474,12 +473,7 @@ def numba_funcify_DimShuffle(op, node, **kwargs):
             new_shape = find_shape(shuffle_shape)
 
             # FIXME: Numba's `array.reshape` only accepts C arrays.
-            res_reshape = np.reshape(np.ascontiguousarray(x), new_shape)
-
-            if not inplace:
-                return res_reshape.copy()
-            else:
-                return res_reshape
+            return np.reshape(np.ascontiguousarray(x), new_shape)
 
     else:
 
