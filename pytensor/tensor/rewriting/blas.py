@@ -803,7 +803,7 @@ def local_dot22_to_dot22scalar(fgraph, node):
     """
     if node.op != mul:
         return False
-    i_dot22 = [x.owner and x.owner.op == _dot22 for x in node.inputs]
+    i_dot22 = [x.owner is not None and x.owner.op == _dot22 for x in node.inputs]
     if not any(i_dot22):
         return False  # no dot22
     if i_dot22.count(True) > 1:
@@ -813,14 +813,16 @@ def local_dot22_to_dot22scalar(fgraph, node):
     dot22_idx = i_dot22.index(True)
     d = node.inputs[dot22_idx]
     i_scalar = [_as_scalar(x, dtype=d.dtype) for x in node.inputs]
-    if not any(i_scalar):
+    if all(i is None for i in i_scalar):
         # Check if we can reorder the graph as this mul have a mul in inputs.
         # We support only 1 additional level of mul.
         # The canonizer should have merged those mul together.
         i_mul = [
             x.owner
             and x.owner.op == mul
-            and any(_as_scalar(x_i, dtype=d.dtype) for x_i in x.owner.inputs)
+            and any(
+                _as_scalar(x_i, dtype=d.dtype) is not None for x_i in x.owner.inputs
+            )
             for x in node.inputs
         ]
         if not any(i_mul):
@@ -834,7 +836,7 @@ def local_dot22_to_dot22scalar(fgraph, node):
 
         scalar_idx = -1
         for i, x in enumerate(m.owner.inputs):
-            if _as_scalar(x, dtype=d.dtype) and (
+            if _as_scalar(x, dtype=d.dtype) is not None and (
                 pytensor.scalar.upcast(x.type.dtype, d.type.dtype) == d.type.dtype
             ):
                 scalar_idx = i

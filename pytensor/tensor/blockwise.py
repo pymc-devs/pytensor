@@ -443,6 +443,13 @@ _vectorize_node.register(Blockwise, _vectorize_not_needed)
 class OpWithCoreShape(OpFromGraph):
     """Generalizes an `Op` to include core shape as an additional input."""
 
+    def __init__(self, *args, on_unused_input="ignore", **kwargs):
+        # We set on_unused_inputs="ignore" so that we can easily wrap nodes with repeated inputs
+        # In this case the subsequent appearance of repeated inputs get disconnected in the inner graph
+        # I can't think of a scenario where this will backfire, but if there's one
+        # I bet on inplacing operations (time will tell)
+        return super().__init__(*args, on_unused_input=on_unused_input, **kwargs)
+
 
 class BlockwiseWithCoreShape(OpWithCoreShape):
     """Generalizes a Blockwise `Op` to include a core shape parameter."""

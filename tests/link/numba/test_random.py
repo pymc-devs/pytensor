@@ -10,6 +10,7 @@ import pytensor.tensor.random.basic as ptr
 from pytensor import shared
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
+from pytensor.tensor.random.op import RandomVariableWithCoreShape
 from tests.link.numba.test_basic import (
     compare_numba_and_py,
     numba_mode,
@@ -514,6 +515,31 @@ test_mvnormal_cov_decomposition_method = create_mvnormal_cov_decomposition_metho
             ],
             (pt.as_tensor([2, 1])),
         ),
+        (
+            ptr.invgamma,
+            [
+                (
+                    pt.dvector("shape"),
+                    np.array([1.0, 2.0], dtype=np.float64),
+                ),
+                (
+                    pt.dvector("scale"),
+                    np.array([0.5, 3.0], dtype=np.float64),
+                ),
+            ],
+            (2,),
+        ),
+        (
+            ptr.multinomial,
+            [
+                (
+                    pt.lvector("n"),
+                    np.array([1, 10, 1000], dtype=np.int64),
+                ),
+                (pt.dvector("p"), np.array([0.3, 0.7], dtype=np.float64)),
+            ],
+            None,
+        ),
     ],
     ids=str,
 )
@@ -627,15 +653,11 @@ def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_
 def test_DirichletRV(a, size, cm):
     a, a_val = a
     rng = shared(np.random.default_rng(29402))
-    g = ptr.dirichlet(a, size=size, rng=rng)
-    g_fn = function([a], g, mode=numba_mode)
+    next_rng, g = ptr.dirichlet(a, size=size, rng=rng).owner.outputs
+    g_fn = function([a], g, mode=numba_mode, updates={rng: next_rng})
 
     with cm:
-        all_samples = []
-        for i in range(1000):
-            samples = g_fn(a_val)
-            all_samples.append(samples)
-
+        all_samples = [g_fn(a_val) for _ in range(1000)]
         exp_res = a_val / a_val.sum(-1)
         res = np.mean(all_samples, axis=tuple(range(0, a_val.ndim - 1)))
         assert np.allclose(res, exp_res, atol=1e-4)
@@ -672,3 +694,14 @@ def test_rv_inside_ofg():
 def test_unnatural_batched_dims(batch_dims_tester):
     """Tests for RVs that don't have natural batch dims in Numba API."""
     batch_dims_tester(mode="NUMBA")
+
+
+def test_repeated_args():
+    v = pt.scalar()
+    x = ptr.beta(v, v)
+    fn, _ = compare_numba_and_py([v], [x], [0.5 * 1e6], eval_obj_mode=False)
+
+    # Confirm we are testing a RandomVariable with repeated inputs
+    final_node = fn.maker.fgraph.outputs[0].owner
+    assert isinstance(final_node.op, RandomVariableWithCoreShape)
+    assert final_node.inputs[-2] is final_node.inputs[-1]

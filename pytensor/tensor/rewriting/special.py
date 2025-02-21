@@ -162,7 +162,7 @@ def softmax_simplifier(numerators, denominators):
                         matching_denom = denominator
                         break
 
-        if matching_denom:
+        if matching_denom is not None:
             softmax = Softmax(axis=sum_axis)(numerator.owner.inputs[0])
             copy_stack_trace(numerator, softmax)
             numerators.remove(numerator)

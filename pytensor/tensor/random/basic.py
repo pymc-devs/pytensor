@@ -1219,7 +1219,7 @@ class HalfCauchyRV(ScipyRandomVariable):
 halfcauchy = HalfCauchyRV()
 
 
-class InvGammaRV(ScipyRandomVariable):
+class InvGammaRV(RandomVariable):
     r"""An inverse-gamma continuous random variable.
 
     The probability density function for `invgamma` in terms of its shape
@@ -1266,8 +1266,8 @@ class InvGammaRV(ScipyRandomVariable):
         return super().__call__(shape, scale, size=size, **kwargs)
 
     @classmethod
-    def rng_fn_scipy(cls, rng, shape, scale, size):
-        return stats.invgamma.rvs(shape, scale=scale, size=size, random_state=rng)
+    def rng_fn(cls, rng, shape, scale, size):
+        return 1 / rng.gamma(shape, 1 / scale, size)
 
 
 invgamma = InvGammaRV()

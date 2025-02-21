@@ -2,9 +2,9 @@ import numpy as np
 import pytest
 
 from pytensor import function
-from pytensor.tensor import tensor
+from pytensor.tensor import tensor, tensor3
 from pytensor.tensor.basic import ARange
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.nlinalg import SVD, Det
 from pytensor.tensor.slinalg import Cholesky, cholesky
 from tests.link.numba.test_basic import compare_numba_and_py, numba_mode
@@ -58,3 +58,15 @@ def test_blockwise_benchmark(benchmark):
     x_test = np.eye(3) * np.arange(1, 6)[:, None, None]
     fn(x_test)  # JIT compile
     benchmark(fn, x_test)
+
+
+def test_repeated_args():
+    x = tensor3("x")
+    x_test = np.full((1, 1, 1), 2.0, dtype=x.type.dtype)
+    out = x @ x
+    fn, _ = compare_numba_and_py([x], [out], [x_test], eval_obj_mode=False)
+
+    # Confirm we are testing a Blockwise with repeated inputs
+    final_node = fn.maker.fgraph.outputs[0].owner
+    assert isinstance(final_node.op, BlockwiseWithCoreShape)
+    assert final_node.inputs[0] is final_node.inputs[1]
