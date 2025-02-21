@@ -125,13 +125,6 @@ class DimShuffle(ExternalCOp):
             input_ndim=int64,
         )
 
-    @property
-    def _new_order(self):
-        # Param for C code.
-        # self.new_order may contain 'x', which is not a valid integer value.
-        # We replace it with -1.
-        return [(-1 if x == "x" else x) for x in self.new_order]
-
     def __init__(self, *, input_ndim: int, new_order: Sequence[int | Literal["x"]]):
         super().__init__([self.c_func_file], self.c_func_name)
 
@@ -140,6 +133,7 @@ class DimShuffle(ExternalCOp):
 
         self.input_ndim = input_ndim
         self.new_order = tuple(new_order)
+        self._new_order = [(-1 if x == "x" else x) for x in self.new_order]
 
         for i, j in enumerate(new_order):
             if j != "x":
@@ -231,22 +225,15 @@ class DimShuffle(ExternalCOp):
         return f"DimShuffle{{order=[{','.join(map(str, self.new_order))}]}}"
 
     def perform(self, node, inp, out):
-        (res,) = inp
-        (storage,) = out
+        (inp,) = inp
+        new_order = self._new_order
+        old_shape = inp.shape
+        old_strides = inp.strides
 
-        if not isinstance(res, np.ndarray | np.memmap):
-            raise TypeError(res)
-
-        # Put dropped axis at end
-        res = res.transpose(self.transposition)
-
-        # Define new shape without dropped axis and including new ones
-        new_shape = list(res.shape[: len(self.shuffle)])
-        for augm in self.augment:
-            new_shape.insert(augm, 1)
-        res = res.reshape(new_shape)
-
-        storage[0] = np.asarray(res)
+        res = inp.view()
+        res.shape = [1 if i == -1 else old_shape[i] for i in new_order]
+        res.strides = [0 if i == -1 else old_strides[i] for i in new_order]
+        out[0][0] = res
 
     def infer_shape(self, fgraph, node, shapes):
         (ishp,) = shapes
