@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
+import tests.unittest_tools as utt
 from pytensor.configdefaults import config
 from pytensor.tensor import nlinalg as pt_nlinalg
 from pytensor.tensor import slinalg as pt_slinalg
@@ -103,28 +104,41 @@ def test_jax_basic():
     )
 
 
-@pytest.mark.parametrize("check_finite", [False, True])
-@pytest.mark.parametrize("lower", [False, True])
-@pytest.mark.parametrize("trans", [0, 1, 2])
-def test_jax_SolveTriangular(trans, lower, check_finite):
-    x = matrix("x")
-    b = vector("b")
+def test_jax_solve():
+    rng = np.random.default_rng(utt.fetch_seed())
+
+    A = pt.tensor("A", shape=(5, 5))
+    b = pt.tensor("B", shape=(5, 5))
+
+    out = pt_slinalg.solve(A, b, lower=False, transposed=False)
+
+    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+    b_val = rng.normal(size=(5, 5)).astype(config.floatX)
+
+    compare_jax_and_py(
+        [A, b],
+        [out],
+        [A_val, b_val],
+    )
+
+
+def test_jax_SolveTriangular():
+    rng = np.random.default_rng(utt.fetch_seed())
+
+    A = pt.tensor("A", shape=(5, 5))
+    b = pt.tensor("B", shape=(5, 5))
+
+    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+    b_val = rng.normal(size=(5, 5)).astype(config.floatX)
 
     out = pt_slinalg.solve_triangular(
-        x,
+        A,
         b,
-        trans=trans,
-        lower=lower,
-        check_finite=check_finite,
+        trans=0,
+        lower=True,
+        unit_diagonal=False,
     )
-    compare_jax_and_py(
-        [x, b],
-        [out],
-        [
-            np.eye(10).astype(config.floatX),
-            np.arange(10).astype(config.floatX),
-        ],
-    )
+    compare_jax_and_py([A, b], [out], [A_val, b_val])
 
 
 def test_jax_block_diag():

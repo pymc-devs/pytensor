@@ -205,7 +205,7 @@ class TestSolveBase:
         y = self.SolveTest(b_ndim=2)(A, b)
         assert (
             y.__repr__()
-            == "SolveTest{lower=False, transposed=False, check_finite=True, b_ndim=2, overwrite_a=False, overwrite_b=False}.0"
+            == "SolveTest{lower=False, check_finite=True, b_ndim=2, overwrite_a=False, overwrite_b=False}.0"
         )
 
 
@@ -214,7 +214,38 @@ def test_solve_raises_on_invalid_A():
         Solve(assume_a="test", b_ndim=2)
 
 
+solve_test_cases = [
+    ("gen", False, False),
+    ("gen", False, True),
+    ("sym", False, False),
+    ("sym", True, False),
+    ("sym", True, True),
+    ("pos", False, False),
+    ("pos", True, False),
+    ("pos", True, True),
+]
+solve_test_ids = [
+    f'{assume_a}_{"lower" if lower else "upper"}_{"A^T" if transposed else "A"}'
+    for assume_a, lower, transposed in solve_test_cases
+]
+
+
 class TestSolve(utt.InferShapeTester):
+    @staticmethod
+    def A_func(x, assume_a):
+        if assume_a == "pos":
+            return x @ x.T
+        elif assume_a == "sym":
+            return (x + x.T) / 2
+        else:
+            return x
+
+    @staticmethod
+    def T(x, transposed):
+        if transposed:
+            return x.T
+        return x
+
     @pytest.mark.parametrize("b_shape", [(5, 1), (5,)])
     def test_infer_shape(self, b_shape):
         rng = np.random.default_rng(utt.fetch_seed())
@@ -235,8 +266,12 @@ class TestSolve(utt.InferShapeTester):
     @pytest.mark.parametrize(
         "b_size", [(5, 1), (5, 5), (5,)], ids=["b_col_vec", "b_matrix", "b_vec"]
     )
-    @pytest.mark.parametrize("assume_a", ["gen", "sym", "pos"], ids=str)
-    def test_solve_correctness(self, b_size: tuple[int], assume_a: str):
+    @pytest.mark.parametrize(
+        "assume_a, lower, transposed", solve_test_cases, ids=solve_test_ids
+    )
+    def test_solve_correctness(
+        self, b_size: tuple[int], assume_a: str, lower: bool, transposed: bool
+    ):
         rng = np.random.default_rng(utt.fetch_seed())
         A = pt.tensor("A", shape=(5, 5))
         b = pt.tensor("b", shape=b_size)
@@ -244,19 +279,18 @@ class TestSolve(utt.InferShapeTester):
         A_val = rng.normal(size=(5, 5)).astype(config.floatX)
         b_val = rng.normal(size=b_size).astype(config.floatX)
 
-        solve_op = functools.partial(solve, assume_a=assume_a, b_ndim=len(b_size))
+        A_func = functools.partial(self.A_func, assume_a=assume_a)
+        T = functools.partial(self.T, transposed=transposed)
 
-        def A_func(x):
-            if assume_a == "pos":
-                return x @ x.T
-            elif assume_a == "sym":
-                return (x + x.T) / 2
-            else:
-                return x
+        y = solve(
+            A_func(A),
+            b,
+            assume_a=assume_a,
+            lower=lower,
+            transposed=transposed,
+            b_ndim=len(b_size),
+        )
 
-        solve_input_val = A_func(A_val)
-
-        y = solve_op(A_func(A), b)
         solve_func = pytensor.function([A, b], y)
         X_np = solve_func(A_val.copy(), b_val.copy())
 
@@ -264,30 +298,27 @@ class TestSolve(utt.InferShapeTester):
         RTOL = 1e-8 if config.floatX.endswith("64") else 1e-4
 
         np.testing.assert_allclose(
-            scipy.linalg.solve(solve_input_val, b_val, assume_a=assume_a),
+            scipy.linalg.solve(
+                A_func(A_val),
+                b_val,
+                assume_a=assume_a,
+                transposed=transposed,
+                lower=lower,
+            ),
             X_np,
             atol=ATOL,
             rtol=RTOL,
         )
 
-        np.testing.assert_allclose(A_func(A_val) @ X_np, b_val, atol=ATOL, rtol=RTOL)
+        np.testing.assert_allclose(T(A_func(A_val)) @ X_np, b_val, atol=ATOL, rtol=RTOL)
 
     @pytest.mark.parametrize(
         "b_size", [(5, 1), (5, 5), (5,)], ids=["b_col_vec", "b_matrix", "b_vec"]
     )
     @pytest.mark.parametrize(
         "assume_a, lower, transposed",
-        [
-            ("gen", False, False),
-            ("gen", False, True),
-            ("sym", False, False),
-            ("sym", True, False),
-            ("sym", True, True),
-            ("pos", False, False),
-            ("pos", True, False),
-            ("pos", True, True),
-        ],
-        ids=str,
+        solve_test_cases,
+        ids=solve_test_ids,
     )
     @pytest.mark.skipif(
         config.floatX == "float32", reason="Gradients not numerically stable in float32"
@@ -302,15 +333,8 @@ class TestSolve(utt.InferShapeTester):
         A_val = rng.normal(size=(5, 5)).astype(config.floatX)
         b_val = rng.normal(size=b_size).astype(config.floatX)
 
-        def A_func(x):
-            if assume_a == "pos":
-                return x @ x.T
-            elif assume_a == "sym":
-                return (x + x.T) / 2
-            else:
-                return x
-
         solve_op = functools.partial(solve, assume_a=assume_a, b_ndim=len(b_size))
+        A_func = functools.partial(self.A_func, assume_a=assume_a)
 
         # To correctly check the gradients, we need to include a transformation from the space of unconstrained matrices
         # (A) to a valid input matrix for the given solver. This is done by the A_func function. If this isn't included,
@@ -322,11 +346,27 @@ class TestSolve(utt.InferShapeTester):
 
 
 class TestSolveTriangular(utt.InferShapeTester):
+    @staticmethod
+    def A_func(x, lower, unit_diagonal):
+        x = x @ x.T
+        x = pt.linalg.cholesky(x, lower=lower)
+        if unit_diagonal:
+            x = pt.fill_diagonal(x, 1)
+        return x
+
+    @staticmethod
+    def T(x, trans):
+        if trans == 1:
+            return x.T
+        elif trans == 2:
+            return x.conj().T
+        return x
+
     @pytest.mark.parametrize("b_shape", [(5, 1), (5,)])
     def test_infer_shape(self, b_shape):
         rng = np.random.default_rng(utt.fetch_seed())
         A = matrix()
-        b_val = np.asarray(rng.random(b_shape), dtype=config.floatX)
+        b_val = rng.random(b_shape).astype(config.floatX)
         b = pt.as_tensor_variable(b_val).type()
         self._compile_and_check(
             [A, b],
@@ -339,56 +379,78 @@ class TestSolveTriangular(utt.InferShapeTester):
             warn=False,
         )
 
+    @pytest.mark.parametrize(
+        "b_shape", [(5, 1), (5,), (5, 5)], ids=["b_col_vec", "b_vec", "b_matrix"]
+    )
     @pytest.mark.parametrize("lower", [True, False])
-    def test_correctness(self, lower):
+    @pytest.mark.parametrize("trans", [0, 1, 2])
+    @pytest.mark.parametrize("unit_diagonal", [True, False])
+    def test_correctness(self, b_shape: tuple[int], lower, trans, unit_diagonal):
         rng = np.random.default_rng(utt.fetch_seed())
+        A = pt.tensor("A", shape=(5, 5))
+        b = pt.tensor("b", shape=b_shape)
 
-        b_val = np.asarray(rng.random((5, 1)), dtype=config.floatX)
+        A_val = rng.random((5, 5)).astype(config.floatX)
+        b_val = rng.random(b_shape).astype(config.floatX)
 
-        A_val = np.asarray(rng.random((5, 5)), dtype=config.floatX)
-        A_val = np.dot(A_val.transpose(), A_val)
+        A_func = functools.partial(
+            self.A_func, lower=lower, unit_diagonal=unit_diagonal
+        )
 
-        C_val = scipy.linalg.cholesky(A_val, lower=lower)
+        x = solve_triangular(
+            A_func(A),
+            b,
+            lower=lower,
+            trans=trans,
+            unit_diagonal=unit_diagonal,
+            b_ndim=len(b_shape),
+        )
 
-        A = matrix()
-        b = matrix()
+        f = pytensor.function([A, b], x)
 
-        cholesky = Cholesky(lower=lower)
-        C = cholesky(A)
-        y_lower = solve_triangular(C, b, lower=lower)
-        lower_solve_func = pytensor.function([C, b], y_lower)
+        x_pt = f(A_val, b_val)
+        x_sp = scipy.linalg.solve_triangular(
+            A_func(A_val).eval(),
+            b_val,
+            lower=lower,
+            trans=trans,
+            unit_diagonal=unit_diagonal,
+        )
 
-        assert np.allclose(
-            scipy.linalg.solve_triangular(C_val, b_val, lower=lower),
-            lower_solve_func(C_val, b_val),
+        np.testing.assert_allclose(
+            x_pt,
+            x_sp,
+            atol=1e-8 if config.floatX == "float64" else 1e-4,
+            rtol=1e-8 if config.floatX == "float64" else 1e-4,
         )
 
     @pytest.mark.parametrize(
-        "m, n, lower",
-        [
-            (5, None, False),
-            (5, None, True),
-            (4, 2, False),
-            (4, 2, True),
-        ],
+        "b_shape", [(5, 1), (5,), (5, 5)], ids=["b_col_vec", "b_vec", "b_matrix"]
     )
-    def test_solve_grad(self, m, n, lower):
+    @pytest.mark.parametrize("lower", [True, False])
+    @pytest.mark.parametrize("trans", [0, 1])
+    @pytest.mark.parametrize("unit_diagonal", [True, False])
+    def test_solve_triangular_grad(self, b_shape, lower, trans, unit_diagonal):
+        if config.floatX == "float32":
+            pytest.skip(reason="Not enough precision in float32 to get a good gradient")
+
         rng = np.random.default_rng(utt.fetch_seed())
+        A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+        b_val = rng.normal(size=b_shape).astype(config.floatX)
 
-        # Ensure diagonal elements of `A` are relatively large to avoid
-        # numerical precision issues
-        A_val = (rng.normal(size=(m, m)) * 0.5 + np.eye(m)).astype(config.floatX)
-
-        if n is None:
-            b_val = rng.normal(size=m).astype(config.floatX)
-        else:
-            b_val = rng.normal(size=(m, n)).astype(config.floatX)
+        A_func = functools.partial(
+            self.A_func, lower=lower, unit_diagonal=unit_diagonal
+        )
 
         eps = None
         if config.floatX == "float64":
             eps = 2e-8
 
-        solve_op = SolveTriangular(lower=lower, b_ndim=1 if n is None else 2)
+        def solve_op(A, b):
+            return solve_triangular(
+                A_func(A), b, lower=lower, trans=trans, unit_diagonal=unit_diagonal
+            )
+
         utt.verify_grad(solve_op, [A_val, b_val], 3, rng, eps=eps)
 
 
