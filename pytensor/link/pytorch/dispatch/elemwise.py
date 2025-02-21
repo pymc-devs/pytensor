@@ -61,12 +61,7 @@ def pytorch_funcify_DimShuffle(op, **kwargs):
         for augm in op.augment:
             shape.insert(augm, 1)
 
-        res = torch.reshape(res, shape)
-
-        if not op.inplace:
-            res = res.clone()
-
-        return res
+        return torch.reshape(res, shape)
 
     return dimshuffle
 

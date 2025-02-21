@@ -19,7 +19,6 @@ from pytensor.misc.frozendict import frozendict
 from pytensor.npy_2_compat import normalize_axis_tuple
 from pytensor.printing import Printer, pprint
 from pytensor.scalar import get_scalar_type
-from pytensor.scalar.basic import bool as scalar_bool
 from pytensor.scalar.basic import identity as scalar_identity
 from pytensor.scalar.basic import int64, transfer_type, upcast
 from pytensor.tensor import elemwise_cgen as cgen
@@ -114,15 +113,15 @@ class DimShuffle(ExternalCOp):
 
     _f16_ok = True
     check_input = False
-    __props__ = ("input_ndim", "new_order", "inplace")
+    __props__ = ("input_ndim", "new_order")
     c_func_file = "c_code/dimshuffle.c"
     c_func_name = "APPLY_SPECIFIC(cpu_dimshuffle)"
+    view_map = {0: [0]}
 
     @property
     def params_type(self):
         return ParamsType(
             _new_order=lvector,
-            inplace=scalar_bool,
             input_ndim=int64,
         )
 
@@ -135,7 +134,6 @@ class DimShuffle(ExternalCOp):
         self.input_ndim = input_ndim
         self.new_order = tuple(new_order)
         self._new_order = [(-1 if x == "x" else x) for x in self.new_order]
-        self.inplace = True
 
         for i, j in enumerate(new_order):
             if j != "x":
@@ -177,9 +175,6 @@ class DimShuffle(ExternalCOp):
         self.is_right_expand_dims = self.is_expand_dims and new_order[
             :input_ndim
         ] == list(range(input_ndim))
-
-        if self.inplace:
-            self.view_map = {0: [0]}
 
     def __setstate__(self, state):
         self.__dict__.update(state)
@@ -248,12 +243,7 @@ class DimShuffle(ExternalCOp):
         new_shape = list(res.shape[: len(self.shuffle)])
         for augm in self.augment:
             new_shape.insert(augm, 1)
-        res = res.reshape(new_shape)
-
-        if not self.inplace:
-            res = np.copy(res)
-
-        out[0][0] = res
+        out[0][0] = res.reshape(new_shape)
 
     def infer_shape(self, fgraph, node, shapes):
         (ishp,) = shapes
