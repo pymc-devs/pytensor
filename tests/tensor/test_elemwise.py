@@ -66,6 +66,30 @@ def reduce_bitwise_and(x, axis=-1, dtype="int8"):
     return np.apply_along_axis(custom_reduce, axis, x)
 
 
+def dimshuffle_benchmark(mode, c_contiguous, benchmark):
+    x = tensor3("x")
+    if c_contiguous:
+        x_val = np.random.random((2, 3, 4)).astype(config.floatX)
+    else:
+        x_val = np.random.random((200, 300, 400)).transpose(1, 2, 0)
+    ys = [x.transpose(t) for t in itertools.permutations((0, 1, 2))]
+    ys += [
+        x[None],
+        x[:, None],
+        x[:, :, None],
+        x[:, :, :, None],
+    ]
+    # Borrow to avoid deepcopy overhead
+    fn = pytensor.function(
+        [In(x, borrow=True)],
+        [Out(y, borrow=True) for y in ys],
+        mode=mode,
+    )
+    fn.trust_input = True
+    fn(x_val)  # JIT compile for JIT backends
+    benchmark(fn, x_val)
+
+
 class TestDimShuffle(unittest_tools.InferShapeTester):
     op = DimShuffle
     type = TensorType
@@ -218,23 +242,9 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
         with pytest.raises(TypeError, match="input_ndim must be an integer"):
             DimShuffle(input_ndim=(True, False), new_order=(1, 0))
 
-    def test_benchmark(self, benchmark):
-        x = tensor3("x")
-        x_val = np.random.random((2, 3, 4)).astype(config.floatX)
-        ys = [x.transpose(t) for t in itertools.permutations((0, 1, 2))]
-        ys += [
-            x[None],
-            x[:, None],
-            x[:, :, None],
-            x[:, :, :, None],
-        ]
-        # Borrow to avoid deepcopy overhead
-        fn = pytensor.function(
-            [In(x, borrow=True)],
-            [Out(y, borrow=True) for y in ys],
-        )
-        fn.trust_input = True
-        benchmark(fn, x_val)
+    @pytest.mark.parametrize("c_contiguous", [True, False])
+    def test_benchmark(self, c_contiguous, benchmark):
+        dimshuffle_benchmark("FAST_RUN", c_contiguous, benchmark)
 
 
 class TestBroadcast:
