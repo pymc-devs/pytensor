@@ -10,6 +10,7 @@ from pytensor import function
 from pytensor import tensor as pt
 from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
+from pytensor.graph import FunctionGraph
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
 from pytensor.tensor.blockwise import Blockwise
@@ -993,3 +994,23 @@ def test_slogdet_specialization():
     f = function([x], [exp_det_x, sign_det_x], mode="FAST_RUN")
     nodes = f.maker.fgraph.apply_nodes
     assert not any(isinstance(node.op, SLogDet) for node in nodes)
+
+
+def test_rewrite_A_transposed_solve_to_transposed_solver():
+    A = matrix("A")
+    b = vector("b")
+    x = pt.linalg.solve(A.T, b)
+
+    fg = FunctionGraph([A, b], [x])
+    assert any(isinstance(node.op, DimShuffle) for node in fg.toposort())
+
+    f = function([A, b], x, mode="FAST_RUN")
+    assert not any(
+        isinstance(node.op, DimShuffle) for node in f.maker.fgraph.toposort()
+    )
+
+    A_val = np.random.normal(size=(10, 10))
+    b_val = np.random.normal(size=(10,))
+
+    g = function([A, b], pt.linalg.solve(A.T, b), mode="FAST_COMPILE")
+    np.testing.assert_allclose(f(A_val, b_val), g(A_val, b_val))
