@@ -1052,7 +1052,7 @@ def numba_funcify_Solve(op, node, **kwargs):
     check_finite = op.check_finite
     overwrite_a = op.overwrite_a
     overwrite_b = op.overwrite_b
-    transposed = False  # TODO: Solve doesnt currently allow the transposed argument
+    transposed = op.transposed
 
     dtype = node.inputs[0].dtype
     if str(dtype).startswith("complex"):
