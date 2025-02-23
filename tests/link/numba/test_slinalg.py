@@ -141,8 +141,8 @@ def test_solve_triangular_overwrite_b_correct(overwrite_b):
     b_test_py = np.asfortranarray(rng.normal(size=(3, 2)))
 
     # .T.copy().T creates an f-contiguous copy of an f-contiguous array (otherwise the copy is c-contiguous)
-    a_test_nb = a_test_py.T.copy().T
-    b_test_nb = b_test_py.T.copy().T
+    a_test_nb = a_test_py.copy(order="F")
+    b_test_nb = b_test_py.copy(order="F")
 
     op = SolveTriangular(
         trans=0,

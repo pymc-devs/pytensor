@@ -124,19 +124,25 @@ def solve_triangular_impl(A, B, trans, lower, unit_diagonal, b_ndim, overwrite_b
         _N = np.int32(A.shape[-1])
         _solve_check_input_shapes(A, B)
 
+        # Seems weird to not use the b_ndim input directly, but when I did that Numba complained that the output type
+        # could potentially be 3d (it didn't understand b_ndim was always equal to B.ndim)
         B_is_1d = B.ndim == 1
 
-        A_copy = _copy_to_fortran_order(A)
+        # This will only copy if A is not already fortran contiguous
+        A_f = np.asfortranarray(A)
 
-        # This list is exhaustive, but numba freaks out if we include a final else clause
-        if not overwrite_b and not B_is_1d:
-            B_copy = _copy_to_fortran_order(B)
-        elif overwrite_b and not B_is_1d:
-            B_copy = np.asfortranarray(B)
-        elif not overwrite_b and B_is_1d:
-            B_copy = np.copy(np.expand_dims(B, -1))
-        elif overwrite_b and B_is_1d:
-            B_copy = np.expand_dims(B, -1)
+        if overwrite_b:
+            if B_is_1d:
+                B_copy = np.expand_dims(B, -1)
+            else:
+                # This *will* allow inplace destruction of B, but only if it is already fortran contiguous.
+                # Otherwise, there's no way to get around the need to copy the data before going into TRTRS
+                B_copy = np.asfortranarray(B)
+        else:
+            if B_is_1d:
+                B_copy = np.copy(np.expand_dims(B, -1))
+            else:
+                B_copy = _copy_to_fortran_order(B)
 
         NRHS = 1 if B_is_1d else int(B_copy.shape[-1])
 
@@ -155,7 +161,7 @@ def solve_triangular_impl(A, B, trans, lower, unit_diagonal, b_ndim, overwrite_b
             DIAG,
             N,
             NRHS,
-            A_copy.view(w_type).ctypes,
+            A_f.view(w_type).ctypes,
             LDA,
             B_copy.view(w_type).ctypes,
             LDB,
