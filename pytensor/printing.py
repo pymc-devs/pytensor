@@ -544,7 +544,7 @@ def _debugprint(
         type_str = ""
 
     if print_shape:
-        shape_str = f" shape={str(var.type.shape).replace("None", "?")}"
+        shape_str = f" shape={str(var.type.shape).replace('None', '?')}"
     else:
         shape_str = ""
 
