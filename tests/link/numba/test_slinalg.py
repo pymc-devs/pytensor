@@ -10,6 +10,7 @@ from scipy import linalg as scipy_linalg
 import pytensor
 import pytensor.tensor as pt
 from pytensor import config
+from pytensor.tensor.slinalg import SolveTriangular
 from tests import unittest_tools as utt
 from tests.link.numba.test_basic import compare_numba_and_py
 
@@ -128,6 +129,48 @@ def test_solve_triangular_grad(lower, unit_diag, trans):
         [A_val.copy(), b_val.copy()],
         mode="NUMBA",
     )
+
+
+@pytest.mark.parametrize("overwrite_b", [True, False], ids=["inplace", "not_inplace"])
+def test_solve_triangular_overwrite_b_correct(overwrite_b):
+    # Regression test for issue #1233
+
+    rng = np.random.default_rng(utt.fetch_seed())
+    a_test_py = np.asfortranarray(rng.normal(size=(3, 3)))
+    a_test_py = np.tril(a_test_py)
+    b_test_py = np.asfortranarray(rng.normal(size=(3, 2)))
+
+    # .T.copy().T creates an f-contiguous copy of an f-contiguous array (otherwise the copy is c-contiguous)
+    a_test_nb = a_test_py.T.copy().T
+    b_test_nb = b_test_py.T.copy().T
+
+    op = SolveTriangular(
+        trans=0,
+        unit_diagonal=False,
+        lower=False,
+        check_finite=True,
+        b_ndim=2,
+        overwrite_b=overwrite_b,
+    )
+
+    a_pt = pt.matrix("a", shape=(3, 3))
+    b_pt = pt.matrix("b", shape=(3, 2))
+    out = op(a_pt, b_pt)
+
+    py_fn = pytensor.function([a_pt, b_pt], out, accept_inplace=True)
+    numba_fn = pytensor.function([a_pt, b_pt], out, accept_inplace=True, mode="NUMBA")
+
+    x_py = py_fn(a_test_py, b_test_py)
+    x_nb = numba_fn(a_test_nb, b_test_nb)
+
+    np.testing.assert_allclose(
+        py_fn(a_test_py, b_test_py), numba_fn(a_test_nb, b_test_nb)
+    )
+    np.testing.assert_allclose(b_test_py, b_test_nb)
+
+    if overwrite_b:
+        np.testing.assert_allclose(b_test_py, x_py)
+        np.testing.assert_allclose(b_test_nb, x_nb)
 
 
 @pytest.mark.parametrize("value", [np.nan, np.inf])
