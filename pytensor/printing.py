@@ -543,7 +543,7 @@ def _debugprint(
     else:
         type_str = ""
 
-    if print_shape:
+    if print_shape and hasattr(var.type, "shape"):
         shape_str = f" shape={str(var.type.shape).replace('None', '?')}"
     else:
         shape_str = ""
