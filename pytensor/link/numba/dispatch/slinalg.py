@@ -126,17 +126,17 @@ def solve_triangular_impl(A, B, trans, lower, unit_diagonal, b_ndim, overwrite_b
 
         B_is_1d = B.ndim == 1
 
-        if overwrite_b:
-            B_copy = B
-        else:
-            if B_is_1d:
-                # _copy_to_fortran_order does nothing with vectors
-                B_copy = np.copy(B)
-            else:
-                B_copy = _copy_to_fortran_order(B)
+        A_copy = _copy_to_fortran_order(A)
 
-        if B_is_1d:
-            B_copy = np.expand_dims(B_copy, -1)
+        # This list is exhaustive, but numba freaks out if we include a final else clause
+        if not overwrite_b and not B_is_1d:
+            B_copy = _copy_to_fortran_order(B)
+        elif overwrite_b and not B_is_1d:
+            B_copy = np.asfortranarray(B)
+        elif not overwrite_b and B_is_1d:
+            B_copy = np.copy(np.expand_dims(B, -1))
+        elif overwrite_b and B_is_1d:
+            B_copy = np.expand_dims(B, -1)
 
         NRHS = 1 if B_is_1d else int(B_copy.shape[-1])
 
@@ -155,7 +155,7 @@ def solve_triangular_impl(A, B, trans, lower, unit_diagonal, b_ndim, overwrite_b
             DIAG,
             N,
             NRHS,
-            np.asfortranarray(A).T.view(w_type).ctypes,
+            A_copy.view(w_type).ctypes,
             LDA,
             B_copy.view(w_type).ctypes,
             LDB,
