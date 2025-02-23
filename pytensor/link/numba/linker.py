@@ -4,9 +4,17 @@ from pytensor.link.basic import JITLinker
 class NumbaLinker(JITLinker):
     """A `Linker` that JIT-compiles NumPy-based operations using Numba."""
 
+    def __init__(self, *args, debug: bool = False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.debug = debug
+
     def fgraph_convert(self, fgraph, **kwargs):
         from pytensor.link.numba.dispatch import numba_funcify
 
+        if self.debug:
+            from pytensor.link.numba.dispatch.basic import numba_funcify_debug
+
+            kwargs.setdefault("op_conversion_fn", numba_funcify_debug)
         return numba_funcify(fgraph, **kwargs)
 
     def jit_compile(self, fn):
