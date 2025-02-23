@@ -42,6 +42,7 @@ Advanced
 
     sparse
     prng
+    conv_arithmetic
 
 Advanced configuration and debugging
 ------------------------------------
