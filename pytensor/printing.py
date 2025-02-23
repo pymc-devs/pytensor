@@ -89,6 +89,7 @@ def debugprint(
     | Sequence[Variable | Apply | Function | FunctionGraph],
     depth: int = -1,
     print_type: bool = False,
+    print_shape: bool = False,
     file: Literal["str"] | TextIO | None = None,
     id_type: IDTypesType = "CHAR",
     stop_on_name: bool = False,
@@ -123,6 +124,8 @@ def debugprint(
         Print graph to this depth (``-1`` for unlimited).
     print_type
         If ``True``, print the `Type`\s of each `Variable` in the graph.
+    print_shape
+        If ``True``, print the shape of each `Variable` in the graph.
     file
         When `file` extends `TextIO`, print to it; when `file` is
         equal to ``"str"``, return a string; when `file` is ``None``, print to
@@ -265,6 +268,7 @@ N.B.:
             depth=depth,
             done=done,
             print_type=print_type,
+            print_shape=print_shape,
             file=_file,
             id_type=id_type,
             inner_graph_ops=inner_graph_vars,
@@ -295,6 +299,7 @@ N.B.:
             depth=depth,
             done=done,
             print_type=print_type,
+            print_shape=print_shape,
             file=_file,
             topo_order=topo_order,
             id_type=id_type,
@@ -365,6 +370,7 @@ N.B.:
                 depth=depth,
                 done=done,
                 print_type=print_type,
+                print_shape=print_shape,
                 file=_file,
                 id_type=id_type,
                 inner_graph_ops=inner_graph_vars,
@@ -387,6 +393,7 @@ N.B.:
                         depth=depth,
                         done=done,
                         print_type=print_type,
+                        print_shape=print_shape,
                         file=_file,
                         id_type=id_type,
                         stop_on_name=stop_on_name,
@@ -421,6 +428,7 @@ N.B.:
                     depth=depth,
                     done=done,
                     print_type=print_type,
+                    print_shape=print_shape,
                     file=_file,
                     id_type=id_type,
                     stop_on_name=stop_on_name,
@@ -452,6 +460,7 @@ def _debugprint(
     depth: int = -1,
     done: dict[Literal["output"] | Variable | Apply, str] | None = None,
     print_type: bool = False,
+    print_shape: bool = False,
     file: TextIO = sys.stdout,
     print_destroy_map: bool = False,
     print_view_map: bool = False,
@@ -483,6 +492,8 @@ def _debugprint(
     done
         See `debugprint`.
     print_type
+        See `debugprint`.
+    print_shape
         See `debugprint`.
     file
         File-like object to which to print.
@@ -531,6 +542,11 @@ def _debugprint(
         type_str = f" <{var.type}>"
     else:
         type_str = ""
+
+    if print_shape:
+        shape_str = f" shape={str(var.type.shape).replace("None", "?")}"
+    else:
+        shape_str = ""
 
     if prefix_child is None:
         prefix_child = prefix
@@ -612,7 +628,7 @@ def _debugprint(
         if is_inner_graph_header:
             var_output = f"{prefix}{node.op}{id_str}{destroy_map_str}{view_map_str}{o}"
         else:
-            var_output = f"{prefix}{node.op}{output_idx}{id_str}{type_str}{var_name}{destroy_map_str}{view_map_str}{o}{data}"
+            var_output = f"{prefix}{node.op}{output_idx}{id_str}{type_str}{shape_str}{var_name}{destroy_map_str}{view_map_str}{o}{data}"
 
         if print_op_info and node not in op_information:
             op_information.update(op_debug_information(node.op, node))
@@ -662,6 +678,7 @@ def _debugprint(
                     depth=depth - 1,
                     done=_done,
                     print_type=print_type,
+                    print_shape=print_shape,
                     file=file,
                     topo_order=topo_order,
                     id_type=id_type,
@@ -692,7 +709,7 @@ def _debugprint(
         else:
             data = ""
 
-        var_output = f"{prefix}{var}{id_str}{type_str}{data}"
+        var_output = f"{prefix}{var}{id_str}{type_str}{shape_str}{data}"
 
         if print_op_info and var.owner and var.owner not in op_information:
             op_information.update(op_debug_information(var.owner.op, var.owner))
