@@ -165,10 +165,12 @@ def function(
     on_unused_input
         What to do if a variable in the 'inputs' list is not used in the graph.
         Possible values are 'raise', 'warn', 'ignore' and None.
-    trust_input: bool
-        If True, the inputs are trusted to be correct. This is used to avoid
-        the overhead of checking the inputs for correctness. This should only
-        be used if the inputs are guaranteed to be correct.
+    trust_input: bool, default False
+        If True, no input validation checks are performed when the function is 
+        called. This includes checking the number of inputs, their types and
+        that multiple inputs are not aliased to each other. Failure to meet any
+        of these conditions can lead to computational errors or to the 
+        interpreter crashing.
 
     Returns
     -------

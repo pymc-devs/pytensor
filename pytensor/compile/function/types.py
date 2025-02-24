@@ -408,10 +408,12 @@ class Function:
             TODO
         maker
             The `FunctionMaker` that created this instance.
-        trust_input : bool
-            If True, the inputs are trusted to be correct. This is used to avoid
-            the overhead of checking the inputs for correctness. This should only
-            be used if the inputs are guaranteed to be correct.
+        trust_input : bool, default False
+            If True, no input validation checks are performed when the function is 
+            called. This includes checking the number of inputs, their types and
+            that multiple inputs are not aliased to each other. Failure to meet any
+            of these conditions can lead to computational errors or to the 
+            interpreter crashing.
         name
             A string name.
         """
@@ -1346,10 +1348,12 @@ class FunctionMaker:
     name : str
         An optional name for this function. If used, the profile mode will
         print the time spent in this function.
-    trust_input : bool
-        If True, the inputs are trusted to be correct. This is used to avoid
-        the overhead of checking the inputs for correctness. This should only
-        be used if the inputs are guaranteed to be correct.
+    trust_input : bool, default False
+        If True, no input validation checks are performed when the function is 
+        called. This includes checking the number of inputs, their types and
+        that multiple inputs are not aliased to each other. Failure to meet any
+        of these conditions can lead to computational errors or to the 
+        interpreter crashing.
     """
 
     @staticmethod
@@ -1785,10 +1789,12 @@ def orig_function(
     fgraph
         An existing `FunctionGraph` to use instead of constructing a new one
         from cloned `outputs`.
-    trust_input : bool
-        If True, the inputs are trusted to be correct. This is used to avoid
-        the overhead of checking the inputs for correctness. This should only
-        be used if the inputs are guaranteed to be correct.
+    trust_input : bool, default False
+        If True, no input validation checks are performed when the function is 
+        called. This includes checking the number of inputs, their types and
+        that multiple inputs are not aliased to each other. Failure to meet any
+        of these conditions can lead to computational errors or to the 
+        interpreter crashing.
     """
 
     if profile:
