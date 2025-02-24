@@ -399,22 +399,13 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         else:
             shape = self.shape
             len_shape = len(shape)
-
-            def shape_str(s):
-                if s is None:
-                    return "?"
-                else:
-                    return str(s)
-
-            formatted_shape = ", ".join(shape_str(s) for s in shape)
-            if len_shape == 1:
-                formatted_shape += ","
+            formatted_shape = str(shape).replace("None", "?")
 
             if len_shape > 2:
                 name = f"Tensor{len_shape}"
             else:
                 name = ("Scalar", "Vector", "Matrix")[len_shape]
-            return f"{name}({self.dtype}, shape=({formatted_shape}))"
+            return f"{name}({self.dtype}, shape={formatted_shape})"
 
     def __repr__(self):
         return f"TensorType({self.dtype}, shape={self.shape})"
