@@ -207,6 +207,7 @@ class SolveBase(Op):
 
     __props__: tuple[str, ...] = (
         "lower",
+        "transposed",
         "check_finite",
         "b_ndim",
         "overwrite_a",
@@ -218,11 +219,13 @@ class SolveBase(Op):
         *,
         lower=False,
         check_finite=True,
+        transposed=False,
         b_ndim,
         overwrite_a=False,
         overwrite_b=False,
     ):
         self.lower = lower
+        self.transposed = transposed
         self.check_finite = check_finite
         assert b_ndim in (1, 2)
         self.b_ndim = b_ndim
@@ -296,15 +299,28 @@ class SolveBase(Op):
         # We need to return (dC/d[inv(A)], dC/db)
         c_bar = output_gradients[0]
 
-        trans_solve_op = type(self)(
-            **{
-                k: (not getattr(self, k) if k == "lower" else getattr(self, k))
-                for k in self.__props__
-            }
-        )
-        b_bar = trans_solve_op(A.T, c_bar)
+        props_dict = self._props_dict()
+
+        if isinstance(self, SolveTriangular):
+            # SolveTriangular has a special trans argument we have to handle
+            transposed = props_dict.pop("trans") in [1, "T"]
+            props_dict["trans"] = not transposed
+        else:
+            transposed = props_dict.pop("transposed")
+            props_dict["transposed"] = not transposed
+
+        # TODO: We were flipping lower before, but it doesn't appear we need to -- all tests pass without taking it into
+        #  account.
+        # props_dict['lower'] = not self.lower
+
+        solve_op = type(self)(**props_dict)
+
+        b_bar = solve_op(A, c_bar)
         # force outer product if vector second input
         A_bar = -ptm.outer(b_bar, c) if c.ndim == 1 else -b_bar.dot(c.T)
+
+        if transposed:
+            A_bar = A_bar.T
 
         return [A_bar, b_bar]
 
@@ -396,9 +412,10 @@ class SolveTriangular(SolveBase):
     def __init__(self, *, trans=0, unit_diagonal=False, **kwargs):
         if kwargs.get("overwrite_a", False):
             raise ValueError("overwrite_a is not supported for SolverTriangulare")
+
         super().__init__(**kwargs)
-        self.trans = trans
         self.unit_diagonal = unit_diagonal
+        self.trans = trans
 
     def perform(self, node, inputs, outputs):
         A, b = inputs
@@ -445,9 +462,9 @@ def solve_triangular(
 
     Parameters
     ----------
-    a
+    a: TensorVariable
         Square input data
-    b
+    b: TensorVariable
         Input data for the right hand side.
     lower : bool, optional
         Use only data contained in the lower triangle of `a`. Default is to use upper triangle.
@@ -488,6 +505,7 @@ class Solve(SolveBase):
     __props__ = (
         "assume_a",
         "lower",
+        "transposed",
         "check_finite",
         "b_ndim",
         "overwrite_a",
@@ -507,6 +525,7 @@ class Solve(SolveBase):
             a=a,
             b=b,
             lower=self.lower,
+            transposed=self.transposed,
             check_finite=self.check_finite,
             assume_a=self.assume_a,
             overwrite_a=self.overwrite_a,
@@ -534,6 +553,7 @@ def solve(
     *,
     assume_a="gen",
     lower=False,
+    transposed=False,
     check_finite=True,
     b_ndim: int | None = None,
 ):
@@ -564,8 +584,11 @@ def solve(
     b : (..., N, NRHS) array_like
         Input data for the right hand side.
     lower : bool, optional
-        If True, only the data contained in the lower triangle of `a`. Default
+        If True, use only the data contained in the lower triangle of `a`. Default
         is to use upper triangle. (ignored for ``'gen'``)
+    transposed: bool, optional
+        If True, solves the system A^T x = b, without actually performing the transpose operation on A.
+        Default is False.
     check_finite : bool, optional
         Whether to check that the input matrices contain only finite numbers.
         Disabling may give a performance gain, but may result in problems
@@ -580,6 +603,7 @@ def solve(
     return Blockwise(
         Solve(
             lower=lower,
+            transposed=transposed,
             check_finite=check_finite,
             assume_a=assume_a,
             b_ndim=b_ndim,

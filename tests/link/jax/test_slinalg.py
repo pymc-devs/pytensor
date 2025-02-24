@@ -73,16 +73,6 @@ def test_jax_basic():
         ],
     )
 
-    out = pt_slinalg.solve(x, b)
-    compare_jax_and_py(
-        [x, b],
-        [out],
-        [
-            np.eye(10).astype(config.floatX),
-            np.arange(10).astype(config.floatX),
-        ],
-    )
-
     out = pt.diag(b)
     compare_jax_and_py([b], [out], [np.arange(10).astype(config.floatX)])
 
@@ -100,6 +90,45 @@ def test_jax_basic():
                 config.floatX
             )
         ],
+    )
+
+
+solve_test_cases = [
+    ("gen", False, False),
+    ("gen", False, True),
+    ("sym", False, False),
+    ("sym", True, False),
+    ("sym", True, True),
+    ("pos", False, False),
+    ("pos", True, False),
+    ("pos", True, True),
+]
+solve_test_ids = [
+    f'{assume_a}_{"lower" if lower else "upper"}_{"A^T" if transposed else "A"}'
+    for assume_a, lower, transposed in solve_test_cases
+]
+
+
+@pytest.mark.parametrize("b_shape", [(5,), (5, 5)])
+@pytest.mark.parametrize(
+    "assume_a, lower, transposed", solve_test_cases, ids=solve_test_ids
+)
+def test_jax_solve(b_shape: tuple[int], assume_a: str, lower: bool, transposed: bool):
+    A = pt.tensor("A", shape=(5, 5))
+    B = pt.tensor("B", shape=b_shape)
+
+    A_val = np.random.normal(size=(5, 5)).astype(config.floatX)
+    b_val = np.random.normal(size=b_shape).astype(config.floatX)
+
+    if assume_a == "sym":
+        A_val = (A_val + A_val.T) / 2
+    elif assume_a == "pos":
+        A_val = A_val @ A_val.T
+
+    out = pt_slinalg.solve(A, B, assume_a=assume_a, lower=lower, transposed=transposed)
+
+    compare_jax_and_py(
+        graph_inputs=[A, B], graph_outputs=[out], test_inputs=[A_val, b_val]
     )
 
 
