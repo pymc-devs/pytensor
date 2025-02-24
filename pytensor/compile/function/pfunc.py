@@ -426,10 +426,12 @@ def pfunc(
     fgraph
         An existing `FunctionGraph` from which to construct the returned
         `Function`.  When this is non-``None``, nothing is cloned.
-    trust_input : bool
-        If True, the inputs are trusted to be correct. This is used to avoid
-        the overhead of checking the inputs for correctness. This should only
-        be used if the inputs are guaranteed to be correct.
+    trust_input : bool, default False
+        If True, no input validation checks are performed when the function is 
+        called. This includes checking the number of inputs, their types and
+        that multiple inputs are not aliased to each other. Failure to meet any
+        of these conditions can lead to computational errors or to the 
+        interpreter crashing.
 
     Returns
     -------
