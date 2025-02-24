@@ -567,6 +567,13 @@ class ReplaceValidate(History, Validator):
         if verbose is None:
             verbose = config.optimizer_verbose
 
+        if verbose:
+            print_reason = True
+            if config.optimizer_verbose_ignore:
+                print_reason = str(reason) not in config.optimizer_verbose_ignore.split(
+                    ","
+                )
+
         for r, new_r in replacements:
             try:
                 fgraph.replace(r, new_r, reason=reason, verbose=False, **kwargs)
@@ -608,7 +615,7 @@ class ReplaceValidate(History, Validator):
                 )
             raise
 
-        if verbose:
+        if verbose and print_reason:
             print(  # noqa: T201
                 f"rewriting: rewrite {reason} replaces {r} of {r.owner} with {new_r} of {new_r.owner}"
             )
