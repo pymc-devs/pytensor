@@ -445,6 +445,15 @@ class TestLocalReshapeToDimshuffle:
         new_out = rewrite_graph(out, include=("canonicalize", "ShapeOpt"))
         assert equal_computations([new_out], [pt.alloc(x, 12, 9)], strict_dtype=False)
 
+    def test_reshape_implies_size_1_input(self):
+        x = pt.matrix("x", shape=(None, None))
+        out = pt.reshape(x, (1, 1, 1))
+
+        new_out = rewrite_graph(out, include=("canonicalize",))
+        assert equal_computations(
+            [new_out], [x.dimshuffle("x", "x", "x")], strict_dtype=False
+        )
+
 
 def test_expand_dims_squeeze_reshape_fusion():
     x = pt.tensor("x", shape=(1, 9))
