@@ -966,16 +966,15 @@ def local_reshape_to_dimshuffle(fgraph, node):
     inp, output_shape = node.inputs
     [output] = node.outputs
 
-    # Remove any broadcastable dimensions from the input
-    squeeze_axes = [i for i, bcast in enumerate(inp.type.broadcastable) if bcast]
-
     # Trivial case, all dimensions of input/output are known to be broadcastable:
     # there's nothing to reshape
     if all(inp.type.broadcastable) or all(output.type.broadcastable):
+        squeeze_axes = tuple(range(inp.type.ndim))
         new_output_shape = []
         expand_axes = tuple(range(output.type.ndim))
 
     else:
+        squeeze_axes = [i for i, bcast in enumerate(inp.type.broadcastable) if bcast]
         unpacked_shape = _unpack_shape_vector(output_shape)
         new_output_shape = []
         expand_axes = []
