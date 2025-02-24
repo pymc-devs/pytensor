@@ -409,10 +409,10 @@ class Function:
         maker
             The `FunctionMaker` that created this instance.
         trust_input : bool, default False
-            If True, no input validation checks are performed when the function is 
+            If True, no input validation checks are performed when the function is
             called. This includes checking the number of inputs, their types and
             that multiple inputs are not aliased to each other. Failure to meet any
-            of these conditions can lead to computational errors or to the 
+            of these conditions can lead to computational errors or to the
             interpreter crashing.
         name
             A string name.
@@ -1349,10 +1349,10 @@ class FunctionMaker:
         An optional name for this function. If used, the profile mode will
         print the time spent in this function.
     trust_input : bool, default False
-        If True, no input validation checks are performed when the function is 
+        If True, no input validation checks are performed when the function is
         called. This includes checking the number of inputs, their types and
         that multiple inputs are not aliased to each other. Failure to meet any
-        of these conditions can lead to computational errors or to the 
+        of these conditions can lead to computational errors or to the
         interpreter crashing.
     """
 
@@ -1790,10 +1790,10 @@ def orig_function(
         An existing `FunctionGraph` to use instead of constructing a new one
         from cloned `outputs`.
     trust_input : bool, default False
-        If True, no input validation checks are performed when the function is 
+        If True, no input validation checks are performed when the function is
         called. This includes checking the number of inputs, their types and
         that multiple inputs are not aliased to each other. Failure to meet any
-        of these conditions can lead to computational errors or to the 
+        of these conditions can lead to computational errors or to the
         interpreter crashing.
     """
 
