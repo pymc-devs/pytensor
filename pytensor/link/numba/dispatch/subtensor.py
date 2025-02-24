@@ -130,7 +130,6 @@ def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
         if isinstance(idx.type, TensorType)
     ]
 
-    # Special case for consecutive consecutive vector indices
     def broadcasted_to(x_bcast: tuple[bool, ...], to_bcast: tuple[bool, ...]):
         # Check that x is not broadcasted to y based on broadcastable info
         if len(x_bcast) < len(to_bcast):
@@ -176,7 +175,14 @@ def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
         or (
             isinstance(op, AdvancedIncSubtensor)
             and not op.set_instead_of_inc
-            and not op.ignore_duplicates
+            and not (
+                op.ignore_duplicates
+                # Only vector integer indices can have "duplicates", not scalars or boolean vectors
+                or all(
+                    adv_idx["ndim"] == 0 or adv_idx["dtype"] == "bool"
+                    for adv_idx in adv_idxs
+                )
+            )
         )
     ):
         return generate_fallback_impl(op, node, **kwargs)
