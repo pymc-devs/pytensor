@@ -81,6 +81,7 @@ class PyTensorConfigParser:
     allow_gc: bool
     optimizer: str
     optimizer_verbose: bool
+    optimizer_verbose_ignore: str
     on_opt_error: str
     nocleanup: bool
     on_unused_input: str

@@ -1305,9 +1305,15 @@ class SequentialNodeRewriter(NodeRewriter):
                     new_vars = list(new_repl.values())
 
                 if config.optimizer_verbose:
-                    print(  # noqa: T201
-                        f"rewriting: rewrite {rewrite} replaces node {node} with {new_repl}"
-                    )
+                    print_reason = True
+                    if config.optimizer_verbose_ignore:
+                        print_reason = str(
+                            rewrite
+                        ) not in config.optimizer_verbose_ignore.split(",")
+                    if print_reason:
+                        print(  # noqa: T201
+                            f"rewriting: rewrite {rewrite} replaces node {node} with {new_repl}"
+                        )
 
                 if self.profile:
                     self.node_created[rewrite] += len(
