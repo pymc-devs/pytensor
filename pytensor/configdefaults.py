@@ -331,7 +331,7 @@ def add_compile_configvars():
                 rc = 1
             if rc != 0:
                 _logger.warning(
-                    "g++ not available, if using conda: `conda install m2w64-toolchain`"
+                    "g++ not available, if using conda: `conda install gxx`"
                 )
 
     if rc != 0:
