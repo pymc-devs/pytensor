@@ -19,9 +19,8 @@ from pytensor.misc.frozendict import frozendict
 from pytensor.npy_2_compat import normalize_axis_tuple
 from pytensor.printing import Printer, pprint
 from pytensor.scalar import get_scalar_type
-from pytensor.scalar.basic import bool as scalar_bool
 from pytensor.scalar.basic import identity as scalar_identity
-from pytensor.scalar.basic import transfer_type, upcast
+from pytensor.scalar.basic import int64, transfer_type, upcast
 from pytensor.tensor import elemwise_cgen as cgen
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import _get_vector_length, as_tensor_variable
@@ -114,17 +113,16 @@ class DimShuffle(ExternalCOp):
 
     _f16_ok = True
     check_input = False
-    __props__ = ("input_ndim", "new_order", "inplace")
+    __props__ = ("input_ndim", "new_order")
     c_func_file = "c_code/dimshuffle.c"
     c_func_name = "APPLY_SPECIFIC(cpu_dimshuffle)"
+    view_map = {0: [0]}
 
     @property
     def params_type(self):
         return ParamsType(
-            shuffle=lvector,
-            augment=lvector,
-            transposition=lvector,
-            inplace=scalar_bool,
+            _new_order=lvector,
+            input_ndim=int64,
         )
 
     def __init__(self, *, input_ndim: int, new_order: Sequence[int | Literal["x"]]):
@@ -135,7 +133,7 @@ class DimShuffle(ExternalCOp):
 
         self.input_ndim = input_ndim
         self.new_order = tuple(new_order)
-        self.inplace = True
+        self._new_order = [(-1 if x == "x" else x) for x in self.new_order]
 
         for i, j in enumerate(new_order):
             if j != "x":
@@ -177,9 +175,6 @@ class DimShuffle(ExternalCOp):
         self.is_right_expand_dims = self.is_expand_dims and new_order[
             :input_ndim
         ] == list(range(input_ndim))
-
-        if self.inplace:
-            self.view_map = {0: [0]}
 
     def __setstate__(self, state):
         self.__dict__.update(state)
@@ -231,10 +226,15 @@ class DimShuffle(ExternalCOp):
 
     def perform(self, node, inp, out):
         (res,) = inp
-        (storage,) = out
 
-        if not isinstance(res, np.ndarray | np.memmap):
-            raise TypeError(res)
+        # This C-like impl is very slow in Python compared to transpose+reshape
+        # new_order = self._new_order
+        # old_shape = inp.shape
+        # old_strides = inp.strides
+        # res = as_strided(
+        #     shape = [1 if i == -1 else old_shape[i] for i in new_order],
+        #     strides=[0 if i == -1 else old_strides[i] for i in new_order],
+        # )
 
         # Put dropped axis at end
         res = res.transpose(self.transposition)
@@ -243,12 +243,7 @@ class DimShuffle(ExternalCOp):
         new_shape = list(res.shape[: len(self.shuffle)])
         for augm in self.augment:
             new_shape.insert(augm, 1)
-        res = res.reshape(new_shape)
-
-        if not self.inplace:
-            res = np.copy(res)
-
-        storage[0] = np.asarray(res)
+        out[0][0] = res.reshape(new_shape)
 
     def infer_shape(self, fgraph, node, shapes):
         (ishp,) = shapes

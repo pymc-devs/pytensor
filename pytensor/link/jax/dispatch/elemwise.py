@@ -79,12 +79,7 @@ def jax_funcify_DimShuffle(op, **kwargs):
         for augm in op.augment:
             shape.insert(augm, 1)
 
-        res = jnp.reshape(res, shape)
-
-        if not op.inplace:
-            res = jnp.copy(res)
-
-        return res
+        return jnp.reshape(res, shape)
 
     return dimshuffle
 
