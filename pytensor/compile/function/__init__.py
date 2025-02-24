@@ -107,6 +107,7 @@ def function(
     allow_input_downcast: bool | None = None,
     profile: bool | ProfileStats | None = None,
     on_unused_input: str | None = None,
+    trust_input: bool = False,
 ):
     """
     Return a :class:`callable object <pytensor.compile.function.types.Function>`
@@ -164,6 +165,12 @@ def function(
     on_unused_input
         What to do if a variable in the 'inputs' list is not used in the graph.
         Possible values are 'raise', 'warn', 'ignore' and None.
+    trust_input: bool, default False
+        If True, no input validation checks are performed when the function is
+        called. This includes checking the number of inputs, their types and
+        that multiple inputs are not aliased to each other. Failure to meet any
+        of these conditions can lead to computational errors or to the
+        interpreter crashing.
 
     Returns
     -------
@@ -294,7 +301,8 @@ def function(
             "contained in a list, even when there is a single "
             "input."
         )
-
+    if len(inputs) == 0:
+        trust_input = True  # we can trust the empty input (for speed)
     # compute some features of the arguments:
     uses_tuple = any(isinstance(i, list | tuple) for i in inputs)
     uses_updates = bool(updates)
@@ -310,7 +318,12 @@ def function(
                 "semantics, which disallow using updates and givens"
             )
         fn = orig_function(
-            inputs, outputs, mode=mode, accept_inplace=accept_inplace, name=name
+            inputs,
+            outputs,
+            mode=mode,
+            accept_inplace=accept_inplace,
+            name=name,
+            trust_input=trust_input,
         )
     else:
         # note: pfunc will also call orig_function -- orig_function is
@@ -329,5 +342,6 @@ def function(
             on_unused_input=on_unused_input,
             profile=profile,
             output_keys=output_keys,
+            trust_input=trust_input,
         )
     return fn

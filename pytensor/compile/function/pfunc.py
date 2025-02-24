@@ -377,6 +377,7 @@ def pfunc(
     on_unused_input=None,
     output_keys=None,
     fgraph: FunctionGraph | None = None,
+    trust_input: bool = False,
 ) -> Function:
     """
     Function-constructor for graphs with shared variables.
@@ -425,6 +426,12 @@ def pfunc(
     fgraph
         An existing `FunctionGraph` from which to construct the returned
         `Function`.  When this is non-``None``, nothing is cloned.
+    trust_input : bool, default False
+        If True, no input validation checks are performed when the function is
+        called. This includes checking the number of inputs, their types and
+        that multiple inputs are not aliased to each other. Failure to meet any
+        of these conditions can lead to computational errors or to the
+        interpreter crashing.
 
     Returns
     -------
@@ -472,6 +479,7 @@ def pfunc(
         on_unused_input=on_unused_input,
         output_keys=output_keys,
         fgraph=fgraph,
+        trust_input=trust_input,
     )
 
 
