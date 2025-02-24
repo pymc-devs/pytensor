@@ -314,7 +314,15 @@ def test_AdvancedIncSubtensor1(x, y, indices):
             np.arange(3 * 4 * 5).reshape((3, 4, 5)),
             -np.arange(1 * 4 * 5).reshape(1, 4, 5),
             (np.array([True, False, False])),  # Broadcasted boolean index
+            False,  # It shouldn't matter what we set this to, boolean indices cannot be duplicate
             False,
+            False,
+        ),
+        (
+            np.arange(3 * 4 * 5).reshape((3, 4, 5)),
+            -np.arange(1 * 4 * 5).reshape(1, 4, 5),
+            (np.array([True, False, False])),  # Broadcasted boolean index
+            True,  # It shouldn't matter what we set this to, boolean indices cannot be duplicate
             False,
             False,
         ),
