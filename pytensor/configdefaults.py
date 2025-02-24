@@ -418,8 +418,15 @@ def add_compile_configvars():
 
     config.add(
         "optimizer_verbose",
-        "If True, we print all optimization being applied",
+        "Print information about rewrites that are applied during a graph transformation.",
         BoolParam(False),
+        in_c_key=False,
+    )
+
+    config.add(
+        "optimizer_verbose_ignore",
+        "Do not print information for rewrites with these names when `optimizer_verbose` is `True`. Separate names with ','",
+        StrParam(""),
         in_c_key=False,
     )
 

@@ -731,3 +731,43 @@ class TestFunctionGraph:
         o1 = op1(r1, r2)
         fg = FunctionGraph([r1, r2], [o1], clone=False)
         assert fg.dprint(file="str") == debugprint(fg, file="str")
+
+    def test_optimizer_verbose(self, capsys):
+        x = MyVariable("x")
+        y = MyVariable("y")
+        z = MyVariable("z")
+
+        o1 = op1(x, y)
+        fgraph = FunctionGraph([x, y, z], [o1], clone=False)
+
+        with config.change_flags(optimizer_verbose=False):
+            fgraph.replace(y, z, reason="y->z")
+
+        cap_out = capsys.readouterr().out
+        assert cap_out == ""
+
+        with config.change_flags(optimizer_verbose=True):
+            fgraph.replace(z, y, reason="z->y")
+
+        cap_out = capsys.readouterr().out
+        assert "z->y" in cap_out
+
+        with config.change_flags(
+            optimizer_verbose=True, optimizer_verbose_ignore="y->z"
+        ):
+            fgraph.replace(y, z, reason="y->z")
+            fgraph.replace(z, y, reason="z->y")
+
+        cap_out = capsys.readouterr().out
+        assert "y->z" not in cap_out
+        assert "z->y" in cap_out
+
+        with config.change_flags(
+            optimizer_verbose=True, optimizer_verbose_ignore="y->z,z->y"
+        ):
+            fgraph.replace(y, z, reason="y->z")
+            fgraph.replace(z, y, reason="z->y")
+
+        cap_out = capsys.readouterr().out
+        assert "y->z" not in cap_out
+        assert "z->y" not in cap_out

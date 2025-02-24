@@ -490,10 +490,18 @@ class FunctionGraph(MetaObject):
         """
         if verbose is None:
             verbose = config.optimizer_verbose
+
         if verbose:
-            print(  # noqa: T201
-                f"rewriting: rewrite {reason} replaces {var} of {var.owner} with {new_var} of {new_var.owner}"
-            )
+            print_reason = True
+            if config.optimizer_verbose_ignore:
+                print_reason = str(reason) not in config.optimizer_verbose_ignore.split(
+                    ","
+                )
+
+            if print_reason:
+                print(  # noqa: T201
+                    f"rewriting: rewrite {reason} replaces {var} of {var.owner} with {new_var} of {new_var.owner}"
+                )
 
         new_var = var.type.filter_variable(new_var, allow_convert=True)
 
