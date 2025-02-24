@@ -99,6 +99,7 @@ def debugprint(
     print_op_info: bool = False,
     print_destroy_map: bool = False,
     print_view_map: bool = False,
+    print_memory_map: bool = False,
     print_fgraph_inputs: bool = False,
 ) -> str | TextIO:
     r"""Print a graph as text.
@@ -156,6 +157,8 @@ def debugprint(
         Whether to print the `destroy_map`\s of printed objects
     print_view_map
         Whether to print the `view_map`\s of printed objects
+    print_memory_map
+        Whether to set both `print_destroy_map` and `print_view_map` to ``True``.
     print_fgraph_inputs
         Print the inputs of `FunctionGraph`\s.
 
@@ -179,6 +182,10 @@ def debugprint(
 
     if used_ids is None:
         used_ids = dict()
+
+    if print_memory_map:
+        print_destroy_map = True
+        print_view_map = True
 
     inputs_to_print = []
     outputs_to_print = []
