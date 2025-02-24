@@ -427,10 +427,10 @@ def pfunc(
         An existing `FunctionGraph` from which to construct the returned
         `Function`.  When this is non-``None``, nothing is cloned.
     trust_input : bool, default False
-        If True, no input validation checks are performed when the function is 
+        If True, no input validation checks are performed when the function is
         called. This includes checking the number of inputs, their types and
         that multiple inputs are not aliased to each other. Failure to meet any
-        of these conditions can lead to computational errors or to the 
+        of these conditions can lead to computational errors or to the
         interpreter crashing.
 
     Returns
