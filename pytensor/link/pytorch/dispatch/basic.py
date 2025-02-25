@@ -5,8 +5,10 @@ import numpy as np
 import torch
 import torch.compiler
 
+from pytensor import In
 from pytensor.compile import PYTORCH
 from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.function.types import add_supervisor_to_fgraph
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
@@ -185,6 +187,13 @@ def pytorch_funcify_OpFromGraph(op, node, **kwargs):
     kwargs.pop("storage_map", None)
     # Apply inner rewrites
     PYTORCH.optimizer(op.fgraph)
+    fgraph = op.fgraph
+    add_supervisor_to_fgraph(
+        fgraph=fgraph,
+        input_specs=[In(x, borrow=True, mutable=False) for x in fgraph.inputs],
+        accept_inplace=True,
+    )
+    PYTORCH.optimizer(fgraph)
     fgraph_fn = pytorch_funcify(op.fgraph, **kwargs, squeeze_output=True)
     return fgraph_fn
 

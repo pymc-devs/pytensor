@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 
-from pytensor.compile.mode import JAX
+from pytensor.compile.mode import JAX, get_mode
 from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.scan.op import Scan
 
@@ -19,7 +19,9 @@ def jax_funcify_Scan(op: Scan, **kwargs):
         )
 
     # Optimize inner graph (exclude any defalut rewrites that are incompatible with JAX mode)
-    rewriter = op.mode_instance.excluding(*JAX._optimizer.exclude).optimizer
+    rewriter = (
+        get_mode(op.mode).including("jax").excluding(*JAX._optimizer.exclude).optimizer
+    )
     rewriter(op.fgraph)
     scan_inner_func = jax_funcify(op.fgraph, **kwargs)
 

@@ -57,6 +57,7 @@ import pytensor.link.utils as link_utils
 from pytensor import tensor as pt
 from pytensor.compile.builders import construct_nominal_fgraph, infer_shape
 from pytensor.compile.function.pfunc import pfunc
+from pytensor.compile.function.types import add_supervisor_to_fgraph
 from pytensor.compile.io import In, Out
 from pytensor.compile.mode import Mode, get_mode
 from pytensor.compile.profiling import register_profiler_printer
@@ -834,8 +835,6 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         self.n_outer_inputs = info.n_outer_inputs
         self.n_outer_outputs = info.n_outer_outputs
 
-        _ = self.prepare_fgraph(self.fgraph)
-
         if any(node.op.destroy_map for node in self.fgraph.apply_nodes):
             raise InconsistencyError(
                 "Inner-graphs must not contain in-place operations."
@@ -1394,23 +1393,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
         fgraph.update_mapping = update_mapping
 
-        from pytensor.compile.function.types import Supervisor
-        from pytensor.graph.destroyhandler import DestroyHandler
-
-        for node in fgraph.apply_nodes:
-            if node.op.destroy_map:
-                fgraph.attach_feature(DestroyHandler())
-                break
-
-        fgraph.attach_feature(
-            Supervisor(
-                inp
-                for spec, inp in zip(wrapped_inputs, fgraph.inputs, strict=True)
-                if not (
-                    getattr(spec, "mutable", None)
-                    or (hasattr(fgraph, "destroyers") and fgraph.has_destroyers([inp]))
-                )
-            )
+        add_supervisor_to_fgraph(
+            fgraph=fgraph, input_specs=wrapped_inputs, accept_inplace=True
         )
 
         return wrapped_inputs, wrapped_outputs
