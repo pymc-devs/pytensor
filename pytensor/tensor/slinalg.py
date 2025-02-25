@@ -10,6 +10,7 @@ from numpy.exceptions import ComplexWarning
 
 import pytensor
 import pytensor.tensor as pt
+from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import TensorLike, as_tensor_variable
@@ -303,6 +304,7 @@ class SolveBase(Op):
             }
         )
         b_bar = trans_solve_op(A.T, c_bar)
+
         # force outer product if vector second input
         A_bar = -ptm.outer(b_bar, c) if c.ndim == 1 else -b_bar.dot(c.T)
 
@@ -379,6 +381,285 @@ def cho_solve(c_and_lower, b, *, check_finite=True, b_ndim: int | None = None):
     return Blockwise(
         CholeskySolve(lower=lower, check_finite=check_finite, b_ndim=b_ndim)
     )(A, b)
+
+
+class LU(Op):
+    """Decompose a matrix into lower and upper triangular matrices."""
+
+    __props__ = ("permute_l", "overwrite_a", "check_finite", "p_indices")
+
+    def __init__(
+        self, *, permute_l=False, overwrite_a=False, check_finite=True, p_indices=False
+    ):
+        if permute_l and p_indices:
+            raise ValueError("Only one of permute_l and p_indices can be True")
+        self.permute_l = permute_l
+        self.check_finite = check_finite
+        self.p_indices = p_indices
+        self.overwrite_a = overwrite_a
+
+        if self.permute_l:
+            # permute_l overrides p_indices in the scipy function. We can copy that behavior
+            self.gufunc_signature = "(m,m)->(m,m),(m,m)"
+        elif self.p_indices:
+            self.gufunc_signature = "(m,m)->(m),(m,m),(m,m)"
+        else:
+            self.gufunc_signature = "(m,m)->(m,m),(m,m),(m,m)"
+
+        if self.overwrite_a:
+            self.destroy_map = {0: [0]}
+
+    def infer_shape(self, fgraph, node, shapes):
+        n = shapes[0][0]
+        if self.permute_l:
+            return [(n, n), (n, n)]
+        elif self.p_indices:
+            return [(n,), (n, n), (n, n)]
+        else:
+            return [(n, n), (n, n), (n, n)]
+
+    def make_node(self, x):
+        x = as_tensor_variable(x)
+        if x.type.ndim != 2:
+            raise TypeError(
+                f"LU only allowed on matrix (2-D) inputs, got {x.type.ndim}-D input"
+            )
+
+        real_dtype = "f" if np.dtype(x.type.dtype).char in "fF" else "d"
+        p_dtype = "int32" if self.p_indices else np.dtype(real_dtype)
+
+        L = tensor(shape=x.type.shape, dtype=x.type.dtype)
+        U = tensor(shape=x.type.shape, dtype=x.type.dtype)
+
+        if self.permute_l:
+            # In this case, L is actually P @ L
+            return Apply(self, inputs=[x], outputs=[L, U])
+        if self.p_indices:
+            p_indices = tensor(shape=(x.type.shape[0],), dtype=p_dtype)
+            return Apply(self, inputs=[x], outputs=[p_indices, L, U])
+
+        P = tensor(shape=x.type.shape, dtype=p_dtype)
+        return Apply(self, inputs=[x], outputs=[P, L, U])
+
+    def perform(self, node, inputs, outputs):
+        [A] = inputs
+
+        out = scipy_linalg.lu(
+            A,
+            permute_l=self.permute_l,
+            overwrite_a=self.overwrite_a,
+            check_finite=self.check_finite,
+            p_indices=self.p_indices,
+        )
+
+        outputs[0][0] = out[0]
+        outputs[1][0] = out[1]
+
+        if not self.permute_l:
+            # In all cases except permute_l, there are three returns
+            outputs[2][0] = out[2]
+
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
+        if 0 in allowed_inplace_inputs:
+            new_props = self._props_dict()  # type: ignore
+            new_props["overwrite_a"] = True
+            return type(self)(**new_props)
+        else:
+            return self
+
+    def L_op(
+        self,
+        inputs: Sequence[ptb.Variable],
+        outputs: Sequence[ptb.Variable],
+        output_grads: Sequence[ptb.Variable],
+    ) -> list[ptb.Variable]:
+        r"""
+        Derivation is due to Differentiation of Matrix Functionals Using Triangular Factorization
+        F. R. De Hoog, R.S. Anderssen, M. A. Lukas
+        """
+        [A] = inputs
+        A = cast(TensorVariable, A)
+
+        if self.permute_l:
+            # P has no gradient contribution (by assumption...), so PL_bar is the same as L_bar
+            L_bar, U_bar = output_grads
+
+            # TODO: Rewrite into permute_l = False for graphs where we need to compute the gradient
+            # We need L, not PL. It's not possible to recover it from PL, though. So we need to do a new forward pass
+            P_or_indices, L, U = lu(  # type: ignore
+                A, permute_l=False, check_finite=self.check_finite, p_indices=False
+            )
+
+        else:
+            # In both other cases, there are 3 outputs. The first output will either be the permutation index itself,
+            # or indices that can be used to reconstruct the permutation matrix.
+            P_or_indices, L, U = outputs
+            _, L_bar, U_bar = output_grads
+
+        L_bar = (
+            L_bar if not isinstance(L_bar.type, DisconnectedType) else pt.zeros_like(A)
+        )
+        U_bar = (
+            U_bar if not isinstance(U_bar.type, DisconnectedType) else pt.zeros_like(A)
+        )
+
+        x1 = ptb.tril(L.T @ L_bar, k=-1)
+        x2 = ptb.triu(U_bar @ U.T)
+
+        LT_inv_x = solve_triangular(L.T, x1 + x2, lower=False, unit_diagonal=True)
+
+        # Where B = P.T @ A is a change of variable to avoid the permutation matrix in the gradient derivation
+        B_bar = solve_triangular(U, LT_inv_x.T, lower=False).T
+
+        if not self.p_indices:
+            A_bar = P_or_indices @ B_bar
+        else:
+            A_bar = B_bar[P_or_indices]
+
+        return [A_bar]
+
+
+def lu(
+    a: TensorLike, permute_l=False, check_finite=True, p_indices=False
+) -> (
+    tuple[TensorVariable, TensorVariable, TensorVariable]
+    | tuple[TensorVariable, TensorVariable]
+):
+    """
+    Factorize a matrix as the product of a unit lower triangular matrix and an upper triangular matrix:
+
+    ... math::
+
+        A = P L U
+
+    Where P is a permutation matrix, L is lower triangular with unit diagonal elements, and U is upper triangular.
+
+    Parameters
+    ----------
+    a: TensorLike
+        Matrix to be factorized
+    permute_l: bool
+        If True, L is a product of permutation and unit lower triangular matrices. Only two values, PL and U, will
+        be returned in this case, and PL will not be lower triangular.
+    check_finite: bool
+        Whether to check that the input matrix contains only finite numbers.
+    p_indices: bool
+        If True, return integer matrix indices for the permutation matrix. Otherwise, return the permutation matrix
+        itself.
+
+    Returns
+    -------
+    P: TensorVariable
+        Permutation matrix, or array of integer indices for permutation matrix. Not returned if permute_l is True.
+    L: TensorVariable
+        Lower triangular matrix, or product of permutation and unit lower triangular matrices if permute_l is True.
+    U: TensorVariable
+        Upper triangular matrix
+    """
+    return cast(
+        tuple[TensorVariable, TensorVariable, TensorVariable]
+        | tuple[TensorVariable, TensorVariable],
+        Blockwise(
+            LU(permute_l=permute_l, p_indices=p_indices, check_finite=check_finite)
+        )(a),
+    )
+
+
+class LUFactor(Op):
+    __props__ = ("overwrite_a", "check_finite")
+
+    def __init__(self, *, overwrite_a=False, check_finite=True):
+        self.overwrite_a = overwrite_a
+        self.check_finite = check_finite
+        self.gufunc_signature = "(m,m)->(m,m),(m)"
+
+        if self.overwrite_a:
+            self.destroy_map = {0: [0]}
+
+    def make_node(self, A):
+        A = as_tensor_variable(A)
+        if A.type.ndim != 2:
+            raise TypeError(
+                f"LU only allowed on matrix (2-D) inputs, got {A.type.ndim}-D input"
+            )
+
+        LU = matrix(shape=A.type.shape, dtype=A.type.dtype)
+        pivots = vector(shape=(A.type.shape[0],), dtype="int32")
+        return Apply(self, [A], [LU, pivots])
+
+    def infer_shape(self, fgraph, node, shapes):
+        n = shapes[0][0]
+        return [(n, n), (n,)]
+
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
+        if 0 in allowed_inplace_inputs:
+            new_props = self._props_dict()  # type: ignore
+            new_props["overwrite_a"] = True
+            return type(self)(**new_props)
+        else:
+            return self
+
+    def perform(self, node, inputs, outputs):
+        A = inputs[0]
+        LU, pivots = scipy_linalg.lu_factor(
+            A,
+            overwrite_a=self.overwrite_a,
+            check_finite=self.check_finite,
+        )
+
+        outputs[0][0] = LU
+        outputs[1][0] = pivots
+
+    def L_op(self, inputs, outputs, output_gradients):
+        A = inputs[0]
+        LU_bar, _ = output_gradients
+
+        # We need the permutation matrix P, not the pivot indices. Easiest way is to just do another LU forward.
+        # Alternative is to do a scan over the pivot indices to convert them to permutation indices. I don't know if
+        # that's faster or slower.
+        P, L, U = lu(
+            A, permute_l=False, check_finite=self.check_finite, p_indices=False
+        )
+
+        # Split LU_bar into L_bar and U_bar. This is valid because of the triangular structure of L and U
+        L_bar = ptb.tril(LU_bar, k=-1)
+        U_bar = ptb.triu(LU_bar)
+
+        # From here we're in the same situation as the LU gradient derivation
+        x1 = ptb.tril(L.T @ L_bar, k=-1)
+        x2 = ptb.triu(U_bar @ U.T)
+
+        LT_inv_x = solve_triangular(L.T, x1 + x2, lower=False, unit_diagonal=True)
+        A_bar = P @ solve_triangular(U, LT_inv_x.T, lower=False).T
+
+        return [A_bar]
+
+
+def lu_factor(
+    a: TensorLike, *, check_finite=True
+) -> tuple[TensorVariable, TensorVariable]:
+    """
+    LU factorization with partial pivoting.
+
+    Parameters
+    ----------
+    a: TensorLike
+        Matrix to be factorized
+    check_finite: bool
+        Whether to check that the input matrix contains only finite numbers.
+
+    Returns
+    -------
+    LU: TensorVariable
+        LU decomposition of `a`
+    pivots: TensorVariable
+        Permutation indices
+    """
+
+    return cast(
+        tuple[TensorVariable, TensorVariable],
+        Blockwise(LUFactor(check_finite=check_finite))(a),
+    )
 
 
 class SolveTriangular(SolveBase):
@@ -1177,4 +1458,6 @@ __all__ = [
     "solve_triangular",
     "block_diag",
     "cho_solve",
+    "lu",
+    "lu_factor",
 ]

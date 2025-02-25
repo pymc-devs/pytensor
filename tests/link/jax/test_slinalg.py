@@ -11,6 +11,7 @@ from pytensor.tensor import slinalg as pt_slinalg
 from pytensor.tensor import subtensor as pt_subtensor
 from pytensor.tensor.math import clip, cosh
 from pytensor.tensor.type import matrix, vector
+from tests import unittest_tools as utt
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
@@ -213,4 +214,47 @@ def test_jax_solve_discrete_lyapunov(
         ],
         jax_mode="JAX",
         assert_fn=partial(np.testing.assert_allclose, atol=atol, rtol=rtol),
+    )
+
+
+@pytest.mark.parametrize(
+    "permute_l, p_indices",
+    [(True, False), (False, True), (False, False)],
+    ids=["PL", "p_indices", "P"],
+)
+@pytest.mark.parametrize("complex", [False, True], ids=["real", "complex"])
+@pytest.mark.parametrize("shape", [(3, 5, 5), (5, 5)], ids=["batched", "not_batched"])
+def test_jax_lu(permute_l, p_indices, complex, shape: tuple[int]):
+    rng = np.random.default_rng()
+    A = pt.tensor(
+        "A",
+        shape=shape,
+        dtype=f"complex{int(config.floatX[-2:]) * 2}" if complex else config.floatX,
+    )
+    out = pt_slinalg.lu(A, permute_l=permute_l, p_indices=p_indices)
+
+    x = rng.normal(size=shape).astype(config.floatX)
+    if complex:
+        x = x + 1j * rng.normal(size=shape).astype(config.floatX)
+
+    if p_indices:
+        with pytest.raises(
+            ValueError, match="JAX does not support the p_indices argument"
+        ):
+            compare_jax_and_py(graph_inputs=[A], graph_outputs=out, test_inputs=[x])
+    else:
+        compare_jax_and_py(graph_inputs=[A], graph_outputs=out, test_inputs=[x])
+
+
+@pytest.mark.parametrize("shape", [(5, 5), (5, 5, 5)], ids=["matrix", "batch"])
+def test_jax_lu_factor(shape):
+    rng = np.random.default_rng(utt.fetch_seed())
+    A = pt.tensor(name="A", shape=shape)
+    A_value = rng.normal(size=shape).astype(config.floatX)
+    out = pt_slinalg.lu_factor(A)
+
+    compare_jax_and_py(
+        [A],
+        out,
+        [A_value],
     )
