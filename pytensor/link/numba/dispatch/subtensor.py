@@ -77,10 +77,10 @@ def numba_funcify_default_subtensor(op, node, **kwargs):
             y_name = input_names[1]
 
         if op.set_instead_of_inc:
-            function_name = "setsubtensor"
+            function_name = "set_subtensor"
             index_body = f"z[indices] = {y_name}"
         else:
-            function_name = "incsubtensor"
+            function_name = "inc_subtensor"
             index_body = f"z[indices] += {y_name}"
     else:
         function_name = "subtensor"
