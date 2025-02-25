@@ -4,7 +4,9 @@ import numpy as np
 from numba import types
 from numba.extending import overload
 
-from pytensor.compile.mode import NUMBA
+from pytensor import In
+from pytensor.compile.function.types import add_supervisor_to_fgraph
+from pytensor.compile.mode import NUMBA, get_mode
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     create_arg_string,
@@ -59,11 +61,18 @@ def numba_funcify_Scan(op, node, **kwargs):
     #  explicitly triggers the optimization of the inner graphs of Scan?
     #  The C-code defers it to the make_thunk phase
     rewriter = (
-        op.mode_instance.including("numba")
+        get_mode(op.mode)
+        .including("numba")
         .excluding(*NUMBA._optimizer.exclude)
         .optimizer
     )
-    rewriter(op.fgraph)
+    fgraph = op.fgraph
+    add_supervisor_to_fgraph(
+        fgraph=fgraph,
+        input_specs=[In(x, borrow=True, mutable=False) for x in fgraph.inputs],
+        accept_inplace=True,
+    )
+    rewriter(fgraph)
 
     scan_inner_func = numba_basic.numba_njit(numba_funcify(op.fgraph))
 

@@ -16,9 +16,10 @@ from numba.core.errors import NumbaWarning, TypingError
 from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
 from numba.extending import box, overload
 
-from pytensor import config
+from pytensor import In, config
 from pytensor.compile import NUMBA
 from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.function.types import add_supervisor_to_fgraph
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
@@ -430,7 +431,13 @@ def numba_funcify_OpFromGraph(op, node=None, **kwargs):
     # TODO: Not sure this is the right place to do this, should we have a rewrite that
     #  explicitly triggers the optimization of the inner graphs of OpFromGraph?
     #  The C-code defers it to the make_thunk phase
-    NUMBA.optimizer(op.fgraph)
+    fgraph = op.fgraph
+    add_supervisor_to_fgraph(
+        fgraph=fgraph,
+        input_specs=[In(x, borrow=True, mutable=False) for x in fgraph.inputs],
+        accept_inplace=True,
+    )
+    NUMBA.optimizer(fgraph)
     fgraph_fn = numba_njit(numba_funcify(op.fgraph, **kwargs))
 
     if len(op.fgraph.outputs) == 1:

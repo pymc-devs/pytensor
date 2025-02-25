@@ -138,7 +138,11 @@ class AddDestroyHandler(GraphRewriter):
                 break
         if not supervisor_added:
             warnings.warn(
-                f"A Supervisor feature is missing from {fgraph}.",
+                (
+                    f"A Supervisor feature is missing from {fgraph}.\n"
+                    "This is needed for inplace rewrites. Either exclude inplace rewrites or add a Supervisor feature.\n"
+                    "A Supervisor feature can be added via `pytensor.compile.function.types.add_supervisor_to_fgraph`."
+                ),
                 stacklevel=3,
             )
 

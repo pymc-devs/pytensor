@@ -836,6 +836,39 @@ def test_OpFromGraph():
 
 
 @pytest.mark.filterwarnings("error")
+def test_ofg_inner_inplace():
+    x = pt.vector("x")
+    set0 = x[0].set(1)  # SetSubtensor should not inplace on x
+    exp_x = pt.exp(x)
+    set1 = exp_x[0].set(1)  # SetSubtensor should inplace on exp_x
+    ofg0 = OpFromGraph([x], [set0])
+    ofg1 = OpFromGraph([x], [set1])
+
+    y, z = pt.vectors("y", "z")
+    fn = function([y, z], [ofg0(y), ofg1(z)], mode="NUMBA")
+
+    fn_ofg0 = fn.maker.fgraph.outputs[0].owner.op
+    assert isinstance(fn_ofg0, OpFromGraph)
+    fn_set0 = fn_ofg0.fgraph.outputs[0]
+    assert fn_set0.owner.op.destroy_map == {}
+
+    fn_ofg1 = fn.maker.fgraph.outputs[1].owner.op
+    assert isinstance(fn_ofg1, OpFromGraph)
+    fn_set1 = fn_ofg1.fgraph.outputs[0]
+    assert fn_set1.owner.op.destroy_map == {0: [0]}
+
+    x_test = np.array([0, 1, 1], dtype=config.floatX)
+    y_test = np.array([0, 1, 1], dtype=config.floatX)
+    res0, res1 = fn(x_test, y_test)
+    # Check inputs were not mutated
+    np.testing.assert_allclose(x_test, [0, 1, 1])
+    np.testing.assert_allclose(y_test, [0, 1, 1])
+    # Check outputs are correct
+    np.testing.assert_allclose(res0, [1, 1, 1])
+    np.testing.assert_allclose(res1, [1, np.e, np.e])
+
+
+@pytest.mark.filterwarnings("error")
 def test_cache_warning_suppressed():
     x = pt.vector("x", shape=(5,), dtype="float64")
     out = pt.psi(x) * 2
