@@ -4147,11 +4147,6 @@ def vecdot(
     out : ndarray
         The vector dot product of the inputs computed along the specified axes.
 
-    Raises
-    ------
-    ValueError
-        If either input is a scalar value.
-
     Notes
     -----
     This is similar to `dot` but with broadcasting. It computes the dot product
@@ -4160,9 +4155,6 @@ def vecdot(
     """
     x1 = as_tensor_variable(x1)
     x2 = as_tensor_variable(x2)
-
-    if x1.type.ndim == 0 or x2.type.ndim == 0:
-        raise ValueError("vecdot operand cannot be scalar")
 
     # Handle negative axis
     if axis < 0:
@@ -4209,12 +4201,6 @@ def matvec(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None
     out : ndarray
         The matrix-vector product with shape (..., M).
 
-    Raises
-    ------
-    ValueError
-        If any input is a scalar or if the trailing dimension of x2 does not match
-        the second-to-last dimension of x1.
-
     Notes
     -----
     This is similar to `matmul` where the second argument is a vector,
@@ -4223,15 +4209,6 @@ def matvec(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None
     """
     x1 = as_tensor_variable(x1)
     x2 = as_tensor_variable(x2)
-
-    if x1.type.ndim == 0 or x2.type.ndim == 0:
-        raise ValueError("matvec operand cannot be scalar")
-
-    if x1.type.ndim < 2:
-        raise ValueError("First input to matvec must have at least 2 dimensions")
-
-    if x2.type.ndim < 1:
-        raise ValueError("Second input to matvec must have at least 1 dimension")
 
     out = _matrix_vec_prod(x1, x2)
 
@@ -4260,12 +4237,6 @@ def vecmat(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None
     out : ndarray
         The vector-matrix product with shape (..., N).
 
-    Raises
-    ------
-    ValueError
-        If any input is a scalar or if the last dimension of x1 does not match
-        the second-to-last dimension of x2.
-
     Notes
     -----
     This is similar to `matmul` where the first argument is a vector,
@@ -4274,15 +4245,6 @@ def vecmat(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None
     """
     x1 = as_tensor_variable(x1)
     x2 = as_tensor_variable(x2)
-
-    if x1.type.ndim == 0 or x2.type.ndim == 0:
-        raise ValueError("vecmat operand cannot be scalar")
-
-    if x1.type.ndim < 1:
-        raise ValueError("First input to vecmat must have at least 1 dimension")
-
-    if x2.type.ndim < 2:
-        raise ValueError("Second input to vecmat must have at least 2 dimensions")
 
     out = _vec_matrix_prod(x1, x2)
 

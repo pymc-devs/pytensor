@@ -2116,12 +2116,6 @@ class TestMatrixVectorOps:
         y_val = random(2, 3, 4, rng=rng).astype(config.floatX)
         np.testing.assert_allclose(f(x_val, y_val), np.sum(x_val * y_val, axis=2))
 
-        # Test error cases
-        x = scalar()
-        y = scalar()
-        with pytest.raises(ValueError):
-            vecdot(x, y)
-
     def test_matvec(self):
         """Test matvec function with various input shapes."""
         rng = np.random.default_rng(seed=utt.fetch_seed())
@@ -2147,17 +2141,6 @@ class TestMatrixVectorOps:
         expected = np.array([np.dot(x_val[i], y_val[i]) for i in range(2)])
         np.testing.assert_allclose(f(x_val, y_val), expected)
 
-        # Test error cases
-        x = vector()
-        y = vector()
-        with pytest.raises(ValueError):
-            matvec(x, y)
-
-        x = scalar()
-        y = vector()
-        with pytest.raises(ValueError):
-            matvec(x, y)
-
     def test_vecmat(self):
         """Test vecmat function with various input shapes."""
         rng = np.random.default_rng(seed=utt.fetch_seed())
@@ -2182,17 +2165,6 @@ class TestMatrixVectorOps:
         y_val = random(2, 3, 4, rng=rng).astype(config.floatX)
         expected = np.array([np.dot(x_val[i], y_val[i]) for i in range(2)])
         np.testing.assert_allclose(f(x_val, y_val), expected)
-
-        # Test error cases
-        x = matrix()
-        y = vector()
-        with pytest.raises(ValueError):
-            vecmat(x, y)
-
-        x = scalar()
-        y = matrix()
-        with pytest.raises(ValueError):
-            vecmat(x, y)
 
     def test_matmul(self):
         """Test matmul function with various input shapes."""
