@@ -89,6 +89,7 @@ from pytensor.tensor.math import (
     logaddexp,
     logsumexp,
     matmul,
+    matvec,
     max,
     max_and_argmax,
     maximum,
@@ -123,6 +124,8 @@ from pytensor.tensor.math import (
     true_div,
     trunc,
     var,
+    vecdot,
+    vecmat,
 )
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.type import (
@@ -2074,6 +2077,182 @@ class TestDot:
                             assert is_super_shape(x, g)
                             g = grad(z.sum(), y)
                             assert is_super_shape(y, g)
+
+
+class TestMatrixVectorOps:
+    def test_vecdot(self):
+        """Test vecdot function with various input shapes and axis."""
+        rng = np.random.default_rng(seed=utt.fetch_seed())
+
+        # Test vector-vector
+        x = vector()
+        y = vector()
+        z = vecdot(x, y)
+        f = function([x, y], z)
+        x_val = random(5, rng=rng).astype(config.floatX)
+        y_val = random(5, rng=rng).astype(config.floatX)
+        np.testing.assert_allclose(f(x_val, y_val), np.dot(x_val, y_val))
+
+        # Test with axis parameter
+        x = matrix()
+        y = matrix()
+        z0 = vecdot(x, y, axis=0)
+        z1 = vecdot(x, y, axis=1)
+        f0 = function([x, y], z0)
+        f1 = function([x, y], z1)
+
+        x_val = random(3, 4, rng=rng).astype(config.floatX)
+        y_val = random(3, 4, rng=rng).astype(config.floatX)
+        np.testing.assert_allclose(f0(x_val, y_val), np.sum(x_val * y_val, axis=0))
+        np.testing.assert_allclose(f1(x_val, y_val), np.sum(x_val * y_val, axis=1))
+
+        # Test batched vectors
+        x = tensor3()
+        y = tensor3()
+        z = vecdot(x, y, axis=2)
+        f = function([x, y], z)
+
+        x_val = random(2, 3, 4, rng=rng).astype(config.floatX)
+        y_val = random(2, 3, 4, rng=rng).astype(config.floatX)
+        np.testing.assert_allclose(f(x_val, y_val), np.sum(x_val * y_val, axis=2))
+
+        # Test error cases
+        x = scalar()
+        y = scalar()
+        with pytest.raises(ValueError):
+            vecdot(x, y)
+
+    def test_matvec(self):
+        """Test matvec function with various input shapes."""
+        rng = np.random.default_rng(seed=utt.fetch_seed())
+
+        # Test matrix-vector
+        x = matrix()
+        y = vector()
+        z = matvec(x, y)
+        f = function([x, y], z)
+
+        x_val = random(3, 4, rng=rng).astype(config.floatX)
+        y_val = random(4, rng=rng).astype(config.floatX)
+        np.testing.assert_allclose(f(x_val, y_val), np.dot(x_val, y_val))
+
+        # Test batched
+        x = tensor3()
+        y = matrix()
+        z = matvec(x, y)
+        f = function([x, y], z)
+
+        x_val = random(2, 3, 4, rng=rng).astype(config.floatX)
+        y_val = random(2, 4, rng=rng).astype(config.floatX)
+        expected = np.array([np.dot(x_val[i], y_val[i]) for i in range(2)])
+        np.testing.assert_allclose(f(x_val, y_val), expected)
+
+        # Test error cases
+        x = vector()
+        y = vector()
+        with pytest.raises(ValueError):
+            matvec(x, y)
+
+        x = scalar()
+        y = vector()
+        with pytest.raises(ValueError):
+            matvec(x, y)
+
+    def test_vecmat(self):
+        """Test vecmat function with various input shapes."""
+        rng = np.random.default_rng(seed=utt.fetch_seed())
+
+        # Test vector-matrix
+        x = vector()
+        y = matrix()
+        z = vecmat(x, y)
+        f = function([x, y], z)
+
+        x_val = random(3, rng=rng).astype(config.floatX)
+        y_val = random(3, 4, rng=rng).astype(config.floatX)
+        np.testing.assert_allclose(f(x_val, y_val), np.dot(x_val, y_val))
+
+        # Test batched
+        x = matrix()
+        y = tensor3()
+        z = vecmat(x, y)
+        f = function([x, y], z)
+
+        x_val = random(2, 3, rng=rng).astype(config.floatX)
+        y_val = random(2, 3, 4, rng=rng).astype(config.floatX)
+        expected = np.array([np.dot(x_val[i], y_val[i]) for i in range(2)])
+        np.testing.assert_allclose(f(x_val, y_val), expected)
+
+        # Test error cases
+        x = matrix()
+        y = vector()
+        with pytest.raises(ValueError):
+            vecmat(x, y)
+
+        x = scalar()
+        y = matrix()
+        with pytest.raises(ValueError):
+            vecmat(x, y)
+
+    def test_matmul(self):
+        """Test matmul function with various input shapes."""
+        rng = np.random.default_rng(seed=utt.fetch_seed())
+
+        # Test matrix-matrix
+        x = matrix()
+        y = matrix()
+        z = matmul(x, y)
+        f = function([x, y], z)
+
+        x_val = random(3, 4, rng=rng).astype(config.floatX)
+        y_val = random(4, 5, rng=rng).astype(config.floatX)
+        np.testing.assert_allclose(f(x_val, y_val), np.matmul(x_val, y_val))
+
+        # Test vector-matrix
+        x = vector()
+        y = matrix()
+        z = matmul(x, y)
+        f = function([x, y], z)
+
+        x_val = random(3, rng=rng).astype(config.floatX)
+        y_val = random(3, 4, rng=rng).astype(config.floatX)
+        np.testing.assert_allclose(f(x_val, y_val), np.matmul(x_val, y_val))
+
+        # Test matrix-vector
+        x = matrix()
+        y = vector()
+        z = matmul(x, y)
+        f = function([x, y], z)
+
+        x_val = random(3, 4, rng=rng).astype(config.floatX)
+        y_val = random(4, rng=rng).astype(config.floatX)
+        np.testing.assert_allclose(f(x_val, y_val), np.matmul(x_val, y_val))
+
+        # Test vector-vector
+        x = vector()
+        y = vector()
+        z = matmul(x, y)
+        f = function([x, y], z)
+
+        x_val = random(3, rng=rng).astype(config.floatX)
+        y_val = random(3, rng=rng).astype(config.floatX)
+        np.testing.assert_allclose(f(x_val, y_val), np.matmul(x_val, y_val))
+
+        # Test batched
+        x = tensor3()
+        y = tensor3()
+        z = matmul(x, y)
+        f = function([x, y], z)
+
+        x_val = random(2, 3, 4, rng=rng).astype(config.floatX)
+        y_val = random(2, 4, 5, rng=rng).astype(config.floatX)
+        np.testing.assert_allclose(f(x_val, y_val), np.matmul(x_val, y_val))
+
+        # Test error cases
+        x = scalar()
+        y = scalar()
+        with pytest.raises(ValueError):
+            matmul(x, y)
 
 
 class TestTensordot:
