@@ -64,7 +64,7 @@ def test_trust_input():
     x = dvector()
     y = shared(1)
     z = x + y
-    f = function([x], z) 
+    f = function([x], z)
     assert f.trust_input is False
     f = function([x], z, trust_input=True)
     assert f.trust_input is True
