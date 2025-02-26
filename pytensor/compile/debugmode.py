@@ -1966,6 +1966,12 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
         If the outputs argument for pytensor.function was a list, then
         output_keys is None. If the outputs argument was a dict, then
         output_keys is a sorted list of the keys from that dict.
+    trust_input : bool, default False
+        If True, no input validation checks are performed when the function is
+        called. This includes checking the number of inputs, their types and
+        that multiple inputs are not aliased to each other. Failure to meet any
+        of these conditions can lead to computational errors or to the
+        interpreter crashing.
 
     Notes
     -----
@@ -1993,6 +1999,7 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
         output_keys=None,
         name=None,
         no_fgraph_prep=False,
+        trust_input=False,
     ):
         self.mode = mode
         self.profile = profile
@@ -2146,6 +2153,7 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
         self.on_unused_input = on_unused_input  # Used for the pickling/copy
         self.output_keys = output_keys
         self.name = name
+        self.trust_input = trust_input
 
         self.required = [(i.value is None) for i in self.inputs]
         self.refeed = [
