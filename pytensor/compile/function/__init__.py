@@ -37,6 +37,7 @@ def function_dump(
     profile: bool | ProfileStats | None = None,
     on_unused_input: str | None = None,
     extra_tag_to_remove: str | None = None,
+    trust_input: bool = False,
 ):
     """
     This is helpful to make a reproducible case for problems during PyTensor
@@ -82,6 +83,7 @@ def function_dump(
         "allow_input_downcast": allow_input_downcast,
         "profile": profile,
         "on_unused_input": on_unused_input,
+        "trust_input": trust_input,
     }
     with Path(filename).open("wb") as f:
         pickler = pytensor.misc.pkl_utils.StripPickler(
