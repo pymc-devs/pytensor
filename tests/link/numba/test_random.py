@@ -705,3 +705,52 @@ def test_repeated_args():
     final_node = fn.maker.fgraph.outputs[0].owner
     assert isinstance(final_node.op, RandomVariableWithCoreShape)
     assert final_node.inputs[-2] is final_node.inputs[-1]
+
+
+def test_unsupported_rv_fallback():
+    """Test that unsupported random variables fallback to object mode."""
+    import warnings
+
+    # Create a mock random variable that doesn't have a numba implementation
+    class CustomRV(ptr.RandomVariable):
+        name = "custom"
+        signature = "(d)->(d)"  # We need a parameter for test to pass
+        dtype = "float64"
+
+        def _supp_shape_from_params(self, dist_params, param_shapes=None):
+            # Return the shape of the support
+            return [1]
+
+        def rng_fn(self, rng, value, size=None):
+            # Just return the value plus a random number
+            return value + rng.standard_normal()
+
+    custom_rv = CustomRV()
+
+    # Create a graph with the unsupported RV
+    rng = shared(np.random.default_rng(123))
+    value = np.array(1.0)
+    x = custom_rv(value, rng=rng)
+
+    # Capture warnings to check for the fallback warning
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+
+        # Compile with numba mode
+        fn = function([], x, mode=numba_mode)
+
+        # Execute to trigger the fallback
+        result = fn()
+
+        # Check that a warning was raised about object mode
+        assert any("object mode" in str(warning.message) for warning in w)
+
+    # Verify the result is as expected
+    assert isinstance(result, np.ndarray)
+
+    # Run again to make sure the compiled function works properly
+    result2 = fn()
+    assert isinstance(result2, np.ndarray)
+    assert not np.array_equal(
+        result, result2
+    )  # Results should differ with different RNG states
