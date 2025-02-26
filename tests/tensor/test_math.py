@@ -2081,7 +2081,7 @@ class TestDot:
 
 class TestMatrixVectorOps:
     def test_vecdot(self):
-        """Test vecdot function with various input shapes and axis."""
+        """Test vecdot function with various input shapes."""
         rng = np.random.default_rng(seed=utt.fetch_seed())
 
         # Test vector-vector
@@ -2093,77 +2093,69 @@ class TestMatrixVectorOps:
         y_val = random(5, rng=rng).astype(config.floatX)
         np.testing.assert_allclose(f(x_val, y_val), np.dot(x_val, y_val))
 
-        # Test with axis parameter
-        x = matrix()
-        y = matrix()
-        z0 = vecdot(x, y, axis=0)
-        z1 = vecdot(x, y, axis=1)
-        f0 = function([x, y], z0)
-        f1 = function([x, y], z1)
-
-        x_val = random(3, 4, rng=rng).astype(config.floatX)
-        y_val = random(3, 4, rng=rng).astype(config.floatX)
-        np.testing.assert_allclose(f0(x_val, y_val), np.sum(x_val * y_val, axis=0))
-        np.testing.assert_allclose(f1(x_val, y_val), np.sum(x_val * y_val, axis=1))
-
         # Test batched vectors
         x = tensor3()
         y = tensor3()
-        z = vecdot(x, y, axis=2)
+        z = vecdot(x, y)
         f = function([x, y], z)
 
         x_val = random(2, 3, 4, rng=rng).astype(config.floatX)
         y_val = random(2, 3, 4, rng=rng).astype(config.floatX)
-        np.testing.assert_allclose(f(x_val, y_val), np.sum(x_val * y_val, axis=2))
-
-    def test_matvec(self):
-        """Test matvec function with various input shapes."""
-        rng = np.random.default_rng(seed=utt.fetch_seed())
-
-        # Test matrix-vector
-        x = matrix()
-        y = vector()
-        z = matvec(x, y)
-        f = function([x, y], z)
-
-        x_val = random(3, 4, rng=rng).astype(config.floatX)
-        y_val = random(4, rng=rng).astype(config.floatX)
-        np.testing.assert_allclose(f(x_val, y_val), np.dot(x_val, y_val))
-
-        # Test batched
-        x = tensor3()
-        y = matrix()
-        z = matvec(x, y)
-        f = function([x, y], z)
-
-        x_val = random(2, 3, 4, rng=rng).astype(config.floatX)
-        y_val = random(2, 4, rng=rng).astype(config.floatX)
-        expected = np.array([np.dot(x_val[i], y_val[i]) for i in range(2)])
+        expected = np.sum(x_val * y_val, axis=-1)
         np.testing.assert_allclose(f(x_val, y_val), expected)
 
-    def test_vecmat(self):
-        """Test vecmat function with various input shapes."""
+    @pytest.mark.parametrize(
+        "func,x_shape,y_shape,make_expected",
+        [
+            # matvec tests - Matrix(M,K) @ Vector(K) -> Vector(M)
+            (matvec, (3, 4), (4,), lambda x, y: np.dot(x, y)),
+            # matvec batch tests - Tensor3(B,M,K) @ Matrix(B,K) -> Matrix(B,M)
+            (
+                matvec,
+                (2, 3, 4),
+                (2, 4),
+                lambda x, y: np.array([np.dot(x[i], y[i]) for i in range(len(x))]),
+            ),
+            # vecmat tests - Vector(K) @ Matrix(K,N) -> Vector(N)
+            (vecmat, (3,), (3, 4), lambda x, y: np.dot(x, y)),
+            # vecmat batch tests - Matrix(B,K) @ Tensor3(B,K,N) -> Matrix(B,N)
+            (
+                vecmat,
+                (2, 3),
+                (2, 3, 4),
+                lambda x, y: np.array([np.dot(x[i], y[i]) for i in range(len(x))]),
+            ),
+        ],
+    )
+    def test_mat_vec_ops(self, func, x_shape, y_shape, make_expected):
+        """Parametrized test for matvec and vecmat functions."""
         rng = np.random.default_rng(seed=utt.fetch_seed())
 
-        # Test vector-matrix
-        x = vector()
-        y = matrix()
-        z = vecmat(x, y)
+        # Create PyTensor variables with appropriate dimensions
+        if len(x_shape) == 1:
+            x = vector()
+        elif len(x_shape) == 2:
+            x = matrix()
+        else:
+            x = tensor3()
+
+        if len(y_shape) == 1:
+            y = vector()
+        elif len(y_shape) == 2:
+            y = matrix()
+        else:
+            y = tensor3()
+
+        # Apply the function
+        z = func(x, y)
         f = function([x, y], z)
 
-        x_val = random(3, rng=rng).astype(config.floatX)
-        y_val = random(3, 4, rng=rng).astype(config.floatX)
-        np.testing.assert_allclose(f(x_val, y_val), np.dot(x_val, y_val))
+        # Create random values
+        x_val = random(*x_shape, rng=rng).astype(config.floatX)
+        y_val = random(*y_shape, rng=rng).astype(config.floatX)
 
-        # Test batched
-        x = matrix()
-        y = tensor3()
-        z = vecmat(x, y)
-        f = function([x, y], z)
-
-        x_val = random(2, 3, rng=rng).astype(config.floatX)
-        y_val = random(2, 3, 4, rng=rng).astype(config.floatX)
-        expected = np.array([np.dot(x_val[i], y_val[i]) for i in range(2)])
+        # Compare with the expected result
+        expected = make_expected(x_val, y_val)
         np.testing.assert_allclose(f(x_val, y_val), expected)
 
     def test_matmul(self):
