@@ -2841,6 +2841,176 @@ def matmul(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None
     return out
 
 
+def vecdot(
+    x1: "ArrayLike",
+    x2: "ArrayLike",
+    axis: int = -1,
+    dtype: Optional["DTypeLike"] = None,
+):
+    """Compute the dot product of two vectors along specified dimensions.
+
+    Parameters
+    ----------
+    x1, x2
+        Input arrays, scalars not allowed.
+    axis
+        The axis along which to compute the dot product. By default, the last
+        axes of the inputs are used.
+    dtype
+        The desired data-type for the array. If not given, then the type will
+        be determined as the minimum type required to hold the objects in the
+        sequence.
+
+    Returns
+    -------
+    out : ndarray
+        The vector dot product of the inputs computed along the specified axes.
+
+    Raises
+    ------
+    ValueError
+        If either input is a scalar value.
+
+    Notes
+    -----
+    This is similar to `dot` but with broadcasting. It computes the dot product
+    along the specified axes, treating these as vectors, and broadcasts across
+    the remaining axes.
+    """
+    x1 = as_tensor_variable(x1)
+    x2 = as_tensor_variable(x2)
+
+    if x1.type.ndim == 0 or x2.type.ndim == 0:
+        raise ValueError("vecdot operand cannot be scalar")
+
+    # Handle negative axis
+    if axis < 0:
+        x1_axis = axis % x1.type.ndim
+        x2_axis = axis % x2.type.ndim
+    else:
+        x1_axis = axis
+        x2_axis = axis
+
+    # Move the axes to the end for dot product calculation
+    x1_perm = list(range(x1.type.ndim))
+    x1_perm.append(x1_perm.pop(x1_axis))
+    x1_transposed = x1.transpose(x1_perm)
+
+    x2_perm = list(range(x2.type.ndim))
+    x2_perm.append(x2_perm.pop(x2_axis))
+    x2_transposed = x2.transpose(x2_perm)
+
+    # Use the inner product operation
+    out = _inner_prod(x1_transposed, x2_transposed)
+
+    if dtype is not None:
+        out = out.astype(dtype)
+
+    return out
+
+
+def matvec(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None):
+    """Compute the matrix-vector product.
+
+    Parameters
+    ----------
+    x1
+        Input array for the matrix with shape (..., M, K).
+    x2
+        Input array for the vector with shape (..., K).
+    dtype
+        The desired data-type for the array. If not given, then the type will
+        be determined as the minimum type required to hold the objects in the
+        sequence.
+
+    Returns
+    -------
+    out : ndarray
+        The matrix-vector product with shape (..., M).
+
+    Raises
+    ------
+    ValueError
+        If any input is a scalar or if the trailing dimension of x2 does not match
+        the second-to-last dimension of x1.
+
+    Notes
+    -----
+    This is similar to `matmul` where the second argument is a vector,
+    but with different broadcasting rules. Broadcasting happens over all but
+    the last dimension of x1 and all dimensions of x2 except the last.
+    """
+    x1 = as_tensor_variable(x1)
+    x2 = as_tensor_variable(x2)
+
+    if x1.type.ndim == 0 or x2.type.ndim == 0:
+        raise ValueError("matvec operand cannot be scalar")
+
+    if x1.type.ndim < 2:
+        raise ValueError("First input to matvec must have at least 2 dimensions")
+
+    if x2.type.ndim < 1:
+        raise ValueError("Second input to matvec must have at least 1 dimension")
+
+    out = _matrix_vec_prod(x1, x2)
+
+    if dtype is not None:
+        out = out.astype(dtype)
+
+    return out
+
+
+def vecmat(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None):
+    """Compute the vector-matrix product.
+
+    Parameters
+    ----------
+    x1
+        Input array for the vector with shape (..., K).
+    x2
+        Input array for the matrix with shape (..., K, N).
+    dtype
+        The desired data-type for the array. If not given, then the type will
+        be determined as the minimum type required to hold the objects in the
+        sequence.
+
+    Returns
+    -------
+    out : ndarray
+        The vector-matrix product with shape (..., N).
+
+    Raises
+    ------
+    ValueError
+        If any input is a scalar or if the last dimension of x1 does not match
+        the second-to-last dimension of x2.
+
+    Notes
+    -----
+    This is similar to `matmul` where the first argument is a vector,
+    but with different broadcasting rules. Broadcasting happens over all but
+    the last dimension of x1 and all but the last two dimensions of x2.
+    """
+    x1 = as_tensor_variable(x1)
+    x2 = as_tensor_variable(x2)
+
+    if x1.type.ndim == 0 or x2.type.ndim == 0:
+        raise ValueError("vecmat operand cannot be scalar")
+
+    if x1.type.ndim < 1:
+        raise ValueError("First input to vecmat must have at least 1 dimension")
+
+    if x2.type.ndim < 2:
+        raise ValueError("Second input to vecmat must have at least 2 dimensions")
+
+    out = _vec_matrix_prod(x1, x2)
+
+    if dtype is not None:
+        out = out.astype(dtype)
+
+    return out
+
+
 @_vectorize_node.register(Dot)
 def vectorize_node_dot(op, node, batched_x, batched_y):
     old_x, old_y = node.inputs
@@ -2937,6 +3107,9 @@ __all__ = [
     "max_and_argmax",
     "max",
     "matmul",
+    "vecdot",
+    "matvec",
+    "vecmat",
     "argmax",
     "min",
     "argmin",
