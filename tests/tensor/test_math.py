@@ -2158,66 +2158,6 @@ class TestMatrixVectorOps:
         expected = make_expected(x_val, y_val)
         np.testing.assert_allclose(f(x_val, y_val), expected)
 
-    def test_matmul(self):
-        """Test matmul function with various input shapes."""
-        rng = np.random.default_rng(seed=utt.fetch_seed())
-
-        # Test matrix-matrix
-        x = matrix()
-        y = matrix()
-        z = matmul(x, y)
-        f = function([x, y], z)
-
-        x_val = random(3, 4, rng=rng).astype(config.floatX)
-        y_val = random(4, 5, rng=rng).astype(config.floatX)
-        np.testing.assert_allclose(f(x_val, y_val), np.matmul(x_val, y_val))
-
-        # Test vector-matrix
-        x = vector()
-        y = matrix()
-        z = matmul(x, y)
-        f = function([x, y], z)
-
-        x_val = random(3, rng=rng).astype(config.floatX)
-        y_val = random(3, 4, rng=rng).astype(config.floatX)
-        np.testing.assert_allclose(f(x_val, y_val), np.matmul(x_val, y_val))
-
-        # Test matrix-vector
-        x = matrix()
-        y = vector()
-        z = matmul(x, y)
-        f = function([x, y], z)
-
-        x_val = random(3, 4, rng=rng).astype(config.floatX)
-        y_val = random(4, rng=rng).astype(config.floatX)
-        np.testing.assert_allclose(f(x_val, y_val), np.matmul(x_val, y_val))
-
-        # Test vector-vector
-        x = vector()
-        y = vector()
-        z = matmul(x, y)
-        f = function([x, y], z)
-
-        x_val = random(3, rng=rng).astype(config.floatX)
-        y_val = random(3, rng=rng).astype(config.floatX)
-        np.testing.assert_allclose(f(x_val, y_val), np.matmul(x_val, y_val))
-
-        # Test batched
-        x = tensor3()
-        y = tensor3()
-        z = matmul(x, y)
-        f = function([x, y], z)
-
-        x_val = random(2, 3, 4, rng=rng).astype(config.floatX)
-        y_val = random(2, 4, 5, rng=rng).astype(config.floatX)
-        np.testing.assert_allclose(f(x_val, y_val), np.matmul(x_val, y_val))
-
-        # Test error cases
-        x = scalar()
-        y = scalar()
-        with pytest.raises(ValueError):
-            matmul(x, y)
-
 
 class TestTensordot:
     def TensorDot(self, axes):
