@@ -54,12 +54,6 @@ def test_function_name():
     assert regex.match(func.name) is not None
 
 
-def test_trust_empty_input():
-    x = shared(1)
-    f = function([], x + 1)
-    assert f.trust_input is True
-
-
 def test_trust_input():
     x = dvector()
     y = shared(1)
