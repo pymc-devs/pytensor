@@ -59,6 +59,7 @@ from pytensor.tensor.type import (
     zscalar,
 )
 from pytensor.tensor.type_other import (
+    MakeSlice,
     NoneConst,
     NoneTypeT,
     SliceConstant,
@@ -527,11 +528,20 @@ def basic_shape(shape, indices):
         if isinstance(idx, slice):
             res_shape += (slice_len(idx, n),)
         elif isinstance(getattr(idx, "type", None), SliceType):
-            if idx.owner:
-                idx_inputs = idx.owner.inputs
+            if idx.owner is None:
+                if not isinstance(idx, Constant):
+                    # This is an input slice, we can't reason symbolically on it.
+                    # We don't even know if we will get None entries or integers
+                    res_shape += (None,)
+                    continue
+                else:
+                    sl: slice = idx.data
+                    slice_inputs = (sl.start, sl.stop, sl.step)
+            elif isinstance(idx.owner.op, MakeSlice):
+                slice_inputs = idx.owner.inputs
             else:
-                idx_inputs = (None,)
-            res_shape += (slice_len(slice(*idx_inputs), n),)
+                raise ValueError(f"Unexpected Slice producing Op {idx.owner.op}")
+            res_shape += (slice_len(slice(*slice_inputs), n),)
         elif idx is None:
             res_shape += (ps.ScalarConstant(ps.int64, 1),)
         elif isinstance(getattr(idx, "type", None), NoneTypeT):
@@ -2728,6 +2738,11 @@ class AdvancedSubtensor(Op):
         res_shape = list(
             indexed_result_shape(ishapes[0], index_shapes, indices_are_shapes=True)
         )
+        for i, res_dim_length in enumerate(res_shape):
+            if res_dim_length is None:
+                # This can happen when we have a Slice provided by the user (not a constant nor the result of MakeSlice)
+                # We must compute the Op to find its shape
+                res_shape[i] = Shape_i(i)(node.out)
 
         adv_indices = [idx for idx in indices if not is_basic_idx(idx)]
         bool_indices = [idx for idx in adv_indices if is_bool_index(idx)]
