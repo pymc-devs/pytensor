@@ -957,7 +957,8 @@ optdb.register(
 @node_rewriter([det])
 def slogdet_specialization(fgraph, node):
     """
-    This rewrite targets specific operations related to slogdet i.e sign(det), log(det) and log(abs(det)) and rewrites them using the SLogDet operation.
+    This rewrite targets specific operations related to slogdet i.e sign(det), log(det) and log(abs(det)) and rewrites
+    them using the SLogDet operation.
 
     Parameters
     ----------
@@ -1013,3 +1014,30 @@ def slogdet_specialization(fgraph, node):
             k: slogdet_specialization_map[v] for k, v in dummy_replacements.items()
         }
         return replacements
+
+
+@register_specialize
+@node_rewriter([Blockwise])
+def rewrite_A_transposed_solve_to_transposed_solver(fgraph, node):
+    """
+    Replace solve(A.T, b) with solve(A, b, transposed=True).
+    """
+    solve_op = node.op.core_op
+    if not isinstance(solve_op, Solve):
+        return None
+
+    A, b = node.inputs
+
+    if not is_matrix_transpose(A):
+        return None
+
+    # If we've gotten here, A is actually A.T
+    A = A.owner.inputs[0]
+    solve_kwargs = solve_op._props_dict()
+
+    # The reason for using `not transposed` here is that we could have had solve(A.T, b, transposed=True), in which
+    # case we can just do solve(A, b, transposed=False) and the rewrite is still valid. In the "base case" we had
+    # solve(A.T, b, transposed=False) and we're going to solve(A, b, tranposed=True).
+    solve_kwargs["transposed"] = not solve_kwargs["transposed"]
+
+    return [Blockwise(Solve(**solve_kwargs))(A, b)]

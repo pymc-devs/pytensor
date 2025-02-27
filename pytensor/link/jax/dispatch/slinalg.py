@@ -39,13 +39,26 @@ def jax_funcify_Cholesky(op, **kwargs):
 
 @jax_funcify.register(Solve)
 def jax_funcify_Solve(op, **kwargs):
-    if op.assume_a != "gen" and op.lower:
-        lower = True
-    else:
-        lower = False
+    assume_a = op.assume_a
+    lower = op.lower
+    check_finite = op.check_finite
+    overwrite_a = op.overwrite_a
+    overwrite_b = op.overwrite_b
+    transposed = op.transposed
 
-    def solve(a, b, lower=lower):
-        return jax.scipy.linalg.solve(a, b, lower=lower)
+    def solve(a, b):
+        if transposed:
+            a = a.T
+
+        return jax.scipy.linalg.solve(
+            a,
+            b,
+            assume_a=assume_a,
+            lower=lower,
+            check_finite=check_finite,
+            overwrite_a=overwrite_a,
+            overwrite_b=overwrite_b,
+        )
 
     return solve
 

@@ -401,16 +401,39 @@ def test_getrs(trans, overwrite_a, overwrite_b, b_shape):
     assert_allclose(x, x_sp)
 
 
+solve_test_cases = [
+    ("gen", False, False),
+    ("gen", False, True),
+    ("sym", False, False),
+    ("sym", True, False),
+    ("sym", True, True),
+    ("pos", False, False),
+    ("pos", True, False),
+    ("pos", True, True),
+]
+solve_test_ids = [
+    f'{assume_a}_{"lower" if lower else "upper"}_{"A^T" if transposed else "A"}'
+    for assume_a, lower, transposed in solve_test_cases
+]
+
+
 @pytest.mark.parametrize(
     "b_shape",
     [(5, 1), (5, 5), (5,)],
     ids=["b_col_vec", "b_matrix", "b_vec"],
 )
-@pytest.mark.parametrize("assume_a", ["gen", "sym", "pos"], ids=str)
+@pytest.mark.parametrize(
+    "assume_a, lower, transposed", solve_test_cases, ids=solve_test_ids
+)
 @pytest.mark.filterwarnings(
     'ignore:Cannot cache compiled function "numba_funcified_fgraph"'
 )
-def test_solve(b_shape: tuple[int], assume_a: Literal["gen", "sym", "pos"]):
+def test_solve(
+    b_shape: tuple[int],
+    assume_a: Literal["gen", "sym", "pos"],
+    lower: bool,
+    transposed: bool,
+):
     A = pt.matrix("A", dtype=floatX)
     b = pt.tensor("b", shape=b_shape, dtype=floatX)
 
@@ -424,10 +447,17 @@ def test_solve(b_shape: tuple[int], assume_a: Literal["gen", "sym", "pos"]):
             x = (x + x.T) / 2
         return x
 
+    def T(x):
+        if transposed:
+            return x.T
+        return x
+
     X = pt.linalg.solve(
         A_func(A),
         b,
         assume_a=assume_a,
+        lower=lower,
+        transposed=transposed,
         b_ndim=len(b_shape),
     )
     f = pytensor.function(
@@ -459,13 +489,18 @@ def test_solve(b_shape: tuple[int], assume_a: Literal["gen", "sym", "pos"]):
 
     # Test that the result is numerically correct. Need to use the unmodified copy
     np.testing.assert_allclose(
-        A_func(A_val_copy) @ X_np, b_val_copy, atol=ATOL, rtol=RTOL
+        T(A_func(A_val_copy)) @ X_np, b_val_copy, atol=ATOL, rtol=RTOL
     )
 
     # See the note in tensor/test_slinalg.py::test_solve_correctness for details about the setup here
     utt.verify_grad(
         lambda A, b: pt.linalg.solve(
-            A_func(A), b, lower=False, assume_a=assume_a, b_ndim=len(b_shape)
+            A_func(A),
+            b,
+            lower=lower,
+            transposed=transposed,
+            assume_a=assume_a,
+            b_ndim=len(b_shape),
         ),
         [A_val_copy, b_val_copy],
         mode="NUMBA",
