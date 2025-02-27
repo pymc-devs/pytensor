@@ -142,7 +142,13 @@ if __name__ == "__main__":
         print(*missing, sep="\n")
         sys.exit(1)
     cp = subprocess.run(
-        ["mypy", "--show-error-codes", "pytensor"],
+        [
+            "mypy",
+            "--show-error-codes",
+            "--disable-error-code",
+            "annotation-unchecked",
+            "pytensor",
+        ],
         capture_output=True,
     )
     output = cp.stdout.decode()
