@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pytensor"
 dynamic = ['version']
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.11,<3.14"
 authors = [{ name = "pymc-devs", email = "pymc.devs@gmail.com" }]
 description = "Optimizing compiler for evaluating mathematical expressions on CPUs and GPUs."
 readme = "README.rst"
@@ -30,7 +30,6 @@ classifiers = [
     "Operating System :: Unix",
     "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -169,7 +168,7 @@ lines-after-imports = 2
 
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 ignore_missing_imports = true
 strict_equality = true
 warn_redundant_casts = true

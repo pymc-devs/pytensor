@@ -21,10 +21,10 @@ jobs=$(gh api /repos/$owner/$repo/actions/runs/$latest_id/jobs --jq '
 | map({name: .name, run_id: .run_id, id: .id, started_at: .started_at, completed_at: .completed_at})
 ')
 
-# Skip 3.10, float32, and Benchmark tests
+# Skip oldest supported Python version, float32, and Benchmark tests
 function skip_job() {
     name=$1
-    if [[ $name == *"py3.10"* ]]; then
+    if [[ $name == *"py3.11"* ]]; then
         return 0
     fi
 
