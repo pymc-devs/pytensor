@@ -89,6 +89,7 @@ from pytensor.tensor.math import (
     logaddexp,
     logsumexp,
     matmul,
+    matvec,
     max,
     max_and_argmax,
     maximum,
@@ -123,6 +124,8 @@ from pytensor.tensor.math import (
     true_div,
     trunc,
     var,
+    vecdot,
+    vecmat,
 )
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.type import (
@@ -2074,6 +2077,86 @@ class TestDot:
                             assert is_super_shape(x, g)
                             g = grad(z.sum(), y)
                             assert is_super_shape(y, g)
+
+
+class TestMatrixVectorOps:
+    def test_vecdot(self):
+        """Test vecdot function with various input shapes."""
+        rng = np.random.default_rng(seed=utt.fetch_seed())
+
+        # Test vector-vector
+        x = vector()
+        y = vector()
+        z = vecdot(x, y)
+        f = function([x, y], z)
+        x_val = random(5, rng=rng).astype(config.floatX)
+        y_val = random(5, rng=rng).astype(config.floatX)
+        np.testing.assert_allclose(f(x_val, y_val), np.dot(x_val, y_val))
+
+        # Test batched vectors
+        x = tensor3()
+        y = tensor3()
+        z = vecdot(x, y)
+        f = function([x, y], z)
+
+        x_val = random(2, 3, 4, rng=rng).astype(config.floatX)
+        y_val = random(2, 3, 4, rng=rng).astype(config.floatX)
+        expected = np.sum(x_val * y_val, axis=-1)
+        np.testing.assert_allclose(f(x_val, y_val), expected)
+
+    @pytest.mark.parametrize(
+        "func,x_shape,y_shape,make_expected",
+        [
+            # matvec tests - Matrix(M,K) @ Vector(K) -> Vector(M)
+            (matvec, (3, 4), (4,), lambda x, y: np.dot(x, y)),
+            # matvec batch tests - Tensor3(B,M,K) @ Matrix(B,K) -> Matrix(B,M)
+            (
+                matvec,
+                (2, 3, 4),
+                (2, 4),
+                lambda x, y: np.array([np.dot(x[i], y[i]) for i in range(len(x))]),
+            ),
+            # vecmat tests - Vector(K) @ Matrix(K,N) -> Vector(N)
+            (vecmat, (3,), (3, 4), lambda x, y: np.dot(x, y)),
+            # vecmat batch tests - Matrix(B,K) @ Tensor3(B,K,N) -> Matrix(B,N)
+            (
+                vecmat,
+                (2, 3),
+                (2, 3, 4),
+                lambda x, y: np.array([np.dot(x[i], y[i]) for i in range(len(x))]),
+            ),
+        ],
+    )
+    def test_mat_vec_ops(self, func, x_shape, y_shape, make_expected):
+        """Parametrized test for matvec and vecmat functions."""
+        rng = np.random.default_rng(seed=utt.fetch_seed())
+
+        # Create PyTensor variables with appropriate dimensions
+        if len(x_shape) == 1:
+            x = vector()
+        elif len(x_shape) == 2:
+            x = matrix()
+        else:
+            x = tensor3()
+
+        if len(y_shape) == 1:
+            y = vector()
+        elif len(y_shape) == 2:
+            y = matrix()
+        else:
+            y = tensor3()
+
+        # Apply the function
+        z = func(x, y)
+        f = function([x, y], z)
+
+        # Create random values
+        x_val = random(*x_shape, rng=rng).astype(config.floatX)
+        y_val = random(*y_shape, rng=rng).astype(config.floatX)
+
+        # Compare with the expected result
+        expected = make_expected(x_val, y_val)
+        np.testing.assert_allclose(f(x_val, y_val), expected)
 
 
 class TestTensordot:

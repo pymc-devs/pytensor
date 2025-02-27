@@ -2841,6 +2841,159 @@ def matmul(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None
     return out
 
 
+def vecdot(
+    x1: "TensorLike",
+    x2: "TensorLike",
+    dtype: Optional["DTypeLike"] = None,
+) -> "TensorVariable":
+    """Compute the vector dot product of two arrays.
+
+    Parameters
+    ----------
+    x1, x2
+        Input arrays with the same shape.
+    dtype
+        The desired data-type for the result. If not given, then the type will
+        be determined as the minimum type required to hold the objects in the
+        sequence.
+
+    Returns
+    -------
+    TensorVariable
+        The vector dot product of the inputs.
+
+    Notes
+    -----
+    This is similar to `np.vecdot` and computes the dot product of
+    vectors along the last axis of both inputs. Broadcasting is supported
+    across all other dimensions.
+
+    Examples
+    --------
+    >>> import pytensor.tensor as pt
+    >>> x = pt.matrix("x")
+    >>> y = pt.matrix("y")
+    >>> z = pt.vecdot(x, y)
+    >>> # Equivalent to np.sum(x * y, axis=-1)
+    """
+    x1 = as_tensor_variable(x1)
+    x2 = as_tensor_variable(x2)
+
+    # Use the inner product operation along the last axis
+    out = _inner_prod(x1, x2)
+
+    if dtype is not None:
+        out = out.astype(dtype)
+
+    return out
+
+
+def matvec(
+    x1: "TensorLike", x2: "TensorLike", dtype: Optional["DTypeLike"] = None
+) -> "TensorVariable":
+    """Compute the matrix-vector product.
+
+    Parameters
+    ----------
+    x1
+        Input array for the matrix with shape (..., M, K).
+    x2
+        Input array for the vector with shape (..., K).
+    dtype
+        The desired data-type for the result. If not given, then the type will
+        be determined as the minimum type required to hold the objects in the
+        sequence.
+
+    Returns
+    -------
+    TensorVariable
+        The matrix-vector product with shape (..., M).
+
+    Notes
+    -----
+    This is equivalent to `numpy.matmul` where the second argument is a vector,
+    but with more intuitive broadcasting rules. Broadcasting happens over all but
+    the last two dimensions of x1 and all dimensions of x2 except the last.
+
+    Examples
+    --------
+    >>> import pytensor.tensor as pt
+    >>> import numpy as np
+    >>> # Matrix-vector product
+    >>> A = pt.matrix("A")  # shape (M, K)
+    >>> v = pt.vector("v")  # shape (K,)
+    >>> result = pt.matvec(A, v)  # shape (M,)
+    >>> # Equivalent to np.matmul(A, v)
+    >>>
+    >>> # Batched matrix-vector product
+    >>> batched_A = pt.tensor3("A")  # shape (B, M, K)
+    >>> batched_v = pt.matrix("v")  # shape (B, K)
+    >>> result = pt.matvec(batched_A, batched_v)  # shape (B, M)
+    """
+    x1 = as_tensor_variable(x1)
+    x2 = as_tensor_variable(x2)
+
+    out = _matrix_vec_prod(x1, x2)
+
+    if dtype is not None:
+        out = out.astype(dtype)
+
+    return out
+
+
+def vecmat(
+    x1: "TensorLike", x2: "TensorLike", dtype: Optional["DTypeLike"] = None
+) -> "TensorVariable":
+    """Compute the vector-matrix product.
+
+    Parameters
+    ----------
+    x1
+        Input array for the vector with shape (..., K).
+    x2
+        Input array for the matrix with shape (..., K, N).
+    dtype
+        The desired data-type for the result. If not given, then the type will
+        be determined as the minimum type required to hold the objects in the
+        sequence.
+
+    Returns
+    -------
+    TensorVariable
+        The vector-matrix product with shape (..., N).
+
+    Notes
+    -----
+    This is equivalent to `numpy.matmul` where the first argument is a vector,
+    but with more intuitive broadcasting rules. Broadcasting happens over all but
+    the last dimension of x1 and all but the last two dimensions of x2.
+
+    Examples
+    --------
+    >>> import pytensor.tensor as pt
+    >>> import numpy as np
+    >>> # Vector-matrix product
+    >>> v = pt.vector("v")  # shape (K,)
+    >>> A = pt.matrix("A")  # shape (K, N)
+    >>> result = pt.vecmat(v, A)  # shape (N,)
+    >>> # Equivalent to np.matmul(v, A)
+    >>>
+    >>> # Batched vector-matrix product
+    >>> batched_v = pt.matrix("v")  # shape (B, K)
+    >>> batched_A = pt.tensor3("A")  # shape (B, K, N)
+    >>> result = pt.vecmat(batched_v, batched_A)  # shape (B, N)
+    """
+    x1 = as_tensor_variable(x1)
+    x2 = as_tensor_variable(x2)
+
+    out = _vec_matrix_prod(x1, x2)
+
+    if dtype is not None:
+        out = out.astype(dtype)
+
+    return out
+
+
 @_vectorize_node.register(Dot)
 def vectorize_node_dot(op, node, batched_x, batched_y):
     old_x, old_y = node.inputs
@@ -2937,6 +3090,9 @@ __all__ = [
     "max_and_argmax",
     "max",
     "matmul",
+    "vecdot",
+    "matvec",
+    "vecmat",
     "argmax",
     "min",
     "argmin",
