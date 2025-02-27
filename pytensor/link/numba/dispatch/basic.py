@@ -448,16 +448,46 @@ def numba_funcify_OpFromGraph(op, node=None, **kwargs):
     return opfromgraph
 
 
+def numba_funcify_debug(op, node, **kwargs):
+    numba_fun = numba_funcify(op, node=node, **kwargs)
+
+    if node is None:
+        return numba_fun
+
+    args = ", ".join([f"i{i}" for i in range(len(node.inputs))])
+    str_op = str(op)
+
+    f_source = dedent(
+        f"""
+        def foo({args}):
+            print("\\nOp: ", "{str_op}")
+            print("    inputs: ", {args})
+            outs = numba_fun({args})
+            print("    outputs: ", outs)
+            return outs
+        """
+    )
+
+    f = compile_function_src(
+        f_source,
+        "foo",
+        {**globals(), **{"numba_fun": numba_fun}},
+    )
+
+    return numba_njit(f)
+
+
 @numba_funcify.register(FunctionGraph)
 def numba_funcify_FunctionGraph(
     fgraph,
     node=None,
     fgraph_name="numba_funcified_fgraph",
+    op_conversion_fn=numba_funcify,
     **kwargs,
 ):
     return fgraph_to_python(
         fgraph,
-        numba_funcify,
+        op_conversion_fn=op_conversion_fn,
         type_conversion_fn=numba_typify,
         fgraph_name=fgraph_name,
         **kwargs,
