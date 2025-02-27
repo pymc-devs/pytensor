@@ -303,8 +303,7 @@ def function(
             "contained in a list, even when there is a single "
             "input."
         )
-    if len(inputs) == 0:
-        trust_input = True  # we can trust the empty input (for speed)
+
     # compute some features of the arguments:
     uses_tuple = any(isinstance(i, list | tuple) for i in inputs)
     uses_updates = bool(updates)
