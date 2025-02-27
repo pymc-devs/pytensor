@@ -19,7 +19,6 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.tensor import ones, stack
 from pytensor.tensor.random.basic import (
     ChoiceWithoutReplacement,
-    MvNormalRV,
     PermutationRV,
     _gamma,
     bernoulli,
@@ -707,7 +706,7 @@ def create_mvnormal_cov_decomposition_method_test(mode):
                 [0, 0, 0],
             ]
         rng = shared(np.random.default_rng(675))
-        draws = MvNormalRV(method=method)(mean, cov, rng=rng, size=(10_000,))
+        draws = multivariate_normal(mean, cov, method=method, size=(10_000,), rng=rng)
         assert draws.owner.op.method == method
 
         # JAX doesn't raise errors at runtime

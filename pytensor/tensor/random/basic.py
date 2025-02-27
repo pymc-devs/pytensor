@@ -865,7 +865,7 @@ class MvNormalRV(RandomVariable):
             )
         self.method = method
 
-    def __call__(self, mean, cov, size=None, **kwargs):
+    def __call__(self, mean, cov, size=None, method=None, **kwargs):
         r""" "Draw samples from a multivariate normal distribution.
 
         Signature
@@ -888,6 +888,12 @@ class MvNormalRV(RandomVariable):
             is specified, a single `N`-dimensional sample is returned.
 
         """
+        if method is not None and method != self.method:
+            # Recreate Op with the new method
+            props = self._props_dict()
+            props["method"] = method
+            new_op = type(self)(**props)
+            return new_op.__call__(mean, cov, size=size, method=method, **kwargs)
         return super().__call__(mean, cov, size=size, **kwargs)
 
     def rng_fn(self, rng, mean, cov, size):
