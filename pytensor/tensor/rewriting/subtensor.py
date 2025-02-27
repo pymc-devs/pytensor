@@ -2029,18 +2029,41 @@ def ravel_multidimensional_bool_idx(fgraph, node):
     return [copy_stack_trace(node.outputs[0], new_out)]
 
 
-@node_rewriter(tracks=[AdvancedSubtensor])
+@node_rewriter(tracks=[AdvancedSubtensor, AdvancedIncSubtensor])
 def ravel_multidimensional_int_idx(fgraph, node):
-    """Convert multidimensional integer indexing into equivalent vector integer index, supported by Numba
+    """Convert multidimensional integer indexing into equivalent consecutive vector integer index,
+    supported by Numba or by our specialized dispatchers
 
-    x[eye(3, dtype=int)] -> x[eye(3).ravel()].reshape((3, 3))
-
+        x[eye(3)] -> x[eye(3).ravel()].reshape((3, 3))
 
     NOTE: This is very similar to the rewrite `local_replace_AdvancedSubtensor` except it also handles non-full slices
 
-    x[eye(3, dtype=int), 2:] -> x[eye(3).ravel(), 2:].reshape((3, 3, ...)), where ... are the remaining output shapes
+        x[eye(3), 2:] -> x[eye(3).ravel(), 2:].reshape((3, 3, ...)), where ... are the remaining output shapes
+
+    It also handles multiple integer indices, but only if they don't broadcast
+
+        x[eye(3,), 2:, eye(3)] -> x[eye(3).ravel(), eye(3).ravel(), 2:].reshape((3, 3, ...)), where ... are the remaining output shapes
+
+    Also handles AdvancedIncSubtensor, but only if the advanced indices are consecutive and neither indices nor y broadcast
+
+        x[eye(3), 2:].set(y) -> x[eye(3).ravel(), 2:].set(y.reshape(-1, y.shape[1:]))
+
     """
-    x, *idxs = node.inputs
+    op = node.op
+    non_consecutive_adv_indexing = op.non_consecutive_adv_indexing(node)
+    is_inc_subtensor = isinstance(op, AdvancedIncSubtensor)
+
+    if is_inc_subtensor:
+        x, y, *idxs = node.inputs
+        # Inc/SetSubtensor is harder to reason about due to y
+        # We get out if it's broadcasting or if the advanced indices are non-consecutive
+        if non_consecutive_adv_indexing or (
+            y.type.broadcastable != x[tuple(idxs)].type.broadcastable
+        ):
+            return None
+
+    else:
+        x, *idxs = node.inputs
 
     if any(
         (
@@ -2049,39 +2072,90 @@ def ravel_multidimensional_int_idx(fgraph, node):
         )
         for idx in idxs
     ):
-        # Get out if there are any other advanced indexes or np.newaxis
+        # Get out if there are any other advanced indices or np.newaxis
         return None
 
-    int_idxs = [
+    int_idxs_and_pos = [
         (i, idx)
         for i, idx in enumerate(idxs)
         if (isinstance(idx.type, TensorType) and idx.dtype in integer_dtypes)
     ]
 
-    if len(int_idxs) != 1:
-        # Get out if there are no or multiple integer idxs
+    if not int_idxs_and_pos:
         return None
 
-    [(int_idx_pos, int_idx)] = int_idxs
-    if int_idx.type.ndim < 2:
-        # No need to do anything if it's a vector or scalar, as it's already supported by Numba
+    int_idxs_pos, int_idxs = zip(
+        *int_idxs_and_pos, strict=False
+    )  # strict=False because by definition it's true
+
+    first_int_idx_pos = int_idxs_pos[0]
+    first_int_idx = int_idxs[0]
+    first_int_idx_bcast = first_int_idx.type.broadcastable
+
+    if any(int_idx.type.broadcastable != first_int_idx_bcast for int_idx in int_idxs):
+        # We don't have a view-only broadcasting operation
+        # Explicitly broadcasting the indices can incur a memory / copy overhead
         return None
 
-    raveled_int_idx = int_idx.ravel()
-    new_idxs = list(idxs)
-    new_idxs[int_idx_pos] = raveled_int_idx
-    raveled_subtensor = x[tuple(new_idxs)]
+    int_idxs_ndim = len(first_int_idx_bcast)
+    if (
+        int_idxs_ndim == 0
+    ):  # This should be a basic indexing operation, rewrite elsewhere
+        return None
 
-    # Reshape into correct shape
-    # Because we only allow one advanced indexing, the output dimension corresponding to the raveled integer indexing
-    # must match the input position. If there were multiple advanced indexes, this could have been forcefully moved to the front
-    raveled_shape = raveled_subtensor.shape
-    unraveled_shape = (
-        *raveled_shape[:int_idx_pos],
-        *int_idx.shape,
-        *raveled_shape[int_idx_pos + 1 :],
-    )
-    new_out = raveled_subtensor.reshape(unraveled_shape)
+    int_idxs_need_raveling = int_idxs_ndim > 1
+    if not (int_idxs_need_raveling or non_consecutive_adv_indexing):
+        # Numba or our dispatch natively supports consecutive vector indices, nothing needs to be done
+        return None
+
+    # Reorder non-consecutive indices
+    if non_consecutive_adv_indexing:
+        assert not is_inc_subtensor  # Sanity check that we got out if this was the case
+        # This case works as if all the advanced indices were on the front
+        transposition = list(int_idxs_pos) + [
+            i for i in range(len(idxs)) if i not in int_idxs_pos
+        ]
+        idxs = tuple(idxs[a] for a in transposition)
+        x = x.transpose(transposition)
+        first_int_idx_pos = 0
+        del int_idxs_pos  # Make sure they are not wrongly used
+
+    # Ravel multidimensional indices
+    if int_idxs_need_raveling:
+        idxs = list(idxs)
+        for idx_pos, int_idx in enumerate(int_idxs, start=first_int_idx_pos):
+            idxs[idx_pos] = int_idx.ravel()
+
+    # Index with reordered and/or raveled indices
+    new_subtensor = x[tuple(idxs)]
+
+    if is_inc_subtensor:
+        y_shape = tuple(y.shape)
+        y_raveled_shape = (
+            *y_shape[:first_int_idx_pos],
+            -1,
+            *y_shape[first_int_idx_pos + int_idxs_ndim :],
+        )
+        y_raveled = y.reshape(y_raveled_shape)
+
+        new_out = inc_subtensor(
+            new_subtensor,
+            y_raveled,
+            set_instead_of_inc=op.set_instead_of_inc,
+            ignore_duplicates=op.ignore_duplicates,
+            inplace=op.inplace,
+        )
+
+    else:
+        # Unravel advanced indexing dimensions
+        raveled_shape = tuple(new_subtensor.shape)
+        unraveled_shape = (
+            *raveled_shape[:first_int_idx_pos],
+            *first_int_idx.shape,
+            *raveled_shape[first_int_idx_pos + 1 :],
+        )
+        new_out = new_subtensor.reshape(unraveled_shape)
+
     return [copy_stack_trace(node.outputs[0], new_out)]
 
 
@@ -2089,10 +2163,12 @@ optdb["specialize"].register(
     ravel_multidimensional_bool_idx.__name__,
     ravel_multidimensional_bool_idx,
     "numba",
+    use_db_name_as_tag=False,  # Not included if only "specialize" is requested
 )
 
 optdb["specialize"].register(
     ravel_multidimensional_int_idx.__name__,
     ravel_multidimensional_int_idx,
     "numba",
+    use_db_name_as_tag=False,  # Not included if only "specialize" is requested
 )
