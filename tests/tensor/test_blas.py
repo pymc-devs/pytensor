@@ -27,6 +27,7 @@ from pytensor.tensor.blas import (
     Gemm,
     Gemv,
     Ger,
+    _batched_dot,
     _dot22,
     _dot22scalar,
     batched_dot,
@@ -2446,7 +2447,7 @@ class TestInferShape(unittest_tools.InferShapeTester):
 rng = np.random.default_rng(unittest_tools.fetch_seed())
 TestBatchedDot = makeTester(
     name="BatchedDotTester",
-    op=batched_dot,
+    op=_batched_dot,
     expected=(
         lambda xs, ys: np.asarray(
             [
@@ -2460,34 +2461,10 @@ TestBatchedDot = makeTester(
     grad=dict(
         correct1=(random(3, 5, 7, rng=rng), random(3, 7, 5, rng=rng)),
         correct2=(random(3, 5, 7, rng=rng), random(3, 7, 9, rng=rng)),
-        correct3=(random(3, 5, 7, rng=rng), random(3, 7, rng=rng)),
-        correct4=(random(3, 5), random(3, 5, 7, rng=rng)),
-        correct5=(random(3, rng=rng), random(3, 5, 7, rng=rng)),
-        correct6=(random(3, 5, rng=rng), random(3, rng=rng)),
-        correct7=(random(3, 5, rng=rng), random(3, 5, rng=rng)),
-        correct8=(random(3, rng=rng), random(3, rng=rng)),
-        correct9=(random(3, 5, 7, 11, rng=rng), random(3, rng=rng)),
-        correct10=(random(3, 2, 6, 5, rng=rng), random(3, 5, rng=rng)),
-        correct11=(random(3, 2, 6, 5, rng=rng), random(3, 5, 7, rng=rng)),
-        correct12=(random(3, 2, 6, 5, rng=rng), random(3, 7, 5, 8, rng=rng)),
-        mixed1=(random(3, 5, rng=rng).astype("float32"), random(3, 5, 7, rng=rng)),
-        mixed2=(random(3, 5, rng=rng).astype("float64"), random(3, 5, 7, rng=rng)),
     ),
     good=dict(
         correct1=(random(3, 5, 7, rng=rng), random(3, 7, 5, rng=rng)),
         correct2=(random(3, 5, 7, rng=rng), random(3, 7, 9, rng=rng)),
-        correct3=(random(3, 5, 7, rng=rng), random(3, 7, rng=rng)),
-        correct4=(random(3, 5, rng=rng), random(3, 5, 7, rng=rng)),
-        correct5=(random(3, rng=rng), random(3, 5, 7, rng=rng)),
-        correct6=(random(3, 5, rng=rng), random(3, rng=rng)),
-        correct7=(random(3, 5, rng=rng), random(3, 5, rng=rng)),
-        correct8=(random(3, rng=rng), random(3, rng=rng)),
-        correct9=(random(3, 5, 7, 11, rng=rng), random(3, rng=rng)),
-        correct10=(random(3, 7, 11, 5, rng=rng), random(3, 5, rng=rng)),
-        correct11=(random(3, 7, 11, 5, rng=rng), random(3, 5, 13, rng=rng)),
-        correct12=(random(3, 7, 11, 5, rng=rng), random(3, 13, 5, 17, rng=rng)),
-        mixed1=(random(3, 5, rng=rng).astype("float32"), random(3, 5, 7, rng=rng)),
-        mixed2=(random(3, 5, rng=rng).astype("float64"), random(3, 5, 7, rng=rng)),
     ),
     bad_build=dict(
         no_batch_axis2=(random(rng=rng), random(3, 5, rng=rng)),
@@ -2496,13 +2473,8 @@ TestBatchedDot = makeTester(
     bad_runtime=dict(
         batch_dim_mismatch1=(random(2, 5, 7, rng=rng), random(3, 7, 9, rng=rng)),
         batch_dim_mismatch2=(random(3, 5, 7, rng=rng), random(2, 7, 9, rng=rng)),
-        batch_dim_mismatch3=(random(3, rng=rng), random(5, rng=rng)),
         bad_dim1=(random(3, 5, 7, rng=rng), random(3, 5, 7, rng=rng)),
         bad_dim2=(random(3, 5, 7, rng=rng), random(3, 8, 3, rng=rng)),
-        bad_dim3=(random(3, 5, rng=rng), random(3, 7, rng=rng)),
-        bad_dim4=(random(3, 5, 7, 11, rng=rng), random(3, 5, rng=rng)),
-        bad_dim5=(random(3, 5, 7, 11, rng=rng), random(3, 5, 13, rng=rng)),
-        bad_dim6=(random(3, 5, 7, 11, rng=rng), random(3, 13, 5, 17, rng=rng)),
     ),
 )
 
@@ -2511,7 +2483,8 @@ def test_batched_dot():
     rng = np.random.default_rng(unittest_tools.fetch_seed())
     first = tensor3("first")
     second = tensor3("second")
-    output = batched_dot(first, second)
+    with pytest.warns(FutureWarning):
+        output = batched_dot(first, second)
     first_val = rng.random((10, 10, 20)).astype(config.floatX)
     second_val = rng.random((10, 20, 5)).astype(config.floatX)
     result_fn = function([first, second], output)
@@ -2522,7 +2495,8 @@ def test_batched_dot():
 
     first_mat = dmatrix("first")
     second_mat = dmatrix("second")
-    output = batched_dot(first_mat, second_mat)
+    with pytest.warns(FutureWarning):
+        output = batched_dot(first_mat, second_mat)
     first_mat_val = rng.random((10, 10)).astype(config.floatX)
     second_mat_val = rng.random((10, 10)).astype(config.floatX)
     result_fn = function([first_mat, second_mat], output)
@@ -2540,7 +2514,7 @@ def test_batched_dot_not_contiguous():
 
     X = tensor3()
     W = tensor3()
-    Z = batched_dot(X, W)
+    Z = _batched_dot(X, W)
     f = function([X, W], Z)
 
     w = np_genarray(30, 10, 5)
@@ -2568,7 +2542,7 @@ def test_batched_dot_blas_flags():
 
     x = tensor("x", shape=(2, 5, 3))
     y = tensor("y", shape=(2, 3, 1))
-    out = batched_dot(x, y)
+    out = _batched_dot(x, y)
     assert isinstance(out.owner.op, BatchedDot)
     x_test = rng.normal(size=x.type.shape).astype(x.type.dtype)
     y_test = rng.normal(size=y.type.shape).astype(y.type.dtype)
@@ -2590,7 +2564,8 @@ def test_batched_tensordot():
     first = tensor4("first")
     second = tensor4("second")
     axes = [[1, 2], [3, 1]]
-    output = batched_tensordot(first, second, axes)
+    with pytest.warns(FutureWarning):
+        output = batched_tensordot(first, second, axes)
     first_val = rng.random((8, 10, 20, 3)).astype(config.floatX)
     second_val = rng.random((8, 20, 5, 10)).astype(config.floatX)
     result_fn = function([first, second], output)
@@ -2602,7 +2577,8 @@ def test_batched_tensordot():
     first_mat = dmatrix("first")
     second_mat = dmatrix("second")
     axes = 1
-    output = batched_tensordot(first_mat, second_mat, axes)
+    with pytest.warns(FutureWarning):
+        output = batched_tensordot(first_mat, second_mat, axes)
     first_mat_val = rng.random((10, 4)).astype(config.floatX)
     second_mat_val = rng.random((10, 4)).astype(config.floatX)
     result_fn = function([first_mat, second_mat], output)
