@@ -15,6 +15,7 @@ from pytensor.compile.io import In
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
+from pytensor.graph import Constant
 from pytensor.graph.op import get_test_value
 from pytensor.graph.rewriting.utils import is_same_graph
 from pytensor.printing import pprint
@@ -37,6 +38,7 @@ from pytensor.tensor.subtensor import (
     advanced_inc_subtensor1,
     advanced_set_subtensor,
     advanced_set_subtensor1,
+    advanced_subtensor,
     advanced_subtensor1,
     as_index_literal,
     basic_shape,
@@ -2145,7 +2147,17 @@ class TestAdvancedSubtensor:
         slc = slicetype()
         f = pytensor.function([slc], var[slc], mode=self.mode)
         s = slice(1, 3)
-        f(s)
+        assert f(s).shape == (2, 3)
+
+        f_shape0 = pytensor.function([slc], var[slc].shape[0], mode=self.mode)
+        assert f_shape0(s) == 2
+
+        f_shape1 = pytensor.function([slc], var[slc].shape[1], mode=self.mode)
+        assert not any(
+            isinstance(node.op, AdvancedSubtensor)
+            for node in f_shape1.maker.fgraph.toposort()
+        )
+        assert f_shape1(s) == 3
 
     def test_adv_grouped(self):
         # Reported in https://github.com/Theano/Theano/issues/6152
@@ -2610,6 +2622,14 @@ class TestInferShape(utt.InferShapeTester):
             [n_val],
             AdvancedSubtensor,
         )
+
+    def test_advanced_subtensor_constant_slice(self):
+        x = dmatrix("x")
+        constant_slice = pytensor.as_symbolic(slice(1, None, None))
+        assert isinstance(constant_slice, Constant)
+        adv_indices = ptb.constant(np.zeros((2, 3)), dtype="int")
+        y = advanced_subtensor(x, constant_slice, adv_indices)
+        assert tuple(y.shape.eval({x: np.zeros((10, 10))})) == (9, 2, 3)
 
 
 @config.change_flags(compute_test_value="raise")
