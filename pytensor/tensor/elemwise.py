@@ -1645,6 +1645,25 @@ def scalar_elemwise(*symbol, nfunc=None, nin=None, nout=None, symbolname=None):
     should take nin + nout inputs. `nout == 0` means that the numpy function does
     not take a NumPy array argument to put its result in.
 
+    This decorator is used to create element-wise operations on tensors.
+    It transforms scalar operations (those that work on individual values)
+    into operations that work on entire tensors by applying the scalar
+    operation to each element of the tensor.
+
+    Examples
+    --------
+    @scalar_elemwise
+    def add(a, b):
+        "Add two values together."
+        # The actual implementation is provided by the decorator
+
+    x = tensor('x')
+    y = tensor('y')
+    z = add(x, y)  # Creates a computational graph node
+
+    The decorator creates an Elemwise op that handles broadcasting,
+    different input shapes, dtype conversions, and other details needed
+    for tensor operations.
     """
     import pytensor.scalar as scalar
 
