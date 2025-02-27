@@ -81,11 +81,6 @@ def test_AdvancedSubtensor1_out_of_bounds():
             (np.array([True, False, False])),
             False,
         ),
-        (
-            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
-            ([1, 2], [2, 3]),
-            False,
-        ),
         # Single multidimensional indexing (supported after specialization rewrites)
         (
             as_tensor(np.arange(3 * 3).reshape((3, 3))),
@@ -117,6 +112,12 @@ def test_AdvancedSubtensor1_out_of_bounds():
             (slice(2, None), np.eye(3).astype(bool)),
             False,
         ),
+        # Multiple vector indexing (supported by our dispatcher)
+        (
+            pt.as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            ([1, 2], [2, 3]),
+            False,
+        ),
         (
             as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             (slice(None), [1, 2], [3, 4]),
@@ -127,16 +128,33 @@ def test_AdvancedSubtensor1_out_of_bounds():
             ([1, 2], [3, 4], [5, 6]),
             False,
         ),
-        # Non-contiguous vector indexing, only supported in obj mode
+        # Non-consecutive vector indexing, supported by our dispatcher after rewriting
         (
             as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             ([1, 2], slice(None), [3, 4]),
-            True,
+            False,
         ),
-        # >1d vector indexing, only supported in obj mode
+        # Multiple multidimensional integer indexing (supported by our dispatcher)
+        (
+            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            ([[1, 2], [2, 1]], [[0, 0], [0, 0]]),
+            False,
+        ),
+        (
+            as_tensor(np.arange(2 * 3 * 4 * 5).reshape((2, 3, 4, 5))),
+            (slice(None), [[1, 2], [2, 1]], slice(None), [[0, 0], [0, 0]]),
+            False,
+        ),
+        # Multiple multidimensional indexing with broadcasting, only supported in obj mode
         (
             as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             ([[1, 2], [2, 1]], [0, 0]),
+            True,
+        ),
+        # multiple multidimensional integer indexing mixed with basic indexing, only supported in obj mode
+        (
+            as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
+            ([[1, 2], [2, 1]], slice(1, None), [[0, 0], [0, 0]]),
             True,
         ),
     ],
@@ -297,7 +315,7 @@ def test_AdvancedIncSubtensor1(x, y, indices):
         (
             np.arange(3 * 4 * 5).reshape((3, 4, 5)),
             -np.arange(4 * 5).reshape(4, 5),
-            (0, [1, 2, 2, 3]),  # Broadcasted vector index
+            (0, [1, 2, 2, 3]),  # Broadcasted vector index with repeated values
             True,
             False,
             True,
@@ -305,7 +323,7 @@ def test_AdvancedIncSubtensor1(x, y, indices):
         (
             np.arange(3 * 4 * 5).reshape((3, 4, 5)),
             np.array([-99]),  # Broadcasted value
-            (0, [1, 2, 2, 3]),  # Broadcasted vector index
+            (0, [1, 2, 2, 3]),  # Broadcasted vector index with repeated values
             True,
             False,
             True,
@@ -380,7 +398,7 @@ def test_AdvancedIncSubtensor1(x, y, indices):
         (
             np.arange(3 * 4 * 5).reshape((3, 4, 5)),
             rng.poisson(size=(2, 4)),
-            ([1, 2], slice(None), [3, 4]),  # Non-contiguous vector indices
+            ([1, 2], slice(None), [3, 4]),  # Non-consecutive vector indices
             False,
             True,
             True,
@@ -400,15 +418,23 @@ def test_AdvancedIncSubtensor1(x, y, indices):
         (
             np.arange(5),
             rng.poisson(size=(2, 2)),
-            ([[1, 2], [2, 3]]),  # matrix indices
+            ([[1, 2], [2, 3]]),  # matrix index
             False,
-            False,  # Gets converted to AdvancedIncSubtensor1
-            True,  # This is actually supported with the default `ignore_duplicates=False`
+            False,
+            False,
         ),
         (
             np.arange(3 * 5).reshape((3, 5)),
-            rng.poisson(size=(1, 2, 2)),
-            (slice(1, 3), [[1, 2], [2, 3]]),  # matrix indices, mixed with basic index
+            rng.poisson(size=(2, 2, 2)),
+            (slice(1, 3), [[1, 2], [2, 3]]),  # matrix index, mixed with basic index
+            False,
+            False,
+            False,
+        ),
+        (
+            np.arange(3 * 5).reshape((3, 5)),
+            rng.poisson(size=(1, 2, 2)),  # Same as before, but Y broadcasts
+            (slice(1, 3), [[1, 2], [2, 3]]),
             False,
             True,
             True,
@@ -418,6 +444,14 @@ def test_AdvancedIncSubtensor1(x, y, indices):
             rng.poisson(size=(2, 5)),
             ([1, 1], [2, 2]),  # Repeated indices
             True,
+            False,
+            False,
+        ),
+        (
+            np.arange(3 * 4 * 5).reshape((3, 4, 5)),
+            rng.poisson(size=(3, 2, 2)),
+            (slice(None), [[1, 2], [2, 1]], [[2, 3], [0, 0]]),  # 2 matrix indices
+            False,
             False,
             False,
         ),

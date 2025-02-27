@@ -1,5 +1,6 @@
 import logging
 import sys
+import warnings
 from collections.abc import Callable, Iterable
 from itertools import chain, groupby
 from textwrap import dedent
@@ -580,8 +581,8 @@ def group_indices(indices):
     return idx_groups
 
 
-def _non_contiguous_adv_indexing(indices) -> bool:
-    """Check if the advanced indexing is non-contiguous (i.e., split by basic indexing)."""
+def _non_consecutive_adv_indexing(indices) -> bool:
+    """Check if the advanced indexing is non-consecutive (i.e., split by basic indexing)."""
     idx_groups = group_indices(indices)
     # This means that there are at least two groups of advanced indexing separated by basic indexing
     return len(idx_groups) > 3 or (len(idx_groups) == 3 and not idx_groups[0][0])
@@ -611,7 +612,7 @@ def indexed_result_shape(array_shape, indices, indices_are_shapes=False):
     remaining_dims = range(pytensor.tensor.basic.get_vector_length(array_shape))
     idx_groups = group_indices(indices)
 
-    if _non_contiguous_adv_indexing(indices):
+    if _non_consecutive_adv_indexing(indices):
         # In this case NumPy places the advanced index groups in the front of the array
         # https://numpy.org/devdocs/user/basics.indexing.html#combining-advanced-and-basic-indexing
         idx_groups = sorted(idx_groups, key=lambda x: x[0])
@@ -2796,10 +2797,17 @@ class AdvancedSubtensor(Op):
 
     @staticmethod
     def non_contiguous_adv_indexing(node: Apply) -> bool:
-        """
-        Check if the advanced indexing is non-contiguous (i.e. interrupted by basic indexing).
+        warnings.warn(
+            "Method was renamed to `non_consecutive_adv_indexing`", FutureWarning
+        )
+        return AdvancedSubtensor.non_consecutive_adv_indexing(node)
 
-        This function checks if the advanced indexing is non-contiguous,
+    @staticmethod
+    def non_consecutive_adv_indexing(node: Apply) -> bool:
+        """
+        Check if the advanced indexing is non-consecutive (i.e. interrupted by basic indexing).
+
+        This function checks if the advanced indexing is non-consecutive,
         in which case the advanced index dimensions are placed on the left of the
         output array, regardless of their opriginal position.
 
@@ -2814,10 +2822,10 @@ class AdvancedSubtensor(Op):
         Returns
         -------
         bool
-            True if the advanced indexing is non-contiguous, False otherwise.
+            True if the advanced indexing is non-consecutive, False otherwise.
         """
         _, *idxs = node.inputs
-        return _non_contiguous_adv_indexing(idxs)
+        return _non_consecutive_adv_indexing(idxs)
 
 
 advanced_subtensor = AdvancedSubtensor()
@@ -2835,7 +2843,7 @@ def vectorize_advanced_subtensor(op: AdvancedSubtensor, node, *batch_inputs):
         if isinstance(batch_idx, TensorVariable)
     )
 
-    if idxs_are_batched or (x_is_batched and op.non_contiguous_adv_indexing(node)):
+    if idxs_are_batched or (x_is_batched and op.non_consecutive_adv_indexing(node)):
         # Fallback to Blockwise if idxs are batched or if we have non contiguous advanced indexing
         # which would put the indexed results to the left of the batch dimensions!
         # TODO: Not all cases must be handled by Blockwise, but the logic is complex
@@ -2844,7 +2852,7 @@ def vectorize_advanced_subtensor(op: AdvancedSubtensor, node, *batch_inputs):
         # TODO: Implement these internally, so Blockwise is always a safe fallback
         if any(not isinstance(idx, TensorVariable) for idx in idxs):
             raise NotImplementedError(
-                "Vectorized AdvancedSubtensor with batched indexes or non-contiguous advanced indexing "
+                "Vectorized AdvancedSubtensor with batched indexes or non-consecutive advanced indexing "
                 "and slices or newaxis is currently not supported."
             )
         else:
@@ -2954,10 +2962,17 @@ class AdvancedIncSubtensor(Op):
 
     @staticmethod
     def non_contiguous_adv_indexing(node: Apply) -> bool:
-        """
-        Check if the advanced indexing is non-contiguous (i.e. interrupted by basic indexing).
+        warnings.warn(
+            "Method was renamed to `non_consecutive_adv_indexing`", FutureWarning
+        )
+        return AdvancedIncSubtensor.non_consecutive_adv_indexing(node)
 
-        This function checks if the advanced indexing is non-contiguous,
+    @staticmethod
+    def non_consecutive_adv_indexing(node: Apply) -> bool:
+        """
+        Check if the advanced indexing is non-consecutive (i.e. interrupted by basic indexing).
+
+        This function checks if the advanced indexing is non-consecutive,
         in which case the advanced index dimensions are placed on the left of the
         output array, regardless of their opriginal position.
 
@@ -2972,10 +2987,10 @@ class AdvancedIncSubtensor(Op):
         Returns
         -------
         bool
-            True if the advanced indexing is non-contiguous, False otherwise.
+            True if the advanced indexing is non-consecutive, False otherwise.
         """
         _, _, *idxs = node.inputs
-        return _non_contiguous_adv_indexing(idxs)
+        return _non_consecutive_adv_indexing(idxs)
 
 
 advanced_inc_subtensor = AdvancedIncSubtensor()

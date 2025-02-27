@@ -150,7 +150,7 @@ def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
             for adv_idx in adv_idxs
         )
         # Must be consecutive
-        and not op.non_contiguous_adv_indexing(node)
+        and not op.non_consecutive_adv_indexing(node)
         # y in set/inc_subtensor cannot be broadcasted
         and (
             y is None
